@@ -1,0 +1,31 @@
+# Template, not installed. One stall-watchdog tick for the local OpenCode agent.
+# Owner reviews and activates: see docs/stall-watch.md.
+[Unit]
+Description=Reverie stall watchdog tick (nudges a live but stuck local agent)
+After=reverie.service reverie-watcher.service
+# Never pulls the console up; a tick while it is down simply does not run.
+Requisite=reverie.service
+
+[Service]
+Type=oneshot
+Environment=FLEET_REPO=%h/git/reverie
+# Dry-run by default: it only observes and logs. To let it act, add a drop-in
+# (`systemctl --user edit reverie-stall-watch.service`) with `Environment=STALL_WATCH_FLAGS=`.
+Environment=STALL_WATCH_FLAGS=--dry-run
+# HOST-ONLY (mode 0600): REVERIE_SERVICE_TOKEN=..., STALL_WATCH_REPORTS="<room id>=<to>[,<to>] ...",
+# STALL_WATCH_TARGET_NAME=..., optionally STALL_WATCH_MIN_INTERVAL. They stay in the host process
+# (stall-watch-host); nothing is passed into the container. stall-watch-host fetches the console reads
+# with the token, feeds them to the tick on stdin, and writes and posts the notice itself from the
+# tick's coded report (it trusts no text from the container). In --dry-run it never posts.
+EnvironmentFile=-%h/.config/reverie/stall-watch.env
+# No config, no tick (instead of a traceback every minute). The path is inside the container (the
+# instance is a bind mount there), so it is checked there; a Condition= would look on the host.
+ExecCondition=%h/.local/libexec/reverie/fleet-container engine exec --user cto reverie-live test -f /instances/personal/runtime/stall-watch.json
+# The config is instance data (target, rooms, reporting identity); it never lives in the repo.
+# --workdir / and -I: the container's default working directory is the agent-editable work tree, and
+# `python -m` would import `cto` from there; this way only the installed package runs.
+ExecStart=%h/.local/libexec/reverie/stall-watch-host %h/.local/libexec/reverie/fleet-container engine exec -i --workdir / --user cto reverie-live /opt/fleet/python/bin/python3 -I -m cto.stall_watch --config /instances/personal/runtime/stall-watch.json --console-json - $STALL_WATCH_FLAGS
+# The tick also ends itself before its minute is up (`tick_seconds`), since stopping this unit ends
+# only the podman client, not the tick inside the container.
+TimeoutStartSec=90
+UMask=0077

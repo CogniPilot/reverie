@@ -1,0 +1,20 @@
+# Template, not installed. One night-cycle tick: at most one model phase, only when the host GPU is idle.
+# Owner reviews and activates: see docs/night-cycle.md.
+[Unit]
+Description=Reverie night cycle tick (consolidation and dreams)
+After=reverie.service
+# Never pulls the console up; a tick while it is down simply does not run.
+Requisite=reverie.service
+
+[Service]
+Type=oneshot
+Environment=FLEET_REPO=%h/git/reverie
+# Required: sets FLEET_CYCLE_POLICY (the external night-cycle policy inside the container).
+EnvironmentFile=%h/.config/reverie/cycle.env
+# Host-only check (the container cannot see host GPU users). Non-zero skips this tick, fails closed.
+ExecCondition=%h/.local/libexec/reverie/gpu-idle-check
+ExecStart=%h/.local/libexec/reverie/fleet-container engine exec --user cto reverie-live /opt/fleet/python/bin/fleet-cycle --policy ${FLEET_CYCLE_POLICY} tick --max-model-phases 1
+# One model phase is bounded by its policy caps; stopping this unit ends only the podman client.
+# The owner's stop is `fleet-cycle --policy ... pause`.
+TimeoutStartSec=20min
+UMask=0077

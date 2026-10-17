@@ -1,0 +1,19 @@
+{
+  "timezone": "America/Chicago",
+  "agents": {
+    "alpha": {"session": "Alpha", "session_id": "<persistent session id>", "sleep": {"start": "01:30", "end": "06:30"}, "lead": true},
+    "beta":  {"session": "Beta",  "session_id": "<persistent session id>", "sleep": {"start": "01:00", "end": "06:00"}, "lead": true},
+    "coord": {"session": "Coord", "session_id": "<persistent session id>", "sleep": {"start": "00:30", "end": "06:00"}}
+  },
+  "coffee": {"every_minutes": 120, "stall_minutes": 30, "dialog_minutes": 10},
+  "calls": {"wind_down_minutes_before": 20, "wake_after_minutes": 15, "wake_retry_minutes": 60},
+  "caps": {"calls_per_day": 2, "routines_per_day": 3},
+  "routines": {
+    "retro": {"at": "20:00", "compiler": "coord", "compile_after_minutes": 45, "valid_minutes": 90},
+    "kickoff": {"at": "09:00", "to": "coord", "valid_minutes": 120},
+    "stagger_minutes": 3,
+    "weekdays_only": false
+  },
+  "quota": {"profile": "<plan profile id>", "reserve_percent": 15},
+  "cycle_policy": null
+}

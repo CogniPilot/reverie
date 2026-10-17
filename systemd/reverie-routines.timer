@@ -1,0 +1,12 @@
+# Template, not installed.
+[Unit]
+Description=Run the Reverie routines tick every 5 minutes
+
+[Timer]
+OnCalendar=*:0/5
+# Missed ticks are not replayed: each routine has its own validity window in the ledger.
+Persistent=false
+AccuracySec=30s
+
+[Install]
+WantedBy=timers.target

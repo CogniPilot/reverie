@@ -1,0 +1,65 @@
+#!/usr/bin/env bash
+# gpu-idle-check: exit 0 only when the host GPU is idle enough for one night-cycle model phase.
+#
+# Runs on the HOST as reverie-cycle.service's ExecCondition: the container cannot see host GPU
+# users (a demo, training, the owner's own work). A non-zero exit skips that tick without
+# marking the unit failed. It fails CLOSED: a missing nvidia-smi, a driver error or output it
+# cannot parse all exit 1.
+#
+# Idle means: no hold file; utilisation at or below the limit in every sample; and no compute
+# process on the GPU other than the model router's own (llama-server), whatever its VRAM.
+#
+# Environment:
+#   NVIDIA_SMI                 nvidia-smi to run (default: the NixOS system path, then /usr/bin)
+#   GPU_HOLD_FILE              a file whose presence means "the GPU is taken" (default ~/.config/reverie/gpu.hold)
+#   GPU_IDLE_MAX_UTIL          highest utilisation % that still counts as idle (default 5)
+#   GPU_IDLE_SAMPLES           samples, one second apart (default 3)
+#   GPU_IDLE_ALLOWED_PROCESS   the router's process name (default llama-server)
+#   GPU_IDLE_ALLOW_UNNAMED     1 = accept compute processes the driver cannot name ("[Not Found]",
+#                              e.g. the router inside another PID namespace). Off by default: an
+#                              unnamed process blocks, with a message saying how to allow it.
+set -euo pipefail
+
+hold="${GPU_HOLD_FILE:-$HOME/.config/reverie/gpu.hold}"
+max="${GPU_IDLE_MAX_UTIL:-5}"
+samples="${GPU_IDLE_SAMPLES:-3}"
+allowed="${GPU_IDLE_ALLOWED_PROCESS:-llama-server}"
+allow_unnamed="${GPU_IDLE_ALLOW_UNNAMED:-0}"
+
+busy() { echo "gpu-idle-check: $*" >&2; exit 1; }
+
+[[ "$max" =~ ^[0-9]+$ && "$samples" =~ ^[1-9][0-9]*$ ]] || busy "GPU_IDLE_MAX_UTIL and GPU_IDLE_SAMPLES must be integers"
+[ ! -e "$hold" ] || busy "hold file $hold is present"
+
+smi="${NVIDIA_SMI:-}"
+if [ -z "$smi" ]; then
+  for candidate in /run/current-system/sw/bin/nvidia-smi /usr/bin/nvidia-smi; do
+    if [ -x "$candidate" ]; then smi="$candidate"; break; fi
+  done
+fi
+[ -n "$smi" ] && [ -x "$smi" ] || busy "nvidia-smi not found (set NVIDIA_SMI)"
+
+for ((i = 1; i <= samples; i++)); do
+  out=$("$smi" --query-gpu=utilization.gpu --format=csv,noheader,nounits) || busy "nvidia-smi failed"
+  [ -n "$out" ] || busy "nvidia-smi reported no GPU"
+  while read -r util; do
+    util="${util// /}"
+    [[ "$util" =~ ^[0-9]+$ ]] || busy "unreadable utilisation '$util'"
+    (( util <= max )) || busy "utilisation ${util}% > ${max}%"
+  done <<< "$out"
+  (( i == samples )) || sleep 1
+done
+
+apps=$("$smi" --query-compute-apps=pid,process_name,used_memory --format=csv,noheader,nounits) || busy "nvidia-smi failed"
+while IFS=, read -r pid name _memory; do
+  pid="${pid// /}"
+  [ -n "$pid" ] || continue
+  case "$pid" in No*) continue ;; esac   # "No running processes found" (some drivers print it)
+  name="${name#"${name%%[![:space:]]*}"}"; name="${name##*/}"
+  if [ "$name" = "[Not Found]" ] || [ "$name" = "[N/A]" ]; then
+    [ "$allow_unnamed" = 1 ] && continue
+    busy "the driver cannot name GPU process $pid; if it is the model router, set GPU_IDLE_ALLOW_UNNAMED=1"
+  fi
+  [ "$name" = "$allowed" ] || busy "process '$name' (pid $pid) is using the GPU"
+done <<< "$apps"
+exit 0

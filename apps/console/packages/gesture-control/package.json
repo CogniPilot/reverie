@@ -1,0 +1,28 @@
+{
+  "name": "codeman-gesture-control",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Jarvis-style hand-tracking input layer for the Codeman dashboard. Vendored into the Codeman repo; the Codeman bundle (src/codeman/entry.ts) is built into src/web/public/gesture/gesture-codeman.js by `npm run build:gesture` at the repo root.",
+  "scripts": {
+    "dev": "vite",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "build:demo": "tsc && vite build",
+    "build:codeman": "esbuild src/codeman/entry.ts --bundle --format=esm --target=es2020 --outfile=dist-codeman/gesture-codeman.js"
+  },
+  "dependencies": {
+    "@mediapipe/tasks-vision": "0.10.21"
+  },
+  "devDependencies": {
+    "esbuild": "^0.27.3",
+    "typescript": "^5.5.4",
+    "vite": "^7.3.5"
+  },
+  "homepage": "https://github.com/Ark0N/Codeman/tree/master/packages/gesture-control#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Ark0N/Codeman.git",
+    "directory": "packages/gesture-control"
+  }
+}

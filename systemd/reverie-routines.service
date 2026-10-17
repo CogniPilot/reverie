@@ -1,0 +1,23 @@
+# Template, not installed. One routines tick (R1): status-only rounds (report-only), and
+# wake-up/wind-down calls. Owner reviews and activates: see docs/routines.md.
+[Unit]
+Description=Reverie routines tick (status reports, wake-up and wind-down calls)
+After=reverie.service
+# Never pulls the console up; a tick while it is down simply does not run.
+Requisite=reverie.service
+# The policy is an owner-written HOST file. No policy, no tick.
+ConditionPathExists=%h/.config/reverie/routines.json
+
+[Service]
+Type=oneshot
+# Dry run by default: it only logs what it would send (to the journal and
+# ~/.local/state/reverie/routines-reports.log). To let it act, add a drop-in
+# (`systemctl --user edit reverie-routines.service`) with `Environment=ROUTINES_FLAGS=--live`.
+Environment=ROUTINES_FLAGS=
+# HOST-ONLY (mode 0600): REVERIE_SERVICE_TOKEN=<a DEDICATED routines token>, optionally REVERIE_CONSOLE_URL. Nothing is passed
+# into the container, and the tick runs no container command at all.
+EnvironmentFile=-%h/.config/reverie/routines.env
+# The host's own build of the package (nix build .#default), not the agent-writable container copy.
+ExecStart=%h/.local/libexec/reverie/fleet-routines tick $ROUTINES_FLAGS
+TimeoutStartSec=60
+UMask=0077

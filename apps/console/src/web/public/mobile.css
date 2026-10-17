@@ -1,0 +1,4313 @@
+/* ============================================================================
+   Mobile & Touch Styles
+   Extracted from styles.css for cleaner separation.
+   Loaded only on small/medium screens via media attribute in index.html.
+   ============================================================================ */
+
+/* ============================================================================
+   Mobile Init Flash Prevention
+   Hides elements that are off by default on mobile BEFORE JS runs.
+   The inline <script> in <head> adds .mobile-init to <html> synchronously.
+   app.init() removes .mobile-init after applying visibility settings.
+   ============================================================================ */
+html.mobile-init .header-font-controls,
+html.mobile-init .header-system-stats,
+html.mobile-init .header-tokens,
+html.mobile-init .monitor-panel,
+html.mobile-init .subagents-panel,
+html.mobile-init .project-insights-panel,
+html.mobile-init .file-browser-panel {
+  display: none !important;
+}
+
+/* ============================================================================
+   iOS Zoom Prevention (all mobile/tablet sizes)
+   iOS Safari ignores user-scalable=no since iOS 10.
+   font-size >= 16px on inputs prevents auto-zoom on focus.
+   touch-action: manipulation prevents double-tap zoom.
+   ============================================================================ */
+@media (max-width: 768px) {
+  /* Prevent iOS auto-zoom on input focus (triggers at font-size < 16px) */
+  input, textarea, select {
+    font-size: 16px !important;
+  }
+
+  /* Prevent double-tap zoom globally */
+  html {
+    touch-action: manipulation;
+  }
+
+  /* No "open in new window" (detach) on phones/tablets — popped-out browser
+     windows aren't usable there. !important beats the hover/detached reveal
+     rules in styles.css. A native wrapper that opens windows of its own (side
+     by side on a foldable) keeps it at tablet widths: app.js sets
+     html.host-windows. Phone widths hide it again in the 599px block. */
+  html:not(.host-windows) .session-tab .tab-detach {
+    display: none !important;
+  }
+}
+
+/* ============================================================================
+   Tablet Breakpoint (600px - 768px)
+   ============================================================================ */
+@media (max-width: 768px) and (min-width: 600px) {
+  /* Compact header for tablet - fixed at top, includes safe area padding */
+  .header {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    min-height: 48px;
+    max-height: 48px;
+    padding: 0.35rem 0.5rem;
+    padding-left: calc(0.5rem + var(--safe-area-left));
+    padding-right: calc(0.5rem + var(--safe-area-right));
+    background: #0a0a0a;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    contain: none;
+    overflow: visible;
+    z-index: 1200;
+  }
+
+  /* iOS safe area adjustment for fixed header - header extends into notch area */
+  .ios-device .header {
+    padding-top: calc(0.35rem + var(--safe-area-top));
+    min-height: calc(48px + var(--safe-area-top));
+    max-height: calc(48px + var(--safe-area-top));
+  }
+
+  /* Push ALL content below fixed header (not just .main) so banners
+     (respawn, timer, orchestrator) between header and main are visible */
+  .app {
+    padding-top: 54px;
+  }
+
+  .ios-device .app {
+    padding-top: calc(54px + var(--safe-area-top));
+  }
+
+  /* Font controls - smaller on tablet, visibility controlled by JS */
+  .header-font-controls {
+    gap: 0.15rem;
+    padding: 0.15rem 0.25rem;
+  }
+
+  .header-font-controls .btn-icon-sm {
+    width: 18px;
+    height: 18px;
+  }
+
+  /* System stats - compact on tablet, visibility controlled by JS */
+  .header-system-stats {
+    font-size: 0.6rem;
+    gap: 0.25rem;
+  }
+
+  /* Inline, always-visible header utilities (eye / multimonitor). The
+     position:fixed collapsible tray (02fa3f3) had its expand toggle reverted on
+     master but left this container permanently `mobile-collapsed` → the response
+     viewer eye became unreachable on phones. Restored to the simple inline flow. */
+  .header-right {
+    gap: 0.35rem;
+  }
+
+  .btn-icon-header:not(.btn-sm) {
+    width: 44px;
+    height: 44px;
+  }
+
+  /* Compact session tabs — .tabs-two-rows override needed to match
+     specificity of .session-tabs.tabs-two-rows in styles.css (0,2,0).
+     overscroll-behavior-x keeps a swipe that runs past the last tab inside the
+     strip: chained to the page it becomes the browser's back gesture, which is
+     exactly the swipe someone makes reaching for the rightmost tabs (#257). */
+  .session-tabs,
+  .session-tabs.tabs-two-rows {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-x: contain;
+    scrollbar-width: none;
+    max-height: 52px;
+    gap: 3px;
+  }
+
+  .session-tabs::-webkit-scrollbar {
+    display: none;
+  }
+
+  .session-tab {
+    padding: 0.4rem 0.6rem;
+    font-size: 0.75rem;
+    min-height: 40px;
+  }
+
+  .session-tab .tab-name {
+    max-width: 80px;
+  }
+
+  /* Compact toolbar - includes safe area padding */
+  .toolbar {
+    padding: 0.4rem 0.5rem;
+    padding-left: calc(0.5rem + var(--safe-area-left));
+    padding-right: calc(0.5rem + var(--safe-area-right));
+    gap: 0.4rem;
+  }
+
+  /* Hide instance count buttons on tablet too */
+  .tab-count-group {
+    display: none;
+  }
+
+  /* Compact toolbar buttons */
+  .btn-toolbar {
+    padding: 0.4rem 0.8rem;
+    font-size: 0.8rem;
+    min-height: 40px;
+  }
+
+  .case-select-group {
+    max-width: none;
+  }
+
+  .case-combobox {
+    width: 160px;
+  }
+
+  .toolbar-select {
+    font-size: 0.75rem;
+  }
+
+  /* Stack panels vertically */
+  .monitor-panel,
+  .subagents-panel {
+    width: 100%;
+    max-width: 100%;
+    left: 0;
+    right: 0;
+    border-radius: 8px 8px 0 0;
+    max-height: 40vh;
+  }
+
+  /* Project insights - compact on tablet, visibility controlled by JS */
+  .project-insights-panel {
+    max-width: 280px;
+    font-size: 0.7rem;
+  }
+
+  /* ---- Settings Modal: Tablet Optimizations ---- */
+
+  /* Modals must stack above the fixed tablet header (z-index 1200) so the
+     modal header with the close button stays visible */
+  .modal {
+    z-index: 1300;
+  }
+
+  .command-palette-modal {
+    padding: 10vh 0.75rem 0;
+  }
+
+  .command-palette-shell {
+    width: 100%;
+    max-height: 74vh;
+  }
+
+  .command-palette-input-row {
+    grid-template-columns: 20px minmax(0, 1fr);
+  }
+
+  .command-palette-input-row kbd {
+    display: none;
+  }
+
+  .command-palette-item {
+    min-height: 56px;
+  }
+
+  /* Settings grid stays 2-col on tablet but tighter */
+  .settings-grid {
+    gap: 0.4rem 0.75rem;
+  }
+
+  .settings-item {
+    font-size: 0.7rem;
+  }
+
+  /* Event type grid - slightly tighter */
+  .event-type-grid {
+    grid-template-columns: 1fr 40px 40px 40px;
+    gap: 5px 6px;
+  }
+
+  .event-label {
+    font-size: 0.7rem;
+  }
+
+  /* ---- Subagent Windows: Tablet Optimizations ---- */
+
+  .subagent-window {
+    width: 320px;
+    height: 280px;
+    min-width: 240px;
+    min-height: 160px;
+  }
+
+  .subagent-window-header {
+    padding: 0.35rem 0.5rem;
+  }
+
+  .subagent-window-title .id {
+    font-size: 0.7rem;
+    max-width: 180px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .subagent-window-title .status {
+    font-size: 0.55rem;
+  }
+
+  .subagent-window-body {
+    font-size: 0.7rem;
+  }
+
+  /* ---- Respawn Banner: Tablet Optimizations ---- */
+
+  .respawn-banner {
+    padding: 0.25rem 0.5rem;
+    padding-left: calc(0.5rem + var(--safe-area-left));
+    padding-right: calc(0.5rem + var(--safe-area-right));
+    font-size: 0.65rem;
+  }
+
+  .respawn-compact-layout {
+    gap: 0.75rem;
+  }
+
+  .respawn-status-row1 {
+    gap: 0.4rem;
+  }
+
+  .respawn-action-log {
+    max-height: 2.6em;
+    font-size: 0.6rem;
+  }
+
+  .respawn-countdown-timer {
+    font-size: 0.55rem;
+  }
+
+  /* Respawn timer bar — slimmer on tablet */
+  .respawn-timer-bar {
+    width: 24px;
+  }
+
+  /* Show desktop voice button on tablet (hidden by max-width:1023px in styles.css,
+     mobile .btn-voice-mobile only shows at <600px) */
+  .toolbar-center .btn-toolbar.btn-voice {
+    display: flex !important;
+  }
+
+  /* Toolbar — use desktop-style sizing on tablet (plenty of room at 600-768px) */
+  .toolbar {
+    padding: 0 0.5rem;
+    gap: 0.5rem;
+  }
+
+  .toolbar-left,
+  .toolbar-right {
+    gap: 0.5rem;
+  }
+
+  /* Instance count controls are hidden on tablet, so toolbar-group needs gap
+     to space out Run / Stop / Run Shell (desktop uses gap:0 because -1+ separates them) */
+  .toolbar-group {
+    gap: 0.5rem;
+  }
+
+  .btn-toolbar {
+    padding: 0.4rem 0.75rem;
+    font-size: 0.75rem;
+    min-height: unset;
+  }
+}
+
+/* Tab Layout "By case" at tablet widths, getDeviceType()'s 'tablet' (600 to
+   767px). The strip is the tablet block's one scrolling row and
+   updateTabOverflowMode() never wraps it here, so the boxes, which may shrink
+   below 768px, squeezed and wrapped their tabs inside themselves instead of
+   overflowing: the strip never scrolled, and every tab past a box's first
+   line was clipped under the fixed header. The boxes dissolve into the chip
+   row as on phones (the 599px block), which keeps the tablet's own 40px chip
+   geometry; a 44px box would hang below the 48px header. Ends at 767px, not
+   at the tablet block's 768: from 768 getDeviceType() says 'desktop', and the
+   desktop rule in styles.css (flex-shrink: 0, wrapping box by box) owns the
+   strip. With the boxes, their labels and their case-colour borders gone, the
+   `-<case>` part of a generated name (.tab-name-case, which styles.css hides
+   in the clustered strip) is the only cue left to which case a chip is in: the
+   w<n> counter is per case, so w1-alpha and w1-beta would both read "w1". */
+@media (min-width: 600px) and (max-width: 767px) {
+  :where(.header) .session-tabs-host > .session-tabs.tabs-clusters > .tab-cluster {
+    display: contents;
+  }
+
+  :where(.header) .tab-cluster-label {
+    display: none;
+  }
+
+  :where(.header) .session-tabs-host > .session-tabs.tabs-clusters .tab-name-case {
+    display: inline;
+  }
+}
+
+/* Edge fade for the phone's header tab strip (used in the block below).
+   Registered so the keyframes can interpolate them as lengths; @property is
+   only valid at the top level, hence out here. */
+@property --tab-strip-fade-start {
+  syntax: '<length>';
+  inherits: false;
+  initial-value: 0px;
+}
+
+@property --tab-strip-fade-end {
+  syntax: '<length>';
+  inherits: false;
+  initial-value: 0px;
+}
+
+/* Driven by the strip's own scroll position, not by time: at the start only the
+   end edge fades, at the end only the start edge, and in between both. */
+@keyframes tab-strip-edge-fade {
+  0% {
+    --tab-strip-fade-start: 0px;
+    --tab-strip-fade-end: 28px;
+  }
+  10%,
+  90% {
+    --tab-strip-fade-start: 28px;
+    --tab-strip-fade-end: 28px;
+  }
+  100% {
+    --tab-strip-fade-start: 28px;
+    --tab-strip-fade-end: 0px;
+  }
+}
+
+/* ============================================================================
+   Phone Breakpoint (<600px)
+   ============================================================================ */
+@media (max-width: 599px) {
+  /* Phones get a 44px header, up from 36px. Every header control is a touch
+     target and 44px is the floor for one; the brand "C" that gets you home is
+     the one that matters most. Redefined as the TOKEN rather than a literal so
+     the panels positioned off `var(--header-height)` (file browser, insights,
+     plan overlays in styles.css) follow it instead of drifting 8px under the
+     header. Costs 8px of terminal height on a phone. */
+  :root {
+    --header-height: 44px;
+  }
+
+  /* Phone brand collapses to a single "C" home button: hide the wordmark,
+     keep the tap target */
+  .header-brand {
+    padding-right: 0;
+    margin-right: 0.1rem;
+    border-right: none;
+    /* styles.css sizes this to the FULL header height, which is taller than the
+       header's padding box; centred by the header's `align-items: center` above,
+       that overflow is symmetric and the button lands flush with both edges.
+       Do not "fix" it with `height: 100%`: the header sets min/max-height and no
+       height, so the percentage has no definite containing block to resolve
+       against and silently falls back to auto. */
+  }
+
+  /* The "C" was a 0.85rem inline span — about a 12x13px hit area, far under the
+     44px minimum, on the one control that gets you back to the home screen.
+     It is now a real 44x44 button: 44px wide, and the full height of the phone
+     header, which is itself 44px for exactly this reason. The negative margin
+     spends the header's OWN left padding on the target instead of pushing the
+     tab strip right. */
+  .header-brand .logo {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 44px;
+    /* Taller than its parent on purpose: centred in the padded brand box, this
+       makes the button fill all 36 header pixels edge to edge. */
+    height: var(--header-height);
+    margin-left: -0.3rem;
+    font-size: 1.15rem;
+    line-height: 1;
+    border-radius: 8px;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .header-brand .logo:active {
+    background: rgba(96, 165, 250, 0.16);
+  }
+
+  .header-brand .logo .logo-text {
+    display: none;
+  }
+
+  .header-brand .logo .logo-compact {
+    display: inline;
+  }
+
+  /* Font controls - compact on phones, visibility controlled by JS */
+  .header-font-controls {
+    gap: 0.1rem;
+    padding: 0.1rem 0.2rem;
+  }
+
+  .header-font-controls .btn-icon-sm {
+    width: 16px;
+    height: 16px;
+  }
+
+  .header-font-controls .font-size-display {
+    font-size: 0.6rem;
+    min-width: 14px;
+  }
+
+  /* System stats - very compact on phones, visibility controlled by JS */
+  .header-system-stats {
+    font-size: 0.55rem;
+    gap: 0.15rem;
+  }
+
+  /* Token count - compact on phones, visibility controlled by JS */
+  .header-tokens {
+    font-size: 0.6rem;
+    padding: 0.1rem 0.3rem;
+  }
+
+  /* Ultra-compact header for mobile - fixed at top */
+  .header {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    min-height: var(--header-height);
+    max-height: var(--header-height);
+    /* styles.css top-aligns header children. That read as centred while the bar
+       was 36px and its contents ~31px; in a 44px bar it leaves a visible gap
+       under everything. */
+    align-items: center;
+    padding: 0.15rem 0.3rem;
+    padding-left: calc(0.3rem + var(--safe-area-left));
+    padding-right: calc(0.3rem + var(--safe-area-right));
+    gap: 0.15rem;
+    overflow: hidden;
+    background: #0a0a0a;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    contain: none;
+    z-index: 1200;
+  }
+
+  /* iOS safe area adjustment for fixed header - header extends into notch area */
+  .ios-device .header {
+    padding-top: calc(0.15rem + var(--safe-area-top));
+    min-height: calc(var(--header-height) + var(--safe-area-top));
+    max-height: calc(var(--header-height) + var(--safe-area-top));
+  }
+
+  /* Push ALL content below fixed header (not just .main) so banners
+     (respawn, timer, orchestrator) between header and main are visible.
+     Bottom padding for the fixed toolbar (40px) so terminal content
+     doesn't extend behind it. JS overrides paddingBottom on .main
+     when keyboard is visible, and resetLayout() clears the inline
+     style to re-expose this CSS value. */
+  .app {
+    /* Header height plus its 1px border and a little slack. Derived from the
+       token so the offset cannot fall out of step with the bar it clears. */
+    padding-top: calc(var(--header-height) + 6px);
+  }
+
+  .ios-device .app {
+    padding-top: calc(var(--header-height) + 6px + var(--safe-area-top));
+  }
+
+  .main {
+    padding-bottom: calc(40px + var(--safe-area-bottom));
+  }
+
+  /* iOS Safari: the toolbar is lifted by --chrome-overlap where the browser's
+     bottom bar would otherwise cover it. Match that offset in main's padding so
+     the terminal doesn't extend behind the toolbar. */
+  .ios-device.safari-browser .main {
+    padding-bottom: calc(40px + var(--safe-area-bottom) + var(--chrome-overlap, 0px));
+  }
+
+  .header-right {
+    padding-left: 0.2rem;
+    gap: 0.1rem;
+    flex-shrink: 0;
+    border-left: none;
+  }
+
+  /* Smaller header buttons on mobile */
+  .btn-icon-header {
+    width: 26px;
+    height: 26px;
+    padding: 0;
+  }
+
+  .btn-icon-header svg {
+    width: 12px;
+    height: 12px;
+  }
+
+  /* Exception to the 26px shrink above: in sidebar layout this button is the
+     ONLY way to open the session list — the strip it replaced is gone. A 26px
+     target is below --touch-target-min (44px), which the 600-768px block
+     already enforces for every other header button. */
+  html[data-session-list='sidebar'] #sidebarToggleBtn {
+    width: 44px;
+    height: 44px;
+  }
+
+  html[data-session-list='sidebar'] #sidebarToggleBtn svg {
+    width: 18px;
+    height: 18px;
+  }
+
+  /* Hide header settings gear, lifecycle log, away digest, session manager, and
+     file viewer on mobile - settings moved to toolbar; the others are secondary /
+     desktop-oriented controls that don't belong on the cramped phone header (the
+     session manager stays reachable via the Ctrl+K palette's "Browse all sessions"
+     item; the file viewer button is opt-in but its panel is desktop-sized).
+     (The attachments button is opt-in / default-hidden everywhere via its own
+     --hidden marker, so it needs no mobile-specific rule here.) */
+  .btn-icon-header.btn-settings,
+  .btn-icon-header.btn-lifecycle-log,
+  .btn-icon-header.btn-away-digest,
+  .btn-icon-header.btn-session-manager,
+  .btn-icon-header.btn-file-viewer,
+  /* Approvals bell: phones answer from the overview's NEEDS YOU rows instead
+     (inline approve/deny in mobile-overview.js); the bell would only crowd the
+     header it was designed to stay out of. */
+  .btn-icon-header.btn-approvals {
+    display: none !important;
+  }
+  /* Split-pane is hidden here too, but the AUTHORITATIVE hard gate is the
+     wider `@media (max-width: 1179px)` rule in styles.css — this file only
+     loads up to 1023px, which does not cover the 1024-1179px tablet range
+     the split feature also needs to stay off (two 240px min-width panes plus
+     the divider need ~486px; the divider also has no touch handlers). */
+
+  /* Read My Mind 🧠 header button: never in the phone header; the phone
+     surface is the keyboard-accessory 🧠 key (same `readMyMindEnabled` gate,
+     see keyboard-accessory.js + the rmm-enabled rules in styles.css). */
+  .btn-icon-header.btn-readmymind {
+    display: none !important;
+  }
+
+  /* The big labeled Admin Panel button is desktop-only (admin-gated, revealed by
+     admin-ui.js). On phones admins still reach user management via App Settings →
+     Users, so the cramped header stays minimal. */
+  .btn-admin-panel {
+    display: none !important;
+  }
+
+  /* Mobile voice input button in toolbar — initially hidden via inline style,
+     shown by VoiceInput._showButtons() clearing the inline display */
+  /* The Attach button shares the mic's box; its toolbar slot is on its wrapper below. */
+  .btn-voice-mobile,
+  .btn-attach-mobile {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    background: #1a2a3f;
+    border: 1px solid rgba(59, 130, 246, 0.3);
+    border-radius: 4px;
+    color: #93c5fd;
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+
+  /* Toolbar slot for both, between Run Shell and the settings gear. Attach's
+     WRAPPER takes it (the button inside is not a toolbar flex item), and at an
+     equal order source order keeps Attach on the left of the mic. */
+  .btn-voice-mobile,
+  .btn-attach-mobile-wrap {
+    order: 5;
+  }
+
+  /* Relative box for the invisible file input that sits over the button and TAKES
+     THE TAPS (see initImageInput): a native tap on the input is the only thing that
+     opens the picker while the keyboard is up, and iOS anchors the picker popover to
+     the input's own frame. overflow: hidden is load-bearing: WebKit does not clip a
+     file input, so its "Choose Files" content (~115px in this 26px box) spilled out
+     invisibly over the mic and took its taps. Chromium clips it, so only iOS showed it. */
+  .btn-attach-mobile-wrap {
+    position: relative;
+    display: inline-flex;
+    flex-shrink: 0;
+    overflow: hidden;
+  }
+
+  .btn-attach-mobile-input {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    opacity: 0;
+  }
+
+  .btn-voice-mobile svg,
+  .btn-attach-mobile svg {
+    width: 13px;
+    height: 13px;
+  }
+
+  .btn-voice-mobile:active,
+  .btn-attach-mobile:active,
+  /* The input above the button swallows the press, so the wrapper is what goes
+     :active. Without this the only phone button with no press feedback is Attach. */
+  .btn-attach-mobile-wrap:active .btn-attach-mobile {
+    background: #2a3a5f;
+  }
+
+  .btn-voice-mobile.recording {
+    background: rgba(239, 68, 68, 0.25);
+    border-color: rgba(239, 68, 68, 0.6);
+    color: #ef4444;
+    animation: mobile-voice-pulse 1.2s ease-in-out infinite;
+  }
+
+  @keyframes mobile-voice-pulse {
+    0%, 100% {
+      box-shadow: inset 0 0 0 1px rgba(239, 68, 68, 0.35);
+      background: rgba(239, 68, 68, 0.2);
+    }
+    50% {
+      box-shadow: inset 0 0 0 2px rgba(239, 68, 68, 0.75);
+      background: rgba(239, 68, 68, 0.35);
+    }
+  }
+
+  /* Mobile app settings gear in toolbar - far right */
+  .btn-settings-mobile {
+    display: inline-flex !important;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    background: transparent;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 4px;
+    color: #9ca3af;
+    font-size: 0.85rem;
+    cursor: pointer;
+    flex-shrink: 0;
+    order: 6; /* Far right */
+    position: relative;
+  }
+
+  .btn-settings-mobile svg {
+    width: 13px;
+    height: 13px;
+  }
+
+  .btn-settings-mobile:active {
+    background: rgba(255, 255, 255, 0.1);
+    color: #fff;
+  }
+
+  /* App container - prevent scrolling, strict layout */
+  .app {
+    overflow: hidden;
+    position: relative;
+  }
+
+  /* When keyboard is visible, pin the app container to the viewport.
+     iOS Safari scrolls the page to bring the focused input (xterm's hidden
+     textarea) into view, even with overflow:hidden. position:fixed prevents
+     the browser from scrolling the document under the app. */
+  .keyboard-visible .app {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: auto;
+    height: var(--app-height, 100dvh);
+  }
+
+  /* Ultra-compact session tabs — .tabs-two-rows override needed to match
+     specificity of .session-tabs.tabs-two-rows in styles.css (0,2,0) */
+  .session-tabs,
+  .session-tabs.tabs-two-rows {
+    flex: 1;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-x: contain;
+    scrollbar-width: none;
+    max-height: 36px;
+    gap: 6px;
+    padding: 0;
+  }
+
+  .session-tabs::-webkit-scrollbar {
+    display: none;
+  }
+
+  /* Fade the strip's edges while there is more to scroll to, so the tab that
+     does not fit dissolves into the edge instead of being cut mid-word against
+     the connection dot. Scroll-driven, no JS: the timeline is the strip's own
+     inline scroll (keyframes + registered properties above this block). A strip
+     that does not overflow has an INACTIVE timeline, so the animation applies
+     nothing and both widths stay at their registered 0px, which is no mask at
+     all. Browsers without scroll timelines skip the block and keep the hard
+     edge. Header only: in sidebar layout the same list scrolls vertically. */
+  @supports (animation-timeline: scroll()) {
+    .header .session-tabs {
+      -webkit-mask-image: linear-gradient(
+        to right,
+        transparent,
+        #000 var(--tab-strip-fade-start),
+        #000 calc(100% - var(--tab-strip-fade-end)),
+        transparent
+      );
+      mask-image: linear-gradient(
+        to right,
+        transparent,
+        #000 var(--tab-strip-fade-start),
+        #000 calc(100% - var(--tab-strip-fade-end)),
+        transparent
+      );
+      /* The shorthand resets animation-timeline, so the timeline comes after. */
+      animation: tab-strip-edge-fade linear both;
+      animation-timeline: scroll(self inline);
+    }
+  }
+
+  /* Smaller tabs for mobile */
+  .session-tab {
+    flex-shrink: 0;
+    min-height: 32px;
+    max-height: 32px;
+    padding: 0.35rem 0.5rem;
+    font-size: 0.7rem;
+    gap: 0.25rem;
+    border-radius: 4px;
+  }
+
+  /* Every tab in the header strip is a chip, not only the active one. Left
+     transparent, the strip read as a row of disabled labels: grey 11px text
+     floating in unmarked gaps, with nothing saying "tap me". Fill and border
+     come from the skin's control tokens, so the four light skins (which repaint
+     the header with --glass-bg) get a matching chip with no override block, and
+     the active tab's !important fill and border in styles.css still win.
+     `:where(.header)` keeps this at (0,1,0): the per-colour left border
+     (`.session-tab[data-color="red"]`, (0,2,0)) must still outrank the
+     border-color here, and in sidebar layout the list leaves the header, so
+     its rows are untouched. */
+  :where(.header) .session-tab {
+    border-radius: 8px;
+    background: var(--control-bg-hover);
+    border-color: var(--control-border-hover);
+    color: var(--text);
+  }
+
+  :where(.header) .session-tab .tab-name {
+    font-weight: 500;
+  }
+
+  /* Grouped by state (tabArrangement 'state'), the phone strip keeps its one scrolling
+     row: the tabs still come in state order, most urgent first, but the
+     headings would cost chips and the dots already say which state is which.
+     The phone overview is where the labelled sections live. */
+  :where(.header) .tab-triage-head {
+    display: none;
+  }
+
+  /* Clustered by case, the same holds: the boxes dissolve into the one chip
+     row (in cluster order) and the labels go, since every chip still names
+     its session. It does so in full: the `-<case>` part of a generated name,
+     which styles.css hides in the clustered strip, shows again, or w1-alpha
+     and w1-beta (the w<n> counter is per case) would both read "w1". */
+  :where(.header) .session-tabs-host > .session-tabs.tabs-clusters > .tab-cluster {
+    display: contents;
+  }
+
+  :where(.header) .tab-cluster-label {
+    display: none;
+  }
+
+  :where(.header) .session-tabs-host > .session-tabs.tabs-clusters .tab-name-case {
+    display: inline;
+  }
+
+  /* Only the active tab shows its action icons on a phone (see below), so on
+     every other tab the container is empty but still a flex item, and its gap
+     made the chip visibly wider on the right than on the left. */
+  :where(.header) .session-tab:not(.active) .tab-actions {
+    display: none;
+  }
+
+  /* The boxed digit is the Alt+1..9 shortcut hint. A phone has no Alt key, so
+     here it was only a second grey box inside every tab, and 20px of the name's
+     width. Every header tab is therefore numberless on a phone, which is the
+     case the active-tab reserve below is already sized for. */
+  :where(.header) .session-tab .tab-number {
+    display: none;
+  }
+
+  /* Status dot: 6px so an idle green reads at arm's length (4px was a speck). */
+  .session-tab .tab-status {
+    width: 6px;
+    height: 6px;
+  }
+
+  /* The working dot is the one glance-state a phone needs: keep idle tiny, but
+     let the pulsing green "working" dot read from arm's length. !important on
+     the glow because the skin block's no-halo rule (styles.css, nested under
+     html:not([data-skin="og"])) outranks any plain class rule here. */
+  .session-tab .tab-status.busy {
+    width: 9px;
+    height: 9px;
+    box-shadow: 0 0 8px 2px color-mix(in srgb, var(--green) 55%, transparent) !important;
+  }
+
+  /* No orbiting ring on phone tabs (styles.css draws one on desktop/tablet):
+     the dot is already enlarged to 9px with a glow here, and a 15px ring in a
+     32px tab would sit on top of the tab name. The glow is the phone's tell. */
+  .session-tab .tab-status.busy::after {
+    display: none;
+  }
+
+  /* The exited-agent mute, a third time, for the phone (Ark0N/Codeman#446).
+     The rule above enlarges the working dot and gives it a green glow with
+     !important, and `status` deliberately stays `busy` for a pane whose agent
+     died mid-turn — so without this a phone renders a 9px grey dot still
+     wearing the green halo, beside a badge reading "exited". Measured; the
+     desktop rules cannot reach it, since they declare no box-shadow and lose
+     to !important anyway. !important here for the reason the glow needs it:
+     the skin block in styles.css outranks any plain class rule in this file.
+     ⚠ The alert classes and the error state are excluded exactly as they are
+     on desktop — a colour that means "this needs you" outranks "it exited". */
+  .session-tab.tab-agent-exited:not(.tab-alert-action):not(.tab-alert-idle) .tab-status:not(.error) {
+    background: var(--text-muted) !important;
+    box-shadow: none !important;
+    opacity: 0.5;
+  }
+
+  /* Truncate tab names on mobile. 80px, not the old 50px: session names share
+     a `w1-` style prefix, and at 50px "w1-ingest-pipeline" became "w1-inge…"
+     and a clipped tab just "w1-", which says nothing about which session it is.
+     The 20px the hidden tab number gave back pays for most of the difference. */
+  .session-tab .tab-name {
+    max-width: 80px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  /* ⚠️ Reserve a tappable label on the ACTIVE tab, which is the only one that
+     grows action icons. With a short session name the icons were eating the
+     tab: "w1" rendered a 13px label while gear + close took 50px of a 116px
+     tab, so the tab's geometric CENTRE landed on the gear and a thumb aiming
+     at the tab opened Session Options instead of switching sessions (measured
+     at 360, 393 and 430px; only long names cleared it). The tab widens by the
+     difference instead, which costs a little strip space on exactly one tab
+     and keeps tap-to-switch the majority of it.
+
+     ⚠️ The floor is set by a NUMBERLESS tab. `.tab-number` is rendered only
+     for `_tabIdx < 9` (app.js), and the header hides it on phones altogether
+     (above), so every phone tab is that case now; a numbered one would sit 10px
+     further left and hide the problem. The centre clears the icons when
+
+         reserved > icons + rightEdge - leftRunUp - gap
+                  =    50 +         9 -        19 -   4  = 36px
+
+     with icons = gear 32 + close 20 - close's -2px margin, leftRunUp = border 1
+     + padding 8 + status dot 6 + gap 4, and rightEdge = padding 8 + border 1.
+     Hit testing snaps to whole pixels, so a centre half a pixel short still
+     lands on the gear: the practical floor was measured at 40px (with the
+     older 4px dot) and 44px keeps headroom. Pinned by
+     test/mobile-tab-tap-zones.test.ts. */
+  .session-tab.active .tab-name {
+    min-width: 44px;
+  }
+
+  /* Hide close/gear buttons on non-active tabs on mobile */
+  .session-tab .tab-close,
+  .session-tab .tab-gear {
+    display: none;
+  }
+
+  /* The tap-zone reserve counts gear + close only (test/mobile-tab-tap-zones),
+     so the pop-out icon stays off phone tabs even under a window-opening host,
+     which offers the pop-out from its own chrome (app.detachSession). */
+  .session-tab .tab-detach {
+    display: none !important;
+  }
+
+  /* Gear icon on active tab - tiny, subtle */
+  .session-tab.active .tab-gear {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.65rem;
+    line-height: 1;
+    width: 32px;
+    height: 32px;
+    margin-left: auto;
+    opacity: 0.6;
+  }
+
+  /* Close button on active tab - large for easy tapping */
+  .session-tab.active .tab-close {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.1rem;
+    line-height: 1;
+    width: 20px;
+    height: 18px;
+    margin-left: -2px;
+  }
+
+  /* Clean dark toolbar - positioned near bottom */
+  .toolbar {
+    position: fixed;
+    bottom: var(--safe-area-bottom);
+    left: 0;
+    right: 0;
+    height: 40px;
+    min-height: 40px;
+    max-height: 40px;
+    padding: 0.3rem 0.4rem;
+    padding-left: calc(0.4rem + var(--safe-area-left));
+    padding-right: calc(0.4rem + var(--safe-area-right));
+    flex-wrap: nowrap;
+    gap: 0.3rem;
+    align-items: center;
+    justify-content: space-between;
+    background: #111111;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+    z-index: 50;
+    /* Smooth transition for keyboard show/hide */
+    transition: transform 0.15s ease-out;
+    /* Ensure transform works properly */
+    will-change: transform;
+  }
+
+  /* iOS Safari: where position: fixed anchors to a layout viewport that
+     extends behind the browser's bottom bar, lift the toolbar by that overlap.
+     --chrome-overlap is innerHeight minus the visual viewport height, set in
+     mobile-handlers.js. On iPhone Safari it is 0 because fixed elements already
+     stop above the bar; the previous (100vh - --app-height) lift measured the
+     collapsible chrome instead and left an empty band above the bar. */
+  .ios-device.safari-browser .toolbar {
+    bottom: calc(var(--safe-area-bottom) + var(--chrome-overlap, 0px));
+  }
+
+  /* When keyboard is visible the JS translateY already accounts for the full
+     distance from the visual-viewport bottom to the layout-viewport bottom
+     (keyboard + Safari bar).  Remove the CSS Safari-bar offset to avoid
+     double-counting, which otherwise creates a visible gap above the keyboard. */
+  .keyboard-visible.ios-device.safari-browser .toolbar {
+    bottom: var(--safe-area-bottom);
+  }
+  .keyboard-visible.ios-device.safari-browser .keyboard-accessory-bar {
+    bottom: calc(var(--safe-area-bottom) + 40px);
+  }
+
+  /* Show case selector in center */
+  .toolbar-center {
+    display: flex !important;
+    align-items: center;
+  }
+
+  .toolbar-center .btn-toolbar.btn-voice {
+    display: none !important;
+  }
+
+  .toolbar-right {
+    display: none !important;
+  }
+
+  /* Hide version display on mobile */
+  .version-display {
+    display: none !important;
+  }
+
+  /* Toolbar layout */
+  .toolbar-left {
+    flex: 1 1 0;
+    min-width: 0;
+    align-items: center;
+    gap: 0.3rem;
+  }
+
+  .toolbar-left .toolbar-group {
+    display: flex;
+    flex: 1 1 0;
+    min-width: 0;
+    align-items: center;
+    gap: 0.3rem;
+  }
+
+  .toolbar-left .toolbar-group:first-child {
+    flex: 1 1 0;
+    min-width: 0;
+    justify-content: space-between;
+    gap: 0.3rem;
+    flex-wrap: nowrap;
+    align-items: center;
+  }
+
+  /* Hide instance count buttons (±) on mobile - cleaner UI */
+  .tab-count-group {
+    display: none !important;
+  }
+
+  /* Compact toolbar buttons for mobile - white text on dark */
+  .btn-toolbar {
+    min-height: 26px !important;
+    max-height: 26px !important;
+    height: 26px !important;
+    padding: 0 0.5rem !important;
+    font-size: 0.65rem !important;
+    border-radius: 4px;
+    line-height: 26px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 500;
+    letter-spacing: 0.01em;
+    color: #fff;
+  }
+
+  /* Run button group — split button with dropdown */
+  .run-btn-group {
+    display: flex;
+    flex: 0 0 auto;
+  }
+
+  .btn-toolbar.btn-run {
+    flex: 0 0 auto;
+    padding: 0 0.6rem !important;
+    font-weight: 500;
+    border-radius: 4px 0 0 4px !important;
+    border-right: none !important;
+  }
+
+  .btn-toolbar.btn-run svg {
+    width: 10px;
+    height: 10px;
+    margin-right: 3px;
+  }
+
+  .btn-toolbar.btn-run-gear {
+    flex: 0 0 auto;
+    padding: 0 0.35rem !important;
+    min-width: unset !important;
+    border-radius: 0 4px 4px 0 !important;
+    border-left: 1px solid rgba(255,255,255,0.15) !important;
+  }
+
+  .btn-toolbar.btn-run-gear svg {
+    width: 10px;
+    height: 10px;
+  }
+
+  /* Claude mode colors on mobile */
+  .btn-toolbar.btn-run.mode-claude,
+  .btn-toolbar.btn-run-gear.mode-claude {
+    background: #1e3a5f;
+    border-color: rgba(59, 130, 246, 0.3);
+    color: #93c5fd;
+  }
+
+  .btn-toolbar.btn-run.mode-claude:active,
+  .btn-toolbar.btn-run-gear.mode-claude:active {
+    background: #2563eb;
+    border-color: rgba(59, 130, 246, 0.5);
+  }
+
+  /* OpenCode mode colors on mobile */
+  .btn-toolbar.btn-run.mode-opencode,
+  .btn-toolbar.btn-run-gear.mode-opencode {
+    background: #0a2e2a;
+    border-color: rgba(16, 185, 129, 0.3);
+    color: #6ee7b7;
+  }
+
+  .btn-toolbar.btn-run.mode-opencode:active,
+  .btn-toolbar.btn-run-gear.mode-opencode:active {
+    background: #0d4a40;
+    border-color: rgba(16, 185, 129, 0.5);
+  }
+
+  /* Gemini mode colors on mobile. Same `!important` rationale as the pi block below. */
+  .btn-toolbar.btn-run.mode-gemini,
+  .btn-toolbar.btn-run-gear.mode-gemini {
+    background: #10243f !important;
+    border-color: rgba(96, 165, 250, 0.3) !important;
+    color: #dbeafe !important;
+  }
+
+  .btn-toolbar.btn-run.mode-gemini:active,
+  .btn-toolbar.btn-run-gear.mode-gemini:active {
+    background: #174ea6 !important;
+    border-color: rgba(96, 165, 250, 0.5) !important;
+  }
+
+  /* Antigravity mode colors on mobile. Same `!important` rationale as the pi block below. */
+  .btn-toolbar.btn-run.mode-antigravity,
+  .btn-toolbar.btn-run-gear.mode-antigravity {
+    background: #0b2b33 !important;
+    border-color: rgba(34, 211, 238, 0.3) !important;
+    color: #cffafe !important;
+  }
+
+  .btn-toolbar.btn-run.mode-antigravity:active,
+  .btn-toolbar.btn-run-gear.mode-antigravity:active {
+    background: #0e7490 !important;
+    border-color: rgba(34, 211, 238, 0.5) !important;
+  }
+
+  /* Pi mode colors on mobile.
+     `!important` is load-bearing here, not noise: styles.css nests its skin rules
+     inside `html:not([data-skin="og"])`, so a bare `.btn-toolbar.btn-run` or
+     `.btn-toolbar.btn-run-gear` in there outranks this `.mode-pi` pair regardless
+     of load order. Without it the gear half keeps the skin accent while the body
+     takes the nested block's mode colour, so the split button renders two-tone
+     (gemini and antigravity shipped that way until they got `!important` too). */
+  .btn-toolbar.btn-run.mode-pi,
+  .btn-toolbar.btn-run-gear.mode-pi {
+    background: #33121f !important;
+    border-color: rgba(244, 114, 182, 0.3) !important;
+    color: #fce7f3 !important;
+  }
+
+  .btn-toolbar.btn-run.mode-pi:active,
+  .btn-toolbar.btn-run-gear.mode-pi:active {
+    background: #9d174d !important;
+    border-color: rgba(244, 114, 182, 0.5) !important;
+  }
+
+  /* Grok mode colors on mobile. Same `!important` rationale as the pi block above. */
+  .btn-toolbar.btn-run.mode-grok,
+  .btn-toolbar.btn-run-gear.mode-grok {
+    background: #1c1c1f !important;
+    border-color: rgba(212, 212, 216, 0.3) !important;
+    color: #f4f4f5 !important;
+  }
+
+  .btn-toolbar.btn-run.mode-grok:active,
+  .btn-toolbar.btn-run-gear.mode-grok:active {
+    background: #3f3f46 !important;
+    border-color: rgba(212, 212, 216, 0.5) !important;
+  }
+
+  /* DeepSeek mode colors on mobile. Same `!important` rationale as the pi and
+     grok blocks above: styles.css nests its skin rules inside
+     `html:not([data-skin="og"])`, so a bare `.btn-toolbar` rule there outranks a
+     `.btn-toolbar.btn-x` rule here regardless of load order. */
+  .btn-toolbar.btn-run.mode-deepseek,
+  .btn-toolbar.btn-run-gear.mode-deepseek {
+    background: #16225f !important;
+    border-color: rgba(124, 147, 255, 0.35) !important;
+    color: #eef2ff !important;
+  }
+
+  .btn-toolbar.btn-run.mode-deepseek:active,
+  .btn-toolbar.btn-run-gear.mode-deepseek:active {
+    background: #3350e6 !important;
+    border-color: rgba(150, 170, 255, 0.55) !important;
+  }
+
+  /* OMP mode colors on mobile. Same `!important` rationale as the pi/grok/deepseek blocks above. */
+  .btn-toolbar.btn-run.mode-omp,
+  .btn-toolbar.btn-run-gear.mode-omp {
+    background: #312e81 !important;
+    border-color: rgba(129, 140, 248, 0.3) !important;
+    color: #e0e7ff !important;
+  }
+
+  .btn-toolbar.btn-run.mode-omp:active,
+  .btn-toolbar.btn-run-gear.mode-omp:active {
+    background: #4f46e5 !important;
+    border-color: rgba(129, 140, 248, 0.5) !important;
+  }
+
+  /* Run mode dropdown menu — positioned above toolbar on mobile */
+  .run-mode-menu {
+    bottom: 100%;
+    left: 0;
+    margin-bottom: 6px;
+    min-width: 160px;
+    max-width: 80vw;
+  }
+
+  .run-mode-option {
+    padding: 10px 12px;
+    font-size: 0.8rem;
+    cursor: pointer;
+    -webkit-tap-highlight-color: rgba(255, 255, 255, 0.1);
+  }
+
+  /* Per-URL edit/delete in the Web / URL list need a real touch target, and they
+     sit next to the row's own tap area, so they get sized up rather than relying
+     on the 24px desktop hit box. */
+  .run-mode-row-btn {
+    width: 34px;
+    height: 34px;
+    font-size: 1rem;
+    -webkit-tap-highlight-color: rgba(255, 255, 255, 0.1);
+  }
+  .run-mode-webview-delete { font-size: 1.2rem; }
+
+  .run-mode-history {
+    -webkit-overflow-scrolling: touch;
+    touch-action: manipulation;
+  }
+
+  /* Stop button - visible on mobile, icon-only */
+  .btn-toolbar.btn-stop {
+    display: flex !important;
+    flex: 0 0 auto;
+    padding: 0 8px !important;
+    min-width: unset;
+    order: 3; /* Left of Run Shell */
+  }
+
+  .btn-toolbar.btn-stop svg {
+    width: 10px;
+    height: 10px;
+    margin-right: 0;
+  }
+
+  /* Shell is NOT a toolbar button on phones — it moved into the Run dropdown
+     (Terminal / Shell), freeing this slot for Enter. Starting a shell is a rare,
+     deliberate act; sending Enter is a constant one, so the scarce phone real
+     estate goes to Enter. */
+  .btn-toolbar.btn-shell {
+    display: none !important;
+  }
+
+  /* Secondary action - Enter - right side. Takes the slot (and the order) the
+     Shell button used to hold, so the toolbar rhythm is unchanged. */
+  .btn-toolbar.btn-enter {
+    display: flex !important;
+    flex: 0 0 auto;
+    align-items: center;
+    justify-content: center;
+    min-width: 54px;
+    width: 54px;
+    white-space: nowrap;
+    padding: 0 8px !important;
+    overflow: hidden;
+    font-size: 0.65rem;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    /* !important is REQUIRED here, not defensive habit: styles.css nests its skin
+       overrides inside `html:not([data-skin="og"]) { … }`, so a plain `.btn-toolbar`
+       in that block resolves to (0,2,1) and outranks this (0,2,0) rule. Without
+       !important the button silently renders in generic toolbar grey. */
+    background: rgba(30, 58, 95, 0.85) !important;
+    border: 1px solid rgba(59, 130, 246, 0.45) !important;
+    color: #dbeafe !important;
+    order: 4; /* Right position — same slot Shell used to occupy */
+  }
+
+  .btn-toolbar.btn-enter:hover,
+  .btn-toolbar.btn-enter:active {
+    background: rgba(37, 74, 122, 0.95) !important;
+    border-color: rgba(59, 130, 246, 0.7) !important;
+    color: #fff !important;
+  }
+
+  /* Hide case selector on mobile - simplified toolbar */
+  .case-select-group {
+    display: none !important;
+  }
+
+  /* Simplified toolbar layout — Run, Enter, and Case */
+  .toolbar-left .toolbar-group:first-child {
+    width: 100%;
+    gap: 8px;
+  }
+
+  /* Mobile case button - visible on mobile */
+  .btn-toolbar.btn-case-mobile {
+    display: flex !important;
+    flex: 1 1 0 !important;
+    min-width: 0;
+    padding: 0 8px !important;
+    order: 2; /* Between Run and Run Shell */
+    overflow: hidden;
+    justify-content: center;
+    gap: 4px;
+  }
+
+  .btn-toolbar.btn-case-mobile #mobileCaseName {
+    max-width: none;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* Mobile case settings gear button - next to Run */
+  .btn-case-settings-mobile {
+    display: inline-flex !important;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    background: transparent;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 4px;
+    color: #9ca3af;
+    cursor: pointer;
+    flex-shrink: 0;
+    order: 1; /* Next to Run */
+  }
+
+  .btn-case-settings-mobile:active {
+    background: rgba(255, 255, 255, 0.1);
+    color: #fff;
+  }
+
+  @media (max-width: 374px) {
+    .toolbar {
+      padding: 0 2px;
+    }
+
+    .toolbar-left,
+    .toolbar-left .toolbar-group,
+    .toolbar-left .toolbar-group:first-child {
+      gap: 2px;
+    }
+  }
+
+  @media (max-width: 599px) {
+    .btn-case-settings-mobile {
+      display: none !important;
+    }
+  }
+
+  /* Mobile case settings popover */
+  .case-settings-popover-mobile {
+    position: fixed;
+    bottom: calc(var(--safe-area-bottom) + 46px);
+    left: 8px;
+    right: 8px;
+    background: #1e1e1e;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 8px;
+    padding: 0.6rem 0.75rem;
+    z-index: 1000;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+    display: block;
+  }
+
+  .case-settings-popover-mobile.hidden {
+    display: none !important;
+  }
+
+  .case-settings-popover-mobile .checkbox-inline {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.75rem;
+    color: #e5e7eb;
+  }
+
+  .case-settings-popover-mobile .form-hint {
+    display: block;
+    margin-top: 0.2rem;
+    font-size: 0.6rem;
+    color: #6b7280;
+  }
+
+  /* Keyboard Accessory Bar - quick actions above keyboard */
+  .keyboard-accessory-bar {
+    display: none;
+    position: fixed;
+    bottom: calc(var(--safe-area-bottom) + 40px); /* Above toolbar */
+    left: 0;
+    right: 0;
+    height: 44px;
+    background: #1a1a1a;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+    padding: 6px 8px;
+    padding-left: calc(8px + var(--safe-area-left));
+    padding-right: calc(8px + var(--safe-area-right));
+    gap: 8px;
+    align-items: center;
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+    z-index: 51;
+    transition: transform 0.15s ease-out;
+    will-change: transform;
+  }
+
+  .keyboard-accessory-bar.visible {
+    display: flex;
+  }
+
+  /* 隐藏滚动条但保留滑动能力 */
+  .keyboard-accessory-bar::-webkit-scrollbar {
+    display: none;
+  }
+
+  .accessory-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    gap: 4px;
+    padding: 6px 12px;
+    background: #2a2a2a;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 6px;
+    color: #e5e5e5;
+    font-size: 0.65rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s;
+  }
+
+  /* Confirm state — button turns amber and shows "Tap again" */
+  .accessory-btn.confirming {
+    background: #6b4f00;
+    border-color: #b8860b;
+    color: #ffd54f;
+  }
+
+  /* Armed one-shot Ctrl (shell bar, issue #262). Phone palette is hardcoded in
+     this block, so the state needs its own entry here. Three classes beat the
+     plain .accessory-btn rules; the light-skin rule at the bottom of this file
+     is higher still at (0,3,1) and is excluded by hand there, not outranked. */
+  .accessory-btn.accessory-btn-ctrl.armed {
+    background: #2563eb;
+    border-color: rgba(59, 130, 246, 0.9);
+    color: #fff;
+    font-weight: 700;
+    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.45);
+  }
+
+  .accessory-btn:active {
+    background: #3a3a3a;
+  }
+
+  .accessory-btn svg {
+    width: 14px;
+    height: 14px;
+  }
+
+  .accessory-btn-arrow {
+    padding: 6px 10px;
+    background: #2563eb;
+    border-color: rgba(59, 130, 246, 0.5);
+    color: #fff;
+  }
+
+  .accessory-btn-arrow:active {
+    background: #1d4ed8;
+  }
+
+  .accessory-btn-dismiss {
+    margin-left: auto;
+    flex: 1 1 0;
+    max-width: 100px;
+    padding: 10px 8px;
+    background: #2563eb;
+    border-color: rgba(59, 130, 246, 0.5);
+    color: #fff;
+    font-weight: 600;
+  }
+
+  .accessory-btn-dismiss svg {
+    width: 22px;
+    height: 22px;
+  }
+
+  .accessory-btn-dismiss:active {
+    background: #1d4ed8;
+  }
+
+  /* Voice preview — positioned above accessory bar on mobile */
+  .voice-preview {
+    bottom: calc(var(--safe-area-bottom) + 94px);
+    font-size: 0.8rem;
+    max-width: 90%;
+    padding: 6px 14px;
+  }
+
+  /* When keyboard is visible, also move accessory bar up */
+  .keyboard-visible .keyboard-accessory-bar.visible {
+    /* Position is handled by JS transform along with toolbar */
+  }
+
+  /* Phone keyboard row: ONE row (Esc Tab ↑ ↓ Enter mic ⋯ ⌄) and nothing else while
+     the keyboard is open. The footer toolbar's Run Shell, folder, stop, image and
+     settings sit behind ⋯ (keyboard-accessory.js), so the footer is hidden then. */
+  .keyboard-visible .toolbar {
+    display: none;
+  }
+
+  .keyboard-accessory-bar.phone-row {
+    bottom: var(--safe-area-bottom) !important;
+    gap: 6px;
+  }
+
+  /* The footer is gone, so the terminal needs only the row's own height. */
+  .keyboard-visible .main {
+    padding-bottom: 52px !important;
+  }
+
+  .phone-row .accessory-btn {
+    padding: 6px 8px;
+    min-height: 32px;
+  }
+
+  .phone-row .accessory-btn-arrow {
+    padding: 6px 9px;
+  }
+
+  .phone-row .accessory-btn-dismiss {
+    padding: 6px 8px;
+    max-width: 64px;
+    min-width: 36px;
+  }
+
+  .accessory-btn[hidden] {
+    display: none;
+  }
+
+  .accessory-btn-mic.recording {
+    background: rgba(239, 68, 68, 0.25);
+    border-color: rgba(239, 68, 68, 0.6);
+    color: #ef4444;
+  }
+
+  .accessory-btn-more {
+    font-size: 1.1rem;
+    line-height: 1;
+  }
+
+  .accessory-btn-more[aria-expanded="true"],
+  .accessory-btn-more.ctrl-armed {
+    background: #2563eb;
+    border-color: rgba(59, 130, 246, 0.9);
+    color: #fff;
+  }
+
+  /* ⋯ panel: sits on the row, lifted by the same keyboard offset (mobile-handlers.js). */
+  .accessory-overflow {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: calc(var(--safe-area-bottom) + 44px);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 8px calc(8px + var(--safe-area-right)) 8px calc(8px + var(--safe-area-left));
+    background: #1a1a1a;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+    z-index: 52;
+  }
+
+  .accessory-overflow-item {
+    position: relative;
+    min-height: 40px;
+    min-width: 72px;
+    font-size: 0.75rem;
+    overflow: hidden;
+  }
+
+  .accessory-overflow-file {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    opacity: 0;
+  }
+
+  /* Toasts (e.g. the long-press hint) stay inside a phone screen and wrap instead of running off the right edge. */
+  .toast-container { left: 0.5rem; right: 0.5rem; }
+  .toast { max-width: calc(100vw - 1rem); overflow-wrap: anywhere; white-space: normal; }
+  .run-mode-case-hint { padding: 6px 12px; font-size: 0.75rem; opacity: 0.7; }
+  .run-mode-case-hint:empty { display: none; }
+
+  /* Paste overlay for iOS clipboard access */
+  /* Paste overlay styles extracted to universal section below (line ~2293+) */
+
+  /* LEGACY: Hide old toolbar select (no longer used on mobile) */
+  .toolbar-select {
+    display: none !important;
+  }
+
+  /* Panels on mobile - full width, positioned above toolbar, visibility controlled by JS */
+  .monitor-panel,
+  .subagents-panel {
+    width: 100%;
+    max-width: 100%;
+    left: 0;
+    right: 0;
+    border-radius: 8px 8px 0 0;
+    bottom: calc(44px + 2rem + var(--safe-area-bottom));
+    max-height: 35vh;
+  }
+
+  /* Modals must stack above the fixed mobile header (z-index 1200), or the
+     modal header with the close button is buried underneath it and the
+     full-screen modal cannot be dismissed */
+  .modal {
+    z-index: 1300;
+  }
+
+  /* Full-screen modals on phones */
+  .modal-content {
+    width: 100%;
+    max-width: 100%;
+    height: 100%;
+    max-height: 100%;
+    border-radius: 0;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* Small modals (confirmations, dialogs) — auto-height, not full-screen */
+  .modal-content.modal-sm {
+    height: auto;
+    max-height: 85vh;
+    border-radius: 12px;
+    margin: 1rem;
+    width: calc(100% - 2rem);
+  }
+
+  /* Read My Mind: a small dialog (mirrors modal-sm), not a full-screen
+     takeover — it opens over the keyboard from the accessory 🧠 key and
+     should read as a quick suggestion sheet. Not modal-sm itself because
+     that caps desktop width at 340px; this modal wants 560px there. */
+  .modal-content.readmymind-modal {
+    height: auto;
+    max-height: 85vh;
+    border-radius: 12px;
+    margin: 1rem;
+    width: calc(100% - 2rem);
+  }
+  /* Four footer buttons on a narrow phone: let them wrap instead of clipping,
+     and give buttons + alternate rows finger-sized targets. The flex row
+     itself comes from the base rule in styles.css. */
+  .readmymind-modal .modal-footer {
+    flex-wrap: wrap;
+  }
+  .readmymind-modal .modal-footer .btn-toolbar {
+    flex: 1 1 auto;
+    justify-content: center;
+    min-height: 38px;
+  }
+  .readmymind-alt {
+    min-height: 38px;
+  }
+  .readmymind-steer-input {
+    min-height: 38px;
+  }
+
+  /* Modal safe area padding - all sides for full-screen modals */
+  .ios-device .modal-content {
+    padding-top: var(--safe-area-top);
+    padding-bottom: var(--safe-area-bottom);
+    padding-left: var(--safe-area-left);
+    padding-right: var(--safe-area-right);
+  }
+
+  .modal-header {
+    padding: 0.75rem 1rem;
+  }
+
+  .modal-header h3 {
+    font-size: 1rem;
+  }
+
+  .modal-body {
+    padding: 0.75rem 1rem;
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .away-digest-modal {
+    width: 100%;
+    max-width: 100%;
+    height: 100%;
+    max-height: 100%;
+  }
+
+  .away-digest-ranges {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.4rem;
+  }
+
+  .away-digest-ranges .filter-btn {
+    min-height: 38px;
+    padding: 0.4rem 0.5rem;
+  }
+
+  .away-digest-custom-range,
+  .away-digest-custom-range.active {
+    grid-template-columns: 1fr;
+  }
+
+  .away-digest-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.5rem;
+  }
+
+  .away-digest-item {
+    grid-template-columns: 1fr;
+    gap: 0.5rem;
+  }
+
+  .away-digest-action {
+    width: 100%;
+    min-height: 38px;
+  }
+
+  .modal-footer,
+  .form-actions {
+    padding: 0.75rem 1rem;
+    padding-bottom: calc(0.75rem + var(--safe-area-bottom));
+  }
+
+  /* Terminal container safe area */
+  .ios-device .terminal-container {
+    padding-bottom: var(--safe-area-bottom);
+  }
+
+  /* Main area must fill available space */
+  .main {
+    flex: 1;
+    min-height: 0; /* Allow flex item to shrink below content size */
+  }
+
+  /* Show CLI info bar on mobile (Claude version/model) */
+  .cli-info-bar {
+    display: block;
+  }
+
+  /* Mobile terminal — JS touch handler (terminal.scrollLines()) drives
+     scrollback because xterm.js DOM renderer doesn't populate xterm-viewport's
+     scroll area.  touch-action:none lets our JS handler own the gesture. */
+  .terminal-container {
+    height: 100%;
+    min-height: 0;
+    position: relative;
+    overflow: visible;
+    touch-action: none;
+  }
+
+  .terminal-container .xterm,
+  .terminal-container .xterm-viewport,
+  .terminal-container .xterm-screen {
+    touch-action: none;
+  }
+
+  .response-viewer {
+    padding-bottom: var(--safe-area-bottom, 0px);
+    /* dvh tracks the visible viewport on iOS Safari (vh = large viewport and would clip
+       the header/close button off-screen); the vh line is the old-engine fallback */
+    max-height: 88vh;
+    max-height: 92dvh;
+  }
+
+  .response-viewer-body {
+    font-size: 14.5px;
+    line-height: 1.65;
+    padding: 16px 16px 24px;
+    --rv-content-max: 100%;
+  }
+
+  .response-viewer-body .rv-text pre,
+  .response-viewer-body pre {
+    /* Slightly smaller on mobile so diagrams fit better before scrolling */
+    padding: 12px 14px;
+    margin-left: -4px;
+    margin-right: -4px;
+    border-radius: 6px;
+  }
+
+  .response-viewer-body .rv-text pre code,
+  .response-viewer-body pre code {
+    font-size: 11.5px;
+    line-height: 1.5;
+  }
+
+  .response-viewer-body .rv-text h1,
+  .response-viewer-body > h1 { font-size: 1.35em; }
+  .response-viewer-body .rv-text h2,
+  .response-viewer-body > h2 { font-size: 1.2em; }
+  .response-viewer-body .rv-text h3,
+  .response-viewer-body > h3 { font-size: 1.08em; }
+
+  /* Compact welcome overlay for mobile */
+  .welcome-content {
+    max-width: calc(100vw - 1.5rem);
+    padding: 1rem 0.75rem;
+  }
+
+  .welcome-title {
+    font-size: 1.2rem;
+    margin-bottom: 0.5rem;
+  }
+
+  .welcome-desc {
+    font-size: 0.8rem;
+    margin-bottom: 0.4rem;
+  }
+
+  .welcome-actions {
+    margin-top: 1rem;
+  }
+
+  /* Only reached with the phone overview switched off. The primary spans the
+     column; the chips keep wrapping at the finger size styles.css gives touch
+     screens (40px, its pointer: coarse rule). This rule loads later at equal
+     specificity, so a lower value here made a phone's chips shorter than a
+     tablet's; restating 40px also covers a narrow window with a mouse. */
+  .welcome-primary {
+    width: 100%;
+    justify-content: center;
+    min-height: 44px;
+    font-size: 0.9rem;
+  }
+
+  .welcome-chip {
+    height: 40px;
+    border-radius: 20px;
+  }
+
+  .history-show-more {
+    display: block;
+    margin-bottom: 0.75rem;
+  }
+
+  .welcome-ralph-link {
+    display: block;
+    margin: 0.75rem auto 0;
+  }
+
+  .welcome-hint {
+    font-size: 0.7rem;
+    margin-top: 0.75rem;
+  }
+
+  /* Ralph wizard responsive */
+  .modal-wizard {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .wizard-progress {
+    padding: 0.5rem;
+  }
+
+  .wizard-step {
+    padding: 0.3rem;
+  }
+
+  .wizard-step-number {
+    width: 24px;
+    height: 24px;
+    font-size: 0.7rem;
+  }
+
+  .wizard-step-label {
+    display: none;
+  }
+
+  /* Timer banner - includes safe area padding */
+  .timer-banner {
+    padding-left: calc(0.5rem + var(--safe-area-left));
+    padding-right: calc(0.5rem + var(--safe-area-right));
+  }
+
+  /* ---- Respawn Banner: Mobile Optimizations ---- */
+
+  .respawn-banner {
+    padding: 0.3rem 0.5rem;
+    padding-left: calc(0.5rem + var(--safe-area-left));
+    padding-right: calc(0.5rem + var(--safe-area-right));
+    font-size: 0.65rem;
+  }
+
+  /* Stack banner vertically on mobile — status on top, action log below */
+  .respawn-compact-layout {
+    flex-direction: column;
+    gap: 0.15rem;
+  }
+
+  /* Let status column shrink to fit */
+  .respawn-status-col {
+    flex-shrink: 1;
+    min-width: 0;
+    gap: 0.1rem;
+  }
+
+  /* Row1: wrap allowed, key info prioritized via order */
+  .respawn-status-row1 {
+    flex-wrap: wrap;
+    gap: 0.25rem;
+    row-gap: 0.1rem;
+  }
+
+  /* State label — smaller on phone, stays first */
+  .respawn-state {
+    font-size: 0.6rem;
+    padding: 0.05rem 0.3rem;
+  }
+
+  /* Confidence badge — compact */
+  .respawn-banner .detection-confidence {
+    font-size: 0.5rem;
+    padding: 0.02rem 0.2rem;
+  }
+
+  /* Cycles — compact */
+  .respawn-cycles {
+    font-size: 0.55rem;
+  }
+
+  /* Run timer — compact */
+  .respawn-timer {
+    font-size: 0.55rem;
+    padding: 0 0.25rem;
+  }
+
+  /* Tokens — compact, truncate if long */
+  .respawn-tokens {
+    font-size: 0.55rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 120px;
+  }
+
+  /* Spinner icon — smaller on phone */
+  .respawn-indicator {
+    font-size: 0.65rem;
+  }
+
+  /* Stop button — 36px touch target, pushed right */
+  .respawn-banner .btn-icon-only {
+    min-width: 36px;
+    min-height: 36px;
+    font-size: 1rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-left: auto;
+    border-radius: 6px;
+    flex-shrink: 0;
+  }
+
+  /* Row2: tighter spacing, smaller text */
+  .respawn-status-row2 {
+    font-size: 0.55rem;
+    gap: 0.3rem;
+    min-height: 0;
+    flex-wrap: wrap;
+  }
+
+  /* Detection badges — smaller on phone */
+  .respawn-banner .detection-hook,
+  .respawn-banner .detection-ai-check,
+  .respawn-banner .detection-status {
+    font-size: 0.55rem;
+    padding: 0.02rem 0.2rem;
+  }
+
+  /* Countdown timers — inline, no progress bars */
+  .respawn-countdown-timers {
+    gap: 0.2rem;
+  }
+
+  .respawn-countdown-timer {
+    font-size: 0.5rem;
+    padding: 0.02rem 0.2rem;
+    gap: 0.15rem;
+  }
+
+  /* Hide progress bars on phone — values are enough */
+  .respawn-countdown-timer .respawn-timer-bar {
+    display: none;
+  }
+
+  /* Action log — single-line strip below status, show latest entry only */
+  .respawn-action-log {
+    border-left: none;
+    border-top: 1px solid rgba(34, 197, 94, 0.15);
+    padding-left: 0;
+    padding-top: 0.15rem;
+    max-height: 1.4em;
+    font-size: 0.55rem;
+    overflow: hidden;
+  }
+
+  /* ---- Session Options Modal: Respawn Tab Mobile Optimizations ---- */
+
+  /* Respawn header — keep horizontal, compact */
+  .respawn-header {
+    flex-direction: row;
+    gap: 0.4rem;
+    align-items: center;
+  }
+
+  /* Enable/Stop buttons — compact */
+  .respawn-header .respawn-actions {
+    display: flex;
+    gap: 0.3rem;
+    flex-shrink: 0;
+  }
+
+  .respawn-header .respawn-actions .btn-toolbar {
+    min-height: 28px !important;
+    font-size: 0.7rem !important;
+    padding: 0.2rem 0.5rem !important;
+    border-radius: 5px;
+  }
+
+  /* Duration preset buttons — one compact row */
+  .duration-presets {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.2rem;
+  }
+
+  .duration-preset-btn {
+    min-height: 24px;
+    padding: 0.1rem 0.4rem;
+    font-size: 0.6rem;
+    border-radius: 4px;
+    text-align: center;
+  }
+
+  .duration-custom {
+    display: flex;
+    gap: 0.2rem;
+    align-items: center;
+  }
+
+  .duration-custom-input.visible {
+    flex: 0 1 auto;
+  }
+
+  .duration-custom-input input {
+    width: 64px;
+    min-height: 24px;
+    font-size: 16px; /* Prevents iOS zoom */
+    padding: 0.1rem 0.3rem;
+  }
+
+  /* Preset selector row — full-width dropdown, buttons below */
+  .preset-selector {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.25rem;
+  }
+
+  .preset-selector select {
+    grid-column: 1 / -1;
+    min-height: 32px;
+    font-size: 16px; /* Prevents iOS zoom */
+    border-radius: 5px;
+    padding: 0.2rem 0.4rem;
+  }
+
+  .preset-selector .btn {
+    min-height: 32px;
+    font-size: 0.65rem;
+    border-radius: 5px;
+    padding: 0.2rem 0.4rem;
+  }
+
+  /* Textareas — prevent iOS zoom with 16px font, compact height */
+  #sessionOptionsModal textarea {
+    font-size: 16px;
+    min-height: 32px !important;
+    max-height: 56px;
+    height: auto !important;
+    border-radius: 6px;
+    padding: 0.3rem 0.5rem;
+  }
+
+  /* Override inline min-height styles on respawn textareas */
+  #modalRespawnPrompt {
+    min-height: 32px !important;
+    max-height: 56px;
+  }
+
+  #modalRespawnKickstart {
+    min-height: 32px !important;
+    max-height: 48px;
+  }
+
+  /* Checkboxes — compact touch area */
+  #sessionOptionsModal .checkbox-inline {
+    min-height: 30px;
+    font-size: 0.75rem;
+    padding: 0.15rem 0;
+    gap: 0.4rem;
+  }
+
+  #sessionOptionsModal .checkbox-inline input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+  }
+
+  /* Respawn-loop box title matches the auto-resume title; its cycle-step
+     checkboxes match the step labels */
+  #sessionOptionsModal .respawn-loop-title {
+    font-size: 0.75rem;
+  }
+
+  #sessionOptionsModal .respawn-loop-box .checkbox-inline {
+    font-size: 0.65rem;
+  }
+
+  /* Respawn options row — stack if needed */
+  #sessionOptionsModal .respawn-options-row {
+    gap: 0.5rem;
+  }
+
+  /* Form section headers — compact on mobile */
+  #sessionOptionsModal .form-section-header {
+    margin-top: 0.75rem;
+    padding-top: 0.5rem;
+    font-size: 0.65rem;
+  }
+
+  /* Form rows — tighter spacing */
+  #sessionOptionsModal .form-row {
+    margin-bottom: 0.5rem;
+  }
+
+  #sessionOptionsModal .form-row label {
+    font-size: 0.65rem;
+    margin-bottom: 0.2rem;
+  }
+
+  /* Form hints — compact */
+  #sessionOptionsModal .form-hint {
+    font-size: 0.6rem;
+    margin-top: 0.2rem;
+  }
+
+  /* ---- Context Tab: Mobile Optimizations ---- */
+
+  /* Context settings cards — tighter padding */
+  .context-setting {
+    padding: 0.625rem;
+  }
+
+  /* Stack context setting header vertically on narrow screens */
+  .context-setting-header {
+    flex-wrap: wrap;
+    gap: 0.4rem;
+  }
+
+  .context-setting-header .input-suffix-sm input {
+    width: 60px;
+    font-size: 16px; /* Prevents iOS zoom */
+    min-height: 36px;
+  }
+
+  .context-setting input[type="text"] {
+    font-size: 16px; /* Prevents iOS zoom */
+    min-height: 36px;
+    padding: 0.4rem 0.6rem;
+    border-radius: 6px;
+  }
+
+  /* Color picker — larger swatches for touch */
+  .color-picker {
+    gap: 8px;
+  }
+
+  .color-swatch {
+    width: 36px;
+    height: 36px;
+    border-radius: 6px;
+  }
+
+  /* Toggle switches — larger touch area */
+  .form-row-switch {
+    min-height: 40px;
+    gap: 0.4rem;
+  }
+
+  /* Number inputs in context tab — prevent iOS zoom */
+  .context-settings-grid input[type="number"] {
+    font-size: 16px;
+    min-height: 36px;
+  }
+
+  /* ---- Ralph Tab: Mobile Optimizations ---- */
+
+  /* Ralph limits grid — 2 columns on mobile */
+  .ralph-limits-grid {
+    grid-template-columns: 1fr 1fr;
+    gap: 0.5rem;
+  }
+
+  .ralph-limits-grid .form-col input[type="number"] {
+    font-size: 16px; /* Prevents iOS zoom */
+    min-height: 36px;
+    padding: 0.4rem 0.5rem;
+    border-radius: 6px;
+  }
+
+  /* Ralph phrase input — prevent iOS zoom */
+  #modalRalphPhrase {
+    font-size: 16px;
+    min-height: 40px;
+    border-radius: 6px;
+  }
+
+  /* Save button — full width, proper touch target */
+  .ralph-config-actions {
+    margin-top: 1rem;
+  }
+
+  .ralph-config-actions .btn-toolbar {
+    width: 100%;
+    min-height: 44px;
+    font-size: 0.85rem;
+    border-radius: 8px;
+  }
+
+  /* ---- Summary Tab: Mobile Optimizations ---- */
+
+  /* Filter buttons — larger touch targets */
+  .run-summary-filters {
+    gap: 0.3rem;
+    margin-bottom: 0.5rem;
+  }
+
+  .filter-btn {
+    padding: 0.35rem 0.75rem;
+    font-size: 0.7rem;
+    min-height: 32px;
+  }
+
+  /* Timeline events — tighter on mobile */
+  .timeline-event {
+    padding: 0.4rem 0.5rem;
+    margin-bottom: 0.25rem;
+    font-size: 0.7rem;
+  }
+
+  /* Summary footer — stack vertically */
+  .run-summary-footer {
+    flex-direction: column;
+    gap: 0.4rem;
+    padding: 0.5rem 0;
+  }
+
+  .run-summary-actions {
+    flex-wrap: wrap;
+    gap: 0.3rem;
+  }
+
+  .run-summary-actions .btn-toolbar {
+    flex: 1;
+    min-height: 36px;
+    font-size: 0.7rem;
+    white-space: nowrap;
+  }
+
+  .auto-refresh-label {
+    font-size: 0.7rem;
+  }
+
+  .ralph-panel {
+    font-size: 0.75rem;
+  }
+
+  .ralph-summary {
+    padding: 0.4rem 0.5rem;
+    padding-left: calc(0.5rem + var(--safe-area-left));
+    padding-right: calc(0.5rem + var(--safe-area-right));
+  }
+
+  /* Project insights panel - compact on mobile, visibility controlled by JS */
+  .project-insights-panel {
+    max-width: 100%;
+    font-size: 0.65rem;
+    bottom: calc(44px + 2rem + var(--safe-area-bottom));
+  }
+
+  /* File browser panel - compact on mobile, visibility controlled by JS */
+  .file-browser-panel {
+    max-width: 100%;
+    max-height: 50vh;
+    bottom: calc(44px + 2rem + var(--safe-area-bottom));
+  }
+
+  /* File preview window: full screen on phones. --app-height tracks the visual
+     viewport (KeyboardHandler), so the edit textarea + Save bar stay above the
+     OS keyboard instead of hiding behind it. Footer/edit bar pad for the home
+     indicator. */
+  .file-preview-window {
+    width: 100vw;
+    max-width: 100vw;
+    height: var(--app-height, 100vh);
+    max-height: var(--app-height, 100vh);
+    border-radius: 0;
+    border-left: none;
+    border-right: none;
+  }
+
+  .file-preview-editbar {
+    padding-bottom: calc(0.4rem + var(--safe-area-bottom));
+  }
+
+  .file-preview-overlay .file-preview-footer {
+    padding-bottom: calc(0.35rem + var(--safe-area-bottom));
+  }
+
+  /* >=16px or iOS Safari auto-zooms the page on focus */
+  .file-preview-body textarea.file-preview-editor {
+    font-size: 16px;
+  }
+
+  /* Notification drawer - full width on mobile, includes safe area padding */
+  .notification-drawer {
+    width: 100%;
+    max-width: 100%;
+    right: 0;
+    border-radius: 0;
+    padding-left: var(--safe-area-left);
+    padding-right: var(--safe-area-right);
+    padding-bottom: var(--safe-area-bottom);
+  }
+
+  /* Scroll margin for inputs - helps with keyboard visibility */
+  input, textarea, [contenteditable] {
+    scroll-margin-bottom: 200px;
+    scroll-margin-top: 80px;
+  }
+
+  /* When keyboard is visible, the JS paddingBottom on .main already reserves
+     space for toolbar + accessory bar. No extra padding needed here — it was
+     double-counting and creating dead space between terminal and the bars. */
+
+  /* Ensure modals scroll properly when keyboard is visible */
+  .keyboard-visible .modal-body {
+    max-height: 40vh;
+    overflow-y: auto;
+  }
+
+  /* When keyboard opens in case modal, let body grow taller */
+  .keyboard-visible #createCaseModal .modal-body {
+    max-height: 60vh;
+  }
+
+  /* Mobile Case Picker - Mobile-specific overrides */
+  .mobile-case-picker .modal-backdrop {
+    background: rgba(0, 0, 0, 0.5);
+  }
+
+  /* The footer already reserves the home-indicator inset; padding the sheet too
+     counted it twice and left a dead band under Create New Case. */
+  .mobile-case-picker-sheet {
+    max-height: 80vh;
+    max-height: 80dvh;
+    animation: slideUp 0.2s ease-out;
+  }
+
+  @keyframes slideUp {
+    from {
+      transform: translateY(100%);
+    }
+    to {
+      transform: translateY(0);
+    }
+  }
+
+  .mobile-case-picker-header .modal-close {
+    width: 32px;
+    height: 32px;
+    font-size: 1.5rem;
+  }
+
+  /* With the keyboard up the sheet is lifted above it (mobile-handlers.js), so
+     what is left to fit is much shorter than 80dvh of the layout viewport. Cap
+     the list rather than the sheet, so the search row and the Create button
+     stay on screen and only the rows scroll. */
+  .keyboard-visible .mobile-case-picker-sheet {
+    max-height: 45vh;
+  }
+
+  .keyboard-visible .mobile-case-picker-body {
+    max-height: 28vh;
+  }
+
+  .mobile-case-picker-footer {
+    padding-bottom: calc(12px + var(--safe-area-bottom));
+  }
+
+  /* ---- Settings Modal: Mobile Optimizations ---- */
+
+  /* ---- Case Modal: Mobile Touch Optimizations ---- */
+
+
+  /* Touch-friendly form inputs in case modal */
+  #createCaseModal .form-row {
+    margin-bottom: 1rem;
+  }
+
+  #createCaseModal .form-row label {
+    font-size: 0.8rem;
+    margin-bottom: 0.4rem;
+    font-weight: 500;
+    color: #e5e7eb;
+  }
+
+  #createCaseModal .form-row input[type="text"] {
+    min-height: 44px;
+    font-size: 16px; /* Prevents iOS zoom on focus */
+    padding: 0.5rem 0.75rem;
+    border-radius: 8px;
+  }
+
+  #createCaseModal .form-row .form-hint {
+    font-size: 0.65rem;
+    margin-top: 0.35rem;
+    line-height: 1.4;
+  }
+
+  /* Touch-friendly action buttons in case modal */
+  #createCaseModal .form-actions {
+    padding: 0.75rem 1rem;
+    padding-bottom: calc(0.75rem + var(--safe-area-bottom));
+    gap: 0.75rem;
+  }
+
+  #createCaseModal .form-actions .btn-toolbar {
+    min-height: 44px !important;
+    max-height: 44px !important;
+    height: 44px !important;
+    font-size: 0.85rem !important;
+    font-weight: 500;
+    border-radius: 8px;
+  }
+
+  /* Loading state for submit button */
+  #caseModalSubmit.loading {
+    opacity: 0.6;
+    pointer-events: none;
+  }
+
+  /* Smooth open animation for case modal from mobile picker */
+  #createCaseModal.from-mobile .modal-content {
+    animation: caseModalSlideUp 0.25s ease-out;
+  }
+
+  @keyframes caseModalSlideUp {
+    from {
+      transform: translateY(30px);
+      opacity: 0;
+    }
+    to {
+      transform: translateY(0);
+      opacity: 1;
+    }
+  }
+
+  /* Mobile case picker - larger create button (override btn-toolbar !important) */
+  .btn-case-create-mobile {
+    min-height: 48px !important;
+    max-height: 48px !important;
+    height: 48px !important;
+    font-size: 0.85rem !important;
+    font-weight: 500;
+    border-radius: 10px;
+  }
+
+  /* Settings grid - single column on phones */
+  .settings-grid {
+    grid-template-columns: 1fr;
+    gap: 0.35rem;
+  }
+
+  .settings-grid-3col {
+    grid-template-columns: 1fr 1fr 1fr;
+  }
+
+  .settings-item {
+    padding: 0.35rem 0.5rem;
+    font-size: 0.7rem;
+  }
+
+  .settings-item-label {
+    font-size: 0.7rem;
+  }
+
+  .settings-section-header {
+    font-size: 0.6rem;
+    padding: 0.35rem 0 0.2rem 0;
+    margin-top: 0.5rem;
+  }
+
+  /* Form rows - compact on mobile */
+  .form-row {
+    margin-bottom: 0.5rem;
+  }
+
+  .form-row label {
+    font-size: 0.7rem;
+    margin-bottom: 0.2rem;
+  }
+
+  .form-row .form-hint {
+    font-size: 0.6rem;
+  }
+
+  .form-row input[type="text"],
+  .form-row input[type="number"],
+  .form-row textarea,
+  .form-row .form-select,
+  .form-row select {
+    font-size: 0.75rem;
+    padding: 0.35rem 0.5rem;
+    min-height: 32px;
+  }
+
+  .form-row-switch {
+    gap: 0.3rem;
+  }
+
+  .form-row-switch > label:first-child {
+    font-size: 0.7rem;
+  }
+
+  .form-section-header {
+    font-size: 0.6rem;
+    margin-top: 0.75rem;
+  }
+
+  /* Event type grid - tighter on mobile */
+  .event-type-grid {
+    grid-template-columns: 1fr 36px 36px 36px;
+    gap: 4px 4px;
+    padding: 6px;
+    margin-top: 6px;
+  }
+
+  .event-header {
+    font-size: 0.55rem;
+  }
+
+  .event-label {
+    font-size: 0.65rem;
+  }
+
+  .event-type-grid input[type="checkbox"] {
+    width: 12px;
+    height: 12px;
+  }
+
+  /* Modal footer buttons - full width on mobile */
+  .form-actions {
+    gap: 0.5rem;
+  }
+
+  .form-actions .btn-toolbar {
+    flex: 1;
+    min-height: 36px !important;
+    max-height: 36px !important;
+    height: 36px !important;
+    font-size: 0.75rem !important;
+  }
+
+  /* ---- Subagent Windows: Mobile Optimizations ---- */
+
+  /* Compact stacked cards — multiple visible at once, draggable via touch */
+  .subagent-window {
+    position: fixed;
+    width: calc(100% - 8px);
+    max-width: calc(100% - 8px);
+    height: 110px;
+    min-height: 80px;
+    max-height: 110px;
+    min-width: 200px;
+    border-radius: 6px;
+    resize: none;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+  }
+
+  /* Hide resize handle on mobile */
+  .subagent-window::after {
+    display: none;
+  }
+
+  /* Compact subagent window header */
+  .subagent-window-header {
+    padding: 0.2rem 0.4rem;
+    min-height: 24px;
+  }
+
+  .subagent-window-title {
+    gap: 0.2rem;
+    overflow: hidden;
+  }
+
+  .subagent-window-title .icon {
+    font-size: 0.7rem;
+  }
+
+  .subagent-window-title .id {
+    font-size: 0.6rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 45vw;
+  }
+
+  .subagent-window-title .status {
+    font-size: 0.45rem;
+    padding: 0.05rem 0.15rem;
+  }
+
+  .subagent-model-badge {
+    font-size: 0.45rem !important;
+    padding: 0.05rem 0.15rem !important;
+  }
+
+  .subagent-window-actions button {
+    font-size: 0.7rem;
+    padding: 0.15rem 0.35rem;
+    min-width: 26px;
+    min-height: 26px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .subagent-window-body {
+    font-size: 0.6rem;
+    padding: 0.2rem 0.35rem;
+  }
+
+  .subagent-window-body .activity-line {
+    gap: 0.15rem;
+    padding: 0.05rem 0;
+  }
+
+  .subagent-window-body .activity-line .time {
+    font-size: 0.5rem;
+  }
+
+  .subagent-window-body .activity-line .tool-name {
+    font-size: 0.55rem;
+  }
+
+  .subagent-window-body .activity-line .tool-detail {
+    font-size: 0.55rem;
+  }
+
+  /* Hide parent label on mobile to save space */
+  .subagent-window-parent {
+    display: none;
+  }
+
+  /* ---- Tab Subagent Badges: Smaller on Mobile ---- */
+
+  .session-tab .tab-subagent-badge {
+    height: 14px;
+    padding: 0 3px;
+    border-radius: 7px;
+    margin-left: 2px;
+  }
+
+  .session-tab .tab-subagent-badge .subagent-label {
+    font-size: 0.45rem;
+  }
+
+  /* Subagent dropdown - full width near badge on mobile (JS sets top from badge position) */
+  .subagent-dropdown {
+    position: fixed !important;
+    left: 8px !important;
+    right: 8px !important;
+    bottom: auto !important;
+    min-width: auto !important;
+    max-width: none !important;
+    border-radius: 8px;
+    transform: none !important;
+  }
+
+  /* ---- Mobile Overview (phone home screen) ----
+     Shown in place of the welcome overlay when the C logo is tapped. Styled only
+     with :root tokens so every skin, including the four light ones, works with
+     no override block. Never give .mobile-overview itself a display value: the
+     element ships with [hidden] and only .visible may turn it on. */
+
+  .mobile-overview.visible {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 10;
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    padding: 0.75rem 0.6rem calc(1rem + var(--safe-area-bottom));
+    background: var(--bg-dark);
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+  }
+
+  /* No side padding: the wordmark's left edge lines up with the session cards
+     below it, and the Run button's right edge with theirs. */
+  .mobile-overview-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    padding: 0;
+  }
+
+  /* Same accent as the "C" in the header (`.logo` uses --accent-hover), and the
+     same 48px box as the Run button opposite it, so the two are centered on one
+     line by construction rather than by eye. */
+  .mobile-overview-brand {
+    display: inline-flex;
+    align-items: center;
+    min-height: 48px;
+    font-size: 1.5rem;
+    font-weight: 800;
+    line-height: 1;
+    color: var(--accent-hover);
+    letter-spacing: -0.02em;
+  }
+
+  /* Split Run button. Colors come from the toolbar's own
+     `.btn-toolbar.btn-run.mode-<backend>` rules in styles.css (the element
+     carries those classes), so this button and the one in the toolbar are the
+     same control in two places. Only size/shape is set here, and NOTHING that
+     would override the mode gradient. */
+  .mobile-overview-header {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .mobile-overview-run-group {
+    display: flex;
+    align-items: stretch;
+    flex-shrink: 0;
+  }
+
+  /* Sized well past the 44px touch minimum: this is the primary action on the
+     home screen, and the caret is a separate target right next to it.
+     ⚠️ The !important is required, not decorative: the phone block clamps every
+     .btn-toolbar to `height/min-height/max-height: 26px !important`, and this
+     button deliberately carries .btn-toolbar to inherit the run-mode gradient.
+     Without matching !important (max-height included) it renders 26px tall. */
+  .mobile-overview-run-group .mobile-overview-run {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    min-height: 48px !important;
+    height: 48px !important;
+    max-height: 48px !important;
+    padding: 0 1.15rem !important;
+    font-size: 0.95rem !important;
+    line-height: 1;
+    font-weight: 700;
+    font-family: inherit;
+    border-radius: 10px 0 0 10px !important;
+  }
+
+  .mobile-overview-run-mode {
+    font-weight: 600;
+    font-size: 0.85rem;
+    opacity: 0.8;
+  }
+
+  .mobile-overview-run-group .mobile-overview-run-caret {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 48px !important;
+    height: 48px !important;
+    max-height: 48px !important;
+    min-width: 48px !important;
+    width: 48px !important;
+    padding: 0 !important;
+    line-height: 1;
+    font-family: inherit;
+    border-radius: 0 10px 10px 0 !important;
+  }
+
+  /* The phone block shrinks every run-gear glyph to 10px; this one is a 48px
+     tap target, so it gets a proportionate chevron. `display:block` drops the
+     inline-baseline gap that would otherwise push it a pixel low. */
+  .mobile-overview-run-group .mobile-overview-run-caret svg {
+    display: block;
+    width: 20px !important;
+    height: 20px !important;
+    margin: 0 !important;
+  }
+
+  .mobile-overview-run-menu {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    margin: 0.5rem 0 0;
+    padding: 0.35rem;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: var(--floating-bg);
+    box-shadow: var(--elevated-shadow);
+  }
+
+  .mobile-overview-run-option {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    min-height: 44px;
+    padding: 0 0.6rem;
+    border: none;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--text);
+    font-family: inherit;
+    font-size: 0.82rem;
+    text-align: left;
+  }
+
+  .mobile-overview-run-option.selected {
+    background: var(--control-bg-hover);
+  }
+
+  .mobile-overview-run-option:active {
+    background: var(--bg-hover);
+  }
+
+  .mobile-overview-run-option--add {
+    color: var(--accent);
+  }
+
+  .mobile-overview-run-header {
+    padding: 0.4rem 0.6rem 0.2rem;
+    font-size: 0.6rem;
+    font-weight: 700;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+  }
+
+  .mobile-overview-section {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+  }
+
+  /* Flush left with the wordmark and the cards: one left edge down the screen. */
+  .mobile-overview-heading {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    margin: 0.35rem 0 0;
+    padding: 0;
+    font-size: 0.65rem;
+    font-weight: 700;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+  }
+
+  .mobile-overview-heading-count {
+    color: var(--text-dim);
+    font-weight: 600;
+  }
+
+  .mobile-overview-empty {
+    margin: 0;
+    padding: 0.5rem 0;
+    font-size: 0.75rem;
+    color: var(--text-muted);
+  }
+
+  /* Row: 56px tap target, dot + two-line body + pill + chevron */
+  .mobile-overview-row {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    width: 100%;
+    min-height: 56px;
+    padding: 0.5rem 0.7rem;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: var(--bg-card);
+    color: var(--text);
+    font-family: inherit;
+    text-align: left;
+  }
+
+  .mobile-overview-row:active {
+    background: var(--bg-hover);
+  }
+
+  /* Approvals Inbox answer strip: sits under a NEEDS YOU row (sibling of the
+     row <button>, see _buildMobileOverviewApprovalStrip). Buttons inherit no
+     toolbar styling on purpose; they are one-tap dialog answers, not runs. */
+  .mobile-overview-row-wrap {
+    width: 100%;
+  }
+  .mobile-overview-approval-strip {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    padding: 0.4rem 0.2rem 0.1rem;
+  }
+  .mobile-overview-approval-btn {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--bg-card);
+    color: var(--text);
+    font-family: inherit;
+    font-size: 0.72rem;
+    padding: 0.35rem 0.6rem;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .mobile-overview-approval-btn.primary {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: white;
+  }
+  .mobile-overview-approval-btn.danger {
+    border-color: var(--error);
+    color: var(--error);
+  }
+
+  /* Attention states mirror the session tabs exactly: red blink when the agent
+     asked something (permission / question), yellow blink when it is waiting for
+     a prompt. Same hues and same cadence as tab-blink-red / tab-blink-yellow in
+     styles.css; the keyframes are re-declared here only because a tab's resting
+     background is transparent while a row's is the card color. */
+  .mobile-overview-row--needs {
+    border-color: var(--red);
+    animation: mobile-overview-blink-red 2.5s ease-in-out infinite;
+  }
+
+  .mobile-overview-row--waiting {
+    border-color: var(--yellow);
+    animation: mobile-overview-blink-yellow 3.5s ease-in-out infinite;
+  }
+
+  .mobile-overview-row--error {
+    border-color: var(--red);
+  }
+
+  /* Working is not an alert, so it gets a calm green breathing edge rather than a
+     blink: at a glance the row reads "this one is moving", without competing with
+     the two states that actually want you. Slower than both of them on purpose. */
+  .mobile-overview-row--working {
+    border-color: var(--green);
+    animation: mobile-overview-breathe-green 2.2s ease-in-out infinite;
+  }
+
+  @keyframes mobile-overview-breathe-green {
+    0%,
+    100% {
+      background: var(--bg-card);
+      border-color: var(--border);
+    }
+    50% {
+      background: rgba(34, 197, 94, 0.1);
+      border-color: var(--green);
+    }
+  }
+
+  /* The pill picks up a three-dot ellipsis that fills in and empties, so the row
+     still reads as active on a skin where the border tint is subtle. */
+  .mobile-overview-pill--working::after {
+    content: '';
+    display: inline-block;
+    width: 0.75em;
+    text-align: left;
+    animation: mobile-overview-pill-dots 1.5s steps(1, end) infinite;
+  }
+
+  @keyframes mobile-overview-pill-dots {
+    0% {
+      content: '';
+    }
+    25% {
+      content: '.';
+    }
+    50% {
+      content: '..';
+    }
+    75% {
+      content: '...';
+    }
+  }
+
+  @keyframes mobile-overview-blink-red {
+    0%,
+    100% {
+      background: var(--bg-card);
+      border-color: var(--border);
+    }
+    50% {
+      background: rgba(239, 68, 68, 0.14);
+      border-color: var(--red);
+    }
+  }
+
+  @keyframes mobile-overview-blink-yellow {
+    0%,
+    100% {
+      background: var(--bg-card);
+      border-color: var(--border);
+    }
+    50% {
+      background: rgba(234, 179, 8, 0.12);
+      border-color: var(--yellow);
+    }
+  }
+
+  .mobile-overview-row-body {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    flex: 1;
+    min-width: 0;
+  }
+
+  .mobile-overview-row-title {
+    display: block;
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: var(--text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .mobile-overview-row-case {
+    color: var(--text-dim);
+    font-weight: 500;
+  }
+
+  .mobile-overview-row-sub {
+    display: block;
+    font-size: 0.68rem;
+    color: var(--text-muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  /* Third line of the row body: "STARTED 3d ago · IDLE 12m". Monospace so the
+     numbers stay put as the clock rewrites them every 20s, and dimmer than the
+     path above it: it answers a question you only ask on purpose. */
+  .mobile-overview-row-meta {
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+    min-width: 0;
+    font-family: var(--font-mono, monospace);
+    font-size: 0.63rem;
+    color: var(--text-muted);
+    white-space: nowrap;
+    overflow: hidden;
+  }
+
+  .mobile-overview-meta-item {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .mobile-overview-meta-key {
+    margin-right: 0.3rem;
+    opacity: 0.6;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  .mobile-overview-meta-sep {
+    opacity: 0.45;
+  }
+
+  /* The freshest signal on the row: while a session is actually running, how
+     long the current turn has been going is the number the eye should land on.
+     Same treatment the desktop rail gives its "active" stamp. */
+  .mobile-overview-row--working .mobile-overview-meta-since {
+    color: var(--green);
+    opacity: 0.95;
+  }
+
+  .mobile-overview-dot {
+    flex-shrink: 0;
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background: var(--text-muted);
+  }
+
+  .mobile-overview-dot--needs,
+  .mobile-overview-dot--error {
+    background: var(--red);
+  }
+
+  .mobile-overview-dot--waiting {
+    background: var(--yellow);
+  }
+
+  /* Same as .session-tab .tab-status: green when the session is fine, and the
+     shared `pulse` keyframes while it is working. The halo matches the busy tab
+     dot and the desktop home column (.home-sessions-dot--working, styles.css):
+     working reads identically on every surface or it reads as three features. */
+  .mobile-overview-dot--working {
+    background: var(--green);
+    animation: pulse 1.5s infinite;
+    box-shadow: 0 0 8px 2px color-mix(in srgb, var(--green) 55%, transparent);
+    will-change: opacity;
+  }
+
+  /* Ring the pulsing dot with the SAME spinner a tab shows while it loads: same
+     2px ring, same bright leading edge, same `tab-load-spin` keyframes from
+     styles.css (reused, not re-declared, so the two can never drift). Green
+     rather than the tab's blue because here it means "running", not "loading":
+     the motion is the shared part, the color still belongs to the state. */
+  .mobile-overview-dot {
+    position: relative;
+  }
+
+  .mobile-overview-dot--working::after {
+    content: '';
+    position: absolute;
+    inset: -4px;
+    border: 2px solid rgba(34, 197, 94, 0.25);
+    border-top-color: var(--green);
+    border-radius: 50%;
+    animation: tab-load-spin 0.7s linear infinite;
+  }
+
+  .mobile-overview-dot--idle {
+    background: var(--green);
+  }
+
+  .mobile-overview-dot--done {
+    background: var(--text-muted);
+    opacity: 0.5;
+  }
+
+  .mobile-overview-pill {
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    padding: 0.2rem 0.45rem;
+    border: 1px solid var(--border-light);
+    border-radius: 999px;
+    font-size: 0.62rem;
+    font-weight: 600;
+    color: var(--text-dim);
+    white-space: nowrap;
+  }
+
+  .mobile-overview-pill--needs,
+  .mobile-overview-pill--error {
+    border-color: var(--red);
+    color: var(--red);
+  }
+
+  .mobile-overview-pill--waiting {
+    border-color: var(--yellow);
+    color: var(--yellow);
+  }
+
+  .mobile-overview-pill--idle,
+  .mobile-overview-pill--working {
+    border-color: var(--green);
+    color: var(--green);
+  }
+
+  /* An exited agent (Ark0N/Codeman#446): neutral, since nothing is running behind
+     the row. The dot and the row take `--exited` too and keep their base rules. */
+  .mobile-overview-pill--exited {
+    border-color: var(--text-muted);
+    color: var(--text-muted);
+  }
+
+  /* Accent, and none of the three above: a session watching work it started itself
+     is not asking the user for anything, and red and yellow are what say it is. */
+  .mobile-overview-pill--watching {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+
+  .mobile-overview-chevron {
+    flex-shrink: 0;
+    color: var(--text-muted);
+    font-size: 1rem;
+    line-height: 1;
+  }
+
+  /* Past conversations: quieter than a live row, since tapping one starts work */
+  .mobile-overview-row--past {
+    background: transparent;
+    border-style: dashed;
+  }
+
+  .mobile-overview-row--past .mobile-overview-row-title {
+    font-weight: 500;
+    color: var(--text-dim);
+  }
+
+  .mobile-overview-dot--past {
+    background: transparent;
+    border: 1px solid var(--border-light);
+  }
+
+  .mobile-overview-pill--past {
+    border-color: var(--border-light);
+    color: var(--text-muted);
+  }
+
+  .mobile-overview-more {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.35rem;
+    min-height: 40px;
+    border: none;
+    border-radius: 10px;
+    background: var(--control-bg);
+    color: var(--text-dim);
+    font-family: inherit;
+    font-size: 0.72rem;
+    font-weight: 600;
+  }
+
+  .mobile-overview-more-count {
+    padding: 0.05rem 0.35rem;
+    border-radius: 999px;
+    background: var(--control-bg-hover);
+    color: var(--text-muted);
+  }
+}
+
+/* The overview's attention blink is an alert, so it stays visible without
+   motion: hold the alert color instead of animating to it. */
+@media (prefers-reduced-motion: reduce) {
+  .mobile-overview-row--needs,
+  .mobile-overview-row--waiting {
+    animation: none;
+  }
+
+  .mobile-overview-row--needs {
+    background: rgba(239, 68, 68, 0.14);
+  }
+
+  .mobile-overview-row--waiting {
+    background: rgba(234, 179, 8, 0.12);
+  }
+
+  .mobile-overview-dot--working {
+    animation: none;
+  }
+
+  /* The ring stays as a static full circle: it still marks the row, it just
+     stops turning. */
+  .mobile-overview-dot--working::after {
+    border-color: var(--green);
+    animation: none;
+  }
+
+  /* Working is only informational, so it drops to a static green edge and a
+     static ellipsis rather than holding a tint the way the alerts do. */
+  .mobile-overview-row--working {
+    animation: none;
+  }
+
+  .mobile-overview-pill--working::after {
+    content: '...';
+    animation: none;
+  }
+}
+
+/* Light-skin compatibility for mobile-only chrome. These components predate
+   the shared skin system and intentionally retain their original dark values
+   for the three dark skins above. */
+html:is([data-skin="paper-gray"], [data-skin="solarized-light"], [data-skin="catppuccin-latte"], [data-skin="rose-pine-dawn"]) :is(.header, .toolbar, .keyboard-accessory-bar) {
+  background: var(--glass-bg);
+  border-color: var(--glass-border);
+  color: var(--text);
+}
+
+/* `.accessory-btn:not(.armed)` on purpose: this selector is (0,3,1) — `:is()`
+   takes the specificity of its most specific argument, and `.btn-toolbar
+   .btn-shell` is two classes — so it OUTRANKS the (0,3,0) armed-Ctrl rules in
+   both stylesheets and repainted the armed modifier back to a resting button on
+   all four light skins. Excluding the state here fixes phone and tablet at once;
+   adding a class to the armed rules would only have moved the tie. */
+html:is([data-skin="paper-gray"], [data-skin="solarized-light"], [data-skin="catppuccin-latte"], [data-skin="rose-pine-dawn"]) :is(.btn-voice-mobile, .btn-attach-mobile, .btn-settings-mobile, .btn-toolbar.btn-shell, .accessory-btn:not(.armed)) {
+  background: var(--control-bg);
+  border-color: var(--control-border);
+  color: var(--text-dim);
+}
+
+html:is([data-skin="paper-gray"], [data-skin="solarized-light"], [data-skin="catppuccin-latte"], [data-skin="rose-pine-dawn"]) :is(.btn-voice-mobile:active, .btn-attach-mobile:active, .btn-settings-mobile:active, .btn-toolbar.btn-shell:hover, .btn-toolbar.btn-shell:active, .accessory-btn:active) {
+  background: var(--control-bg-hover);
+  border-color: var(--control-border-hover);
+  color: var(--text);
+}
+
+/* Attach's press feedback comes from its wrapper (the file input over the button
+   takes the press). Kept out of the :is() list above on purpose: a descendant
+   selector there would raise that list's specificity for every button in it. */
+html:is([data-skin="paper-gray"], [data-skin="solarized-light"], [data-skin="catppuccin-latte"], [data-skin="rose-pine-dawn"]) .btn-attach-mobile-wrap:active .btn-attach-mobile {
+  background: var(--control-bg-hover);
+  border-color: var(--control-border-hover);
+  color: var(--text);
+}
+
+html:is([data-skin="paper-gray"], [data-skin="solarized-light"], [data-skin="catppuccin-latte"], [data-skin="rose-pine-dawn"]) :is(.btn-toolbar.btn-run.mode-claude, .btn-toolbar.btn-run-gear.mode-claude) {
+  background: linear-gradient(135deg, var(--accent-grad-a), var(--accent-grad-b));
+  border-color: var(--accent);
+  color: var(--accent-ink);
+}
+
+html:is([data-skin="paper-gray"], [data-skin="solarized-light"], [data-skin="catppuccin-latte"], [data-skin="rose-pine-dawn"]) :is(.btn-toolbar.btn-run.mode-opencode, .btn-toolbar.btn-run-gear.mode-opencode) {
+  background: linear-gradient(135deg, var(--accent-d), var(--accent-grad-b));
+  border-color: var(--accent);
+  color: var(--accent-ink);
+}
+
+html:is([data-skin="paper-gray"], [data-skin="solarized-light"], [data-skin="catppuccin-latte"], [data-skin="rose-pine-dawn"]) :is(.btn-toolbar.btn-run.mode-gemini, .btn-toolbar.btn-run-gear.mode-gemini) {
+  background: linear-gradient(135deg, #174ea6, #4f46e5);
+  border-color: #315fc3;
+  color: #ffffff;
+}
+
+html:is([data-skin="paper-gray"], [data-skin="solarized-light"], [data-skin="catppuccin-latte"], [data-skin="rose-pine-dawn"]) :is(.btn-toolbar.btn-run.mode-antigravity, .btn-toolbar.btn-run-gear.mode-antigravity) {
+  background: linear-gradient(135deg, #0e7490, #0891b2);
+  border-color: #155e75;
+  color: #ffffff;
+}
+
+html:is([data-skin="paper-gray"], [data-skin="solarized-light"], [data-skin="catppuccin-latte"], [data-skin="rose-pine-dawn"]) :is(.btn-toolbar.btn-run.mode-pi, .btn-toolbar.btn-run-gear.mode-pi) {
+  background: linear-gradient(135deg, #be185d, #db2777);
+  border-color: #9d174d;
+  color: #ffffff;
+}
+
+html:is([data-skin="paper-gray"], [data-skin="solarized-light"], [data-skin="catppuccin-latte"], [data-skin="rose-pine-dawn"]) :is(.btn-toolbar.btn-run.mode-omp, .btn-toolbar.btn-run-gear.mode-omp) {
+  background: linear-gradient(135deg, #4f46e5, #6366f1);
+  border-color: #4338ca;
+  color: #ffffff;
+}
+
+html:is([data-skin="paper-gray"], [data-skin="solarized-light"], [data-skin="catppuccin-latte"], [data-skin="rose-pine-dawn"]) :is(.btn-toolbar.btn-run.mode-grok, .btn-toolbar.btn-run-gear.mode-grok) {
+  background: linear-gradient(135deg, #27272a, #52525b);
+  border-color: #18181b;
+  color: #ffffff;
+}
+
+html:is([data-skin="paper-gray"], [data-skin="solarized-light"], [data-skin="catppuccin-latte"], [data-skin="rose-pine-dawn"]) :is(.btn-toolbar.btn-run.mode-deepseek, .btn-toolbar.btn-run-gear.mode-deepseek) {
+  background: linear-gradient(135deg, #2740c4, #4d6bfe);
+  border-color: #1b2a8f;
+  color: #ffffff;
+}
+
+html:is([data-skin="paper-gray"], [data-skin="solarized-light"], [data-skin="catppuccin-latte"], [data-skin="rose-pine-dawn"]) .btn-toolbar.btn-run-gear {
+  border-left-color: var(--control-border-hover) !important;
+}
+
+html:is([data-skin="paper-gray"], [data-skin="solarized-light"], [data-skin="catppuccin-latte"], [data-skin="rose-pine-dawn"]) :is(.case-settings-popover-mobile, .mobile-case-picker-sheet) {
+  background: var(--floating-bg);
+  border-color: var(--control-border);
+  color: var(--text);
+  box-shadow: var(--elevated-shadow);
+}
+
+html:is([data-skin="paper-gray"], [data-skin="solarized-light"], [data-skin="catppuccin-latte"], [data-skin="rose-pine-dawn"]) :is(.case-settings-popover-mobile .checkbox-inline, #createCaseModal .form-row label) {
+  color: var(--text);
+}
+
+html:is([data-skin="paper-gray"], [data-skin="solarized-light"], [data-skin="catppuccin-latte"], [data-skin="rose-pine-dawn"]) .case-settings-popover-mobile .form-hint {
+  color: var(--text-muted);
+}
+
+html:is([data-skin="paper-gray"], [data-skin="solarized-light"], [data-skin="catppuccin-latte"], [data-skin="rose-pine-dawn"]) .mobile-case-picker .modal-backdrop {
+  background: var(--modal-backdrop);
+}
+
+
+/* Keyboard accessory bar + paste overlay base styles moved to styles.css
+   (always loaded — covers iPad landscape where mobile.css doesn't load).
+   Phone-specific overrides remain in @media (max-width: 599px) above. */
+
+/* ============================================================================
+   iOS Safari Specific Fixes
+   ============================================================================ */
+.ios-device.safari-browser {
+  /* Prevent pull-to-refresh */
+  overscroll-behavior: none;
+}
+
+/* JS touch handler now drives terminal scrollback — no native scroll needed.
+   -webkit-overflow-scrolling and overflow-y:scroll on xterm-viewport removed. */
+
+/* ============================================================================
+   Hover State Fallbacks for Touch
+   ============================================================================ */
+@media (hover: none) and (pointer: coarse) {
+  /* Remove hover-dependent UI patterns */
+  .session-tab .tab-close,
+  .session-tab .tab-gear {
+    opacity: 1;
+    width: auto;
+    padding: 0.15rem 0.25rem;
+    align-items: center;
+    justify-content: center;
+  }
+
+  /* Simplify button hover states */
+  .btn-toolbar:hover {
+    transform: none;
+  }
+
+  .btn-icon-header:hover {
+    transform: none;
+  }
+
+  /* Show dropdown on tap instead of hover */
+  .subagent-dropdown-trigger:active + .subagent-dropdown-menu,
+  .subagent-dropdown-trigger:focus + .subagent-dropdown-menu {
+    display: block;
+  }
+}
+
+@media (max-width: 599px) {
+  /* Attachment history (COD-18): full-screen sheet on phones */
+  .attachment-history-drawer {
+    top: 0;
+    bottom: 0;
+    width: 100%;
+    max-width: 100%;
+    height: 100vh;
+    height: 100dvh;
+    border-left: none;
+    border-radius: 0;
+    padding-top: var(--safe-area-top);
+    padding-left: var(--safe-area-left);
+    padding-right: var(--safe-area-right);
+    padding-bottom: var(--safe-area-bottom);
+  }
+
+  .attachment-history-header {
+    padding: 12px;
+  }
+
+  .attachment-history-list {
+    padding: 6px;
+  }
+
+  .attachment-history-item {
+    grid-template-columns: 104px minmax(0, 1fr);
+    gap: 8px;
+    padding: 8px 6px;
+  }
+
+  .attachment-history-thumb {
+    width: 104px;
+  }
+
+  .attachment-history-actions {
+    gap: 4px;
+  }
+
+  .attachment-history-actions button {
+    padding: 4px 7px;
+  }
+}
+
+/* ============================================================================
+   Connection loss: phone sizing
+   The banner sits in normal flow directly under the fixed header (the container
+   already reserves that space), so it needs the same safe-area padding as the
+   other banners. The overlay is fixed and handles its own insets.
+   ============================================================================ */
+@media (max-width: 599px) {
+  /* Reboot-restore banner: the same treatment as the offline banner below. Its
+     text and note are nowrap and the two buttons cannot shrink, so without this
+     the actions are pushed off a phone-width viewport and become unreachable. */
+  .reboot-restore-banner {
+    padding: 0.4rem 0.5rem;
+    padding-left: calc(0.5rem + var(--safe-area-left));
+    padding-right: calc(0.5rem + var(--safe-area-right));
+    font-size: 0.7rem;
+    gap: 0.4rem;
+  }
+
+  /* The session names and the scrollback note are the first things to go. The
+     count plus the two buttons carry the message on their own, and the note
+     survives as the accept button's title. */
+  .reboot-restore-banner-detail,
+  .reboot-restore-banner-note {
+    display: none;
+  }
+
+  /* A flex item will not shrink below its content width at the default
+     `min-width: auto`, so without this the nowrap text pushes the buttons off a
+     360px viewport and the ellipsis never engages. */
+  .reboot-restore-banner-text {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .reboot-restore-banner-accept,
+  .reboot-restore-banner-dismiss {
+    padding: 0.25rem 0.5rem;
+  }
+
+  .reboot-restore-banner-accept {
+    margin-left: auto;
+  }
+
+  .offline-banner {
+    padding: 0.4rem 0.5rem;
+    padding-left: calc(0.5rem + var(--safe-area-left));
+    padding-right: calc(0.5rem + var(--safe-area-right));
+    font-size: 0.7rem;
+    gap: 0.4rem;
+  }
+
+  /* The countdown is the first thing to go when the bar gets tight. The
+     wording plus the Retry button carry the message on their own. */
+  .offline-banner-detail {
+    display: none;
+  }
+
+  .offline-banner-retry {
+    padding: 0.25rem 0.5rem;
+    margin-left: auto;
+  }
+
+  .offline-overlay-card {
+    padding: 22px 18px 18px;
+  }
+
+  .offline-overlay-title {
+    font-size: 1.05rem;
+  }
+
+  .offline-overlay-actions {
+    flex-direction: column;
+  }
+
+  .offline-overlay-btn {
+    width: 100%;
+    padding: 0.65rem 1rem;
+  }
+}
+
+/* ============================================================================
+   App Settings, compact layout (<= 860px)
+
+   Same single scrolling document as the desktop rail layout; only the
+   navigation changes. The rail collapses to its search field and #appSettingsJump
+   takes over as the sticky "where am I / jump elsewhere" control, so a phone
+   spends its vertical budget on settings instead of on chrome.
+
+   Groups render as one inset rounded list with hairline dividers rather than a
+   stack of separate cards: at 390px the per-card borders were most of the pixels.
+   ============================================================================ */
+@media (max-width: 860px) {
+  :is(#appSettingsModal, #sessionOptionsModal, #createCaseModal) .modal-content.modal-lg {
+    width: 100%;
+    max-width: 100%;
+    height: 100%;
+    max-height: 100%;
+  }
+
+  :is(#appSettingsModal, #sessionOptionsModal, #createCaseModal) .set-body {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+
+  /* Rail keeps only its search field, laid out as a bar */
+  :is(#appSettingsModal, #sessionOptionsModal, #createCaseModal) .set-rail {
+    flex-direction: row;
+    align-items: center;
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+    background: transparent;
+    padding: 10px 14px;
+    overflow: visible;
+    flex-shrink: 0;
+  }
+
+  :is(#appSettingsModal, #sessionOptionsModal, #createCaseModal) .set-rail-items,
+  :is(#appSettingsModal, #sessionOptionsModal, #createCaseModal) .set-rail-foot {
+    display: none;
+  }
+
+  :is(#appSettingsModal, #sessionOptionsModal, #createCaseModal) .set-search {
+    margin: 0;
+    flex: 1;
+  }
+
+  :is(#appSettingsModal, #sessionOptionsModal, #createCaseModal) .set-search input {
+    padding: 9px 10px 9px 30px;
+    border-radius: 10px;
+  }
+
+  /* Save + Close are the two ways out of the sheet (save-and-close vs
+     discard-and-close; Apply saves but keeps the sheet open), hit in the same corner with the same thumb, so here —
+     and only here, since Save is header-only below 860px — they share a
+     recessed tray and matching pill geometry instead of reading as a fat
+     accent pill parked beside a stray × glyph. Tray colors come from skin
+     tokens, never a hardcoded black alpha, or the light skins get a grey slab.
+     `:has()` keeps the tray off Session Options, the one sheet left carrying a
+     lone × because it saves from inside its own per-section forms. Add Case
+     now has a header save of its own (its footer is hidden below 860px, so
+     that button is the only way to submit it there), and picks up the tray. */
+  :is(#appSettingsModal, #sessionOptionsModal, #createCaseModal) .set-head-actions:has(.set-head-save) {
+    padding: 3px;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: var(--bg-input);
+  }
+
+  /* Save moves into the header; the bottom action bar would cost 60px. Both
+     buttons grow to a thumb-sized target and keep identical heights so the
+     pair reads as one cluster — 36 + the tray's 3px padding and 1px border on
+     each side is a 44px block, the same height as the phone header. */
+  :is(#appSettingsModal, #sessionOptionsModal, #createCaseModal) .set-head-save {
+    display: inline-flex;
+    height: 36px;
+    padding: 0 16px;
+    font-size: 0.86rem;
+  }
+
+  /* Add Case's pending state has to show on the header button: below 860px it is
+     the only submit control (the footer is hidden), and the #caseModalSubmit
+     .loading rule in the phone block dims a button nobody can see. Measured at
+     390px before this: header opacity 1 for the whole clone, hidden footer 0.6. */
+  #createCaseModal .set-head-save.loading {
+    opacity: 0.6;
+    pointer-events: none;
+  }
+
+  :is(#appSettingsModal, #sessionOptionsModal, #createCaseModal) .set-head-actions .modal-close {
+    width: 36px;
+    height: 36px;
+    font-size: 1.35rem;
+  }
+
+  :is(#appSettingsModal, #sessionOptionsModal, #createCaseModal) .set-foot {
+    display: none;
+  }
+
+  :is(#appSettingsModal, #sessionOptionsModal, #createCaseModal) .set-doc {
+    padding: 0 14px 34px;
+    flex: 1;
+  }
+
+  /* ── jump control ──────────────────────────────────────────────────── */
+  :is(#appSettingsModal, #sessionOptionsModal, #createCaseModal) .set-jump {
+    display: flex;
+    position: sticky;
+    top: 0;
+    z-index: 4;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    margin: 10px 0 2px;
+    padding: 10px 12px;
+    border-radius: 11px;
+    font: inherit;
+    font-size: 0.82rem;
+    color: var(--text);
+    background: rgba(var(--accent-rgb), 0.13);
+    border: 1px solid rgba(var(--accent-rgb), 0.3);
+    -webkit-backdrop-filter: blur(14px);
+    backdrop-filter: blur(14px);
+    cursor: pointer;
+  }
+
+  :is(#appSettingsModal, #sessionOptionsModal, #createCaseModal) .set-jump-ico {
+    color: var(--accent);
+    flex-shrink: 0;
+  }
+
+  :is(#appSettingsModal, #sessionOptionsModal, #createCaseModal) .set-jump-label {
+    font-weight: 580;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  :is(#appSettingsModal, #sessionOptionsModal, #createCaseModal) .set-jump-chev {
+    margin-left: auto;
+    color: var(--text-muted);
+    flex-shrink: 0;
+    transition: transform 0.18s;
+  }
+
+  :is(#appSettingsModal, #sessionOptionsModal, #createCaseModal) .set-jump[aria-expanded='true'] .set-jump-chev {
+    transform: rotate(180deg);
+  }
+
+  :is(#appSettingsModal, #sessionOptionsModal, #createCaseModal) .set-jump-veil {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 8;
+    background: rgba(4, 8, 13, 0.62);
+  }
+
+  :is(#appSettingsModal, #sessionOptionsModal, #createCaseModal) .set-jump-menu {
+    display: none;
+    position: absolute;
+    left: 14px;
+    right: 14px;
+    z-index: 9;
+    padding: 7px;
+    border-radius: 16px;
+    /* Opaque on purpose: --floating-bg is translucent and the settings rows
+       behind the menu bleed through it. */
+    background: var(--bg-card);
+    border: 1px solid var(--control-border);
+    box-shadow: var(--elevated-shadow);
+    max-height: 70vh;
+    overflow-y: auto;
+  }
+
+  #appSettingsModal.jump-open .set-jump-veil,
+  #appSettingsModal.jump-open .set-jump-menu {
+    display: block;
+  }
+
+  :is(#appSettingsModal, #sessionOptionsModal, #createCaseModal) .set-jump-row {
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    width: 100%;
+    padding: 11px 12px;
+    border: 0;
+    border-radius: 11px;
+    background: transparent;
+    color: var(--text-dim);
+    font: inherit;
+    font-size: 0.82rem;
+    text-align: left;
+  }
+
+  :is(#appSettingsModal, #sessionOptionsModal, #createCaseModal) .set-jump-row svg {
+    color: var(--text-muted);
+    flex-shrink: 0;
+  }
+
+  :is(#appSettingsModal, #sessionOptionsModal, #createCaseModal) .set-jump-row .set-jump-count {
+    margin-left: auto;
+    font-size: 0.62rem;
+    color: var(--text-muted);
+  }
+
+  :is(#appSettingsModal, #sessionOptionsModal, #createCaseModal) .set-jump-row.active {
+    background: rgba(var(--accent-rgb), 0.14);
+    color: var(--text);
+    font-weight: 570;
+  }
+
+  :is(#appSettingsModal, #sessionOptionsModal, #createCaseModal) .set-jump-row.active svg {
+    color: var(--accent);
+  }
+
+  /* ── sections step down: the jump pill already names the current one ── */
+  :is(#appSettingsModal, #sessionOptionsModal, #createCaseModal) .set-section {
+    padding-top: 0;
+  }
+
+  :is(#appSettingsModal, #sessionOptionsModal, #createCaseModal) .set-section + .set-section {
+    border-top: 0;
+    margin-top: 0;
+  }
+
+  :is(#appSettingsModal, #sessionOptionsModal, #createCaseModal) .set-section-head {
+    gap: 7px;
+    margin: 18px 0 2px;
+  }
+
+  :is(#appSettingsModal, #sessionOptionsModal, #createCaseModal) .set-section-head svg {
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--text-muted);
+    width: 12px;
+    height: 12px;
+  }
+
+  :is(#appSettingsModal, #sessionOptionsModal, #createCaseModal) .set-section-head h2 {
+    font-size: 0.6rem;
+    font-weight: 640;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+  }
+
+  :is(#appSettingsModal, #sessionOptionsModal, #createCaseModal) .set-section-head::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: linear-gradient(90deg, var(--border), transparent);
+  }
+
+  :is(#appSettingsModal, #sessionOptionsModal, #createCaseModal) .set-section-blurb {
+    display: none;
+  }
+
+  /* ── live layout preview ───────────────────────────────────────────── */
+  :is(#appSettingsModal, #sessionOptionsModal, #createCaseModal) .set-preview {
+    margin-bottom: 12px;
+  }
+
+  :is(#appSettingsModal, #sessionOptionsModal, #createCaseModal) .set-preview-stage {
+    min-height: 62px;
+  }
+
+  /* ── inset grouped list ────────────────────────────────────────────── */
+  :is(#appSettingsModal, #sessionOptionsModal, #createCaseModal) .set-group {
+    margin-top: 14px;
+  }
+
+  :is(#appSettingsModal, #sessionOptionsModal, #createCaseModal) .set-group + .set-group {
+    margin-top: 16px;
+  }
+
+  :is(#appSettingsModal, #sessionOptionsModal, #createCaseModal) .set-group-head {
+    margin-bottom: 7px;
+    padding: 0 3px;
+  }
+
+  :is(#appSettingsModal, #sessionOptionsModal, #createCaseModal) .set-group-hint {
+    padding: 0 3px;
+  }
+
+  :is(#appSettingsModal, #sessionOptionsModal, #createCaseModal) .set-group-body {
+    gap: 0;
+    background: rgba(255, 255, 255, 0.035);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 13px;
+    overflow: hidden;
+  }
+
+  :is(#appSettingsModal, #sessionOptionsModal, #createCaseModal) .set-group-body > .set-row {
+    background: transparent;
+    border: 0;
+    border-radius: 0;
+    padding: 12px 13px;
+    gap: 12px;
+  }
+
+  :is(#appSettingsModal, #sessionOptionsModal, #createCaseModal) .set-group-body > .set-row + .set-row {
+    border-top: 1px solid rgba(255, 255, 255, 0.055);
+  }
+
+  :is(#appSettingsModal, #sessionOptionsModal, #createCaseModal) .set-group-body > .set-chips,
+  :is(#appSettingsModal, #sessionOptionsModal, #createCaseModal) .set-group-body > .set-modelgrid,
+  :is(#appSettingsModal, #sessionOptionsModal, #createCaseModal) .set-group-body > .set-minigrid,
+  :is(#appSettingsModal, #sessionOptionsModal, #createCaseModal) .set-group-body > #appSettingsShortcutsList {
+    padding: 12px;
+  }
+
+  :is(#appSettingsModal, #sessionOptionsModal, #createCaseModal) .set-group-body > .event-type-grid {
+    padding: 12px;
+    margin: 0;
+  }
+
+  :is(#appSettingsModal, #sessionOptionsModal, #createCaseModal) .set-row-label {
+    font-size: 0.84rem;
+  }
+
+  :is(#appSettingsModal, #sessionOptionsModal, #createCaseModal) .set-row-desc {
+    font-size: 0.69rem;
+    max-width: none;
+  }
+
+  /* Fields go full width under their label instead of fighting for the row */
+  :is(#appSettingsModal, #sessionOptionsModal, #createCaseModal) .set-row.has-field {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 9px;
+  }
+
+  :is(#appSettingsModal, #sessionOptionsModal, #createCaseModal) .set-row.has-field .set-select,
+  :is(#appSettingsModal, #sessionOptionsModal, #createCaseModal) .set-row.has-field .set-input {
+    width: 100%;
+    min-width: 0;
+    max-width: none;
+    box-sizing: border-box;
+  }
+
+  :is(#appSettingsModal, #sessionOptionsModal, #createCaseModal) .set-row-actions-wide {
+    width: 100%;
+  }
+
+  :is(#appSettingsModal, #sessionOptionsModal, #createCaseModal) .set-row-actions-wide .set-input {
+    flex: 1;
+    min-width: 0;
+  }
+
+  :is(#appSettingsModal, #sessionOptionsModal, #createCaseModal) .set-num {
+    width: 76px;
+  }
+
+  /* Bigger touch targets for the toggles and chips */
+  :is(#appSettingsModal, #sessionOptionsModal, #createCaseModal) .switch-sm {
+    width: 40px;
+    height: 24px;
+  }
+
+  :is(#appSettingsModal, #sessionOptionsModal, #createCaseModal) .switch-sm .slider:before {
+    height: 18px;
+    width: 18px;
+  }
+
+  :is(#appSettingsModal, #sessionOptionsModal, #createCaseModal) .switch-sm input:checked + .slider:before {
+    transform: translateX(16px);
+  }
+
+  :is(#appSettingsModal, #sessionOptionsModal, #createCaseModal) .set-chip {
+    font-size: 0.78rem;
+    padding: 9px 14px;
+  }
+
+  :is(#appSettingsModal, #sessionOptionsModal, #createCaseModal) .set-modelgrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  :is(#appSettingsModal, #sessionOptionsModal, #createCaseModal) .set-minigrid {
+    grid-template-columns: 1fr;
+  }
+
+  :is(#appSettingsModal, #sessionOptionsModal, #createCaseModal) .set-mini .set-select {
+    width: 148px;
+  }
+
+  /* One scrollable line beats a ragged two-row wrap for 7 effort levels */
+  :is(#appSettingsModal, #sessionOptionsModal, #createCaseModal) .set-segment {
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  :is(#appSettingsModal, #sessionOptionsModal, #createCaseModal) .set-segment::-webkit-scrollbar {
+    display: none;
+  }
+
+  :is(#appSettingsModal, #sessionOptionsModal, #createCaseModal) .set-segment button {
+    flex: 0 0 auto;
+    padding: 8px 12px;
+  }
+}
+
+/* ============================================================================
+   Session Options, compact layout (<= 860px)
+
+   App Settings collapses its rail and hands navigation to the sticky
+   #appSettingsJump pill. Session Options has no such pill (and no search), so
+   its rail stays put and becomes a horizontal, scrollable strip — which is
+   what its tab bar was before the two modals started sharing a surface.
+   ============================================================================ */
+@media (max-width: 860px) {
+  :is(#sessionOptionsModal, #createCaseModal) .set-rail {
+    padding: 8px 10px;
+  }
+
+  :is(#sessionOptionsModal, #createCaseModal) .set-rail-items {
+    display: flex;
+    flex-direction: row;
+    flex: 1;
+    min-width: 0;
+    gap: 4px;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  :is(#sessionOptionsModal, #createCaseModal) .set-rail-items::-webkit-scrollbar {
+    display: none;
+  }
+
+  :is(#sessionOptionsModal, #createCaseModal) .set-rail-item {
+    white-space: nowrap;
+    padding: 8px 12px;
+  }
+
+  /* The active marker is a left bar in the vertical rail; horizontally that
+     reads as a stray tick, so the strip uses a filled pill instead. */
+  :is(#sessionOptionsModal, #createCaseModal) .set-rail-item.active::before {
+    display: none;
+  }
+
+  :is(#sessionOptionsModal, #createCaseModal) .set-rail-item.active {
+    background: rgba(var(--accent-rgb), 0.13);
+  }
+}
+
+/* ============================================================================
+   SESSION SIDEBAR — off-canvas drawer (tablet + phone)
+   ============================================================================
+   This whole file is served with media="(max-width: 1023px)", so these
+   top-level rules cover the entire handheld range — deliberately NOT wrapped in
+   a nested @media, because the two compact `.session-tabs` blocks above live in
+   `max-width: 768px` and `max-width: 599px` and would leave 769-1023px
+   unhandled.
+
+   Placement at the END of the file is load-bearing: the compact strip blocks at
+   lines ~117 and ~584 use the deliberate `.session-tabs, .session-tabs.tabs-two-rows`
+   (0,2,0) doubling documented there. The sidebar selectors below are (0,2,1)
+   and up AND come later, so they win on both counts. Move this block and the
+   list collapses to a 36px sliver that looks like an empty list.
+
+   Why an overlay instead of the desktop rail: 44px is 11% of a 393px viewport.
+   Below 1024px the sidebar never occupies layout width — it slides over the
+   terminal, following the .attachment-history-drawer recipe in styles.css.
+   `collapsed` therefore means "drawer closed", and applySessionListLayout()
+   mirrors that into the `.open` class. */
+
+html[data-session-list="sidebar"] .session-sidebar {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: min(280px, 80vw);
+  flex: 0 0 auto;
+  transform: translateX(-100%);
+  /* visibility, not just transform: an off-screen drawer keeps display:flex, so
+     without this its filter box and ~4 tab stops per session stay in the Tab
+     order and in the a11y tree. applySessionListLayout() also sets `inert`; this
+     is the CSS half, and the transition keeps it visible for the slide-out. */
+  visibility: hidden;
+  transition: transform var(--sidebar-transition), visibility var(--sidebar-transition);
+  box-shadow: 10px 0 28px rgba(0, 0, 0, 0.36);
+  z-index: 12;
+  padding-left: var(--safe-area-left);
+}
+
+/* The rich variant's desktop column is 300px (--sidebar-width-rich, styles.css)
+   and its selector carries one attribute MORE than the drawer base above —
+   (0,3,1) vs (0,2,1) — so without this it would win here and pin the drawer of
+   a 320px phone to 300px, leaving 20px of terminal behind it. How wide a drawer
+   may be is a viewport decision, never a row-detail one: match the specificity
+   and hand the width back. Row detail itself is kept — the stamps are as useful
+   on a phone as anywhere, and the drawer is wider than the rail they were
+   designed against. */
+html[data-session-list="sidebar"][data-sidebar-detail="rich"] .session-sidebar {
+  width: min(280px, 80vw);
+  flex: 0 0 auto;
+}
+
+html[data-session-list="sidebar"] .session-sidebar.open {
+  transform: translateX(0);
+  visibility: visible;
+}
+
+/* Collapsed == closed here, so the desktop icon-rail styling must not apply:
+   the drawer keeps its full width and its head/filter/labels while it is off
+   screen, otherwise opening it would animate in a 44px stub. */
+html[data-session-list="sidebar"][data-sidebar="collapsed"] .session-sidebar {
+  flex-basis: auto;
+  width: min(280px, 80vw);
+}
+
+html[data-session-list="sidebar"][data-sidebar="collapsed"] .session-sidebar-head,
+html[data-session-list="sidebar"][data-sidebar="collapsed"] .session-sidebar-filter {
+  display: flex;
+}
+
+html[data-session-list="sidebar"][data-sidebar="collapsed"] .session-sidebar .session-tab {
+  justify-content: flex-start;
+  flex-wrap: nowrap;
+  padding: 0.4rem 0.5rem;
+}
+
+/* Undo the rail's content trimming: these rows are full-width drawer rows, just
+   currently off screen. Same specificity as the styles.css rail rules and later
+   in the cascade, which is why this file must stay loaded after styles.css. */
+html[data-session-list="sidebar"][data-sidebar="collapsed"] .session-sidebar .tab-info {
+  display: flex;
+}
+
+html[data-session-list="sidebar"][data-sidebar="collapsed"] .session-sidebar .tab-number {
+  display: inline-flex;
+}
+
+html[data-session-list="sidebar"][data-sidebar="collapsed"] .session-sidebar .tab-subagent-badge {
+  margin-left: 4px;
+}
+
+/* mobile.css:~604 pins .session-tab to max-height:32px for the horizontal strip,
+   which clips the folder row the sidebar always renders. Rows also need the
+   44px touch target the strip cannot afford. */
+html[data-session-list="sidebar"] .session-sidebar .session-tab {
+  min-height: 44px;
+  max-height: none;
+  flex-shrink: 0;
+}
+
+/* Touch has no hover: reveal-on-hover row actions would be unreachable.
+   Matches the (hover: none) block above, but has to be repeated here because
+   the phone block hides them on non-active tabs with (0,2,0). */
+html[data-session-list="sidebar"] .session-sidebar .session-tab .tab-gear,
+html[data-session-list="sidebar"] .session-sidebar .session-tab .tab-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 1;
+  width: auto;
+  min-width: 28px;
+  height: auto;
+  margin-left: 0;
+  padding: 0.15rem 0.25rem;
+}
+
+/* (.tab-filtered-out is handled in styles.css — its rule is already scoped to
+   html[data-session-list="sidebar"] and carries !important, so it wins here too;
+   no handheld variant needed.) */
+
+@media (prefers-reduced-motion: reduce) {
+  html[data-session-list="sidebar"] .session-sidebar {
+    transition: none;
+  }
+}
+
+/* Folding devices, tabletop pose: cap the response viewer to the bottom
+   segment. Twin of the rule at the end of styles.css, needed here because the
+   phone block (under 600px) above sets `max-height: 92dvh` on the same selector at the same
+   specificity, and this file loads later, so the styles.css copy loses on a
+   phone-width foldable. Keep the value identical; test/foldable-layout.test.ts
+   compares them. */
+@media (vertical-viewport-segments: 2) {
+  .response-viewer {
+    max-height: min(88vh, env(viewport-segment-height 0 1, 88vh));
+  }
+}
+
+/* XLSX preview (spreadsheet-preview.js): larger sheet tabs and a taller,
+   touch-scrollable grid on phones. */
+@media (max-width: 700px) {
+  .spreadsheet-sheet-tabs {
+    padding-inline: 4px;
+    scroll-snap-type: x proximity;
+  }
+
+  .spreadsheet-sheet-tab {
+    min-width: 96px;
+    min-height: 40px;
+    scroll-snap-align: start;
+  }
+
+  .spreadsheet-grid {
+    min-height: 55vh;
+    -webkit-overflow-scrolling: touch;
+    touch-action: pan-x pan-y;
+  }
+}
+
+/* Phone header: the session switcher (session-switcher.js) replaces the
+   horizontal tab strip, which frees the room the chat button and the account
+   chip need in portrait. #sessionTabs itself stays in the DOM, hidden. */
+@media (max-width: 599px) {
+  .header .session-switcher {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+  .header .session-tabs-host { display: none; }
+  .session-switcher-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    min-width: 0;
+    max-width: 100%;
+    height: 32px;
+    padding: 0 8px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+    font: inherit;
+    font-size: 13px;
+  }
+  .session-switcher-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .session-switcher-count {
+    flex: none;
+    padding: 0 5px;
+    border-radius: 999px;
+    background: var(--bg-secondary);
+    color: var(--text-muted);
+    font-size: 11px;
+  }
+  .session-switcher-caret { flex: none; color: var(--text-muted); font-size: 10px; }
+  .session-switcher-help {
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    height: 32px;
+    padding: 0 7px 0 4px;
+    border: 1px solid var(--red);
+    border-radius: 999px;
+    background: rgba(224, 99, 99, 0.12);
+    color: var(--red);
+    font: inherit;
+    font-size: 11px;
+    white-space: nowrap;
+  }
+  .session-switcher-help[hidden] { display: none; }
+  .session-switcher-help--waiting { border-color: var(--yellow); background: rgba(240, 194, 90, 0.12); color: var(--yellow); }
+  .header .session-switcher-toggle { flex: 0 1 auto; min-width: 72px; }
+  /* Account chip, phone form: provider letter + the 5h reading + "+N ▾". The
+     label, the 7d window and the meters live in its dropdown. */
+  .header #planUsageChip { flex: none; max-width: 112px; }
+  .header #planUsageChip .pu-name,
+  .header #planUsageChip .pu-summary .pu-win + .pu-win,
+  .header #planUsageChip .pu-summary .pu-meter,
+  .header #planUsageChip .pu-summary .pu-label { display: none !important; }
+  /* Narrowest phones: the needs-help chip keeps its avatar and colour, drops the words. */
+  @media (max-width: 374px) {
+    .session-switcher-reason { display: none; }
+    .session-switcher-help { padding: 0 4px; }
+  }
+  /* The chat button is back on phones: the switcher made room for it. */
+  .btn-icon-header.btn-chatroom { width: 32px; height: 32px; flex: none; }
+  .btn-icon-header.btn-chatroom svg { width: 16px; height: 16px; }
+}

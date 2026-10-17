@@ -1,0 +1,103 @@
+#!/usr/bin/env bash
+# reverie-restore: after reverie-recreate, put the rescued files back INSIDE the new container.
+#
+#   reverie-restore --dry-run              show what would be copied or differs
+#   reverie-restore                        restore home files (credentials, configs, OpenCode DB)
+#   reverie-restore --apply-image-diffs    also copy rescued cto/console files that differ from
+#                                          the image (only needed if the image was built from
+#                                          the repo instead of the rescue; NOT durable)
+#
+# Run as the container user, e.g. on the host:
+#   FLEET_CONTAINER_NAME=reverie-live ~/.local/libexec/agent-fleet/fleet-container \
+#     exec bash /scratch/repos/reverie/scripts/reverie-restore --dry-run
+# Never deletes anything: an existing, different destination is kept as NAME.pre-restore-TIMESTAMP.
+# Options: --rescue DIR [/scratch/handoffs/2026-10-15/rescue]  --home DIR [$HOME]
+#          --opt DIR [/opt/fleet]  --force (restore the OpenCode DB although OpenCode runs)
+set -euo pipefail
+
+rescue=/scratch/handoffs/2026-10-15/rescue
+home="$HOME"
+opt=/opt/fleet
+dry=0
+apply_image=0
+force=0
+pgrep_cmd="${RESTORE_PGREP:-pgrep}"
+stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+
+die() { echo "reverie-restore: $*" >&2; exit 1; }
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --rescue) rescue="${2:?--rescue needs a value}"; shift 2 ;;
+    --home) home="${2:?--home needs a value}"; shift 2 ;;
+    --opt) opt="${2:?--opt needs a value}"; shift 2 ;;
+    --apply-image-diffs) apply_image=1; shift ;;
+    --force) force=1; shift ;;
+    --dry-run) dry=1; shift ;;
+    -h|--help) sed -n '2,/^set -euo/p' "$0" | sed '$d' | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) die "unknown option '$1' (see --help)" ;;
+  esac
+done
+[ -d "$rescue" ] || die "no rescue directory: $rescue"
+[ "$dry" = 0 ] || echo "DRY RUN: nothing is changed."
+
+restored=0 kept=0 skipped=0
+# put SRC DEST MODE: copy unless identical; keep a different existing DEST as a backup.
+put() {
+  local src="$1" dest="$2" mode="$3"
+  if [ ! -f "$src" ]; then echo "missing in rescue: $src"; skipped=$((skipped + 1)); return; fi
+  if [ -f "$dest" ] && cmp -s "$src" "$dest"; then echo "same:     $dest"; kept=$((kept + 1)); return; fi
+  echo "restore:  $dest"
+  restored=$((restored + 1))
+  [ "$dry" = 0 ] || return 0
+  mkdir -p "$(dirname "$dest")"
+  if [ -e "$dest" ]; then mv -- "$dest" "$dest.pre-restore-$stamp"; echo "          (kept previous as $dest.pre-restore-$stamp)"; fi
+  cp -p -- "$src" "$dest"
+  chmod "$mode" "$dest"
+}
+
+echo "== Claude and OpenCode configuration"
+put "$rescue/home-cto/claude/credentials.json" "$home/.claude/.credentials.json" 600
+put "$rescue/home-cto/claude/settings.json" "$home/.claude/settings.json" 600
+put "$rescue/home-cto/config/.claude.json" "$home/.claude.json" 600
+put "$rescue/home-cto/config/opencode.jsonc" "$home/.config/opencode/opencode.jsonc" 600
+for f in "$rescue"/home-cto/claude/*.md; do
+  if [ -e "$f" ]; then echo "left for its owner (agent memory, not restored): $f"; fi
+done
+
+echo "== Console backup"
+for f in "$rescue"/home-cto/scratch/console-backup/*; do
+  if [ -f "$f" ]; then put "$f" "$home/scratch/console-backup/$(basename "$f")" 644; fi
+done
+
+echo "== OpenCode conversation database"
+if "$pgrep_cmd" -x opencode >/dev/null 2>&1 && [ "$force" = 0 ]; then
+  echo "skipped: an opencode process is running; stop it first (or --force) so it cannot overwrite the restored DB"
+  skipped=$((skipped + 1))
+else
+  for f in opencode.db opencode.db-wal opencode.db-shm; do
+    put "$rescue/opencode/$f" "$home/.local/share/opencode/$f" 600
+  done
+  put "$rescue/opencode/opencode.log" "$home/.local/share/opencode/log/opencode-rescued-2026-10-15.log" 600
+fi
+
+# compare TREE_RESCUED TREE_LIVE LABEL: report files that differ or are missing (dist and
+# node_modules excluded: the image rebuilds them); with --apply-image-diffs, copy them in.
+compare() {
+  local from="$1" to="$2" label="$3" rel
+  [ -d "$from" ] || { echo "$label: no rescued copy"; return; }
+  [ -d "$to" ] || { echo "$label: not in the image at $to"; return; }
+  local differ=0
+  while IFS= read -r rel; do
+    if ! cmp -s "$from/$rel" "$to/$rel"; then
+      differ=$((differ + 1))
+      echo "$label differs: $rel"
+      if [ "$apply_image" = 1 ]; then put "$from/$rel" "$to/$rel" 644; fi
+    fi
+  done < <(cd -- "$from" && find . \( -name node_modules -o -name dist -o -name __pycache__ \) -prune -o -type f -print | sed 's|^\./||' | sort)
+  echo "$label: $differ file(s) differ from the rescued live copy"
+}
+echo "== Image contents vs. the rescued live copies"
+compare "$rescue/opt-fleet-python/site-packages/cto" "$opt/python/lib/python3.11/site-packages/cto" cto
+compare "$rescue/opt-console" "$opt/apps/console" console
+
+echo "Summary: $restored to restore, $kept already identical, $skipped skipped."

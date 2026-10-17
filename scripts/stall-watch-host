@@ -1,0 +1,165 @@
+#!/usr/bin/env bash
+# Host side of the stall watchdog: the only holder of its service token, and the only author of its notices.
+#
+# Everything inside the container runs as the agents' uid: its code, its config and even its output pipe
+# are agent-writable. So nothing the container prints is trusted as words. This script runs ON THE HOST:
+#   1. it fetches the two console reads a tick needs (sessions, chat rooms) with the token,
+#   2. runs the in-container tick (the command given as arguments) with that JSON on stdin,
+#   3. reads at most one CODED report line, `stall-watch-report v1 <kind> <n> <started> <tried> <quiet>`,
+#      validates every field (an enum, bounded integers, bounded bit masks), and writes the notice text
+#      from its OWN templates, with the agent's name, the rooms and the recipients from host config,
+#   4. posts it, at most once per room per STALL_WATCH_MIN_INTERVAL, and never in a dry run.
+# Other tick output goes to the journal marked "tick: ", without control characters, at most 500
+# characters per line and 20 lines per run, so container text never reads as this script's own.
+# The tick's exit status is returned.
+#
+# Environment (a 0600 EnvironmentFile on the host; nothing is passed into the container):
+#   REVERIE_SERVICE_TOKEN     the watchdog's service token; without it reads are unauthenticated and
+#                             nothing is posted
+#   STALL_WATCH_REPORTS       where notices go: "<room id>=<to>[,<to>] ...", e.g. "abc-123=coordinator"
+#   STALL_WATCH_TARGET_NAME   the watched agent's name in notices (letters, digits, space . _ -)
+#   STALL_WATCH_MIN_INTERVAL  seconds between notices to one room (default 1800)
+#   STALL_WATCH_DAILY_CAP     notices per room per 24 h at most (default 8)
+#   STALL_WATCH_STATE_DIR     rate-limit state (default ${XDG_STATE_HOME:-~/.local/state}/reverie)
+#   REVERIE_CONSOLE_URL       the console's published loopback URL (default http://127.0.0.1:3001)
+#   CURL, NOW                 curl binary and current time (tests)
+set -uo pipefail
+# One locale everywhere: the [A-Za-z] ranges in the checks below and `date` must not depend on the host's.
+export LC_ALL=C
+
+api_url="${REVERIE_CONSOLE_URL:-http://127.0.0.1:3001}"
+curl_bin="${CURL:-curl}"
+now="${NOW:-$(date +%s)}"
+interval="${STALL_WATCH_MIN_INTERVAL:-1800}"
+daily_cap="${STALL_WATCH_DAILY_CAP:-8}"
+state_dir="${STALL_WATCH_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/reverie}"
+[ "$#" -gt 0 ] || { echo "usage: stall-watch-host <in-container tick command...>" >&2; exit 2; }
+[[ "$interval" =~ ^[0-9]{1,7}$ ]] || { echo "stall-watch-host: STALL_WATCH_MIN_INTERVAL must be seconds" >&2; exit 2; }
+[[ "$daily_cap" =~ ^[0-9]{1,3}$ ]] || { echo "stall-watch-host: STALL_WATCH_DAILY_CAP must be a count" >&2; exit 2; }
+
+dry_run=0
+for arg in "$@"; do [ "$arg" = "--dry-run" ] && dry_run=1; done
+
+name="${STALL_WATCH_TARGET_NAME:-The watched agent}"
+if ! [[ "$name" =~ ^[A-Za-z0-9][A-Za-z0-9\ ._-]{0,39}$ ]]; then
+  echo "stall-watch-host: STALL_WATCH_TARGET_NAME has characters outside letters, digits, space . _ -" >&2; exit 2
+fi
+
+# The token goes to curl through a process substitution, never on its command line.
+api() {
+  if [ -n "${REVERIE_SERVICE_TOKEN:-}" ]; then
+    "$curl_bin" -sS --fail --max-time 10 -H @<(printf 'X-Reverie-Service-Token: %s\n' "$REVERIE_SERVICE_TOKEN") "$@"
+  else
+    "$curl_bin" -sS --fail --max-time 10 "$@"
+  fi
+}
+
+if ! sessions=$(api "$api_url/api/v1/sessions") || ! chatrooms=$(api "$api_url/api/chatrooms"); then
+  echo "stall-watch-host: cannot read the console at $api_url; skipping this tick" >&2
+  exit 1
+fi
+
+output=$(printf '{"sessions":%s,"chatrooms":%s}' "$sessions" "$chatrooms" | "$@")
+status=$?
+
+describe() {   # kind n -> fixed text
+  case "$1" in
+    shell_mode) echo "the prompt is in shell mode, so room deliveries run as bash" ;;
+    missed_deliveries) echo "$2 room message(s) ran as bash while in shell mode" ;;
+    dialog) echo "a pane dialog is open" ;;
+    busy_stall) echo "busy with no progress for $2 min" ;;
+    long_tool) echo "a tool has been running without output for $2 min" ;;
+    slow_reasoning) echo "reasoning without new output for $2 min" ;;
+    max_steps) echo "stopped at OpenCode's step limit" ;;
+    stuck_queue) echo "$2 room deliveries are queued and not draining" ;;
+    unanswered) echo "idle without answering its last input" ;;
+    *) return 1 ;;
+  esac
+}
+
+mask_words() {   # mask word-for-bit-1 word-for-bit-2 ...
+  local mask="$1"; shift; local bit=1 out=""
+  for word in "$@"; do
+    if (( mask & bit )); then out="${out:+$out, }$word"; fi
+    bit=$((bit * 2))
+  done
+  printf '%s' "$out"
+}
+
+compose() {   # kind n started tried quiet -> notice text, or failure
+  local what since tried quiet
+  what=$(describe "$1" "$2") || return 1
+  since=$(date -u -d "@$3" +%H:%M) || return 1
+  tried=$(mask_words "$4" "continue" "interrupt + resume note" "Esc" "re-read note")
+  quiet=$(mask_words "$5" "night window" "GPU lock held by dream" "GPU lock held by train" \
+    "GPU lock held by review" "GPU lock held by unknown" "hold file" "owner pause")
+  printf '%s needs attention: %s (since %s UTC; tried: %s)%s. No restart was done.' \
+    "$name" "$what" "$since" "${tried:-nothing}" "${quiet:+; not nudged: $quiet}"
+}
+
+failed=0
+reported=0
+passed=0
+while IFS= read -r line; do
+  case "$line" in
+    "stall-watch-report "*)
+      read -r _ version kind n started tried quiet extra <<<"$line"
+      if (( reported )); then echo "stall-watch-host: more than one report in a tick; extra ignored" >&2; failed=1; continue; fi
+      # No leading zeros: bash arithmetic would read "08" as octal.
+      if [ "$version" != "v1" ] || [ -n "${extra:-}" ] || ! [[ "$n" =~ ^(0|[1-9][0-9]{0,5})$ ]] \
+          || ! [[ "$started" =~ ^[1-9][0-9]{8,10}$ ]] || ! [[ "$tried" =~ ^(0|[1-9][0-9]?)$ ]] \
+          || ! [[ "$quiet" =~ ^(0|[1-9][0-9]{0,2})$ ]] \
+          || (( n > 100000 || tried > 15 || quiet > 127 || started < now - 172800 || started > now + 300 )); then
+        echo "stall-watch-host: malformed report line refused" >&2; failed=1; continue
+      fi
+      if ! text=$(compose "$kind" "$n" "$started" "$tried" "$quiet"); then
+        echo "stall-watch-host: unknown report kind refused" >&2; failed=1; continue
+      fi
+      reported=1
+      if (( dry_run )); then echo "stall-watch-host: dry run, would post: $text"; continue; fi
+      if [ -z "${REVERIE_SERVICE_TOKEN:-}" ]; then echo "stall-watch-host: no service token; report not posted" >&2; continue; fi
+      [ -n "${STALL_WATCH_REPORTS:-}" ] || { echo "stall-watch-host: STALL_WATCH_REPORTS is empty; report not posted" >&2; continue; }
+      mkdir -p -m 0700 "$state_dir"
+      for entry in $STALL_WATCH_REPORTS; do
+        room="${entry%%=*}"; to="${entry#*=}"
+        if [ "$room" = "$entry" ] || ! [[ "$room" =~ ^[A-Za-z0-9-]{1,64}$ ]] || ! [[ "$to" =~ ^[A-Za-z0-9_-]{1,40}(,[A-Za-z0-9_-]{1,40}){0,9}$ ]]; then
+          echo "stall-watch-host: bad STALL_WATCH_REPORTS entry refused" >&2; failed=1; continue
+        fi
+        # Rate limits: one notice per room per interval, and at most daily_cap per room per 24 h.
+        stamp="$state_dir/stall-watch-posts-$room"
+        recent=()
+        while IFS= read -r at; do
+          [[ "$at" =~ ^[0-9]{1,11}$ ]] && (( now - at < 86400 )) && recent+=("$at")
+        done < <(cat "$stamp" 2>/dev/null)
+        last=0
+        for at in "${recent[@]}"; do (( at > last )) && last=$at; done
+        if (( now - last < interval )); then
+          echo "stall-watch-host: room $room had a notice $((now - last)) s ago; skipped" >&2; continue
+        fi
+        if (( ${#recent[@]} >= daily_cap )); then
+          echo "stall-watch-host: room $room reached its daily cap of $daily_cap notices; skipped" >&2; continue
+        fi
+        to_json="\"${to//,/\",\"}\""
+        if printf '{"text":"%s","to":[%s]}' "$text" "$to_json" \
+            | api -X POST -H 'Content-Type: application/json' --data-binary @- "$api_url/api/chatrooms/$room/notices" >/dev/null; then
+          printf '%s\n' "${recent[@]}" "$now" | grep -E '^[0-9]+$' > "$stamp.tmp" && mv "$stamp.tmp" "$stamp"
+        else
+          echo "stall-watch-host: posting the notice for room $room failed" >&2; failed=1
+        fi
+      done
+      ;;
+    "stall-watch-"*) echo "stall-watch-host: unknown stall-watch line refused" >&2; failed=1 ;;
+    *)
+      passed=$((passed + 1))
+      if (( passed <= 20 )); then
+        clean="${line//[$'\001'-$'\037'$'\177']/}"
+        printf 'tick: %s\n' "${clean:0:500}"
+      elif (( passed == 21 )); then
+        echo "tick: (further output dropped)"
+      fi
+      ;;
+  esac
+done <<<"$output"
+
+[ "$status" -ne 0 ] && exit "$status"
+exit "$failed"

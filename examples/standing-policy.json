@@ -1,0 +1,26 @@
+{
+  "commits": {
+    "require_review": true,
+    "default_author": {
+      "name": "YOUR_NAME",
+      "email": "YOUR_EMAIL"
+    },
+    "dco_signoff": true,
+    "no_ai_coauthors": true
+  },
+  "review_directives": [
+    {
+      "id": "correct-by-construction",
+      "instruction": "Design explicit invariants, contracts and state transitions. Make illegal states difficult to represent. Distinguish proofs from testing evidence."
+    },
+    {
+      "id": "dry",
+      "instruction": "Keep one source of truth for shared logic and data. Consolidate actual duplication to improve maintenance."
+    }
+  ],
+  "repositories": {},
+  "github": {
+    "token_env": "GH_TOKEN"
+  },
+  "note": "Repositories require explicit merge policies. Credentials remain outside source and images."
+}

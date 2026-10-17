@@ -1,0 +1,115 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Memory limit for a NEW container: FLEET_MEMORY (e.g. 16g) when set, otherwise half of
+# the host's MemTotal rounded down to whole GiB and clamped to 4..32 GiB. Swap = memory.
+# An existing container keeps the limit stored with it (`container-memory` changes it live).
+fleet_memory_size() {
+  if [[ -n "${FLEET_MEMORY:-}" ]]; then
+    [[ "$FLEET_MEMORY" =~ ^[0-9]+[gGmM]$ ]] || { echo "FLEET_MEMORY must look like 16g or 8192m, got '$FLEET_MEMORY'" >&2; return 1; }
+    echo "$FLEET_MEMORY"
+    return
+  fi
+  local total_kb gib
+  total_kb=$(awk '/^MemTotal:/ {print $2}' "${FLEET_MEMINFO:-/proc/meminfo}")
+  [[ "$total_kb" =~ ^[0-9]+$ ]] || { echo 'cannot read MemTotal' >&2; return 1; }
+  gib=$(( total_kb / 2 / 1048576 ))
+  (( gib >= 4 )) || gib=4
+  (( gib <= 32 )) || gib=32
+  echo "${gib}g"
+}
+if [[ "${1:-}" == memory-default ]]; then fleet_memory_size; exit; fi
+
+fleet_repo="${FLEET_REPO:-$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)}"
+fleet_repo="$(realpath -m -- "$fleet_repo")"
+# Engine storage (image layers, container overlays, engine config). It must not live under a
+# scratch/cleanup area: on 2026-10-15 a cleanup of ~/scratch/agent-fleet deleted the live
+# container's root filesystem. FLEET_SCRATCH overrides it.
+fleet_storage="${FLEET_SCRATCH:-${XDG_DATA_HOME:-$HOME/.local/share}/reverie/engine}"
+fleet_engine="${FLEET_PODMAN:-podman}"
+if ! command -v "$fleet_engine" >/dev/null 2>&1 && [[ -x "$fleet_storage/podman/bin/podman" ]]; then
+  fleet_engine="$fleet_storage/podman/bin/podman"
+fi
+fleet_name="${FLEET_CONTAINER_NAME:-agent-fleet-dev}"
+fleet_image="${FLEET_IMAGE:-localhost/agent-fleet:dev}"
+fleet_network=pasta
+if [[ "${FLEET_ALLOW_HOST_LOOPBACK:-0}" == 1 ]]; then
+  fleet_network=pasta:--map-host-loopback,169.254.1.2
+fi
+fleet_environment=()
+[[ -z "${FLEET_CODEMAN_API_URL:-}" ]] || fleet_environment+=(--env "CODEMAN_API_URL=$FLEET_CODEMAN_API_URL")
+[[ -z "${FLEET_MODEL_API_BASE:-}" ]] || fleet_environment+=(--env "FLEET_API_BASE=$FLEET_MODEL_API_BASE")
+fleet_instance_data="${FLEET_INSTANCE_DATA:-$HOME/.local/share/agent-fleet/development/console}"
+fleet_instance_data="$(realpath -m -- "$fleet_instance_data")"
+fleet_workspace="$(realpath -m -- "$fleet_storage/workspaces/development")"
+fleet_runtime="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/agent-fleet"
+mkdir -p "$fleet_storage/tmp" "$fleet_storage/workspaces/development/tmp"
+export TMPDIR="$fleet_storage/tmp"
+export XDG_CONFIG_HOME="$fleet_storage/engine-config"
+mkdir -p "$XDG_CONFIG_HOME/containers"
+cp "$fleet_repo/docker/policy.json" "$XDG_CONFIG_HOME/containers/policy.json"
+# NixOS exposes its setuid user-namespace helpers in this directory.
+[[ ! -d /run/wrappers/bin ]] || export PATH="/run/wrappers/bin:$PATH"
+fleet_podman=("$fleet_engine" --root "$fleet_storage/containers-overlay" --runroot "$fleet_runtime" --storage-driver overlay)
+fleet_rootless=$("${fleet_podman[@]}" info --format '{{.Host.Security.Rootless}}')
+[[ "$fleet_rootless" == true ]] || { echo 'Reverie requires a rootless container engine.' >&2; exit 1; }
+
+case "${1:-status}" in
+  build)
+    echo "Engine storage: $fleet_storage" >&2
+    "${fleet_podman[@]}" build --signature-policy "$fleet_repo/docker/policy.json" --tag "$fleet_image" --file "$fleet_repo/docker/Containerfile" "$fleet_repo"
+    ;;
+  up)
+    echo "Engine storage: $fleet_storage" >&2
+    if "${fleet_podman[@]}" container exists "$fleet_name"; then
+      fleet_reuse_error() {
+        echo "Refusing to reuse $fleet_name: its image or bind mounts differ from the requested configuration." >&2
+        echo 'Choose a fresh FLEET_CONTAINER_NAME to preserve the existing container and its sessions.' >&2
+        exit 1
+      }
+      fleet_expected_image="$("${fleet_podman[@]}" image inspect --format '{{.Id}}' "$fleet_image")" || fleet_reuse_error
+      fleet_actual_image="$("${fleet_podman[@]}" inspect --format '{{.Image}}' "$fleet_name")" || fleet_reuse_error
+      [[ -n "$fleet_expected_image" && "${fleet_expected_image#sha256:}" == "${fleet_actual_image#sha256:}" ]] || fleet_reuse_error
+      fleet_mounts="$("${fleet_podman[@]}" inspect --format '{{range .Mounts}}{{if eq .Type "bind"}}{{.Destination}}{{"\t"}}{{.Source}}{{"\n"}}{{end}}{{end}}' "$fleet_name")" || fleet_reuse_error
+      fleet_bind_count=0
+      fleet_source_seen=0
+      fleet_scratch_seen=0
+      fleet_state_seen=0
+      while IFS=$'\t' read -r fleet_destination fleet_source; do
+        [[ -n "$fleet_destination" && -n "$fleet_source" ]] || fleet_reuse_error
+        fleet_source="$(realpath -m -- "$fleet_source")" || fleet_reuse_error
+        case "$fleet_destination" in
+          /workspace) [[ "$fleet_source" == "$fleet_repo" ]] || fleet_reuse_error; fleet_source_seen=1 ;;
+          /scratch) [[ "$fleet_source" == "$fleet_workspace" ]] || fleet_reuse_error; fleet_scratch_seen=1 ;;
+          /home/cto/.fleet) [[ "$fleet_source" == "$fleet_instance_data" ]] || fleet_reuse_error; fleet_state_seen=1 ;;
+          *) fleet_reuse_error ;;
+        esac
+        fleet_bind_count=$((fleet_bind_count + 1))
+      done <<< "$fleet_mounts"
+      [[ "$fleet_bind_count" == 3 && "$fleet_source_seen$fleet_scratch_seen$fleet_state_seen" == 111 ]] || fleet_reuse_error
+      "${fleet_podman[@]}" start "$fleet_name"
+    else
+      install -d -m 0700 "$fleet_instance_data"
+      fleet_memory=$(fleet_memory_size)
+      echo "Creating $fleet_name with a $fleet_memory memory limit (swap = memory; set FLEET_MEMORY to override)."
+      "${fleet_podman[@]}" run --pull=never --init --detach --name "$fleet_name" --label agent-fleet.managed=true \
+        --userns=keep-id:uid=2000,gid=2000 --user 2000:2000 \
+        --cap-drop=all --cap-add=chown,dac_override,fowner,fsetid,kill,setgid,setuid,setpcap,net_bind_service,sys_chroot,setfcap \
+        --memory="$fleet_memory" --memory-swap="$fleet_memory" --pids-limit=512 \
+        --network="$fleet_network" "${fleet_environment[@]}" --log-driver=k8s-file --log-opt=max-size=10mb \
+        --mount "type=bind,src=$fleet_instance_data,dst=/home/cto/.fleet" \
+        --mount "type=bind,src=$fleet_repo,dst=/workspace" \
+        --mount "type=bind,src=$fleet_workspace,dst=/scratch" \
+        "$fleet_image"
+    fi
+    ;;
+  exec)
+    shift
+    "${fleet_podman[@]}" exec --interactive --user cto --workdir /workspace "$fleet_name" "$@"
+    ;;
+  status) "${fleet_podman[@]}" ps --all --filter "name=^$fleet_name$" ;;
+  inspect) "${fleet_podman[@]}" inspect "$fleet_name" ;;
+  stop) "${fleet_podman[@]}" stop "$fleet_name" ;;
+  engine) shift; "${fleet_podman[@]}" "$@" ;;
+  *) echo 'Usage: fleet-container {build|up|exec COMMAND...|status|inspect|stop|engine ARGS...|memory-default}' >&2; exit 2 ;;
+esac

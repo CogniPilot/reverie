@@ -1,0 +1,30 @@
+dist/
+coverage/
+node_modules/
+src/web/public/vendor/
+src/web/public/gesture/
+src/web/public/app.js
+src/web/public/styles.css
+src/web/public/mobile.css
+src/web/public/index.html
+# Hand-formatted public JS modules (never prettier-enforced; the new
+# check-public-assets.mjs still validates NUL bytes + JS syntax on these).
+src/web/public/constants.js
+src/web/public/image-input.js
+src/web/public/input-cjk.js
+src/web/public/keyboard-accessory.js
+src/web/public/notification-manager.js
+src/web/public/orchestrator-panel.js
+src/web/public/panels-ui.js
+src/web/public/ralph-panel.js
+src/web/public/ralph-wizard.js
+src/web/public/respawn-ui.js
+src/web/public/session-ui.js
+src/web/public/settings-ui.js
+src/web/public/sw.js
+src/web/public/terminal-ui.js
+src/web/public/voice-input.js
+scripts/remotion/
+
+# Hand-maintained; Prettier escapes underscores in glob paths and corrupts paragraphs.
+CLAUDE.md

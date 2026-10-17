@@ -1,0 +1,32 @@
+{
+  "target": {
+    "name": "<the OpenCode agent's session name>"
+  },
+  "api_url": "http://127.0.0.1:3000",
+  "opencode_db": "~/.local/share/opencode/opencode.db",
+  "tmux_socket": "fleet",
+  "state_file": "/instances/<instance>/runtime/stall-watch-state.json",
+  "log_file": "/instances/<instance>/runtime/stall-watch.jsonl",
+  "pause_file": "/instances/<instance>/runtime/stall-watch-paused",
+  "runtime_policy": "/instances/<instance>/runtime/runtime-policy.json",
+  "cycle_policy": null,
+  "night": {
+    "start": "23:00",
+    "end": "07:00",
+    "timezone": "<IANA timezone, e.g. America/Chicago>"
+  },
+  "gpu_lock": "~/.cache/gpu.lock",
+  "hold_files": [
+    "~/.config/reverie/gpu.hold",
+    "~/.cache/cto.hold"
+  ],
+  "busy_stall_minutes": 6,
+  "tool_stall_minutes": 30,
+  "idle_unanswered_minutes": 4,
+  "max_steps_grace_minutes": 1,
+  "dialog_minutes": 4,
+  "step_wait_minutes": 3,
+  "recovery_quiet_minutes": 10,
+  "max_nudges": 3,
+  "nudge_window_minutes": 30
+}

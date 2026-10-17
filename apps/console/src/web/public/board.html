@@ -1,0 +1,672 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Board</title>
+<style>
+:root{
+  --bg:#f4f3ef; --panel:#ffffff; --panel2:#f9f8f5; --line:#e2dfd6; --grid:#ece9e1;
+  --fg:#1d1f24; --muted:#6b6e76; --faint:#9a9ca3;
+  --accent:#2f5bd3; --accent-soft:#e3eafb;
+  --done:#3d9a6a; --now:#2f5bd3; --plan:#8e96a8; --gate:#c98a12; --blocked:#c94a3c; --cont:#b9bec9; --sleep:#7c6fb0; --triage:#a06bc7;
+  --now-line:#e0402f; --night:rgba(40,40,80,.045); --weekend:rgba(201,138,18,.06); --ms:#8a3fb5;
+  --good:#2f8f5b; --warn:#b77d0b; --bad:#c23b2e;
+  --shadow:0 1px 2px rgba(20,20,30,.06),0 4px 16px rgba(20,20,30,.04);
+  --mono:ui-monospace,"SF Mono","JetBrains Mono",Menlo,Consolas,monospace;
+  --sans:"Inter",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#0f1115; --panel:#161920; --panel2:#1b1f27; --line:#2a2f3a; --grid:#20242d;
+  --fg:#e7e9ee; --muted:#9aa0ad; --faint:#666c79;
+  --accent:#7fa2ff; --accent-soft:#1e2a47;
+  --done:#4fbf86; --now:#7fa2ff; --plan:#6f7889; --gate:#e3a531; --blocked:#ef6a5a; --cont:#3a404d; --sleep:#9d8fe0; --triage:#c196e6;
+  --now-line:#ff5a47; --night:rgba(120,130,255,.05); --weekend:rgba(227,165,49,.06); --ms:#c196e6;
+  --good:#4fbf86; --warn:#e3a531; --bad:#ef6a5a; --shadow:none; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#0f1115; --panel:#161920; --panel2:#1b1f27; --line:#2a2f3a; --grid:#20242d;
+  --fg:#e7e9ee; --muted:#9aa0ad; --faint:#666c79;
+  --accent:#7fa2ff; --accent-soft:#1e2a47;
+  --done:#4fbf86; --now:#7fa2ff; --plan:#6f7889; --gate:#e3a531; --blocked:#ef6a5a; --cont:#3a404d; --sleep:#9d8fe0; --triage:#c196e6;
+  --now-line:#ff5a47; --night:rgba(120,130,255,.05); --weekend:rgba(227,165,49,.06); --ms:#c196e6;
+  --good:#4fbf86; --warn:#e3a531; --bad:#ef6a5a; --shadow:none; color-scheme:dark}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.45 var(--sans);-webkit-font-smoothing:antialiased}
+.wrap{max-width:1400px;margin:0 auto;padding-block:20px 48px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));display:flex;flex-direction:column;gap:18px}
+header{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:12px}
+h1{margin:0;font-size:22px;letter-spacing:-.01em}
+h1 span{color:var(--muted);font-weight:500}
+h2{margin:0;font-size:13px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);font-weight:600}
+.meta{color:var(--muted);font-size:12.5px;display:flex;gap:14px;flex-wrap:wrap;align-items:center}
+.clock{font-family:var(--mono);color:var(--fg);font-size:13px}
+.btn{font:inherit;font-size:12.5px;padding:6px 11px;min-height:32px;border-radius:7px;border:1px solid var(--line);background:var(--panel);color:var(--fg);cursor:pointer}
+.btn:hover{border-color:var(--accent)} .btn.on{background:var(--accent-soft);border-color:var(--accent);color:var(--accent)}
+.banner{background:color-mix(in srgb,var(--warn) 16%,var(--panel));border:1px solid var(--warn);border-radius:10px;padding:8px 12px;font-size:13px}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px}
+.kpi{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px 14px;box-shadow:var(--shadow);cursor:pointer}
+.kpi b{display:block;font:600 26px/1.1 var(--mono);letter-spacing:-.02em}
+.kpi small{color:var(--muted);font-size:12px}
+.kpi.bad b{color:var(--bad)} .kpi.warn b{color:var(--warn)} .kpi.good b{color:var(--good)}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow);min-width:0}
+.phead{display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:space-between;padding:12px 14px;border-bottom:1px solid var(--line)}
+.tools{display:flex;gap:6px;flex-wrap:wrap}
+#tl{position:relative;height:auto;touch-action:pan-y;user-select:none;-webkit-user-select:none;overflow:hidden;border-radius:0 0 14px 14px}
+#tl svg{display:block;width:100%}
+#tl text{font-family:var(--sans)}
+.hint{color:var(--faint);font-size:12px}
+.empty{color:var(--faint);font-size:13px;padding:16px 14px}
+.tip{position:fixed;z-index:10;pointer-events:none;background:var(--panel);border:1px solid var(--line);border-radius:9px;padding:8px 10px;box-shadow:0 6px 24px rgba(0,0,0,.18);font-size:12.5px;max-width:280px}
+.tip b{display:block;margin-bottom:2px}
+.tip .k{display:inline-block;font-size:11px;padding:0 6px;border-radius:5px;margin-left:6px;color:#fff}
+.legend{display:flex;flex-wrap:wrap;gap:12px;padding:10px 14px;border-top:1px solid var(--line);font-size:12px;color:var(--muted)}
+.legend i{display:inline-block;width:12px;height:8px;border-radius:2px;margin-right:5px;vertical-align:middle}
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr));gap:12px;padding:14px}
+.plan,.ms{border:1px solid var(--line);border-radius:12px;padding:12px;background:var(--panel2);min-width:0}
+.plan h3,.ms h3{margin:0 0 2px;font-size:14px;display:flex;justify-content:space-between;gap:8px;align-items:center}
+.plan .who,.ms .who{color:var(--muted);font-size:12px}
+.badge{font-size:11px;font-weight:600;padding:2px 7px;border-radius:99px;white-space:nowrap}
+.badge.bad{background:color-mix(in srgb,var(--bad) 16%,transparent);color:var(--bad)}
+.badge.warn{background:color-mix(in srgb,var(--warn) 16%,transparent);color:var(--warn)}
+.badge.good{background:color-mix(in srgb,var(--good) 16%,transparent);color:var(--good)}
+.badge.mute{background:var(--grid);color:var(--muted)}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:8px}
+.stats div{font-size:11.5px;color:var(--muted)} .stats b{display:block;font:600 15px var(--mono);color:var(--fg)}
+.plan svg{width:100%;height:auto;display:block;margin-top:8px}
+.bar-track{height:8px;border-radius:99px;background:var(--grid);margin-top:10px;overflow:hidden}
+.bar-fill{height:100%;background:var(--done);border-radius:99px}
+.agents{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,250px),1fr));gap:12px;padding:14px}
+.agent{border:1px solid var(--line);border-radius:12px;padding:12px;background:var(--panel2);display:grid;grid-template-columns:64px 1fr;gap:12px;min-width:0}
+.agent h3{margin:0;font-size:15px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.agent .role{color:var(--muted);font-size:12px}
+.agent .focus{font-size:12.5px;margin-top:6px;overflow-wrap:anywhere}
+.agent ul{margin:8px 0 0;padding-left:16px;font-size:12px;color:var(--muted);overflow-wrap:anywhere}
+.agent .nums{display:flex;gap:12px;flex-wrap:wrap;margin-top:6px;font-size:11.5px;color:var(--muted)} .agent .nums b{font-family:var(--mono);color:var(--fg)}
+.dot{width:8px;height:8px;border-radius:50%;display:inline-block}
+.cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr));gap:12px}
+.list{list-style:none;margin:0;padding:6px 0}
+.list li{padding:9px 14px;border-bottom:1px solid var(--grid);display:flex;gap:10px;align-items:flex-start;overflow-wrap:anywhere}
+.list li:last-child{border-bottom:0}
+.list .t{font:12px var(--mono);color:var(--faint);white-space:nowrap;padding-top:2px;min-width:44px}
+.list .who{font-size:11.5px;color:var(--muted)}
+.sev{width:4px;align-self:stretch;border-radius:2px;flex:none}
+.kan{display:grid;grid-template-columns:repeat(5,minmax(220px,1fr));gap:10px;padding:14px;overflow-x:auto;scroll-snap-type:x proximity;-webkit-overflow-scrolling:touch}
+.ktabs{position:sticky;top:0;z-index:5;display:grid;grid-template-columns:repeat(5,1fr);gap:4px;padding:8px 10px;background:var(--panel);border-bottom:1px solid var(--line)}
+.ktabs button{font:inherit;font-size:11px;border:1px solid var(--line);border-radius:8px;background:var(--panel2);color:var(--muted);padding:5px 2px;cursor:pointer;line-height:1.25}
+.ktabs button b{display:block;font:600 15px var(--mono);color:var(--fg)}
+.ktabs button.on{border-color:var(--accent);background:var(--accent-soft)}
+.ktabs button.on b{color:var(--accent)}
+.kcol{background:var(--panel2);border:1px solid var(--line);border-radius:12px;min-width:0;scroll-snap-align:start;scroll-snap-stop:always;display:flex;flex-direction:column}
+.kcol h3{margin:0;padding:10px 12px;font-size:12px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);display:flex;justify-content:space-between;border-bottom:1px solid var(--line)}
+.kcol h3 i{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px}
+.kcards{display:flex;flex-direction:column;gap:8px;padding:8px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:9px 10px;font-size:13px;overflow-wrap:anywhere}
+.card .meta2{display:flex;flex-wrap:wrap;gap:5px;margin-top:6px;font-size:11.5px;color:var(--muted)}
+.chip{border:1px solid var(--line);border-radius:99px;padding:0 7px;white-space:nowrap}
+.card a,.tip a{color:var(--accent);text-decoration:none}
+.card .why{font-size:12px;color:var(--bad);margin-top:4px}
+.wontdo summary{cursor:pointer;padding:10px 14px;color:var(--muted);font-size:12.5px}
+.wontdo .kcards{padding:0 14px 14px}
+.foot{color:var(--faint);font-size:12px;text-align:center}
+@media (max-width:560px){h1{font-size:19px}.kpi b{font-size:22px}.kan{grid-template-columns:repeat(5,calc(100% - 4px));grid-auto-columns:calc(100% - 4px);scroll-snap-type:x mandatory;gap:8px}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1><span id="co"></span> Board <span>· issues, milestones, burn, people</span></h1>
+      <div class="meta"><span class="clock" id="clock"></span><span id="built"></span></div>
+    </div>
+    <div class="tools"><button class="btn" id="refresh">Refresh</button><button class="btn" id="theme">Theme</button></div>
+  </header>
+  <div class="banner" id="banner" hidden></div>
+
+  <section class="kpis" id="kpis"></section>
+
+  <section class="panel" id="sec-issues">
+    <div class="phead">
+      <div class="tools" id="tabs">
+        <button class="btn on" data-tab="timeline">Timeline</button>
+        <button class="btn" data-tab="kanban">Kanban</button>
+      </div>
+      <div class="tools" id="zoombtns">
+        <button class="btn" data-z="now">Now ±4h</button>
+        <button class="btn" data-z="today">Today</button>
+        <button class="btn" data-z="3d">3 days</button>
+        <button class="btn" data-z="2w">2 weeks</button>
+      </div>
+    </div>
+    <div id="tl"></div>
+    <div class="legend" id="legend"></div>
+    <div id="kanban" hidden></div>
+  </section>
+
+  <section class="panel" id="sec-ms">
+    <div class="phead"><h2>Milestones</h2><span class="hint">Progress comes from each milestone's issues.</span></div>
+    <div class="grid2" id="milestones"></div>
+  </section>
+
+  <section class="panel" id="sec-burn">
+    <div class="phead"><h2>Burn rate · this week per plan</h2><span class="hint">Dotted line = projection at the current rate to the weekly reset.</span></div>
+    <div class="grid2" id="plans"></div>
+  </section>
+
+  <section class="panel" id="sec-agents">
+    <div class="phead"><h2>People</h2><span class="hint">Ring = today's issues done of planned. Receipts are checkable facts, not claims.</span></div>
+    <div class="agents" id="agents"></div>
+  </section>
+
+  <section class="cols">
+    <div class="panel" id="sec-wins"><div class="phead"><h2>Wins</h2></div><ul class="list" id="wins"></ul></div>
+    <div class="panel" id="sec-blockers"><div class="phead"><h2>Blockers</h2></div><ul class="list" id="blockers"></ul></div>
+    <div class="panel" id="sec-decisions"><div class="phead"><h2>Decisions waiting</h2></div><ul class="list" id="decisions"></ul></div>
+  </section>
+
+  <section class="cols">
+    <div class="panel" id="sec-polls"><div class="phead"><h2>Open polls</h2><button type="button" class="btn" id="pollsToggle" hidden></button></div><ul class="list" id="polls"></ul></div>
+    <div class="panel" id="sec-pins"><div class="phead"><h2>Pinned</h2></div><ul class="list" id="pins"></ul></div>
+  </section>
+  <div class="foot" id="foot">Served inside Reverie. Refreshes every minute.</div>
+</div>
+<div class="tip" id="tip" hidden></div>
+<script>
+const H = 3600e3, D = 24 * H;
+const STATUS = {triage:'Triage', todo:'To do', doing:'Doing', blocked:'Blocked', done:'Done', wontdo:"Won't do"};
+const COLS = ['triage', 'todo', 'doing', 'blocked', 'done'];
+const KIND = {done:'Done', now:'In progress', plan:'Planned', gate:'Gate', blocked:'Blocked', cont:'Ongoing', sleep:'Sleep', triage:'Triage'};
+const VERDICT = {ahead:['good', 'ahead'], 'on-track':['mute', 'on track'], behind:['bad', 'behind']};
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+let B = null, TZ = 'America/New_York', view = null, tlState = {}, tab = 'timeline', preset = 'now';
+
+/* ---------- time in the company zone ---------- */
+const fmt = (t, o) => new Intl.DateTimeFormat('en-US', Object.assign({timeZone: TZ}, o)).format(new Date(t));
+const hm = t => fmt(t, {hour: '2-digit', minute: '2-digit', hourCycle: 'h23'});
+const dayLbl = t => fmt(t, {weekday: 'short', day: 'numeric', month: 'short'});
+const parts = t => { const o = {}; new Intl.DateTimeFormat('en-US', {timeZone: TZ, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit',
+  hour: '2-digit', minute: '2-digit', second: '2-digit', weekday: 'short'}).formatToParts(new Date(t)).forEach(p => o[p.type] = p.value); return o; };
+const startOfDay = t => { const p = parts(t); return t - ((+p.hour * 60 + +p.minute) * 60 + +p.second) * 1000; };
+const etHour = t => +parts(t).hour;
+const etDow = t => ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].indexOf(parts(t).weekday);
+/** End of the due date (23:59 company time) as epoch ms. */
+function dueMs(ymd) { const m = /^(\d{4})-(\d\d)-(\d\d)$/.exec(ymd || ''); if (!m) return NaN;
+  const guess = Date.UTC(+m[1], +m[2] - 1, +m[3], 12); return startOfDay(guess) + D - 60e3; }
+
+/* ---------- people, owners, links ---------- */
+const roster = () => B.roster || [];
+const person = id => roster().find(r => r.id === id);
+const nameOf = id => (person(id) || {}).name || id || '';
+const ownerName = i => i.owner ? nameOf(i.owner) : (i.ownerLabel || 'Unassigned');
+const ownerKey = i => i.owner || ('label:' + (i.ownerLabel || ''));
+function linkInfo(l) {
+  const u = String((l && l.url) || '');
+  if (!/^https?:\/\//i.test(u)) return null;
+  const m = /^https?:\/\/github\.com\/([^/]+)\/([^/]+)\/(issues|pull)\/(\d+)/i.exec(u);
+  let text;
+  if (m) text = m[2] + '#' + m[4];
+  else { try { text = new URL(u).hostname.replace(/^www\./, ''); } catch (e) { return null; } if (l.kind === 'report') text = 'report · ' + text; }
+  return {href: u, text};
+}
+const linksHtml = i => (i.links || []).map(linkInfo).filter(Boolean).map(l => `<a href="${esc(l.href)}" target="_blank" rel="noopener noreferrer">${esc(l.text)}</a>`).join(' · ');
+const msTitle = id => { const m = (B.milestones || []).find(x => x.id === id); return m ? m.title : ''; };
+
+/** Colour class of an issue on the timeline. */
+function kindOf(i) {
+  const tags = i.tags || [];
+  if (i.status === 'done') return 'done';
+  if (i.status === 'blocked') return 'blocked';
+  if (i.status === 'triage') return 'triage';
+  if (tags.includes('sleep')) return 'sleep';
+  if (tags.includes('gate')) return 'gate';
+  if (i.status === 'doing') return tags.includes('continuous') ? 'cont' : 'now';
+  return 'plan';
+}
+const onTimeline = i => i.status !== 'wontdo' && Number.isFinite(i.start) && Number.isFinite(i.end) && i.end >= i.start;
+const overdue = (i, now) => i.status !== 'done' && i.status !== 'wontdo' && Number.isFinite(i.end) && i.end <= now;
+
+/* ---------- theme, clock ---------- */
+(function theme() {
+  let saved = null; try { saved = localStorage.getItem('board-theme'); } catch (e) {}
+  if (saved) document.documentElement.dataset.theme = saved;
+  document.getElementById('theme').onclick = () => {
+    const cur = document.documentElement.dataset.theme || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+    const nx = cur === 'dark' ? 'light' : 'dark';
+    document.documentElement.dataset.theme = nx;
+    try { localStorage.setItem('board-theme', nx); } catch (e) {}
+    if (B) render();
+  };
+})();
+function tick() {
+  document.getElementById('clock').textContent = fmt(Date.now(), {weekday: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23'}) + ' ' + zoneShort();
+  if (B && tab === 'timeline') drawTimeline();
+}
+const zoneShort = () => { try { return (new Intl.DateTimeFormat('en-US', {timeZone: TZ, timeZoneName: 'short'}).formatToParts(new Date()).find(p => p.type === 'timeZoneName') || {}).value || 'ET'; } catch (e) { return 'ET'; } };
+
+/* ---------- loading ---------- */
+let failures = 0;
+async function load() {
+  const banner = document.getElementById('banner');
+  try {
+    const r = await fetch('/api/board', {cache: 'no-store', credentials: 'same-origin', headers: {accept: 'application/json'}});
+    if (r.status === 401 || r.status === 403) {
+      // The login expired: reload once so the console can ask again; never loop.
+      let tried = null; try { tried = sessionStorage.getItem('board-reloaded'); } catch (e) {}
+      if (!tried || Date.now() - +tried > 60e3) { try { sessionStorage.setItem('board-reloaded', String(Date.now())); } catch (e) {} location.reload(); return; }
+      throw new Error('Sign in to the console, then reload (HTTP ' + r.status + ')');
+    }
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    // The API wraps replies as {success, data}; a bare view is accepted too.
+    const j = await r.json();
+    if (j && j.success === false) throw new Error(j.error || 'refused');
+    const next = j && j.data ? j.data : j;
+    if (!next || !Array.isArray(next.issues)) throw new Error('unexpected reply');
+    const first = !B;
+    B = next; TZ = B.timeZone || TZ; failures = 0; banner.hidden = true;
+    if (first) view = presetView(preset);
+    render();
+  } catch (e) {
+    failures++;
+    banner.hidden = false;
+    banner.textContent = (B ? 'Could not refresh the board (' : 'Could not load the board (') + e.message + '). ' + (B ? 'Showing the last data; ' : '') + 'trying again in a minute.';
+  }
+}
+document.getElementById('refresh').onclick = () => load();
+setInterval(load, 60e3);
+setInterval(tick, 30e3);
+load().then(tick);
+
+let pollsOpen = false; // false = default (newest 10, none on phone); true = all
+function render() {
+  document.getElementById('co').textContent = (B.company && B.company.name) || '';
+  document.title = ((B.company && B.company.name) ? B.company.name + ' ' : '') + 'Board';
+  document.getElementById('built').textContent = 'Data built ' + dayLbl(B.built) + ' ' + hm(B.built) + ' ' + zoneShort();
+  kpis(); drawTimeline(); kanban(); milestones(); plans(); agents(); lists(); tick();
+}
+
+/* ---------- KPIs ---------- */
+const num = (v, d) => v == null ? '–' : (d == null ? v : Math.round(v * 10 ** d) / 10 ** d);
+function planRisk(p) {
+  if (p.runsOut && p.reset && p.runsOut < p.reset) return 'bad';
+  if (p.proj != null && p.proj >= 85) return 'warn';
+  return 'good';
+}
+function kpis() {
+  const now = Date.now(), today = startOfDay(now), plansB = B.planBurn;
+  const issues = B.issues || [];
+  const winsToday = (B.wins || []).filter(w => w.at >= today).length;
+  const blockers = (B.blockers || []).filter(b => !b.clearedAt), high = blockers.filter(b => b.sev === 'high').length;
+  const decisions = (B.decisions || []).filter(d => !d.clearedAt);
+  const late = issues.filter(i => overdue(i, now)).length, triage = issues.filter(i => i.status === 'triage').length;
+  const up = roster().filter(r => r.state !== 'gone').length;
+  const k = [
+    ['good', winsToday, 'wins today', 'sec-wins'],
+    [late ? 'bad' : 'good', late, 'issues overdue', 'sec-issues'],
+    [triage ? 'warn' : 'good', triage, 'to triage', 'sec-issues'],
+    [high ? 'bad' : blockers.length ? 'warn' : 'good', blockers.length, `blockers (${high} high)`, 'sec-blockers'],
+    [decisions.length ? 'warn' : 'good', decisions.length, 'decisions waiting', 'sec-decisions'],
+  ];
+  if (plansB) { const risk = plansB.filter(p => planRisk(p) === 'bad').length; k.push([risk ? 'bad' : 'good', `${risk}/${plansB.length}`, 'plans run out before reset', 'sec-burn']); }
+  k.push([up === roster().length ? 'good' : 'warn', `${up}/${roster().length}`, 'people up', 'sec-agents']);
+  const el = document.getElementById('kpis');
+  el.innerHTML = k.map(([c, v, l, id]) => `<div class="kpi ${c}" data-go="${id}"><b>${esc(v)}</b><small>${esc(l)}</small></div>`).join('');
+  el.querySelectorAll('.kpi').forEach(x => x.onclick = () => document.getElementById(x.dataset.go).scrollIntoView({behavior: 'smooth'}));
+}
+
+/* ---------- Tabs ---------- */
+document.getElementById('tabs').onclick = e => {
+  const t = e.target.dataset && e.target.dataset.tab; if (!t) return;
+  tab = t;
+  document.querySelectorAll('#tabs .btn').forEach(b => b.classList.toggle('on', b === e.target));
+  const tl = t === 'timeline';
+  document.getElementById('tl').hidden = !tl; document.getElementById('legend').hidden = !tl;
+  document.getElementById('zoombtns').hidden = !tl; document.getElementById('kanban').hidden = tl;
+  if (B) { if (tl) drawTimeline(); else kanban(); }
+};
+
+/* ---------- Timeline ---------- */
+function timelineBounds() {
+  const now = Date.now(), d0 = startOfDay(now);
+  let lo = d0 - D, hi = d0 + 14 * D;
+  (B.issues || []).filter(onTimeline).forEach(i => { lo = Math.min(lo, startOfDay(i.start)); hi = Math.max(hi, i.end); });
+  (B.milestones || []).forEach(m => { const t = dueMs(m.due); if (Number.isFinite(t)) hi = Math.max(hi, t); });
+  return {start: lo, end: Math.min(hi, lo + 60 * D)};
+}
+function presetView(z) {
+  const now = Date.now(), d0 = startOfDay(now);
+  if (z === 'now') return {s: now - 4 * H, e: now + 4 * H};
+  if (z === 'today') return {s: d0 + 6 * H, e: d0 + 24 * H};
+  if (z === '3d') return {s: d0 - 12 * H, e: d0 + 2.5 * D};
+  const b = timelineBounds(); return {s: b.start, e: b.end};
+}
+document.getElementById('zoombtns').onclick = e => {
+  const z = e.target.dataset && e.target.dataset.z; if (!z || !B) return;
+  preset = z; animateTo(presetView(z));
+  document.querySelectorAll('#zoombtns .btn').forEach(b => b.classList.toggle('on', b === e.target));
+};
+function animateTo(v) {
+  const a = {...view}, t0 = performance.now();
+  const step = t => { const k = Math.min(1, (t - t0) / 260), q = 1 - Math.pow(1 - k, 3);
+    view = {s: a.s + (v.s - a.s) * q, e: a.e + (v.e - a.e) * q}; drawTimeline(); if (k < 1) requestAnimationFrame(step); };
+  requestAnimationFrame(step);
+}
+function clampView(v) {
+  const b = timelineBounds(), lo = b.start - D, hi = b.end + D, minSpan = 1.5 * H, maxSpan = hi - lo;
+  const span = Math.max(minSpan, Math.min(maxSpan, v.e - v.s));
+  const s = Math.max(lo, Math.min(hi - span, v.s));
+  return {s, e: s + span};
+}
+/** One row per owner. Today's hour-scale issues replace that owner's overlapping day-scale ones. */
+function rowsForView() {
+  const today = startOfDay(Date.now()), tomorrow = today + D, by = new Map();
+  (B.issues || []).filter(onTimeline).forEach(i => { const k = ownerKey(i); if (!by.has(k)) by.set(k, []); by.get(k).push(i); });
+  const order = roster().map(r => r.id);
+  const keys = [...by.keys()].sort((a, b) => { const ia = order.indexOf(a), ib = order.indexOf(b);
+    return (ia < 0 ? 999 : ia) - (ib < 0 ? 999 : ib) || a.localeCompare(b); });
+  return keys.map(k => {
+    const all = by.get(k), p = person(k);
+    const hasHours = all.some(i => i.scale === 'hour');
+    const items = all.filter(i => !(hasHours && i.scale === 'day' && i.start < tomorrow && i.end > today && i.end - i.start < D))
+      .map(i => ({i, lane: 0}));
+    const lanes = [];
+    items.slice().sort((a, b) => a.i.start - b.i.start || (b.i.end - b.i.start) - (a.i.end - a.i.start)).forEach(b => {
+      let n = lanes.findIndex(end => end <= b.i.start); if (n < 0) { n = lanes.length; lanes.push(0); }
+      lanes[n] = Math.max(b.i.end, b.i.start + 30 * 60e3); b.lane = n;
+    });
+    return {key: k, who: p ? p.name : ownerName(all[0]), sub: p ? (p.position || '') : '', items, lanes: Math.max(1, lanes.length)};
+  });
+}
+function tickStep(span, maxTicks) {
+  const steps = [H, 2 * H, 3 * H, 6 * H, 12 * H, D, 2 * D, 7 * D];
+  return steps.find(s => span / s <= maxTicks) || 7 * D;
+}
+function drawTimeline() {
+  const host = document.getElementById('tl');
+  if (!B || tab !== 'timeline') return;
+  const rows = rowsForView();
+  const W = Math.max(320, host.clientWidth), narrow = W < 600;
+  const LW = narrow ? 64 : 112, AX = 34, LANE = narrow ? 22 : 22, PAD = 6;
+  if (!rows.length) { host.innerHTML = '<div class="empty">No issues with a start and end yet. File one with <code>reverie board issue add --start … --end …</code>.</div>'; return; }
+  let y = AX; rows.forEach(r => { r._y = y; r._h = r.lanes * LANE + PAD * 2; y += r._h; });
+  const Ht = y + 30, PW = W - LW - 8;
+  const X = t => LW + (t - view.s) / (view.e - view.s) * PW;
+  const span = view.e - view.s, step = tickStep(span, Math.max(3, Math.floor(PW / (narrow ? 62 : 78)))), now = Date.now();
+  const kc = k => css('--' + (k in KIND ? k : 'plan'));
+  let s = `<svg viewBox="0 0 ${W} ${Ht}" height="${Ht}" xmlns="http://www.w3.org/2000/svg"><defs><clipPath id="plot"><rect x="${LW}" y="0" width="${PW}" height="${Ht}"/></clipPath>
+    <pattern id="hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="3" height="6" fill="${css('--gate')}" opacity=".35"/></pattern>
+    <pattern id="late" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="3" height="6" fill="${css('--bad')}" opacity=".5"/></pattern></defs>`;
+  s += `<g clip-path="url(#plot)">`;
+  for (let d = startOfDay(view.s) - D; d < view.e + D; d += D) {
+    const dow = etDow(d + H);
+    if (dow === 0 || dow === 6) s += `<rect x="${X(d)}" y="${AX}" width="${X(d + D) - X(d)}" height="${Ht - AX}" fill="${css('--weekend')}"/>`;
+    s += `<rect x="${X(d)}" y="${AX}" width="${X(d + 7 * H) - X(d)}" height="${Ht - AX}" fill="${css('--night')}"/>`;
+    s += `<rect x="${X(d + 23 * H)}" y="${AX}" width="${X(d + D) - X(d + 23 * H)}" height="${Ht - AX}" fill="${css('--night')}"/>`;
+  }
+  const d0v = startOfDay(view.s);
+  for (let t = d0v + Math.ceil((view.s - d0v) / step) * step; t <= view.e; t += step) {
+    const x = X(t), mid = etHour(t) === 0;
+    s += `<line x1="${x}" x2="${x}" y1="${AX - 4}" y2="${Ht}" stroke="${css(mid ? '--line' : '--grid')}" stroke-width="${mid ? 1.2 : 1}"/>`;
+    const lbl = step >= D ? dayLbl(t) : (mid ? dayLbl(t) : hm(t));
+    // Leave out a label that would sit under the "now" chip (44 px wide, centred on the now line).
+    if (now > view.s && now < view.e && x + 4 < X(now) + 24 && x + 4 + lbl.length * 6.2 > X(now) - 24) continue;
+    s += `<text x="${x + 4}" y="${AX - 12}" font-size="11" fill="${css(mid ? '--fg' : '--muted')}" font-weight="${mid ? 600 : 400}">${esc(lbl)}</text>`;
+  }
+  const resets = new Map(), bottom = [];
+  (B.planBurn || []).forEach(p => { if (p.reset > view.s && p.reset < view.e) { const k = Math.round(p.reset / 60e3); resets.set(k, (resets.get(k) || []).concat(p.name)); } });
+  resets.forEach((names, k) => { const x = X(k * 60e3), text = '↻ ' + (names.length > 1 ? names.length + ' plans reset' : names[0] + ' reset');
+    s += `<line x1="${x}" x2="${x}" y1="${AX}" y2="${Ht}" stroke="${css('--accent')}" stroke-dasharray="3 4" opacity=".7"/>`;
+    bottom.push({x, text, color: css('--accent'), weight: 400}); });
+  (B.marks || []).forEach(m => { if (m.t > view.s && m.t < view.e) { const x = X(m.t);
+    s += `<line x1="${x}" x2="${x}" y1="${AX}" y2="${Ht}" stroke="${css('--gate')}" stroke-width="1.2"/>`;
+    bottom.push({x, text: m.label, color: css('--gate'), weight: 600}); } });
+  // Labels sit on up to three staggered lines; one that would still touch another (within 40 px) is left out.
+  // Its line stays, and a tap on the timeline shows nothing extra, so keep the text short.
+  const ends = [-1e9, -1e9, -1e9];
+  bottom.sort((a, b) => a.x - b.x).forEach(l => {
+    const w = l.text.length * 5.8, row = ends.findIndex(e => l.x + 3 - e >= 40);
+    if (row < 0) return;
+    ends[row] = l.x + 3 + w;
+    s += `<text x="${l.x + 3}" y="${Ht - 6 - row * 12}" font-size="10" fill="${l.color}" font-weight="${l.weight}">${esc(l.text)}</text>`;
+  });
+  rows.forEach((r, ri) => {
+    if (ri % 2) s += `<rect x="${LW}" y="${r._y}" width="${PW}" height="${r._h}" fill="${css('--panel2')}" opacity=".55"/>`;
+    r.items.forEach((b, bj) => {
+      const i = b.i, kind = kindOf(i);
+      const x1 = Math.max(LW - 2, X(i.start)), x2 = Math.min(W, X(i.end)), w = Math.max(3, x2 - x1);
+      if (x2 < LW || x1 > W) return;
+      const by = r._y + PAD + b.lane * LANE, bh = LANE - 5, c = kc(kind);
+      const fill = kind === 'gate' ? 'url(#hatch)' : c;
+      const op = kind === 'plan' || kind === 'triage' ? .5 : kind === 'cont' ? .55 : .92;
+      s += `<g class="bar" data-r="${ri}" data-b="${bj}"><rect x="${x1}" y="${by}" width="${w}" height="${bh}" rx="4" fill="${fill}" fill-opacity="${op}" stroke="${kind === 'gate' || kind === 'now' ? c : 'none'}" stroke-width="1.2"/>`;
+      if (overdue(i, now)) { const lx1 = Math.max(x2, LW), lx2 = Math.min(W, X(now)); if (lx2 > lx1) s += `<rect x="${lx1}" y="${by + 2}" width="${lx2 - lx1}" height="${bh - 4}" fill="url(#late)" stroke="${css('--bad')}" stroke-width="1" rx="2"/>`; }
+      if (w > 34) {
+        const tc = (kind === 'plan' || kind === 'cont' || kind === 'gate' || kind === 'triage') ? css('--fg') : '#fff';
+        const maxc = Math.floor((w - 10) / 6.1), lab = i.title.length > maxc ? i.title.slice(0, Math.max(1, maxc - 1)) + '…' : i.title;
+        s += `<text x="${x1 + 6}" y="${by + bh / 2 + 4}" font-size="11.5" fill="${tc}" pointer-events="none">${esc(lab)}</text>`;
+      }
+      // Planned vs actual: a diamond where it was really finished (green = on time or early, red = late).
+      if (i.status === 'done' && Number.isFinite(i.doneAt)) { const dx = X(i.doneAt);
+        if (dx > LW && dx < W) s += `<path d="M${dx} ${by - 1} l4.5 ${bh / 2 + 1} l-4.5 ${bh / 2 + 1} l-4.5 -${bh / 2 + 1} z" fill="${i.doneAt <= i.end ? css('--done') : css('--bad')}" stroke="${css('--panel')}" stroke-width="1.2"/>`; }
+      s += `</g>`;
+    });
+  });
+  // Milestones: a marker per due date.
+  (B.milestones || []).forEach((m, k) => { const t = dueMs(m.due); if (t > view.s && t < view.e) { const x = X(t);
+    s += `<line x1="${x}" x2="${x}" y1="${AX}" y2="${Ht}" stroke="${css('--ms')}" stroke-width="1.4" stroke-dasharray="5 3"/>`;
+    s += `<path d="M${x} ${AX + 1} l6 6 l-6 6 l-6 -6 z" fill="${css('--ms')}"/>`;
+    s += `<text x="${x + 9}" y="${AX + 12 + (k % 2) * 11}" font-size="10" fill="${css('--ms')}" font-weight="600">${esc(m.title)}</text>`; } });
+  if (now > view.s && now < view.e) { const x = X(now);
+    s += `<line x1="${x}" x2="${x}" y1="${AX - 6}" y2="${Ht}" stroke="${css('--now-line')}" stroke-width="2"/>`;
+    s += `<rect x="${x - 22}" y="${AX - 22}" width="44" height="15" rx="4" fill="${css('--now-line')}"/><text x="${x}" y="${AX - 11}" font-size="10.5" font-weight="700" fill="#fff" text-anchor="middle">${hm(now)}</text>`; }
+  s += `</g><rect x="0" y="0" width="${LW}" height="${Ht}" fill="${css('--panel')}"/>`;
+  rows.forEach(r => {
+    s += `<line x1="0" x2="${W}" y1="${r._y}" y2="${r._y}" stroke="${css('--grid')}"/>`;
+    const nm = r.who.length > (narrow ? 9 : 16) ? r.who.slice(0, narrow ? 8 : 15) + '…' : r.who;
+    s += `<text x="12" y="${r._y + 19}" font-size="13" font-weight="600" fill="${css('--fg')}">${esc(nm)}</text>`;
+    if (!narrow && r.sub) s += `<text x="12" y="${r._y + 34}" font-size="11" fill="${css('--muted')}">${esc(r.sub.slice(0, 18))}</text>`;
+  });
+  s += `<line x1="${LW}" x2="${LW}" y1="0" y2="${Ht}" stroke="${css('--line')}"/></svg>`;
+  host.innerHTML = s;
+  tlState = {rows, X, LW, PW, W};
+  host.querySelectorAll('.bar').forEach(g => {
+    const b = rows[g.dataset.r].items[g.dataset.b], i = b.i, kind = kindOf(i);
+    const show = e => { const p = e.touches ? e.touches[0] : e; tip(p.clientX, p.clientY, issueTip(i, kind)); };
+    g.addEventListener('mousemove', show); g.addEventListener('mouseleave', hideTip);
+    g.addEventListener('click', show);
+  });
+  const lg = document.getElementById('legend');
+  if (!lg.innerHTML) lg.innerHTML =
+    ['done', 'now', 'plan', 'gate', 'blocked', 'cont', 'triage'].map(k => `<span><i style="background:${k === 'gate' ? 'transparent;border:1.5px solid ' + css('--gate') : css('--' + k)}"></i>${KIND[k]}</span>`).join('') +
+    `<span><i style="background:${css('--ms')}"></i>Milestone</span><span><i style="background:${css('--now-line')}"></i>Now</span>` +
+    `<span class="hint">◆ finished (green on time, red late) · red hatch = overdue · scroll or pinch to zoom · drag to pan · tap a bar</span>`;
+}
+function issueTip(i, kind) {
+  const now = Date.now();
+  const when = i.scale === 'day' ? `${dayLbl(i.start)}${i.end - i.start > D ? ' → ' + dayLbl(i.end) : ''}` : `${dayLbl(i.start)}, ${hm(i.start)}–${hm(i.end)}`;
+  let actual = '';
+  if (i.status === 'done' && Number.isFinite(i.doneAt)) actual = `<br>Finished ${dayLbl(i.doneAt)} ${hm(i.doneAt)} (${i.doneAt <= i.end ? 'on time' : Math.round((i.doneAt - i.end) / H) + 'h late'})`;
+  else if (overdue(i, now)) actual = `<br><span style="color:${css('--bad')}">Overdue ${Math.max(1, Math.round((now - i.end) / H))}h</span>`;
+  const ms = i.milestoneId ? msTitle(i.milestoneId) : '', lk = linksHtml(i);
+  return `<b>${esc(i.title)}</b>${esc(ownerName(i))} <span class="k" style="background:${css('--' + (kind in KIND ? kind : 'plan'))}">${esc(STATUS[i.status] || i.status)}</span><br>${esc(when)} ${esc(zoneShort())}${actual}` +
+    (i.reason ? `<br>${esc(i.reason)}` : '') + (ms ? `<br>Milestone: ${esc(ms)}` : '') + (lk ? `<br>${lk}` : '');
+}
+const tipEl = document.getElementById('tip');
+function tip(x, y, h) { tipEl.innerHTML = h; tipEl.hidden = false;
+  const r = tipEl.getBoundingClientRect(); tipEl.style.left = Math.max(8, Math.min(innerWidth - r.width - 8, x + 12)) + 'px'; tipEl.style.top = Math.max(8, y - r.height - 12) + 'px'; }
+function hideTip() { tipEl.hidden = true; }
+
+(function interact() {
+  const host = document.getElementById('tl');
+  const tAt = cx => { const r = host.getBoundingClientRect(); return view.s + (cx - r.left - tlState.LW) / tlState.PW * (view.e - view.s); };
+  const unpreset = () => document.querySelectorAll('#zoombtns .btn').forEach(b => b.classList.remove('on'));
+  host.addEventListener('wheel', e => {
+    if (!tlState.PW) return;
+    e.preventDefault(); hideTip();
+    if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) { const dt = e.deltaX / tlState.PW * (view.e - view.s); view = clampView({s: view.s + dt, e: view.e + dt}); }
+    else { const t = tAt(e.clientX), k = Math.exp(e.deltaY * 0.0015);
+      view = clampView({s: t - (t - view.s) * k, e: t + (view.e - t) * k}); }
+    drawTimeline(); unpreset();
+  }, {passive: false});
+  // One finger: a vertical swipe scrolls the page (touch-action: pan-y); a horizontal drag pans the time axis.
+  let drag = null, pinch = null;
+  host.addEventListener('pointerdown', e => { drag = {x: e.clientX, v: {...view}, moved: false}; });
+  addEventListener('pointermove', e => { if (!drag || pinch || !tlState.PW) return; const dx = e.clientX - drag.x; if (Math.abs(dx) > 3) drag.moved = true;
+    if (!drag.moved) return; hideTip(); const dt = -dx / tlState.PW * (drag.v.e - drag.v.s); view = clampView({s: drag.v.s + dt, e: drag.v.e + dt}); drawTimeline(); unpreset(); });
+  addEventListener('pointerup', () => { drag = null; });
+  addEventListener('pointercancel', () => { drag = null; });
+  host.addEventListener('touchstart', e => { if (e.touches.length === 2) { const [a, b] = e.touches;
+    pinch = {d: Math.abs(a.clientX - b.clientX) || 1, c: tAt((a.clientX + b.clientX) / 2), v: {...view}}; } }, {passive: true});
+  host.addEventListener('touchmove', e => { if (pinch && e.touches.length === 2) { e.preventDefault(); const [a, b] = e.touches;
+    const k = pinch.d / (Math.abs(a.clientX - b.clientX) || 1), t = pinch.c;
+    view = clampView({s: t - (t - pinch.v.s) * k, e: t + (pinch.v.e - t) * k}); drawTimeline(); unpreset(); } }, {passive: false});
+  host.addEventListener('touchend', e => { if (e.touches.length < 2) pinch = null; });
+  addEventListener('resize', () => { if (B) drawTimeline(); });
+  document.addEventListener('click', e => { if (!e.target.closest('.bar')) hideTip(); });
+})();
+
+/* ---------- Kanban ---------- */
+function card(i) {
+  const now = Date.now(), lk = linksHtml(i), ms = i.milestoneId ? msTitle(i.milestoneId) : '';
+  const late = overdue(i, now);
+  return `<div class="card"><div>${esc(i.title)}</div>
+    <div class="meta2"><span class="chip">${esc(ownerName(i))}</span>${late ? `<span class="chip" style="color:var(--bad);border-color:var(--bad)">overdue ${Math.max(1, Math.round((now - i.end) / H))}h</span>` : ''}
+    ${Number.isFinite(i.end) ? `<span class="chip">due ${esc(dayLbl(i.end))}</span>` : ''}${ms ? `<span class="chip">◆ ${esc(ms)}</span>` : ''}
+    ${(i.tags || []).map(t => `<span class="chip">#${esc(t)}</span>`).join('')}</div>
+    ${i.reason ? `<div class="why">${esc(i.reason)}</div>` : ''}${lk ? `<div class="meta2">${lk}</div>` : ''}</div>`;
+}
+function kanban() {
+  const host = document.getElementById('kanban');
+  if (!B || tab !== 'kanban') return;
+  const issues = (B.issues || []).slice().sort((a, b) => (a.end || 9e15) - (b.end || 9e15) || b.updatedAt - a.updatedAt);
+  const col = s => issues.filter(i => i.status === s);
+  host.innerHTML = `<div class="ktabs">` + COLS.map((s, n) => `<button data-col="${n}"><b>${col(s).length}</b>${STATUS[s]}</button>`).join('') + `</div><div class="kan">` + COLS.map(s => {
+    const items = col(s).slice(0, s === 'done' ? 40 : 200);
+    return `<div class="kcol"><h3><span><i style="background:${css('--' + (s === 'todo' ? 'plan' : s === 'doing' ? 'now' : s))}"></i>${STATUS[s]}</span><span>${col(s).length}</span></h3>
+      <div class="kcards">${items.map(card).join('') || '<div class="hint" style="padding:6px">Nothing here</div>'}</div></div>`; }).join('') + `</div>` +
+    (col('wontdo').length ? `<details class="wontdo"><summary>Won't do (${col('wontdo').length})</summary><div class="kcards">${col('wontdo').map(card).join('')}</div></details>` : '');
+}
+
+(function kanbanStrip() {
+  const host = document.getElementById('kanban');
+  const kan = () => host.querySelector('.kan');
+  const mark = () => { const k = kan(); if (!k) return; const cols = [...k.children];
+    let best = 0; cols.forEach((c, n) => { if (Math.abs(c.offsetLeft - k.offsetLeft - k.scrollLeft) < Math.abs(cols[best].offsetLeft - k.offsetLeft - k.scrollLeft)) best = n; });
+    host.querySelectorAll('.ktabs button').forEach((b, n) => b.classList.toggle('on', n === best)); };
+  host.addEventListener('click', e => { const b = e.target.closest('.ktabs button'); if (!b) return;
+    const k = kan(), c = k && k.children[+b.dataset.col]; if (c) k.scrollTo({left: c.offsetLeft - k.offsetLeft - 14, behavior: 'smooth'}); });
+  host.addEventListener('scroll', mark, true);
+  new MutationObserver(mark).observe(host, {childList: true});
+})();
+
+/* ---------- Milestones ---------- */
+function paceBadge(p) { const v = VERDICT[p && p.verdict] || VERDICT['on-track']; return `<span class="badge ${v[0]}">${v[1]}</span>`; }
+function milestones() {
+  const el = document.getElementById('milestones'), list = (B.milestones || []).slice().sort((a, b) => a.due.localeCompare(b.due)), now = Date.now();
+  if (!list.length) { el.innerHTML = '<div class="empty">No milestones yet. Add one with <code>reverie board milestone add --title … --due YYYY-MM-DD</code>.</div>'; return; }
+  el.innerHTML = list.map(m => {
+    const p = (B.pace && B.pace.milestones && B.pace.milestones[m.id]) || null;
+    const total = p ? p.total : 0, done = p ? p.done : 0, pct = total ? Math.round(done / total * 100) : 0;
+    const left = Math.ceil((dueMs(m.due) - now) / D);
+    const due = left < 0 ? `${-left}d past due` : left === 0 ? 'due today' : `${left}d left`;
+    return `<div class="ms"><h3>${esc(m.title)}${paceBadge(p)}</h3>
+      <div class="who">Due ${esc(m.due)} · ${esc(due)}</div>
+      <div class="bar-track"><div class="bar-fill" style="width:${pct}%"></div></div>
+      <div class="stats"><div><b>${done}/${total}</b>issues done</div><div><b>${p ? p.overdue : 0}</b>overdue</div><div><b>${p ? p.early : 0}</b>finished early</div></div></div>`;
+  }).join('');
+}
+
+/* ---------- Burn ---------- */
+function plans() {
+  const sec = document.getElementById('sec-burn'), el = document.getElementById('plans');
+  if (!B.planBurn) { el.innerHTML = '<div class="empty">Plan burn is shown to the console owner only.</div>'; return; }
+  if (!B.planBurn.length) { el.innerHTML = '<div class="empty">No plan data yet.</div>'; return; }
+  el.innerHTML = B.planBurn.map((p, i) => {
+    const risk = planRisk(p);
+    const badge = risk === 'bad' ? `runs out ${dayLbl(p.runsOut).split(',')[0]} ${hm(p.runsOut)}` : risk === 'warn' ? 'tight' : p.used == null ? 'no data' : 'on track';
+    return `<div class="plan"><h3>${esc(p.name)}<span class="badge ${p.used == null ? 'mute' : risk}">${esc(badge)}</span></h3>
+      <div class="who">${esc(p.who)}${p.reset ? ' · resets ' + dayLbl(p.reset) + ' ' + hm(p.reset) + ' ' + esc(zoneShort()) : ''}</div>
+      <div class="stats"><div><b>${esc(num(p.used))}${p.used == null ? '' : '%'}</b>used</div><div><b>${esc(num(p.rate, 1))}${p.rate == null ? '' : '%/h'}</b>burn now</div><div><b style="color:${css('--' + risk)}">${p.proj == null ? '–' : Math.round(p.proj) + '%'}</b>at reset</div></div>
+      ${p.weekStart && p.reset ? `<svg id="burn${i}" viewBox="0 0 320 120"></svg>` : ''}</div>`;
+  }).join('');
+  B.planBurn.forEach((p, i) => { const svg = document.getElementById('burn' + i); if (svg) burnChart(svg, p); });
+}
+function burnChart(svg, p) {
+  const W = 320, Hh = 120, L = 28, R = 8, T = 8, Bm = 18, pts0 = p.points || [];
+  const s = p.weekStart, e = p.reset, ymax = Math.max(100, Math.ceil((p.proj || 0) / 25) * 25);
+  const X = t => L + (t - s) / (e - s) * (W - L - R), Y = v => T + (1 - v / ymax) * (Hh - T - Bm);
+  let g = '';
+  [0, 50, 100].concat(ymax > 100 ? [ymax] : []).forEach(v => {
+    g += `<line x1="${L}" x2="${W - R}" y1="${Y(v)}" y2="${Y(v)}" stroke="${css(v === 100 ? '--bad' : '--grid')}" ${v === 100 ? 'stroke-dasharray="4 3"' : ''}/>`;
+    g += `<text x="${L - 4}" y="${Y(v) + 3}" font-size="9" text-anchor="end" fill="${css('--faint')}">${v}%</text>`;
+  });
+  for (let d = startOfDay(s) + D; d < e; d += D) g += `<text x="${X(d + 12 * H)}" y="${Hh - 5}" font-size="9" text-anchor="middle" fill="${css('--faint')}">${esc(fmt(d + H, {weekday: 'narrow'}))}</text>`;
+  const now = Date.now();
+  if (now > s && now < e) g += `<line x1="${X(now)}" x2="${X(now)}" y1="${T}" y2="${Hh - Bm}" stroke="${css('--now-line')}" opacity=".6"/>`;
+  const pts = pts0.map(q => `${X(q.t).toFixed(1)},${Y(q.used).toFixed(1)}`).join(' ');
+  const last = pts0[pts0.length - 1] || {t: p.at, used: p.used};
+  const projEnd = Math.min(ymax, last.used + (p.rate || 0) * (e - last.t) / H);
+  const area = pts0.length ? `${X(pts0[0].t)},${Y(0)} ${pts} ${X(last.t)},${Y(0)}` : '';
+  const c = css('--' + planRisk(p));
+  g += `<polygon points="${area}" fill="${c}" opacity=".12"/><polyline points="${pts}" fill="none" stroke="${c}" stroke-width="2"/>`;
+  g += `<line x1="${X(last.t)}" y1="${Y(last.used)}" x2="${X(e)}" y2="${Y(projEnd)}" stroke="${c}" stroke-width="1.6" stroke-dasharray="2 4"/>`;
+  if (p.runsOut && p.runsOut < e) g += `<circle cx="${X(p.runsOut)}" cy="${Y(100)}" r="4" fill="${css('--bad')}"/>`;
+  g += `<circle cx="${X(last.t)}" cy="${Y(last.used)}" r="3.2" fill="${c}"/>`;
+  svg.innerHTML = g;
+}
+
+/* ---------- People ---------- */
+function ring(done, planned, color) {
+  const r = 26, C = 2 * Math.PI * r, f = planned ? done / planned : 0;
+  return `<svg viewBox="0 0 64 64" width="64" height="64"><circle cx="32" cy="32" r="${r}" fill="none" stroke="${css('--grid')}" stroke-width="7"/>
+    <circle cx="32" cy="32" r="${r}" fill="none" stroke="${color}" stroke-width="7" stroke-linecap="round" stroke-dasharray="${C * f} ${C}" transform="rotate(-90 32 32)"/>
+    <text x="32" y="36" text-anchor="middle" font-size="13" font-weight="700" fill="${css('--fg')}" font-family="${css('--mono')}">${planned ? done + '/' + planned : '–'}</text></svg>`;
+}
+function agents() {
+  const st = {running: ['--good', 'working', 'good'], idle: ['--plan', 'idle', 'warn'], gone: ['--bad', 'down', 'bad']};
+  const el = document.getElementById('agents');
+  if (!roster().length) { el.innerHTML = '<div class="empty">No people yet.</div>'; return; }
+  const today = startOfDay(Date.now()), issues = B.issues || [];
+  el.innerHTML = roster().map(r => {
+    const [cv, label, bc] = st[r.state] || st.idle, c = css(cv);
+    const note = (B.agents && B.agents[r.id]) || null, p = B.pace && B.pace.owners && B.pace.owners[r.id];
+    const mine = issues.filter(i => i.owner === r.id && i.status !== 'wontdo');
+    const td = mine.filter(i => Number.isFinite(i.end) && i.end >= today && i.end < today + D);
+    const two = mine.filter(i => Number.isFinite(i.end) && i.end >= today - D && i.end < today + 14 * D);
+    const od = p ? p.overdue : 0;
+    return `<div class="agent">${ring(td.filter(i => i.status === 'done').length, td.length, c)}<div style="min-width:0">
+      <h3><span class="dot" style="background:${c}"></span>${esc(r.name)} <span class="badge ${bc}">${label}</span>${p ? paceBadge(p) : ''}</h3>
+      <div class="role">${esc(r.position || '')}${r.coordinator ? ' · coordinator' : ''}</div>
+      <div class="focus">${esc((note && note.focus) || '')}</div>
+      <div class="nums"><span><b>${od}</b> overdue${od ? ' (' + Math.round(p.overdueHours) + 'h)' : ''}</span><span><b>${p ? p.early : 0}</b> early</span><span><b>${two.filter(i => i.status === 'done').length}/${two.length}</b> 2-wk items</span></div>
+      ${note && note.receipts && note.receipts.length ? `<ul>${note.receipts.map(x => `<li>${esc(x)}</li>`).join('')}</ul>` : ''}</div></div>`;
+  }).join('');
+}
+
+/* ---------- Lists ---------- */
+function when(t) { return startOfDay(t) === startOfDay(Date.now()) ? hm(t) : dayLbl(t).split(',')[0]; }
+function lists() {
+  const sevc = {high: '--bad', med: '--warn', low: '--plan'};
+  const fill = (id, rows, none) => { document.getElementById(id).innerHTML = rows.length ? rows.join('') : `<li><span class="hint">${none}</span></li>`; };
+  fill('wins', (B.wins || []).slice().sort((a, b) => b.at - a.at).slice(0, 30).map(w =>
+    `<li><span class="t">${when(w.at)}</span><div>${esc(w.text)}<div class="who">${esc(nameOf(w.who))}</div></div></li>`), 'No wins yet');
+  fill('blockers', (B.blockers || []).filter(b => !b.clearedAt).map(b =>
+    `<li><span class="sev" style="background:${css(sevc[b.sev] || '--plan')}"></span><div>${esc(b.text)}<div class="who">${esc(nameOf(b.who))} · owner ${esc(nameOf(b.owner))} · since ${when(b.since)}</div></div></li>`), 'No open blockers');
+  fill('decisions', (B.decisions || []).filter(d => !d.clearedAt).map(d =>
+    `<li><span class="sev" style="background:${css('--warn')}"></span><div>${esc(d.text)}<div class="who">${esc(d.where)}</div></div></li>`), 'Nothing waiting');
+  const allPolls = B.polls || [];
+  const sorted = allPolls.slice().sort((x, y) => (y.createdAt || 0) - (x.createdAt || 0)); // newest first
+  const phoneView = matchMedia('(max-width:600px)').matches;
+  const pollLimit = pollsOpen ? allPolls.length : (phoneView ? 0 : 10);
+  const shown = sorted.slice(0, pollLimit);
+  fill('polls', shown.map(p =>
+    `<li><span class="sev" style="background:${css('--accent')}"></span><div>${esc(p.question)}<div class="who">${esc(p.room)} · ${p.options.map(o => esc(o.label) + ' ' + o.votes).join(' · ')}${p.closesAt ? ' · closes ' + when(p.closesAt) : ''}</div></div></li>`), allPolls.length ? allPolls.length + ' open, hidden' : 'No open polls');
+  const pt = document.getElementById('pollsToggle');
+  pt.hidden = !allPolls.length || (!phoneView && allPolls.length <= 10);
+  pt.textContent = shown.length >= allPolls.length ? (phoneView ? 'Hide polls' : 'Show newest 10') : 'Show all ' + allPolls.length;
+  pt.onclick = () => { pollsOpen = shown.length < allPolls.length; render(); };
+  fill('pins', (B.pins || []).slice(0, 12).map(p =>
+    `<li><span class="t">${when(p.at)}</span><div>${esc(String(p.text).slice(0, 240))}<div class="who">${esc(p.room)} · ${esc(p.by)}</div></div></li>`), 'Nothing pinned');
+}
+</script>
+</body>
+</html>

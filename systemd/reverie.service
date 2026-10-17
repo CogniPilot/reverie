@@ -1,0 +1,21 @@
+[Unit]
+Description=Reverie fleet console
+Wants=network-online.target
+After=network-online.target agent-fleet-engine.service
+Requires=agent-fleet-engine.service
+StartLimitIntervalSec=120
+StartLimitBurst=10
+
+[Service]
+Type=exec
+Environment=FLEET_REPO=%h/git/reverie
+ExecStart=%h/.local/libexec/agent-fleet/fleet-container engine start --attach --sig-proxy=false reverie-live
+ExecStop=%h/.local/libexec/agent-fleet/fleet-container engine stop --time=30 reverie-live
+Restart=always
+RestartSec=5
+TimeoutStopSec=45
+KillMode=process
+UMask=0077
+
+[Install]
+WantedBy=default.target

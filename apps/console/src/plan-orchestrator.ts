@@ -1,0 +1,695 @@
+/**
+ * @fileoverview Simplified plan generation with 2 agents instead of 9.
+ *
+ * Previous architecture (removed):
+ * - 4 parallel analysis agents (requirements, architecture, testing, risks)
+ * - Synthesis phase
+ * - Verification agent
+ * - Execution optimizer agent (output was ignored anyway)
+ * - Final review agent
+ *
+ * New architecture:
+ * 1. Research Agent - gather context (optional, can fail)
+ * 2. Planner Agent - single agent generates complete TDD plan
+ *
+ * @module plan-orchestrator
+ */
+
+import { Session } from './session.js';
+import type { TerminalMultiplexer } from './mux-interface.js';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { RESEARCH_AGENT_PROMPT, PLANNER_PROMPT } from './prompts/index.js';
+import { applyWorkspaceHooks } from './hooks-config.js';
+import { getErrorMessage, type PlanItem, type ClaudeMode } from './types.js';
+
+// Re-export for backward compatibility
+export type { PlanItem };
+
+export interface ResearchResult {
+  success: boolean;
+  findings: {
+    externalResources: Array<{
+      type: 'github' | 'documentation' | 'tutorial' | 'article' | 'stackoverflow';
+      url?: string;
+      title: string;
+      relevance: string;
+      keyInsights: string[];
+    }>;
+    codebasePatterns: Array<{
+      pattern: string;
+      location: string;
+      relevance: string;
+    }>;
+    technicalRecommendations: string[];
+    potentialChallenges: string[];
+    recommendedTools: Array<{
+      name: string;
+      purpose: string;
+      reason: string;
+    }>;
+  };
+  enrichedTaskDescription: string;
+  error?: string;
+  durationMs: number;
+}
+
+export interface DetailedPlanResult {
+  success: boolean;
+  items?: PlanItem[];
+  costUsd?: number;
+  metadata?: {
+    researchResult?: ResearchResult;
+    plannerGaps: string[];
+    plannerWarnings: string[];
+    totalDurationMs: number;
+  };
+  error?: string;
+}
+
+export type ProgressCallback = (phase: string, detail: string) => void;
+
+interface PlanSubagentEvent {
+  type: 'started' | 'progress' | 'completed' | 'failed';
+  agentId: string;
+  agentType: 'research' | 'planner';
+  model: string;
+  status: string;
+  detail?: string;
+  itemCount?: number;
+  durationMs?: number;
+  error?: string;
+}
+
+type SubagentCallback = (event: PlanSubagentEvent) => void;
+
+// ============================================================================
+// JSON Repair Helper
+// ============================================================================
+
+function tryParseJSON(jsonString: string): { success: boolean; data?: unknown; error?: string } {
+  try {
+    return { success: true, data: JSON.parse(jsonString) };
+  } catch (firstError) {
+    let repaired = jsonString;
+    repaired = repaired.replace(/,(\s*[\]}])/g, '$1');
+    repaired = repaired.replace(/"([^"\\]|\\.)*"/g, (match) => {
+      return match.replace(/\n/g, '\\n').replace(/\r/g, '\\r').replace(/\t/g, '\\t');
+    });
+
+    const openBraces = (repaired.match(/\{/g) || []).length;
+    const closeBraces = (repaired.match(/\}/g) || []).length;
+    for (let i = 0; i < openBraces - closeBraces; i++) {
+      repaired = repaired.replace(/,\s*$/, '') + '}';
+    }
+
+    try {
+      return { success: true, data: JSON.parse(repaired) };
+    } catch {
+      const errMsg = firstError instanceof Error ? firstError.message : String(firstError);
+      return { success: false, error: errMsg };
+    }
+  }
+}
+
+// ============================================================================
+// Constants
+// ============================================================================
+
+const DEFAULT_MODEL = 'opus';
+
+// ============================================================================
+// Main Orchestrator Class
+// ============================================================================
+
+export class PlanOrchestrator {
+  private mux: TerminalMultiplexer;
+  private workingDir: string;
+  private outputDir?: string;
+  private runningSessions: Set<Session> = new Set();
+  private cancelled = false;
+  private taskDescription = '';
+  private researchModel: string;
+  private plannerModel: string;
+  // Multi-user permission threading: the resolved claudeMode/owner/allowedTools for the
+  // internal research/planner one-shots. Left undefined = today's single-user behavior
+  // (the caller threads the resolved global mode, byte-identical when !isMultiUserMode()).
+  private claudeMode?: ClaudeMode;
+  private owner?: string;
+  private allowedTools?: string;
+
+  constructor(
+    mux: TerminalMultiplexer,
+    workingDir: string = process.cwd(),
+    outputDir?: string,
+    modelConfig?: { defaultModel?: string; agentTypeOverrides?: Record<string, string> },
+    security?: { claudeMode?: ClaudeMode; owner?: string; allowedTools?: string }
+  ) {
+    this.mux = mux;
+    this.workingDir = workingDir;
+    this.outputDir = outputDir;
+    this.researchModel = modelConfig?.agentTypeOverrides?.explore || modelConfig?.defaultModel || DEFAULT_MODEL;
+    this.plannerModel = modelConfig?.agentTypeOverrides?.review || modelConfig?.defaultModel || DEFAULT_MODEL;
+    this.claudeMode = security?.claudeMode;
+    this.owner = security?.owner;
+    this.allowedTools = security?.allowedTools;
+  }
+
+  private saveAgentOutput(agentType: string, prompt: string, result: unknown, durationMs: number): void {
+    if (!this.outputDir) return;
+
+    try {
+      if (!existsSync(this.outputDir)) {
+        mkdirSync(this.outputDir, { recursive: true });
+      }
+
+      const agentDir = join(this.outputDir, agentType);
+      if (!existsSync(agentDir)) {
+        mkdirSync(agentDir, { recursive: true });
+      }
+
+      const promptPath = join(agentDir, 'prompt.md');
+      writeFileSync(
+        promptPath,
+        `# ${agentType} Agent Prompt\n\nGenerated: ${new Date().toISOString()}\nDuration: ${(durationMs / 1000).toFixed(1)}s\n\n## Task\n${this.taskDescription}\n\n## Prompt\n${prompt}\n`,
+        'utf-8'
+      );
+
+      const resultPath = join(agentDir, 'result.json');
+      writeFileSync(resultPath, JSON.stringify(result, null, 2), 'utf-8');
+    } catch (err) {
+      console.warn(`[PlanOrchestrator] Failed to save ${agentType} output:`, err);
+    }
+  }
+
+  private saveFinalResult(result: DetailedPlanResult): void {
+    if (!this.outputDir) return;
+
+    try {
+      if (!existsSync(this.outputDir)) {
+        mkdirSync(this.outputDir, { recursive: true });
+      }
+
+      // Save final result JSON
+      const resultPath = join(this.outputDir, 'final-result.json');
+      writeFileSync(resultPath, JSON.stringify(result, null, 2), 'utf-8');
+
+      // Save human-readable summary
+      if (result.success && result.items) {
+        const summaryPath = join(this.outputDir, 'summary.md');
+        const summary = this.generateSummary(result);
+        writeFileSync(summaryPath, summary, 'utf-8');
+      }
+    } catch (err) {
+      console.warn('[PlanOrchestrator] Failed to save final result:', err);
+    }
+  }
+
+  private generateSummary(result: DetailedPlanResult): string {
+    const items = result.items || [];
+    const p0 = items.filter((i) => i.priority === 'P0');
+    const p1 = items.filter((i) => i.priority === 'P1');
+    const p2 = items.filter((i) => i.priority === 'P2');
+
+    let md = `# Plan Summary\n\n`;
+    md += `Generated: ${new Date().toISOString()}\n`;
+    md += `Total Tasks: ${items.length} (P0: ${p0.length}, P1: ${p1.length}, P2: ${p2.length})\n\n`;
+
+    md += `## Task\n${this.taskDescription}\n\n`;
+
+    const addSection = (title: string, tasks: PlanItem[]) => {
+      if (tasks.length === 0) return;
+      md += `## ${title}\n\n`;
+      for (const t of tasks) {
+        const phase = t.tddPhase ? ` [${t.tddPhase}]` : '';
+        md += `- **${t.id}**${phase}: ${t.content}\n`;
+        if (t.verificationCriteria) md += `  - Verify: ${t.verificationCriteria}\n`;
+      }
+      md += '\n';
+    };
+
+    addSection('P0 - Critical', p0);
+    addSection('P1 - Required', p1);
+    addSection('P2 - Enhancement', p2);
+
+    if (result.metadata?.plannerWarnings?.length) {
+      md += `## Warnings\n\n`;
+      for (const w of result.metadata.plannerWarnings) {
+        md += `- ${w}\n`;
+      }
+    }
+
+    return md;
+  }
+
+  private _extractJsonFromResponse(response: string): string | null {
+    let jsonMatch = response.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/);
+    if (jsonMatch) {
+      jsonMatch = [jsonMatch[1]]; // Use captured group (inside code block)
+    } else {
+      jsonMatch = response.match(/\{[\s\S]*\}/);
+    }
+    return jsonMatch ? jsonMatch[0] : null;
+  }
+
+  private _emitAgentFailure(
+    onSubagent: SubagentCallback | undefined,
+    agentId: string,
+    agentType: 'research' | 'planner',
+    model: string,
+    error: string,
+    durationMs: number
+  ): void {
+    onSubagent?.({
+      type: 'failed',
+      agentId,
+      agentType,
+      model,
+      status: 'failed',
+      error,
+      durationMs,
+    });
+  }
+
+  private _formatResearchSection(
+    parts: string[],
+    title: string,
+    items: unknown[],
+    formatter: (item: unknown) => string[]
+  ): void {
+    if (items.length === 0) return;
+    parts.push(title);
+    for (const item of items.slice(0, 5)) {
+      parts.push(...formatter(item));
+    }
+    parts.push('');
+  }
+
+  async cancel(): Promise<void> {
+    this.cancelled = true;
+    // Stop all running sessions and await cleanup to prevent PTY process leaks
+    const stopPromises: Promise<void>[] = [];
+    for (const session of this.runningSessions) {
+      stopPromises.push(
+        session.stop().catch((err) => {
+          console.error('[PlanOrchestrator] Failed to stop session during cancel:', err);
+        })
+      );
+    }
+    await Promise.all(stopPromises);
+    this.runningSessions.clear();
+  }
+
+  /**
+   * Generate a detailed TDD plan.
+   *
+   * Flow:
+   * 1. Research Agent (optional - failures don't block)
+   * 2. Planner Agent (generates complete TDD plan)
+   */
+  async generateDetailedPlan(
+    taskDescription: string,
+    onProgress?: ProgressCallback,
+    onSubagent?: SubagentCallback
+  ): Promise<DetailedPlanResult> {
+    const startTime = Date.now();
+    let totalCost = 0;
+
+    this.taskDescription = taskDescription;
+
+    try {
+      // Phase 1: Research (optional)
+      onProgress?.('research', 'Running research agent...');
+      const researchResult = await this.runResearchAgent(taskDescription, onProgress, onSubagent);
+      totalCost += researchResult.success ? 0.01 : 0;
+
+      const effectiveTaskDescription = researchResult.success
+        ? researchResult.enrichedTaskDescription
+        : taskDescription;
+
+      const researchContext = this.formatResearchContext(researchResult);
+
+      // Phase 2: Planner (main agent)
+      onProgress?.('planning', 'Running planner agent...');
+      const plannerResult = await this.runPlannerAgent(
+        effectiveTaskDescription,
+        researchContext,
+        onProgress,
+        onSubagent
+      );
+
+      if (!plannerResult.success) {
+        return {
+          success: false,
+          error: plannerResult.error || 'Planner failed',
+        };
+      }
+
+      totalCost += 0.01;
+
+      const totalDurationMs = Date.now() - startTime;
+
+      const result: DetailedPlanResult = {
+        success: true,
+        items: plannerResult.items,
+        costUsd: totalCost,
+        metadata: {
+          researchResult: researchResult.success ? researchResult : undefined,
+          plannerGaps: plannerResult.gaps || [],
+          plannerWarnings: plannerResult.warnings || [],
+          totalDurationMs,
+        },
+      };
+
+      this.saveFinalResult(result);
+      return result;
+    } catch (err) {
+      return {
+        success: false,
+        error: getErrorMessage(err),
+      };
+    }
+  }
+
+  private formatResearchContext(research: ResearchResult): string {
+    if (!research.success) return '';
+
+    const parts: string[] = ['## Research Context\n'];
+
+    this._formatResearchSection(parts, '### External Resources', research.findings.externalResources, (item) => {
+      const r = item as ResearchResult['findings']['externalResources'][number];
+      const lines = [`- ${r.title}${r.url ? ` (${r.url})` : ''}`];
+      if (r.keyInsights.length > 0) {
+        lines.push(`  Key insights: ${r.keyInsights.slice(0, 3).join(', ')}`);
+      }
+      return lines;
+    });
+
+    this._formatResearchSection(parts, '### Existing Codebase Patterns', research.findings.codebasePatterns, (item) => {
+      const p = item as ResearchResult['findings']['codebasePatterns'][number];
+      return [`- ${p.pattern} at ${p.location}`];
+    });
+
+    this._formatResearchSection(parts, '### Recommendations', research.findings.technicalRecommendations, (item) => [
+      `- ${item as string}`,
+    ]);
+
+    return parts.join('\n');
+  }
+
+  private async runResearchAgent(
+    taskDescription: string,
+    _onProgress?: ProgressCallback,
+    onSubagent?: SubagentCallback
+  ): Promise<ResearchResult> {
+    const agentId = `research-${Date.now()}`;
+    const startTime = Date.now();
+
+    if (this.cancelled) {
+      return {
+        success: false,
+        findings: {
+          externalResources: [],
+          codebasePatterns: [],
+          technicalRecommendations: [],
+          potentialChallenges: [],
+          recommendedTools: [],
+        },
+        enrichedTaskDescription: taskDescription,
+        error: 'Cancelled',
+        durationMs: 0,
+      };
+    }
+
+    onSubagent?.({
+      type: 'started',
+      agentId,
+      agentType: 'research',
+      model: this.researchModel,
+      status: 'running',
+      detail: 'Researching...',
+    });
+
+    // Workspace hooks for the case this plan targets (see applyWorkspaceHooks in
+    // hooks-config): claude-mode, local workingDir, and the helper itself skips a
+    // vanished dir + swallows failures — the plan run must never fail on hooks.
+    await applyWorkspaceHooks(this.workingDir);
+
+    const session = new Session({
+      workingDir: this.workingDir,
+      mux: this.mux,
+      useMux: false,
+      mode: 'claude',
+      // Section 6.3: run this one-shot under the caller-resolved permission mode/owner so a
+      // non-granted multi-user user cannot regain --dangerously-skip-permissions. Undefined
+      // (single-user, not threaded) is byte-identical to today (Session keeps its default).
+      claudeMode: this.claudeMode,
+      allowedTools: this.allowedTools,
+      owner: this.owner,
+    });
+
+    this.runningSessions.add(session);
+
+    const prompt = RESEARCH_AGENT_PROMPT.replace('{TASK}', taskDescription).replace('{WORKING_DIR}', this.workingDir);
+
+    // Start progress interval before try block to ensure cleanup in finally
+    const progressInterval = setInterval(() => {
+      const elapsed = Math.floor((Date.now() - startTime) / 1000);
+      onSubagent?.({
+        type: 'progress',
+        agentId,
+        agentType: 'research',
+        model: this.researchModel,
+        status: 'running',
+        detail: `${elapsed}s elapsed`,
+      });
+    }, 30000);
+
+    try {
+      const { result: response } = await session.runPrompt(prompt, { model: this.researchModel });
+
+      const durationMs = Date.now() - startTime;
+
+      console.log(
+        `[PlanOrchestrator] Research response length: ${response.length}, first 500 chars:`,
+        response.substring(0, 500)
+      );
+
+      // Extract JSON from response — try multiple strategies
+      const jsonStr = this._extractJsonFromResponse(response);
+
+      if (!jsonStr) {
+        console.error(
+          `[PlanOrchestrator] No JSON found in research response. Full response:`,
+          response.substring(0, 2000)
+        );
+        this._emitAgentFailure(onSubagent, agentId, 'research', this.researchModel, 'No JSON found', durationMs);
+        return {
+          success: false,
+          findings: {
+            externalResources: [],
+            codebasePatterns: [],
+            technicalRecommendations: [],
+            potentialChallenges: [],
+            recommendedTools: [],
+          },
+          enrichedTaskDescription: taskDescription,
+          error: 'No JSON in response',
+          durationMs,
+        };
+      }
+
+      const parsed = tryParseJSON(jsonStr);
+      if (!parsed.success) {
+        this._emitAgentFailure(onSubagent, agentId, 'research', this.researchModel, parsed.error!, durationMs);
+        return {
+          success: false,
+          findings: {
+            externalResources: [],
+            codebasePatterns: [],
+            technicalRecommendations: [],
+            potentialChallenges: [],
+            recommendedTools: [],
+          },
+          enrichedTaskDescription: taskDescription,
+          error: parsed.error,
+          durationMs,
+        };
+      }
+
+      const data = parsed.data as Record<string, unknown>;
+      const result: ResearchResult = {
+        success: true,
+        findings: {
+          externalResources: Array.isArray(data.externalResources) ? data.externalResources : [],
+          codebasePatterns: Array.isArray(data.codebasePatterns) ? data.codebasePatterns : [],
+          technicalRecommendations: Array.isArray(data.technicalRecommendations) ? data.technicalRecommendations : [],
+          potentialChallenges: Array.isArray(data.potentialChallenges) ? data.potentialChallenges : [],
+          recommendedTools: Array.isArray(data.recommendedTools) ? data.recommendedTools : [],
+        },
+        enrichedTaskDescription:
+          typeof data.enrichedTaskDescription === 'string' ? data.enrichedTaskDescription : taskDescription,
+        durationMs,
+      };
+
+      this.saveAgentOutput('research', prompt, result, durationMs);
+      onSubagent?.({
+        type: 'completed',
+        agentId,
+        agentType: 'research',
+        model: this.researchModel,
+        status: 'completed',
+        durationMs,
+      });
+
+      return result;
+    } catch (err) {
+      const durationMs = Date.now() - startTime;
+      const error = getErrorMessage(err);
+      this._emitAgentFailure(onSubagent, agentId, 'research', this.researchModel, error, durationMs);
+      return {
+        success: false,
+        findings: {
+          externalResources: [],
+          codebasePatterns: [],
+          technicalRecommendations: [],
+          potentialChallenges: [],
+          recommendedTools: [],
+        },
+        enrichedTaskDescription: taskDescription,
+        error,
+        durationMs,
+      };
+    } finally {
+      // Always clean up session and progress interval — centralizing here
+      // prevents the race where cancel() and catch both try to manage the set
+      await session.stop().catch(() => {}); // Ignore - session cleanup is best-effort in finally block
+      this.runningSessions.delete(session);
+      clearInterval(progressInterval);
+    }
+  }
+
+  private async runPlannerAgent(
+    taskDescription: string,
+    researchContext: string,
+    onProgress?: ProgressCallback,
+    onSubagent?: SubagentCallback
+  ): Promise<{
+    success: boolean;
+    items?: PlanItem[];
+    gaps?: string[];
+    warnings?: string[];
+    error?: string;
+  }> {
+    const agentId = `planner-${Date.now()}`;
+    const startTime = Date.now();
+
+    if (this.cancelled) {
+      return { success: false, error: 'Cancelled' };
+    }
+
+    onSubagent?.({
+      type: 'started',
+      agentId,
+      agentType: 'planner',
+      model: this.plannerModel,
+      status: 'running',
+      detail: 'Generating plan...',
+    });
+
+    // Workspace hooks: same rationale as the research one-shot above (idempotent —
+    // the helper short-circuits when the hooks block is already current).
+    await applyWorkspaceHooks(this.workingDir);
+
+    const session = new Session({
+      workingDir: this.workingDir,
+      mux: this.mux,
+      useMux: false,
+      mode: 'claude',
+      // Section 6.3: same permission-mode/owner threading as the research one-shot above.
+      claudeMode: this.claudeMode,
+      allowedTools: this.allowedTools,
+      owner: this.owner,
+    });
+
+    this.runningSessions.add(session);
+
+    const prompt = PLANNER_PROMPT.replace('{TASK}', taskDescription).replace(
+      '{RESEARCH_CONTEXT}',
+      researchContext || ''
+    );
+
+    // Start progress interval before try block to ensure cleanup in finally
+    const progressInterval = setInterval(() => {
+      const elapsed = Math.floor((Date.now() - startTime) / 1000);
+      onSubagent?.({
+        type: 'progress',
+        agentId,
+        agentType: 'planner',
+        model: this.plannerModel,
+        status: 'running',
+        detail: `${elapsed}s elapsed`,
+      });
+    }, 30000);
+
+    try {
+      const { result: response } = await session.runPrompt(prompt, { model: this.plannerModel });
+
+      const durationMs = Date.now() - startTime;
+
+      console.log(
+        `[PlanOrchestrator] Planner response length: ${response.length}, first 500 chars:`,
+        response.substring(0, 500)
+      );
+
+      // Extract JSON from response — try multiple strategies
+      const jsonStr = this._extractJsonFromResponse(response);
+
+      if (!jsonStr) {
+        console.error(
+          `[PlanOrchestrator] No JSON found in planner response. Full response:`,
+          response.substring(0, 2000)
+        );
+        this._emitAgentFailure(onSubagent, agentId, 'planner', this.plannerModel, 'No JSON found', durationMs);
+        return { success: false, error: 'No JSON in response' };
+      }
+
+      const parsed = tryParseJSON(jsonStr);
+      if (!parsed.success) {
+        this._emitAgentFailure(onSubagent, agentId, 'planner', this.plannerModel, parsed.error!, durationMs);
+        return { success: false, error: parsed.error };
+      }
+
+      const data = parsed.data as Record<string, unknown>;
+      const items: PlanItem[] = Array.isArray(data.items) ? data.items : [];
+      const gaps: string[] = Array.isArray(data.gaps) ? data.gaps : [];
+      const warnings: string[] = Array.isArray(data.warnings) ? data.warnings : [];
+
+      this.saveAgentOutput('planner', prompt, { items, gaps, warnings }, durationMs);
+      onSubagent?.({
+        type: 'completed',
+        agentId,
+        agentType: 'planner',
+        model: this.plannerModel,
+        status: 'completed',
+        itemCount: items.length,
+        durationMs,
+      });
+
+      onProgress?.('planning', `Generated ${items.length} tasks`);
+
+      return { success: true, items, gaps, warnings };
+    } catch (err) {
+      const durationMs = Date.now() - startTime;
+      const error = getErrorMessage(err);
+      this._emitAgentFailure(onSubagent, agentId, 'planner', this.plannerModel, error, durationMs);
+      return { success: false, error };
+    } finally {
+      // Always clean up session and progress interval — centralizing here
+      // prevents the race where cancel() and catch both try to manage the set
+      await session.stop().catch(() => {}); // Ignore - session cleanup is best-effort in finally block
+      this.runningSessions.delete(session);
+      clearInterval(progressInterval);
+    }
+  }
+}

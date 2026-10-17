@@ -1,0 +1,119 @@
+# Claude Code local files
+.agents/
+skills-lock.json
+
+
+# In-session decision scratchpad (context-survival mechanism, not a deliverable)
+DECISIONS.md
+# Written by install.sh into end-user clones when setup finishes
+.install-complete
+
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# Generated frontend dependencies; the two pinned source assets stay tracked.
+src/web/public/vendor/*
+!src/web/public/vendor/dompurify.min.js
+!src/web/public/vendor/marked.min.js
+
+# Test coverage
+coverage/
+
+# E2E test screenshots (keep baselines, ignore current/diffs)
+test/e2e/screenshots/current/
+test/e2e/screenshots/diffs/
+
+# Mobile visual regression failure artifacts
+test/mobile/snapshots/*.actual.png
+test/mobile/snapshots/*.diff.png
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor directories
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# Local Compose customisation (host-specific, not part of the project)
+docker-compose.override.yml
+docker-compose.override.yaml
+
+# State files (local to each machine)
+.claude/ralph-loop.local.md
+
+# Temporary files
+*.tmp
+*.temp
+
+# Generated output
+out/
+screenshots-echo-diag/
+screenshots-readme/
+screenshots-readme-real/
+screenshots-real/
+scripts/remotion/out/
+
+# Local UI/README capture scratch (screenshot runs, design mockups). Not build
+# output, but never meant for git — an unqualified `git add -A` during a COM has
+# swept dirs like these into a release before.
+design-explorations/
+
+# Artifacts that should not be tracked
+test-results/
+tmp/
+# Machine-local working files (never meant for git). ANCHORED so only the root
+# dir matches.
+/pr/
+# Root `public` (a symlink to scripts/remotion/public — local artifact). ANCHORED
+# with a leading slash so it does NOT also match src/web/public (a bare `public`
+# would swallow the whole web UI source dir and silently un-stage any new asset
+# added there). No trailing slash so it still matches the symlink, not just dirs.
+/public
+
+# Opt-in gesture overlay runtime assets: large MediaPipe wasm + model (~27 MB)
+# fetched at build/install by scripts/fetch-gesture-assets.mjs, kept out of git.
+# (The gesture bundle itself, gesture-codeman.js, IS tracked — built from
+# packages/gesture-control source by `npm run build:gesture`.)
+src/web/public/gesture/wasm/
+src/web/public/gesture/*.task
+
+# Gesture-control workspace package build outputs (source is tracked; the
+# Codeman bundle is emitted to src/web/public/gesture/gesture-codeman.js instead).
+packages/gesture-control/dist/
+packages/gesture-control/dist-codeman/
+packages/gesture-control/.vite/
+
+# Claude Code plan tracking
+plan.json
+
+.claude/
+media-assets/
+commands
+todo.md
+@fix_plan.md
+readme-preview.mjs
+
+# Prompt uploads land here under each session working dir (runtime artifact);
+# .claude-images/ is where they landed before the move.
+.codeman-uploads/
+.claude-images/
+
+# Local-LLM harness smoke-test config (real IPs/keys) — see the .example.json
+# alongside it in scripts/, which IS tracked as the template.
+scripts/local-llm-test.config.json

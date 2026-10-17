@@ -1,0 +1,31 @@
+{
+  "api_url": "http://127.0.0.1:3000",
+  "case_name": "fleet-personal",
+  "state_file": "../runtime/controller-state.json",
+  "pause_file": "../runtime/owner-paused",
+  "fallback": "local",
+  "max_recoveries": 3,
+  "backends": {
+    "local": {
+      "mode": "opencode",
+      "model": "local_agent/qwen3.8-27b",
+      "enabled": true
+    },
+    "cloud-codex": {
+      "mode": "codex",
+      "model": "MODEL_ID",
+      "enabled": false
+    },
+    "cloud-claude": {
+      "mode": "claude",
+      "model": "MODEL_ID",
+      "enabled": false
+    }
+  },
+  "keep_alive": {
+    "model_api_url": "http://127.0.0.1:8080/v1",
+    "model_id": "qwen3.8-27b",
+    "poll_seconds": 10,
+    "probe_timeout_seconds": 5
+  }
+}

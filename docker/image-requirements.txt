@@ -1,0 +1,4 @@
+# Extra Python packages for the fleet venv (/opt/fleet/python), installed at image build with
+# `pip install --only-binary=:all: --require-hashes`. Every line pins a version AND the wheel's sha256.
+# pillow: image drawing for agents (profile pictures, diagrams); no system libraries needed.
+pillow==11.3.0 --hash=sha256:106064daa23a745510dabce1d84f29137a37224831d88eb4ce94bb187b1d7e5f

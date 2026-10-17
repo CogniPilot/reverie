@@ -1,0 +1,208 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Codeman Gesture Control — Phase 4</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #0b0f17;
+        --panel: #131a26;
+        --ink: #e6edf3;
+        --muted: #94a3b8;
+        --accent: #38bdf8;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
+        background: var(--bg);
+        color: var(--ink);
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 1rem;
+        padding: 1.5rem;
+      }
+      h1 { font-size: 1.25rem; margin: 0; font-weight: 650; }
+      .sub { color: var(--muted); font-size: 0.85rem; margin: 0; }
+
+      .stage {
+        position: relative;
+        width: min(90vw, 960px);
+        aspect-ratio: 16 / 9;
+        background: #000;
+        border-radius: 12px;
+        overflow: hidden;
+        box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+      }
+      /* Fullscreen: fill the display so grab targets get big. Coord mapping
+         reads the stage rect each frame, so it adapts automatically. */
+      #stage:fullscreen,
+      #stage:-webkit-full-screen {
+        width: 100vw;
+        height: 100vh;
+        max-width: none;
+        aspect-ratio: auto;
+        border-radius: 0;
+      }
+      /* Mirror the camera so it reads like a, er, mirror. */
+      #cam {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        transform: scaleX(-1);
+      }
+      /* Overlay is NOT CSS-mirrored; overlay.ts mirrors coords itself.
+         z-index 2 keeps the cursor + skeleton drawn over the tab board. */
+      #overlay {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        pointer-events: none;
+        z-index: 2;
+      }
+
+      /* Phase 3 tab board — overlays the video; gesture-driven, no mouse. */
+      #board {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        gap: 12px;
+        padding: 12px;
+        pointer-events: none;
+        z-index: 1;
+      }
+      #board .column {
+        flex: 1;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        background: rgba(11, 15, 23, 0.55);
+        border: 1px solid #25324a;
+        border-radius: 10px;
+        backdrop-filter: blur(3px);
+        transition: border-color 0.1s, background 0.1s;
+      }
+      #board .column.col-hot {
+        border-color: var(--accent);
+        background: rgba(56, 189, 248, 0.18);
+      }
+      #board .column > header {
+        font-size: 0.78rem;
+        font-weight: 650;
+        color: var(--muted);
+        padding: 0.5rem 0.6rem;
+        border-bottom: 1px solid #25324a;
+      }
+      #board .tablist {
+        flex: 1;
+        padding: 0.5rem;
+        display: flex;
+        flex-direction: column;
+        gap: 0.4rem;
+        overflow: hidden;
+      }
+      #board .tab {
+        background: #1b2740;
+        border: 1px solid #2c3c5c;
+        border-radius: 8px;
+        padding: 0.85rem 0.7rem;
+        min-height: 3rem;
+        display: flex;
+        align-items: center;
+        font-size: 0.95rem;
+        font-weight: 550;
+        font-variant-numeric: tabular-nums;
+        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+        transition: border-color 0.1s, transform 0.05s;
+      }
+      #board .tab.tab-hot {
+        border-color: var(--accent);
+        background: #22304d;
+      }
+      #board .tab.dragging {
+        position: absolute;
+        z-index: 5;
+        width: auto;
+        box-shadow: 0 12px 30px rgba(0, 0, 0, 0.55);
+        transform: scale(1.05);
+        opacity: 0.97;
+        border-color: #4ade80;
+      }
+
+      .controls { display: flex; gap: 0.75rem; align-items: center; }
+      button {
+        background: var(--accent);
+        color: #04222e;
+        border: 0;
+        border-radius: 8px;
+        padding: 0.55rem 1.1rem;
+        font-size: 0.95rem;
+        font-weight: 650;
+        cursor: pointer;
+      }
+      button:disabled { opacity: 0.4; cursor: not-allowed; }
+      button.ghost { background: var(--panel); color: var(--ink); }
+      select {
+        background: var(--panel);
+        color: var(--ink);
+        border: 1px solid #25324a;
+        border-radius: 8px;
+        padding: 0.5rem 0.75rem;
+        font-size: 0.9rem;
+        max-width: 16rem;
+      }
+      select:disabled { opacity: 0.4; cursor: not-allowed; }
+
+      .hud {
+        display: flex;
+        gap: 1.5rem;
+        background: var(--panel);
+        border-radius: 10px;
+        padding: 0.75rem 1.25rem;
+        font-variant-numeric: tabular-nums;
+        font-size: 0.9rem;
+      }
+      .hud .label { color: var(--muted); margin-right: 0.4rem; }
+      .hud b { font-weight: 650; }
+
+      #status-msg { color: var(--muted); font-size: 0.85rem; min-height: 1.2em; margin: 0; }
+    </style>
+  </head>
+  <body>
+    <h1>Codeman Gesture Control</h1>
+    <p class="sub">Phase 4 — pinch-drag tabs + discrete gesture commands. Camera feed never leaves this machine.</p>
+
+    <div class="stage" id="stage">
+      <video id="cam" autoplay muted playsinline></video>
+      <div id="board"></div>
+      <canvas id="overlay"></canvas>
+    </div>
+
+    <div class="controls">
+      <button id="start">Start camera</button>
+      <button id="stop" class="ghost" disabled>Stop</button>
+      <button id="fullscreen" class="ghost" title="Toggle fullscreen (Esc to exit)">⛶ Fullscreen</button>
+      <select id="camera" disabled title="Choose camera (populated after start)">
+        <option>Default camera</option>
+      </select>
+    </div>
+
+    <div class="hud">
+      <span><span class="label">FPS</span><b id="fps">0</b></span>
+      <span><span class="label">Hands</span><b id="hand">no</b></span>
+      <span><span class="label">Pinch</span><b id="pinch">—</b></span>
+      <span><span class="label">Gesture</span><b id="gesture">—</b></span>
+    </div>
+
+    <p id="status-msg">Click “Start camera” to begin (camera access requires a click).</p>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

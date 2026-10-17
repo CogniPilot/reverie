@@ -1,0 +1,12 @@
+# Template, not installed. Fires only at night, as defence in depth: the policy's night window
+# (in its own timezone) still decides, and a tick outside it returns at once. Set these hours to cover
+# the policy window in the host's local time (or append the policy's IANA zone, e.g. "... 00..06:00/5:00 UTC").
+[Unit]
+Description=Reverie night cycle tick every 5 minutes, at night
+
+[Timer]
+OnCalendar=*-*-* 00..06:00/5:00
+Persistent=false
+
+[Install]
+WantedBy=timers.target

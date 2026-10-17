@@ -1,0 +1,111 @@
+#!/usr/bin/env bash
+# container-memory: show or change the Reverie container's memory limit, live.
+#
+#   container-memory                 show the current limit and usage
+#   container-memory 16g             set the limit to 16 GiB now, no restart
+#   container-memory auto            size it like a new install: half of host MemTotal,
+#                                    whole GiB, clamped to 4..32 GiB (FLEET_MEMORY overrides)
+#   container-memory 16g --persist   also update the launcher (and the source copy of
+#                                    scripts/fleet-container) so a recreated container
+#                                    gets the same limit
+#
+# Run on the HOST as the user that owns the container (the one that runs
+# `systemctl --user ... reverie.service`). Swap stays disabled (swap = memory).
+# It talks to Reverie's private podman through the installed launcher
+# (~/.local/libexec/reverie/fleet-container engine ...), so podman does not
+# need to be on PATH.
+# Environment: FLEET_CONTAINER_NAME (default reverie-live),
+#              FLEET_LAUNCHER (default ~/.local/libexec/reverie/fleet-container),
+#              FLEET_CONTAINER_SCRIPT (extra copy to persist, default ~/git/reverie/scripts/fleet-container).
+set -euo pipefail
+
+name="${FLEET_CONTAINER_NAME:-reverie-live}"
+script="${FLEET_CONTAINER_SCRIPT:-$HOME/git/reverie/scripts/fleet-container}"
+# The installed launcher finds its policy files via FLEET_REPO, as the systemd units set it.
+export FLEET_REPO="${FLEET_REPO:-$HOME/git/reverie}"
+launcher="${FLEET_LAUNCHER:-$HOME/.local/libexec/reverie/fleet-container}"
+size="${1:-}"
+persist="${2:-}"
+
+die() { echo "container-memory: $*" >&2; exit 1; }
+
+# Same rule as scripts/fleet-container's fleet_memory_size (a test keeps them identical):
+# the installed launcher may be older and lack `memory-default`, so this cannot call it.
+fleet_memory_size() {
+  if [[ -n "${FLEET_MEMORY:-}" ]]; then
+    [[ "$FLEET_MEMORY" =~ ^[0-9]+[gGmM]$ ]] || { echo "FLEET_MEMORY must look like 16g or 8192m, got '$FLEET_MEMORY'" >&2; return 1; }
+    echo "$FLEET_MEMORY"
+    return
+  fi
+  local total_kb gib
+  total_kb=$(awk '/^MemTotal:/ {print $2}' "${FLEET_MEMINFO:-/proc/meminfo}")
+  [[ "$total_kb" =~ ^[0-9]+$ ]] || { echo 'cannot read MemTotal' >&2; return 1; }
+  gib=$(( total_kb / 2 / 1048576 ))
+  (( gib >= 4 )) || gib=4
+  (( gib <= 32 )) || gib=32
+  echo "${gib}g"
+}
+gib() { awk -v b="$1" 'BEGIN { printf "%.1f GiB", b / 1073741824 }'; }
+
+# Validate every argument before touching anything.
+[ -z "$size" ] || [ "$size" = auto ] || [[ "$size" =~ ^[0-9]+[gGmM]$ ]] || die "size must look like 16g, 8192m or auto, got '$size'"
+auto_size=$(fleet_memory_size) || die "cannot compute the automatic size"
+[ "$size" != auto ] || size="$auto_size"
+case "$persist" in "" | --persist) ;; *) die "unknown option '$persist' (only --persist)" ;; esac
+[ "$#" -le 2 ] || die "too many arguments; usage: container-memory [SIZE|auto [--persist]]"
+
+if [ -x "$launcher" ]; then
+  podman() { "$launcher" engine "$@"; }
+elif ! command -v podman >/dev/null; then
+  die "neither $launcher nor podman found; run this on the host, not inside the container"
+fi
+if ! podman container exists "$name"; then
+  die "no container named '$name' (set FLEET_CONTAINER_NAME); found: $(podman ps -a --format '{{.Names}}' | tr '\n' ' ')"
+fi
+
+limit=$(podman inspect "$name" --format '{{.HostConfig.Memory}}')
+if [ "$limit" = 0 ]; then shown=unlimited; else shown=$(gib "$limit"); fi
+echo "Container:     $name"
+echo "Current limit: $shown"
+if [ "$(podman inspect "$name" --format '{{.State.Running}}')" = true ]; then
+  podman stats --no-stream --format 'In use:        {{.MemUsage}}' "$name" 2>/dev/null || true
+fi
+avail_kb=$(awk '/^MemAvailable:/ {print $2}' /proc/meminfo)
+total_kb=$(awk '/^MemTotal:/ {print $2}' /proc/meminfo)
+echo "Host free:     $(gib "$((avail_kb * 1024))") available of $(gib "$((total_kb * 1024))")"
+echo "Auto size:     $auto_size (what a new install would get; 'container-memory auto' applies it)"
+
+[ -n "$size" ] || exit 0
+case "$size" in
+  *[gG]) bytes=$(( ${size%?} * 1073741824 )) ;;
+  *) bytes=$(( ${size%?} * 1048576 )) ;;
+esac
+(( bytes >= 2147483648 )) || die "refusing a limit under 2 GiB; agents would be killed"
+cgroup=$(podman inspect "$name" --format '{{.State.CgroupPath}}')
+in_use=$(cat "/sys/fs/cgroup/$cgroup/memory.current" 2>/dev/null || echo 0)
+(( bytes > in_use )) || die "the container already uses $(gib "$in_use"); a lower limit would kill processes"
+if (( bytes - in_use > avail_kb * 1024 )); then
+  echo "warning: the host has only $(gib "$((avail_kb * 1024))") available; the container may not get all of it" >&2
+fi
+
+echo "Setting limit: $(gib "$bytes") (no swap) ..."
+podman update --memory="$size" --memory-swap="$size" "$name"
+now=$(podman inspect "$name" --format '{{.HostConfig.Memory}}')
+[ "$now" = "$bytes" ] || die "podman accepted the update but reports $(gib "$now"); check 'podman inspect $name'"
+echo "Done:          limit is now $(gib "$now"). No restart was needed."
+
+if [ "$persist" = "--persist" ]; then
+  done_any=0
+  for f in "$launcher" "$script"; do
+    [ -f "$f" ] || continue
+    if ! grep -q -- '--memory=[0-9]*[gGmM] --memory-swap=[0-9]*[gGmM]' "$f"; then
+      echo "skipped $f: no --memory flags" >&2
+      continue
+    fi
+    cp -p "$f" "$f.bak"
+    sed -i -E "s/--memory=[0-9]+[gGmM] --memory-swap=[0-9]+[gGmM]/--memory=$size --memory-swap=$size/" "$f"
+    echo "Persisted:     $f now uses --memory=$size (backup: $f.bak)"
+    done_any=1
+  done
+  [ "$done_any" = 1 ] || die "limit changed, but found no launcher or script to persist it in"
+fi

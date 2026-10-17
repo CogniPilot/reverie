@@ -1,0 +1,5767 @@
+import { clampExternalCliBypassForOwner } from '../../session-config-clamp.js';
+/**
+ * @fileoverview Session management routes.
+ * Covers session CRUD, input/output, terminal buffer, quick-start, quick-run,
+ * auto-clear, auto-compact, image watcher, flicker filter, and logout.
+ */
+
+import { guardShellKey } from '../../opencode-input.js';
+import { FastifyInstance, type FastifyReply } from 'fastify';
+import { z } from 'zod';
+import { join, dirname, extname, basename } from 'node:path';
+import { homedir } from 'node:os';
+import { existsSync, statSync, mkdirSync, writeFileSync } from 'node:fs';
+import { execFile } from 'node:child_process';
+import fs from 'node:fs/promises';
+import { finished } from 'node:stream/promises';
+import { randomBytes, randomUUID } from 'node:crypto';
+import { performance } from 'node:perf_hooks';
+import {
+  ApiErrorCode,
+  createErrorResponse,
+  getErrorMessage,
+  type ApiResponse,
+  type SessionColor,
+  type SessionStatus,
+  type SessionMode,
+  type CodexConfig,
+  type GeminiConfig,
+  type AntigravityConfig,
+  type PiConfig,
+  type GrokConfig,
+  type DeepSeekConfig,
+  type OmpConfig,
+  type RemoteHost,
+} from '../../types.js';
+import {
+  Session,
+  cliTakesSessionModel,
+  isAltScreenStripMode,
+  isExternalCliMode,
+  isMuxAltScreenOnlyStripMode,
+  isMuxMouseStripMode,
+} from '../../session.js';
+import type { PaneCaptureOptions } from '../../mux-interface.js';
+import { SseEvent } from '../sse-events.js';
+import { webviewCapabilities } from '../../webview-capabilities.js';
+import { htmlViewCapabilities } from '../../html-view-capabilities.js';
+import {
+  CreateSessionSchema,
+  SessionNameSchema,
+  SessionColorSchema,
+  RunPromptSchema,
+  SessionInputWithLimitSchema,
+  ResizeSchema,
+  AutoClearSchema,
+  AutoCompactSchema,
+  AutoResumeSchema,
+  PinSessionSchema,
+  ImageWatcherSchema,
+  FlickerFilterSchema,
+  QuickRunSchema,
+  QuickStartSchema,
+  InteractiveStartSchema,
+  SessionOrderUpdateSchema,
+  SessionWaitQuerySchema,
+  SessionWaitOutputQuerySchema,
+  CustomModelSelectionSchema,
+} from '../schemas.js';
+import { readCustomModelHosts } from '../../custom-model-hosts.js';
+import { applyCustomModelInjection, removeConfigDir } from '../../custom-model-injection-apply.js';
+import {
+  getLlamaSwapStatus,
+  triggerLlamaSwapLoad,
+  exceedsSafeContextFloor,
+  CLAUDE_MIN_SAFE_CONTEXT_TOKENS,
+} from './custom-model-routes.js';
+import { matchesPattern } from '../../config/cli-registry/patterns.js';
+import { ownerLayoutKey } from '../../tab-layout-persistence.js';
+import { TabLayoutValidationError } from '../../tab-layout.js';
+import {
+  sessionWaits,
+  resolveWaitSignals,
+  sessionHookOptions,
+  signalForStatus,
+  WaitCapacityError,
+  type WaitSignal,
+  type SignalWaitResult,
+} from '../session-wait-registry.js';
+import {
+  RemoteWakeRegistry,
+  REMOTE_WAKE_REQUEST_READY_TIMEOUT_MS,
+  createDefaultRemoteWakeDeps,
+  isProbeable,
+  type WakeableRemote,
+} from '../../remote-wake.js';
+import { clampWaitMs, MAX_BUFFER_SCAN_BYTES } from '../../config/agent-wait.js';
+import {
+  autoConfigureRalph,
+  canAccessOwned,
+  CASES_DIR,
+  findPersistedSessionOrFail,
+  findSessionOrFail,
+  getAuthUser,
+  isAdmin,
+  isPlainPromptInput,
+  isWorkingDirAllowed,
+  ownerFor,
+  parseBody,
+  persistAndBroadcastSession,
+  resolveAgentCaseOrigin,
+  resolveCasesDir,
+  resolveParentSessionId,
+  sessionCapacityMessage,
+  SETTINGS_PATH,
+  validatePathWithinBase,
+} from '../route-helpers.js';
+import { buildAgentCaseMarker, writeAgentCaseMarker } from '../../agent-case-marker.js';
+import { canUsernameRunPrivilegedCommands, resolveClaudeModeForUsername } from '../../user-store.js';
+import { clampEnvOverridesForOwner } from '../../session-env-clamp.js';
+import {
+  checkClaudeResume,
+  foreignResumes,
+  resolveTakeoverPolicy,
+  resumeRefusalForAgent,
+  resumeTakeoverRoom,
+  persistedTakeoverSession,
+  type TakeoverRoom,
+} from '../resume-guard.js';
+import { subscriptionLaunch } from './subscription-profile-routes.js';
+import { getCli } from '../../config/cli-registry/registry.js';
+import type { AgentSkillDir, NewlineSequence } from '../../config/cli-registry/types.js';
+import { resolveCliLaunchError } from '../../utils/cli-launcher.js';
+import { applyLaunchDefaults } from '../launch-defaults.js';
+import { legacyConfigForMode } from '../../session-cli-registry-bridge.js';
+import { isMultiUserMode } from '../../config/multiuser.js';
+import { AUTH_COOKIE_NAME } from '../middleware/auth.js';
+import {
+  writeHooksConfig,
+  updateCaseModel,
+  stripCaseEnvKeys,
+  agentSkillDir,
+  agentSkillDirFor,
+  applyAgentSkill,
+  refreshUserAgentSkill,
+  seedAgentSessionPreamble,
+  applyWorkspaceHooks,
+  refreshStaleCodemanHooks,
+} from '../../hooks-config.js';
+import { generateClaudeMd } from '../../templates/claude-md.js';
+import { imageWatcher } from '../../image-watcher.js';
+import { convertHeicToJpeg } from '../heic-jpeg-converter.js';
+import { getLifecycleLog } from '../../session-lifecycle-log.js';
+import {
+  mergeUnifiedSessions,
+  filterAndPaginate,
+  type LiveSessionInput,
+  type PersistedSessionInput,
+  type LifecycleInput,
+  type HistoryInput,
+  type MuxStatInput,
+  type UnifiedSessionItem,
+} from '../../services/unified-session-service.js';
+import {
+  buildHistorySessionIndexItems,
+  setHistoryIndexRefresher,
+  setHistorySessionIndex,
+} from '../session-history-index.js';
+import type { SessionPort, EventPort, ConfigPort, InfraPort, AuthPort, TabLayoutPort } from '../ports/index.js';
+import { RunSummaryTracker } from '../../run-summary.js';
+
+import { MAX_INPUT_LENGTH, MAX_SESSION_NAME_LENGTH } from '../../config/terminal-limits.js';
+import { MAX_PASTE_IMAGE_BYTES, MAX_PASTE_VIDEO_BYTES } from '../../config/buffer-limits.js';
+import { VIDEO_ATTACHMENT_EXTENSIONS } from '../../attachment-registry.js';
+import { dataPath, getDataDir } from '../../config/instance.js';
+import {
+  checkRemoteTmuxAvailable,
+  readRemoteCases,
+  readRemoteHosts,
+  rehydrateRemoteHostFields,
+  toAttachedSessionRemote,
+  toSessionRemote,
+} from '../../remote-hosts.js';
+import { fetchRemoteScrollback } from '../../remote-pane-history.js';
+import {
+  checkDockerAvailable,
+  checkDockerConfigDrift,
+  probeAdoptableContainer,
+  checkDockerTmuxAvailable,
+  ensureAgentBaseImage,
+  DEFAULT_AGENT_IMAGE,
+  persistDockerCaseClaudeSessionId,
+  readDockerCases,
+  readDockerHosts,
+  toSessionDocker,
+} from '../../docker-hosts.js';
+import { LRUMap } from '../../utils/lru-map.js';
+import { describeUnknownPath, probePathKind } from '../../utils/index.js';
+import { findLatestOmpSessionId } from '../../utils/omp-session-resolver.js';
+import { scanOmpSessionsHistory } from '../../omp-transcript.js';
+import { scanCodexSessionsHistory, codexThreadBySessionId } from '../../codex-transcript.js';
+import {
+  getLastTranscriptResponse,
+  isExternalCliTranscriptMode,
+  parseExternalCliTranscript,
+  selectLastAnsweredTurn,
+} from '../response-viewer-transcript.js';
+import { readDeepSeekLastResponse } from '../../deepseek-transcript.js';
+import { appendClaudeCustomTitle } from '../../claude-session-title.js';
+import { UPLOADS_DIR } from '../paste-image-gc.js';
+import type { CompanyService } from '../../company-service.js';
+import { normalizeIcon } from '../../chatroom-store.js';
+
+// Path to linked-cases registry (same file used by case-routes resolveCasePath)
+const LINKED_CASES_FILE = dataPath('linked-cases.json');
+const CODEMAN_CONFIG_DIR = getDataDir();
+
+// Pre-compiled regex for terminal buffer cleaning (avoids per-request compilation)
+// eslint-disable-next-line no-control-regex
+const CLAUDE_BANNER_PATTERN = /\x1b\[1mClaud/;
+// eslint-disable-next-line no-control-regex
+const CTRL_L_PATTERN = /\x0c/g;
+const LEADING_WHITESPACE_PATTERN = /^[\s\r\n]+/;
+
+/**
+ * Match xterm alternate-screen mode toggles + the standalone scrollback-erase.
+ *
+ * - DECSET/DECRST 47, 1047, 1049 = enter/exit alternate screen buffer
+ *   (1049 also saves cursor and clears the alt buffer).
+ * - CSI 3 J = erase saved lines (scrollback).
+ *
+ * Codex AND Claude Code emit `\x1b[?1049h` and clear-scrollback sequences (the
+ * latter intermittently, e.g. full-screen pickers/dialogs). xterm.js obeys them
+ * by switching to the alt buffer (no native scrollback) and wiping saved lines,
+ * so the user's conversation history disappears on every tab switch / pane
+ * refresh (and scroll-up breaks live). Stripping these from the replayed byte
+ * stream keeps everything in the main buffer with scrollback intact. Mirrors the
+ * live-stream strip in Session._handleTerminalOutput (isAltScreenStripMode).
+ */
+// eslint-disable-next-line no-control-regex
+const ALT_SCREEN_TOGGLE_PATTERN = /\x1b\[\?(?:47|1047|1049)[hl]/g;
+// eslint-disable-next-line no-control-regex
+const ERASE_SCROLLBACK_PATTERN = /\x1b\[3J/g;
+// Mouse-tracking enables (X10/button/any-event/UTF-8/SGR/alt-scroll) — once on,
+// xterm.js forwards wheel events to the app instead of scrolling the viewport.
+// Live streams are stripped at the source, but buffers persisted BEFORE that
+// strip existed can still carry them; strip on replay for parity.
+// eslint-disable-next-line no-control-regex
+const MOUSE_TRACKING_PATTERN = /\x1b\[\?(?:1000|1001|1002|1003|1005|1006|1007)[hl]/g;
+
+/**
+ * The replay half of the strip parity triangle: what `_handleTerminalOutput` (session.ts)
+ * removes from the live stream, removed again from a stored buffer before it is replayed,
+ * because a buffer recorded before the live-side strip existed (or by an older server)
+ * still carries the sequences, and one replayed enable is enough to re-park xterm.
+ *
+ * - `strip-full` (claude/codex/gemini): alt-screen toggles, `3J` and mouse DECSETs.
+ *   xterm obeys the toggles by switching to its scrollback-less alt buffer and wiping
+ *   saved lines, so history disappeared on tab switch.
+ * - `strip-mux-and-mouse` (opencode, tmux-backed): alt-screen toggles and mouse DECSETs.
+ *   A replayed tracking enable parks xterm in report mode, where a drag goes to the CLI
+ *   instead of selecting text (and Ctrl+C without a selection is opencode's app_exit).
+ *   `3J` stays: a TUI is not a `clear` consumer.
+ * - every other mode, tmux-backed: tmux's own client smcup only (#205).
+ *
+ * Exported so the parity with the live strip is a test (claude-scrollback-strip.test.ts).
+ */
+export function stripReplayBuffer(buffer: string, mode: SessionMode, usesMux: boolean): string {
+  if (isAltScreenStripMode(mode)) {
+    return buffer
+      .replace(ALT_SCREEN_TOGGLE_PATTERN, '')
+      .replace(ERASE_SCROLLBACK_PATTERN, '')
+      .replace(MOUSE_TRACKING_PATTERN, '');
+  }
+  if (isMuxMouseStripMode(mode, usesMux)) {
+    return buffer.replace(ALT_SCREEN_TOGGLE_PATTERN, '').replace(MOUSE_TRACKING_PATTERN, '');
+  }
+  if (isMuxAltScreenOnlyStripMode(mode, usesMux)) return buffer.replace(ALT_SCREEN_TOGGLE_PATTERN, '');
+  return buffer;
+}
+
+/**
+ * Strip redundant Ink spinner/status-bar redraw frames from the terminal buffer.
+ * Ink (Claude Code's TUI) uses absolute cursor positioning (CSI n d = VPA) to animate
+ * the spinner and update the status bar. During long thinking phases, these frames
+ * accumulate to 500KB+ of repeated overwrites to the same rows.
+ *
+ * Strategy: detect "redraw clusters" — dense runs of VPA escapes where each is within
+ * FRAME_GAP bytes of the previous (i.e. continuous rerendering of the same UI region).
+ * Collapse each big cluster down to just the bytes from its last VPA onwards (the final
+ * frame). Content *between* clusters (Claude's streamed response text) is preserved.
+ *
+ * Without clustering, a single first-VPA-finds-all approach would discard the entire
+ * conversation after Claude's first render — losing 100KB+ of legitimate scrollback.
+ */
+export function stripInkRedrawBloat(buffer: string): string {
+  // eslint-disable-next-line no-control-regex
+  const vpaRe = /\x1b\[\d+d/g;
+  const positions: number[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = vpaRe.exec(buffer)) !== null) {
+    positions.push(m.index);
+  }
+  if (positions.length < 10) return buffer; // Too few VPAs to be bloat
+
+  // Group consecutive VPAs into clusters separated by gaps > FRAME_GAP.
+  // Within a cluster, VPAs are close together (continuous rerenders).
+  // Between clusters, real terminal output (response text) lives.
+  const FRAME_GAP = 8 * 1024; // 8KB — one Ink frame is typically 1-4KB
+  const MIN_BLOAT_SIZE = 32 * 1024; // Only collapse clusters spanning >= 32KB
+
+  const clusters: { start: number; end: number }[] = [];
+  let cs = positions[0];
+  let ce = positions[0];
+  for (let i = 1; i < positions.length; i++) {
+    if (positions[i] - ce <= FRAME_GAP) {
+      ce = positions[i];
+    } else {
+      clusters.push({ start: cs, end: ce });
+      cs = positions[i];
+      ce = positions[i];
+    }
+  }
+  clusters.push({ start: cs, end: ce });
+
+  // For each big cluster, replace [start..end] with the bytes from `end` onwards
+  // (which contains the last frame's content up to where the next cluster, or
+  // post-cluster content, begins).
+  const parts: string[] = [];
+  let cursor = 0;
+  for (const cl of clusters) {
+    if (cl.end - cl.start < MIN_BLOAT_SIZE) continue;
+    parts.push(buffer.slice(cursor, cl.start));
+    cursor = cl.end;
+  }
+  parts.push(buffer.slice(cursor));
+  return parts.join('');
+}
+
+/**
+ * Validate image bytes against a declared extension. Sniffs the first ~12 bytes
+ * for a known magic-number signature. Defends against polyglots (e.g. HTML or
+ * SVG disguised under a `Content-Type: image/png` header) and against simple
+ * extension-only spoofing — both the multipart filename and the Content-Type
+ * are attacker-controlled, the raw bytes are not.
+ *
+ * Signatures: https://en.wikipedia.org/wiki/List_of_file_signatures
+ */
+export function imageMagicMatchesExt(data: Buffer, ext: string): boolean {
+  if (data.length < 12) return false;
+  const u32be = (off: number): number => data.readUInt32BE(off);
+  switch (ext) {
+    case '.png':
+      return u32be(0) === 0x89504e47 && u32be(4) === 0x0d0a1a0a;
+    case '.jpg':
+    case '.jpeg':
+      return data[0] === 0xff && data[1] === 0xd8 && data[2] === 0xff;
+    case '.gif':
+      return (
+        data[0] === 0x47 &&
+        data[1] === 0x49 &&
+        data[2] === 0x46 &&
+        data[3] === 0x38 &&
+        (data[4] === 0x37 || data[4] === 0x39) &&
+        data[5] === 0x61
+      );
+    case '.webp':
+      // RIFF....WEBP
+      return u32be(0) === 0x52494646 && u32be(8) === 0x57454250;
+    case '.bmp':
+      return data[0] === 0x42 && data[1] === 0x4d;
+    case '.heic':
+    case '.heif': {
+      // ISO Base Media File Format: size + "ftyp" + major brand. The brand
+      // list matches heic-decode's own isHeic() — accepting more brands here
+      // would only route bytes into a conversion that always throws.
+      if (u32be(4) !== 0x66747970) return false;
+      const brand = data.subarray(8, 12).toString('ascii');
+      return ['heic', 'heix', 'hevc', 'hevx', 'mif1', 'msf1'].includes(brand);
+    }
+    case '.mp4':
+    case '.m4v':
+    case '.mov':
+      // ISO Base Media File Format / QuickTime: size + a top-level atom type. Brands
+      // vary too widely to enumerate (qt, isom, mp42, avc1, hev1, ...), and an older
+      // QuickTime file can open on an atom other than ftyp.
+      return ['ftyp', 'moov', 'mdat', 'wide', 'free', 'skip'].includes(data.subarray(4, 8).toString('ascii'));
+    case '.webm':
+      // EBML header (Matroska's WebM subset)
+      return u32be(0) === 0x1a45dfa3;
+    case '.ogv':
+      // Ogg container ("OggS")
+      return u32be(0) === 0x4f676753;
+    default:
+      return false;
+  }
+}
+
+/**
+ * Create or re-verify `{workingDir}/.codeman-uploads` for a prompt upload, or
+ * null when something other than a regular directory sits there. An agent or
+ * postinstall script could plant `.codeman-uploads -> ~/.ssh/` and redirect
+ * future writes outside workingDir: lstat (not stat) sees the symlink itself,
+ * and mkdir without `recursive` does not follow one for the leaf either;
+ * O_EXCL|O_NOFOLLOW on the file open makes the write itself symlink-safe.
+ * The folder ignores itself: a `.gitignore` of `*`, written once with O_EXCL,
+ * so the user's repository never sees uploads, their own ignore file is never
+ * touched, and a file already there is theirs and stays as it is.
+ */
+async function ensureUploadDir(workingDir: string): Promise<string | null> {
+  // workingDir exists (live session) and the caller bounded-probed its mount, so
+  // the lstat/mkdir below normally start on a reachable path; a mount that dies
+  // after that probe is the same residual race POST /api/sessions accepts.
+  const uploadDir = join(workingDir, UPLOADS_DIR);
+  try {
+    const dirStat = await fs.lstat(uploadDir);
+    if (dirStat.isSymbolicLink() || !dirStat.isDirectory()) return null;
+  } catch (err: unknown) {
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+    try {
+      await fs.mkdir(uploadDir);
+    } catch (mkErr: unknown) {
+      // Concurrent uploads (a batch of photos) race to create the dir — the
+      // losers get EEXIST. Treat an already-present REAL directory as success,
+      // but re-verify it isn't a symlink a racing actor planted.
+      if ((mkErr as NodeJS.ErrnoException).code !== 'EEXIST') throw mkErr;
+      const raceStat = await fs.lstat(uploadDir);
+      if (raceStat.isSymbolicLink() || !raceStat.isDirectory()) return null;
+    }
+  }
+  const ignoreFile = join(uploadDir, '.gitignore');
+  try {
+    // 'wx' = O_CREAT|O_EXCL, which also fails on a symlink at the path.
+    await fs.writeFile(ignoreFile, '*\n', { flag: 'wx' });
+  } catch (err: unknown) {
+    if ((err as NodeJS.ErrnoException).code === 'EEXIST') return uploadDir;
+    // The create can succeed before the write fails (ENOSPC): an empty ignore
+    // file would read as the user's on the next upload, so take it back; its own
+    // failure must not replace the cause.
+    await fs.rm(ignoreFile, { force: true }).catch(() => {});
+    throw err;
+  }
+  return uploadDir;
+}
+
+/** Open a fresh, uniquely named paste file for writing. */
+async function openPasteFile(imageDir: string, ext: string) {
+  // Date.now() collides on same-ms uploads from two tabs (last-write wins
+  // silently). Append 8 hex chars so concurrent pastes get distinct names.
+  const filename = `paste-${Date.now()}-${randomBytes(4).toString('hex')}${ext}`;
+  const filepath = join(imageDir, filename);
+  // O_EXCL: refuse to overwrite (collision is impossible with random suffix,
+  // but defends against TOCTOU). O_NOFOLLOW: refuse if filepath is a symlink.
+  const fh = await fs.open(
+    filepath,
+    fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_NOFOLLOW
+  );
+  return { filename, filepath, fh };
+}
+
+// Per-(IP, sessionId) token buckets for paste-image. Images: 30/min. Videos: 3/min,
+// a much lower rate because one video can be up to MAX_PASTE_VIDEO_BYTES (1GB), so the
+// 30/min cap would let a single authenticated client write 30GB of disk a minute; 3/min
+// bounds that to 3GB. Bucket entries are pruned when they drift > 1h stale to bound
+// memory against a flood of unique IP keys.
+const PASTE_RATE_TOKENS = 30;
+const VIDEO_RATE_TOKENS = 3;
+const PASTE_BUCKET_TTL_MS = 60 * 60 * 1000;
+const PASTE_BUCKET_GC_THRESHOLD = 1000;
+const pasteRateBuckets = new Map<string, { tokens: number; lastRefill: number }>();
+const videoRateBuckets = new Map<string, { tokens: number; lastRefill: number }>();
+
+function takeToken(
+  buckets: Map<string, { tokens: number; lastRefill: number }>,
+  key: string,
+  capacity: number,
+  now: number
+): boolean {
+  if (buckets.size > PASTE_BUCKET_GC_THRESHOLD) {
+    for (const [k, b] of buckets) {
+      if (now - b.lastRefill > PASTE_BUCKET_TTL_MS) buckets.delete(k);
+    }
+  }
+  let b = buckets.get(key);
+  if (!b) {
+    b = { tokens: capacity, lastRefill: now };
+    buckets.set(key, b);
+  }
+  b.tokens = Math.min(capacity, b.tokens + (now - b.lastRefill) * (capacity / 60_000));
+  b.lastRefill = now;
+  if (b.tokens < 1) return false;
+  b.tokens -= 1;
+  return true;
+}
+
+export function consumePasteToken(key: string, now: number = Date.now()): boolean {
+  return takeToken(pasteRateBuckets, key, PASTE_RATE_TOKENS, now);
+}
+
+// Videos stream to disk under a far larger per-file cap, so they draw on their own,
+// much lower bucket (see the comment above the constants).
+export function consumeVideoToken(key: string, now: number = Date.now()): boolean {
+  return takeToken(videoRateBuckets, key, VIDEO_RATE_TOKENS, now);
+}
+
+// Test hook: reset between runs.
+export function _resetPasteRateBuckets(): void {
+  pasteRateBuckets.clear();
+  videoRateBuckets.clear();
+}
+
+/**
+ * Security (multi-user §6.3): the Claude-only permission-mode downgrade does not
+ * cover the other CLIs' bypass switches. Codex `--dangerously-bypass-approvals-and-sandbox`,
+ * Gemini `--approval-mode yolo`, and Antigravity `--dangerously-skip-permissions` disable
+ * the safety classifier the non-granted-user downgrade is meant to keep on, so clamp them
+ * for a non-granted owner. buildGeminiCommand defaults an ABSENT approvalMode to yolo, so
+ * the gemini config must be MATERIALIZED (auto_edit) even when the request sent none.
+ * Antigravity is like Codex: an ABSENT config already defaults safe (no bypass flag), so
+ * only a sent config needs the flag forced off. No-op in single-user mode / for a granted
+ * owner (canUsernameRunPrivilegedCommands returns true when !isMultiUserMode()).
+ *
+ * Pi has no permission prompts at all, so there is no bypass switch to clamp; its
+ * privilege-shaped knob is `approveProjectTrust`, which makes pi LOAD AND EXECUTE
+ * repo-local `.pi/extensions` TypeScript and npm-install missing project packages.
+ * Pi joins the gemini-style MATERIALIZE branch, not the codex/antigravity
+ * only-if-sent one: pi's absent-config default is an interactive trust prompt the
+ * session user could simply answer "yes" to in the terminal, so merely omitting
+ * `--approve` is not a clamp. Forcing `approveProjectTrust: false` makes
+ * buildPiCommand emit `--no-approve`, and the prompt never appears.
+ *
+ * Grok is like Codex/Antigravity: the bypass switch is `alwaysApprove`
+ * (`--always-approve`), and an ABSENT config already spawns in grok's own
+ * ask-mode default, so only a sent config needs the flag forced off.
+ *
+ * DeepSeek joins the same only-if-sent branch, but its switch is not a flag: the
+ * harness has no command-line permission option, and its sandbox/approval rows
+ * read `DSH_PERMISSION_MODE`. Omitting that export leaves the harness on its own
+ * `workspace-write` preset, which still asks, so an absent config is already
+ * safe; a sent one is forced down to `workspace-write` rather than to
+ * `read-only`, because the clamp exists to remove PRIVILEGE, not to break a
+ * session's ability to edit its own workspace.
+ */
+
+/**
+ * Test hook, and the positional shape the clamp has always been called with in tests.
+ *
+ * The clamp itself is now generic over the registry, which is what makes a CUSTOM CLI's
+ * privileged flag clampable with no code here — previously the five config objects were
+ * named individually, so `privilegedParams` on anything outside that list was declared but
+ * unreachable.
+ */
+export async function _clampExternalCliBypassForOwner(
+  owner: string | undefined,
+  codexConfig?: CodexConfig,
+  geminiConfig?: GeminiConfig,
+  antigravityConfig?: AntigravityConfig,
+  piConfig?: PiConfig,
+  grokConfig?: GrokConfig,
+  deepSeekConfig?: DeepSeekConfig
+): Promise<{
+  codexConfig: CodexConfig | undefined;
+  geminiConfig: GeminiConfig | undefined;
+  antigravityConfig: AntigravityConfig | undefined;
+  piConfig: PiConfig | undefined;
+  grokConfig: GrokConfig | undefined;
+  deepSeekConfig: DeepSeekConfig | undefined;
+}> {
+  const out = await clampExternalCliBypassForOwner(owner, {
+    codexConfig,
+    geminiConfig,
+    antigravityConfig,
+    piConfig,
+    grokConfig,
+    deepSeekConfig,
+  });
+  return out as {
+    codexConfig: CodexConfig | undefined;
+    geminiConfig: GeminiConfig | undefined;
+    antigravityConfig: AntigravityConfig | undefined;
+    piConfig: PiConfig | undefined;
+    grokConfig: GrokConfig | undefined;
+    deepSeekConfig: DeepSeekConfig | undefined;
+  };
+}
+
+/** Test hook: the env-var half of the same multi-user safety gate. */
+export const _clampEnvOverridesForOwner = clampEnvOverridesForOwner;
+
+/** Is `id` the session's own id, its native conversation, or one earlier in its conversation chain? */
+export function agentOwnsConversation(
+  session: { id: string; claudeSessionId?: string | null; claudeSessionChain?: readonly string[] } | undefined,
+  id: string
+): boolean {
+  if (!session) return false;
+  return id === session.id || id === session.claudeSessionId || !!session.claudeSessionChain?.includes(id);
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Agent wait helpers (shared by GET /wait, GET /wait-output, POST /input)
+// ═══════════════════════════════════════════════════════════════
+
+/**
+ * Validate a wait query WITHOUT throwing away the Zod issue.
+ *
+ * `parseBody`'s message argument REPLACES the issue text, so `?timeout=30s` came
+ * back as a bare "Invalid wait parameters": the caller could not tell which of
+ * `until`, `timeout` or `fresh` it got wrong, and its only move was to retry with
+ * a different guess. These endpoints are driven by an LLM with no documentation in
+ * context — the error message IS the documentation, which is why the signal parser
+ * one line later goes to the trouble of naming the bad token and listing the valid
+ * ones. This keeps the endpoint label AND names the offending field.
+ */
+function parseWaitQuery<T>(schema: z.ZodType<T>, query: unknown, label: string): T {
+  const result = schema.safeParse(query);
+  if (result.success) return result.data;
+  const issue = result.error.issues[0];
+  const field = issue && issue.path.length > 0 ? issue.path.join('.') : '';
+  const detail = issue?.message ?? 'validation failed';
+  const message = field ? `Invalid ${label} parameter '${field}': ${detail}` : `Invalid ${label} parameters: ${detail}`;
+  throw Object.assign(new Error(message), {
+    statusCode: 400,
+    body: createErrorResponse(ApiErrorCode.INVALID_INPUT, message),
+  });
+}
+
+/**
+ * Map a waiter-cap rejection to the code that tells the caller the truth.
+ *
+ * The two caps mean different things and warrant different recovery: `session` is
+ * genuinely about THIS session, while `owner` and `total` are process-wide budgets
+ * that say nothing about it. Reporting a global cap as `SESSION_BUSY` (409,
+ * documented as "Session is busy") sent an agent off to a different session to hit
+ * the identical error. `RATE_LIMITED` is the code whose whole meaning is "come back
+ * later", and clients and proxies already treat 429 that way.
+ */
+function waitCapacityResponse(err: WaitCapacityError): ApiResponse<never> {
+  const code = err.scope === 'session' ? ApiErrorCode.SESSION_BUSY : ApiErrorCode.RATE_LIMITED;
+  // The registry's message already names the scope and the limit; passing it through
+  // verbatim keeps the wording in one place.
+  return createErrorResponse(code, err.message);
+}
+
+/**
+ * The signal a session is ALREADY emitting, corrected for liveness.
+ *
+ * `signalForStatus` alone is not enough here, because `Session` parks a DEAD PTY at
+ * `_status = 'idle'` (both `onExit` handlers do) and the object survives in the
+ * session map until an explicit DELETE. Trusting the status therefore answers the
+ * default wait with `{signal:"idle", immediate:true}` for a worker that has
+ * crashed — HTTP 200, no error anywhere, and the agent types its next prompt into a
+ * corpse — while `until=exit` blocks for the full timeout on an event that already
+ * happened and can never happen again.
+ *
+ * `pid === null` means no process is behind this session: it exited, it was
+ * detached, or it was created and never started. All three are `exit` from a
+ * caller's point of view — nothing is running — and in all three the agent's
+ * correct next move is to (re)start the worker rather than to type at it. The
+ * response still carries the raw `status` alongside, so nothing is hidden.
+ *
+ * ⚠️ `pid` alone is NOT enough, and on the normal configuration it is never the
+ * thing that fires — see `workerIsDead()`. `dead` carries the mux layer's answer.
+ *
+ * Fixing it HERE rather than in `signalForStatus` is deliberate: liveness is not
+ * derivable from `SessionStatus`, and the registry holds no `Session` reference.
+ */
+function currentSignalFor(session: { pid: number | null; status: SessionStatus }, dead: boolean): WaitSignal | null {
+  if (dead || session.pid === null || session.pid === undefined) return 'exit';
+  return signalForStatus(session.status);
+}
+
+// ── Worker liveness for tmux-backed sessions ────────────────────────────────
+//
+// `session.pid` is the LOCAL `tmux attach` client, not the worker. Codeman sets
+// `remain-on-exit on` for every session it creates, so when the command inside the
+// pane exits, tmux keeps the pane (`pane_dead=1`), the tmux session survives, the
+// attach client keeps running and `pid` never goes null — no `exit` event is emitted
+// and nothing in `Session` changes. Measured on a shell worker killed with `exit 42`:
+// tmux reports `pane_dead=1 status=42` while Codeman reports `pid=309406 status=idle`
+// and the DEFAULT wait answers `{signal:"idle", immediate:true}` in 0 ms for a corpse.
+// So the liveness check has to ask the mux layer. `pid === null` still matters: it is
+// the right (and only) answer for a direct-PTY session, which has no pane to ask about.
+//
+// Cost control, because `isPaneDead()` is a synchronous `execSync` and `/wait` is
+// polled in a loop by design:
+//   1. Only mux-backed sessions are probed at all.
+//   2. Only requests that actually wait probe — a plain `POST .../input` (the browser's
+//      hot path, thousands per session) never touches tmux.
+//   3. Results are cached per pane for PANE_DEATH_TTL_MS, so a poll loop cannot turn
+//      into one exec per request.
+//   4. The while-blocked watcher is ONE timer per session no matter how many waiters
+//      are parked on it, and it exists only while at least one of them is.
+
+/** How long a pane-liveness probe is reused. Long enough to absorb a poll loop. */
+const PANE_DEATH_TTL_MS = 750;
+
+/** How often a session with a parked waiter is re-checked for a dead worker. */
+const PANE_DEATH_POLL_MS = 3_000;
+
+/** Bounded, because a 24h server churns through panes. */
+const paneDeathCache = new LRUMap<string, { dead: boolean; at: number }>({ maxSize: 256 });
+
+/** One watcher per pane, refcounted by the waits currently parked on it. */
+const paneDeathWatchers = new Map<string, { timer: NodeJS.Timeout; refs: number }>();
+
+type LivenessSession = { usesMux?: boolean; muxName?: string | null };
+
+/**
+ * Whether the worker inside this session's tmux pane has exited.
+ *
+ * False for anything not tmux-backed (nothing to ask), and false when the probe is
+ * unavailable or throws — an unknown answer must never invent a death.
+ */
+function workerIsDead(mux: InfraPort['mux'], session: LivenessSession, now: number = Date.now()): boolean {
+  const muxName = session.usesMux === false ? null : session.muxName;
+  if (!muxName) return false;
+  // Defensive: `TerminalMultiplexer` declares it, but route-test doubles may not.
+  if (typeof mux?.isPaneDead !== 'function') return false;
+
+  const cached = paneDeathCache.get(muxName);
+  if (cached && now - cached.at < PANE_DEATH_TTL_MS) return cached.dead;
+
+  let dead = false;
+  try {
+    dead = mux.isPaneDead(muxName) === true;
+  } catch {
+    dead = false;
+  }
+  paneDeathCache.set(muxName, { dead, at: now });
+  return dead;
+}
+
+/**
+ * Release every waiter on a session whose worker has died, in the documented order.
+ *
+ * The same pair the PTY-exit listener and the delete path use, for the same reason:
+ * `until=exit` callers get their signal, everyone else gets `ended: true` instead of
+ * burning the rest of their timeout on feeds that will never produce anything.
+ */
+function releaseWaitersForDeadWorker(sessionId: string): void {
+  sessionWaits.notifySignal(sessionId, 'exit');
+  sessionWaits.cancelAll(sessionId);
+}
+
+/**
+ * While a wait is parked on a mux-backed session, poll for the worker dying.
+ *
+ * Without this, a worker that dies DURING a wait is invisible: no `exit` event fires
+ * (the attach client is still alive), no output arrives, and the caller blocks for its
+ * full timeout — the common orchestration case, "send a prompt and wait", where the
+ * worker crashes mid-turn.
+ *
+ * @returns a release function; call it in a `finally`, or the timer outlives the wait.
+ */
+function watchForDeadWorker(mux: InfraPort['mux'], session: LivenessSession, sessionId: string): () => void {
+  const muxName = session.usesMux === false ? null : session.muxName;
+  if (!muxName || typeof mux?.isPaneDead !== 'function') return () => {};
+
+  const existing = paneDeathWatchers.get(muxName);
+  if (existing) {
+    existing.refs++;
+  } else {
+    const timer = setInterval(() => {
+      if (!workerIsDead(mux, session)) return;
+      releaseWaitersForDeadWorker(sessionId);
+    }, PANE_DEATH_POLL_MS);
+    // Auxiliary to the waiter's own timer, which is deliberately NOT unref'd; this one
+    // must never be the reason the process stays up.
+    timer.unref();
+    paneDeathWatchers.set(muxName, { timer, refs: 1 });
+  }
+
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    const entry = paneDeathWatchers.get(muxName);
+    if (!entry) return;
+    entry.refs--;
+    if (entry.refs <= 0) {
+      clearInterval(entry.timer);
+      paneDeathWatchers.delete(muxName);
+    }
+  };
+}
+
+/** Test seam: pane-liveness state is module-level, so a suite must be able to reset it. */
+export function _resetPaneLivenessState(): void {
+  for (const entry of paneDeathWatchers.values()) clearInterval(entry.timer);
+  paneDeathWatchers.clear();
+  paneDeathCache.clear();
+}
+
+/** Test seam: how many panes are currently being watched for a dead worker. */
+export function _paneDeathWatcherCount(): number {
+  return paneDeathWatchers.size;
+}
+
+/**
+ * An `AbortController` that fires when the CLIENT goes away, and only then.
+ *
+ * Freeing an abandoned waiter matters because the documented pattern is a loop of
+ * short waits: `curl --max-time 30 ".../wait?timeout=600000"` abandons a live waiter
+ * every iteration until the cap is hit and an innocent session reports busy. Same for
+ * any proxy that cuts the connection.
+ *
+ * ⚠️ **It must listen on the RESPONSE, not the request.** `req.raw` emits `'close'`
+ * as soon as the request body has finished streaming, which on a POST is BEFORE the
+ * handler ever blocks — measured at +1ms with `aborted: false`, indistinguishable
+ * from a real hang-up at +0ms. Wiring the abort there cancels every send-and-wait
+ * instantly and silently kills the feature (it survives on GET only because a GET has
+ * no body to finish). `reply.raw` emits `'close'` both when the response completes
+ * and when the socket dies, and `writableFinished` is what tells those apart: true
+ * only if the response actually went out. The guard is load-bearing, not defensive.
+ *
+ * `app.inject()` never emits `'close'` at all, so this is only observable over real
+ * HTTP — which is why the regression test for it binds a port.
+ */
+function abortOnClientHangUp(reply: FastifyReply): AbortController {
+  const controller = new AbortController();
+  reply.raw.on('close', () => {
+    if (!reply.raw.writableFinished) controller.abort();
+  });
+  return controller;
+}
+
+/**
+ * Inject the agent skill into a case on create, surfacing only the REFUSALS.
+ *
+ * `applyAgentSkill` declines two shapes rather than writing through them ('foreign':
+ * an unmarked skills/codeman the user authored; 'symlink': the skill dir or its
+ * parent is a link). Both were silent: the user flips `agentSkillEnabled` on, nothing
+ * appears in the case, and there is nowhere to look for why. The ordinary outcomes
+ * ('installed'/'refreshed'/'unchanged') stay unlogged since they would print on every
+ * single session create.
+ *
+ * Injection is best-effort and stays that way: neither a refusal nor a thrown error
+ * may fail the create.
+ */
+async function injectAgentSkill(casePath: string, dir: AgentSkillDir): Promise<void> {
+  const skillDir = agentSkillDirFor(casePath, dir);
+  try {
+    // Claude Code loads a same-named USER-LEVEL skill (`~/.claude/skills/codeman`,
+    // written once by `codeman skill install`) over the case copy injected below, so a
+    // stale user copy silently replaces every fresh injection (observed 2026-08-14: an
+    // old copy cost every spawned worker its lineage arc and the fast path). Keep it
+    // current on the same trigger. Refresh-only + marker-guarded; quiet on refusal,
+    // since a foreign user copy is the user's own authored skill, not a config error.
+    await refreshUserAgentSkill();
+    const result = await applyAgentSkill(casePath, true, dir);
+    if (result === 'foreign') {
+      console.warn(
+        `[agent-skill] not injected: ${skillDir} exists but is not Reverie-managed (no marker), refusing to touch it. Remove that copy if you want the packaged skill there.`
+      );
+    } else if (result === 'symlink') {
+      console.warn(
+        `[agent-skill] not injected: ${skillDir} (or its parent) is a symlink, refusing to write through it. Replace it with a real directory to let Reverie install the skill.`
+      );
+    }
+  } catch (err: unknown) {
+    console.warn(`[agent-skill] injection failed for ${skillDir}: ${getErrorMessage(err)}`);
+  }
+}
+
+// Workspace hooks: the install-vs-refresh decision core moved to
+// `applyWorkspaceHooks` in hooks-config.ts (imported above) so the non-route
+// claude create paths — cron fires, legacy scheduled runs, the plan-orchestrator
+// one-shots, the boot recovery sweep — share the SAME decision instead of
+// bypassing the `workspaceHooksEnabled` setting. Route handlers here resolve the
+// setting through the ConfigPort (tests stub it) and pass it as the second arg.
+
+/**
+ * A "Resume"/"continue" request for a NEW omp-mode session (the frontend's
+ * resumeHistorySession(), or anyone hitting the API directly) carries
+ * `continueSession: true` but no id — omp has none to give it, since Codeman
+ * has never tracked its own conversation UUID. Left as `--continue`, that
+ * picks whichever session file in the directory is newest, which silently
+ * drifts to the WRONG conversation the moment a second omp session (this
+ * one, a sibling worker, a stray manual run) has touched the same directory
+ * more recently. Resolve the real id up front instead, same as the
+ * dead-pane-respawn path in session.ts does, so even the FIRST relaunch of a
+ * resumed conversation is pinned rather than guessed.
+ */
+export function resolveOmpConfigForCreate(
+  mode: SessionMode,
+  workingDir: string,
+  ompConfig: OmpConfig | undefined
+): OmpConfig | undefined {
+  if (mode !== 'omp') return undefined;
+  if (!ompConfig || ompConfig.resumeSessionId || !ompConfig.continueSession) {
+    return ompConfig;
+  }
+  const resolvedId = findLatestOmpSessionId(workingDir);
+  if (!resolvedId) {
+    console.warn(
+      `[Session] OMP: no session file found under ${workingDir} to pin --resume; falling back to ambiguous --continue`
+    );
+  }
+  return resolvedId ? { ...ompConfig, resumeSessionId: resolvedId } : ompConfig;
+}
+
+/**
+ * The tmux history lines a full capture may read (`capture-pane -S -<n>`): the
+ * optional `lines` query parameter, an integer of at least 1, never more than
+ * the configured history limit; absent or malformed, the limit itself, as
+ * before. A grid tile sends its own scrollback size: its xterm keeps no more
+ * than that, while a capture of the whole history (tens of thousands of lines,
+ * cut to `tail` only afterwards) is synchronous work on this event loop.
+ */
+function captureHistoryLines(raw: string | undefined, historyLimit: number): number {
+  if (typeof raw !== 'string' || !/^\d{1,9}$/.test(raw)) return historyLimit;
+  const lines = Number(raw);
+  return lines >= 1 ? Math.min(lines, historyLimit) : historyLimit;
+}
+
+/**
+ * `RemoteHost` → the wake registry's host shape. They differ in one field name only
+ * (`id` in host config vs `hostId` on a session's `remote`), but the rename is load-
+ * bearing: the registry keys its per-host wake state on `hostId`. The proxy fields
+ * travel too: they are what tells the registry its probe cannot reach this host.
+ */
+function wakeableHost(host: RemoteHost): WakeableRemote {
+  return {
+    hostId: host.id,
+    label: host.label,
+    host: host.host,
+    port: host.port,
+    wakeMac: host.wakeMac,
+    wakeCommand: host.wakeCommand,
+    jumpHost: host.jumpHost,
+    socksProxy: host.socksProxy,
+    extraSshOptions: host.extraSshOptions,
+  };
+}
+
+export function registerSessionRoutes(
+  app: FastifyInstance,
+  ctx: SessionPort & EventPort & ConfigPort & InfraPort & AuthPort & TabLayoutPort,
+  /** Test seam: inject a registry with fake IO instead of the real TCP/WoL probes. */
+  options: {
+    remoteWake?: RemoteWakeRegistry;
+    company?: CompanyService;
+    /** Rooms and the audit log, for a coordinator continuing a gone agent's conversation (resume-guard.ts). */
+    resumeTakeover?: { rooms: () => readonly TakeoverRoom[]; audit: (entry: Record<string, unknown>) => Promise<void> };
+  } = {}
+): RemoteWakeRegistry {
+  // A coordinator may continue a GONE agent's conversation in a room it coordinates (REVERIE_RESUME_TAKEOVER=owner turns
+  // this off). Every conversation let through that way is written to the audit log before the session is created.
+  // The coordinator role counts only when the caller's header and the resolved parent are the same session: a body
+  // `parentSessionId` naming someone else cannot borrow their role.
+  const takeoverFor = (callerId: string, header: unknown) =>
+    options.resumeTakeover && header === callerId
+      ? (id: string) => takeoverGrant(callerId, id) !== null
+      : undefined;
+  const takeoverGrant = (callerId: string, id: string) =>
+    options.resumeTakeover
+      ? resumeTakeoverRoom({
+          policy: resolveTakeoverPolicy(),
+          caller: callerId,
+          id,
+          sessions: [
+            ...ctx.sessions.values(),
+            // Rows the console did not load after a restart are gone agents too; the live row, if any, wins.
+            ...Object.entries(ctx.store.getSessions() as unknown as Record<string, Record<string, unknown>>)
+              .filter(([rowId]) => !ctx.sessions.has(rowId))
+              .map(([rowId, row]) => persistedTakeoverSession(rowId, row)),
+          ],
+          rooms: options.resumeTakeover.rooms(),
+        })
+      : null;
+  /** Audit each foreign conversation the body continues; false if the audit line could not be written (the caller then refuses). */
+  const auditTakeovers = async (
+    body: Parameters<typeof foreignResumes>[0],
+    callerId: string,
+    owns: (id: string) => boolean
+  ): Promise<{ status: number; message: string } | null> => {
+    const auditFailed = { status: 500, message: 'Could not write the audit line for this launch; nothing was started' };
+    // An agent caller launching Codex without approvals is audited the same way (the agent runs unattended).
+    if (options.resumeTakeover && (body as { codexConfig?: { dangerouslyBypassApprovals?: boolean } }).codexConfig?.dangerouslyBypassApprovals === true) {
+      try {
+        await options.resumeTakeover.audit({ action: 'agent-bypass-approvals', by: callerId, mode: 'codex' });
+      } catch {
+        return auditFailed;
+      }
+    }
+    for (const id of foreignResumes(body, owns)) {
+      const grant = takeoverGrant(callerId, id);
+      // The state moved between the check and now (the agent restarted, a membership changed): fail closed.
+      if (!grant) return { status: 409, message: 'The takeover is no longer allowed; nothing was started' };
+      try {
+        await options.resumeTakeover!.audit({
+          action: 'resume-takeover',
+          by: callerId,
+          conversation: id,
+          member: grant.memberSessionId,
+          roomId: grant.roomId,
+          room: grant.roomName,
+        });
+      } catch {
+        return auditFailed;
+      }
+    }
+    return null;
+  };
+
+  // Wake-on-LAN for sleeping remote hosts (see remote-wake.ts). One registry per
+  // route registration (= one web server) — the same shape as the process-wide
+  // `sessionWaits` singleton, but without the global.
+  //
+  // ⚠️ The ONLY caller that may wake a host is the input route below. The
+  // auto-reconnect watcher and boot recovery deliberately have no access to this
+  // registry: waking there would re-wake the host seconds after every suspend, so
+  // it could never stay asleep.
+  const remoteWake =
+    options.remoteWake ??
+    new RemoteWakeRegistry(
+      createDefaultRemoteWakeDeps({
+        noteReconnected: (sessionId, success) => {
+          // Duck-typed exactly like server.ts: TmuxManager owns the COD-108 backoff
+          // state, and the port interface does not expose it.
+          const mux = ctx.mux as unknown as { noteRemoteReconnect?: (id: string, ok: boolean) => void };
+          mux.noteRemoteReconnect?.(sessionId, success);
+        },
+        broadcast: (event, payload) => ctx.broadcast(event, payload),
+        log: (message) => console.log(message),
+        // The session's `remote` block is a launch-time snapshot, so a wake target
+        // configured later (banner's config dialog, or a hand-edited remote-hosts.json)
+        // is resolved here — throttled by the registry, and the host config is
+        // authoritative in BOTH directions (removing the field turns the feature off
+        // for a live session too).
+        resolveRemote: async (session) => {
+          const remote = session.remote;
+          if (!remote) return undefined;
+          const hosts = await readRemoteHosts(CODEMAN_CONFIG_DIR);
+          return rehydrateRemoteHostFields(remote, new Map(hosts.map((host) => [host.id, host])));
+        },
+      })
+    );
+  // ═══════════════════════════════════════════════════════════════
+  // Auth
+  // ═══════════════════════════════════════════════════════════════
+
+  // ========== Logout ==========
+
+  app.post('/api/logout', async (req, reply) => {
+    // Invalidate server-side session token (not just the browser cookie)
+    const sessionToken = req.cookies[AUTH_COOKIE_NAME];
+    if (sessionToken) {
+      ctx.authSessions?.delete(sessionToken);
+    }
+    // The web-tab proxy authenticates on capabilities, not on this cookie, so a
+    // logout has to retire them too or every dashboard URL opened during this
+    // login keeps relaying without one (WebviewCapabilityStore.revokeOwner).
+    webviewCapabilities.revokeOwner(ownerFor(req));
+    htmlViewCapabilities.revokeOwner(ownerFor(req));
+    reply.clearCookie(AUTH_COOKIE_NAME, { path: '/' });
+    return {};
+  });
+
+  // ═══════════════════════════════════════════════════════════════
+  // Session CRUD (list, create, rename, color, delete, detail)
+  // ═══════════════════════════════════════════════════════════════
+
+  // ========== Session Listing ==========
+
+  app.get('/api/sessions', async (req) => {
+    const list = ctx.getLightSessionsState();
+    if (!isMultiUserMode()) return list;
+    const user = getAuthUser(req);
+    if (user.role === 'admin') return list;
+    return (list as Array<{ owner?: string }>).filter((s) => canAccessOwned(user, s.owner));
+  });
+
+  // ========== Legacy Session Tab Order (temporary synchronized compatibility bridge) ==========
+
+  app.put('/api/session-order', async (req, reply): Promise<ApiResponse<{ order: string[] }>> => {
+    try {
+      const { order } = parseBody(SessionOrderUpdateSchema, req.body, 'Invalid session order');
+      const user = getAuthUser(req);
+      const result = await ctx.tabLayouts.putLegacyOrder(
+        { owner: ownerLayoutKey(ownerFor(req)), isAdmin: user.role === 'admin' },
+        order
+      );
+      return { success: true, data: { order: result.order } };
+    } catch (error) {
+      if (error instanceof TabLayoutValidationError) {
+        return reply.code(400).send(createErrorResponse(ApiErrorCode.INVALID_INPUT, error.message));
+      }
+      throw error;
+    }
+  });
+
+  // ========== Session Creation ==========
+
+  app.post('/api/sessions', async (req, reply) => {
+    const owner = ownerFor(req);
+    // Global + per-user session cap.
+    const capMsg = sessionCapacityMessage(ctx.sessions, owner);
+    if (capMsg) return createErrorResponse(ApiErrorCode.OPERATION_FAILED, capMsg);
+
+    const body = parseBody(CreateSessionSchema, req.body);
+    const parentSessionId = resolveParentSessionId(ctx, req, body.parentSessionId, owner);
+    // An agent may only resume a conversation of its OWN (its row id, its native thread or an earlier one in its chain). A row created
+    // "resuming" another agent's thread would pass for that agent's successor, so it is refused at the source.
+    if (req.headers['x-codeman-parent-session'] !== undefined && parentSessionId) {
+      const owns = (id: string) => agentOwnsConversation(ctx.sessions.get(parentSessionId), id);
+      const refusal = resumeRefusalForAgent(body, owns, takeoverFor(parentSessionId, req.headers['x-codeman-parent-session']));
+      if (refusal) return reply.code(403).send(createErrorResponse(ApiErrorCode.FORBIDDEN, refusal));
+      const auditRefusal = await auditTakeovers(body, parentSessionId, owns);
+      if (auditRefusal) {
+        return reply.code(auditRefusal.status).send(createErrorResponse(ApiErrorCode.OPERATION_FAILED, auditRefusal.message));
+      }
+    }
+    if (body.icon !== undefined && normalizeIcon(body.icon) === undefined) {
+      return createErrorResponse(ApiErrorCode.INVALID_INPUT, 'Choose an icon with at most two characters');
+    }
+    let spawnIdentity: ReturnType<CompanyService['prepareSpawn']> | undefined;
+    if (options.company && getCli(body.mode ?? 'claude')?.kind === 'agent' && !body.attachRemoteSession) {
+      try {
+        spawnIdentity = options.company.prepareSpawn({
+          owner,
+          parentSessionId,
+          channelId: body.channelId ?? body.chatroomId,
+          name: body.name,
+          icon: body.icon,
+        });
+      } catch (error) {
+        return createErrorResponse(ApiErrorCode.INVALID_INPUT, getErrorMessage(error));
+      }
+    }
+    // The top-level `model` is Claude's per-session `--model`. Every other CLI takes its model
+    // in its own config object (`codexConfig.model` and so on), so a `model` here would be
+    // dropped without a word; refuse it before anything is written for the session.
+    if (body.model && !cliTakesSessionModel(body.mode ?? 'claude')) {
+      return createErrorResponse(
+        ApiErrorCode.INVALID_INPUT,
+        'model applies to claude sessions only; other CLIs take their model in their own config object, such as codexConfig.model'
+      );
+    }
+    // An attach launches nothing (the remote agent is already running), so a launch model
+    // or advisor would be dropped the same way, so both are refused, as they have been since
+    // they were added. The older launch fields (effort, envOverrides) predate this and keep
+    // their silent ignore here, since refusing them now would break existing callers.
+    if (body.attachRemoteSession && (body.model || body.advisorModel)) {
+      return createErrorResponse(
+        ApiErrorCode.INVALID_INPUT,
+        'model and advisorModel shape a new launch, and attachRemoteSession launches nothing; leave them out when attaching'
+      );
+    }
+    let workingDir = body.workingDir || process.cwd();
+    let remote = undefined;
+
+    // COD-105 — attach to a discovered (non-owned) remote tmux session. The
+    // remote session is already running, so we skip the tmux-prereq probe and
+    // build a NON-owned SessionRemote (detach-not-kill on close). Remote CASE
+    // creation (owned durable sessions) is handled by the dedicated case-create
+    // endpoint below, which #145 consolidated remote-host resolution into.
+    if (body.attachRemoteSession) {
+      // Remote hosts are admin-only infrastructure everywhere else (the list answers
+      // `[]` to a non-admin; write and discovery routes are `adminOnly`), and the wake
+      // below spawns the host's `wakeCommand` or broadcasts a packet. So the gate comes
+      // FIRST — before the host is even looked up — or an unprivileged account could
+      // invoke that executable for any configured `hostId` and only then be told the
+      // workingDir was outside its workspace (reproduced upstream: wake spy fired, 403).
+      if (isMultiUserMode() && !isAdmin(req)) {
+        return createErrorResponse(ApiErrorCode.FORBIDDEN, 'Remote hosts are admin-only in multi-user mode');
+      }
+      const { hostId, remoteSessionName } = body.attachRemoteSession;
+      const host = (await readRemoteHosts(CODEMAN_CONFIG_DIR)).find((item) => item.id === hostId);
+      if (!host) return createErrorResponse(ApiErrorCode.NOT_FOUND, 'Remote host not found');
+      // An explicit wake request is the only thing that may wake a host, and the user
+      // pressing Attach IS one (see quick-start for the same gate, and
+      // `remote-wake.ts` for what must never call this). Without it a sleeping host
+      // answers with an ssh failure that blames anything but the machine being asleep.
+      const hostWake = await remoteWake.ensureHostAwake(wakeableHost(host), {
+        timeoutMs: REMOTE_WAKE_REQUEST_READY_TIMEOUT_MS,
+        // No session yet, so the wake events name their requester (multi-user routing).
+        requestedBy: ownerFor(req),
+      });
+      if (hostWake === 'failed') {
+        return createErrorResponse(
+          ApiErrorCode.OPERATION_FAILED,
+          `${host.label} did not come back after a wake-on-LAN request — nothing was attached`
+        );
+      }
+      workingDir = `${host.username}@${host.host}:${remoteSessionName}`;
+      remote = toAttachedSessionRemote(host, remoteSessionName, workingDir);
+    }
+
+    // Multi-user: shell mode is arbitrary command execution as the host account,
+    // gated behind the same grant as bypass (section 6.3). Resolve the owner's grant
+    // from the store so a GRANTED regular user is not wrongly denied (AuthUser role alone can't tell).
+    if (
+      getCli(body.mode ?? 'claude')?.capabilities.privilegedCommandGate &&
+      !(await canUsernameRunPrivilegedCommands(owner))
+    ) {
+      return createErrorResponse(ApiErrorCode.FORBIDDEN, 'Shell sessions require the can-bypass-permissions grant');
+    }
+
+    // Multi-user linchpin (section 6.2): a non-admin's workingDir must resolve
+    // inside their own case space. Enforced BEFORE any disk-mutating call below so
+    // a foreign path can never be written into.
+    if (!isWorkingDirAllowed(getAuthUser(req), workingDir)) {
+      return createErrorResponse(ApiErrorCode.FORBIDDEN, 'workingDir is outside your workspace');
+    }
+
+    // Validate workingDir exists and is a directory. Bounded: a workingDir on a
+    // network mount that stopped answering must not freeze the event loop, and
+    // "did not answer" is reported as such, never as "does not exist".
+    if (body.workingDir) {
+      const kind = await probePathKind(workingDir, { pastCap: true });
+      if (kind === 'unknown') {
+        return createErrorResponse(
+          ApiErrorCode.OPERATION_FAILED,
+          describeUnknownPath('workingDir', workingDir, { pastCap: true })
+        );
+      }
+      if (kind === 'absent') {
+        return createErrorResponse(ApiErrorCode.INVALID_INPUT, 'workingDir does not exist');
+      }
+      if (kind !== 'directory') {
+        return createErrorResponse(ApiErrorCode.INVALID_INPUT, 'workingDir is not a directory');
+      }
+    }
+
+    // envOverrides flow through Session → tmux setenv (ephemeral, per-session).
+    //
+    // For keys the caller is actively setting, strip any stale disk entry a prior
+    // Codeman version may have written. Scope limited to:
+    //   - Claude mode (OpenCode/Codex/Gemini/Antigravity don't read .claude/settings.local.json)
+    //   - workingDir inside CASES_DIR / the per-user case space (Codeman's managed
+    //     territory — we never mutate .claude/settings.local.json in arbitrary user
+    //     repos that POST /api/sessions can target, as those may have hand-authored
+    //     values).
+    const managedCasesBase = resolveCasesDir(getAuthUser(req));
+    // `!isExternalCliMode()` is byte-identical to the eight-mode `!==` chain it replaces
+    // (claude and shell are the two non-external modes) and, unlike the chain, cannot fall
+    // behind the next CLI added.
+    const canStripDisk =
+      !isExternalCliMode(body.mode ?? 'claude') &&
+      body.envOverrides &&
+      Object.keys(body.envOverrides).length > 0 &&
+      (workingDir.startsWith(CASES_DIR + '/') || workingDir.startsWith(managedCasesBase + '/'));
+    if (canStripDisk) {
+      await stripCaseEnvKeys(workingDir, Object.keys(body.envOverrides!));
+    }
+
+    // Write model override to .claude/settings.local.json if provided
+    if (body.modelOverride !== undefined) {
+      await updateCaseModel(workingDir, body.modelOverride || null);
+    }
+
+    // Plan-usage telemetry (App Settings → header chip): no request-time field
+    // here anymore, and NO disk write — a settings.local.json statusLine used
+    // to take precedence over the user's own global/project statusLine for ANY
+    // `claude` run in that directory, including entirely outside Codeman, with
+    // no disclosure and no way to undo it (real bug, found 2026-08-31).
+    // TmuxManager.createSession reads the persisted `showPlanUsageLimits`
+    // setting FRESH at spawn (readPlanUsageTelemetryEnabled in hooks-config.ts)
+    // and resolves it into an EPHEMERAL `claude --settings` CLI flag — never
+    // written to disk, so a plain `claude` run outside Codeman is untouched —
+    // and applies uniformly to every claude creation path (this route, cron,
+    // the Ralph Loop API, quick-start), not just this one. That resolution
+    // also self-heals: it strips any legacy disk-written exporter an older
+    // Codeman build left behind.
+
+    // Hooks for the workspace this session runs in (install vs refresh-only is the
+    // `workspaceHooksEnabled` setting; see applyWorkspaceHooks). Never for a remote
+    // attach (workingDir is a user@host:session pseudo-path — mkdir would create it
+    // as a junk local dir), and only when the caller named a workingDir: the
+    // process-cwd fallback is $HOME under installer-created services, and hooks
+    // materializing in ~/.claude/settings.local.json was never asked for.
+    if (!remote && body.workingDir && (body.mode ?? 'claude') === 'claude') {
+      await applyWorkspaceHooks(workingDir, await ctx.getWorkspaceHooksEnabled());
+    }
+
+    // Refuse up front if the requested CLI cannot start, rather than spawning a pane that
+    // dies on `command not found`. The message comes from the resolver, so it names where
+    // resolution actually looked (server PATH, login shell, the entry's search dirs); a
+    // LAUNCHER CLI answers with its own more specific reason instead — for dsh, whether the
+    // binary is missing, no pane-capable profile exists, or the profile the caller NAMED
+    // cannot drive a pane, which are three different things to go and fix.
+    //
+    // Scoped to EXTERNAL CLIs, matching what this route has always pre-flighted: claude and
+    // shell deliberately fall through to tmux-manager's own not-found throw instead, and
+    // pulling them forward here would change which error a missing claude produces.
+    const requestedMode = body.mode ?? 'claude';
+    if (getCli(requestedMode)?.capabilities.external) {
+      const cliLaunchError = await resolveCliLaunchError(
+        requestedMode,
+        legacyConfigForMode(requestedMode, body as unknown as Record<string, unknown>)
+      );
+      if (cliLaunchError) {
+        return createErrorResponse(ApiErrorCode.OPERATION_FAILED, cliLaunchError);
+      }
+    }
+
+    // Agent skill (docs/agent-control-plan.md §2): ADD-ONLY on create, same shared-
+    // workspace rationale as the statusLine above: a create must never remove the
+    // skill from under other live sessions in the repo. Marker-guarded, so a user's
+    // own copy is never touched. Every CLI that takes the skill gets it in the directory
+    // that CLI scans (`capabilities.agentSkillDir`); the same remote and named-workingDir
+    // conditions as the hooks above, and only once the launch pre-flight passed, so a
+    // CLI that cannot start leaves nothing in the workspace.
+    const createSkillDir = agentSkillDir(getCli(body.mode ?? 'claude')?.capabilities);
+    if (!remote && body.workingDir && createSkillDir && (await ctx.getAgentSkillEnabled())) {
+      await injectAgentSkill(workingDir, createSkillDir);
+    }
+
+    // A Claude resume must find its transcript in THIS session's config dir (its account), and must never fall back to a fresh
+    // thread or to one of two copies that differ (a switch between accounts leaves a stale copy behind): refused with the copies
+    // named, unless the caller asks to refresh from the newest (resume-guard.ts).
+    const validatedResumeId = body.resumeSessionId;
+    const resumeWarnings: string[] = [];
+    if (validatedResumeId && getCli(body.mode ?? 'claude')?.capabilities.transcript === 'claude-jsonl' && !remote) {
+      const launchEnv = { ...(await clampEnvOverridesForOwner(owner, body.envOverrides)), ...subscriptionLaunch(req).env };
+      const home = join(process.env.HOME || '/tmp', '.claude');
+      const targetDir = launchEnv.CLAUDE_CONFIG_DIR || process.env.CLAUDE_CONFIG_DIR || home;
+      const accounts = join(getDataDir(), 'accounts');
+      const known = [home, ...(process.env.CLAUDE_CONFIG_DIR ? [process.env.CLAUDE_CONFIG_DIR] : [])];
+      try {
+        for (const entry of await fs.readdir(accounts)) known.push(join(accounts, entry));
+      } catch {
+        // No subscription accounts.
+      }
+      const check = await checkClaudeResume(validatedResumeId, targetDir, known, body.refreshResumeFromNewest === true);
+      if (!check.ok) {
+        const code = { 404: ApiErrorCode.NOT_FOUND, 409: ApiErrorCode.CONFLICT, 422: ApiErrorCode.INVALID_INPUT }[check.status];
+        return reply.code(check.status).send(createErrorResponse(code, check.error));
+      }
+      if (check.refreshed) console.log(`[Session] Resume ${validatedResumeId}: refreshed ${check.refreshed} from the newest copy`);
+      if (check.setAside) console.log(`[Session] Resume ${validatedResumeId}: set aside ${check.setAside.join(', ')}`);
+      if (check.olderElsewhere) {
+        console.log(`[Session] Resume ${validatedResumeId}: older differing copies left in other accounts: ${check.olderElsewhere.join('; ')}`);
+        resumeWarnings.push(`Resumed the copy in ${targetDir}; older, different copies of this conversation are in other accounts and were not used: ${check.olderElsewhere.join('; ')}`);
+      }
+    }
+
+    const globalNice = await ctx.getGlobalNiceConfig();
+    const modelConfig = await ctx.getModelConfig();
+    const mode = body.mode || 'claude';
+    // Synced App Settings launch defaults (capabilities.launchDefaults, codex's model and
+    // effort today) fill the CLI's own config object where the caller left it unset.
+    // Local launches only: a remote attach runs whatever the remote pane already runs.
+    const launchBody = remote ? body : await applyLaunchDefaults(mode, body);
+    // Where a model override comes from is a capability, and the three answers are
+    // genuinely different mechanisms:
+    //   'flag'                 — the CLI takes --model, so read the value the caller sent
+    //                            in that CLI's own config object.
+    //   'claude-settings-file' — claude alone, whose persistent model is written to
+    //                            <case>/.claude/settings.local.json (`modelOverride`). A
+    //                            per-session `model` from the caller goes out as --model and
+    //                            wins; without one, the app-wide default applies.
+    //   'none'                 — shell has no model; deepseek's is a composition entry in
+    //                            the profile's config tree, not a session field
+    //                            (docs/deepseek-integration.md). Both get nothing.
+    const modelSource = getCli(mode)?.capabilities.model;
+    const model =
+      modelSource?.source === 'flag'
+        ? (legacyConfigForMode(mode, launchBody as unknown as Record<string, unknown>)?.[
+            modelSource.param ?? 'model'
+          ] as string | undefined)
+        : modelSource?.source === 'claude-settings-file'
+          ? body.model || modelConfig?.defaultModel || undefined
+          : undefined;
+    const claudeModeConfig = await ctx.getClaudeModeConfig();
+    // Section 6.3: force non-granted users to a classifier-guarded mode.
+    const effectiveClaudeMode = await resolveClaudeModeForUsername(claudeModeConfig.claudeMode, owner);
+    // Section 6.3: clamp Codex/Gemini/Antigravity bypass switches for a non-granted owner (no-op single-user/granted).
+    const {
+      codexConfig: gatedCodexConfig,
+      geminiConfig: gatedGeminiConfig,
+      antigravityConfig: gatedAntigravityConfig,
+      piConfig: gatedPiConfig,
+      grokConfig: gatedGrokConfig,
+      deepSeekConfig: gatedDeepSeekConfig,
+    } = await _clampExternalCliBypassForOwner(
+      owner,
+      launchBody.codexConfig,
+      launchBody.geminiConfig,
+      launchBody.antigravityConfig,
+      launchBody.piConfig,
+      launchBody.grokConfig,
+      launchBody.deepSeekConfig
+    );
+    const terminalHistoryConfig = await ctx.getTerminalHistoryConfig();
+    const session = new Session({
+      workingDir,
+      mode,
+      name: spawnIdentity?.name ?? body.name ?? '',
+      mux: ctx.mux,
+      useMux: true,
+      niceConfig: globalNice,
+      model,
+      claudeMode: effectiveClaudeMode,
+      allowedTools: claudeModeConfig.allowedTools,
+      openCodeConfig: mode === 'opencode' ? launchBody.openCodeConfig : undefined,
+      codexConfig: mode === 'codex' ? gatedCodexConfig : undefined,
+      geminiConfig: mode === 'gemini' ? gatedGeminiConfig : undefined,
+      antigravityConfig: mode === 'antigravity' ? gatedAntigravityConfig : undefined,
+      piConfig: mode === 'pi' ? gatedPiConfig : undefined,
+      grokConfig: mode === 'grok' ? gatedGrokConfig : undefined,
+      deepSeekConfig: mode === 'deepseek' ? gatedDeepSeekConfig : undefined,
+      ompConfig: resolveOmpConfigForCreate(mode, workingDir, launchBody.ompConfig),
+      resumeSessionId: validatedResumeId,
+      envOverrides: { ...(await clampEnvOverridesForOwner(owner, body.envOverrides)), ...subscriptionLaunch(req).env },
+      subscriptionProfile: subscriptionLaunch(req).selection,
+      effort: body.effort,
+      advisorModel: body.advisorModel,
+      tmuxHistoryLimit: terminalHistoryConfig.tmuxHistoryLimit,
+      remote,
+      owner,
+      parentSessionId,
+    });
+
+    const tabLayout = body.tabGroupId
+      ? await ctx.addSession(session, { tabGroupId: body.tabGroupId })
+      : await ctx.addSession(session);
+    ctx.store.incrementSessionsCreated();
+    ctx.persistSessionState(session);
+    await ctx.setupSessionListeners(session);
+    if (spawnIdentity) await options.company!.completeSpawn(session.id, spawnIdentity);
+    // Pre-seed the agent skill's preamble cache so its §0 bootstrap is a two-line
+    // loader (see seedAgentSessionPreamble). Local sessions of a CLI that takes the
+    // skill; best-effort.
+    if (agentSkillDir(getCli(mode)?.capabilities) && !remote && (await ctx.getAgentSkillEnabled())) {
+      await seedAgentSessionPreamble(session.id).catch((err: unknown) =>
+        console.warn(`[agent-skill] preamble seed failed for ${session.id}: ${getErrorMessage(err)}`)
+      );
+    }
+    getLifecycleLog().log({ event: 'created', sessionId: session.id, name: session.name });
+
+    // Use light state for broadcast + response — buffers are fetched on-demand via /terminal.
+    // Avoids serializing 2-3MB of terminal+text buffers per session creation.
+    const lightState = ctx.getSessionStateWithRespawn(session);
+    ctx.broadcast(SseEvent.SessionCreated, lightState);
+    // A grouped creation also returns the layout that placed it, so the browser
+    // draws the tab inside its group at once instead of after a re-read.
+    return {
+      session: lightState,
+      ...(spawnIdentity ? { identity: spawnIdentity } : {}),
+      ...(body.tabGroupId ? { tabLayout } : {}),
+      ...(resumeWarnings.length ? { warnings: resumeWarnings } : {}),
+    };
+  });
+
+  // ========== Rename Session ==========
+
+  app.put('/api/sessions/:id/name', async (req) => {
+    const { id } = req.params as { id: string };
+    const body = parseBody(SessionNameSchema, req.body, 'Invalid request body');
+    const session = findSessionOrFail(ctx, id, req);
+
+    const name = String(body.name || '').slice(0, MAX_SESSION_NAME_LENGTH);
+    // A no-op rename (the Session Options name field saves on blur and recomposes the same
+    // string) must not flip nameSource to 'manual' or append a custom-title row to the transcript.
+    if (name === session.name) return { name: session.name };
+    session.name = name;
+    // Also update the mux session name if applicable
+    ctx.mux.updateSessionName(id, session.name);
+    persistAndBroadcastSession(ctx, session);
+    await syncClaudeTitle(session);
+    return { name: session.name };
+  });
+
+  // ========== Set Session Color ==========
+
+  app.put('/api/sessions/:id/color', async (req) => {
+    const { id } = req.params as { id: string };
+    const body = parseBody(SessionColorSchema, req.body, 'Invalid request body');
+    const session = findSessionOrFail(ctx, id, req);
+
+    const validColors = ['default', 'red', 'orange', 'yellow', 'green', 'blue', 'purple', 'pink'];
+    if (!validColors.includes(body.color)) {
+      return createErrorResponse(ApiErrorCode.INVALID_INPUT, 'Invalid color');
+    }
+
+    session.setColor(body.color as SessionColor);
+    persistAndBroadcastSession(ctx, session);
+    return { color: session.color };
+  });
+
+  // ========== Custom Model Endpoint Profiles (docs/custom-model-endpoints-plan.md) ==========
+  //
+  // Applies (or clears) a session's custom OpenAI-compatible endpoint selection and
+  // RESTARTS the pane's CLI process — these harnesses read endpoint config at process
+  // start, not per-turn, so a live hot-swap isn't possible (confirmed with the
+  // maintainer). Endpoints come from the admin-configured custom-model-hosts store
+  // (chunk 3's CRUD routes), never raw client-supplied env — that's what keeps this
+  // route safe to let any session owner call for their own session, unlike the
+  // generic envOverrides field the privilegedEnvKeys clamp exists to guard.
+  //
+  // ⚠️ Local sessions only for now. A remote session's `restartCli()` renders
+  // `ssh ... tmux new-session -A`, which reattaches the durable remote tmux rather than
+  // restarting the agent, and the env lands on the LOCAL pane running ssh, which
+  // forwards nothing; docker is the same attach-or-create shape. Both used to answer
+  // `restarted: true` and change nothing, so they are refused until those paths are
+  // plumbed (the env would have to ride the remote/in-container launch command).
+  app.post('/api/sessions/:id/custom-model', async (req) => {
+    const { id } = req.params as { id: string };
+    const body = parseBody(CustomModelSelectionSchema, req.body, 'Invalid request body');
+    const session = findSessionOrFail(ctx, id, req);
+
+    if (session.remote || session.docker) {
+      return createErrorResponse(
+        ApiErrorCode.INVALID_INPUT,
+        'Custom model endpoints are not supported for remote (SSH) or Docker sessions yet'
+      );
+    }
+    if (session.isBusy()) {
+      return createErrorResponse(ApiErrorCode.SESSION_BUSY, 'Session is busy');
+    }
+
+    if ('clear' in body) {
+      const { previousConfigDir } = session.setCustomModel(undefined);
+      removeConfigDir(previousConfigDir);
+      const restarted = await session.restartCli();
+      persistAndBroadcastSession(ctx, session);
+      return { customModel: session.customModel, restarted };
+    }
+
+    const entry = getCli(session.mode);
+    if (!entry) {
+      return createErrorResponse(ApiErrorCode.INVALID_INPUT, `No CLI registry entry for mode ${session.mode}`);
+    }
+    if (entry.capabilities.customModelInjection.kind === 'unsupported') {
+      return createErrorResponse(ApiErrorCode.OPERATION_FAILED, `${session.mode} has no known custom-model mechanism`);
+    }
+
+    const hosts = await readCustomModelHosts(getDataDir());
+    const endpoint = hosts.find((h) => h.id === body.endpointId);
+    if (!endpoint) {
+      return createErrorResponse(ApiErrorCode.NOT_FOUND, 'Model endpoint not found');
+    }
+    const contextLength = endpoint.modelContextLengths?.[body.modelId];
+
+    // Some CLIs (today: only claude) carry enough of their own fixed system-prompt/tool-
+    // schema overhead that a small enough real context guarantees a first-message failure
+    // no matter what CLAUDE_CODE_MAX_CONTEXT_TOKENS says — confirmed live at ~36.4K tokens
+    // against a model configured with a real 16384-token context. Warn before committing
+    // to a restart that's certain to fail, rather than letting the user discover it via a
+    // cryptic 400 from the CLI itself. Answered by `confirmedContext` (or the legacy
+    // `confirmed`, which still means both) — NOT by `confirmedSwap`: this warning is
+    // about the caller's own session, and the swap warning below is about someone
+    // else's, so an answer to one is not consent to the other.
+    if (!(body.confirmed || body.confirmedContext) && exceedsSafeContextFloor(entry, contextLength)) {
+      return {
+        requiresContextWarning: true,
+        modelId: body.modelId,
+        contextLength,
+        minSafeContextTokens: CLAUDE_MIN_SAFE_CONTEXT_TOKENS,
+      };
+    }
+
+    // llama.cpp runs exactly one model at a time; llama-swap unloads and reloads it on
+    // demand, which can take anywhere from a few seconds to over a minute — long enough
+    // that a session mid-swap looks indistinguishable from one that never left the native
+    // backend. Feature-detected via llama-swap's own `GET /running` (a plain llama.cpp
+    // server has no such endpoint and reads as `isLlamaSwap: false` — nothing to check).
+    const swapStatus = await getLlamaSwapStatus(endpoint);
+    const currentlyLoaded = swapStatus.running.find((r) => r.state === 'ready')?.model ?? swapStatus.running[0]?.model;
+    // Distinct from targetReady below: this is ONLY about whether proceeding would evict a
+    // model another session is actively using — true even if nothing is loaded at all yet
+    // would be wrong here (nothing to evict), so this stays narrowly "a DIFFERENT model is
+    // currently ready".
+    const swapNeeded = swapStatus.isLlamaSwap && !!currentlyLoaded && currentlyLoaded !== body.modelId;
+    // Whether the TARGET model itself is already the one loaded and ready — false whether
+    // nothing is loaded yet, a different model is loaded, or this one is loaded but still
+    // mid-load. Drives both the actual load trigger below and modelSwapInProgress in the
+    // response; deliberately broader than swapNeeded, which only gates the confirmation ask.
+    const targetReady = swapStatus.running.some((r) => r.model === body.modelId && r.state === 'ready');
+
+    // Only ask when switching would actually take the model away from another session
+    // that is currently using it — never just because a swap is needed at all. Answered
+    // by `confirmedSwap` (or the legacy `confirmed`). ⚠ It must NOT read
+    // `confirmedContext`: this check runs second, and while the two shared one flag a
+    // user who clicked past a too-small-context warning had already, silently, agreed to
+    // evict another session's model.
+    if (swapNeeded && !(body.confirmed || body.confirmedSwap)) {
+      const conflicting = [...ctx.sessions.values()].filter(
+        (s) =>
+          s.id !== session.id && s.customModel?.endpointId === endpoint.id && s.customModel?.modelId === currentlyLoaded
+      );
+      if (conflicting.length > 0) {
+        // Applying a custom model is ungated for any session owner, so in multi-user
+        // mode a non-admin pointing their own session at a shared endpoint must not
+        // learn another user's session names in the confirm dialog — with
+        // autoNameSessions on, those names are that user's own prompts. The swap is
+        // still blocked pending confirmation regardless of ownership (a foreign
+        // session is just as real a disruption); only which ones get NAMED is scoped.
+        const requestUser = getAuthUser(req);
+        const affectedSessions = conflicting
+          .filter((s) => canAccessOwned(requestUser, s.owner))
+          .map((s) => ({ id: s.id, name: s.name }));
+        return { requiresConfirmation: true, currentlyLoadedModel: currentlyLoaded, affectedSessions };
+      }
+    }
+
+    // A CLI whose config alone cannot select the model also gets its `model` launch param
+    // forced (pi/omp `custom/<id>`, grok's block name). The argv engine DROPS a token that
+    // fails its pattern rather than quoting it, which would silently launch the CLI on its
+    // own default provider again, so refuse an id the pattern cannot carry up front.
+    const modelSpec = entry.launch.params.model;
+    const applied = applyCustomModelInjection(
+      entry,
+      endpoint,
+      body.modelId,
+      session.id,
+      contextLength,
+      session.workingDir
+    );
+    if (!applied) {
+      return createErrorResponse(ApiErrorCode.OPERATION_FAILED, `${session.mode} has no known custom-model mechanism`);
+    }
+    if (
+      applied.launchModel !== undefined &&
+      modelSpec?.type === 'token' &&
+      !matchesPattern(modelSpec.pattern, applied.launchModel)
+    ) {
+      removeConfigDir(applied.configDir);
+      return createErrorResponse(
+        ApiErrorCode.INVALID_INPUT,
+        `Model id ${JSON.stringify(body.modelId)} cannot be passed to ${session.mode} on its command line`
+      );
+    }
+
+    const { previousConfigDir } = session.setCustomModel(
+      {
+        endpointId: endpoint.id,
+        modelId: body.modelId,
+        label: endpoint.label,
+        envKeys: applied.envKeys,
+        configDir: applied.configDir,
+        launchModel: applied.launchModel,
+      },
+      applied.envOverrides
+    );
+    // Clean up the OLD config dir on disk, unless the new one happens to reuse the same
+    // path (same session, configDir kind again) — never delete the dir we just wrote.
+    if (previousConfigDir && previousConfigDir !== applied.configDir) {
+      removeConfigDir(previousConfigDir);
+    }
+
+    // Actually kick off llama-swap's load now, rather than waiting on the restarted CLI's
+    // own first prompt to do it — confirmed live that applying a selection alone never
+    // reached the llama-swap server at all (nothing in its own logs), since llama-swap has
+    // no "switch model" admin call, only a real inference request naming the model.
+    if (swapStatus.isLlamaSwap && !targetReady) {
+      triggerLlamaSwapLoad(endpoint, body.modelId);
+    }
+
+    const restarted = await session.restartCli();
+    persistAndBroadcastSession(ctx, session);
+    return { customModel: session.customModel, restarted, modelSwapInProgress: swapStatus.isLlamaSwap && !targetReady };
+  });
+
+  // ========== Delete Session ==========
+
+  app.delete('/api/sessions/:id', async (req) => {
+    const { id } = req.params as { id: string };
+    const query = req.query as { killMux?: string };
+    const killMux = query.killMux !== 'false'; // Default to true
+
+    // A resumed/detached-but-never-live row (e.g. a non-claude "Resume" that
+    // relaunched into a NEW session and wants to retire the old one it can no
+    // longer reattach to) has no entry in ctx.sessions at all — only in
+    // persisted state. Fall back to removing that persisted record directly
+    // rather than 404ing: the caller means "make this row go away", and a
+    // stale duplicate row is exactly what's left behind otherwise. Pinned
+    // sessions keep their existing demote-not-delete protection.
+    if (!ctx.sessions.has(id)) {
+      // Called for its existence/ownership 404 side effect only — demoteOrRemoveSession
+      // below re-looks-up the record by id, so the returned SessionState is unused here.
+      findPersistedSessionOrFail(ctx.store, id, req);
+      ctx.store.demoteOrRemoveSession(id);
+      // Mirrors the broadcast at the tail of the live-session cleanup path
+      // (_doCleanupSession in server.ts) — without it, other open tabs keep
+      // showing the retired row until their next unrelated fetch.
+      ctx.broadcast(SseEvent.SessionDeleted, { id });
+      return {};
+    }
+
+    const session = findSessionOrFail(ctx, id, req);
+    // Wake state is dropped by `cleanupSession` itself (server.ts), on EVERY cleanup
+    // path — not here: the scheduled-run and admin paths clean up without this route.
+    await ctx.cleanupSession(session.id, killMux, 'user_delete');
+    return {};
+  });
+
+  // ========== Delete All Sessions ==========
+
+  app.delete('/api/sessions', async (req): Promise<ApiResponse<{ killed: number }>> => {
+    // Security: scope the bulk sweep to sessions the caller can access — a non-admin
+    // must not wipe other users' sessions (canAccessOwned is allow-all for admin/single-user).
+    const user = getAuthUser(req);
+    const sessionIds = Array.from(ctx.sessions.values())
+      .filter((s) => canAccessOwned(user, s.owner))
+      .map((s) => s.id);
+    let killed = 0;
+
+    for (const id of sessionIds) {
+      if (ctx.sessions.has(id)) {
+        await ctx.cleanupSession(id, true, 'user_bulk_delete');
+        killed++;
+      }
+    }
+
+    return { success: true, data: { killed } };
+  });
+
+  // ========== Get Session Detail ==========
+
+  app.get('/api/sessions/:id', async (req) => {
+    const { id } = req.params as { id: string };
+    const session = findSessionOrFail(ctx, id, req);
+
+    // Use light state (no full buffers) — terminal buffer available via /terminal endpoint.
+    // Full buffers were 2-3MB and caused slowness when polled frequently (e.g. Ralph wizard).
+    return ctx.getSessionStateWithRespawn(session);
+  });
+
+  // ═══════════════════════════════════════════════════════════════
+  // Session Data (output, ralph state, run summary, active tools)
+  // ═══════════════════════════════════════════════════════════════
+
+  // ========== Get Session Output ==========
+
+  app.get('/api/sessions/:id/output', async (req) => {
+    const { id } = req.params as { id: string };
+    const session = findSessionOrFail(ctx, id, req);
+
+    return {
+      success: true,
+      data: {
+        textOutput: session.textOutput,
+        messages: session.messages,
+        errorBuffer: session.errorBuffer,
+      },
+    };
+  });
+
+  // ========== Get Ralph State ==========
+
+  app.get('/api/sessions/:id/ralph-state', async (req) => {
+    const { id } = req.params as { id: string };
+    const session = findSessionOrFail(ctx, id, req);
+
+    return {
+      success: true,
+      data: {
+        loop: session.ralphLoopState,
+        todos: session.ralphTodos,
+        todoStats: session.ralphTodoStats,
+      },
+    };
+  });
+
+  // ========== Get Run Summary ==========
+
+  app.get('/api/sessions/:id/run-summary', async (req) => {
+    const { id } = req.params as { id: string };
+    const session = findSessionOrFail(ctx, id, req);
+
+    const tracker = ctx.runSummaryTrackers.get(id);
+    if (!tracker) {
+      // Create a fresh tracker if one doesn't exist (shouldn't happen normally)
+      const newTracker = new RunSummaryTracker(id, session.name);
+      ctx.runSummaryTrackers.set(id, newTracker);
+      return { summary: newTracker.getSummary() };
+    }
+
+    // Update session name in case it changed
+    tracker.setSessionName(session.name);
+
+    return { summary: tracker.getSummary() };
+  });
+
+  // ========== Get Active Tools ==========
+
+  app.get('/api/sessions/:id/active-tools', async (req) => {
+    const { id } = req.params as { id: string };
+    const session = findSessionOrFail(ctx, id, req);
+
+    return {
+      success: true,
+      data: {
+        tools: session.activeTools,
+      },
+    };
+  });
+
+  // ═══════════════════════════════════════════════════════════════
+  // Session Execution (run prompt, interactive mode, shell mode)
+  // ═══════════════════════════════════════════════════════════════
+
+  // ========== Run Prompt ==========
+
+  app.post('/api/sessions/:id/run', async (req) => {
+    const { id } = req.params as { id: string };
+    const { prompt } = parseBody(RunPromptSchema, req.body);
+    const session = findSessionOrFail(ctx, id, req);
+
+    if (session.isBusy()) {
+      return createErrorResponse(ApiErrorCode.SESSION_BUSY, 'Session is busy');
+    }
+
+    // Run async, don't wait
+    session.runPrompt(prompt).catch((err) => {
+      ctx.broadcast(SseEvent.SessionError, { id, error: err.message });
+    });
+
+    ctx.broadcast(SseEvent.SessionRunning, { id, prompt });
+    return {};
+  });
+
+  // ========== Start Interactive Mode ==========
+
+  app.post('/api/sessions/:id/interactive', async (req) => {
+    const { id } = req.params as { id: string };
+    // Body is optional (auto-reattach callers send none) — same idiom as /interactive-respawn.
+    const bodyResult = req.body
+      ? InteractiveStartSchema.safeParse(req.body)
+      : { success: true as const, data: {} as { clearBreaker?: boolean } };
+    if (!bodyResult.success) {
+      return createErrorResponse(ApiErrorCode.INVALID_INPUT, 'Invalid request body');
+    }
+    const { clearBreaker } = bodyResult.data;
+    const session = findSessionOrFail(ctx, id, req);
+
+    if (session.isBusy()) {
+      return createErrorResponse(ApiErrorCode.SESSION_BUSY, 'Session is busy');
+    }
+
+    try {
+      // Auto-detect completion phrase from CLAUDE.md BEFORE starting (only if globally
+      // enabled and not explicitly disabled by user).
+      //
+      // `isExternalCliMode()` is what the eight-mode `!==` chain this replaces was FOR: its
+      // own comment asked the next person to keep the list in step with that predicate by
+      // hand. Calling it instead is byte-identical today (claude and shell are the two
+      // non-external modes, exactly what the chain admitted) and cannot drift.
+      //
+      // ⚠️ Deliberately NOT `capabilities.ralph`, which the quick-start path below reads:
+      // that capability is claude-only, so using it here would stop auto-enabling Ralph for
+      // SHELL sessions, which this path has always done. The two paths genuinely disagree
+      // about shell, and they disagree upstream too — reconciling them is a behaviour change
+      // and belongs in its own PR, not in a refactor that is meant to change nothing.
+      if (
+        !isExternalCliMode(session.mode) &&
+        ctx.store.getConfig().ralphEnabled &&
+        !session.ralphTracker.autoEnableDisabled
+      ) {
+        autoConfigureRalph(session, session.workingDir, ctx);
+        if (!session.ralphTracker.enabled) {
+          session.ralphTracker.enable();
+        }
+      }
+
+      // COD-118: ONLY an explicit user-initiated restart (body {clearBreaker:true})
+      // clears a tripped PTY-exit circuit breaker. This endpoint is ALSO the frontend's
+      // automatic re-attach path (selectSession auto-POSTs it for any pid===null
+      // session), so an unconditional reset here would re-arm the exact crash loop
+      // the breaker exists to stop — auto-reattach sends no body and must not clear.
+      if (clearBreaker) {
+        session.resetRespawnBreaker();
+      }
+      // Re-attach listener wiring if a prior PTY exit detached it: the wiring exit
+      // handler removes ALL session listeners (incl. respawnBreakerTripped), and only
+      // session-create/boot-recovery paths ran setupSessionListeners before this fix —
+      // without this, a re-attached session's SSE/terminal/trip events go unobserved.
+      // setupSessionListeners is idempotent (no-op while refs are still attached).
+      await ctx.setupSessionListeners(session);
+      await session.startInteractive();
+      getLifecycleLog().log({
+        event: 'started',
+        sessionId: id,
+        name: session.name,
+        mode: session.mode,
+      });
+      // Persist, not just broadcast. Starting a command in the pane changes
+      // `pid` and retracts any `paneExit` (Ark0N/Codeman#446), and the pane-exit
+      // watcher cannot write that retraction to disk for us: its next tick finds
+      // the in-memory field already cleared, reports no change and persists
+      // nothing, so `state.json` would keep saying the agent had exited.
+      ctx.persistSessionState(session);
+      ctx.broadcast(SseEvent.SessionInteractive, { id });
+      ctx.broadcast(SseEvent.SessionUpdated, { session: ctx.getSessionStateWithRespawn(session) });
+
+      return {};
+    } catch (err) {
+      return createErrorResponse(ApiErrorCode.OPERATION_FAILED, getErrorMessage(err));
+    }
+  });
+
+  // ========== Start Shell Mode ==========
+
+  app.post('/api/sessions/:id/shell', async (req) => {
+    const { id } = req.params as { id: string };
+    const session = findSessionOrFail(ctx, id, req);
+
+    if (session.isBusy()) {
+      return createErrorResponse(ApiErrorCode.SESSION_BUSY, 'Session is busy');
+    }
+
+    try {
+      // Re-attach listener wiring if a prior PTY exit detached it (see /interactive).
+      await ctx.setupSessionListeners(session);
+      await session.startShell();
+      getLifecycleLog().log({
+        event: 'started',
+        sessionId: id,
+        name: session.name,
+        mode: 'shell',
+      });
+      // Persist for the same reason /interactive does: a started pane retracts
+      // `paneExit`, and the watcher's next tick cannot write that retraction.
+      ctx.persistSessionState(session);
+      ctx.broadcast(SseEvent.SessionInteractive, { id, mode: 'shell' });
+      ctx.broadcast(SseEvent.SessionUpdated, { session: ctx.getSessionStateWithRespawn(session) });
+      return {};
+    } catch (err) {
+      return createErrorResponse(ApiErrorCode.OPERATION_FAILED, getErrorMessage(err));
+    }
+  });
+
+  // ═══════════════════════════════════════════════════════════════
+  // Terminal I/O (input, resize, buffer)
+  // ═══════════════════════════════════════════════════════════════
+
+  // ========== Wake-on-LAN: state + manual trigger ==========
+  //
+  // Both routes are session-scoped (not host-scoped) because the wake flow needs the
+  // SESSION: a woken host whose pane is not reattached is still a dead terminal, and an
+  // exhausted COD-108 backoff never retries on its own. The probe in `/reachability` is
+  // the same cheap TCP connect the input path uses and it NEVER wakes a host — the UI
+  // decides that, with the button.
+
+  app.get('/api/sessions/:id/reachability', async (req) => {
+    const { id } = req.params as { id: string };
+    const session = findSessionOrFail(ctx, id, req);
+    const remote = session.remote;
+    if (!remote) {
+      return { success: true, data: { reachable: true, probeable: true, wakeConfigured: 'none' as const } };
+    }
+    const force = (req.query as { force?: string })?.force === '1';
+    // `reachable: null` + `probeable: false` for a host behind a jump host / SOCKS proxy:
+    // the probe cannot reach it, so the UI shows no banner and stops polling.
+    const reachable = await remoteWake.checkReachable(session, { force });
+    return {
+      success: true,
+      data: {
+        reachable,
+        probeable: isProbeable(remote),
+        wakeConfigured: await remoteWake.wakeConfigured(session),
+        host: remote.host,
+        label: remote.label,
+      },
+    };
+  });
+
+  app.post('/api/sessions/:id/wake', async (req) => {
+    const { id } = req.params as { id: string };
+    const session = findSessionOrFail(ctx, id, req);
+    if (!session.remote) {
+      return createErrorResponse(ApiErrorCode.INVALID_INPUT, 'Not a remote session');
+    }
+    // The UI uses this to route to the host config dialog instead of a dead button.
+    if (!(await remoteWake.hasWakeTarget(session))) {
+      return createErrorResponse(
+        ApiErrorCode.INVALID_INPUT,
+        'No wake-on-LAN target configured for this host (set a MAC address or a wake command)'
+      );
+    }
+    // The button is pressed from the SAME dashboard the create/attach paths are, under
+    // the same reverse proxy — so it holds the request open the same way and needs the
+    // same request budget, not the 90 s session default (see remote-wake.ts).
+    const woke = await remoteWake.ensureAwake(session, {
+      force: true,
+      timeoutMs: REMOTE_WAKE_REQUEST_READY_TIMEOUT_MS,
+    });
+    return {
+      success: true,
+      data: {
+        woke,
+        reachable: await remoteWake.checkReachable(session),
+        wakeConfigured: await remoteWake.wakeConfigured(session),
+      },
+    };
+  });
+
+  // ========== Send Input ==========
+
+  app.post('/api/sessions/:id/input', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const { input, useMux, seq, clientId, wait, waitTimeout } = parseBody(SessionInputWithLimitSchema, req.body);
+    const session = findSessionOrFail(ctx, id, req);
+
+    const inputStr = String(input);
+    if (inputStr.length > MAX_INPUT_LENGTH) {
+      return createErrorResponse(
+        ApiErrorCode.INVALID_INPUT,
+        `Input exceeds maximum length (${MAX_INPUT_LENGTH} bytes)`
+      );
+    }
+
+    // Send-and-wait (agent orchestration). This has to be ONE endpoint rather than a
+    // POST followed by GET .../wait: between the write and the session flipping to
+    // `working` there is a window in which a separate wait sees the session still
+    // idle and returns instantly, reporting the PREVIOUS turn as this turn's answer.
+    // Registering the waiter before the write closes that window.
+    const wantsWait =
+      wait === true || (typeof wait === 'string' && wait.trim().length > 0) || (Array.isArray(wait) && wait.length > 0);
+    let until: readonly WaitSignal[] = [];
+    if (wantsWait) {
+      const resolved = resolveWaitSignals(wait === true ? undefined : wait, {
+        mode: session.mode,
+        ...sessionHookOptions(session),
+      });
+      if (resolved.error) return createErrorResponse(ApiErrorCode.INVALID_INPUT, resolved.error);
+      until = resolved.until;
+    }
+
+    // Reliable delivery (POST fallback when the WebSocket is down): a 2xx IS the
+    // client's ACK, so a tagged duplicate redelivery must still return 200 but
+    // skip the write. Untagged requests (curl/legacy) always apply.
+    const tagged = typeof clientId === 'string' && typeof seq === 'number';
+    const duplicate = tagged && !session.shouldApplyInput(clientId as string, seq as number);
+    if (duplicate && !wantsWait) {
+      return {};
+    }
+
+    // Wake-on-LAN (remote-wake.ts): a wake-enabled remote host that suspended leaves
+    // the local ssh pane STALLED, and `send-keys` succeeds against it — the bytes
+    // would vanish with no error anywhere. Give the registry the chance to probe the
+    // host, wake it, reattach, and own delivery before we write into nothing.
+    //
+    // Costs nothing for non-wake hosts (the `wakeCommand` guard) or while the host is
+    // known reachable inside the probe throttle window; the probe itself is a bare
+    // TCP connect on wake-enabled hosts only, at most once per
+    // REMOTE_WAKE_PROBE_MIN_INTERVAL_MS.
+    if (!duplicate && (await remoteWake.hasWakeTarget(session))) {
+      if (wantsWait) {
+        // Send-and-wait keeps the response open anyway, so blocking on the wake is
+        // simpler and more correct than buffering (buffering would break the wait).
+        // A host that never comes back is an error here, as on the create/attach
+        // paths: writing into the stalled pane would answer `delivered:true` plus a
+        // timeout, which is the combination the API docs send callers to the wrong
+        // recovery for.
+        if (!(await remoteWake.ensureAwake(session))) {
+          return createErrorResponse(
+            ApiErrorCode.OPERATION_FAILED,
+            `${session.remote?.label ?? 'the remote host'} did not come back after a wake-on-LAN request — nothing was sent`
+          );
+        }
+      } else {
+        const outcome = await remoteWake.handleInput(session, inputStr);
+        // The registry holds the bytes and flushes them in order once the pane is
+        // reattached. The client's ACK is this 200 — a tagged retry is deduped
+        // (`shouldApplyInput` above already consumed the seq), so nothing is lost.
+        // `buffered` is additive to the historical bare `{}`; `dropped` says the chunk
+        // was over the wake buffer's cap and is GONE (a 200 with no field could not
+        // tell delivered from buffered from dropped).
+        if (outcome === 'buffered') return { buffered: true };
+        if (outcome === 'dropped') return { buffered: true, dropped: true };
+      }
+    }
+
+    // Only a waiting request pays for the tmux probe: the browser's plain input path
+    // (thousands of calls per session) must stay exec-free.
+    const workerDead = wantsWait && workerIsDead(ctx.mux, session);
+
+    const timeoutMs = clampWaitMs(waitTimeout ?? undefined);
+    // Same slot leak as the GET routes: a client that gives up mid-wait would
+    // otherwise hold a waiter for the full timeout. Response-side, always — see
+    // abortOnClientHangUp: on THIS route a request-side listener fires the moment the
+    // JSON body finishes streaming and aborts every send-and-wait before it starts.
+    const abort = abortOnClientHangUp(reply);
+    let waitPromise: Promise<SignalWaitResult> | null = null;
+    if (wantsWait) {
+      try {
+        waitPromise = sessionWaits.waitForSignal(id, {
+          until,
+          timeoutMs,
+          owner: ownerFor(req),
+          abortSignal: abort.signal,
+          // A FRESH delivery must not be satisfied by the state the session is already
+          // in: it is idle right now, which is precisely why we are typing at it.
+          // A DUPLICATE has no new turn coming, so it answers from the current state
+          // instead of blocking for a transition that already happened.
+          requireTransition: !duplicate,
+          currentSignal: duplicate ? currentSignalFor(session, workerDead) : undefined,
+        });
+      } catch (err) {
+        if (err instanceof WaitCapacityError) {
+          // Nothing has been written yet, but `shouldApplyInput` already consumed the
+          // seq. Give it back or the caller's retry is rejected as a duplicate and the
+          // input is lost by the very mechanism meant to make delivery reliable.
+          if (tagged && !duplicate) session.forgetInputSeq(clientId as string, seq as number);
+          return waitCapacityResponse(err);
+        }
+        throw err;
+      }
+    }
+    const stopDeathWatch = wantsWait ? watchForDeadWorker(ctx.mux, session, id) : () => {};
+
+    // Write input to PTY. Direct write is synchronous; writeViaMux
+    // (tmux send-keys) is fire-and-forget to avoid blocking the HTTP response.
+    // Every write here is `fromUser`: this route carries a person's prompt, or an
+    // agent's on their behalf, so it may name the tab (Ralph, respawn, cron and
+    // approvals write through the session directly and never say so).
+    //
+    // Because the response has already been sent by then, a failure there is the
+    // one case the caller can never learn about — so the dedup bookkeeping is
+    // rolled back. Otherwise the seq stays recorded as applied and a retry, the
+    // very mechanism reliable delivery exists for, is rejected as a duplicate.
+    const undoOnFailure = () => {
+      if (tagged) session.forgetInputSeq(clientId as string, seq as number);
+    };
+
+    // Whether the bytes actually reached a write path. Only meaningful on the wait
+    // path (the fire-and-forget branches return before the response is built), and
+    // reported there instead of the old `!duplicate`: a PTY that has exited fails
+    // BOTH writes, and telling the caller "delivered, but it timed out" points it at
+    // the wrong recovery — wait longer, when the truth is "restart the worker".
+    let delivered = false;
+
+    // A plain prompt (`<text>\r`) goes through the mux even when the caller did not
+    // ask for it: written straight into the pane it arrives as one burst, and Claude
+    // Code takes a long burst as a paste whose `\r` becomes a newline, so the prompt
+    // sat unsent (see isPlainPromptInput). The mux path types the text, presses Enter
+    // separately and arms the SubmitVerifier. An explicit `useMux: false` keeps the
+    // raw write for a caller that really wants it.
+    const autoMux = useMux === undefined && isPlainPromptInput(inputStr);
+    // An agent's `send` (the request names its calling session) must not trip OpenCode's "!" shell-mode key;
+    // a person's own typing, which names no session, is left exactly as typed.
+    const agentCaller = typeof req.headers['x-codeman-parent-session'] === 'string' && req.headers['x-codeman-parent-session'] !== '';
+    const muxOptions = agentCaller ? { fromUser: true, opencodeGuard: true } : { fromUser: true };
+    // The direct PTY writes (a mux failure's fallback, an explicit raw write) carry the same text: an agent's goes in without "!".
+    const rawInput = agentCaller && session.mode === 'opencode' ? guardShellKey(inputStr) : inputStr;
+
+    if (duplicate) {
+      // Redelivery of an already-applied input: skip the write, but still honor the
+      // wait, since the caller's question ("tell me when this settles") is unanswered.
+    } else if ((useMux || autoMux) && waitPromise) {
+      // The response is already staying open for the wait, so the tmux write can be
+      // awaited here. This is the ONE path where a writeViaMux failure is observable.
+      const ok = await session.writeViaMux(inputStr, muxOptions).catch(() => false);
+      if (ok) {
+        delivered = true;
+      } else {
+        console.warn(`[Server] writeViaMux failed for session ${id}, falling back to direct write`);
+        delivered = session.write(rawInput, { fromUser: true });
+        if (!delivered) undoOnFailure();
+      }
+    } else if (autoMux) {
+      // Awaited, unlike the explicit useMux branch below. This shape also reaches here
+      // from the browser's POST fallback, which sends its frames one at a time and
+      // waits for each 2xx; answering only once Enter has gone out is what keeps the
+      // next keystroke from overtaking it.
+      const ok = await session.writeViaMux(inputStr, muxOptions).catch(() => false);
+      if (!ok) {
+        console.warn(`[Server] writeViaMux failed for session ${id}, falling back to direct write`);
+        if (!session.write(rawInput, { fromUser: true })) undoOnFailure();
+      }
+    } else if (useMux) {
+      // Fire-and-forget: don't block the HTTP response on a tmux child process.
+      // Fallback to a direct write on failure. Unchanged from before send-and-wait.
+      session
+        .writeViaMux(inputStr, muxOptions)
+        .then((ok) => {
+          if (ok) return;
+          console.warn(`[Server] writeViaMux failed for session ${id}, falling back to direct write`);
+          if (!session.write(rawInput, { fromUser: true })) undoOnFailure();
+        })
+        .catch(() => {
+          if (!session.write(rawInput, { fromUser: true })) undoOnFailure();
+        });
+    } else {
+      // Same rollback. NOT an error response, deliberately: a session can
+      // legitimately have no PTY yet (created but not started), and callers have
+      // always been able to write to one without a 4xx.
+      delivered = session.write(rawInput, { fromUser: true });
+      if (!delivered && tagged) {
+        session.forgetInputSeq(clientId as string, seq as number);
+      }
+    }
+
+    if (!waitPromise) return {};
+
+    try {
+      // `send-keys` SUCCEEDS against a dead pane — tmux is happy to write into a corpse
+      // — so a truthful `delivered` cannot come from the write's return value alone.
+      // This is the case the field exists for: "delivered, but it timed out" tells an
+      // agent to wait longer when the truth is "restart the worker".
+      if (delivered && workerDead) {
+        delivered = false;
+        // The bytes went nowhere, so the seq must not be recorded as applied or the
+        // caller's retry against a restarted worker is refused as a duplicate.
+        if (!duplicate) undoOnFailure();
+      }
+
+      // Nothing was written and nothing will be: no turn is coming, so blocking for the
+      // full timeout would only delay the caller's real recovery by up to ten minutes.
+      // Releasing the waiter also hands its slot back immediately.
+      const selfReleased = !delivered && !duplicate;
+      if (selfReleased) abort.abort();
+
+      const result = await waitPromise;
+      return {
+        success: true,
+        data: {
+          delivered,
+          duplicate,
+          status: session.status,
+          limitPaused: session.isLimitPaused,
+          // Identical `wait` object to the two GET endpoints, so one client helper
+          // reads all three, `timeoutMs` (post-clamp) included.
+          //
+          // `aborted` is the CLIENT-facing "you hung up, nobody is reading this", and
+          // by that definition it is unobservable — which is exactly what the API
+          // reference promises. The abort above is the server releasing its own waiter
+          // on a delivery that failed, and the client IS reading this response, so
+          // reporting `aborted: true` there would break that promise and hand an agent
+          // a second, contradictory reason for the same outcome. `delivered: false`
+          // already says what happened; `ended` says the wait was released early.
+          wait: { ...result, aborted: selfReleased ? false : result.aborted, until: [...until] },
+        },
+      };
+    } finally {
+      stopDeathWatch();
+    }
+  });
+
+  // ========== Wait For A Signal (agent orchestration) ==========
+  //
+  // A bounded long-poll: block until the session hits one of `until`, then answer.
+  // This exists because SSE is the only "tell me when" channel Codeman has, and an
+  // agent driving the API from a shell tool cannot hold a stream and parse events
+  // inline. See docs/agent-control-plan.md.
+  //
+  // A TIMEOUT IS A 200, not an error: callers are expected to loop over short waits
+  // (proxies such as `tailscale serve` cut idle connections), and turning every poll
+  // boundary into a 4xx would make that loop indistinguishable from a real failure.
+
+  app.get('/api/sessions/:id/wait', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const query = parseWaitQuery(SessionWaitQuerySchema, req.query, 'wait');
+    const session = findSessionOrFail(ctx, id, req);
+
+    // An agent polls this URL in a loop with identical parameters. Any intermediary
+    // applying heuristic freshness to the 200 would serve the stored `timedOut:true`
+    // body to the next iteration instantly, turning the loop into a busy spin that
+    // never observes the signal.
+    reply.header('Cache-Control', 'no-store');
+
+    // Shared with the `wait` field on POST .../input: unknown token is a 400,
+    // hook-only signals are rejected explicitly but dropped from the default.
+    const { until, error } = resolveWaitSignals(query.until, { mode: session.mode, ...sessionHookOptions(session) });
+    if (error) return createErrorResponse(ApiErrorCode.INVALID_INPUT, error);
+
+    // The value actually applied after clamping, echoed below: a caller that asked
+    // for 30 minutes and silently got 10 could not otherwise tell a poll boundary
+    // from a wedged worker, and would kill a session that was working fine.
+    const timeoutMs = clampWaitMs(query.timeout);
+
+    // Free the waiter when the caller hangs up; the response can no longer be sent by
+    // then, so freeing the slot is the entire purpose.
+    const abort = abortOnClientHangUp(reply);
+    // A worker that dies while this request is parked emits nothing at all (the tmux
+    // attach client survives it), so a wait would otherwise run to its full timeout.
+    const stopDeathWatch = watchForDeadWorker(ctx.mux, session, id);
+
+    try {
+      const result = await sessionWaits.waitForSignal(id, {
+        until,
+        timeoutMs,
+        owner: ownerFor(req),
+        abortSignal: abort.signal,
+        requireTransition: query.fresh === '1' || query.fresh === 'true',
+        // Read BEFORE awaiting: this is the state the caller is asking about.
+        currentSignal: currentSignalFor(session, workerIsDead(ctx.mux, session)),
+      });
+
+      return {
+        success: true,
+        data: {
+          sessionId: id,
+          // Post-wait status, so a caller that timed out still learns where things stand.
+          status: session.status,
+          // A session paused on a usage limit emits nothing until its reset, so a
+          // timeout here is expected rather than a stall worth retrying hard.
+          limitPaused: session.isLimitPaused,
+          // One shape across all three endpoints, so a single `is_done(resp)` helper
+          // works against any of them. `result.timeoutMs` is the value actually
+          // applied after clamping, which is what makes the clamp observable.
+          wait: { ...result, until: [...until] },
+        },
+      };
+    } catch (err) {
+      if (err instanceof WaitCapacityError) return waitCapacityResponse(err);
+      throw err;
+    } finally {
+      stopDeathWatch();
+    }
+  });
+
+  // ========== Wait For Output (agent orchestration) ==========
+  //
+  // The companion to /wait: block until a literal string appears in this session's
+  // output. Same 200-on-timeout contract. Fed by the `terminal` listener in
+  // session-listener-wiring.ts, so what this scans is byte-for-byte what the pane
+  // printed, ANSI stripped.
+  //
+  // ⚠️ A tmux repaint replays text already on screen, so `from=now` can match
+  // something printed before the request. Callers need a marker unique per call.
+
+  app.get('/api/sessions/:id/wait-output', async (req, reply) => {
+    const { id } = req.params as { id: string };
+
+    // Reject `regex` loudly instead of ignoring it. Matching is deliberately literal
+    // (no ReDoS surface on a caller-supplied pattern over a live stream), and an agent
+    // that assumed otherwise would silently wait on the wrong thing.
+    if (req.query && typeof req.query === 'object' && 'regex' in req.query) {
+      return createErrorResponse(
+        ApiErrorCode.INVALID_INPUT,
+        'regex is not supported; use match=<literal substring> (optionally with nocase=1)'
+      );
+    }
+
+    const query = parseWaitQuery(SessionWaitOutputQuerySchema, req.query, 'wait-output');
+    const session = findSessionOrFail(ctx, id, req);
+
+    // Same reason as /wait: this URL is polled in a loop with identical parameters.
+    reply.header('Cache-Control', 'no-store');
+
+    const timeoutMs = clampWaitMs(query.timeout);
+    const abort = abortOnClientHangUp(reply);
+    const owner = ownerFor(req);
+    // Output waiters are the ones a dead worker strands hardest: the feed simply stops.
+    const stopDeathWatch = watchForDeadWorker(ctx.mux, session, id);
+
+    try {
+      // Check the cap BEFORE touching the buffer. `session.terminalBuffer` is
+      // `BufferAccumulator.value`, which joins the WHOLE accumulator (up to 32MB)
+      // before the slice below takes its tail — so a request that is going to be
+      // rejected anyway must not pay for a full materialization first, or the cap
+      // provides no backpressure at all against a `from=buffer` loop.
+      sessionWaits.assertCapacity(id, owner);
+
+      // `from=buffer` scans what already scrolled past before blocking. Bounded to a
+      // tail: the buffer runs to 32MB and this is a per-request ANSI strip.
+      let initialText: string | undefined;
+      if (query.from === 'buffer') {
+        const buffer = session.terminalBuffer;
+        initialText =
+          buffer.length > MAX_BUFFER_SCAN_BYTES ? buffer.slice(buffer.length - MAX_BUFFER_SCAN_BYTES) : buffer;
+      }
+
+      const result = await sessionWaits.waitForOutput(id, {
+        match: query.match,
+        nocase: query.nocase === '1' || query.nocase === 'true',
+        timeoutMs,
+        owner,
+        abortSignal: abort.signal,
+        initialText,
+      });
+
+      return {
+        success: true,
+        data: {
+          sessionId: id,
+          status: session.status,
+          limitPaused: session.isLimitPaused,
+          // Same envelope as /wait; this one carries `matched`/`snippet`/`match`
+          // where the signal wait carries `signal`/`until`.
+          wait: { ...result, match: query.match },
+        },
+      };
+    } catch (err) {
+      if (err instanceof WaitCapacityError) return waitCapacityResponse(err);
+      throw err;
+    } finally {
+      stopDeathWatch();
+    }
+  });
+
+  // ========== Send Named Key (tmux send-keys -H) ==========
+  // Sends raw hex bytes to tmux pane for keys like Shift+Enter / Ctrl+Enter.
+  // Uses send-keys -H (hex) to inject a newline chord: 0x0a (line feed) by default, or the CLI's
+  // own `capabilities.newline`. Claude Code's Ink input recognizes 0x0a as "insert newline" vs
+  // 0x0d (carriage return = submit).
+
+  app.post('/api/sessions/:id/send-key', async (req) => {
+    const { id } = req.params as { id: string };
+    const body = req.body as Record<string, unknown>;
+    const key = typeof body?.key === 'string' ? body.key : '';
+
+    if (key !== 'S-Enter' && key !== 'C-Enter') {
+      return createErrorResponse(ApiErrorCode.INVALID_INPUT, `Key not allowed: ${key}`);
+    }
+
+    const session = findSessionOrFail(ctx, id, req);
+    const muxName = session.muxName;
+    if (!muxName) {
+      return createErrorResponse(ApiErrorCode.INVALID_INPUT, 'No tmux session');
+    }
+
+    // Key names map to hex byte sequences. Ctrl+Enter is always a line feed; Shift+Enter is the
+    // CLI's own newline chord (`capabilities.newline`, default line feed), so a CLI that wants
+    // Esc+Enter declares it in the registry instead of being special-cased here.
+    const NEWLINE_HEX: Record<NewlineSequence, string[]> = {
+      'line-feed': ['0a'], // \n
+      'esc-enter': ['1b', '0d'], // ESC CR, the Alt/Option+Enter chord
+    };
+    const hex =
+      key === 'C-Enter'
+        ? NEWLINE_HEX['line-feed']
+        : NEWLINE_HEX[getCli(session.mode)?.capabilities.newline ?? 'line-feed'];
+
+    try {
+      // Route through the dedicated Codeman socket — bare `tmux` would target the
+      // user's default server and never find this session (same #80 regression class).
+      await new Promise<void>((resolve, reject) => {
+        execFile(
+          'tmux',
+          ['-L', ctx.mux.muxSocket, 'send-keys', '-H', '-t', muxName, ...hex],
+          { timeout: 5000 },
+          (err) => {
+            if (err) reject(err);
+            else resolve();
+          }
+        );
+      });
+    } catch (err) {
+      console.error('[Server] send-key failed:', err);
+      return createErrorResponse(ApiErrorCode.INTERNAL_ERROR, 'tmux send-keys failed');
+    }
+    // The bytes bypassed the session's write path, so tell the auto-name
+    // tracker about them or the two lines of a prompt join with no separator.
+    session.trackUserInput(hex.map((byte) => String.fromCharCode(parseInt(byte, 16))).join(''));
+    return {};
+  });
+
+  // ========== Resize Terminal ==========
+
+  app.post('/api/sessions/:id/resize', async (req) => {
+    const { id } = req.params as { id: string };
+    const { cols, rows, viewportType, force } = parseBody(ResizeSchema, req.body);
+    const session = findSessionOrFail(ctx, id, req);
+
+    session.resize(cols, rows, { viewportType, force });
+    // Answer with the geometry the PTY ACTUALLY holds, which is not always the
+    // one asked for: `Session.resize` declines small-viewport requests while a
+    // desktop connection holds an active sizing claim. A browser terminal left
+    // at a shape the PTY refused renders garbled output, not merely wrong-sized
+    // output, so the client adopts this (issue #464). A session with no pane
+    // reports nothing rather than the constructor defaults — see `ptyGeometry`.
+    return session.ptyGeometry ?? {};
+  });
+
+  // ========== Get Last Response (from transcript JSONL) ==========
+
+  // How far apart a ~/.claude/history.jsonl entry and a pane's Enter may be and
+  // still be the same submission. Claude appends to history as it accepts the
+  // prompt, so the true gap is milliseconds — this is slack for a loaded box,
+  // not a search radius.
+  const CLAUDE_SUBMIT_MATCH_MS = 10_000;
+  // history.jsonl grows forever; only the tail can hold entries near a submit.
+  const CLAUDE_HISTORY_TAIL_BYTES = 256 * 1024;
+
+  // Resolves the Claude conversation id THIS pane is currently on by matching
+  // ~/.claude/history.jsonl (which logs every submitted prompt as
+  // {project, sessionId, timestamp}) against the pane's last Enter. After
+  // `/clear` Claude keeps writing to a new <uuid>.jsonl, and history.jsonl is
+  // the only source-of-truth update that does not rely on project-local hooks
+  // (we intentionally don't install hooks in arbitrary user repos, see the
+  // POST /api/sessions comment).
+  //
+  // The pane's own Enter is what makes an entry OURS. `project` alone is not:
+  // a cwd is shared by every other Codeman tab on it, by tabs long since
+  // closed, and by any plain `claude` the user runs in their own terminal —
+  // adopting the newest entry for the cwd pinned the viewer to whichever of
+  // those conversations was typed in last, so the eye showed a stranger's
+  // transcript. With no correlated entry we keep the id we have; a viewer one
+  // turn behind beats a viewer showing someone else's conversation.
+  const claudeHistoryPinCache = new LRUMap<string, { submitAt: number; claudeSessionId: string }>({ maxSize: 1024 });
+  async function resolveActiveClaudeSessionIdFromHistory(
+    session: Session,
+    projectsDir: string
+  ): Promise<string | null> {
+    // A pane whose conversation id came from its OWN hook needs no correlation:
+    // $CODEMAN_SESSION_ID (the pane's env) -> data.session_id (the CLI's own
+    // stdin JSON) is a first-hand binding that never looks at cwd, so it cannot
+    // be stolen by a sibling pane, a closed tab, or a bare `claude` in a
+    // terminal. Guessing can only be worse than the fact. This is also what
+    // closes the hole below for a pane driven straight from tmux: it never
+    // reaches `if (!submitAt)`.
+    if (session.claudeSessionIdIsFirstHand) return null;
+
+    const submitAt = session.lastSubmitAt;
+    if (!submitAt) return null; // no anchor at all — nothing to credit
+    const cached = claudeHistoryPinCache.get(session.id);
+    if (cached && cached.submitAt === submitAt) return cached.claudeSessionId;
+
+    // Ids another live pane is already pinned to can never be ours, and every
+    // pane sharing this cwd competes for the entry we are about to claim —
+    // including non-Claude panes, since a shell pane can run `claude` too.
+    const otherClaudeIds = new Set<string>();
+    const otherSubmits: number[] = [];
+    for (const s of ctx.sessions.values()) {
+      if (s.id === session.id || s.workingDir !== session.workingDir) continue;
+      if (s.claudeSessionId) otherClaudeIds.add(s.claudeSessionId);
+      if (s.lastSubmitAt) otherSubmits.push(s.lastSubmitAt);
+    }
+
+    const historyPath = join(homedir(), '.claude', 'history.jsonl');
+    const stat = await fs.stat(historyPath).catch(() => null);
+    if (!stat || stat.size === 0) return null;
+    const tail = await readFileTail(historyPath, Buffer.alloc(CLAUDE_HISTORY_TAIL_BYTES), stat.size);
+    if (!tail) return null;
+
+    let best: { sessionId: string; dist: number } | undefined;
+    for (const line of tail.split('\n')) {
+      if (!line) continue;
+      let entry: { project?: string; sessionId?: string; timestamp?: number };
+      try {
+        entry = JSON.parse(line) as typeof entry;
+      } catch {
+        continue; // the first tail line is usually cut mid-JSON
+      }
+      const { sessionId, timestamp } = entry;
+      if (entry.project !== session.workingDir) continue;
+      if (typeof sessionId !== 'string' || !sessionId) continue;
+      if (typeof timestamp !== 'number') continue;
+      if (otherClaudeIds.has(sessionId)) continue;
+      const dist = Math.abs(timestamp - submitAt);
+      if (dist > CLAUDE_SUBMIT_MATCH_MS) continue;
+      if (otherSubmits.some((other) => Math.abs(timestamp - other) < dist)) continue; // another pane is closer
+      if (!best || dist <= best.dist) best = { sessionId, dist }; // ties: the newer entry wins
+    }
+    if (!best) return null;
+
+    // Sanity: the conversation we switch to must exist on disk and must not be
+    // staler than the one we are leaving. A `/clear` successor never is.
+    const currentSessionId = session.claudeSessionId || session.id;
+    if (best.sessionId !== currentSessionId) {
+      const projectDirs = await fs.readdir(projectsDir).catch(() => null);
+      if (!projectDirs) return null;
+      let candidateMtime = 0;
+      let currentMtime = 0;
+      for (const projDir of projectDirs) {
+        const candidateStat = await fs.stat(join(projectsDir, projDir, `${best.sessionId}.jsonl`)).catch(() => null);
+        if (candidateStat && candidateStat.mtimeMs > candidateMtime) candidateMtime = candidateStat.mtimeMs;
+        const currentStat = await fs.stat(join(projectsDir, projDir, `${currentSessionId}.jsonl`)).catch(() => null);
+        if (currentStat && currentStat.mtimeMs > currentMtime) currentMtime = currentStat.mtimeMs;
+      }
+      if (candidateMtime === 0) return null; // transcript not written yet — retry next poll
+      if (currentMtime > 0 && candidateMtime < currentMtime) return null;
+    }
+
+    claudeHistoryPinCache.set(session.id, { submitAt, claudeSessionId: best.sessionId });
+    return best.sessionId;
+  }
+
+  interface ClaudeResponseMessage {
+    kind: 'prompt' | 'response';
+    label: 'Prompt' | 'Response';
+    role: 'user' | 'assistant';
+    text: string;
+    timestamp?: string;
+    turn: number;
+    queued?: boolean;
+  }
+
+  interface ClaudeTranscriptEntry {
+    type?: string;
+    timestamp?: string;
+    isMeta?: boolean;
+    isSidechain?: boolean;
+    isCompactSummary?: boolean;
+    message?: { content?: unknown };
+    // A prompt typed while Claude is working is absorbed mid-turn and recorded
+    // ONLY here — the CLI never re-emits it as a `user` row. Every field stays
+    // optional and unvalidated: `queued_command` is not a documented CLI
+    // contract, so a missing/renamed field must mean "skip", which is also what
+    // the CLI's own non-human queue entries (commandMode 'task-notification',
+    // no `origin` key) require. Shape observed on Claude Code 2.1.220-2.1.251.
+    attachment?: {
+      type?: string;
+      prompt?: string;
+      commandMode?: string;
+      timestamp?: string;
+      origin?: { kind?: string };
+    };
+  }
+
+  function extractClaudeText(content: unknown, separator: string): string {
+    if (typeof content === 'string') return content;
+    if (!Array.isArray(content)) return '';
+    return content
+      .filter(
+        (block): block is { type: string; text: string } =>
+          !!block &&
+          typeof block === 'object' &&
+          (block as { type?: string }).type === 'text' &&
+          typeof (block as { text?: string }).text === 'string'
+      )
+      .map((block) => block.text)
+      .join(separator);
+  }
+
+  function isClaudeSyntheticUserMessage(entry: ClaudeTranscriptEntry, text: string): boolean {
+    if (entry.isMeta || entry.isCompactSummary) return true;
+    return /^(?:<local-command|<command-name>|<task-notification>|<system-reminder>|<teammate-message\b|Another Claude session sent a message:|Base directory for this skill:)/i.test(
+      text
+    );
+  }
+
+  /**
+   * Claude writes an append-only event log: tool results arrive as user rows,
+   * thinking/tool_use rows carry no text, and a prompt typed while the agent is
+   * working is only ever recorded as an `attachment/queued_command` row. But one
+   * assistant row IS one whole model message: measured across ~/.claude/projects
+   * (CLI 2.1.220-2.1.251) no assistant row carries more than one content block
+   * and no message id carries more than one text block, so there is nothing to
+   * reassemble. Emit one card per row and group them with `turn` instead of
+   * concatenating a human turn's replies into a single card (#169), which fused
+   * up to 74 distinct model messages into one card. Splitting is safe for
+   * markdown: no adjacent pair of assistant text rows in the corpus continues a
+   * table, a list, or an open code fence.
+   */
+  function parseClaudeResponseTranscript(
+    content: string,
+    full: boolean
+  ): { text: string; timestamp: string; messages?: ClaudeResponseMessage[] } {
+    let lastText = '';
+    let lastTimestamp = '';
+    const messages: ClaudeResponseMessage[] = [];
+    // #169's replay guards, kept: they now SKIP a duplicated row instead of
+    // concatenating it into the previous card.
+    const currentUserFragments = new Set<string>();
+    const currentAssistantFragments = new Set<string>();
+    // Turn 0 is reserved for anything emitted before the first human prompt.
+    let turn = 0;
+
+    const pushUserMessage = (text: string, timestamp: string | undefined, queued: boolean): void => {
+      // A run of consecutive human inputs (a mid-turn queued burst) is ONE turn,
+      // so the viewer renders it under one badge instead of one badge per line.
+      if (messages.at(-1)?.role !== 'user') turn += 1;
+      const message: ClaudeResponseMessage = { kind: 'prompt', label: 'Prompt', role: 'user', text, timestamp, turn };
+      if (queued) message.queued = true;
+      messages.push(message);
+      currentUserFragments.add(text);
+      currentAssistantFragments.clear();
+    };
+
+    for (const line of content.split('\n')) {
+      if (!line) continue;
+      let entry: ClaudeTranscriptEntry;
+      try {
+        entry = JSON.parse(line) as ClaudeTranscriptEntry;
+      } catch {
+        continue;
+      }
+      // Sidechains belong to agents/forks, not the main conversation. Meta user
+      // rows include repeated image dimensions and other UI-generated context.
+      if (entry.isSidechain) continue;
+
+      // A prompt typed while Claude is working is absorbed mid-turn and lives
+      // ONLY in an attachment row, so it was lost outright. `origin.kind` and
+      // `commandMode` separate the human's queue entries from the CLI's own:
+      // measured over 57 real transcripts on 2026-09-01, 322 queued_command rows
+      // split 163 `prompt`/`human` and 159 `task-notification`, and not one of
+      // those 159 carries an `origin` key. The 163 human rows become 162 user
+      // cards here — one is a verbatim repeat inside a still-unanswered user run
+      // and is collapsed by the dedup guard below — out of 353 user cards total.
+      if (entry.type === 'attachment') {
+        if (!full) continue;
+        const queued = entry.attachment;
+        if (!queued || queued.type !== 'queued_command') continue;
+        if (queued.origin?.kind !== 'human' || queued.commandMode !== 'prompt') continue;
+        const text = typeof queued.prompt === 'string' ? queued.prompt.trim() : '';
+        if (!text || isClaudeSyntheticUserMessage(entry, text)) continue;
+        if (currentUserFragments.has(text)) continue;
+        pushUserMessage(text, queued.timestamp || entry.timestamp, true);
+        continue;
+      }
+
+      if (entry.type === 'user') {
+        const text = extractClaudeText(entry.message?.content, '\n').trim();
+        // A tool_result block has no text block and naturally drops out here.
+        if (!text || isClaudeSyntheticUserMessage(entry, text)) continue;
+        if (!full) continue;
+        // Claude replays the initial user row while restoring a transcript, and
+        // a CLI that also wrote an absorbed prompt as a user row would double it.
+        // Both collapse here. The same prompt sent again AFTER a reply is a
+        // legitimate second turn, because that reply cleared the set.
+        if (currentUserFragments.has(text)) continue;
+        pushUserMessage(text, entry.timestamp, false);
+        continue;
+      }
+
+      if (entry.type !== 'assistant') continue;
+      const text = extractClaudeText(entry.message?.content, '\n\n').trim();
+      if (!text) continue;
+      lastText = text;
+      lastTimestamp = entry.timestamp || '';
+      if (!full) continue;
+
+      // Replayed snapshots repeat an identical text block inside one turn.
+      if (currentAssistantFragments.has(text)) continue;
+      messages.push({ kind: 'response', label: 'Response', role: 'assistant', text, timestamp: entry.timestamp, turn });
+      currentAssistantFragments.add(text);
+      currentUserFragments.clear();
+    }
+
+    return full ? { text: lastText, timestamp: lastTimestamp, messages } : { text: lastText, timestamp: lastTimestamp };
+  }
+
+  /**
+   * Mirror a rename into the conversation's `/resume` title (claude-session-title.ts).
+   * Local Claude-format transcripts only: a remote pane's transcript lives on the remote host and a
+   * docker pane's inside the container (HOME=/home/agent), never under the host's projects dir. Best
+   * effort: the tab rename has already happened and must not fail on this.
+   */
+  async function syncClaudeTitle(session: Session): Promise<void> {
+    if (getCli(session.mode)?.capabilities.transcript !== 'claude-jsonl' || session.remote || session.docker) return;
+    try {
+      const projectsDir = join(process.env.HOME || '/tmp', '.claude', 'projects');
+      const hookPath = ctx.getTranscriptPath(session.id);
+      const transcript = hookPath
+        ? { sessionId: basename(hookPath, '.jsonl'), path: hookPath }
+        : await findClaudeTranscript(projectsDir, session.claudeSessionId || session.id, session.id);
+      if (transcript) await appendClaudeCustomTitle(transcript.path, transcript.sessionId, session.name);
+    } catch (err) {
+      console.warn(`[Session] Could not carry rename into the Claude transcript for ${session.id}:`, err);
+    }
+  }
+
+  /** Locate a top-level Claude transcript, including recovered tmux sessions. */
+  async function findClaudeTranscript(
+    projectsDir: string,
+    conversationId: string,
+    codemanSessionId: string
+  ): Promise<{ sessionId: string; path: string } | null> {
+    let projectDirs: import('node:fs').Dirent[];
+    try {
+      projectDirs = await fs.readdir(projectsDir, { withFileTypes: true });
+    } catch {
+      return null;
+    }
+
+    const safeIds = [...new Set([conversationId, codemanSessionId])].filter((value) => /^[a-zA-Z0-9._-]+$/.test(value));
+    for (const candidateId of safeIds) {
+      for (const projectDir of projectDirs) {
+        if (!projectDir.isDirectory()) continue;
+        const jsonlPath = join(projectsDir, projectDir.name, `${candidateId}.jsonl`);
+        try {
+          const stat = await fs.stat(jsonlPath);
+          if (stat.isFile()) return { sessionId: candidateId, path: jsonlPath };
+        } catch {
+          /* continue */
+        }
+      }
+    }
+
+    // If mux-sessions.json was lost or stale, reconcileSessions() historically
+    // recovered `codeman-40568a29` as `restored-40568a29` and used the server cwd.
+    // The tmux name still carries the first eight UUID characters, which safely
+    // reconnects the viewer when exactly one matching top-level transcript exists.
+    const restoredMatch = /^restored-([a-f0-9]{8,})$/i.exec(codemanSessionId);
+    if (!restoredMatch) return null;
+    const fragment = restoredMatch[1].toLowerCase();
+    const candidates: Array<{ sessionId: string; path: string; mtimeMs: number }> = [];
+    const uuidPattern = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i;
+
+    for (const projectDir of projectDirs) {
+      if (!projectDir.isDirectory()) continue;
+      const dirPath = join(projectsDir, projectDir.name);
+      let files: import('node:fs').Dirent[];
+      try {
+        files = await fs.readdir(dirPath, { withFileTypes: true });
+      } catch {
+        continue;
+      }
+      for (const file of files) {
+        if (!file.isFile() || !file.name.endsWith('.jsonl')) continue;
+        const candidateId = file.name.slice(0, -'.jsonl'.length);
+        if (!candidateId.toLowerCase().startsWith(fragment) || !uuidPattern.test(candidateId)) continue;
+        const path = join(dirPath, file.name);
+        const stat = await fs.stat(path).catch(() => null);
+        if (stat) candidates.push({ sessionId: candidateId, path, mtimeMs: stat.mtimeMs });
+      }
+    }
+
+    const candidateIds = new Set(candidates.map((candidate) => candidate.sessionId));
+    if (candidateIds.size !== 1) return null;
+    candidates.sort((a, b) => b.mtimeMs - a.mtimeMs);
+    return candidates[0] ?? null;
+  }
+
+  app.get('/api/sessions/:id/last-response', async (req) => {
+    const { id } = req.params as { id: string };
+    const session = findSessionOrFail(ctx, id, req);
+
+    // Codex sessions don't write to ~/.claude/projects — their transcripts
+    // live in ~/.codex/sessions/**. Branch to a Codex-specific reader so the
+    // response-viewer works for Codex panes too.
+    if (getCli(session.mode)?.capabilities.transcript === 'codex-rollout') {
+      const codexQuery = req.query as { context?: string };
+      return await readCodexLastResponse(session, codexQuery.context === 'full');
+    }
+
+    // DeepSeek Harness writes a real structured transcript under
+    // `$DSH_HOME/sessions/**`, so read that rather than segmenting the pane.
+    // ⚠️ For dsh the pane fallback is not merely coarse, it is WRONG: dsh-TUI
+    // paints a full-screen splash, and the segmenter served its ASCII-art logo
+    // back as the worker's answer (measured), which an agent polling for a
+    // reply reads as a reply. So an EMPTY transcript result still wins over the
+    // pane — "nothing said yet" is the honest answer. Only `null`, meaning a
+    // Node too old to decode zstd, falls through to the segmenter below.
+    // ⚠️ Local sessions only: a docker case's harness writes its transcript
+    // inside the CONTAINER's ~/.dsh (the workspace bind-mount does not cover
+    // it) and a remote-SSH case's lives on the remote host, so the local
+    // reader would scan a $DSH_HOME that can never hold this session's file
+    // and return "nothing said yet" forever — an agent polling that worker
+    // would starve on an answer that exists. Those configurations keep the
+    // pane segmenter below: coarse, but the real conversation.
+    if (getCli(session.mode)?.capabilities.transcript === 'deepseek-zstd' && !session.docker && !session.remote) {
+      const deepSeekQuery = req.query as { context?: string };
+      const full = deepSeekQuery.context === 'full';
+      const transcript = await readDeepSeekLastResponse(session, { blocks: full });
+      if (transcript) {
+        return {
+          text: transcript.text,
+          timestamp: transcript.timestamp,
+          hasContext: transcript.text.length > 0 || transcript.blocks.length > 0,
+          messages: full ? transcript.blocks : undefined,
+        };
+      }
+    }
+
+    // OpenCode / Gemini / Antigravity / Pi render their own TUIs and write no
+    // Claude transcript, so the scan below finds nothing and the response viewer
+    // renders permanently empty for them. Segment the terminal buffer instead —
+    // the pane IS the transcript for these CLIs. Codex is already handled above,
+    // where a real rollout file is the better source.
+    if (isExternalCliTranscriptMode(session.mode)) {
+      const externalQuery = req.query as { context?: string };
+      const blocks = parseExternalCliTranscript(session.terminalBuffer, session.mode);
+      return {
+        text: getLastTranscriptResponse(blocks),
+        timestamp: '',
+        hasContext: blocks.length > 0,
+        messages: externalQuery.context === 'full' ? blocks : undefined,
+      };
+    }
+
+    // Scan ~/.claude/projects/*/ for the transcript file
+    const projectsDir = join(process.env.HOME || '/tmp', '.claude', 'projects');
+
+    // Adopt the current conversation id if the user ran `/clear` — Claude CLI's
+    // interactive PTY emits no JSON on stdout, so without this lookup the
+    // stored id stays pinned to the pre-/clear transcript.
+    const activeId = await resolveActiveClaudeSessionIdFromHistory(session, projectsDir);
+    if (activeId && activeId !== session.claudeSessionId) {
+      session.adoptClaudeSessionId(activeId);
+      // Flush the Enter that vouched for this adoption to state.json. A `/clear`
+      // emits no completion event, so without this the anchor could still be
+      // unpersisted when the server restarts — and recovery would fall back to
+      // the launch conversation.
+      ctx.persistSessionState(session);
+      // Docker sessions: keep the case's resume seed following the live conversation.
+      if (session.docker) {
+        void persistDockerCaseClaudeSessionId(CODEMAN_CONFIG_DIR, session.docker.containerName, activeId).catch(
+          () => {}
+        );
+      }
+    }
+
+    const query = req.query as { context?: string };
+    // `turn` is the brief view's context: the last ANSWERED turn's assistant
+    // messages, so a multi-row answer is not reduced to its final row. `text`
+    // stays the last assistant row in every mode (agent pollers hash it).
+    const wantsMessages = query.context === 'full' || query.context === 'turn';
+    const claudeSessionId = session.claudeSessionId || session.id;
+    const transcript = await findClaudeTranscript(projectsDir, claudeSessionId, session.id);
+    if (!transcript) {
+      return wantsMessages ? { text: '', timestamp: '', messages: [] } : { text: '', timestamp: '' };
+    }
+
+    if (transcript.sessionId !== session.claudeSessionId && transcript.sessionId !== session.id) {
+      session.adoptClaudeSessionId(transcript.sessionId);
+      if (session.docker) {
+        void persistDockerCaseClaudeSessionId(
+          CODEMAN_CONFIG_DIR,
+          session.docker.containerName,
+          transcript.sessionId
+        ).catch(() => {});
+      }
+    }
+
+    try {
+      const content = await fs.readFile(transcript.path, 'utf8');
+      const parsed = parseClaudeResponseTranscript(content, wantsMessages);
+      if (query.context === 'turn') {
+        return {
+          text: parsed.text,
+          timestamp: parsed.timestamp,
+          messages: selectLastAnsweredTurn(parsed.messages ?? []),
+        };
+      }
+      return parsed;
+    } catch {
+      return wantsMessages ? { text: '', timestamp: '', messages: [] } : { text: '', timestamp: '' };
+    }
+  });
+
+  function isCodexInjectedContext(text: string): boolean {
+    return (
+      /^# AGENTS\.md instructions\b/i.test(text) ||
+      /^<environment_context\b/i.test(text) ||
+      /^<turn_aborted\b/i.test(text) ||
+      /^<codex_internal_context\b/i.test(text) ||
+      /^<recommended_plugins\b/i.test(text) ||
+      /^<user_instructions\b/i.test(text) ||
+      /^# Options\b/i.test(text)
+    );
+  }
+
+  // ── Codex response-viewer support ───────────────────────────────────────────────────────
+  // Read the rollout's session_meta identity fields (plus turn_context cwd as
+  // a fallback when the huge session_meta line got truncated by the head read).
+  function readCodexRolloutMeta(head: string): { cwd?: string; originator?: string } {
+    let cwd: string | undefined;
+    let originator: string | undefined;
+    for (const line of head.split('\n')) {
+      if (!line) continue;
+      try {
+        const entry = JSON.parse(line) as {
+          type?: string;
+          payload?: { cwd?: string; originator?: string };
+        };
+        if (entry.type === 'session_meta') {
+          cwd ??= entry.payload?.cwd;
+          originator ??= entry.payload?.originator;
+        } else if (entry.type === 'turn_context') {
+          cwd ??= entry.payload?.cwd;
+        }
+      } catch {
+        // Malformed or truncated head line — keep scanning.
+      }
+      if (cwd && originator) break;
+    }
+    return { cwd, originator };
+  }
+
+  // The pane's last Enter (Session.lastSubmitAt) correlated against
+  // ~/.codex/history.jsonl, which logs every submitted user message as
+  // {session_id, ts}. This identifies the thread the pane is ACTUALLY on and
+  // is the only signal that survives /resume, /new and /fork typed inside the
+  // codex TUI itself. An entry is credited to this pane only when its Enter is
+  // the closest among all codex panes, so a menu keystroke in another pane
+  // can't steal the attribution.
+  const codexHistoryPinCache = new LRUMap<string, { submitAt: number; threadId: string }>({ maxSize: 1024 });
+  async function resolveCodexThreadFromHistory(
+    session: { id: string; lastSubmitAt?: number },
+    codexHome: string
+  ): Promise<string | null> {
+    const submitAt = session.lastSubmitAt || 0;
+    if (!submitAt) return null;
+    const cached = codexHistoryPinCache.get(session.id);
+    if (cached && cached.submitAt === submitAt) return cached.threadId;
+
+    const histPath = join(codexHome, 'history.jsonl');
+    const st = await fs.stat(histPath).catch(() => null);
+    if (!st || st.size === 0) return null;
+    const tail = await readFileTail(histPath, Buffer.alloc(65536), st.size);
+    if (!tail) return null;
+
+    const WINDOW_MS = 15_000;
+    const otherSubmits: number[] = [];
+    for (const s of ctx.sessions.values()) {
+      if (s.id !== session.id && getCli(s.mode)?.capabilities.transcript === 'codex-rollout' && s.lastSubmitAt) {
+        otherSubmits.push(s.lastSubmitAt);
+      }
+    }
+
+    let best: { threadId: string; dist: number } | undefined;
+    for (const line of tail.split('\n')) {
+      if (!line) continue;
+      let e: { session_id?: string; ts?: number };
+      try {
+        e = JSON.parse(line);
+      } catch {
+        continue; // first tail line may be cut mid-JSON
+      }
+      if (!e.session_id || typeof e.ts !== 'number') continue;
+      const tsMs = e.ts * 1000; // history timestamps are unix seconds
+      const dist = Math.abs(tsMs - submitAt);
+      if (dist > WINDOW_MS) continue;
+      if (otherSubmits.some((o) => Math.abs(tsMs - o) < dist)) continue; // another pane is closer
+      if (!best || dist < best.dist) best = { threadId: e.session_id, dist };
+    }
+    if (!best) return null;
+    codexHistoryPinCache.set(session.id, { submitAt, threadId: best.threadId });
+    return best.threadId;
+  }
+
+  // Locate THIS pane's rollout, in order of confidence:
+  //   0. history match — the thread the pane last submitted a message to
+  //      (see resolveCodexThreadFromHistory); tracks the pane through
+  //      /resume //new //fork typed inside the TUI.
+  //   1. originator match — Codeman spawns codex panes with
+  //      CODEX_INTERNAL_ORIGINATOR_OVERRIDE=codeman_<sessionId>, which codex
+  //      writes into session_meta.originator of every rollout it creates
+  //      (including new files after /new in the same pane; newest match wins).
+  //   2. resume-id match — resumed rollouts keep their ORIGINAL session_meta
+  //      (codex appends without rewriting it), so originator matching can't
+  //      see them; but the rollout uuid is in the filename and we know the id.
+  //   3. legacy cwd+mtime heuristic — panes started before this feature, or
+  //      TUI-resumed threads before their first tracked submit. Case-blind
+  //      cwd compare (codex records the launch-time case, /mnt paths vary)
+  //      and rollouts claimed by OTHER codeman panes are excluded.
+  async function findActiveCodexFile(session: {
+    id: string;
+    workingDir: string;
+    lastSubmitAt?: number;
+    codexConfig?: { resumeSessionId?: string };
+  }): Promise<string | null> {
+    const codexHome = process.env.CODEX_HOME || join(process.env.HOME || '/tmp', '.codex');
+    const sessionsDir = join(codexHome, 'sessions');
+
+    const files: Array<{ path: string; mtimeMs: number }> = [];
+    const walk = async (dir: string): Promise<void> => {
+      let entries: import('node:fs').Dirent[];
+      try {
+        entries = await fs.readdir(dir, { withFileTypes: true });
+      } catch {
+        return;
+      }
+      for (const entry of entries) {
+        const fullPath = join(dir, entry.name);
+        if (entry.isDirectory()) {
+          await walk(fullPath);
+          continue;
+        }
+        if (!entry.isFile() || !entry.name.endsWith('.jsonl')) continue;
+        const st = await fs.stat(fullPath).catch(() => null);
+        if (!st || st.size < 100) continue;
+        files.push({ path: fullPath, mtimeMs: st.mtimeMs });
+      }
+    };
+    await walk(sessionsDir);
+    files.sort((a, b) => b.mtimeMs - a.mtimeMs);
+
+    const historyThreadId = await resolveCodexThreadFromHistory(session, codexHome);
+    if (historyThreadId) {
+      const hit = files.find((f) => basename(f.path).endsWith(`-${historyThreadId}.jsonl`));
+      if (hit) return hit.path;
+    }
+
+    const rawResumeId = session.codexConfig?.resumeSessionId;
+    const resumeId =
+      rawResumeId && /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(rawResumeId)
+        ? rawResumeId
+        : undefined;
+    const idMatch = resumeId ? files.find((f) => basename(f.path).endsWith(`-${resumeId}.jsonl`)) : undefined;
+
+    // Scan newest-first for our originator; anything strictly older than the
+    // id match can never beat it, so the head reads stop there (mtime ties are
+    // still scanned — a /new rollout may land in the same clock tick). The
+    // 128 KiB head budget covers the session_meta line, which embeds full
+    // base_instructions (observed max ~22 KiB on codex 0.144).
+    const originator = `codeman_${session.id}`;
+    const wantCwd = session.workingDir.toLowerCase();
+    const headBuf = Buffer.alloc(131072);
+    let cwdFallback: { path: string; mtimeMs: number } | undefined;
+    for (const f of files) {
+      if (idMatch && f.mtimeMs < idMatch.mtimeMs) break;
+      const meta = await readCodexRolloutMetaCached(f.path, headBuf);
+      if (!meta) continue;
+      if (meta.originator === originator) return f.path; // newest-first → first hit wins
+      if (
+        !cwdFallback &&
+        !idMatch &&
+        meta.cwd?.toLowerCase() === wantCwd &&
+        // A rollout stamped by another codeman pane belongs to that pane.
+        !(meta.originator?.startsWith('codeman_') && meta.originator !== originator)
+      ) {
+        cwdFallback = f;
+      }
+    }
+
+    return idMatch?.path ?? cwdFallback?.path ?? null;
+  }
+
+  // session_meta is written once when codex creates the rollout and never
+  // rewritten (verified: resume appends without touching it), so the parsed
+  // identity of a given path can be cached forever. This turns the per-request
+  // scan into stat calls plus head reads for new files only.
+  const codexRolloutMetaCache = new LRUMap<string, { cwd?: string; originator?: string }>({ maxSize: 4096 });
+  async function readCodexRolloutMetaCached(
+    filePath: string,
+    headBuf: Buffer
+  ): Promise<{ cwd?: string; originator?: string } | null> {
+    const cached = codexRolloutMetaCache.get(filePath);
+    if (cached) return cached;
+    const head = await readFileHead(filePath, headBuf);
+    if (!head) return null;
+    const meta = readCodexRolloutMeta(head);
+    // Don't cache a still-incomplete head: a rollout being created may not
+    // have flushed session_meta/turn_context yet.
+    if (!meta.cwd && !meta.originator) return meta;
+    codexRolloutMetaCache.set(filePath, meta);
+    return meta;
+  }
+
+  function extractCodexBlockText(content: unknown, kinds: string[]): string {
+    if (typeof content === 'string') return content;
+    if (!Array.isArray(content)) return '';
+    return content
+      .filter(
+        (b): b is { type: string; text: string } =>
+          !!b &&
+          typeof b === 'object' &&
+          kinds.includes((b as { type?: string }).type || '') &&
+          typeof (b as { text?: string }).text === 'string'
+      )
+      .map((b) => b.text)
+      .join('\n\n');
+  }
+
+  // Single pass over a Codex rollout: track the last assistant message (for the
+  // default eye view) and, when `full`, the whole user/assistant thread.
+  //
+  // User turns come from event_msg/user_message when available: codex emits one
+  // per REAL user input, and injected context (AGENTS.md, environment_context,
+  // compaction summaries, …) never appears there — so no filtering heuristics.
+  // response_item user rows duplicate those inputs mixed with the injections;
+  // they are kept only as a fallback for old rollouts without event_msg rows.
+  async function readCodexLastResponse(
+    session: { id: string; workingDir: string; codexConfig?: { resumeSessionId?: string } },
+    full: boolean
+  ): Promise<{
+    text: string;
+    timestamp: string;
+    messages?: Array<{ role: string; text: string; timestamp?: string }>;
+  }> {
+    const empty = full ? { text: '', timestamp: '', messages: [] } : { text: '', timestamp: '' };
+    const filePath = await findActiveCodexFile(session);
+    if (!filePath) return empty;
+
+    let content: string;
+    try {
+      content = await fs.readFile(filePath, 'utf8');
+    } catch {
+      return empty;
+    }
+
+    let lastText = '';
+    let lastTimestamp = '';
+    const messages: Array<{ role: string; text: string; timestamp?: string; legacyUser?: boolean }> = [];
+    // Multiset of event-sourced user texts: a real input appears BOTH as an
+    // event_msg and as a response_item row, so each event text cancels exactly
+    // one legacy twin. Legacy rows without an event twin (turns written by an
+    // older codex appending to the same rollout) survive — a file-wide boolean
+    // would wrongly drop them.
+    const eventUserTexts = new Map<string, number>();
+
+    for (const line of content.split('\n')) {
+      if (!line) continue;
+      let entry: {
+        timestamp?: string;
+        type?: string;
+        payload?: {
+          type?: string;
+          role?: string;
+          content?: unknown;
+          message?: unknown;
+          images?: unknown;
+          local_images?: unknown;
+        };
+      };
+      try {
+        entry = JSON.parse(line);
+      } catch {
+        continue;
+      }
+      if (full && entry.type === 'event_msg' && entry.payload?.type === 'user_message') {
+        let text = typeof entry.payload.message === 'string' ? entry.payload.message.trim() : '';
+        if (text && isCodexInjectedContext(text)) continue;
+        if (text) eventUserTexts.set(text, (eventUserTexts.get(text) || 0) + 1);
+        // Image-only (or image+text) inputs: the text field alone would make
+        // the turn vanish, so surface a placeholder.
+        const imageCount =
+          (Array.isArray(entry.payload.images) ? entry.payload.images.length : 0) +
+          (Array.isArray(entry.payload.local_images) ? entry.payload.local_images.length : 0);
+        if (imageCount > 0) text = text ? `${text}\n\n*[image ×${imageCount}]*` : `*[image ×${imageCount}]*`;
+        if (text) messages.push({ role: 'user', text, timestamp: entry.timestamp });
+        continue;
+      }
+      if (entry.type !== 'response_item' || entry.payload?.type !== 'message') continue;
+      const role = entry.payload?.role;
+      if (role === 'assistant') {
+        const text = extractCodexBlockText(entry.payload?.content, ['output_text', 'text']);
+        if (text) {
+          lastText = text;
+          lastTimestamp = entry.timestamp || '';
+          if (full) messages.push({ role: 'assistant', text, timestamp: entry.timestamp });
+        }
+      } else if (role === 'user' && full) {
+        const text = extractCodexBlockText(entry.payload?.content, ['input_text', 'text']).trim();
+        // Drop Codex's injected context turns (AGENTS.md, environment_context, …)
+        // so the thread shows real user prompts only.
+        if (text && !isCodexInjectedContext(text)) {
+          messages.push({ role: 'user', text, timestamp: entry.timestamp, legacyUser: true });
+        }
+      }
+    }
+
+    const thread = messages
+      .filter((m) => {
+        if (!m.legacyUser) return true;
+        const n = eventUserTexts.get(m.text) || 0;
+        if (n > 0) {
+          eventUserTexts.set(m.text, n - 1);
+          return false; // duplicate of an event_msg row already in the thread
+        }
+        return true;
+      })
+      .map(({ role, text, timestamp }) => ({ role, text, timestamp }));
+
+    return full
+      ? { text: lastText, timestamp: lastTimestamp, messages: thread }
+      : { text: lastText, timestamp: lastTimestamp };
+  }
+
+  // ========== Get Terminal Buffer ==========
+
+  // Query params:
+  //   tail=<bytes> - Only return last N bytes (faster initial load)
+  //   full=1       - Explicitly request the entire tmux scrollback (COD-47)
+  //   alt=recording - With full=1: if the pane is in the alternate screen, load
+  //                  the visible frame over the byte recording instead
+  app.get('/api/sessions/:id/terminal', async (req, reply) => {
+    const routeStartedAt = performance.now();
+    const { id } = req.params as { id: string };
+    const query = req.query as { tail?: string; full?: string; lines?: string; alt?: string };
+    const session = findSessionOrFail(ctx, id, req);
+
+    // `full=1` is the EXPLICIT full-history signal (COD-47): capture the ENTIRE
+    // tmux scrollback so history beyond the server byte buffer can be recovered.
+    // Requests WITHOUT it — shell selection/tab switches (`tail=`) and legacy
+    // no-param callers — keep the fast visible-frame capture.
+    const tailBytes = query.tail ? parseInt(query.tail, 10) : 0;
+    let isFullReload = query.full === '1' || query.full === 'true';
+    const { tmuxHistoryLimit, terminalBufferMaxBytes } = await ctx.getTerminalHistoryConfig();
+
+    // Prepend the live tmux pane buffer so tab-switch replay shows the current
+    // on-screen frame, not just the accumulated byte history. This matters for
+    // TUI modes (codex/opencode) that repaint only their latest frame: the
+    // accumulated buffer alone replays as the idle banner. We clear the viewport
+    // (`\x1b[H\x1b[2J`) between the history and the live pane so they don't
+    // overlap. `captureActivePaneBuffer` is a no-op ('') under test mode and
+    // returns null when unavailable, in which case we fall back to history.
+    const muxName = session.muxName;
+    const captureStartedAt = performance.now();
+    // The visible path used to pass no options at all. It passes one now for a
+    // single reason: `capturedGeometry` comes BACK on it, and the response has
+    // to tell the client what size the frame it is about to render was built
+    // for. See PaneCaptureOptions.capturedGeometry.
+    // `lines` bounds only the history a FULL capture reads; the visible-frame
+    // path reads no history and is untouched by it.
+    let captureOpts: PaneCaptureOptions = isFullReload
+      ? {
+          fullHistory: true,
+          historyLimitLines: captureHistoryLines(query.lines, tmuxHistoryLimit),
+          maxCaptureBytes: terminalBufferMaxBytes,
+        }
+      : {};
+    // A remote session's local pane only sees the remote tmux client's repaints,
+    // so its own scrollback is a fraction of the real one: read that from the
+    // remote tmux and splice it above the local frame. Null (host unreachable,
+    // no remote session, back-off) keeps the local capture as before.
+    if (isFullReload && session.remote && muxName && captureOpts.historyLimitLines !== undefined) {
+      const remoteScrollback = await fetchRemoteScrollback(
+        session.remote,
+        session.id,
+        captureOpts.historyLimitLines,
+        terminalBufferMaxBytes
+      );
+      if (remoteScrollback !== null) {
+        captureOpts.scrollbackOverride = remoteScrollback.scrollback;
+        captureOpts.scrollbackOverrideScreen = remoteScrollback.screen;
+      }
+    }
+    const capture = (opts: PaneCaptureOptions): string | null =>
+      muxName && typeof ctx.mux.captureActivePaneBuffer === 'function'
+        ? ctx.mux.captureActivePaneBuffer(muxName, opts)
+        : null;
+    let liveMuxBuffer = capture(captureOpts);
+    // tmux adds no history while a pane is in the alternate screen, and a
+    // nested tmux client (a remote SSH or Docker case, or `tmux` run by hand
+    // in a shell) holds its pane there for good, so the full capture above is
+    // one screen plus whatever came before. The byte recording still carries
+    // the scrollback, so a caller that opts in (a shell's automatic load,
+    // `alt=recording`) gets the old visible-frame load over it, tailed, rather
+    // than losing everything above the screen. `alternate_on` cannot tell a
+    // nested tmux from vim or less, so those take this path too while open:
+    // the load the shell had before tmux-rendered loads existed. Not when the
+    // history came from the remote tmux (`scrollbackOverride`): a remote pane is
+    // in the alternate screen only because it hosts that tmux's client, and
+    // the fallback would throw the remote scrollback away.
+    if (
+      isFullReload &&
+      query.alt === 'recording' &&
+      captureOpts.scrollbackOverride === undefined &&
+      captureOpts.capturedAlternateOn === true
+    ) {
+      isFullReload = false;
+      captureOpts = {};
+      liveMuxBuffer = capture(captureOpts);
+    }
+    const captureFinishedAt = performance.now();
+    const hasLiveMuxBuffer = liveMuxBuffer !== null && liveMuxBuffer.length > 0;
+    const source: 'history' | 'mux-visible' | 'mux-full-history' = hasLiveMuxBuffer
+      ? isFullReload
+        ? 'mux-full-history'
+        : 'mux-visible'
+      : 'history';
+    // What the three row-preserving skips below must key on. `isFullReload` is
+    // only what the CLIENT ASKED FOR: when the capture comes back null — ENOBUFS,
+    // a timeout, a vanished pane, or a session with no mux at all — rawBuffer
+    // falls back to the byte history, which is a stream of successive frames with
+    // no row alignment to protect and every reason to be stripped.
+    const isFullCapture = isFullReload && hasLiveMuxBuffer;
+    let rawBuffer: string;
+    if (liveMuxBuffer !== null && liveMuxBuffer.length > 0) {
+      // Full-history capture is the RENDERED form of everything already in the
+      // byte buffer (up to tmux eviction) — return it alone. Prepending the byte
+      // history would replay the whole conversation twice: `\x1b[2J` clears only
+      // the viewport, not xterm scrollback. The history+clear+frame concat stays
+      // for the visible-frame path, where the single pane frame lacks history.
+      rawBuffer = isFullReload
+        ? liveMuxBuffer
+        : session.terminalBufferLength > 0
+          ? `${session.terminalBuffer}\x1b[H\x1b[2J${liveMuxBuffer}`
+          : liveMuxBuffer;
+    } else {
+      rawBuffer = session.terminalBuffer;
+    }
+    const fullSize = rawBuffer.length;
+    let truncated = false;
+    // WHY the reason and not just the boolean (#258): `truncated` is set at two
+    // sites that mean opposite things to a user. 'tail' is an intentional
+    // partial replay and the rest is still retained, so a `full=1` pull recovers
+    // it. 'capped' means we hit the byte ceiling — and on a full-history capture
+    // that is already everything tmux holds, so the oldest output is genuinely
+    // out of reach rather than one click away. Collapsing both into one flag is
+    // why the UI could only ever say "truncated for performance".
+    let truncationReason: 'capped' | 'tail' | null = null;
+    let cleanBuffer: string;
+
+    // A `lines=` bound shallower than tmux's history left the older lines in
+    // tmux: an intentional partial read, so 'tail', and a later pull with a
+    // deeper (or no) bound recovers them. Without this a bounded window looks
+    // like the whole history to the client. The byte cap below still wins.
+    // Only a bound the CLIENT set and below the configured ceiling counts:
+    // without `lines=` the bound is the ceiling itself, and on tmux before 3.7
+    // a live pane can hold more than a lowered ceiling, which no request can
+    // read, so calling that a recoverable cut would offer a button that can
+    // never return more.
+    // `historyLinesCut` tells the client this happened, apart from any byte
+    // cut below: `fullSize` counts only what tmux returned, so the bytes a
+    // later `tail` cut are not all that is left, and the client must not name
+    // them as the remainder.
+    const capturedHistoryLines = captureOpts.capturedHistoryLines;
+    const historyLinesCut =
+      isFullCapture &&
+      captureOpts.historyLimitLines !== undefined &&
+      captureOpts.historyLimitLines < tmuxHistoryLimit &&
+      capturedHistoryLines !== undefined &&
+      capturedHistoryLines > captureOpts.historyLimitLines;
+    if (historyLinesCut) {
+      truncated = true;
+      truncationReason = 'tail';
+    }
+
+    // Cap the payload EARLY — before the regex normalization passes below run
+    // over it. A full-history tmux capture can be tens of MB of scrollback;
+    // normalizing all of it would stall the event loop only to discard most
+    // bytes anyway. Keep the most RECENT bytes (slice from the end) and align
+    // to a line boundary so we never start mid-ANSI-escape.
+    if (terminalBufferMaxBytes > 0 && rawBuffer.length > terminalBufferMaxBytes) {
+      rawBuffer = rawBuffer.slice(-terminalBufferMaxBytes);
+      truncated = true;
+      truncationReason = 'capped';
+      const capNewline = rawBuffer.indexOf('\n');
+      if (capNewline > 0 && capNewline < 4096) {
+        rawBuffer = rawBuffer.slice(capNewline + 1);
+      }
+    }
+
+    // Strip redundant Ink spinner/status redraws BEFORE tailing.
+    // During long thinking phases, Ink rewrites the same rows thousands of times
+    // (500KB+). Without stripping, tail mode returns only spinner frames and
+    // the terminal appears empty when switching tabs.
+    // A full reload's buffer IS the rendered pane, one line per screen row, and
+    // it ends with an absolute cursor move back to the pane's own position.
+    // Every transform below that can DELETE A LINE would shift the rows out from
+    // under that position, leaving the caret a row off — on the composer's
+    // border rather than its input line. Redraw-bloat stripping exists for a
+    // byte stream of successive frames; a capture holds no successive frames.
+    let strippedBuffer =
+      isFullCapture || getCli(session.mode)?.capabilities.stripInkBloat === false
+        ? rawBuffer
+        : stripInkRedrawBloat(rawBuffer);
+
+    // Same strip as the live stream (session.ts), so a buffer recorded before the
+    // live-side strip existed cannot re-park xterm on replay. See stripReplayBuffer.
+    strippedBuffer = stripReplayBuffer(strippedBuffer, session.mode, session.usesMux);
+
+    if (tailBytes > 0 && strippedBuffer.length > tailBytes) {
+      // Fast path: tail from the end, skip expensive banner search on full 2MB buffer.
+      // Banner is near the top and gets discarded by tail anyway.
+      cleanBuffer = strippedBuffer.slice(-tailBytes);
+      truncated = true;
+      // 'capped' already means the oldest bytes are gone for good; a tail cut on
+      // top of it does not soften that, so the stronger reason wins.
+      truncationReason ??= 'tail';
+      // Avoid starting mid-ANSI-escape: find first newline within the first 4KB
+      // and start from there. This prevents xterm.js from parsing a partial escape
+      // sequence which corrupts cursor position for all subsequent Ink redraws.
+      const firstNewline = cleanBuffer.indexOf('\n');
+      if (firstNewline > 0 && firstNewline < 4096) {
+        cleanBuffer = cleanBuffer.slice(firstNewline + 1);
+      }
+    } else {
+      // Full buffer: clean junk before actual Claude content
+      cleanBuffer = strippedBuffer;
+
+      // Find where Claude banner starts (has color codes before "Claude")
+      // Skipped for a full reload: the banner sits at whatever row the pane has
+      // it, and cutting to it would drop the blank rows above and move every
+      // row up by that many.
+      const claudeMatch = isFullCapture ? null : cleanBuffer.match(CLAUDE_BANNER_PATTERN);
+      if (claudeMatch && claudeMatch.index !== undefined && claudeMatch.index > 0) {
+        let lineStart = claudeMatch.index;
+        while (lineStart > 0 && cleanBuffer[lineStart - 1] !== '\n') {
+          lineStart--;
+        }
+        cleanBuffer = cleanBuffer.slice(lineStart);
+      }
+    }
+
+    // Remove Ctrl+L and leading whitespace (cheap on tailed subset)
+    // Leading whitespace goes too, except on a full reload where a leading
+    // blank line is the pane's own first row and dropping it shifts every row
+    // up by one.
+    cleanBuffer = cleanBuffer.replace(CTRL_L_PATTERN, '');
+    if (!isFullCapture) cleanBuffer = cleanBuffer.replace(LEADING_WHITESPACE_PATTERN, '');
+
+    const finishedAt = performance.now();
+    reply.header(
+      'Server-Timing',
+      `capture;dur=${(captureFinishedAt - captureStartedAt).toFixed(1)}, ` +
+        `prepare;dur=${(finishedAt - captureFinishedAt).toFixed(1)}, ` +
+        `total;dur=${(finishedAt - routeStartedAt).toFixed(1)}`
+    );
+
+    return {
+      terminalBuffer: cleanBuffer,
+      status: session.status,
+      fullSize,
+      truncated,
+      truncationReason,
+      // The `lines=` bound left older lines in tmux (see above): the remainder
+      // is more than `fullSize - retainedBytes`, by an amount unknown here.
+      historyLinesCut,
+      // `retainedBytes` is what this response actually carries; `fullSize` is
+      // what existed before the cut. The gap is what the indicator reports.
+      retainedBytes: cleanBuffer.length,
+      source,
+      // The pane geometry this frame was drawn for. A visible-frame capture
+      // positions every row absolutely, so a client whose terminal has fewer
+      // rows than this overwrites its last line with the overflow and loses
+      // the rows underneath. The client compares these against its own size.
+      //
+      // BOTH FIELDS ARE ABSENT unless this response really carries a capture,
+      // and that is the honest answer rather than a gap to paper over. Two
+      // separate things can leave a frame unpositioned. The cursor query is
+      // what produces the absolute addressing in the first place, so a capture
+      // that lost it returned a raw frame with no row positioning in it. And a
+      // capture can report geometry and STILL hand back nothing: the
+      // full-history path returns '' for a pane holding nothing visible, which
+      // drops `source` to `history` while `capturedGeometry` is already
+      // written, so the geometry has to be suppressed HERE rather than trusted
+      // to be missing. Naming a size for a body that is the byte stream would
+      // describe a frame that was never drawn and invite the client to repair
+      // damage that does not exist.
+      captureCols: hasLiveMuxBuffer ? captureOpts.capturedGeometry?.cols : undefined,
+      captureRows: hasLiveMuxBuffer ? captureOpts.capturedGeometry?.rows : undefined,
+      // Rows tmux holds above the visible frame, which is the most a `full=1`
+      // pull can add. `truncated` measures the BYTE stream, and for a pane that
+      // keeps no scrollback (a fullscreen CLI in the alternate screen) the bytes
+      // a tail cut drops are old repaints that no request can bring back, so a
+      // client must not offer to load them. Absent when the pane was not read,
+      // and for a remote session: its local pane hosts the remote tmux client in
+      // the alternate screen, so it always reports 0, while a `full=1` load reads
+      // the real scrollback from the remote tmux (`fetchRemoteScrollback`).
+      paneHistoryLines: hasLiveMuxBuffer && !session.remote ? captureOpts.capturedHistoryLines : undefined,
+    };
+  });
+
+  // ═══════════════════════════════════════════════════════════════
+  // Session Settings (auto-clear, auto-compact, image watcher, flicker filter)
+  // ═══════════════════════════════════════════════════════════════
+
+  // ========== Auto-Clear ==========
+
+  app.post('/api/sessions/:id/auto-clear', async (req) => {
+    const { id } = req.params as { id: string };
+    const body = parseBody(AutoClearSchema, req.body, 'Invalid request body');
+    const session = findSessionOrFail(ctx, id, req);
+
+    session.setAutoClear(body.enabled, body.threshold);
+    persistAndBroadcastSession(ctx, session);
+
+    return {
+      success: true,
+      data: {
+        autoClear: {
+          enabled: session.autoClearEnabled,
+          threshold: session.autoClearThreshold,
+        },
+      },
+    };
+  });
+
+  // ========== Auto-Compact ==========
+
+  app.post('/api/sessions/:id/auto-compact', async (req) => {
+    const { id } = req.params as { id: string };
+    const body = parseBody(AutoCompactSchema, req.body, 'Invalid request body');
+    const session = findSessionOrFail(ctx, id, req);
+
+    session.setAutoCompact(body.enabled, body.threshold, body.prompt);
+    persistAndBroadcastSession(ctx, session);
+
+    return {
+      success: true,
+      data: {
+        autoCompact: {
+          enabled: session.autoCompactEnabled,
+          threshold: session.autoCompactThreshold,
+          prompt: session.autoCompactPrompt,
+        },
+      },
+    };
+  });
+
+  // ========== Auto-Resume (usage-limit pause) ==========
+
+  app.post('/api/sessions/:id/auto-resume', async (req) => {
+    const { id } = req.params as { id: string };
+    const body = parseBody(AutoResumeSchema, req.body, 'Invalid request body');
+    const session = findSessionOrFail(ctx, id, req);
+
+    session.setAutoResume(body.enabled);
+    persistAndBroadcastSession(ctx, session);
+
+    return {
+      success: true,
+      data: {
+        autoResume: {
+          enabled: session.autoResumeEnabled,
+          resumeAt: session.autoResumeAt ?? undefined,
+        },
+      },
+    };
+  });
+
+  // ========== Pin (float to top of the session manager list, COD-139) ==========
+
+  app.post('/api/sessions/:id/pin', async (req) => {
+    const { id } = req.params as { id: string };
+    const body = parseBody(PinSessionSchema, req.body, 'Invalid request body');
+
+    const session = ctx.sessions.get(id);
+    if (session) {
+      if (!canAccessOwned(getAuthUser(req), session.owner)) {
+        return createErrorResponse(ApiErrorCode.NOT_FOUND, `Session ${id} not found`);
+      }
+      session.setPinned(body.pinned);
+      // Persist + broadcast session:updated (keeps tabs/state consistent), then a
+      // dedicated session:pinned event so the session manager list re-sorts live.
+      persistAndBroadcastSession(ctx, session);
+      ctx.broadcast(SseEvent.SessionPinned, {
+        id,
+        pinned: session.pinned,
+        pinnedAt: session.pinnedAt ?? undefined,
+      });
+
+      return {
+        success: true,
+        data: {
+          pinned: session.pinned,
+          pinnedAt: session.pinnedAt ?? undefined,
+        },
+      };
+    }
+
+    // COD-142 keeps a pinned session's record after kill (demoteOrRemoveSession),
+    // so pin toggles must also work WITHOUT a live Session — otherwise a
+    // pinned-then-killed record could never be unpinned (cleanup skips pinned
+    // records, and the record has no live session to route through).
+    const persisted = ctx.store.getSession(id);
+    if (!persisted || !canAccessOwned(getAuthUser(req), persisted.owner)) {
+      return createErrorResponse(ApiErrorCode.NOT_FOUND, `Session ${id} not found`);
+    }
+    const pinnedAt = body.pinned ? Date.now() : undefined;
+    ctx.store.setSession(id, { ...persisted, pinned: body.pinned || undefined, pinnedAt });
+    ctx.broadcast(SseEvent.SessionPinned, { id, pinned: body.pinned, pinnedAt });
+    return { success: true, data: { pinned: body.pinned, pinnedAt } };
+  });
+
+  // ========== Image Watcher ==========
+
+  app.post('/api/sessions/:id/image-watcher', async (req) => {
+    const { id } = req.params as { id: string };
+    const body = parseBody(ImageWatcherSchema, req.body, 'Invalid request body');
+    const session = findSessionOrFail(ctx, id, req);
+
+    if (body.enabled) {
+      imageWatcher.watchSession(session.id, session.workingDir);
+    } else {
+      imageWatcher.unwatchSession(session.id);
+    }
+
+    // Store state on session for persistence
+    session.imageWatcherEnabled = body.enabled;
+    ctx.persistSessionState(session);
+
+    return {
+      success: true,
+      data: {
+        imageWatcherEnabled: body.enabled,
+      },
+    };
+  });
+
+  // ========== Flicker Filter ==========
+
+  app.post('/api/sessions/:id/flicker-filter', async (req) => {
+    const { id } = req.params as { id: string };
+    const body = parseBody(FlickerFilterSchema, req.body, 'Invalid request body');
+    const session = findSessionOrFail(ctx, id, req);
+
+    session.flickerFilterEnabled = body.enabled;
+    persistAndBroadcastSession(ctx, session);
+
+    return {
+      success: true,
+      data: {
+        flickerFilterEnabled: body.enabled,
+      },
+    };
+  });
+
+  // ═══════════════════════════════════════════════════════════════
+  // Quick Actions (quick-run, quick-start)
+  // ═══════════════════════════════════════════════════════════════
+
+  // ========== Quick Run ==========
+
+  app.post('/api/run', async (req) => {
+    const runOwner = ownerFor(req);
+    const capMsg = sessionCapacityMessage(ctx.sessions, runOwner);
+    if (capMsg) return createErrorResponse(ApiErrorCode.SESSION_BUSY, capMsg);
+
+    const {
+      prompt,
+      workingDir,
+      envOverrides: runEnvOverrides,
+    } = parseBody(QuickRunSchema, req.body, 'Invalid request body');
+
+    if (!prompt.trim()) {
+      return createErrorResponse(ApiErrorCode.INVALID_INPUT, 'prompt is required');
+    }
+    const dir = workingDir || process.cwd();
+
+    // Multi-user: confine a non-admin's one-shot working dir to their space.
+    if (!isWorkingDirAllowed(getAuthUser(req), dir)) {
+      return createErrorResponse(ApiErrorCode.FORBIDDEN, 'workingDir is outside your workspace');
+    }
+
+    // Validate workingDir exists and is a directory
+    if (workingDir) {
+      try {
+        const stat = statSync(dir);
+        if (!stat.isDirectory()) {
+          return createErrorResponse(ApiErrorCode.INVALID_INPUT, 'workingDir is not a directory');
+        }
+      } catch {
+        return createErrorResponse(ApiErrorCode.INVALID_INPUT, 'workingDir does not exist');
+      }
+    }
+
+    // Section 6.3: the one-shot spawn path (runPrompt/buildPromptArgs) respects the
+    // session's claudeMode, so resolve it for the owner (bypass -> auto for non-granted).
+    const runClaudeModeConfig = await ctx.getClaudeModeConfig();
+    const runClaudeMode = await resolveClaudeModeForUsername(runClaudeModeConfig.claudeMode, runOwner);
+    const session = new Session({
+      workingDir: dir,
+      envOverrides: runEnvOverrides,
+      claudeMode: runClaudeMode,
+      allowedTools: runClaudeModeConfig.allowedTools,
+      owner: runOwner,
+    });
+    await ctx.addSession(session);
+    ctx.store.incrementSessionsCreated();
+    ctx.persistSessionState(session);
+    await ctx.setupSessionListeners(session);
+    getLifecycleLog().log({
+      event: 'created',
+      sessionId: session.id,
+      name: session.name,
+      reason: 'run_prompt',
+    });
+
+    ctx.broadcast(SseEvent.SessionCreated, ctx.getSessionStateWithRespawn(session));
+
+    try {
+      const result = await session.runPrompt(prompt);
+      // Clean up session after completion to prevent memory leak
+      await ctx.cleanupSession(session.id, true, 'run_prompt_complete');
+      return { sessionId: session.id, ...result };
+    } catch (err) {
+      // Clean up session on error too. The session is destroyed here, so its id
+      // is only useful for log correlation — carry it in the error message.
+      await ctx.cleanupSession(session.id, true, 'run_prompt_error');
+      return createErrorResponse(ApiErrorCode.OPERATION_FAILED, `${getErrorMessage(err)} (session ${session.id})`);
+    }
+  });
+
+  // ========== Quick Start ==========
+
+  app.post('/api/quick-start', async (req) => {
+    const owner = ownerFor(req);
+    const capMsg = sessionCapacityMessage(ctx.sessions, owner);
+    if (capMsg) return createErrorResponse(ApiErrorCode.SESSION_BUSY, capMsg);
+
+    const {
+      caseName = 'testcase',
+      sessionName,
+      icon,
+      channelId,
+      chatroomId,
+      mode = 'claude',
+      modelOverride,
+      openCodeConfig,
+      codexConfig,
+      geminiConfig,
+      antigravityConfig,
+      piConfig,
+      grokConfig,
+      deepSeekConfig,
+      ompConfig,
+      envOverrides,
+      effort,
+      advisorModel,
+      parentSessionId,
+      agentOrigin,
+      customModel,
+      tabGroupId,
+    } = parseBody(QuickStartSchema, req.body);
+
+    // Resolved ONCE here: the same value labels a case directory this request creates
+    // (agent-case-marker.ts) and draws the tab lineage line on the session below.
+    const qsParentSessionId = resolveParentSessionId(ctx, req, parentSessionId, owner);
+    // Same source guard as POST /api/sessions: an agent resumes only a conversation of its own, and never "the latest".
+    if (req.headers['x-codeman-parent-session'] !== undefined && qsParentSessionId) {
+      const resumes = { openCodeConfig, codexConfig, geminiConfig, antigravityConfig, piConfig, grokConfig, ompConfig, deepSeekConfig };
+      const owns = (id: string) => agentOwnsConversation(ctx.sessions.get(qsParentSessionId), id);
+      const refusal = resumeRefusalForAgent(resumes, owns, takeoverFor(qsParentSessionId, req.headers['x-codeman-parent-session']));
+      if (refusal) return createErrorResponse(ApiErrorCode.FORBIDDEN, refusal);
+      const auditRefusal = await auditTakeovers(resumes, qsParentSessionId, owns);
+      if (auditRefusal) return createErrorResponse(ApiErrorCode.OPERATION_FAILED, auditRefusal.message);
+    }
+    if (icon !== undefined && normalizeIcon(icon) === undefined) {
+      return createErrorResponse(ApiErrorCode.INVALID_INPUT, 'Choose an icon with at most two characters');
+    }
+    let qsSpawnIdentity: ReturnType<CompanyService['prepareSpawn']> | undefined;
+    if (options.company && getCli(mode)?.kind === 'agent') {
+      try {
+        qsSpawnIdentity = options.company.prepareSpawn({
+          owner,
+          parentSessionId: qsParentSessionId,
+          channelId: channelId ?? chatroomId,
+          name: sessionName?.slice(0, MAX_SESSION_NAME_LENGTH),
+          icon,
+        });
+      } catch (error) {
+        return createErrorResponse(ApiErrorCode.INVALID_INPUT, getErrorMessage(error));
+      }
+    }
+
+    // Multi-user: shell mode is arbitrary host-account execution, gated by the grant.
+    // Resolve the owner's grant from the store so a GRANTED regular user is not wrongly denied.
+    if (getCli(mode)?.capabilities.privilegedCommandGate && !(await canUsernameRunPrivilegedCommands(owner))) {
+      return createErrorResponse(ApiErrorCode.FORBIDDEN, 'Shell sessions require the can-bypass-permissions grant');
+    }
+
+    // Resolve the remote case FIRST — the CLI executes on the REMOTE host over ssh,
+    // so the LOCAL availability gates below (isCodexAvailable() etc.) don't apply and
+    // would wrongly reject a machine that hasn't got the CLI installed locally.
+    let remote = undefined;
+    let docker = undefined;
+    let dockerResumeId: string | undefined;
+    let casePath: string | null = null;
+    // Security: fold ownership INTO the match (don't early-return) so a NON-OWNED
+    // same-named remote/docker case is skipped and control falls through to the caller's
+    // own LOCAL case — remote/docker names are globally unique but local names are
+    // per-user, so a name collision must not shadow the caller's own case. canAccessOwned
+    // is allow-all for admins/single-user, so flag-OFF stays byte-identical.
+    const remoteCases = await readRemoteCases(CODEMAN_CONFIG_DIR);
+    const remoteCase = remoteCases.find(
+      (item) => item.name === caseName && canAccessOwned(getAuthUser(req), item.owner)
+    );
+    const dockerCase = remoteCase
+      ? undefined
+      : (await readDockerCases(CODEMAN_CONFIG_DIR)).find(
+          (item) => item.name === caseName && canAccessOwned(getAuthUser(req), item.owner)
+        );
+    if (remoteCase) {
+      const host = (await readRemoteHosts(CODEMAN_CONFIG_DIR)).find((item) => item.id === remoteCase.hostId);
+      if (!host) return createErrorResponse(ApiErrorCode.NOT_FOUND, 'Remote host not found');
+
+      // Per-session config that is applied to the LOCAL tmux/CLI wrapper (env vars via
+      // tmux setenv, effort/model CLI args, codex/gemini/antigravity/opencode config) does NOT
+      // cross ssh, so it would silently no-op. Reject rather than pretend it worked —
+      // remote command/env customization goes through the per-host command override.
+      if (
+        subscriptionLaunch(req).selection ||
+        (envOverrides && Object.keys(envOverrides).length > 0) ||
+        effort ||
+        advisorModel ||
+        modelOverride !== undefined ||
+        codexConfig ||
+        geminiConfig ||
+        antigravityConfig ||
+        piConfig ||
+        grokConfig ||
+        deepSeekConfig ||
+        ompConfig ||
+        openCodeConfig ||
+        customModel
+      ) {
+        return createErrorResponse(
+          ApiErrorCode.INVALID_INPUT,
+          'envOverrides, effort, advisorModel, modelOverride, per-CLI config, and custom model endpoints are not supported for remote cases (they do not cross ssh). Configure the remote command via the host command override instead.'
+        );
+      }
+
+      // The user pressing "Run" on a case whose host is asleep IS an explicit wake
+      // request (docs/remote-sessions.md §Wake-on-LAN), and the tmux probe below would
+      // otherwise fail with "could not verify tmux on remote host …" — an ssh failure
+      // that blames tmux for a machine that is merely suspended. Wired HERE, in the HTTP
+      // route, and deliberately NOT in the shared session service: `cron-service.ts`
+      // builds sessions through the service, and a wake down there would re-wake the
+      // host on every schedule (the failure invariant #1 exists to prevent).
+      const hostWake = await remoteWake.ensureHostAwake(wakeableHost(host), {
+        timeoutMs: REMOTE_WAKE_REQUEST_READY_TIMEOUT_MS,
+        // No session yet, so the wake events name their requester (multi-user routing).
+        requestedBy: ownerFor(req),
+      });
+      if (hostWake === 'failed') {
+        return createErrorResponse(
+          ApiErrorCode.OPERATION_FAILED,
+          `${host.label} did not come back after a wake-on-LAN request — the session was not started`
+        );
+      }
+
+      // tmux is a hard prerequisite on the remote host (the agent runs inside a remote
+      // tmux server so it survives ssh drops). Probe before spawning so a missing tmux
+      // surfaces a clear, structured error instead of a dead "tmux: command not found" pane.
+      const tmuxCheck = await checkRemoteTmuxAvailable(host);
+      if (!tmuxCheck.ok) {
+        // An unreachable host and a host without tmux fail the same way over ssh, so the
+        // probe's own message would send the user hunting for a tmux install. Ask the
+        // registry (which just probed, when it woke the host) which of the two it is.
+        // `=== false` on purpose: a proxied host answers `null` (the probe cannot reach
+        // it), and an unknown verdict must not replace the real ssh error with
+        // "not reachable" over a host that is fine.
+        if ((await remoteWake.checkHostReachable(wakeableHost(host))) === false) {
+          return createErrorResponse(
+            ApiErrorCode.OPERATION_FAILED,
+            hostWake === 'no-target'
+              ? `${host.label} (${host.host}) is not reachable, and this host has no wake-on-LAN target — configure a MAC address or a wake command first`
+              : `${host.label} (${host.host}) is not reachable`
+          );
+        }
+        return createErrorResponse(ApiErrorCode.OPERATION_FAILED, tmuxCheck.error || 'remote host is missing tmux');
+      }
+
+      casePath = remoteCase.remotePath;
+      remote = toSessionRemote(host, remoteCase);
+    } else if (dockerCase) {
+      // Docker case: the CLI executes INSIDE a container via local tmux + `docker
+      // exec`, so the LOCAL availability gates below don't apply. Mirror the remote
+      // branch's rejection of per-session config that would not cross into the
+      // container (it would silently no-op). (Ownership is enforced in the .find above.)
+      const host = (await readDockerHosts(CODEMAN_CONFIG_DIR)).find((item) => item.id === dockerCase.hostId);
+      if (!host) return createErrorResponse(ApiErrorCode.NOT_FOUND, 'Docker host not found');
+      if (
+        subscriptionLaunch(req).selection ||
+        (envOverrides && Object.keys(envOverrides).length > 0) ||
+        effort ||
+        advisorModel ||
+        codexConfig ||
+        geminiConfig ||
+        antigravityConfig ||
+        piConfig ||
+        grokConfig ||
+        deepSeekConfig ||
+        ompConfig ||
+        openCodeConfig ||
+        customModel
+      ) {
+        return createErrorResponse(
+          ApiErrorCode.INVALID_INPUT,
+          'envOverrides, effort, advisorModel, per-CLI config, and custom model endpoints are not supported for docker cases (they do not cross into the container). Configure the container via the docker host command override instead.'
+        );
+      }
+
+      const availability = await checkDockerAvailable(host.engine);
+      if (!availability.ok) {
+        return createErrorResponse(
+          ApiErrorCode.OPERATION_FAILED,
+          availability.error || 'docker daemon is not available'
+        );
+      }
+      const sessionDocker = toSessionDocker(host, dockerCase);
+      // An ADOPTED container skips every image-side gate: we never run `docker
+      // create`, so the image is the user's business, and `ensureAgentBaseImage`
+      // would build/require an image that has nothing to do with their container.
+      // The prerequisite that DOES still hold is tmux inside it, so probe the live
+      // container (not the image) and refuse before launch rather than dead-paning.
+      if (sessionDocker.owned === false) {
+        const probe = await probeAdoptableContainer(sessionDocker, [mode]);
+        if (!probe.ok) {
+          return createErrorResponse(ApiErrorCode.OPERATION_FAILED, probe.error || 'container is not usable');
+        }
+        // The probe already exec'd into the container; carry its facts onto the
+        // live session so the launch chain does not have to re-ask.
+        sessionDocker.runsAsRoot = probe.runsAsRoot;
+        // No `mode !== 'shell'` arm: a mode with no binary of its own is reported
+        // available by the probe unconditionally, so this reads the same answer for it.
+        if (!probe.availableModes?.includes(mode)) {
+          return createErrorResponse(
+            ApiErrorCode.OPERATION_FAILED,
+            `"${mode}" is not installed in container "${sessionDocker.containerName}". Adoption never modifies the container — install it inside, or pick another mode.`
+          );
+        }
+      } else {
+        // Ensure the base image exists, auto-building the default image on first use so
+        // it is never a blocker. Dedup'd with any build kicked off at case-create, so
+        // this awaits the SAME in-flight build rather than starting a second one.
+        const ensured = await ensureAgentBaseImage(sessionDocker, sessionDocker.image, {
+          onProgress: (line) => ctx.broadcast(SseEvent.DockerImageBuildProgress, { name: dockerCase.name, line }),
+        });
+        if (!ensured.ok) {
+          return createErrorResponse(ApiErrorCode.OPERATION_FAILED, ensured.error || 'base image not available');
+        }
+        if (ensured.built) {
+          ctx.broadcast(SseEvent.DockerImageBuildComplete, { name: dockerCase.name, image: sessionDocker.image });
+        }
+        // tmux is a hard prerequisite (the in-container tmux makes reconnect durable).
+        // Skip the extra container-run probe for our OWN default image (the baked
+        // Dockerfile always contains tmux); still verify a custom image.
+        if (sessionDocker.image !== DEFAULT_AGENT_IMAGE) {
+          const tmuxCheck = await checkDockerTmuxAvailable(sessionDocker);
+          if (!tmuxCheck.ok) {
+            return createErrorResponse(ApiErrorCode.OPERATION_FAILED, tmuxCheck.error || 'base image is missing tmux');
+          }
+        }
+      }
+
+      // Config drift (docs/docker-cases-plan.md §4): the desired create-config no
+      // longer matches the existing container's codeman.confighash label. Refuse to
+      // silently launch into the stale container — the frontend confirms a recreate
+      // (POST /api/docker-cases/:name/recreate; workspace + transcripts ride bind
+      // mounts and the conversation resumes), or the user reverts the host edit.
+      const drift = await checkDockerConfigDrift(sessionDocker);
+      if (drift.exists && drift.drifted) {
+        return createErrorResponse(
+          ApiErrorCode.CONFLICT,
+          `Container config for case "${dockerCase.name}" changed since the container was created. Recreate the container to apply it (workspace and conversation survive), or revert the docker host edit.`
+        );
+      }
+
+      casePath = dockerCase.hostWorkspacePath; // a REAL host dir (bind-mounted into the container)
+      docker = sessionDocker;
+      // Seed only Claude's resume id. Codex, Gemini, and the other CLIs have
+      // separate conversation stores and must never receive a Claude UUID.
+      if (mode === 'claude' && sessionDocker.resumeOnStart && dockerCase.lastClaudeSessionId) {
+        dockerResumeId = dockerCase.lastClaudeSessionId;
+      }
+    } else {
+      // Same pre-flight as POST /api/sessions: refuse before spawning a pane that would die
+      // on `command not found`, with the resolver's own diagnostics, and a launcher CLI's
+      // more specific reason (dsh: binary vs no pane-capable profile vs the profile the
+      // caller named). External CLIs only — claude and shell fall through to tmux-manager's
+      // own not-found throw, exactly as before.
+      if (getCli(mode)?.capabilities.external) {
+        const qsLaunchError = await resolveCliLaunchError(
+          mode,
+          legacyConfigForMode(mode, {
+            openCodeConfig,
+            codexConfig,
+            geminiConfig,
+            antigravityConfig,
+            piConfig,
+            grokConfig,
+            deepSeekConfig,
+          } as unknown as Record<string, unknown>)
+        );
+        if (qsLaunchError) {
+          return createErrorResponse(ApiErrorCode.OPERATION_FAILED, qsLaunchError);
+        }
+      }
+
+      // Resolve case path: check linked-cases registry first, then fall back to CASES_DIR.
+      // This mirrors the behaviour of resolveCasePath() in case-routes so that linked
+      // external project directories are honoured by quick-start just like regular case routes.
+      let linkedCases: Record<string, string> = {};
+      try {
+        const raw = await fs.readFile(LINKED_CASES_FILE, 'utf-8');
+        linkedCases = JSON.parse(raw);
+      } catch {
+        // File missing or unparseable — treat as empty registry
+      }
+      // Multi-user: the linked-cases registry is ownerless/global, so only admins may
+      // resolve a name to an arbitrary linked path. A non-admin resolves inside their
+      // OWN case space only (single-user: isAdmin true, so linked cases still honoured).
+      const linked = isAdmin(req) ? linkedCases[caseName] : undefined;
+      casePath = linked || validatePathWithinBase(caseName, resolveCasesDir(getAuthUser(req)));
+      if (!casePath) {
+        return createErrorResponse(ApiErrorCode.INVALID_INPUT, 'Invalid case path');
+      }
+    }
+
+    // By this point casePath is guaranteed non-null: for remote cases it was set from remoteCase.remotePath,
+    // for local cases the !casePath guard above returned early. TypeScript can't narrow across the if/else.
+    const resolvedCasePath = casePath as string;
+
+    // Multi-user linchpin (section 6.2): confine the resolved workingDir to the caller's
+    // own case space BEFORE any mkdir/scaffold below creates or mutates it. Applies to
+    // LOCAL and DOCKER cases (docker.hostWorkspacePath is a real host dir the file routes
+    // trust); skipped for REMOTE, whose path is an ssh path that would spuriously fail
+    // realpath confinement. No-op for admins / single-user mode.
+    if (!remote && !isWorkingDirAllowed(getAuthUser(req), resolvedCasePath)) {
+      return createErrorResponse(ApiErrorCode.FORBIDDEN, 'case path is outside your workspace');
+    }
+
+    // Bounded probe of a local case folder: a linked case can sit on a network mount
+    // that stopped answering, and a synchronous check there froze the whole server.
+    // Only a DEFINITE absence may scaffold a new case; "did not answer" must not
+    // create one over the top of where the real case is mounted.
+    const localCaseState = remote || docker ? undefined : await probePathKind(resolvedCasePath, { pastCap: true });
+    if (localCaseState === 'unknown') {
+      return createErrorResponse(
+        ApiErrorCode.OPERATION_FAILED,
+        describeUnknownPath('Case folder', resolvedCasePath, { pastCap: true })
+      );
+    }
+
+    // Create case folder and CLAUDE.md if it doesn't exist (only for non-linked, non-remote,
+    // non-docker cases — docker workspaces are scaffolded in their own block below)
+    if (localCaseState === 'absent') {
+      try {
+        mkdirSync(resolvedCasePath, { recursive: true });
+        mkdirSync(join(resolvedCasePath, 'src'), { recursive: true });
+
+        // Read settings to get custom template path
+        const templatePath = await ctx.getDefaultClaudeMdPath();
+        const claudeMd = generateClaudeMd(caseName, '', templatePath);
+        writeFileSync(join(resolvedCasePath, 'CLAUDE.md'), claudeMd);
+
+        // Write .claude/settings.local.json with hooks for desktop notifications
+        // (Claude-specific — OpenCode, Codex, Gemini, Antigravity, Pi, Grok, DeepSeek and OMP use their own systems)
+        if (
+          mode !== 'opencode' &&
+          mode !== 'codex' &&
+          mode !== 'gemini' &&
+          mode !== 'antigravity' &&
+          mode !== 'pi' &&
+          mode !== 'grok' &&
+          mode !== 'omp'
+        ) {
+          await writeHooksConfig(resolvedCasePath);
+        }
+
+        // Label a directory an AGENT asked us to create, so the scratch workspaces a
+        // long orchestration leaves behind can be told apart from the user's real
+        // projects later (see agent-case-marker.ts). This is the only branch that may
+        // write it: it is the only one that creates the directory, and a pre-existing
+        // case must never be labelled. Best-effort — a failed marker must not fail the
+        // spawn it decorates.
+        const qsAgentOrigin = resolveAgentCaseOrigin(req, agentOrigin, qsParentSessionId);
+        if (qsAgentOrigin) {
+          await writeAgentCaseMarker(
+            resolvedCasePath,
+            buildAgentCaseMarker({
+              createdBy: qsAgentOrigin,
+              parentSessionId: qsParentSessionId,
+              parentSessionName: qsParentSessionId ? ctx.sessions.get(qsParentSessionId)?.name : undefined,
+              mode,
+              owner,
+            })
+          );
+        }
+
+        ctx.broadcast(SseEvent.CaseCreated, { name: caseName, path: resolvedCasePath });
+      } catch (err) {
+        return createErrorResponse(ApiErrorCode.OPERATION_FAILED, `Failed to create case: ${getErrorMessage(err)}`);
+      }
+    } else if (!remote && !docker && mode !== 'opencode') {
+      // EXISTING case directory (a linked case, a cloned repo, anything Codeman did
+      // not scaffold): install-or-refresh per the setting (see applyWorkspaceHooks).
+      // Other modes keep the narrower COD-91 self-heal unconditionally: only claude
+      // reads `.claude` hooks, so a shell/codex quick-start should not author a block
+      // of its own. Skipped for remote cases — resolvedCasePath is a REMOTE path that
+      // doesn't exist on the local filesystem.
+      if (getCli(mode)?.capabilities.hooks === 'always') {
+        await applyWorkspaceHooks(resolvedCasePath, await ctx.getWorkspaceHooksEnabled());
+      } else {
+        await refreshStaleCodemanHooks(resolvedCasePath).catch(() => {});
+      }
+    }
+
+    // Agent skill injection (docs/agent-control-plan.md §2): ADD-ONLY on create,
+    // marker-guarded (a user's own copy is never touched). Each CLI that takes the
+    // skill gets it in the directory it scans (`capabilities.agentSkillDir`:
+    // `.claude/skills` for claude, `.agents/skills` for most others); skipped for
+    // remote cases, whose casePath lives on another host. Docker cases qualify:
+    // hostWorkspacePath is a real host dir and the skill crosses the bind mount.
+    const quickStartSkillDir = agentSkillDir(getCli(mode)?.capabilities);
+    if (!remote && quickStartSkillDir && (await ctx.getAgentSkillEnabled())) {
+      await injectAgentSkill(resolvedCasePath, quickStartSkillDir);
+    }
+
+    // Docker cases: the workspace is a REAL host dir bind-mounted into the container.
+    // Scaffold hooks (+ a CLAUDE.md) if MISSING so in-container permission prompts and
+    // hook-idle detection fire (decision: wire hooks now). Never clobbers an existing
+    // configured project. Claude mode ONLY — only claude reads `.claude` hooks, so a
+    // shell or external-CLI quick-start must not author a block of its own (the same
+    // rule the existing-case branch above states; this branch used to exclude just
+    // the five external CLIs and let `shell` through).
+    if (docker && docker.hooksEnabled && getCli(mode)?.capabilities.hooks === 'always') {
+      try {
+        if (!existsSync(join(resolvedCasePath, 'CLAUDE.md'))) {
+          const templatePath = await ctx.getDefaultClaudeMdPath();
+          writeFileSync(join(resolvedCasePath, 'CLAUDE.md'), generateClaudeMd(caseName, '', templatePath));
+        }
+        if (!existsSync(join(resolvedCasePath, '.claude', 'settings.local.json'))) {
+          await writeHooksConfig(resolvedCasePath);
+        } else {
+          // A settings file with no hooks in it is the same dead-surface case as a
+          // linked case. This branch is already gated on `docker.hooksEnabled`, and
+          // applyWorkspaceHooks adds the user-level gate on top.
+          await applyWorkspaceHooks(resolvedCasePath, await ctx.getWorkspaceHooksEnabled());
+        }
+      } catch {
+        /* non-fatal — the session still runs, hooks may be degraded */
+      }
+    }
+
+    // Model override → <case>/.claude/settings.local.json (claude-mode; local AND
+    // docker — the docker workspace is a real host dir, so the settings file crosses
+    // the bind mount and the in-container claude reads it). Remote was rejected above.
+    if (getCli(mode)?.capabilities.model.source === 'claude-settings-file' && modelOverride !== undefined) {
+      await updateCaseModel(resolvedCasePath, modelOverride || null);
+    }
+
+    // Strip stale disk entries for keys this request is actively setting (Claude only —
+    // see POST /api/sessions for full rationale).
+    // Same chain, same replacement as the create path above: byte-identical, drift-proof.
+    if (!isExternalCliMode(mode) && !remote && envOverrides && Object.keys(envOverrides).length > 0) {
+      await stripCaseEnvKeys(resolvedCasePath, Object.keys(envOverrides));
+    }
+
+    // Create a new session with the case as working directory
+    // Apply global Nice priority config and model config from settings
+    const niceConfig = await ctx.getGlobalNiceConfig();
+    const qsModelConfig = await ctx.getModelConfig();
+    // Synced App Settings launch defaults, as on the create path: local launches only, so
+    // never a remote or Docker case, and never a custom model endpoint launch.
+    const qsRequestConfigs = {
+      openCodeConfig,
+      codexConfig,
+      geminiConfig,
+      antigravityConfig,
+      piConfig,
+      grokConfig,
+      deepSeekConfig,
+      ompConfig,
+    };
+    const qsLaunchConfigs =
+      remote || docker ? qsRequestConfigs : await applyLaunchDefaults(mode, qsRequestConfigs, !!customModel);
+    // ⚠️ The model is read from a bag WITHOUT ompConfig, as it always was here: quick-start
+    // has never taken omp's session model from ompConfig (the create path does). Kept as
+    // found rather than changed in passing.
+    const { ompConfig: qsLaunchOmpConfig, ...qsModelConfigs } = qsLaunchConfigs;
+    // See the create path for why this is a capability rather than a mode ladder.
+    const qsModelSource = getCli(mode)?.capabilities.model;
+    const qsModel =
+      qsModelSource?.source === 'flag'
+        ? (legacyConfigForMode(mode, qsModelConfigs as unknown as Record<string, unknown>)?.[
+            qsModelSource.param ?? 'model'
+          ] as string | undefined)
+        : qsModelSource?.source === 'claude-settings-file'
+          ? qsModelConfig?.defaultModel || undefined
+          : undefined;
+    const qsClaudeModeConfig = await ctx.getClaudeModeConfig();
+    const qsEffectiveClaudeMode = await resolveClaudeModeForUsername(qsClaudeModeConfig.claudeMode, owner);
+    // Section 6.3: clamp Codex/Gemini/Antigravity bypass switches for a non-granted owner (no-op single-user/granted).
+    const {
+      codexConfig: qsGatedCodexConfig,
+      geminiConfig: qsGatedGeminiConfig,
+      antigravityConfig: qsGatedAntigravityConfig,
+      piConfig: qsGatedPiConfig,
+      grokConfig: qsGatedGrokConfig,
+      deepSeekConfig: qsGatedDeepSeekConfig,
+    } = await _clampExternalCliBypassForOwner(
+      owner,
+      qsLaunchConfigs.codexConfig,
+      qsLaunchConfigs.geminiConfig,
+      qsLaunchConfigs.antigravityConfig,
+      qsLaunchConfigs.piConfig,
+      qsLaunchConfigs.grokConfig,
+      qsLaunchConfigs.deepSeekConfig
+    );
+    const qsTerminalHistoryConfig = await ctx.getTerminalHistoryConfig();
+    const qsGatedEnvOverrides = await clampEnvOverridesForOwner(owner, envOverrides);
+    const qsResolvedOmpConfig = resolveOmpConfigForCreate(mode, resolvedCasePath, qsLaunchOmpConfig);
+
+    // Custom Model Endpoint Profiles, applied AT CREATE TIME (docs/custom-model-endpoints-plan.md)
+    // rather than via the dedicated restart-in-place route (POST /api/sessions/:id/custom-
+    // model, still what an ALREADY-RUNNING session uses to switch later): computing the
+    // injection before the process exists and launching directly on it avoids the visible
+    // native-boot-then-restart the restart-after-launch design otherwise shows on every
+    // custom-model run — most jarring on a CLI like Codex whose TUI fully reinitializes.
+    // Mirrors the dedicated route's own checks (llama-swap conflict, unsupported CLI,
+    // unknown endpoint, a model id the CLI's argv pattern can't carry) rather than trusting
+    // a lighter version of them, since this is the same server-side authority reached a
+    // different way, not a separate, less-checked path.
+    let qsCustomModelEnvOverrides = qsGatedEnvOverrides;
+    // Only the INJECTED keys (never the caller's envOverrides merged in) — this is what
+    // setCustomModel() bookkeeping must be given below. The Session constructor already
+    // applies qsCustomModelEnvOverrides (the full merged set) directly; re-merging that
+    // full set into setCustomModel() would put CLAUDE_CODE_EFFORT_LEVEL back after the
+    // constructor stripped it (see setCustomModel()'s own doc comment in session.ts).
+    let qsCustomModelAppliedEnvOverrides: Record<string, string> | undefined;
+    let qsCustomModelLaunchModel: string | undefined;
+    let qsCustomModelSessionId: string | undefined;
+    let qsCustomModelSwapInProgress = false;
+    let qsCustomModelBookkeeping:
+      | {
+          endpointId: string;
+          modelId: string;
+          label?: string;
+          envKeys: string[];
+          configDir?: string;
+          launchModel?: string;
+        }
+      | undefined;
+    if (customModel) {
+      const cmEntry = getCli(mode);
+      if (!cmEntry) return createErrorResponse(ApiErrorCode.INVALID_INPUT, `No CLI registry entry for mode ${mode}`);
+      if (cmEntry.capabilities.customModelInjection.kind === 'unsupported') {
+        return createErrorResponse(ApiErrorCode.OPERATION_FAILED, `${mode} has no known custom-model mechanism`);
+      }
+      const cmHosts = await readCustomModelHosts(CODEMAN_CONFIG_DIR);
+      const cmEndpoint = cmHosts.find((h) => h.id === customModel.endpointId);
+      if (!cmEndpoint) return createErrorResponse(ApiErrorCode.NOT_FOUND, 'Model endpoint not found');
+      const cmContextLength = cmEndpoint.modelContextLengths?.[customModel.modelId];
+
+      // See the dedicated route's own comment for the full reasoning: some CLIs' own fixed
+      // overhead can exceed a small enough real context on the very first message,
+      // regardless of contextLengthVar. Warn before creating a session that's certain to
+      // fail immediately.
+      // See the dedicated route above for why this reads `confirmedContext` and never
+      // `confirmedSwap`.
+      if (
+        !(customModel.confirmed || customModel.confirmedContext) &&
+        exceedsSafeContextFloor(cmEntry, cmContextLength)
+      ) {
+        return {
+          requiresContextWarning: true,
+          modelId: customModel.modelId,
+          contextLength: cmContextLength,
+          minSafeContextTokens: CLAUDE_MIN_SAFE_CONTEXT_TOKENS,
+        };
+      }
+
+      // See the dedicated route's own comment for the full reasoning: llama.cpp runs one
+      // model at a time, llama-swap swaps on demand, and switching away from what another
+      // live session is actively using deserves a warning, not a silent switch. There is no
+      // "self" to exclude from the affected-sessions scan here — this session doesn't exist
+      // yet.
+      const cmSwapStatus = await getLlamaSwapStatus(cmEndpoint);
+      const cmCurrentlyLoaded =
+        cmSwapStatus.running.find((r) => r.state === 'ready')?.model ?? cmSwapStatus.running[0]?.model;
+      const cmSwapNeeded = cmSwapStatus.isLlamaSwap && !!cmCurrentlyLoaded && cmCurrentlyLoaded !== customModel.modelId;
+      // Broader than cmSwapNeeded (which only gates the confirmation ask above): true
+      // whenever the TARGET model isn't already loaded and ready, including when nothing
+      // is loaded at all yet. Drives the actual load trigger below.
+      const cmTargetReady = cmSwapStatus.running.some((r) => r.model === customModel.modelId && r.state === 'ready');
+      qsCustomModelSwapInProgress = cmSwapStatus.isLlamaSwap && !cmTargetReady;
+      if (cmSwapNeeded && !(customModel.confirmed || customModel.confirmedSwap)) {
+        const cmConflicting = [...ctx.sessions.values()].filter(
+          (s) => s.customModel?.endpointId === cmEndpoint.id && s.customModel?.modelId === cmCurrentlyLoaded
+        );
+        if (cmConflicting.length > 0) {
+          // Same reasoning as the dedicated /custom-model route above: the swap is
+          // still blocked pending confirmation regardless of ownership, but a
+          // non-admin caller only learns the names of sessions they can access.
+          const cmRequestUser = getAuthUser(req);
+          const cmAffectedSessions = cmConflicting
+            .filter((s) => canAccessOwned(cmRequestUser, s.owner))
+            .map((s) => ({ id: s.id, name: s.name }));
+          return {
+            requiresConfirmation: true,
+            currentlyLoadedModel: cmCurrentlyLoaded,
+            affectedSessions: cmAffectedSessions,
+          };
+        }
+      }
+
+      // Minted ourselves (rather than left to Session's own default) so the injection
+      // below — and any configDir it writes — can target the REAL id the session launches
+      // with, not a placeholder: `new Session({ id: ... })` accepts an explicit id for
+      // exactly this reason.
+      qsCustomModelSessionId = randomUUID();
+      const cmApplied = applyCustomModelInjection(
+        cmEntry,
+        cmEndpoint,
+        customModel.modelId,
+        qsCustomModelSessionId,
+        cmContextLength,
+        resolvedCasePath
+      );
+      if (!cmApplied) {
+        return createErrorResponse(ApiErrorCode.OPERATION_FAILED, `${mode} has no known custom-model mechanism`);
+      }
+      const cmModelSpec = cmEntry.launch.params.model;
+      if (
+        cmApplied.launchModel !== undefined &&
+        cmModelSpec?.type === 'token' &&
+        !matchesPattern(cmModelSpec.pattern, cmApplied.launchModel)
+      ) {
+        removeConfigDir(cmApplied.configDir);
+        return createErrorResponse(
+          ApiErrorCode.INVALID_INPUT,
+          `Model id ${JSON.stringify(customModel.modelId)} cannot be passed to ${mode} on its command line`
+        );
+      }
+
+      qsCustomModelEnvOverrides = { ...qsGatedEnvOverrides, ...cmApplied.envOverrides };
+      qsCustomModelAppliedEnvOverrides = cmApplied.envOverrides;
+      qsCustomModelLaunchModel = cmApplied.launchModel;
+      qsCustomModelBookkeeping = {
+        endpointId: cmEndpoint.id,
+        modelId: customModel.modelId,
+        label: cmEndpoint.label,
+        envKeys: cmApplied.envKeys,
+        configDir: cmApplied.configDir,
+        launchModel: cmApplied.launchModel,
+      };
+
+      // Actually kick off llama-swap's load now — see the dedicated apply route's own
+      // comment on triggerLlamaSwapLoad for why this can't just wait on the launched CLI's
+      // first prompt. Fired here, before the session is even created, so the load starts
+      // concurrently with Claude/Codex/etc. booting rather than after.
+      if (qsCustomModelSwapInProgress) {
+        triggerLlamaSwapLoad(cmEndpoint, customModel.modelId);
+      }
+    }
+
+    const qsSessionOptions: ConstructorParameters<typeof Session>[0] = {
+      id: qsCustomModelSessionId,
+      workingDir: resolvedCasePath,
+      name: qsSpawnIdentity?.name ?? (sessionName ? sessionName.slice(0, MAX_SESSION_NAME_LENGTH) : ''),
+      mux: ctx.mux,
+      useMux: true,
+      mode: mode,
+      niceConfig: niceConfig,
+      model: qsModel,
+      claudeMode: qsEffectiveClaudeMode,
+      allowedTools: qsClaudeModeConfig.allowedTools,
+      owner,
+      openCodeConfig: mode === 'opencode' ? qsLaunchConfigs.openCodeConfig : undefined,
+      codexConfig: mode === 'codex' ? qsGatedCodexConfig : undefined,
+      geminiConfig: mode === 'gemini' ? qsGatedGeminiConfig : undefined,
+      antigravityConfig: mode === 'antigravity' ? qsGatedAntigravityConfig : undefined,
+      piConfig: mode === 'pi' ? qsGatedPiConfig : undefined,
+      grokConfig: mode === 'grok' ? qsGatedGrokConfig : undefined,
+      deepSeekConfig: mode === 'deepseek' ? qsGatedDeepSeekConfig : undefined,
+      ompConfig: qsResolvedOmpConfig,
+      envOverrides: { ...qsCustomModelEnvOverrides, ...subscriptionLaunch(req).env },
+      subscriptionProfile: subscriptionLaunch(req).selection,
+      effort,
+      advisorModel,
+      remote,
+      docker,
+      resumeSessionId: dockerResumeId,
+      tmuxHistoryLimit: qsTerminalHistoryConfig.tmuxHistoryLimit,
+      parentSessionId: qsParentSessionId,
+    };
+    // Force the custom-model selection's launchModel (pi/omp `custom/<id>`, grok's
+    // `[model.<name>]` block name) onto whichever config field the registry says the
+    // CLI's `model` launch param lives in — mirrors Session._withCustomModelLaunchModel,
+    // which the restart-in-place path already uses, rather than a hardcoded per-CLI
+    // branch here that a CLI landing its injection recipe later would silently miss.
+    if (qsCustomModelLaunchModel !== undefined) {
+      const qsCustomModelField = getCli(mode)?.launch.legacyConfigField;
+      if (qsCustomModelField) {
+        const qsSessionOptionsBag = qsSessionOptions as unknown as Record<string, unknown>;
+        qsSessionOptionsBag[qsCustomModelField] = {
+          ...((qsSessionOptionsBag[qsCustomModelField] as Record<string, unknown>) ?? {}),
+          model: qsCustomModelLaunchModel,
+        };
+      } else {
+        qsSessionOptions.model = qsCustomModelLaunchModel;
+      }
+    }
+    const session = new Session(qsSessionOptions);
+
+    // Records the selection for session.customModel/getCustomModelForPersist() and future
+    // clear/switch calls — the actual env vars and launch-model config are already part of
+    // the launch above (constructor envOverrides, piConfig/grokConfig/ompConfig.model), so
+    // this is bookkeeping only, never a restart: setCustomModel() is synchronous state, no
+    // tmux IO of its own (see its own doc comment in session.ts).
+    if (qsCustomModelBookkeeping) {
+      session.setCustomModel(qsCustomModelBookkeeping, qsCustomModelAppliedEnvOverrides);
+    }
+
+    // Auto-detect completion phrase from CLAUDE.md BEFORE broadcasting
+    // so the initial state already has the phrase configured (only if globally enabled)
+    if (getCli(mode)?.capabilities.ralph && !remote && !docker && ctx.store.getConfig().ralphEnabled) {
+      autoConfigureRalph(session, resolvedCasePath, ctx);
+      if (!session.ralphTracker.enabled) {
+        session.ralphTracker.enable();
+        session.ralphTracker.enableAutoEnable(); // Allow re-enabling on restart
+      }
+    }
+
+    const tabLayout = tabGroupId ? await ctx.addSession(session, { tabGroupId }) : await ctx.addSession(session);
+    ctx.store.incrementSessionsCreated();
+    ctx.persistSessionState(session);
+    await ctx.setupSessionListeners(session);
+    // Pre-seed the agent skill's preamble cache so its §0 bootstrap is a two-line
+    // loader (see seedAgentSessionPreamble). Local sessions of a CLI that takes the
+    // skill; best-effort.
+    if (agentSkillDir(getCli(mode)?.capabilities) && !remote && !docker && (await ctx.getAgentSkillEnabled())) {
+      await seedAgentSessionPreamble(session.id).catch((err: unknown) =>
+        console.warn(`[agent-skill] preamble seed failed for ${session.id}: ${getErrorMessage(err)}`)
+      );
+    }
+    getLifecycleLog().log({
+      event: 'created',
+      sessionId: session.id,
+      name: session.name,
+      reason: 'quick_start',
+    });
+    ctx.broadcast(SseEvent.SessionCreated, ctx.getSessionStateWithRespawn(session));
+
+    // Start in the appropriate mode
+    try {
+      if (getCli(mode)?.capabilities.startMode === 'shell') {
+        await session.startShell();
+        getLifecycleLog().log({
+          event: 'started',
+          sessionId: session.id,
+          name: session.name,
+          mode: 'shell',
+        });
+        ctx.broadcast(SseEvent.SessionInteractive, { id: session.id, mode: 'shell' });
+      } else {
+        // every non-shell mode ('claude', the external CLIs) uses startInteractive()
+        await session.startInteractive();
+        getLifecycleLog().log({
+          event: 'started',
+          sessionId: session.id,
+          name: session.name,
+          mode,
+        });
+        ctx.broadcast(SseEvent.SessionInteractive, { id: session.id, mode });
+      }
+      if (qsSpawnIdentity) await options.company!.completeSpawn(session.id, qsSpawnIdentity);
+      ctx.broadcast(SseEvent.SessionUpdated, { session: ctx.getSessionStateWithRespawn(session) });
+
+      // Docker + claude: the pane command pins the conversation id (--session-id /
+      // --resume, claudeDockerPaneCommand), so persist it as the case's resume seed
+      // NOW — a later container stop/reboot relaunch resumes this conversation even
+      // if no in-container hook ever reaches the host (loopback bind, no bridge
+      // listener). Hook/last-response adoption updates it again after /clear.
+      if (docker && mode === 'claude') {
+        void persistDockerCaseClaudeSessionId(
+          CODEMAN_CONFIG_DIR,
+          docker.containerName,
+          session.claudeSessionId || session.id
+        ).catch(() => {});
+      }
+
+      // Save lastUsedCase to settings for TUI/web sync
+      try {
+        const settingsFilePath = SETTINGS_PATH;
+        let settings: Record<string, unknown> = {};
+        try {
+          settings = JSON.parse(await fs.readFile(settingsFilePath, 'utf-8'));
+        } catch (err) {
+          if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+        }
+        settings.lastUsedCase = caseName;
+        const dir = dirname(settingsFilePath);
+        if (!existsSync(dir)) {
+          mkdirSync(dir, { recursive: true });
+        }
+        // Use async write to avoid blocking event loop
+        fs.writeFile(settingsFilePath, JSON.stringify(settings, null, 2)).catch((err) => {
+          // Non-critical but log for debugging
+          console.warn('[Server] Failed to save settings (lastUsedCase):', err);
+        });
+      } catch (err) {
+        // Non-critical but log for debugging
+        console.warn('[Server] Failed to prepare settings update:', err);
+      }
+
+      return {
+        sessionId: session.id,
+        casePath: resolvedCasePath,
+        caseName,
+        ...(qsSpawnIdentity ? { identity: qsSpawnIdentity } : {}),
+        ...(customModel ? { modelSwapInProgress: qsCustomModelSwapInProgress } : {}),
+        ...(tabGroupId ? { tabLayout } : {}),
+      };
+    } catch (err) {
+      // Clean up session on error to prevent orphaned resources
+      await ctx.cleanupSession(session.id, true, 'quick_start_error');
+      return createErrorResponse(ApiErrorCode.OPERATION_FAILED, getErrorMessage(err));
+    }
+  });
+
+  // ═══════════════════════════════════════════════════════════════
+  // History — list past Claude conversations for resume
+  // ═══════════════════════════════════════════════════════════════
+
+  /** Extract the text of the first user message from a JSONL transcript head. */
+  function extractFirstUserPrompt(head: string): string | undefined {
+    const MAX_PROMPT_LEN = 120;
+    // Iterate lines without allocating a full split array
+    let start = 0;
+    while (start < head.length) {
+      const end = head.indexOf('\n', start);
+      const line = end === -1 ? head.slice(start) : head.slice(start, end);
+      start = end === -1 ? head.length : end + 1;
+      if (!line.includes('"type":"user"')) continue;
+      try {
+        const entry = JSON.parse(line);
+        if (entry.type !== 'user' || !entry.message) continue;
+        const content = entry.message.content;
+        let text: string | undefined;
+        if (typeof content === 'string') {
+          text = content;
+        } else if (Array.isArray(content)) {
+          const textBlock = content.find((b: { type: string }) => b.type === 'text');
+          if (textBlock) text = textBlock.text;
+        }
+        if (!text) continue;
+        // Strip XML-like system/command tags and ANSI escapes from transcripts
+        text = text
+          .replace(/<[^>]+>/g, '')
+          .replace(new RegExp(String.raw`\x1b\[[0-9;]*[a-zA-Z]`, 'g'), '')
+          .trim()
+          .replace(/\s+/g, ' ');
+        if (!text) continue;
+        // Skip system-injected messages, slash command artifacts, and expanded skill prompts
+        if (
+          /^(Caveat:|init\b|clear\b|resume\b|\/[a-z][\w-]*\b|You are a |\[Request |Set model to )/i.test(text) ||
+          /^(Please )?(analyze|review) this codebase/i.test(text) ||
+          /^(Read|Implement the following) .+, then (search|list|check) /i.test(text) ||
+          /^\d+ vulnerabilit/i.test(text) ||
+          /\btoolu_/.test(text) ||
+          /^[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]+/.test(text) ||
+          /\b(sk-ant-|ANTHROPIC_API_KEY|API_KEY=|SECRET|TOKEN=)/i.test(text) ||
+          text.length < 8
+        )
+          continue;
+        return text.length > MAX_PROMPT_LEN ? text.slice(0, MAX_PROMPT_LEN) + '\u2026' : text;
+      } catch {
+        // Malformed line — skip
+      }
+    }
+    return undefined;
+  }
+
+  /**
+   * Is this `entrypoint` value an automated/SDK-driven invocation?
+   *
+   * ⚠️ Deliberately a BLOCKLIST on the SDK shape, not an allowlist on `'cli'`.
+   * The exclusion below hides rows, so an allowlist fails CLOSED on any value
+   * Claude Code has not shipped yet: the day it stamps a new interactive
+   * entrypoint (a rename, or a second interactive host), every transcript stops
+   * matching `'cli'` and the whole Past Sessions list goes blank with nothing in
+   * the UI to explain it. A blocklist fails OPEN instead — an automated
+   * entrypoint we do not recognize yet costs a few noisy rows, which is the
+   * annoyance this filter set out to fix rather than a broken feature.
+   *
+   * Observed values: `cli` (interactive), `sdk-cli` / `sdk-py` (automated).
+   */
+  function isAutomatedEntrypoint(entrypoint: string): boolean {
+    return /^sdk(-|$)/.test(entrypoint);
+  }
+
+  /**
+   * The `entrypoint` field Claude Code stamps on its own message records:
+   * 'cli' for a real interactive session, something else (e.g. 'sdk-py') for
+   * an SDK/automated invocation. Used to exclude non-interactive transcripts
+   * (CI review bots, etc.) from the resumable history list — they were never
+   * something a user can resume into.
+   *
+   * Scans every `"type":"user"`/`"type":"assistant"` line with an entrypoint
+   * field — not just the first one — and returns 'cli' the moment ANY of them
+   * carries it. A transcript is excluded only when every entrypoint-bearing
+   * message says something else; "first field wins" would misattribute a
+   * transcript that started under an older Claude Code version (no entrypoint
+   * on its true first message) and later picked up a non-'cli' entrypoint on
+   * some later message, wrongly hiding a genuinely interactive session. This
+   * deliberately errs toward keeping a session visible: one real interactive
+   * message anywhere is enough. Returns undefined ("unknown", fail-open) only
+   * when nothing scanned carries the field at all.
+   */
+  function extractTranscriptEntrypoint(text: string): string | undefined {
+    let start = 0;
+    let sawNonCli: string | undefined;
+    while (start < text.length) {
+      const end = text.indexOf('\n', start);
+      const line = end === -1 ? text.slice(start) : text.slice(start, end);
+      start = end === -1 ? text.length : end + 1;
+      if (!line.includes('"type":"user"') && !line.includes('"type":"assistant"')) continue;
+      if (!line.includes('"entrypoint"')) continue;
+      try {
+        const entry = JSON.parse(line);
+        if ((entry.type === 'user' || entry.type === 'assistant') && typeof entry.entrypoint === 'string') {
+          if (entry.entrypoint === 'cli') return 'cli';
+          sawNonCli ??= entry.entrypoint;
+        }
+      } catch {
+        // Malformed/truncated line — skip
+      }
+    }
+    return sawNonCli;
+  }
+
+  /** Git/worktree facts recovered from a transcript. Every field is optional —
+   *  "unknown" must stay distinguishable from "not a worktree" (#265/#266). */
+  type TranscriptGitInfo = {
+    /** The literal `cwd` Claude Code stamped on its own records. */
+    cwd?: string;
+    gitBranch?: string;
+    worktreeName?: string;
+    /** Main repo root the worktree belongs to. */
+    worktreeRepo?: string;
+  };
+
+  /** `<repo>/.claude/worktrees/<name>` — the layout Claude Code's own worktree feature creates. */
+  const CLAUDE_WORKTREE_PATH = /^(.*)\/\.claude\/worktrees\/([^/]+)\/?$/;
+
+  /**
+   * Recover cwd / branch / worktree from a transcript chunk.
+   *
+   * Claude Code stamps `"cwd"` and `"gitBranch"` on every user/assistant record,
+   * and writes a dedicated `worktree-state` record when the session was started
+   * through its own worktree feature. This reads buffers `scanProjectDir` has
+   * ALREADY loaded, so it costs no extra file I/O.
+   *
+   * Why this matters beyond a label: `decodeProjectKey()` reconstructs a path by
+   * stat-walking the filesystem and falls back to `$HOME` when nothing resolves.
+   * A deleted worktree is the normal end of a worktree's life, so every past
+   * worktree session used to collapse onto `$HOME` (#265). The transcript value
+   * is the literal cwd — non-lossy, and it survives the directory being removed.
+   *
+   * cwd is taken from the FIRST record that carries it (a session's cwd does not
+   * move); gitBranch from the LAST (a branch genuinely changes mid-session, and
+   * the newest value in the scanned chunk is the closest to current).
+   */
+  function extractTranscriptGitInfo(text: string): TranscriptGitInfo {
+    const info: TranscriptGitInfo = {};
+    let start = 0;
+    while (start < text.length) {
+      const end = text.indexOf('\n', start);
+      const line = end === -1 ? text.slice(start) : text.slice(start, end);
+      start = end === -1 ? text.length : end + 1;
+
+      // Highest-confidence source: Claude's own worktree record. Names the
+      // worktree explicitly, so it beats anything inferred from the path.
+      if (line.includes('"worktree-state"')) {
+        try {
+          const rec = JSON.parse(line) as {
+            worktreeSession?: { worktreeName?: unknown; worktreePath?: unknown; originalCwd?: unknown };
+          };
+          const ws = rec.worktreeSession;
+          if (ws) {
+            if (typeof ws.worktreeName === 'string') info.worktreeName ||= ws.worktreeName;
+            if (typeof ws.originalCwd === 'string') info.worktreeRepo ||= ws.originalCwd;
+            if (typeof ws.worktreePath === 'string') info.cwd ||= ws.worktreePath;
+          }
+        } catch {
+          // Malformed/truncated line — skip
+        }
+        continue;
+      }
+
+      if (!line.includes('"cwd"') && !line.includes('"gitBranch"')) continue;
+      if (!line.includes('"type":"user"') && !line.includes('"type":"assistant"')) continue;
+      try {
+        const rec = JSON.parse(line) as { cwd?: unknown; gitBranch?: unknown };
+        if (!info.cwd && typeof rec.cwd === 'string' && rec.cwd) info.cwd = rec.cwd;
+        // Last one wins — closest to the session's current branch.
+        if (typeof rec.gitBranch === 'string' && rec.gitBranch) info.gitBranch = rec.gitBranch;
+      } catch {
+        // Malformed/truncated line — skip
+      }
+    }
+
+    // No explicit worktree record: infer from Claude's own worktree path layout.
+    // A worktree created by hand (`git worktree add` anywhere) has no recoverable
+    // NAME here — it still gets a branch, and the badge degrades to branch-only
+    // rather than guessing.
+    if (!info.worktreeName && info.cwd) {
+      const m = CLAUDE_WORKTREE_PATH.exec(info.cwd);
+      if (m) {
+        info.worktreeName = m[2];
+        info.worktreeRepo ||= m[1];
+      }
+    }
+    return info;
+  }
+
+  /**
+   * Extract the text of the LAST user message from a JSONL transcript chunk
+   * (COD-145). Mirrors `extractFirstUserPrompt` exactly — same user-message
+   * detection, same noise/secret/slash-command filters, same 120-char cap — but
+   * keeps the last qualifying match instead of returning on the first. Scan the
+   * file tail for this (the most recent prompt lives near the end).
+   */
+  function extractLastUserPrompt(text: string): string | undefined {
+    const MAX_PROMPT_LEN = 120;
+    let result: string | undefined;
+    let start = 0;
+    while (start < text.length) {
+      const end = text.indexOf('\n', start);
+      const line = end === -1 ? text.slice(start) : text.slice(start, end);
+      start = end === -1 ? text.length : end + 1;
+      if (!line.includes('"type":"user"')) continue;
+      try {
+        const entry = JSON.parse(line);
+        if (entry.type !== 'user' || !entry.message) continue;
+        const content = entry.message.content;
+        let msgText: string | undefined;
+        if (typeof content === 'string') {
+          msgText = content;
+        } else if (Array.isArray(content)) {
+          const textBlock = content.find((b: { type: string }) => b.type === 'text');
+          if (textBlock) msgText = textBlock.text;
+        }
+        if (!msgText) continue;
+        msgText = msgText
+          .replace(/<[^>]+>/g, '')
+          .replace(new RegExp(String.raw`\x1b\[[0-9;]*[a-zA-Z]`, 'g'), '')
+          .trim()
+          .replace(/\s+/g, ' ');
+        if (!msgText) continue;
+        if (
+          /^(Caveat:|init\b|clear\b|resume\b|\/[a-z][\w-]*\b|You are a |\[Request |Set model to )/i.test(msgText) ||
+          /^(Please )?(analyze|review) this codebase/i.test(msgText) ||
+          /^(Read|Implement the following) .+, then (search|list|check) /i.test(msgText) ||
+          /^\d+ vulnerabilit/i.test(msgText) ||
+          /\btoolu_/.test(msgText) ||
+          /^[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]+/.test(msgText) ||
+          /\b(sk-ant-|ANTHROPIC_API_KEY|API_KEY=|SECRET|TOKEN=)/i.test(msgText) ||
+          msgText.length < 8
+        )
+          continue;
+        result = msgText.length > MAX_PROMPT_LEN ? msgText.slice(0, MAX_PROMPT_LEN) + '…' : msgText;
+      } catch {
+        // Malformed line — skip
+      }
+    }
+    return result;
+  }
+
+  /**
+   * Decode a Claude project key (e.g. "-Users-teigen-Documents-Workspace-AI-project-Mirror")
+   * back to a filesystem path ("/Users/teigen/Documents/Workspace/AI_project/Mirror").
+   *
+   * Claude CLI encodes both '/' and '_' as '-', so each '-' in the key could be
+   * any of: '/' (path separator), '_' (underscore), or '-' (literal dash).
+   *
+   * Strategy: recursive backtracking with longest-match-first preference.
+   * At each segment boundary, try joining as many segments as possible (with '_'
+   * or '-') into a single existing directory name. If a shorter match leads to a
+   * dead end, backtrack and try the next-shorter candidate.
+   *
+   * Why backtracking: when both `diary/` and `diary-app/` exist as siblings, the
+   * naive shortest-match would pick `diary` and then fail to find `app` inside,
+   * leaving the rest of the key unresolved. Longest-first picks `diary-app`.
+   */
+  async function decodeProjectKey(projKey: string): Promise<string> {
+    const encoded = projKey.startsWith('-') ? projKey.slice(1) : projKey;
+    const segments = encoded.split('-');
+
+    const isDirCache = new Map<string, boolean>();
+    const isDir = async (p: string): Promise<boolean> => {
+      const cached = isDirCache.get(p);
+      if (cached !== undefined) return cached;
+      const result = await fs
+        .stat(p)
+        .then((s) => s.isDirectory())
+        .catch(() => false);
+      isDirCache.set(p, result);
+      return result;
+    };
+
+    // Recursive backtracking: returns the deepest valid path that consumes all
+    // segments. Tries the longest segment-join first at each step so that
+    // dash-containing directory names win over shorter same-prefix siblings.
+    async function tryDecode(idx: number, current: string): Promise<string | null> {
+      if (idx >= segments.length) return current;
+      const maxLook = Math.min(idx + 4, segments.length);
+      // Longest first: end = maxLook-1 down to idx
+      for (let end = maxLook - 1; end >= idx; end--) {
+        const candidates: string[] = [];
+        if (end === idx) {
+          // Skip an EMPTY segment: `isDir(current + '/' + '')` stats `current + '/'`,
+          // which always succeeds, so the empty candidate would match unconditionally
+          // and swallow the doubled dash that is the whole signature of a dotdir. It
+          // then resolves "/home/x/.sib" to "/home/x//sib" whenever a non-dot sibling
+          // exists, and shadows the dotdir branch below in every other case.
+          if (segments[idx] !== '') candidates.push(segments[idx]);
+        } else {
+          candidates.push(segments.slice(idx, end + 1).join('-'));
+          candidates.push(segments.slice(idx, end + 1).join('_'));
+        }
+        for (const child of candidates) {
+          const candidate = current + '/' + child;
+          if (await isDir(candidate)) {
+            const result = await tryDecode(end + 1, candidate);
+            if (result) return result;
+          }
+        }
+      }
+      // The encoder maps both '/' and '.' to '-', so a literal '.' in the
+      // original path (e.g. "/home/timkjr/.codeman") collapses into an empty
+      // split segment here. Retry this window as a dotdir/dotfile: ".<join>".
+      if (segments[idx] === '' && idx + 1 < segments.length) {
+        const dotMaxLook = Math.min(idx + 1 + 4, segments.length);
+        for (let end = dotMaxLook - 1; end >= idx + 1; end--) {
+          const dotCandidates =
+            end === idx + 1
+              ? [segments[idx + 1]]
+              : [segments.slice(idx + 1, end + 1).join('-'), segments.slice(idx + 1, end + 1).join('_')];
+          for (const child of dotCandidates) {
+            const candidate = current + '/.' + child;
+            if (await isDir(candidate)) {
+              const result = await tryDecode(end + 1, candidate);
+              if (result) return result;
+            }
+          }
+        }
+      }
+      return null;
+    }
+
+    const decoded = await tryDecode(0, '');
+    if (decoded) return decoded;
+
+    // Fallback: greedy shortest-match (original behavior) — best effort when
+    // no fully-valid path exists (e.g. directory was deleted after the
+    // conversation was recorded).
+    let current = '';
+    let i = 0;
+    while (i < segments.length) {
+      let matched = false;
+      const maxLook = Math.min(i + 4, segments.length);
+      for (let end = i; end < maxLook; end++) {
+        const candidates: string[] = [];
+        if (end === i) {
+          // Same empty-segment skip as tryDecode above. This loop is shortest-match
+          // first, so without it the empty candidate matches on the very first try
+          // and sets `matched`, leaving the dotdir branch below permanently dead.
+          if (segments[i] !== '') candidates.push(segments[i]);
+        } else {
+          candidates.push(segments.slice(i, end + 1).join('_'));
+          candidates.push(segments.slice(i, end + 1).join('-'));
+        }
+        for (const child of candidates) {
+          const candidate = current + '/' + child;
+          if (await isDir(candidate)) {
+            current = candidate;
+            i = end + 1;
+            matched = true;
+            break;
+          }
+        }
+        if (matched) break;
+      }
+      if (!matched && segments[i] === '' && i + 1 < segments.length) {
+        const dotMaxLook = Math.min(i + 1 + 4, segments.length);
+        for (let end = i + 1; end < dotMaxLook; end++) {
+          const dotCandidates =
+            end === i + 1
+              ? [segments[i + 1]]
+              : [segments.slice(i + 1, end + 1).join('_'), segments.slice(i + 1, end + 1).join('-')];
+          for (const child of dotCandidates) {
+            const candidate = current + '/.' + child;
+            if (await isDir(candidate)) {
+              current = candidate;
+              i = end + 1;
+              matched = true;
+              break;
+            }
+          }
+          if (matched) break;
+        }
+      }
+      if (!matched) {
+        if (segments[i] === '') {
+          // Nothing on disk matched (the usual reason this fallback runs at all is
+          // that the directory was deleted). An empty segment still means the
+          // encoder ate a literal '.', so guess the dotdir form rather than
+          // appending a bare '/' and emitting a "//" path.
+          if (i + 1 < segments.length) {
+            current = current + '/.' + segments[i + 1];
+            i += 2;
+          } else {
+            i++;
+          }
+        } else {
+          current = current + '/' + segments[i];
+          i++;
+        }
+      }
+    }
+    const finalExists = await fs
+      .access(current)
+      .then(() => true)
+      .catch(() => false);
+    return finalExists ? current : process.env.HOME || '/tmp';
+  }
+
+  /** Read the first `buf.length` bytes of a file for content sniffing. */
+  async function readFileHead(path: string, buf: Buffer): Promise<string | null> {
+    try {
+      const fd = await fs.open(path, 'r');
+      const { bytesRead } = await fd.read(buf, 0, buf.length, 0);
+      await fd.close();
+      return buf.toString('utf8', 0, bytesRead);
+    } catch {
+      return null;
+    }
+  }
+
+  /** Read the last `buf.length` bytes of a file (for tail-scanning user prompts). */
+  async function readFileTail(path: string, buf: Buffer, fileSize: number): Promise<string | null> {
+    try {
+      const fd = await fs.open(path, 'r');
+      const offset = Math.max(0, fileSize - buf.length);
+      const { bytesRead } = await fd.read(buf, 0, buf.length, offset);
+      await fd.close();
+      const text = buf.toString('utf8', 0, bytesRead);
+      // Skip first partial line when we didn't read from the start
+      if (offset > 0) {
+        const nl = text.indexOf('\n');
+        return nl >= 0 ? text.slice(nl + 1) : null;
+      }
+      return text;
+    } catch {
+      return null;
+    }
+  }
+
+  type HistorySession = {
+    sessionId: string;
+    workingDir: string;
+    projectKey: string;
+    sizeBytes: number;
+    lastModified: string;
+    firstPrompt?: string;
+    lastPrompt?: string;
+    /** True when workingDir came from the transcript rather than decodeProjectKey's guess. */
+    workingDirExact?: boolean;
+    gitBranch?: string;
+    worktreeName?: string;
+    worktreeRepo?: string;
+  };
+
+  // Scan a single project directory and return all valid history sessions in it.
+  // Reused by both the global overview and the single-folder drill-down.
+  async function scanProjectDir(
+    projPath: string,
+    projDir: string,
+    smallHeadBuf: Buffer,
+    headBuf: Buffer
+  ): Promise<HistorySession[]> {
+    const out: HistorySession[] = [];
+    const stat = await fs.stat(projPath).catch(() => null);
+    if (!stat?.isDirectory()) return out;
+
+    const workingDir = await decodeProjectKey(projDir);
+    const entries = await fs.readdir(projPath).catch(() => [] as string[]);
+
+    for (const entry of entries) {
+      if (!entry.endsWith('.jsonl')) continue;
+      const sessionId = entry.replace('.jsonl', '');
+      if (!/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(sessionId)) continue;
+
+      const filePath = join(projPath, entry);
+      const fileStat = await fs.stat(filePath).catch(() => null);
+      if (!fileStat) continue;
+      if (fileStat.size < 4000) continue;
+
+      const hasConversation = (text: string) =>
+        text.includes('"type":"user"') || text.includes('"type":"assistant"') || text.includes('"type":"summary"');
+
+      // Two-tier head read: try the cheap smallHeadBuf (16KB) size first -- enough
+      // for the vast majority of transcripts -- and only escalate to the full
+      // headBuf (128KB) when that wasn't enough. Reading 128KB unconditionally for
+      // EVERY file in the directory roughly quadrupled the cost of a full scan
+      // (measured against a real ~/.claude/projects tree: ~4x both bytes read and
+      // wall time) to fix a problem only ~28% of files actually have. Escalating
+      // resolves the restart-bookkeeping case (the reason 128KB exists at all)
+      // without ever touching the tail-read fallback below for most of that 28%.
+      let head = await readFileHead(filePath, smallHeadBuf);
+      let foundContent = head ? hasConversation(head) : false;
+      let firstPrompt = head ? extractFirstUserPrompt(head) : undefined;
+      if ((!foundContent || !firstPrompt) && head !== null && fileStat.size > smallHeadBuf.length) {
+        const biggerHead = await readFileHead(filePath, headBuf);
+        if (biggerHead) {
+          head = biggerHead;
+          if (!foundContent) foundContent = hasConversation(head);
+          if (!firstPrompt) firstPrompt = extractFirstUserPrompt(head);
+        }
+      }
+
+      let tail: string | null = null;
+      // `head === null` (a failed read -- e.g. EMFILE while scanning hundreds of
+      // files) must also get a shot at the tail, not just "file bigger than the
+      // head buffer". Losing this dropped the session from history entirely
+      // instead of giving it a second chance, for any file at or under the head
+      // buffer size whose head read happened to fail.
+      if (!foundContent && (head === null || fileStat.size > headBuf.length)) {
+        const tailBuf = Buffer.alloc(32768);
+        tail = await readFileTail(filePath, tailBuf, fileStat.size);
+        if (tail) foundContent = hasConversation(tail);
+      }
+      if (!foundContent) continue;
+
+      // firstPrompt was already attempted from head (both tiers) above; this is
+      // purely the tail fallback for whatever's left unresolved.
+      if (!firstPrompt && (head === null || fileStat.size > headBuf.length)) {
+        if (!tail) {
+          const tailBuf = Buffer.alloc(32768);
+          tail = await readFileTail(filePath, tailBuf, fileStat.size);
+        }
+        if (tail) firstPrompt = extractFirstUserPrompt(tail);
+      }
+
+      // COD-145: last (most recent) user prompt lives near the END of the file, so
+      // prefer the tail. For large files where no tail was read yet, read one
+      // (mirrors the firstPrompt > headBuf.length block). Small files fit in `head`,
+      // which then contains the whole transcript — scan it for the last match instead.
+      if (!tail && fileStat.size > headBuf.length) {
+        const tailBuf = Buffer.alloc(32768);
+        tail = await readFileTail(filePath, tailBuf, fileStat.size);
+      }
+      const lastPrompt =
+        (tail ? extractLastUserPrompt(tail) : undefined) ?? (head ? extractLastUserPrompt(head) : undefined);
+
+      // Automated/SDK-driven invocations (CI review bots, etc.) write transcripts
+      // into the same ~/.claude/projects tree as interactive sessions but were
+      // never something a user can resume into — no PTY, no running process, and
+      // their "conversation" is typically a single one-shot prompt (often with a
+      // full diff embedded, which is exactly why it dwarfs this scanner's read
+      // windows and shows up above as blank or as an identical boilerplate
+      // sentence across many rows). Checked last, so it reuses whatever `head`/
+      // `tail` the prompt extraction above already read rather than triggering
+      // an extra file read. Missing entrypoint (older transcripts) reads as
+      // interactive — fail open, matching every other gating check in this
+      // codebase.
+      //
+      // head and tail are checked independently and merged with "cli wins" (not
+      // a first-truthy-value `??` chain): a large file's head might land on a
+      // non-'cli' message while a real interactive message sits in the tail (or
+      // vice versa), and either one being 'cli' is enough to keep the session.
+      const headEntrypoint = head ? extractTranscriptEntrypoint(head) : undefined;
+      const tailEntrypoint = tail ? extractTranscriptEntrypoint(tail) : undefined;
+      const entrypoint =
+        headEntrypoint === 'cli' || tailEntrypoint === 'cli' ? 'cli' : (headEntrypoint ?? tailEntrypoint);
+      if (entrypoint && isAutomatedEntrypoint(entrypoint)) continue;
+
+      // Git/worktree facts from the buffers already read above — no extra I/O.
+      // head first (cwd is stamped near the top; median offset ~1KB), tail as the
+      // fallback for transcripts whose head read failed or came up empty.
+      const headGit = head ? extractTranscriptGitInfo(head) : {};
+      const tailGit = tail ? extractTranscriptGitInfo(tail) : {};
+      const git: TranscriptGitInfo = {
+        cwd: headGit.cwd ?? tailGit.cwd,
+        // Last-wins within a chunk; across chunks the tail is the newer one.
+        gitBranch: tailGit.gitBranch ?? headGit.gitBranch,
+        worktreeName: headGit.worktreeName ?? tailGit.worktreeName,
+        worktreeRepo: headGit.worktreeRepo ?? tailGit.worktreeRepo,
+      };
+
+      out.push({
+        sessionId,
+        // The transcript's literal cwd beats decodeProjectKey's stat-walked guess,
+        // which silently collapses to $HOME once the directory is gone (#265).
+        // Absent cwd falls back to the old behaviour rather than inventing a path.
+        workingDir: git.cwd ?? workingDir,
+        workingDirExact: git.cwd !== undefined,
+        projectKey: projDir,
+        sizeBytes: fileStat.size,
+        lastModified: fileStat.mtime.toISOString(),
+        firstPrompt,
+        lastPrompt,
+        gitBranch: git.gitBranch,
+        worktreeName: git.worktreeName,
+        worktreeRepo: git.worktreeRepo,
+      });
+    }
+    return out;
+  }
+
+  app.get('/api/history/sessions', async (req) => {
+    const query = req.query as { projectKey?: string; offset?: string; limit?: string };
+    const projectsDir = join(process.env.HOME || '/tmp', '.claude', 'projects');
+    // scanProjectDir tries smallHeadBuf (16KB, the original size) first for every
+    // file and only escalates to headBuf (128KB) when that wasn't enough — see the
+    // comment at the escalation site in scanProjectDir for why unconditional 128KB
+    // reads were too expensive to keep. 128KB matches the existing precedent
+    // elsewhere in this file (line ~1431).
+    const smallHeadBuf = Buffer.alloc(16384);
+    const headBuf = Buffer.alloc(131072);
+    // Multi-user: this scans the host-wide ~/.claude/projects tree, so a non-admin
+    // must only see history whose decoded workingDir is inside their own case space.
+    // Do NOT trust the caller-supplied projectKey — confine on the decoded path.
+    // No-op for admins / single-user mode.
+    const user = getAuthUser(req);
+    const scopeHistory = isMultiUserMode() && user.role !== 'admin';
+
+    // Single-folder drill-down: when projectKey is provided, scan only that
+    // directory, bypass the 50-cap, and honor offset/limit pagination.
+    if (query.projectKey) {
+      // Validate projectKey format to prevent path traversal
+      if (!/^[A-Za-z0-9_-]+$/.test(query.projectKey)) {
+        return { sessions: [], total: 0 };
+      }
+      const offset = Math.max(0, parseInt(query.offset || '0', 10) || 0);
+      const limit = Math.min(100, Math.max(1, parseInt(query.limit || '20', 10) || 20));
+      const projPath = join(projectsDir, query.projectKey);
+      let all = await scanProjectDir(projPath, query.projectKey, smallHeadBuf, headBuf);
+      // Confine to the caller's workspace (a projectKey maps to a single foreign cwd).
+      if (scopeHistory) all = all.filter((r) => isWorkingDirAllowed(user, r.workingDir));
+      all.sort((a, b) => new Date(b.lastModified).getTime() - new Date(a.lastModified).getTime());
+      return { sessions: all.slice(offset, offset + limit), total: all.length };
+    }
+
+    // Global overview: scan all projects, return up to 50 most-recent sessions.
+    let results: HistorySession[] = [];
+    try {
+      const projectDirs = await fs.readdir(projectsDir);
+      for (const projDir of projectDirs) {
+        const projPath = join(projectsDir, projDir);
+        const list = await scanProjectDir(projPath, projDir, smallHeadBuf, headBuf);
+        results.push(...list);
+      }
+    } catch {
+      // Projects dir may not exist
+    }
+
+    // Multi-user: drop rows outside the non-admin caller's own case space.
+    if (scopeHistory) results = results.filter((r) => isWorkingDirAllowed(user, r.workingDir));
+    results.sort((a, b) => new Date(b.lastModified).getTime() - new Date(a.lastModified).getTime());
+    return { sessions: results.slice(0, 50) };
+  });
+
+  /**
+   * Gather the four read-only views the unified list is merged from, plus mux
+   * stats. This is the expensive half (the lifecycle log and a scan of every
+   * Claude transcript), factored out of the route handler because the
+   * past-session search index rebuilds itself from the very same inputs, off
+   * the request path, see session-history-index.ts.
+   */
+  async function gatherUnifiedInputs(): Promise<{
+    live: LiveSessionInput[];
+    persisted: PersistedSessionInput[];
+    lifecycle: LifecycleInput[];
+    history: HistoryInput[];
+    mux: MuxStatInput[];
+  }> {
+    // Live (in-memory) sessions.
+    const live: LiveSessionInput[] = [...ctx.sessions.values()].map((s) => {
+      const st = s.toState();
+      return {
+        id: st.id,
+        name: st.name,
+        mode: st.mode,
+        status: st.status,
+        isWorking: s.isWorking,
+        workingDir: st.workingDir,
+        createdAt: st.createdAt,
+        lastActivityAt: st.lastActivityAt,
+        claudeSessionId: s.claudeSessionId ?? undefined,
+        pinned: st.pinned,
+        pinnedAt: st.pinnedAt,
+      };
+    });
+
+    // Persisted sessions (state.json). resumeSessionId is the Claude
+    // conversation UUID a resumed session continues — feed it to the merge's
+    // alias map so its transcript row folds into this session.
+    //
+    // codex keeps its thread id in `codexConfig` instead, and state.json stores
+    // that, so read it here as well. Without it a resumed codex session that has
+    // been demoted to a persisted-only record loses its alias and duplicates: the
+    // originator fallback below cannot rescue that one, because a RESUMED rollout
+    // keeps the original session_meta (see findActiveCodexFile) and so still
+    // names whichever pane first created the thread.
+    const persisted: PersistedSessionInput[] = Object.values(ctx.store.getState().sessions).map((p) => ({
+      id: p.id,
+      name: p.name,
+      mode: p.mode,
+      status: p.status,
+      workingDir: p.workingDir,
+      createdAt: p.createdAt,
+      lastActivityAt: p.lastActivityAt,
+      claudeSessionId: p.resumeSessionId || p.codexConfig?.resumeSessionId,
+      pinned: p.pinned,
+      pinnedAt: p.pinnedAt,
+    }));
+
+    // Lifecycle audit log (newest-first, capped).
+    let lifecycle: LifecycleInput[] = [];
+    try {
+      const entries = await getLifecycleLog().query({ limit: 2000 });
+      lifecycle = entries.map((e) => ({
+        sessionId: e.sessionId,
+        name: e.name,
+        mode: e.mode,
+        ts: e.ts,
+        event: e.event,
+      }));
+    } catch {
+      // Lifecycle log may be unavailable; treat as empty.
+    }
+
+    // Transcript history (~/.claude/projects) — reuse the same scanner as the overview.
+    const history: HistoryInput[] = [];
+    try {
+      const projectsDir = join(process.env.HOME || '/tmp', '.claude', 'projects');
+      // See the sibling allocation above for why there are two sizes.
+      const smallHeadBuf = Buffer.alloc(16384);
+      const headBuf = Buffer.alloc(131072);
+      const projectDirs = await fs.readdir(projectsDir);
+      for (const projDir of projectDirs) {
+        const projPath = join(projectsDir, projDir);
+        const list = await scanProjectDir(projPath, projDir, smallHeadBuf, headBuf);
+        for (const h of list) {
+          history.push({
+            sessionId: h.sessionId,
+            workingDir: h.workingDir,
+            sizeBytes: h.sizeBytes,
+            lastModified: h.lastModified,
+            firstPrompt: h.firstPrompt,
+            lastPrompt: h.lastPrompt,
+            projectKey: h.projectKey,
+            gitBranch: h.gitBranch,
+            worktreeName: h.worktreeName,
+            worktreeRepo: h.worktreeRepo,
+          });
+        }
+      }
+    } catch {
+      // Projects dir may not exist.
+    }
+
+    // OMP's own session files (~/.omp/agent/sessions) — the non-claude twin
+    // of the scan above; see omp-transcript.ts for why this exists at all.
+    try {
+      for (const h of scanOmpSessionsHistory()) {
+        history.push({
+          sessionId: h.sessionId,
+          workingDir: h.workingDir,
+          sizeBytes: h.sizeBytes,
+          lastModified: h.lastModified,
+          firstPrompt: h.firstPrompt,
+          lastPrompt: h.lastPrompt,
+          mode: 'omp',
+        });
+      }
+    } catch {
+      // Best-effort, same as the claude scan above.
+    }
+
+    // Codex's own rollout store (~/.codex/sessions) — the same treatment omp
+    // gets above, and for the same reason: codex writes no Claude transcript, so
+    // without this a codex conversation disappears from the list as soon as its
+    // session record does. `resumeId` is the rollout's own thread id, which is
+    // what `codex resume` takes; see codex-transcript.ts.
+    try {
+      const codexRows = await scanCodexSessionsHistory();
+      for (const h of codexRows) {
+        history.push({
+          sessionId: h.sessionId,
+          workingDir: h.workingDir,
+          sizeBytes: h.sizeBytes,
+          lastModified: h.lastModified,
+          firstPrompt: h.firstPrompt,
+          lastPrompt: h.lastPrompt,
+          mode: 'codex',
+          resumeId: h.sessionId,
+        });
+      }
+
+      // Fold a FRESH codex pane into its own rollout row. A resumed one already
+      // folds, because Session sets `claudeSessionId` from the resume id it was
+      // given; a fresh one has no thread id until codex writes the rollout, so
+      // the link has to come from the other side. Codeman spawns every codex pane
+      // with CODEX_INTERNAL_ORIGINATOR_OVERRIDE=codeman_<sessionId>, and codex
+      // stamps that into session_meta.originator, so the rollout names the pane.
+      //
+      // Newest rollout wins: `/new` typed inside the TUI leaves several rollouts
+      // carrying the same originator, and the pane is on the most recent one.
+      // Rows arrive newest-first, so the first match is it.
+      //
+      // Never overwrites an id a session already knows — that one came from the
+      // resume path and is authoritative.
+      const codexThreads = codexThreadBySessionId(codexRows);
+      for (const row of [...live, ...persisted]) {
+        if (row.claudeSessionId && row.claudeSessionId !== row.id) continue;
+        const threadId = codexThreads.get(row.id);
+        if (threadId) row.claudeSessionId = threadId;
+      }
+    } catch {
+      // Best-effort, same as the two scans above.
+    }
+
+    // Mux process stats (best-effort; guard against mocks lacking the method).
+    let mux: MuxStatInput[] = [];
+    try {
+      const getStats = (ctx.mux as { getSessionsWithStats?: () => Promise<unknown[]> }).getSessionsWithStats;
+      if (typeof getStats === 'function') {
+        const muxSessions = (await getStats.call(ctx.mux)) as Array<{
+          sessionId: string;
+          muxName?: string;
+          mode?: string;
+          remote?: unknown;
+          stats?: { memoryMB: number; cpuPercent: number };
+        }>;
+        mux = muxSessions.map((m) => ({
+          sessionId: m.sessionId,
+          muxName: m.muxName,
+          mode: m.mode,
+          remote: m.remote !== undefined ? true : undefined,
+          stats: m.stats ? { memoryMB: m.stats.memoryMB, cpuPercent: m.stats.cpuPercent } : undefined,
+        }));
+      }
+    } catch {
+      // Mux stats are optional.
+    }
+
+    return { live, persisted, lifecycle, history, mux };
+  }
+
+  /**
+   * Publish a merged unified list as the past-session search index (issue #261).
+   * The snapshot is stored UNSCOPED with a per-row owner, so it must only ever be
+   * built from an unscoped merge, `harvestSources()` in search-routes re-applies
+   * the ownership check on read.
+   */
+  function publishHistorySessionIndex(merged: UnifiedSessionItem[]): void {
+    const ownerById = new Map<string, string | undefined>();
+    const stored = ctx.store.getState().sessions as Record<string, { id: string; owner?: string }>;
+    for (const p of Object.values(stored)) ownerById.set(p.id, p.owner);
+    // Live wins: a session's owner on disk can lag the running one.
+    for (const s of ctx.sessions.values()) ownerById.set(s.id, s.owner);
+    const liveIds = new Set(ctx.sessions.keys());
+    setHistorySessionIndex(buildHistorySessionIndexItems(merged, ownerById, liveIds));
+  }
+
+  // Rebuild hook for the search route: it kicks this (fire-and-forget) when the
+  // snapshot goes stale, so a search never pays for the scan itself.
+  setHistoryIndexRefresher(async () => {
+    if (ctx.testMode) return;
+    publishHistorySessionIndex(mergeUnifiedSessions(await gatherUnifiedInputs()));
+  });
+
+  // Unified, read-only session list: merges live + persisted + lifecycle +
+  // transcript history + mux stats into one de-duplicated, searchable list
+  // (COD-121). Pure merge/filter logic lives in unified-session-service.ts.
+  app.get('/api/sessions/unified', async (req) => {
+    const query = req.query as { q?: string; offset?: string; limit?: string };
+
+    if (ctx.testMode) {
+      return { sessions: [], total: 0 };
+    }
+
+    const { live, persisted, lifecycle, history, mux } = await gatherUnifiedInputs();
+
+    // Multi-user: a non-admin only sees their own sessions; host-wide transcript
+    // history (not tied to an owned session) is admin-only.
+    let sLive = live;
+    let sPersisted = persisted;
+    let sLifecycle = lifecycle;
+    let sHistory = history;
+    let scoped = false;
+    const uUser = getAuthUser(req);
+    if (isMultiUserMode() && uUser.role !== 'admin') {
+      scoped = true;
+      const ownedLive = new Set(
+        [...ctx.sessions.values()].filter((s) => canAccessOwned(uUser, s.owner)).map((s) => s.id)
+      );
+      const stored = ctx.store.getState().sessions as Record<string, { id: string; owner?: string }>;
+      const ownedPersisted = new Set(
+        Object.values(stored)
+          .filter((p) => canAccessOwned(uUser, p.owner))
+          .map((p) => p.id)
+      );
+      const isOwned = (id: string) => ownedLive.has(id) || ownedPersisted.has(id);
+      sLive = live.filter((l) => isOwned(l.id));
+      sPersisted = persisted.filter((p) => isOwned(p.id));
+      sLifecycle = lifecycle.filter((e) => isOwned(e.sessionId));
+      sHistory = [];
+    }
+
+    const merged = mergeUnifiedSessions({
+      live: sLive,
+      persisted: sPersisted,
+      lifecycle: sLifecycle,
+      history: sHistory,
+      mux,
+    });
+
+    // Refresh the search index off the back of this request, the home screen
+    // fetches this endpoint whenever it opens, which is the same screen the
+    // search box lives on, so the snapshot is warm before anyone types. A scoped
+    // merge is a per-user subset and would corrupt the shared snapshot, so that
+    // path re-merges unscoped instead (multi-user is opt-in and rarely hit).
+    publishHistorySessionIndex(scoped ? mergeUnifiedSessions({ live, persisted, lifecycle, history, mux }) : merged);
+
+    const offset = query.offset !== undefined ? parseInt(query.offset, 10) : undefined;
+    const limit = query.limit !== undefined ? parseInt(query.limit, 10) : undefined;
+    return filterAndPaginate(merged, {
+      q: query.q,
+      offset: Number.isNaN(offset as number) ? undefined : offset,
+      limit: Number.isNaN(limit as number) ? undefined : limit,
+    });
+  });
+
+  // ═══════════════════════════════════════════════════════════════
+  // Paste Image (clipboard / drag-drop upload)
+  // ═══════════════════════════════════════════════════════════════
+
+  const ALLOWED_IMAGE_EXTS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.heic', '.heif']);
+  // Single-sourced from the attachment registry (what the file viewer can also play),
+  // so an uploaded video is a type that previews. 3gp/mkv are deliberately out: they
+  // would upload but not preview, and a phone's camera roll produces neither.
+  const ALLOWED_VIDEO_EXTS = new Set([...VIDEO_ATTACHMENT_EXTENSIONS].map((e) => `.${e}`));
+  const VIDEO_MIME_EXT: Record<string, string> = {
+    mp4: '.mp4',
+    quicktime: '.mov',
+    'x-m4v': '.m4v',
+    webm: '.webm',
+    ogg: '.ogv',
+  };
+  // The per-file size cap (MAX_PASTE_IMAGE_BYTES) is enforced by @fastify/multipart (registered in server.ts).
+
+  app.post('/api/sessions/:id/paste-image', async (req, reply) => {
+    // CSRF defense: state-changing routes must come from same origin.
+    // Cookies are SameSite=lax, multipart/form-data is a "simple" CORS request
+    // (no preflight), so a cross-origin <form enctype="multipart/form-data">
+    // submit attaches the session cookie unimpeded. Reject unless Origin/Referer
+    // matches req.host. Non-browser clients (no Origin AND no Referer) must
+    // supply X-Codeman-CSRF — a header browsers cannot add cross-origin without
+    // a preflight, which our CORS config does not allow from other origins.
+    const reqHost = req.headers.host;
+    const origin = req.headers.origin;
+    const referer = req.headers.referer;
+    let csrfOk = false;
+    if (origin) {
+      try {
+        csrfOk = new URL(origin).host === reqHost;
+      } catch {
+        /* invalid Origin → not ok */
+      }
+    } else if (referer) {
+      try {
+        csrfOk = new URL(referer).host === reqHost;
+      } catch {
+        /* invalid Referer → not ok */
+      }
+    } else {
+      csrfOk = !!req.headers['x-codeman-csrf'];
+    }
+    if (!csrfOk) {
+      reply.code(403);
+      return createErrorResponse(ApiErrorCode.INVALID_INPUT, 'CSRF check failed');
+    }
+
+    const { id } = req.params as { id: string };
+    // `?kind=video` selects the disk-streamed path (see below). It is read here so the
+    // rate check draws on the right bucket before any work: videos get 3/min, images 30.
+    const isVideo = (req.query as { kind?: string }).kind === 'video';
+
+    // Rate limit per (IP, sessionId). Defends against disk-fill DoS — even an
+    // authenticated client can otherwise loop large uploads. Videos get their own,
+    // far lower bucket because the per-file cap is 1GB (see the bucket constants).
+    const rateKey = `${req.ip}:${id}`;
+    if (!(isVideo ? consumeVideoToken(rateKey) : consumePasteToken(rateKey))) {
+      reply.code(429);
+      reply.header('Retry-After', '60');
+      return createErrorResponse(
+        ApiErrorCode.INVALID_INPUT,
+        isVideo
+          ? 'Rate limit exceeded (3 video uploads/min per session)'
+          : 'Rate limit exceeded (30 uploads/min per session)'
+      );
+    }
+
+    const session = findSessionOrFail(ctx, id, req);
+
+    // The file lands on THIS host under the session's working directory, which
+    // for a remote (SSH) session is the remote path: the agent there could never
+    // read it, and the write would land in a same-named local directory or fail.
+    // An owned Docker case is fine, its workspace is bind-mounted at the same
+    // absolute path; an adopted container (owned: false) mounts nothing, so its
+    // agent reads the file only if the container exposes that host path.
+    if (session.remote) {
+      reply.code(400);
+      return createErrorResponse(
+        ApiErrorCode.INVALID_INPUT,
+        'Prompt uploads are not supported for remote (SSH) sessions'
+      );
+    }
+
+    // The upload is written under session.workingDir (ensureUploadDir below), and
+    // a live session's workspace can sit on a network mount that stopped answering.
+    // Probe it bounded before the first disk touch, as #516 requires for a path the
+    // user named, so one dead mount cannot freeze a libuv threadpool worker per
+    // upload. Only "unknown" (the mount is not answering) is refused here, the way
+    // the create route does; absent / not-a-directory keep ensureUploadDir's own
+    // errors, since a live session's workspace should be neither.
+    if ((await probePathKind(session.workingDir, { pastCap: true })) === 'unknown') {
+      return createErrorResponse(
+        ApiErrorCode.OPERATION_FAILED,
+        describeUnknownPath('Workspace', session.workingDir, { pastCap: true })
+      );
+    }
+
+    if (!req.isMultipart()) {
+      reply.code(400);
+      return createErrorResponse(ApiErrorCode.INVALID_INPUT, 'Expected multipart/form-data');
+    }
+
+    // Read the single file part. @fastify/multipart enforces the per-file size
+    // cap (MAX_PASTE_IMAGE_BYTES) and the 1-file/4-field count limits (server.ts),
+    // replacing a hand-rolled
+    // boundary scanner with several bugs: literal boundary matches anywhere in
+    // body, LF-only clients silently corrupted the last byte (hard-coded \r\n
+    // offsets), no part-count cap.
+    // `?kind=video` (read above for the rate check) is the ONLY way onto the video
+    // path: it selects the larger, disk-streamed budget before the part is seen
+    // (busboy takes its limits up front), and it admits video types alone, so an
+    // image can never ride the video cap through memory. Without it the route is
+    // byte-identical to the image-only version. Truncation is checked on the stream
+    // below rather than thrown, since the file is being written as it arrives.
+    let part: import('@fastify/multipart').MultipartFile | undefined;
+    try {
+      part = await req.file(
+        isVideo ? { limits: { fileSize: MAX_PASTE_VIDEO_BYTES }, throwFileSizeLimit: false } : undefined
+      );
+    } catch (err: unknown) {
+      reply.code(413);
+      return createErrorResponse(ApiErrorCode.INVALID_INPUT, getErrorMessage(err) || 'Invalid multipart payload');
+    }
+    if (!part) {
+      reply.code(400);
+      return createErrorResponse(ApiErrorCode.INVALID_INPUT, 'No image uploaded');
+    }
+    if (part.fieldname !== 'image') {
+      reply.code(400);
+      return createErrorResponse(ApiErrorCode.INVALID_INPUT, `Unexpected field "${part.fieldname}", expected "image"`);
+    }
+
+    if (isVideo) {
+      let ext = '';
+      if (part.filename) {
+        const origExt = extname(part.filename).toLowerCase();
+        if (ALLOWED_VIDEO_EXTS.has(origExt)) ext = origExt;
+      }
+      const videoMime = (part.mimetype || '').toLowerCase().match(/^video\/(mp4|quicktime|x-m4v|webm|ogg)$/);
+      if (videoMime) ext = VIDEO_MIME_EXT[videoMime[1]] ?? ext;
+      if (!ext) {
+        await finished(part.file.resume()).catch(() => {});
+        reply.code(400);
+        return createErrorResponse(
+          ApiErrorCode.INVALID_INPUT,
+          `Unsupported video type. Allowed: ${[...ALLOWED_VIDEO_EXTS].join(', ')}`
+        );
+      }
+      const imageDir = await ensureUploadDir(session.workingDir);
+      if (!imageDir) {
+        await finished(part.file.resume()).catch(() => {});
+        reply.code(403);
+        return createErrorResponse(ApiErrorCode.INVALID_INPUT, `${UPLOADS_DIR} is not a regular directory`);
+      }
+      const { filename, filepath, fh } = await openPasteFile(imageDir, ext);
+      // Written as it arrives: a phone video is far too large to buffer the way an
+      // image is. The container is judged on the first 12 bytes as soon as they are
+      // in, so a mislabeled upload stops touching disk at its first chunk; the rest
+      // of the body is drained unwritten (as busboy does past its own size limit),
+      // which is what lets the answer reach the client. A transfer that dies midway
+      // (the phone left the network) leaves no partial file behind.
+      const head = Buffer.alloc(12);
+      let headLen = 0;
+      let mislabeled = false;
+      try {
+        for await (const chunk of part.file) {
+          if (mislabeled) continue;
+          if (headLen < head.length) {
+            headLen += chunk.copy(head, headLen, 0, head.length - headLen);
+            mislabeled = headLen === head.length && !imageMagicMatchesExt(head, ext);
+            if (mislabeled) continue;
+          }
+          // writeFile loops until the whole chunk is on disk; a bare write() may be short.
+          await fh.writeFile(chunk);
+        }
+      } catch (err: unknown) {
+        await fs.unlink(filepath).catch(() => {});
+        throw err;
+      } finally {
+        await fh.close();
+      }
+      let failure: { status: number; message: string } | null = null;
+      if (headLen === 0) failure = { status: 400, message: 'Empty file' };
+      else if (!imageMagicMatchesExt(head.subarray(0, headLen), ext)) {
+        console.warn(
+          `[paste-image] video magic mismatch: filename=${JSON.stringify(part.filename)} mime=${JSON.stringify(part.mimetype)} declaredExt=${ext} magic=${head.subarray(0, headLen).toString('hex')}`
+        );
+        failure = { status: 415, message: `Video bytes do not match declared type ${ext}` };
+      } else if (part.file.truncated) {
+        const maxMb = Math.round(MAX_PASTE_VIDEO_BYTES / (1024 * 1024));
+        failure = { status: 413, message: `File too large (max ${maxMb}MB)` };
+      }
+      if (failure) {
+        await fs.unlink(filepath).catch(() => {});
+        reply.code(failure.status);
+        return createErrorResponse(ApiErrorCode.INVALID_INPUT, failure.message);
+      }
+      return { path: filepath, filename };
+    }
+
+    let imageBytes: Buffer;
+    try {
+      imageBytes = await part.toBuffer();
+    } catch (err: unknown) {
+      reply.code(413);
+      const maxMb = Math.round(MAX_PASTE_IMAGE_BYTES / (1024 * 1024));
+      return createErrorResponse(ApiErrorCode.INVALID_INPUT, getErrorMessage(err) || `File too large (max ${maxMb}MB)`);
+    }
+    if (imageBytes.length === 0) {
+      reply.code(400);
+      return createErrorResponse(ApiErrorCode.INVALID_INPUT, 'Empty file');
+    }
+
+    // Determine extension from filename or Content-Type.
+    let ext = '.png';
+    if (part.filename) {
+      const origExt = extname(part.filename).toLowerCase();
+      if (ALLOWED_IMAGE_EXTS.has(origExt)) ext = origExt;
+    }
+    const mimeMatch = (part.mimetype || '').toLowerCase().match(/^image\/(png|jpeg|jpg|webp|gif|bmp|heic|heif)$/);
+    if (mimeMatch) {
+      const map: Record<string, string> = {
+        png: '.png',
+        jpeg: '.jpg',
+        jpg: '.jpg',
+        webp: '.webp',
+        gif: '.gif',
+        bmp: '.bmp',
+        heic: '.heic',
+        heif: '.heif',
+      };
+      ext = map[mimeMatch[1]] ?? ext;
+    }
+
+    if (!ALLOWED_IMAGE_EXTS.has(ext)) {
+      reply.code(400);
+      return createErrorResponse(
+        ApiErrorCode.INVALID_INPUT,
+        `Unsupported image type: ${ext}. Allowed: ${[...ALLOWED_IMAGE_EXTS].join(', ')}`
+      );
+    }
+
+    // Route HEIC on the raw bytes, NOT the declared ext/mime: on some Android
+    // galleries (e.g. MIUI) a HEIF comes back mislabeled as image/jpeg, and
+    // browsers that cannot decode HEIF upload the original file as-is — so a
+    // HEIC payload can arrive under any declared type. Filename and
+    // Content-Type are attacker-supplied anyway; only the bytes are trusted.
+    if (imageMagicMatchesExt(imageBytes, '.heic')) {
+      try {
+        imageBytes = await convertHeicToJpeg(imageBytes);
+        ext = '.jpg';
+      } catch (err: unknown) {
+        console.warn(
+          `[paste-image] HEIC conversion failed: filename=${JSON.stringify(part.filename)} mime=${JSON.stringify(part.mimetype)} error=${getErrorMessage(err)}`
+        );
+        reply.code(415);
+        return createErrorResponse(ApiErrorCode.INVALID_INPUT, 'Could not convert HEIC image to JPEG');
+      }
+    } else if (!imageMagicMatchesExt(imageBytes, ext)) {
+      // Sniff actual bytes — a polyglot HTML/PNG would otherwise pass and
+      // serve back with image/png MIME. Log the real header so format
+      // mismatches can be pinned down without a reproduce-and-guess loop. The
+      // client re-encodes images to JPEG/PNG before upload, so this is rare.
+      console.warn(
+        `[paste-image] magic mismatch: filename=${JSON.stringify(part.filename)} mime=${JSON.stringify(part.mimetype)} declaredExt=${ext} magic=${imageBytes.subarray(0, 12).toString('hex')}`
+      );
+      reply.code(415);
+      return createErrorResponse(ApiErrorCode.INVALID_INPUT, `Image bytes do not match declared type ${ext}`);
+    }
+
+    // {workingDir}/.codeman-uploads/, see ensureUploadDir.
+    const imageDir = await ensureUploadDir(session.workingDir);
+    if (!imageDir) {
+      reply.code(403);
+      return createErrorResponse(ApiErrorCode.INVALID_INPUT, `${UPLOADS_DIR} is not a regular directory`);
+    }
+    const { filename, filepath, fh } = await openPasteFile(imageDir, ext);
+    try {
+      await fh.writeFile(imageBytes);
+    } finally {
+      await fh.close();
+    }
+
+    return { path: filepath, filename };
+  });
+
+  // Returned so the server can own the registry's LIFETIME (drop state when a session is
+  // cleaned up on any of its paths, resolve in-flight wakes on shutdown). The wake-CAPABLE
+  // code stays here: `test/remote-wake.test.ts` pins that `server.ts` calls nothing but
+  // `drop`/`stop` on this handle, so no timer path can reach a wake through it.
+  return remoteWake;
+}

@@ -1,0 +1,6 @@
+node_modules
+dist
+dist-codeman/
+*.local
+.vite
+.DS_Store

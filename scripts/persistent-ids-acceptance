@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+# persistent-ids-acceptance: read-only before/after check for a real container restart.
+#
+#   persistent-ids-acceptance before [FILE]   snapshot pinned sessions, rooms and company bindings
+#   persistent-ids-acceptance after  [FILE]   compare the live console with the snapshot; exit 1 on any FAIL
+#
+# Only GET requests. API defaults to http://127.0.0.1:3001 (CONSOLE_API overrides).
+# FILE defaults to ./persistent-ids-snapshot.json.
+set -euo pipefail
+mode="${1:-}"; file="${2:-persistent-ids-snapshot.json}"; api="${CONSOLE_API:-http://127.0.0.1:3001}"
+case "$mode" in before|after) ;; *) echo "usage: $0 before|after [FILE]" >&2; exit 2 ;; esac
+command -v python3 >/dev/null || { echo "python3 is required" >&2; exit 2; }
+get() { curl -fsS --max-time 15 "$api/api/v1/$1"; }
+snapshot="$(python3 -c '
+import json, sys
+sessions, rooms, company, lifecycle = (json.loads(a) for a in sys.argv[1:5])
+unwrap = lambda v: v.get("data", v) if isinstance(v, dict) else v
+sessions = unwrap(sessions); sessions = sessions.get("sessions", sessions) if isinstance(sessions, dict) else sessions
+rooms = unwrap(rooms)["rooms"]; company = unwrap(company)
+print(json.dumps({
+  "sessions": {s["id"]: {"name": s.get("name"), "mode": s.get("mode"), "pinned": bool(s.get("pinned")),
+               "alive": s.get("pid") is not None,
+               "thread": (s.get("openCodeConfig") or {}).get("continueSession")} for s in sessions},
+  "rooms": {r["id"]: {"name": r["name"], "members": {m["sessionId"]: m.get("role") for m in r["members"]}} for r in rooms},
+  "employees": {e["id"]: e.get("sessionId") for e in company.get("employees", [])},
+}, sort_keys=True))
+' "$(get sessions)" "$(get chatrooms)" "$(get company)" "{}")"
+if [ "$mode" = before ]; then
+  printf '%s\n' "$snapshot" > "$file"
+  python3 -c 'import json,sys; s=json.load(open(sys.argv[1])); p=[k for k,v in s["sessions"].items() if v["pinned"]]; print("saved", sys.argv[1], "-", len(p), "pinned session(s):", ", ".join(s["sessions"][k]["name"] or k for k in p))' "$file"
+  exit 0
+fi
+python3 - "$file" "$snapshot" <<'EOF'
+import json, sys
+before = json.load(open(sys.argv[1])); now = json.loads(sys.argv[2]); fails = 0
+def check(ok, text):
+    global fails
+    print(("PASS " if ok else "FAIL ") + text); fails += 0 if ok else 1
+for sid, s in before["sessions"].items():
+    if not s["pinned"]: continue
+    label = "%s (%s)" % (s["name"], sid)
+    if not s["alive"]:
+        check(sid not in now["sessions"] or not now["sessions"][sid]["alive"], label + " was not running and stays down")
+        continue
+    cur = now["sessions"].get(sid)
+    check(bool(cur and cur["alive"]), label + " is back under the SAME id")
+    if cur and s["thread"]:
+        check(cur["thread"] == s["thread"], label + " resumes the same native thread " + s["thread"])
+    same_name = [k for k, v in now["sessions"].items() if v["name"] == s["name"] and v["alive"]]
+    check(len(same_name) <= 1, label + " has no duplicate live session (found %d)" % len(same_name))
+for rid, r in before["rooms"].items():
+    for sid, role in r["members"].items():
+        if not before["sessions"].get(sid, {}).get("pinned"): continue
+        cur = now["rooms"].get(rid, {}).get("members", {})
+        check(cur.get(sid) == role, "room %s keeps %s as %s" % (r["name"], before["sessions"][sid]["name"], role))
+for eid, sid in before["employees"].items():
+    if before["sessions"].get(sid, {}).get("pinned"):
+        check(now["employees"].get(eid) == sid, "company employee %s stays bound to %s" % (eid, sid))
+print("RESULT:", "PASS" if fails == 0 else "%d FAIL(S)" % fails)
+sys.exit(1 if fails else 0)
+EOF

@@ -1,0 +1,283 @@
+/**
+ * @fileoverview Chatroom attachments and custom emotes, stored under the data dir.
+ *
+ * Attachments: `<data>/chatroom-files/<roomId>/<fileId>-<safe name>`, indexed per room in
+ * `index.json`. Limits: MAX_FILE_BYTES per file, MAX_ROOM_BYTES per room. The stored path
+ * is absolute and readable by the agents on this machine, which is how an attachment
+ * reaches a member's pane (chatroom-delivery.ts appends the path to the delivered line).
+ *
+ * Emotes: `<data>/chatroom-emotes/<scope>/<name>.<ext>`, scope `global` or a room id,
+ * indexed in `<data>/chatroom-emotes/index.json`. Small images only (MAX_EMOTE_BYTES).
+ *
+ * Only raster images in INLINE_IMAGE_TYPES are ever served inline; everything else
+ * (SVG and HTML included) is served as a download (see the routes). Writes are tmp+rename
+ * and every index write is serialized per store.
+ */
+
+import { randomUUID } from 'node:crypto';
+import fs from 'node:fs/promises';
+import { join } from 'node:path';
+
+export const MAX_FILE_BYTES = 25 * 1024 * 1024;
+export const MAX_ROOM_BYTES = 2 * 1024 * 1024 * 1024;
+export const MAX_EMOTE_BYTES = 256 * 1024;
+export const MAX_ATTACHMENTS_PER_MESSAGE = 10;
+/** An upload no message references is kept this long (a message may still be on its way). */
+export const ORPHAN_GRACE_MS = 60 * 60 * 1000;
+/** Raster types a browser may show inline; nothing else is ever rendered from the store. */
+export const INLINE_IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp']);
+const EMOTE_TYPES: Record<string, string> = {
+  'image/png': 'png',
+  'image/gif': 'gif',
+  'image/webp': 'webp',
+  'image/jpeg': 'jpg',
+};
+export const EMOTE_NAME = /^[a-z0-9_]{2,32}$/;
+
+export interface ChatFile {
+  id: string;
+  name: string;
+  size: number;
+  type: string;
+  at: number;
+  /** 'user' or the uploading session id. */
+  by: string;
+  /** File name on disk inside the room directory. */
+  stored: string;
+}
+
+export interface ChatEmote {
+  name: string;
+  /** 'global' or a room id. */
+  scope: string;
+  type: string;
+  file: string;
+  at: number;
+}
+
+export class ChatFileError extends Error {
+  constructor(
+    message: string,
+    readonly status: number
+  ) {
+    super(message);
+  }
+}
+
+/** A display/disk-safe file name: no path parts, no control characters, bounded. */
+export function safeFileName(raw: string): string {
+  const base = String(raw || '')
+    .split(/[\\/]/)
+    .pop()!
+    // eslint-disable-next-line no-control-regex
+    .replace(/[\x00-\x1f\x7f]/g, '')
+    .replace(/[^\p{L}\p{N}._ -]/gu, '_')
+    .replace(/^\.+/, '')
+    .trim()
+    .slice(0, 120);
+  return base || 'file';
+}
+
+/** Is this content type shown inline (raster images only)? */
+export function isInlineImage(type: string): boolean {
+  return INLINE_IMAGE_TYPES.has(type.toLowerCase());
+}
+
+async function writeAtomic(path: string, data: Buffer | string): Promise<void> {
+  const tmp = `${path}.${randomUUID()}.tmp`;
+  await fs.writeFile(tmp, data, { mode: 0o600 });
+  await fs.rename(tmp, path);
+}
+
+export class ChatFileStore {
+  private chain: Promise<unknown> = Promise.resolve();
+
+  private readonly maxFile: number;
+  private readonly maxRoom: number;
+
+  constructor(
+    private readonly root: string,
+    limits: { maxFile?: number; maxRoom?: number } = {}
+  ) {
+    this.maxFile = limits.maxFile ?? MAX_FILE_BYTES;
+    this.maxRoom = limits.maxRoom ?? MAX_ROOM_BYTES;
+  }
+
+  private serial<T>(fn: () => Promise<T>): Promise<T> {
+    const next = this.chain.then(fn, fn);
+    this.chain = next.catch(() => {});
+    return next;
+  }
+
+  roomDir(roomId: string): string {
+    if (!/^[A-Za-z0-9-]{1,64}$/.test(roomId)) throw new ChatFileError('Bad room id', 400);
+    return join(this.root, 'chatroom-files', roomId);
+  }
+
+  async list(roomId: string): Promise<ChatFile[]> {
+    try {
+      return JSON.parse(await fs.readFile(join(this.roomDir(roomId), 'index.json'), 'utf8')) as ChatFile[];
+    } catch {
+      return [];
+    }
+  }
+
+  async get(roomId: string, fileId: string): Promise<(ChatFile & { path: string }) | undefined> {
+    const file = (await this.list(roomId)).find((f) => f.id === fileId);
+    return file ? { ...file, path: join(this.roomDir(roomId), file.stored) } : undefined;
+  }
+
+  /** Absolute on-disk path of a stored file (what an agent reads). */
+  pathOf(roomId: string, file: Pick<ChatFile, 'stored'>): string {
+    return join(this.roomDir(roomId), file.stored);
+  }
+
+  add(roomId: string, input: { name: string; type: string; data: Buffer; by: string }): Promise<ChatFile> {
+    return this.serial(async () => {
+      if (input.data.length === 0) throw new ChatFileError('Empty file', 400);
+      if (input.data.length > this.maxFile) {
+        throw new ChatFileError(`A file can be at most ${Math.round(this.maxFile / 1024 / 1024)} MB`, 413);
+      }
+      const dir = this.roomDir(roomId);
+      const index = await this.list(roomId);
+      const used = index.reduce((n, f) => n + f.size, 0);
+      if (used + input.data.length > this.maxRoom) {
+        throw new ChatFileError('This room has used its 2 GB of attachments; delete the room or older files', 413);
+      }
+      await fs.mkdir(dir, { recursive: true, mode: 0o700 });
+      const id = randomUUID();
+      const name = safeFileName(input.name);
+      const stored = `${id}-${name}`;
+      await writeAtomic(join(dir, stored), input.data);
+      const file: ChatFile = {
+        id,
+        name,
+        size: input.data.length,
+        type: String(input.type || 'application/octet-stream')
+          .toLowerCase()
+          .slice(0, 100),
+        at: Date.now(),
+        by: input.by,
+        stored,
+      };
+      index.push(file);
+      await writeAtomic(join(dir, 'index.json'), JSON.stringify(index));
+      return file;
+    });
+  }
+
+  /** Remove a room's whole attachment folder (the room was deleted). */
+  /**
+   * A deleted room's attachments are moved aside (not destroyed) so the audit log's copy of the room still has its files;
+   * its room-scoped emotes are removed.
+   */
+  async removeRoom(roomId: string): Promise<void> {
+    await this.serial(async () => {
+      const dir = this.roomDir(roomId);
+      try {
+        await fs.mkdir(join(this.root, 'chatroom-files-deleted'), { recursive: true });
+        await fs.rename(dir, join(this.root, 'chatroom-files-deleted', `${roomId}-${Date.now()}`));
+      } catch {
+        /* no files for this room */
+      }
+      const all = await this.emotes();
+      const kept = all.filter((e) => e.scope !== roomId);
+      if (kept.length !== all.length) {
+        await fs.rm(join(this.emoteDir(), roomId), { recursive: true, force: true });
+        await writeAtomic(join(this.emoteDir(), 'index.json'), JSON.stringify(kept));
+      }
+    });
+  }
+
+  /**
+   * Drop uploads no message references once they are older than `graceMs`: a paste or
+   * drop that was cancelled, a send that failed, or a client that uploaded and went away
+   * must not hold the room's budget forever. Run before each add.
+   */
+  pruneUnreferenced(
+    roomId: string,
+    referenced: Set<string>,
+    now = Date.now(),
+    graceMs = ORPHAN_GRACE_MS
+  ): Promise<number> {
+    return this.serial(async () => {
+      const dir = this.roomDir(roomId);
+      const index = await this.list(roomId);
+      const stale = index.filter((f) => !referenced.has(f.id) && now - f.at > graceMs);
+      if (!stale.length) return 0;
+      for (const f of stale) await fs.rm(join(dir, f.stored), { force: true });
+      const gone = new Set(stale.map((f) => f.id));
+      await writeAtomic(join(dir, 'index.json'), JSON.stringify(index.filter((f) => !gone.has(f.id))));
+      return stale.length;
+    });
+  }
+
+  // ─── Emotes ─────────────────────────────────────────────────────────────────
+
+  private emoteDir(): string {
+    return join(this.root, 'chatroom-emotes');
+  }
+
+  async emotes(): Promise<ChatEmote[]> {
+    try {
+      return JSON.parse(await fs.readFile(join(this.emoteDir(), 'index.json'), 'utf8')) as ChatEmote[];
+    } catch {
+      return [];
+    }
+  }
+
+  /** Emotes visible in a room: its own first, then global ones not shadowed by them. */
+  async emotesFor(roomId: string): Promise<ChatEmote[]> {
+    const all = await this.emotes();
+    const own = all.filter((e) => e.scope === roomId);
+    const names = new Set(own.map((e) => e.name));
+    return [...own, ...all.filter((e) => e.scope === 'global' && !names.has(e.name))];
+  }
+
+  emotePath(emote: ChatEmote): string {
+    return join(this.emoteDir(), emote.file);
+  }
+
+  addEmote(input: { name: string; scope: string; type: string; data: Buffer }): Promise<ChatEmote> {
+    return this.serial(async () => {
+      if (!EMOTE_NAME.test(input.name)) {
+        throw new ChatFileError('An emote name is 2-32 lowercase letters, digits or underscores', 400);
+      }
+      const ext = EMOTE_TYPES[input.type.toLowerCase()];
+      if (!ext) throw new ChatFileError('An emote is a PNG, GIF, WebP or JPEG image', 415);
+      if (input.data.length === 0 || input.data.length > MAX_EMOTE_BYTES) {
+        throw new ChatFileError(`An emote image can be at most ${MAX_EMOTE_BYTES / 1024} KB`, 413);
+      }
+      if (input.scope !== 'global') this.roomDir(input.scope); // validates the room id
+      const dir = join(this.emoteDir(), input.scope);
+      await fs.mkdir(dir, { recursive: true, mode: 0o700 });
+      const file = join(input.scope, `${input.name}.${ext}`);
+      const all = (await this.emotes()).filter((e) => !(e.name === input.name && e.scope === input.scope));
+      for (const old of (await this.emotes()).filter((e) => e.name === input.name && e.scope === input.scope)) {
+        await fs.rm(join(this.emoteDir(), old.file), { force: true });
+      }
+      await writeAtomic(join(this.emoteDir(), file), input.data);
+      const emote: ChatEmote = {
+        name: input.name,
+        scope: input.scope,
+        type: input.type.toLowerCase(),
+        file,
+        at: Date.now(),
+      };
+      all.push(emote);
+      await writeAtomic(join(this.emoteDir(), 'index.json'), JSON.stringify(all));
+      return emote;
+    });
+  }
+
+  removeEmote(name: string, scope: string): Promise<boolean> {
+    return this.serial(async () => {
+      const all = await this.emotes();
+      const hit = all.find((e) => e.name === name && e.scope === scope);
+      if (!hit) return false;
+      await fs.rm(join(this.emoteDir(), hit.file), { force: true });
+      await writeAtomic(join(this.emoteDir(), 'index.json'), JSON.stringify(all.filter((e) => e !== hit)));
+      return true;
+    });
+  }
+}

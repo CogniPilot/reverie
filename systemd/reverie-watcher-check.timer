@@ -1,0 +1,10 @@
+# Template, not installed.
+[Unit]
+Description=Check the Reverie runtime watcher every 5 minutes
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=5min
+
+[Install]
+WantedBy=timers.target
