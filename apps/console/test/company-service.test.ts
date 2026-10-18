@@ -138,6 +138,24 @@ describe('company identities and genuine research lifecycle', () => {
     expect(store.snapshot().temporaryAgents.some((a) => a.sessionId === 'child')).toBe(false);
   });
 
+  it('refuses a new worker at the 500-record cap and never drops an existing record to make room', async () => {
+    const room = rooms.create('One', undefined);
+    rooms.addMember(room.id, 'parent-agent');
+    await store.update((state) => {
+      for (let i = 0; i < 500; i++) state.temporaryAgents.push({ sessionId: `old-${i}`, name: 'Old', icon: '🎨', createdAt: i });
+    });
+    expect(() => service.prepareSpawn({ parentSessionId: 'parent-agent' })).toThrow('Profile limit');
+    await expect(service.completeSpawn('child', { channelId: room.id, name: 'New', icon: '🎨' })).rejects.toMatchObject({
+      status: 409,
+    });
+    expect(room.members.some((m) => m.sessionId === 'child')).toBe(false);
+    expect(store.snapshot().temporaryAgents.map((a) => a.sessionId)).toEqual(Array.from({ length: 500 }, (_, i) => `old-${i}`));
+    // Re-recording a session already on the list is not a new record, so it still succeeds at the cap.
+    await service.completeSpawn('old-7', { name: 'Renamed', icon: '🎨' });
+    expect(store.snapshot().temporaryAgents).toHaveLength(500);
+    expect(store.snapshot().temporaryAgents.find((a) => a.sessionId === 'old-7')?.name).toBe('Renamed');
+  });
+
   it('inherits a unique active channel, preserves explicit identity, and refuses unauthorized channels', async () => {
     const one = rooms.create('One', undefined);
     rooms.addMember(one.id, 'parent-agent');
