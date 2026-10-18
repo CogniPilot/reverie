@@ -434,21 +434,52 @@ export class ChatroomService {
       .filter((x): x is { room: ChatRoom; member: ChatMember } => !!x.member)
       .map((x) => ({ roomId: x.room.id, roomName: x.room.name, member: structuredClone(x.member), owner: x.room.owner }));
     const oldName = this.nameOf(oldId);
-    const moved = this.store.replaceMember(oldId, newId, candidates);
-    for (const room of moved) {
-      this.delivery.dropRoom(room.id, oldId);
-      const member = room.members.find((m) => m.sessionId === newId);
-      this.system(room, `${this.nameOf(newId)} moved to a new session`);
-      if (member && !member.postOnly) this.brief(room, member);
-      this.changed(room, 'updated');
+    // All or nothing: if anything after the seats move throws (a room's notice, the retired record), every touched room gets its old
+    // members and DM pair back, so a person is never left half in one session and half in the other.
+    const before = candidates
+      .filter((r) => r.members.some((m) => m.sessionId === oldId))
+      .map((r) => ({ room: r, members: structuredClone(r.members), dm: r.dm ? [...r.dm] : undefined }));
+    const retiredBefore = this.retired;
+    let moved: ChatRoom[] = [];
+    try {
+      moved = this.store.replaceMember(oldId, newId, candidates);
+      for (const room of moved) this.changed(room, 'updated');
+      if (moved.length) {
+        // One badge per person: the old session is retired (and, if the new one was itself retired, it is back).
+        this.retired = this.retired.filter((r) => r.sessionId !== newId && r.sessionId !== oldId);
+        this.retired.push({ sessionId: oldId, name: oldName, successorId: newId, at: this.now(), owner: snapshot[0]?.owner, rooms: snapshot.map(({ roomId, roomName, member }) => ({ roomId, roomName, member })) });
+        await this.saveRetired();
+      }
+    } catch (error) {
+      this.retired = retiredBefore;
+      for (const { room, members, dm } of before) {
+        room.members = members;
+        if (dm) room.dm = dm;
+        try { this.changed(room, 'updated'); } catch { /* the rollback must finish for every room */ }
+      }
+      throw error;
     }
     if (moved.length) {
-      // One badge per person: the old session is retired (and, if the new one was itself retired, it is back).
-      this.retired = this.retired.filter((r) => r.sessionId !== newId && r.sessionId !== oldId);
-      this.retired.push({ sessionId: oldId, name: oldName, successorId: newId, at: this.now(), owner: snapshot[0]?.owner, rooms: snapshot.map(({ roomId, roomName, member }) => ({ roomId, roomName, member })) });
-      await this.saveRetired();
+      // Committed: only now are the old session's undelivered lines dropped (each is a copy of a room line).
+      for (const room of moved) this.delivery.dropRoom(room.id, oldId);
+      // The notices wait for the commit, so the history never says a move happened that was rolled back. A notice that fails now
+      // must not undo the move.
+      for (const room of moved) {
+        try {
+          const member = room.members.find((m) => m.sessionId === newId);
+          this.system(room, `${this.nameOf(newId)} moved to a new session`);
+          if (member && !member.postOnly) this.brief(room, member);
+        } catch (error) {
+          console.warn(`[chatroom] move notice for ${room.id} failed: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      }
       this.deps.retiredChanged?.([oldId, newId]);
-      await this.audit({ action: 'replace-session', by, from: oldId, to: newId, rooms: moved.map((r) => r.id) });
+      // Committed: a failed audit line is reported, never a reason to put the seats back on a session that is already running.
+      try {
+        await this.audit({ action: 'replace-session', by, from: oldId, to: newId, rooms: moved.map((r) => r.id) });
+      } catch (error) {
+        console.warn(`[chatroom] replace-session audit failed: ${error instanceof Error ? error.message : String(error)}`);
+      }
     }
     return moved.map((r) => ({ id: r.id, name: r.name }));
   }

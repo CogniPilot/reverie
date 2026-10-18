@@ -575,6 +575,8 @@ export const CreateSessionSchema = z.object({
   icon: z.string().max(16).optional(),
   channelId: z.string().min(1).max(100).optional(),
   chatroomId: z.string().min(1).max(100).optional(),
+  /** Replace this employee's session (the owner, or the employee's own session) instead of adding another person. */
+  employeeId: z.string().min(1).max(100).optional(),
   /** Session that spawned this one — see parentSessionIdSchema. */
   parentSessionId: parentSessionIdSchema,
   /** Tab group to place the new session in: see tabGroupIdSchema. */
@@ -1158,6 +1160,8 @@ export const QuickStartSchema = z.object({
   icon: z.string().max(16).optional(),
   channelId: z.string().min(1).max(100).optional(),
   chatroomId: z.string().min(1).max(100).optional(),
+  /** Replace this employee's session (the owner, or the employee's own session) instead of adding another person. */
+  employeeId: z.string().min(1).max(100).optional(),
   /** Session that spawned this one — see parentSessionIdSchema. */
   parentSessionId: parentSessionIdSchema,
   /** Tab group to place the new session in: see tabGroupIdSchema. */

@@ -14,6 +14,8 @@ export const EmployeeSchema = z.object({
   position: text,
   expertise: z.array(text).min(1).max(20),
   sessionId: text,
+  /** The CLI conversation thread this person resumes whenever its session is replaced (an OpenCode `ses_...` id). It belongs to the employee, not to any one session. */
+  threadId: z.string().trim().min(1).max(200).optional(),
   researchEnabled: z.boolean().default(true),
   createdAt: z.number(),
 });

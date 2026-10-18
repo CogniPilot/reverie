@@ -17,6 +17,7 @@ const UpdateSchema = EmployeeSchema.pick({ position: true, expertise: true, icon
   .strict()
   .refine((v) => Object.keys(v).length > 0, 'Give a position, expertise, an icon, or any of them');
 const RebindSchema = z.object({ sessionId: z.string().min(1).max(100) });
+const ThreadSchema = z.object({ threadId: z.string().trim().min(1).max(200).nullable() });
 const MemorySchema = z.object({
   text: z.string().trim().min(1).max(16000),
   kind: z.enum(['note', 'imagination']).default('note'),
@@ -87,6 +88,13 @@ export function registerCompanyRoutes(
       ownerOnly(req);
       const { id } = req.params as { id: string };
       return { employee: await service.rebind(id, ownerFor(req), parseBody(RebindSchema, req.body).sessionId) };
+    })
+  );
+  app.put('/api/company/employees/:id/thread', async (req, reply) =>
+    run(reply, async () => {
+      ownerOnly(req);
+      const { id } = req.params as { id: string };
+      return { employee: await service.setThread(id, ownerFor(req), parseBody(ThreadSchema, req.body).threadId) };
     })
   );
   app.put('/api/company/employees/:id', async (req, reply) =>

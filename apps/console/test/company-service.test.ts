@@ -107,6 +107,76 @@ describe('company identities and genuine research lifecycle', () => {
     expect((await stat(store.file)).mode & 0o777).toBe(0o600);
   });
 
+  it('keeps one person across repeated session replacements: rebinding moves every room seat with the employee', async () => {
+    const dmSessions = ['alice-1', 'alice-2', 'alice-3', 'alice-4'];
+    for (const id of dmSessions) sessions.set(id, { id, name: 'Alice', owner: undefined });
+    service = new CompanyService(store, {
+      getSession: (id) => sessions.get(id),
+      chatrooms: {
+        rooms: () => rooms.list(),
+        room: (id) => rooms.get(id),
+        addMember: (id, sessionId, options) => rooms.addMember(id, sessionId, options).member,
+        replaceSession: async (oldId, newId, _by, canTouch) =>
+          rooms.replaceMember(oldId, newId, rooms.list().filter(canTouch)).map((r) => ({ id: r.id, name: r.name })),
+      },
+      research: backend,
+      now: () => night,
+    });
+    const alice = await service.hire({ name: 'Alice', icon: '🦊', position: 'Local Agent', expertise: ['chat'], sessionId: 'alice-1', researchEnabled: false });
+    const lounge = rooms.create('Lounge', undefined);
+    const game = rooms.create('Game', undefined);
+    rooms.addMember(lounge.id, 'alice-1');
+    rooms.addMember(game.id, 'alice-1', { role: 'coordinator' });
+    for (const [from, to] of [['alice-1', 'alice-2'], ['alice-2', 'alice-3'], ['alice-3', 'alice-4']]) {
+      // A successor started with its parent's header may already sit in a room, empty.
+      if (to === 'alice-3') rooms.addMember(lounge.id, to);
+      await service.rebind(alice.id, undefined, to);
+      expect(service.view().employees.filter((e) => e.name === 'Alice')).toHaveLength(1);
+      expect(service.view().employees.find((e) => e.id === alice.id)?.sessionId).toBe(to);
+      for (const room of [lounge, game]) {
+        const seats = rooms.get(room.id)?.members.map((m) => m.sessionId) ?? [];
+        expect(seats).toContain(to);
+        expect(seats).not.toContain(from);
+        expect(seats.filter((id) => dmSessions.includes(id))).toEqual([to]);
+      }
+      expect(rooms.get(game.id)?.members.find((m) => m.sessionId === to)?.role).toBe('coordinator');
+    }
+  });
+
+  it('never lets a new session take an employee\'s name; a replacement names the employee id and takes over', async () => {
+    for (const id of ['alice-1', 'alice-2', 'alice-3']) sessions.set(id, { id, name: 'Alice', owner: undefined });
+    service = new CompanyService(store, {
+      getSession: (id) => sessions.get(id),
+      chatrooms: {
+        rooms: () => rooms.list(),
+        room: (id) => rooms.get(id),
+        addMember: (id, sessionId, options) => rooms.addMember(id, sessionId, options).member,
+        replaceSession: async (oldId, newId, _by, canTouch) =>
+          rooms.replaceMember(oldId, newId, rooms.list().filter(canTouch)).map((r) => ({ id: r.id, name: r.name })),
+      },
+      research: backend,
+      now: () => night,
+    });
+    const alice = await service.hire({ name: 'Alice', icon: '🦊', position: 'Local Agent', expertise: ['chat'], sessionId: 'alice-1', researchEnabled: false });
+    const lounge = rooms.create('Lounge', undefined);
+    rooms.addMember(lounge.id, 'alice-1');
+    // By name alone: refused, in any case, whoever asks.
+    expect(() => service.prepareSpawn({ owner: undefined, name: 'alice' })).toThrow('existing employee');
+    expect(() => service.prepareSpawn({ owner: undefined, parentSessionId: 'parent-agent', name: 'Alice' })).toThrow('existing employee');
+    // An unrelated agent may not replace her; the owner may, and so may her own current session.
+    expect(() => service.prepareSpawn({ owner: undefined, parentSessionId: 'parent-agent', employeeId: alice.id })).toThrow('own session');
+    expect(() => service.prepareSpawn({ owner: undefined, employeeId: 'nobody' })).toThrow('Unknown employee');
+    for (const [parent, to] of [[undefined, 'alice-2'], ['alice-2', 'alice-3']] as const) {
+      const plan = service.prepareSpawn({ owner: undefined, parentSessionId: parent, employeeId: alice.id });
+      expect(plan.name).toBe('Alice');
+      await service.completeSpawn(to, plan);
+      expect(service.view().employees).toHaveLength(1);
+      expect(service.view().employees[0].sessionId).toBe(to);
+      expect(service.view().temporaryAgents.filter((a) => a.name === 'Alice')).toHaveLength(0);
+      expect(rooms.get(lounge.id)?.members.map((m) => m.sessionId)).toEqual([to]);
+    }
+  });
+
   it('invites a registered expert only for owned rooms and authorized member agents', async () => {
     const employee = await hire();
     const room = rooms.create('Research', undefined);
