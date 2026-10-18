@@ -242,9 +242,9 @@ export function registerBoardRoutes(app: FastifyInstance, ctx: SessionPort & Par
       const note = state.plans[row.label] ?? { name: row.label, who: '' };
       const weekStart = row.pace.weekStart;
       const reset = row.pace.weekReset;
-      const samples = ((history as Record<string, UsageSample[]>)[row.id] ?? []).filter((s) => weekStart === null || s.at >= weekStart);
+      const samples = ((history as Record<string, UsageSample[]>)[row.id] ?? []).filter((s) => !s.misattributed && (weekStart === null || s.at >= weekStart));
       const points = samples.map((s, i) => {
-        const rate = burnRate(samples.slice(0, i + 1), s.at, weekStart);
+        const rate = burnRate(samples.slice(0, i + 1), s.at, weekStart, reset);
         const proj = rate === null || reset === null ? null : Math.round((s.weekly + (rate * (reset - s.at)) / HOUR) * 10) / 10;
         return { t: s.at, used: s.weekly, rate, proj };
       });
@@ -258,6 +258,10 @@ export function registerBoardRoutes(app: FastifyInstance, ctx: SessionPort & Par
         weekStart,
         reset,
         runsOut: row.pace.runsOutAt,
+        burnBasis: row.pace.burnBasis,
+        remainingPct: row.pace.remainingPct,
+        hoursToReset: row.pace.hoursToReset,
+        sustainablePctPerHour: row.pace.sustainablePctPerHour,
         at: row.updatedAt,
         points,
       };

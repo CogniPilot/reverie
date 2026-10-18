@@ -177,6 +177,12 @@ Object.assign(CodemanApp.prototype, {
     } else {
       fact('at reset', p.projected === null ? '-' : `${Math.round(p.projected)}%`);
     }
+    if (a.usageSource === 'statusline' || a.usageSource === 'history') {
+      const asOf = new Date(a.usageAsOf).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+      fact(a.usageStale ? 'stale, as of' : 'as of', asOf);
+    } else if (a.provider === 'anthropic' && p.weekly === null && p.fiveHour === null) {
+      fact('usage', 'no report yet');
+    }
     if (reset) fact('resets', reset.toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' }));
     card.append(facts);
     card.append(this._planResets(a));
@@ -481,7 +487,10 @@ Object.assign(CodemanApp.prototype, {
     const state = { dialog, status, grid, panels: new Map(), timer: null };
     this._signInAll = state;
     closeBtn.onclick = () => this._closeSignInAll();
-    dialog.addEventListener('cancel', (e) => { e.preventDefault(); this._closeSignInAll(); });
+    dialog.addEventListener('cancel', (e) => {
+      e.preventDefault();
+      this._closeSignInAll();
+    });
     dialog.showModal();
     const res = await this._chatApi('/api/plans/login-all', { method: 'POST' });
     if (this._signInAll !== state) return;
@@ -523,7 +532,7 @@ Object.assign(CodemanApp.prototype, {
     const settled = ['signed_in', 'failed', 'timeout', 'cancelled'].includes(view.state);
     if (settled) {
       p.settled = true;
-      const all = [...(this._signInAll?.panels.values() || [])].every(x => x.settled);
+      const all = [...(this._signInAll?.panels.values() || [])].every((x) => x.settled);
       if (all && this._signInAll?.timer) {
         clearInterval(this._signInAll.timer);
         this._signInAll.timer = null;
@@ -550,8 +559,15 @@ Object.assign(CodemanApp.prototype, {
         const copy = el('button', 'plans-btn', 'Copy');
         copy.type = 'button';
         copy.onclick = async () => {
-          try { await navigator.clipboard.writeText(view.url); copy.textContent = '✓'; } catch { copy.textContent = 'Fail'; }
-          setTimeout(() => { copy.textContent = 'Copy'; }, 1500);
+          try {
+            await navigator.clipboard.writeText(view.url);
+            copy.textContent = '✓';
+          } catch {
+            copy.textContent = 'Fail';
+          }
+          setTimeout(() => {
+            copy.textContent = 'Copy';
+          }, 1500);
         };
         row.append(open, copy);
         step.append(row);
@@ -569,8 +585,15 @@ Object.assign(CodemanApp.prototype, {
         const copy = el('button', 'plans-btn', 'Copy');
         copy.type = 'button';
         copy.onclick = async () => {
-          try { await navigator.clipboard.writeText(view.code); copy.textContent = '✓'; } catch { copy.textContent = 'Fail'; }
-          setTimeout(() => { copy.textContent = 'Copy'; }, 1500);
+          try {
+            await navigator.clipboard.writeText(view.code);
+            copy.textContent = '✓';
+          } catch {
+            copy.textContent = 'Fail';
+          }
+          setTimeout(() => {
+            copy.textContent = 'Copy';
+          }, 1500);
         };
         row.append(copy);
         step.append(row);
@@ -592,9 +615,13 @@ Object.assign(CodemanApp.prototype, {
           const code = input.value.trim();
           if (!code || !p.view?.id) return;
           send.disabled = true;
-          const res = await this._chatApi(`/api/plans/logins/${encodeURIComponent(p.view.id)}/code`, { method: 'POST', body: { code } });
+          const res = await this._chatApi(`/api/plans/logins/${encodeURIComponent(p.view.id)}/code`, {
+            method: 'POST',
+            body: { code },
+          });
           send.disabled = false;
-          if (this._signInAll) this._renderSignInPanel(res.ok ? res.data : { ...p.view, state: 'failed', message: res.error }, p);
+          if (this._signInAll)
+            this._renderSignInPanel(res.ok ? res.data : { ...p.view, state: 'failed', message: res.error }, p);
         };
         parts.push(step);
       }
@@ -612,10 +639,13 @@ Object.assign(CodemanApp.prototype, {
     for (const [id, p] of s.panels) {
       if (p.settled || p.polling) continue;
       p.polling = true;
-      this._chatApi(`/api/plans/logins/${encodeURIComponent(id)}`).then(res => {
+      this._chatApi(`/api/plans/logins/${encodeURIComponent(id)}`).then((res) => {
         p.polling = false;
         if (this._signInAll !== s) return;
-        this._renderSignInPanel(res.ok ? res.data : { ...p.view, state: 'failed', message: 'Sign-in helper stopped.' }, p);
+        this._renderSignInPanel(
+          res.ok ? res.data : { ...p.view, state: 'failed', message: 'Sign-in helper stopped.' },
+          p
+        );
       });
     }
   },

@@ -44,3 +44,13 @@ export function setLatestAccountPlanUsage(value: SubscriptionUsage): Record<stri
   latest = { ...(latest ?? {}), accounts: [...accounts.values()] };
   return latest;
 }
+
+/** The newest status-line report for one account, or undefined before the first report of this process. */
+export function getLatestAccountPlanUsage(id: string): SubscriptionUsage | undefined {
+  return accounts.get(id);
+}
+
+/** Test hook: forget every account report. */
+export function resetLatestAccountPlanUsage(): void {
+  accounts.clear();
+}
