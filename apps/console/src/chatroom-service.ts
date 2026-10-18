@@ -306,29 +306,6 @@ export class ChatroomService {
     return () => this.messageListeners.delete(listener);
   }
 
-  /** Persist ingress before advancing the external cursor. Replayed pages dedupe here. */
-  async externalMessage(
-    roomId: string,
-    from: Extract<ChatSender, { kind: 'external' }>,
-    text: string,
-    agentSessionId: string
-  ): Promise<ChatMessage> {
-    const room = this.store.require(roomId);
-    const existing = room.messages.find(
-      (m) =>
-        m.from.kind === 'external' &&
-        m.from.provider === from.provider &&
-        m.from.channelId === from.channelId &&
-        m.from.messageId === from.messageId &&
-        m.from.connectionId === from.connectionId
-    );
-    const message = existing ?? this.post(roomId, from, text, [agentSessionId]);
-    const persisted = this.persistChain.then(() => this.save());
-    this.persistChain = persisted.catch(() => {});
-    await persisted;
-    return message;
-  }
-
   rooms(): ChatRoom[] {
     return this.store.list();
   }

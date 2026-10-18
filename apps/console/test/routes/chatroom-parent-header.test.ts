@@ -13,8 +13,6 @@ import { createMockSession, type MockRouteContext } from '../mocks/index.js';
 import { ChatroomService } from '../../src/chatroom-service.js';
 import { ChatFileStore } from '../../src/chatroom-files.js';
 import { registerChatroomRoutes } from '../../src/web/routes/chatroom-routes.js';
-import { registerExternalChatRoutes } from '../../src/web/routes/external-chat-routes.js';
-import Fastify from 'fastify';
 
 const A = 'aaaaaaaa-0000-4000-8000-000000000001';
 const B = 'bbbbbbbb-0000-4000-8000-000000000002';
@@ -130,18 +128,5 @@ describe('chatroom routes: unresolved parent-session header', () => {
   it('does not touch routes outside the chatroom prefix', async () => {
     const res = await app.inject({ method: 'GET', url: '/api/elsewhere', headers: as('not-a-session') });
     expect(res.statusCode).toBe(200);
-  });
-});
-
-describe('external chat routes: any parent-session header is an agent', () => {
-  it.each([
-    ['a live-looking id', A],
-    ['an empty header', ''],
-  ])('refuses %s', async (_label, header) => {
-    const app = Fastify();
-    registerExternalChatRoutes(app, {} as never, {} as never);
-    const res = await app.inject({ url: '/api/external-chat', headers: { 'x-codeman-parent-session': header } });
-    expect(res.statusCode).toBe(403);
-    await app.close();
   });
 });

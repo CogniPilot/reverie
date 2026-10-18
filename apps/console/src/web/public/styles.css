@@ -23240,15 +23240,13 @@ html.plans-open { overflow: hidden; }
   padding-right: calc(16px + var(--fold-inline-end));
   padding-bottom: calc(16px + var(--fold-block-end));
 }
-.fleet-company-dialog,
-.fleet-external-chat-dialog {
+.fleet-company-dialog {
   box-sizing: border-box;
   width: min(900px, calc(100vw - 32px - var(--fold-inline-end, 0px)));
   max-height: calc(100dvh - 32px - var(--fold-block-end, 0px));
   inset-inline-end: var(--fold-inline-end, 0px);
   inset-block-end: var(--fold-block-end, 0px);
 }
-.fleet-external-chat-dialog { max-width: 720px; }
 
 /* "Message <agent>" box under an agent terminal (session-ui.js syncMessageAgentBar). */
 .message-agent-bar { display: flex; gap: 6px; padding: 6px 8px; background: var(--bg-secondary, #1c222b); border-top: 1px solid var(--border, #2b3441); }
