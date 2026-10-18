@@ -437,7 +437,6 @@ Object.assign(CodemanApp.prototype, {
     document.getElementById('appSettingsMcpSync').checked = this._mcpSyncSavedOn;
     this.applyMcpSyncVisibility();
     this._applyDoctorAdminGate();
-    this.loadWebhook();
     // Read My Mind: synced, default OFF (opt-in; capture + prediction cost real tokens).
     document.getElementById('appSettingsReadMyMind').checked = settings.readMyMindEnabled === true;
     document.getElementById('appSettingsUltracodeFloatingWindows').checked =
@@ -1283,134 +1282,6 @@ Object.assign(CodemanApp.prototype, {
       ? `<p>No MCP config support for: ${data.unsupported.map(escapeHtml).join(', ')}</p>`
       : '';
     show(`<ul>${rows.join('')}</ul>${conflicts}${disabled}${unsupported}`);
-  },
-
-  /**
-   * Webhook notifications (Settings → Notifications). Server-side config behind /api/webhook, not a
-   * settings-payload field: the URL is a secret, so it never round-trips through settings.json or
-   * this page. The URL box is write-only; the status line shows scheme + host only.
-   *
-   * Three ways to save, one PUT: the group's own Save, Send test (saves pending edits first, so it
-   * never tests the old URL while the box shows a new one), and the modal's main Save, which calls
-   * saveWebhook() beside the settings PUT the same way it saves the model config
-   * (saveModelConfigFromSettings). `_webhookLoaded` is what loadWebhook() put on screen, so
-   * `_webhookPending()` can tell an edited group from an untouched one.
-   */
-  _webhookSay(text, bad = false) {
-    const out = document.getElementById('webhookResult');
-    if (!out) return;
-    out.textContent = text;
-    out.style.display = text ? 'block' : 'none';
-    out.style.color = bad ? 'var(--danger, #e5534b)' : '';
-  },
-
-  async loadWebhook() {
-    const group = document.getElementById('webhookGroup');
-    if (!group) return;
-    const res = await this._api('/api/webhook');
-    if (!res || !res.ok) {
-      this._webhookLoaded = null;
-      group.style.display = 'none'; // not an admin in multi-user mode, or the server predates the route
-      return;
-    }
-    let body = null;
-    try { body = await res.json(); } catch { /* leave hidden */ }
-    if (!body || body.success === false) { this._webhookLoaded = null; group.style.display = 'none'; return; }
-    const d = body.data;
-    group.style.display = '';
-    document.getElementById('webhookEnabled').checked = d.enabled === true;
-    document.getElementById('webhookKind').value = d.kind;
-    document.getElementById('webhookScope').value = d.scope;
-    const url = document.getElementById('webhookUrl');
-    url.value = '';
-    url.placeholder = d.hasUrl ? 'Saved. Paste a new URL to replace it' : 'https://ntfy.sh/your-topic';
-    document.getElementById('webhookUrlHint').textContent = d.hasUrl ? `Saved: ${d.urlMasked}` : 'Nothing saved yet.';
-    const clearBtn = document.getElementById('webhookClearBtn');
-    if (clearBtn) clearBtn.style.display = d.hasUrl ? '' : 'none';
-    // Read back from the controls, so a value the <select> does not offer compares as what is shown.
-    this._webhookLoaded = {
-      enabled: document.getElementById('webhookEnabled').checked,
-      kind: document.getElementById('webhookKind').value,
-      scope: document.getElementById('webhookScope').value,
-    };
-    if (d.lastResult) {
-      const when = new Date(d.lastResult.at).toLocaleString();
-      this._webhookSay(
-        d.lastResult.ok ? `Last delivery succeeded (${when}).` : `Last delivery failed (${when}): ${d.lastResult.error}`,
-        !d.lastResult.ok
-      );
-    } else {
-      this._webhookSay('');
-    }
-  },
-
-  /** True when the visible webhook group differs from what loadWebhook() last showed. */
-  _webhookPending() {
-    const group = document.getElementById('webhookGroup');
-    const loaded = this._webhookLoaded;
-    if (!group || group.style.display === 'none' || !loaded) return false;
-    return (
-      document.getElementById('webhookUrl').value.trim() !== '' ||
-      document.getElementById('webhookEnabled').checked !== loaded.enabled ||
-      document.getElementById('webhookKind').value !== loaded.kind ||
-      document.getElementById('webhookScope').value !== loaded.scope
-    );
-  },
-
-  /** PUT the group's state. Resolves to '' on success, else the error (also shown in the group). */
-  async saveWebhook() {
-    const payload = {
-      enabled: document.getElementById('webhookEnabled').checked,
-      kind: document.getElementById('webhookKind').value,
-      scope: document.getElementById('webhookScope').value,
-    };
-    const url = document.getElementById('webhookUrl').value.trim();
-    if (url) payload.url = url; // blank = keep the saved one (Remove URL is the way to clear it)
-    const res = await this._api('/api/webhook', { method: 'PUT', body: payload });
-    let body = null;
-    try { body = res ? await res.json() : null; } catch { /* fall through */ }
-    if (!res || !res.ok || !body || body.success === false) {
-      const error = body?.error || 'Could not save the webhook.';
-      this._webhookSay(error, true);
-      return error;
-    }
-    await this.loadWebhook();
-    this._webhookSay('Saved.');
-    return '';
-  },
-
-  /** Delete the saved URL from the server (the API clears on `url: ""`), which also turns the channel off. */
-  async clearWebhook() {
-    if (!confirm('Remove the saved webhook URL from the server? Webhook alerts stop until you save a new one.')) return;
-    const res = await this._api('/api/webhook', { method: 'PUT', body: { url: '', enabled: false } });
-    let body = null;
-    try { body = res ? await res.json() : null; } catch { /* fall through */ }
-    if (!res || !res.ok || !body || body.success === false) {
-      this._webhookSay(body?.error || 'Could not remove the webhook URL.', true);
-      return;
-    }
-    await this.loadWebhook();
-    this._webhookSay('Webhook URL removed.');
-  },
-
-  async testWebhook() {
-    const btn = document.getElementById('webhookTestBtn');
-    if (btn) btn.disabled = true;
-    try {
-      if (this._webhookPending() && (await this.saveWebhook())) return; // the save's error is already shown
-      this._webhookSay('Sending…');
-      const res = await this._apiPost('/api/webhook/test', {});
-      let body = null;
-      try { body = res ? await res.json() : null; } catch { /* fall through */ }
-      if (!res || !res.ok || !body || body.success === false) {
-        this._webhookSay(body?.error || 'Could not send the test.', true);
-        return;
-      }
-      const r = body.data;
-      this._webhookSay(r.ok ? 'Test sent. Check your phone or channel.' : `Delivery failed: ${r.error}`, !r.ok);
-    } finally {
-      if (btn) btn.disabled = false;
-    }
   },
 
   /**
@@ -2883,7 +2754,6 @@ Object.assign(CodemanApp.prototype, {
       shortcutOverrides: _sco,
       ...serverSettings
     } = settings;
-    let webhookError = '';
     let serverSaved = false;
     try {
       const res = await this._apiPut('/api/settings', {
@@ -2913,16 +2783,7 @@ Object.assign(CodemanApp.prototype, {
       // Save model configuration separately
       await this.saveModelConfigFromSettings();
 
-      // The webhook is server state in its own 0600 file (its URL is a secret, kept out of
-      // settings.json), so like the model config above it is saved beside the settings PUT, not in
-      // it. Only when the group was edited: an untouched group must not re-PUT. A refusal (bad URL,
-      // enabled with no URL) keeps the modal open below, with the pasted URL still in the box.
-      webhookError = this._webhookPending() ? await this.saveWebhook() : '';
-      if (webhookError) {
-        this.showToast(`Settings saved, but not the webhook: ${webhookError}`, 'warning');
-      } else {
-        this.showToast(keepOpen ? 'Settings applied' : 'Settings saved', 'success');
-      }
+      this.showToast(keepOpen ? 'Settings applied' : 'Settings saved', 'success');
 
       // Show tunnel-specific feedback if toggled on
       if (settings.tunnelEnabled) {
@@ -2934,14 +2795,10 @@ Object.assign(CodemanApp.prototype, {
     }
 
     // Only when the settings PUT landed: after a 400 or a dropped connection the server still has the
-    // old flags, and a webhook-only failure still saved the rest, so this runs ahead of that branch.
+    // old flags. Refresh only after a successful settings save.
     if (keepOpen && serverSaved) this._refreshSettingsAfterApply(settings);
 
-    if (webhookError) {
-      document.getElementById('webhookGroup')?.scrollIntoView({ block: 'center' });
-    } else if (!keepOpen) {
-      this.closeAppSettings();
-    }
+    if (!keepOpen) this.closeAppSettings();
 
     // The gesture overlay is injected at page render (server reads
     // gestureControlEnabled from settings.json), so a change only takes effect on

@@ -60,9 +60,6 @@ import {
 import { rebootRestoreRegistry } from './reboot-restore-registry.js';
 import { dataPath, getDataDir, CODEMAN_INSTANCE, resolveTmuxSocketName } from '../config/instance.js';
 import { getAugmentedPath, getClaudeBinaryPath } from '../utils/claude-cli-resolver.js';
-import { WebhookNotifier, readWebhookConfig } from '../webhook-notify.js';
-import type { WebhookUrgency } from '../types/push.js';
-import { webviewFetch } from './webview-egress.js';
 import { readRemoteHosts, rehydrateRemoteHostFields } from '../remote-hosts.js';
 import type { RemoteWakeRegistry } from '../remote-wake.js';
 import { normalizeBasePath, stripBasePath, joinBasePath } from '../config/base-path.js';
@@ -237,7 +234,6 @@ import {
   registerWebviewRoutes,
   registerTabLayoutRoutes,
   registerMcpSyncRoutes,
-  registerWebhookRoutes,
   registerDoctorRoutes,
   registerCustomModelRoutes,
   refreshAllCustomModelHosts,
@@ -455,8 +451,6 @@ export class WebServer extends EventEmitter {
   private hookSecretFailures: StaleExpirationMap<string, number> | null = null;
   private userFailures: StaleExpirationMap<string, number> | null = null;
   private pushStore: PushSubscriptionStore = new PushSubscriptionStore();
-  /** ntfy / Slack / Discord / generic webhook for the push events; config in webhook.json (0600). */
-  private webhookNotifier = new WebhookNotifier(() => readWebhookConfig(getDataDir()), webviewFetch);
   private teamWatcher: TeamWatcher = new TeamWatcher();
   private _orchestratorLoop: import('../orchestrator-loop.js').OrchestratorLoop | null = null;
   private readonly titleHostname: string;
@@ -1279,11 +1273,6 @@ export class WebServer extends EventEmitter {
     registerWebviewRoutes(this.app, ctx, this.basePath);
     registerTabLayoutRoutes(this.app, ctx);
     registerMcpSyncRoutes(this.app);
-    registerWebhookRoutes(this.app, {
-      notifier: this.webhookNotifier,
-      configDir: getDataDir(),
-      hostTitle: () => this.windowTitle,
-    });
     registerDoctorRoutes(this.app);
     registerCustomModelRoutes(this.app);
     registerCliRegistryRoutes(this.app);
@@ -3041,21 +3030,6 @@ export class WebServer extends EventEmitter {
     const sessionId = (data.sessionId as string) || '';
     const body = WebServer.pushBodyText(event, data, sessionName);
 
-    // Webhook channel (ntfy / Slack / Discord / generic): independent of Web Push, so it runs BEFORE
-    // the "no subscriptions" return below, which is exactly the headless-server case it exists for.
-    // Fire-and-forget; WebhookNotifier dedupes, caps what is in flight and never throws.
-    void this.webhookNotifier
-      .notify({
-        event,
-        title: template.title,
-        body,
-        urgency: template.urgency as WebhookUrgency,
-        sessionId: sessionId || undefined,
-        sessionName: sessionName || undefined,
-        host: this.windowTitle,
-      })
-      .catch(() => undefined);
-
     const subscriptions = this.pushStore.getAll();
     if (subscriptions.length === 0) return;
 
@@ -3129,7 +3103,7 @@ export class WebServer extends EventEmitter {
     }
   }
 
-  /** The notification body for an event (shared by Web Push and the webhook channel). */
+  /** The notification body for a Web Push event. */
   private static pushBodyText(event: string, data: Record<string, unknown>, sessionName: string): string {
     let body = sessionName ? `[${sessionName}]` : '';
     if (event === SseEvent.SessionError && data.error) {

@@ -19,6 +19,7 @@
  * why these are a runnable suite (`npm run test:browser`) rather than skipped.
  */
 export const BROWSER_TEST_GLOBS = [
+  'test/webhook-removal.browser.test.ts',
   'test/company-ui.browser.test.ts',
   'test/tab-rail-resize.browser.test.ts',
   'test/tab-activation.browser.test.ts',
@@ -40,7 +41,6 @@ export const BROWSER_TEST_GLOBS = [
   'test/terminal-touch-paging.browser.test.ts',
   'test/shift-enter-keypress.browser.test.ts',
   'test/key-tester.browser.test.ts',
-  'test/webhook-settings.browser.test.ts',
   'test/case-custom-path.browser.test.ts',
   'test/doctor-settings.browser.test.ts',
   'test/git-status.browser.test.ts',
