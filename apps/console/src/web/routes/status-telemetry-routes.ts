@@ -29,13 +29,41 @@ import {
 } from '../../usage-telemetry.js';
 import { SessionPromptCache, SessionStatusTelemetry } from '../sse-events.js';
 import { setLatestPlanUsage, setLatestAccountPlanUsage } from '../plan-usage-latest.js';
+import { accountForSession, planCatalogue, type PlanSessionLike } from '../../plan-accounts.js';
 import type { SessionPort, EventPort } from '../ports/index.js';
 import { getCli } from '../../config/cli-registry/index.js';
+
+type RelocatedAccount = { id: string; label: string; provider: 'anthropic' };
+
+// planCatalogue reads the profile directory and resolves real paths; a statusline post can arrive on every message.
+const CATALOGUE_TTL_MS = 60_000;
+let cachedCatalogue: { at: number; accounts: Awaited<ReturnType<typeof planCatalogue>> } | null = null;
+async function catalogue() {
+  if (!cachedCatalogue || Date.now() - cachedCatalogue.at > CATALOGUE_TTL_MS) cachedCatalogue = { at: Date.now(), accounts: await planCatalogue() };
+  return cachedCatalogue.accounts;
+}
+
+/**
+ * Where a profile-less session's report belongs when it carries a CLAUDE_CONFIG_DIR override: the non-default account it resolves
+ * to, 'default' when it resolves to the default directory, or 'unknown' when it matches no account (the report is then filed
+ * nowhere, never under another account's series). undefined means no override.
+ */
+async function relocatedAccount(session: PlanSessionLike): Promise<RelocatedAccount | 'default' | 'unknown' | undefined> {
+  if (typeof session.getEnvOverridesForPersist !== 'function' || !session.getEnvOverridesForPersist()?.CLAUDE_CONFIG_DIR) return undefined;
+  try {
+    const account = await accountForSession(session, await catalogue());
+    if (!account || account.provider !== 'anthropic') return 'unknown';
+    return account.isDefault ? 'default' : { id: account.id, label: account.label, provider: 'anthropic' };
+  } catch {
+    return 'unknown';
+  }
+}
 
 export function registerStatusTelemetryRoutes(app: FastifyInstance, ctx: SessionPort & EventPort): void {
   // Last broadcast telemetry signature per session — the statusline fires on
   // every assistant message, so we only rebroadcast when the value changes.
   const lastSig = new Map<string, string>();
+  const warnedUnknown = new Set<string>();
 
   app.post('/api/status-telemetry', async (req, reply) => {
     const { sessionId, data } = parseBody(StatusTelemetrySchema, req.body);
@@ -89,17 +117,30 @@ export function registerStatusTelemetryRoutes(app: FastifyInstance, ctx: Session
           }
         }
         const update = { sessionId, ...telemetry };
-        const profile = session?.subscriptionProfile ?? {
-          id: 'anthropic-default',
-          label: 'Default Claude',
-          provider: 'anthropic' as const,
-        };
-        if (!session?.subscriptionProfile) setLatestPlanUsage(update);
-        const snapshot =
-          session?.subscriptionProfile?.provider === 'anthropic'
+        // A session without a profile may still run on another account through its CLAUDE_CONFIG_DIR override; its report belongs
+        // to that account, never to the default one (the default series would otherwise alternate between two logins). An
+        // override that matches no known account is filed nowhere: the session's own broadcast still goes out, once-warned.
+        const found = session && !session.subscriptionProfile ? await relocatedAccount(session) : undefined;
+        const relocated = typeof found === 'object' ? found : undefined;
+        if (found === 'unknown' && !warnedUnknown.has(sessionId)) {
+          warnedUnknown.add(sessionId);
+          console.warn(`[status-telemetry] session ${sessionId} has a CLAUDE_CONFIG_DIR that matches no known account; its plan usage is not recorded`);
+        }
+        const profile = session?.subscriptionProfile ??
+          relocated ?? {
+            id: 'anthropic-default',
+            label: 'Default Claude',
+            provider: 'anthropic' as const,
+          };
+        const ownAccount = Boolean(relocated) || session?.subscriptionProfile?.provider === 'anthropic';
+        const unfiled = found === 'unknown';
+        if (!session?.subscriptionProfile && !relocated && !unfiled) setLatestPlanUsage(update);
+        const snapshot = unfiled
+          ? update
+          : ownAccount
             ? setLatestAccountPlanUsage({ ...profile, status: 'ready', updatedAt: Date.now(), usage: telemetry })
             : setLatestPlanUsage(update); // replayed in the SSE init snapshot for fresh loads
-        if (!session?.subscriptionProfile)
+        if (!session?.subscriptionProfile && !relocated && !unfiled)
           setLatestAccountPlanUsage({ ...profile, status: 'ready', updatedAt: Date.now(), usage: telemetry });
         ctx.broadcast(SessionStatusTelemetry, snapshot);
       }

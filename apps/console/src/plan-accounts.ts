@@ -18,7 +18,7 @@
 import { execFile } from 'node:child_process';
 import fs from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { basename, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import {
   defaultSubscriptionProfiles,
@@ -28,8 +28,9 @@ import {
   type SubscriptionProvider,
 } from './subscription-profiles.js';
 import type { SubscriptionUsage } from './subscription-usage.js';
+import { getLatestAccountPlanUsage } from './web/plan-usage-latest.js';
 import type { BankedResets } from './usage-telemetry.js';
-import { addSample, planPace, suggestAccount, type PlanPace, type UsageSample } from './plan-pace.js';
+import { addSample, planPace, suggestAccount, toMs, type PlanPace, type UsageSample } from './plan-pace.js';
 
 export interface PlanAccount {
   /** The profile id when there is one, else `acct-<provider>-<name>`. */
@@ -51,6 +52,9 @@ export interface PlanSession {
   status: string;
 }
 
+/** Status-line numbers older than this are shown as stale, with their as-of time. */
+export const USAGE_STALE_MS = 30 * 60 * 1000;
+
 export interface PlanRow {
   id: string;
   label: string;
@@ -61,6 +65,12 @@ export interface PlanRow {
   signedIn: boolean;
   status: SubscriptionUsage['status'];
   updatedAt: number;
+  /** Where the usage numbers came from: Claude Code's status line, the last saved sample, or the provider read. */
+  usageSource: 'statusline' | 'history' | 'provider' | null;
+  /** When the numbers were reported (epoch ms); null when there are none. */
+  usageAsOf: number | null;
+  /** True when the numbers are older than `USAGE_STALE_MS`. */
+  usageStale: boolean;
   pace: PlanPace;
   /** Codex banked resets; null when not read (shown as "unknown"), and always null for Claude. */
   bankedResets: BankedResets | null;
@@ -269,7 +279,35 @@ export class PlanService {
     } catch {
       this.history = {};
     }
+    if (await this.applyMarks(this.history)) this.saveHistory();
     return this.history;
+  }
+
+  /**
+   * `plan-usage-marks.json` beside the history: a list of `{ account, at }` naming readings that were filed under the wrong
+   * account. Read once, as the history loads; each exact match gets `misattributed: true` in memory and is saved through the
+   * normal path. The file is never written here, a missing or unreadable one is ignored, and a second load changes nothing.
+   * Returns whether any sample changed.
+   */
+  private async applyMarks(history: Record<string, UsageSample[]>): Promise<boolean> {
+    let marks: unknown;
+    try {
+      marks = JSON.parse(await fs.readFile(join(dirname(this.deps.historyFile), 'plan-usage-marks.json'), 'utf8'));
+    } catch {
+      return false;
+    }
+    if (!Array.isArray(marks)) return false;
+    let changed = false;
+    for (const mark of marks as { account?: unknown; at?: unknown }[]) {
+      if (!mark || typeof mark.account !== 'string' || typeof mark.at !== 'number' || !Array.isArray(history[mark.account])) continue;
+      for (const sample of history[mark.account]) {
+        if (sample && sample.at === mark.at && !sample.misattributed) {
+          sample.misattributed = true;
+          changed = true;
+        }
+      }
+    }
+    return changed;
   }
 
   private saveHistory(): void {
@@ -313,10 +351,48 @@ export class PlanService {
     const coordinators = new Set(this.deps.coordinatorIds());
     let changed = false;
     const accounts = catalogue.map((a, i): PlanRow => {
-      const reading = readings[i];
+      let reading = readings[i];
+      let usageSource: PlanRow['usageSource'] = reading.usage ? 'provider' : null;
+      let usageAsOf: number | null = reading.usage ? reading.updatedAt : null;
+      let seeded = false;
+      if (a.provider === 'anthropic' && !reading.usage && reading.status === 'ready') {
+        // Claude Code reports its own limits through its status line; use the newest report from any
+        // session on this account. Nothing is fetched. After a restart, fall back to the last saved sample.
+        const reported = getLatestAccountPlanUsage(a.id);
+        if (reported?.usage) {
+          reading = { ...reading, usage: reported.usage };
+          usageSource = 'statusline';
+          usageAsOf = reported.updatedAt;
+        } else {
+          const last = (history[a.id] ?? []).at(-1);
+          if (last) {
+            // The saved sample keeps its reset, so a restart does not blank the period; a reset already past means a new
+            // period whose end is not known yet.
+            const savedReset = last.resetAt !== undefined && last.resetAt > now ? last.resetAt : Number.NaN;
+            reading = { ...reading, usage: { sevenDay: { usedPercentage: last.weekly, resetAt: savedReset } } };
+            usageSource = 'history';
+            usageAsOf = last.at;
+            seeded = true;
+          }
+        }
+      }
       const weekly = reading.usage?.sevenDay?.usedPercentage;
-      if (Number.isFinite(weekly)) {
-        history[a.id] = addSample(history[a.id] ?? [], { at: now, weekly: weekly as number });
+      const sampleReset = toMs(reading.usage?.sevenDay?.resetAt);
+      const withReset = (weeklyValue: number): UsageSample => ({
+        at: now,
+        weekly: weeklyValue,
+        ...(sampleReset !== null ? { resetAt: sampleReset } : {}),
+      });
+      if (
+        !seeded &&
+        usageSource !== 'provider' &&
+        Number.isFinite(weekly) &&
+        now - (usageAsOf ?? 0) <= USAGE_STALE_MS
+      ) {
+        history[a.id] = addSample(history[a.id] ?? [], withReset(weekly as number));
+        changed = true;
+      } else if (usageSource === 'provider' && Number.isFinite(weekly)) {
+        history[a.id] = addSample(history[a.id] ?? [], withReset(weekly as number));
         changed = true;
       }
       const sessions = sessionsByAccount.get(a.id) ?? [];
@@ -330,6 +406,9 @@ export class PlanService {
         signedIn: reading.status !== 'signed-out',
         status: reading.status,
         updatedAt: reading.updatedAt,
+        usageSource,
+        usageAsOf,
+        usageStale: usageAsOf !== null && usageSource !== 'provider' && now - usageAsOf > USAGE_STALE_MS,
         pace: planPace({
           signedIn: reading.status !== 'signed-out',
           fiveHour: reading.usage?.fiveHour ?? null,

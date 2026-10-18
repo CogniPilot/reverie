@@ -106,6 +106,83 @@ describe('burnRate', () => {
   });
 });
 
+describe('burn rate needs an hour of readings from one period', () => {
+  const now = START + 40 * H;
+  it('gives no rate from two readings minutes apart, however far apart their values are (27% then 61%)', () => {
+    const samples = [
+      { at: now - 12 * 60 * 1000, weekly: 27 },
+      { at: now, weekly: 61 },
+    ];
+    expect(burnRate(samples, now, START, RESET)).toBeNull();
+    const p = planPace({ signedIn: true, sevenDay: { usedPercentage: 61, resetAt: RESET }, samples, now });
+    expect(p.burnPerHour).toBeNull();
+    expect(p.burnBasis).toBe('average');
+    expect(p.runsOutAt === null || p.runsOutAt > now + 24 * H).toBe(true);
+  });
+
+  it('gives a rate from an hour or more of readings', () => {
+    expect(burnRate([{ at: now - H, weekly: 50 }, { at: now, weekly: 51 }], now, START, RESET)).toBe(1);
+  });
+
+  it('ignores readings that belong to another weekly period (another account misfiled here)', () => {
+    const other = RESET - 2 * 24 * H;
+    const samples = [
+      { at: now - 3 * H, weekly: 25, resetAt: other },
+      { at: now - H, weekly: 59, resetAt: RESET },
+      { at: now, weekly: 60, resetAt: RESET },
+    ];
+    expect(burnRate(samples, now, START, RESET)).toBe(1);
+    // Readings saved before resets were recorded still count.
+    expect(burnRate([{ at: now - 2 * H, weekly: 10 }, { at: now, weekly: 12 }], now, START, RESET)).toBe(1);
+  });
+
+  it('uses only the run after the last drop: 59, 27, 61, 62 over 3 h gives the 61 to 62 run, or null under an hour', () => {
+    const samples = [
+      { at: now - 3 * H, weekly: 59 },
+      { at: now - 2 * H, weekly: 27 },
+      { at: now - H, weekly: 61 },
+      { at: now, weekly: 62 },
+    ];
+    expect(burnRate(samples, now, START, RESET)).toBe(1);
+    const short = [
+      { at: now - 3 * H, weekly: 59 },
+      { at: now - 90 * 60 * 1000, weekly: 27 },
+      { at: now - 40 * 60 * 1000, weekly: 61 },
+      { at: now, weekly: 62 },
+    ];
+    expect(burnRate(short, now, START, RESET)).toBeNull();
+  });
+
+  it('skips samples marked misattributed, and fits a slope so one noisy reading cannot swing the rate', () => {
+    const marked = [
+      { at: now - 3 * H, weekly: 27, misattributed: true },
+      { at: now - 2 * H, weekly: 60 },
+      { at: now, weekly: 62 },
+    ];
+    expect(burnRate(marked, now, START, RESET)).toBe(1);
+    const noisy = [0, 1, 2, 3, 4].map((i) => ({ at: now - (4 - i) * H, weekly: 50 + i + (i === 4 ? 2 : 0) }));
+    // first-to-last would say 1.5/h; the fit over the five readings says 1.4.
+    expect(burnRate(noisy, now, START, RESET)).toBe(1.4);
+  });
+
+  it('says there is no basis early in the week instead of extrapolating the first hours', () => {
+    const early = START + 3 * H;
+    const p = planPace({ signedIn: true, sevenDay: { usedPercentage: 9, resetAt: RESET }, samples: [], now: early });
+    expect(p.burnBasis).toBeNull();
+    expect(p.projected).toBeNull();
+    expect(p.runsOutAt).toBeNull();
+  });
+
+  it('reports what is left, the hours to the reset and the steady rate that spends exactly the rest', () => {
+    const p = planPace({ signedIn: true, sevenDay: { usedPercentage: 61, resetAt: RESET }, samples: [], now });
+    expect(p.remainingPct).toBe(39);
+    expect(p.hoursToReset).toBe(128);
+    expect(p.sustainablePctPerHour).toBe(0.3);
+    const over = planPace({ signedIn: true, sevenDay: { usedPercentage: 104, resetAt: RESET }, samples: [], now });
+    expect(over.remainingPct).toBe(0);
+  });
+});
+
 describe('suggestAccount', () => {
   const row = (id: string, provider: string, pace: number, rec = 'steady', signedIn = true, fiveHour = 10) => ({
     id,

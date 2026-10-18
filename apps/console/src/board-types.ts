@@ -173,6 +173,12 @@ export interface PlanBurn {
   weekStart: number | null;
   reset: number | null;
   runsOut: number | null;
+  /** Where `rate` comes from ('recent' samples or the weekly 'average'), null when there is no rate yet. */
+  burnBasis: 'recent' | 'average' | null;
+  /** Points left in the week, hours to the reset and the steady rate that would use exactly the rest by then. */
+  remainingPct: number | null;
+  hoursToReset: number | null;
+  sustainablePctPerHour: number | null;
   at: number;
   points: { t: number; used: number; rate: number | null; proj: number | null }[];
 }
