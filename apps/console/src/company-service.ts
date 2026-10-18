@@ -54,7 +54,9 @@ export interface CompanyServiceDeps {
   getSession(id: string): CompanySession | undefined;
   /** The console keeps this session's record although it is not running (pinned, paused): its profile is never cleaned up. */
   keepsRecord?(id: string): boolean;
-  chatrooms: Pick<ChatroomService, 'rooms' | 'room' | 'addMember' | 'setStatus'>;
+  /** The conversation thread a session is running (OpenCode `continueSession`), when it has one. */
+  threadOf?(id: string): string | undefined;
+  chatrooms: Pick<ChatroomService, 'rooms' | 'room' | 'addMember' | 'setStatus'> & Partial<Pick<ChatroomService, 'replaceSession'>>;
   research: CompanyResearchBackend;
   /** Apply the owner's explicit company name to the bound session and persist its display state. */
   bindIdentity?(employee: CompanyEmployee): void;
@@ -105,7 +107,7 @@ export class CompanyService {
   }
 
   async hire(input: Omit<CompanyEmployee, 'id' | 'createdAt'>): Promise<CompanyEmployee> {
-    const employee = EmployeeSchema.parse({ ...input, id: randomUUID(), createdAt: this.now() });
+    const employee = EmployeeSchema.parse({ ...input, threadId: input.threadId ?? this.deps.threadOf?.(input.sessionId), id: randomUUID(), createdAt: this.now() });
     const session = this.deps.getSession(employee.sessionId);
     if (!session || !sameOwner(session.owner, employee.owner))
       throw new CompanyError('Bind an existing session owned by this company');
@@ -193,16 +195,53 @@ export class CompanyService {
   async rebind(employeeId: string, owner: string | undefined, sessionId: string): Promise<CompanyEmployee> {
     const session = this.deps.getSession(sessionId);
     if (!session || !sameOwner(session.owner, owner)) throw new CompanyError('Bind an existing owned session');
+    let previous: string | undefined;
+    let previousThread: string | undefined;
     const bound = await this.store.update((state) => {
       const employee = state.employees.find((e) => e.id === employeeId && sameOwner(e.owner, owner));
       if (!employee) throw new CompanyError('Unknown employee', 404);
       if (state.employees.some((e) => e.id !== employeeId && e.sessionId === sessionId))
         throw new CompanyError('Session already bound', 409);
+      previous = employee.sessionId;
+      previousThread = employee.threadId;
       employee.sessionId = sessionId;
+      // A session that runs a known thread brings it to the person; one that has none (hand-started, never resumed) leaves theirs alone.
+      const thread = this.deps.threadOf?.(sessionId);
+      if (thread) employee.threadId = thread;
       return employee;
     });
+    // The employee is the identity and the session only its current runtime: room seats, DMs and undelivered lines follow it, and
+    // the replaced session leaves every room at once instead of lingering as a second copy of the same person.
+    if (previous && previous !== sessionId) {
+      try {
+        await this.deps.chatrooms.replaceSession?.(previous, sessionId, 'owner', (room) => sameOwner(room.owner, owner));
+      } catch (error) {
+        // All or nothing: a failed move leaves the employee on the session it had, never half-moved.
+        const back = previous;
+        await this.store.update((state) => {
+          const employee = state.employees.find((e) => e.id === employeeId && sameOwner(e.owner, owner));
+          // Only undo our own bind: a concurrent rebind may already have moved the person on.
+          if (employee && employee.sessionId === sessionId) {
+            employee.sessionId = back;
+            employee.threadId = previousThread;
+          }
+        });
+        throw error;
+      }
+    }
     this.deps.bindIdentity?.(bound);
     return bound;
+  }
+
+  /** Owner choice of the conversation thread an employee resumes on every replacement (`null` clears it). */
+  async setThread(employeeId: string, owner: string | undefined, threadId: string | null): Promise<CompanyEmployee> {
+    return this.store.update((state) => {
+      const employee = state.employees.find((e) => e.id === employeeId && sameOwner(e.owner, owner));
+      if (!employee) throw new CompanyError('Unknown employee', 404);
+      if (threadId === null) delete employee.threadId;
+      else employee.threadId = threadId;
+      return employee;
+    });
   }
 
   /** Owner edit of an existing employee's position, expertise and icon; the name and session binding are untouched. */
@@ -345,11 +384,39 @@ export class CompanyService {
     return { record, avatar, rooms };
   }
 
-  prepareSpawn(input: { owner?: string; parentSessionId?: string; channelId?: string; name?: string; icon?: string }) {
+  prepareSpawn(input: {
+    owner?: string;
+    parentSessionId?: string;
+    /** The request carried a parent header. An unresolvable parent is then refused, never treated as the owner. */
+    agentCaller?: boolean;
+    channelId?: string;
+    name?: string;
+    icon?: string;
+    employeeId?: string;
+  }) {
     const { owner, parentSessionId } = input;
-    // Refuse before the session launches; completeSpawn checks again under the store lock.
-    if (this.store.snapshot().temporaryAgents.length >= 500)
+    // Refuse before the session launches; completeSpawn checks again under the store lock. A replacement session takes over an
+    // employee and adds no temporary record, so the cap does not apply to it.
+    if (!input.employeeId && this.store.snapshot().temporaryAgents.length >= 500)
       throw new CompanyError('Profile limit reached; ask the owner to archive old profiles', 409);
+    if (input.agentCaller && !parentSessionId && (input.employeeId || input.channelId))
+      throw new CompanyError('The parent session is unknown, so this request cannot name an employee or a channel', 403);
+    const employees = this.store.snapshot().employees.filter((e) => sameOwner(e.owner, owner));
+    // The employee id is the identity. A new session either replaces a named employee's session (the owner, or the employee's own
+    // current session, says so with `employeeId`) or must not take an employee's name: two sessions called Alice are two people.
+    let replaces: CompanyEmployee | undefined;
+    if (input.employeeId) {
+      replaces = employees.find((e) => e.id === input.employeeId);
+      if (!replaces) throw new CompanyError('Unknown employee', 404);
+      // Not a security check: a missing parent header counts as the owner and agent headers are self-asserted until agent tokens v3.
+      if ((parentSessionId || input.agentCaller) && parentSessionId !== replaces.sessionId)
+        throw new CompanyError('Only the owner or the employee\'s own session may replace its session', 403);
+    } else if (input.name && employees.some((e) => e.name.toLowerCase() === input.name!.trim().toLowerCase())) {
+      throw new CompanyError(
+        `"${input.name}" is an existing employee. Pass employeeId to replace that employee's session, or choose another name`,
+        409
+      );
+    }
     let room = input.channelId ? this.deps.chatrooms.room(input.channelId) : undefined;
     if (input.channelId && (!room || !sameOwner(room.owner, owner) || room.archivedAt || room.kind === 'dm'))
       throw new CompanyError('Choose an active owned channel');
@@ -368,13 +435,23 @@ export class CompanyService {
       if (candidates.length === 1) room = candidates[0];
     }
     return {
-      name: input.name ?? NAMES[randomInt(NAMES.length)],
+      name: replaces?.name ?? input.name ?? NAMES[randomInt(NAMES.length)],
       icon: input.icon ?? ICONS[randomInt(ICONS.length)],
       channelId: room?.id,
+      employeeId: replaces?.id,
+      /** The session being replaced: its conversation thread is the one the replacement resumes. */
+      replacesSessionId: replaces?.sessionId,
+      /** The thread the replacement resumes: the employee's own, wherever the old session stood. */
+      threadId: replaces?.threadId,
     };
   }
 
-  async completeSpawn(sessionId: string, plan: { channelId?: string; name: string; icon: string }): Promise<void> {
+  async completeSpawn(sessionId: string, plan: { channelId?: string; name: string; icon: string; employeeId?: string; replacesSessionId?: string }): Promise<void> {
+    // A replacement session takes over the employee: record, room seats and deliveries move in one step, no temporary record.
+    if (plan.employeeId) {
+      await this.rebind(plan.employeeId, this.deps.getSession(sessionId)?.owner, sessionId);
+      return;
+    }
     // At the cap, refuse (never drop another agent's record to make room), and before the join, so a refusal
     // leaves no seat behind.
     const full = (agents: { sessionId: string }[]) => agents.filter((a) => a.sessionId !== sessionId).length >= 500;

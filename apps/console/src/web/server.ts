@@ -1325,6 +1325,12 @@ export class WebServer extends EventEmitter {
     this.companyService = new CompanyService(companyStore, {
       getSession: (id) => this.sessions.get(id),
       keepsRecord: (id) => this.store.getSession(id)?.pinned === true,
+      // Reads only `openCodeConfig.continueSession`: a hand-started session has none, so its employee gets no `threadId` until
+      // the owner sets one through `setThread`.
+      threadOf: (id) => {
+        const thread = this.store.getSession(id)?.openCodeConfig?.continueSession;
+        return typeof thread === 'string' ? thread : undefined;
+      },
       chatrooms: this.chatroomService,
       research,
       bindIdentity: (employee) => {
@@ -1353,6 +1359,10 @@ export class WebServer extends EventEmitter {
       resumeTakeover: {
         rooms: () => this.chatroomService.rooms(),
         audit: (entry) => this.chatroomService.auditEntry(entry),
+      },
+      // A replacement that fails after the old session was stopped leaves the employee without one: record it.
+      onReplacementFailed: (info) => {
+        void this.chatroomService.auditEntry({ event: 'replacement_failed', ...info }).catch(() => {});
       },
     });
     registerCompanyRoutes(

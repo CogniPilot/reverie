@@ -207,7 +207,7 @@ import {
 import { readDeepSeekLastResponse } from '../../deepseek-transcript.js';
 import { appendClaudeCustomTitle } from '../../claude-session-title.js';
 import { UPLOADS_DIR } from '../paste-image-gc.js';
-import type { CompanyService } from '../../company-service.js';
+import { CompanyError, type CompanyService } from '../../company-service.js';
 import { normalizeIcon } from '../../chatroom-store.js';
 
 // Path to linked-cases registry (same file used by case-routes resolveCasePath)
@@ -941,8 +941,17 @@ export function registerSessionRoutes(
     company?: CompanyService;
     /** Rooms and the audit log, for a coordinator continuing a gone agent's conversation (resume-guard.ts). */
     resumeTakeover?: { rooms: () => readonly TakeoverRoom[]; audit: (entry: Record<string, unknown>) => Promise<void> };
+    /** Called when a replacement launch fails after the old session was stopped (log, audit and alert the owner). */
+    onReplacementFailed?: (info: { employeeId?: string; replacedSessionIds: string[]; error: string }) => void;
   } = {}
 ): RemoteWakeRegistry {
+  /** A launch failed after the claim stopped the session it replaces: the employee is left without a running session. Never silent. */
+  const replacementFailed = (identity: { employeeId?: string } | undefined, claim: ThreadClaim, error: unknown): void => {
+    if (!claim.stopped.length || claim.released) return;
+    const info = { employeeId: identity?.employeeId, replacedSessionIds: claim.stopped, error: getErrorMessage(error) };
+    console.error('[replacement_failed]', JSON.stringify(info));
+    options.onReplacementFailed?.(info);
+  };
   // A coordinator may continue a GONE agent's conversation in a room it coordinates (REVERIE_RESUME_TAKEOVER=owner turns
   // this off). Every conversation let through that way is written to the audit log before the session is created.
   // The coordinator role counts only when the caller's header and the resolved parent are the same session: a body
@@ -1119,12 +1128,14 @@ export function registerSessionRoutes(
         spawnIdentity = options.company.prepareSpawn({
           owner,
           parentSessionId,
+          agentCaller: req.headers['x-codeman-parent-session'] !== undefined,
           channelId: body.channelId ?? body.chatroomId,
           name: body.name,
           icon: body.icon,
+          employeeId: body.employeeId,
         });
       } catch (error) {
-        return createErrorResponse(ApiErrorCode.INVALID_INPUT, getErrorMessage(error));
+        return createErrorResponse(spawnRefusalCode(error), getErrorMessage(error));
       }
     }
     // The top-level `model` is Claude's per-session `--model`. Every other CLI takes its model
@@ -1383,64 +1394,91 @@ export function registerSessionRoutes(
       launchBody.deepSeekConfig
     );
     const terminalHistoryConfig = await ctx.getTerminalHistoryConfig();
-    const session = new Session({
-      workingDir,
-      mode,
-      name: spawnIdentity?.name ?? body.name ?? '',
-      mux: ctx.mux,
-      useMux: true,
-      niceConfig: globalNice,
-      model,
-      claudeMode: effectiveClaudeMode,
-      allowedTools: claudeModeConfig.allowedTools,
-      openCodeConfig: mode === 'opencode' ? launchBody.openCodeConfig : undefined,
-      codexConfig: mode === 'codex' ? gatedCodexConfig : undefined,
-      geminiConfig: mode === 'gemini' ? gatedGeminiConfig : undefined,
-      antigravityConfig: mode === 'antigravity' ? gatedAntigravityConfig : undefined,
-      piConfig: mode === 'pi' ? gatedPiConfig : undefined,
-      grokConfig: mode === 'grok' ? gatedGrokConfig : undefined,
-      deepSeekConfig: mode === 'deepseek' ? gatedDeepSeekConfig : undefined,
-      ompConfig: resolveOmpConfigForCreate(mode, workingDir, launchBody.ompConfig),
-      resumeSessionId: validatedResumeId,
-      envOverrides: { ...(await clampEnvOverridesForOwner(owner, body.envOverrides)), ...subscriptionLaunch(req).env },
-      subscriptionProfile: subscriptionLaunch(req).selection,
-      effort: body.effort,
-      advisorModel: body.advisorModel,
-      tmuxHistoryLimit: terminalHistoryConfig.tmuxHistoryLimit,
-      remote,
-      owner,
-      parentSessionId,
-    });
+    // The thread is decided once, before anything is stopped: the stop removes the old record the employee's thread may come from.
+    const launchThread =
+      mode === 'opencode'
+        ? typeof launchBody.openCodeConfig?.continueSession === 'string'
+          ? launchBody.openCodeConfig.continueSession
+          : employeeThread(ctx, spawnIdentity)
+        : undefined;
+    const claim = await claimEmployeeThread(ctx, spawnIdentity, launchThread, req.headers['x-codeman-parent-session'] !== undefined);
+    if (claim.refusal) return createErrorResponse(ApiErrorCode.CONFLICT, claim.refusal);
+    try {
+      const session = new Session({
+        workingDir,
+        mode,
+        name: spawnIdentity?.name ?? body.name ?? '',
+        mux: ctx.mux,
+        useMux: true,
+        niceConfig: globalNice,
+        model,
+        claudeMode: effectiveClaudeMode,
+        allowedTools: claudeModeConfig.allowedTools,
+        openCodeConfig:
+          mode === 'opencode' ? withEmployeeThread(launchBody.openCodeConfig, launchThread) : undefined,
+        codexConfig: mode === 'codex' ? gatedCodexConfig : undefined,
+        geminiConfig: mode === 'gemini' ? gatedGeminiConfig : undefined,
+        antigravityConfig: mode === 'antigravity' ? gatedAntigravityConfig : undefined,
+        piConfig: mode === 'pi' ? gatedPiConfig : undefined,
+        grokConfig: mode === 'grok' ? gatedGrokConfig : undefined,
+        deepSeekConfig: mode === 'deepseek' ? gatedDeepSeekConfig : undefined,
+        ompConfig: resolveOmpConfigForCreate(mode, workingDir, launchBody.ompConfig),
+        resumeSessionId: validatedResumeId,
+        envOverrides: { ...(await clampEnvOverridesForOwner(owner, body.envOverrides)), ...subscriptionLaunch(req).env },
+        subscriptionProfile: subscriptionLaunch(req).selection,
+        effort: body.effort,
+        advisorModel: body.advisorModel,
+        tmuxHistoryLimit: terminalHistoryConfig.tmuxHistoryLimit,
+        remote,
+        owner,
+        parentSessionId,
+      });
 
-    const tabLayout = body.tabGroupId
-      ? await ctx.addSession(session, { tabGroupId: body.tabGroupId })
-      : await ctx.addSession(session);
-    ctx.store.incrementSessionsCreated();
-    ctx.persistSessionState(session);
-    await ctx.setupSessionListeners(session);
-    if (spawnIdentity) await options.company!.completeSpawn(session.id, spawnIdentity);
-    // Pre-seed the agent skill's preamble cache so its §0 bootstrap is a two-line
-    // loader (see seedAgentSessionPreamble). Local sessions of a CLI that takes the
-    // skill; best-effort.
-    if (agentSkillDir(getCli(mode)?.capabilities) && !remote && (await ctx.getAgentSkillEnabled())) {
-      await seedAgentSessionPreamble(session.id).catch((err: unknown) =>
-        console.warn(`[agent-skill] preamble seed failed for ${session.id}: ${getErrorMessage(err)}`)
-      );
+      const tabLayout = body.tabGroupId
+        ? await ctx.addSession(session, { tabGroupId: body.tabGroupId })
+        : await ctx.addSession(session);
+      ctx.store.incrementSessionsCreated();
+      ctx.persistSessionState(session);
+      await ctx.setupSessionListeners(session);
+      if (spawnIdentity) {
+        try {
+          await options.company!.completeSpawn(session.id, spawnIdentity);
+        } catch (error) {
+          // The session is already running; without its rooms and record it would be an orphan under the employee's name.
+          await ctx.cleanupSession(session.id, true, 'spawn_failed').catch(() => {});
+          replacementFailed(spawnIdentity, claim, error);
+          claim.release();
+          return createErrorResponse(spawnRefusalCode(error), getErrorMessage(error));
+        }
+      }
+      claim.release();
+      // Pre-seed the agent skill's preamble cache so its §0 bootstrap is a two-line
+      // loader (see seedAgentSessionPreamble). Local sessions of a CLI that takes the
+      // skill; best-effort.
+      if (agentSkillDir(getCli(mode)?.capabilities) && !remote && (await ctx.getAgentSkillEnabled())) {
+        await seedAgentSessionPreamble(session.id).catch((err: unknown) =>
+          console.warn(`[agent-skill] preamble seed failed for ${session.id}: ${getErrorMessage(err)}`)
+        );
+      }
+      getLifecycleLog().log({ event: 'created', sessionId: session.id, name: session.name });
+
+      // Use light state for broadcast + response — buffers are fetched on-demand via /terminal.
+      // Avoids serializing 2-3MB of terminal+text buffers per session creation.
+      const lightState = ctx.getSessionStateWithRespawn(session);
+      ctx.broadcast(SseEvent.SessionCreated, lightState);
+      // A grouped creation also returns the layout that placed it, so the browser
+      // draws the tab inside its group at once instead of after a re-read.
+      return {
+        session: lightState,
+        ...(spawnIdentity ? { identity: spawnIdentity } : {}),
+        ...(body.tabGroupId ? { tabLayout } : {}),
+        ...(resumeWarnings.length ? { warnings: resumeWarnings } : {}),
+      };
+    } catch (error) {
+      replacementFailed(spawnIdentity, claim, error);
+      claim.release();
+      throw error;
     }
-    getLifecycleLog().log({ event: 'created', sessionId: session.id, name: session.name });
-
-    // Use light state for broadcast + response — buffers are fetched on-demand via /terminal.
-    // Avoids serializing 2-3MB of terminal+text buffers per session creation.
-    const lightState = ctx.getSessionStateWithRespawn(session);
-    ctx.broadcast(SseEvent.SessionCreated, lightState);
-    // A grouped creation also returns the layout that placed it, so the browser
-    // draws the tab inside its group at once instead of after a re-read.
-    return {
-      session: lightState,
-      ...(spawnIdentity ? { identity: spawnIdentity } : {}),
-      ...(body.tabGroupId ? { tabLayout } : {}),
-      ...(resumeWarnings.length ? { warnings: resumeWarnings } : {}),
-    };
   });
 
   // ========== Rename Session ==========
@@ -3756,9 +3794,10 @@ export function registerSessionRoutes(
       icon,
       channelId,
       chatroomId,
+      employeeId,
       mode = 'claude',
       modelOverride,
-      openCodeConfig,
+      openCodeConfig: requestedOpenCodeConfig,
       codexConfig,
       geminiConfig,
       antigravityConfig,
@@ -3774,6 +3813,7 @@ export function registerSessionRoutes(
       customModel,
       tabGroupId,
     } = parseBody(QuickStartSchema, req.body);
+    let openCodeConfig = requestedOpenCodeConfig;
 
     // Resolved ONCE here: the same value labels a case directory this request creates
     // (agent-case-marker.ts) and draws the tab lineage line on the session below.
@@ -3796,12 +3836,14 @@ export function registerSessionRoutes(
         qsSpawnIdentity = options.company.prepareSpawn({
           owner,
           parentSessionId: qsParentSessionId,
+          agentCaller: req.headers['x-codeman-parent-session'] !== undefined,
           channelId: channelId ?? chatroomId,
           name: sessionName?.slice(0, MAX_SESSION_NAME_LENGTH),
           icon,
+          employeeId,
         });
       } catch (error) {
-        return createErrorResponse(ApiErrorCode.INVALID_INPUT, getErrorMessage(error));
+        return createErrorResponse(spawnRefusalCode(error), getErrorMessage(error));
       }
     }
 
@@ -4192,6 +4234,15 @@ export function registerSessionRoutes(
 
     // Create a new session with the case as working directory
     // Apply global Nice priority config and model config from settings
+    // A replacement of an employee resumes that employee's own thread (the guard above ran on what the caller asked for), so a
+    // restart continues the same conversation instead of starting a stranger under the same name.
+    // Decided once, here; the old session is stopped only just before the new one starts (claimEmployeeThread below), after every
+    // check that can still refuse the request.
+    let qsThread: string | undefined;
+    if (mode === 'opencode') {
+      qsThread = typeof openCodeConfig?.continueSession === 'string' ? openCodeConfig.continueSession : employeeThread(ctx, qsSpawnIdentity);
+      if (qsThread && !openCodeConfig?.continueSession) openCodeConfig = { ...openCodeConfig, continueSession: qsThread };
+    }
     const niceConfig = await ctx.getGlobalNiceConfig();
     const qsModelConfig = await ctx.getModelConfig();
     // Synced App Settings launch defaults, as on the create path: local launches only, so
@@ -4435,6 +4486,8 @@ export function registerSessionRoutes(
         qsSessionOptions.model = qsCustomModelLaunchModel;
       }
     }
+    const qsClaim = await claimEmployeeThread(ctx, qsSpawnIdentity, qsThread, req.headers['x-codeman-parent-session'] !== undefined);
+    if (qsClaim.refusal) return createErrorResponse(ApiErrorCode.CONFLICT, qsClaim.refusal);
     const session = new Session(qsSessionOptions);
 
     // Records the selection for session.customModel/getCustomModelForPersist() and future
@@ -4549,7 +4602,10 @@ export function registerSessionRoutes(
     } catch (err) {
       // Clean up session on error to prevent orphaned resources
       await ctx.cleanupSession(session.id, true, 'quick_start_error');
-      return createErrorResponse(ApiErrorCode.OPERATION_FAILED, getErrorMessage(err));
+      replacementFailed(qsSpawnIdentity, qsClaim, err);
+      return createErrorResponse(err instanceof CompanyError ? spawnRefusalCode(err) : ApiErrorCode.OPERATION_FAILED, getErrorMessage(err));
+    } finally {
+      qsClaim.release();
     }
   });
 
@@ -5764,4 +5820,112 @@ export function registerSessionRoutes(
   // code stays here: `test/remote-wake.test.ts` pins that `server.ts` calls nothing but
   // `drop`/`stop` on this handle, so no timer path can reach a wake through it.
   return remoteWake;
+}
+
+/** A spawn refused by the company keeps its own meaning: a name clash is a 409, an unknown employee a 404, a foreign caller a 403. */
+function spawnRefusalCode(error: unknown): ApiErrorCode {
+  if (!(error instanceof CompanyError)) return ApiErrorCode.INVALID_INPUT;
+  if (error.status === 403) return ApiErrorCode.FORBIDDEN;
+  if (error.status === 404) return ApiErrorCode.NOT_FOUND;
+  if (error.status === 409) return ApiErrorCode.CONFLICT;
+  return ApiErrorCode.INVALID_INPUT;
+}
+
+/** The thread an employee's replacement resumes: the employee's own, else the one the replaced session was running. */
+function employeeThread(
+  ctx: { store: { getSession(id: string): { openCodeConfig?: { continueSession?: unknown } } | undefined } },
+  identity: { threadId?: string; replacesSessionId?: string } | undefined
+): string | undefined {
+  if (!identity) return undefined;
+  if (identity.threadId) return identity.threadId;
+  const old = identity.replacesSessionId ? ctx.store.getSession(identity.replacesSessionId)?.openCodeConfig?.continueSession : undefined;
+  return typeof old === 'string' ? old : undefined;
+}
+
+/** Employees whose replacement is being started, with the time the claim lapses if its holder never lets go (a throw mid-launch). */
+const replacementsInFlight = new Map<string, number>();
+/** Conversation threads with a launch in progress, same lease: two launches on one thread would both pass the holders() check. */
+const threadsInFlight = new Map<string, number>();
+const REPLACEMENT_LEASE_MS = 120_000;
+
+/**
+ * One guard for every OpenCode launch that resumes a conversation thread: two processes on one thread write over each other.
+ * - A live session already on `thread` blocks the launch, whoever asks and whether or not an employee is involved.
+ * - The one exception is the owner (no parent header) replacing an employee: the session being replaced is stopped first, and the
+ *   launch goes ahead only if the thread is then free. Call this as late as possible, after every other refusal, so a refused
+ *   request never leaves the employee on a stopped session.
+ * - Two replacements of one employee cannot overlap: the second is told to wait. The returned `release()` ends the claim; a claim
+ *   that is never released lapses after two minutes.
+ */
+async function claimEmployeeThread(
+  ctx: {
+    sessions: ReadonlyMap<string, { id: string; name: string }>;
+    store: { getSession(id: string): { openCodeConfig?: { continueSession?: unknown } } | undefined };
+    cleanupSession(id: string, killMux: boolean, reason?: string): Promise<void>;
+  },
+  identity: { employeeId?: string; replacesSessionId?: string } | undefined,
+  thread: string | undefined,
+  agentCaller: boolean
+): Promise<ThreadClaim> {
+  const noop = () => {};
+  const stopped: string[] = [];
+  const employeeId = identity?.employeeId;
+  if (employeeId) {
+    const until = replacementsInFlight.get(employeeId);
+    if (until !== undefined && until > Date.now()) return { refusal: 'This employee is already being replaced; wait for that launch to finish', release: noop, stopped, released: true };
+  }
+  const holders = () =>
+    [...ctx.sessions.values()].filter(
+      (s) => ctx.store.getSession(s.id)?.openCodeConfig?.continueSession === thread || (s.id === identity?.replacesSessionId && !!thread)
+    );
+  const threadUntil = thread ? threadsInFlight.get(thread) : undefined;
+  if (thread && threadUntil !== undefined && threadUntil > Date.now()) {
+    return { refusal: 'Another launch is starting on this conversation thread; wait for it to finish', release: noop, stopped, released: true };
+  }
+  const lease = Date.now() + REPLACEMENT_LEASE_MS;
+  if (employeeId) replacementsInFlight.set(employeeId, lease);
+  if (thread) threadsInFlight.set(thread, lease);
+  const claim: ThreadClaim = {
+    release: () => {
+      claim.released = true;
+      if (employeeId && replacementsInFlight.get(employeeId) === lease) replacementsInFlight.delete(employeeId);
+      if (thread && threadsInFlight.get(thread) === lease) threadsInFlight.delete(thread);
+    },
+    stopped,
+    released: false,
+  };
+  const release = claim.release;
+  if (!thread) return claim;
+  const busy = (s: { id: string; name: string }) => `Stop ${s.name} (${s.id}) first: it is still running this conversation thread`;
+  let blocking = holders();
+  if (blocking.length && !agentCaller && blocking.every((s) => s.id === identity?.replacesSessionId)) {
+    for (const old of blocking) {
+      await ctx.cleanupSession(old.id, true, 'employee_replaced');
+      stopped.push(old.id);
+    }
+    blocking = holders();
+  }
+  // The replaced session counts only while it is alive; after the stop the list is empty or the stop failed.
+  if (blocking.length) {
+    release();
+    // An agent never replaces a running employee session, its own included: that is the owner's call.
+    const own = agentCaller && blocking.every((s) => s.id === identity?.replacesSessionId);
+    return { refusal: own ? `${busy(blocking[0])}. Only the owner can replace a running session; ask the owner` : busy(blocking[0]), release: noop, stopped, released: true };
+  }
+  return claim;
+}
+
+/** What a claim hands back: `stopped` lists the sessions it stopped, so a launch that fails afterwards can say who is left without one. */
+interface ThreadClaim {
+  refusal?: string;
+  release(): void;
+  stopped: string[];
+  /** True once the launch is over (done or given up); a failure after that is not a failed replacement. */
+  released: boolean;
+}
+
+/** A caller's own `continueSession` wins; otherwise the employee's thread is resumed. */
+function withEmployeeThread<T extends { continueSession?: unknown } | undefined>(config: T, thread: string | undefined): T {
+  if (!thread || config?.continueSession) return config;
+  return { ...config, continueSession: thread } as T;
 }
