@@ -162,3 +162,15 @@ describe('chatCodeSegments', () => {
     expect(plain(codeSegs('```\na\n``` and ```\nb\n```')).filter((x: { code?: string }) => x.code !== undefined)).toEqual([{ code: 'a' }, { code: 'b' }]);
   });
 });
+
+const inlineSegs = get('chatInlineCodeSegments') as (t: string) => Array<{ text?: string; inline?: string }>;
+
+describe('chatInlineCodeSegments', () => {
+  it('splits `spans` from the text around them', () => {
+    expect(plain(inlineSegs('run `npm test` now'))).toEqual([{ text: 'run ' }, { inline: 'npm test' }, { text: ' now' }]);
+  });
+  it('leaves an unclosed backtick and plain text whole', () => {
+    expect(plain(inlineSegs('a ` b'))).toEqual([{ text: 'a ` b' }]);
+    expect(plain(inlineSegs('plain'))).toEqual([{ text: 'plain' }]);
+  });
+});

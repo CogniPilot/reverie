@@ -2262,7 +2262,7 @@ class ReverieChatApp {
     }
     if (m.text && sheet) {
       // A touch screen turns selection off on messages (a long press opens this sheet): this turns it on for one.
-      out.push({ label: 'Select text', run: () => this.msgEl(m.id)?.classList.add('is-selectable') });
+      out.push({ label: 'Select text', run: () => this.startSelectMode(m.id) });
     }
     if (this.serverFeatures.edits && m.from.kind === 'user' && m.text && !m.poll && !m.deleted) {
       out.push({ label: 'Edit message', run: () => this.startEdit(m) });
@@ -2278,9 +2278,23 @@ class ReverieChatApp {
     return out;
   }
 
+  // Leaves the sheet closed so the native selection handles stay usable; a tap outside the message ends select mode.
+  startSelectMode(id) {
+    const el = this.msgEl(id);
+    if (!el) return;
+    el.classList.add('is-selectable');
+    const end = (ev) => {
+      if (ev.target?.closest?.('.ca-msg') === el) return;
+      el.classList.remove('is-selectable');
+      this.doc.removeEventListener('pointerdown', end, true);
+    };
+    this.doc.defaultView?.setTimeout(() => this.doc.addEventListener('pointerdown', end, true), 0);
+  }
+
   wireMessageMenu(el, m) {
     el.addEventListener('contextmenu', (ev) => {
       if (ev.target?.closest?.('a, button, input, textarea')) return;
+      if (el.classList.contains('is-selectable')) return;
       ev.preventDefault();
       this.openMessageMenu(m, el, { at: { x: ev.clientX || el.getBoundingClientRect().left + 24, y: ev.clientY || el.getBoundingClientRect().top + 24 }, sheet: true });
     });
@@ -2292,6 +2306,8 @@ class ReverieChatApp {
     };
     el.addEventListener('touchstart', (ev) => {
       if (ev.target?.closest?.('a, button, input, textarea')) return;
+      // In select mode the long press belongs to the native selection handles, not the sheet.
+      if (el.classList.contains('is-selectable')) return;
       const t = ev.touches?.[0];
       start = t ? { x: t.clientX, y: t.clientY } : null;
       timer = this.doc.defaultView?.setTimeout(() => {

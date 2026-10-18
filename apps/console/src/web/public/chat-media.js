@@ -196,6 +196,22 @@ function chatCodeSegments(text) {
   return out;
 }
 
+/** Pure: split a plain run into text and `inline code` spans (`{inline}`); an unclosed backtick stays plain. */
+function chatInlineCodeSegments(text) {
+  const out = [];
+  const src = String(text ?? '');
+  const re = /`([^`\n]+)`/g;
+  let last = 0;
+  let m;
+  while ((m = re.exec(src))) {
+    if (m.index > last) out.push({ text: src.slice(last, m.index) });
+    out.push({ inline: m[1] });
+    last = m.index + m[0].length;
+  }
+  if (last < src.length) out.push({ text: src.slice(last) });
+  return out;
+}
+
 /** Pure: split text into plain runs and `:emote:` tokens that exist in `names`. */
 function chatTextSegments(text, names) {
   const out = [];
@@ -571,7 +587,36 @@ Object.assign(CodemanApp.prototype, {
     return wrap;
   },
 
+  /** An inline code span; tapping it copies it (a long press opens the message sheet, not a selection). */
+  _chatInlineCode(code) {
+    const span = this._chatEl('code', 'chatroom-inline-code', code);
+    span.title = 'Tap to copy';
+    span.onclick = async () => {
+      try {
+        await navigator.clipboard.writeText(code);
+        span.classList.add('is-copied');
+      } catch {
+        // No clipboard (plain http, refused): select the text so it can be copied by hand.
+        span.classList.add('is-copy-failed');
+        const range = document.createRange();
+        range.selectNodeContents(span);
+        const sel = window.getSelection?.();
+        sel?.removeAllRanges();
+        sel?.addRange(range);
+      }
+      setTimeout(() => span.classList.remove('is-copied', 'is-copy-failed'), 1200);
+    };
+    return span;
+  },
+
   _chatAppendText(el, text, names) {
+    for (const piece of chatInlineCodeSegments(text)) {
+      if (piece.inline !== undefined) el.append(this._chatInlineCode(piece.inline));
+      else this._chatAppendPlain(el, piece.text, names);
+    }
+  },
+
+  _chatAppendPlain(el, text, names) {
     for (const seg of chatTextSegments(text, names)) {
       if (seg.emote) {
         el.append(this._emoteImg(seg.emote));
