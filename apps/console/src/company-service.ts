@@ -347,6 +347,9 @@ export class CompanyService {
 
   prepareSpawn(input: { owner?: string; parentSessionId?: string; channelId?: string; name?: string; icon?: string }) {
     const { owner, parentSessionId } = input;
+    // Refuse before the session launches; completeSpawn checks again under the store lock.
+    if (this.store.snapshot().temporaryAgents.length >= 500)
+      throw new CompanyError('Profile limit reached; ask the owner to archive old profiles', 409);
     let room = input.channelId ? this.deps.chatrooms.room(input.channelId) : undefined;
     if (input.channelId && (!room || !sameOwner(room.owner, owner) || room.archivedAt || room.kind === 'dm'))
       throw new CompanyError('Choose an active owned channel');
@@ -372,11 +375,18 @@ export class CompanyService {
   }
 
   async completeSpawn(sessionId: string, plan: { channelId?: string; name: string; icon: string }): Promise<void> {
+    // At the cap, refuse (never drop another agent's record to make room), and before the join, so a refusal
+    // leaves no seat behind.
+    const full = (agents: { sessionId: string }[]) => agents.filter((a) => a.sessionId !== sessionId).length >= 500;
+    if (full(this.store.snapshot().temporaryAgents))
+      throw new CompanyError('Profile limit reached; ask the owner to archive old profiles', 409);
     // Join first: a refused join must not leave a temporary-worker record behind.
     if (plan.channelId)
       asCompanyError(() => this.deps.chatrooms.addMember(plan.channelId!, sessionId, { icon: plan.icon }));
     await this.store.update((state) => {
-      state.temporaryAgents = state.temporaryAgents.filter((a) => a.sessionId !== sessionId).slice(-499);
+      if (full(state.temporaryAgents))
+        throw new CompanyError('Profile limit reached; ask the owner to archive old profiles', 409);
+      state.temporaryAgents = state.temporaryAgents.filter((a) => a.sessionId !== sessionId);
       state.temporaryAgents.push({
         sessionId,
         name: plan.name,
