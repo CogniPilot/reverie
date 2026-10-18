@@ -4,11 +4,9 @@ import { BoardStore } from '../board-store.js';
 import { CompanyService } from '../company-service.js';
 import { DurableCompanyResearchBackend } from '../company-research-backend.js';
 import { companySessionRuntime } from '../company-session-runtime.js';
-import { ExternalChatService } from '../external-chat-service.js';
 import { registerCompanyRoutes } from './routes/company-routes.js';
 import { registerWorkspaceIconRoutes } from './routes/workspace-icon-routes.js';
 import { WorkspaceIconStore } from '../workspace-icons.js';
-import { registerExternalChatRoutes } from './routes/external-chat-routes.js';
 /**
  * @fileoverview Codeman web server — central hub coordinating all subsystems.
  *
@@ -379,7 +377,6 @@ export class WebServer extends EventEmitter {
   private chatroomService!: ChatroomService;
   private companyService!: CompanyService;
   private cronPort!: CronPort;
-  private externalChatService!: ExternalChatService;
   private planService!: PlanService;
   private accountLogins: AccountLoginService | null = null;
   /** Fingerprint of the served frontend, sent in `init` so stale tabs can offer a reload. */
@@ -1388,13 +1385,6 @@ export class WebServer extends EventEmitter {
       usageHistory: async () => (this.planService ? this.planService.usageHistory() : {}),
     });
     registerWorkspaceIconRoutes(this.app, new WorkspaceIconStore(dataPath('workspace-icons')));
-    this.externalChatService = new ExternalChatService({
-      file: dataPath('external-chat.json'),
-      chatrooms: this.chatroomService,
-      getSession: (id) => this.sessions.get(id),
-    });
-    await this.externalChatService.init();
-    registerExternalChatRoutes(this.app, ctx, this.externalChatService);
 
     registerChatroomRoutes(this.app, ctx, this.chatroomService, chatroomFiles, verifiedOwner);
     // Chat bots: the sender a scheduled 'post' job speaks as (see chat-bots.ts). The registry is instance data.
@@ -3394,7 +3384,6 @@ export class WebServer extends EventEmitter {
     // Main Codex subscription limits come from the signed-in local CLI. Keep
     // this read-only and host-scoped; multi-user SSE routing makes it admin-only.
     if (!this.testMode) {
-      this.externalChatService.start();
       const tickCompany = () =>
         this.companyService
           .tick()
@@ -4415,7 +4404,6 @@ export class WebServer extends EventEmitter {
     closeAllLlamaSwapLogTails();
 
     // Flush pending chatroom writes and stop pane delivery.
-    await this.externalChatService?.stop();
     await this.chatroomService?.stop();
 
     // Dispose all managed timers (intervals + resettable timeouts)
