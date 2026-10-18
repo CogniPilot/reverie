@@ -63,7 +63,7 @@ interface SettingsApp {
 
 /**
  * Methods that run for real. Every other method of the app is a no-op here:
- * openAppSettings() and saveAppSettings() fan out into the voice, webhook,
+ * openAppSettings() and saveAppSettings() fan out into the voice,
  * tunnel, model and push panels, none of which this setting touches, and the
  * load/save lines under test sit between those calls.
  */
