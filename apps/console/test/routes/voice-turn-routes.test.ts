@@ -6,7 +6,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { mkdtempSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { FastifyInstance } from 'fastify';
@@ -35,10 +35,12 @@ describe('voice turn routes', () => {
   let answer: { status: number; body: unknown; type?: string };
   const seen: Seen[] = [];
   let diagDir: string;
+  let roomDir: string;
 
   beforeEach(async () => {
     seen.length = 0;
     diagDir = mkdtempSync(join(tmpdir(), 'voice-diag-'));
+    roomDir = mkdtempSync(join(tmpdir(), 'voice-'));
     answer = {
       status: 200,
       body: { transcript: 'what time is it', reply: 'Time to ship, Pat.', audio_url: '/audio/r1.mp3' },
@@ -73,7 +75,7 @@ describe('voice turn routes', () => {
 
     const harness = await createRouteTestHarness((fastify, c) => {
       service = new ChatroomService({
-        file: join(mkdtempSync(join(tmpdir(), 'voice-')), 'chatrooms.json'),
+        file: join(roomDir, 'chatrooms.json'),
         getSession: (id) => c.sessions.get(id),
         broadcast: () => {},
       });
@@ -92,6 +94,8 @@ describe('voice turn routes', () => {
     await service.stop();
     await app.close();
     await new Promise((r) => upstream.close(r));
+    rmSync(diagDir, { recursive: true, force: true });
+    rmSync(roomDir, { recursive: true, force: true });
   });
 
   const turn = (opts: { room?: string; member?: string; type?: string; body?: Buffer } = {}) =>
