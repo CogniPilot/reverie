@@ -109,9 +109,9 @@ describe('plans routes', () => {
       accounts.map((a: { provider: string; label: string }) => [`${a.provider}:${a.label}`, a])
     );
     expect(Object.keys(byLabel).sort()).toEqual([
-      'anthropic:initech',
-      'anthropic:gmail',
       'anthropic:globex',
+      'anthropic:gmail',
+      'anthropic:initech',
       'openai:gmail',
     ]);
     const initech = byLabel['anthropic:initech'];
