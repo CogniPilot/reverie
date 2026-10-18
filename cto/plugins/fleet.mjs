@@ -127,7 +127,7 @@ export const CTOFleet = async ({ client, directory, serverUrl }) => {
       const mode = await bridge({action: "mode"});
       if (mode.mode !== "vacation") return;
       if (input.tool === "cto_memory") return;
-      if (input.tool === "cto_room" && (["read", "who", "status"].includes(output.args.action) ||
+      if (input.tool === "cto_room" && (["read", "who", "status", "rooms"].includes(output.args.action) ||
           (output.args.action === "say" && (!output.args.to || output.args.to === "user")))) return;
       if (input.tool === "cto_fleet" && ["self", "self_vote", "self_history", "rules", "votes", "publication_proposal",
           "profiles", "return", "vacation"].includes(output.args.action)) return;
@@ -174,13 +174,18 @@ export const CTOFleet = async ({ client, directory, serverUrl }) => {
         },
       }),
       cto_room: tool({
-        description: "Read Fleet history and members, update your own status, or send a bounded room message. No shell execution.",
-        args: {action: tool.schema.enum(["read", "who", "status", "say"]), text: tool.schema.string(), to: tool.schema.string()},
-        execute: async ({action, text, to}) => {
-          if (text.length > 5000) throw new Error("Keep room messages under 5000 characters");
-          if (action === "say") return room(["say", "--to", to || "user", "--", text]);
-          if (action === "status") return room(["status", "--progress", text]);
-          return room([action]);
+        description: "Read Fleet history and members, update your own status, list your rooms, or send a bounded room message. No shell execution. " +
+          "room names the room (name or id); it is required whenever you are in more than one room, so use action=rooms to list yours.",
+        args: {action: tool.schema.enum(["read", "who", "status", "say", "rooms"]), text: tool.schema.string().optional(), to: tool.schema.string().optional(),
+          room: tool.schema.string().optional().describe("Room name or id; empty only when you are in exactly one room")},
+        execute: async ({action, text, to, room: name}) => {
+          if ((action === "say" || action === "status") && !text) throw new Error("text is required for " + action);
+          if ((text || "").length > 5000) throw new Error("Keep room messages under 5000 characters");
+          const where = name ? ["--room", name] : [];
+          if (action === "say") return room(["say", ...where, "--to", to || "user", "--", text]);
+          if (action === "status") return room(["status", ...where, "--progress", text]);
+          if (action === "rooms") return room(["rooms"]);
+          return room([action, ...where]);
         },
       }),
     },

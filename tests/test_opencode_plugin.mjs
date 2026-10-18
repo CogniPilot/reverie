@@ -21,7 +21,7 @@ test("OpenCode hooks restore context, persist complete turns once, and compose d
     await writeFile(join(dir, ".fleet-instance"), JSON.stringify({ python: "python3", source: root }));
     const source = (await readFile(join(root, "cto/plugins/fleet.mjs"), "utf8")).replace(
       'import { tool } from "@opencode-ai/plugin";',
-      'const tool = Object.assign((definition) => definition, {schema: {string: () => ({describe() {return this}}), enum: () => ({})}});');
+      'const tool = Object.assign((definition) => definition, {schema: {string: () => ({describe() {return this}, optional() {return this}}), enum: () => ({})}});');
     const { CTOFleet } = await import("data:text/javascript;base64," + Buffer.from(source).toString("base64"));
     const logs = [];
     const messages = [
@@ -85,7 +85,7 @@ test("Research cycles mark activity without registering a primary runtime, recor
     await writeFile(join(dir, ".fleet-instance"), JSON.stringify({ python: bridge, source: root }));
     const source = (await readFile(join(root, "cto/plugins/fleet.mjs"), "utf8")).replace(
       'import { tool } from "@opencode-ai/plugin";',
-      'const tool = Object.assign((definition) => definition, {schema: {string: () => ({describe() {return this}}), enum: () => ({})}});');
+      'const tool = Object.assign((definition) => definition, {schema: {string: () => ({describe() {return this}, optional() {return this}}), enum: () => ({})}});');
     const { CTOFleet } = await import("data:text/javascript;base64," + Buffer.from(source).toString("base64"));
     let maintenance;
     globalThis.setInterval = (callback) => { maintenance = callback; return {unref() {}}; };
