@@ -2123,6 +2123,37 @@ describe('phone: message sheet and one Debug terminals button', () => {
     expect(h.document.querySelector('.ca-msg-menu')).not.toBeNull();
   });
 
+  it('Select text closes the sheet and the next long press leaves the native selection alone', async () => {
+    const h = await createHarness({ sessions, rooms: rs() });
+    const el = h.document.querySelector('[data-msg-id="m1"]') as HTMLElement;
+    el.dispatchEvent(new h.window.MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 50, clientY: 50 }));
+    const select = [...h.document.querySelectorAll('.ca-msg-menu > button')].find((b) => b.textContent === 'Select text') as HTMLElement;
+    select.click();
+    await settle(40);
+    expect(h.document.querySelector('.ca-msg-menu')).toBeNull();
+    expect(el.classList.contains('is-selectable')).toBe(true);
+    const ev = new h.window.Event('touchstart', { bubbles: true, cancelable: true }) as Event & { touches?: unknown[] };
+    ev.touches = [{ clientX: 20, clientY: 20 }];
+    el.dispatchEvent(ev);
+    await settle(520);
+    expect(h.document.querySelector('.ca-msg-menu')).toBeNull();
+    h.document.body.dispatchEvent(new h.window.Event('pointerdown', { bubbles: true }));
+    expect(el.classList.contains('is-selectable')).toBe(false);
+  });
+
+  it('an inline code span selects its own text when the clipboard is unavailable', async () => {
+    const h = await createHarness({
+      sessions,
+      rooms: [room('r1', 'General', [member(A, 'alpha'), member(B, 'bravo')], { messages: [message('m1', 'r1', agent(B, 'bravo'), 'run `npm test` now', 1000)] })],
+    });
+    const span = h.document.querySelector('.chatroom-inline-code') as HTMLElement;
+    expect(span.textContent).toBe('npm test');
+    span.click();
+    await settle(40);
+    expect(span.classList.contains('is-copy-failed') || span.classList.contains('is-copied')).toBe(true);
+    if (span.classList.contains('is-copy-failed')) expect(h.window.getSelection()?.toString()).toBe('npm test');
+  });
+
   it('has a single Debug terminals button, in the profile bar next to the gear', async () => {
     const h = await createHarness({ sessions, rooms: [room('r1', 'General', [member(A, 'alpha')], {})], narrow: true });
     expect(h.document.querySelectorAll('[aria-label="Debug terminals"]')).toHaveLength(1);

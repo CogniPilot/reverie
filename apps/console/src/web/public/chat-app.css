@@ -1088,4 +1088,7 @@ button.ca-org-node:hover, button.ca-org-node:focus-visible { background: var(--c
 
 .chatroom-codeblock { position: relative; margin: 4px 0; }
 .chatroom-code { margin: 0; padding: 8px 56px 8px 10px; overflow-x: auto; white-space: pre; border-radius: 8px; background: var(--bg-primary, #11161d); border: 1px solid var(--border, #2b3441); font: 0.85em/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.chatroom-inline-code { padding: 1px 5px; border-radius: 5px; background: var(--bg-primary, #11161d); border: 1px solid var(--border, #2b3441); font: 0.88em ui-monospace, SFMono-Regular, Menlo, monospace; cursor: copy; user-select: text; -webkit-user-select: text; }
+.chatroom-inline-code.is-copied { outline: 1px solid var(--accent, #4aa3ff); }
+.chatroom-inline-code.is-copy-failed { outline: 1px solid var(--danger, #e5534b); }
 .chatroom-code-copy { position: absolute; top: 4px; right: 4px; padding: 3px 8px; font-size: 0.75rem; border-radius: 6px; border: 1px solid var(--border, #2b3441); background: var(--bg-secondary, #1c222b); color: inherit; cursor: pointer; }
