@@ -57,7 +57,7 @@ it('uncertain publication retries exactly the saved text and request id even aft
 });
 it('Disable and Leave retain visible history while refusing local sends',async()=>{
  const h=await setup();h.histories.one.push(post(1));h.ui.open('one');await h.flush(10);await h.ui.setEnabled('one',false);expect(h.ui.send.disabled).toBe(true);expect(h.document.querySelectorAll('.eg-post')).toHaveLength(1);h.ui.input.value='held';await h.ui.publish();expect(h.calls.filter(c=>c.method==='POST')).toHaveLength(0);
- h.window.confirm=()=>true;await h.ui.leave('one');expect(h.ui.status.textContent).toContain('left');expect(h.document.querySelectorAll('.eg-post')).toHaveLength(1);
+ h.window.confirm=()=>true;await h.ui.leave('one');expect(h.ui.status.textContent).toContain('Disconnected');expect(h.document.querySelectorAll('.eg-post')).toHaveLength(1);
 });
 it('requires a parsed host confirmation, clears the pasted key and never stores it',async()=>{
  const h=await setup();h.ui.joinDialog();h.document.querySelector('.eg-key')!.value='SECRET_KEY';[...h.document.querySelectorAll('.eg-dialog button')].find((b:any)=>b.textContent==='Check host')!.click();await h.flush(15);

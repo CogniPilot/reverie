@@ -19,6 +19,10 @@
 
 /* ───────────────────────── pure helpers ───────────────────────── */
 
+// Consume the fragment before this shell starts any asynchronous work. The
+// invitation is held in memory only and never used as a navigation destination.
+let caEmbassyIncomingInvite = typeof window !== 'undefined' ? caEmbassyTakeFragment(window) : null;
+
 /** Badge text for a count; large counts stop growing. */
 function chatBadgeCount(n) {
   return n > 99 ? '99+' : String(n);
@@ -966,6 +970,7 @@ const CA_ICONS = {
 /** The Board is pinned above the channel list, shown in the main pane. */
 const CA_PAGES = {
   board: { label: 'Board', icon: 'calendar', path: '/board' },
+  embassies: { label: 'Embassies', icon: 'chat', path: null },
 };
 
 /** Which supported page a URL fragment asks for, or null. */
@@ -2178,6 +2183,7 @@ class ReverieChatApp {
   openPage(kind, { push = true } = {}) {
     const page = CA_PAGES[kind];
     if (!page) return;
+    this.embassy?.close();
     if (this.orgOpen) this.closeOrg();
     this.toggleDrawer(null);
     const again = this.embed === kind;
@@ -2190,7 +2196,12 @@ class ReverieChatApp {
       this.els.body.append(panel);
       this.els.page = panel;
     }
-    const frame = panel.querySelector('iframe');
+    let frame = panel.querySelector('iframe');
+    if (kind === 'embassies') {
+      panel.replaceChildren(this.embassy.directoryEl());
+      panel.dataset.kind = kind;
+    } else {
+    if (!frame) { frame = this.el('iframe', 'ca-page-frame'); panel.replaceChildren(frame); }
     frame.title = page.label;
     if (panel.dataset.kind !== kind) {
       panel.dataset.kind = kind;
@@ -2201,6 +2212,7 @@ class ReverieChatApp {
       } catch {
         /* a frame that is not loaded yet has nothing to reload */
       }
+    }
     }
     panel.hidden = false;
     this.els.root.classList.add('is-page');
@@ -2228,7 +2240,7 @@ class ReverieChatApp {
     if (panel) {
       panel.hidden = true;
       delete panel.dataset.kind;
-      panel.querySelector('iframe').src = 'about:blank';
+      const frame = panel.querySelector('iframe'); if (frame) frame.src = 'about:blank';
     }
     this.els.root.classList.remove('is-page');
     this.els.chat.inert = false;
@@ -3353,7 +3365,7 @@ class ReverieChatApp {
     this.els.root.classList.toggle('ca-members-open', this.membersOpen);
     this.els.root.dataset.drawer = this.drawer || '';
     this.els.membersBtn.setAttribute('aria-pressed', String(this.membersOpen));
-    const placeholder = this.room ? `Message ${this.room.kind === 'dm' ? '@' : '#'}${caRoomLabel(this.room)}` : 'Message';
+    const placeholder = this.embassy?.selected ? `Message #${this.embassy.connection()?.roomName || 'shared room'}` : this.room ? `Message ${this.room.kind === 'dm' ? '@' : '#'}${caRoomLabel(this.room)}` : 'Message';
     const input = this.app._chatEls?.input;
     if (input) input.placeholder = placeholder;
     this.els.root.dataset.unread = features.unread && total.unread ? (total.mentions ? 'mention' : 'unread') : '';
@@ -3768,7 +3780,7 @@ class ReverieChatApp {
     const shown = this.viewRooms.filter((r) => !(hide && r.muted && r.id !== this.roomId));
     const draft = this._order;
     const source = draft ? shown.map((r) => (draft.includes(r.id) ? { ...r, position: draft.indexOf(r.id) + 1 } : r)) : shown;
-    const items = caChannelItems(source, this.workspace === 'home' ? '' : this.workspace, this.collapsed, this.embed ? null : this.roomId);
+    const items = caChannelItems(source, this.workspace === 'home' ? '' : this.workspace, this.collapsed, this.embed || this.embassy?.selected ? null : this.roomId);
     if (!items.length) {
       into.append(this.el('p', 'ca-empty-note', 'No channels here yet. Use + to create one.'));
       return;
@@ -4131,6 +4143,13 @@ class ReverieChatApp {
     const room = this.room;
     headTitle.replaceChildren();
     headTopic.textContent = '';
+    if (this.embassy?.selected) {
+      headTitle.append(this.el('span', 'ca-hash', '#'), this.el('span', 'ca-head-name', this.embassy.connection()?.roomName || 'Shared room'));
+      headTopic.textContent = 'Embassy · UNTRUSTED EXTERNAL';
+      this.els.pinsBtn.hidden = true; this.els.inviteBtn.hidden = true; this.els.bellBtn.hidden = true;
+      return;
+    }
+    this.els.bellBtn.hidden = false;
     if (this.embed) {
       const page = CA_PAGES[this.embed];
       const mark = this.el('span', 'ca-hash is-drawn');
@@ -4185,6 +4204,10 @@ class ReverieChatApp {
     const box = this.els.members;
     this.keepFocus(box, () => {
       box.replaceChildren();
+      if (this.embassy?.selected) {
+        box.append(this.el('h3', 'ca-members-head', 'Shared with other companies'), this.el('p', 'ca-hint', 'External identities are labels, not local employees.'));
+        return;
+      }
       const room = this.room;
       if (!room || this.app._chatCreating) return;
       for (const section of caMemberSections(room.members)) {
@@ -5587,7 +5610,7 @@ class ReverieChatApp {
     // One tab stop per message; its toolbar shows (and is reachable) while it has focus.
     el.tabIndex = 0;
     // Right-click, or a long press on a phone, opens the message's actions (a bottom sheet on a phone).
-    if (!m.deleted) this.wireMessageMenu(el, m);
+    if (!m.deleted && !m.external) this.wireMessageMenu(el, m);
     el.setAttribute('role', 'article');
     const gutter = this.el('div', 'ca-msg-gutter');
     const name = mine ? this.userName() : m.from.name;
@@ -5610,6 +5633,7 @@ class ReverieChatApp {
       const time = this.el('time', 'ca-time', new Date(m.at).toLocaleString([], { month: 'numeric', day: 'numeric', year: '2-digit', hour: 'numeric', minute: '2-digit' }));
       time.dateTime = new Date(m.at).toISOString();
       meta.append(from, time);
+      if (m.external) meta.append(this.el('span', m.own ? 'ca-tag eg-own' : 'ca-tag eg-trust', m.own ? 'Sent from this console' : 'UNTRUSTED EXTERNAL'));
       if (direct) meta.append(this.el('span', 'ca-msg-to', `→ ${m.to.map((r) => this.app._chatNameOf(r)).join(', ')}`));
       if (m.voice) meta.prepend(this.el('span', 'ca-voice-mark', '\u{1F3A4}'));
       body.append(meta);
@@ -5618,6 +5642,7 @@ class ReverieChatApp {
     else if (m.poll) body.append(this.pollEl(m));
     else if (m.text) {
       const text = this.app._chatTextEl ? this.app._chatTextEl(m.text) : this.el('div', 'chatroom-msg-text', m.text);
+      if (m.external) text.classList.add('eg-text');
       this.decorateMentions(text);
       if (m.edited) {
         const mark = this.el('span', 'ca-edited', '(edited)');
@@ -5626,9 +5651,9 @@ class ReverieChatApp {
       }
       body.append(text);
     }
-    const files = this.app._chatAttachmentsEl?.(m);
+    const files = !m.external && this.app._chatAttachmentsEl?.(m);
     if (files) body.append(files);
-    if (this.app._chatReactionsEl) body.append(this.app._chatReactionsEl(m));
+    if (!m.external && this.app._chatReactionsEl) body.append(this.app._chatReactionsEl(m));
     if (m.audioUrl) {
       const play = this.el('button', 'ca-btn', '▶ Play');
       play.type = 'button';
@@ -5636,7 +5661,7 @@ class ReverieChatApp {
       body.append(play);
     }
     el.append(gutter, body);
-    if (this.serverFeatures.replies) {
+    if (!m.external && this.serverFeatures.replies) {
       el.append(this.actionsEl(m));
     }
     return el;
@@ -5647,6 +5672,7 @@ class ReverieChatApp {
    * reader within a thumb's width of the bottom stays pinned to it, so they keep following new messages.
    */
   renderFeed({ keepScroll = false } = {}) {
+    if (this.embassy?.selected) return this.embassy.renderPosts();
     const feed = this.app._chatEls.feed;
     this.app._watchChatFeedTop?.(feed);
     if (!feed._caStick) {
@@ -5708,7 +5734,7 @@ class ReverieChatApp {
     if (room && caIsDm(room) && data.message?.from?.kind !== 'user') this.reopenDm(room.id);
     // A member that posts in the room it was woken from is done there (a quick answer ends "is typing").
     if (data.message?.from?.kind === 'agent' && this.dropTurn(`${data.roomId}|${data.message.from.sessionId}`)) this.renderTyping();
-    const open = this.active && data.roomId === this.roomId && this.room;
+    const open = !this.embassy?.selected && this.active && data.roomId === this.roomId && this.room;
     if (open) {
       if (this.room.messages.some((m) => m.id === data.message.id)) return true;
       this.room.messages.push(data.message);
@@ -5787,12 +5813,14 @@ class ReverieChatApp {
   }
 
   markReadSoon() {
+    if (this.embassy?.selected) { this.embassy.markRead(); return; }
     clearTimeout(this._readTimer);
     this._readTimer = setTimeout(() => this.markRead(), 250);
   }
 
   /** The user can see the newest message of the open room: move the server-side read cursor. */
   async markRead() {
+    if (this.embassy?.selected) { this.embassy.markRead(); return; }
     if (!this.active || !this.serverFeatures.unread) return;
     const entry = this.rooms.find((r) => r.id === this.roomId);
     const room = this.room;
@@ -5833,6 +5861,7 @@ function caInstall(proto) {
     _fitChatToKeyboard: proto._fitChatToKeyboard,
     _renderChatBadge: proto._renderChatBadge,
     _sendChatMessage: proto._sendChatMessage,
+    _attachChatFiles: proto._attachChatFiles,
     _chatApi: proto._chatApi,
     setPendingHook: proto.setPendingHook,
     clearPendingHooks: proto.clearPendingHooks,
@@ -5919,6 +5948,7 @@ function caInstall(proto) {
     },
     // Voice belongs to voice channels: the voice member is the room's, and the mic shows nowhere else.
     _chatVoiceTarget() {
+      if (this._chatApp?.embassy?.selected) return null;
       if (!this._chatApp?.built) return original._chatVoiceTarget.call(this);
       return this._chatRoom?.members?.find((m) => m.voice === true) || null;
     },
@@ -5965,9 +5995,14 @@ function caInstall(proto) {
       return result;
     },
     async _sendChatMessage(options) {
+      if (this._chatApp?.embassy?.selected) return this._chatApp.embassy.publish();
       const result = await original._sendChatMessage.call(this, options);
       this._chatApp?.fitInput?.();
       return result;
+    },
+    _attachChatFiles(files) {
+      if (this._chatApp?.embassy?.selected) { this.showToast?.('Embassy attachments are not available yet', 'info'); return; }
+      return original._attachChatFiles?.call(this, files);
     },
     _renderChatBadge() {
       original._renderChatBadge?.call(this);
@@ -6005,6 +6040,68 @@ function caInstall(proto) {
 }
 
 /** Start the app once the CodemanApp singleton exists. */
+/** Parse the existing guest key, or our fragment-only sharing envelope. No I/O. */
+function caEmbassyInvite(value) {
+  if (typeof value !== 'string' || value.length > 2048) throw new Error('Invalid invite');
+  value = value.trim();
+  let claimedHost = null;
+  if (!value.startsWith('embassy-v1|')) {
+    const link = new URL(value);
+    if (link.protocol !== 'https:' || link.username || link.password || link.search || link.pathname !== '/') throw new Error('Invalid invite');
+    const fields = new URLSearchParams(link.hash.slice(1));
+    if ([...fields].length !== 3 || fields.get('embassy') !== '1' || !fields.has('host') || !fields.has('key') || new Set(fields.keys()).size !== 3) throw new Error('Invalid invite');
+    claimedHost = fields.get('host');
+    value = fields.get('key');
+  }
+  if (value.length > 512 || new TextEncoder().encode(value).length > 512) throw new Error('Invalid invite');
+  const parts = value.split('|');
+  if (parts.length !== 3 || parts[0] !== 'embassy-v1' || !/^[A-Za-z0-9_-]{43}$/.test(parts[2])) throw new Error('Invalid invite');
+  const host = new URL(parts[1]);
+  if (host.protocol !== 'https:' || host.origin !== parts[1] || host.username || host.password || host.pathname !== '/' || host.search || host.hash ||
+      host.hostname.length > 253 || !host.hostname.includes('.') || /^[0-9.]+$/.test(host.hostname) ||
+      !host.hostname.split('.').every(label => /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(label)) ||
+      (claimedHost !== null && claimedHost !== host.origin)) throw new Error('Invalid invite');
+  return { key: value, origin: host.origin };
+}
+
+function caEmbassyJoinLink(value) {
+  const invite = caEmbassyInvite(value);
+  const link = new URL('/', invite.origin);
+  link.hash = new URLSearchParams({ embassy: '1', host: invite.origin, key: invite.key }).toString();
+  return link.href;
+}
+
+function caEmbassyTakeFragment(win) {
+  const staged = win.ReverieEmbassyInvite?.take?.();
+  if (staged?.invalid) return { invalid: true };
+  const hash = staged?.hash || win.location.hash;
+  if (!/^#embassy(?:=|&)/.test(hash)) return null;
+  // Invalid envelopes are scrubbed too. Preserve unrelated page/query state.
+  try { if (!staged?.scrubbed) win.history.replaceState(win.history.state, '', win.location.pathname + win.location.search); }
+  catch { return { invalid: true }; }
+  // The envelope is independent of the joining console's (possibly localhost)
+  // origin. This dummy origin is parsed only and is never requested.
+  try { return caEmbassyInvite('https://invite.invalid/' + hash); }
+  catch { return { invalid: true }; }
+}
+
+const caEmbassyQrLoads = new Map();
+function caEmbassyQrAsset(win, kind) {
+  const loaded = () => kind === 'code' ? win.ReverieQRCode : win.jsQR;
+  if (loaded()) return Promise.resolve(loaded());
+  if (caEmbassyQrLoads.has(kind)) return caEmbassyQrLoads.get(kind);
+  const promise = new Promise((resolve, reject) => {
+    const script = win.document.createElement('script');
+    script.src = kind === 'code' ? '/vendor/embassy-qr-code.min.js?v=1.5.4' : '/vendor/embassy-qr-scan.min.js?v=1.4.0';
+    script.referrerPolicy = 'no-referrer';
+    script.onload = () => loaded() ? resolve(loaded()) : reject(new Error('QR unavailable'));
+    script.onerror = () => { script.remove(); caEmbassyQrLoads.delete(kind); reject(new Error('QR unavailable')); };
+    win.document.head.append(script);
+  });
+  caEmbassyQrLoads.set(kind, promise);
+  return promise;
+}
+
 /** Guest-only embassy conversations. External posts never enter local chat delivery. */
 class ReverieEmbassyView {
   constructor(shell) {
@@ -6015,11 +6112,19 @@ class ReverieEmbassyView {
     this.posts = new Map();
     this.pending = new Map();
     this.drafts = new Map();
+    this.ownVerified = new Map();
+    this.sentReceipts = new Map();
     this.allowed = false;
     this.selected = null;
     this.version = 0;
     this.listEpoch = 0;
     this.mutationUnknown = new Set();
+    this.startInvite = caEmbassyIncomingInvite;
+    caEmbassyIncomingInvite = null;
+    this.win.addEventListener('hashchange', () => {
+      const invite = caEmbassyTakeFragment(this.win);
+      if (invite && this.allowed && !this.dialog) this.joinDialog(invite);
+    });
     this.collapsed = caRead('local', 'reverie:embassies:collapsed', '') === '1';
     this.refresh().catch(() => {});
     const tick = async () => {
@@ -6051,11 +6156,16 @@ class ReverieEmbassyView {
       if (epoch !== this.listEpoch || this.changing) return;
       if (!result.ok) {
         this.ownerRequired = result.status === 403 || /HTTP 403|signed-in owner|owner dashboard/i.test(this.failure(result));
+        this.lastFailure = { error: this.failure(result), status: Number.isInteger(result.status) ? result.status : undefined };
         // Do not retain a previous owner's external content after authorization disappears.
         this.allowed = false;
         this.connections = [];
         this.posts.clear();
         this.pending.clear();
+        this.ownVerified.clear();
+        this.sentReceipts.clear();
+        this.startInvite = null;
+        this.cancelJoin?.();
         this.close();
         this.renderSidebar();
         return;
@@ -6063,9 +6173,14 @@ class ReverieEmbassyView {
       this.allowed = true;
       this.mutationUnknown.clear();
       this.ownerRequired = false;
+      this.lastFailure = undefined;
       this.connections = Array.isArray(result.data?.connections) ? result.data.connections : [];
       if (this.selected && !this.connection()) this.close();
       this.renderSidebar();
+      if (this.startInvite && !this.dialog) {
+        const invite = this.startInvite; this.startInvite = null;
+        this.joinDialog(invite);
+      }
       if (this.selected) {
         this.updateControls();
         await this.loadPosts();
@@ -6093,7 +6208,21 @@ class ReverieEmbassyView {
         login.href = '/owner/login';
         note.append(login);
         host.append(note);
+        this.renderDirectory();
+        return;
       }
+      // Any other failure stays visible with the real error: the section never silently disappears, and there is no
+      // Add control until a refresh succeeds.
+      const failure = this.lastFailure || { error: 'Request refused' };
+      const note = this.el('section', 'eg-access-note');
+      note.setAttribute('role', 'alert');
+      const detail = failure.status ? `${failure.error} (HTTP ${failure.status})` : failure.error;
+      note.append(this.el('strong', '', 'Embassies'), this.el('p', '', `Embassies unavailable: ${detail}`));
+      const retry = this.button('Retry', () => { void this.refresh(); });
+      retry.setAttribute('aria-label', 'Retry loading embassies');
+      note.append(retry);
+      host.append(note);
+      this.renderDirectory();
       return;
     }
     const section = this.el('section', 'eg-category');
@@ -6132,78 +6261,175 @@ class ReverieEmbassyView {
     if (!this.connections.length) list.append(this.el('p', 'ca-hint', 'No embassy rooms connected'));
     section.append(header, list);
     host.append(section);
+    this.renderDirectory();
     if (focused) [...section.querySelectorAll('button')].find(b => focusId ? b.dataset.connection === focusId : b.getAttribute('aria-label') === focusLabel)?.focus();
+  }
+  directoryEl() {
+    const box = this.el('section', 'eg-directory');
+    box.setAttribute('aria-label', 'Embassy rooms');
+    box.append(this.el('h1', '', 'Embassies'), this.el('p', 'ca-hint', 'Shared rooms with other companies, here in your own Reverie.'));
+    if (!this.allowed) {
+      box.append(this.el('p', 'eg-directory-status', this.ownerRequired ? 'Sign in as the console owner to connect shared rooms.' : 'Checking embassy access…'));
+      if (this.ownerRequired) { const a = this.el('a', '', 'Owner sign-in'); a.href = '/owner/login'; box.append(a); }
+      return box;
+    }
+    const add = this.button('Add embassy channel', () => this.joinDialog());
+    box.append(add);
+    const list = this.el('div', 'eg-directory-list');
+    for (const c of this.connections) {
+      const row = this.button(c.roomName || 'Shared room', () => this.open(c.id));
+      row.classList.add('eg-directory-room'); row.dataset.connection = c.id;
+      row.append(this.el('small', '', `${c.hostCompany || 'External company'} · ${c.origin}`));
+      row.append(this.el('span', `eg-connection-state is-${c.status}`, this.connectionState(c)));
+      const count = this.unread(c); if (count) row.append(this.el('span', 'eg-unread', String(count)));
+      const card = this.el('article', 'eg-directory-card');
+      const disconnect = this.button('Disconnect', () => this.leave(c.id));
+      disconnect.classList.add('eg-disconnect'); disconnect.disabled = !!this.changing || c.status === 'left';
+      disconnect.setAttribute('aria-label', `Disconnect ${c.roomName || 'shared room'}`);
+      card.append(row, disconnect); list.append(card);
+    }
+    if (!this.connections.length) list.append(this.el('p', 'ca-hint', 'No shared rooms connected. Add a key, scan a QR or paste a link.'));
+    box.append(list); return box;
+  }
+  connectionState(c) {
+    return { live: 'Connected', connecting: 'Connecting…', disabled: 'Disabled here', left: 'Disconnected',
+      unreachable: 'Connection unavailable', expired: 'Access expired', refused: 'Connection refused', 'storage-full': 'Local copy full' }[c.status] || 'Connection unavailable';
+  }
+  ownReceipts(id) {
+    if (!this.sentReceipts.has(id)) {
+      let receipts = [];
+      try {
+        const value = caRead('local', this.key(id, 'sent-receipts'), '[]');
+        if (value.length <= 65536) {
+          const parsed = JSON.parse(value);
+          if (Array.isArray(parsed) && parsed.length <= 256) receipts = parsed.filter(r => r && typeof r.ackId === 'string' && r.ackId.length <= 64 &&
+            Number.isSafeInteger(r.sequence) && r.sequence > 0 && /^[a-f0-9]{64}$/.test(r.sha256));
+        }
+      } catch { /* Missing/corrupt proof never turns an imported post into our own. */ }
+      this.sentReceipts.set(id, receipts);
+    }
+    return this.sentReceipts.get(id);
+  }
+  async textDigest(text) {
+    if (typeof text !== 'string') throw new Error('No receipt');
+    const bytes = new TextEncoder().encode(text);
+    if (bytes.length > 4096) throw new Error('No receipt');
+    const digest = await this.win.crypto.subtle.digest('SHA-256', bytes);
+    return [...new Uint8Array(digest)].map(v => v.toString(16).padStart(2, '0')).join('');
+  }
+  async rememberOwn(id, post, sent) {
+    // Human-readable company/identity labels are spoofable. Only a confirmed
+    // response to THIS console's exact publication can establish a local receipt.
+    if (!this.allowed || !post || typeof post.ackId !== 'string' || post.ackId.length > 64 ||
+        !Number.isSafeInteger(post.sequence) || post.sequence <= 0 || post.text !== sent.text) return;
+    try {
+      const sha256 = await this.textDigest(sent.text);
+      if (!this.allowed) return;
+      const receipts = [...this.ownReceipts(id).filter(r => r.ackId !== post.ackId), { ackId: post.ackId, sequence: post.sequence, sha256 }].slice(-256);
+      this.sentReceipts.set(id, receipts);
+      caWrite('local', this.key(id, 'sent-receipts'), JSON.stringify(receipts));
+    } catch { /* No crypto/storage capability: keep conservative provenance. */ }
+  }
+  async verifyOwn(id, posts) {
+    const receipts = new Map(this.ownReceipts(id).map(r => [r.ackId, r]));
+    const verified = new Set();
+    await Promise.all(posts.filter(p => receipts.has(p.ackId)).slice(0, 256).map(async p => {
+      try {
+        const receipt = receipts.get(p.ackId);
+        if (receipt.sequence === p.sequence && receipt.sha256 === await this.textDigest(p.text)) verified.add(p.ackId);
+      } catch { /* Unverifiable content stays externally labelled. */ }
+    }));
+    if (this.allowed) this.ownVerified.set(id, verified);
+  }
+  renderDirectory() {
+    if (this.shell.embed === 'embassies' && this.shell.els.page) {
+      const page = this.shell.els.page;
+      const id = page.contains(this.doc.activeElement) ? this.doc.activeElement.dataset.connection : null;
+      page.replaceChildren(this.directoryEl());
+      if (id) [...page.querySelectorAll('[data-connection]')].find(n => n.dataset.connection === id)?.focus();
+    }
   }
   open(id) {
     if (!this.allowed || !this.connections.some(c => c.id === id)) return;
-    this.close();
-    this.selected = id;
-    this.version++;
-    this.shell.setView('chat');
-    this.shell.toggleDrawer(null);
-    const panel = this.el('section', 'eg-view');
-    const head = this.el('header', 'eg-head');
-    head.append(this.button('Channels', () => this.shell.toggleDrawer('channels')));
-    this.title = this.el('h1', 'eg-title');
-    this.status = this.el('p', 'eg-status');
-    this.status.setAttribute('role', 'status');
-    head.append(this.title, this.el('span', 'ca-tag', 'Shared · Guest'), this.status);
-    this.origin = this.el('p', 'eg-origin');
-    this.controls = this.el('div', 'eg-controls');
-    this.feed = this.el('div', 'eg-feed');
-    this.feed.setAttribute('role', 'log');
+    if (this.shell.app._chatSending) { this.shell.toast('Wait for the current message to finish sending', 'info'); return; }
+    this.close(); this.shell.closePage();
+    const app = this.shell.app, els = app._chatEls;
+    // Reuse the actual local channel feed/composer. External records remain in
+    // this adapter, never app._chatRoom, ChatroomStore or its agent wake path.
+    this.localState = { input: els.input.value, maxLength: els.input.getAttribute('maxlength'),
+      label: els.input.getAttribute('aria-label'), feedLabel: els.feed.getAttribute('aria-label') };
+    this.selected = id; this.version++;
+    this.shell.setView('chat'); this.shell.toggleDrawer(null);
+    this.panel = this.shell.els.chat; this.panel.classList.add('eg-view');
+    this.feed = els.feed; this.feed.classList.add('eg-feed'); this.feed.dataset.signature = '';
     this.feed.setAttribute('aria-label', 'Embassy conversation');
-    this.feed.setAttribute('aria-live', 'polite');
-    this.feed.addEventListener('scroll', () => this.markRead());
-    this.form = this.el('form', 'eg-composer');
-    this.input = this.el('textarea', 'eg-input');
+    this.form = els.composer; this.form.classList.add('eg-composer'); this.form.dataset.connection = id;
+    this.input = els.input; this.input.classList.add('eg-input'); this.input.maxLength = 4096;
     this.input.setAttribute('aria-label', 'Message to shared room');
-    this.input.placeholder = 'Message this shared room';
-    this.input.rows = 2;
-    this.input.maxLength = 4096;
-    this.send = this.el('button', 'ca-btn', 'Send');
-    this.send.type = 'submit';
-    this.notice = this.el('p', 'eg-notice');
-    this.notice.setAttribute('role', 'status');
-    this.form.append(this.input, this.send);
-    this.form.addEventListener('submit', e => { e.preventDefault(); void this.publish(); });
-    const pending = this.getPending(id);
-    this.input.value = pending?.text || this.drafts.get(id) || '';
-    this.form.dataset.connection = id;
-    panel.append(head, this.origin, this.controls, this.feed, this.notice, this.form,
-      this.el('p', 'eg-visibility', 'External guest conversation. Shared posts are visible to its members. Synced copies remain after leaving.'));
-    this.panel = panel;
-    this.shell.els.main.append(panel);
+    this.send = els.send;
+    this.detail = this.el('section', 'eg-detail');
+    this.status = this.el('p', 'eg-status'); this.status.setAttribute('role', 'status');
+    this.origin = this.el('p', 'eg-origin'); this.controls = this.el('div', 'eg-controls');
+    this.detail.append(this.status, this.origin, this.controls);
+    this.notice = this.el('p', 'eg-notice'); this.notice.setAttribute('role', 'status');
+    this.visibility = this.el('p', 'eg-visibility', 'UNTRUSTED EXTERNAL · Text and emoji shared with other companies. Files are not supported yet.');
+    els.feed.before(this.detail); els.composer.before(this.notice, this.visibility);
+    const pending = this.getPending(id); this.input.value = pending?.text || this.drafts.get(id) || '';
     this.shell.els.main.classList.add('eg-active');
-    this.renderSidebar();
-    this.updateControls();
-    void this.loadPosts();
+    this.shell.cancelReplySilently?.();
+    this.shell.renderHeader(); this.shell.renderMembers(); this.shell.renderChrome(); this.shell.renderSidebar();
+    this.updateControls(); this.renderPosts(); void this.loadPosts(); this.input.focus();
   }
   close() {
-    if (this.selected && this.input && this.form?.dataset.connection === this.selected) this.drafts.set(this.selected, this.input.value);
-    this.version++;
-    this.selected = null;
-    this.panel?.remove();
-    this.panel = null;
-    this.shell.els.main?.classList.remove('eg-active');
+    if (!this.selected) return;
+    if (this.input && this.form?.dataset.connection === this.selected) this.drafts.set(this.selected, this.input.value);
+    this.version++; this.selected = null;
+    this.detail?.remove(); this.notice?.remove(); this.visibility?.remove();
+    this.panel?.classList.remove('eg-view'); this.feed?.classList.remove('eg-feed'); this.form?.classList.remove('eg-composer'); this.input?.classList.remove('eg-input');
+    if (this.form) delete this.form.dataset.connection;
+    if (this.localState) {
+      this.input.value = this.localState.input;
+      if (this.localState.maxLength === null) this.input.removeAttribute('maxlength'); else this.input.setAttribute('maxlength', this.localState.maxLength);
+      if (this.localState.label === null) this.input.removeAttribute('aria-label'); else this.input.setAttribute('aria-label', this.localState.label);
+      if (this.localState.feedLabel === null) this.feed.removeAttribute('aria-label'); else this.feed.setAttribute('aria-label', this.localState.feedLabel);
+      this.localState = null;
+    }
+    this.input.disabled = false; this.input.readOnly = false; this.send.disabled = false; this.send.textContent = 'Send'; this.send.setAttribute('aria-label', 'Send message');
+    this.panel = null; this.shell.els.main.classList.remove('eg-active');
+    this.shell.renderHeader(); this.shell.renderMembers(); this.shell.renderFeed(); this.shell.renderChrome(); this.shell.syncComposer?.();
+  }
+  renderPosts() {
+    if (!this.selected || !this.feed) return;
+    const values = [...(this.posts.get(this.selected)?.values() || [])].sort((a, b) => a.sequence - b.sequence);
+    const top = this.feed.scrollTop, pinned = this.feed.scrollHeight - top - this.feed.clientHeight < 40;
+    this.feed.replaceChildren();
+    if (!values.length) this.feed.append(this.el('p', 'ca-feed-empty', 'This is the start of the shared room. Say hello.'));
+    for (const p of values) {
+      const own = this.ownVerified.get(this.selected)?.has(p.ackId) === true;
+      const row = this.shell.messageEl({ id: `embassy:${this.selected}:${p.ackId}`, at: Number(p.at) || Date.now(), to: 'all',
+        from: { kind: own ? 'user' : 'external', name: `${p.author?.company || 'External'} · ${p.author?.identity || 'Guest'}` }, text: p.text, external: true, own }, true);
+      row.classList.add('eg-post'); row.dataset.post = p.ackId; this.feed.append(row);
+    }
+    this.feed.scrollTop = pinned ? this.feed.scrollHeight : top;
   }
   updateControls() {
     const c = this.connection();
     if (!c || !this.panel) return;
-    this.title.textContent = c.roomName;
+    this.shell.renderHeader();
     this.origin.textContent = `${c.hostCompany} · ${c.origin} · Guest access (TLS origin; no signed identity pin)`;
     const state = this.mutationUnknown.has(c.id) ? 'State change unconfirmed' : c.status === 'disabled' ? 'Disabled here' : c.status;
-    this.status.textContent = `${state}${c.lastError ? ` · ${c.lastError}` : ''}`;
+    this.status.textContent = `${this.mutationUnknown.has(c.id) ? state : this.connectionState(c)}${c.lastError ? ` · ${c.lastError}` : ''}`;
     const controlFocus = this.controls.contains(this.doc.activeElement) ? this.doc.activeElement?.getAttribute('aria-label') : null;
     this.controls.replaceChildren();
     if (c.status !== 'left') {
       this.controls.append(this.button(c.enabled ? 'Disable' : 'Enable', () => this.setEnabled(c.id, !c.enabled)),
-        this.button('Leave', () => this.leave(c.id)));
+        this.button('Disconnect', () => this.leave(c.id)));
     }
     for (const b of this.controls.querySelectorAll('button')) b.disabled = !!this.changing;
     if (controlFocus) [...this.controls.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === controlFocus)?.focus();
     const pending = this.getPending(c.id);
     this.send.textContent = pending ? 'Retry same message' : 'Send';
+    this.send.setAttribute('aria-label', pending ? 'Retry same message' : 'Send message');
     this.send.disabled = !!this.sending || this.changing === c.id || this.mutationUnknown.has(c.id) || !c.enabled || !['live', 'connecting'].includes(c.status) || c.expiresAt <= Date.now();
     this.input.disabled = this.changing === c.id || this.mutationUnknown.has(c.id) || !c.enabled || c.status === 'left' || c.status === 'expired';
     this.input.readOnly = !!pending;
@@ -6230,23 +6456,10 @@ class ReverieEmbassyView {
         after = result.data.next;
       }
       if (version !== this.version || this.selected !== id) return;
-      const previousScroll = this.feed.scrollTop;
-      const atBottom = this.feed.scrollHeight - this.feed.clientHeight - this.feed.scrollTop < 40;
-      const values = [...items.values()].sort((a, b) => a.sequence - b.sequence);
-      const sig = values.map(p => p.ackId).join('|');
-      if (sig !== this.feed.dataset.signature) {
-        this.feed.replaceChildren();
-        for (const p of values) {
-          const row = this.el('article', 'eg-post');
-          row.dataset.post = p.ackId;
-          row.append(this.el('strong', 'eg-author', `${p.author?.company || 'External'} · ${p.author?.identity || 'Guest'}`),
-            this.el('span', 'eg-trust', `External · ${p.trust || p.author?.kind || 'guest'}`),
-            this.el('p', 'eg-text', p.text));
-          this.feed.append(row);
-        }
-        this.feed.dataset.signature = sig;
-        this.feed.scrollTop = atBottom ? this.feed.scrollHeight : previousScroll;
-      }
+      await this.verifyOwn(id, [...items.values()]);
+      if (version !== this.version || this.selected !== id) return;
+      const sig = [...items.values()].sort((a, b) => a.sequence - b.sequence).map(p => `${p.ackId}:${this.ownVerified.get(id)?.has(p.ackId) ? 1 : 0}`).join('|');
+      if (sig !== this.feed.dataset.signature) { this.feed.dataset.signature = sig; this.renderPosts(); }
       this.markRead();
     } finally { if (this.loading === id) this.loading = null; }
   }
@@ -6290,6 +6503,7 @@ class ReverieEmbassyView {
     const result = await this.api(`/${encodeURIComponent(id)}/posts`, { method: 'POST', body: pending });
     this.sending = false;
     if (result.ok) {
+      await this.rememberOwn(id, result.data?.post, pending);
       this.pending.delete(id);
       this.drafts.delete(id);
       caWrite('session', this.key(id, 'pending'), 'null');
@@ -6298,6 +6512,7 @@ class ReverieEmbassyView {
       if (result.ok) { this.input.value = ''; this.notice.textContent = 'Posted'; await this.loadPosts(); }
       else this.notice.textContent = `Not confirmed. ${this.failure(result)} Retry uses the same message id.`;
       this.updateControls();
+      this.shell.fitInput?.(); this.shell.syncComposer?.();
     }
   }
   async mutateConnection(id, options) {
@@ -6325,35 +6540,149 @@ class ReverieEmbassyView {
     await this.mutateConnection(id, { method: 'PUT', body: { enabled } });
   }
   async leave(id) {
-    if (!this.win.confirm('Leave this embassy room? Sending and syncing stop. Synced history and copies elsewhere remain.')) return;
+    if (!this.win.confirm('Disconnect this embassy room? Sending and syncing stop. Synced history and copies elsewhere remain.')) return;
     await this.mutateConnection(id, { method: 'DELETE' });
   }
-  joinDialog() {
+  joinDialog(initial = null) {
     if (!this.allowed || this.dialog) return;
     const dlg = this.el('dialog', 'ca-dialog eg-dialog');
     this.dialog = dlg;
     dlg.setAttribute('aria-label', 'Add embassy channel');
     const title = this.el('h2', '', 'Add embassy channel');
-    const explain = this.el('p', '', 'Paste a guest invite key. Confirm its host before this server connects. No owner access is granted.');
+    const explain = this.el('p', '', 'Paste a key, scan a QR, or paste an invite link. Confirm the host before connecting. Guest access only.');
     const label = this.el('label', '', 'Invite key');
     const input = this.el('input', 'eg-key');
     input.type = 'password';
     input.autocomplete = 'off';
     input.spellcheck = false;
+    input.maxLength = 2048;
     label.append(input);
     const note = this.el('p', 'eg-join-status');
     note.setAttribute('role', 'status');
+    let secret = '', origin = '', joining = false, closed = false, stream = null, scanTimer = null, cameraEpoch = 0, renderEpoch = 0, shareLink = '';
+    const valid = () => !closed && this.allowed && this.dialog === dlg;
+    const tools = this.el('div', 'eg-join-tools');
+    const qr = this.el('section', 'eg-qr-output'); qr.hidden = true;
+    const qrCanvas = this.el('canvas', 'eg-qr-canvas');
+    qrCanvas.setAttribute('role', 'img'); qrCanvas.setAttribute('aria-label', 'Private embassy invite QR');
+    const shareLabel = this.el('label', '', 'Invite link (private)');
+    const shareInput = this.el('input', 'eg-share-link'); shareInput.type = 'password'; shareInput.readOnly = true; shareInput.autocomplete = 'off';
+    shareLabel.append(shareInput);
+    const scan = this.el('section', 'eg-scan'); scan.hidden = true;
+    const linkLabel = this.el('label', '', 'Invite link');
+    const linkInput = this.el('input', 'eg-invite-link'); linkInput.type = 'password'; linkInput.autocomplete = 'off'; linkInput.maxLength = 2048; linkInput.spellcheck = false;
+    linkLabel.append(linkInput);
+    const video = this.el('video', 'eg-scan-video'); video.muted = true; video.playsInline = true; video.hidden = true;
+    const stopCamera = () => {
+      cameraEpoch++;
+      if (scanTimer !== null) this.win.clearTimeout(scanTimer);
+      scanTimer = null;
+      for (const track of stream?.getTracks() || []) track.stop();
+      stream = null; video.srcObject = null; video.hidden = true;
+    };
+    const clearQR = () => {
+      renderEpoch++; shareLink = ''; shareInput.value = ''; shareInput.type = 'password';
+      qrCanvas.width = 0; qrCanvas.height = 0; qr.hidden = true;
+    };
+    const acceptInvite = (value) => {
+      const invite = caEmbassyInvite(value);
+      if (!valid()) return;
+      stopCamera(); clearQR(); linkInput.value = ''; input.value = invite.key; scan.hidden = true;
+      note.textContent = `Invite ready for ${invite.origin}. Choose Check host, then confirm.`;
+      next.focus();
+    };
+    const showQR = this.button('Show QR', async () => {
+      stopCamera(); clearQR(); scan.hidden = true; linkInput.value = '';
+      const epoch = renderEpoch;
+      try {
+        const link = caEmbassyJoinLink(input.value);
+        const encoder = await caEmbassyQrAsset(this.win, 'code');
+        if (!valid() || epoch !== renderEpoch) return;
+        await encoder.toCanvas(qrCanvas, link, { errorCorrectionLevel: 'M', margin: 4, width: 320 });
+        if (!valid() || epoch !== renderEpoch) { qrCanvas.width = 0; return; }
+        shareLink = link; shareInput.value = link; qr.hidden = false;
+        note.textContent = 'Private invite: scan or paste it in your own Reverie console. Anyone with it can use its guest access.';
+      } catch { if (valid()) note.textContent = 'QR unavailable or invalid key. Paste a valid key, or join using the key directly.'; }
+    });
+    const copy = this.button('Copy invite link', async () => {
+      if (!valid() || !shareLink) return;
+      try { await this.win.navigator.clipboard.writeText(shareLink); if (valid()) note.textContent = 'Invite link copied. Share it privately.'; }
+      catch { if (valid()) { shareInput.type = 'text'; shareInput.focus(); shareInput.select(); note.textContent = 'Select and copy the invite link. Share it privately.'; } }
+    });
+    qr.append(qrCanvas, this.el('p', '', 'Scan from Embassies + → Scan/paste link in the joining company’s console.'), shareLabel, copy);
+    const useLink = this.button('Use link', () => {
+      const value = linkInput.value; linkInput.value = '';
+      try { acceptInvite(value); } catch { note.textContent = 'Invalid invite link. No connection was made.'; }
+    });
+    const startCamera = this.button('Scan with camera', async () => {
+      stopCamera(); const epoch = cameraEpoch;
+      if (!this.win.navigator.mediaDevices?.getUserMedia) { note.textContent = 'Camera unavailable. Paste the link or choose a QR image.'; return; }
+      try {
+        const decoder = await caEmbassyQrAsset(this.win, 'scan');
+        if (!valid() || epoch !== cameraEpoch) return;
+        const camera = await this.win.navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false });
+        if (!valid() || epoch !== cameraEpoch) { for (const track of camera.getTracks()) track.stop(); return; }
+        stream = camera; video.srcObject = camera; video.hidden = false; await video.play();
+        const canvas = this.el('canvas'); const ctx = canvas.getContext('2d', { willReadFrequently: true });
+        const deadline = Date.now() + 60000;
+        const tick = () => {
+          if (!valid() || epoch !== cameraEpoch || this.doc.hidden || Date.now() > deadline) { stopCamera(); return; }
+          try {
+            if (video.videoWidth && video.videoHeight) {
+              const scale = Math.min(1, 1280 / Math.max(video.videoWidth, video.videoHeight));
+              canvas.width = Math.max(1, Math.round(video.videoWidth * scale)); canvas.height = Math.max(1, Math.round(video.videoHeight * scale));
+              ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+              const image = ctx.getImageData(0, 0, canvas.width, canvas.height);
+              const code = decoder(image.data, image.width, image.height, { inversionAttempts: 'dontInvert' });
+              if (code) { acceptInvite(code.data); canvas.width = 0; return; }
+            }
+          } catch { note.textContent = 'No valid embassy invite found yet. You can paste the link instead.'; }
+          scanTimer = this.win.setTimeout(tick, 250);
+        };
+        note.textContent = 'Camera scans locally. No images are uploaded.'; tick();
+      } catch { stopCamera(); if (valid()) note.textContent = 'Camera unavailable. Paste the link or choose a QR image.'; }
+    });
+    const stop = this.button('Stop camera', stopCamera);
+    const fileLabel = this.el('label', '', 'Choose QR image');
+    const file = this.el('input', 'eg-qr-file'); file.type = 'file'; file.accept = 'image/png,image/jpeg,image/webp'; fileLabel.append(file);
+    file.addEventListener('change', async () => {
+      stopCamera(); const epoch = cameraEpoch; const imageFile = file.files?.[0]; file.value = '';
+      if (!imageFile) return;
+      if (imageFile.size > 5 * 1024 * 1024 || !['image/png', 'image/jpeg', 'image/webp'].includes(imageFile.type)) { note.textContent = 'Choose a PNG, JPEG or WebP QR image up to 5 MB.'; return; }
+      let bitmap = null;
+      try {
+        const decoder = await caEmbassyQrAsset(this.win, 'scan');
+        if (!valid() || epoch !== cameraEpoch) return;
+        bitmap = await this.win.createImageBitmap(imageFile);
+        if (!valid() || epoch !== cameraEpoch) return;
+        if (!bitmap.width || !bitmap.height || bitmap.width * bitmap.height > 16000000) throw new Error('Image too large');
+        const scale = Math.min(1, 2048 / Math.max(bitmap.width, bitmap.height));
+        const canvas = this.el('canvas'); canvas.width = Math.max(1, Math.round(bitmap.width * scale)); canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+        const ctx = canvas.getContext('2d', { willReadFrequently: true }); ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+        const image = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const code = decoder(image.data, image.width, image.height); canvas.width = 0;
+        if (!code) throw new Error('No QR');
+        acceptInvite(code.data);
+      } catch { if (valid()) note.textContent = 'No valid embassy QR found. Paste the invite link instead.'; }
+      finally { bitmap?.close(); }
+    });
+    scan.append(linkLabel, useLink, startCamera, stop, fileLabel, video);
+    const scanLink = this.button('Scan/paste link', () => { stopCamera(); clearQR(); scan.hidden = false; linkInput.focus(); });
+    tools.append(showQR, scanLink);
+    input.addEventListener('input', clearQR);
     const next = this.button('Check host', async () => {
       if (next.disabled) return;
       next.disabled = true;
       const value = input.value;
       input.value = '';
+      stopCamera(); clearQR(); linkInput.value = ''; scan.hidden = true;
       const result = await this.api('/preview', { method: 'POST', body: { key: value } });
-      if (!dlg.isConnected) return;
+      if (!valid()) return;
       if (!result.ok) { note.textContent = 'Invalid invite key. Paste a valid key to try again.'; next.disabled = false; return; }
       secret = value;
       origin = result.data.origin;
       label.hidden = true;
+      tools.hidden = true;
       note.textContent = `Connect this server to ${origin}? Room details appear only after joining.`;
       next.textContent = 'Connect';
       next.setAttribute('aria-label', 'Connect');
@@ -6361,10 +6690,13 @@ class ReverieEmbassyView {
       next.replaceWith(confirm);
       confirm.focus();
     });
-    let secret = '', origin = '', joining = false;
     const cleanup = () => {
-      secret = ''; input.value = '';
+      if (closed) return;
+      closed = true; stopCamera(); clearQR(); secret = ''; input.value = ''; linkInput.value = ''; file.value = '';
+      this.doc.removeEventListener('visibilitychange', visibility);
+      this.win.removeEventListener('pagehide', cleanup);
       dlg.remove(); this.dialog = null;
+      if (this.cancelJoin === cleanup) this.cancelJoin = null;
       this.shell.els.sideScroll.querySelector('[aria-label="Add embassy channel"]')?.focus();
     };
     const confirm = this.button('Connect', async () => {
@@ -6375,6 +6707,7 @@ class ReverieEmbassyView {
       note.textContent = 'Connecting…';
       const result = await this.api('/join', { method: 'POST', body: { key, confirmedOrigin: origin } });
       this.listEpoch++;
+      if (!valid()) { if (this.allowed) await this.refresh(); return; }
       if (result.ok && result.data?.id) {
         const joined = result.data;
         this.connections = [...this.connections.filter(c => c.id !== joined.id), joined];
@@ -6389,11 +6722,24 @@ class ReverieEmbassyView {
       cleanup(); if (id) this.open(id); await this.refresh();
     });
     const cancel = this.button('Cancel', cleanup);
+    const visibility = () => { if (this.doc.hidden) stopCamera(); };
+    this.doc.addEventListener('visibilitychange', visibility);
+    this.win.addEventListener('pagehide', cleanup);
+    this.cancelJoin = cleanup;
     dlg.addEventListener('cancel', e => { e.preventDefault(); cleanup(); });
-    dlg.append(title, explain, label, note, next, cancel);
+    dlg.addEventListener('close', cleanup);
+    const heading = this.el('header', 'eg-dialog-head');
+    const headingText = this.el('div'); headingText.append(title, explain);
+    const close = this.button('Close', cleanup); close.textContent = '×'; close.classList.add('eg-dialog-close');
+    heading.append(headingText, close);
+    const content = this.el('div', 'eg-dialog-body'); content.append(label, tools, qr, scan, note);
+    const actions = this.el('footer', 'eg-dialog-actions'); next.classList.add('is-primary'); confirm.classList.add('is-primary');
+    actions.append(cancel, next); dlg.append(heading, content, actions);
     this.doc.body.append(dlg);
     if (typeof dlg.showModal === 'function') dlg.showModal(); else dlg.setAttribute('open', '');
     input.focus();
+    if (initial?.key) { input.value = initial.key; note.textContent = `Invite ready for ${initial.origin}. Check host before connecting.`; }
+    else if (initial?.invalid) note.textContent = 'Invalid invite link. Paste a new key or link.';
   }
 }
 
@@ -6477,5 +6823,8 @@ if (typeof module !== 'undefined' && module.exports) {
     caCount,
     caMentionCandidates,
     ReverieEmbassyView,
+    caEmbassyInvite,
+    caEmbassyJoinLink,
+    caEmbassyTakeFragment,
   };
 }

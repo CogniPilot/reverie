@@ -113,11 +113,14 @@ describe('the default view', () => {
     const side = labels(h.document.querySelectorAll('.ca-side-scroll button:not(.ca-item-act)'));
     expect(side).toEqual([
       'Board',
+      'Embassies',
       'Build category, 1 mention',
       'Channel General',
       'Channel Ops, 1 mention',
       'Misc category',
       'Channel Side',
+      // The harness has no embassy API: the failure stays visible with a retry.
+      'Retry loading embassies',
     ]);
     expect(h.document.querySelector('.ca-item[aria-current]')!.textContent).toContain('General');
   });
@@ -4132,7 +4135,7 @@ describe('the Board entry', () => {
     const h = await createHarness({ sessions, rooms: fixtureRooms() });
     const scroll = h.document.querySelector('.ca-side-scroll')!;
     expect(scroll.firstElementChild!.classList.contains('ca-pages')).toBe(true);
-    expect([...scroll.querySelectorAll('.ca-pages .ca-item')].map((b) => b.textContent)).toEqual(['Board']);
+    expect([...scroll.querySelectorAll('.ca-pages .ca-item')].map((b) => b.textContent)).toEqual(['Board','Embassies']);
     expect(entry(h, 'board').draggable).toBe(false);
     expect(h.document.querySelector('.ca-page')).toBeNull();
   });

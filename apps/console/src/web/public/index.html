@@ -6,6 +6,8 @@
        served at /session/:id (detached single-session window) without 404ing
        on relative <script>/<link> URLs. Must precede the first resource tag. -->
   <base href="/">
+  <!-- Blocking: remove invitation secrets from the URL before the app initializes. -->
+  <script src="embassy-invite-bootstrap.js"></script>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="description" content="Chat with your AI agents, follow your channels, and stay in touch from your phone.">
   <meta name="theme-color" content="#11151c">
