@@ -187,4 +187,27 @@ describe('minimal agent terminal in Chromium', () => {
     await page.frameLocator('.ca-page-frame').getByText('Usage and resets').waitFor({ state: 'visible' });
     expect(await page.frameLocator('.ca-page-frame').getByText('Usage and resets').isVisible()).toBe(true);
   });
+  it('fits the debug terminal to keyboard height and viewport panning, then restores it', async () => {
+    await open(390);
+    await page.evaluate(() => (window as any).reverieChat.showDebug('a1111111-0000-4000-8000-000000000001'));
+    for (const [height, top, event] of [[480, 32, 'resize'], [480, 64, 'scroll'], [560, 0, 'resize'], [844, 0, 'resize']] as const) {
+      await page.evaluate(({height, top, event}) => {
+        const vv = window.visualViewport!;
+        Object.defineProperty(vv, 'height', {value: height, configurable: true});
+        Object.defineProperty(vv, 'offsetTop', {value: top, configurable: true});
+        vv.dispatchEvent(new Event(event));
+      }, {height, top, event});
+      const main = await page.locator('.app > .main').boundingBox();
+      const terminal = await page.locator('#terminalContainer').boundingBox();
+      const back = await page.getByRole('button', {name:'Back to chat', exact:true}).boundingBox();
+      expect(main!.y).toBeCloseTo(top + 48, 0);
+      expect(main!.y + main!.height).toBeLessThanOrEqual(top + height + 1);
+      expect(terminal!.y + terminal!.height).toBeLessThanOrEqual(top + height + 1);
+      expect(back!.y).toBeGreaterThanOrEqual(top);
+      expect(back!.y + back!.height).toBeLessThanOrEqual(top + 48);
+    }
+    await page.getByRole('button', {name:'Back to chat', exact:true}).click();
+    expect(await page.locator('#chatApp').isVisible()).toBe(true);
+  });
+
 });
