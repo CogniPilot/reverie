@@ -48,13 +48,13 @@ describe('Board timeline navigation in Chromium', () => {
     expect(errors).toEqual([]);
   });
 
-  async function open(width = 1100) {
+  async function open(width = 1100, data: Record<string, unknown> = board) {
     errors = [];
     page = await browser.newPage({ viewport: { width, height: 650 } });
     page.on('pageerror', (e) => errors.push(e.message));
     await page.route('http://board.test/**', async (route) => {
       if (new URL(route.request().url()).pathname === '/api/board') {
-        await route.fulfill({ json: { success: true, data: board } });
+        await route.fulfill({ json: { success: true, data } });
       } else await route.fulfill({ contentType: 'text/html', body: html });
     });
     await page.goto('http://board.test/board');
@@ -84,6 +84,20 @@ describe('Board timeline navigation in Chromium', () => {
       { modifier, deltaX }
     );
   }
+
+  it('groups legacy name owners with their canonical person in timeline and People', async () => {
+    const row = (id: string, owner: {owner?: string; ownerLabel?: string}, status='todo') => ({...board.issues[0],id,title:id,...owner,status});
+    await open(390, {...board, roster:[{id:'person-one',name:'Morgan',state:'idle',position:'Engineer'}],
+      issues:[row('stable',{owner:'person-one'},'done'),row('label',{owner:undefined,ownerLabel:'mOrGaN'}),row('literal',{owner:'MORGAN'}),row('james',{owner:undefined,ownerLabel:'James'}),row('sleep',{owner:undefined,ownerLabel:'Sleep'})],
+      ownerIds:{stable:'person-one',label:'person-one',literal:'person-one'},
+      pace:{owners:{'person-one':{plannedToDate:3,doneOfPlanned:1,overdue:2,overdueHours:2,early:0,verdict:'behind'}}}});
+    const rows=await page.evaluate(() => window.eval('rowsForView().map(r=>({key:r.key,who:r.who,count:r.items.length}))'));
+    expect(rows).toEqual([{key:'person-one',who:'Morgan',count:3},{key:'label:James',who:'James',count:1},{key:'label:Sleep',who:'Sleep',count:1}]);
+    expect(await page.evaluate(() => window.eval('ownerName(B.issues[1])'))).toBe('Morgan');
+    const person=page.locator('#agents .agent').filter({hasText:'Morgan'});
+    expect(await person.locator('.nums').textContent()).toContain('2 overdue');
+    expect(await person.locator('.nums').textContent()).toContain('1/3 2-wk items');
+  });
 
   it('leaves ordinary vertical and horizontal wheel events uncancelled and the view unchanged', async () => {
     await open();

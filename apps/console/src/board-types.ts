@@ -243,6 +243,8 @@ export interface BoardView extends BoardState {
   timeZone: string;
   ownerName: string;
   roster: RosterRow[];
+  /** Per-issue resolved display owner; never an authorization or stored-owner replacement. */
+  ownerIds: Record<string, string>;
   /** Same gate as GET /api/plans: null unless the caller is an admin. */
   planBurn: PlanBurn[] | null;
   polls: BoardPoll[];

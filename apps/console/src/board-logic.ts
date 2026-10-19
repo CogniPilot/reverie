@@ -3,7 +3,7 @@
  * (runtime/board/content.json and reports/schedule/schedule-data.json). No IO here.
  */
 import { createHash } from 'node:crypto';
-import type { BoardState, Issue, IssueStatus, Mark, Pace } from './board-types.js';
+import type { BoardState, Issue, IssueStatus, Mark, Pace, RosterRow } from './board-types.js';
 
 const HOUR = 3600_000;
 
@@ -29,12 +29,31 @@ export function paceOf(issues: readonly Issue[], now: number): Pace {
   return { plannedToDate, doneOfPlanned, overdue, overdueHours: Math.round((overdueMs / HOUR) * 10) / 10, early, verdict };
 }
 
+/** Resolve display ownership only; ambiguous names stay unresolved and stored ownership is unchanged. */
+export function boardOwnerIds(
+  issues: readonly Pick<Issue, 'id' | 'owner' | 'ownerLabel'>[],
+  roster: readonly Pick<RosterRow, 'id' | 'name'>[]
+): Record<string, string> {
+  const ids = new Set(roster.map(person => person.id));
+  const names = new Map<string, string | null>();
+  for (const person of roster) {
+    const name = person.name.trim().toLowerCase();
+    names.set(name, names.has(name) && names.get(name) !== person.id ? null : person.id);
+  }
+  return Object.fromEntries(issues.flatMap(issue => {
+    const raw = issue.owner || issue.ownerLabel;
+    if (!raw) return [];
+    const id = ids.has(raw) ? raw : names.get(raw.trim().toLowerCase());
+    return id ? [[issue.id, id]] : [];
+  }));
+}
+
 /** Pace per owner and per milestone (milestones also get done/total over their non-wontdo issues). */
-export function boardPace(state: Pick<BoardState, 'issues' | 'milestones'>, now: number) {
+export function boardPace(state: Pick<BoardState, 'issues' | 'milestones'>, now: number, ownerIds: Readonly<Record<string, string>> = {}) {
   const byOwner = new Map<string, Issue[]>();
   const byMilestone = new Map<string, Issue[]>();
   for (const issue of state.issues) {
-    const owner = issue.owner ?? issue.ownerLabel;
+    const owner = Object.hasOwn(ownerIds, issue.id) ? ownerIds[issue.id] : issue.owner ?? issue.ownerLabel;
     if (owner) byOwner.set(owner, [...(byOwner.get(owner) ?? []), issue]);
     if (issue.milestoneId) byMilestone.set(issue.milestoneId, [...(byMilestone.get(issue.milestoneId) ?? []), issue]);
   }
