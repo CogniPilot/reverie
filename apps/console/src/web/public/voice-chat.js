@@ -49,13 +49,22 @@ function chatSpeechJoin(previous, next) {
 
 /** Rebuild from the current result snapshot; resultIndex is an update offset, not an append instruction. */
 function chatSpeechSnapshot(results) {
-  let final = '', interim = '';
+  const finals = [], interims = [], all = [];
+  const append = (parts, raw) => {
+    const text = String(raw || '').trim();
+    if (!text) return;
+    // An equal final remains a separate segment. Only a later STRICT extension
+    // replaces its trailing prefix segments, even if that prefix was repeated.
+    let start = parts.length;
+    while (start > 0 && text.startsWith(`${parts[start - 1]} `)) start--;
+    parts.splice(start, parts.length - start, text);
+  };
   for (let i = 0; i < results.length; i++) {
     const text = results[i]?.[0]?.transcript || '';
-    if (results[i].isFinal) final = chatSpeechJoin(final, text);
-    else interim = chatSpeechJoin(interim, text);
+    append(results[i].isFinal ? finals : interims, text);
+    append(all, text);
   }
-  return { final, interim, text: chatSpeechJoin(final, interim) };
+  return { final: finals.join(' '), interim: interims.join(' '), text: all.join(' ') };
 }
 
 /** Room-wide replies are addressed to the owner only by an exact mention or an actual spoken-owner reply. */
