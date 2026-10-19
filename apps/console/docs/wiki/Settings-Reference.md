@@ -162,8 +162,7 @@ corner toast stays on screen (**Toast display time**, 1 to 300 seconds, default 
 how long a desktop notification stays up before Reverie closes it (**Browser
 notification display time**, default 8; both per device, and your OS may close a
 desktop notification sooner), the idle
-threshold that decides when a quiet session counts as needing you, and the server-wide
-webhook (ntfy, Slack, Discord or generic JSON; admins only in multi-user mode). See
+threshold that decides when a quiet session counts as needing you. See
 [Notifications And Approvals](Notifications-And-Approvals).
 
 ### Voice

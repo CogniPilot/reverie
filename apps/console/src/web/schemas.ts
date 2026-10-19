@@ -23,7 +23,6 @@ import {
 } from '../config/terminal-history.js';
 import { MAX_EDITABLE_BYTES } from '../config/file-editing.js';
 import { CODEX_REASONING_EFFORTS } from '../types/session.js';
-import { WEBHOOK_KINDS, WEBHOOK_SCOPES } from '../types/push.js';
 import { MIN_MATCH_LENGTH, MAX_MATCH_LENGTH } from '../config/agent-wait.js';
 import { MAX_WAKE_MACS } from '../config/remote-wake-limits.js';
 import { MAX_INPUT_LENGTH } from '../config/terminal-limits.js';
@@ -2095,20 +2094,6 @@ export const PushSubscribeSchema = z.object({
 export const PushPreferencesUpdateSchema = z.object({
   pushPreferences: z.record(z.string(), z.boolean()),
 });
-
-/**
- * PUT /api/webhook. `.strict()` like every settings-shaped schema; `url` is optional so a change of
- * kind or scope never needs the secret re-sent, and an empty string clears it. The kind and scope
- * lists are the store's own, so the schema can never accept a value the store would coerce away.
- */
-export const WebhookUpdateSchema = z
-  .object({
-    enabled: z.boolean().optional(),
-    kind: z.enum(WEBHOOK_KINDS).optional(),
-    scope: z.enum(WEBHOOK_SCOPES).optional(),
-    url: z.string().max(2048).optional(),
-  })
-  .strict();
 
 // ========== Ralph Loop ==========
 

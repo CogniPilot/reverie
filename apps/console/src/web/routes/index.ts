@@ -34,7 +34,6 @@ export { registerWebviewRoutes, tryWebviewRefererFallback } from './webview-rout
 export { registerTabLayoutRoutes } from './tab-layout-routes.js';
 export { registerChatroomRoutes } from './chatroom-routes.js';
 export { registerMcpSyncRoutes } from './mcp-sync-routes.js';
-export { registerWebhookRoutes } from './webhook-routes.js';
 export { registerDoctorRoutes } from './doctor-routes.js';
 export { registerBoardRoutes } from './board-routes.js';
 export {
