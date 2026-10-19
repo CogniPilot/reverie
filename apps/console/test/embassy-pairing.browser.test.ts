@@ -58,3 +58,15 @@ it('cancelling keeps recovery visible across dialog restore and waits for confir
  expect(await page.evaluate(()=>window.__pair.calls.filter(c=>c.path==='/api/embassy-pairing'&&c.method==='POST').length)).toBe(1);
  await page.getByRole('button',{name:'Start over',exact:true}).click();await page.getByRole('button',{name:'Scan with camera',exact:true}).waitFor();
 });
+it('hosted view keeps its composer label and hides local typing on desktop and phone',async()=>{
+ await page.getByRole('button',{name:'Close',exact:true}).click();
+ await page.evaluate(()=>{const s=window.reverieChat;s.app.sessions.set('local-agent',{id:'local-agent',status:'idle',mode:'claude',name:'Local colleague'});s.noteTurn({roomId:s.roomId,sessionId:'local-agent'});});
+ expect(await page.locator('.ca-typing').isVisible()).toBe(true);
+ await page.evaluate(()=>{const s=window.reverieChat;s.embassy.open('__host__');s.syncComposer();s.noteTurn({roomId:s.roomId,sessionId:'local-agent'});});
+ for(const width of [1280,390]){
+  await page.setViewportSize({width,height:844});expect(await page.locator('.eg-input').getAttribute('placeholder')).toBe('Message #Lab commons');
+  expect(await page.locator('.ca-typing').isVisible()).toBe(false);
+ }
+ await page.evaluate(()=>window.reverieChat.embassy.close());expect(await page.locator('.ca-typing').isVisible()).toBe(true);
+ expect(await page.evaluate(()=>window.reverieChat.app._chatEls.input.placeholder)).toBe('Message #General');
+});

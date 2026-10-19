@@ -2308,6 +2308,12 @@ class ReverieChatApp {
 
   /* ── composer ── */
 
+  composerPlaceholder() {
+    if (this.embassy?.selected) return `Message #${this.embassy.connection()?.roomName || 'shared room'}`;
+    const room = this.room;
+    return !room || this.app._chatCreating ? 'Message' : caIsDm(room) ? `Message @${caRoomLabel(room)}` : `Message #${room.name}`;
+  }
+
   /**
    * Discord's message box: "+" (upload) on the left, then the box, then dim GIF / sticker icons and the emoji
    * button. There is no "To" menu: the channel decides who reads a message. The mic exists in voice channels only.
@@ -2347,8 +2353,7 @@ class ReverieChatApp {
     send.setAttribute('aria-label', 'Send message');
     this.syncComposer = () => {
       sync();
-      const room = this.room;
-      input.placeholder = !room || this.app._chatCreating ? 'Message' : caIsDm(room) ? `Message @${caRoomLabel(room)}` : `Message #${room.name}`;
+      input.placeholder = this.composerPlaceholder();
     };
     this.syncComposer();
   }
@@ -2706,7 +2711,7 @@ class ReverieChatApp {
     const bar = this.els.typing;
     if (!bar) return;
     const names = [...(this.turns?.values() || [])]
-      .filter((t) => t.roomId === this.roomId)
+      .filter((t) => !this.embassy?.selected && t.roomId === this.roomId)
       .map((t) => this.room?.members?.find((m) => m.sessionId === t.sessionId)?.name)
       .filter(Boolean);
     bar.replaceChildren();
@@ -3367,7 +3372,7 @@ class ReverieChatApp {
     this.els.root.classList.toggle('ca-members-open', this.membersOpen);
     this.els.root.dataset.drawer = this.drawer || '';
     this.els.membersBtn.setAttribute('aria-pressed', String(this.membersOpen));
-    const placeholder = this.embassy?.selected ? `Message #${this.embassy.connection()?.roomName || 'shared room'}` : this.room ? `Message ${this.room.kind === 'dm' ? '@' : '#'}${caRoomLabel(this.room)}` : 'Message';
+    const placeholder = this.composerPlaceholder();
     const input = this.app._chatEls?.input;
     if (input) input.placeholder = placeholder;
     this.els.root.dataset.unread = features.unread && total.unread ? (total.mentions ? 'mention' : 'unread') : '';
@@ -6453,6 +6458,7 @@ class ReverieEmbassyView {
     this.shell.els.main.classList.add('eg-active');
     this.shell.cancelReplySilently?.();
     this.shell.renderHeader(); this.shell.renderMembers(); this.shell.renderChrome(); this.shell.renderSidebar();
+    this.shell.renderTyping();
     this.updateControls(); this.renderPosts(); void this.loadPosts(); this.input.focus();
   }
   close() {
@@ -6471,7 +6477,7 @@ class ReverieEmbassyView {
     }
     this.input.disabled = false; this.input.readOnly = false; this.send.disabled = false; this.send.textContent = 'Send'; this.send.setAttribute('aria-label', 'Send message');
     this.panel = null; this.shell.els.main.classList.remove('eg-active');
-    this.shell.renderHeader(); this.shell.renderMembers(); this.shell.renderFeed(); this.shell.renderChrome(); this.shell.syncComposer?.();
+    this.shell.renderHeader(); this.shell.renderMembers(); this.shell.renderFeed(); this.shell.renderChrome(); this.shell.syncComposer?.(); this.shell.renderTyping();
   }
   renderPosts() {
     if (!this.selected || !this.feed) return;

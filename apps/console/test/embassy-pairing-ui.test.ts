@@ -228,3 +228,22 @@ it('cancelling hides stale public confirmation and never opens a guest connectio
  const h=await setup();await h.pair.open();h.pair.record={handle,state:'cancelling',origin,requestQr,code:'3BCD-5FGH',connectionId};const open=vi.spyOn(h.view,'open');await h.pair.showRecord();
  expect(h.document.querySelector('.eg-pair-confirm-code')).toBeNull();expect(h.button('Open shared room')).toBeUndefined();expect(h.button('Cancel and start over')).toBeUndefined();expect(open).not.toHaveBeenCalled();
 });
+it('the real composer send hook routes hosted messages only to the embassy',async()=>{
+ const h=await setup();h.view.open('__host__');await h.flush(5);h.view.input.value='Hosted route control';
+ await h.app._sendChatMessage();
+ expect(h.calls.filter(c=>c.path==='/api/embassy-host/posts'&&c.method==='POST')).toHaveLength(1);
+ expect(h.state.hostPosts.at(-1).text).toBe('Hosted route control');expect(h.server.posts).toHaveLength(0);
+});
+it('composer resync and send keep the embassy placeholder, then restore the local room context',async()=>{
+ const h=await setup();const shell=h.view.shell;const local=shell.room.name;h.view.open('__host__');await h.flush(5);
+ shell.syncComposer();expect(h.view.input.placeholder).toBe('Message #Shared room');
+ h.view.input.value='Context control';await h.app._sendChatMessage();expect(h.view.input.placeholder).toBe('Message #Shared room');
+ h.view.close();expect(h.app._chatEls.input.placeholder).toBe('Message #'+local);
+});
+it('local-room typing never appears in an embassy, including new turn events, and resumes on return',async()=>{
+ const h=await setup();const shell=h.view.shell;shell.noteTurn({roomId:shell.roomId,sessionId:'local'});
+ expect(shell.els.typing.hidden).toBe(false);h.view.open('__host__');await h.flush(5);
+ expect(shell.els.typing.hidden).toBe(true);expect(shell.els.typing.textContent).toBe('');
+ shell.noteTurn({roomId:shell.roomId,sessionId:'local'});expect(shell.els.typing.hidden).toBe(true);
+ h.view.close();expect(shell.els.typing.hidden).toBe(false);expect(shell.els.typing.textContent).toContain('Local');
+});
