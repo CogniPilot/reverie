@@ -37,6 +37,41 @@ function chatMicRoute({ toVoiceMember, hasRecognition, hasRecorder }) {
   return hasRecorder ? 'server' : null;
 }
 
+/** Browser results may repeat an entire growing utterance, rather than add a segment. */
+function chatSpeechJoin(previous, next) {
+  const a = String(previous || '').trim();
+  const b = String(next || '').trim();
+  if (!a) return b;
+  if (!b || a === b || a.startsWith(`${b} `)) return a;
+  if (b.startsWith(`${a} `)) return b;
+  return `${a} ${b}`;
+}
+
+/** Rebuild from the current result snapshot; resultIndex is an update offset, not an append instruction. */
+function chatSpeechSnapshot(results) {
+  let final = '', interim = '';
+  for (let i = 0; i < results.length; i++) {
+    const text = results[i]?.[0]?.transcript || '';
+    if (results[i].isFinal) final = chatSpeechJoin(final, text);
+    else interim = chatSpeechJoin(interim, text);
+  }
+  return { final, interim, text: chatSpeechJoin(final, interim) };
+}
+
+/** Room-wide replies are addressed to the owner only by an exact mention or an actual spoken-owner reply. */
+function chatReadAloudAddressed(message, ownerNames, messages) {
+  if (Array.isArray(message.to) && message.to.includes('user')) return true;
+  if (message.to !== 'all') return false;
+  const names = ['user', 'owner', ...(Array.isArray(ownerNames) ? ownerNames : [])];
+  if (names.some((name) => {
+    if (typeof name !== 'string' || !name.trim()) return false;
+    const escaped = name.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return new RegExp(`(^|[^\\p{L}\\p{N}_])@${escaped}(?![\\p{L}\\p{N}_-])`, 'iu').test(message.text || '');
+  })) return true;
+  const original = (messages || []).find((m) => m.id === message.replyTo);
+  return original?.from?.kind === 'user' && original.spoken === true;
+}
+
 /** Pure: what to say for a reply. */
 function readAloudText(name, text, maxWords = READ_ALOUD_MAX_WORDS) {
   const words = String(text || '')
@@ -155,16 +190,11 @@ Object.assign(CodemanApp.prototype, {
     rec.continuous = true;
     rec.interimResults = true;
     rec.lang = 'en-US';
-    let finalText = '';
-    let interim = '';
+    let transcript = { final: '', interim: '', text: '' };
     rec.onresult = (e) => {
-      interim = '';
-      for (let i = e.resultIndex; i < e.results.length; i++) {
-        const t = e.results[i][0].transcript;
-        if (e.results[i].isFinal) finalText += `${t} `;
-        else interim += t;
-      }
-      this._chatVoiceStatus(`● ${`${finalText}${interim}`.trim() || 'Listening…'}`, 'recording');
+      if (this._chatDictation !== rec) return;
+      transcript = chatSpeechSnapshot(e.results);
+      this._chatVoiceStatus(`● ${transcript.text || 'Listening…'}`, 'recording');
     };
     rec.onerror = (e) => {
       this._diag?.('dictation:error', { error: e.error });
@@ -173,9 +203,10 @@ Object.assign(CodemanApp.prototype, {
       }
     };
     rec.onend = () => {
+      if (this._chatDictation !== rec) return;
       this._chatDictation = null;
       this._setChatRecording(false);
-      this._dictationDone(`${finalText}${interim}`.trim());
+      this._dictationDone(transcript.text);
     };
     this._chatDictation = rec;
     this._setChatRecording(true);
@@ -289,7 +320,7 @@ Object.assign(CodemanApp.prototype, {
     const m = data?.message;
     if (!m || !this._voiceSetting('speakReplies')) return;
     if (data.roomId !== this._chatRoomId || m.from.kind !== 'agent' || m.voice) return;
-    if (m.to === 'all' || !m.to.includes('user')) return;
+    if (!chatReadAloudAddressed(m, this._chatOwnerNames, this._chatRoom?.messages)) return;
     // Car mode reads its own member's answers; never say one twice.
     if (this._carScreen && !this._carScreen.hidden && this._carVoiceMember?.()?.sessionId === m.from.sessionId) return;
     const name = m.from.name.split(': ').pop();
