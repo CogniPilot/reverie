@@ -5,6 +5,8 @@ import { CompanyService } from '../company-service.js';
 import { DurableCompanyResearchBackend } from '../company-research-backend.js';
 import { companySessionRuntime } from '../company-session-runtime.js';
 import { registerCompanyRoutes } from './routes/company-routes.js';
+import { EmbassyGuestClient } from '../embassy-guest-client.js';
+import { registerEmbassyGuestRoutes } from './routes/embassy-guest-routes.js';
 import { registerWorkspaceIconRoutes } from './routes/workspace-icon-routes.js';
 import { WorkspaceIconStore } from '../workspace-icons.js';
 /**
@@ -371,6 +373,7 @@ export class WebServer extends EventEmitter {
   /** Cron service (assigned in setupRoutes). */
   private cronService!: CronService;
   private chatroomService!: ChatroomService;
+  private embassyGuestClient!: EmbassyGuestClient;
   private companyService!: CompanyService;
   private cronPort!: CronPort;
   private planService!: PlanService;
@@ -1385,6 +1388,11 @@ export class WebServer extends EventEmitter {
     });
     registerWorkspaceIconRoutes(this.app, new WorkspaceIconStore(dataPath('workspace-icons')));
 
+    // Embassy rooms joined as a guest: own files, never the chatroom store, so imports wake nothing. The routes need a
+    // verified owner session in every policy mode (not only under enforce) and refuse any agent session header.
+    this.embassyGuestClient = new EmbassyGuestClient({ file: dataPath('embassy-guest.json') });
+    await this.embassyGuestClient.init();
+    registerEmbassyGuestRoutes(this.app, this.embassyGuestClient, verifiedOwner);
     registerChatroomRoutes(this.app, ctx, this.chatroomService, chatroomFiles, verifiedOwner);
     // Chat bots: the sender a scheduled 'post' job speaks as (see chat-bots.ts). The registry is instance data.
     const chatBots = new ChatBotRegistry(dataPath('chat-bots.json'));
@@ -3368,6 +3376,7 @@ export class WebServer extends EventEmitter {
     // Main Codex subscription limits come from the signed-in local CLI. Keep
     // this read-only and host-scoped; multi-user SSE routing makes it admin-only.
     if (!this.testMode) {
+      this.embassyGuestClient.start();
       const tickCompany = () =>
         this.companyService
           .tick()
@@ -4387,6 +4396,7 @@ export class WebServer extends EventEmitter {
     // only by the periodic idle sweep, whose interval is disposed just below.
     closeAllLlamaSwapLogTails();
 
+    await this.embassyGuestClient?.stop();
     // Flush pending chatroom writes and stop pane delivery.
     await this.chatroomService?.stop();
 

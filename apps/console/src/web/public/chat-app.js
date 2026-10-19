@@ -1109,6 +1109,7 @@ class ReverieChatApp {
     this.scheduleNotifyTick();
     this.touchHint();
     this.startStats();
+    this.embassy = new ReverieEmbassyView(this);
   }
 
   /** Once, on a touch screen: the message actions are a long press away (there is no hover toolbar). */
@@ -3452,6 +3453,7 @@ class ReverieChatApp {
       if (home) this.renderDmList(sideScroll);
       else this.renderChannelList(sideScroll);
     });
+    this.embassy?.renderSidebar();
   }
 
   wireRailMenu(b, key) {
@@ -3679,6 +3681,7 @@ class ReverieChatApp {
   }
 
   selectWorkspace(key) {
+    this.embassy?.close();
     if (this.orgOpen) this.closeOrg();
     this.workspace = key;
     this._wsPinned = true;
@@ -3692,6 +3695,7 @@ class ReverieChatApp {
   }
 
   async selectRoom(id) {
+    this.embassy?.close();
     if (this.orgOpen) this.closeOrg();
     this.reopenDm(id);
     this.app._chatCreating = false;
@@ -5698,6 +5702,398 @@ function caInstall(proto) {
 }
 
 /** Start the app once the CodemanApp singleton exists. */
+/** Guest-only embassy conversations. External posts never enter local chat delivery. */
+class ReverieEmbassyView {
+  constructor(shell) {
+    this.shell = shell;
+    this.doc = shell.doc;
+    this.win = this.doc.defaultView;
+    this.connections = [];
+    this.posts = new Map();
+    this.pending = new Map();
+    this.drafts = new Map();
+    this.allowed = false;
+    this.selected = null;
+    this.version = 0;
+    this.listEpoch = 0;
+    this.mutationUnknown = new Set();
+    this.collapsed = caRead('local', 'reverie:embassies:collapsed', '') === '1';
+    this.refresh().catch(() => {});
+    const tick = async () => {
+      try { if (!this.doc.hidden) await this.refresh(); } catch { /* status is shown by refresh */ }
+      this.timer = this.win.setTimeout(tick, 5000);
+    };
+    this.timer = this.win.setTimeout(tick, 5000);
+  }
+  el(tag, cls, text) { return this.shell.el(tag, cls, text); }
+  button(label, run) { return this.shell.button('ca-btn eg-button', label, run, { text: label }); }
+  async api(path = '', options = {}) {
+    try { return await this.shell.app._chatApi(`/api/embassy-guest${path}`, options); }
+    catch { return { ok: false, error: 'Connection unavailable' }; }
+  }
+  failure(result) { return typeof result?.error === 'string' ? result.error : 'Request refused'; }
+  key(id, kind) { return `reverie:embassy:${id}:${kind}`; }
+  readCount(id) {
+    const n = Number(caRead('local', this.key(id, 'read'), '0'));
+    return Number.isSafeInteger(n) && n >= 0 ? n : 0;
+  }
+  unread(c) { return Math.max(0, (Number(c.postCount) || 0) - this.readCount(c.id)); }
+  connection() { return this.connections.find(c => c.id === this.selected); }
+  async refresh() {
+    if (this.refreshing) { this.refreshAgain = true; return; }
+    this.refreshing = true;
+    const epoch = this.listEpoch;
+    try {
+      const result = await this.api();
+      if (epoch !== this.listEpoch || this.changing) return;
+      if (!result.ok) {
+        this.ownerRequired = result.status === 403 || /HTTP 403|signed-in owner|owner dashboard/i.test(this.failure(result));
+        // Do not retain a previous owner's external content after authorization disappears.
+        this.allowed = false;
+        this.connections = [];
+        this.posts.clear();
+        this.pending.clear();
+        this.close();
+        this.renderSidebar();
+        return;
+      }
+      this.allowed = true;
+      this.mutationUnknown.clear();
+      this.ownerRequired = false;
+      this.connections = Array.isArray(result.data?.connections) ? result.data.connections : [];
+      if (this.selected && !this.connection()) this.close();
+      this.renderSidebar();
+      if (this.selected) {
+        this.updateControls();
+        await this.loadPosts();
+      }
+    } finally {
+      this.refreshing = false;
+      if (this.refreshAgain) { this.refreshAgain = false; void this.refresh(); }
+    }
+  }
+  renderSidebar() {
+    const host = this.shell.els.sideScroll;
+    if (!host) return;
+    const previous = host.querySelector('.eg-category');
+    const focused = previous?.contains(this.doc.activeElement) ? this.doc.activeElement : null;
+    const focusId = focused?.dataset?.connection;
+    const focusLabel = focused?.getAttribute('aria-label');
+    previous?.remove();
+    host.querySelector('.eg-access-note')?.remove();
+    if (!this.allowed) {
+      if (this.ownerRequired) {
+        const note = this.el('section', 'eg-access-note');
+        note.setAttribute('role', 'status');
+        note.append(this.el('strong', '', 'Embassies'), this.el('p', '', 'Embassies need owner sign-in: run reverie owner bootstrap, then sign in at /owner/login.'));
+        const login = this.el('a', '', 'Owner sign-in');
+        login.href = '/owner/login';
+        note.append(login);
+        host.append(note);
+      }
+      return;
+    }
+    const section = this.el('section', 'eg-category');
+    const header = this.el('div', 'eg-category-head');
+    const toggle = this.button(`${this.collapsed ? '▸' : '▾'} Embassies`, () => {
+      this.collapsed = !this.collapsed;
+      caWrite('local', 'reverie:embassies:collapsed', this.collapsed ? '1' : '0');
+      this.renderSidebar();
+      host.querySelector('.eg-category-toggle')?.focus();
+    });
+    toggle.classList.add('eg-category-toggle');
+    toggle.setAttribute('aria-label', 'Embassies');
+    toggle.setAttribute('aria-expanded', String(!this.collapsed));
+    toggle.setAttribute('aria-controls', 'eg-channel-list');
+    const add = this.button('+', () => this.joinDialog());
+    add.setAttribute('aria-label', 'Add embassy channel');
+    const total = this.connections.reduce((n, c) => n + this.unread(c), 0);
+    header.append(toggle, this.el('span', 'eg-unread-total', total ? String(total) : ''), add);
+    const list = this.el('div', 'eg-channel-list');
+    list.id = 'eg-channel-list';
+    list.hidden = this.collapsed;
+    for (const c of this.connections) {
+      const row = this.button(c.roomName || 'Shared room', () => this.open(c.id));
+      row.classList.add('eg-channel');
+      row.dataset.connection = c.id;
+      const label = row.querySelector('span');
+      label.classList.add('eg-channel-label');
+      label.append(this.el('small', 'eg-channel-origin', c.origin));
+      row.title = `${c.roomName} · ${c.origin} · ${c.status}`;
+      const count = this.unread(c);
+      row.setAttribute('aria-label', `${c.roomName} · ${c.origin}${count ? `, ${count} unread` : ''}`);
+      if (c.id === this.selected) row.setAttribute('aria-current', 'page');
+      row.append(this.el('span', 'eg-unread', count ? String(count) : ''));
+      list.append(row);
+    }
+    if (!this.connections.length) list.append(this.el('p', 'ca-hint', 'No embassy rooms connected'));
+    section.append(header, list);
+    host.append(section);
+    if (focused) [...section.querySelectorAll('button')].find(b => focusId ? b.dataset.connection === focusId : b.getAttribute('aria-label') === focusLabel)?.focus();
+  }
+  open(id) {
+    if (!this.allowed || !this.connections.some(c => c.id === id)) return;
+    this.close();
+    this.selected = id;
+    this.version++;
+    this.shell.setView('chat');
+    this.shell.toggleDrawer(null);
+    const panel = this.el('section', 'eg-view');
+    const head = this.el('header', 'eg-head');
+    head.append(this.button('Channels', () => this.shell.toggleDrawer('channels')));
+    this.title = this.el('h1', 'eg-title');
+    this.status = this.el('p', 'eg-status');
+    this.status.setAttribute('role', 'status');
+    head.append(this.title, this.el('span', 'ca-tag', 'Shared · Guest'), this.status);
+    this.origin = this.el('p', 'eg-origin');
+    this.controls = this.el('div', 'eg-controls');
+    this.feed = this.el('div', 'eg-feed');
+    this.feed.setAttribute('role', 'log');
+    this.feed.setAttribute('aria-label', 'Embassy conversation');
+    this.feed.setAttribute('aria-live', 'polite');
+    this.feed.addEventListener('scroll', () => this.markRead());
+    this.form = this.el('form', 'eg-composer');
+    this.input = this.el('textarea', 'eg-input');
+    this.input.setAttribute('aria-label', 'Message to shared room');
+    this.input.placeholder = 'Message this shared room';
+    this.input.rows = 2;
+    this.input.maxLength = 4096;
+    this.send = this.el('button', 'ca-btn', 'Send');
+    this.send.type = 'submit';
+    this.notice = this.el('p', 'eg-notice');
+    this.notice.setAttribute('role', 'status');
+    this.form.append(this.input, this.send);
+    this.form.addEventListener('submit', e => { e.preventDefault(); void this.publish(); });
+    const pending = this.getPending(id);
+    this.input.value = pending?.text || this.drafts.get(id) || '';
+    this.form.dataset.connection = id;
+    panel.append(head, this.origin, this.controls, this.feed, this.notice, this.form,
+      this.el('p', 'eg-visibility', 'External guest conversation. Shared posts are visible to its members. Synced copies remain after leaving.'));
+    this.panel = panel;
+    this.shell.els.main.append(panel);
+    this.shell.els.main.classList.add('eg-active');
+    this.renderSidebar();
+    this.updateControls();
+    void this.loadPosts();
+  }
+  close() {
+    if (this.selected && this.input && this.form?.dataset.connection === this.selected) this.drafts.set(this.selected, this.input.value);
+    this.version++;
+    this.selected = null;
+    this.panel?.remove();
+    this.panel = null;
+    this.shell.els.main?.classList.remove('eg-active');
+  }
+  updateControls() {
+    const c = this.connection();
+    if (!c || !this.panel) return;
+    this.title.textContent = c.roomName;
+    this.origin.textContent = `${c.hostCompany} · ${c.origin} · Guest access (TLS origin; no signed identity pin)`;
+    const state = this.mutationUnknown.has(c.id) ? 'State change unconfirmed' : c.status === 'disabled' ? 'Disabled here' : c.status;
+    this.status.textContent = `${state}${c.lastError ? ` · ${c.lastError}` : ''}`;
+    const controlFocus = this.controls.contains(this.doc.activeElement) ? this.doc.activeElement?.getAttribute('aria-label') : null;
+    this.controls.replaceChildren();
+    if (c.status !== 'left') {
+      this.controls.append(this.button(c.enabled ? 'Disable' : 'Enable', () => this.setEnabled(c.id, !c.enabled)),
+        this.button('Leave', () => this.leave(c.id)));
+    }
+    for (const b of this.controls.querySelectorAll('button')) b.disabled = !!this.changing;
+    if (controlFocus) [...this.controls.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === controlFocus)?.focus();
+    const pending = this.getPending(c.id);
+    this.send.textContent = pending ? 'Retry same message' : 'Send';
+    this.send.disabled = !!this.sending || this.changing === c.id || this.mutationUnknown.has(c.id) || !c.enabled || !['live', 'connecting'].includes(c.status) || c.expiresAt <= Date.now();
+    this.input.disabled = this.changing === c.id || this.mutationUnknown.has(c.id) || !c.enabled || c.status === 'left' || c.status === 'expired';
+    this.input.readOnly = !!pending;
+    if (pending) this.notice.textContent = 'Not confirmed. Retry keeps the original message and request id; do not send it again as a new message.';
+  }
+  async loadPosts() {
+    const id = this.selected, version = this.version;
+    if (!id || this.loading === id) return;
+    this.loading = id;
+    try {
+      const items = this.posts.get(id) || new Map();
+      let after = Math.max(0, ...[...items.values()].map(p => p.sequence));
+      for (let page = 0; page < 10; page++) {
+        const result = await this.api(`/${encodeURIComponent(id)}/posts?after=${after}`);
+        if (version !== this.version || this.selected !== id) return;
+        if (!result.ok) { this.notice.textContent = this.failure(result); return; }
+        const incoming = result.data?.posts || [];
+        for (const p of incoming) {
+          if (!Number.isSafeInteger(p.sequence) || p.sequence <= 0 || typeof p.ackId !== 'string') continue;
+          items.set(p.ackId, p);
+        }
+        this.posts.set(id, items);
+        if (incoming.length < 200 || !(result.data.next > after)) break;
+        after = result.data.next;
+      }
+      if (version !== this.version || this.selected !== id) return;
+      const previousScroll = this.feed.scrollTop;
+      const atBottom = this.feed.scrollHeight - this.feed.clientHeight - this.feed.scrollTop < 40;
+      const values = [...items.values()].sort((a, b) => a.sequence - b.sequence);
+      const sig = values.map(p => p.ackId).join('|');
+      if (sig !== this.feed.dataset.signature) {
+        this.feed.replaceChildren();
+        for (const p of values) {
+          const row = this.el('article', 'eg-post');
+          row.dataset.post = p.ackId;
+          row.append(this.el('strong', 'eg-author', `${p.author?.company || 'External'} · ${p.author?.identity || 'Guest'}`),
+            this.el('span', 'eg-trust', `External · ${p.trust || p.author?.kind || 'guest'}`),
+            this.el('p', 'eg-text', p.text));
+          this.feed.append(row);
+        }
+        this.feed.dataset.signature = sig;
+        this.feed.scrollTop = atBottom ? this.feed.scrollHeight : previousScroll;
+      }
+      this.markRead();
+    } finally { if (this.loading === id) this.loading = null; }
+  }
+  markRead() {
+    if (!this.selected || !this.feed || this.doc.hidden || this.shell.view !== 'chat') return;
+    if (this.feed.scrollHeight - this.feed.clientHeight - this.feed.scrollTop > 40) return;
+    const count = this.posts.get(this.selected)?.size || 0;
+    if (count > this.readCount(this.selected)) {
+      caWrite('local', this.key(this.selected, 'read'), String(count));
+      this.renderSidebar();
+    }
+  }
+  getPending(id) {
+    if (!this.pending.has(id)) {
+      try {
+        const value = JSON.parse(caRead('session', this.key(id, 'pending'), 'null'));
+        if (value && typeof value.text === 'string' && typeof value.requestId === 'string') this.pending.set(id, value);
+      } catch { /* no saved operation */ }
+    }
+    return this.pending.get(id);
+  }
+  async publish() {
+    const c = this.connection();
+    if (!c || this.send.disabled || this.sending) return;
+    const id = c.id;
+    let pending = this.getPending(id);
+    if (!pending) {
+      const text = this.input.value.trim();
+      if (!text) return;
+      if (new TextEncoder().encode(text).length > 4096) { this.notice.textContent = 'Message exceeds 4096 bytes'; return; }
+      pending = { text, requestId: this.win.crypto.randomUUID() };
+      caWrite('session', this.key(id, 'pending'), JSON.stringify(pending));
+      if (caRead('session', this.key(id, 'pending'), '') !== JSON.stringify(pending)) {
+        this.notice.textContent = 'Cannot save retry identity in this tab. Sending is paused until browser storage is available.';
+        return;
+      }
+      this.pending.set(id, pending);
+    }
+    this.sending = true;
+    this.updateControls();
+    const result = await this.api(`/${encodeURIComponent(id)}/posts`, { method: 'POST', body: pending });
+    this.sending = false;
+    if (result.ok) {
+      this.pending.delete(id);
+      this.drafts.delete(id);
+      caWrite('session', this.key(id, 'pending'), 'null');
+    }
+    if (this.selected === id) {
+      if (result.ok) { this.input.value = ''; this.notice.textContent = 'Posted'; await this.loadPosts(); }
+      else this.notice.textContent = `Not confirmed. ${this.failure(result)} Retry uses the same message id.`;
+      this.updateControls();
+    }
+  }
+  async mutateConnection(id, options) {
+    if (this.changing) return;
+    this.changing = id;
+    this.listEpoch++;
+    this.version++;
+    this.updateControls();
+    const result = await this.api(`/${encodeURIComponent(id)}`, options);
+    // Also invalidate snapshots started while the write was still in flight.
+    this.listEpoch++;
+    if (result.ok && result.data?.id === id) {
+      this.connections = this.connections.map(c => c.id === id ? result.data : c);
+      this.mutationUnknown.delete(id);
+    } else {
+      this.mutationUnknown.add(id);
+      if (this.selected === id) this.notice.textContent = this.failure(result);
+    }
+    this.changing = null;
+    this.renderSidebar();
+    this.updateControls();
+    await this.refresh();
+  }
+  async setEnabled(id, enabled) {
+    await this.mutateConnection(id, { method: 'PUT', body: { enabled } });
+  }
+  async leave(id) {
+    if (!this.win.confirm('Leave this embassy room? Sending and syncing stop. Synced history and copies elsewhere remain.')) return;
+    await this.mutateConnection(id, { method: 'DELETE' });
+  }
+  joinDialog() {
+    if (!this.allowed || this.dialog) return;
+    const dlg = this.el('dialog', 'ca-dialog eg-dialog');
+    this.dialog = dlg;
+    dlg.setAttribute('aria-label', 'Add embassy channel');
+    const title = this.el('h2', '', 'Add embassy channel');
+    const explain = this.el('p', '', 'Paste a guest invite key. Confirm its host before this server connects. No owner access is granted.');
+    const label = this.el('label', '', 'Invite key');
+    const input = this.el('input', 'eg-key');
+    input.type = 'password';
+    input.autocomplete = 'off';
+    input.spellcheck = false;
+    label.append(input);
+    const note = this.el('p', 'eg-join-status');
+    note.setAttribute('role', 'status');
+    const next = this.button('Check host', async () => {
+      if (next.disabled) return;
+      next.disabled = true;
+      const value = input.value;
+      input.value = '';
+      const result = await this.api('/preview', { method: 'POST', body: { key: value } });
+      if (!dlg.isConnected) return;
+      if (!result.ok) { note.textContent = 'Invalid invite key. Paste a valid key to try again.'; next.disabled = false; return; }
+      secret = value;
+      origin = result.data.origin;
+      label.hidden = true;
+      note.textContent = `Connect this server to ${origin}? Room details appear only after joining.`;
+      next.textContent = 'Connect';
+      next.setAttribute('aria-label', 'Connect');
+      next.disabled = false;
+      next.replaceWith(confirm);
+      confirm.focus();
+    });
+    let secret = '', origin = '', joining = false;
+    const cleanup = () => {
+      secret = ''; input.value = '';
+      dlg.remove(); this.dialog = null;
+      this.shell.els.sideScroll.querySelector('[aria-label="Add embassy channel"]')?.focus();
+    };
+    const confirm = this.button('Connect', async () => {
+      if (joining || !secret) return;
+      joining = true; confirm.disabled = true;
+      this.listEpoch++;
+      const key = secret; secret = '';
+      note.textContent = 'Connecting…';
+      const result = await this.api('/join', { method: 'POST', body: { key, confirmedOrigin: origin } });
+      this.listEpoch++;
+      if (result.ok && result.data?.id) {
+        const joined = result.data;
+        this.connections = [...this.connections.filter(c => c.id !== joined.id), joined];
+        this.renderSidebar();
+      }
+      if (!dlg.isConnected) { await this.refresh(); return; }
+      if (!result.ok) {
+        note.textContent = 'Join not confirmed or key refused. It may already have been used. Check connected rooms before asking for a new key; no automatic retry.';
+        await this.refresh(); return;
+      }
+      const id = result.data?.id;
+      cleanup(); if (id) this.open(id); await this.refresh();
+    });
+    const cancel = this.button('Cancel', cleanup);
+    dlg.addEventListener('cancel', e => { e.preventDefault(); cleanup(); });
+    dlg.append(title, explain, label, note, next, cancel);
+    this.doc.body.append(dlg);
+    if (typeof dlg.showModal === 'function') dlg.showModal(); else dlg.setAttribute('open', '');
+    input.focus();
+  }
+}
+
 function caBoot() {
   const proto = typeof CodemanApp !== 'undefined' ? CodemanApp.prototype : null;
   if (!proto || proto._caInstalled) return;
@@ -5777,5 +6173,6 @@ if (typeof module !== 'undefined' && module.exports) {
     caAgentProfile,
     caCount,
     caMentionCandidates,
+    ReverieEmbassyView,
   };
 }
