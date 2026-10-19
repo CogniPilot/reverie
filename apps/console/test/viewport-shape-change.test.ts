@@ -51,8 +51,8 @@ const KEYBOARD_HEIGHT = 300;
  * `const KeyboardHandler = {...}` is a lexical binding that does not survive to
  * a second `vm.runInContext`, so the export is appended to the SAME script.
  */
-function loadHandler(start: { width: number; height: number }) {
-  const viewport = { ...start, offsetTop: 0, addEventListener: () => {}, removeEventListener: () => {} };
+function loadHandler(start: { width: number; height: number }, visualHeight = start.height) {
+  const viewport = { ...start, height: visualHeight, offsetTop: 0, addEventListener: () => {}, removeEventListener: () => {} };
   const layout = { height: start.height };
   const bodyClasses = new Set<string>();
   const appHeight: string[] = [];
@@ -276,5 +276,25 @@ describe('handleViewportResize: width changes are the device changing shape', ()
 
     expect(handler.keyboardVisible).toBe(false);
     expect(bodyClasses.has('keyboard-visible')).toBe(false);
+  });
+});
+
+
+describe('terminal keyboard gradual animation and already-open mount', () => {
+  it('detects a keyboard animated in sub-threshold steps and keeps app above it', () => {
+    const { handler, resizeTo, bodyClasses, appHeight } = loadHandler(DUO_INNER);
+    for (const height of [840, 790, 740, 690, 640, 590]) resizeTo(DUO_INNER.width, height, DUO_INNER.height);
+    expect(handler.keyboardVisible).toBe(true);
+    expect(bodyClasses.has('keyboard-visible')).toBe(true);
+    expect(appHeight.at(-1)).toBe('590px');
+    resizeTo(DUO_INNER.width, DUO_INNER.height, DUO_INNER.height);
+    expect(handler.keyboardVisible).toBe(false);
+  });
+
+  it('detects the keyboard when handlers mount into an already reduced viewport', () => {
+    const { handler, bodyClasses, appHeight } = loadHandler(DUO_INNER, 500);
+    expect(handler.keyboardVisible).toBe(true);
+    expect(bodyClasses.has('keyboard-visible')).toBe(true);
+    expect(appHeight.at(-1)).toBe('500px');
   });
 });

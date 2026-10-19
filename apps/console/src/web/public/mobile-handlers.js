@@ -243,7 +243,7 @@ const KeyboardHandler = {
     // Only initialize on touch devices
     if (!MobileDetection.isTouchDevice()) return;
 
-    this.initialViewportHeight = window.visualViewport?.height || window.innerHeight;
+    this.initialViewportHeight = Math.max(window.innerHeight, window.visualViewport?.height || 0);
     this.lastViewportHeight = this.initialViewportHeight;
     // Seed the width too, or the first resize event reads as a shape change and
     // swallows a real keyboard.
@@ -284,6 +284,8 @@ const KeyboardHandler = {
       }
     };
     window.addEventListener('scroll', this._windowScrollHandler);
+    // A session can mount while the phone keyboard is already open.
+    this.handleViewportResize();
   },
 
   /** Remove event listeners */
@@ -338,6 +340,9 @@ const KeyboardHandler = {
     const currentWidth = window.visualViewport?.width || window.innerWidth;
     const shapeChanged = currentWidth !== this.lastViewportWidth;
     this.lastViewportWidth = currentWidth;
+    // The layout viewport stays keyboard-free under resizes-visual. Use it
+    // as a floor: many small animation steps must not chase the baseline down.
+    if (!shapeChanged) this.initialViewportHeight = Math.max(this.initialViewportHeight, window.innerHeight);
     const heightDiff = this.initialViewportHeight - currentHeight;
 
     // Keyboard appeared (viewport shrunk by more than 150px). Both detection
@@ -541,11 +546,8 @@ const KeyboardHandler = {
    * Only a real show/hide transition arms the settle work; ongoing viewport
    * resize events merely push a pending settle back (_deferViewportSettle).
    * A viewport change that never crosses the show/hide thresholds must not
-   * refit: keyboard detection can miss a fine-grained OS animation entirely
-   * (each step under 150px, with the baseline chasing the animation), and the
-   * container is then mid-animation with no keyboard CSS compensation, so a
-   * fit against it resizes the PTY to transient dims and the SIGWINCH thrash
-   * garbles the transcript.
+   * refit: a fit against a mid-animation container resizes the PTY to transient
+   * dimensions and repeated SIGWINCH redraws can garble the transcript.
    */
   _scheduleViewportSettle({ restoreScroll = false } = {}) {
     // Capture scroll intent on the FIRST event of a settle cycle, BEFORE any
