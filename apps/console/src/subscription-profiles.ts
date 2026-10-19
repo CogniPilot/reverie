@@ -55,6 +55,15 @@ export async function readSubscriptionProfiles(): Promise<SubscriptionProfile[]>
 }
 
 let writing: Promise<unknown> = Promise.resolve();
+
+/** Thrown when another profile already has the label (compared ignoring case), so two plans never share a name. */
+export class DuplicateLabelError extends Error {}
+
+function refuseDuplicateLabel(others: SubscriptionProfile[], label: string): void {
+  const key = label.trim().toLowerCase();
+  if (others.some((p) => p.label.trim().toLowerCase() === key)) throw new DuplicateLabelError('Another account already has that name');
+}
+
 export function addSubscriptionProfile(input: {
   label: string;
   provider: SubscriptionProvider;
@@ -63,6 +72,7 @@ export function addSubscriptionProfile(input: {
   const result = writing.then(async () => {
     const profiles = await readSubscriptionProfiles();
     if (profiles.length >= 32) throw new Error('At most 32 account profiles are supported');
+    refuseDuplicateLabel(profiles, input.label);
     const id = `${input.provider}-${randomUUID().slice(0, 8)}`;
     const configDir = input.configDir || join(getDataDir(), 'accounts', id);
     const profile = subscriptionProfileSchema.parse({
@@ -100,6 +110,7 @@ export function renameSubscriptionProfile(
     const profiles = await readSubscriptionProfiles();
     const index = profiles.findIndex((p) => p.id === id);
     if (index < 0) return null;
+    refuseDuplicateLabel(profiles.filter((_, i) => i !== index), label);
     const renamed = subscriptionProfileSchema.parse({ ...profiles[index], label });
     const next = profiles.map((p, i) => (i === index ? renamed : p));
     const path = join(getDataDir(), 'subscription-profiles.json');
@@ -112,6 +123,36 @@ export function renameSubscriptionProfile(
       await fs.rm(tmp, { force: true });
     }
     return { profile: renamed, from: profiles[index].label };
+  });
+  writing = result.catch(() => {});
+  return result;
+}
+
+/**
+ * Unlist a profile. Only the entry goes: the login directory and everything in it stay on disk (a
+ * removed account can be listed again by pointing a new profile at the same directory), and the
+ * built-in defaults are refused. Returns the removed profile, or null when there is no such id.
+ */
+/** Thrown for the one refusal that is bad input; any other error from a remove is a failure of ours. */
+export class DefaultProfileError extends Error {}
+
+export function removeSubscriptionProfile(id: string): Promise<SubscriptionProfile | null> {
+  const result = writing.then(async () => {
+    if (defaultSubscriptionProfiles().some((d) => d.id === id)) throw new DefaultProfileError('The default accounts cannot be removed');
+    const profiles = await readSubscriptionProfiles();
+    const index = profiles.findIndex((p) => p.id === id);
+    if (index < 0) return null;
+    const next = profiles.filter((_, i) => i !== index);
+    const path = join(getDataDir(), 'subscription-profiles.json');
+    await fs.mkdir(dirname(path), { recursive: true, mode: 0o700 });
+    const tmp = `${path}.${randomUUID()}.tmp`;
+    try {
+      await fs.writeFile(tmp, JSON.stringify(next, null, 2) + '\n', { mode: 0o600 });
+      await fs.rename(tmp, path);
+    } finally {
+      await fs.rm(tmp, { force: true });
+    }
+    return profiles[index];
   });
   writing = result.catch(() => {});
   return result;

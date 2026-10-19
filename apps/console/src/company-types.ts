@@ -117,5 +117,7 @@ export const CompanyStateSchema = z.object({
       })
     )
     .default([]),
+  /** Employees the owner retired: off the org chart and out of every room, kept (same id and session) so history still names them. */
+  retired: z.array(EmployeeSchema.extend({ retiredAt: z.number() })).default([]),
 });
 export type CompanyState = z.infer<typeof CompanyStateSchema>;

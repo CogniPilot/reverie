@@ -35,14 +35,14 @@ describe('plans routes', () => {
     mkdirSync(join(home, '.codex'));
     mkdirSync(join(home, '.claude-accounts'));
     mkdirSync(join(home, '.codex-accounts'));
-    symlinkSync(join(home, '.claude'), join(home, '.claude-accounts', 'initech'));
-    mkdirSync(join(home, '.claude-accounts', 'gmail'));
-    mkdirSync(join(home, '.claude-accounts', 'globex'));
-    symlinkSync(join(home, '.codex'), join(home, '.codex-accounts', 'gmail'));
+    symlinkSync(join(home, '.claude'), join(home, '.claude-accounts', 'primary'));
+    mkdirSync(join(home, '.claude-accounts', 'secondary'));
+    mkdirSync(join(home, '.claude-accounts', 'tertiary'));
+    symlinkSync(join(home, '.codex'), join(home, '.codex-accounts', 'secondary'));
     Object.assign(usage, {
       'anthropic-default': { status: 'ready', five: 30, week: 70 }, // pace +20: ease
-      'acct-anthropic-gmail': { status: 'ready', five: 5, week: 10 }, // pace -40: push
-      'acct-anthropic-globex': { status: 'signed-out' },
+      'acct-anthropic-secondary': { status: 'ready', five: 5, week: 10 }, // pace -40: push
+      'acct-anthropic-tertiary': { status: 'signed-out' },
       'openai-default': { status: 'ready', five: 96, week: 40 }, // 5 h full: stop
     });
     const reader = {
@@ -68,8 +68,8 @@ describe('plans routes', () => {
       },
     };
     const sessions = [
-      session('s-default', 'w1-compiler', 'claude'),
-      session('s-gmail', 'w2-lean', 'claude', { CLAUDE_CONFIG_DIR: join(home, '.claude-accounts', 'gmail') }),
+      session('s-default', 'w1-rumoca', 'claude'),
+      session('s-secondary', 'w2-lean', 'claude', { CLAUDE_CONFIG_DIR: join(home, '.claude-accounts', 'secondary') }),
       session('s-orch', 'w4-orchestrator', 'claude'),
       session('s-codex', 'w1-pr', 'codex'),
       session('s-shell', 'scratch', 'shell'),
@@ -109,29 +109,29 @@ describe('plans routes', () => {
       accounts.map((a: { provider: string; label: string }) => [`${a.provider}:${a.label}`, a])
     );
     expect(Object.keys(byLabel).sort()).toEqual([
-      'anthropic:globex',
-      'anthropic:gmail',
-      'anthropic:initech',
-      'openai:gmail',
+      'anthropic:primary',
+      'anthropic:secondary',
+      'anthropic:tertiary',
+      'openai:secondary',
     ]);
-    const initech = byLabel['anthropic:initech'];
-    expect(initech).toMatchObject({
+    const primary = byLabel['anthropic:primary'];
+    expect(primary).toMatchObject({
       id: 'anthropic-default',
       profileId: 'anthropic-default',
       isDefault: true,
       orchestrator: true,
     });
-    expect(initech.pace).toMatchObject({ elapsed: 50, pace: 20, recommendation: 'ease' });
-    expect(initech.sessions.map((s: { name: string }) => s.name)).toEqual(['w1-compiler', 'w4-orchestrator']);
-    expect(byLabel['anthropic:gmail']).toMatchObject({ profileId: null, isDefault: false, orchestrator: false });
-    expect(byLabel['anthropic:gmail'].pace.recommendation).toBe('push');
-    expect(byLabel['anthropic:gmail'].sessions.map((s: { name: string }) => s.name)).toEqual(['w2-lean']);
-    expect(byLabel['anthropic:globex']).toMatchObject({ signedIn: false });
-    expect(byLabel['anthropic:globex'].pace.recommendation).toBe('login');
-    expect(byLabel['openai:gmail'].pace.recommendation).toBe('stop');
-    expect(byLabel['openai:gmail'].sessions.map((s: { name: string }) => s.name)).toEqual(['w1-pr']);
-    expect(byLabel['openai:gmail'].bankedResets).toEqual({ availableCount: 2, earliestExpiresAt: NOW + 86_400_000 });
-    expect(byLabel['anthropic:initech'].bankedResets).toBeNull();
+    expect(primary.pace).toMatchObject({ elapsed: 50, pace: 20, recommendation: 'ease' });
+    expect(primary.sessions.map((s: { name: string }) => s.name)).toEqual(['w1-rumoca', 'w4-orchestrator']);
+    expect(byLabel['anthropic:secondary']).toMatchObject({ profileId: null, isDefault: false, orchestrator: false });
+    expect(byLabel['anthropic:secondary'].pace.recommendation).toBe('push');
+    expect(byLabel['anthropic:secondary'].sessions.map((s: { name: string }) => s.name)).toEqual(['w2-lean']);
+    expect(byLabel['anthropic:tertiary']).toMatchObject({ signedIn: false });
+    expect(byLabel['anthropic:tertiary'].pace.recommendation).toBe('login');
+    expect(byLabel['openai:secondary'].pace.recommendation).toBe('stop');
+    expect(byLabel['openai:secondary'].sessions.map((s: { name: string }) => s.name)).toEqual(['w1-pr']);
+    expect(byLabel['openai:secondary'].bankedResets).toEqual({ availableCount: 2, earliestExpiresAt: NOW + 86_400_000 });
+    expect(byLabel['anthropic:primary'].bankedResets).toBeNull();
     expect(gpu).toMatchObject({ utilization: 87, models: ['qwen.gguf'], lastHolder: { role: 'chat' } });
   });
 
@@ -141,16 +141,16 @@ describe('plans routes', () => {
     const { accounts } = (await app.inject({ method: 'GET', url: '/api/plans' })).json().data;
     const labels = accounts.map((a: { provider: string; label: string }) => `${a.provider}:${a.label}`);
     expect(labels).toContain('openai:Codex user@example.com');
-    expect(labels).not.toContain('openai:gmail');
-    expect(labels).toContain('anthropic:initech');
+    expect(labels).not.toContain('openai:secondary');
+    expect(labels).toContain('anthropic:primary');
   });
 
   it('suggests the account with the most headroom and how to launch on it', async () => {
     const res = await app.inject({ method: 'POST', url: '/api/plans/suggest', payload: { provider: 'anthropic' } });
     expect(res.statusCode).toBe(200);
     const { account, launch } = res.json().data;
-    expect(account.label).toBe('gmail');
-    expect(launch).toEqual({ envOverrides: { CLAUDE_CONFIG_DIR: join(home, '.claude-accounts', 'gmail') } });
+    expect(account.label).toBe('secondary');
+    expect(launch).toEqual({ envOverrides: { CLAUDE_CONFIG_DIR: join(home, '.claude-accounts', 'secondary') } });
   });
 
   it('answers 409 when no account of that provider has room', async () => {
@@ -159,10 +159,10 @@ describe('plans routes', () => {
   });
 
   it('launches on a default-directory account through its profile with no override', async () => {
-    usage['acct-anthropic-gmail'] = { status: 'ready', five: 99, week: 10 }; // gmail must stop
+    usage['acct-anthropic-secondary'] = { status: 'ready', five: 99, week: 10 }; // secondary must stop
     const res = await app.inject({ method: 'POST', url: '/api/plans/suggest', payload: {} });
     expect(res.json().data).toMatchObject({
-      account: { label: 'initech' },
+      account: { label: 'primary' },
       launch: { subscriptionProfileId: 'anthropic-default', envOverrides: {} },
     });
   });

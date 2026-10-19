@@ -26,7 +26,7 @@ describe('permanent employee across three runtime replacements', () => {
     const writes: string[] = [];
     const value: Pane = {
       id,
-      name: 'Alice',
+      name: 'Jinx',
       owner,
       mode: 'opencode',
       status: 'running',
@@ -48,7 +48,7 @@ describe('permanent employee across three runtime replacements', () => {
     clock = Date.now();
     panes.clear();
     threads.clear();
-    for (let i = 0; i <= 3; i++) pane(`alice-${i}`);
+    for (let i = 0; i <= 3; i++) pane(`jinx-${i}`);
     companyStore = new CompanyStore(join(directory, 'company.json'));
     await companyStore.init();
     chat = new ChatroomService({
@@ -75,9 +75,9 @@ describe('permanent employee across three runtime replacements', () => {
     await rm(directory, { recursive: true, force: true });
   });
 
-  async function employee(sessionId = 'alice-0') {
+  async function employee(sessionId = 'jinx-0') {
     return company.hire({
-      name: 'Alice',
+      name: 'Jinx',
       icon: '🦊',
       position: 'COO',
       expertise: ['coordination'],
@@ -90,28 +90,28 @@ describe('permanent employee across three runtime replacements', () => {
     const hired = await employee();
     const memory = await company.remember(hired.id, undefined, 'Keep the dragon story');
     const room = chat.createRoom('reverie', undefined);
-    chat.addMember(room.id, 'alice-0', { role: 'coordinator', goal: 'Coordinate', icon: '🦊' });
-    const dm = chat.openDm('alice-0', undefined);
+    chat.addMember(room.id, 'jinx-0', { role: 'coordinator', goal: 'Coordinate', icon: '🦊' });
+    const dm = chat.openDm('jinx-0', undefined);
     const message = chat.post(
       room.id,
-      { kind: 'agent', name: 'Alice', sessionId: 'alice-0' },
+      { kind: 'agent', name: 'Jinx', sessionId: 'jinx-0' },
       'Original thread handoff',
       'all',
       { deliver: false }
     );
-    const direct = chat.post(dm.id, { kind: 'user', name: 'Owner' }, 'Original DM history', 'all', { deliver: false });
+    const direct = chat.post(dm.id, { kind: 'user', name: 'James' }, 'Original DM history', 'all', { deliver: false });
 
     for (let i = 1; i <= 3; i++) {
-      const current = `alice-${i}`;
+      const current = `jinx-${i}`;
       await company.rebind(hired.id, undefined, current);
       expect(company.view().employees.map((e) => [e.id, e.sessionId])).toEqual([[hired.id, current]]);
       expect(company.view().memories).toContainEqual(memory);
       for (const original of [room, dm]) {
         const present = chat.room(original.id)!;
-        expect(present.members.filter((m) => m.sessionId.startsWith('alice-')).map((m) => m.sessionId)).toEqual([
+        expect(present.members.filter((m) => m.sessionId.startsWith('jinx-')).map((m) => m.sessionId)).toEqual([
           current,
         ]);
-        expect(chat.view(present).members.filter((m) => m.name === 'Alice')).toHaveLength(1);
+        expect(chat.view(present).members.filter((m) => m.name === 'Jinx')).toHaveLength(1);
       }
       expect(chat.view(chat.room(room.id)!).coordinatorId).toBe(current);
       expect(chat.room(room.id)!.members.find((m) => m.sessionId === current)).toMatchObject({
@@ -122,8 +122,8 @@ describe('permanent employee across three runtime replacements', () => {
       expect(chat.room(room.id)!.messages).toContainEqual(message);
       expect(chat.room(dm.id)!.messages).toContainEqual(direct);
       // The author of an old message stays the original runtime, not rewritten.
-      expect(message.from).toMatchObject({ sessionId: 'alice-0' });
-      for (let old = 0; old < i; old++) expect(chat.roomsFor(`alice-${old}`)).toEqual([]);
+      expect(message.from).toMatchObject({ sessionId: 'jinx-0' });
+      for (let old = 0; old < i; old++) expect(chat.roomsFor(`jinx-${old}`)).toEqual([]);
     }
     await chat.stop();
     await chat.init();
@@ -131,44 +131,44 @@ describe('permanent employee across three runtime replacements', () => {
     const loaded = new CompanyStore(companyStore.file);
     await loaded.init();
     expect(loaded.snapshot().employees).toHaveLength(1);
-    expect(loaded.snapshot().employees[0]).toMatchObject({ id: hired.id, sessionId: 'alice-3' });
-    expect(chat.openDm('alice-3', undefined).id).toBe(dm.id);
+    expect(loaded.snapshot().employees[0]).toMatchObject({ id: hired.id, sessionId: 'jinx-3' });
+    expect(chat.openDm('jinx-3', undefined).id).toBe(dm.id);
     expect(chat.room(dm.id)!.messages).toContainEqual(direct);
   });
 
   it('drops old queued deliveries and resolves each new mention to only the current runtime', async () => {
     const hired = await employee();
     const room = chat.createRoom('work', undefined);
-    chat.addMember(room.id, 'alice-0');
+    chat.addMember(room.id, 'jinx-0');
     for (let i = 1; i <= 3; i++) {
-      const old = panes.get(`alice-${i - 1}`)!;
-      const current = panes.get(`alice-${i}`)!;
+      const old = panes.get(`jinx-${i - 1}`)!;
+      const current = panes.get(`jinx-${i}`)!;
       old.isWorking = true;
-      chat.post(room.id, { kind: 'user', name: 'Owner' }, `@Alice queued before restart ${i}`);
+      chat.post(room.id, { kind: 'user', name: 'James' }, `@Jinx queued before restart ${i}`);
       expect(chat.delivery.pendingFor(old.id)).toBeGreaterThan(0);
       await company.rebind(hired.id, undefined, current.id);
       expect(chat.delivery.pendingFor(old.id)).toBe(0);
-      const recipients = chat.resolveRecipients(chat.room(room.id)!, ['Alice']);
+      const recipients = chat.resolveRecipients(chat.room(room.id)!, ['Jinx']);
       expect(recipients).toEqual([current.id]);
-      chat.post(room.id, { kind: 'user', name: 'Owner' }, `@Alice new runtime ${i}`, recipients);
+      chat.post(room.id, { kind: 'user', name: 'James' }, `@Jinx new runtime ${i}`, recipients);
       for (const value of panes.values()) value.isWorking = false;
       clock += 10_000;
       await chat.delivery.flushAll();
       expect(current.writes.some((line) => line.includes(`new runtime ${i}`))).toBe(true);
-      for (let retired = 0; retired < i; retired++) expect(panes.get(`alice-${retired}`)!.writes).toEqual([]);
+      for (let retired = 0; retired < i; retired++) expect(panes.get(`jinx-${retired}`)!.writes).toEqual([]);
       // Clear the just-served runtime's writes to distinguish any later stale send.
       current.writes.length = 0;
       for (const value of panes.values()) value.isWorking = true;
     }
   });
 
-  it('does not merge another employee merely because its name is also Alice', async () => {
+  it('does not merge another employee merely because its name is also Jinx', async () => {
     const hired = await employee();
     pane('different-employee');
     const other = await employee('different-employee');
     const room = chat.createRoom('other employee room', undefined);
     chat.addMember(room.id, 'different-employee');
-    for (let i = 1; i <= 3; i++) await company.rebind(hired.id, undefined, `alice-${i}`);
+    for (let i = 1; i <= 3; i++) await company.rebind(hired.id, undefined, `jinx-${i}`);
     expect(company.view().employees).toHaveLength(2);
     expect(company.view().employees.find((e) => e.id === other.id)?.sessionId).toBe('different-employee');
     expect(chat.room(room.id)!.members.map((m) => m.sessionId)).toEqual(['different-employee']);
@@ -177,48 +177,48 @@ describe('permanent employee across three runtime replacements', () => {
   it('does not leave the employee bound to the successor when membership migration fails', async () => {
     const hired = await employee();
     const room = chat.createRoom('migration failure', undefined);
-    chat.addMember(room.id, 'alice-0');
+    chat.addMember(room.id, 'jinx-0');
     const before = structuredClone(chat.room(room.id));
     vi.spyOn(chat, 'replaceSession').mockRejectedValueOnce(new Error('migration failed'));
-    await expect(company.rebind(hired.id, undefined, 'alice-1')).rejects.toThrow('migration failed');
-    expect(company.view().employees[0].sessionId).toBe('alice-0');
+    await expect(company.rebind(hired.id, undefined, 'jinx-1')).rejects.toThrow('migration failed');
+    expect(company.view().employees[0].sessionId).toBe('jinx-0');
     expect(chat.room(room.id)).toEqual(before);
   });
 
   it('does not undo a bind that a concurrent rebind has since moved on', async () => {
     const hired = await employee();
-    chat.addMember(chat.createRoom('race', undefined).id, 'alice-0');
+    chat.addMember(chat.createRoom('race', undefined).id, 'jinx-0');
     vi.spyOn(chat, 'replaceSession').mockImplementationOnce(async () => {
       // While this move is in flight another rebind lands on a third session.
       await companyStore.update((state) => {
-        state.employees[0].sessionId = 'alice-2';
+        state.employees[0].sessionId = 'jinx-2';
       });
       throw new Error('migration failed');
     });
-    await expect(company.rebind(hired.id, undefined, 'alice-1')).rejects.toThrow('migration failed');
-    expect(company.view().employees[0].sessionId).toBe('alice-2');
+    await expect(company.rebind(hired.id, undefined, 'jinx-1')).rejects.toThrow('migration failed');
+    expect(company.view().employees[0].sessionId).toBe('jinx-2');
   });
 
   it('posts no move notice for a move that was rolled back', async () => {
     const hired = await employee();
     const room = chat.createRoom('notices', undefined);
-    chat.addMember(room.id, 'alice-0');
+    chat.addMember(room.id, 'jinx-0');
     vi.spyOn(chat as any, 'changed').mockImplementationOnce(() => {
       throw new Error('broadcast failed');
     });
-    await expect(company.rebind(hired.id, undefined, 'alice-1')).rejects.toThrow('broadcast failed');
+    await expect(company.rebind(hired.id, undefined, 'jinx-1')).rejects.toThrow('broadcast failed');
     expect(JSON.stringify(chat.room(room.id)!.messages)).not.toContain('moved to a new session');
   });
 
   it('keeps the move when its audit line cannot be written', async () => {
     const hired = await employee();
     const room = chat.createRoom('audit', undefined);
-    chat.addMember(room.id, 'alice-0');
+    chat.addMember(room.id, 'jinx-0');
     vi.spyOn(chat as any, 'audit').mockRejectedValue(new Error('disk full'));
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
-    await company.rebind(hired.id, undefined, 'alice-1');
-    expect(company.view().employees[0].sessionId).toBe('alice-1');
-    expect(chat.room(room.id)!.members.map((m) => m.sessionId)).toEqual(['alice-1']);
+    await company.rebind(hired.id, undefined, 'jinx-1');
+    expect(company.view().employees[0].sessionId).toBe('jinx-1');
+    expect(chat.room(room.id)!.members.map((m) => m.sessionId)).toEqual(['jinx-1']);
     expect(JSON.stringify(chat.room(room.id)!.messages)).toContain('moved to a new session');
     expect(warn).toHaveBeenCalled();
   });
@@ -226,8 +226,8 @@ describe('permanent employee across three runtime replacements', () => {
   it('leaves no room half-moved when the second of three rooms fails mid-migration', async () => {
     const hired = await employee();
     const rooms = ['one', 'two', 'three'].map((name) => chat.createRoom(name, undefined));
-    for (const r of rooms) chat.addMember(r.id, 'alice-0', { role: r === rooms[0] ? 'coordinator' : 'agent' });
-    const dm = chat.openDm('alice-0', undefined);
+    for (const r of rooms) chat.addMember(r.id, 'jinx-0', { role: r === rooms[0] ? 'coordinator' : 'agent' });
+    const dm = chat.openDm('jinx-0', undefined);
     const before = [...rooms, dm].map((r) => structuredClone(chat.room(r.id)!.members));
     const dmBefore = [...chat.room(dm.id)!.dm!];
     const real = (chat as any).changed.bind(chat);
@@ -236,36 +236,36 @@ describe('permanent employee across three runtime replacements', () => {
       if (++calls === 2) throw new Error('room two failed');
       return real(...args);
     });
-    await expect(company.rebind(hired.id, undefined, 'alice-1')).rejects.toThrow('room two failed');
-    expect(company.view().employees[0].sessionId).toBe('alice-0');
+    await expect(company.rebind(hired.id, undefined, 'jinx-1')).rejects.toThrow('room two failed');
+    expect(company.view().employees[0].sessionId).toBe('jinx-0');
     [...rooms, dm].forEach((r, i) => expect(chat.room(r.id)!.members).toEqual(before[i]));
     expect(chat.room(dm.id)!.dm).toEqual(dmBefore);
     // Nothing was retired, so the next attempt starts clean and moves all of them.
     vi.restoreAllMocks();
-    await company.rebind(hired.id, undefined, 'alice-1');
+    await company.rebind(hired.id, undefined, 'jinx-1');
     for (const r of [...rooms, dm]) {
-      expect(chat.room(r.id)!.members.map((m) => m.sessionId)).toEqual(['alice-1']);
+      expect(chat.room(r.id)!.members.map((m) => m.sessionId)).toEqual(['jinx-1']);
     }
   });
 
   it('keeps the employee\'s thread across sessions: adopted when known, kept when the successor has none, restored on a failed move', async () => {
-    threads.set('alice-0', 'ses_first');
+    threads.set('jinx-0', 'ses_first');
     const hired = await employee();
     expect(hired.threadId).toBe('ses_first');
     // A fresh, never-resumed successor (no thread of its own) leaves the person's thread alone.
-    await company.rebind(hired.id, undefined, 'alice-1');
+    await company.rebind(hired.id, undefined, 'jinx-1');
     expect(company.view().employees[0].threadId).toBe('ses_first');
     // A successor that runs a thread brings it.
-    threads.set('alice-2', 'ses_second');
-    await company.rebind(hired.id, undefined, 'alice-2');
+    threads.set('jinx-2', 'ses_second');
+    await company.rebind(hired.id, undefined, 'jinx-2');
     expect(company.view().employees[0].threadId).toBe('ses_second');
     // A failed move undoes the thread with the binding.
-    threads.set('alice-3', 'ses_third');
+    threads.set('jinx-3', 'ses_third');
     vi.spyOn(chat, 'replaceSession').mockRejectedValueOnce(new Error('migration failed'));
     const room = chat.createRoom('thread rollback', undefined);
-    chat.addMember(room.id, 'alice-2');
-    await expect(company.rebind(hired.id, undefined, 'alice-3')).rejects.toThrow('migration failed');
-    expect(company.view().employees[0]).toMatchObject({ sessionId: 'alice-2', threadId: 'ses_second' });
+    chat.addMember(room.id, 'jinx-2');
+    await expect(company.rebind(hired.id, undefined, 'jinx-3')).rejects.toThrow('migration failed');
+    expect(company.view().employees[0]).toMatchObject({ sessionId: 'jinx-2', threadId: 'ses_second' });
     // The owner can seed or clear it, and the next replacement is told it.
     await company.setThread(hired.id, undefined, 'ses_seed');
     expect(company.prepareSpawn({ employeeId: hired.id }).threadId).toBe('ses_seed');
@@ -276,12 +276,12 @@ describe('permanent employee across three runtime replacements', () => {
 
   it('refuses a foreign-owner target without changing membership, identity or history', async () => {
     const hired = await employee();
-    pane('foreign-alice', 'another-owner');
+    pane('foreign-jinx', 'another-owner');
     const room = chat.createRoom('private', undefined);
-    chat.addMember(room.id, 'alice-0');
+    chat.addMember(room.id, 'jinx-0');
     const before = structuredClone(chat.room(room.id));
-    await expect(company.rebind(hired.id, undefined, 'foreign-alice')).rejects.toThrow('owned');
-    expect(company.view().employees[0].sessionId).toBe('alice-0');
+    await expect(company.rebind(hired.id, undefined, 'foreign-jinx')).rejects.toThrow('owned');
+    expect(company.view().employees[0].sessionId).toBe('jinx-0');
     expect(chat.room(room.id)).toEqual(before);
   });
 });

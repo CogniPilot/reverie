@@ -21,7 +21,7 @@ function fake() {
       if (options.path === '/api/v1/chatrooms') return { status: 200, text: '', json: { success: true, data: { rooms: [{ id: ROOM, name: 'host requests', dm: [] }] } } };
       if (options.path.endsWith('/messages')) {
         const poll = { question: 'q', options: [{ id: 'o1', label: 'Yes' }, { id: 'o2', label: 'No' }], votes: { user: ['o1'] } };
-        return { status: 200, text: '', json: { success: true, data: { messages: [{ id: POLL, at: 1, from: { kind: 'agent', sessionId: 'self', name: 'Morgan' }, text: 'q', poll }], members: [] } } };
+        return { status: 200, text: '', json: { success: true, data: { messages: [{ id: POLL, at: 1, from: { kind: 'agent', sessionId: 'self', name: 'Otto' }, text: 'q', poll }], members: [] } } };
       }
       const poll = { question: 'q', options: [{ id: 'o1', label: 'Yes' }, { id: 'o2', label: 'No' }], votes: { user: ['o1'] }, closed: { at: 2, by: 'self' } };
       return { status: 200, text: '', json: { success: true, data: { poll } } };

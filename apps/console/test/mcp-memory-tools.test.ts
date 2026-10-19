@@ -72,8 +72,8 @@ describe('requests', () => {
     expect(calls[0].env.FLEET_INSTANCE_CONFIG).toBe(ON.instance);
     expect(calls[0].env.PYTHONPATH).toBe('/src');
     expect(Object.keys(calls[0].env).filter((k) => k.startsWith('CODEMAN_'))).toEqual([]);   // no room credentials
-    await tools.run('memory_recall', { query: 'q', project: 'web-app' });
-    expect(JSON.parse(calls[1].input)).toEqual({ action: 'recall', query: 'q', project: 'web-app' });
+    await tools.run('memory_recall', { query: 'q', project: 'slam-web' });
+    expect(JSON.parse(calls[1].input)).toEqual({ action: 'recall', query: 'q', project: 'slam-web' });
   });
 
   it('never lets an argument choose another store', async () => {

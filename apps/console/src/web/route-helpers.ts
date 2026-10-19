@@ -404,6 +404,15 @@ export function resolveParentSessionId(
 }
 
 /**
+ * Who asked, for an audit line: the session in the caller's own `X-Codeman-Parent-Session`
+ * header (validated as in `resolveParentSessionId`), else 'owner'. A body `parentSessionId` is
+ * lineage the caller may set for anyone, so it never names the actor.
+ */
+export function auditActor(ctx: SessionPort, req: FastifyRequest, owner: string | undefined): string {
+  return resolveParentSessionId(ctx, req, undefined, owner) ?? 'owner';
+}
+
+/**
  * Resolve "an agent asked for this", the signal that labels a case directory
  * Codeman is about to CREATE as an agent scratch workspace (see agent-case-marker.ts).
  *

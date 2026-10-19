@@ -14,9 +14,10 @@ function pane(): DeliverySession & { writes: string[]; ok: boolean } {
     pid: 1,
     writes,
     ok: true,
-    writeViaMux: async (data: string) => {
+    writeViaMux: async (data: string, options?: Parameters<DeliverySession['writeViaMux']>[1]) => {
       if (!p.ok) return false;
       writes.push(data);
+      options?.onOutcome?.('submitted');
       return true;
     },
   };

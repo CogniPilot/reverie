@@ -85,9 +85,22 @@ export function registerCompanyRoutes(
   );
   app.put('/api/company/employees/:id/session', async (req, reply) =>
     run(reply, async () => {
-      ownerOnly(req);
       const { id } = req.params as { id: string };
-      return { employee: await service.rebind(id, ownerFor(req), parseBody(RebindSchema, req.body).sessionId) };
+      const { sessionId } = parseBody(RebindSchema, req.body);
+      if (req.headers['x-codeman-parent-session'] === undefined)
+        return { employee: await service.rebind(id, ownerFor(req), sessionId) };
+      // An agent header: only the CTO/COO recovery of an employee whose session is gone, audited.
+      const self = caller(req);
+      if (!self) throw new CompanyError('Only the owner, the CTO or the COO may recover an employee session', 403);
+      const employee = await service.recover(id, ownerFor(req), self, sessionId);
+      void appendAdminAudit({
+        admin: `session ${self}`,
+        action: 'employee_recover',
+        target: employee.name,
+        ip: req.ip,
+        detail: { id, by: self, sessionId },
+      });
+      return { employee };
     })
   );
   app.put('/api/company/employees/:id/thread', async (req, reply) =>
@@ -112,6 +125,31 @@ export function registerCompanyRoutes(
         ip: req.ip,
         detail: { id, fields: Object.keys(change), position: { from: before?.position, to: employee.position } },
       });
+      return { employee };
+    })
+  );
+  // Retire an employee whose session is gone, or put a retired one back (owner only; refused with any agent header).
+  app.post('/api/company/employees/:id/retire', async (req, reply) =>
+    run(reply, async () => {
+      ownerOnly(req);
+      const { id } = req.params as { id: string };
+      const { employee, rooms, failed } = await service.retire(id, ownerFor(req));
+      void appendAdminAudit({
+        admin: 'owner',
+        action: 'employee_retire',
+        target: employee.name,
+        ip: req.ip,
+        detail: { id, sessionId: employee.sessionId, rooms, failed },
+      });
+      return { employee, rooms, failed };
+    })
+  );
+  app.post('/api/company/employees/:id/restore', async (req, reply) =>
+    run(reply, async () => {
+      ownerOnly(req);
+      const { id } = req.params as { id: string };
+      const employee = await service.restore(id, ownerFor(req));
+      void appendAdminAudit({ admin: 'owner', action: 'employee_restore', target: employee.name, ip: req.ip, detail: { id, sessionId: employee.sessionId } });
       return { employee };
     })
   );

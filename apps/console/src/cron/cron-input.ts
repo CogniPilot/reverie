@@ -13,6 +13,7 @@ export interface CronJobInput {
   name: string;
   /** Default 'launch'. A 'post' job needs botId, roomId and postText and leaves the session fields out. */
   action?: CronAction;
+  postAs?: 'bot' | 'author';
   botId?: string;
   roomId?: string;
   postText?: string;

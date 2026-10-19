@@ -1089,10 +1089,10 @@ webCmd.action(async (options) => {
     )
   );
 
-  try {
+  {
     // The server prints its own "running at" line (it also covers the daemon and
     // service launch paths), so this one used to be a duplicate of it.
-    const server = await startWebServer(port, https, false, host, titleHostname, allowUnauthenticatedNetwork, basePath);
+    const server = await startWebOrExit(() => startWebServer(port, https, false, host, titleHostname, allowUnauthenticatedNetwork, basePath));
     if (https) {
       console.log(palette.warn('  Note: Accept the self-signed certificate in your browser on first visit'));
     }
@@ -1122,11 +1122,22 @@ webCmd.action(async (options) => {
     process.on('SIGTERM', () => shutdown('SIGTERM'));
     process.on('SIGINT', () => shutdown('SIGINT'));
     process.on('SIGHUP', () => shutdown('SIGHUP'));
-  } catch (err) {
-    console.error(palette.err(`✗ Failed to start web server: ${getErrorMessage(err)}`));
-    process.exit(1);
   }
 });
+
+/**
+ * Start the web server, or say why not and exit 1. A start that throws (a chat database that fails its
+ * check, a port in use) must end the process non-zero, so the supervisor counts it as a failed start.
+ * The exit is injectable so this is tested without ending the test runner.
+ */
+export async function startWebOrExit<T>(start: () => Promise<T>, exit: (code: number) => never = process.exit): Promise<T> {
+  try {
+    return await start();
+  } catch (err) {
+    console.error(palette.err(`✗ Failed to start web server: ${getErrorMessage(err)}`));
+    return exit(1);
+  }
+}
 
 // Supervised service: the "still there after a reboot" answer, where `web -d` is
 // the "still there after I close this shell" one (issue #231).

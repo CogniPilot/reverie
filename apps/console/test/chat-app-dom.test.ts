@@ -40,6 +40,15 @@ const labels = (nodes: Iterable<Element>) => [...nodes].map((n) => n.getAttribut
 const settle = (ms = 40) => new Promise((resolve) => setTimeout(resolve, ms));
 
 describe('the default view', () => {
+  it('exposes the full terminal interface only through the explicit legacy flag', async () => {
+    const legacy = await createHarness({ sessions, rooms: fixtureRooms(), hash: '?legacy=1' });
+    expect(legacy.shell.view).toBe('debug');
+    expect(legacy.document.documentElement.hasAttribute('data-reverie-legacy')).toBe(true);
+    const ordinary = await createHarness({ sessions, rooms: fixtureRooms(), hash: '?legacy=0' });
+    expect(ordinary.shell.view).toBe('chat');
+    expect(ordinary.document.documentElement.hasAttribute('data-reverie-legacy')).toBe(false);
+  });
+
   it('opens as a full-height conversation, with the terminal UI kept out of sight', async () => {
     const h = await createHarness({ sessions, rooms: fixtureRooms() });
     const { document } = h;
@@ -103,11 +112,14 @@ describe('the default view', () => {
     const h = await createHarness({ sessions, rooms: fixtureRooms() });
     const side = labels(h.document.querySelectorAll('.ca-side-scroll button:not(.ca-item-act)'));
     expect(side).toEqual([
+      'Board',
       'Build category, 1 mention',
       'Channel General',
       'Channel Ops, 1 mention',
       'Misc category',
       'Channel Side',
+      // The harness has no embassy API: the failure stays visible with a retry.
+      'Retry loading embassies',
     ]);
     expect(h.document.querySelector('.ca-item[aria-current]')!.textContent).toContain('General');
   });
@@ -405,6 +417,7 @@ describe('members and presence', () => {
     expect(h.window.sessionStorage.getItem('reverie:view')).toBe('debug');
     const back = h.document.querySelector<HTMLButtonElement>('.ca-back')!;
     expect(back.getAttribute('aria-label')).toBe('Back to chat');
+    expect(back.parentElement).toBe(h.document.body);
     back.click();
     expect(h.document.documentElement.getAttribute('data-reverie-view')).toBe('chat');
     expect(h.document.getElementById('chatApp')!.hidden).toBe(false);
@@ -415,17 +428,17 @@ describe('members and presence', () => {
     const h = await createHarness({ sessions: [], rooms: fixtureRooms() });
     h.shell.showDebug('nobody');
     expect(h.app.toasts.at(-1).text).toContain('no open terminal');
+    expect(h.shell.view).toBe('chat');
   });
 
-  it('the profile bar shows the connection, and opens settings and the terminals', async () => {
+  it('the profile bar shows the connection and opens settings without a general terminals button', async () => {
     const h = await createHarness({ sessions, rooms: fixtureRooms() });
     expect(h.document.querySelector('.ca-user-status')!.textContent).toBe('Online');
     h.app.setConnectionStatus('reconnecting');
     expect(h.document.querySelector('.ca-user-status')!.textContent).toBe('Reconnecting…');
     (h.document.querySelector('.ca-user [aria-label="App settings"]') as HTMLButtonElement).click();
     expect(h.app.settingsOpened).toBe(1);
-    (h.document.querySelector('.ca-user [aria-label="Debug terminals"]') as HTMLButtonElement).click();
-    expect(h.document.documentElement.getAttribute('data-reverie-view')).toBe('debug');
+    expect(h.document.querySelector('[aria-label="Debug terminals"]')).toBeNull();
   });
 });
 
@@ -716,7 +729,7 @@ describe('the profile card', () => {
     expect(h.document.activeElement).toBe(buttons[0]);
     buttons.at(-1)!.focus();
     expect(tab(h).defaultPrevented).toBe(true);
-    expect(h.document.activeElement).toBe(buttons[0]);
+    expect(h.document.activeElement).toBe(h.document.querySelector('.ca-profile summary'));
     expect(tab(h, true).defaultPrevented).toBe(true);
     expect(h.document.activeElement).toBe(buttons.at(-1));
     h.document.dispatchEvent(new h.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
@@ -2066,7 +2079,7 @@ describe('review fixes for deleting and reporting', () => {
   });
 });
 
-describe('phone: message sheet and one Debug terminals button', () => {
+describe('phone: message sheet and member-only terminal access', () => {
   const rs = () => [
     room('r1', 'General', [member(A, 'alpha', { role: 'coordinator' }), member(B, 'bravo')], {
       messages: [message('m1', 'r1', agent(B, 'bravo'), 'from an agent', 1000)],
@@ -2154,17 +2167,17 @@ describe('phone: message sheet and one Debug terminals button', () => {
     if (span.classList.contains('is-copy-failed')) expect(h.window.getSelection()?.toString()).toBe('npm test');
   });
 
-  it('has a single Debug terminals button, in the profile bar next to the gear', async () => {
+  it('has no general Debug terminals button on phones', async () => {
     const h = await createHarness({ sessions, rooms: [room('r1', 'General', [member(A, 'alpha')], {})], narrow: true });
-    expect(h.document.querySelectorAll('[aria-label="Debug terminals"]')).toHaveLength(1);
-    expect(h.document.querySelector('.ca-user [aria-label="Debug terminals"]')).not.toBeNull();
+    expect(h.document.querySelectorAll('[aria-label="Debug terminals"]')).toHaveLength(0);
+    expect(h.document.querySelector('.ca-user [aria-label="Debug terminals"]')).toBeNull();
     expect(h.document.querySelector('.ca-rail [aria-label="Debug terminals"]')).toBeNull();
   });
 
-  it('puts the org chart and the Debug terminals next to the gear, in that order, and keeps them out of the rail', async () => {
+  it('puts the org chart next to the gear and keeps both out of the rail', async () => {
     const h = await createHarness({ sessions, rooms: [room('r1', 'General', [member(A, 'alpha')], {})] });
     const bar = [...h.document.querySelectorAll('.ca-user > button')].map((b) => b.getAttribute('aria-label'));
-    expect(bar.slice(-3)).toEqual(['Org chart', 'Debug terminals', 'App settings']);
+    expect(bar.slice(-2)).toEqual(['Org chart', 'App settings']);
     expect(h.document.querySelector('.ca-rail [aria-label="Org chart"]')).toBeNull();
     expect(h.document.querySelector('.ca-rail [aria-label="Debug terminals"]')).toBeNull();
     const org = h.document.querySelector('.ca-user-org') as HTMLElement;
@@ -4111,6 +4124,68 @@ describe('moving an agent to its new session, and retired sessions', () => {
     buttons[1].click();
     await settle(80);
     expect(h.server.retiredCalls).toEqual([{ id: OLD, method: 'DELETE', restore: false }]);
+  });
+});
+
+describe('the Board entry', () => {
+  const entry = (h: { document: Document }, kind: string) => h.document.querySelector<HTMLButtonElement>(`.ca-item[data-key="page:${kind}"]`)!;
+
+  it('are pinned at the top of the channel list, above every channel, with no sorting or dragging', async () => {
+    const h = await createHarness({ sessions, rooms: fixtureRooms() });
+    const scroll = h.document.querySelector('.ca-side-scroll')!;
+    expect(scroll.firstElementChild!.classList.contains('ca-pages')).toBe(true);
+    expect([...scroll.querySelectorAll('.ca-pages .ca-item')].map((b) => b.textContent)).toEqual(['Board']);
+    expect(entry(h, 'board').draggable).toBe(false);
+    expect(h.document.querySelector('.ca-page')).toBeNull();
+  });
+
+  it('opens Board in place of chat, highlights it, and restores it through browser Back', async () => {
+    const h = await createHarness({ sessions, rooms: fixtureRooms() });
+    entry(h, 'board').click();
+    const frame = h.document.querySelector<HTMLIFrameElement>('.ca-page-frame')!;
+    expect(frame.getAttribute('src')).toBe('/board');
+    expect(h.document.querySelector<HTMLElement>('.ca-page')!.hidden).toBe(false);
+    expect(h.document.querySelector('.ca-head-title')!.textContent).toBe('Board');
+    expect(entry(h, 'board').getAttribute('aria-current')).toBe('page');
+    expect(h.document.querySelector('.ca-item--room.is-active')).toBeNull();
+    expect((h.document.querySelector('.ca-chat') as HTMLElement & { inert: boolean }).inert).toBe(true);
+    expect(h.window.location.hash).toBe('#board');
+    h.window.history.back();
+    await settle(60);
+    expect(h.shell.embed).toBeNull();
+    h.window.history.forward();
+    await settle(60);
+    expect(h.window.location.hash).toBe('#board');
+    expect(frame.getAttribute('src')).toBe('/board');
+  });
+
+  it('does not offer Plans or open the removed #plans page', async () => {
+    const h = await createHarness({ sessions, rooms: fixtureRooms(), hash: '#plans' });
+    expect(entry(h, 'plans')).toBeNull();
+    expect(h.shell.embed).toBeNull();
+    h.shell.openPage('plans');
+    expect(h.document.querySelector('.ca-page')).toBeNull();
+    expect(h.server.calls.some((call: { path: string }) => call.path === '/plans')).toBe(false);
+  });
+
+  it('a room click, or a link to another room, brings the conversation back', async () => {
+    const h = await createHarness({ sessions, rooms: fixtureRooms() });
+    entry(h, 'board').click();
+    [...h.document.querySelectorAll<HTMLButtonElement>('.ca-item--room')].find((b) => b.textContent!.includes('Side'))!.click();
+    await settle(80);
+    expect(h.document.querySelector<HTMLElement>('.ca-page')!.hidden).toBe(true);
+    expect(h.document.querySelector('.ca-head-title')!.textContent).toBe('#Side');
+    expect(h.window.location.hash).toBe('');
+    expect((h.document.querySelector('.ca-chat') as HTMLElement & { inert: boolean }).inert).toBe(false);
+    expect(entry(h, 'board').classList.contains('is-active')).toBe(false);
+  });
+
+  it('a #board link opens the page when the app loads', async () => {
+    const h = await createHarness({ sessions, rooms: fixtureRooms(), hash: '#board' });
+    await settle(60);
+    expect(h.document.querySelector<HTMLElement>('.ca-page')!.hidden).toBe(false);
+    expect(h.document.querySelector('.ca-page-frame')!.getAttribute('src')).toBe('/board');
+    expect(entry(h, 'board').classList.contains('is-active')).toBe(true);
   });
 });
 

@@ -261,7 +261,7 @@ describe('built-in data sources', () => {
   it('posts the rendered text only when the condition holds; scheduled silence leaves no run', async () => {
     const load = { v: 1 };
     const { service, posted, runs } = sourced(load);
-    const j = service.createJob(postInput({ postSource: 'host-load', postText: '@Morgan load {load15} on {cpus} CPUs', postWhen: { field: 'load15', op: 'gt', value: 4 } }));
+    const j = service.createJob(postInput({ postSource: 'host-load', postText: '@Otto load {load15} on {cpus} CPUs', postWhen: { field: 'load15', op: 'gt', value: 4 } }));
     await service.tickDueJobs((j.nextRunAt as number) + 1000);
     await new Promise((r) => setTimeout(r, 20));
     expect(posted).toEqual([]);
@@ -273,7 +273,7 @@ describe('built-in data sources', () => {
     load.v = 6;
     const run = await service.runNow(j.id);
     expect(run?.status).toBe('posted');
-    expect(posted).toEqual([{ roomId: 'room-1', text: '@Morgan load 6 on 8 CPUs' }]);
+    expect(posted).toEqual([{ roomId: 'room-1', text: '@Otto load 6 on 8 CPUs' }]);
   });
 
   it('change-only skips an identical scheduled post but posts a changed one', async () => {
@@ -311,15 +311,15 @@ describe('source post edits', () => {
 
 describe('burn-watch source', () => {
   const plan = (label: string, over: Record<string, unknown> = {}): PlanRow =>
-    ({ label, signedIn: true, sessions: [{ name: 'Morgan' }], bankedResets: null,
+    ({ label, signedIn: true, sessions: [{ name: 'Otto' }], bankedResets: null,
       pace: { weekly: 50, burnPerHour: 1, projected: 90, weekReset: 2_000_000_000, runsOutAt: null }, ...over }) as unknown as PlanRow;
   const alerting = (label: string) => plan(label, { pace: { weekly: 90, burnPerHour: 2, projected: 130, weekReset: 2_000_000_000, runsOutAt: 1_900_000_000 } });
 
   it('lists a plan that runs out before reset and a banked reset; times stay out of the key', () => {
-    const d = burnWatchData([alerting('globex'), plan('codex', { bankedResets: { availableCount: 2, earliestExpiresAt: 5 } }), plan('ok')]);
+    const d = burnWatchData([alerting('tertiary'), plan('codex', { bankedResets: { availableCount: 2, earliestExpiresAt: 5 } }), plan('ok')]);
     expect(d.alerts).toBe(2);
-    expect(d.message).toMatch(/^Burn watch: ALERT globex \(Morgan\) runs out .* UTC, before its reset .* UTC; ALERT BANKED codex \(Morgan\): 2 free reset/);
-    expect(d._key).toBe('ALERT globex (Morgan) runs out|ALERT BANKED codex (Morgan): 2');
+    expect(d.message).toMatch(/^Burn watch: ALERT tertiary \(Otto\) runs out .* UTC, before its reset .* UTC; ALERT BANKED codex \(Otto\): 2 free reset/);
+    expect(d._key).toBe('ALERT tertiary (Otto) runs out|ALERT BANKED codex (Otto): 2');
     expect(burnWatchData([plan('ok')])).toMatchObject({ alerts: 0, _key: '', message: expect.stringMatching(/No alerts/) });
   });
 
@@ -335,7 +335,7 @@ describe('burn-watch source', () => {
     };
     await tick();
     expect(ctx.posted).toHaveLength(0); // quiet baseline
-    rows = [alerting('globex')];
+    rows = [alerting('tertiary')];
     await tick();
     expect(ctx.posted).toHaveLength(1);
     await tick(); // same set

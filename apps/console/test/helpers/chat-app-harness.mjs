@@ -67,7 +67,7 @@ export function createServer(rooms, { features = { unread: true, dms: true, plac
   state.handle = async (path, opts = {}) => {
     const method = opts.method || 'GET';
     const url = new URL(path, 'http://localhost');
-    state.calls.push({ method, path: url.pathname, body: opts.body });
+    state.calls.push({ method, path: url.pathname, body: opts.body, search: url.search });
     let m;
     if (url.pathname === '/api/chatrooms/retired' && method === 'GET') {
       return ok({ retired: structuredClone(state.retired || []) });
@@ -83,8 +83,14 @@ export function createServer(rooms, { features = { unread: true, dms: true, plac
     }
     if ((m = url.pathname.match(/^\/api\/chatrooms\/([^/]+)$/)) && method === 'GET') {
       const r = find(decodeURIComponent(m[1]));
+      const limit = Number(url.searchParams.get('limit')) || undefined;
       return r
-        ? ok(structuredClone({ ...r, coordinatorId: r.members.find((x) => x.role === 'coordinator')?.sessionId }))
+        ? ok(structuredClone({
+            ...r,
+            messages: limit ? r.messages.slice(-limit) : r.messages,
+            messageCount: r.messages.length,
+            coordinatorId: r.members.find((x) => x.role === 'coordinator')?.sessionId,
+          }))
         : fail(404, 'No such room');
     }
     if ((m = url.pathname.match(/^\/api\/chatrooms\/([^/]+)\/messages$/)) && method === 'POST') {

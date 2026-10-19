@@ -6,6 +6,8 @@
        served at /session/:id (detached single-session window) without 404ing
        on relative <script>/<link> URLs. Must precede the first resource tag. -->
   <base href="/">
+  <!-- Blocking: remove invitation secrets from the URL before the app initializes. -->
+  <script src="embassy-invite-bootstrap.js"></script>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="description" content="Chat with your AI agents, follow your channels, and stay in touch from your phone.">
   <meta name="theme-color" content="#11151c">
@@ -952,7 +954,7 @@
           </div>
           <div class="form-row">
             <label for="webviewUrl">URL</label>
-            <input type="text" id="webviewUrl" placeholder="http://100.64.0.1:4000/" autocomplete="off"
+            <input type="text" id="webviewUrl" placeholder="http://100.70.56.18:4000/" autocomplete="off"
                    autocapitalize="off" spellcheck="false">
             <span class="form-hint">
               Reached from the Reverie server, so a tailnet or localhost address works even when
@@ -4205,7 +4207,7 @@
   <script defer src="chat-media.js"></script>
   <script defer src="voice-chat.js"></script>
   <script defer src="car-mode.js"></script>
-  <script defer src="plans-ui.js"></script>
+  <script defer src="account-ui.js"></script>
   <script defer src="update-notice.js"></script>
   <script defer src="host-wake-ui.js"></script>
   <script defer src="webview-tabs.js"></script>

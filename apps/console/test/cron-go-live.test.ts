@@ -23,14 +23,14 @@ describe('go-live is a partial edit', () => {
     installRouteErrorHandler(app);
     await app.ready();
     const created = await app.inject({ method: 'POST', url: '/api/cron/jobs', payload: {
-      name: 'Coffee', action: 'post', botId: 'routines', roomId: 'room-1', postText: '@Casey coffee', scheduleType: 'daily',
+      name: 'Coffee', action: 'post', botId: 'routines', roomId: 'room-1', postText: '@Jinx coffee', scheduleType: 'daily',
       dailyTime: '10:03', timeZone: 'America/New_York', dryRun: true, enabled: true } });
     const id = created.json().job.id as string;
     expect(cron.getJob(id)?.dryRun).toBe(true);
 
     const res = await app.inject({ method: 'PUT', url: `/api/cron/jobs/${id}`, payload: { dryRun: false } });
     expect(res.statusCode).toBe(200);
-    expect(cron.getJob(id)).toMatchObject({ dryRun: false, name: 'Coffee', botId: 'routines', roomId: 'room-1', postText: '@Casey coffee', dailyTime: '10:03', timeZone: 'America/New_York', enabled: true });
+    expect(cron.getJob(id)).toMatchObject({ dryRun: false, name: 'Coffee', botId: 'routines', roomId: 'room-1', postText: '@Jinx coffee', dailyTime: '10:03', timeZone: 'America/New_York', enabled: true });
     await app.close();
   });
 });

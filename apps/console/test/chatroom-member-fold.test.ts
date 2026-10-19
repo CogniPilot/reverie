@@ -26,19 +26,19 @@ function fold(members: M[]) {
 
 describe('_foldGoneMembers', () => {
   it('folds an old session whose name a live member now holds', () => {
-    const r = fold([m('57cf2d36', 'Morgan', true), m('cc9158df', 'Morgan', false), m('2e9d2da3', 'Riley', true), m('15dedf37', 'riley ', false)]);
+    const r = fold([m('57cf2d36', 'Otto', true), m('cc9158df', 'Otto', false), m('2e9d2da3', 'Mira', true), m('15dedf37', 'mira ', false)]);
     expect(r.folded.map((x) => x.sessionId)).toEqual(['cc9158df', '15dedf37']);
     expect(r.shown.map((x) => x.sessionId)).toEqual(['57cf2d36', '2e9d2da3']);
   });
 
   it('keeps a gone member with no live twin, and any live member', () => {
-    const r = fold([m('a', 'Jordan', false), m('b', 'Blake', true), m('c', 'Blake', true)]);
+    const r = fold([m('a', 'Bev', false), m('b', 'Stan', true), m('c', 'Stan', true)]);
     expect(r.folded).toEqual([]);
     expect(r.shown).toHaveLength(3);
   });
 
   it('never folds the admin', () => {
-    const r = fold([m('a', 'Avery', false, 'coordinator'), m('b', 'Avery', true)]);
+    const r = fold([m('a', 'Burt', false, 'coordinator'), m('b', 'Burt', true)]);
     expect(r.folded).toEqual([]);
   });
 });

@@ -11,6 +11,8 @@ export interface RoutinesPolicy {
   readonly grants: RoutinesGrants;
   /** The employee whose session id the agent header carries. */
   findEmployee(sessionId: string): { id: string; name: string; position: string } | undefined;
+  /** True when this session sits in the room (the employee's seat, not a name). */
+  isMember(roomId: string, sessionId: string): boolean;
   /** The boardroom channel, or undefined when there is none. */
   boardroomId(): string | undefined;
   /** Post a one-line system notice in a room; false when it could not be posted. */

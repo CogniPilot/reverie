@@ -13,12 +13,14 @@ npm run build
 node dist/index.js web
 ```
 
-The installed command is `reverie`. Reverie defaults to `~/.fleet` and a separate `fleet` tmux socket. Set
+The installed command is `reverie`; `fleet` and `codeman` remain compatibility
+aliases. Reverie defaults to `~/.fleet` and a separate `fleet` tmux socket. Set
 `FLEET_INSTANCE`, `FLEET_DATA_DIR`, `FLEET_TMUX_SOCKET` and `FLEET_PORT` for an
-isolated deployment. Some internal names keep the older `fleet` / `codeman`
-spelling for compatibility; explicit `FLEET_*` settings take precedence over
-`CODEMAN_*`. Use `FLEET_CASES_PATH` to choose a separate workspace root (the
-image uses `/scratch/cases`).
+isolated deployment. Existing `CODEMAN_*` environment variables, API headers and
+agent tooling remain compatible; explicit `FLEET_*` settings take precedence.
+Existing Codeman state is never migrated or modified automatically. Internal
+protocol names and the historical case-directory spelling remain compatible;
+use `FLEET_CASES_PATH` to choose a separate workspace root (the image uses `/scratch/cases`).
 
 Update Reverie by reviewing monorepo changes and rebuilding the image. Installation
 never starts a server, and the inherited upstream self-updater is disabled.
@@ -48,10 +50,11 @@ belongs to the project in each account, not to one conversation.
 
 For MCP over stdio, use [config/mcp-client.json](config/mcp-client.json) in your
 MCP client's configuration. It runs the locally installed `reverie mcp`; ensure
-`reverie` is on that client's PATH. Explicitly set `FLEET_API_URL` in the MCP client's inherited environment to select the intended
+`reverie` is on that client's PATH. Explicitly set `FLEET_API_URL` or the compatible
+`CODEMAN_API_URL` in the MCP client's inherited environment to select the intended
 Reverie server. No server URL is guessed. If authentication is enabled, supply
-`FLEET_PASSWORD` through the client's secret environment,
-outside the repository. This fork has no registry publication identity
+`FLEET_PASSWORD` or `CODEMAN_PASSWORD` through the client's secret environment,
+outside the repository. This private fork has no registry publication identity
 and the example never downloads an upstream package.
 
 Common dashboard shortcuts are listed below. App Settings → Shortcuts lists the

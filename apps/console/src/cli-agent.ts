@@ -1585,6 +1585,122 @@ export async function agentChatVoice(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Plans (read-only)
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface PlanRowView {
+  id: string;
+  label: string;
+  provider: string;
+  signedIn: boolean;
+  status: string;
+  pace: {
+    fiveHour: number | null;
+    weekly: number | null;
+    weekReset: number | null;
+    pace: number | null;
+    burnPerHour?: number | null;
+    burnBasis?: 'recent' | 'average' | null;
+    remainingPct?: number | null;
+    sustainablePctPerHour?: number | null;
+    projected: number | null;
+    runsOutAt: number | null;
+    recommendation: string;
+  };
+  bankedResets: { availableCount: number; earliestExpiresAt: number | null } | null;
+  sessions: Array<{ id: string; name: string }>;
+}
+
+const PLAN_ZONE = 'America/New_York';
+
+/** An instant as "Sat 17 Oct 20:54 ET". */
+export function planEt(ms: number | null | undefined): string {
+  if (ms === null || ms === undefined || !Number.isFinite(ms)) return '-';
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: PLAN_ZONE,
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(new Date(ms));
+  const get = (t: string) => parts.find((x) => x.type === t)?.value ?? '';
+  return `${get('weekday')} ${get('day')} ${get('month')} ${get('hour')}:${get('minute')} ET`;
+}
+
+const planPct = (n: number | null): string => (n === null || !Number.isFinite(n) ? '-' : `${Math.round(n)}%`);
+
+function planState(a: PlanRowView): string {
+  if (!a.signedIn) return 'signed out';
+  // A run-out time is only as good as the rate behind it: with no recent rate it says so instead of guessing.
+  if (a.pace.runsOutAt) return `runs out ${planEt(a.pace.runsOutAt)}${a.pace.burnBasis === 'average' ? ' (at the weekly average)' : ''}`;
+  return a.pace.burnBasis ? 'on pace' : 'pace: not enough data';
+}
+
+/** "burn 0.8%/h, 39% left = 0.4%/h to the reset", or why there is no burn. */
+function planBurnLine(a: PlanRowView): string {
+  const p = a.pace;
+  const burn =
+    p.burnPerHour === null || p.burnPerHour === undefined
+      ? 'burn: not enough data (needs 1 h of readings)'
+      : `burn ${p.burnPerHour}%/h`;
+  const left =
+    p.remainingPct === null || p.remainingPct === undefined || p.sustainablePctPerHour === null || p.sustainablePctPerHour === undefined
+      ? ''
+      : `, ${p.remainingPct}% left = ${p.sustainablePctPerHour}%/h to the reset`;
+  return `  ${burn}${left}`;
+}
+
+function planLines(a: PlanRowView): string[] {
+  const lines = [
+    `${quoteForPane(a.label, 80)}  (${a.provider})  ${planState(a)}`,
+    `  week ${planPct(a.pace.weekly)}  5-hour ${planPct(a.pace.fiveHour)}  resets ${planEt(a.pace.weekReset)}`,
+    ...(a.signedIn ? [planBurnLine(a)] : []),
+  ];
+  if (a.provider === 'openai') {
+    const b = a.bankedResets;
+    lines.push(`  banked resets: ${b ? b.availableCount + (b.earliestExpiresAt ? ` (earliest ${planEt(b.earliestExpiresAt)})` : '') : 'unknown'}`);
+  }
+  lines.push(`  agents on it: ${a.sessions.length ? a.sessions.map((s) => quoteForPane(s.name, 40)).join(', ') : '(none)'}`);
+  return lines;
+}
+
+async function loadPlans(deps: AgentDeps): Promise<{ rows: PlanRowView[] } | { error: string }> {
+  const res = await deps.request(deps.ctx, { method: 'GET', path: '/api/v1/plans' });
+  if (!res.json?.success) return { error: describeFailure(res) };
+  return { rows: ((res.json.data as { accounts?: PlanRowView[] } | undefined)?.accounts ?? []) as PlanRowView[] };
+}
+
+/** `plans`: every account this session may see (a coordinator sees all, any other agent its own account). Read-only. */
+export async function agentPlans(deps: AgentDeps): Promise<number> {
+  const loaded = await loadPlans(deps);
+  if ('error' in loaded) return fail(deps, loaded.error);
+  if (deps.json) {
+    emitJson(deps, loaded.rows);
+    return EXIT.ok;
+  }
+  if (loaded.rows.length === 0) deps.io.out(palette.muted('(no account visible to this session)'));
+  for (const a of loaded.rows) for (const line of planLines(a)) deps.io.out(line);
+  return EXIT.ok;
+}
+
+/** `plans show NAME`: one account by label, id or profile id. */
+export async function agentPlansShow(deps: AgentDeps, options: { name: string }): Promise<number> {
+  const loaded = await loadPlans(deps);
+  if ('error' in loaded) return fail(deps, loaded.error);
+  const want = options.name.trim().toLowerCase();
+  const hit = loaded.rows.find((a) => a.id.toLowerCase() === want || a.label.toLowerCase() === want);
+  if (!hit) return fail(deps, `no account "${quoteForPane(options.name, 80)}" visible to this session`, EXIT.error);
+  if (deps.json) {
+    emitJson(deps, hit);
+    return EXIT.ok;
+  }
+  for (const line of planLines(hit)) deps.io.out(line);
+  return EXIT.ok;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Commander wiring
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -1630,6 +1746,19 @@ export function registerAgentCommands(program: Command): Command {
     .description('Talk to other sessions from inside one (any CLI mode): list, spawn, send, wait, read, interrupt, rm');
 
   const run = runAgentVerb;
+
+  const plans = program
+    .command('plans')
+    .description('Subscription accounts: week and 5-hour use, reset time, pace, banked resets, agents on it (read-only)')
+    .option('--json', 'Machine-readable output')
+    .action((options: { json?: boolean }) => run(Boolean(options.json), agentPlans));
+  plans
+    .command('show <name>')
+    .description('One account by label or id')
+    .option('--json', 'Machine-readable output')
+    .action((name: string, options: { json?: boolean }, cmd: Command) =>
+      run(Boolean(options.json ?? cmd.parent?.opts().json), (deps) => agentPlansShow(deps, { name }))
+    );
 
   agent
     .command('ls')

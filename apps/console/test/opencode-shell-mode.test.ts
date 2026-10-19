@@ -187,7 +187,7 @@ describe('who gets the guard', () => {
     delivery.enqueue('p', { id: 'r', name: 'Room' }, '"alpha" -> you: "done!"');
     await delivery.flushAll();
     expect(writes).toHaveLength(1);
-    expect(writes[0].options).toEqual({ opencodeGuard: true });
+    expect(writes[0].options).toEqual({ opencodeGuard: true, onOutcome: expect.any(Function) });
     expect(writes[0].data.endsWith('\r')).toBe(true);
   });
 });

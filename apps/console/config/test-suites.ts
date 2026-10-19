@@ -20,6 +20,11 @@
  */
 export const BROWSER_TEST_GLOBS = [
   'test/embassy-guest-ui.browser.test.ts',
+  'test/embassy-qr.browser.test.ts',
+  'test/embassy-pairing.browser.test.ts',
+  'test/embassy-pairing-csrf.browser.test.ts',
+  'test/member-menu.browser.test.ts',
+  'test/debug-terminal-view.browser.test.ts',
   'test/webhook-removal.browser.test.ts',
   'test/company-ui.browser.test.ts',
   'test/tab-rail-resize.browser.test.ts',
@@ -52,6 +57,8 @@ export const BROWSER_TEST_GLOBS = [
   'test/run-mode-menu-scroll.browser.test.ts',
   'test/markdown-anchor-links.browser.test.ts',
   'test/fullscreen-tab-switch-capture.browser.test.ts',
+  'test/account-ui.browser.test.ts',
+  'test/board-timeline.browser.test.ts',
 ];
 
 /**

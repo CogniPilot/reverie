@@ -45,28 +45,28 @@ beforeEach(async()=>{
 it('CAT1-CAT3 shows real category rows, keyboard collapse and independently bound conversations',async()=>{
  expect(await page.locator('.eg-channel').count()).toBe(2);
  if(process.env.EMBASSY_UI_SCREENSHOT_DIR)await page.screenshot({path:process.env.EMBASSY_UI_SCREENSHOT_DIR+'/embassy-category-desktop.png'});
- const toggle=page.getByRole('button',{name:'Embassies',exact:true});await toggle.focus();await page.keyboard.press('Space');expect(await toggle.getAttribute('aria-expanded')).toBe('false');expect(await page.locator('.eg-channel').first().isVisible()).toBe(false);
+ const toggle=page.locator('.eg-category-toggle');await toggle.focus();await page.keyboard.press('Space');expect(await toggle.getAttribute('aria-expanded')).toBe('false');expect(await page.locator('.eg-channel').first().isVisible()).toBe(false);
  await page.keyboard.press('Enter');expect(await toggle.getAttribute('aria-expanded')).toBe('true');await page.locator('[data-connection="one"]').click();await page.waitForSelector('.eg-post');expect(await page.locator('.eg-origin').textContent()).toContain('one.example.test');
  await page.locator('[data-connection="two"]').click();await page.waitForFunction(()=>document.querySelector('.eg-text')?.textContent==='Another independent conversation');expect(await page.locator('.eg-origin').textContent()).toContain('two.example.test');
  expect(await page.locator('.eg-view iframe').count()).toBe(0);
 });
 it('CAT4 keeps room unread independently across collapse, switch and local read-cursor restoration',async()=>{
  await page.locator('[data-connection="one"]').click();await page.waitForSelector('.eg-post');expect(await page.locator('[data-connection="two"] .eg-unread').textContent()).toBe('1');
- await page.getByRole('button',{name:'Embassies',exact:true}).click();expect(await page.locator('.eg-unread-total').textContent()).toBe('1');
+ await page.locator('.eg-category-toggle').click();expect(await page.locator('.eg-unread-total').textContent()).toBe('1');
  const before=await page.evaluate(()=>({one:localStorage.getItem('reverie:embassy:one:read'),two:localStorage.getItem('reverie:embassy:two:read'),posts:window.__server.posts.length}));expect(before).toEqual({one:'1',two:null,posts:0});
  await page.evaluate(async()=>{const ui=window.reverieChat.embassy;ui.close();ui.posts.clear();await ui.refresh();});
  expect(await page.locator('.eg-unread-total').textContent()).toBe('1');
 });
 it('host preview does not join until confirmed and clears the invite before showing the host',async()=>{
- await page.getByRole('button',{name:'Add embassy channel',exact:true}).click();await page.getByLabel('Invite key', {exact:true}).fill('PRIVATE_INVITE');await page.getByRole('button',{name:'Check host',exact:true}).click();
+ await page.evaluate(()=>window.reverieChat.embassy.joinDialog());await page.getByLabel('Invite key', {exact:true}).fill('PRIVATE_INVITE');await page.getByRole('button',{name:'Check host',exact:true}).click();
  await page.getByRole('button',{name:'Connect',exact:true}).waitFor();expect(await page.locator('.eg-key').inputValue()).toBe('');expect(await page.locator('.eg-join-status').textContent()).toContain('https://relay.example.test');
  expect(await page.evaluate(()=>window.__eg.calls.filter(c=>c.path.endsWith('/join')).length)).toBe(0);
  await page.getByRole('button',{name:'Connect',exact:true}).click();await page.waitForSelector('.eg-view');expect(await page.evaluate(()=>JSON.stringify({...localStorage,...sessionStorage}))).not.toContain('PRIVATE_INVITE');
 });
 it('Disable freezes the composer and retains history; uncertain retries reuse the same identity',async()=>{
- await page.locator('[data-connection="one"]').click();await page.waitForSelector('.eg-post');await page.locator('.eg-input').fill('Keep one request');await page.evaluate(()=>window.__eg.failPost=true);await page.locator('.eg-composer button').click();await page.getByRole('button',{name:'Retry same message',exact:true}).waitFor();await page.getByRole('button',{name:'Retry same message',exact:true}).click();
+ await page.locator('[data-connection="one"]').click();await page.waitForSelector('.eg-post');await page.locator('.eg-input').fill('Keep one request');await page.evaluate(()=>window.__eg.failPost=true);await page.locator('.eg-composer .chatroom-send').click();await page.getByRole('button',{name:'Retry same message',exact:true}).waitFor();await page.getByRole('button',{name:'Retry same message',exact:true}).click();
  const calls=await page.evaluate(()=>window.__eg.calls.filter(c=>c.method==='POST'&&c.path.endsWith('/posts')).map(c=>c.body));expect(calls).toHaveLength(2);expect(calls[0]).toEqual(calls[1]);
- await page.getByRole('button',{name:'Disable',exact:true}).click();await page.waitForFunction(()=>document.querySelector('.eg-status')?.textContent==='Disabled here');expect(await page.locator('.eg-composer button').isDisabled()).toBe(true);expect(await page.locator('.eg-post').count()).toBe(1);
+ await page.getByRole('button',{name:'Disable',exact:true}).click();await page.waitForFunction(()=>document.querySelector('.eg-status')?.textContent==='Disabled here');expect(await page.locator('.eg-composer .chatroom-send').isDisabled()).toBe(true);expect(await page.locator('.eg-post').count()).toBe(1);
  if(process.env.EMBASSY_UI_SCREENSHOT_DIR)await page.screenshot({path:process.env.EMBASSY_UI_SCREENSHOT_DIR+'/embassy-disabled-here.png'});
 });
 it('CAT6 renders hostile labels safely at 390px in light and dark with no horizontal overflow',async()=>{

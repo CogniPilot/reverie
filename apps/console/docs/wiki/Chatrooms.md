@@ -118,7 +118,7 @@ the dashboard transcribes through the local voice service. **Dictation: send wit
 preview** in the room's ⋯ menu skips the countdown.
 
 **Speak replies aloud** (⋯ menu, per device) reads replies addressed to you with the
-phone's voice, name first ("proof_tool says: ..."), one at a time, and waits while you
+phone's voice, name first ("rumoca_lean says: ..."), one at a time, and waits while you
 are recording. A reply longer than about 80 words is announced instead ("Long reply from
 ...") so you can read it in the panel.
 

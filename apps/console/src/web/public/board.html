@@ -56,6 +56,25 @@ h2{margin:0;font-size:13px;text-transform:uppercase;letter-spacing:.08em;color:v
 #tl text{font-family:var(--sans)}
 .hint{color:var(--faint);font-size:12px}
 .empty{color:var(--faint);font-size:13px;padding:16px 14px}
+.dcards{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,340px),1fr));gap:12px;padding:12px 14px}
+.dcard{border:1px solid var(--line);border-left:4px solid var(--warn);border-radius:12px;padding:12px;background:var(--panel2);min-width:0;display:flex;flex-direction:column;gap:8px}
+.dcard.poll{border-left-color:var(--accent)}
+.dcard h3{margin:0;font-size:14.5px;line-height:1.35;font-weight:600;overflow-wrap:anywhere}
+.dcard .sum{font-size:13px;line-height:1.45;overflow-wrap:anywhere}
+.dcard .rec{font-size:13px;line-height:1.45;background:var(--accent-soft);border-radius:8px;padding:7px 9px;overflow-wrap:anywhere}
+.dcard .rec b{color:var(--accent)} .dcard .rec.none{background:none;padding:0;color:var(--faint);font-style:italic}
+.dcard .trade{font-size:12.5px;color:var(--muted);overflow-wrap:anywhere}
+.dcard .who{color:var(--muted);font-size:12px}
+.dcard .opts{display:flex;flex-wrap:wrap;gap:6px}
+.dcard .opts .btn{min-height:40px;text-align:left}
+.dcard .opts .btn.recd{border-color:var(--accent)}
+.dcard .opts .btn .n{color:var(--faint);margin-left:6px}
+.dcard details summary{cursor:pointer;color:var(--muted);font-size:12.5px}
+.dcard .err{color:var(--bad);font-size:12.5px}
+#decidedBox{border-top:1px solid var(--line);padding:10px 14px}
+#decidedBox summary{cursor:pointer;color:var(--muted);font-size:12.5px}
+#decidedBox ul{list-style:none;margin:8px 0 0;padding:0;display:flex;flex-direction:column;gap:6px;font-size:12.5px}
+#decidedBox li{overflow-wrap:anywhere}
 .tip{position:fixed;z-index:10;pointer-events:none;background:var(--panel);border:1px solid var(--line);border-radius:9px;padding:8px 10px;box-shadow:0 6px 24px rgba(0,0,0,.18);font-size:12.5px;max-width:280px}
 .tip b{display:block;margin-bottom:2px}
 .tip .k{display:inline-block;font-size:11px;padding:0 6px;border-radius:5px;margin-left:6px;color:#fff}
@@ -73,6 +92,18 @@ h2{margin:0;font-size:13px;text-transform:uppercase;letter-spacing:.08em;color:v
 .stats{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:8px}
 .stats div{font-size:11.5px;color:var(--muted)} .stats b{display:block;font:600 15px var(--mono);color:var(--fg)}
 .plan svg{width:100%;height:auto;display:block;margin-top:8px}
+.pact{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:8px}
+.pact input{flex:1 1 140px}
+.plan .err,dialog .err{color:var(--bad);font-size:12.5px;margin:4px 0 0}
+dialog{border:1px solid var(--line);border-radius:14px;background:var(--panel);color:var(--fg);padding:16px;width:min(94vw,440px);box-shadow:0 12px 40px rgba(0,0,0,.25)}
+dialog::backdrop{background:rgba(0,0,0,.4)}
+dialog h3{margin:0 0 10px;font-size:16px}
+dialog form,dialog .step{display:flex;flex-direction:column;gap:8px;margin-bottom:12px}
+dialog input,dialog select,.pact input{font:inherit;font-size:16px;padding:6px 10px;min-height:36px;border-radius:7px;border:1px solid var(--line);background:var(--panel2);color:var(--fg)}
+dialog input,dialog select{width:100%}
+dialog .code{font:600 20px var(--mono);letter-spacing:.08em;padding:6px 10px;border-radius:7px;background:var(--panel2);border:1px solid var(--line)}
+dialog .status{font-size:13px;margin:0 0 10px} dialog .status.failed,dialog .status.timeout{color:var(--bad)} dialog .status.signed_in{color:var(--good)}
+dialog .qr svg{width:160px;height:160px;background:#fff;padding:6px;border-radius:6px}
 .bar-track{height:8px;border-radius:99px;background:var(--grid);margin-top:10px;overflow:hidden}
 .bar-fill{height:100%;background:var(--done);border-radius:99px}
 .agents{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,250px),1fr));gap:12px;padding:14px}
@@ -124,6 +155,12 @@ h2{margin:0;font-size:13px;text-transform:uppercase;letter-spacing:.08em;color:v
 
   <section class="kpis" id="kpis"></section>
 
+  <section class="panel" id="sec-decisions">
+    <div class="phead"><h2>Waiting on you</h2><span class="hint" id="waitingHint">Decisions and polls. The recommendation is the named agent's, not the server's.</span></div>
+    <div class="dcards" id="cards"></div>
+    <details id="decidedBox" hidden><summary id="decidedSum"></summary><ul id="decided"></ul></details>
+  </section>
+
   <section class="panel" id="sec-issues">
     <div class="phead">
       <div class="tools" id="tabs">
@@ -131,6 +168,9 @@ h2{margin:0;font-size:13px;text-transform:uppercase;letter-spacing:.08em;color:v
         <button class="btn" data-tab="kanban">Kanban</button>
       </div>
       <div class="tools" id="zoombtns">
+        <button type="button" class="btn" data-zoom="out" aria-label="Zoom out timeline" title="Zoom out">−</button>
+        <button type="button" class="btn" data-zoom="in" aria-label="Zoom in timeline" title="Zoom in">+</button>
+        <button type="button" class="btn" data-z="fit">Fit</button>
         <button class="btn" data-z="now">Now ±4h</button>
         <button class="btn" data-z="today">Today</button>
         <button class="btn" data-z="3d">3 days</button>
@@ -148,7 +188,7 @@ h2{margin:0;font-size:13px;text-transform:uppercase;letter-spacing:.08em;color:v
   </section>
 
   <section class="panel" id="sec-burn">
-    <div class="phead"><h2>Burn rate · this week per plan</h2><span class="hint">Dotted line = projection at the current rate to the weekly reset.</span></div>
+    <div class="phead"><h2>Burn rate · this week per plan</h2><span class="hint">Dotted line = projection at the current rate to the weekly reset.</span><button type="button" class="btn" id="addAcct" hidden>Add account</button></div>
     <div class="grid2" id="plans"></div>
   </section>
 
@@ -160,16 +200,14 @@ h2{margin:0;font-size:13px;text-transform:uppercase;letter-spacing:.08em;color:v
   <section class="cols">
     <div class="panel" id="sec-wins"><div class="phead"><h2>Wins</h2></div><ul class="list" id="wins"></ul></div>
     <div class="panel" id="sec-blockers"><div class="phead"><h2>Blockers</h2></div><ul class="list" id="blockers"></ul></div>
-    <div class="panel" id="sec-decisions"><div class="phead"><h2>Decisions waiting</h2></div><ul class="list" id="decisions"></ul></div>
-  </section>
-
-  <section class="cols">
-    <div class="panel" id="sec-polls"><div class="phead"><h2>Open polls</h2><button type="button" class="btn" id="pollsToggle" hidden></button></div><ul class="list" id="polls"></ul></div>
     <div class="panel" id="sec-pins"><div class="phead"><h2>Pinned</h2></div><ul class="list" id="pins"></ul></div>
   </section>
   <div class="foot" id="foot">Served inside Reverie. Refreshes every minute.</div>
 </div>
 <div class="tip" id="tip" hidden></div>
+<dialog id="addDlg" aria-label="Add subscription account"></dialog>
+<dialog id="signDlg" aria-label="Sign in"></dialog>
+<dialog id="removeDlg" aria-label="Remove account"></dialog>
 <script>
 const H = 3600e3, D = 24 * H;
 const STATUS = {triage:'Triage', todo:'To do', doing:'Doing', blocked:'Blocked', done:'Done', wontdo:"Won't do"};
@@ -178,7 +216,7 @@ const KIND = {done:'Done', now:'In progress', plan:'Planned', gate:'Gate', block
 const VERDICT = {ahead:['good', 'ahead'], 'on-track':['mute', 'on track'], behind:['bad', 'behind']};
 const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
 const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-let B = null, TZ = 'America/New_York', view = null, tlState = {}, tab = 'timeline', preset = 'now';
+let B = null, TZ = 'America/New_York', view = null, tlState = {}, tab = 'timeline', preset = 'now', timelineAnimation = 0;
 
 /* ---------- time in the company zone ---------- */
 const fmt = (t, o) => new Intl.DateTimeFormat('en-US', Object.assign({timeZone: TZ}, o)).format(new Date(t));
@@ -276,12 +314,12 @@ setInterval(load, 60e3);
 setInterval(tick, 30e3);
 load().then(tick);
 
-let pollsOpen = false; // false = default (newest 10, none on phone); true = all
+const undecidedPolls = () => (B.polls || []).filter(p => !(p.ownerVote || []).length);
 function render() {
   document.getElementById('co').textContent = (B.company && B.company.name) || '';
   document.title = ((B.company && B.company.name) ? B.company.name + ' ' : '') + 'Board';
   document.getElementById('built').textContent = 'Data built ' + dayLbl(B.built) + ' ' + hm(B.built) + ' ' + zoneShort();
-  kpis(); drawTimeline(); kanban(); milestones(); plans(); agents(); lists(); tick();
+  kpis(); drawTimeline(); kanban(); milestones(); plans(); agents(); lists(); cards(); tick();
 }
 
 /* ---------- KPIs ---------- */
@@ -304,7 +342,7 @@ function kpis() {
     [late ? 'bad' : 'good', late, 'issues overdue', 'sec-issues'],
     [triage ? 'warn' : 'good', triage, 'to triage', 'sec-issues'],
     [high ? 'bad' : blockers.length ? 'warn' : 'good', blockers.length, `blockers (${high} high)`, 'sec-blockers'],
-    [decisions.length ? 'warn' : 'good', decisions.length, 'decisions waiting', 'sec-decisions'],
+    [decisions.length + undecidedPolls().length ? 'warn' : 'good', decisions.length + undecidedPolls().length, 'waiting on you', 'sec-decisions'],
   ];
   if (plansB) { const risk = plansB.filter(p => planRisk(p) === 'bad').length; k.push([risk ? 'bad' : 'good', `${risk}/${plansB.length}`, 'plans run out before reset', 'sec-burn']); }
   k.push([up === roster().length ? 'good' : 'warn', `${up}/${roster().length}`, 'people up', 'sec-agents']);
@@ -340,21 +378,32 @@ function presetView(z) {
   const b = timelineBounds(); return {s: b.start, e: b.end};
 }
 document.getElementById('zoombtns').onclick = e => {
-  const z = e.target.dataset && e.target.dataset.z; if (!z || !B) return;
+  const button = e.target.closest('button'); if (!button || !B || !view) return;
+  if (button.dataset.zoom) { zoomTimeline(button.dataset.zoom === 'in' ? 1 / 1.5 : 1.5); return; }
+  const z = button.dataset.z; if (!z) return;
   preset = z; animateTo(presetView(z));
-  document.querySelectorAll('#zoombtns .btn').forEach(b => b.classList.toggle('on', b === e.target));
+  document.querySelectorAll('#zoombtns .btn').forEach(b => b.classList.toggle('on', b === button));
 };
 function animateTo(v) {
+  cancelAnimationFrame(timelineAnimation);
   const a = {...view}, t0 = performance.now();
   const step = t => { const k = Math.min(1, (t - t0) / 260), q = 1 - Math.pow(1 - k, 3);
-    view = {s: a.s + (v.s - a.s) * q, e: a.e + (v.e - a.e) * q}; drawTimeline(); if (k < 1) requestAnimationFrame(step); };
-  requestAnimationFrame(step);
+    view = {s: a.s + (v.s - a.s) * q, e: a.e + (v.e - a.e) * q}; drawTimeline(); timelineAnimation = k < 1 ? requestAnimationFrame(step) : 0; };
+  timelineAnimation = requestAnimationFrame(step);
 }
 function clampView(v) {
   const b = timelineBounds(), lo = b.start - D, hi = b.end + D, minSpan = 1.5 * H, maxSpan = hi - lo;
   const span = Math.max(minSpan, Math.min(maxSpan, v.e - v.s));
   const s = Math.max(lo, Math.min(hi - span, v.s));
   return {s, e: s + span};
+}
+function zoomTimeline(factor, anchor) {
+  if (!view) return;
+  cancelAnimationFrame(timelineAnimation); timelineAnimation = 0;
+  const t = anchor ?? (view.s + view.e) / 2;
+  view = clampView({s: t - (t - view.s) * factor, e: t + (view.e - t) * factor});
+  preset = null; hideTip(); drawTimeline();
+  document.querySelectorAll('#zoombtns .btn').forEach(b => b.classList.remove('on'));
 }
 /** One row per owner. Today's hour-scale issues replace that owner's overlapping day-scale ones. */
 function rowsForView() {
@@ -478,7 +527,7 @@ function drawTimeline() {
   if (!lg.innerHTML) lg.innerHTML =
     ['done', 'now', 'plan', 'gate', 'blocked', 'cont', 'triage'].map(k => `<span><i style="background:${k === 'gate' ? 'transparent;border:1.5px solid ' + css('--gate') : css('--' + k)}"></i>${KIND[k]}</span>`).join('') +
     `<span><i style="background:${css('--ms')}"></i>Milestone</span><span><i style="background:${css('--now-line')}"></i>Now</span>` +
-    `<span class="hint">◆ finished (green on time, red late) · red hatch = overdue · scroll or pinch to zoom · drag to pan · tap a bar</span>`;
+    `<span class="hint">◆ finished (green on time, red late) · red hatch = overdue · Ctrl/Cmd+scroll or pinch to zoom · drag to pan · tap a bar</span>`;
 }
 function issueTip(i, kind) {
   const now = Date.now();
@@ -500,12 +549,10 @@ function hideTip() { tipEl.hidden = true; }
   const tAt = cx => { const r = host.getBoundingClientRect(); return view.s + (cx - r.left - tlState.LW) / tlState.PW * (view.e - view.s); };
   const unpreset = () => document.querySelectorAll('#zoombtns .btn').forEach(b => b.classList.remove('on'));
   host.addEventListener('wheel', e => {
-    if (!tlState.PW) return;
-    e.preventDefault(); hideTip();
-    if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) { const dt = e.deltaX / tlState.PW * (view.e - view.s); view = clampView({s: view.s + dt, e: view.e + dt}); }
-    else { const t = tAt(e.clientX), k = Math.exp(e.deltaY * 0.0015);
-      view = clampView({s: t - (t - view.s) * k, e: t + (view.e - t) * k}); }
-    drawTimeline(); unpreset();
+    if (!tlState.PW || !(e.ctrlKey || e.metaKey) || !e.deltaY) return;
+    e.preventDefault();
+    const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? host.clientHeight : 1;
+    zoomTimeline(Math.exp(e.deltaY * unit * 0.0015), tAt(e.clientX));
   }, {passive: false});
   // One finger: a vertical swipe scrolls the page (touch-action: pan-y); a horizontal drag pans the time axis.
   let drag = null, pinch = null;
@@ -578,18 +625,226 @@ function milestones() {
 /* ---------- Burn ---------- */
 function plans() {
   const sec = document.getElementById('sec-burn'), el = document.getElementById('plans');
+  document.getElementById('addAcct').hidden = !B.planBurn;
   if (!B.planBurn) { el.innerHTML = '<div class="empty">Plan burn is shown to the console owner only.</div>'; return; }
   if (!B.planBurn.length) { el.innerHTML = '<div class="empty">No plan data yet.</div>'; return; }
+  // Leave an open rename alone on the minute refresh, so a half-typed name survives.
+  if (planEdit && el.querySelector('[data-rename-form]') && B.planBurn.some(p => p.profileId === planEdit)) return;
+  if (planEdit && !B.planBurn.some(p => p.profileId === planEdit)) planEdit = null;
   el.innerHTML = B.planBurn.map((p, i) => {
     const risk = planRisk(p);
     const badge = risk === 'bad' ? `runs out ${dayLbl(p.runsOut).split(',')[0]} ${hm(p.runsOut)}` : risk === 'warn' ? 'tight' : p.used == null ? 'no data' : 'on track';
     return `<div class="plan"><h3>${esc(p.name)}<span class="badge ${p.used == null ? 'mute' : risk}">${esc(badge)}</span></h3>
       <div class="who">${esc(p.who)}${p.reset ? ' · resets ' + dayLbl(p.reset) + ' ' + hm(p.reset) + ' ' + esc(zoneShort()) : ''}</div>
       <div class="stats"><div><b>${esc(num(p.used))}${p.used == null ? '' : '%'}</b>used</div><div><b>${esc(num(p.rate, 1))}${p.rate == null ? '' : '%/h'}</b>burn now</div><div><b style="color:${css('--' + risk)}">${p.proj == null ? '–' : Math.round(p.proj) + '%'}</b>at reset</div></div>
-      ${p.weekStart && p.reset ? `<svg id="burn${i}" viewBox="0 0 320 120"></svg>` : ''}</div>`;
+      ${p.weekStart && p.reset ? `<svg id="burn${i}" viewBox="0 0 320 120"></svg>` : ''}
+      ${planActions(p)}</div>`;
   }).join('');
   B.planBurn.forEach((p, i) => { const svg = document.getElementById('burn' + i); if (svg) burnChart(svg, p); });
+  wirePlanActions(el);
 }
+/* ---------- Plan accounts (rename, sign in, add, remove; was the /plans page) ---------- */
+const SETTLED = ['signed_in', 'failed', 'timeout', 'cancelled'];
+const providerName = p => p === 'anthropic' ? 'Claude' : 'Codex';
+// The rename open on a tile (profile id), and the last error per profile id, kept across the minute refresh.
+let planEdit = null;
+const planErr = {};
+function mk(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; }
+function mkBtn(text, cls, fn) { const b = mk('button', cls, text); b.type = 'button'; if (fn) b.onclick = fn; return b; }
+async function acctApi(path, opts) {
+  opts = opts || {};
+  try {
+    const r = await fetch(path, {method: opts.method || 'GET', cache: 'no-store', credentials: 'same-origin',
+      headers: opts.body ? {'content-type': 'application/json', accept: 'application/json'} : {accept: 'application/json'},
+      body: opts.body ? JSON.stringify(opts.body) : undefined});
+    const j = await r.json().catch(() => null);
+    // A refused login shows as an error here; it never reloads the page (load() owns that).
+    if (r.status === 401) return {ok: false, error: 'Signed out of the console (HTTP 401); sign in and try again'};
+    if (!r.ok || !j || j.success === false) return {ok: false, error: (j && (j.error || j.message)) || 'HTTP ' + r.status};
+    return {ok: true, data: j.data};
+  } catch (e) { return {ok: false, error: 'Network error'}; }
+}
+function planActions(p) {
+  if (planEdit && planEdit === p.profileId)
+    return `<form class="pact" data-rename-form="${esc(p.profileId)}"><input name="label" maxlength="64" value="${esc(p.label)}" aria-label="Plan name" autocomplete="off">
+      <button type="submit" class="btn">Save</button><button type="button" class="btn" data-rename-cancel>Cancel</button></form>
+      <div class="hint">The 'who' line under the name is kept under the old name, so it is blank after a rename until it is set again.</div>
+      <div data-rename-err class="err" role="alert">${esc(planErr[p.profileId] || '')}</div>`;
+  const why = p.profileId ? '' : `<div class="hint">No rename or remove: this account is only a login folder, with no account entry to change.</div>`;
+  return `<div class="pact">${p.profileId ? `<button type="button" class="btn" data-rename="${esc(p.profileId)}">Rename</button>` : ''}
+    <button type="button" class="btn" data-signin="${esc(p.id)}">Sign in again</button>
+    ${p.profileId && !p.isDefault ? `<button type="button" class="btn" data-remove="${esc(p.profileId)}">Remove</button>` : ''}</div>
+    ${why}${p.profileId && planErr[p.profileId] ? `<div class="err" role="alert">${esc(planErr[p.profileId])}</div>` : ''}`;
+}
+function wirePlanActions(el) {
+  const byProfile = id => (B.planBurn || []).find(p => p.profileId === id);
+  el.querySelectorAll('[data-rename]').forEach(b => b.onclick = () => {
+    planEdit = b.dataset.rename; delete planErr[planEdit]; plans();
+    const i = el.querySelector('[data-rename-form] input'); if (i) { i.focus(); i.select(); }
+  });
+  el.querySelectorAll('[data-rename-cancel]').forEach(b => b.onclick = () => { delete planErr[planEdit]; planEdit = null; plans(); });
+  el.querySelectorAll('[data-rename-form]').forEach(f => f.onsubmit = async e => {
+    e.preventDefault();
+    const id = f.dataset.renameForm, label = f.elements.label.value.trim(), out = f.parentElement.querySelector('[data-rename-err]');
+    if (!label) { out.textContent = planErr[id] = 'The name cannot be empty'; return; }
+    f.querySelectorAll('button,input').forEach(x => x.disabled = true);
+    const r = await acctApi('/api/subscription-profiles/' + encodeURIComponent(id), {method: 'PATCH', body: {label}});
+    if (!r.ok) { f.querySelectorAll('button,input').forEach(x => x.disabled = false); out.textContent = planErr[id] = 'Not renamed: ' + r.error; return; }
+    delete planErr[id]; planEdit = null;
+    await load();
+  });
+  el.querySelectorAll('[data-signin]').forEach(b => b.onclick = () => {
+    const p = (B.planBurn || []).find(x => x.id === b.dataset.signin);
+    if (p) startSignIn(p.id, providerName(p.provider) + ' · ' + p.label);
+  });
+  el.querySelectorAll('[data-remove]').forEach(b => b.onclick = () => { const p = byProfile(b.dataset.remove); if (p) confirmRemove(p); });
+}
+function openAdd() {
+  const dlg = document.getElementById('addDlg'), form = mk('form'), input = mk('input');
+  input.required = true; input.maxLength = 64; input.placeholder = 'Account name, e.g. Work'; input.setAttribute('aria-label', 'Account name');
+  const provider = mk('select'); provider.setAttribute('aria-label', 'Provider');
+  provider.append(new Option('Claude', 'anthropic'), new Option('ChatGPT / Codex', 'openai'));
+  const add = mk('button', 'btn', 'Add account'); add.type = 'submit';
+  const error = mk('p', 'err'); error.setAttribute('role', 'alert');
+  const row = mk('div', 'pact'); row.append(add, mkBtn('Cancel', 'btn', () => dlg.close()));
+  form.append(input, provider, row, error);
+  form.onsubmit = async e => {
+    e.preventDefault();
+    add.disabled = true;
+    const r = await acctApi('/api/subscription-profiles', {method: 'POST', body: {label: input.value, provider: provider.value}});
+    if (!r.ok) { add.disabled = false; error.textContent = 'Not added: ' + r.error; return; }
+    const profile = r.data.profile;
+    dlg.close();
+    await load();
+    startSignIn(profile.id, providerName(profile.provider) + ' · ' + profile.label);
+  };
+  dlg.replaceChildren(mk('h3', '', 'Add subscription account'), form);
+  dlg.showModal();
+  input.focus();
+}
+function confirmRemove(p) {
+  const dlg = document.getElementById('removeDlg'), error = mk('p', 'err'); error.setAttribute('role', 'alert');
+  const go = mkBtn('Remove account', 'btn');
+  go.onclick = async () => {
+    go.disabled = true;
+    const r = await acctApi('/api/subscription-profiles/' + encodeURIComponent(p.profileId), {method: 'DELETE'});
+    if (!r.ok) { go.disabled = false; error.textContent = 'Not removed: ' + r.error; return; }
+    dlg.close();
+    load();
+  };
+  const row = mk('div', 'pact'); row.append(go, mkBtn('Cancel', 'btn', () => dlg.close()));
+  dlg.replaceChildren(mk('h3', '', 'Remove ' + providerName(p.provider) + ' · ' + p.label + '?'),
+    mk('p', 'hint', 'It is taken off this list. Its login stays on disk, nothing is deleted, and you can add it again later. Not possible while agents are running on it.'),
+    row, error);
+  dlg.showModal();
+}
+let sign = null;
+function copyBtn(text, label) {
+  const b = mkBtn(label, 'btn');
+  b.onclick = async () => {
+    try { await navigator.clipboard.writeText(text); b.textContent = 'Copied'; } catch (e) { b.textContent = 'Copy failed: select it by hand'; }
+    setTimeout(() => { b.textContent = label; }, 2000);
+  };
+  return b;
+}
+async function startSignIn(accountId, title) {
+  // A retry replaces the old login inside the open dialog; closing and reopening would let the old close event cancel the new login.
+  stopSignIn();
+  const dlg = document.getElementById('signDlg'), status = mk('p', 'status', 'Starting sign-in…'), body = mk('div');
+  status.setAttribute('role', 'status');
+  dlg.replaceChildren(mk('h3', '', 'Sign in · ' + title), status, body);
+  const s = sign = {accountId, title, status, body, view: null, rendered: null, timer: null};
+  dlg.onclose = () => { if (sign === s && !dlg.open) closeSignIn(); };
+  if (!dlg.open) dlg.showModal();
+  const r = await acctApi('/api/plans/accounts/' + encodeURIComponent(accountId) + '/login', {method: 'POST'});
+  if (sign !== s) return;
+  if (!r.ok) { status.textContent = r.error; status.className = 'status failed'; body.replaceChildren(mkBtn('Close', 'btn', closeSignIn)); return; }
+  signRender(r.data);
+  s.timer = setInterval(signPoll, 1500);
+}
+async function signPoll() {
+  const s = sign;
+  if (!s || !s.view) return;
+  const r = await acctApi('/api/plans/logins/' + encodeURIComponent(s.view.id));
+  if (sign !== s) return;
+  signRender(r.ok ? r.data : Object.assign({}, s.view, {state: 'failed', message: 'Sign-in helper stopped.'}));
+}
+function signRender(v) {
+  const s = sign;
+  if (!s) return;
+  s.view = v.id ? v : Object.assign({}, s.view, v);
+  s.status.textContent = v.message || '';
+  s.status.className = 'status ' + v.state;
+  const settled = SETTLED.includes(v.state);
+  if (settled && s.timer) { clearInterval(s.timer); s.timer = null; if (v.state === 'signed_in') load(); }
+  const key = JSON.stringify([v.state, v.url, v.code, v.needsCode]);
+  if (key === s.rendered) return; // a half-typed code survives each poll
+  s.rendered = key;
+  const parts = [];
+  if (settled) {
+    const row = mk('div', 'pact');
+    if (v.state === 'signed_in') row.append(mkBtn('Done', 'btn', closeSignIn), mkBtn('Wrong account? Sign in again', 'btn', () => startSignIn(s.accountId, s.title)));
+    else row.append(mkBtn('Try again', 'btn', () => startSignIn(s.accountId, s.title)), mkBtn('Close', 'btn', closeSignIn));
+    s.body.replaceChildren(row);
+    row.querySelector('button').focus();
+    return;
+  }
+  if (v.url) {
+    const step = mk('div', 'step'), open = mk('a', 'btn', 'Open the sign-in page'), r = mk('div', 'pact');
+    open.href = v.url; open.target = '_blank'; open.rel = 'noopener noreferrer';
+    r.append(open, copyBtn(v.url, 'Copy link'));
+    step.append(mk('b', '', '1. Sign in'), r);
+    if (v.qrSvg) {
+      const det = mk('details'), qr = mk('div', 'qr');
+      qr.innerHTML = v.qrSvg; // rendered by the server's qrcode library from the URL
+      det.append(mk('summary', '', 'On another device? Scan this'), qr);
+      step.append(det);
+    }
+    parts.push(step);
+  }
+  if (v.code) {
+    const st = mk('div', 'step'), rr = mk('div', 'pact');
+    rr.append(mk('code', 'code', v.code), copyBtn(v.code, 'Copy code'));
+    st.append(mk('b', '', '2. Enter this code on that page'), rr, mk('p', 'hint', 'It expires in 15 minutes.'));
+    parts.push(st);
+  }
+  if (v.needsCode) {
+    const f = mk('form', 'step'), input = mk('input'), send = mk('button', 'btn', 'Sign in');
+    input.placeholder = 'Paste the code from the sign-in page'; input.autocomplete = 'off'; input.spellcheck = false;
+    input.setAttribute('autocapitalize', 'off'); input.setAttribute('aria-label', 'Sign-in code');
+    send.type = 'submit';
+    f.append(mk('b', '', '2. Paste the code it shows you'), input, send);
+    f.onsubmit = async e => {
+      e.preventDefault();
+      const code = input.value.trim();
+      if (!code || !s.view) return;
+      send.disabled = true;
+      const r = await acctApi('/api/plans/logins/' + encodeURIComponent(s.view.id) + '/code', {method: 'POST', body: {code}});
+      send.disabled = false;
+      if (sign !== s) return;
+      if (!r.ok) { s.status.textContent = r.error; s.status.className = 'status failed'; return; }
+      signRender(r.data);
+    };
+    parts.push(f);
+  }
+  if (!parts.length) parts.push(mk('p', 'hint', 'Waiting for the sign-in page…'));
+  parts.push(mkBtn('Cancel sign-in', 'btn', closeSignIn));
+  s.body.replaceChildren(...parts);
+}
+function stopSignIn() {
+  const s = sign;
+  if (!s) return;
+  sign = null;
+  clearInterval(s.timer);
+  if (s.view && s.view.id && !SETTLED.includes(s.view.state)) acctApi('/api/plans/logins/' + encodeURIComponent(s.view.id), {method: 'DELETE'});
+}
+function closeSignIn() {
+  stopSignIn();
+  const dlg = document.getElementById('signDlg');
+  dlg.onclose = null;
+  if (dlg.open) dlg.close();
+}
+document.getElementById('addAcct').onclick = openAdd;
 function burnChart(svg, p) {
   const W = 320, Hh = 120, L = 28, R = 8, T = 8, Bm = 18, pts0 = p.points || [];
   const s = p.weekStart, e = p.reset, ymax = Math.max(100, Math.ceil((p.proj || 0) / 25) * 25);
@@ -651,21 +906,92 @@ function lists() {
     `<li><span class="t">${when(w.at)}</span><div>${esc(w.text)}<div class="who">${esc(nameOf(w.who))}</div></div></li>`), 'No wins yet');
   fill('blockers', (B.blockers || []).filter(b => !b.clearedAt).map(b =>
     `<li><span class="sev" style="background:${css(sevc[b.sev] || '--plan')}"></span><div>${esc(b.text)}<div class="who">${esc(nameOf(b.who))} · owner ${esc(nameOf(b.owner))} · since ${when(b.since)}</div></div></li>`), 'No open blockers');
-  fill('decisions', (B.decisions || []).filter(d => !d.clearedAt).map(d =>
-    `<li><span class="sev" style="background:${css('--warn')}"></span><div>${esc(d.text)}<div class="who">${esc(d.where)}</div></div></li>`), 'Nothing waiting');
-  const allPolls = B.polls || [];
-  const sorted = allPolls.slice().sort((x, y) => (y.createdAt || 0) - (x.createdAt || 0)); // newest first
-  const phoneView = matchMedia('(max-width:600px)').matches;
-  const pollLimit = pollsOpen ? allPolls.length : (phoneView ? 0 : 10);
-  const shown = sorted.slice(0, pollLimit);
-  fill('polls', shown.map(p =>
-    `<li><span class="sev" style="background:${css('--accent')}"></span><div>${esc(p.question)}<div class="who">${esc(p.room)} · ${p.options.map(o => esc(o.label) + ' ' + o.votes).join(' · ')}${p.closesAt ? ' · closes ' + when(p.closesAt) : ''}</div></div></li>`), allPolls.length ? allPolls.length + ' open, hidden' : 'No open polls');
-  const pt = document.getElementById('pollsToggle');
-  pt.hidden = !allPolls.length || (!phoneView && allPolls.length <= 10);
-  pt.textContent = shown.length >= allPolls.length ? (phoneView ? 'Hide polls' : 'Show newest 10') : 'Show all ' + allPolls.length;
-  pt.onclick = () => { pollsOpen = shown.length < allPolls.length; render(); };
   fill('pins', (B.pins || []).slice(0, 12).map(p =>
     `<li><span class="t">${when(p.at)}</span><div>${esc(String(p.text).slice(0, 240))}<div class="who">${esc(p.room)} · ${esc(p.by)}</div></div></li>`), 'Nothing pinned');
+}
+
+/* ---------- Waiting on you: decision and poll cards ---------- */
+// A card shows the summary, the named recommendation and the trade-off; the full text folds away. Voting uses the chat
+// room's own vote path (the owner votes as "user"); a decision is marked decided with the board's clear path.
+const cardErr = {};
+function recLine(rec, label) {
+  if (!rec) return '<div class="rec none">No recommendation yet</div>';
+  return `<div class="rec">Recommended: <b>${esc(label || rec.option)}</b>${rec.reason ? ' — ' + esc(rec.reason) : ''}<div class="who">by ${esc(rec.by)}</div></div>`;
+}
+function pollCard(p) {
+  const key = p.roomId + ':' + p.messageId;
+  const recId = (p.recommendation && p.recommendation.option) || p.recommended;
+  const recOpt = p.options.find(o => o.id === recId);
+  const rec = p.recommendation || (p.recommended ? {option: p.recommended, reason: '', by: 'poll author'} : null);
+  return `<article class="dcard poll" data-key="${esc(key)}">
+    <div class="who">Poll · ${esc(p.room)} · ${when(p.createdAt)}${p.closesAt ? ' · closes ' + when(p.closesAt) : ''}</div>
+    <h3>${esc(p.summary || p.question)}</h3>
+    ${recLine(rec, recOpt && recOpt.label)}
+    ${p.tradeoff ? `<div class="trade"><b>Trade-off:</b> ${esc(p.tradeoff)}</div>` : ''}
+    <div class="opts">${p.options.map((o, i) => `<button type="button" class="btn${o.id === recId ? ' recd' : ''}" data-vote="${esc(key)}" data-opt="${esc(o.id)}">${i + 1}. ${esc(o.label)}${o.id === recId ? ' ★' : ''}<span class="n">${o.votes}</span></button>`).join('')}</div>
+    ${cardErr[key] ? `<div class="err">${esc(cardErr[key])}</div>` : ''}
+    ${p.summary ? `<details><summary>Full question</summary><div class="sum">${esc(p.question)}</div></details>` : ''}
+  </article>`;
+}
+function decisionCard(d) {
+  const key = 'd:' + d.id;
+  return `<article class="dcard" data-key="${esc(key)}">
+    <div class="who">Decision · ${esc(d.where || 'board')} · ${when(d.at)}</div>
+    <h3>${esc(d.summary || d.text)}</h3>
+    ${recLine(d.recommendation)}
+    ${d.tradeoff ? `<div class="trade"><b>Trade-off:</b> ${esc(d.tradeoff)}</div>` : ''}
+    <div class="opts"><button type="button" class="btn" data-clear="${esc(d.id)}">Mark decided</button></div>
+    ${cardErr[key] ? `<div class="err">${esc(cardErr[key])}</div>` : ''}
+    ${d.summary ? `<details><summary>Full text</summary><div class="sum">${esc(d.text)}</div></details>` : ''}
+  </article>`;
+}
+async function post(url, body) {
+  const r = await fetch(url, {method: 'POST', credentials: 'same-origin', headers: {'content-type': 'application/json', accept: 'application/json'}, body: JSON.stringify(body || {})});
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok || j.success === false) throw new Error(j.error || j.message || 'HTTP ' + r.status);
+  return j;
+}
+function cards() {
+  const open = (B.decisions || []).filter(d => !d.clearedAt).sort((a, b) => a.at - b.at);
+  const polls = (B.polls || []).slice().sort((x, y) => (x.createdAt || 0) - (y.createdAt || 0));
+  const waiting = polls.filter(p => !(p.ownerVote || []).length);
+  const html = [...open.map(decisionCard), ...waiting.map(pollCard)];
+  document.getElementById('cards').innerHTML = html.length ? html.join('') : '<div class="empty">Nothing is waiting on you.</div>';
+  document.getElementById('waitingHint').textContent = `${open.length} decision${open.length === 1 ? '' : 's'}, ${waiting.length} poll${waiting.length === 1 ? '' : 's'}. Recommendations are the named agent's, not the server's.`;
+  // Decided history: polls you voted on (still open, so you can change the vote) and cleared decisions.
+  const voted = polls.filter(p => (p.ownerVote || []).length).reverse();
+  const cleared = (B.decisions || []).filter(d => d.clearedAt).sort((a, b) => b.clearedAt - a.clearedAt).slice(0, 20);
+  const box = document.getElementById('decidedBox');
+  box.hidden = !voted.length && !cleared.length;
+  document.getElementById('decidedSum').textContent = `Decided (${voted.length + cleared.length})`;
+  document.getElementById('decided').innerHTML = [
+    ...voted.map(p => `<li>🗳️ ${esc(p.summary || p.question)} — you chose <b>${esc(p.options.filter(o => p.ownerVote.includes(o.id)).map(o => o.label).join(', '))}</b> <button type="button" class="btn" data-undo="${esc(p.roomId + ':' + p.messageId)}">Change</button></li>`),
+    ...cleared.map(d => `<li>✅ ${esc(d.summary || d.text)} <span class="hint">${when(d.clearedAt)}</span></li>`),
+  ].join('');
+  const root = document.getElementById('sec-decisions');
+  root.querySelectorAll('[data-vote]').forEach(b => b.onclick = async () => {
+    const k = b.dataset.vote, roomId = k.slice(0, k.indexOf(':')), messageId = k.slice(k.indexOf(':') + 1);
+    root.querySelectorAll(`[data-vote="${CSS.escape(b.dataset.vote)}"]`).forEach(x => x.disabled = true);
+    try {
+      await post(`/api/chatrooms/${encodeURIComponent(roomId)}/messages/${encodeURIComponent(messageId)}/poll/vote`, {options: [b.dataset.opt]});
+      delete cardErr[b.dataset.vote];
+    } catch (e) { cardErr[b.dataset.vote] = 'Vote not saved: ' + e.message; }
+    await load();
+  });
+  root.querySelectorAll('[data-undo]').forEach(b => b.onclick = async () => {
+    const k = b.dataset.undo, roomId = k.slice(0, k.indexOf(':')), messageId = k.slice(k.indexOf(':') + 1);
+    b.disabled = true;
+    try { await post(`/api/chatrooms/${encodeURIComponent(roomId)}/messages/${encodeURIComponent(messageId)}/poll/vote`, {options: []}); }
+    catch (e) { cardErr[b.dataset.undo] = 'Could not reopen: ' + e.message; }
+    await load();
+  });
+  root.querySelectorAll('[data-clear]').forEach(b => b.onclick = async () => {
+    const key = 'd:' + b.dataset.clear;
+    b.disabled = true;
+    try { await post(`/api/board/decisions/${encodeURIComponent(b.dataset.clear)}/clear`, {}); delete cardErr[key]; }
+    catch (e) { cardErr[key] = 'Not saved: ' + e.message; }
+    await load();
+  });
 }
 </script>
 </body>

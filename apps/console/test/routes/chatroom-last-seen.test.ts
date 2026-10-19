@@ -36,6 +36,7 @@ describe('what an agent has seen of a room', () => {
     for (const [id, name] of [[A, 'alpha'], [B, 'bravo'], [C, 'charlie']]) {
       const s = createMockSession(id);
       s.name = name;
+      s.submitOutcome = 'none'; // This fixture deliberately models typed input without a submission receipt.
       ctx.sessions.set(id, s as never);
     }
   });

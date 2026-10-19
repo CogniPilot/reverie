@@ -243,7 +243,7 @@ describe('checkClaudeResume', () => {
       '',
       'x\n',
       '{"type":"user","sessionId":', // truncated
-      JSON.stringify({ type: 'custom-title', customTitle: 'Morgan', sessionId: ID }) + '\n',
+      JSON.stringify({ type: 'custom-title', customTitle: 'Otto', sessionId: ID }) + '\n',
       JSON.stringify({ type: 'user', sessionId: 'another-id' }) + '\n',
     ]) {
       put(a, body, 1000);
@@ -312,39 +312,39 @@ describe('resume takeover', () => {
 });
 
 describe('resumeTakeoverRoom (a coordinator continues a gone agent)', () => {
-  const BLAKE = { id: 'blake-row', claudeSessionId: 'thread-01a1', claudeSessionChain: ['thread-old'], isRunning: () => false };
+  const STAN = { id: 'stan-row', claudeSessionId: 'thread-01a1', claudeSessionChain: ['thread-old'], isRunning: () => false };
   const room = (over: Partial<{ id: string; name: string; archivedAt: number; members: Array<{ sessionId: string; role: string }> }> = {}) => ({
     id: 'r1',
     name: 'reverie',
     members: [
-      { sessionId: 'avery', role: 'coordinator' },
-      { sessionId: 'blake-row', role: 'member' },
+      { sessionId: 'burt', role: 'coordinator' },
+      { sessionId: 'stan-row', role: 'member' },
     ],
     ...over,
   });
   const ask = (over: Partial<Parameters<typeof resumeTakeoverRoom>[0]> = {}) =>
-    resumeTakeoverRoom({ policy: 'coordinators', caller: 'avery', id: 'thread-01a1', sessions: [BLAKE], rooms: [room()], ...over });
+    resumeTakeoverRoom({ policy: 'coordinators', caller: 'burt', id: 'thread-01a1', sessions: [STAN], rooms: [room()], ...over });
 
   it('allows the coordinator of a room the gone agent is in, and names the room and member', () => {
-    expect(ask()).toEqual({ roomId: 'r1', roomName: 'reverie', memberSessionId: 'blake-row' });
+    expect(ask()).toEqual({ roomId: 'r1', roomName: 'reverie', memberSessionId: 'stan-row' });
   });
   it('matches the row id and an earlier conversation in the chain too', () => {
-    expect(ask({ id: 'blake-row' })).not.toBeNull();
+    expect(ask({ id: 'stan-row' })).not.toBeNull();
     expect(ask({ id: 'thread-old' })).not.toBeNull();
   });
   it('refuses a caller who is a member but not the coordinator', () => {
-    expect(ask({ caller: 'morgan', rooms: [room({ members: [{ sessionId: 'morgan', role: 'member' }, { sessionId: 'blake-row', role: 'member' }] })] })).toBeNull();
+    expect(ask({ caller: 'otto', rooms: [room({ members: [{ sessionId: 'otto', role: 'member' }, { sessionId: 'stan-row', role: 'member' }] })] })).toBeNull();
   });
   it('refuses a live agent, even if it is the room\'s member', () => {
-    expect(ask({ sessions: [{ ...BLAKE, isRunning: () => true }] })).toBeNull();
+    expect(ask({ sessions: [{ ...STAN, isRunning: () => true }] })).toBeNull();
   });
   it('refuses when any session holding the conversation is still running', () => {
-    expect(ask({ sessions: [BLAKE, { id: 'blake-2', claudeSessionId: 'thread-01a1', isRunning: () => true }] })).toBeNull();
+    expect(ask({ sessions: [STAN, { id: 'stan-2', claudeSessionId: 'thread-01a1', isRunning: () => true }] })).toBeNull();
   });
   it('refuses a room the caller does not coordinate (the gone agent is elsewhere)', () => {
-    const other = room({ id: 'r2', name: 'other', members: [{ sessionId: 'avery', role: 'member' }, { sessionId: 'blake-row', role: 'member' }] });
+    const other = room({ id: 'r2', name: 'other', members: [{ sessionId: 'burt', role: 'member' }, { sessionId: 'stan-row', role: 'member' }] });
     expect(ask({ rooms: [other] })).toBeNull();
-    const apart = room({ id: 'r3', members: [{ sessionId: 'avery', role: 'coordinator' }, { sessionId: 'someone', role: 'member' }] });
+    const apart = room({ id: 'r3', members: [{ sessionId: 'burt', role: 'coordinator' }, { sessionId: 'someone', role: 'member' }] });
     expect(ask({ rooms: [apart] })).toBeNull();
   });
   it('ignores archived rooms, unknown conversations, and the owner-only policy', () => {
@@ -353,7 +353,7 @@ describe('resumeTakeoverRoom (a coordinator continues a gone agent)', () => {
     expect(ask({ policy: 'owner' })).toBeNull();
   });
   it('picks the first qualifying room when the agent is in several', () => {
-    const a = room({ id: 'ra', members: [{ sessionId: 'x', role: 'coordinator' }, { sessionId: 'blake-row', role: 'member' }] });
+    const a = room({ id: 'ra', members: [{ sessionId: 'x', role: 'coordinator' }, { sessionId: 'stan-row', role: 'member' }] });
     const b = room({ id: 'rb' });
     expect(ask({ rooms: [a, b] })?.roomId).toBe('rb');
   });

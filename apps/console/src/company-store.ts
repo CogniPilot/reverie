@@ -37,6 +37,7 @@ export class CompanyStore {
     cycles: [],
     memories: [],
     temporaryAgents: [],
+    retired: [],
   };
   private chain: Promise<unknown> = Promise.resolve();
   constructor(readonly file: string) {}

@@ -20,7 +20,7 @@ afterEach(async () => {
 async function app() {
   const instance = Fastify();
   apps.push(instance);
-  registerSubscriptionProfileRoutes(instance, new SubscriptionUsageReader('test'));
+  registerSubscriptionProfileRoutes(instance, new SubscriptionUsageReader('test'), async () => []);
   instance.post('/api/sessions', (req) => ({ success: true, data: subscriptionLaunch(req) }));
   installRouteErrorHandler(instance);
   await instance.ready();
@@ -84,6 +84,35 @@ describe('subscription profile API', () => {
       payload: { label: 'Codex user@example.com' },
     });
     expect(missing.statusCode).toBe(404);
+  });
+  it('refuses a name another account already has, ignoring case, and leaves both labels as they were', async () => {
+    const server = await app();
+    const rename = (id: string, label: string) =>
+      server.inject({ method: 'PATCH', url: `/api/subscription-profiles/${id}`, payload: { label } });
+    for (const label of ['Default Claude', 'default claude', '  DEFAULT CLAUDE ']) {
+      const res = await rename('openai-default', label);
+      expect(res.statusCode).toBe(409);
+      expect(res.json().error).toMatch(/already has that name/);
+    }
+    const listed = (await server.inject('/api/subscription-profiles')).json().data.profiles;
+    const label = (id: string) => listed.find((p: { id: string }) => p.id === id).label;
+    expect([label('anthropic-default'), label('openai-default')]).toEqual(['Default Claude', 'Default Codex']);
+    // Its own name in another case is not a clash.
+    expect((await rename('openai-default', 'default codex')).statusCode).toBe(200);
+  });
+  it('refuses to add an account under a name another account already has, ignoring case', async () => {
+    const server = await app();
+    const add = (label: string) =>
+      server.inject({ method: 'POST', url: '/api/subscription-profiles', payload: { label, provider: 'anthropic' } });
+    for (const label of ['Default Codex', 'default codex', ' DEFAULT CODEX ']) {
+      const res = await add(label);
+      expect(res.statusCode).toBe(409);
+      expect(res.json().error).toMatch(/already has that name/);
+    }
+    expect((await add('Work')).statusCode).toBe(200);
+    expect((await add('WORK')).statusCode).toBe(409);
+    const listed = (await server.inject('/api/subscription-profiles')).json().data.profiles;
+    expect(listed.map((p: { label: string }) => p.label).sort()).toEqual(['Default Claude', 'Default Codex', 'Work']);
   });
   it('records a rename in the admin audit log, and a refused or failed one leaves no line', async () => {
     const audit = dataPath('admin-audit.jsonl');

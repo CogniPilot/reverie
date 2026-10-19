@@ -28,6 +28,7 @@
  */
 
 import { AVATAR_URL } from './agent-avatars.js';
+import type { RoomOverride } from './roles.js';
 import { randomUUID } from 'node:crypto';
 import fs from 'node:fs/promises';
 import { dirname } from 'node:path';
@@ -113,7 +114,7 @@ export interface ChatMessage {
   /** Files attached to the message (chatroom-files.ts); `path` is where agents read them. */
   attachments?: ChatAttachment[];
   /** Set when the user deleted the message: its content is gone from the room (kept in the audit log), this tombstone stays. */
-  deleted?: { at: number; by: string; /** The files stay referenced so the upload sweep keeps them for a restore. */ attachments?: ChatAttachment[] };
+  deleted?: { at: number; by: string; /** Rank of whoever deleted it; absent means the Owner (100), as for deletions made before roles. A restore needs at least this rank. */ byRank?: number; /** The files stay referenced so the upload sweep keeps them for a restore. */ attachments?: ChatAttachment[] };
   /** The id of the earlier message in this room that this one answers (a Discord-style reply). */
   replyTo?: string;
   /** Reactions: emoji (or `:emote:`) -> who reacted ('user' or session ids). */
@@ -202,6 +203,8 @@ export interface ChatRoom {
   visibility?: ChatVisibility;
   /** The owner's place for this channel in their sidebar (1 is first); channels the owner never placed come after the placed ones. */
   position?: number;
+  /** Channel allow/deny overrides for roles and members (roles-contract section 5); absent = none. Edited through the overrides API. */
+  overrides?: RoomOverride[];
   /** The user's read cursor (ms): messages after it are unread. */
   userReadAt?: number;
   /** Multi-user owner; undefined in single-user mode. */
@@ -294,7 +297,7 @@ export function accentHue(sessionId: string): number {
 export class ChatroomError extends Error {
   constructor(
     message: string,
-    readonly code: 'NOT_FOUND' | 'INVALID_INPUT' | 'CONFLICT'
+    readonly code: 'NOT_FOUND' | 'INVALID_INPUT' | 'CONFLICT' | 'UNAVAILABLE'
   ) {
     super(message);
   }
@@ -314,6 +317,24 @@ export class ChatroomStore {
       // first load does not light up every room.
       if (typeof room.userReadAt !== 'number') room.userReadAt = room.messages.at(-1)?.at ?? room.createdAt;
       this.rooms.set(room.id, room);
+    }
+  }
+
+  /**
+   * Put every room back to `rooms` (a change the database did not commit). A room that still exists
+   * keeps its object, so whoever holds it sees the rollback; rooms not in `rooms` go.
+   */
+  reset(rooms: ChatRoom[]): void {
+    const ids = new Set(rooms.map((r) => r.id));
+    for (const id of [...this.rooms.keys()]) if (!ids.has(id)) this.rooms.delete(id);
+    for (const room of rooms) {
+      const current = this.rooms.get(room.id);
+      if (!current) {
+        this.rooms.set(room.id, room);
+        continue;
+      }
+      for (const key of Object.keys(current)) if (!(key in room)) delete (current as unknown as Record<string, unknown>)[key];
+      Object.assign(current, room);
     }
   }
 
@@ -728,7 +749,7 @@ export class ChatroomStore {
    * Replace a message with a tombstone (same id, time, sender and recipients; no text, files, reactions
    * or reply link). Returns the original, which the caller has already put in the audit log.
    */
-  tombstone(roomId: string, messageId: string, by: string, at: number): ChatMessage {
+  tombstone(roomId: string, messageId: string, by: string, at: number, byRank?: number): ChatMessage {
     const room = this.require(roomId);
     const index = room.messages.findIndex((m) => m.id === messageId);
     if (index < 0) throw new ChatroomError('No such message', 'NOT_FOUND');
@@ -741,7 +762,7 @@ export class ChatroomStore {
       from: original.from,
       to: original.to,
       text: '',
-      deleted: { at, by, ...(original.attachments?.length ? { attachments: original.attachments } : {}) },
+      deleted: { at, by, ...(byRank !== undefined && byRank < 100 ? { byRank } : {}), ...(original.attachments?.length ? { attachments: original.attachments } : {}) },
     };
     return original;
   }

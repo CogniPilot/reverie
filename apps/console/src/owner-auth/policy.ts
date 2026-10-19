@@ -56,6 +56,7 @@ const AGENT_ROUTES = new Set([
   'POST /api/quick-start',
   'GET /api/session-lifecycle',
   'GET /api/company',
+  'GET /api/plans', // read-only; the route scopes by role (coordinators all accounts, other agents their own)
   'POST /api/company/self',
   'POST /api/company/self/avatar',
   'DELETE /api/company/self/avatar',

@@ -15,7 +15,7 @@ import type { Issue } from '../../src/board-types.js';
 
 const NOW = Date.UTC(2026, 9, 17, 18, 0, 0); // 14:00 ET
 const COORD = 'aaaaaaaa-0000-4000-8000-000000000001';
-const JORDAN = 'bbbbbbbb-0000-4000-8000-000000000002';
+const BEV = 'bbbbbbbb-0000-4000-8000-000000000002';
 const STRANGER = 'cccccccc-0000-4000-8000-000000000003';
 
 function room(over: Partial<ChatRoom> = {}): ChatRoom {
@@ -25,7 +25,7 @@ function room(over: Partial<ChatRoom> = {}): ChatRoom {
     createdAt: 0,
     members: [
       { sessionId: COORD, role: 'coordinator', goal: '' },
-      { sessionId: JORDAN, role: 'member', goal: '' },
+      { sessionId: BEV, role: 'member', goal: '' },
     ],
     messages: [],
     ...over,
@@ -50,17 +50,17 @@ describe('board routes', () => {
     events = [];
     rooms = [room()];
     const sessions = new Map(
-      [COORD, JORDAN, STRANGER].map((id) => [id, { id, owner: undefined, pid: 1, isWorking: id === JORDAN }] as const)
+      [COORD, BEV, STRANGER].map((id) => [id, { id, owner: undefined, pid: 1, isWorking: id === BEV }] as const)
     );
     app = Fastify();
     registerBoardRoutes(app, { sessions, broadcast: (e: string, d: unknown) => events.push([e, d]) } as never, {
       store,
       company: () => ({
         employees: [
-          { id: 'e-avery', name: 'Avery', sessionId: COORD },
-          { id: 'e-jordan', name: 'Jordan', sessionId: JORDAN },
+          { id: 'e-burt', name: 'Burt', sessionId: COORD },
+          { id: 'e-bev', name: 'Bev', sessionId: BEV },
         ],
-        settings: { timeZone: 'America/New_York', ownerName: 'Robin' },
+        settings: { timeZone: 'America/New_York', ownerName: 'James' },
       }),
       rooms: () => rooms,
       audit: async (entry) => {
@@ -81,11 +81,11 @@ describe('board routes', () => {
   const patch = (url: string, payload: unknown, session?: string) => app.inject({ method: 'PATCH', url, payload: payload as object, headers: as(session) });
 
   it('a member files into triage; the audit line is written before the save', async () => {
-    const res = await post('/api/board/issues', { title: 'Mesa ICD noise', status: 'doing' }, JORDAN);
+    const res = await post('/api/board/issues', { title: 'Mesa ICD noise', status: 'doing' }, BEV);
     expect(res.statusCode).toBe(200);
     const issue = res.json().data.item;
-    expect(issue).toMatchObject({ status: 'triage', requester: 'e-jordan' });
-    expect(audit).toEqual([expect.objectContaining({ action: 'board-issue-add', by: 'e-jordan', session: JORDAN, id: issue.id })]);
+    expect(issue).toMatchObject({ status: 'triage', requester: 'e-bev' });
+    expect(audit).toEqual([expect.objectContaining({ action: 'board-issue-add', by: 'e-bev', session: BEV, id: issue.id })]);
     expect(JSON.parse(readFileSync(join(dir, 'board.json'), 'utf8')).issues).toHaveLength(1);
     expect(events).toEqual([['board:changed', { rev: 1 }]]);
   });
@@ -104,18 +104,80 @@ describe('board routes', () => {
   });
 
   it('members edit only their own issues; coordinators edit all; done stamps doneAt', async () => {
-    const id = (await post('/api/board/issues', { title: 'Keyframe suite', owner: 'e-jordan' }, COORD)).json().data.item.id;
+    const id = (await post('/api/board/issues', { title: 'Keyframe suite', owner: 'e-bev' }, COORD)).json().data.item.id;
     expect((await patch(`/api/board/issues/${id}`, { status: 'doing' }, STRANGER)).statusCode).toBe(403);
-    expect((await patch(`/api/board/issues/${id}`, { owner: 'e-avery' }, JORDAN)).statusCode).toBe(403);
-    const done = await patch(`/api/board/issues/${id}`, { status: 'done' }, JORDAN);
+    expect((await patch(`/api/board/issues/${id}`, { owner: 'e-burt' }, BEV)).statusCode).toBe(403);
+    const done = await patch(`/api/board/issues/${id}`, { status: 'done' }, BEV);
     expect(done.json().data.item).toMatchObject({ status: 'done', doneAt: NOW });
     const reopened = await patch(`/api/board/issues/${id}`, { status: 'todo' }, COORD);
     expect(reopened.json().data.item.doneAt).toBeUndefined();
   });
 
+  it('status-only PATCH preserves omitted metadata in the response and persisted board', async () => {
+    const fields = {
+      title: 'Hourly task',
+      owner: 'e-bev',
+      tags: ['release', 'phone'],
+      scale: 'hour',
+      start: NOW,
+      end: NOW + 3600_000,
+      links: [{ url: 'https://example.com/report', kind: 'report' }],
+      source: { roomId: 'r1', messageId: 'request-1' },
+    };
+    const created = (await post('/api/board/issues', fields, COORD)).json().data.item;
+    const updated = await patch(`/api/board/issues/${created.id}`, { status: 'doing' }, BEV);
+    expect(updated.statusCode).toBe(200);
+    const expected = { ...fields, id: created.id, status: 'doing' };
+    expect(updated.json().data.item).toMatchObject(expected);
+    expect(store.snapshot().issues[0]).toMatchObject(expected);
+    expect(JSON.parse(readFileSync(join(dir, 'board.json'), 'utf8')).issues[0]).toMatchObject(expected);
+    expect(audit.at(-1)).not.toHaveProperty('tags');
+    expect(audit.at(-1)).not.toHaveProperty('scale');
+  });
+
+  it('PATCH accepts explicit empty tags and day scale without changing unrelated fields', async () => {
+    const created = (
+      await post(
+        '/api/board/issues',
+        {
+          title: 'Hourly task',
+          owner: 'e-bev',
+          tags: ['release'],
+          scale: 'hour',
+          start: NOW,
+          end: NOW + 3600_000,
+        },
+        COORD
+      )
+    ).json().data.item;
+    const updated = await patch(`/api/board/issues/${created.id}`, { tags: [], scale: 'day' }, BEV);
+    expect(updated.statusCode).toBe(200);
+    expect(store.snapshot().issues[0]).toMatchObject({
+      title: created.title,
+      owner: created.owner,
+      status: created.status,
+      start: created.start,
+      end: created.end,
+      tags: [],
+      scale: 'day',
+    });
+  });
+
+  it('create keeps its defaults while empty PATCH is refused without a write', async () => {
+    const created = (await post('/api/board/issues', { title: 'Defaults' }, COORD)).json().data.item;
+    expect(created).toMatchObject({ tags: [], scale: 'day' });
+    const before = store.snapshot();
+    for (const body of [{}, { ifRev: before.rev }]) {
+      const response = await patch(`/api/board/issues/${created.id}`, body, COORD);
+      expect(response.statusCode).toBe(400);
+      expect(store.snapshot()).toEqual(before);
+      expect(audit).toHaveLength(1);
+    }
+  });
+
   it('the edit check uses the issue as it is at write time', async () => {
-    const id = (await post('/api/board/issues', { title: 'x', owner: 'e-jordan' }, COORD)).json().data.item.id;
-    const [reassign, edit] = await Promise.all([patch(`/api/board/issues/${id}`, { owner: 'e-avery' }, COORD), patch(`/api/board/issues/${id}`, { title: 'mine' }, JORDAN)]);
+    const id = (await post('/api/board/issues', { title: 'x', owner: 'e-bev' }, COORD)).json().data.item.id;
+    const [reassign, edit] = await Promise.all([patch(`/api/board/issues/${id}`, { owner: 'e-burt' }, COORD), patch(`/api/board/issues/${id}`, { title: 'mine' }, BEV)]);
     expect(reassign.statusCode).toBe(200);
     expect(edit.statusCode).toBe(403);
     expect(store.snapshot().issues[0].title).toBe('x');
@@ -140,69 +202,86 @@ describe('board routes', () => {
   });
 
   it('blockers and decisions are lead-only and cleared, never deleted', async () => {
-    expect((await post('/api/board/blockers', { who: 'All', owner: 'Robin', text: 'bot' }, JORDAN)).statusCode).toBe(403);
-    const id = (await post('/api/board/blockers', { who: 'All', owner: 'Robin', text: 'bot' }, COORD)).json().data.item.id;
+    expect((await post('/api/board/blockers', { who: 'All', owner: 'James', text: 'bot' }, BEV)).statusCode).toBe(403);
+    const id = (await post('/api/board/blockers', { who: 'All', owner: 'James', text: 'bot' }, COORD)).json().data.item.id;
     const cleared = await post(`/api/board/blockers/${id}/clear`, {}, COORD);
-    expect(cleared.json().data.item).toMatchObject({ clearedAt: NOW, clearedBy: 'e-avery' });
+    expect(cleared.json().data.item).toMatchObject({ clearedAt: NOW, clearedBy: 'e-burt' });
     expect(store.snapshot().blockers).toHaveLength(1);
     expect((await post(`/api/board/blockers/${id}/clear`, {}, COORD)).statusCode).toBe(409);
   });
 
   it('a member sets only its own focus', async () => {
-    expect((await app.inject({ method: 'PUT', url: '/api/board/agents/e-avery', payload: { focus: 'x' }, headers: as(JORDAN) })).statusCode).toBe(403);
-    const res = await app.inject({ method: 'PUT', url: '/api/board/agents/e-jordan', payload: { focus: 'suite', receipts: ['r1'] }, headers: as(JORDAN) });
-    expect(res.json().data.item).toMatchObject({ focus: 'suite', receipts: ['r1'], updatedBy: 'e-jordan' });
+    expect((await app.inject({ method: 'PUT', url: '/api/board/agents/e-burt', payload: { focus: 'x' }, headers: as(BEV) })).statusCode).toBe(403);
+    const res = await app.inject({ method: 'PUT', url: '/api/board/agents/e-bev', payload: { focus: 'suite', receipts: ['r1'] }, headers: as(BEV) });
+    expect(res.json().data.item).toMatchObject({ focus: 'suite', receipts: ['r1'], updatedBy: 'e-bev' });
   });
 
   it('GET derives roster, open polls, pins and pace (planBurn null without a plan source)', async () => {
     rooms = [
       room({
         messages: [
-          { id: 'm1', roomId: 'r1', at: 1, from: { kind: 'user', name: 'Robin' }, to: 'all', text: 'pick', poll: { question: 'pick', options: [{ id: 'a', label: 'A' }, { id: 'b', label: 'B' }], votes: { user: ['a'] } } },
-          { id: 'm2', roomId: 'r1', at: 2, from: { kind: 'user', name: 'Robin' }, to: 'all', text: 'old', poll: { question: 'old', options: [], votes: {}, closed: { at: 3, by: 'user' } } },
-          { id: 'm3', roomId: 'r1', at: 4, from: { kind: 'user', name: 'Robin' }, to: 'all', text: 'rule', pinned: { at: 5, by: 'Avery', kind: 'agent' } },
+          { id: 'm1', roomId: 'r1', at: 1, from: { kind: 'user', name: 'James' }, to: 'all', text: 'pick', poll: { question: 'pick', options: [{ id: 'a', label: 'A' }, { id: 'b', label: 'B' }], votes: { user: ['a'] } } },
+          { id: 'm2', roomId: 'r1', at: 2, from: { kind: 'user', name: 'James' }, to: 'all', text: 'old', poll: { question: 'old', options: [], votes: {}, closed: { at: 3, by: 'user' } } },
+          { id: 'm3', roomId: 'r1', at: 4, from: { kind: 'user', name: 'James' }, to: 'all', text: 'rule', pinned: { at: 5, by: 'Burt', kind: 'agent' } },
         ],
       } as Partial<ChatRoom>),
       room({ id: 'r2', name: 'old', archivedAt: 1, messages: [{ id: 'm9', roomId: 'r2', at: 1, from: { kind: 'user', name: 'J' }, to: 'all', text: 'gone', pinned: { at: 9, by: 'x', kind: 'user' } }] } as Partial<ChatRoom>),
     ];
-    await post('/api/board/issues', { title: 'late', owner: 'e-jordan', start: NOW - 7200_000, end: NOW - 3600_000 }, COORD);
+    await post('/api/board/issues', { title: 'late', owner: 'e-bev', start: NOW - 7200_000, end: NOW - 3600_000 }, COORD);
     const view = (await app.inject({ method: 'GET', url: '/api/board' })).json().data;
     expect(view.roster).toEqual([
-      expect.objectContaining({ id: 'e-avery', state: 'idle', coordinator: true }),
-      expect.objectContaining({ id: 'e-jordan', state: 'running', coordinator: false }),
+      expect.objectContaining({ id: 'e-burt', state: 'idle', coordinator: true }),
+      expect.objectContaining({ id: 'e-bev', state: 'running', coordinator: false }),
     ]);
     expect(view.polls).toEqual([expect.objectContaining({ messageId: 'm1', createdAt: 1, options: [{ id: 'a', label: 'A', votes: 1 }, { id: 'b', label: 'B', votes: 0 }] })]);
-    expect(view.pins).toEqual([expect.objectContaining({ messageId: 'm3', by: 'Avery' })]);
-    expect(view.pace.owners['e-jordan']).toMatchObject({ plannedToDate: 1, overdue: 1, overdueHours: 1, verdict: 'behind' });
+    expect(view.pins).toEqual([expect.objectContaining({ messageId: 'm3', by: 'Burt' })]);
+    expect(view.pace.owners['e-bev']).toMatchObject({ plannedToDate: 1, overdue: 1, overdueHours: 1, verdict: 'behind' });
     expect(view.planBurn).toBeNull();
     expect(view.timeZone).toBe('America/New_York');
   });
 
+  it('GET /api/board/waiting counts open decisions and open polls the owner has not voted on', async () => {
+    rooms = [
+      room({
+        messages: [
+          { id: 'm1', roomId: 'r1', at: 1, from: { kind: 'user', name: 'James' }, to: 'all', text: 'p', poll: { question: 'pick', options: [{ id: 'a', label: 'A' }], votes: {} } },
+          { id: 'm2', roomId: 'r1', at: 2, from: { kind: 'user', name: 'James' }, to: 'all', text: 'p', poll: { question: 'voted', options: [{ id: 'a', label: 'A' }], votes: { user: ['a'] } } },
+        ],
+      } as Partial<ChatRoom>),
+    ];
+    await post('/api/board/decisions', { id: 'd-one', text: 'ship it?' }, COORD);
+    const res = await app.inject({ method: 'GET', url: '/api/board/waiting' });
+    expect(res.statusCode).toBe(200);
+    const body = res.json().data;
+    expect(body).toMatchObject({ count: 2, decisions: 1, polls: 1 });
+    expect(body.items.map((i: { key: string }) => i.key).sort()).toEqual(['d-one', 'r1:m1']);
+  });
+
   it('imports schedule-data.json and content.json idempotently, keeping unmatched names', async () => {
     const schedule = {
-      today: { date: '2026-10-17', rows: [{ who: 'Jordan', blocks: [[13.0, 14.0, 'Smoke test', 'done'], [14.0, 15.0, 'Suite', 'now']] }], marks: [[17.08, 'check-ins']] },
-      twoweek: { rows: [{ who: 'Blake', bars: [['2026-10-18', '2026-10-19', 'Resume', 'gate']] }] },
+      today: { date: '2026-10-17', rows: [{ who: 'Bev', blocks: [[13.0, 14.0, 'Smoke test', 'done'], [14.0, 15.0, 'Suite', 'now']] }], marks: [[17.08, 'check-ins']] },
+      twoweek: { rows: [{ who: 'Stan', bars: [['2026-10-18', '2026-10-19', 'Resume', 'gate']] }] },
     };
     const content = {
-      plans: { 'claude globex': { name: 'Claude Globex', who: 'Morgan' } },
-      agents: [{ who: 'Avery', focus: 'Board', receipts: ['a'] }],
-      wins: [{ at: '2026-10-17T14:02', who: 'Robin', text: 'Board' }, { at: '2026-10-16', who: 'Jordan', text: 'Date only' }],
-      blockers: [{ since: '2026-10-17T13:18', who: 'All', owner: 'Robin', sev: 'med', text: 'bot' }],
-      decisions: [{ id: 'resume', text: 'Resume Blake', where: 'console' }],
+      plans: { 'claude tertiary': { name: 'Claude Tertiary', who: 'Otto' } },
+      agents: [{ who: 'Burt', focus: 'Board', receipts: ['a'] }],
+      wins: [{ at: '2026-10-17T14:02', who: 'James', text: 'Board' }, { at: '2026-10-16', who: 'Bev', text: 'Date only' }],
+      blockers: [{ since: '2026-10-17T13:18', who: 'All', owner: 'James', sev: 'med', text: 'bot' }],
+      decisions: [{ id: 'resume', text: 'Resume Stan', where: 'console' }],
     };
-    expect((await post('/api/board/import', { schedule }, JORDAN)).statusCode).toBe(403);
+    expect((await post('/api/board/import', { schedule }, BEV)).statusCode).toBe(403);
     const dry = (await post('/api/board/import', { schedule, content, dryRun: true }, COORD)).json().data;
-    expect(dry.item).toMatchObject({ issues: 3, marks: 1, wins: 2, unmatched: ['Blake'] });
+    expect(dry.item).toMatchObject({ issues: 3, marks: 1, wins: 2, unmatched: ['Stan'] });
     expect(store.snapshot().rev).toBe(0);
     await post('/api/board/import', { schedule, content }, COORD);
     await post('/api/board/import', { schedule, content }, COORD);
     const s = store.snapshot();
     expect(s.issues).toHaveLength(3);
     expect(s.wins).toHaveLength(2);
-    expect(s.issues.find((i) => i.title === 'Smoke test')).toMatchObject({ owner: 'e-jordan', status: 'done', scale: 'hour', start: Date.UTC(2026, 9, 17, 17), doneAt: Date.UTC(2026, 9, 17, 18) });
-    expect(s.issues.find((i) => i.title === 'Resume')).toMatchObject({ ownerLabel: 'Blake', status: 'todo', tags: ['gate'], scale: 'day' });
+    expect(s.issues.find((i) => i.title === 'Smoke test')).toMatchObject({ owner: 'e-bev', status: 'done', scale: 'hour', start: Date.UTC(2026, 9, 17, 17), doneAt: Date.UTC(2026, 9, 17, 18) });
+    expect(s.issues.find((i) => i.title === 'Resume')).toMatchObject({ ownerLabel: 'Stan', status: 'todo', tags: ['gate'], scale: 'day' });
     expect(s.wins.map((w) => w.at)).toEqual([Date.UTC(2026, 9, 17, 18, 2), Date.UTC(2026, 9, 16, 4)]);
-    expect(s.agents['e-avery']).toMatchObject({ focus: 'Board' });
+    expect(s.agents['e-burt']).toMatchObject({ focus: 'Board' });
     expect(s.marks).toHaveLength(1);
   });
 });
@@ -226,5 +305,39 @@ describe('board logic', () => {
   it('day bars span 07:00 to 22:00 like build_board.py', () => {
     const { issues } = importSchedule({ twoweek: { rows: [{ who: 'X', bars: [['2026-10-18', '2026-10-18', 'L', 'plan']] }] } }, () => undefined, 'America/New_York', 0);
     expect(issues[0]).toMatchObject({ start: Date.UTC(2026, 9, 18, 11), end: Date.UTC(2026, 9, 19, 2) });
+  });
+
+  it('names each plan by its account label, never by a board note name, and carries the account ids', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'board-plans-'));
+    const store = new BoardStore(join(dir, 'board.json'));
+    await store.init();
+    await store.update({}, (st) => {
+      st.plans = { Work: { name: 'Old note name', who: 'Bev' } };
+    });
+    const pace = { weekly: 40, burnPerHour: 1, projected: 80, weekStart: NOW - 86400_000, weekReset: NOW + 86400_000, runsOutAt: null, burnBasis: 'average', remainingPct: 60, hoursToReset: 24, sustainablePctPerHour: 2.5 };
+    const rows = [
+      { id: 'p-1', label: 'Work', provider: 'anthropic', profileId: 'p-1', acctName: null, isDefault: false, signedIn: true, updatedAt: NOW, pace },
+      { id: 'acct-openai-spare', label: 'spare', provider: 'openai', profileId: null, acctName: 'spare', isDefault: false, signedIn: false, updatedAt: NOW, pace },
+    ];
+    const own = Fastify();
+    registerBoardRoutes(own, { sessions: new Map(), broadcast: () => {} } as never, {
+      store,
+      company: () => ({ employees: [], settings: { timeZone: 'America/New_York', ownerName: 'James' } }),
+      rooms: () => [],
+      audit: async () => {},
+      plans: async () => rows as never,
+      now: () => NOW,
+    });
+    await own.ready();
+    try {
+      const burn = (await own.inject({ method: 'GET', url: '/api/board' })).json().data.planBurn;
+      expect(burn.map((b: { name: string }) => b.name)).toEqual(['Work', 'spare']);
+      expect(burn[0]).toMatchObject({ id: 'p-1', profileId: 'p-1', provider: 'anthropic', isDefault: false, label: 'Work', who: 'Bev', used: 40 });
+      expect(burn[1]).toMatchObject({ id: 'acct-openai-spare', profileId: null, who: '' });
+      expect(JSON.stringify(burn)).not.toContain('Old note name');
+    } finally {
+      await own.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

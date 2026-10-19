@@ -56,7 +56,7 @@ export interface CompanyServiceDeps {
   keepsRecord?(id: string): boolean;
   /** The conversation thread a session is running (OpenCode `continueSession`), when it has one. */
   threadOf?(id: string): string | undefined;
-  chatrooms: Pick<ChatroomService, 'rooms' | 'room' | 'addMember' | 'setStatus'> & Partial<Pick<ChatroomService, 'replaceSession'>>;
+  chatrooms: Pick<ChatroomService, 'rooms' | 'room' | 'addMember' | 'setStatus'> & Partial<Pick<ChatroomService, 'replaceSession' | 'removeMember' | 'retiredSessions'>>;
   research: CompanyResearchBackend;
   /** Apply the owner's explicit company name to the bound session and persist its display state. */
   bindIdentity?(employee: CompanyEmployee): void;
@@ -80,6 +80,8 @@ function asCompanyError<T>(work: () => T): T {
 const NAMES = ['Amir', 'Maya', 'Lena', 'Felix', 'Nora', 'Leo', 'Iris', 'Theo', 'Zara', 'Hugo', 'Asha', 'Emil'];
 const ICONS = ['🧭', '🌱', '🦉', '🚀', '🔭', '🎨', '🦊', '🌊', '🪁', '🌻', '🦋', '⚡'];
 const sameOwner = (a?: string, b?: string): boolean => a === b;
+/** Positions (owner-set) whose bound session may recover another employee whose session is gone. */
+const RECOVERY_POSITIONS = new Set(['cto', 'coo']);
 
 export class CompanyService {
   private ticking = false;
@@ -103,7 +105,59 @@ export class CompanyService {
       temporaryAgents: state.temporaryAgents
         .filter((a) => sameOwner(a.owner, owner))
         .map((a) => (this.deps.keepsRecord?.(a.sessionId) ? { ...a, kept: true } : a)),
+      retired: state.retired.filter((e) => sameOwner(e.owner, owner)),
     };
+  }
+
+  /**
+   * Retire an employee whose session is gone: the record leaves the org chart (and the CTO seat) for the retired list, keeping its
+   * id and session so chat history still names them, then the session leaves every room of this owner. Unknown is a 404, any
+   * session record (running or stopped) is refused (409); retiring someone already retired only finishes the room removals.
+   * Returns the rooms left and the rooms whose removal failed (a re-run retries those).
+   */
+  async retire(employeeId: string, owner: string | undefined): Promise<{ employee: CompanyEmployee; rooms: string[]; failed: string[] }> {
+    const employee = await this.store.update((state) => {
+      const done = state.retired.find((e) => e.id === employeeId && sameOwner(e.owner, owner));
+      if (done) return done;
+      const index = state.employees.findIndex((e) => e.id === employeeId && sameOwner(e.owner, owner));
+      if (index < 0) throw new CompanyError('Unknown employee', 404);
+      const current = state.employees[index];
+      if (this.deps.getSession(current.sessionId)) throw new CompanyError('That employee still has a session; stop or remove it first', 409);
+      state.employees.splice(index, 1);
+      for (const settings of state.settings) if (sameOwner(settings.owner, owner) && settings.ctoId === employeeId) delete settings.ctoId;
+      const retired = { ...current, retiredAt: this.now() };
+      state.retired.push(retired);
+      return retired;
+    });
+    const rooms: string[] = [];
+    const failed: string[] = [];
+    for (const room of this.deps.chatrooms.rooms()) {
+      if (!sameOwner(room.owner, owner) || !room.members.some((m) => m.sessionId === employee.sessionId)) continue;
+      try {
+        if (this.deps.chatrooms.removeMember?.(room.id, employee.sessionId)) rooms.push(room.id);
+        else failed.push(room.id);
+      } catch {
+        failed.push(room.id);
+      }
+    }
+    return { employee, rooms, failed };
+  }
+
+  /** Put a retired employee back on the org chart (not back in rooms: the owner invites them again). Refused if their session or name is now someone else's. */
+  async restore(employeeId: string, owner: string | undefined): Promise<CompanyEmployee> {
+    const employee = await this.store.update((state) => {
+      const index = state.retired.findIndex((e) => e.id === employeeId && sameOwner(e.owner, owner));
+      if (index < 0) throw new CompanyError('Unknown retired employee', 404);
+      const { retiredAt: _retiredAt, ...record } = state.retired[index];
+      if (state.employees.some((e) => e.sessionId === record.sessionId)) throw new CompanyError('Session already bound', 409);
+      if (state.employees.some((e) => sameOwner(e.owner, owner) && e.name.toLowerCase() === record.name.toLowerCase()))
+        throw new CompanyError(`"${record.name}" is an existing employee; rename one of them first`, 409);
+      state.retired.splice(index, 1);
+      state.employees.push(record);
+      return record;
+    });
+    this.deps.bindIdentity?.(employee);
+    return employee;
   }
 
   async hire(input: Omit<CompanyEmployee, 'id' | 'createdAt'>): Promise<CompanyEmployee> {
@@ -192,7 +246,8 @@ export class CompanyService {
     return settings;
   }
 
-  async rebind(employeeId: string, owner: string | undefined, sessionId: string): Promise<CompanyEmployee> {
+  /** `by` is who asked (an agent's session id, or 'owner'); it goes on the room move's audit line. */
+  async rebind(employeeId: string, owner: string | undefined, sessionId: string, by = 'owner'): Promise<CompanyEmployee> {
     const session = this.deps.getSession(sessionId);
     if (!session || !sameOwner(session.owner, owner)) throw new CompanyError('Bind an existing owned session');
     let previous: string | undefined;
@@ -214,7 +269,7 @@ export class CompanyService {
     // the replaced session leaves every room at once instead of lingering as a second copy of the same person.
     if (previous && previous !== sessionId) {
       try {
-        await this.deps.chatrooms.replaceSession?.(previous, sessionId, 'owner', (room) => sameOwner(room.owner, owner));
+        await this.deps.chatrooms.replaceSession?.(previous, sessionId, by, (room) => sameOwner(room.owner, owner));
       } catch (error) {
         // All or nothing: a failed move leaves the employee on the session it had, never half-moved.
         const back = previous;
@@ -231,6 +286,32 @@ export class CompanyService {
     }
     this.deps.bindIdentity?.(bound);
     return bound;
+  }
+
+  /**
+   * Delegated recovery: the CTO or COO (by the owner-set position of the employee its session is bound to) moves another employee
+   * whose bound session is gone back onto that session's retired predecessor: the server's own plan-switch record (the destination
+   * was retired with the gone session as its successor) is the proof of identity, never a name, which any session may set. Nothing
+   * else: a live bound session, the caller itself, any other destination or another owner's session stays owner-only.
+   */
+  async recover(employeeId: string, owner: string | undefined, callerSessionId: string, sessionId: string): Promise<CompanyEmployee> {
+    const employees = this.store.snapshot().employees.filter((e) => sameOwner(e.owner, owner));
+    const delegate = employees.find((e) => e.sessionId === callerSessionId);
+    if (!delegate || !RECOVERY_POSITIONS.has(delegate.position.trim().toLowerCase()) || !this.deps.getSession(callerSessionId))
+      throw new CompanyError('Only the owner, the CTO or the COO may recover an employee session', 403);
+    const target = employees.find((e) => e.id === employeeId);
+    if (!target) throw new CompanyError('Unknown employee', 404);
+    if (target.id === delegate.id) throw new CompanyError('An agent may not recover itself; ask the owner', 403);
+    if (this.deps.getSession(target.sessionId))
+      throw new CompanyError('That employee\'s session is still open; only the owner may move it', 409);
+    const session = this.deps.getSession(sessionId);
+    if (!session || !sameOwner(session.owner, owner)) throw new CompanyError('Bind an existing owned session');
+    const predecessor = this.deps.chatrooms
+      .retiredSessions?.((o) => sameOwner(o, owner))
+      .some((r) => r.sessionId === sessionId && r.successorId === target.sessionId);
+    if (!predecessor)
+      throw new CompanyError(`Only ${target.name}'s retired previous session may take the place back; ask the owner for any other`, 409);
+    return this.rebind(employeeId, owner, sessionId);
   }
 
   /** Owner choice of the conversation thread an employee resumes on every replacement (`null` clears it). */
@@ -446,10 +527,14 @@ export class CompanyService {
     };
   }
 
-  async completeSpawn(sessionId: string, plan: { channelId?: string; name: string; icon: string; employeeId?: string; replacesSessionId?: string }): Promise<void> {
+  async completeSpawn(
+    sessionId: string,
+    plan: { channelId?: string; name: string; icon: string; employeeId?: string; replacesSessionId?: string },
+    by = 'owner'
+  ): Promise<void> {
     // A replacement session takes over the employee: record, room seats and deliveries move in one step, no temporary record.
     if (plan.employeeId) {
-      await this.rebind(plan.employeeId, this.deps.getSession(sessionId)?.owner, sessionId);
+      await this.rebind(plan.employeeId, this.deps.getSession(sessionId)?.owner, sessionId, by);
       return;
     }
     // At the cap, refuse (never drop another agent's record to make room), and before the join, so a refusal

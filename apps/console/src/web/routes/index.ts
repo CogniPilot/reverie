@@ -25,6 +25,7 @@ export { registerPlanRoutes } from './plan-routes.js';
 export { registerOrchestratorRoutes } from './orchestrator-routes.js';
 export { registerClipboardRoutes } from './clipboard-routes.js';
 export { registerBoardPageRoutes } from './board-page-routes.js';
+export { registerPlansPageRoutes } from './plans-page-routes.js';
 export { registerSearchRoutes } from './search-routes.js';
 export { registerMeRoutes } from './me-routes.js';
 export { registerAdminRoutes } from './admin-routes.js';

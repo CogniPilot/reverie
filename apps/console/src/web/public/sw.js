@@ -143,14 +143,14 @@ self.addEventListener('push', (event) => {
     return;
   }
 
-  const { title, hostTitle, body, tag, sessionId, roomId, approvalId, urgency, actions } = payload;
+  const { title, hostTitle, body, tag, sessionId, roomId, approvalId, urgency, actions, board } = payload;
 
   const options = {
     body: body || '',
     tag: tag || 'codeman-default',
     icon: B('/icon-192.png'),
     badge: B('/icon-192.png'),
-    data: { sessionId, roomId, approvalId, url: roomId ? B(`/?room=${encodeURIComponent(roomId)}`) : (sessionId ? B(`/?session=${encodeURIComponent(sessionId)}`) : B('/')) },
+    data: { sessionId, roomId, approvalId, url: board === true ? B('/board.html') : roomId ? B(`/?room=${encodeURIComponent(roomId)}`) : (sessionId ? B(`/?session=${encodeURIComponent(sessionId)}`) : B('/')) },
     renotify: true,
     requireInteraction: urgency === 'critical',
   };

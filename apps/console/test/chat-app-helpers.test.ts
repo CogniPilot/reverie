@@ -62,7 +62,7 @@ const caFeedItems = fn<(m: Msg[], readAt?: number) => Array<{ type: string; head
 const caContinues = fn<(a: Msg, b: Msg) => boolean>('caContinues');
 const caMemberSections = fn<(m: unknown[]) => Array<{ key: string; label: string; members: unknown[] }>>('caMemberSections');
 const caSwitcherResults = fn<(r: Room[], a: Array<{ id: string; name: string }>, q: string, limit?: number) => Array<{ type: string; id: string; label: string }>>('caSwitcherResults');
-const caInitialView = fn<(o: { stored?: string; solo?: boolean; hasSessionLink?: boolean }) => string>('caInitialView');
+const caInitialView = fn<(o: { stored?: string; solo?: boolean; hasSessionLink?: boolean; legacy?: boolean }) => string>('caInitialView');
 const caRoomLabel = fn<(r: Room) => string>('caRoomLabel');
 
 describe('badges, the Discord way', () => {
@@ -82,7 +82,7 @@ describe('sidebar model', () => {
     room('review', 3, 0, { category: 'Build' }),
     room('quiet', 0, 0, { category: 'Build' }),
     room('ops', 0, 0, { category: 'Ops' }),
-    room('other', 4, 0, { workspace: 'Compiler' }),
+    room('other', 4, 0, { workspace: 'Rumoca' }),
     room('dm', 9, 9, { kind: 'dm' }),
     room('old', 5, 5, { archivedAt: 1, category: 'Build' }),
   ];
@@ -106,7 +106,7 @@ describe('sidebar model', () => {
     expect(ids).not.toContain('dm');
     expect(ids).not.toContain('other');
     expect(caChannelItems(rooms, 'Rumoza', {})).toEqual([]);
-    expect(keys(caChannelItems(rooms, 'Compiler', {}))).toEqual(['room:other']);
+    expect(keys(caChannelItems(rooms, 'Rumoca', {}))).toEqual(['room:other']);
   });
 
   it('rolls a category\'s dot and mention number up onto its header', () => {
@@ -161,13 +161,13 @@ describe('direct messages and the workspace rail', () => {
   });
 
   it('shows each person once: chats with ended sessions fold into the live one and keep their unread', () => {
-    const peer = (sid: string, alive: boolean, name = 'Casey') => ({ sessionId: sid, name, alive }) as never;
-    const casey = (id: string, sid: string, alive: boolean, extra: Partial<Room> = {}) =>
+    const peer = (sid: string, alive: boolean, name = 'Jinx') => ({ sessionId: sid, name, alive }) as never;
+    const jinx = (id: string, sid: string, alive: boolean, extra: Partial<Room> = {}) =>
       dm(id, sid, { members: [peer(sid, alive)], ...extra });
     const rooms = [
-      casey('old1', 's1', false, { lastMessageAt: 3, unread: 2, mentions: 1 }),
-      casey('live', 's3', true, { lastMessageAt: 9, unread: 1 }),
-      casey('old2', 's2', false, { lastMessageAt: 6 }),
+      jinx('old1', 's1', false, { lastMessageAt: 3, unread: 2, mentions: 1 }),
+      jinx('live', 's3', true, { lastMessageAt: 9, unread: 1 }),
+      jinx('old2', 's2', false, { lastMessageAt: 6 }),
       dm('bob', 'sb', { lastMessageAt: 1 }),
     ];
     const items = caDmItems(rooms);
@@ -178,7 +178,7 @@ describe('direct messages and the workspace rail', () => {
   });
 
   it('prefers the live chat even when an ended one is newer, and folds nothing while both are live', () => {
-    const peer = (sid: string, alive: boolean) => ({ sessionId: sid, name: 'Casey', alive }) as never;
+    const peer = (sid: string, alive: boolean) => ({ sessionId: sid, name: 'Jinx', alive }) as never;
     const mk = (id: string, sid: string, alive: boolean, at: number) => dm(id, sid, { members: [peer(sid, alive)], lastMessageAt: at });
     expect(caDmItems([mk('gone', 's1', false, 9), mk('live', 's2', true, 1)]).map((i) => i.id)).toEqual(['live']);
     expect(caDmItems([mk('a', 's1', true, 9), mk('b', 's2', true, 1)]).map((i) => i.id)).toEqual(['a', 'b']);
@@ -188,7 +188,7 @@ describe('direct messages and the workspace rail', () => {
   });
 
   it('folds by employee id when both sessions have one, and by name only when an id is missing', () => {
-    const peer = (sid: string, alive: boolean) => ({ sessionId: sid, name: 'Blake', alive }) as never;
+    const peer = (sid: string, alive: boolean) => ({ sessionId: sid, name: 'Stan', alive }) as never;
     const mk = (id: string, sid: string, alive: boolean, at: number) => dm(id, sid, { members: [peer(sid, alive)], lastMessageAt: at });
     const employeeOf = new Map([['s-live', 'e1'], ['s-old-same', 'e1'], ['s-old-other', 'e2']]);
     const rooms = [mk('live', 's-live', true, 9), mk('same', 's-old-same', false, 5), mk('other', 's-old-other', false, 4), mk('noid', 's-old-none', false, 3)];
@@ -199,7 +199,7 @@ describe('direct messages and the workspace rail', () => {
   });
 
   it('opening the main row reads the folded chats too, so the one badge clears', () => {
-    const peer = (sid: string, alive: boolean) => ({ sessionId: sid, name: 'Casey', alive }) as never;
+    const peer = (sid: string, alive: boolean) => ({ sessionId: sid, name: 'Jinx', alive }) as never;
     const mk = (id: string, sid: string, alive: boolean, extra: Partial<Room>) => dm(id, sid, { members: [peer(sid, alive)], ...extra });
     const rooms = [mk('live', 's2', true, { lastMessageAt: 9, unread: 1 }), mk('old', 's1', false, { lastMessageAt: 3, unread: 4, mentions: 2 }), mk('quiet', 's0', false, { lastMessageAt: 1 })];
     expect(caDmItems4(rooms, 'live', {}, new Map())[0]).toMatchObject({ unread: 5, mentions: 2 });
@@ -217,8 +217,8 @@ describe('direct messages and the workspace rail', () => {
     const items = caWorkspaceItems(
       [
         room('a', 2, 1),
-        room('b', 1, 0, { workspace: 'Compiler' }),
-        room('c', 8, 8, { workspace: 'Compiler', archivedAt: 1 }),
+        room('b', 1, 0, { workspace: 'Rumoca' }),
+        room('c', 8, 8, { workspace: 'Rumoca', archivedAt: 1 }),
         dm('d', 'x', { unread: 3, mentions: 3 }),
       ],
       'Reverie'
@@ -226,7 +226,7 @@ describe('direct messages and the workspace rail', () => {
     expect(items.map((i) => [i.key, i.label, i.unread, i.mentions])).toEqual([
       ['home', 'Direct messages', 3, 3],
       ['', 'Reverie', 2, 1],
-      ['Compiler', 'Compiler', 1, 0],
+      ['Rumoca', 'Rumoca', 1, 0],
     ]);
     expect(caWorkspaceItems([], 'Reverie').map((i) => i.label)).toEqual(['Direct messages', 'Reverie']);
     expect(caWorkspaceOf(dm('d', 'x'))).toBe('home');
@@ -375,6 +375,7 @@ describe('which view to open', () => {
     expect(caInitialView({ stored: 'debug' })).toBe('debug');
     expect(caInitialView({ solo: true })).toBe('debug');
     expect(caInitialView({ hasSessionLink: true })).toBe('debug');
+    expect(caInitialView({ legacy: true })).toBe('debug');
   });
 });
 

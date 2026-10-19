@@ -417,3 +417,19 @@ describe('the member card one-liners', () => {
   });
 });
 
+
+describe('page and org panels vs the phone drawers', () => {
+  const z = (selector: string): number => {
+    let found = NaN;
+    root.walkRules((r) => {
+      if (r.selectors.includes(selector)) r.walkDecls('z-index', (d) => (found = Number(d.value)));
+    });
+    return found;
+  };
+  it('keeps Board/Plans pages and the org chart under the drawers', () => {
+    const drawer = Number(decl(phoneRules(), '.ca-side', 'z-index') ?? decl(phoneRules(), '.ca-rail', 'z-index'));
+    expect(drawer).toBe(3);
+    expect(z('.ca-page')).toBeLessThan(drawer);
+    expect(z('.ca-org')).toBeLessThan(drawer);
+  });
+});

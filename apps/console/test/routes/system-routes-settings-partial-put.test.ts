@@ -143,4 +143,29 @@ describe('PUT /api/settings — partial body must not reset service toggles', ()
     // showUltracodeAgents is still true in settings.json, so it stays up.
     expect(workflowRunWatcher.stop).not.toHaveBeenCalled();
   });
+
+  it('accepts and drops the retired claudeVoiceEnabled key from a stale tab', async () => {
+    const fs = (await import('node:fs/promises')).default;
+    vi.mocked(fs.writeFile).mockClear();
+    const res = await harness.app.inject({
+      method: 'PUT',
+      url: '/api/settings',
+      payload: { showPlanUsageLimits: true, claudeVoiceEnabled: true },
+    });
+
+    expect(res.statusCode).toBe(200);
+    const written = vi.mocked(fs.writeFile).mock.calls.map((c) => String(c[1])).join('\n');
+    expect(written).toContain('showPlanUsageLimits');
+    expect(written).not.toContain('claudeVoiceEnabled');
+  });
+
+  it('still rejects other unknown keys', async () => {
+    const res = await harness.app.inject({
+      method: 'PUT',
+      url: '/api/settings',
+      payload: { notARealSetting: true },
+    });
+
+    expect(res.statusCode).toBe(400);
+  });
 });

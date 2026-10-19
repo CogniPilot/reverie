@@ -174,3 +174,25 @@ describe('chatInlineCodeSegments', () => {
     expect(plain(inlineSegs('plain'))).toEqual([{ text: 'plain' }]);
   });
 });
+
+const boldSegs = get('chatBoldSegments') as (t: string) => Array<{ text?: string; bold?: string }>;
+
+describe('chatBoldSegments', () => {
+  it('splits **bold** spans from the text around them', () => {
+    expect(plain(boldSegs('a **big** win and **two words**'))).toEqual([
+      { text: 'a ' },
+      { bold: 'big' },
+      { text: ' win and ' },
+      { bold: 'two words' },
+    ]);
+  });
+  it('leaves stray, spaced, empty and multi-line asterisks as text', () => {
+    for (const t of ['a ** b', '2 ** 3 ** 4', '****', '** x**', '**x **', '**a\nb**', 'plain', '*one*']) {
+      expect(plain(boldSegs(t))).toEqual([{ text: t }]);
+    }
+  });
+  it('keeps a link inside bold whole (the closing ** is not part of the link)', () => {
+    expect(plain(boldSegs('**see https://example.com/x**'))).toEqual([{ bold: 'see https://example.com/x' }]);
+    expect(plain(links('see https://example.com/x'))).toEqual([{ text: 'see ' }, { text: 'https://example.com/x', href: 'https://example.com/x' }]);
+  });
+});

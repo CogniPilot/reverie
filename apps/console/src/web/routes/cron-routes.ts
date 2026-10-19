@@ -19,6 +19,13 @@ import { appendAdminAudit } from '../admin-audit.js';
 import { RoutinesGrantsError } from '../../routines-grants.js';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 
+/** What an agent's routine may do; the owner's bots and jobs keep the wider limits. */
+export const ROUTINES_PER_AUTHOR = 20;
+export const ROUTINE_MIN_INTERVAL_MINUTES = 5;
+export const ROUTINE_MAX_TEXT = 2000;
+/** Fields only the owner sets: who speaks, what data a post reads, and whether it only pretends. */
+const OWNER_ONLY_FIELDS = ['postAs', 'botId', 'postSource', 'postSourceArgs', 'postWhen', 'postChangeOnly', 'dryRun'] as const;
+
 export function registerCronRoutes(app: FastifyInstance, ctx: CronPort): void {
   // Stopgap until owner authentication: writes here create or start sessions that run unattended
   // (shell mode, a launchCommand, or full permissions), so they are owner-only. In single-user mode
@@ -65,7 +72,6 @@ export function registerCronRoutes(app: FastifyInstance, ctx: CronPort): void {
     const v = req.headers[name];
     return Array.isArray(v) ? v[0] : v;
   };
-  const SOURCES_FOR_BOARDROOM = ['plans-pace', 'burn-watch'];
   const gatePost = async (
     req: FastifyRequest,
     verb: string,
@@ -85,12 +91,28 @@ export function registerCronRoutes(app: FastifyInstance, ctx: CronPort): void {
     // A tainted caller (web content in its context) never schedules posts, whoever it is.
     if (header(req, 'x-codeman-tainted') !== undefined) return refuse('Refused while web content is in the caller context');
     const employee = policy.findEmployee(caller);
-    if (!employee || !policy.grants.allows(employee)) return refuse('Only the owner or a delegate creates or edits a post job');
-    const boardroom = policy.boardroomId();
-    const source = body?.postSource ?? job?.postSource;
-    if (source && SOURCES_FOR_BOARDROOM.includes(source) && (body?.roomId ?? job?.roomId) !== boardroom) {
-      return refuse(`${source} jobs post only in the boardroom`);
+    if (!employee) {
+      return refuse('Temporary agents cannot own routines, because the routine would outlive the agent. Ask the owner to hire this agent first');
     }
+    if (!policy.grants.allows(employee)) return refuse('Only the owner or a delegate creates or edits a post job');
+    // A routine belongs to the employee who made it. Bot jobs and the owner's jobs have no author, so no agent changes them.
+    if (job && job.createdBy?.employeeId !== employee.id) return refuse('You can only change your own routines');
+    const asked = body ? OWNER_ONLY_FIELDS.filter((f) => (verb !== 'created' || f !== 'postAs') && (body as Record<string, unknown>)[f] !== undefined) : [];
+    if (asked.length) return refuse(`${asked.join(', ')} can only be set by the owner`);
+    const room = body?.roomId ?? job?.roomId;
+    if (room && !policy.isMember(room, caller)) return refuse('You can only schedule a routine in a room you are a member of');
+    if (body) {
+      const text = (body as { postText?: string }).postText;
+      if (text !== undefined && text.length > ROUTINE_MAX_TEXT) return refuse(`A routine's text is at most ${ROUTINE_MAX_TEXT} characters`);
+      const every = (body as { intervalMinutes?: number }).intervalMinutes;
+      if (every !== undefined && every < ROUTINE_MIN_INTERVAL_MINUTES) {
+        return refuse(`A routine repeats at most every ${ROUTINE_MIN_INTERVAL_MINUTES} minutes`);
+      }
+    }
+    if (verb === 'created' && ctx.cron.listJobs().filter((j) => j.createdBy?.employeeId === employee.id).length >= ROUTINES_PER_AUTHOR) {
+      return refuse(`You already have ${ROUTINES_PER_AUTHOR} routines; remove one first`);
+    }
+    const boardroom = policy.boardroomId();
     const text = `${employee.name} (${employee.position}) ${verb} post job "${name}"${detail.fields.length ? ` (${detail.fields.join(', ')})` : ''}`;
     if (!boardroom || !policy.notify(boardroom, text)) return refuse('The boardroom could not be told, so the change was not made');
     void appendAdminAudit({ admin: `${employee.name} (${employee.id})`, action: `post_job_${verb}`, target: name, ip: req.ip, detail });
@@ -113,21 +135,54 @@ export function registerCronRoutes(app: FastifyInstance, ctx: CronPort): void {
   });
 
   app.get('/api/cron/jobs', async (req) => {
-    const jobs = ctx.cron.listJobs();
-    if (!isMultiUserMode()) return jobs;
-    const user = getAuthUser(req);
-    if (user.role === 'admin') return jobs;
-    return (jobs as CronJob[]).filter((j) => canAccessOwned(user, j.owner));
+    // Owner scope first, for every caller: an agent never sees past the jobs its owner scope allows, ?all=1 or not.
+    let jobs = ctx.cron.listJobs();
+    if (isMultiUserMode()) {
+      const user = getAuthUser(req);
+      if (user.role !== 'admin') jobs = (jobs as CronJob[]).filter((j) => canAccessOwned(user, j.owner));
+    }
+    // An agent sees its own routines in full; ?all=1 adds everyone's name, room and schedule, never another author's text.
+    const caller = header(req, 'x-codeman-parent-session');
+    if (caller === undefined) return jobs;
+    const mine = authorOf(caller);
+    const all = (req.query as { all?: string } | undefined)?.all === '1';
+    return jobs.filter((j) => all || isMine(mine, j)).map((j) => (isMine(mine, j) ? j : publicJob(j)));
   });
+
+  const authorOf = (caller: string): string | undefined => ctx.routines?.findEmployee(caller)?.id;
+  const isMine = (me: string | undefined, j: CronJob | undefined): boolean => !!me && !!j && j.createdBy?.employeeId === me;
+  // What an agent may read of a job or run that is not its own: when, where and by whom, never what it says. An allowlist,
+  // so a field added to the job later (rendered text, notes, commands, errors that quote the text) stays hidden by default.
+  const PUBLIC_JOB_FIELDS = [
+    'id', 'name', 'action', 'postAs', 'createdBy', 'roomId', 'enabled', 'scheduleType', 'runAt', 'intervalMinutes', 'timeZone',
+    'dailyTime', 'weeklyDays', 'weeklyTime', 'createdAt', 'updatedAt', 'lastRunAt', 'nextRunAt', 'lastStatus',
+  ] as const;
+  const PUBLIC_RUN_FIELDS = ['id', 'cronJobId', 'startedAt', 'finishedAt', 'status', 'triggerType'] as const;
+  const pick = <T extends object>(o: T, keys: readonly string[]): T =>
+    Object.fromEntries(keys.filter((k) => k in o).map((k) => [k, (o as Record<string, unknown>)[k]])) as T;
+  const publicJob = (j: CronJob): CronJob => pick(j, PUBLIC_JOB_FIELDS);
+  const publicRun = <R extends object>(r: R): R => pick(r, PUBLIC_RUN_FIELDS);
 
   app.post('/api/cron/jobs', async (req) => {
     // No custom errorMessage: surface the schema's field-specific messages
     // (e.g. "runAt is required for a one-time schedule").
-    const body = parseBody(CronJobSchema, req.body);
+    // An employee's routine always speaks as its author: the server says so, and the body may not.
+    const raw = (req.body ?? {}) as Record<string, unknown>;
+    const asEmployee = header(req, 'x-codeman-parent-session') !== undefined && raw.action === 'post';
+    if (asEmployee && raw.postAs !== undefined) {
+      return createErrorResponse(ApiErrorCode.FORBIDDEN, 'postAs can only be set by the owner');
+    }
+    const body = parseBody(CronJobSchema, asEmployee ? { ...raw, postAs: 'author' } : req.body);
     if (body.action === 'post') {
       const refused = await gatePost(req, 'created', undefined, body);
       if (refused) return refused;
-      return { job: ctx.cron.createJob(body, ownerFor(req)) };
+      // The author comes from the caller's own session, never from the body.
+      const caller = header(req, 'x-codeman-parent-session');
+      const author = caller === undefined ? undefined : ctx.routines?.findEmployee(caller);
+      if (caller === undefined && body.postAs === 'author') {
+        return createErrorResponse(ApiErrorCode.INVALID_INPUT, 'postAs author is only for an employee\'s own routine');
+      }
+      return { job: ctx.cron.createJob(body, ownerFor(req), author && { employeeId: author.id }) };
     }
     // Section 6.2: confine the job's workingDir to the owner's case space (mirrors
     // POST /api/sessions). No-op allow-all for admins/single-user. workingDir is
@@ -154,6 +209,8 @@ export function registerCronRoutes(app: FastifyInstance, ctx: CronPort): void {
     const { id } = req.params as { id: string };
     const job = ctx.cron.getJob(id);
     if (!canTouch(req, job)) return createErrorResponse(ApiErrorCode.NOT_FOUND, 'Cron job not found');
+    const caller = header(req, 'x-codeman-parent-session');
+    if (caller !== undefined && !isMine(authorOf(caller), job)) return publicJob(job);
     return job;
   });
 
@@ -234,12 +291,26 @@ export function registerCronRoutes(app: FastifyInstance, ctx: CronPort): void {
     const { id } = req.params as { id: string };
     // Owner-gate like every other :id handler so a foreign job's run history (session
     // ids, names, deep links) isn't leaked; NOT_FOUND avoids disclosing existence.
-    if (!canTouch(req, ctx.cron.getJob(id))) return createErrorResponse(ApiErrorCode.NOT_FOUND, 'Cron job not found');
-    return ctx.cron.listRuns(id);
+    const job = ctx.cron.getJob(id);
+    if (!canTouch(req, job)) return createErrorResponse(ApiErrorCode.NOT_FOUND, 'Cron job not found');
+    // An agent reads the history of its own routines; for anyone else's it gets the times and outcomes, not the messages.
+    const caller = header(req, 'x-codeman-parent-session');
+    const runs = ctx.cron.listRuns(id);
+    return caller !== undefined && !isMine(authorOf(caller), job) ? runs.map(publicRun) : runs;
   });
 
   app.get('/api/cron/runs', async (req) => {
-    const runs = ctx.cron.listRuns();
+    let runs = ctx.cron.listRuns();
+    const caller = header(req, 'x-codeman-parent-session');
+    if (caller !== undefined) {
+      // Owner scope below still applies; then an agent keeps its own runs whole and sees only times and outcomes of the rest.
+      const jobById = new Map(ctx.cron.listJobs().map((j): [string, CronJob] => [j.id, j]));
+      const mine = authorOf(caller);
+      const scoped = (filtered: typeof runs) => filtered.map((r) => (isMine(mine, jobById.get(r.cronJobId)) ? r : publicRun(r)));
+      if (!isMultiUserMode()) return scoped(runs);
+      const agentUser = getAuthUser(req);
+      return scoped(agentUser.role === 'admin' ? runs : runs.filter((r) => canAccessOwned(agentUser, jobById.get(r.cronJobId)?.owner)));
+    }
     if (!isMultiUserMode()) return runs;
     const user = getAuthUser(req);
     if (user.role === 'admin') return runs;

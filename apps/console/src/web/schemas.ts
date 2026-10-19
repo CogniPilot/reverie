@@ -1817,6 +1817,11 @@ export const PinSessionSchema = z.object({
   pinned: z.boolean(),
 });
 
+/** An OpenCode thread id, as `opencode session list` prints it. */
+export const OpenCodeThreadSchema = z.object({
+  thread: z.string().regex(/^ses_[A-Za-z0-9]{8,64}$/, 'Expected an OpenCode thread id (ses_...)'),
+});
+
 /** POST /api/sessions/:id/image-watcher */
 export const ImageWatcherSchema = z.object({
   enabled: z.boolean(),
@@ -1854,6 +1859,7 @@ const CronJobBaseSchema = z.object({
   name: z.string().min(1).max(200),
   /** 'launch' (default) starts a session; 'post' has a chat bot post a message. */
   action: z.enum(['launch', 'post']).optional(),
+  postAs: z.enum(['bot', 'author']).optional(),
   botId: z.string().regex(/^[a-z0-9][a-z0-9_-]{0,39}$/, 'botId must be lowercase letters, digits, - or _').optional(),
   roomId: z.string().min(1).max(100).optional(),
   postText: z.string().min(1).max(4000).refine(noNewlines, 'postText must be a single line').optional(),
@@ -1911,7 +1917,7 @@ function refineCronJob(val: z.infer<typeof CronJobBaseSchema>, ctx: z.Refinement
   const add = (message: string, path: string) => ctx.addIssue({ code: 'custom', message, path: [path] });
 
   if (val.action === 'post') {
-    if (!val.botId) add('botId is required for a post job', 'botId');
+    if (!val.botId && val.postAs !== 'author') add('botId is required for a post job', 'botId');
     if (!val.roomId) add('roomId is required for a post job', 'roomId');
     if (!val.postText) add('postText is required for a post job', 'postText');
     if (val.postSource && val.postText) {

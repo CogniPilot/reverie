@@ -19,6 +19,10 @@
 
 /* ───────────────────────── pure helpers ───────────────────────── */
 
+// Consume the fragment before this shell starts any asynchronous work. The
+// invitation is held in memory only and never used as a navigation destination.
+let caEmbassyIncomingInvite = typeof window !== 'undefined' ? caEmbassyTakeFragment(window) : null;
+
 /** Badge text for a count; large counts stop growing. */
 function chatBadgeCount(n) {
   return n > 99 ? '99+' : String(n);
@@ -910,8 +914,8 @@ function caProfile(raw) {
 }
 
 /** Which view to open with: a popped-out terminal window or a session link is a terminal on purpose. */
-function caInitialView({ stored, solo, hasSessionLink }) {
-  if (solo || hasSessionLink) return 'debug';
+function caInitialView({ stored, solo, hasSessionLink, legacy }) {
+  if (legacy || solo || hasSessionLink) return 'debug';
   return stored === 'debug' ? 'debug' : 'chat';
 }
 
@@ -959,7 +963,22 @@ const CA_ICONS = {
   invite: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M19 8v6M22 11h-6"/>',
   gearsmall: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h0a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h0a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>',
   chevron: '<path d="m6 9 6 6 6-6"/>',
+  embassy: '<path d="M3 10h18L12 4 3 10ZM5 10v10m5-10v10m4-10v10m5-10v10M2 20h20"/>',
+  calendar: '<rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/>',
+  gauge: '<path d="M12 14l4-4"/><path d="M3.34 19a10 10 0 1 1 17.32 0"/>',
 };
+
+/** The Board is pinned above the channel list, shown in the main pane. */
+const CA_PAGES = {
+  board: { label: 'Board', icon: 'calendar', path: '/board' },
+  embassies: { label: 'Embassies', icon: 'embassy', path: null, nav: false },
+};
+
+/** Which supported page a URL fragment asks for, or null. */
+function caPageFromHash(hash) {
+  const key = String(hash || '').replace(/^#/, '');
+  return Object.hasOwn(CA_PAGES, key) ? key : null;
+}
 
 /* ───────────────────────── the app ───────────────────────── */
 
@@ -970,6 +989,9 @@ class ReverieChatApp {
     this.app = app;
     this.doc = doc;
     this.view = 'chat';
+    /** The Board page shown in place of the conversation, or null. */
+    this.embed = null;
+    this._embedRoom = null;
     // The rail follows the open room until the user picks a workspace by hand.
     this.workspace = 'home';
     this._wsPinned = false;
@@ -1097,6 +1119,7 @@ class ReverieChatApp {
         stored: caRead('session', 'reverie:view', ''),
         solo: !!this.app.isSoloWindow || chosen === 'debug',
         hasSessionLink: !!this.app._urlSessionId,
+        legacy: html.hasAttribute('data-reverie-legacy'),
       }),
       { initial: true }
     );
@@ -1253,14 +1276,20 @@ class ReverieChatApp {
     }
   }
 
-  /** The explicit way into a terminal: that agent's, or the terminal UI as it is. */
+  /** Open the chosen agent's terminal without the legacy navigation. */
   showDebug(sessionId) {
-    this.setView('debug');
-    if (sessionId && this.app.sessions?.has?.(sessionId)) {
-      this.app.selectSession(sessionId);
-    } else if (sessionId) {
+    if (sessionId && !this.app.sessions?.has?.(sessionId)) {
       this.toast('That agent has no open terminal session', 'error');
+      return;
     }
+    const target = sessionId || this.app.activeSessionId;
+    if (this.app._tileGrid?.open) {
+      this.app.closeTileGrid({ keepStored: true, reselect: false, animate: false });
+      this.app.activeSessionId = null;
+    }
+    this.app.closeSplitPane?.({ skipPrimaryResize: true });
+    this.setView('debug');
+    if (target) this.app.selectSession(target);
   }
 
   showChat() {
@@ -1271,7 +1300,9 @@ class ReverieChatApp {
 
   ensureBackButton() {
     if (this.els.back?.isConnected) return;
-    const brand = this.doc.querySelector('.header-brand') || this.doc.body;
+    const brand = this.doc.documentElement.hasAttribute('data-reverie-legacy')
+      ? this.doc.querySelector('.header-brand') || this.doc.body
+      : this.doc.body;
     const back = this.button('ca-back', 'Back to chat', () => this.showChat(), { icon: 'back', text: 'Back to chat' });
     back.classList.add('ca-back');
     brand.prepend(back);
@@ -1310,7 +1341,7 @@ class ReverieChatApp {
     const headTitle = this.el('h1', 'ca-head-title');
     const headTopic = this.el('p', 'ca-head-topic');
     const spacer = this.el('span', 'ca-spacer');
-    const membersBtn = this.button('ca-icon-btn', 'Show member list', () => this.toggleMembers(), { icon: 'members' });
+    const membersBtn = this.button('ca-icon-btn ca-head-members', 'Show member list', () => this.toggleMembers(), { icon: 'members' });
     membersBtn.setAttribute('aria-pressed', String(this.membersOpen));
     // "Add people" sits right beside the channel name and is always visible (a touch screen has no hover to reveal the one in the sidebar row).
     const inviteBtn = this.button('ca-icon-btn ca-head-invite', 'Add people to this channel', () => this.room && this.openInviteDialog(this.room.id), { icon: 'invite' });
@@ -1319,7 +1350,7 @@ class ReverieChatApp {
     const pinsBtn = this.button('ca-icon-btn ca-head-pins', 'Pinned messages', () => this.room && this.openPinsDialog(this.room.id), { icon: 'pin' });
     pinsBtn.hidden = true;
     const phoneBtn = this.button('ca-icon-btn', 'Install app and notifications', () => window.ReverieMobile?.open(), { icon: 'phone' });
-    const bellBtn = this.button('ca-icon-btn', 'Notification settings', () => this.openNotifyMenu(bellBtn), { icon: 'bell' });
+    const bellBtn = this.button('ca-icon-btn ca-head-bell', 'Notification settings', () => this.openNotifyMenu(bellBtn), { icon: 'bell' });
     bellBtn.setAttribute('aria-haspopup', 'menu');
     head.append(navBtn, headTitle, inviteBtn, headTopic, spacer, pinsBtn, phoneBtn, bellBtn, membersBtn);
 
@@ -1338,7 +1369,7 @@ class ReverieChatApp {
 
     Object.assign(this.els, {
       rail, side, sideHead, sideTitle, sideScroll, user, main, head, headTitle, headTopic,
-      membersBtn, bellBtn, navBtn, inviteBtn, pinsBtn, chat, members, scrim, stats,
+      membersBtn, bellBtn, navBtn, inviteBtn, pinsBtn, chat, members, scrim, stats, body,
     });
 
     // Reuse the chat panel's feed, composer, mic, attachments and create form: it becomes the
@@ -1363,6 +1394,14 @@ class ReverieChatApp {
     this.app._chatEls.feed.addEventListener('scroll', () => this.markReadSoon(), { passive: true });
     this.renderAll();
     this.renderUser();
+    // Back and forward move between the conversation and Board; a #board link opens it.
+    this.doc.defaultView?.addEventListener('popstate', () => {
+      const kind = caPageFromHash(this.doc.defaultView.location.hash);
+      if (kind) this.openPage(kind, { push: false });
+      else this.closePage({ history: false });
+    });
+    const first = caPageFromHash(this.doc.defaultView?.location.hash);
+    if (first) this.openPage(first, { push: false });
   }
 
   /** Keep Tab and Shift+Tab inside a full-screen settings page. */
@@ -2119,6 +2158,107 @@ class ReverieChatApp {
     this.els.orgBtn?.focus();
   }
 
+  /* ── Board and Plans pages ── */
+
+  /** The Board and Plans entries pinned above the list: pages, not rooms, so they take no part in the sort or the reordering. */
+  pagesEl() {
+    const box = this.el('div', 'ca-pages');
+    for (const [kind, page] of Object.entries(CA_PAGES)) {
+      if (page.nav === false) continue; // Embassies has one home: its sidebar section.
+      const on = this.embed === kind;
+      const b = this.el('button', `ca-item ca-item--page${on ? ' is-active' : ''}`);
+      b.type = 'button';
+      b.dataset.key = `page:${kind}`;
+      b.setAttribute('aria-label', page.label);
+      if (on) b.setAttribute('aria-current', 'page');
+      const mark = this.el('span', 'ca-hash is-drawn');
+      mark.setAttribute('aria-hidden', 'true');
+      mark.append(this.icon(page.icon));
+      b.append(mark, this.el('span', 'ca-name', page.label));
+      b.addEventListener('click', () => this.openPage(kind));
+      box.append(b);
+    }
+    return box;
+  }
+
+  /** Show the console's own Board page in place of the conversation (the same page, in a frame). */
+  openPage(kind, { push = true } = {}) {
+    const page = CA_PAGES[kind];
+    if (!page) return;
+    this.embassy?.close();
+    if (this.orgOpen) this.closeOrg();
+    this.toggleDrawer(null);
+    const again = this.embed === kind;
+    this.embed = kind;
+    this._embedRoom = this.roomId;
+    let panel = this.els.page;
+    if (!panel) {
+      panel = this.el('section', 'ca-page');
+      panel.append(this.el('iframe', 'ca-page-frame'));
+      this.els.body.append(panel);
+      this.els.page = panel;
+    }
+    let frame = panel.querySelector('iframe');
+    if (kind === 'embassies') {
+      panel.replaceChildren(this.embassy.directoryEl());
+      panel.dataset.kind = kind;
+    } else {
+    if (!frame) { frame = this.el('iframe', 'ca-page-frame'); panel.replaceChildren(frame); }
+    frame.title = page.label;
+    if (panel.dataset.kind !== kind) {
+      panel.dataset.kind = kind;
+      frame.src = page.path;
+    } else if (again) {
+      try {
+        frame.contentWindow.location.reload();
+      } catch {
+        /* a frame that is not loaded yet has nothing to reload */
+      }
+    }
+    }
+    panel.hidden = false;
+    this.els.root.classList.add('is-page');
+    // The conversation stays where it was but is out of reach of the keyboard and screen readers while the page covers it.
+    this.els.chat.inert = true;
+    this.els.members.inert = true;
+    const win = this.doc.defaultView;
+    if (push && win && caPageFromHash(win.location.hash) !== kind) {
+      try {
+        win.history.pushState({ reveriePage: kind }, '', `#${kind}`);
+      } catch {
+        /* the address bar is a convenience */
+      }
+    }
+    this.renderSidebar();
+    this.renderHeader();
+  }
+
+  /** Back to the conversation. `history: 'replace'` also takes #board out of the address bar. */
+  closePage({ history = 'replace' } = {}) {
+    if (!this.embed) return;
+    this.embed = null;
+    this._embedRoom = null;
+    const panel = this.els.page;
+    if (panel) {
+      panel.hidden = true;
+      delete panel.dataset.kind;
+      const frame = panel.querySelector('iframe'); if (frame) frame.src = 'about:blank';
+    }
+    this.els.root.classList.remove('is-page');
+    this.els.chat.inert = false;
+    this.els.members.inert = false;
+    const win = this.doc.defaultView;
+    if (history === 'replace' && win && caPageFromHash(win.location.hash)) {
+      try {
+        win.history.replaceState(win.history.state, '', win.location.pathname + win.location.search);
+      } catch {
+        /* the address bar is a convenience */
+      }
+    }
+    this.renderSidebar();
+    this.renderHeader();
+  }
+
   orgTreeEl(tree) {
     const canMessage = (n) => this.serverFeatures.dms && n.sessionId && this.app.sessions?.has?.(n.sessionId);
     const walk = (node) => {
@@ -2168,6 +2308,12 @@ class ReverieChatApp {
 
   /* ── composer ── */
 
+  composerPlaceholder() {
+    if (this.embassy?.selected) return `Message #${this.embassy.connection()?.roomName || 'shared room'}`;
+    const room = this.room;
+    return !room || this.app._chatCreating ? 'Message' : caIsDm(room) ? `Message @${caRoomLabel(room)}` : `Message #${room.name}`;
+  }
+
   /**
    * Discord's message box: "+" (upload) on the left, then the box, then dim GIF / sticker icons and the emoji
    * button. There is no "To" menu: the channel decides who reads a message. The mic exists in voice channels only.
@@ -2207,8 +2353,7 @@ class ReverieChatApp {
     send.setAttribute('aria-label', 'Send message');
     this.syncComposer = () => {
       sync();
-      const room = this.room;
-      input.placeholder = !room || this.app._chatCreating ? 'Message' : caIsDm(room) ? `Message @${caRoomLabel(room)}` : `Message #${room.name}`;
+      input.placeholder = this.composerPlaceholder();
     };
     this.syncComposer();
   }
@@ -2566,7 +2711,7 @@ class ReverieChatApp {
     const bar = this.els.typing;
     if (!bar) return;
     const names = [...(this.turns?.values() || [])]
-      .filter((t) => t.roomId === this.roomId)
+      .filter((t) => !this.embassy?.selected && t.roomId === this.roomId)
       .map((t) => this.room?.members?.find((m) => m.sessionId === t.sessionId)?.name)
       .filter(Boolean);
     bar.replaceChildren();
@@ -3203,6 +3348,11 @@ class ReverieChatApp {
 
   renderAll() {
     if (!this.built) return;
+    // Another room opened (a click, a link, a notification): leave the page for the conversation.
+    if (this.embed) {
+      if (this._embedRoom == null) this._embedRoom = this.roomId; // a page opened by a link before any room had loaded
+      else if (this.roomId !== this._embedRoom) this.closePage();
+    }
     if (!this.app._chatCreating) this._pendingPlacement = null;
     this.renderReplyBar();
     this.syncComposer?.();
@@ -3222,7 +3372,7 @@ class ReverieChatApp {
     this.els.root.classList.toggle('ca-members-open', this.membersOpen);
     this.els.root.dataset.drawer = this.drawer || '';
     this.els.membersBtn.setAttribute('aria-pressed', String(this.membersOpen));
-    const placeholder = this.room ? `Message ${this.room.kind === 'dm' ? '@' : '#'}${caRoomLabel(this.room)}` : 'Message';
+    const placeholder = this.composerPlaceholder();
     const input = this.app._chatEls?.input;
     if (input) input.placeholder = placeholder;
     this.els.root.dataset.unread = features.unread && total.unread ? (total.mentions ? 'mention' : 'unread') : '';
@@ -3450,6 +3600,7 @@ class ReverieChatApp {
     }
     this.keepFocus(sideScroll, () => {
       sideScroll.replaceChildren();
+      sideScroll.append(this.pagesEl());
       if (home) this.renderDmList(sideScroll);
       else this.renderChannelList(sideScroll);
     });
@@ -3613,7 +3764,7 @@ class ReverieChatApp {
   }
 
   renderDmList(into) {
-    const items = caDmItems(this.viewRooms, this.roomId, this.closedDms, caEmployeeBySession(this.company));
+    const items = caDmItems(this.viewRooms, this.embed ? null : this.roomId, this.closedDms, caEmployeeBySession(this.company));
     if (!items.length) {
       into.append(this.el('p', 'ca-empty-note', this.serverFeatures.dms
         ? 'No direct messages yet. Start one with the + above, or open an agent in the member list.'
@@ -3636,7 +3787,7 @@ class ReverieChatApp {
     const shown = this.viewRooms.filter((r) => !(hide && r.muted && r.id !== this.roomId));
     const draft = this._order;
     const source = draft ? shown.map((r) => (draft.includes(r.id) ? { ...r, position: draft.indexOf(r.id) + 1 } : r)) : shown;
-    const items = caChannelItems(source, this.workspace === 'home' ? '' : this.workspace, this.collapsed, this.roomId);
+    const items = caChannelItems(source, this.workspace === 'home' ? '' : this.workspace, this.collapsed, this.embed || this.embassy?.selected ? null : this.roomId);
     if (!items.length) {
       into.append(this.el('p', 'ca-empty-note', 'No channels here yet. Use + to create one.'));
       return;
@@ -3697,6 +3848,7 @@ class ReverieChatApp {
   async selectRoom(id) {
     this.embassy?.close();
     if (this.orgOpen) this.closeOrg();
+    this.closePage();
     this.reopenDm(id);
     this.app._chatCreating = false;
     this.toggleDrawer(null);
@@ -3948,14 +4100,12 @@ class ReverieChatApp {
     approvals.append(this.el('span', 'ca-count ca-approvals-count', '0'));
     this.els.approvals = approvals;
     user.append(approvals);
-    // Org chart, Debug terminals and settings sit together at the right of the profile bar.
+    // Org chart and settings sit together at the right of the profile bar.
     const org = this.button('ca-icon-btn ca-user-org', 'Org chart', () => this.openOrg(), { icon: 'org' });
     org.dataset.key = 'org';
     org.setAttribute('aria-pressed', String(!!this.orgOpen));
     this.els.orgBtn = org;
-    const debug = this.button('ca-icon-btn ca-user-debug', 'Debug terminals', () => this.showDebug(), { icon: 'terminal' });
-    debug.dataset.key = 'debug';
-    user.append(org, debug);
+    user.append(org);
     user.append(this.button('ca-icon-btn', 'App settings', () => this.app.openAppSettings?.(), { icon: 'gear' }));
     this.renderConnection();
     this.renderApprovals();
@@ -4000,6 +4150,23 @@ class ReverieChatApp {
     const room = this.room;
     headTitle.replaceChildren();
     headTopic.textContent = '';
+    if (this.embassy?.selected) {
+      headTitle.append(this.el('span', 'ca-hash', '#'), this.el('span', 'ca-head-name', this.embassy.connection()?.roomName || 'Shared room'));
+      headTopic.textContent = 'Embassy · UNTRUSTED EXTERNAL';
+      this.els.pinsBtn.hidden = true; this.els.inviteBtn.hidden = true; this.els.bellBtn.hidden = true;
+      return;
+    }
+    this.els.bellBtn.hidden = false;
+    if (this.embed) {
+      const page = CA_PAGES[this.embed];
+      const mark = this.el('span', 'ca-hash is-drawn');
+      mark.setAttribute('aria-hidden', 'true');
+      mark.append(this.icon(page.icon));
+      headTitle.append(mark, this.el('span', 'ca-head-name', page.label));
+      if (this.els.pinsBtn) this.els.pinsBtn.hidden = true;
+      if (this.els.inviteBtn) this.els.inviteBtn.hidden = true;
+      return;
+    }
     // Add people: for a channel that is open (not a direct message, not the new-channel form).
     if (this.els.pinsBtn) {
       const pinned = (room?.messages || []).filter((m) => m.pinned && !m.deleted).length;
@@ -4044,6 +4211,10 @@ class ReverieChatApp {
     const box = this.els.members;
     this.keepFocus(box, () => {
       box.replaceChildren();
+      if (this.embassy?.selected) {
+        box.append(this.el('h3', 'ca-members-head', 'Shared with other companies'), this.el('p', 'ca-hint', 'External identities are labels, not local employees.'));
+        return;
+      }
       const room = this.room;
       if (!room || this.app._chatCreating) return;
       for (const section of caMemberSections(room.members)) {
@@ -4075,29 +4246,150 @@ class ReverieChatApp {
     if (sub) text.append(this.el('span', 'ca-member-sub', sub));
     b.append(text);
     b.addEventListener('click', () => this.openProfile(m, b));
+    b.addEventListener('contextmenu', (ev) => {
+      ev.preventDefault();
+      const r = b.getBoundingClientRect();
+      this.openMemberMenu(m, b, { x: ev.clientX || r.left, y: ev.clientY || r.bottom });
+    });
+    b.addEventListener('keydown', (ev) => {
+      if (ev.key !== 'ContextMenu' && !(ev.shiftKey && ev.key === 'F10')) return;
+      ev.preventDefault();
+      this.openMemberMenu(m, b);
+    });
     return b;
+  }
+
+  openMemberMenu(m, anchor, at = anchor) {
+    this.closeProfile();
+    const manage = this.canManageMembers(this.room);
+    const appoint = this.canAppointLead(this.room);
+    const own = this.app._chatSelf === m.sessionId;
+    const remove = manage || own;
+    const entries = [
+      { label: 'Profile', run: () => this.openProfile(m, anchor) },
+      { label: 'Mention', run: () => {
+        const input = this.app._chatEls?.input;
+        if (!input) return;
+        const start = input.selectionStart ?? input.value.length;
+        const end = input.selectionEnd ?? start;
+        const prefix = start && !/\s$/.test(input.value.slice(0, start)) ? ' ' : '';
+        const text = `${prefix}@${m.name} `;
+        input.setRangeText(text, start, end, 'end');
+        input.focus();
+        input.dispatchEvent(new this.doc.defaultView.Event('input', { bubbles: true }));
+      } },
+    ];
+    if (this.serverFeatures.dms && !caIsDm(this.room)) {
+      entries.push({ label: 'Message', run: () => this.startDm(m.sessionId) });
+    }
+    if (!caIsDm(this.room)) {
+      entries.push(
+        { sep: true },
+        { label: m.role === 'coordinator' ? 'Remove lead' : 'Make lead', disabled: !appoint,
+          tip: appoint ? 'Change the room coordinator seat' : '',
+          reason: !appoint ? 'Only the owner or a server Admin can change the channel lead' : '',
+          run: () => this.app._appointChatCoordinator(m.role === 'coordinator' ? null : m.sessionId) },
+        { label: 'Remove from channel', danger: true, disabled: !remove,
+          reason: !remove ? 'Only the user or channel lead can remove another member' : '',
+          run: () => this.app._removeChatMember(m) },
+      );
+    }
+    entries.push({ sep: true });
+    if (this.app.sessions?.has?.(m.sessionId)) {
+      entries.push({ label: 'Debug terminal', run: () => this.showDebug(m.sessionId) });
+    }
+    if (!caIsDm(this.room)) {
+      entries.push(
+        { label: 'Edit status', disabled: !!this.app._chatSelf && !own,
+          reason: this.app._chatSelf && !own ? 'Only the user or this member can edit its status' : '',
+          run: () => this.editStatus(m) },
+        { label: 'Re-brief', disabled: !manage && !own,
+          reason: !manage && !own ? 'Only the user or channel lead can re-brief another member' : '',
+          run: () => this.app._rebriefChatMember(m.sessionId) },
+      );
+    }
+    entries.push({ sep: true }, { label: 'Copy session id', run: async () => {
+      try {
+        await this.doc.defaultView.navigator.clipboard.writeText(m.sessionId);
+        this.toast('Session id copied', 'info');
+      } catch {
+        this.toast('Could not copy session id', 'error');
+      }
+    } });
+    this.openMenu(entries, { at, focus: anchor, label: `${m.name} actions`, className: 'ca-member-menu' });
+  }
+
+  canManageMembers(room = this.room) {
+    if (!room || caIsDm(room)) return false;
+    const self = this.app._chatSelf;
+    return !self || !!room.members.some((m) => m.sessionId === self && m.role === 'coordinator');
+  }
+
+  canAppointLead(room = this.room) {
+    return !!room && !caIsDm(room) && !this.app._chatSelf;
   }
 
   addMemberRow() {
     const wrap = this.el('div', 'ca-add');
-    const candidates = this.app._chatCandidateSessions?.(new Set(this.room.members.map((m) => m.sessionId))) || [];
-    if (!candidates.length) return wrap;
-    const form = this.el('form', 'ca-add-form');
-    const pick = this.el('select', 'ca-field');
-    pick.setAttribute('aria-label', 'Add an agent to this room');
-    pick.append(new Option('Add an agent…', ''));
-    for (const s of candidates) pick.append(new Option(`${s.name}${s.mode ? ` (${s.mode})` : ''}`, s.id));
-    form.append(pick);
-    pick.addEventListener('change', async () => {
-      if (!pick.value) return;
-      const res = await this.app._chatApi(`/api/chatrooms/${encodeURIComponent(this.roomId)}/members`, {
-        method: 'POST',
-        body: { sessionId: pick.value },
-      });
-      if (!res.ok) this.toast(`Chat: ${res.error}`, 'error');
-    });
-    wrap.append(form);
+    if (!this.canManageMembers()) return wrap;
+    const add = this.button('ca-icon-btn ca-add-button', 'Add an agent', () => this.openMemberPicker(add), { icon: 'plus' });
+    add.setAttribute('aria-haspopup', 'menu');
+    wrap.append(add);
     return wrap;
+  }
+
+  openMemberPicker(anchor) {
+    if (!this.canManageMembers()) return;
+    this.closeProfile();
+    const roomId = this.roomId;
+    const inRoom = new Set(this.room.members.map((m) => m.sessionId));
+    const postOnly = new Set((this.rooms || []).flatMap((r) => r.members || []).filter((m) => m.postOnly).map((m) => m.sessionId));
+    const candidates = (this.app._chatCandidateSessions?.(inRoom) || [])
+      .filter((s) => s.mode !== 'shell' && !postOnly.has(s.id) && !this.app.sessions?.get(s.id)?.postOnly);
+    const entries = candidates.map((s) => ({
+      label: s.name, hint: s.mode || '', avatar: s,
+      run: async () => {
+        const res = await this.app._chatApi(`/api/chatrooms/${encodeURIComponent(roomId)}/members`, {
+          method: 'POST', body: { sessionId: s.id },
+        });
+        if (!res.ok) return this.toast(`Chat: ${res.error}`, 'error');
+        if (this.roomId === roomId) {
+          await this.app._loadChatRoom(roomId, { quiet: true });
+          this.els.members.querySelector('.ca-add-button')?.focus();
+        }
+      },
+    }));
+    const menu = this.openMenu(entries, {
+      at: anchor, focus: anchor, label: 'Add an agent', className: 'ca-member-picker', restoreFocus: true,
+    });
+    const empty = this.el('p', 'ca-hint ca-member-empty', 'No other agents to add');
+    empty.setAttribute('role', 'status');
+    empty.hidden = !!candidates.length;
+    menu.append(empty);
+    if (candidates.length > 8) {
+      const search = this.el('input', 'ca-field ca-member-search');
+      search.type = 'search';
+      search.placeholder = 'Search agents';
+      search.setAttribute('aria-label', 'Search agents');
+      search.addEventListener('input', () => {
+        const query = search.value.trim().toLowerCase();
+        const rows = [...menu.querySelectorAll('button')];
+        rows.forEach((b, i) => { b.hidden = !`${candidates[i].name} ${candidates[i].mode || ''}`.toLowerCase().includes(query); });
+        empty.hidden = rows.some((b) => !b.hidden);
+        empty.textContent = 'No agents match';
+      });
+      menu.prepend(search);
+      search.focus();
+    }
+    this.fitMemberMenu(menu);
+  }
+
+  fitMemberMenu(menu) {
+    const w = this.doc.defaultView?.innerWidth || 1024;
+    const h = this.doc.defaultView?.innerHeight || 768;
+    const r = menu.getBoundingClientRect();
+    menu.style.top = `${Math.max(8, Math.min(r.top, h - r.height - 8))}px`;
+    menu.style.left = `${Math.max(8, Math.min(r.left, w - r.width - 8))}px`;
   }
 
   closeProfile() {
@@ -4109,6 +4401,7 @@ class ReverieChatApp {
   }
 
   openProfile(m, anchor) {
+    this.closeMenus();
     this.closeProfile();
     const card = this.el('div', 'ca-profile');
     card.setAttribute('role', 'dialog');
@@ -4142,12 +4435,13 @@ class ReverieChatApp {
     card.append(local, full);
     const section = (title, rows) => {
       if (!rows.length) return;
-      local.append(this.el('h3', 'ca-profile-section', title));
+      const group = this.profileSection(title);
       for (const [k, v] of rows) {
         const row = this.el('div', 'ca-kv');
         row.append(this.el('span', 'ca-k', k), this.el('span', 'ca-v', v));
-        local.append(row);
+        group.append(row);
       }
+      local.append(group);
     };
     section('Runtime', facts.runtime);
     section('Usage', facts.usage);
@@ -4158,24 +4452,27 @@ class ReverieChatApp {
       ]);
     }
     const actions = this.el('div', 'ca-profile-actions');
-    const act = (label, fn, primary, tip) => {
+    const manage = this.canManageMembers(this.room);
+    const own = this.app._chatSelf === m.sessionId;
+    const act = (label, fn, primary, tip, reason = '') => {
       const item = this.el('div', 'ca-act-item');
       const b = this.el('button', `ca-btn${primary ? ' is-primary' : ''}`, label);
       b.type = 'button';
+      b.disabled = !!reason;
       b.addEventListener('click', () => {
         this.closeProfile();
         fn();
       });
       item.append(b);
-      if (tip) this.describeButton(item, b, tip);
+      if (tip) this.describeButton(item, b, reason || tip);
       actions.append(item);
     };
     if (this.serverFeatures.dms && !caIsDm(this.room)) act('Message', () => this.startDm(m.sessionId), true, 'Start a private chat with this agent');
     if (this.app.sessions?.has?.(m.sessionId)) act('Debug terminal', () => this.showDebug(m.sessionId), false, "Open this agent's live terminal");
     if (!caIsDm(this.room)) {
-      act('Edit status', () => this.editStatus(m), false, 'Change the goal/progress shown for this agent');
-      if (m.role !== 'coordinator') act('Make admin', () => this.app._appointChatCoordinator(m.sessionId), false, 'Let this agent coordinate the channel');
-      act('Re-brief', () => this.app._rebriefChatMember(m.sessionId), false, 'Re-send this agent the room intro and rules');
+      act('Edit status', () => this.editStatus(m), false, 'Change the goal/progress shown for this agent', this.app._chatSelf && !own ? 'Only the user or this member can edit its status' : '');
+      if (m.role !== 'coordinator') act('Make lead', () => this.app._appointChatCoordinator(m.sessionId), false, 'Change the room coordinator seat', !this.canAppointLead(this.room) ? 'Only the owner or a server Admin can change the channel lead' : '');
+      act('Re-brief', () => this.app._rebriefChatMember(m.sessionId), false, 'Re-send this agent the room intro and rules', !manage && !own ? 'Only the user or channel lead can re-brief another member' : '');
       if (this.serverFeatures.notify && !m.postOnly) {
         act(m.notify === 'mentions' ? 'Wake on everything' : 'Wake on @mentions only', () => this.setMemberNotify(m, m.notify === 'mentions' ? 'all' : 'mentions'), false, m.notify === 'mentions' ? 'Wake this agent on every message again' : 'Only wake this agent when @named, replied to, or by you');
       }
@@ -4183,7 +4480,7 @@ class ReverieChatApp {
       if (this.serverFeatures.replace && !m.postOnly && m.alive === false) {
         act('Move to new session', () => this.openReplaceDialog(m), false, "Give this offline agent's place in every room to its new session");
       }
-      act('Remove from channel', () => this.app._removeChatMember(m), false, 'Take this agent out of this channel');
+      act('Remove from channel', () => this.app._removeChatMember(m), false, 'Take this agent out of this channel', !manage && !own ? 'Only the user or channel lead can remove another member' : '');
     }
     // The owner can give any agent a picture (the server keeps PNG, JPEG, GIF or WebP up to 256 KB).
     const pic = this.el('input');
@@ -4222,8 +4519,8 @@ class ReverieChatApp {
     const uploadItem = this.el('div', 'ca-act-item');
     uploadItem.append(upload);
     this.describeButton(uploadItem, upload, 'Give this agent a picture (up to 256 KB)');
-    actions.append(uploadItem, pic);
-    if (this.profileAvatar(m.sessionId, m)) {
+    if (!this.app._chatSelf) actions.append(uploadItem, pic);
+    if (!this.app._chatSelf && this.profileAvatar(m.sessionId, m)) {
       const clear = this.el('button', 'ca-btn', 'Remove image');
       clear.type = 'button';
       clear.addEventListener('click', () => avatarCall('DELETE'));
@@ -4259,6 +4556,12 @@ class ReverieChatApp {
     item.append(tip);
   }
 
+  profileSection(title) {
+    const group = this.el('details', 'ca-profile-group');
+    group.append(this.el('summary', 'ca-profile-section', title));
+    return group;
+  }
+
   /** Fetch the runtime's read-only profile for an agent and show it in its card (the local facts stay if it fails). */
   async loadAgentProfile(m, card, local, full) {
     full.replaceChildren(this.el('p', 'ca-hint', 'Loading the full profile\u2026'));
@@ -4271,22 +4574,28 @@ class ReverieChatApp {
     const profile = caAgentProfile(res.data);
     full.replaceChildren();
     if (profile.persona) {
-      full.append(this.el('h3', 'ca-profile-section', 'About'));
+      const about = this.profileSection('About');
       const head = [profile.persona.name, profile.persona.role, profile.persona.kind].filter(Boolean).join(' \u00B7 ');
-      if (head) full.append(this.el('p', 'ca-persona-head', head));
-      if (profile.persona.text) full.append(this.el('p', 'ca-persona', profile.persona.text));
+      if (head) about.append(this.el('p', 'ca-persona-head', head));
+      if (profile.persona.text) about.append(this.el('p', 'ca-persona', profile.persona.text));
+      full.append(about);
     } else if (profile.personaError) {
       full.append(this.el('p', 'ca-hint', `About: ${profile.personaError}`));
     }
     for (const sec of profile.sections) {
-      full.append(this.el('h3', 'ca-profile-section', sec.title));
+      const group = this.profileSection(sec.title === 'Channels' ? `Channels · in ${sec.rows.length} channels` : sec.title);
       for (const [k, v] of sec.rows) {
         const row = this.el('div', 'ca-kv');
         row.append(this.el('span', 'ca-k', k), this.el('span', 'ca-v', v));
-        full.append(row);
+        group.append(row);
       }
+      full.append(group);
     }
-    if (profile.switchInfo) full.append(this.switchEl(profile.switchInfo));
+    if (profile.switchInfo && !this.app._chatSelf) {
+      const group = this.profileSection('Backend switch');
+      group.append(this.switchEl(profile.switchInfo));
+      full.append(group);
+    }
     if (profile.sections.length || profile.persona || profile.switchInfo) local.remove();
   }
 
@@ -4323,7 +4632,9 @@ class ReverieChatApp {
       // A phone has no room beside the row: the card is a sheet at the bottom of the screen, as wide as the screen (CSS).
       card.classList.add('ca-profile--sheet');
     } else {
-      card.style.top = `${Math.max(8, Math.min(a.top, h - 340))}px`;
+      const top = Math.max(8, Math.min(a.top, h - card.getBoundingClientRect().height - 8));
+      card.style.top = `${top}px`;
+      card.style.maxHeight = `${h - top - 8}px`;
       // Left of the row, but never past the left edge of the window (a narrow window used to put it half off-screen).
       card.style.right = `${Math.min(Math.max(8, w - a.left + 8), Math.max(8, w - CA_CARD_WIDTH - 8))}px`;
     }
@@ -4332,6 +4643,7 @@ class ReverieChatApp {
       card.style.right = 'auto';
       card.style.left = `${Math.max(8, a.left)}px`;
       card.style.bottom = `${Math.max(8, h - a.top + 8)}px`;
+      card.style.maxHeight = `${Math.max(0, a.top - 16)}px`;
     }
     this.els.profile = card;
     this._profileDismiss = (e) => {
@@ -4345,7 +4657,8 @@ class ReverieChatApp {
       }
       if (e.key !== 'Tab') return;
       // The card is modal in spirit: Tab and Shift+Tab stay inside it until it is closed.
-      const items = [...card.querySelectorAll('button')].filter((b) => !b.disabled);
+      const items = [...card.querySelectorAll('button, summary, select, input:not([type="hidden"]), textarea, a[href]')]
+        .filter((b) => !b.disabled && !b.hidden && !b.closest('details:not([open]) > :not(summary)'));
       if (!items.length) return;
       const first = items[0];
       const last = items[items.length - 1];
@@ -4584,7 +4897,7 @@ class ReverieChatApp {
    * shown beside the entry. Arrow keys move, ArrowRight opens a sub-list, ArrowLeft/Escape close it, Escape closes the
    * menu and gives focus back to `focus`. `at` is { x, y } or an element to hang under (right-aligned when `right`).
    */
-  openMenu(entries, { at, focus, right = false, above = false, label = 'Menu', className = '' } = {}) {
+  openMenu(entries, { at, focus, right = false, above = false, label = 'Menu', className = '', restoreFocus = false } = {}) {
     this.closeMenus();
     const restore = focus || this.doc.activeElement;
     const open = [];
@@ -4639,12 +4952,22 @@ class ReverieChatApp {
         b.setAttribute('role', e.checked === undefined ? 'menuitem' : e.checkbox ? 'menuitemcheckbox' : 'menuitemradio');
         if (e.checked !== undefined) b.setAttribute('aria-checked', String(!!e.checked));
         b.disabled = !!e.disabled;
+        if (e.tip) b.title = e.tip;
+        if (e.avatar) {
+          const avatar = this.app._chatAvatar(e.avatar.id, e.avatar.name, { size: 'sm' });
+          avatar.setAttribute('aria-hidden', 'true');
+          b.append(avatar);
+        }
         if (e.glyph) {
           const g = this.el('span', 'ca-menu-glyph', e.glyph);
           g.setAttribute('aria-hidden', 'true');
           b.append(g);
         }
         const text = this.el('span', 'ca-menu-label', e.label);
+        if (e.disabled && e.reason) {
+          b.title = [e.reason, e.tip].filter(Boolean).join('; ');
+          text.append(this.el('span', 'ca-menu-reason', e.reason));
+        }
         b.append(text);
         if (e.hint) b.append(this.el('span', 'ca-menu-hint', e.hint));
         if (e.sub) b.append(this.el('span', 'ca-menu-arrow', '\u203A'));
@@ -4659,6 +4982,7 @@ class ReverieChatApp {
       }
       this.doc.body.append(menu);
       place(menu, anchor, side);
+      if (className === 'ca-member-menu' || className === 'ca-member-picker') this.fitMemberMenu(menu);
       open.push(menu);
       return menu;
     };
@@ -4672,15 +4996,18 @@ class ReverieChatApp {
       this.doc.removeEventListener('pointerdown', onPointer, true);
       this.doc.removeEventListener('keydown', onKey, true);
       this._openMenuClose = null;
-      if (refocus) restore?.focus?.();
+      if (refocus || restoreFocus) restore?.focus?.();
     };
     const onPointer = (ev) => {
-      if (!open.some((m) => m.contains(ev.target))) closeAll(false);
+      if (!open.some((m) => m.contains(ev.target))) {
+        if (restoreFocus) ev.preventDefault();
+        closeAll(false);
+      }
     };
     const onKey = (ev) => {
       const menu = open.at(-1);
       if (!menu) return;
-      const items = [...menu.querySelectorAll('button:not(:disabled)')];
+      const items = [...menu.querySelectorAll('button:not(:disabled)')].filter((b) => !b.hidden);
       const at = items.indexOf(this.doc.activeElement);
       if (ev.key === 'Escape') {
         ev.preventDefault();
@@ -4692,7 +5019,9 @@ class ReverieChatApp {
         } else closeAll(true);
       } else if (ev.key === 'ArrowDown' || ev.key === 'ArrowUp') {
         ev.preventDefault();
-        items[(at + (ev.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length]?.focus();
+        const next = at < 0 ? (ev.key === 'ArrowDown' ? 0 : items.length - 1)
+          : (at + (ev.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length;
+        items[next]?.focus();
       } else if (ev.key === 'Home' || ev.key === 'End') {
         ev.preventDefault();
         items[ev.key === 'Home' ? 0 : items.length - 1]?.focus();
@@ -4704,6 +5033,9 @@ class ReverieChatApp {
         ev.stopPropagation();
         open.pop().remove();
         open.at(-1).querySelector('[aria-haspopup]')?.focus();
+      } else if (ev.key === 'Enter' || (ev.key === ' ' && !this.doc.activeElement?.matches('input'))) {
+        ev.preventDefault();
+        items[at < 0 ? 0 : at]?.click();
       } else if (ev.key === 'Tab') {
         closeAll(false);
       }
@@ -5285,7 +5617,7 @@ class ReverieChatApp {
     // One tab stop per message; its toolbar shows (and is reachable) while it has focus.
     el.tabIndex = 0;
     // Right-click, or a long press on a phone, opens the message's actions (a bottom sheet on a phone).
-    if (!m.deleted) this.wireMessageMenu(el, m);
+    if (!m.deleted && !m.external) this.wireMessageMenu(el, m);
     el.setAttribute('role', 'article');
     const gutter = this.el('div', 'ca-msg-gutter');
     const name = mine ? this.userName() : m.from.name;
@@ -5308,6 +5640,7 @@ class ReverieChatApp {
       const time = this.el('time', 'ca-time', new Date(m.at).toLocaleString([], { month: 'numeric', day: 'numeric', year: '2-digit', hour: 'numeric', minute: '2-digit' }));
       time.dateTime = new Date(m.at).toISOString();
       meta.append(from, time);
+      if (m.external) meta.append(this.el('span', m.own ? 'ca-tag eg-own' : 'ca-tag eg-trust', m.own ? 'Sent from this console' : 'UNTRUSTED EXTERNAL'));
       if (direct) meta.append(this.el('span', 'ca-msg-to', `→ ${m.to.map((r) => this.app._chatNameOf(r)).join(', ')}`));
       if (m.voice) meta.prepend(this.el('span', 'ca-voice-mark', '\u{1F3A4}'));
       body.append(meta);
@@ -5316,6 +5649,7 @@ class ReverieChatApp {
     else if (m.poll) body.append(this.pollEl(m));
     else if (m.text) {
       const text = this.app._chatTextEl ? this.app._chatTextEl(m.text) : this.el('div', 'chatroom-msg-text', m.text);
+      if (m.external) text.classList.add('eg-text');
       this.decorateMentions(text);
       if (m.edited) {
         const mark = this.el('span', 'ca-edited', '(edited)');
@@ -5324,9 +5658,9 @@ class ReverieChatApp {
       }
       body.append(text);
     }
-    const files = this.app._chatAttachmentsEl?.(m);
+    const files = !m.external && this.app._chatAttachmentsEl?.(m);
     if (files) body.append(files);
-    if (this.app._chatReactionsEl) body.append(this.app._chatReactionsEl(m));
+    if (!m.external && this.app._chatReactionsEl) body.append(this.app._chatReactionsEl(m));
     if (m.audioUrl) {
       const play = this.el('button', 'ca-btn', '▶ Play');
       play.type = 'button';
@@ -5334,7 +5668,7 @@ class ReverieChatApp {
       body.append(play);
     }
     el.append(gutter, body);
-    if (this.serverFeatures.replies) {
+    if (!m.external && this.serverFeatures.replies) {
       el.append(this.actionsEl(m));
     }
     return el;
@@ -5345,7 +5679,9 @@ class ReverieChatApp {
    * reader within a thumb's width of the bottom stays pinned to it, so they keep following new messages.
    */
   renderFeed({ keepScroll = false } = {}) {
+    if (this.embassy?.selected) return this.embassy.renderPosts();
     const feed = this.app._chatEls.feed;
+    this.app._watchChatFeedTop?.(feed);
     if (!feed._caStick) {
       feed._caStick = true;
       feed.addEventListener('scroll', () => (this._feedStick = feed.scrollHeight - feed.scrollTop - feed.clientHeight < 60), { passive: true });
@@ -5405,7 +5741,7 @@ class ReverieChatApp {
     if (room && caIsDm(room) && data.message?.from?.kind !== 'user') this.reopenDm(room.id);
     // A member that posts in the room it was woken from is done there (a quick answer ends "is typing").
     if (data.message?.from?.kind === 'agent' && this.dropTurn(`${data.roomId}|${data.message.from.sessionId}`)) this.renderTyping();
-    const open = this.active && data.roomId === this.roomId && this.room;
+    const open = !this.embassy?.selected && this.active && data.roomId === this.roomId && this.room;
     if (open) {
       if (this.room.messages.some((m) => m.id === data.message.id)) return true;
       this.room.messages.push(data.message);
@@ -5484,12 +5820,14 @@ class ReverieChatApp {
   }
 
   markReadSoon() {
+    if (this.embassy?.selected) { this.embassy.markRead(); return; }
     clearTimeout(this._readTimer);
     this._readTimer = setTimeout(() => this.markRead(), 250);
   }
 
   /** The user can see the newest message of the open room: move the server-side read cursor. */
   async markRead() {
+    if (this.embassy?.selected) { this.embassy.markRead(); return; }
     if (!this.active || !this.serverFeatures.unread) return;
     const entry = this.rooms.find((r) => r.id === this.roomId);
     const room = this.room;
@@ -5530,6 +5868,7 @@ function caInstall(proto) {
     _fitChatToKeyboard: proto._fitChatToKeyboard,
     _renderChatBadge: proto._renderChatBadge,
     _sendChatMessage: proto._sendChatMessage,
+    _attachChatFiles: proto._attachChatFiles,
     _chatApi: proto._chatApi,
     setPendingHook: proto.setPendingHook,
     clearPendingHooks: proto.clearPendingHooks,
@@ -5616,6 +5955,7 @@ function caInstall(proto) {
     },
     // Voice belongs to voice channels: the voice member is the room's, and the mic shows nowhere else.
     _chatVoiceTarget() {
+      if (this._chatApp?.embassy?.selected) return null;
       if (!this._chatApp?.built) return original._chatVoiceTarget.call(this);
       return this._chatRoom?.members?.find((m) => m.voice === true) || null;
     },
@@ -5662,9 +6002,14 @@ function caInstall(proto) {
       return result;
     },
     async _sendChatMessage(options) {
+      if (this._chatApp?.embassy?.selected) return this._chatApp.embassy.publish();
       const result = await original._sendChatMessage.call(this, options);
       this._chatApp?.fitInput?.();
       return result;
+    },
+    _attachChatFiles(files) {
+      if (this._chatApp?.embassy?.selected) { this.showToast?.('Embassy attachments are not available yet', 'info'); return; }
+      return original._attachChatFiles?.call(this, files);
     },
     _renderChatBadge() {
       original._renderChatBadge?.call(this);
@@ -5686,8 +6031,8 @@ function caInstall(proto) {
         this._chatApp.renderChrome();
       }
     },
-    _renderChatFeed() {
-      if (this._chatApp?.built) return this._chatApp.renderFeed();
+    _renderChatFeed(opts) {
+      if (this._chatApp?.built) return this._chatApp.renderFeed(opts);
       return undefined;
     },
     _chatMessageEl(m) {
@@ -5702,6 +6047,95 @@ function caInstall(proto) {
 }
 
 /** Start the app once the CodemanApp singleton exists. */
+/** Pairing QR parsers are local and inert: no navigation, redeem or authority from labels. */
+function caPairFields(value, version) {
+  if (typeof value !== 'string' || value.length > 512 || new TextEncoder().encode(value).length > 512) throw new Error('Invalid pairing QR');
+  const qr = value.trim(), fields = qr.split('|');
+  if (fields.length !== 4 || fields[0] !== version) throw new Error('Invalid pairing QR');
+  // Reuse the existing strict canonical HTTPS-origin parser; never accept arbitrary URLs.
+  const { origin } = caEmbassyInvite(`embassy-v1|${fields[1]}|${'A'.repeat(43)}`);
+  return { qr, origin, fields };
+}
+function caPairInvite(value) {
+  const { qr, origin, fields } = caPairFields(value, 'embassy-v2');
+  if (!/^[A-Za-z0-9_-]{1,128}$/.test(fields[2]) || !/^[A-Za-z0-9_-]{43}$/.test(fields[3])) throw new Error('Invalid pairing invitation');
+  return { qr, origin, roomId: fields[2] };
+}
+function caPairCode(value) {
+  if (typeof value !== 'string' || value.length > 16) throw new Error('Invalid confirmation code');
+  const code = value.trim().toUpperCase();
+  if (!/^[0-9A-HJKMNP-TV-Z]{4}-?[0-9A-HJKMNP-TV-Z]{4}$/.test(code)) throw new Error('Invalid confirmation code');
+  const compact = code.replace('-', '');
+  return compact.slice(0, 4) + '-' + compact.slice(4);
+}
+function caPairRequest(value, expectedOrigin) {
+  const { qr, origin, fields } = caPairFields(value, 'embassy-pair-v1');
+  if (origin !== expectedOrigin || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(fields[2])) throw new Error('Wrong host or request');
+  return { qr, origin, requestId: fields[2], code: caPairCode(fields[3]) };
+}
+
+/** Parse the existing guest key, or our fragment-only sharing envelope. No I/O. */
+function caEmbassyInvite(value) {
+  if (typeof value !== 'string' || value.length > 2048) throw new Error('Invalid invite');
+  value = value.trim();
+  let claimedHost = null;
+  if (!value.startsWith('embassy-v1|')) {
+    const link = new URL(value);
+    if (link.protocol !== 'https:' || link.username || link.password || link.search || link.pathname !== '/') throw new Error('Invalid invite');
+    const fields = new URLSearchParams(link.hash.slice(1));
+    if ([...fields].length !== 3 || fields.get('embassy') !== '1' || !fields.has('host') || !fields.has('key') || new Set(fields.keys()).size !== 3) throw new Error('Invalid invite');
+    claimedHost = fields.get('host');
+    value = fields.get('key');
+  }
+  if (value.length > 512 || new TextEncoder().encode(value).length > 512) throw new Error('Invalid invite');
+  const parts = value.split('|');
+  if (parts.length !== 3 || parts[0] !== 'embassy-v1' || !/^[A-Za-z0-9_-]{43}$/.test(parts[2])) throw new Error('Invalid invite');
+  const host = new URL(parts[1]);
+  if (host.protocol !== 'https:' || host.origin !== parts[1] || host.username || host.password || host.pathname !== '/' || host.search || host.hash ||
+      host.hostname.length > 253 || !host.hostname.includes('.') || /^[0-9.]+$/.test(host.hostname) ||
+      !host.hostname.split('.').every(label => /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(label)) ||
+      (claimedHost !== null && claimedHost !== host.origin)) throw new Error('Invalid invite');
+  return { key: value, origin: host.origin };
+}
+
+function caEmbassyJoinLink(value) {
+  const invite = caEmbassyInvite(value);
+  const link = new URL('/', invite.origin);
+  link.hash = new URLSearchParams({ embassy: '1', host: invite.origin, key: invite.key }).toString();
+  return link.href;
+}
+
+function caEmbassyTakeFragment(win) {
+  const staged = win.ReverieEmbassyInvite?.take?.();
+  if (staged?.invalid) return { invalid: true };
+  const hash = staged?.hash || win.location.hash;
+  if (!/^#embassy(?:=|&)/.test(hash)) return null;
+  // Invalid envelopes are scrubbed too. Preserve unrelated page/query state.
+  try { if (!staged?.scrubbed) win.history.replaceState(win.history.state, '', win.location.pathname + win.location.search); }
+  catch { return { invalid: true }; }
+  // The envelope is independent of the joining console's (possibly localhost)
+  // origin. This dummy origin is parsed only and is never requested.
+  try { return caEmbassyInvite('https://invite.invalid/' + hash); }
+  catch { return { invalid: true }; }
+}
+
+const caEmbassyQrLoads = new Map();
+function caEmbassyQrAsset(win, kind) {
+  const loaded = () => kind === 'code' ? win.ReverieQRCode : win.jsQR;
+  if (loaded()) return Promise.resolve(loaded());
+  if (caEmbassyQrLoads.has(kind)) return caEmbassyQrLoads.get(kind);
+  const promise = new Promise((resolve, reject) => {
+    const script = win.document.createElement('script');
+    script.src = kind === 'code' ? '/vendor/embassy-qr-code.min.js?v=1.5.4' : '/vendor/embassy-qr-scan.min.js?v=1.4.0';
+    script.referrerPolicy = 'no-referrer';
+    script.onload = () => loaded() ? resolve(loaded()) : reject(new Error('QR unavailable'));
+    script.onerror = () => { script.remove(); caEmbassyQrLoads.delete(kind); reject(new Error('QR unavailable')); };
+    win.document.head.append(script);
+  });
+  caEmbassyQrLoads.set(kind, promise);
+  return promise;
+}
+
 /** Guest-only embassy conversations. External posts never enter local chat delivery. */
 class ReverieEmbassyView {
   constructor(shell) {
@@ -5712,11 +6146,20 @@ class ReverieEmbassyView {
     this.posts = new Map();
     this.pending = new Map();
     this.drafts = new Map();
+    this.ownVerified = new Map();
+    this.sentReceipts = new Map();
     this.allowed = false;
     this.selected = null;
     this.version = 0;
     this.listEpoch = 0;
     this.mutationUnknown = new Set();
+    this.startInvite = caEmbassyIncomingInvite;
+    caEmbassyIncomingInvite = null;
+    this.win.addEventListener('hashchange', () => {
+      const invite = caEmbassyTakeFragment(this.win);
+      if (invite && this.allowed && !this.dialog) this.joinDialog(invite);
+    });
+    this.pairing = new ReverieEmbassyPairingView(this);
     this.collapsed = caRead('local', 'reverie:embassies:collapsed', '') === '1';
     this.refresh().catch(() => {});
     const tick = async () => {
@@ -5728,17 +6171,44 @@ class ReverieEmbassyView {
   el(tag, cls, text) { return this.shell.el(tag, cls, text); }
   button(label, run) { return this.shell.button('ca-btn eg-button', label, run, { text: label }); }
   async api(path = '', options = {}) {
-    try { return await this.shell.app._chatApi(`/api/embassy-guest${path}`, options); }
+    try {
+      if (/^\/__host__\/posts(?:\?|$)/.test(path)) {
+        if (!this.hostedConnection()) return { ok: false, error: 'Hosting unavailable' };
+        return await this.pairing.api('/api/embassy-host/posts' + path.slice('/__host__/posts'.length), options);
+      }
+      return await this.shell.app._chatApi(`/api/embassy-guest${path}`, options);
+    }
     catch { return { ok: false, error: 'Connection unavailable' }; }
   }
   failure(result) { return typeof result?.error === 'string' ? result.error : 'Request refused'; }
-  key(id, kind) { return `reverie:embassy:${id}:${kind}`; }
+  key(id, kind) {
+    const scope = id === '__host__' ? `__host__:${encodeURIComponent(this.hostScope || 'unbound')}` : id;
+    return `reverie:embassy:${scope}:${kind}`;
+  }
+  syncHostScope() {
+    const host = this.hostedConnection();
+    const scope = host ? JSON.stringify([host.origin, host.roomId, this.pairing.host.bindingId || null]) : null;
+    if (scope === this.hostScope) return;
+    if (this.selected === '__host__') this.close();
+    this.hostScope = scope;
+    this.version++;
+    for (const cache of [this.posts, this.pending, this.drafts, this.ownVerified, this.sentReceipts]) cache.delete('__host__');
+    this.mutationUnknown.delete('__host__');
+  }
   readCount(id) {
     const n = Number(caRead('local', this.key(id, 'read'), '0'));
     return Number.isSafeInteger(n) && n >= 0 ? n : 0;
   }
   unread(c) { return Math.max(0, (Number(c.postCount) || 0) - this.readCount(c.id)); }
-  connection() { return this.connections.find(c => c.id === this.selected); }
+  hostedConnection() {
+    const p = this.pairing;
+    if (!p?.owner || p.host.status !== 'ready') return null;
+    return { id: '__host__', origin: p.host.origin, roomId: p.host.room.id, roomName: p.host.room.name,
+      hostCompany: this.shell.defaultWorkspaceName(), enabled: true, status: 'live', expiresAt: Number.MAX_SAFE_INTEGER,
+      postCount: this.posts.get('__host__')?.size || 0 };
+  }
+  availableConnections() { const host = this.hostedConnection(); return host ? [host, ...this.connections] : this.connections; }
+  connection() { return this.availableConnections().find(c => c.id === this.selected); }
   async refresh() {
     if (this.refreshing) { this.refreshAgain = true; return; }
     this.refreshing = true;
@@ -5748,11 +6218,17 @@ class ReverieEmbassyView {
       if (epoch !== this.listEpoch || this.changing) return;
       if (!result.ok) {
         this.ownerRequired = result.status === 403 || /HTTP 403|signed-in owner|owner dashboard/i.test(this.failure(result));
+        this.lastFailure = { error: this.failure(result), status: Number.isInteger(result.status) ? result.status : undefined };
         // Do not retain a previous owner's external content after authorization disappears.
         this.allowed = false;
+        this.pairing.deny();
         this.connections = [];
         this.posts.clear();
         this.pending.clear();
+        this.ownVerified.clear();
+        this.sentReceipts.clear();
+        this.startInvite = null;
+        this.cancelJoin?.();
         this.close();
         this.renderSidebar();
         return;
@@ -5760,9 +6236,15 @@ class ReverieEmbassyView {
       this.allowed = true;
       this.mutationUnknown.clear();
       this.ownerRequired = false;
-      this.connections = Array.isArray(result.data?.connections) ? result.data.connections : [];
+      this.lastFailure = undefined;
+      this.connections = Array.isArray(result.data?.connections) ? result.data.connections.filter(c => c?.id !== '__host__') : [];
+      await this.pairing.refresh();
       if (this.selected && !this.connection()) this.close();
       this.renderSidebar();
+      if (this.startInvite && !this.dialog) {
+        const invite = this.startInvite; this.startInvite = null;
+        this.joinDialog(invite);
+      }
       if (this.selected) {
         this.updateControls();
         await this.loadPosts();
@@ -5790,35 +6272,54 @@ class ReverieEmbassyView {
         login.href = '/owner/login';
         note.append(login);
         host.append(note);
+        this.renderDirectory();
+        return;
       }
+      // Any other failure stays visible with the real error: the section never silently disappears, and there is no
+      // Add control until a refresh succeeds.
+      const failure = this.lastFailure || { error: 'Request refused' };
+      const note = this.el('section', 'eg-access-note');
+      note.setAttribute('role', 'alert');
+      const detail = failure.status ? `${failure.error} (HTTP ${failure.status})` : failure.error;
+      note.append(this.el('strong', '', 'Embassies'), this.el('p', '', `Embassies unavailable: ${detail}`));
+      const retry = this.button('Retry', () => { void this.refresh(); });
+      retry.setAttribute('aria-label', 'Retry loading embassies');
+      note.append(retry);
+      host.append(note);
+      this.renderDirectory();
       return;
     }
     const section = this.el('section', 'eg-category');
     const header = this.el('div', 'eg-category-head');
-    const toggle = this.button(`${this.collapsed ? '▸' : '▾'} Embassies`, () => {
+    const toggle = this.shell.button('ca-cat eg-category-toggle', 'Embassies', () => {
       this.collapsed = !this.collapsed;
       caWrite('local', 'reverie:embassies:collapsed', this.collapsed ? '1' : '0');
       this.renderSidebar();
       host.querySelector('.eg-category-toggle')?.focus();
     });
-    toggle.classList.add('eg-category-toggle');
+    const chevron = this.shell.icon('chevron');
+    chevron.classList.add('ca-chev');
+    chevron.classList.toggle('is-folded', this.collapsed);
+    toggle.append(chevron, this.el('span', 'ca-name', 'Embassies'));
     toggle.setAttribute('aria-label', 'Embassies');
     toggle.setAttribute('aria-expanded', String(!this.collapsed));
     toggle.setAttribute('aria-controls', 'eg-channel-list');
-    const add = this.button('+', () => this.joinDialog());
+    const add = this.shell.button('ca-icon-btn eg-add', 'Add embassy channel', () => this.pairing.open(), { icon: 'plus' });
     add.setAttribute('aria-label', 'Add embassy channel');
-    const total = this.connections.reduce((n, c) => n + this.unread(c), 0);
+    const total = this.availableConnections().reduce((n, c) => n + this.unread(c), 0);
     header.append(toggle, this.el('span', 'eg-unread-total', total ? String(total) : ''), add);
     const list = this.el('div', 'eg-channel-list');
     list.id = 'eg-channel-list';
     list.hidden = this.collapsed;
-    for (const c of this.connections) {
-      const row = this.button(c.roomName || 'Shared room', () => this.open(c.id));
-      row.classList.add('eg-channel');
+    for (const c of this.availableConnections()) {
+      const row = this.shell.button('ca-item eg-channel', c.roomName || 'Shared room', () => this.open(c.id), { text: c.roomName || 'Shared room' });
       row.dataset.connection = c.id;
       const label = row.querySelector('span');
-      label.classList.add('eg-channel-label');
-      label.append(this.el('small', 'eg-channel-origin', c.origin));
+      label.classList.add('ca-name', 'eg-channel-label');
+      const mark = this.el('span', 'ca-hash is-drawn');
+      mark.setAttribute('aria-hidden', 'true');
+      mark.append(this.shell.icon('embassy'));
+      row.prepend(mark);
       row.title = `${c.roomName} · ${c.origin} · ${c.status}`;
       const count = this.unread(c);
       row.setAttribute('aria-label', `${c.roomName} · ${c.origin}${count ? `, ${count} unread` : ''}`);
@@ -5826,81 +6327,196 @@ class ReverieEmbassyView {
       row.append(this.el('span', 'eg-unread', count ? String(count) : ''));
       list.append(row);
     }
-    if (!this.connections.length) list.append(this.el('p', 'ca-hint', 'No embassy rooms connected'));
+    if (!this.availableConnections().length) list.append(this.el('p', 'ca-hint', 'No embassy rooms connected'));
     section.append(header, list);
     host.append(section);
+    this.renderDirectory();
     if (focused) [...section.querySelectorAll('button')].find(b => focusId ? b.dataset.connection === focusId : b.getAttribute('aria-label') === focusLabel)?.focus();
   }
+  platformName() {
+    const name = this.el('span', '', 'Reverie');
+    // This is the platform name, independent of the company's display name.
+    name.setAttribute('data-i18n-skip', '');
+    return name;
+  }
+  directoryEl() {
+    const box = this.el('section', 'eg-directory');
+    box.setAttribute('aria-label', 'Embassy rooms');
+    const intro = this.el('p', 'ca-hint');
+    intro.append('Shared rooms with other companies, here in your own ', this.platformName(), '.');
+    box.append(this.el('h1', '', 'Embassies'), intro);
+    if (!this.allowed) {
+      box.append(this.el('p', 'eg-directory-status', this.ownerRequired ? 'Sign in as the console owner to connect shared rooms.' : 'Checking embassy access…'));
+      if (this.ownerRequired) { const a = this.el('a', '', 'Owner sign-in'); a.href = '/owner/login'; box.append(a); }
+      return box;
+    }
+    const add = this.button('Add embassy channel', () => this.joinDialog());
+    box.append(add);
+    const list = this.el('div', 'eg-directory-list');
+    for (const c of this.availableConnections()) {
+      const row = this.button(c.roomName || 'Shared room', () => this.open(c.id));
+      row.classList.add('eg-directory-room'); row.dataset.connection = c.id;
+      row.append(this.el('small', '', `${c.hostCompany || 'External company'} · ${c.origin}`));
+      row.append(this.el('span', `eg-connection-state is-${c.status}`, this.connectionState(c)));
+      const count = this.unread(c); if (count) row.append(this.el('span', 'eg-unread', String(count)));
+      const card = this.el('article', 'eg-directory-card');
+      const disconnect = this.button('Disconnect', () => this.leave(c.id));
+      disconnect.classList.add('eg-disconnect'); disconnect.disabled = !!this.changing || c.status === 'left';
+      disconnect.setAttribute('aria-label', `Disconnect ${c.roomName || 'shared room'}`);
+      card.append(row, disconnect); list.append(card);
+    }
+    if (!this.availableConnections().length) list.append(this.el('p', 'ca-hint', 'No shared rooms connected. Add a key, scan a QR or paste a link.'));
+    box.append(list); return box;
+  }
+  connectionState(c) {
+    if (c.id === '__host__') return 'Hosted here';
+    return { live: 'Connected', connecting: 'Connecting…', disabled: 'Disabled here', left: 'Disconnected',
+      unreachable: 'Connection unavailable', expired: 'Access expired', refused: 'Connection refused', 'storage-full': 'Local copy full' }[c.status] || 'Connection unavailable';
+  }
+  ownReceipts(id) {
+    if (!this.sentReceipts.has(id)) {
+      let receipts = [];
+      try {
+        const value = caRead('local', this.key(id, 'sent-receipts'), '[]');
+        if (value.length <= 65536) {
+          const parsed = JSON.parse(value);
+          if (Array.isArray(parsed) && parsed.length <= 256) receipts = parsed.filter(r => r && typeof r.ackId === 'string' && r.ackId.length <= 64 &&
+            Number.isSafeInteger(r.sequence) && r.sequence > 0 && /^[a-f0-9]{64}$/.test(r.sha256));
+        }
+      } catch { /* Missing/corrupt proof never turns an imported post into our own. */ }
+      this.sentReceipts.set(id, receipts);
+    }
+    return this.sentReceipts.get(id);
+  }
+  async textDigest(text) {
+    if (typeof text !== 'string') throw new Error('No receipt');
+    const bytes = new TextEncoder().encode(text);
+    if (bytes.length > 4096) throw new Error('No receipt');
+    const digest = await this.win.crypto.subtle.digest('SHA-256', bytes);
+    return [...new Uint8Array(digest)].map(v => v.toString(16).padStart(2, '0')).join('');
+  }
+  async rememberOwn(id, post, sent) {
+    // Human-readable company/identity labels are spoofable. Only a confirmed
+    // response to THIS console's exact publication can establish a local receipt.
+    if (!this.allowed || !post || typeof post.ackId !== 'string' || post.ackId.length > 64 ||
+        !Number.isSafeInteger(post.sequence) || post.sequence <= 0 || post.text !== sent.text) return;
+    const key = this.key(id, 'sent-receipts'), version = this.version;
+    try {
+      const sha256 = await this.textDigest(sent.text);
+      if (!this.allowed || version !== this.version || key !== this.key(id, 'sent-receipts')) return;
+      const receipts = [...this.ownReceipts(id).filter(r => r.ackId !== post.ackId), { ackId: post.ackId, sequence: post.sequence, sha256 }].slice(-256);
+      this.sentReceipts.set(id, receipts);
+      caWrite('local', this.key(id, 'sent-receipts'), JSON.stringify(receipts));
+    } catch { /* No crypto/storage capability: keep conservative provenance. */ }
+  }
+  async verifyOwn(id, posts) {
+    const version = this.version, key = this.key(id, 'sent-receipts');
+    const receipts = new Map(this.ownReceipts(id).map(r => [r.ackId, r]));
+    const verified = new Set();
+    await Promise.all(posts.filter(p => receipts.has(p.ackId)).slice(0, 256).map(async p => {
+      try {
+        const receipt = receipts.get(p.ackId);
+        if (receipt.sequence === p.sequence && receipt.sha256 === await this.textDigest(p.text)) verified.add(p.ackId);
+      } catch { /* Unverifiable content stays externally labelled. */ }
+    }));
+    if (this.allowed && version === this.version && key === this.key(id, 'sent-receipts')) this.ownVerified.set(id, verified);
+  }
+  renderDirectory() {
+    if (this.shell.embed === 'embassies' && this.shell.els.page) {
+      const page = this.shell.els.page;
+      const id = page.contains(this.doc.activeElement) ? this.doc.activeElement.dataset.connection : null;
+      page.replaceChildren(this.directoryEl());
+      if (id) [...page.querySelectorAll('[data-connection]')].find(n => n.dataset.connection === id)?.focus();
+    }
+  }
   open(id) {
-    if (!this.allowed || !this.connections.some(c => c.id === id)) return;
-    this.close();
-    this.selected = id;
-    this.version++;
-    this.shell.setView('chat');
-    this.shell.toggleDrawer(null);
-    const panel = this.el('section', 'eg-view');
-    const head = this.el('header', 'eg-head');
-    head.append(this.button('Channels', () => this.shell.toggleDrawer('channels')));
-    this.title = this.el('h1', 'eg-title');
-    this.status = this.el('p', 'eg-status');
-    this.status.setAttribute('role', 'status');
-    head.append(this.title, this.el('span', 'ca-tag', 'Shared · Guest'), this.status);
-    this.origin = this.el('p', 'eg-origin');
-    this.controls = this.el('div', 'eg-controls');
-    this.feed = this.el('div', 'eg-feed');
-    this.feed.setAttribute('role', 'log');
+    if (!this.allowed || !this.availableConnections().some(c => c.id === id)) return;
+    if (this.shell.app._chatSending) { this.shell.toast('Wait for the current message to finish sending', 'info'); return; }
+    this.close(); this.shell.closePage();
+    const app = this.shell.app, els = app._chatEls;
+    // Reuse the actual local channel feed/composer. External records remain in
+    // this adapter, never app._chatRoom, ChatroomStore or its agent wake path.
+    this.localState = { input: els.input.value, maxLength: els.input.getAttribute('maxlength'),
+      label: els.input.getAttribute('aria-label'), feedLabel: els.feed.getAttribute('aria-label'),
+      feedHidden: els.feed.hidden, composerHidden: els.composer.hidden, emptyHidden: els.empty.hidden };
+    els.feed.hidden = false; els.composer.hidden = false; els.empty.hidden = true;
+    this.selected = id; this.version++;
+    this.shell.setView('chat'); this.shell.toggleDrawer(null);
+    this.panel = this.shell.els.chat; this.panel.classList.add('eg-view');
+    this.feed = els.feed; this.feed.classList.add('eg-feed'); this.feed.dataset.signature = '';
     this.feed.setAttribute('aria-label', 'Embassy conversation');
-    this.feed.setAttribute('aria-live', 'polite');
-    this.feed.addEventListener('scroll', () => this.markRead());
-    this.form = this.el('form', 'eg-composer');
-    this.input = this.el('textarea', 'eg-input');
+    this.form = els.composer; this.form.classList.add('eg-composer'); this.form.dataset.connection = id;
+    this.input = els.input; this.input.classList.add('eg-input'); this.input.maxLength = 4096;
     this.input.setAttribute('aria-label', 'Message to shared room');
-    this.input.placeholder = 'Message this shared room';
-    this.input.rows = 2;
-    this.input.maxLength = 4096;
-    this.send = this.el('button', 'ca-btn', 'Send');
-    this.send.type = 'submit';
-    this.notice = this.el('p', 'eg-notice');
-    this.notice.setAttribute('role', 'status');
-    this.form.append(this.input, this.send);
-    this.form.addEventListener('submit', e => { e.preventDefault(); void this.publish(); });
-    const pending = this.getPending(id);
-    this.input.value = pending?.text || this.drafts.get(id) || '';
-    this.form.dataset.connection = id;
-    panel.append(head, this.origin, this.controls, this.feed, this.notice, this.form,
-      this.el('p', 'eg-visibility', 'External guest conversation. Shared posts are visible to its members. Synced copies remain after leaving.'));
-    this.panel = panel;
-    this.shell.els.main.append(panel);
+    this.send = els.send;
+    this.detail = this.el('section', 'eg-detail');
+    this.status = this.el('p', 'eg-status'); this.status.setAttribute('role', 'status');
+    this.origin = this.el('p', 'eg-origin'); this.controls = this.el('div', 'eg-controls');
+    this.detail.append(this.status, this.origin, this.controls);
+    this.notice = this.el('p', 'eg-notice'); this.notice.setAttribute('role', 'status');
+    this.visibility = this.el('p', 'eg-visibility', 'UNTRUSTED EXTERNAL · Text and emoji shared with other companies. Files are not supported yet.');
+    els.feed.before(this.detail); els.composer.before(this.notice, this.visibility);
+    const pending = this.getPending(id); this.input.value = pending?.text || this.drafts.get(id) || '';
     this.shell.els.main.classList.add('eg-active');
-    this.renderSidebar();
-    this.updateControls();
-    void this.loadPosts();
+    this.shell.cancelReplySilently?.();
+    this.shell.renderHeader(); this.shell.renderMembers(); this.shell.renderChrome(); this.shell.renderSidebar();
+    this.shell.renderTyping();
+    this.updateControls(); this.renderPosts(); void this.loadPosts(); this.input.focus();
   }
   close() {
-    if (this.selected && this.input && this.form?.dataset.connection === this.selected) this.drafts.set(this.selected, this.input.value);
-    this.version++;
-    this.selected = null;
-    this.panel?.remove();
-    this.panel = null;
-    this.shell.els.main?.classList.remove('eg-active');
+    if (!this.selected) return;
+    if (this.input && this.form?.dataset.connection === this.selected) this.drafts.set(this.selected, this.input.value);
+    this.version++; this.selected = null;
+    this.detail?.remove(); this.notice?.remove(); this.visibility?.remove();
+    this.panel?.classList.remove('eg-view'); this.feed?.classList.remove('eg-feed'); this.form?.classList.remove('eg-composer'); this.input?.classList.remove('eg-input');
+    if (this.form) delete this.form.dataset.connection;
+    if (this.localState) {
+      this.input.value = this.localState.input;
+      this.feed.hidden = this.localState.feedHidden; this.form.hidden = this.localState.composerHidden;
+      this.shell.app._chatEls.empty.hidden = this.localState.emptyHidden;
+      if (this.localState.maxLength === null) this.input.removeAttribute('maxlength'); else this.input.setAttribute('maxlength', this.localState.maxLength);
+      if (this.localState.label === null) this.input.removeAttribute('aria-label'); else this.input.setAttribute('aria-label', this.localState.label);
+      if (this.localState.feedLabel === null) this.feed.removeAttribute('aria-label'); else this.feed.setAttribute('aria-label', this.localState.feedLabel);
+      this.localState = null;
+    }
+    this.input.disabled = false; this.input.readOnly = false; this.send.disabled = false; this.send.textContent = 'Send'; this.send.setAttribute('aria-label', 'Send message');
+    this.panel = null; this.shell.els.main.classList.remove('eg-active');
+    this.shell.renderHeader(); this.shell.renderMembers(); this.shell.renderFeed(); this.shell.renderChrome(); this.shell.syncComposer?.(); this.shell.renderTyping();
+  }
+  renderPosts() {
+    if (!this.selected || !this.feed) return;
+    const values = [...(this.posts.get(this.selected)?.values() || [])].sort((a, b) => a.sequence - b.sequence);
+    const top = this.feed.scrollTop, pinned = this.feed.scrollHeight - top - this.feed.clientHeight < 40;
+    this.feed.replaceChildren();
+    if (!values.length) this.feed.append(this.el('p', 'ca-feed-empty', 'This is the start of the shared room. Say hello.'));
+    for (const p of values) {
+      const own = this.ownVerified.get(this.selected)?.has(p.ackId) === true;
+      const row = this.shell.messageEl({ id: `embassy:${this.selected}:${p.ackId}`, at: Number(p.at) || Date.now(), to: 'all',
+        from: { kind: own ? 'user' : 'external', name: `${p.author?.company || 'External'} · ${p.author?.identity || 'Guest'}` }, text: p.text, external: true, own }, true);
+      row.classList.add('eg-post'); row.dataset.post = p.ackId; this.feed.append(row);
+    }
+    this.feed.scrollTop = pinned ? this.feed.scrollHeight : top;
   }
   updateControls() {
     const c = this.connection();
     if (!c || !this.panel) return;
-    this.title.textContent = c.roomName;
-    this.origin.textContent = `${c.hostCompany} · ${c.origin} · Guest access (TLS origin; no signed identity pin)`;
+    this.shell.renderHeader();
+    this.origin.textContent = c.id === '__host__' ? `${c.origin} · Hosted room` : `${c.hostCompany} · ${c.origin} · Guest access (TLS origin; no signed identity pin)`;
     const state = this.mutationUnknown.has(c.id) ? 'State change unconfirmed' : c.status === 'disabled' ? 'Disabled here' : c.status;
-    this.status.textContent = `${state}${c.lastError ? ` · ${c.lastError}` : ''}`;
+    this.status.textContent = `${this.mutationUnknown.has(c.id) ? state : this.connectionState(c)}${c.lastError ? ` · ${c.lastError}` : ''}`;
     const controlFocus = this.controls.contains(this.doc.activeElement) ? this.doc.activeElement?.getAttribute('aria-label') : null;
     this.controls.replaceChildren();
-    if (c.status !== 'left') {
+    if (c.id === '__host__') {
+      this.controls.append(this.button('Invite a company', () => this.pairing.open('invite')), this.button('Manage invitations', () => this.pairing.open('manage')));
+    } else if (c.status !== 'left') {
       this.controls.append(this.button(c.enabled ? 'Disable' : 'Enable', () => this.setEnabled(c.id, !c.enabled)),
-        this.button('Leave', () => this.leave(c.id)));
+        this.button('Disconnect', () => this.leave(c.id)));
     }
     for (const b of this.controls.querySelectorAll('button')) b.disabled = !!this.changing;
     if (controlFocus) [...this.controls.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === controlFocus)?.focus();
     const pending = this.getPending(c.id);
     this.send.textContent = pending ? 'Retry same message' : 'Send';
+    this.send.setAttribute('aria-label', pending ? 'Retry same message' : 'Send message');
     this.send.disabled = !!this.sending || this.changing === c.id || this.mutationUnknown.has(c.id) || !c.enabled || !['live', 'connecting'].includes(c.status) || c.expiresAt <= Date.now();
     this.input.disabled = this.changing === c.id || this.mutationUnknown.has(c.id) || !c.enabled || c.status === 'left' || c.status === 'expired';
     this.input.readOnly = !!pending;
@@ -5927,23 +6543,10 @@ class ReverieEmbassyView {
         after = result.data.next;
       }
       if (version !== this.version || this.selected !== id) return;
-      const previousScroll = this.feed.scrollTop;
-      const atBottom = this.feed.scrollHeight - this.feed.clientHeight - this.feed.scrollTop < 40;
-      const values = [...items.values()].sort((a, b) => a.sequence - b.sequence);
-      const sig = values.map(p => p.ackId).join('|');
-      if (sig !== this.feed.dataset.signature) {
-        this.feed.replaceChildren();
-        for (const p of values) {
-          const row = this.el('article', 'eg-post');
-          row.dataset.post = p.ackId;
-          row.append(this.el('strong', 'eg-author', `${p.author?.company || 'External'} · ${p.author?.identity || 'Guest'}`),
-            this.el('span', 'eg-trust', `External · ${p.trust || p.author?.kind || 'guest'}`),
-            this.el('p', 'eg-text', p.text));
-          this.feed.append(row);
-        }
-        this.feed.dataset.signature = sig;
-        this.feed.scrollTop = atBottom ? this.feed.scrollHeight : previousScroll;
-      }
+      await this.verifyOwn(id, [...items.values()]);
+      if (version !== this.version || this.selected !== id) return;
+      const sig = [...items.values()].sort((a, b) => a.sequence - b.sequence).map(p => `${p.ackId}:${this.ownVerified.get(id)?.has(p.ackId) ? 1 : 0}`).join('|');
+      if (sig !== this.feed.dataset.signature) { this.feed.dataset.signature = sig; this.renderPosts(); }
       this.markRead();
     } finally { if (this.loading === id) this.loading = null; }
   }
@@ -5982,11 +6585,15 @@ class ReverieEmbassyView {
       }
       this.pending.set(id, pending);
     }
+    const version = this.version, key = this.key(id, 'pending');
     this.sending = true;
     this.updateControls();
     const result = await this.api(`/${encodeURIComponent(id)}/posts`, { method: 'POST', body: pending });
     this.sending = false;
+    if (version !== this.version || key !== this.key(id, 'pending')) return;
     if (result.ok) {
+      await this.rememberOwn(id, result.data?.post, pending);
+      if (version !== this.version || key !== this.key(id, 'pending')) return;
       this.pending.delete(id);
       this.drafts.delete(id);
       caWrite('session', this.key(id, 'pending'), 'null');
@@ -5995,6 +6602,7 @@ class ReverieEmbassyView {
       if (result.ok) { this.input.value = ''; this.notice.textContent = 'Posted'; await this.loadPosts(); }
       else this.notice.textContent = `Not confirmed. ${this.failure(result)} Retry uses the same message id.`;
       this.updateControls();
+      this.shell.fitInput?.(); this.shell.syncComposer?.();
     }
   }
   async mutateConnection(id, options) {
@@ -6022,35 +6630,149 @@ class ReverieEmbassyView {
     await this.mutateConnection(id, { method: 'PUT', body: { enabled } });
   }
   async leave(id) {
-    if (!this.win.confirm('Leave this embassy room? Sending and syncing stop. Synced history and copies elsewhere remain.')) return;
+    if (!this.win.confirm('Disconnect this embassy room? Sending and syncing stop. Synced history and copies elsewhere remain.')) return;
     await this.mutateConnection(id, { method: 'DELETE' });
   }
-  joinDialog() {
+  joinDialog(initial = null) {
     if (!this.allowed || this.dialog) return;
     const dlg = this.el('dialog', 'ca-dialog eg-dialog');
     this.dialog = dlg;
     dlg.setAttribute('aria-label', 'Add embassy channel');
     const title = this.el('h2', '', 'Add embassy channel');
-    const explain = this.el('p', '', 'Paste a guest invite key. Confirm its host before this server connects. No owner access is granted.');
+    const explain = this.el('p', '', 'Paste a key, scan a QR, or paste an invite link. Confirm the host before connecting. Guest access only.');
     const label = this.el('label', '', 'Invite key');
     const input = this.el('input', 'eg-key');
     input.type = 'password';
     input.autocomplete = 'off';
     input.spellcheck = false;
+    input.maxLength = 2048;
     label.append(input);
     const note = this.el('p', 'eg-join-status');
     note.setAttribute('role', 'status');
+    let secret = '', origin = '', joining = false, closed = false, stream = null, scanTimer = null, cameraEpoch = 0, renderEpoch = 0, shareLink = '';
+    const valid = () => !closed && this.allowed && this.dialog === dlg;
+    const tools = this.el('div', 'eg-join-tools');
+    const qr = this.el('section', 'eg-qr-output'); qr.hidden = true;
+    const qrCanvas = this.el('canvas', 'eg-qr-canvas');
+    qrCanvas.setAttribute('role', 'img'); qrCanvas.setAttribute('aria-label', 'Private embassy invite QR');
+    const shareLabel = this.el('label', '', 'Invite link (private)');
+    const shareInput = this.el('input', 'eg-share-link'); shareInput.type = 'password'; shareInput.readOnly = true; shareInput.autocomplete = 'off';
+    shareLabel.append(shareInput);
+    const scan = this.el('section', 'eg-scan'); scan.hidden = true;
+    const linkLabel = this.el('label', '', 'Invite link');
+    const linkInput = this.el('input', 'eg-invite-link'); linkInput.type = 'password'; linkInput.autocomplete = 'off'; linkInput.maxLength = 2048; linkInput.spellcheck = false;
+    linkLabel.append(linkInput);
+    const video = this.el('video', 'eg-scan-video'); video.muted = true; video.playsInline = true; video.hidden = true;
+    const stopCamera = () => {
+      cameraEpoch++;
+      if (scanTimer !== null) this.win.clearTimeout(scanTimer);
+      scanTimer = null;
+      for (const track of stream?.getTracks() || []) track.stop();
+      stream = null; video.srcObject = null; video.hidden = true;
+    };
+    const clearQR = () => {
+      renderEpoch++; shareLink = ''; shareInput.value = ''; shareInput.type = 'password';
+      qrCanvas.width = 0; qrCanvas.height = 0; qr.hidden = true;
+    };
+    const acceptInvite = (value) => {
+      const invite = caEmbassyInvite(value);
+      if (!valid()) return;
+      stopCamera(); clearQR(); linkInput.value = ''; input.value = invite.key; scan.hidden = true;
+      note.textContent = `Invite ready for ${invite.origin}. Choose Check host, then confirm.`;
+      next.focus();
+    };
+    const showQR = this.button('Show QR', async () => {
+      stopCamera(); clearQR(); scan.hidden = true; linkInput.value = '';
+      const epoch = renderEpoch;
+      try {
+        const link = caEmbassyJoinLink(input.value);
+        const encoder = await caEmbassyQrAsset(this.win, 'code');
+        if (!valid() || epoch !== renderEpoch) return;
+        await encoder.toCanvas(qrCanvas, link, { errorCorrectionLevel: 'M', margin: 4, width: 320 });
+        if (!valid() || epoch !== renderEpoch) { qrCanvas.width = 0; return; }
+        shareLink = link; shareInput.value = link; qr.hidden = false;
+        note.replaceChildren('Private invite: scan or paste it in your own ', this.platformName(), ' console. Anyone with it can use its guest access.');
+      } catch { if (valid()) note.textContent = 'QR unavailable or invalid key. Paste a valid key, or join using the key directly.'; }
+    });
+    const copy = this.button('Copy invite link', async () => {
+      if (!valid() || !shareLink) return;
+      try { await this.win.navigator.clipboard.writeText(shareLink); if (valid()) note.textContent = 'Invite link copied. Share it privately.'; }
+      catch { if (valid()) { shareInput.type = 'text'; shareInput.focus(); shareInput.select(); note.textContent = 'Select and copy the invite link. Share it privately.'; } }
+    });
+    qr.append(qrCanvas, this.el('p', '', 'Scan from Embassies + → Scan/paste link in the joining company’s console.'), shareLabel, copy);
+    const useLink = this.button('Use link', () => {
+      const value = linkInput.value; linkInput.value = '';
+      try { acceptInvite(value); } catch { note.textContent = 'Invalid invite link. No connection was made.'; }
+    });
+    const startCamera = this.button('Scan with camera', async () => {
+      stopCamera(); const epoch = cameraEpoch;
+      if (!this.win.navigator.mediaDevices?.getUserMedia) { note.textContent = 'Camera unavailable. Paste the link or choose a QR image.'; return; }
+      try {
+        const decoder = await caEmbassyQrAsset(this.win, 'scan');
+        if (!valid() || epoch !== cameraEpoch) return;
+        const camera = await this.win.navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false });
+        if (!valid() || epoch !== cameraEpoch) { for (const track of camera.getTracks()) track.stop(); return; }
+        stream = camera; video.srcObject = camera; video.hidden = false; await video.play();
+        const canvas = this.el('canvas'); const ctx = canvas.getContext('2d', { willReadFrequently: true });
+        const deadline = Date.now() + 60000;
+        const tick = () => {
+          if (!valid() || epoch !== cameraEpoch || this.doc.hidden || Date.now() > deadline) { stopCamera(); return; }
+          try {
+            if (video.videoWidth && video.videoHeight) {
+              const scale = Math.min(1, 1280 / Math.max(video.videoWidth, video.videoHeight));
+              canvas.width = Math.max(1, Math.round(video.videoWidth * scale)); canvas.height = Math.max(1, Math.round(video.videoHeight * scale));
+              ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+              const image = ctx.getImageData(0, 0, canvas.width, canvas.height);
+              const code = decoder(image.data, image.width, image.height, { inversionAttempts: 'dontInvert' });
+              if (code) { acceptInvite(code.data); canvas.width = 0; return; }
+            }
+          } catch { note.textContent = 'No valid embassy invite found yet. You can paste the link instead.'; }
+          scanTimer = this.win.setTimeout(tick, 250);
+        };
+        note.textContent = 'Camera scans locally. No images are uploaded.'; tick();
+      } catch { stopCamera(); if (valid()) note.textContent = 'Camera unavailable. Paste the link or choose a QR image.'; }
+    });
+    const stop = this.button('Stop camera', stopCamera);
+    const fileLabel = this.el('label', '', 'Choose QR image');
+    const file = this.el('input', 'eg-qr-file'); file.type = 'file'; file.accept = 'image/png,image/jpeg,image/webp'; fileLabel.append(file);
+    file.addEventListener('change', async () => {
+      stopCamera(); const epoch = cameraEpoch; const imageFile = file.files?.[0]; file.value = '';
+      if (!imageFile) return;
+      if (imageFile.size > 5 * 1024 * 1024 || !['image/png', 'image/jpeg', 'image/webp'].includes(imageFile.type)) { note.textContent = 'Choose a PNG, JPEG or WebP QR image up to 5 MB.'; return; }
+      let bitmap = null;
+      try {
+        const decoder = await caEmbassyQrAsset(this.win, 'scan');
+        if (!valid() || epoch !== cameraEpoch) return;
+        bitmap = await this.win.createImageBitmap(imageFile);
+        if (!valid() || epoch !== cameraEpoch) return;
+        if (!bitmap.width || !bitmap.height || bitmap.width * bitmap.height > 16000000) throw new Error('Image too large');
+        const scale = Math.min(1, 2048 / Math.max(bitmap.width, bitmap.height));
+        const canvas = this.el('canvas'); canvas.width = Math.max(1, Math.round(bitmap.width * scale)); canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+        const ctx = canvas.getContext('2d', { willReadFrequently: true }); ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+        const image = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const code = decoder(image.data, image.width, image.height); canvas.width = 0;
+        if (!code) throw new Error('No QR');
+        acceptInvite(code.data);
+      } catch { if (valid()) note.textContent = 'No valid embassy QR found. Paste the invite link instead.'; }
+      finally { bitmap?.close(); }
+    });
+    scan.append(linkLabel, useLink, startCamera, stop, fileLabel, video);
+    const scanLink = this.button('Scan/paste link', () => { stopCamera(); clearQR(); scan.hidden = false; linkInput.focus(); });
+    tools.append(showQR, scanLink);
+    input.addEventListener('input', clearQR);
     const next = this.button('Check host', async () => {
       if (next.disabled) return;
       next.disabled = true;
       const value = input.value;
       input.value = '';
+      stopCamera(); clearQR(); linkInput.value = ''; scan.hidden = true;
       const result = await this.api('/preview', { method: 'POST', body: { key: value } });
-      if (!dlg.isConnected) return;
+      if (!valid()) return;
       if (!result.ok) { note.textContent = 'Invalid invite key. Paste a valid key to try again.'; next.disabled = false; return; }
       secret = value;
       origin = result.data.origin;
       label.hidden = true;
+      tools.hidden = true;
       note.textContent = `Connect this server to ${origin}? Room details appear only after joining.`;
       next.textContent = 'Connect';
       next.setAttribute('aria-label', 'Connect');
@@ -6058,10 +6780,13 @@ class ReverieEmbassyView {
       next.replaceWith(confirm);
       confirm.focus();
     });
-    let secret = '', origin = '', joining = false;
     const cleanup = () => {
-      secret = ''; input.value = '';
+      if (closed) return;
+      closed = true; stopCamera(); clearQR(); secret = ''; input.value = ''; linkInput.value = ''; file.value = '';
+      this.doc.removeEventListener('visibilitychange', visibility);
+      this.win.removeEventListener('pagehide', cleanup);
       dlg.remove(); this.dialog = null;
+      if (this.cancelJoin === cleanup) this.cancelJoin = null;
       this.shell.els.sideScroll.querySelector('[aria-label="Add embassy channel"]')?.focus();
     };
     const confirm = this.button('Connect', async () => {
@@ -6072,6 +6797,7 @@ class ReverieEmbassyView {
       note.textContent = 'Connecting…';
       const result = await this.api('/join', { method: 'POST', body: { key, confirmedOrigin: origin } });
       this.listEpoch++;
+      if (!valid()) { if (this.allowed) await this.refresh(); return; }
       if (result.ok && result.data?.id) {
         const joined = result.data;
         this.connections = [...this.connections.filter(c => c.id !== joined.id), joined];
@@ -6086,11 +6812,434 @@ class ReverieEmbassyView {
       cleanup(); if (id) this.open(id); await this.refresh();
     });
     const cancel = this.button('Cancel', cleanup);
+    const visibility = () => { if (this.doc.hidden) stopCamera(); };
+    this.doc.addEventListener('visibilitychange', visibility);
+    this.win.addEventListener('pagehide', cleanup);
+    this.cancelJoin = cleanup;
     dlg.addEventListener('cancel', e => { e.preventDefault(); cleanup(); });
-    dlg.append(title, explain, label, note, next, cancel);
+    dlg.addEventListener('close', cleanup);
+    const heading = this.el('header', 'eg-dialog-head');
+    const headingText = this.el('div'); headingText.append(title, explain);
+    const close = this.button('Close', cleanup); close.textContent = '×'; close.classList.add('eg-dialog-close');
+    heading.append(headingText, close);
+    const content = this.el('div', 'eg-dialog-body'); content.append(label, tools, qr, scan, note);
+    const actions = this.el('footer', 'eg-dialog-actions'); next.classList.add('is-primary'); confirm.classList.add('is-primary');
+    actions.append(cancel, next); dlg.append(heading, content, actions);
     this.doc.body.append(dlg);
     if (typeof dlg.showModal === 'function') dlg.showModal(); else dlg.setAttribute('open', '');
     input.focus();
+    if (initial?.key) { input.value = initial.key; note.textContent = `Invite ready for ${initial.origin}. Check host before connecting.`; }
+    else if (initial?.invalid) note.textContent = 'Invalid invite link. Paste a new key or link.';
+  }
+}
+
+/** Owner-only two-scan UI. Credentials and operation recovery belong to the local backend. */
+class ReverieEmbassyPairingView {
+  constructor(view) {
+    this.view = view; this.shell = view.shell; this.doc = view.doc; this.win = view.win;
+    this.host = { status: 'unconfigured' }; this.handles = []; this.epoch = 0; this.owner = false; this.requests = new Set();
+  }
+  el(tag, cls, text) { return this.view.el(tag, cls, text); }
+  button(text, run, primary = false) { const b = this.view.button(text, run); if (primary) b.classList.add('is-primary'); return b; }
+  async api(path, options = {}) {
+    const controller = new this.win.AbortController(); this.requests.add(controller);
+    const timeout = this.win.setTimeout(() => controller.abort(), 20000);
+    try {
+      const result = await this.shell.app._chatApi(path, { ...options, signal: controller.signal });
+      if (result.status === 403) this.deny();
+      return result;
+    } catch { return { ok: false }; }
+    finally { this.win.clearTimeout(timeout); this.requests.delete(controller); }
+  }
+  error(result) {
+    const code = result?.errorCode || result?.error?.code;
+    return ({ OWNER_ONLY: 'Sign in as the console owner to pair companies.', FORBIDDEN: 'Sign in as the console owner to pair companies.',
+      HOSTING_UNCONFIGURED: 'Hosting not set up.', EMBASSY_UNREACHABLE: 'The other company is unavailable. Try again later.',
+      INVALID_INVITE: 'This invitation has been used, expired or revoked.', GUEST_LABEL: 'That name is already in use. Choose another name.',
+      INVITE_LIMIT: 'Too many open invitations. Revoke an unused invitation first.', PAIR_PENDING_LIMIT: 'Too many pending connections. Try again later.',
+      PAIR_NOT_FOUND: 'Confirmation not found. Check the code or scan it again.', PAIR_PENDING: 'Waiting for the host to approve.',
+      PAIR_STATE: 'This request has already changed. Refresh its status.', PAIR_REJECTED: 'The host declined this request.',
+      PAIR_EXPIRED: 'This request has expired. Ask for a new invitation.', PAIR_REVOKED: 'This invitation has been revoked.',
+      CLAIM_LIMIT: 'Connection recovery is unavailable. Ask the host for help.', ROOM_NOT_FOUND: 'Shared room unavailable.',
+      ROOM_CLOSED: 'This shared room is closed.', PAIR_WRONG_HOST: 'This confirmation belongs to another host.',
+      PAIR_ROOM_MISMATCH: 'The invitation and shared room do not match.', PAIR_BAD_QR: 'This is not a valid pairing QR.' })[code] ||
+      (result?.status === 403 ? 'Sign in as the console owner to pair companies.' : 'Request not confirmed. Recover its status before trying again.');
+  }
+  deny() {
+    this.owner = false; this.host = { status: 'unconfigured' }; this.handles = []; this.view.syncHostScope(); if (this.view.selected === '__host__') this.view.close(); this.view.renderSidebar(); this.invite = null; this.record = null; this.guestQr = ''; this.guestOperation = null; this.inviteOperation = null;
+    for (const request of this.requests) request.abort();
+    if (!this.dlg?.isConnected) return;
+    this.clearBody(); this.body.append(this.el('p', 'eg-pair-status', 'Sign in as the console owner to pair companies.'));
+    const link = this.el('a', '', 'Owner sign-in'); link.href = '/owner/login'; this.body.append(link); this.actions.append(this.button('Close', this.cleanup));
+  }
+  isCurrent(epoch) { return this.dlg?.isConnected && this.view.dialog === this.dlg && this.epoch === epoch && this.view.allowed; }
+  async refresh() {
+    if (this.refreshing) return;
+    this.refreshing = true;
+    const epoch = this.epoch;
+    try {
+      const [host, pending] = await Promise.all([this.api('/api/embassy-host'), this.api('/api/embassy-pairing')]);
+      if (epoch !== this.epoch || !this.view.allowed) return;
+      if ([host, pending].some(r => r.status === 403)) { this.owner = false; this.host = { status: 'unconfigured' }; this.handles = []; return; }
+      this.owner = !!(host.ok || pending.ok);
+      if (host.ok && host.data?.status === 'ready') {
+        try {
+          const origin = caEmbassyInvite(`embassy-v1|${host.data.origin}|${'A'.repeat(43)}`).origin;
+          const room = host.data.room;
+          if (!room || typeof room.id !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(room.id) || typeof room.name !== 'string') throw Error();
+          this.host = { status: 'ready', origin, room: { id: room.id, name: room.name.slice(0, 200) },
+            ...(typeof host.data.bindingId === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(host.data.bindingId) ? { bindingId: host.data.bindingId } : {}) };
+        } catch { this.host = { status: 'unreachable' }; }
+      } else this.host = { status: host.ok && host.data?.status === 'unconfigured' ? 'unconfigured' : 'unreachable' };
+      if (pending.ok) {
+        const values = Array.isArray(pending.data) ? pending.data : pending.data?.pairings;
+        this.handles = (Array.isArray(values) ? values : []).slice(0, 50).map(v => typeof v === 'string' ? { handle: v } : v)
+          .filter(v => v && typeof v.handle === 'string' && /^[A-Za-z0-9_-]{1,80}$/.test(v.handle));
+      }
+    } finally { this.view.syncHostScope(); this.refreshing = false; }
+  }
+  stopCamera() { this.scanEpoch = (this.scanEpoch || 0) + 1; this.win.clearTimeout(this.scanTimer); for (const t of this.stream?.getTracks() || []) t.stop(); this.stream = null; this.video?.remove(); this.video = null; }
+  stopPoll() { this.win.clearTimeout(this.pollTimer); this.pollTimer = null; }
+  clearBody() { this.win.clearTimeout(this.expiryTimer); this.epoch++; this.stopCamera(); this.stopPoll(); for (const c of this.body.querySelectorAll('canvas')) { c.width = 0; c.height = 0; } for (const i of this.body.querySelectorAll('input')) i.value = ''; this.invite = null; this.body.replaceChildren(); this.actions.replaceChildren(); this.qr = null; this.review = null; }
+  close() {
+    this.win.clearTimeout(this.expiryTimer); this.epoch++; this.stopCamera(); this.stopPoll(); for (const r of this.requests) r.abort(); this.invite = null; this.record = null; this.guestQr = ''; this.guestOperation = null; this.inviteOperation = null;
+    for (const i of this.dlg?.querySelectorAll('input,textarea') || []) i.value = '';
+    for (const c of this.dlg?.querySelectorAll('canvas') || []) { c.width = 0; c.height = 0; }
+    this.dlg?.remove(); if (this.view.dialog === this.dlg) this.view.dialog = null;
+    if (this.view.cancelJoin === this.cleanup) this.view.cancelJoin = null;
+    this.doc.removeEventListener('visibilitychange', this.onVisibility); this.win.removeEventListener('pagehide', this.cleanup); this.dlg = null;
+  }
+  async open(intent = 'home') {
+    if (!this.view.allowed || this.view.dialog) return;
+    this.epoch++; const epoch = this.epoch;
+    const dlg = this.el('dialog', 'ca-dialog eg-dialog eg-pair-dialog'); this.dlg = dlg; this.view.dialog = dlg;
+    dlg.setAttribute('aria-label', 'Connect companies');
+    this.title = this.el('h2', '', 'Connect companies'); const sub = this.el('p', '', 'Pair two companies in '); sub.append(this.view.platformName(), '.');
+    const text = this.el('div'); text.append(this.title, sub); const head = this.el('header', 'eg-dialog-head');
+    this.cleanup = () => this.close(); const close = this.button('Close', this.cleanup); close.textContent = '×'; close.classList.add('eg-dialog-close'); head.append(text, close);
+    this.body = this.el('div', 'eg-dialog-body'); this.actions = this.el('footer', 'eg-dialog-actions');
+    dlg.append(head, this.body, this.actions); this.doc.body.append(dlg);
+    dlg.addEventListener('cancel', e => { e.preventDefault(); this.close(); }); dlg.addEventListener('close', this.cleanup);
+    this.onVisibility = () => { if (this.doc.hidden) { this.stopCamera(); this.stopPoll(); } else if (this.record) void this.poll(); };
+    this.doc.addEventListener('visibilitychange', this.onVisibility); this.win.addEventListener('pagehide', this.cleanup); this.view.cancelJoin = this.cleanup;
+    if (typeof dlg.showModal === 'function') dlg.showModal(); else dlg.setAttribute('open', '');
+    this.body.append(this.el('p', 'eg-pair-status', 'Checking company access…')); this.actions.append(this.button('Cancel', this.cleanup));
+    await this.refresh(); if (this.isCurrent(epoch)) { this.home(); if (intent === 'invite') await this.createInvite(); else if (intent === 'manage') await this.invites(); }
+  }
+  home() {
+    this.clearBody(); this.record = null; this.guestOperation = null; this.inviteOperation = null; this.title.textContent = 'Connect companies';
+    if (!this.owner) { this.body.append(this.el('p', 'eg-pair-status', 'Sign in as the console owner to pair companies.')); const a = this.el('a', '', 'Owner sign-in'); a.href = '/owner/login'; this.body.append(a); this.actions.append(this.button('Close', this.cleanup)); return; }
+    const invite = this.button('Invite a company', () => this.createInvite(), true); invite.disabled = this.host.status !== 'ready';
+    const join = this.button('Join a company', () => this.scan('invite'));
+    join.disabled = this.handles.some(item => item.state === 'cancelling');
+    if (join.disabled) this.body.append(this.el('p', 'ca-hint', 'Recover the cancelling request below before starting another connection.'));
+    const choices = this.el('div', 'eg-pair-choices'); choices.append(invite, join); this.body.append(choices);
+    this.body.append(this.el('p', 'ca-hint', this.host.status === 'ready' ? `${this.host.room.name} · ${this.host.origin}` : this.host.status === 'unconfigured' ? 'Hosting not set up. You can still join another company.' : 'Hosting is unavailable. You can still join another company.'));
+    if (this.host.status === 'ready') this.body.append(this.button('Manage invitations', () => this.invites()));
+    if (this.handles.length) {
+      const list = this.el('section', 'eg-pair-recent'); list.append(this.el('h3', '', 'Connections in progress'));
+      for (const item of this.handles) {
+        list.append(this.button(item.room?.name || item.hostCompany || 'Resume connection', () => this.resume(item)));
+        if (item.state === 'connected') list.append(this.button(`Reconnect ${item.room?.name || 'shared room'}`, () => this.reconnect(item)));
+      }
+      this.body.append(list);
+    }
+    const fallback = this.el('details', 'eg-pair-fallback'); fallback.append(this.el('summary', '', 'Other ways to connect'));
+    fallback.append(this.button('Use an existing guest key', () => { this.close(); this.view.joinDialog(); })); this.body.append(fallback);
+    this.actions.append(this.button('Cancel', this.cleanup)); invite.disabled ? join.focus() : invite.focus();
+  }
+  async createInvite() {
+    if (this.busy || !this.owner || this.host.status !== 'ready') return;
+    this.clearBody(); this.record = null; this.title.textContent = 'Invite a company'; const epoch = this.epoch;
+    this.body.append(this.el('p', 'eg-pair-status', 'Creating your invitation…')); this.actions.append(this.button('Cancel', this.cleanup));
+    if (!this.inviteOperation) this.inviteOperation = this.win.crypto.randomUUID();
+    this.busy = true; const result = await this.api('/api/embassy-host/invites', { method: 'POST', body: { clientRequestId: this.inviteOperation } }); this.busy = false;
+    if (!this.isCurrent(epoch)) return;
+    if (!result.ok) { this.body.replaceChildren(this.el('p', 'eg-pair-status', this.error(result))); this.actions.prepend(this.button('Retry same invitation', () => this.createInvite())); return; }
+    if (result.data?.qr === null && result.data?.qrAvailable === false && ['pending', 'approved', 'connected', 'expired', 'revoked', 'rejected'].includes(result.data?.state)) {
+      this.body.replaceChildren(this.el('p', 'eg-pair-status', `Invitation ${result.data.state}. It will not be replaced automatically.`));
+      this.actions.replaceChildren(this.button('Back', () => this.home()), this.button('New invitation', () => { this.inviteOperation = null; return this.createInvite(); }, true));
+      if (result.data.state === 'pending') this.actions.prepend(this.button('Scan their confirmation', () => this.scan('request')));
+      return;
+    }
+    try {
+      const invite = caPairInvite(result.data?.qr);
+      if (invite.origin !== this.host.origin || invite.roomId !== this.host.room.id || typeof result.data.inviteId !== 'string' || !Number.isFinite(result.data.expiresAt) || result.data.expiresAt <= Date.now() || result.data.expiresAt > Date.now() + 3600000) throw Error();
+      this.invite = { ...result.data, ...invite }; this.body.replaceChildren(this.el('p', '', `${this.host.room.name} · ${this.host.origin}`));
+      await this.showQR(invite.qr, 'Private company invitation QR'); if (!this.isCurrent(epoch)) return;
+      const note = this.el('p', 'eg-pair-status'); note.append('Have the other company scan this QR in their ', this.view.platformName(), '. Then scan their confirmation QR to approve the connection.'); this.body.append(note);
+      this.body.append(this.el('small', 'ca-hint', `Expires in ${Math.ceil((this.invite.expiresAt - Date.now()) / 60000)} min`));
+      const fallback = this.el('details', 'eg-pair-fallback'); fallback.append(this.el('summary', '', 'Share without a camera'));
+      fallback.append(this.button('Copy invitation', async () => {
+        if (!this.isCurrent(epoch)) return;
+        try { await this.win.navigator.clipboard.writeText(invite.qr); if (this.isCurrent(epoch)) note.textContent = 'Invitation copied. Send it privately to the joining company.'; }
+        catch { if (this.isCurrent(epoch)) { const input = this.el('input'); input.type = 'password'; input.readOnly = true; input.value = invite.qr; input.autocomplete = 'off'; fallback.append(input); input.focus(); input.select(); note.textContent = 'Copy the selected invitation and send it privately.'; } }
+      })); this.body.append(fallback);
+      this.expiryTimer = this.win.setTimeout(() => {
+        if (!this.isCurrent(epoch)) return; this.clearBody(); this.inviteOperation = null; this.body.append(this.el('p', 'eg-pair-status', 'Invitation expired. Create a new one to connect.')); this.actions.append(this.button('New invitation', () => this.createInvite(), true), this.button('Back', () => this.home()));
+      }, Math.max(1, this.invite.expiresAt - Date.now()));
+      this.actions.replaceChildren(this.button('Back', () => this.home()), this.button('Scan their confirmation', () => this.scan('request'), true));
+    } catch { if (this.isCurrent(epoch)) this.body.replaceChildren(this.el('p', 'eg-pair-status', 'Invitation unavailable. Recover invitations before creating another.')); }
+  }
+  async showQR(value, label) {
+    const epoch = this.epoch; const canvas = this.el('canvas', 'eg-pair-qr'); canvas.setAttribute('role', 'img'); canvas.setAttribute('aria-label', label); this.body.append(canvas);
+    const encoder = await caEmbassyQrAsset(this.win, 'code');
+    if (!this.isCurrent(epoch) || !canvas.isConnected) return;
+    await encoder.toCanvas(canvas, value, { errorCorrectionLevel: 'M', margin: 4, width: 320 });
+    if (!this.isCurrent(epoch) || !canvas.isConnected) { canvas.width = 0; canvas.height = 0; }
+  }
+  scan(mode) {
+    if (mode === 'invite') {
+      const cancelling = this.handles.find(item => item.state === 'cancelling');
+      if (cancelling) { void this.resume(cancelling); return; }
+    }
+    this.clearBody(); this.record = null; this.title.textContent = mode === 'invite' ? 'Scan an invitation' : 'Scan their confirmation';
+    const note = this.el('p', 'eg-pair-status', mode === 'invite' ? 'Scan the host company’s QR. This creates a pending request; the host must approve before you can read or post.' : `Approve a request for ${this.host.room?.name || 'this room'} at ${this.host.origin || 'this host'}.`); note.setAttribute('role', 'status'); this.body.append(note);
+    let company, identity;
+    if (mode === 'invite') {
+      const labels = this.el('details', 'eg-pair-labels'); labels.append(this.el('summary', '', 'Choose company and person labels (optional)'));
+      for (const name of ['Company', 'Person']) {
+        const label = this.el('label', '', name), field = this.el('input'); field.type = 'text'; field.maxLength = name === 'Company' ? 120 : 80; field.autocomplete = 'off';
+        label.append(field); labels.append(label); if (name === 'Company') company = field; else identity = field;
+      }
+      this.body.append(labels);
+    }
+    const camera = this.button('Scan with camera', () => this.camera(note, accept)); this.body.append(camera);
+    const fileLabel = this.el('label', 'eg-pair-file', 'Or scan a QR image'); const file = this.el('input'); file.type = 'file'; file.accept = 'image/png,image/jpeg,image/webp'; fileLabel.append(file); this.body.append(fileLabel);
+    const fallback = this.el('details', 'eg-pair-fallback'); fallback.append(this.el('summary', '', mode === 'invite' ? 'Paste an invitation instead' : 'Type the confirmation code instead'));
+    const label = this.el('label', '', mode === 'invite' ? 'Invitation QR text' : 'Confirmation code'); const input = this.el('input', 'eg-pair-code'); input.type = mode === 'invite' ? 'password' : 'text'; input.autocomplete = 'off'; input.spellcheck = false; input.maxLength = 512; label.append(input);
+    const use = this.button(mode === 'invite' ? 'Request to join' : 'Look up confirmation', () => { const value = input.value; input.value = ''; void accept(value); }); fallback.append(label, use); this.body.append(fallback);
+    const epoch = this.epoch;
+    const accept = async value => {
+      if (!this.isCurrent(epoch) || this.busy) return; this.stopCamera(); file.value = ''; input.value = '';
+      if (mode === 'invite') {
+        const labels = { ...(company?.value.trim() ? { company: company.value.trim() } : {}), ...(identity?.value.trim() ? { identity: identity.value.trim() } : {}) };
+        if (company) company.value = ''; if (identity) identity.value = '';
+        await this.join(value, note, labels);
+      } else await this.lookup(value, note);
+    };
+    file.addEventListener('change', async () => {
+      const image = file.files?.[0]; file.value = ''; if (!image) return;
+      if (!['image/png', 'image/jpeg', 'image/webp'].includes(image.type) || image.size > 5 * 1024 * 1024) { note.textContent = 'Choose a PNG, JPEG or WebP under 5 MB.'; return; }
+      let bitmap;
+      try {
+        const decode = await caEmbassyQrAsset(this.win, 'scan'); bitmap = await this.win.createImageBitmap(image);
+        if (!this.isCurrent(epoch) || !file.isConnected) return;
+        if (bitmap.width * bitmap.height > 25000000) throw Error();
+        const canvas = this.el('canvas'), scale = Math.min(1, 1600 / Math.max(bitmap.width, bitmap.height)); canvas.width = Math.max(1, Math.round(bitmap.width * scale)); canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+        const ctx = canvas.getContext('2d', { willReadFrequently: true }); ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height); const pixels = ctx.getImageData(0, 0, canvas.width, canvas.height); const qr = decode(pixels.data, canvas.width, canvas.height); canvas.width = 0;
+        if (!qr) throw Error(); await accept(qr.data);
+      } catch { if (this.isCurrent(epoch) && note.isConnected) note.textContent = 'QR not found. Try another image or paste the invitation/code.'; }
+      finally { bitmap?.close(); }
+    });
+    this.actions.append(this.button('Back', () => this.home())); camera.focus();
+  }
+  async camera(note, accept) {
+    this.stopCamera(); const scanEpoch = this.scanEpoch, epoch = this.epoch;
+    if (!this.win.navigator.mediaDevices?.getUserMedia) { note.textContent = 'Camera unavailable. Use a QR image or paste the invitation/code.'; return; }
+    try {
+      const stream = await this.win.navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false });
+      if (!this.isCurrent(epoch) || scanEpoch !== this.scanEpoch || !note.isConnected || this.doc.hidden) { for (const t of stream.getTracks()) t.stop(); return; }
+      this.stream = stream; const video = this.el('video', 'eg-scan-video'); this.video = video; video.muted = true; video.playsInline = true; video.srcObject = stream; note.after(video); await video.play();
+      const decode = await caEmbassyQrAsset(this.win, 'scan'), end = Date.now() + 60000;
+      const tick = async () => {
+        if (!this.isCurrent(epoch) || scanEpoch !== this.scanEpoch || !note.isConnected || this.doc.hidden) { this.stopCamera(); return; }
+        if (Date.now() >= end) { this.stopCamera(); note.textContent = 'Camera paused. Scan again or use the code fallback.'; return; }
+        if (video.readyState >= 2) {
+          const c = this.el('canvas'), scale = Math.min(1, 960 / Math.max(video.videoWidth, video.videoHeight)); c.width = Math.max(1, Math.round(video.videoWidth * scale)); c.height = Math.max(1, Math.round(video.videoHeight * scale));
+          const ctx = c.getContext('2d', { willReadFrequently: true }); ctx.drawImage(video, 0, 0, c.width, c.height); const px = ctx.getImageData(0, 0, c.width, c.height), qr = decode(px.data, c.width, c.height); c.width = 0;
+          if (qr) { await accept(qr.data); return; }
+        }
+        this.scanTimer = this.win.setTimeout(tick, 250);
+      }; await tick();
+    } catch { this.stopCamera(); if (this.isCurrent(epoch) && note.isConnected) note.textContent = 'Camera unavailable. Use a QR image or paste the invitation/code.'; }
+  }
+  async join(value, note, labels = {}) {
+    if (this.busy || !this.owner) return;
+    let invite; try { invite = caPairInvite(value); } catch { note.textContent = 'Invalid pairing invitation. Scan the host’s Invite QR.'; return; }
+    const epoch = this.epoch; this.guestQr = invite.qr; this.busy = true; note.textContent = `Requesting approval from ${invite.origin}…`;
+    const result = await this.api('/api/embassy-pairing', { method: 'POST', body: { ...labels, qr: invite.qr, clientRequestId: this.guestOperation || (this.guestOperation = this.win.crypto.randomUUID()) } }); this.busy = false;
+    if (!this.isCurrent(epoch)) return;
+    if (!result.ok) { this.guestQr = ''; note.textContent = this.error(result); this.actions.replaceChildren(this.button('Recover connections', async () => { await this.refresh(); if (this.isCurrent(epoch)) this.home(); })); return; }
+    this.guestQr = '';
+    try {
+      const data = result.data;
+      if (!['creating', 'pending', 'approved', 'connected', 'failed', 'cancelling', 'cancelled', 'rejected', 'expired', 'revoked'].includes(data?.state) || data?.origin !== invite.origin || data?.room?.id !== invite.roomId || !this.validHandle(data?.handle)) throw Error();
+      let requestId;
+      if (['pending', 'approved'].includes(data.state)) {
+        const qr = caPairRequest(data.requestQr, invite.origin);
+        if (caPairCode(data.code) !== qr.code) throw Error();
+        requestId = qr.requestId;
+      }
+      this.record = { ...data, ...(requestId ? { requestId } : {}) }; await this.showRecord();
+    } catch { note.textContent = 'Pairing response did not match this invitation. Recover connections to check the outcome.'; }
+  }
+  validHandle(value) { return typeof value === 'string' && /^[A-Za-z0-9_-]{1,80}$/.test(value); }
+  async resume(value) { if (!this.validHandle(value?.handle)) return; this.clearBody(); this.body.append(this.el('p', 'eg-pair-status', 'Restoring connection…')); this.record = { ...value }; await this.poll(); }
+  async showRecord() {
+    const record = this.record; if (!record || !this.validHandle(record.handle)) return;
+    this.handles = [...this.handles.filter(item => item.handle !== record.handle), { ...record }];
+    this.clearBody(); this.title.textContent = 'Connect companies';
+    const label = { creating: 'Creating request', pending: 'Waiting for host approval', approved: 'Approved · connecting', connected: 'Connected', rejected: 'Request declined', expired: 'Request expired', revoked: 'Invitation revoked', cancelling: 'Cancelling… (waiting for the host embassy to confirm)', cancelled: 'Request cancelled', failed: 'Connection unavailable' }[record.state] || 'Checking connection';
+    const note = this.el('p', 'eg-pair-status', label); note.setAttribute('role', 'status'); this.body.append(note);
+    if (record.hostCompany) this.body.append(this.el('p', '', `Connecting to ${String(record.hostCompany).slice(0, 200)}`));
+    if (record.room) this.body.append(this.el('p', 'ca-hint', `${record.room.name || 'Shared room'} · ${record.origin || ''}`));
+    if (record.state === 'pending' && record.requestQr && record.origin) {
+      try {
+        const qr = caPairRequest(record.requestQr, record.origin); if (record.requestId && qr.requestId !== record.requestId || caPairCode(record.code) !== qr.code) throw Error();
+        try { await this.showQR(qr.qr, 'Public confirmation QR'); }
+        catch { if (note.isConnected) note.textContent = 'QR unavailable. Have the host enter the confirmation code instead.'; }
+        if (!note.isConnected) return;
+        this.body.append(this.el('strong', 'eg-pair-confirm-code', qr.code), this.el('p', '', 'Have the host scan this confirmation QR, or enter this code. You cannot read or post until they approve.'));
+      } catch { if (note.isConnected) note.textContent = 'Confirmation unavailable. Recover the request status.'; }
+    }
+    if (!note.isConnected) return;
+    if (record.state === 'failed' && record.error === 'GUEST_LABEL') {
+      note.textContent = 'That name is already in use. Cancel this request before starting over with another name.';
+      this.actions.append(this.button('Cancel and start over', () => this.restartAfterLabelConflict()), this.button('Back', () => this.home()));
+      return;
+    }
+    if (record.state === 'cancelling') {
+      this.actions.append(this.button('Check status', () => this.poll()), this.button('Close', this.cleanup));
+      this.schedulePoll();
+    } else if (record.state === 'cancelled') {
+      this.actions.append(this.button('Start over', () => {
+        if (this.record?.handle !== record.handle || this.record.state !== 'cancelled') return;
+        this.record = null; this.guestOperation = null; this.guestQr = ''; this.scan('invite');
+      }), this.button('Back', () => this.home()));
+    } else if (record.state === 'failed') {
+      this.actions.append(this.button('Cancel request', () => this.cancel()), this.button('Check status', () => this.poll()));
+    } else if (record.state === 'connected' && record.connectionId) this.actions.append(this.button('Open shared room', () => this.openConnected(record), true));
+    else if (['creating', 'pending', 'approved'].includes(record.state)) {
+      this.actions.append(this.button('Cancel request', () => this.cancel()), this.button('Check status', () => this.poll()));
+      this.schedulePoll();
+    } else this.actions.append(this.button('Back', () => this.home()));
+  }
+  schedulePoll() { this.stopPoll(); if (!this.doc.hidden && this.dlg) this.pollTimer = this.win.setTimeout(() => this.poll(), 3000); }
+  async poll() {
+    if (!this.record || this.doc.hidden) return;
+    if (this.polling) { this.schedulePoll(); return; }
+    const handle = this.record.handle, epoch = this.epoch; if (!this.validHandle(handle)) return;
+    this.polling = true; const result = await this.api(`/api/embassy-pairing/${encodeURIComponent(handle)}`); this.polling = false;
+    if (!this.isCurrent(epoch) || this.record?.handle !== handle) return;
+    if (!result.ok) { this.clearBody(); this.body.append(this.el('p', 'eg-pair-status', this.error(result))); this.actions.append(this.button('Check status', () => this.poll()), this.button('Close', this.cleanup)); return; }
+    const states = ['creating', 'pending', 'approved', 'connected', 'rejected', 'expired', 'revoked', 'cancelling', 'cancelled', 'failed'];
+    if (!states.includes(result.data?.state) || result.data?.handle !== handle) { this.clearBody(); this.body.append(this.el('p', 'eg-pair-status', 'Pairing status unavailable. Recover the original request.')); this.actions.append(this.button('Check status', () => this.poll()), this.button('Close', this.cleanup)); return; }
+    if (this.record.state === 'cancelling' && !['cancelling', 'cancelled'].includes(result.data.state)) {
+      this.clearBody(); this.body.append(this.el('p', 'eg-pair-status', 'Cancellation is not confirmed. Recover the original request status.'));
+      this.actions.append(this.button('Check status', () => this.poll()), this.button('Close', this.cleanup)); return;
+    }
+    this.record = { ...this.record, ...result.data, handle };
+    if (!['pending', 'approved'].includes(this.record.state)) { delete this.record.requestQr; delete this.record.code; }
+    if (this.record.state !== 'connected') delete this.record.connectionId;
+    const record = this.record; await this.showRecord();
+    if (this.record === record && this.dlg?.isConnected && this.record?.state === 'connected') await this.openConnected(record);
+  }
+  async restartAfterLabelConflict() {
+    if (this.busy || !this.owner || this.record?.state !== 'failed' || this.record.error !== 'GUEST_LABEL' || !this.validHandle(this.record.handle)) return;
+    const handle = this.record.handle;
+    this.clearBody();
+    this.body.append(this.el('p', 'eg-pair-status', 'Cancelling the previous request…'));
+    const epoch = this.epoch;
+    this.busy = true;
+    const result = await this.api(`/api/embassy-pairing/${encodeURIComponent(handle)}`, { method: 'DELETE' });
+    this.busy = false;
+    if (!this.isCurrent(epoch) || this.record?.handle !== handle) return;
+    if (!result.ok || result.data?.handle !== handle || result.data?.state !== 'cancelled' || result.data?.cancelPending === true) {
+      this.clearBody(); this.body.append(this.el('p', 'eg-pair-status', result.ok ? 'Cancellation is not confirmed. Recover the request before starting over.' : this.error(result)));
+      this.actions.append(this.button('Check status', () => this.poll()), this.button('Back', () => this.home())); return;
+    }
+    this.handles = this.handles.map(item => item.handle === handle ? { ...result.data } : item);
+    this.record = null; this.guestOperation = null; this.guestQr = '';
+    this.scan('invite');
+  }
+  async reconnect(record) {
+    if (this.busy || !this.owner || record?.state !== 'connected' || !this.validHandle(record.handle)) return;
+    if (!this.win.confirm('Recover this connection after losing local access? This replaces the previous session.')) return;
+    this.clearBody(); this.record = { ...record }; const epoch = this.epoch;
+    this.body.append(this.el('p', 'eg-pair-status', 'Recovering connection…'));
+    this.busy = true;
+    const result = await this.api(`/api/embassy-pairing/${encodeURIComponent(record.handle)}/reconnect`, { method: 'POST' });
+    this.busy = false;
+    if (!this.isCurrent(epoch) || this.record?.handle !== record.handle) return;
+    if (!result.ok) {
+      this.body.replaceChildren(this.el('p', 'eg-pair-status', this.error(result)));
+      this.actions.append(this.button('Check status', () => this.poll()), this.button('Back', () => this.home()));
+      return;
+    }
+    if (result.data?.handle !== record.handle || !['connected', 'expired', 'revoked', 'cancelling', 'cancelled', 'rejected', 'failed'].includes(result.data?.state)) {
+      this.body.replaceChildren(this.el('p', 'eg-pair-status', 'Recovery status unavailable. Check the connection before trying again.'));
+      this.actions.append(this.button('Check status', () => this.poll())); return;
+    }
+    this.record = { ...result.data }; await this.showRecord();
+  }
+  async openConnected(record) {
+    if (record?.state !== 'connected' || typeof record.connectionId !== 'string') return;
+    const epoch = this.epoch; await this.view.refresh();
+    if (!this.isCurrent(epoch) || !this.view.connections.some(c => c.id === record.connectionId)) return;
+    this.close(); this.view.open(record.connectionId);
+  }
+  async cancel() {
+    if (this.busy || !this.record || !this.owner) return;
+    const handle = this.record.handle; this.clearBody(); const epoch = this.epoch; this.busy = true;
+    this.body.append(this.el('p', 'eg-pair-status', 'Requesting cancellation…'));
+    const result = await this.api(`/api/embassy-pairing/${encodeURIComponent(handle)}`, { method: 'DELETE' }); this.busy = false;
+    if (!this.isCurrent(epoch) || this.record?.handle !== handle) return;
+    const data = result.data;
+    const states = ['creating', 'pending', 'approved', 'connected', 'rejected', 'expired', 'revoked', 'cancelling', 'cancelled', 'failed'];
+    if (result.ok && data?.handle === handle && states.includes(data.state) && !(data.state === 'cancelled' && data.cancelPending === true)) {
+      this.record = { ...this.record, ...data };
+      if (['rejected', 'expired', 'revoked', 'cancelling', 'cancelled', 'failed'].includes(data.state)) { delete this.record.requestQr; delete this.record.code; delete this.record.connectionId; }
+      await this.showRecord();
+    } else {
+      this.clearBody(); this.body.append(this.el('p', 'eg-pair-status', result.ok ? 'Cancellation is not confirmed. Recover the original request status.' : this.error(result)));
+      this.actions.append(this.button('Check status', () => this.poll()), this.button('Close', this.cleanup));
+    }
+  }
+  async lookup(value, note) {
+    if (this.busy || !this.owner || this.host.status !== 'ready') return;
+    let body, code, requestId;
+    try { if (String(value).startsWith('embassy-pair-v1|')) { const qr = caPairRequest(value, this.host.origin); body = { qr: qr.qr }; code = qr.code; requestId = qr.requestId; } else { code = caPairCode(value); body = { code }; } }
+    catch { note.textContent = 'Invalid confirmation or wrong host. Scan this company’s request QR, or enter its code.'; return; }
+    const epoch = this.epoch; this.busy = true; const result = await this.api('/api/embassy-host/lookup', { method: 'POST', body }); this.busy = false;
+    if (!this.isCurrent(epoch)) return; if (!result.ok) { note.textContent = this.error(result); return; }
+    const data = result.data;
+    if (!data || !/^[0-9a-f-]{36}$/.test(data.requestId) || requestId && data.requestId !== requestId || !data.guest || typeof data.guest.company !== 'string' || typeof data.guest.identity !== 'string') { note.textContent = 'Confirmation response did not match the request.'; return; }
+    this.clearBody(); this.review = { requestId: data.requestId, code }; this.title.textContent = 'Approve connection?';
+    this.body.append(this.el('p', 'eg-pair-guest', `${data.guest.identity.slice(0, 200)} from ${data.guest.company.slice(0, 200)}`), this.el('p', 'ca-hint', `${this.host.room.name} · ${this.host.origin}`), this.el('p', 'ca-hint', 'Company and person names are labels, not verified identity.'));
+    if (data.state === 'pending' && Number.isFinite(data.expiresAt) && data.expiresAt > Date.now()) this.actions.append(this.button('Decline', () => this.decide('reject')), this.button('Approve connection', () => this.decide('approve'), true));
+    else { this.body.append(this.el('p', 'eg-pair-status', data.state === 'approved' || data.state === 'claimed' ? 'This connection is already approved.' : 'This request is no longer available.')); this.actions.append(this.button('Back', () => this.home())); }
+  }
+  async decide(kind) {
+    if (this.busy || !this.owner || !this.review || this.host.status !== 'ready' || !['approve', 'reject'].includes(kind)) return;
+    const epoch = this.epoch, review = this.review; this.busy = true; for (const b of this.actions.querySelectorAll('button')) b.disabled = true;
+    const result = await this.api(`/api/embassy-host/${kind}`, { method: 'POST', body: review }); this.busy = false;
+    if (!this.isCurrent(epoch) || this.review !== review) return;
+    this.clearBody(); this.body.append(this.el('p', 'eg-pair-status', result.ok ? kind === 'approve' ? 'Approved. The other company can now finish connecting.' : 'Request declined.' : this.error(result)));
+    if (!result.ok) { this.review = review; this.actions.append(this.button('Retry same decision', () => this.decide(kind))); }
+    this.actions.append(this.button('Done', () => this.home()));
+  }
+  async invites() {
+    if (this.busy || !this.owner || this.host.status !== 'ready') return;
+    this.clearBody(); this.title.textContent = 'Invitations'; const epoch = this.epoch;
+    this.body.append(this.el('p', 'eg-pair-status', 'Loading invitations…')); const result = await this.api('/api/embassy-host/invites');
+    if (!this.isCurrent(epoch)) return; this.body.replaceChildren();
+    if (!result.ok) this.body.append(this.el('p', 'eg-pair-status', this.error(result)));
+    else {
+      const rows = Array.isArray(result.data) ? result.data : result.data?.invites;
+      for (const row of (Array.isArray(rows) ? rows : []).slice(0, 100)) {
+        if (typeof row.inviteId !== 'string') continue;
+        const item = this.el('section', 'eg-pair-invite'); item.append(this.el('span', '', row.guest ? `${row.guest.identity || 'Guest'} · ${row.guest.company || 'Company'}` : 'Company invitation'), this.el('small', '', ['open', 'pending', 'approved', 'connected', 'expired', 'revoked', 'rejected'].includes(row.state) ? row.state : 'Unavailable'));
+        if (Number.isFinite(row.expiresAt)) item.append(this.el('small', '', row.expiresAt > Date.now() ? `Expires in ${Math.ceil((row.expiresAt - Date.now()) / 60000)} min` : 'Expired'));
+        if (['open', 'pending', 'approved', 'connected'].includes(row.state)) item.append(this.button('Revoke', async () => {
+          if (this.busy || !this.win.confirm('Revoke this invitation and stop its guest access?')) return;
+          this.busy = true; const answer = await this.api(`/api/embassy-host/invites/${encodeURIComponent(row.inviteId)}`, { method: 'DELETE' }); this.busy = false;
+          if (!this.isCurrent(epoch)) return; if (answer.ok) await this.invites(); else item.append(this.el('p', 'eg-pair-status', this.error(answer)));
+        })); this.body.append(item);
+      }
+      if (!this.body.childElementCount) this.body.append(this.el('p', 'eg-pair-status', 'No invitations yet.'));
+    }
+    this.actions.append(this.button('Back', () => this.home()));
   }
 }
 
@@ -6174,5 +7323,12 @@ if (typeof module !== 'undefined' && module.exports) {
     caCount,
     caMentionCandidates,
     ReverieEmbassyView,
+    ReverieEmbassyPairingView,
+    caPairInvite,
+    caPairCode,
+    caPairRequest,
+    caEmbassyInvite,
+    caEmbassyJoinLink,
+    caEmbassyTakeFragment,
   };
 }

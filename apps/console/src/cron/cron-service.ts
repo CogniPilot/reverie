@@ -7,6 +7,7 @@
  * send prompt via writeViaMux/write), mirroring the "quick start" route flow.
  */
 
+import type { AuthorQuotaStore } from './author-quota.js';
 import { v4 as uuidv4 } from 'uuid';
 import { readFile } from 'node:fs/promises';
 import { statSync, realpathSync } from 'node:fs';
@@ -150,7 +151,18 @@ export interface BotPoster {
   /** Throws when the bot may not post in the room now (allowlist, hourly cap, archived room, unknown room). */
   check(bot: ChatBot, roomId: string, recentPosts: number): void;
   post(bot: ChatBot, roomId: string, text: string, recentPosts: number): void;
+  /**
+   * Post as the employee who owns an author routine, with the server's "routine" prefix. Throws with a plain message when the
+   * employee is gone, no longer sits in the room, or the room is archived. Optional: without it author routines fail their run.
+   */
+  postAsAuthor?(employeeId: string, roomId: string, text: string): { name: string };
+  /** One system line in the routine's room (not delivered to anyone's pane) telling the author the routine was disabled. */
+  notifyDisabled?(employeeId: string, roomId: string, text: string): void;
 }
+
+/** Author routines: consecutive failed fires before the routine switches itself off, and posts an hour per author. */
+export const AUTHOR_FAIL_LIMIT = 3;
+export const AUTHOR_POSTS_PER_HOUR = 30;
 
 /** A post job that missed its time by more than this (server down, long pause) is skipped, not sent late. */
 export const POST_CATCH_UP_MS = 5 * 60_000;
@@ -219,7 +231,7 @@ export class CronService {
 
   // ──────────────────────────── Mutations ───────────────────────────
 
-  createJob(input: CronJobInput, owner?: string): CronJob {
+  createJob(input: CronJobInput, owner?: string, createdBy?: CronJob['createdBy']): CronJob {
     if (Object.keys(this.store.getCronJobs()).length >= MAX_CRON_JOBS) {
       throw this.badRequest(`Maximum number of cron jobs (${MAX_CRON_JOBS}) reached`);
     }
@@ -233,7 +245,7 @@ export class CronService {
       ...(action === 'post'
         ? {
             action,
-            botId: input.botId,
+            ...(createdBy ? { postAs: 'author' as const, createdBy } : { botId: input.botId }),
             roomId: input.roomId,
             postText: input.postText,
             dryRun: input.dryRun === true,
@@ -342,6 +354,7 @@ export class CronService {
     if (!existing) return null;
     const now = Date.now();
     existing.enabled = enabled;
+    if (enabled) delete existing.failStreak;
     existing.updatedAt = now;
     existing.nextRunAt = enabled ? computeNextRunAt(existing, now) : null;
     this.store.setCronJob(existing.id, existing);
@@ -831,7 +844,84 @@ export class CronService {
     return this.listRuns().filter((r) => r.status === 'posted' && jobIds.has(r.cronJobId) && r.startedAt > now - HOUR_MS).length;
   }
 
+  /**
+   * Posts an author made in the last hour, across every routine they own or ever owned. Kept in a ledger of its own (saved to
+   * the author quota file when one is set), not read from the job and run records, so deleting a routine (which removes its
+   * runs), pruning the run history or restarting cannot reset the count. An author with no saved entry is counted from the runs
+   * still on file, which covers the first start after this change.
+   */
+  private authorLedger?: Map<string, number[]>;
+  private authorQuota?: AuthorQuotaStore;
+  setAuthorQuota(store: AuthorQuotaStore): void {
+    this.authorQuota = store;
+    this.authorLedger = undefined;
+  }
+  private ledger(): Map<string, number[]> {
+    this.authorLedger ??= new Map(Object.entries(this.authorQuota?.load() ?? {}));
+    return this.authorLedger;
+  }
+  private recentAuthorPosts(employeeId: string, now: number): number {
+    const ledger = this.ledger();
+    let log = ledger.get(employeeId);
+    if (!log) {
+      const jobIds = new Set(this.listJobs().filter((j) => j.action === 'post' && j.createdBy?.employeeId === employeeId).map((j) => j.id));
+      log = this.listRuns().filter((r) => r.status === 'posted' && jobIds.has(r.cronJobId)).map((r) => r.startedAt);
+    }
+    log = log.filter((t) => t > now - HOUR_MS);
+    ledger.set(employeeId, log);
+    return log.length;
+  }
+  private recordAuthorPost(employeeId: string, at: number): void {
+    const ledger = this.ledger();
+    ledger.set(employeeId, [...(ledger.get(employeeId) ?? []), at]);
+    if (!this.authorQuota) return;
+    const keep: Record<string, number[]> = {};
+    for (const [id, times] of ledger) {
+      const recent = times.filter((t) => t > at - HOUR_MS);
+      if (recent.length) keep[id] = recent;
+    }
+    this.authorQuota.save(keep);
+  }
+
+  private fireAuthorPost(job: CronJob, run: CronJobRun): CronJobRun {
+    const employeeId = job.createdBy?.employeeId;
+    if (!employeeId || !this.poster?.postAsAuthor) return this.failRun(job, run, 'This routine has no author who can post');
+    if (this.recentAuthorPosts(employeeId, run.startedAt) >= AUTHOR_POSTS_PER_HOUR) {
+      // A rate limit is the author's own doing, not a broken routine: it does not count toward the auto-disable.
+      return this.failRun(job, run, `Limit of ${AUTHOR_POSTS_PER_HOUR} routine posts an hour reached`, false);
+    }
+    let name: string;
+    try {
+      if (job.dryRun) {
+        run.status = 'skipped';
+        run.errorMessage = `Dry run: would post in ${job.roomId}: ${job.postText}`;
+        run.finishedAt = Date.now();
+        this.store.setCronJobRun(run.id, run);
+        this.deps.broadcast(SseEvent.CronRunUpdated, run);
+        this.updateJobLastStatus(job.id, 'skipped');
+        return run;
+      }
+      ({ name } = this.poster.postAsAuthor(employeeId, job.roomId as string, job.postText as string));
+    } catch (err) {
+      return this.failRun(job, run, `Post failed: ${getErrorMessage(err)}`);
+    }
+    run.status = 'posted';
+    run.finishedAt = Date.now();
+    this.recordAuthorPost(employeeId, run.startedAt);
+    this.store.setCronJobRun(run.id, run);
+    this.deps.broadcast(SseEvent.CronRunUpdated, run);
+    this.updateJobLastStatus(job.id, 'posted');
+    const fresh = this.store.getCronJob(job.id);
+    if (fresh?.failStreak) {
+      fresh.failStreak = 0;
+      this.store.setCronJob(fresh.id, fresh);
+    }
+    console.log(`[cron] posted ${job.id}: ${name} -> ${job.roomId}`);
+    return run;
+  }
+
   private firePost(job: CronJob, run: CronJobRun, sourced?: { text: string | null; reason: string; key?: string }): CronJobRun {
+    if (job.postAs === 'author') return this.fireAuthorPost(job, run);
     const bot = job.botId ? this.poster?.getBot(job.botId) : undefined;
     if (!this.poster || !bot) return this.failRun(job, run, `No bot "${job.botId ?? ''}" is registered`);
     try {
@@ -901,14 +991,34 @@ export class CronService {
     this.updateJobLastStatus(job.id, 'skipped', { touchLastRun: false });
   }
 
-  private failRun(job: CronJob, run: CronJobRun, message: string): CronJobRun {
+  private failRun(job: CronJob, run: CronJobRun, message: string, countsTowardDisable = true): CronJobRun {
     run.status = 'failed';
     run.errorMessage = message;
     run.finishedAt = Date.now();
     this.store.setCronJobRun(run.id, run);
     this.deps.broadcast(SseEvent.CronRunUpdated, run);
     this.updateJobLastStatus(job.id, 'failed');
+    if (job.postAs === 'author' && countsTowardDisable) this.countAuthorFailure(job.id, message);
     return run;
+  }
+
+  /** The third failed fire in a row switches an author routine off and tells its author once, in the routine's room. */
+  private countAuthorFailure(jobId: string, message: string): void {
+    const job = this.store.getCronJob(jobId);
+    if (!job || job.postAs !== 'author') return;
+    job.failStreak = (job.failStreak ?? 0) + 1;
+    this.store.setCronJob(job.id, job);
+    if (job.failStreak < AUTHOR_FAIL_LIMIT || !job.enabled) return;
+    this.setEnabled(job.id, false);
+    try {
+      this.poster?.notifyDisabled?.(
+        job.createdBy?.employeeId as string,
+        job.roomId as string,
+        `Routine "${job.name}" is switched off after ${AUTHOR_FAIL_LIMIT} failed runs in a row (${message}). Fix it and enable it again.`
+      );
+    } catch (err) {
+      console.warn(`[cron] could not tell the author of ${job.id} that it was disabled:`, getErrorMessage(err));
+    }
   }
 
   private recordSkippedRun(job: CronJob): void {

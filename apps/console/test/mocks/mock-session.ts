@@ -4,6 +4,7 @@
  */
 import { EventEmitter } from 'node:events';
 import { vi } from 'vitest';
+import type { DeliverySession } from '../../src/chatroom-delivery.js';
 import type { PromptCacheStatus, SessionAttachmentHistoryItem, SessionStatus, SessionRemote } from '../../src/types.js';
 
 /**
@@ -105,10 +106,14 @@ export class MockSession extends EventEmitter {
     return true;
   }
 
-  /** Write via mux (used by respawn controller) */
-  async writeViaMux(data: string): Promise<boolean> {
+  /** Successful input is confirmed by default; receipt tests can opt out explicitly. */
+  submitOutcome: 'submitted' | 'stranded' | 'unverified' | 'none' = 'submitted';
+
+  /** Write via mux (used by respawn controller). */
+  async writeViaMux(data: string, options?: Parameters<DeliverySession['writeViaMux']>[1]): Promise<boolean> {
     if (this.failWrites) return false;
     this.writeBuffer.push(data);
+    if (this.submitOutcome !== 'none') options?.onOutcome?.(this.submitOutcome);
     return true;
   }
 
@@ -282,6 +287,17 @@ export class MockSession extends EventEmitter {
 
   /** CLI mode */
   mode: string = 'claude';
+
+  /** Mirrors Session.openCodeThread / setOpenCodeThread (PUT /api/sessions/:id/opencode-thread). */
+  openCodeConfig: { continueSession?: string; forkSession?: boolean } | undefined = undefined;
+  get openCodeThread(): string | undefined {
+    return this.openCodeConfig?.continueSession || undefined;
+  }
+  setOpenCodeThread = vi.fn((thread: string) => {
+    if (this.mode !== 'opencode') throw new Error('Only an OpenCode session has a thread');
+    if (this.openCodeConfig?.forkSession === true) throw new Error('This session forks its thread on every start');
+    this.openCodeConfig = { ...this.openCodeConfig, continueSession: thread };
+  });
 
   /** Text output buffer (stripped of ANSI) */
   textOutput: string = '';

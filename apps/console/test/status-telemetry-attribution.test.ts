@@ -9,8 +9,8 @@ import { getLatestAccountPlanUsage, resetLatestAccountPlanUsage } from '../src/w
 
 const mocks = vi.hoisted(() => ({
   catalogue: [
-    { id: 'anthropic-default', label: 'Account One', provider: 'anthropic', isDefault: true, realDir: '/home/.claude' },
-    { id: 'anthropic-two', label: 'Account Two', provider: 'anthropic', isDefault: false, realDir: '/acct/two' },
+    { id: 'anthropic-default', label: 'Default Claude', provider: 'anthropic', isDefault: true, realDir: '/home/.claude' },
+    { id: 'anthropic-fixture-tertiary', label: 'claude tertiary', provider: 'anthropic', isDefault: false, realDir: '/acct/tertiary' },
   ],
 }));
 vi.mock('../src/plan-accounts.js', async (importActual) => ({
@@ -30,27 +30,27 @@ describe('status telemetry attribution by config dir', () => {
 
   beforeEach(async () => {
     resetLatestAccountPlanUsage();
-    h = await createRouteTestHarness(registerStatusTelemetryRoutes, { sessionId: 'coord' });
+    h = await createRouteTestHarness(registerStatusTelemetryRoutes, { sessionId: 'burt' });
   });
 
   it('files a relocated session under its own account and leaves the default series alone', async () => {
-    add('bob', { CLAUDE_CONFIG_DIR: '/acct/two' });
-    add('alice');
-    await post('alice', 62);
-    await post('bob', 27);
+    add('otto', { CLAUDE_CONFIG_DIR: '/acct/tertiary' });
+    add('mira');
+    await post('mira', 62);
+    await post('otto', 27);
     expect(getLatestAccountPlanUsage('anthropic-default')?.usage?.sevenDay?.usedPercentage).toBe(62);
-    expect(getLatestAccountPlanUsage('anthropic-two')?.usage?.sevenDay?.usedPercentage).toBe(27);
+    expect(getLatestAccountPlanUsage('anthropic-fixture-tertiary')?.usage?.sevenDay?.usedPercentage).toBe(27);
   });
 
   it('a session with no override still reports to the default account', async () => {
-    add('alice');
-    await post('alice', 61);
+    add('mira');
+    await post('mira', 61);
     expect(getLatestAccountPlanUsage('anthropic-default')?.usage?.sevenDay?.usedPercentage).toBe(61);
   });
 
   it('an override that resolves to the default directory reports to the default account', async () => {
-    add('alice', { CLAUDE_CONFIG_DIR: '/home/.claude' });
-    await post('alice', 60);
+    add('mira', { CLAUDE_CONFIG_DIR: '/home/.claude' });
+    await post('mira', 60);
     expect(getLatestAccountPlanUsage('anthropic-default')?.usage?.sevenDay?.usedPercentage).toBe(60);
   });
 
@@ -60,7 +60,7 @@ describe('status telemetry attribution by config dir', () => {
     await post('newbie', 33);
     await post('newbie', 34);
     expect(getLatestAccountPlanUsage('anthropic-default')).toBeUndefined();
-    expect(getLatestAccountPlanUsage('anthropic-two')).toBeUndefined();
+    expect(getLatestAccountPlanUsage('anthropic-fixture-tertiary')).toBeUndefined();
     expect((h.ctx.broadcast as ReturnType<typeof vi.fn>).mock.calls.filter((c) => c[0] === 'session:statusTelemetry' || c[1]?.sessionId === 'newbie')).toHaveLength(2);
     expect(warn).toHaveBeenCalledTimes(1);
     warn.mockRestore();

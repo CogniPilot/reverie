@@ -56,6 +56,7 @@ import {
   AutoCompactSchema,
   AutoResumeSchema,
   PinSessionSchema,
+  OpenCodeThreadSchema,
   ImageWatcherSchema,
   FlickerFilterSchema,
   QuickRunSchema,
@@ -110,6 +111,7 @@ import {
   resolveAgentCaseOrigin,
   resolveCasesDir,
   resolveParentSessionId,
+  auditActor,
   sessionCapacityMessage,
   SETTINGS_PATH,
   validatePathWithinBase,
@@ -1442,7 +1444,8 @@ export function registerSessionRoutes(
       await ctx.setupSessionListeners(session);
       if (spawnIdentity) {
         try {
-          await options.company!.completeSpawn(session.id, spawnIdentity);
+          // The audit names the agent that asked (its header, not the body lineage); an owner's own request stays 'owner'.
+          await options.company!.completeSpawn(session.id, spawnIdentity, auditActor(ctx, req, owner));
         } catch (error) {
           // The session is already running; without its rooms and record it would be an orphan under the employee's name.
           await ctx.cleanupSession(session.id, true, 'spawn_failed').catch(() => {});
@@ -3662,6 +3665,44 @@ export function registerSessionRoutes(
     return { success: true, data: { pinned: body.pinned, pinnedAt } };
   });
 
+  // ========== OpenCode thread ==========
+
+  // The owner points an OpenCode session at another conversation thread for its next start. The session id and everything keyed to
+  // it (identity, policies, pin, rooms) stay; nothing is restarted here. Owner only: an agent never moves a session's thread.
+  app.put('/api/sessions/:id/opencode-thread', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    if (req.headers['x-codeman-parent-session'] !== undefined) {
+      return reply.code(403).send(createErrorResponse(ApiErrorCode.FORBIDDEN, 'Only the owner may change a session thread'));
+    }
+    const { thread } = parseBody(OpenCodeThreadSchema, req.body, 'Invalid request body');
+    const session = findSessionOrFail(ctx, id, req);
+    if (session.mode !== 'opencode') {
+      return reply.code(400).send(createErrorResponse(ApiErrorCode.INVALID_INPUT, 'Only an OpenCode session has a thread'));
+    }
+    // Two processes on one thread write over each other, the same rule the launch guard applies.
+    const holder = [...ctx.sessions.values()].find(
+      (s) => s.id !== id && ctx.store.getSession(s.id)?.openCodeConfig?.continueSession === thread
+    );
+    if (holder) {
+      return reply.code(409).send(createErrorResponse(ApiErrorCode.CONFLICT, `${holder.name} (${holder.id}) already resumes that thread`));
+    }
+    const previous = session.openCodeThread ?? null;
+    try {
+      session.setOpenCodeThread(thread);
+    } catch (err) {
+      return reply.code(400).send(createErrorResponse(ApiErrorCode.INVALID_INPUT, getErrorMessage(err)));
+    }
+    persistAndBroadcastSession(ctx, session);
+    getLifecycleLog().log({
+      event: 'thread_set',
+      sessionId: id,
+      name: session.name,
+      mode: session.mode,
+      extra: { from: previous, to: thread, by: 'owner' },
+    });
+    return { success: true, data: { thread, previous } };
+  });
+
   // ========== Image Watcher ==========
 
   app.post('/api/sessions/:id/image-watcher', async (req) => {
@@ -4551,7 +4592,7 @@ export function registerSessionRoutes(
         });
         ctx.broadcast(SseEvent.SessionInteractive, { id: session.id, mode });
       }
-      if (qsSpawnIdentity) await options.company!.completeSpawn(session.id, qsSpawnIdentity);
+      if (qsSpawnIdentity) await options.company!.completeSpawn(session.id, qsSpawnIdentity, auditActor(ctx, req, owner));
       ctx.broadcast(SseEvent.SessionUpdated, { session: ctx.getSessionStateWithRespawn(session) });
 
       // Docker + claude: the pane command pins the conversation id (--session-id /

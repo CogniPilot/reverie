@@ -187,13 +187,13 @@ describe('a coordinator continues a gone agent (resume takeover)', () => {
   afterEach(() => vi.unstubAllEnvs());
   const COORD = 'aaaaaaaa-0000-4000-8000-0000000000a1';
   const PEER = 'bbbbbbbb-0000-4000-8000-0000000000b1';
-  const BLAKE = 'eeeeeeee-0000-4000-8000-0000000000e1';
-  const T_BLAKE = 'eeeeeeee-0000-4000-8000-0000000000e2';
+  const STAN = 'eeeeeeee-0000-4000-8000-0000000000e1';
+  const T_STAN = 'eeeeeeee-0000-4000-8000-0000000000e2';
 
-  const setup = async (opts: { blakeRunning?: boolean; rooms?: unknown[]; auditFails?: boolean } = {}) => {
+  const setup = async (opts: { stanRunning?: boolean; rooms?: unknown[]; auditFails?: boolean } = {}) => {
     const audit: Array<Record<string, unknown>> = [];
     const rooms = (opts.rooms ?? [
-      { id: 'r1', name: 'reverie', members: [{ sessionId: COORD, role: 'coordinator' }, { sessionId: PEER, role: 'member' }, { sessionId: BLAKE, role: 'member' }] },
+      { id: 'r1', name: 'reverie', members: [{ sessionId: COORD, role: 'coordinator' }, { sessionId: PEER, role: 'member' }, { sessionId: STAN, role: 'member' }] },
     ]) as never;
     const h = await createRouteTestHarness((app, ctx) =>
       registerSessionRoutes(app, ctx, {
@@ -206,23 +206,23 @@ describe('a coordinator continues a gone agent (resume takeover)', () => {
         },
       })
     );
-    for (const [id, name] of [[COORD, 'avery'], [PEER, 'morgan'], [BLAKE, 'blake']] as const) {
+    for (const [id, name] of [[COORD, 'burt'], [PEER, 'otto'], [STAN, 'stan']] as const) {
       const s = createMockSession(id);
       s.name = name;
-      (s as unknown as { isRunning: () => boolean }).isRunning = () => id !== BLAKE || !!opts.blakeRunning;
+      (s as unknown as { isRunning: () => boolean }).isRunning = () => id !== STAN || !!opts.stanRunning;
       h.ctx.sessions.set(id, s as never);
     }
-    (h.ctx.sessions.get(BLAKE) as unknown as { claudeSessionId: string }).claudeSessionId = T_BLAKE;
+    (h.ctx.sessions.get(STAN) as unknown as { claudeSessionId: string }).claudeSessionId = T_STAN;
     return { h, audit };
   };
-  const create = (h: Awaited<ReturnType<typeof setup>>['h'], as: string, body: object = { resumeSessionId: T_BLAKE }) =>
+  const create = (h: Awaited<ReturnType<typeof setup>>['h'], as: string, body: object = { resumeSessionId: T_STAN }) =>
     h.app.inject({ method: 'POST', url: '/api/sessions', headers: { 'x-codeman-parent-session': as }, payload: { workingDir: '/nonexistent-resume-guard', ...body } });
 
   it('lets the room\'s coordinator resume the gone agent\'s thread, and writes one audit line', async () => {
     const { h, audit } = await setup();
     const res = await create(h, COORD);
     expect(res.statusCode, res.body).not.toBe(403);
-    expect(audit).toEqual([{ action: 'resume-takeover', by: COORD, conversation: T_BLAKE, member: BLAKE, roomId: 'r1', room: 'reverie' }]);
+    expect(audit).toEqual([{ action: 'resume-takeover', by: COORD, conversation: T_STAN, member: STAN, roomId: 'r1', room: 'reverie' }]);
   });
   it('refuses a member who is not the coordinator, with no audit line', async () => {
     const { h, audit } = await setup();
@@ -231,13 +231,13 @@ describe('a coordinator continues a gone agent (resume takeover)', () => {
     expect(audit).toEqual([]);
   });
   it('refuses while the agent is still running', async () => {
-    const { h, audit } = await setup({ blakeRunning: true });
+    const { h, audit } = await setup({ stanRunning: true });
     expect((await create(h, COORD)).statusCode).toBe(403);
     expect(audit).toEqual([]);
   });
   it('refuses a room the caller does not coordinate', async () => {
     const { h, audit } = await setup({
-      rooms: [{ id: 'r2', name: 'other', members: [{ sessionId: COORD, role: 'member' }, { sessionId: BLAKE, role: 'member' }] }],
+      rooms: [{ id: 'r2', name: 'other', members: [{ sessionId: COORD, role: 'member' }, { sessionId: STAN, role: 'member' }] }],
     });
     expect((await create(h, COORD)).statusCode).toBe(403);
     expect(audit).toEqual([]);
@@ -272,20 +272,20 @@ describe('a coordinator continues a gone agent (resume takeover)', () => {
   });
   it('treats a row only in the persisted state (not loaded after a restart) as gone, matching a Codex thread in codexConfig', async () => {
     const { h, audit } = await setup();
-    h.ctx.sessions.delete(BLAKE);
+    h.ctx.sessions.delete(STAN);
     const THREAD = 'codex-thread-aaaa';
     (h.ctx.store.getSessions as unknown as { mockReturnValue: (v: unknown) => void }).mockReturnValue({
-      [BLAKE]: { id: BLAKE, status: 'busy', claudeSessionId: null, codexConfig: { resumeSessionId: THREAD } },
+      [STAN]: { id: STAN, status: 'busy', claudeSessionId: null, codexConfig: { resumeSessionId: THREAD } },
     });
     const codex = { mode: 'codex', codexConfig: { resumeSessionId: THREAD } };
     const res = await create(h, COORD, codex);
     expect(res.statusCode, res.body).not.toBe(403);
-    expect(audit).toEqual([{ action: 'resume-takeover', by: COORD, conversation: THREAD, member: BLAKE, roomId: 'r1', room: 'reverie' }]);
+    expect(audit).toEqual([{ action: 'resume-takeover', by: COORD, conversation: THREAD, member: STAN, roomId: 'r1', room: 'reverie' }]);
     expect((await create(h, PEER, codex)).statusCode).toBe(403);
   });
   it('fails closed with a 409 and no audit line when the grant disappears between the check and the audit', async () => {
     const calls = { n: 0 };
-    const room = { id: 'r1', name: 'reverie', members: [{ sessionId: COORD, role: 'coordinator' }, { sessionId: BLAKE, role: 'member' }] };
+    const room = { id: 'r1', name: 'reverie', members: [{ sessionId: COORD, role: 'coordinator' }, { sessionId: STAN, role: 'member' }] };
     const { h, audit } = await setup({ rooms: [] });
     // rooms() answers the coordinator room once (the check) and nothing after (the audit).
     const reg = await createRouteTestHarness((app, ctx) =>
@@ -293,13 +293,13 @@ describe('a coordinator continues a gone agent (resume takeover)', () => {
         resumeTakeover: { rooms: () => (calls.n++ === 0 ? ([room] as never) : []), audit: async (e) => void audit.push(e) },
       })
     );
-    for (const [id, name] of [[COORD, 'avery'], [BLAKE, 'blake']] as const) {
+    for (const [id, name] of [[COORD, 'burt'], [STAN, 'stan']] as const) {
       const s = createMockSession(id);
       s.name = name;
       (s as unknown as { isRunning: () => boolean }).isRunning = () => id === COORD;
       reg.ctx.sessions.set(id, s as never);
     }
-    (reg.ctx.sessions.get(BLAKE) as unknown as { claudeSessionId: string }).claudeSessionId = T_BLAKE;
+    (reg.ctx.sessions.get(STAN) as unknown as { claudeSessionId: string }).claudeSessionId = T_STAN;
     void h;
     const res = await create(reg as never, COORD);
     expect(res.statusCode).toBe(409);
@@ -311,7 +311,7 @@ describe('a coordinator continues a gone agent (resume takeover)', () => {
       method: 'POST',
       url: '/api/sessions',
       headers: { 'x-codeman-parent-session': PEER },
-      payload: { workingDir: '/nonexistent-resume-guard', resumeSessionId: T_BLAKE, parentSessionId: COORD },
+      payload: { workingDir: '/nonexistent-resume-guard', resumeSessionId: T_STAN, parentSessionId: COORD },
     });
     expect(res.statusCode).toBe(403);
     expect(audit).toEqual([]);

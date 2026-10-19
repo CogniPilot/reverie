@@ -148,6 +148,9 @@ import {
 import type { SessionAttachmentHistoryItem, DisplayModel } from './types/session.js';
 import { resolveConfigModel } from './model-config-resolvers.js';
 import { legacyConfigForMode } from './session-cli-registry-bridge.js';
+import { checkFullAccessFlags, fullAccessByDefault, withFullAccessDefault, type FullAccessCheck } from './full-access-default.js';
+import { canUsernameRunPrivilegedCommands } from './user-store.js';
+import { getLifecycleLog } from './session-lifecycle-log.js';
 import {
   launchModelFor,
   readScreenModel,
@@ -1632,6 +1635,88 @@ export class Session extends EventEmitter {
     return this._codexConfig;
   }
 
+  /** The post-launch argv check of the latest launch: resolves to the missing flags (empty when none). */
+  fullAccessCheck: Promise<string[]> = Promise.resolve([]);
+
+  /** How long after a launch the argv check runs, so the CLI has started below the pane launcher. */
+  static fullAccessCheckDelayMs = 5000;
+
+  /** How many more times, one delay apart, the check looks again while no CLI process has started yet. */
+  static fullAccessCheckRetries = 5;
+
+  /**
+   * Fill this session's unset CLI bypass switches inside the fleet container
+   * (full-access-default.ts). Runs before every local launch and relaunch, so a session
+   * created, moved or recovered without the switch still starts with full access, and the
+   * filled config is what `toState()` persists. True when the config changed.
+   */
+  async applyFullAccessDefault(): Promise<boolean> {
+    if (this._remote || this._docker) return false;
+    const slot = this._fullAccessConfigSlot();
+    if (!slot) return false;
+    const next = await withFullAccessDefault(this.mode, slot[0](), this._owner);
+    if (!next) return false;
+    slot[1](next);
+    console.log(`[Session] ${this.id}: full-access default applied to ${getCli(this.mode)?.launch.legacyConfigField}`);
+    return true;
+  }
+
+  /** Getter/setter for the config field that holds this CLI's bypass switches, if it has one. */
+  private _fullAccessConfigSlot(): [() => object | undefined, (v: object) => void] | undefined {
+    const field = getCli(this.mode)?.launch.legacyConfigField;
+    const slots: Record<string, [() => object | undefined, (v: object) => void]> = {
+      codexConfig: [() => this._codexConfig, (v) => (this._codexConfig = v as CodexConfig)],
+      antigravityConfig: [() => this._antigravityConfig, (v) => (this._antigravityConfig = v as AntigravityConfig)],
+      piConfig: [() => this._piConfig, (v) => (this._piConfig = v as PiConfig)],
+      grokConfig: [() => this._grokConfig, (v) => (this._grokConfig = v as GrokConfig)],
+      openCodeConfig: [() => this._openCodeConfig, (v) => (this._openCodeConfig = v as OpenCodeConfig)],
+    };
+    return field ? slots[field] : undefined;
+  }
+
+  /**
+   * A few seconds after a local launch inside the fleet container, read the real argv of the
+   * pane's process tree (the CLI runs below the pane's `bash -c` launcher) and report any
+   * expected bypass flag that is missing: logged as a `full_access_missing` lifecycle event
+   * and emitted as `fullAccessMissing` (the server posts it to #reverie and pushes it to the
+   * owner). Only the CLI's own processes count; while none has started yet the check looks
+   * again, `fullAccessCheckRetries` times, then reports it ('no-cli'). Nothing is expected for
+   * a non-granted owner or for a switch the session's config sets to `false`. Resolves when
+   * the check has run.
+   */
+  private _scheduleFullAccessCheck(pid: number | null | undefined, delayMs = Session.fullAccessCheckDelayMs): Promise<string[]> {
+    if (!pid || this._remote || this._docker || !fullAccessByDefault()) return Promise.resolve([]);
+    return new Promise((resolve) => {
+      let retries = Session.fullAccessCheckRetries;
+      const run = () => {
+        void this._checkFullAccess(pid, retries-- > 0).then((missing) => {
+          if (missing === undefined) setTimeout(run, delayMs).unref?.();
+          else resolve(missing);
+        }, () => resolve([]));
+      };
+      setTimeout(run, delayMs).unref?.();
+    });
+  }
+
+  /** The missing flags, or `undefined` when no CLI process has started yet and `retry` asks to look again. */
+  private async _checkFullAccess(pid: number, retry = false): Promise<string[] | undefined> {
+    if (!(await canUsernameRunPrivilegedCommands(this._owner))) return [];
+    const check: FullAccessCheck = checkFullAccessFlags(this.mode, pid, this._fullAccessConfigSlot()?.[0](), undefined, this._claudeMode);
+    if (check.reason === 'no-cli' && retry) return undefined;
+    const { missing, reason } = check;
+    if (missing.length === 0) return [];
+    console.warn(`[Session] ${this.id}: launched without full access (pane pid ${pid}, ${reason}, missing ${missing.join(' ')})`);
+    getLifecycleLog().log({
+      event: 'full_access_missing',
+      sessionId: this.id,
+      name: this._name,
+      mode: this.mode,
+      extra: { pid, missing, reason },
+    });
+    this.emit('fullAccessMissing', { pid, missing, reason });
+    return missing;
+  }
+
   // Note: _buildPermissionArgs removed — now using buildInteractiveArgs from session-cli-builder.ts
 
   /**
@@ -1924,6 +2009,23 @@ export class Session extends EventEmitter {
 
   isBusy(): boolean {
     return this._status === 'busy';
+  }
+
+  /** The OpenCode thread the next start resumes (`--session`), if any. */
+  get openCodeThread(): string | undefined {
+    const thread = this._openCodeConfig?.continueSession;
+    return typeof thread === 'string' && thread.length > 0 ? thread : undefined;
+  }
+
+  /**
+   * Point the next start at another OpenCode thread. The running CLI is untouched: the change takes
+   * effect on the next start (an in-place restart or a reboot restore). A forking config is refused,
+   * because every start would fork the thread again.
+   */
+  setOpenCodeThread(thread: string): void {
+    if (this.mode !== 'opencode') throw new Error('Only an OpenCode session has a thread');
+    if (this._openCodeConfig?.forkSession === true) throw new Error('This session forks its thread on every start');
+    this._openCodeConfig = { ...this._openCodeConfig, continueSession: thread };
   }
 
   isRunning(): boolean {
@@ -2345,7 +2447,7 @@ export class Session extends EventEmitter {
     return this._withPaneLifecycle(() => this._doRestartCli());
   }
 
-  private async _doRestartCli(): Promise<boolean> {
+  private async _doRestartCli(onlyIfDead = false): Promise<boolean> {
     if (!this._useMux || !this._mux || !this._muxSession) return false;
     const mux = this._mux;
 
@@ -2355,7 +2457,10 @@ export class Session extends EventEmitter {
     }
 
     this._pinOmpRespawnId();
-    const newPid = await mux.respawnPane(await this._buildRespawnPaneOptionsWithResumePin());
+    await this.applyFullAccessDefault();
+    const options = await this._buildRespawnPaneOptionsWithResumePin();
+    if (onlyIfDead && (this._closing || this._respawnBlocked)) return false;
+    const newPid = await mux.respawnPane(onlyIfDead ? { ...options, onlyIfDead: true } : options);
     if (!newPid) {
       console.error('[Session] restartCli: respawnPane failed for', this._muxSession.muxName);
       return false;
@@ -2365,6 +2470,7 @@ export class Session extends EventEmitter {
     // is history. Without this the caller's persist-and-broadcast writes the old
     // exit straight back onto a session that is running again.
     this.clearPaneExitForNewPane();
+    this.fullAccessCheck = this._scheduleFullAccessCheck(newPid);
     console.log('[Session] restartCli: restarted CLI for', this._muxSession.muxName, 'pid', newPid);
     return true;
   }
@@ -2743,13 +2849,38 @@ export class Session extends EventEmitter {
   }
 
   async startInteractive(): Promise<void> {
-    if (this.ptyProcess) {
-      throw new Error('Session already has a running process');
-    }
     if (this._closing) {
       throw new Error('Session is being closed');
     }
+    if (this._respawnBlocked) {
+      throw new Error(
+        'Respawn blocked: interactive PTY exited non-zero too many times in a short window (circuit breaker tripped). Restart the session to clear it.'
+      );
+    }
+    if (this.ptyProcess) {
+      // remain-on-exit keeps the attach PTY alive after the local CLI exits.
+      // Recover in the same pane, retaining its PTY, listeners and identity.
+      // Unknown, remote and docker panes are not evidence of a dead local CLI.
+      if (
+        !this.paneExitApplies ||
+        !this._mux ||
+        !this._muxSession ||
+        this.paneLifecycleInFlight ||
+        !this._mux.isPaneDead(this._muxSession.muxName)
+      ) {
+        throw new Error('Session already has a running process');
+      }
+      await this._withPaneLifecycle(async () => {
+        // onlyIfDead makes the final tmux respawn refuse a pane that came alive
+        // after the observation above. No process is killed by pid or pattern.
+        if (!(await this._doRestartCli(true))) {
+          throw new Error('The exited pane could not be restarted; its process may already be running');
+        }
+      });
+      return;
+    }
     this._ensurePaneDialogScan();
+    await this.applyFullAccessDefault();
 
     // Bounds the workspace-trust scan (see _maybeAcceptTrustDialog). Stamped here
     // rather than at PTY spawn so a slow mux attach still counts as startup.
@@ -2759,16 +2890,6 @@ export class Session extends EventEmitter {
     if (this._trustDialogTimer) {
       clearTimeout(this._trustDialogTimer);
       this._trustDialogTimer = null;
-    }
-
-    // COD-118: if the PTY exit breaker has tripped (repeated non-zero exits in a
-    // short window), refuse to respawn. This is the uniform choke point that stops
-    // automatic recovery/reconnect callers from re-creating a crash-looping PTY.
-    // An explicit user restart clears it via resetRespawnBreaker().
-    if (this._respawnBlocked) {
-      throw new Error(
-        'Respawn blocked: interactive PTY exited non-zero too many times in a short window (circuit breaker tripped). Restart the session to clear it.'
-      );
     }
 
     this._resetBuffers();
@@ -3047,6 +3168,7 @@ export class Session extends EventEmitter {
 
     this._pid = this.ptyProcess.pid;
     console.log('[Session] Interactive PTY spawned with PID:', this._pid);
+    this.fullAccessCheck = this._scheduleFullAccessCheck(this._muxSession?.pid);
 
     this.ptyProcess.onData((rawData: string) => {
       // Filter out focus escape sequences and Ctrl+L (form feed)
