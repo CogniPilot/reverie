@@ -3323,7 +3323,11 @@ class ReverieChatApp {
       },
       true
     );
-    this.doc.addEventListener('visibilitychange', () => this.markReadSoon());
+    this.doc.addEventListener('visibilitychange', () => {
+      this.markReadSoon();
+      // Back from a sleeping phone or a background tab: what the live stream missed comes in now.
+      if (this.doc.visibilityState === 'visible' && this.roomId && !this.embassy?.selected) this.app._chatOnVisible?.();
+    });
     this.doc.addEventListener('keydown', (e) => {
       if (e.key === 'Escape' && this.active && this.drawer && !this.doc.querySelector('dialog[open]')) {
         this.toggleDrawer(null);
@@ -4257,6 +4261,12 @@ class ReverieChatApp {
     const text = this.el('span', 'ca-member-text');
     const line = this.el('span', 'ca-member-name', m.name);
     text.append(line);
+    const alert = this.app._chatAlertBadge?.(m, 'ca-member-alert');
+    if (alert) {
+      line.append(' ', alert);
+      // Ring is everyone's default: only a held mode is worth saying aloud.
+      if (alert.dataset.alertMode !== 'ring') b.setAttribute('aria-label', `${b.getAttribute('aria-label')}, ${alert.title}`);
+    }
     if (m.role === 'coordinator') text.append(this.el('span', 'ca-tag', 'Admin'));
     if (m.voice) text.append(this.el('span', 'ca-tag', 'Voice'));
     // A member that needs you says so in words as well as colour.
@@ -5713,6 +5723,7 @@ class ReverieChatApp {
       feed.append(this.el('p', 'ca-feed-empty', this.room && caIsDm(this.room) ? `This is the beginning of your conversation with @${caRoomLabel(this.room)}.` : `This is the start of #${this.room?.name || 'the channel'}. Say hello: everyone in the channel reads it.`));
     }
     for (const item of caFeedItems(messages, this._readMarkAt)) feed.append(this.feedNode(item));
+    this.app._chatPendingDraw?.();
     feed.scrollTop = keepScroll && !pinned ? top : feed.scrollHeight;
     this._feedStick = !(keepScroll && !pinned);
     this.markReadSoon();
@@ -5767,6 +5778,7 @@ class ReverieChatApp {
       const feed = this.app._chatEls.feed;
       const atBottom = feed.scrollHeight - feed.scrollTop - feed.clientHeight < 60;
       this.appendMessage(data.message);
+      this.app._chatPendingDraw?.();
       if (atBottom || data.message.from.kind === 'user') feed.scrollTop = feed.scrollHeight;
       if (atBottom && this.doc.visibilityState !== 'hidden') this.markReadSoon();
       else this.countMessage(data, room);
@@ -5898,6 +5910,7 @@ function caInstall(proto) {
     renderApprovals: proto.renderApprovals,
     handleNotificationAction: proto.handleNotificationAction,
     _selectUrlSession: proto._selectUrlSession,
+    setConnectionStatus: proto.setConnectionStatus,
   };
   Object.assign(proto, {
     isChatroomOpen() {
@@ -6002,6 +6015,17 @@ function caInstall(proto) {
         }
       }
       return res;
+    },
+    // The live stream does not replay what was sent while it was down (the heartbeat watchdog or a page coming back
+    // into view reconnects a dead one), so every time it (re)opens, the open room catches up from the last message
+    // proved complete. That includes the page's first open: the transport's own state is the only signal used (no
+    // memory of earlier opens, which a shell installed on an already-connected page would not have), and with
+    // nothing missed it costs one small request.
+    setConnectionStatus(status) {
+      const was = this._connectionStatus;
+      original.setConnectionStatus?.call(this, status);
+      if (status !== 'connected' || was === 'connected') return;
+      if (this._chatRoomId && !this._chatApp?.embassy?.selected) this._chatBackfill?.();
     },
     // A session's state changes (a hook arrives or clears, its status changes): the member dots follow.
     setPendingHook(sessionId, hookType) {

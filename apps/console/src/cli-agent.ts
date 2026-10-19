@@ -1952,6 +1952,22 @@ export function registerAgentCommands(program: Command): Command {
     .description('Talk in the Reverie chatroom(s) this session belongs to: say, read, who, status, add, new, rooms');
 
   chat
+    .command('mode [mode]')
+    .description('Read or set your employee phone mode: ring, vibrate, silent; quiet leases expire within 8h')
+    .option('--for <duration>', 'Lease duration, e.g. 30m or 1h (maximum 8h)', '1h')
+    .option('--json', 'Machine-readable output')
+    .action((mode: string | undefined, options: { for: string; json?: boolean }) => run(Boolean(options.json), async (deps) => {
+      const match = /^(\d+(?:\.\d+)?)(m|h)$/.exec(options.for);
+      const durationMs = match ? Number(match[1]) * (match[2] === 'h' ? 3600000 : 60000) : NaN;
+      if (mode && (!['ring', 'vibrate', 'silent'].includes(mode) || !Number.isFinite(durationMs) || durationMs <= 0 || durationMs > 28800000)) return fail(deps, 'Use ring|vibrate|silent --for 1h (maximum 8h)');
+      const res = await deps.request(deps.ctx, { method: mode ? 'POST' : 'GET', path: '/api/v1/chatrooms/alert-mode', ...(mode ? { body: { mode, durationMs } } : {}) });
+      if (!res.json?.success) return fail(deps, describeFailure(res));
+      if (deps.json) emitJson(deps, res.json.data ?? {});
+      else deps.io.out(JSON.stringify(res.json.data ?? {}));
+      return EXIT.ok;
+    }));
+
+  chat
     .command('rooms')
     .description('List the chatrooms this session is in (--all also lists the public channels it could join)')
     .option('--all', 'Also list the public channels you are not in')

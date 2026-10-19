@@ -14,7 +14,11 @@ vm.runInContext('globalThis.CodemanApp = class {}; globalThis.fetch = () => new 
 vm.runInContext(readFileSync(resolve(import.meta.dirname, '../src/web/public/chatroom-ui.js'), 'utf8'), context);
 afterAll(() => dom.window.close());
 
-function composer(api: (url: string, o: unknown) => Promise<{ ok: boolean; error?: string }>) {
+type Answer = { ok: boolean; status?: number; errorCode?: string; error?: string; data?: unknown };
+// A stored send's answer carries the stored message (without it the page cannot confirm the send).
+const stored = (): Answer => ({ ok: true, data: { message: { id: 'p1', text: 'I ran it' } } });
+
+function composer(api: (url: string, o: unknown) => Promise<Answer>) {
   const self = vm.runInContext('Object.create(CodemanApp.prototype)', context) as Record<string, unknown>;
   const input = { value: 'I ran it', focus() {} };
   Object.assign(self, {
@@ -29,21 +33,22 @@ function composer(api: (url: string, o: unknown) => Promise<{ ok: boolean; error
 describe('_sendChatMessage', () => {
   it('posts once however many times it is triggered before the answer', async () => {
     const posts: unknown[] = [];
-    let answer!: (v: { ok: boolean }) => void;
+    let answer!: (v: Answer) => void;
     const { self, input } = composer((_u, o) => {
       posts.push(o);
       return new Promise((r) => (answer = r));
     });
     const sends = [self._sendChatMessage(), self._sendChatMessage(), self._sendChatMessage()];
-    answer({ ok: true });
+    answer(stored());
     await Promise.all(sends);
     expect(posts).toHaveLength(1);
     expect(input.value).toBe('');
   });
 
   it('sends again after the first has finished, and after a failure', async () => {
+    // A documented refusal: the text stays to send again. A lost answer is held instead (chatroom-send-feedback.test.ts).
     let calls = 0;
-    const { self, input } = composer(async () => ({ ok: ++calls > 1 }));
+    const { self, input } = composer(async () => (++calls > 1 ? stored() : { ok: false, status: 400, errorCode: 'INVALID_INPUT', error: 'No' }));
     await self._sendChatMessage(); // fails: text stays
     expect(input.value).toBe('I ran it');
     await self._sendChatMessage();

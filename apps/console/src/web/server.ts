@@ -1318,6 +1318,10 @@ export class WebServer extends EventEmitter {
     const chatroomFiles = new ChatFileStore(getDataDir());
     this.chatroomService = new ChatroomService({
       file: dataPath('chatrooms.json'),
+      employeeOf: (sessionId) => {
+        const employees = this.companyService?.view().employees.filter((e) => e.sessionId === sessionId) ?? [];
+        return employees.length === 1 ? employees[0].id : undefined;
+      },
       // Rooms and messages live in SQLite; chatrooms.json is imported once, when chat.db does not exist yet.
       database: dataPath('chat.db'),
       deferDeliveryRecovery: true,

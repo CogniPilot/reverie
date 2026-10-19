@@ -157,6 +157,25 @@ export function registerChatroomRoutes(
     options.preHandler = [refuseUnresolvedParent, ...existing];
   });
 
+  app.get('/api/chatrooms/alert-mode', async (req, reply) => {
+    const self = caller(req);
+    if (!self) return forbid(reply, 'A bound employee session is required');
+    if (!employeeOf(self)) return forbid(reply, 'No employee binding');
+    return { success: true, data: { alertMode: service.alertMode(self) ?? null } };
+  });
+  app.post('/api/chatrooms/alert-mode', async (req, reply) => {
+    const self = caller(req);
+    if (!self || !employeeOf(self)) return forbid(reply, 'A bound employee session is required');
+    const body = req.body as { mode?: unknown; durationMs?: unknown } | null;
+    if (!body || !['ring', 'vibrate', 'silent'].includes(String(body.mode)) || typeof body.durationMs !== 'number') {
+      return reply.code(400).send(createErrorResponse(ApiErrorCode.INVALID_INPUT, 'Expected mode and durationMs'));
+    }
+    try {
+      const alertMode = await service.setAlertMode(self, body.mode as 'ring' | 'vibrate' | 'silent', body.durationMs);
+      return { success: true, data: { alertMode: alertMode ?? null } };
+    } catch (error) { return sendError(reply, error); }
+  });
+
   const userName = (req: FastifyRequest): string => (isMultiUserMode() ? getAuthUser(req).username : 'user');
 
   const roomOrFail = (req: FastifyRequest, id: string): ChatRoom => {
@@ -881,7 +900,8 @@ export function registerChatroomRoutes(
         if (!allowed(req, room, 'messages.post')) return forbid(reply, 'You cannot post in this room (messages.post)');
         from = { kind: 'agent', sessionId: self, name: service.nameOf(self) };
       } else {
-        from = { kind: 'user', name: userName(req) };
+        const mark = ownerMark(req, verifiedOwner, false);
+        from = { kind: 'user', name: userName(req), ...(mark ? { mark } : {}) };
       }
       const recipients = recipientsFor(room, body.to, false);
       const message = service.createPoll(
