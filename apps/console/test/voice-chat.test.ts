@@ -129,6 +129,15 @@ describe('cumulative browser speech results', () => {
     rec.onend();
     rec.onend();
     expect(posted).toEqual(['can you hear me']);
+    app._startLocalDictation();
+    const repeated = instances[1];
+    repeated.onresult({ resultIndex: 0, results: [result('yes', true), result('yes', true)] });
+    repeated.onend();
+    app._startLocalDictation();
+    const shorter = instances[2];
+    shorter.onresult({ resultIndex: 0, results: [result('go now', true), result('go', true)] });
+    shorter.onend();
+    expect(posted).toEqual(['can you hear me', 'yes yes', 'go now go']);
   });
 });
 

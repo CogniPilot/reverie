@@ -42,7 +42,7 @@ function chatSpeechJoin(previous, next) {
   const a = String(previous || '').trim();
   const b = String(next || '').trim();
   if (!a) return b;
-  if (!b || a === b || a.startsWith(`${b} `)) return a;
+  if (!b) return a;
   if (b.startsWith(`${a} `)) return b;
   return `${a} ${b}`;
 }
