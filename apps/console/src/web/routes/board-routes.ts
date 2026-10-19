@@ -11,7 +11,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { randomBytes } from 'node:crypto';
 import { z } from 'zod';
 import { BoardError, type BoardStore } from '../../board-store.js';
-import { boardPace, importContent, importSchedule, upsertById, type ContentFile, type ScheduleFile } from '../../board-logic.js';
+import { boardOwnerIds, boardPace, importContent, importSchedule, upsertById, type ContentFile, type ScheduleFile } from '../../board-logic.js';
 import {
   BlockerSchema,
   DecisionSchema,
@@ -269,17 +269,19 @@ export function registerBoardRoutes(app: FastifyInstance, ctx: SessionPort & Par
         }
       }
       pins.sort((a, b) => b.at - a.at);
+      const ownerIds = boardOwnerIds(state.issues, company.employees);
       const view: BoardView = {
         ...state,
         built: at,
         timeZone: company.settings.timeZone,
         ownerName: company.settings.ownerName,
         roster,
+        ownerIds,
         // Same gate as GET /api/plans.
         planBurn: isAdmin(req) ? await planBurn(state) : null,
         polls,
         pins,
-        pace: boardPace(state, at),
+        pace: boardPace(state, at, ownerIds),
       };
       return view;
     })

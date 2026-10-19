@@ -257,6 +257,31 @@ describe('board routes', () => {
     expect(body.items.map((i: { key: string }) => i.key).sort()).toEqual(['d-one', 'r1:m1']);
   });
 
+  it('resolves legacy owner names for display and pace without rewriting ownership or granting edit rights', async () => {
+    const issue = (id: string, fields: Partial<Issue>): Issue => ({id, title:id, status:'todo', tags:[], links:[], start:NOW-7200000, end:NOW-3600000, createdAt:1, updatedAt:1, ...fields});
+    const issues = [
+      issue('stable', {owner:'e-bev', status:'done', doneAt:NOW-3600000}),
+      issue('label', {ownerLabel:'  bEV  '}),
+      issue('literal', {owner:'BEV'}),
+      issue('explicit', {owner:'e-burt', ownerLabel:'Bev'}),
+      issue('owner-label', {ownerLabel:'James'}),
+      issue('sleep-label', {ownerLabel:'Sleep'}),
+    ];
+    await store.update({}, state => {state.issues=issues;});
+    const before=JSON.stringify(store.snapshot());
+    const view=(await app.inject({method:'GET',url:'/api/board'})).json().data;
+    expect(view.ownerIds).toEqual({stable:'e-bev',label:'e-bev',literal:'e-bev',explicit:'e-burt'});
+    expect(view.issues).toEqual(issues);
+    expect(view.pace.owners['e-bev']).toMatchObject({plannedToDate:3,doneOfPlanned:1,overdue:2});
+    expect(view.pace.owners.BEV).toBeUndefined();
+    expect(view.pace.owners['  bEV  ']).toBeUndefined();
+    expect(view.pace.owners.James.overdue).toBe(1);
+    expect(view.pace.owners.Sleep.overdue).toBe(1);
+    expect((await patch('/api/board/issues/label',{status:'doing'},BEV)).statusCode).toBe(403);
+    expect(JSON.stringify(store.snapshot())).toBe(before);
+    expect(audit).toEqual([]);
+  });
+
   it('imports schedule-data.json and content.json idempotently, keeping unmatched names', async () => {
     const schedule = {
       today: { date: '2026-10-17', rows: [{ who: 'Bev', blocks: [[13.0, 14.0, 'Smoke test', 'done'], [14.0, 15.0, 'Suite', 'now']] }], marks: [[17.08, 'check-ins']] },
