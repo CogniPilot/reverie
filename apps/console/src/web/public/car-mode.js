@@ -419,6 +419,118 @@ const CAR_STATUS = {
   off: 'Off',
 };
 
+/** Owns only the screen lock; it never starts audio, changes phone settings or retries forever. */
+class CarScreenWakeLock {
+  constructor(deps) {
+    this.deps = deps;
+    this.active = false;
+    this.generation = 0;
+    this.lock = null;
+    this.pending = null;
+    this.retryTimer = null;
+    this.attempts = 0;
+    this.onVisibility = () => {
+      if (!this.active) return;
+      this.generation++;
+      this.pending = null;
+      this._clearRetry();
+      this._release();
+      this.attempts = 0;
+      if (this.deps.visible()) void this.acquire();
+      else this.deps.status(false, 'Screen may sleep while this tab is hidden.');
+    };
+  }
+
+  start() {
+    if (this.active) return;
+    this.active = true;
+    this.generation++;
+    this.deps.addVisibility(this.onVisibility);
+    return this.acquire();
+  }
+
+  stop() {
+    this.active = false;
+    this.generation++;
+    this.pending = null;
+    this._clearRetry();
+    this.deps.removeVisibility(this.onVisibility);
+    this._release();
+  }
+
+  retry() {
+    this.attempts = 0;
+    return this.acquire();
+  }
+
+  _clearRetry() {
+    if (this.retryTimer !== null) this.deps.clearTimeout(this.retryTimer);
+    this.retryTimer = null;
+  }
+
+  _release() {
+    const held = this.lock;
+    this.lock = null;
+    if (!held) return;
+    held.sentinel.removeEventListener('release', held.onRelease);
+    if (!held.sentinel.released) Promise.resolve(held.sentinel.release()).catch(() => {});
+  }
+
+  async acquire() {
+    if (!this.active || this.lock || this.pending) return;
+    if (!this.deps.visible()) {
+      this.deps.status(false, 'Screen may sleep while this tab is hidden.');
+      return;
+    }
+    if (!this.deps.secure) {
+      this.deps.status(false, 'Screen may sleep: open Reverie over HTTPS to keep it awake.');
+      return;
+    }
+    if (!this.deps.request) {
+      this.deps.status(false, 'Screen may sleep: wake lock is unavailable in this browser.');
+      return;
+    }
+    if (this.attempts >= 3) {
+      this.deps.status(false, 'Screen lock keeps dropping. Tap Retry or check your screen timeout settings.');
+      return;
+    }
+    const token = { generation: this.generation };
+    this.pending = token;
+    this.attempts++;
+    this.deps.status(false, 'Requesting screen lock…');
+    try {
+      const sentinel = await this.deps.request();
+      if (!this.active || token.generation !== this.generation || !this.deps.visible()) {
+        if (!sentinel.released) await sentinel.release();
+        return;
+      }
+      if (sentinel.released) throw new Error('released');
+      const onRelease = () => {
+        if (this.lock?.sentinel !== sentinel) return;
+        this.lock = null;
+        this.deps.status(false, 'Screen lock released; the screen may sleep.');
+        if (this.active && this.deps.visible()) {
+          this._clearRetry();
+          const generation = this.generation;
+          this.retryTimer = this.deps.setTimeout(() => {
+            this.retryTimer = null;
+            if (this.active && generation === this.generation) void this.acquire();
+          }, 1000);
+        }
+      };
+      this.lock = { sentinel, onRelease };
+      sentinel.addEventListener('release', onRelease, { once: true });
+      this.deps.status(true, 'Screen kept awake');
+    } catch {
+      if (this.active && token.generation === this.generation) {
+        this.deps.status(false, 'Screen lock was refused. Tap Retry or check your screen timeout settings.');
+      }
+    } finally {
+      if (this.pending === token) this.pending = null;
+    }
+  }
+}
+
 Object.assign(CodemanApp.prototype, {
   /** The member car mode talks to: the one marked as the room's voice. */
   _carVoiceMember() {
@@ -525,8 +637,8 @@ Object.assign(CodemanApp.prototype, {
     this._stopChatRecording?.();
     this._carScreen.hidden = true;
     document.documentElement.classList.remove('car-mode-open');
-    this._carWakeLock?.release?.().catch?.(() => {});
-    this._carWakeLock = null;
+    this._carAwake?.stop();
+    this._carAwake = null;
     try {
       localStorage.removeItem('codeman:carMode');
     } catch {
@@ -547,12 +659,26 @@ Object.assign(CodemanApp.prototype, {
     if (on) setTimeout(() => this.openCarMode(), 500);
   },
 
-  async _keepCarScreenAwake() {
-    try {
-      this._carWakeLock = await navigator.wakeLock?.request('screen');
-    } catch {
-      /* not offered, or refused: the screen may sleep */
+  _keepCarScreenAwake() {
+    if (!this._carAwake) {
+      this._carAwake = new CarScreenWakeLock({
+        secure: window.isSecureContext === true,
+        visible: () => document.visibilityState === 'visible',
+        request: navigator.wakeLock?.request ? () => navigator.wakeLock.request('screen') : null,
+        addVisibility: (fn) => document.addEventListener('visibilitychange', fn),
+        removeVisibility: (fn) => document.removeEventListener('visibilitychange', fn),
+        setTimeout: (fn, ms) => setTimeout(fn, ms),
+        clearTimeout: (timer) => clearTimeout(timer),
+        status: (held, text) => {
+          const notice = this._carScreen?.querySelector('.car-wake-notice');
+          if (!notice) return;
+          notice.hidden = held;
+          notice.querySelector('.car-wake-text').textContent = text;
+          this._carScreen.dataset.screenAwake = held ? 'held' : 'unavailable';
+        },
+      });
     }
+    return this._carAwake.start();
   },
 
   async _carSend(text) {
@@ -644,7 +770,24 @@ Object.assign(CodemanApp.prototype, {
       hint.className = 'car-hint';
       pad.append(status, detail, hint);
       pad.onclick = () => this._carTap();
-      screen.append(bar, pad);
+      const awake = document.createElement('div');
+      awake.className = 'car-wake-notice';
+      awake.setAttribute('role', 'status');
+      awake.style.cssText = 'padding:8px 14px;background:#3d330b;color:#fff;font-size:14px;';
+      const awakeText = document.createElement('span');
+      awakeText.className = 'car-wake-text';
+      awakeText.textContent = 'Requesting screen lock…';
+      const retryAwake = document.createElement('button');
+      retryAwake.type = 'button';
+      retryAwake.className = 'car-exit';
+      retryAwake.textContent = 'Retry keep awake';
+      retryAwake.style.cssText = 'margin-left:8px;padding:4px 8px;font-size:14px;min-height:44px;';
+      retryAwake.onclick = (event) => {
+        event.stopPropagation();
+        void this._carAwake?.retry();
+      };
+      awake.append(awakeText, retryAwake);
+      screen.append(bar, awake, pad);
       document.body.append(screen);
       this._carScreen = screen;
       const fillVoices = () => this._fillCarVoices();
