@@ -113,7 +113,6 @@ describe('the default view', () => {
     const side = labels(h.document.querySelectorAll('.ca-side-scroll button:not(.ca-item-act)'));
     expect(side).toEqual([
       'Board',
-      'Embassies',
       'Build category, 1 mention',
       'Channel General',
       'Channel Ops, 1 mention',
@@ -4135,7 +4134,7 @@ describe('the Board entry', () => {
     const h = await createHarness({ sessions, rooms: fixtureRooms() });
     const scroll = h.document.querySelector('.ca-side-scroll')!;
     expect(scroll.firstElementChild!.classList.contains('ca-pages')).toBe(true);
-    expect([...scroll.querySelectorAll('.ca-pages .ca-item')].map((b) => b.textContent)).toEqual(['Board','Embassies']);
+    expect([...scroll.querySelectorAll('.ca-pages .ca-item')].map((b) => b.textContent)).toEqual(['Board']);
     expect(entry(h, 'board').draggable).toBe(false);
     expect(h.document.querySelector('.ca-page')).toBeNull();
   });

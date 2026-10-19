@@ -58,7 +58,7 @@ it('CAT4 keeps room unread independently across collapse, switch and local read-
  expect(await page.locator('.eg-unread-total').textContent()).toBe('1');
 });
 it('host preview does not join until confirmed and clears the invite before showing the host',async()=>{
- await page.getByRole('button',{name:'Add embassy channel',exact:true}).click();await page.getByLabel('Invite key', {exact:true}).fill('PRIVATE_INVITE');await page.getByRole('button',{name:'Check host',exact:true}).click();
+ await page.evaluate(()=>window.reverieChat.embassy.joinDialog());await page.getByLabel('Invite key', {exact:true}).fill('PRIVATE_INVITE');await page.getByRole('button',{name:'Check host',exact:true}).click();
  await page.getByRole('button',{name:'Connect',exact:true}).waitFor();expect(await page.locator('.eg-key').inputValue()).toBe('');expect(await page.locator('.eg-join-status').textContent()).toContain('https://relay.example.test');
  expect(await page.evaluate(()=>window.__eg.calls.filter(c=>c.path.endsWith('/join')).length)).toBe(0);
  await page.getByRole('button',{name:'Connect',exact:true}).click();await page.waitForSelector('.eg-view');expect(await page.evaluate(()=>JSON.stringify({...localStorage,...sessionStorage}))).not.toContain('PRIVATE_INVITE');

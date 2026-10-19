@@ -27,6 +27,9 @@ Object.assign(CodemanApp.prototype, {
       fetchOpts.headers = { 'Content-Type': 'application/json' };
       fetchOpts.body = JSON.stringify(body);
     }
+    if (/^\/api\/embassy-(?:host|pairing)(?:[/?]|$)/.test(path)) {
+      fetchOpts.headers = { ...fetchOpts.headers, 'X-Reverie-CSRF': '1' };
+    }
     try {
       const res = await fetch(path, fetchOpts);
       return res;

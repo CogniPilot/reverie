@@ -8,6 +8,9 @@ import { companySessionRuntime } from '../company-session-runtime.js';
 import { registerCompanyRoutes } from './routes/company-routes.js';
 import { EmbassyGuestClient } from '../embassy-guest-client.js';
 import { registerEmbassyGuestRoutes } from './routes/embassy-guest-routes.js';
+import { registerEmbassyPairingRoutes } from './routes/embassy-pairing-routes.js';
+import { EmbassyHost } from '../embassy-host.js';
+import { EmbassyPairing } from '../embassy-pairing.js';
 import { registerWorkspaceIconRoutes } from './routes/workspace-icon-routes.js';
 import { WorkspaceIconStore } from '../workspace-icons.js';
 /**
@@ -388,6 +391,8 @@ export class WebServer extends EventEmitter {
   private cronService!: CronService;
   private chatroomService!: ChatroomService;
   private embassyGuestClient!: EmbassyGuestClient;
+  private embassyHost!: EmbassyHost;
+  private embassyPairing!: EmbassyPairing;
   private inputWatch?: ReturnType<typeof createInputWatch>;
   private chatBackup: ChatBackupScheduler | undefined;
   private companyService!: CompanyService;
@@ -1461,6 +1466,18 @@ export class WebServer extends EventEmitter {
     this.embassyGuestClient = new EmbassyGuestClient({ file: dataPath('embassy-guest.json') });
     await this.embassyGuestClient.init();
     registerEmbassyGuestRoutes(this.app, this.embassyGuestClient, verifiedOwner);
+    // Two-scan pairing (contract r2): hosting through the loopback embassy channel, and pairing as a guest. The
+    // channel secret stays in this backend; without the host step's channel.json hosting reports unconfigured.
+    this.embassyHost = new EmbassyHost({
+      dir: dataPath('embassy-channel'),
+      opsFile: dataPath('embassy-host', 'ops.json'),
+    });
+    await this.embassyHost.init().catch(() => console.warn('[embassy] channel secret unavailable; hosting stays unconfigured'));
+    this.embassyPairing = new EmbassyPairing({ dir: dataPath('embassy-pairings'), guest: this.embassyGuestClient });
+    await this.embassyPairing.init();
+    registerEmbassyPairingRoutes(this.app, this.embassyHost, this.embassyPairing, verifiedOwner, () =>
+      this.getHostPolicy()
+    );
     registerChatroomRoutes(this.app, ctx, this.chatroomService, chatroomFiles, verifiedOwner, roles, (sessionId) =>
       this.companyService?.view().employees.find((e) => e.sessionId === sessionId)?.id
     );
@@ -3532,6 +3549,7 @@ export class WebServer extends EventEmitter {
     // this read-only and host-scoped; multi-user SSE routing makes it admin-only.
     if (!this.testMode) {
       this.embassyGuestClient.start();
+      this.embassyPairing.start();
       const tickCompany = () =>
         this.companyService
           .tick()
@@ -4558,6 +4576,7 @@ export class WebServer extends EventEmitter {
 
     // Flush pending chatroom writes and stop pane delivery.
     await this.chatBackup?.stop();
+    await this.embassyPairing?.stop();
     await this.embassyGuestClient?.stop();
     await this.chatroomService?.stop();
 

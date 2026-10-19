@@ -326,7 +326,7 @@ interface History {
   posts: EmbassyGuestPost[];
 }
 
-async function writePrivate(file: string, value: unknown): Promise<void> {
+export async function writePrivate(file: string, value: unknown): Promise<void> {
   await fs.mkdir(dirname(file), { recursive: true, mode: 0o700 });
   const temp = `${file}.${randomUUID()}.tmp`;
   try {
@@ -529,6 +529,84 @@ export class EmbassyGuestClient {
       void this.pollSoon(c.id);
       return this.view(c);
     });
+  }
+
+  /** Two-scan pairing (contract r2 §4): stores a claimed session under the pairing's stable connectionId. An
+   * idempotent upsert, so a repeated claim or a crash-and-retry never makes a second connection; the old session is
+   * replaced and anything in flight for it is dropped. `roomId` is the pairing's own room (from QR1): a claim for
+   * another room is refused, and a connection already bound to another origin or room is never rebound (CP-K3). */
+  async adopt(owner: string | undefined, id: string, origin: string, roomId: string, claimed: unknown) {
+    const parsed = Joined.safeParse(claimed);
+    if (!parsed.success) throw new EmbassyGuestError('UPSTREAM', 'Embassy claim answer was malformed');
+    const j = parsed.data;
+    const room = roomId.toLowerCase();
+    if (j.room.id.toLowerCase() !== room) throw new EmbassyGuestError('UPSTREAM', 'Embassy claim is for another room');
+    return this.run(async () => {
+      let c = this.state.connections.find((x) => x.id === id);
+      if (c && c.owner !== owner) throw new EmbassyGuestError('CONFLICT', 'Embassy connection belongs to another owner');
+      if (c?.roomId && (c.roomId !== room || c.origin !== origin))
+        throw new EmbassyGuestError('CONFLICT', 'Embassy connection is bound to another room');
+      // A retired binding never comes back: a late claim cannot reactivate a cancelled pairing's connection.
+      if (c?.status === 'left') throw new EmbassyGuestError('CONFLICT', 'This embassy pairing was cancelled');
+      if (!c) {
+        const active = this.state.connections.filter((x) => x.status !== 'left');
+        if (active.length + this.joining >= EMBASSY_GUEST_MAX_CONNECTIONS)
+          throw new EmbassyGuestError('CONFLICT', `At most ${EMBASSY_GUEST_MAX_CONNECTIONS} embassy rooms; leave one first`);
+        const history: History = { version: 1, cursor: 0, posts: [] };
+        await writePrivate(this.historyFile(id), history);
+        this.histories.set(id, history);
+        c = {
+          id,
+          owner,
+          origin,
+          roomId: '',
+          roomName: '',
+          hostCompany: '',
+          guest: { company: '', identity: '' },
+          expiresAt: 0,
+          enabled: true,
+          status: 'connecting',
+          createdAt: this.now(),
+        };
+        this.state.connections.push(c);
+      }
+      this.bump(id);
+      Object.assign(c, {
+        origin,
+        roomId: j.room.id.toLowerCase(),
+        roomName: j.room.name,
+        hostCompany: j.hostCompany,
+        guest: { company: j.guest.company, identity: j.guest.identity },
+        expiresAt: j.expiresAt,
+        session: j.sessionToken,
+        enabled: true,
+        status: 'connecting' as const,
+        lastError: undefined,
+      });
+      this.backoff.delete(id);
+      await this.save();
+      void this.pollSoon(id);
+      return this.view(c);
+    });
+  }
+
+  /** The origin and room a pairing's connection is bound to, once a claim stored one. */
+  binding(owner: string | undefined, id: string): { origin: string; roomId: string } | undefined {
+    const c = this.state.connections.find((x) => x.id === id && x.owner === owner);
+    return c?.roomId ? { origin: c.origin, roomId: c.roomId } : undefined;
+  }
+
+  /** Whether a pairing's connection holds a session that has not been refused yet (crash recovery, §4). */
+  holds(owner: string | undefined, id: string): boolean {
+    const c = this.state.connections.find((x) => x.id === id && x.owner === owner);
+    // 'expired' is only ever set by a 401 or the access deadline, never by a timeout or 5xx, so a network failure
+    // alone keeps a possibly valid session and never leads to a re-claim (Kit, r2 PASS note 3).
+    return !!c?.session && c.status !== 'expired' && c.status !== 'left' && c.status !== 'refused' && c.expiresAt > this.now();
+  }
+
+  /** Ends a pairing's connection when the pairing is cancelled; a missing connection is already retired. */
+  async retire(owner: string | undefined, id: string): Promise<void> {
+    if (this.state.connections.some((x) => x.id === id && x.owner === owner)) await this.leave(owner, id);
   }
 
   posts(owner: string | undefined, id: string, after: number) {

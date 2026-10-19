@@ -54,7 +54,7 @@ Object.assign(CodemanApp.prototype, {
       /* non-JSON error page */
     }
     if (res.ok && body?.success !== false) return { ok: true, data: body?.data ?? body };
-    return { ok: false, status: res.status, error: body?.error || `HTTP ${res.status}` };
+    return { ok: false, status: res.status, errorCode: body?.errorCode, error: body?.error || `HTTP ${res.status}` };
   },
 
   _chatEl(tag, className, text) {

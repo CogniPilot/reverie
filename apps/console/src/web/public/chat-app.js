@@ -963,6 +963,7 @@ const CA_ICONS = {
   invite: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M19 8v6M22 11h-6"/>',
   gearsmall: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h0a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h0a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>',
   chevron: '<path d="m6 9 6 6 6-6"/>',
+  embassy: '<path d="M3 10h18L12 4 3 10ZM5 10v10m5-10v10m4-10v10m5-10v10M2 20h20"/>',
   calendar: '<rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/>',
   gauge: '<path d="M12 14l4-4"/><path d="M3.34 19a10 10 0 1 1 17.32 0"/>',
 };
@@ -970,7 +971,7 @@ const CA_ICONS = {
 /** The Board is pinned above the channel list, shown in the main pane. */
 const CA_PAGES = {
   board: { label: 'Board', icon: 'calendar', path: '/board' },
-  embassies: { label: 'Embassies', icon: 'chat', path: null },
+  embassies: { label: 'Embassies', icon: 'embassy', path: null, nav: false },
 };
 
 /** Which supported page a URL fragment asks for, or null. */
@@ -2163,6 +2164,7 @@ class ReverieChatApp {
   pagesEl() {
     const box = this.el('div', 'ca-pages');
     for (const [kind, page] of Object.entries(CA_PAGES)) {
+      if (page.nav === false) continue; // Embassies has one home: its sidebar section.
       const on = this.embed === kind;
       const b = this.el('button', `ca-item ca-item--page${on ? ' is-active' : ''}`);
       b.type = 'button';
@@ -6040,6 +6042,33 @@ function caInstall(proto) {
 }
 
 /** Start the app once the CodemanApp singleton exists. */
+/** Pairing QR parsers are local and inert: no navigation, redeem or authority from labels. */
+function caPairFields(value, version) {
+  if (typeof value !== 'string' || value.length > 512 || new TextEncoder().encode(value).length > 512) throw new Error('Invalid pairing QR');
+  const qr = value.trim(), fields = qr.split('|');
+  if (fields.length !== 4 || fields[0] !== version) throw new Error('Invalid pairing QR');
+  // Reuse the existing strict canonical HTTPS-origin parser; never accept arbitrary URLs.
+  const { origin } = caEmbassyInvite(`embassy-v1|${fields[1]}|${'A'.repeat(43)}`);
+  return { qr, origin, fields };
+}
+function caPairInvite(value) {
+  const { qr, origin, fields } = caPairFields(value, 'embassy-v2');
+  if (!/^[A-Za-z0-9_-]{1,128}$/.test(fields[2]) || !/^[A-Za-z0-9_-]{43}$/.test(fields[3])) throw new Error('Invalid pairing invitation');
+  return { qr, origin, roomId: fields[2] };
+}
+function caPairCode(value) {
+  if (typeof value !== 'string' || value.length > 16) throw new Error('Invalid confirmation code');
+  const code = value.trim().toUpperCase();
+  if (!/^[0-9A-HJKMNP-TV-Z]{4}-?[0-9A-HJKMNP-TV-Z]{4}$/.test(code)) throw new Error('Invalid confirmation code');
+  const compact = code.replace('-', '');
+  return compact.slice(0, 4) + '-' + compact.slice(4);
+}
+function caPairRequest(value, expectedOrigin) {
+  const { qr, origin, fields } = caPairFields(value, 'embassy-pair-v1');
+  if (origin !== expectedOrigin || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(fields[2])) throw new Error('Wrong host or request');
+  return { qr, origin, requestId: fields[2], code: caPairCode(fields[3]) };
+}
+
 /** Parse the existing guest key, or our fragment-only sharing envelope. No I/O. */
 function caEmbassyInvite(value) {
   if (typeof value !== 'string' || value.length > 2048) throw new Error('Invalid invite');
@@ -6125,6 +6154,7 @@ class ReverieEmbassyView {
       const invite = caEmbassyTakeFragment(this.win);
       if (invite && this.allowed && !this.dialog) this.joinDialog(invite);
     });
+    this.pairing = new ReverieEmbassyPairingView(this);
     this.collapsed = caRead('local', 'reverie:embassies:collapsed', '') === '1';
     this.refresh().catch(() => {});
     const tick = async () => {
@@ -6136,17 +6166,44 @@ class ReverieEmbassyView {
   el(tag, cls, text) { return this.shell.el(tag, cls, text); }
   button(label, run) { return this.shell.button('ca-btn eg-button', label, run, { text: label }); }
   async api(path = '', options = {}) {
-    try { return await this.shell.app._chatApi(`/api/embassy-guest${path}`, options); }
+    try {
+      if (/^\/__host__\/posts(?:\?|$)/.test(path)) {
+        if (!this.hostedConnection()) return { ok: false, error: 'Hosting unavailable' };
+        return await this.pairing.api('/api/embassy-host/posts' + path.slice('/__host__/posts'.length), options);
+      }
+      return await this.shell.app._chatApi(`/api/embassy-guest${path}`, options);
+    }
     catch { return { ok: false, error: 'Connection unavailable' }; }
   }
   failure(result) { return typeof result?.error === 'string' ? result.error : 'Request refused'; }
-  key(id, kind) { return `reverie:embassy:${id}:${kind}`; }
+  key(id, kind) {
+    const scope = id === '__host__' ? `__host__:${encodeURIComponent(this.hostScope || 'unbound')}` : id;
+    return `reverie:embassy:${scope}:${kind}`;
+  }
+  syncHostScope() {
+    const host = this.hostedConnection();
+    const scope = host ? JSON.stringify([host.origin, host.roomId, this.pairing.host.bindingId || null]) : null;
+    if (scope === this.hostScope) return;
+    if (this.selected === '__host__') this.close();
+    this.hostScope = scope;
+    this.version++;
+    for (const cache of [this.posts, this.pending, this.drafts, this.ownVerified, this.sentReceipts]) cache.delete('__host__');
+    this.mutationUnknown.delete('__host__');
+  }
   readCount(id) {
     const n = Number(caRead('local', this.key(id, 'read'), '0'));
     return Number.isSafeInteger(n) && n >= 0 ? n : 0;
   }
   unread(c) { return Math.max(0, (Number(c.postCount) || 0) - this.readCount(c.id)); }
-  connection() { return this.connections.find(c => c.id === this.selected); }
+  hostedConnection() {
+    const p = this.pairing;
+    if (!p?.owner || p.host.status !== 'ready') return null;
+    return { id: '__host__', origin: p.host.origin, roomId: p.host.room.id, roomName: p.host.room.name,
+      hostCompany: this.shell.defaultWorkspaceName(), enabled: true, status: 'live', expiresAt: Number.MAX_SAFE_INTEGER,
+      postCount: this.posts.get('__host__')?.size || 0 };
+  }
+  availableConnections() { const host = this.hostedConnection(); return host ? [host, ...this.connections] : this.connections; }
+  connection() { return this.availableConnections().find(c => c.id === this.selected); }
   async refresh() {
     if (this.refreshing) { this.refreshAgain = true; return; }
     this.refreshing = true;
@@ -6159,6 +6216,7 @@ class ReverieEmbassyView {
         this.lastFailure = { error: this.failure(result), status: Number.isInteger(result.status) ? result.status : undefined };
         // Do not retain a previous owner's external content after authorization disappears.
         this.allowed = false;
+        this.pairing.deny();
         this.connections = [];
         this.posts.clear();
         this.pending.clear();
@@ -6174,7 +6232,8 @@ class ReverieEmbassyView {
       this.mutationUnknown.clear();
       this.ownerRequired = false;
       this.lastFailure = undefined;
-      this.connections = Array.isArray(result.data?.connections) ? result.data.connections : [];
+      this.connections = Array.isArray(result.data?.connections) ? result.data.connections.filter(c => c?.id !== '__host__') : [];
+      await this.pairing.refresh();
       if (this.selected && !this.connection()) this.close();
       this.renderSidebar();
       if (this.startInvite && !this.dialog) {
@@ -6227,30 +6286,35 @@ class ReverieEmbassyView {
     }
     const section = this.el('section', 'eg-category');
     const header = this.el('div', 'eg-category-head');
-    const toggle = this.button(`${this.collapsed ? '▸' : '▾'} Embassies`, () => {
+    const toggle = this.shell.button('ca-cat eg-category-toggle', 'Embassies', () => {
       this.collapsed = !this.collapsed;
       caWrite('local', 'reverie:embassies:collapsed', this.collapsed ? '1' : '0');
       this.renderSidebar();
       host.querySelector('.eg-category-toggle')?.focus();
     });
-    toggle.classList.add('eg-category-toggle');
+    const chevron = this.shell.icon('chevron');
+    chevron.classList.add('ca-chev');
+    chevron.classList.toggle('is-folded', this.collapsed);
+    toggle.append(chevron, this.el('span', 'ca-name', 'Embassies'));
     toggle.setAttribute('aria-label', 'Embassies');
     toggle.setAttribute('aria-expanded', String(!this.collapsed));
     toggle.setAttribute('aria-controls', 'eg-channel-list');
-    const add = this.button('+', () => this.joinDialog());
+    const add = this.shell.button('ca-icon-btn eg-add', 'Add embassy channel', () => this.pairing.open(), { icon: 'plus' });
     add.setAttribute('aria-label', 'Add embassy channel');
-    const total = this.connections.reduce((n, c) => n + this.unread(c), 0);
+    const total = this.availableConnections().reduce((n, c) => n + this.unread(c), 0);
     header.append(toggle, this.el('span', 'eg-unread-total', total ? String(total) : ''), add);
     const list = this.el('div', 'eg-channel-list');
     list.id = 'eg-channel-list';
     list.hidden = this.collapsed;
-    for (const c of this.connections) {
-      const row = this.button(c.roomName || 'Shared room', () => this.open(c.id));
-      row.classList.add('eg-channel');
+    for (const c of this.availableConnections()) {
+      const row = this.shell.button('ca-item eg-channel', c.roomName || 'Shared room', () => this.open(c.id), { text: c.roomName || 'Shared room' });
       row.dataset.connection = c.id;
       const label = row.querySelector('span');
-      label.classList.add('eg-channel-label');
-      label.append(this.el('small', 'eg-channel-origin', c.origin));
+      label.classList.add('ca-name', 'eg-channel-label');
+      const mark = this.el('span', 'ca-hash is-drawn');
+      mark.setAttribute('aria-hidden', 'true');
+      mark.append(this.shell.icon('embassy'));
+      row.prepend(mark);
       row.title = `${c.roomName} · ${c.origin} · ${c.status}`;
       const count = this.unread(c);
       row.setAttribute('aria-label', `${c.roomName} · ${c.origin}${count ? `, ${count} unread` : ''}`);
@@ -6258,16 +6322,24 @@ class ReverieEmbassyView {
       row.append(this.el('span', 'eg-unread', count ? String(count) : ''));
       list.append(row);
     }
-    if (!this.connections.length) list.append(this.el('p', 'ca-hint', 'No embassy rooms connected'));
+    if (!this.availableConnections().length) list.append(this.el('p', 'ca-hint', 'No embassy rooms connected'));
     section.append(header, list);
     host.append(section);
     this.renderDirectory();
     if (focused) [...section.querySelectorAll('button')].find(b => focusId ? b.dataset.connection === focusId : b.getAttribute('aria-label') === focusLabel)?.focus();
   }
+  platformName() {
+    const name = this.el('span', '', 'Reverie');
+    // This is the platform name, independent of the company's display name.
+    name.setAttribute('data-i18n-skip', '');
+    return name;
+  }
   directoryEl() {
     const box = this.el('section', 'eg-directory');
     box.setAttribute('aria-label', 'Embassy rooms');
-    box.append(this.el('h1', '', 'Embassies'), this.el('p', 'ca-hint', 'Shared rooms with other companies, here in your own Reverie.'));
+    const intro = this.el('p', 'ca-hint');
+    intro.append('Shared rooms with other companies, here in your own ', this.platformName(), '.');
+    box.append(this.el('h1', '', 'Embassies'), intro);
     if (!this.allowed) {
       box.append(this.el('p', 'eg-directory-status', this.ownerRequired ? 'Sign in as the console owner to connect shared rooms.' : 'Checking embassy access…'));
       if (this.ownerRequired) { const a = this.el('a', '', 'Owner sign-in'); a.href = '/owner/login'; box.append(a); }
@@ -6276,7 +6348,7 @@ class ReverieEmbassyView {
     const add = this.button('Add embassy channel', () => this.joinDialog());
     box.append(add);
     const list = this.el('div', 'eg-directory-list');
-    for (const c of this.connections) {
+    for (const c of this.availableConnections()) {
       const row = this.button(c.roomName || 'Shared room', () => this.open(c.id));
       row.classList.add('eg-directory-room'); row.dataset.connection = c.id;
       row.append(this.el('small', '', `${c.hostCompany || 'External company'} · ${c.origin}`));
@@ -6288,10 +6360,11 @@ class ReverieEmbassyView {
       disconnect.setAttribute('aria-label', `Disconnect ${c.roomName || 'shared room'}`);
       card.append(row, disconnect); list.append(card);
     }
-    if (!this.connections.length) list.append(this.el('p', 'ca-hint', 'No shared rooms connected. Add a key, scan a QR or paste a link.'));
+    if (!this.availableConnections().length) list.append(this.el('p', 'ca-hint', 'No shared rooms connected. Add a key, scan a QR or paste a link.'));
     box.append(list); return box;
   }
   connectionState(c) {
+    if (c.id === '__host__') return 'Hosted here';
     return { live: 'Connected', connecting: 'Connecting…', disabled: 'Disabled here', left: 'Disconnected',
       unreachable: 'Connection unavailable', expired: 'Access expired', refused: 'Connection refused', 'storage-full': 'Local copy full' }[c.status] || 'Connection unavailable';
   }
@@ -6322,15 +6395,17 @@ class ReverieEmbassyView {
     // response to THIS console's exact publication can establish a local receipt.
     if (!this.allowed || !post || typeof post.ackId !== 'string' || post.ackId.length > 64 ||
         !Number.isSafeInteger(post.sequence) || post.sequence <= 0 || post.text !== sent.text) return;
+    const key = this.key(id, 'sent-receipts'), version = this.version;
     try {
       const sha256 = await this.textDigest(sent.text);
-      if (!this.allowed) return;
+      if (!this.allowed || version !== this.version || key !== this.key(id, 'sent-receipts')) return;
       const receipts = [...this.ownReceipts(id).filter(r => r.ackId !== post.ackId), { ackId: post.ackId, sequence: post.sequence, sha256 }].slice(-256);
       this.sentReceipts.set(id, receipts);
       caWrite('local', this.key(id, 'sent-receipts'), JSON.stringify(receipts));
     } catch { /* No crypto/storage capability: keep conservative provenance. */ }
   }
   async verifyOwn(id, posts) {
+    const version = this.version, key = this.key(id, 'sent-receipts');
     const receipts = new Map(this.ownReceipts(id).map(r => [r.ackId, r]));
     const verified = new Set();
     await Promise.all(posts.filter(p => receipts.has(p.ackId)).slice(0, 256).map(async p => {
@@ -6339,7 +6414,7 @@ class ReverieEmbassyView {
         if (receipt.sequence === p.sequence && receipt.sha256 === await this.textDigest(p.text)) verified.add(p.ackId);
       } catch { /* Unverifiable content stays externally labelled. */ }
     }));
-    if (this.allowed) this.ownVerified.set(id, verified);
+    if (this.allowed && version === this.version && key === this.key(id, 'sent-receipts')) this.ownVerified.set(id, verified);
   }
   renderDirectory() {
     if (this.shell.embed === 'embassies' && this.shell.els.page) {
@@ -6350,7 +6425,7 @@ class ReverieEmbassyView {
     }
   }
   open(id) {
-    if (!this.allowed || !this.connections.some(c => c.id === id)) return;
+    if (!this.allowed || !this.availableConnections().some(c => c.id === id)) return;
     if (this.shell.app._chatSending) { this.shell.toast('Wait for the current message to finish sending', 'info'); return; }
     this.close(); this.shell.closePage();
     const app = this.shell.app, els = app._chatEls;
@@ -6416,12 +6491,14 @@ class ReverieEmbassyView {
     const c = this.connection();
     if (!c || !this.panel) return;
     this.shell.renderHeader();
-    this.origin.textContent = `${c.hostCompany} · ${c.origin} · Guest access (TLS origin; no signed identity pin)`;
+    this.origin.textContent = c.id === '__host__' ? `${c.origin} · Hosted room` : `${c.hostCompany} · ${c.origin} · Guest access (TLS origin; no signed identity pin)`;
     const state = this.mutationUnknown.has(c.id) ? 'State change unconfirmed' : c.status === 'disabled' ? 'Disabled here' : c.status;
     this.status.textContent = `${this.mutationUnknown.has(c.id) ? state : this.connectionState(c)}${c.lastError ? ` · ${c.lastError}` : ''}`;
     const controlFocus = this.controls.contains(this.doc.activeElement) ? this.doc.activeElement?.getAttribute('aria-label') : null;
     this.controls.replaceChildren();
-    if (c.status !== 'left') {
+    if (c.id === '__host__') {
+      this.controls.append(this.button('Invite a company', () => this.pairing.open('invite')), this.button('Manage invitations', () => this.pairing.open('manage')));
+    } else if (c.status !== 'left') {
       this.controls.append(this.button(c.enabled ? 'Disable' : 'Enable', () => this.setEnabled(c.id, !c.enabled)),
         this.button('Disconnect', () => this.leave(c.id)));
     }
@@ -6498,12 +6575,15 @@ class ReverieEmbassyView {
       }
       this.pending.set(id, pending);
     }
+    const version = this.version, key = this.key(id, 'pending');
     this.sending = true;
     this.updateControls();
     const result = await this.api(`/${encodeURIComponent(id)}/posts`, { method: 'POST', body: pending });
     this.sending = false;
+    if (version !== this.version || key !== this.key(id, 'pending')) return;
     if (result.ok) {
       await this.rememberOwn(id, result.data?.post, pending);
+      if (version !== this.version || key !== this.key(id, 'pending')) return;
       this.pending.delete(id);
       this.drafts.delete(id);
       caWrite('session', this.key(id, 'pending'), 'null');
@@ -6601,7 +6681,7 @@ class ReverieEmbassyView {
         await encoder.toCanvas(qrCanvas, link, { errorCorrectionLevel: 'M', margin: 4, width: 320 });
         if (!valid() || epoch !== renderEpoch) { qrCanvas.width = 0; return; }
         shareLink = link; shareInput.value = link; qr.hidden = false;
-        note.textContent = 'Private invite: scan or paste it in your own Reverie console. Anyone with it can use its guest access.';
+        note.replaceChildren('Private invite: scan or paste it in your own ', this.platformName(), ' console. Anyone with it can use its guest access.');
       } catch { if (valid()) note.textContent = 'QR unavailable or invalid key. Paste a valid key, or join using the key directly.'; }
     });
     const copy = this.button('Copy invite link', async () => {
@@ -6743,6 +6823,416 @@ class ReverieEmbassyView {
   }
 }
 
+/** Owner-only two-scan UI. Credentials and operation recovery belong to the local backend. */
+class ReverieEmbassyPairingView {
+  constructor(view) {
+    this.view = view; this.shell = view.shell; this.doc = view.doc; this.win = view.win;
+    this.host = { status: 'unconfigured' }; this.handles = []; this.epoch = 0; this.owner = false; this.requests = new Set();
+  }
+  el(tag, cls, text) { return this.view.el(tag, cls, text); }
+  button(text, run, primary = false) { const b = this.view.button(text, run); if (primary) b.classList.add('is-primary'); return b; }
+  async api(path, options = {}) {
+    const controller = new this.win.AbortController(); this.requests.add(controller);
+    const timeout = this.win.setTimeout(() => controller.abort(), 20000);
+    try {
+      const result = await this.shell.app._chatApi(path, { ...options, signal: controller.signal });
+      if (result.status === 403) this.deny();
+      return result;
+    } catch { return { ok: false }; }
+    finally { this.win.clearTimeout(timeout); this.requests.delete(controller); }
+  }
+  error(result) {
+    const code = result?.errorCode || result?.error?.code;
+    return ({ OWNER_ONLY: 'Sign in as the console owner to pair companies.', FORBIDDEN: 'Sign in as the console owner to pair companies.',
+      HOSTING_UNCONFIGURED: 'Hosting not set up.', EMBASSY_UNREACHABLE: 'The other company is unavailable. Try again later.',
+      INVALID_INVITE: 'This invitation has been used, expired or revoked.', GUEST_LABEL: 'That name is already in use. Choose another name.',
+      INVITE_LIMIT: 'Too many open invitations. Revoke an unused invitation first.', PAIR_PENDING_LIMIT: 'Too many pending connections. Try again later.',
+      PAIR_NOT_FOUND: 'Confirmation not found. Check the code or scan it again.', PAIR_PENDING: 'Waiting for the host to approve.',
+      PAIR_STATE: 'This request has already changed. Refresh its status.', PAIR_REJECTED: 'The host declined this request.',
+      PAIR_EXPIRED: 'This request has expired. Ask for a new invitation.', PAIR_REVOKED: 'This invitation has been revoked.',
+      CLAIM_LIMIT: 'Connection recovery is unavailable. Ask the host for help.', ROOM_NOT_FOUND: 'Shared room unavailable.',
+      ROOM_CLOSED: 'This shared room is closed.', PAIR_WRONG_HOST: 'This confirmation belongs to another host.',
+      PAIR_ROOM_MISMATCH: 'The invitation and shared room do not match.', PAIR_BAD_QR: 'This is not a valid pairing QR.' })[code] ||
+      (result?.status === 403 ? 'Sign in as the console owner to pair companies.' : 'Request not confirmed. Recover its status before trying again.');
+  }
+  deny() {
+    this.owner = false; this.host = { status: 'unconfigured' }; this.handles = []; this.view.syncHostScope(); if (this.view.selected === '__host__') this.view.close(); this.view.renderSidebar(); this.invite = null; this.record = null; this.guestQr = ''; this.guestOperation = null; this.inviteOperation = null;
+    for (const request of this.requests) request.abort();
+    if (!this.dlg?.isConnected) return;
+    this.clearBody(); this.body.append(this.el('p', 'eg-pair-status', 'Sign in as the console owner to pair companies.'));
+    const link = this.el('a', '', 'Owner sign-in'); link.href = '/owner/login'; this.body.append(link); this.actions.append(this.button('Close', this.cleanup));
+  }
+  isCurrent(epoch) { return this.dlg?.isConnected && this.view.dialog === this.dlg && this.epoch === epoch && this.view.allowed; }
+  async refresh() {
+    if (this.refreshing) return;
+    this.refreshing = true;
+    const epoch = this.epoch;
+    try {
+      const [host, pending] = await Promise.all([this.api('/api/embassy-host'), this.api('/api/embassy-pairing')]);
+      if (epoch !== this.epoch || !this.view.allowed) return;
+      if ([host, pending].some(r => r.status === 403)) { this.owner = false; this.host = { status: 'unconfigured' }; this.handles = []; return; }
+      this.owner = !!(host.ok || pending.ok);
+      if (host.ok && host.data?.status === 'ready') {
+        try {
+          const origin = caEmbassyInvite(`embassy-v1|${host.data.origin}|${'A'.repeat(43)}`).origin;
+          const room = host.data.room;
+          if (!room || typeof room.id !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(room.id) || typeof room.name !== 'string') throw Error();
+          this.host = { status: 'ready', origin, room: { id: room.id, name: room.name.slice(0, 200) },
+            ...(typeof host.data.bindingId === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(host.data.bindingId) ? { bindingId: host.data.bindingId } : {}) };
+        } catch { this.host = { status: 'unreachable' }; }
+      } else this.host = { status: host.ok && host.data?.status === 'unconfigured' ? 'unconfigured' : 'unreachable' };
+      if (pending.ok) {
+        const values = Array.isArray(pending.data) ? pending.data : pending.data?.pairings;
+        this.handles = (Array.isArray(values) ? values : []).slice(0, 50).map(v => typeof v === 'string' ? { handle: v } : v)
+          .filter(v => v && typeof v.handle === 'string' && /^[A-Za-z0-9_-]{1,80}$/.test(v.handle));
+      }
+    } finally { this.view.syncHostScope(); this.refreshing = false; }
+  }
+  stopCamera() { this.scanEpoch = (this.scanEpoch || 0) + 1; this.win.clearTimeout(this.scanTimer); for (const t of this.stream?.getTracks() || []) t.stop(); this.stream = null; this.video?.remove(); this.video = null; }
+  stopPoll() { this.win.clearTimeout(this.pollTimer); this.pollTimer = null; }
+  clearBody() { this.win.clearTimeout(this.expiryTimer); this.epoch++; this.stopCamera(); this.stopPoll(); for (const c of this.body.querySelectorAll('canvas')) { c.width = 0; c.height = 0; } for (const i of this.body.querySelectorAll('input')) i.value = ''; this.invite = null; this.body.replaceChildren(); this.actions.replaceChildren(); this.qr = null; this.review = null; }
+  close() {
+    this.win.clearTimeout(this.expiryTimer); this.epoch++; this.stopCamera(); this.stopPoll(); for (const r of this.requests) r.abort(); this.invite = null; this.record = null; this.guestQr = ''; this.guestOperation = null; this.inviteOperation = null;
+    for (const i of this.dlg?.querySelectorAll('input,textarea') || []) i.value = '';
+    for (const c of this.dlg?.querySelectorAll('canvas') || []) { c.width = 0; c.height = 0; }
+    this.dlg?.remove(); if (this.view.dialog === this.dlg) this.view.dialog = null;
+    if (this.view.cancelJoin === this.cleanup) this.view.cancelJoin = null;
+    this.doc.removeEventListener('visibilitychange', this.onVisibility); this.win.removeEventListener('pagehide', this.cleanup); this.dlg = null;
+  }
+  async open(intent = 'home') {
+    if (!this.view.allowed || this.view.dialog) return;
+    this.epoch++; const epoch = this.epoch;
+    const dlg = this.el('dialog', 'ca-dialog eg-dialog eg-pair-dialog'); this.dlg = dlg; this.view.dialog = dlg;
+    dlg.setAttribute('aria-label', 'Connect companies');
+    this.title = this.el('h2', '', 'Connect companies'); const sub = this.el('p', '', 'Pair two companies in '); sub.append(this.view.platformName(), '.');
+    const text = this.el('div'); text.append(this.title, sub); const head = this.el('header', 'eg-dialog-head');
+    this.cleanup = () => this.close(); const close = this.button('Close', this.cleanup); close.textContent = '×'; close.classList.add('eg-dialog-close'); head.append(text, close);
+    this.body = this.el('div', 'eg-dialog-body'); this.actions = this.el('footer', 'eg-dialog-actions');
+    dlg.append(head, this.body, this.actions); this.doc.body.append(dlg);
+    dlg.addEventListener('cancel', e => { e.preventDefault(); this.close(); }); dlg.addEventListener('close', this.cleanup);
+    this.onVisibility = () => { if (this.doc.hidden) { this.stopCamera(); this.stopPoll(); } else if (this.record) void this.poll(); };
+    this.doc.addEventListener('visibilitychange', this.onVisibility); this.win.addEventListener('pagehide', this.cleanup); this.view.cancelJoin = this.cleanup;
+    if (typeof dlg.showModal === 'function') dlg.showModal(); else dlg.setAttribute('open', '');
+    this.body.append(this.el('p', 'eg-pair-status', 'Checking company access…')); this.actions.append(this.button('Cancel', this.cleanup));
+    await this.refresh(); if (this.isCurrent(epoch)) { this.home(); if (intent === 'invite') await this.createInvite(); else if (intent === 'manage') await this.invites(); }
+  }
+  home() {
+    this.clearBody(); this.record = null; this.guestOperation = null; this.inviteOperation = null; this.title.textContent = 'Connect companies';
+    if (!this.owner) { this.body.append(this.el('p', 'eg-pair-status', 'Sign in as the console owner to pair companies.')); const a = this.el('a', '', 'Owner sign-in'); a.href = '/owner/login'; this.body.append(a); this.actions.append(this.button('Close', this.cleanup)); return; }
+    const invite = this.button('Invite a company', () => this.createInvite(), true); invite.disabled = this.host.status !== 'ready';
+    const join = this.button('Join a company', () => this.scan('invite'));
+    join.disabled = this.handles.some(item => item.state === 'cancelling');
+    if (join.disabled) this.body.append(this.el('p', 'ca-hint', 'Recover the cancelling request below before starting another connection.'));
+    const choices = this.el('div', 'eg-pair-choices'); choices.append(invite, join); this.body.append(choices);
+    this.body.append(this.el('p', 'ca-hint', this.host.status === 'ready' ? `${this.host.room.name} · ${this.host.origin}` : this.host.status === 'unconfigured' ? 'Hosting not set up. You can still join another company.' : 'Hosting is unavailable. You can still join another company.'));
+    if (this.host.status === 'ready') this.body.append(this.button('Manage invitations', () => this.invites()));
+    if (this.handles.length) {
+      const list = this.el('section', 'eg-pair-recent'); list.append(this.el('h3', '', 'Connections in progress'));
+      for (const item of this.handles) {
+        list.append(this.button(item.room?.name || item.hostCompany || 'Resume connection', () => this.resume(item)));
+        if (item.state === 'connected') list.append(this.button(`Reconnect ${item.room?.name || 'shared room'}`, () => this.reconnect(item)));
+      }
+      this.body.append(list);
+    }
+    const fallback = this.el('details', 'eg-pair-fallback'); fallback.append(this.el('summary', '', 'Other ways to connect'));
+    fallback.append(this.button('Use an existing guest key', () => { this.close(); this.view.joinDialog(); })); this.body.append(fallback);
+    this.actions.append(this.button('Cancel', this.cleanup)); invite.disabled ? join.focus() : invite.focus();
+  }
+  async createInvite() {
+    if (this.busy || !this.owner || this.host.status !== 'ready') return;
+    this.clearBody(); this.record = null; this.title.textContent = 'Invite a company'; const epoch = this.epoch;
+    this.body.append(this.el('p', 'eg-pair-status', 'Creating your invitation…')); this.actions.append(this.button('Cancel', this.cleanup));
+    if (!this.inviteOperation) this.inviteOperation = this.win.crypto.randomUUID();
+    this.busy = true; const result = await this.api('/api/embassy-host/invites', { method: 'POST', body: { clientRequestId: this.inviteOperation } }); this.busy = false;
+    if (!this.isCurrent(epoch)) return;
+    if (!result.ok) { this.body.replaceChildren(this.el('p', 'eg-pair-status', this.error(result))); this.actions.prepend(this.button('Retry same invitation', () => this.createInvite())); return; }
+    if (result.data?.qr === null && result.data?.qrAvailable === false && ['pending', 'approved', 'connected', 'expired', 'revoked', 'rejected'].includes(result.data?.state)) {
+      this.body.replaceChildren(this.el('p', 'eg-pair-status', `Invitation ${result.data.state}. It will not be replaced automatically.`));
+      this.actions.replaceChildren(this.button('Back', () => this.home()), this.button('New invitation', () => { this.inviteOperation = null; return this.createInvite(); }, true));
+      if (result.data.state === 'pending') this.actions.prepend(this.button('Scan their confirmation', () => this.scan('request')));
+      return;
+    }
+    try {
+      const invite = caPairInvite(result.data?.qr);
+      if (invite.origin !== this.host.origin || invite.roomId !== this.host.room.id || typeof result.data.inviteId !== 'string' || !Number.isFinite(result.data.expiresAt) || result.data.expiresAt <= Date.now() || result.data.expiresAt > Date.now() + 3600000) throw Error();
+      this.invite = { ...result.data, ...invite }; this.body.replaceChildren(this.el('p', '', `${this.host.room.name} · ${this.host.origin}`));
+      await this.showQR(invite.qr, 'Private company invitation QR'); if (!this.isCurrent(epoch)) return;
+      const note = this.el('p', 'eg-pair-status'); note.append('Have the other company scan this QR in their ', this.view.platformName(), '. Then scan their confirmation QR to approve the connection.'); this.body.append(note);
+      this.body.append(this.el('small', 'ca-hint', `Expires in ${Math.ceil((this.invite.expiresAt - Date.now()) / 60000)} min`));
+      const fallback = this.el('details', 'eg-pair-fallback'); fallback.append(this.el('summary', '', 'Share without a camera'));
+      fallback.append(this.button('Copy invitation', async () => {
+        if (!this.isCurrent(epoch)) return;
+        try { await this.win.navigator.clipboard.writeText(invite.qr); if (this.isCurrent(epoch)) note.textContent = 'Invitation copied. Send it privately to the joining company.'; }
+        catch { if (this.isCurrent(epoch)) { const input = this.el('input'); input.type = 'password'; input.readOnly = true; input.value = invite.qr; input.autocomplete = 'off'; fallback.append(input); input.focus(); input.select(); note.textContent = 'Copy the selected invitation and send it privately.'; } }
+      })); this.body.append(fallback);
+      this.expiryTimer = this.win.setTimeout(() => {
+        if (!this.isCurrent(epoch)) return; this.clearBody(); this.inviteOperation = null; this.body.append(this.el('p', 'eg-pair-status', 'Invitation expired. Create a new one to connect.')); this.actions.append(this.button('New invitation', () => this.createInvite(), true), this.button('Back', () => this.home()));
+      }, Math.max(1, this.invite.expiresAt - Date.now()));
+      this.actions.replaceChildren(this.button('Back', () => this.home()), this.button('Scan their confirmation', () => this.scan('request'), true));
+    } catch { if (this.isCurrent(epoch)) this.body.replaceChildren(this.el('p', 'eg-pair-status', 'Invitation unavailable. Recover invitations before creating another.')); }
+  }
+  async showQR(value, label) {
+    const epoch = this.epoch; const canvas = this.el('canvas', 'eg-pair-qr'); canvas.setAttribute('role', 'img'); canvas.setAttribute('aria-label', label); this.body.append(canvas);
+    const encoder = await caEmbassyQrAsset(this.win, 'code');
+    if (!this.isCurrent(epoch) || !canvas.isConnected) return;
+    await encoder.toCanvas(canvas, value, { errorCorrectionLevel: 'M', margin: 4, width: 320 });
+    if (!this.isCurrent(epoch) || !canvas.isConnected) { canvas.width = 0; canvas.height = 0; }
+  }
+  scan(mode) {
+    if (mode === 'invite') {
+      const cancelling = this.handles.find(item => item.state === 'cancelling');
+      if (cancelling) { void this.resume(cancelling); return; }
+    }
+    this.clearBody(); this.record = null; this.title.textContent = mode === 'invite' ? 'Scan an invitation' : 'Scan their confirmation';
+    const note = this.el('p', 'eg-pair-status', mode === 'invite' ? 'Scan the host company’s QR. This creates a pending request; the host must approve before you can read or post.' : `Approve a request for ${this.host.room?.name || 'this room'} at ${this.host.origin || 'this host'}.`); note.setAttribute('role', 'status'); this.body.append(note);
+    let company, identity;
+    if (mode === 'invite') {
+      const labels = this.el('details', 'eg-pair-labels'); labels.append(this.el('summary', '', 'Choose company and person labels (optional)'));
+      for (const name of ['Company', 'Person']) {
+        const label = this.el('label', '', name), field = this.el('input'); field.type = 'text'; field.maxLength = name === 'Company' ? 120 : 80; field.autocomplete = 'off';
+        label.append(field); labels.append(label); if (name === 'Company') company = field; else identity = field;
+      }
+      this.body.append(labels);
+    }
+    const camera = this.button('Scan with camera', () => this.camera(note, accept)); this.body.append(camera);
+    const fileLabel = this.el('label', 'eg-pair-file', 'Or scan a QR image'); const file = this.el('input'); file.type = 'file'; file.accept = 'image/png,image/jpeg,image/webp'; fileLabel.append(file); this.body.append(fileLabel);
+    const fallback = this.el('details', 'eg-pair-fallback'); fallback.append(this.el('summary', '', mode === 'invite' ? 'Paste an invitation instead' : 'Type the confirmation code instead'));
+    const label = this.el('label', '', mode === 'invite' ? 'Invitation QR text' : 'Confirmation code'); const input = this.el('input', 'eg-pair-code'); input.type = mode === 'invite' ? 'password' : 'text'; input.autocomplete = 'off'; input.spellcheck = false; input.maxLength = 512; label.append(input);
+    const use = this.button(mode === 'invite' ? 'Request to join' : 'Look up confirmation', () => { const value = input.value; input.value = ''; void accept(value); }); fallback.append(label, use); this.body.append(fallback);
+    const epoch = this.epoch;
+    const accept = async value => {
+      if (!this.isCurrent(epoch) || this.busy) return; this.stopCamera(); file.value = ''; input.value = '';
+      if (mode === 'invite') {
+        const labels = { ...(company?.value.trim() ? { company: company.value.trim() } : {}), ...(identity?.value.trim() ? { identity: identity.value.trim() } : {}) };
+        if (company) company.value = ''; if (identity) identity.value = '';
+        await this.join(value, note, labels);
+      } else await this.lookup(value, note);
+    };
+    file.addEventListener('change', async () => {
+      const image = file.files?.[0]; file.value = ''; if (!image) return;
+      if (!['image/png', 'image/jpeg', 'image/webp'].includes(image.type) || image.size > 5 * 1024 * 1024) { note.textContent = 'Choose a PNG, JPEG or WebP under 5 MB.'; return; }
+      let bitmap;
+      try {
+        const decode = await caEmbassyQrAsset(this.win, 'scan'); bitmap = await this.win.createImageBitmap(image);
+        if (!this.isCurrent(epoch) || !file.isConnected) return;
+        if (bitmap.width * bitmap.height > 25000000) throw Error();
+        const canvas = this.el('canvas'), scale = Math.min(1, 1600 / Math.max(bitmap.width, bitmap.height)); canvas.width = Math.max(1, Math.round(bitmap.width * scale)); canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+        const ctx = canvas.getContext('2d', { willReadFrequently: true }); ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height); const pixels = ctx.getImageData(0, 0, canvas.width, canvas.height); const qr = decode(pixels.data, canvas.width, canvas.height); canvas.width = 0;
+        if (!qr) throw Error(); await accept(qr.data);
+      } catch { if (this.isCurrent(epoch) && note.isConnected) note.textContent = 'QR not found. Try another image or paste the invitation/code.'; }
+      finally { bitmap?.close(); }
+    });
+    this.actions.append(this.button('Back', () => this.home())); camera.focus();
+  }
+  async camera(note, accept) {
+    this.stopCamera(); const scanEpoch = this.scanEpoch, epoch = this.epoch;
+    if (!this.win.navigator.mediaDevices?.getUserMedia) { note.textContent = 'Camera unavailable. Use a QR image or paste the invitation/code.'; return; }
+    try {
+      const stream = await this.win.navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false });
+      if (!this.isCurrent(epoch) || scanEpoch !== this.scanEpoch || !note.isConnected || this.doc.hidden) { for (const t of stream.getTracks()) t.stop(); return; }
+      this.stream = stream; const video = this.el('video', 'eg-scan-video'); this.video = video; video.muted = true; video.playsInline = true; video.srcObject = stream; note.after(video); await video.play();
+      const decode = await caEmbassyQrAsset(this.win, 'scan'), end = Date.now() + 60000;
+      const tick = async () => {
+        if (!this.isCurrent(epoch) || scanEpoch !== this.scanEpoch || !note.isConnected || this.doc.hidden) { this.stopCamera(); return; }
+        if (Date.now() >= end) { this.stopCamera(); note.textContent = 'Camera paused. Scan again or use the code fallback.'; return; }
+        if (video.readyState >= 2) {
+          const c = this.el('canvas'), scale = Math.min(1, 960 / Math.max(video.videoWidth, video.videoHeight)); c.width = Math.max(1, Math.round(video.videoWidth * scale)); c.height = Math.max(1, Math.round(video.videoHeight * scale));
+          const ctx = c.getContext('2d', { willReadFrequently: true }); ctx.drawImage(video, 0, 0, c.width, c.height); const px = ctx.getImageData(0, 0, c.width, c.height), qr = decode(px.data, c.width, c.height); c.width = 0;
+          if (qr) { await accept(qr.data); return; }
+        }
+        this.scanTimer = this.win.setTimeout(tick, 250);
+      }; await tick();
+    } catch { this.stopCamera(); if (this.isCurrent(epoch) && note.isConnected) note.textContent = 'Camera unavailable. Use a QR image or paste the invitation/code.'; }
+  }
+  async join(value, note, labels = {}) {
+    if (this.busy || !this.owner) return;
+    let invite; try { invite = caPairInvite(value); } catch { note.textContent = 'Invalid pairing invitation. Scan the host’s Invite QR.'; return; }
+    const epoch = this.epoch; this.guestQr = invite.qr; this.busy = true; note.textContent = `Requesting approval from ${invite.origin}…`;
+    const result = await this.api('/api/embassy-pairing', { method: 'POST', body: { ...labels, qr: invite.qr, clientRequestId: this.guestOperation || (this.guestOperation = this.win.crypto.randomUUID()) } }); this.busy = false;
+    if (!this.isCurrent(epoch)) return;
+    if (!result.ok) { this.guestQr = ''; note.textContent = this.error(result); this.actions.replaceChildren(this.button('Recover connections', async () => { await this.refresh(); if (this.isCurrent(epoch)) this.home(); })); return; }
+    this.guestQr = '';
+    try {
+      const data = result.data;
+      if (!['creating', 'pending', 'approved', 'connected', 'failed', 'cancelling', 'cancelled', 'rejected', 'expired', 'revoked'].includes(data?.state) || data?.origin !== invite.origin || data?.room?.id !== invite.roomId || !this.validHandle(data?.handle)) throw Error();
+      let requestId;
+      if (['pending', 'approved'].includes(data.state)) {
+        const qr = caPairRequest(data.requestQr, invite.origin);
+        if (caPairCode(data.code) !== qr.code) throw Error();
+        requestId = qr.requestId;
+      }
+      this.record = { ...data, ...(requestId ? { requestId } : {}) }; await this.showRecord();
+    } catch { note.textContent = 'Pairing response did not match this invitation. Recover connections to check the outcome.'; }
+  }
+  validHandle(value) { return typeof value === 'string' && /^[A-Za-z0-9_-]{1,80}$/.test(value); }
+  async resume(value) { if (!this.validHandle(value?.handle)) return; this.clearBody(); this.body.append(this.el('p', 'eg-pair-status', 'Restoring connection…')); this.record = { ...value }; await this.poll(); }
+  async showRecord() {
+    const record = this.record; if (!record || !this.validHandle(record.handle)) return;
+    this.handles = [...this.handles.filter(item => item.handle !== record.handle), { ...record }];
+    this.clearBody(); this.title.textContent = 'Connect companies';
+    const label = { creating: 'Creating request', pending: 'Waiting for host approval', approved: 'Approved · connecting', connected: 'Connected', rejected: 'Request declined', expired: 'Request expired', revoked: 'Invitation revoked', cancelling: 'Cancelling… (waiting for the host embassy to confirm)', cancelled: 'Request cancelled', failed: 'Connection unavailable' }[record.state] || 'Checking connection';
+    const note = this.el('p', 'eg-pair-status', label); note.setAttribute('role', 'status'); this.body.append(note);
+    if (record.hostCompany) this.body.append(this.el('p', '', `Connecting to ${String(record.hostCompany).slice(0, 200)}`));
+    if (record.room) this.body.append(this.el('p', 'ca-hint', `${record.room.name || 'Shared room'} · ${record.origin || ''}`));
+    if (record.state === 'pending' && record.requestQr && record.origin) {
+      try {
+        const qr = caPairRequest(record.requestQr, record.origin); if (record.requestId && qr.requestId !== record.requestId || caPairCode(record.code) !== qr.code) throw Error();
+        try { await this.showQR(qr.qr, 'Public confirmation QR'); }
+        catch { if (note.isConnected) note.textContent = 'QR unavailable. Have the host enter the confirmation code instead.'; }
+        if (!note.isConnected) return;
+        this.body.append(this.el('strong', 'eg-pair-confirm-code', qr.code), this.el('p', '', 'Have the host scan this confirmation QR, or enter this code. You cannot read or post until they approve.'));
+      } catch { if (note.isConnected) note.textContent = 'Confirmation unavailable. Recover the request status.'; }
+    }
+    if (!note.isConnected) return;
+    if (record.state === 'failed' && record.error === 'GUEST_LABEL') {
+      note.textContent = 'That name is already in use. Cancel this request before starting over with another name.';
+      this.actions.append(this.button('Cancel and start over', () => this.restartAfterLabelConflict()), this.button('Back', () => this.home()));
+      return;
+    }
+    if (record.state === 'cancelling') {
+      this.actions.append(this.button('Check status', () => this.poll()), this.button('Close', this.cleanup));
+      this.schedulePoll();
+    } else if (record.state === 'cancelled') {
+      this.actions.append(this.button('Start over', () => {
+        if (this.record?.handle !== record.handle || this.record.state !== 'cancelled') return;
+        this.record = null; this.guestOperation = null; this.guestQr = ''; this.scan('invite');
+      }), this.button('Back', () => this.home()));
+    } else if (record.state === 'failed') {
+      this.actions.append(this.button('Cancel request', () => this.cancel()), this.button('Check status', () => this.poll()));
+    } else if (record.state === 'connected' && record.connectionId) this.actions.append(this.button('Open shared room', () => this.openConnected(record), true));
+    else if (['creating', 'pending', 'approved'].includes(record.state)) {
+      this.actions.append(this.button('Cancel request', () => this.cancel()), this.button('Check status', () => this.poll()));
+      this.schedulePoll();
+    } else this.actions.append(this.button('Back', () => this.home()));
+  }
+  schedulePoll() { this.stopPoll(); if (!this.doc.hidden && this.dlg) this.pollTimer = this.win.setTimeout(() => this.poll(), 3000); }
+  async poll() {
+    if (!this.record || this.doc.hidden) return;
+    if (this.polling) { this.schedulePoll(); return; }
+    const handle = this.record.handle, epoch = this.epoch; if (!this.validHandle(handle)) return;
+    this.polling = true; const result = await this.api(`/api/embassy-pairing/${encodeURIComponent(handle)}`); this.polling = false;
+    if (!this.isCurrent(epoch) || this.record?.handle !== handle) return;
+    if (!result.ok) { this.clearBody(); this.body.append(this.el('p', 'eg-pair-status', this.error(result))); this.actions.append(this.button('Check status', () => this.poll()), this.button('Close', this.cleanup)); return; }
+    const states = ['creating', 'pending', 'approved', 'connected', 'rejected', 'expired', 'revoked', 'cancelling', 'cancelled', 'failed'];
+    if (!states.includes(result.data?.state) || result.data?.handle !== handle) { this.clearBody(); this.body.append(this.el('p', 'eg-pair-status', 'Pairing status unavailable. Recover the original request.')); this.actions.append(this.button('Check status', () => this.poll()), this.button('Close', this.cleanup)); return; }
+    if (this.record.state === 'cancelling' && !['cancelling', 'cancelled'].includes(result.data.state)) {
+      this.clearBody(); this.body.append(this.el('p', 'eg-pair-status', 'Cancellation is not confirmed. Recover the original request status.'));
+      this.actions.append(this.button('Check status', () => this.poll()), this.button('Close', this.cleanup)); return;
+    }
+    this.record = { ...this.record, ...result.data, handle };
+    if (!['pending', 'approved'].includes(this.record.state)) { delete this.record.requestQr; delete this.record.code; }
+    if (this.record.state !== 'connected') delete this.record.connectionId;
+    const record = this.record; await this.showRecord();
+    if (this.record === record && this.dlg?.isConnected && this.record?.state === 'connected') await this.openConnected(record);
+  }
+  async restartAfterLabelConflict() {
+    if (this.busy || !this.owner || this.record?.state !== 'failed' || this.record.error !== 'GUEST_LABEL' || !this.validHandle(this.record.handle)) return;
+    const handle = this.record.handle;
+    this.clearBody();
+    this.body.append(this.el('p', 'eg-pair-status', 'Cancelling the previous request…'));
+    const epoch = this.epoch;
+    this.busy = true;
+    const result = await this.api(`/api/embassy-pairing/${encodeURIComponent(handle)}`, { method: 'DELETE' });
+    this.busy = false;
+    if (!this.isCurrent(epoch) || this.record?.handle !== handle) return;
+    if (!result.ok || result.data?.handle !== handle || result.data?.state !== 'cancelled' || result.data?.cancelPending === true) {
+      this.clearBody(); this.body.append(this.el('p', 'eg-pair-status', result.ok ? 'Cancellation is not confirmed. Recover the request before starting over.' : this.error(result)));
+      this.actions.append(this.button('Check status', () => this.poll()), this.button('Back', () => this.home())); return;
+    }
+    this.handles = this.handles.map(item => item.handle === handle ? { ...result.data } : item);
+    this.record = null; this.guestOperation = null; this.guestQr = '';
+    this.scan('invite');
+  }
+  async reconnect(record) {
+    if (this.busy || !this.owner || record?.state !== 'connected' || !this.validHandle(record.handle)) return;
+    if (!this.win.confirm('Recover this connection after losing local access? This replaces the previous session.')) return;
+    this.clearBody(); this.record = { ...record }; const epoch = this.epoch;
+    this.body.append(this.el('p', 'eg-pair-status', 'Recovering connection…'));
+    this.busy = true;
+    const result = await this.api(`/api/embassy-pairing/${encodeURIComponent(record.handle)}/reconnect`, { method: 'POST' });
+    this.busy = false;
+    if (!this.isCurrent(epoch) || this.record?.handle !== record.handle) return;
+    if (!result.ok) {
+      this.body.replaceChildren(this.el('p', 'eg-pair-status', this.error(result)));
+      this.actions.append(this.button('Check status', () => this.poll()), this.button('Back', () => this.home()));
+      return;
+    }
+    if (result.data?.handle !== record.handle || !['connected', 'expired', 'revoked', 'cancelling', 'cancelled', 'rejected', 'failed'].includes(result.data?.state)) {
+      this.body.replaceChildren(this.el('p', 'eg-pair-status', 'Recovery status unavailable. Check the connection before trying again.'));
+      this.actions.append(this.button('Check status', () => this.poll())); return;
+    }
+    this.record = { ...result.data }; await this.showRecord();
+  }
+  async openConnected(record) {
+    if (record?.state !== 'connected' || typeof record.connectionId !== 'string') return;
+    const epoch = this.epoch; await this.view.refresh();
+    if (!this.isCurrent(epoch) || !this.view.connections.some(c => c.id === record.connectionId)) return;
+    this.close(); this.view.open(record.connectionId);
+  }
+  async cancel() {
+    if (this.busy || !this.record || !this.owner) return;
+    const handle = this.record.handle; this.clearBody(); const epoch = this.epoch; this.busy = true;
+    this.body.append(this.el('p', 'eg-pair-status', 'Requesting cancellation…'));
+    const result = await this.api(`/api/embassy-pairing/${encodeURIComponent(handle)}`, { method: 'DELETE' }); this.busy = false;
+    if (!this.isCurrent(epoch) || this.record?.handle !== handle) return;
+    const data = result.data;
+    const states = ['creating', 'pending', 'approved', 'connected', 'rejected', 'expired', 'revoked', 'cancelling', 'cancelled', 'failed'];
+    if (result.ok && data?.handle === handle && states.includes(data.state) && !(data.state === 'cancelled' && data.cancelPending === true)) {
+      this.record = { ...this.record, ...data };
+      if (['rejected', 'expired', 'revoked', 'cancelling', 'cancelled', 'failed'].includes(data.state)) { delete this.record.requestQr; delete this.record.code; delete this.record.connectionId; }
+      await this.showRecord();
+    } else {
+      this.clearBody(); this.body.append(this.el('p', 'eg-pair-status', result.ok ? 'Cancellation is not confirmed. Recover the original request status.' : this.error(result)));
+      this.actions.append(this.button('Check status', () => this.poll()), this.button('Close', this.cleanup));
+    }
+  }
+  async lookup(value, note) {
+    if (this.busy || !this.owner || this.host.status !== 'ready') return;
+    let body, code, requestId;
+    try { if (String(value).startsWith('embassy-pair-v1|')) { const qr = caPairRequest(value, this.host.origin); body = { qr: qr.qr }; code = qr.code; requestId = qr.requestId; } else { code = caPairCode(value); body = { code }; } }
+    catch { note.textContent = 'Invalid confirmation or wrong host. Scan this company’s request QR, or enter its code.'; return; }
+    const epoch = this.epoch; this.busy = true; const result = await this.api('/api/embassy-host/lookup', { method: 'POST', body }); this.busy = false;
+    if (!this.isCurrent(epoch)) return; if (!result.ok) { note.textContent = this.error(result); return; }
+    const data = result.data;
+    if (!data || !/^[0-9a-f-]{36}$/.test(data.requestId) || requestId && data.requestId !== requestId || !data.guest || typeof data.guest.company !== 'string' || typeof data.guest.identity !== 'string') { note.textContent = 'Confirmation response did not match the request.'; return; }
+    this.clearBody(); this.review = { requestId: data.requestId, code }; this.title.textContent = 'Approve connection?';
+    this.body.append(this.el('p', 'eg-pair-guest', `${data.guest.identity.slice(0, 200)} from ${data.guest.company.slice(0, 200)}`), this.el('p', 'ca-hint', `${this.host.room.name} · ${this.host.origin}`), this.el('p', 'ca-hint', 'Company and person names are labels, not verified identity.'));
+    if (data.state === 'pending' && Number.isFinite(data.expiresAt) && data.expiresAt > Date.now()) this.actions.append(this.button('Decline', () => this.decide('reject')), this.button('Approve connection', () => this.decide('approve'), true));
+    else { this.body.append(this.el('p', 'eg-pair-status', data.state === 'approved' || data.state === 'claimed' ? 'This connection is already approved.' : 'This request is no longer available.')); this.actions.append(this.button('Back', () => this.home())); }
+  }
+  async decide(kind) {
+    if (this.busy || !this.owner || !this.review || this.host.status !== 'ready' || !['approve', 'reject'].includes(kind)) return;
+    const epoch = this.epoch, review = this.review; this.busy = true; for (const b of this.actions.querySelectorAll('button')) b.disabled = true;
+    const result = await this.api(`/api/embassy-host/${kind}`, { method: 'POST', body: review }); this.busy = false;
+    if (!this.isCurrent(epoch) || this.review !== review) return;
+    this.clearBody(); this.body.append(this.el('p', 'eg-pair-status', result.ok ? kind === 'approve' ? 'Approved. The other company can now finish connecting.' : 'Request declined.' : this.error(result)));
+    if (!result.ok) { this.review = review; this.actions.append(this.button('Retry same decision', () => this.decide(kind))); }
+    this.actions.append(this.button('Done', () => this.home()));
+  }
+  async invites() {
+    if (this.busy || !this.owner || this.host.status !== 'ready') return;
+    this.clearBody(); this.title.textContent = 'Invitations'; const epoch = this.epoch;
+    this.body.append(this.el('p', 'eg-pair-status', 'Loading invitations…')); const result = await this.api('/api/embassy-host/invites');
+    if (!this.isCurrent(epoch)) return; this.body.replaceChildren();
+    if (!result.ok) this.body.append(this.el('p', 'eg-pair-status', this.error(result)));
+    else {
+      const rows = Array.isArray(result.data) ? result.data : result.data?.invites;
+      for (const row of (Array.isArray(rows) ? rows : []).slice(0, 100)) {
+        if (typeof row.inviteId !== 'string') continue;
+        const item = this.el('section', 'eg-pair-invite'); item.append(this.el('span', '', row.guest ? `${row.guest.identity || 'Guest'} · ${row.guest.company || 'Company'}` : 'Company invitation'), this.el('small', '', ['open', 'pending', 'approved', 'connected', 'expired', 'revoked', 'rejected'].includes(row.state) ? row.state : 'Unavailable'));
+        if (Number.isFinite(row.expiresAt)) item.append(this.el('small', '', row.expiresAt > Date.now() ? `Expires in ${Math.ceil((row.expiresAt - Date.now()) / 60000)} min` : 'Expired'));
+        if (['open', 'pending', 'approved', 'connected'].includes(row.state)) item.append(this.button('Revoke', async () => {
+          if (this.busy || !this.win.confirm('Revoke this invitation and stop its guest access?')) return;
+          this.busy = true; const answer = await this.api(`/api/embassy-host/invites/${encodeURIComponent(row.inviteId)}`, { method: 'DELETE' }); this.busy = false;
+          if (!this.isCurrent(epoch)) return; if (answer.ok) await this.invites(); else item.append(this.el('p', 'eg-pair-status', this.error(answer)));
+        })); this.body.append(item);
+      }
+      if (!this.body.childElementCount) this.body.append(this.el('p', 'eg-pair-status', 'No invitations yet.'));
+    }
+    this.actions.append(this.button('Back', () => this.home()));
+  }
+}
+
 function caBoot() {
   const proto = typeof CodemanApp !== 'undefined' ? CodemanApp.prototype : null;
   if (!proto || proto._caInstalled) return;
@@ -6823,6 +7313,10 @@ if (typeof module !== 'undefined' && module.exports) {
     caCount,
     caMentionCandidates,
     ReverieEmbassyView,
+    ReverieEmbassyPairingView,
+    caPairInvite,
+    caPairCode,
+    caPairRequest,
     caEmbassyInvite,
     caEmbassyJoinLink,
     caEmbassyTakeFragment,

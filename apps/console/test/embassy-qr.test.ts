@@ -67,9 +67,9 @@ it('a late preview after owner loss cannot restore a secret or confirmation',asy
  h.ui.joinDialog();h.document.querySelector('.eg-key').value=key;h.button('Check host').click();h.deny();await h.ui.refresh();release({ok:true,data:{origin:'https://relay.example.test:8443'}});await h.flush(5);
  expect(h.document.querySelector('.eg-dialog')).toBeNull();expect(h.document.body.textContent).not.toContain(key);expect(h.ui.allowed).toBe(false);
 });
-it('Embassies sits beside Board and opens the same feed, composer and message renderer',async()=>{
+it('Embassies lives only in the sidebar and opens the same feed, composer and message renderer',async()=>{
  const h=await setup();const feed=h.app._chatEls.feed,form=h.app._chatEls.composer;
- expect([...h.document.querySelectorAll('.ca-pages .ca-name')].map(n=>n.textContent)).toEqual(['Board','Embassies']);h.shell=h.window.reverieChat;
+ expect([...h.document.querySelectorAll('.ca-pages .ca-name')].map(n=>n.textContent)).toEqual(['Board']);h.shell=h.window.reverieChat;
  h.shell.openPage('embassies');expect(h.document.querySelector('.ca-page iframe')).toBeNull();h.document.querySelector('.eg-directory-room').click();await h.flush(15);
  expect(h.ui.feed).toBe(feed);expect(h.ui.form).toBe(form);expect(h.ui.feed.querySelector('.ca-msg .ca-msg-body')).not.toBeNull();expect(h.ui.feed.textContent).toContain('UNTRUSTED EXTERNAL');expect(h.ui.feed.querySelector('img')).toBeNull();
  expect(h.ui.feed.querySelector('.ca-msg-actions')).toBeNull();expect(h.window.location.hash).toBe('');

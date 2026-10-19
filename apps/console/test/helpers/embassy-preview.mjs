@@ -33,9 +33,9 @@ window.__server.handle=async(path,opts={})=>{
 window.fetch=()=>Promise.resolve({ok:true});
 ${stub}
 `;
-export async function startEmbassyPreview(){
+export async function startEmbassyPreview({extraScript=""}={}){
  const requests=[];
- const html='<!doctype html><html data-skin="daylight-blue"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Embassies UI prototype</title><script src="/embassy-invite-bootstrap.js"></script><link rel="stylesheet" href="/styles.css"><link rel="stylesheet" href="/chat-app.css"></head><body><div role="note" style="position:fixed;z-index:2000;right:8px;bottom:90px;padding:6px 10px;background:#10283f;color:white;border-radius:6px;font:12px sans-serif">Prototype · simulated connections/posts</div><script>'+bootstrap+'</script><script src="/chatroom-ui.js"></script><script src="/chat-media.js"></script><script>window.__atAppConstruction=location.hash;window.app=new CodemanApp();</script></body></html>';
+ const html='<!doctype html><html data-skin="daylight-blue"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Embassies UI prototype</title><script src="/embassy-invite-bootstrap.js"></script><link rel="stylesheet" href="/styles.css"><link rel="stylesheet" href="/chat-app.css"></head><body><div role="note" style="position:fixed;z-index:2000;right:8px;bottom:90px;padding:6px 10px;background:#10283f;color:white;border-radius:6px;font:12px sans-serif">Prototype · simulated connections/posts</div><script>'+bootstrap+extraScript+'</script><script src="/chatroom-ui.js"></script><script src="/chat-media.js"></script><script>window.__atAppConstruction=location.hash;window.app=new CodemanApp();</script></body></html>';
  const server=http.createServer(async(req,res)=>{
   const path=new URL(req.url,'http://localhost').pathname;requests.push({path,referer:req.headers.referer||''});
   if(path==='/'){res.writeHead(200,{'Content-Type':'text/html','Cache-Control':'no-store','Referrer-Policy':'no-referrer'});res.end(html);return;}
