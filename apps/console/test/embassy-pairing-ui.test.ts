@@ -247,3 +247,11 @@ it('local-room typing never appears in an embassy, including new turn events, an
  shell.noteTurn({roomId:shell.roomId,sessionId:'local'});expect(shell.els.typing.hidden).toBe(true);
  h.view.close();expect(shell.els.typing.hidden).toBe(false);expect(shell.els.typing.textContent).toContain('Local');
 });
+it('typing in every local view requires current membership in the displayed room',async()=>{
+ const h=await setup();const shell=h.view.shell;h.app._chatRooms.push(room('other','Other',[member('local','Local')]));
+ shell.noteTurn({roomId:'other',sessionId:'local'});expect(shell.els.typing.hidden).toBe(true);
+ h.app.sessions.set('outsider',{id:'outsider',status:'idle',mode:'claude',name:'Outsider'});
+ shell.noteTurn({roomId:shell.roomId,sessionId:'outsider'});expect(shell.els.typing.hidden).toBe(true);
+ shell.noteTurn({roomId:shell.roomId,sessionId:'local'});expect(shell.els.typing.textContent).toContain('Local');
+ shell.room.members=[];shell.renderTyping();expect(shell.els.typing.hidden).toBe(true);expect(shell.els.typing.textContent).toBe('');
+});
