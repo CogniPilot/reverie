@@ -56,8 +56,8 @@ describe('Plans Claude usage from the status line', () => {
 
   const report = (at: number, week = 42, five = 11) =>
     setLatestAccountPlanUsage({
-      id: 'acct-anthropic-two',
-      label: 'Account Two',
+      id: 'acct-anthropic-secondary',
+      label: 'secondary',
       provider: 'anthropic',
       status: 'ready',
       updatedAt: at,
@@ -67,13 +67,13 @@ describe('Plans Claude usage from the status line', () => {
       },
     });
 
-  const accountTwo = async () => (await service().rows()).accounts.find((r) => r.id === 'acct-anthropic-two')!;
+  const secondary = async () => (await service().rows()).accounts.find((r) => r.id === 'acct-anthropic-secondary')!;
 
   beforeEach(() => {
     rmSync(join(getDataDir(), 'subscription-profiles.json'), { force: true });
     home = mkdtempSync(join(tmpdir(), 'plans-sl-'));
     process.env.HOME = home;
-    mkdirSync(join(home, '.claude-accounts', 'two'), { recursive: true });
+    mkdirSync(join(home, '.claude-accounts', 'secondary'), { recursive: true });
     history = join(home, 'plan-usage-history.json');
     clock = NOW;
     resetLatestAccountPlanUsage();
@@ -87,7 +87,7 @@ describe('Plans Claude usage from the status line', () => {
 
   it('shows the status-line sample on the account row', async () => {
     report(NOW - 60_000);
-    const row = await accountTwo();
+    const row = await secondary();
     expect(row.usageSource).toBe('statusline');
     expect(row.usageAsOf).toBe(NOW - 60_000);
     expect(row.usageStale).toBe(false);
@@ -98,7 +98,7 @@ describe('Plans Claude usage from the status line', () => {
 
   it('marks the numbers stale after 30 minutes but keeps them with their as-of time', async () => {
     report(NOW - USAGE_STALE_MS - 1000);
-    const row = await accountTwo();
+    const row = await secondary();
     expect(row.usageStale).toBe(true);
     expect(row.usageAsOf).toBe(NOW - USAGE_STALE_MS - 1000);
     expect(row.pace.weekly).toBe(42);
@@ -107,19 +107,19 @@ describe('Plans Claude usage from the status line', () => {
   it('a newer report replaces an older one; an older one never replaces a newer one', () => {
     report(NOW - 5000, 50);
     report(NOW - 9000, 10);
-    expect(getLatestAccountPlanUsage('acct-anthropic-two')?.usage?.sevenDay?.usedPercentage).toBe(50);
+    expect(getLatestAccountPlanUsage('acct-anthropic-secondary')?.usage?.sevenDay?.usedPercentage).toBe(50);
   });
 
   it('saves each reading with its own reset, and a restart keeps the period instead of blanking it', async () => {
     report(NOW - 60_000);
-    await accountTwo();
+    await secondary();
     // The history is written in the background.
     await vi.waitFor(() => expect(existsSync(history)).toBe(true));
-    const saved = JSON.parse(readFileSync(history, 'utf8'))['acct-anthropic-two'];
+    const saved = JSON.parse(readFileSync(history, 'utf8'))['acct-anthropic-secondary'];
     expect(saved.at(-1).resetAt).toBe(RESET);
     resetLatestAccountPlanUsage();
     clock = NOW + 3600_000;
-    const row = await accountTwo();
+    const row = await secondary();
     expect(row.usageSource).toBe('history');
     expect(row.pace.weekReset).toBe(RESET);
     expect(row.pace.weekStart).toBe(RESET - WEEK_MS);
@@ -127,14 +127,14 @@ describe('Plans Claude usage from the status line', () => {
   });
 
   it('does not invent a reset when the saved one has already passed', async () => {
-    writeFileSync(history, JSON.stringify({ 'acct-anthropic-two': [{ at: NOW - 3 * 3600_000, weekly: 37, resetAt: NOW - 1000 }] }));
-    const row = await accountTwo();
+    writeFileSync(history, JSON.stringify({ 'acct-anthropic-secondary': [{ at: NOW - 3 * 3600_000, weekly: 37, resetAt: NOW - 1000 }] }));
+    const row = await secondary();
     expect(row.pace.weekReset).toBeNull();
   });
 
   it('after a restart seeds the weekly figure from the last saved sample, labelled with its time', async () => {
-    writeFileSync(history, JSON.stringify({ 'acct-anthropic-two': [{ at: NOW - 3 * 3600_000, weekly: 37 }] }));
-    const row = await accountTwo();
+    writeFileSync(history, JSON.stringify({ 'acct-anthropic-secondary': [{ at: NOW - 3 * 3600_000, weekly: 37 }] }));
+    const row = await secondary();
     expect(row.usageSource).toBe('history');
     expect(row.usageAsOf).toBe(NOW - 3 * 3600_000);
     expect(row.usageStale).toBe(true);
@@ -144,14 +144,14 @@ describe('Plans Claude usage from the status line', () => {
 
   it('a seeded sample is not written back as a fresh one', async () => {
     const saved = [{ at: NOW - 3 * 3600_000, weekly: 37 }];
-    writeFileSync(history, JSON.stringify({ 'acct-anthropic-two': saved }));
+    writeFileSync(history, JSON.stringify({ 'acct-anthropic-secondary': saved }));
     const svc = service();
     await svc.rows();
-    expect((await svc.usageHistory())['acct-anthropic-two']).toEqual(saved);
+    expect((await svc.usageHistory())['acct-anthropic-secondary']).toEqual(saved);
   });
 
   it('shows no data, not an error, before any report or sample', async () => {
-    const row = await accountTwo();
+    const row = await secondary();
     expect(row.usageSource).toBeNull();
     expect(row.usageAsOf).toBeNull();
     expect(row.pace.weekly).toBeNull();

@@ -13,8 +13,8 @@ const board = {
   rev: 7,
   timeZone: 'America/New_York',
   roster: [
-    { id: 'e-jordan', name: 'Jordan', state: 'idle', coordinator: false },
-    { id: 'e-avery', name: 'Avery', state: 'idle', coordinator: true },
+    { id: 'e-bev', name: 'Bev', state: 'idle', coordinator: false },
+    { id: 'e-burt', name: 'Burt', state: 'idle', coordinator: true },
   ],
   issues: [{ id: 'i-1', title: 't', tags: ['a'], status: 'todo', links: [], scale: 'day', createdAt: 0, updatedAt: 0 }],
 };
@@ -41,12 +41,12 @@ function fake() {
 describe('reverie board', () => {
   it('issue add resolves owner, times and --from', async () => {
     const { deps, calls } = fake();
-    const code = await boardIssueAdd(deps, { title: 'Suite', owner: 'jordan', start: '2026-10-17T14:00', end: '2026-10-18', tag: ['x'], from: 'reverie:m42' });
+    const code = await boardIssueAdd(deps, { title: 'Suite', owner: 'bev', start: '2026-10-17T14:00', end: '2026-10-18', tag: ['x'], from: 'reverie:m42' });
     expect(code).toBe(0);
     const write = calls.find((c) => c.path === '/api/board/issues');
     expect(write?.body).toEqual({
       title: 'Suite',
-      owner: 'e-jordan',
+      owner: 'e-bev',
       tags: ['x'],
       start: Date.UTC(2026, 9, 17, 18),
       end: Date.UTC(2026, 9, 19, 2),
@@ -84,7 +84,7 @@ describe('reverie board', () => {
   });
 
   it('helpers', () => {
-    expect(memberRef(board as never, 'e-avery')).toBe('e-avery');
+    expect(memberRef(board as never, 'e-burt')).toBe('e-burt');
     expect(wallTime('2026-10-17', 'start', 'America/New_York')).toBe(Date.UTC(2026, 9, 17, 11));
   });
 });

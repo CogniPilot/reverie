@@ -10,7 +10,7 @@ import { placeholderHoldsPrompt, promptStillInComposer, SubmitVerifier, type Sub
 import { ChatroomDelivery, type DeliveredMessage, type DeliverySession } from '../src/chatroom-delivery.js';
 import { LastSeenStore } from '../src/chatroom-last-seen.js';
 
-const LINE = '[Reverie chat "general"] "Avery" (coordinator): "@Blake BLOCKING review: please fix the exporter before the commit"';
+const LINE = '[Reverie chat "general"] "Burt" (coordinator): "@Stan BLOCKING review: please fix the exporter before the commit"';
 
 describe('a folded paste in the composer', () => {
   it('is recognised as our prompt when its size matches what we typed, Codex style', () => {

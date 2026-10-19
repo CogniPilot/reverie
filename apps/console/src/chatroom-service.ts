@@ -10,13 +10,15 @@
  * client re-fetches. Both carry the room's `owner` for multi-user routing.
  */
 
-import { promises as fs } from 'node:fs';
+import { randomUUID } from 'node:crypto';
+import { chmodSync, constants as fsConstants, copyFileSync, existsSync, promises as fs, renameSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import {
   ChatroomError,
   ChatroomStore,
   MAX_POLL_LABEL,
   MAX_POLL_OPTIONS,
+  MAX_MESSAGES_PER_ROOM,
   MAX_POLL_QUESTION,
   accentHue,
   isDm,
@@ -27,6 +29,7 @@ import {
   pollIsOpen,
   resolveRecipient,
   saveChatrooms,
+  textMentions,
   unreadFor,
   type ChatMember,
   type ChatMessage,
@@ -37,8 +40,10 @@ import {
   type ChatSender,
 } from './chatroom-store.js';
 import { LastSeenStore, type SeenMark } from './chatroom-last-seen.js';
+import { PendingDeliveryStore } from './chatroom-pending-delivery.js';
 import { ChatArchive, zoneWeek } from './chat-archive.js';
-import { ChatroomDelivery, buildBriefing, paneAcceptsChat, roomLabel, senderLabel, wakeRecipients, type DeliverySession } from './chatroom-delivery.js';
+import { ChatDb, ChatDbSyncError, importLegacy, readArchive, standingLines, type JournalLine, type SyncChanges } from './chat-db.js';
+import { ChatroomDelivery, buildBriefing, paneAcceptsChat, roomLabel, senderLabel, wakeRecipients, renderForRecipient, type DeliverySession } from './chatroom-delivery.js';
 import { quoteForPane } from './pane-quote.js';
 import type { ChatBot } from './chat-bots.js';
 import { ChatroomChanged, ChatroomMessage, ChatroomReaction, ChatroomTurn } from './web/sse-events.js';
@@ -48,6 +53,8 @@ export interface ChatSessionLike extends DeliverySession {
   readonly status: string;
   readonly owner?: string;
 }
+
+const CLOSED_ALERT = 'Chat is read-only: a change could not be saved or undone on disk. Fix the disk, then restart the console.';
 
 export interface ChatroomServiceDeps {
   file: string;
@@ -60,6 +67,8 @@ export interface ChatroomServiceDeps {
   auditFile?: string;
   /** How long the poll author waits for an owner's votes to settle before hearing about them (default 3000 ms). */
   voteCoalesceMs?: number;
+  /** How long an @mentioned agent has to reply before the feed says it has not (default 3 min; REVERIE_OWED_REPLY_MS). */
+  owedReplyMs?: number;
   /** The names an owner is called by in a room (their company-settings name), so an `@name` of them counts as a mention. */
   ownerNames?: (owner: string | undefined) => string[];
   /** Sessions whose retired state changed (retired, restored or deleted): the console refreshes their rows so a retired one leaves every tab list. */
@@ -68,6 +77,16 @@ export interface ChatroomServiceDeps {
   archiveDir?: string;
   /** The company time zone for a room's owner: the archive's week files follow it (default UTC). */
   timeZone?: (owner: string | undefined) => string | undefined;
+  /** Tell the owner outside chat (web push) that chat cannot start or has gone read-only. */
+  alert?: (text: string) => Promise<unknown> | void;
+  /**
+   * The chat database (chat-db.ts). When set, rooms and messages live there: every change is committed
+   * (and copied to the archive files) before the call that made it returns, and chatrooms.json is only
+   * read once, to import it, when the database does not exist yet. Unset: chatrooms.json as before.
+   */
+  database?: string;
+  /** The server calls startDelivery after it has finished restoring all session records. */
+  deferDeliveryRecovery?: boolean;
 }
 
 export interface ChatMemberView extends ChatMember {
@@ -140,6 +159,28 @@ function cleanName(v: unknown): string {
   return typeof v === 'string' ? v.replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2066-\u2069]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 100) : '';
 }
 
+/** One owner request an agent owes a reply to (see trackOwedReplies). */
+interface OwedReply {
+  sessionId: string;
+  roomId: string;
+  messageId: string;
+  at: number;
+  delivery: 'pending' | 'submitted' | 'unconfirmed';
+  /** When the agent's pane was last seen go (or stay) idle; undefined while it is working. The grace runs from here. */
+  idleSince: number | undefined;
+  /** The fixed-deadline "delivery still unconfirmed" line was shown. */
+  deliveryNoted: boolean;
+  timer: ReturnType<typeof setTimeout>;
+}
+/** How often an owed reply's pane is checked for idleness (at most; half the grace when that is shorter). */
+const OWED_IDLE_RECHECK_MS = 30_000;
+/** While it keeps working, after this long an unconfirmed delivery is said so once. */
+const OWED_DELIVERY_DEADLINE_MS = 10 * 60_000;
+
+function etTime(at: number): string {
+  return new Date(at).toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit' });
+}
+
 export class ChatroomService {
   private store = new ChatroomStore();
   readonly delivery: ChatroomDelivery;
@@ -149,16 +190,40 @@ export class ChatroomService {
 
   /** What each agent session has seen of each room (chatroom-last-seen.ts), next to the rooms file. */
   readonly seen: LastSeenStore;
+  private pendingStore: PendingDeliveryStore | undefined;
+  private deliveryReady: boolean;
+  private deliveryStart: Promise<void> | undefined;
+  private uncertainNotices = new Map<string, { at: number; count: number }>();
+  /**
+   * Owed replies, one per request: the owner @mentioned or addressed an agent (or @everyone). Settled only by that agent's post
+   * whose replyTo is exactly that message. Key: session NUL room NUL message.
+   */
+  private owedReplies = new Map<string, OwedReply>();
+  /** Last visible delivery-problem notice per session NUL room, so a stuck pane can not flood the feed. */
+  private deliveryNotices = new Map<string, number>();
 
-  /** Messages past the per-room cap, archived before they are dropped (chat-archive.ts). */
+  /** Messages past the per-room cap, archived before they are dropped (chat-archive.ts); with the database, its second record. */
   private readonly archive: ChatArchive;
 
+  /** The chat database, when `deps.database` is set and it opened (or was imported) cleanly. */
+  private db: ChatDb | undefined;
+  /** Set when a failed commit could not be voided in the archive: writes refused until a restart. */
+  private writesClosed: string | undefined;
+
   constructor(private readonly deps: ChatroomServiceDeps) {
+    this.deliveryReady = !deps.deferDeliveryRecovery;
     this.archive = new ChatArchive(deps.archiveDir ?? join(dirname(deps.file), 'chat-archive'));
     this.seen = new LastSeenStore(deps.file ? join(dirname(deps.file), 'chat-last-seen.json') : undefined);
     this.delivery = new ChatroomDelivery({
       getSession: deps.getSession,
       now: deps.now,
+      isReady: () => this.deliveryReady,
+      pendingStore: () => this.pendingStore,
+      onPersistenceError: () => {
+        this.writesClosed = 'Pending delivery persistence failed; restart after repairing storage';
+        console.error('[chatroom] pending delivery persistence failed; delivery stopped');
+        void Promise.resolve(this.deps.alert?.('Chat delivery stopped: pending deliveries could not be saved.')).catch(() => undefined);
+      },
       // A turn is starting for this member in this room: the page shows "is thinking" there until it ends.
       onWoken: (sessionId, roomId, at) => {
         const room = this.store?.get(roomId);
@@ -166,11 +231,31 @@ export class ChatroomService {
       },
       onSubmitted: (sessionId, messages) => {
         for (const { roomId, messageId } of messages) this.markSeen(sessionId, roomId, messageId);
+        this.noteOwedDelivery(sessionId, messages, 'submitted');
       },
       onStranded: (sessionId, messages) => {
         const rooms = [...new Set(messages.map((m) => m.roomId))];
         console.warn(`[chatroom] delivery to ${sessionId.slice(0, 8)} is still unsubmitted in its composer (rooms ${rooms.join(', ')})`);
         void this.audit({ action: 'delivery-stranded', sessionId, rooms, messages: messages.length }).catch(() => undefined);
+        this.noticeDeliveryProblem(sessionId, rooms, 'Delivery to %s failed: the message is still unsent in its composer (held, not resent)');
+        this.noteOwedDelivery(sessionId, messages, 'unconfirmed');
+      },
+      onUncertain: (sessionId, messages) => {
+        const rooms = [...new Set(messages.map((m) => m.roomId))];
+        console.warn(`[chatroom] delivery to ${sessionId.slice(0, 8)} may have been typed; inspect its pane before retrying`);
+        void this.audit({ action: 'delivery-uncertain', sessionId, rooms, messages: messages.length }).catch(() => undefined);
+        this.noticeDeliveryProblem(sessionId, rooms, 'Delivery to %s is unconfirmed: it may or may not have been submitted (held, not resent)');
+        this.noteOwedDelivery(sessionId, messages, 'unconfirmed');
+        const now = this.now();
+        const notice = this.uncertainNotices.get(sessionId) ?? { at: -Infinity, count: 0 };
+        notice.count++;
+        this.uncertainNotices.set(sessionId, notice);
+        if (now - notice.at >= 30 * 60_000) {
+          const count = notice.count;
+          notice.at = now;
+          notice.count = 0;
+          void this.raiseAlert(`Chat delivery to session ${sessionId.slice(0, 8)} is paused (${count} unconfirmed event${count === 1 ? '' : 's'} since the previous notice). Inspect its pane, then use reverie agent chat read for the affected rooms.`);
+        }
       },
     });
   }
@@ -186,6 +271,13 @@ export class ChatroomService {
   /** The newest message of this room the session is known to have seen (submitted to its prompt or read via the API). */
   lastSeen(sessionId: string, roomId: string): SeenMark | undefined {
     return this.seen.get(sessionId, roomId);
+  }
+
+  /** Reading a page covers its returned identities, not earlier gaps hidden by the newest seen mark. */
+  acknowledgeAgentRead(sessionId: string, roomId: string, messages: ChatMessage[]): void {
+    if (!this.store.get(roomId)?.members.some((m) => m.sessionId === sessionId)) return;
+    this.delivery.acknowledgeRead(sessionId, roomId, messages.map((m) => m.id));
+    for (const message of messages) this.markSeen(sessionId, roomId, message.id);
   }
 
   private retired: RetiredSession[] = [];
@@ -233,16 +325,54 @@ export class ChatroomService {
 
   async init(): Promise<void> {
     await this.loadRetired();
-    const rooms = await loadChatrooms(this.deps.file);
+    const rooms = this.deps.database ? await this.openDatabase(this.deps.database) : await loadChatrooms(this.deps.file);
     this.store = new ChatroomStore(rooms);
     await this.seen.load();
     this.learnNames(rooms);
-    this.delivery.start();
+    if (this.deps.file) {
+      try {
+        const opened = PendingDeliveryStore.openRecoverable(join(dirname(this.deps.file), 'chat-pending-delivery.db'));
+        this.pendingStore = opened.store;
+        if (opened.quarantined) {
+          console.warn('[chatroom] invalid pending delivery database preserved; starting empty', opened.quarantined);
+          await this.audit({ action: 'delivery-journal-quarantined', path: opened.quarantined }).catch(() => undefined);
+          await Promise.resolve().then(() => this.deps.alert?.('Chat started with an empty delivery queue after preserving an invalid delivery database. Use chat read for messages that may need catching up.'))
+            .catch(() => undefined);
+        }
+      } catch (error) {
+        this.pendingStore?.close();
+        this.db?.close();
+        throw error;
+      }
+    }
+    if (!this.deps.deferDeliveryRecovery) await this.startDelivery();
+  }
+
+  /** Called once the registry is complete: only then is a missing session actually gone. */
+  startDelivery(): Promise<void> {
+    return this.deliveryStart ??= (async () => {
+      this.delivery.stop(); // Bootstrap messages are rebuilt once from their durable identities.
+      this.deliveryReady = true;
+      try {
+        if (this.pendingStore) await this.recoverPendingDeliveries();
+        this.delivery.start();
+      } catch (error) {
+        this.deliveryReady = false;
+        this.delivery.stop();
+        this.writesClosed = 'Delivery recovery failed; inspect storage and restart';
+        console.error('[chatroom] delivery recovery failed; chat writes are closed', error);
+        await this.raiseAlert('Chat is read-only: delivery recovery failed during startup. Inspect storage and restart after repair.');
+        throw error;
+      }
+    })();
   }
 
   async stop(): Promise<void> {
+    this.deliveryReady = false;
     for (const pending of this.voteNotices.values()) clearTimeout(pending.timer);
     this.voteNotices.clear();
+    for (const owed of this.owedReplies.values()) clearTimeout(owed.timer);
+    this.owedReplies.clear();
     this.delivery.stop();
     await this.seen.flush();
     if (this.persistTimer) {
@@ -251,6 +381,224 @@ export class ChatroomService {
       this.persistNow();
     }
     await this.persistChain;
+    // A last full compare: anything changed without naming its room is committed now.
+    if (this.db && !this.writesClosed) {
+      try {
+        this.syncDatabase();
+      } catch {
+        // Logged by syncDatabase.
+      }
+    }
+    this.db?.close();
+    this.db = undefined;
+    this.pendingStore?.close();
+  }
+
+  /** Restore only the exact queued identities: a newer seen mark cannot cover an older hole. */
+  private async recoverPendingDeliveries(): Promise<void> {
+    const pending = this.pendingStore!;
+    const uncertain = new Map<string, number>();
+    const gone = new Set<string>();
+    for (const entry of pending.list()) {
+      if (gone.has(entry.sessionId)) continue;
+      const room = this.store.get(entry.roomId);
+      const member = room?.members.find((m) => m.sessionId === entry.sessionId);
+      const session = this.deps.getSession(entry.sessionId);
+      if (!session) {
+        pending.forget(entry.sessionId);
+        gone.add(entry.sessionId);
+        continue;
+      }
+      const message = room?.messages.find((m) => m.id === entry.messageId)
+        ?? (this.db ? JSON.parse(String(this.db.db.prepare('SELECT data FROM messages WHERE room_id = ? AND id = ?')
+          .get(entry.roomId, entry.messageId)?.data ?? 'null')) as ChatMessage | null : null);
+      // Membership and owner scope are checked again, never inferred from persisted recipients.
+      if (!room || !member || !session || member.postOnly || session.owner !== room.owner || message?.deleted
+        || (message && !messageRecipients(room, message).includes(entry.sessionId))) {
+        pending.remove([entry.id]);
+        continue;
+      }
+      if (entry.state === 'uncertain' || !message) {
+        pending.state([entry.id], 'uncertain');
+        this.delivery.holdForInspection(entry.sessionId, [{ roomId: entry.roomId, messageId: entry.messageId }]);
+        uncertain.set(entry.roomId, (uncertain.get(entry.roomId) ?? 0) + 1);
+        continue;
+      }
+      const recipients = messageRecipients(room, message);
+      const awake = wakeRecipients(room, message, recipients, this.nameOf);
+      this.delivery.enqueue(entry.sessionId, room, renderForRecipient(room, message, entry.sessionId, this.nameOf), {
+        deliveryId: entry.id, messageId: entry.messageId, at: entry.at,
+        passive: entry.passive || !awake.has(entry.sessionId),
+      });
+    }
+    if (uncertain.size) {
+      const counts = Object.fromEntries(uncertain);
+      console.warn('[chatroom] unconfirmed deliveries require pane inspection and chat read; not automatically pasted again', counts);
+      await this.audit({ action: 'delivery-recovery-uncertain', rooms: counts });
+      await Promise.resolve(this.deps.alert?.('Some chat deliveries were unconfirmed at restart. Inspect panes and use chat read; they were not pasted again.'))
+        .catch(() => undefined);
+    }
+  }
+
+  /**
+   * Open the chat database, importing chatrooms.json and the archive files into it first if it does
+   * not exist. A database that fails its integrity check throws (the console does not start on it). An
+   * import that does not match its sources is set aside (`chat.db.rejected-<ms>`) and the rooms come
+   * from chatrooms.json as before, with an error logged.
+   */
+  private async openDatabase(file: string): Promise<ChatRoom[]> {
+    if (!existsSync(file) && !this.importDatabase(file)) return loadChatrooms(this.deps.file);
+    try {
+      this.db = ChatDb.open(file);
+    } catch (err) {
+      // Chat itself is what failed, so this cannot be posted to a room: the log line, the nonzero exit
+      // (cli.ts) and the supervisor's exit record and ALERT file are where it shows.
+      console.error(
+        `[chatroom] REFUSING TO START: ${(err as Error).message}. Nothing was changed. Recover from the newest nightly backup ` +
+          `(node dist/chat-db-cli.js check --db BACKUP, then put it in place of ${file}) or rebuild from the archive ` +
+          `(node dist/chat-db-cli.js rebuild --archive ${this.archive.dir} --out NEW.db --compare BACKUP).`
+      );
+      await this.raiseAlert('Chat did not start: its database failed a check. Nothing was changed. The console log has the recovery steps.');
+      throw err;
+    }
+    this.voidOrphans();
+    return this.db.loadRooms(MAX_MESSAGES_PER_ROOM);
+  }
+
+  /**
+   * A txn in the archive that the database never committed and nothing voided: left by writes closed
+   * (its void could not be written) or by a crash between the archive append and the commit. Its void
+   * goes in now, so a rebuild does not bring it back. Only the plain (current) weeks can hold one: a
+   * week is gzipped on an append, and the first append of a run comes after this. If the void still
+   * cannot be written, writes stay closed.
+   */
+  /** The owner alert; never throws (an alert must not change what happens next). */
+  private async raiseAlert(text: string): Promise<void> {
+    try {
+      await this.deps.alert?.(text);
+    } catch (err) {
+      console.error('[chatroom] owner alert failed:', err);
+    }
+  }
+
+  private voidOrphans(): void {
+    const lines = readArchive(this.archive.dir, { plainOnly: true }).lines;
+    const voided = new Set<string>();
+    const txns = new Set<string>();
+    for (const line of lines) {
+      if (line.kind === 'void') voided.add(line.txn);
+      else if (line.txn) txns.add(line.txn);
+    }
+    const open = [...txns].filter((t) => !voided.has(t));
+    if (!open.length) return;
+    const committed = this.db!.committedTxns(open);
+    const orphans = open.filter((t) => !committed.has(t));
+    if (!orphans.length) return;
+    const now = this.now();
+    try {
+      this.appendJournal(orphans.map((txn) => ({ kind: 'void', txn, archivedAt: now })), now);
+      console.error(`[chatroom] voided ${orphans.length} archive txn(s) the database never committed (writes closed or a crash mid-commit): ${orphans.join(', ')}`);
+    } catch (err) {
+      this.writesClosed = `the archive has txn(s) ${orphans.join(', ')}, which the database did not commit, and they could not be voided at start`;
+      console.error(`[chatroom] WRITES CLOSED: ${this.writesClosed}. Chat stays readable; restart the console after fixing the disk.`, err);
+      void this.raiseAlert(CLOSED_ALERT);
+    }
+  }
+
+  private importDatabase(file: string): boolean {
+    const json = this.deps.file;
+    // The rollback: chatrooms.json as it was at this attempt, one copy per attempt; the log names the
+    // copy that matches the database it made.
+    const attempt = this.now();
+    const frozen = existsSync(json) ? join(dirname(json), `chatrooms.pre-sqlite-${attempt}.json`) : undefined;
+    if (frozen) {
+      copyFileSync(json, frozen, fsConstants.COPYFILE_EXCL);
+      chmodSync(frozen, 0o600);
+    }
+    const tmp = `${file}.import-${process.pid}`;
+    const report = importLegacy({ json, archiveDir: this.archive.dir, dbFile: tmp });
+    if (!report.ok) {
+      const aside = `${file}.rejected-${attempt}`;
+      renameSync(tmp, aside);
+      console.error(`[chatroom] the chat database import did not match chatrooms.json and the archive (kept as ${aside}, its source as ${frozen ?? 'no chatrooms.json'}); staying on chatrooms.json:`, report.problems);
+      return false;
+    }
+    // The archive files become the second record: a baseline of every room, and of every message the
+    // archive does not already hold as imported (the archived ones are there), then every change after it.
+    const now = this.now();
+    const archived = new Map<string, string>();
+    for (const line of standingLines(readArchive(this.archive.dir).lines)) {
+      if (line.kind === undefined || line.kind === 'message') archived.set(`${line.roomId}/${line.message.id}`, JSON.stringify(line.message));
+    }
+    const lines: JournalLine[] = [];
+    for (const room of loadImportedRooms(tmp)) {
+      const { messages, ...data } = room;
+      lines.push({ kind: 'room', roomId: room.id, archivedAt: now, data });
+      for (const message of messages) {
+        if (archived.get(`${room.id}/${message.id}`) !== JSON.stringify(message)) lines.push({ roomId: room.id, room: room.name, archivedAt: now, message });
+      }
+    }
+    this.archive.appendSync(zoneWeek(now, this.deps.timeZone?.(undefined)), lines.map((l) => JSON.stringify(l)));
+    renameSync(tmp, file);
+    console.log(
+      `[chatroom] chat database created from chatrooms.json and the archive: ${report.totals.rooms} rooms, ${report.totals.messages} messages; rollback copy: ${frozen ?? 'none (no chatrooms.json)'}`
+    );
+    return true;
+  }
+
+  /**
+   * Commit what changed (in `roomId` only, when given) to the database, its copy to the archive files
+   * first, under one txn id; the window trims after. If it cannot be committed, memory goes back to
+   * what is (no one may read what a restart would lose), a `void` line for the txn follows its archive
+   * lines, and the caller gets UNAVAILABLE (503). If even the void line cannot be written, the archive
+   * holds a change the database does not, so writes stop until a restart (fail closed).
+   */
+  private syncDatabase(roomId?: string): void {
+    const now = this.now();
+    const db = this.db!;
+    if (this.writesClosed) {
+      this.store.reset(db.committed());
+      throw new ChatroomError(`Chat is read-only until the console restarts: ${this.writesClosed}`, 'UNAVAILABLE');
+    }
+    const txn = randomUUID();
+    try {
+      db.sync(this.store.list(), MAX_MESSAGES_PER_ROOM, (changes) => this.journal(changes, now, txn), roomId ? new Set([roomId]) : undefined, txn);
+    } catch (err) {
+      this.store.reset(db.committed());
+      if (err instanceof ChatDbSyncError && err.journaled) {
+        try {
+          this.appendJournal([{ kind: 'void', txn, archivedAt: now }], now);
+        } catch (voidErr) {
+          this.writesClosed = `the archive has txn ${txn}, which the database did not commit, and it could not be voided`;
+          console.error(`[chatroom] WRITES CLOSED: ${this.writesClosed}. Chat stays readable; restart the console after fixing the disk.`, voidErr);
+          void this.raiseAlert(CLOSED_ALERT);
+        }
+      }
+      console.error('[chatroom] chat database commit failed; the change was undone in memory:', err);
+      throw new ChatroomError('The chat database could not save that change, so nothing was kept. Try again.', 'UNAVAILABLE');
+    }
+    void this.archive.sweep(now, this.deps.timeZone?.(undefined)).catch((err) => console.warn('[chat-archive] gzip of ended weeks failed (kept as plain files):', err));
+  }
+
+  private journal(changes: SyncChanges, now: number, txn: string): void {
+    const lines: JournalLine[] = [];
+    for (const data of changes.rooms) lines.push({ kind: 'room', txn, roomId: data.id, archivedAt: now, data });
+    for (const { room, message } of changes.messages) lines.push({ txn, roomId: room.id, room: room.name, archivedAt: now, message });
+    for (const roomId of changes.deletedRooms) lines.push({ kind: 'room-deleted', txn, roomId, archivedAt: now });
+    this.appendJournal(lines, now);
+  }
+
+  /** Lines to the week file of `now` in the zone of each room's owner (a removed room's: the default zone). */
+  private appendJournal(lines: JournalLine[], now: number): void {
+    const byWeek = new Map<string, string[]>();
+    for (const line of lines) {
+      const owner = line.kind === 'room' ? line.data.owner : line.kind === 'void' ? undefined : this.store.get(line.roomId)?.owner;
+      const week = zoneWeek(now, this.deps.timeZone?.(owner));
+      const group = byWeek.get(week) ?? [];
+      group.push(JSON.stringify(line));
+      byWeek.set(week, group);
+    }
+    for (const [week, group] of byWeek) this.archive.appendSync(week, group);
   }
 
   /** Owner votes waiting to be told to a poll's author, by poll message id (see scheduleOwnerVoteNotice). */
@@ -326,7 +674,7 @@ export class ChatroomService {
       const liveName = cleanName(s?.name);
       if (liveName && m.lastName !== liveName) {
         m.lastName = liveName;
-        this.schedulePersist();
+        this.schedulePersist(room.id);
       }
       return {
         ...m,
@@ -674,6 +1022,8 @@ export class ChatroomService {
     const message = this.store.post(roomId, from, text, to, this.now(), extra);
     // Only an agent's own signature names a session: a user, an external sender or the system never does.
     if (from.kind === 'agent' && cleanName(from.name)) this.knownNames.set(from.sessionId, cleanName(from.name));
+    // Persisted before it is shown or delivered: with the database, committed before anyone sees it.
+    this.schedulePersist(room.id);
     this.deps.broadcast(ChatroomMessage, { owner: room.owner ?? '@single', roomId: room.id, message });
     // A spoken turn was already answered by the voice service: show it, never type it into a pane.
     if (deliver) {
@@ -685,9 +1035,113 @@ export class ChatroomService {
         return !!session && session.pid !== null && paneAcceptsChat(session.mode);
       }));
     }
-    this.schedulePersist();
+    this.trackOwedReplies(room, message, deliver);
     for (const listener of this.messageListeners) listener(room, message);
     return message;
+  }
+
+  private owedReplyMs(): number {
+    const env = Number(process.env.REVERIE_OWED_REPLY_MS);
+    return this.deps.owedReplyMs ?? (Number.isFinite(env) && env > 0 ? env : 3 * 60_000);
+  }
+
+  /**
+   * An owner post that @mentions or addresses an agent that takes chat (or says @everyone) makes it owe a reply to THAT message
+   * in that room; each request is watched on its own. Only a post by that agent whose replyTo is exactly that message settles
+   * it; nothing is inferred. The no-reply line is timed by idleness: the grace starts when the pane is first seen idle and
+   * restarts whenever work resumes, so a long task that just finished is not warned at once (idle is a timing signal only,
+   * never proof of delivery or of reading). While it keeps working, a
+   * separate fixed deadline may say once that delivery is still unconfirmed, labelled as that. Both are system lines: shown,
+   * never typed into a pane, and they create no obligation. Prototype: owed replies are not kept across a restart.
+   */
+  private trackOwedReplies(room: ChatRoom, message: ChatMessage, delivered: boolean): void {
+    if (message.from.kind === 'agent') {
+      if (!message.replyTo) return;
+      const key = `${message.from.sessionId}\u0000${room.id}\u0000${message.replyTo}`;
+      const owed = this.owedReplies.get(key);
+      if (owed) {
+        clearTimeout(owed.timer);
+        this.owedReplies.delete(key);
+      }
+      return;
+    }
+    if (message.from.kind !== 'user' || !delivered || isDm(room)) return;
+    const text = message.text ?? '';
+    const everyone = textMentions(text, 'everyone') || textMentions(text, 'all') || textMentions(text, 'here');
+    for (const member of room.members) {
+      const id = member.sessionId;
+      if (member.postOnly) continue;
+      const addressed = message.to !== 'all' && message.to.includes(id);
+      if (!everyone && !addressed && !textMentions(text, this.nameOf(id))) continue;
+      const session = this.deps.getSession(id);
+      if (!session || session.pid === null || !paneAcceptsChat(session.mode)) continue;
+      const key = `${id}\u0000${room.id}\u0000${message.id}`;
+      if (this.owedReplies.has(key)) continue;
+      const idleSince = session.isWorking ? undefined : this.now();
+      const owed: OwedReply = { sessionId: id, roomId: room.id, messageId: message.id, at: message.at, delivery: 'pending', idleSince, deliveryNoted: false, timer: undefined as never };
+      this.owedReplies.set(key, owed);
+      this.armOwedReply(key, owed, this.owedRecheckMs());
+    }
+  }
+
+  private owedRecheckMs(): number {
+    return Math.max(1, Math.min(OWED_IDLE_RECHECK_MS, Math.floor(this.owedReplyMs() / 2)));
+  }
+
+  private armOwedReply(key: string, owed: OwedReply, ms: number): void {
+    owed.timer = setTimeout(() => this.checkOwedReply(key), ms);
+    owed.timer.unref?.();
+  }
+
+  private checkOwedReply(key: string): void {
+    const owed = this.owedReplies.get(key);
+    if (!owed) return;
+    const room = this.store.get(owed.roomId);
+    if (!room || room.archivedAt) {
+      this.owedReplies.delete(key);
+      return;
+    }
+    const session = this.deps.getSession(owed.sessionId);
+    const now = this.now();
+    if (session?.isWorking) {
+      owed.idleSince = undefined; // work resumed: the grace starts again when it next goes idle
+      // Still working: not a missed reply. Past the fixed delivery deadline, say once that delivery itself is unconfirmed.
+      if (!owed.deliveryNoted && owed.delivery !== 'submitted' && now - owed.at >= OWED_DELIVERY_DEADLINE_MS) {
+        owed.deliveryNoted = true;
+        this.system(room, `Delivery to ${this.nameOf(owed.sessionId)} still unconfirmed ${Math.round((now - owed.at) / 60_000)} min after the ${etTime(owed.at)} ET message to it (it is still working)`, owed.sessionId);
+      }
+      this.armOwedReply(key, owed, this.owedRecheckMs());
+      return;
+    }
+    owed.idleSince ??= now;
+    if (now - owed.idleSince < this.owedReplyMs()) {
+      this.armOwedReply(key, owed, this.owedRecheckMs());
+      return;
+    }
+    this.owedReplies.delete(key);
+    const mins = Math.round((now - owed.at) / 60_000);
+    const delivery = owed.delivery === 'pending' ? 'not yet confirmed' : owed.delivery;
+    this.system(room, `Reply from ${this.nameOf(owed.sessionId)} unconfirmed: no reply linked to the ${etTime(owed.at)} ET message to it after ${mins} min (delivery: ${delivery})`, owed.sessionId);
+  }
+
+  private noteOwedDelivery(sessionId: string, messages: { roomId: string; messageId: string }[], delivery: 'submitted' | 'unconfirmed'): void {
+    for (const { roomId, messageId } of messages) {
+      const owed = this.owedReplies.get(`${sessionId}\u0000${roomId}\u0000${messageId}`);
+      if (owed && owed.delivery !== 'submitted') owed.delivery = delivery;
+    }
+  }
+
+  /** A failed or unconfirmed delivery is shown in each affected room, at most once per 10 minutes per member and room. */
+  private noticeDeliveryProblem(sessionId: string, roomIds: string[], template: string): void {
+    const now = this.now();
+    for (const roomId of roomIds) {
+      const room = this.store.get(roomId);
+      if (!room || room.archivedAt) continue;
+      const key = `${sessionId}\u0000${roomId}`;
+      if (now - (this.deliveryNotices.get(key) ?? -Infinity) < 10 * 60_000) continue;
+      this.deliveryNotices.set(key, now);
+      this.system(room, template.replace('%s', () => this.nameOf(sessionId)), sessionId);
+    }
   }
 
   /** Throws unless this bot may post in this room now: allowlisted, room there and open, under its hourly cap. */
@@ -749,15 +1203,14 @@ export class ChatroomService {
    * Soft delete: the original goes to the audit log first (a message is never dropped without a record),
    * then the room keeps a tombstone. Open panels reload the room.
    */
-  async deleteMessage(roomId: string, messageId: string, by: string): Promise<void> {
+  async deleteMessage(roomId: string, messageId: string, by: string, byRank?: number): Promise<void> {
     const room = this.store.require(roomId);
     const original = this.store.findMessage(roomId, messageId);
     if (original.deleted) throw new ChatroomError('Already deleted', 'CONFLICT');
     await this.audit({ action: 'delete', roomId, by, message: original });
-    this.store.tombstone(roomId, messageId, by, this.now());
+    this.store.tombstone(roomId, messageId, by, this.now(), byRank);
     this.delivery.dropMessage(roomId, messageId);
     this.changed(room, 'updated');
-    this.schedulePersist();
   }
 
   /**
@@ -831,7 +1284,6 @@ export class ChatroomService {
     await this.audit({ action: 'restore', roomId, by, messageId });
     this.store.restore(roomId, original);
     this.changed(room, 'updated');
-    this.schedulePersist();
   }
 
   /**
@@ -851,14 +1303,17 @@ export class ChatroomService {
     if (original.from.kind === 'agent' && original.from.sessionId === coordinator.sessionId) {
       throw new ChatroomError('A coordinator\'s own message cannot be reported to the coordinator', 'INVALID_INPUT');
     }
-    await this.audit({ action: 'report', roomId, by: from.kind === 'user' ? from.name : 'agent', reason, message: original });
+    const reporter = from.kind === 'agent' ? this.nameOf(from.sessionId) : 'the user';
+    await this.audit({ action: 'report', roomId, by: from.kind === 'user' ? from.name : reporter, reason, message: original });
     const name = senderLabel({ ...original.from, name: this.nameOf(original.from.sessionId) });
     const snippet = original.text.replace(/\s+/g, ' ').trim().slice(0, 200) || '(attachment)';
     const text =
-      `REPORT from the user about a message in ${quoteForPane(room.name, 80)} by ${name} (${new Date(original.at).toISOString()}): ` +
-      `${quoteForPane(snippet, 200)}${reason.trim() ? ` Reason: ${quoteForPane(reason.trim(), 1000)}` : ''} Please look into it and tell the user what you find.`;
+      `REPORT from ${from.kind === 'agent' ? quoteForPane(reporter, 80) : reporter} about a message in ${quoteForPane(room.name, 80)} by ${name} (${new Date(original.at).toISOString()}): ` +
+      `${quoteForPane(snippet, 200)}${reason.trim() ? ` Reason: ${quoteForPane(reason.trim(), 1000)}` : ''} Please look into it and tell ${from.kind === 'agent' ? quoteForPane(reporter, 80) : 'the user'} what you find.`;
     const dm = this.openDm(coordinator.sessionId, room.owner);
-    return { message: this.post(dm.id, from, text, 'all'), dmId: dm.id };
+    // An agent is not a participant of the coordinator's direct message, so its report goes in as a system notice naming it.
+    const sender: ChatSender = from.kind === 'agent' ? { kind: 'system', name: 'report' } : from;
+    return { message: this.post(dm.id, sender, text, 'all'), dmId: dm.id };
   }
 
   /**
@@ -977,14 +1432,15 @@ export class ChatroomService {
   /** Polls whose close is between its audit line and the store write (see closePoll). */
   private readonly closingPolls = new Set<string>();
 
-  async closePoll(roomId: string, messageId: string, who: string): Promise<ChatPoll> {
+  async closePoll(roomId: string, messageId: string, who: string, closesOthers = false): Promise<ChatPoll> {
     const room = this.store.require(roomId);
     const message = room.messages.find((m) => m.id === messageId);
     if (!message) throw new ChatroomError('No such message', 'NOT_FOUND');
     const isAuthor = message.from.kind === 'agent' && message.from.sessionId === who;
+    // The route found that this member holds polls.close_others over the author (roles.ts); the coordinator seat is that for a Lead.
     const isCoordinator =
       who !== USER_RECIPIENT && message.from.kind === 'agent' && room.members.some((m) => m.sessionId === who && m.role === 'coordinator');
-    if (who !== USER_RECIPIENT && !isAuthor && !isCoordinator) {
+    if (who !== USER_RECIPIENT && !isAuthor && !isCoordinator && !closesOthers) {
       throw new ChatroomError("Only the user, the poll's author or the room's coordinator closes a poll", 'INVALID_INPUT');
     }
     if (message.poll && !message.deleted && pollIsOpen(message.poll, this.now())) {
@@ -1032,8 +1488,8 @@ export class ChatroomService {
   react(roomId: string, messageId: string, emoji: string, who: string, on?: boolean): Record<string, string[]> {
     const room = this.store.require(roomId);
     const reactions = this.store.react(roomId, messageId, emoji, who, on);
+    this.schedulePersist(roomId);
     this.deps.broadcast(ChatroomReaction, { owner: room.owner ?? '@single', roomId, messageId, reactions });
-    this.schedulePersist();
     return reactions;
   }
 
@@ -1094,15 +1550,20 @@ export class ChatroomService {
   private system(room: ChatRoom, text: string, sessionId?: string): void {
     const from: ChatSender = { kind: 'system', name: 'system', ...(sessionId ? { sessionId } : {}) };
     const message = this.store.post(room.id, from, text, 'all', this.now());
+    // With the database, committed before it is shown (a JSON save stays with the caller's change).
+    if (this.db) this.schedulePersist(room.id);
     this.deps.broadcast(ChatroomMessage, { owner: room.owner ?? '@single', roomId: room.id, message });
   }
 
   private changed(room: ChatRoom, action: 'created' | 'updated' | 'deleted' | 'status' | 'emotes' | 'read' | 'poll', messageId?: string): void {
+    // Persisted first: with the database the change is committed before anyone is told of it.
+    this.schedulePersist(room.id);
     this.deps.broadcast(ChatroomChanged, { owner: room.owner ?? '@single', roomId: room.id, action, ...(messageId ? { messageId } : {}) });
-    this.schedulePersist();
   }
 
-  private schedulePersist(): void {
+  /** `roomId`: the only room that changed (with the database, only it is compared); without it, all are. */
+  private schedulePersist(roomId?: string): void {
+    if (this.db) return this.syncDatabase(roomId);
     if (this.persistTimer) return;
     this.persistTimer = setTimeout(() => {
       this.persistTimer = undefined;
@@ -1117,6 +1578,7 @@ export class ChatroomService {
 
   /** Archive what the rooms hold past the cap, drop it, then write the rooms file. */
   private async save(): Promise<void> {
+    if (this.db) return this.syncDatabase();
     await this.archiveOverflow();
     await saveChatrooms(this.deps.file, this.store.toJSON());
   }
@@ -1139,6 +1601,16 @@ export class ChatroomService {
       return;
     }
     for (const { room, messages } of overflow) this.store.dropArchived(room.id, new Set(messages.map((m) => m.id)));
+  }
+}
+
+/** The rooms (with all their messages) of a database file just imported. */
+function loadImportedRooms(file: string): ChatRoom[] {
+  const db = ChatDb.open(file);
+  try {
+    return db.exportRooms();
+  } finally {
+    db.close();
   }
 }
 

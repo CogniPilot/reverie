@@ -143,6 +143,111 @@ describe('company identities and genuine research lifecycle', () => {
     }
   });
 
+  it('retires only a gone employee: off the org chart, the CTO seat and every room, kept with history, and restorable', async () => {
+    sessions.set('alice-1', { id: 'alice-1', name: 'Alice', owner: undefined });
+    const removeMember = vi.fn((id: string, sessionId: string) => rooms.removeMember(id, sessionId));
+    service = new CompanyService(store, {
+      getSession: (id) => sessions.get(id),
+      chatrooms: {
+        rooms: () => rooms.list(),
+        room: (id) => rooms.get(id),
+        addMember: (id, sessionId, options) => rooms.addMember(id, sessionId, options).member,
+        removeMember,
+      },
+      research: backend,
+      now: () => night,
+    });
+    const alice = await service.hire({ name: 'Alice', icon: '🦉', position: 'CTO', expertise: ['ops'], sessionId: 'alice-1', researchEnabled: false });
+    await service.configure(undefined, { ...service.view().settings, ctoId: alice.id });
+    const lounge = rooms.create('Lounge', undefined);
+    const other = rooms.create('Other', 'another-owner');
+    rooms.addMember(lounge.id, 'alice-1');
+    rooms.addMember(other.id, 'alice-1');
+    rooms.post(lounge.id, { kind: 'agent', sessionId: 'alice-1', name: 'Alice' }, 'Morning, all');
+
+    await expect(service.retire(alice.id, undefined)).rejects.toMatchObject({ status: 409 });
+    expect(service.view().employees.map((e) => e.id)).toContain(alice.id);
+    await expect(service.retire('nobody', undefined)).rejects.toMatchObject({ status: 404 });
+    await expect(service.retire(alice.id, 'another-owner')).rejects.toMatchObject({ status: 404 });
+
+    sessions.delete('alice-1');
+    const { employee, rooms: left, failed } = await service.retire(alice.id, undefined);
+    expect(employee).toMatchObject({ id: alice.id, sessionId: 'alice-1', name: 'Alice', retiredAt: night });
+    expect(left).toEqual([lounge.id]);
+    expect(failed).toEqual([]);
+    // History keeps the retired person's name and session on what they said.
+    expect(rooms.messages(lounge.id).find((m) => m.text === 'Morning, all')?.from).toMatchObject({ kind: 'agent', sessionId: 'alice-1', name: 'Alice' });
+    expect(service.view().employees.map((e) => e.id)).not.toContain(alice.id);
+    expect(service.view().settings.ctoId).toBeUndefined();
+    expect(service.view().retired.map((e) => e.id)).toEqual([alice.id]);
+    expect(service.view('another-owner').retired).toEqual([]);
+    expect(rooms.get(lounge.id)?.members.map((m) => m.sessionId)).not.toContain('alice-1');
+    // Another owner's room is not this owner's to change.
+    expect(rooms.get(other.id)?.members.map((m) => m.sessionId)).toContain('alice-1');
+
+    // A second call is harmless: nothing left to remove, the record stays retired once.
+    removeMember.mockClear();
+    expect((await service.retire(alice.id, undefined)).rooms).toEqual([]);
+    expect(removeMember).not.toHaveBeenCalledWith(lounge.id, 'alice-1');
+    expect(store.snapshot().retired).toHaveLength(1);
+
+    const back = await service.restore(alice.id, undefined);
+    expect(back).not.toHaveProperty('retiredAt');
+    expect(service.view().employees.map((e) => e.id)).toContain(alice.id);
+    expect(service.view().retired).toEqual([]);
+    await expect(service.restore(alice.id, undefined)).rejects.toMatchObject({ status: 404 });
+  });
+
+  it('reports a room it could not leave and retries it on the next call', async () => {
+    sessions.set('alice-1', { id: 'alice-1', name: 'Alice', owner: undefined });
+    let refuse = true;
+    service = new CompanyService(store, {
+      getSession: (id) => sessions.get(id),
+      chatrooms: {
+        rooms: () => rooms.list(),
+        room: (id) => rooms.get(id),
+        addMember: (id, sessionId, options) => rooms.addMember(id, sessionId, options).member,
+        removeMember: (id, sessionId) => {
+          if (refuse) throw new Error('store busy');
+          return rooms.removeMember(id, sessionId);
+        },
+      },
+      research: backend,
+      now: () => night,
+    });
+    const alice = await service.hire({ name: 'Alice', icon: '🦉', position: 'Ops', expertise: ['ops'], sessionId: 'alice-1', researchEnabled: false });
+    const lounge = rooms.create('Lounge', undefined);
+    rooms.addMember(lounge.id, 'alice-1');
+    sessions.delete('alice-1');
+    expect(await service.retire(alice.id, undefined)).toMatchObject({ rooms: [], failed: [lounge.id] });
+    expect(service.view().employees.map((e) => e.id)).not.toContain(alice.id);
+    refuse = false;
+    expect(await service.retire(alice.id, undefined)).toMatchObject({ rooms: [lounge.id], failed: [] });
+    expect(rooms.get(lounge.id)?.members.map((m) => m.sessionId)).not.toContain('alice-1');
+  });
+
+  it('refuses to restore a retired employee whose name another employee now has', async () => {
+    sessions.set('alice-1', { id: 'alice-1', name: 'Alice', owner: undefined });
+    sessions.set('alice-2', { id: 'alice-2', name: 'Alice', owner: undefined });
+    const alice = await service.hire({ name: 'Alice', icon: '🦉', position: 'Ops', expertise: ['ops'], sessionId: 'alice-1', researchEnabled: false });
+    sessions.delete('alice-1');
+    await service.retire(alice.id, undefined);
+    await service.hire({ name: 'alice', icon: '🌱', position: 'Ops', expertise: ['ops'], sessionId: 'alice-2', researchEnabled: false });
+    await expect(service.restore(alice.id, undefined)).rejects.toMatchObject({ status: 409 });
+    expect(service.view().retired.map((e) => e.id)).toEqual([alice.id]);
+  });
+
+  it('refuses to restore a retired employee whose session another employee now holds', async () => {
+    sessions.set('alice-1', { id: 'alice-1', name: 'Alice', owner: undefined });
+    const alice = await service.hire({ name: 'Alice', icon: '🦉', position: 'Ops', expertise: ['ops'], sessionId: 'alice-1', researchEnabled: false });
+    sessions.delete('alice-1');
+    await service.retire(alice.id, undefined);
+    sessions.set('alice-1', { id: 'alice-1', name: 'Nora', owner: undefined });
+    await service.hire({ name: 'Nora', icon: '🌱', position: 'Ops', expertise: ['ops'], sessionId: 'alice-1', researchEnabled: false });
+    await expect(service.restore(alice.id, undefined)).rejects.toMatchObject({ status: 409 });
+    expect(service.view().retired.map((e) => e.id)).toEqual([alice.id]);
+  });
+
   it('never lets a new session take an employee\'s name; a replacement names the employee id and takes over', async () => {
     for (const id of ['alice-1', 'alice-2', 'alice-3']) sessions.set(id, { id, name: 'Alice', owner: undefined });
     service = new CompanyService(store, {

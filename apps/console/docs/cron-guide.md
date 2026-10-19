@@ -478,6 +478,6 @@ a numeric field passes, and `postChangeOnly` skips a fire whose rendered text eq
 last post. A scheduled fire with nothing to say is silent and records no run, so a
 15-minute check does not fill the run history; Run Now always records the outcome,
 including why nothing was posted. Example (alarm when the 15-minute load per CPU passes 1.5):
-`postSource: "host-load"`, `postText: "@Morgan host load {load15} on {cpus} CPUs"`,
+`postSource: "host-load"`, `postText: "@Otto host load {load15} on {cpus} CPUs"`,
 `postWhen: {field: "load15PerCpu", op: "gt", value: 1.5}`, `postChangeOnly: true`,
 `scheduleType: "interval"`, `intervalMinutes: 15`.

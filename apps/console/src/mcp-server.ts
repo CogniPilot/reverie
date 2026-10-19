@@ -46,6 +46,8 @@ import {
   agentChatPoll,
   agentChatRead,
   agentChatRooms,
+  agentPlans,
+  agentPlansShow,
   agentChatSay,
   agentChatVote,
   agentChatWho,
@@ -378,7 +380,7 @@ export function buildToolDefinitions(modes: readonly string[], options: { chat?:
       annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
     },
   ];
-  return options.chat ? [...sessionTools, ...CHAT_TOOL_DEFINITIONS] : sessionTools;
+  return options.chat ? [...sessionTools, ...PLANS_TOOL_DEFINITIONS, ...CHAT_TOOL_DEFINITIONS] : sessionTools;
 }
 
 const roomProperty = {
@@ -386,6 +388,33 @@ const roomProperty = {
   description:
     'Room name or id. Optional: with one room it is that room; with several, the room your last prompt came from (when it came from exactly one), else you must name it.',
 };
+
+/**
+ * The plans tools, offered with the chat tools (both speak as the session this server runs in). Read-only: the server decides
+ * what this session may see (a coordinator every account, any other agent its own), and no token ever passes through them.
+ */
+export const PLANS_TOOL_DEFINITIONS: ToolDefinition[] = [
+  {
+    name: 'plans_list',
+    title: 'List subscription plans',
+    description:
+      'List the subscription accounts you may see: week and 5-hour use, week reset (ET), on pace or runs out, Codex banked resets, and the agents on each. A coordinator sees every account; any other agent sees only the account its own session runs on.',
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+    annotations: { readOnlyHint: true, openWorldHint: false },
+  },
+  {
+    name: 'plans_show',
+    title: 'Show one subscription plan',
+    description: 'Show one account by label or id, if you may see it.',
+    inputSchema: {
+      type: 'object',
+      properties: { name: { type: 'string', minLength: 1, description: 'The account label or id.' } },
+      required: ['name'],
+      additionalProperties: false,
+    },
+    annotations: { readOnlyHint: true, openWorldHint: false },
+  },
+];
 
 /**
  * The chat tools, offered only with `--chat`. No tool has a recipient: everything goes to the whole room (everyone in a channel
@@ -999,6 +1028,13 @@ export function createToolRunner(deps: ToolRunnerDeps) {
 
   if (config.chat) {
     Object.assign(tools, {
+      async plans_list(_args: Record<string, unknown>, signal?: AbortSignal) {
+        return chatVerb((d) => agentPlans(d), signal);
+      },
+      async plans_show(args: Record<string, unknown>, signal?: AbortSignal) {
+        const name = readString(args, 'name', { required: true, max: 200 })!;
+        return chatVerb((d) => agentPlansShow(d, { name }), signal);
+      },
       async chat_rooms(args: Record<string, unknown>, signal?: AbortSignal) {
         const all = readBool(args, 'all', false);
         return chatVerb((d) => agentChatRooms(d, { all }), signal);

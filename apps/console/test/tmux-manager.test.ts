@@ -858,6 +858,47 @@ describe('TmuxManager (unit)', () => {
       }
     });
 
+    it.each([false, true])('onlyIfDead=%s controls whether tmux may kill a pane that became live', async (onlyIfDead) => {
+      const NonTestTmuxManager = await importWithTmuxCommandsEnabled();
+      const nonTestManager = new NonTestTmuxManager();
+      nonTestManager.registerSession({
+        sessionId: 'recovery1234', muxName: 'codeman-abcd1234', pid: 1000,
+        createdAt: Date.now(), workingDir: '/tmp', mode: 'shell', attached: true,
+      });
+      try {
+        expect(await nonTestManager.respawnPane({ sessionId: 'recovery1234', workingDir: '/tmp', mode: 'shell', onlyIfDead })).toBe(4242);
+        const { exec: currentExec } = await import('node:child_process');
+        const command = vi.mocked(currentExec).mock.calls.find(([cmd]) => String(cmd).includes(' respawn-pane '))?.[0];
+        expect(command).toContain(`respawn-pane${onlyIfDead ? '' : ' -k'} -c /tmp -t "codeman-abcd1234"`);
+        if (onlyIfDead) expect(command).not.toMatch(/respawn-pane\s+-k\b/);
+      } finally { nonTestManager.destroy(); }
+    });
+
+    it('returns failure without retrying forcefully when tmux refuses a pane that became live', async () => {
+      const NonTestTmuxManager = await importWithTmuxCommandsEnabled();
+      const nonTestManager = new NonTestTmuxManager();
+      nonTestManager.registerSession({
+        sessionId: 'recovery5678', muxName: 'codeman-abcd5678', pid: 1000,
+        createdAt: Date.now(), workingDir: '/tmp', mode: 'shell', attached: true,
+      });
+      const { exec: currentExec } = await import('node:child_process');
+      const previousExec = vi.mocked(currentExec).getMockImplementation();
+      vi.mocked(currentExec).mockImplementation((cmd, optionsOrCallback, maybeCallback) => {
+        const callback = typeof optionsOrCallback === 'function' ? optionsOrCallback : maybeCallback;
+        if (typeof callback === 'function') setImmediate(() => callback(String(cmd).includes(' respawn-pane ') ? new Error('pane is not dead') : null, '', ''));
+        return { on: vi.fn(), kill: vi.fn(), pid: 12345 } as never;
+      });
+      try {
+        expect(await nonTestManager.respawnPane({ sessionId: 'recovery5678', workingDir: '/tmp', mode: 'shell', onlyIfDead: true })).toBeNull();
+        const commands = vi.mocked(currentExec).mock.calls.filter(([cmd]) => String(cmd).includes(' respawn-pane '));
+        expect(commands).toHaveLength(1);
+        expect(commands[0][0]).not.toMatch(/respawn-pane\s+-k\b/);
+      } finally {
+        vi.mocked(currentExec).mockImplementation(previousExec!);
+        nonTestManager.destroy();
+      }
+    });
+
     it('unsets retired env keys on the tmux session BEFORE re-applying the live overrides', async () => {
       // `tmux setenv` persists at the session level and is inherited by `respawn-pane`, so
       // a key that merely disappears from envOverrides comes back in the relaunched CLI

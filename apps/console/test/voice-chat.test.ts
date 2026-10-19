@@ -39,7 +39,7 @@ describe('readAloudText', () => {
     expect(readAloudText('orchestrator', 'Build is green.')).toBe('orchestrator says: Build is green.');
   });
   it('announces a long reply instead of reading it', () => {
-    expect(readAloudText('web_app', 'word '.repeat(81))).toBe('Long reply from web_app, see the panel.');
+    expect(readAloudText('slam_web', 'word '.repeat(81))).toBe('Long reply from slam_web, see the panel.');
     expect(readAloudText('x', '   ')).toBe('');
   });
 });

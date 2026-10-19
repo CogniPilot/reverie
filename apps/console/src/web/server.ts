@@ -1,6 +1,7 @@
 import { AvatarStore } from '../agent-avatars.js';
 import { CompanyStore } from '../company-store.js';
 import { BoardStore } from '../board-store.js';
+import { fullAccessAlertRoom } from '../full-access-default.js';
 import { CompanyService } from '../company-service.js';
 import { DurableCompanyResearchBackend } from '../company-research-backend.js';
 import { companySessionRuntime } from '../company-session-runtime.js';
@@ -62,6 +63,9 @@ import {
 import { rebootRestoreRegistry } from './reboot-restore-registry.js';
 import { dataPath, getDataDir, CODEMAN_INSTANCE, resolveTmuxSocketName } from '../config/instance.js';
 import { getAugmentedPath, getClaudeBinaryPath } from '../utils/claude-cli-resolver.js';
+import { WebhookNotifier, readWebhookConfig } from '../webhook-notify.js';
+import type { WebhookUrgency } from '../types/push.js';
+import { webviewFetch } from './webview-egress.js';
 import { readRemoteHosts, rehydrateRemoteHostFields } from '../remote-hosts.js';
 import type { RemoteWakeRegistry } from '../remote-wake.js';
 import { normalizeBasePath, stripBasePath, joinBasePath } from '../config/base-path.js';
@@ -119,6 +123,7 @@ import { SseStreamManager } from './sse-stream-manager.js';
 import { deriveTabLayoutSseHint } from './tab-layout-sse.js';
 import { deriveWebviewSseHint } from './webview-sse.js';
 import {
+  type FullAccessMissing,
   type SessionListenerRefs,
   createSessionListeners,
   attachSessionListeners,
@@ -227,6 +232,7 @@ import {
   registerPlanRoutes,
   registerClipboardRoutes,
   registerBoardPageRoutes,
+  registerPlansPageRoutes,
   registerSearchRoutes,
   registerOrchestratorRoutes,
   registerCronRoutes,
@@ -236,6 +242,7 @@ import {
   registerWebviewRoutes,
   registerTabLayoutRoutes,
   registerMcpSyncRoutes,
+  registerWebhookRoutes,
   registerDoctorRoutes,
   registerCustomModelRoutes,
   refreshAllCustomModelHosts,
@@ -247,12 +254,18 @@ import {
   registerCliRegistryRoutes,
 } from './routes/index.js';
 import { isLostWebviewFrameNavigation } from './webview-proxy.js';
+import { AuthorQuotaFile } from '../cron/author-quota.js';
 import { CronService } from '../cron/cron-service.js';
 import { ChatroomService } from '../chatroom-service.js';
+import { ChatBackupScheduler } from '../chat-backup.js';
+import { sendOwnerAlert } from '../owner-alert.js';
+import { DecisionAlerts, waitingForOwner } from '../decision-alert.js';
 import { ChatFileStore } from '../chatroom-files.js';
 import { registerChatroomRoutes } from './routes/chatroom-routes.js';
+import { RolesStore, seedAssignmentsFromEnv } from '../roles.js';
 import { registerChatBotRoutes } from './routes/chat-bot-routes.js';
 import { ChatBotRegistry } from '../chat-bots.js';
+import { createInputWatch } from '../input-watch.js';
 import { registerExpertRoutes } from './routes/expert-routes.js';
 import { ExpertError, ExpertStore, sessionCreateBody } from '../experts.js';
 import { appendAdminAudit } from './admin-audit.js';
@@ -362,6 +375,7 @@ export class WebServer extends EventEmitter {
   private app: FastifyInstance;
   private sessions: Map<string, Session> = new Map();
   private respawnControllers: Map<string, RespawnController> = new Map();
+  private decisionAlertTimer: NodeJS.Timeout | null = null;
   private respawnTimers: Map<string, { timer: NodeJS.Timeout; endAt: number; startedAt: number }> = new Map();
   private runSummaryTrackers: Map<string, RunSummaryTracker> = new Map();
   private transcriptWatchers: Map<string, TranscriptWatcher> = new Map();
@@ -374,6 +388,8 @@ export class WebServer extends EventEmitter {
   private cronService!: CronService;
   private chatroomService!: ChatroomService;
   private embassyGuestClient!: EmbassyGuestClient;
+  private inputWatch?: ReturnType<typeof createInputWatch>;
+  private chatBackup: ChatBackupScheduler | undefined;
   private companyService!: CompanyService;
   private cronPort!: CronPort;
   private planService!: PlanService;
@@ -454,6 +470,8 @@ export class WebServer extends EventEmitter {
   private hookSecretFailures: StaleExpirationMap<string, number> | null = null;
   private userFailures: StaleExpirationMap<string, number> | null = null;
   private pushStore: PushSubscriptionStore = new PushSubscriptionStore();
+  /** ntfy / Slack / Discord / generic webhook for the push events; config in webhook.json (0600). */
+  private webhookNotifier = new WebhookNotifier(() => readWebhookConfig(getDataDir()), webviewFetch);
   private teamWatcher: TeamWatcher = new TeamWatcher();
   private _orchestratorLoop: import('../orchestrator-loop.js').OrchestratorLoop | null = null;
   private readonly titleHostname: string;
@@ -540,7 +558,10 @@ export class WebServer extends EventEmitter {
     // Approvals Inbox → SSE. The singleton has no server reference; these
     // callbacks are its only way out. Broadcasts carry sessionId, so the
     // multi-user SSE scoping applies to them like any session event.
-    approvalInbox.onPending = (item) => this.broadcast(SseEvent.ApprovalPending, { ...item });
+    approvalInbox.onPending = (item) => {
+      this.broadcast(SseEvent.ApprovalPending, { ...item });
+      this.inputWatch?.pending(item);
+    };
     approvalInbox.onUpdated = (item) => this.broadcast(SseEvent.ApprovalUpdated, { ...item });
     approvalInbox.onResolved = (info) => this.broadcast(SseEvent.ApprovalResolved, { ...info });
 
@@ -1258,7 +1279,9 @@ export class WebServer extends EventEmitter {
     registerGitStatusRoutes(this.app, ctx);
     registerAgentProfileRoutes(this.app, ctx);
     registerStatusTelemetryRoutes(this.app, ctx);
-    registerSubscriptionProfileRoutes(this.app, this.subscriptionUsageReader);
+    registerSubscriptionProfileRoutes(this.app, this.subscriptionUsageReader, async (profileId) =>
+      (await this.planService.rows()).accounts.filter((row) => row.profileId === profileId).flatMap((row) => row.sessions.map((s) => s.name))
+    );
     registerSystemRoutes(this.app, ctx);
     registerCaseRoutes(this.app, ctx);
     // The registry's lifetime is the server's: it drops per-session wake state on every
@@ -1269,6 +1292,7 @@ export class WebServer extends EventEmitter {
     registerPlanRoutes(this.app, ctx);
     registerClipboardRoutes(this.app, ctx);
     registerBoardPageRoutes(this.app);
+    registerPlansPageRoutes(this.app);
     registerSearchRoutes(this.app, ctx);
     registerMeRoutes(this.app, ctx);
     registerAdminRoutes(this.app, ctx);
@@ -1276,6 +1300,11 @@ export class WebServer extends EventEmitter {
     registerWebviewRoutes(this.app, ctx, this.basePath);
     registerTabLayoutRoutes(this.app, ctx);
     registerMcpSyncRoutes(this.app);
+    registerWebhookRoutes(this.app, {
+      notifier: this.webhookNotifier,
+      configDir: getDataDir(),
+      hostTitle: () => this.windowTitle,
+    });
     registerDoctorRoutes(this.app);
     registerCustomModelRoutes(this.app);
     registerCliRegistryRoutes(this.app);
@@ -1284,6 +1313,7 @@ export class WebServer extends EventEmitter {
     // due times for any persisted jobs, then expose it to its routes.
     this.cronService = new CronService(ctx);
     this.cronService.init();
+    this.cronService.setAuthorQuota(new AuthorQuotaFile(dataPath('routines-author-quota.json')));
     // Only what CronPort declares: a spread of ctx would copy `port` by value (the
     // pre-listen 0 of an ephemeral bind) into an object nothing keeps in sync.
     this.cronPort = { cron: this.cronService };
@@ -1294,13 +1324,18 @@ export class WebServer extends EventEmitter {
     const chatroomFiles = new ChatFileStore(getDataDir());
     this.chatroomService = new ChatroomService({
       file: dataPath('chatrooms.json'),
+      // Rooms and messages live in SQLite; chatrooms.json is imported once, when chat.db does not exist yet.
+      database: dataPath('chat.db'),
+      deferDeliveryRecovery: true,
       files: chatroomFiles,
       getSession: (id) => this.sessions.get(id),
       broadcast: (event, data) => this.broadcast(event, data),
-      // An agent's `@<owner name>` counts as a mention of the owner: the name is the one set in the company settings.
+      // An agent's `@James` counts as a mention of the owner: the name is the one set in the company settings.
       ownerNames: (owner) => [this.companyService?.view(owner).settings.ownerName ?? ''],
       // Dropped messages are archived in ISO-week files, weeks in the company zone.
       timeZone: (owner) => this.companyService?.view(owner).settings.timeZone,
+      // Chat refused to start or went read-only: a push to the owner's devices (5 s cap: a refusal exits next).
+      alert: (text) => sendOwnerAlert(this.pushStore, text, { multiUser: isMultiUserMode(), timeoutMs: 5000 }),
       // A session retired by a plan switch leaves every tab list (its row carries `retired`); a restore brings it back.
       retiredChanged: (ids) => {
         this.cachedSessionsList = null;
@@ -1315,6 +1350,23 @@ export class WebServer extends EventEmitter {
     this.chatroomService.onMessage((room, message) => {
       void sendChatPush(this.pushStore, room, message, isMultiUserMode()).catch(() => undefined);
     });
+    // Nightly chat.db backup at 03:30 company time (one catch-up at start when the newest is over a day
+    // old); every copy is kept. The result goes to #reverie; a failure is delivered to its members.
+    this.chatBackup = new ChatBackupScheduler({
+      database: dataPath('chat.db'),
+      dir: dataPath('chat-backups'),
+      timeZone: () => this.companyService?.view(undefined).settings.timeZone,
+      notify: (text, failed) => {
+        if (failed) void sendOwnerAlert(this.pushStore, 'Nightly chat backup failed. Details in #reverie and the console log.', { multiUser: isMultiUserMode() });
+        const room = this.chatroomService.rooms().find((r) => r.kind !== 'dm' && r.name.trim().toLowerCase() === 'reverie');
+        if (!room) {
+          console.error(`[chat-backup] no #reverie room to post to: ${text}`);
+          return;
+        }
+        this.chatroomService.post(room.id, { kind: 'system', name: 'chat backup' }, text, 'all', { deliver: failed });
+      },
+    });
+    this.chatBackup.start();
     const companyStore = new CompanyStore(dataPath('company.json'));
     await companyStore.init();
     const research = new DurableCompanyResearchBackend({
@@ -1363,9 +1415,13 @@ export class WebServer extends EventEmitter {
         rooms: () => this.chatroomService.rooms(),
         audit: (entry) => this.chatroomService.auditEntry(entry),
       },
-      // A replacement that fails after the old session was stopped leaves the employee without one: record it.
+      // A replacement that fails after the old session was stopped leaves the employee without one: record it and tell the owner.
       onReplacementFailed: (info) => {
         void this.chatroomService.auditEntry({ event: 'replacement_failed', ...info }).catch(() => {});
+        void sendOwnerAlert(this.pushStore, `Replacing ${info.employeeId ?? 'an employee'} failed after the old session was stopped; they have no running session. ${info.error}`, {
+          multiUser: isMultiUserMode(),
+          timeoutMs: 5000,
+        });
       },
     });
     registerCompanyRoutes(
@@ -1386,21 +1442,70 @@ export class WebServer extends EventEmitter {
       plans: async () => (this.planService ? (await this.planService.plans()).accounts : []),
       usageHistory: async () => (this.planService ? this.planService.usageHistory() : {}),
     });
+    // New decisions and polls waiting on the owner reach their devices as one batched push per 10 minutes (decision-alert.ts).
+    const decisionAlerts = new DecisionAlerts({
+      waiting: () => waitingForOwner(boardStore.snapshot(), this.chatroomService.rooms(), Date.now()),
+      alert: (text) => sendOwnerAlert(this.pushStore, text, { multiUser: isMultiUserMode(), timeoutMs: 5000, title: 'Decision waiting', board: true }),
+    });
+    void decisionAlerts.check().catch(() => undefined);
+    this.decisionAlertTimer = setInterval(() => void decisionAlerts.check().catch(() => undefined), 60_000);
+    this.decisionAlertTimer.unref();
     registerWorkspaceIconRoutes(this.app, new WorkspaceIconStore(dataPath('workspace-icons')));
 
+    // Roles (src/roles.ts): who holds Admin or Moderator is instance data in roles.json; the first holders come from
+    // REVERIE_ROLES_SEED, a JSON array of {employeeId, roleId}, read only while the file does not exist.
+    const roles = new RolesStore(dataPath('roles.json'), seedAssignmentsFromEnv(process.env.REVERIE_ROLES_SEED, (line) => console.warn(line)));
+    await roles.init();
     // Embassy rooms joined as a guest: own files, never the chatroom store, so imports wake nothing. The routes need a
     // verified owner session in every policy mode (not only under enforce) and refuse any agent session header.
     this.embassyGuestClient = new EmbassyGuestClient({ file: dataPath('embassy-guest.json') });
     await this.embassyGuestClient.init();
     registerEmbassyGuestRoutes(this.app, this.embassyGuestClient, verifiedOwner);
-    registerChatroomRoutes(this.app, ctx, this.chatroomService, chatroomFiles, verifiedOwner);
+    registerChatroomRoutes(this.app, ctx, this.chatroomService, chatroomFiles, verifiedOwner, roles, (sessionId) =>
+      this.companyService?.view().employees.find((e) => e.sessionId === sessionId)?.id
+    );
     // Chat bots: the sender a scheduled 'post' job speaks as (see chat-bots.ts). The registry is instance data.
     const chatBots = new ChatBotRegistry(dataPath('chat-bots.json'));
     registerChatBotRoutes(this.app, chatBots);
+    this.inputWatch = createInputWatch({
+      ledgerFile: dataPath('input-watch-ledger.json'),
+      bot: () => isMultiUserMode() ? undefined : chatBots.get('input-watch'),
+      employee: (sessionId) => {
+        const session = this.sessions.get(sessionId);
+        if (!session || session.pid === null) return undefined;
+        return this.companyService.view().employees.find(e => e.sessionId === sessionId);
+      },
+      room: (roomId) => this.chatroomService.room(roomId),
+      post: (bot, roomId, text, recent) => {
+        this.chatroomService.checkBotPost(bot, roomId, recent);
+        // Visibility only: never wake members or create owed replies from an alert.
+        return this.chatroomService.post(roomId, { kind: 'bot', botId: bot.id, name: bot.name,
+          icon: bot.icon ?? '🤖' }, text, 'all', { deliver: false });
+      },
+      failed: (text) => {
+        console.warn(text);
+        void sendOwnerAlert(this.pushStore, text, { multiUser: isMultiUserMode(),
+          timeoutMs: 5000, title: 'Bot alert failed' }).catch(() => undefined);
+      },
+    });
     this.cronService.setBotPoster({
       getBot: (id) => chatBots.get(id),
       check: (bot, roomId, recent) => this.chatroomService.checkBotPost(bot, roomId, recent),
       post: (bot, roomId, text, recent) => void this.chatroomService.postAsBot(bot, roomId, text, recent),
+      // An author routine speaks as the employee, found by employee id each time so a restart or rebind changes nothing.
+      postAsAuthor: (employeeId, roomId, text) => {
+        const employee = companyStore.snapshot().employees.find((x) => x.id === employeeId);
+        if (!employee) throw new Error('The author is no longer an employee');
+        const room = this.chatroomService.room(roomId);
+        if (!room) throw new Error('The room no longer exists');
+        if (room.archivedAt) throw new Error('This room is archived');
+        if (!room.members.some((m) => m.sessionId === employee.sessionId)) throw new Error(`${employee.name} is no longer a member of this room`);
+        this.chatroomService.post(roomId, { kind: 'agent', sessionId: employee.sessionId, name: employee.name }, `⏰ routine: ${text}`, 'all');
+        return { name: employee.name };
+      },
+      notifyDisabled: (_employeeId, roomId, text) => {
+        this.chatroomService.post(roomId, { kind: 'system', name: 'system' }, text, 'all', { deliver: false });
+      },
     });
     // Delegated post-job authoring: the owner grants it to roles or employees (routines-grants.json, instance data).
     const routinesGrants = new RoutinesGrants(dataPath('routines-grants.json'));
@@ -1411,6 +1516,7 @@ export class WebServer extends EventEmitter {
         const e = companyStore.snapshot().employees.find((x) => x.sessionId === sessionId);
         return e && { id: e.id, name: e.name, position: e.position };
       },
+      isMember: (roomId, sessionId) => !!this.chatroomService.room(roomId)?.members.some((m) => m.sessionId === sessionId),
       boardroomId: () => this.chatroomService.rooms().find((r) => r.kind !== 'dm' && r.name.trim().toLowerCase() === 'boardroom')?.id,
       notify: (roomId, text) => {
         try {
@@ -1518,7 +1624,21 @@ export class WebServer extends EventEmitter {
         path: getAugmentedPath(),
       })
     );
-    registerPlansRoutes(this.app, this.planService, this.accountLogins);
+    // Every account is visible to whoever holds plans.view_all: Admin, or a Lead of a live (not archived) room.
+    const leadsALiveRoom = (id: string) =>
+      this.chatroomService.rooms().some((r) => !r.archivedAt && r.members.some((m) => m.sessionId === id && m.role === 'coordinator'));
+    registerPlansRoutes(this.app, this.planService, this.accountLogins, {
+      callerSession: (req) => resolveParentSessionId(ctx, req, undefined, ownerFor(req)),
+      canViewAll: (id) =>
+        roles.can(
+          {
+            employeeId: this.companyService?.view().employees.find((e) => e.sessionId === id)?.id,
+            leadOfAny: leadsALiveRoom(id),
+            memberId: id,
+          },
+          'plans.view_all'
+        ),
+    });
 
     registerWsRoutes(this.app, ctx, () => this.getHostPolicy());
   }
@@ -2287,6 +2407,19 @@ export class WebServer extends EventEmitter {
       // Opt-in: the first prompt lands in the tab name, mux-sessions.json, every
       // session:updated broadcast and /api/search, so it is a choice, not a default.
       isAutoNameEnabled: async () => (await this.readSettings()).autoNameSessions === true,
+      // The same two paths as the chat backup: a #reverie system line (shown, not typed into
+      // members' panes) and an owner push.
+      alertFullAccessMissing: (session: Session, data: FullAccessMissing) => {
+        const why = data.reason === 'no-cli' ? `no ${session.mode} process was found under pane pid ${data.pid}` : `pane pid ${data.pid} lacks ${data.missing.join(' ')}`;
+        const text = `${session.name || session.id} started without full access: ${why}. Check its permissions before relying on it.`;
+        void sendOwnerAlert(this.pushStore, text, { multiUser: isMultiUserMode(), timeoutMs: 5000, title: 'Full access missing' });
+        const room = fullAccessAlertRoom(this.chatroomService?.rooms() ?? [], session.owner);
+        if (!room) {
+          console.error(`[full-access] no #reverie room of owner ${session.owner ?? '(single-user)'} to post to: ${text}`);
+          return;
+        }
+        this.chatroomService.post(room.id, { kind: 'system', name: 'full access' }, text, 'all', { deliver: false });
+      },
     };
   }
 
@@ -3048,6 +3181,21 @@ export class WebServer extends EventEmitter {
     const sessionId = (data.sessionId as string) || '';
     const body = WebServer.pushBodyText(event, data, sessionName);
 
+    // Webhook channel (ntfy / Slack / Discord / generic): independent of Web Push, so it runs BEFORE
+    // the "no subscriptions" return below, which is exactly the headless-server case it exists for.
+    // Fire-and-forget; WebhookNotifier dedupes, caps what is in flight and never throws.
+    void this.webhookNotifier
+      .notify({
+        event,
+        title: template.title,
+        body,
+        urgency: template.urgency as WebhookUrgency,
+        sessionId: sessionId || undefined,
+        sessionName: sessionName || undefined,
+        host: this.windowTitle,
+      })
+      .catch(() => undefined);
+
     const subscriptions = this.pushStore.getAll();
     if (subscriptions.length === 0) return;
 
@@ -3121,7 +3269,7 @@ export class WebServer extends EventEmitter {
     }
   }
 
-  /** The notification body for a Web Push event. */
+  /** The notification body for an event (shared by Web Push and the webhook channel). */
   private static pushBodyText(event: string, data: Record<string, unknown>, sessionName: string): string {
     let body = sessionName ? `[${sessionName}]` : '';
     if (event === SseEvent.SessionError && data.error) {
@@ -3292,6 +3440,13 @@ export class WebServer extends EventEmitter {
     // not the 0 that was asked for.
     const address = this.app.server.address();
     if (address !== null && typeof address === 'object') this.port = address.port;
+    // Registry restoration and HTTP readiness must precede replay: prompted members can call the API immediately.
+    try {
+      await this.chatroomService.startDelivery();
+    } catch (error) {
+      // The service has closed chat writes and raised its alert. Keep HTTP/history reads available.
+      console.error('[chatroom] delivery recovery unavailable; continuing with read-only chat', error);
+    }
     const protocol = this.https ? 'https' : 'http';
     const displayHost = this.host === '0.0.0.0' ? 'localhost' : this.host;
     // The only startup banner: `codeman web` used to print its own copy of this
@@ -4376,6 +4531,11 @@ export class WebServer extends EventEmitter {
       this._pasteImageGcStop = null;
     }
 
+    if (this.decisionAlertTimer) {
+      clearInterval(this.decisionAlertTimer);
+      this.decisionAlertTimer = null;
+    }
+
     if (this._eventLoopMonitor) {
       this._eventLoopMonitor.stop();
       this._eventLoopMonitor = null;
@@ -4396,8 +4556,9 @@ export class WebServer extends EventEmitter {
     // only by the periodic idle sweep, whose interval is disposed just below.
     closeAllLlamaSwapLogTails();
 
-    await this.embassyGuestClient?.stop();
     // Flush pending chatroom writes and stop pane delivery.
+    await this.chatBackup?.stop();
+    await this.embassyGuestClient?.stop();
     await this.chatroomService?.stop();
 
     // Dispose all managed timers (intervals + resettable timeouts)

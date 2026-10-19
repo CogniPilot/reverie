@@ -2561,6 +2561,7 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
    * Respawn a dead pane in an existing tmux session.
    * Uses `tmux respawn-pane -k` to restart the command in the same pane,
    * preserving the session and its scrollback buffer.
+   * `onlyIfDead` omits -k so tmux atomically refuses a pane that is running again.
    */
   async respawnPane(options: RespawnPaneOptions): Promise<number | null> {
     const {
@@ -2652,7 +2653,7 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
       // -c /tmp + cd bounce — see createSession() for rationale (stale FUSE state).
       const launchCmd = remote || docker ? fullCmd : `cd ${JSON.stringify(workingDir)} && ${fullCmd}`;
       await execAsync(
-        `${this.tmux()} respawn-pane -k -c ${TMUX_LAUNCH_CWD} -t "${muxName}" bash -c ${JSON.stringify(launchCmd)}`,
+        `${this.tmux()} respawn-pane${options.onlyIfDead ? '' : ' -k'} -c ${TMUX_LAUNCH_CWD} -t "${muxName}" bash -c ${JSON.stringify(launchCmd)}`,
         {
           timeout: EXEC_TIMEOUT_MS,
         }

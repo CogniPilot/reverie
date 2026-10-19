@@ -47,6 +47,12 @@ export interface CronJob {
    * neutral placeholders in the session fields below, which it never reads.
    */
   action?: CronAction;
+  /** post: who speaks. 'bot' (the default, and every job saved before this field) uses `botId`; 'author' speaks as `createdBy`. */
+  postAs?: 'bot' | 'author';
+  /** post, postAs 'author': the hired employee who owns the routine. The id is stable; the session is resolved at fire time. */
+  createdBy?: { employeeId: string };
+  /** Server-kept: consecutive failed fires of an author routine; 3 disables it. */
+  failStreak?: number;
   /** post: the chat bot that speaks (an id in the bot registry). */
   botId?: string;
   /** post: the room it speaks in; the bot's allowlist must name it. */

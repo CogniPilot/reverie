@@ -29,10 +29,10 @@ describe('isSensitivePath', () => {
   describe('Fleet runtime secrets', () => {
     it('keeps nested conventional stores and credential trees protected', () => {
       expect(isSensitivePath(`${HOME}/.fleet/archive/.codeman/state.json`)).toBe(true);
-      expect(isSensitivePath(`${HOME}/.fleet/.fleet-shared/external-chat.json`)).toBe(true);
+      expect(isSensitivePath(`${HOME}/.fleet/.fleet-classroom/external-chat.json`)).toBe(true);
       expect(isSensitivePath(`${HOME}/.fleet/accounts/.fleet-profile/report.md`)).toBe(true);
     });
-    it.each(['.fleet', '.fleet-team', '.codeman', '.codeman-beta'])(
+    it.each(['.fleet', '.fleet-teaching', '.codeman', '.codeman-beta'])(
       'protects secret and state members in %s',
       (directory) => {
         for (const member of [

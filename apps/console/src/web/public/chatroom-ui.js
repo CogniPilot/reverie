@@ -19,6 +19,12 @@
 const CHAT_MIN_WIDTH = 320;
 /** Client trace lines kept for "Send diagnostics". */
 const CHAT_DIAG_LINES = 300;
+
+/** A room opens on its newest messages only; older ones load as the reader scrolls up, this many more at a time. */
+const CHAT_OPEN_LIMIT = 50;
+/** Scrolling within this many px of the top asks for older messages. */
+const CHAT_OLDER_TRIGGER_PX = 240;
+
 /** A visual viewport this much shorter than the layout viewport means an on-screen keyboard. */
 const CHAT_KEYBOARD_MIN_PX = 120;
 
@@ -78,7 +84,7 @@ Object.assign(CodemanApp.prototype, {
     return (h >>> 0) % 360;
   },
 
-  /** First letter after the "wN-case: " prefix: "w4-testcase: orchestrator" gives "O", "w1-compiler: PR: 430" gives "P". */
+  /** First letter after the "wN-case: " prefix: "w4-testcase: orchestrator" gives "O", "w1-rumoca: PR: 430" gives "P". */
   _chatInitial(name) {
     const parts = String(name || '?').split(': ');
     const label = parts[1] || parts[0];
@@ -511,6 +517,7 @@ Object.assign(CodemanApp.prototype, {
       return;
     }
     this._chatRooms = res.data.rooms || [];
+    this._chatSelf = res.data.self || null;
     // What the server can do (unread counts, direct messages): the conversation shell shows only that.
     this._chatFeatures = res.data.features || {};
     this._chatOwnerNames = Array.isArray(res.data.ownerNames) ? res.data.ownerNames : [];
@@ -542,26 +549,58 @@ Object.assign(CodemanApp.prototype, {
     // Background refreshes must not close the create form while it is being filled in.
     if (quiet && this._chatCreating) return false;
     if (!quiet) this._chatCreating = false;
-    const res = await this._chatApi(`/api/chatrooms/${encodeURIComponent(id)}?limit=300`);
+    const switching = this._chatRoomId !== id;
+    // The latest switch wins: an answer for a room the reader has since left must not bring them back to it.
+    const seq = quiet ? this._chatLoadSeq : (this._chatLoadSeq = (this._chatLoadSeq || 0) + 1);
+    // Coming back to a room: draw what was last seen at once, then bring it up to date behind it.
+    const cached = switching && !quiet ? this._chatCache?.get(id) : undefined;
+    if (cached) {
+      this._chatEmotes = this._chatEmoteCache?.get(id) || [];
+      await this._applyChatRoom(id, cached, { quiet: false, switched: true });
+      this._loadChatEmotes?.(id).then(() => this._chatRoomId === id && this._renderChatFeed({ keepScroll: true }));
+      this._loadChatRoom(id, { quiet: true });
+      return true;
+    }
+    // The room and its emotes are asked for together; a switch used to wait for one before sending the other.
+    const emotes = switching ? this._loadChatEmotes?.(id) : null;
+    const res = await this._chatApi(`/api/chatrooms/${encodeURIComponent(id)}?limit=${CHAT_OPEN_LIMIT}`);
     if (!res.ok) {
       if (!quiet) this.showToast?.(`Chat: ${res.error}`, 'error');
       return false;
     }
     if (quiet && this._chatCreating) return false;
-    const switched = this._chatRoomId !== id;
+    if (seq !== this._chatLoadSeq || (quiet && this._chatRoomId !== id)) return false;
+    // Older messages the reader already scrolled back to stay; the fresh window only replaces the tail.
+    const held = this._chatRoomId === id ? this._chatRoom?.messages || [] : [];
+    const fresh = res.data.messages || [];
+    // Joined by id at the first held message the fresh window also holds. No overlap means more than a window
+    // arrived since the last look (a phone that slept), so the held ones would leave a gap: keep only the fresh window.
+    if (held.length && fresh.length) {
+      const freshIds = new Set(fresh.map((m) => m.id));
+      const overlap = held.findIndex((m) => freshIds.has(m.id));
+      if (overlap > 0) res.data.messages = [...held.slice(0, overlap), ...fresh];
+    }
+    await emotes;
+    return this._applyChatRoom(id, res.data, { quiet, switched: switching });
+  },
+
+  async _applyChatRoom(id, data, { quiet, switched }) {
     // A message gone from the loaded window (deleted) needs the feed redrawn, which a quiet refresh skips.
     const before = this._chatRoom?.messages || [];
-    const now = res.data.messages || [];
+    const now = data.messages || [];
     const kept = new Set(now.map((m) => m.id));
     const firstAt = now.length ? now[0].at : Infinity;
     const wasDeleted = new Map(before.map((m) => [m.id, !!m.deleted]));
-    // A message gone, deleted or restored (another tab did it) redraws the feed.
+    const known = new Set(before.map((m) => m.id));
+    // A message gone, deleted or restored (another tab did it) redraws the feed; so does one the live stream missed.
     const removed =
       !switched &&
       (before.some((m) => m.at >= firstAt && !kept.has(m.id)) ||
-        now.some((m) => wasDeleted.has(m.id) && wasDeleted.get(m.id) !== !!m.deleted));
+        now.some((m) => wasDeleted.has(m.id) && wasDeleted.get(m.id) !== !!m.deleted) ||
+        now.some((m) => !known.has(m.id)));
     this._chatRoomId = id;
-    this._chatRoom = res.data;
+    this._chatRoom = data;
+    (this._chatCache ||= new Map()).set(id, data);
     try {
       localStorage.setItem('codeman:chatroom', id);
     } catch {
@@ -579,12 +618,50 @@ Object.assign(CodemanApp.prototype, {
     if (!busy) this._renderChatMembers();
     if (!(quiet && document.activeElement === this._chatEls.to)) this._renderChatTo();
     // An icon change redraws the feed so earlier messages show the new avatar.
-    const icons = res.data.members.map((m) => `${m.sessionId}:${m.icon || ''}`).join('|');
+    const icons = data.members.map((m) => `${m.sessionId}:${m.icon || ''}`).join('|');
     const iconsChanged = icons !== this._chatIconSig;
     this._chatIconSig = icons;
-    if (switched) await this._loadChatEmotes?.();
-    if (switched || !quiet || iconsChanged || removed) this._renderChatFeed();
+    if (switched || !quiet || iconsChanged || removed) this._renderChatFeed({ keepScroll: !switched });
     return true;
+  },
+
+  /**
+   * The reader is near the top of the loaded messages and the room has more: fetch a longer tail and redraw so the
+   * message they were looking at stays where it was. One request at a time; never marks anything read.
+   */
+  async _loadOlderChat() {
+    const id = this._chatRoomId;
+    const room = this._chatRoom;
+    if (!id || !room || this._chatOlderBusy) return;
+    const have = room.messages.length;
+    if (have >= (room.messageCount ?? 0)) return;
+    this._chatOlderBusy = true;
+    try {
+      const res = await this._chatApi(`/api/chatrooms/${encodeURIComponent(id)}?limit=${have + CHAT_OPEN_LIMIT}`);
+      if (!res.ok || this._chatRoomId !== id) return;
+      const feed = this._chatEls.feed;
+      const fromBottom = feed.scrollHeight - feed.scrollTop;
+      // Only the messages grow; the member list and synopses already on screen are left alone.
+      room.messages = res.data.messages || room.messages;
+      room.messageCount = res.data.messageCount ?? room.messageCount;
+      this._renderChatFeed({ keepScroll: true });
+      feed.scrollTop = feed.scrollHeight - fromBottom;
+    } finally {
+      this._chatOlderBusy = false;
+    }
+  },
+
+  /** Wire the feed's scroll once: reaching the top asks for older messages. */
+  _watchChatFeedTop(feed) {
+    if (feed._chatTopWatch) return;
+    feed._chatTopWatch = true;
+    feed.addEventListener(
+      'scroll',
+      () => {
+        if (feed.scrollTop < CHAT_OLDER_TRIGGER_PX) this._loadOlderChat();
+      },
+      { passive: true }
+    );
   },
 
   _showChatCreate() {
@@ -1171,8 +1248,11 @@ Object.assign(CodemanApp.prototype, {
     this._chatAudioRetry = null;
   },
 
-  _renderChatFeed() {
+  _renderChatFeed({ keepScroll = false } = {}) {
     const { feed } = this._chatEls;
+    this._watchChatFeedTop(feed);
+    const pinned = feed.scrollHeight - feed.scrollTop - feed.clientHeight < 40;
+    const top = feed.scrollTop;
     feed.replaceChildren();
     const messages = this._chatRoom?.messages || [];
     if (!messages.length) {
@@ -1185,7 +1265,7 @@ Object.assign(CodemanApp.prototype, {
       );
     }
     for (const m of messages) feed.append(this._chatMessageEl(m));
-    feed.scrollTop = feed.scrollHeight;
+    feed.scrollTop = keepScroll && !pinned ? top : feed.scrollHeight;
   },
 
   _chatNameOf(id) {
@@ -1418,6 +1498,8 @@ Object.assign(CodemanApp.prototype, {
  */
 (function loadConversationShell() {
   const root = document.documentElement;
+  const legacy = new URLSearchParams(location.search).get('legacy') === '1';
+  root.toggleAttribute('data-reverie-legacy', legacy);
   const solo = typeof window.__CODEMAN_SOLO__ === 'string' && !!window.__CODEMAN_SOLO__;
   let link = false;
   let stored = '';
@@ -1427,7 +1509,7 @@ Object.assign(CodemanApp.prototype, {
   } catch {
     /* private mode: default view */
   }
-  root.setAttribute('data-reverie-view', solo || link || stored === 'debug' ? 'debug' : 'chat');
+  root.setAttribute('data-reverie-view', legacy || solo || link || stored === 'debug' ? 'debug' : 'chat');
   // The terminal UI stays mounted but is kept out of sight while the view is chat (the shell's own
   // CSS, chat-app.css, loads a moment later). Plain rules, so they hold even if the shell never loads.
   const guard = document.createElement('style');
@@ -1439,6 +1521,9 @@ Object.assign(CodemanApp.prototype, {
     "html[data-reverie-view='chat'] .loading-skeleton { display: none !important; }",
     "html[data-reverie-view='chat'] .app { display: block !important; height: 0 !important; min-height: 0 !important; padding: 0 !important; overflow: visible !important; }",
     "html[data-reverie-view='chat'] .app > :not(.modal):not(.notification-drawer) { display: none !important; }",
+    "html[data-reverie-view='debug']:not([data-reverie-legacy]) body > :not(.app):not(.ca-back):not(script):not(style) { display: none !important; }",
+    "html[data-reverie-view='debug']:not([data-reverie-legacy]) .app > :not(.main) { display: none !important; }",
+    "html[data-reverie-view='debug']:not([data-reverie-legacy]) .main > :not(.terminal-wrap) { display: none !important; }",
   ].join('\n');
   document.head.append(guard);
   const fail = () => {

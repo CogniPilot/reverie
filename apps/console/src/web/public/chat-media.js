@@ -74,6 +74,7 @@ const CHAT_EMOJI = [
   ['alien', '\u{1F47D}'],
   ['robot', '\u{1F916}'],
   ['clown', '\u{1F921}'],
+  ['poop', '\u{1F4A9}'],
   ['wave', '\u{1F44B}'],
   ['ok_hand', '\u{1F44C}'],
   ['clap', '\u{1F44F}'],
@@ -146,6 +147,7 @@ const CHAT_EMOJI = [
   ['recycle', '♻️'],
   ['coffee', '☕'],
   ['pizza', '\u{1F355}'],
+  ['beer', '\u{1F37A}'],
   ['cake', '\u{1F370}'],
   ['dog', '\u{1F436}'],
   ['cat', '\u{1F431}'],
@@ -206,6 +208,25 @@ function chatInlineCodeSegments(text) {
   while ((m = re.exec(src))) {
     if (m.index > last) out.push({ text: src.slice(last, m.index) });
     out.push({ inline: m[1] });
+    last = m.index + m[0].length;
+  }
+  if (last < src.length) out.push({ text: src.slice(last) });
+  return out;
+}
+
+/**
+ * Pure: split a plain run into text and **bold** spans (`{bold}`). The span stays on one line and does not start or end with a
+ * space, so a lone ** or "2 ** 3" stays plain text.
+ */
+function chatBoldSegments(text) {
+  const out = [];
+  const src = String(text ?? '');
+  const re = /\*\*(?=\S)([^\n]*?\S)\*\*/g;
+  let last = 0;
+  let m;
+  while ((m = re.exec(src))) {
+    if (m.index > last) out.push({ text: src.slice(last, m.index) });
+    out.push({ bold: m[1] });
     last = m.index + m[0].length;
   }
   if (last < src.length) out.push({ text: src.slice(last) });
@@ -532,10 +553,11 @@ Object.assign(CodemanApp.prototype, {
 
   // ─── Emoji, emotes and the text renderer ─────────────────────────────────────
 
-  async _loadChatEmotes() {
-    if (!this._chatRoomId) return;
-    const res = await this._chatApi(`/api/chatrooms/${encodeURIComponent(this._chatRoomId)}/emotes`);
+  async _loadChatEmotes(roomId = this._chatRoomId) {
+    if (!roomId) return;
+    const res = await this._chatApi(`/api/chatrooms/${encodeURIComponent(roomId)}/emotes`);
     this._chatEmotes = res.ok ? res.data.emotes : [];
+    (this._chatEmoteCache ||= new Map()).set(roomId, this._chatEmotes);
   },
 
   _emoteUrl(name) {
@@ -611,8 +633,19 @@ Object.assign(CodemanApp.prototype, {
 
   _chatAppendText(el, text, names) {
     for (const piece of chatInlineCodeSegments(text)) {
-      if (piece.inline !== undefined) el.append(this._chatInlineCode(piece.inline));
-      else this._chatAppendPlain(el, piece.text, names);
+      if (piece.inline !== undefined) {
+        el.append(this._chatInlineCode(piece.inline));
+        continue;
+      }
+      for (const run of chatBoldSegments(piece.text)) {
+        if (run.bold === undefined) {
+          this._chatAppendPlain(el, run.text, names);
+          continue;
+        }
+        const strong = this._chatEl('strong', 'chatroom-bold');
+        this._chatAppendPlain(strong, run.bold, names);
+        el.append(strong);
+      }
     }
   },
 

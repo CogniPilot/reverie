@@ -20,7 +20,7 @@ function load(opts: { phone: boolean; sessionMode?: string }): Bar {
   const context = vm.createContext({
     window: { matchMedia: () => ({ matches: opts.phone }) },
     app: { activeSessionId: 's', sessions: new Map([['s', { mode: opts.sessionMode ?? 'claude' }]]) },
-    document: { getElementById: () => ({ textContent: 'agent-work' }) },
+    document: { getElementById: () => ({ textContent: 'jinx-work' }) },
     MobileDetection: { isTouchDevice: () => true },
   });
   vm.runInContext(`${source}\nglobalThis.__bar = KeyboardAccessoryBar;`, context, { filename: 'keyboard-accessory.js' });
@@ -53,6 +53,6 @@ describe('phone keyboard row', () => {
   });
 
   it('labels the folder entry with the footer case name', () => {
-    expect(load({ phone: true })._overflowItems(false).find((i) => i[0] === 'case')?.[1]).toBe('agent-work');
+    expect(load({ phone: true })._overflowItems(false).find((i) => i[0] === 'case')?.[1]).toBe('jinx-work');
   });
 });

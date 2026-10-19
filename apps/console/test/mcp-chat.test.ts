@@ -29,6 +29,32 @@ function fake(answers: Record<string, (o: RequestOptions) => ApiResponse> = {}) 
 }
 const run = (c: McpConfig, f = fake()) => ({ ...f, runner: createToolRunner({ config: c, request: f.request, started: new Set(), clientId: 'test' }) });
 
+describe('plans tools (read-only)', () => {
+  const ROW = (label: string, provider: string) => ({
+    id: label, label, provider, signedIn: true, status: 'ok',
+    pace: { fiveHour: 12, weekly: 40, weekReset: Date.UTC(2026, 9, 19, 4, 0), pace: 3, projected: 90, runsOutAt: null, recommendation: 'steady' },
+    bankedResets: provider === 'openai' ? { availableCount: 2, earliestExpiresAt: null } : null,
+    sessions: [{ id: SELF, name: 'alpha' }],
+  });
+  const plans = { 'GET /api/v1/plans': () => ok({ generatedAt: 1, accounts: [ROW('Work', 'anthropic'), ROW('Primary', 'openai')] }) };
+
+  it('plans_list and plans_show are offered with the chat tools and print week, 5-hour, reset in ET and banked resets', async () => {
+    const { runner, calls } = run(cfg(), fake(plans));
+    expect(buildToolDefinitions(['claude'], { chat: true }).map((t) => t.name)).toEqual(expect.arrayContaining(['plans_list', 'plans_show']));
+    const list = await runner.run('plans_list', {});
+    expect(list.isError).toBeFalsy();
+    expect(list.text).toContain('week 40%');
+    expect(list.text).toContain('5-hour 12%');
+    expect(list.text).toContain('resets Mon 19 Oct 00:00 ET');
+    expect(list.text).toContain('banked resets: 2');
+    const one = await runner.run('plans_show', { name: 'primary' });
+    expect(one.text).toContain('Primary');
+    expect(one.text).not.toContain('Work');
+    expect((await runner.run('plans_show', { name: 'nobody' })).isError).toBe(true);
+    expect(calls.every((c) => c.method === 'GET')).toBe(true); // read-only: nothing else is ever called
+  });
+});
+
 describe('chat tools are opt-in', () => {
   it('without --chat there are no chat tools: not listed and not callable', async () => {
     expect(buildToolDefinitions(['claude']).map((t) => t.name).some((n) => n.startsWith('chat_'))).toBe(false);
@@ -41,7 +67,7 @@ describe('chat tools are opt-in', () => {
   it('with --chat the seven chat tools follow the session tools, in a fixed order, and none has a recipient', () => {
     const all = buildToolDefinitions(['claude'], { chat: true });
     expect(all.slice(-7).map((t) => t.name)).toEqual(['chat_rooms', 'chat_channel', 'chat_say', 'chat_read', 'chat_who', 'chat_poll', 'chat_vote']);
-    expect(all.length).toBe(buildToolDefinitions(['claude']).length + 7);
+    expect(all.length).toBe(buildToolDefinitions(['claude']).length + 9); // seven chat tools and the two plans tools
     for (const tool of CHAT_TOOL_DEFINITIONS) {
       const props = Object.keys((tool.inputSchema.properties ?? {}) as Record<string, unknown>);
       expect(props, tool.name).not.toContain('to');

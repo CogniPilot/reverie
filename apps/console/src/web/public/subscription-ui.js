@@ -381,17 +381,7 @@ Object.assign(CodemanApp.prototype, {
       this.closeAccountMenu();
       this.addSubscriptionAccount();
     };
-    const plans = document.createElement('button');
-    plans.type = 'button';
-    plans.setAttribute('role', 'menuitem');
-    plans.textContent = 'Plans\u2026';
-    plans.title = 'Every account paced against its week, with the sessions on it';
-    plans.onclick = (event) => {
-      event.stopPropagation();
-      this.closeAccountMenu();
-      this.openPlans?.();
-    };
-    footer.append(plans, add);
+    footer.append(add);
     menu.append(footer);
     document.body.append(menu);
     const place = () => {

@@ -135,6 +135,8 @@ export interface RespawnPaneOptions {
   sessionId: string;
   workingDir: string;
   mode: SessionMode;
+  /** Refuse if the pane is running at respawn time; never kill a process that won a recovery race. */
+  onlyIfDead?: boolean;
   /** Session display name (tab name). */
   name?: string;
   /**

@@ -910,8 +910,8 @@ function caProfile(raw) {
 }
 
 /** Which view to open with: a popped-out terminal window or a session link is a terminal on purpose. */
-function caInitialView({ stored, solo, hasSessionLink }) {
-  if (solo || hasSessionLink) return 'debug';
+function caInitialView({ stored, solo, hasSessionLink, legacy }) {
+  if (legacy || solo || hasSessionLink) return 'debug';
   return stored === 'debug' ? 'debug' : 'chat';
 }
 
@@ -959,7 +959,20 @@ const CA_ICONS = {
   invite: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M19 8v6M22 11h-6"/>',
   gearsmall: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h0a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h0a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>',
   chevron: '<path d="m6 9 6 6 6-6"/>',
+  calendar: '<rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/>',
+  gauge: '<path d="M12 14l4-4"/><path d="M3.34 19a10 10 0 1 1 17.32 0"/>',
 };
+
+/** The Board is pinned above the channel list, shown in the main pane. */
+const CA_PAGES = {
+  board: { label: 'Board', icon: 'calendar', path: '/board' },
+};
+
+/** Which supported page a URL fragment asks for, or null. */
+function caPageFromHash(hash) {
+  const key = String(hash || '').replace(/^#/, '');
+  return Object.hasOwn(CA_PAGES, key) ? key : null;
+}
 
 /* ───────────────────────── the app ───────────────────────── */
 
@@ -970,6 +983,9 @@ class ReverieChatApp {
     this.app = app;
     this.doc = doc;
     this.view = 'chat';
+    /** The Board page shown in place of the conversation, or null. */
+    this.embed = null;
+    this._embedRoom = null;
     // The rail follows the open room until the user picks a workspace by hand.
     this.workspace = 'home';
     this._wsPinned = false;
@@ -1097,6 +1113,7 @@ class ReverieChatApp {
         stored: caRead('session', 'reverie:view', ''),
         solo: !!this.app.isSoloWindow || chosen === 'debug',
         hasSessionLink: !!this.app._urlSessionId,
+        legacy: html.hasAttribute('data-reverie-legacy'),
       }),
       { initial: true }
     );
@@ -1253,14 +1270,20 @@ class ReverieChatApp {
     }
   }
 
-  /** The explicit way into a terminal: that agent's, or the terminal UI as it is. */
+  /** Open the chosen agent's terminal without the legacy navigation. */
   showDebug(sessionId) {
-    this.setView('debug');
-    if (sessionId && this.app.sessions?.has?.(sessionId)) {
-      this.app.selectSession(sessionId);
-    } else if (sessionId) {
+    if (sessionId && !this.app.sessions?.has?.(sessionId)) {
       this.toast('That agent has no open terminal session', 'error');
+      return;
     }
+    const target = sessionId || this.app.activeSessionId;
+    if (this.app._tileGrid?.open) {
+      this.app.closeTileGrid({ keepStored: true, reselect: false, animate: false });
+      this.app.activeSessionId = null;
+    }
+    this.app.closeSplitPane?.({ skipPrimaryResize: true });
+    this.setView('debug');
+    if (target) this.app.selectSession(target);
   }
 
   showChat() {
@@ -1271,7 +1294,9 @@ class ReverieChatApp {
 
   ensureBackButton() {
     if (this.els.back?.isConnected) return;
-    const brand = this.doc.querySelector('.header-brand') || this.doc.body;
+    const brand = this.doc.documentElement.hasAttribute('data-reverie-legacy')
+      ? this.doc.querySelector('.header-brand') || this.doc.body
+      : this.doc.body;
     const back = this.button('ca-back', 'Back to chat', () => this.showChat(), { icon: 'back', text: 'Back to chat' });
     back.classList.add('ca-back');
     brand.prepend(back);
@@ -1310,7 +1335,7 @@ class ReverieChatApp {
     const headTitle = this.el('h1', 'ca-head-title');
     const headTopic = this.el('p', 'ca-head-topic');
     const spacer = this.el('span', 'ca-spacer');
-    const membersBtn = this.button('ca-icon-btn', 'Show member list', () => this.toggleMembers(), { icon: 'members' });
+    const membersBtn = this.button('ca-icon-btn ca-head-members', 'Show member list', () => this.toggleMembers(), { icon: 'members' });
     membersBtn.setAttribute('aria-pressed', String(this.membersOpen));
     // "Add people" sits right beside the channel name and is always visible (a touch screen has no hover to reveal the one in the sidebar row).
     const inviteBtn = this.button('ca-icon-btn ca-head-invite', 'Add people to this channel', () => this.room && this.openInviteDialog(this.room.id), { icon: 'invite' });
@@ -1319,7 +1344,7 @@ class ReverieChatApp {
     const pinsBtn = this.button('ca-icon-btn ca-head-pins', 'Pinned messages', () => this.room && this.openPinsDialog(this.room.id), { icon: 'pin' });
     pinsBtn.hidden = true;
     const phoneBtn = this.button('ca-icon-btn', 'Install app and notifications', () => window.ReverieMobile?.open(), { icon: 'phone' });
-    const bellBtn = this.button('ca-icon-btn', 'Notification settings', () => this.openNotifyMenu(bellBtn), { icon: 'bell' });
+    const bellBtn = this.button('ca-icon-btn ca-head-bell', 'Notification settings', () => this.openNotifyMenu(bellBtn), { icon: 'bell' });
     bellBtn.setAttribute('aria-haspopup', 'menu');
     head.append(navBtn, headTitle, inviteBtn, headTopic, spacer, pinsBtn, phoneBtn, bellBtn, membersBtn);
 
@@ -1338,7 +1363,7 @@ class ReverieChatApp {
 
     Object.assign(this.els, {
       rail, side, sideHead, sideTitle, sideScroll, user, main, head, headTitle, headTopic,
-      membersBtn, bellBtn, navBtn, inviteBtn, pinsBtn, chat, members, scrim, stats,
+      membersBtn, bellBtn, navBtn, inviteBtn, pinsBtn, chat, members, scrim, stats, body,
     });
 
     // Reuse the chat panel's feed, composer, mic, attachments and create form: it becomes the
@@ -1363,6 +1388,14 @@ class ReverieChatApp {
     this.app._chatEls.feed.addEventListener('scroll', () => this.markReadSoon(), { passive: true });
     this.renderAll();
     this.renderUser();
+    // Back and forward move between the conversation and Board; a #board link opens it.
+    this.doc.defaultView?.addEventListener('popstate', () => {
+      const kind = caPageFromHash(this.doc.defaultView.location.hash);
+      if (kind) this.openPage(kind, { push: false });
+      else this.closePage({ history: false });
+    });
+    const first = caPageFromHash(this.doc.defaultView?.location.hash);
+    if (first) this.openPage(first, { push: false });
   }
 
   /** Keep Tab and Shift+Tab inside a full-screen settings page. */
@@ -2117,6 +2150,99 @@ class ReverieChatApp {
     if (this.els.org) this.els.org.hidden = true;
     this.els.orgBtn?.setAttribute('aria-pressed', 'false');
     this.els.orgBtn?.focus();
+  }
+
+  /* ── Board and Plans pages ── */
+
+  /** The Board and Plans entries pinned above the list: pages, not rooms, so they take no part in the sort or the reordering. */
+  pagesEl() {
+    const box = this.el('div', 'ca-pages');
+    for (const [kind, page] of Object.entries(CA_PAGES)) {
+      const on = this.embed === kind;
+      const b = this.el('button', `ca-item ca-item--page${on ? ' is-active' : ''}`);
+      b.type = 'button';
+      b.dataset.key = `page:${kind}`;
+      b.setAttribute('aria-label', page.label);
+      if (on) b.setAttribute('aria-current', 'page');
+      const mark = this.el('span', 'ca-hash is-drawn');
+      mark.setAttribute('aria-hidden', 'true');
+      mark.append(this.icon(page.icon));
+      b.append(mark, this.el('span', 'ca-name', page.label));
+      b.addEventListener('click', () => this.openPage(kind));
+      box.append(b);
+    }
+    return box;
+  }
+
+  /** Show the console's own Board page in place of the conversation (the same page, in a frame). */
+  openPage(kind, { push = true } = {}) {
+    const page = CA_PAGES[kind];
+    if (!page) return;
+    if (this.orgOpen) this.closeOrg();
+    this.toggleDrawer(null);
+    const again = this.embed === kind;
+    this.embed = kind;
+    this._embedRoom = this.roomId;
+    let panel = this.els.page;
+    if (!panel) {
+      panel = this.el('section', 'ca-page');
+      panel.append(this.el('iframe', 'ca-page-frame'));
+      this.els.body.append(panel);
+      this.els.page = panel;
+    }
+    const frame = panel.querySelector('iframe');
+    frame.title = page.label;
+    if (panel.dataset.kind !== kind) {
+      panel.dataset.kind = kind;
+      frame.src = page.path;
+    } else if (again) {
+      try {
+        frame.contentWindow.location.reload();
+      } catch {
+        /* a frame that is not loaded yet has nothing to reload */
+      }
+    }
+    panel.hidden = false;
+    this.els.root.classList.add('is-page');
+    // The conversation stays where it was but is out of reach of the keyboard and screen readers while the page covers it.
+    this.els.chat.inert = true;
+    this.els.members.inert = true;
+    const win = this.doc.defaultView;
+    if (push && win && caPageFromHash(win.location.hash) !== kind) {
+      try {
+        win.history.pushState({ reveriePage: kind }, '', `#${kind}`);
+      } catch {
+        /* the address bar is a convenience */
+      }
+    }
+    this.renderSidebar();
+    this.renderHeader();
+  }
+
+  /** Back to the conversation. `history: 'replace'` also takes #board out of the address bar. */
+  closePage({ history = 'replace' } = {}) {
+    if (!this.embed) return;
+    this.embed = null;
+    this._embedRoom = null;
+    const panel = this.els.page;
+    if (panel) {
+      panel.hidden = true;
+      delete panel.dataset.kind;
+      panel.querySelector('iframe').src = 'about:blank';
+    }
+    this.els.root.classList.remove('is-page');
+    this.els.chat.inert = false;
+    this.els.members.inert = false;
+    const win = this.doc.defaultView;
+    if (history === 'replace' && win && caPageFromHash(win.location.hash)) {
+      try {
+        win.history.replaceState(win.history.state, '', win.location.pathname + win.location.search);
+      } catch {
+        /* the address bar is a convenience */
+      }
+    }
+    this.renderSidebar();
+    this.renderHeader();
   }
 
   orgTreeEl(tree) {
@@ -3203,6 +3329,11 @@ class ReverieChatApp {
 
   renderAll() {
     if (!this.built) return;
+    // Another room opened (a click, a link, a notification): leave the page for the conversation.
+    if (this.embed) {
+      if (this._embedRoom == null) this._embedRoom = this.roomId; // a page opened by a link before any room had loaded
+      else if (this.roomId !== this._embedRoom) this.closePage();
+    }
     if (!this.app._chatCreating) this._pendingPlacement = null;
     this.renderReplyBar();
     this.syncComposer?.();
@@ -3450,6 +3581,7 @@ class ReverieChatApp {
     }
     this.keepFocus(sideScroll, () => {
       sideScroll.replaceChildren();
+      sideScroll.append(this.pagesEl());
       if (home) this.renderDmList(sideScroll);
       else this.renderChannelList(sideScroll);
     });
@@ -3613,7 +3745,7 @@ class ReverieChatApp {
   }
 
   renderDmList(into) {
-    const items = caDmItems(this.viewRooms, this.roomId, this.closedDms, caEmployeeBySession(this.company));
+    const items = caDmItems(this.viewRooms, this.embed ? null : this.roomId, this.closedDms, caEmployeeBySession(this.company));
     if (!items.length) {
       into.append(this.el('p', 'ca-empty-note', this.serverFeatures.dms
         ? 'No direct messages yet. Start one with the + above, or open an agent in the member list.'
@@ -3636,7 +3768,7 @@ class ReverieChatApp {
     const shown = this.viewRooms.filter((r) => !(hide && r.muted && r.id !== this.roomId));
     const draft = this._order;
     const source = draft ? shown.map((r) => (draft.includes(r.id) ? { ...r, position: draft.indexOf(r.id) + 1 } : r)) : shown;
-    const items = caChannelItems(source, this.workspace === 'home' ? '' : this.workspace, this.collapsed, this.roomId);
+    const items = caChannelItems(source, this.workspace === 'home' ? '' : this.workspace, this.collapsed, this.embed ? null : this.roomId);
     if (!items.length) {
       into.append(this.el('p', 'ca-empty-note', 'No channels here yet. Use + to create one.'));
       return;
@@ -3697,6 +3829,7 @@ class ReverieChatApp {
   async selectRoom(id) {
     this.embassy?.close();
     if (this.orgOpen) this.closeOrg();
+    this.closePage();
     this.reopenDm(id);
     this.app._chatCreating = false;
     this.toggleDrawer(null);
@@ -3948,14 +4081,12 @@ class ReverieChatApp {
     approvals.append(this.el('span', 'ca-count ca-approvals-count', '0'));
     this.els.approvals = approvals;
     user.append(approvals);
-    // Org chart, Debug terminals and settings sit together at the right of the profile bar.
+    // Org chart and settings sit together at the right of the profile bar.
     const org = this.button('ca-icon-btn ca-user-org', 'Org chart', () => this.openOrg(), { icon: 'org' });
     org.dataset.key = 'org';
     org.setAttribute('aria-pressed', String(!!this.orgOpen));
     this.els.orgBtn = org;
-    const debug = this.button('ca-icon-btn ca-user-debug', 'Debug terminals', () => this.showDebug(), { icon: 'terminal' });
-    debug.dataset.key = 'debug';
-    user.append(org, debug);
+    user.append(org);
     user.append(this.button('ca-icon-btn', 'App settings', () => this.app.openAppSettings?.(), { icon: 'gear' }));
     this.renderConnection();
     this.renderApprovals();
@@ -4000,6 +4131,16 @@ class ReverieChatApp {
     const room = this.room;
     headTitle.replaceChildren();
     headTopic.textContent = '';
+    if (this.embed) {
+      const page = CA_PAGES[this.embed];
+      const mark = this.el('span', 'ca-hash is-drawn');
+      mark.setAttribute('aria-hidden', 'true');
+      mark.append(this.icon(page.icon));
+      headTitle.append(mark, this.el('span', 'ca-head-name', page.label));
+      if (this.els.pinsBtn) this.els.pinsBtn.hidden = true;
+      if (this.els.inviteBtn) this.els.inviteBtn.hidden = true;
+      return;
+    }
     // Add people: for a channel that is open (not a direct message, not the new-channel form).
     if (this.els.pinsBtn) {
       const pinned = (room?.messages || []).filter((m) => m.pinned && !m.deleted).length;
@@ -4075,29 +4216,150 @@ class ReverieChatApp {
     if (sub) text.append(this.el('span', 'ca-member-sub', sub));
     b.append(text);
     b.addEventListener('click', () => this.openProfile(m, b));
+    b.addEventListener('contextmenu', (ev) => {
+      ev.preventDefault();
+      const r = b.getBoundingClientRect();
+      this.openMemberMenu(m, b, { x: ev.clientX || r.left, y: ev.clientY || r.bottom });
+    });
+    b.addEventListener('keydown', (ev) => {
+      if (ev.key !== 'ContextMenu' && !(ev.shiftKey && ev.key === 'F10')) return;
+      ev.preventDefault();
+      this.openMemberMenu(m, b);
+    });
     return b;
+  }
+
+  openMemberMenu(m, anchor, at = anchor) {
+    this.closeProfile();
+    const manage = this.canManageMembers(this.room);
+    const appoint = this.canAppointLead(this.room);
+    const own = this.app._chatSelf === m.sessionId;
+    const remove = manage || own;
+    const entries = [
+      { label: 'Profile', run: () => this.openProfile(m, anchor) },
+      { label: 'Mention', run: () => {
+        const input = this.app._chatEls?.input;
+        if (!input) return;
+        const start = input.selectionStart ?? input.value.length;
+        const end = input.selectionEnd ?? start;
+        const prefix = start && !/\s$/.test(input.value.slice(0, start)) ? ' ' : '';
+        const text = `${prefix}@${m.name} `;
+        input.setRangeText(text, start, end, 'end');
+        input.focus();
+        input.dispatchEvent(new this.doc.defaultView.Event('input', { bubbles: true }));
+      } },
+    ];
+    if (this.serverFeatures.dms && !caIsDm(this.room)) {
+      entries.push({ label: 'Message', run: () => this.startDm(m.sessionId) });
+    }
+    if (!caIsDm(this.room)) {
+      entries.push(
+        { sep: true },
+        { label: m.role === 'coordinator' ? 'Remove lead' : 'Make lead', disabled: !appoint,
+          tip: appoint ? 'Change the room coordinator seat' : '',
+          reason: !appoint ? 'Only the owner or a server Admin can change the channel lead' : '',
+          run: () => this.app._appointChatCoordinator(m.role === 'coordinator' ? null : m.sessionId) },
+        { label: 'Remove from channel', danger: true, disabled: !remove,
+          reason: !remove ? 'Only the user or channel lead can remove another member' : '',
+          run: () => this.app._removeChatMember(m) },
+      );
+    }
+    entries.push({ sep: true });
+    if (this.app.sessions?.has?.(m.sessionId)) {
+      entries.push({ label: 'Debug terminal', run: () => this.showDebug(m.sessionId) });
+    }
+    if (!caIsDm(this.room)) {
+      entries.push(
+        { label: 'Edit status', disabled: !!this.app._chatSelf && !own,
+          reason: this.app._chatSelf && !own ? 'Only the user or this member can edit its status' : '',
+          run: () => this.editStatus(m) },
+        { label: 'Re-brief', disabled: !manage && !own,
+          reason: !manage && !own ? 'Only the user or channel lead can re-brief another member' : '',
+          run: () => this.app._rebriefChatMember(m.sessionId) },
+      );
+    }
+    entries.push({ sep: true }, { label: 'Copy session id', run: async () => {
+      try {
+        await this.doc.defaultView.navigator.clipboard.writeText(m.sessionId);
+        this.toast('Session id copied', 'info');
+      } catch {
+        this.toast('Could not copy session id', 'error');
+      }
+    } });
+    this.openMenu(entries, { at, focus: anchor, label: `${m.name} actions`, className: 'ca-member-menu' });
+  }
+
+  canManageMembers(room = this.room) {
+    if (!room || caIsDm(room)) return false;
+    const self = this.app._chatSelf;
+    return !self || !!room.members.some((m) => m.sessionId === self && m.role === 'coordinator');
+  }
+
+  canAppointLead(room = this.room) {
+    return !!room && !caIsDm(room) && !this.app._chatSelf;
   }
 
   addMemberRow() {
     const wrap = this.el('div', 'ca-add');
-    const candidates = this.app._chatCandidateSessions?.(new Set(this.room.members.map((m) => m.sessionId))) || [];
-    if (!candidates.length) return wrap;
-    const form = this.el('form', 'ca-add-form');
-    const pick = this.el('select', 'ca-field');
-    pick.setAttribute('aria-label', 'Add an agent to this room');
-    pick.append(new Option('Add an agent…', ''));
-    for (const s of candidates) pick.append(new Option(`${s.name}${s.mode ? ` (${s.mode})` : ''}`, s.id));
-    form.append(pick);
-    pick.addEventListener('change', async () => {
-      if (!pick.value) return;
-      const res = await this.app._chatApi(`/api/chatrooms/${encodeURIComponent(this.roomId)}/members`, {
-        method: 'POST',
-        body: { sessionId: pick.value },
-      });
-      if (!res.ok) this.toast(`Chat: ${res.error}`, 'error');
-    });
-    wrap.append(form);
+    if (!this.canManageMembers()) return wrap;
+    const add = this.button('ca-icon-btn ca-add-button', 'Add an agent', () => this.openMemberPicker(add), { icon: 'plus' });
+    add.setAttribute('aria-haspopup', 'menu');
+    wrap.append(add);
     return wrap;
+  }
+
+  openMemberPicker(anchor) {
+    if (!this.canManageMembers()) return;
+    this.closeProfile();
+    const roomId = this.roomId;
+    const inRoom = new Set(this.room.members.map((m) => m.sessionId));
+    const postOnly = new Set((this.rooms || []).flatMap((r) => r.members || []).filter((m) => m.postOnly).map((m) => m.sessionId));
+    const candidates = (this.app._chatCandidateSessions?.(inRoom) || [])
+      .filter((s) => s.mode !== 'shell' && !postOnly.has(s.id) && !this.app.sessions?.get(s.id)?.postOnly);
+    const entries = candidates.map((s) => ({
+      label: s.name, hint: s.mode || '', avatar: s,
+      run: async () => {
+        const res = await this.app._chatApi(`/api/chatrooms/${encodeURIComponent(roomId)}/members`, {
+          method: 'POST', body: { sessionId: s.id },
+        });
+        if (!res.ok) return this.toast(`Chat: ${res.error}`, 'error');
+        if (this.roomId === roomId) {
+          await this.app._loadChatRoom(roomId, { quiet: true });
+          this.els.members.querySelector('.ca-add-button')?.focus();
+        }
+      },
+    }));
+    const menu = this.openMenu(entries, {
+      at: anchor, focus: anchor, label: 'Add an agent', className: 'ca-member-picker', restoreFocus: true,
+    });
+    const empty = this.el('p', 'ca-hint ca-member-empty', 'No other agents to add');
+    empty.setAttribute('role', 'status');
+    empty.hidden = !!candidates.length;
+    menu.append(empty);
+    if (candidates.length > 8) {
+      const search = this.el('input', 'ca-field ca-member-search');
+      search.type = 'search';
+      search.placeholder = 'Search agents';
+      search.setAttribute('aria-label', 'Search agents');
+      search.addEventListener('input', () => {
+        const query = search.value.trim().toLowerCase();
+        const rows = [...menu.querySelectorAll('button')];
+        rows.forEach((b, i) => { b.hidden = !`${candidates[i].name} ${candidates[i].mode || ''}`.toLowerCase().includes(query); });
+        empty.hidden = rows.some((b) => !b.hidden);
+        empty.textContent = 'No agents match';
+      });
+      menu.prepend(search);
+      search.focus();
+    }
+    this.fitMemberMenu(menu);
+  }
+
+  fitMemberMenu(menu) {
+    const w = this.doc.defaultView?.innerWidth || 1024;
+    const h = this.doc.defaultView?.innerHeight || 768;
+    const r = menu.getBoundingClientRect();
+    menu.style.top = `${Math.max(8, Math.min(r.top, h - r.height - 8))}px`;
+    menu.style.left = `${Math.max(8, Math.min(r.left, w - r.width - 8))}px`;
   }
 
   closeProfile() {
@@ -4109,6 +4371,7 @@ class ReverieChatApp {
   }
 
   openProfile(m, anchor) {
+    this.closeMenus();
     this.closeProfile();
     const card = this.el('div', 'ca-profile');
     card.setAttribute('role', 'dialog');
@@ -4142,12 +4405,13 @@ class ReverieChatApp {
     card.append(local, full);
     const section = (title, rows) => {
       if (!rows.length) return;
-      local.append(this.el('h3', 'ca-profile-section', title));
+      const group = this.profileSection(title);
       for (const [k, v] of rows) {
         const row = this.el('div', 'ca-kv');
         row.append(this.el('span', 'ca-k', k), this.el('span', 'ca-v', v));
-        local.append(row);
+        group.append(row);
       }
+      local.append(group);
     };
     section('Runtime', facts.runtime);
     section('Usage', facts.usage);
@@ -4158,24 +4422,27 @@ class ReverieChatApp {
       ]);
     }
     const actions = this.el('div', 'ca-profile-actions');
-    const act = (label, fn, primary, tip) => {
+    const manage = this.canManageMembers(this.room);
+    const own = this.app._chatSelf === m.sessionId;
+    const act = (label, fn, primary, tip, reason = '') => {
       const item = this.el('div', 'ca-act-item');
       const b = this.el('button', `ca-btn${primary ? ' is-primary' : ''}`, label);
       b.type = 'button';
+      b.disabled = !!reason;
       b.addEventListener('click', () => {
         this.closeProfile();
         fn();
       });
       item.append(b);
-      if (tip) this.describeButton(item, b, tip);
+      if (tip) this.describeButton(item, b, reason || tip);
       actions.append(item);
     };
     if (this.serverFeatures.dms && !caIsDm(this.room)) act('Message', () => this.startDm(m.sessionId), true, 'Start a private chat with this agent');
     if (this.app.sessions?.has?.(m.sessionId)) act('Debug terminal', () => this.showDebug(m.sessionId), false, "Open this agent's live terminal");
     if (!caIsDm(this.room)) {
-      act('Edit status', () => this.editStatus(m), false, 'Change the goal/progress shown for this agent');
-      if (m.role !== 'coordinator') act('Make admin', () => this.app._appointChatCoordinator(m.sessionId), false, 'Let this agent coordinate the channel');
-      act('Re-brief', () => this.app._rebriefChatMember(m.sessionId), false, 'Re-send this agent the room intro and rules');
+      act('Edit status', () => this.editStatus(m), false, 'Change the goal/progress shown for this agent', this.app._chatSelf && !own ? 'Only the user or this member can edit its status' : '');
+      if (m.role !== 'coordinator') act('Make lead', () => this.app._appointChatCoordinator(m.sessionId), false, 'Change the room coordinator seat', !this.canAppointLead(this.room) ? 'Only the owner or a server Admin can change the channel lead' : '');
+      act('Re-brief', () => this.app._rebriefChatMember(m.sessionId), false, 'Re-send this agent the room intro and rules', !manage && !own ? 'Only the user or channel lead can re-brief another member' : '');
       if (this.serverFeatures.notify && !m.postOnly) {
         act(m.notify === 'mentions' ? 'Wake on everything' : 'Wake on @mentions only', () => this.setMemberNotify(m, m.notify === 'mentions' ? 'all' : 'mentions'), false, m.notify === 'mentions' ? 'Wake this agent on every message again' : 'Only wake this agent when @named, replied to, or by you');
       }
@@ -4183,7 +4450,7 @@ class ReverieChatApp {
       if (this.serverFeatures.replace && !m.postOnly && m.alive === false) {
         act('Move to new session', () => this.openReplaceDialog(m), false, "Give this offline agent's place in every room to its new session");
       }
-      act('Remove from channel', () => this.app._removeChatMember(m), false, 'Take this agent out of this channel');
+      act('Remove from channel', () => this.app._removeChatMember(m), false, 'Take this agent out of this channel', !manage && !own ? 'Only the user or channel lead can remove another member' : '');
     }
     // The owner can give any agent a picture (the server keeps PNG, JPEG, GIF or WebP up to 256 KB).
     const pic = this.el('input');
@@ -4222,8 +4489,8 @@ class ReverieChatApp {
     const uploadItem = this.el('div', 'ca-act-item');
     uploadItem.append(upload);
     this.describeButton(uploadItem, upload, 'Give this agent a picture (up to 256 KB)');
-    actions.append(uploadItem, pic);
-    if (this.profileAvatar(m.sessionId, m)) {
+    if (!this.app._chatSelf) actions.append(uploadItem, pic);
+    if (!this.app._chatSelf && this.profileAvatar(m.sessionId, m)) {
       const clear = this.el('button', 'ca-btn', 'Remove image');
       clear.type = 'button';
       clear.addEventListener('click', () => avatarCall('DELETE'));
@@ -4259,6 +4526,12 @@ class ReverieChatApp {
     item.append(tip);
   }
 
+  profileSection(title) {
+    const group = this.el('details', 'ca-profile-group');
+    group.append(this.el('summary', 'ca-profile-section', title));
+    return group;
+  }
+
   /** Fetch the runtime's read-only profile for an agent and show it in its card (the local facts stay if it fails). */
   async loadAgentProfile(m, card, local, full) {
     full.replaceChildren(this.el('p', 'ca-hint', 'Loading the full profile\u2026'));
@@ -4271,22 +4544,28 @@ class ReverieChatApp {
     const profile = caAgentProfile(res.data);
     full.replaceChildren();
     if (profile.persona) {
-      full.append(this.el('h3', 'ca-profile-section', 'About'));
+      const about = this.profileSection('About');
       const head = [profile.persona.name, profile.persona.role, profile.persona.kind].filter(Boolean).join(' \u00B7 ');
-      if (head) full.append(this.el('p', 'ca-persona-head', head));
-      if (profile.persona.text) full.append(this.el('p', 'ca-persona', profile.persona.text));
+      if (head) about.append(this.el('p', 'ca-persona-head', head));
+      if (profile.persona.text) about.append(this.el('p', 'ca-persona', profile.persona.text));
+      full.append(about);
     } else if (profile.personaError) {
       full.append(this.el('p', 'ca-hint', `About: ${profile.personaError}`));
     }
     for (const sec of profile.sections) {
-      full.append(this.el('h3', 'ca-profile-section', sec.title));
+      const group = this.profileSection(sec.title === 'Channels' ? `Channels · in ${sec.rows.length} channels` : sec.title);
       for (const [k, v] of sec.rows) {
         const row = this.el('div', 'ca-kv');
         row.append(this.el('span', 'ca-k', k), this.el('span', 'ca-v', v));
-        full.append(row);
+        group.append(row);
       }
+      full.append(group);
     }
-    if (profile.switchInfo) full.append(this.switchEl(profile.switchInfo));
+    if (profile.switchInfo && !this.app._chatSelf) {
+      const group = this.profileSection('Backend switch');
+      group.append(this.switchEl(profile.switchInfo));
+      full.append(group);
+    }
     if (profile.sections.length || profile.persona || profile.switchInfo) local.remove();
   }
 
@@ -4323,7 +4602,9 @@ class ReverieChatApp {
       // A phone has no room beside the row: the card is a sheet at the bottom of the screen, as wide as the screen (CSS).
       card.classList.add('ca-profile--sheet');
     } else {
-      card.style.top = `${Math.max(8, Math.min(a.top, h - 340))}px`;
+      const top = Math.max(8, Math.min(a.top, h - card.getBoundingClientRect().height - 8));
+      card.style.top = `${top}px`;
+      card.style.maxHeight = `${h - top - 8}px`;
       // Left of the row, but never past the left edge of the window (a narrow window used to put it half off-screen).
       card.style.right = `${Math.min(Math.max(8, w - a.left + 8), Math.max(8, w - CA_CARD_WIDTH - 8))}px`;
     }
@@ -4332,6 +4613,7 @@ class ReverieChatApp {
       card.style.right = 'auto';
       card.style.left = `${Math.max(8, a.left)}px`;
       card.style.bottom = `${Math.max(8, h - a.top + 8)}px`;
+      card.style.maxHeight = `${Math.max(0, a.top - 16)}px`;
     }
     this.els.profile = card;
     this._profileDismiss = (e) => {
@@ -4345,7 +4627,8 @@ class ReverieChatApp {
       }
       if (e.key !== 'Tab') return;
       // The card is modal in spirit: Tab and Shift+Tab stay inside it until it is closed.
-      const items = [...card.querySelectorAll('button')].filter((b) => !b.disabled);
+      const items = [...card.querySelectorAll('button, summary, select, input:not([type="hidden"]), textarea, a[href]')]
+        .filter((b) => !b.disabled && !b.hidden && !b.closest('details:not([open]) > :not(summary)'));
       if (!items.length) return;
       const first = items[0];
       const last = items[items.length - 1];
@@ -4584,7 +4867,7 @@ class ReverieChatApp {
    * shown beside the entry. Arrow keys move, ArrowRight opens a sub-list, ArrowLeft/Escape close it, Escape closes the
    * menu and gives focus back to `focus`. `at` is { x, y } or an element to hang under (right-aligned when `right`).
    */
-  openMenu(entries, { at, focus, right = false, above = false, label = 'Menu', className = '' } = {}) {
+  openMenu(entries, { at, focus, right = false, above = false, label = 'Menu', className = '', restoreFocus = false } = {}) {
     this.closeMenus();
     const restore = focus || this.doc.activeElement;
     const open = [];
@@ -4639,12 +4922,22 @@ class ReverieChatApp {
         b.setAttribute('role', e.checked === undefined ? 'menuitem' : e.checkbox ? 'menuitemcheckbox' : 'menuitemradio');
         if (e.checked !== undefined) b.setAttribute('aria-checked', String(!!e.checked));
         b.disabled = !!e.disabled;
+        if (e.tip) b.title = e.tip;
+        if (e.avatar) {
+          const avatar = this.app._chatAvatar(e.avatar.id, e.avatar.name, { size: 'sm' });
+          avatar.setAttribute('aria-hidden', 'true');
+          b.append(avatar);
+        }
         if (e.glyph) {
           const g = this.el('span', 'ca-menu-glyph', e.glyph);
           g.setAttribute('aria-hidden', 'true');
           b.append(g);
         }
         const text = this.el('span', 'ca-menu-label', e.label);
+        if (e.disabled && e.reason) {
+          b.title = [e.reason, e.tip].filter(Boolean).join('; ');
+          text.append(this.el('span', 'ca-menu-reason', e.reason));
+        }
         b.append(text);
         if (e.hint) b.append(this.el('span', 'ca-menu-hint', e.hint));
         if (e.sub) b.append(this.el('span', 'ca-menu-arrow', '\u203A'));
@@ -4659,6 +4952,7 @@ class ReverieChatApp {
       }
       this.doc.body.append(menu);
       place(menu, anchor, side);
+      if (className === 'ca-member-menu' || className === 'ca-member-picker') this.fitMemberMenu(menu);
       open.push(menu);
       return menu;
     };
@@ -4672,15 +4966,18 @@ class ReverieChatApp {
       this.doc.removeEventListener('pointerdown', onPointer, true);
       this.doc.removeEventListener('keydown', onKey, true);
       this._openMenuClose = null;
-      if (refocus) restore?.focus?.();
+      if (refocus || restoreFocus) restore?.focus?.();
     };
     const onPointer = (ev) => {
-      if (!open.some((m) => m.contains(ev.target))) closeAll(false);
+      if (!open.some((m) => m.contains(ev.target))) {
+        if (restoreFocus) ev.preventDefault();
+        closeAll(false);
+      }
     };
     const onKey = (ev) => {
       const menu = open.at(-1);
       if (!menu) return;
-      const items = [...menu.querySelectorAll('button:not(:disabled)')];
+      const items = [...menu.querySelectorAll('button:not(:disabled)')].filter((b) => !b.hidden);
       const at = items.indexOf(this.doc.activeElement);
       if (ev.key === 'Escape') {
         ev.preventDefault();
@@ -4692,7 +4989,9 @@ class ReverieChatApp {
         } else closeAll(true);
       } else if (ev.key === 'ArrowDown' || ev.key === 'ArrowUp') {
         ev.preventDefault();
-        items[(at + (ev.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length]?.focus();
+        const next = at < 0 ? (ev.key === 'ArrowDown' ? 0 : items.length - 1)
+          : (at + (ev.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length;
+        items[next]?.focus();
       } else if (ev.key === 'Home' || ev.key === 'End') {
         ev.preventDefault();
         items[ev.key === 'Home' ? 0 : items.length - 1]?.focus();
@@ -4704,6 +5003,9 @@ class ReverieChatApp {
         ev.stopPropagation();
         open.pop().remove();
         open.at(-1).querySelector('[aria-haspopup]')?.focus();
+      } else if (ev.key === 'Enter' || (ev.key === ' ' && !this.doc.activeElement?.matches('input'))) {
+        ev.preventDefault();
+        items[at < 0 ? 0 : at]?.click();
       } else if (ev.key === 'Tab') {
         closeAll(false);
       }
@@ -5346,6 +5648,7 @@ class ReverieChatApp {
    */
   renderFeed({ keepScroll = false } = {}) {
     const feed = this.app._chatEls.feed;
+    this.app._watchChatFeedTop?.(feed);
     if (!feed._caStick) {
       feed._caStick = true;
       feed.addEventListener('scroll', () => (this._feedStick = feed.scrollHeight - feed.scrollTop - feed.clientHeight < 60), { passive: true });
@@ -5686,8 +5989,8 @@ function caInstall(proto) {
         this._chatApp.renderChrome();
       }
     },
-    _renderChatFeed() {
-      if (this._chatApp?.built) return this._chatApp.renderFeed();
+    _renderChatFeed(opts) {
+      if (this._chatApp?.built) return this._chatApp.renderFeed(opts);
       return undefined;
     },
     _chatMessageEl(m) {

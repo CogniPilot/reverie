@@ -19,16 +19,19 @@ import {
   LinkSchema,
   MarkSchema,
   MilestoneSchema,
+  RecommendationSchema,
   ISSUE_STATUSES,
   type BoardPin,
   type BoardPoll,
   type BoardState,
   type BoardView,
   type Issue,
+  type Recommendation,
   type PlanBurn,
   type RosterRow,
 } from '../../board-types.js';
-import { pollIsOpen, type ChatRoom } from '../../chatroom-store.js';
+import { pollIsOpen, USER_RECIPIENT, type ChatRoom } from '../../chatroom-store.js';
+import { waitingForOwner } from '../../decision-alert.js';
 import { burnRate, type UsageSample } from '../../plan-pace.js';
 import type { PlanRow } from '../../plan-accounts.js';
 import type { SessionPort } from '../ports/session-port.js';
@@ -78,14 +81,32 @@ const IssueInput = IssueSchema.pick({
   .merge(IfRev)
   .strict();
 const IssueCreate = IssueInput.required({ title: true });
-const IssuePatch = IssueInput.omit({ source: true }).extend({ owner: z.string().max(100).nullable().optional() }).strict();
+// Create defaults must not turn omitted PATCH fields into destructive updates.
+const IssuePatch = IssueInput.omit({ source: true })
+  .extend({
+    owner: z.string().max(100).nullable().optional(),
+    tags: IssueSchema.shape.tags.unwrap().optional(),
+    scale: IssueSchema.shape.scale.unwrap().optional(),
+  })
+  .strict();
 const MilestoneInput = MilestoneSchema.pick({ title: true, due: true }).partial().merge(IfRev).strict();
 const WinInput = z.object({ text: z.string().trim().min(1).max(500), who: z.string().trim().max(100).optional() }).merge(IfRev).strict();
 const BlockerInput = BlockerSchema.pick({ who: true, owner: true, text: true })
   .extend({ sev: BlockerSchema.shape.sev.default('med') })
   .merge(IfRev)
   .strict();
-const DecisionInput = DecisionSchema.pick({ text: true, where: true }).extend({ id: z.string().regex(/^[A-Za-z0-9_.:-]{1,64}$/).optional() }).merge(IfRev).strict();
+/** Card text for a decision or poll; null clears a field. An agent's `by` is always itself; the owner may name the author. */
+const CardNote = z.object({
+  summary: z.string().trim().max(300).nullable().optional(),
+  recommendation: RecommendationSchema.extend({ by: RecommendationSchema.shape.by.optional() }).nullable().optional(),
+  tradeoff: z.string().trim().max(300).nullable().optional(),
+});
+const CardNoteInput = CardNote.merge(IfRev).strict();
+const DecisionInput = DecisionSchema.pick({ text: true, where: true })
+  .extend({ id: z.string().regex(/^[A-Za-z0-9_.:-]{1,64}$/).optional() })
+  .merge(CardNote)
+  .merge(IfRev)
+  .strict();
 const AgentInput = z
   .object({ focus: z.string().trim().max(500).optional(), receipts: z.array(z.string().trim().min(1).max(300)).max(20).optional() })
   .merge(IfRev)
@@ -113,6 +134,23 @@ export function registerBoardRoutes(app: FastifyInstance, ctx: SessionPort & Par
     return { kind: 'agent', by: memberId ?? sessionId, sessionId, memberId, coordinator: isCoordinator(sessionId), owner };
   };
   const lead = (c: Caller) => c.kind === 'owner' || c.coordinator;
+  /** The caller's display name, for "recommended by". */
+  const nameOf = (c: Caller) =>
+    c.kind === 'owner' ? deps.company(c.owner).settings.ownerName || 'owner' : (deps.company(c.owner).employees.find((e) => e.id === c.memberId)?.name ?? c.by);
+  /** Apply a card note to a target: a field given as null is removed, one left out is kept. */
+  const applyNote = (c: Caller, target: { summary?: string; recommendation?: Recommendation; tradeoff?: string }, note: z.infer<typeof CardNote>) => {
+    for (const key of ['summary', 'tradeoff'] as const) {
+      const v = note[key];
+      if (v === null || v === '') delete target[key];
+      else if (v !== undefined) target[key] = v;
+    }
+    if (note.recommendation === null) delete target.recommendation;
+    // An agent is always credited as itself; only the owner may name who wrote it (e.g. loading an agent's file).
+    else if (note.recommendation) {
+      const by = c.kind === 'owner' && note.recommendation.by ? note.recommendation.by : nameOf(c);
+      target.recommendation = { option: note.recommendation.option, reason: note.recommendation.reason ?? '', by };
+    }
+  };
   const requireLead = (c: Caller, what: string) => {
     if (!lead(c)) throw new BoardError(`Only the owner or a coordinator may ${what}`, 403);
   };
@@ -172,6 +210,13 @@ export function registerBoardRoutes(app: FastifyInstance, ctx: SessionPort & Par
   };
 
   // ---- read ----
+  // What waits on the owner: open decisions and open polls without an owner vote. Backs the Board badge and the push.
+  app.get('/api/board/waiting', async (req, reply) =>
+    run(reply, async () => {
+      caller(req);
+      return waitingForOwner(deps.store.snapshot(), deps.rooms(), now());
+    })
+  );
   app.get('/api/board', async (req, reply) =>
     run(reply, async () => {
       const c = caller(req);
@@ -201,6 +246,7 @@ export function registerBoardRoutes(app: FastifyInstance, ctx: SessionPort & Par
           if (m.poll && pollIsOpen(m.poll, at)) {
             const counts = new Map<string, number>();
             for (const chosen of Object.values(m.poll.votes)) for (const o of chosen) counts.set(o, (counts.get(o) ?? 0) + 1);
+            const note = state.pollNotes[`${room.id}:${m.id}`];
             polls.push({
               roomId: room.id,
               room: room.name,
@@ -211,6 +257,10 @@ export function registerBoardRoutes(app: FastifyInstance, ctx: SessionPort & Par
               multi: !!m.poll.multi,
               closesAt: m.poll.closesAt,
               recommended: m.poll.recommended,
+              ...(note?.summary ? { summary: note.summary } : {}),
+              ...(note?.recommendation ? { recommendation: note.recommendation } : {}),
+              ...(note?.tradeoff ? { tradeoff: note.tradeoff } : {}),
+              ownerVote: c.kind === 'owner' ? [...(m.poll.votes[USER_RECIPIENT] ?? [])] : [],
             });
           }
           if (m.pinned) {
@@ -239,7 +289,8 @@ export function registerBoardRoutes(app: FastifyInstance, ctx: SessionPort & Par
     if (!deps.plans) return null;
     const [rows, history] = await Promise.all([deps.plans(), deps.usageHistory?.() ?? Promise.resolve({})]);
     return rows.map((row) => {
-      const note = state.plans[row.label] ?? { name: row.label, who: '' };
+      // The plan name is the account label itself (renamed on the Board); only `who` still comes from the note.
+      const who = state.plans[row.label]?.who ?? '';
       const weekStart = row.pace.weekStart;
       const reset = row.pace.weekReset;
       const samples = ((history as Record<string, UsageSample[]>)[row.id] ?? []).filter((s) => !s.misattributed && (weekStart === null || s.at >= weekStart));
@@ -249,9 +300,14 @@ export function registerBoardRoutes(app: FastifyInstance, ctx: SessionPort & Par
         return { t: s.at, used: s.weekly, rate, proj };
       });
       return {
+        id: row.id,
+        profileId: row.profileId,
+        provider: row.provider,
+        isDefault: row.isDefault,
+        signedIn: row.signedIn,
         label: row.label,
-        name: note.name || row.label,
-        who: note.who,
+        name: row.label,
+        who,
         used: row.pace.weekly,
         rate: row.pace.burnPerHour,
         proj: row.pace.projected,
@@ -397,9 +453,52 @@ export function registerBoardRoutes(app: FastifyInstance, ctx: SessionPort & Par
       const id = body.id ?? newId('d');
       return write(c, 'decision-add', body.ifRev, { id, text: body.text }, (s) => {
         if (s.decisions.some((d) => d.id === id)) throw new BoardError(`Decision ${id} exists`, 409);
-        const decision = { id, text: body.text, where: body.where ?? '', at: now() };
+        const decision: BoardState['decisions'][number] = { id, text: body.text, where: body.where ?? '', at: now() };
+        applyNote(c, decision, body);
         s.decisions.push(decision);
         return decision;
+      });
+    })
+  );
+  app.patch<{ Params: { id: string } }>('/api/board/decisions/:id', async (req, reply) =>
+    run(reply, async () => {
+      const c = caller(req);
+      requireLead(c, 'annotate a decision');
+      const { ifRev, ...note } = parse(CardNoteInput, req.body);
+      if (Object.keys(note).length === 0) throw new BoardError('Nothing to change', 400);
+      return write(c, 'decision-note', ifRev, { id: req.params.id, ...note }, (s) => {
+        const d = s.decisions.find((x) => x.id === req.params.id);
+        if (!d) throw new BoardError(`No decision ${req.params.id}`, 404);
+        applyNote(c, d, note);
+        return d;
+      });
+    })
+  );
+  app.put<{ Params: { roomId: string; messageId: string } }>('/api/board/polls/:roomId/:messageId/note', async (req, reply) =>
+    run(reply, async () => {
+      const c = caller(req);
+      requireLead(c, 'annotate a poll');
+      const { ifRev, ...note } = parse(CardNoteInput, req.body);
+      const { roomId, messageId } = req.params;
+      const room = deps.rooms().find((r) => r.id === roomId && !r.archivedAt);
+      const message = room?.messages.find((m) => m.id === messageId && !m.deleted);
+      if (!message?.poll) throw new BoardError(`No poll ${messageId} in room ${roomId}`, 404);
+      const options = message.poll.options;
+      if (note.recommendation && !options.some((o) => o.id === note.recommendation!.option || o.label.toLowerCase() === note.recommendation!.option.toLowerCase())) {
+        throw new BoardError(`Not an option of this poll: ${note.recommendation.option.slice(0, 40)}`, 400);
+      }
+      return write(c, 'poll-note', ifRev, { roomId, messageId, ...note }, (s) => {
+        const key = `${roomId}:${messageId}`;
+        const prev = s.pollNotes[key];
+        const next = { ...(prev ?? {}), updatedAt: now(), updatedBy: c.by };
+        applyNote(c, next, note);
+        // Store the option as its id, whatever the caller typed.
+        if (next.recommendation) {
+          const hit = options.find((o) => o.id === next.recommendation!.option || o.label.toLowerCase() === next.recommendation!.option.toLowerCase());
+          if (hit) next.recommendation = { ...next.recommendation, option: hit.id };
+        }
+        s.pollNotes[key] = next;
+        return next;
       });
     })
   );

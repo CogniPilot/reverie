@@ -1463,7 +1463,7 @@ class CodemanApp {
           this._closeEmojiPicker();
           return;
         }
-        // The sign-in dialog closes alone (and cancels its helper), leaving Plans open.
+        // The sign-in dialog closes alone and cancels its helper.
         if (this._signIn) {
           this._closeSignIn();
           return;
@@ -1483,7 +1483,6 @@ class CodemanApp {
         }
         this.closeAllPanels();
         this.closeCarMode?.();
-        this.closePlans?.();
         this._closeTabFamily?.();
         this.closeChatroom?.();
         this.closeSessionSwitcher?.({ refocus: true });

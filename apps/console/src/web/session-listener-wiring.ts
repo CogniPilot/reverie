@@ -69,6 +69,14 @@ export interface SessionListenerRefs {
   bashToolsUpdate: (tools: ActiveBashTool[]) => void;
   attachmentRequested: (event: { path: string; source: 'external' | 'codex-generated' }) => void;
   promptSubmitted: (prompt: string) => void;
+  fullAccessMissing: (data: FullAccessMissing) => void;
+}
+
+/** A local launch whose CLI argv lacks its expected bypass flag(s); see `Session._checkFullAccess`. */
+export interface FullAccessMissing {
+  pid: number;
+  missing: string[];
+  reason: 'flags' | 'no-cli';
 }
 
 /** Dependencies injected by WebServer — keeps listener creation decoupled from server internals. */
@@ -92,6 +100,8 @@ interface SessionListenerDeps {
   updateSessionName(sessionId: string, name: string): boolean;
   /** The synced `autoNameSessions` setting, read fresh so a flip applies to the next prompt. */
   isAutoNameEnabled(): Promise<boolean>;
+  /** Tells the owner and the room that a launch lacks full access. Optional so test harnesses can omit it. */
+  alertFullAccessMissing?(session: Session, data: FullAccessMissing): void;
 }
 
 /**
@@ -510,6 +520,11 @@ export function createSessionListeners(session: Session, deps: SessionListenerDe
         })
         .catch((err) => console.error(`[Session] auto-name failed for ${session.id}:`, err));
     },
+
+    /** A launch without its bypass flag(s): the session keeps running, the owner and room are told. */
+    fullAccessMissing: (data) => {
+      deps.alertFullAccessMissing?.(session, data);
+    },
   };
 }
 
@@ -550,6 +565,7 @@ export function attachSessionListeners(session: Session, refs: SessionListenerRe
   session.on('bashToolsUpdate', refs.bashToolsUpdate);
   session.on('attachmentRequested', refs.attachmentRequested);
   session.on('promptSubmitted', refs.promptSubmitted);
+  session.on('fullAccessMissing', refs.fullAccessMissing);
 }
 
 /** Detach all listeners from a session (prevents memory leaks from closure references). */
@@ -589,4 +605,5 @@ export function detachSessionListeners(session: Session, refs: SessionListenerRe
   session.off('bashToolsUpdate', refs.bashToolsUpdate);
   session.off('attachmentRequested', refs.attachmentRequested);
   session.off('promptSubmitted', refs.promptSubmitted);
+  session.off('fullAccessMissing', refs.fullAccessMissing);
 }

@@ -7,7 +7,7 @@ import { agentChatSay, resolveChatRoom, type AgentDeps, type RequestOptions } fr
 
 const ROOMS = [
   { id: 'room-aaaa', name: 'Break Room', members: [] },
-  { id: 'room-bbbb', name: 'Web App', members: [] },
+  { id: 'room-bbbb', name: 'Slam Web', members: [] },
   { id: 'room-cccc', name: 'Platform', members: [] },
 ];
 
@@ -35,22 +35,22 @@ describe('chat verbs with no --room', () => {
     const { d, err } = deps({ roomIds: ['room-bbbb'] });
     const target = await resolveChatRoom(d, undefined);
     expect(target).toEqual({ room: ROOMS[1] });
-    expect(plain(err)).toContain('using "Web App", the room you were last addressed in');
+    expect(plain(err)).toContain('using "Slam Web", the room you were last addressed in');
   });
 
   it('a prompt that bundled several rooms is not guessed: it asks for --room and lists the bundle and all the rooms', async () => {
     const { d } = deps({ roomIds: ['room-aaaa', 'room-bbbb'] });
     const target = await resolveChatRoom(d, undefined);
     expect('error' in target && target.error).toContain('3 chatrooms');
-    expect('error' in target && target.error).toContain('bundled messages from "Break Room" and "Web App"');
-    expect('error' in target && target.error).toContain('pick one with --room ("Break Room", "Web App", "Platform")');
+    expect('error' in target && target.error).toContain('bundled messages from "Break Room" and "Slam Web"');
+    expect('error' in target && target.error).toContain('pick one with --room ("Break Room", "Slam Web", "Platform")');
   });
 
   it('with no delivery yet, or one from a room the session is no longer in, it keeps the plain error', async () => {
     for (const last of [undefined, null, { roomIds: [] }, { roomIds: ['room-gone'] }]) {
       const { d } = deps(last as never);
       const target = await resolveChatRoom(d, undefined);
-      expect('error' in target && target.error).toBe('this session is in 3 chatrooms; pick one with --room ("Break Room", "Web App", "Platform")');
+      expect('error' in target && target.error).toBe('this session is in 3 chatrooms; pick one with --room ("Break Room", "Slam Web", "Platform")');
     }
   });
 

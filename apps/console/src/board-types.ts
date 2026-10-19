@@ -78,11 +78,27 @@ export const BlockerSchema = z
   .strict();
 export type Blocker = z.infer<typeof BlockerSchema>;
 
+/** Who recommends which option, and why. Written by the agent that raised the decision; the server never guesses one. */
+export const RecommendationSchema = z
+  .object({ option: text(200), reason: z.string().trim().max(300).default(''), by: text(100) })
+  .strict();
+export type Recommendation = z.infer<typeof RecommendationSchema>;
+
+/** The card text for a decision or a poll: a short summary, the recommendation and the trade-off of going the other way. */
+export const CardNoteFields = {
+  summary: z.string().trim().max(300).optional(),
+  recommendation: RecommendationSchema.optional(),
+  tradeoff: z.string().trim().max(300).optional(),
+};
+export const PollNoteSchema = z.object({ ...CardNoteFields, updatedAt: ms, updatedBy: z.string().max(100) }).strict();
+export type PollNote = z.infer<typeof PollNoteSchema>;
+
 export const DecisionSchema = z
   .object({
     id,
     text: text(500),
     where: z.string().trim().max(200).default(''),
+    ...CardNoteFields,
     at: ms,
     clearedAt: ms.optional(),
     clearedBy: z.string().max(100).optional(),
@@ -120,6 +136,8 @@ export const BoardStateSchema = z
     agents: z.record(z.string(), AgentNoteSchema),
     marks: z.array(MarkSchema).max(BOARD_LIMITS.marks),
     plans: z.record(z.string(), PlanNoteSchema),
+    /** Card notes for chat polls, keyed `roomId:messageId` (the poll itself stays in the chat room). */
+    pollNotes: z.record(z.string(), PollNoteSchema).default({}),
   })
   .strict();
 export type BoardState = z.infer<typeof BoardStateSchema>;
@@ -135,6 +153,7 @@ export const emptyBoard = (): BoardState => ({
   agents: {},
   marks: [],
   plans: {},
+  pollNotes: {},
 });
 
 /** Ahead/behind, derived from issues with an `end` (never stored). */
@@ -164,6 +183,12 @@ export interface RosterRow {
 }
 
 export interface PlanBurn {
+  /** Plan account id (for sign-in) and its subscription profile id; profileId is null for an account that exists only as an acct directory. */
+  id: string;
+  profileId: string | null;
+  provider: string;
+  isDefault: boolean;
+  signedIn: boolean;
   label: string;
   name: string;
   who: string;
@@ -193,7 +218,13 @@ export interface BoardPoll {
   options: { id: string; label: string; votes: number }[];
   multi: boolean;
   closesAt?: number;
+  /** Option id the poll's author marked when posting it. */
   recommended?: string;
+  summary?: string;
+  recommendation?: Recommendation;
+  tradeoff?: string;
+  /** The owner's current vote (option ids); empty until the owner votes. Only filled for the owner's own view. */
+  ownerVote: string[];
 }
 
 export interface BoardPin {

@@ -8,14 +8,16 @@
  * the middle of a CLI's work, where some CLIs would treat it as an interrupt.
  *
  * Flushing is driven by a short poll rather than per-session listeners, so a
- * session created, restored or deleted after it joined needs no extra wiring: a
- * session that is gone or has no pane simply keeps its queue (bounded) until it
- * comes back or leaves the room.
+ * session created, restored or deleted after it joined needs no extra wiring.
+ * After registry restoration, missing sessions are forgotten; registered ones
+ * without a pane keep a bounded queue until they return or leave the room.
  *
  * The briefing texts that teach an agent how to talk in the room also live here,
  * next to the line format they describe.
  */
 
+import { randomUUID } from 'node:crypto';
+import type { PendingDeliveryStore } from './chatroom-pending-delivery.js';
 import { cutQuoted, quoteForPane } from './pane-quote.js';
 import type { ChatMember, ChatMessage, ChatRoom } from './chatroom-store.js';
 import { USER_RECIPIENT, isDm, textMentions } from './chatroom-store.js';
@@ -55,6 +57,11 @@ export interface DeliveredMessage {
 }
 
 export interface DeliveryDeps {
+  /** False while the server is restoring its session registry; missing entries are not gone yet. */
+  isReady?: () => boolean;
+  /** Opened before delivery starts; only message identities are persisted. */
+  pendingStore?: () => PendingDeliveryStore | undefined;
+  onPersistenceError?: (error: unknown) => void;
   getSession(id: string): DeliverySession | undefined;
   now?: () => number;
   /** A message line was typed into this session's pane, for each room it was about (not a briefing, not a held message). */
@@ -66,10 +73,13 @@ export interface DeliveryDeps {
   onSubmitted?: (sessionId: string, messages: DeliveredMessage[]) => void;
   /** A line was still sitting unsubmitted in the composer after the whole retry schedule: a person has to look at that pane. */
   onStranded?: (sessionId: string, messages: DeliveredMessage[]) => void;
+  /** A write failed after it may have typed text; a boolean failure is not proof of no input. */
+  onUncertain?: (sessionId: string, messages: DeliveredMessage[]) => void;
 }
 
 /** One queued line fragment, already rendered. */
 interface Pending {
+  deliveryId?: string;
   roomId: string;
   roomName: string;
   /** Fixed text, or a renderer called at flush time (briefings describe the room as it is THEN). */
@@ -410,12 +420,53 @@ export class ChatroomDelivery {
   /** Held messages dropped for a session (too many, too old, or over the line budget) that its next line has not mentioned yet. */
   private omitted = new Map<string, number>();
   private timer: ReturnType<typeof setInterval> | undefined;
+  private persistenceFailed = false;
+  private inspectionHolds = new Map<string, Map<string, DeliveredMessage>>();
+  /** Reads racing pane IO stay durable until both the write and its submit verifier have settled. */
+  private activeWrites = new Map<string, {
+    messages: DeliveredMessage[];
+    reads: Map<string, Set<string>>;
+  }>();
+
+  holdForInspection(sessionId: string, messages: DeliveredMessage[]): void {
+    if (!messages.length) return;
+    const held = this.inspectionHolds.get(sessionId) ?? new Map<string, DeliveredMessage>();
+    for (const message of messages) held.set(JSON.stringify([message.roomId, message.messageId]), message);
+    this.inspectionHolds.set(sessionId, held);
+  }
+
+  private releaseInspection(sessionId: string, messages: DeliveredMessage[]): void {
+    const held = this.inspectionHolds.get(sessionId);
+    if (!held) return;
+    for (const message of messages) held.delete(JSON.stringify([message.roomId, message.messageId]));
+    if (!held.size) this.inspectionHolds.delete(sessionId);
+  }
+
+  private durable(action: (store: PendingDeliveryStore) => void): void {
+    if (this.persistenceFailed) throw new Error('Delivery persistence is unavailable');
+    const store = this.deps.pendingStore?.();
+    if (!store) return;
+    try { action(store); }
+    catch (error) {
+      this.persistenceFailed = true;
+      if (this.timer) clearInterval(this.timer);
+      this.timer = undefined;
+      this.deps.onPersistenceError?.(error);
+      throw error;
+    }
+  }
+
+  private discard(pending: Pending[]): void {
+    this.durable((store) => store.remove(pending.flatMap((p) => p.deliveryId ? [p.deliveryId] : [])));
+  }
 
   constructor(private readonly deps: DeliveryDeps) {}
 
   start(pollMs = DELIVERY_POLL_MS): void {
     if (this.timer) return;
-    this.timer = setInterval(() => void this.flushAll(), pollMs);
+    this.timer = setInterval(() => {
+      void this.flushAll().catch(() => undefined); // The durability guard already reports a storage failure.
+    }, pollMs);
     this.timer.unref?.();
   }
 
@@ -424,14 +475,36 @@ export class ChatroomDelivery {
     this.timer = undefined;
     this.queues.clear();
     this.lastDelivered.clear();
+    this.inspectionHolds.clear();
+    this.activeWrites.clear();
   }
 
   pendingFor(sessionId: string): number {
     return this.queues.get(sessionId)?.length ?? 0;
   }
 
+  /** A pull read acknowledges exactly the messages returned, never an entire time range. */
+  acknowledgeRead(sessionId: string, roomId: string, messageIds: string[]): void {
+    const writing = this.activeWrites.get(sessionId);
+    const immediate = messageIds.filter((id) => {
+      if (!writing?.messages.some((m) => m.roomId === roomId && m.messageId === id)) return true;
+      const reads = writing.reads.get(roomId) ?? new Set<string>();
+      reads.add(id);
+      writing.reads.set(roomId, reads);
+      return false;
+    });
+    this.durable((store) => store.acknowledge(sessionId, roomId, immediate));
+    this.releaseInspection(sessionId, immediate.map((messageId) => ({ roomId, messageId })));
+    const read = new Set(messageIds);
+    const queue = this.queues.get(sessionId);
+    if (queue) this.queues.set(sessionId, queue.filter((p) => !(p.roomId === roomId && p.messageId && read.has(p.messageId))));
+  }
+
   /** Drop a session's queue (it left the room, or was deleted). */
   forget(sessionId: string): void {
+    this.durable((store) => store.forget(sessionId));
+    this.inspectionHolds.delete(sessionId);
+    this.activeWrites.delete(sessionId);
     this.queues.delete(sessionId);
     this.lastDelivered.delete(sessionId);
     this.lastRooms.delete(sessionId);
@@ -453,12 +526,22 @@ export class ChatroomDelivery {
     sessionId: string,
     room: { id: string; name: string; kind?: 'dm'; dm?: string[] },
     text: string | (() => string),
-    options: { brief?: boolean; messageId?: string; passive?: boolean } = {}
+    options: { brief?: boolean; messageId?: string; passive?: boolean; durable?: boolean; deliveryId?: string; at?: number } = {}
   ): void {
+    if (this.deps.isReady?.() !== false && !this.deps.getSession(sessionId)) {
+      this.forget(sessionId);
+      return;
+    }
     let queue = this.queues.get(sessionId) ?? [];
     if (options.brief) queue = queue.filter((p) => !(p.brief && p.roomId === room.id));
-    const at = (this.deps.now ?? Date.now)();
-    queue.push({ roomId: room.id, roomName: deliveryRoomName(room), text, brief: options.brief, messageId: options.messageId, passive: options.passive, at });
+    const at = options.at ?? (this.deps.now ?? Date.now)();
+    const deliveryId = options.deliveryId ?? (options.durable && options.messageId ? randomUUID() : undefined);
+    if (deliveryId && options.messageId && !options.deliveryId) this.durable((store) => store.add({
+      id: deliveryId, sessionId, roomId: room.id, messageId: options.messageId!,
+      passive: !!options.passive, at, state: 'queued',
+    }));
+    queue.push({ deliveryId, roomId: room.id, roomName: deliveryRoomName(room), text, brief: options.brief, messageId: options.messageId, passive: options.passive, at });
+    const candidates = queue.slice();
     if (options.passive) {
       // Older read-later fragments go first, so a quiet member never loses a wake-up message to a pile of them.
       let extra = queue.filter((p) => p.passive).length - MAX_PASSIVE_PER_SESSION;
@@ -481,12 +564,15 @@ export class ChatroomDelivery {
       }
       if (over > 0) queue.splice(0, over);
     }
+    this.discard(candidates.filter((p) => !queue.includes(p)));
     this.queues.set(sessionId, queue);
     // A passive fragment alone never wakes the pane: only the flush that a waking fragment asks for types anything.
     if (options.passive) return;
     // Deferred, so a burst of changes in one request (a room created with all its
     // members) is described once, by briefings rendered after the burst.
-    setTimeout(() => void this.flush(sessionId), 0).unref?.();
+    setTimeout(() => {
+      void this.flush(sessionId).catch(() => undefined); // The durability guard already reports a storage failure.
+    }, 0).unref?.();
   }
 
   /** Does the session still have an undelivered briefing for this room? */
@@ -501,6 +587,13 @@ export class ChatroomDelivery {
    */
   /** Withdraw a message's fragments that have not been typed into a pane yet (a delete cannot unsend the rest). */
   dropMessage(roomId: string, messageId: string): void {
+    this.durable((store) => store.forget(undefined, roomId, messageId));
+    for (const id of this.inspectionHolds.keys()) this.releaseInspection(id, [{ roomId, messageId }]);
+    for (const [id, writing] of this.activeWrites) {
+      writing.messages = writing.messages.filter((m) => !(m.roomId === roomId && m.messageId === messageId));
+      writing.reads.get(roomId)?.delete(messageId);
+      if (!writing.messages.length) this.activeWrites.delete(id);
+    }
     for (const [id, queue] of this.queues) {
       const kept = queue.filter((p) => !(p.roomId === roomId && p.messageId === messageId));
       if (kept.length) this.queues.set(id, kept);
@@ -509,6 +602,16 @@ export class ChatroomDelivery {
   }
 
   dropRoom(roomId: string, sessionId?: string): void {
+    this.durable((store) => store.forget(sessionId, roomId));
+    for (const [id, held] of this.inspectionHolds) {
+      if (!sessionId || sessionId === id) this.releaseInspection(id, [...held.values()].filter((p) => p.roomId === roomId));
+    }
+    for (const [id, writing] of this.activeWrites) {
+      if (sessionId && id !== sessionId) continue;
+      writing.messages = writing.messages.filter((m) => m.roomId !== roomId);
+      writing.reads.delete(roomId);
+      if (!writing.messages.length) this.activeWrites.delete(id);
+    }
     for (const [id, queue] of this.queues) {
       if (sessionId && id !== sessionId) continue;
       const kept = queue.filter((p) => p.roomId !== roomId);
@@ -528,32 +631,40 @@ export class ChatroomDelivery {
     for (const id of recipients) {
       this.enqueue(id, room, renderForRecipient(room, message, id, nameOf), {
         messageId: message.id,
+        durable: true,
         ...(awake && !awake.has(id) ? { passive: true } : {}),
       });
     }
   }
 
   async flushAll(): Promise<void> {
-    await Promise.all([...this.queues.keys()].map((id) => this.flush(id)));
+    const sessions = new Set([...this.queues.keys(), ...this.inspectionHolds.keys()]);
+    await Promise.all([...sessions].map((id) => this.flush(id)));
   }
 
   /** Write the session's queue as one line if its pane is up and not mid-turn. */
   async flush(sessionId: string): Promise<boolean> {
+    if (this.persistenceFailed || this.deps.isReady?.() === false) return false;
+    const session = this.deps.getSession(sessionId);
+    if (!session) {
+      this.forget(sessionId);
+      return false;
+    }
     const queue = this.queues.get(sessionId);
-    if (!queue || queue.length === 0 || this.inFlight.has(sessionId)) return false;
+    if (this.persistenceFailed || this.inspectionHolds.has(sessionId) || !queue || queue.length === 0 || this.inFlight.has(sessionId)) return false;
     // Read-later fragments alone stay queued (they wait for a message that wakes this member); stale ones are dropped.
     const nowMs = (this.deps.now ?? Date.now)();
     const fresh = queue.filter((p) => !p.passive || nowMs - (p.at ?? nowMs) <= PASSIVE_MAX_AGE_MS);
     if (fresh.length !== queue.length) {
+      this.discard(queue.filter((p) => !fresh.includes(p)));
       this.omitted.set(sessionId, (this.omitted.get(sessionId) ?? 0) + queue.length - fresh.length);
       queue.splice(0, queue.length, ...fresh);
       if (!queue.length) this.queues.delete(sessionId);
     }
     if (!queue.some((p) => !p.passive)) return false;
-    const session = this.deps.getSession(sessionId);
-    if (!session) return false;
     if (!paneAcceptsChat(session.mode)) {
       // Never type into a shell (or unknown) pane; its queue is dropped, not held for later.
+      this.discard(queue);
       this.queues.delete(sessionId);
       return false;
     }
@@ -573,6 +684,7 @@ export class ChatroomDelivery {
       if (!batch[i].passive) continue;
       budget -= pendingText(batch[i]).length;
       if (budget < 0) {
+        this.discard([batch[i]]);
         batch.splice(i, 1);
         this.omitted.set(sessionId, (this.omitted.get(sessionId) ?? 0) + 1);
       }
@@ -590,6 +702,11 @@ export class ChatroomDelivery {
     }
     this.inFlight.add(sessionId);
     this.lastDelivered.set(sessionId, now);
+    let attempted = 0;
+    let submitted = false;
+    let finishWrite = () => {};
+    let ioDone = false;
+    let writeOk = false;
     try {
       const { line, taken } = buildDeliveryBatch(batch);
       // Whatever the line could not hold waits for the next delivery; nothing is dropped. A last guard strips every control
@@ -602,13 +719,46 @@ export class ChatroomDelivery {
         .slice(0, taken)
         .filter((p): p is Pending & { messageId: string } => p.messageId !== undefined)
         .map((p) => ({ roomId: p.roomId, messageId: p.messageId }));
+      const ids = batch.slice(0, taken).flatMap((p) => p.deliveryId ? [p.deliveryId] : []);
+      // Commit this barrier before touching the pane. After a crash, these identities need inspection,
+      // not another paste into a composer that might already contain or have submitted the line.
+      this.durable((store) => store.state(ids, 'uncertain'));
+      this.holdForInspection(sessionId, carried);
+      const writing = { messages: carried, reads: new Map<string, Set<string>>() };
+      if (carried.length) this.activeWrites.set(sessionId, writing);
+      let outcomeSeen = false;
+      let finished = false;
+      finishWrite = () => {
+        // A successful write can arm asynchronous Enter retries. A read cannot release
+        // that barrier until the verifier reports its terminal outcome too.
+        if (finished || !ioDone || (writeOk && !outcomeSeen && carried.length)) return;
+        finished = true;
+        if (this.activeWrites.get(sessionId) !== writing) return;
+        this.activeWrites.delete(sessionId);
+        for (const [roomId, read] of writing.reads) this.acknowledgeRead(sessionId, roomId, [...read]);
+      };
+      attempted = taken;
       const ok = await session.writeViaMux(`${safe}\r`, {
         opencodeGuard: true,
         onOutcome: (outcome) => {
-          if (outcome === 'submitted' && carried.length) this.deps.onSubmitted?.(sessionId, carried);
-          else if (outcome === 'stranded') this.deps.onStranded?.(sessionId, carried);
+          if (finished || (carried.length && this.activeWrites.get(sessionId) !== writing)) return;
+          outcomeSeen = true;
+          if (outcome === 'submitted') {
+            submitted = true;
+            this.durable((store) => store.remove(ids));
+            this.releaseInspection(sessionId, carried);
+            if (carried.length) this.deps.onSubmitted?.(sessionId, carried);
+          }
+          else if (outcome === 'stranded') {
+            this.deps.onStranded?.(sessionId, carried);
+          }
+          else if (carried.length) {
+            this.deps.onUncertain?.(sessionId, carried);
+          }
+          finishWrite();
         },
       });
+      writeOk = ok;
       // Only what was really written counts: the rooms of the fragments in this line, not of the ones left for the next.
       // Only chat messages count (they carry a message id): a re-briefing or a system notice about another room must not move the
       // room a reply goes to.
@@ -618,14 +768,31 @@ export class ChatroomDelivery {
       // Each room whose message was in the line has a turn starting for this member (the page shows "is thinking" there).
       if (ok) for (const roomId of new Set(chat.map((p) => p.roomId))) this.deps.onWoken?.(sessionId, roomId, now);
       if (ok) this.noteReceived(sessionId, batch.slice(0, taken));
-      if (!ok) this.requeue(sessionId, batch);
+      if (!ok) {
+        // sendInput can type successfully and then fail Enter. Keep uncertainty unless a receipt
+        // proves submission; no existing boolean return proves that the pane received no text.
+        if (!submitted) {
+          this.deps.onUncertain?.(sessionId, carried);
+        }
+        if (taken < batch.length) this.requeue(sessionId, batch.slice(taken));
+      }
       else if (taken < batch.length) this.requeue(sessionId, batch.slice(taken));
       return ok;
     } catch {
-      this.requeue(sessionId, batch);
+      // An exception can follow a partial paste. Keep its identities uncertain and do not paste twice.
+      if (attempted > 0) {
+        const messages = batch.slice(0, attempted)
+          .flatMap((p) => p.messageId ? [{ roomId: p.roomId, messageId: p.messageId }] : []);
+        if (!submitted) {
+          this.deps.onUncertain?.(sessionId, messages);
+        }
+        if (attempted < batch.length) this.requeue(sessionId, batch.slice(attempted));
+      } else if (!this.persistenceFailed) this.requeue(sessionId, batch);
       return false;
     } finally {
-      this.inFlight.delete(sessionId);
+      ioDone = true;
+      try { finishWrite(); }
+      finally { this.inFlight.delete(sessionId); }
     }
   }
 
@@ -656,7 +823,9 @@ export class ChatroomDelivery {
 
   private requeue(sessionId: string, batch: Pending[]): void {
     const queue = [...batch, ...(this.queues.get(sessionId) ?? [])];
-    if (queue.length > MAX_PENDING_PER_SESSION) queue.splice(0, queue.length - MAX_PENDING_PER_SESSION);
+    if (queue.length > MAX_PENDING_PER_SESSION) {
+      this.discard(queue.splice(0, queue.length - MAX_PENDING_PER_SESSION));
+    }
     this.queues.set(sessionId, queue);
   }
 }

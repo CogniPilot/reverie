@@ -84,7 +84,7 @@ export async function githubData(args: GithubArgs, last: string | undefined, fet
   }
 }
 
-/** An ISO time as Eastern Time, for posts (the owner reads ET). */
+/** An ISO time as Eastern Time, for posts (James reads ET). */
 function etStamp(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return 'the last run';

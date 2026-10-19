@@ -16,23 +16,54 @@
  *
  * Admin-only in multi-user mode, like the subscription profiles they build on.
  */
-import type { FastifyInstance, FastifyReply } from 'fastify';
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { ApiErrorCode, createErrorResponse } from '../../types.js';
 import type { PlanService } from '../../plan-accounts.js';
 import { LoginError, type AccountLoginService } from '../../account-login.js';
 import { isAdmin, parseBody } from '../route-helpers.js';
 
+/** Who an agent caller is, for the read-only scoping of `GET /api/plans`. */
+export interface PlansScope {
+  /** The live session this request speaks as (X-Codeman-Parent-Session), undefined when it does not resolve. */
+  callerSession(req: FastifyRequest): string | undefined;
+  /** Does this session hold plans.view_all (Admin, or Lead of a live room)? It sees every account. */
+  canViewAll(sessionId: string): boolean;
+}
+
 const SuggestSchema = z.object({ provider: z.enum(['anthropic', 'openai']).optional() }).strict();
 const CodeSchema = z.object({ code: z.string().min(1).max(2048) }).strict();
 
-export function registerPlansRoutes(app: FastifyInstance, plans: PlanService, logins?: AccountLoginService): void {
+export function registerPlansRoutes(
+  app: FastifyInstance,
+  plans: PlanService,
+  logins?: AccountLoginService,
+  scope?: PlansScope
+): void {
   const forbid = (reply: FastifyReply) =>
     reply.code(403).send(createErrorResponse(ApiErrorCode.FORBIDDEN, 'Plans are admin-only'));
 
+  // Read-only and role-scoped, server-side, for the page, `reverie plans` and the MCP tools alike:
+  // - no X-Codeman-Parent-Session header: the owner (admin) sees everything;
+  // - an agent holding plans.view_all (an Admin, or the Lead of a live room) sees every account;
+  // - any other agent sees only the account its own session runs on (and no GPU line).
+  // A header that does not resolve to a live session the caller may speak as is refused.
+  // Add, remove and sign-in stay admin-only below; no token is ever part of a plan row.
   app.get('/api/plans', async (req, reply) => {
-    if (!isAdmin(req)) return forbid(reply);
-    return { success: true, data: await plans.plans() };
+    if (req.headers['x-codeman-parent-session'] === undefined) {
+      if (!isAdmin(req)) return forbid(reply);
+      return { success: true, data: await plans.plans() };
+    }
+    const self = scope?.callerSession(req);
+    if (!self) {
+      return reply
+        .code(403)
+        .send(createErrorResponse(ApiErrorCode.FORBIDDEN, 'X-Codeman-Parent-Session does not name a live session you may speak as'));
+    }
+    const all = await plans.plans();
+    if (scope?.canViewAll(self)) return { success: true, data: all };
+    const { gpu: _gpu, ...rest } = all;
+    return { success: true, data: { ...rest, accounts: all.accounts.filter((a) => a.sessions.some((s) => s.id === self)) } };
   });
 
   app.post('/api/plans/suggest', async (req, reply) => {
@@ -48,6 +79,14 @@ export function registerPlansRoutes(app: FastifyInstance, plans: PlanService, lo
   });
 
   if (!logins) return;
+  // Sign-in is the owner's alone: an agent caller (the parent-session header is present) never starts, reads or ends one.
+  app.addHook('preHandler', async (req, reply) => {
+    if (req.url.startsWith('/api/plans/accounts/') || req.url.startsWith('/api/plans/login') ) {
+      if (req.headers['x-codeman-parent-session'] !== undefined) {
+        return reply.code(403).send(createErrorResponse(ApiErrorCode.FORBIDDEN, 'Signing in an account is the owner\'s alone'));
+      }
+    }
+  });
   const loginError = (reply: FastifyReply, err: unknown) => {
     if (err instanceof LoginError) {
       const code =

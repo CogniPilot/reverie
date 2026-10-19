@@ -11,7 +11,7 @@ export function chatPushKind(room: ChatRoom, message: ChatMessage): 'mention' | 
   return 'message';
 }
 
-async function deliver(
+export async function deliver(
   store: PushSubscriptionStore,
   sub: OwnedPushSubscriptionRecord,
   payload: object

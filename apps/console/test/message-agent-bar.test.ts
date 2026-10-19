@@ -26,11 +26,11 @@ describe('_sendMessageToAgent', () => {
       _chatApi: async (url: string, o: { body: unknown }) => (calls.push([url, o.body]), url.endsWith('/dms') ? { ok: true, data: { id: 'room 1' } } : { ok: true, data: {} }),
       showToast() {},
     });
-    const { input, el } = bar('  hello Casey ');
+    const { input, el } = bar('  hello Jinx ');
     await self._sendMessageToAgent(el);
     expect(calls).toEqual([
       ['/api/chatrooms/dms', { sessionId: 's1' }],
-      ['/api/chatrooms/room%201/messages', { text: 'hello Casey' }],
+      ['/api/chatrooms/room%201/messages', { text: 'hello Jinx' }],
     ]);
     expect(input.value).toBe('');
   });

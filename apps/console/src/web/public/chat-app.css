@@ -459,7 +459,7 @@ html[data-skin='rose-pine-dawn'] .ca-root {
   color: var(--text);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
 }
-.ca-profile { max-height: calc(100vh - 16px); overflow-y: auto; overscroll-behavior: contain; }
+.ca-profile { box-sizing: border-box; max-width: calc(100vw - 16px); max-height: calc(100dvh - 16px); overflow-y: auto; overscroll-behavior: contain; }
 /* On a phone the card is a sheet over the bottom of the screen: as wide as the screen, never off its edges, scrolling inside. */
 .ca-profile.ca-profile--sheet {
   top: auto;
@@ -541,6 +541,34 @@ html[data-reverie-view='debug'] .ca-back {
   background: var(--ca-composer-bg);
   color: var(--accent);
   cursor: pointer;
+}
+
+/* Agent debug is one terminal. Full legacy controls require an explicit ?legacy=1. */
+html[data-reverie-view='debug']:not([data-reverie-legacy]) .app > .main {
+  position: fixed !important;
+  inset: 48px 0 0 !important;
+  width: auto !important;
+  height: auto !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  display: flex !important;
+}
+html[data-reverie-view='debug']:not([data-reverie-legacy]) .main > .terminal-wrap {
+  display: flex !important;
+  position: relative !important;
+  width: 100% !important;
+  height: 100% !important;
+  margin: 0 !important;
+  min-width: 0 !important;
+}
+html[data-reverie-view='debug']:not([data-reverie-legacy]) .terminal-wrap > :not(#terminalContainer):not(#cjkInput) {
+  display: none !important;
+}
+html[data-reverie-view='debug']:not([data-reverie-legacy]) .ca-back {
+  position: fixed;
+  top: 8px;
+  left: 12px;
+  z-index: 1100;
 }
 
 /* ── narrower than a desktop: the member list becomes a drawer ── */
@@ -736,7 +764,7 @@ html[data-reverie-view='debug'] .ca-back {
 
 /* org chart */
 .ca-main { position: relative; }
-.ca-org { position: absolute; inset: 0; z-index: 5; display: flex; flex-direction: column; background: var(--ca-main-bg); }
+.ca-org { position: absolute; inset: 0; z-index: 2; display: flex; flex-direction: column; background: var(--ca-main-bg); }
 .ca-org[hidden] { display: none; }
 .ca-org-head { display: flex; align-items: center; gap: 10px; min-height: 48px; padding: 0 12px 0 16px; border-bottom: 1px solid var(--ca-line); }
 .ca-org-head h2 { margin: 0; font-size: 16px; }
@@ -874,6 +902,19 @@ button.ca-org-node:hover, button.ca-org-node:focus-visible { background: var(--c
 .ca-popmenu button.is-danger { color: #f0605d; }
 .ca-popmenu button.is-danger:hover:not(:disabled), .ca-popmenu button.is-danger:focus-visible { background: #d83c3e; color: #fff; }
 .ca-popmenu .ca-menu-sep { margin: 4px 2px; border: 0; border-top: 1px solid var(--ca-line); }
+.ca-member-menu { box-sizing: border-box; max-width: calc(100vw - 16px); max-height: calc(100dvh - 16px); overflow-y: auto; gap: 0; }
+.ca-member-menu button { flex: none; min-height: 28px; padding: 5px 8px; font-size: 14px; line-height: 18px; }
+.ca-member-menu .ca-menu-reason { display: block; font-size: 11px; line-height: 14px; color: var(--text-dim); }
+.ca-member-picker { box-sizing: border-box; width: 260px; max-width: calc(100vw - 16px); max-height: min(420px, calc(100dvh - 16px)); overflow-y: auto; }
+.ca-member-picker button { flex: none; }
+.ca-member-picker .ca-menu-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ca-member-picker [hidden] { display: none !important; }
+.ca-member-search { flex: none; width: 100%; margin: 2px 0 6px; }
+.ca-member-empty { padding: 8px; margin: 0; }
+.ca-profile-group { border-bottom: 1px solid var(--ca-line); padding: 4px 0; }
+.ca-profile-group > summary { cursor: pointer; margin: 0; padding: 6px 0; }
+.ca-profile-group > summary:focus-visible { outline: 2px solid var(--accent, #5b8def); outline-offset: 2px; }
+.ca-profile-group .ca-kv { margin: 6px 0; }
 .ca-side-name-btn { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0; padding: 4px 6px; border: 0; border-radius: 4px; background: none; color: inherit; font: inherit; cursor: pointer; }
 .ca-side-name-btn:hover, .ca-side-name-btn:focus-visible { background: var(--ca-hover); }
 .ca-side-name-btn .ca-icon, .ca-side-name-btn svg { width: 14px; height: 14px; flex: none; }
@@ -1092,6 +1133,15 @@ button.ca-org-node:hover, button.ca-org-node:focus-visible { background: var(--c
 .chatroom-inline-code.is-copied { outline: 1px solid var(--accent, #4aa3ff); }
 .chatroom-inline-code.is-copy-failed { outline: 1px solid var(--danger, #e5534b); }
 .chatroom-code-copy { position: absolute; top: 4px; right: 4px; padding: 3px 8px; font-size: 0.75rem; border-radius: 6px; border: 1px solid var(--border, #2b3441); background: var(--bg-secondary, #1c222b); color: inherit; cursor: pointer; }
+
+/* Board and Plans: pinned above the list, shown in the main pane over the conversation. */
+.ca-pages { display: flex; flex-direction: column; margin-bottom: 6px; padding-bottom: 6px; border-bottom: 1px solid var(--ca-line); }
+.ca-body { position: relative; }
+/* z-index 2 keeps the page and org panels under the phone drawers (3); the scrim (2) comes later in the DOM so it still covers them. */
+.ca-page { position: absolute; inset: 0; z-index: 2; display: flex; background: var(--ca-main-bg); }
+.ca-page[hidden] { display: none; }
+.ca-page-frame { flex: 1; width: 100%; min-width: 0; border: 0; background: var(--ca-main-bg); }
+.ca-root.is-page :is(.ca-head-members, .ca-head-bell, .ca-head-pins, .ca-head-invite, .ca-head-topic) { display: none; }
 
 /* Guest embassy views keep external data out of local conversation controls. */
 .eg-category { margin-top: 16px; min-width: 0; }

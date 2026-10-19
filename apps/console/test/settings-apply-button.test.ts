@@ -148,6 +148,7 @@ describe('Settings Apply button', () => {
       app._apiPut = vi.fn(put);
       app._handleTunnelEnableRefusal = vi.fn(async () => false);
       app.saveModelConfigFromSettings = vi.fn(async () => {});
+      app._webhookPending = () => false;
       app.showToast = vi.fn();
       app.closeAppSettings = vi.fn();
       app._refreshSettingsAfterApply = vi.fn();
@@ -184,6 +185,14 @@ describe('Settings Apply button', () => {
       }
     });
 
+    it('still refreshes when only the webhook failed (the rest was saved)', async () => {
+      const app = loadRealApp(async () => ({ ok: true }));
+      app._webhookPending = () => true;
+      app.saveWebhook = vi.fn(async () => 'bad URL');
+      await app.applyAppSettings();
+      expect(app._refreshSettingsAfterApply).toHaveBeenCalledTimes(1);
+      expect(app.closeAppSettings).not.toHaveBeenCalled();
+    });
 
     it('a plain Save closes the modal and never refreshes in place', async () => {
       const app = loadRealApp(async () => ({ ok: true }));

@@ -955,7 +955,15 @@ export function registerSystemRoutes(
   });
 
   app.put('/api/settings', async (req) => {
-    const settings = parseBody(SettingsUpdateSchema, req.body, 'Invalid settings') as Record<string, unknown>;
+    // `claudeVoiceEnabled` is a retired key (Claude voice dictation was removed). A tab
+    // left open from before the removal still sends it in its full-payload PUT, and the
+    // strict schema would 400 the whole save, so drop it before parsing. Never persisted.
+    let body = req.body;
+    if (body && typeof body === 'object' && !Array.isArray(body) && 'claudeVoiceEnabled' in body) {
+      const { claudeVoiceEnabled: _retired, ...rest } = body as Record<string, unknown>;
+      body = rest;
+    }
+    const settings = parseBody(SettingsUpdateSchema, body, 'Invalid settings') as Record<string, unknown>;
 
     // COD-55: enabling the Cloudflare tunnel publishes the whole app (full terminal
     // control = effectively RCE) to a public *.trycloudflare.com URL. Because the

@@ -288,7 +288,7 @@ describe('conversation routes', () => {
       panes(A).length = 0;
       panes(B).length = 0;
       const url = `/api/chatrooms/${room.id}/messages/${said.id}/report`;
-      expect((await app.inject({ method: 'POST', url, headers: as(B), payload: {} })).statusCode).toBe(403);
+      // a member agent may now report (as itself); the coordinator's own message is refused below
       expect((await app.inject({ method: 'POST', url, payload: { reason: 'abusive', extra: 1 } })).statusCode).toBe(400);
       const sent = await app.inject({ method: 'POST', url, payload: { reason: 'abusive' } });
       expect(sent.statusCode).toBe(200);

@@ -45,6 +45,7 @@ import {
 import { ChatFileError, MAX_FILE_BYTES, isInlineImage, type ChatFileStore } from '../../chatroom-files.js';
 import fs from 'node:fs/promises';
 import { parseByteRange } from '../http-range.js';
+import { isRollCommand, rollCommand } from '../../chatroom-dice.js';
 
 /**
  * Exactly one emoji: a single grapheme that is pictographic (with any variation
@@ -98,9 +99,11 @@ import {
 import { isMultiUserMode } from '../../config/multiuser.js';
 import { isSensitivePath } from '../sensitive-path.js';
 import { NO_OWNER, ownerMark, type OwnerVerifier } from '../../owner-auth/marks.js';
+import { OWNER_RANK, RolesStore, type Actor, type Permission } from '../../roles.js';
 
 function sendError(reply: FastifyReply, err: unknown): FastifyReply {
   if (err instanceof ChatroomError) {
+    if (err.code === 'UNAVAILABLE') return reply.code(503).send(createErrorResponse(ApiErrorCode.OPERATION_FAILED, err.message));
     const status = err.code === 'NOT_FOUND' ? 404 : err.code === 'CONFLICT' ? 409 : 400;
     return reply.code(status).send(createErrorResponse(ApiErrorCode[err.code], err.message));
   }
@@ -122,7 +125,11 @@ export function registerChatroomRoutes(
   service: ChatroomService,
   files: ChatFileStore,
   /** Is this request a cookie-verified owner (owner-auth/marks.ts)? Only then is a user post marked. */
-  verifiedOwner: OwnerVerifier = NO_OWNER
+  verifiedOwner: OwnerVerifier = NO_OWNER,
+  /** Roles and their permissions (src/roles.ts). The default has no assignments: every session is a Member, a coordinator is its room's Lead. */
+  roles: RolesStore = new RolesStore(''),
+  /** A session id to its company employee id, if it has one. */
+  employeeOf: (sessionId: string) => string | undefined = () => undefined
 ): void {
   /** The session this request speaks as, or undefined for the user. */
   const caller = (req: FastifyRequest): string | undefined =>
@@ -192,6 +199,41 @@ export function registerChatroomRoutes(
 
   const forbid = (reply: FastifyReply, message: string): FastifyReply =>
     reply.code(403).send(createErrorResponse(ApiErrorCode.FORBIDDEN, message));
+
+  /**
+   * Who the request is for the roles resolver. No parent-session header is still read as the owner (as every owner-only
+   * rule here always did; roles-contract 1a covers closing that with owner-auth). A session is its employee's role, plus
+   * Lead where it holds this room's coordinator seat.
+   */
+  const actorFor = (req: FastifyRequest, room: ChatRoom): Actor => {
+    const self = caller(req);
+    if (!self) return { owner: true };
+    return {
+      employeeId: employeeOf(self),
+      lead: room.members.some((m) => m.sessionId === self && m.role === 'coordinator'),
+      leadOfAny: coordinatesVisibleRoom(req, self),
+      memberId: self,
+    };
+  };
+
+  /** Does the request hold `permission` in `room`, counting the room's channel overrides? */
+  const allowed = (req: FastifyRequest, room: ChatRoom, permission: Permission): boolean =>
+    roles.can(actorFor(req, room), permission, room.overrides);
+
+  /** Who to record for an action: the user's name, or the acting session's. */
+  const byName = (req: FastifyRequest): string => {
+    const self = caller(req);
+    return self ? service.nameOf(self) : userName(req);
+  };
+
+  /** The rank of a message's sender in `room` (the user is the Owner and never a target). */
+  const senderRank = (room: ChatRoom, from: ChatSender): { rank: number; owner: boolean } => {
+    if (from.kind === 'user') return { rank: 0, owner: true };
+    // System notices and anything else that is not an agent are Owner-only targets, like the user's own messages.
+    if (from.kind !== 'agent') return { rank: 0, owner: true };
+    const lead = room.members.some((m) => m.sessionId === from.sessionId && m.role === 'coordinator');
+    return { rank: roles.rankOf({ employeeId: employeeOf(from.sessionId), lead }), owner: false };
+  };
 
   /** A session that may join a room owned by `owner`: visible to the caller and owned the same way. */
   const joinableSession = (req: FastifyRequest, room: { owner?: string }, sessionId: string): string => {
@@ -374,8 +416,8 @@ export function registerChatroomRoutes(
     try {
       const room = roomOrFail(req, id);
       const self = caller(req);
-      if (self && !room.members.some((m) => m.sessionId === self && m.role === 'coordinator')) {
-        return forbid(reply, 'Only the user or the room\'s coordinator makes a chatroom public or private');
+      if (!allowed(req, room, 'room.settings')) {
+        return forbid(reply, 'Only the user or someone with room settings rights makes a chatroom public or private');
       }
       const by = self ? { name: service.nameOf(self), kind: 'agent' as const } : { name: userName(req), kind: 'user' as const };
       return { success: true, data: service.view(await service.setRoomVisibility(id, body.visibility, by), { limit: 0 }) };
@@ -403,7 +445,9 @@ export function registerChatroomRoutes(
       if (room.members.some((m) => m.sessionId === self)) {
         return { success: true, data: { joined: false, room: service.view(room, { limit: 0 }) } };
       }
-      if (!isPublicRoom(room)) return forbid(reply, "This channel is private: ask the owner or the room's coordinator to add you");
+      if (!isPublicRoom(room) && !roles.can(actorFor(req, room), 'members.join_any', room.overrides)) {
+        return forbid(reply, "This channel is private: ask the owner or the room's coordinator to add you");
+      }
       const sessionId = joinableSession(req, room, self);
       service.addMember(id, sessionId, {});
       return { success: true, data: { joined: true, room: service.view(room, { limit: 0 }) } };
@@ -548,7 +592,7 @@ export function registerChatroomRoutes(
       const room = roomOrFail(req, id);
       const self = caller(req);
       if (self) {
-        if (room.members.find((m) => m.sessionId === self)?.role !== 'coordinator') {
+        if (!allowed(req, room, 'members.add')) {
           return forbid(reply, 'Only the coordinator (or the user) can add members');
         }
         if (body.role === 'coordinator') return forbid(reply, 'Only the user appoints the coordinator');
@@ -581,8 +625,15 @@ export function registerChatroomRoutes(
     try {
       const room = roomOrFail(req, id);
       const self = caller(req);
-      if (self && self !== sessionId && room.members.find((m) => m.sessionId === self)?.role !== 'coordinator') {
-        return forbid(reply, 'Only the coordinator (or the user) can remove other members');
+      if (self && self !== sessionId) {
+        if (!allowed(req, room, 'members.remove_others')) {
+          return forbid(reply, 'Only the coordinator (or the user) can remove other members');
+        }
+        // Same rule as deleting a message: you can only remove someone ranked below you; anyone may leave.
+        const lead = room.members.some((m) => m.sessionId === sessionId && m.role === 'coordinator');
+        if (!roles.outranks(actorFor(req, room), roles.rankOf({ employeeId: employeeOf(sessionId), lead }))) {
+          return forbid(reply, 'You can only remove a member ranked below you');
+        }
       }
       if (!service.removeMember(id, sessionId)) throw new ChatroomError('Not a member of this room', 'NOT_FOUND');
       return { success: true, data: { room: service.view(room, { limit: 0 }) } };
@@ -633,7 +684,7 @@ export function registerChatroomRoutes(
       const room = roomOrFail(req, id);
       const self = caller(req);
       if (self) {
-        const isCoordinator = room.members.find((m) => m.sessionId === self)?.role === 'coordinator';
+        const isCoordinator = allowed(req, room, 'members.add');
         // Who answers spoken turns is decided by the user or the coordinator, never by an
         // agent about itself, so the mic can never be pointed at the wrong session.
         // Never about itself, coordinator included: the voice is whoever runs the voice daemon.
@@ -657,7 +708,7 @@ export function registerChatroomRoutes(
       const room = roomOrFail(req, id);
       const self = caller(req);
       // An agent may re-brief itself; only the coordinator may re-brief others or the room.
-      if (self && self !== sessionId && room.members.find((m) => m.sessionId === self)?.role !== 'coordinator') {
+      if (self && self !== sessionId && !allowed(req, room, 'members.add')) {
         return forbid(reply, 'Only the coordinator (or the user) can re-brief other members');
       }
       const count = service.rebrief(id, sessionId === 'all' ? undefined : sessionId);
@@ -677,10 +728,15 @@ export function registerChatroomRoutes(
 
   app.delete('/api/chatrooms/:id/messages/:messageId', async (req, reply) => {
     const { id, messageId } = req.params as { id: string; messageId: string };
-    if (caller(req)) return forbid(reply, 'Only the user deletes messages');
     try {
-      roomOrFail(req, id);
-      await service.deleteMessage(id, messageId, userName(req));
+      const room = roomOrFail(req, id);
+      if (!allowed(req, room, 'messages.delete_others')) return forbid(reply, 'You cannot delete messages here (messages.delete_others)');
+      const target = room.messages.find((m) => m.id === messageId);
+      if (target && caller(req)) {
+        const { rank, owner } = senderRank(room, target.from);
+        if (!roles.outranks(actorFor(req, room), rank, owner)) return forbid(reply, 'You can only delete messages from someone ranked below you');
+      }
+      await service.deleteMessage(id, messageId, byName(req), roles.rankOf(actorFor(req, room)));
       return { success: true, data: { id: messageId, deleted: true } };
     } catch (err) {
       return sendError(reply, err);
@@ -705,7 +761,7 @@ export function registerChatroomRoutes(
   const pinner = (req: FastifyRequest, room: ChatRoom): { name: string; kind: 'user' | 'agent' } | null => {
     const self = caller(req);
     if (!self) return { name: userName(req), kind: 'user' };
-    return room.members.some((m) => m.sessionId === self && m.role === 'coordinator') ? { name: service.nameOf(self), kind: 'agent' } : null;
+    return allowed(req, room, 'pins.manage') ? { name: service.nameOf(self), kind: 'agent' } : null;
   };
 
   app.get('/api/chatrooms/:id/pins', async (req, reply) => {
@@ -724,7 +780,7 @@ export function registerChatroomRoutes(
       try {
         const room = roomOrFail(req, id);
         const by = pinner(req, room);
-        if (!by) return forbid(reply, 'Only the user or the room\'s coordinator pins messages');
+        if (!by) return forbid(reply, 'You cannot pin messages here (pins.manage)');
         // The user can unpin anything; the coordinator cannot unpin what the user pinned.
         if (!on && by.kind === 'agent' && room.messages.find((m) => m.id === messageId)?.pinned?.kind === 'user') {
           return forbid(reply, 'Only the user can unpin a message the user pinned');
@@ -739,10 +795,15 @@ export function registerChatroomRoutes(
 
   app.post('/api/chatrooms/:id/messages/:messageId/restore', async (req, reply) => {
     const { id, messageId } = req.params as { id: string; messageId: string };
-    if (caller(req)) return forbid(reply, 'Only the user restores messages');
     try {
-      roomOrFail(req, id);
-      await service.restoreMessage(id, messageId, userName(req));
+      const room = roomOrFail(req, id);
+      if (!allowed(req, room, 'messages.restore')) return forbid(reply, 'You cannot restore messages here (messages.restore)');
+      // Undoing a deletion needs the deleter's rank or more: a Lead cannot undo a Moderator's or the Owner's moderation.
+      const gone = room.messages.find((m) => m.id === messageId)?.deleted;
+      if (gone && roles.rankOf(actorFor(req, room)) < (gone.byRank ?? OWNER_RANK)) {
+        return forbid(reply, 'You can only restore a message deleted by someone ranked at or below you');
+      }
+      await service.restoreMessage(id, messageId, byName(req));
       return { success: true, data: { id: messageId, deleted: false } };
     } catch (err) {
       return sendError(reply, err);
@@ -751,11 +812,15 @@ export function registerChatroomRoutes(
 
   app.post('/api/chatrooms/:id/messages/:messageId/report', async (req, reply) => {
     const { id, messageId } = req.params as { id: string; messageId: string };
-    if (caller(req)) return forbid(reply, 'Only the user reports messages');
     const body = parseBody(ChatroomReportSchema, req.body);
     try {
-      roomOrFail(req, id);
-      const { message, dmId } = await service.reportMessage(id, messageId, body.reason ?? '', { kind: 'user', name: userName(req) });
+      const room = roomOrFail(req, id);
+      const self = caller(req);
+      // An agent reports as itself, and only from a room it belongs to; the user reports as before.
+      if (self && !room.members.some((m) => m.sessionId === self)) return forbid(reply, 'Only a member of this room reports its messages');
+      if (!allowed(req, room, 'messages.report')) return forbid(reply, 'You cannot report messages in this room');
+      const from: ChatSender = self ? { kind: 'agent', sessionId: self, name: service.nameOf(self) } : { kind: 'user', name: userName(req) };
+      const { message, dmId } = await service.reportMessage(id, messageId, body.reason ?? '', from);
       return { success: true, data: { message, dmId } };
     } catch (err) {
       return sendError(reply, err);
@@ -769,6 +834,7 @@ export function registerChatroomRoutes(
       const room = roomOrFail(req, id);
       const who = actor(req, room);
       if (!who) return forbid(reply, 'Join the room before reacting');
+      if (!allowed(req, room, 'messages.react')) return forbid(reply, 'You cannot react here (messages.react)');
       const emote = /^:([a-z0-9_]{2,32}):$/.exec(body.emoji);
       if (emote) {
         if (!(await files.emotesFor(id)).some((e) => e.name === emote[1])) {
@@ -812,6 +878,7 @@ export function registerChatroomRoutes(
       let from: ChatSender;
       if (self) {
         if (!room.members.some((m) => m.sessionId === self)) return forbid(reply, 'Join the room before posting a poll');
+        if (!allowed(req, room, 'messages.post')) return forbid(reply, 'You cannot post in this room (messages.post)');
         from = { kind: 'agent', sessionId: self, name: service.nameOf(self) };
       } else {
         from = { kind: 'user', name: userName(req) };
@@ -836,6 +903,7 @@ export function registerChatroomRoutes(
       const room = roomOrFail(req, id);
       const who = actor(req, room);
       if (!who) return forbid(reply, 'Join the room before voting');
+      if (!allowed(req, room, 'messages.react')) return forbid(reply, 'You cannot vote here (messages.react)');
       return { success: true, data: { poll: service.votePoll(id, messageId, who, body.options) } };
     } catch (err) {
       return sendError(reply, err);
@@ -849,11 +917,15 @@ export function registerChatroomRoutes(
       const who = actor(req, room);
       if (!who) return forbid(reply, 'Join the room before closing a poll');
       const message = room.messages.find((m) => m.id === messageId);
-      const coordinates = message?.from.kind === 'agent' && room.members.some((m) => m.sessionId === who && m.role === 'coordinator');
-      if (message && who !== 'user' && !(message.from.kind === 'agent' && message.from.sessionId === who) && !coordinates) {
-        return forbid(reply, "Only the user, the poll's author or the room's coordinator closes a poll");
+      // polls.close_others closes another agent's poll, never the user's, and only one ranked below the closer.
+      const closesOthers =
+        message?.from.kind === 'agent' &&
+        allowed(req, room, 'polls.close_others') &&
+        roles.outranks(actorFor(req, room), senderRank(room, message.from).rank);
+      if (message && who !== 'user' && !(message.from.kind === 'agent' && message.from.sessionId === who) && !closesOthers) {
+        return forbid(reply, "Only the user, the poll's author, or someone with polls.close_others over its author closes a poll");
       }
-      return { success: true, data: { poll: await service.closePoll(id, messageId, who) } };
+      return { success: true, data: { poll: await service.closePoll(id, messageId, who, closesOthers) } };
     } catch (err) {
       return sendError(reply, err);
     }
@@ -1007,8 +1079,9 @@ export function registerChatroomRoutes(
     const { id, name } = req.params as { id: string; name: string };
     const q = req.query as { scope?: string };
     try {
-      roomOrFail(req, id);
-      if (caller(req)) return forbid(reply, 'Only the user removes emotes');
+      const room = roomOrFail(req, id);
+      // A global emote is every room's: that stays the user's. A room's own emote needs emotes.remove there.
+      if (q.scope === 'global' ? caller(req) : !allowed(req, room, 'emotes.remove')) return forbid(reply, 'You cannot remove emotes here (emotes.remove)');
       if (!(await files.removeEmote(name, q.scope === 'global' ? 'global' : id))) {
         throw new ChatroomError('No such emote', 'NOT_FOUND');
       }
@@ -1027,8 +1100,7 @@ export function registerChatroomRoutes(
       const view = service.view(room, { since: parseNumber(q.since), limit: parseNumber(q.limit) ?? 50 });
       // An agent that reads the room has seen what it was given: its seen-marker moves to the newest message returned.
       const self = caller(req);
-      const newest = view.messages[view.messages.length - 1];
-      if (self && newest && room.members.some((m) => m.sessionId === self)) service.markSeen(self, room.id, newest.id);
+      if (self && room.members.some((m) => m.sessionId === self)) service.acknowledgeAgentRead(self, room.id, view.messages);
       return { success: true, data: { messages: view.messages, members: view.members } };
     } catch (err) {
       return sendError(reply, err);
@@ -1046,6 +1118,7 @@ export function registerChatroomRoutes(
         if (!room.members.some((m) => m.sessionId === self)) {
           return forbid(reply, 'Join the room before posting (ask the user or the coordinator to add you)');
         }
+        if (!allowed(req, room, 'messages.post')) return forbid(reply, 'You cannot post in this room (messages.post)');
         from = { kind: 'agent', sessionId: self, name: service.nameOf(self) };
       } else {
         // An automated sender whose session id did not resolve must not speak as the user.
@@ -1064,7 +1137,16 @@ export function registerChatroomRoutes(
         if (!file) throw new ChatroomError(`No uploaded file ${fileId} in this room`, 'INVALID_INPUT');
         attachments.push({ id: file.id, name: file.name, size: file.size, type: file.type, path: file.path });
       }
-      const message = service.post(id, from, body.text, to, {
+      // The user's `/roll ...` becomes a real server-side roll; an agent keeps using the roll tool.
+      let text = body.text;
+      if (from.kind === 'user' && isRollCommand(text)) {
+        try {
+          text = rollCommand(text, from.name);
+        } catch (e) {
+          throw new ChatroomError((e as Error).message, 'INVALID_INPUT');
+        }
+      }
+      const message = service.post(id, from, text, to, {
         ...spoken,
         attachments,
         ...(body.replyTo ? { replyTo: body.replyTo } : {}),

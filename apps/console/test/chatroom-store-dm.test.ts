@@ -114,11 +114,11 @@ describe('group direct messages', () => {
 describe('workspaces, categories and archiving', () => {
   it('places rooms and archives them read-only', () => {
     const store = new ChatroomStore();
-    const room = store.create('mapper', undefined, 0, { workspace: 'compiler', category: ' Working Groups ' });
-    expect(room).toMatchObject({ workspace: 'compiler', category: 'Working Groups' });
+    const room = store.create('slam', undefined, 0, { workspace: 'rumoca', category: ' Working Groups ' });
+    expect(room).toMatchObject({ workspace: 'rumoca', category: 'Working Groups' });
     store.place(room.id, { category: '' });
     expect(room.category).toBeUndefined();
-    expect(room.workspace).toBe('compiler');
+    expect(room.workspace).toBe('rumoca');
     store.addMember(room.id, A);
     store.archive(room.id, true, 50);
     expect(room.archivedAt).toBe(50);

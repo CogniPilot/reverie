@@ -6,6 +6,9 @@ import { isMultiUserMode } from '../../config/multiuser.js';
 import {
   addSubscriptionProfile,
   readSubscriptionProfiles,
+  removeSubscriptionProfile,
+  DefaultProfileError,
+  DuplicateLabelError,
   renameSubscriptionProfile,
   selectedSubscription,
   subscriptionModes,
@@ -27,7 +30,14 @@ export function subscriptionLaunch(req: FastifyRequest): {
   return launches.get(req) ?? { env: {} };
 }
 
-export function registerSubscriptionProfileRoutes(app: FastifyInstance, reader: SubscriptionUsageReader): void {
+/** Names of the sessions running on an account profile (a Plans row's sessions), for the remove check. */
+export type SessionsOnProfile = (profileId: string) => Promise<string[]>;
+
+export function registerSubscriptionProfileRoutes(
+  app: FastifyInstance,
+  reader: SubscriptionUsageReader,
+  sessionsOn: SessionsOnProfile
+): void {
   const authorize = (req: FastifyRequest): boolean => !isMultiUserMode() || isAdmin(req);
   app.addHook('preHandler', async (req, reply) => {
     if (req.method !== 'POST' || !['/api/sessions', '/api/quick-start'].includes(req.routeOptions.url ?? '')) return;
@@ -86,6 +96,8 @@ export function registerSubscriptionProfileRoutes(app: FastifyInstance, reader: 
       const profile = await addSubscriptionProfile(body);
       return { success: true, data: { profile } };
     } catch (error) {
+      if (error instanceof DuplicateLabelError)
+        return reply.code(409).send(createErrorResponse(ApiErrorCode.CONFLICT, error.message));
       return reply.code(400).send(createErrorResponse(ApiErrorCode.INVALID_INPUT, (error as Error).message));
     }
   });
@@ -98,7 +110,14 @@ export function registerSubscriptionProfileRoutes(app: FastifyInstance, reader: 
     if (!authorize(req))
       return reply.code(403).send(createErrorResponse(ApiErrorCode.FORBIDDEN, 'Account profiles are owner-only'));
     const body = parseBody(SubscriptionProfileRenameSchema, req.body);
-    const renamed = await renameSubscriptionProfile(req.params.id, body.label);
+    let renamed;
+    try {
+      renamed = await renameSubscriptionProfile(req.params.id, body.label);
+    } catch (err) {
+      if (err instanceof DuplicateLabelError)
+        return reply.code(409).send(createErrorResponse(ApiErrorCode.CONFLICT, err.message));
+      throw err;
+    }
     if (!renamed) return reply.code(404).send(createErrorResponse(ApiErrorCode.NOT_FOUND, 'No such account profile'));
     await appendAdminAudit({
       admin: getAuthUser(req).username,
@@ -108,6 +127,42 @@ export function registerSubscriptionProfileRoutes(app: FastifyInstance, reader: 
       detail: { from: renamed.from, to: renamed.profile.label },
     });
     return { success: true, data: { profile: renamed.profile } };
+  });
+  // Owner-only like rename. Unlists the account (its login directory is never touched) and is refused while
+  // a session runs on it, so no running agent loses its account underneath it.
+  app.delete<{ Params: { id: string } }>('/api/subscription-profiles/:id', async (req, reply) => {
+    if (req.headers['x-codeman-parent-session'] !== undefined)
+      return reply.code(403).send(createErrorResponse(ApiErrorCode.FORBIDDEN, 'Only the owner removes accounts'));
+    if (!authorize(req))
+      return reply.code(403).send(createErrorResponse(ApiErrorCode.FORBIDDEN, 'Account profiles are owner-only'));
+    const id = req.params.id;
+    const running = await sessionsOn(id);
+    if (running.length)
+      return reply
+        .code(409)
+        .send(
+          createErrorResponse(
+            ApiErrorCode.CONFLICT,
+            `Sessions are running on this account (${running.slice(0, 5).join(', ')}); stop or move them first`
+          )
+        );
+    let removed;
+    try {
+      removed = await removeSubscriptionProfile(id);
+    } catch (error) {
+      if (error instanceof DefaultProfileError)
+        return reply.code(400).send(createErrorResponse(ApiErrorCode.INVALID_INPUT, error.message));
+      return reply.code(500).send(createErrorResponse(ApiErrorCode.INTERNAL_ERROR, 'Could not remove the account; nothing was changed'));
+    }
+    if (!removed) return reply.code(404).send(createErrorResponse(ApiErrorCode.NOT_FOUND, 'No such account profile'));
+    await appendAdminAudit({
+      admin: getAuthUser(req).username,
+      action: 'profile_remove',
+      target: removed.id,
+      ip: req.ip,
+      detail: { label: removed.label, provider: removed.provider },
+    });
+    return { success: true, data: { removed: { id: removed.id, label: removed.label, provider: removed.provider } } };
   });
   app.get('/api/subscription-profiles/usage', async (req, reply) => {
     if (!authorize(req))

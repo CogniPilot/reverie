@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import fs from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { getDataDir } from '../src/config/instance.js';
 import {
@@ -12,6 +13,7 @@ import {
   subscriptionModes,
 } from '../src/subscription-profiles.js';
 import { Session } from '../src/session.js';
+import { planCatalogue } from '../src/plan-accounts.js';
 
 beforeEach(async () => {
   await fs.rm(join(getDataDir(), 'subscription-profiles.json'), { force: true });
@@ -124,5 +126,30 @@ describe('named subscription profiles', () => {
     await fs.writeFile(path, '{broken');
     await expect(renameSubscriptionProfile('openai-default', 'Codex user@example.com')).rejects.toThrow('invalid');
     expect(await fs.readFile(path, 'utf8')).toBe('{broken');
+  });
+});
+
+describe('plan labels after a rename', () => {
+  it('a rename beats the acct-alias label swap: the owner label wins over the acct directory name', async () => {
+    const home = await fs.mkdtemp(join(tmpdir(), 'plan-alias-'));
+    const saved = { claude: process.env.CLAUDE_CONFIG_DIR, codex: process.env.CODEX_HOME };
+    process.env.CLAUDE_CONFIG_DIR = join(home, '.claude');
+    process.env.CODEX_HOME = join(home, '.codex');
+    try {
+      await fs.mkdir(join(home, '.claude'));
+      await fs.mkdir(join(home, '.claude-accounts'));
+      await fs.symlink(join(home, '.claude'), join(home, '.claude-accounts', 'secondary'));
+      const label = async () => (await planCatalogue(home)).find((a) => a.profileId === 'anthropic-default');
+      // Still the built-in label: the acct directory name is shown, as before.
+      expect(await label()).toMatchObject({ label: 'secondary', acctName: 'secondary', isDefault: true });
+      await renameSubscriptionProfile('anthropic-default', 'Claude Work');
+      expect(await label()).toMatchObject({ label: 'Claude Work', acctName: 'secondary', isDefault: true });
+    } finally {
+      if (saved.claude === undefined) delete process.env.CLAUDE_CONFIG_DIR;
+      else process.env.CLAUDE_CONFIG_DIR = saved.claude;
+      if (saved.codex === undefined) delete process.env.CODEX_HOME;
+      else process.env.CODEX_HOME = saved.codex;
+      await fs.rm(home, { recursive: true, force: true });
+    }
   });
 });

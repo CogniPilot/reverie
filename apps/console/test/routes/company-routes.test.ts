@@ -18,6 +18,7 @@ describe('company HTTP ownership and expert invites', () => {
   let directory: string;
   let service: CompanyService;
   let rooms: ChatroomStore;
+  let sessions: Map<string, { id: string; name: string }>;
   const hireBody = {
     name: 'Maya',
     icon: '🌱',
@@ -33,7 +34,7 @@ describe('company HTTP ownership and expert invites', () => {
     const store = new CompanyStore(join(directory, 'company.json'));
     await store.init();
     rooms = new ChatroomStore();
-    const sessions = new Map([
+    sessions = new Map([
       ['expert-session', { id: 'expert-session', name: 'Expert' }],
       ['parent-session', { id: 'parent-session', name: 'Parent' }],
     ]);
@@ -43,6 +44,7 @@ describe('company HTTP ownership and expert invites', () => {
         rooms: () => rooms.list(),
         room: (id) => rooms.get(id),
         addMember: (id, sessionId, options) => rooms.addMember(id, sessionId, options).member,
+        removeMember: (id, sessionId) => rooms.removeMember(id, sessionId),
       },
       research: { start: vi.fn(), inspect: vi.fn(), stop: vi.fn() },
     });
@@ -94,6 +96,45 @@ describe('company HTTP ownership and expert invites', () => {
         })
       ).statusCode
     ).toBe(403);
+  });
+
+  it('lets only the owner retire and restore an employee, only once the session is gone, with one audit line each', async () => {
+    const id = (await app.inject({ method: 'POST', url: '/api/company/employees', payload: hireBody })).json().data.employee.id;
+    const lounge = rooms.create('Lounge', undefined);
+    rooms.addMember(lounge.id, 'expert-session');
+    const agent = { 'x-codeman-parent-session': 'parent-session' };
+    expect((await app.inject({ method: 'POST', url: `/api/company/employees/${id}/retire`, headers: agent })).statusCode).toBe(403);
+    expect((await app.inject({ method: 'POST', url: `/api/company/employees/${id}/retire?q=1`, headers: agent })).statusCode).toBe(403);
+    expect((await app.inject({ method: 'POST', url: `/api/company/employees/${id}/restore`, headers: agent })).statusCode).toBe(403);
+    // Odd spellings of the path never reach a handler that acts.
+    for (const url of [`//api/company/employees/${id}/retire`, `/api/company/employees/${id}/%72etire`, `/api/company/employees/${id}%2Fretire`]) {
+      expect((await app.inject({ method: 'POST', url, headers: agent })).statusCode).not.toBe(200);
+      expect((await app.inject({ method: 'POST', url })).statusCode).not.toBe(200);
+    }
+    const live = await app.inject({ method: 'POST', url: `/api/company/employees/${id}/retire` });
+    expect(live.statusCode).toBe(409);
+    expect(live.json().error).toMatch(/still has a session/);
+    expect((await app.inject({ method: 'POST', url: '/api/company/employees/nobody/retire' })).statusCode).toBe(404);
+    expect(service.view().employees.map((e) => e.id)).toEqual([id]);
+    expect(appendAdminAudit).not.toHaveBeenCalled();
+
+    sessions.delete('expert-session');
+    const retired = await app.inject({ method: 'POST', url: `/api/company/employees/${id}/retire` });
+    expect(retired.statusCode).toBe(200);
+    expect(retired.json().data.rooms).toEqual([lounge.id]);
+    expect(appendAdminAudit).toHaveBeenCalledTimes(1);
+    expect(appendAdminAudit).toHaveBeenCalledWith(
+      expect.objectContaining({ admin: 'owner', action: 'employee_retire', target: 'Maya', detail: { id, sessionId: 'expert-session', rooms: [lounge.id], failed: [] } })
+    );
+    const company = (await app.inject('/api/company')).json().data;
+    expect(company.employees).toEqual([]);
+    expect(company.retired.map((e: { id: string }) => e.id)).toEqual([id]);
+    expect(rooms.get(lounge.id)?.members.map((m) => m.sessionId)).not.toContain('expert-session');
+
+    const restored = await app.inject({ method: 'POST', url: `/api/company/employees/${id}/restore` });
+    expect(restored.statusCode).toBe(200);
+    expect(appendAdminAudit).toHaveBeenCalledTimes(2);
+    expect((await app.inject('/api/company')).json().data.employees.map((e: { id: string }) => e.id)).toEqual([id]);
   });
 
   it('lets only the owner edit an employee position, expertise and icon', async () => {

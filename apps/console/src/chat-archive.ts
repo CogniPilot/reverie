@@ -14,12 +14,17 @@
  * whose weeks differ, can repeat one batch: a duplicate, never a loss. A torn last line (a failed
  * write) is ended before the next append, so it costs only itself; readers skip lines that do not parse.
  *
+ * With the chat database (chat-db.ts) the files are its second, independent record instead: every
+ * change to a message or room is appended (appendSync) as it is committed, as `{ kind: 'room', ... }`,
+ * `{ kind: 'room-deleted', ... }` or a message line as above, so the database can be rebuilt from them.
+ *
  * A week that has ended becomes `YYYY-Www.jsonl.gz` (checked once a day, on an append). The plain
  * file is replaced only after its .gz is on disk and reads back to the same bytes; an existing .gz is
  * never overwritten, and nothing is ever deleted.
  */
 
 import fs from 'node:fs/promises';
+import { closeSync, fstatSync, fsyncSync, mkdirSync, openSync, readSync, renameSync, statSync, unlinkSync, writeSync } from 'node:fs';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { gunzipSync, gzip } from 'node:zlib';
@@ -114,6 +119,29 @@ export class ChatArchive {
     }
   }
 
+  /**
+   * The chat database's second record (chat-db.ts): append these lines to the week's file and fsync,
+   * synchronously, before the database commits the same changes. Throws if they may not be on disk.
+   */
+  appendSync(week: string, lines: string[]): void {
+    if (!lines.length) return;
+    mkdirSync(this.dir, { recursive: true, mode: 0o700 });
+    const fd = openSync(join(this.dir, `${week}.jsonl`), 'a+', 0o600);
+    try {
+      const { size } = fstatSync(fd);
+      let lead = '';
+      if (size > 0) {
+        const last = Buffer.alloc(1);
+        readSync(fd, last, 0, 1, size - 1);
+        if (last[0] !== 0x0a) lead = '\n';
+      }
+      writeSync(fd, `${lead}${lines.join('\n')}\n`);
+      fsyncSync(fd);
+    } finally {
+      closeSync(fd);
+    }
+  }
+
   /** The newest archived `at` per room, from the newest plain week file (only the last append can repeat). */
   private async load(): Promise<Map<string, number>> {
     if (this.lastAt) return this.lastAt;
@@ -181,8 +209,16 @@ export class ChatArchive {
         console.warn(`[chat-archive] ${name}.gz did not read back to the same bytes; leaving ${name} as it is`);
         continue;
       }
-      await fs.rename(tmp, packed);
-      await fs.unlink(plain);
+      // An append (appendSync, a room whose owner's zone is still in that week) may have landed since
+      // the read: then keep it plain for now. Checked and swapped with no await in between, so no
+      // append can fall into the gap.
+      if (statSync(plain).size !== original.length) {
+        await fs.unlink(tmp);
+        console.warn(`[chat-archive] ${name} grew while it was being packed; leaving it as it is`);
+        continue;
+      }
+      renameSync(tmp, packed);
+      unlinkSync(plain);
       done.push(name);
     }
     this.sweptOn = today;

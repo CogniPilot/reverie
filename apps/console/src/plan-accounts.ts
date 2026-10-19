@@ -7,7 +7,7 @@
  * - the `acct` tool's accounts (`~/.claude-accounts/<name>`, `~/.codex-accounts/<name>`),
  *   which `acct spawn` selects with a `CLAUDE_CONFIG_DIR` / `CODEX_HOME` override.
  * A profile and an `acct` account that resolve to the same directory are one account,
- * named by its `acct` name (e.g. `~/.claude` is "main").
+ * named by its `acct` name (e.g. `~/.claude` is "primary").
  *
  * A session's account is its profile, else its `CLAUDE_CONFIG_DIR`/`CODEX_HOME` override,
  * else the default account of its CLI. Usage samples are kept (8 days, one per 5 min per

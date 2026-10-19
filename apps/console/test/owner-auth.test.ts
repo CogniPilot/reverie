@@ -203,7 +203,7 @@ describe('owner sign-in', () => {
 
   it('rejects weak new passwords with a reason', async () => {
     const restricted = cookie(await login(oneTime))!;
-    for (const weak of ['aaaaaaaaaaaaaaaa', 'Password1234!xyz', 'qwerty-Ocean-77', 'abab-abab-abab']) {
+    for (const weak of ['aaaaaaaaaaaaaaaa', 'Password1234!xyz', 'qwerty-Lucid-77', 'abab-abab-abab']) {
       const res = await app.inject({
         method: 'POST',
         url: '/api/owner/password',
