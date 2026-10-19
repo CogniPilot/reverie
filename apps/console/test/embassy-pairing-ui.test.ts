@@ -6,8 +6,8 @@ const origin='https://relay.example.test:8443',roomId='420a20cc-1288-4faa-8f45-b
 const qr=`embassy-v2|${origin}|${roomId}|${'A'.repeat(43)}`,requestQr=`embassy-pair-v1|${origin}|${requestId}|3BCD-5FGH`;
 const opened:any[]=[];
 afterEach(()=>{for(const h of opened.splice(0))h.dom.window.close();vi.restoreAllMocks();});
-async function setup(){
- const h=await createHarness({loadShell:false,sessions:[{id:'local',name:'Local',mode:'claude'}],rooms:[room('r1','General',[member('local','Local')])]});opened.push(h);h.window.TextEncoder=TextEncoder;
+async function setup(emptyLocal=false){
+ const h=await createHarness({loadShell:false,sessions:[{id:'local',name:'Local',mode:'claude'}],rooms:emptyLocal?[]:[room('r1','General',[member('local','Local')])]});opened.push(h);h.window.TextEncoder=TextEncoder;
  const calls:any[]=[],drawn:any[]=[],rows:any[]=[],state:any={host:'ready',pair:'pending',deny:false,createFailure:false,deleteFailure:false,guestResponse:null,lookupResponse:null,delayed:null,hostPosts:[]};
  const original=h.app._api;
  h.app._api=async(path:string,options:any={})=>{
@@ -254,4 +254,20 @@ it('typing in every local view requires current membership in the displayed room
  shell.noteTurn({roomId:shell.roomId,sessionId:'outsider'});expect(shell.els.typing.hidden).toBe(true);
  shell.noteTurn({roomId:shell.roomId,sessionId:'local'});expect(shell.els.typing.textContent).toContain('Local');
  shell.room.members=[];shell.renderTyping();expect(shell.els.typing.hidden).toBe(true);expect(shell.els.typing.textContent).toBe('');
+});
+
+it.each(['host','guest'])('opens a visible %s embassy feed/composer with zero ordinary local rooms and restores empty state',async(kind)=>{
+ const h=await setup(true),els=h.app._chatEls;
+ expect(h.app._chatRoomId).toBeFalsy();
+ if(kind==='guest')h.rows.push({id:connectionId,origin,roomId,roomName:'Shared room',enabled:true,status:'live'});
+ await h.view.refresh();
+ // The actual create-room path is the state inherited by a new console.
+ h.app._showChatCreate();
+ expect(els.composer.hidden).toBe(true);expect(els.feed.hidden).toBe(true);
+ h.view.open(kind==='host'?'__host__':connectionId);await h.flush(10);
+ expect(els.composer.hidden).toBe(false);expect(els.feed.hidden).toBe(false);expect(els.empty.hidden).toBe(true);
+ expect(els.send.disabled).toBe(false);
+ expect(h.calls.filter(c=>c.method==='POST')).toHaveLength(0);
+ h.view.close();
+ expect(els.composer.hidden).toBe(true);expect(els.feed.hidden).toBe(true);expect(els.empty.hidden).toBe(false);
 });

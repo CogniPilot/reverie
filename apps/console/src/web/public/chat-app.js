@@ -6437,7 +6437,9 @@ class ReverieEmbassyView {
     // Reuse the actual local channel feed/composer. External records remain in
     // this adapter, never app._chatRoom, ChatroomStore or its agent wake path.
     this.localState = { input: els.input.value, maxLength: els.input.getAttribute('maxlength'),
-      label: els.input.getAttribute('aria-label'), feedLabel: els.feed.getAttribute('aria-label') };
+      label: els.input.getAttribute('aria-label'), feedLabel: els.feed.getAttribute('aria-label'),
+      feedHidden: els.feed.hidden, composerHidden: els.composer.hidden, emptyHidden: els.empty.hidden };
+    els.feed.hidden = false; els.composer.hidden = false; els.empty.hidden = true;
     this.selected = id; this.version++;
     this.shell.setView('chat'); this.shell.toggleDrawer(null);
     this.panel = this.shell.els.chat; this.panel.classList.add('eg-view');
@@ -6470,6 +6472,8 @@ class ReverieEmbassyView {
     if (this.form) delete this.form.dataset.connection;
     if (this.localState) {
       this.input.value = this.localState.input;
+      this.feed.hidden = this.localState.feedHidden; this.form.hidden = this.localState.composerHidden;
+      this.shell.app._chatEls.empty.hidden = this.localState.emptyHidden;
       if (this.localState.maxLength === null) this.input.removeAttribute('maxlength'); else this.input.setAttribute('maxlength', this.localState.maxLength);
       if (this.localState.label === null) this.input.removeAttribute('aria-label'); else this.input.setAttribute('aria-label', this.localState.label);
       if (this.localState.feedLabel === null) this.feed.removeAttribute('aria-label'); else this.feed.setAttribute('aria-label', this.localState.feedLabel);
