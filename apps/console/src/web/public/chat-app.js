@@ -3332,6 +3332,9 @@ class ReverieChatApp {
     const vv = this.doc.defaultView?.visualViewport;
     if (!vv) return;
     const fit = () => {
+      // Debug's terminal is a sibling of the chat root and needs the same viewport.
+      this.doc.documentElement.style.setProperty('--ca-vh', `${Math.round(vv.height)}px`);
+      this.doc.documentElement.style.setProperty('--ca-vtop', `${Math.round(vv.offsetTop)}px`);
       this.els.root.style.setProperty('--ca-vh', `${Math.round(vv.height)}px`);
       this.els.root.style.setProperty('--ca-vtop', `${Math.round(vv.offsetTop)}px`);
       // A keyboard opening, closing or resizing keeps the newest message in view, but only for a reader who was at the
