@@ -37,11 +37,11 @@ import { getDataDir } from '../config/instance.js';
 // Runtime JSON contains credentials, private prompts, or owner-scoped state.
 // Include atomic-write siblings and state backups: their payload is identical.
 const PRIVATE_RUNTIME_FILE =
-  /^(?:hook-secret|state[^/]*\.json|(?:users|settings|push-keys|push-subscriptions|subscription-profiles|custom-model-hosts|webhook|webviews|remote-hosts|remote-cases|docker-hosts|docker-cases|intents|external-chat|chatrooms|company|company-research|mux-sessions|subagent-parents|subagent-window-states|linked-cases|clis|plan-usage-history|docker-env-applied|update-status)\.json)(?:\.(?:bak|[^/]*tmp))?$/;
+  /^(?:hook-secret|state[^/]*\.json|(?:users|settings|push-keys|push-subscriptions|subscription-profiles|custom-model-hosts|webhook|webviews|remote-hosts|remote-cases|docker-hosts|docker-cases|intents|external-chat|embassy-guest|chatrooms|company|company-research|mux-sessions|subagent-parents|subagent-window-states|linked-cases|clis|plan-usage-history|docker-env-applied|update-status)\.json)(?:\.(?:bak|[^/]*tmp))?$/;
 // The append-only audit logs hold deleted message text and reports.
 const PRIVATE_RUNTIME_LOG = /^(?:chatrooms\.json\.audit|admin-audit)\.jsonl(?:\.(?:bak|[^/]*tmp))?$/;
 // chatroom-files-deleted holds the files of deleted channels (kept for the audit log, never cleaned up automatically).
-const PRIVATE_RUNTIME_TREE = /^(?:certs|accounts|docker-seeds|cred-seeds|custom-model-configs|chatroom-files-deleted)(?:\/|$)/;
+const PRIVATE_RUNTIME_TREE = /^(?:certs|accounts|embassy-guest|docker-seeds|cred-seeds|custom-model-configs|chatroom-files-deleted)(?:\/|$)/;
 
 function isPrivateRuntimeMember(member: string): boolean {
   return PRIVATE_RUNTIME_FILE.test(member) || PRIVATE_RUNTIME_LOG.test(member) || PRIVATE_RUNTIME_TREE.test(member);
