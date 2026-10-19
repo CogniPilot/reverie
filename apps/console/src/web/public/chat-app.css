@@ -1241,3 +1241,10 @@ button.ca-org-node:hover, button.ca-org-node:focus-visible { background: var(--c
 .eg-pair-recent h3 { margin:0; font-size:14px; }
 .eg-pair-recent .eg-button { text-align:left; }
 @media(max-width:767px) { .eg-pair-choices { grid-template-columns:1fr; } }
+
+/* Keep the two voice actions directly reachable on a narrow header. */
+@media (max-width: 700px) {
+  .ca-head.has-voice-controls :is(.ca-head-invite, .ca-head-pins, .ca-head-phone) { display: none; }
+  .ca-head.has-voice-controls .ca-head-title { min-width: 0; overflow: hidden; }
+  .ca-head.has-voice-controls .ca-head-name { overflow: hidden; text-overflow: ellipsis; }
+}

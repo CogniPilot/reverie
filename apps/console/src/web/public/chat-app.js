@@ -1349,10 +1349,18 @@ class ReverieChatApp {
     inviteBtn.hidden = true;
     const pinsBtn = this.button('ca-icon-btn ca-head-pins', 'Pinned messages', () => this.room && this.openPinsDialog(this.room.id), { icon: 'pin' });
     pinsBtn.hidden = true;
-    const phoneBtn = this.button('ca-icon-btn', 'Install app and notifications', () => window.ReverieMobile?.open(), { icon: 'phone' });
+    const phoneBtn = this.button('ca-icon-btn ca-head-phone', 'Install app and notifications', () => window.ReverieMobile?.open(), { icon: 'phone' });
     const bellBtn = this.button('ca-icon-btn ca-head-bell', 'Notification settings', () => this.openNotifyMenu(bellBtn), { icon: 'bell' });
     bellBtn.setAttribute('aria-haspopup', 'menu');
-    head.append(navBtn, headTitle, inviteBtn, headTopic, spacer, pinsBtn, phoneBtn, bellBtn, membersBtn);
+    const speakBtn = this.button('ca-icon-btn ca-head-speak', 'Speak replies aloud', () => {
+      const on = !this.app._voiceSetting?.('speakReplies');
+      this.app._setVoiceSetting?.('speakReplies', on);
+      if (!on) this.app._readAloud?.clear();
+      this.renderHeader();
+    }, { text: '🔊' });
+    const carBtn = this.button('ca-icon-btn ca-head-car', 'Car mode', () => this.app.openCarMode?.(), { text: '🚗' });
+    speakBtn.hidden = carBtn.hidden = true;
+    head.append(navBtn, headTitle, inviteBtn, headTopic, spacer, speakBtn, carBtn, pinsBtn, phoneBtn, bellBtn, membersBtn);
 
     const body = this.el('div', 'ca-body');
     const chat = this.el('section', 'ca-chat');
@@ -1369,7 +1377,7 @@ class ReverieChatApp {
 
     Object.assign(this.els, {
       rail, side, sideHead, sideTitle, sideScroll, user, main, head, headTitle, headTopic,
-      membersBtn, bellBtn, navBtn, inviteBtn, pinsBtn, chat, members, scrim, stats, body,
+      membersBtn, bellBtn, navBtn, inviteBtn, pinsBtn, speakBtn, carBtn, chat, members, scrim, stats, body,
     });
 
     // Reuse the chat panel's feed, composer, mic, attachments and create form: it becomes the
@@ -4151,6 +4159,13 @@ class ReverieChatApp {
   renderHeader() {
     const { headTitle, headTopic } = this.els;
     const room = this.room;
+    const voiceControls = !!room && caIsVoice(room) && !this.embed && !this.embassy?.selected && !this.app._chatCreating;
+    this.els.head?.classList.toggle('has-voice-controls', voiceControls);
+    if (this.els.speakBtn) {
+      this.els.speakBtn.hidden = !voiceControls;
+      this.els.speakBtn.setAttribute('aria-pressed', String(!!this.app._voiceSetting?.('speakReplies')));
+    }
+    if (this.els.carBtn) this.els.carBtn.hidden = !voiceControls || !this.app.openCarMode;
     headTitle.replaceChildren();
     headTopic.textContent = '';
     if (this.embassy?.selected) {

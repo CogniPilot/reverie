@@ -19,12 +19,14 @@
  * unit-tested with fakes (test/car-mode.test.ts); the rest is DOM glue.
  *
  * @mixin Extends CodemanApp.prototype via Object.assign
- * @dependency app.js, chatroom-ui.js (_chatApi, _chatRoom, push-to-talk helpers)
- * @loadorder 12.12 (after chatroom-ui.js)
+ * @dependency app.js, chatroom-ui.js (_chatApi, _chatRoom, push-to-talk helpers), voice-chat.js (snapshot helpers)
+ * @loadorder 12.12 (after voice-chat.js)
  */
 
 /** How long to wait for the member's answer before listening again. */
 const CAR_REPLY_TIMEOUT_MS = 180_000;
+/** Join final recognition segments across a short natural pause. */
+const CAR_FINAL_GRACE_MS = 1500;
 /** Chrome stops long utterances; speaking sentence by sentence avoids it. */
 const CAR_MAX_UTTERANCE_CHARS = 220;
 /** Recognition errors other than silence (network, audio-capture): wait before retrying. */
@@ -106,10 +108,29 @@ class CarModeController {
     this.errors = 0;
     /** Polls the synthesizer after a reply until it is really silent. */
     this.speechPoll = null;
+    this.finalTimer = null;
+    this.finalGeneration = 0;
+    this.finalText = '';
   }
 
   _now() {
     return (this.deps.now ?? Date.now)();
+  }
+
+  _clearFinalTimer() {
+    this.finalGeneration++;
+    if (this.finalTimer) this.deps.clearTimeout(this.finalTimer);
+    this.finalTimer = null;
+  }
+
+  _queueFinal() {
+    this._clearFinalTimer();
+    const generation = this.finalGeneration;
+    this.finalTimer = this.deps.setTimeout(() => {
+      if (generation !== this.finalGeneration || this.state !== 'listening') return;
+      this.finalTimer = null;
+      this._final(chatSpeechJoin(this.finalText, this.interim));
+    }, CAR_FINAL_GRACE_MS);
   }
 
   _clearListenTimer() {
@@ -124,7 +145,7 @@ class CarModeController {
       this.listenTimer = null;
       if (this.state !== 'listening') return;
       if (this.interim) {
-        this._final(this.interim);
+        this._final(chatSpeechJoin(this.finalText, this.interim));
         return;
       }
       this._stopRecognition();
@@ -215,43 +236,39 @@ class CarModeController {
    */
   _listen({ restart = false } = {}) {
     this._set('listening');
-    this.interim = '';
-    this.utteranceAt = 0;
+    if (!restart) { this.finalText = ''; this.interim = ''; this.utteranceAt = 0; }
     if (!restart || !this.listenTimer) this._armListenTimer();
     if (this.recognition) return;
+    const priorFinal = this.finalText;
     const rec = this.deps.createRecognition();
     rec.continuous = true;
     rec.interimResults = true;
     rec.lang = 'en-US';
     rec.onresult = (event) => {
-      if (this.state !== 'listening') return;
+      if (this.state !== 'listening' || this.recognition !== rec) return;
       this.errors = 0;
-      let interim = '';
-      for (let i = event.resultIndex; i < event.results.length; i++) {
-        const result = event.results[i];
-        const text = result[0].transcript;
-        if (result.isFinal) {
-          if (text.trim()) this._final(text.trim());
-          return;
-        }
-        interim += text;
-      }
-      this.interim = interim.trim();
-      if (!this.interim) return;
+      const snapshot = chatSpeechSnapshot(event.results);
+      this._clearFinalTimer();
+      this.finalText = chatSpeechJoin(priorFinal, snapshot.final);
+      this.interim = snapshot.interim;
+      const heard = chatSpeechJoin(this.finalText, this.interim);
+      if (!heard) return;
       // Hearing something: the no-speech timeout starts over, and an utterance that
       // never ends is cut at the cap and sent as heard.
       if (!this.utteranceAt) this.utteranceAt = this._now();
       if (this._now() - this.utteranceAt >= CAR_UTTERANCE_CAP_MS) {
-        this._final(this.interim);
+        this._final(chatSpeechJoin(this.finalText, this.interim));
         return;
       }
       this._armListenTimer();
-      this.deps.onState('listening', this.interim);
+      if (snapshot.final && !this.interim) this._queueFinal();
+      this.deps.onState('listening', heard);
     };
     // Chrome ends a "continuous" session after a while of silence: keep it going, but
     // after a real error (no network for the speech service, no audio device) wait a
     // little, or the restart loop would spin as fast as the browser can fail.
     rec.onend = () => {
+      if (this.recognition !== rec) return;
       this.recognition = null;
       if (this.state !== 'listening' || this.restartTimer) return;
       // A backoff covers the one failed session it was set for, then is used up.
@@ -267,6 +284,7 @@ class CarModeController {
       }, wait);
     };
     rec.onerror = (event) => {
+      if (this.recognition !== rec) return;
       if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
         this._stopRecognition();
         this._set('paused', 'Microphone access was refused');
@@ -294,6 +312,8 @@ class CarModeController {
   }
 
   _stopRecognition() {
+    this._clearFinalTimer();
+    this.finalText = '';
     const rec = this.recognition;
     this.recognition = null;
     if (!rec) return;

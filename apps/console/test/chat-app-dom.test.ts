@@ -4189,3 +4189,28 @@ describe('the Board entry', () => {
   });
 });
 
+
+
+describe('visible mobile voice controls', () => {
+  it('shows labelled header actions only in a voice room and toggles read aloud', async () => {
+    const rooms = fixtureRooms();
+    rooms[0].members[0].voice = true;
+    const h = await createHarness({ sessions, rooms });
+    let speaks = false, cars = 0;
+    Object.assign(h.app, { _voiceSetting: () => speaks, _setVoiceSetting: (_key: string, on: boolean) => { speaks = on; }, openCarMode: () => { cars++; } });
+    h.shell.renderHeader();
+    const speak = h.document.querySelector('.ca-head-speak') as HTMLButtonElement;
+    const car = h.document.querySelector('.ca-head-car') as HTMLButtonElement;
+    expect(speak.hidden).toBe(false);
+    expect(car.hidden).toBe(false);
+    expect(car.getAttribute('aria-label')).toBe('Car mode');
+    speak.click();
+    expect(speaks).toBe(true);
+    expect(speak.getAttribute('aria-pressed')).toBe('true');
+    car.click();
+    expect(cars).toBe(1);
+    await h.shell.selectRoom('r3');
+    expect(speak.hidden).toBe(true);
+    expect(car.hidden).toBe(true);
+  });
+});

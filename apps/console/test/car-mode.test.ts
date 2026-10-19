@@ -8,6 +8,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 const context = vm.createContext({ CodemanApp: class {} });
+vm.runInContext(readFileSync(resolve(import.meta.dirname, '../src/web/public/voice-chat.js'), 'utf8'), context);
 vm.runInContext(readFileSync(resolve(import.meta.dirname, '../src/web/public/car-mode.js'), 'utf8'), context);
 const get = (name: string) => vm.runInContext(name, context);
 const carModeEngine = get('carModeEngine') as (w: unknown) => string;
@@ -23,6 +24,7 @@ const CarModeController = get('CarModeController') as new (deps: unknown) => {
 
 class FakeRecognition {
   static all: FakeRecognition[] = [];
+  afterFinal?: () => void;
   continuous = false;
   interimResults = false;
   lang = '';
@@ -43,15 +45,17 @@ class FakeRecognition {
   say(text: string, isFinal: boolean) {
     const result = Object.assign([{ transcript: text }], { isFinal });
     this.onresult?.({ resultIndex: 0, results: [result] });
+    if (isFinal) this.afterFinal?.();
   }
 }
 
-function harness() {
+function harness(advanceFinal = true) {
   FakeRecognition.all = [];
   const spoken: Array<{ text: string; onend?: () => void; onerror?: () => void }> = [];
   const sent: string[] = [];
   const states: Array<[string, string]> = [];
   const timers: Array<() => void> = [];
+  const delays: number[] = [];
   // Like the Web Speech API: cancel() fires onerror('interrupted') on every queued utterance.
   const synth = {
     speaking: false,
@@ -66,18 +70,23 @@ function harness() {
   };
   const clock = { now: 1_000_000 };
   const ctl = new CarModeController({
-    createRecognition: () => new FakeRecognition(),
+    createRecognition: () => {
+      const recognition = new FakeRecognition();
+      // Legacy loop tests advance the new grace deadline explicitly via this fake-clock hook.
+      if (advanceFinal) recognition.afterFinal = () => timers.at(-1)?.();
+      return recognition;
+    },
     createUtterance: (text: string) => ({ text }),
     synth,
     voice: () => null,
     send: async (text: string) => void sent.push(text),
     onState: (s: string, d: string) => states.push([s, d]),
-    setTimeout: (fn: () => void) => (timers.push(fn), timers.length),
+    setTimeout: (fn: () => void, ms: number) => (delays.push(ms), timers.push(fn), timers.length),
     now: () => clock.now,
     clearTimeout: () => {},
   });
   const rec = () => FakeRecognition.all[FakeRecognition.all.length - 1];
-  return { ctl, spoken, sent, states, timers, rec, synth, clock };
+  return { ctl, spoken, sent, states, timers, delays, rec, synth, clock };
 }
 
 describe('car mode loop', () => {
@@ -254,14 +263,15 @@ describe('car mode loop', () => {
   });
 
   it('gives up visibly after repeated recognition failures', () => {
-    const { ctl, rec, states } = harness();
+    const { ctl, rec, states, timers } = harness();
     ctl.start();
     for (let i = 0; i < 3; i++) {
       const r = rec();
       r.onerror?.({ error: 'network' });
       if (ctl.state === 'listening') {
         r.onend?.();
-        (ctl as unknown as { backoffUntil: number }).backoffUntil = 0;
+        // Advance the pending retry: the next failure comes from the new active recognizer.
+        timers.at(-1)!();
       }
     }
     expect(ctl.state).toBe('paused');
@@ -336,4 +346,87 @@ describe('car mode helpers', () => {
     expect(carModePickVoice(voices, 'Daniel')?.name).toBe('Daniel');
     expect(carModePickVoice([{ name: 'X', lang: 'fr-FR' }])).toBeNull();
   });
+});
+
+
+describe('Android utterance grace', () => {
+  it('waits, joins cumulative finals and refuses stale timer callbacks', async () => {
+    const { ctl, rec, sent, timers, delays } = harness(false);
+    ctl.start();
+    rec().say('can you', true);
+    expect(delays.at(-1)).toBe(1500);
+    const stale = timers.at(-1)!;
+    expect(sent).toEqual([]);
+    rec().say('can you hear me', false);
+    stale();
+    expect(sent).toEqual([]);
+    rec().say('can you hear me okay', true);
+    timers.at(-1)!();
+    await Promise.resolve();
+    expect(sent).toEqual(['can you hear me okay']);
+    stale();
+    expect(sent).toHaveLength(1);
+  });
+
+  it('joins distinct final phrases and cancels pending send on pause or stop', () => {
+    const { ctl, rec, sent, timers } = harness(false);
+    ctl.start();
+    rec().say('can you', true);
+    rec().onresult?.({ resultIndex: 1, results: ['can you', 'hear me'].map((transcript) => Object.assign([{ transcript }], { isFinal: true })) });
+    timers.at(-1)!();
+    expect(sent).toEqual(['can you hear me']);
+    ctl.stop();
+    ctl.start();
+    rec().say('do not send', true);
+    const pending = timers.at(-1)!;
+    ctl.tap();
+    pending();
+    expect(sent).toHaveLength(1);
+    ctl.tap();
+    rec().say('also cancel', true);
+    const stopping = timers.at(-1)!;
+    ctl.stop();
+    stopping();
+    expect(sent).toHaveLength(1);
+  });
+
+  it('preserves the pending utterance across a browser recognition restart', () => {
+    const { ctl, rec, sent, timers } = harness(false);
+    ctl.start();
+    rec().say('can you', true);
+    rec().onend?.();
+    rec().say('hear me', true);
+    timers.at(-1)!();
+    expect(sent).toEqual(['can you hear me']);
+  });
+});
+
+
+it('does not duplicate prior finals on repeated full snapshots during the grace window', () => {
+  const { ctl, rec, timers, sent } = harness(false);
+  ctl.start();
+  const results = ['yes', 'yes'].map((transcript) => Object.assign([{ transcript }], { isFinal: true }));
+  rec().onresult?.({ resultIndex: 0, results });
+  rec().onresult?.({ resultIndex: 1, results });
+  expect(sent).toEqual([]);
+  timers.at(-1)!();
+  expect(sent).toEqual(['yes yes']);
+});
+
+
+it('ignores callbacks from the recognizer replaced during the grace window', () => {
+  const { ctl, rec, timers, sent } = harness(false);
+  ctl.start();
+  const old = rec();
+  old.say('can you', true);
+  const lateResult = old.onresult!;
+  const lateEnd = old.onend!;
+  old.onend?.();
+  const active = rec();
+  lateResult({ resultIndex: 0, results: [Object.assign([{ transcript: 'wrong old input' }], { isFinal: true })] });
+  lateEnd();
+  expect(rec()).toBe(active);
+  active.say('hear me', true);
+  timers.at(-1)!();
+  expect(sent).toEqual(['can you hear me']);
 });
