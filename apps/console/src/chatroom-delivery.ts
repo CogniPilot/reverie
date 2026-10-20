@@ -63,6 +63,8 @@ export interface DeliveryDeps {
   pendingStore?: () => PendingDeliveryStore | undefined;
   onPersistenceError?: (error: unknown) => void;
   getSession(id: string): DeliverySession | undefined;
+  forceWake?: (sessionId: string, roomId: string, messageId: string) => boolean;
+  allowFragment?: (sessionId: string, roomId: string, messageId?: string) => boolean;
   now?: () => number;
   /** A message line was typed into this session's pane, for each room it was about (not a briefing, not a held message). */
   onWoken?: (sessionId: string, roomId: string, at: number) => void;
@@ -528,6 +530,10 @@ export class ChatroomDelivery {
     text: string | (() => string),
     options: { brief?: boolean; messageId?: string; passive?: boolean; durable?: boolean; deliveryId?: string; at?: number } = {}
   ): void {
+    if (this.deps.allowFragment?.(sessionId, room.id, options.messageId) === false) {
+      if (options.deliveryId) this.durable((store) => store.remove([options.deliveryId!]));
+      return;
+    }
     if (this.deps.isReady?.() !== false && !this.deps.getSession(sessionId)) {
       this.forget(sessionId);
       return;
@@ -632,9 +638,19 @@ export class ChatroomDelivery {
       this.enqueue(id, room, renderForRecipient(room, message, id, nameOf), {
         messageId: message.id,
         durable: true,
-        ...(awake && !awake.has(id) ? { passive: true } : {}),
+        ...(awake && !awake.has(id) && !this.deps.forceWake?.(id, room.id, message.id) ? { passive: true } : {}),
       });
     }
+  }
+
+  applyAlertPolicy(sessionId: string): void {
+    const queue = this.queues.get(sessionId);
+    if (!queue) return;
+    const blocked = queue.filter((p) => this.deps.allowFragment?.(sessionId, p.roomId, p.messageId) === false);
+    this.discard(blocked);
+    const kept = queue.filter((p) => !blocked.includes(p));
+    if (kept.length) this.queues.set(sessionId, kept);
+    else this.queues.delete(sessionId);
   }
 
   async flushAll(): Promise<void> {
@@ -652,6 +668,12 @@ export class ChatroomDelivery {
     }
     const queue = this.queues.get(sessionId);
     if (this.persistenceFailed || this.inspectionHolds.has(sessionId) || !queue || queue.length === 0 || this.inFlight.has(sessionId)) return false;
+    const blocked = queue.filter((p) => this.deps.allowFragment?.(sessionId, p.roomId, p.messageId) === false);
+    if (blocked.length) {
+      this.discard(blocked);
+      queue.splice(0, queue.length, ...queue.filter((p) => !blocked.includes(p)));
+      if (!queue.length) { this.queues.delete(sessionId); return false; }
+    }
     // Read-later fragments alone stay queued (they wait for a message that wakes this member); stale ones are dropped.
     const nowMs = (this.deps.now ?? Date.now)();
     const fresh = queue.filter((p) => !p.passive || nowMs - (p.at ?? nowMs) <= PASSIVE_MAX_AGE_MS);

@@ -24,6 +24,24 @@ const CHAT_DIAG_LINES = 300;
 const CHAT_OPEN_LIMIT = 50;
 /** Scrolling within this many px of the top asks for older messages. */
 const CHAT_OLDER_TRIGGER_PX = 240;
+/**
+ * Bringing the open room up to date after the live stream was down: messages after the last one held, this many at
+ * first. The server answers with the newest `limit` after `since`, so a page that does not reach back to the last
+ * held message is widened (x4) until it does, at most this many times; past that the fresh window replaces the feed.
+ */
+const CHAT_BACKFILL_LIMIT = 200;
+const CHAT_BACKFILL_ROUNDS = 3;
+/** The server's live stream heartbeats every 15 s: quieter than this when the page comes back means the stream is likely dead. */
+const CHAT_STREAM_QUIET_MS = 20000;
+/**
+ * The only answers to a room post that prove nothing was stored: the status and the error code together. Each is
+ * thrown before the message is committed (chatroom-routes.ts POST /api/chatrooms/:id/messages: body validation,
+ * roomOrFail, forbid, attachments, /roll; chatroom-store.ts post(): every check comes before messages.push), and
+ * nothing after the commit maps to them (delivery throws plain errors, which answer 500; push errors are caught).
+ * Anything else (408, 5xx, another 4xx, an answer without its JSON error code, an OK without the stored message)
+ * leaves the send "Not confirmed".
+ */
+const CHAT_SEND_REFUSALS = { 400: 'INVALID_INPUT', 403: 'FORBIDDEN', 404: 'NOT_FOUND', 409: 'CONFLICT' };
 
 /** A visual viewport this much shorter than the layout viewport means an on-screen keyboard. */
 const CHAT_KEYBOARD_MIN_PX = 120;
@@ -94,6 +112,44 @@ Object.assign(CodemanApp.prototype, {
 
   _chatMember(sessionId) {
     return sessionId ? this._chatRoom?.members.find((m) => m.sessionId === sessionId) : undefined;
+  },
+
+  /**
+   * The member's phone-style alert mode as a monochrome phone outline: ring,
+   * vibrate (only a direct mention or the owner wakes it), silent (only the owner).
+   * The server sends `alertMode: {mode, until}` with unexpired modes only; an absent, unknown
+   * or already-expired mode reads as ring, so a stale page never shows a member muted.
+   */
+  _chatAlertBadge(m, className) {
+    const labels = { ring: 'Ring', vibrate: 'Vibrate', silent: 'Silent' };
+    const a = m?.alertMode;
+    const until = Number(a?.until);
+    const live = a && Object.hasOwn(labels, a.mode) && a.mode !== 'ring' && Number.isFinite(until) && until > Date.now();
+    const mode = live ? a.mode : 'ring';
+    const label = labels[mode];
+    let title = label;
+    if (live) {
+      const et = (opts) => new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', ...opts });
+      const day = (t) => et({ year: 'numeric', month: '2-digit', day: '2-digit' }).format(t);
+      const time = et({ hour: 'numeric', minute: '2-digit' }).format(until);
+      const when = day(until) === day(Date.now()) ? time : `${et({ weekday: 'short' }).format(until)} ${time}`;
+      title = `${label} until ${when} ET${a.mode === 'vibrate' ? ' (wakes on a direct @mention or the owner)' : ' (only the owner wakes it)'}`;
+    }
+    const badge = this._chatEl('span', className);
+    badge.style.cssText = 'display:inline-flex;vertical-align:middle;margin-left:4px;color:var(--text-muted,#919aa6);width:16px;height:16px;flex-shrink:0';
+    const ns = 'http://www.w3.org/2000/svg';
+    const svg = document.createElementNS(ns, 'svg');
+    for (const [key, value] of Object.entries({ viewBox: '0 0 24 24', width: '16', height: '16', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.6', 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'aria-hidden': 'true' })) svg.setAttribute(key, value);
+    const phone = document.createElementNS(ns, 'rect');
+    for (const [key, value] of Object.entries({ x: '8', y: '4', width: '8', height: '16', rx: '2' })) phone.setAttribute(key, value);
+    const detail = document.createElementNS(ns, 'path');
+    detail.setAttribute('d', mode === 'silent' ? 'M3 3l18 18' : mode === 'vibrate' ? 'M4 6L2 9l2 3-2 3 2 3M20 6l2 3-2 3 2 3-2 3' : 'M4 7a9 9 0 0 0 0 10M20 7a9 9 0 0 1 0 10');
+    svg.append(phone, detail);
+    badge.append(svg);
+    badge.title = title;
+    badge.setAttribute('aria-label', title);
+    badge.dataset.alertMode = live ? a.mode : 'ring';
+    return badge;
   },
 
   /** Discord-style avatar: the member's icon, else its initial, on its accent colour. */
@@ -573,18 +629,38 @@ Object.assign(CodemanApp.prototype, {
     // Older messages the reader already scrolled back to stay; the fresh window only replaces the tail.
     const held = this._chatRoomId === id ? this._chatRoom?.messages || [] : [];
     const fresh = res.data.messages || [];
-    // Joined by id at the first held message the fresh window also holds. No overlap means more than a window
-    // arrived since the last look (a phone that slept), so the held ones would leave a gap: keep only the fresh window.
-    if (held.length && fresh.length) {
+    // They stay only if the fresh window holds the last message proved complete (`_chatSyncedFrom`): everything held
+    // up to it has no gap, so joining at the first held message the window also holds leaves none. A join at any other
+    // message proves nothing: one drawn by a send's answer or a live event may sit past messages this page never saw.
+    // Otherwise (more than a window arrived since the last look, a phone that slept) only the fresh window is kept,
+    // and older messages load again on scroll.
+    const cursor = this._chatSynced?.get(id);
+    const proved = !!cursor?.id && fresh.some((m) => m.id === cursor.id) && held.some((m) => m.id === cursor.id);
+    if (held.length && fresh.length && proved) {
       const freshIds = new Set(fresh.map((m) => m.id));
       const overlap = held.findIndex((m) => freshIds.has(m.id));
       if (overlap > 0) res.data.messages = [...held.slice(0, overlap), ...fresh];
     }
+    // Held messages left out (the window was rebased) must leave the screen too, which a quiet refresh would not redraw.
+    const ids = new Set((res.data.messages || []).map((m) => m.id));
+    const rebased = held.some((m) => !ids.has(m.id));
     await emotes;
-    return this._applyChatRoom(id, res.data, { quiet, switched: switching });
+    return this._applyChatRoom(id, res.data, { quiet, switched: switching, synced: fresh, redraw: rebased });
   },
 
-  async _applyChatRoom(id, data, { quiet, switched }) {
+  /**
+   * The last message up to which the open room's history is PROVED complete: the newest message of a fresh room tail
+   * (a load, or a catch-up that joined by id), or the empty start of a room that had no messages. Catching up starts
+   * here. A send's answer or a live event never moves it: either may follow messages this page never saw.
+   */
+  _chatSyncedFrom(id, fresh) {
+    const last = fresh.at(-1);
+    if (last && (typeof last.id !== 'string' || typeof last.at !== 'number')) return;
+    (this._chatSynced ||= new Map()).set(id, last ? { id: last.id, at: last.at } : { id: null, at: 0 });
+  },
+
+  /** `synced`: the fresh room tail this data was built from, which moves the proved-complete point (`_chatSyncedFrom`). */
+  async _applyChatRoom(id, data, { quiet, switched, synced = null, redraw = false }) {
     // A message gone from the loaded window (deleted) needs the feed redrawn, which a quiet refresh skips.
     const before = this._chatRoom?.messages || [];
     const now = data.messages || [];
@@ -600,6 +676,7 @@ Object.assign(CodemanApp.prototype, {
         now.some((m) => !known.has(m.id)));
     this._chatRoomId = id;
     this._chatRoom = data;
+    if (synced) this._chatSyncedFrom(id, synced);
     (this._chatCache ||= new Map()).set(id, data);
     try {
       localStorage.setItem('codeman:chatroom', id);
@@ -621,7 +698,7 @@ Object.assign(CodemanApp.prototype, {
     const icons = data.members.map((m) => `${m.sessionId}:${m.icon || ''}`).join('|');
     const iconsChanged = icons !== this._chatIconSig;
     this._chatIconSig = icons;
-    if (switched || !quiet || iconsChanged || removed) this._renderChatFeed({ keepScroll: !switched });
+    if (switched || !quiet || iconsChanged || removed || redraw) this._renderChatFeed({ keepScroll: !switched });
     return true;
   },
 
@@ -836,7 +913,7 @@ Object.assign(CodemanApp.prototype, {
     name.type = 'button';
     name.title = 'Open this session';
     name.onclick = () => this.sessions?.has(m.sessionId) && this.selectSession(m.sessionId);
-    top.append(this._chatAvatar(m.sessionId, m.name, { state }), name);
+    top.append(this._chatAvatar(m.sessionId, m.name, { state }), name, this._chatAlertBadge(m, 'chatroom-alert'));
     if (m.role === 'coordinator') top.append(this._chatEl('span', 'chatroom-badge', 'admin'));
     if (m.mode) {
       const account = this._sessionAccountLabel?.(m.sessionId) || '';
@@ -1265,6 +1342,7 @@ Object.assign(CodemanApp.prototype, {
       );
     }
     for (const m of messages) feed.append(this._chatMessageEl(m));
+    this._chatPendingDraw();
     feed.scrollTop = keepScroll && !pinned ? top : feed.scrollHeight;
   },
 
@@ -1335,32 +1413,48 @@ Object.assign(CodemanApp.prototype, {
     return row;
   },
 
-  async _sendChatMessage({ spoken = false } = {}) {
+  async _sendChatMessage({ spoken = false, again = false } = {}) {
     // One send at a time: a double tap, or Enter plus the button, would otherwise post the same text again
     // while the first request is still on its way (the box is only emptied once the server answers).
     if (this._chatSending) return;
     const { input, to, send } = this._chatEls;
     const text = input.value.trim();
+    const roomId = this._chatRoomId;
+    const seq = this._chatLoadSeq;
+    const owner = this._chatRoom?.owner;
+    // A send whose answer was lost may be stored already. Sending the same words again is only ever the
+    // explicit "Send again" on its row, never a plain Enter.
+    const unsure = !again && (this._chatOwnSends || []).find((p) => p.state === 'unconfirmed' && p.roomId === roomId && p.text === text);
+    if (unsure) {
+      unsure.held = true;
+      this._chatPendingDraw();
+      return;
+    }
     const attachments = this._takeChatAttachments ? this._takeChatAttachments() : [];
     if (attachments === null) {
       this.showToast?.('Wait for the upload to finish', 'info');
       return;
     }
-    if ((!text && !attachments.length) || !this._chatRoomId) return;
+    if ((!text && !attachments.length) || !roomId) return;
     // Dictated (possibly edited after the preview) words go out marked as speech.
     const isSpoken = spoken || this._pendingSpoken === true;
     this._pendingSpoken = false;
     // A reply links to the message it answers. @mentions are highlighted for readers and never narrow who
     // gets the message: only the "To" choice does (Discord's rule: a mention notifies, everyone still sees it).
     const reply = this._chatReplyTarget ? this._chatReplyTarget() : null;
+    const draft = this._chatDraft();
     // Nothing typed is addressed to one member (everyone in a channel reads it: @mention who it is for); only a spoken turn, the
     // owner speaking to the room's voice member, is aimed.
     const recipients = isSpoken ? [to.value].filter(Boolean) : [];
+    // Your own message used to appear only when the live stream echoed it back, so a stale or reconnecting
+    // stream left the feed without it until a reload. It shows at once as "Sending…" instead, and the
+    // server's answer (which carries the stored message) draws it, whether or not the echo ever comes.
+    const own = this._chatPendingShow(roomId, text, attachments.length);
     this._chatSending = true;
     send.disabled = true;
     let res;
     try {
-      res = await this._chatApi(`/api/chatrooms/${encodeURIComponent(this._chatRoomId)}/messages`, {
+      res = await this._chatApi(`/api/chatrooms/${encodeURIComponent(roomId)}/messages`, {
         method: 'POST',
         body: {
           text,
@@ -1374,14 +1468,239 @@ Object.assign(CodemanApp.prototype, {
       this._chatSending = false;
       send.disabled = false;
     }
-    if (!res.ok) {
-      this.showToast?.(`Chat: ${res.error}`, 'error');
+    const message = res.ok ? res.data?.message : null;
+    if (typeof message?.id !== 'string') {
+      // Only a documented refusal says it was not stored. No answer, a timeout, a server error or an answer this page
+      // does not recognise may come after the message was stored, and nothing here can tell which (room posts carry
+      // no send id), so it stays "Not confirmed" with the text kept, and the room catches up to show what is there.
+      const refused = !res.ok && CHAT_SEND_REFUSALS[res.status] !== undefined && CHAT_SEND_REFUSALS[res.status] === res.errorCode;
+      const error = res.ok ? 'the answer did not carry the message' : res.error;
+      this._chatPendingSet(own, refused ? 'failed' : 'unconfirmed', error);
+      this.showToast?.(`Chat: ${refused ? '' : 'not confirmed: '}${error}`, 'error');
+      if (!refused) this._chatBackfill?.();
       return;
     }
-    input.value = '';
-    this._chatReplySent?.();
-    this._clearChatAttachments?.();
-    input.focus();
+    // The words and the reply are cleared only if the composer still holds this send as a whole: the same room, load
+    // and owner, and the same draft (words, reply target and every file in the tray). A reader who moved on (another
+    // room, other words, another reply, a file added or removed) keeps what they have; the send settles either way.
+    const here =
+      roomId === this._chatRoomId && seq === this._chatLoadSeq && this._chatRoom?.owner === owner && this._chatSameDraft(draft);
+    // Only the files this send carried leave the tray, every time: anything else in it is not sent yet.
+    if (attachments.length && Array.isArray(this._chatPending)) {
+      this._chatPending = this._chatPending.filter((p) => !attachments.includes(p.id));
+      this._renderChatTray?.();
+    }
+    if (here) {
+      input.value = '';
+      this._chatReplySent?.();
+      input.focus();
+    }
+    // The answer and the live echo are matched by the server's message id only (a known id is never drawn twice).
+    if (roomId === this._chatRoomId && this.isChatroomOpen?.()) this._chatShowMessage({ roomId, message });
+    this._chatPendingSet(own, null);
+  },
+
+  /** The composer's whole draft: its words, the message it replies to, and the files in its tray (the items themselves). */
+  _chatDraft() {
+    return {
+      text: this._chatEls?.input?.value.trim() ?? '',
+      reply: (this._chatReplyTarget ? this._chatReplyTarget() : null)?.id ?? null,
+      tray: Array.isArray(this._chatPending) ? [...this._chatPending] : [],
+    };
+  },
+
+  /** The composer still holds exactly this draft: the same words, reply target and tray items in the same order. */
+  _chatSameDraft(draft) {
+    const now = this._chatDraft();
+    return (
+      now.text === draft.text &&
+      now.reply === draft.reply &&
+      now.tray.length === draft.tray.length &&
+      now.tray.every((p, i) => p === draft.tray[i])
+    );
+  },
+
+  /**
+   * Your sends this page has not seen settled: "sending", "failed" (refused: not stored) or "unconfirmed" (no
+   * answer: it may be stored). Drawn after the feed, and again after every redraw. A new send replaces the
+   * room's refused ones (their text was in the box); an unconfirmed one stays until it is dismissed or sent again.
+   */
+  _chatPendingShow(roomId, text, files = 0) {
+    this._chatOwnSendKey = (this._chatOwnSendKey || 0) + 1;
+    const own = { key: this._chatOwnSendKey, roomId, text, files, state: 'sending', error: null };
+    this._chatOwnSends = [...(this._chatOwnSends || []).filter((p) => !(p.roomId === roomId && p.state === 'failed')), own];
+    this._chatPendingDraw();
+    return own;
+  },
+
+  /** Settle one send: a new state for its row, or null to remove it. */
+  _chatPendingSet(own, state, error) {
+    if (!own) return;
+    const list = (this._chatOwnSends || []).filter((p) => p.key !== own.key);
+    this._chatOwnSends = state ? [...list, { ...own, state, error: error || 'not sent' }] : list;
+    this._chatPendingDraw();
+  },
+
+  /** (Re)draw the rows of this room's unsettled sends at the end of the feed; called after a change and after every feed redraw. */
+  _chatPendingDraw() {
+    const feed = this._chatEls?.feed;
+    if (!feed) return;
+    for (const old of feed.querySelectorAll(':scope > .chatroom-pending, :scope > .chatroom-recovery')) old.remove();
+    const here = (this._chatOwnSends || []).filter((p) => p.roomId === this._chatRoomId);
+    const gap = this._chatRecovery?.roomId === this._chatRoomId ? this._chatRecovery : null;
+    if (!here.length && !gap) return;
+    const atBottom = feed.scrollHeight - feed.scrollTop - feed.clientHeight < 60;
+    if (gap) feed.append(this._chatRecoveryRow(gap));
+    for (const p of here) feed.append(this._chatPendingRow(p));
+    if (atBottom || here.some((p) => p.state === 'sending')) feed.scrollTop = feed.scrollHeight;
+  },
+
+  _chatPendingRow(p) {
+    const row = this._chatEl('div', `chatroom-pending is-${p.state}${p.state === 'sending' ? '' : ' is-failed'}`);
+    row.setAttribute('role', 'status');
+    row.style.cssText = 'padding:4px 16px;white-space:pre-wrap;word-break:break-word;' + (p.state === 'sending' ? 'opacity:.6;' : 'color:var(--danger,#e5534b);');
+    const files = p.files ? `${p.text ? '\n' : ''}(${p.files} file${p.files === 1 ? '' : 's'})` : '';
+    row.append(this._chatEl('div', 'chatroom-pending-text', `${p.text}${files}`));
+    const words = {
+      sending: 'Sending…',
+      failed: `Not sent: ${p.error}. Your text is still in the box. `,
+      unconfirmed:
+        `Not confirmed: ${p.error}. It may or may not have been posted; check the messages above. Your text is still in the box. ` +
+        (p.held ? 'Enter does not send it again: use Send again if it is not above. ' : ''),
+    }[p.state];
+    const state = this._chatEl('div', 'chatroom-pending-state', words);
+    state.style.cssText = 'font-size:12px;';
+    const button = (cls, label, fn) => {
+      const b = this._chatEl('button', cls, label);
+      b.type = 'button';
+      b.onclick = fn;
+      state.append(b);
+    };
+    // Both resend what is in the box only when it is still these words; otherwise they go back in the box to look at first.
+    const resend = (again) => {
+      const { input } = this._chatEls;
+      if (input.value.trim() !== p.text) {
+        input.value = p.text;
+        input.focus();
+        return;
+      }
+      if (again) this._chatPendingSet(p, null);
+      this._sendChatMessage({ again });
+    };
+    if (p.state === 'failed') button('chatroom-pending-retry', 'Retry', () => resend(false));
+    if (p.state === 'unconfirmed') {
+      button('chatroom-pending-again', 'Send again (it may post twice)', () => resend(true));
+      button('chatroom-pending-dismiss', 'Dismiss', () => this._chatPendingSet(p, null));
+    }
+    row.append(state);
+    return row;
+  },
+
+  /**
+   * Catching up did not finish: messages from while the stream was down may be missing, and the feed says so (it
+   * is never shown as complete). It stays, through later catch-ups, until the room is reloaded fresh.
+   */
+  _chatRecoveryRow(gap) {
+    const row = this._chatEl('div', 'chatroom-recovery');
+    row.setAttribute('role', 'status');
+    row.style.cssText = 'padding:4px 16px;font-size:12px;color:var(--danger,#e5534b);';
+    row.append(`Catching up did not finish (${gap.reason}): messages from while the connection was down may be missing here. `);
+    const reload = this._chatEl('button', 'chatroom-recovery-reload', 'Reload room');
+    reload.type = 'button';
+    reload.onclick = () => this._chatReloadFresh(gap.roomId);
+    row.append(reload);
+    return row;
+  },
+
+  _chatRecoveryFail(roomId, reason) {
+    if (roomId !== this._chatRoomId) return false;
+    this._chatRecovery = { roomId, reason };
+    this._chatPendingDraw();
+    return false;
+  },
+
+  /** Drop what is held and show the room's newest messages only (older ones load on scroll): no gap can be kept. */
+  async _chatReloadFresh(id) {
+    const gen = (this._chatBackfillGen = (this._chatBackfillGen || 0) + 1);
+    const seq = this._chatLoadSeq;
+    const res = await this._chatApi(`/api/chatrooms/${encodeURIComponent(id)}?limit=${CHAT_OPEN_LIMIT}`);
+    if (gen !== this._chatBackfillGen || seq !== this._chatLoadSeq || id !== this._chatRoomId) return false;
+    if (!res.ok) {
+      this.showToast?.(`Chat: ${res.error}`, 'error');
+      return false;
+    }
+    if (this._chatRecovery?.roomId === id) this._chatRecovery = null;
+    this._chatCache?.delete(id);
+    return this._applyChatRoom(id, res.data, { quiet: false, switched: true, synced: res.data.messages || [] });
+  },
+
+  /**
+   * Bring the open room up to date after the live stream was down (it does not replay what it missed): everything
+   * after the last message proved complete (`_chatSyncedFrom`), joined by id. An answer that comes back after a room switch, a newer room load or
+   * a newer backfill, or for a room with another owner, is dropped.
+   */
+  async _chatBackfill() {
+    const id = this._chatRoomId;
+    const room = this._chatRoom;
+    if (!id || !room || typeof this._chatApi !== 'function') return false;
+    // From the last message PROVED complete, not the last one shown: a send's answer or a live event may sit past
+    // messages the page never saw. A room that was empty starts from its empty start (since=0: the whole room).
+    const anchor = this._chatSynced?.get(id);
+    if (!anchor) return this._chatRecoveryFail(id, 'nothing proved to start from');
+    const gen = (this._chatBackfillGen = (this._chatBackfillGen || 0) + 1);
+    const seq = this._chatLoadSeq;
+    const owner = room.owner;
+    const current = () => gen === this._chatBackfillGen && seq === this._chatLoadSeq && id === this._chatRoomId && this._chatRoom?.owner === owner;
+    const fromStart = anchor.id === null;
+    for (let round = 0, limit = CHAT_BACKFILL_LIMIT; round < CHAT_BACKFILL_ROUNDS; round++, limit *= 4) {
+      // `since` is exclusive and in ms: one ms back so the anchor (and any message sharing its ms) comes back too.
+      const since = fromStart ? 0 : anchor.at - 1;
+      const res = await this._chatApi(`/api/chatrooms/${encodeURIComponent(id)}?since=${since}&limit=${limit}`);
+      if (!current()) return false;
+      if (!res.ok || !Array.isArray(res.data?.messages)) return this._chatRecoveryFail(id, res.ok ? 'unrecognised answer' : res.error);
+      const fresh = res.data.messages;
+      // The page is the newest `limit`. It joins the proved history if it holds the anchor (by id), or, from the
+      // empty start, if it holds fewer than asked for (then it is the whole room). A full page that does neither:
+      // more arrived than it holds, so ask for a wider one.
+      const from = fromStart ? -1 : fresh.findIndex((m) => m.id === anchor.id);
+      const joined = fromStart ? fresh.length < limit : from >= 0;
+      if (!joined && fresh.length >= limit) continue;
+      // A short page without the anchor: it is gone from the room (or the server gave less than asked), so nothing
+      // proves the two join.
+      if (!joined) return this._chatRecoveryFail(id, 'the last message held is no longer in the room');
+      const held = this._chatRoom.messages || [];
+      const upTo = fromStart ? -1 : held.findIndex((m) => m.id === anchor.id);
+      if (!fromStart && upTo < 0) return this._chatRecoveryFail(id, 'the last message proved complete is no longer shown');
+      const byId = new Map(fresh.map((m) => [m.id, m]));
+      const heldIds = new Set(held.map((m) => m.id));
+      // Held before the anchor (with any newer copy); the page up to the anchor, which adds any missed message sharing
+      // the anchor's ms that the server stored before it; the page after it (what the stream missed, in the room's
+      // order); then anything the page lacks that was drawn since the request (a live event, a send's answer).
+      const messages = [
+        ...(fromStart ? [] : held.slice(0, upTo).map((m) => byId.get(m.id) || m)),
+        ...fresh.slice(0, from + 1).filter((m) => m.id === anchor.id || !heldIds.has(m.id)),
+        ...fresh.slice(from + 1),
+        ...held.slice(upTo + 1).filter((m) => !byId.has(m.id)),
+      ];
+      return this._applyChatRoom(id, { ...res.data, messages }, { quiet: true, switched: false, synced: fresh.length ? fresh : null });
+    }
+    // Still not joined at the widest page: the work bound.
+    return current() ? this._chatRecoveryFail(id, 'too many messages to fetch') : false;
+  },
+
+  /**
+   * The page is visible again (a phone woke, a background tab came forward). A stream quiet for longer than its
+   * heartbeat is likely dead: reconnect it (the reconnect brings the room up to date). Otherwise just catch up.
+   */
+  _chatOnVisible() {
+    if (this._connectionStatus !== 'connected') return;
+    const quiet = this._sseLastMessageAt ? Date.now() - this._sseLastMessageAt : 0;
+    if (quiet > CHAT_STREAM_QUIET_MS && typeof this.connectSSE === 'function') {
+      console.log(`[SSE] page visible after ${quiet}ms without a frame: reconnecting`);
+      this.connectSSE();
+      return;
+    }
+    this._chatBackfill();
   },
 
   _toggleChatRoomMenu(e) {
@@ -1451,6 +1770,11 @@ Object.assign(CodemanApp.prototype, {
     // the replies to the user from everyone else.
     this._carModeOnMessage?.(data);
     this._readAloudOnMessage?.(data);
+    this._chatShowMessage(data);
+  },
+
+  /** Put a message into the open feed (once: a known id is skipped). The live echo and the send answer both come here. */
+  _chatShowMessage(data) {
     if (!data?.message) return;
     // The conversation shell (chat-app.js) owns the feed and the counts once it is running.
     if (this._chatApp?.handleMessage(data)) return;
@@ -1461,6 +1785,7 @@ Object.assign(CodemanApp.prototype, {
       const atBottom = feed.scrollHeight - feed.scrollTop - feed.clientHeight < 60;
       feed.querySelector(':scope > .chatroom-hint')?.remove();
       feed.append(this._chatMessageEl(data.message));
+      this._chatPendingDraw();
       if (atBottom || data.message.from.kind === 'user') feed.scrollTop = feed.scrollHeight;
       return;
     }

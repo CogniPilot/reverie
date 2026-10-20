@@ -1349,10 +1349,18 @@ class ReverieChatApp {
     inviteBtn.hidden = true;
     const pinsBtn = this.button('ca-icon-btn ca-head-pins', 'Pinned messages', () => this.room && this.openPinsDialog(this.room.id), { icon: 'pin' });
     pinsBtn.hidden = true;
-    const phoneBtn = this.button('ca-icon-btn', 'Install app and notifications', () => window.ReverieMobile?.open(), { icon: 'phone' });
+    const phoneBtn = this.button('ca-icon-btn ca-head-phone', 'Install app and notifications', () => window.ReverieMobile?.open(), { icon: 'phone' });
     const bellBtn = this.button('ca-icon-btn ca-head-bell', 'Notification settings', () => this.openNotifyMenu(bellBtn), { icon: 'bell' });
     bellBtn.setAttribute('aria-haspopup', 'menu');
-    head.append(navBtn, headTitle, inviteBtn, headTopic, spacer, pinsBtn, phoneBtn, bellBtn, membersBtn);
+    const speakBtn = this.button('ca-icon-btn ca-head-speak', 'Speak replies aloud', () => {
+      const on = !this.app._voiceSetting?.('speakReplies');
+      this.app._setVoiceSetting?.('speakReplies', on);
+      if (!on) this.app._readAloud?.clear();
+      this.renderHeader();
+    }, { text: '🔊' });
+    const carBtn = this.button('ca-icon-btn ca-head-car', 'Car mode', () => this.app.openCarMode?.(), { text: '🚗' });
+    speakBtn.hidden = carBtn.hidden = true;
+    head.append(navBtn, headTitle, inviteBtn, headTopic, spacer, speakBtn, carBtn, pinsBtn, phoneBtn, bellBtn, membersBtn);
 
     const body = this.el('div', 'ca-body');
     const chat = this.el('section', 'ca-chat');
@@ -1369,7 +1377,7 @@ class ReverieChatApp {
 
     Object.assign(this.els, {
       rail, side, sideHead, sideTitle, sideScroll, user, main, head, headTitle, headTopic,
-      membersBtn, bellBtn, navBtn, inviteBtn, pinsBtn, chat, members, scrim, stats, body,
+      membersBtn, bellBtn, navBtn, inviteBtn, pinsBtn, speakBtn, carBtn, chat, members, scrim, stats, body,
     });
 
     // Reuse the chat panel's feed, composer, mic, attachments and create form: it becomes the
@@ -3315,7 +3323,11 @@ class ReverieChatApp {
       },
       true
     );
-    this.doc.addEventListener('visibilitychange', () => this.markReadSoon());
+    this.doc.addEventListener('visibilitychange', () => {
+      this.markReadSoon();
+      // Back from a sleeping phone or a background tab: what the live stream missed comes in now.
+      if (this.doc.visibilityState === 'visible' && this.roomId && !this.embassy?.selected) this.app._chatOnVisible?.();
+    });
     this.doc.addEventListener('keydown', (e) => {
       if (e.key === 'Escape' && this.active && this.drawer && !this.doc.querySelector('dialog[open]')) {
         this.toggleDrawer(null);
@@ -4151,6 +4163,13 @@ class ReverieChatApp {
   renderHeader() {
     const { headTitle, headTopic } = this.els;
     const room = this.room;
+    const voiceControls = !!room && caIsVoice(room) && !this.embed && !this.embassy?.selected && !this.app._chatCreating;
+    this.els.head?.classList.toggle('has-voice-controls', voiceControls);
+    if (this.els.speakBtn) {
+      this.els.speakBtn.hidden = !voiceControls;
+      this.els.speakBtn.setAttribute('aria-pressed', String(!!this.app._voiceSetting?.('speakReplies')));
+    }
+    if (this.els.carBtn) this.els.carBtn.hidden = !voiceControls || !this.app.openCarMode;
     headTitle.replaceChildren();
     headTopic.textContent = '';
     if (this.embassy?.selected) {
@@ -4242,6 +4261,12 @@ class ReverieChatApp {
     const text = this.el('span', 'ca-member-text');
     const line = this.el('span', 'ca-member-name', m.name);
     text.append(line);
+    const alert = this.app._chatAlertBadge?.(m, 'ca-member-alert');
+    if (alert) {
+      line.append(' ', alert);
+      // Ring is everyone's default: only a held mode is worth saying aloud.
+      if (alert.dataset.alertMode !== 'ring') b.setAttribute('aria-label', `${b.getAttribute('aria-label')}, ${alert.title}`);
+    }
     if (m.role === 'coordinator') text.append(this.el('span', 'ca-tag', 'Admin'));
     if (m.voice) text.append(this.el('span', 'ca-tag', 'Voice'));
     // A member that needs you says so in words as well as colour.
@@ -5698,6 +5723,7 @@ class ReverieChatApp {
       feed.append(this.el('p', 'ca-feed-empty', this.room && caIsDm(this.room) ? `This is the beginning of your conversation with @${caRoomLabel(this.room)}.` : `This is the start of #${this.room?.name || 'the channel'}. Say hello: everyone in the channel reads it.`));
     }
     for (const item of caFeedItems(messages, this._readMarkAt)) feed.append(this.feedNode(item));
+    this.app._chatPendingDraw?.();
     feed.scrollTop = keepScroll && !pinned ? top : feed.scrollHeight;
     this._feedStick = !(keepScroll && !pinned);
     this.markReadSoon();
@@ -5752,6 +5778,7 @@ class ReverieChatApp {
       const feed = this.app._chatEls.feed;
       const atBottom = feed.scrollHeight - feed.scrollTop - feed.clientHeight < 60;
       this.appendMessage(data.message);
+      this.app._chatPendingDraw?.();
       if (atBottom || data.message.from.kind === 'user') feed.scrollTop = feed.scrollHeight;
       if (atBottom && this.doc.visibilityState !== 'hidden') this.markReadSoon();
       else this.countMessage(data, room);
@@ -5883,6 +5910,7 @@ function caInstall(proto) {
     renderApprovals: proto.renderApprovals,
     handleNotificationAction: proto.handleNotificationAction,
     _selectUrlSession: proto._selectUrlSession,
+    setConnectionStatus: proto.setConnectionStatus,
   };
   Object.assign(proto, {
     isChatroomOpen() {
@@ -5987,6 +6015,17 @@ function caInstall(proto) {
         }
       }
       return res;
+    },
+    // The live stream does not replay what was sent while it was down (the heartbeat watchdog or a page coming back
+    // into view reconnects a dead one), so every time it (re)opens, the open room catches up from the last message
+    // proved complete. That includes the page's first open: the transport's own state is the only signal used (no
+    // memory of earlier opens, which a shell installed on an already-connected page would not have), and with
+    // nothing missed it costs one small request.
+    setConnectionStatus(status) {
+      const was = this._connectionStatus;
+      original.setConnectionStatus?.call(this, status);
+      if (status !== 'connected' || was === 'connected') return;
+      if (this._chatRoomId && !this._chatApp?.embassy?.selected) this._chatBackfill?.();
     },
     // A session's state changes (a hook arrives or clears, its status changes): the member dots follow.
     setPendingHook(sessionId, hookType) {

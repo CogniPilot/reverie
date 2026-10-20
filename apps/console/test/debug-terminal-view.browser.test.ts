@@ -116,6 +116,40 @@ describe('minimal agent terminal in Chromium', () => {
     return server;
   }
 
+  it.each([1280, 390])('keeps voice actions visible and clickable without a long press at %ipx', async (width) => {
+    await open(width);
+    await page.evaluate(() => {
+      const app = (window as any).app;
+      const shell = (window as any).reverieChat;
+      let enabled = false;
+      app._voiceSetting = () => enabled;
+      app._setVoiceSetting = (_key: string, value: boolean) => { enabled = value; };
+      app.openCarMode = () => { (window as any).carOpened = true; };
+      shell.room.members[0].voice = true;
+      shell.renderHeader();
+    });
+    const speak = page.getByRole('button', { name: 'Speak replies aloud', exact: true });
+    const car = page.getByRole('button', { name: 'Car mode', exact: true });
+    await expect.poll(() => speak.isVisible()).toBe(true);
+    expect(await car.isVisible()).toBe(true);
+    for (const action of [speak, car]) {
+      const box = (await action.boundingBox())!;
+      expect(box.x).toBeGreaterThanOrEqual(0);
+      expect(box.x + box.width).toBeLessThanOrEqual(width);
+    }
+    await speak.click();
+    expect(await speak.getAttribute('aria-pressed')).toBe('true');
+    await car.click();
+    expect(await page.evaluate(() => (window as any).carOpened)).toBe(true);
+    await page.evaluate(() => {
+      const shell = (window as any).reverieChat;
+      shell.room.members[0].voice = false;
+      shell.renderHeader();
+    });
+    expect(await speak.isVisible()).toBe(false);
+    expect(await car.isVisible()).toBe(false);
+  });
+
   it.each([1280, 390])('shows only the chosen terminal and Back to chat at %ipx', async (width) => {
     await open(width);
     const shell = page.locator('#chatApp');

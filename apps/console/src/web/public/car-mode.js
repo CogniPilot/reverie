@@ -19,12 +19,14 @@
  * unit-tested with fakes (test/car-mode.test.ts); the rest is DOM glue.
  *
  * @mixin Extends CodemanApp.prototype via Object.assign
- * @dependency app.js, chatroom-ui.js (_chatApi, _chatRoom, push-to-talk helpers)
- * @loadorder 12.12 (after chatroom-ui.js)
+ * @dependency app.js, chatroom-ui.js (_chatApi, _chatRoom, push-to-talk helpers), voice-chat.js (snapshot helpers)
+ * @loadorder 12.12 (after voice-chat.js)
  */
 
 /** How long to wait for the member's answer before listening again. */
 const CAR_REPLY_TIMEOUT_MS = 180_000;
+/** Join final recognition segments across a short natural pause. */
+const CAR_FINAL_GRACE_MS = 1500;
 /** Chrome stops long utterances; speaking sentence by sentence avoids it. */
 const CAR_MAX_UTTERANCE_CHARS = 220;
 /** Recognition errors other than silence (network, audio-capture): wait before retrying. */
@@ -106,10 +108,29 @@ class CarModeController {
     this.errors = 0;
     /** Polls the synthesizer after a reply until it is really silent. */
     this.speechPoll = null;
+    this.finalTimer = null;
+    this.finalGeneration = 0;
+    this.finalText = '';
   }
 
   _now() {
     return (this.deps.now ?? Date.now)();
+  }
+
+  _clearFinalTimer() {
+    this.finalGeneration++;
+    if (this.finalTimer) this.deps.clearTimeout(this.finalTimer);
+    this.finalTimer = null;
+  }
+
+  _queueFinal() {
+    this._clearFinalTimer();
+    const generation = this.finalGeneration;
+    this.finalTimer = this.deps.setTimeout(() => {
+      if (generation !== this.finalGeneration || this.state !== 'listening') return;
+      this.finalTimer = null;
+      this._final(chatSpeechJoin(this.finalText, this.interim));
+    }, CAR_FINAL_GRACE_MS);
   }
 
   _clearListenTimer() {
@@ -124,7 +145,7 @@ class CarModeController {
       this.listenTimer = null;
       if (this.state !== 'listening') return;
       if (this.interim) {
-        this._final(this.interim);
+        this._final(chatSpeechJoin(this.finalText, this.interim));
         return;
       }
       this._stopRecognition();
@@ -215,43 +236,39 @@ class CarModeController {
    */
   _listen({ restart = false } = {}) {
     this._set('listening');
-    this.interim = '';
-    this.utteranceAt = 0;
+    if (!restart) { this.finalText = ''; this.interim = ''; this.utteranceAt = 0; }
     if (!restart || !this.listenTimer) this._armListenTimer();
     if (this.recognition) return;
+    const priorFinal = this.finalText;
     const rec = this.deps.createRecognition();
     rec.continuous = true;
     rec.interimResults = true;
     rec.lang = 'en-US';
     rec.onresult = (event) => {
-      if (this.state !== 'listening') return;
+      if (this.state !== 'listening' || this.recognition !== rec) return;
       this.errors = 0;
-      let interim = '';
-      for (let i = event.resultIndex; i < event.results.length; i++) {
-        const result = event.results[i];
-        const text = result[0].transcript;
-        if (result.isFinal) {
-          if (text.trim()) this._final(text.trim());
-          return;
-        }
-        interim += text;
-      }
-      this.interim = interim.trim();
-      if (!this.interim) return;
+      const snapshot = chatSpeechSnapshot(event.results);
+      this._clearFinalTimer();
+      this.finalText = chatSpeechJoin(priorFinal, snapshot.final);
+      this.interim = snapshot.interim;
+      const heard = chatSpeechJoin(this.finalText, this.interim);
+      if (!heard) return;
       // Hearing something: the no-speech timeout starts over, and an utterance that
       // never ends is cut at the cap and sent as heard.
       if (!this.utteranceAt) this.utteranceAt = this._now();
       if (this._now() - this.utteranceAt >= CAR_UTTERANCE_CAP_MS) {
-        this._final(this.interim);
+        this._final(chatSpeechJoin(this.finalText, this.interim));
         return;
       }
       this._armListenTimer();
-      this.deps.onState('listening', this.interim);
+      if (snapshot.final && !this.interim) this._queueFinal();
+      this.deps.onState('listening', heard);
     };
     // Chrome ends a "continuous" session after a while of silence: keep it going, but
     // after a real error (no network for the speech service, no audio device) wait a
     // little, or the restart loop would spin as fast as the browser can fail.
     rec.onend = () => {
+      if (this.recognition !== rec) return;
       this.recognition = null;
       if (this.state !== 'listening' || this.restartTimer) return;
       // A backoff covers the one failed session it was set for, then is used up.
@@ -267,6 +284,7 @@ class CarModeController {
       }, wait);
     };
     rec.onerror = (event) => {
+      if (this.recognition !== rec) return;
       if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
         this._stopRecognition();
         this._set('paused', 'Microphone access was refused');
@@ -294,6 +312,8 @@ class CarModeController {
   }
 
   _stopRecognition() {
+    this._clearFinalTimer();
+    this.finalText = '';
     const rec = this.recognition;
     this.recognition = null;
     if (!rec) return;
@@ -398,6 +418,118 @@ const CAR_STATUS = {
   paused: 'Paused',
   off: 'Off',
 };
+
+/** Owns only the screen lock; it never starts audio, changes phone settings or retries forever. */
+class CarScreenWakeLock {
+  constructor(deps) {
+    this.deps = deps;
+    this.active = false;
+    this.generation = 0;
+    this.lock = null;
+    this.pending = null;
+    this.retryTimer = null;
+    this.attempts = 0;
+    this.onVisibility = () => {
+      if (!this.active) return;
+      this.generation++;
+      this.pending = null;
+      this._clearRetry();
+      this._release();
+      this.attempts = 0;
+      if (this.deps.visible()) void this.acquire();
+      else this.deps.status(false, 'Screen may sleep while this tab is hidden.');
+    };
+  }
+
+  start() {
+    if (this.active) return;
+    this.active = true;
+    this.generation++;
+    this.deps.addVisibility(this.onVisibility);
+    return this.acquire();
+  }
+
+  stop() {
+    this.active = false;
+    this.generation++;
+    this.pending = null;
+    this._clearRetry();
+    this.deps.removeVisibility(this.onVisibility);
+    this._release();
+  }
+
+  retry() {
+    this.attempts = 0;
+    return this.acquire();
+  }
+
+  _clearRetry() {
+    if (this.retryTimer !== null) this.deps.clearTimeout(this.retryTimer);
+    this.retryTimer = null;
+  }
+
+  _release() {
+    const held = this.lock;
+    this.lock = null;
+    if (!held) return;
+    held.sentinel.removeEventListener('release', held.onRelease);
+    if (!held.sentinel.released) Promise.resolve(held.sentinel.release()).catch(() => {});
+  }
+
+  async acquire() {
+    if (!this.active || this.lock || this.pending) return;
+    if (!this.deps.visible()) {
+      this.deps.status(false, 'Screen may sleep while this tab is hidden.');
+      return;
+    }
+    if (!this.deps.secure) {
+      this.deps.status(false, 'Screen may sleep: open Reverie over HTTPS to keep it awake.');
+      return;
+    }
+    if (!this.deps.request) {
+      this.deps.status(false, 'Screen may sleep: wake lock is unavailable in this browser.');
+      return;
+    }
+    if (this.attempts >= 3) {
+      this.deps.status(false, 'Screen lock keeps dropping. Tap Retry or check your screen timeout settings.');
+      return;
+    }
+    const token = { generation: this.generation };
+    this.pending = token;
+    this.attempts++;
+    this.deps.status(false, 'Requesting screen lock…');
+    try {
+      const sentinel = await this.deps.request();
+      if (!this.active || token.generation !== this.generation || !this.deps.visible()) {
+        if (!sentinel.released) await sentinel.release();
+        return;
+      }
+      if (sentinel.released) throw new Error('released');
+      const onRelease = () => {
+        if (this.lock?.sentinel !== sentinel) return;
+        this.lock = null;
+        this.deps.status(false, 'Screen lock released; the screen may sleep.');
+        if (this.active && this.deps.visible()) {
+          this._clearRetry();
+          const generation = this.generation;
+          this.retryTimer = this.deps.setTimeout(() => {
+            this.retryTimer = null;
+            if (this.active && generation === this.generation) void this.acquire();
+          }, 1000);
+        }
+      };
+      this.lock = { sentinel, onRelease };
+      sentinel.addEventListener('release', onRelease, { once: true });
+      this.deps.status(true, 'Screen kept awake');
+    } catch {
+      if (this.active && token.generation === this.generation) {
+        this.deps.status(false, 'Screen lock was refused. Tap Retry or check your screen timeout settings.');
+      }
+    } finally {
+      if (this.pending === token) this.pending = null;
+    }
+  }
+}
 
 Object.assign(CodemanApp.prototype, {
   /** The member car mode talks to: the one marked as the room's voice. */
@@ -505,8 +637,8 @@ Object.assign(CodemanApp.prototype, {
     this._stopChatRecording?.();
     this._carScreen.hidden = true;
     document.documentElement.classList.remove('car-mode-open');
-    this._carWakeLock?.release?.().catch?.(() => {});
-    this._carWakeLock = null;
+    this._carAwake?.stop();
+    this._carAwake = null;
     try {
       localStorage.removeItem('codeman:carMode');
     } catch {
@@ -527,12 +659,26 @@ Object.assign(CodemanApp.prototype, {
     if (on) setTimeout(() => this.openCarMode(), 500);
   },
 
-  async _keepCarScreenAwake() {
-    try {
-      this._carWakeLock = await navigator.wakeLock?.request('screen');
-    } catch {
-      /* not offered, or refused: the screen may sleep */
+  _keepCarScreenAwake() {
+    if (!this._carAwake) {
+      this._carAwake = new CarScreenWakeLock({
+        secure: window.isSecureContext === true,
+        visible: () => document.visibilityState === 'visible',
+        request: navigator.wakeLock?.request ? () => navigator.wakeLock.request('screen') : null,
+        addVisibility: (fn) => document.addEventListener('visibilitychange', fn),
+        removeVisibility: (fn) => document.removeEventListener('visibilitychange', fn),
+        setTimeout: (fn, ms) => setTimeout(fn, ms),
+        clearTimeout: (timer) => clearTimeout(timer),
+        status: (held, text) => {
+          const notice = this._carScreen?.querySelector('.car-wake-notice');
+          if (!notice) return;
+          notice.hidden = held;
+          notice.querySelector('.car-wake-text').textContent = text;
+          this._carScreen.dataset.screenAwake = held ? 'held' : 'unavailable';
+        },
+      });
     }
+    return this._carAwake.start();
   },
 
   async _carSend(text) {
@@ -624,7 +770,24 @@ Object.assign(CodemanApp.prototype, {
       hint.className = 'car-hint';
       pad.append(status, detail, hint);
       pad.onclick = () => this._carTap();
-      screen.append(bar, pad);
+      const awake = document.createElement('div');
+      awake.className = 'car-wake-notice';
+      awake.setAttribute('role', 'status');
+      awake.style.cssText = 'padding:8px 14px;background:#3d330b;color:#fff;font-size:14px;';
+      const awakeText = document.createElement('span');
+      awakeText.className = 'car-wake-text';
+      awakeText.textContent = 'Requesting screen lock…';
+      const retryAwake = document.createElement('button');
+      retryAwake.type = 'button';
+      retryAwake.className = 'car-exit';
+      retryAwake.textContent = 'Retry keep awake';
+      retryAwake.style.cssText = 'margin-left:8px;padding:4px 8px;font-size:14px;min-height:44px;';
+      retryAwake.onclick = (event) => {
+        event.stopPropagation();
+        void this._carAwake?.retry();
+      };
+      awake.append(awakeText, retryAwake);
+      screen.append(bar, awake, pad);
       document.body.append(screen);
       this._carScreen = screen;
       const fillVoices = () => this._fillCarVoices();

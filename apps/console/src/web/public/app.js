@@ -1558,6 +1558,9 @@ class CodemanApp {
       if (!e.ctrlKey && !e.metaKey && !e.altKey) return;
       for (const shortcut of this.getShortcutRegistry()) {
         if (shortcut.disabled || !shortcut.action) continue;
+        // Ctrl+Shift+R belongs to the browser unless a visible terminal owns the keyboard.
+        if (shortcut.id === 'restore-terminal-size' &&
+            (this._chatApp?.view === 'chat' || !e.target?.closest?.('.xterm'))) continue;
         const action = SHORTCUT_ACTIONS[shortcut.action];
         if (!action) continue;
         if (this.matchesShortcutEvent(e, shortcut)) {

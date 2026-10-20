@@ -11,6 +11,8 @@
  */
 
 import { randomUUID } from 'node:crypto';
+import { EmployeeAlertModes, type AlertLease, type AlertMode } from './employee-alert-mode.js';
+import { isOwnerMark } from './owner-auth/marks.js';
 import { chmodSync, constants as fsConstants, copyFileSync, existsSync, promises as fs, renameSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import {
@@ -58,6 +60,7 @@ const CLOSED_ALERT = 'Chat is read-only: a change could not be saved or undone o
 
 export interface ChatroomServiceDeps {
   file: string;
+  employeeOf?: (sessionId: string) => string | undefined;
   getSession(id: string): ChatSessionLike | undefined;
   broadcast(event: string, data: unknown): void;
   now?: () => number;
@@ -91,6 +94,7 @@ export interface ChatroomServiceDeps {
 
 export interface ChatMemberView extends ChatMember {
   name: string;
+  alertMode?: AlertLease;
   mode?: string;
   alive: boolean;
   working: boolean;
@@ -184,6 +188,7 @@ function etTime(at: number): string {
 export class ChatroomService {
   private store = new ChatroomStore();
   readonly delivery: ChatroomDelivery;
+  private readonly alertModes: EmployeeAlertModes;
   private persistTimer: ReturnType<typeof setTimeout> | undefined;
   private persistChain: Promise<void> = Promise.resolve();
   private messageListeners = new Set<(room: ChatRoom, message: ChatMessage) => void>();
@@ -211,11 +216,18 @@ export class ChatroomService {
   private writesClosed: string | undefined;
 
   constructor(private readonly deps: ChatroomServiceDeps) {
+    this.alertModes = new EmployeeAlertModes(deps.file ? join(dirname(deps.file), 'employee-alert-modes.json') : undefined, () => this.now());
     this.deliveryReady = !deps.deferDeliveryRecovery;
     this.archive = new ChatArchive(deps.archiveDir ?? join(dirname(deps.file), 'chat-archive'));
     this.seen = new LastSeenStore(deps.file ? join(dirname(deps.file), 'chat-last-seen.json') : undefined);
     this.delivery = new ChatroomDelivery({
       getSession: deps.getSession,
+      forceWake: (sessionId, roomId, messageId) => {
+        const message = this.store.get(roomId)?.messages.find((m) => m.id === messageId);
+        if (message?.from.kind === 'user' && isOwnerMark(message.from.mark)) return true;
+        return this.alertMode(sessionId)?.mode === 'vibrate' && this.alertAllows(sessionId, roomId, messageId);
+      },
+      allowFragment: (sessionId, roomId, messageId) => this.alertAllows(sessionId, roomId, messageId),
       now: deps.now,
       isReady: () => this.deliveryReady,
       pendingStore: () => this.pendingStore,
@@ -666,6 +678,36 @@ export class ChatroomService {
     return this.store.roomsFor(sessionId);
   }
 
+  alertMode(sessionId: string): AlertLease | undefined {
+    const employee = this.deps.employeeOf?.(sessionId);
+    return employee ? this.alertModes.get(employee) : undefined;
+  }
+
+  async setAlertMode(sessionId: string, mode: AlertMode, durationMs: number): Promise<AlertLease | undefined> {
+    const employeeId = this.deps.employeeOf?.(sessionId);
+    if (!employeeId) throw new ChatroomError('No employee binding for this session', 'CONFLICT');
+    if (!['ring', 'vibrate', 'silent'].includes(mode) || !Number.isFinite(durationMs) || durationMs <= 0 || durationMs > 28800000) throw new ChatroomError('Duration must be greater than zero and at most eight hours', 'INVALID_INPUT');
+    await this.audit({ action: 'alert-mode-request', sessionId, employeeId, mode, durationMs });
+    if (this.deps.employeeOf?.(sessionId) !== employeeId) throw new ChatroomError('Employee binding changed', 'CONFLICT');
+    const lease = this.alertModes.set(employeeId, mode, durationMs);
+    this.delivery.applyAlertPolicy(sessionId);
+    await this.audit({ action: 'alert-mode-changed', sessionId, employeeId, mode, until: lease?.until ?? null });
+    for (const room of this.store.list()) if (room.members.some((m) => m.sessionId === sessionId)) this.deps.broadcast(ChatroomChanged, { owner: room.owner ?? '@single', roomId: room.id });
+    return lease;
+  }
+
+  private alertAllows(sessionId: string, roomId: string, messageId?: string): boolean {
+    const lease = this.alertMode(sessionId);
+    if (!lease || lease.mode === 'ring') return true;
+    const room = this.store.get(roomId);
+    const message = room?.messages.find((m) => m.id === messageId);
+    if (!message) return false;
+    if (message.from.kind === 'user' && isOwnerMark(message.from.mark)) return true;
+    const name = this.nameOf(sessionId);
+    const unique = room?.members.filter((m) => this.nameOf(m.sessionId).toLowerCase() === name.toLowerCase()).length === 1;
+    return lease.mode === 'vibrate' && unique && textMentions(message.text, name);
+  }
+
   view(room: ChatRoom, options: { since?: number; limit?: number } = {}): ChatRoomView {
     const members = room.members.map((m): ChatMemberView => {
       const s = this.deps.getSession(m.sessionId);
@@ -680,6 +722,7 @@ export class ChatroomService {
         ...m,
         name,
         mode: s?.mode,
+        alertMode: this.alertMode(m.sessionId),
         alive: !!s && s.pid !== null,
         working: !!s?.isWorking,
         pendingDeliveries: this.delivery.pendingFor(m.sessionId),
