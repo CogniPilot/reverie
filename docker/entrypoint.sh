@@ -37,6 +37,10 @@ if [ -z "${CODEMAN_PASSWORD:-}" ]; then
 fi
 export CODEMAN_USERNAME=${CODEMAN_USERNAME:-owner}
 
+# The default Claude and Codex profiles keep their sign-in under these directories; on the volume they survive a recreate.
+mkdir -p "$DATA/accounts/claude" "$DATA/accounts/codex"
+export CLAUDE_CONFIG_DIR=${CLAUDE_CONFIG_DIR:-$DATA/accounts/claude} CODEX_HOME=${CODEX_HOME:-$DATA/accounts/codex}
+
 # Opt-in agent CLIs that the image does not ship. They install on the volume, so a recreated container keeps them.
 # No network or a failed install is a warning, never a failed start.
 export PATH="$DATA/tools/bin:$PATH"

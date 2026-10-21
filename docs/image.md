@@ -59,12 +59,22 @@ bytes that ran before.
 3. sets the owner login: `CODEMAN_PASSWORD` from the environment, or a generated password
    kept at `owner-password` (mode 0600) on the volume. The console never starts without one;
 4. installs the opt-in CLIs named in `REVERIE_INSTALL_CLIS` onto the volume, skipping
-   cleanly when offline;
+   cleanly when offline, and points the default Claude and Codex profiles at
+   `accounts/claude` and `accounts/codex` on the volume so a recreate keeps a sign-in;
 5. runs the given command, by default `reverie web --host 0.0.0.0 --port 3000`.
 
 Any other command runs after the same preparation. The development and personal
 launchers (`scripts/fleet-container`, `scripts/reverie-recreate`) bypass it with
 `--entrypoint /usr/bin/env`, because they mount their own instance and workspace.
+
+## Hiring the first employee (interim, until hire-by-model lands)
+
+The Company page's Hire form adopts an existing agent session; with no session yet it stays
+disabled. Until hiring by model, plan and effort ships, start the first session from the
+legacy screen: open `http://127.0.0.1:3000/?legacy=1`, choose the plan account and model in
+its Run controls and start a session, then return to Company and hire it. Sign-ins for plan
+accounts live on the Plans page. This route is temporary and is listed as a known rough
+edge of this release.
 
 ## Exposure
 

@@ -78,6 +78,18 @@ class EntrypointTest(unittest.TestCase):
         self.assertIn("could not install claude-code", result.stderr)
         self.assertIn("unknown CLI 'nonsense'", result.stderr)
 
+    def test_default_profiles_sign_in_on_the_volume(self):
+        result = self.start("sh", "-c", 'printf "%s|%s" "$CLAUDE_CONFIG_DIR" "$CODEX_HOME"')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, f"{self.data / 'accounts' / 'claude'}|{self.data / 'accounts' / 'codex'}")
+        for name in ("claude", "codex"):
+            self.assertEqual(stat.S_IMODE((self.data / "accounts" / name).stat().st_mode), 0o700)
+
+    def test_given_profile_dirs_are_kept(self):
+        result = self.start("sh", "-c", 'printf "%s|%s" "$CLAUDE_CONFIG_DIR" "$CODEX_HOME"',
+                            CLAUDE_CONFIG_DIR="/elsewhere/claude", CODEX_HOME="/elsewhere/codex")
+        self.assertEqual(result.stdout, "/elsewhere/claude|/elsewhere/codex")
+
     def test_default_command_is_the_console_on_all_interfaces(self):
         reverie = self.bin / "reverie"
         reverie.write_text('#!/bin/sh\necho "$@"\n')
