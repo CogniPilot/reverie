@@ -31,11 +31,11 @@ class FloorsTest(unittest.TestCase):
         self.assertTrue(targets_private_person("mail Jane Roe at jane@example.com", []))
         self.assertFalse(targets_private_person("the build took 555 seconds and 12345678901 cycles", []))
         # Addresses, versions and dates are not contact details, even beside a capitalised name.
-        for benign in ("The Model Router listens on 169.254.1.2 now", "Home Server is 10.20.30.12 on the LAN",
+        for benign in ("The Model Router listens on 192.0.2.10 now", "Home Server is 10.20.30.12 on the LAN",
                        "Build Tools moved to 1.19.1 and 10.2.3.4", "Release Notes for 2026-10-16 are out",
                        "Home Lab hosts sit on 10.20.30.x behind the router", "Private Range 10.0.0.0/8 is local",
-                       "Model Router at 169.254.1.2:8080 answered", "Build Tools v1.19.10 shipped",
-                       "Home Server (10.20.30.12), on the LAN", "Model Router on `169.254.1.2` and **127.0.0.1**"):
+                       "Model Router at 192.0.2.10:8080 answered", "Build Tools v1.19.10 shipped",
+                       "Home Server (10.20.30.12), on the LAN", "Model Router on `192.0.2.10` and **127.0.0.1**"):
             self.assertFalse(targets_private_person(benign, []), benign)
         # Real contact details still trip: US, continental and short dotted shapes, any group above 255, and a
         # phone beside an IP.
