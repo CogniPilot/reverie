@@ -5,6 +5,7 @@
 #   setup.sh --version 0.1.0    install or switch to that release (an upgrade backs up console state first)
 #   setup.sh --rollback         go back to the release that ran before the last switch, with its backed-up state
 #   setup.sh --password         print the owner login
+#   setup.sh --owner            create the owner account; prints a one-time password for /owner/login
 #   setup.sh --dry-run ...      print every command, change nothing
 #
 # Options: --port N (default 3000), --name NAME (default reverie; also the data volume NAME-data),
@@ -24,8 +25,9 @@ while [ $# -gt 0 ]; do
     --with-claude-code) clis="claude-code" ;;
     --rollback) mode=rollback ;;
     --password) mode=password ;;
+    --owner) mode=owner ;;
     --dry-run) dry=1 ;;
-    -h|--help) sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "unknown option: $1 (see --help)" >&2; exit 2 ;;
   esac
   shift
@@ -51,6 +53,11 @@ exists() { "$engine" container inspect "$name" >/dev/null 2>&1; }
 
 if [ "$mode" = password ]; then
   exec "$engine" exec "$name" cat /instances/default/owner-password
+fi
+if [ "$mode" = owner ]; then
+  # From this host shell, never from inside a Reverie session: the one-time password is printed here only.
+  run "$engine" exec -e REVERIE_DATA_DIR=/instances/default/console "$name" reverie owner bootstrap --username owner --enforce
+  exit
 fi
 
 pull() {
@@ -112,6 +119,7 @@ cat <<EOF
 
 Reverie is running: http://127.0.0.1:$port
 Owner login: user "owner", password from:  $0 --password${name:+ --name $name}
+Owner sign-in: on first install run  $0 --owner${name:+ --name $name}  and sign in at /owner/login
 Data volume: $volume (kept across upgrades; console backups inside it)
 Upgrade:     $0 --version X.Y.Z      Roll back: $0 --rollback
 EOF

@@ -66,10 +66,21 @@ export function oneTimePassword(): string {
   return randomToken(16);
 }
 
+/**
+ * The policy a first bootstrap keeps: a fresh image volume starts with only the policy marker
+ * (`enforce`, written by the image entrypoint), and creating the account must not lower it.
+ * An unreadable marker fails closed; no marker at all is the long-standing default, `log`.
+ */
+function markerPolicy(store: OwnerAuthStore): OwnerPolicy {
+  const marker = store.readMarker();
+  if (marker === undefined) return 'log';
+  return marker === 'unreadable' ? 'enforce' : marker;
+}
+
 export async function bootstrap(
   store: OwnerAuthStore,
   username: string,
-  options: { force?: boolean; now?: number } = {}
+  options: { force?: boolean; enforce?: boolean; now?: number } = {}
 ): Promise<{ username: string; oneTimePassword: string }> {
   const name = normalizeUsername(username);
   if (!isValidUsername(name)) throw new OwnerAdminError('Usernames are 2-32 of a-z 0-9 _ - and start alphanumeric');
@@ -91,10 +102,11 @@ export async function bootstrap(
     keepers: store.read()?.keepers ?? [],
     throttles: {},
     epoch: (store.read()?.epoch ?? 0) + 1,
-    policy: store.read()?.policy ?? 'log',
+    // `enforce` (a fresh native install) only ever raises the policy; it never lowers one.
+    policy: options.enforce ? 'enforce' : (store.read()?.policy ?? markerPolicy(store)),
   };
   await store.replace(account);
-  await auditAdmin(store, 'owner_bootstrapped', { username: name, replaced: !!options.force });
+  await auditAdmin(store, 'owner_bootstrapped', { username: name, replaced: !!options.force, policy: account.policy });
   return { username: name, oneTimePassword: password };
 }
 

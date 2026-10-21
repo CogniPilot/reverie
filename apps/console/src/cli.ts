@@ -1288,11 +1288,13 @@ ownerCmd
   .description('Create the owner account with a one-time password (change forced at first sign-in)')
   .requiredOption('--username <name>', 'Owner username')
   .option('--force', 'Replace an existing owner account entirely (two-step, devices and sessions end)')
-  .action((options: { username: string; force?: boolean }) =>
+  .option('--enforce', 'Require owner sign-in from the start (policy enforce); use it on a fresh install')
+  .action((options: { username: string; force?: boolean; enforce?: boolean }) =>
     ownerAction(async () => {
       const { bootstrap } = await import('./owner-auth/admin.js');
-      const result = await bootstrap(await ownerStore(), options.username, { force: !!options.force });
+      const result = await bootstrap(await ownerStore(), options.username, { force: !!options.force, enforce: !!options.enforce });
       printOneTime(result.username, result.oneTimePassword);
+      if (options.enforce) console.log('Owner policy: enforce');
     })
   );
 ownerCmd
