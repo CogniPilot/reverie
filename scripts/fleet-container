@@ -100,7 +100,7 @@ case "${1:-status}" in
         --mount "type=bind,src=$fleet_instance_data,dst=/home/cto/.fleet" \
         --mount "type=bind,src=$fleet_repo,dst=/workspace" \
         --mount "type=bind,src=$fleet_workspace,dst=/scratch" \
-        "$fleet_image"
+        --entrypoint /usr/bin/env "$fleet_image" sleep infinity
     fi
     ;;
   exec)
