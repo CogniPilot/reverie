@@ -94,7 +94,19 @@ jobs:
           [ "$code" = 401 ] || ok=
           # Full built-image owner-login acceptance: bootstrap, one-time sign-in, password
           # change, owner route 200, and the refusals. The one-time password stays in 0600 files.
-          docker exec -i boot bash -s < .github/ci/boot-owner.sh || ok=
+          docker image inspect --format 'image {{.Id}}' "reverie:$GITHUB_SHA" | tee -a "$GITHUB_STEP_SUMMARY"
+          docker exec -i boot bash -s -- before < .github/ci/boot-smoke.sh || ok=
+          # Enforcement must survive a restart of the same container (state lives in its writable layer).
+          docker restart --time 30 boot || ok=
+          code=
+          for _ in $(seq 1 60); do
+            code=$(status)
+            if [ "$code" != 000 ] && [ -n "$code" ]; then break; fi
+            sleep 2
+          done
+          echo "after restart, without the owner password: ${code:-none}"
+          [ "$code" = 401 ] || ok=
+          docker exec -i boot bash -s -- after < .github/ci/boot-smoke.sh || ok=
           test "$(docker exec boot stat -c %a /instances/default/owner-password)" = 600 || ok=
           docker exec boot /opt/fleet/python/bin/python3 -I -c 'import cto, experts' || ok=
           docker inspect --format 'state {{.State.Status}}, exit code {{.State.ExitCode}}' boot
