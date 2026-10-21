@@ -107,17 +107,28 @@ describe('shipped Company plans page', () => {
     expect(def).not.toContain('data-remove');
   });
 
-  it('draws the even-pace line from 0 % at the week start to 100 % at the reset, under the projection', () => {
+  it('keeps the scale near 100 % and ends a steep projection at its run-out marker', () => {
     const svg = { innerHTML: '' };
     const run = new vm.Script(`${/const esc = .*/.exec(script)?.[0]}\n${between('function burnChart(svg, p)', "document.getElementById('refresh').onclick")}; burnChart`).runInNewContext({
       css: (v: string) => v, fmt: () => 'M', startOfDay: (t: number) => t, D: 864e5, H: 36e5, planRisk: () => 'good',
     }) as (svg: object, p: object) => void;
     const weekStart = 1_000_000_000_000, reset = weekStart + 7 * 864e5;
-    // Projection past 100 % stretches the y axis to 150 %: the even-pace line still ends at 100 %.
-    run(svg, { weekStart, reset, points: [{ t: weekStart + 864e5, used: 30 }], used: 30, rate: 1, proj: 140, at: weekStart + 864e5 });
+    // At 3 % per hour, the remaining 70 % lasts 23 1/3 hours, not the rest of the week.
+    run(svg, { weekStart, reset, points: [{ t: weekStart + 864e5, used: 30 }], used: 30, rate: 3, proj: 462, at: weekStart + 864e5 });
     const line = /<line class="nominal" x1="([\d.]+)" y1="([\d.]+)" x2="([\d.]+)" y2="([\d.]+)"/.exec(svg.innerHTML);
-    expect(line?.slice(1).map(Number)).toEqual([28, 102, 312, 8 + (1 - 100 / 150) * 94]);
+    expect(line?.slice(1).map(Number)).toEqual([28, 102, 312, 8 + (1 - 100 / 110) * 94]);
     expect(svg.innerHTML).toContain('>even pace</text>');
+    const projection = /<line class="projection" x1="([\d.]+)" y1="([\d.]+)" x2="([\d.]+)" y2="([\d.]+)"/.exec(svg.innerHTML);
+    const runout = /<circle class="runout" cx="([\d.]+)" cy="([\d.]+)"/.exec(svg.innerHTML);
+    const runoutX = 28 + (864e5 + 70 / 3 * 36e5) / (7 * 864e5) * 284;
+    expect(Number(projection?.[3])).toBeCloseTo(runoutX);
+    expect(Number(projection?.[4])).toBeCloseTo(8 + (1 - 100 / 110) * 94);
+    expect(Number(runout?.[1])).toBeCloseTo(runoutX);
+    expect(Number(runout?.[2])).toBeCloseTo(Number(projection?.[4]));
+    expect(svg.innerHTML).toContain('Budget reaches 100%');
+    expect(svg.innerHTML).not.toContain('>110%</text>');
+    expect(svg.innerHTML).not.toContain('>475%</text>');
+
     expect(svg.innerHTML.indexOf('class="nominal"')).toBeLessThan(svg.innerHTML.indexOf('<polyline'));
     expect(html).toContain('Dashed grey line = even pace to the stop point');
     // Start and reset days: vertical lines at both edges, labelled.
@@ -138,7 +149,7 @@ describe('shipped Company plans page', () => {
         fmt: (timestamp: number, options: Intl.DateTimeFormatOptions) => new Intl.DateTimeFormat('en-US', { ...options, timeZone: 'America/New_York' }).format(timestamp),
         startOfDay: (timestamp: number) => timestamp, D: 864e5, H: 36e5, planRisk: () => 'good',
       }) as (svg: object, plan: object) => void;
-      const plan = { weekStart, reset, banked: { count: 2, expiresAt }, points: [], used: 40, rate: 1, proj: 136, at: weekStart + 864e5 };
+      const plan = { weekStart, reset, banked: { count: 2, expiresAt }, points: [], used: 40, rate: 0.1, proj: 54.4, at: weekStart + 864e5 };
       run(svg, plan);
       const extent = Math.max(reset, expiresAt) - weekStart;
       const stopX = 28 + (expiresAt - weekStart) / extent * 284;
@@ -174,7 +185,7 @@ describe('shipped Company plans page', () => {
       css: (value: string) => value, fmt: () => 'M', startOfDay: (timestamp: number) => timestamp, D: 864e5, H: 36e5, planRisk: () => 'good',
     }) as (svg: object, plan: object) => void;
     const weekStart = 1_000_000_000_000, reset = weekStart + 7 * 864e5;
-    run(svg, { weekStart, reset, banked, points: [], used: 40, rate: 1, proj: 136, at: weekStart + 864e5 });
+    run(svg, { weekStart, reset, banked, points: [], used: 40, rate: 0.1, proj: 54.4, at: weekStart + 864e5 });
     expect(svg.innerHTML).toContain('Stop at weekly reset');
     expect(svg.innerHTML).toContain('>reset</text>');
     expect(svg.innerHTML).not.toContain('class="weekly-reset"');
