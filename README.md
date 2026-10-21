@@ -12,11 +12,32 @@ Use `reverie` inside the container. Existing `fleet` and `codeman` CLI aliases,
 `REVERIE_*` settings, storage paths and `fleet-*` tools remain compatible.
 The fork has no automatic upstream package update or synchronization process.
 
+## What it is
+
+A shareable agent workspace with persistent identities, private and project memory,
+reflection, dreams and provider-independent handoffs. An instance selects its organizational role independently of its harness and
+permissions. `kind: "agent"` provides a conversation-first local agent with chat
+and bounded coding profiles; `kind: "cto"` retains the CTO template. Names, personal style, relationships, memories and instance credentials
+are external data. No personal instance is included in this repository.
+
+The current native runtime adapter uses OpenCode and its provider/model selection.
+The portable memory CLI and skill also work from Codex, Claude Code and other CLIs.
+Full automatic conversation ingestion for those other harnesses is future work;
+installing the skill alone does not hook every completed turn automatically.
+The implementation lives in `cto/`; generic specialist templates live in `experts/`.
+Personal identities and their histories live in the ignored `local/` directory.
+Existing SQLite history columns are read compatibly during migration.
+
 ## Setup
 
 Two ways to run Reverie: the published container image (Docker or Podman), or
 natively from a clone. Both end with the same first-login steps.
 [docs/image.md](docs/image.md) and [docs/setup.md](docs/setup.md) have the details.
+
+Plan about 15 minutes for a first run on a normal connection; the image pull is most
+of it. Recreating later takes under 5 minutes because the data volume keeps the
+sign-ins. Add a few minutes once for the GitHub steps (accepting the invitation,
+creating a token).
 
 ### With Docker or Podman
 
@@ -107,19 +128,6 @@ and memory skill, the runtime watcher and running the console as a service.
 To reach the console from another device, front it with an authenticated proxy or
 tunnel such as `tailscale serve`; do not publish the port on all interfaces.
 
-A shareable agent workspace with persistent identities, private and project memory,
-reflection, dreams and provider-independent handoffs. An instance selects its organizational role independently of its harness and
-permissions. `kind: "agent"` provides a conversation-first local agent with chat
-and bounded coding profiles; `kind: "cto"` retains the CTO template. Names, personal style, relationships, memories and instance credentials
-are external data. No personal instance is included in this repository.
-
-The current native runtime adapter uses OpenCode and its provider/model selection.
-The portable memory CLI and skill also work from Codex, Claude Code and other CLIs.
-Full automatic conversation ingestion for those other harnesses is future work;
-installing the skill alone does not hook every completed turn automatically.
-The implementation lives in `cto/`; generic specialist templates live in `experts/`.
-Personal identities and their histories live in the ignored `local/` directory.
-Existing SQLite history columns are read compatibly during migration.
 
 ## Code and instance data
 
