@@ -6,6 +6,7 @@
 #   setup.sh --rollback         go back to the release that ran before the last switch, with its backed-up state
 #   setup.sh --password         print the owner login
 #   setup.sh --owner            create the owner account; prints a one-time password for /owner/login
+#   setup.sh --offline [PATH]   load a local image archive (default ./reverie-image.tar); never pull
 #   setup.sh --dry-run ...      print every command, change nothing
 #
 # Options: --port N (default 3000), --name NAME (default reverie; also the data volume NAME-data),
@@ -15,6 +16,7 @@
 set -euo pipefail
 
 image=ghcr.io/jgoppert/reverie version=latest port=3000 name=reverie engine= mode=install dry=0 clis=
+offline=0 archive=./reverie-image.tar
 while [ $# -gt 0 ]; do
   case "$1" in
     --version) version=${2#v}; shift ;;
@@ -22,18 +24,26 @@ while [ $# -gt 0 ]; do
     --name) name=$2; shift ;;
     --image) image=$2; shift ;;
     --engine) engine=$2; shift ;;
+    --offline)
+      offline=1
+      if [ "$#" -gt 1 ] && [[ "$2" != --* ]]; then archive=$2; shift; fi
+      ;;
     --with-claude-code) clis="claude-code" ;;
     --rollback) mode=rollback ;;
     --password) mode=password ;;
     --owner) mode=owner ;;
     --dry-run) dry=1 ;;
-    -h|--help) sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "unknown option: $1 (see --help)" >&2; exit 2 ;;
   esac
   shift
 done
 case "$port" in ''|*[!0-9]*) echo "--port needs a number" >&2; exit 2 ;; esac
 case "$name" in ''|*[!A-Za-z0-9_.-]*) echo "--name may use letters, digits, . _ -" >&2; exit 2 ;; esac
+if [ "$offline" = 1 ] && [ "$mode" != install ]; then
+  echo "--offline is only for installation; use --owner, --password or --rollback separately" >&2
+  exit 2
+fi
 
 if [ -z "$engine" ]; then
   if command -v podman >/dev/null 2>&1; then engine=podman
@@ -72,7 +82,9 @@ start() {  # start IMAGE_REF: replace the container, keep the volume
   if exists; then run "$engine" stop --time 30 "$name"; run "$engine" rm "$name"; fi
   local restart=(--restart unless-stopped)
   [ "$engine" = podman ] && restart=(--restart always)
-  run "$engine" run --detach --name "$name" "${restart[@]}" \
+  local pull_policy=()
+  [ "$offline" = 0 ] || pull_policy=(--pull=never)
+  run "$engine" run "${pull_policy[@]}" --detach --name "$name" "${restart[@]}" \
     --publish "127.0.0.1:$port:3000" \
     --mount "type=volume,src=$volume,dst=/instances" \
     --env "REVERIE_INSTALL_CLIS=$clis" \
@@ -91,9 +103,28 @@ if [ "$mode" = rollback ]; then
   [ "$dry" = 1 ] || { head -n -1 "$state" > "$state.tmp" && mv "$state.tmp" "$state"; }
 else
   ref="$image:$version"
-  pull "$ref"
+  if [ "$offline" = 1 ]; then
+    [ -f "$archive" ] && [ -r "$archive" ] || { echo "Local image archive is missing or unreadable: $archive" >&2; exit 1; }
+    if [ "$dry" = 1 ]; then
+      run "$engine" load --input "$archive"
+      run "$engine" image inspect --format '{{.Id}}' "$ref"
+      digest=$ref
+    else
+      loaded=$("$engine" load --input "$archive" 2>&1) || { printf '%s\n' "$loaded" >&2; exit 1; }
+      printf '%s\n' "$loaded"
+      printf '%s\n' "$loaded" | grep -Fx -- "Loaded image: $ref" >/dev/null || {
+        echo "Archive did not load the requested image tag: $ref" >&2; exit 1;
+      }
+      digest=$("$engine" image inspect --format '{{.Id}}' "$ref") || {
+        echo "Archive did not provide the requested local image: $ref" >&2; exit 1;
+      }
+      [[ "$digest" =~ ^(sha256:)?[0-9a-f]{64}$ ]] || { echo "Local image has no valid image ID: $ref" >&2; exit 1; }
+    fi
+  else
+    pull "$ref"
+    digest=$("$engine" image inspect --format '{{index .RepoDigests 0}}' "$ref" 2>/dev/null || true)
+  fi
   # Record the exact image (by digest when the engine reports one) so a rollback returns to these bytes.
-  digest=$("$engine" image inspect --format '{{index .RepoDigests 0}}' "$ref" 2>/dev/null || true)
   start "${digest:-$ref}"
   if [ "$dry" = 0 ]; then
     mkdir -p "$state_dir"
@@ -107,7 +138,7 @@ if [ "$engine" = podman ] && command -v systemctl >/dev/null 2>&1; then
     echo "note: enable podman-restart.service (systemctl --user) so Reverie starts at boot" >&2
 fi
 
-if [ "$dry" = 0 ]; then
+if [ "$dry" = 0 ] && command -v curl >/dev/null 2>&1; then
   for _ in $(seq 1 60); do
     if curl -fsS -o /dev/null "http://127.0.0.1:$port/api/status" 2>/dev/null || [ "$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$port/api/status")" = 401 ]; then
       break

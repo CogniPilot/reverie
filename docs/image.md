@@ -47,6 +47,12 @@ gh auth token | podman login ghcr.io --username YOUR_GITHUB_USER --password-stdi
 
 ## Upgrade and rollback
 
+For a release bundle with a local image archive, follow
+[offline installation](offline-install.md). `setup.sh --offline [PATH]` loads
+the archive (default `./reverie-image.tar`), checks the requested image tag and
+starts its local image ID with `--pull=never`. Use the image name and version
+from the bundle's `IMAGE-REF.txt`; no registry login or host Nix is required.
+
 ```bash
 bash setup.sh --version 0.1.1   # the first start of a new release backs up console state on the volume
 bash setup.sh --rollback        # back to the previous release, with the state it backed up

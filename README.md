@@ -41,6 +41,29 @@ creating a token).
 
 ### With Docker or Podman
 
+If you received a release bundle, use its local image instead of signing in to
+GitHub or a registry. The host needs Docker Engine running, Bash, tar, coreutils,
+grep and a browser; it does not need Nix, Skopeo, Node or Python. Match the host
+CPU architecture to the image architecture stated in the bundled README.
+From the extracted bundle directory:
+
+```bash
+sha256sum -c SHA256SUMS
+IMAGE_REF=$(cat IMAGE-REF.txt)
+bash setup.sh --engine docker --offline ./reverie-image.tar \
+  --image "${IMAGE_REF%:*}" --version "${IMAGE_REF##*:}"
+bash setup.sh --engine docker --password
+bash setup.sh --engine docker --owner
+```
+
+The local install refuses a missing archive or mismatched tag before replacing
+an existing container and starts with `--pull=never`. Keep the two passwords
+private and continue with First login below. See
+[offline installation](docs/offline-install.md) for details and updates.
+Provider sign-ins, hosted models and optional CLI installation still need internet.
+
+For a registry-based installation instead:
+
 While the repository is private, you need to be a collaborator on it with Read
 access to the `reverie` package. The repository owner adds you as a collaborator,
 then either grants you Read on the package or links the package to the repository
