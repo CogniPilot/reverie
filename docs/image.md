@@ -8,12 +8,15 @@ empty instance on a volume.
 
 ## Quick start
 
-With Docker or Podman installed:
+With Docker or Podman and the GitHub CLI installed:
 
 ```bash
-curl -fsSLO https://github.com/jgoppert/reverie/releases/latest/download/setup.sh
+gh release download v0.1.0 --repo jgoppert/reverie --pattern setup.sh
 bash setup.sh
 ```
+
+Once the repository is public, `curl -fsSLO https://github.com/jgoppert/reverie/releases/latest/download/setup.sh`
+works as well, without signing in.
 
 `setup.sh` pulls the release, starts one container named `reverie` with a data volume
 `reverie-data` mounted at `/instances`, and prints the address. The console listens on
