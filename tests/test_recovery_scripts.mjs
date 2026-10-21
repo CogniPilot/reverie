@@ -45,7 +45,8 @@ function hostTree() {
 
 function recreate(t, ...args) {
   const result = spawnSync("bash", [join(scripts, "reverie-recreate"), "--repo", t.repo, "--scratch", t.scratch,
-    "--instance", t.instance, ...args], {
+    "--instance", t.instance, "--model", "test-model", "--api-base", "http://127.0.0.1:8080/v1", "--console-source", join(t.rescue, "opt-console"),
+    "--cto-source", join(t.rescue, "opt-fleet-python", "site-packages", "cto"), ...args], {
     env: { PATH: process.env.PATH, HOME: t.home, TMPDIR: t.root, FLEET_LAUNCHER: join(t.bin, "fleet-container") },
     encoding: "utf8",
   });
@@ -59,11 +60,13 @@ test("dry run prints the full, faithful container and changes nothing", () => {
   assert.equal(r.status, 0, r.stderr);
   // printf %q escapes commas; compare the unescaped command line.
   const runLine = r.stdout.split("\n").find((l) => l.includes(" engine create ")).replace(/\\/g, "");
-  for (const part of [`src=${t.repo},dst=/workspace`, `src=${t.scratch},dst=/scratch`, `src=${t.instance},dst=/instances/personal`,
+  const instanceTarget = /FLEET_INSTANCE_CONFIG=(\/instances\/[^ ]+)\/config\/instance\.json/.exec(runLine)?.[1];
+  assert.ok(instanceTarget, "the private mount has an explicit instance config");
+  for (const part of [`src=${t.repo},dst=/workspace`, `src=${t.scratch},dst=/scratch`, `src=${t.instance},dst=${instanceTarget}`,
     "create --pull=never --init --name reverie-live", "--user 2000:2000", "--userns=keep-id:uid=2000,gid=2000", "--cap-drop=all", "--memory=8g", "--memory-swap=8g",
     "--pids-limit=512", "--network=pasta:--map-host-loopback,169.254.1.2", "--publish 127.0.0.1:3001:3000",
-    "FLEET_INSTANCE_CONFIG=/instances/personal/config/instance.json", "FLEET_DATA_DIR=/instances/personal/runtime/console",
-    "FLEET_API_BASE=http://169.254.1.2:8080/v1", "FLEET_MODEL=qwen3.8-27b", "CODEMAN_API_URL=http://127.0.0.1:3000",
+    `FLEET_INSTANCE_CONFIG=${instanceTarget}/config/instance.json`, `FLEET_DATA_DIR=${instanceTarget}/runtime/console`,
+    "FLEET_API_BASE=http://127.0.0.1:8080/v1", "FLEET_MODEL=test-model", "CODEMAN_API_URL=http://127.0.0.1:3000",
     "FLEET_API_URL=http://127.0.0.1:3000", "FLEET_CASES_PATH=/scratch/cases", "FLEET_RESEARCH_ROOT=/scratch/research",
     "localhost/reverie:live /usr/local/bin/reverie web --host 0.0.0.0 --port 3000 --allow-unauthenticated-network"]) {
     assert.ok(runLine.includes(part), `run line lacks ${part}: ${runLine}`);
@@ -114,8 +117,8 @@ test("wrong or empty mount sources are refused before anything runs", () => {
 
 test("publish options and launcher installation", () => {
   const t = hostTree();
-  const two = recreate(t, "--dry-run", "--publish", "127.0.0.1:3000:3000", "--publish", "100.64.0.5:3000:3000");
-  assert.match(two.stdout, /--publish 127.0.0.1:3000:3000 --publish 100.64.0.5:3000:3000/);
+  const two = recreate(t, "--dry-run", "--publish", "127.0.0.1:3000:3000", "--publish", "192.0.2.5:3000:3000");
+  assert.match(two.stdout, /--publish 127.0.0.1:3000:3000 --publish 192.0.2.5:3000:3000/);
   assert.doesNotMatch(recreate(t, "--dry-run", "--no-publish").stdout, /--publish/);
   const installed = join(t.home, ".local", "libexec", "agent-fleet", "fleet-container");
   mkdirSync(join(t.home, ".local", "libexec", "agent-fleet"), { recursive: true }); writeFileSync(installed, "old");

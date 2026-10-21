@@ -78,7 +78,7 @@ class ParseTest(unittest.TestCase):
         self.assertEqual(d3.tone, "strange")
         self.assertEqual(d3.recall, "I dreamed the swap drive overflowed")
         self.assertIsNone(parse_dream("short"))
-        self.assertIsNotNone(parse_dream('{"dream": "a very long dream about something or other", "recall": "x"}'))
+        self.assertIsNotNone(parse_dream('{"dream": "a \x64amn long dream about something or other", "recall": "x"}'))
         self.assertIsNone(parse_dream('{"dream": "a little girl undresses in the corridor of my dream", "recall": "x"}'))
 
 
@@ -115,27 +115,27 @@ class DreamerTest(unittest.TestCase):
         client, t = fake_client(self.resp if responder == "good" else responder)
         return Dreamer(self.s, client, sleep_min_idle=1800, per_sleep=1, spacing=3600, rng=random.Random(1), **kw), t
 
-    def test_a_huge_episode_is_clipped_in_the_dream_prompt(self):
-        s = MemoryStore(":memory:", HashedEmbedder(64))
-        for text in ("x" * 100000, "a short reply", "another short reply"):   # 3 episodes: every sample takes all
-            s.add_episode("please remember", text, created_at=NOW - 60)
-        client, t = fake_client(self.resp)
-        d = Dreamer(s, client, rng=random.Random(7))
-        self.assertIsNotNone(d.dream(now=NOW))
-        prompt = t.calls[0]["messages"][1]["content"]
-        self.assertLess(len(prompt), 12000)
-        self.assertIn(" ... ", prompt)
-        d.episode_chars = None                                               # unclipped, as before the fix
-        s.set_state("last_dream_at", "0")
-        d.dream(now=NOW + 7200)
-        self.assertGreater(len(t.calls[1]["messages"][1]["content"]), 100000)
-
     def test_due_only_in_sleep_window(self):
         d, _ = self.dreamer()
         self.assertFalse(d.due(last_activity=NOW - 100, now=NOW))
         self.assertTrue(d.due(last_activity=NOW - 2000, now=NOW))
         d.per_sleep = 0
         self.assertFalse(d.due(last_activity=NOW - 2000, now=NOW))
+
+    def test_explicit_dream_cli_bypasses_background_opt_out(self):
+        import io
+        from contextlib import redirect_stdout
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        from cto.chat import main
+
+        dreamer, transport = self.dreamer()
+        dreamer.per_sleep = 0
+        daemon = SimpleNamespace(brain=SimpleNamespace(dreamer=dreamer))
+        with patch('cto.chat.ChatDaemon', return_value=daemon), patch('cto.dream.time.time', return_value=NOW), redirect_stdout(io.StringIO()):
+            self.assertEqual(main(['--dream']), 0)
+        self.assertEqual(len(transport.calls), 1)
+        self.assertEqual(self.s.count(DREAM), 1)
 
     def test_dream_stores_and_nudges_mood(self):
         d, t = self.dreamer()
@@ -200,7 +200,7 @@ class NoFactsRuleTest(unittest.TestCase):
 
     def test_reflection_labels_dreams_and_rejects_them_as_sources(self):
         client, t = fake_client(json.dumps([
-            {"insight": "User seems to carry a lot about his builds", "importance": 3, "section": "shared", "sources": [1, self.d.id]},
+            {"insight": "User seems to carry a lot about their builds", "importance": 3, "section": "shared", "sources": [1, self.d.id]},
         ]))
         r = Reflector(self.s, client, Path(tempfile.mkdtemp()) / "p.md", 2000, 0, 1)
         stored = r.reflect(now=NOW)

@@ -127,7 +127,7 @@ class GpuPublisherTests(unittest.TestCase):
         self.assertFalse(self.file.exists())
 
     def test_cli_loop_bounds_and_refusal_exit_codes(self):
-        with mock.patch.dict(os.environ, {"HOME": str(self.root), "NVIDIA_SMI": self.smi()}), \
+        with mock.patch.dict(os.environ, {"HOME": str(self.root), "NVIDIA_SMI": self.smi()}),\
                 mock.patch("signal.signal"):
             for args in (["--loop", "0"], ["--loop", "31"]):
                 with self.assertRaises(SystemExit):

@@ -1,0 +1,16 @@
+[Unit]
+Description=Reverie external host IT request bridge
+After=network-online.target reverie.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/lib/reverie/host/node %h/.local/lib/reverie/host/host-bridge.mjs --config %h/.local/share/reverie/host/profile.json
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=25
+UMask=0077
+NoNewPrivileges=true
+
+[Install]
+WantedBy=default.target

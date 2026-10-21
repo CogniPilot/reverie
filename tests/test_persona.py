@@ -29,10 +29,10 @@ class PersonaTest(unittest.TestCase):
         self.assertEqual(normalize_section("banana"), "shared")
 
     def test_render_sections_and_order(self):
-        text = render_profile([refl(1, "likes coffee", 5, "user"), refl(2, "I tease him", 7, "agent"),
+        text = render_profile([refl(1, "likes coffee", 5, "user"), refl(2, "I tease them", 7, "agent"),
                                refl(3, "we joked about swap", 9, "shared"), refl(4, "hates bugs", 8, "user")])
         self.assertIn("## About the user\n- (8) hates bugs\n- (5) likes coffee", text)
-        self.assertIn("## About the agent\n- (7) I tease him", text)
+        self.assertIn("## About the agent\n- (7) I tease them", text)
         self.assertIn("## Shared history\n- (9) we joked about swap", text)
         self.assertTrue(text.startswith("# Agent notes"))
 

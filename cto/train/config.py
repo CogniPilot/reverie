@@ -8,8 +8,9 @@ from pathlib import Path
 
 from ..config import DATA_DIR
 
-# Candidate bases (safetensors on HF). The default is plain Qwen3.8-27B.
+# Public candidate bases; select base_model explicitly in the training JSON.
 BASE_CANDIDATES = (
+    "huihui-ai/Huihui-Qwen3.8-27B-abliterated",
     "Qwen/Qwen3.8-27B",
     "Qwen/Qwen3.5-9B",
 )
@@ -17,7 +18,7 @@ BASE_CANDIDATES = (
 
 @dataclass
 class TrainConfig:
-    base_model: str = BASE_CANDIDATES[0]      # the 27B base
+    base_model: str = "MODEL_ID"              # owner-selected public model or local snapshot
     base_model_dir: str = ""                 # local HF snapshot used by convert; empty means resolve from the cache
     base_4bit_dir: str = str(Path.home() / "scratch" / "agent-fleet" / "training" / "base-4bit")   # saved nf4 snapshot, preferred when present
     run_name: str = "agent-fleet"

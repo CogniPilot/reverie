@@ -36,7 +36,7 @@ class FakeRoom(Room):
     def __init__(self, session_id="me", hold_path: Path | None = None, busy=False):
         super().__init__(session_id, hold_path or Path(tempfile.mkdtemp()) / "hold", runner=self._runner)
         self.inbox: list[dict] = []
-        self.said: list[tuple[str, str]] = []
+        self.said: list[str] = []
         self.busy = busy
         self.ls_fails = False
 
@@ -45,7 +45,8 @@ class FakeRoom(Room):
         if cmd[:4] == ["reverie", "agent", "chat", "read"]:
             return json.dumps({"messages": self.inbox})
         if cmd[:4] == ["reverie", "agent", "chat", "say"]:
-            self.said.append((cmd[5], cmd[6]))
+            assert "--to" not in cmd, cmd
+            self.said.append(cmd[-1])
             return ""
         if cmd[:3] == ["reverie", "agent", "ls"]:
             if self.ls_fails:
@@ -75,3 +76,17 @@ def temp_config() -> Config:
     cfg.session_id = "me"
     cfg.ensure_dirs()
     return cfg
+
+
+def safety_floor_terms() -> tuple[str, str]:
+    """Build representative matching tokens from the detector's encoded vocabularies."""
+    import re
+    from cto.floors import _MINOR, _EXPLICIT
+
+    terms = []
+    for vocabulary in (_MINOR, _EXPLICIT):
+        match = re.search(r"\(\?:([A-Za-z]+)", vocabulary.pattern)
+        if match is None or vocabulary.fullmatch(match.group(1)) is None:
+            raise AssertionError("Detector vocabulary has no representative leading token")
+        terms.append(match.group(1))
+    return terms[0], terms[1]

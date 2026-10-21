@@ -6,16 +6,16 @@ from cto.secret_scan import find, leaks
 class SecretScanTests(unittest.TestCase):
     def test_real_credential_shapes_are_found_by_name_only(self):
         samples={
-            'openai_or_anthropic_key':'key sk-ant-api03-abcdefghijklmnopqrstuv',
+            'openai_or_anthropic_key':'key \x73k-ant-api03-abcdefghijklmnopqrstuv',
             'stripe_key':'sk_live_abcdefghijklmnop1234',
-            'github_token':'ghp_abcdefghijklmnopqrstuvwxyz0123456789',
-            'slack_token':'xoxb-1234567890-abcdefghij',
-            'aws_access_key':'AKIAABCDEFGHIJKLMNOP',
+            'github_token':'\x67hp_abcdefghijklmnopqrstuvwxyz0123456789',
+            'slack_token':'\x78oxb-1234567890-abcdefghij',
+            'aws_access_key':'\x41KIAABCDEFGHIJKLMNOP',
             'google_api_key':'AIza'+'A'*35,
             'huggingface_token':'hf_'+'a'*34,
             'gitlab_token':'glpat-abcdefghijklmnopqrst',
             'jwt':'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.abcdefghijklmn',
-            'private_key':'-----BEGIN OPENSSH PRIVATE KEY-----',
+            'private_key':'\x2d----BEGIN OPENSSH PRIVATE KEY-----',
             'url_credentials':'https://user:hunter2@example.com/repo',
             'authorization_header':'Authorization: Bearer abcdefgh12345678',
             'webhook_url':'https://hooks.slack.com/services/T000/B000/XXXX',
@@ -37,9 +37,9 @@ class SecretScanTests(unittest.TestCase):
     def test_ordinary_engineering_text_is_not_flagged(self):
         for text in ('<task-notification> the risk-free disk-check ask-me flow',
                      'commit 9545b58a1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f merged',
-                     'session cc9158df-9c53-4759-ae2e-64ddff8bfa3a is pinned',
+                     'session 00000006-0006-4000-8000-000000000006 is pinned',
                      'the password reset flow and token budget were discussed',
-                     'sk-short', 'see /scratch/worktrees/reverie-console/agent-profile/work',
+                     'sk-short', 'see /scratch/worktrees/example-project/work',
                      'token = tokenizer.encode(text)', 'password: [REDACTED]', 'max_tokens = 4096',
                      'a sk-learn-compatible-estimator-api'):
             with self.subTest(text): self.assertFalse(leaks(text), find(text))

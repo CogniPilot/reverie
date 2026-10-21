@@ -1,5 +1,7 @@
 import tests  # noqa: F401  isolates CODEMAN_*/FLEET_* before cto is imported
+import tempfile
 import unittest
+from pathlib import Path
 
 from cto.embeddings import HashedEmbedder
 from cto.memory import EPISODE, REFLECTION, MemoryStore, recency_score, score_memory
@@ -134,29 +136,28 @@ class RetrievalTest(unittest.TestCase):
         self.assertEqual(len(self.s.retrieve("topic", k=3)), 3)
 
 
-
-class AtomicTest(unittest.TestCase):
-    def test_a_failed_block_rolls_back_even_when_the_store_writes_again_before_closing(self):
-        import tempfile
-        from pathlib import Path
-        with tempfile.TemporaryDirectory() as folder:
-            path = Path(folder) / "memory.sqlite"
-            store = MemoryStore(path, HashedEmbedder(64))
-            with self.assertRaises(RuntimeError):
-                with store.atomic():
-                    store.add_reflection("first insight here", 5, [])
-                    store.set_state("cursor", "9")
-                    raise RuntimeError("second insight failed")
-            store.set_state("later", "1")          # a later write on the same connection commits only itself
-            store.close()
-            reopened = MemoryStore(path, HashedEmbedder(64))
-            try:
-                self.assertEqual(reopened.count("reflection"), 0)
-                self.assertIsNone(reopened.get_state("cursor"))
-                self.assertEqual(reopened.get_state("later"), "1")
-            finally:
-                reopened.close()
-
-
 if __name__ == "__main__":
     unittest.main()
+
+
+class AtomicTest(unittest.TestCase):
+    def setUp(self):
+        self.s = MemoryStore(Path(tempfile.mkdtemp()) / "m.sqlite", HashedEmbedder(64))
+
+    def test_all_or_nothing_and_reentrant(self):
+        with self.assertRaises(RuntimeError):
+            with self.s.atomic():
+                self.s.add_reflection("one insight here", 5, [], "shared")
+                with self.s.atomic():
+                    self.s.set_state("k", "v")
+                    self.s.add_belief("a belief", 5)
+                raise RuntimeError("boom")
+        self.assertEqual(self.s.count("reflection"), 0)
+        self.assertIsNone(self.s.get_state("k"))
+        self.assertEqual(self.s.beliefs(), [])
+        with self.s.atomic():
+            self.s.add_reflection("two insight here", 5, [], "shared")
+            self.s.set_state("k", "v")
+        other = MemoryStore(self.s.path, HashedEmbedder(64))  # committed: another connection sees it
+        self.assertEqual(other.get_state("k"), "v")
+        self.assertEqual(other.count("reflection"), 1)

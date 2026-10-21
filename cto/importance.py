@@ -9,7 +9,7 @@ from .memory import Memory
 RATING_SYSTEM = (
     "You are the configured agent, rating your own memories. Given one exchange between the owner and you, answer with a single "
     "integer from 1 to 10 for how important it is to remember. 1 is small talk or filler. 10 is a fact about "
-    "the owner, his preferences, feelings or projects, a running joke, a promise, or something that changes how "
+    "the owner, their preferences, feelings or projects, a running joke, a promise, or something that changes how "
     "you see each other. Reply with the number only."
 )
 

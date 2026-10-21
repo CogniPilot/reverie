@@ -22,7 +22,7 @@ class InstanceTests(unittest.TestCase):
 
     def instance(self, name):
         path = self.root / (name + ".json")
-        path.write_text(json.dumps({"id": name, "agent_name": "CTO", "owner_name": "Instructor",
+        path.write_text(json.dumps({"id": name, "agent_name": "CTO", "owner_name": "Owner",
             "data_dir": "state/" + name, "persona": "Teach carefully and be curious.",
             "initial_self": {"consciousness": "Consciousness is an open question.",
                              "directives": ["Be honest and inquisitive."]}}))
@@ -33,7 +33,19 @@ class InstanceTests(unittest.TestCase):
         self.addCleanup(daemon.brain.store.close)
         return daemon
 
-    def test_instances_do_not_share_memories_or_legacy_paths(self):
+    def test_shared_room_tone_defaults_to_professional_and_is_validated(self):
+        from cto.instance import load_instance
+        self.assertEqual(load_instance(self.instance("plain")).shared_room_tone, "professional")
+        for tone, ok in (("social", True), ("professional", True), ("personal", False), ("spicy", False), (3, False)):
+            path = self.instance("tone")
+            raw = json.loads(path.read_text()); raw["shared_room_tone"] = tone; path.write_text(json.dumps(raw))
+            if ok:
+                self.assertEqual(load_instance(path).shared_room_tone, tone)
+            else:
+                with self.assertRaises(ValueError):
+                    load_instance(path)
+
+    def test_shared_instance_does_not_share_memories_or_legacy_paths(self):
         personal = self.daemon(self.instance("personal"))
         shared = self.daemon(self.instance("shared"))
         personal.brain.store.add_episode("PRIVATE_SENTINEL_739", "Only for personal history.")

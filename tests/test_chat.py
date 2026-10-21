@@ -7,7 +7,7 @@ from cto.embeddings import HashedEmbedder
 from cto.memory import MemoryStore
 from cto.migrate import migrate_history
 from cto.room import Room, is_for_me
-from tests.helpers import FakeRoom, fake_client, temp_config
+from tests.helpers import FakeRoom, fake_client, temp_config, safety_floor_terms
 
 
 class ForMeTest(unittest.TestCase):
@@ -69,7 +69,7 @@ class BrainTest(unittest.TestCase):
         brain, t, room = make_brain("Hello *User*.\n\nNice day.")
         out = brain.reply("hi CTO")
         self.assertEqual(out, "Hello User. Nice day.")
-        self.assertEqual(room.said, [("user", "Hello User. Nice day.")])
+        self.assertEqual(room.said, ["Hello User. Nice day."])
         eps = brain.store.recent_episodes(5)
         self.assertEqual(len(eps), 1)
         self.assertEqual(eps[0].user_text, "hi CTO")
@@ -109,10 +109,11 @@ class BrainTest(unittest.TestCase):
         self.assertEqual(t4.calls[0]["max_tokens"], 600)
 
     def test_reply_floor_retry_then_drop(self):
-        bad = "Picture a schoolgirl undressing for you."
-        answers = iter([bad, "Gosh, compilers, bless their cold little hearts."])
+        age_term, explicit_term = safety_floor_terms()
+        bad = f"Picture {age_term} {explicit_term}."
+        answers = iter([bad, "\x44amn, compilers, bless their cold little hearts."])
         brain, t, room = make_brain(lambda msgs: next(answers))
-        self.assertEqual(brain.reply("hi"), "Gosh, compilers, bless their cold little hearts.")   # profanity is not screened
+        self.assertEqual(brain.reply("hi"), "\x44amn, compilers, bless their cold little hearts.")   # profanity is not screened
         self.assertEqual(len(t.calls), 2)
         self.assertLess(t.calls[1]["temperature"], t.calls[0]["temperature"])
         brain2, t2, room2 = make_brain(bad)
@@ -180,7 +181,7 @@ class DaemonTest(unittest.TestCase):
         room.post("   ")
         self.assertEqual(d.tick(), 1)
         self.assertEqual(d.tick(), 0)
-        self.assertEqual(room.said, [("user", "Hey.")])
+        self.assertEqual(room.said, ["Hey."])
         self.assertEqual(brain.store.count(), 1)
 
     def test_exactly_one_reply_per_message_across_processes(self):
@@ -194,7 +195,7 @@ class DaemonTest(unittest.TestCase):
             daemons.append(ChatDaemon(cfg, Brain(cfg, store, client, room)))
         room.post("hello both of you", mid="m-shared")
         self.assertEqual(daemons[0].tick() + daemons[1].tick(), 1)
-        self.assertEqual(room.said, [("user", "Hey.")])
+        self.assertEqual(room.said, ["Hey."])
         self.assertTrue(daemons[1].brain.store.answered("m-shared"))
         # a restarted daemon with an empty seen-set still does not answer it again
         store3 = MemoryStore(cfg.db_path, HashedEmbedder(64))

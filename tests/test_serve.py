@@ -171,7 +171,7 @@ class TrainHelpersTest(unittest.TestCase):
             self.assertEqual(hf_home(), Path.home() / ".cache" / "huggingface")
         with mock.patch.dict("os.environ", {"HF_HOME": "/x/hf"}):
             self.assertEqual(hf_home(), Path("/x/hf"))
-        req = requirements(TrainConfig())
+        req = requirements(TrainConfig(base_model="Qwen/Qwen3.8-27B"))
         self.assertEqual(req["download_gb_estimate"], 54.0)
         self.assertEqual(req["steps"], 20)
         self.assertGreater(req["free_gb_at_hf_home"], 0)

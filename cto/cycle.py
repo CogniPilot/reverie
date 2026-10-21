@@ -212,6 +212,9 @@ class Cycle:
                 mode=fleet.read('lifecycle',{'mode':'active'})['body']['mode']
                 if mode=='vacation' and phase not in ('consolidation','dreaming','sleeping'):
                     self.ledger.finish_phase(day,name,phase,'skipped','on vacation'); return
+                if phase=='dreaming' and (cfg.dreams_per_sleep<=0 or self.agents[name].get('dreaming') is False):
+                    self.ledger.finish_phase(day,name,phase,'skipped','dreams disabled')
+                    return
                 if phase not in ('waking','sleeping'):
                     resource=self.models[model_key]['resource']
                     with self.lock('resource-'+resource): result=callback(cfg,store,fleet,self.client(name,phase,model_key,day))
@@ -426,7 +429,7 @@ class Cycle:
                 last=float(store.get_state('vacation_last_dream_attempt','0'))
                 if time.time()-last<86400: return {'skipped':'vacation daily limit'}
                 store.set_state('vacation_last_dream_attempt',str(time.time())); client.timeout=min(client.timeout,120)
-            dreamer=Dreamer(store,client)
+            dreamer=Dreamer(store,client,per_sleep=cfg.dreams_per_sleep)
             # Shared technical context + this specialist's own experiences; no other private store.
             dreamer.creative_context=lambda:self.context(name,'Questions you may freely explore: '+', '.join(self.agents[name].get('interests',[])))
             dreamer.system_prompt_path=cfg.dream_prompt_path

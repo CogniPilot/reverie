@@ -55,7 +55,7 @@ class Config:
     instance: Instance | None = field(default=None, init=False, repr=False)
     # llama-server router (one model loaded at a time)
     api_base: str = os.environ.get("FLEET_API_BASE", "http://127.0.0.1:8080/v1")
-    model: str = field(default_factory=lambda: _env_fallback("FLEET_MODEL", "JESTER_MODEL", "qwen3.8-27b"))
+    model: str = field(default_factory=lambda: _env_fallback("FLEET_MODEL", "JESTER_MODEL", "MODEL_ID"))
     request_timeout: int = _env_int("FLEET_TIMEOUT", 240)
 
     # optional CPU embedding server (a second llama-server started with --embeddings);
@@ -99,7 +99,7 @@ class Config:
 
     # dreams (see cto.dream): only in the sleep window, i.e. no user activity for sleep_min_idle seconds
     sleep_min_idle: int = _env_int("FLEET_SLEEP_MIN_IDLE", 1800)
-    dreams_per_sleep: int = _env_int("FLEET_DREAMS_PER_SLEEP", 1)
+    dreams_per_sleep: int = _env_int("FLEET_DREAMS_PER_SLEEP", 0)   # off unless the owner turns it on
     dream_spacing: int = _env_int("FLEET_DREAM_SPACING", 3600)
     dream_mood_weight: float = _env_float("FLEET_DREAM_MOOD_WEIGHT", 1.0)
     dream_recall_hours: float = _env_float("FLEET_DREAM_RECALL_HOURS", 24.0)   # how long the last dream stays in the prompt

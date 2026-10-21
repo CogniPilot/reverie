@@ -5,13 +5,13 @@ took the CTO pane during an unbounded test run. Every compile or heavy test goes
 through `cto.buildenv`. Only start one after the coordinator has granted a slot.
 
 ```sh
-python3 -m cto.buildenv --project example --repo /scratch/repos/example \
-    --expect 2.5G --disk 6G [--jobs 2] -- cargo build -p example
+python3 -m cto.buildenv --project rumoca --repo /scratch/repos/rumoca \
+    --expect 2.5G --disk 6G [--jobs 2] -- cargo build -p rumoca
 ```
 
 - **Toolchain:** rustup 1.29.1 (sha256-verified) in `/scratch/cache/rust/{rustup,cargo}`,
   with `nightly-2026-02-27` (rustc 1.95.0-nightly 6a979b3e3), `llvm-tools-preview`,
-  `rust-src`, `wasm32-unknown-unknown` and `wasm32-wasip2`, matching every example project
+  `rust-src`, `wasm32-unknown-unknown` and `wasm32-wasip2`, matching every rumoca
   checkout's `rust-toolchain.toml`. Nothing is added to PATH or shell profiles. The
   wrapper sets `RUSTUP_AUTO_INSTALL=0`, so a different pin is refused rather than
   silently downloaded. Install a new pin deliberately (and gated, see below).

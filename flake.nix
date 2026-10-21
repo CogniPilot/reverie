@@ -25,8 +25,6 @@
       packages.${system}.default = fleet;
       apps.${system} = {
         default = { type = "app"; program = "${fleet}/bin/fleet-memory"; };
-        # Host routines tick (R1); see docs/routines.md. Runs from this owner-built package, never the container copy.
-        routines = { type = "app"; program = "${fleet}/bin/fleet-routines"; };
         container-memory = { type = "app"; program = "${container-memory}/bin/container-memory"; };
       };
       devShells.${system}.default = pkgs.mkShell {

@@ -90,7 +90,7 @@ provenance in `apps/console/UPSTREAM.md`.
 For a recovered personal deployment, `scripts/reverie-recreate --dry-run` shows
 the mounts before creation. The personal launcher mounts `~/.local/share/reverie/home`
 at `/home/cto`, so native conversations and login configuration survive recreation.
-Persistent instance handoffs belong under `/instances/personal/runtime/handoffs`;
+Persistent instance handoffs belong under `/instances/example/runtime/handoffs`;
 only disposable working copies belong under `/scratch`.
 
 Inside the container, `reverie web --host 0.0.0.0 --port 3000` starts the console.
@@ -142,7 +142,9 @@ notes stay private; dream ideas are unverified hypotheses until checked.
 
 Runtime rules, current identity, core-value votes, vacation and publication proposals
 remain readable. Existing personal self-models survive installation and model changes.
-Full dream narratives are temporary; only bounded summaries and candidate ideas are
+Dreams are off by default: set `FLEET_DREAMS_PER_SLEEP=1` (and enable `dreaming`
+on the expert profile) to turn them on. Full dream narratives are temporary; only
+bounded summaries and candidate ideas are
 retained. Normal conversation/memory writes do not train or change model weights.
 Optional training tools are not run by installation.
 
@@ -271,3 +273,5 @@ User lingering must be enabled for startup without an interactive login.
 This starts the existing container; applying a newly built image requires a
 separate deployment step. Native agent sessions may need to be resumed after a
 container restart; console availability alone does not establish agent recovery.
+
+See [runtime configuration](runtime-configuration.md) for neutral model defaults, profile section keys, and required user-service environment files.

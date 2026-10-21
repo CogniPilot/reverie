@@ -201,7 +201,7 @@ class ServiceTest(unittest.TestCase):
         room.post("typed thing")
         room.inbox.append({"id": "s1", "from": {"kind": "user"}, "to": ["me"], "text": "hands-free car mode thing", "spoken": True})
         self.assertEqual(d.tick(), 2)                                 # typed and spoken:true answered, voice:true skipped
-        self.assertEqual(room.said, [("user", "Hey."), ("user", "Hey.")])
+        self.assertEqual(room.said, ["Hey.", "Hey."])
         self.assertEqual([m.user_text for m in store.recent_episodes(2)], ["typed thing", "hands-free car mode thing"])
 
 

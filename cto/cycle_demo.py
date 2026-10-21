@@ -52,7 +52,7 @@ def main(argv=None):
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--directory',type=Path,required=True)
     parser.add_argument('--api-base',required=True)
-    parser.add_argument('--model',default='qwen3.8-27b')
+    parser.add_argument('--model',required=True)
     args=parser.parse_args(argv)
     print(json.dumps({'policy':str(create(args.directory,args.api_base,args.model)),
                       'next':'fleet-cycle --policy POLICY once'}))

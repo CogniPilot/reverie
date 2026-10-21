@@ -17,14 +17,14 @@ Environment=STALL_WATCH_FLAGS=--dry-run
 # (stall-watch-host); nothing is passed into the container. stall-watch-host fetches the console reads
 # with the token, feeds them to the tick on stdin, and writes and posts the notice itself from the
 # tick's coded report (it trusts no text from the container). In --dry-run it never posts.
-EnvironmentFile=-%h/.config/reverie/stall-watch.env
+EnvironmentFile=%h/.config/reverie/stall-watch.env
 # No config, no tick (instead of a traceback every minute). The path is inside the container (the
 # instance is a bind mount there), so it is checked there; a Condition= would look on the host.
-ExecCondition=%h/.local/libexec/reverie/fleet-container engine exec --user cto reverie-live test -f /instances/personal/runtime/stall-watch.json
+ExecCondition=%h/.local/libexec/reverie/fleet-container engine exec --user cto reverie-live test -f ${FLEET_STALL_WATCH_CONFIG}
 # The config is instance data (target, rooms, reporting identity); it never lives in the repo.
 # --workdir / and -I: the container's default working directory is the agent-editable work tree, and
 # `python -m` would import `cto` from there; this way only the installed package runs.
-ExecStart=%h/.local/libexec/reverie/stall-watch-host %h/.local/libexec/reverie/fleet-container engine exec -i --workdir / --user cto reverie-live /opt/fleet/python/bin/python3 -I -m cto.stall_watch --config /instances/personal/runtime/stall-watch.json --console-json - $STALL_WATCH_FLAGS
+ExecStart=%h/.local/libexec/reverie/stall-watch-host %h/.local/libexec/reverie/fleet-container engine exec -i --workdir / --user cto reverie-live /opt/fleet/python/bin/python3 -I -m cto.stall_watch --config ${FLEET_STALL_WATCH_CONFIG} --console-json - $STALL_WATCH_FLAGS
 # The tick also ends itself before its minute is up (`tick_seconds`), since stopping this unit ends
 # only the podman client, not the tick inside the container.
 TimeoutStartSec=90

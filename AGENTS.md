@@ -3,10 +3,12 @@
 Read README.md. Work inside the fleet development container:
 `./scripts/fleet-container exec COMMAND ...`. Bootstrap/engine control and private
 migration brokers run on the host. Never mount personal instance data into the
-development or shared-instance container.
+development or shared container.
 
-The container role is CTO. Identity, relationships, model selection, credentials and
-memory are owner-selected instance data. Keep them outside this shareable repository.
+The container supports owner-selected agent roles, including CTO and generic local
+agents. Organizational role, tool permissions and chat/coding mode are separate.
+Identity, relationships, model selection, credentials and memory are owner-selected
+instance data. Keep them outside this shareable repository.
 Use `cto/` for the shared runtime and `experts/` for specialist templates.
 
 Use $HOME/scratch on the host and /scratch in the container for builds, compiler

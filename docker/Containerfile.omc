@@ -1,0 +1,22 @@
+# SUPERSEDED: not adopted; retain for evidence. See docs/openmodelica-runtime.md.
+# Layer the CI-pinned OMC closure onto an already reviewed Reverie image.
+# --build-context omc-runtime=<directory containing the approved runtime-closure.tar>
+# --build-arg REVERIE_BASE_IMAGE=<reviewed image digest>
+ARG REVERIE_BASE_IMAGE
+FROM ${REVERIE_BASE_IMAGE} AS omc-extract
+USER root
+COPY --from=omc-runtime /runtime-closure.tar /tmp/omc-runtime.tar
+RUN printf '%s  %s\n' a591badfefb7bce50e13cbf8fb99c0809ac4516374d2175ee34c88148e8031ae /tmp/omc-runtime.tar \
+    | sha256sum --check --status \
+    && mkdir -p /omc-root \
+    && tar --extract --file /tmp/omc-runtime.tar --directory /omc-root --no-same-owner
+
+FROM ${REVERIE_BASE_IMAGE}
+USER root
+COPY --from=omc-extract /omc-root/nix/store /nix/store
+RUN test ! -e /usr/local/bin/omc \
+    && ln -s /nix/store/6iggbkckmny55dwflvz73pmjq45j8whw-openmodelica-unstable-2026-07-21/bin/omc /usr/local/bin/omc \
+    && test "$(/usr/local/bin/omc --version)" = a96aa1a-cmake
+LABEL org.reverie.omc.source=a96aa1a682c463b0fd2d285b486c09a8b7fe496d \
+      org.reverie.omc.closure.sha256=a591badfefb7bce50e13cbf8fb99c0809ac4516374d2175ee34c88148e8031ae
+USER cto
