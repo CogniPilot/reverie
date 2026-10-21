@@ -23,13 +23,6 @@ working during the upgrade. Rename the variables in owner env files (for example
 - `cto.cycle_demo` requires `--model`. `cto.opencode` accepts `--model` or
   `REVERIE_MODEL`, with neutral fallback `local_agent/MODEL_ID`; configure a real
   provider/model identifier before installing. Bridge actions need no model flag.
-- `cto.train.config`: set `base_model` in the training JSON; its neutral default
-  is `MODEL_ID`. The public candidate list is informational, not an instance choice.
-- `cto.train.serve`: `REVERIE_GGUF` defaults to
-  `~/.local/share/reverie/models/model.gguf`, `REVERIE_MODEL` to `MODEL_ID`, and
-  `REVERIE_SERVE_PORT` to 8081. Set them for the selected server and model file.
-  Snapshot metadata uses `snapshot-base.json`. `REVERIE_SNAPSHOT_MARKER` optionally
-  names an older snapshot marker in the instance overlay; it defaults to empty.
 - Runtime policies select `backends.local.model` and `keep_alive.model_id`.
   `examples/runtime-policy.json` uses `MODEL_ID` placeholders; replace both.
 - `cto.sleep` takes `--policy`; all chat database, state, instance and employee
@@ -41,6 +34,25 @@ working during the upgrade. Rename the variables in owner env files (for example
 
 `scripts/reverie-restore` requires `--rescue DIR` or `REVERIE_RESCUE_DIR`
 (default empty), pointing at the owner-selected recovery snapshot.
+
+## Training any expert
+
+Training and adapter serving are shared tools for any expert, regardless of
+organizational role. Select the expert's private instance with
+`REVERIE_INSTANCE_CONFIG`. Give each expert a separate training JSON, dataset and
+adapter output directory; set `dataset_path`, `output_root` and `run_name`
+explicitly rather than sharing their defaults.
+
+- [Training configuration](../cto/train/config.py): set `base_model` in the
+  training JSON; its neutral default is `MODEL_ID`. The public candidate list is
+  informational; the owner selects the expert's model.
+- [Adapter serving](../cto/train/serve.py): `REVERIE_GGUF` defaults to
+  `~/.local/share/reverie/models/model.gguf`, `REVERIE_MODEL` to `MODEL_ID`, and
+  `REVERIE_SERVE_PORT` to 8081. Set them for the selected expert's server and model
+  file. Use a separate serving JSON with its own `state_path`, and distinct ports
+  when running multiple servers.
+  Snapshot metadata uses `snapshot-base.json`. `REVERIE_SNAPSHOT_MARKER` optionally
+  names an older snapshot marker in the instance overlay; it defaults to empty.
 
 ## User service templates
 
