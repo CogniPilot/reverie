@@ -15,12 +15,12 @@ node dist/index.js web
 
 The installed command is `reverie`; `fleet` and `codeman` remain compatibility
 aliases. Reverie defaults to `~/.fleet` and a separate `fleet` tmux socket. Set
-`FLEET_INSTANCE`, `FLEET_DATA_DIR`, `FLEET_TMUX_SOCKET` and `FLEET_PORT` for an
+`REVERIE_INSTANCE`, `REVERIE_DATA_DIR`, `REVERIE_TMUX_SOCKET` and `REVERIE_PORT` for an
 isolated deployment. Existing `CODEMAN_*` environment variables, API headers and
-agent tooling remain compatible; explicit `FLEET_*` settings take precedence.
+agent tooling remain compatible; explicit `REVERIE_*` settings take precedence.
 Existing Codeman state is never migrated or modified automatically. Internal
 protocol names and the historical case-directory spelling remain compatible;
-use `FLEET_CASES_PATH` to choose a separate workspace root (the image uses `/scratch/cases`).
+use `REVERIE_CASES_PATH` to choose a separate workspace root (the image uses `/scratch/cases`).
 
 Update Reverie by reviewing monorepo changes and rebuilding the image. Installation
 never starts a server, and the inherited upstream self-updater is disabled.
@@ -30,7 +30,7 @@ notes, expert invitations, nightly research and CTO briefings. Research defaults
 to a 60-minute budget, with an owner-selected timezone and schedule. It is off
 until configured by the owner. Each cycle uses a fresh dedicated session and
 workspace under `~/scratch/agent-fleet/research` (`/scratch/research` in the image;
-`FLEET_RESEARCH_ROOT` overrides it); it never resumes an employee's private conversation. Completed reports
+`REVERIE_RESEARCH_ROOT` overrides it); it never resumes an employee's private conversation. Completed reports
 and honest failures remain visible after restart. Research ideas remain hypotheses
 until corroborated independently. Standard local provider sessions with a declared
 composer readiness marker are supported; custom endpoints and remote/container
@@ -50,10 +50,10 @@ belongs to the project in each account, not to one conversation.
 
 For MCP over stdio, use [config/mcp-client.json](config/mcp-client.json) in your
 MCP client's configuration. It runs the locally installed `reverie mcp`; ensure
-`reverie` is on that client's PATH. Explicitly set `FLEET_API_URL` or the compatible
+`reverie` is on that client's PATH. Explicitly set `REVERIE_API_URL` or the compatible
 `CODEMAN_API_URL` in the MCP client's inherited environment to select the intended
 Reverie server. No server URL is guessed. If authentication is enabled, supply
-`FLEET_PASSWORD` or `CODEMAN_PASSWORD` through the client's secret environment,
+`REVERIE_PASSWORD` or `CODEMAN_PASSWORD` through the client's secret environment,
 outside the repository. This private fork has no registry publication identity
 and the example never downloads an upstream package.
 

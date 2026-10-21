@@ -11,6 +11,7 @@ import {
 } from './company-types.js';
 import type { CompanyResearchBackend, ResearchHandle } from './company-service.js';
 import { writeCompanyStateFile } from './company-store.js';
+import { bothNames } from './config/fleet-env.js';
 
 const BindingSchema = z.object({
   cycleId: z.string().uuid(),
@@ -181,9 +182,9 @@ export class DurableCompanyResearchBackend implements CompanyResearchBackend {
         employee: input.employee,
         prompt: input.prompt,
         env: {
-          FLEET_RESEARCH_CYCLE_ID: cycle.id,
-          FLEET_EMPLOYEE_ID: input.employee.id,
-          FLEET_RESEARCH_DEADLINE_AT: String(cycle.deadlineAt),
+          ...bothNames('RESEARCH_CYCLE_ID', cycle.id),
+          ...bothNames('EMPLOYEE_ID', input.employee.id),
+          ...bothNames('RESEARCH_DEADLINE_AT', String(cycle.deadlineAt)),
         },
       });
       binding.phase = 'running';

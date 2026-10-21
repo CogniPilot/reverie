@@ -8,7 +8,7 @@ renamed). They are never kept in the repository.
 ## Seeding
 
 When `experts.json` does not exist yet, the first read seeds it from the `*.json` files in
-`FLEET_EXPERTS_SEED_DIR`. If that variable is unset, no seeding happens and the list starts
+`REVERIE_EXPERTS_SEED_DIR`. If that variable is unset, no seeding happens and the list starts
 empty. A seed file that is invalid is skipped and logged. A damaged `experts.json` is
 reported (503) and is never overwritten.
 
@@ -65,7 +65,7 @@ a `budgetStop` is refused (400). Nothing is created by a refused hire.
    included. `maxActive` (default 5) counts hires that are not retired. At a cap the request
    gets 409. Nothing is retired or trimmed to make room.
 2. A notice room must be configured, either as `settings.noticeRoomId` or as
-   `FLEET_EXPERTS_NOTICE_ROOM`. Without one, hiring is off (503).
+   `REVERIE_EXPERTS_NOTICE_ROOM`. Without one, hiring is off (503).
 3. The session is created by an in-process request to `POST /api/sessions` (that route's
    handler has no separate creation function). It carries the caller's own cookie,
    authorization, origin and host, and never an agent header, and the owner policy checks it

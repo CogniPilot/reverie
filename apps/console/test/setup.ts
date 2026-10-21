@@ -26,13 +26,13 @@ const originalPlaywrightBrowsersPath = process.env.PLAYWRIGHT_BROWSERS_PATH;
 // reach live state through anything the env strip below misses. On 2026-10-15
 // a run in the live container OOM-killed the CTO pane and wrote fixtures into
 // live state. Run the suite in a development container instead.
-const liveDataDir = [process.env.CODEMAN_DATA_DIR, process.env.FLEET_DATA_DIR].find(
+const liveDataDir = [process.env.CODEMAN_DATA_DIR, process.env.REVERIE_DATA_DIR, process.env.FLEET_DATA_DIR].find(
   (dir) => !!dir && existsSync(join(dir, 'state.json'))
 );
 if (liveDataDir) {
   throw new Error(
     `Refusing to run tests inside a live Codeman instance (data dir ${liveDataDir}). ` +
-      'Use a development container without CODEMAN_DATA_DIR/FLEET_DATA_DIR.'
+      'Use a development container without CODEMAN_DATA_DIR/REVERIE_DATA_DIR/FLEET_DATA_DIR.'
   );
 }
 
@@ -51,7 +51,7 @@ process.env.USERPROFILE = testHome;
 process.env.VITEST = 'true';
 
 for (const key of Object.keys(process.env)) {
-  if ((key.startsWith('CODEMAN_') || key.startsWith('FLEET_'))) delete process.env[key];
+  if (key.startsWith('CODEMAN_') || key.startsWith('FLEET_') || key.startsWith('REVERIE_')) delete process.env[key];
 }
 
 // Explicitly document the most consequential inherited settings below. The

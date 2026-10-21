@@ -61,6 +61,7 @@ describe('durable tool-capable company research backend', () => {
       expect(persisted.phase).toBe('launching');
       expect(binding.sessionId).not.toBe(employee.sessionId);
       expect(binding.workingDir).toBe(join(directory, 'workspaces', cycle.id));
+      expect(env.REVERIE_RESEARCH_CYCLE_ID).toBe(cycle.id);
       expect(env.FLEET_RESEARCH_CYCLE_ID).toBe(cycle.id);
       expect(await readFile(join(binding.workingDir, 'RESEARCH_TASK.md'), 'utf8')).toContain('Use tools');
     });

@@ -19,6 +19,9 @@ vi.mock('node:fs', async (orig) => {
 });
 
 const ENV_KEYS = [
+  'REVERIE_INSTANCE',
+  'REVERIE_DATA_DIR',
+  'REVERIE_TMUX_SOCKET',
   'FLEET_INSTANCE',
   'FLEET_DATA_DIR',
   'FLEET_TMUX_SOCKET',
@@ -98,6 +101,19 @@ describe('Fleet environment precedence', () => {
     expect(m.getDataDir()).toBe('/owned/fleet');
     expect(m.CODEMAN_INSTANCE).toBe('company');
     expect(m.resolveTmuxSocketName()).toBe('fleet-owned');
+  });
+  it('uses REVERIE_ names before the older FLEET_ spelling', async () => {
+    const m = await load({
+      REVERIE_INSTANCE: 'company',
+      REVERIE_DATA_DIR: '/owned/reverie',
+      REVERIE_TMUX_SOCKET: 'reverie-owned',
+      FLEET_INSTANCE: 'older',
+      FLEET_DATA_DIR: '/older',
+      FLEET_TMUX_SOCKET: 'older',
+    });
+    expect(m.getDataDir()).toBe('/owned/reverie');
+    expect(m.CODEMAN_INSTANCE).toBe('company');
+    expect(m.resolveTmuxSocketName()).toBe('reverie-owned');
   });
   it('cannot escape the derived home directory through an instance name', async () => {
     const m = await load({ FLEET_INSTANCE: '../../other' });

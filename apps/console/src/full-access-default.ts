@@ -3,9 +3,10 @@
  *
  * A CLI's approval bypass is a launch param (codex `--dangerously-bypass-approvals-and-sandbox`),
  * so a session created, moved or relaunched without it starts with approval prompts on and
- * stalls on the first command. Inside the fleet container (`FLEET_CONTAINER=1`) the bypass is
- * therefore the default: every boolean param a CLI entry lists in `privilegedParams` with
- * `clampTo: false` is filled with `true` where the session's config leaves it unset.
+ * stalls on the first command. Inside the fleet container (`REVERIE_CONTAINER=1`, or the older
+ * `FLEET_CONTAINER=1`) the bypass is therefore the default: every boolean param a CLI entry
+ * lists in `privilegedParams` with `clampTo: false` is filled with `true` where the session's
+ * config leaves it unset.
  *
  * - An explicit `false` is kept (an owner who turned prompts on keeps them).
  * - A non-granted owner gets nothing: `canUsernameRunPrivilegedCommands()` is the same check
@@ -30,10 +31,11 @@ import { basename } from 'node:path';
 import { getCli } from './config/cli-registry/registry.js';
 import type { ClaudeMode } from './types/session.js';
 import { canUsernameRunPrivilegedCommands } from './user-store.js';
+import { envValue } from './config/fleet-env.js';
 
 /** True when this console runs inside the fleet container. */
 export function fullAccessByDefault(env: NodeJS.ProcessEnv = process.env): boolean {
-  return env.FLEET_CONTAINER === '1';
+  return envValue(env, 'CONTAINER') === '1';
 }
 
 /** The wire keys (legacy config names) of `mode`'s bypass switches, e.g. `dangerouslyBypassApprovals` for codex. */

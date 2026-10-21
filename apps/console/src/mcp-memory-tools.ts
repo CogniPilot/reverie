@@ -12,6 +12,7 @@
 import { execFile } from 'node:child_process';
 import { isAbsolute } from 'node:path';
 import type { ToolDefinition, ToolResult } from './mcp-server.js';
+import { bothNames, envValue } from './config/fleet-env.js';
 
 export const MEMORY_TOOL_NAMES = ['memory_recall', 'memory_remember'] as const;
 
@@ -131,13 +132,15 @@ export function createMemoryTools(config: MemoryToolsConfig, runner: BridgeRunne
       const body = request(name, args);
       if (typeof body === 'string') return failure(body);
       // Only what the bridge needs: never forward this process's room or session credentials to it.
+      const apiBase = envValue(process.env, 'API_BASE');
+      const embedUrl = envValue(process.env, 'EMBED_URL');
       const env: NodeJS.ProcessEnv = {
         PATH: process.env.PATH ?? '/usr/bin:/bin',
         HOME: process.env.HOME ?? '/tmp',
         PYTHONPATH: config.source,
-        FLEET_INSTANCE_CONFIG: config.instance,
-        ...(process.env.FLEET_API_BASE ? { FLEET_API_BASE: process.env.FLEET_API_BASE } : {}),
-        ...(process.env.FLEET_EMBED_URL ? { FLEET_EMBED_URL: process.env.FLEET_EMBED_URL } : {}),
+        ...(config.instance ? bothNames('INSTANCE_CONFIG', config.instance) : {}),
+        ...(apiBase ? bothNames('API_BASE', apiBase) : {}),
+        ...(embedUrl ? bothNames('EMBED_URL', embedUrl) : {}),
       };
       const out = await runner(config.python, ['-m', 'cto.memory_cli'], {
         env,
