@@ -15,16 +15,6 @@ DATA_DIR = Path(env_names.lookup("REVERIE_DATA_DIR", HOME / ".local" / "share" /
 DEPRECATIONS: list[str] = []
 
 
-def _env_fallback(new: str, old: str, default: str = "") -> str:
-    """Read ``new`` from the environment (REVERIE_*, or its FLEET_* spelling), falling back to the deprecated ``old`` name."""
-    if env_names.lookup(new):
-        return env_names.lookup(new)
-    if os.environ.get(old):
-        DEPRECATIONS.append(f"{old} is deprecated, use {new}")
-        return os.environ[old]
-    return default
-
-
 def _path_fallback(env: str, new: Path, old: Path) -> Path:
     """Prefer ``env``, then ``new`` if it exists, then the deprecated ``old`` if it exists."""
     if os.environ.get(env):
@@ -56,7 +46,7 @@ class Config:
     instance: Instance | None = field(default=None, init=False, repr=False)
     # llama-server router (one model loaded at a time)
     api_base: str = env_names.lookup("REVERIE_API_BASE", "http://127.0.0.1:8080/v1")
-    model: str = field(default_factory=lambda: _env_fallback("REVERIE_MODEL", "JESTER_MODEL", "MODEL_ID"))
+    model: str = field(default_factory=lambda: (env_names.lookup("REVERIE_MODEL") or "MODEL_ID"))
     request_timeout: int = _env_int("REVERIE_TIMEOUT", 240)
 
     # optional CPU embedding server (a second llama-server started with --embeddings);
@@ -93,7 +83,7 @@ class Config:
 
     # daemon timing (seconds)
     poll_interval: int = _env_int("REVERIE_POLL", 10)
-    joke_interval: int = field(default_factory=lambda: int(_env_fallback("REVERIE_INTERVAL", "JESTER_INTERVAL", "240") or 240))
+    joke_interval: int = field(default_factory=lambda: _env_int("REVERIE_INTERVAL", 240))
     reflect_interval: int = _env_int("REVERIE_REFLECT_INTERVAL", 1800)
     reflect_min_episodes: int = _env_int("REVERIE_REFLECT_MIN_EPISODES", 3)
     rate_batch: int = 3                                              # importance ratings per idle pass

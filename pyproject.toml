@@ -31,7 +31,7 @@ fleet-gpu-publisher = "cto.gpu_publisher:main"
 fleet-sleep = "cto.sleep:main"
 
 [tool.setuptools.package-data]
-cto = ["plugins/*.mjs", "rules.md", "skills/*/SKILL.md"]
+cto = ["plugins/*.mjs", "rules.md", "skills/*/SKILL.md", "resources/*.json"]
 
 [tool.setuptools.packages.find]
 include = ["cto*", "experts*"]

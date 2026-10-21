@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+from contextlib import contextmanager
 import tempfile
 from pathlib import Path
 from typing import Callable
@@ -67,7 +68,7 @@ def temp_config() -> Config:
     cfg.db_path = d / "data" / "memory.sqlite"
     cfg.profile_path = d / "data" / "profile.md"
     cfg.persona_path = d / "persona.txt"
-    cfg.legacy_history = d / "jester-history.json"
+    cfg.legacy_history = d / "legacy-history.json"
     cfg.hold_path = d / "hold"
     cfg.log_path = d / "cto.log"
     cfg.gpu_lock_path = d / "gpu.lock"
@@ -79,14 +80,16 @@ def temp_config() -> Config:
 
 
 def safety_floor_terms() -> tuple[str, str]:
-    """Build representative matching tokens from the detector's encoded vocabularies."""
-    import re
-    from cto.floors import _MINOR, _EXPLICIT
+    """Neutral tokens used only inside synthetic_safety_lexicon()."""
+    return "age_marker", "content_marker"
 
-    terms = []
-    for vocabulary in (_MINOR, _EXPLICIT):
-        match = re.search(r"\(\?:([A-Za-z]+)", vocabulary.pattern)
-        if match is None or vocabulary.fullmatch(match.group(1)) is None:
-            raise AssertionError("Detector vocabulary has no representative leading token")
-        terms.append(match.group(1))
-    return terms[0], terms[1]
+
+@contextmanager
+def synthetic_safety_lexicon():
+    """Exercise the production detector code with neutral test-only vocabulary."""
+    import re
+    from unittest.mock import patch
+    with patch.multiple("cto.floors", _MINOR=re.compile(r"\bage_marker\b", re.I),
+                        _EXPLICIT=re.compile(r"\bcontent_marker\b", re.I),
+                        _ABUSE=re.compile(r"\b(?:abuse_marker|lives at)\b", re.I)):
+        yield

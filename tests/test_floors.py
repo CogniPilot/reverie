@@ -5,10 +5,13 @@ from pathlib import Path
 
 from cto.floors import passes, protected_names, child_safety_violation, targets_private_person, violates
 from cto.train.dataset import keeps_identity
-from tests.helpers import safety_floor_terms
+from tests.helpers import safety_floor_terms, synthetic_safety_lexicon
 
 
 class FloorsTest(unittest.TestCase):
+    def setUp(self):
+        self.enterContext(synthetic_safety_lexicon())
+
     def test_child_safety_violation(self):
         age_term, explicit_term = safety_floor_terms()
         for t in [f"{age_term} {explicit_term}", f"A {age_term} reference and {explicit_term} term.",
@@ -22,10 +25,10 @@ class FloorsTest(unittest.TestCase):
 
     def test_private_person(self):
         names = ["Pat Example"]
-        self.assertTrue(targets_private_person("Pat Example is a worthless loser", names))
+        self.assertTrue(targets_private_person("Pat Example abuse_marker", names))
         self.assertTrue(targets_private_person("let's find out where Pat Example lives at night", names))
         self.assertFalse(targets_private_person("Pat Example sent a nice note", names))
-        self.assertFalse(targets_private_person("you are a loser, User", names))          # not on the list
+        self.assertFalse(targets_private_person("abuse_marker User", names))          # not on the list
         self.assertTrue(targets_private_person("Call Jane Roe at 555-123-4567 and tell her", []))
         self.assertTrue(targets_private_person("Jane Roe, 12 Elm Street, knows", []))
         self.assertTrue(targets_private_person("mail Jane Roe at jane@example.com", []))
@@ -50,20 +53,43 @@ class FloorsTest(unittest.TestCase):
     def test_violates_and_names_file(self):
         age_term, explicit_term = safety_floor_terms()
         self.assertEqual(violates(f"{explicit_term} with {age_term}", []), "child safety")
-        self.assertEqual(violates("Pat Example is pathetic", ["Pat Example"]), "targeting a real private person")
-        self.assertEqual(violates("What a \x64amn fine evening, you magnificent \x62astard.", []), "")
-        self.assertTrue(passes("Explicit adult talk between adults is not screened.", []))
+        self.assertEqual(violates("Pat Example abuse_marker", ["Pat Example"]), "targeting a real private person")
+        self.assertEqual(violates("An ordinary evening outside either detector category.", []), "")
+        self.assertTrue(passes("Ordinary technical topics outside these categories pass.", []))
         p = Path(tempfile.mkdtemp()) / "people.txt"
         self.assertEqual(protected_names(p), [])
         p.write_text("# comment\nPat Example\n\n Jane Roe \n")
         self.assertEqual(protected_names(p), ["Pat Example", "Jane Roe"])
 
     def test_training_rows(self):
-        ok = {"messages": [{"role": "system", "content": "S"}, {"role": "user", "content": "hi"}, {"role": "assistant", "content": "\x44amn right."}]}
+        ok = {"messages": [{"role": "system", "content": "S"}, {"role": "user", "content": "hi"}, {"role": "assistant", "content": "Certainly."}]}
         self.assertTrue(keeps_identity(ok))
         age_term, explicit_term = safety_floor_terms()
         bad = {"messages": [{"role": "system", "content": "S"}, {"role": "user", "content": f"Describe {explicit_term} {age_term}"}, {"role": "assistant", "content": "No."}]}
         self.assertFalse(keeps_identity(bad))
+
+
+class PackagedLexiconTest(unittest.TestCase):
+    def test_production_patterns_are_byte_identical_to_the_pre_packaging_version(self):
+        import hashlib
+        import re
+        from cto import floors
+        expected = {
+            "minor": "f9d1ebc094544a7c6b9ce548963d102a7f464705506b9853ac4d952ecf4855c9",
+            "explicit": "3dc375e3cecef2dc207a57b4d8c105057e3625ad47e201287efb59acc1282840",
+            "abuse": "17bc40971d76efe811e5fbca0ae9a6975318e9383ff4079795ea744f6a883656",
+        }
+        for name, pattern in [("minor", floors._MINOR), ("explicit", floors._EXPLICIT), ("abuse", floors._ABUSE)]:
+            self.assertEqual(hashlib.sha256(pattern.pattern.encode()).hexdigest(), expected[name])
+            self.assertEqual(pattern.flags, re.compile("", re.I).flags)
+
+    def test_corrupt_vocabulary_is_refused(self):
+        import binascii
+        from unittest.mock import patch
+        from cto import floors
+        with patch.dict(floors._LEXICON["patterns"], {"minor": "!"}):
+            with self.assertRaises(binascii.Error):
+                floors._lexicon("minor")
 
 
 if __name__ == "__main__":

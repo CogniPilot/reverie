@@ -127,10 +127,10 @@ describe('agent routines: what the server accepts', () => {
 
   it('lets an author change only its own routines, never another author\'s or an owner job', async () => {
     const { create, app, cron, jobs } = await setup();
-    const miras = (await create(ALICE)).json().job.id as string;
+    const authorJobId = (await create(ALICE)).json().job.id as string;
     const ownerJob = cron.createJob({ ...mine, name: 'owner', botId: 'routines' } as never);
-    for (const target of [miras, ownerJob.id]) {
-      const who = target === miras ? BOB : ALICE;
+    for (const target of [authorJobId, ownerJob.id]) {
+      const who = target === authorJobId ? BOB : ALICE;
       for (const [method, url, payload] of [
         ['PUT', `/api/cron/jobs/${target}`, { postText: 'hijack' }],
         ['PUT', `/api/cron/jobs/${target}/enabled`, { enabled: false }],
@@ -141,7 +141,7 @@ describe('agent routines: what the server accepts', () => {
         expect(res.json(), `${who.name} ${method} ${url}`).toMatchObject({ success: false, errorCode: 'FORBIDDEN' });
       }
     }
-    expect(jobs[miras]?.postText).toBe('standup in 5');
+    expect(jobs[authorJobId]?.postText).toBe('standup in 5');
     expect(Object.keys(jobs)).toHaveLength(2);
     await app.close();
   });

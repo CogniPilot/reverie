@@ -9,7 +9,7 @@ from cto.persona import (DEFAULT_PERSONA, build_system_prompt, load_persona, nor
 
 
 def refl(i, text, imp, section="shared", created=1000.0):
-    return Memory(id=i, kind="reflection", created_at=created, user_text="", jinx_text="", text=text,
+    return Memory(id=i, kind="reflection", created_at=created, user_text="", assistant_text="", text=text,
                   importance=imp, section=section)
 
 
@@ -60,7 +60,7 @@ class PersonaTest(unittest.TestCase):
 
     def test_system_prompt(self):
         mems = [refl(1, "User likes rust", 8, "user"),
-                Memory(id=2, kind="episode", created_at=0, user_text="hi", jinx_text="hello", text="User: hi\nCTO: hello", importance=3)]
+                Memory(id=2, kind="episode", created_at=0, user_text="hi", assistant_text="hello", text="User: hi\nCTO: hello", importance=3)]
         s = build_system_prompt("PERSONA", "# notes\n- (8) x", mems)
         self.assertTrue(s.startswith("PERSONA"))
         self.assertIn("# notes", s)

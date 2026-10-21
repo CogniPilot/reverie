@@ -1,4 +1,4 @@
-"""One-time import of the legacy ~/.cache/jester-history.json into the episodic store."""
+"""One-time import of the legacy configured legacy-history.json into the episodic store."""
 from __future__ import annotations
 
 import json

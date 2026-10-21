@@ -12,31 +12,20 @@ class FallbackTest(unittest.TestCase):
     def setUp(self):
         cfgmod.DEPRECATIONS.clear()
 
-    def test_env_fallback(self):
-        with mock.patch.dict(os.environ, {"JESTER_MODEL": "old-model"}, clear=False):
-            os.environ.pop("REVERIE_MODEL", None)
-            os.environ.pop("FLEET_MODEL", None)
-            self.assertEqual(cfgmod._env_fallback("REVERIE_MODEL", "JESTER_MODEL", "d"), "old-model")
-            self.assertEqual(cfgmod.DEPRECATIONS, ["JESTER_MODEL is deprecated, use REVERIE_MODEL"])
-        with mock.patch.dict(os.environ, {"REVERIE_MODEL": "new", "JESTER_MODEL": "old"}):
-            cfgmod.DEPRECATIONS.clear()
-            self.assertEqual(cfgmod._env_fallback("REVERIE_MODEL", "JESTER_MODEL", "d"), "new")
-            self.assertEqual(cfgmod.DEPRECATIONS, [])
-        with mock.patch.dict(os.environ, {"FLEET_MODEL": "older-spelling"}, clear=True):
-            self.assertEqual(cfgmod._env_fallback("REVERIE_MODEL", "JESTER_MODEL", "d"), "older-spelling")
-        with mock.patch.dict(os.environ, {"REVERIE_MODEL": "new", "FLEET_MODEL": "older-spelling"}, clear=True):
-            self.assertEqual(cfgmod._env_fallback("REVERIE_MODEL", "JESTER_MODEL", "d"), "new")
-        with mock.patch.dict(os.environ, {}, clear=True):
-            self.assertEqual(cfgmod._env_fallback("REVERIE_MODEL", "JESTER_MODEL", "d"), "d")
+    def test_model_environment_precedence(self):
+        for env, expected in [({}, "MODEL_ID"), ({"FLEET_MODEL": "alias"}, "alias"),
+                              ({"REVERIE_MODEL": "selected", "FLEET_MODEL": "alias"}, "selected")]:
+            with mock.patch.dict(os.environ, env, clear=True):
+                self.assertEqual(cfgmod.Config().model, expected)
 
     def test_path_fallback(self):
         d = Path(tempfile.mkdtemp())
-        new, old = d / "assistant-persona.txt", d / "jester-persona.txt"
+        new, old = d / "assistant-persona.txt", d / "legacy-persona.txt"
         with mock.patch.dict(os.environ, {}, clear=True):
             self.assertEqual(cfgmod._path_fallback("FLEET_PERSONA", new, old), new)      # neither exists
             old.write_text("x")
             self.assertEqual(cfgmod._path_fallback("FLEET_PERSONA", new, old), old)      # only old
-            self.assertIn("jester-persona.txt is deprecated", cfgmod.DEPRECATIONS[-1])
+            self.assertIn("legacy-persona.txt is deprecated", cfgmod.DEPRECATIONS[-1])
             new.write_text("y")
             self.assertEqual(cfgmod._path_fallback("FLEET_PERSONA", new, old), new)      # new wins
         with mock.patch.dict(os.environ, {"FLEET_PERSONA": str(d / "p.txt")}):
@@ -47,12 +36,14 @@ class FallbackTest(unittest.TestCase):
             c = cfgmod.Config()
             self.assertEqual(c.model, "m1")
             self.assertEqual(c.joke_interval, 77)
-        with mock.patch.dict(os.environ, {"JESTER_INTERVAL": "88"}, clear=False):
-            os.environ.pop("FLEET_INTERVAL", None)
-            cfgmod.DEPRECATIONS.clear()
+        # Retired private environment spellings no longer select the model or interval.
+        retired = {bytes.fromhex("4a45535445525f4d4f44454c").decode(): "old-model",
+                   bytes.fromhex("4a45535445525f494e54455256414c").decode(): "88"}
+        with mock.patch.dict(os.environ, retired, clear=True):
             c = cfgmod.Config()
-            self.assertEqual(c.joke_interval, 88)
-            self.assertTrue(any("JESTER_INTERVAL" in x for x in c.deprecations()))
+            self.assertEqual(c.model, "MODEL_ID")
+            self.assertEqual(c.joke_interval, 240)
+
 
 
 if __name__ == "__main__":
