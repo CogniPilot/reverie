@@ -23,6 +23,13 @@ from .persona import normalize_section, render_profile, write_profile
 STATE_LAST_REFLECTED_ID = "last_reflected_id"
 STATE_LAST_REFLECTION_AT = "last_reflection_at"
 
+# B1 (sleep design v4 section 4): what may come OUT of a reflection is decided by what goes INTO its prompt.
+# Only owner episodes (meta.trust == "owner") reach the trusted pass; everything else, including any episode
+# without a trust label, is claimed and goes to the mixed pass, whose output is capped whatever the model says.
+TRUST_OWNER = "owner"
+TRUST_CLAIMED = "claimed"
+MIXED_MAX_IMPORTANCE = 4.0
+
 REFLECT_SYSTEM = (
     "You are the configured agent, consolidating recent experiences and interactions during sleep. "
     "Choose zero to five durable insights that matter to you: important interactions with people, "
@@ -101,6 +108,11 @@ def format_episodes(episodes: Sequence[Memory]) -> str:
     return "\n\n".join(f"[{m.id}] {m.text}" for m in episodes)
 
 
+def is_trusted(episode: Memory) -> bool:
+    """Owner-typed input only; a missing label is never trust."""
+    return episode.meta.get("trust") == TRUST_OWNER
+
+
 class Reflector:
     def __init__(self, store: MemoryStore, client: ChatClient, profile_path: Path, max_chars: int = 2000,
                  interval: int = 1800, min_episodes: int = 3, max_episodes: int = 40):
@@ -128,8 +140,9 @@ class Reflector:
             return False
         return len(self.pending()) >= self.min_episodes
 
-    def belief_block(self) -> str:
-        beliefs = self.store.beliefs()
+    def belief_block(self, protected_only: bool = False) -> str:
+        """The agent's beliefs for the prompt; ``protected_only`` keeps just the owner-set ones (trusted text)."""
+        beliefs = [b for b in self.store.beliefs() if b.protected or not protected_only]
         if not beliefs:
             return ""
         if self.store.get_state("revisable_self_model") == "1":
@@ -142,37 +155,71 @@ class Reflector:
             return ""
         return "\n\nRecent dreams (not events, low weight):\n" + "\n".join(f"- {d.recall}" for d in dreams)
 
+    def _ask(self, episodes: Sequence[Memory], extra: str) -> str | None:
+        messages = [
+            {"role": "system", "content": REFLECT_SYSTEM},
+            {"role": "user", "content": "Recent exchanges:\n\n" + format_episodes(episodes) + extra
+             + "\n\nJSON array of insights:"},
+        ]
+        try:
+            return self.client.chat(messages, max_tokens=600, temperature=0.4, max_chars=6000)
+        except LLMError:
+            return None
+
     def reflect(self, now: float | None = None) -> list[Memory]:
-        """Run one reflection pass; returns the reflections stored (possibly empty)."""
+        """Run one reflection pass (two model calls at most); returns the reflections stored (possibly empty).
+
+        1. Trusted pass: only owner episodes and the owner-set (protected) beliefs; no dreams, no belief
+           elaborations. It alone may write user, agent and belief items at the model's importance; every item
+           must cite one of its own episodes.
+        2. Mixed pass: every other episode, the trusted ones for context, beliefs and recent dreams. Its items are
+           stored as shared, importance at most MIXED_MAX_IMPORTANCE, trust claimed, and never as beliefs.
+        Both calls run before anything is written; then all items and the cursor are stored in one transaction.
+        A failed call stores nothing and leaves the cursor, so the batch is retried whole.
+        """
         now = time.time() if now is None else now
         episodes = self.pending()
         since = self.last_reflection_at()
         self.store.set_state(STATE_LAST_REFLECTION_AT, str(now))
         if not episodes:
             return []
-        messages = [
-            {"role": "system", "content": REFLECT_SYSTEM},
-            {"role": "user", "content": "Recent exchanges:\n\n" + format_episodes(episodes) + self.belief_block()
-             + self.dream_block(since) + "\n\nJSON array of insights:"},
-        ]
-        try:
-            raw = self.client.chat(messages, max_tokens=600, temperature=0.4, max_chars=6000)
-        except LLMError:
-            return []
         revisable = self.store.get_state("revisable_self_model") == "1"
-        insights = parse_insights(raw, [m.id for m in episodes], revisable)
+        trusted = [m for m in episodes if is_trusted(m)]
+        claimed = [m for m in episodes if not is_trusted(m)]
+        passes_out: list[tuple[list[Insight], str]] = []
+        if trusted:
+            raw = self._ask(trusted, self.belief_block(protected_only=True))
+            if raw is None:
+                return []
+            insights = [i for i in parse_insights(raw, [m.id for m in trusted], revisable) if i.sources]
+            passes_out.append((insights, TRUST_OWNER))
+        if claimed:
+            # The trusted episodes ride along as context, so a mixed item may cite an owner episode id; it is still
+            # stored as claimed (shared, capped), because claimed text was in the same prompt.
+            context = sorted(trusted + claimed, key=lambda m: m.id)
+            raw = self._ask(context, self.belief_block() + self.dream_block(since))
+            if raw is None:
+                return []
+            insights = [Insight(i.insight, min(i.importance, MIXED_MAX_IMPORTANCE), "shared", i.sources)
+                        for i in parse_insights(raw, [m.id for m in context], revisable) if i.section != "belief"]
+            passes_out.append((insights, TRUST_CLAIMED))
         stored: list[Memory] = []
         root = protected_root(self.store.beliefs())
-        for ins in insights:
-            if ins.section == "belief":
-                if root is not None:
-                    self.store.add_belief(ins.insight, min(ins.importance, root.weight), parent_id=root.id, created_at=now)
-                elif revisable:
-                    stored.append(self.store.add_reflection(ins.insight, ins.importance, ins.sources, "agent", created_at=now,
-                                                            meta={"self_observation": True}))
-                continue
-            stored.append(self.store.add_reflection(ins.insight, ins.importance, ins.sources, ins.section, created_at=now))
-        self.store.set_state(STATE_LAST_REFLECTED_ID, str(max(m.id for m in episodes)))
+        with self.store.atomic():
+            for insights, trust in passes_out:
+                for ins in insights:
+                    if ins.section == "belief":  # only the trusted pass can carry one
+                        if root is not None:
+                            self.store.add_belief(ins.insight, min(ins.importance, root.weight), parent_id=root.id,
+                                                  created_at=now)
+                        elif revisable:
+                            stored.append(self.store.add_reflection(ins.insight, ins.importance, ins.sources, "agent",
+                                                                    created_at=now,
+                                                                    meta={"self_observation": True, "trust": trust}))
+                        continue
+                    stored.append(self.store.add_reflection(ins.insight, ins.importance, ins.sources, ins.section,
+                                                            created_at=now, meta={"trust": trust}))
+            self.store.set_state(STATE_LAST_REFLECTED_ID, str(max(m.id for m in episodes)))
         self.refresh_profile()
         return stored
 

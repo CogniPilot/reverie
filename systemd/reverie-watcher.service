@@ -9,13 +9,15 @@ StartLimitIntervalSec=0
 
 [Service]
 Environment=FLEET_REPO=%h/git/reverie
+# Required: FLEET_RUNTIME_POLICY is the container-visible owner-selected policy.
+EnvironmentFile=%h/.config/reverie/runtime.env
 Type=exec
 # The console needs a few seconds after the container starts; ticks before that only log errors.
-ExecStartPre=/bin/sleep 15
-ExecStart=%h/.local/libexec/reverie/fleet-container engine exec --user cto reverie-live /opt/fleet/python/bin/fleet-runtime --policy /instances/personal/runtime/runtime-policy.json watch
+ExecStartPre=/usr/bin/env sleep 15
+ExecStart=%h/.local/libexec/reverie/fleet-container engine exec --user cto reverie-live /opt/fleet/python/bin/fleet-runtime --policy ${FLEET_RUNTIME_POLICY} watch
 # Stopping the unit kills only the podman client; the in-container watcher (and any standby)
 # would keep running and keep holding the lock. End them explicitly.
-ExecStopPost=-%h/.local/libexec/reverie/fleet-container engine exec --user cto reverie-live /opt/fleet/python/bin/fleet-runtime --policy /instances/personal/runtime/runtime-policy.json stop-watcher
+ExecStopPost=-%h/.local/libexec/reverie/fleet-container engine exec --user cto reverie-live /opt/fleet/python/bin/fleet-runtime --policy ${FLEET_RUNTIME_POLICY} stop-watcher
 # A crash restarts it. `systemctl --user stop reverie-watcher` is an intentional stop.
 Restart=on-failure
 RestartSec=30

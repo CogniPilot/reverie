@@ -8,14 +8,14 @@
 #                                          the repo instead of the rescue; NOT durable)
 #
 # Run as the container user, e.g. on the host:
-#   FLEET_CONTAINER_NAME=reverie-live ~/.local/libexec/agent-fleet/fleet-container \
+#   FLEET_CONTAINER_NAME=reverie-live ~/.local/libexec/reverie/fleet-container \
 #     exec bash /scratch/repos/reverie/scripts/reverie-restore --dry-run
 # Never deletes anything: an existing, different destination is kept as NAME.pre-restore-TIMESTAMP.
-# Options: --rescue DIR [/scratch/handoffs/2026-10-15/rescue]  --home DIR [$HOME]
+# Options: --rescue DIR [FLEET_RESCUE_DIR, required if unset]  --home DIR [$HOME]
 #          --opt DIR [/opt/fleet]  --force (restore the OpenCode DB although OpenCode runs)
 set -euo pipefail
 
-rescue=/scratch/handoffs/2026-10-15/rescue
+rescue="${FLEET_RESCUE_DIR:-}"
 home="$HOME"
 opt=/opt/fleet
 dry=0
@@ -37,6 +37,7 @@ while [ "$#" -gt 0 ]; do
     *) die "unknown option '$1' (see --help)" ;;
   esac
 done
+[ -n "$rescue" ] || die "set FLEET_RESCUE_DIR or pass --rescue DIR"
 [ -d "$rescue" ] || die "no rescue directory: $rescue"
 [ "$dry" = 0 ] || echo "DRY RUN: nothing is changed."
 

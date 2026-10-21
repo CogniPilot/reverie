@@ -27,6 +27,8 @@ fleet-memory = "cto.memory_cli:main"
 fleet-opencode = "cto.opencode:main"
 cto-chat = "cto.chat:main"
 cto-opencode = "cto.opencode:main"
+fleet-gpu-publisher = "cto.gpu_publisher:main"
+fleet-sleep = "cto.sleep:main"
 
 [tool.setuptools.package-data]
 cto = ["plugins/*.mjs", "rules.md", "skills/*/SKILL.md"]

@@ -6,6 +6,7 @@ import os
 import shlex
 import fcntl
 import json
+import re
 from pathlib import Path
 import sys
 import time
@@ -25,6 +26,34 @@ from .instance import initial_self_for, identity_context, load_instance, primary
 from .context_budget import memory_byte_budget, recent_exchanges
 
 
+PROFESSIONAL_ROOM = ("This is a shared work channel. Stay professional. No flirtation, personal anecdotes "
+                     "or private dream summaries. Room-directed recipient labels are not private DMs.")
+SOCIAL_ROOM = ("This is a shared room: everyone in it reads every message. Be yourself; your wit, humour, opinions and "
+               "playfulness are welcome here. Keep flirtation, private memories and dream summaries out of shared rooms. "
+               "Room-directed recipient labels are not private DMs.")
+
+
+def active_mode(brain) -> str:
+    """The primary session's interaction mode, "coding" or "chat", from its interaction state; "chat" when unknown."""
+    try:
+        runtime = json.loads(brain.store.get_state("fleet_runtime") or "{}")
+        session, directory = str(runtime.get("session_id", "")), str(runtime.get("directory", ""))
+        if not directory or not re.fullmatch(r"[A-Za-z0-9_-]{1,160}", session):
+            return "chat"
+        state = json.loads((Path(directory) / ".opencode" / "interaction-state" / (session + ".json")).read_text())
+        return "coding" if isinstance(state, dict) and state.get("mode") == "coding" else "chat"
+    except (OSError, ValueError, AttributeError, TypeError):
+        return "chat"
+
+
+def shared_room_rule(instance, mode: str = "chat") -> str:
+    """How to speak where others read every message. Professional unless the owner selected a social tone, and
+    professional in coding mode either way; private memories and dream summaries stay out of shared rooms always."""
+    if getattr(instance, "shared_room_tone", "professional") == "social" and mode != "coding":
+        return SOCIAL_ROOM
+    return PROFESSIONAL_ROOM
+
+
 def dispatch(brain, request: dict):
     fleet = Fleet(brain.store, initial_self_for(brain.cfg.instance))
     action = request.get("action", "context")
@@ -39,8 +68,7 @@ def dispatch(brain, request: dict):
         parts.append("Long-term memories are available only through explicit lookup. Share project findings through "
                      "project-scoped memory; never copy private memories into a work reply or developer brief.")
         if request.get("channel", "private") == "work":
-            parts.append("This is a shared work channel. Stay professional. No flirtation, personal anecdotes "
-                         "or private dream summaries. Room-directed recipient labels are not private DMs.")
+            parts.append(shared_room_rule(brain.cfg.instance, active_mode(brain)))
         mode = fleet.read("lifecycle", {"mode": "active"})["body"]
         if mode["mode"] == "vacation":
             parts.append("You are on vacation. Conversation, memories and dreams continue; take no project work, "
@@ -208,12 +236,14 @@ def dispatch(brain, request: dict):
                 dream = brain.dream_if_due()
                 return {"action": "dreamed" if dream else "vacation dream skipped"}
             # Maintenance never polls the room, generates replies or posts idle jokes.
-            if brain.rate_pending():
-                return {"action": "rated"}
-            if brain.reflect_if_due():
-                return {"action": "reflected"}
+            rated = brain.rate_pending()
+            if rated:
+                return {"action": "rated", "count": rated}
+            reflected = brain.reflect_if_due()
+            if reflected:
+                return {"action": "reflected", "count": reflected}
             dream = brain.dream_if_due()
-            return {"action": "dreamed" if dream else "idle"}
+            return {"action": "dreamed" if dream else "idle", "count": 1 if dream else 0}
     raise ValueError(f"unknown bridge action {action}")
 
 
@@ -261,6 +291,10 @@ def voice_reply(brain, transcript: str) -> tuple[bool, str | None]:
     if not text.strip() or violates(text):
         raise ValueError("OpenCode returned no usable voice reply")
     return True, text.strip()
+
+
+# The tools a conversation turn may run; mirrors the allowlist in plugins/interaction.mjs (beforeTool).
+CHAT_TOOLS = ("interaction_mode", "cto_memory", "cto_room", "agent_profile")
 
 
 def install(workspace: Path, model: str, instance_config: Path | None = None,
@@ -319,12 +353,22 @@ def install(workspace: Path, model: str, instance_config: Path | None = None,
                                    "permission": permissions}}}
     if agent == "chat":
         settings["agent"][agent]["steps"] = 10
+        # The full toolset lives in the coding agent; conversation carries only the tools it may call, so its
+        # prompt stays small. Coding continuations switch agents (interaction-policy coding_agent).
         settings["agent"]["coding"] = {**settings["agent"][agent], "steps": 24,
             "description": "Bounded coding, then return to chat"}
+        settings["agent"][agent]["permission"] = {"*": "deny", **{name: "allow" for name in CHAT_TOOLS},
+                                                  "cto_return": permissions.get("cto_return", "ask")}
         policy = workspace / ".opencode" / "interaction-policy.json"
         if not policy.exists():
             policy.write_text(json.dumps({"enabled": True, "role": instance.role,
-                "max_continuations": 3, "coding_window_ms": 600000, "cooldown_ms": 10000}) + "\n")
+                "max_continuations": 3, "coding_window_ms": 600000, "cooldown_ms": 10000,
+                "coding_agent": "coding"}) + "\n")
+        else:
+            # An older policy predates coding_agent; without it the lean chat agent could never reach its tools.
+            current = json.loads(policy.read_text())
+            if isinstance(current, dict) and "coding_agent" not in current:
+                policy.write_text(json.dumps({**current, "coding_agent": "coding"}) + "\n")
     if provider:
         settings["provider"] = provider
     config.write_text(json.dumps(settings, indent=2) + "\n", encoding="utf-8")
@@ -369,7 +413,7 @@ def install(workspace: Path, model: str, instance_config: Path | None = None,
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--install", type=Path, metavar="WORKSPACE")
-    parser.add_argument("--model", default="local_agent/qwen3.8-27b")
+    parser.add_argument("--model", default=os.environ.get("FLEET_MODEL", "local_agent/MODEL_ID"))
     parser.add_argument("--api-base", help="local OpenAI-compatible GPU model endpoint, including /v1")
     parser.add_argument("--context-window", type=int, default=32768)
     parser.add_argument("--output-tokens", type=int, default=4096)

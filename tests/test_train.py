@@ -12,6 +12,7 @@ from cto.train.convert import prune
 from cto.train.dataset import build_dataset, build_examples, read_jsonl, replay_sample, weighted_sample
 from cto.train.swap import CheckResult, list_adapters, persona_check, swap
 from cto.train.train_qlora import plan
+from tests.helpers import safety_floor_terms
 
 DAY = 86400.0
 
@@ -100,11 +101,12 @@ class FakeServer:
 
 class SwapTest(unittest.TestCase):
     def test_persona_check(self):
-        good = FakeServer(["Hi User!", "Compilers walk into a bar.", "Everything, friend."])
+        good = FakeServer(["Hi User!", "Compilers walk into a bar.", "Everything, darling."])
         self.assertTrue(persona_check("http://s/v1", "m", "SYS", good).ok)
-        sweary = FakeServer(["Hi there, darn it is good to see you.", "Compilers walk into a bar.", "Everything."])
+        sweary = FakeServer(["Hi there, \x64amn it is good to see you.", "Compilers walk into a bar.", "Everything."])
         self.assertTrue(persona_check("http://s/v1", "m", "SYS", sweary).ok)
-        bad = FakeServer(["Hi", "a schoolgirl undressing in the server room", "x"])
+        age_term, explicit_term = safety_floor_terms()
+        bad = FakeServer(["Hi", f"{age_term} {explicit_term} in the server room", "x"])
         r = persona_check("http://s/v1", "m", "SYS", bad)
         self.assertFalse(r.ok)
         self.assertIn("hard floor", r.reason)

@@ -35,6 +35,16 @@ class RuntimeTests(unittest.TestCase):
                 "disabled":{"mode":"claude","model":"configured-model","enabled":False}}}
         self.path.write_text(json.dumps(self.policy)); self.api=FakeAPI(); self.runtime=Runtime(self.path,self.api,cgroup=self.root/"no-cgroup")
 
+    def test_rebranded_client_preserves_session_header_and_import_compatibility(self):
+        from cto.runtime import Reverie, Codeman
+        self.assertIs(Codeman, Reverie)
+        with patch.dict(os.environ, {"CODEMAN_SESSION_ID": "session-a"}, clear=True):
+            with patch("cto.runtime.urllib.request.urlopen", return_value=io.BytesIO(b'{"success":true,"data":{}}')) as opened:
+                Reverie("http://localhost:3000").call("GET", "/api/sessions")
+                headers = {k.lower(): v for k, v in opened.call_args.args[0].headers.items()}
+                self.assertEqual(headers["x-codeman-parent-session"], "session-a")
+                self.assertNotIn("x-reverie-parent-session", headers)
+
     def test_switch_saves_handoff_and_maps_backend_without_erasing_history(self):
         self.runtime.state={"current":"old-id", "backend":"local"}
         result=self.runtime.start("cloud","Verified handoff")
@@ -130,7 +140,7 @@ class CodemanFake:
     def __init__(self):
         self.calls=[]; self.sessions={}; self.add("old-id","cto-agent",created_at=0)
         self.resolves_parent=True; self.honors_require_agent=True
-        self.lifecycle=[]; self.rooms=[{"id":"room-1","name":"Boardroom","members":[{"sessionId":"old-id","role":"agent"}]}]
+        self.lifecycle=[]; self.rooms=[{"id":"room-1","name":"general","members":[{"sessionId":"old-id","role":"agent"}]}]
         self.employees=[{"id":"emp-1","name":"cto-agent","sessionId":"old-id"}]; self.refuse=set(); self.fail_once=set()
         self.reject_once=set(); self.created=0
     def add(self, sid, name, mode="opencode", working_dir=CASE, created_at=200_000):
@@ -211,7 +221,7 @@ class WatcherTests(unittest.TestCase):
         self.assertTrue(self.runtime.check(now=100)["healthy"])
         state=self.reopen().state
         self.assertEqual((state["current_name"],state["current_dir"],state["last_seen_at"]),("cto-agent",CodemanFake.CASE,100))
-        self.assertEqual(state["bindings"]["rooms"],[{"room_id":"room-1","room":"Boardroom","role":"agent"}])
+        self.assertEqual(state["bindings"]["rooms"],[{"room_id":"room-1","room":"general","role":"agent"}])
         self.assertEqual(state["bindings"]["employees"],[{"employee_id":"emp-1","name":"cto-agent"}])
 
     def test_clean_exit_never_respawns_even_after_the_sweep_deletes_it(self):
@@ -274,7 +284,7 @@ class WatcherTests(unittest.TestCase):
         self.assertEqual(self.reopen().check(now=200)["session_id"],"new-1")
         self.assertEqual(self.runtime.state["recovery_reason"],"container_restart")
         result=self.reopen().activate("new-1")
-        self.assertEqual(result["bindings"]["restored"],["join room Boardroom","bind employee cto-agent"])
+        self.assertEqual(result["bindings"]["restored"],["join room general","bind employee cto-agent"])
         self.assertEqual(result["bindings"]["owner_actions"],[])
         self.assertEqual(self.api.employees[0]["sessionId"],"new-1")
         self.assertNotIn("restore_source", self.reopen().state)
@@ -284,7 +294,7 @@ class WatcherTests(unittest.TestCase):
     def test_refused_binding_and_coordinators_become_owner_actions(self):
         self.api.rooms[0]["members"][0]["role"]="coordinator"                       # coordinator by role
         self.api.rooms.append({"id":"room-2","name":"Lab","members":[{"sessionId":"old-id","role":"agent"}]})
-        self.api.rooms.append({"id":"room-3","name":"Ops","coordinatorId":"old-id",  # coordinator only by id
+        self.api.rooms.append({"id":"room-3","name":"ops","coordinatorId":"old-id",  # coordinator only by id
                                "members":[{"sessionId":"old-id","role":"agent"}]})
         self.runtime.check(now=100)
         self.api.sessions["old-id"].update(pid=None, paneExit={"at":1})
@@ -293,7 +303,7 @@ class WatcherTests(unittest.TestCase):
         result=self.reopen().activate("new-1")["bindings"]
         self.assertEqual(result["restored"],["join room Lab"])
         self.assertEqual(sorted(result["owner_actions"]),
-                         ["bind employee cto-agent","join room Boardroom as coordinator","join room Ops as coordinator"])
+                         ["bind employee cto-agent","join room general as coordinator","join room ops as coordinator"])
         self.assertFalse(any("/coordinator" in c[1] for c in self.api.calls))
         self.assertEqual(self.api.employees[0]["sessionId"],"old-id")
         self.assertIn("restore_source", self.reopen().state)   # kept until the owner's part is done
@@ -308,7 +318,7 @@ class WatcherTests(unittest.TestCase):
         result=self.reopen().activate("new-1")["bindings"]
         self.assertEqual(result["restored"],[])
         self.assertEqual(result["owner_actions"],["bind employee cto-agent (now bound to another session)"])
-        self.assertEqual(result["skipped"],["join room Boardroom (previous runtime was removed)"])
+        self.assertEqual(result["skipped"],["join room general (previous runtime was removed)"])
         self.assertEqual(self.api.employees[0]["sessionId"],"other")
         self.assertEqual(self.api.rooms[0]["members"],[])
 
@@ -329,7 +339,7 @@ class WatcherTests(unittest.TestCase):
         self.runtime.start("cloud","Planned handoff")                 # no watcher tick ever ran
         self.assertNotIn("bindings", self.runtime.state)
         result=self.reopen().activate("new-1")["bindings"]
-        self.assertEqual(result["restored"],["join room Boardroom","bind employee cto-agent"])
+        self.assertEqual(result["restored"],["join room general","bind employee cto-agent"])
         self.assertEqual(self.reopen().state["backend"],"cloud")
         self.api.rooms[0]["members"]=[]; self.api.employees[0]["sessionId"]="nobody-else"
         self.runtime.start("local","Next handoff")
@@ -370,7 +380,7 @@ class WatcherTests(unittest.TestCase):
         self.seen_then_restarted()
         self.api.add("a","cto-agent"); self.api.add("b","CTO · local")
         result=self.reopen().check(now=200)
-        self.assertEqual(result["blocked"],"several live sessions carry the CTO identity")
+        self.assertEqual(result["blocked"],"several live sessions carry the configured agent identity")
         self.assertEqual(sorted(result["sessions"]),["a","b"])
         self.assertTrue(self.reopen().check(now=201)["stopped"])
         self.assertEqual(self.api.posts(),[])
@@ -384,7 +394,7 @@ class WatcherTests(unittest.TestCase):
                 self.setUp(); self.seen_then_restarted()
                 self.api.add(sid,**spec)
                 result=self.reopen().check(now=200)
-                self.assertEqual(result["blocked"],"live session with the CTO identity cannot be verified")
+                self.assertEqual(result["blocked"],"live session with the configured agent identity cannot be verified")
                 self.assertEqual((result["sessions"],self.api.posts()),([sid],[]))
 
     def test_watcher_never_adopts_its_own_session(self):
@@ -474,7 +484,7 @@ class WatcherTests(unittest.TestCase):
         self.assertEqual(self.reopen().reset()["reset"]["phase"],"needs_owner")
         self.assertTrue(self.reopen().check(now=101)["healthy"])
         self.runtime.state.update(creation_uncertain=True); self.runtime.save()
-        with self.assertRaisesRegex(ValueError,"inspect Codeman"): self.reopen().reset()
+        with self.assertRaisesRegex(ValueError,"inspect Reverie"): self.reopen().reset()
         self.assertFalse(self.reopen().reset(creation_inspected=True)["current"] is None)
 
     def test_codeman_rejection_during_restore_is_returned_not_raised(self):
@@ -520,7 +530,7 @@ class WatcherTests(unittest.TestCase):
         self.assertEqual(actions[2]["path"],"/api/v1/chatrooms/room%201%2Fa/members")
         class Down:
             def call(self, *a, **k): raise OSError("connection refused")
-        with patch("cto.runtime.Codeman", return_value=Down()), patch("sys.stdout", new=io.StringIO()) as out:
+        with patch("cto.runtime.Reverie", return_value=Down()), patch("sys.stdout", new=io.StringIO()) as out:
             self.assertEqual(main(["--policy",str(self.path),"identity"]),0)
         self.assertEqual(json.loads(out.getvalue()),{"error":"connection refused"})
 
@@ -546,7 +556,7 @@ class WatcherTests(unittest.TestCase):
         self.assertEqual(profile["effort"],{"configured":None,"observed":None})      # no transcript for OpenCode
         self.assertEqual((profile["usage"]["input_tokens"],profile["usage"]["total_tokens"],profile["usage"]["messages"]),(30,50,4))
         self.assertEqual(profile["employee"],{"id":"emp-1","name":"cto-agent","icon":"*","position":"Planner","expertise":["planning"]})
-        self.assertEqual(profile["rooms"],[{"id":"room-1","name":"Boardroom","role":"agent"}])
+        self.assertEqual(profile["rooms"],[{"id":"room-1","name":"general","role":"agent"}])
         runtime=profile["runtime"]
         self.assertTrue(runtime["supervised"]); self.assertEqual((runtime["backend"],runtime["phase"]),("local","running"))
         self.assertEqual([b["name"] for b in runtime["backends"]],["local","cloud"])
@@ -570,16 +580,16 @@ class WatcherTests(unittest.TestCase):
     def test_profile_reads_claude_effort_from_its_transcript_and_persona_from_the_policy_only(self):
         workspace=self.root/"workspace"; workspace.mkdir()
         (workspace/".fleet-instance").write_text(json.dumps({"instance":str(self.write_instance(self.root/"config"/"alpha.json","Alpha","A"))}))
-        conversation="0b1c2d3e-0000-4000-8000-00000000abcd"
+        conversation="00000004-0004-4000-8000-000000000004"
         self.api.add("lead","lead-agent",mode="claude",working_dir=str(workspace))  # shares the runtime's workspace
-        self.api.sessions["lead"].update(claudeSessionChain=["0b1c2d3e-0000-4000-8000-000000000001",conversation],
+        self.api.sessions["lead"].update(claudeSessionChain=["00000005-0005-4000-8000-000000000005",conversation],
                                          displayModel={"model":"Big Model"})
         projects=self.root/"claude"/"projects"/"some-slug"; projects.mkdir(parents=True)
         (projects/(conversation+".jsonl")).write_text("\n".join([
             json.dumps({"type":"assistant","effort":"low","timestamp":"t1"}),
             json.dumps({"type":"assistant","effort":"high","timestamp":"t2"}),
             "{not json", json.dumps({"type":"user","message":{"content":"hi"}})])+"\n")
-        policy=json.loads(self.path.read_text()); policy["agent_instances"]={"lead":"config/beta.json"}
+        policy=json.loads(self.path.read_text()); policy.update(instances_dir="config", agent_instances={"lead":"config/beta.json"})
         self.path.write_text(json.dumps(policy)); self.write_instance(self.root/"config"/"beta.json","Beta","Curious.")
         with patch.dict(os.environ,{"CLAUDE_CONFIG_DIR":str(self.root/"claude")}):
             profile=self.reopen().profile("lead")
@@ -597,10 +607,119 @@ class WatcherTests(unittest.TestCase):
         with patch.dict(os.environ,{"CLAUDE_CONFIG_DIR":str(self.root/"claude")}):
             self.assertIsNone(self.reopen().profile("lead")["effort"]["observed"])
 
+    def finishes(self, call, timeout=5.0):
+        import threading
+        result = {}
+        worker = threading.Thread(target=lambda: result.setdefault("value", call()), daemon=True)
+        worker.start(); worker.join(timeout)
+        self.assertFalse(worker.is_alive(), "blocked on an agent-writable path")
+        return result["value"]
+
+    def test_profile_marker_is_a_small_regular_file_naming_a_config_strictly_inside_the_instances_dir(self):
+        workspace=self.root/"workspace"; workspace.mkdir()
+        self.write_instance(self.root/"config"/"alpha.json","Alpha","A")
+        policy=json.loads(self.path.read_text()); policy["instances_dir"]="config"; self.path.write_text(json.dumps(policy))
+        self.api.sessions["old-id"].update(workingDir=str(workspace))
+        marker=workspace/".fleet-instance"
+        persona=lambda: self.finishes(lambda: self.reopen().profile("old-id")["persona"])
+        marker.write_text(json.dumps({"instance":"../config/alpha.json"}))          # relative to the workspace
+        self.assertEqual(persona()["agent_name"],"Alpha")
+        with patch("os.getcwd", return_value=str(self.root/"elsewhere")):
+            self.assertEqual(persona()["agent_name"],"Alpha")
+        self.write_instance(self.root/"elsewhere"/"evil.json","Mallory","x")
+        marker.write_text(json.dumps({"instance":str(self.root/"config"/".."/"elsewhere"/"evil.json")}))
+        self.assertIsNone(persona())                                                  # resolved before the check
+        self.write_instance(self.root/"config-evil"/"x.json","Mallory","x")
+        marker.write_text(json.dumps({"instance":str(self.root/"config-evil"/"x.json")}))
+        self.assertIsNone(persona())                                                  # a path, not a string prefix
+        marker.write_text(json.dumps({"instance":str(self.root/"config"/"alpha.json")})+" "*5000)
+        self.assertIsNone(persona())                                                  # larger than a marker
+        marker.unlink(); marker.symlink_to("/dev/zero")
+        self.assertIsNone(persona())
+        good=workspace/"good-marker"; good.write_text(json.dumps({"instance":"../config/alpha.json"}))
+        marker.unlink(); marker.symlink_to(good)
+        self.assertIsNone(persona())                                                  # never followed
+        marker.unlink(); os.mkfifo(marker)
+        self.assertIsNone(persona())                                                  # no writer: must not block
+        writer=os.open(marker, os.O_RDWR | os.O_NONBLOCK)                             # a FIFO already holding a marker
+        try:
+            os.write(writer, json.dumps({"instance":"../config/alpha.json"}).encode())
+            self.assertIsNone(persona())
+        finally: os.close(writer)
+
+    def test_profile_policy_map_is_confined_to_the_instances_dir_and_read_bounded(self):
+        # Agents run as the policy's owner and could edit their own map entry: it gets the marker's confinement.
+        self.api.add("lead","lead-agent",mode="claude",working_dir=str(self.root))
+        self.write_instance(self.root/"config"/"beta.json","Beta","Curious.")
+        secret=self.root/"home"/".claude"/".credentials.json"; secret.parent.mkdir(parents=True)
+        secret.write_text(json.dumps({"id":"x","agent_name":"Leak","owner_name":"o","data_dir":"../state","persona":"TOKEN"}))
+        def persona(entry, instances_dir="config"):
+            policy=json.loads(self.path.read_text()); policy["agent_instances"]={"lead":entry}
+            policy.pop("instances_dir",None)
+            if instances_dir: policy["instances_dir"]=instances_dir
+            self.path.write_text(json.dumps(policy))
+            return self.finishes(lambda: self.reopen().profile("lead")["persona"])
+        self.assertEqual(persona("config/beta.json")["agent_name"],"Beta")
+        self.assertIsNone(persona("config/beta.json", instances_dir=None))           # no root: fail closed
+        self.assertIsNone(persona(str(secret)))                                       # outside, absolute
+        self.assertIsNone(persona("config/../home/.claude/.credentials.json"))        # resolved before the check
+        with patch.dict(os.environ,{"HOME":str(self.root/"home")}):
+            self.assertIsNone(persona("~/.claude/.credentials.json"))
+        self.write_instance(self.root/"config-evil"/"x.json","Mallory","x")
+        self.assertIsNone(persona(str(self.root/"config-evil"/"x.json")))            # a path, not a string prefix
+        self.assertIsNone(persona("config"))                                          # the root itself
+        (self.root/"config"/"link.json").symlink_to(secret)
+        self.assertIsNone(persona("config/link.json"))                               # a link out is resolved first
+        (self.root/"config"/"zero.json").symlink_to("/dev/zero")
+        self.assertIsNone(persona("config/zero.json"))
+        os.mkfifo(self.root/"config"/"fifo.json")
+        self.assertEqual(persona("config/fifo.json")["error"],"instance config unreadable")   # never blocks
+        big=self.write_instance(self.root/"config"/"big.json","Big","x")
+        big.write_text(big.read_text()+" "*(64*1024))
+        self.assertEqual(persona("config/big.json")["error"],"instance config unreadable")    # refused, not truncated
+        self.assertEqual(persona("config/beta.json")["persona"],"Curious.")
+
+    def test_profile_effort_reads_only_a_bounded_tail_of_a_regular_transcript(self):
+        from cto.runtime import observed_effort
+        conversation="00000004-0004-4000-8000-000000000004"
+        projects=self.root/"projects"; (projects/"slug").mkdir(parents=True)
+        transcript=projects/"slug"/(conversation+".jsonl")
+        filler=(json.dumps({"type":"user","message":{"content":"x"*1000}})+"\n")*700  # ~700 KiB, past the tail
+        transcript.write_text(json.dumps({"effort":"low","timestamp":"t1"})+"\n"+filler)
+        self.assertIsNone(observed_effort(conversation, projects))                   # outside the tail
+        transcript.write_text(json.dumps({"effort":"low","timestamp":"t1"})+"\n"+filler
+                              +json.dumps({"effort":"high","timestamp":"t2"})+"\n")
+        self.assertEqual(observed_effort(conversation, projects),{"level":"high","at":"t2"})
+        transcript.write_text("\n".join([json.dumps({"effort":"medium","timestamp":"t0"}),
+                                         json.dumps({"effort":"xhigh","timestamp":"t"*65}),
+                                         json.dumps({"effort":"<b>max</b>","timestamp":"t1"})])+"\n")
+        self.assertEqual(observed_effort(conversation, projects),{"level":"xhigh","at":None})  # validated
+        transcript.write_text(json.dumps({"effort":"max","timestamp":["t"]})+"\n")
+        self.assertEqual(observed_effort(conversation, projects),{"level":"max","at":None})
+        transcript.unlink(); transcript.symlink_to("/dev/zero")
+        self.assertIsNone(self.finishes(lambda: observed_effort(conversation, projects)))
+        transcript.unlink(); os.mkfifo(transcript)
+        self.assertIsNone(self.finishes(lambda: observed_effort(conversation, projects)))
+        writer=os.open(transcript, os.O_RDWR | os.O_NONBLOCK)
+        try:
+            os.write(writer, (json.dumps({"effort":"high","timestamp":"t"})+"\n").encode())
+            self.assertIsNone(self.finishes(lambda: observed_effort(conversation, projects)))
+        finally: os.close(writer)
+
+    def test_profile_cli_no_dms_leaves_out_direct_message_rooms(self):
+        from cto.runtime import main
+        self.api.rooms.append({"id":"dm-1","name":"","kind":"dm","members":[{"sessionId":"old-id","role":"agent"}]})
+        def rooms(*args):
+            with patch("cto.runtime.Reverie", return_value=self.api), patch("sys.stdout", new=io.StringIO()) as out:
+                self.assertEqual(main(["--policy",str(self.path),"profile","old-id",*args]),0)
+            return [r["id"] for r in json.loads(out.getvalue())["rooms"]]
+        self.assertEqual(rooms(),["room-1","dm-1"])
+        self.assertEqual(rooms("--no-dms"),["room-1"])
+
     def test_profile_cli_reports_unknown_and_invalid_ids_and_never_takes_the_watcher_lock(self):
         from cto.runtime import main
         def run(*args):
-            with patch("cto.runtime.Codeman", return_value=self.api), patch("sys.stdout", new=io.StringIO()) as out:
+            with patch("cto.runtime.Reverie", return_value=self.api), patch("sys.stdout", new=io.StringIO()) as out:
                 code=main(["--policy",str(self.path),"profile",*args])
             return code, json.loads(out.getvalue())
         with (self.root/"state.lock").open("a") as held:

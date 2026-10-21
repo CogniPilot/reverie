@@ -149,7 +149,7 @@ per room per interval and at most the daily cap per room.
    - Run `reverie owner service-token issue stall-watch` from a host shell.
    - Write `~/.config/reverie/stall-watch.env` (mode 0600, on the host) with:
      - `REVERIE_SERVICE_TOKEN=…`
-     - `STALL_WATCH_REPORTS="<room id>=<to>[,<to>] …"`, for example `"<break room>=<cto name> <platform room>=coordinator"`
+     - `STALL_WATCH_REPORTS="<room id>=<to>[,<to>] …"`, for example `"<lounge>=<cto name> <platform room>=coordinator"`
      - `STALL_WATCH_TARGET_NAME=<agent name>`
      - optionally `STALL_WATCH_MIN_INTERVAL` (seconds) and `STALL_WATCH_DAILY_CAP` (notices per room per day)
    - Nothing from this file is passed into the container.
@@ -160,3 +160,5 @@ Manual tick: `python3 -m cto.stall_watch --config FILE [--dry-run]` (inside the 
 1. **Console delivery for OpenCode panes:** a bracketed paste instead of typed keys (root cause above).
 2. **A console endpoint for host services to post a room notice** as `system` (with a service token).
 3. **Optionally,** OpenCode's prompt mode in the session object, as `paneDialog` is.
+
+See [runtime configuration](runtime-configuration.md) for neutral model defaults, profile section keys, and required user-service environment files.

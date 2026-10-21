@@ -17,7 +17,7 @@ The console decides "is this the owner?" by the **absence** of `X-Codeman-Parent
 ## Facts that decide the design (checked 2026-10-15, live container)
 | Fact | Consequence |
 |---|---|
-| The console listens on `0.0.0.0:3000` with `--allow-unauthenticated-network`, and no password is set | Anyone who can reach the port is the owner. This is the largest exposure today, bigger than agents. |
+| The console listens on `0.0.0.0:3000` with `--allow-unauthenticated-network`, and no password is set | Anyone who can reach the port is the owner. Review the instance network and authentication configuration before exposing it. |
 | The console has HTTP Basic auth with session cookies (`web/middleware/auth.ts`, `CODEMAN_PASSWORD`, cookie `codeman_session`) | A login and cookie mechanism already exists and can be reused. |
 | Agent tooling reads the **same** password from the data dir's `.env` (`codeman-credentials.ts`) | Turning the password on stops the network, but does not tell the owner apart from agents. |
 | The console and all agents run as uid `cto`; the data dir is `0700 cto` | Every file the console can read or write, an agent can too: tokens, password hashes, settings. |

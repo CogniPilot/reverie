@@ -19,7 +19,7 @@ workers stay stopped. Each tick re-reads the controller state under a file lock.
 | session 404 and newest event **after `last_seen_at`** is `mux_died`/`stale_cleaned` (container or tmux restart) | recover, reason `container_restart` |
 | session 404 with no such event, or never seen alive | `missing_needs_owner`; no guess |
 
-Lifecycle events come newest-first from Codeman (it reads its log backwards). The
+Lifecycle events come newest-first from Reverie (it reads its log backwards). The
 watcher both asks for `since=last_seen_at` and filters on the client side, so an
 older restart event can never count.
 
@@ -35,7 +35,7 @@ fails these checks stops with `needs_owner`, because creating another session wo
 duplicate the identity. More than one match
 stops with `needs_owner`. A candidate that dies before activation gives
 `candidate_failed`. If a planned switch's candidate dies while `current` is still live, the watcher
-alerts and keeps supervising `current`. These stops raise an alert. Codeman posts as the
+alerts and keeps supervising `current`. These stops raise an alert. Reverie posts as the
 user when a parent session does not resolve. So before posting to `alert_room`, the
 watcher checks that its own `CODEMAN_SESSION_ID` is live, is a member of that room, and
 is not a supervised runtime. It sends `requireAgent: true` (a patched console refuses;
@@ -68,9 +68,8 @@ automatically.
 
 ## Supervision (design; templates in `systemd/`, not installed)
 
-Today the watcher runs in Codeman shell session 84aa9010 (`exec fleet-runtime watch`).
-A container restart removes that session (`stale_cleaned`), and nothing would notice the
-watcher dying. Proposal:
+A watcher started manually in a shell session is lost when the container restarts.
+Use the reviewed user-service templates to supervise it independently of that session:
 
 1. **Start with the container.** A host user unit, `reverie-watcher.service`, runs
    `fleet-container engine exec --user cto reverie-live fleet-runtime --policy ... watch`. It is
@@ -95,8 +94,8 @@ watcher dying. Proposal:
    succeeded). It exits 1 when not ticking, or not healthy with `--healthy`. `status`
    includes both. The 5-minute `reverie-watcher-check.timer` uses `try-restart` only
    when the watcher is not ticking. A ticking watcher with failing ticks is reported,
-   not restarted, because a restart cannot fix Codeman being down.
-4. **Alerts.** A host-run watcher has no Codeman identity, so alerts go to
+   not restarted, because a restart cannot fix Reverie being down.
+4. **Alerts.** A host-run watcher has no Reverie identity, so alerts go to
    `undelivered_alerts` and the host journal (`journalctl --user -u reverie-watcher`).
    They are never posted as the user. Optional: once the console post-only patch is
    deployed, the user adds a dedicated shell session as a **post-only** member of
@@ -104,13 +103,13 @@ watcher dying. Proposal:
    identity is gone after a container restart until it is recreated, and alerts fall
    back to the state.
 
-Migration order (owner): deploy the reviewed code, stop session 84aa9010 (the old code
-does not take `watch.lock`), install and enable the units, then confirm
+Migration order (owner): deploy the reviewed code, identify and stop any existing
+manual watcher that does not take `watch.lock`, install and enable the units, then confirm
 `fleet-runtime status` shows `watcher.alive: true`.
 
 ## Shell members never receive room text (console patch, `apps/console`)
 
-Codeman delivers room messages by typing them plus Enter into each member's pane, so a
+Reverie delivers room messages by typing them plus Enter into each member's pane, so a
 shell member would run them as commands. `ChatroomDelivery.flush()`, the only writer,
 now types only into modes marked as chat-capable in an exhaustive
 `Record<SessionMode, boolean>`. Shell and unknown modes have their queue dropped. This
@@ -120,6 +119,26 @@ it with `postOnly: true`. Room creation checks every member before the room exis
 refusal leaves nothing half-made. A post-only member gets no briefing and no messages,
 cannot coordinate or be the voice, and can still post as itself.
 
+## OpenCode reply guard and its relay log
+
+When an OpenCode turn that received a room delivery ends without posting to that room,
+the plugin does not relay the leftover text. It appends `{at, session, rooms, text}` to
+`.reverie-relay-log.jsonl` in the agent's directory (mode 0600). Setting
+`reply_guard: "post"` restores the old relay. A short room id in the reply counts as
+the delivered room when it is a prefix of the full id.
+
+**Retention: the relay log keeps text for the owner-configured period (7 days
+in this example).** The nightly
+sleep step prunes it through a `prune` entry in the sleep policy:
+`{"path": "<agent dir>/.reverie-relay-log.jsonl", "days": 7, "live": true}`. It goes by
+each line's own `at` stamp, never by file mtime. It drops lines older than the retention,
+and also any line without a readable stamp, since that may still hold DM text. A
+trailing line with no newline may be mid-append, so it is kept for one night and dropped
+if it is unchanged the next night. The file is rewritten at 0600 through a temp file and
+a rename. Without `"live": true` an entry only reports `would_prune N`. The global
+`dry_run` does not affect pruning; lifting it would also turn on memory consolidation,
+model maintenance and morning notes.
+
 ## Memory-aware admission
 
 `cto/admission.py` refuses new work when `used + expected > limit - reserve`. Here
@@ -127,10 +146,9 @@ cannot coordinate or be the voice, and can still post as itself.
 default reserve is 512 MiB. An unlimited or unreadable cgroup is admitted. `start()`
 (switch, reboot, recovery) checks the backend's session cost first. A refused
 recovery returns `blocked` without spending a recovery attempt, so an OOM-killed
-runtime is not replaced straight into the same OOM. Defaults are taken from PSS
-measured on 2026-10-15 (process tree, 6 runtimes): Claude sessions 248–373 MiB, the
-OpenCode CTO 990 MiB and `reverie web` 197 MiB. Costs are budgeted as claude/codex
-400 MiB and opencode 1100 MiB. The policy may override them with
+runtime is not replaced straight into the same OOM. Conservative default session
+costs are budgeted as claude/codex 400 MiB and opencode 1100 MiB. Measure the
+intended deployment before choosing overrides. The policy may override them with
 `memory_admission.{reserve_bytes,session_cost_bytes}`. Heavy commands use the same
 gate: `python3 -m cto.admission --expect 1.5G -- npm test` exits 75 when refused.
 
@@ -151,9 +169,20 @@ the console's profile panel (`GET /api/agents/:id/profile`, `apps/console`):
 
 The persona comes from the supervised runtime's own `.fleet-instance`, or else from the policy's
 optional `agent_instances` map (session id to instance config). A shared working dir is not
-identity, so the marker counts only for the tracked session. That agent can write its own marker,
-so the marker counts only when it names a config under the policy's `instances_dir`; without
-`instances_dir` it is ignored. An unreadable config is reported only as "instance config unreadable".
+identity, so the marker counts only for the tracked session. Every agent runs as the same user that
+owns the marker and the policy, so neither is trusted: the config a marker or a map entry names is
+resolved (symlinks and `..` included) and must lie strictly inside the policy's `instances_dir`.
+Without `instances_dir` no persona is shown. A relative marker path resolves against the working
+dir, and a relative map entry against the policy's directory. An unreadable config is reported only
+as "instance config unreadable". A map entry is keyed by console session id, so a relaunch under a
+new id needs its entry updated.
+
+All agent-writable inputs are read defensively: the marker, the transcript and the instance config
+must be regular files, opened without following a final symlink and without blocking. The marker is
+refused above 4 KiB and the instance config above 64 KiB; only the transcript's last 512 KiB is
+read. The effort must be a known level (low, medium, high, xhigh, max), and its timestamp a string
+of at most 64 characters.
+
 `--no-dms` leaves out direct-message rooms; the console passes it for an agent caller.
 
 It makes GET calls and local reads only, and it never takes the watcher's lock. Backend
@@ -162,10 +191,10 @@ unknown session prints `{"error": "no such session", "status": 404}` and exits 1
 
 ## Not done here (needs owner approval / deployment)
 
-- Running the watcher: something must start `watch` after container start. Today
-  that is nothing: `local-health` reports `configured:false` and the container's
-  PID 1 starts only `reverie web`. A supervisor entry, `keep_alive` policy and the
-  host memory limit are owner-controlled. The 2026-10-15 OOM came from a 4 GiB
-  container cgroup with swap disabled.
-- Codeman logged no `exit` lifecycle event when the old CTO pane was SIGKILLed, so
-  the watcher depends on `paneExit` for live crashes.
+- Running the watcher requires an owner-configured supervisor, `keep_alive` policy
+  and adequate container memory limits. Review these before enabling the service;
+  source installation alone does not activate supervision.
+- A SIGKILL can leave no `exit` lifecycle event; the watcher depends on `paneExit`
+  for live crashes.
+
+See [runtime configuration](runtime-configuration.md) for neutral model defaults, profile section keys, and required user-service environment files.

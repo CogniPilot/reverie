@@ -48,9 +48,10 @@ class Room:
         msgs = d.get("messages", []) if isinstance(d, dict) else d
         return [m for m in msgs if isinstance(m, dict) and "id" in m]
 
-    def say(self, text: str, to: str = "user") -> bool:
+    def say(self, text: str) -> bool:
+        """Post to everyone in the room; a room has no private replies."""
         try:
-            self._run(["reverie", "agent", "chat", "say", "--to", to, text], 30)
+            self._run(["reverie", "agent", "chat", "say", "--", text], 30)
             return True
         except Exception:
             return False

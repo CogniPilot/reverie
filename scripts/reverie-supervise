@@ -1,0 +1,26 @@
+#!/bin/sh
+# Container command: run the console under the in-container supervisor (cto/supervise.py), so the console can
+# restart or redeploy without stopping the container or its agents. Falls back to running the console directly if
+# the supervisor or its interpreter is missing, so a broken checkout can never stop the container from starting.
+here=$(dirname "$0")
+supervisor="$here/../cto/supervise.py"
+python=/opt/fleet/python/bin/python3
+state="${FLEET_DATA_DIR:-/tmp}/supervise"
+# Optional owner-configured agent watchdog, outside every agent tmux pane.
+# The policy and installed standard-library monitor live in private instance data.
+watchdog_state="${FLEET_DATA_DIR:-/tmp}/watchdog"
+if [ -x "$python" ] && [ -f "$watchdog_state/policy.json" ] && [ -f "$watchdog_state/bin/watchdog.py" ]; then
+  setsid "$python" -I "$watchdog_state/bin/watchdog.py" --policy "$watchdog_state/policy.json" watch \
+    </dev/null >>"$watchdog_state/watchdog.log" 2>&1 &
+fi
+if [ -x "$python" ] && [ -f "$supervisor" ]; then
+  # The console's env file (state/child.env) may only name files under the instance's runtime dir: the parent of
+  # the data dir, which comes from the container's own environment. Without a data dir it is not read.
+  if [ -n "${FLEET_DATA_DIR:-}" ]; then
+    exec "$python" -I "$supervisor" run --state "$state" --rollback-dist /opt/fleet/apps/console/dist \
+      --env-root "$(dirname "$FLEET_DATA_DIR")" -- "$@"
+  fi
+  exec "$python" -I "$supervisor" run --state "$state" --rollback-dist /opt/fleet/apps/console/dist -- "$@"
+fi
+echo "reverie-supervise: supervisor unavailable; starting the console unsupervised" >&2
+exec "$@"

@@ -11,8 +11,8 @@ remove the session identity to obtain owner authority.
 Read `reverie agent --help` for the installed commands. Use `reverie agent who`
 and `reverie agent chat who` to inspect the current sessions and channel. Read
 messages with `reverie agent chat read`, then reply with
-`reverie agent chat say --to user -- "your reply"`. Use explicit recipient IDs
-for worker assignments. Avoid reply loops and repetitive broadcast acknowledgments.
+`reverie agent chat say -- "your reply"`, which reaches everyone in the room; @mention
+the owner or the worker it is for. Avoid reply loops and repetitive broadcast acknowledgments.
 
 Use `reverie agent profile --name "Display Name" --icon "🦉"` to edit your own
 name or icon. Identity IDs, company authority and permission grants remain stable.

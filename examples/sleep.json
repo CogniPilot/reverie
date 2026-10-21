@@ -1,0 +1,12 @@
+{
+  "timezone": "UTC",
+  "window": {"start": "01:00", "end": "06:00"},
+  "dry_run": true,
+  "chat_db": "/instances/example/runtime/console/chat.db",
+  "state_dir": "/instances/example/runtime/sleep",
+  "agents": [
+    {"name": "assistant", "instance": "/instances/example/config/instance.json", "consolidate": false},
+    {"name": "expert", "instance": "/instances/example/config/experts/expert.json",
+     "session_ids": ["00000000-0000-4000-8000-000000000001"]}
+  ]
+}

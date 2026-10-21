@@ -1,18 +1,43 @@
 import tests  # noqa: F401  isolates CODEMAN_*/FLEET_* before cto is imported
 import fcntl
+import io
 import json
+import os
 import sys
 import tempfile
 import threading
 import time
 import unittest
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
+from unittest import mock
 
-from cto.buildenv import (EX_TEMPFAIL, admit_pids, build_env, group_rss, ledger_estimate, main, pids_needed, pids_usage,
-                          pinned_toolchain, preflight, run)
+import cto.buildenv
+from cto.buildenv import (EX_FEWER_FILES, EX_TEMPFAIL, admit_pids, build_env, count_test_files, group_rss, ledger_estimate,
+                          main, pids_needed, pids_usage, pinned_toolchain, preflight, run, vitest_file_count)
 
 MiB = 1 << 20
 CHANNEL = "nightly-2026-02-27"
+# A stand-in for `vitest run`: runs the named files that exist (a typo or excluded file is silently
+# skipped, as vitest's filter does), prints 100 KiB of log first (past the 64 KiB tail) and exits 0
+# with "No test files found" when nothing matched (as with passWithNoTests).
+FAKE_VITEST = r"""
+import os, sys
+args = sys.argv[1:]
+if args[:1] == ["run"]: args = args[1:]
+files, skip = [], False
+for arg in args:
+    if skip: skip = False; continue
+    if arg.startswith("-"): skip = arg in ("--config", "-t"); continue
+    if os.path.isfile(arg): files.append(arg)
+sys.stderr.write("vitest stderr line\n")
+sys.stdout.write(("x" * 99 + "\n") * 1024)
+if not files: print("No test files found, exiting with code 0"); sys.exit(0)
+print("\x1b[2m Test Files \x1b[22m \x1b[1m\x1b[32m%d passed\x1b[39m\x1b[22m\x1b[90m (%d)\x1b[39m" % (len(files), len(files)))
+print("\x1b[2m      Tests \x1b[22m %d passed (%d)" % (len(files), len(files)))
+"""
+LEDGER_FIELDS = {"ts", "project", "repo", "command", "expect_mib", "jobs", "waited_s", "exit", "seconds", "peak_mib",
+                 "peak_rss_mib", "peak_cgroup_delta_mib", "peak_pids_delta", "status"}
 
 
 class BuildEnvTests(unittest.TestCase):
@@ -216,6 +241,109 @@ class BuildEnvTests(unittest.TestCase):
         self.assertEqual(result["peak_pids_delta"], 37)
         for name in ("pids.max", "pids.current"): (self.cgroup / name).unlink()
         self.assertIsNone(self.run_build([sys.executable, "-c", "pass"], interval=0.1)["peak_pids_delta"])
+
+    def vitest_repo(self):
+        entry = self.repo / "node_modules" / "vitest" / "vitest.mjs"; entry.parent.mkdir(parents=True)
+        entry.write_text(FAKE_VITEST)
+        (self.repo / "config").mkdir(); (self.repo / "config" / "vitest.ci.config.ts").write_text("")
+        (self.repo / "test").mkdir()
+        for name in ("a.test.ts", "b.test.ts", "helper.ts"): (self.repo / "test" / name).write_text("")
+        return [sys.executable, "node_modules/vitest/vitest.mjs", "run", "--config", "config/vitest.ci.config.ts"]
+
+    def cli(self, *argv):
+        """main() against this test's scratch/cgroup; returns (exit code, stdout bytes, stderr bytes, ledger)."""
+        real, ledger = run, self.scratch / "cli-ledger.jsonl"
+        isolated = lambda *a, **kw: real(*a, **dict(kw, scratch=self.scratch, rust_cache=self.cache, cgroup=self.cgroup,
+                                                    disk_reserve=0))
+        out, err = io.TextIOWrapper(io.BytesIO()), io.TextIOWrapper(io.BytesIO())
+        with mock.patch.object(cto.buildenv, "run", isolated), redirect_stdout(out), redirect_stderr(err):
+            code = main(["--project", "demo", "--repo", str(self.repo), "--expect", "100M", "--disk", "1M",
+                         "--ledger", str(ledger)] + list(argv))
+        out.flush(); err.flush()
+        return code, out.buffer.getvalue(), err.buffer.getvalue(), json.loads(ledger.read_text().splitlines()[-1])
+
+    def test_expect_files_fails_when_vitest_runs_fewer_files(self):
+        vitest = self.vitest_repo()
+        code, out, err, entry = self.cli("--expect-files", "2", "--", *vitest, "test/a.test.ts", "test/typo.test.ts")
+        self.assertEqual(code, EX_FEWER_FILES)
+        self.assertEqual(err.decode().splitlines()[-1], "buildenv: expected 2 test files, vitest ran 1")
+        self.assertEqual((entry["status"], entry["exit"], entry["expected_files"], entry["ran_files"]),
+                         ("fewer-files", 0, 2, 1))
+        self.assertEqual(json.loads(out.decode().splitlines()[-1]), entry)          # the JSON line stays last
+        self.assertIn(b"Test Files", out); self.assertIn(b"vitest stderr line", err)  # child output still streams
+        self.assertEqual(out.count(b"x" * 99 + b"\n"), 1024)                        # all of it, not just the tail
+
+    def test_expect_files_met_keeps_the_childs_result(self):
+        vitest = self.vitest_repo()
+        code, out, _, entry = self.cli("--expect-files", "2", "--", *vitest, "test/a.test.ts", "test/b.test.ts")
+        self.assertEqual((code, entry["status"], entry["expected_files"], entry["ran_files"]), (0, "ok", 2, 2))
+        code, _, _, entry = self.cli("--expect-files", "1", "--", *vitest, "test/a.test.ts", "test/b.test.ts")
+        self.assertEqual((code, entry["status"], entry["ran_files"]), (0, "ok", 2))   # more than expected is fine
+        code, _, _, entry = self.cli("--expect-files", "1", "--", sys.executable, "-c",
+                                     "print(' Test Files  1 failed (1)'); raise SystemExit(3)")
+        self.assertEqual((code, entry["status"], entry["exit"], entry["ran_files"]), (3, "failed", 3, 1))
+
+    def test_expect_files_fails_without_a_summary_line(self):
+        vitest = self.vitest_repo()
+        code, out, err, entry = self.cli("--expect-files", "1", "--", *vitest, "test/gone.test.ts")
+        self.assertIn(b"No test files found", out)
+        self.assertEqual(code, EX_FEWER_FILES)
+        self.assertEqual(err.decode().splitlines()[-1],
+                         "buildenv: expected 1 test files, vitest ran none (no 'Test Files' summary line)")
+        self.assertEqual((entry["status"], entry["exit"], entry["ran_files"]), ("fewer-files", 0, None))
+        with self.assertRaises(SystemExit), redirect_stderr(io.StringIO()):
+            self.cli("--expect-files", "some", "--", "true")
+        with self.assertRaises(SystemExit), redirect_stderr(io.StringIO()):
+            self.cli("--expect-files", "0", "--", "true")
+
+    def test_expect_files_auto_counts_test_file_arguments(self):
+        vitest = self.vitest_repo()
+        named = ["test/a.test.ts",         # exists, test suffix
+                 "test/missing.test.ts",   # missing, test suffix: still expected
+                 "test/helper.ts",         # exists: expected
+                 "test/typo.tset.ts",      # neither: a filter auto cannot count (give N)
+                 "-t", "some name", "--reporter=dot", "--silent"]
+        self.assertEqual(count_test_files(vitest + named, self.repo), 3)              # entry and --config value skipped
+        self.assertEqual(count_test_files(["npx", "vitest", "run", "x.spec.ts", "src/y.test.mjs"], self.repo), 2)
+        self.assertEqual(count_test_files(["npx", "vitest", "run", "chat"], self.repo), 0)
+        code, _, err, entry = self.cli("--expect-files", "auto", "--", *vitest, "test/a.test.ts", "test/missing.test.ts")
+        self.assertEqual((code, entry["expected_files"], entry["ran_files"]), (EX_FEWER_FILES, 2, 1))
+        self.assertIn(b"expected 2 test files, vitest ran 1", err)
+        with self.assertRaises(SystemExit), redirect_stderr(io.StringIO()):
+            self.cli("--expect-files", "auto", "--", *vitest, "chat")                  # nothing countable: give N
+
+    def test_vitest_summary_parsing(self):
+        self.assertEqual(vitest_file_count(b" Test Files  1 failed | 2 passed (3)\n      Tests  9 passed (9)\n"), 3)
+        self.assertEqual(vitest_file_count(b"\x1b[2m Test Files \x1b[22m \x1b[1m\x1b[32m4 passed\x1b[39m\x1b[22m"
+                                           b"\x1b[90m (4)\x1b[39m\r\n"), 4)
+        self.assertEqual(vitest_file_count(b" Test Files  1 passed (1)\n...\n Test Files  5 passed | 1 skipped (6)\n"), 6)
+        self.assertIsNone(vitest_file_count(b"No test files found, exiting with code 0\n"))
+        self.assertIsNone(vitest_file_count(b"      Tests  9 passed (9)\n"))
+
+    def test_tee_keeps_only_a_bounded_tail(self):
+        read, write = os.pipe()
+        sink = io.TextIOWrapper(io.BytesIO())
+        tee = cto.buildenv.Tee(os.fdopen(read, "rb"), sink); tee.start()
+        with os.fdopen(write, "wb") as pipe: pipe.write(b"y" * (200 << 10) + b"\n Test Files  2 passed (2)\n")
+        tee.join(5)
+        self.assertEqual(len(tee.tail), cto.buildenv.TAIL_BYTES)
+        self.assertEqual(len(sink.buffer.getvalue()), (200 << 10) + 27)               # everything passed through
+        self.assertEqual(vitest_file_count(tee.tail), 2)
+
+    def test_without_expect_files_output_and_ledger_are_unchanged(self):
+        probe = "import os; s = os.fstat(1); open('fd1', 'w').write('%d %d' % (s.st_dev, s.st_ino))"
+        mine = os.fstat(1)
+        result = self.run_build([sys.executable, "-c", probe])
+        self.assertEqual(set(result), LEDGER_FIELDS)                                  # no new fields
+        self.assertEqual((self.repo / "fd1").read_text(), "%d %d" % (mine.st_dev, mine.st_ino))  # inherited, not piped
+        out = io.TextIOWrapper(io.BytesIO())
+        with redirect_stdout(out):
+            result = self.run_build([sys.executable, "-c", probe], expect_files=1)
+        self.assertNotEqual((self.repo / "fd1").read_text(), "%d %d" % (mine.st_dev, mine.st_ino))  # teed
+        self.assertEqual(set(result), LEDGER_FIELDS | {"expected_files", "ran_files"})
+        code, out, err, entry = self.cli("--", sys.executable, "-c", "print(' Test Files  0 passed (0)'); raise SystemExit(5)")
+        self.assertEqual((code, entry["status"], set(entry)), (5, "failed", LEDGER_FIELDS))
+        self.assertEqual(err, b"")
 
     def test_cli_requires_estimates_and_exits_tempfail_when_refused(self):
         with self.assertRaises(SystemExit): main(["--project", "demo", "--", "true"])        # no --expect/--disk

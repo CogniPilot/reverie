@@ -7,6 +7,7 @@ import json
 import os
 import re
 import signal
+import stat
 import urllib.parse
 from pathlib import Path
 import time
@@ -15,6 +16,7 @@ import urllib.request
 import uuid
 
 from cto.admission import session_admission
+from cto.instance import parse_instance
 
 
 def atomic_write(path, value):
@@ -32,6 +34,49 @@ DISAPPEARANCE = {"deleted":"deleted", "mux_died":"restart", "stale_cleaned":"res
 STOPPED = ("owner_closed", "clean_exit", "missing_needs_owner", "needs_owner", "candidate_failed")
 RECOVERY_NOTE = ("Automatic recovery: do not accept dialogs, and do not rerun interrupted or uncertain jobs;"
                  " review them first.")
+
+
+SESSION_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9-]{0,99}")
+CONVERSATION_ID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
+PERSONA_CHARS = 2000
+
+
+EFFORT_LEVELS = frozenset({"low", "medium", "high", "xhigh", "max"})
+MARKER_BYTES = 4096
+INSTANCE_BYTES = 64 * 1024
+
+
+def read_regular(path, limit, from_end=False):
+    """At most limit bytes of a regular file (the last ones with from_end). A symlink as the last path
+    component, a FIFO or a device is refused with OSError, so an agent-writable path can never block
+    the caller or stream without end."""
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | getattr(os, "O_CLOEXEC", 0))
+    try:
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode): raise OSError(f"not a regular file: {path}")
+        if from_end: os.lseek(fd, max(0, info.st_size - limit), os.SEEK_SET)
+        return os.read(fd, limit)   # one read: a regular file returns all of it up to EOF
+    finally: os.close(fd)
+
+
+def observed_effort(conversation, projects, tail=512 * 1024):
+    """Effort level of the newest record in a Claude Code transcript that names one, or None.
+
+    Claude Code writes the effort of each turn into its transcript; the console only knows a
+    spawn-time default, which /effort can change in the session. Reads the file's tail only."""
+    if not isinstance(conversation, str) or not CONVERSATION_ID.fullmatch(conversation): return None
+    try: files = sorted(Path(projects).glob("*/" + conversation + ".jsonl"), key=lambda path: path.stat().st_mtime)
+    except OSError: return None
+    if not files: return None
+    try: data = read_regular(files[-1], tail, from_end=True)
+    except OSError: return None
+    for raw in reversed(data.splitlines()):   # the first line after the seek may be cut; it just fails to parse
+        try: record = json.loads(raw)
+        except ValueError: continue
+        if isinstance(record, dict) and record.get("effort") in EFFORT_LEVELS:
+            at = record.get("timestamp")
+            return {"level": record["effort"], "at": at if isinstance(at, str) and len(at) <= 64 else None}
+    return None
 
 
 def coordinator_of(room):
@@ -493,6 +538,99 @@ class Runtime:
         return {"live_sessions": len(live), "findings": findings, "owner_actions": actions,
                 "note": "read-only report; a name match is a lead to verify, not proof of identity"}
 
+    def inside_instances_dir(self, path):
+        """The resolved path if it lies strictly inside the policy's instances_dir, else None.
+
+        Agents run as the same user that owns the marker and this policy, so neither is trusted to
+        name a file outside the owner's instance configs. Without instances_dir nothing is."""
+        if not self.policy.get("instances_dir"): return None
+        try: path = Path(path).resolve()
+        except (OSError, RuntimeError): return None
+        return path if self.resolve(self.policy["instances_dir"]) in path.parents else None
+
+    def instance_for(self, session_id, live):
+        """The owner-selected instance config of a session: the supervised runtime's own, else the policy's map.
+
+        A shared working dir is not identity, so the workspace marker counts only for the
+        session this controller tracks as current. Either way the config must be inside instances_dir."""
+        if session_id == self.state.get("current"):
+            workspace = Path(live.get("workingDir") or ".")
+            try:
+                if not workspace.is_absolute(): raise ValueError("no absolute working dir")
+                data = read_regular(workspace / ".fleet-instance", MARKER_BYTES + 1)
+                if len(data) > MARKER_BYTES: raise ValueError("marker too large")
+                instance = json.loads(data).get("instance")
+                named = self.inside_instances_dir(workspace / instance) if isinstance(instance, str) and instance else None
+            except (OSError, ValueError, AttributeError): named = None
+            if named is not None: return str(named)
+        path = self.policy.get("agent_instances", {}).get(session_id)
+        named = self.inside_instances_dir(self.resolve(path)) if isinstance(path, str) and path else None
+        return str(named) if named is not None else None
+
+    def profile(self, session_id, include_dms=True):
+        """Read-only profile of one agent session: backend, model, effort, usage, durable bindings, persona.
+
+        GET calls and local reads only. Backend switching is listed as unavailable: it is an owner
+        action and waits for owner authentication. Without include_dms, direct-message rooms are left
+        out (the console hides an agent's DMs from other agents, and this report reads as the owner)."""
+        if not isinstance(session_id, str) or not SESSION_ID.fullmatch(session_id): raise ValueError("invalid session id")
+        try: live = self.api.call("GET", "/api/v1/sessions/" + urllib.parse.quote(session_id, safe=""))
+        except urllib.error.HTTPError as error:
+            if error.code == 404: return {"error": "no such session", "status": 404}
+            raise
+        live = live.get("session", live)
+        display = live.get("displayModel")
+        display = display.get("model") if isinstance(display, dict) else display
+        chain = live.get("claudeSessionChain") or ([live["claudeSessionId"]] if live.get("claudeSessionId") else [])
+        projects = Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude") / "projects"
+        tokens = live.get("tokens") if isinstance(live.get("tokens"), dict) else {}
+        result = {
+            "session": {"id": live.get("id", session_id), "name": live.get("name"), "status": live.get("status"),
+                        "alive": live.get("pid") is not None and not live.get("paneExit"),
+                        "pinned": bool(live.get("pinned")), "created_at": live.get("createdAt"),
+                        "last_activity_at": live.get("lastActivityAt"), "working_dir": live.get("workingDir")},
+            "backend": {"mode": live.get("mode"), "model": live.get("model") or display, "display_model": display},
+            "effort": {"configured": live.get("effort"),
+                       "observed": observed_effort(chain[-1], projects) if live.get("mode") == "claude" and chain else None},
+            "usage": {"input_tokens": tokens.get("input", live.get("inputTokens")),
+                      "output_tokens": tokens.get("output", live.get("outputTokens")),
+                      "total_tokens": tokens.get("total"), "cost": live.get("totalCost"),
+                      "messages": live.get("messageCount"),
+                      "scope": "console counters for this session since created_at; no per-day history is recorded yet"},
+        }
+        company = self.api.call("GET", "/api/v1/company")
+        employee = next((e for e in company.get("employees", []) if e.get("sessionId") == session_id), None)
+        result["employee"] = {key: employee.get(key) for key in ("id", "name", "icon", "position", "expertise")} if employee else None
+        rooms = self.api.call("GET", "/api/v1/chatrooms?member=" + urllib.parse.quote(session_id, safe=""))
+        rooms = rooms.get("rooms", []) if isinstance(rooms, dict) else rooms
+        result["rooms"] = [{"id": room.get("id"), "name": room.get("name"),
+                            "role": next((m.get("role") for m in room.get("members", []) if m.get("sessionId") == session_id), None)}
+                           for room in rooms if any(m.get("sessionId") == session_id for m in room.get("members", []))
+                           and (include_dms or room.get("kind") != "dm")]
+        supervised = session_id == self.state.get("current")
+        result["runtime"] = {
+            "supervised": supervised,
+            "backend": self.state.get("backend") if supervised else None,
+            "phase": self.state.get("phase") if supervised else None,
+            "backends": [{"name": name, "mode": backend.get("mode"), "model": backend.get("model"),
+                          "enabled": bool(backend.get("enabled"))}
+                         for name, backend in self.policy["backends"].items()] if supervised else [],
+            "switch": {"available": False, "reason": "switching a backend is an owner action; it waits for owner authentication"}}
+        source = self.instance_for(session_id, live)
+        persona = None
+        if source:
+            try:
+                data = read_regular(source, INSTANCE_BYTES + 1)
+                if len(data) > INSTANCE_BYTES: raise ValueError("instance config too large")
+                instance = parse_instance(data.decode("utf-8"), Path(source))
+                persona = {"agent_name": instance.agent_name, "role": instance.role, "kind": instance.kind,
+                           "persona": instance.persona[:PERSONA_CHARS], "source": source}
+            except (OSError, ValueError):
+                persona = {"error": "instance config unreadable", "source": source}
+        result["persona"] = persona
+        result["note"] = "read-only profile; nothing was changed"
+        return result
+
     def check(self, now=None):
         now = time.time() if now is None else now
         if self.resolve(self.policy["pause_file"]).exists(): return {"paused":True}
@@ -700,6 +838,9 @@ def main(argv=None):
     activate = sub.add_parser("activate"); activate.add_argument("session_id")
     sub.add_parser("check"); sub.add_parser("watch")
     sub.add_parser("identity", help="read-only report of stale identity bindings and the calls that repair them")
+    profile = sub.add_parser("profile", help="read-only profile of one agent session (backend, model, effort, usage, persona)")
+    profile.add_argument("session_id")
+    profile.add_argument("--no-dms", action="store_true", help="leave out direct-message rooms (for a non-owner caller)")
     health = sub.add_parser("watcher-health", help="exit 1 when no watcher is ticking (or, with --healthy, failing)")
     health.add_argument("--healthy", action="store_true", help="also require its ticks to succeed")
     sub.add_parser("stop-watcher", help="supervisor: terminate this policy's watchers (active and standby)")
@@ -740,6 +881,12 @@ def main(argv=None):
             return 0 if health["healthy" if args.healthy else "ticking"] else 1
         elif args.action == "stop-watcher":
             print(json.dumps(stop_watchers(args.policy)))
+        elif args.action == "profile":
+            # Read-only and called per console click: never waits on, or blocks, the watcher's lock.
+            try: result = runtime.profile(args.session_id, include_dms=not args.no_dms)
+            except (OSError, RuntimeError, ValueError) as error: result = {"error": str(error)}
+            print(json.dumps(result, indent=2))
+            return 1 if "error" in result else 0
         else:
             print(json.dumps(step(), indent=2))
     return 0

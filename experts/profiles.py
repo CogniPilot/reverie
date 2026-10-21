@@ -36,7 +36,7 @@ def initialize(cfg: Config | None = None) -> list[dict]:
             private.mkdir(parents=True, exist_ok=True, mode=0o700)
             store = MemoryStore(private / "memory.sqlite")
             store.close()
-            profile = {**definition, "id": identifier, "persistent": True, "dreaming": True,
+            profile = {**definition, "id": identifier, "persistent": True, "dreaming": False,
                        "private_memory": str(private / "memory.sqlite"),
                        "project_memory": "Explicit lookup in the project-wide store; never copy personal DM history.",
                        "short_term": "No active assignment. CTO selects a bounded task after checking priorities and capacity.",

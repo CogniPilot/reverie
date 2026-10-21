@@ -49,7 +49,7 @@ def run_process(argv, cwd, timeout, env=None, token_limit=None, cancel=lambda:Fa
                                 cache.get("read",0),cache.get("write",0)]
                         if all(isinstance(v,int) and not isinstance(v,bool) and v>=0 for v in values):
                             reported+=sum(values); seen=True
-                        if token_limit is not None and reported>=token_limit:
+                        if token_limit is not None and reported>=token_limit and part.get('reason')!='stop':
                             reason="token_limit"; break
                     if event.get("type")=="error": reason="provider_error"; break
                     if event.get("type")=="text" and isinstance(part.get("text"),str):
@@ -82,6 +82,8 @@ class OpenCodeRunner:
             permission=settings['permission']
             # All child jobs are brokered by the CTO schedule; no hidden harness task tree.
             permission['task']='deny'
+            permission['cto_room']='deny'
+            permission['cto_fleet']='deny'
             if task.get('kind')=='research':
                 permission={'*':'deny','read':'allow','glob':'allow','grep':'allow',
                             'webfetch':'allow','websearch':'allow','skill':'allow','task':'deny'}
@@ -91,14 +93,14 @@ class OpenCodeRunner:
             prompt=root/'assignment.txt'
             prompt.write_text(task['brief']+'\n\nAuthorized project workspace: '+str(task['workdir'])+
                 '\nReport evidence, source locations, tests, uncertainty and next action. '
-                'Do not spawn other agents. Save concise project findings; keep private context out of reports.\n')
+                'Do not spawn other agents or use room tools. Return your report as the final response; the controller delivers it to the lead. Keep private context out of reports.\n')
             env={**os.environ,'FLEET_CYCLE_MANAGED':'1','FLEET_CYCLE_CHANNEL':'work','FLEET_INSTANCE_CONFIG':str(instance),
                  'FLEET_MODEL':model['model'],'FLEET_API_BASE':model['api_base'],
                  'XDG_DATA_HOME':str(root/'data'),'XDG_CACHE_HOME':str(root/'cache'),
                  'XDG_STATE_HOME':str(root/'state'),'TMPDIR':str(root/'tmp')}
             (root/'tmp').mkdir()
-            result=run_process(['opencode','run','--format','json','--model',model['provider']+'/'+model['model'],
-                                '--agent','cto','--file',str(prompt),'Carry out the attached authorized assignment.'],
+            result=run_process(['opencode','run','Carry out the attached authorized assignment.','--format','json',
+                                '--model',model['provider']+'/'+model['model'],'--agent','cto','--file',str(prompt)],
                                runtime,cap['max_seconds'],env,cap['max_tokens'],cancel)
             result['verification']=[]
             if result['exit_code']==0 and not result['stop_reason']:

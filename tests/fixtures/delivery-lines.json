@@ -1,0 +1,66 @@
+[
+  {
+    "case": "owner to the whole room",
+    "line": "[Reverie chat \"news\"] USER: \"headline?\" (reply: reverie agent chat say \"...\"; full history: reverie agent chat read)",
+    "expect": {
+      "rooms": [
+        "news"
+      ],
+      "ownerRooms": [
+        "news"
+      ],
+      "channel": "work"
+    }
+  },
+  {
+    "case": "owner addressed to the agent",
+    "line": "[Reverie chat \"news\"] USER -> you: \"you there?\" (reply: reverie agent chat say \"...\"; full history: reverie agent chat read)",
+    "expect": {
+      "rooms": [
+        "news"
+      ],
+      "ownerRooms": [
+        "news"
+      ],
+      "channel": "work"
+    }
+  },
+  {
+    "case": "owner in a direct message",
+    "line": "[Reverie chat \"DM:dddddddd-0000-4000-8000-0000000000d1\"] USER: \"a private question\" (reply: reverie agent chat say \"...\"; full history: reverie agent chat read)",
+    "expect": {
+      "rooms": [
+        "dddddddd-0000-4000-8000-0000000000d1"
+      ],
+      "ownerRooms": [
+        "dddddddd-0000-4000-8000-0000000000d1"
+      ],
+      "channel": "private:dddddddd-0000-4000-8000-0000000000d1"
+    }
+  },
+  {
+    "case": "agents only",
+    "line": "[Reverie chat \"news\"] \"beta\": \"chatter\" (reply: reverie agent chat say \"...\"; full history: reverie agent chat read)",
+    "expect": {
+      "rooms": [
+        "news"
+      ],
+      "ownerRooms": [],
+      "channel": "work"
+    }
+  },
+  {
+    "case": "two rooms, owner in one",
+    "line": "[Reverie chat \"news\", \"rules\"] [\"news\"] \"beta\": \"fyi\" | [\"rules\"] USER: \"a question\" (reply: reverie agent chat say \"...\"; full history: reverie agent chat read)",
+    "expect": {
+      "rooms": [
+        "news",
+        "rules"
+      ],
+      "ownerRooms": [
+        "rules"
+      ],
+      "channel": "work"
+    }
+  }
+]

@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+# SUPERSEDED: not adopted; retain for evidence. See docs/openmodelica-runtime.md.
+# Install the reviewed CI-pinned OMC runtime inside a fresh Reverie container.
+set -euo pipefail
+expected_sha=a591badfefb7bce50e13cbf8fb99c0809ac4516374d2175ee34c88148e8031ae
+omc_bin=/nix/store/6iggbkckmny55dwflvz73pmjq45j8whw-openmodelica-unstable-2026-07-21/bin/omc
+usage() { echo "Usage: install-omc-runtime [--dry-run] RUNTIME-CLOSURE.tar"; }
+dry=0
+case "${1:-}" in --dry-run) dry=1; shift ;; -h|--help) usage; exit 0 ;; esac
+[ "$#" = 1 ] || { usage >&2; exit 2; }
+archive="$1"
+[ -f "$archive" ] || { echo "Archive not found: $archive" >&2; exit 1; }
+[ -f /run/.containerenv ] || { echo "Run inside the Reverie container." >&2; exit 1; }
+actual_sha="$(sha256sum -- "$archive")"
+[ "${actual_sha%% *}" = "$expected_sha" ] || { echo "OMC closure SHA256 mismatch; refusing." >&2; exit 1; }
+if [ "$dry" = 1 ]; then
+  printf 'Verified CI-pinned closure %s\nWould install at original /nix/store paths and link /usr/local/bin/omc.\n' "$expected_sha"
+  exit 0
+fi
+[ "$(id -u)" = 0 ] || { echo "Container root is required to install; no host root is needed." >&2; exit 1; }
+if [ -e /usr/local/bin/omc ] || [ -L /usr/local/bin/omc ]; then
+  [ -L /usr/local/bin/omc ] && [ "$(readlink /usr/local/bin/omc)" = "$omc_bin" ] \
+    && [ "$(/usr/local/bin/omc --version)" = a96aa1a-cmake ] \
+    || { echo "Existing OMC differs; refusing to overwrite." >&2; exit 1; }
+  echo "Pinned OMC already installed."
+  exit 0
+fi
+[ ! -L /nix ] && [ ! -L /nix/store ] || { echo "Refusing symlinked store path." >&2; exit 1; }
+shopt -s nullglob dotglob
+existing=(/nix/store/*)
+[ "${#existing[@]}" = 0 ] || { echo "Nonempty Nix store; inspect before installing. No files changed." >&2; exit 1; }
+mkdir -p /nix/store
+tar --extract --file "$archive" --directory / --no-same-owner --keep-old-files
+chmod 0755 /nix /nix/store
+ln -s "$omc_bin" /usr/local/bin/omc
+[ "$(/usr/local/bin/omc --version)" = a96aa1a-cmake ] || { echo "Unexpected OMC version after extraction." >&2; exit 1; }
+echo "Installed a96aa1a-cmake. Runtime resources and toolchain retain their original store prefixes."

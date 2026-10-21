@@ -2,6 +2,29 @@ import { execFile } from 'node:child_process';
 import { tool } from '@opencode-ai/plugin';
 import { createInteractionController } from './interaction.mjs';
 
+/**
+ * Does any message in a delivered room line come from the owner? A line is `[Reverie chat "..."] ` followed by
+ * fragments separated by ` | `; each fragment is `SPEAKER: "BODY"` or `SPEAKER -> RECIPIENT: "BODY"`, optionally led by a
+ * `["room"] ` tag; a reply adds ` (replying to "name": "quote")` after the speaker. Names and bodies are JSON strings, so a ` | ` or a speaker label inside quotes is data: the line is
+ * split only outside quoted strings (escapes honoured), and only an unquoted leading `USER` label counts.
+ */
+export function ownerSpokeIn(rest) {
+  const fragments = [];
+  let current = '', quoted = false;
+  for (let i = 0; i < rest.length; i++) {
+    const c = rest[i];
+    if (quoted) {
+      current += c;
+      if (c === '\\') { current += rest[i + 1] ?? ''; i++; }
+      else if (c === '"') quoted = false;
+    } else if (c === '"') { quoted = true; current += c; }
+    else if (rest.startsWith(' | ', i)) { fragments.push(current); current = ''; i += 2; }
+    else current += c;
+  }
+  fragments.push(current);
+  return fragments.some((f) => /^(?:\["(?:[^"\\]|\\.)*"\]\s+)?(?:USER|user)(?:\s*->|:|\s+\(replying to )/.test(f.trimStart()));
+}
+
 export default async function InteractionModes({ client, directory }) {
   const controller = await createInteractionController({ client, directory });
   if (!controller) return {};
@@ -27,9 +50,16 @@ export default async function InteractionModes({ client, directory }) {
       const parts = output.parts.filter((p) => p.type === 'text');
       const text = parts.map((p) => p.text).join('\n');
       // A behavioural guard, not an authentication boundary: room transport owns sender authentication.
-      const room = /^\[(?:Codeman|Reverie) chat [^\]]+\]\s*(.*)/s.exec(text);
-      const ownerInput = room ? /^(?:USER|user)\s*->/.test(room[1]) : !text.startsWith('Shared-room voice turn:');
+      // Room names are JSON-quoted: match the header quote-aware, so a ']' inside a room name cannot end it early.
+      const room = /^\[(?:Codeman|Reverie) chat "(?:[^"\\]|\\.)*"(?:, "(?:[^"\\]|\\.)*")*\]\s*(.*)/s.exec(text);
+      // Fail closed: anything that starts like a room delivery but does not parse is never owner input.
+      const looksLikeRoom = /^\[(?:Codeman|Reverie) chat\b/.test(text);
+      const ownerInput = room ? ownerSpokeIn(room[1]) : !looksLikeRoom && !text.startsWith('Shared-room voice turn:');
       await controller.onMessage(input.sessionID, text, parts.length > 0 && parts.every((p) => p.synthetic), ownerInput);
+      // OpenCode saves output.message after this hook and its prompt loop runs the last user message's agent
+      // (session/prompt.ts createUserMessage + loop), so this re-selects the conversation agent for the turn.
+      const agent = await controller.messageAgent(input.sessionID);
+      if (agent && output.message) output.message.agent = agent;
       blocked.delete(input.sessionID);
     }),
     'experimental.chat.system.transform': async (input, output) => {
@@ -84,7 +114,12 @@ export default async function InteractionModes({ client, directory }) {
         async execute(args, context) {
           if (await isChild(context.sessionID)) return JSON.stringify({ mode: 'delegated', note: 'Interaction modes apply to the primary conversation, not its bounded child tasks.' });
           if (blocked.has(context.sessionID) && args.mode === 'coding') throw new Error('Interaction state unavailable: a fresh successful owner turn is required before coding.');
-          return JSON.stringify(await controller.setMode(context.sessionID, args.mode, args.task));
+          const state = await controller.setMode(context.sessionID, args.mode, args.task);
+          // With a separate coding agent the tools arrive in the next turn, not this one: say so, so the model stops here.
+          if (args.mode === 'coding' && controller.codingAgent && controller.continuationDelayMs !== undefined) {
+            return JSON.stringify({ ...state, next: `End this turn now. The task continues automatically in about ${Math.round(controller.continuationDelayMs / 1000)} seconds as the ${controller.codingAgent} agent, with the full toolset.` });
+          }
+          return JSON.stringify(state);
         },
       }),
     },

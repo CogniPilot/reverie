@@ -20,6 +20,7 @@ import json
 import sqlite3
 import threading
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable, Sequence
@@ -156,12 +157,44 @@ class MemoryStore:
         self.embedder: Embedder = embedder or HashedEmbedder()
         self.decay_per_hour = decay_per_hour
         self._lock = threading.RLock()
+        self._atomic_depth = 0  # > 0 inside atomic(): writes join that one transaction
         self._db = sqlite3.connect(str(self.path), check_same_thread=False, timeout=30)
         self._db.row_factory = sqlite3.Row
         with self._lock:
             if str(self.path) != ":memory:":
                 self._db.execute("PRAGMA journal_mode=WAL")       # the chat daemon and the voice service share this file
             self._db.executescript(SCHEMA)
+            self._db.commit()
+
+    # ---- transactions --------------------------------------------------------
+    @contextmanager
+    def atomic(self):
+        """Several writes as one transaction: all of them commit at the end, or none do (re-entrant)."""
+        with self._lock:
+            self._atomic_depth += 1
+            try:
+                yield
+            except BaseException:
+                if self._atomic_depth == 1:
+                    self._db.rollback()
+                raise
+            else:
+                if self._atomic_depth == 1:
+                    self._db.commit()
+            finally:
+                self._atomic_depth -= 1
+
+    @contextmanager
+    def _tx(self):
+        """A write's own transaction, or the enclosing atomic() one."""
+        if self._atomic_depth:
+            yield
+        else:
+            with self._db:
+                yield
+
+    def _commit(self) -> None:
+        if not self._atomic_depth:
             self._db.commit()
 
     # ---- state ---------------------------------------------------------
@@ -173,7 +206,7 @@ class MemoryStore:
     def set_state(self, key: str, value: str) -> None:
         with self._lock:
             self._db.execute("INSERT OR REPLACE INTO state(key, value) VALUES (?, ?)", (key, str(value)))
-            self._db.commit()
+            self._commit()
 
     # ---- idempotency per source message ------------------------------------
     def claim_message(self, source_id: str, now: float | None = None) -> bool:
@@ -242,7 +275,7 @@ class MemoryStore:
                 "INSERT INTO beliefs(text, weight, parent_id, protected, created_at) VALUES (?,?,?,?,?)",
                 (text, float(max(1.0, min(10.0, weight))), parent_id, int(protected), created_at),
             )
-            self._db.commit()
+            self._commit()
             r = self._db.execute("SELECT * FROM beliefs WHERE id=?", (cur.lastrowid,)).fetchone()
         return Belief(r["id"], r["text"], r["weight"], r["parent_id"], bool(r["protected"]), r["created_at"])
 
@@ -337,7 +370,7 @@ class MemoryStore:
         created_at = time.time() if created_at is None else created_at
         vec = self.embedder.embed(text)
         importance = float(max(1.0, min(10.0, importance)))
-        with self._lock, self._db:
+        with self._lock, self._tx():
             if external_source:
                 claimed = self._db.execute("INSERT OR IGNORE INTO external_episodes(source_id) VALUES (?)",
                                            (external_source,))

@@ -32,11 +32,11 @@ class FleetTests(unittest.TestCase):
 
     def test_plan_survives_backend_restart_and_rejects_stale_writer(self):
         self.assertEqual(self.fleet.plan()["revision"], 0)
-        self.fleet.write("plan", "Ship the mapper after parity", 0)
+        self.fleet.write("plan", "Ship SLAM after parity", 0)
         other = MemoryStore(self.cfg.db_path)
         self.addCleanup(other.close)
         successor = Fleet(other)
-        self.assertEqual(successor.plan()["body"], "Ship the mapper after parity")
+        self.assertEqual(successor.plan()["body"], "Ship SLAM after parity")
         successor.write("plan", "Recheck memory regression", 1)
         with self.assertRaises(RevisionConflict):
             self.fleet.write("plan", "stale plan", 1)
@@ -44,16 +44,16 @@ class FleetTests(unittest.TestCase):
 
     def test_profiles_compose_histories_and_exclude_dreams(self):
         self.store.add_dream("Rust compiles itself", "flying compiler", "happy", [])
-        self.store.add_reflection("Mapper parity must pass", 9, [], meta={"project": "mapper"})
-        self.fleet.save_profile("blake", {"role": "Compiler developer", "long_term": "Rust compiler history",
-                               "short_term": "PR 437 CI pending", "memory_queries": ["mapper compiler"]}, 0)
-        self.fleet.save_profile("jordan", {"role": "WASM engineer", "long_term": "browser memory",
+        self.store.add_reflection("SLAM parity must pass", 9, [], meta={"project": "slam"})
+        self.fleet.save_profile("reviewer-three", {"role": "Compiler developer", "long_term": "Rust compiler history",
+                               "short_term": "PR 437 CI pending", "memory_queries": ["SLAM compiler"]}, 0)
+        self.fleet.save_profile("reviewer-two", {"role": "WASM engineer", "long_term": "browser memory",
                                "short_term": "baseline 278"}, 0)
-        brief = self.fleet.brief(["blake", "jordan"], "Diagnose the regression", 2000)
+        brief = self.fleet.brief(["reviewer-three", "reviewer-two"], "Diagnose the regression", 2000)
         for text in ("Compiler developer", "WASM engineer", "PR 437", "Explicit long-term lookup"):
             self.assertIn(text, brief)
         self.assertNotIn("Rust compiler history", brief)
-        self.assertNotIn("Mapper parity must pass", brief)
+        self.assertNotIn("SLAM parity must pass", brief)
         self.assertNotIn("flying compiler", brief)
         self.assertLessEqual(len(brief), 2000)
         with self.assertRaises(ValueError):
@@ -95,6 +95,51 @@ class FleetTests(unittest.TestCase):
         self.store._db.execute("DROP TRIGGER fail_insert")
         self.store.add_external_episode("retry", "input", "output")
         self.assertEqual(self.store.count("episode"), 1)
+
+    def test_shared_room_tone_is_social_in_chat_and_professional_in_coding_when_selected(self):
+        import json as _json
+        from types import SimpleNamespace
+        from cto.opencode import PROFESSIONAL_ROOM, SOCIAL_ROOM, active_mode, shared_room_rule
+        social, plain = SimpleNamespace(shared_room_tone="social"), SimpleNamespace(shared_room_tone="professional")
+        self.assertEqual(shared_room_rule(social, "chat"), SOCIAL_ROOM)
+        self.assertEqual(shared_room_rule(social, "coding"), PROFESSIONAL_ROOM)
+        for instance in (None, SimpleNamespace(), plain):
+            for mode in ("chat", "coding"):
+                self.assertEqual(shared_room_rule(instance, mode), PROFESSIONAL_ROOM)   # generic and shared default
+        self.assertIn("Keep flirtation, private memories and dream summaries out", SOCIAL_ROOM)
+        # The mode comes from the primary session's interaction state; anything unreadable means chat.
+        self.assertEqual(active_mode(self.brain), "chat")
+        directory = self.cfg.data_dir.parent / "runtime"
+        state = directory / ".opencode" / "interaction-state"
+        state.mkdir(parents=True)
+        self.store.set_state("fleet_runtime", _json.dumps({"url": "http://127.0.0.1:1/", "session_id": "ses_abc",
+                                                          "directory": str(directory)}))
+        (state / "ses_abc.json").write_text(_json.dumps({"mode": "coding"}))
+        self.assertEqual(active_mode(self.brain), "coding")
+        self.brain.cfg.instance = SimpleNamespace(shared_room_tone="social", persona="p", agent_name="A", owner_name="O",
+                                                  id="x", role="Assistant", kind="agent", initial_self=None)
+        try:
+            self.assertIn("Stay professional", dispatch(self.brain, {"action": "context", "query": "q", "channel": "work"}))
+            (state / "ses_abc.json").write_text(_json.dumps({"mode": "chat"}))
+            text = dispatch(self.brain, {"action": "context", "query": "q", "channel": "work"})
+            self.assertIn("Be yourself", text)
+            self.assertNotIn("Stay professional", text)
+            (state / "ses_abc.json").write_text("{broken")
+            self.assertEqual(active_mode(self.brain), "chat")
+            (directory / "etc").mkdir()
+            (directory / "etc" / "x.json").write_text(_json.dumps({"mode": "coding"}))     # where an escape would land
+            self.store.set_state("fleet_runtime", _json.dumps({"session_id": "../../etc/x", "directory": str(directory)}))
+            self.assertEqual(active_mode(self.brain), "chat")                              # no path escape
+        finally:
+            self.brain.cfg.instance = None
+
+    def test_agent_charter_keeps_coding_mode_the_exception(self):
+        from types import SimpleNamespace
+        from cto.fleet import role_charter
+        text = role_charter(SimpleNamespace(kind="agent", role="Administrative Assistant"))
+        self.assertIn("Stay in chat by default", text)
+        self.assertIn("only for an owner-requested task that needs the terminal or files", text)
+        self.assertNotIn("Choose chat or bounded coding in the same identity", text)
 
     def test_context_keeps_personality_and_adds_admin_charter(self):
         self.cfg.persona_path.write_text("You are CTO. Be witty.")
@@ -217,6 +262,10 @@ class FleetTests(unittest.TestCase):
         self.brain.rate_pending = lambda: 0
         self.brain.reflect_if_due = lambda: 0
         self.store.set_state("fleet_last_activity", str(time.time() - 2000))
+        self.assertEqual(self.brain.dreamer.per_sleep, 0)
+        self.assertEqual(dispatch(self.brain, {"action": "maintenance"})["action"], "idle")
+        self.assertEqual(transport.calls, [])
+        self.brain.dreamer.per_sleep = 1  # This dream-generation fixture explicitly opts in.
         self.assertEqual(dispatch(self.brain, {"action": "maintenance"})["action"], "dreamed")
         self.assertEqual(self.store.count("dream"), 1)
         self.assertIn("Unverified dream hypothesis", dispatch(self.brain, {"action": "context"}))
@@ -246,9 +295,9 @@ class FleetTests(unittest.TestCase):
 
     def test_project_memory_is_separate_and_private_recall_blocked_at_work(self):
         self.store.add_episode("A private conversation", "private detail")
-        dispatch(self.brain, {"action": "remember", "project": "compiler", "text": "Compiler parity passed",
+        dispatch(self.brain, {"action": "remember", "project": "rumoca", "text": "Compiler parity passed",
                               "source": "public handoff, commit abc123"})
-        recalled = dispatch(self.brain, {"action": "recall", "project": "compiler", "query": "parity", "channel": "work"})
+        recalled = dispatch(self.brain, {"action": "recall", "project": "rumoca", "query": "parity", "channel": "work"})
         self.assertEqual(len(recalled), 1)
         self.assertNotIn("private detail", json.dumps(recalled))
         with self.assertRaises(ValueError):

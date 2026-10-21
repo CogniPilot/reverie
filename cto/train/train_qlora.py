@@ -11,6 +11,7 @@ the latest checkpoint on the next invocation.
 from __future__ import annotations
 
 import json
+import os
 import time
 from pathlib import Path
 
@@ -45,7 +46,7 @@ def latest_checkpoint(ckpt_dir: Path) -> Path | None:
 
 
 MARKER = "snapshot-base.json"
-LEGACY_MARKERS = ("jinx-base.json",)  # older snapshots keep loading
+LEGACY_MARKERS = tuple(filter(None, (os.environ.get("FLEET_SNAPSHOT_MARKER", ""),)))
 
 
 def _marker(d: Path) -> Path | None:

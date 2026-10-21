@@ -2,7 +2,7 @@
 
 ## Finding (read-only, 2026-10-15)
 
-Codeman already keeps session ids across a host reboot. The boot pass
+Reverie already keeps session ids across a host reboot. The boot pass
 (`restoreMuxSessions`, then `planRebootRestoreOffer`) builds an offer from `state.json`,
 and the reboot-restore route rebuilds each session with `id: saved.id`, resuming its
 conversation. Every room, company and runtime binding keyed on that id survives.
@@ -23,10 +23,10 @@ the fix used here.
    - Result: same ids, same bindings, nothing to rebind. The offer stays a click and the
      restored sessions come back idle and disarmed, as upstream intends.
    - Tests: a pure-function case per signal, plus a container-restart fixture.
-2. **Codeman is the only live binding store.** Rooms, company and runtime state keep
+2. **Reverie is the only live binding store.** Rooms, company and runtime state keep
    pointing at session ids, which now persist. No second binding store is added.
 3. **An intent registry only for a true respawn** (a session that cannot be resumed).
-   - Location: `/instances/<instance>/runtime/identities.json`.
+   - Location: `<private-instance-root>/runtime/identities.json`.
    - Contents: per identity, the launch spec, the memberships it should hold, and its
      history. It never holds the live binding.
    - It feeds the same reboot-restore route instead of adding a third rebind mechanism
@@ -61,7 +61,7 @@ coordinator role. Until owner-only routes require a credential agent panes do no
 - No member-replace route.
 - No unattended rebind.
 
-Proposal for the owner: an owner token kept outside every agent mount (a host file, or the
+Proposal for owner: an owner token kept outside every agent mount (a host file, or the
 Plans-page browser session) and required by owner-only routes.
 
 ## Order of work

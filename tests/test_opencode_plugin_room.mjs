@@ -31,7 +31,7 @@ test("cto_room passes the room to the chat CLI, and lists the agent's rooms", as
     const room = hooks.tool.cto_room.execute;
     await room({action: "say", text: "hello", room: "reverie"});
     await room({action: "say", text: "no room given"});
-    await room({action: "read", room: "boardroom"});
+    await room({action: "read", room: "general"});
     await room({action: "status", text: "working", room: "games"});
     await room({action: "rooms"});
     // Optional in the schema, so say and status must refuse an empty text instead of passing undefined into argv.
@@ -39,9 +39,9 @@ test("cto_room passes the room to the chat CLI, and lists the agent's rooms", as
     await assert.rejects(room({action: "status", text: "", room: "reverie"}), /text is required for status/);
     const calls = (await readFile(log, "utf8")).trim().split("\n");
     assert.deepEqual(calls, [
-      "agent chat say --room reverie --to user -- hello",
-      "agent chat say --to user -- no room given",
-      "agent chat read --room boardroom",
+      "agent chat say --room reverie -- hello",
+      "agent chat say -- no room given",
+      "agent chat read --room general",
       "agent chat status --room games --progress working",
       "agent chat rooms",
     ]);

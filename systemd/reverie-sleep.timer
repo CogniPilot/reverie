@@ -1,0 +1,12 @@
+# Template, not installed. Fires every 10 minutes around the clock: the policy's own window, in the
+# policy's timezone, decides, and a tick outside it returns at once without opening any store.
+[Unit]
+Description=Run the Reverie nightly sleep tick every 10 minutes
+
+[Timer]
+OnCalendar=*:0/10
+Persistent=false
+AccuracySec=30s
+
+[Install]
+WantedBy=timers.target

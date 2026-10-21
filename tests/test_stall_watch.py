@@ -19,7 +19,7 @@ MS = lambda seconds: int(seconds * 1000)
 SHELL_RERUN = "The following tool was executed by the user"
 
 CHAT_PANE = """
-     Got it, thanks for the heads up. Waiting on his answer.
+     Got it, thanks for the heads up. Waiting on their answer.
 
      ▣  Chat · local-model · 1m 13s
 
@@ -30,7 +30,7 @@ CHAT_PANE = """
    /instances/agent/cwd
 """
 SHELL_PANE = """
-     Got it, thanks for the heads up. Waiting on his answer.
+     Got it, thanks for the heads up. Waiting on their answer.
 
   ┃
   ┃  hello there obviously  grins

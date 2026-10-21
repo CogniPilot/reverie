@@ -26,7 +26,7 @@ class FallbackTest(unittest.TestCase):
 
     def test_path_fallback(self):
         d = Path(tempfile.mkdtemp())
-        new, old = d / "agent-persona.txt", d / "jester-persona.txt"
+        new, old = d / "assistant-persona.txt", d / "jester-persona.txt"
         with mock.patch.dict(os.environ, {}, clear=True):
             self.assertEqual(cfgmod._path_fallback("FLEET_PERSONA", new, old), new)      # neither exists
             old.write_text("x")

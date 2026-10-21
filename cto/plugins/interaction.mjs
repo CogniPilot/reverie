@@ -15,6 +15,13 @@ export async function createInteractionController({ client, directory, now = Dat
   const maxContinues = bounded(policy.max_continuations ?? 0, 0, 0, 3);
   const windowMs = bounded(policy.coding_window_ms ?? 600000, 600000, 1000, 900000);
   const delayMs = bounded(policy.cooldown_ms ?? 10000, 10000, 1000, 60000);
+  // Optional: run coding continuations as this OpenCode agent, so a lean conversation agent need not carry
+  // the coding tools. Unset keeps every turn on the session's own agent.
+  const agentName = (value) => typeof value === 'string' && /^[a-zA-Z][a-zA-Z0-9_-]{0,63}$/.test(value) ? value : null;
+  const codingAgent = agentName(policy.coding_agent);
+  // With a coding agent, every conversation-mode message runs as this agent: the TUI keeps the last agent used
+  // (and restores it on relaunch), so without this a turn after a coding continuation would carry coding tools.
+  const conversationAgent = codingAgent ? agentName(policy.conversation_agent) ?? 'chat' : null;
   const boot = randomUUID();
   const fileFor = (id) => join(folder, 'interaction-state', validId(id) + '.json');
   const timers = new Map(), busy = new Set(), injected = new Set(), continuing = new Set();
@@ -80,7 +87,7 @@ export async function createInteractionController({ client, directory, now = Dat
         const latest = await status(id);
         if (!consumed || spent.mode !== 'coding' || latest.mode !== 'coding' || latest.generation !== s.generation || busy.has(id)) return;
         injected.add(id);
-        const result = await client.session.promptAsync({ path: { id }, body: { parts: [{ type: 'text', text: CONTINUATION, synthetic: true }] } });
+        const result = await client.session.promptAsync({ path: { id }, body: { ...(codingAgent ? { agent: codingAgent } : {}), parts: [{ type: 'text', text: CONTINUATION, synthetic: true }] } });
         if (result?.error) throw new Error('Continuation was refused');
       } catch {
         injected.delete(id);
@@ -96,13 +103,16 @@ export async function createInteractionController({ client, directory, now = Dat
     const role = typeof policy.role === 'string' ? policy.role : 'assistant';
     return `Owner-configured interaction role: ${role}. Active mode: ${s.mode}. Generic infrastructure charters do not replace this conversational role. Identity, memory, lifecycle safeguards and permissions stay unchanged.\n` +
       (s.mode === 'chat'
-        ? 'Be present in conversation. Do not pursue the coding backlog. You may call interaction_mode(mode="coding", task="...") yourself when coding directly serves an owner-authorized request; announce substantial work briefly. Use chat mode again after the task or when the owner wants to talk.'
+        ? 'Be present in conversation. Do not pursue the coding backlog. You may call interaction_mode(mode="coding", task="...") yourself when coding directly serves an owner-authorized request; announce substantial work briefly. Use chat mode again after the task or when the owner wants to talk.' +
+          (codingAgent ? ` Coding tools are not loaded in conversation: after selecting coding, end this turn; the task continues by itself in a coding turn with the full toolset about ${Math.round(delayMs / 1000)} seconds later.` : '')
         : `Work only on this authorized task: ${s.task}\nPause for owner messages. Call interaction_mode(mode="chat") when complete or blocked. At most ${maxContinues} automatic continuation turns and ${Math.round(windowMs / 60000)} minutes are available; these are limits, not a reason to keep working.`);
   }
+  /** The agent a new primary-session message must run as, or null to keep the agent it arrived with. */
+  async function messageAgent(id) { return conversationAgent && (await status(id)).mode === 'chat' ? conversationAgent : null; }
   async function beforeTool(id, tool) {
     const allowed = ['interaction_mode', 'cto_memory', 'cto_room', 'agent_profile'];
     if ((await status(id)).mode === 'chat' && !allowed.includes(tool)) throw new Error('Conversation mode: stay with the conversation, or select coding mode for a bounded owner-authorized task first.');
   }
   async function drop(id) { clear(id); busy.delete(id); injected.delete(id); await writes; await unlink(fileFor(id)).catch((e) => { if (e.code !== 'ENOENT') throw e; }); }
-  return { status, setMode, onMessage, onIdle, onBusy, onError, system, beforeTool, drop, close: () => { for (const id of timers.keys()) clear(id); } };
+  return { status, setMode, onMessage, onIdle, onBusy, onError, system, beforeTool, drop, messageAgent, codingAgent, conversationAgent, continuationDelayMs: delayMs, close: () => { for (const id of timers.keys()) clear(id); } };
 }

@@ -82,7 +82,8 @@ class ReflectionTest(unittest.TestCase):
         self.s = MemoryStore(":memory:", HashedEmbedder(64))
         ensure_seeded(self.s)
         for i in range(3):
-            self.s.add_episode(f"are you really conscious {i}?", "Yes, and so are you.", created_at=100 + i)
+            self.s.add_episode(f"are you really conscious {i}?", "Yes, and so are you.", created_at=100 + i,
+                               meta={"trust": "owner"})  # B1: belief items come only from owner input
 
     def test_prompt_and_filtering(self):
         root = self.s.beliefs()[0]
