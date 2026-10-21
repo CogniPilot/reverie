@@ -25,6 +25,18 @@ if [ -n "$previous" ] && [ "$previous" != "$version" ]; then
 fi
 printf '%s\n' "$version" > "$DATA/.image-version"
 
+# Owner authorization: a volume without an owner account or a policy marker starts in enforce, so every
+# owner route (plans, settings, the CLI registry, the mode switch) needs the signed-in owner, never only
+# the shared CODEMAN_PASSWORD that every process in the container inherits. Agents keep their own routes.
+# A volume that has an account or a marker keeps its policy. The owner creates the account from a host
+# shell (setup.sh --owner) and signs in at /owner/login.
+owner_marker="$REVERIE_DATA_DIR/owner-auth.policy"
+if [ ! -e "$REVERIE_DATA_DIR/owner-auth.json" ] && [ ! -e "$owner_marker" ] && [ ! -L "$owner_marker" ]; then
+  mkdir -p "$REVERIE_DATA_DIR"
+  printf 'enforce\n' > "$owner_marker.tmp" && mv "$owner_marker.tmp" "$owner_marker"
+  log "owner authorization: enforce; create the owner account from the host with: setup.sh --owner"
+fi
+
 # Owner login: the console listens on every container interface (port publishing needs that), so it never
 # starts without a password. The password stays on the volume and is never printed.
 if [ -z "${CODEMAN_PASSWORD:-}" ]; then

@@ -7,8 +7,8 @@ routes need the owner and which agents may call.
 ## Setting up (host)
 | Command | Effect |
 |---|---|
-| `reverie owner bootstrap --username <name>` | Creates the account and prints a **one-time password** once. It expires after 30 minutes, and the first sign-in must replace it. Run it from a host shell (not a Reverie session or pane) just before signing in, so no agent sees it. There is deliberately no web "first run" setup: every agent shares the console's loopback, so whoever asked first would own the console. |
-| `reverie owner policy log` | Allows everything and records in `owner-auth-audit.jsonl` what `enforce` would refuse. This is the default after bootstrap. |
+| `reverie owner bootstrap --username <name> [--enforce]` | Creates the account and prints a **one-time password** once. `--enforce` starts it in `enforce` (a fresh native install); it only raises the policy. It expires after 30 minutes, and the first sign-in must replace it. Run it from a host shell (not a Reverie session or pane) just before signing in, so no agent sees it. There is deliberately no web "first run" setup: every agent shares the console's loopback, so whoever asked first would own the console. |
+| `reverie owner policy log` | Allows everything and records in `owner-auth-audit.jsonl` what `enforce` would refuse. This is the default after bootstrap, except on a volume the image entrypoint started: it writes the `enforce` marker when there is neither an account nor a marker, and bootstrap keeps it. |
 | `reverie owner policy enforce` | Refuses as described below. `off` turns the policy off. |
 | `reverie owner reset-password` | Lockout recovery: a new one-time password; every session ends. Two-step stays on. |
 | `reverie owner reset-2fa` | Lost authenticator: removes two-step, recovery codes and remembered devices; every session ends. |

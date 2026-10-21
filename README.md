@@ -69,10 +69,18 @@ bash setup.sh
 
 `setup.sh` pulls the release, starts a container named `reverie` with its data on
 the `reverie-data` volume, and prints the address (`http://127.0.0.1:3000`, loopback
-only). Print the owner password the first start generated:
+only). Print the console password the first start generated:
 
 ```bash
 bash setup.sh --password
+```
+
+A new server requires owner sign-in from the start. Create the owner account once,
+from this host shell (not from inside a Reverie session), and note the one-time
+password it prints:
+
+```bash
+bash setup.sh --owner
 ```
 
 Removing someone's access stops their future pulls only. An image they have
@@ -103,8 +111,16 @@ Build the console:
 cd apps/console && npm ci && npm run build && cd ../..
 ```
 
-Choose an owner password, then start the console on loopback. It keeps its state
-in `~/.fleet` unless `REVERIE_DATA_DIR` names another directory:
+The console keeps its state in `~/.fleet` unless `REVERIE_DATA_DIR` names another
+directory; use the same value for every command below. Before the first start,
+create the owner account with sign-in required, and note the one-time password it
+prints:
+
+```bash
+node apps/console/dist/index.js owner bootstrap --username owner --enforce
+```
+
+Choose a console password, then start the console on loopback:
 
 ```bash
 read -rs CODEMAN_PASSWORD && export CODEMAN_PASSWORD CODEMAN_USERNAME=owner REVERIE_MCP_MEMORY_PYTHON=$HOME/.local/share/reverie/python/bin/python3
@@ -116,7 +132,12 @@ and memory skill, the runtime watcher and running the console as a service.
 
 ### First login
 
-1. Open `http://127.0.0.1:3000` and sign in as `owner` with the password from above.
+1. Open `http://127.0.0.1:3000`. The browser first asks for the console password
+   (user `owner`, the password from `setup.sh --password` or the one you chose). It
+   then shows the owner sign-in page: sign in as `owner` with the one-time password
+   (valid 30 minutes; `reverie owner reset-password` from the host prints a new one)
+   and choose your own password when asked. Both are required: the console
+   password alone does not open owner pages, settings or plan accounts.
 2. Add a plan: open the account menu in the header, choose **Add account**, name
    it and pick the provider (Claude or ChatGPT / Codex), then **Sign in** and follow
    the provider's link or code. **Plans** in the same menu shows each account's use.

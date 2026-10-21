@@ -238,7 +238,7 @@ export class OwnerAuthService {
     const policy = marker === 'unreadable' ? 'enforce' : marker;
     if (!this.warned.missing) {
       this.warned.missing = true;
-      console.error(`[owner-auth] owner-auth.json is missing but the policy marker says ${marker}: keeping ${policy}; owner sign-in is unavailable until the host restores the account`);
+      console.error(`[owner-auth] owner-auth.json is missing but the policy marker says ${marker}: keeping ${policy}; owner sign-in is unavailable until the host restores the account (or, on a fresh volume, runs \`reverie owner bootstrap\`)`);
       void this.audit('account_file_missing', { policy, source: 'marker' });
     }
     return policy;

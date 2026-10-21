@@ -45,6 +45,22 @@ class SetupScriptTest(unittest.TestCase):
         self.assertNotIn("0.0.0.0", run_line)
         self.assertIn("http://127.0.0.1:3100", result.stdout)
 
+    def test_owner_bootstraps_inside_the_container_from_the_host(self):
+        result = self.run_setup("--owner", "--name", "second")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(), "+ podman exec -e REVERIE_DATA_DIR=/instances/default/console second "
+                                                "reverie owner bootstrap --username owner --enforce")
+
+    def test_summary_names_the_owner_sign_in(self):
+        result = self.run_setup()
+        self.assertIn("--owner", result.stdout)
+        self.assertIn("/owner/login", result.stdout)
+
+    def test_help_is_the_header_only(self):
+        result = subprocess.run(["bash", str(SETUP), "--help"], capture_output=True, text=True, timeout=60)
+        self.assertIn("--owner", result.stdout)
+        self.assertNotIn("set -euo", result.stdout)
+
     def test_rollback_needs_an_earlier_release(self):
         result = self.run_setup("--rollback")
         self.assertEqual(result.returncode, 1)

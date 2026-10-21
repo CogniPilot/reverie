@@ -72,6 +72,37 @@ class EntrypointTest(unittest.TestCase):
         self.assertIn("console/state.json", listing)
         self.assertEqual((self.data / ".image-version").read_text().strip(), "v0.1.1")
 
+    def test_fresh_volume_starts_in_enforce(self):
+        result = self.start("true")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        marker = self.data / "console" / "owner-auth.policy"
+        self.assertEqual(marker.read_text(), "enforce\n")
+        self.assertEqual(stat.S_IMODE(marker.stat().st_mode), 0o600)
+        self.assertIn("setup.sh --owner", result.stderr)
+        again = self.start("true")
+        self.assertEqual(marker.read_text(), "enforce\n")
+        self.assertNotIn("owner authorization", again.stderr)
+
+    def test_existing_policy_or_account_is_kept(self):
+        console = self.data / "console"
+        console.mkdir(parents=True)
+        (console / "owner-auth.policy").write_text("log\n")
+        self.start("true")
+        self.assertEqual((console / "owner-auth.policy").read_text(), "log\n")
+        (console / "owner-auth.policy").unlink()
+        (console / "owner-auth.json").write_text("{}")
+        self.start("true")
+        self.assertFalse((console / "owner-auth.policy").exists())   # the console keeps the account's policy
+
+    def test_upgrade_backup_holds_the_state_before_the_marker(self):
+        self.start("true", REVERIE_VERSION="v0.1.0")
+        (self.data / "console" / "owner-auth.policy").unlink()   # a v0.1.0 volume had no marker
+        self.start("true", REVERIE_VERSION="v0.1.1")
+        backup = next((self.data / "backups").iterdir())
+        listing = subprocess.run(["tar", "-tf", str(backup)], capture_output=True, text=True).stdout
+        self.assertNotIn("owner-auth.policy", listing)
+        self.assertEqual((self.data / "console" / "owner-auth.policy").read_text(), "enforce\n")
+
     def test_offline_cli_install_does_not_fail_the_start(self):
         result = self.start("echo", "started", REVERIE_INSTALL_CLIS="claude-code nonsense")
         self.assertEqual(result.returncode, 0, result.stderr)

@@ -26,6 +26,15 @@ works as well, without signing in.
 bash setup.sh --password
 ```
 
+A new server also requires the owner sign-in for owner pages and settings (plan accounts,
+CLIs, settings): every process in the container shares that first password, so it alone is
+not enough. Create the owner account once from this host shell, then sign in at `/owner/login`
+with the one-time password it prints (valid 30 minutes; the first sign-in sets your own):
+
+```bash
+bash setup.sh --owner
+```
+
 Options: `--version X.Y.Z`, `--port N`, `--name NAME` (a second server on the same machine),
 `--with-claude-code` (installs that CLI at start, on the volume, under your own account and
 its license; the image does not ship it), `--dry-run`.
