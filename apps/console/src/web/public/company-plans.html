@@ -130,6 +130,10 @@ function plans() {
   // Leave an open rename alone on the minute refresh, so a half-typed name survives.
   if (planEdit && el.querySelector('[data-rename-form]') && B.planBurn.some(p => p.profileId === planEdit)) return;
   if (planEdit && !B.planBurn.some(p => p.profileId === planEdit)) planEdit = null;
+  // Show the plan cards sorted by next reset time, soonest first;
+  // accounts with no known reset time sort last.
+  B.planBurn.sort((a, b) =>
+    (Number.isFinite(a.reset) ? a.reset : Infinity) - (Number.isFinite(b.reset) ? b.reset : Infinity));
   el.innerHTML = B.planBurn.map((p, i) => {
     const risk = planRisk(p);
     const landing = planLanding(p);
