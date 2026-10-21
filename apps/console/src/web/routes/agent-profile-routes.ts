@@ -7,7 +7,7 @@
  *
  * Read-only: the report makes GET calls and local reads only, and lists backend switching as
  * unavailable until owner authentication exists. Enabled when the server's environment names the
- * runtime policy (FLEET_RUNTIME_POLICY); `fleet-runtime` comes from PATH unless FLEET_RUNTIME_BIN
+ * runtime policy (REVERIE_RUNTIME_POLICY); `fleet-runtime` comes from PATH unless REVERIE_RUNTIME_BIN
  * names it. Configuration is environment-only, never a settings key, so no API call can choose what
  * this route runs. Single-user only: the report reads the console as its owner. Ownership of the
  * session itself goes through `findSessionOrFail`, like every session-scoped route; an agent caller
@@ -21,6 +21,7 @@ import { ApiErrorCode, createErrorResponse } from '../../types.js';
 import { isMultiUserMode } from '../../config/multiuser.js';
 import type { SessionPort } from '../ports/session-port.js';
 import { findSessionOrFail, ownerFor, resolveParentSessionId } from '../route-helpers.js';
+import { envValue } from '../../config/fleet-env.js';
 
 /** What a report may include: direct-message rooms only for the owner. */
 export interface ProfileView {
@@ -48,6 +49,7 @@ const CHILD_ENV_NAMES = new Set([
   'HOME',
   'LANG',
   'CLAUDE_CONFIG_DIR',
+  'REVERIE_RUNTIME_POLICY',
   'FLEET_RUNTIME_POLICY',
   'CODEMAN_API_URL',
 ]);
@@ -65,9 +67,9 @@ export function profileChildEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
 }
 
 export function profileRunnerFromEnv(env: NodeJS.ProcessEnv = process.env): ProfileRunner | null {
-  const policy = env.FLEET_RUNTIME_POLICY;
+  const policy = envValue(env, 'RUNTIME_POLICY');
   if (!policy) return null;
-  const bin = env.FLEET_RUNTIME_BIN || 'fleet-runtime';
+  const bin = envValue(env, 'RUNTIME_BIN') || 'fleet-runtime';
   const childEnv = profileChildEnv(env);
   return (sessionId, view) =>
     new Promise((resolve, reject) => {
@@ -131,7 +133,7 @@ export function registerAgentProfileRoutes(
         .send(
           createErrorResponse(
             ApiErrorCode.OPERATION_FAILED,
-            'Agent profiles are not configured on this server (set FLEET_RUNTIME_POLICY)'
+            'Agent profiles are not configured on this server (set REVERIE_RUNTIME_POLICY)'
           )
         );
     }

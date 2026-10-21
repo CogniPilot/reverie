@@ -11,7 +11,7 @@
   downloaded on first use), ``GET /audio/<id>.wav``, ``GET /health``
 
 Speech to text is whisper.cpp (``whisper-cli``, model ggml-base.en by default, 4 CPU threads;
-``FLEET_WHISPER_GPU=1`` takes the ``chat`` GPU lock around each call). Text to speech is
+``REVERIE_WHISPER_GPU=1`` takes the ``chat`` GPU lock around each call). Text to speech is
 piper (voice en_US-amy-medium by default). Models are downloaded once into
 ``~/.local/share/cto/voice`` and warmed at start.
 
@@ -44,6 +44,7 @@ from urllib.parse import urlparse, parse_qs
 from .config import Config, DATA_DIR
 from .gpu import GpuLock
 from .log import get
+from cto import env_names
 
 Runner = Callable[[Sequence[str], bytes | None, int], subprocess.CompletedProcess]
 
@@ -59,17 +60,17 @@ _NOISE = re.compile(r"\[[^\]]*\]|\([^)]*\)|\*[^*]*\*")   # [BLANK_AUDIO], (music
 
 @dataclass
 class VoiceConfig:
-    host: str = os.environ.get("FLEET_VOICE_HOST", "127.0.0.1")
-    port: int = int(os.environ.get("FLEET_VOICE_PORT", "8090"))
-    voice_dir: Path = Path(os.environ.get("FLEET_VOICE_DIR", DATA_DIR / "voice"))
-    ffmpeg_bin: str = os.environ.get("FLEET_FFMPEG_BIN", shutil.which("ffmpeg") or "ffmpeg")
-    whisper_bin: str = os.environ.get("FLEET_WHISPER_BIN", shutil.which("whisper-cli") or "whisper-cli")
-    whisper_model: str = os.environ.get("FLEET_WHISPER_MODEL", "base.en")      # base.en or small.en
-    whisper_threads: int = int(os.environ.get("FLEET_WHISPER_THREADS", "4"))
-    whisper_gpu: bool = os.environ.get("FLEET_WHISPER_GPU", "0") == "1"
-    piper_bin: str = os.environ.get("FLEET_PIPER_BIN", shutil.which("piper") or "piper")
-    voice: str = os.environ.get("FLEET_VOICE", "en_US-amy-medium")               # or en_GB-jenny_dioco-medium
-    audio_ttl: int = int(os.environ.get("FLEET_AUDIO_TTL", "3600"))
+    host: str = env_names.lookup("REVERIE_VOICE_HOST", "127.0.0.1")
+    port: int = int(env_names.lookup("REVERIE_VOICE_PORT", "8090"))
+    voice_dir: Path = Path(env_names.lookup("REVERIE_VOICE_DIR", DATA_DIR / "voice"))
+    ffmpeg_bin: str = env_names.lookup("REVERIE_FFMPEG_BIN", shutil.which("ffmpeg") or "ffmpeg")
+    whisper_bin: str = env_names.lookup("REVERIE_WHISPER_BIN", shutil.which("whisper-cli") or "whisper-cli")
+    whisper_model: str = env_names.lookup("REVERIE_WHISPER_MODEL", "base.en")      # base.en or small.en
+    whisper_threads: int = int(env_names.lookup("REVERIE_WHISPER_THREADS", "4"))
+    whisper_gpu: bool = env_names.lookup("REVERIE_WHISPER_GPU", "0") == "1"
+    piper_bin: str = env_names.lookup("REVERIE_PIPER_BIN", shutil.which("piper") or "piper")
+    voice: str = env_names.lookup("REVERIE_VOICE", "en_US-amy-medium")               # or en_GB-jenny_dioco-medium
+    audio_ttl: int = int(env_names.lookup("REVERIE_AUDIO_TTL", "3600"))
     max_upload: int = 10 * 1024 * 1024
     timeout: int = 120
     room_post: bool = True

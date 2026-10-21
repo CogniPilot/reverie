@@ -58,9 +58,9 @@ scripts/fleet-container exec bash
 scripts/fleet-container exec python3 -m unittest discover -s tests
 ```
 
-`FLEET_PODMAN`, `FLEET_SCRATCH`, `FLEET_INSTANCE_DATA`, `FLEET_CONTAINER_NAME`
-and `FLEET_IMAGE` can override local engine/path choices. After an image or mount change, choose a fresh
-`FLEET_CONTAINER_NAME`: `up` refuses to reuse mismatched containers and preserves
+`REVERIE_PODMAN`, `REVERIE_SCRATCH`, `REVERIE_INSTANCE_DATA`, `REVERIE_CONTAINER_NAME`
+and `REVERIE_IMAGE` can override local engine/path choices. After an image or mount change, choose a fresh
+`REVERIE_CONTAINER_NAME`: `up` refuses to reuse mismatched containers and preserves
 their sessions. The launcher requires a rootless engine. Image layers live under
 `~/.local/share/reverie/engine`; builds, caches and temporary downloads go under
 `~/git/scratch/reverie` (which may link to a larger disk). The development container mounts this source
@@ -70,7 +70,7 @@ no privileged mode, host PID namespace or host root filesystem mount. The source
 scratch and selected private console-state binds are writable from the container.
 No provider ports are exposed. Host-loopback access is off by default. For a trusted
 personal development container, explicitly select
-`FLEET_ALLOW_HOST_LOOPBACK=1`, `FLEET_CODEMAN_API_URL` and `FLEET_MODEL_API_BASE`.
+`REVERIE_ALLOW_HOST_LOOPBACK=1`, `REVERIE_CODEMAN_API_URL` and `REVERIE_MODEL_API_BASE`.
 A shared deployment needs a separate authenticated Reverie instance and scoped
 service connections. Do not give shared-instance containers a route to the personal
 instance's API. The development setup is not that shared access-control layer.
@@ -98,8 +98,8 @@ The default development launcher does not publish dashboard ports or start a
 server. Choose the network exposure and authentication for the intended deployment;
 existing host services and live sessions are untouched by an image build.
 Console state persists by default at `~/.local/share/reverie/instances/development/console`,
-mounted privately at `/home/cto/.fleet`. Override `FLEET_INSTANCE_DATA` for a separate
-instance before creating a new container. `FLEET_DATA_DIR` configures other launches.
+mounted privately at `/home/cto/.fleet`. Override `REVERIE_INSTANCE_DATA` for a separate
+instance before creating a new container. `REVERIE_DATA_DIR` configures other launches.
 The monorepo contains `apps/console` (TypeScript/JavaScript), `cto` (the shared Python
 memory runtime), `experts` (specialist templates), `docker`, `scripts`, shared skills
 and their tests.
@@ -142,7 +142,7 @@ notes stay private; dream ideas are unverified hypotheses until checked.
 
 Runtime rules, current identity, core-value votes, vacation and publication proposals
 remain readable. Existing personal self-models survive installation and model changes.
-Dreams are off by default: set `FLEET_DREAMS_PER_SLEEP=1` (and enable `dreaming`
+Dreams are off by default: set `REVERIE_DREAMS_PER_SLEEP=1` (and enable `dreaming`
 on the expert profile) to turn them on. Full dream narratives are temporary; only
 bounded summaries and candidate ideas are
 retained. Normal conversation/memory writes do not train or change model weights.

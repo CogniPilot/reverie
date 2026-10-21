@@ -11,7 +11,8 @@ log() { printf 'reverie-start: %s\n' "$*" >&2; }
 
 DATA=${REVERIE_DATA:-/instances/default}
 mkdir -p "$DATA/console" "$DATA/backups" "$DATA/tools" "${TMPDIR:-/tmp}"
-export FLEET_DATA_DIR=${FLEET_DATA_DIR:-$DATA/console}
+# REVERIE_DATA_DIR is the name; the older FLEET_DATA_DIR spelling is still read, and both are exported for one release.
+REVERIE_DATA_DIR=${REVERIE_DATA_DIR:-${FLEET_DATA_DIR:-$DATA/console}}; export REVERIE_DATA_DIR FLEET_DATA_DIR="$REVERIE_DATA_DIR"
 
 # Upgrade: the first start of a new image build backs up the console state before the console reads it
 # (the console migrates its own files on start).

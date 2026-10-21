@@ -5,10 +5,12 @@
 here=$(dirname "$0")
 supervisor="$here/../cto/supervise.py"
 python=/opt/fleet/python/bin/python3
-state="${FLEET_DATA_DIR:-/tmp}/supervise"
+# REVERIE_DATA_DIR is the name; the older FLEET_DATA_DIR spelling is still read for one release.
+data_dir="${REVERIE_DATA_DIR:-${FLEET_DATA_DIR:-}}"
+state="${data_dir:-/tmp}/supervise"
 # Optional owner-configured agent watchdog, outside every agent tmux pane.
 # The policy and installed standard-library monitor live in private instance data.
-watchdog_state="${FLEET_DATA_DIR:-/tmp}/watchdog"
+watchdog_state="${data_dir:-/tmp}/watchdog"
 if [ -x "$python" ] && [ -f "$watchdog_state/policy.json" ] && [ -f "$watchdog_state/bin/watchdog.py" ]; then
   setsid "$python" -I "$watchdog_state/bin/watchdog.py" --policy "$watchdog_state/policy.json" watch \
     </dev/null >>"$watchdog_state/watchdog.log" 2>&1 &
@@ -16,9 +18,9 @@ fi
 if [ -x "$python" ] && [ -f "$supervisor" ]; then
   # The console's env file (state/child.env) may only name files under the instance's runtime dir: the parent of
   # the data dir, which comes from the container's own environment. Without a data dir it is not read.
-  if [ -n "${FLEET_DATA_DIR:-}" ]; then
+  if [ -n "$data_dir" ]; then
     exec "$python" -I "$supervisor" run --state "$state" --rollback-dist /opt/fleet/apps/console/dist \
-      --env-root "$(dirname "$FLEET_DATA_DIR")" -- "$@"
+      --env-root "$(dirname "$data_dir")" -- "$@"
   fi
   exec "$python" -I "$supervisor" run --state "$state" --rollback-dist /opt/fleet/apps/console/dist -- "$@"
 fi

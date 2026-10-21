@@ -58,7 +58,7 @@ RUN python3 -m venv /opt/fleet/python \
     && ln -s /opt/fleet/apps/console/dist/index.js /usr/local/bin/codeman
 COPY --chmod=0755 docker/entrypoint.sh /usr/local/bin/reverie-start
 ARG REVERIE_VERSION=dev
-ENV REVERIE_VERSION=$REVERIE_VERSION HOME=/home/cto FLEET_CONTAINER=1 FLEET_CASES_PATH=/scratch/cases FLEET_RESEARCH_ROOT=/scratch/research TMPDIR=/scratch/tmp PATH=/opt/fleet/python/bin:$PATH
+ENV REVERIE_VERSION=$REVERIE_VERSION HOME=/home/cto REVERIE_CONTAINER=1 REVERIE_CASES_PATH=/scratch/cases REVERIE_RESEARCH_ROOT=/scratch/research TMPDIR=/scratch/tmp PATH=/opt/fleet/python/bin:$PATH
 USER cto
 WORKDIR /workspace
 # The start script prepares the instance on a volume mounted at /instances (owner password, upgrade backup,

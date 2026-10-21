@@ -6,11 +6,12 @@ from pathlib import Path
 from .chat import ChatDaemon
 from .config import Config
 from .opencode import dispatch
+from cto import env_names
 
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--instance", type=Path, default=os.environ.get("FLEET_INSTANCE_CONFIG"))
+    parser.add_argument("--instance", type=Path, default=env_names.lookup("REVERIE_INSTANCE_CONFIG"))
     parser.add_argument("--channel", choices=("work","private"), default="work")
     parser.add_argument("--context-window", type=int, default=16384)
     parser.add_argument("--output-tokens", type=int, default=4096)

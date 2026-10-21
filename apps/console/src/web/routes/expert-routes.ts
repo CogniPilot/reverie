@@ -107,7 +107,7 @@ export interface ExpertRouteDeps {
   forgetSpawnProfile?(owner: string | undefined, sessionId: string): Promise<void>;
   postNotice(roomId: string, text: string): void | Promise<void>;
   audit(entry: ExpertAuditEntry): Promise<void>;
-  /** Notice room when the settings name none (FLEET_EXPERTS_NOTICE_ROOM). */
+  /** Notice room when the settings name none (REVERIE_EXPERTS_NOTICE_ROOM). */
   noticeRoomFallback?: string;
   /** Plans as GET /api/plans reads them. A throw means the plans cannot be read. */
   readPlans?(): Promise<PlanReading[]>;

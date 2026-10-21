@@ -5,16 +5,17 @@ import json
 import os
 from pathlib import Path
 import sys
+from cto import env_names
 
 
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--instance", type=Path, default=os.environ.get("FLEET_INSTANCE_CONFIG"))
+    parser.add_argument("--instance", type=Path, default=env_names.lookup("REVERIE_INSTANCE_CONFIG"))
     args = parser.parse_args(argv)
     daemon = None
     try:
         if not args.instance:
-            raise ValueError("select an instance with --instance or FLEET_INSTANCE_CONFIG")
+            raise ValueError("select an instance with --instance or REVERIE_INSTANCE_CONFIG")
         request = json.load(sys.stdin)
         if not isinstance(request, dict) or request.get("action") not in ("recall", "remember"):
             raise ValueError("expected a recall or remember JSON object")

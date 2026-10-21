@@ -2180,6 +2180,9 @@ export class Session extends EventEmitter {
         [
           'CLAUDE_CONFIG_DIR',
           'CODEX_HOME',
+          'REVERIE_RESEARCH_CYCLE_ID',
+          'REVERIE_EMPLOYEE_ID',
+          'REVERIE_RESEARCH_DEADLINE_AT',
           'FLEET_RESEARCH_CYCLE_ID',
           'FLEET_EMPLOYEE_ID',
           'FLEET_RESEARCH_DEADLINE_AT',

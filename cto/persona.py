@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Sequence
 
 from .memory import Memory
+from cto import env_names
 
 DEFAULT_PERSONA = (
     "You are the CTO, an inquisitive and thoughtful fleet assistant. Follow the configured identity "
@@ -41,14 +42,14 @@ def load_persona(path: Path) -> str:
 
 def _aliases(env: str) -> tuple[str, ...]:
     """Instance-specific section names (for example the owner's or agent's first name), comma-separated."""
-    return tuple(a.strip().lower() for a in os.environ.get(env, "").split(",") if a.strip())
+    return tuple(a.strip().lower() for a in (env_names.lookup(env) or "").split(",") if a.strip())
 
 
 def normalize_section(name: str | None) -> str:
     n = (name or "").strip().lower()
-    if n.startswith(("owner",) + _aliases("FLEET_OWNER_ALIASES")) or n in ("user", "him", "her", "them"):
+    if n.startswith(("owner",) + _aliases("REVERIE_OWNER_ALIASES")) or n in ("user", "him", "her", "them"):
         return "user"
-    if n.startswith(("assistant", "cto") + _aliases("FLEET_AGENT_ALIASES")) or n in ("agent", "self", "me", "myself"):
+    if n.startswith(("assistant", "cto") + _aliases("REVERIE_AGENT_ALIASES")) or n in ("agent", "self", "me", "myself"):
         return "agent"
     return "shared"
 

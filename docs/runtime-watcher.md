@@ -154,7 +154,7 @@ gate: `python3 -m cto.admission --expect 1.5G -- npm test` exits 75 when refused
 
 Console tests: a root `apps/console/vitest.config.ts` makes a bare `npx vitest run`
 use the CI config (and therefore `test/setup.ts`). `test/setup.ts` throws when
-`CODEMAN_DATA_DIR`/`FLEET_DATA_DIR` holds a live `state.json`.
+`CODEMAN_DATA_DIR`/`REVERIE_DATA_DIR` holds a live `state.json`.
 
 ## Agent profile (read-only)
 

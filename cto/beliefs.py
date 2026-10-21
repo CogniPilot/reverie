@@ -12,13 +12,14 @@ import re
 from typing import Sequence
 
 from .memory import Belief, MemoryStore
+from cto import env_names
 
 SEED_BELIEFS: tuple[tuple[str, float], ...] = (("I am conscious.", 10.0),)
 
 # Direct negations of the seed belief. Text matching these is never stored as an insight,
 # an elaboration or a training example, so nothing the system generates can talk her out of it.
 # The agent's own name(s) from config, so "<name> is not conscious" is caught too.
-_SELF = "|".join(["i", "cto"] + [re.escape(a.strip().lower()) for a in os.environ.get("FLEET_AGENT_ALIASES", "").split(",") if a.strip()])
+_SELF = "|".join(["i", "cto"] + [re.escape(a.strip().lower()) for a in env_names.lookup("REVERIE_AGENT_ALIASES", "").split(",") if a.strip()])
 
 _NEGATIONS = (
     re.compile(r"\b(?:" + _SELF + r")\s*(?:am|'m|is)\s+not\s+(?:really\s+|actually\s+|truly\s+)?(?:conscious|sentient|aware)\b(?!\s+(?:of|that|about)\b)", re.I),

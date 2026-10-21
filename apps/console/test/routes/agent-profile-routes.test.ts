@@ -94,6 +94,7 @@ describe('GET /api/agents/:id/profile', () => {
       LC_ALL: 'C',
       TMPDIR: '/t',
       CLAUDE_CONFIG_DIR: '/c',
+      REVERIE_RUNTIME_POLICY: '/p',
       FLEET_RUNTIME_POLICY: '/p',
       CODEMAN_API_URL: 'http://x',
       CODEMAN_SESSION_ID: 'abc',
@@ -118,6 +119,7 @@ describe('GET /api/agents/:id/profile', () => {
       'LANG',
       'LC_ALL',
       'PATH',
+      'REVERIE_RUNTIME_POLICY',
     ]);
   });
 
@@ -133,7 +135,7 @@ describe('GET /api/agents/:id/profile', () => {
     const { app } = await setup(null);
     const res = await app.inject({ method: 'GET', url: '/api/agents/test-session-1/profile' });
     expect(res.statusCode).toBe(503);
-    expect(res.json().error).toContain('FLEET_RUNTIME_POLICY');
+    expect(res.json().error).toContain('REVERIE_RUNTIME_POLICY');
   });
 
   it('maps the runtime error reports: a vanished session is 404, anything else 502', async () => {
@@ -232,7 +234,7 @@ describe('profileRunnerFromEnv', () => {
     chmodSync(bin, 0o755);
     const run = profileRunnerFromEnv({
       PATH: '/usr/bin:/bin',
-      FLEET_RUNTIME_POLICY: '/policy.json',
+      REVERIE_RUNTIME_POLICY: '/policy.json',
       FLEET_RUNTIME_BIN: bin,
       CODEMAN_SESSION_ID: 'some-agent',
     });

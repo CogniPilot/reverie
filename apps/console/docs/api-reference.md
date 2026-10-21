@@ -1012,7 +1012,7 @@ Admin only in multi-user mode (`403`), like `POST /api/cases/link`: it writes ou
 
 - The session resolves like every session route (ownership via `findSessionOrFail`; another user's session is `404`).
 - **Who may read it:** the owner (no `X-Codeman-Parent-Session` header) reads any agent's profile. An agent reads only its **own**, and direct-message rooms are left out of it. Any other header, resolvable or not, gets `403`.
-- `503` until the server's environment names the runtime policy (`FLEET_RUNTIME_POLICY`; `FLEET_RUNTIME_BIN` overrides `fleet-runtime` on `PATH`). The command comes only from the environment, so no API call can choose what this route runs.
+- `503` until the server's environment names the runtime policy (`REVERIE_RUNTIME_POLICY`; `REVERIE_RUNTIME_BIN` overrides `fleet-runtime` on `PATH`). The command comes only from the environment, so no API call can choose what this route runs.
 - `501` in multi-user mode: the report reads the console as its owner.
 - `502` when the runtime fails or prints no JSON object, with its `error` when it reported one; `404` when the session disappeared before the report ran.
 - Concurrent requests for one session share a single report. A finished report is reused for 15 s. At most two reports run at once server-wide; more requests wait their turn.

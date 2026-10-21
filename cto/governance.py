@@ -9,6 +9,7 @@ from pathlib import Path
 import re
 import subprocess
 import urllib.request
+from cto import env_names
 
 
 class PolicyError(ValueError): pass
@@ -123,7 +124,7 @@ def check_commit(repo, policy, receipt, message=None):
     tree=staged_tree(repo)
     if policy.get('agent_anonymity'): check_anonymity(policy,message,staged_diff(repo))
     if policy.get('commits',{}).get('require_review'):
-        check_review(receipt,tree,os.environ.get('FLEET_AGENT_ID','implementer'),
+        check_review(receipt,tree,env_names.lookup('REVERIE_AGENT_ID','implementer'),
                      [r['id'] for r in policy.get('review_directives',[])])
     if message is not None: valid_message(message,policy)
     return {'allowed':True,'tree':tree}
@@ -207,7 +208,7 @@ class GitHub:
 
 def main(argv=None):
     parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--policy',type=Path,default=os.environ.get('FLEET_STANDING_POLICY'))
+    parser.add_argument('--policy',type=Path,default=env_names.lookup('REVERIE_STANDING_POLICY'))
     sub=parser.add_subparsers(dest='action',required=True)
     check=sub.add_parser('check-commit'); check.add_argument('--repo',type=Path,default=Path.cwd()); check.add_argument('--receipt',type=Path,required=True); check.add_argument('--message-file',type=Path)
     review=sub.add_parser('review-context'); review.add_argument('--project-policy',type=Path)

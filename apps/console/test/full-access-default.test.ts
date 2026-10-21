@@ -3,7 +3,7 @@
  *
  * A codex session created, moved (employee replace) or relaunched without
  * `codexConfig.dangerouslyBypassApprovals` used to start with approval prompts on and stall.
- * Inside the container (`FLEET_CONTAINER=1`) every local launch now fills the unset switch,
+ * Inside the container (`REVERIE_CONTAINER=1`) every local launch now fills the unset switch,
  * stores it on the session (so the persisted row carries it), keeps an explicit `false`, and
  * never lifts the clamp for a non-granted owner. Each launch path is checked on the command
  * the pane would really run (`buildCodexCommand` of the options handed to tmux).
@@ -22,7 +22,7 @@ vi.mock('../src/user-store.js', async (importOriginal) => ({
 import { Session } from '../src/session.js';
 import { TmuxManager, buildCodexCommand } from '../src/tmux-manager.js';
 import type { CreateSessionOptions, RespawnPaneOptions } from '../src/mux-interface.js';
-import {
+import { fullAccessByDefault,
   checkFullAccessFlags,
   fullAccessAlertRoom,
   fullAccessFlags,
@@ -37,9 +37,16 @@ import { createSessionListeners, attachSessionListeners } from '../src/web/sessi
 
 const FLAG = '--dangerously-bypass-approvals-and-sandbox';
 const CLAUDE_FLAG = '--dangerously-skip-permissions';
-const CONTAINER = { FLEET_CONTAINER: '1' } as NodeJS.ProcessEnv;
+const CONTAINER = { REVERIE_CONTAINER: '1' } as NodeJS.ProcessEnv;
 
 describe('withFullAccessDefault', () => {
+  it('reads the container flag under the new name and the older FLEET_ spelling', () => {
+    expect(fullAccessByDefault(CONTAINER)).toBe(true);
+    expect(fullAccessByDefault({ FLEET_CONTAINER: '1' } as NodeJS.ProcessEnv)).toBe(true);
+    expect(fullAccessByDefault({ REVERIE_CONTAINER: '0', FLEET_CONTAINER: '1' } as NodeJS.ProcessEnv)).toBe(false);
+    expect(fullAccessByDefault({} as NodeJS.ProcessEnv)).toBe(false);
+  });
+
   it('fills the codex bypass switch inside the container', async () => {
     expect(await withFullAccessDefault('codex', undefined, undefined, CONTAINER)).toEqual({ dangerouslyBypassApprovals: true });
     expect(await withFullAccessDefault('codex', { reasoningEffort: 'high' }, undefined, CONTAINER)).toEqual({
@@ -172,8 +179,8 @@ describe('codex sessions launch with full access in the container', () => {
   let previous: string | undefined;
 
   beforeEach(() => {
-    previous = process.env.FLEET_CONTAINER;
-    process.env.FLEET_CONTAINER = '1';
+    previous = process.env.REVERIE_CONTAINER;
+    process.env.REVERIE_CONTAINER = '1';
     Session.fullAccessCheckDelayMs = 0;
     mkdirSync(workingDir, { recursive: true });
     created = [];
@@ -191,8 +198,8 @@ describe('codex sessions launch with full access in the container', () => {
     rmSync(workingDir, { recursive: true, force: true });
     Session.fullAccessCheckDelayMs = 5000;
     Session.fullAccessCheckRetries = 5;
-    if (previous === undefined) delete process.env.FLEET_CONTAINER;
-    else process.env.FLEET_CONTAINER = previous;
+    if (previous === undefined) delete process.env.REVERIE_CONTAINER;
+    else process.env.REVERIE_CONTAINER = previous;
   });
 
   /** Serve the pane's process tree from a fake table instead of /proc. */
@@ -367,7 +374,7 @@ describe('codex sessions launch with full access in the container', () => {
   });
 
   it('outside the container nothing is added', async () => {
-    delete process.env.FLEET_CONTAINER;
+    delete process.env.REVERIE_CONTAINER;
     const session = make();
     await session.startInteractive();
     expect(buildCodexCommand(created.at(-1)?.codexConfig)).not.toContain(FLAG);

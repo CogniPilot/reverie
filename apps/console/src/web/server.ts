@@ -79,6 +79,7 @@ import { RespawnController, RespawnConfig } from '../respawn-controller.js';
 import type { TerminalMultiplexer } from '../mux-interface.js';
 import { createMultiplexer } from '../mux-factory.js';
 import { getStore } from '../state-store.js';
+import { envValue } from '../config/fleet-env.js';
 import { TabLayoutService, type SessionPlacementHint } from '../tab-layout-service.js';
 import type { TabLayout } from '../tab-layout.js';
 import { ownerLayoutKey } from '../tab-layout-persistence.js';
@@ -1382,7 +1383,7 @@ export class WebServer extends EventEmitter {
     const research = new DurableCompanyResearchBackend({
       file: dataPath('company-research.json'),
       workspaceRoot:
-        process.env.FLEET_RESEARCH_ROOT ||
+        envValue(process.env, 'RESEARCH_ROOT') ||
         join(homedir(), 'scratch', 'agent-fleet', 'research', resolveTmuxSocketName()),
       runtime: companySessionRuntime(ctx),
     });
@@ -1568,7 +1569,7 @@ export class WebServer extends EventEmitter {
     //   launch inside that root.
     const company = this.companyService;
     registerExpertRoutes(this.app, {
-      store: new ExpertStore(dataPath('experts.json'), process.env.FLEET_EXPERTS_SEED_DIR || undefined),
+      store: new ExpertStore(dataPath('experts.json'), envValue(process.env, 'EXPERTS_SEED_DIR') || undefined),
       callerSession: (req) => resolveParentSessionId(ctx, req, undefined, ownerFor(req)),
       createSession: async (req, launch) => {
         const headers: Record<string, string> = { 'content-type': 'application/json' };
@@ -1604,7 +1605,7 @@ export class WebServer extends EventEmitter {
       forgetSpawnProfile: (owner, sessionId) => company.removeTemporaryAgent(owner, sessionId).catch(() => undefined),
       postNotice: (roomId, text) => void this.chatroomService.post(roomId, { kind: 'system', name: 'experts' }, text),
       audit: appendAdminAudit,
-      noticeRoomFallback: process.env.FLEET_EXPERTS_NOTICE_ROOM || undefined,
+      noticeRoomFallback: envValue(process.env, 'EXPERTS_NOTICE_ROOM') || undefined,
       roomExists: (roomId) => !!this.chatroomService.room(roomId),
       // Budget stops read the same rows as GET /api/plans: `pace.weekly` is sevenDay.usedPercentage.
       readPlans: async () =>

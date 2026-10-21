@@ -51,7 +51,7 @@ ENV_FILE_BYTES = 4096
 
 
 def runtime_policy(value: str, root: Path) -> bool:
-    """FLEET_RUNTIME_POLICY: an absolute path that resolves to a regular file strictly inside root."""
+    """REVERIE_RUNTIME_POLICY (or FLEET_RUNTIME_POLICY): an absolute path that resolves to a regular file strictly inside root."""
     if not value.startswith("/"):
         return False
     try:
@@ -61,7 +61,8 @@ def runtime_policy(value: str, root: Path) -> bool:
         return False
 
 
-ENV_RULES = {"FLEET_RUNTIME_POLICY": runtime_policy}
+# Standalone file (run by path, stdlib only): both spellings of the one allowed key, REVERIE_ the name, FLEET_ deprecated.
+ENV_RULES = {"REVERIE_RUNTIME_POLICY": runtime_policy, "FLEET_RUNTIME_POLICY": runtime_policy}
 ENV_LINE = re.compile(r"([A-Z][A-Z0-9_]{0,63})=(.*)")
 
 
@@ -283,7 +284,7 @@ def main(argv=None) -> int:
     run.add_argument("--fast-seconds", type=float, default=30.0)
     run.add_argument("--max-backoff", type=float, default=30.0)
     run.add_argument("--grace", type=float, default=GRACE_SECONDS)
-    run.add_argument("--env-root", type=Path, help="read DIR/child.env; FLEET_RUNTIME_POLICY must resolve inside this dir")
+    run.add_argument("--env-root", type=Path, help="read DIR/child.env; REVERIE_RUNTIME_POLICY must resolve inside this dir")
     run.add_argument("command", nargs=argparse.REMAINDER)
     for name in ("restart", "status"):
         p = sub.add_parser(name)

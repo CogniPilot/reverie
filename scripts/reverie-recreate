@@ -7,8 +7,8 @@
 #   reverie-recreate --replace            stop and remove an existing container first
 #
 # Run on the HOST as the user that owns the container. Engine access goes through the
-# launcher (scripts/fleet-container next to this file, or FLEET_LAUNCHER), so engine storage
-# follows its default (${XDG_DATA_HOME:-~/.local/share}/reverie/engine) or FLEET_SCRATCH.
+# launcher (scripts/fleet-container next to this file, or REVERIE_LAUNCHER), so engine storage
+# follows its default (${XDG_DATA_HOME:-~/.local/share}/reverie/engine) or REVERIE_SCRATCH.
 # Mounted data (repo, scratch, instance) is never deleted or rewritten: --replace removes
 # only the container itself, never volumes or images.
 #
@@ -33,14 +33,16 @@
 #                            ~/.local/libexec/agent-fleet/fleet-container (backup kept), so
 #                            reverie.service finds the container in the new engine storage
 #   --dry-run                print, do not change anything
-# FLEET_MEMORY overrides the automatic memory size (half of host RAM, 4..32 GiB).
+# REVERIE_MEMORY overrides the automatic memory size (half of host RAM, 4..32 GiB).
 set -euo pipefail
+# REVERIE_* is the name; the older FLEET_* spelling is still read for one release (the new name wins).
+while IFS= read -r _old; do _new="REVERIE_${_old#FLEET_}"; [[ -n "${!_new:-}" ]] || export "$_new=${!_old}"; done < <(compgen -e | grep '^FLEET_' || true)
 
 here="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 source_repo="$(cd -- "$here/.." && pwd)"
-launcher="${FLEET_LAUNCHER:-$here/fleet-container}"
+launcher="${REVERIE_LAUNCHER:-$here/fleet-container}"
 name=reverie-live
-image="${FLEET_IMAGE:-localhost/reverie:live}"
+image="${REVERIE_IMAGE:-localhost/reverie:live}"
 repo="$HOME/git/reverie"
 scratch="$HOME/scratch/reverie/runtime"
 instance="$HOME/.local/share/agent-fleet/default"
@@ -93,7 +95,7 @@ run() {
   [ "$dry" = 1 ] || "$@"
 }
 
-[ -x "$launcher" ] || die "launcher not executable: $launcher (set FLEET_LAUNCHER)"
+[ -x "$launcher" ] || die "launcher not executable: $launcher (set REVERIE_LAUNCHER)"
 resolve_dir() { [ -d "$2" ] || die "$1 does not exist: $2"; (cd -- "$2" && pwd -P); }
 repo="$(resolve_dir repo "$repo")"
 scratch="$(resolve_dir scratch "$scratch")"
@@ -138,7 +140,7 @@ fi
 
 if [ "$build" = 1 ] && [ "$dry" = 1 ]; then
   echo "Build context:  (staged at run time from the repo, console and cto sources above)"
-  run env FLEET_REPO="<staged context>" FLEET_IMAGE="$image" "$launcher" build
+  run env REVERIE_REPO="<staged context>" FLEET_REPO="<staged context>" REVERIE_IMAGE="$image" FLEET_IMAGE="$image" "$launcher" build
 elif [ "$build" = 1 ]; then
   # Stage exactly what docker/Containerfile copies, with the chosen console and cto trees.
   context="$(mktemp -d "${TMPDIR:-/tmp}/reverie-build.XXXXXX")"
@@ -150,7 +152,7 @@ elif [ "$build" = 1 ]; then
   mkdir -p "$context/apps/console" "$context/cto"
   (cd -- "$console_source" && tar --exclude=./node_modules --exclude=./.git -cf - .) | (cd -- "$context/apps/console" && tar -xf -)
   (cd -- "$cto_source" && tar --exclude=__pycache__ -cf - .) | (cd -- "$context/cto" && tar -xf -)
-  run env FLEET_REPO="$context" FLEET_IMAGE="$image" "$launcher" build
+  run env REVERIE_REPO="$context" FLEET_REPO="$context" REVERIE_IMAGE="$image" FLEET_IMAGE="$image" "$launcher" build
 fi
 
 # Create only: reverie.service (fleet-container engine start --attach) starts and owns it.
@@ -160,11 +162,11 @@ args=(create --pull=never --init --name "$name" --label agent-fleet.managed=true
   --memory="$memory" --memory-swap="$memory" --pids-limit=512
   --network=pasta:--map-host-loopback,169.254.1.2)
 for p in "${publish[@]}"; do args+=(--publish "$p"); done
-args+=(--env FLEET_INSTANCE_CONFIG=/instances/personal/config/instance.json
-  --env FLEET_DATA_DIR=/instances/personal/runtime/console
-  --env "FLEET_API_BASE=$api_base" --env "FLEET_MODEL=$model"
-  --env FLEET_CASES_PATH=/scratch/cases --env FLEET_RESEARCH_ROOT=/scratch/research
-  --env FLEET_API_URL=http://127.0.0.1:3000 --env CODEMAN_API_URL=http://127.0.0.1:3000
+args+=(--env REVERIE_INSTANCE_CONFIG=/instances/personal/config/instance.json --env FLEET_INSTANCE_CONFIG=/instances/personal/config/instance.json
+  --env REVERIE_DATA_DIR=/instances/personal/runtime/console --env FLEET_DATA_DIR=/instances/personal/runtime/console
+  --env "REVERIE_API_BASE=$api_base" --env "FLEET_API_BASE=$api_base" --env "REVERIE_MODEL=$model" --env "FLEET_MODEL=$model"
+  --env REVERIE_CASES_PATH=/scratch/cases --env FLEET_CASES_PATH=/scratch/cases --env REVERIE_RESEARCH_ROOT=/scratch/research --env FLEET_RESEARCH_ROOT=/scratch/research
+  --env REVERIE_API_URL=http://127.0.0.1:3000 --env FLEET_API_URL=http://127.0.0.1:3000 --env CODEMAN_API_URL=http://127.0.0.1:3000
   --log-driver=k8s-file --log-opt=max-size=10mb
   --mount "type=bind,src=$repo,dst=/workspace"
   --mount "type=bind,src=$scratch,dst=/scratch"

@@ -24,6 +24,7 @@ from .project_memory import ProjectMemory
 from .reflection import Reflector
 from .room import Room
 from .plan_usage import PlanMonitor
+from cto import env_names
 
 PHASES=('waking','planning','research','implementation','reporting','consolidation','dreaming','sleeping')
 
@@ -526,7 +527,7 @@ class Cycle:
 
 def main(argv=None):
     parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--policy',type=Path,default=os.environ.get('FLEET_CYCLE_POLICY'))
+    parser.add_argument('--policy',type=Path,default=env_names.lookup('REVERIE_CYCLE_POLICY'))
     sub=parser.add_subparsers(dest='action',required=True)
     for command in ('status','tick','once','watch','pause','resume'): sub.add_parser(command)
     profile=sub.add_parser('profile'); profile.add_argument('agent')

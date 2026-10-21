@@ -13,6 +13,7 @@ import { applyWorkspaceHooks } from './hooks-config.js';
 import { SseEvent } from './web/sse-events.js';
 import type { CompanyResearchBinding, CompanyResearchRuntime } from './company-research-backend.js';
 import type { SessionPort, ConfigPort, EventPort, InfraPort } from './web/ports/index.js';
+import { envValue } from './config/fleet-env.js';
 
 type RuntimeContext = SessionPort & ConfigPort & EventPort & Pick<InfraPort, 'mux'>;
 const REPORT = 'RESEARCH_REPORT.json';
@@ -41,7 +42,7 @@ export function companySessionRuntime(ctx: RuntimeContext): CompanyResearchRunti
     if (
       session.owner !== binding.owner ||
       resolve(session.workingDir) !== resolve(binding.workingDir) ||
-      session.getEnvOverridesForPersist()?.FLEET_RESEARCH_CYCLE_ID !== binding.cycleId
+      envValue(session.getEnvOverridesForPersist() ?? {}, 'RESEARCH_CYCLE_ID') !== binding.cycleId
     )
       throw new Error('Research session ownership mismatch');
     return session;

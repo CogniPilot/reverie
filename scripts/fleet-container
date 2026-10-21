@@ -1,17 +1,19 @@
 #!/usr/bin/env bash
 set -euo pipefail
+# REVERIE_* is the name; the older FLEET_* spelling is still read for one release (the new name wins).
+while IFS= read -r _old; do _new="REVERIE_${_old#FLEET_}"; [[ -n "${!_new:-}" ]] || export "$_new=${!_old}"; done < <(compgen -e | grep '^FLEET_' || true)
 
-# Memory limit for a NEW container: FLEET_MEMORY (e.g. 16g) when set, otherwise half of
+# Memory limit for a NEW container: REVERIE_MEMORY (e.g. 16g) when set, otherwise half of
 # the host's MemTotal rounded down to whole GiB and clamped to 4..32 GiB. Swap = memory.
 # An existing container keeps the limit stored with it (`container-memory` changes it live).
 fleet_memory_size() {
-  if [[ -n "${FLEET_MEMORY:-}" ]]; then
-    [[ "$FLEET_MEMORY" =~ ^[0-9]+[gGmM]$ ]] || { echo "FLEET_MEMORY must look like 16g or 8192m, got '$FLEET_MEMORY'" >&2; return 1; }
-    echo "$FLEET_MEMORY"
+  if [[ -n "${REVERIE_MEMORY:-}" ]]; then
+    [[ "$REVERIE_MEMORY" =~ ^[0-9]+[gGmM]$ ]] || { echo "REVERIE_MEMORY must look like 16g or 8192m, got '$REVERIE_MEMORY'" >&2; return 1; }
+    echo "$REVERIE_MEMORY"
     return
   fi
   local total_kb gib
-  total_kb=$(awk '/^MemTotal:/ {print $2}' "${FLEET_MEMINFO:-/proc/meminfo}")
+  total_kb=$(awk '/^MemTotal:/ {print $2}' "${REVERIE_MEMINFO:-/proc/meminfo}")
   [[ "$total_kb" =~ ^[0-9]+$ ]] || { echo 'cannot read MemTotal' >&2; return 1; }
   gib=$(( total_kb / 2 / 1048576 ))
   (( gib >= 4 )) || gib=4
@@ -20,26 +22,26 @@ fleet_memory_size() {
 }
 if [[ "${1:-}" == memory-default ]]; then fleet_memory_size; exit; fi
 
-fleet_repo="${FLEET_REPO:-$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)}"
+fleet_repo="${REVERIE_REPO:-$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)}"
 fleet_repo="$(realpath -m -- "$fleet_repo")"
 # Engine storage (image layers, container overlays, engine config). It must not live under a
 # scratch/cleanup area: on 2026-10-15 a cleanup of ~/scratch/agent-fleet deleted the live
-# container's root filesystem. FLEET_SCRATCH overrides it.
-fleet_storage="${FLEET_SCRATCH:-${XDG_DATA_HOME:-$HOME/.local/share}/reverie/engine}"
-fleet_engine="${FLEET_PODMAN:-podman}"
+# container's root filesystem. REVERIE_SCRATCH overrides it.
+fleet_storage="${REVERIE_SCRATCH:-${XDG_DATA_HOME:-$HOME/.local/share}/reverie/engine}"
+fleet_engine="${REVERIE_PODMAN:-podman}"
 if ! command -v "$fleet_engine" >/dev/null 2>&1 && [[ -x "$fleet_storage/podman/bin/podman" ]]; then
   fleet_engine="$fleet_storage/podman/bin/podman"
 fi
-fleet_name="${FLEET_CONTAINER_NAME:-agent-fleet-dev}"
-fleet_image="${FLEET_IMAGE:-localhost/agent-fleet:dev}"
+fleet_name="${REVERIE_CONTAINER_NAME:-agent-fleet-dev}"
+fleet_image="${REVERIE_IMAGE:-localhost/agent-fleet:dev}"
 fleet_network=pasta
-if [[ "${FLEET_ALLOW_HOST_LOOPBACK:-0}" == 1 ]]; then
+if [[ "${REVERIE_ALLOW_HOST_LOOPBACK:-0}" == 1 ]]; then
   fleet_network=pasta:--map-host-loopback,169.254.1.2
 fi
 fleet_environment=()
-[[ -z "${FLEET_CODEMAN_API_URL:-}" ]] || fleet_environment+=(--env "CODEMAN_API_URL=$FLEET_CODEMAN_API_URL")
-[[ -z "${FLEET_MODEL_API_BASE:-}" ]] || fleet_environment+=(--env "FLEET_API_BASE=$FLEET_MODEL_API_BASE")
-fleet_instance_data="${FLEET_INSTANCE_DATA:-$HOME/.local/share/agent-fleet/development/console}"
+[[ -z "${REVERIE_CODEMAN_API_URL:-}" ]] || fleet_environment+=(--env "CODEMAN_API_URL=$REVERIE_CODEMAN_API_URL")
+[[ -z "${REVERIE_MODEL_API_BASE:-}" ]] || fleet_environment+=(--env "REVERIE_API_BASE=$REVERIE_MODEL_API_BASE" --env "FLEET_API_BASE=$REVERIE_MODEL_API_BASE")
+fleet_instance_data="${REVERIE_INSTANCE_DATA:-$HOME/.local/share/agent-fleet/development/console}"
 fleet_instance_data="$(realpath -m -- "$fleet_instance_data")"
 fleet_workspace="$(realpath -m -- "$fleet_storage/workspaces/development")"
 fleet_runtime="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/agent-fleet"
@@ -64,7 +66,7 @@ case "${1:-status}" in
     if "${fleet_podman[@]}" container exists "$fleet_name"; then
       fleet_reuse_error() {
         echo "Refusing to reuse $fleet_name: its image or bind mounts differ from the requested configuration." >&2
-        echo 'Choose a fresh FLEET_CONTAINER_NAME to preserve the existing container and its sessions.' >&2
+        echo 'Choose a fresh REVERIE_CONTAINER_NAME to preserve the existing container and its sessions.' >&2
         exit 1
       }
       fleet_expected_image="$("${fleet_podman[@]}" image inspect --format '{{.Id}}' "$fleet_image")" || fleet_reuse_error
@@ -91,7 +93,7 @@ case "${1:-status}" in
     else
       install -d -m 0700 "$fleet_instance_data"
       fleet_memory=$(fleet_memory_size)
-      echo "Creating $fleet_name with a $fleet_memory memory limit (swap = memory; set FLEET_MEMORY to override)."
+      echo "Creating $fleet_name with a $fleet_memory memory limit (swap = memory; set REVERIE_MEMORY to override)."
       "${fleet_podman[@]}" run --pull=never --init --detach --name "$fleet_name" --label agent-fleet.managed=true \
         --userns=keep-id:uid=2000,gid=2000 --user 2000:2000 \
         --cap-drop=all --cap-add=chown,dac_override,fowner,fsetid,kill,setgid,setuid,setpcap,net_bind_service,sys_chroot,setfcap \

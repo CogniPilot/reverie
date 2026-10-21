@@ -17,6 +17,7 @@ from pathlib import Path
 
 from ..gpu import GpuLock
 from .config import TrainConfig
+from cto import env_names
 
 
 def plan(cfg: TrainConfig) -> dict:
@@ -46,7 +47,7 @@ def latest_checkpoint(ckpt_dir: Path) -> Path | None:
 
 
 MARKER = "snapshot-base.json"
-LEGACY_MARKERS = tuple(filter(None, (os.environ.get("FLEET_SNAPSHOT_MARKER", ""),)))
+LEGACY_MARKERS = tuple(filter(None, (env_names.lookup("REVERIE_SNAPSHOT_MARKER", ""),)))
 
 
 def _marker(d: Path) -> Path | None:
