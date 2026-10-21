@@ -21,6 +21,11 @@
  *   session metadata every agent may read), never another session's terminal or transcript. The
  *   list is set only by the host (`reverie owner keepers`), and an employee's session binding only
  *   by the owner or a service, so neither can be self-declared.
+ *
+ * **admin** (not a session relation): the caller is bound to an employee on the owner-set admin list
+ * (`cto` names the company's CTO). The policy lets it call the few company and session routes on the
+ * admin list (`policy.ts` ADMIN_ROUTES). Same sources as keeper: the list is set only by the host
+ * (`reverie owner admins`) and the binding only by the owner or a service. Never a name or a title.
  */
 import { readFileSync, statSync } from 'node:fs';
 
@@ -33,6 +38,8 @@ export interface RoomMember {
   /** The agent session that added this member; absent when the owner, the host or a service did. */
   addedBy?: string;
 }
+
+export const ownerMade = (m: RoomMember | undefined): m is RoomMember => !!m && !m.addedBy;
 
 export interface RelationSources {
   /** The recorded parent of a live session or of a persisted (stopped) record. */
@@ -48,6 +55,8 @@ export interface RelationSources {
   ctoEmployee(): string | undefined;
   /** Owner-set keeper entries: employee ids, or `cto`. */
   keepers(): readonly string[];
+  /** Owner-set admin entries: employee ids, or `cto`. */
+  admins(): readonly string[];
 }
 
 export interface Relations {
@@ -60,6 +69,8 @@ export interface Relations {
   upward(caller: string, target: string): boolean;
   /** Input only, any session: an owner-set keeper. */
   keeper(caller: string): boolean;
+  /** The admin routes (policy.ts ADMIN_ROUTES): an owner-set admin. */
+  admin(caller: string): boolean;
 }
 
 export function relations(src: RelationSources): Relations {
@@ -84,7 +95,12 @@ export function relations(src: RelationSources): Relations {
     return false;
   };
   const rooms = () => [...src.rooms()];
-  const ownerMade = (m: RoomMember | undefined): m is RoomMember => !!m && !m.addedBy;
+  // The caller's bound employee is on an owner-set list (`cto` = the company's current CTO).
+  const listed = (caller: string, list: readonly string[]): boolean => {
+    const employee = src.employeeOf(caller);
+    if (!employee) return false;
+    return list.includes(employee) || (list.includes(CTO_KEEPER) && employee === src.ctoEmployee());
+  };
   return {
     known: (id) => src.known(id),
     related: (caller, target) => caller === target || isAncestor(caller, target, recorded),
@@ -104,12 +120,8 @@ export function relations(src: RelationSources): Relations {
           room.members.some((m) => m.sessionId === target && m.role === 'coordinator') &&
           room.members.some((m) => m.sessionId === caller)
       ),
-    keeper: (caller) => {
-      const employee = src.employeeOf(caller);
-      if (!employee) return false;
-      const list = src.keepers();
-      return list.includes(employee) || (list.includes(CTO_KEEPER) && employee === src.ctoEmployee());
-    },
+    keeper: (caller) => listed(caller, src.keepers()),
+    admin: (caller) => listed(caller, src.admins()),
   };
 }
 

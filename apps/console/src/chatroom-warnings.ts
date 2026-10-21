@@ -4,10 +4,11 @@
  */
 import type { ChatMessage, ChatRoom } from './chatroom-store.js';
 import { roomLabel } from './chatroom-delivery.js';
+import { textMentions } from './chatroom-store.js';
 
 export interface PostWarning {
   /** What kind of heads-up this is, for a front end that wants to treat one differently. */
-  code: 'stray-mention' | 'newer-unread';
+  code: 'stray-mention' | 'retired-mention' | 'newer-unread';
   /** The line to show, ready to print. */
   text: string;
   /** The @names it is about (without the @), or who wrote the newer messages. */
@@ -15,14 +16,16 @@ export interface PostWarning {
 }
 
 /** Words that name the whole room or its owner, so an @ to them is never a stray one. */
-const MENTION_ALWAYS_OK = ['all', 'everyone', 'here', 'user', 'owner'];
+const MENTION_ALWAYS_OK = ['everyone', 'user', 'owner'];
+/** Old synonyms of `@everyone` (Owner 10-21: one room-wide word). They are plain text now; the writer is told so. */
+const RETIRED_ROOM_WORDS = ['all', 'here'];
 
 /**
- * The @names in `text` that no member of the room goes by (case-insensitive; `@all`, `@everyone`, `@here`, `@user`, `@owner` and the
- * owner's own names are always fine). Not inside a word or an address (a@b), same as how the room reads a mention.
+ * The @names in `text` that no member of the room goes by (case-insensitive; `@everyone`, `@user`, `@owner` and the
+ * owner's own names are always fine; `@all` and `@here` get their own heads-up). Not inside a word or an address (a@b), same as how the room reads a mention.
  */
 export function strayMentions(text: string, memberNames: readonly string[], ownerNames: readonly string[] = []): string[] {
-  const known = new Set([...memberNames, ...ownerNames, ...MENTION_ALWAYS_OK].map((n) => n.trim().toLowerCase()));
+  const known = new Set([...memberNames, ...ownerNames, ...MENTION_ALWAYS_OK, ...RETIRED_ROOM_WORDS].map((n) => n.trim().toLowerCase()));
   const stray = new Map<string, string>();
   for (const found of text.matchAll(/(^|[^\w@])@([A-Za-z][\w-]*)/g)) {
     const name = found[2].replace(/-+$/, '');
@@ -69,6 +72,15 @@ export function postWarnings(
   unread: { count: number; names: string[] } | null = null
 ): PostWarning[] {
   const warnings: PostWarning[] = [];
+  const taken = new Set([...memberNames, ...ownerNames].map((n) => n.trim().toLowerCase()));
+  const retired = RETIRED_ROOM_WORDS.filter((n) => !taken.has(n) && textMentions(text, n));
+  if (retired.length) {
+    warnings.push({
+      code: 'retired-mention',
+      names: retired,
+      text: `${retired.map((n) => `@${n}`).join(' and ')} no longer ${retired.length === 1 ? 'notifies' : 'notify'} anyone; use @everyone to reach the whole room`,
+    });
+  }
   const stray = strayMentions(text, memberNames, ownerNames);
   if (stray.length) {
     const one = stray.length === 1;

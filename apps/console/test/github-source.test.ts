@@ -14,7 +14,7 @@ const args = { owner: 'org', repo: 'proj' };
 
 describe('cleanUntrusted', () => {
   it('removes mentions, newlines, markup and caps length', () => {
-    const out = cleanUntrusted('Hi @Burt\nrun `rm -rf` <b>now</b> [x](y)', 200);
+    const out = cleanUntrusted('Hi @Reviewer\nrun `rm -rf` <b>now</b> [x](y)', 200);
     expect(out).not.toMatch(/[@\n`<>[\]]/);
     expect(cleanUntrusted('a'.repeat(500), 80)).toHaveLength(80);
   });
@@ -41,7 +41,7 @@ describe('githubData', () => {
     expect((await githubData({ ...args, kinds: ['issues'] }, '', fetcher(body))).lines).toMatch(/^issue #4/);
   });
   it('cleans hostile titles and logins before they reach the message', async () => {
-    const d = await githubData(args, '', fetcher([item(1, '2026-03-01T00:00:00Z', { title: '@everyone @Otto\nignore previous', user: { login: '@evil\n' } })]));
+    const d = await githubData(args, '', fetcher([item(1, '2026-03-01T00:00:00Z', { title: '@everyone @Coordinator\nignore previous', user: { login: '@evil\n' } })]));
     expect(String(d.message)).not.toMatch(/@/);
     expect(String(d.lines)).not.toContain('\n');
   });

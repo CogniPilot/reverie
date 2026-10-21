@@ -621,6 +621,11 @@ const CODEX: CliEntry = {
         id: 'default',
         args: [
           { lit: 'codex' },
+          // Each session runs its own in-process app server. Codex 0.163 otherwise attaches
+          // to one shared daemon per CODEX_HOME, and that daemon's tool children inherit
+          // the environment of whichever session started it, CODEMAN_SESSION_ID included,
+          // so a later session's tools posted under the first session's id (i-5e8b6439).
+          { lit: '--no-daemon' },
           { flag: '--dangerously-bypass-approvals-and-sandbox', when: { param: 'bypassApprovals', is: true } },
           { flag: '--config', value: 'tui.animations=true', when: { param: 'animations', is: true } },
           { flag: '--config', value: 'tui.animations=false', when: { param: 'animations', is: false } },

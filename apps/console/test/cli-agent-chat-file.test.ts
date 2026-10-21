@@ -9,7 +9,7 @@ describe('agent chat say --file', () => {
   it('uploads each file raw, then posts the message with the attachment ids', async () => {
     const calls: RequestOptions[] = [];
     const deps: AgentDeps = {
-      ctx: { apiUrl: 'http://127.0.0.1:3000', selfId: 'aaaaaaaa-0000-4000-8000-000000000001' },
+      ctx: { apiUrl: 'http://127.0.0.1:3000', selfId: '0000002d-0035-4000-8000-000000000047' },
       json: false,
       io: { out: () => {}, err: () => {} },
       request: async (_ctx, options) => {

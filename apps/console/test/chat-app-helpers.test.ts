@@ -161,13 +161,13 @@ describe('direct messages and the workspace rail', () => {
   });
 
   it('shows each person once: chats with ended sessions fold into the live one and keep their unread', () => {
-    const peer = (sid: string, alive: boolean, name = 'Jinx') => ({ sessionId: sid, name, alive }) as never;
-    const jinx = (id: string, sid: string, alive: boolean, extra: Partial<Room> = {}) =>
+    const peer = (sid: string, alive: boolean, name = 'Worker') => ({ sessionId: sid, name, alive }) as never;
+    const worker = (id: string, sid: string, alive: boolean, extra: Partial<Room> = {}) =>
       dm(id, sid, { members: [peer(sid, alive)], ...extra });
     const rooms = [
-      jinx('old1', 's1', false, { lastMessageAt: 3, unread: 2, mentions: 1 }),
-      jinx('live', 's3', true, { lastMessageAt: 9, unread: 1 }),
-      jinx('old2', 's2', false, { lastMessageAt: 6 }),
+      worker('old1', 's1', false, { lastMessageAt: 3, unread: 2, mentions: 1 }),
+      worker('live', 's3', true, { lastMessageAt: 9, unread: 1 }),
+      worker('old2', 's2', false, { lastMessageAt: 6 }),
       dm('bob', 'sb', { lastMessageAt: 1 }),
     ];
     const items = caDmItems(rooms);
@@ -178,7 +178,7 @@ describe('direct messages and the workspace rail', () => {
   });
 
   it('prefers the live chat even when an ended one is newer, and folds nothing while both are live', () => {
-    const peer = (sid: string, alive: boolean) => ({ sessionId: sid, name: 'Jinx', alive }) as never;
+    const peer = (sid: string, alive: boolean) => ({ sessionId: sid, name: 'Worker', alive }) as never;
     const mk = (id: string, sid: string, alive: boolean, at: number) => dm(id, sid, { members: [peer(sid, alive)], lastMessageAt: at });
     expect(caDmItems([mk('gone', 's1', false, 9), mk('live', 's2', true, 1)]).map((i) => i.id)).toEqual(['live']);
     expect(caDmItems([mk('a', 's1', true, 9), mk('b', 's2', true, 1)]).map((i) => i.id)).toEqual(['a', 'b']);
@@ -188,7 +188,7 @@ describe('direct messages and the workspace rail', () => {
   });
 
   it('folds by employee id when both sessions have one, and by name only when an id is missing', () => {
-    const peer = (sid: string, alive: boolean) => ({ sessionId: sid, name: 'Stan', alive }) as never;
+    const peer = (sid: string, alive: boolean) => ({ sessionId: sid, name: 'Verifier', alive }) as never;
     const mk = (id: string, sid: string, alive: boolean, at: number) => dm(id, sid, { members: [peer(sid, alive)], lastMessageAt: at });
     const employeeOf = new Map([['s-live', 'e1'], ['s-old-same', 'e1'], ['s-old-other', 'e2']]);
     const rooms = [mk('live', 's-live', true, 9), mk('same', 's-old-same', false, 5), mk('other', 's-old-other', false, 4), mk('noid', 's-old-none', false, 3)];
@@ -199,7 +199,7 @@ describe('direct messages and the workspace rail', () => {
   });
 
   it('opening the main row reads the folded chats too, so the one badge clears', () => {
-    const peer = (sid: string, alive: boolean) => ({ sessionId: sid, name: 'Jinx', alive }) as never;
+    const peer = (sid: string, alive: boolean) => ({ sessionId: sid, name: 'Worker', alive }) as never;
     const mk = (id: string, sid: string, alive: boolean, extra: Partial<Room>) => dm(id, sid, { members: [peer(sid, alive)], ...extra });
     const rooms = [mk('live', 's2', true, { lastMessageAt: 9, unread: 1 }), mk('old', 's1', false, { lastMessageAt: 3, unread: 4, mentions: 2 }), mk('quiet', 's0', false, { lastMessageAt: 1 })];
     expect(caDmItems4(rooms, 'live', {}, new Map())[0]).toMatchObject({ unread: 5, mentions: 2 });
@@ -527,26 +527,35 @@ describe('org chart tree: former workers', () => {
     expect(t.children[0].children.map((n) => n.name)).toEqual(['Here', 'Old', 'Older']);
     expect(t.children.some((n) => n.kind === 'former')).toBe(false);
   });
-  it('with it, the sessions that are gone are grouped last under one node, and marked former and not available', () => {
-    const t = tree(company, new Set(['s1', 'live']));
+  it('omits disconnected temporary profiles without changing input data or hiding employees', () => {
+    const original = JSON.stringify(company);
+    const t = tree(company, new Set(['live']));
+    expect(t.children[0].name).toBe('Chief');
     expect(t.children[0].children.map((n) => n.name)).toEqual(['Here']);
-    const former = t.children.at(-1)!;
-    expect(former).toMatchObject({ kind: 'former', name: 'Former workers' });
-    expect(former.children.map((n) => [n.name, n.title, n.available])).toEqual([['Old', 'Former worker', false], ['Older', 'Former worker', false]]);
-    // everyone running: no group at all
-    expect(tree(company, new Set(['live', 'old1', 'old2'])).children.some((n) => n.kind === 'former')).toBe(false);
+    expect(t.children.some((n) => n.kind === 'former')).toBe(false);
+    expect(JSON.stringify(company)).toBe(original);
   });
-  it('a pinned agent that is only stopped (marked kept) stays among the workers as paused, never in the former group', () => {
-    const kept = { ...company, temporaryAgents: [...company.temporaryAgents, { sessionId: 'pinned1', name: 'Paused', icon: '', kept: true }] };
-    const t = tree(kept, new Set(['s1', 'live']));
-    const former = t.children.at(-1)!;
-    expect(former.children.map((n) => n.name)).toEqual(['Old', 'Older']);
-    const paused = t.children[0].children.find((n) => n.name === 'Paused')!;
-    expect(paused).toMatchObject({ title: 'Paused (pinned)', available: false });
-    // once it runs again it is an ordinary temporary worker
-    const running = tree(kept, new Set(['s1', 'live', 'pinned1'])).children[0].children.find((n) => n.name === 'Paused')!;
-    expect(running).toMatchObject({ title: 'Temporary worker', available: true });
+  it('also hides pinned-disconnected profiles while retaining live pinned profiles', () => {
+    const kept = { ...company, temporaryAgents: [
+      ...company.temporaryAgents,
+      { sessionId: 'pinned1', name: 'Disconnected', kept: true },
+      { sessionId: 'pinned2', name: 'Running pinned', kept: true },
+    ] };
+    const t = tree(kept, new Set(['s1', 'live', 'pinned2']));
+    expect(t.children[0].children.map((n) => n.name)).toEqual(['Here', 'Running pinned']);
+    expect(kept.temporaryAgents).toHaveLength(5);
   });
+  it('derives connected ids from actual pids, not cached map keys or the kept flag', () => {
+    const connected = fn<(sessions: Map<string, unknown>) => Set<string>>('caConnectedSessionIds');
+    const ids = connected(new Map([
+      ['live', { id: 'live', pid: 42 }],
+      ['pinned', { id: 'pinned', pid: null, kept: true }],
+      ['zero', { id: 'zero', pid: 0 }],
+      ['retired', { id: 'retired', pid: 43, retired: true }],
+    ]));
+    expect([...ids]).toEqual(['live']);
+  });
+
 });
 
 describe('org chart tree', () => {
@@ -829,12 +838,12 @@ describe('chatCountsAfterMessage and a mention of the owner', () => {
   const post = (text: string) => ({ from: { kind: 'agent' }, to: 'all', text });
   const counted = (text: string, owner: string[] = ['Pat']) => chatCountsAfterMessage(room, post(text), owner).mentions;
 
-  it('counts @user, @owner, the owner\u2019s name, @everyone, @all and @here, in any case', () => {
-    for (const t of ['@user look', '@OWNER look', 'hi @pat, look', '@Pat', 'ok @everyone', '@all hands', 'now @here']) expect(counted(t), t).toBe(1);
+  it('counts @user, @owner, the owner\u2019s name and @everyone, in any case', () => {
+    for (const t of ['@user look', '@OWNER look', 'hi @pat, look', '@Pat', 'ok @everyone', 'OK @EVERYONE']) expect(counted(t), t).toBe(1);
   });
 
-  it('does not count part of a word or an address, another name, or the owner\u2019s name when none is known', () => {
-    for (const t of ['pat@user.io', '@users', '@patrick', '@allies', 'me@here.com', 'no names']) expect(counted(t), t).toBe(0);
+  it('does not count part of a word or an address, another name, @all or @here, or the owner\u2019s name when none is known', () => {
+    for (const t of ['pat@user.io', '@users', '@patrick', '@allies', 'me@here.com', 'no names', '@all hands', 'now @here']) expect(counted(t), t).toBe(0);
     expect(counted('@Pat', [])).toBe(0);
     expect(counted('@user', [])).toBe(1);
   });

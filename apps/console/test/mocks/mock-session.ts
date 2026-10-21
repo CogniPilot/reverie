@@ -288,6 +288,11 @@ export class MockSession extends EventEmitter {
   /** CLI mode */
   mode: string = 'claude';
 
+  /** Mirrors Session.setMode (POST /api/sessions/:id/mode). */
+  setMode = vi.fn((mode: string) => {
+    this.mode = mode;
+  });
+
   /** Mirrors Session.openCodeThread / setOpenCodeThread (PUT /api/sessions/:id/opencode-thread). */
   openCodeConfig: { continueSession?: string; forkSession?: boolean } | undefined = undefined;
   get openCodeThread(): string | undefined {

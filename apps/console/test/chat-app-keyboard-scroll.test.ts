@@ -5,7 +5,7 @@
 import { describe, expect, it } from 'vitest';
 import { agent, createHarness, member, message, room } from './helpers/chat-app-harness.mjs';
 
-const A = 'a1111111-0000-4000-8000-000000000001';
+const A = '00000026-002d-4000-8000-00000000003c';
 const rooms = () => [room('r1', 'General', [member(A, 'alpha')], { messages: [message('m1', 'r1', agent(A, 'alpha'), 'hello', 1000)] })];
 const frame = () => new Promise((resolve) => setTimeout(resolve, 50));
 

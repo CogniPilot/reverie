@@ -205,6 +205,8 @@ export interface PlanBurn {
   hoursToReset: number | null;
   sustainablePctPerHour: number | null;
   at: number;
+  /** Codex banked resets the account holds (count and earliest expiry, epoch ms); null when not read or not Codex. */
+  banked: { count: number; expiresAt: number | null } | null;
   points: { t: number; used: number; rate: number | null; proj: number | null }[];
 }
 

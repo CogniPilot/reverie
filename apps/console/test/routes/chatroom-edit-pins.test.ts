@@ -16,9 +16,9 @@ import { registerChatroomRoutes } from '../../src/web/routes/chatroom-routes.js'
 import { formatChatMessage } from '../../src/cli-agent.js';
 import { MAX_PINS } from '../../src/chatroom-store.js';
 
-const A = 'aaaaaaaa-0000-4000-8000-000000000001';
-const B = 'bbbbbbbb-0000-4000-8000-000000000002';
-const D = 'dddddddd-0000-4000-8000-000000000004';
+const A = '0000002d-0035-4000-8000-000000000047';
+const B = '00000038-0043-4000-8000-000000000060';
+const D = '00000043-0053-4000-8000-00000000007a';
 
 describe('chatroom message editing and pins', () => {
   let app: FastifyInstance;

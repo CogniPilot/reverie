@@ -9,7 +9,7 @@ import type { PlanService } from '../src/plan-accounts.js';
 import type { AccountLoginService } from '../src/account-login.js';
 import { allowed, classify } from '../src/owner-auth/policy.js';
 
-const COORD = 'cccccccc-0000-4000-8000-000000000001';
+const COORD = '0000003e-004c-4000-8000-00000000006e';
 const WORKER = 'wwwwwwww-0000-4000-8000-000000000002';
 const IDLE = 'iiiiiiii-0000-4000-8000-000000000003';
 
@@ -27,7 +27,12 @@ async function build() {
   app = Fastify();
   const started: string[] = [];
   const logins = { start: async () => { started.push('x'); return {}; }, get: () => undefined, cancel: () => undefined } as unknown as AccountLoginService;
-  registerPlansRoutes(app, { plans: async () => DATA, suggest: async () => null } as unknown as PlanService, logins, {
+  registerPlansRoutes(app, {
+    plans: async () => DATA,
+    allocations: async () => ({ generatedAt: 1, accounts: DATA.accounts.map((account) => ({ id: account.id, sessionIds: account.sessions.map((session) => session.id) })) }),
+    suggest: async () => null,
+  } as unknown as PlanService, logins, {
+    employees: () => [{ id: 'employee-one', name: 'Employee One', sessionId: COORD, icon: '🧭' }],
     callerSession: (req) => {
       const h = req.headers['x-codeman-parent-session'];
       return [COORD, WORKER, IDLE].includes(h as string) ? (h as string) : undefined;
@@ -42,6 +47,21 @@ const get = (session?: string) =>
 const ids = (r: { json(): { data: { accounts: Array<{ id: string }> } } }) => r.json().data.accounts.map((a) => a.id);
 
 describe('GET /api/plans by role', () => {
+  it('keeps the allocation snapshot owner-only, including employee identity data', async () => {
+    await build();
+    const owner = await app.inject({ method: 'GET', url: '/api/plans/allocations' });
+    expect(owner.statusCode).toBe(200);
+    expect(owner.json().data.employees).toEqual([{ id: 'employee-one', name: 'Employee One', sessionId: COORD, icon: '🧭' }]);
+    for (const session of [COORD, WORKER, IDLE, 'not-a-session']) {
+      const denied = await app.inject({ method: 'GET', url: '/api/plans/allocations', headers: { 'x-codeman-parent-session': session } });
+      expect(denied.statusCode).toBe(403);
+      expect(denied.json().data).toBeUndefined();
+    }
+    expect(classify('GET', '/api/plans/allocations', '/api/plans/allocations')).toBe('owner');
+    expect(allowed('owner', 'agent')).toBe(false);
+    expect(allowed('owner', 'anonymous')).toBe(false);
+  });
+
   it('owner: every account and the GPU line', async () => {
     await build();
     const r = await get();

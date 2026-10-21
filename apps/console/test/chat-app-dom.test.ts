@@ -10,8 +10,8 @@ import { resolve } from 'node:path';
 import postcss from 'postcss';
 import { agent, createHarness, member, message, room, user } from './helpers/chat-app-harness.mjs';
 
-const A = 'a1111111-0000-4000-8000-000000000001';
-const B = 'b2222222-0000-4000-8000-000000000002';
+const A = '00000026-002d-4000-8000-00000000003c';
+const B = '00000035-0040-4000-8000-00000000005c';
 const sessions = [
   { id: A, name: 'alpha', mode: 'claude' },
   { id: B, name: 'bravo', mode: 'opencode' },
@@ -112,6 +112,7 @@ describe('the default view', () => {
     const h = await createHarness({ sessions, rooms: fixtureRooms() });
     const side = labels(h.document.querySelectorAll('.ca-side-scroll button:not(.ca-item-act)'));
     expect(side).toEqual([
+      'Company',
       'Board',
       'Build category, 1 mention',
       'Channel General',
@@ -294,7 +295,7 @@ describe('members and presence', () => {
         [
           member(A, 'alpha', { role: 'coordinator' }),
           member(B, 'bravo', { working: false }),
-          member('c3333333-0000-4000-8000-000000000003', 'carol', { alive: false }),
+          member('0000003b-0049-4000-8000-00000000006a', 'carol', { alive: false }),
         ],
         {}
       ),
@@ -861,19 +862,16 @@ describe('@mentions in the composer', () => {
     expect(tags).toEqual(['@bravo', '@everyone']);
   });
 
-  it('marks @all and @here like @everyone, since they wake everyone too', async () => {
+  it('leaves @all and @here as plain text: only @everyone reaches the whole room', async () => {
     const h = await createHarness({
       sessions,
       rooms: [
         room('r1', 'General', [member(A, 'alpha'), member(B, 'bravo')], {
-          messages: [message('m1', 'r1', agent(A, 'alpha'), '@all and @here, also email@all.io and @allies', 1000)],
+          messages: [message('m1', 'r1', agent(A, 'alpha'), '@all and @here, also email@all.io and @allies, then @everyone', 1000)],
         }),
       ],
     });
-    expect([...h.document.querySelectorAll('.ca-msg .ca-mention-tag')].map((e) => e.textContent)).toEqual([
-      '@all',
-      '@here',
-    ]);
+    expect([...h.document.querySelectorAll('.ca-msg .ca-mention-tag')].map((e) => e.textContent)).toEqual(['@everyone']);
   });
 });
 
@@ -1256,71 +1254,42 @@ describe('workspace "+" review fixes', () => {
   });
 });
 
-describe('org chart: former workers', () => {
-  const temp = (id: string, name: string, extra: Record<string, unknown> = {}) => ({
-    sessionId: id,
-    name,
-    icon: '\u{1F331}',
-    createdAt: 1,
-    ...extra,
-  });
-  const company = () => ({
-    settings: { ownerName: 'Pat', ctoId: 'c' },
-    employees: [{ id: 'c', name: 'Chief', position: 'CTO', sessionId: A }],
-    temporaryAgents: [
-      temp(B, 'live-one'),
-      temp('old-1', 'Aria', { gone: true }),
-      temp('old-2', 'Aria', { gone: true }),
-      temp('old-3', 'Bo', { gone: true }),
-    ],
-  });
-  const open = async (h: Awaited<ReturnType<typeof createHarness>>) => {
-    h.server.company = company();
-    (h.document.querySelector('[aria-label="Org chart"]') as HTMLElement).click();
-    await settle(60);
-    return h.document.querySelector('.ca-org') as HTMLElement;
-  };
-
-  it('folds the profiles of agents that are gone into one "Former workers" group, last, and keeps the running ones in the tree', async () => {
-    const h = await createHarness({ sessions, rooms: [room('r1', 'General', [member(A, 'alpha')], {})] });
-    const panel = await open(h);
-    const text = panel.textContent || '';
-    expect(text).toContain('live-one');
-    expect(text).toContain('Former workers (3)');
-    expect(panel.querySelector('details.ca-org-former')).not.toBeNull();
-    expect((panel.querySelector('details.ca-org-former') as HTMLDetailsElement).open).toBe(false);
-    expect(panel.querySelectorAll('.ca-org-former li.ca-org-item--temporary').length).toBe(3);
-    // the live one is outside the group
-    expect(panel.querySelectorAll('.ca-org-list--root > li > ul li.ca-org-item--temporary').length).toBeGreaterThan(0);
-  });
-
-  it('one button removes the old profiles after asking, tells how many went, and draws the chart again without them', async () => {
-    const h = await createHarness({ sessions, rooms: [room('r1', 'General', [member(A, 'alpha')], {})] });
-    const panel = await open(h);
-    const clean = panel.querySelector('.ca-org-clean') as HTMLButtonElement;
-    expect(clean.textContent).toBe('Remove 3 old profiles');
-    h.window.confirm = () => false;
-    clean.click();
-    await settle(60);
-    expect(h.server.pruneCalls).toBeUndefined();
-    h.window.confirm = () => true;
-    clean.click();
-    await settle(120);
-    expect(h.server.pruneCalls).toHaveLength(1);
-    expect(h.app.toasts.at(-1).text).toBe('Removed 3 old profiles');
-    expect(panel.textContent).not.toContain('Former workers');
-    expect(panel.textContent).toContain('live-one');
-  });
-
-  it('a refused clean-up says so and leaves the chart as it was', async () => {
-    const h = await createHarness({ sessions, rooms: [room('r1', 'General', [member(A, 'alpha')], {})] });
-    const panel = await open(h);
-    h.server.pruneRefuse = true;
-    h.window.confirm = () => true;
-    (panel.querySelector('.ca-org-clean') as HTMLButtonElement).click();
-    await settle(100);
-    expect(h.app.toasts.at(-1).text).toContain('Only the company owner');
-    expect(panel.textContent).toContain('Former workers (3)');
+describe('org chart: connected-worker projection without teardown', () => {
+  it('renders the reporting tree and live temps; hides disconnected pinned temps without mutation or API teardown', async () => {
+    const live = { id: B, name: 'live-temp', mode: 'codex', pid: 123 };
+    const disconnected = { id: '97329593', name: 'old', pid: null, pinned: true };
+    const company = {
+      settings: { ownerName: 'Pat', ctoId: 'chief' },
+      employees: [
+        { id: 'chief', name: 'Chief', position: 'CTO', sessionId: A, reportsTo: 'owner' },
+        { id: 'lead', name: 'Lead', position: 'Tech lead', sessionId: 'lead-offline', available: false, reportsTo: 'chief' },
+        { id: 'report', name: 'Report', position: 'Engineer', sessionId: 'report-offline', available: false, reportsTo: 'lead' },
+      ],
+      temporaryAgents: [
+        { sessionId: B, name: 'live-temp', icon: '🦉' },
+        { sessionId: '97329593', name: 'stale-pinned-one', kept: true },
+        { sessionId: '2e9d2da3', name: 'stale-pinned-two', kept: true },
+        { sessionId: 'gone', name: 'gone-unpinned' },
+      ],
+    };
+    const original = JSON.stringify(company);
+    const h = await createHarness({ sessions: [{ id: A, name: 'chief', pid: null }, live, disconnected], rooms: [], company });
+    const beforeSessions = [...h.app.sessions.entries()];
+    await h.shell.openOrg();
+    await settle(70);
+    const panel = h.document.querySelector('.ca-org')!;
+    expect(panel.textContent).toContain('Chief');
+    expect(panel.textContent).toContain('Lead');
+    expect(panel.textContent).toContain('Report');
+    expect(panel.textContent).toContain('live-temp');
+    expect(panel.textContent).not.toContain('stale-pinned');
+    expect(panel.textContent).not.toContain('gone-unpinned');
+    expect(panel.querySelector('.ca-org-former, .ca-org-clean')).toBeNull();
+    const lead = [...panel.querySelectorAll('li')].find((node) => node.querySelector(':scope > .ca-org-node > strong')?.textContent === 'Lead');
+    expect(lead?.textContent).toContain('Report');
+    expect(JSON.stringify(company)).toBe(original);
+    expect([...h.app.sessions.entries()]).toEqual(beforeSessions);
+    expect(h.server.calls.some((call: { method: string; path: string }) => call.method !== 'GET')).toBe(false);
   });
 });
 
@@ -1333,10 +1302,10 @@ describe('org chart', () => {
     ],
   };
 
-  it('opens from the rail, draws the tree as text, messages someone, and closes with Escape', async () => {
+  it('draws the org tree as text, messages someone, and closes with Escape', async () => {
     const h = await createHarness({ sessions, rooms: [room('r1', 'General', [member(A, 'alpha')], {})] });
     h.server.company = company;
-    (h.document.querySelector('.ca-user-org') as HTMLElement).click();
+    await h.shell.openOrg();
     await settle(40);
     const panel = h.document.querySelector('.ca-org') as HTMLElement;
     expect(panel.hidden).toBe(false);
@@ -1350,8 +1319,8 @@ describe('org chart', () => {
       .querySelector('.ca-org')
       ?.dispatchEvent(new h.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
     expect((h.document.querySelector('.ca-org') as HTMLElement).hidden).toBe(true);
-    expect(h.document.activeElement?.getAttribute('data-key')).toBe('org');
-    (h.document.querySelector('.ca-user-org') as HTMLElement).click();
+    expect(h.document.activeElement?.getAttribute('aria-label')).toBe('Company');
+    await h.shell.openOrg();
     await settle(40);
     (h.document.querySelector('button.ca-org-node') as HTMLElement).click();
     await settle(60);
@@ -1369,7 +1338,7 @@ describe('org chart', () => {
       settings: {},
       employees: [{ id: 'x', name: '<img src=x onerror=alert(1)>', position: '<b>boss</b>' }],
     };
-    (h.document.querySelector('.ca-user-org') as HTMLElement).click();
+    await h.shell.openOrg();
     await settle(40);
     expect(h.document.querySelector('.ca-org img, .ca-org b')).toBeNull();
     expect(h.document.querySelector('.ca-org')?.textContent).toContain('<img src=x');
@@ -1380,8 +1349,8 @@ describe('invite to channel', () => {
   const S = [
     { id: A, name: 'alpha', mode: 'claude' },
     { id: B, name: 'bravo', mode: 'codex' },
-    { id: 'c3333333-0000-4000-8000-000000000003', name: 'carol', mode: 'opencode' },
-    { id: 'd4444444-0000-4000-8000-000000000004', name: 'term', mode: 'shell' },
+    { id: '0000003b-0049-4000-8000-00000000006a', name: 'carol', mode: 'opencode' },
+    { id: '00000040-0050-4000-8000-000000000077', name: 'term', mode: 'shell' },
   ];
 
   it('has an Invite button on each channel row (not on DMs) that opens the picker', async () => {
@@ -1584,7 +1553,7 @@ describe('create channel', () => {
   const S = [
     { id: A, name: 'alpha', mode: 'claude' },
     { id: B, name: 'bravo', mode: 'codex' },
-    { id: 'd4444444-0000-4000-8000-000000000004', name: 'term', mode: 'shell' },
+    { id: '00000040-0050-4000-8000-000000000077', name: 'term', mode: 'shell' },
   ];
   const rs = () => [room('r1', 'General', [member(A, 'alpha')], { category: 'Build' })];
   const created = (h: Awaited<ReturnType<typeof createHarness>>) =>
@@ -1748,15 +1717,12 @@ describe('the message box', () => {
     expect(input.placeholder).toBe('Message @bravo');
   });
 
-  it('has "+" to upload, dim GIF and sticker icons that do nothing, and Send only with something to send', async () => {
+  it('has "+" to upload, no dead GIF or sticker buttons, and Send only with something to send', async () => {
     const h = await createHarness({ sessions, rooms: rs() });
     const plus = h.document.querySelector('.ca-plus') as HTMLElement;
     expect(plus.getAttribute('aria-label')).toBe('Add to the message');
-    const dim = [...h.document.querySelectorAll('.ca-dim')] as HTMLButtonElement[];
-    expect(dim.map((b) => [b.getAttribute('aria-label'), b.disabled])).toEqual([
-      ['GIF, not available yet', true],
-      ['Stickers, not available yet', true],
-    ]);
+    expect(h.document.querySelectorAll('.ca-dim')).toHaveLength(0);
+    expect(h.document.querySelector('[aria-label="Insert emoji"]')).not.toBeNull();
     const send = h.document.querySelector('.chatroom-send') as HTMLElement;
     expect(send.classList.contains('has-text')).toBe(false);
     const input = h.document.querySelector('.chatroom-input') as HTMLTextAreaElement;
@@ -1765,8 +1731,9 @@ describe('the message box', () => {
     expect(send.classList.contains('has-text')).toBe(true);
   });
 
-  it('keeps voice to voice channels: the mic, the speak toggle and the speaker mark', async () => {
+  it('keeps voice to voice channels: the mic and the speaker mark; read aloud is in every channel menu', async () => {
     const h = await createHarness({ sessions, rooms: rs() });
+    Object.assign(h.app, { _speakRepliesMode: () => 'off', _setSpeakReplies: () => {}, openCarMode: () => {} });
     const mic = h.document.querySelector('.chatroom-mic') as HTMLElement;
     expect(mic.hidden).toBe(true);
     const marks = [...h.document.querySelectorAll('.ca-item-wrap .ca-hash')].map(
@@ -1777,17 +1744,19 @@ describe('the message box', () => {
       (h.document.querySelector(`[data-key="room:${id}"]`) as HTMLElement).dispatchEvent(
         new h.window.MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 40, clientY: 40 })
       );
-      const labels = [...h.document.querySelectorAll('.ca-popmenu button')].map((b) => b.textContent || '');
+      const labels = [...h.document.querySelectorAll('.ca-popmenu button')].map((b) =>
+        (b.textContent || '').replace(/›$/, '')
+      );
       h.document.querySelector('.ca-popmenu')?.remove();
       return labels;
     };
-    expect(menu('r1').some((l) => /speak/i.test(l))).toBe(false);
+    expect(menu('r1').filter((l) => /read aloud|car mode/i.test(l))).toEqual(['Read aloud']);
     await h.shell.selectRoom('r2');
     expect(mic.hidden).toBe(false);
     expect((h.document.querySelector('.ca-head-name')?.previousElementSibling as HTMLElement).dataset.glyph).toBe(
       'voice'
     );
-    expect(menu('r2').some((l) => /speak/i.test(l))).toBe(true);
+    expect(menu('r2').filter((l) => /read aloud|car mode/i.test(l))).toEqual(['Read aloud', 'Car mode']);
   });
 });
 
@@ -2174,23 +2143,14 @@ describe('phone: message sheet and member-only terminal access', () => {
     expect(h.document.querySelector('.ca-rail [aria-label="Debug terminals"]')).toBeNull();
   });
 
-  it('puts the org chart next to the gear and keeps both out of the rail', async () => {
+  it('removes the duplicate footer org shortcut while keeping settings and Company navigation', async () => {
     const h = await createHarness({ sessions, rooms: [room('r1', 'General', [member(A, 'alpha')], {})] });
     const bar = [...h.document.querySelectorAll('.ca-user > button')].map((b) => b.getAttribute('aria-label'));
-    expect(bar.slice(-2)).toEqual(['Org chart', 'App settings']);
+    expect(bar.at(-1)).toBe('App settings');
     expect(h.document.querySelector('.ca-rail [aria-label="Org chart"]')).toBeNull();
     expect(h.document.querySelector('.ca-rail [aria-label="Debug terminals"]')).toBeNull();
-    const org = h.document.querySelector('.ca-user-org') as HTMLElement;
-    expect(org.getAttribute('aria-pressed')).toBe('false');
-    h.server.company = { employees: [], settings: {} };
-    org.click();
-    await settle(40);
-    expect(org.getAttribute('aria-pressed')).toBe('true');
-    h.document
-      .querySelector('.ca-org')
-      ?.dispatchEvent(new h.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
-    expect(org.getAttribute('aria-pressed')).toBe('false');
-    expect(h.document.activeElement).toBe(org);
+    expect(h.document.querySelector('.ca-user-org')).toBeNull();
+    expect(h.document.querySelectorAll('.ca-company-nav')).toHaveLength(1);
   });
 });
 
@@ -3562,7 +3522,7 @@ describe('the "is typing" line', () => {
   });
 
   it('names two and three at once, and drops one that is gone', async () => {
-    const C = 'c3333333-0000-4000-8000-000000000003';
+    const C = '0000003b-0049-4000-8000-00000000006a';
     const rooms = [
       room('r1', 'General', [member(A, 'alpha'), member(B, 'bravo'), member(C, 'carol', { alive: false })], {}),
     ];
@@ -3614,7 +3574,7 @@ describe('the profile card on a phone', () => {
 describe('private channels have a lock, and the owner decides who can join', () => {
   const rooms = () => [
     { ...room('r1', 'General', [member(A, 'alpha')], {}), visibility: 'public' },
-    { ...room('r2', 'Boardroom', [member(A, 'alpha')], {}), visibility: 'private' },
+    { ...room('r2', 'general', [member(A, 'alpha')], {}), visibility: 'private' },
   ];
   const row = (h: Awaited<ReturnType<typeof createHarness>>, key: string) =>
     h.document.querySelector(`[data-key="room:${key}"]`) as HTMLElement;
@@ -3636,7 +3596,7 @@ describe('private channels have a lock, and the owner decides who can join', () 
   it('draws the marks like Discord: a # with a lock, a speaker, a speaker with a lock; monochrome SVG, no emoji', async () => {
     const mixed = [
       { ...room('r1', 'General', [member(A, 'alpha')], {}), visibility: 'public' },
-      { ...room('r2', 'Boardroom', [member(A, 'alpha')], {}), visibility: 'private' },
+      { ...room('r2', 'general', [member(A, 'alpha')], {}), visibility: 'private' },
       { ...room('r3', 'Standup', [{ ...member(A, 'alpha'), voice: true }], {}), visibility: 'public' },
       { ...room('r4', 'Briefing', [{ ...member(A, 'alpha'), voice: true }], {}), visibility: 'private' },
     ];
@@ -3668,7 +3628,7 @@ describe('private channels have a lock, and the owner decides who can join', () 
   });
 
   it('a server that does not say gets no lock (nothing is called private by guesswork)', async () => {
-    const plain = [room('r1', 'General', [member(A, 'alpha')], {}), room('r2', 'Boardroom', [member(A, 'alpha')], {})];
+    const plain = [room('r1', 'General', [member(A, 'alpha')], {}), room('r2', 'general', [member(A, 'alpha')], {})];
     const h = await createHarness({ sessions, rooms: plain, stored: { 'codeman:chatroom': 'r1' } });
     expect(row(h, 'r2').querySelector('.ca-hash')!.textContent).toBe('#');
   });
@@ -4056,13 +4016,13 @@ describe('who a message wakes', () => {
 });
 
 describe('moving an agent to its new session, and retired sessions', () => {
-  const OLD = 'eeeeeeee-0000-4000-8000-000000000005';
+  const OLD = '00000046-0058-4000-8000-000000000084';
   const rooms = () => [
     room('r1', 'General', [member(A, 'alpha', { role: 'coordinator' }), member(OLD, 'Pat', { alive: false, goal: 'runtime' })], {}),
   ];
 
   it('an offline member\'s card offers Move to new session; the new one is picked from the open sessions, same name first', async () => {
-    const S = [...sessions, { id: B, name: 'Pat', mode: 'claude' }, { id: 'ffffffff-0000-4000-8000-000000000006', name: 'zed', mode: 'claude' }];
+    const S = [...sessions, { id: B, name: 'Pat', mode: 'claude' }, { id: '00000048-005c-4000-8000-00000000008d', name: 'zed', mode: 'claude' }];
     const h = await createHarness({ sessions: S, rooms: rooms(), stored: { 'codeman:chatroom': 'r1' } });
     const offline = ([...h.document.querySelectorAll('.ca-member')] as HTMLButtonElement[]).find((b) => b.textContent!.includes('Pat'))!;
     offline.click();
@@ -4134,7 +4094,7 @@ describe('the Board entry', () => {
     const h = await createHarness({ sessions, rooms: fixtureRooms() });
     const scroll = h.document.querySelector('.ca-side-scroll')!;
     expect(scroll.firstElementChild!.classList.contains('ca-pages')).toBe(true);
-    expect([...scroll.querySelectorAll('.ca-pages .ca-item')].map((b) => b.textContent)).toEqual(['Board']);
+    expect([...scroll.querySelectorAll('.ca-pages .ca-item')].map((b) => b.textContent)).toEqual(['Company', 'Board']);
     expect(entry(h, 'board').draggable).toBe(false);
     expect(h.document.querySelector('.ca-page')).toBeNull();
   });
@@ -4196,21 +4156,53 @@ describe('visible mobile voice controls', () => {
     const rooms = fixtureRooms();
     rooms[0].members[0].voice = true;
     const h = await createHarness({ sessions, rooms });
-    let speaks = false, cars = 0;
-    Object.assign(h.app, { _voiceSetting: () => speaks, _setVoiceSetting: (_key: string, on: boolean) => { speaks = on; }, openCarMode: () => { cars++; } });
+    const modes = new Map<string, string>();
+    let cars = 0;
+    Object.assign(h.app, {
+      _speakRepliesMode: (id: string) => modes.get(id) || 'off',
+      _speakRepliesIn: (id: string) => modes.has(id),
+      _setSpeakReplies: (id: string, mode: string) => {
+        if (mode === 'off') modes.delete(id);
+        else modes.set(id, mode);
+      },
+      openCarMode: () => {
+        cars++;
+      },
+    });
     h.shell.renderHeader();
     const speak = h.document.querySelector('.ca-head-speak') as HTMLButtonElement;
     const car = h.document.querySelector('.ca-head-car') as HTMLButtonElement;
     expect(speak.hidden).toBe(false);
     expect(car.hidden).toBe(false);
     expect(car.getAttribute('aria-label')).toBe('Car mode');
+    expect(speak.title).toBe('Enable spoken replies in this room');
     speak.click();
-    expect(speaks).toBe(true);
+    expect([...modes]).toEqual([[rooms[0].id, 'mine']]); // only this room, starting at "Replies to me"
     expect(speak.getAttribute('aria-pressed')).toBe('true');
+    expect(speak.title).toBe('Disable spoken replies in this room (now: replies to you)');
+    expect(speak.getAttribute('aria-label')).toBe('Disable spoken replies in this room (now: replies to you)');
+    modes.set(rooms[0].id, 'all');
+    h.shell.renderHeader();
+    expect(speak.title).toBe('Disable spoken replies in this room (now: everyone)');
+    speak.click();
+    expect(modes.size).toBe(0);
+    expect(speak.title).toBe('Enable spoken replies in this room');
     car.click();
     expect(cars).toBe(1);
+    // The channel menu chooses who is read: Off, Replies to me, Everyone.
+    const menu = h.shell.channelEntries(rooms[0]).find((e: { label?: string }) => e.label === 'Read aloud');
+    expect(menu.sub.map((e: { label: string; checked: boolean }) => [e.label, e.checked])).toEqual([
+      ['Off', true],
+      ['Replies to me', false],
+      ['Everyone', false],
+    ]);
+    menu.sub[2].run();
+    expect(modes.get(rooms[0].id)).toBe('all');
+    expect(speak.title).toBe('Disable spoken replies in this room (now: everyone)');
+    modes.clear();
+    // Read aloud is any room's choice; car mode needs a voice member.
     await h.shell.selectRoom('r3');
-    expect(speak.hidden).toBe(true);
+    expect(speak.hidden).toBe(false);
     expect(car.hidden).toBe(true);
   });
 });

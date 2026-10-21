@@ -2,8 +2,16 @@ import { z } from 'zod';
 import { OWNER_AVATAR_URL } from './owner-avatar.js';
 import { normalizeIcon } from './chatroom-store.js';
 import { AVATAR_URL } from './agent-avatars.js';
+import { PRONOUNS_MAX, pronounsProblem } from './pronouns.js';
 
 const text = z.string().trim().min(1).max(100);
+/** An employee's pronouns (pronouns.ts): one line, 1-24 characters. Set by the owner only. */
+export const PronounsSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(PRONOUNS_MAX)
+  .refine((s) => pronounsProblem(s) === undefined, 'Pronouns are one line of text');
 export const EmployeeSchema = z.object({
   id: text,
   owner: z.string().optional(),
@@ -12,13 +20,17 @@ export const EmployeeSchema = z.object({
   /** Profile image (`/api/avatars/<id>?v=<ms>`), set through the avatar routes only. */
   avatar: z.string().regex(AVATAR_URL).optional(),
   position: text,
+  /** How to refer to this person ("she/her", "they/them"); the owner sets it (PUT /api/company/employees/:id), never the agent. */
+  pronouns: PronounsSchema.optional(),
+  /** Active employee id in this company, or the company owner. Resolved transactionally by the service. */
+  reportsTo: text.optional(),
   expertise: z.array(text).min(1).max(20),
   sessionId: text,
   /** The CLI conversation thread this person resumes whenever its session is replaced (an OpenCode `ses_...` id). It belongs to the employee, not to any one session. */
   threadId: z.string().trim().min(1).max(200).optional(),
   researchEnabled: z.boolean().default(true),
   createdAt: z.number(),
-});
+}).strict();
 export type CompanyEmployee = z.infer<typeof EmployeeSchema>;
 
 /**

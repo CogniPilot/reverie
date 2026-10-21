@@ -19,7 +19,7 @@ import { buildHostPolicy } from '../src/web/network-auth-policy.js';
 import { registerHostGuard, registerSecurityHeaders } from '../src/web/middleware/auth.js';
 
 const ORIGIN = 'https://embassy.example.ts.net:8443';
-const ROOM = '46c990d2-c599-4c44-9234-acd91682464d';
+const ROOM = '00000015-001b-4000-8000-000000000025';
 const sha = (v: string) => createHash('sha256').update(v).digest('base64url');
 const CROCK = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
 
@@ -230,7 +230,7 @@ describe('embassy pairing, guest side (contract r2 §4)', () => {
     expect(sends[1].body).toEqual(sends[0].body);
   });
 
-  it('Kit note 1: a recovered request keeps its real state instead of pending', async () => {
+  it('Inspector note 1: a recovered request keeps its real state instead of pending', async () => {
     for (const hostDid of ['approved', 'rejected'] as const) {
       const g = await guestConsole();
       g.embassy.loseAnswer.add('/api/embassy/pair-request');
@@ -250,7 +250,7 @@ describe('embassy pairing, guest side (contract r2 §4)', () => {
     }
   });
 
-  it('Kit note 2: one clientRequestId is admitted once, before any handle exists, even when sends race', async () => {
+  it('Inspector note 2: one clientRequestId is admitted once, before any handle exists, even when sends race', async () => {
     const g = await guestConsole();
     const qr = g.embassy.issue();
     const clientRequestId = randomUUID();
@@ -269,7 +269,7 @@ describe('embassy pairing, guest side (contract r2 §4)', () => {
     expect(recordFiles(g.dir)).toHaveLength(1);
   });
 
-  it('Kit note 3: a timeout or 5xx never rotates the session; only a refused or missing one is re-claimed', async () => {
+  it('Inspector note 3: a timeout or 5xx never rotates the session; only a refused or missing one is re-claimed', async () => {
     const g = await guestConsole();
     const created = await g.pairing.create(undefined, { qr: g.embassy.issue(), clientRequestId: randomUUID() });
     g.embassy.approve();
@@ -311,7 +311,7 @@ describe('embassy pairing, guest side (contract r2 §4)', () => {
     expect(rooms[0].status).toBe('live');
   });
 
-  it('Kit note 4: a retired binding refuses a late claim and a late save', async () => {
+  it('Inspector note 4: a retired binding refuses a late claim and a late save', async () => {
     const g = await guestConsole();
     const created = await g.pairing.create(undefined, { qr: g.embassy.issue(), clientRequestId: randomUUID() });
     g.embassy.approve();
@@ -443,7 +443,7 @@ function fakeChannel(room = ROOM) {
     if (call.method === 'POST' && call.path === `${base}/pair/lookup`)
       return {
         status: 200,
-        body: { requestId: '11111111-1111-4111-8111-111111111111', state: 'claimed', company: 'Lab', identity: 'Student One', expiresAt: 1 },
+        body: { requestId: '00000009-000a-4000-8000-00000000000b', state: 'claimed', company: 'Lab', identity: 'Student One', expiresAt: 1 },
       };
     return { status: 404, body: { error: { code: 'NOT_FOUND', message: 'x' } } };
   };
@@ -466,7 +466,7 @@ async function hostConsole(configured = true) {
   return { dir, channel, host, secret };
 }
 
-describe('r5: cancellation confirmation and room binding (Kit CP-K1..K3)', () => {
+describe('r5: cancellation confirmation and room binding (Inspector CP-K1..K3)', () => {
   type Hook = (r: EmbassyGuestRequest) => EmbassyGuestResponse | undefined;
   /** A fake whose answers a test can override at any time (the hook is read on every call). */
   const hooked = () => {
@@ -627,7 +627,7 @@ describe('r5: cancellation confirmation and room binding (Kit CP-K1..K3)', () =>
   });
 });
 
-describe('pilot limits (Burt and Kit, 4:50 AM ET)', () => {
+describe('pilot limits (Reviewer and Inspector, 4:50 AM ET)', () => {
   it('GUEST_LABEL is definite: invite unconsumed, DELETE confirms cancelled at once, start over is a new claimant', async () => {
     const g = await guestConsole();
     g.embassy.takenLabels.add('Owner');
@@ -792,7 +792,7 @@ describe('embassy hosting through the channel (contract r2 §1, §4)', () => {
 
   it('lookup checks the request QR origin; codes are normalized; claimed reads as connected', async () => {
     const h = await hostConsole();
-    const id = '11111111-1111-4111-8111-111111111111';
+    const id = '00000009-000a-4000-8000-00000000000b';
     await expect(
       h.host.lookup({ qr: `embassy-pair-v1|https://other.example.ts.net|${id}|ABCDEFGH` })
     ).rejects.toMatchObject({ status: 400, code: 'PAIR_WRONG_HOST' });
@@ -869,7 +869,7 @@ describe('embassy pairing routes', () => {
       const wrong = await call({
         method: 'POST',
         url: '/api/embassy-host/lookup',
-        payload: { qr: `embassy-pair-v1|https://other.example.ts.net|11111111-1111-4111-8111-111111111111|ABCDEFGH` },
+        payload: { qr: `embassy-pair-v1|https://other.example.ts.net|00000009-000a-4000-8000-00000000000b|ABCDEFGH` },
       });
       expect(wrong.statusCode).toBe(400);
       expect(wrong.json().errorCode).toBe('PAIR_WRONG_HOST');
@@ -900,7 +900,7 @@ describe('embassy pairing routes', () => {
     }
   });
 
-  it("Kit's CSRF controls: marker, foreign and null Origin, anonymous, owner plus agent", async () => {
+  it("Inspector's CSRF controls: marker, foreign and null Origin, anonymous, owner plus agent", async () => {
     const h = await hostConsole();
     const g = await guestConsole();
     let owner = true;

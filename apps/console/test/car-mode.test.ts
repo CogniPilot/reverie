@@ -13,7 +13,12 @@ vm.runInContext(readFileSync(resolve(import.meta.dirname, '../src/web/public/car
 const get = (name: string) => vm.runInContext(name, context);
 const carModeEngine = get('carModeEngine') as (w: unknown) => string;
 const carModeUtterances = get('carModeUtterances') as (t: string, max?: number) => string[];
-const carModePickVoice = get('carModePickVoice') as (v: unknown[], saved?: string) => { name: string } | null;
+const carModeSpeakable = get('carModeSpeakable') as (t: string) => string;
+const carModePickVoice = get('carModePickVoice') as (
+  v: unknown[],
+  saved?: string | null,
+  memberId?: string
+) => { name: string } | null;
 const CarModeController = get('CarModeController') as new (deps: unknown) => {
   state: string;
   start(): void;
@@ -334,6 +339,55 @@ describe('car mode helpers', () => {
     expect(long.length).toBeGreaterThan(5);
     expect(long.every((u) => u.length <= 60)).toBe(true);
     expect(carModeUtterances('')).toEqual([]);
+  });
+
+  it('speaks paths, ids, links and code as short stand-ins, and keeps plain speech', () => {
+    expect(carModeSpeakable('Backup /instances/x/backups/deploy-backup-1438, rollback via rollback-cmv1.sh.')).toBe(
+      'Backup a file path, rollback via a file.'
+    );
+    expect(carModeSpeakable('SUMS 4beae09195178df3 for 00000019-001f-4000-8000-00000000002a, card i-fff8833d.')).toBe(
+      'SUMS an id for an id, card an id.'
+    );
+    expect(carModeSpeakable('Run `reverie agent chat read --room x` or see https://example.com/a?b=1 now.')).toBe(
+      'Run (see chat) or see a link now.'
+    );
+    expect(carModeSpeakable('Use ```\nnpm run build\n``` then `done`.')).toBe('Use (code in chat) then done.');
+    expect(carModeSpeakable('- First\n- **Bold** second\n## Heading')).toBe('First\nBold second\nHeading');
+    expect(carModeSpeakable('Paths /a/b.txt /c/d.txt /e/f.txt done.')).toBe('Paths a file path done.');
+    expect(carModeSpeakable('~/notes/today is ready (see ./out/x.json).')).toBe(
+      'a file path is ready (see a file path).'
+    );
+    // Simple paths (one segment) are paths too, and a list of them keeps each item and its comma spacing.
+    expect(carModeSpeakable('Open /etc then ~/x, ./y and ../z.')).toBe(
+      'Open a file path then a file path, a file path and a file path.'
+    );
+    expect(carModeSpeakable('Go to /tmp; then ./run, ok? Is it ~/x! See ../z: done.')).toBe(
+      'Go to a file path; then a file path, ok? Is it a file path! See a file path: done.'
+    );
+    expect(carModeSpeakable('Read it, ./y, then (/x) and "~/a" or \'../b\'.')).toBe(
+      'Read it, a file path, then (a file path) and "a file path" or \'a file path\'.'
+    );
+    expect(carModeSpeakable('Wait , then go .')).toBe('Wait, then go.');
+    // Plain speech, times, versions, numbers and names stay as they are.
+    for (const plain of [
+      'Deployed at 2:38 PM ET.',
+      'It took 1.5 s on v2.1.284.',
+      'Node.js and/or 12345678 are fine.',
+      'deadbeef cafe',
+      'Use 1/2 cup, w/ milk and/or 24/7 help.',
+      'See / here, say "hi".',
+    ]) {
+      expect(carModeSpeakable(plain)).toBe(plain);
+    }
+    expect(carModeSpeakable('')).toBe('');
+  });
+
+  it('speaks the filtered reply but shows the full one', () => {
+    const { ctl, spoken, states } = harness();
+    ctl.start();
+    ctl.reply('Done. Log at /scratch/tmp/run.log.');
+    expect(spoken.map((u) => u.text)).toEqual(['Done.', 'Log at a file path.']);
+    expect(states.at(-1)).toEqual(['speaking', 'Done. Log at /scratch/tmp/run.log.']);
   });
 
   it('prefers the saved voice, else an English female-sounding one', () => {

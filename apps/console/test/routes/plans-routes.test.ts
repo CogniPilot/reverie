@@ -4,7 +4,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { installRouteErrorHandler } from '../../src/web/route-error-handler.js';
@@ -24,10 +24,13 @@ function session(id: string, name: string, mode: string, env?: Record<string, st
 describe('plans routes', () => {
   let app: FastifyInstance;
   let home: string;
+  let sessions: PlanSessionLike[];
+  let usageReads: number;
   const savedHome = process.env.HOME;
   const usage: Record<string, { status: 'ready' | 'signed-out'; five?: number; week?: number }> = {};
 
   beforeEach(async () => {
+    usageReads = 0;
     rmSync(join(getDataDir(), 'subscription-profiles.json'), { force: true });
     home = mkdtempSync(join(tmpdir(), 'plans-home-'));
     process.env.HOME = home;
@@ -47,6 +50,7 @@ describe('plans routes', () => {
     });
     const reader = {
       read: async (p: SubscriptionProfile) => {
+        usageReads++;
         const u = usage[p.id] ?? { status: 'signed-out' as const };
         return {
           id: p.id,
@@ -67,7 +71,7 @@ describe('plans routes', () => {
         };
       },
     };
-    const sessions = [
+    sessions = [
       session('s-default', 'w1-rumoca', 'claude'),
       session('s-secondary', 'w2-lean', 'claude', { CLAUDE_CONFIG_DIR: join(home, '.claude-accounts', 'secondary') }),
       session('s-orch', 'w4-orchestrator', 'claude'),
@@ -133,6 +137,30 @@ describe('plans routes', () => {
     expect(byLabel['openai:secondary'].bankedResets).toEqual({ availableCount: 2, earliestExpiresAt: NOW + 86_400_000 });
     expect(byLabel['anthropic:primary'].bankedResets).toBeNull();
     expect(gpu).toMatchObject({ utilization: 87, models: ['qwen.gguf'], lastHolder: { role: 'chat' } });
+  });
+
+  it('reads current allocation changes without usage reads or history writes', async () => {
+    const initial = await app.inject({ method: 'GET', url: '/api/plans/allocations' });
+    expect(initial.statusCode).toBe(200);
+    expect(initial.headers['cache-control']).toBe('no-store');
+    expect(initial.json().data.accounts.find((account: { id: string }) => account.id === 'openai-default').sessionIds).toEqual(['s-codex']);
+    mkdirSync(join(home, '.codex-accounts', 'primary'));
+    sessions.find((current) => current.id === 's-codex')!.getEnvOverridesForPersist = () => ({ CODEX_HOME: join(home, '.codex-accounts', 'primary') });
+    const updated = (await app.inject({ method: 'GET', url: '/api/plans/allocations' })).json().data;
+    expect(updated.accounts.find((account: { id: string }) => account.id === 'openai-default').sessionIds).toEqual([]);
+    expect(updated.accounts.find((account: { id: string }) => account.id === 'acct-openai-primary').sessionIds).toEqual(['s-codex']);
+    expect(usageReads).toBe(0);
+    expect(existsSync(join(home, 'plan-history.json'))).toBe(false);
+    expect(updated.employees).toEqual([]);
+    expect(JSON.stringify(updated)).not.toMatch(/configDir|token|password|pace|usedPercentage/);
+  });
+
+  it('prefers the explicit profile over an obsolete environment allocation', async () => {
+    sessions.find((current) => current.id === 's-secondary')!.subscriptionProfile = { id: 'anthropic-default' };
+    const allocations = (await app.inject({ method: 'GET', url: '/api/plans/allocations' })).json().data.accounts;
+    expect(allocations.find((account: { id: string }) => account.id === 'anthropic-default').sessionIds).toContain('s-secondary');
+    expect(allocations.find((account: { id: string }) => account.id === 'acct-anthropic-secondary').sessionIds).not.toContain('s-secondary');
+    expect(usageReads).toBe(0);
   });
 
   it('shows an owner-set profile label instead of the directory name', async () => {

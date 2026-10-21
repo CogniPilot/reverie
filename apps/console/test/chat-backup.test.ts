@@ -50,7 +50,7 @@ async function seed(n: number): Promise<void> {
   });
   await s.init();
   const room = s.createRoom('r', undefined);
-  for (let i = 0; i < n; i++) s.post(room.id, { kind: 'user', name: 'James' }, `m${i}`, 'all', { deliver: false });
+  for (let i = 0; i < n; i++) s.post(room.id, { kind: 'user', name: 'Owner' }, `m${i}`, 'all', { deliver: false });
   await s.stop();
 }
 

@@ -7,7 +7,7 @@ import vm from 'node:vm';
 import { JSDOM } from 'jsdom';
 import { registerBoardPageRoutes } from '../src/web/routes/board-page-routes.js';
 
-const SHIPPED = join(__dirname, '..', 'src', 'web', 'public', 'board.html');
+const SHIPPED = join(__dirname, '..', 'src', 'web', 'public', 'company-plans.html');
 
 describe('GET /board (page)', () => {
   let app: FastifyInstance;
@@ -45,7 +45,16 @@ describe('GET /board (page)', () => {
   });
 });
 
-describe('shipped board.html', () => {
+describe('shipped Board page', () => {
+  it('keeps its script parse check after plans move into Company', () => {
+    const html = readFileSync(join(__dirname, '..', 'src', 'web', 'public', 'board.html'), 'utf8');
+    const script = /<script>([\s\S]*)<\/script>/.exec(html)?.[1] ?? '';
+    expect(script.length).toBeGreaterThan(1000);
+    expect(() => new vm.Script(script)).not.toThrow();
+  });
+});
+
+describe('shipped Company plans page', () => {
   const html = readFileSync(SHIPPED, 'utf-8');
 
   it('reads the board API with the viewer login and refreshes every minute', () => {
@@ -56,7 +65,7 @@ describe('shipped board.html', () => {
 
   it('has a phone viewport and no horizontal page overflow rule it relies on', () => {
     expect(html).toContain('name="viewport"');
-    expect(html).toContain('[hidden]{display:none!important}');
+    expect(readFileSync(join(__dirname, '..', 'src', 'web', 'public', 'company-board.css'), 'utf8')).toContain('[hidden]{display:none!important}');
   });
 
   it('its script parses', () => {
@@ -96,6 +105,115 @@ describe('shipped board.html', () => {
     const def = planActions(null)({ ...plan, isDefault: true });
     expect(def).toContain('data-rename');
     expect(def).not.toContain('data-remove');
+  });
+
+  it('draws the even-pace line from 0 % at the week start to 100 % at the reset, under the projection', () => {
+    const svg = { innerHTML: '' };
+    const run = new vm.Script(`${/const esc = .*/.exec(script)?.[0]}\n${between('function burnChart(svg, p)', "document.getElementById('refresh').onclick")}; burnChart`).runInNewContext({
+      css: (v: string) => v, fmt: () => 'M', startOfDay: (t: number) => t, D: 864e5, H: 36e5, planRisk: () => 'good',
+    }) as (svg: object, p: object) => void;
+    const weekStart = 1_000_000_000_000, reset = weekStart + 7 * 864e5;
+    // Projection past 100 % stretches the y axis to 150 %: the even-pace line still ends at 100 %.
+    run(svg, { weekStart, reset, points: [{ t: weekStart + 864e5, used: 30 }], used: 30, rate: 1, proj: 140, at: weekStart + 864e5 });
+    const line = /<line class="nominal" x1="([\d.]+)" y1="([\d.]+)" x2="([\d.]+)" y2="([\d.]+)"/.exec(svg.innerHTML);
+    expect(line?.slice(1).map(Number)).toEqual([28, 102, 312, 8 + (1 - 100 / 150) * 94]);
+    expect(svg.innerHTML).toContain('>even pace</text>');
+    expect(svg.innerHTML.indexOf('class="nominal"')).toBeLessThan(svg.innerHTML.indexOf('<polyline'));
+    expect(html).toContain('Dashed grey line = even pace to the stop point');
+    // Start and reset days: vertical lines at both edges, labelled.
+    const edges = [...svg.innerHTML.matchAll(/<line class="edge" x1="([\d.]+)" x2="([\d.]+)" y1="([\d.]+)" y2="([\d.]+)"/g)].map((m) => m.slice(1).map(Number));
+    expect(edges).toEqual([[28, 28, 8, 102], [312, 312, 8, 102]]);
+    expect(svg.innerHTML).toContain('>start</text>');
+    expect(svg.innerHTML).toContain('>reset</text>');
+  });
+
+  it.each([9, 5])('stops at the banked expiry %i days after week start and retains the weekly reset reference', (expiryDays) => {
+    const dom = new JSDOM('<svg></svg>');
+    try {
+      const svg = dom.window.document.querySelector('svg')!;
+      const weekStart = Date.parse('2026-10-20T14:48:00-04:00'), reset = weekStart + 7 * 864e5;
+      const expiresAt = weekStart + expiryDays * 864e5;
+      const run = new vm.Script(`${/const esc = .*/.exec(script)?.[0]}\n${between('function burnChart(svg, p)', "document.getElementById('refresh').onclick")}; burnChart`).runInNewContext({
+        css: (value: string) => value,
+        fmt: (timestamp: number, options: Intl.DateTimeFormatOptions) => new Intl.DateTimeFormat('en-US', { ...options, timeZone: 'America/New_York' }).format(timestamp),
+        startOfDay: (timestamp: number) => timestamp, D: 864e5, H: 36e5, planRisk: () => 'good',
+      }) as (svg: object, plan: object) => void;
+      const plan = { weekStart, reset, banked: { count: 2, expiresAt }, points: [], used: 40, rate: 1, proj: 136, at: weekStart + 864e5 };
+      run(svg, plan);
+      const extent = Math.max(reset, expiresAt) - weekStart;
+      const stopX = 28 + (expiresAt - weekStart) / extent * 284;
+      const resetX = 28 + (reset - weekStart) / extent * 284;
+      const weekly = svg.querySelector('.weekly-reset')!;
+      const edges = svg.querySelectorAll('.edge');
+      expect(Number(edges[1].getAttribute('x1'))).toBeCloseTo(stopX);
+      expect(Number(weekly.getAttribute('x1'))).toBeCloseTo(resetX);
+      expect(Number(weekly.getAttribute('stroke-width'))).toBeLessThan(Number(edges[1].getAttribute('stroke-width')));
+      expect(Number(svg.querySelector('.nominal')!.getAttribute('x2'))).toBeCloseTo(stopX);
+      expect(Number(svg.querySelector('.projection')!.getAttribute('x2'))).toBeCloseTo(stopX);
+      expect(Number(svg.querySelector('.projection')!.getAttribute('y2'))).toBeGreaterThan(8);
+      expect(svg.textContent).toContain(expiryDays === 9 ? 'expires 10/29' : 'expires 10/25');
+      expect(svg.querySelector('title')!.textContent).toContain('Stop at banked-reset expiry');
+      expect(svg.querySelector('title')!.textContent).toContain('weekly reset');
+      expect(svg.innerHTML).not.toMatch(/NaN|Infinity/);
+      expect(plan.reset).toBe(reset);
+      expect(plan.banked.count).toBe(2);
+    } finally {
+      dom.window.close();
+    }
+  });
+
+  it.each([
+    null,
+    { count: 0, expiresAt: 1_001_000_000_000 },
+    { count: 1, expiresAt: null },
+    { count: 1, expiresAt: Number.NaN },
+    { count: 1, expiresAt: 0 },
+  ])('keeps the weekly stop when banked expiry is unavailable: %j', (banked) => {
+    const svg = { innerHTML: '' };
+    const run = new vm.Script(`${/const esc = .*/.exec(script)?.[0]}\n${between('function burnChart(svg, p)', "document.getElementById('refresh').onclick")}; burnChart`).runInNewContext({
+      css: (value: string) => value, fmt: () => 'M', startOfDay: (timestamp: number) => timestamp, D: 864e5, H: 36e5, planRisk: () => 'good',
+    }) as (svg: object, plan: object) => void;
+    const weekStart = 1_000_000_000_000, reset = weekStart + 7 * 864e5;
+    run(svg, { weekStart, reset, banked, points: [], used: 40, rate: 1, proj: 136, at: weekStart + 864e5 });
+    expect(svg.innerHTML).toContain('Stop at weekly reset');
+    expect(svg.innerHTML).toContain('>reset</text>');
+    expect(svg.innerHTML).not.toContain('class="weekly-reset"');
+    expect(svg.innerHTML).not.toMatch(/NaN|Infinity/);
+  });
+
+  it('keeps Board work sections and links to the unified Company page', () => {
+    const board = readFileSync(join(__dirname, '..', 'src', 'web', 'public', 'board.html'), 'utf8');
+    const at = (id: string) => board.indexOf(`<section class="panel" id="${id}">`);
+    const order = ['sec-decisions', 'sec-issues', 'sec-ms'].map(at);
+    expect(order.every((n) => n > 0)).toBe(true);
+    expect([...order].sort((a, b) => a - b)).toEqual(order);
+    expect(board).not.toContain('id="sec-burn"');
+    expect(board).toContain('href="/#company"');
+    const dom = new JSDOM(board);
+    try {
+      const link = dom.window.document.querySelector('header #company-link');
+      expect(link?.tagName).toBe('A');
+      expect(link?.getAttribute('href')).toBe('/#company');
+      expect(link?.getAttribute('target')).toBe('_top');
+      expect(link?.textContent).toBe('Company');
+      expect(dom.window.document.querySelectorAll('#company-link')).toHaveLength(1);
+      expect(dom.window.document.querySelector('section#company-link')).toBeNull();
+      expect(dom.window.document.querySelector('#sec-decisions')?.nextElementSibling?.id).toBe('sec-issues');
+    } finally { dom.window.close(); }
+    expect(board).not.toContain('id="sec-agents"');
+    expect(board).not.toContain('function agents()');
+  });
+
+  it('shows Codex banked resets on each plan tile without a redundant headline count', () => {
+    const stat = new vm.Script(`${/const esc = .*/.exec(script)?.[0]}\n${between('function bankedStat(p)', '/* ---------- Plan accounts')}; bankedStat`).runInNewContext({
+      dayLbl: () => 'Thu, 29 Oct', hm: () => '14:48',
+    }) as (p: object) => string;
+    expect(stat({ banked: null })).toBe('');
+    expect(stat({ banked: { count: 2, expiresAt: 1 } })).toBe('<div class="banked"><b>2</b>banked resets<small>expires Thu, 29 Oct 14:48</small></div>');
+    expect(stat({ banked: { count: 1, expiresAt: null } })).toBe('<div class="banked"><b>1</b>banked reset</div>');
+    expect(stat({ banked: { count: 0, expiresAt: null } })).toBe('<div class="banked"><b>0</b>banked resets</div>');
+    expect(script).toContain('${bankedStat(p)}</div>');
+    expect(script).not.toContain('function planKpis()');
   });
 
   it('shows the rename form with the current label escaped, and a refused rename as a visible error', () => {

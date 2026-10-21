@@ -77,7 +77,7 @@ describe('resumeRefusalForAgent', () => {
 
 describe('checkClaudeResume', () => {
   afterEach(() => vi.restoreAllMocks());
-  const ID = '11111111-2222-4333-8444-555555555555';
+  const ID = '00000009-000b-4000-8000-00000000000e';
   /** A transcript body: one real conversation line of this session, plus `extra`. */
   const conv = (extra = '') => JSON.stringify({ type: 'user', sessionId: ID, message: { role: 'user', content: 'hi' } }) + '\n' + extra;
   const setup = () => {
@@ -243,7 +243,7 @@ describe('checkClaudeResume', () => {
       '',
       'x\n',
       '{"type":"user","sessionId":', // truncated
-      JSON.stringify({ type: 'custom-title', customTitle: 'Otto', sessionId: ID }) + '\n',
+      JSON.stringify({ type: 'custom-title', customTitle: 'Coordinator', sessionId: ID }) + '\n',
       JSON.stringify({ type: 'user', sessionId: 'another-id' }) + '\n',
     ]) {
       put(a, body, 1000);
@@ -312,39 +312,39 @@ describe('resume takeover', () => {
 });
 
 describe('resumeTakeoverRoom (a coordinator continues a gone agent)', () => {
-  const STAN = { id: 'stan-row', claudeSessionId: 'thread-01a1', claudeSessionChain: ['thread-old'], isRunning: () => false };
+  const VERIFIER = { id: 'verifier-row', claudeSessionId: 'thread-01a1', claudeSessionChain: ['thread-old'], isRunning: () => false };
   const room = (over: Partial<{ id: string; name: string; archivedAt: number; members: Array<{ sessionId: string; role: string }> }> = {}) => ({
     id: 'r1',
     name: 'reverie',
     members: [
-      { sessionId: 'burt', role: 'coordinator' },
-      { sessionId: 'stan-row', role: 'member' },
+      { sessionId: 'reviewer', role: 'coordinator' },
+      { sessionId: 'verifier-row', role: 'member' },
     ],
     ...over,
   });
   const ask = (over: Partial<Parameters<typeof resumeTakeoverRoom>[0]> = {}) =>
-    resumeTakeoverRoom({ policy: 'coordinators', caller: 'burt', id: 'thread-01a1', sessions: [STAN], rooms: [room()], ...over });
+    resumeTakeoverRoom({ policy: 'coordinators', caller: 'reviewer', id: 'thread-01a1', sessions: [VERIFIER], rooms: [room()], ...over });
 
   it('allows the coordinator of a room the gone agent is in, and names the room and member', () => {
-    expect(ask()).toEqual({ roomId: 'r1', roomName: 'reverie', memberSessionId: 'stan-row' });
+    expect(ask()).toEqual({ roomId: 'r1', roomName: 'reverie', memberSessionId: 'verifier-row' });
   });
   it('matches the row id and an earlier conversation in the chain too', () => {
-    expect(ask({ id: 'stan-row' })).not.toBeNull();
+    expect(ask({ id: 'verifier-row' })).not.toBeNull();
     expect(ask({ id: 'thread-old' })).not.toBeNull();
   });
   it('refuses a caller who is a member but not the coordinator', () => {
-    expect(ask({ caller: 'otto', rooms: [room({ members: [{ sessionId: 'otto', role: 'member' }, { sessionId: 'stan-row', role: 'member' }] })] })).toBeNull();
+    expect(ask({ caller: 'coordinator', rooms: [room({ members: [{ sessionId: 'coordinator', role: 'member' }, { sessionId: 'verifier-row', role: 'member' }] })] })).toBeNull();
   });
   it('refuses a live agent, even if it is the room\'s member', () => {
-    expect(ask({ sessions: [{ ...STAN, isRunning: () => true }] })).toBeNull();
+    expect(ask({ sessions: [{ ...VERIFIER, isRunning: () => true }] })).toBeNull();
   });
   it('refuses when any session holding the conversation is still running', () => {
-    expect(ask({ sessions: [STAN, { id: 'stan-2', claudeSessionId: 'thread-01a1', isRunning: () => true }] })).toBeNull();
+    expect(ask({ sessions: [VERIFIER, { id: 'verifier-2', claudeSessionId: 'thread-01a1', isRunning: () => true }] })).toBeNull();
   });
   it('refuses a room the caller does not coordinate (the gone agent is elsewhere)', () => {
-    const other = room({ id: 'r2', name: 'other', members: [{ sessionId: 'burt', role: 'member' }, { sessionId: 'stan-row', role: 'member' }] });
+    const other = room({ id: 'r2', name: 'other', members: [{ sessionId: 'reviewer', role: 'member' }, { sessionId: 'verifier-row', role: 'member' }] });
     expect(ask({ rooms: [other] })).toBeNull();
-    const apart = room({ id: 'r3', members: [{ sessionId: 'burt', role: 'coordinator' }, { sessionId: 'someone', role: 'member' }] });
+    const apart = room({ id: 'r3', members: [{ sessionId: 'reviewer', role: 'coordinator' }, { sessionId: 'someone', role: 'member' }] });
     expect(ask({ rooms: [apart] })).toBeNull();
   });
   it('ignores archived rooms, unknown conversations, and the owner-only policy', () => {
@@ -353,7 +353,7 @@ describe('resumeTakeoverRoom (a coordinator continues a gone agent)', () => {
     expect(ask({ policy: 'owner' })).toBeNull();
   });
   it('picks the first qualifying room when the agent is in several', () => {
-    const a = room({ id: 'ra', members: [{ sessionId: 'x', role: 'coordinator' }, { sessionId: 'stan-row', role: 'member' }] });
+    const a = room({ id: 'ra', members: [{ sessionId: 'x', role: 'coordinator' }, { sessionId: 'verifier-row', role: 'member' }] });
     const b = room({ id: 'rb' });
     expect(ask({ rooms: [a, b] })?.roomId).toBe('rb');
   });

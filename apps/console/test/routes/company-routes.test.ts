@@ -219,4 +219,40 @@ describe('company HTTP ownership and expert invites', () => {
     ).toBe(200);
     expect(service.view().memories[0].kind).toBe('imagination');
   });
+  it('persists reporting edits, audits their transactional before/after, and remains owner-only', async () => {
+    const report = await service.hire(hireBody);
+    const lead = await service.hire({ ...hireBody, name: 'Lead', sessionId: 'parent-session', position: 'CTO' });
+    const put = (reportsTo: string, headers = {}) => app.inject({
+      method: 'PUT', url: `/api/company/employees/${report.id}`, payload: { reportsTo }, headers,
+    });
+    expect((await put(lead.id, { 'x-codeman-parent-session': 'parent-session' })).statusCode).toBe(403);
+    expect((await put(lead.id, { 'x-codeman-parent-session': 'stale-agent' })).statusCode).toBe(403);
+    expect(appendAdminAudit).not.toHaveBeenCalled();
+    expect((await put(lead.id)).json().data.employee.reportsTo).toBe(lead.id);
+    expect(service.view().employees.find((e) => e.id === report.id)?.reportsTo).toBe(lead.id);
+    expect(appendAdminAudit).toHaveBeenLastCalledWith(expect.objectContaining({
+      action: 'employee_update', admin: 'owner',
+      detail: expect.objectContaining({ reportsTo: { from: null, to: lead.id } }),
+    }));
+    expect((await put('owner')).statusCode).toBe(200);
+    expect(appendAdminAudit).toHaveBeenLastCalledWith(expect.objectContaining({
+      detail: expect.objectContaining({ reportsTo: { from: lead.id, to: 'owner' } }),
+    }));
+  });
+
+  it('rejects strict malformed or authority-changing updates and invalid hierarchy without audit', async () => {
+    const report = await service.hire(hireBody);
+    for (const payload of [
+      {}, { reportsTo: '' }, { reportsTo: null }, { reportsTo: 7 },
+      { reportsTo: 'owner', owner: 'other' }, { reportsTo: 'owner', sessionId: 'replacement' },
+      { reportsTo: 'owner', name: 'Renamed' }, { reportsTo: 'owner', arbitrary: true },
+      { reportsTo: 'missing-parent' }, { reportsTo: report.id },
+    ]) {
+      const res = await app.inject({ method: 'PUT', url: `/api/company/employees/${report.id}`, payload });
+      expect(res.statusCode, JSON.stringify(payload)).toBe(400);
+    }
+    expect(service.view().employees[0]).not.toHaveProperty('reportsTo');
+    expect(appendAdminAudit).not.toHaveBeenCalled();
+  });
+
 });

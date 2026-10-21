@@ -12,8 +12,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ChatroomService } from '../src/chatroom-service.js';
 
-const A = 'aaaaaaaa-0000-4000-8000-000000000001';
-const B = 'bbbbbbbb-0000-4000-8000-000000000002';
+const A = '0000002d-0035-4000-8000-000000000047';
+const B = '00000038-0043-4000-8000-000000000060';
 const USER = { kind: 'user', name: 'user' } as const;
 type Outcome = 'submitted' | 'stranded' | 'unverified';
 
@@ -147,6 +147,15 @@ describe('owed replies and visible delivery problems', () => {
     const added = system(room.id).slice(before);
     expect(added.filter((t) => t.startsWith('Reply from Quinn unconfirmed:'))).toHaveLength(1);
     expect(added.filter((t) => t.startsWith('Reply from Rowan unconfirmed:'))).toHaveLength(1);
+  });
+
+  it('@here and @all are plain text: nobody owes a reply', async () => {
+    const room = lab();
+    const before = system(room.id).length;
+    service.post(room.id, USER, '@here status?');
+    service.post(room.id, USER, '@all status?');
+    await vi.advanceTimersByTimeAsync(5 * 60_000);
+    expect(system(room.id).slice(before).filter((t) => t.startsWith('Reply from'))).toEqual([]);
   });
 
   it('no missed-reply line while working; after work ends it waits a full idle grace, restarted if work resumes', async () => {

@@ -19,7 +19,7 @@ import { buildHostPolicy } from '../src/web/network-auth-policy.js';
 import { registerHostGuard, registerSecurityHeaders } from '../src/web/middleware/auth.js';
 
 const ORIGIN = 'https://embassy.example.ts.net:8443';
-const ROOM = '46c990d2-c599-4c44-9234-acd91682464d';
+const ROOM = '00000015-001b-4000-8000-000000000025';
 const sha = (v: string) => createHash('sha256').update(v).digest('base64url');
 const CROCK = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
 
@@ -170,18 +170,30 @@ const record = (dir: string, handle: string) =>
 const flush = () => new Promise((r) => setTimeout(r, 20));
 
 
-it('STAN-CANCEL-STATUS: cancellation fences an approved status arriving before claim begins', async () => {
-  const g = await guestConsole();
-  const made = await g.pairing.create(undefined, {qr:g.embassy.issue(),clientRequestId:randomUUID()});
-  g.embassy.approve();
-  const release = g.embassy.hold('/api/embassy/pair-status');
-  const get = g.pairing.get(undefined,made.handle);
-  await flush();
-  const cancel = g.pairing.cancel(undefined,made.handle);
-  release();
-  const [polled,cancelled] = await Promise.all([get,cancel]);
-  await g.guest.stop(); await g.pairing.stop();
-  expect(cancelled.state).toBe('cancelled');
-  expect.soft(g.embassy.claimCount(), 'a status result after cancel must not begin a new claim').toBe(0);
-  expect.soft(polled.state, 'the outstanding GET must not report connected after cancellation was requested').not.toBe('connected');
-});
+for (const phase of ['status','request-recovery','reconnect'] as const) {
+  it(`VERIFIER-CANCEL-BARRIER: ${phase} result arriving after cancel cannot begin a new claim`, async () => {
+    const g = await guestConsole();
+    if (phase === 'request-recovery') g.embassy.loseAnswer.add('/api/embassy/pair-request');
+    const made = await g.pairing.create(undefined,{qr:g.embassy.issue(),clientRequestId:randomUUID()});
+    g.embassy.approve();
+    if (phase === 'reconnect') {
+      const connected = await g.pairing.get(undefined,made.handle);
+      expect(connected.state).toBe('connected');
+      await g.guest.tick();
+      g.embassy.sessions.clear();
+      await g.guest.tick();
+      expect(g.guest.holds(undefined,connected.connectionId!)).toBe(false);
+    }
+    const priorClaims = g.embassy.claimCount();
+    const release = g.embassy.hold(phase==='request-recovery'?'/api/embassy/pair-request':'/api/embassy/pair-status');
+    const get = phase==='reconnect'?g.pairing.reconnect(undefined,made.handle):g.pairing.get(undefined,made.handle);
+    await flush();
+    const cancel = g.pairing.cancel(undefined,made.handle);
+    release();
+    const [polled,cancelled] = await Promise.all([get,cancel]);
+    await g.guest.stop(); await g.pairing.stop();
+    expect(cancelled.state).toBe('cancelled');
+    expect.soft(g.embassy.claimCount()-priorClaims, 'late pre-claim result must not begin a new claim').toBe(0);
+    expect.soft(polled.state, 'outstanding result must not activate a connection after cancel starts').not.toBe('connected');
+  });
+}

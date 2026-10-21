@@ -600,7 +600,7 @@ export class EmbassyGuestClient {
   holds(owner: string | undefined, id: string): boolean {
     const c = this.state.connections.find((x) => x.id === id && x.owner === owner);
     // 'expired' is only ever set by a 401 or the access deadline, never by a timeout or 5xx, so a network failure
-    // alone keeps a possibly valid session and never leads to a re-claim (Kit, r2 PASS note 3).
+    // alone keeps a possibly valid session and never leads to a re-claim (Inspector, r2 PASS note 3).
     return !!c?.session && c.status !== 'expired' && c.status !== 'left' && c.status !== 'refused' && c.expiresAt > this.now();
   }
 

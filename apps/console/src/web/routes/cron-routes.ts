@@ -66,8 +66,8 @@ export function registerCronRoutes(app: FastifyInstance, ctx: CronPort): void {
 
   // Post jobs speak through a bot into rooms. The owner (no agent header) authors them; so may an employee the owner
   // delegated to (a role or a per-employee grant), as the agent header names them. Until service tokens exist that header
-  // is forgeable, so every delegate change is announced in the boardroom and audited BEFORE it happens, and a change the
-  // boardroom cannot be told about is refused. Bots, allowlists and caps stay owner-only (chat-bot-routes.ts).
+  // is forgeable, so every delegate change is announced in the general and audited BEFORE it happens, and a change the
+  // general cannot be told about is refused. Bots, allowlists and caps stay owner-only (chat-bot-routes.ts).
   const header = (req: FastifyRequest, name: string): string | undefined => {
     const v = req.headers[name];
     return Array.isArray(v) ? v[0] : v;
@@ -85,7 +85,9 @@ export function registerCronRoutes(app: FastifyInstance, ctx: CronPort): void {
       void appendAdminAudit({ admin: 'owner', action: `post_job_${verb}`, target: name, ip: req.ip, detail });
       return undefined;
     }
-    const refuse = (why: string) => createErrorResponse(ApiErrorCode.FORBIDDEN, why);
+    const refuse = (why: string): never => {
+      throw Object.assign(new Error(why), { statusCode: 403, body: createErrorResponse(ApiErrorCode.FORBIDDEN, why) });
+    };
     const policy = ctx.routines;
     if (!policy) return refuse('Only the owner creates or edits a post job');
     // A tainted caller (web content in its context) never schedules posts, whoever it is.
@@ -100,7 +102,7 @@ export function registerCronRoutes(app: FastifyInstance, ctx: CronPort): void {
     const asked = body ? OWNER_ONLY_FIELDS.filter((f) => (verb !== 'created' || f !== 'postAs') && (body as Record<string, unknown>)[f] !== undefined) : [];
     if (asked.length) return refuse(`${asked.join(', ')} can only be set by the owner`);
     const room = body?.roomId ?? job?.roomId;
-    if (room && !policy.isMember(room, caller)) return refuse('You can only schedule a routine in a room you are a member of');
+    if (room && verb !== 'deleted' && verb !== 'disabled' && !policy.isMember(room, caller)) return refuse('You can only schedule a routine in a room you are a member of');
     if (body) {
       const text = (body as { postText?: string }).postText;
       if (text !== undefined && text.length > ROUTINE_MAX_TEXT) return refuse(`A routine's text is at most ${ROUTINE_MAX_TEXT} characters`);
@@ -112,9 +114,9 @@ export function registerCronRoutes(app: FastifyInstance, ctx: CronPort): void {
     if (verb === 'created' && ctx.cron.listJobs().filter((j) => j.createdBy?.employeeId === employee.id).length >= ROUTINES_PER_AUTHOR) {
       return refuse(`You already have ${ROUTINES_PER_AUTHOR} routines; remove one first`);
     }
-    const boardroom = policy.boardroomId();
+    const general = policy.notificationRoomId();
     const text = `${employee.name} (${employee.position}) ${verb} post job "${name}"${detail.fields.length ? ` (${detail.fields.join(', ')})` : ''}`;
-    if (!boardroom || !policy.notify(boardroom, text)) return refuse('The boardroom could not be told, so the change was not made');
+    if (!general || !policy.notify(general, text)) return refuse('The general could not be told, so the change was not made');
     void appendAdminAudit({ admin: `${employee.name} (${employee.id})`, action: `post_job_${verb}`, target: name, ip: req.ip, detail });
     return undefined;
   };
@@ -163,13 +165,14 @@ export function registerCronRoutes(app: FastifyInstance, ctx: CronPort): void {
   const publicJob = (j: CronJob): CronJob => pick(j, PUBLIC_JOB_FIELDS);
   const publicRun = <R extends object>(r: R): R => pick(r, PUBLIC_RUN_FIELDS);
 
-  app.post('/api/cron/jobs', async (req) => {
+  app.post('/api/cron/jobs', async (req, reply) => {
     // No custom errorMessage: surface the schema's field-specific messages
     // (e.g. "runAt is required for a one-time schedule").
     // An employee's routine always speaks as its author: the server says so, and the body may not.
     const raw = (req.body ?? {}) as Record<string, unknown>;
     const asEmployee = header(req, 'x-codeman-parent-session') !== undefined && raw.action === 'post';
     if (asEmployee && raw.postAs !== undefined) {
+      reply.code(403);
       return createErrorResponse(ApiErrorCode.FORBIDDEN, 'postAs can only be set by the owner');
     }
     const body = parseBody(CronJobSchema, asEmployee ? { ...raw, postAs: 'author' } : req.body);

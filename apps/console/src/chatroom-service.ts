@@ -10,7 +10,7 @@
  * client re-fetches. Both carry the room's `owner` for multi-user routing.
  */
 
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
 import { EmployeeAlertModes, type AlertLease, type AlertMode } from './employee-alert-mode.js';
 import { isOwnerMark } from './owner-auth/marks.js';
 import { chmodSync, constants as fsConstants, copyFileSync, existsSync, promises as fs, renameSync } from 'node:fs';
@@ -45,8 +45,22 @@ import { LastSeenStore, type SeenMark } from './chatroom-last-seen.js';
 import { PendingDeliveryStore } from './chatroom-pending-delivery.js';
 import { ChatArchive, zoneWeek } from './chat-archive.js';
 import { ChatDb, ChatDbSyncError, importLegacy, readArchive, standingLines, type JournalLine, type SyncChanges } from './chat-db.js';
-import { ChatroomDelivery, buildBriefing, paneAcceptsChat, roomLabel, senderLabel, wakeRecipients, renderForRecipient, type DeliverySession } from './chatroom-delivery.js';
+import { ChatroomDelivery, buildBriefing, paneAcceptsChat, modePollsChat, roomLabel, senderLabel, wakeRecipients, renderForRecipient, type DeliverySession } from './chatroom-delivery.js';
 import { quoteForPane } from './pane-quote.js';
+import { messageWithEmployeeIdentity, stampEmployeeSender, type ChatIdentityLookup } from './chat-message-identity.js';
+
+/** What car mode did with a message addressed to the user (see ChatroomService.playbackNotice). */
+export type ChatPlaybackOutcome = 'not-played' | 'interrupted';
+/** Why, in the app's words: what it did, not what the user heard. */
+export const PLAYBACK_REASONS = {
+  'other-room': 'another room was open',
+  'read-aloud-off': 'read aloud is off in this room',
+  'audio-failed': 'the audio failed',
+  stopped: 'read aloud was stopped',
+  'timed-out': 'the audio did not report its end in time',
+} as const;
+export type ChatPlaybackReason = keyof typeof PLAYBACK_REASONS;
+const PLAYBACK_NOTICE_MEMORY = 5000;
 import type { ChatBot } from './chat-bots.js';
 import { ChatroomChanged, ChatroomMessage, ChatroomReaction, ChatroomTurn } from './web/sse-events.js';
 
@@ -61,6 +75,8 @@ const CLOSED_ALERT = 'Chat is read-only: a change could not be saved or undone o
 export interface ChatroomServiceDeps {
   file: string;
   employeeOf?: (sessionId: string) => string | undefined;
+  /** The pronouns on a member's employee record (owner-set), shown with the member in every room view. */
+  pronounsOf?: (sessionId: string) => string | undefined;
   getSession(id: string): ChatSessionLike | undefined;
   broadcast(event: string, data: unknown): void;
   now?: () => number;
@@ -101,6 +117,8 @@ export interface ChatMemberView extends ChatMember {
   pendingDeliveries: number;
   /** Accent hue (0-359) derived from the session id; the avatar colour. */
   hue: number;
+  /** The member's pronouns, from its employee record; absent when none are set. */
+  pronouns?: string;
 }
 
 /** A session replaced by its successor after a plan switch: out of every room, hidden, and kept only to roll back to (or to forget). */
@@ -189,6 +207,7 @@ export class ChatroomService {
   private store = new ChatroomStore();
   readonly delivery: ChatroomDelivery;
   private readonly alertModes: EmployeeAlertModes;
+  private exactReadReceipts = new Map<string, { sessionId: string; roomId: string; messageId: string; hash: string; until: number; session: ChatSessionLike; pid: number | null; employeeId?: string }>();
   private persistTimer: ReturnType<typeof setTimeout> | undefined;
   private persistChain: Promise<void> = Promise.resolve();
   private messageListeners = new Set<(room: ChatRoom, message: ChatMessage) => void>();
@@ -224,8 +243,10 @@ export class ChatroomService {
       getSession: deps.getSession,
       forceWake: (sessionId, roomId, messageId) => {
         const message = this.store.get(roomId)?.messages.find((m) => m.id === messageId);
-        if (message?.from.kind === 'user' && isOwnerMark(message.from.mark)) return true;
-        return this.alertMode(sessionId)?.mode === 'vibrate' && this.alertAllows(sessionId, roomId, messageId);
+        const mode = this.alertMode(sessionId)?.mode;
+        // The owner wakes a member on Ring or Vibrate; on Silent only by @mentioning it or @everyone (alertAllows).
+        if (message?.from.kind === 'user' && isOwnerMark(message.from.mark) && mode !== 'silent') return true;
+        return (mode === 'vibrate' || mode === 'silent') && this.alertAllows(sessionId, roomId, messageId);
       },
       allowFragment: (sessionId, roomId, messageId) => this.alertAllows(sessionId, roomId, messageId),
       now: deps.now,
@@ -285,6 +306,55 @@ export class ChatroomService {
     return this.seen.get(sessionId, roomId);
   }
 
+  deliveryStatus(sessionId: string): { blocked: boolean; pending: number; held: Array<{ roomId: string; messageId: string }> } {
+    const holds = this.delivery.inspectionFor(sessionId);
+    return {
+      blocked: holds.length > 0,
+      pending: this.delivery.pendingFor(sessionId),
+      held: holds.filter((item) => this.store.get(item.roomId)?.members.some((m) => m.sessionId === sessionId)),
+    };
+  }
+
+  private exactVisibleMessage(sessionId: string, roomId: string, messageId: string): ChatMessage {
+    const room = this.store.get(roomId);
+    const session = this.deps.getSession(sessionId);
+    if (!room || !session || session.pid === null || session.owner !== room.owner || !room.members.some((m) => m.sessionId === sessionId)) {
+      throw new ChatroomError('No visible room for this live session', 'NOT_FOUND');
+    }
+    const message = room.messages.find((m) => m.id === messageId)
+      ?? (this.db ? JSON.parse(String(this.db.db.prepare('SELECT data FROM messages WHERE room_id = ? AND id = ?').get(roomId, messageId)?.data ?? 'null')) as ChatMessage | null : null);
+    if (!message || message.id !== messageId || message.roomId !== roomId) throw new ChatroomError('No such message in this room', 'NOT_FOUND');
+    if (message.deleted) throw new ChatroomError('Deleted messages require separate owner resolution', 'CONFLICT');
+    return structuredClone(this.messageIdentity(room, message));
+  }
+
+  exactAgentRead(sessionId: string, roomId: string, messageId: string): { message: ChatMessage; readToken: string } {
+    const message = this.exactVisibleMessage(sessionId, roomId, messageId);
+    for (const [token, receipt] of this.exactReadReceipts) if (receipt.until <= this.now()) this.exactReadReceipts.delete(token);
+    if (this.exactReadReceipts.size >= 256) throw new ChatroomError('Too many pending exact reads; wait for expiry', 'UNAVAILABLE');
+    const readToken = randomUUID();
+    this.exactReadReceipts.set(readToken, { sessionId, roomId, messageId, hash: createHash('sha256').update(JSON.stringify(message)).digest('hex'), until: this.now() + 60_000, session: this.deps.getSession(sessionId)!, pid: this.deps.getSession(sessionId)!.pid, employeeId: this.deps.employeeOf?.(sessionId) });
+    return { message, readToken };
+  }
+
+  async acknowledgeExactAgentRead(sessionId: string, roomId: string, messageId: string, token: string): Promise<void> {
+    const receipt = this.exactReadReceipts.get(token);
+    if (!receipt || receipt.sessionId !== sessionId || receipt.roomId !== roomId || receipt.messageId !== messageId || receipt.until <= this.now()) {
+      throw new ChatroomError('Exact-read receipt is missing, expired or belongs to another request', 'CONFLICT');
+    }
+    const check = () => {
+      const current = this.deps.getSession(sessionId);
+      if (current !== receipt.session || current?.pid !== receipt.pid || this.deps.employeeOf?.(sessionId) !== receipt.employeeId) throw new ChatroomError('Session or employee binding changed; read again', 'CONFLICT');
+      const message = this.exactVisibleMessage(sessionId, roomId, messageId);
+      if (receipt.until <= this.now() || createHash('sha256').update(JSON.stringify(message)).digest('hex') !== receipt.hash) throw new ChatroomError('Message changed; read it again before acknowledging', 'CONFLICT');
+    };
+    check();
+    this.exactReadReceipts.delete(token);
+    await this.audit({ action: 'exact-read-ack-request', sessionId, roomId, messageId });
+    check();
+    this.delivery.acknowledgeRead(sessionId, roomId, [messageId]);
+  }
+
   /** Reading a page covers its returned identities, not earlier gaps hidden by the newest seen mark. */
   acknowledgeAgentRead(sessionId: string, roomId: string, messages: ChatMessage[]): void {
     if (!this.store.get(roomId)?.members.some((m) => m.sessionId === sessionId)) return;
@@ -293,6 +363,14 @@ export class ChatroomService {
   }
 
   private retired: RetiredSession[] = [];
+
+  private depsWithIdentity(): ChatIdentityLookup {
+    return { getSession: (sessionId) => this.deps.getSession(sessionId), employeeOf: this.deps.employeeOf, retired: this.retired };
+  }
+
+  private messageIdentity(room: ChatRoom, message: ChatMessage): ChatMessage {
+    return messageWithEmployeeIdentity(message, room.owner, this.depsWithIdentity());
+  }
 
   private get retiredFile(): string {
     return `${this.deps.file}.retired.json`;
@@ -613,6 +691,9 @@ export class ChatroomService {
     for (const [week, group] of byWeek) this.archive.appendSync(week, group);
   }
 
+  /** Messages whose author was already told how car mode played them (see playbackNotice), oldest first. */
+  private readonly playbackNoticed = new Set<string>();
+
   /** Owner votes waiting to be told to a poll's author, by poll message id (see scheduleOwnerVoteNotice). */
   private readonly voteNotices = new Map<string, { timer: ReturnType<typeof setTimeout>; initial: string[] }>();
 
@@ -696,16 +777,55 @@ export class ChatroomService {
     return lease;
   }
 
+  private phoneWrites: Promise<unknown> = Promise.resolve();
+
+  ownerPhoneStatus(owner?: string): AlertLease | undefined {
+    return this.alertModes.get(`@owner:${owner ?? '@single'}`);
+  }
+
+  /** Authorization and audit must succeed before the synchronous durable commit. */
+  setPhoneStatus(owner: string | undefined, target: string | undefined, mode: AlertMode, by: string,
+    authorize: () => void): Promise<AlertLease | undefined> {
+    const run = async () => {
+      authorize();
+      const employee = target ? this.deps.employeeOf?.(target) : undefined;
+      if (target && !employee) throw new ChatroomError('No employee binding', 'CONFLICT');
+      const key = employee ?? `@owner:${owner ?? '@single'}`;
+      await this.audit({ action: 'phone-status-request', by, owner: owner ?? '@single', target: target ?? 'owner',
+        employeeId: employee, before: this.alertModes.get(key) ?? null, mode });
+      authorize();
+      if (target && this.deps.employeeOf?.(target) !== employee) throw new ChatroomError('Employee binding changed', 'CONFLICT');
+      const lease = this.alertModes.set(key, mode, 28800000);
+      void this.audit({ action: 'phone-status-changed', by, owner: owner ?? '@single',
+        target: target ?? 'owner', employeeId: employee, mode, after: lease ?? null }).catch(() => undefined);
+      // A delivery/broadcast failure after commit must not report a refused write.
+      if (target) {
+        try { this.delivery.applyAlertPolicy(target); } catch { /* durable mode is authoritative */ }
+        for (const room of this.store.list()) if (room.members.some(m => m.sessionId === target)) {
+          try { this.deps.broadcast(ChatroomChanged, { owner: room.owner ?? '@single', roomId: room.id }); } catch { /* refreshed on next read */ }
+        }
+      }
+      return lease;
+    };
+    const result = this.phoneWrites.then(run);
+    this.phoneWrites = result.catch(() => undefined);
+    return result;
+  }
+
   private alertAllows(sessionId: string, roomId: string, messageId?: string): boolean {
     const lease = this.alertMode(sessionId);
     if (!lease || lease.mode === 'ring') return true;
     const room = this.store.get(roomId);
     const message = room?.messages.find((m) => m.id === messageId);
     if (!message) return false;
-    if (message.from.kind === 'user' && isOwnerMark(message.from.mark)) return true;
+    const owner = message.from.kind === 'user' && isOwnerMark(message.from.mark);
+    if (owner && lease.mode === 'vibrate') return true;
     const name = this.nameOf(sessionId);
     const unique = room?.members.filter((m) => this.nameOf(m.sessionId).toLowerCase() === name.toLowerCase()).length === 1;
-    return lease.mode === 'vibrate' && unique && textMentions(message.text, name);
+    const direct = unique && textMentions(message.text, name);
+    // Silent: only the owner's direct @mention or his @everyone. Vibrate: a direct @mention from anyone.
+    if (owner) return direct || textMentions(message.text, 'everyone');
+    return lease.mode === 'vibrate' && direct;
   }
 
   view(room: ChatRoom, options: { since?: number; limit?: number } = {}): ChatRoomView {
@@ -714,6 +834,7 @@ export class ChatroomService {
       const name = this.nameOf(m.sessionId);
       // A live name is kept on the membership too, so it survives a restart of the console.
       const liveName = cleanName(s?.name);
+      const pronouns = this.deps.pronounsOf?.(m.sessionId);
       if (liveName && m.lastName !== liveName) {
         m.lastName = liveName;
         this.schedulePersist(room.id);
@@ -727,6 +848,7 @@ export class ChatroomService {
         working: !!s?.isWorking,
         pendingDeliveries: this.delivery.pendingFor(m.sessionId),
         hue: accentHue(m.sessionId),
+        ...(pronouns ? { pronouns } : {}),
       };
     });
     const last = room.messages[room.messages.length - 1];
@@ -737,7 +859,7 @@ export class ChatroomService {
       createdAt: room.createdAt,
       coordinatorId: room.members.find((m) => m.role === 'coordinator')?.sessionId,
       members,
-      messages: this.store.messages(room.id, options),
+      messages: this.store.messages(room.id, options).map((message) => this.messageIdentity(room, message)),
       messageCount: room.messages.length,
       lastMessageAt: last?.at,
       workspace: room.workspace,
@@ -956,7 +1078,7 @@ export class ChatroomService {
 
   /**
    * Refuse a member whose pane would run room text as commands, unless the user adds it as
-   * post-only; a post-only member never coordinates or speaks. Callers that build a room
+   * post-only. An explicitly registered polling agent may lead without pane delivery; an ordinary post-only member may not. Callers that build a room
    * check every member first so a refusal leaves nothing half-created.
    */
   assertJoinable(
@@ -964,7 +1086,7 @@ export class ChatroomService {
     options: { role?: ChatRole; voice?: boolean; postOnly?: boolean },
     existing?: ChatMember
   ): void {
-    const postOnly = existing ? existing.postOnly : options.postOnly;
+    const postOnly = modePollsChat(this.deps.getSession(sessionId)?.mode) || (existing ? existing.postOnly : options.postOnly);
     if (!existing && !paneAcceptsChat(this.deps.getSession(sessionId)?.mode) && !postOnly) {
       const mode = this.deps.getSession(sessionId)?.mode ?? 'non-agent';
       throw new ChatroomError(
@@ -972,7 +1094,7 @@ export class ChatroomService {
         'INVALID_INPUT'
       );
     }
-    if (postOnly && (options.role === 'coordinator' || options.voice)) {
+    if (postOnly && !modePollsChat(this.deps.getSession(sessionId)?.mode) && (options.role === 'coordinator' || options.voice)) {
       throw new ChatroomError('A post-only member cannot coordinate or be the voice', 'INVALID_INPUT');
     }
   }
@@ -983,12 +1105,14 @@ export class ChatroomService {
     options: { role?: ChatRole; goal?: string; icon?: string; voice?: boolean; postOnly?: boolean; addedBy?: string } = {}
   ): ChatMember {
     const room = this.store.require(roomId);
+    // Registry capability chooses transport; a client cannot turn typed delivery on for a poller.
+    if (modePollsChat(this.deps.getSession(sessionId)?.mode)) options = { ...options, postOnly: true };
     // Every path into a room (create, add, appoint, company invite/spawn) comes through here.
     this.assertJoinable(sessionId, options, room.members.find((m) => m.sessionId === sessionId));
     if (options.role === 'coordinator') this.assertCanLead(sessionId, 'coordinate');
     if (options.voice) this.assertCanLead(sessionId, 'be the voice');
     const wasCoordinator = room.members.find((m) => m.role === 'coordinator')?.sessionId;
-    const { member, added } = this.store.addMember(roomId, sessionId, options, this.now());
+    const { member, added } = this.store.addMember(roomId, sessionId, { ...options, pollingLead: modePollsChat(this.deps.getSession(sessionId)?.mode) }, this.now());
     if (added) {
       this.system(room, `${this.nameOf(sessionId)} joined${member.goal ? ` (goal: ${member.goal})` : ''}`, sessionId);
       this.brief(room, member);
@@ -1026,7 +1150,7 @@ export class ChatroomService {
     const room = this.store.require(roomId);
     if (sessionId !== null) this.assertCanLead(sessionId, 'coordinate');
     const previous = room.members.find((m) => m.role === 'coordinator')?.sessionId;
-    const appointed = this.store.setCoordinator(roomId, sessionId, this.now());
+    const appointed = this.store.setCoordinator(roomId, sessionId, this.now(), modePollsChat(sessionId ? this.deps.getSession(sessionId)?.mode : undefined));
     if (appointed && previous !== appointed.sessionId) this.announceCoordinator(room, appointed, false);
     if (!appointed && previous) this.system(room, 'The room has no coordinator now');
     this.changed(room, 'updated');
@@ -1040,7 +1164,7 @@ export class ChatroomService {
   ): ChatMember {
     const room = this.store.require(roomId);
     if (status.voice) this.assertCanLead(sessionId, 'be the voice');
-    const member = this.store.setStatus(roomId, sessionId, status, this.now());
+    const member = this.store.setStatus(roomId, sessionId, status, this.now(), modePollsChat(this.deps.getSession(sessionId)?.mode));
     this.changed(room, 'status');
     return member;
   }
@@ -1062,6 +1186,7 @@ export class ChatroomService {
   ): ChatMessage {
     const room = this.store.require(roomId);
     const { deliver = true, ...extra } = options;
+    from = stampEmployeeSender(from, room.owner, this.depsWithIdentity());
     const message = this.store.post(roomId, from, text, to, this.now(), extra);
     // Only an agent's own signature names a session: a user, an external sender or the system never does.
     if (from.kind === 'agent' && cleanName(from.name)) this.knownNames.set(from.sessionId, cleanName(from.name));
@@ -1110,7 +1235,7 @@ export class ChatroomService {
     }
     if (message.from.kind !== 'user' || !delivered || isDm(room)) return;
     const text = message.text ?? '';
-    const everyone = textMentions(text, 'everyone') || textMentions(text, 'all') || textMentions(text, 'here');
+    const everyone = textMentions(text, 'everyone');
     for (const member of room.members) {
       const id = member.sessionId;
       if (member.postOnly) continue;
@@ -1185,6 +1310,15 @@ export class ChatroomService {
       this.deliveryNotices.set(key, now);
       this.system(room, template.replace('%s', () => this.nameOf(sessionId)), sessionId);
     }
+  }
+
+  /** A routine failure notice is shown in its room and queued for its author, without creating an owed reply. */
+  noticeMember(roomId: string, sessionId: string, text: string): ChatMessage {
+    const room = this.store.require(roomId);
+    const present = room.members.some((m) => m.sessionId === sessionId);
+    const message = this.post(roomId, { kind: 'system', name: 'system' }, text, present ? [sessionId] : 'all', { deliver: false });
+    this.delivery.deliverMessage(room, message, [sessionId], this.nameOf, new Set([sessionId]), !present);
+    return message;
   }
 
   /** Throws unless this bot may post in this room now: allowlisted, room there and open, under its hourly cap. */
@@ -1315,7 +1449,8 @@ export class ChatroomService {
   }
 
   pinned(roomId: string): ChatMessage[] {
-    return this.store.pinned(roomId);
+    const room = this.store.require(roomId);
+    return this.store.pinned(roomId).map((message) => this.messageIdentity(room, message));
   }
 
   /** Bring a deleted message back from the audit log (the restore is logged too). */
@@ -1527,6 +1662,34 @@ export class ChatroomService {
     this.delivery.enqueue(author, room, `USER ${what}`, { messageId: message.id });
   }
 
+  /**
+   * Car mode on the owner's page did not play a message addressed to the user, or stopped partway: its agent author gets one
+   * private line saying what the app did (not what the user heard), once per message. Returns whether a line was queued.
+   */
+  playbackNotice(roomId: string, messageId: string, outcome: ChatPlaybackOutcome, reason: ChatPlaybackReason): boolean {
+    const room = this.store.require(roomId);
+    const message = room.messages.find((m) => m.id === messageId);
+    if (!message) throw new ChatroomError('No such message', 'NOT_FOUND');
+    if (message.from.kind !== 'agent' || message.deleted) return false;
+    const author = message.from.sessionId;
+    const member = room.members.find((m) => m.sessionId === author);
+    if (!member || member.postOnly || this.playbackNoticed.has(messageId)) return false;
+    // Delivery types into the pane: a polling author (its chat comes by API) or a shell pane gets nothing typed. Deferred, not
+    // marked as told, until a poll-readable notice exists.
+    if (!paneAcceptsChat(this.deps.getSession(author)?.mode)) return false;
+    this.playbackNoticed.add(messageId);
+    // A dedupe memory, not a record: the oldest ids go once it is large.
+    if (this.playbackNoticed.size > PLAYBACK_NOTICE_MEMORY) this.playbackNoticed.delete(this.playbackNoticed.values().next().value as string);
+    const what = outcome === 'not-played' ? 'Not played aloud' : 'Playback interrupted';
+    this.delivery.enqueue(
+      author,
+      room,
+      `SYSTEM -> you: car mode on the user's page: ${what} (${PLAYBACK_REASONS[reason]}): your message ${quoteForPane(message.text, 80)}. Its text is in the room.`,
+      { messageId }
+    );
+    return true;
+  }
+
   /** Toggle a reaction and tell every open panel. */
   react(roomId: string, messageId: string, emoji: string, who: string, on?: boolean): Record<string, string[]> {
     const room = this.store.require(roomId);
@@ -1542,9 +1705,10 @@ export class ChatroomService {
     if (room) this.changed(room, 'emotes');
   }
 
-  /** Room traffic for a member that does not resolve to an agent pane is dropped, so it cannot lead. */
+  /** A leader must accept typed chat or explicitly declare API/poll delivery. */
   private assertCanLead(sessionId: string, what: 'coordinate' | 'be the voice'): void {
-    if (!paneAcceptsChat(this.deps.getSession(sessionId)?.mode)) {
+    const mode = this.deps.getSession(sessionId)?.mode;
+    if (!paneAcceptsChat(mode) && !modePollsChat(mode)) {
       throw new ChatroomError(`Only an agent session can ${what}`, 'INVALID_INPUT');
     }
   }

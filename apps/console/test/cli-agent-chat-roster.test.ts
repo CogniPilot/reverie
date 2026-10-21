@@ -5,7 +5,7 @@
 import { describe, expect, it } from 'vitest';
 import { agentChatEmote, agentChatStatus, agentChatWho, type AgentDeps, type RequestOptions } from '../src/cli-agent.js';
 
-const ME = 'aaaaaaaa-0000-4000-8000-000000000001';
+const ME = '0000002d-0035-4000-8000-000000000047';
 const member = (sessionId: string, name: string, extra: Record<string, unknown> = {}) => ({ sessionId, name, role: 'agent', goal: '', progress: '', ...extra });
 const ROOMS = [
   { id: 'room-aaaa', name: 'Platform', members: [member(ME, 'Ada'), member('g-id', 'Grace', { away: 'back at 3' }), member('l-id', 'Linus')] },

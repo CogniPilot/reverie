@@ -250,6 +250,8 @@ html[data-skin='rose-pine-dawn'] .ca-root {
 .ca-icon-btn:hover,
 .ca-icon-btn[aria-pressed='true'] { color: var(--text); background: var(--ca-hover); }
 .ca-only-narrow { display: none; }
+.ca-members-chip-dot,
+.ca-members-chip-count { display: none; }
 .ca-body { flex: 1; display: flex; min-height: 0; }
 .ca-chat { position: relative; flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 .ca-chat.is-dropping::after {
@@ -382,6 +384,7 @@ html[data-skin='rose-pine-dawn'] .ca-root {
 .ca-root .chatroom-mic:hover { background: var(--ca-hover); }
 .ca-root .chatroom-to { display: none; }
 .ca-root .chatroom-mic { order: 4; }
+.ca-root .chatroom-handsfree { order: 4; height: 32px; }
 .ca-root .chatroom-send { order: 5; flex: none; height: 32px; padding: 0 14px; border-radius: 6px; }
 
 /* ── member list ── */
@@ -575,6 +578,10 @@ html[data-reverie-view='debug']:not([data-reverie-legacy]) .ca-back {
 /* ── narrower than a desktop: the member list becomes a drawer ── */
 @media (max-width: 899px) {
   .ca-root { --ca-members: min(280px, 86vw); }
+  .ca-root .ca-head .ca-head-members { display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; width: auto; min-width: 60px; gap: 5px; padding: 0 8px; }
+  .ca-members-chip-count { display: inline; font-size: 12px; font-variant-numeric: tabular-nums; }
+  .ca-members-chip-dot { display: inline-block; width: 6px; height: 6px; flex: none; border-radius: 50%; background: var(--text-dim); }
+  .ca-members-chip-dot[data-online='true'] { background: var(--green, #4fbf86); }
   .ca-members {
     position: fixed;
     top: var(--ca-vtop, 0);
@@ -861,12 +868,9 @@ button.ca-org-node:hover, button.ca-org-node:focus-visible { background: var(--c
 .ca-check { display: flex; align-items: flex-start; gap: 8px; font-size: 12px; color: var(--text-dim); }
 .ca-check input { margin-top: 2px; }
 
-/* Discord-style message box: "+" left, dim icons right, Send only once there is something to send */
+/* Discord-style message box: "+" left, emoji right, Send only once there is something to send */
 .ca-root .ca-plus { font-size: 22px; line-height: 1; color: var(--text-dim); border-radius: 50%; }
 .ca-root .ca-plus:hover { color: var(--text); }
-.ca-root .ca-dim { color: var(--text-dim); opacity: 0.55; font-size: 11px; font-weight: 700; cursor: not-allowed; }
-.ca-root .ca-dim:hover { background: transparent; }
-.ca-root .chatroom-composer-row > .ca-dim { order: 2; }
 .ca-root .chatroom-send:not(.has-text) { display: none; }
 @media (hover: none) { .ca-root .chatroom-send:not(.has-text) { display: inline-flex; } }
 /* The lock and speaker marks are drawn (monochrome, in the text colour), 18px in a fixed box so rows line up with the # rows. */
@@ -933,7 +937,6 @@ button.ca-org-node:hover, button.ca-org-node:focus-visible { background: var(--c
   }
   .ca-popmenu button { min-height: 48px; font-size: 16px; }
   .ca-dialog { max-height: calc(100dvh - 24px); overflow-y: auto; }
-  .ca-root .ca-dim { display: none; }
   .ca-dialog .ca-field, .ca-settings .ca-field, .ca-root .chatroom-input { font-size: 16px; }
 }
 .ca-menu-row { display: flex; justify-content: space-between; gap: 4px; padding: 4px 0 6px; }
@@ -1243,8 +1246,90 @@ button.ca-org-node:hover, button.ca-org-node:focus-visible { background: var(--c
 @media(max-width:767px) { .eg-pair-choices { grid-template-columns:1fr; } }
 
 /* Keep the two voice actions directly reachable on a narrow header. */
-@media (max-width: 700px) {
-  .ca-head.has-voice-controls :is(.ca-head-invite, .ca-head-pins, .ca-head-phone) { display: none; }
-  .ca-head.has-voice-controls .ca-head-title { min-width: 0; overflow: hidden; }
-  .ca-head.has-voice-controls .ca-head-name { overflow: hidden; text-overflow: ellipsis; }
+.ca-head .ca-head-more { display: none; }
+.ca-head-menu [role='menuitem'] { min-height: 40px; }
+@media (max-width: 767px) {
+  .ca-head :is(.ca-head-invite, .ca-head-pins, .ca-head-phone, .ca-head-bell) { display: none; }
+  .ca-head .ca-icon-btn { flex: none; width: 36px; height: 36px; }
+  .ca-head .ca-head-more { display: inline-grid; }
+  .ca-head .ca-head-title { flex: 1 1 auto; min-width: 0; overflow: hidden; }
+  .ca-head .ca-head-name { overflow: hidden; text-overflow: ellipsis; }
+  .ca-head .ca-spacer { display: none; }
 }
+
+/* Company is reachable directly from the sidebar on desktop and mobile. */
+.ca-company { width: min(760px, calc(100vw - 24px)); max-width: min(760px, calc(100vw - 24px)); overflow:auto; box-sizing:border-box; max-height: calc(100dvh - 32px); padding: 0; }
+.ca-company-head { position:sticky; top:0; z-index:1; background:var(--ca-composer-bg,#222); display:flex; align-items:center; gap:12px; padding:16px 20px; border-bottom:1px solid var(--ca-line); }
+.ca-company-head h2 { margin:0; font-size:20px; }
+.ca-company-content { padding:0 20px 20px; }
+.ca-company > [role='status'] { margin:0; padding:0 20px 16px; }
+.ca-company-intro { color:var(--text-dim); }
+.ca-company-roster { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:12px; margin-bottom:16px; }
+.ca-company-person { border:1px solid var(--ca-line); border-radius:10px; padding:14px; }
+.ca-company-person-title { display:flex; gap:8px; align-items:center; }
+.ca-company-person p { margin:8px 0; }
+.ca-company-icon { font-size:22px; }
+.ca-company-hire { border-top:1px solid var(--ca-line); margin-top:24px; padding-top:8px; }
+.ca-company-form { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+.ca-company-form .ca-label { min-width:0; }
+.ca-company-form .ca-field { width:100%; box-sizing:border-box; }
+.ca-company-error,.ca-company-actions { grid-column:1/-1; }
+.ca-company-error { color:var(--error,#f38b8b); margin:0; }
+.ca-company-actions { display:flex; gap:12px; align-items:center; }
+@media(max-width:600px) { .ca-company-form { grid-template-columns:1fr; } .ca-company { max-height:calc(100dvh - 16px); } }
+
+.ca-company .ca-btn { background:var(--ca-input-bg,#17181c); color:var(--text,#eee); border-color:var(--ca-line,#444); }
+.ca-company .ca-btn.is-primary { background:var(--accent,#5b8def); border-color:var(--accent,#5b8def); color:var(--accent-ink,#06121f); }
+
+/* Company workspace: compact rows, inline reporting, progressive hiring. */
+.ca-company { width:100%; max-width:none; height:100%; max-height:none; min-width:0; margin:0; border:0; border-radius:0; background:var(--ca-main-bg,var(--bg-dark)); color:var(--text); display:flex; flex-direction:column; overflow:hidden; }
+.ca-company-head { padding:14px 24px; gap:12px; background:var(--ca-side-bg,var(--bg-card)); }
+.ca-company-head h2 { font-size:19px; letter-spacing:-.02em; }
+.ca-company-tabs { display:flex; flex-wrap:wrap; gap:8px; padding:12px 24px; border-bottom:1px solid var(--ca-line); }
+.ca-company-tabs [aria-selected="true"] { background:var(--accent); color:var(--accent-ink,#06121f); border-color:var(--accent); }
+.ca-company-content[hidden],.ca-company-plans[hidden] { display:none; }
+.ca-company-plans { flex:1; min-height:0; }
+.ca-company-plans-frame { display:block; width:100%; height:100%; border:0; }
+.ca-company-content { padding:18px 24px; flex:1; overflow:auto; min-height:0; }
+.ca-company-layout { display:grid; grid-template-columns:minmax(0,1fr) minmax(220px,280px); gap:24px; align-items:start; }
+.ca-company h3 { font-size:12px; text-transform:uppercase; letter-spacing:.07em; color:var(--text-dim); margin:0 0 12px; }
+.ca-company-roster { display:block; border:1px solid var(--ca-line); border-radius:10px; overflow:hidden; margin:0; }
+.ca-company-person { display:grid; grid-template-columns:minmax(120px,.8fr) minmax(160px,1.5fr) minmax(90px,.6fr) 100px; gap:12px; align-items:center; border:0; border-bottom:1px solid var(--ca-line); border-radius:0; padding:11px 14px; font-size:13px; min-width:0; }
+.ca-company-person:last-child { border-bottom:0; }
+.ca-company-person > * { min-width:0; overflow-wrap:anywhere; }
+.ca-company-person-title { gap:9px; }
+.ca-company-icon { font-size:19px; }
+.ca-company-role,.ca-company-parent { color:var(--text-dim); }
+.ca-company-state { font-size:11px; color:var(--text-dim); }
+.ca-company-state.is-connected { color:var(--green,var(--accent)); }
+.ca-company .ca-company-person { grid-template-columns:minmax(110px,1fr) minmax(120px,1.4fr) minmax(90px,1fr) auto; border:1px solid var(--ca-line); border-radius:10px; margin:8px 0; }
+.ca-company-parent::before { content:'Reports to '; }
+.ca-company-work { grid-column:1/-1; border-top:1px solid var(--ca-line); padding-top:12px; }
+.ca-company-work-detail { display:flex; align-items:flex-start; gap:14px; }
+.ca-company-ring { --company-done:0; flex:none; width:58px; height:58px; border-radius:50%; display:grid; place-items:center; font:600 12px ui-monospace,monospace; background:radial-gradient(closest-side,var(--ca-main-bg) 76%,transparent 78%),conic-gradient(var(--accent) calc(var(--company-done)*1%),var(--ca-line) 0); }
+.ca-company-work-summary { min-width:0; }
+.ca-company-live-state,.ca-company-pace { font-size:11px; padding:2px 7px; border:1px solid var(--ca-line); border-radius:12px; margin-right:6px; }
+.ca-company-focus,.ca-company-counts,.ca-company-receipts { margin:8px 0 0; overflow-wrap:anywhere; }
+.ca-company-counts { color:var(--text-dim); font-size:12px; }
+.ca-company .ca-company-tree { border:0; }
+.ca-company-tree,.ca-company-tree ul { list-style:none; padding:0; margin:0; }
+.ca-company-tree ul { margin:8px 0 0 9px; padding-left:16px; border-left:1px solid var(--ca-line); }
+.ca-company-tree li { padding:4px 0; font-size:13px; line-height:1.5; }
+.ca-company-hire { margin-top:20px; padding:18px; border:1px solid var(--ca-line); border-radius:10px; background:var(--ca-side-bg,var(--bg-card)); }
+.ca-company-hire[hidden] { display:none; }
+.ca-company-form { grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; }
+.ca-company-advanced { margin-top:16px; font-size:12px; }
+@media(max-width:1000px) { .ca-company-person { grid-template-columns:minmax(100px,1fr) minmax(140px,1.4fr) 90px; } .ca-company-state { grid-column:1; } .ca-company-layout { grid-template-columns:minmax(0,1fr) 200px; gap:18px; } }
+@media(max-width:700px) {
+ .ca-company-head { padding:12px 16px; } .ca-company-content { padding:16px; }
+ .ca-company-layout { grid-template-columns:1fr; gap:24px; }
+ .ca-company-person { grid-template-columns:minmax(0,1fr) auto; padding:10px 12px; gap:5px 10px; }
+ .ca-company-person-title { grid-column:1; } .ca-company-state { grid-column:2; grid-row:1; }
+ .ca-company-role { grid-column:1/-1; font-size:12px; } .ca-company-parent { grid-column:1/-1; font-size:11px; }
+ .ca-company-parent::before { content:'Reports to '; }
+ .ca-company-form { grid-template-columns:1fr; } .ca-company-actions { flex-wrap:wrap; }
+}
+
+.ca-company-columns { display:grid; grid-template-columns:minmax(120px,.8fr) minmax(160px,1.5fr) minmax(90px,.6fr) 100px; gap:12px; padding:9px 14px; border-bottom:1px solid var(--ca-line); color:var(--text-dim); font-size:11px; background:var(--ca-side-bg,var(--bg-card)); }
+@media(max-width:1000px) { .ca-company-columns { display:none; } }
+@media(max-width:700px) { .ca-company .ca-company-person { grid-template-columns:minmax(0,1fr) auto; } .ca-company-tree ul { padding-left:10px; margin-left:0; } }

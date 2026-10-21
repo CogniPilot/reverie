@@ -30,8 +30,15 @@ import { STOCK_CLIS } from './config/cli-registry/stock.js';
  * its SHIPPED `kind` (an override cannot flip it); a custom CLI only when the user set
  * `acceptsChat`, since its binary may be a shell. An unknown or missing mode never.
  */
+/** Only an explicit registry capability grants API/polling membership. Shells never qualify. */
+export function modePollsChat(mode: string | undefined): boolean {
+  if (!mode || STOCK_CLIS.some(entry => (entry.id as string) === mode)) return false;
+  const entry = getCli(mode);
+  return entry?.kind === 'agent' && entry.capabilities.chatDelivery === 'poll' && entry.acceptsChat !== true;
+}
+
 export function paneAcceptsChat(mode: string | undefined): boolean {
-  if (mode === undefined) return false;
+  if (mode === undefined || modePollsChat(mode)) return false;
   const stock = STOCK_CLIS.find((entry) => (entry.id as string) === mode);
   if (stock) return stock.kind === 'agent';
   return getCli(mode)?.acceptsChat === true;
@@ -95,6 +102,8 @@ interface Pending {
    * does wake the member, so the member still sees everything, in order, without a billed turn per message.
    */
   passive?: boolean;
+  /** A system notice to someone who cannot answer in the room carries no reply hint. */
+  noReply?: boolean;
   /** When it was queued (only passive fragments are aged out). */
   at?: number;
 }
@@ -165,6 +174,18 @@ export function pollSummary(message: ChatMessage): string {
   return `POLL ${message.id.slice(0, 8)}: ${poll.question} Options: ${options}${poll.multi ? ' (several may be chosen)' : ''}. Vote: reverie agent chat vote ${message.id.slice(0, 8)} <number>`;
 }
 
+/**
+ * Context for one spoken turn (car mode): it rides on that message only, so written work stays as full as ever.
+ * Codeman's words, never the speaker's: it sits after the quoted text, where nothing a sender writes can reach.
+ */
+export const SPOKEN_TURN_HINT =
+  '(spoken in car mode: reply in 1-3 short sentences of natural speech, result first; keep paths, commands, ids, logs and code out of the spoken reply and put any details in a separate written post)';
+
+/** How a member links its answer to a spoken message; only a post with exactly this replyTo is read back to the speaker. */
+export function answerLinkHint(messageId: string): string {
+  return `(to answer it: reverie agent chat say --reply-to ${messageId} "...")`;
+}
+
 export function renderForRecipient(
   room: ChatRoom,
   message: ChatMessage,
@@ -193,7 +214,12 @@ export function renderForRecipient(
   // A reply says which message it answers, on the same line.
   const original = message.replyTo ? room.messages.find((m) => m.id === message.replyTo && !m.deleted) : undefined;
   const quoted = original ? ` (replying to ${senderLabel(original.from)}${quoteOf(original)})` : '';
-  return `${from}${role}${to === undefined ? '' : ` -> ${to}`}${quoted}: ${text}${files}`;
+  // Only a turn the server found the verified owner speaking (owner_spoken, owner-auth/marks.ts) gets this turn's voice
+  // context, outside the quote. A body's own `spoken` is a request, never evidence: an unsigned post gets no hint.
+  const voice = message.from.kind === 'user' && message.from.mark === 'owner_spoken' ? ` ${SPOKEN_TURN_HINT}` : '';
+  // A spoken user message waits for an answer linked to it by id (voice-turn-routes.ts): say which id, outside the quote.
+  const link = message.from.kind === 'user' && message.spoken ? ` ${answerLinkHint(message.id)}` : '';
+  return `${from}${role}${to === undefined ? '' : ` -> ${to}`}${quoted}: ${text}${files}${voice}${link}`;
 }
 
 /** The one-line prompt a flush writes for a set of pending fragments. */
@@ -208,8 +234,8 @@ export function buildDeliveryLine(pending: Pending[], maxChars = MAX_DELIVERY_CH
 export function buildDeliveryBatch(pending: Pending[], maxChars = MAX_DELIVERY_CHARS): { line: string; taken: number } {
   const rooms = [...new Set(pending.map((p) => p.roomName))];
   const head = `[Reverie chat ${rooms.map((r) => quoteForPane(r, 80)).join(', ')}] `;
-  const tail =
-    ' (reply: reverie agent chat say "..."; full history: reverie agent chat read)';
+  const tail = pending.length > 0 && pending.every((p) => p.noReply)
+    ? '' : ' (reply: reverie agent chat say "..."; full history: reverie agent chat read)';
   const budget = Math.max(200, maxChars - head.length - tail.length);
   const parts: string[] = [];
   let used = 0;
@@ -355,7 +381,7 @@ export function wakeRecipients(
 
 /**
  * A member that chose `notify: mentions` is woken only by what is meant for it: the owner's own posts, a direct `@name`, a reply to its
- * message, or a message addressed to it. `@everyone`, `@all` and `@here` do not count. It still receives everything else with its next
+ * message, or a message addressed to it. `@everyone` does not count. It still receives everything else with its next
  * prompt (the caller delivers the rest as read-later), so nothing is lost.
  */
 function applyMemberNotify(room: ChatRoom, message: ChatMessage, woken: Set<string>, nameOf: (id: string) => string): Set<string> {
@@ -391,7 +417,7 @@ function wakeByRoom(
   if (!wakesByMention(room, env)) return all;
   if (message.to !== 'all' || isDm(room) || message.poll || message.from.kind === 'system') return all;
   const text = message.text ?? '';
-  if (textMentions(text, 'everyone') || textMentions(text, 'all') || textMentions(text, 'here')) return all;
+  if (textMentions(text, 'everyone')) return all;
   const coordinator = room.members.find((m) => m.role === 'coordinator')?.sessionId;
   const wake = new Set<string>();
   if (coordinator) wake.add(coordinator);
@@ -481,6 +507,10 @@ export class ChatroomDelivery {
     this.activeWrites.clear();
   }
 
+  inspectionFor(sessionId: string): DeliveredMessage[] {
+    return [...(this.inspectionHolds.get(sessionId)?.values() ?? [])].map((item) => ({ ...item }));
+  }
+
   pendingFor(sessionId: string): number {
     return this.queues.get(sessionId)?.length ?? 0;
   }
@@ -528,7 +558,7 @@ export class ChatroomDelivery {
     sessionId: string,
     room: { id: string; name: string; kind?: 'dm'; dm?: string[] },
     text: string | (() => string),
-    options: { brief?: boolean; messageId?: string; passive?: boolean; durable?: boolean; deliveryId?: string; at?: number } = {}
+    options: { brief?: boolean; messageId?: string; passive?: boolean; noReply?: boolean; durable?: boolean; deliveryId?: string; at?: number } = {}
   ): void {
     if (this.deps.allowFragment?.(sessionId, room.id, options.messageId) === false) {
       if (options.deliveryId) this.durable((store) => store.remove([options.deliveryId!]));
@@ -546,7 +576,7 @@ export class ChatroomDelivery {
       id: deliveryId, sessionId, roomId: room.id, messageId: options.messageId!,
       passive: !!options.passive, at, state: 'queued',
     }));
-    queue.push({ deliveryId, roomId: room.id, roomName: deliveryRoomName(room), text, brief: options.brief, messageId: options.messageId, passive: options.passive, at });
+    queue.push({ deliveryId, roomId: room.id, roomName: deliveryRoomName(room), text, brief: options.brief, messageId: options.messageId, passive: options.passive, noReply: options.noReply, at });
     const candidates = queue.slice();
     if (options.passive) {
       // Older read-later fragments go first, so a quiet member never loses a wake-up message to a pile of them.
@@ -632,12 +662,14 @@ export class ChatroomDelivery {
     message: ChatMessage,
     recipients: string[],
     nameOf: (id: string) => string,
-    awake?: Set<string>
+    awake?: Set<string>,
+    noReply = false
   ): void {
     for (const id of recipients) {
       this.enqueue(id, room, renderForRecipient(room, message, id, nameOf), {
         messageId: message.id,
         durable: true,
+        ...(noReply ? { noReply: true } : {}),
         ...(awake && !awake.has(id) && !this.deps.forceWake?.(id, room.id, message.id) ? { passive: true } : {}),
       });
     }

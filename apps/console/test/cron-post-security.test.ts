@@ -94,7 +94,7 @@ describe('post jobs and bots are owner-only', () => {
     scheduleType: 'daily', dailyTime: '06:45', timeZone: 'America/New_York', enabled: true,
   };
   // A real session id, garbage, and the empty string (a header sent with no value); 'name;' is the shape of a stray value.
-  const AGENT_HEADERS = ['2edf4125-0000-4000-8000-000000000001', 'garbage', '', 'name;'];
+  const AGENT_HEADERS = ['0000000e-0012-4000-8000-000000000018', 'garbage', '', 'name;'];
 
   it.each(AGENT_HEADERS)('refuses an agent header %j on every post-job and bot route', async (header) => {
     const { app, cron, registry } = await setup();

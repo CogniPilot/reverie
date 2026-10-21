@@ -127,7 +127,7 @@ describe('buildSpawnCommand advisorModel (tmux launch, claude mode)', () => {
     const cmd = buildSpawnCommand({
       mode: 'claude',
       sessionId: 'sid-1',
-      resumeSessionId: '11111111-2222-3333-4444-555555555555',
+      resumeSessionId: '00000009-000b-4000-8000-00000000000d',
       advisorModel: 'opus',
     });
     expect(cmd).toContain('--resume');
@@ -196,7 +196,7 @@ describe('a per-session model together with an advisor', () => {
   ] as const;
 
   it.each(cases)('tmux template carries --model and the merged --settings, effort %s', (effort, settings) => {
-    for (const resumeSessionId of [undefined, '11111111-2222-3333-4444-555555555555']) {
+    for (const resumeSessionId of [undefined, '00000009-000b-4000-8000-00000000000d']) {
       const cmd = buildSpawnCommand({
         mode: 'claude',
         sessionId: 'sid-1',

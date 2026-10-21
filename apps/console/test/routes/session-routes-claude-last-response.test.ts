@@ -112,8 +112,8 @@ describe('GET /api/sessions/:id/last-response (claude)', () => {
   }
 
   it('recovers a placeholder tmux session by UUID prefix and renders one message per model message', async () => {
-    const restoredId = 'restored-40568a29';
-    const conversationId = '40568a29-d4eb-4eb6-b671-8401428e4f39';
+    const restoredId = 'restored-00000011';
+    const conversationId = '00000011-0016-4000-8000-00000000001f';
     const session = harness.ctx._session as typeof harness.ctx._session & {
       claudeSessionId: string;
       adoptClaudeSessionId: ReturnType<typeof vi.fn>;

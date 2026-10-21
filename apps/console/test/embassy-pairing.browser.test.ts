@@ -31,7 +31,7 @@ it('typed public code resolves to guest/company and requires explicit approval',
  expect(await page.evaluate(()=>window.__pair.calls.filter(c=>c.path.endsWith('/approve')).length)).toBe(1);
 });
 it('connected status opens the existing feed only after connection-store discovery',async()=>{
- await inputQR();await page.evaluate(()=>{window.__pair.state='connected';return window.reverieChat.embassy.pairing.poll();});await page.waitForFunction(()=>window.reverieChat.embassy.selected==='bd2161d7-0c0e-41f8-83d2-c6c720c22ac2');expect(await page.locator('.ca-head-title').textContent()).toContain('Paired room');
+ await inputQR();await page.evaluate(()=>{window.__pair.state='connected';return window.reverieChat.embassy.pairing.poll();});await page.waitForFunction(()=>window.reverieChat.embassy.selected==='0000003a-0048-4000-8000-000000000069');expect(await page.locator('.ca-head-title').textContent()).toContain('Paired room');
  expect(await page.locator('.eg-pair-dialog').count()).toBe(0);expect(await page.locator('.eg-input').isVisible()).toBe(true);expect(await page.locator('[data-key="page:embassies"]').count()).toBe(0);
 });
 it('desktop and390px pending screens keep QR/actions inside the dialog viewport',async()=>{

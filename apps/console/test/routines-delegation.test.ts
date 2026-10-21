@@ -1,6 +1,6 @@
 /**
  * Delegated post-job authoring (F.3): the owner grants the permission to roles or employees; a delegate authors post jobs,
- * and every such change is announced in the boardroom and audited first. Bots, allowlists and caps stay owner-only.
+ * and every such change is announced in the general and audited first. Bots, allowlists and caps stay owner-only.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mkdtempSync } from 'node:fs';
@@ -20,9 +20,9 @@ import { installRouteErrorHandler } from '../src/web/route-error-handler.js';
 import type { CronJob, CronJobRun } from '../src/types/cron.js';
 
 const tmp = () => mkdtempSync(join(tmpdir(), 'deleg-'));
-const CARL = { id: 'e-carl', name: 'Carl', position: 'CTO', session: '7cb49893-0000-4000-8000-000000000001' };
-const DANA = { id: 'e-dana', name: 'Dana', position: 'COO', session: 'c7042061-0000-4000-8000-000000000002' };
-const DEV = { id: 'e-dev', name: 'Dev', position: 'Developer', session: 'd0000000-0000-4000-8000-000000000003' };
+const CARL = { id: 'e-carl', name: 'Carl', position: 'CTO', session: '00000022-0028-4000-8000-000000000035' };
+const DANA = { id: 'e-dana', name: 'Dana', position: 'COO', session: '0000003c-004a-4000-8000-00000000006b' };
+const DEV = { id: 'e-dev', name: 'Dev', position: 'Developer', session: '0000003f-004f-4000-8000-000000000076' };
 const people = [CARL, DANA, DEV];
 const BOARD = 'room-board';
 
@@ -45,14 +45,14 @@ const as = (p: { session: string }) => ({ 'x-codeman-parent-session': p.session 
 
 let notices: string[];
 let noticeWorks: boolean;
-let boardroom: string | undefined;
+let general: string | undefined;
 
 async function setup() {
   for (const k of Object.keys(jobs)) delete jobs[k];
   audits.length = 0;
   notices = [];
   noticeWorks = true;
-  boardroom = BOARD;
+  general = BOARD;
   const cron = new CronService({ store, broadcast: vi.fn(), sessions: new Map() } as unknown as CronDeps);
   const bot: ChatBot = { id: 'routines', name: 'Routines', rooms: ['room-1', BOARD], maxPerHour: 5 };
   cron.setBotPoster({ getBot: () => bot, check: () => {}, post: () => {} } as BotPoster);
@@ -67,7 +67,7 @@ async function setup() {
       grants,
       findEmployee: (sid: string) => people.find((p) => p.session === sid),
       isMember: (room: string, sid: string) => !(room === 'room-gone' && sid),
-      boardroomId: () => boardroom,
+      notificationRoomId: () => general,
       notify: (_room: string, text: string) => (noticeWorks ? (notices.push(text), true) : false),
     },
   };
@@ -140,12 +140,12 @@ describe('delegated post jobs', () => {
     await app.close();
   });
 
-  it('makes no change when the boardroom cannot be told (no notice, no boardroom)', async () => {
+  it('makes no change when the general cannot be told (no notice, no general)', async () => {
     const { app } = await setup();
     noticeWorks = false;
     expect((await app.inject({ method: 'POST', url: '/api/cron/jobs', headers: as(CARL), payload: mine })).json()).toMatchObject({ errorCode: 'FORBIDDEN' });
     noticeWorks = true;
-    boardroom = undefined;
+    general = undefined;
     expect((await app.inject({ method: 'POST', url: '/api/cron/jobs', headers: as(CARL), payload: mine })).json()).toMatchObject({ errorCode: 'FORBIDDEN' });
     expect(Object.keys(jobs)).toHaveLength(0);
     expect(audits).toHaveLength(0);
@@ -163,7 +163,7 @@ describe('delegated post jobs', () => {
     await app.close();
   });
 
-  it('audits the owner too, without a boardroom notice', async () => {
+  it('audits the owner too, without a general notice', async () => {
     const { app } = await setup();
     const res = await app.inject({ method: 'POST', url: '/api/cron/jobs', payload: body });
     expect(res.json().job).toBeTruthy();

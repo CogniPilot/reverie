@@ -15,7 +15,7 @@ describe('board display owner identity', () => {
     expect(boardOwnerIds([
       {id:'ambiguous',ownerLabel:'morgan'},
       {id:'unknown',owner:'missing-person',ownerLabel:'Morgan'},
-      {id:'owner',ownerLabel:'James'},
+      {id:'owner',ownerLabel:'Owner'},
       {id:'sleep',ownerLabel:'Sleep'},
       {id:'explicit',owner:'person-one'},
     ],roster)).toEqual({explicit:'person-one'});

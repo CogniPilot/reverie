@@ -16,9 +16,9 @@ import { registerChatroomRoutes } from '../../src/web/routes/chatroom-routes.js'
 import { ChatroomDelivery, MAX_PASSIVE_PER_SESSION, PASSIVE_MAX_AGE_MS, buildBriefing, wakeRecipients } from '../../src/chatroom-delivery.js';
 import type { ChatMessage, ChatRoom } from '../../src/chatroom-store.js';
 
-const A = 'aaaaaaaa-0000-4000-8000-000000000001';
-const B = 'bbbbbbbb-0000-4000-8000-000000000002';
-const C = 'cccccccc-0000-4000-8000-000000000003';
+const A = '0000002d-0035-4000-8000-000000000047';
+const B = '00000038-0043-4000-8000-000000000060';
+const C = '0000003e-004c-4000-8000-00000000006f';
 const AS = (id: string) => ({ 'x-codeman-parent-session': id });
 
 describe('mention-only delivery', () => {
@@ -250,16 +250,16 @@ describe('mention-only delivery', () => {
     expect(panes(A)).toEqual([]);
   });
 
-  it('@all and @here wake everyone like @everyone', async () => {
+  it('@all and @here are plain text now: only @everyone wakes everyone', async () => {
     const id = await room();
-    await post(id, { text: '@all quick one' });
+    await post(id, { text: '@all quick one' }, B);
+    await post(id, { text: 'heads up @here' }, B);
     await flush();
-    for (const who of [A, B, C]) expect(text(who)).toContain('@all quick one');
-    for (const who of [A, B, C]) panes(who).length = 0;
+    expect(panes(A)).toEqual([]);
     clock += 10_000;
-    await post(id, { text: 'heads up @here' });
+    await post(id, { text: '@everyone quick one' }, B);
     await flush();
-    for (const who of [A, B, C]) expect(text(who)).toContain('heads up @here');
+    expect(text(A)).toContain('@everyone quick one');
   });
 
   it('the room to answer is the one whose message woke the member, not the rooms of the held ones', async () => {

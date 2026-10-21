@@ -13,7 +13,7 @@ import { ChatroomService } from '../../src/chatroom-service.js';
 import { ChatFileStore } from '../../src/chatroom-files.js';
 import { registerChatroomRoutes } from '../../src/web/routes/chatroom-routes.js';
 
-const A = 'aaaaaaaa-0000-4000-8000-000000000001';
+const A = '0000002d-0035-4000-8000-000000000047';
 
 describe('channel order', () => {
   let app: FastifyInstance;

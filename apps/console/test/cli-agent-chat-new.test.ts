@@ -3,8 +3,8 @@ import { describe, expect, it } from 'vitest';
 import http from 'node:http';
 import { agentChatNew, httpRequest, type AgentDeps, type RequestOptions } from '../src/cli-agent.js';
 
-const SELF = 'aaaaaaaa-0000-4000-8000-000000000001';
-const WORKER = 'bbbbbbbb-0000-4000-8000-000000000002';
+const SELF = '0000002d-0035-4000-8000-000000000047';
+const WORKER = '00000038-0043-4000-8000-000000000060';
 
 function harness(respond: (o: RequestOptions) => { status: number; json: unknown }) {
   const calls: RequestOptions[] = [];

@@ -85,7 +85,7 @@ describe('Codex launch defaults', () => {
     ]) {
       await writeFile(SETTINGS_PATH, JSON.stringify(settings));
       expect(await resolveCodexDefaults(undefined)).toBeUndefined();
-      expect(buildCodexCommand(await resolveCodexDefaults(undefined))).toBe('codex');
+      expect(buildCodexCommand(await resolveCodexDefaults(undefined))).toBe('codex --no-daemon');
     }
   });
 

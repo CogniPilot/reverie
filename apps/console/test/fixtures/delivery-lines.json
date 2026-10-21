@@ -27,15 +27,15 @@
   },
   {
     "case": "owner in a direct message",
-    "line": "[Reverie chat \"DM:dddddddd-0000-4000-8000-0000000000d1\"] USER: \"a private question\" (reply: reverie agent chat say \"...\"; full history: reverie agent chat read)",
+    "line": "[Reverie chat \"DM:00000043-0053-4000-8000-00000000007e\"] USER: \"a private question\" (reply: reverie agent chat say \"...\"; full history: reverie agent chat read)",
     "expect": {
       "rooms": [
-        "dddddddd-0000-4000-8000-0000000000d1"
+        "00000043-0053-4000-8000-00000000007e"
       ],
       "ownerRooms": [
-        "dddddddd-0000-4000-8000-0000000000d1"
+        "00000043-0053-4000-8000-00000000007e"
       ],
-      "channel": "private:dddddddd-0000-4000-8000-0000000000d1"
+      "channel": "private:00000043-0053-4000-8000-00000000007e"
     }
   },
   {

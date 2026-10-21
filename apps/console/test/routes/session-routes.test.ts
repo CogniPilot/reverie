@@ -1373,7 +1373,7 @@ describe('session-routes', () => {
       // The local pane hosts the remote tmux client in the alternate screen, so it
       // reports 0, while full=1 reads the real scrollback from the remote tmux.
       const session = harness.ctx._session as unknown as { remote?: unknown };
-      session.remote = { hostId: 'h1', label: 'proxx', host: 'proxx.lan', username: 'tim', remotePath: '/home/tim' };
+      session.remote = { hostId: 'h1', label: 'workerfour', host: 'workerfour.lan', username: 'operator', remotePath: '/home/operator' };
       harness.ctx._session.terminalBuffer = 'x'.repeat(4096);
       (harness.ctx.mux as { captureActivePaneBuffer?: unknown }).captureActivePaneBuffer = vi.fn(
         (_name: string, opts?: { capturedHistoryLines?: number }) => {
@@ -1522,13 +1522,13 @@ describe('session-routes', () => {
       expect(await linesFor('full=1&lines=1')).toBe(1);
       expect(await linesFor('full=1')).toBe(limit);
       expect(await linesFor(`full=1&lines=${limit + 5}`)).toBe(limit);
-      for (const bad of ['0', '-5', 'abc', '1.5', '', '1e4', '9999999999']) {
+      for (const bad of ['0', '-5', 'abc', '1.5', '', '1e4', '0000002599']) {
         expect(await linesFor(`full=1&lines=${bad}`), `lines=${bad}`).toBe(limit);
       }
     });
 
     it("a remote session's full capture takes its scrollback from the remote tmux", async () => {
-      const remote = { hostId: 'h1', label: 'proxx', host: 'proxx.lan', username: 'tim', remotePath: '/home/tim' };
+      const remote = { hostId: 'h1', label: 'workerfour', host: 'workerfour.lan', username: 'operator', remotePath: '/home/operator' };
       (harness.ctx._session as unknown as { remote?: unknown }).remote = remote;
       harness.ctx._session.mode = 'shell';
       const captureSpy = vi.fn((_name: string, _opts?: { scrollbackOverride?: string }) => 'captured frame');
@@ -1690,7 +1690,7 @@ describe('session-routes', () => {
         // always in the alternate screen; the history comes from the remote tmux.
         const spy = install(true);
         const session = harness.ctx._session as unknown as { remote?: unknown };
-        session.remote = { hostId: 'h1', label: 'proxx', host: 'proxx.lan', username: 'tim', remotePath: '/home/tim' };
+        session.remote = { hostId: 'h1', label: 'workerfour', host: 'workerfour.lan', username: 'operator', remotePath: '/home/operator' };
         try {
           remoteScrollback.mockResolvedValueOnce({ scrollback: 'remote line 1\n', screen: '' } as never);
           const spliced = await load(`full=1&tail=${1024 * 1024}&alt=recording&lines=10000`);
@@ -2457,7 +2457,7 @@ describe('session-routes', () => {
       const projDir = join(home, '.claude', 'projects', projectKey);
       await mkdir(projDir, { recursive: true });
 
-      const sessionId = '12345678-1234-1234-1234-123456789012';
+      const sessionId = '0000000a-000c-4000-8000-00000000000f';
       const transcriptLine = JSON.stringify({ type: 'user', message: { role: 'user', content: 'hello world' } }) + '\n';
       // scanProjectDir skips files under 4000 bytes.
       const padding = '#'.repeat(4200 - transcriptLine.length);
@@ -2492,7 +2492,7 @@ describe('session-routes', () => {
       const projDir = join(home, '.claude', 'projects', projectKey);
       await mkdir(projDir, { recursive: true });
 
-      const sessionId = '22222222-2222-2222-2222-222222222222';
+      const sessionId = '0000000c-0010-4000-8000-000000000014';
       const line = JSON.stringify({ type: 'user', message: { role: 'user', content: 'hello world' } }) + '\n';
       await writeFile(join(projDir, `${sessionId}.jsonl`), line + '#'.repeat(4200 - line.length));
 
@@ -2514,9 +2514,9 @@ describe('session-routes', () => {
       const projPath = join(home, '.claude', 'projects', 'proj-entrypoint-test');
       await mkdir(projPath, { recursive: true });
 
-      const cliId = '33333333-3333-3333-3333-333333333333';
-      const sdkId = '44444444-4444-4444-4444-444444444444';
-      const noEntrypointId = '55555555-5555-5555-5555-555555555555';
+      const cliId = '0000000f-0014-4000-8000-00000000001b';
+      const sdkId = '00000013-0019-4000-8000-000000000022';
+      const noEntrypointId = '00000018-001e-4000-8000-000000000028';
 
       const cliLine =
         JSON.stringify({ type: 'user', entrypoint: 'cli', message: { role: 'user', content: 'a real question' } }) +
@@ -2556,7 +2556,7 @@ describe('session-routes', () => {
       const projPath = join(home, '.claude', 'projects', 'proj-entrypoint-bookkeeping-test');
       await mkdir(projPath, { recursive: true });
 
-      const sessionId = '77777777-7777-7777-7777-777777777777';
+      const sessionId = '00000021-0027-4000-8000-000000000033';
       const bookkeepingLine = JSON.stringify({ type: 'mode', mode: 'normal', entrypoint: 'sdk-py' }) + '\n';
       const realLine =
         JSON.stringify({ type: 'user', entrypoint: 'cli', message: { role: 'user', content: 'a real message' } }) +
@@ -2587,7 +2587,7 @@ describe('session-routes', () => {
       const projPath = join(home, '.claude', 'projects', 'proj-entrypoint-any-cli-test');
       await mkdir(projPath, { recursive: true });
 
-      const sessionId = '99999999-9999-9999-9999-999999999999';
+      const sessionId = '00000025-002c-4000-8000-00000000003b';
       const firstLine =
         JSON.stringify({ type: 'user', message: { role: 'user', content: 'pre-entrypoint-field message' } }) + '\n';
       const automatedLine =
@@ -2622,7 +2622,7 @@ describe('session-routes', () => {
       const projPath = join(home, '.claude', 'projects', 'proj-entrypoint-all-automated-test');
       await mkdir(projPath, { recursive: true });
 
-      const sessionId = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+      const sessionId = '0000002d-0037-4000-8000-000000000051';
       const firstLine =
         JSON.stringify({
           type: 'user',
@@ -2659,7 +2659,7 @@ describe('session-routes', () => {
       const projPath = join(home, '.claude', 'projects', 'proj-entrypoint-unknown-test');
       await mkdir(projPath, { recursive: true });
 
-      const sessionId = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb';
+      const sessionId = '00000038-0046-4000-8000-000000000067';
       const line =
         JSON.stringify({
           type: 'user',
@@ -2687,7 +2687,7 @@ describe('session-routes', () => {
       const projPath = join(home, '.claude', 'projects', 'proj-bookkeeping-test');
       await mkdir(projPath, { recursive: true });
 
-      const sessionId = '66666666-6666-6666-6666-666666666666';
+      const sessionId = '0000001c-0022-4000-8000-00000000002d';
       const bookkeepingLine = JSON.stringify({ type: 'mode', mode: 'normal', sessionId }) + '\n';
       // > 16KB (the old head-read size) but well under 128KB (the new one).
       const prefix = bookkeepingLine.repeat(Math.ceil(20000 / bookkeepingLine.length));
@@ -2726,7 +2726,7 @@ describe('session-routes', () => {
       const projPath = join(home, '.claude', 'projects', 'proj-tail-fallback-test');
       await mkdir(projPath, { recursive: true });
 
-      const sessionId = '88888888-8888-8888-8888-888888888888';
+      const sessionId = '00000023-0029-4000-8000-000000000037';
       const bookkeepingLine = JSON.stringify({ type: 'mode', mode: 'normal', sessionId }) + '\n';
       // Comfortably past the new 128KB head window (was 16KB), so the head read
       // never reaches a single "type":"user"/"assistant"/"summary" line.
@@ -3031,8 +3031,8 @@ describe('session-routes', () => {
       vi.stubEnv('CLAUDE_CONFIG_DIR', '');
       mkdirSync(join(home, '.claude', 'projects', '-w'), { recursive: true });
       writeFileSync(
-        join(home, '.claude', 'projects', '-w', 'a1b2c3d4-e5f6-7890-abcd-ef1234567890.jsonl'),
-        JSON.stringify({ type: 'user', sessionId: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890' }) + '\n'
+        join(home, '.claude', 'projects', '-w', '00000027-002f-4000-8000-00000000003f.jsonl'),
+        JSON.stringify({ type: 'user', sessionId: '00000027-002f-4000-8000-00000000003f' }) + '\n'
       );
       const res = await harness.app.inject({
         method: 'POST',
@@ -3041,7 +3041,7 @@ describe('session-routes', () => {
           name: 'resume-test',
           mode: 'claude',
           workingDir: process.env.HOME || '/tmp',
-          resumeSessionId: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890',
+          resumeSessionId: '00000027-002f-4000-8000-00000000003f',
         },
       });
       expect(res.statusCode).toBe(200);

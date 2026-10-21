@@ -157,7 +157,7 @@ describe('restartCli() must not kill a working pane', () => {
   });
 
   it('claude: an explicit resume id from a resume-from-history launch wins over the pin', async () => {
-    const RESUMED = '01a060f0-0361-7f91-abde-b283020db0d7';
+    const RESUMED = '00000003-0003-4000-8000-000000000003';
     const { session, respawn } = liveSession('claude', { resumeSessionId: RESUMED });
     giveTranscript(RESUMED);
     await session.restartCli();
@@ -171,7 +171,7 @@ describe('restartCli() must not kill a working pane', () => {
     // `--resume <seed> || --session-id <this.id>` — the resume fails and the
     // fallback runs, which is safe precisely because nothing is on disk to
     // collide with.
-    const RESUMED = '01a060f0-0361-7f91-abde-b283020db0d7';
+    const RESUMED = '00000003-0003-4000-8000-000000000003';
     const { session, respawn } = liveSession('claude', { resumeSessionId: RESUMED });
     await session.restartCli();
     expect(respawn.mock.calls[0][0].resumeSessionId).toBe(RESUMED);

@@ -117,7 +117,7 @@ describe('buildInteractiveArgs with a session name (direct PTY path)', () => {
 describe('buildSpawnCommand with a session name (tmux path)', () => {
   const base = {
     mode: 'claude' as const,
-    sessionId: 'aaaabbbb-cccc-dddd-eeee-ffff00001111',
+    sessionId: '0000002e-0039-4000-8000-000000000053',
     claudeMode: 'dangerously-skip-permissions' as const,
   };
 
@@ -150,7 +150,7 @@ describe('buildSpawnCommand with a session name (tmux path)', () => {
       ...base,
       sessionName: 'w1-a',
       claudeCliVersion: '2.1.226',
-      resumeSessionId: 'aaaabbbb-cccc-dddd-eeee-ffff00001111',
+      resumeSessionId: '0000002e-0039-4000-8000-000000000053',
     });
     const occurrences = cmd.split(' --name "w1-a"').length - 1;
     expect(cmd).toContain(' || ');

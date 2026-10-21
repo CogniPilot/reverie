@@ -30,7 +30,7 @@ import { TmuxManager } from '../src/tmux-manager.js';
 
 describe('codex: a resumed thread id survives start()', () => {
   const workingDir = join(homedir(), 'codeman-cases', 'codex-resume-alias');
-  const THREAD_ID = '01a060f0-0361-7f91-abde-b283020db0d7';
+  const THREAD_ID = '00000003-0003-4000-8000-000000000003';
   const sessions: Session[] = [];
 
   afterEach(() => {

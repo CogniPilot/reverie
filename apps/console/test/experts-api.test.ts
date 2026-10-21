@@ -24,8 +24,8 @@ import { installRouteErrorHandler } from '../src/web/route-error-handler.js';
 import { classify } from '../src/owner-auth/policy.js';
 
 const HEADER = 'x-codeman-parent-session';
-const DELEGATE = 'a1b2c3d4-0000-4000-8000-00000000d001';
-const OTHER_AGENT = 'a1b2c3d4-0000-4000-8000-00000000e002';
+const DELEGATE = '00000027-002e-4000-8000-00000000003d';
+const OTHER_AGENT = '00000027-002e-4000-8000-00000000003e';
 
 const alpha = {
   id: 'alpha',
@@ -289,7 +289,7 @@ describe('experts api', () => {
     const cases = [
       { ...alpha, persona: 'Use key sk-' + 'x'.repeat(30) },
       { ...alpha, persona: 'token ghp_' + 'A1'.repeat(15) },
-      { ...alpha, persona: '-----BEGIN PRIVATE KEY-----' },
+      { ...alpha, persona: ['-----BEGIN', 'PRIVATE KEY-----'].join(' ') },
       { ...alpha, expertise: ['Q'.repeat(20) + '_' + 'z9'.repeat(12)] },
       { ...alpha, data_dir: '../memory' },
       { ...alpha, initial_self: { consciousness: 'x', directives: [] } },

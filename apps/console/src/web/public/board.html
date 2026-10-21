@@ -4,152 +4,16 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Board</title>
-<style>
-:root{
-  --bg:#f4f3ef; --panel:#ffffff; --panel2:#f9f8f5; --line:#e2dfd6; --grid:#ece9e1;
-  --fg:#1d1f24; --muted:#6b6e76; --faint:#9a9ca3;
-  --accent:#2f5bd3; --accent-soft:#e3eafb;
-  --done:#3d9a6a; --now:#2f5bd3; --plan:#8e96a8; --gate:#c98a12; --blocked:#c94a3c; --cont:#b9bec9; --sleep:#7c6fb0; --triage:#a06bc7;
-  --now-line:#e0402f; --night:rgba(40,40,80,.045); --weekend:rgba(201,138,18,.06); --ms:#8a3fb5;
-  --good:#2f8f5b; --warn:#b77d0b; --bad:#c23b2e;
-  --shadow:0 1px 2px rgba(20,20,30,.06),0 4px 16px rgba(20,20,30,.04);
-  --mono:ui-monospace,"SF Mono","JetBrains Mono",Menlo,Consolas,monospace;
-  --sans:"Inter",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
-}
-@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
-  --bg:#0f1115; --panel:#161920; --panel2:#1b1f27; --line:#2a2f3a; --grid:#20242d;
-  --fg:#e7e9ee; --muted:#9aa0ad; --faint:#666c79;
-  --accent:#7fa2ff; --accent-soft:#1e2a47;
-  --done:#4fbf86; --now:#7fa2ff; --plan:#6f7889; --gate:#e3a531; --blocked:#ef6a5a; --cont:#3a404d; --sleep:#9d8fe0; --triage:#c196e6;
-  --now-line:#ff5a47; --night:rgba(120,130,255,.05); --weekend:rgba(227,165,49,.06); --ms:#c196e6;
-  --good:#4fbf86; --warn:#e3a531; --bad:#ef6a5a; --shadow:none; color-scheme:dark}}
-:root[data-theme="dark"]{
-  --bg:#0f1115; --panel:#161920; --panel2:#1b1f27; --line:#2a2f3a; --grid:#20242d;
-  --fg:#e7e9ee; --muted:#9aa0ad; --faint:#666c79;
-  --accent:#7fa2ff; --accent-soft:#1e2a47;
-  --done:#4fbf86; --now:#7fa2ff; --plan:#6f7889; --gate:#e3a531; --blocked:#ef6a5a; --cont:#3a404d; --sleep:#9d8fe0; --triage:#c196e6;
-  --now-line:#ff5a47; --night:rgba(120,130,255,.05); --weekend:rgba(227,165,49,.06); --ms:#c196e6;
-  --good:#4fbf86; --warn:#e3a531; --bad:#ef6a5a; --shadow:none; color-scheme:dark}
-*{box-sizing:border-box}
-[hidden]{display:none!important}
-body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.45 var(--sans);-webkit-font-smoothing:antialiased}
-.wrap{max-width:1400px;margin:0 auto;padding-block:20px 48px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));display:flex;flex-direction:column;gap:18px}
-header{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:12px}
-h1{margin:0;font-size:22px;letter-spacing:-.01em}
-h1 span{color:var(--muted);font-weight:500}
-h2{margin:0;font-size:13px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);font-weight:600}
-.meta{color:var(--muted);font-size:12.5px;display:flex;gap:14px;flex-wrap:wrap;align-items:center}
-.clock{font-family:var(--mono);color:var(--fg);font-size:13px}
-.btn{font:inherit;font-size:12.5px;padding:6px 11px;min-height:32px;border-radius:7px;border:1px solid var(--line);background:var(--panel);color:var(--fg);cursor:pointer}
-.btn:hover{border-color:var(--accent)} .btn.on{background:var(--accent-soft);border-color:var(--accent);color:var(--accent)}
-.banner{background:color-mix(in srgb,var(--warn) 16%,var(--panel));border:1px solid var(--warn);border-radius:10px;padding:8px 12px;font-size:13px}
-.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px}
-.kpi{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px 14px;box-shadow:var(--shadow);cursor:pointer}
-.kpi b{display:block;font:600 26px/1.1 var(--mono);letter-spacing:-.02em}
-.kpi small{color:var(--muted);font-size:12px}
-.kpi.bad b{color:var(--bad)} .kpi.warn b{color:var(--warn)} .kpi.good b{color:var(--good)}
-.panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow);min-width:0}
-.phead{display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:space-between;padding:12px 14px;border-bottom:1px solid var(--line)}
-.tools{display:flex;gap:6px;flex-wrap:wrap}
-#tl{position:relative;height:auto;touch-action:pan-y;user-select:none;-webkit-user-select:none;overflow:hidden;border-radius:0 0 14px 14px}
-#tl svg{display:block;width:100%}
-#tl text{font-family:var(--sans)}
-.hint{color:var(--faint);font-size:12px}
-.empty{color:var(--faint);font-size:13px;padding:16px 14px}
-.dcards{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,340px),1fr));gap:12px;padding:12px 14px}
-.dcard{border:1px solid var(--line);border-left:4px solid var(--warn);border-radius:12px;padding:12px;background:var(--panel2);min-width:0;display:flex;flex-direction:column;gap:8px}
-.dcard.poll{border-left-color:var(--accent)}
-.dcard h3{margin:0;font-size:14.5px;line-height:1.35;font-weight:600;overflow-wrap:anywhere}
-.dcard .sum{font-size:13px;line-height:1.45;overflow-wrap:anywhere}
-.dcard .rec{font-size:13px;line-height:1.45;background:var(--accent-soft);border-radius:8px;padding:7px 9px;overflow-wrap:anywhere}
-.dcard .rec b{color:var(--accent)} .dcard .rec.none{background:none;padding:0;color:var(--faint);font-style:italic}
-.dcard .trade{font-size:12.5px;color:var(--muted);overflow-wrap:anywhere}
-.dcard .who{color:var(--muted);font-size:12px}
-.dcard .opts{display:flex;flex-wrap:wrap;gap:6px}
-.dcard .opts .btn{min-height:40px;text-align:left}
-.dcard .opts .btn.recd{border-color:var(--accent)}
-.dcard .opts .btn .n{color:var(--faint);margin-left:6px}
-.dcard details summary{cursor:pointer;color:var(--muted);font-size:12.5px}
-.dcard .err{color:var(--bad);font-size:12.5px}
-#decidedBox{border-top:1px solid var(--line);padding:10px 14px}
-#decidedBox summary{cursor:pointer;color:var(--muted);font-size:12.5px}
-#decidedBox ul{list-style:none;margin:8px 0 0;padding:0;display:flex;flex-direction:column;gap:6px;font-size:12.5px}
-#decidedBox li{overflow-wrap:anywhere}
-.tip{position:fixed;z-index:10;pointer-events:none;background:var(--panel);border:1px solid var(--line);border-radius:9px;padding:8px 10px;box-shadow:0 6px 24px rgba(0,0,0,.18);font-size:12.5px;max-width:280px}
-.tip b{display:block;margin-bottom:2px}
-.tip .k{display:inline-block;font-size:11px;padding:0 6px;border-radius:5px;margin-left:6px;color:#fff}
-.legend{display:flex;flex-wrap:wrap;gap:12px;padding:10px 14px;border-top:1px solid var(--line);font-size:12px;color:var(--muted)}
-.legend i{display:inline-block;width:12px;height:8px;border-radius:2px;margin-right:5px;vertical-align:middle}
-.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr));gap:12px;padding:14px}
-.plan,.ms{border:1px solid var(--line);border-radius:12px;padding:12px;background:var(--panel2);min-width:0}
-.plan h3,.ms h3{margin:0 0 2px;font-size:14px;display:flex;justify-content:space-between;gap:8px;align-items:center}
-.plan .who,.ms .who{color:var(--muted);font-size:12px}
-.badge{font-size:11px;font-weight:600;padding:2px 7px;border-radius:99px;white-space:nowrap}
-.badge.bad{background:color-mix(in srgb,var(--bad) 16%,transparent);color:var(--bad)}
-.badge.warn{background:color-mix(in srgb,var(--warn) 16%,transparent);color:var(--warn)}
-.badge.good{background:color-mix(in srgb,var(--good) 16%,transparent);color:var(--good)}
-.badge.mute{background:var(--grid);color:var(--muted)}
-.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:8px}
-.stats div{font-size:11.5px;color:var(--muted)} .stats b{display:block;font:600 15px var(--mono);color:var(--fg)}
-.plan svg{width:100%;height:auto;display:block;margin-top:8px}
-.pact{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:8px}
-.pact input{flex:1 1 140px}
-.plan .err,dialog .err{color:var(--bad);font-size:12.5px;margin:4px 0 0}
-dialog{border:1px solid var(--line);border-radius:14px;background:var(--panel);color:var(--fg);padding:16px;width:min(94vw,440px);box-shadow:0 12px 40px rgba(0,0,0,.25)}
-dialog::backdrop{background:rgba(0,0,0,.4)}
-dialog h3{margin:0 0 10px;font-size:16px}
-dialog form,dialog .step{display:flex;flex-direction:column;gap:8px;margin-bottom:12px}
-dialog input,dialog select,.pact input{font:inherit;font-size:16px;padding:6px 10px;min-height:36px;border-radius:7px;border:1px solid var(--line);background:var(--panel2);color:var(--fg)}
-dialog input,dialog select{width:100%}
-dialog .code{font:600 20px var(--mono);letter-spacing:.08em;padding:6px 10px;border-radius:7px;background:var(--panel2);border:1px solid var(--line)}
-dialog .status{font-size:13px;margin:0 0 10px} dialog .status.failed,dialog .status.timeout{color:var(--bad)} dialog .status.signed_in{color:var(--good)}
-dialog .qr svg{width:160px;height:160px;background:#fff;padding:6px;border-radius:6px}
-.bar-track{height:8px;border-radius:99px;background:var(--grid);margin-top:10px;overflow:hidden}
-.bar-fill{height:100%;background:var(--done);border-radius:99px}
-.agents{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,250px),1fr));gap:12px;padding:14px}
-.agent{border:1px solid var(--line);border-radius:12px;padding:12px;background:var(--panel2);display:grid;grid-template-columns:64px 1fr;gap:12px;min-width:0}
-.agent h3{margin:0;font-size:15px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
-.agent .role{color:var(--muted);font-size:12px}
-.agent .focus{font-size:12.5px;margin-top:6px;overflow-wrap:anywhere}
-.agent ul{margin:8px 0 0;padding-left:16px;font-size:12px;color:var(--muted);overflow-wrap:anywhere}
-.agent .nums{display:flex;gap:12px;flex-wrap:wrap;margin-top:6px;font-size:11.5px;color:var(--muted)} .agent .nums b{font-family:var(--mono);color:var(--fg)}
-.dot{width:8px;height:8px;border-radius:50%;display:inline-block}
-.cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr));gap:12px}
-.list{list-style:none;margin:0;padding:6px 0}
-.list li{padding:9px 14px;border-bottom:1px solid var(--grid);display:flex;gap:10px;align-items:flex-start;overflow-wrap:anywhere}
-.list li:last-child{border-bottom:0}
-.list .t{font:12px var(--mono);color:var(--faint);white-space:nowrap;padding-top:2px;min-width:44px}
-.list .who{font-size:11.5px;color:var(--muted)}
-.sev{width:4px;align-self:stretch;border-radius:2px;flex:none}
-.kan{display:grid;grid-template-columns:repeat(5,minmax(220px,1fr));gap:10px;padding:14px;overflow-x:auto;scroll-snap-type:x proximity;-webkit-overflow-scrolling:touch}
-.ktabs{position:sticky;top:0;z-index:5;display:grid;grid-template-columns:repeat(5,1fr);gap:4px;padding:8px 10px;background:var(--panel);border-bottom:1px solid var(--line)}
-.ktabs button{font:inherit;font-size:11px;border:1px solid var(--line);border-radius:8px;background:var(--panel2);color:var(--muted);padding:5px 2px;cursor:pointer;line-height:1.25}
-.ktabs button b{display:block;font:600 15px var(--mono);color:var(--fg)}
-.ktabs button.on{border-color:var(--accent);background:var(--accent-soft)}
-.ktabs button.on b{color:var(--accent)}
-.kcol{background:var(--panel2);border:1px solid var(--line);border-radius:12px;min-width:0;scroll-snap-align:start;scroll-snap-stop:always;display:flex;flex-direction:column}
-.kcol h3{margin:0;padding:10px 12px;font-size:12px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);display:flex;justify-content:space-between;border-bottom:1px solid var(--line)}
-.kcol h3 i{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px}
-.kcards{display:flex;flex-direction:column;gap:8px;padding:8px}
-.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:9px 10px;font-size:13px;overflow-wrap:anywhere}
-.card .meta2{display:flex;flex-wrap:wrap;gap:5px;margin-top:6px;font-size:11.5px;color:var(--muted)}
-.chip{border:1px solid var(--line);border-radius:99px;padding:0 7px;white-space:nowrap}
-.card a,.tip a{color:var(--accent);text-decoration:none}
-.card .why{font-size:12px;color:var(--bad);margin-top:4px}
-.wontdo summary{cursor:pointer;padding:10px 14px;color:var(--muted);font-size:12.5px}
-.wontdo .kcards{padding:0 14px 14px}
-.foot{color:var(--faint);font-size:12px;text-align:center}
-@media (max-width:560px){h1{font-size:19px}.kpi b{font-size:22px}.kan{grid-template-columns:repeat(5,calc(100% - 4px));grid-auto-columns:calc(100% - 4px);scroll-snap-type:x mandatory;gap:8px}}
-</style>
+<link rel="stylesheet" href="/company-board.css">
 </head>
-<body>
+<body class="board-page">
 <div class="wrap">
   <header>
     <div>
-      <h1><span id="co"></span> Board <span>· issues, milestones, burn, people</span></h1>
+      <h1><span id="co"></span> Board <span>· issues, milestones</span></h1>
       <div class="meta"><span class="clock" id="clock"></span><span id="built"></span></div>
     </div>
-    <div class="tools"><button class="btn" id="refresh">Refresh</button><button class="btn" id="theme">Theme</button></div>
+    <div class="tools"><a class="btn" id="company-link" href="/#company" target="_top" title="Plans, burn rate and people">Company</a><button class="btn" id="refresh">Refresh</button><button class="btn" id="theme">Theme</button></div>
   </header>
   <div class="banner" id="banner" hidden></div>
 
@@ -187,16 +51,6 @@ dialog .qr svg{width:160px;height:160px;background:#fff;padding:6px;border-radiu
     <div class="grid2" id="milestones"></div>
   </section>
 
-  <section class="panel" id="sec-burn">
-    <div class="phead"><h2>Burn rate · this week per plan</h2><span class="hint">Dotted line = projection at the current rate to the weekly reset.</span><button type="button" class="btn" id="addAcct" hidden>Add account</button></div>
-    <div class="grid2" id="plans"></div>
-  </section>
-
-  <section class="panel" id="sec-agents">
-    <div class="phead"><h2>People</h2><span class="hint">Ring = today's issues done of planned. Receipts are checkable facts, not claims.</span></div>
-    <div class="agents" id="agents"></div>
-  </section>
-
   <section class="cols">
     <div class="panel" id="sec-wins"><div class="phead"><h2>Wins</h2></div><ul class="list" id="wins"></ul></div>
     <div class="panel" id="sec-blockers"><div class="phead"><h2>Blockers</h2></div><ul class="list" id="blockers"></ul></div>
@@ -205,10 +59,9 @@ dialog .qr svg{width:160px;height:160px;background:#fff;padding:6px;border-radiu
   <div class="foot" id="foot">Served inside Reverie. Refreshes every minute.</div>
 </div>
 <div class="tip" id="tip" hidden></div>
-<dialog id="addDlg" aria-label="Add subscription account"></dialog>
-<dialog id="signDlg" aria-label="Sign in"></dialog>
-<dialog id="removeDlg" aria-label="Remove account"></dialog>
 <script>
+if (location.hash === '#sec-burn') location.replace('/#company-plans');
+if (location.hash === '#sec-agents') location.replace('/#company-people');
 const H = 3600e3, D = 24 * H;
 const STATUS = {triage:'Triage', todo:'To do', doing:'Doing', blocked:'Blocked', done:'Done', wontdo:"Won't do"};
 const COLS = ['triage', 'todo', 'doing', 'blocked', 'done'];
@@ -217,8 +70,6 @@ const VERDICT = {ahead:['good', 'ahead'], 'on-track':['mute', 'on track'], behin
 const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
 const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 let B = null, TZ = 'America/New_York', view = null, tlState = {}, tab = 'timeline', preset = 'now', timelineAnimation = 0;
-
-/* ---------- time in the company zone ---------- */
 const fmt = (t, o) => new Intl.DateTimeFormat('en-US', Object.assign({timeZone: TZ}, o)).format(new Date(t));
 const hm = t => fmt(t, {hour: '2-digit', minute: '2-digit', hourCycle: 'h23'});
 const dayLbl = t => fmt(t, {weekday: 'short', day: 'numeric', month: 'short'});
@@ -320,24 +171,18 @@ function render() {
   document.getElementById('co').textContent = (B.company && B.company.name) || '';
   document.title = ((B.company && B.company.name) ? B.company.name + ' ' : '') + 'Board';
   document.getElementById('built').textContent = 'Data built ' + dayLbl(B.built) + ' ' + hm(B.built) + ' ' + zoneShort();
-  kpis(); drawTimeline(); kanban(); milestones(); plans(); agents(); lists(); cards(); tick();
+  kpis(); drawTimeline(); kanban(); milestones(); lists(); cards(); tick();
 }
 
 /* ---------- KPIs ---------- */
 const num = (v, d) => v == null ? '–' : (d == null ? v : Math.round(v * 10 ** d) / 10 ** d);
-function planRisk(p) {
-  if (p.runsOut && p.reset && p.runsOut < p.reset) return 'bad';
-  if (p.proj != null && p.proj >= 85) return 'warn';
-  return 'good';
-}
 function kpis() {
-  const now = Date.now(), today = startOfDay(now), plansB = B.planBurn;
+  const now = Date.now(), today = startOfDay(now);
   const issues = B.issues || [];
   const winsToday = (B.wins || []).filter(w => w.at >= today).length;
   const blockers = (B.blockers || []).filter(b => !b.clearedAt), high = blockers.filter(b => b.sev === 'high').length;
   const decisions = (B.decisions || []).filter(d => !d.clearedAt);
   const late = issues.filter(i => overdue(i, now)).length, triage = issues.filter(i => i.status === 'triage').length;
-  const up = roster().filter(r => r.state !== 'gone').length;
   const k = [
     ['good', winsToday, 'wins today', 'sec-wins'],
     [late ? 'bad' : 'good', late, 'issues overdue', 'sec-issues'],
@@ -345,8 +190,6 @@ function kpis() {
     [high ? 'bad' : blockers.length ? 'warn' : 'good', blockers.length, `blockers (${high} high)`, 'sec-blockers'],
     [decisions.length + undecidedPolls().length ? 'warn' : 'good', decisions.length + undecidedPolls().length, 'waiting on you', 'sec-decisions'],
   ];
-  if (plansB) { const risk = plansB.filter(p => planRisk(p) === 'bad').length; k.push([risk ? 'bad' : 'good', `${risk}/${plansB.length}`, 'plans run out before reset', 'sec-burn']); }
-  k.push([up === roster().length ? 'good' : 'warn', `${up}/${roster().length}`, 'people up', 'sec-agents']);
   const el = document.getElementById('kpis');
   el.innerHTML = k.map(([c, v, l, id]) => `<div class="kpi ${c}" data-go="${id}"><b>${esc(v)}</b><small>${esc(l)}</small></div>`).join('');
   el.querySelectorAll('.kpi').forEach(x => x.onclick = () => document.getElementById(x.dataset.go).scrollIntoView({behavior: 'smooth'}));
@@ -620,281 +463,6 @@ function milestones() {
       <div class="who">Due ${esc(m.due)} · ${esc(due)}</div>
       <div class="bar-track"><div class="bar-fill" style="width:${pct}%"></div></div>
       <div class="stats"><div><b>${done}/${total}</b>issues done</div><div><b>${p ? p.overdue : 0}</b>overdue</div><div><b>${p ? p.early : 0}</b>finished early</div></div></div>`;
-  }).join('');
-}
-
-/* ---------- Burn ---------- */
-function plans() {
-  const sec = document.getElementById('sec-burn'), el = document.getElementById('plans');
-  document.getElementById('addAcct').hidden = !B.planBurn;
-  if (!B.planBurn) { el.innerHTML = '<div class="empty">Plan burn is shown to the console owner only.</div>'; return; }
-  if (!B.planBurn.length) { el.innerHTML = '<div class="empty">No plan data yet.</div>'; return; }
-  // Leave an open rename alone on the minute refresh, so a half-typed name survives.
-  if (planEdit && el.querySelector('[data-rename-form]') && B.planBurn.some(p => p.profileId === planEdit)) return;
-  if (planEdit && !B.planBurn.some(p => p.profileId === planEdit)) planEdit = null;
-  el.innerHTML = B.planBurn.map((p, i) => {
-    const risk = planRisk(p);
-    const badge = risk === 'bad' ? `runs out ${dayLbl(p.runsOut).split(',')[0]} ${hm(p.runsOut)}` : risk === 'warn' ? 'tight' : p.used == null ? 'no data' : 'on track';
-    return `<div class="plan"><h3>${esc(p.name)}<span class="badge ${p.used == null ? 'mute' : risk}">${esc(badge)}</span></h3>
-      <div class="who">${esc(p.who)}${p.reset ? ' · resets ' + dayLbl(p.reset) + ' ' + hm(p.reset) + ' ' + esc(zoneShort()) : ''}</div>
-      <div class="stats"><div><b>${esc(num(p.used))}${p.used == null ? '' : '%'}</b>used</div><div><b>${esc(num(p.rate, 1))}${p.rate == null ? '' : '%/h'}</b>burn now</div><div><b style="color:${css('--' + risk)}">${p.proj == null ? '–' : Math.round(p.proj) + '%'}</b>at reset</div></div>
-      ${p.weekStart && p.reset ? `<svg id="burn${i}" viewBox="0 0 320 120"></svg>` : ''}
-      ${planActions(p)}</div>`;
-  }).join('');
-  B.planBurn.forEach((p, i) => { const svg = document.getElementById('burn' + i); if (svg) burnChart(svg, p); });
-  wirePlanActions(el);
-}
-/* ---------- Plan accounts (rename, sign in, add, remove; was the /plans page) ---------- */
-const SETTLED = ['signed_in', 'failed', 'timeout', 'cancelled'];
-const providerName = p => p === 'anthropic' ? 'Claude' : 'Codex';
-// The rename open on a tile (profile id), and the last error per profile id, kept across the minute refresh.
-let planEdit = null;
-const planErr = {};
-function mk(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; }
-function mkBtn(text, cls, fn) { const b = mk('button', cls, text); b.type = 'button'; if (fn) b.onclick = fn; return b; }
-async function acctApi(path, opts) {
-  opts = opts || {};
-  try {
-    const r = await fetch(path, {method: opts.method || 'GET', cache: 'no-store', credentials: 'same-origin',
-      headers: opts.body ? {'content-type': 'application/json', accept: 'application/json'} : {accept: 'application/json'},
-      body: opts.body ? JSON.stringify(opts.body) : undefined});
-    const j = await r.json().catch(() => null);
-    // A refused login shows as an error here; it never reloads the page (load() owns that).
-    if (r.status === 401) return {ok: false, error: 'Signed out of the console (HTTP 401); sign in and try again'};
-    if (!r.ok || !j || j.success === false) return {ok: false, error: (j && (j.error || j.message)) || 'HTTP ' + r.status};
-    return {ok: true, data: j.data};
-  } catch (e) { return {ok: false, error: 'Network error'}; }
-}
-function planActions(p) {
-  if (planEdit && planEdit === p.profileId)
-    return `<form class="pact" data-rename-form="${esc(p.profileId)}"><input name="label" maxlength="64" value="${esc(p.label)}" aria-label="Plan name" autocomplete="off">
-      <button type="submit" class="btn">Save</button><button type="button" class="btn" data-rename-cancel>Cancel</button></form>
-      <div class="hint">The 'who' line under the name is kept under the old name, so it is blank after a rename until it is set again.</div>
-      <div data-rename-err class="err" role="alert">${esc(planErr[p.profileId] || '')}</div>`;
-  const why = p.profileId ? '' : `<div class="hint">No rename or remove: this account is only a login folder, with no account entry to change.</div>`;
-  return `<div class="pact">${p.profileId ? `<button type="button" class="btn" data-rename="${esc(p.profileId)}">Rename</button>` : ''}
-    <button type="button" class="btn" data-signin="${esc(p.id)}">Sign in again</button>
-    ${p.profileId && !p.isDefault ? `<button type="button" class="btn" data-remove="${esc(p.profileId)}">Remove</button>` : ''}</div>
-    ${why}${p.profileId && planErr[p.profileId] ? `<div class="err" role="alert">${esc(planErr[p.profileId])}</div>` : ''}`;
-}
-function wirePlanActions(el) {
-  const byProfile = id => (B.planBurn || []).find(p => p.profileId === id);
-  el.querySelectorAll('[data-rename]').forEach(b => b.onclick = () => {
-    planEdit = b.dataset.rename; delete planErr[planEdit]; plans();
-    const i = el.querySelector('[data-rename-form] input'); if (i) { i.focus(); i.select(); }
-  });
-  el.querySelectorAll('[data-rename-cancel]').forEach(b => b.onclick = () => { delete planErr[planEdit]; planEdit = null; plans(); });
-  el.querySelectorAll('[data-rename-form]').forEach(f => f.onsubmit = async e => {
-    e.preventDefault();
-    const id = f.dataset.renameForm, label = f.elements.label.value.trim(), out = f.parentElement.querySelector('[data-rename-err]');
-    if (!label) { out.textContent = planErr[id] = 'The name cannot be empty'; return; }
-    f.querySelectorAll('button,input').forEach(x => x.disabled = true);
-    const r = await acctApi('/api/subscription-profiles/' + encodeURIComponent(id), {method: 'PATCH', body: {label}});
-    if (!r.ok) { f.querySelectorAll('button,input').forEach(x => x.disabled = false); out.textContent = planErr[id] = 'Not renamed: ' + r.error; return; }
-    delete planErr[id]; planEdit = null;
-    await load();
-  });
-  el.querySelectorAll('[data-signin]').forEach(b => b.onclick = () => {
-    const p = (B.planBurn || []).find(x => x.id === b.dataset.signin);
-    if (p) startSignIn(p.id, providerName(p.provider) + ' · ' + p.label);
-  });
-  el.querySelectorAll('[data-remove]').forEach(b => b.onclick = () => { const p = byProfile(b.dataset.remove); if (p) confirmRemove(p); });
-}
-function openAdd() {
-  const dlg = document.getElementById('addDlg'), form = mk('form'), input = mk('input');
-  input.required = true; input.maxLength = 64; input.placeholder = 'Account name, e.g. Work'; input.setAttribute('aria-label', 'Account name');
-  const provider = mk('select'); provider.setAttribute('aria-label', 'Provider');
-  provider.append(new Option('Claude', 'anthropic'), new Option('ChatGPT / Codex', 'openai'));
-  const add = mk('button', 'btn', 'Add account'); add.type = 'submit';
-  const error = mk('p', 'err'); error.setAttribute('role', 'alert');
-  const row = mk('div', 'pact'); row.append(add, mkBtn('Cancel', 'btn', () => dlg.close()));
-  form.append(input, provider, row, error);
-  form.onsubmit = async e => {
-    e.preventDefault();
-    add.disabled = true;
-    const r = await acctApi('/api/subscription-profiles', {method: 'POST', body: {label: input.value, provider: provider.value}});
-    if (!r.ok) { add.disabled = false; error.textContent = 'Not added: ' + r.error; return; }
-    const profile = r.data.profile;
-    dlg.close();
-    await load();
-    startSignIn(profile.id, providerName(profile.provider) + ' · ' + profile.label);
-  };
-  dlg.replaceChildren(mk('h3', '', 'Add subscription account'), form);
-  dlg.showModal();
-  input.focus();
-}
-function confirmRemove(p) {
-  const dlg = document.getElementById('removeDlg'), error = mk('p', 'err'); error.setAttribute('role', 'alert');
-  const go = mkBtn('Remove account', 'btn');
-  go.onclick = async () => {
-    go.disabled = true;
-    const r = await acctApi('/api/subscription-profiles/' + encodeURIComponent(p.profileId), {method: 'DELETE'});
-    if (!r.ok) { go.disabled = false; error.textContent = 'Not removed: ' + r.error; return; }
-    dlg.close();
-    load();
-  };
-  const row = mk('div', 'pact'); row.append(go, mkBtn('Cancel', 'btn', () => dlg.close()));
-  dlg.replaceChildren(mk('h3', '', 'Remove ' + providerName(p.provider) + ' · ' + p.label + '?'),
-    mk('p', 'hint', 'It is taken off this list. Its login stays on disk, nothing is deleted, and you can add it again later. Not possible while agents are running on it.'),
-    row, error);
-  dlg.showModal();
-}
-let sign = null;
-function copyBtn(text, label) {
-  const b = mkBtn(label, 'btn');
-  b.onclick = async () => {
-    try { await navigator.clipboard.writeText(text); b.textContent = 'Copied'; } catch (e) { b.textContent = 'Copy failed: select it by hand'; }
-    setTimeout(() => { b.textContent = label; }, 2000);
-  };
-  return b;
-}
-async function startSignIn(accountId, title) {
-  // A retry replaces the old login inside the open dialog; closing and reopening would let the old close event cancel the new login.
-  stopSignIn();
-  const dlg = document.getElementById('signDlg'), status = mk('p', 'status', 'Starting sign-in…'), body = mk('div');
-  status.setAttribute('role', 'status');
-  dlg.replaceChildren(mk('h3', '', 'Sign in · ' + title), status, body);
-  const s = sign = {accountId, title, status, body, view: null, rendered: null, timer: null};
-  dlg.onclose = () => { if (sign === s && !dlg.open) closeSignIn(); };
-  if (!dlg.open) dlg.showModal();
-  const r = await acctApi('/api/plans/accounts/' + encodeURIComponent(accountId) + '/login', {method: 'POST'});
-  if (sign !== s) return;
-  if (!r.ok) { status.textContent = r.error; status.className = 'status failed'; body.replaceChildren(mkBtn('Close', 'btn', closeSignIn)); return; }
-  signRender(r.data);
-  s.timer = setInterval(signPoll, 1500);
-}
-async function signPoll() {
-  const s = sign;
-  if (!s || !s.view) return;
-  const r = await acctApi('/api/plans/logins/' + encodeURIComponent(s.view.id));
-  if (sign !== s) return;
-  signRender(r.ok ? r.data : Object.assign({}, s.view, {state: 'failed', message: 'Sign-in helper stopped.'}));
-}
-function signRender(v) {
-  const s = sign;
-  if (!s) return;
-  s.view = v.id ? v : Object.assign({}, s.view, v);
-  s.status.textContent = v.message || '';
-  s.status.className = 'status ' + v.state;
-  const settled = SETTLED.includes(v.state);
-  if (settled && s.timer) { clearInterval(s.timer); s.timer = null; if (v.state === 'signed_in') load(); }
-  const key = JSON.stringify([v.state, v.url, v.code, v.needsCode]);
-  if (key === s.rendered) return; // a half-typed code survives each poll
-  s.rendered = key;
-  const parts = [];
-  if (settled) {
-    const row = mk('div', 'pact');
-    if (v.state === 'signed_in') row.append(mkBtn('Done', 'btn', closeSignIn), mkBtn('Wrong account? Sign in again', 'btn', () => startSignIn(s.accountId, s.title)));
-    else row.append(mkBtn('Try again', 'btn', () => startSignIn(s.accountId, s.title)), mkBtn('Close', 'btn', closeSignIn));
-    s.body.replaceChildren(row);
-    row.querySelector('button').focus();
-    return;
-  }
-  if (v.url) {
-    const step = mk('div', 'step'), open = mk('a', 'btn', 'Open the sign-in page'), r = mk('div', 'pact');
-    open.href = v.url; open.target = '_blank'; open.rel = 'noopener noreferrer';
-    r.append(open, copyBtn(v.url, 'Copy link'));
-    step.append(mk('b', '', '1. Sign in'), r);
-    if (v.qrSvg) {
-      const det = mk('details'), qr = mk('div', 'qr');
-      qr.innerHTML = v.qrSvg; // rendered by the server's qrcode library from the URL
-      det.append(mk('summary', '', 'On another device? Scan this'), qr);
-      step.append(det);
-    }
-    parts.push(step);
-  }
-  if (v.code) {
-    const st = mk('div', 'step'), rr = mk('div', 'pact');
-    rr.append(mk('code', 'code', v.code), copyBtn(v.code, 'Copy code'));
-    st.append(mk('b', '', '2. Enter this code on that page'), rr, mk('p', 'hint', 'It expires in 15 minutes.'));
-    parts.push(st);
-  }
-  if (v.needsCode) {
-    const f = mk('form', 'step'), input = mk('input'), send = mk('button', 'btn', 'Sign in');
-    input.placeholder = 'Paste the code from the sign-in page'; input.autocomplete = 'off'; input.spellcheck = false;
-    input.setAttribute('autocapitalize', 'off'); input.setAttribute('aria-label', 'Sign-in code');
-    send.type = 'submit';
-    f.append(mk('b', '', '2. Paste the code it shows you'), input, send);
-    f.onsubmit = async e => {
-      e.preventDefault();
-      const code = input.value.trim();
-      if (!code || !s.view) return;
-      send.disabled = true;
-      const r = await acctApi('/api/plans/logins/' + encodeURIComponent(s.view.id) + '/code', {method: 'POST', body: {code}});
-      send.disabled = false;
-      if (sign !== s) return;
-      if (!r.ok) { s.status.textContent = r.error; s.status.className = 'status failed'; return; }
-      signRender(r.data);
-    };
-    parts.push(f);
-  }
-  if (!parts.length) parts.push(mk('p', 'hint', 'Waiting for the sign-in page…'));
-  parts.push(mkBtn('Cancel sign-in', 'btn', closeSignIn));
-  s.body.replaceChildren(...parts);
-}
-function stopSignIn() {
-  const s = sign;
-  if (!s) return;
-  sign = null;
-  clearInterval(s.timer);
-  if (s.view && s.view.id && !SETTLED.includes(s.view.state)) acctApi('/api/plans/logins/' + encodeURIComponent(s.view.id), {method: 'DELETE'});
-}
-function closeSignIn() {
-  stopSignIn();
-  const dlg = document.getElementById('signDlg');
-  dlg.onclose = null;
-  if (dlg.open) dlg.close();
-}
-document.getElementById('addAcct').onclick = openAdd;
-function burnChart(svg, p) {
-  const W = 320, Hh = 120, L = 28, R = 8, T = 8, Bm = 18, pts0 = p.points || [];
-  const s = p.weekStart, e = p.reset, ymax = Math.max(100, Math.ceil((p.proj || 0) / 25) * 25);
-  const X = t => L + (t - s) / (e - s) * (W - L - R), Y = v => T + (1 - v / ymax) * (Hh - T - Bm);
-  let g = '';
-  [0, 50, 100].concat(ymax > 100 ? [ymax] : []).forEach(v => {
-    g += `<line x1="${L}" x2="${W - R}" y1="${Y(v)}" y2="${Y(v)}" stroke="${css(v === 100 ? '--bad' : '--grid')}" ${v === 100 ? 'stroke-dasharray="4 3"' : ''}/>`;
-    g += `<text x="${L - 4}" y="${Y(v) + 3}" font-size="9" text-anchor="end" fill="${css('--faint')}">${v}%</text>`;
-  });
-  for (let d = startOfDay(s) + D; d < e; d += D) g += `<text x="${X(d + 12 * H)}" y="${Hh - 5}" font-size="9" text-anchor="middle" fill="${css('--faint')}">${esc(fmt(d + H, {weekday: 'narrow'}))}</text>`;
-  const now = Date.now();
-  if (now > s && now < e) g += `<line x1="${X(now)}" x2="${X(now)}" y1="${T}" y2="${Hh - Bm}" stroke="${css('--now-line')}" opacity=".6"/>`;
-  const pts = pts0.map(q => `${X(q.t).toFixed(1)},${Y(q.used).toFixed(1)}`).join(' ');
-  const last = pts0[pts0.length - 1] || {t: p.at, used: p.used};
-  const projEnd = Math.min(ymax, last.used + (p.rate || 0) * (e - last.t) / H);
-  const area = pts0.length ? `${X(pts0[0].t)},${Y(0)} ${pts} ${X(last.t)},${Y(0)}` : '';
-  const c = css('--' + planRisk(p));
-  g += `<polygon points="${area}" fill="${c}" opacity=".12"/><polyline points="${pts}" fill="none" stroke="${c}" stroke-width="2"/>`;
-  g += `<line x1="${X(last.t)}" y1="${Y(last.used)}" x2="${X(e)}" y2="${Y(projEnd)}" stroke="${c}" stroke-width="1.6" stroke-dasharray="2 4"/>`;
-  if (p.runsOut && p.runsOut < e) g += `<circle cx="${X(p.runsOut)}" cy="${Y(100)}" r="4" fill="${css('--bad')}"/>`;
-  g += `<circle cx="${X(last.t)}" cy="${Y(last.used)}" r="3.2" fill="${c}"/>`;
-  svg.innerHTML = g;
-}
-
-/* ---------- People ---------- */
-function ring(done, planned, color) {
-  const r = 26, C = 2 * Math.PI * r, f = planned ? done / planned : 0;
-  return `<svg viewBox="0 0 64 64" width="64" height="64"><circle cx="32" cy="32" r="${r}" fill="none" stroke="${css('--grid')}" stroke-width="7"/>
-    <circle cx="32" cy="32" r="${r}" fill="none" stroke="${color}" stroke-width="7" stroke-linecap="round" stroke-dasharray="${C * f} ${C}" transform="rotate(-90 32 32)"/>
-    <text x="32" y="36" text-anchor="middle" font-size="13" font-weight="700" fill="${css('--fg')}" font-family="${css('--mono')}">${planned ? done + '/' + planned : '–'}</text></svg>`;
-}
-function agents() {
-  const st = {running: ['--good', 'working', 'good'], idle: ['--plan', 'idle', 'warn'], gone: ['--bad', 'down', 'bad']};
-  const el = document.getElementById('agents');
-  if (!roster().length) { el.innerHTML = '<div class="empty">No people yet.</div>'; return; }
-  const today = startOfDay(Date.now()), issues = B.issues || [];
-  el.innerHTML = roster().map(r => {
-    const [cv, label, bc] = st[r.state] || st.idle, c = css(cv);
-    const note = (B.agents && B.agents[r.id]) || null, p = B.pace && B.pace.owners && B.pace.owners[r.id];
-    const mine = issues.filter(i => ownerKey(i) === r.id && i.status !== 'wontdo');
-    const td = mine.filter(i => Number.isFinite(i.end) && i.end >= today && i.end < today + D);
-    const two = mine.filter(i => Number.isFinite(i.end) && i.end >= today - D && i.end < today + 14 * D);
-    const od = p ? p.overdue : 0;
-    return `<div class="agent">${ring(td.filter(i => i.status === 'done').length, td.length, c)}<div style="min-width:0">
-      <h3><span class="dot" style="background:${c}"></span>${esc(r.name)} <span class="badge ${bc}">${label}</span>${p ? paceBadge(p) : ''}</h3>
-      <div class="role">${esc(r.position || '')}${r.coordinator ? ' · coordinator' : ''}</div>
-      <div class="focus">${esc((note && note.focus) || '')}</div>
-      <div class="nums"><span><b>${od}</b> overdue${od ? ' (' + Math.round(p.overdueHours) + 'h)' : ''}</span><span><b>${p ? p.early : 0}</b> early</span><span><b>${two.filter(i => i.status === 'done').length}/${two.length}</b> 2-wk items</span></div>
-      ${note && note.receipts && note.receipts.length ? `<ul>${note.receipts.map(x => `<li>${esc(x)}</li>`).join('')}</ul>` : ''}</div></div>`;
   }).join('');
 }
 

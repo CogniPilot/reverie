@@ -4,7 +4,7 @@
 > Test case: `~/codeman-cases/agent-teams-test/`
 > Team name: `research-watchers`
 > Teammates: 3 (fs-researcher, perf-researcher, api-researcher)
-> Lead session: `461daa80-94ec-4e5e-a1bb-0518f78311bc`
+> Lead session: `00000014-001a-4000-8000-000000000024`
 > Duration: ~3 minutes (06:45:01 → 06:48:07)
 
 ## Pre-Experiment State
@@ -57,8 +57,8 @@ Name the team research-watchers.
 Subagent transcripts also appear in the standard subagent directory:
 ```
 ~/.claude/projects/-home-arkon-codeman-cases-agent-teams-test/
-└── 461daa80.../
-    ├── 461daa80...jsonl                 # Lead session transcript
+└── 00000014.../
+    ├── 00000014...jsonl                 # Lead session transcript
     └── subagents/
         ├── agent-ae50544.jsonl          # Teammate: fs-researcher
         ├── agent-aa20c65.jsonl          # Teammate: perf-researcher
@@ -147,7 +147,7 @@ Agent: a29de32  Status: active  Tools: 7   Model: claude-opus-4-6
     "description": "Research team investigating file watching mechanisms...",
     "createdAt": 1770875105373,
     "leadAgentId": "team-lead@research-watchers",
-    "leadSessionId": "461daa80-94ec-4e5e-a1bb-0518f78311bc",
+    "leadSessionId": "00000014-001a-4000-8000-000000000024",
     "members": [
         {
             "agentId": "team-lead@research-watchers",
@@ -310,7 +310,7 @@ Observations:
 ```
 # Only 2 claude processes (both Codeman sessions, none for teammates):
 25405 claude --dangerously-skip-permissions --session-id 236f004f...  (our main session)
-383633 claude --dangerously-skip-permissions --session-id 461daa80... (test session + 3 teammates)
+383633 claude --dangerously-skip-permissions --session-id 00000014... (test session + 3 teammates)
 
 # Process tree for test session:
 claude(383633)─┬─{claude}(383635)
@@ -336,8 +336,8 @@ claude(383633)─┬─{claude}(383635)
 Since teammates are threads in the lead's process (PID 383633), they share the exact same environment:
 ```
 CODEMAN_SCREEN=1
-CODEMAN_SESSION_ID=461daa80-94ec-4e5e-a1bb-0518f78311bc
-CODEMAN_SCREEN_NAME=codeman-461daa80
+CODEMAN_SESSION_ID=00000014-001a-4000-8000-000000000024
+CODEMAN_SCREEN_NAME=codeman-00000014
 CODEMAN_API_URL=http://localhost:3000
 ```
 

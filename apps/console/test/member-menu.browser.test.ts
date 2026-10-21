@@ -8,7 +8,7 @@ const publicDir = resolve(import.meta.dirname, '../src/web/public');
 const read = (name: string) => readFileSync(resolve(publicDir, name), 'utf8');
 const harness = readFileSync(resolve(import.meta.dirname, 'helpers/chat-app-harness.mjs'), 'utf8');
 const appStub = harness.match(/window\.eval\(`([\s\S]*?)`\);/)![1];
-const A = 'a1111111-0000-4000-8000-000000000001';
+const A = '00000026-002d-4000-8000-00000000003c';
 
 describe('member menu and profile in Chromium', () => {
   let browser: Browser;

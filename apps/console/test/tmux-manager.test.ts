@@ -131,9 +131,9 @@ describe('TmuxManager (unit)', () => {
 
   describe('Codex command builder', () => {
     it('controls decorative TUI animation through Codex config', () => {
-      expect(buildCodexCommand({ animations: false })).toBe('codex --config tui.animations=false');
-      expect(buildCodexCommand({ animations: true })).toBe('codex --config tui.animations=true');
-      expect(buildCodexCommand()).toBe('codex');
+      expect(buildCodexCommand({ animations: false })).toBe('codex --no-daemon --config tui.animations=false');
+      expect(buildCodexCommand({ animations: true })).toBe('codex --no-daemon --config tui.animations=true');
+      expect(buildCodexCommand()).toBe('codex --no-daemon');
     });
   });
 
@@ -271,14 +271,14 @@ describe('TmuxManager (unit)', () => {
 
   describe('getAttachArgs', () => {
     it('should attach every session through the dedicated Codeman socket', () => {
-      const args = manager.getAttachArgs('codeman-abc12345');
-      expect(args).toEqual(['-L', 'fleet', 'attach-session', '-t', 'codeman-abc12345']);
+      const args = manager.getAttachArgs('codeman-00000030');
+      expect(args).toEqual(['-L', 'fleet', 'attach-session', '-t', 'codeman-00000030']);
     });
 
     it('should attach registered sessions on the same dedicated socket (no per-session socket)', () => {
       manager.registerSession({
         sessionId: 'some-session',
-        muxName: 'codeman-abc12345',
+        muxName: 'codeman-00000030',
         pid: 12345,
         createdAt: Date.now(),
         workingDir: '/tmp',
@@ -286,27 +286,27 @@ describe('TmuxManager (unit)', () => {
         attached: false,
       });
 
-      const args = manager.getAttachArgs('codeman-abc12345');
-      expect(args).toEqual(['-L', 'fleet', 'attach-session', '-t', 'codeman-abc12345']);
+      const args = manager.getAttachArgs('codeman-00000030');
+      expect(args).toEqual(['-L', 'fleet', 'attach-session', '-t', 'codeman-00000030']);
     });
   });
 
   describe('window sizing', () => {
     it('pins a tmux window to manual sizing before browser attach', () => {
-      expect(manager.setManualWindowSize('codeman-abc12345')).toBe(true);
+      expect(manager.setManualWindowSize('codeman-00000030')).toBe(true);
 
       expect(mockedExecSync).toHaveBeenCalledWith(
-        "tmux -L 'fleet' set-window-option -t 'codeman-abc12345' window-size manual",
+        "tmux -L 'fleet' set-window-option -t 'codeman-00000030' window-size manual",
         expect.objectContaining({ stdio: 'ignore' })
       );
     });
 
     it('resizes the tmux window when Codeman accepts a desktop resize', () => {
-      expect(manager.resizeWindow('codeman-abc12345', 140, 42)).toBe(true);
+      expect(manager.resizeWindow('codeman-00000030', 140, 42)).toBe(true);
 
       // Non-blocking exec (not execSync) on the interactive resize hot path.
       expect(mockedExec).toHaveBeenCalledWith(
-        "tmux -L 'fleet' resize-window -t 'codeman-abc12345' -x 140 -y 42",
+        "tmux -L 'fleet' resize-window -t 'codeman-00000030' -x 140 -y 42",
         expect.objectContaining({ timeout: expect.any(Number) }),
         expect.any(Function)
       );
@@ -319,7 +319,7 @@ describe('TmuxManager (unit)', () => {
         manager as unknown as {
           buildEnvExports(sessionId: string, muxName: string, mode: string): string[];
         }
-      ).buildEnvExports('session-1', 'codeman-abc12345', mode);
+      ).buildEnvExports('session-1', 'codeman-00000030', mode);
 
     it('keeps COLORTERM unset for OpenCode sessions', () => {
       expect(callBuildEnvExports('opencode')).toContain('unset COLORTERM');
@@ -746,7 +746,7 @@ describe('TmuxManager (unit)', () => {
 
       try {
         const session = await nonTestManager.createSession({
-          sessionId: 'abc12345-1234-5678-90ab-cdef12345678',
+          sessionId: '00000030-003b-4000-8000-000000000055',
           workingDir: '/mnt/gdrive/project with spaces',
           mode: 'shell',
           historyLimit: 250_000,
@@ -759,14 +759,14 @@ describe('TmuxManager (unit)', () => {
           ([cmd]) => typeof cmd === 'string' && cmd.includes(' new-session ')
         );
         expect(newSessionCall?.[0]).toBe(
-          `tmux -L 'fleet' set-option -g history-limit 250000 \\; new-session -ds "codeman-abc12345" -c /tmp \\; set-option -t "codeman-abc12345" history-limit 250000`
+          `tmux -L 'fleet' set-option -g history-limit 250000 \\; new-session -ds "codeman-00000030" -c /tmp \\; set-option -t "codeman-00000030" history-limit 250000`
         );
         expect(newSessionCall?.[1]).toEqual(expect.objectContaining({ cwd: '/tmp' }));
 
         const respawnCall = mockedExecSync.mock.calls.find(
           ([cmd]) => typeof cmd === 'string' && cmd.includes(' respawn-pane ')
         );
-        expect(respawnCall?.[0]).toContain(`tmux -L 'fleet' respawn-pane -k -c /tmp -t "codeman-abc12345"`);
+        expect(respawnCall?.[0]).toContain(`tmux -L 'fleet' respawn-pane -k -c /tmp -t "codeman-00000030"`);
         expect(respawnCall?.[0]).toContain('cd \\"/mnt/gdrive/project with spaces\\" &&');
       } finally {
         nonTestManager.destroy();
@@ -801,7 +801,7 @@ describe('TmuxManager (unit)', () => {
 
       try {
         await nonTestManager.createSession({
-          sessionId: 'def67890-1234-5678-90ab-cdef12345678',
+          sessionId: '00000044-0056-4000-8000-000000000082',
           workingDir: '/project',
           mode: 'shell',
           historyLimit: 250_000,
@@ -810,7 +810,7 @@ describe('TmuxManager (unit)', () => {
           ([cmd]) => typeof cmd === 'string' && cmd.includes(' new-session ')
         );
         expect(newSessionCall?.[0]).toBe(
-          `tmux -L 'fleet' new-session -ds "codeman-def67890" -c /tmp \\; set-option -t "codeman-def67890" history-limit 250000`
+          `tmux -L 'fleet' new-session -ds "codeman-00000044" -c /tmp \\; set-option -t "codeman-00000044" history-limit 250000`
         );
         expect(newSessionCall?.[0]).not.toContain('set-option -g');
 
@@ -819,7 +819,7 @@ describe('TmuxManager (unit)', () => {
         const historyCall = mockedExec.mock.calls.find(
           ([cmd]) => typeof cmd === 'string' && cmd.includes(' history-limit ')
         );
-        expect(historyCall?.[0]).toBe(`tmux -L 'fleet' set-option -t 'codeman-def67890' history-limit 200000`);
+        expect(historyCall?.[0]).toBe(`tmux -L 'fleet' set-option -t 'codeman-00000044' history-limit 200000`);
         expect(historyCall?.[0]).not.toContain('set-option -g');
       } finally {
         nonTestManager.destroy();

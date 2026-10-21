@@ -8,9 +8,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ChatroomService } from '../src/chatroom-service.js';
 
-const A = 'aaaaaaaa-0000-4000-8000-000000000001';
-const B = 'bbbbbbbb-0000-4000-8000-000000000002';
-const C = 'cccccccc-0000-4000-8000-000000000003';
+const A = '0000002d-0035-4000-8000-000000000047';
+const B = '00000038-0043-4000-8000-000000000060';
+const C = '0000003e-004c-4000-8000-00000000006f';
 
 describe('offline members keep their names', () => {
   let file: string;

@@ -43,6 +43,10 @@ import { getErrorMessage } from './types.js';
 import { CODEX_REASONING_EFFORTS } from './types/session.js';
 import { stripAnsi as stripAnsiSequences } from './utils/regex-patterns.js';
 import { quoteForPane } from './pane-quote.js';
+import { pronounsProblem, pronounsProposal } from './pronouns.js';
+
+/** A chat message id, as the server stores it. */
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Context and guard
@@ -831,6 +835,8 @@ interface ChatMemberRow {
   goal: string;
   progress: string;
   away?: string;
+  /** Owner-set, from the member's employee record. */
+  pronouns?: string;
   alive?: boolean;
   working?: boolean;
   updatedAt?: number;
@@ -888,7 +894,7 @@ function chatRoomLabel(room: ChatRoomRow): string {
 export async function resolveChatRoom(
   deps: AgentDeps,
   room: string | undefined
-): Promise<{ room: ChatRoomRow } | { error: string; code: number }> {
+): Promise<{ room: ChatRoomRow; ownerNames?: string[] } | { error: string; code: number }> {
   const res = await deps.request(deps.ctx, {
     method: 'GET',
     path: '/api/v1/chatrooms',
@@ -896,6 +902,12 @@ export async function resolveChatRoom(
   });
   if (!res.json?.success) return { error: describeFailure(res), code: EXIT.error };
   const rooms = ((res.json.data as { rooms?: ChatRoomRow[] } | undefined)?.rooms ?? []) as ChatRoomRow[];
+  // What the owner is called in a room (company settings), when the server says, for a line that @mentions them.
+  const listed = (res.json.data as { ownerNames?: unknown } | undefined)?.ownerNames;
+  const ownerNames = Array.isArray(listed)
+    ? listed.filter((n): n is string => typeof n === 'string' && !!n.trim())
+    : [];
+  const found = (r: ChatRoomRow) => (ownerNames.length ? { room: r, ownerNames } : { room: r });
   const lastDelivery = (res.json.data as { lastDelivery?: { roomIds?: string[] } | null } | undefined)?.lastDelivery;
   if (room) {
     const matching = (ref: string) => {
@@ -911,11 +923,11 @@ export async function resolveChatRoom(
     // The value as given first (a room may be named "DM:ops"); then the `DM:<roomId>` form a delivered DM header uses.
     let matches = matching(room);
     if (matches.length === 0 && /^DM:/i.test(room.trim())) matches = matching(room.trim().slice(3));
-    if (matches.length === 1) return { room: matches[0] };
+    if (matches.length === 1) return found(matches[0]);
     if (matches.length === 0) return { error: `no chatroom matches "${room}"`, code: EXIT.error };
     return { error: `"${room}" matches ${matches.length} chatrooms; use the id`, code: EXIT.error };
   }
-  if (rooms.length === 1) return { room: rooms[0] };
+  if (rooms.length === 1) return found(rooms[0]);
   if (rooms.length === 0) {
     return { error: 'this session is not in any chatroom (the user or a coordinator adds it)', code: EXIT.error };
   }
@@ -923,7 +935,7 @@ export async function resolveChatRoom(
   const addressed = (lastDelivery?.roomIds ?? []).map((id) => rooms.find((r) => r.id === id)).filter((r): r is ChatRoomRow => !!r);
   if (addressed.length === 1) {
     if (!deps.json) deps.io.err(palette.muted(`using "${addressed[0].name}", the room you were last addressed in (--room picks another)`));
-    return { room: addressed[0] };
+    return found(addressed[0]);
   }
   const list = rooms.map((r) => `"${r.name}"`).join(', ');
   const bundle = addressed.length > 1 ? `; your last prompt bundled messages from ${addressed.map((r) => `"${r.name}"`).join(' and ')}` : '';
@@ -1206,8 +1218,19 @@ const TO_IGNORED_NOTE = '--to is ignored: everyone in a channel reads every mess
 /** `agent chat say` — post to the room, always to everyone (`--to` is accepted and ignored: nothing an agent posts is private in a channel). */
 export async function agentChatSay(
   deps: AgentDeps,
-  options: { room?: string; to?: string; text: string; files?: string[]; readFile?: (path: string) => Promise<Buffer> }
+  options: {
+    room?: string;
+    to?: string;
+    text: string;
+    files?: string[];
+    /** The id of the message this post answers (a spoken turn waits for exactly this link). */
+    replyTo?: string;
+    readFile?: (path: string) => Promise<Buffer>;
+  }
 ): Promise<number> {
+  // Refused before anything is uploaded or posted, so a bad id never turns into an unlinked answer.
+  if (options.replyTo !== undefined && !UUID_RE.test(options.replyTo))
+    return fail(deps, `refusing: --reply-to needs a message id, got ${JSON.stringify(options.replyTo).slice(0, 80)}`, EXIT.refused);
   const target = await resolveChatRoom(deps, options.room);
   if ('error' in target) return fail(deps, target.error, target.code);
   // Each --file is copied into the room's attachment store first, then the message names them.
@@ -1235,6 +1258,7 @@ export async function agentChatSay(
     body: {
       text: options.text,
       ...(attachments.length ? { attachments } : {}),
+      ...(options.replyTo !== undefined ? { replyTo: options.replyTo } : {}),
     },
   });
   if (!res.json?.success) return fail(deps, describeFailure(res));
@@ -1280,9 +1304,29 @@ export function guessContentType(path: string): string {
 }
 
 /** `agent chat read` — recent history. */
-export async function agentChatRead(deps: AgentDeps, options: { room?: string; limit: number }): Promise<number> {
+export async function agentChatRead(deps: AgentDeps, options: { room?: string; limit: number; message?: string; acknowledge?: boolean }): Promise<number> {
+  if (options.acknowledge && !options.message) return fail(deps, '--acknowledge requires --message');
   const target = await resolveChatRoom(deps, options.room);
   if ('error' in target) return fail(deps, target.error, target.code);
+  if (options.message) {
+    const path = `/api/v1/chatrooms/${encodeURIComponent(target.room.id)}/messages/${encodeURIComponent(options.message)}`;
+    const exact = await deps.request(deps.ctx, { method: 'GET', path });
+    if (!exact.json?.success) return fail(deps, describeFailure(exact));
+    const data = exact.json.data as { message?: ChatMessageRow; readToken?: string } | undefined;
+    if (data?.message?.id !== options.message || typeof data.readToken !== 'string') return fail(deps, 'Unrecognized exact-message response; nothing acknowledged');
+    // Explicit acknowledgement follows receipt of this exact response, never a guessed timestamp or text match.
+    if (!deps.json) deps.io.out(formatChatMessage(data.message, target.room.members ?? []));
+    if (options.acknowledge) {
+      const ack = await deps.request(deps.ctx, { method: 'POST', path: path + '/read-ack', body: { readToken: data.readToken } });
+      const confirmed = ack.json?.success && (ack.json.data as { acknowledged?: string } | undefined)?.acknowledged === options.message;
+      if (!confirmed) {
+        if (deps.json) { emitJson(deps, { message: data.message, acknowledgementConfirmed: false }); return EXIT.error; }
+        return fail(deps, 'Acknowledgement not confirmed; inspect delivery-status before retrying');
+      }
+    }
+    if (deps.json) emitJson(deps, { message: data.message, acknowledgementConfirmed: !!options.acknowledge });
+    return EXIT.ok;
+  }
   const res = await deps.request(deps.ctx, {
     method: 'GET',
     path: `/api/v1/chatrooms/${encodeURIComponent(target.room.id)}/messages`,
@@ -1405,6 +1449,8 @@ export async function agentChatWho(deps: AgentDeps, options: { room?: string; na
     const state = m.alive === false ? 'gone' : m.working ? 'working' : 'idle';
     const me = m.sessionId === deps.ctx.selfId ? ' (you)' : '';
     deps.io.out(`${m.sessionId.slice(0, 8)}  ${m.icon ? `${quoteForPane(m.icon, 8)} ` : ''}${quoteForPane(m.name, 80)}${me}  [${m.role}, ${state}]`);
+    // Owner-set pronouns (your own too, so you know how you are referred to): use them when you write about a member.
+    if (m.pronouns) deps.io.out(`    pronouns: ${quoteForPane(m.pronouns, 40)}`);
     if (m.away) deps.io.out(`    away: ${quoteForPane(m.away, 500)}`);
     deps.io.out(`    goal: ${m.goal ? quoteForPane(m.goal, 500) : '-'}`);
     deps.io.out(`    progress: ${m.progress ? quoteForPane(m.progress, 500) : '-'}`);
@@ -1438,7 +1484,10 @@ export async function agentChatStatus(
   return EXIT.ok;
 }
 
-/** `agent profile` — change this session's own display name and/or icon (nothing else, no one else). */
+/**
+ * `agent profile` — change this session's own display name and/or icon (nothing else, no one else). `--pronouns` changes
+ * nothing: pronouns are set by the owner, so it posts a proposal in the room that the owner's member card offers to set.
+ */
 export async function agentProfile(
   deps: AgentDeps,
   options: {
@@ -1446,18 +1495,27 @@ export async function agentProfile(
     icon?: string;
     image?: string;
     clearImage?: boolean;
+    pronouns?: string;
+    room?: string;
     readFile?: (path: string) => Promise<Buffer>;
   }
 ): Promise<number> {
   const textual = options.name !== undefined || options.icon !== undefined;
-  if (!textual && options.image === undefined && !options.clearImage) {
-    return fail(deps, 'give --name, --icon, --image, --clear-image, or several', EXIT.refused);
+  if (!textual && options.image === undefined && !options.clearImage && options.pronouns === undefined) {
+    return fail(deps, 'give --name, --icon, --image, --clear-image, --pronouns, or several', EXIT.refused);
   }
   if (options.image !== undefined && options.clearImage) {
     return fail(deps, 'give --image or --clear-image, not both', EXIT.refused);
   }
+  const pronouns = options.pronouns?.trim();
+  if (pronouns !== undefined && (textual || options.image !== undefined || options.clearImage)) {
+    return fail(deps, '--pronouns only posts a proposal; give it on its own', EXIT.refused);
+  }
+  const problem = pronouns === undefined ? undefined : pronounsProblem(pronouns);
+  if (problem) return fail(deps, `refusing: ${problem}`, EXIT.refused);
   if (!deps.ctx.selfId)
     return fail(deps, 'run this inside a Reverie agent session (CODEMAN_SESSION_ID is not set)', EXIT.refused);
+  if (pronouns !== undefined) return proposePronouns(deps, pronouns, options.room);
   let image: Buffer | undefined;
   if (options.image !== undefined) {
     try {
@@ -1501,6 +1559,19 @@ export async function agentProfile(
     deps.io.out(palette.ok(`${GLYPH.ok} profile updated: ${parts.filter(Boolean).join(', ')}${rooms}`));
   }
   return EXIT.ok;
+}
+
+/**
+ * Post `<name> proposes pronouns: <text> (@<owner> can set them on my member card)` in the room (the one room this session is
+ * in, the one it was last addressed in, or --room), through `agent chat say`. Nothing is written to the employee record.
+ */
+async function proposePronouns(deps: AgentDeps, pronouns: string, room: string | undefined): Promise<number> {
+  const target = await resolveChatRoom(deps, room);
+  if ('error' in target) return fail(deps, target.error, target.code);
+  const me = target.room.members.find((m) => m.sessionId === deps.ctx.selfId);
+  if (!me) return fail(deps, 'you are not a member of this room', EXIT.refused);
+  const owner = target.ownerNames?.[0] ? `@${target.ownerNames[0].trim()}` : '@owner';
+  return agentChatSay(deps, { room: target.room.id, text: pronounsProposal(me.name, pronouns, owner) });
 }
 
 /** `agent chat new` — a coordinator creates a room it will coordinate. */
@@ -1739,6 +1810,306 @@ export async function runAgentVerb(json: boolean, verb: (deps: AgentDeps) => Pro
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Routines (`routine …`): a message that posts itself on a schedule, as the agent that made it
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** The shortest repeat the server accepts from an agent; checked here too so the error comes before a request. */
+export const ROUTINE_MIN_EVERY_MINUTES = 5;
+
+interface RoutineRow {
+  id: string;
+  name: string;
+  roomId?: string;
+  postText?: string;
+  scheduleType: string;
+  intervalMinutes?: number;
+  dailyTime?: string;
+  weeklyDays?: number[];
+  weeklyTime?: string;
+  timeZone?: string;
+  enabled: boolean;
+  nextRunAt?: number | null;
+  lastStatus?: string | null;
+  lastRunAt?: number | null;
+  createdBy?: { employeeId: string };
+}
+
+export type RoutineSchedule =
+  | { scheduleType: 'interval'; intervalMinutes: number }
+  | { scheduleType: 'daily'; dailyTime: string }
+  | { scheduleType: 'weekly'; weeklyDays: number[]; weeklyTime: string };
+
+const hhmm = (h: number, m: number): string => `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+
+function parseClock(raw: string): string | undefined {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(raw.trim());
+  if (!m) return undefined;
+  const h = Number(m[1]);
+  const min = Number(m[2]);
+  return h < 24 && min < 60 ? hhmm(h, min) : undefined;
+}
+
+/**
+ * Turn the schedule flags into the server's schedule fields, or say why not. Exactly one of --every, --daily, --weekdays, --cron.
+ * The engine has interval, daily and weekly schedules, not a cron string, so --cron is accepted only where it means one of those
+ * ("M H * * *" daily; "M H * * 1-5" or a day list weekly) and refused, with the reason, for anything else.
+ */
+export function parseRoutineSchedule(o: { every?: string; daily?: string; weekdays?: string; cron?: string }): RoutineSchedule | { error: string } {
+  const given = [o.every, o.daily, o.weekdays, o.cron].filter((v) => v !== undefined);
+  if (given.length !== 1) return { error: 'give exactly one of --every, --daily, --weekdays or --cron' };
+  if (o.every !== undefined) {
+    const m = /^(\d+)\s*([mhd])$/.exec(o.every.trim().toLowerCase());
+    if (!m) return { error: '--every takes a number and m, h or d, for example 30m, 2h or 1d' };
+    const minutes = Number(m[1]) * { m: 1, h: 60, d: 1440 }[m[2] as 'm' | 'h' | 'd'];
+    if (minutes < ROUTINE_MIN_EVERY_MINUTES) return { error: `a routine repeats at most every ${ROUTINE_MIN_EVERY_MINUTES} minutes` };
+    if (minutes > 525600) return { error: '--every is at most 365 days' };
+    return { scheduleType: 'interval', intervalMinutes: minutes };
+  }
+  if (o.daily !== undefined) {
+    const t = parseClock(o.daily);
+    return t ? { scheduleType: 'daily', dailyTime: t } : { error: '--daily takes a 24-hour time such as 09:00' };
+  }
+  if (o.weekdays !== undefined) {
+    const t = parseClock(o.weekdays);
+    return t ? { scheduleType: 'weekly', weeklyDays: [1, 2, 3, 4, 5], weeklyTime: t } : { error: '--weekdays takes a 24-hour time such as 09:00' };
+  }
+  const refusal = (why: string): { error: string } => ({
+    error: `--cron "${o.cron}" cannot be scheduled: ${why}. Routines run every N minutes/hours/days, daily, or weekly (use --every, --daily or --weekdays, or "M H * * *" / "M H * * 1-5")`,
+  });
+  const f = (o.cron ?? '').trim().split(/\s+/);
+  if (f.length !== 5) return refusal('a cron line has five fields');
+  const [min, hour, dom, mon, dow] = f as [string, string, string, string, string];
+  if (!/^\d{1,2}$/.test(min) || !/^\d{1,2}$/.test(hour)) return refusal('minute and hour must be single numbers');
+  const t = parseClock(`${hour}:${min.padStart(2, '0')}`);
+  if (!t) return refusal('the time is out of range');
+  if (dom !== '*' || mon !== '*') return refusal('day-of-month and month must be *');
+  if (dow === '*') return { scheduleType: 'daily', dailyTime: t };
+  const days = new Set<number>();
+  for (const part of dow.split(',')) {
+    const r = /^([0-7])(?:-([0-7]))?$/.exec(part);
+    if (!r) return refusal('day-of-week must be * or numbers, ranges and lists such as 1-5 or 1,3');
+    const a = Number(r[1]);
+    const b = r[2] === undefined ? a : Number(r[2]);
+    if (b < a) return refusal('a day range must run upward');
+    for (let d = a; d <= b; d++) days.add(d % 7);
+  }
+  return { scheduleType: 'weekly', weeklyDays: [...days].sort((x, y) => x - y), weeklyTime: t };
+}
+
+const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+function routineWhen(j: RoutineRow): string {
+  if (j.scheduleType === 'interval') {
+    const m = j.intervalMinutes ?? 0;
+    return m % 1440 === 0 ? `every ${m / 1440}d` : m % 60 === 0 ? `every ${m / 60}h` : `every ${m}m`;
+  }
+  const zone = j.timeZone ? ` ${j.timeZone}` : '';
+  if (j.scheduleType === 'daily') return `daily ${j.dailyTime ?? ''}${zone}`;
+  if (j.scheduleType === 'weekly') {
+    const days = (j.weeklyDays ?? []).join(',') === '1,2,3,4,5' ? 'weekdays' : (j.weeklyDays ?? []).map((d) => DAY_NAMES[d]).join(',');
+    return `${days} ${j.weeklyTime ?? ''}${zone}`;
+  }
+  return j.scheduleType;
+}
+
+function routineNext(j: RoutineRow): string {
+  if (!j.enabled) return 'off';
+  if (!j.nextRunAt) return 'none scheduled';
+  const zone = j.timeZone || 'UTC';
+  try {
+    const text = new Intl.DateTimeFormat('en-GB', { timeZone: zone, weekday: 'short', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(j.nextRunAt));
+    return `${text} ${zone}`;
+  } catch {
+    return new Date(j.nextRunAt).toISOString();
+  }
+}
+
+function routineLine(j: RoutineRow, roomName: (id?: string) => string): string {
+  return `${j.id.slice(0, 8)}  ${j.enabled ? 'on ' : 'off'}  ${routineWhen(j)}  ${roomName(j.roomId)}  next: ${routineNext(j)}  ${quoteForPane(j.name, 60)}`;
+}
+
+/** The caller's routine with this id (or an 8+ character prefix of it), among the ones it may see. */
+async function resolveRoutine(deps: AgentDeps, ref: string): Promise<{ job: RoutineRow } | { error: string; code: number }> {
+  if (ref.trim().length < 8) return { error: `refusing: "${ref}" is shorter than 8 characters; use the id \`routine list\` prints`, code: EXIT.refused };
+  const res = await deps.request(deps.ctx, { method: 'GET', path: '/api/v1/cron/jobs' });
+  if (!res.json?.success) return { error: describeFailure(res), code: EXIT.error };
+  const rows = ((res.json.data as RoutineRow[] | undefined) ?? []).filter((j) => (j as { action?: string }).action === 'post' && j.id.startsWith(ref.trim()));
+  if (rows.length === 1) return { job: rows[0] as RoutineRow };
+  if (rows.length === 0) return { error: `no routine of yours starts with "${ref}" (see \`routine list\`)`, code: EXIT.error };
+  return { error: `"${ref}" is ambiguous: ${rows.map((r) => r.id.slice(0, 13)).join(', ')}`, code: EXIT.error };
+}
+
+/** `routine add` — schedule a message in a room you are in. The server sets the author (you) and adds the "routine" label to each post. */
+export async function routineAdd(
+  deps: AgentDeps,
+  options: { room?: string; text: string; name?: string; disabled?: boolean; tz?: string } & Parameters<typeof parseRoutineSchedule>[0]
+): Promise<number> {
+  const text = options.text.trim();
+  if (!text) return fail(deps, 'refusing: empty routine text', EXIT.refused);
+  if (text.length > 2000) return fail(deps, 'a routine\'s text is at most 2000 characters', EXIT.refused);
+  if (/[\r\n]/.test(text)) return fail(deps, 'a routine is one line', EXIT.refused);
+  const schedule = parseRoutineSchedule(options);
+  if ('error' in schedule) return fail(deps, schedule.error, EXIT.refused);
+  const target = await resolveChatRoom(deps, options.room);
+  if ('error' in target) return fail(deps, target.error, target.code);
+  const res = await deps.request(deps.ctx, {
+    method: 'POST',
+    path: '/api/v1/cron/jobs',
+    body: {
+      // Without --name the label says only when it runs: the name is visible to other employees and the general, the text is not.
+      name: options.name ?? `routine ${routineWhen({ id: '', name: '', enabled: true, ...schedule, timeZone: options.tz ?? PLAN_ZONE })}`,
+      action: 'post',
+      roomId: target.room.id,
+      postText: text,
+      enabled: !options.disabled,
+      ...schedule,
+      timeZone: options.tz ?? PLAN_ZONE,
+    },
+  });
+  if (!res.json?.success) return fail(deps, describeFailure(res));
+  const job = (res.json.data as { job: RoutineRow }).job;
+  if (deps.json) emitJson(deps, job);
+  else {
+    deps.io.out(palette.ok(`${GLYPH.ok} routine ${job.id.slice(0, 8)} in "${chatRoomLabel(target.room)}": ${routineWhen(job)}, next ${routineNext(job)}`));
+  }
+  return EXIT.ok;
+}
+
+/** `routine list` — your routines; with --all, everyone's name, room and schedule (never their text). */
+export async function routineList(deps: AgentDeps, options: { all?: boolean } = {}): Promise<number> {
+  const res = await deps.request(deps.ctx, { method: 'GET', path: '/api/v1/cron/jobs', query: options.all ? { all: '1' } : undefined });
+  if (!res.json?.success) return fail(deps, describeFailure(res));
+  const rows = ((res.json.data as RoutineRow[] | undefined) ?? []).filter((j) => (j as { action?: string }).action === 'post');
+  if (deps.json) {
+    emitJson(deps, rows);
+    return EXIT.ok;
+  }
+  if (rows.length === 0) {
+    deps.io.out(palette.muted(options.all ? '(no routines)' : '(you have no routines; add one with `routine add`)'));
+    return EXIT.ok;
+  }
+  const rooms = await deps.request(deps.ctx, { method: 'GET', path: '/api/v1/chatrooms' });
+  const names = new Map(((rooms.json?.data as { rooms?: ChatRoomRow[] } | undefined)?.rooms ?? []).map((r) => [r.id, chatRoomLabel(r)]));
+  for (const j of rows) deps.io.out(routineLine(j, (id) => `"${(id && names.get(id)) || id?.slice(0, 8) || '?'}"`));
+  return EXIT.ok;
+}
+
+/** `routine show ID` — one routine in full. */
+export async function routineShow(deps: AgentDeps, options: { id: string }): Promise<number> {
+  const found = await resolveRoutine(deps, options.id);
+  if ('error' in found) return fail(deps, found.error, found.code);
+  const j = found.job;
+  if (deps.json) {
+    emitJson(deps, j);
+    return EXIT.ok;
+  }
+  deps.io.out(routineLine(j, (id) => id?.slice(0, 8) ?? '?'));
+  deps.io.out(`text: ${quoteForPane(j.postText ?? '', 2000)}`);
+  deps.io.out(`last: ${j.lastStatus ?? 'never run'}`);
+  return EXIT.ok;
+}
+
+async function routineChange(deps: AgentDeps, id: string, how: 'rm' | 'enable' | 'disable' | 'run'): Promise<number> {
+  const found = await resolveRoutine(deps, id);
+  if ('error' in found) return fail(deps, found.error, found.code);
+  const base = `/api/v1/cron/jobs/${encodeURIComponent(found.job.id)}`;
+  const res =
+    how === 'rm'
+      ? await deps.request(deps.ctx, { method: 'DELETE', path: base })
+      : how === 'run'
+        ? await deps.request(deps.ctx, { method: 'POST', path: `${base}/run` })
+        : await deps.request(deps.ctx, { method: 'PUT', path: `${base}/enabled`, body: { enabled: how === 'enable' } });
+  if (!res.json?.success) return fail(deps, describeFailure(res));
+  const verb = { rm: 'removed', enable: 'switched on', disable: 'switched off', run: 'ran' }[how];
+  if (deps.json) emitJson(deps, res.json.data ?? {});
+  else deps.io.out(palette.ok(`${GLYPH.ok} routine ${found.job.id.slice(0, 8)} ${verb}`));
+  if (how === 'run' && !deps.json) {
+    const run = (res.json.data as { run?: { status?: string; errorMessage?: string } } | undefined)?.run;
+    if (run?.status === 'failed') return fail(deps, `the post failed: ${run.errorMessage ?? 'unknown reason'}`);
+  }
+  return EXIT.ok;
+}
+
+export const routineRm = (deps: AgentDeps, o: { id: string }): Promise<number> => routineChange(deps, o.id, 'rm');
+export const routineEnable = (deps: AgentDeps, o: { id: string }): Promise<number> => routineChange(deps, o.id, 'enable');
+export const routineDisable = (deps: AgentDeps, o: { id: string }): Promise<number> => routineChange(deps, o.id, 'disable');
+export const routineRun = (deps: AgentDeps, o: { id: string }): Promise<number> => routineChange(deps, o.id, 'run');
+
+/** `routine runs ID` — the last fires of one routine, newest first. */
+export async function routineRuns(deps: AgentDeps, options: { id: string; count?: number }): Promise<number> {
+  const found = await resolveRoutine(deps, options.id);
+  if ('error' in found) return fail(deps, found.error, found.code);
+  const res = await deps.request(deps.ctx, { method: 'GET', path: `/api/v1/cron/jobs/${encodeURIComponent(found.job.id)}/runs` });
+  if (!res.json?.success) return fail(deps, describeFailure(res));
+  const runs = ((res.json.data as Array<{ startedAt: number; status: string; errorMessage?: string }> | undefined) ?? [])
+    .slice()
+    .sort((a, b) => b.startedAt - a.startedAt)
+    .slice(0, options.count ?? 20);
+  if (deps.json) {
+    emitJson(deps, runs);
+    return EXIT.ok;
+  }
+  if (runs.length === 0) deps.io.out(palette.muted('(never run)'));
+  for (const r of runs) deps.io.out(`${new Date(r.startedAt).toISOString()}  ${r.status}${r.errorMessage ? `  ${quoteForPane(r.errorMessage, 160)}` : ''}`);
+  return EXIT.ok;
+}
+
+function registerRoutineCommands(program: Command, run: typeof runAgentVerb): void {
+  const routine = program
+    .command('routine')
+    .description('Scheduled messages that post themselves in a room as you, labelled "routine" (yours only; the owner can turn this off)');
+  const json = '--json';
+  routine
+    .command('add [text...]')
+    .description('Schedule a message: add --room R --every 30m|--daily 09:00|--weekdays 09:00|--cron "M H * * 1-5" [--tz Zone] -- text')
+    .option('-r, --room <room>', 'Room id or name (default: the one room this session is in)')
+    .option('--every <span>', 'Repeat every N minutes/hours/days: 30m, 2h, 1d (at least 5m)')
+    .option('--daily <HH:MM>', 'Every day at this 24-hour time')
+    .option('--weekdays <HH:MM>', 'Monday to Friday at this 24-hour time')
+    .option('--cron <expr>', 'Five fields; only "M H * * *" (daily) and "M H * * days" (weekly) can be scheduled')
+    .option('--tz <zone>', 'IANA zone the daily/weekly time is read in (default America/New_York)')
+    .option('--name <name>', 'A short label (default: the start of the text)')
+    .option('--disabled', 'Create it switched off')
+    .option(json, 'Machine-readable output')
+    .action((words: string[], o: { room?: string; every?: string; daily?: string; weekdays?: string; cron?: string; tz?: string; name?: string; disabled?: boolean; json?: boolean }) =>
+      run(Boolean(o.json), (deps) => routineAdd(deps, { ...o, text: words.join(' ') }))
+    );
+  routine
+    .command('list')
+    .alias('ls')
+    .description('Your routines; --all adds everyone\'s name, room and schedule (never their text)')
+    .option('--all', 'Include other authors\' routines')
+    .option(json, 'Machine-readable output')
+    .action((o: { all?: boolean; json?: boolean }) => run(Boolean(o.json), (deps) => routineList(deps, o)));
+  routine
+    .command('show <id>')
+    .description('One routine in full')
+    .option(json, 'Machine-readable output')
+    .action((id: string, o: { json?: boolean }) => run(Boolean(o.json), (deps) => routineShow(deps, { id })));
+  for (const [verb, text, fn] of [
+    ['rm', 'Delete one of your routines', routineRm],
+    ['enable', 'Switch a routine on', routineEnable],
+    ['disable', 'Switch a routine off', routineDisable],
+    ['run', 'Post it once now', routineRun],
+  ] as const) {
+    routine
+      .command(`${verb} <id>`)
+      .description(text)
+      .option(json, 'Machine-readable output')
+      .action((id: string, o: { json?: boolean }) => run(Boolean(o.json), (deps) => fn(deps, { id })));
+  }
+  routine
+    .command('runs <id>')
+    .description('The last fires of one routine, newest first')
+    .option('-n, --count <n>', 'How many', '20')
+    .option(json, 'Machine-readable output')
+    .action((id: string, o: { count?: string; json?: boolean }) =>
+      run(Boolean(o.json), (deps) => routineRuns(deps, { id, count: parsePositiveInt(o.count, 20) }))
+    );
+}
+
+
 /** Register `codeman agent …` on the program. */
 export function registerAgentCommands(program: Command): Command {
   const agent = program
@@ -1746,6 +2117,7 @@ export function registerAgentCommands(program: Command): Command {
     .description('Talk to other sessions from inside one (any CLI mode): list, spawn, send, wait, read, interrupt, rm');
 
   const run = runAgentVerb;
+  registerRoutineCommands(program, run);
 
   const plans = program
     .command('plans')
@@ -1929,22 +2301,38 @@ export function registerAgentCommands(program: Command): Command {
   agent
     .command('profile')
     .description(
-      'Change your own Reverie display name, icon and/or profile image, everywhere it shows (only this session)'
+      'Change your own Reverie display name, icon and/or profile image, everywhere it shows (only this session), or propose your pronouns to the owner'
     )
     .option('--name <name>', 'New display name (one line, at most 100 characters)')
     .option('--icon <emoji>', 'New icon (one emoji or at most two characters); shown when there is no image')
     .option('--image <file>', 'New profile image: a PNG, JPEG, GIF or WebP file of at most 256 KB')
     .option('--clear-image', 'Remove the profile image (the icon shows again)')
+    .option(
+      '--pronouns <text>',
+      'Propose your pronouns (one line, at most 24 characters): posts the proposal in the room for the owner to set; changes nothing itself'
+    )
+    .option('-r, --room <room>', 'Room for the --pronouns proposal (id or name)')
     .option('--json', 'Machine-readable output')
-    .action((options: { name?: string; icon?: string; image?: string; clearImage?: boolean; json?: boolean }) =>
-      run(Boolean(options.json), (deps) =>
-        agentProfile(deps, {
-          name: options.name,
-          icon: options.icon,
-          image: options.image,
-          clearImage: options.clearImage,
-        })
-      )
+    .action(
+      (options: {
+        name?: string;
+        icon?: string;
+        image?: string;
+        clearImage?: boolean;
+        pronouns?: string;
+        room?: string;
+        json?: boolean;
+      }) =>
+        run(Boolean(options.json), (deps) =>
+          agentProfile(deps, {
+            name: options.name,
+            icon: options.icon,
+            image: options.image,
+            clearImage: options.clearImage,
+            pronouns: options.pronouns,
+            room: options.room,
+          })
+        )
     );
 
   const chat = agent
@@ -2005,12 +2393,13 @@ export function registerAgentCommands(program: Command): Command {
       (v: string, prev: string[] = []) => [...prev, v]
     )
     .option('-r, --room <room>', 'Room id or name (default: the one room this session is in)')
+    .option('--reply-to <id>', 'Answer the message with this id (a spoken turn is read back only when its answer names it)')
     .option('--json', 'Machine-readable output')
-    .action((words: string[], options: { to?: string; room?: string; file?: string[]; json?: boolean }) =>
+    .action((words: string[], options: { to?: string; room?: string; file?: string[]; replyTo?: string; json?: boolean }) =>
       run(Boolean(options.json), (deps) => {
         const text = words.join(' ').trim();
         if (!text && !options.file?.length) return Promise.resolve(fail(deps, 'refusing: empty message', EXIT.refused));
-        return agentChatSay(deps, { room: options.room, to: options.to, text, files: options.file });
+        return agentChatSay(deps, { room: options.room, to: options.to, text, files: options.file, replyTo: options.replyTo });
       })
     );
 
@@ -2083,14 +2472,28 @@ export function registerAgentCommands(program: Command): Command {
     );
 
   chat
+    .command('delivery-status')
+    .description('Inspect your own pending delivery/inspection status; does not clear anything')
+    .option('--json', 'Machine-readable output')
+    .action((options: { json?: boolean }) => run(Boolean(options.json), async (deps) => {
+      const res = await deps.request(deps.ctx, { method: 'GET', path: '/api/v1/chatrooms/delivery-status' });
+      if (!res.json?.success) return fail(deps, describeFailure(res));
+      if (deps.json) emitJson(deps, res.json.data ?? {});
+      else deps.io.out(JSON.stringify(res.json.data ?? {}));
+      return EXIT.ok;
+    }));
+
+  chat
     .command('read')
-    .description('Print recent room history')
+    .description('Print recent room history, or one exact message without the history-window cap')
     .option('-n, --limit <n>', 'How many messages', '30')
     .option('-r, --room <room>', 'Room id or name')
     .option('--json', 'Machine-readable output')
-    .action((options: { limit?: string; room?: string; json?: boolean }) =>
+    .option('--message <id>', 'Read exactly this message, including archived history; no automatic acknowledgement')
+    .option('--acknowledge', 'Explicitly acknowledge only the exact message after receiving it')
+    .action((options: { limit?: string; room?: string; json?: boolean; message?: string; acknowledge?: boolean }) =>
       run(Boolean(options.json), (deps) =>
-        agentChatRead(deps, { room: options.room, limit: parsePositiveInt(options.limit, 30, '--limit') })
+        agentChatRead(deps, { room: options.room, limit: parsePositiveInt(options.limit, 30, '--limit'), message: options.message, acknowledge: options.acknowledge })
       )
     );
 

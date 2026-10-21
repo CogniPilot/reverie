@@ -33,7 +33,7 @@ describe('owner alert', () => {
   it('in multi-user mode goes only to admins', async () => {
     const to: string[] = [];
     const send: PushSend = async (s) => (to.push(s.endpoint), true);
-    const subs = [sub('https://admin', { username: 'james', role: 'admin' }), sub('https://user', { username: 'stu', role: 'user' }), sub('https://none')];
+    const subs = [sub('https://admin', { username: 'owner', role: 'admin' }), sub('https://user', { username: 'stu', role: 'user' }), sub('https://none')];
     expect(await sendOwnerAlert(store(subs), 'x', { multiUser: true, send })).toBe(1);
     expect(to).toEqual(['https://admin']);
   });

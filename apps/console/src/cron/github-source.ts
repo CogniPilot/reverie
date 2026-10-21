@@ -84,7 +84,7 @@ export async function githubData(args: GithubArgs, last: string | undefined, fet
   }
 }
 
-/** An ISO time as Eastern Time, for posts (James reads ET). */
+/** An ISO time as Eastern Time, for posts (Owner reads ET). */
 function etStamp(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return 'the last run';
@@ -93,7 +93,7 @@ function etStamp(iso: string): string {
 
 async function read(args: GithubArgs, last: string | undefined, fetcher: Fetcher): Promise<PostSourceData> {
   const kinds = new Set(args.kinds?.length ? args.kinds : ['pulls', 'issues']);
-  const url = `https://api.github.com/repos/${encodeURIComponent(args.owner)}/${encodeURIComponent(args.repo)}/issues?state=all&sort=updated&direction=desc&per_page=${PAGE}`;
+  const url = `https://api.github.com/repos/${encodeURIComponent(args.owner)}/${encodeURIComponent(args.repo)}/issues?state=all&sort=updatedemoirection=desc&per_page=${PAGE}`;
   const res = await fetcher(url, {
     headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'reverie-console', 'X-GitHub-Api-Version': '2022-11-28' },
     signal: AbortSignal.timeout(10_000),

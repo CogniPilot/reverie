@@ -346,6 +346,8 @@ export interface CliEnv {
  * Keeping them as separate fields makes that invariant structural rather than commented.
  */
 export interface CliCapabilities {
+  /** Positive opt-in: reads its server-authorized rooms through the API; never type into its pane. */
+  chatDelivery?: 'poll';
   /**
    * Non-Claude run mode that uses its own TUI and output format (`isExternalCliMode`):
    * no Claude transcript, no hooks, no Claude-format token/BashTool parsing. An explicit

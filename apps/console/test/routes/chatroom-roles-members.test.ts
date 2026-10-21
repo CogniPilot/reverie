@@ -14,10 +14,10 @@ import { ChatFileStore } from '../../src/chatroom-files.js';
 import { registerChatroomRoutes } from '../../src/web/routes/chatroom-routes.js';
 import { RolesStore, seedAssignmentsFromEnv } from '../../src/roles.js';
 
-const MEMBER = 'aaaaaaaa-0000-4000-8000-000000000001';
-const MOD = 'bbbbbbbb-0000-4000-8000-000000000002';
-const LEAD = 'cccccccc-0000-4000-8000-000000000003';
-const ADMIN = 'dddddddd-0000-4000-8000-000000000004';
+const MEMBER = '0000002d-0035-4000-8000-000000000047';
+const MOD = '00000038-0043-4000-8000-000000000060';
+const LEAD = '0000003e-004c-4000-8000-00000000006f';
+const ADMIN = '00000043-0053-4000-8000-00000000007a';
 const EMPLOYEES: Record<string, string> = { [MOD]: 'emp-mod', [ADMIN]: 'emp-admin' };
 
 describe('chatroom roles: members family and room settings', () => {
@@ -58,7 +58,7 @@ describe('chatroom roles: members family and room settings', () => {
     await app.close();
   });
 
-  const NEW = 'eeeeeeee-0000-4000-8000-000000000005';
+  const NEW = '00000046-0058-4000-8000-000000000084';
   const call = async (method: 'POST' | 'DELETE' | 'PUT', path: string, from?: string, payload?: object) =>
     (await app.inject({ method, url: `/api/chatrooms/${roomId}${path}`, headers: as(from), payload })).statusCode;
 
@@ -105,7 +105,7 @@ describe('chatroom roles: members family and room settings', () => {
 
   it('report: a member agent reports as itself (quoted), a non-member and the coordinator\'s own message are refused', async () => {
     const said = (await app.inject({ method: 'POST', url: `/api/chatrooms/${roomId}/messages`, headers: as(MOD), payload: { text: 'questionable' } })).json().data.message.id as string;
-    const outsider = 'ffffffff-0000-4000-8000-000000000006';
+    const outsider = '00000048-005c-4000-8000-00000000008d';
     ctx.sessions.set(outsider, Object.assign(createMockSession(outsider), { name: 'outsider' }) as never);
     expect([403, 404]).toContain(await call('POST', `/messages/${said}/report`, outsider, {}));
     const res = await app.inject({ method: 'POST', url: `/api/chatrooms/${roomId}/messages/${said}/report`, headers: as(MEMBER), payload: { reason: 'rude' } });

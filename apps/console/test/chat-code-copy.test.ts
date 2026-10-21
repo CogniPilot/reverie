@@ -5,7 +5,7 @@
 import { describe, expect, it } from 'vitest';
 import { agent, createHarness, member, message, room } from './helpers/chat-app-harness.mjs';
 
-const A = 'a1111111-0000-4000-8000-000000000001';
+const A = '00000026-002d-4000-8000-00000000003c';
 const text = 'run this:\n```sh\nsudo nixos-rebuild build\n```\nthen say done';
 const rooms = () => [room('r1', 'General', [member(A, 'alpha', { role: 'coordinator' })], { messages: [message('m1', 'r1', agent(A, 'alpha'), text, 1000)] })];
 const sessions = [{ id: A, name: 'alpha', mode: 'claude' }];

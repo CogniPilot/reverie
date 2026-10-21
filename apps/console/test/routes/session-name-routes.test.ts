@@ -25,7 +25,7 @@ describe('PUT /api/sessions/:id/name', () => {
   let session: Session;
   const updateSessionName = vi.fn(() => true);
   const transcriptDir = mkdtempSync(join(tmpdir(), 'codeman-rename-title-'));
-  const transcriptPath = join(transcriptDir, '6f1c1a2e-0000-4000-8000-000000000001.jsonl');
+  const transcriptPath = join(transcriptDir, '0000001e-0024-4000-8000-000000000030.jsonl');
   const transcriptRows = () =>
     readFileSync(transcriptPath, 'utf8')
       .split('\n')
@@ -103,7 +103,7 @@ describe('PUT /api/sessions/:id/name', () => {
     expect(transcriptRows().at(-1)).toEqual({
       type: 'custom-title',
       customTitle: '修复登录跳转',
-      sessionId: '6f1c1a2e-0000-4000-8000-000000000001',
+      sessionId: '0000001e-0024-4000-8000-000000000030',
     });
   });
 

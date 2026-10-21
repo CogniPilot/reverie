@@ -179,7 +179,7 @@ Pure modules unit-test with no TTY. `cli.ts` gains one thin `tui` command regist
 
 ## 5. CLI-wide polish (the rest of "make it much nicer")
 
-A shared style kit, `src/cli-style.ts`: one palette (mirroring the web's status colors), one glyph set with fallback, `heading()`, `kv()`, `table()` (width-aware, fixes the Antigravity overflow), `spinner()` (finally: the 30s silent daemon/service waits get a live line), `confirm()` (used by `reset --force`'s missing prompt and `x` in the TUI). Then the mechanical fixes from §1: colorize `doctor` through the hook that already exists for it, dedupe the `codeman web` startup line, colorize the server's security warning, fix the README `codeman attach` description and the Ctrl+B/Ctrl+A detach drift, TTY/NO_COLOR gates everywhere.
+A shared style inspector, `src/cli-style.ts`: one palette (mirroring the web's status colors), one glyph set with fallback, `heading()`, `kv()`, `table()` (width-aware, fixes the Antigravity overflow), `spinner()` (finally: the 30s silent daemon/service waits get a live line), `confirm()` (used by `reset --force`'s missing prompt and `x` in the TUI). Then the mechanical fixes from §1: colorize `doctor` through the hook that already exists for it, dedupe the `codeman web` startup line, colorize the server's security warning, fix the README `codeman attach` description and the Ctrl+B/Ctrl+A detach drift, TTY/NO_COLOR gates everywhere.
 
 ## 6. Phasing
 

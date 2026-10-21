@@ -6,9 +6,11 @@
  * - `speech` (Android Chrome, desktop Chrome): the browser's SpeechRecognition listens
  *   continuously with its own voice-activity detection. A final transcript is posted
  *   as an ordinary room message (`spoken: true`, so the member answers it like a typed
- *   one), the member's reply is spoken with `speechSynthesis` (the phone's own voice:
- *   nothing to download, no autoplay policy, nothing to truncate), and listening
- *   pauses while she speaks so she is never transcribed, then resumes on its own.
+ *   one), the member's reply is spoken, and listening pauses while she speaks so she is
+ *   never transcribed, then resumes on its own. The reply is spoken in the member's own
+ *   server voice ("Team voice", the default: /api/voice/speak, CarServerSynth) or in a
+ *   phone voice picked in the menu (`speechSynthesis`). A line the server cannot make,
+ *   or the browser will not play, is spoken by the phone instead.
  * - `server` (no SpeechRecognition): the whole screen is the push-to-talk button of
  *   the chat panel (tap to talk, tap to send), using the /api/voice/turn path.
  *
@@ -43,6 +45,8 @@ const CAR_SPEECH_POLL_MS = 250;
 const CAR_SPEECH_MIN_WAIT_MS = 4000;
 /** Never wait longer than this for the synthesizer to go quiet. */
 const CAR_SPEECH_WAIT_CAP_MS = 120_000;
+/** How often the car screen checks who is speaking (its avatar and name). */
+const CAR_SPEAKER_MS = 250;
 
 /** Pure: which engine this browser supports. */
 function carModeEngine(win) {
@@ -71,14 +75,250 @@ function carModeUtterances(text, max = CAR_MAX_UTTERANCE_CHARS) {
   return out;
 }
 
-/** Pure: the default voice: an English female-sounding one if the platform names one. */
-function carModePickVoice(voices, savedName) {
-  const english = (voices || []).filter((v) => /^en[-_](US|GB)/i.test(v.lang || ''));
+/**
+ * Pure: what of a reply is worth hearing. Code, links, paths and long ids stay on screen and are
+ * spoken as a short stand-in; markdown markers are dropped. The written reply is never changed.
+ */
+function carModeSpeakable(text) {
+  return (
+    String(text || '')
+      .replace(/```[\s\S]*?(```|$)/g, ' (code in chat) ')
+      .replace(/`([^`\n]*)`/g, (_, inner) => (inner.length <= 24 && !/[/\\]/.test(inner) ? inner : ' (see chat) '))
+      .replace(/\b(?:https?|wss?):\/\/\S+/gi, ' a link ')
+      // A path starts a word: /etc, ~/x, ./y, ../z (one segment is enough). "and/or" and "1/2" do not start one.
+      .replace(/(^|[\s("'])(?:~|\.{1,2})?\/[^\s"')]+?(?=[.,;:!?]*(?:[\s"')]|$))/g, (_, pre) =>
+        /\S/.test(pre) ? `${pre}a file path ` : `${pre} a file path `
+      )
+      // "Node.js" is a name, "chat-app.js" a file: a .js/.ts name counts only with a dash, underscore or digit.
+      .replace(
+        /\b([\w-]+)\.(sh|js|mjs|ts|py|json|md|txt|log|patch|gz|tar|html|css|yaml|yml|toml)\b/gi,
+        (m, name, ext) => (/^(?:js|ts)$/i.test(ext) && !/[-_\d]/.test(name) ? m : ' a file ')
+      )
+      .replace(/\b[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\b/gi, ' an id ')
+      .replace(/\b(?:[a-z]{1,3}-)?(?=[0-9a-f]*\d)(?=[0-9a-f]*[a-f])[0-9a-f]{8,}\b/gi, ' an id ')
+      .replace(/^\s*(?:#{1,6}\s+|[-*+]\s+|>\s*)/gm, '')
+      // Kokoro has no stress markup and reads a lone star as "asterisk": every star goes, **x** and *x* alike.
+      .replace(/\*+|__/g, '')
+      // A run of stand-ins with only spaces between them is said once; a list ("x, y and z") keeps each one.
+      .replace(/( (?:a file path|a file|an id|a link|\(see chat\)|\(code in chat\)) )(?:[ \t]*\1)+/g, '$1')
+      .replace(/[ \t]+/g, ' ')
+      // Only punctuation that ends a word loses the space before it: " ./y" keeps its space.
+      .replace(/ ([,.;:!?)"'])(?=[\s,.;:!?)"']|$)/g, '$1')
+      .trim()
+  );
+}
+
+/** Pure: a stable 32-bit FNV-1a hash, so a member keeps the same default voice. */
+function carModeHash(text) {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < text.length; i++) {
+    h ^= text.charCodeAt(i);
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  return h;
+}
+
+/**
+ * Voices checked to sound female or male, by exact entry: Apple and other desktop voices by name,
+ * Microsoft voices by their first name inside the full Microsoft name, Android voices by their
+ * Google TTS code. Anything not on the table is unknown, however its name reads.
+ */
+const CAR_VOICE_GENDERS = (() => {
+  const table = new Map();
+  const add = (kind, gender, keys) =>
+    (Array.isArray(keys) ? keys : keys.split(' ')).forEach((k) => table.set(`${kind}:${k}`, gender));
+  add(
+    'name',
+    'female',
+    'samantha karen victoria moira tessa fiona veena serena allison ava susan kate nicky catherine'
+  );
+  add('name', 'female', 'zoe flo sandy shelley grandma');
+  add(
+    'name',
+    'male',
+    'daniel alex fred tom aaron arthur gordon rishi oliver lee evan nathan eddy reed rocko grandpa ralph'
+  );
+  add('full', 'female', ['google us english', 'google uk english female']);
+  add('full', 'male', ['google uk english male']);
+  add('microsoft', 'female', 'zira aria jenny libby sonia hazel natasha clara michelle emily susan catherine');
+  add('microsoft', 'male', 'david mark guy ryan george william eric davis tony christopher brian');
+  add('code', 'female', 'sfg iob iog tpc tpf gba gbc gbg fis afh aua auc');
+  add('code', 'male', 'iol iom tpd gbb gbd rjs aub aud');
+  return table;
+})();
+
+/**
+ * Pure: how a voice is known to sound, 'female' or 'male', or '' when it is not on the table.
+ * The whole (lowercased, space-collapsed) name must have one of these exact shapes:
+ *   en-us-x-sfg-local / -network          Android, by code
+ *   Microsoft Zira [Online (Natural)] - English (United States)
+ *   Samantha, Samantha (Enhanced), Samantha (Premium), Flo (English (US))
+ *   Google US English, Google UK English Female, Google UK English Male
+ * so "Not Samantha", "Daniel Clone" or "Unknown Male" say nothing.
+ */
+function carModeVoiceGender(name) {
+  const n = String(name || '')
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim();
+  const lookup = (kind, key) => CAR_VOICE_GENDERS.get(`${kind}:${key}`) || '';
+  let m = /^en-[a-z]{2}-x-([a-z]{3})-(?:local|network)$/.exec(n);
+  if (m) return lookup('code', m[1]);
+  m = /^microsoft ([a-z]+)(?: online \(natural\))? - english \([a-z ]+\)$/.exec(n);
+  if (m) return lookup('microsoft', m[1]);
+  m = /^([a-z]+)(?: \((?:enhanced|premium|english \([a-z ]+\))\))?$/.exec(n);
+  if (m) return lookup('name', m[1]);
+  return lookup('full', n);
+}
+
+/** Pure: the voice a member's pronouns ask for: 'female' for she/..., 'male' for he/..., '' otherwise (they, xe, none). */
+function carModePronounGender(pronouns) {
+  const first = /[a-z]+/i.exec(String(pronouns || ''))?.[0].toLowerCase();
+  return first === 'she' ? 'female' : first === 'he' ? 'male' : '';
+}
+
+/**
+ * Pure: the voice for a member. A saved choice wins. Without a member, the old default:
+ * an English (US/UK) female-sounding voice. With a member, each member gets its own
+ * English voice (any English locale), picked by a stable hash of its id over the voices
+ * sorted by name, so different members usually sound different and each stays the same.
+ * Pronouns (she/he) narrow that pool to the voices known to sound that way; with none of
+ * those on the device, or other pronouns, the whole pool is used.
+ */
+function carModePickVoice(voices, savedName, memberId, pronouns) {
+  const english = (voices || []).filter((v) => /^en[-_]/i.test(v.lang || ''));
   const saved = english.find((v) => v.name === savedName);
   if (saved) return saved;
+  if (memberId) {
+    const all = english.slice().sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+    const want = carModePronounGender(pronouns);
+    const matching = want ? all.filter((v) => carModeVoiceGender(v.name) === want) : [];
+    const pool = matching.length ? matching : all;
+    return pool.length ? pool[carModeHash(String(memberId)) % pool.length] : null;
+  }
+  const usuk = english.filter((v) => /^en[-_](US|GB)/i.test(v.lang || ''));
   const female =
     /female|woman|samantha|karen|victoria|zira|aria|jenny|libby|sonia|amy|serena|moira|tessa|google uk english female|google us english/i;
-  return english.find((v) => female.test(v.name)) || english[0] || null;
+  return usuk.find((v) => female.test(v.name)) || usuk[0] || null;
+}
+
+/** The per-device storage key for one member's car-mode voice. */
+function carModeVoiceKey(memberId) {
+  return `codeman:carVoice:${memberId}`;
+}
+
+/** The voice menu's value for the member's own server voice (no phone voice is named this). */
+const CAR_TEAM_VOICE = 'team-voice';
+/** A server line not made by then is spoken by the phone (the server gives up on its voices at 20 s). */
+const CAR_TEAM_FETCH_MS = 25_000;
+/** A line still playing after this has stalled (600 characters is about 45 s of speech). */
+const CAR_TEAM_PLAY_MS = 60_000;
+/** No playback progress this long after the stream stalls: give the line to the phone. */
+const CAR_TEAM_STALL_MS = 10_000;
+
+/**
+ * Speaks utterances in a server voice, one at a time, with the same surface the controller
+ * uses on `speechSynthesis`: `speaking`, `pending`, `speak(u)`, `cancel()`; the utterance's
+ * `onend` (or `onerror`) is called when it is done. Every line is requested as soon as it is
+ * queued, so the next one is usually ready when the last ends. A line the server cannot
+ * make, or that will not play, is spoken by `fallback(u)` (the phone's voice) instead.
+ * A request or a playback that never settles (a dropped connection on the road stalls rather
+ * than failing) is given up on after CAR_TEAM_FETCH_MS / CAR_TEAM_PLAY_MS and goes to the
+ * phone voice too, so the loop always gets back to listening.
+ * deps: { fetchAudio(text) -> Promise<url|null>, play(url) -> Promise (settles when it ends),
+ *         stop(), fallback(u) -> Promise, setTimeout?, clearTimeout? }
+ */
+class CarServerSynth {
+  constructor(deps) {
+    this.deps = deps;
+    this.queue = [];
+    this.current = null;
+    /** Bumped by cancel(): a line from before it never reports or plays on. */
+    this.gen = 0;
+  }
+
+  get speaking() {
+    return this.current !== null;
+  }
+
+  get pending() {
+    return this.queue.length > 0;
+  }
+
+  /**
+   * `promise`, or (once `ms` pass without it settling) `timedOut`: rejected with it if it is
+   * an Error, resolved with it otherwise. `after` runs once the timeout has decided.
+   */
+  _within(promise, ms, timedOut, after) {
+    const set = this.deps.setTimeout || setTimeout;
+    const clear = this.deps.clearTimeout || clearTimeout;
+    let timer;
+    const timeout = new Promise((resolve, reject) => {
+      timer = set(() => {
+        if (timedOut instanceof Error) reject(timedOut);
+        else resolve(timedOut);
+        after?.();
+      }, ms);
+    });
+    return Promise.race([promise, timeout]).finally(() => clear(timer));
+  }
+
+  speak(u) {
+    let audio;
+    try {
+      audio = Promise.resolve(this.deps.fetchAudio(u.text)).catch(() => null);
+    } catch {
+      audio = Promise.resolve(null);
+    }
+    audio = this._within(audio, CAR_TEAM_FETCH_MS, null);
+    this.queue.push({ u, audio });
+    if (!this.current) void this._next();
+  }
+
+  cancel() {
+    this.gen++;
+    this.queue = [];
+    this.current = null;
+    this.deps.stop();
+  }
+
+  async _next() {
+    const item = this.queue.shift();
+    if (!item) return;
+    this.current = item;
+    const gen = this.gen;
+    let ok = false;
+    const url = await item.audio;
+    if (gen !== this.gen) return;
+    if (url) {
+      try {
+        // A stalled line is silenced once given up on, so it cannot resume over the phone voice.
+        await this._within(Promise.resolve(this.deps.play(url)), CAR_TEAM_PLAY_MS, new Error('playback stalled'), () =>
+          this.deps.stop()
+        );
+        ok = true;
+      } catch {
+        ok = false;
+      }
+      if (gen !== this.gen) return;
+    }
+    if (!ok) {
+      try {
+        await this.deps.fallback(item.u);
+        ok = true;
+      } catch {
+        ok = false;
+      }
+      if (gen !== this.gen) return;
+    }
+    this.current = null;
+    try {
+      if (ok) item.u.onend?.();
+      else item.u.onerror?.();
+    } finally {
+      if (gen === this.gen && !this.current) void this._next();
+    }
+  }
 }
 
 /**
@@ -355,7 +595,7 @@ class CarModeController {
     if (this.state === 'off' || this.state === 'paused') return false;
     this._clearReplyTimer();
     this._stopRecognition();
-    const parts = carModeUtterances(text);
+    const parts = carModeUtterances(carModeSpeakable(text));
     if (!parts.length || !this.deps.synth) {
       this._listen();
       return true;
@@ -532,8 +772,9 @@ class CarScreenWakeLock {
 }
 
 Object.assign(CodemanApp.prototype, {
-  /** The member car mode talks to: the one marked as the room's voice. */
+  /** The member car mode talks to: the one marked as the room's voice, or a DM's agent (chatVoiceMember). */
   _carVoiceMember() {
+    if (typeof chatVoiceMember === 'function') return chatVoiceMember(this._chatRoom);
     return this._chatRoom?.members.find((m) => m.voice === true) || null;
   },
 
@@ -541,6 +782,10 @@ Object.assign(CodemanApp.prototype, {
     // Idempotent: a second open (a double tap, the restore after a reload racing a
     // click) must never leave two recognizers listening and sending the same words.
     if (this._carOpening || (this._car && this._carScreen && !this._carScreen.hidden)) return;
+    // Opening is usually a tap: unlock the audio element now, inside the gesture, so the
+    // team voice can play (a reopen after a reload is not a gesture: the phone voice
+    // speaks until the next tap).
+    this._unlockChatAudio?.();
     this._carOpening = true;
     try {
       await this._openCarMode();
@@ -565,6 +810,8 @@ Object.assign(CodemanApp.prototype, {
     this._carEngine = carModeEngine(window);
     this._carScreen.hidden = false;
     document.documentElement.classList.add('car-mode-open');
+    clearInterval(this._carSpeakerTimer);
+    this._carSpeakerTimer = setInterval(() => this._renderCarSpeaker(), CAR_SPEAKER_MS);
     this._keepCarScreenAwake();
     this._car?.stop();
     if (this._carEngine === 'speech') {
@@ -588,6 +835,8 @@ Object.assign(CodemanApp.prototype, {
           synth.cancel();
         },
       };
+      const app = this;
+      const teamSynth = this._carTeamSynth(synth, diag);
       let recCount = 0;
       this._car = new CarModeController({
         createRecognition: () => {
@@ -604,6 +853,8 @@ Object.assign(CodemanApp.prototype, {
           return rec;
         },
         createUtterance: (text) => {
+          // A server-voice line is a plain record; CarServerSynth calls its onend/onerror.
+          if (this._carUsesTeamVoice()) return { text, voice: null, lang: '', onend: null, onerror: null };
           const u = new SpeechSynthesisUtterance(text);
           let boundaries = 0;
           u.addEventListener?.('start', () => diag('tts:start', { chars: text.length, ...flags() }));
@@ -614,7 +865,9 @@ Object.assign(CodemanApp.prototype, {
           u.addEventListener?.('boundary', () => boundaries++);
           return u;
         },
-        synth: tracedSynth,
+        get synth() {
+          return app._carUsesTeamVoice() ? teamSynth : tracedSynth;
+        },
         voice: () => this._carVoice(),
         send: (text) => this._carSend(text),
         onState: (state, detail) => {
@@ -637,6 +890,8 @@ Object.assign(CodemanApp.prototype, {
     this._stopChatRecording?.();
     this._carScreen.hidden = true;
     document.documentElement.classList.remove('car-mode-open');
+    clearInterval(this._carSpeakerTimer);
+    this._carSpeakerTimer = null;
     this._carAwake?.stop();
     this._carAwake = null;
     try {
@@ -711,9 +966,115 @@ Object.assign(CodemanApp.prototype, {
     }
   },
 
+  /** The member's own server voice is chosen in the menu (the default). */
+  _carUsesTeamVoice() {
+    const select = this._carScreen?.querySelector('.car-voice');
+    return !select || !select.value || select.value === CAR_TEAM_VOICE;
+  },
+
+  /** The server-voice synthesizer: Kokoro audio on the chat panel's one unlocked audio element. */
+  _carTeamSynth(synth, diag) {
+    let settle = null;
+    const stopPhone = () => {
+      if (synth.speaking || synth.pending) synth.cancel();
+    };
+    return new CarServerSynth({
+      fetchAudio: async (text) => {
+        const member = this._carVoiceMember();
+        if (!member) return null;
+        const res = await this._chatApi('/api/voice/speak', {
+          method: 'POST',
+          body: { room: this._chatRoomId, member: member.sessionId, text },
+          signal: AbortSignal.timeout?.(CAR_TEAM_FETCH_MS),
+        });
+        diag('team:speak', { ok: res.ok, engine: res.data?.engine, chars: text.length });
+        return res.ok && typeof res.data?.audioUrl === 'string' ? res.data.audioUrl : null;
+      },
+      play: (url) =>
+        new Promise((resolve, reject) => {
+          const audio = this._chatAudioEl();
+          // A stream that stops arriving fires 'stalled' or 'waiting', then nothing: give it
+          // CAR_TEAM_STALL_MS of no progress before the phone voice takes the line.
+          let stallTimer = null;
+          const clearStall = () => {
+            if (stallTimer) clearTimeout(stallTimer);
+            stallTimer = null;
+          };
+          const onStall = () => {
+            clearStall();
+            stallTimer = setTimeout(() => {
+              diag('team:stalled', {});
+              audio.pause();
+              done(new Error('audio stalled'));
+            }, CAR_TEAM_STALL_MS);
+          };
+          const done = (err) => {
+            clearStall();
+            audio.removeEventListener('ended', onEnd);
+            audio.removeEventListener('error', onError);
+            audio.removeEventListener('stalled', onStall);
+            audio.removeEventListener('waiting', onStall);
+            audio.removeEventListener('timeupdate', clearStall);
+            settle = null;
+            if (err) reject(err);
+            else resolve();
+          };
+          const onEnd = () => done(null);
+          const onError = () => done(new Error('audio error'));
+          settle = () => done(null);
+          audio.addEventListener('ended', onEnd);
+          audio.addEventListener('error', onError);
+          audio.addEventListener('stalled', onStall);
+          audio.addEventListener('waiting', onStall);
+          audio.addEventListener('timeupdate', clearStall);
+          // A line from the car or read aloud: not a spoken turn's answer (_carSpeakerId).
+          this._chatAudioFrom = null;
+          audio.src = this._chatUrl(url);
+          audio.play().then(
+            () => (this._chatAudioUnlocked = true),
+            (err) => {
+              diag('team:play-refused', { error: err?.name });
+              done(err || new Error('play refused'));
+            }
+          );
+        }),
+      stop: () => {
+        const audio = this._chatAudio;
+        if (audio && !audio.paused) audio.pause();
+        settle?.();
+        stopPhone();
+      },
+      fallback: (u) =>
+        new Promise((resolve, reject) => {
+          const p = new SpeechSynthesisUtterance(u.text);
+          const voice = this._carVoice();
+          if (voice) {
+            p.voice = voice;
+            p.lang = voice.lang;
+          }
+          p.onend = () => resolve();
+          p.onerror = (e) => reject(e);
+          // Held so Chrome does not drop it before it ends (crbug 509488).
+          this._carFallbackUtterance = p;
+          diag('team:fallback', { chars: u.text?.length });
+          synth.speak(p);
+        }),
+    });
+  },
+
+  /** The phone voice (the team voice's backup): one chosen for this member on this device, else the member's default. */
   _carVoice() {
-    const name = this._carScreen?.querySelector('.car-voice')?.value;
-    return carModePickVoice(window.speechSynthesis?.getVoices?.() || [], name);
+    const member = this._carVoiceMember();
+    const id = member?.sessionId;
+    return carModePickVoice(window.speechSynthesis?.getVoices?.() || [], this._carSavedVoice(id), id, member?.pronouns);
+  },
+
+  _carSavedVoice(id) {
+    try {
+      return id ? localStorage.getItem(carModeVoiceKey(id)) : null;
+    } catch {
+      return null;
+    }
   },
 
   _buildCarMode(member) {
@@ -732,9 +1093,14 @@ Object.assign(CodemanApp.prototype, {
       const voice = document.createElement('select');
       voice.className = 'car-voice';
       voice.setAttribute('aria-label', 'Speaking voice');
+      // Owner 10-20: no voice menu in the car. Each teammate speaks in their own voice; the
+      // phone voice is only the backup (kept here, hidden, so a choice made earlier still holds).
+      voice.hidden = true;
       voice.onchange = () => {
+        const id = this._carVoiceMember()?.sessionId;
+        if (!id) return;
         try {
-          localStorage.setItem('codeman:carVoice', voice.value);
+          localStorage.setItem(carModeVoiceKey(id), voice.value);
         } catch {
           /* per-device convenience only */
         }
@@ -762,13 +1128,19 @@ Object.assign(CodemanApp.prototype, {
       const pad = document.createElement('button');
       pad.type = 'button';
       pad.className = 'car-pad';
+      // Whoever is speaking, as on a video call: their avatar and name (_renderCarSpeaker).
+      const speaker = document.createElement('span');
+      speaker.className = 'car-speaker';
+      speaker.hidden = true;
+      // display is set only while shown: an inline display would override the hidden attribute.
+      speaker.style.cssText = 'flex-direction:column;align-items:center;gap:8px;font-size:22px;';
       const status = document.createElement('span');
       status.className = 'car-status';
       const detail = document.createElement('span');
       detail.className = 'car-detail';
       const hint = document.createElement('span');
       hint.className = 'car-hint';
-      pad.append(status, detail, hint);
+      pad.append(speaker, status, detail, hint);
       pad.onclick = () => this._carTap();
       const awake = document.createElement('div');
       awake.className = 'car-wake-notice';
@@ -801,28 +1173,44 @@ Object.assign(CodemanApp.prototype, {
   _fillCarVoices() {
     const select = this._carScreen?.querySelector('.car-voice');
     if (!select) return;
-    const voices = (window.speechSynthesis?.getVoices?.() || []).filter((v) => /^en[-_](US|GB)/i.test(v.lang || ''));
-    select.hidden = voices.length === 0;
-    let saved = null;
-    try {
-      saved = localStorage.getItem('codeman:carVoice');
-    } catch {
-      saved = null;
-    }
-    const pick = carModePickVoice(voices, saved);
-    select.replaceChildren(...voices.map((v) => new Option(`${v.name} (${v.lang})`, v.name)));
-    if (pick) select.value = pick.name;
+    const voices = (window.speechSynthesis?.getVoices?.() || []).filter((v) => /^en[-_]/i.test(v.lang || ''));
+    select.replaceChildren(
+      new Option('Team voice', CAR_TEAM_VOICE),
+      ...voices.map((v) => new Option(`${v.name} (${v.lang})`, v.name))
+    );
+    // Always the team voice; a phone voice chosen on this device is its backup (_carVoice).
+    select.value = CAR_TEAM_VOICE;
   },
 
   _carTap() {
     if (this._carEngine === 'speech') {
+      // A tap is a gesture: it lets the team voice play on browsers that need one first.
+      this._unlockChatAudio?.();
       this._car?.tap();
       return;
     }
-    // Server engine: the whole screen is the push-to-talk button (tap, speak, tap).
+    // Server engine: hands-free listens, else the whole screen is the push-to-talk button (tap, speak, tap).
     this._unlockChatAudio?.();
     const member = this._carVoiceMember();
     if (!member) return;
+    // Push-to-talk (/api/voice/turn) answers only a member marked as the voice; a DM's
+    // agent is the voice here without that mark.
+    if (member.voice !== true) {
+      this._renderCarState('paused', 'Talking in a direct message needs a browser with speech recognition');
+      return;
+    }
+    // Waiting for an answer: this tap stops the wait (the next one talks again).
+    if (this._chatVoiceTurnStop) {
+      this._chatVoiceTurnStop.abort();
+      return;
+    }
+    // Hands-free (hands-free.js) listens on its own: a tap pauses it, the next listens again.
+    if (this._carHandsFree?.() && this._chatRecorder?.state !== 'recording') {
+      this._carHfPaused = !this._carHfPaused;
+      this._diag?.('car:handsfree', { paused: this._carHfPaused });
+      this._hfTick?.();
+      return;
+    }
     if (this._chatRecorder?.state === 'recording') {
       this._stopChatRecording();
       this._renderCarState('thinking', '');
@@ -832,6 +1220,44 @@ Object.assign(CodemanApp.prototype, {
     this._syncChatMic?.();
     this._startChatRecording();
     this._renderCarState('listening', 'Tap again to send');
+  },
+
+  /**
+   * Who is speaking now: a line being read aloud (its author), the car's own spoken
+   * answer (the voice member), or a spoken turn's answer on the chat audio element.
+   */
+  _carSpeakerId() {
+    const read = this._readAloud?.current?.item?.meta?.member;
+    if (read) return read;
+    if (this._car?.state === 'speaking') return this._carVoiceMember?.()?.sessionId || null;
+    const a = this._chatAudio;
+    if (a && !a.paused && !a.ended && this._chatAudioFrom) return this._chatAudioFrom;
+    return null;
+  },
+
+  /** The car screen shows the speaker's avatar and name while they speak, nothing otherwise. */
+  _renderCarSpeaker() {
+    const el = this._carScreen?.querySelector('.car-speaker');
+    if (!el) return;
+    const id = this._carScreen.hidden ? null : this._carSpeakerId();
+    if (el.dataset.member === (id || '')) return;
+    el.dataset.member = id || '';
+    const name = id ? this._chatMember?.(id)?.name : null;
+    if (!name) {
+      el.hidden = true;
+      el.style.display = '';
+      el.replaceChildren();
+      return;
+    }
+    const avatar = this._chatAvatar?.(id, name);
+    // Large on the car screen, inline so no stylesheet changes with it.
+    if (avatar) avatar.style.cssText += 'width:96px;height:96px;font-size:48px;';
+    const label = document.createElement('span');
+    label.className = 'car-speaker-name';
+    label.textContent = name;
+    el.replaceChildren(...(avatar ? [avatar] : []), label);
+    el.hidden = false;
+    el.style.display = 'flex';
   },
 
   _renderCarState(state, detail) {
@@ -849,7 +1275,13 @@ Object.assign(CodemanApp.prototype, {
             : state === 'paused'
               ? 'Tap anywhere to listen'
               : 'Tap to stop waiting and listen'
-        : 'Tap anywhere to talk, tap again to send';
+        : state === 'thinking'
+          ? 'Tap to stop waiting'
+          : this._carHandsFree?.()
+            ? state === 'listening'
+              ? 'Just talk, pause to send. Tap anywhere to pause.'
+              : 'Tap anywhere to listen'
+            : 'Tap anywhere to talk, tap again to send';
     screen.querySelector('.car-hint').textContent = hint;
   },
 });

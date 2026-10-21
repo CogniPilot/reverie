@@ -2,7 +2,7 @@ import {readFileSync} from 'node:fs';
 import {expect,it} from 'vitest';
 const source=readFileSync(new URL('../src/web/public/chat-app.js',import.meta.url),'utf8');
 const mod={exports:{}};new Function('module',source)(mod);const p:any=mod.exports;
-const origin='https://relay.example.test:8443',id='420a20cc-1288-4faa-8f45-b6f908cf4a20';
+const origin='https://relay.example.test:8443',id='00000012-0017-4000-8000-000000000020';
 const invite=`embassy-v2|${origin}|${id}|${'A'.repeat(43)}`;
 const request=`embassy-pair-v1|${origin}|${id}|3BCD-5FGH`;
 it('keeps invitation and public approval locator protocols distinct and inert',()=>{

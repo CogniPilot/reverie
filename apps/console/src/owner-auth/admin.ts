@@ -8,7 +8,7 @@
  * the first sign-in.
  */
 import { randomUUID } from 'node:crypto';
-import { promises as fs } from 'node:fs';
+import { constants as fsConstants, promises as fs } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { hashPassword, isValidUsername, normalizeUsername } from '../user-store.js';
 import { randomToken, sha256 } from './crypto.js';
@@ -24,13 +24,29 @@ export async function auditAdmin(
   store: OwnerAuthStore,
   event: string,
   detail: Record<string, unknown> = {}
-): Promise<void> {
+): Promise<boolean> {
   const line = JSON.stringify({ at: new Date().toISOString(), event, actor: 'host-cli', ...detail }) + '\n';
+  let handle: fs.FileHandle | undefined;
   try {
-    await fs.appendFile(join(dirname(store.file), 'owner-auth-audit.jsonl'), line, { mode: 0o600 });
+    // NONBLOCK: a FIFO in its place must not hang the command; only a regular file takes the line.
+    handle = await fs.open(
+      auditFile(store),
+      fsConstants.O_WRONLY | fsConstants.O_APPEND | fsConstants.O_CREAT | fsConstants.O_NONBLOCK | fsConstants.O_NOFOLLOW,
+      0o600
+    );
+    if (!(await handle.stat()).isFile()) return false;
+    await handle.writeFile(line);
+    return true;
   } catch {
-    /* best effort */
+    /* best effort; setPolicy reports a lost line */
+    return false;
+  } finally {
+    await handle?.close().catch(() => undefined);
   }
+}
+
+function auditFile(store: OwnerAuthStore): string {
+  return join(dirname(store.file), 'owner-auth-audit.jsonl');
 }
 
 /**
@@ -125,14 +141,138 @@ export async function logoutEverywhere(store: OwnerAuthStore): Promise<void> {
   await auditAdmin(store, 'logout_everywhere');
 }
 
-export async function setPolicy(store: OwnerAuthStore, policy: OwnerPolicy): Promise<void> {
+/** The host services that call the console and need a service token once `enforce` is on. */
+export const REQUIRED_SERVICES = ['watcher', 'plan-usage'] as const;
+export const MIN_RECOVERY_CODES = 5;
+/** No caller that is not signed in may have been refused-in-log-mode within this window before `enforce`. */
+export const QUIET_MS = 60 * 60 * 1000;
+/**
+ * The policy writes each would-deny key at most hourly (policy.ts auditHourly), so a request in the
+ * last QUIET_MS may only show as a line up to an hour older. Reading two windows back catches it.
+ */
+export const LOOKBACK_MS = 2 * QUIET_MS;
+
+/**
+ * What the audit says about callers `enforce` would refuse: `known` with the anonymous requests of
+ * the last LOOKBACK_MS (their counts summed), or `known: false` with the reason when the audit cannot
+ * show it (missing, unreadable, not a regular file, or covering less than QUIET_MS of log mode).
+ * An I/O failure is never read as quiet. Errs towards "not quiet": a caller that stopped up to an
+ * hour ago still counts.
+ */
+export type AnonymousTraffic = { known: true; count: number } | { known: false; reason: string };
+
+export async function recentAnonymous(store: OwnerAuthStore, now = Date.now()): Promise<AnonymousTraffic> {
+  let text: string;
+  let handle: fs.FileHandle | undefined;
+  try {
+    // NONBLOCK: a FIFO in its place must not hang the command; NOFOLLOW: no link to another file.
+    handle = await fs.open(auditFile(store), fsConstants.O_RDONLY | fsConstants.O_NONBLOCK | fsConstants.O_NOFOLLOW);
+    if (!(await handle.stat()).isFile()) return { known: false, reason: 'the audit log is not a regular file' };
+    text = await handle.readFile('utf8');
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code ?? 'error';
+    return {
+      known: false,
+      reason: code === 'ENOENT' ? 'there is no audit log yet: run log mode first' : `the audit log cannot be read (${code})`,
+    };
+  } finally {
+    await handle?.close().catch(() => undefined);
+  }
+  let count = 0;
+  let first = Infinity;
+  let logSince = -Infinity;
+  for (const line of text.split('\n')) {
+    let e: { at?: string; event?: string; caller?: string; count?: unknown; to?: unknown };
+    try {
+      e = JSON.parse(line);
+    } catch {
+      continue; /* a damaged line is skipped */
+    }
+    const at = Date.parse(String(e?.at));
+    if (!Number.isFinite(at)) continue;
+    first = Math.min(first, at);
+    if (e.event === 'policy_changed' && e.to === 'log') logSince = Math.max(logSince, at);
+    if (e.event !== 'policy_would_deny' || e.caller !== 'anonymous' || !(now - at <= LOOKBACK_MS)) continue;
+    count += typeof e.count === 'number' && e.count > 0 ? e.count : 1;
+  }
+  const since = Math.max(first, logSince);
+  if (!(now - since >= QUIET_MS)) {
+    return { known: false, reason: 'the audit log does not cover the last hour of log mode yet: wait' };
+  }
+  return { known: true, count };
+}
+
+/** What in the account itself would lock the owner (or the host services) out under `enforce`. */
+function accountProblems(a: OwnerAccount | undefined): string[] {
+  if (!a) return ['there is no owner account (reverie owner bootstrap)'];
+  const problems: string[] = [];
+  if (a.policy === 'off') problems.push('the policy is off: run log first, so the would-deny log shows who is not signed in');
+  if (a.mustChange) problems.push('the password is still a one-time password: sign in and change it');
+  if (!a.totp) problems.push('two-step sign-in is off: set up the authenticator app on the account page');
+  const codes = a.recovery.filter((r) => !r.usedAt).length;
+  if (codes < MIN_RECOVERY_CODES) problems.push(`only ${codes} unused recovery codes (at least ${MIN_RECOVERY_CODES}): make new ones`);
+  const missing = REQUIRED_SERVICES.filter((name) => !a.services.some((s) => s.name === name));
+  if (missing.length) problems.push(`no service token for: ${missing.join(', ')} (reverie owner service-token issue <name>)`);
+  return problems;
+}
+
+function trafficProblems(traffic: AnonymousTraffic): string[] {
+  if (!traffic.known) return [`quiet cannot be established: ${traffic.reason}`];
+  return traffic.count > 0
+    ? [`${traffic.count} requests in the last two hours came from callers that are not signed in: sign in everywhere first, then wait`]
+    : [];
+}
+
+/**
+ * What would lock the owner (or the host services) out if `enforce` went on now; empty when nothing.
+ * Names only what is missing, never a secret.
+ */
+export async function enforceProblems(store: OwnerAuthStore, now = Date.now()): Promise<string[]> {
+  const traffic = await recentAnonymous(store, now);
+  return [...accountProblems(store.read()), ...trafficProblems(traffic)];
+}
+
+class EnforceRefused extends Error {
+  constructor(readonly problems: string[]) {
+    super('enforce refused');
+  }
+}
+
+/**
+ * Change the policy. `enforce` is refused while anything in enforceProblems() holds, unless the owner
+ * passes `forceLockoutRisk`; both the refusal and a forced flip are audited with the problems.
+ * The account checks run inside the write that flips the policy, under the account lock every writer
+ * (the host CLI, the console) holds, so they hold for the account that is committed; the audit
+ * evidence is read just before. Returns whether the audit line was written: a forced flip with a broken audit log
+ * still happens (the owner asked), and the CLI says the line is missing.
+ */
+export async function setPolicy(
+  store: OwnerAuthStore,
+  policy: OwnerPolicy,
+  options: { forceLockoutRisk?: boolean; now?: number } = {}
+): Promise<{ audited: boolean }> {
   if (!['off', 'log', 'enforce'].includes(policy)) throw new OwnerAdminError('Policy is off, log or enforce');
-  const from = await store.update((a) => {
-    const previous = a.policy;
-    a.policy = policy;
-    return previous;
+  const traffic = policy === 'enforce' ? await recentAnonymous(store, options.now) : undefined;
+  let changed: { from: OwnerPolicy; problems: string[] };
+  try {
+    changed = await store.update((a) => {
+      const problems = traffic ? [...accountProblems(a), ...trafficProblems(traffic)] : [];
+      if (problems.length && !options.forceLockoutRisk) throw new EnforceRefused(problems);
+      const from = a.policy;
+      a.policy = policy;
+      return { from, problems };
+    });
+  } catch (error) {
+    if (!(error instanceof EnforceRefused)) throw error;
+    await auditAdmin(store, 'policy_enforce_refused', { problems: error.problems });
+    throw new OwnerAdminError('Not turning enforce on yet:\n- ' + error.problems.join('\n- '));
+  }
+  const audited = await auditAdmin(store, 'policy_changed', {
+    from: changed.from,
+    to: policy,
+    ...(changed.problems.length ? { forced: true, problems: changed.problems } : {}),
   });
-  await auditAdmin(store, 'policy_changed', { from, to: policy });
+  return { audited };
 }
 
 /** A keeper entry: `cto` (the company's CTO, whoever that is) or a company employee id. */
@@ -163,6 +303,34 @@ export async function removeKeeper(store: OwnerAuthStore, entry: string): Promis
     return a.keepers.length < before;
   });
   if (removed) await auditAdmin(store, 'keeper_removed', { keeper: entry });
+  return removed;
+}
+
+export function listAdmins(store: OwnerAuthStore): string[] {
+  return store.read()?.admins ?? [];
+}
+
+/**
+ * Let an agent call the admin routes (policy.ts ADMIN_ROUTES): its company employee, or the CTO
+ * (`cto`). Only this host command sets it, and it is audited.
+ */
+export async function addAdmin(store: OwnerAuthStore, entry: string): Promise<string[]> {
+  if (!KEEPER_ENTRY.test(entry)) throw new OwnerAdminError('An admin is `cto` or a company employee id');
+  const admins = await store.update((a) => {
+    a.admins = [...new Set([...(a.admins ?? []), entry])];
+    return a.admins;
+  });
+  await auditAdmin(store, 'admin_added', { admin: entry });
+  return admins;
+}
+
+export async function removeAdmin(store: OwnerAuthStore, entry: string): Promise<boolean> {
+  const removed = await store.update((a) => {
+    const before = a.admins?.length ?? 0;
+    a.admins = (a.admins ?? []).filter((k) => k !== entry);
+    return a.admins.length < before;
+  });
+  if (removed) await auditAdmin(store, 'admin_removed', { admin: entry });
   return removed;
 }
 
@@ -202,6 +370,7 @@ export function describe(store: OwnerAuthStore, now = Date.now()) {
     devices: a.devices.filter((d) => d.expiresAt > now).length,
     services: a.services.map((s) => s.name),
     keepers: a.keepers ?? [],
+    admins: a.admins ?? [],
     lockedBuckets: Object.entries(a.throttles ?? {})
       .filter(([, t]) => t.lockedUntil > now)
       .map(([key, t]) => ({

@@ -1,3 +1,6 @@
+import { listClis } from '../../config/cli-registry/registry.js';
+import { modePollsChat } from '../../chatroom-delivery.js';
+import { z } from 'zod';
 /**
  * @fileoverview Chatroom routes: a shared room where the user, an appointed
  * coordinator session and worker sessions talk.
@@ -84,6 +87,7 @@ import {
   ChatroomPlacementSchema,
   ChatroomPollSchema,
   ChatroomPollVoteSchema,
+  ChatroomPlaybackSchema,
   ChatroomEditSchema,
   ChatroomNotifySchema,
   ChatroomOrderSchema,
@@ -101,7 +105,10 @@ import { isSensitivePath } from '../sensitive-path.js';
 import { NO_OWNER, ownerMark, type OwnerVerifier } from '../../owner-auth/marks.js';
 import { OWNER_RANK, RolesStore, type Actor, type Permission } from '../../roles.js';
 
+class PhoneStatusForbidden extends Error {}
+
 function sendError(reply: FastifyReply, err: unknown): FastifyReply {
+  if (err instanceof PhoneStatusForbidden) return reply.code(403).send(createErrorResponse(ApiErrorCode.FORBIDDEN, err.message));
   if (err instanceof ChatroomError) {
     if (err.code === 'UNAVAILABLE') return reply.code(503).send(createErrorResponse(ApiErrorCode.OPERATION_FAILED, err.message));
     const status = err.code === 'NOT_FOUND' ? 404 : err.code === 'CONFLICT' ? 409 : 400;
@@ -155,6 +162,46 @@ export function registerChatroomRoutes(
     if (!options.url.startsWith('/api/chatrooms')) return;
     const existing = options.preHandler ? [options.preHandler].flat() : [];
     options.preHandler = [refuseUnresolvedParent, ...existing];
+  });
+
+  const phoneSchema = z.object({ mode: z.enum(['ring', 'vibrate', 'silent']) }).strict();
+  const phoneActor = (req: FastifyRequest) => {
+    const self = caller(req);
+    const owner = verifiedOwner(req) && req.headers['x-codeman-parent-session'] === undefined;
+    if (!owner && (!self || req.headers['x-codeman-parent-session'] !== self || !employeeOf(self))) {
+      throw new PhoneStatusForbidden('Verified owner or exact bound employee caller required');
+    }
+    const coordinator = !!self && service.rooms().some(room => room.owner === ownerFor(req) && !room.archivedAt &&
+      room.members.some(m => m.sessionId === self && m.role === 'coordinator'));
+    return { self, owner, coordinator };
+  };
+  app.get('/api/chatrooms/phone-status', async (req, reply) => {
+    try {
+      const actor = phoneActor(req);
+      return { success: true, data: { canSetOwn: true, canSetAgents: actor.owner || actor.coordinator,
+        self: actor.self ?? 'owner', alertMode: actor.self ? service.alertMode(actor.self) ?? null : service.ownerPhoneStatus(ownerFor(req)) ?? null } };
+    } catch (error) { return sendError(reply, error); }
+  });
+  app.put<{ Params: { target: string } }>('/api/chatrooms/phone-status/:target', async (req, reply) => {
+    const body = phoneSchema.safeParse(req.body);
+    if (!body.success) return reply.code(400).send(createErrorResponse(ApiErrorCode.INVALID_INPUT, 'Expected only mode: ring, vibrate or silent'));
+    try {
+      const actor = phoneActor(req);
+      const target = req.params.target === 'owner' ? undefined : req.params.target;
+      const authorize = () => {
+        const current = phoneActor(req);
+        if (current.self !== actor.self || current.owner !== actor.owner) throw new PhoneStatusForbidden('Caller changed');
+        if (!target) {
+          if (!current.owner) throw new PhoneStatusForbidden('Only the owner sets owner status');
+        } else {
+          const session = ctx.sessions.get(target);
+          if (!session || session.owner !== ownerFor(req) || !employeeOf(target)) throw new PhoneStatusForbidden('Target is not an employee in your company');
+          if (!current.owner && !current.coordinator && current.self !== target) throw new PhoneStatusForbidden('Only owner, coordinator or self may set this mode');
+        }
+      };
+      const alertMode = await service.setPhoneStatus(ownerFor(req), target, body.data.mode, actor.owner ? 'owner' : actor.self!, authorize);
+      return { success: true, data: { alertMode: alertMode ?? null } };
+    } catch (error) { return sendError(reply, error); }
   });
 
   app.get('/api/chatrooms/alert-mode', async (req, reply) => {
@@ -281,7 +328,7 @@ export function registerChatroomRoutes(
         // For an agent asking about its own rooms: where its last prompt came from, so a verb with no --room can reply there.
         ...(self && member === 'self' ? { lastDelivery: service.lastDeliveryRooms(self) ?? null } : {}),
         // What this server can do, so a page built for more never shows a control that does nothing.
-        features: { unread: true, dms: true, placement: true, replies: true, deletes: true, reports: true, topics: true, edits: true, pins: true, order: true, notify: true, replace: true },
+        features: { pollingModes: listClis().filter(entry => modePollsChat(entry.id)).map(entry => entry.id), unread: true, dms: true, placement: true, replies: true, deletes: true, reports: true, topics: true, edits: true, pins: true, order: true, notify: true, replace: true },
         // What the owner is called in a room, so the page counts an `@name` of them as a mention.
         ownerNames: service.ownerNames(isMultiUserMode() ? user.username : undefined),
         // Sessions retired by a plan switch: the page keeps them out of its pickers (the owner sees them in a list).
@@ -930,6 +977,20 @@ export function registerChatroomRoutes(
     }
   });
 
+  // Car mode on the owner's page reports a message addressed to the user that it did not play, or cut short (playbackNotice).
+  app.post('/api/chatrooms/:id/messages/:messageId/playback', async (req, reply) => {
+    const { id, messageId } = req.params as { id: string; messageId: string };
+    const body = parseBody(ChatroomPlaybackSchema, req.body);
+    try {
+      roomOrFail(req, id);
+      // Only the owner's page plays aloud; an agent saying what the user heard would be a note in the user's name.
+      if (caller(req)) return forbid(reply, "Only the user's page reports playback");
+      return { success: true, data: { told: service.playbackNotice(id, messageId, body.outcome, body.reason) } };
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
   app.post('/api/chatrooms/:id/messages/:messageId/poll/close', async (req, reply) => {
     const { id, messageId } = req.params as { id: string; messageId: string };
     try {
@@ -1110,6 +1171,35 @@ export function registerChatroomRoutes(
     } catch (err) {
       return sendError(reply, err);
     }
+  });
+
+  app.get('/api/chatrooms/delivery-status', async (req, reply) => {
+    const self = caller(req);
+    if (!self) return forbid(reply, 'An agent session is required');
+    return { success: true, data: service.deliveryStatus(self) };
+  });
+
+  app.get('/api/chatrooms/:id/messages/:messageId', async (req, reply) => {
+    const { id, messageId } = req.params as { id: string; messageId: string };
+    try {
+      roomOrFail(req, id);
+      const self = caller(req);
+      if (!self) return forbid(reply, 'An agent session is required');
+      return { success: true, data: service.exactAgentRead(self, id, messageId) };
+    } catch (error) { return sendError(reply, error); }
+  });
+
+  app.post('/api/chatrooms/:id/messages/:messageId/read-ack', async (req, reply) => {
+    const { id, messageId } = req.params as { id: string; messageId: string };
+    try {
+      roomOrFail(req, id);
+      const self = caller(req);
+      if (!self) return forbid(reply, 'An agent session is required');
+      const token = (req.body as { readToken?: unknown } | null)?.readToken;
+      if (typeof token !== 'string' || token.length > 100) return reply.code(400).send(createErrorResponse(ApiErrorCode.INVALID_INPUT, 'Expected readToken'));
+      await service.acknowledgeExactAgentRead(self, id, messageId, token);
+      return { success: true, data: { acknowledged: messageId } };
+    } catch (error) { return sendError(reply, error); }
   });
 
   app.get('/api/chatrooms/:id/messages', async (req, reply) => {

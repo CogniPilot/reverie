@@ -150,6 +150,7 @@ import { resolveConfigModel } from './model-config-resolvers.js';
 import { legacyConfigForMode } from './session-cli-registry-bridge.js';
 import { checkFullAccessFlags, fullAccessByDefault, withFullAccessDefault, type FullAccessCheck } from './full-access-default.js';
 import { canUsernameRunPrivilegedCommands } from './user-store.js';
+import { readProcStat, stopPtyChild } from './signal-target.js';
 import { getLifecycleLog } from './session-lifecycle-log.js';
 import {
   launchModelFor,
@@ -495,7 +496,7 @@ export class Session extends EventEmitter {
   readonly id: string;
   readonly workingDir: string;
   readonly createdAt: number;
-  readonly mode: SessionMode;
+  private _mode: SessionMode;
   readonly subscriptionProfile?: SessionState['subscriptionProfile'];
 
   // Task description cache (extracted to SessionTaskCache)
@@ -510,7 +511,7 @@ export class Session extends EventEmitter {
    * (`startMode: 'shell'`), so a shell tab is not renamed after every `ls`.
    */
   private readonly _submittedPromptTracker = new SubmittedPromptTracker();
-  private readonly _acceptsPrompts: boolean;
+  private _acceptsPrompts: boolean;
   private ptyProcess: pty.IPty | null = null;
   private _pid: number | null = null;
   private _status: SessionStatus = 'idle';
@@ -920,7 +921,7 @@ export class Session extends EventEmitter {
     this.id = config.id || uuidv4();
     this.workingDir = config.workingDir;
     this.createdAt = config.createdAt || Date.now();
-    this.mode = config.mode || 'claude';
+    this._mode = config.mode || 'claude';
     this.subscriptionProfile = config.subscriptionProfile;
     this._name = config.name || '';
     this._nameSource =
@@ -1855,6 +1856,23 @@ export class Session extends EventEmitter {
 
   get autoClearEnabled(): boolean {
     return this._autoOps.autoClearEnabled;
+  }
+
+  get mode(): SessionMode {
+    return this._mode;
+  }
+
+  /**
+   * Point this session at another registered CLI for its NEXT launch. Nothing is restarted here: the caller restarts
+   * the pane in place (restartCli) and puts the old mode back if that fails. Everything keyed to the session id
+   * (identity, rooms, pin, OpenCode thread) stays, so switching back to `opencode` resumes the same thread.
+   */
+  setMode(mode: SessionMode): void {
+    if (!getCli(mode)) throw new Error(`No CLI registry entry for mode ${mode}`);
+    this._mode = mode;
+    this._acceptsPrompts = getCli(mode)?.capabilities.startMode !== 'shell';
+    // The probed version belongs to the previous CLI.
+    this._cliVersion = '';
   }
 
   get name(): string {
@@ -5112,38 +5130,19 @@ export class Session extends EventEmitter {
 
     if (this.ptyProcess) {
       if (killMux) {
-        // Full kill: SIGTERM → wait → SIGKILL the PTY and its children
-        const pid = this.ptyProcess.pid;
-
-        // First try graceful SIGTERM
-        try {
-          this.ptyProcess.kill();
-        } catch (err) {
-          console.warn('[Session] Failed to send SIGTERM to PTY process (may already be dead):', err);
-        }
-
-        // Give it a moment to terminate gracefully. For a tmux-backed session this
-        // is the attach client, gone within a few ms of SIGTERM, and this used to be
-        // a fixed 100ms sleep on every close.
-        if (pid) await waitForProcessesExit([pid], { timeoutMs: GRACEFUL_SHUTDOWN_DELAY_MS });
-
-        // Force kill with SIGKILL if still alive
-        try {
-          if (pid) {
-            process.kill(pid, 'SIGKILL');
-          }
-        } catch (err) {
-          console.warn('[Session] Failed to send SIGKILL to process (already terminated):', err);
-        }
-
-        // Also try to kill any child processes in the process group
-        try {
-          if (pid) {
-            process.kill(-pid, 'SIGKILL');
-          }
-        } catch (err) {
-          console.warn('[Session] Failed to send SIGKILL to process group (may not exist):', err);
-        }
+        // Full kill: SIGTERM → wait → SIGKILL the PTY and its children. Every signal,
+        // the first included, goes only to a PTY child verified at that moment (see
+        // stopPtyChild): node-pty's kill() is a bare process.kill(pid), so a zero,
+        // reused or foreign pid must never reach it. Unverified: no signal here; the
+        // mux teardown below still runs.
+        await stopPtyChild(this.ptyProcess, {
+          stat: readProcStat,
+          kill: (p, sig) => process.kill(p, sig),
+          selfPid: process.pid,
+          selfPgid: readProcStat(process.pid)?.pgid ?? null,
+          wait: (pids) => waitForProcessesExit(pids, { timeoutMs: GRACEFUL_SHUTDOWN_DELAY_MS }),
+          warn: (msg) => console.warn(`[Session] ${msg}`),
+        });
       } else {
         // Server shutdown: just detach — the process lives on inside tmux
         console.log('[Session] Detaching from PTY (server shutdown) — mux session preserved');

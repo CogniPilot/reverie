@@ -147,3 +147,15 @@ describe('autoRestorePinnedSessions', () => {
     expect(rebootRestoreRegistry.list(() => true).map((e) => e.sessionId)).toEqual([result.skipped[0].sessionId]);
   });
 });
+
+describe('a session switched off OpenCode (POST /api/sessions/:id/mode)', () => {
+  it('keeps its OpenCode config through a restore, so switching back resumes the same thread', async () => {
+    const ctx = createMockRouteContext();
+    offer([record({ id: 'switched', pinned: true, mode: 'claude', openCodeConfig: { continueSession: 'ses_kept' } })]);
+    const result = await autoRestorePinnedSessions(ctx as never);
+    expect(result.restored).toEqual(['switched']);
+    const built0 = built.find((c) => c.id === 'switched')!;
+    expect(built0.mode).toBe('claude');
+    expect(built0.openCodeConfig).toEqual({ continueSession: 'ses_kept' });
+  });
+});

@@ -30,11 +30,11 @@ describe('COD-106 shared remote sessions', () => {
       remote,
       sessionId: 'cod106aaa',
       ompConfig: { model: 'llm-proxy/crof/glm-5.3-flash' },
-      resumeSessionId: '01a04eb1-d883-75f0-bdfa-74cc315b09ce',
+      resumeSessionId: '00000002-0002-4000-8000-000000000002',
     });
     // The remote pane command must carry the pinned omp session id so a
     // dead-pane respawn lands back in the same conversation.
-    expect(cmd).toContain('omp --model llm-proxy/crof/glm-5.3-flash --resume 01a04eb1-d883-75f0-bdfa-74cc315b09ce');
+    expect(cmd).toContain('omp --model llm-proxy/crof/glm-5.3-flash --resume 00000002-0002-4000-8000-000000000002');
     // still a durable, idempotent remote tmux session
     expect(cmd).toContain('new-session -A -s codeman-ssh-cod106aa');
   });

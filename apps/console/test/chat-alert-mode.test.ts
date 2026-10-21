@@ -7,10 +7,10 @@
 import { describe, expect, it } from 'vitest';
 import { createHarness, member, room } from './helpers/chat-app-harness.mjs';
 
-const A = 'a1111111-0000-4000-8000-000000000001';
-const B = 'b2222222-0000-4000-8000-000000000002';
-const C = 'c3333333-0000-4000-8000-000000000003';
-const D = 'd4444444-0000-4000-8000-000000000004';
+const A = '00000026-002d-4000-8000-00000000003c';
+const B = '00000035-0040-4000-8000-00000000005c';
+const C = '0000003b-0049-4000-8000-00000000006a';
+const D = '00000040-0050-4000-8000-000000000077';
 const sessions = [
   { id: A, name: 'alpha', mode: 'claude' },
   { id: B, name: 'bravo', mode: 'opencode' },
@@ -42,7 +42,7 @@ describe('member alert mode', () => {
     expect(badge('bravo').title).toMatch(/^Vibrate until (\w{3} )?\d{1,2}:\d{2} [AP]M ET \(wakes on a direct @mention or the owner\)$/);
     expect(label('bravo')).toContain(', Vibrate until ');
     expect(badge('carol').querySelector('path')?.getAttribute('d')).toBe('M3 3l18 18');
-    expect(badge('carol').title).toMatch(/^Silent until .* ET \(only the owner wakes it\)$/);
+    expect(badge('carol').title).toMatch(/^Silent until .* ET \(only an owner @mention or @everyone wakes it\)$/);
     expect(badge('delta').dataset.alertMode).toBe('ring');
     expect(label('delta')).not.toContain('Silent');
   });

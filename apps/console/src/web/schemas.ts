@@ -1822,6 +1822,13 @@ export const OpenCodeThreadSchema = z.object({
   thread: z.string().regex(/^ses_[A-Za-z0-9]{8,64}$/, 'Expected an OpenCode thread id (ses_...)'),
 });
 
+/** POST /api/sessions/:id/mode: the registry id of the CLI the session's pane runs next. */
+export const SessionModeSwitchSchema = z
+  .object({
+    mode: z.string().regex(/^[a-z0-9][a-z0-9-]{0,63}$/, 'Expected a CLI registry id'),
+  })
+  .strict();
+
 /** POST /api/sessions/:id/image-watcher */
 export const ImageWatcherSchema = z.object({
   enabled: z.boolean(),
@@ -2294,6 +2301,8 @@ export const CliCustomEntrySchema = z.object({
   argv: z.array(cliShellToken).min(1).max(16),
   /** The user confirms the CLI reads typed room text as a prompt; absent = no chat delivery. */
   acceptsChat: z.boolean().optional(),
+  /** Explicit API/polling delivery, never inferred from the absence of typed chat. */
+  chatDelivery: z.literal('poll').optional(),
 });
 
 /** POST /api/sessions/:id/custom-model — apply or clear a session's custom-model selection. */
@@ -2458,6 +2467,13 @@ export const ChatroomPollSchema = z
 export const ChatroomPollVoteSchema = z
   .object({
     options: z.array(z.string().trim().min(1).max(100)).max(10),
+  })
+  .strict();
+
+export const ChatroomPlaybackSchema = z
+  .object({
+    outcome: z.enum(['not-played', 'interrupted']),
+    reason: z.enum(['other-room', 'read-aloud-off', 'audio-failed', 'stopped', 'timed-out']),
   })
   .strict();
 

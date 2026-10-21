@@ -15,10 +15,10 @@ import { ChatFileStore } from '../../src/chatroom-files.js';
 import { registerChatroomRoutes } from '../../src/web/routes/chatroom-routes.js';
 import { RolesStore, seedAssignmentsFromEnv } from '../../src/roles.js';
 
-const MEMBER = 'aaaaaaaa-0000-4000-8000-000000000001';
-const MOD = 'bbbbbbbb-0000-4000-8000-000000000002';
-const LEAD = 'cccccccc-0000-4000-8000-000000000003';
-const ADMIN = 'dddddddd-0000-4000-8000-000000000004';
+const MEMBER = '0000002d-0035-4000-8000-000000000047';
+const MOD = '00000038-0043-4000-8000-000000000060';
+const LEAD = '0000003e-004c-4000-8000-00000000006f';
+const ADMIN = '00000043-0053-4000-8000-00000000007a';
 const EMPLOYEES: Record<string, string> = { [MOD]: 'emp-mod', [ADMIN]: 'emp-admin' };
 
 describe('chatroom roles: messages family', () => {

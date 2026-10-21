@@ -5,7 +5,7 @@ fresh. The console only reads it (`GET /api/system/gpu`).
 
 - **Where:** the console looks in `REVERIE_GPU_STATUS_FILE` alone when that is set; otherwise `/host-published/gpu.json` (the host's
   read-only bind mount of one directory), then `host/gpu.json` next to the console's data directory (for example
-  `/instances/personal/runtime/host/gpu.json`) until the mount exists. The first place with a fresh reading wins.
+  `/instances/example/runtime/host/gpu.json`) until the mount exists. The first place with a fresh reading wins.
 - **Format:**
   ```json
   { "updatedAt": 1800000000000,

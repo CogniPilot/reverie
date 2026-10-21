@@ -46,7 +46,7 @@ function service(): ChatroomService {
 }
 
 function msg(roomId: string, id: string, at: number, text = id): ChatMessage {
-  return { id, roomId, at, from: { kind: 'user', name: 'James' }, to: 'all', text };
+  return { id, roomId, at, from: { kind: 'user', name: 'Owner' }, to: 'all', text };
 }
 
 function legacyRoom(id: string, messages: ChatMessage[], extra: Partial<ChatRoom> = {}): ChatRoom {
@@ -82,8 +82,8 @@ describe('chat database', () => {
     const s = service();
     await s.init();
     const room = s.createRoom('plans', undefined);
-    const a = s.post(room.id, { kind: 'user', name: 'James' }, 'first', 'all', { deliver: false });
-    const b = s.post(room.id, { kind: 'user', name: 'James' }, 'second', 'all', { deliver: false });
+    const a = s.post(room.id, { kind: 'user', name: 'Owner' }, 'first', 'all', { deliver: false });
+    const b = s.post(room.id, { kind: 'user', name: 'Owner' }, 'second', 'all', { deliver: false });
     s.react(room.id, a.id, '👍', 'user');
     await s.deleteMessage(room.id, b.id, 'user');
     s.renameRoom(room.id, 'plans-2');
@@ -103,7 +103,7 @@ describe('chat database', () => {
     const s = service();
     await s.init();
     const room = s.createRoom('now', undefined);
-    const m = s.post(room.id, { kind: 'user', name: 'James' }, 'durable', 'all', { deliver: false });
+    const m = s.post(room.id, { kind: 'user', name: 'Owner' }, 'durable', 'all', { deliver: false });
     // No await, no timer: another connection already sees it.
     expect(open(dbFile, (db) => db.contents().messages.has(`${room.id}/${m.id}`))).toBe(true);
     expect(statSync(dbFile).mode & 0o777).toBe(0o600);
@@ -117,7 +117,7 @@ describe('chat database', () => {
     const s = service();
     await s.init();
     const room = s.createRoom('busy', undefined);
-    for (let i = 0; i < MAX_MESSAGES_PER_ROOM + 5; i++) s.post(room.id, { kind: 'user', name: 'James' }, `m${i}`, 'all', { deliver: false });
+    for (let i = 0; i < MAX_MESSAGES_PER_ROOM + 5; i++) s.post(room.id, { kind: 'user', name: 'Owner' }, `m${i}`, 'all', { deliver: false });
     expect(s.rooms()[0].messages).toHaveLength(MAX_MESSAGES_PER_ROOM);
     expect(s.rooms()[0].messages[0].text).toBe('m5');
     await s.stop();
@@ -195,7 +195,7 @@ describe('chat database', () => {
     const s = service();
     await s.init();
     const room = s.createRoom('r', undefined);
-    for (let i = 0; i < 300; i++) s.post(room.id, { kind: 'user', name: 'James' }, `filler ${i} ${'x'.repeat(200)}`, 'all', { deliver: false });
+    for (let i = 0; i < 300; i++) s.post(room.id, { kind: 'user', name: 'Owner' }, `filler ${i} ${'x'.repeat(200)}`, 'all', { deliver: false });
     await s.stop();
     // An index that no longer matches its table: the file opens and reads, only the check sees it.
     open(dbFile, (db) =>
@@ -214,7 +214,7 @@ describe('chat database', () => {
     const s = service();
     await s.init();
     const room = s.createRoom('r', undefined);
-    for (let i = 0; i < 300; i++) s.post(room.id, { kind: 'user', name: 'James' }, `filler ${i} ${'x'.repeat(200)}`, 'all', { deliver: false });
+    for (let i = 0; i < 300; i++) s.post(room.id, { kind: 'user', name: 'Owner' }, `filler ${i} ${'x'.repeat(200)}`, 'all', { deliver: false });
     await s.stop();
     open(dbFile, (db) =>
       db.db.exec(`PRAGMA writable_schema = ON;
@@ -240,9 +240,9 @@ describe('chat database', () => {
     await s.init();
     const keep = s.createRoom('keep', undefined);
     const gone = s.createRoom('gone', undefined);
-    const m = s.post(keep.id, { kind: 'user', name: 'James' }, 'hello', 'all', { deliver: false });
-    const doomed = s.post(keep.id, { kind: 'user', name: 'James' }, 'oops', 'all', { deliver: false });
-    s.post(gone.id, { kind: 'user', name: 'James' }, 'bye', 'all', { deliver: false });
+    const m = s.post(keep.id, { kind: 'user', name: 'Owner' }, 'hello', 'all', { deliver: false });
+    const doomed = s.post(keep.id, { kind: 'user', name: 'Owner' }, 'oops', 'all', { deliver: false });
+    s.post(gone.id, { kind: 'user', name: 'Owner' }, 'bye', 'all', { deliver: false });
     s.react(keep.id, m.id, '✅', 'user');
     s.react(keep.id, m.id, '👀', 'user');
     s.react(keep.id, m.id, '✅', 'user');
@@ -251,7 +251,7 @@ describe('chat database', () => {
     await s.editMessage(keep.id, m.id, 'hello again', 'user');
     // Committed by the edit itself, not by a later change to the room.
     expect(open(dbFile, (db) => db.exportRooms().find((r) => r.id === keep.id)!.messages.find((x) => x.id === m.id)!.text)).toBe('hello again');
-    const poll = s.createPoll(keep.id, { kind: 'user', name: 'James' }, { question: 'Which?', options: ['one', 'two'] });
+    const poll = s.createPoll(keep.id, { kind: 'user', name: 'Owner' }, { question: 'Which?', options: ['one', 'two'] });
     s.votePoll(keep.id, poll.id, 'user', ['1']);
     s.votePoll(keep.id, poll.id, 'user', ['2']);
     await s.closePoll(keep.id, poll.id, 'user');
@@ -274,7 +274,7 @@ describe('chat database', () => {
     const s = service();
     await s.init();
     const room = s.createRoom('r', undefined);
-    s.post(room.id, { kind: 'user', name: 'James' }, 'kept', 'all', { deliver: false });
+    s.post(room.id, { kind: 'user', name: 'Owner' }, 'kept', 'all', { deliver: false });
     const db = (s as unknown as { db: ChatDb }).db;
     const exec = db.db.exec.bind(db.db);
     let fail = true;
@@ -285,7 +285,7 @@ describe('chat database', () => {
       }
       return exec(sql);
     };
-    expect(() => s.post(room.id, { kind: 'user', name: 'James' }, 'lost', 'all', { deliver: false })).toThrow(
+    expect(() => s.post(room.id, { kind: 'user', name: 'Owner' }, 'lost', 'all', { deliver: false })).toThrow(
       expect.objectContaining({ code: 'UNAVAILABLE' })
     );
     expect(s.rooms()[0].messages.map((m) => m.text)).toEqual(['kept']);
@@ -296,7 +296,7 @@ describe('chat database', () => {
     expect(() => s.renameRoom(room.id, 'renamed')).toThrow(expect.objectContaining({ code: 'UNAVAILABLE' }));
     expect(s.rooms()[0].name).toBe('r');
 
-    s.post(room.id, { kind: 'user', name: 'James' }, 'again', 'all', { deliver: false });
+    s.post(room.id, { kind: 'user', name: 'Owner' }, 'again', 'all', { deliver: false });
     await s.stop();
     const again = service();
     await again.init();
@@ -317,7 +317,7 @@ describe('chat database', () => {
     const s = service();
     await s.init();
     const room = s.createRoom('r', undefined);
-    s.post(room.id, { kind: 'user', name: 'James' }, 'kept', 'all', { deliver: false });
+    s.post(room.id, { kind: 'user', name: 'Owner' }, 'kept', 'all', { deliver: false });
     const db = (s as unknown as { db: ChatDb }).db;
     const archive = (s as unknown as { archive: ChatArchive }).archive;
     const exec = db.db.exec.bind(db.db);
@@ -330,13 +330,13 @@ describe('chat database', () => {
       if (lines.some((l) => l.includes('"kind":"void"'))) throw new Error('ENOSPC');
       append(week, lines);
     };
-    expect(() => s.post(room.id, { kind: 'user', name: 'James' }, 'lost', 'all', { deliver: false })).toThrow(expect.objectContaining({ code: 'UNAVAILABLE' }));
+    expect(() => s.post(room.id, { kind: 'user', name: 'Owner' }, 'lost', 'all', { deliver: false })).toThrow(expect.objectContaining({ code: 'UNAVAILABLE' }));
     expect(errors).toHaveBeenCalledWith(expect.stringContaining('WRITES CLOSED'), expect.anything());
     await vi.waitFor(() => expect(alerts).toEqual([expect.stringMatching(/^Chat is read-only/)]));
     // The disk is fine again, but the archive still holds an unvoided txn: no more writes until a restart.
     db.db.exec = exec;
     archive.appendSync = append;
-    expect(() => s.post(room.id, { kind: 'user', name: 'James' }, 'later', 'all', { deliver: false })).toThrow(/read-only until the console restarts/);
+    expect(() => s.post(room.id, { kind: 'user', name: 'Owner' }, 'later', 'all', { deliver: false })).toThrow(/read-only until the console restarts/);
     expect(s.rooms()[0].messages.map((m) => m.text)).toEqual(['kept']);
     expect(s.view(s.rooms()[0]).messages.map((m) => m.text)).toEqual(['kept']);
     await s.stop();
@@ -350,7 +350,7 @@ describe('chat database', () => {
     const restarted = service();
     await restarted.init();
     expect(errors).toHaveBeenCalledWith(expect.stringContaining(`voided 1 archive txn(s) the database never committed (writes closed or a crash mid-commit): ${lost.txn}`));
-    restarted.post(room.id, { kind: 'user', name: 'James' }, 'after restart', 'all', { deliver: false });
+    restarted.post(room.id, { kind: 'user', name: 'Owner' }, 'after restart', 'all', { deliver: false });
     await restarted.stop();
     const lines = readArchive(archiveDir).lines;
     expect(lines.filter((l) => l.kind === 'void').map((l) => l.txn)).toEqual([lost.txn]);
@@ -384,7 +384,7 @@ describe('chat database', () => {
       if (lines.some((l) => l.includes('"kind":"void"'))) throw new Error('ENOSPC');
       append(week, lines);
     };
-    expect(() => s.post(room.id, { kind: 'user', name: 'James' }, 'lost', 'all', { deliver: false })).toThrow(expect.objectContaining({ code: 'UNAVAILABLE' }));
+    expect(() => s.post(room.id, { kind: 'user', name: 'Owner' }, 'lost', 'all', { deliver: false })).toThrow(expect.objectContaining({ code: 'UNAVAILABLE' }));
     db.close();
 
     // The disk is still full at the restart.
@@ -396,7 +396,7 @@ describe('chat database', () => {
     await restarted.init();
     expect(errors).toHaveBeenCalledWith(expect.stringContaining('WRITES CLOSED: the archive has txn(s)'), expect.anything());
     await vi.waitFor(() => expect(alerts.at(-1)).toMatch(/^Chat is read-only/));
-    expect(() => restarted.post(room.id, { kind: 'user', name: 'James' }, 'x', 'all', { deliver: false })).toThrow(/read-only until the console restarts/);
+    expect(() => restarted.post(room.id, { kind: 'user', name: 'Owner' }, 'x', 'all', { deliver: false })).toThrow(/read-only until the console restarts/);
     spy.mockRestore();
     await restarted.stop();
   });
@@ -406,14 +406,14 @@ describe('chat database', () => {
     await s.init();
     const a = s.createRoom('a', undefined);
     const b = s.createRoom('b', undefined);
-    s.post(b.id, { kind: 'user', name: 'James' }, 'in b', 'all', { deliver: false });
+    s.post(b.id, { kind: 'user', name: 'Owner' }, 'in b', 'all', { deliver: false });
     const stringify = vi.spyOn(JSON, 'stringify');
-    s.post(a.id, { kind: 'user', name: 'James' }, 'in a', 'all', { deliver: false });
+    s.post(a.id, { kind: 'user', name: 'Owner' }, 'in a', 'all', { deliver: false });
     expect(stringify.mock.calls.some(([v]) => (v as ChatMessage)?.text === 'in b')).toBe(false);
     stringify.mockRestore();
     // A change with no persist naming its room (as a missed call site would be).
     s.rooms().find((r) => r.id === b.id)!.messages[0].text = 'edited quietly';
-    s.post(a.id, { kind: 'user', name: 'James' }, 'again in a', 'all', { deliver: false });
+    s.post(a.id, { kind: 'user', name: 'Owner' }, 'again in a', 'all', { deliver: false });
     expect(open(dbFile, (d) => d.exportRooms().find((r) => r.id === b.id)!.messages[0].text)).toBe('in b');
     await s.stop();
     expect(open(dbFile, (d) => d.exportRooms().find((r) => r.id === b.id)!.messages[0].text)).toBe('edited quietly');
@@ -441,7 +441,7 @@ describe('chat database', () => {
     const s = service();
     await s.init();
     const room = s.createRoom('r', undefined);
-    for (let i = 0; i < 20; i++) s.post(room.id, { kind: 'user', name: 'James' }, `m${i}`, 'all', { deliver: false });
+    for (let i = 0; i < 20; i++) s.post(room.id, { kind: 'user', name: 'Owner' }, `m${i}`, 'all', { deliver: false });
     const dest = join(dir, 'backup.db');
     // Taken while the service has it open.
     expect(await backupChatDb(dbFile, dest)).toEqual({ rooms: 1, messages: 20 });
@@ -460,7 +460,7 @@ const s = new ChatroomService({ file: ${JSON.stringify(file)}, database: ${JSON.
 await s.init();
 const room = s.createRoom('crash', undefined);
 for (let i = 0; ; i++) {
-  const m = s.post(room.id, { kind: 'user', name: 'James' }, 'n' + i + ' ' + 'y'.repeat(500), 'all', { deliver: false });
+  const m = s.post(room.id, { kind: 'user', name: 'Owner' }, 'n' + i + ' ' + 'y'.repeat(500), 'all', { deliver: false });
   process.stdout.write('id ' + m.id + '\\n');
 }
 `

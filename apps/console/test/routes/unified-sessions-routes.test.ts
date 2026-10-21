@@ -141,7 +141,7 @@ describe('GET /api/sessions/unified', () => {
   it('folds a resumed session transcript (claudeSessionId != id) into ONE row', async () => {
     // Seed a real transcript fixture keyed by the Claude conversation UUID
     // (the .jsonl filename stem), like a resumed session leaves behind.
-    const uuid = 'aabbccdd-1111-2222-3333-444455556666';
+    const uuid = '0000002f-003a-4000-8000-000000000054';
     const projDir = join(tmpHome, '.claude', 'projects', '-tmp-test-workdir');
     mkdirSync(projDir, { recursive: true });
     const line = JSON.stringify({ type: 'user', message: { role: 'user', content: 'resumed prompt' } }) + '\n';

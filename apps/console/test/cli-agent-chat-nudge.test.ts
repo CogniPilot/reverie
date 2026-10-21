@@ -8,7 +8,7 @@ import { agentChatSay, resolveChatRoom, type AgentDeps, type RequestOptions } fr
 const member = (name: string) => ({ sessionId: `${name}-id`, name, role: '', goal: '', progress: '' });
 const ROOMS = [
   { id: 'room-aaaa', name: 'Platform', members: [member('Ada'), member('Grace')] },
-  { id: 'fb5a947c-0000-4000-8000-000000000001', name: '', kind: 'dm' as const, dm: ['user', 'x'], members: [] },
+  { id: '00000047-005b-4000-8000-00000000008c', name: '', kind: 'dm' as const, dm: ['user', 'x'], members: [] },
 ];
 
 function deps(json = false, warnings?: unknown[]) {
@@ -16,7 +16,7 @@ function deps(json = false, warnings?: unknown[]) {
   const err: string[] = [];
   const out: string[] = [];
   const d: AgentDeps = {
-    ctx: { apiUrl: 'http://127.0.0.1:3000', selfId: 'aaaaaaaa-0000-4000-8000-000000000001' },
+    ctx: { apiUrl: 'http://127.0.0.1:3000', selfId: '0000002d-0035-4000-8000-000000000047' },
     json,
     io: { out: (m: string) => void out.push(m), err: (m: string) => void err.push(m) },
     request: async (_ctx, options) => {
@@ -59,6 +59,6 @@ describe('--room for a direct message', () => {
     const { d } = deps();
     expect(await resolveChatRoom(d, 'Direct message')).toEqual({ room: ROOMS[1] });
     expect(await resolveChatRoom(d, 'direct MESSAGE')).toEqual({ room: ROOMS[1] });
-    expect(await resolveChatRoom(d, 'fb5a947c')).toEqual({ room: ROOMS[1] });
+    expect(await resolveChatRoom(d, '00000047')).toEqual({ room: ROOMS[1] });
   });
 });

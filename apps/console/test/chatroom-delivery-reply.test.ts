@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest';
 import { renderForRecipient } from '../src/chatroom-delivery.js';
 import type { ChatMessage, ChatRoom } from '../src/chatroom-store.js';
 
-const A = 'aaaaaaaa-0000-4000-8000-000000000001';
+const A = '0000002d-0035-4000-8000-000000000047';
 const room = (messages: ChatMessage[]): ChatRoom =>
   ({ id: 'r', name: 'Room', createdAt: 1, members: [{ sessionId: A, role: 'member', joinedAt: 1, updatedAt: 1 }], messages }) as unknown as ChatRoom;
 const nameOf = () => 'alpha';

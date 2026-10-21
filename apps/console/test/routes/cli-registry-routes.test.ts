@@ -24,7 +24,7 @@ import {
 } from '../../src/web/routes/cli-registry-routes.js';
 import { SETTINGS_PATH } from '../../src/web/route-helpers.js';
 import { CreateSessionSchema } from '../../src/web/schemas.js';
-import { paneAcceptsChat } from '../../src/chatroom-delivery.js';
+import { paneAcceptsChat, modePollsChat } from '../../src/chatroom-delivery.js';
 import { buildSpawnCommandFromRegistry } from '../../src/session-cli-registry-bridge.js';
 import { defaultRemoteCommandForMode } from '../../src/remote-hosts.js';
 import { defaultDockerCommandForMode } from '../../src/docker-hosts.js';
@@ -353,7 +353,7 @@ describe('Custom CLI entries (Phase 5)', () => {
     const byAgent = await app.inject({
       method: 'POST',
       url: '/api/clis',
-      headers: { 'x-codeman-parent-session': 'aaaaaaaa-0000-4000-8000-000000000001' },
+      headers: { 'x-codeman-parent-session': '0000002d-0035-4000-8000-000000000047' },
       payload,
     });
     expect(byAgent.statusCode).toBe(403);
@@ -369,6 +369,22 @@ describe('Custom CLI entries (Phase 5)', () => {
     expect(paneAcceptsChat('shell')).toBe(false);
     expect(paneAcceptsChat('claude')).toBe(true);
     await app.inject({ method: 'DELETE', url: '/api/clis/test-chat' });
+  });
+
+  it('persists an explicit polling declaration without enabling pane input or permitting agent registry writes', async () => {
+    enableCliManagement();
+    const { app } = await createRouteTestHarness(registerCliRegistryRoutes);
+    const payload = { id: 'test-poll', label: 'Poller', shortBadge: 'P', binaries: ['poll-bin'], argv: ['poll-bin'], chatDelivery: 'poll' };
+    expect((await app.inject({ method: 'POST', url: '/api/clis', payload,
+      headers: { 'x-codeman-parent-session': '0000002d-0035-4000-8000-000000000047' } })).statusCode).toBe(403);
+    expect((await app.inject({ method: 'POST', url: '/api/clis', payload })).statusCode).toBe(200);
+    expect(getCli('test-poll')?.capabilities.chatDelivery).toBe('poll');
+    expect(modePollsChat('test-poll')).toBe(true);
+    expect(paneAcceptsChat('test-poll')).toBe(false);
+    expect((await app.inject({ method: 'PUT', url: '/api/clis/custom/test-poll', payload: { ...payload, acceptsChat: true } })).json().success).toBe(false);
+    expect(modePollsChat('test-poll')).toBe(true);
+    expect(paneAcceptsChat('test-poll')).toBe(false);
+    await app.inject({ method: 'DELETE', url: '/api/clis/test-poll' });
   });
 
   it('rejects a create whose id collides with a stock id', async () => {

@@ -26,6 +26,7 @@ import { pasteDeliveryEnabled, typeIntoOpencode } from './opencode-input.js';
 import { typeAndSubmit, type SubmitSettleIo, type TurnSignals } from './submit-settle.js';
 import { EventEmitter } from 'node:events';
 import { collectDescendants } from './proc-tree.js';
+import { isSameProcess, PANE_LIVENESS_FORMAT, readProcStat, resolveLivePaneTarget, signalDescendants } from './signal-target.js';
 import { execSync, exec, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
@@ -2511,17 +2512,27 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
   }
 
   /**
-   * {@link getPanePid} without blocking the event loop, for the kill path: a close
-   * must not stall every other session's I/O while tmux answers.
+   * Every pane on our server as `pane_dead pane_pid session_name` (PANE_LIVENESS_FORMAT),
+   * for the kill path; null when tmux does not answer. Listing all panes and matching
+   * the name in code avoids tmux's prefix match on `-t NAME`. Async: a close must not
+   * stall every other session's I/O while tmux answers.
    */
-  private async getPanePidAsync(muxName: string): Promise<number | null> {
-    if (IS_TEST_MODE) return 99999;
-    if (!isValidMuxName(muxName)) {
-      console.error('[TmuxManager] Invalid session name in getPanePidAsync:', muxName);
+  private async listPanesAsync(): Promise<string | null> {
+    try {
+      const { stdout } = await execAsync(`${this.tmux()} list-panes -a -F '${PANE_LIVENESS_FORMAT}'`, {
+        encoding: 'utf-8',
+        timeout: EXEC_TIMEOUT_MS,
+      });
+      return stdout;
+    } catch {
       return null;
     }
+  }
+
+  /** Pid of the tmux server on our socket, or null when it does not answer. */
+  private async getServerPidAsync(): Promise<number | null> {
     try {
-      const { stdout } = await execAsync(`${this.tmux()} display-message -t "${muxName}" -p '#{pane_pid}'`, {
+      const { stdout } = await execAsync(`${this.tmux()} display-message -p '#{pid}'`, {
         encoding: 'utf-8',
         timeout: EXEC_TIMEOUT_MS,
       });
@@ -2791,18 +2802,6 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
     });
   }
 
-  // Check if a process is still alive. Signal decisions only: an unreaped zombie
-  // counts here, so its process group still gets the SIGKILL below. The WAITS use
-  // waitForProcessesExit(), which counts a zombie as exited.
-  private isProcessAlive(pid: number): boolean {
-    try {
-      process.kill(pid, 0);
-      return true;
-    } catch {
-      return false;
-    }
-  }
-
   // Verify all PIDs are dead, returning as soon as they are
   private async verifyProcessesDead(pids: number[], maxWaitMs: number = 1000): Promise<boolean> {
     const stillAlive = await waitForProcessesExit(pids, { timeoutMs: maxWaitMs });
@@ -2863,7 +2862,7 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
       if (isValidMuxName(session.muxName)) {
         try {
           // Local socket only — detaches the remote session by killing the local ssh pane.
-          await execAsync(`${this.tmux()} kill-session -t "${session.muxName}" 2>/dev/null`, {
+          await execAsync(`${this.tmux()} kill-session -t "=${session.muxName}" 2>/dev/null`, {
             timeout: EXEC_TIMEOUT_MS,
           });
         } catch {
@@ -2879,52 +2878,59 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
       return true;
     }
 
-    // Get current PID (may have changed)
-    const currentPid = (await this.getPanePidAsync(session.muxName)) || session.pid;
+    // Signal only a pid verified as this session's LIVE pane (see signal-target.ts).
+    // A dead pane keeps its old pane_pid under remain-on-exit, and that pid may now be
+    // a live sibling pane of the same server; a missing or unreadable pane is no
+    // better. No fallback to the stored session.pid either: a stale, reused or zero
+    // value there reaches every pane and the shared server. Without a live verified
+    // pane, the exact-name kill-session below is the only teardown.
+    const selfPgid = readProcStat(process.pid)?.pgid ?? null;
+    const { target, pane } = isValidMuxName(session.muxName)
+      ? await resolveLivePaneTarget(() => this.listPanesAsync(), session.muxName, {
+          serverPid: await this.getServerPidAsync(),
+          selfPid: process.pid,
+          selfPgid,
+          stat: readProcStat,
+        })
+      : { target: null, pane: { state: 'unreadable' as const } };
+    const currentPid = target?.pid ?? null;
 
-    console.log(`[TmuxManager] Killing session ${session.muxName} (PID ${currentPid})`);
+    console.log(
+      `[TmuxManager] Killing session ${session.muxName} (PID ${currentPid ?? `none verified: pane ${pane.state === 'live' ? pane.pid : pane.state}, stored ${session.pid}`})`
+    );
 
-    const allPids: number[] = [currentPid];
+    const allPids: number[] = currentPid !== null ? [currentPid] : [];
 
-    // Strategy 1: Kill all child processes recursively
-    let childPids = await this.getChildPidsFresh(currentPid);
-    if (childPids.length > 0) {
-      console.log(`[TmuxManager] Found ${childPids.length} child processes to kill`);
-      allPids.push(...childPids);
-
-      for (const childPid of [...childPids].reverse()) {
-        if (this.isProcessAlive(childPid)) {
-          try {
-            process.kill(childPid, 'SIGTERM');
-          } catch {
-            // Process may already be dead
-          }
-        }
-      }
+    // Strategy 1: Kill all child processes recursively. Each snapshot pid is bound to
+    // its identity under the verified pane, and that identity and its whole parent
+    // chain are re-checked right before every signal (see signalDescendants): a pid
+    // that has since exited, been reparented or reused is skipped, never signalled.
+    const deps = { stat: readProcStat, kill: (p: number, sig: NodeJS.Signals) => process.kill(p, sig), selfPid: process.pid, selfPgid };
+    let childPids = target ? await this.getChildPidsFresh(target.pid) : [];
+    if (target && childPids.length > 0) {
+      const term = signalDescendants(target, childPids, 'SIGTERM', deps);
+      console.log(`[TmuxManager] Found ${childPids.length} child processes, ${term.bound.length} verified, to kill`);
+      allPids.push(...term.bound);
 
       // Most children are gone within a few ms; the re-scan below still runs, to
       // catch anything spawned since the first one.
-      await waitForProcessesExit(childPids, { timeoutMs: TMUX_KILL_WAIT_MS });
+      await waitForProcessesExit(term.bound, { timeoutMs: TMUX_KILL_WAIT_MS });
 
-      childPids = await this.getChildPidsFresh(currentPid);
-      for (const childPid of childPids) {
-        if (this.isProcessAlive(childPid)) {
-          try {
-            process.kill(childPid, 'SIGKILL');
-          } catch {
-            // Process already terminated
-          }
-        }
+      childPids = isSameProcess(target, readProcStat) ? await this.getChildPidsFresh(target.pid) : [];
+      const kill = signalDescendants(target, childPids, 'SIGKILL', deps);
+      const skipped = term.skipped + kill.skipped;
+      if (skipped > 0) {
+        console.log(`[TmuxManager] Skipped ${skipped} descendant pid(s) whose identity did not verify`);
       }
     }
 
-    // Strategy 2: Kill the entire process group
-    if (this.isProcessAlive(currentPid)) {
+    // Strategy 2: Kill the entire process group — only one the pane itself leads
+    if (target?.ownGroup && isSameProcess(target, readProcStat)) {
       try {
-        process.kill(-currentPid, 'SIGTERM');
-        await waitForProcessesExit([currentPid], { timeoutMs: GRACEFUL_SHUTDOWN_WAIT_MS });
-        if (this.isProcessAlive(currentPid)) {
-          process.kill(-currentPid, 'SIGKILL');
+        process.kill(-target.pid, 'SIGTERM');
+        await waitForProcessesExit([target.pid], { timeoutMs: GRACEFUL_SHUTDOWN_WAIT_MS });
+        if (isSameProcess(target, readProcStat)) {
+          process.kill(-target.pid, 'SIGKILL');
         }
       } catch {
         // Process group may not exist or already terminated
@@ -2936,7 +2942,7 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
     // whole server for that long on every close.
     if (isValidMuxName(session.muxName)) {
       try {
-        await execAsync(`${this.tmux()} kill-session -t "${session.muxName}" 2>/dev/null`, {
+        await execAsync(`${this.tmux()} kill-session -t "=${session.muxName}" 2>/dev/null`, {
           timeout: EXEC_TIMEOUT_MS,
         });
       } catch {
@@ -2970,10 +2976,10 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
       }
     }
 
-    // Strategy 4: Direct kill by PID as final fallback
-    if (this.isProcessAlive(currentPid)) {
+    // Strategy 4: Direct kill by PID as final fallback (same verified process only)
+    if (target && isSameProcess(target, readProcStat)) {
       try {
-        process.kill(currentPid, 'SIGKILL');
+        process.kill(target.pid, 'SIGKILL');
       } catch {
         // Already dead
       }
@@ -3009,6 +3015,16 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
       return false;
     }
     session.name = name;
+    this.saveSessions();
+    return true;
+  }
+
+  updateSessionMode(sessionId: string, mode: SessionMode): boolean {
+    const session = this.sessions.get(sessionId);
+    if (!session) {
+      return false;
+    }
+    session.mode = mode;
     this.saveSessions();
     return true;
   }

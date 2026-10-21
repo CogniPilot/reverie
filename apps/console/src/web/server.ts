@@ -42,6 +42,7 @@ import { WorkspaceIconStore } from '../workspace-icons.js';
  * @module web/server
  */
 
+import { createHash } from 'node:crypto';
 import Fastify, { FastifyInstance } from 'fastify';
 import fastifyCompress from '@fastify/compress';
 import fastifyCookie from '@fastify/cookie';
@@ -52,7 +53,7 @@ import { pasteImageDirInUseByOtherSession, startPasteImageGc, uploadDirs } from 
 import { CLEAN_EXIT_CLOSE_REASON, shouldCloseCleanlyExitedSession } from '../pane-exit-sweep.js';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { existsSync, mkdirSync, readFileSync, chmodSync, statSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, chmodSync } from 'node:fs';
 import fs from 'node:fs/promises';
 import { execSync } from 'node:child_process';
 import { hostname as getHostname, uptime as osUptime, homedir } from 'node:os';
@@ -269,7 +270,13 @@ import { registerExpertRoutes } from './routes/expert-routes.js';
 import { ExpertError, ExpertStore, sessionCreateBody } from '../experts.js';
 import { appendAdminAudit } from './admin-audit.js';
 import { registerVoiceTurnRoutes } from './routes/voice-turn-routes.js';
+import { registerVoiceSpeakRoutes } from './routes/voice-speak-routes.js';
 import { registerPlansRoutes } from './routes/plans-routes.js';
+import { registerPlanMoveRoutes } from './routes/plan-move-routes.js';
+import { authenticatedPlanMover } from './plan-move-auth.js';
+import { PlanMoves, PlanMoveError } from '../plan-move.js';
+import { PlanMoveStore } from '../plan-move-store.js';
+import { planMoveExecutor, type PlanMoveRuntime } from '../plan-move-runtime.js';
 import { PlanService } from '../plan-accounts.js';
 import { githubData, type GithubArgs } from '../cron/github-source.js';
 import { appendBurnLog, burnLogLines, burnWatchData, hostLoadData, plansPaceData } from '../cron/post-sources.js';
@@ -995,6 +1002,7 @@ export class WebServer extends EventEmitter {
         employeeOf: (sessionId) => this.companyService?.view().employees.find((e) => e.sessionId === sessionId)?.id,
         ctoEmployee: () => this.companyService?.view().settings.ctoId,
         keepers: () => ownerAuth.keepers(),
+        admins: () => ownerAuth.admins(),
       }),
       isCapabilityRequest: (req) => isCapabilityRequest(req, this.basePath),
       basePath: this.basePath,
@@ -1319,8 +1327,12 @@ export class WebServer extends EventEmitter {
     this.chatroomService = new ChatroomService({
       file: dataPath('chatrooms.json'),
       employeeOf: (sessionId) => {
-        const employees = this.companyService?.view().employees.filter((e) => e.sessionId === sessionId) ?? [];
+        const employees = this.companyService?.view(this.sessions.get(sessionId)?.owner).employees.filter((e) => e.sessionId === sessionId) ?? [];
         return employees.length === 1 ? employees[0].id : undefined;
+      },
+      pronounsOf: (sessionId) => {
+        const employees = this.companyService?.view(this.sessions.get(sessionId)?.owner).employees.filter((e) => e.sessionId === sessionId) ?? [];
+        return employees.length === 1 ? employees[0].pronouns : undefined;
       },
       // Rooms and messages live in SQLite; chatrooms.json is imported once, when chat.db does not exist yet.
       database: dataPath('chat.db'),
@@ -1328,7 +1340,7 @@ export class WebServer extends EventEmitter {
       files: chatroomFiles,
       getSession: (id) => this.sessions.get(id),
       broadcast: (event, data) => this.broadcast(event, data),
-      // An agent's `@James` counts as a mention of the owner: the name is the one set in the company settings.
+      // An agent's `@Owner` counts as a mention of the owner: the name is the one set in the company settings.
       ownerNames: (owner) => [this.companyService?.view(owner).settings.ownerName ?? ''],
       // Dropped messages are archived in ISO-week files, weeks in the company zone.
       timeZone: (owner) => this.companyService?.view(owner).settings.timeZone,
@@ -1472,7 +1484,7 @@ export class WebServer extends EventEmitter {
       this.getHostPolicy()
     );
     registerChatroomRoutes(this.app, ctx, this.chatroomService, chatroomFiles, verifiedOwner, roles, (sessionId) =>
-      this.companyService?.view().employees.find((e) => e.sessionId === sessionId)?.id
+      this.companyService?.view(this.sessions.get(sessionId)?.owner).employees.find((e) => e.sessionId === sessionId)?.id
     );
     // Chat bots: the sender a scheduled 'post' job speaks as (see chat-bots.ts). The registry is instance data.
     const chatBots = new ChatBotRegistry(dataPath('chat-bots.json'));
@@ -1513,8 +1525,10 @@ export class WebServer extends EventEmitter {
         this.chatroomService.post(roomId, { kind: 'agent', sessionId: employee.sessionId, name: employee.name }, `⏰ routine: ${text}`, 'all');
         return { name: employee.name };
       },
-      notifyDisabled: (_employeeId, roomId, text) => {
-        this.chatroomService.post(roomId, { kind: 'system', name: 'system' }, text, 'all', { deliver: false });
+      notifyDisabled: (employeeId, roomId, text) => {
+        const employee = companyStore.snapshot().employees.find((x) => x.id === employeeId);
+        if (employee) this.chatroomService.noticeMember(roomId, employee.sessionId, text);
+        else this.chatroomService.post(roomId, { kind: 'system', name: 'system' }, text, 'all', { deliver: false });
       },
     });
     // Delegated post-job authoring: the owner grants it to roles or employees (routines-grants.json, instance data).
@@ -1526,8 +1540,11 @@ export class WebServer extends EventEmitter {
         const e = companyStore.snapshot().employees.find((x) => x.sessionId === sessionId);
         return e && { id: e.id, name: e.name, position: e.position };
       },
-      isMember: (roomId, sessionId) => !!this.chatroomService.room(roomId)?.members.some((m) => m.sessionId === sessionId),
-      boardroomId: () => this.chatroomService.rooms().find((r) => r.kind !== 'dm' && r.name.trim().toLowerCase() === 'boardroom')?.id,
+      isMember: (roomId, sessionId) => {
+        const room = this.chatroomService.room(roomId);
+        return !!room && !room.archivedAt && room.members.some((m) => m.sessionId === sessionId);
+      },
+      notificationRoomId: () => this.chatroomService.rooms().find((r) => r.kind !== 'dm' && r.name.trim().toLowerCase() === 'general')?.id,
       notify: (roomId, text) => {
         try {
           this.chatroomService.post(roomId, { kind: 'system', name: 'system' }, text, 'all', { deliver: false });
@@ -1615,6 +1632,7 @@ export class WebServer extends EventEmitter {
     });
     // Push-to-talk turns from the chat panel, relayed to the local voice service.
     registerVoiceTurnRoutes(this.app, this.chatroomService, { verifiedOwner });
+    registerVoiceSpeakRoutes(this.app, this.chatroomService);
     // Plans: every subscription account paced against its weekly window, plus the GPU.
     this.planService = new PlanService({
       reader: this.subscriptionUsageReader,
@@ -1639,6 +1657,14 @@ export class WebServer extends EventEmitter {
       this.chatroomService.rooms().some((r) => !r.archivedAt && r.members.some((m) => m.sessionId === id && m.role === 'coordinator'));
     registerPlansRoutes(this.app, this.planService, this.accountLogins, {
       callerSession: (req) => resolveParentSessionId(ctx, req, undefined, ownerFor(req)),
+      employees: (owner) =>
+        this.companyService.view(owner).employees.map(({ id, name, sessionId, icon, avatar }) => ({
+          id,
+          name,
+          sessionId,
+          icon,
+          avatar,
+        })),
       canViewAll: (id) =>
         roles.can(
           {
@@ -1649,6 +1675,44 @@ export class WebServer extends EventEmitter {
           'plans.view_all'
         ),
     });
+
+    const planMoveStore = new PlanMoveStore(dataPath('plan-moves.json'));
+    const planMoveRuntime: Omit<PlanMoveRuntime, 'authorized' | 'request'> = {
+      company: this.companyService,
+      plans: this.planService,
+      chat: this.chatroomService,
+      sessions: this.sessions,
+      mux: this.mux,
+      cleanup: (id, killMux, reason) => this.cleanupSession(id, killMux, reason),
+    };
+    const unavailableMoveExecutor = planMoveExecutor({
+      ...planMoveRuntime,
+      authorized: () => false,
+      request: async () => { throw new PlanMoveError('A signed-in browser request is required', 403); },
+    });
+    const planMoves = new PlanMoves({
+      ...unavailableMoveExecutor,
+      load: () => planMoveStore.load(),
+      save: records => planMoveStore.save(records),
+    });
+    registerPlanMoveRoutes(this.app, planMoves, ctx, ownerAuth, request => planMoveExecutor({
+      ...planMoveRuntime,
+      authorized: () => authenticatedPlanMover(request, ctx.authSessions, ownerAuth),
+      request: async (method, url, payload) => {
+        if (!authenticatedPlanMover(request, ctx.authSessions, ownerAuth))
+          throw new PlanMoveError('The owner sign-in expired', 403);
+        const result = await this.app.inject({
+          method,
+          url,
+          headers: { cookie: request.headers.cookie ?? '', host: request.headers.host ?? '', origin: String(request.headers.origin ?? ''), ...(payload === undefined ? {} : { 'content-type': 'application/json' }) },
+          ...(payload === undefined ? {} : { payload: JSON.stringify(payload) }),
+        });
+        const body = result.json();
+        if (result.statusCode >= 400 || body?.success === false)
+          throw new PlanMoveError(body?.error ?? 'The normal session launch path refused the move', result.statusCode >= 400 ? result.statusCode : 409);
+        return body;
+      },
+    }, ownerFor(request)));
 
     registerWsRoutes(this.app, ctx, () => this.getHostPolicy());
   }
@@ -2294,18 +2358,15 @@ export class WebServer extends EventEmitter {
     return html;
   }
 
-  /** mtime memo for asset cache-busting (keyed by absolute path). A full index
-   *  render does one stat per script/link tag (~25-30); without this each `/`,
-   *  `/index.html` and `/session/:id` hit would re-stat them all. A 1s TTL keeps
-   *  a burst of renders cheap while still picking up an edited/redeployed file
-   *  within a second (no server restart needed). */
-  private _assetVersionMemo = new Map<string, { v: number; ts: number }>();
-  private assetVersion(absPath: string): number | null {
+  /** Content versions survive reproducible builds whose asset mtimes are all zero.
+   * Memoize for one second to avoid rereading assets on each index render. */
+  private _assetVersionMemo = new Map<string, { v: string; ts: number }>();
+  private assetVersion(absPath: string): string | null {
     const now = Date.now();
     const hit = this._assetVersionMemo.get(absPath);
     if (hit && now - hit.ts < 1000) return hit.v;
     try {
-      const v = Math.floor(statSync(absPath).mtimeMs);
+      const v = createHash('sha256').update(readFileSync(absPath)).digest('hex').slice(0, 16);
       this._assetVersionMemo.set(absPath, { v, ts: now });
       return v;
     } catch {
@@ -2313,7 +2374,7 @@ export class WebServer extends EventEmitter {
     }
   }
 
-  /** Cache-busting query for the gesture bundle: its mtime (memoized, see
+  /** Cache-busting query for the gesture bundle: its content digest (memoized, see
    *  assetVersion). The bundle is served from /gesture/ with a 1-year cache, so
    *  without a version that changes on redeploy the browser would keep running a
    *  stale bundle forever. Empty string if the file is missing. */
@@ -2322,11 +2383,11 @@ export class WebServer extends EventEmitter {
     return v === null ? '' : `?v=${v}`;
   }
 
-  /** Append ?v=<mtime> to every same-origin .js/.css reference in the page so a
+  /** Append ?v=<content digest> to every same-origin .js/.css reference in the page so a
    *  normal reload always serves the latest. Codeman's static assets are sent
    *  with `Cache-Control: max-age=1y, immutable` and the script/link tags carry
    *  no version, so without this an edited module (panels-ui.js, styles.css, …)
-   *  stays cached until a manual hard refresh. mtime is memoized (1s TTL) so a
+   *  stays cached until a manual hard refresh. The digest is memoized (1s TTL) so a
    *  changed file is picked up with no server restart. External URLs (have a
    *  `:` scheme), already-versioned refs (have a `?`), and refs with no matching
    *  file on disk are left untouched. */
@@ -4087,7 +4148,9 @@ export class WebServer extends EventEmitter {
               muxSession: muxSession, // Pass the existing session so startInteractive() can attach to it
               claudeMode: recoveryClaudeMode.claudeMode,
               allowedTools: recoveryClaudeMode.allowedTools,
-              openCodeConfig: muxSession.mode === 'opencode' ? savedState?.openCodeConfig : undefined,
+              // Kept whatever the mode: a session switched off OpenCode (POST /api/sessions/:id/mode) still owns its thread,
+              // and switching back must resume it. A CLI without a config-content var never reads it.
+              openCodeConfig: savedState?.openCodeConfig,
               codexConfig: muxSession.mode === 'codex' ? savedState?.codexConfig : undefined,
               geminiConfig: muxSession.mode === 'gemini' ? savedState?.geminiConfig : undefined,
               antigravityConfig: muxSession.mode === 'antigravity' ? savedState?.antigravityConfig : undefined,

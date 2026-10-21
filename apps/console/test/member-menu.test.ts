@@ -3,8 +3,8 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { createHarness, member, room } from './helpers/chat-app-harness.mjs';
 
-const A = 'a1111111-0000-4000-8000-000000000001';
-const B = 'b2222222-0000-4000-8000-000000000002';
+const A = '00000026-002d-4000-8000-00000000003c';
+const B = '00000035-0040-4000-8000-00000000005c';
 const sessions = [{ id: A, name: 'Maple', mode: 'claude' }, { id: B, name: 'River', mode: 'claude' }];
 const rooms = () => [room('r1', 'General', [member(A, 'Maple'), member(B, 'River', { role: 'coordinator' })])];
 type Harness = Awaited<ReturnType<typeof createHarness>>;

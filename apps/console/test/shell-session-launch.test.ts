@@ -117,7 +117,7 @@ describe('shell-mode spawn command (issue #208)', () => {
   });
 
   it('never emits an unexpanded $SHELL into the pane command', () => {
-    const cmd = buildSpawnCommand({ mode: 'shell', sessionId: 'abc123de-0000-0000-0000-000000000000' });
+    const cmd = buildSpawnCommand({ mode: 'shell', sessionId: '00000031-003c-4000-8000-000000000056' });
     expect(cmd).not.toContain('$SHELL');
     expect(cmd.trim()).not.toBe('');
   });
@@ -128,12 +128,12 @@ describe('shell-mode spawn command (issue #208)', () => {
     // always been sourced). `-l` is the flag that changes anything: it is what
     // picks up /etc/profile and /etc/profile.d/*, which a systemd --user service
     // never sourced, so its minimal PATH is what every pane used to inherit.
-    const cmd = buildSpawnCommand({ mode: 'shell', sessionId: 'abc123de-0000-0000-0000-000000000000' });
+    const cmd = buildSpawnCommand({ mode: 'shell', sessionId: '00000031-003c-4000-8000-000000000056' });
     expect(cmd.trim().endsWith('-i -l')).toBe(true);
   });
 
   it('produces a launch command that parses after the outer sh -c expansion layer', () => {
-    const cmd = buildSpawnCommand({ mode: 'shell', sessionId: 'abc123de-0000-0000-0000-000000000000' });
+    const cmd = buildSpawnCommand({ mode: 'shell', sessionId: '00000031-003c-4000-8000-000000000056' });
     // Mirrors tmux-manager: `… bash -c ${JSON.stringify(launchCmd)}` handed to `sh -c`.
     const launchCmd = `cd ${JSON.stringify('/tmp')} && export CODEMAN_MUX=1 && ${cmd}`;
     const outer = `bash -n -c ${JSON.stringify(launchCmd)}`;

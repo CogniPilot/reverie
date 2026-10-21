@@ -29,8 +29,8 @@ import type { SessionPort } from '../../src/web/ports/session-port.js';
 
 const USER = 'owner-test';
 const NEW_PASSWORD = 'synthetic-correct-horse-42';
-const ALPHA = 'aaaaaaaa-0000-4000-8000-000000000001';
-const BETA = 'bbbbbbbb-0000-4000-8000-000000000002';
+const ALPHA = '0000002d-0035-4000-8000-000000000047';
+const BETA = '00000038-0043-4000-8000-000000000060';
 
 describe('chatroom owner marks', () => {
   let dir: string;
@@ -74,7 +74,7 @@ describe('chatroom owner marks', () => {
       service = new ChatroomService({ file, getSession: (id) => c.sessions.get(id), broadcast: () => {} });
       const verifiedOwner = ownerVerifier(deps);
       registerChatroomRoutes(fastify, c, service, new ChatFileStore(join(dir, 'files')), verifiedOwner);
-      registerVoiceTurnRoutes(fastify, service, { serviceUrl: () => base, diagDir: () => join(dir, 'diag'), verifiedOwner });
+      registerVoiceTurnRoutes(fastify, service, { serviceUrl: () => base, diagDir: () => join(dir, 'diag'), verifiedOwner, replyWaitMs: 2000 });
     });
     app = harness.app;
     ctx = harness.ctx;
@@ -238,6 +238,15 @@ describe('chatroom owner marks', () => {
   });
 
   it('marks a voice-turn transcript owner_spoken only for a verified owner; the reply never', async () => {
+    // The voice member answers each spoken turn in the room, linked to it, as it would live.
+    const off = service.onMessage((_room, m) => {
+      if (m.from.kind === 'user' && m.spoken)
+        setImmediate(() =>
+          service.post(roomId, { kind: 'agent', sessionId: ALPHA, name: 'alpha' }, 'All green.', ['user'], {
+            replyTo: m.id,
+          })
+        );
+    });
     const turn = (cookie?: string) =>
       app.inject({
         method: 'POST',
@@ -257,5 +266,6 @@ describe('chatroom owner marks', () => {
       expect(res.statusCode).toBe(200);
       for (const m of res.json().data.messages as ChatMessage[]) expect(markOf(m)).toBeUndefined();
     }
+    off();
   });
 });

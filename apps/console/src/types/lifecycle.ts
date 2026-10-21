@@ -6,7 +6,7 @@
  * and QR auth events. Written by `SessionLifecycleLog`, read for debugging.
  *
  * Key exports:
- * - LifecycleEventType — union of 13 event types (created, started, exit, qr_auth, thread_set, full_access_missing, etc.)
+ * - LifecycleEventType — union of 14 event types (created, started, exit, qr_auth, thread_set, mode_set, full_access_missing, etc.)
  * - LifecycleEntry — a single timestamped log entry with event, sessionId, and optional metadata
  *
  * No dependencies on other domain modules. LifecycleEntry.sessionId links
@@ -27,6 +27,7 @@ export type LifecycleEventType =
   | 'server_stopped' // Server shutting down
   | 'qr_auth' // Device authenticated via QR code scan
   | 'thread_set' // Owner pointed an OpenCode session at another thread (extra: from, to, by)
+  | 'mode_set' // Owner switched a session's CLI and restarted its pane in place (extra: from, to, by, oldPid, newPid)
   | 'full_access_missing'; // A local launch's real argv lacks its CLI bypass flag (extra: pid, missing, reason)
 
 /** A single entry in the session lifecycle audit log */

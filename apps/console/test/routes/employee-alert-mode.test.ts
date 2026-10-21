@@ -9,8 +9,8 @@ import { ChatFileStore } from '../../src/chatroom-files.js';
 import { registerChatroomRoutes } from '../../src/web/routes/chatroom-routes.js';
 
 it('own-mode API refuses missing/unbound callers and caps leases without changing room visibility', async () => {
-  const a = 'aaaaaaaa-0000-4000-8000-000000000001';
-  const b = 'bbbbbbbb-0000-4000-8000-000000000002';
+  const a = '0000002d-0035-4000-8000-000000000047';
+  const b = '00000038-0043-4000-8000-000000000060';
   const dir = mkdtempSync(join(tmpdir(), 'alert-api-'));
   let service!: ChatroomService;
   const employeeOf = (id: string) => (id === a ? 'employee-a' : undefined);

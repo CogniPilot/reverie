@@ -27,11 +27,11 @@ describe('Grok mode schemas', () => {
     const parsed = QuickStartSchema.parse({
       caseName: 'grok-case',
       mode: 'grok',
-      grokConfig: { resumeSessionId: '0198f2b4-aa10-7def-8123-4c5d6e7f8a9b', continueSession: true },
+      grokConfig: { resumeSessionId: '00000001-0001-4000-8000-000000000001', continueSession: true },
     });
 
     expect(parsed.mode).toBe('grok');
-    expect(parsed.grokConfig?.resumeSessionId).toBe('0198f2b4-aa10-7def-8123-4c5d6e7f8a9b');
+    expect(parsed.grokConfig?.resumeSessionId).toBe('00000001-0001-4000-8000-000000000001');
   });
 
   it('rejects unsafe Grok model strings', () => {
@@ -105,8 +105,8 @@ describe('Grok spawn command', () => {
   });
 
   it('passes --resume for resume and skips --continue when both are present', () => {
-    expect(buildSpawnCommand({ mode: 'grok', sessionId: 'a', grokConfig: { resumeSessionId: '0198f2b4' } })).toBe(
-      'grok --resume 0198f2b4'
+    expect(buildSpawnCommand({ mode: 'grok', sessionId: 'a', grokConfig: { resumeSessionId: '00000001' } })).toBe(
+      'grok --resume 00000001'
     );
 
     expect(buildSpawnCommand({ mode: 'grok', sessionId: 'a', grokConfig: { continueSession: true } })).toBe(
@@ -118,9 +118,9 @@ describe('Grok spawn command', () => {
       buildSpawnCommand({
         mode: 'grok',
         sessionId: 'a',
-        grokConfig: { continueSession: true, resumeSessionId: '0198f2b4' },
+        grokConfig: { continueSession: true, resumeSessionId: '00000001' },
       })
-    ).toBe('grok --resume 0198f2b4');
+    ).toBe('grok --resume 00000001');
   });
 
   it('drops unsafe values rather than escaping them (the result lands in `bash -c "..."`)', () => {

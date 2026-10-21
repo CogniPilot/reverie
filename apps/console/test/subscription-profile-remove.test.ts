@@ -70,10 +70,10 @@ describe('DELETE /api/subscription-profiles/:id', () => {
 
   it('is refused with 409 while sessions run on the account, and nothing changes', async () => {
     const p = await addSubscriptionProfile({ label: 'Busy', provider: 'openai' });
-    running[p.id] = ['Otto'];
+    running[p.id] = ['Coordinator'];
     const r = await app.inject({ method: 'DELETE', url: `/api/subscription-profiles/${p.id}` });
     expect(r.statusCode).toBe(409);
-    expect(r.json().error ?? r.json().message).toContain('Otto');
+    expect(r.json().error ?? r.json().message).toContain('Coordinator');
     expect((await readSubscriptionProfiles()).some((x) => x.id === p.id)).toBe(true);
   });
 
