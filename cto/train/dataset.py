@@ -33,7 +33,7 @@ def example_from_episode(m: Memory, system: str) -> dict:
         "messages": [
             {"role": "system", "content": system},
             {"role": "user", "content": m.user_text},
-            {"role": "assistant", "content": m.jinx_text},
+            {"role": "assistant", "content": m.assistant_text},
         ],
     }
 

@@ -73,7 +73,7 @@ class Brain:
         msgs: list[dict] = []
         for m in episodes:
             msgs.append({"role": "user", "content": m.user_text})
-            msgs.append({"role": "assistant", "content": m.jinx_text})
+            msgs.append({"role": "assistant", "content": m.assistant_text})
         return msgs
 
     def build_messages(self, user_text: str, now: float | None = None,

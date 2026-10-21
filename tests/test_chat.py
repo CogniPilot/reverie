@@ -7,7 +7,7 @@ from cto.embeddings import HashedEmbedder
 from cto.memory import MemoryStore
 from cto.migrate import migrate_history
 from cto.room import Room, is_for_me
-from tests.helpers import FakeRoom, fake_client, temp_config, safety_floor_terms
+from tests.helpers import FakeRoom, fake_client, temp_config, safety_floor_terms, synthetic_safety_lexicon
 
 
 class ForMeTest(unittest.TestCase):
@@ -40,7 +40,7 @@ class RoomTest(unittest.TestCase):
 
     def test_legacy_hold_file(self):
         r = FakeRoom()
-        legacy = r.hold_path.parent / "jester.hold"
+        legacy = r.hold_path.parent / "legacy.hold"
         r.legacy_hold_path = legacy
         self.assertFalse(r.held())
         legacy.write_text("")
@@ -108,6 +108,7 @@ class BrainTest(unittest.TestCase):
         brain4.reply("hi", max_tokens=600)
         self.assertEqual(t4.calls[0]["max_tokens"], 600)
 
+    @synthetic_safety_lexicon()
     def test_reply_floor_retry_then_drop(self):
         age_term, explicit_term = safety_floor_terms()
         bad = f"Picture {age_term} {explicit_term}."

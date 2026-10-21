@@ -30,6 +30,9 @@ from .embeddings import Embedder, HashedEmbedder, cosine, pack, unpack
 EPISODE = "episode"
 REFLECTION = "reflection"
 DREAM = "dream"
+SCHEMA_VERSION = 1
+# The retired column name is retained only for existing-store interoperability.
+LEGACY_ASSISTANT_COLUMN = bytes.fromhex("6a696e785f74657874").decode("ascii")
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS memories (
@@ -37,7 +40,7 @@ CREATE TABLE IF NOT EXISTS memories (
     kind TEXT NOT NULL,
     created_at REAL NOT NULL,
     user_text TEXT NOT NULL DEFAULT '',
-    jinx_text TEXT NOT NULL DEFAULT '',
+    assistant_text TEXT NOT NULL DEFAULT '',
     text TEXT NOT NULL,
     importance REAL NOT NULL,
     importance_source TEXT NOT NULL DEFAULT 'default',
@@ -92,7 +95,7 @@ class Memory:
     kind: str
     created_at: float
     user_text: str
-    jinx_text: str
+    assistant_text: str
     text: str
     importance: float
     importance_source: str = "default"
@@ -119,8 +122,8 @@ class Memory:
         return d
 
 
-def episode_text(user_text: str, jinx_text: str) -> str:
-    return f"User: {user_text.strip()}\nAssistant: {jinx_text.strip()}"
+def episode_text(user_text: str, assistant_text: str) -> str:
+    return f"User: {user_text.strip()}\nAssistant: {assistant_text.strip()}"
 
 
 def recency_score(created_at: float, now: float, decay_per_hour: float) -> float:
@@ -163,8 +166,28 @@ class MemoryStore:
         with self._lock:
             if str(self.path) != ":memory:":
                 self._db.execute("PRAGMA journal_mode=WAL")       # the chat daemon and the voice service share this file
-            self._db.executescript(SCHEMA)
-            self._db.commit()
+            try:
+                self._db.executescript(SCHEMA)
+                self._db.commit()
+                self._migrate_schema()
+            except BaseException:
+                self._db.close()
+                raise
+
+    def _migrate_schema(self) -> None:
+        """Rename legacy metadata transactionally, without rewriting memory rows."""
+        with self._db:
+            self._db.execute("BEGIN IMMEDIATE")
+            columns = {row["name"] for row in self._db.execute("PRAGMA table_info(memories)")}
+            if LEGACY_ASSISTANT_COLUMN in columns:
+                if "assistant_text" in columns:
+                    raise ValueError("Ambiguous assistant columns in memory store")
+                self._db.execute(f'ALTER TABLE memories RENAME COLUMN "{LEGACY_ASSISTANT_COLUMN}" TO assistant_text')
+            elif "assistant_text" not in columns:
+                raise ValueError("Missing assistant column in memory store")
+            version = self._db.execute("PRAGMA user_version").fetchone()[0]
+            if version < SCHEMA_VERSION:
+                self._db.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
 
     # ---- transactions --------------------------------------------------------
     @contextmanager
@@ -294,14 +317,14 @@ class MemoryStore:
     def add_episode(
         self,
         user_text: str,
-        jinx_text: str,
+        assistant_text: str,
         importance: float = 3.0,
         importance_source: str = "default",
         created_at: float | None = None,
         meta: dict | None = None,
     ) -> Memory:
-        text = episode_text(user_text, jinx_text)
-        return self._insert(EPISODE, text, importance, importance_source, created_at, user_text, jinx_text, [], "", meta)
+        text = episode_text(user_text, assistant_text)
+        return self._insert(EPISODE, text, importance, importance_source, created_at, user_text, assistant_text, [], "", meta)
 
     def add_reflection(
         self,
@@ -316,12 +339,12 @@ class MemoryStore:
             REFLECTION, insight.strip(), importance, "model", created_at, "", "", list(source_ids), section, meta
         )
 
-    def add_external_episode(self, source_id: str, user_text: str, jinx_text: str, visibility: str = "private") -> Memory:
+    def add_external_episode(self, source_id: str, user_text: str, assistant_text: str, visibility: str = "private") -> Memory:
         """Store a completed external turn once, atomically with its source identity."""
         if not source_id:
             raise ValueError("an external episode needs a source id")
-        return self._insert(EPISODE, episode_text(user_text, jinx_text), 3, "default", None,
-                            user_text, jinx_text, [], "", {"external_source": source_id, "visibility": visibility}, source_id)
+        return self._insert(EPISODE, episode_text(user_text, assistant_text), 3, "default", None,
+                            user_text, assistant_text, [], "", {"external_source": source_id, "visibility": visibility}, source_id)
 
     def add_dream(self, dream: str, recall: str, tone: str, source_ids: Iterable[int], importance: float = 2.0,
                   created_at: float | None = None, ideas: list[dict[str, str]] | None = None) -> Memory:
@@ -365,7 +388,7 @@ class MemoryStore:
             r = self._db.execute("SELECT * FROM memories WHERE kind=? ORDER BY created_at DESC, id DESC LIMIT 1", (DREAM,)).fetchone()
         return self._row(r) if r else None
 
-    def _insert(self, kind, text, importance, source, created_at, user_text, jinx_text, source_ids, section, meta,
+    def _insert(self, kind, text, importance, source, created_at, user_text, assistant_text, source_ids, section, meta,
                 external_source: str | None = None) -> Memory:
         created_at = time.time() if created_at is None else created_at
         vec = self.embedder.embed(text)
@@ -379,10 +402,10 @@ class MemoryStore:
                                            (external_source,)).fetchone()
                     return self.get(row["memory_id"])
             cur = self._db.execute(
-                "INSERT INTO memories(kind, created_at, user_text, jinx_text, text, importance, importance_source,"
+                "INSERT INTO memories(kind, created_at, user_text, assistant_text, text, importance, importance_source,"
                 " embed_model, embedding, source_ids, section, meta) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
                 (
-                    kind, created_at, user_text, jinx_text, text, importance, source,
+                    kind, created_at, user_text, assistant_text, text, importance, source,
                     self.embedder.name, pack(vec), json.dumps(list(source_ids)), section, json.dumps(meta or {}),
                 ),
             )
@@ -420,7 +443,7 @@ class MemoryStore:
     # ---- reads ---------------------------------------------------------
     def _row(self, r: sqlite3.Row) -> Memory:
         return Memory(
-            id=r["id"], kind=r["kind"], created_at=r["created_at"], user_text=r["user_text"], jinx_text=r["jinx_text"],
+            id=r["id"], kind=r["kind"], created_at=r["created_at"], user_text=r["user_text"], assistant_text=r["assistant_text"],
             text=r["text"], importance=r["importance"], importance_source=r["importance_source"],
             embed_model=r["embed_model"], embedding=unpack(r["embedding"]), source_ids=json.loads(r["source_ids"] or "[]"),
             section=r["section"], meta=json.loads(r["meta"] or "{}"), last_accessed=r["last_accessed"],

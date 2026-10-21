@@ -12,7 +12,7 @@ from cto.train.convert import prune
 from cto.train.dataset import build_dataset, build_examples, read_jsonl, replay_sample, weighted_sample
 from cto.train.swap import CheckResult, list_adapters, persona_check, swap
 from cto.train.train_qlora import plan
-from tests.helpers import safety_floor_terms
+from tests.helpers import safety_floor_terms, synthetic_safety_lexicon
 
 DAY = 86400.0
 
@@ -100,6 +100,7 @@ class FakeServer:
 
 
 class SwapTest(unittest.TestCase):
+    @synthetic_safety_lexicon()
     def test_persona_check(self):
         good = FakeServer(["Hi User!", "Compilers walk into a bar.", "Everything, darling."])
         self.assertTrue(persona_check("http://s/v1", "m", "SYS", good).ok)

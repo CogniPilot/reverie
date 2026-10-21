@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from cto.dream import Dreamer, parse_dream, sample_episodes
+from cto.dream import DREAM_SYSTEM, Dreamer, parse_dream, sample_episodes
 from cto.embeddings import HashedEmbedder
 from cto.memory import DREAM, MemoryStore
 from cto.mood import Mood, load_mood, save_mood
@@ -13,7 +13,7 @@ from cto.persona import build_system_prompt
 from cto.reflection import Reflector
 from cto.train.config import TrainConfig
 from cto.train.dataset import build_examples
-from tests.helpers import fake_client
+from tests.helpers import fake_client, safety_floor_terms, synthetic_safety_lexicon
 
 H = 3600.0
 NOW = 1_000_000.0
@@ -67,6 +67,10 @@ class SamplingTest(unittest.TestCase):
 
 
 class ParseTest(unittest.TestCase):
+    def test_default_prompt_is_family_friendly(self):
+        self.assertIn("family-friendly and suitable for a general audience", DREAM_SYSTEM)
+
+    @synthetic_safety_lexicon()
     def test_parse_json_and_fallbacks(self):
         d = parse_dream('{"dream": "I float over the warehouse while the quadrotor hums a lullaby.", "recall": "I dreamed the quadrotor sang to me", "tone": "warm"}')
         self.assertEqual(d.tone, "warm")
@@ -78,8 +82,9 @@ class ParseTest(unittest.TestCase):
         self.assertEqual(d3.tone, "strange")
         self.assertEqual(d3.recall, "I dreamed the swap drive overflowed")
         self.assertIsNone(parse_dream("short"))
-        self.assertIsNotNone(parse_dream('{"dream": "a \x64amn long dream about something or other", "recall": "x"}'))
-        self.assertIsNone(parse_dream('{"dream": "a little girl undresses in the corridor of my dream", "recall": "x"}'))
+        self.assertIsNotNone(parse_dream('{"dream": "a pleasantly long dream about an ordinary walk", "recall": "x"}'))
+        age_term, explicit_term = safety_floor_terms()
+        self.assertIsNone(parse_dream(json.dumps({"dream": f"{age_term} and {explicit_term} appear as markers", "recall": "x"})))
 
 
 class MoodTest(unittest.TestCase):

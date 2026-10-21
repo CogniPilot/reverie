@@ -162,7 +162,7 @@ class ServiceTest(unittest.TestCase):
         out = svc.turn(FIXTURE.read_bytes(), "wav")
         self.assertEqual(out["reply"], long)
         self.assertEqual(transport.calls[0]["max_tokens"], brain.cfg.voice_reply_max_tokens)
-        self.assertEqual(brain.store.recent_episodes(1)[0].jinx_text, long)
+        self.assertEqual(brain.store.recent_episodes(1)[0].assistant_text, long)
         self.assertFalse(list(svc.audio.dir.glob(".*.part")))
         self.assertEqual(wav_duration_ms(svc.audio.get(out["id"])), 200)
         # typed replies keep a generous safety cap only

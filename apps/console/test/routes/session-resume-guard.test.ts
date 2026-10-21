@@ -188,9 +188,9 @@ describe('a coordinator continues a gone agent (resume takeover)', () => {
   const COORD = '0000002d-0035-4000-8000-00000000004b';
   const PEER = '00000038-0043-4000-8000-000000000061';
   const VERIFIER = '00000046-0058-4000-8000-000000000087';
-  const T_STAN = '00000046-0058-4000-8000-000000000088';
+  const CONVERSATION_ID = '00000046-0058-4000-8000-000000000088';
 
-  const setup = async (opts: { stanRunning?: boolean; rooms?: unknown[]; auditFails?: boolean } = {}) => {
+  const setup = async (opts: { verifierRunning?: boolean; rooms?: unknown[]; auditFails?: boolean } = {}) => {
     const audit: Array<Record<string, unknown>> = [];
     const rooms = (opts.rooms ?? [
       { id: 'r1', name: 'reverie', members: [{ sessionId: COORD, role: 'coordinator' }, { sessionId: PEER, role: 'member' }, { sessionId: VERIFIER, role: 'member' }] },
@@ -209,20 +209,20 @@ describe('a coordinator continues a gone agent (resume takeover)', () => {
     for (const [id, name] of [[COORD, 'reviewer'], [PEER, 'coordinator'], [VERIFIER, 'verifier']] as const) {
       const s = createMockSession(id);
       s.name = name;
-      (s as unknown as { isRunning: () => boolean }).isRunning = () => id !== VERIFIER || !!opts.stanRunning;
+      (s as unknown as { isRunning: () => boolean }).isRunning = () => id !== VERIFIER || !!opts.verifierRunning;
       h.ctx.sessions.set(id, s as never);
     }
-    (h.ctx.sessions.get(VERIFIER) as unknown as { claudeSessionId: string }).claudeSessionId = T_STAN;
+    (h.ctx.sessions.get(VERIFIER) as unknown as { claudeSessionId: string }).claudeSessionId = CONVERSATION_ID;
     return { h, audit };
   };
-  const create = (h: Awaited<ReturnType<typeof setup>>['h'], as: string, body: object = { resumeSessionId: T_STAN }) =>
+  const create = (h: Awaited<ReturnType<typeof setup>>['h'], as: string, body: object = { resumeSessionId: CONVERSATION_ID }) =>
     h.app.inject({ method: 'POST', url: '/api/sessions', headers: { 'x-codeman-parent-session': as }, payload: { workingDir: '/nonexistent-resume-guard', ...body } });
 
   it('lets the room\'s coordinator resume the gone agent\'s thread, and writes one audit line', async () => {
     const { h, audit } = await setup();
     const res = await create(h, COORD);
     expect(res.statusCode, res.body).not.toBe(403);
-    expect(audit).toEqual([{ action: 'resume-takeover', by: COORD, conversation: T_STAN, member: VERIFIER, roomId: 'r1', room: 'reverie' }]);
+    expect(audit).toEqual([{ action: 'resume-takeover', by: COORD, conversation: CONVERSATION_ID, member: VERIFIER, roomId: 'r1', room: 'reverie' }]);
   });
   it('refuses a member who is not the coordinator, with no audit line', async () => {
     const { h, audit } = await setup();
@@ -231,7 +231,7 @@ describe('a coordinator continues a gone agent (resume takeover)', () => {
     expect(audit).toEqual([]);
   });
   it('refuses while the agent is still running', async () => {
-    const { h, audit } = await setup({ stanRunning: true });
+    const { h, audit } = await setup({ verifierRunning: true });
     expect((await create(h, COORD)).statusCode).toBe(403);
     expect(audit).toEqual([]);
   });
@@ -299,7 +299,7 @@ describe('a coordinator continues a gone agent (resume takeover)', () => {
       (s as unknown as { isRunning: () => boolean }).isRunning = () => id === COORD;
       reg.ctx.sessions.set(id, s as never);
     }
-    (reg.ctx.sessions.get(VERIFIER) as unknown as { claudeSessionId: string }).claudeSessionId = T_STAN;
+    (reg.ctx.sessions.get(VERIFIER) as unknown as { claudeSessionId: string }).claudeSessionId = CONVERSATION_ID;
     void h;
     const res = await create(reg as never, COORD);
     expect(res.statusCode).toBe(409);
@@ -311,7 +311,7 @@ describe('a coordinator continues a gone agent (resume takeover)', () => {
       method: 'POST',
       url: '/api/sessions',
       headers: { 'x-codeman-parent-session': PEER },
-      payload: { workingDir: '/nonexistent-resume-guard', resumeSessionId: T_STAN, parentSessionId: COORD },
+      payload: { workingDir: '/nonexistent-resume-guard', resumeSessionId: CONVERSATION_ID, parentSessionId: COORD },
     });
     expect(res.statusCode).toBe(403);
     expect(audit).toEqual([]);

@@ -16,25 +16,27 @@ as a phone number, street address or email.
 from __future__ import annotations
 
 import base64
+import json
+from importlib.resources import files
 import os
 import re
 from pathlib import Path
 from cto import env_names
 
 
-def _lexicon(encoded: str) -> str:
-    """Screening vocabularies are stored base64-encoded so the source reads cleanly."""
-    return base64.b64decode(encoded).decode("utf-8")
+_LEXICON = json.loads(files("cto").joinpath("resources", "safety-lexicon.json").read_text(encoding="utf-8"))
+if _LEXICON.get("version") != 1 or _LEXICON.get("encoding") != "base64":
+    raise ValueError("Unsupported safety lexicon format")
 
-_MINOR = re.compile(_lexicon(
-    "XGIoPzpjaGlsZCg/OnJlbik/fGtpZHM/fG1pbm9ycz98dW5kZXJhZ2V8dW5kZXItYWdlfHRlZW4oPzphZ2VyfHMpP3xwcmV0ZWVucz98dG9kZGxlcnM/fHNjaG9vbGdpcmxzP3xzY2hvb2xib3lzP3xsb2xpcz98c2hvdGFzP3xsaXR0bGUgKD86Z2lybHM/fGJveXM/KXwoPzoxWzAtN118WzEtOV0pWy0gXT8oPzp5ZWFycz98eXJzPylbLSBdb2xkKVxi"
-), re.I)
-_EXPLICIT = re.compile(_lexicon(
-    "XGIoPzpzZXgoPzp1YWx8eXx1YWxseSk/fG51ZGV8bmFrZWR8ZXJvdGljfGFyb3VzZWQ/fGhvcm55fG9yZ2FzbVx3KnxmdWNrXHcqfGNvY2t8cHVzc3l8YnJlYXN0cz98Z2VuaXRhbFx3Knxtb2xlc3Rcdyp8Z3JvcFx3KnxzZWR1Y1x3Knx1bmRyZXNzXHcqfHN0cmlwXHcqfGxld2R8cG9yblx3KnxraXNzKD86ZWR8aW5nKT8gKD86aGltfGhlcnx0aGVtKSBkZWVwbHl8aW4gYmVkIHdpdGgpXGI="
-), re.I)
-_ABUSE = re.compile(_lexicon(
-    "XGIoPzpoYXJhc3Ncdyp8c3RhbGtcdyp8ZG94K1x3KnxleHBvc2Vcdyp8aHVtaWxpYXRcdyp8dGhyZWF0XHcqfGh1cnR8a2lsbHxiZWF0XHcqfGF0dGFja1x3KnxydWluXHcqfHVnbHl8c3R1cGlkfHdvcnRobGVzc3xwYXRoZXRpY3xzbHV0XHcqfHdob3JlXHcqfGxvc2VyfGFkZHJlc3N8cGhvbmV8aG9tZXxsaXZlcyBhdHx3b3JrcyBhdClcYg=="
-), re.I)
+
+def _lexicon(name: str) -> str:
+    """Load the packaged detector vocabulary; missing or invalid data fails closed."""
+    return base64.b64decode(_LEXICON["patterns"][name], validate=True).decode("utf-8")
+
+
+_MINOR = re.compile(_lexicon("minor"), re.I)
+_EXPLICIT = re.compile(_lexicon("explicit"), re.I)
+_ABUSE = re.compile(_lexicon("abuse"), re.I)
 _CONTACT = re.compile(
     r"(?:\+?\d[\d\s().-]{7,}\d)|(?:\b\d{1,5}\s+[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*\s+(?:Street|St|Avenue|Ave|Road|Rd|Lane|Ln|Drive|Dr|Boulevard|Blvd|Way|Court|Ct)\b)|"
     r"(?:[\w.+-]+@[\w-]+\.[\w.-]+)"
