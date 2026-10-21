@@ -90,7 +90,7 @@ export type ChatSender =
       userId: string;
       messageId: string;
     }
-  | { kind: 'agent'; sessionId: string; name: string }
+  | { kind: 'agent'; sessionId: string; name: string; employeeId?: string }
   /** A post-only scheduled sender (see chat-bots.ts): never a member, never reads, shown with a BOT badge. */
   | { kind: 'bot'; botId: string; name: string; icon?: string }
   | { kind: 'system'; name: string; /** The member a join line is about, for its avatar. */ sessionId?: string };
@@ -268,8 +268,8 @@ function setIcon(member: ChatMember, icon: string): void {
 }
 
 /** A room has at most ONE voice member: marking one clears every other. */
-function setVoice(room: ChatRoom, member: ChatMember, voice: boolean): void {
-  if (voice && member.postOnly) throw new ChatroomError('A post-only member cannot be the voice', 'INVALID_INPUT');
+function setVoice(room: ChatRoom, member: ChatMember, voice: boolean, pollingLead = false): void {
+  if (voice && member.postOnly && !pollingLead) throw new ChatroomError('A post-only member cannot be the voice', 'INVALID_INPUT');
   if (voice) {
     for (const other of room.members) if (other !== member) delete other.voice;
     member.voice = true;
@@ -536,7 +536,7 @@ export class ChatroomStore {
   addMember(
     roomId: string,
     sessionId: string,
-    options: { role?: ChatRole; goal?: string; icon?: string; voice?: boolean; postOnly?: boolean; addedBy?: string } = {},
+    options: { role?: ChatRole; goal?: string; icon?: string; voice?: boolean; postOnly?: boolean; addedBy?: string; pollingLead?: boolean } = {},
     now = Date.now()
   ): { member: ChatMember; added: boolean } {
     const room = this.require(roomId);
@@ -557,8 +557,8 @@ export class ChatroomStore {
     if (existing) {
       if (options.goal !== undefined) existing.goal = clip(options.goal, MAX_SYNOPSIS_CHARS);
       if (options.icon !== undefined) setIcon(existing, iconOrThrow(options.icon));
-      if (options.voice !== undefined) setVoice(room, existing, options.voice);
-      if (options.role === 'coordinator') this.setCoordinator(roomId, sessionId, now);
+      if (options.voice !== undefined) setVoice(room, existing, options.voice, options.pollingLead);
+      if (options.role === 'coordinator') this.setCoordinator(roomId, sessionId, now, options.pollingLead);
       existing.updatedAt = now;
       return { member: existing, added: false };
     }
@@ -575,8 +575,8 @@ export class ChatroomStore {
       updatedAt: now,
     };
     room.members.push(member);
-    if (options.voice) setVoice(room, member, true);
-    if (options.role === 'coordinator') this.setCoordinator(roomId, sessionId, now);
+    if (options.voice) setVoice(room, member, true, options.pollingLead);
+    if (options.role === 'coordinator') this.setCoordinator(roomId, sessionId, now, options.pollingLead);
     return { member, added: true };
   }
 
@@ -627,14 +627,14 @@ export class ChatroomStore {
   }
 
   /** Appoint `sessionId` (a member) as coordinator, demoting any other; `null` clears it. */
-  setCoordinator(roomId: string, sessionId: string | null, now = Date.now()): ChatMember | undefined {
+  setCoordinator(roomId: string, sessionId: string | null, now = Date.now(), pollingLead = false): ChatMember | undefined {
     const room = this.require(roomId);
     if (isDm(room) && sessionId !== null)
       throw new ChatroomError('A direct message has no coordinator', 'INVALID_INPUT');
     if (sessionId !== null && !room.members.some((m) => m.sessionId === sessionId)) {
       throw new ChatroomError('The coordinator must be a member of the room', 'INVALID_INPUT');
     }
-    if (room.members.some((m) => m.sessionId === sessionId && m.postOnly)) {
+    if (!pollingLead && room.members.some((m) => m.sessionId === sessionId && m.postOnly)) {
       throw new ChatroomError('A post-only member cannot coordinate', 'INVALID_INPUT');
     }
     let appointed: ChatMember | undefined;
@@ -651,7 +651,8 @@ export class ChatroomStore {
     roomId: string,
     sessionId: string,
     status: { goal?: string; progress?: string; away?: string; icon?: string; voice?: boolean; avatar?: string },
-    now = Date.now()
+    now = Date.now(),
+    pollingLead = false
   ): ChatMember {
     const member = this.member(roomId, sessionId);
     if (!member) throw new ChatroomError('Not a member of this room', 'NOT_FOUND');
@@ -664,7 +665,7 @@ export class ChatroomStore {
     }
     if (status.icon !== undefined) setIcon(member, iconOrThrow(status.icon));
     if (status.avatar !== undefined) setAvatar(member, status.avatar);
-    if (status.voice !== undefined) setVoice(this.require(roomId), member, status.voice);
+    if (status.voice !== undefined) setVoice(this.require(roomId), member, status.voice, pollingLead);
     member.updatedAt = now;
     return member;
   }
@@ -932,15 +933,15 @@ export function textMentions(text: string | undefined, name: string): boolean {
   return new RegExp(`(^|[^\\w@])@${escaped}(?![\\w-])`, 'i').test(text);
 }
 
-/** Words that name the owner or the whole room: `@user`, `@owner`, `@everyone`, `@all`, `@here`, and the owner's own name. */
+/** Words that name the owner or the whole room: `@user`, `@owner`, `@everyone`, and the owner's own name. */
 export function mentionsOwner(text: string | undefined, ownerNames: readonly string[] = []): boolean {
-  return ['user', 'owner', 'everyone', 'all', 'here', ...ownerNames].some((n) => textMentions(text, n));
+  return ['user', 'owner', 'everyone', ...ownerNames].some((n) => textMentions(text, n));
 }
 
 /**
  * The user's unread state for a room: `unread` counts messages after the read cursor
  * that someone other than the user wrote (system lines excluded); `mentions` those
- * that name the user (`@user`, `@owner`, their own name) or the whole room (`@everyone`, `@all`, `@here`), or were
+ * that name the user (`@user`, `@owner`, their own name) or the whole room (`@everyone`), or were
  * addressed to them in an older room, which is every one of them in a DM with the user.
  */
 export function unreadFor(room: ChatRoom, ownerNames: readonly string[] = []): { unread: number; mentions: number } {

@@ -13,9 +13,9 @@ import { ChatroomService } from '../../src/chatroom-service.js';
 import { ChatFileStore } from '../../src/chatroom-files.js';
 import { registerChatroomRoutes } from '../../src/web/routes/chatroom-routes.js';
 
-const A = 'aaaaaaaa-0000-4000-8000-000000000001';
-const B = 'bbbbbbbb-0000-4000-8000-000000000002';
-const C = 'cccccccc-0000-4000-8000-000000000003';
+const A = '0000002d-0035-4000-8000-000000000047';
+const B = '00000038-0043-4000-8000-000000000060';
+const C = '0000003e-004c-4000-8000-00000000006f';
 const AS = (id: string) => ({ 'x-codeman-parent-session': id });
 
 describe('an agent chooses what wakes it', () => {
@@ -119,7 +119,7 @@ describe('an agent chooses what wakes it', () => {
     expect((await notify(id, B, 'shout', B)).statusCode).toBe(400);
     expect((await notify(id, B, 'all', B)).statusCode).toBe(200);
     expect(service.room(id)?.members.find((m) => m.sessionId === B)?.notify).toBeUndefined();
-    expect((await notify(id, 'dddddddd-0000-4000-8000-000000000004', 'mentions')).statusCode).toBe(404);
+    expect((await notify(id, '00000043-0053-4000-8000-00000000007a', 'mentions')).statusCode).toBe(404);
   });
 
   it('the setting is in the member\'s view and in its briefing, and a member that never set it reads nothing about it', async () => {

@@ -1,5 +1,5 @@
 // r7: the operation fence is taken when an operation is asked for, not when it gets the lock. Harness copied from
-// Stan's stan-pairing-cancel-barrier-review.test.ts (lines 1-171, unchanged).
+// Verifier's verifier-pairing-cancel-barrier-review.test.ts (lines 1-171, unchanged).
 import { afterEach, describe, expect, it } from 'vitest';
 import Fastify, { type InjectOptions } from 'fastify';
 import http from 'node:http';
@@ -21,7 +21,7 @@ import { buildHostPolicy } from '../src/web/network-auth-policy.js';
 import { registerHostGuard, registerSecurityHeaders } from '../src/web/middleware/auth.js';
 
 const ORIGIN = 'https://embassy.example.ts.net:8443';
-const ROOM = '46c990d2-c599-4c44-9234-acd91682464d';
+const ROOM = '00000015-001b-4000-8000-000000000025';
 const sha = (v: string) => createHash('sha256').update(v).digest('base64url');
 const CROCK = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
 

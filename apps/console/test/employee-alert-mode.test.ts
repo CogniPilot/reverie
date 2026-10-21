@@ -22,7 +22,7 @@ describe('employee phone mode prototype', () => {
   it.each([0, -1, Infinity, NaN, MAX_ALERT_LEASE_MS + 1])('refuses unbounded/invalid duration %s', (duration) => {
     expect(() => new EmployeeAlertModes(undefined).set('a', 'silent', duration)).toThrow();
   });
-  it('does not inject silent context, permits verified owner, and never replays held history', async () => {
+  it('does not inject silent context, permits only a verified owner @mention, and never replays held history', async () => {
     let now = 1000000;
     const writes: string[] = [];
     const session = {
@@ -52,7 +52,8 @@ describe('employee phone mode prototype', () => {
       expect(service.view(room).members[0].alertMode?.mode).toBe('silent');
       service.post(room.id, { kind: 'user', name: 'unverified' }, 'blocked ordinary');
       service.post(room.id, { kind: 'agent', sessionId: 'b', name: 'Beta' }, '@Alpha blocked mention');
-      service.post(room.id, { kind: 'user', name: 'owner', mark: 'owner_typed' }, 'verified owner wake');
+      service.post(room.id, { kind: 'user', name: 'owner', mark: 'owner_typed' }, 'blocked owner without mention');
+      service.post(room.id, { kind: 'user', name: 'owner', mark: 'owner_typed' }, '@Alpha verified owner wake');
       session.isWorking = false;
       await service.delivery.flushAll();
       expect(writes.join('')).toContain('verified owner wake');

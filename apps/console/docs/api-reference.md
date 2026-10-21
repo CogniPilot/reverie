@@ -113,18 +113,21 @@ lists the value inside `data` on success.
 
 The create body requires `name`, `scheduleType` and `enabled`. A `launch` job also
 requires `agentType`, `workingDir`, `promptMode`, `inputMode` and `concurrencyPolicy`;
-a `post` job requires `botId`, `roomId` and `postText`. Only the owner (a call
-without an agent's `X-Codeman-Parent-Session` header) creates, edits, enables,
-deletes or runs a `post` job, and a job cannot change its `action`. Additional fields
+a `post` job requires `botId` (or, for an employee's own routine, no bot: the server
+sets `postAs: "author"`), `roomId` and `postText`. The owner (a call without an agent's
+`X-Codeman-Parent-Session` header) creates, edits, enables, deletes or runs any `post`
+job; a hired employee with the owner's routines grant does so for its own routines only (see "Post jobs" in the cron
+guide), and a job cannot change its `action`. Additional fields
 are required according to the selected prompt and schedule:
 
 | Field | Type / validation |
 | --- | --- |
 | `name` | String, 1–200 characters |
-| `action` | Optional, `launch` (default) or `post`. A `post` job has a chat bot post a message instead of starting a session; it needs `botId`, `roomId` and `postText`, and takes none of the session fields below |
-| `botId` | Required for `post`; a bot in the chat-bot registry (`GET /api/chat-bots`) |
-| `roomId` | Required for `post`; a room on that bot's allowlist |
-| `postText` | Required for `post`; single-line string, 1–4000 characters, `@name` mentions as typed in a room |
+| `action` | Optional, `launch` (default) or `post`. A `post` job posts a message as a bot or its employee author instead of starting a session; it needs `roomId`, `postText` and (for a bot) `botId`, and takes none of the session fields below |
+| `postAs` | `bot` (default) or `author`. Set by the server, never by an agent: `author` makes the post speak as the employee in `createdBy`, with a `⏰ routine:` label the server adds. The owner does not set it |
+| `botId` | Required for `post` unless `postAs` is `author`; a bot in the chat-bot registry (`GET /api/chat-bots`) |
+| `roomId` | Required for `post`; a room on that bot's allowlist, or for an author routine a current, non-archived member room (checked on create, edit and every run) |
+| `postText` | Required for `post`; single-line string, 1–4000 characters (2000 for an employee routine), `@name` mentions as typed in a room |
 | `dryRun` | Optional boolean for `post`; record the would-be post in run history and post nothing |
 | `postSource` | Optional for `post`: `plans-pace` (fields `accounts maxWeekly maxProjected minHoursToRunOut bankedAvailable bankedSoonestExpiryHours worst summary`) `host-load` (`load1 load5 load15 cpus load15PerCpu`) or `burn-watch` (`alerts message lines`: plans projected to run out before their weekly reset, and Codex banked resets; with `postChangeOnly` it posts when the alert set changes, once more when it clears, and appends a line per plan to `burn-hourly.log` in the data dir on every read). `postText` is then a template with `{field}` placeholders. Fixed after create |
 | `postWhen` | Optional `{field, op, value}` (op `gt gte lt lte eq ne`, field numeric) or `null` to clear: a scheduled fire that fails it posts nothing and records no run |
@@ -476,7 +479,7 @@ any of them:
 
 ```json
 { "success": true, "data": {
-  "sessionId": "28325fd3-caa7-4178-82bf-87dfebf0f464",
+  "sessionId": "0000000d-0011-4000-8000-000000000017",
   "status": "idle",
   "limitPaused": false,
   "wait": {

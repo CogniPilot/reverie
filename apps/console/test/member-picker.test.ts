@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createHarness, member, room } from './helpers/chat-app-harness.mjs';
 
-const A = 'a1111111-0000-4000-8000-000000000001';
-const B = 'b2222222-0000-4000-8000-000000000002';
-const C = 'c3333333-0000-4000-8000-000000000003';
+const A = '00000026-002d-4000-8000-00000000003c';
+const B = '00000035-0040-4000-8000-00000000005c';
+const C = '0000003b-0049-4000-8000-00000000006a';
 type Harness = Awaited<ReturnType<typeof createHarness>>;
 const opened: Harness[] = [];
 const setup = async (extra: object[] = []) => {
@@ -132,4 +132,16 @@ describe('the member-list add button', () => {
     expect(h.document.querySelector(`[data-key="member:${B}"]`)).toBeNull();
     expect(h.document.activeElement).toBe(button(h));
   });
+});
+
+describe('polling delivery in the normal member picker',()=>{
+ it('includes a positively declared polling agent already post-only elsewhere; posts only sessionId',async()=>{
+  const h=await createHarness({sessions:[{id:A,name:'Maple',mode:'claude'},{id:B,name:'Poller',mode:'poll-agent',postOnly:true}],rooms:[room('r1','Office',[member(A,'Maple')]),room('r2','Break',[member(B,'Poller',{postOnly:true})])],features:{pollingModes:['poll-agent']}});
+  opened.push(h);
+  const picker=open(h);expect(picker.textContent).toContain('Poller');picker.querySelector('button')!.click();await h.flush(100);
+  const calls=h.server.calls.filter((c:any)=>c.method==='POST'&&c.path==='/api/chatrooms/r1/members');expect(calls).toHaveLength(1);expect(calls[0].body).toEqual({sessionId:B});
+ });
+ it('does not infer polling support from acceptsChat=false or a post-only flag',async()=>{
+  const h=await setup([{id:C,name:'NotAPoller',mode:'plain-agent',postOnly:true}]);expect(open(h).textContent).not.toContain('NotAPoller');
+ });
 });

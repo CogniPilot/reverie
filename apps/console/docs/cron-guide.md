@@ -110,7 +110,8 @@ These map 1:1 to `CronJobSchema` (`src/web/schemas.ts`) and the `CronJob` type
 | `autoClosePreviousSession` | —           | boolean (default **true**)                               | Recurring schedules only (ignored for `once`): when the next run fires, the still-open session created by this job's **previous** run is closed first via the normal cleanup path. See §8. |
 
 | `action`                   | —           | `launch` (default) \| `post`                             | `post` has a chat bot post `postText` into `roomId` instead of starting a session. See "Post jobs". |
-| `botId` / `roomId` / `postText` | conditional | bot id, room id, single-line text ≤ 4000 chars      | Required for `post`. The session fields (`agentType`, `workingDir`, `promptMode`, `inputMode`, `concurrencyPolicy`) are then not accepted as requirements. |
+| `postAs`                   | —           | `bot` (default) \| `author`                              | Server-set for an employee's own routine (see "Post jobs"); an agent cannot send it and the owner does not. |
+| `botId` / `roomId` / `postText` | conditional | bot id, room id, single-line text ≤ 4000 chars      | Required for `post`, except `botId` is omitted for an employee author routine. The session fields (`agentType`, `workingDir`, `promptMode`, `inputMode`, `concurrencyPolicy`) are then not accepted as requirements. |
 | `dryRun`                   | —           | boolean                                                  | `post` only: record the would-be post in run history, post nothing. |
 | `postSource`               | —           | `plans-pace` \| `host-load` \| `burn-watch` \| `github`                          | `post` only: a built-in data source; `postText` becomes a template with `{field}` placeholders. Fixed after create. |
 | `postSourceArgs`           | conditional | `{owner, repo, kinds?}`                                  | Required for (and only for) the `github` source: a public repository and which of `pulls` / `issues` to watch (both by default). Changing it restarts from a baseline. |
@@ -453,13 +454,32 @@ create, edit, enable, disable, run and delete post jobs when the owner has grant
 `routines` permission to their role (their position) or to them personally
 (`GET`/`PUT /api/routines-grants`, instance data `routines-grants.json`; a per-employee
 `false` overrides the role). The shipped defaults name roles only: `CTO` and
-`COO`. Launch jobs (the ones that start sessions) stay owner-only for every agent, and a delegate cannot turn a post job into one by edit. A delegate cannot create or change bots, their room allowlists or
-caps. Every delegate change is announced in the boardroom and written to the admin audit
-log before it happens, and is refused if the boardroom cannot be told. A caller that
-sends `x-codeman-tainted` (web content in its context) is refused. `plans-pace` and
-`burn-watch` jobs may only post in the boardroom, because their text carries account
-labels. Until service tokens exist, the caller is identified by the agent header, which
-a process on the host can forge, so the boardroom notice and the audit line are the
+`COO`. An employee may change only its own routines; other employees' routines and
+owner/bot jobs remain under their authors' and the owner's control. A temporary
+agent has no employee record and cannot own a routine.
+
+A routine has `postAs: "author"` and `createdBy: { employeeId }`, both set by the
+server from the caller. Each run resolves the current employee session and checks
+current membership in a non-archived room before posting `⏰ routine: <text>` as the
+employee. A restart or rebind keeps the author identity, and the author does not
+wake itself. Limits: 20 routines per employee, intervals of at least 5 minutes,
+2000 characters per post, and 30 posts per hour across that author's routines.
+The hourly quota persists independently of jobs and runs, including deletion and
+normal service restart. An employee cannot set `botId`, `postAs`, data sources,
+conditions, change-only mode, or `dryRun`. Reads show its own routines in full;
+`?all=1` adds only the live allowlisted fields of other authors' routines, within
+the caller's owner scope. Foreign run history never exposes text or errors.
+Three consecutive failed fires disable a routine and send one system notice to
+its room and author; enabling it resets the count. A removed author's notice has
+no reply hint. The notice respects current delivery policy and recovery checks.
+`reverie routine` and MCP's opt-in routine tools use these same HTTP routes.
+
+Launch jobs (the ones that start sessions) stay owner-only for every agent, and a delegate cannot turn a post job into one by edit. A delegate cannot create or change bots, their room allowlists or
+caps. Every delegate change is announced in the general and written to the admin audit
+log before it happens, and is refused if the general cannot be told. A caller that
+sends `x-codeman-tainted` (web content in its context) is refused. Data sources remain
+owner-only. Until service tokens exist, the caller is identified by the agent header, which
+a process on the host can forge, so the general notice and the audit line are the
 safeguard.
 
 ### Data sources, conditions and change-only
@@ -478,6 +498,6 @@ a numeric field passes, and `postChangeOnly` skips a fire whose rendered text eq
 last post. A scheduled fire with nothing to say is silent and records no run, so a
 15-minute check does not fill the run history; Run Now always records the outcome,
 including why nothing was posted. Example (alarm when the 15-minute load per CPU passes 1.5):
-`postSource: "host-load"`, `postText: "@Otto host load {load15} on {cpus} CPUs"`,
+`postSource: "host-load"`, `postText: "@Coordinator host load {load15} on {cpus} CPUs"`,
 `postWhen: {field: "load15PerCpu", op: "gt", value: 1.5}`, `postChangeOnly: true`,
 `scheduleType: "interval"`, `intervalMinutes: 15`.

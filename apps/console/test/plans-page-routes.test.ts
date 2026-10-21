@@ -13,14 +13,14 @@ describe('GET /plans (redirect)', () => {
     await app.close();
   });
 
-  it('redirects /plans and /plans.html to the Board Plans section, never cached', async () => {
+  it('redirects /plans and /plans.html to Company Plans, never cached', async () => {
     app = Fastify();
     registerPlansPageRoutes(app);
     await app.ready();
     for (const url of ['/plans', '/plans.html']) {
       const r = await app.inject({ method: 'GET', url });
       expect(r.statusCode).toBe(302);
-      expect(r.headers.location).toBe('/board#sec-burn');
+      expect(r.headers.location).toBe('/#company-plans');
       expect(r.headers['cache-control']).toBe('no-store');
     }
   });

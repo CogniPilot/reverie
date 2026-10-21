@@ -13,9 +13,9 @@ import { ChatroomService } from '../src/chatroom-service.js';
 import { ChatFileStore } from '../src/chatroom-files.js';
 import { registerChatroomRoutes } from '../src/web/routes/chatroom-routes.js';
 
-const LEAD = 'aaaaaaaa-0000-4000-8000-000000000001';
-const WORKER = 'bbbbbbbb-0000-4000-8000-000000000002';
-const OTHER = 'cccccccc-0000-4000-8000-000000000003';
+const LEAD = '0000002d-0035-4000-8000-000000000047';
+const WORKER = '00000038-0043-4000-8000-000000000060';
+const OTHER = '0000003e-004c-4000-8000-00000000006f';
 
 describe('chatroom members record who added them', () => {
   let app: FastifyInstance;

@@ -20,9 +20,9 @@ import {
   type ChatRoom,
 } from '../src/chatroom-store.js';
 
-const A = 'aaaaaaaa-0000-0000-0000-000000000001';
-const B = 'bbbbbbbb-0000-0000-0000-000000000002';
-const C = 'cccccccc-0000-0000-0000-000000000003';
+const A = '0000002d-0035-4000-8000-000000000046';
+const B = '00000038-0043-4000-8000-00000000005f';
+const C = '0000003e-004c-4000-8000-00000000006d';
 const agent = (sessionId: string) => ({ kind: 'agent' as const, sessionId, name: sessionId.slice(0, 1) });
 const user = { kind: 'user' as const, name: 'USER' };
 

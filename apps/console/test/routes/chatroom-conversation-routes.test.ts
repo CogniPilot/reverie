@@ -13,8 +13,8 @@ import { ChatroomService } from '../../src/chatroom-service.js';
 import { ChatFileStore } from '../../src/chatroom-files.js';
 import { registerChatroomRoutes } from '../../src/web/routes/chatroom-routes.js';
 
-const A = 'aaaaaaaa-0000-4000-8000-000000000001';
-const B = 'bbbbbbbb-0000-4000-8000-000000000002';
+const A = '0000002d-0035-4000-8000-000000000047';
+const B = '00000038-0043-4000-8000-000000000060';
 
 describe('conversation routes', () => {
   let app: FastifyInstance;
@@ -67,7 +67,7 @@ describe('conversation routes', () => {
 
   it('tells the page what the server can do, so it never shows a control that would do nothing', async () => {
     const res = await app.inject({ url: '/api/chatrooms' });
-    expect(res.json().data.features).toEqual({ unread: true, dms: true, placement: true, replies: true, deletes: true, reports: true, topics: true, edits: true, pins: true, order: true, notify: true, replace: true });
+    expect(res.json().data.features).toEqual({ pollingModes: [], unread: true, dms: true, placement: true, replies: true, deletes: true, reports: true, topics: true, edits: true, pins: true, order: true, notify: true, replace: true });
   });
 
   describe('direct messages', () => {
@@ -134,7 +134,7 @@ describe('conversation routes', () => {
 
     it('is something only the user starts, and only with a session it can see', async () => {
       expect((await openDm(B, as(A))).statusCode).toBe(403);
-      expect((await openDm('ffffffff-0000-4000-8000-0000000000ff')).statusCode).toBe(404);
+      expect((await openDm('00000048-005c-4000-8000-00000000008e')).statusCode).toBe(404);
       expect((await app.inject({ method: 'POST', url: '/api/chatrooms/dms', payload: {} })).statusCode).toBe(400);
       expect((await app.inject({ url: '/api/chatrooms' })).json().data.rooms).toEqual([]);
     });
@@ -203,7 +203,7 @@ describe('conversation routes', () => {
       clock += 10_000;
       await service.delivery.flushAll();
       expect(panes(A).join('')).toMatch(/replying to "[^"]+": "the plan is ready"\): "ship it"/);
-      const bad = await app.inject({ method: 'POST', url, payload: { text: 'x', replyTo: '11111111-1111-4111-8111-111111111111' } });
+      const bad = await app.inject({ method: 'POST', url, payload: { text: 'x', replyTo: '00000009-000a-4000-8000-00000000000b' } });
       expect(bad.statusCode).toBe(400);
       expect((await app.inject({ method: 'POST', url, payload: { text: 'x', replyTo: 'nope' } })).statusCode).toBe(400);
     });

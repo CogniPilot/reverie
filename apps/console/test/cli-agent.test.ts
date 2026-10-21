@@ -43,8 +43,8 @@ import {
 } from '../src/cli-agent.js';
 import { readCodemanEnvFile } from '../src/codeman-credentials.js';
 
-const SELF = '058ee7b5-b2aa-4c33-8cc1-e900eb0b28af';
-const OTHER = '94990c6d-e461-4a29-aa83-89275327732c';
+const SELF = '00000004-0004-4000-8000-000000000004';
+const OTHER = '00000024-002a-4000-8000-000000000038';
 
 function ctx(overrides: Partial<AgentContext> = {}): AgentContext {
   return { apiUrl: 'http://127.0.0.1:1', selfId: SELF, ...overrides };
@@ -192,7 +192,7 @@ describe('send transmits printable text only', () => {
 describe('rm fails closed', () => {
   it('refuses an empty id, a short self id, and a prefix match in either direction', () => {
     expect(deleteRefusal(SELF, '')).toMatch(/empty/);
-    expect(deleteRefusal('058ee7', OTHER)).toMatch(/too short/);
+    expect(deleteRefusal(SELF.slice(0, 6), OTHER)).toMatch(/too short/);
     expect(deleteRefusal(SELF, SELF)).toMatch(/is me/);
     expect(deleteRefusal(SELF, SELF.slice(0, 8))).toMatch(/is me/); // 8-char form of me
     expect(deleteRefusal(SELF.slice(0, 8), SELF)).toMatch(/is me/); // Docker's truncated $SELF
@@ -234,8 +234,8 @@ describe('agent ls', () => {
     const deps = fakeDeps([ok(sessions)]);
     expect(await agentLs(deps)).toBe(EXIT.ok);
     const text = deps.out.join('\n');
-    expect(text).toMatch(/\*\s+058ee7b5\s+claude\s+busy\s+w1-Codeman/);
-    expect(text).toMatch(/94990c6d\s+opencode\s+idle\s+\/home\/joe\/wiki/);
+    expect(text).toMatch(/\*\s+00000004\s+claude\s+busy\s+w1-Codeman/);
+    expect(text).toMatch(/00000024\s+opencode\s+idle\s+\/home\/joe\/wiki/);
   });
 
   it('--json is the envelope data plus a self flag', async () => {
@@ -243,8 +243,8 @@ describe('agent ls', () => {
     await agentLs(deps);
     const parsed = JSON.parse(deps.out.join('')) as Array<{ id: string; self: boolean }>;
     expect(parsed.map((s) => [s.id.slice(0, 8), s.self])).toEqual([
-      ['058ee7b5', true],
-      ['94990c6d', false],
+      ['00000004', true],
+      ['00000024', false],
     ]);
   });
 
@@ -268,7 +268,7 @@ describe('agent send', () => {
     expect(deps.calls[0]).toMatchObject({
       method: 'POST',
       path: `/api/v1/sessions/${OTHER}/input`,
-      body: { input: 'say DONE_1\r', useMux: true, clientId: 'codeman-agent-cli-058ee7b5', seq: 1_700_000_000_000 },
+      body: { input: 'say DONE_1\r', useMux: true, clientId: 'codeman-agent-cli-00000004', seq: 1_700_000_000_000 },
     });
     expect(deps.calls[0].body).not.toHaveProperty('wait');
   });
@@ -420,7 +420,7 @@ describe('agent interrupt', () => {
     expect(deps.calls[0].body).toEqual({
       input: '\u001b',
       useMux: true,
-      clientId: 'codeman-agent-cli-058ee7b5-interrupt',
+      clientId: 'codeman-agent-cli-00000004-interrupt',
       seq: 1_700_000_000_000,
     });
     const self = fakeDeps([]);
@@ -583,7 +583,7 @@ describe('agent spawn', () => {
 });
 
 describe('session id prefixes', () => {
-  const THIRD = '94990c6d-ffff-4000-8000-000000000000';
+  const THIRD = '00000024-002b-4000-8000-000000000039';
   const list = ok([{ id: SELF }, { id: OTHER }, { id: THIRD }]);
 
   it('a full id goes straight to the route, no list call', async () => {
@@ -594,14 +594,14 @@ describe('session id prefixes', () => {
 
   it('a unique prefix (what `ls` prints) resolves through the list — the routes 404 on prefixes', async () => {
     const deps = fakeDeps([ok([{ id: SELF }, { id: OTHER }]), ok({ text: 'x' })]);
-    expect(await agentRead(deps, { id: '94990c6d' })).toBe(EXIT.ok);
+    expect(await agentRead(deps, { id: '00000024' })).toBe(EXIT.ok);
     expect(deps.calls.map((c) => c.path)).toEqual(['/api/v1/sessions', `/api/v1/sessions/${OTHER}/last-response`]);
   });
 
   it('an ambiguous prefix refuses instead of picking one', async () => {
     const deps = fakeDeps([list]);
-    expect(await agentRead(deps, { id: '94990c6d' })).toBe(EXIT.error);
-    expect(deps.err.join('')).toMatch(/ambiguous.*94990c6d-e461.*94990c6d-ffff/);
+    expect(await agentRead(deps, { id: '00000024' })).toBe(EXIT.error);
+    expect(deps.err.join('')).toMatch(/ambiguous.*00000024-002a.*00000024-002b/);
     expect(deps.calls).toHaveLength(1);
   });
 

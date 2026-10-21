@@ -374,7 +374,7 @@ describe('codex sessions launch with full access in the container', () => {
   });
 });
 
-describe('fullAccessAlertRoom (Kit r2 security delta: owner scope)', () => {
+describe('fullAccessAlertRoom (Inspector r2 security delta: owner scope)', () => {
   const rooms = [
     { id: 'a-reverie', kind: 'group', name: 'reverie', owner: 'ownerA' },
     { id: 'b-dm', kind: 'dm', name: 'reverie', owner: 'ownerB' },

@@ -155,7 +155,7 @@ These are set in every managed session. Read them rather than hardcoding anythin
 
 | Variable                   | Meaning                                                                  |
 | -------------------------- | ------------------------------------------------------------------------ |
-| `CODEMAN_MUX=1`            | You are in a managed tmux session. Never `tmux kill-session`, `pkill claude`, or `pkill tmux`: you will kill yourself or a sibling. |
+| `CODEMAN_MUX=1`            | You are in a managed tmux session. Never `tmux kill-session`, `pkill claude`, or `pkill tmux`: you will terminate this pane or a sibling. |
 | `CODEMAN_API_URL`          | Base URL, with the correct scheme.                                        |
 | `CODEMAN_SESSION_ID`       | Your own session id. Use it to avoid acting on yourself.                   |
 | `CODEMAN_HOOK_SECRET_FILE` | Path to the hook secret.                                                   |

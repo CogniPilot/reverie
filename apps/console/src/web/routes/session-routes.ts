@@ -57,6 +57,7 @@ import {
   AutoResumeSchema,
   PinSessionSchema,
   OpenCodeThreadSchema,
+  SessionModeSwitchSchema,
   ImageWatcherSchema,
   FlickerFilterSchema,
   QuickRunSchema,
@@ -152,6 +153,7 @@ import { generateClaudeMd } from '../../templates/claude-md.js';
 import { imageWatcher } from '../../image-watcher.js';
 import { convertHeicToJpeg } from '../heic-jpeg-converter.js';
 import { getLifecycleLog } from '../../session-lifecycle-log.js';
+import { snapshotPaneTree, survivors } from '../../pane-survivors.js';
 import {
   mergeUnifiedSessions,
   filterAndPaginate,
@@ -3703,6 +3705,70 @@ export function registerSessionRoutes(
     return { success: true, data: { thread, previous } };
   });
 
+  // ========== Session mode (which CLI the pane runs) ==========
+
+  // The owner switches a persistent session to another registered CLI (and back) without ending it: the pane is
+  // restarted IN PLACE (respawn-pane -k), never killed, so the session id and everything keyed to it (identity,
+  // rooms, pin, employee, OpenCode thread) stay. Owner only and pinned only: a pinned record survives an exit as
+  // `stopped` instead of being removed. Processes of the old command that outlive the restart are reported, never
+  // signalled here.
+  const modeSwitches = new Set<string>();
+  app.post('/api/sessions/:id/mode', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    if (req.headers['x-codeman-parent-session'] !== undefined) {
+      return reply.code(403).send(createErrorResponse(ApiErrorCode.FORBIDDEN, 'Only the owner may switch a session CLI'));
+    }
+    // A registry id; custom CLI ids are SessionModes by registration (docker-hosts.ts does the same cast).
+    const mode = parseBody(SessionModeSwitchSchema, req.body, 'Invalid request body').mode as SessionMode;
+    const session = findSessionOrFail(ctx, id, req);
+    const refuse = (code: number, err: ApiErrorCode, msg: string) => reply.code(code).send(createErrorResponse(err, msg));
+    if (session.remote || session.docker) {
+      return refuse(400, ApiErrorCode.INVALID_INPUT, 'A remote or Docker session cannot switch CLI');
+    }
+    if (!session.pinned) return refuse(409, ApiErrorCode.CONFLICT, 'Pin the session before switching its CLI');
+    if (mode === session.mode) return refuse(400, ApiErrorCode.INVALID_INPUT, `The session already runs ${mode}`);
+    const entry = getCli(mode);
+    if (!entry || !entry.enabled) return refuse(400, ApiErrorCode.INVALID_INPUT, `No enabled CLI "${mode}"`);
+    if (modeSwitches.has(id)) return refuse(409, ApiErrorCode.CONFLICT, 'A switch of this session is already running');
+    if (session.isBusy()) return refuse(409, ApiErrorCode.SESSION_BUSY, 'Session is busy');
+    const muxRecord = ctx.mux.getSession(id);
+    if (!muxRecord) return refuse(409, ApiErrorCode.CONFLICT, 'The session has no pane to restart');
+
+    modeSwitches.add(id);
+    try {
+      const from = session.mode;
+      const oldPid = muxRecord.pid ?? null;
+      const oldTree = snapshotPaneTree(oldPid);
+      getLifecycleLog().log({ event: 'mode_set', sessionId: id, name: session.name, mode: from,
+        reason: 'requested', extra: { from, to: mode, by: 'owner', oldPid } });
+      session.setMode(mode);
+      ctx.mux.updateSessionMode(id, mode);
+      let restarted = false;
+      try {
+        restarted = await session.restartCli();
+      } catch (err) {
+        console.error('[mode] restart failed:', getErrorMessage(err));
+      }
+      if (!restarted) {
+        session.setMode(from);
+        ctx.mux.updateSessionMode(id, from);
+        persistAndBroadcastSession(ctx, session);
+        getLifecycleLog().log({ event: 'mode_set', sessionId: id, name: session.name, mode: from,
+          reason: 'restart_failed', extra: { from, to: mode, by: 'owner', oldPid } });
+        return refuse(500, ApiErrorCode.OPERATION_FAILED, 'The pane did not restart; the session keeps its CLI');
+      }
+      persistAndBroadcastSession(ctx, session);
+      const newPid = ctx.mux.getSession(id)?.pid ?? null;
+      const leftover = survivors(oldTree).map((p) => p.pid);
+      getLifecycleLog().log({ event: 'mode_set', sessionId: id, name: session.name, mode,
+        reason: leftover.length ? 'switched_with_survivors' : 'switched',
+        extra: { from, to: mode, by: 'owner', oldPid, newPid, survivors: leftover } });
+      return { success: true, data: { from, to: mode, oldPid, newPid, survivors: leftover } };
+    } finally {
+      modeSwitches.delete(id);
+    }
+  });
+
   // ========== Image Watcher ==========
 
   app.post('/api/sessions/:id/image-watcher', async (req) => {
@@ -4691,7 +4757,7 @@ export function registerSessionRoutes(
           /^\d+ vulnerabilit/i.test(text) ||
           /\btoolu_/.test(text) ||
           /^[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]+/.test(text) ||
-          /\b(sk-ant-|ANTHROPIC_API_KEY|API_KEY=|SECRET|TOKEN=)/i.test(text) ||
+          /\b(sk-an[t]-|ANTHROPIC_API_KEY|API_KEY=|SECRET|TOKEN=)/i.test(text) ||
           text.length < 8
         )
           continue;
@@ -4887,7 +4953,7 @@ export function registerSessionRoutes(
           /^\d+ vulnerabilit/i.test(msgText) ||
           /\btoolu_/.test(msgText) ||
           /^[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]+/.test(msgText) ||
-          /\b(sk-ant-|ANTHROPIC_API_KEY|API_KEY=|SECRET|TOKEN=)/i.test(msgText) ||
+          /\b(sk-an[t]-|ANTHROPIC_API_KEY|API_KEY=|SECRET|TOKEN=)/i.test(msgText) ||
           msgText.length < 8
         )
           continue;

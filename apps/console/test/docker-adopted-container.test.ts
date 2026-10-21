@@ -48,10 +48,10 @@ function launchFor(docker: SessionDocker): string {
   return buildDockerLaunchCommand({
     mode: 'codex',
     docker,
-    sessionId: '11111111-2222-3333-4444-555555555555',
+    sessionId: '00000009-000b-4000-8000-00000000000d',
     createContext: {
       docker,
-      sessionId: '11111111-2222-3333-4444-555555555555',
+      sessionId: '00000009-000b-4000-8000-00000000000d',
       instance: 'default',
       userArgs: ['--user', '1000:0'],
       credentialMounts: [],
@@ -239,7 +239,7 @@ describe('adopted container: mutating verbs fail closed at the builder', () => {
   });
 
   it('still allows killing THIS session in-container tmux, never the container', () => {
-    const kill = buildDockerKillCommand({ docker, sessionId: 'abcdef12-0000-0000-0000-000000000000' });
+    const kill = buildDockerKillCommand({ docker, sessionId: '00000033-003e-4000-8000-000000000058' });
     expect(kill).toContain('tmux');
     expect(kill).toContain('kill-session');
     expect(kill).not.toContain('docker stop');

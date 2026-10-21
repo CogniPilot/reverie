@@ -4,19 +4,21 @@
  *
  * Endpoints:
  * - `POST /api/voice/turn?room=<roomId>&member=<sessionId>`: body is the raw
- *   recording (`audio/webm` or `audio/mp4`, at most 10 MB). Forwarded to
- *   `<voice service>/turn`; the transcript is posted to the room as the user to that
- *   member, the reply as that member to the user. Answers
- *   `{ transcript, reply, audioUrl, messages }`.
+ *   recording (`audio/webm` or `audio/mp4`, at most 10 MB). Transcribed by
+ *   `<voice service>/stt` and posted to the room as the user's spoken message to that
+ *   member, delivered like any message; the member's post in that room whose replyTo
+ *   is that transcript (`reverie agent chat say --reply-to <id>`) is read aloud by
+ *   `<voice service>/tts`. No linked answer means no reply and nothing spoken. Answers
+ *   `{ heard, transcript, reply, audioUrl, messages }`.
  * - `GET /api/voice/audio/:id`: the reply audio, proxied from `<voice service>/audio/<id>`.
  *
  * The voice service is `CODEMAN_VOICE_TURN_URL` (default `http://127.0.0.1:8090`), an
  * operator-configured local process; the browser never talks to it directly, so a
  * phone that reaches the dashboard through Tailscale serve needs nothing else.
  *
- * ⚠️ Both messages are posted with `deliver: false`: the service already produced the
- * member's answer, and typing the transcript into the member's pane would make it
- * answer a second time.
+ * ⚠️ The answer comes from the member itself, through the room, for any kind of member
+ * (a typed pane, a polling loop): the voice service is never asked to answer, so no
+ * session it remembers can answer in the member's place.
  * ⚠️ Only `/audio/<id>` paths the service names are ever proxied; the id is checked
  * against a strict pattern, so the route cannot be pointed at another upstream path.
  */
@@ -24,6 +26,7 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { ApiErrorCode, createErrorResponse } from '../../types.js';
 import type { ChatroomService } from '../../chatroom-service.js';
+import type { ChatMessage } from '../../chatroom-store.js';
 import { canAccessOwned, getAuthUser } from '../route-helpers.js';
 import { isMultiUserMode } from '../../config/multiuser.js';
 import { parseByteRange } from '../http-range.js';
@@ -47,14 +50,14 @@ const MAX_DIAG_FILES = 20;
 export const MAX_VOICE_TURN_BYTES = 10 * 1024 * 1024;
 export const MAX_VOICE_AUDIO_BYTES = 20 * 1024 * 1024;
 /**
- * A turn waits for the chat model behind the shared GPU lock: measured live at 60 s
- * (2026-10-14), most of it queueing. Above the voice service's own worst case (its
- * model timeout is 240 s, plus speech to text and text to speech), so the dashboard
- * never gives up on a turn the service is still finishing, which would lose it.
+ * How long a spoken turn waits for the member's answer in the room. Nothing is lost
+ * when it gives up: the transcript is already posted and the answer lands in the room.
  */
-// ⚠️ Stays below 300 s: Node's fetch (undici) has its own 300 s headers timeout, which
-// would fire first and read as "not running" instead of "did not answer in time".
-export const VOICE_TURN_TIMEOUT_MS = 290_000;
+// ⚠️ Keep the whole turn (speech to text + this + text to speech) under the 300 s at
+// which proxies and browsers commonly drop an idle request.
+export const VOICE_REPLY_WAIT_MS = 210_000;
+/** Text to speech of one answer. */
+export const VOICE_TTS_TIMEOUT_MS = 30_000;
 /** Transcription alone (no model turn): whisper on a short clip takes seconds. */
 export const VOICE_STT_TIMEOUT_MS = 60_000;
 /** Reply audio already exists when it is fetched: a service that hangs fails this fast. */
@@ -83,6 +86,8 @@ export interface VoiceTurnDeps {
   diagDir?: () => string;
   /** Is this request a cookie-verified owner (owner-auth/marks.ts)? Only then is the transcript marked. */
   verifiedOwner?: OwnerVerifier;
+  /** How long a turn waits for the member's answer; tests shorten it. */
+  replyWaitMs?: number;
 }
 
 function fail(reply: FastifyReply, status: number, code: ApiErrorCode, message: string): FastifyReply {
@@ -96,6 +101,9 @@ export function registerVoiceTurnRoutes(
 ): void {
   const base = deps.serviceUrl ?? (() => voiceServiceUrl());
   const verifiedOwner = deps.verifiedOwner ?? NO_OWNER;
+  const replyWaitMs = deps.replyWaitMs ?? VOICE_REPLY_WAIT_MS;
+  /** Members with a spoken turn in flight (any room). */
+  const waiting = new Set<string>();
   /** The user sender of a transcript: marked `owner_spoken` only for a verified owner. */
   const speaker = (req: FastifyRequest) => {
     const name = isMultiUserMode() ? getAuthUser(req).username : 'user';
@@ -164,86 +172,114 @@ export function registerVoiceTurnRoutes(
       if (target.voice !== true) {
         return fail(reply, 400, ApiErrorCode.INVALID_INPUT, 'That member is not set up for voice');
       }
-
-      let upstream: Response;
-      try {
-        upstream = await fetch(`${base()}/turn`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': String(req.headers['content-type'] || 'application/octet-stream'),
-            'X-Codeman-Room': room.id,
-          },
-          body: new Uint8Array(audio),
-          signal: AbortSignal.timeout(VOICE_TURN_TIMEOUT_MS),
-        });
-      } catch (err) {
-        const timedOut = isFetchTimeout(err);
+      // One spoken turn per member at a time: each waits for its own linked answer.
+      if (waiting.has(target.sessionId)) {
         return fail(
           reply,
-          timedOut ? 504 : 502,
-          ApiErrorCode.OPERATION_FAILED,
-          timedOut ? 'The voice service did not answer in time' : 'The voice service is not running'
+          409,
+          ApiErrorCode.SESSION_BUSY,
+          `Still waiting for ${chatrooms.nameOf(target.sessionId)} to answer your last spoken turn`
         );
       }
-      // 204: nothing intelligible was heard. Not an error; the panel says so.
-      if (upstream.status === 204) {
-        return { success: true, data: { heard: false, transcript: '', reply: '', audioUrl: null, messages: [] } };
-      }
-      let data: { transcript?: unknown; reply?: unknown; audio_url?: unknown; error?: unknown } = {};
+      waiting.add(target.sessionId);
       try {
-        data = (await upstream.json()) as typeof data;
-      } catch {
-        /* handled below */
-      }
-      if (!upstream.ok) {
-        // 503 still carries what was heard: keep the user's words in the room.
-        if (upstream.status === 503 && typeof data.transcript === 'string' && data.transcript.trim()) {
-          chatrooms.post(room.id, speaker(req), data.transcript, [target.sessionId], {
-            deliver: false,
-            voice: true,
+        // 1. Speech to text only: the member answers in the room, not the voice service's own model.
+        let heard: Response;
+        try {
+          heard = await fetch(`${base()}/stt`, {
+            method: 'POST',
+            headers: { 'Content-Type': String(req.headers['content-type'] || 'application/octet-stream') },
+            body: new Uint8Array(audio),
+            signal: AbortSignal.timeout(VOICE_STT_TIMEOUT_MS),
           });
+        } catch (err) {
+          const timedOut = isFetchTimeout(err);
+          return fail(
+            reply,
+            timedOut ? 504 : 502,
+            ApiErrorCode.OPERATION_FAILED,
+            timedOut ? 'Speech to text did not answer in time' : 'The voice service is not running'
+          );
         }
-        if (upstream.status === 413) {
+        let stt: { transcript?: unknown; error?: unknown } = {};
+        try {
+          stt = (await heard.json()) as typeof stt;
+        } catch {
+          /* handled below */
+        }
+        if (heard.status === 413) {
           return fail(reply, 413, ApiErrorCode.INVALID_INPUT, 'Recording too long for the voice service');
         }
-        const why =
-          typeof data.error === 'string'
-            ? data.error.slice(0, 300)
-            : upstream.status === 503
-              ? 'no reply this time'
-              : `HTTP ${upstream.status}`;
-        return fail(reply, 502, ApiErrorCode.OPERATION_FAILED, `Voice service: ${why}`);
-      }
-      if (typeof data.transcript !== 'string' || typeof data.reply !== 'string') {
-        return fail(reply, 502, ApiErrorCode.OPERATION_FAILED, 'Voice service answered without transcript and reply');
-      }
-      const audioId = typeof data.audio_url === 'string' ? AUDIO_PATH.exec(data.audio_url)?.[1] : undefined;
-      const audioUrl = audioId ? `/api/voice/audio/${audioId}` : undefined;
+        if (!heard.ok || typeof stt.transcript !== 'string') {
+          const why = typeof stt.error === 'string' ? stt.error.slice(0, 300) : `HTTP ${heard.status}`;
+          return fail(reply, 502, ApiErrorCode.OPERATION_FAILED, `Speech to text: ${why}`);
+        }
+        const transcript = stt.transcript.trim();
+        // Nothing intelligible was heard. Not an error; the panel says so.
+        if (!transcript) {
+          return { success: true, data: { heard: false, transcript: '', reply: '', audioUrl: null, messages: [] } };
+        }
 
-      const messages = [];
-      if (data.transcript.trim()) {
-        messages.push(
-          chatrooms.post(room.id, speaker(req), data.transcript, [target.sessionId], {
-            deliver: false,
-            voice: true,
-          })
-        );
+        // 2. An ordinary spoken message to the member, delivered the way that member takes chat.
+        const asked = chatrooms.post(room.id, speaker(req), transcript, [target.sessionId], { spoken: true });
+
+        // 3. Its answer: the member's post in this room whose replyTo is this transcript (say --reply-to <id>).
+        // Listening starts in the same tick as the post, so nothing can arrive in between.
+        const answer = await new Promise<ChatMessage | null>((resolve) => {
+          let stop = () => {};
+          const done = (m: ChatMessage | null) => {
+            stop();
+            resolve(m);
+          };
+          const unsubscribe = chatrooms.onMessage((r, m) => {
+            // Only the member's own post that names this transcript as the message it answers: nothing is guessed.
+            if (r.id !== room.id || m.from.kind !== 'agent' || m.from.sessionId !== target.sessionId) return;
+            if (m.replyTo !== asked.id) return;
+            done(m);
+          });
+          const timer = setTimeout(() => done(null), replyWaitMs);
+          // A phone that hangs up stops the wait; the answer still lands in the room.
+          const gone = () => done(null);
+          reply.raw.once('close', gone);
+          stop = () => {
+            unsubscribe();
+            clearTimeout(timer);
+            reply.raw.off('close', gone);
+          };
+        });
+        if (!answer) {
+          if (reply.raw.destroyed) return reply;
+          return fail(
+            reply,
+            504,
+            ApiErrorCode.OPERATION_FAILED,
+            `No reply from ${chatrooms.nameOf(target.sessionId)} yet; the answer will show in the room`
+          );
+        }
+
+        // 4. Text to speech. Without audio the answer still stands: its text is in the room.
+        let audioUrl: string | undefined;
+        try {
+          const spoken = await fetch(`${base()}/tts`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text: answer.text }),
+            signal: AbortSignal.timeout(VOICE_TTS_TIMEOUT_MS),
+          });
+          const tts = (await spoken.json()) as { audio_url?: unknown };
+          const audioId =
+            spoken.ok && typeof tts.audio_url === 'string' ? AUDIO_PATH.exec(tts.audio_url)?.[1] : undefined;
+          audioUrl = audioId ? `/api/voice/audio/${audioId}` : undefined;
+        } catch {
+          audioUrl = undefined;
+        }
+        return {
+          success: true,
+          data: { heard: true, transcript, reply: answer.text, audioUrl: audioUrl ?? null, messages: [asked, answer] },
+        };
+      } finally {
+        waiting.delete(target.sessionId);
       }
-      if (data.reply.trim()) {
-        messages.push(
-          chatrooms.post(
-            room.id,
-            { kind: 'agent', sessionId: target.sessionId, name: chatrooms.nameOf(target.sessionId) },
-            data.reply,
-            ['user'],
-            { deliver: false, voice: true, ...(audioUrl ? { audioUrl } : {}) }
-          )
-        );
-      }
-      return {
-        success: true,
-        data: { heard: true, transcript: data.transcript, reply: data.reply, audioUrl: audioUrl ?? null, messages },
-      };
     });
   });
 

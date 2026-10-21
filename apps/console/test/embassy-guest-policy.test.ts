@@ -25,9 +25,9 @@ const USER = 'owner-test';
 const PASSWORD = 'synthetic-correct-horse-42';
 const ORIGIN = 'http://localhost:80';
 const KEY = `embassy-v1|https://embassy.example.ts.net:8443|${'T'.repeat(43)}`;
-const ROOM = '00000000-0000-4000-8000-000000000001';
-const AGENT = 'aaaaaaaa-0000-4000-8000-000000000001'; // a live agent session
-const FORGED = 'eeeeeeee-0000-4000-8000-000000000005'; // no such session
+const ROOM = '00000016-001c-4000-8000-000000000026';
+const AGENT = '0000002d-0035-4000-8000-000000000047'; // a live agent session
+const FORGED = '00000046-0058-4000-8000-000000000084'; // no such session
 
 type Route = { method: 'GET' | 'POST' | 'PUT' | 'DELETE'; route: string; url: string; payload?: object; call: string };
 const ROUTES: Route[] = [
@@ -45,7 +45,7 @@ const ROUTES: Route[] = [
     method: 'POST',
     route: '/api/embassy-guest/:id/posts',
     url: `/api/embassy-guest/${ROOM}/posts`,
-    payload: { text: 'hello', requestId: '11111111-1111-4111-8111-111111111111' },
+    payload: { text: 'hello', requestId: '00000009-000a-4000-8000-00000000000b' },
     call: 'post',
   },
   { method: 'PUT', route: '/api/embassy-guest/:id', url: `/api/embassy-guest/${ROOM}`, payload: { enabled: false }, call: 'setEnabled' },
@@ -83,7 +83,7 @@ describe.each(['off', 'log', 'enforce'] as const)('embassy guest routes under po
     dir = await mkdtemp(join(tmpdir(), 'embassy-guest-policy-'));
     store = new OwnerAuthStore(join(dir, 'owner-auth.json'));
     const oneTime = (await admin.bootstrap(store, USER, { now: Date.now() })).oneTimePassword;
-    await admin.setPolicy(store, mode);
+    await admin.setPolicy(store, mode, { forceLockoutRisk: true });
     service = new OwnerAuthService({ store, auditFile: join(dir, 'owner-auth-audit.jsonl') });
     const sessions = new Map([[AGENT, { id: AGENT }]]);
     const ctx = { sessions } as unknown as SessionPort;

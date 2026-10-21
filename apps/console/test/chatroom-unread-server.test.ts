@@ -15,8 +15,8 @@ import { ChatFileStore } from '../src/chatroom-files.js';
 import { registerChatroomRoutes } from '../src/web/routes/chatroom-routes.js';
 import { loadChatrooms } from '../src/chatroom-store.js';
 
-const A = 'aaaaaaaa-0000-4000-8000-000000000001';
-const B = 'bbbbbbbb-0000-4000-8000-000000000002';
+const A = '0000002d-0035-4000-8000-000000000047';
+const B = '00000038-0043-4000-8000-000000000060';
 
 type Room = {
   id: string;
@@ -103,16 +103,16 @@ describe('server counts and read cursor', () => {
     expect(r.mentions).toBe(1);
   });
 
-  it('a mention is @user, @owner, the owner\u2019s name, @everyone, @all or @here; not a part of a word or an address', async () => {
+  it('a mention is @user, @owner, the owner\u2019s name or @everyone; not @all, @here, a part of a word or an address', async () => {
     const id = await makeRoom('Fleet');
     clock += 10;
-    for (const text of ['@user please look', 'ping @OWNER', 'thanks @pat.', '@everyone standup', 'heads up @all', '@here now']) await say(id, A, text);
-    expect((await listed()).Fleet.mentions).toBe(6);
+    for (const text of ['@user please look', 'ping @OWNER', 'thanks @pat.', '@everyone standup']) await say(id, A, text);
+    expect((await listed()).Fleet.mentions).toBe(4);
     const quiet = await makeRoom('Quiet');
     clock += 10;
-    for (const text of ['mail pat@user.io', 'ask @users', '@patrick is away', '@allies', 'email me@here.com', 'no names at all']) await say(quiet, A, text);
+    for (const text of ['mail pat@user.io', 'ask @users', '@patrick is away', '@allies', 'email me@here.com', 'no names at all', 'heads up @all', '@here now']) await say(quiet, A, text);
     const q = (await listed()).Quiet;
-    expect(q.unread).toBe(6);
+    expect(q.unread).toBe(8);
     expect(q.mentions).toBe(0);
   });
 

@@ -200,7 +200,7 @@ describe('POST /api/sessions/:id/input plain-prompt routing', () => {
     await harness.app.inject({
       method: 'POST',
       url: '/api/sessions/test-session-1/input',
-      headers: { 'x-codeman-parent-session': 'aaaaaaaa-0000-4000-8000-000000000001' },
+      headers: { 'x-codeman-parent-session': '0000002d-0035-4000-8000-000000000047' },
       payload: { input: LONG_PROMPT },
     });
     expect(viaMux).toHaveBeenLastCalledWith(LONG_PROMPT, { fromUser: true, opencodeGuard: true });
@@ -216,7 +216,7 @@ describe('POST /api/sessions/:id/input plain-prompt routing', () => {
     await harness.app.inject({
       method: 'POST',
       url: '/api/sessions/test-session-1/input',
-      headers: { 'x-codeman-parent-session': 'aaaaaaaa-0000-4000-8000-000000000001' },
+      headers: { 'x-codeman-parent-session': '0000002d-0035-4000-8000-000000000047' },
       payload: { input: text },
     });
     expect(direct).toHaveBeenLastCalledWith(text.replace('!', '\uFF01'), { fromUser: true });
@@ -227,7 +227,7 @@ describe('POST /api/sessions/:id/input plain-prompt routing', () => {
     await harness.app.inject({
       method: 'POST',
       url: '/api/sessions/test-session-1/input',
-      headers: { 'x-codeman-parent-session': 'aaaaaaaa-0000-4000-8000-000000000001' },
+      headers: { 'x-codeman-parent-session': '0000002d-0035-4000-8000-000000000047' },
       payload: { input: text },
     });
     expect(direct).toHaveBeenLastCalledWith(text, { fromUser: true });

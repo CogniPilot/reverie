@@ -435,7 +435,7 @@ describe('TuiClient.connect', () => {
 
 describe('degraded-mode tmux enumeration', () => {
   const listing = [
-    'codeman-1a2b3c4d\t1\t1700000000\t1',
+    'codeman-0000000b\t1\t1700000000\t1',
     'codeman-deadbeef\t0\t1700000100\t2',
     'claudeman-cafe0001\t0\t1700000200\t1',
     'my-own-tmux-session\t1\t1700000300\t1',
@@ -444,8 +444,8 @@ describe('degraded-mode tmux enumeration', () => {
 
   it('parses the list format and keeps only Codeman-owned names', () => {
     const rows = parseTmuxSessionList(listing);
-    expect(rows.map((row) => row.muxName)).toEqual(['codeman-1a2b3c4d', 'codeman-deadbeef', 'claudeman-cafe0001']);
-    expect(rows[0]).toMatchObject({ sessionIdPrefix: '1a2b3c4d', attached: true, createdAt: 1_700_000_000_000 });
+    expect(rows.map((row) => row.muxName)).toEqual(['codeman-0000000b', 'codeman-deadbeef', 'claudeman-cafe0001']);
+    expect(rows[0]).toMatchObject({ sessionIdPrefix: '0000000b', attached: true, createdAt: 1_700_000_000_000 });
     expect(rows[1]).toMatchObject({ attached: false, windows: 2 });
   });
 
@@ -467,7 +467,7 @@ describe('degraded-mode tmux enumeration', () => {
       statePath,
       JSON.stringify({
         sessions: {
-          '1a2b3c4d-1111-2222-3333-444444444444': {
+          '0000000b-000e-4000-8000-000000000011': {
             name: 'w1-codeman',
             workingDir: '/home/dev/codeman',
             mode: 'claude',
@@ -479,7 +479,7 @@ describe('degraded-mode tmux enumeration', () => {
     const exec: TuiExecFile = async () => ({ stdout: listing, stderr: '' });
     const rows = await enumerateTmuxSessions({ exec, statePath });
     expect(rows[0]).toMatchObject({
-      sessionId: '1a2b3c4d-1111-2222-3333-444444444444',
+      sessionId: '0000000b-000e-4000-8000-000000000011',
       name: 'w1-codeman',
       workingDir: '/home/dev/codeman',
       mode: 'claude',
@@ -495,13 +495,13 @@ describe('degraded-mode tmux enumeration', () => {
       statePath,
       JSON.stringify({
         sessions: {
-          '1a2b3c4d-aaaa': { name: 'first' },
-          '1a2b3c4d-bbbb': { name: 'second' },
+          '0000000b-aaaa': { name: 'first' },
+          '0000000b-bbbb': { name: 'second' },
         },
       }),
       'utf-8'
     );
-    const exec: TuiExecFile = async () => ({ stdout: 'codeman-1a2b3c4d\t0\t1700000000\t1', stderr: '' });
+    const exec: TuiExecFile = async () => ({ stdout: 'codeman-0000000b\t0\t1700000000\t1', stderr: '' });
     const rows = await enumerateTmuxSessions({ exec, statePath });
     expect(rows[0].name).toBeUndefined();
   });
@@ -535,12 +535,12 @@ describe('attach window sizing', () => {
       calls.push(args);
       return { stdout: '120\t40\tmanual', stderr: '' };
     });
-    await expect(client.readWindowSizing('codeman-1a2b3c4d')).resolves.toEqual({
+    await expect(client.readWindowSizing('codeman-0000000b')).resolves.toEqual({
       cols: 120,
       rows: 40,
       mode: 'manual',
     });
-    expect(calls[0].slice(0, 6)).toEqual(['-L', 'codeman-beta', 'display-message', '-p', '-t', 'codeman-1a2b3c4d']);
+    expect(calls[0].slice(0, 6)).toEqual(['-L', 'codeman-beta', 'display-message', '-p', '-t', 'codeman-0000000b']);
   });
 
   it('hands the window to the attaching client with window-size latest', async () => {
@@ -549,13 +549,13 @@ describe('attach window sizing', () => {
       calls.push(args);
       return { stdout: '', stderr: '' };
     });
-    await expect(client.followAttachingClient('codeman-1a2b3c4d')).resolves.toBe(true);
+    await expect(client.followAttachingClient('codeman-0000000b')).resolves.toBe(true);
     expect(calls[0]).toEqual([
       '-L',
       'codeman-beta',
       'set-window-option',
       '-t',
-      'codeman-1a2b3c4d',
+      'codeman-0000000b',
       'window-size',
       'latest',
     ]);
@@ -567,14 +567,14 @@ describe('attach window sizing', () => {
       calls.push(args);
       return { stdout: '', stderr: '' };
     });
-    await client.restoreWindowSizing('codeman-1a2b3c4d', { cols: 120, rows: 40, mode: 'manual' });
+    await client.restoreWindowSizing('codeman-0000000b', { cols: 120, rows: 40, mode: 'manual' });
     expect(calls).toHaveLength(1);
     expect(calls[0]).toEqual([
       '-L',
       'codeman-beta',
       'resize-window',
       '-t',
-      'codeman-1a2b3c4d',
+      'codeman-0000000b',
       '-x',
       '120',
       '-y',
@@ -588,9 +588,9 @@ describe('attach window sizing', () => {
       calls.push(args);
       return { stdout: '', stderr: '' };
     });
-    await client.restoreWindowSizing('codeman-1a2b3c4d', { cols: 120, rows: 40, mode: 'latest' });
+    await client.restoreWindowSizing('codeman-0000000b', { cols: 120, rows: 40, mode: 'latest' });
     expect(calls).toEqual([
-      ['-L', 'codeman-beta', 'set-window-option', '-t', 'codeman-1a2b3c4d', 'window-size', 'latest'],
+      ['-L', 'codeman-beta', 'set-window-option', '-t', 'codeman-0000000b', 'window-size', 'latest'],
     ]);
   });
 
@@ -610,10 +610,10 @@ describe('attach window sizing', () => {
     const client = sizingClient(async () => {
       throw new Error('no server running on /tmp/tmux-1000/codeman-beta');
     });
-    await expect(client.readWindowSizing('codeman-1a2b3c4d')).resolves.toBeNull();
-    await expect(client.followAttachingClient('codeman-1a2b3c4d')).resolves.toBe(false);
+    await expect(client.readWindowSizing('codeman-0000000b')).resolves.toBeNull();
+    await expect(client.followAttachingClient('codeman-0000000b')).resolves.toBe(false);
     await expect(
-      client.restoreWindowSizing('codeman-1a2b3c4d', { cols: 120, rows: 40, mode: 'manual' })
+      client.restoreWindowSizing('codeman-0000000b', { cols: 120, rows: 40, mode: 'manual' })
     ).resolves.toBeUndefined();
   });
 });
@@ -817,7 +817,7 @@ describe('attach status bar options', () => {
       // Session level says nothing; the global answer is the real one.
       return { stdout: args.includes('-gv') ? 'C-a\n' : '\n', stderr: '' };
     });
-    return expect(client.readPrefixKey('codeman-1a2b3c4d'))
+    return expect(client.readPrefixKey('codeman-0000000b'))
       .resolves.toBe('C-a')
       .then(() => {
         expect(calls).toHaveLength(2);
@@ -831,25 +831,25 @@ describe('attach status bar options', () => {
       calls.push(args);
       return { stdout: '', stderr: '' };
     });
-    await client.restoreSessionOptions('codeman-1a2b3c4d', {
+    await client.restoreSessionOptions('codeman-0000000b', {
       status: 'off',
       'status-format[0]': null,
       'status-format[1]': '#[align=right] second ',
     });
     // Unsetting one index leaves an EMPTY array (a blank status bar), so the
     // base option goes first and the survivors are written back on top.
-    expect(calls[0].slice(2)).toEqual(['set-option', '-u', '-t', 'codeman-1a2b3c4d', 'status-format']);
+    expect(calls[0].slice(2)).toEqual(['set-option', '-u', '-t', 'codeman-0000000b', 'status-format']);
     expect(calls.map((args) => args.slice(2))).toContainEqual([
       'set-option',
       '-t',
-      'codeman-1a2b3c4d',
+      'codeman-0000000b',
       'status',
       'off',
     ]);
     expect(calls.map((args) => args.slice(2))).toContainEqual([
       'set-option',
       '-t',
-      'codeman-1a2b3c4d',
+      'codeman-0000000b',
       'status-format[1]',
       '#[align=right] second ',
     ]);
@@ -863,8 +863,8 @@ describe('attach status bar options', () => {
       calls.push(args);
       return { stdout: '', stderr: '' };
     });
-    await client.restoreSessionOptions('codeman-1a2b3c4d', { status: null });
-    expect(calls[0].slice(2)).toEqual(['set-option', '-u', '-t', 'codeman-1a2b3c4d', 'status']);
+    await client.restoreSessionOptions('codeman-0000000b', { status: null });
+    expect(calls[0].slice(2)).toEqual(['set-option', '-u', '-t', 'codeman-0000000b', 'status']);
   });
 
   it('writes the banner one option at a time, and never at a foreign session', async () => {
@@ -873,9 +873,9 @@ describe('attach status bar options', () => {
       calls.push(args);
       return { stdout: '', stderr: '' };
     });
-    await client.applySessionOptions('codeman-1a2b3c4d', { status: 'on', 'status-format[0]': 'x' });
+    await client.applySessionOptions('codeman-0000000b', { status: 'on', 'status-format[0]': 'x' });
     expect(calls).toHaveLength(2);
-    expect(calls[0].slice(2)).toEqual(['set-option', '-t', 'codeman-1a2b3c4d', 'status', 'on']);
+    expect(calls[0].slice(2)).toEqual(['set-option', '-t', 'codeman-0000000b', 'status', 'on']);
     calls.length = 0;
     await client.applySessionOptions('codeman-ssh-prod', { status: 'on' });
     await client.restoreSessionOptions('codeman-dkr-box', { status: null });
@@ -890,7 +890,7 @@ describe('attach status bar options', () => {
       if (args.includes('status-format[0]')) throw new Error('unknown option');
       return { stdout: '', stderr: '' };
     });
-    await client.applySessionOptions('codeman-1a2b3c4d', { 'status-format[0]': 'x', status: 'on' });
+    await client.applySessionOptions('codeman-0000000b', { 'status-format[0]': 'x', status: 'on' });
     expect(seen).toBe(2);
   });
 });
@@ -909,7 +909,7 @@ describe('resumeSession', () => {
     };
     const id = await client().resumeSession({
       workingDir: '/home/dev/codeman',
-      resumeSessionId: 'bbbbbbbb-5555-6666-7777-888888888888',
+      resumeSessionId: '00000038-0045-4000-8000-000000000064',
       sessionName: 'w7-codeman',
     });
     expect(id).toBe('new-session-id');
@@ -921,7 +921,7 @@ describe('resumeSession', () => {
     ]);
     expect(JSON.parse(recorded[0].body)).toMatchObject({
       workingDir: '/home/dev/codeman',
-      resumeSessionId: 'bbbbbbbb-5555-6666-7777-888888888888',
+      resumeSessionId: '00000038-0045-4000-8000-000000000064',
       mode: 'claude',
       name: 'w7-codeman',
     });

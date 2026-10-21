@@ -13,7 +13,7 @@ import { MAX_ICONS, MAX_ICON_BYTES, WorkspaceIconStore, workspaceIconKey } from 
 
 const PNG = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.from('pretend pixels')]);
 const WEBP = Buffer.concat([Buffer.from('RIFF'), Buffer.from([1, 0, 0, 0]), Buffer.from('WEBP'), Buffer.from('data')]);
-const AGENT = { 'x-codeman-parent-session': 'aaaaaaaa-0000-4000-8000-000000000001' };
+const AGENT = { 'x-codeman-parent-session': '0000002d-0035-4000-8000-000000000047' };
 
 describe('workspace pictures', () => {
   let app: FastifyInstance;

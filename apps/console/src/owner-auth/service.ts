@@ -174,6 +174,11 @@ export class OwnerAuthService {
     return this.account()?.keepers ?? [];
   }
 
+  /** Owner-set admins (see `relations.ts`); the last good copy while the file is damaged. */
+  admins(): readonly string[] {
+    return this.account()?.admins ?? [];
+  }
+
   get store(): OwnerAuthStore {
     return this.deps.store;
   }

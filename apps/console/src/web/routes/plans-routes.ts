@@ -21,7 +21,7 @@ import { z } from 'zod';
 import { ApiErrorCode, createErrorResponse } from '../../types.js';
 import type { PlanService } from '../../plan-accounts.js';
 import { LoginError, type AccountLoginService } from '../../account-login.js';
-import { isAdmin, parseBody } from '../route-helpers.js';
+import { isAdmin, ownerFor, parseBody } from '../route-helpers.js';
 
 /** Who an agent caller is, for the read-only scoping of `GET /api/plans`. */
 export interface PlansScope {
@@ -29,6 +29,13 @@ export interface PlansScope {
   callerSession(req: FastifyRequest): string | undefined;
   /** Does this session hold plans.view_all (Admin, or Lead of a live room)? It sees every account. */
   canViewAll(sessionId: string): boolean;
+  employees?(owner: string | undefined): Array<{
+    id: string;
+    name: string;
+    sessionId?: string;
+    icon?: string;
+    avatar?: string;
+  }>;
 }
 
 const SuggestSchema = z.object({ provider: z.enum(['anthropic', 'openai']).optional() }).strict();
@@ -42,6 +49,15 @@ export function registerPlansRoutes(
 ): void {
   const forbid = (reply: FastifyReply) =>
     reply.code(403).send(createErrorResponse(ApiErrorCode.FORBIDDEN, 'Plans are admin-only'));
+
+  app.get('/api/plans/allocations', async (req, reply) => {
+    reply.header('Cache-Control', 'no-store');
+    if (req.headers['x-codeman-parent-session'] !== undefined || !isAdmin(req)) return forbid(reply);
+    return {
+      success: true,
+      data: { ...(await plans.allocations()), employees: scope?.employees?.(ownerFor(req)) ?? [] },
+    };
+  });
 
   // Read-only and role-scoped, server-side, for the page, `reverie plans` and the MCP tools alike:
   // - no X-Codeman-Parent-Session header: the owner (admin) sees everything;

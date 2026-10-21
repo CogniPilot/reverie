@@ -32,21 +32,21 @@ import {
 import { findFrameInScreen, joinScrollbackAndFrame, remoteTmuxLocation } from '../src/tmux-manager.js';
 import type { SessionRemote } from '../src/types/session.js';
 
-const SESSION_ID = '663e3eae-8da6-4c7f-9231-611eb2840641';
+const SESSION_ID = '0000001b-0021-4000-8000-00000000002c';
 const remote: SessionRemote = {
   hostId: 'h1',
-  label: 'proxx',
-  host: 'proxx.lan',
-  username: 'tim',
+  label: 'workerfour',
+  host: 'workerfour.lan',
+  username: 'operator',
   port: 2222,
-  remotePath: '/home/tim',
+  remotePath: '/home/operator',
 };
 
 describe('remoteTmuxLocation', () => {
   it('an owned session is the launch command’s session on the private socket', () => {
     expect(remoteTmuxLocation(remote, SESSION_ID)).toEqual({
       socket: 'codeman-remote',
-      sessionName: 'codeman-ssh-663e3eae',
+      sessionName: 'codeman-ssh-0000001b',
     });
   });
 
@@ -63,10 +63,10 @@ describe('buildRemoteScrollbackCommand', () => {
     const command = buildRemoteScrollbackCommand(remote, SESSION_ID, 10000, 2048, MARKER);
     expect(command.startsWith('exec ssh -o BatchMode=yes')).toBe(true);
     expect(command).toContain('-p 2222');
-    expect(command).toContain('tim@proxx.lan');
+    expect(command).toContain('operator@workerfour.lan');
     // Socket and target are shellescaped inside the (itself shellescaped) script.
     expect(command).toContain('codeman-remote');
-    expect(command).toContain('codeman-ssh-663e3eae');
+    expect(command).toContain('codeman-ssh-0000001b');
     expect(command).toContain('capture-pane -p -e -J -S -10000 -E -1');
     expect(command).toContain('#{history_size}');
     expect(command).toContain(MARKER);
@@ -103,7 +103,7 @@ describe('parseRemoteScrollbackOutput', () => {
   it('drops anything printed before the script (login banner, rc-file echo)', () => {
     expect(
       parseRemoteScrollbackOutput(
-        `Welcome to proxx\n${read(`line a\nline b\n${MARKER}\n42\nscreen 1\nscreen 2\n`)}`,
+        `Welcome to workerfour\n${read(`line a\nline b\n${MARKER}\n42\nscreen 1\nscreen 2\n`)}`,
         MARKER,
         0
       )

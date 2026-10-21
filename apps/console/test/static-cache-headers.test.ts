@@ -81,4 +81,12 @@ describe('static asset Cache-Control headers', () => {
     expect(res.status).toBe(200);
     expect(res.headers.get('cache-control')).toContain('no-cache');
   });
+  it('versions speech scripts by bytes in the rendered page', async () => {
+    const response = await fetch(`${baseUrl}/index.html`, { headers: { connection: 'close' } });
+    const html = await response.text();
+    expect(html).toMatch(/src="voice-chat\.js\?v=[a-f0-9]{16}"/);
+    expect(html).toMatch(/src="car-mode\.js\?v=[a-f0-9]{16}"/);
+    expect(html).toMatch(/src="hands-free\.js\?v=[a-f0-9]{16}"/);
+  });
+
 });

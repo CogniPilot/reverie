@@ -14,9 +14,9 @@ import { ChatroomService } from '../../src/chatroom-service.js';
 import { ChatFileStore } from '../../src/chatroom-files.js';
 import { registerChatroomRoutes } from '../../src/web/routes/chatroom-routes.js';
 
-const A = 'aaaaaaaa-0000-4000-8000-000000000001';
-const B = 'bbbbbbbb-0000-4000-8000-000000000002';
-const C = 'cccccccc-0000-4000-8000-000000000003';
+const A = '0000002d-0035-4000-8000-000000000047';
+const B = '00000038-0043-4000-8000-000000000060';
+const C = '0000003e-004c-4000-8000-00000000006f';
 const AS = (id: string) => ({ 'x-codeman-parent-session': id });
 
 describe('public and private channels', () => {
@@ -58,7 +58,7 @@ describe('public and private channels', () => {
   const joinChannel = (id: string, as: string) => app.inject({ method: 'POST', url: `/api/chatrooms/${id}/join`, headers: AS(as), payload: {} });
 
   it('every room is private until the owner changes it, and the room view says which', async () => {
-    const id = await make('Boardroom', [A]);
+    const id = await make('general', [A]);
     const view = (await app.inject({ method: 'GET', url: `/api/chatrooms/${id}` })).json().data;
     expect(view.visibility).toBe('private');
     expect((await setVisibility(id, 'public')).json().data.visibility).toBe('public');
@@ -121,7 +121,7 @@ describe('public and private channels', () => {
 
   it('an agent joins a public channel itself, through the add checks, and a private one refuses with what to do', async () => {
     const pub = await make('News', [A]);
-    const priv = await make('Boardroom', [A]);
+    const priv = await make('general', [A]);
     await setVisibility(pub, 'public');
     const refused = await joinChannel(priv, C);
     expect(refused.statusCode).toBe(403);
@@ -143,14 +143,14 @@ describe('public and private channels', () => {
   it('a session that is not a live chat session cannot join: the same checks as being added', async () => {
     const pub = await make('News', [A]);
     await setVisibility(pub, 'public');
-    const res = await joinChannel(pub, 'dddddddd-0000-4000-8000-000000000004');
+    const res = await joinChannel(pub, '00000043-0053-4000-8000-00000000007a');
     expect(res.statusCode).not.toBe(200);
     expect(service.room(pub)!.members.map((m) => m.sessionId)).toEqual([A]);
   });
 
   it('a non-member sees nothing of a room: private is 404, public says how to join, and after joining it reads and posts', async () => {
     const pub = await make('News', [A]);
-    const priv = await make('Boardroom', [A]);
+    const priv = await make('general', [A]);
     await setVisibility(pub, 'public');
     for (const [id, headers] of [[priv, AS(C)], [pub, AS(C)]] as const) {
       expect((await app.inject({ method: 'GET', url: `/api/chatrooms/${id}`, headers })).statusCode).toBe(404);
@@ -172,7 +172,7 @@ describe('public and private channels', () => {
     const left = await app.inject({ method: 'DELETE', url: `/api/chatrooms/${pub}/members/${C}`, headers: AS(C) });
     expect(left.statusCode).toBe(200);
     expect(service.room(pub)!.members.some((m) => m.sessionId === C)).toBe(false);
-    const priv = await make('Boardroom', [A]);
+    const priv = await make('general', [A]);
     const all = (await app.inject({ method: 'GET', url: '/api/chatrooms' })).json().data.rooms as Array<{ id: string }>;
     expect(all.map((r) => r.id)).toEqual(expect.arrayContaining([pub, priv]));
   });

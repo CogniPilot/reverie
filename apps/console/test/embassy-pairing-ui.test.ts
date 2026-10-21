@@ -2,7 +2,7 @@ import {readFileSync} from 'node:fs';
 import {afterEach,expect,it,vi} from 'vitest';
 import {createHarness,room,member} from './helpers/chat-app-harness.mjs';
 const src=readFileSync(new URL('../src/web/public/chat-app.js',import.meta.url),'utf8');
-const origin='https://relay.example.test:8443',roomId='420a20cc-1288-4faa-8f45-b6f908cf4a20',requestId='d7f74718-8792-476d-a609-331da7c5611d',handle='a'.repeat(32),connectionId='bd2161d7-0c0e-41f8-83d2-c6c720c22ac2';
+const origin='https://relay.example.test:8443',roomId='00000012-0017-4000-8000-000000000020',requestId='00000041-0051-4000-8000-000000000078',handle='a'.repeat(32),connectionId='0000003a-0048-4000-8000-000000000069';
 const qr=`embassy-v2|${origin}|${roomId}|${'A'.repeat(43)}`,requestQr=`embassy-pair-v1|${origin}|${requestId}|3BCD-5FGH`;
 const opened:any[]=[];
 afterEach(()=>{for(const h of opened.splice(0))h.dom.window.close();vi.restoreAllMocks();});
@@ -17,7 +17,7 @@ async function setup(emptyLocal=false){
   if(path==='/api/embassy-guest')data={connections:rows};
   else if(path.startsWith('/api/embassy-guest/'))data={posts:[],next:0};
   else if(path.startsWith('/api/embassy-host/posts')){
-   if(options.method==='POST'){const post={ackId:'b89a36db-b8a5-453f-95d2-198df41dd537',sequence:state.hostPosts.length+1,at:Date.now(),text:options.body.text,author:{company:'Host company',identity:'Owner'}};state.hostPosts.push(post);data={post};}
+   if(options.method==='POST'){const post={ackId:'00000036-0041-4000-8000-00000000005d',sequence:state.hostPosts.length+1,at:Date.now(),text:options.body.text,author:{company:'Host company',identity:'Owner'}};state.hostPosts.push(post);data={post};}
    else data={posts:state.hostPosts,next:state.hostPosts.length};
   }
   else if(path==='/api/embassy-host')data={status:state.host,origin,room:{id:roomId,name:'Shared room'}};

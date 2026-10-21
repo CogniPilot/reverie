@@ -1,7 +1,7 @@
 # Split-Pane Sessions — Design Spec
 
 **Status**: Implemented (v1)
-**Author**: Claude (session with Tim), 2026-09-15
+**Origin**: upstream design note, 2026-09-15
 **Scope**: v1 only. v2 items are named and explicitly deferred, not designed.
 
 > **Update (tile grid, PR 1):** Pane B is now a `TerminalTile`

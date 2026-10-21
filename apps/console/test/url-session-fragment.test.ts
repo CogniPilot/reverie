@@ -21,8 +21,8 @@ describe('CodemanUrlSession.sessionIdFromFragment', () => {
   const { sessionIdFromFragment } = loadHelper();
 
   it('reads the id from a #session= fragment', () => {
-    expect(sessionIdFromFragment('#session=76763752-fa3a-40aa-a025-e1684c82d00e')).toBe(
-      '76763752-fa3a-40aa-a025-e1684c82d00e'
+    expect(sessionIdFromFragment('#session=00000020-0026-4000-8000-000000000032')).toBe(
+      '00000020-0026-4000-8000-000000000032'
     );
   });
 

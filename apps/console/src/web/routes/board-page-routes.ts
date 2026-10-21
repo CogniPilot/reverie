@@ -37,4 +37,12 @@ export function registerBoardPageRoutes(app: FastifyInstance, dir: string = publ
   // ⚠️ /board.html needs its own route: the static plugin would give it a year of `immutable`.
   app.get('/board', serve);
   app.get('/board.html', serve);
+  app.get('/company-board.css', async (_req, reply) => {
+    try {
+      const styles = await readFile(join(dir, 'company-board.css'), 'utf-8');
+      return reply.header('Cache-Control', 'no-store').type('text/css; charset=utf-8').send(styles);
+    } catch {
+      return reply.code(404).header('Cache-Control', 'no-store').type('text/plain; charset=utf-8').send('Company and Board styles are not installed in this build');
+    }
+  });
 }

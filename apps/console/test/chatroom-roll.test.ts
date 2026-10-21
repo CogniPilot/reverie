@@ -15,7 +15,7 @@ import { ChatFileStore } from '../src/chatroom-files.js';
 import { registerChatroomRoutes } from '../src/web/routes/chatroom-routes.js';
 import { rollCommand, isRollCommand } from '../src/chatroom-dice.js';
 
-const A = 'aaaaaaaa-0000-4000-8000-000000000001';
+const A = '0000002d-0035-4000-8000-000000000047';
 
 describe('/roll command', () => {
   it('rolls a bare d20 by default and a spec with a modifier', () => {
@@ -64,7 +64,7 @@ describe('/roll through the message route', () => {
     app.inject({ method: 'POST', url: `/api/chatrooms/${id}/messages`, headers, payload: { text } });
 
   it('the user rolls on the server; an agent typing /roll stays plain text', async () => {
-    const room = (await app.inject({ method: 'POST', url: '/api/chatrooms', payload: { name: 'd&d', members: [{ sessionId: A }] } })).json().data.id;
+    const room = (await app.inject({ method: 'POST', url: '/api/chatrooms', payload: { name: 'demo', members: [{ sessionId: A }] } })).json().data.id;
     const mine = await post(room, '/roll 1d20+3 for stealth');
     expect(mine.statusCode).toBe(200);
     expect(mine.json().data.message.text).toMatch(/^🎲 .* rolls 1d20\+3 for stealth: \*\*\d+\*\* \(\d+ \+ 3\)/);

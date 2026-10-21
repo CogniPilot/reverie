@@ -2,7 +2,7 @@
 # Respawn Controller Monitor - 12 hour monitoring script
 # Usage: ./scripts/monitor-respawn.sh <session_id> [duration_hours]
 
-SESSION_ID="${1:-5ecdf859-3605-42d8-b0a2-f8f0a1b5ff98}"
+SESSION_ID="${1:-0000001a-0020-4000-8000-00000000002b}"
 DURATION_HOURS="${2:-12}"
 ISSUES_FILE="/home/arkon/default/codeman/respawn-monitor-issues.md"
 FIXES_FILE="/home/arkon/default/codeman/respawn-monitor-fixes.md"

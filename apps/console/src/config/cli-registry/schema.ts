@@ -288,6 +288,7 @@ const launchModelTemplate = z
 
 const capabilitiesSchema = z
   .object({
+    chatDelivery: z.literal('poll').optional(),
     external: z.boolean(),
     requiresMux: z.boolean(),
     hooks: z.enum(['none', 'always', 'supervised']),
@@ -592,6 +593,9 @@ export const CliEntrySchema = z
   })
   .strict()
   .superRefine((entry, ctx) => {
+    if (entry.capabilities.chatDelivery === 'poll' && (entry.kind !== 'agent' || entry.acceptsChat === true)) {
+      ctx.addIssue({ code: 'custom', message: 'Polling delivery requires an agent with typed chat disabled', path: ['capabilities', 'chatDelivery'] });
+    }
     const gateNames = new Set(Object.keys(entry.capabilities.gates));
     const walkConds = (cond: import('./types.js').Cond | undefined) => {
       if (!cond) return;

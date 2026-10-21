@@ -1,7 +1,7 @@
 /**
  * @fileoverview The server's board (board-types.ts): GET /api/board and its audited writes.
  *
- * Who may write: the owner (no agent header) and room coordinators may do anything; any member may file an issue (it
+ * Who may write: the owner (no agent header) and owner-made room coordinators may do anything; any member may file an issue (it
  * lands in triage), add a win, edit its own issues and set its own focus. Only the owner and coordinators import.
  * An agent is identified by its x-codeman-parent-session header, which must resolve to exactly itself (no prefix, and a
  * body field never stands in for it). Every write appends an audit line BEFORE the board is saved; if the audit
@@ -32,6 +32,7 @@ import {
 } from '../../board-types.js';
 import { pollIsOpen, USER_RECIPIENT, type ChatRoom } from '../../chatroom-store.js';
 import { waitingForOwner } from '../../decision-alert.js';
+import { ownerMade } from '../../owner-auth/relations.js';
 import { burnRate, type UsageSample } from '../../plan-pace.js';
 import type { PlanRow } from '../../plan-accounts.js';
 import type { SessionPort } from '../ports/session-port.js';
@@ -121,7 +122,11 @@ type Caller =
 export function registerBoardRoutes(app: FastifyInstance, ctx: SessionPort & Partial<EventPort>, deps: BoardDeps): void {
   const now = () => (deps.now ?? Date.now)();
   const isCoordinator = (sessionId: string) =>
-    deps.rooms().some((r) => !r.archivedAt && r.members.some((m) => m.sessionId === sessionId && m.role === 'coordinator'));
+    deps.rooms().some((r) => !r.archivedAt && r.members.some((m) => m.sessionId === sessionId && m.role === 'coordinator' && ownerMade(m)));
+
+  // Apply current membership before reading any room messages, including counts and poll metadata.
+  const visibleRooms = (c: Caller) =>
+    deps.rooms().filter((r) => !r.archivedAt && (c.kind === 'owner' || r.members.some((m) => m.sessionId === c.sessionId)));
 
   const caller = (req: FastifyRequest): Caller => {
     const owner = ownerFor(req);
@@ -213,8 +218,8 @@ export function registerBoardRoutes(app: FastifyInstance, ctx: SessionPort & Par
   // What waits on the owner: open decisions and open polls without an owner vote. Backs the Board badge and the push.
   app.get('/api/board/waiting', async (req, reply) =>
     run(reply, async () => {
-      caller(req);
-      return waitingForOwner(deps.store.snapshot(), deps.rooms(), now());
+      const c = caller(req);
+      return waitingForOwner(deps.store.snapshot(), visibleRooms(c), now());
     })
   );
   app.get('/api/board', async (req, reply) =>
@@ -223,7 +228,7 @@ export function registerBoardRoutes(app: FastifyInstance, ctx: SessionPort & Par
       const company = deps.company(c.owner);
       const state = deps.store.snapshot();
       const at = now();
-      const rooms = deps.rooms().filter((r) => !r.archivedAt);
+      const rooms = visibleRooms(c);
       const roster: RosterRow[] = company.employees.map((e) => {
         const s = e.sessionId ? ctx.sessions.get(e.sessionId) : undefined;
         const alive = !!s && s.pid !== null;
@@ -240,8 +245,13 @@ export function registerBoardRoutes(app: FastifyInstance, ctx: SessionPort & Par
       });
       const polls: BoardPoll[] = [];
       const pins: BoardPin[] = [];
+      const pollNotes: BoardState['pollNotes'] = c.kind === 'owner' ? state.pollNotes : {};
       for (const room of rooms) {
         for (const m of room.messages) {
+          if (c.kind === 'agent') {
+            const key = `${room.id}:${m.id}`;
+            if (state.pollNotes[key]) pollNotes[key] = state.pollNotes[key];
+          }
           if (m.deleted) continue;
           if (m.poll && pollIsOpen(m.poll, at)) {
             const counts = new Map<string, number>();
@@ -272,6 +282,7 @@ export function registerBoardRoutes(app: FastifyInstance, ctx: SessionPort & Par
       const ownerIds = boardOwnerIds(state.issues, company.employees);
       const view: BoardView = {
         ...state,
+        pollNotes,
         built: at,
         timeZone: company.settings.timeZone,
         ownerName: company.settings.ownerName,
@@ -321,6 +332,7 @@ export function registerBoardRoutes(app: FastifyInstance, ctx: SessionPort & Par
         hoursToReset: row.pace.hoursToReset,
         sustainablePctPerHour: row.pace.sustainablePctPerHour,
         at: row.updatedAt,
+        banked: row.bankedResets ? { count: row.bankedResets.availableCount, expiresAt: row.bankedResets.earliestExpiresAt } : null,
         points,
       };
     });

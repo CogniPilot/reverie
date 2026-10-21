@@ -355,7 +355,7 @@ describe('the recovery construction path can create a resumed pane', () => {
 
   it('creates a NEW mux session rather than needing one to attach to', async () => {
     const mux = new TmuxManager();
-    const state = persistedSession({ id: 'aaaaaaa1-1111-4111-8111-111111111111', name: 'w1-spike' });
+    const state = persistedSession({ id: '00000029-0031-4000-8000-000000000041', name: 'w1-spike' });
     const session = rebuildFromPersistedState(state, mux);
 
     expect(mux.getSessions()).toHaveLength(0);
@@ -363,14 +363,14 @@ describe('the recovery construction path can create a resumed pane', () => {
 
     const created = mux.getSessions();
     expect(created).toHaveLength(1);
-    expect(created[0].sessionId).toBe('aaaaaaa1-1111-4111-8111-111111111111');
+    expect(created[0].sessionId).toBe('00000029-0031-4000-8000-000000000041');
     expect(created[0].workingDir).toBe(workingDir);
   });
 
   it('comes back pointed at the conversation the pane was holding', async () => {
     const mux = new TmuxManager();
     const state = persistedSession({
-      id: 'aaaaaaa2-2222-4222-8222-222222222222',
+      id: '0000002a-0032-4000-8000-000000000042',
       resumeSessionId: 'launch-id',
       claudeSessionChain: ['launch-id', 'after-clear'],
     });
@@ -385,7 +385,7 @@ describe('the recovery construction path can create a resumed pane', () => {
   it('comes back idle, with no prompt sent and no autonomous loop armed', async () => {
     const mux = new TmuxManager();
     const state = persistedSession({
-      id: 'aaaaaaa3-3333-4333-8333-333333333333',
+      id: '0000002b-0033-4000-8000-000000000043',
       ralphEnabled: true,
       respawnEnabled: true,
     });
@@ -403,7 +403,7 @@ describe('the recovery construction path can create a resumed pane', () => {
 
   it('keeps the owner it was persisted with, there being no request to read one from', async () => {
     const mux = new TmuxManager();
-    const state = persistedSession({ id: 'aaaaaaa4-4444-4444-8444-444444444444', owner: 'alice' });
+    const state = persistedSession({ id: '0000002c-0034-4000-8000-000000000044', owner: 'alice' });
     const session = rebuildFromPersistedState(state, mux);
 
     await session.startInteractive();

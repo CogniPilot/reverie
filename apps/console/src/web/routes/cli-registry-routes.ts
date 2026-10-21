@@ -154,6 +154,7 @@ function buildCustomCliEntry(
     argv: string[];
     enabled: boolean;
     acceptsChat?: boolean;
+    chatDelivery?: 'poll';
   },
   order: number
 ): unknown {
@@ -185,6 +186,7 @@ function buildCustomCliEntry(
       allowedKeys: [],
     },
     capabilities: {
+      ...(input.chatDelivery === 'poll' ? { chatDelivery: 'poll' } : {}),
       external: true,
       requiresMux: true,
       hooks: 'none',

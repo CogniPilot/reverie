@@ -21,9 +21,9 @@ import { installRouteErrorHandler } from '../src/web/route-error-handler.js';
 import type { CronJob, CronJobRun } from '../src/types/cron.js';
 
 interface Person { id: string; name: string; position: string; session: string }
-const ALICE: Person = { id: 'e-alice', name: 'Alice', position: 'Tech lead', session: 'aaaaaaaa-0000-4000-8000-000000000001' };
-const BOB: Person = { id: 'e-bob', name: 'Bob', position: 'Designer', session: 'bbbbbbbb-0000-4000-8000-000000000002' };
-const TEMP = { session: 'cccccccc-0000-4000-8000-000000000003' };
+const ALICE: Person = { id: 'e-alice', name: 'Alice', position: 'Tech lead', session: '0000002d-0035-4000-8000-000000000047' };
+const BOB: Person = { id: 'e-bob', name: 'Bob', position: 'Designer', session: '00000038-0043-4000-8000-000000000060' };
+const TEMP = { session: '0000003e-004c-4000-8000-00000000006f' };
 const as = (p: { session: string }) => ({ 'x-codeman-parent-session': p.session });
 const mine = {
   name: 'standup', action: 'post', roomId: 'room-1', postText: 'standup in 5',
@@ -69,7 +69,7 @@ async function setup() {
       grants,
       findEmployee: (sid: string) => people.find((p) => p.session === sid),
       isMember: (room: string, sid: string) => !!rooms[room]?.includes(sid),
-      boardroomId: () => 'room-board',
+      notificationRoomId: () => 'room-board',
       notify: () => true,
     },
   };
@@ -183,10 +183,10 @@ describe('agent routines: what the server accepts', () => {
     try {
       const made = (await app.inject({ method: 'POST', url: '/api/cron/jobs', headers: { ...as(ALICE), 'x-test-user': 'owner-a' }, payload: { ...mine, name: 'a-private' } })).json();
       expect(made.job?.owner).toBe('owner-a');
-      const bev = { ...as(BOB), 'x-test-user': 'owner-b' };
-      const listed = (await app.inject({ method: 'GET', url: '/api/cron/jobs?all=1', headers: bev })).json() as CronJob[];
+      const builder = { ...as(BOB), 'x-test-user': 'owner-b' };
+      const listed = (await app.inject({ method: 'GET', url: '/api/cron/jobs?all=1', headers: builder })).json() as CronJob[];
       expect(listed.map((j) => j.name)).not.toContain('a-private');
-      const runs = (await app.inject({ method: 'GET', url: '/api/cron/runs', headers: bev })).json() as unknown[];
+      const runs = (await app.inject({ method: 'GET', url: '/api/cron/runs', headers: builder })).json() as unknown[];
       expect(runs).toEqual([]);
     } finally {
       multiUser.on = false;
@@ -259,7 +259,7 @@ describe('agent routines: when one fires', () => {
     await cron.runNow(id);
     expect(posts).toEqual([{ roomId: 'room-1', from: { sessionId: ALICE.session, name: 'Alice' }, text: '⏰ routine: standup in 5' }]);
     // The employee moves to a new session (a restart); the seat moves with it.
-    const fresh = 'dddddddd-0000-4000-8000-000000000004';
+    const fresh = '00000043-0053-4000-8000-00000000007a';
     people[0]!.session = fresh;
     rooms['room-1'] = [fresh, BOB.session];
     await cron.runNow(id);

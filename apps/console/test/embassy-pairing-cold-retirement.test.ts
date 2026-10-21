@@ -8,7 +8,7 @@ import { EmbassyGuestClient, type EmbassyGuestRequest, type EmbassyGuestResponse
 import { EmbassyPairing } from '../src/embassy-pairing.js';
 
 // CP-K4 (r6): init retires the guest session of every restored cancelling or cancelled pairing before anything can
-// poll, and refuses to start when that local retirement cannot be saved. Rex's control covers `cancelling`.
+// poll, and refuses to start when that local retirement cannot be saved. Tester's control covers `cancelling`.
 
 const stops: Array<() => Promise<void>> = [];
 const dirs: string[] = [];

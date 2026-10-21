@@ -160,18 +160,21 @@ describe('cumulative browser speech results', () => {
 describe('owner-directed room read-aloud', () => {
   const addressed = (message: unknown, names: string[], messages?: unknown[]) => (get('chatReadAloudAddressed') as (m: unknown, n: string[], ms?: unknown[]) => boolean)(message, names, messages);
   it('accepts an exact owner mention in a room-wide reply, not a prefix or unrelated chat', () => {
-    expect(addressed({ to: 'all', text: '@James yes, I hear you' }, ['James'])).toBe(true);
-    expect(addressed({ to: 'all', text: '@Jameson yes' }, ['James'])).toBe(false);
-    expect(addressed({ to: 'all', text: '@everyone hello' }, ['James'])).toBe(false);
-    expect(addressed({ to: 'all', text: 'foo@James yes' }, ['James'])).toBe(false);
+    expect(addressed({ to: 'all', text: '@Owner yes, I hear you' }, ['Owner'])).toBe(true);
+    expect(addressed({ to: 'all', text: '@Jameson yes' }, ['Owner'])).toBe(false);
+    expect(addressed({ to: 'all', text: '@everyone hello' }, ['Owner'])).toBe(false);
+    expect(addressed({ to: 'all', text: 'foo@Owner yes' }, ['Owner'])).toBe(false);
     expect(addressed({ to: 'all', text: '@Jämeson yes' }, ['Jämes'])).toBe(false);
     expect(addressed({ to: 'all', text: '@A+B yes' }, ['A+B'])).toBe(true);
-    expect(addressed({ to: 'all', text: 'build is green' }, ['James'])).toBe(false);
+    expect(addressed({ to: 'all', text: 'build is green' }, ['Owner'])).toBe(false);
     expect(addressed({ to: ['user'], text: 'yes' }, [])).toBe(true);
   });
-  it('accepts an actual reply to an owner spoken message only', () => {
+  it('accepts an actual reply to an owner message, typed or spoken', () => {
     const original = { id: 'owner-spoken', from: { kind: 'user' }, spoken: true };
     expect(addressed({ to: 'all', replyTo: original.id }, [], [original])).toBe(true);
+    // Owner 10-20: Worker's linked replies to his typed general messages were never read.
+    const typed = { id: 'owner-typed', from: { kind: 'user' } };
+    expect(addressed({ to: 'all', replyTo: typed.id }, [], [typed])).toBe(true);
     expect(addressed({ to: 'all', replyTo: 'missing' }, [], [original])).toBe(false);
     expect(addressed({ to: 'all', replyTo: original.id }, [], [{ ...original, from: { kind: 'agent' } }])).toBe(false);
   });
@@ -181,18 +184,36 @@ describe('owner-directed room read-aloud', () => {
 it('speaks an owner-directed broadcast via the actual message callback, not unrelated chatter', () => {
   const proto = vm.runInContext('CodemanApp.prototype', context);
   const said: string[] = [];
-  const app = { _voiceSetting: () => true, _chatRoomId: 'voice', _chatOwnerNames: ['James'], _chatRoom: { messages: [] }, _readAloudQueue: () => ({ push: (s: string) => said.push(s) }) };
-  const data = { roomId: 'voice', message: { id: 'reply', from: { kind: 'agent', name: 'Burt' }, to: 'all', text: '@James yes, I hear you' } };
+  const app = { _speakRepliesMode: (id: string) => (id === 'voice' ? 'mine' : 'off'), _chatRoomId: 'voice', _chatOwnerNames: ['Owner'], _chatRoom: { messages: [] }, _readAloudQueue: () => ({ push: (s: string) => said.push(s) }) };
+  const data = { roomId: 'voice', message: { id: 'reply', from: { kind: 'agent', name: 'Reviewer' }, to: 'all', text: '@Owner yes, I hear you' } };
+  Object.setPrototypeOf(app, proto);
   proto._readAloudOnMessage.call(app, data);
   proto._readAloudOnMessage.call(app, { ...data, message: { ...data.message, text: 'unrelated build chat' } });
   proto._readAloudOnMessage.call(app, { ...data, roomId: 'other' });
-  expect(said).toEqual(['Burt says: @James yes, I hear you']);
+  expect(said).toEqual(['Reviewer says: Owner yes, I hear you']);
+});
+
+it('leaves only the linked answer of a pending spoken turn out of read-aloud, since the turn plays it', () => {
+  const proto = vm.runInContext('CodemanApp.prototype', context);
+  const said: string[] = [];
+  const asked = { id: 'q1', from: { kind: 'user', name: 'Owner' }, to: ['worker'], text: 'status?', spoken: true };
+  const typed = { id: 'q2', from: { kind: 'user', name: 'Owner' }, to: ['worker'], text: 'typed' };
+  const app: Record<string, unknown> = { _speakRepliesMode: (id: string) => (id === 'voice' ? 'mine' : 'off'), _chatRoomId: 'voice', _chatOwnerNames: [], _chatRoom: { messages: [asked, typed] }, _readAloudQueue: () => ({ push: (s: string) => said.push(s) }), _chatVoiceTurnFor: 'worker' };
+  const from = (sessionId: string, name: string, text: string, replyTo?: string) => ({ roomId: 'voice', message: { id: `${sessionId}-${text}`, from: { kind: 'agent', sessionId, name }, to: ['user'], text, ...(replyTo ? { replyTo } : {}) } });
+  Object.setPrototypeOf(app, proto);
+  proto._readAloudOnMessage.call(app, from('worker', 'Worker', 'linked', 'q1')); // the turn plays this one
+  proto._readAloudOnMessage.call(app, from('worker', 'Worker', 'unlinked')); // an unrelated post is still read
+  proto._readAloudOnMessage.call(app, from('worker', 'Worker', 'to typed', 'q2')); // a reply to a typed message is still read
+  proto._readAloudOnMessage.call(app, from('reviewer', 'Reviewer', 'linked', 'q1')); // another member naming the id is still read
+  app._chatVoiceTurnFor = null;
+  proto._readAloudOnMessage.call(app, from('worker', 'Worker', 'late', 'q1')); // a late answer after the turn gave up is read
+  expect(said).toEqual(['Worker says: unlinked', 'Worker says: to typed', 'Reviewer says: linked', 'Worker says: late']);
 });
 
 // Prefix boundaries reconstructed from two actual posted transcripts, not captured browser result events.
 const reportedSpeechCases = [
   {
-    "id": "ad0309b3-64eb-488f-a830-58a0edb2a644",
+    "id": "00000034-003f-4000-8000-00000000005b",
     "segments": [
       "you",
       "you",
@@ -215,7 +236,7 @@ const reportedSpeechCases = [
     "expected": "you guys give me an update on the same weapon remote car"
   },
   {
-    "id": "0bc092ab-dfbd-4651-a7af-ee608b0a29b8",
+    "id": "00000006-0006-4000-8000-000000000006",
     "segments": [
       "I meant",
       "I meant",

@@ -306,6 +306,9 @@ export interface TerminalMultiplexer extends EventEmitter {
   /** Update the display name of a session */
   updateSessionName(sessionId: string, name: string): boolean;
 
+  /** Update the persisted mode of a session (the CLI its pane runs on the next launch) */
+  updateSessionMode(sessionId: string, mode: SessionMode): boolean;
+
   /** Mark session as attached/detached */
   setAttached(sessionId: string, attached: boolean): void;
 

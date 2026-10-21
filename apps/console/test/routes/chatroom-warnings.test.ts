@@ -13,9 +13,9 @@ import { ChatroomService } from '../../src/chatroom-service.js';
 import { ChatFileStore } from '../../src/chatroom-files.js';
 import { registerChatroomRoutes } from '../../src/web/routes/chatroom-routes.js';
 
-const A = 'aaaaaaaa-0000-4000-8000-000000000001';
-const B = 'bbbbbbbb-0000-4000-8000-000000000002';
-const C = 'cccccccc-0000-4000-8000-000000000003';
+const A = '0000002d-0035-4000-8000-000000000047';
+const B = '00000038-0043-4000-8000-000000000060';
+const C = '0000003e-004c-4000-8000-00000000006f';
 const AS = (id: string) => ({ 'x-codeman-parent-session': id });
 
 describe('post warnings', () => {
@@ -84,9 +84,29 @@ describe('post warnings', () => {
     ]);
   });
 
-  it('says nothing for members (any case), @all, @everyone, @here, @user, @owner, and addresses', async () => {
+  it('says nothing for members (any case), @everyone, @user, @owner, and addresses', async () => {
     const id = await room();
-    const res = await post(id, '@ALPHA @Bravo @lead @all @everyone @here @user @owner mail a@b.com foo@bar', A);
+    const res = await post(id, '@ALPHA @Bravo @lead @everyone @user @owner mail a@b.com foo@bar me@all.io', A);
+    expect(res.statusCode).toBe(200);
+    expect(res.json().data.warnings).toBeUndefined();
+  });
+
+  it('tells the writer @all and @here no longer notify anyone, and to use @everyone', async () => {
+    const id = await room();
+    const res = await post(id, '@all heads up, @HERE too', A);
+    expect(res.statusCode).toBe(200);
+    expect(res.json().data.warnings).toEqual([
+      { code: 'retired-mention', names: ['all', 'here'], text: '@all and @here no longer notify anyone; use @everyone to reach the whole room' },
+    ]);
+    const one = await post(id, 'ping @here', A);
+    expect(one.json().data.warnings[0].text).toBe('@here no longer notifies anyone; use @everyone to reach the whole room');
+  });
+
+  it('says nothing about @all or @here when a member really goes by that name', async () => {
+    (ctx.sessions.get(C) as unknown as { name: string }).name = 'All';
+    (ctx.sessions.get(B) as unknown as { name: string }).name = 'here';
+    const id = await room();
+    const res = await post(id, '@all and @HERE, please look', A);
     expect(res.statusCode).toBe(200);
     expect(res.json().data.warnings).toBeUndefined();
   });
@@ -102,7 +122,7 @@ describe('post warnings', () => {
 
   it('a refused post carries no warning and a DM is called "Direct message"', async () => {
     const id = await room();
-    const refused = await post(id, '@linus', 'dddddddd-0000-4000-8000-000000000004');
+    const refused = await post(id, '@linus', '00000043-0053-4000-8000-00000000007a');
     expect(refused.statusCode).toBe(403);
     const dm = await app.inject({ method: 'POST', url: '/api/chatrooms/dms', payload: { sessionId: A } });
     expect(dm.statusCode).toBe(200);

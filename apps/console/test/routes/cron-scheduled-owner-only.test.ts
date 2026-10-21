@@ -12,7 +12,7 @@ import { registerCronRoutes } from '../../src/web/routes/cron-routes.js';
 import { registerScheduledRoutes } from '../../src/web/routes/scheduled-routes.js';
 import { installRouteErrorHandler } from '../../src/web/route-error-handler.js';
 
-const AGENT = { 'x-codeman-parent-session': 'aaaaaaaa-0000-4000-8000-000000000001' };
+const AGENT = { 'x-codeman-parent-session': '0000002d-0035-4000-8000-000000000047' };
 const job = {
   id: 'job-1',
   name: 'nightly',

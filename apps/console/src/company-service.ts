@@ -5,10 +5,12 @@ import { ChatroomError } from './chatroom-store.js';
 import {
   CompanySettingsSchema,
   EmployeeSchema,
+  PronounsSchema,
   ResearchResultSchema,
   type CompanyCycle,
   type CompanyEmployee,
   type CompanySettings,
+  type CompanyState,
   type ResearchResult,
   type SelfProfile,
 } from './company-types.js';
@@ -80,6 +82,22 @@ function asCompanyError<T>(work: () => T): T {
 const NAMES = ['Amir', 'Maya', 'Lena', 'Felix', 'Nora', 'Leo', 'Iris', 'Theo', 'Zara', 'Hugo', 'Asha', 'Emil'];
 const ICONS = ['🧭', '🌱', '🦉', '🚀', '🔭', '🎨', '🦊', '🌊', '🪁', '🌻', '🦋', '⚡'];
 const sameOwner = (a?: string, b?: string): boolean => a === b;
+
+/** Validate the rendered hierarchy against the transaction's current active roster. */
+function validateReportingLine(state: CompanyState, employee: CompanyEmployee): void {
+  const employees = state.employees.filter((e) => sameOwner(e.owner, employee.owner));
+  const byId = new Map(employees.map((e) => [e.id, e]));
+  const ctoId = state.settings.find((s) => sameOwner(s.owner, employee.owner))?.ctoId;
+  const seen = new Set<string>([employee.id]);
+  let next = employee.reportsTo ?? (employee.id === ctoId ? 'owner' : ctoId);
+  while (next && next !== 'owner') {
+    if (seen.has(next)) throw new CompanyError('Reporting hierarchy cannot contain a self-reference or cycle');
+    const parent = byId.get(next);
+    if (!parent) throw new CompanyError('Choose an active employee in the same company or owner');
+    seen.add(parent.id);
+    next = parent.reportsTo ?? (parent.id === ctoId ? 'owner' : ctoId);
+  }
+}
 /** Positions (owner-set) whose bound session may recover another employee whose session is gone. */
 const RECOVERY_POSITIONS = new Set(['cto', 'coo']);
 
@@ -122,6 +140,8 @@ export class CompanyService {
       const index = state.employees.findIndex((e) => e.id === employeeId && sameOwner(e.owner, owner));
       if (index < 0) throw new CompanyError('Unknown employee', 404);
       const current = state.employees[index];
+      if (state.employees.some((e) => sameOwner(e.owner, owner) && e.reportsTo === employeeId))
+        throw new CompanyError('Reassign reports before retiring their manager', 409);
       if (this.deps.getSession(current.sessionId)) throw new CompanyError('That employee still has a session; stop or remove it first', 409);
       state.employees.splice(index, 1);
       for (const settings of state.settings) if (sameOwner(settings.owner, owner) && settings.ctoId === employeeId) delete settings.ctoId;
@@ -154,6 +174,7 @@ export class CompanyService {
         throw new CompanyError(`"${record.name}" is an existing employee; rename one of them first`, 409);
       state.retired.splice(index, 1);
       state.employees.push(record);
+      validateReportingLine(state, record);
       return record;
     });
     this.deps.bindIdentity?.(employee);
@@ -170,6 +191,7 @@ export class CompanyService {
         throw new CompanyError('This session already has a permanent identity', 409);
       if (state.employees.length >= 200) throw new CompanyError('Company employee limit reached', 409);
       state.employees.push(employee);
+      validateReportingLine(state, employee);
       return employee;
     });
     this.deps.bindIdentity?.(hired);
@@ -191,6 +213,8 @@ export class CompanyService {
         const kept = state.settings[index].ownerAvatar;
         state.settings[index] = kept ? { ...settings, ownerAvatar: kept } : settings;
       }
+      for (const employee of state.employees.filter((e) => sameOwner(e.owner, owner)))
+        validateReportingLine(state, employee);
       return index < 0 ? settings : state.settings[index];
     });
   }
@@ -325,22 +349,33 @@ export class CompanyService {
     });
   }
 
-  /** Owner edit of an existing employee's position, expertise and icon; the name and session binding are untouched. */
+  /** Owner edit. Capture the audit's before/after in the same serialized mutation as the hierarchy check. */
   async update(
     employeeId: string,
     owner: string | undefined,
-    change: { position?: string; expertise?: string[]; icon?: string }
+    change: { position?: string; expertise?: string[]; icon?: string; reportsTo?: string; pronouns?: string | null },
+    audit?: (before: CompanyEmployee, after: CompanyEmployee) => Promise<void>
   ): Promise<CompanyEmployee> {
-    const updated = await this.store.update((state) => {
+    // Pronouns: a value sets them, null removes the field.
+    const parsed = EmployeeSchema.pick({ position: true, expertise: true, icon: true, reportsTo: true })
+      .extend({ pronouns: PronounsSchema.nullable() })
+      .partial().strict().parse(change);
+    const result = await this.store.update((state) => {
       const employee = state.employees.find((e) => e.id === employeeId && sameOwner(e.owner, owner));
       if (!employee) throw new CompanyError('Unknown employee', 404);
-      if (change.position !== undefined) employee.position = change.position;
-      if (change.expertise !== undefined) employee.expertise = change.expertise;
-      if (change.icon !== undefined) employee.icon = change.icon;
-      return employee;
+      const before = structuredClone(employee);
+      if (parsed.position !== undefined) employee.position = parsed.position;
+      if (parsed.expertise !== undefined) employee.expertise = parsed.expertise;
+      if (parsed.icon !== undefined) employee.icon = parsed.icon;
+      if (parsed.reportsTo !== undefined) employee.reportsTo = parsed.reportsTo;
+      if (parsed.pronouns === null) delete employee.pronouns;
+      else if (parsed.pronouns !== undefined) employee.pronouns = parsed.pronouns;
+      validateReportingLine(state, employee);
+      return { before, employee };
     });
-    this.deps.bindIdentity?.(updated);
-    return updated;
+    await audit?.(result.before, result.employee);
+    this.deps.bindIdentity?.(result.employee);
+    return result.employee;
   }
 
   async remember(employeeId: string, owner: string | undefined, text: string, kind: 'note' | 'imagination' = 'note') {

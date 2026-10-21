@@ -108,7 +108,7 @@ function vanishedSessionMux() {
   return { mux: mux as unknown as TerminalMultiplexer, calls, respawns };
 }
 
-const CONVERSATION = 'aaaabbbb-cccc-dddd-eeee-ffff00001111';
+const CONVERSATION = '0000002e-0039-4000-8000-000000000053';
 
 let configDir: string;
 
@@ -176,7 +176,7 @@ describe('pinning a conversation onto a relaunch', () => {
     giveTranscript(CONVERSATION);
     const { mux, calls } = recordingMux();
     const session = localSession(
-      { resumeSessionId: 'bbbbcccc-dddd-eeee-ffff-000011112222', claudeSessionChain: [CONVERSATION] },
+      { resumeSessionId: '00000039-0047-4000-8000-000000000068', claudeSessionChain: [CONVERSATION] },
       mux
     );
 
@@ -186,7 +186,7 @@ describe('pinning a conversation onto a relaunch', () => {
   });
 
   it('falls back to the launch seed when no conversation was ever recorded', async () => {
-    const seed = 'bbbbcccc-dddd-eeee-ffff-000011112222';
+    const seed = '00000039-0047-4000-8000-000000000068';
     giveTranscript(seed);
     const { mux, calls } = recordingMux();
     const session = localSession({ resumeSessionId: seed }, mux);
@@ -416,7 +416,7 @@ describe('what the pin renders', () => {
   // The rendered command is what actually runs, and it is where each gate's
   // reason shows. Asserting here rather than counting call sites in the source
   // is what would have caught the divergent-pin and synthetic-id cases.
-  const SID = '0f9c2b14-1111-2222-3333-444455556666';
+  const SID = '00000008-0008-4000-8000-000000000008';
   const entry = getCli('claude');
   const render = (resumeSessionId?: string) => {
     if (!entry) throw new Error('no registry entry for claude');

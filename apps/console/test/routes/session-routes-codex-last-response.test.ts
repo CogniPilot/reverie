@@ -92,9 +92,9 @@ const eventUserMsg = (message: string, timestamp = '2026-07-01T00:00:00Z') => ({
   payload: { type: 'user_message', message },
 });
 
-const UUID_A = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
-const UUID_B = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
-const UUID_C = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
+const UUID_A = '0000002d-0037-4000-8000-00000000004f';
+const UUID_B = '00000038-0046-4000-8000-000000000065';
+const UUID_C = '0000003e-004e-4000-8000-000000000074';
 
 // Fixed epoch (seconds) for deterministic mtime ordering.
 const BASE_MTIME = 1_750_000_000;

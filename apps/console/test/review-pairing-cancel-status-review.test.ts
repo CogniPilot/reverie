@@ -1,5 +1,3 @@
-import fsPromises from 'node:fs/promises';
-import { vi } from 'vitest';
 import { afterEach, describe, expect, it } from 'vitest';
 import Fastify, { type InjectOptions } from 'fastify';
 import http from 'node:http';
@@ -21,7 +19,7 @@ import { buildHostPolicy } from '../src/web/network-auth-policy.js';
 import { registerHostGuard, registerSecurityHeaders } from '../src/web/middleware/auth.js';
 
 const ORIGIN = 'https://embassy.example.ts.net:8443';
-const ROOM = '46c990d2-c599-4c44-9234-acd91682464d';
+const ROOM = '00000015-001b-4000-8000-000000000025';
 const sha = (v: string) => createHash('sha256').update(v).digest('base64url');
 const CROCK = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
 
@@ -172,37 +170,18 @@ const record = (dir: string, handle: string) =>
 const flush = () => new Promise((r) => setTimeout(r, 20));
 
 
-
-for (const phase of ['status','request-recovery'] as const) {
-  it(`KIT-CANCEL-SAVE: ${phase} approval save held across cancellation cannot start a claim`, async () => {
-    const g = await guestConsole();
-    if (phase === 'request-recovery') g.embassy.loseAnswer.add('/api/embassy/pair-request');
-    const made = await g.pairing.create(undefined, { qr:g.embassy.issue(),clientRequestId:randomUUID() });
-    g.embassy.approve();
-    const before = g.embassy.claimCount();
-    let release!: () => void; const hold = new Promise<void>(r => release=r);
-    let entered!: () => void; const reached = new Promise<void>(r => entered=r);
-    let held = false;
-    const realRename = fsPromises.rename.bind(fsPromises);
-    const spy = vi.spyOn(fsPromises,'rename').mockImplementation(async (from,to) => {
-      if (!held && String(to)===join(g.dir,'embassy-pairings',`${made.handle}.json`)) {
-        const candidate = JSON.parse(readFileSync(String(from),'utf8'));
-        if(candidate.state==='approved') { held=true; entered(); await hold; }
-      }
-      return realRename(from,to);
-    });
-    let polled:any,cancelled:any;
-    try {
-      const get = g.pairing.get(undefined,made.handle);
-      await reached;
-      const cancel = g.pairing.cancel(undefined,made.handle);
-      release();
-      [polled,cancelled]=await Promise.all([get,cancel]);
-    } finally {
-      release(); spy.mockRestore(); await g.guest.stop(); await g.pairing.stop();
-    }
-    expect(cancelled.state).toBe('cancelled');
-    expect.soft(g.embassy.claimCount()-before,'cancellation during durable approval save cannot start a claim').toBe(0);
-    expect.soft(polled.state,'cancel during approval save cannot publish connected').not.toBe('connected');
-  });
-}
+it('VERIFIER-CANCEL-STATUS: cancellation fences an approved status arriving before claim begins', async () => {
+  const g = await guestConsole();
+  const made = await g.pairing.create(undefined, {qr:g.embassy.issue(),clientRequestId:randomUUID()});
+  g.embassy.approve();
+  const release = g.embassy.hold('/api/embassy/pair-status');
+  const get = g.pairing.get(undefined,made.handle);
+  await flush();
+  const cancel = g.pairing.cancel(undefined,made.handle);
+  release();
+  const [polled,cancelled] = await Promise.all([get,cancel]);
+  await g.guest.stop(); await g.pairing.stop();
+  expect(cancelled.state).toBe('cancelled');
+  expect.soft(g.embassy.claimCount(), 'a status result after cancel must not begin a new claim').toBe(0);
+  expect.soft(polled.state, 'the outstanding GET must not report connected after cancellation was requested').not.toBe('connected');
+});

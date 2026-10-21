@@ -29,16 +29,16 @@ import type { SessionPort } from '../src/web/ports/session-port.js';
 const USER = 'owner-test';
 const PASSWORD = 'synthetic-correct-horse-42';
 const ORIGIN = { origin: 'http://localhost:80' };
-const A = 'aaaaaaaa-0000-4000-8000-000000000001'; // the calling agent
-const CHILD = 'bbbbbbbb-0000-4000-8000-000000000002'; // spawned by A
-const GRANDCHILD = 'cccccccc-0000-4000-8000-000000000003';
-const MEMBER = 'dddddddd-0000-4000-8000-000000000004'; // in a room A coordinates
-const STRANGER = 'eeeeeeee-0000-4000-8000-000000000005';
-const KEEPER = 'ffffffff-0000-4000-8000-000000000006'; // bound to a company employee
-const RESTARTED = '11111111-0000-4000-8000-000000000007'; // a watcher restart: no recorded parent
-const OLD = '22222222-0000-4000-8000-000000000008'; // its stopped predecessor, spawned by A
-const STOPPED = '33333333-0000-4000-8000-000000000009'; // someone else's stopped record
-const STOPPED_CHILD = '44444444-0000-4000-8000-00000000000a'; // A's stopped child
+const A = '0000002d-0035-4000-8000-000000000047'; // the calling agent
+const CHILD = '00000038-0043-4000-8000-000000000060'; // spawned by A
+const GRANDCHILD = '0000003e-004c-4000-8000-00000000006f';
+const MEMBER = '00000043-0053-4000-8000-00000000007a'; // in a room A coordinates
+const STRANGER = '00000046-0058-4000-8000-000000000084';
+const KEEPER = '00000048-005c-4000-8000-00000000008d'; // bound to a company employee
+const RESTARTED = '00000009-0009-4000-8000-00000000000a'; // a watcher restart: no recorded parent
+const OLD = '0000000c-000f-4000-8000-000000000013'; // its stopped predecessor, spawned by A
+const STOPPED = '0000000f-0013-4000-8000-00000000001a'; // someone else's stopped record
+const STOPPED_CHILD = '00000013-0018-4000-8000-000000000021'; // A's stopped child
 const EMPLOYEE = 'employee-keeper';
 
 describe('owner sign-in review fixes', () => {
@@ -77,10 +77,11 @@ describe('owner sign-in review fixes', () => {
     employeeOf: (id) => employees.get(id),
     ctoEmployee: () => ctoEmployee,
     keepers: () => service.keepers(),
+    admins: () => service.admins(),
   });
 
   async function build(policy?: 'off' | 'log' | 'enforce') {
-    if (policy) await admin.setPolicy(store, policy);
+    if (policy) await admin.setPolicy(store, policy, { forceLockoutRisk: true }); // setup: the lockout guard has its own tests
     service = new OwnerAuthService({ store, auditFile: join(dir, 'owner-auth-audit.jsonl'), now: () => clock });
     app = Fastify();
     await app.register(fastifyCookie);
@@ -356,7 +357,7 @@ describe('owner sign-in review fixes', () => {
 
   describe('M4: the host CLI is audited and refuses to run inside an agent session', () => {
     it('audits every admin action without secrets', async () => {
-      await admin.setPolicy(store, 'enforce');
+      await admin.setPolicy(store, 'enforce', { forceLockoutRisk: true });
       const fresh = await admin.resetPassword(store, clock);
       const token = await admin.issueServiceToken(store, 'watcher');
       await admin.unlock(store);
@@ -507,7 +508,7 @@ describe('owner sign-in review fixes', () => {
     });
 
     it('D4: a deleted account file plus a restart keeps the policy (fails closed)', async () => {
-      await admin.setPolicy(store, 'enforce');
+      await admin.setPolicy(store, 'enforce', { forceLockoutRisk: true });
       expect(readFileSync(store.markerFile, 'utf8').trim()).toBe('enforce');
       await app.close();
       await unlink(store.file);
@@ -618,7 +619,7 @@ describe('owner sign-in review fixes', () => {
       expect((await quickStart(A, CHILD)).json().data.body.parentSessionId).toBe(CHILD); // its own descendant: kept
       expect((await quickStart(A, A)).json().data.body.parentSessionId).toBe(A);
       expect((await quickStart(A)).json().data.body).toEqual({ caseName: 'x' });
-      await audited(/"event":"parent_ignored".*"declared":"eeeeeeee/);
+      await audited(/"event":"parent_ignored".*"declared":"00000046/);
       // The owner and services are not limited.
       const owner = await app.inject({ method: 'POST', url: '/api/quick-start', payload: { parentSessionId: STRANGER } });
       expect(owner.statusCode).toBe(401); // anonymous under enforce

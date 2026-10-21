@@ -1,5 +1,5 @@
 /**
- * @fileoverview Unit tests for the pure half of the CLI style kit: display-width
+ * @fileoverview Unit tests for the pure half of the CLI style inspector: display-width
  * math, column layout, kv padding, glyph selection, and the spinner's non-TTY
  * behavior. Nothing here needs a terminal.
  */

@@ -90,22 +90,22 @@ describe('scanCodexSessionsHistory', () => {
   });
 
   it('reads the thread id, working directory and opening prompt', async () => {
-    await writeRollout('01a060f0-0361-7f91-abde-b283020db0d7', [
-      sessionMeta({ id: '01a060f0-0361-7f91-abde-b283020db0d7', cwd: '/repo/one' }),
+    await writeRollout('00000003-0003-4000-8000-000000000003', [
+      sessionMeta({ id: '00000003-0003-4000-8000-000000000003', cwd: '/repo/one' }),
       itemCompletedUser('Continue the audit log architecture'),
     ]);
 
     const rows = await scanCodexSessionsHistory();
     expect(rows).toHaveLength(1);
-    expect(rows[0].sessionId).toBe('01a060f0-0361-7f91-abde-b283020db0d7');
+    expect(rows[0].sessionId).toBe('00000003-0003-4000-8000-000000000003');
     expect(rows[0].workingDir).toBe('/repo/one');
     expect(rows[0].firstPrompt).toBe('Continue the audit log architecture');
     expect(rows[0].sizeBytes).toBeGreaterThan(0);
   });
 
   it('still reads the prompt shape older codex versions wrote', async () => {
-    await writeRollout('11111111-1111-7111-8111-111111111111', [
-      sessionMeta({ id: '11111111-1111-7111-8111-111111111111', cwd: '/repo/two' }),
+    await writeRollout('00000009-000a-4000-8000-00000000000c', [
+      sessionMeta({ id: '00000009-000a-4000-8000-00000000000c', cwd: '/repo/two' }),
       legacyUserMessage('$pr-review-comment-fixer 349'),
     ]);
 
@@ -114,8 +114,8 @@ describe('scanCodexSessionsHistory', () => {
   });
 
   it('skips injected context when only the fallback shape is present', async () => {
-    await writeRollout('22222222-2222-7222-8222-222222222222', [
-      sessionMeta({ id: '22222222-2222-7222-8222-222222222222', cwd: '/repo/three' }),
+    await writeRollout('0000000c-0010-4000-8000-000000000016', [
+      sessionMeta({ id: '0000000c-0010-4000-8000-000000000016', cwd: '/repo/three' }),
       responseItemUser('# AGENTS.md instructions for /repo/three\n<INSTRUCTIONS> ...'),
       responseItemUser('<environment_context>cwd=/repo/three</environment_context>'),
       responseItemUser('Replace PanicOnError with Require().NoError'),
@@ -126,8 +126,8 @@ describe('scanCodexSessionsHistory', () => {
   });
 
   it('prefers a real user row over the injection-prone fallback', async () => {
-    await writeRollout('33333333-3333-7333-8333-333333333333', [
-      sessionMeta({ id: '33333333-3333-7333-8333-333333333333', cwd: '/repo/four' }),
+    await writeRollout('0000000f-0014-4000-8000-00000000001d', [
+      sessionMeta({ id: '0000000f-0014-4000-8000-00000000001d', cwd: '/repo/four' }),
       responseItemUser('Some earlier response_item row'),
       itemCompletedUser('The prompt the user actually typed'),
     ]);
@@ -137,22 +137,22 @@ describe('scanCodexSessionsHistory', () => {
   });
 
   it('leaves out sub-agent threads, which nobody resumes', async () => {
-    await writeRollout('44444444-4444-7444-8444-444444444444', [
-      sessionMeta({ id: '44444444-4444-7444-8444-444444444444', cwd: '/repo/five' }),
+    await writeRollout('00000013-0019-4000-8000-000000000023', [
+      sessionMeta({ id: '00000013-0019-4000-8000-000000000023', cwd: '/repo/five' }),
       itemCompletedUser('a real conversation'),
     ]);
-    await writeRollout('55555555-5555-7555-8555-555555555555', [
-      sessionMeta({ id: '55555555-5555-7555-8555-555555555555', cwd: '/repo/five', threadSource: 'subagent' }),
+    await writeRollout('00000018-001e-4000-8000-000000000029', [
+      sessionMeta({ id: '00000018-001e-4000-8000-000000000029', cwd: '/repo/five', threadSource: 'subagent' }),
       itemCompletedUser('work codex gave itself'),
     ]);
 
     const rows = await scanCodexSessionsHistory();
-    expect(rows.map((r) => r.sessionId)).toEqual(['44444444-4444-7444-8444-444444444444']);
+    expect(rows.map((r) => r.sessionId)).toEqual(['00000013-0019-4000-8000-000000000023']);
   });
 
   it('reports the most recent prompt as well as the first', async () => {
-    await writeRollout('66666666-6666-7666-8666-666666666666', [
-      sessionMeta({ id: '66666666-6666-7666-8666-666666666666', cwd: '/repo/six' }),
+    await writeRollout('0000001c-0022-4000-8000-00000000002e', [
+      sessionMeta({ id: '0000001c-0022-4000-8000-00000000002e', cwd: '/repo/six' }),
       itemCompletedUser('the opening question'),
       itemCompletedUser('a follow-up'),
       itemCompletedUser('the latest thing asked'),
@@ -165,13 +165,13 @@ describe('scanCodexSessionsHistory', () => {
 
   it('orders rows newest first', async () => {
     await writeRollout(
-      '77777777-7777-7777-8777-777777777777',
-      [sessionMeta({ id: '77777777-7777-7777-8777-777777777777', cwd: '/repo/old' }), itemCompletedUser('older')],
+      '00000021-0027-4000-8000-000000000034',
+      [sessionMeta({ id: '00000021-0027-4000-8000-000000000034', cwd: '/repo/old' }), itemCompletedUser('older')],
       new Date('2026-08-01T00:00:00Z')
     );
     await writeRollout(
-      '88888888-8888-7888-8888-888888888888',
-      [sessionMeta({ id: '88888888-8888-7888-8888-888888888888', cwd: '/repo/new' }), itemCompletedUser('newer')],
+      '00000023-0029-4000-8000-000000000036',
+      [sessionMeta({ id: '00000023-0029-4000-8000-000000000036', cwd: '/repo/new' }), itemCompletedUser('newer')],
       new Date('2026-09-05T00:00:00Z')
     );
 
@@ -188,8 +188,8 @@ describe('scanCodexSessionsHistory', () => {
   });
 
   it('survives a rollout whose lines are malformed', async () => {
-    await writeRollout('99999999-9999-7999-8999-999999999999', [
-      sessionMeta({ id: '99999999-9999-7999-8999-999999999999', cwd: '/repo/seven' }),
+    await writeRollout('00000025-002c-4000-8000-00000000003a', [
+      sessionMeta({ id: '00000025-002c-4000-8000-00000000003a', cwd: '/repo/seven' }),
       '{not json at all',
       itemCompletedUser('still found me'),
     ]);
@@ -199,9 +199,9 @@ describe('scanCodexSessionsHistory', () => {
   });
 
   it('reports the originator, which is how a fresh pane finds its own rollout', async () => {
-    await writeRollout('bbbbbbbb-bbbb-7bbb-8bbb-bbbbbbbbbbbb', [
+    await writeRollout('00000038-0046-4000-8000-000000000066', [
       sessionMeta({
-        id: 'bbbbbbbb-bbbb-7bbb-8bbb-bbbbbbbbbbbb',
+        id: '00000038-0046-4000-8000-000000000066',
         cwd: '/repo/nine',
         originator: 'codeman_2f1c9a44-1111-2222-3333-444455556666',
       }),
@@ -214,8 +214,8 @@ describe('scanCodexSessionsHistory', () => {
 
   it('drops a rollout that records no working directory', async () => {
     // Emitting workingDir: '' would make a click post an empty directory.
-    await writeRollout('cccccccc-cccc-7ccc-8ccc-cccccccccccc', [
-      sessionMeta({ id: 'cccccccc-cccc-7ccc-8ccc-cccccccccccc' }),
+    await writeRollout('0000003e-004e-4000-8000-000000000075', [
+      sessionMeta({ id: '0000003e-004e-4000-8000-000000000075' }),
       itemCompletedUser('nowhere to resume into'),
     ]);
 
@@ -227,7 +227,7 @@ describe('scanCodexSessionsHistory', () => {
     // was known, but codex writes the first UserMessage only when the user
     // submits. Any scan in that window — the home screen, the command palette,
     // the search-index refresh — pinned `firstPrompt: undefined` until restart.
-    const id = 'dddddddd-dddd-7ddd-8ddd-dddddddddddd';
+    const id = '00000043-0055-4000-8000-000000000081';
     const path = await writeRollout(id, [sessionMeta({ id, cwd: '/repo/ten' })]);
 
     const before = await scanCodexSessionsHistory();
@@ -254,9 +254,9 @@ describe('scanCodexSessionsHistory', () => {
       );
     }
     await writeRollout(
-      'ffffffff-ffff-7fff-8fff-ffffffffffff',
+      '00000048-005d-4000-8000-00000000008f',
       [
-        sessionMeta({ id: 'ffffffff-ffff-7fff-8fff-ffffffffffff', cwd: '/repo/real' }),
+        sessionMeta({ id: '00000048-005d-4000-8000-00000000008f', cwd: '/repo/real' }),
         itemCompletedUser('opening'),
         itemCompletedUser('the latest thing asked'),
       ],
@@ -269,8 +269,8 @@ describe('scanCodexSessionsHistory', () => {
   });
 
   it('collapses a long prompt to a single capped line', async () => {
-    await writeRollout('aaaaaaaa-aaaa-7aaa-8aaa-aaaaaaaaaaaa', [
-      sessionMeta({ id: 'aaaaaaaa-aaaa-7aaa-8aaa-aaaaaaaaaaaa', cwd: '/repo/eight' }),
+    await writeRollout('0000002d-0037-4000-8000-000000000050', [
+      sessionMeta({ id: '0000002d-0037-4000-8000-000000000050', cwd: '/repo/eight' }),
       itemCompletedUser('line one\nline two\n' + 'y'.repeat(500)),
     ]);
 

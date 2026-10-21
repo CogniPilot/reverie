@@ -16,6 +16,13 @@
  * @loadorder 12.1 (after session-ui.js)
  */
 
+/** Keyboard dictation owns phone text entry; Car mode remains a separate action.
+ * Use device hints rather than viewport width, so rotation keeps the policy and
+ * a narrow desktop window retains its microphone. No keyboard-brand detection. */
+function chatPhoneComposer(nav) {
+  return nav?.userAgentData?.mobile === true || /Android|iPhone|iPod/i.test(nav?.userAgent || '');
+}
+
 const CHAT_MIN_WIDTH = 320;
 /** Client trace lines kept for "Send diagnostics". */
 const CHAT_DIAG_LINES = 300;
@@ -91,9 +98,11 @@ Object.assign(CodemanApp.prototype, {
     return `${Math.round(s / 86400)}d ago`;
   },
 
-  /** Stable per-name hue, so a speaker keeps its color across the feed. */
-  /** Same FNV-1a hue as the server's accentHue(): one colour per session id, member or not. */
+  /** Employees share their profile hue; unbound sessions retain the server's FNV-1a accent. */
   _chatAccent(sessionId) {
+    const employees = this._chatApp?.company?.employees;
+    const matches = Array.isArray(employees) ? employees.filter(employee => employee?.sessionId === sessionId && typeof employee.id === 'string' && employee.id) : [];
+    if (matches.length === 1) return this._chatHue(matches[0].id);
     let h = 2166136261;
     for (let i = 0; i < sessionId.length; i++) {
       h ^= sessionId.charCodeAt(i);
@@ -116,7 +125,7 @@ Object.assign(CodemanApp.prototype, {
 
   /**
    * The member's phone-style alert mode as a monochrome phone outline: ring,
-   * vibrate (only a direct mention or the owner wakes it), silent (only the owner).
+   * vibrate (only a direct mention or the owner wakes it), silent (only the owner's @mention or @everyone).
    * The server sends `alertMode: {mode, until}` with unexpired modes only; an absent, unknown
    * or already-expired mode reads as ring, so a stale page never shows a member muted.
    */
@@ -133,7 +142,7 @@ Object.assign(CodemanApp.prototype, {
       const day = (t) => et({ year: 'numeric', month: '2-digit', day: '2-digit' }).format(t);
       const time = et({ hour: 'numeric', minute: '2-digit' }).format(until);
       const when = day(until) === day(Date.now()) ? time : `${et({ weekday: 'short' }).format(until)} ${time}`;
-      title = `${label} until ${when} ET${a.mode === 'vibrate' ? ' (wakes on a direct @mention or the owner)' : ' (only the owner wakes it)'}`;
+      title = `${label} until ${when} ET${a.mode === 'vibrate' ? ' (wakes on a direct @mention or the owner)' : ' (only an owner @mention or @everyone wakes it)'}`;
     }
     const badge = this._chatEl('span', className);
     badge.style.cssText = 'display:inline-flex;vertical-align:middle;margin-left:4px;color:var(--text-muted,#919aa6);width:16px;height:16px;flex-shrink:0';
@@ -267,6 +276,11 @@ Object.assign(CodemanApp.prototype, {
       carState: this._car?.state || null,
       speechRecognition: !!(window.SpeechRecognition || window.webkitSpeechRecognition),
       voices: (window.speechSynthesis?.getVoices?.() || []).length,
+      // English voice names and languages only, so car-mode voice choices can be checked.
+      englishVoices: (window.speechSynthesis?.getVoices?.() || [])
+        .filter((v) => /^en[-_]/i.test(v.lang || ''))
+        .slice(0, 60)
+        .map((v) => `${String(v.name).slice(0, 80)} (${String(v.lang).slice(0, 16)})`),
     };
     const res = await this._chatApi('/api/voice/diag', {
       method: 'POST',
@@ -448,6 +462,8 @@ Object.assign(CodemanApp.prototype, {
       vv.addEventListener('scroll', fit);
     }
     this._chatEls = { select, members, feed, composer, to, input, send, empty, mic, voiceStatus };
+    // Hands-free listening on a computer (hands-free.js): its toggle sits after the mic.
+    this._buildHandsFree?.(mic);
     // Emoji, attachments and their drop/paste handling (chat-media.js).
     this._buildChatMedia?.(panel);
   },
@@ -595,6 +611,7 @@ Object.assign(CodemanApp.prototype, {
       select.value = id;
       await this._loadChatRoom(id);
     } else {
+      this._readAloud?.clear();
       this._chatRoomId = null;
       this._chatRoom = null;
       this._showChatCreate();
@@ -674,6 +691,8 @@ Object.assign(CodemanApp.prototype, {
       (before.some((m) => m.at >= firstAt && !kept.has(m.id)) ||
         now.some((m) => wasDeleted.has(m.id) && wasDeleted.get(m.id) !== !!m.deleted) ||
         now.some((m) => !known.has(m.id)));
+    // What another room's read-aloud queued is not said here.
+    if (this._chatRoomId !== id) this._readAloud?.clear();
     this._chatRoomId = id;
     this._chatRoom = data;
     if (synced) this._chatSyncedFrom(id, synced);
@@ -1089,14 +1108,21 @@ Object.assign(CodemanApp.prototype, {
   _syncChatMic() {
     const { mic } = this._chatEls;
     const car = this._chatroomPanel?.querySelector('.chatroom-car-btn');
-    if (car) car.hidden = !this._chatRoom?.members.some((m) => m.voice === true);
+    if (car) {
+      // chatVoiceMember is voice-chat.js's (loaded after this file); without it, a marked voice member only.
+      car.hidden =
+        typeof chatVoiceMember === 'function'
+          ? !chatVoiceMember(this._chatRoom)
+          : !this._chatRoom?.members.some((m) => m.voice === true);
+    }
     const target = this._chatVoiceTarget();
     const route = this._chatMicRoute ? this._chatMicRoute() : target ? 'turn' : null;
-    mic.hidden = !route;
+    mic.hidden = !route || chatPhoneComposer(navigator);
     mic.title =
       route === 'turn'
         ? `Talk to ${target.name}: hold, or tap to start and tap again to send`
         : `Dictate to ${this._chatToLabel?.() || 'everyone'}: hold, or tap to start and tap again`;
+    this._hfTick?.();
   },
 
   /** Root-absolute dashboard URL, under a reverse-proxy base path when there is one. */
@@ -1238,24 +1264,48 @@ Object.assign(CodemanApp.prototype, {
   },
 
   async _sendChatVoice(blob, target) {
+    // The turn plays this member's answer itself: voice-chat.js leaves it out of read-aloud meanwhile.
+    this._chatVoiceTurnFor = target.sessionId;
+    try {
+      await this._sendChatVoiceTurn(blob, target);
+    } finally {
+      if (this._chatVoiceTurnFor === target.sessionId) this._chatVoiceTurnFor = null;
+    }
+  },
+
+  async _sendChatVoiceTurn(blob, target) {
     this._chatVoiceStatus(`${target.name} is typing\u2026`, 'busy');
+    const car = () => this._carScreen && !this._carScreen.hidden;
+    // The wait for a linked answer can be long: car mode says whom it waits for, and a tap stops it
+    // (the server releases the member when the request goes away; the answer still lands in the room).
+    if (car()) this._renderCarState?.('thinking', `Waiting for ${target.name}'s answer`);
+    const stop = new AbortController();
+    this._chatVoiceTurnStop = stop;
+    this._chatVoiceTurnName = target.name;
     const q = `room=${encodeURIComponent(this._chatRoomId)}&member=${encodeURIComponent(target.sessionId)}`;
     let res;
+    let body = null;
     try {
       res = await fetch(this._chatUrl(`/api/voice/turn?${q}`), {
         method: 'POST',
         headers: { 'Content-Type': blob.type.split(';')[0] || 'audio/webm' },
         body: blob,
+        signal: stop.signal,
       });
+      try {
+        body = await res.json();
+      } catch {
+        if (stop.signal.aborted) throw stop.signal.reason;
+        /* non-JSON error page */
+      }
     } catch {
-      this._chatVoiceStatus('Network error: the recording was not sent', 'error');
+      if (stop.signal.aborted) {
+        this._chatVoiceStatus('');
+        if (car()) this._renderCarState?.('paused', `Stopped waiting; ${target.name}'s answer will show in the room`);
+      } else this._chatVoiceStatus('Network error: the recording was not sent', 'error');
       return;
-    }
-    let body = null;
-    try {
-      body = await res.json();
-    } catch {
-      /* non-JSON error page */
+    } finally {
+      if (this._chatVoiceTurnStop === stop) this._chatVoiceTurnStop = null;
     }
     if (!res.ok || body?.success === false) {
       this._chatVoiceStatus(body?.error || `Voice failed (HTTP ${res.status})`, 'error');
@@ -1267,8 +1317,35 @@ Object.assign(CodemanApp.prototype, {
       return;
     }
     this._chatVoiceStatus('');
-    if (data.audioUrl) this._playChatAudio(data.audioUrl);
+    if (data.audioUrl) this._playChatAudio(data.audioUrl, target.sessionId);
+    // The answer came but its audio did not (the voice service failed or timed out): say so, never go quiet.
+    else if (data.reply)
+      this._chatVoiceStatus(`Couldn't make audio for ${target.name}'s answer; its text is in the room`, 'error');
     if (this._carScreen && !this._carScreen.hidden) this._renderCarState('paused', data.reply);
+  },
+
+  /**
+   * A spoken turn's transcript is posted to the room before the wait for the answer: show what
+   * was heard while waiting, so a mishearing is seen at once, with a way to stop waiting.
+   */
+  _chatVoiceTurnHeard(data) {
+    const m = data?.message;
+    const id = this._chatVoiceTurnFor;
+    const stop = this._chatVoiceTurnStop;
+    if (!id || !stop || !m?.spoken || m.from?.kind !== 'user' || data.roomId !== this._chatRoomId) return;
+    if (!Array.isArray(m.to) || !m.to.includes(id)) return;
+    const name = this._chatVoiceTurnName || 'the answer';
+    const heard = `\u201C${m.text}\u201D`;
+    if (this._carScreen && !this._carScreen.hidden) {
+      this._renderCarState?.('thinking', `You said ${heard}. Waiting for ${name}`);
+      return;
+    }
+    const { voiceStatus } = this._chatEls;
+    this._chatVoiceStatus(`Heard ${heard}. Waiting for ${name}\u2026 `, 'busy');
+    const cancel = this._chatEl('button', 'chatroom-replay', 'Stop waiting');
+    cancel.type = 'button';
+    cancel.onclick = () => stop.abort();
+    voiceStatus.append(cancel);
   },
 
   /**
@@ -1276,7 +1353,9 @@ Object.assign(CodemanApp.prototype, {
    * still refuses (no gesture has unlocked it yet), show a prominent Play button and
    * retry on the very next tap or key anywhere on the page, which is a gesture.
    */
-  _playChatAudio(url) {
+  /** Play a reply; `from` is who is speaking (the car screen shows them). */
+  _playChatAudio(url, from = null) {
+    this._chatAudioFrom = from;
     this._chatAudioEl();
     const src = this._chatUrl(url);
     this._chatAudio.src = src;
@@ -1299,6 +1378,7 @@ Object.assign(CodemanApp.prototype, {
 
   _offerChatAudioRetry(url) {
     const { voiceStatus, mic } = this._chatEls;
+    const from = this._chatAudioFrom;
     this._chatVoiceStatus('');
     voiceStatus.hidden = false;
     voiceStatus.className = 'chatroom-voice-status';
@@ -1312,7 +1392,7 @@ Object.assign(CodemanApp.prototype, {
       if (mic.contains(event.target) || this._chatRecorder?.state === 'recording') return;
       this._clearChatAudioRetry();
       this._chatVoiceStatus('');
-      this._playChatAudio(url);
+      this._playChatAudio(url, from);
     };
     document.addEventListener('pointerup', this._chatAudioRetry, { capture: true });
     document.addEventListener('keydown', this._chatAudioRetry, { capture: true });
@@ -1403,7 +1483,7 @@ Object.assign(CodemanApp.prototype, {
       const play = this._chatEl('button', 'chatroom-replay', '\u25B6 Play');
       play.type = 'button';
       play.title = 'Play the spoken reply';
-      play.onclick = () => this._playChatAudio(m.audioUrl);
+      play.onclick = () => this._playChatAudio(m.audioUrl, m.from?.sessionId || null);
       el.append(play);
     }
     if (mine) return el;
@@ -1734,12 +1814,17 @@ Object.assign(CodemanApp.prototype, {
       });
       item('Re-brief everyone', () => this._rebriefChatMember('all'));
       item('Custom emotes\u2026', () => this._openEmoteManager?.());
-      const speak = this._voiceSetting?.('speakReplies');
-      item(speak ? 'Stop speaking replies' : 'Speak replies aloud', () => {
-        this._setVoiceSetting('speakReplies', !speak);
-        if (speak) this._readAloud?.clear();
-        this.showToast?.(speak ? 'Replies will not be read aloud' : 'Replies to you will be read aloud', 'info');
-      });
+      const roomId = this._chatRoomId;
+      if (roomId && this._speakRepliesMode) {
+        const now = this._speakRepliesMode(roomId);
+        for (const [mode, label] of [
+          ['off', 'Read aloud here: off'],
+          ['mine', 'Read aloud here: replies to me'],
+          ['all', 'Read aloud here: everyone'],
+        ]) {
+          item(`${now === mode ? '\u2713 ' : ''}${label}`, () => this._setSpeakReplies(roomId, mode));
+        }
+      }
       const instant = this._voiceSetting?.('dictationSendNow');
       item(instant ? 'Dictation: preview before sending' : 'Dictation: send without preview', () =>
         this._setVoiceSetting('dictationSendNow', !instant)
@@ -1770,6 +1855,7 @@ Object.assign(CodemanApp.prototype, {
     // the replies to the user from everyone else.
     this._carModeOnMessage?.(data);
     this._readAloudOnMessage?.(data);
+    this._chatVoiceTurnHeard(data);
     this._chatShowMessage(data);
   },
 

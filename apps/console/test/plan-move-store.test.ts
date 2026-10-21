@@ -1,0 +1,62 @@
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { PlanMoveStore } from '../src/plan-move-store.js';
+import type { PlanMoveRecord } from '../src/plan-move.js';
+
+describe('private bounded durable plan move journal', () => {
+  let directory: string;
+  let store: PlanMoveStore;
+  const record: PlanMoveRecord = {
+    id: 'move',
+    employeeId: 'casey',
+    name: 'Casey',
+    oldSession: 'old',
+    fromAccount: 'first',
+    toAccount: 'second',
+    phase: 'waiting',
+    at: 1,
+  };
+  beforeEach(async () => {
+    directory = await mkdtemp(join(tmpdir(), 'plan-move-store-'));
+    store = new PlanMoveStore(join(directory, 'moves.json'));
+  });
+  afterEach(async () => {
+    await rm(directory, { recursive: true, force: true });
+  });
+
+  it('starts empty only when absent, and writes private atomically replaced state', async () => {
+    expect(await store.load()).toEqual([]);
+    await store.save([record]);
+    expect(await new PlanMoveStore(store.file).load()).toEqual([record]);
+    expect((await stat(store.file)).mode & 0o777).toBe(0o600);
+  });
+
+  it('serializes concurrent phase writes without reverting the latest phase', async () => {
+    await Promise.all([
+      store.save([record]),
+      store.save([{ ...record, phase: 'starting' }]),
+      store.save([{ ...record, phase: 'completed' }]),
+    ]);
+    expect((await store.load())[0].phase).toBe('completed');
+  });
+
+  it('fails closed on corruption, duplicate ids, unknown fields and oversized journals', async () => {
+    await writeFile(store.file, '{broken');
+    await expect(store.load()).rejects.toThrow();
+    await writeFile(store.file, JSON.stringify([record, record]));
+    await expect(store.load()).rejects.toThrow('Duplicate');
+    expect(() => store.save([{ ...record, cookie: 'never persist' } as PlanMoveRecord])).toThrow();
+    expect(() => store.save(Array.from({ length: 101 }, (_, index) => ({ ...record, id: String(index) })))).toThrow();
+    await writeFile(store.file, ' '.repeat(1024 * 1024 + 1));
+    await expect(store.load()).rejects.toThrow('size bound');
+  });
+
+  it('validates before replacing a good journal', async () => {
+    await store.save([record]);
+    const before = await readFile(store.file, 'utf8');
+    expect(() => store.save([{ ...record, phase: 'unknown' } as unknown as PlanMoveRecord])).toThrow();
+    expect(await readFile(store.file, 'utf8')).toBe(before);
+  });
+});

@@ -4,6 +4,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { chromium, type Browser, type Page } from 'playwright';
 
 const html = readFileSync(resolve(import.meta.dirname, '../src/web/public/board.html'), 'utf8');
+const styles = readFileSync(resolve(import.meta.dirname, '../src/web/public/company-board.css'), 'utf8');
 const now = Date.now();
 const board = {
   built: now,
@@ -55,6 +56,8 @@ describe('Board timeline navigation in Chromium', () => {
     await page.route('http://board.test/**', async (route) => {
       if (new URL(route.request().url()).pathname === '/api/board') {
         await route.fulfill({ json: { success: true, data } });
+      } else if (new URL(route.request().url()).pathname === '/company-board.css') {
+        await route.fulfill({ contentType: 'text/css', body: styles });
       } else await route.fulfill({ contentType: 'text/html', body: html });
     });
     await page.goto('http://board.test/board');
@@ -88,11 +91,11 @@ describe('Board timeline navigation in Chromium', () => {
   it('groups legacy name owners with their canonical person in timeline and People', async () => {
     const row = (id: string, owner: {owner?: string; ownerLabel?: string}, status='todo') => ({...board.issues[0],id,title:id,...owner,status});
     await open(390, {...board, roster:[{id:'person-one',name:'Morgan',state:'idle',position:'Engineer'}],
-      issues:[row('stable',{owner:'person-one'},'done'),row('label',{owner:undefined,ownerLabel:'mOrGaN'}),row('literal',{owner:'MORGAN'}),row('james',{owner:undefined,ownerLabel:'James'}),row('sleep',{owner:undefined,ownerLabel:'Sleep'})],
+      issues:[row('stable',{owner:'person-one'},'done'),row('label',{owner:undefined,ownerLabel:'mOrGaN'}),row('literal',{owner:'MORGAN'}),row('owner',{owner:undefined,ownerLabel:'Owner'}),row('sleep',{owner:undefined,ownerLabel:'Sleep'})],
       ownerIds:{stable:'person-one',label:'person-one',literal:'person-one'},
       pace:{owners:{'person-one':{plannedToDate:3,doneOfPlanned:1,overdue:2,overdueHours:2,early:0,verdict:'behind'}}}});
     const rows=await page.evaluate(() => window.eval('rowsForView().map(r=>({key:r.key,who:r.who,count:r.items.length}))'));
-    expect(rows).toEqual([{key:'person-one',who:'Morgan',count:3},{key:'label:James',who:'James',count:1},{key:'label:Sleep',who:'Sleep',count:1}]);
+    expect(rows).toEqual([{key:'person-one',who:'Morgan',count:3},{key:'label:Owner',who:'Owner',count:1},{key:'label:Sleep',who:'Sleep',count:1}]);
     expect(await page.evaluate(() => window.eval('ownerName(B.issues[1])'))).toBe('Morgan');
     const person=page.locator('#agents .agent').filter({hasText:'Morgan'});
     expect(await person.locator('.nums').textContent()).toContain('2 overdue');

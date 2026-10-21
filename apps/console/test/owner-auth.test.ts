@@ -33,7 +33,7 @@ import type { SessionPort } from '../src/web/ports/session-port.js';
 
 const USER = 'owner-test';
 const NEW_PASSWORD = 'synthetic-correct-horse-42';
-const AGENT = 'aaaaaaaa-0000-4000-8000-000000000001';
+const AGENT = '0000002d-0035-4000-8000-000000000047';
 
 describe('TOTP primitives', () => {
   it('matches the RFC 6238 SHA-1 test vectors', () => {
@@ -94,7 +94,7 @@ describe('owner sign-in', () => {
   const sessions = new Map<string, unknown>([[AGENT, { id: AGENT, owner: undefined }]]);
 
   async function build(policy?: 'off' | 'log' | 'enforce') {
-    if (policy) await admin.setPolicy(store, policy);
+    if (policy) await admin.setPolicy(store, policy, { forceLockoutRisk: true }); // setup: the lockout guard has its own tests
     service = new OwnerAuthService({ store, auditFile: join(dir, 'audit.jsonl'), now: () => clock });
     app = Fastify();
     await app.register(fastifyCookie);
@@ -102,7 +102,7 @@ describe('owner sign-in', () => {
       service,
       ctx: { sessions } as unknown as SessionPort,
       isCapabilityRequest: (req) => (req.url ?? '').startsWith('/q/'),
-      relations: { known: () => true, related: (caller, target) => caller === target, upward: () => false, keeper: () => false },
+      relations: { known: () => true, related: (caller, target) => caller === target, upward: () => false, keeper: () => false, admin: () => false },
       now: () => clock,
     });
     registerOwnerRoutes(app, service, false);
@@ -203,7 +203,7 @@ describe('owner sign-in', () => {
 
   it('rejects weak new passwords with a reason', async () => {
     const restricted = cookie(await login(oneTime))!;
-    for (const weak of ['aaaaaaaaaaaaaaaa', 'Password1234!xyz', 'qwerty-Lucid-77', 'abab-abab-abab']) {
+    for (const weak of ['0000002d0000002d', 'Password1234!xyz', 'qwerty-Workspace-77', 'abab-abab-abab']) {
       const res = await app.inject({
         method: 'POST',
         url: '/api/owner/password',

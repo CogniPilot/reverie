@@ -254,7 +254,7 @@ export class EmbassyPairing {
   }
 
   /** Admission is serialized before a handle exists, so two racing sends of one clientRequestId share one handle
-   * (Kit, r2 PASS note 2). The record is durable, token included, before the first network call. */
+   * (Inspector, r2 PASS note 2). The record is durable, token included, before the first network call. */
   async create(owner: string | undefined, input: z.infer<typeof EmbassyPairingCreateSchema>) {
     const record = await this.admit(owner, input);
     const gen = record.generation;
@@ -357,7 +357,7 @@ export class EmbassyPairing {
       } catch {
         return this.unconfirmed(r);
       }
-      // One write commits the request and drops the token. A recovered request keeps its real state (Kit, r2 note 1).
+      // One write commits the request and drops the token. A recovered request keeps its real state (Inspector, r2 note 1).
       r.requestId = a.requestId;
       r.code = code;
       r.roomName = a.roomName;
@@ -368,7 +368,7 @@ export class EmbassyPairing {
       delete r.token;
       await this.save(r);
       // The committed request stays recorded for the cancel; a cancel begun since this operation was asked for stops
-      // it here, before any claim (STAN-PAIR-CANCEL-BARRIER).
+      // it here, before any claim (VERIFIER-PAIR-CANCEL-BARRIER).
       if (this.fenced(r, gen)) return;
       if (a.state === 'approved' || a.state === 'claimed') await this.afterStatus(r, a.state, gen);
       return;

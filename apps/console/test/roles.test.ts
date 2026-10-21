@@ -13,14 +13,14 @@ beforeEach(() => {
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
 const OWNER: Actor = { owner: true };
-const ADMIN: Actor = { employeeId: 'burt' };
+const ADMIN: Actor = { employeeId: 'reviewer' };
 const MOD: Actor = { employeeId: 'mod' };
-const LEAD: Actor = { employeeId: 'mira', lead: true, memberId: 'mira-m' };
-const PLAIN: Actor = { employeeId: 'otto', memberId: 'otto-m' };
+const LEAD: Actor = { employeeId: 'planner', lead: true, memberId: 'planner-m' };
+const PLAIN: Actor = { employeeId: 'coordinator', memberId: 'coordinator-m' };
 const SHELL: Actor = {};
 
 async function store(): Promise<RolesStore> {
-  const s = new RolesStore(file, [{ employeeId: 'burt', roleId: 'admin' }, { employeeId: 'jinx', roleId: 'admin' }, { employeeId: 'mod', roleId: 'moderator' }]);
+  const s = new RolesStore(file, [{ employeeId: 'reviewer', roleId: 'admin' }, { employeeId: 'worker', roleId: 'admin' }, { employeeId: 'mod', roleId: 'moderator' }]);
   await s.init();
   return s;
 }
@@ -31,7 +31,7 @@ describe('roles store', () => {
     expect(statSync(file).mode & 0o777).toBe(0o600);
     const again = new RolesStore(file, [{ employeeId: 'someone-else', roleId: 'admin' }]);
     await again.init();
-    expect(again.assignedRole('burt').id).toBe('admin');
+    expect(again.assignedRole('reviewer').id).toBe('admin');
     expect(again.assignedRole('someone-else').id).toBe('member'); // seeds apply only when the file is new
     expect(JSON.parse(readFileSync(file, 'utf8')).roles.map((r: { id: string }) => r.id)).toEqual(['admin', 'moderator', 'lead', 'member']);
   });
@@ -51,7 +51,7 @@ describe('roles store', () => {
   it('Lead holds what Moderator lacks, only where it holds the seat', async () => {
     const s = await store();
     expect(s.can(LEAD, 'room.settings')).toBe(true);
-    expect(s.can({ employeeId: 'mira' }, 'room.settings')).toBe(false); // same person in a room it does not lead
+    expect(s.can({ employeeId: 'planner' }, 'room.settings')).toBe(false); // same person in a room it does not lead
     expect(s.can(MOD, 'room.settings')).toBe(false);
   });
 
@@ -74,7 +74,7 @@ describe('roles store', () => {
     const s = await store();
     const room: RoomOverride[] = [
       { target: { kind: 'role', id: 'member' }, allow: [], deny: ['messages.post'] },
-      { target: { kind: 'member', id: 'otto-m' }, allow: ['messages.post', 'pins.manage'], deny: [] },
+      { target: { kind: 'member', id: 'coordinator-m' }, allow: ['messages.post', 'pins.manage'], deny: [] },
     ];
     expect(s.can(PLAIN, 'messages.post', room)).toBe(true);
     expect(s.can(PLAIN, 'pins.manage', room)).toBe(true);
@@ -92,15 +92,15 @@ describe('roles store', () => {
 
   it('override edits cannot escalate', async () => {
     const s = await store();
-    const memberTarget = { kind: 'member' as const, id: 'otto-m' };
+    const memberTarget = { kind: 'member' as const, id: 'coordinator-m' };
     // a Lead may grant what it holds to a lower-ranked member
     expect(s.checkOverrideEdit(LEAD, { target: memberTarget, allow: ['pins.manage'], deny: [], targetRank: 0 })).toEqual({ ok: true, setByRank: 40 });
     // not what it lacks
     expect(s.checkOverrideEdit(LEAD, { target: memberTarget, allow: ['emotes.remove'], deny: [], targetRank: 0 }).ok).toBe(false);
     // not against an Admin
-    expect(s.checkOverrideEdit(LEAD, { target: { kind: 'member', id: 'burt-m' }, allow: [], deny: ['messages.post'], targetRank: s.rankOf(ADMIN) }).ok).toBe(false);
+    expect(s.checkOverrideEdit(LEAD, { target: { kind: 'member', id: 'reviewer-m' }, allow: [], deny: ['messages.post'], targetRank: s.rankOf(ADMIN) }).ok).toBe(false);
     // not on its own member override
-    expect(s.checkOverrideEdit(LEAD, { target: { kind: 'member', id: 'mira-m' }, allow: ['pins.manage'], deny: [], targetRank: 0 }).ok).toBe(false);
+    expect(s.checkOverrideEdit(LEAD, { target: { kind: 'member', id: 'planner-m' }, allow: ['pins.manage'], deny: [], targetRank: 0 }).ok).toBe(false);
     // not a server-level permission
     expect(s.checkOverrideEdit(ADMIN, { target: memberTarget, allow: ['roles.assign'], deny: [], targetRank: 0 }).ok).toBe(false);
     // a Member cannot edit at all; the Owner can
@@ -119,12 +119,12 @@ describe('roles store', () => {
 
   it('assign and unassign persist, report before/after, and reject an unknown role', async () => {
     const s = await store();
-    expect(await s.assign('otto', 'moderator')).toEqual({ before: null, after: 'moderator' });
+    expect(await s.assign('coordinator', 'moderator')).toEqual({ before: null, after: 'moderator' });
     const again = new RolesStore(file);
     await again.init();
-    expect(again.assignedRole('otto').id).toBe('moderator');
-    expect(await s.assign('otto', null)).toEqual({ before: 'moderator', after: null });
-    await expect(s.assign('otto', 'nope')).rejects.toThrow(/No such role/);
+    expect(again.assignedRole('coordinator').id).toBe('moderator');
+    expect(await s.assign('coordinator', null)).toEqual({ before: 'moderator', after: null });
+    await expect(s.assign('coordinator', 'nope')).rejects.toThrow(/No such role/);
   });
 
   it('locked roles always come from the code, so an edited file cannot widen them', async () => {
@@ -174,10 +174,10 @@ describe('roles store', () => {
 
   it('plans.view_all counts the Lead seat of any room; room permissions still need this room', async () => {
     const s = await store();
-    const leadElsewhere: Actor = { employeeId: 'mira', leadOfAny: true };
+    const leadElsewhere: Actor = { employeeId: 'planner', leadOfAny: true };
     expect(s.can(leadElsewhere, 'plans.view_all')).toBe(true);
     expect(s.can(leadElsewhere, 'room.settings')).toBe(false);
-    expect(s.can({ employeeId: 'otto' }, 'plans.view_all')).toBe(false);
+    expect(s.can({ employeeId: 'coordinator' }, 'plans.view_all')).toBe(false);
   });
 
   it('custom roles from the file are validated: rank below Owner, known permissions, no owner id', async () => {

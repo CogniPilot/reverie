@@ -233,7 +233,8 @@ export async function spendRebootRestore(
         // OpenCode resumes from its own config (`--session <thread>`), never from the
         // Claude-style resume id, which for it would name a Codeman id.
         resumeSessionId: nativeOpenCodeThread(saved) ? undefined : entry.resumeConversationId,
-        openCodeConfig: saved.mode === 'opencode' ? saved.openCodeConfig : undefined,
+        // Kept whatever the mode, as on recovery: a session switched off OpenCode still owns its thread.
+        openCodeConfig: saved.openCodeConfig,
         // Re-resolved against the owner's CURRENT grant, never replayed from the
         // record: a grant held when the record was written may be gone now.
         subscriptionProfile: saved.subscriptionProfile,

@@ -14,9 +14,9 @@ import { ChatFileStore } from '../../src/chatroom-files.js';
 import { registerChatroomRoutes } from '../../src/web/routes/chatroom-routes.js';
 import { accentHue, loadChatrooms, normalizeIcon } from '../../src/chatroom-store.js';
 
-const A = 'aaaaaaaa-0000-4000-8000-000000000001';
-const B = 'bbbbbbbb-0000-4000-8000-000000000002';
-const C = 'cccccccc-0000-4000-8000-000000000003';
+const A = '0000002d-0035-4000-8000-000000000047';
+const B = '00000038-0043-4000-8000-000000000060';
+const C = '0000003e-004c-4000-8000-00000000006f';
 
 describe('chatroom routes', () => {
   let app: FastifyInstance;
@@ -230,7 +230,7 @@ describe('chatroom routes', () => {
       await createRoom(); // A and B are plain members
       expect((await asAgent(A, { name: 'Nope' })).statusCode).toBe(403);
       expect((await asAgent(B, { name: 'Nope' })).statusCode).toBe(403);
-      const lone = createMockSession('dddddddd-0000-4000-8000-000000000004');
+      const lone = createMockSession('00000043-0053-4000-8000-00000000007a');
       ctx.sessions.set(lone.id, lone as never);
       expect((await asAgent(lone.id, { name: 'Nope' })).statusCode).toBe(403);
       expect(service.rooms().map((r) => r.name)).toEqual(['Fleet']);
@@ -247,7 +247,7 @@ describe('chatroom routes', () => {
 
     it('creates nothing when a member is unknown', async () => {
       await createRoom();
-      const res = await asAgent(C, { name: 'Ghost', members: [{ sessionId: 'eeeeeeee-0000-4000-8000-00000000dead' }] });
+      const res = await asAgent(C, { name: 'Ghost', members: [{ sessionId: '00000046-0058-4000-8000-000000000089' }] });
       expect(res.statusCode).toBeGreaterThanOrEqual(400);
       expect(service.rooms().map((r) => r.name)).toEqual(['Fleet']);
     });
@@ -321,7 +321,7 @@ describe('chatroom routes', () => {
 
   it('never lets a shell session receive room text: refused, or post-only when the user adds it', async () => {
     const id = await createRoom();
-    const W = 'dddddddd-0000-4000-8000-00000000000d';
+    const W = '00000043-0053-4000-8000-00000000007c';
     const watcher = createMockSession(W);
     watcher.name = 'watcher';
     watcher.mode = 'shell';
@@ -369,7 +369,7 @@ describe('chatroom routes', () => {
 
   it('never lets a post-only or non-agent member lead, and never briefs a post-only member', async () => {
     const id = await createRoom();
-    const D = 'dddddddd-0000-4000-8000-00000000000e';
+    const D = '00000043-0053-4000-8000-00000000007d';
     const listener = createMockSession(D);
     listener.name = 'listener';                                    // an agent pane, added as post-only
     ctx.sessions.set(D, listener as never);
@@ -399,7 +399,7 @@ describe('chatroom routes', () => {
 
   it('refuses a requireAgent post whose caller session does not resolve instead of posting as the user', async () => {
     const id = await createRoom();
-    for (const headers of [{}, { 'x-codeman-parent-session': 'eeeeeeee-0000-4000-8000-000000000005' }]) {
+    for (const headers of [{}, { 'x-codeman-parent-session': '00000046-0058-4000-8000-000000000084' }]) {
       const res = await app.inject({
         method: 'POST',
         url: `/api/chatrooms/${id}/messages`,
@@ -432,13 +432,13 @@ describe('chatroom routes', () => {
     expect(bad.json().data.toIgnored).toBe(true);
     expect(bad.json().data.message.to).toBe('all');
     ctx.sessions.set(
-      'dddddddd-0000-4000-8000-000000000004',
-      createMockSession('dddddddd-0000-4000-8000-000000000004') as never
+      '00000043-0053-4000-8000-00000000007a',
+      createMockSession('00000043-0053-4000-8000-00000000007a') as never
     );
     const outsider = await app.inject({
       method: 'POST',
       url: `/api/chatrooms/${id}/messages`,
-      headers: { 'x-codeman-parent-session': 'dddddddd-0000-4000-8000-000000000004' },
+      headers: { 'x-codeman-parent-session': '00000043-0053-4000-8000-00000000007a' },
       payload: { text: 'let me in' },
     });
     expect(outsider.statusCode).toBe(404); // a private channel is not there for a session outside it
@@ -717,9 +717,9 @@ describe('chatroom routes', () => {
 });
 
 describe('chatroom creation by a coordinator in multi-user mode', () => {
-  const ALICE_LEAD = 'aaaaaaaa-1111-4000-8000-000000000001';
-  const ALICE_WORKER = 'aaaaaaaa-1111-4000-8000-000000000002';
-  const BOB_WORKER = 'bbbbbbbb-1111-4000-8000-000000000003';
+  const ALICE_LEAD = '0000002d-0036-4000-8000-00000000004d';
+  const ALICE_WORKER = '0000002d-0036-4000-8000-00000000004e';
+  const BOB_WORKER = '00000038-0044-4000-8000-000000000063';
   let app: FastifyInstance;
   let service: ChatroomService;
   let previous: string | undefined;

@@ -143,7 +143,7 @@ describe('types utility functions', () => {
     });
 
     it('should handle UUID-style session ID', () => {
-      const uuid = 'a1b2c3d4-e5f6-7890-abcd-ef1234567890';
+      const uuid = '00000027-002f-4000-8000-00000000003f';
       const state = createInitialRalphSessionState(uuid);
       expect(state.sessionId).toBe(uuid);
     });

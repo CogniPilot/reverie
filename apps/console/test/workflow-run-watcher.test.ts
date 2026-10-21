@@ -14,7 +14,7 @@ import { WorkflowRunWatcher } from '../src/workflow-run-watcher.js';
 import type { WorkflowRunInfo } from '../src/types/workflow-run.js';
 
 const PROJECT_HASH = '-home-arkon-default-claudeman';
-const SESSION_UUID = '388113c8-cd01-4e80-93a8-3be66ab1519b';
+const SESSION_UUID = '00000010-0015-4000-8000-00000000001e';
 const RUN_ID = 'wf_test1234-abc';
 
 /**

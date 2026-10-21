@@ -325,7 +325,7 @@ describe('POST /api/quick-start workspace hooks', () => {
   it.each(['codex', 'gemini'] as const)('does not pass a saved Claude conversation id to Docker %s', async (mode) => {
     const ws = await mkdtemp(join(tmpdir(), `codeman-docker-${mode}-`));
     try {
-      await writeDockerFixtures('dockexternal', ws, 'e83a9063-3cb4-44d2-a9a0-df153b81721f');
+      await writeDockerFixtures('dockexternal', ws, '00000045-0057-4000-8000-000000000083');
 
       const res = await quickStart({ caseName: 'dockexternal', mode });
       expect(res.statusCode).toBe(200);
@@ -338,7 +338,7 @@ describe('POST /api/quick-start workspace hooks', () => {
 
   it('passes a saved Claude conversation id only to Docker Claude', async () => {
     const ws = await mkdtemp(join(tmpdir(), 'codeman-docker-resume-'));
-    const resumeId = 'e83a9063-3cb4-44d2-a9a0-df153b81721f';
+    const resumeId = '00000045-0057-4000-8000-000000000083';
     try {
       await writeDockerFixtures('dockresume', ws, resumeId);
 

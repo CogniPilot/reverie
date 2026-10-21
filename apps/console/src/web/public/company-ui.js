@@ -3,7 +3,7 @@ Object.assign(CodemanApp.prototype, {
   async _companyApi(path, method = 'GET', body) {
     const response = await this._api(`/api/company${path}`, {
       method,
-      ...(body === undefined ? {} : { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
+      ...(body === undefined ? {} : { body }),
     });
     if (!response) throw new Error('Connection unavailable');
     const result = await response.json();
@@ -12,6 +12,11 @@ Object.assign(CodemanApp.prototype, {
   },
 
   async openCompany(roomId) {
+    if (this._chatApp?.built && this._chatApp.openCompany) return this._chatApp.openCompany();
+    return this.openLegacyCompany(roomId);
+  },
+
+  async openLegacyCompany(roomId) {
     if (!this._companyPanel) {
       const panel = document.createElement('dialog');
       panel.setAttribute('aria-label', 'Company agents');

@@ -6,8 +6,8 @@ import { describe, expect, it } from 'vitest';
 import { agentChatSay, resolveChatRoom, type AgentDeps, type RequestOptions } from '../src/cli-agent.js';
 
 const ROOMS = [
-  { id: 'room-aaaa', name: 'Break Room', members: [] },
-  { id: 'room-bbbb', name: 'Slam Web', members: [] },
+  { id: 'room-aaaa', name: 'lounge', members: [] },
+  { id: 'room-bbbb', name: 'demo', members: [] },
   { id: 'room-cccc', name: 'Platform', members: [] },
 ];
 
@@ -15,7 +15,7 @@ function deps(lastDelivery: { roomIds: string[] } | null | undefined, rooms = RO
   const calls: RequestOptions[] = [];
   const err: string[] = [];
   const d: AgentDeps = {
-    ctx: { apiUrl: 'http://127.0.0.1:3000', selfId: 'aaaaaaaa-0000-4000-8000-000000000001' },
+    ctx: { apiUrl: 'http://127.0.0.1:3000', selfId: '0000002d-0035-4000-8000-000000000047' },
     json: false,
     io: { out: () => {}, err: (m: string) => void err.push(m) },
     request: async (_ctx, options) => {
@@ -35,22 +35,22 @@ describe('chat verbs with no --room', () => {
     const { d, err } = deps({ roomIds: ['room-bbbb'] });
     const target = await resolveChatRoom(d, undefined);
     expect(target).toEqual({ room: ROOMS[1] });
-    expect(plain(err)).toContain('using "Slam Web", the room you were last addressed in');
+    expect(plain(err)).toContain('using "demo", the room you were last addressed in');
   });
 
   it('a prompt that bundled several rooms is not guessed: it asks for --room and lists the bundle and all the rooms', async () => {
     const { d } = deps({ roomIds: ['room-aaaa', 'room-bbbb'] });
     const target = await resolveChatRoom(d, undefined);
     expect('error' in target && target.error).toContain('3 chatrooms');
-    expect('error' in target && target.error).toContain('bundled messages from "Break Room" and "Slam Web"');
-    expect('error' in target && target.error).toContain('pick one with --room ("Break Room", "Slam Web", "Platform")');
+    expect('error' in target && target.error).toContain('bundled messages from "lounge" and "demo"');
+    expect('error' in target && target.error).toContain('pick one with --room ("lounge", "demo", "Platform")');
   });
 
   it('with no delivery yet, or one from a room the session is no longer in, it keeps the plain error', async () => {
     for (const last of [undefined, null, { roomIds: [] }, { roomIds: ['room-gone'] }]) {
       const { d } = deps(last as never);
       const target = await resolveChatRoom(d, undefined);
-      expect('error' in target && target.error).toBe('this session is in 3 chatrooms; pick one with --room ("Break Room", "Slam Web", "Platform")');
+      expect('error' in target && target.error).toBe('this session is in 3 chatrooms; pick one with --room ("lounge", "demo", "Platform")');
     }
   });
 
@@ -64,12 +64,12 @@ describe('chat verbs with no --room', () => {
 
   it('a delivered DM header name (DM:<roomId>) resolves to exactly that direct message, never by its shared label', async () => {
     const dms = [
-      { id: 'dddddddd-0000-4000-8000-0000000000d1', name: '', kind: 'dm', dm: ['user', 'x'], members: [] },
-      { id: 'dddddddd-0000-4000-8000-0000000000d2', name: '', kind: 'dm', dm: ['user', 'y'], members: [] },
+      { id: '00000043-0053-4000-8000-00000000007e', name: '', kind: 'dm', dm: ['user', 'x'], members: [] },
+      { id: '00000043-0053-4000-8000-00000000007f', name: '', kind: 'dm', dm: ['user', 'y'], members: [] },
     ];
     const { d } = deps(null, [...ROOMS, ...dms] as never);
-    expect(await resolveChatRoom(d, 'DM:dddddddd-0000-4000-8000-0000000000d2')).toEqual({ room: dms[1] });
-    expect(await resolveChatRoom(d, 'dm:dddddddd-0000-4000-8000-0000000000d1')).toEqual({ room: dms[0] });
+    expect(await resolveChatRoom(d, 'DM:00000043-0053-4000-8000-00000000007f')).toEqual({ room: dms[1] });
+    expect(await resolveChatRoom(d, 'dm:00000043-0053-4000-8000-00000000007e')).toEqual({ room: dms[0] });
     expect(await resolveChatRoom(d, 'Direct message')).toMatchObject({ error: expect.stringMatching(/matches 2 chatrooms/) });
   });
 

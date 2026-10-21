@@ -38,7 +38,7 @@ Note: Teammate transcripts appear in the **standard subagent directory** under t
     "description": "Team description...",
     "createdAt": 1770875105373,
     "leadAgentId": "team-lead@research-watchers",
-    "leadSessionId": "461daa80-94ec-4e5e-a1bb-0518f78311bc",
+    "leadSessionId": "00000014-001a-4000-8000-000000000024",
     "members": [
         {
             "agentId": "team-lead@research-watchers",

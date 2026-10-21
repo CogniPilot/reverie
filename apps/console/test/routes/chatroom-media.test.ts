@@ -13,7 +13,7 @@ import { ChatroomService } from '../../src/chatroom-service.js';
 import { ChatFileStore, safeFileName } from '../../src/chatroom-files.js';
 import { registerChatroomRoutes } from '../../src/web/routes/chatroom-routes.js';
 
-const A = 'aaaaaaaa-0000-4000-8000-000000000001';
+const A = '0000002d-0035-4000-8000-000000000047';
 const PNG = Buffer.from('89504e470d0a1a0a0000000d49484452', 'hex');
 
 describe('chatroom media', () => {

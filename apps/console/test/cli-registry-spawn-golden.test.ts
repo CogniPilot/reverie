@@ -27,7 +27,7 @@ import { buildSpawnCommandFromRegistry, type SpawnBridgeOptions } from '../src/s
 import { CODEX_REASONING_EFFORTS } from '../src/types/session.js';
 
 /** A fixed session id, so `--session-id` is stable across runs. */
-const SID = '0f9c2b14-1111-2222-3333-444455556666';
+const SID = '00000008-0008-4000-8000-000000000008';
 
 function render(options: SpawnBridgeOptions): string | undefined {
   const entry = getCli(options.mode);
@@ -42,16 +42,16 @@ function claude(extra: Partial<SpawnBridgeOptions> = {}): string | undefined {
 
 describe('claude', () => {
   it('defaults to skip-permissions plus a new session id', () => {
-    expect(claude()).toBe('claude --dangerously-skip-permissions --session-id "0f9c2b14-1111-2222-3333-444455556666"');
+    expect(claude()).toBe('claude --dangerously-skip-permissions --session-id "00000008-0008-4000-8000-000000000008"');
   });
 
   it('maps each permission mode', () => {
     expect(claude({ claudeMode: 'auto' })).toBe(
-      'claude --permission-mode auto --session-id "0f9c2b14-1111-2222-3333-444455556666"'
+      'claude --permission-mode auto --session-id "00000008-0008-4000-8000-000000000008"'
     );
-    expect(claude({ claudeMode: 'normal' })).toBe('claude --session-id "0f9c2b14-1111-2222-3333-444455556666"');
+    expect(claude({ claudeMode: 'normal' })).toBe('claude --session-id "00000008-0008-4000-8000-000000000008"');
     expect(claude({ claudeMode: 'allowedTools', allowedTools: 'Bash(git:*), Read' })).toBe(
-      'claude --allowedTools "Bash(git:*), Read" --session-id "0f9c2b14-1111-2222-3333-444455556666"'
+      'claude --allowedTools "Bash(git:*), Read" --session-id "00000008-0008-4000-8000-000000000008"'
     );
   });
 
@@ -61,10 +61,10 @@ describe('claude', () => {
     // quoted, and Claude's option parser takes the word after `--model` as its value whatever
     // it starts with, so it can never become a flag of its own.
     expect(claude({ model: 'claude-fable-5-1' })).toBe(
-      'claude --dangerously-skip-permissions --session-id "0f9c2b14-1111-2222-3333-444455556666" --model "claude-fable-5-1"'
+      'claude --dangerously-skip-permissions --session-id "00000008-0008-4000-8000-000000000008" --model "claude-fable-5-1"'
     );
     expect(claude({ model: '--dangerously-skip-permissions' })).toBe(
-      'claude --dangerously-skip-permissions --session-id "0f9c2b14-1111-2222-3333-444455556666" ' +
+      'claude --dangerously-skip-permissions --session-id "00000008-0008-4000-8000-000000000008" ' +
         '--model "--dangerously-skip-permissions"'
     );
   });
@@ -74,16 +74,16 @@ describe('claude', () => {
     // text. This pin is what proves the fallback chain still renders as one command line.
     expect(claude({ resumeSessionId: 'abc-123-def' })).toBe(
       'claude --dangerously-skip-permissions --resume "abc-123-def" || ' +
-        'claude --dangerously-skip-permissions --session-id "0f9c2b14-1111-2222-3333-444455556666"'
+        'claude --dangerously-skip-permissions --session-id "00000008-0008-4000-8000-000000000008"'
     );
   });
 
   it('carries effort as a flag, and ultracode as a settings blob', () => {
     expect(claude({ effort: 'max' })).toBe(
-      'claude --dangerously-skip-permissions --session-id "0f9c2b14-1111-2222-3333-444455556666" --effort \'max\''
+      'claude --dangerously-skip-permissions --session-id "00000008-0008-4000-8000-000000000008" --effort \'max\''
     );
     expect(claude({ effort: 'ultracode' })).toBe(
-      'claude --dangerously-skip-permissions --session-id "0f9c2b14-1111-2222-3333-444455556666" ' +
+      'claude --dangerously-skip-permissions --session-id "00000008-0008-4000-8000-000000000008" ' +
         '--settings \'{"ultracode":true}\''
     );
   });
@@ -91,15 +91,15 @@ describe('claude', () => {
   it('gates --name on the CLI version, failing closed when it is unknown', () => {
     const named = { sessionName: 'w1 alpha' };
     expect(claude({ ...named, claudeCliVersion: '2.1.226' })).toBe(
-      'claude --dangerously-skip-permissions --session-id "0f9c2b14-1111-2222-3333-444455556666" --name "w1 alpha"'
+      'claude --dangerously-skip-permissions --session-id "00000008-0008-4000-8000-000000000008" --name "w1 alpha"'
     );
     expect(claude({ ...named, claudeCliVersion: '2.1.223' })).toBe(
-      'claude --dangerously-skip-permissions --session-id "0f9c2b14-1111-2222-3333-444455556666"'
+      'claude --dangerously-skip-permissions --session-id "00000008-0008-4000-8000-000000000008"'
     );
     // Unknown version satisfies NO gate. A version probe that fails must not silently
     // upgrade behaviour.
     expect(claude({ ...named, claudeCliVersion: null })).toBe(
-      'claude --dangerously-skip-permissions --session-id "0f9c2b14-1111-2222-3333-444455556666"'
+      'claude --dangerously-skip-permissions --session-id "00000008-0008-4000-8000-000000000008"'
     );
   });
 });
@@ -130,32 +130,40 @@ describe('codex', () => {
     render({ mode: 'codex', sessionId: SID, codexConfig });
 
   it('spawns bare by default', () => {
-    expect(cx()).toBe('codex');
+    expect(cx()).toBe('codex --no-daemon');
+  });
+
+  it('always runs its own app server, never the shared daemon (i-5e8b6439)', () => {
+    // A shared daemon per CODEX_HOME hands its tool children the env of whichever session
+    // started it, so another session's CODEMAN_SESSION_ID leaked into this one's tools.
+    for (const cfg of [undefined, { dangerouslyBypassApprovals: true }, { model: 'gpt-5', resumeSessionId: 'roll_42' }]) {
+      expect(cx(cfg).split(' ').slice(0, 2)).toEqual(['codex', '--no-daemon']);
+    }
   });
 
   it('emits the bypass flag only when asked', () => {
-    expect(cx({ dangerouslyBypassApprovals: true })).toBe('codex --dangerously-bypass-approvals-and-sandbox');
-    expect(cx({ dangerouslyBypassApprovals: false })).toBe('codex');
+    expect(cx({ dangerouslyBypassApprovals: true })).toBe('codex --no-daemon --dangerously-bypass-approvals-and-sandbox');
+    expect(cx({ dangerouslyBypassApprovals: false })).toBe('codex --no-daemon');
   });
 
   it('sends animations as an explicit true/false config pair', () => {
-    expect(cx({ animations: true })).toBe('codex --config tui.animations=true');
-    expect(cx({ animations: false })).toBe('codex --config tui.animations=false');
+    expect(cx({ animations: true })).toBe('codex --no-daemon --config tui.animations=true');
+    expect(cx({ animations: false })).toBe('codex --no-daemon --config tui.animations=false');
   });
 
   it('resumes with a POSITIONAL subcommand, not a flag', () => {
-    expect(cx({ model: 'gpt-5', resumeSessionId: 'roll_42' })).toBe('codex --model gpt-5 resume roll_42');
+    expect(cx({ model: 'gpt-5', resumeSessionId: 'roll_42' })).toBe('codex --no-daemon --model gpt-5 resume roll_42');
   });
 
   it('sends reasoning effort as one model_reasoning_effort config value, for every level', () => {
     for (const level of CODEX_REASONING_EFFORTS) {
-      expect(cx({ reasoningEffort: level })).toBe(`codex --config model_reasoning_effort=${level}`);
+      expect(cx({ reasoningEffort: level })).toBe(`codex --no-daemon --config model_reasoning_effort=${level}`);
     }
   });
 
   it('keeps reasoning effort ahead of the resume subcommand', () => {
     expect(cx({ model: 'gpt-5', reasoningEffort: 'high', resumeSessionId: 'roll_42' })).toBe(
-      'codex --model gpt-5 --config model_reasoning_effort=high resume roll_42'
+      'codex --no-daemon --model gpt-5 --config model_reasoning_effort=high resume roll_42'
     );
   });
 });
@@ -220,9 +228,9 @@ describe('pi', () => {
   });
 
   it('prefers an explicit session id over -c', () => {
-    expect(pi({ resumeSessionId: '0f9c2b14' })).toBe('pi --session 0f9c2b14');
+    expect(pi({ resumeSessionId: '00000008' })).toBe('pi --session 00000008');
     expect(pi({ continueSession: true })).toBe('pi -c');
-    expect(pi({ continueSession: true, resumeSessionId: '0f9c2b14' })).toBe('pi --session 0f9c2b14');
+    expect(pi({ continueSession: true, resumeSessionId: '00000008' })).toBe('pi --session 00000008');
   });
 });
 

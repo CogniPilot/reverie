@@ -11,9 +11,9 @@ import { buildDeliveryBatch, deliveryRoomName, renderForRecipient } from '../src
 import { USER_RECIPIENT } from '../src/chatroom-store.js';
 
 const FIXTURE = join(import.meta.dirname, 'fixtures', 'delivery-lines.json');
-const ME = 'aaaaaaaa-0000-4000-8000-000000000001';
-const PEER = 'bbbbbbbb-0000-4000-8000-000000000002';
-const DM_ID = 'dddddddd-0000-4000-8000-0000000000d1';
+const ME = '0000002d-0035-4000-8000-000000000047';
+const PEER = '00000038-0043-4000-8000-000000000060';
+const DM_ID = '00000043-0053-4000-8000-00000000007e';
 const AT = Date.UTC(2026, 9, 17, 14, 31);
 
 type Room = { id: string; name: string; kind?: 'dm'; dm?: string[]; members: Array<{ sessionId: string; role: string }>; messages: [] };

@@ -321,6 +321,30 @@ export class PlanService {
       .catch(() => {});
   }
 
+  private async sessionsByAccount(catalogue: PlanAccount[]): Promise<Map<string, PlanSession[]>> {
+    const assigned = new Map<string, PlanSession[]>();
+    for (const session of this.deps.sessions()) {
+      const account = await accountForSession(session, catalogue);
+      if (!account) continue;
+      const members = assigned.get(account.id) ?? [];
+      members.push({ id: session.id, name: session.name, mode: session.mode, status: session.status });
+      assigned.set(account.id, members);
+    }
+    return assigned;
+  }
+
+  async allocations(): Promise<{ generatedAt: number; accounts: Array<{ id: string; sessionIds: string[] }> }> {
+    const catalogue = await planCatalogue(this.deps.home);
+    const assigned = await this.sessionsByAccount(catalogue);
+    return {
+      generatedAt: this.now(),
+      accounts: catalogue.map((account) => ({
+        id: account.id,
+        sessionIds: (assigned.get(account.id) ?? []).map((session) => session.id),
+      })),
+    };
+  }
+
   /** Every account with its pace and sessions; records one usage sample per account. */
   async rows(): Promise<{ accounts: PlanRow[]; catalogue: PlanAccount[] }> {
     const catalogue = await planCatalogue(this.deps.home);
@@ -340,14 +364,7 @@ export class PlanService {
         )
       )
     );
-    const sessionsByAccount = new Map<string, PlanSession[]>();
-    for (const s of this.deps.sessions()) {
-      const account = await accountForSession(s, catalogue);
-      if (!account) continue;
-      const list = sessionsByAccount.get(account.id) ?? [];
-      list.push({ id: s.id, name: s.name, mode: s.mode, status: s.status });
-      sessionsByAccount.set(account.id, list);
-    }
+    const sessionsByAccount = await this.sessionsByAccount(catalogue);
     const coordinators = new Set(this.deps.coordinatorIds());
     let changed = false;
     const accounts = catalogue.map((a, i): PlanRow => {

@@ -1,7 +1,7 @@
 # Tile Grid: Design Spec
 
 **Status**: Merged for the 1.40.0 release as #560 (the TerminalTile foundation) and #561 (the grid). Where the "As built" section below differs from this spec, As built is authoritative. Builds on `docs/split-pane-sessions-plan.md`; the split pane stays.
-**Author**: Claude (planning session with the maintainer), 2026-10-06
+**Origin**: upstream design note, 2026-10-06
 **Branches**: developed as PR 1 `feat/terminal-tile` and PR 2 `feat/tile-grid` stacked on it, both merged
 **Scope**: v1 is fully designed here; follow-ups are named at the end and explicitly deferred.
 

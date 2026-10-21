@@ -1180,7 +1180,7 @@
   **Breaking: the `sc` tmux chooser is retired.** `scripts/tmux-chooser.sh` is deleted and `install.sh` no longer creates the `tmux-chooser` symlink or the `sc` alias; it sweeps both up instead, on update and on uninstall. `codeman tui` replaces it and does the job better: `sc` numbered its entries globally but only accepted a single `[1-9]` keypress, so sessions 10+ were listed and could not be selected, and it inferred nothing about what an agent was doing. The alias cleanup is marker-owned, matching the exact line the installer wrote, so a user's own `alias sc=` for another tool is untouched.
 
   **CLI polish that came with it.**
-  - New shared style kit (`src/cli-style.ts`) used across the CLI: semantic palette, glyphs, width-aware table, spinner, confirm.
+  - New shared style inspector (`src/cli-style.ts`) used across the CLI: semantic palette, glyphs, width-aware table, spinner, confirm.
   - `codeman doctor` is colorized and its table is measured, so the "Antigravity CLI" label no longer pushes its row out of column. `--json` output is unchanged.
   - `codeman web` no longer prints its "running at" line twice, and the server's non-loopback security warning is painted like the CLI's (chalk degrades off a TTY, so journald and `web.log` stay free of escape codes).
   - Spinners on the silent up-to-30s waits in `codeman web -d`, `codeman web --stop` and `codeman service install`.

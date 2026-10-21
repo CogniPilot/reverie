@@ -48,6 +48,10 @@ import {
   agentChatRooms,
   agentPlans,
   agentPlansShow,
+  routineAdd,
+  routineList,
+  routineRm,
+  routineRun,
   agentChatSay,
   agentChatVote,
   agentChatWho,
@@ -380,7 +384,7 @@ export function buildToolDefinitions(modes: readonly string[], options: { chat?:
       annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
     },
   ];
-  return options.chat ? [...sessionTools, ...PLANS_TOOL_DEFINITIONS, ...CHAT_TOOL_DEFINITIONS] : sessionTools;
+  return options.chat ? [...sessionTools, ...PLANS_TOOL_DEFINITIONS, ...ROUTINE_TOOL_DEFINITIONS, ...CHAT_TOOL_DEFINITIONS] : sessionTools;
 }
 
 const roomProperty = {
@@ -413,6 +417,55 @@ export const PLANS_TOOL_DEFINITIONS: ToolDefinition[] = [
       additionalProperties: false,
     },
     annotations: { readOnlyHint: true, openWorldHint: false },
+  },
+];
+
+/**
+ * Routine tools (opt-in with --chat). A routine is a message you schedule in a room you are in. The server records you as the
+ * author and labels every post; `botId`, `postAs` and `createdBy` are not arguments and are never read.
+ */
+export const ROUTINE_TOOL_DEFINITIONS: ToolDefinition[] = [
+  {
+    name: 'routine_add',
+    title: 'Schedule a routine message',
+    description:
+      'Schedule a message you post in a room you are in: every N minutes/hours/days (at least 5m), daily, or on weekdays. Give exactly one of every, daily, weekdays. Each post is labeled "routine". Employees only; at most 20 routines.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        text: { type: 'string', minLength: 1, maxLength: 2000, description: 'One line to post.' },
+        every: { type: 'string', description: 'Interval such as 30m, 2h or 1d (minimum 5m).' },
+        daily: { type: 'string', description: 'Time of day, HH:MM.' },
+        weekdays: { type: 'string', description: 'Time of day on Monday to Friday, HH:MM.' },
+        tz: { type: 'string', description: 'IANA time zone, for example America/New_York. Default: America/New_York.' },
+        name: { type: 'string', maxLength: 60, description: 'Optional label.' },
+        room: roomProperty,
+      },
+      required: ['text'],
+      additionalProperties: false,
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+  },
+  {
+    name: 'routine_list',
+    title: 'List routines',
+    description: 'List your routines. With all, also every routine\'s name, room and schedule (never other authors\' text).',
+    inputSchema: { type: 'object', properties: { all: { type: 'boolean', default: false } }, additionalProperties: false },
+    annotations: { readOnlyHint: true, openWorldHint: false },
+  },
+  {
+    name: 'routine_rm',
+    title: 'Delete a routine',
+    description: 'Delete one of your routines by id (the first 8 or more characters).',
+    inputSchema: { type: 'object', properties: { id: { type: 'string', minLength: 8, description: 'Routine id or prefix.' } }, required: ['id'], additionalProperties: false },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
+  },
+  {
+    name: 'routine_run',
+    title: 'Fire a routine now',
+    description: 'Post one of your routines immediately, once.',
+    inputSchema: { type: 'object', properties: { id: { type: 'string', minLength: 8, description: 'Routine id or prefix.' } }, required: ['id'], additionalProperties: false },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
   },
 ];
 
@@ -1067,6 +1120,29 @@ export function createToolRunner(deps: ToolRunnerDeps) {
         const closes = args.closes_in_minutes === undefined ? undefined : readInt(args, 'closes_in_minutes', 1, 1, 100_000);
         const room = readString(args, 'room', { max: 200 });
         return chatVerb((d) => agentChatPoll(d, { room, question, options, rec, multi, closesInMinutes: closes }), signal);
+      },
+      async routine_add(args: Record<string, unknown>, signal?: AbortSignal) {
+        const text = readString(args, 'text', { required: true, max: 2000 })!;
+        const room = readString(args, 'room', { max: 200 });
+        const every = readString(args, 'every', { max: 20 });
+        const daily = readString(args, 'daily', { max: 10 });
+        const weekdays = readString(args, 'weekdays', { max: 10 });
+        const tz = readString(args, 'tz', { max: 64 });
+        const name = readString(args, 'name', { max: 60 });
+        // botId, postAs and createdBy are not read: the server sets the author from the caller.
+        return chatVerb((d) => routineAdd(d, { room, text, every, daily, weekdays, tz, name }), signal);
+      },
+      async routine_list(args: Record<string, unknown>, signal?: AbortSignal) {
+        const all = readBool(args, 'all', false);
+        return chatVerb((d) => routineList(d, { all }), signal);
+      },
+      async routine_rm(args: Record<string, unknown>, signal?: AbortSignal) {
+        const id = readString(args, 'id', { required: true, max: 64 })!;
+        return chatVerb((d) => routineRm(d, { id }), signal);
+      },
+      async routine_run(args: Record<string, unknown>, signal?: AbortSignal) {
+        const id = readString(args, 'id', { required: true, max: 64 })!;
+        return chatVerb((d) => routineRun(d, { id }), signal);
       },
       async chat_vote(args: Record<string, unknown>, signal?: AbortSignal) {
         const id = readString(args, 'poll_id', { required: true, max: 64 })!;

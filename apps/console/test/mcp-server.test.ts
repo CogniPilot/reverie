@@ -36,10 +36,10 @@ const MODERN_META = {
   'io.modelcontextprotocol/clientCapabilities': {},
 };
 
-const SELF = 'aaaaaaaa-0000-0000-0000-000000000000';
-const MINE = 'bbbbbbbb-1111-1111-1111-111111111111';
-const USERS = 'cccccccc-2222-2222-2222-222222222222';
-const CHILD = 'dddddddd-3333-3333-3333-333333333333';
+const SELF = '0000002d-0035-4000-8000-000000000045';
+const MINE = '00000038-0044-4000-8000-000000000062';
+const USERS = '0000003e-004d-4000-8000-000000000073';
+const CHILD = '00000043-0054-4000-8000-000000000080';
 
 function config(overrides: Partial<McpConfig> = {}): McpConfig {
   return { apiUrl: 'http://127.0.0.1:9', allowAnySession: false, version: '0.0.0-test', ...overrides };
@@ -347,9 +347,9 @@ describe('who may be prompted, interrupted and deleted', () => {
     const { tools } = runner(config({ selfId: SELF }));
     const sessions = (await tools.run('list_sessions', {})).structured?.sessions as Array<Record<string, unknown>>;
     expect(sessions.map((s) => [s.short_id, s.you, s.controllable])).toEqual([
-      ['aaaaaaaa', true, false],
-      ['cccccccc', false, false],
-      ['dddddddd', false, true],
+      ['0000002d', true, false],
+      ['0000003e', false, false],
+      ['00000043', false, true],
     ]);
   });
 });
@@ -477,10 +477,10 @@ describe('the tools', () => {
   });
 
   it('refuses a session id shorter than 8 characters and an ambiguous prefix', async () => {
-    const twins = [{ id: 'eeeeeeee-1111-1111-1111-111111111111' }, { id: 'eeeeeeee-2222-2222-2222-222222222222' }];
+    const twins = [{ id: '00000046-0059-4000-8000-00000000008a' }, { id: '00000046-005a-4000-8000-00000000008b' }];
     const { tools } = runner(config(), fakeCodeman(twins));
     expect((await tools.run('read_output', { session_id: 'eeee' })).text).toContain('shorter than 8');
-    expect((await tools.run('read_output', { session_id: 'eeeeeeee' })).text).toContain('ambiguous');
+    expect((await tools.run('read_output', { session_id: '00000046' })).text).toContain('ambiguous');
   });
 });
 

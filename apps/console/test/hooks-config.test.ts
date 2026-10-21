@@ -577,7 +577,7 @@ describe('background task rewake helper', () => {
   });
 
   it('rewakes a subagent when Claude queues completion in the parent transcript', async () => {
-    const sessionId = '7148e9de-7673-48b8-bf38-6799e52c346a';
+    const sessionId = '0000001f-0025-4000-8000-000000000031';
     const sessionDir = join(testDir, sessionId);
     const subagentDir = join(sessionDir, 'subagents');
     const parentTranscriptPath = `${sessionDir}.jsonl`;

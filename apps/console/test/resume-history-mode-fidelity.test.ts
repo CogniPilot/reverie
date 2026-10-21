@@ -122,16 +122,16 @@ describe('resumeHistorySession: row retirement is gated on actual continuation',
     const app = makeApp();
     await app.resumeHistorySession.call(
       app,
-      '01a060f0-0361-7f91-abde-b283020db0d7',
+      '00000003-0003-4000-8000-000000000003',
       '/repo',
       'w1-repo',
       'codex',
-      '01a060f0-0361-7f91-abde-b283020db0d7'
+      '00000003-0003-4000-8000-000000000003'
     );
 
     expect(createBody(fetchMock)).toMatchObject({
       mode: 'codex',
-      codexConfig: { resumeSessionId: '01a060f0-0361-7f91-abde-b283020db0d7' },
+      codexConfig: { resumeSessionId: '00000003-0003-4000-8000-000000000003' },
     });
   });
 

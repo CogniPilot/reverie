@@ -12,6 +12,8 @@
  *   caller itself, sessions it spawned (descendants), and sessions in rooms it coordinates;
  * - `service`: agent routes plus the few that host services (the runtime watcher, plan-usage) need;
  * - `owner`: everything else; every unclassified `/api` or `/ws` route is owner-only.
+ * An agent bound to an employee on the owner-set admin list (`relations.ts` admin) may also call the
+ * routes on ADMIN_ROUTES, whatever their class; the route handlers ask `adminGrant(req)`.
  *
  * The caller is the owner (a valid owner session cookie), a service (a service token), an agent
  * (an `X-Codeman-Parent-Session` that resolves; a routing hint, not authentication), or anonymous.
@@ -65,6 +67,26 @@ const AGENT_ROUTES = new Set([
   'GET /api/experts/:id',
   'POST /api/experts/:id/hire',
   'POST /api/experts/:id/retire',
+  // The board: every agent's `reverie board` reads and moves cards.
+  'GET /api/board',
+  'POST /api/board/issues',
+  'PATCH /api/board/issues/:id',
+]);
+/**
+ * What an owner-set admin agent may call besides the agent routes. A whitelist: anything that sets
+ * who someone is or what they may do stays owner-only, i.e. company settings (the CTO), employee edits
+ * (the position the CTO/COO recovery reads), hiring, retiring, another employee's memories or thread,
+ * ending a session, plans, settings, sign-in, the CLI registry and the mode switch.
+ */
+export const ADMIN_ROUTES = new Set([
+  'GET /api/status',
+  'POST /api/sessions',
+  'POST /api/sessions/:id/interactive', // scoped like the session routes: itself and its descendants
+  'PUT /api/company/employees/:id/session', // the CTO/COO recovery; the route keeps its own checks
+  'POST /api/company/employees/:id/restore',
+  'POST /api/company/employees/:id/invite',
+  'POST /api/company/temporary/prune',
+  'DELETE /api/company/temporary/:sessionId',
 ]);
 /** Agent routes that act on another session: scoped by `relations.ts` (related, upward, keeper). */
 export const SESSION_SCOPED_ROUTES = new Set([
@@ -74,6 +96,7 @@ export const SESSION_SCOPED_ROUTES = new Set([
   'GET /api/sessions/:id/wait',
   'GET /api/sessions/:id/wait-output',
   'POST /api/sessions/:id/input',
+  'POST /api/sessions/:id/interactive',
 ]);
 const INPUT_ROUTE = 'POST /api/sessions/:id/input';
 /** Routes whose body may name the new session's parent (`parentSessionId`). */
@@ -179,6 +202,13 @@ export function callerOf(req: FastifyRequest, deps: Pick<PolicyDeps, 'service' |
 
 const MAX_LOG_KEYS = 500;
 
+// The admin agent each granted request was let through for (set by the policy hook, read by handlers).
+const adminGrants = new WeakMap<FastifyRequest, string>();
+/** The admin agent's session when the policy let this request through on the admin list. */
+export function adminGrant(req: FastifyRequest): string | undefined {
+  return adminGrants.get(req);
+}
+
 export function registerOwnerPolicy(app: FastifyInstance, deps: PolicyDeps): void {
   const logged = new Map<string, { at: number; count: number }>();
   const now = () => (deps.now ?? Date.now)();
@@ -271,7 +301,12 @@ export function registerOwnerPolicy(app: FastifyInstance, deps: PolicyDeps): voi
       }
       return;
     }
-    if (!allowed(routeClass, caller.kind)) {
+    const admin = caller.kind === 'agent' && ADMIN_ROUTES.has(key) && deps.relations.admin(caller.session!);
+    if (admin) {
+      adminGrants.set(req, caller.session!);
+      auditHourly('admin_action', `${caller.session} ${key}`, { caller: caller.session, route: key });
+    }
+    if (!admin && !allowed(routeClass, caller.kind)) {
       if (caller.kind === 'anonymous') return deny(401, 'Sign in as the owner', 'anonymous');
       return deny(403, 'Only the owner may do this', 'owner_only');
     }

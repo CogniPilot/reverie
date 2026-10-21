@@ -156,7 +156,7 @@ export interface BotPoster {
    * employee is gone, no longer sits in the room, or the room is archived. Optional: without it author routines fail their run.
    */
   postAsAuthor?(employeeId: string, roomId: string, text: string): { name: string };
-  /** One system line in the routine's room (not delivered to anyone's pane) telling the author the routine was disabled. */
+  /** One system line in the routine's room, also queued for its author, telling them the routine was disabled. */
   notifyDisabled?(employeeId: string, roomId: string, text: string): void;
 }
 

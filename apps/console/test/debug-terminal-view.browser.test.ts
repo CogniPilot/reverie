@@ -7,8 +7,8 @@ import { createServer, member, room } from './helpers/chat-app-harness.mjs';
 
 const publicDir = resolve(import.meta.dirname, '../src/web/public');
 const read = (name: string) => readFileSync(resolve(publicDir, name), 'utf8');
-const A = 'a1111111-0000-4000-8000-000000000001';
-const B = 'b2222222-0000-4000-8000-000000000002';
+const A = '00000026-002d-4000-8000-00000000003c';
+const B = '00000035-0040-4000-8000-00000000005c';
 
 describe('minimal agent terminal in Chromium', () => {
   let browser: Browser;
@@ -128,7 +128,8 @@ describe('minimal agent terminal in Chromium', () => {
       shell.room.members[0].voice = true;
       shell.renderHeader();
     });
-    const speak = page.getByRole('button', { name: 'Speak replies aloud', exact: true });
+    // Its name says what a click does, so it changes on click: find it by class.
+    const speak = page.locator('.ca-head-speak');
     const car = page.getByRole('button', { name: 'Car mode', exact: true });
     await expect.poll(() => speak.isVisible()).toBe(true);
     expect(await car.isVisible()).toBe(true);
@@ -137,8 +138,10 @@ describe('minimal agent terminal in Chromium', () => {
       expect(box.x).toBeGreaterThanOrEqual(0);
       expect(box.x + box.width).toBeLessThanOrEqual(width);
     }
+    expect(await speak.getAttribute('aria-label')).toBe('Enable spoken replies in this room');
     await speak.click();
     expect(await speak.getAttribute('aria-pressed')).toBe('true');
+    expect(await speak.getAttribute('aria-label')).toBe('Disable spoken replies in this room (now: replies to you)');
     await car.click();
     expect(await page.evaluate(() => (window as any).carOpened)).toBe(true);
     await page.evaluate(() => {
@@ -155,7 +158,7 @@ describe('minimal agent terminal in Chromium', () => {
     const shell = page.locator('#chatApp');
     expect(await shell.isVisible()).toBe(true);
     expect(await page.getByRole('button', { name: 'Debug terminals', exact: true }).count()).toBe(0);
-    await page.evaluate(() => (window as any).reverieChat.showDebug('a1111111-0000-4000-8000-000000000001'));
+    await page.evaluate(() => (window as any).reverieChat.showDebug('00000026-002d-4000-8000-00000000003c'));
     await page.evaluate(() => {
       document.getElementById('appSettingsModal')!.style.display = 'block';
     });
@@ -204,7 +207,7 @@ describe('minimal agent terminal in Chromium', () => {
       w.app.closeSplitPane = () => {
         w.closedSplit = true;
       };
-      w.reverieChat.showDebug('a1111111-0000-4000-8000-000000000001');
+      w.reverieChat.showDebug('00000026-002d-4000-8000-00000000003c');
     });
     expect(
       await page.evaluate(() => ({ tiles: (window as any).closedTiles, split: (window as any).closedSplit }))
@@ -223,7 +226,7 @@ describe('minimal agent terminal in Chromium', () => {
   });
   it('fits the debug terminal to keyboard height and viewport panning, then restores it', async () => {
     await open(390);
-    await page.evaluate(() => (window as any).reverieChat.showDebug('a1111111-0000-4000-8000-000000000001'));
+    await page.evaluate(() => (window as any).reverieChat.showDebug('00000026-002d-4000-8000-00000000003c'));
     for (const [height, top, event] of [[480, 32, 'resize'], [480, 64, 'scroll'], [560, 0, 'resize'], [844, 0, 'resize']] as const) {
       await page.evaluate(({height, top, event}) => {
         const vv = window.visualViewport!;

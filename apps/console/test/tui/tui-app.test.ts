@@ -52,7 +52,7 @@ function tmuxSession(overrides: Partial<TuiTmuxSession> & { muxName: string }): 
   };
 }
 
-function row(state: TuiRow['state'], sessionId = 'abcdef0123'): TuiRow {
+function row(state: TuiRow['state'], sessionId = '0000003223'): TuiRow {
   const session: TuiSessionRow = { sessionId, sources: ['live'] };
   return { session, state, group: state === 'working' ? 'working' : 'idle', since: 0 };
 }
@@ -74,25 +74,25 @@ describe('tmuxSocketFromEnv', () => {
 
 describe('planAttach', () => {
   it('attaches with the instance socket when the terminal is not inside tmux', () => {
-    const plan = planAttach('codeman-abcdef01', { socket: 'codeman' });
+    const plan = planAttach('codeman-00000032', { socket: 'codeman' });
     expect(plan).toEqual({
       kind: 'attach',
       file: 'tmux',
-      args: ['-L', 'codeman', 'attach-session', '-t', 'codeman-abcdef01'],
+      args: ['-L', 'codeman', 'attach-session', '-t', 'codeman-00000032'],
     });
   });
 
   it('switches the current client when already inside tmux on the same socket', () => {
-    const plan = planAttach('codeman-abcdef01', { socket: 'codeman', tmux: '/tmp/tmux-1000/codeman,31415,0' });
+    const plan = planAttach('codeman-00000032', { socket: 'codeman', tmux: '/tmp/tmux-1000/codeman,31415,0' });
     expect(plan).toEqual({
       kind: 'switch',
       file: 'tmux',
-      args: ['-L', 'codeman', 'switch-client', '-t', 'codeman-abcdef01'],
+      args: ['-L', 'codeman', 'switch-client', '-t', 'codeman-00000032'],
     });
   });
 
   it('refuses to nest when the surrounding tmux is a different server', () => {
-    const plan = planAttach('codeman-abcdef01', { socket: 'codeman', tmux: '/tmp/tmux-1000/default,31415,0' });
+    const plan = planAttach('codeman-00000032', { socket: 'codeman', tmux: '/tmp/tmux-1000/default,31415,0' });
     expect(plan.kind).toBe('refuse');
     if (plan.kind !== 'refuse') throw new Error('expected a refusal');
     expect(plan.reason).toBe('nested-foreign-socket');
@@ -110,19 +110,19 @@ describe('planAttach', () => {
   });
 
   it('never builds a shell string: every field is its own argv entry', () => {
-    const plan = planAttach('codeman-abcdef01', { socket: 'codeman' });
+    const plan = planAttach('codeman-00000032', { socket: 'codeman' });
     if (plan.kind !== 'attach') throw new Error('expected an attach');
     expect(plan.args.some((arg) => arg.includes(' '))).toBe(false);
   });
 });
 
 describe('isSelfSession', () => {
-  const id = 'abcdef01-2345-6789-abcd-ef0123456789';
+  const id = '00000032-003d-4000-8000-000000000057';
 
   it('recognizes the session the TUI runs in, however the id was truncated', () => {
     expect(isSelfSession(id, { CODEMAN_SESSION_ID: id })).toBe(true);
-    expect(isSelfSession(id, { CODEMAN_SESSION_ID: 'abcdef01' })).toBe(true);
-    expect(isSelfSession('abcdef01', { CODEMAN_SESSION_ID: id })).toBe(true);
+    expect(isSelfSession(id, { CODEMAN_SESSION_ID: '00000032' })).toBe(true);
+    expect(isSelfSession('00000032', { CODEMAN_SESSION_ID: id })).toBe(true);
   });
 
   it('is false for another session, and for env that identifies nothing', () => {
@@ -133,7 +133,7 @@ describe('isSelfSession', () => {
 });
 
 describe('the kill confirmation', () => {
-  const state: TuiConfirmState = { sessionId: 'abcdef01-2345', name: 'w4-api', typed: '' };
+  const state: TuiConfirmState = { sessionId: '00000032-003d', name: 'w4-api', typed: '' };
 
   it('kills on y, upper or lower', () => {
     // Was: type the session's full name. The tester's verdict on that was
@@ -225,8 +225,8 @@ describe('footerKeysFor', () => {
 });
 
 describe('the preview policy', () => {
-  const live: TuiRow = { ...row('idle', 'aaaaaaaa11'), group: 'idle' };
-  const history: TuiRow = { ...row('recent', 'bbbbbbbb22'), group: 'recent' };
+  const live: TuiRow = { ...row('idle', '0000002d11'), group: 'idle' };
+  const history: TuiRow = { ...row('recent', '0000003822'), group: 'recent' };
 
   it('polls a live row only while the plain list is on screen and wide', () => {
     const base = { mode: 'list' as const, narrow: false, connection: 'connected' as const, row: live };
@@ -307,15 +307,15 @@ describe('the repaint test', () => {
 
 describe('degraded-mode rows', () => {
   const sessions: TuiTmuxSession[] = [
-    tmuxSession({ muxName: 'codeman-abcdef01', sessionId: 'abcdef01-2345', name: 'w4-api', workingDir: '/dev/api' }),
+    tmuxSession({ muxName: 'codeman-00000032', sessionId: '00000032-003d', name: 'w4-api', workingDir: '/dev/api' }),
     tmuxSession({ muxName: 'codeman-99887766', createdAt: 1_000_000 }),
   ];
 
   it('keeps the tmux name and falls back to it as the row key', () => {
     const rows = tmuxRowsToSessions(sessions);
     expect(rows[0]).toMatchObject({
-      sessionId: 'abcdef01-2345',
-      muxName: 'codeman-abcdef01',
+      sessionId: '00000032-003d',
+      muxName: 'codeman-00000032',
       name: 'w4-api',
       workingDir: '/dev/api',
     });
@@ -336,27 +336,27 @@ describe('degraded-mode rows', () => {
 
 describe('applyMuxNames', () => {
   const tmux: TuiTmuxSession[] = [
-    tmuxSession({ muxName: 'codeman-abcdef01', sessionId: 'abcdef01-2345-6789' }),
+    tmuxSession({ muxName: 'codeman-00000032', sessionId: '00000032-003d-4000' }),
     tmuxSession({ muxName: 'codeman-99887766' }),
   ];
 
   it('joins on the 8-character prefix a mux name carries', () => {
     const rows = applyMuxNames(
       [
-        { sessionId: 'abcdef01-2345-6789', sources: ['live'] },
+        { sessionId: '00000032-003d-4000', sources: ['live'] },
         { sessionId: '99887766-0000-1111', sources: ['live'] },
         { sessionId: 'deadbeef-0000-1111', sources: ['history'] },
       ],
       tmux
     );
-    expect(rows[0].muxName).toBe('codeman-abcdef01');
+    expect(rows[0].muxName).toBe('codeman-00000032');
     expect(rows[1].muxName).toBe('codeman-99887766');
     // Nothing in tmux backs it, so attach has to refuse rather than guess.
     expect(rows[2].muxName).toBeUndefined();
   });
 
   it('copies rather than mutating its input, and survives an empty tmux list', () => {
-    const input: TuiSessionRow[] = [{ sessionId: 'abcdef01-2345-6789', sources: ['live'] }];
+    const input: TuiSessionRow[] = [{ sessionId: '00000032-003d-4000', sources: ['live'] }];
     const rows = applyMuxNames(input, []);
     expect(rows[0]).not.toBe(input[0]);
     expect(rows[0].muxName).toBeUndefined();
@@ -743,19 +743,19 @@ describe('the way out of an attach', () => {
 });
 
 describe('planResume', () => {
-  const base = { sessionId: 'aaaaaaaa-1111-2222-3333-444444444444', sources: ['transcript'] } as const;
+  const base = { sessionId: '0000002d-0036-4000-8000-00000000004c', sources: ['transcript'] } as const;
 
   it('resumes the CONVERSATION id, not the row id', () => {
     const plan = planResume({
       ...base,
-      claudeSessionId: 'bbbbbbbb-5555-6666-7777-888888888888',
+      claudeSessionId: '00000038-0045-4000-8000-000000000064',
       workingDir: '/home/dev/codeman',
       name: 'w7-codeman',
     });
     expect(plan).toEqual({
       kind: 'resume',
       workingDir: '/home/dev/codeman',
-      resumeSessionId: 'bbbbbbbb-5555-6666-7777-888888888888',
+      resumeSessionId: '00000038-0045-4000-8000-000000000064',
       sessionName: 'w7-codeman',
     });
   });

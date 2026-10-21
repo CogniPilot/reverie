@@ -37,7 +37,7 @@ function framed(lines: string[]): Buffer {
   return Buffer.concat(lines.map((line) => zstdCompressSync(Buffer.from(`${line}\n`, 'utf8'))));
 }
 
-const sessionHeader = (cwd: string, createdAt: number, id = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee') =>
+const sessionHeader = (cwd: string, createdAt: number, id = '0000002d-0038-4000-8000-000000000052') =>
   JSON.stringify({ type: 'session', version: 0, id, createdAt, cwd, delegationDepth: 0 });
 
 const userPrompt = (text: string) =>

@@ -148,7 +148,7 @@ describe('subscription profile API', () => {
   });
   it('refuses a rename from any agent caller, whatever the header value', async () => {
     const server = await app();
-    for (const id of ['11111111-2222-4333-8444-555555555555', 'not-an-id', '']) {
+    for (const id of ['00000009-000b-4000-8000-00000000000e', 'not-an-id', '']) {
       const res = await server.inject({
         method: 'PATCH',
         url: '/api/subscription-profiles/openai-default',

@@ -9,8 +9,8 @@ import { quoteForPane } from '../src/pane-quote.js';
 import { formatChatMessage } from '../src/cli-agent.js';
 import type { ChatMessage, ChatRoom } from '../src/chatroom-store.js';
 
-const A = 'aaaaaaaa-0000-4000-8000-000000000001';
-const B = 'bbbbbbbb-0000-4000-8000-000000000002';
+const A = '0000002d-0035-4000-8000-000000000047';
+const B = '00000038-0043-4000-8000-000000000060';
 const room = (name = 'Room'): ChatRoom =>
   ({
     id: 'r',

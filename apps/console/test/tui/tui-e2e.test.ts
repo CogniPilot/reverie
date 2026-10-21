@@ -44,10 +44,10 @@ const LIST_WIDTH = computeLayout(COLS, ROWS).list.width;
 
 const NOW = Date.now();
 
-const ALPHA = 'aaaa1111-0000-0000-0000-000000000000';
+const ALPHA = '00000028-0030-4000-8000-000000000040';
 /** The id the fake server hands back for a resumed conversation. */
-const RESUMED = 'dddd4444-0000-0000-0000-000000000000';
-const BETA = 'bbbb2222-0000-0000-0000-000000000000';
+const RESUMED = '00000042-0052-4000-8000-000000000079';
+const BETA = '00000037-0042-4000-8000-00000000005e';
 
 /** Mutable so a test can add a session and announce it over SSE. */
 let sessions: UnifiedSessionItem[] = [];
@@ -196,7 +196,7 @@ function resetSessions(): void {
       lastActivityAt: NOW - 60_000,
     },
     {
-      sessionId: 'cccc3333-0000-0000-0000-000000000000',
+      sessionId: '0000003d-004b-4000-8000-00000000006c',
       name: 'w3-gamma',
       sources: ['history'],
       workingDir: '/tmp/gamma',
@@ -539,7 +539,7 @@ describe('codeman tui (under a pty)', () => {
     sessions = [
       ...sessions,
       {
-        sessionId: 'dddd4444-0000-0000-0000-000000000000',
+        sessionId: '00000042-0052-4000-8000-000000000079',
         name: 'w4-delta',
         mode: 'shell',
         sources: ['live'],
@@ -549,7 +549,7 @@ describe('codeman tui (under a pty)', () => {
         lastActivityAt: NOW,
       },
     ];
-    pushEvent('session:created', { id: 'dddd4444-0000-0000-0000-000000000000' });
+    pushEvent('session:created', { id: '00000042-0052-4000-8000-000000000079' });
     await waitFor(() => listLines(output).some((line) => line.includes('w4-delta')), 'the new session to appear');
     expect(frameLines(output)[0]).toContain('3 sessions');
   });
@@ -703,7 +703,7 @@ describe('codeman tui (under a pty)', () => {
     await waitFor(() => created.length > 0, 'the resume POST');
     expect(created[0]).toMatchObject({
       // The conversation, in the directory it ran in, as a claude session.
-      resumeSessionId: 'cccc3333-0000-0000-0000-000000000000',
+      resumeSessionId: '0000003d-004b-4000-8000-00000000006c',
       workingDir: '/tmp/gamma',
       mode: 'claude',
       name: 'w3-gamma',

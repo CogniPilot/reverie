@@ -1,6 +1,6 @@
 /** Scripted API fixture for the UI contract, not actual relay/pairing implementation evidence. */
 import {startEmbassyPreview} from './embassy-preview.mjs';
-export const origin='https://relay.example.test:8443',roomId='420a20cc-1288-4faa-8f45-b6f908cf4a20',requestId='d7f74718-8792-476d-a609-331da7c5611d',handle='a'.repeat(32),connectionId='bd2161d7-0c0e-41f8-83d2-c6c720c22ac2';
+export const origin='https://relay.example.test:8443',roomId='00000012-0017-4000-8000-000000000020',requestId='00000041-0051-4000-8000-000000000078',handle='a'.repeat(32),connectionId='0000003a-0048-4000-8000-000000000069';
 export const qr=`embassy-v2|${origin}|${roomId}|${'A'.repeat(43)}`,requestQr=`embassy-pair-v1|${origin}|${requestId}|3BCD-5FGH`;
 const extraScript=`
 window.__pair={calls:[],state:'pending',cancelState:'cancelled',hold:false,deny:false};

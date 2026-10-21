@@ -1338,12 +1338,24 @@ ownerCmd
   );
 ownerCmd
   .command('policy <mode>')
-  .description('off (no checks), log (allow, record what enforce would refuse), enforce')
-  .action((mode: string) =>
+  .description('off (no checks), log (allow, record what enforce would refuse), enforce (refused while it would lock you out)')
+  .option('--force-lockout-risk', 'turn enforce on although the checks fail (audited)')
+  .action((mode: string, opts: { forceLockoutRisk?: boolean }) =>
     ownerAction(async () => {
       const { setPolicy } = await import('./owner-auth/admin.js');
-      await setPolicy(await ownerStore(), mode as 'off' | 'log' | 'enforce');
+      const { audited } = await setPolicy(await ownerStore(), mode as 'off' | 'log' | 'enforce', { forceLockoutRisk: !!opts.forceLockoutRisk });
       console.log(`Owner policy: ${mode}`);
+      if (!audited) console.error('Warning: the audit line for this change could not be written (owner-auth-audit.jsonl).');
+    })
+  );
+ownerCmd
+  .command('preflight')
+  .description('What would lock you or the host services out if enforce went on now (no secrets)')
+  .action(() =>
+    ownerAction(async () => {
+      const { enforceProblems } = await import('./owner-auth/admin.js');
+      const problems = await enforceProblems(await ownerStore());
+      console.log(problems.length ? 'Not ready:\n- ' + problems.join('\n- ') : 'Ready: enforce would lock no one out.');
     })
   );
 ownerCmd
@@ -1371,6 +1383,22 @@ ownerCmd
       else if (!entry) throw new OwnerAdminError('Name the keeper: `cto` or a company employee id');
       else if (action === 'add') console.log((await addKeeper(store, entry)).join('\n'));
       else if (action === 'remove') console.log((await removeKeeper(store, entry)) ? 'Removed.' : 'Not a keeper.');
+      else throw new OwnerAdminError('Use list, add or remove');
+    })
+  );
+ownerCmd
+  .command('admins [action] [entry]')
+  .description(
+    'list, add or remove an admin: `cto` or a company employee id that may call the admin routes (session create, company recovery)'
+  )
+  .action((action: string | undefined, entry: string | undefined) =>
+    ownerAction(async () => {
+      const { addAdmin, removeAdmin, listAdmins, OwnerAdminError } = await import('./owner-auth/admin.js');
+      const store = await ownerStore();
+      if (!action || action === 'list') console.log(listAdmins(store).join('\n') || '(none)');
+      else if (!entry) throw new OwnerAdminError('Name the admin: `cto` or a company employee id');
+      else if (action === 'add') console.log((await addAdmin(store, entry)).join('\n'));
+      else if (action === 'remove') console.log((await removeAdmin(store, entry)) ? 'Removed.' : 'Not an admin.');
       else throw new OwnerAdminError('Use list, add or remove');
     })
   );

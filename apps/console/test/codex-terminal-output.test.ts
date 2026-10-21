@@ -158,7 +158,7 @@ describe('Codex terminal output filtering', () => {
       sparseResumePickerRedraw += `\x1b[${row};${col}H\x1b[K`;
     }
     sparseResumePickerRedraw +=
-      '\x1b[21;3H  \x1b[2m9d ago      \x1b[mreview this webex room webexteams://im?space=672465b0-4fcb-11f1-9d54-51475df86e3a\x1b[K' +
+      '\x1b[21;3H  \x1b[2m9d ago      \x1b[mreview this webex room webexteams://im?space=0000001d-0023-4000-8000-00000000002f\x1b[K' +
       '\x1b[22;3H\x1b[33m\x1b[1m❯ \x1b[m\x1b[33m\x1b[2m9d ago      \x1b[m\x1b[33mcisco hybrid mesh firewall includes support for smart switch enforcement...\x1b[K' +
       '\x1b[52;229H\x1b[39m\x1b[2m8\x1b[m';
 

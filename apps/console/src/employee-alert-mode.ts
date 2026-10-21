@@ -58,11 +58,14 @@ export class EmployeeAlertModes {
         closeSync(fd);
       }
       renameSync(tmp, this.file);
-      const dir = openSync(dirname(this.file), 'r');
+      // Rename is the commit point. A subsequent directory flush failure must
+      // not return a refusal after the durable file has already changed.
+      this.leases = next;
       try {
-        fsyncSync(dir);
-      } finally {
-        closeSync(dir);
+        const dir = openSync(dirname(this.file), 'r');
+        try { fsyncSync(dir); } finally { closeSync(dir); }
+      } catch (error) {
+        console.warn('Alert mode committed; directory flush failed', error);
       }
     }
     this.leases = next;

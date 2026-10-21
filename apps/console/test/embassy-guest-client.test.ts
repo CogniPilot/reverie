@@ -18,7 +18,7 @@ const ORIGIN = 'https://embassy.example.ts.net:8443';
 const TOKEN = 'T'.repeat(43);
 const KEY = `embassy-v1|${ORIGIN}|${TOKEN}`;
 const SESSION = 'S'.repeat(43);
-const ROOM = '46c990d2-c599-4c44-9234-acd91682464d';
+const ROOM = '00000015-001b-4000-8000-000000000025';
 
 const post = (sequence: number, text = `p${sequence}`) => ({
   ackId: `ack-${sequence}`,

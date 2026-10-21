@@ -18,8 +18,8 @@ import { CompanyStore } from '../src/company-store.js';
 import { CompanyService } from '../src/company-service.js';
 import { ChatroomStore } from '../src/chatroom-store.js';
 
-const caller = '11111111-1111-4111-8111-111111111111';
-const parent = '22222222-2222-4222-8222-222222222222';
+const caller = '00000009-000a-4000-8000-00000000000b';
+const parent = '0000000c-0010-4000-8000-000000000015';
 const ctx = { sessions: new Map([caller, parent].map((id) => [id, { id, owner: undefined }])) } as never;
 const request = (headers: Record<string, string>, body?: object) => ({ headers, body }) as never;
 
@@ -64,7 +64,7 @@ describe('spawn audit actor', () => {
   });
 
   it('a header naming an unknown or other-owner session is not trusted as the actor', () => {
-    expect(auditActor(ctx, request({ 'x-codeman-parent-session': '33333333-3333-4333-8333-333333333333' }), undefined)).toBe('owner');
+    expect(auditActor(ctx, request({ 'x-codeman-parent-session': '0000000f-0014-4000-8000-00000000001c' }), undefined)).toBe('owner');
     expect(auditActor(ctx, request({ 'x-codeman-parent-session': caller }), 'someone-else')).toBe('owner');
   });
 });

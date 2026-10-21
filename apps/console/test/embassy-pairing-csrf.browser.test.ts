@@ -1,5 +1,5 @@
 /**
- * Two-scan pairing CSRF marker in a real browser (integration pins r1 §1; Kit's console r2 check).
+ * Two-scan pairing CSRF marker in a real browser (integration pins r1 §1; Inspector's console r2 check).
  *
  * The console's Origin allowlist matches by hostname and accepts any IP literal, so a page served from another
  * port of the same host passes it, and the SameSite=Strict owner cookie is same-site across ports. What stops
