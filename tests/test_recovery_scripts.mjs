@@ -128,6 +128,34 @@ test("publish options and launcher installation", () => {
   assert.equal(readFileSync(installed, "utf8"), readFileSync(join(scripts, "fleet-container"), "utf8"));
 });
 
+test("defaults are generic: repo sources, /instances/default, no model settings unless given", () => {
+  const t = hostTree();                       // a dated rescue tree exists in scratch, but is never picked up implicitly
+  const bare = (...args) => spawnSync("bash", [join(scripts, "reverie-recreate"), "--repo", t.repo, "--scratch", t.scratch,
+    "--instance", t.instance, ...args], {
+    env: { PATH: process.env.PATH, HOME: t.home, TMPDIR: t.root, REVERIE_LAUNCHER: join(t.bin, "fleet-container") },
+    encoding: "utf8",
+  });
+  const r = bare("--dry-run");
+  assert.equal(r.status, 0, r.stderr);
+  const runLine = r.stdout.split("\n").find((l) => l.includes(" engine create ")).replace(/\\/g, "");
+  assert.ok(runLine.includes(`src=${t.instance},dst=/instances/default`), runLine);
+  assert.ok(runLine.includes("REVERIE_INSTANCE_CONFIG=/instances/default/config/instance.json"), runLine);
+  assert.doesNotMatch(runLine, /API_BASE=|_MODEL=|\/instances\/personal/);
+  assert.match(r.stdout, new RegExp(`Image console: +${resolve(scripts, "..", "apps", "console")}\n`));
+  assert.match(r.stdout, new RegExp(`Image cto: +${resolve(scripts, "..", "cto")}\n`));
+  assert.doesNotMatch(r.stdout, /rescue/);
+  const named = bare("--dry-run", "--instance-name", "lab", "--api-base", "http://192.0.2.7:8080/v1", "--model", "m");
+  const namedLine = named.stdout.split("\n").find((l) => l.includes(" engine create ")).replace(/\\/g, "");
+  for (const part of [`dst=/instances/lab`, "REVERIE_DATA_DIR=/instances/lab/runtime/console",
+    "REVERIE_API_BASE=http://192.0.2.7:8080/v1", "FLEET_API_BASE=http://192.0.2.7:8080/v1", "REVERIE_MODEL=m", "FLEET_MODEL=m"])
+    assert.ok(namedLine.includes(part), `run line lacks ${part}: ${namedLine}`);
+  for (const bad of ["../x", "a/b", "-x", ""]) {
+    const refused = bare("--dry-run", "--instance-name", bad);
+    assert.notEqual(refused.status, 0);
+    assert.match(refused.stderr, /instance-name/);
+  }
+});
+
 function restoreTree() {
   const root = mkdtempSync(join(tmpdir(), "reverie-restore-"));
   const rescue = join(root, "rescue"), home = join(root, "home"), opt = join(root, "opt");
