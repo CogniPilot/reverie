@@ -12,6 +12,101 @@ Use `reverie` inside the container. Existing `fleet` and `codeman` CLI aliases,
 `REVERIE_*` settings, storage paths and `fleet-*` tools remain compatible.
 The fork has no automatic upstream package update or synchronization process.
 
+## Setup
+
+Two ways to run Reverie: the published container image (Docker or Podman), or
+natively from a clone. Both end with the same first-login steps.
+[docs/image.md](docs/image.md) and [docs/setup.md](docs/setup.md) have the details.
+
+### With Docker or Podman
+
+While the repository is private, you need to be a collaborator on it with Read
+access to the `reverie` package. The repository owner adds you as a collaborator,
+then either grants you Read on the package or links the package to the repository
+so collaborators inherit access. With the [GitHub CLI](https://cli.github.com/) and
+your own GitHub account:
+
+```bash
+gh auth login
+gh release download v0.1.1 --repo jgoppert/reverie --pattern setup.sh
+```
+
+Create a classic personal access token with only the `read:packages` scope
+(GitHub → Settings → Developer settings → Personal access tokens → Tokens (classic)).
+GHCR refuses fine-grained tokens. Sign in to the registry with the token on stdin,
+so it never appears on the command line or in your shell history:
+
+```bash
+read -rs GHCR_TOKEN && printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u YOUR_GITHUB_USER --password-stdin; unset GHCR_TOKEN
+```
+
+Use `podman login` instead of `docker login` with Podman. Then start Reverie:
+
+```bash
+bash setup.sh
+```
+
+`setup.sh` pulls the release, starts a container named `reverie` with its data on
+the `reverie-data` volume, and prints the address (`http://127.0.0.1:3000`, loopback
+only). Print the owner password the first start generated:
+
+```bash
+bash setup.sh --password
+```
+
+Removing someone's access stops their future pulls only. An image they have
+already pulled keeps working on their machine.
+
+### Without Docker
+
+Prerequisites: Node 22 or newer, Python 3.11 or newer, tmux, git, and a C++
+compiler with make for the terminal module. With [Nix](https://nixos.org/download/),
+one shell provides all of them:
+
+```bash
+nix shell nixpkgs#nodejs_22 nixpkgs#python3 nixpkgs#tmux nixpkgs#git nixpkgs#gcc nixpkgs#gnumake
+```
+
+Clone the repository (as a collaborator while it is private) and install the
+memory runtime into its own virtual environment:
+
+```bash
+gh repo clone jgoppert/reverie && cd reverie
+python3 -m venv ~/.local/share/reverie/python
+~/.local/share/reverie/python/bin/pip install -e .
+```
+
+Build the console:
+
+```bash
+cd apps/console && npm ci && npm run build && cd ../..
+```
+
+Choose an owner password, then start the console on loopback. It keeps its state
+in `~/.fleet` unless `REVERIE_DATA_DIR` names another directory:
+
+```bash
+read -rs CODEMAN_PASSWORD && export CODEMAN_PASSWORD CODEMAN_USERNAME=owner REVERIE_MCP_MEMORY_PYTHON=$HOME/.local/share/reverie/python/bin/python3
+node apps/console/dist/index.js web --host 127.0.0.1 --port 3000
+```
+
+[docs/setup.md](docs/setup.md) covers instance configuration, the native adapter
+and memory skill, the runtime watcher and running the console as a service.
+
+### First login
+
+1. Open `http://127.0.0.1:3000` and sign in as `owner` with the password from above.
+2. Add a plan: open the account menu in the header, choose **Add account**, name
+   it and pick the provider (Claude or ChatGPT / Codex), then **Sign in** and follow
+   the provider's link or code. **Plans** in the same menu shows each account's use.
+3. Hire: until hiring by model ships, open `http://127.0.0.1:3000/?legacy=1`,
+   choose the plan account and model in its Run controls and start a session,
+   then open **Company** and hire that session. See
+   [docs/image.md](docs/image.md#hiring-the-first-employee-interim-until-hire-by-model-lands).
+
+To reach the console from another device, front it with an authenticated proxy or
+tunnel such as `tailscale serve`; do not publish the port on all interfaces.
+
 A shareable agent workspace with persistent identities, private and project memory,
 reflection, dreams and provider-independent handoffs. An instance selects its organizational role independently of its harness and
 permissions. `kind: "agent"` provides a conversation-first local agent with chat
