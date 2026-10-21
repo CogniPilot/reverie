@@ -3,7 +3,7 @@ Description=Rootless Reverie container engine API
 
 [Service]
 Type=simple
-Environment=FLEET_REPO=%h/git/reverie
+Environment=REVERIE_REPO=%h/git/reverie
 ExecStart=%h/.local/libexec/reverie/fleet-container engine system service --time=0 unix:%t/reverie-engine.sock
 Restart=on-failure
 RestartSec=5

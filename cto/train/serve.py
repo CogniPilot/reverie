@@ -21,15 +21,16 @@ from pathlib import Path
 from typing import Callable, Sequence
 
 from .swap import CheckResult, list_adapters, set_adapters
+from cto import env_names
 
 
 @dataclass
 class ServeConfig:
     llama_server: str = os.environ.get("LLAMA_SERVER", shutil.which("llama-server") or "llama-server")
-    model_path: str = os.environ.get("FLEET_GGUF", str(Path.home() / ".local/share/reverie/models/model.gguf"))
-    alias: str = os.environ.get("FLEET_MODEL", "MODEL_ID")
+    model_path: str = env_names.lookup("REVERIE_GGUF", str(Path.home() / ".local/share/reverie/models/model.gguf"))
+    alias: str = env_names.lookup("REVERIE_MODEL", "MODEL_ID")
     host: str = "127.0.0.1"
-    port: int = int(os.environ.get("FLEET_SERVE_PORT", "8081"))
+    port: int = int(env_names.lookup("REVERIE_SERVE_PORT", "8081"))
     ctx_size: int = 32768
     extra_args: list[str] = field(default_factory=lambda: [
         "--n-gpu-layers", "all", "--flash-attn", "on", "--cache-type-k", "q8_0", "--cache-type-v", "q8_0",

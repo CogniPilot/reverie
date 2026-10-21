@@ -29,7 +29,7 @@ revision, source hashes, test evidence and resulting image digest in the handoff
   reviewed implementation: shared-room tone, profile runtime v4, sleep/floors and
   supervisor support. Do not reinstall an earlier runtime v3 from an old note.
 - Preserve the external runtime-policy mappings using current agent IDs. Verify
-  the supervisor reads the existing `child.env` and passes `FLEET_RUNTIME_POLICY`.
+  the supervisor reads the existing `child.env` and passes `REVERIE_RUNTIME_POLICY`.
   These private policy/config files stay in the persistent instance, not the image.
 
 ## 2. Include the reviewed image requirements

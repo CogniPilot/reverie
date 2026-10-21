@@ -24,6 +24,7 @@ from .project_memory import ProjectMemory
 from .persona import build_system_prompt
 from .instance import initial_self_for, identity_context, load_instance, primary_agent
 from .context_budget import memory_byte_budget, recent_exchanges
+from cto import env_names
 
 
 PROFESSIONAL_ROOM = ("This is a shared work channel. Stay professional. No flirtation, personal anecdotes "
@@ -149,7 +150,7 @@ def dispatch(brain, request: dict):
                            "next_action": "Read current fleet state and obtain owners' handoffs before taking work"},
                            current["revision"])
     if action == "activity":
-        if request.get("research_cycle_id") or os.environ.get("FLEET_RESEARCH_CYCLE_ID"):
+        if request.get("research_cycle_id") or env_names.lookup("REVERIE_RESEARCH_CYCLE_ID"):
             return {"ok": True, "research": True}
         brain.store.set_state("fleet_last_activity", str(time.time()))
         runtime = request.get("runtime")
@@ -341,7 +342,7 @@ def install(workspace: Path, model: str, instance_config: Path | None = None,
         "from './interaction.mjs'", "from '../lib/interaction.mjs'"), encoding="utf-8")
     if marker.exists():
         (plugins / "cto.mjs").unlink(missing_ok=True)
-    container_admin = os.environ.get("FLEET_CONTAINER") == "1" and (
+    container_admin = env_names.lookup("REVERIE_CONTAINER") == "1" and (
         Path("/run/.containerenv").exists() or Path("/.dockerenv").exists())
     permissions = runtime_permissions(container_admin=container_admin)
     agent = primary_agent(instance)
@@ -376,7 +377,7 @@ def install(workspace: Path, model: str, instance_config: Path | None = None,
         json.dumps({"private": True, "type": "module", "dependencies": {"@opencode-ai/plugin": "1.15.10"}}, indent=2) + "\n")
     # The plugin reads this metadata without embedding machine paths in portable source.
     metadata = {"python": sys.executable, "source": str(source.parent),
-                "cycle_managed": os.environ.get("FLEET_CYCLE_MANAGED") == "1"}
+                "cycle_managed": env_names.lookup("REVERIE_CYCLE_MANAGED") == "1"}
     if instance_config:
         metadata["instance"] = str(instance_config.expanduser().resolve(strict=True))
     marker.write_text(json.dumps(metadata) + "\n")
@@ -413,7 +414,7 @@ def install(workspace: Path, model: str, instance_config: Path | None = None,
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--install", type=Path, metavar="WORKSPACE")
-    parser.add_argument("--model", default=os.environ.get("FLEET_MODEL", "local_agent/MODEL_ID"))
+    parser.add_argument("--model", default=env_names.lookup("REVERIE_MODEL", "local_agent/MODEL_ID"))
     parser.add_argument("--api-base", help="local OpenAI-compatible GPU model endpoint, including /v1")
     parser.add_argument("--context-window", type=int, default=32768)
     parser.add_argument("--output-tokens", type=int, default=4096)

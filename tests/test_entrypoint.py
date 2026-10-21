@@ -33,11 +33,12 @@ class EntrypointTest(unittest.TestCase):
         return subprocess.run(["bash", str(ENTRYPOINT), *command], env=base, capture_output=True, text=True, timeout=60)
 
     def test_first_start_creates_instance_and_private_password(self):
-        result = self.start("sh", "-c", 'printf "%s|%s|%s" "$CODEMAN_USERNAME" "$FLEET_DATA_DIR" "${#CODEMAN_PASSWORD}"')
+        result = self.start("sh", "-c", 'printf "%s|%s|%s|%s" "$CODEMAN_USERNAME" "$REVERIE_DATA_DIR" "$FLEET_DATA_DIR" "${#CODEMAN_PASSWORD}"')
         self.assertEqual(result.returncode, 0, result.stderr)
-        user, data_dir, length = result.stdout.split("|")
+        user, data_dir, old_data_dir, length = result.stdout.split("|")
         self.assertEqual(user, "owner")
         self.assertEqual(data_dir, str(self.data / "console"))
+        self.assertEqual(old_data_dir, data_dir)   # the older spelling is exported too, for one release
         self.assertGreaterEqual(int(length), 20)
         secret = self.data / "owner-password"
         self.assertEqual(stat.S_IMODE(secret.stat().st_mode), 0o600)

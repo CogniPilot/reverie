@@ -63,7 +63,7 @@ elif args[0] not in ("start", "run"):
 
     def assert_refused(self, result):
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("fresh FLEET_CONTAINER_NAME", result.stderr)
+        self.assertIn("fresh REVERIE_CONTAINER_NAME", result.stderr)
         self.assertFalse(any(call[0] in ("start", "run", "stop", "rm") for call in self.calls()))
 
     def test_matching_image_and_all_three_binds_start_existing_container(self):

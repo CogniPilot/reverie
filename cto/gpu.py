@@ -25,12 +25,13 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from cto import env_names
 
 PRIORITY = {"chat": 0, "review": 1, "train": 2, "dream": 3}
-CACHE = Path(os.environ.get("FLEET_HOME", Path.home())) / ".cache"
-LOCK_PATH = Path(os.environ.get("FLEET_GPU_LOCK", CACHE / "gpu.lock"))
-YIELD_PATH = Path(os.environ.get("FLEET_GPU_YIELD", CACHE / "gpu.yield"))
-ACTIVITY_PATH = Path(os.environ.get("FLEET_GPU_ACTIVITY", CACHE / "gpu.activity"))
+CACHE = Path(env_names.lookup("REVERIE_HOME", Path.home())) / ".cache"
+LOCK_PATH = Path(env_names.lookup("REVERIE_GPU_LOCK", CACHE / "gpu.lock"))
+YIELD_PATH = Path(env_names.lookup("REVERIE_GPU_YIELD", CACHE / "gpu.yield"))
+ACTIVITY_PATH = Path(env_names.lookup("REVERIE_GPU_ACTIVITY", CACHE / "gpu.activity"))
 TRAIN_MIN_IDLE = 1800
 YIELD_MAX_AGE = 300        # a yield request older than this is stale (its requester gave up or died)
 

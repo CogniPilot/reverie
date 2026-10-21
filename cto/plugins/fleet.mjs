@@ -2,6 +2,8 @@ import { execFile } from "node:child_process";
 import { appendFile, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tool } from "@opencode-ai/plugin";
+// REVERIE_* is the name; the older FLEET_* spelling is still read for one release.
+const envName = (suffix) => process.env[`REVERIE_${suffix}`] || process.env[`FLEET_${suffix}`];
 
 // Every room a delivery names: `[Reverie chat "<room>", ...]` (names are JSON-quoted); a DM is its id.
 const roomsOf = (text = "") => {
@@ -31,7 +33,7 @@ const roomOf = (text = "") => {
 };
 
 const channelOf = (text = "") => {
-  if (process.env.FLEET_CYCLE_CHANNEL === "work") return "work";
+  if (envName("CYCLE_CHANNEL") === "work") return "work";
   const dm = /^\[(?:Codeman|Reverie) chat "DM:([a-f0-9-]+)"\]/.exec(text);
   if (dm) return `private:${dm[1]}`;
   // A direct message delivered under its label (consoles before the DM:<id> header) is still private, never work.
@@ -52,13 +54,13 @@ const clockLine = (now = new Date(), timeZone) => {
 
 // All requests go over stdin. Conversation text is never interpolated into a shell.
 export const CTOFleet = async ({ client, directory, serverUrl }) => {
-  const researchCycle = process.env.FLEET_RESEARCH_CYCLE_ID;
+  const researchCycle = envName("RESEARCH_CYCLE_ID");
   const settings = JSON.parse(await readFile(join(directory, ".fleet-instance"), "utf8"));
   const bridge = (request) => new Promise((resolve, reject) => {
     const child = execFile(settings.python, ["-m", "cto.opencode"], {
       cwd: settings.source,
       env: { ...process.env, PYTHONPATH: settings.source,
-        ...(settings.instance ? { FLEET_INSTANCE_CONFIG: settings.instance } : {}) },
+        ...(settings.instance ? { REVERIE_INSTANCE_CONFIG: settings.instance, FLEET_INSTANCE_CONFIG: settings.instance } : {}) },
       timeout: request.action === "maintenance" ? 120000 : 60000,
       maxBuffer: 1024 * 1024,
     }, (error, stdout, stderr) => {
@@ -80,7 +82,7 @@ export const CTOFleet = async ({ client, directory, serverUrl }) => {
     try { await bridge({ action: "maintenance" }); } catch (error) { await log(error); }
     finally { maintaining = false; }
   };
-  const timer = (settings.cycle_managed === true || process.env.FLEET_CYCLE_MANAGED === "1") ? null : setInterval(maintain, 60000);
+  const timer = (settings.cycle_managed === true || envName("CYCLE_MANAGED") === "1") ? null : setInterval(maintain, 60000);
   timer?.unref();
   const lastRoom = new Map();
   const settled = new Map(); // session -> turn ids already recorded or refused; a restart re-sends, and records are idempotent

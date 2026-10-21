@@ -81,7 +81,7 @@ must exist exactly once before re-enabling its watcher; verify one active watche
 Update the host bridge binding through its supported identity flow if needed.
 
 Acceptance: API healthy on the configured private access route; supervisor
-loads `FLEET_RUNTIME_POLICY` from the external env file; chat send/receive, unread,
+loads `REVERIE_RUNTIME_POLICY` from the external env file; chat send/receive, unread,
 poll and delivery receipts work; histories remain accessible; provider CLIs resume
 the recorded native threads with no duplicate identity. Confirm model responses,
 admission/resource limits, timers and watcher health. Apply the separately reviewed

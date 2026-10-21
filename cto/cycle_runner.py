@@ -10,6 +10,7 @@ import tempfile
 import time
 from .cycle_budget import BudgetExhausted
 from .opencode import install
+from cto import env_names
 
 
 def stop(process, force_group=False):
@@ -94,8 +95,8 @@ class OpenCodeRunner:
             prompt.write_text(task['brief']+'\n\nAuthorized project workspace: '+str(task['workdir'])+
                 '\nReport evidence, source locations, tests, uncertainty and next action. '
                 'Do not spawn other agents or use room tools. Return your report as the final response; the controller delivers it to the lead. Keep private context out of reports.\n')
-            env={**os.environ,'FLEET_CYCLE_MANAGED':'1','FLEET_CYCLE_CHANNEL':'work','FLEET_INSTANCE_CONFIG':str(instance),
-                 'FLEET_MODEL':model['model'],'FLEET_API_BASE':model['api_base'],
+            env={**os.environ,**env_names.both('CYCLE_MANAGED', '1'),**env_names.both('CYCLE_CHANNEL', 'work'),**env_names.both('INSTANCE_CONFIG', str(instance)),
+                 **env_names.both('MODEL', model['model']),**env_names.both('API_BASE', model['api_base']),
                  'XDG_DATA_HOME':str(root/'data'),'XDG_CACHE_HOME':str(root/'cache'),
                  'XDG_STATE_HOME':str(root/'state'),'TMPDIR':str(root/'tmp')}
             (root/'tmp').mkdir()

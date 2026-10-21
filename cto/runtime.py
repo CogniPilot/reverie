@@ -17,6 +17,7 @@ import uuid
 
 from cto.admission import session_admission
 from cto.instance import parse_instance
+from cto import env_names
 
 
 def atomic_write(path, value):
@@ -830,7 +831,7 @@ def stop_watchers(policy_path, proc=Path("/proc"), kill=os.kill, wait=time.sleep
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--policy", type=Path, default=os.environ.get("FLEET_RUNTIME_POLICY"))
+    parser.add_argument("--policy", type=Path, default=env_names.lookup("REVERIE_RUNTIME_POLICY"))
     sub = parser.add_subparsers(dest="action", required=True)
     sub.add_parser("status"); sub.add_parser("local-health")
     switch = sub.add_parser("switch"); switch.add_argument("backend"); switch.add_argument("--handoff", required=True)

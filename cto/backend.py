@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 from .runtime import Reverie
 from .instance import load_instance, primary_agent
+from cto import env_names
 
 
 def argv_for(mode, model, agent="cto"):
@@ -39,8 +40,8 @@ def main(argv=None):
     marker=Path.cwd()/".fleet-instance"
     if marker.exists():
         settings=json.loads(marker.read_text())
-        if settings.get("instance"): os.environ["FLEET_INSTANCE_CONFIG"]=settings["instance"]
-    config=os.environ.get("FLEET_INSTANCE_CONFIG")
+        if settings.get("instance"): os.environ.update(env_names.both("INSTANCE_CONFIG", settings["instance"]))
+    config=env_names.lookup("REVERIE_INSTANCE_CONFIG")
     agent=primary_agent(load_instance(Path(config))) if config else "cto"
     command=argv_for(args.mode, model, agent)
     if args.describe: print(json.dumps({"mode":args.mode, "model":model, "argv":command})); return 0

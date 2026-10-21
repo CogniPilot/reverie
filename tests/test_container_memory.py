@@ -110,7 +110,7 @@ class AutoSizeTests(unittest.TestCase):
         return path
 
     def size_from(self, script, gib, **env):
-        full = {"PATH": os.environ["PATH"], "HOME": str(self.root), "FLEET_MEMINFO": str(self.meminfo(gib)), **env}
+        full = {"PATH": os.environ["PATH"], "HOME": str(self.root), "REVERIE_MEMINFO": str(self.meminfo(gib)), **env}
         if script == "fleet-container":
             command = ["bash", str(SCRIPT.parent / "fleet-container"), "memory-default"]
         else:   # the identical function inside container-memory
@@ -127,9 +127,18 @@ class AutoSizeTests(unittest.TestCase):
 
     def test_override_and_bad_values(self):
         for script in ("fleet-container", "container-memory"):
-            self.assertEqual(self.size_from(script, 62.7, FLEET_MEMORY="16g").stdout.strip(), "16g")
-            bad = self.size_from(script, 62.7, FLEET_MEMORY="16GB")
-            self.assertNotEqual(bad.returncode, 0); self.assertIn("FLEET_MEMORY must look like", bad.stderr)
+            self.assertEqual(self.size_from(script, 62.7, REVERIE_MEMORY="16g").stdout.strip(), "16g")
+            bad = self.size_from(script, 62.7, REVERIE_MEMORY="16GB")
+            self.assertNotEqual(bad.returncode, 0); self.assertIn("REVERIE_MEMORY must look like", bad.stderr)
+
+    def test_the_older_fleet_spelling_is_still_read_and_the_new_name_wins(self):
+        def run(**env):
+            full = {"PATH": os.environ["PATH"], "HOME": str(self.root), **env}
+            return subprocess.run(["bash", str(SCRIPT.parent / "fleet-container"), "memory-default"],
+                                  env=full, capture_output=True, text=True).stdout.strip()
+        self.assertEqual(run(FLEET_MEMINFO=str(self.meminfo(12)), FLEET_MEMORY="16g"), "16g")
+        self.assertEqual(run(FLEET_MEMINFO=str(self.meminfo(12))), "6g")
+        self.assertEqual(run(REVERIE_MEMORY="8g", FLEET_MEMORY="16g"), "8g")
 
     def test_new_container_is_created_with_the_printed_auto_size(self):
         repo = SCRIPT.parent.parent

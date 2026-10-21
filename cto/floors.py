@@ -19,6 +19,7 @@ import base64
 import os
 import re
 from pathlib import Path
+from cto import env_names
 
 
 def _lexicon(encoded: str) -> str:
@@ -64,7 +65,7 @@ def _contact_token(sentence: str, match: re.Match) -> str:
     return sentence[start:end].strip(_TOKEN_EDGE).rstrip(".:")
 _SENTENCE = re.compile(r"(?<=[.!?])\s+")
 
-PROTECTED_PEOPLE = Path(os.environ.get("FLEET_PROTECTED_PEOPLE", Path.home() / ".local" / "share" / "agent-fleet" / "default" / "protected-people.txt"))
+PROTECTED_PEOPLE = Path(env_names.lookup("REVERIE_PROTECTED_PEOPLE", Path.home() / ".local" / "share" / "agent-fleet" / "default" / "protected-people.txt"))
 
 
 def protected_names(path: Path | None = None) -> list[str]:

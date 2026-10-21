@@ -8,7 +8,7 @@ Requisite=reverie.service
 
 [Service]
 Type=oneshot
-Environment=FLEET_REPO=%h/git/reverie
+Environment=REVERIE_REPO=%h/git/reverie
 # Dry-run by default: it only observes and logs. To let it act, add a drop-in
 # (`systemctl --user edit reverie-stall-watch.service`) with `Environment=STALL_WATCH_FLAGS=`.
 Environment=STALL_WATCH_FLAGS=--dry-run
@@ -20,11 +20,11 @@ Environment=STALL_WATCH_FLAGS=--dry-run
 EnvironmentFile=%h/.config/reverie/stall-watch.env
 # No config, no tick (instead of a traceback every minute). The path is inside the container (the
 # instance is a bind mount there), so it is checked there; a Condition= would look on the host.
-ExecCondition=%h/.local/libexec/reverie/fleet-container engine exec --user cto reverie-live test -f ${FLEET_STALL_WATCH_CONFIG}
+ExecCondition=/bin/sh -c 'exec %h/.local/libexec/reverie/fleet-container engine exec --user cto reverie-live test -f "$${REVERIE_STALL_WATCH_CONFIG:-$${FLEET_STALL_WATCH_CONFIG}}"'
 # The config is instance data (target, rooms, reporting identity); it never lives in the repo.
 # --workdir / and -I: the container's default working directory is the agent-editable work tree, and
 # `python -m` would import `cto` from there; this way only the installed package runs.
-ExecStart=%h/.local/libexec/reverie/stall-watch-host %h/.local/libexec/reverie/fleet-container engine exec -i --workdir / --user cto reverie-live /opt/fleet/python/bin/python3 -I -m cto.stall_watch --config ${FLEET_STALL_WATCH_CONFIG} --console-json - $STALL_WATCH_FLAGS
+ExecStart=/bin/sh -c 'exec %h/.local/libexec/reverie/stall-watch-host %h/.local/libexec/reverie/fleet-container engine exec -i --workdir / --user cto reverie-live /opt/fleet/python/bin/python3 -I -m cto.stall_watch --config "$${REVERIE_STALL_WATCH_CONFIG:-$${FLEET_STALL_WATCH_CONFIG}}" --console-json - $${STALL_WATCH_FLAGS}'
 # The tick also ends itself before its minute is up (`tick_seconds`), since stopping this unit ends
 # only the podman client, not the tick inside the container.
 TimeoutStartSec=90

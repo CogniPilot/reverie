@@ -14,15 +14,20 @@ class FallbackTest(unittest.TestCase):
 
     def test_env_fallback(self):
         with mock.patch.dict(os.environ, {"JESTER_MODEL": "old-model"}, clear=False):
+            os.environ.pop("REVERIE_MODEL", None)
             os.environ.pop("FLEET_MODEL", None)
-            self.assertEqual(cfgmod._env_fallback("FLEET_MODEL", "JESTER_MODEL", "d"), "old-model")
-            self.assertEqual(cfgmod.DEPRECATIONS, ["JESTER_MODEL is deprecated, use FLEET_MODEL"])
-        with mock.patch.dict(os.environ, {"FLEET_MODEL": "new", "JESTER_MODEL": "old"}):
+            self.assertEqual(cfgmod._env_fallback("REVERIE_MODEL", "JESTER_MODEL", "d"), "old-model")
+            self.assertEqual(cfgmod.DEPRECATIONS, ["JESTER_MODEL is deprecated, use REVERIE_MODEL"])
+        with mock.patch.dict(os.environ, {"REVERIE_MODEL": "new", "JESTER_MODEL": "old"}):
             cfgmod.DEPRECATIONS.clear()
-            self.assertEqual(cfgmod._env_fallback("FLEET_MODEL", "JESTER_MODEL", "d"), "new")
+            self.assertEqual(cfgmod._env_fallback("REVERIE_MODEL", "JESTER_MODEL", "d"), "new")
             self.assertEqual(cfgmod.DEPRECATIONS, [])
+        with mock.patch.dict(os.environ, {"FLEET_MODEL": "older-spelling"}, clear=True):
+            self.assertEqual(cfgmod._env_fallback("REVERIE_MODEL", "JESTER_MODEL", "d"), "older-spelling")
+        with mock.patch.dict(os.environ, {"REVERIE_MODEL": "new", "FLEET_MODEL": "older-spelling"}, clear=True):
+            self.assertEqual(cfgmod._env_fallback("REVERIE_MODEL", "JESTER_MODEL", "d"), "new")
         with mock.patch.dict(os.environ, {}, clear=True):
-            self.assertEqual(cfgmod._env_fallback("FLEET_MODEL", "JESTER_MODEL", "d"), "d")
+            self.assertEqual(cfgmod._env_fallback("REVERIE_MODEL", "JESTER_MODEL", "d"), "d")
 
     def test_path_fallback(self):
         d = Path(tempfile.mkdtemp())
@@ -60,4 +65,4 @@ class IsolationTest(unittest.TestCase):
         leaked = [key for key in os.environ if key.startswith("CODEMAN_")]
         self.assertEqual(leaked, [])
         self.assertNotIn("FLEET_INSTANCE_CONFIG", os.environ)
-        self.assertTrue(str(cto.config.DATA_DIR).startswith(os.environ["FLEET_HOME"]))
+        self.assertTrue(str(cto.config.DATA_DIR).startswith(os.environ["REVERIE_HOME"]))
