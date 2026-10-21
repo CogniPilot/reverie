@@ -1,0 +1,138 @@
+name: image
+
+# Every pull request and every push to main builds the image, checks its contents and boots it once;
+# nothing is published.
+# A published GitHub release builds its tagged commit the same way, pushes it to
+# ghcr.io/<owner>/reverie as X.Y.Z, X.Y and latest, and attaches scripts/setup.sh to the release.
+# The release notes must name the reviewed commit on a line "Reviewed commit: <40-hex sha>";
+# a release whose tag points elsewhere is refused.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: image-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  image:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: write
+    env:
+      IMAGE: ghcr.io/${{ github.repository_owner }}/reverie
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Match the release to the reviewed commit
+        if: github.event_name == 'release'
+        env:
+          BODY: ${{ github.event.release.body }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          if ! printf '%s\n' "$TAG" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "release tag $TAG is not vX.Y.Z"; exit 1
+          fi
+          reviewed=$(printf '%s\n' "$BODY" | sed -n 's/^Reviewed commit: \([0-9a-f]\{40\}\)[[:space:]]*$/\1/p' | head -n 1)
+          actual=$(git rev-parse HEAD)
+          echo "tag $TAG is $actual; release notes name ${reviewed:-nothing}"
+          test -n "$reviewed" && test "$reviewed" = "$actual"
+
+      - name: Build
+        env:
+          VERSION: ${{ github.event.release.tag_name || github.sha }}
+        run: |
+          docker build --file docker/Containerfile --tag "reverie:$GITHUB_SHA" \
+            --build-arg "REVERIE_VERSION=${VERSION#v}" \
+            --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" \
+            --label "org.opencontainers.image.revision=$GITHUB_SHA" .
+          docker image inspect --format '{{.Id}}' "reverie:$GITHUB_SHA" | tee image-id.txt
+
+      - name: Check the image contents
+        run: |
+          docker save "reverie:$GITHUB_SHA" --output image.tar
+          python3 -m cto.image_check image.tar --allow docker/image-check-allow.tsv --json image-check.json
+          unpacked=$(docker image inspect --format '{{.Size}}' "reverie:$GITHUB_SHA")
+          compressed=$(gzip -1 --stdout image.tar | wc -c)
+          echo "image size: $((unpacked / 1000000)) MB unpacked, about $((compressed / 1000000)) MB compressed" \
+            | tee -a "$GITHUB_STEP_SUMMARY"
+          rm image.tar
+
+      - name: Boot with an empty instance and no mounts
+        run: |
+          # The image's own start script and default command, as a user would run it.
+          docker run --detach --name boot --network none "reverie:$GITHUB_SHA"
+          status() { docker exec boot curl -sS -o /dev/null -w '%{http_code}' "$@" http://127.0.0.1:3000/api/status || true; }
+          for _ in $(seq 1 60); do
+            code=$(status)
+            if [ "$code" != 000 ] && [ -n "$code" ]; then break; fi
+            sleep 2
+          done
+          echo "without the owner password: ${code:-none}"
+          [ "$code" = 401 ] && ok=1
+          # Sign in with the generated password through a netrc file, so it never appears in a command line.
+          docker exec boot bash -c 'umask 077; printf "machine 127.0.0.1 login owner password %s\n" \
+            "$(cat /instances/default/owner-password)" > "$TMPDIR/netrc"' || ok=
+          code=$(status --netrc-file /scratch/tmp/netrc)
+          echo "with the owner password: $code"
+          [ "$code" = 200 ] || ok=
+          test "$(docker exec boot stat -c %a /instances/default/owner-password)" = 600 || ok=
+          docker exec boot /opt/fleet/python/bin/python3 -I -c 'import cto, experts' || ok=
+          docker inspect --format 'state {{.State.Status}}, exit code {{.State.ExitCode}}' boot
+          docker logs boot 2>&1 | tail -n 40
+          docker rm --force boot
+          test "${ok:-}" = 1
+
+      - name: Publish the release
+        if: github.event_name == 'release' && !github.event.release.prerelease
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          version=${TAG#v}
+          line=${version%.*}
+          tags=$version
+          # A patch on an older line must not move that line's newest tag or latest backward.
+          newest_in_line=$(git tag --list "v$line.*" --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n 1)
+          newest=$(git tag --list 'v*' --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n 1)
+          test "$newest_in_line" = "$TAG" && tags="$tags $line"
+          test "$newest" = "$TAG" && tags="$tags latest"
+          echo "publishing: $tags"
+          printf '%s\n' "$GH_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          for tag in $tags; do
+            docker tag "reverie:$GITHUB_SHA" "$IMAGE:$tag"
+            docker push "$IMAGE:$tag"
+          done
+          docker logout ghcr.io
+          docker image inspect --format '{{index .RepoDigests 0}}' "$IMAGE:$version" | tee -a "$GITHUB_STEP_SUMMARY"
+
+  release-assets:
+    needs: image
+    if: github.event_name == 'release' && !github.event.release.prerelease
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Attach the setup script
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "$TAG" scripts/setup.sh --clobber --repo "$GITHUB_REPOSITORY"

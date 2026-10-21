@@ -1,0 +1,3 @@
+# Fake credentials in console test fixtures, shipped with the console tree.
+opt/fleet/apps/console/test/experts-api.test.ts	private_key
+opt/fleet/apps/console/test/custom-model-injection-apply.test.ts	openai_or_anthropic_key
