@@ -98,7 +98,7 @@ package is downloaded. `reverie` is the product and CLI name. The original MIT
 license and copyright are retained in `apps/console/LICENSE`, with source
 provenance in `apps/console/UPSTREAM.md`.
 
-For a recovered personal deployment, `scripts/reverie-recreate --dry-run` shows
+For a recovered deployment, `scripts/reverie-recreate --dry-run` shows
 the mounts before creation. The personal launcher mounts `~/.local/share/reverie/home`
 at `/home/cto`, so native conversations and login configuration survive recreation.
 Persistent instance handoffs belong under `/instances/example/runtime/handoffs`;
