@@ -136,7 +136,7 @@ python3 -m cto.opencode --install /path/to/runtime \
 
 The installer copies the memory skill into `.agents/skills`, `.claude/skills` and
 `.opencode/skills`, and records the explicit instance path in bridge metadata.
-Read [fleet-memory](../skills/fleet-memory/SKILL.md) for the portable lookup/write
+Read [fleet-memory](../cto/skills/fleet-memory/SKILL.md) for the portable lookup/write
 workflow. Use concise, verified project handoffs with source receipts. Private
 notes stay private; dream ideas are unverified hypotheses until checked.
 
@@ -150,7 +150,7 @@ Optional training tools are not run by installation.
 
 ## Runtime selection and recovery
 
-The [fleet-runtime skill](../skills/fleet-runtime/SKILL.md) covers Reverie backend
+The [fleet-runtime skill](../cto/skills/fleet-runtime/SKILL.md) covers Reverie backend
 handoffs. Configure `examples/runtime-policy.json` outside the repository, with
 actual enabled model IDs and a verified adopted case. The generic image installs
 `fleet-backend`; configure Reverie's per-mode commands to `fleet-backend opencode`,
@@ -178,7 +178,7 @@ training tools are retained for compatibility but are outside the runtime workfl
 
 The CTO curates each worker's short-term context: task, acceptance checks, constraints,
 verified findings with sources, relevant files/tools and targeted memory queries.
-Use [fleet-context](../skills/fleet-context/SKILL.md) and `cto_fleet` action `brief`.
+Use [fleet-context](../cto/skills/fleet-context/SKILL.md) and `cto_fleet` action `brief`.
 The builder budgets against model context/output limits and occupied prompt space,
 preserves complete required instructions, and reports omitted optional items. If the
 essentials do not fit, split or shorten the task. It never injects private histories
@@ -254,8 +254,17 @@ storage; do not commit them with the shareable source.
 
 ## Proposed memory design
 
-Open the standalone [memory explorer](../docs/memory-explorer.html) in a browser.
-It contains only synthetic records and shows a self-organizing tag tree, typed
+GitHub displays the [memory explorer HTML source](memory-explorer.html) rather than running it.
+To view the standalone demo, run this from the repository root:
+
+```bash
+python3 -m http.server 8000 --bind 127.0.0.1 --directory docs
+```
+
+Then [open the memory explorer](http://127.0.0.1:8000/memory-explorer.html).
+Stop the preview server with Ctrl+C when finished.
+
+The demo contains only synthetic records and shows a self-organizing tag tree, typed
 associations, human-inspired consolidation and bounded task-context selection.
 This is a design visualization; the production store has not yet adopted this
 richer schema or tag reorganization. No live or private memory is loaded.
