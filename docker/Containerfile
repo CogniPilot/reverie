@@ -35,9 +35,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && useradd --uid 2000 --gid fleet --create-home --shell /bin/bash cto \
     && printf 'cto ALL=(ALL) NOPASSWD: ALL\n' > /etc/sudoers.d/fleet-cto \
     && chmod 0440 /etc/sudoers.d/fleet-cto && visudo --check \
-    && install -d -m 2770 -o cto -g fleet /workspace /scratch
-# Agent CLIs live in the image, never only in a container's writable layer (lost on recreate).
-RUN npm install --global opencode-ai@1.18.31 @anthropic-ai/claude-code@2.1.300 @openai/codex@0.162.1 && npm cache clean --force
+    && install -d -m 2770 -o cto -g fleet /workspace /scratch /instances
+# Agent CLIs live in the image, never only in a container's writable layer (lost on recreate). Claude Code is
+# not shipped; the start script installs it on the volume when REVERIE_INSTALL_CLIS asks for it.
+RUN npm install --global opencode-ai@1.18.31 @openai/codex@0.162.1 && npm cache clean --force \
+    && rm -rf /tmp/node-compile-cache
 WORKDIR /opt/fleet
 COPY pyproject.toml README.md LICENSE THIRD_PARTY_NOTICES.md ./
 COPY cto ./cto
@@ -54,8 +56,14 @@ RUN python3 -m venv /opt/fleet/python \
     && ln -s /opt/fleet/apps/console/dist/index.js /usr/local/bin/reverie \
     && ln -s /opt/fleet/apps/console/dist/index.js /usr/local/bin/fleet \
     && ln -s /opt/fleet/apps/console/dist/index.js /usr/local/bin/codeman
-ENV HOME=/home/cto FLEET_CONTAINER=1 FLEET_CASES_PATH=/scratch/cases FLEET_RESEARCH_ROOT=/scratch/research TMPDIR=/scratch/tmp PATH=/opt/fleet/python/bin:$PATH
+COPY --chmod=0755 docker/entrypoint.sh /usr/local/bin/reverie-start
+ARG REVERIE_VERSION=dev
+ENV REVERIE_VERSION=$REVERIE_VERSION HOME=/home/cto FLEET_CONTAINER=1 FLEET_CASES_PATH=/scratch/cases FLEET_RESEARCH_ROOT=/scratch/research TMPDIR=/scratch/tmp PATH=/opt/fleet/python/bin:$PATH
 USER cto
 WORKDIR /workspace
-# In-container dashboard is opt-in: reverie web --host 0.0.0.0 --port 3000.
-CMD ["sleep", "infinity"]
+# The start script prepares the instance on a volume mounted at /instances (owner password, upgrade backup,
+# opt-in CLIs), then runs the console. Any other command runs after the same preparation. The development
+# and personal launchers bypass it with --entrypoint /usr/bin/env and pass their own command.
+EXPOSE 3000
+ENTRYPOINT ["/usr/local/bin/reverie-start"]
+CMD ["reverie", "web", "--host", "0.0.0.0", "--port", "3000"]

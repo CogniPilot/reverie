@@ -169,7 +169,7 @@ args+=(--env FLEET_INSTANCE_CONFIG=/instances/personal/config/instance.json
   --mount "type=bind,src=$repo,dst=/workspace"
   --mount "type=bind,src=$scratch,dst=/scratch"
   --mount "type=bind,src=$instance,dst=/instances/personal"
-  "$image" /usr/local/bin/reverie web --host 0.0.0.0 --port 3000 --allow-unauthenticated-network)
+  --entrypoint /usr/bin/env "$image" /usr/local/bin/reverie web --host 0.0.0.0 --port 3000 --allow-unauthenticated-network)
 run "$launcher" engine "${args[@]}"
 
 if [ "$install_launcher" = 1 ]; then
