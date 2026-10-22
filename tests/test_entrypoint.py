@@ -73,6 +73,18 @@ class EntrypointTest(unittest.TestCase):
         self.assertEqual(result.stdout, "chosen")
         self.assertFalse((self.data / "owner-password").exists())
 
+    def test_managed_provider_guard_precedes_old_mutable_tool_on_path(self):
+        provider = self.bin / "codex"
+        provider.write_text(executable_script("#!/bin/sh\nprintf 'managed-provider-guard'\n"))
+        provider.chmod(0o755)
+        old = self.data / "tools" / "bin" / "codex"
+        old.parent.mkdir(parents=True)
+        old.write_text(executable_script("#!/bin/sh\nprintf 'old-provider-bypassed-guard'\n"))
+        old.chmod(0o755)
+        result = self.start("codex")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, "managed-provider-guard")
+
     def test_upgrade_backs_up_console_state_once(self):
         self.start("true", REVERIE_VERSION="v0.1.0")
         (self.data / "console" / "state.json").write_text('{"kept": true}')

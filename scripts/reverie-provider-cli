@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# Private runtime launcher: a provider must be ready before a managed session executes it.
+set -euo pipefail
+provider=${1:?provider required}
+installer=${2:?installer required}
+shift 2
+case "$provider" in claude|codex|opencode) ;; *) exit 2 ;; esac
+case "$installer" in /*) ;; *) exit 2 ;; esac
+
+provider_root=${REVERIE_ROOT:-$HOME/reverie}
+if [ "${REVERIE_CONTAINER:-0}" = 1 ]; then
+  provider_data=${REVERIE_DATA:-/instances/default}
+else
+  provider_data=${REVERIE_DATA:-$provider_root/companies/default/data}
+fi
+provider_prefix=$provider_data/tools
+export npm_config_prefix="$provider_prefix"
+unset NPM_CONFIG_PREFIX REVERIE_CLI_INSTALL_LOCKED
+
+if [ "$provider" = codex ] && [ "${1:-}" = update ]; then
+  printf '%s\n' 'Reverie manages pinned Codex updates. Run reverie-install-clis to install the reviewed version.' >&2
+  exit 2
+fi
+
+if [ "${REVERIE_INSTALL_CLIS:-}" != none ]; then
+  # Ignore stdin while waiting/installing: bootstrap input belongs to the eventual CLI composer.
+  REVERIE_INSTALL_CLIS="$provider" REVERIE_CLI_INSTALL_WAIT=1 REVERIE_CLI_INSTALL_REQUIRED=1 \
+    "$installer" </dev/null >&2
+fi
+provider_binary=$provider_prefix/bin/$provider
+if [ ! -x "$provider_binary" ]; then
+  printf 'Reverie: %s is unavailable. Run reverie-install-clis, then retry.\n' "$provider" >&2
+  exit 127
+fi
+if [ "$provider" = codex ]; then
+  exec "$provider_binary" --config check_for_update_on_startup=false "$@"
+fi
+if [ "$provider" = claude ]; then
+  export DISABLE_AUTOUPDATER=1 DISABLE_UPDATES=1
+fi
+exec "$provider_binary" "$@"

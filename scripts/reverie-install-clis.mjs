@@ -25,12 +25,15 @@ if (process.argv.length !== 2 || requested.some(id => !providers.some(provider =
 }
 mkdirSync(prefix, { recursive: true });
 if (process.env.REVERIE_CLI_INSTALL_LOCKED !== '1') {
-  const child = spawnSync('flock', ['-n', '-E', '75', join(prefix, '.install.lock'), process.execPath, fileURLToPath(import.meta.url)], {
+  const wait = process.env.REVERIE_CLI_INSTALL_WAIT === '1';
+  const requestedWait = Number(process.env.REVERIE_CLI_INSTALL_WAIT_SECONDS || 180);
+  const waitSeconds = Number.isFinite(requestedWait) && requestedWait >= 0.05 && requestedWait <= 180 ? requestedWait : 180;
+  const child = spawnSync('flock', [ ...(wait ? ['-w', String(waitSeconds)] : ['-n']), '-E', '75', join(prefix, '.install.lock'), process.execPath, fileURLToPath(import.meta.url)], {
     env: { ...process.env, REVERIE_CLI_INSTALL_LOCKED: '1' }, stdio: 'inherit',
   });
-  if (child.status === 75) console.log('reverie-install-clis: an installer is already running.');
+  if (child.status === 75) console.log(wait ? 'reverie-install-clis: provider preparation timed out; retry when installation finishes.' : 'reverie-install-clis: an installer is already running.');
   else if (child.error) console.error('reverie-install-clis: installer could not start.');
-  process.exit(child.status === 75 ? 0 : child.status ?? 1);
+  process.exit(child.status === 75 && !wait ? 0 : child.status ?? 1);
 }
 const timeoutSeconds = 120;
 const cache = process.env.npm_config_cache || join(process.env.TMPDIR || join(process.env.REVERIE_ROOT || join(homedir(), 'reverie'), 'scratch/tmp'), 'npm-provider-clis');
@@ -114,7 +117,9 @@ patchOwnedElfs();
 const runnable = provider => {
   const binary = join(prefix, 'bin', provider.id);
   try { accessSync(binary, constants.X_OK); } catch { return false; }
-  return spawnSync('timeout', ['--kill-after=2s', '10s', binary, '--version'], { env, stdio: 'ignore' }).status === 0;
+  const result = spawnSync('timeout', ['--kill-after=2s', '10s', binary, '--version'], { env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 16384 });
+  const version = provider.version.replaceAll('.', '\\.');
+  return result.status === 0 && new RegExp(`\\b${version}\\b`).test(result.stdout || '');
 };
 const status = (provider, state) => {
   const path = join(prefix, `.install-${provider.id}.json`);
@@ -145,5 +150,6 @@ for (const provider of providers.filter(provider => requested.includes(provider.
     : result;
   const ready = result.status === 0 && setup.status === 0 && runnable(provider);
   status(provider, ready ? 'ready' : 'unavailable');
+  if (!ready && process.env.REVERIE_CLI_INSTALL_REQUIRED === '1') process.exitCode = 1;
   console.log(`reverie-install-clis: ${provider.id} ${ready ? 'ready' : 'unavailable; retry with reverie-install-clis when the network/runtime is ready'}.`);
 }

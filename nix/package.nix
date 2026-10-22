@@ -28,7 +28,7 @@ let
       npm test -- test/company-recover.test.ts test/routes/company-routes.test.ts \
         test/company-service.test.ts test/company-hierarchy.test.ts \
         test/owner-auth-admin-grant.test.ts test/owner-auth-review.test.ts \
-        test/experts-api.test.ts test/self-update.test.ts \
+        test/experts-api.test.ts test/experts-delegated-server.test.ts test/delegated-session-create.test.ts test/self-update.test.ts \
         test/owner-auth-lock-portability.test.ts test/company-full-page.test.ts \
         test/service-installer.test.ts test/company-wake.test.ts \
         test/company-recovery-prompt.test.ts test/company-wake-server.test.ts \
@@ -99,7 +99,7 @@ let
     paths = [ console memory pkgs.nodejs_22 pkgs.tmux pkgs.git pkgs.ripgrep
       pkgs.curl pkgs.coreutils pkgs.bashInteractive pkgs.gnugrep pkgs.gnused
       pkgs.gawk pkgs.findutils pkgs.gnutar pkgs.gzip pkgs.procps pkgs.which pkgs.gnumake pkgs.gcc
-      pkgs.cacert lockTools ];
+      pkgs.cacert lockTools ] ++ providerLaunchers;
     pathsToLink = [ "/bin" "/share" ];
   };
   entrypoint = pkgs.writeShellScript "reverie-start" (builtins.readFile (src + "/docker/entrypoint.sh"));
@@ -120,6 +120,12 @@ let
       exec node ${cliInstallerSource} "$@"
     '';
   };
+  providerLauncherSource = pkgs.writeText "reverie-provider-cli"
+    (builtins.readFile (src + "/scripts/reverie-provider-cli"));
+  providerLaunchers = map (provider: pkgs.writeShellScriptBin provider ''
+    export PATH=${pkgs.nodejs_22}/bin:${pkgs.coreutils}/bin:${lockTools}/bin:$PATH
+    exec ${pkgs.bash}/bin/bash ${providerLauncherSource} ${provider} ${installClis}/bin/reverie-install-clis "$@"
+  '') [ "claude" "codex" "opencode" ];
   launcher = pkgs.writeShellScript "reverie-launcher" ''
     export PATH=${installClis}/bin:${runtime}/bin:$PATH
     export REVERIE_MCP_MEMORY_PYTHON=${memory}/bin/python3

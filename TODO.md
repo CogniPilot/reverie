@@ -20,6 +20,7 @@ Updated as work is tested and deployed. Existing backups must remain intact.
 - [x] Install pinned Claude and Codex CLIs into persistent user storage at startup; both verified signed in after replacement.
 - [x] Finish OpenCode CLI installation compatibility; all three provider commands verified runnable, with no provider CLIs distributed in the image.
 - [x] Update installed Codex to 0.163.0 and Claude Code to 2.1.308; verify native startup, updater suppression, project trust and preservation of existing account configuration.
+- [x] Guard managed provider launches against concurrent installation and stale binaries; keep npm globals on persistent writable storage and retry transient Claude availability checks after fifteen seconds.
 - [x] Replace the existing-session hiring picker with plan, model, effort and harness selection; deployed for owner testing.
 - [x] Surface local model endpoint selection with compatible owner-configured harnesses.
 - [x] Add a way to delete a workspace/channel grouping while preserving channels and messages.
@@ -68,13 +69,14 @@ Updated as work is tested and deployed. Existing backups must remain intact.
 - [x] Hire opens a four-step role, person, work and review wizard from the People + button, with Cancel on every step. Profiles retain editable role, duties and personality; model and effort stay in the later runtime editor.
 - [ ] Detailed generic role briefs and skill profiles, including CTO/COO templates with editable explicit authority presets; emphasize evidence, responsibilities and uncertainty rather than omniscience.
 - [ ] Share templates and validation with an agent-callable hiring API enforcing Can hire, allowed plans and grant limits.
+- [x] Verify explicitly delegated template hiring under enforced owner sign-in, including bounded session creation, CLI activation, account and parent inheritance, fresh grant checks and rollback on startup failure.
 - [ ] One canonical employee profile page with permission-based editing, shared by hiring and later edits.
 - [ ] Owner/admin/moderator/member defaults; plan Use and Manage grants remain separate from server roles and are editable during hiring.
 - [ ] Curated editable name/avatar/Kokoro voice tags as soft randomization preferences; avoid duplicate names and preset photos within a company.
 - [x] Randomizable, editable personality and working style; detailed role duties reach ordinary agent conversations as profile context. Further interest/tag curation remains below.
 - [x] Dream and Sleep opt-in checkboxes on employee cards, hiring and profile editing, off by default, with explanatory tooltips. These permit scheduled work without starting an independent nightly timer.
 - [ ] Agents can request Sleep as a Gantt task. A coordinator with explicit scheduling permission (such as the appointed COO/CTO) fits it around company work; record requests, approval and the scheduled window.
-- [ ] Package and run the optional Kokoro-ONNX service with contained model storage; keep voice choice and preview independent from pronouns.
+- [ ] Next after the current runtime and hiring fixes: restore Kokoro voice service availability and load its voices in expert profiles, with persistent selection and a working sample preview. Package the optional Kokoro-ONNX service with contained model storage; keep voice choice independent from pronouns.
 
 ## Deferred
 

@@ -32,6 +32,7 @@ import type { Socket } from 'node:net';
 import { ApiErrorCode, createErrorResponse } from '../types.js';
 import type { SessionPort } from '../web/ports/session-port.js';
 import { ownerFor, resolveParentSessionId } from '../web/route-helpers.js';
+import { claimDelegatedSessionCreate, consumeDelegatedSessionCreate, hasDelegatedSessionCreate } from './delegated-session-create.js';
 import type { OwnerAuthService } from './service.js';
 import type { Relations } from './relations.js';
 
@@ -240,7 +241,9 @@ export function registerOwnerPolicy(app: FastifyInstance, deps: PolicyDeps): voi
   // else would let it spawn a child "under" any session and reach it through the upward rule. The
   // body is parsed only after onRequest, so this check runs as a preHandler; a refused value is
   // dropped (the caller's own header then names the parent), not an error.
-  app.addHook('preHandler', async (req: FastifyRequest) => {
+  app.addHook('preHandler', async (req: FastifyRequest, reply: FastifyReply) => {
+    if (consumeDelegatedSessionCreate(req) === false)
+      return reply.code(403).send(createErrorResponse(ApiErrorCode.FORBIDDEN, 'The delegated hire authorization changed or the session request did not match'));
     const policy = deps.service.policy();
     const caller = callers.get(req);
     if (policy === 'off' || caller?.kind !== 'agent') return;
@@ -269,12 +272,14 @@ export function registerOwnerPolicy(app: FastifyInstance, deps: PolicyDeps): voi
 
   app.addHook('onRequest', async (req: FastifyRequest, reply: FastifyReply) => {
     const policy = deps.service.policy();
-    if (policy === 'off') return;
+    if (policy === 'off' && !hasDelegatedSessionCreate()) return;
     const route = req.routeOptions?.url;
     const rawUrl = req.url ?? '';
     const routeClass = deps.isCapabilityRequest(req) ? 'public' : classify(req.method, route, rawUrl);
     const caller = callerOf(req, deps);
     callers.set(req, caller);
+    const delegatedHire = caller.kind === 'agent' && claimDelegatedSessionCreate(req, caller.session);
+    if (policy === 'off') return;
     const key = route !== undefined ? `${req.method} ${route}` : `UNMATCHED ${req.method}`;
     const upgrade = String(req.headers.upgrade ?? '').toLowerCase() === 'websocket';
     const deny = (status: 401 | 403, message: string, reason: string, code?: ApiErrorCode) => {
@@ -320,7 +325,7 @@ export function registerOwnerPolicy(app: FastifyInstance, deps: PolicyDeps): voi
       adminGrants.set(req, caller.session!);
       auditHourly('admin_action', `${caller.session} ${key}`, { caller: caller.session, route: key });
     }
-    if (!admin && !allowed(routeClass, caller.kind)) {
+    if (!admin && !delegatedHire && !allowed(routeClass, caller.kind)) {
       if (caller.kind === 'anonymous') return deny(401, 'Sign in as the owner', 'anonymous');
       return deny(403, 'Only the owner may do this', 'owner_only');
     }

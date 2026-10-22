@@ -1,4 +1,5 @@
 import { isEmbassyProtocolRoute } from '../embassy-public-routes.js';
+import { withDelegatedSessionCreate } from '../owner-auth/delegated-session-create.js';
 import { BuiltinEmbassy } from '../embassy-builtin.js';
 import { registerBuiltinEmbassyRoutes } from './routes/embassy-builtin-routes.js';
 import { employeeRestContext, employeeProfileContext } from '../company-types.js';
@@ -1787,45 +1788,57 @@ export class WebServer extends EventEmitter {
       },
     };
     // Experts: owner-kept templates hired as employees (see expert-routes.ts). The record is instance data.
-    // A hire creates its session by injecting POST /api/sessions: that handler is an inline closure in
-    // session-routes.ts with no separate creation function to call. The injected request carries the
-    // caller's own cookie, authorization, origin and host, and never an agent header, so the route sees
-    // exactly the caller's credentials and the owner policy runs on it again:
-    // - an owner hire passes the same owner-cookie and same-origin checks a direct POST would;
-    // - a delegate holds no owner cookie, so under `enforce` the injected request is anonymous and the
-    //   policy refuses it (401) before the handler runs: the hire fails and nothing is created. It can
-    //   never be raised to owner by this route. Under `off`/`log` it reaches the handler as the owner,
-    //   which is why the hire route refuses a delegate's mode, accountProfileId and any workingDir
-    //   outside settings.delegateWorkingRoot first: what the delegate can choose is the template's own
-    //   launch inside that root.
+    // Preserve the caller's credentials. A validated delegate keeps its lineage and
+    // gets private one-use authority for this exact template payload, never an owner cookie.
     const company = this.companyService;
     registerExpertRoutes(this.app, {
       store: new ExpertStore(dataPath('experts.json'), envValue(process.env, 'EXPERTS_SEED_DIR') || undefined),
       callerSession: (req) => resolveParentSessionId(ctx, req, undefined, ownerFor(req)),
-      createSession: async (req, launch) => {
+      createSession: async (req, launch, delegate) => {
         const headers: Record<string, string> = { 'content-type': 'application/json' };
         for (const name of ['cookie', 'authorization', 'origin', 'host']) {
           const value = req.headers[name];
           if (typeof value === 'string') headers[name] = value;
         }
-        const res = await this.app.inject({
+        const payload = sessionCreateBody(launch);
+        if (delegate) {
+          // A delegate is always evaluated as an agent, even when an owner browser
+          // also supplied cookies on the outer request. Basic auth still identifies
+          // the same multi-user principal; no owner credential is synthesized.
+          delete headers.cookie;
+          headers['x-reverie-parent-session'] = delegate.sessionId;
+          payload.parentSessionId = delegate.sessionId;
+        }
+        const inject = () => this.app.inject({
           method: 'POST',
           url: '/api/sessions',
           headers,
-          payload: sessionCreateBody(launch),
+          payload,
         });
-        let json: { success?: boolean; error?: string; session?: { id?: unknown } } | undefined;
+        const res = delegate ? await withDelegatedSessionCreate({ sessionId: delegate.sessionId, owner: ownerFor(req), payload, authorized: delegate.authorized }, inject) : await inject();
+        let json: { success?: boolean; error?: string; session?: { id?: unknown }; data?: { session?: { id?: unknown } } } | undefined;
         try {
           json = res.json();
         } catch {
           json = undefined;
         }
-        const id = json?.session?.id;
+        const id = json?.data?.session?.id ?? json?.session?.id;
         if (res.statusCode >= 400 || json?.success === false || typeof id !== 'string') {
+          if (typeof id === 'string') {
+            await this.cleanupSession(id, true, 'expert_hire_rollback');
+            await company.removeTemporaryAgent(ownerFor(req), id).catch(() => undefined);
+          }
           const status = res.statusCode >= 400 && res.statusCode < 500 ? res.statusCode : 502;
           throw new ExpertError(`The session was not created: ${json?.error ?? `status ${res.statusCode}`}`, status);
         }
         return id;
+      },
+      startSession: async (id) => {
+        const session = this.sessions.get(id);
+        if (!session) throw new ExpertError('The newly hired runtime no longer exists', 409);
+        await session.startInteractive();
+        await company.saveRuntimeRecipe(id, expertRuntimeRecipe(session));
+        await company.setDesiredRunning(id, true);
       },
       stopSession: (id) => this.cleanupSession(id, true, 'expert_retire'),
       sessionExists: (id) => this.sessions.has(id),

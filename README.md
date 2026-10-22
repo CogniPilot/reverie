@@ -162,10 +162,15 @@ The Nix-built image contains the console and memory runtime. Provider CLIs are
 installed on first start into persistent private tool storage; they are not
 distributed in the image. Native and container installations use the same pinned
 installer. Provider sign-in and company state survive container replacement.
+Managed sessions wait for their provider installation to finish before launching,
+and suppress the provider's automatic update prompt. To retry an installation
+after a network failure, run `reverie-install-clis` in a Reverie terminal.
 
-Open **Company → Hire** to create an expert from a provider plan or local
-model profile, then choose its harness, model and effort. Each expert has a persistent
-identity and memory. Choose an illustrated avatar, upload a photo, or use initials.
+Open **Company → People +** or **Hire** to choose an expert's role, customize
+their profile and review the hire. Choose a provider plan or local model profile;
+model and effort use its defaults. Change Plan, Harness, Model and Effort later
+from the expert's runtime settings. Each expert has a persistent identity and
+memory. Choose an illustrated avatar, upload a photo, or use initials.
 Explicit permissions control orchestration independently of organizational titles.
 
 Nightly research is owner-configured, normally 60 minutes per employee, with an

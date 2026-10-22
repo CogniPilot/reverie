@@ -53,7 +53,9 @@ export CLAUDE_CONFIG_DIR=${CLAUDE_CONFIG_DIR:-$DATA/accounts/claude} CODEX_HOME=
 
 # Provider programs are installed into the user's persistent volume on first start.
 # The web server starts immediately; offline installation failures remain retryable.
-export PATH="$DATA/tools/bin:$PATH"
+# Keep the immutable runtime's guarded provider launchers ahead of mutable npm bins.
+# They wait for this background installer before running a provider; the web server can still start immediately.
+export PATH="$PATH:$DATA/tools/bin"
 export REVERIE_DATA="$DATA"
 if command -v reverie-install-clis >/dev/null 2>&1; then
   reverie-install-clis </dev/null &

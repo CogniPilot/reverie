@@ -86,7 +86,9 @@ export interface ExpertRouteDeps {
   /** The agent session an `X-Reverie-Parent-Session` header resolves to, if any. */
   callerSession(req: FastifyRequest): string | undefined;
   /** Create the session through the console's session-creation route; resolves to its id. */
-  createSession(req: FastifyRequest, launch: SessionLaunch): Promise<string>;
+  createSession(req: FastifyRequest, launch: SessionLaunch, delegate?: { sessionId: string; authorized(): boolean }): Promise<string>;
+  /** Start only the freshly created runtime, after its persistent identity and rooms exist. */
+  startSession(sessionId: string): Promise<void>;
   /** Stop a session through the console's cleanup path (no history or data directories are removed). */
   stopSession(sessionId: string): Promise<void>;
   sessionExists(sessionId: string): boolean;
@@ -299,18 +301,21 @@ export function registerExpertRoutes(app: FastifyInstance, deps: ExpertRouteDeps
   app.post('/api/experts/:id/hire', async (req, reply) =>
     run(reply, async () => {
       await deps.store.load();
+      return serial(async () => {
       const actor = hiringActor(req);
       const body = parseBody(HireBodySchema, req.body);
       if (findCredential(body.reason)) throw new ExpertError('reason: looks like a credential');
       const { id } = req.params as { id: string };
       const owner = ownerFor(req);
+      let delegatedRoot: string | undefined;
       if (actor.kind === 'delegate') {
         const settings = deps.store.snapshot().settings;
-        // The internal session request carries no agent header, so the session route would treat a
-        // delegate as the owner. Everything that changes privilege therefore comes from the template.
+        // The delegate keeps its agent identity. Only this validated template launch
+        // receives the private, one-use authorization to create a session.
         if (body.mode !== undefined || body.accountProfileId !== undefined)
           throw new ExpertError('A delegate hire uses the template mode and account; leave out mode and accountProfileId', 403);
         const root = settings.delegateWorkingRoot;
+        delegatedRoot = root;
         if (!root) throw new ExpertError('No delegateWorkingRoot is set, so a delegate may not hire', 403);
         let inside = false;
         try {
@@ -344,7 +349,8 @@ export function registerExpertRoutes(app: FastifyInstance, deps: ExpertRouteDeps
         )
           throw new ExpertError(`budgetStop: plan ${row.id} is already at ${row.weeklyPercent}% weekly`);
       }
-      return serial(async () => {
+        // All async checks ran inside the hire queue. Recheck mutable grants now,
+        // then again at both private session-request authorization boundaries.
         const state = deps.store.snapshot();
         const template = state.templates.find((t) => t.id === id);
         if (!template) throw new ExpertError('No such expert template', 404);
@@ -359,6 +365,16 @@ export function registerExpertRoutes(app: FastifyInstance, deps: ExpertRouteDeps
         if (active >= settings.maxActive)
           throw new ExpertError(`Active expert limit reached: ${active} of ${settings.maxActive}; retire one first`, 409);
         if (state.hires.length >= MAX_HIRE_RECORDS) throw new ExpertError('Hire record limit reached', 409);
+        const authorized = () => {
+          if (actor.kind !== 'delegate') return true;
+          const latest = deps.store.snapshot();
+          return deps.callerSession(req) === actor.session && latest.settings.hireDelegates.includes(actor.session) &&
+            latest.settings.delegateWorkingRoot === delegatedRoot && (!latest.settings.requireBudgetStopForDelegates || !!body.budgetStop) &&
+            latest.hires.filter(hire => hire.hiredAt > now() - DAY_MS).length < latest.settings.maxHiresPerDay &&
+            latest.hires.filter(hire => hire.status === 'active').length < latest.settings.maxActive &&
+            JSON.stringify(latest.templates.find(row => row.id === id)) === JSON.stringify(template);
+        };
+        if (!authorized()) throw new ExpertError('The delegated hire authorization changed; ask the owner to review it', 403);
 
         const names = new Set(deps.employeeNames(owner).map(name => name.normalize('NFKC').toLowerCase()));
         let employeeName = template.name;
@@ -373,7 +389,7 @@ export function registerExpertRoutes(app: FastifyInstance, deps: ExpertRouteDeps
           model: body.model ?? (body.mode && body.mode !== template.defaults.mode ? undefined : template.defaults.model),
           effort: body.effort ?? template.defaults.effort,
           accountProfileId: body.accountProfileId ?? template.defaults.accountProfileId,
-        });
+        }, actor.kind === 'delegate' ? { sessionId: actor.session, authorized } : undefined);
         // Undo steps, newest first. The session goes last, after everything that refers to it.
         const undo: Array<() => unknown> = [
           () => deps.stopSession(sessionId),
@@ -395,6 +411,12 @@ export function registerExpertRoutes(app: FastifyInstance, deps: ExpertRouteDeps
           for (const roomId of joins) {
             deps.inviteEmployee(employee.id, roomId, owner);
             undo.unshift(() => deps.leaveRoom(roomId, sessionId));
+          }
+          if (!authorized()) throw new ExpertError('The delegated hire authorization changed before startup', 403);
+          try {
+            await deps.startSession(sessionId);
+          } catch {
+            throw new ExpertError('The expert runtime could not start, so the hire was undone', 503);
           }
           record = {
             id: randomUUID(),

@@ -56,8 +56,11 @@ export class SubscriptionUsageReader {
     }
     const stamp = JSON.stringify(profile) + ':' + mtime;
     const cached = this.cache.get(profile.id);
-    // Credential changes invalidate immediately; briefly cache provider status commands.
-    const cacheMs = profile.provider === 'anthropic' ? 5 * 60_000 : 15_000;
+    // Missing CLI/auth errors can be transient while private tools install. Recheck those
+    // promptly even when the credential file is unchanged; preserve the provider's five-minute
+    // quota polling budget once signed in, including rate-limited usage responses.
+    const cacheMs = profile.provider === 'anthropic' && cached?.result.authState === 'signed-in'
+      ? 5 * 60_000 : 15_000;
     if (cached?.stamp === stamp && Date.now() - cached.result.updatedAt < cacheMs) return cached.result;
     const pending = this.inFlight.get(profile.id);
     if (pending) return pending;

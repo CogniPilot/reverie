@@ -67,6 +67,8 @@ describe('experts api', () => {
   let launches: SessionLaunch[];
   let stopped: string[];
   let noticeFails: boolean;
+  let activationFails: boolean;
+  let activated: string[];
   let clock: number;
   let noticeRoom: string;
   let sideRoom: string;
@@ -95,6 +97,12 @@ describe('experts api', () => {
         const id = `hired-${++counter}`;
         sessions.set(id, { id, name: launch.name, mode: launch.mode });
         return id;
+      },
+      startSession: async (id) => {
+        expect(company.view().employees.some(employee => employee.sessionId === id)).toBe(true);
+        expect(rooms.get(sideRoom)!.members.some(member => member.sessionId === id)).toBe(true);
+        if (activationFails) throw new Error('Synthetic startup failure');
+        activated.push(id);
       },
       stopSession: async (id) => {
         if (stopFails.has(id)) throw new Error('tmux did not answer');
@@ -159,6 +167,8 @@ describe('experts api', () => {
     launches = [];
     stopped = [];
     noticeFails = false;
+    activationFails = false;
+    activated = [];
     stopFails = new Set();
     sendFails = false;
     counter = 0;
@@ -419,6 +429,18 @@ describe('experts api', () => {
       expect(rooms.get(sideRoom)!.members).toHaveLength(0);
       expect((await state()).hires).toHaveLength(0);
       expect(audits).toHaveLength(0);
+    });
+
+    it('awaits activation after registering identity and rooms, and rolls everything back if startup fails', async () => {
+      activationFails = true;
+      const response = await hire('alpha', DELEGATE);
+      expect(response.statusCode).toBe(503);
+      expect(response.json().error).toContain('runtime could not start');
+      expect(activated).toEqual([]); expect(stopped).toEqual(['hired-1']);
+      expect(sessions.has('hired-1')).toBe(false); expect(company.view().employees).toHaveLength(0);
+      expect(rooms.get(sideRoom)!.members).toHaveLength(0);
+      expect((await state()).hires).toHaveLength(0);
+      expect(rooms.get(noticeRoom)!.messages.some(message => message.text.includes('Expert hired'))).toBe(false);
     });
 
     it('refuses to hire with no notice room configured, before creating anything', async () => {
