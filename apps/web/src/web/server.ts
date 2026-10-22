@@ -66,6 +66,7 @@ import { hostname as getHostname, uptime as osUptime, homedir } from 'node:os';
 import { deliverRecoveryPrompt } from '../company-recovery-prompt.js';
 import { CompanyWake } from '../company-wake.js';
 import { spendRebootRestore, autoRestorePinnedIfEnabled } from './routes/reboot-restore-routes.js';
+import { planMoveHarness } from '../plan-move-launch.js';
 import {
   initStartedAtFromProc,
   looksLikeHostReboot,
@@ -1992,10 +1993,10 @@ export class WebServer extends EventEmitter {
       save: records => planRequestStore.save(records),
       moves: planMoves,
       binding: (employeeId, owner) => this.companyService.view(owner).employees.find(employee => employee.id === employeeId)?.sessionId,
-      validateTarget: async (snapshot, target) => {
+      validateTarget: async (_snapshot, target) => {
         const account = await this.planService.account(target);
-        if (!account || account.provider !== (snapshot.mode === 'codex' ? 'openai' : snapshot.mode === 'claude' ? 'anthropic' : null))
-          throw new PlanMoveError('Choose an available plan for the same provider');
+        if (!account) throw new PlanMoveError('Choose an available destination plan');
+        return { mode: planMoveHarness(account) };
       },
       capability: new PlanRequestCapabilities(),
       notify: (record, _file, allowed) => deliverPlanRequest(record, () => this.sessions.get(record.sessionId), allowed),

@@ -87,8 +87,10 @@ export function planMoveExecutor(runtime: PlanMoveRuntime, owner?: string): Plan
       const account = await runtime.plans.account(input.toAccount);
       if (!account) throw new PlanMoveError('The destination plan no longer exists', 404);
       const payload = planMoveLaunch(session(input.sessionId).toState(), account, input);
-      const response = (await runtime.request('POST', '/api/sessions', payload)) as { session?: { id?: unknown } };
-      const id = response?.session?.id;
+      const response = (await runtime.request('POST', '/api/sessions', payload)) as {
+        session?: { id?: unknown }; data?: { session?: { id?: unknown } };
+      };
+      const id = response?.data?.session?.id ?? response?.session?.id;
       if (typeof id !== 'string') throw new PlanMoveError('The replacement response has no session identifier');
       candidates.set(id, input.handoff);
       createdCandidates.add(id);

@@ -82,6 +82,19 @@ export function requestHarness(seed: PlanRequestRecord[] = []) {
 }
 
 describe('expert-approved plan requests', () => {
+  it('binds cross-provider approval to the destination harness and refuses a changed target', async () => {
+    const h = requestHarness();
+    h.port.validateTarget = vi.fn(async () => ({ mode: 'claude' as const }));
+    const record = await h.service.create(h.input, 'owner', h.execution);
+    expect(record.targetMode).toBe('claude');
+    expect(h.port.moves.begin).not.toHaveBeenCalled();
+    h.port.validateTarget = vi.fn(async () => ({ mode: 'codex' as const }));
+    await expect(h.service.decide('request', 'source', h.nonce(), 'approve', 'Use the work handoff', 'owner')).rejects.toThrow('destination harness changed');
+    expect(h.port.moves.begin).not.toHaveBeenCalled();
+    h.port.validateTarget = vi.fn(async () => ({ mode: 'claude' as const }));
+    await h.service.decide('request', 'source', h.nonce(), 'approve', 'Use the work handoff', 'owner');
+    expect(h.port.moves.begin).toHaveBeenCalledWith(expect.objectContaining({ targetMode: 'claude', handoff: 'Use the work handoff' }), 'owner', h.executor);
+  });
   it('persists only a nonce hash, exposes no credential, and does nothing before exact expert approval', async () => {
     const h = requestHarness();
     const record = await h.service.create(h.input, 'owner', h.execution);

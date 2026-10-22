@@ -19,6 +19,7 @@ export interface PlanMoveInput {
   forceBusy: boolean;
   handoff: string;
   model?: string;
+  targetMode?: 'codex' | 'claude';
 }
 
 export interface PlanMoveRecord {
@@ -116,7 +117,7 @@ export class PlanMoves {
   async begin(input: PlanMoveInput, owner?: string, executor: PlanMoveExecutor = this.port): Promise<PlanMoveRecord> {
     await this.init();
     const requestDigest = createHash('sha256')
-      .update(JSON.stringify([input.forceBusy, input.handoff, input.model ?? '']))
+      .update(JSON.stringify([input.forceBusy, input.handoff, input.model ?? '', input.targetMode ?? '']))
       .digest('hex');
     const existing = this.records.get(input.id);
     if (existing) {

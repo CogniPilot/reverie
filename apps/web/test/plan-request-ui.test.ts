@@ -73,6 +73,25 @@ function harness() {
 }
 afterEach(() => pages.splice(0).forEach((page) => page.window.close()));
 describe('owner plan request presentation', () => {
+  it('accepts a drop across providers and explains the automatically selected destination harness', async () => {
+    const h = harness();
+    h.context.B.planBurn.push({ id: 'claude', name: 'Claude Work', provider: 'anthropic' });
+    h.context.planAllocations.accounts.push({ id: 'claude', sessionIds: [] });
+    await h.methods.openPlanMove('alex', 'claude');
+    expect(h.dialog.querySelector<HTMLSelectElement>('[name=target]')!.value).toBe('claude');
+    expect(h.dialog.querySelector('[data-target-harness]')!.textContent).toContain('Harness: Claude');
+    expect(h.dialog.textContent).toContain('destination provider’s model and effort defaults');
+    const select = h.dialog.querySelector<HTMLSelectElement>('[name=target]')!;
+    select.value = 'second'; select.dispatchEvent(new h.dom.window.Event('change'));
+    expect(h.dialog.querySelector('[data-target-harness]')!.textContent).toContain('Harness: Codex');
+    select.value = 'claude'; select.dispatchEvent(new h.dom.window.Event('change'));
+    h.dialog.querySelector('form')!.dispatchEvent(new h.dom.window.Event('submit', { bubbles: true, cancelable: true }));
+    await vi.waitFor(() => expect(h.fetch.mock.calls.some(([path]) => path === '/api/plans/requests')).toBe(true));
+    const request = h.fetch.mock.calls.find(([path]) => path === '/api/plans/requests')!;
+    expect(JSON.parse(request[1]!.body)).toMatchObject({ employeeId: 'alex', sessionId: 'source', toAccount: 'claude' });
+    await vi.waitFor(() => expect(h.dialog.textContent).toContain('Queued until'));
+    expect(h.dom.window.document.querySelector('[data-plan-members=first] [data-member=alex]')).not.toBeNull();
+  });
   it('requests only immutable destination intent, leaves source avatar, and displays a grey destination ghost until resolution', async () => {
     const h = harness();
     await h.methods.openPlanMove('alex', 'second');

@@ -52,7 +52,7 @@ function harness(owner?: string) {
     cleanup: vi.fn(async () => {}),
     authorized: vi.fn(() => true),
     request: vi.fn(async (method, path) =>
-      method === 'POST' && path === '/api/sessions' ? { session: { id: 'new' } } : { data: { wait: { matched: true } } }
+      method === 'POST' && path === '/api/sessions' ? { success: true, data: { session: { id: 'new' } } } : { data: { wait: { matched: true } } }
     ),
     capture: vi.fn(async () => [{ pid: 123, start: '456' }]),
     survivors: vi.fn(async () => []),
@@ -107,6 +107,17 @@ describe('runtime adapter uses normal creation and interactive paths, never chan
     await expect(test.executor.ready('new')).rejects.toThrow('pane exited');
     expect(test.sessions.get('new')?.writeViaMux).not.toHaveBeenCalled();
     expect(test.runtime.cleanup).not.toHaveBeenCalled();
+  });
+
+  it('launches a cross-provider replacement through the normal wrapped session API before touching the source', async () => {
+    const test = harness();
+    test.runtime.plans.account = vi.fn(async (id) => ({ id, provider: 'anthropic', label: id, profileId: id }) as PlanAccount);
+    expect(await test.executor.create({ ...input, targetMode: 'claude' }, undefined)).toBe('new');
+    expect(test.runtime.request).toHaveBeenCalledWith('POST', '/api/sessions', expect.objectContaining({ mode: 'claude', subscriptionProfileId: 'second', employeeId: 'casey' }));
+    expect(test.runtime.cleanup).not.toHaveBeenCalled();
+    const payload = (test.runtime.request as ReturnType<typeof vi.fn>).mock.calls[0][2];
+    expect(payload.model).toBeUndefined();
+    expect(payload.codexConfig).toBeUndefined();
   });
 
   it('requires a verified submitted handoff after composer readiness', async () => {

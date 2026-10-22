@@ -270,14 +270,23 @@ async function openPlanMove(employeeId, destination) {
     const preview = await planMoveRequest('/api/plans/moves/preview', {employeeId, sessionId: employee.sessionId});
     if (!dialog.open) return;
     const source = B.planBurn.find(account => account.id === preview.account);
-    const targets = B.planBurn.filter(account => account.id !== preview.account && account.provider === source?.provider);
-    if (!targets.length) throw new Error('No other plan for this provider is available.');
+    const targets = B.planBurn.filter(account => account.id !== preview.account && ['openai', 'anthropic'].includes(account.provider));
+    if (!targets.length) throw new Error('No other plan is available.');
     if (destination === preview.account) { dialog.close(); return; }
-    if (destination && !targets.some(account => account.id === destination)) throw new Error('Choose another plan for the same provider.');
+    if (destination && !targets.some(account => account.id === destination)) throw new Error('Choose an available destination plan.');
     dialog.innerHTML = `<h3>Request move: ${esc(employee.name)}</h3><p class="status">From ${esc(source?.name || preview.account)}. The expert keeps working here until it prepares a handoff and approves the request. A grey avatar marks the requested destination. The old session stops only after its replacement is ready.</p><form>
       <label>Destination plan<select name="target">${targets.map(account => `<option value="${esc(account.id)}"${account.id === destination ? ' selected' : ''}>${esc(account.name)}</option>`).join('')}</select></label>
+      <p class="hint" data-target-harness role="status"></p>
       <p class="err" role="alert"></p><div><button type="submit" class="btn">Request move</button> <button type="button" class="btn" data-close>Cancel</button></div></form>`;
     dialog.querySelector('[data-close]').onclick = () => dialog.close();
+    const target = dialog.querySelector('[name=target]');
+    const explainHarness = () => {
+      const account = targets.find(account => account.id === target.value);
+      const mode = account?.provider === 'openai' ? 'codex' : 'claude';
+      dialog.querySelector('[data-target-harness]').textContent = `Harness: ${mode === 'codex' ? 'Codex' : 'Claude'}. ${mode === preview.mode ? 'Your model and effort stay the same.' : 'The destination provider’s model and effort defaults apply.'}`;
+    };
+    target.onchange = explainHarness;
+    explainHarness();
     let submitting = false;
     dialog.querySelector('form').onsubmit = async event => {
       event.preventDefault();

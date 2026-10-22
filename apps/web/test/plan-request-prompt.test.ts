@@ -3,7 +3,7 @@ import { deliverPlanRequest } from '../src/plan-request-prompt.js';
 import { getCli } from '../src/config/cli-registry/registry.js';
 import type { PlanRequestView } from '../src/plan-request.js';
 
-const record = { id: 'request', fromAccount: 'first', toAccount: 'second' } as PlanRequestView;
+const record = { id: 'request', fromAccount: 'first', toAccount: 'second', mode: 'codex', targetMode: 'claude' } as PlanRequestView;
 describe('safe queued expert plan approval instruction', () => {
   it('waits for work and dialogs to finish before delivering one nonce-free instruction', async () => {
     const session = {
@@ -34,6 +34,8 @@ describe('safe queued expert plan approval instruction', () => {
     const text = session.writeViaMux.mock.calls[0][0];
     expect(text).toContain('reverie agent plan-move approve request --handoff-file');
     expect(text).toContain('reverie agent plan-move reject request');
+    expect(text).toContain('Claude harness');
+    expect(text).toContain('rather than calling the owner-only session creation API directly');
     expect(text).not.toMatch(/[a-f0-9]{64}/);
     expect(text).not.toContain('/plan-request-capabilities/');
   });

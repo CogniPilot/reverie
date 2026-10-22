@@ -172,6 +172,11 @@ model and effort use its defaults. Change Plan, Harness, Model and Effort later
 from the expert's runtime settings. Each expert has a persistent identity and
 memory. Choose an illustrated avatar, upload a photo, or use initials.
 Explicit permissions control orchestration independently of organizational titles.
+Drag an expert onto another plan to request a move, including between Codex and
+Claude. The destination selects its native harness; changing providers uses that
+provider's model and effort defaults. The expert prepares a handoff and approves
+the request before the replacement starts; its source stops only after the
+replacement is ready.
 
 Kokoro speech runs locally with Nix-managed Python, ONNX Runtime and espeak-ng.
 The web launcher starts it in the background; its pinned, checksum-verified models

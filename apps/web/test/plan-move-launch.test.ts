@@ -65,7 +65,29 @@ describe('fresh account launch selection', () => {
     expect(planMoveLaunch(saved, account, { ...input, model: undefined }).codexConfig?.model).toBe('old-model');
     expect(planMoveLaunch({ ...saved, codexConfig: undefined }, account, { ...input, model: undefined }).codexConfig?.model).toBeUndefined();
     expect(() => planMoveLaunch(saved, account, { ...input, handoff: '  ' })).toThrow('handoff');
-    expect(() => planMoveLaunch(saved, { ...account, provider: 'anthropic' }, input)).toThrow('same provider');
+  });
+
+  it('moves Codex to Claude using destination defaults without carrying models, effort or account-private threads', () => {
+    const launch = planMoveLaunch(saved, { ...account, provider: 'anthropic' }, { ...input, targetMode: 'claude' });
+    expect(launch).toMatchObject({ employeeId: 'casey', name: 'Casey', workingDir: '/scratch/casey', mode: 'claude', subscriptionProfileId: 'new-profile' });
+    expect(launch.codexConfig).toBeUndefined();
+    expect(launch.model).toBeUndefined();
+    expect(launch.effort).toBeUndefined();
+    expect(launch.resumeSessionId).toBeUndefined();
+  });
+
+  it('moves Claude to Codex without carrying Claude model, advisor, effort or login environment', () => {
+    const launch = planMoveLaunch({ ...saved, mode: 'claude', model: 'source-claude', effort: 'max', advisorModel: 'source-advisor', resumeSessionId: 'source-thread' }, account, { ...input, targetMode: 'codex' });
+    expect(launch).toMatchObject({ mode: 'codex', codexConfig: {}, subscriptionProfileId: 'new-profile' });
+    expect(launch.model).toBeUndefined();
+    expect(launch.effort).toBeUndefined();
+    expect(launch.advisorModel).toBeUndefined();
+    expect(launch.resumeSessionId).toBeUndefined();
+    expect(launch.envOverrides).toBeUndefined();
+  });
+
+  it('rejects a destination whose provider changed after the expert approved its harness', () => {
+    expect(() => planMoveLaunch(saved, account, { ...input, targetMode: 'claude' })).toThrow('destination harness changed');
   });
 
   it.each(['opencode', 'shell', 'custom-loop'])('refuses unsupported %s without touching the old process', (mode) => {

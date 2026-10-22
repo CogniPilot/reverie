@@ -13,6 +13,7 @@ export const PlanRequestSchema = z
     fromAccount: PlanRequestId,
     toAccount: PlanRequestId,
     mode: z.string(),
+    targetMode: z.enum(['codex', 'claude']).optional(),
     model: z.string().optional(),
     phase: z.enum([
       'pending',
@@ -48,7 +49,7 @@ export interface PlanRequestPort {
   save(records: PlanRequestRecord[]): Promise<void>;
   moves: Pick<PlanMoves, 'begin' | 'get' | 'cancel'>;
   binding(employeeId: string, owner?: string): string | undefined;
-  validateTarget(snapshot: PlanMoveSnapshot, target: string, owner?: string): Promise<void>;
+  validateTarget(snapshot: PlanMoveSnapshot, target: string, owner?: string): Promise<{ mode: 'codex' | 'claude' } | void>;
   capability: {
     write(value: { requestId: string; sessionId: string; nonce: string }): Promise<string>;
     remove(sessionId: string, id: string): Promise<void>;
@@ -243,7 +244,7 @@ export class PlanMoveRequests {
       const snapshot = await execution.executor.snapshot(input.employeeId, owner);
       if (snapshot.sessionId !== input.sessionId || snapshot.account === input.toAccount)
         throw new PlanMoveError('The expert or plan changed. Refresh before requesting a move.');
-      await this.port.validateTarget(snapshot, input.toAccount, owner);
+      const target = await this.port.validateTarget(snapshot, input.toAccount, owner);
       if (this.records.size >= 100) {
         const old = [...this.records.values()].find((record) => !active(record.phase));
         if (!old) throw new PlanMoveError('Resolve pending requests before creating more');
@@ -255,6 +256,7 @@ export class PlanMoveRequests {
         name: snapshot.name,
         fromAccount: snapshot.account,
         mode: snapshot.mode || '',
+        ...(target ? { targetMode: target.mode } : {}),
         model: snapshot.model,
         phase: 'pending',
         createdAt: this.now(),
@@ -314,7 +316,9 @@ export class PlanMoveRequests {
         snapshot.model !== record.model
       )
         throw new PlanMoveError('The expert’s runtime changed. Cancel this request and create a new one.');
-      await this.port.validateTarget(snapshot, record.toAccount, owner);
+      const target = await this.port.validateTarget(snapshot, record.toAccount, owner);
+      if (record.targetMode && record.targetMode !== target?.mode)
+        throw new PlanMoveError('The destination harness changed. Cancel this request and create a new one.');
       await this.issue(record, execution);
       return view(record);
     });
@@ -362,7 +366,9 @@ export class PlanMoveRequests {
         snapshot.model !== record.model
       )
         throw new PlanMoveError('The expert’s runtime changed; ask the owner for a new request');
-      await this.port.validateTarget(snapshot, record.toAccount, record.owner);
+      const target = await this.port.validateTarget(snapshot, record.toAccount, record.owner);
+      if (record.targetMode && record.targetMode !== target?.mode)
+        throw new PlanMoveError('The destination harness changed; ask the owner for a new request');
       record.phase = 'executing';
       await this.revoke(record);
       await this.save();
@@ -378,6 +384,7 @@ export class PlanMoveRequests {
             forceBusy: false,
             handoff: handoff.trim().replace(/[\r\n]+/g, ' '),
             ...(record.model ? { model: record.model } : {}),
+            ...(record.targetMode ? { targetMode: record.targetMode } : {}),
           },
           record.owner,
           execution.executor
