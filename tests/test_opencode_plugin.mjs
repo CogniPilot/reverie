@@ -254,6 +254,21 @@ test("The reply guard relays an unposted reply only to rooms the delivery named,
   const dir = await mkdtemp(join(tmpdir(), "reverie-reply-guard-"));
   const oldEnv = { ...process.env };
   const originalInterval = globalThis.setInterval;
+  const originalTimeout = globalThis.setTimeout;
+  const originalClearTimeout = globalThis.clearTimeout;
+  const timers = new Map();
+  let elapsed = 0;
+  // Await each timer's async relay, including its child process. Wall-clock
+  // sleeps can observe the timer firing before that relay finishes on CI.
+  const advance = async (ms) => {
+    elapsed += ms;
+    for (;;) {
+      const due = [...timers].find(([, timer]) => timer.at <= elapsed);
+      if (!due) return;
+      timers.delete(due[0]);
+      await due[1].run();
+    }
+  };
   try {
     const root = resolve(import.meta.dirname, "..");
     const calls = join(dir, "calls.jsonl");
@@ -270,6 +285,12 @@ test("The reply guard relays an unposted reply only to rooms the delivery named,
       'const tool = Object.assign((definition) => definition, {schema: {string: () => ({describe() {return this}, optional() {return this}}), enum: () => ({})}});');
     const { ReveriePlugin } = await import("data:text/javascript;base64," + Buffer.from(source).toString("base64"));
     globalThis.setInterval = () => ({unref() {}});
+    globalThis.setTimeout = (callback, ms, ...args) => {
+      const handle = { unref() {} };
+      timers.set(handle, { at: elapsed + ms, run: () => callback(...args) });
+      return handle;
+    };
+    globalThis.clearTimeout = (handle) => timers.delete(handle);
     const messages = [], logs = [];
     const hooks = await ReveriePlugin({ directory: dir, serverUrl: new URL("http://127.0.0.1:1234"),
       client: { app: { log: async (entry) => logs.push(entry.body.message) }, session: { messages: async () => ({data: messages}) } } });
@@ -283,7 +304,7 @@ test("The reply guard relays an unposted reply only to rooms the delivery named,
     const say = (room, text = "posted") => hooks.tool.reverie_room.execute({action: "say", text, room}, {sessionID: "s1"});
     const idle = () => hooks.event({event: {type: "session.idle", properties: {sessionID: "s1"}}});
     const busy = () => hooks.event({event: {type: "session.status", properties: {sessionID: "s1", status: {type: "busy"}}}});
-    const settle = () => new Promise((done) => setTimeout(done, 120));
+    const settle = () => advance(120);
 
     // A two-room delivery answered in one room only: the other room gets the reply, marked automated.
     await deliver('[Reverie chat "lounge", "ceo office"] ["lounge"] USER -> everyone: "hi" | ["ceo office"] USER -> everyone: "new image"');
@@ -367,7 +388,7 @@ test("The reply guard relays an unposted reply only to rooms the delivery named,
     reply("Working on it.");
     await idle(); await settle();
     assert.equal((await relays()).length, before + 1);
-    await new Promise((done) => setTimeout(done, 450));
+    await advance(450);
     assert.equal((await relays()).length, before + 2);
 
     // A direct message the agent answered only in its pane is relayed back into that same DM.
@@ -390,6 +411,8 @@ test("The reply guard relays an unposted reply only to rooms the delivery named,
     assert.ok(logs.some((l) => /room unavailable/.test(l)));
   } finally {
     globalThis.setInterval = originalInterval;
+    globalThis.setTimeout = originalTimeout;
+    globalThis.clearTimeout = originalClearTimeout;
     process.env = oldEnv;
     await rm(dir, { recursive: true, force: true });
   }

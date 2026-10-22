@@ -50,7 +50,7 @@ Updated as work is tested and deployed. Existing backups must remain intact.
 - [ ] Let additional humans register and appear alongside agents in company people, with explicit roles and permissions.
 - [x] Deploy the consolidated root skills and removal of legacy console Docker/plugin packaging.
 - [x] Verify editable deployment defaults, source/config access off by default, and explicit project mounts with workspace links. Launcher and legacy recovery checks pass.
-- [x] Ubuntu CI passed Nix builds, login, persistence and crash restart for `0221059`; local `51be1e3` image passed 1,289 web and 552 Python tests and a 99-layer scan with no findings. Repeat CI for the current runtime.
+- [x] Ubuntu CI passed the provider update at `8feee24`; deployed `b87dca1` passed 1,304 web, 553 Python and 36 Node tests and a 99-layer scan with no findings. Repeat CI after making the reply-guard test await its asynchronous relay deterministically.
 - [x] Verify no generated caches, credentials or private instance data are committed.
 
 ## Machine cleanup requiring ordinary host activation
