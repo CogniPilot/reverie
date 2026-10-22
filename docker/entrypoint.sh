@@ -64,4 +64,10 @@ else
 fi
 
 [ "$#" -gt 0 ] || set -- reverie web --host 0.0.0.0 --port "${REVERIE_PORT:-3000}"
+# Speech is local to this instance. Start independently so first-use model downloads
+# never delay the web server; an operator-provided service URL takes precedence.
+if [ "${REVERIE_KOKORO_ENABLED:-1}" = 1 ] && [ -z "${REVERIE_KOKORO_URL:-}" ] &&
+   [ "${1##*/}" = reverie ] && [ "${2:-}" = web ] && command -v reverie-kokoro >/dev/null 2>&1; then
+  reverie-kokoro </dev/null &
+fi
 exec "$@"

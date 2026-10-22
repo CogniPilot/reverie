@@ -76,7 +76,8 @@ Updated as work is tested and deployed. Existing backups must remain intact.
 - [x] Randomizable, editable personality and working style; detailed role duties reach ordinary agent conversations as profile context. Further interest/tag curation remains below.
 - [x] Dream and Sleep opt-in checkboxes on employee cards, hiring and profile editing, off by default, with explanatory tooltips. These permit scheduled work without starting an independent nightly timer.
 - [ ] Agents can request Sleep as a Gantt task. A coordinator with explicit scheduling permission (such as the appointed COO/CTO) fits it around company work; record requests, approval and the scheduled window.
-- [ ] Next after the current runtime and hiring fixes: restore Kokoro voice service availability and load its voices in expert profiles, with persistent selection and a working sample preview. Package the optional Kokoro-ONNX service with contained model storage; keep voice choice independent from pronouns.
+- [x] Nix-managed Kokoro-ONNX service with contained, checksum-verified model storage; expert profiles list installed voices, retain selections independently of pronouns and play real sample previews. Startup does not delay the web server.
+- [ ] After voice: allow expert plan moves between providers. Infer the target provider's compatible harness or ask when configuration is needed; retain the expert handoff and approval flow, identity, memories and channel memberships.
 
 ## Deferred
 

@@ -173,6 +173,16 @@ from the expert's runtime settings. Each expert has a persistent identity and
 memory. Choose an illustrated avatar, upload a photo, or use initials.
 Explicit permissions control orchestration independently of organizational titles.
 
+Kokoro speech runs locally with Nix-managed Python, ONNX Runtime and espeak-ng.
+The web launcher starts it in the background; its pinned, checksum-verified models
+are downloaded on first start into the instance's `data/voice/kokoro` directory.
+Once ready, its voices appear in **Expert profile → Voice**, with **Play sample**
+to preview them. A saved choice applies across devices and remains independent
+of pronouns. Models and saved selections survive image updates.
+Set `REVERIE_KOKORO_ENABLED=0` to disable the bundled service, or set
+`REVERIE_KOKORO_URL` to use an existing compatible service. For a standalone native
+service, run `nix run .#kokoro`; it listens only on `127.0.0.1:8091`.
+
 Nightly research is owner-configured, normally 60 minutes per employee, with an
 IANA timezone and morning coordinator briefing. Each cycle runs real tools in a separate
 session/workspace, with persisted launch ownership and deadline enforcement.

@@ -85,6 +85,28 @@ class EntrypointTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout, "managed-provider-guard")
 
+    def test_kokoro_starts_only_for_web_and_respects_operator_service_or_disable(self):
+        for name, script in {
+            "reverie": "#!/bin/sh\nprintf 'web-started'\n",
+            "reverie-kokoro": "#!/bin/sh\nprintf 'kokoro-started\\n' >&2\n",
+        }.items():
+            command = self.bin / name
+            command.write_text(executable_script(script))
+            command.chmod(0o755)
+        result = self.start("reverie", "web")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, "web-started")
+        self.assertIn("kokoro-started", result.stderr)
+        for command, settings in [
+            (("reverie", "web"), {"REVERIE_KOKORO_ENABLED": "0"}),
+            (("reverie", "web"), {"REVERIE_KOKORO_URL": "http://operator-service:8091"}),
+            (("reverie", "--version"), {}),
+        ]:
+            with self.subTest(command=command, settings=settings):
+                result = self.start(*command, **settings)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertNotIn("kokoro-started", result.stderr)
+
     def test_upgrade_backs_up_console_state_once(self):
         self.start("true", REVERIE_VERSION="v0.1.0")
         (self.data / "console" / "state.json").write_text('{"kept": true}')

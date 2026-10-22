@@ -90,13 +90,14 @@ let
     '';
   };
   memory = pkgs.python3.withPackages (ps: [ memoryPackage ps.pillow ]);
+  kokoro = import ./kokoro.nix { inherit pkgs memoryPackage; };
   lockTools = pkgs.runCommand "reverie-lock-tools" { } ''
     mkdir -p "$out/bin"
     ln -s ${lib.getBin pkgs.util-linux}/bin/flock "$out/bin/flock"
   '';
   runtime = pkgs.buildEnv {
     name = "reverie-runtime";
-    paths = [ console memory pkgs.nodejs_22 pkgs.tmux pkgs.git pkgs.ripgrep
+    paths = [ console memory kokoro pkgs.nodejs_22 pkgs.tmux pkgs.git pkgs.ripgrep
       pkgs.curl pkgs.coreutils pkgs.bashInteractive pkgs.gnugrep pkgs.gnused
       pkgs.gawk pkgs.findutils pkgs.gnutar pkgs.gzip pkgs.procps pkgs.which pkgs.gnumake pkgs.gcc
       pkgs.cacert lockTools ] ++ providerLaunchers;
@@ -161,6 +162,7 @@ let
     ln -s ${launcher} "$out/bin/reverie"
     ln -s ${requestUpdate}/bin/reverie-request-update "$out/bin/reverie-request-update"
     ln -s ${installClis}/bin/reverie-install-clis "$out/bin/reverie-install-clis"
+    ln -s ${kokoro}/bin/reverie-kokoro "$out/bin/reverie-kokoro"
     for command in ${memory}/bin/reverie-*; do
       makeWrapper "$command" "$out/bin/$(basename "$command")" \
         --prefix PATH : ${runtime}/bin \
@@ -168,4 +170,4 @@ let
     done
   '';
 
-in { inherit reverie console memory memoryPackage runtime entrypoint; }
+in { inherit reverie console memory memoryPackage runtime entrypoint kokoro; }
