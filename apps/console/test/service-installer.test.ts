@@ -1,16 +1,17 @@
 /**
- * Unit tests for the unit-file builders behind `codeman service install`
+ * Unit tests for the unit-file builders behind `reverie service install`
  * (issue #231). These are the parts that must be right without launchctl or
  * systemctl in the loop: PATH construction, escaping, and the file contents.
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import {
   buildLaunchAgentPlist,
   buildServiceEnv,
   buildServicePath,
   buildSystemdUnit,
   detectServiceKind,
+  resolveServicePlan,
   systemdQuote,
   xmlEscape,
   type ServicePlan,
@@ -19,13 +20,13 @@ import {
 function plan(overrides: Partial<ServicePlan> = {}): ServicePlan {
   return {
     kind: 'systemd',
-    name: 'codeman-web.service',
+    name: 'reverie-web.service',
     nodePath: '/usr/bin/node',
     execArgv: [],
-    scriptPath: '/home/u/.codeman/app/dist/index.js',
+    scriptPath: '/home/u/.reverie/app/dist/index.js',
     args: ['web', '--host', '127.0.0.1', '--port', '3000'],
     env: { PATH: '/usr/bin:/bin', HOME: '/home/u', LANG: 'en_US.UTF-8' },
-    logPath: '/home/u/.codeman/web.log',
+    logPath: '/home/u/.reverie/web.log',
     workingDir: '/home/u',
     ...overrides,
   };
@@ -84,7 +85,7 @@ describe('buildServiceEnv', () => {
 
   it('does not carry a password into the unit file', () => {
     const env = buildServiceEnv('/usr/bin', '/usr/bin', '/home/u');
-    expect(Object.keys(env)).not.toContain('CODEMAN_PASSWORD');
+    expect(Object.keys(env)).not.toContain('REVERIE_PASSWORD');
   });
 });
 
@@ -102,20 +103,20 @@ describe('escaping', () => {
 
 describe('buildLaunchAgentPlist', () => {
   it('writes the label, the full command and the log paths', () => {
-    const xml = buildLaunchAgentPlist(plan({ kind: 'launchd', name: 'com.codeman.web' }));
-    expect(xml).toContain('<string>com.codeman.web</string>');
+    const xml = buildLaunchAgentPlist(plan({ kind: 'launchd', name: 'com.reverie.web' }));
+    expect(xml).toContain('<string>com.reverie.web</string>');
     expect(xml).toContain('<string>/usr/bin/node</string>');
-    expect(xml).toContain('<string>/home/u/.codeman/app/dist/index.js</string>');
+    expect(xml).toContain('<string>/home/u/.reverie/app/dist/index.js</string>');
     expect(xml).toContain('<string>web</string>');
-    expect(xml).toContain('<string>/home/u/.codeman/web.log</string>');
+    expect(xml).toContain('<string>/home/u/.reverie/web.log</string>');
   });
 
   it('keeps the argument order: node, script, then the web args', () => {
-    const xml = buildLaunchAgentPlist(plan({ kind: 'launchd', name: 'com.codeman.web' }));
+    const xml = buildLaunchAgentPlist(plan({ kind: 'launchd', name: 'com.reverie.web' }));
     // Match whole <string> elements: the label itself contains the word "web".
     const order = [
       '<string>/usr/bin/node</string>',
-      '<string>/home/u/.codeman/app/dist/index.js</string>',
+      '<string>/home/u/.reverie/app/dist/index.js</string>',
       '<string>web</string>',
       '<string>--port</string>',
     ].map((s) => xml.indexOf(s));
@@ -145,7 +146,7 @@ describe('buildLaunchAgentPlist', () => {
 describe('buildSystemdUnit', () => {
   it('builds ExecStart from node, script and args', () => {
     expect(buildSystemdUnit(plan())).toContain(
-      'ExecStart=/usr/bin/node /home/u/.codeman/app/dist/index.js web --host 127.0.0.1 --port 3000'
+      'ExecStart=/usr/bin/node /home/u/.reverie/app/dist/index.js web --host 127.0.0.1 --port 3000'
     );
   });
 
@@ -167,6 +168,7 @@ describe('buildSystemdUnit', () => {
   it('is installable and restarts on failure', () => {
     const unit = buildSystemdUnit(plan());
     expect(unit).toContain('Restart=always');
+    expect(unit).toContain('StartLimitIntervalSec=0');
     expect(unit).toContain('WantedBy=default.target');
   });
 });
@@ -175,5 +177,32 @@ describe('detectServiceKind', () => {
   it('maps the platform to its supervisor', () => {
     const expected = process.platform === 'darwin' ? 'launchd' : process.platform === 'linux' ? 'systemd' : null;
     expect(detectServiceKind()).toBe(expected);
+  });
+});
+
+describe('managed Nix service plan', () => {
+  afterEach(() => vi.unstubAllEnvs());
+  it('runs the executable launcher directly with web arguments and selected data paths', () => {
+    vi.stubEnv('REVERIE_MANAGED_INSTALL', 'nix');
+    vi.stubEnv('REVERIE_NIX_LAUNCHER', process.execPath);
+    vi.stubEnv('REVERIE_DATA_DIR', '/selected/instance');
+    vi.stubEnv('REVERIE_PASSWORD', 'never-copy-credentials');
+    const managed = resolveServicePlan('systemd', { host: '127.0.0.1', port: 3100, https: false });
+    expect(managed.launcherPath).toBe(process.execPath);
+    expect(managed.env.REVERIE_DATA_DIR).toBe('/selected/instance');
+    expect(managed.env.REVERIE_PASSWORD).toBeUndefined();
+    const unit = buildSystemdUnit(managed);
+    expect(unit).toContain(`ExecStart=${process.execPath} web --host 127.0.0.1 --port 3100`);
+    expect(unit).not.toContain(managed.scriptPath);
+    const xml = buildLaunchAgentPlist(managed);
+    expect(xml).not.toContain(xmlEscape(managed.scriptPath));
+    expect(xml).not.toContain('<string></string>');
+  });
+  it('refuses a missing, relative or nonexecutable launcher rather than bypassing Nix', () => {
+    vi.stubEnv('REVERIE_MANAGED_INSTALL', 'nix');
+    for (const value of ['', 'relative/reverie', '/does-not-exist/reverie']) {
+      vi.stubEnv('REVERIE_NIX_LAUNCHER', value);
+      expect(() => resolveServicePlan('systemd', { host: '127.0.0.1', port: 3000, https: false })).toThrow(/LAUNCHER/);
+    }
   });
 });

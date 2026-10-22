@@ -10,7 +10,7 @@
  *   平铺, the grid's own word, or "Tiles (default)" reads as the grid.
  * - Every new key is in the dictionary once (a repeated key in the object
  *   literal silently replaces the first).
- * - The state-row headings the strip draws (CodemanTabTriage's labels)
+ * - The state-row headings the strip draws (ReverieTabTriage's labels)
  *   translate too.
  * - The Bottom bar group (the Git status rows, #543's max repositories and
  *   git timeout among them) translates as one group: heading, every label and
@@ -61,7 +61,7 @@ const english = rowStrings(source.window.document);
 
 const dom = new JSDOM(INDEX, { runScripts: 'outside-only', url: 'http://localhost/' });
 vm.runInContext(I18N, dom.getInternalVMContext(), { filename: 'i18n.js' });
-const api = (dom.window as unknown as { CodemanI18n: Api }).CodemanI18n;
+const api = (dom.window as unknown as { ReverieI18n: Api }).ReverieI18n;
 api.start();
 api.configure({ language: 'zh-CN' });
 const chinese = rowStrings(dom.window.document);
@@ -98,7 +98,7 @@ describe('the Tab Layout settings rows in zh-CN', () => {
       url: 'http://localhost/',
     });
     vm.runInContext(I18N, en.getInternalVMContext(), { filename: 'i18n.js' });
-    const t = (en.window as unknown as { CodemanI18n: Api }).CodemanI18n;
+    const t = (en.window as unknown as { ReverieI18n: Api }).ReverieI18n;
     t.configure({ language: 'en' });
     expect([...english.values()].filter((s) => t.t(s) !== s)).toEqual([]);
     en.window.close();
@@ -162,7 +162,7 @@ describe('the Bottom bar settings group in zh-CN', () => {
       url: 'http://localhost/',
     });
     vm.runInContext(I18N, en.getInternalVMContext(), { filename: 'i18n.js' });
-    const t = (en.window as unknown as { CodemanI18n: Api }).CodemanI18n;
+    const t = (en.window as unknown as { ReverieI18n: Api }).ReverieI18n;
     t.configure({ language: 'en' });
     expect([...englishGroup.values()].filter((s) => t.t(s) !== s)).toEqual([]);
     en.window.close();

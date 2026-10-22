@@ -3,13 +3,13 @@
  * plan versioning (checkpoint, rollback, diff), and plan wizard agents in monitor.
  * Includes 11 SSE handlers for Ralph and plan events.
  *
- * @mixin Extends CodemanApp.prototype via Object.assign
- * @dependency app.js (CodemanApp class, this.ralphStates, this.activeSessionId)
+ * @mixin Extends ReverieApp.prototype via Object.assign
+ * @dependency app.js (ReverieApp class, this.ralphStates, this.activeSessionId)
  * @dependency constants.js (escapeHtml)
  * @loadorder 9 of 15 — loaded after respawn-ui.js, before settings-ui.js
  */
 
-Object.assign(CodemanApp.prototype, {
+Object.assign(ReverieApp.prototype, {
   // Ralph
   _onRalphLoopUpdate(data) {
     // Skip if user explicitly closed this session's Ralph panel

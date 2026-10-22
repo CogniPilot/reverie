@@ -2,7 +2,7 @@
 /**
  * capture-real-overview.mjs
  *
- * Captures a REAL claude-overview screenshot from a LIVE Codeman server
+ * Captures a REAL claude-overview screenshot from a LIVE Reverie server
  * (no mock injection). Drive a real session to do real work, then run:
  *
  *   SID=<sessionId> BASE=http://localhost:5000 OUT=screenshots-real \
@@ -60,15 +60,15 @@ const main = async () => {
   // browser would otherwise hide it. PLAN_USAGE=0 disables.
   const PLAN_USAGE = process.env.PLAN_USAGE !== '0';
   // Terminal console font size. App default is 14px; a fresh headless browser has
-  // no saved codeman-font-size, so it renders at 14 — much larger than a real
+  // no saved reverie-font-size, so it renders at 14 — much larger than a real
   // device where the console has been zoomed down. Seed a smaller value (clamped
   // to the app's [10,24] range) so the console font looks normal in the capture.
   const FONT = Math.max(10, Math.min(24, Number(process.env.FONT || 14)));
   await page.addInitScript(
     ([skin, planUsage, font]) => {
       try {
-        localStorage.setItem('codeman:skin', skin);
-        localStorage.setItem('codeman-font-size', String(font));
+        localStorage.setItem('reverie:skin', skin);
+        localStorage.setItem('reverie-font-size', String(font));
         // Desktop app-settings blob (settings-ui.js getSettingsStorageKey()).
         // Present these display keys explicitly so the server merge won't seed
         // side panels open (display keys only seed from server when absent from
@@ -82,7 +82,7 @@ const main = async () => {
           showTokenCount: false,
         };
         if (planUsage) blob.showPlanUsageLimits = true;
-        localStorage.setItem('codeman-app-settings', JSON.stringify(blob));
+        localStorage.setItem('reverie-app-settings', JSON.stringify(blob));
       } catch {
         /* ignore */
       }

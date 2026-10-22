@@ -12,7 +12,7 @@
  *   `attachment:detected` event while it is open, which is exactly when an agent is
  *   writing files. The route now batches the probes, but a burst of drawers is still
  *   a burst.
- * - A `codeman://attach?path=` magic link in terminal output registers the path
+ * - A `reverie://attach?path=` magic link in terminal output registers the path
  *   fire-and-forget, once per distinct link per PTY chunk. In a remote session that
  *   output is written by a process on the remote host, so a prompt-injected agent can
  *   print hundreds of links and have the server fork one `ssh` per link, each holding
@@ -36,11 +36,11 @@
 
 /**
  * Max remote probes/reads allowed to run concurrently across the whole process.
- * Override with CODEMAN_MAX_REMOTE_FILE_SSH (clamped to >= 1). Four keeps a burst
+ * Override with REVERIE_MAX_REMOTE_FILE_SSH (clamped to >= 1). Four keeps a burst
  * well under OpenSSH's ten-handshake default.
  */
 const MAX_CONCURRENT_REMOTE_SSH = (() => {
-  const raw = Number(process.env.CODEMAN_MAX_REMOTE_FILE_SSH);
+  const raw = Number(process.env.REVERIE_MAX_REMOTE_FILE_SSH);
   return Number.isFinite(raw) && raw >= 1 ? Math.floor(raw) : 4;
 })();
 

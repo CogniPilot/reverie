@@ -134,9 +134,9 @@ const findSessionOrFail = (sessionId: string) => {
 | KeyboardAccessoryBar | ~195 | lines 1480-1680 | Medium |
 | FocusTrap | ~60 | lines 1690-1748 | Medium |
 
-### CodemanApp Class (12,000+ LOC)
+### ReverieApp Class (12,000+ LOC)
 
-The main `CodemanApp` class starting at line 2665 has:
+The main `ReverieApp` class starting at line 2665 has:
 - **60+ Maps/Sets** in the constructor (lines 2667-2805)
 - **18 Map instances** with complex cross-references (subagents, parents, teams, windows)
 - **10+ monolithic methods** exceeding 100 lines each
@@ -587,9 +587,9 @@ src/config/
 ## 11. Medium: Frontend Global State Monolith
 
 **Severity**: MEDIUM
-**Impact**: All state in single CodemanApp class. Tight coupling between unrelated systems.
+**Impact**: All state in single ReverieApp class. Tight coupling between unrelated systems.
 
-### 60+ State Variables in CodemanApp Constructor (lines 2667-2805)
+### 60+ State Variables in ReverieApp Constructor (lines 2667-2805)
 
 ```javascript
 this.sessions = new Map();             // Session data
@@ -980,4 +980,4 @@ These patterns should be **preserved, not refactored**:
 - `CleanupManager` for centralized timer/watcher disposal
 - `Debouncer`/`KeyedDebouncer` for consistent debounce patterns
 - Port interfaces for route module dependency injection
-- `Object.assign(CodemanApp.prototype, ...)` for frontend module composition
+- `Object.assign(ReverieApp.prototype, ...)` for frontend module composition

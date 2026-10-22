@@ -40,7 +40,7 @@ function gridFilter(): string {
   const window: Record<string, { TILE_GRID_SSE_FILTER?: string }> = {};
   const context = vm.createContext({ window, globalThis: {} });
   vm.runInContext(readFileSync(path.resolve(import.meta.dirname, '../src/web/public/constants.js'), 'utf8'), context);
-  return window.CodemanTileGrid.TILE_GRID_SSE_FILTER as string;
+  return window.ReverieTileGrid.TILE_GRID_SSE_FILTER as string;
 }
 const FILTER = gridFilter();
 
@@ -106,19 +106,19 @@ beforeAll(async () => {
   dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'sse-grid-data-'));
   spacesDir = await fs.mkdtemp(path.join(os.tmpdir(), 'sse-grid-spaces-'));
   for (const k of [
-    'CODEMAN_DATA_DIR',
-    'CODEMAN_USER_SPACES_DIR',
-    'CODEMAN_MULTIUSER',
-    'CODEMAN_PASSWORD',
-    'CODEMAN_USERNAME',
+    'REVERIE_DATA_DIR',
+    'REVERIE_USER_SPACES_DIR',
+    'REVERIE_MULTIUSER',
+    'REVERIE_PASSWORD',
+    'REVERIE_USERNAME',
   ]) {
     saved[k] = process.env[k];
   }
-  process.env.CODEMAN_DATA_DIR = dataDir;
-  process.env.CODEMAN_USER_SPACES_DIR = spacesDir;
-  process.env.CODEMAN_MULTIUSER = '1';
-  delete process.env.CODEMAN_PASSWORD;
-  delete process.env.CODEMAN_USERNAME;
+  process.env.REVERIE_DATA_DIR = dataDir;
+  process.env.REVERIE_USER_SPACES_DIR = spacesDir;
+  process.env.REVERIE_MULTIUSER = '1';
+  delete process.env.REVERIE_PASSWORD;
+  delete process.env.REVERIE_USERNAME;
   invalidateUsersCache();
   await createUser({ username: 'root', role: 'admin', password: 'rootpass123' });
   await createUser({ username: 'alice', role: 'user', password: 'alicepass1' });

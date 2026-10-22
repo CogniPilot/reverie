@@ -81,7 +81,7 @@ export function registerHookEventRoutes(
     }
 
     // Wake anything blocked on `GET /api/sessions/:id/wait`. Hooks are the only
-    // DEFINITIVE signals Codeman gets (`idle` is inferred from output stabilization
+    // DEFINITIVE signals Reverie gets (`idle` is inferred from output stabilization
     // and can flap mid-turn), so these two are what an orchestrating agent should
     // wait on.
     //
@@ -133,14 +133,14 @@ export function registerHookEventRoutes(
       const prevClaudeSessionId = session?.claudeSessionId;
       const prevChainLength = session?.claudeSessionChain.length ?? 0;
       // FIRST-HAND: this payload came from the CLI process itself and reached us
-      // because the pane's own $CODEMAN_SESSION_ID addressed it. No cwd, no
+      // because the pane's own $REVERIE_SESSION_ID addressed it. No cwd, no
       // timestamp, nothing a sibling pane on the same folder could win — so the
       // response viewer can stop guessing entirely (see
       // resolveActiveClaudeSessionIdFromHistory).
       session?.adoptClaudeSessionId(data.session_id, { firstHand: true });
       if (event === 'prompt_submitted') {
         // Repairs `lastSubmitAt` for a pane driven straight from tmux: it was
-        // bumped only by input that flowed through Codeman's own write path, so
+        // bumped only by input that flowed through Reverie's own write path, so
         // it read 0 forever for those panes and every consumer of "when did this
         // pane last submit" silently degraded.
         session?.markPromptSubmitted();

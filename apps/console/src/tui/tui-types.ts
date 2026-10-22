@@ -1,5 +1,5 @@
 /**
- * @fileoverview Shared types for the `codeman tui` pure core.
+ * @fileoverview Shared types for the `reverie tui` pure core.
  *
  * The TUI is a client of the server, never a second brain: its rows are the
  * rows `GET /api/sessions/unified` already returns (`UnifiedSessionItem`) and
@@ -35,7 +35,7 @@ export interface TuiSessionRow extends UnifiedSessionItem {
   inputTokens?: number;
   outputTokens?: number;
   /**
-   * tmux session name to attach to (`codeman-<first 8 of the id>`).
+   * tmux session name to attach to (`reverie-<first 8 of the id>`).
    *
    * The unified list does not carry it (no server view merges the mux name into
    * a row), so the app layer fills it in from the local tmux enumeration, which

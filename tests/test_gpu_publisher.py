@@ -1,4 +1,5 @@
-import tests  # noqa: F401  isolates CODEMAN_*/FLEET_* before cto is imported
+from tests import executable_script
+import tests  # noqa: F401  isolates REVERIE_* before reverie is imported
 import io
 import json
 import os
@@ -8,7 +9,7 @@ import time
 import unittest
 from unittest import mock
 
-from cto import gpu_publisher as gp
+from reverie import gpu_publisher as gp
 
 GOOD = "NVIDIA GeForce RTX 4090, 12, 4096, 24576"
 
@@ -27,7 +28,9 @@ class GpuPublisherTests(unittest.TestCase):
     def smi(self, lines=GOOD, exit_code=0, sleep=0):
         self.fakes = getattr(self, "fakes", 0) + 1
         path = self.root / ("nvidia-smi-%d" % self.fakes)
-        body = "#!/bin/sh\n" + ("sleep %d\n" % sleep if sleep else "") + "cat <<'EOF'\n%s\nEOF\nexit %d\n" % (lines, exit_code)
+        body = executable_script("#!/usr/bin/env python3\n") + (
+            "import sys, time\ntime.sleep(%r)\nsys.stdout.write(%r)\nsys.exit(%r)\n"
+            % (sleep, lines + "\n", exit_code))
         path.write_text(body); path.chmod(0o755)
         return str(path)
 

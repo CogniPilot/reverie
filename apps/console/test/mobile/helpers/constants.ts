@@ -118,7 +118,7 @@ export const BODY_CLASSES = {
 
 // Settings localStorage keys
 export const STORAGE_KEYS = {
-  SETTINGS_MOBILE: 'codeman-app-settings-mobile',
-  SETTINGS_DESKTOP: 'codeman-app-settings',
-  NOTIFICATION_PREFS_MOBILE: 'codeman-notification-prefs-mobile',
+  SETTINGS_MOBILE: 'reverie-app-settings-mobile',
+  SETTINGS_DESKTOP: 'reverie-app-settings',
+  NOTIFICATION_PREFS_MOBILE: 'reverie-notification-prefs-mobile',
 } as const;

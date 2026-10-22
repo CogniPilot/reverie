@@ -14,7 +14,7 @@ import { join } from 'node:path';
 
 const probe = vi.hoisted(() => {
   // Short probe timeout so a stall costs ~100 ms, read at import.
-  process.env.CODEMAN_PATH_PROBE_TIMEOUT_MS = '100';
+  process.env.REVERIE_PATH_PROBE_TIMEOUT_MS = '100';
   return { dead: '/mnt/dead-nas-case-parent', releases: [] as Array<() => void>, touched: [] as string[] };
 });
 
@@ -52,7 +52,7 @@ vi.mock('node:fs', async (importOriginal) => {
 import { prepareNewCasePath } from '../src/web/case-path.js';
 
 const root = realpathSync(mkdtempSync(join(tmpdir(), 'case-path-unreachable-')));
-const ctx = { home: join(root, 'home'), dataDir: join(root, 'home', '.codeman'), casesDirs: [join(root, 'cases')] };
+const ctx = { home: join(root, 'home'), dataDir: join(root, 'home', '.reverie'), casesDirs: [join(root, 'cases')] };
 
 afterEach(async () => {
   probe.releases.splice(0).forEach((release) => release());
@@ -62,7 +62,7 @@ afterEach(async () => {
 
 afterAll(() => {
   rmSync(root, { recursive: true, force: true });
-  delete process.env.CODEMAN_PATH_PROBE_TIMEOUT_MS;
+  delete process.env.REVERIE_PATH_PROBE_TIMEOUT_MS;
 });
 
 describe('prepareNewCasePath on a parent folder that does not answer', () => {

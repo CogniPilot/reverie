@@ -187,6 +187,6 @@ describe('voice speak routes', () => {
 
   it('reads the Kokoro URL from the environment', () => {
     expect(kokoroUrl({})).toBe('http://127.0.0.1:8091');
-    expect(kokoroUrl({ CODEMAN_KOKORO_URL: ' http://k:9/ ' })).toBe('http://k:9');
+    expect(kokoroUrl({ REVERIE_KOKORO_URL: ' http://k:9/ ' })).toBe('http://k:9');
   });
 });

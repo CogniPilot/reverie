@@ -4,7 +4,7 @@
 
 ## Problem
 
-When the Cloudflare tunnel is active, anyone who discovers the `*.trycloudflare.com` URL can access Codeman (they just need the Basic Auth password, or if no password is set, full open access). The QR code currently encodes the raw tunnel URL — it provides no additional security. We want:
+When the Cloudflare tunnel is active, anyone who discovers the `*.trycloudflare.com` URL can access Reverie (they just need the Basic Auth password, or if no password is set, full open access). The QR code currently encodes the raw tunnel URL — it provides no additional security. We want:
 
 1. **Scanning the QR code** → seamless, instant access (no password prompt)
 2. **Having only the URL** → blocked by Basic Auth (no access without credentials)
@@ -22,7 +22,7 @@ Phone     → scans, GET /q/Xk9mQ3
 Server    → looks up short code via Map (hash-based, timing-safe)
           → finds token record → validates TTL
           → atomically consumes token (single-use)
-          → issues codeman_session cookie
+          → issues reverie_session cookie
           → 302 redirect to /
           → SSE push: new QR with embedded SVG for desktop display
           → desktop toast: "Device [IP] authenticated via QR"
@@ -46,7 +46,7 @@ Someone who only has `https://abc-xyz.trycloudflare.com/` gets the standard Basi
 | Usage | **Single-use** — atomically consumed on first valid scan |
 | URL format | Short code in path (`/q/Xk9mQ3`), not query params |
 | URL length | ~53-56 chars total — targets QR Version 4 (33x33) for fast scanning |
-| Scope | Only valid when `CODEMAN_PASSWORD` is set (no point without auth) |
+| Scope | Only valid when `REVERIE_PASSWORD` is set (no point without auth) |
 | Lookup | `Map.get()` — hash-based O(1), no timing side-channel |
 
 ### Why This Design?
@@ -80,7 +80,7 @@ Someone who only has `https://abc-xyz.trycloudflare.com/` gets the standard Basi
                                │ 4. Checks consumed flag               │
                                │    → not already used?                 │
                                │ 5. Atomically marks token consumed    │
-                               │ 6. Issues codeman_session cookie      │
+                               │ 6. Issues reverie_session cookie      │
                                │ 7. 302 redirect to /                  │
                                │ 8. Audit log → session-lifecycle.jsonl│
                                │ 9. SSE push: tunnel:qrRegenerated     │
@@ -279,7 +279,7 @@ Add `GET /q/:code` as a top-level route (not under `/api/`):
 ```typescript
 app.get('/q/:code', async (req, reply) => {
   const shortCode = (req.params as { code: string }).code;
-  const authPassword = process.env.CODEMAN_PASSWORD;
+  const authPassword = process.env.REVERIE_PASSWORD;
 
   // No point if auth isn't enabled
   if (!authPassword) {
@@ -349,7 +349,7 @@ app.get('/api/tunnel/qr', async (_req, reply) => {
     return reply.code(404).send(createErrorResponse(ApiErrorCode.NOT_FOUND, 'Tunnel not running'));
   }
 
-  const authPassword = process.env.CODEMAN_PASSWORD;
+  const authPassword = process.env.REVERIE_PASSWORD;
 
   // If auth is enabled, use the cached SVG with embedded short code
   if (authPassword) {
@@ -439,7 +439,7 @@ Three events for the frontend. QR rotation events embed the SVG directly in the 
 // Auto-rotation every 60s — desktop refreshes QR silently (SVG inline)
 tunnelManager.on('qrTokenRotated', async () => {
   const url = tunnelManager.getUrl();
-  if (url && process.env.CODEMAN_PASSWORD) {
+  if (url && process.env.REVERIE_PASSWORD) {
     const svg = await tunnelManager.getQrSvg(url);
     broadcast('tunnel:qrRotated', { svg });
   } else {
@@ -450,7 +450,7 @@ tunnelManager.on('qrTokenRotated', async () => {
 // Manual regeneration or post-consumption — desktop refreshes QR (SVG inline)
 tunnelManager.on('qrTokenRegenerated', async () => {
   const url = tunnelManager.getUrl();
-  if (url && process.env.CODEMAN_PASSWORD) {
+  if (url && process.env.REVERIE_PASSWORD) {
     const svg = await tunnelManager.getQrSvg(url);
     broadcast('tunnel:qrRegenerated', { svg });
   } else {
@@ -699,7 +699,7 @@ Test cases:
 
 ### Manual
 
-1. Start server with `CODEMAN_PASSWORD=test`
+1. Start server with `REVERIE_PASSWORD=test`
 2. Enable tunnel
 3. Verify `/api/tunnel/qr` returns QR encoding `https://...trycloudflare.com/q/Xk9mQ3`
 4. Open the QR URL in incognito → should auto-redirect to `/` with session cookie
@@ -710,7 +710,7 @@ Test cases:
 9. Call `POST /api/tunnel/qr/regenerate` → old QR URL returns 401, new QR appears
 10. Verify per-IP rate limiting: 10+ failed `/q/badcode` → 429
 11. Verify Basic Auth failures don't consume QR rate limit budget (and vice versa)
-12. Check `~/.codeman/session-lifecycle.jsonl` for `qr_auth` entries after successful scan
+12. Check `~/.reverie/session-lifecycle.jsonl` for `qr_auth` entries after successful scan
 13. Click [Revoke] on the notification toast → verify session is invalidated
 
 ## References

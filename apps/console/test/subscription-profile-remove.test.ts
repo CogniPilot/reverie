@@ -84,7 +84,7 @@ describe('DELETE /api/subscription-profiles/:id', () => {
     const agent = await app.inject({
       method: 'DELETE',
       url: `/api/subscription-profiles/${p.id}`,
-      headers: { 'x-codeman-parent-session': 'x' },
+      headers: { 'x-reverie-parent-session': 'x' },
     });
     expect(agent.statusCode).toBe(403);
     expect((await readSubscriptionProfiles()).some((x) => x.id === p.id)).toBe(true);

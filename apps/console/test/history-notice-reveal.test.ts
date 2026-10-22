@@ -76,7 +76,7 @@ function fakeEl(tagName: string): FakeEl {
 /** Real terminal-ui.js mixin, for `_maybeLoadMoreHistoryOnScroll` / `isTerminalAtBottom`. */
 function loadTerminalMixin(): Record<string, (...args: unknown[]) => unknown> {
   const source = readFileSync(resolve(PUBLIC, 'terminal-ui.js'), 'utf8');
-  const FakeCodemanApp = function () {} as unknown as { prototype: Record<string, (...args: unknown[]) => unknown> };
+  const FakeReverieApp = function () {} as unknown as { prototype: Record<string, (...args: unknown[]) => unknown> };
   const context = vm.createContext({
     console,
     performance,
@@ -85,12 +85,12 @@ function loadTerminalMixin(): Record<string, (...args: unknown[]) => unknown> {
     setInterval: vi.fn(),
     clearInterval: vi.fn(),
     requestAnimationFrame: vi.fn(),
-    CodemanApp: FakeCodemanApp,
+    ReverieApp: FakeReverieApp,
     window: { addEventListener: vi.fn(), removeEventListener: vi.fn() },
     document: { addEventListener: vi.fn() },
   });
   vm.runInContext(source, context);
-  return FakeCodemanApp.prototype;
+  return FakeReverieApp.prototype;
 }
 
 function makeApp() {

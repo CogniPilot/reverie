@@ -1,6 +1,6 @@
 // Port: none (pure comparator — no browser, no server).
 //
-// `CodemanSessionOrder` (src/web/public/constants.js) is the single row order
+// `ReverieSessionOrder` (src/web/public/constants.js) is the single row order
 // behind both home screens: the phone overview and the desktop tab rail. It is
 // the one place the two surfaces can disagree about which session you should
 // look at next, which is why it is pure and pinned here rather than living
@@ -29,14 +29,14 @@ function loadOrderHelper() {
   vm.runInContext(source, context, { filename: 'constants.js' });
   return (
     context.window as {
-      CodemanSessionOrder: {
+      ReverieSessionOrder: {
         RANK: Record<string, number>;
         anchor: (row: Row) => number;
         compare: (a: Row, b: Row) => number;
         sort: (rows: Row[]) => Row[];
       };
     }
-  ).CodemanSessionOrder;
+  ).ReverieSessionOrder;
 }
 
 const order = loadOrderHelper();
@@ -86,7 +86,7 @@ describe('session overview order: in-progress states sort oldest first', () => {
 
   it('falls back to last activity for a working pane that never submitted', () => {
     // Spawned with its prompt on the command line, or an external CLI whose
-    // Enter never went through Codeman. Its fallback stamp is ~now, so it sits
+    // Enter never went through Reverie. Its fallback stamp is ~now, so it sits
     // at the SHORT end of the running group rather than falsely leading it.
     const rows: Row[] = [
       { id: 'no-submit', state: 'working', lastActivityAt: 10_000 },

@@ -1,5 +1,5 @@
 [Unit]
-Description=Reverie fleet console
+Description=Reverie reverie console
 Wants=network-online.target
 After=network-online.target reverie-engine.service
 Requires=reverie-engine.service
@@ -9,8 +9,8 @@ StartLimitBurst=10
 [Service]
 Type=exec
 Environment=REVERIE_REPO=%h/git/reverie
-ExecStart=%h/.local/libexec/reverie/fleet-container engine start --attach --sig-proxy=false reverie-live
-ExecStop=%h/.local/libexec/reverie/fleet-container engine stop --time=30 reverie-live
+ExecStart=%h/.local/libexec/reverie/reverie-container engine start --attach --sig-proxy=false reverie-live
+ExecStop=%h/.local/libexec/reverie/reverie-container engine stop --time=30 reverie-live
 Restart=always
 RestartSec=5
 TimeoutStopSec=45

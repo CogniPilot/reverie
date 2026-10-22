@@ -1,11 +1,11 @@
 /**
- * @fileoverview `GET /api/doctor` — the `codeman doctor` dependency report (Node, the agent CLIs,
+ * @fileoverview `GET /api/doctor` — the `reverie doctor` dependency report (Node, the agent CLIs,
  * tmux, LibreOffice, MS Office) for Settings → System → Diagnostics.
  *
  * The probe engine is synchronous (`which` + `<bin> --version` per tool, each up to its own
  * timeout), so it must never run on the server's event loop: a handful of slow probes would
  * freeze every request and every SSE client, with the process still alive. The default runner
- * therefore runs `codeman doctor --json` in a CHILD PROCESS of this same entry script and
+ * therefore runs `reverie doctor --json` in a CHILD PROCESS of this same entry script and
  * parses its output; the runner is injected so tests never spawn anything.
  *
  * Read-only, but the report names install paths and versions on the host, so in multi-user

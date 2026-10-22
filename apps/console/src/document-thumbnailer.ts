@@ -70,7 +70,7 @@ async function renderOfficeFirstPage(filePath: string): Promise<ThumbnailResult 
 async function renderPdfFirstPage(filePath: string): Promise<ThumbnailResult | null> {
   let previewDir: string | undefined;
   try {
-    previewDir = await fs.mkdtemp(join(tmpdir(), 'codeman-thumb-pdf-'));
+    previewDir = await fs.mkdtemp(join(tmpdir(), 'reverie-thumb-pdf-'));
     const prefix = join(previewDir, basename(filePath, extname(filePath)));
     await runWithConversionLimit(() =>
       execFileAsync('pdftoppm', ['-png', '-singlefile', '-f', '1', '-l', '1', '-scale-to', '520', filePath, prefix], {

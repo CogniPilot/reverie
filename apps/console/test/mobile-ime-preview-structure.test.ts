@@ -22,7 +22,7 @@ type Fn = ReturnType<typeof vi.fn>;
 type App = Record<string, any>;
 
 function loadMixin(globals: Record<string, unknown> = {}) {
-  const FakeCodemanApp = function () {} as unknown as { prototype: Record<string, unknown> };
+  const FakeReverieApp = function () {} as unknown as { prototype: Record<string, unknown> };
   const windowStub = {
     addEventListener: vi.fn(),
     removeEventListener: vi.fn(),
@@ -42,13 +42,13 @@ function loadMixin(globals: Record<string, unknown> = {}) {
     localStorage: { getItem: vi.fn(), setItem: vi.fn(), removeItem: vi.fn() },
     document: { addEventListener: vi.fn(), createElement: vi.fn() },
     MobileDetection: { isTouchDevice: () => false },
-    CodemanApp: FakeCodemanApp,
+    ReverieApp: FakeReverieApp,
     _crashDiag: { log: vi.fn() },
     ...globals,
     window: windowStub,
   });
   vm.runInContext(terminalSource, context, { filename: 'terminal-ui.js' });
-  return { mixin: FakeCodemanApp.prototype, context, windowStub };
+  return { mixin: FakeReverieApp.prototype, context, windowStub };
 }
 
 function fakeClassList() {
@@ -139,7 +139,7 @@ function createPreviewHarness(
     MobileImePreview: mobileImePreview,
     getComputedStyle: (node: { style: Record<string, string> }) => node.style,
   });
-  windowStub.codemanCurrentXtermTheme = () => {
+  windowStub.reverieCurrentXtermTheme = () => {
     if (options.themeGetterThrows) throw new Error('theme unavailable');
     return { foreground: '#334455', background: '#223344' };
   };
@@ -173,10 +173,10 @@ describe('mobile IME preview delivery graph', () => {
   });
 
   it('scopes preview presentation and native composition suppression to touch ownership', () => {
-    expect(cssSource).toContain('.xterm-helpers .codeman-ime-preview {');
-    expect(cssSource).toContain(".xterm-helpers .codeman-ime-preview[data-phase='provisional'] {");
-    expect(cssSource).toContain('.touch-device .xterm-helpers.codeman-ime-preview-owned .composition-view.active {');
-    const rule = cssSource.slice(cssSource.indexOf('.xterm-helpers .codeman-ime-preview {'));
+    expect(cssSource).toContain('.xterm-helpers .reverie-ime-preview {');
+    expect(cssSource).toContain(".xterm-helpers .reverie-ime-preview[data-phase='provisional'] {");
+    expect(cssSource).toContain('.touch-device .xterm-helpers.reverie-ime-preview-owned .composition-view.active {');
+    const rule = cssSource.slice(cssSource.indexOf('.xterm-helpers .reverie-ime-preview {'));
     expect(rule.slice(0, rule.indexOf('}'))).toContain('left: var(--xterm-helper-left, 0px)');
     expect(rule.slice(0, rule.indexOf('}'))).toContain('top: var(--xterm-helper-top, 0px)');
   });
@@ -212,7 +212,7 @@ describe('mobile IME preview lifecycle', () => {
     // textarea), so it runs before xterm's own capture listener finalizes.
     expect(mobileImePreview?.create.mock.calls[0][0].keydownTarget).toBe(app.terminal.element);
     expect(helpers.children).toEqual([previewNodes[0]]);
-    expect(previewNodes[0]).toMatchObject({ className: 'codeman-ime-preview', hidden: true });
+    expect(previewNodes[0]).toMatchObject({ className: 'reverie-ime-preview', hidden: true });
     expect(previewNodes[0].attributes['aria-hidden']).toBe('true');
   });
 
@@ -274,10 +274,10 @@ describe('mobile IME preview lifecycle', () => {
     const callbacks = createdControllers[0].callbacks;
     callbacks.render({ text: '你好', phase: 'provisional' });
     expect(previewNodes[0]).toMatchObject({ textContent: '你好', hidden: false, dataset: { phase: 'provisional' } });
-    expect(helpers.classList.contains('codeman-ime-preview-owned')).toBe(true);
+    expect(helpers.classList.contains('reverie-ime-preview-owned')).toBe(true);
     callbacks.clear();
     expect(previewNodes[0]).toMatchObject({ textContent: '', hidden: true, dataset: {} });
-    expect(helpers.classList.contains('codeman-ime-preview-owned')).toBe(false);
+    expect(helpers.classList.contains('reverie-ime-preview-owned')).toBe(false);
   });
 
   // With local echo on, typed text sits in the overlay (z-index 7) and the PTY
@@ -304,10 +304,10 @@ describe('mobile IME preview lifecycle', () => {
     callbacks.render({ text: '天気', phase: 'provisional' });
     expect(overlay.setComposition).toHaveBeenLastCalledWith('天気');
     expect(previewNodes[0]).toMatchObject({ textContent: '', hidden: true });
-    expect(helpers.classList.contains('codeman-ime-preview-owned')).toBe(true);
+    expect(helpers.classList.contains('reverie-ime-preview-owned')).toBe(true);
     callbacks.clear();
     expect(overlay.setComposition).toHaveBeenLastCalledWith('');
-    expect(helpers.classList.contains('codeman-ime-preview-owned')).toBe(false);
+    expect(helpers.classList.contains('reverie-ime-preview-owned')).toBe(false);
   });
 
   it('uses the span when the overlay cannot place the composition (no prompt found)', () => {
@@ -422,7 +422,7 @@ describe('mobile IME preview lifecycle', () => {
       expect(() => app._initMobileImePreview()).not.toThrow();
       expect(app._mobileImePreview).toBeNull();
       expect(MobileImePreview.create).not.toHaveBeenCalled();
-      expect(owner.contains('codeman-ime-preview-owned')).toBe(false);
+      expect(owner.contains('reverie-ime-preview-owned')).toBe(false);
       if (!['query', 'create'].includes(failure)) expect(removed).toHaveBeenCalled();
     }
   );
@@ -452,7 +452,7 @@ function loadHandleTerminalData(app: App, sent: string[]) {
     document: { activeElement: null, getElementById: vi.fn(() => null) },
     window: {
       cjkActive: false,
-      CodemanTerminalInput: {
+      ReverieTerminalInput: {
         BRACKETED_PASTE_START: '\x1b[200~',
         shouldSuppressTerminalQueryResponse: () => false,
         isTerminalFocusOrMouseReport: () => false,

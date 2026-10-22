@@ -60,7 +60,7 @@ describe('minimal agent terminal in Chromium', () => {
     await page.goto('http://reverie.test/' + query, { waitUntil: 'domcontentloaded' });
     await page.setContent(`<!doctype html><html><head><style>${read('styles.css')}\n${read('mobile.css')}</style></head><body>
       <div class="app">
-        <header class="header"><div class="header-brand">Codeman</div><button>Settings</button><div id="sessionTabs">All sessions</div></header>
+        <header class="header"><div class="header-brand">Reverie</div><button>Settings</button><div id="sessionTabs">All sessions</div></header>
         <main class="main"><aside id="tabRail">Session rail</aside><aside id="sessionSidebar">Session list</aside>
           <div class="terminal-wrap"><div id="terminalContainer" class="terminal-container"><textarea aria-label="Terminal"></textarea></div><textarea id="cjkInput" aria-label="CJK input"></textarea></div>
           <section id="tileGrid">Tiled sessions</section><div id="webviewLayer">Web view</div><div id="welcomeOverlay">Welcome</div>
@@ -71,7 +71,7 @@ describe('minimal agent terminal in Chromium', () => {
     await page.evaluate(
       ({ stored }) => {
         if (stored) sessionStorage.setItem('reverie:view', stored);
-        (window as any).CodemanUrlSession = {
+        (window as any).ReverieUrlSession = {
           sessionIdFromFragment: (hash: string) => new URLSearchParams(hash.replace(/^#/, '')).get('session'),
         };
       },
@@ -79,7 +79,7 @@ describe('minimal agent terminal in Chromium', () => {
     );
     await page.addScriptTag({
       content: `
-        class CodemanApp {
+        class ReverieApp {
           constructor() {
             this.sessions = new Map([
               ['${A}', {id:'${A}', name:'alpha', mode:'shell'}],
@@ -103,8 +103,8 @@ describe('minimal agent terminal in Chromium', () => {
           setConnectionStatus(status) { this._connectionStatus = status; }
           closeSplitPane() {}
         }
-        window.CodemanApp = CodemanApp;
-        window.app = new CodemanApp();
+        window.ReverieApp = ReverieApp;
+        window.app = new ReverieApp();
         ${read('chatroom-ui.js')}
         ${read('chat-media.js')}
       `,

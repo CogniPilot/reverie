@@ -1,4 +1,4 @@
-import tests  # noqa: F401  isolates CODEMAN_*/FLEET_* before cto is imported
+import tests  # noqa: F401  isolates REVERIE_* before reverie is imported
 import io
 import json
 import subprocess
@@ -7,7 +7,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from cto.governance import PolicyError, added_lines, anonymity_violations, check_commit, main
+from reverie.governance import PolicyError, added_lines, anonymity_violations, check_commit, main
 
 NAMES = ["Alpha", "Bravo", "Sentinel"]   # stand-ins; the owner's real list lives in the instance policy
 POLICY = {"agent_anonymity": {"agent_names": NAMES, "allow_paths": ["vendor/*"]}}

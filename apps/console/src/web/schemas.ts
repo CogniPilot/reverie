@@ -233,8 +233,8 @@ const BLOCKED_ENV_KEYS = new Set([
   'LD_PRELOAD',
   'LD_LIBRARY_PATH',
   'NODE_OPTIONS',
-  'CODEMAN_MUX_NAME',
-  'CODEMAN_TMUX',
+  'REVERIE_MUX_NAME',
+  'REVERIE_TMUX',
   'OPENCODE_SERVER_PASSWORD', // Security-sensitive: server auth password
 ]);
 
@@ -546,7 +546,7 @@ export const DeepSeekWebStartSchema = z
 /**
  * The session that spawned the one being created — pure UI decoration, drawn as a
  * lineage line between the two tabs. Accepted here and, equivalently, as the
- * `X-Codeman-Parent-Session` header (the agent skill sets that once on its shared
+ * `X-Reverie-Parent-Session` header (the agent skill sets that once on its shared
  * curl invocation so every spawn recipe carries it); the body wins when both are
  * present. `resolveParentSessionId()` in route-helpers.ts re-checks it against live
  * sessions and DROPS anything it cannot resolve — a bad value must never fail a
@@ -624,9 +624,9 @@ export const CreateSessionSchema = z.object({
     .optional(),
   /**
    * COD-105 — attach to an EXISTING remote tmux session discovered via
-   * `GET /api/remote-hosts/:hostId/sessions` (one this Codeman didn't create).
+   * `GET /api/remote-hosts/:hostId/sessions` (one this Reverie didn't create).
    * The resulting session is NON-owned (closing it detaches, never kills the
-   * remote). `remoteSessionName` is a discovered `codeman-*` tmux session name.
+   * remote). `remoteSessionName` is a discovered `reverie-*` tmux session name.
    */
   attachRemoteSession: z
     .object({
@@ -635,7 +635,7 @@ export const CreateSessionSchema = z.object({
         .string()
         .min(1)
         .max(200)
-        .regex(/^codeman-[a-zA-Z0-9._-]+$/, 'remoteSessionName must be a codeman-* tmux session name'),
+        .regex(/^reverie-[a-zA-Z0-9._-]+$/, 'remoteSessionName must be a reverie-* tmux session name'),
     })
     .optional(),
 });
@@ -661,9 +661,9 @@ export const ResizeSchema = z.object({
 
 /**
  * Schema for POST /api/status-telemetry
- * Claude Code statusline payload forwarded by the Codeman-managed statusLine
+ * Claude Code statusline payload forwarded by the Reverie-managed statusLine
  * exporter (see hooks-config.generateStatusLineCommand). Validates only the
- * subset Codeman displays; unknown keys (session_id, transcript_path, cwd, …)
+ * subset Reverie displays; unknown keys (session_id, transcript_path, cwd, …)
  * are stripped by z.object. Auth-exempt like /api/hook-event.
  */
 // NOTE: every modeled field is `.nullish()` (not `.optional()`) on purpose.
@@ -870,7 +870,7 @@ export const RemoteHostSchema = z.object({
     .optional(),
   // Wake-on-LAN MAC address(es), comma-separated. Structural: only hex pairs with
   // `:`/`-` separators, so nothing here can be a shell token even by accident (the
-  // value never reaches a shell — Codeman builds the magic packet itself).
+  // value never reaches a shell — Reverie builds the magic packet itself).
   wakeMac: z
     .string()
     .min(11)
@@ -1186,8 +1186,8 @@ export const QuickStartSchema = z.object({
   /** Claude advisor model (soft default via --settings, switchable in-session via /advisor) */
   advisorModel: advisorModelSchema,
   /**
-   * Who is spawning this worker (`codeman-skill` from the packaged agent skill), or,
-   * equivalently, the `X-Codeman-Agent-Origin` header; the body wins when both are
+   * Who is spawning this worker (`reverie-skill` from the packaged agent skill), or,
+   * equivalently, the `X-Reverie-Agent-Origin` header; the body wins when both are
    * present. Used ONLY to label a case directory this request CREATES as an agent
    * scratch workspace, so it can be found and cleaned up later — see
    * `src/agent-case-marker.ts`. Never a permission signal, and an unrecognised token
@@ -1361,7 +1361,7 @@ export const RebootRestoreRequestSchema = z
 export const SettingsUpdateSchema = z
   .object({
     // User-facing product branding. This changes browser/UI copy only; package,
-    // CLI, API, storage, and protocol identifiers remain Codeman.
+    // CLI, API, storage, and protocol identifiers remain Reverie.
     displayName: z
       .string()
       .trim()
@@ -1390,7 +1390,7 @@ export const SettingsUpdateSchema = z
     ultracodeFloatingWindows: z.boolean().optional(),
     imageWatcherEnabled: z.boolean().optional(),
     /**
-     * Inject the Codeman agent skill (`skills/codeman`) into `<case>/.claude/skills/`
+     * Inject the Reverie agent skill (`skills/reverie`) into `<case>/.claude/skills/`
      * on Claude session create, so an agent inside the session can drive the API
      * (see docs/agent-control-plan.md §2). SYNCED, default OFF: every skill's
      * name+description costs context on every turn, so it is opt-in. Injection is
@@ -1398,14 +1398,14 @@ export const SettingsUpdateSchema = z
      */
     agentSkillEnabled: z.boolean().optional(),
     /**
-     * Install Codeman's hooks block into the workspace of every Claude session,
-     * not only into cases Codeman scaffolded itself. SYNCED, default ON: without
+     * Install Reverie's hooks block into the workspace of every Claude session,
+     * not only into cases Reverie scaffolded itself. SYNCED, default ON: without
      * it a linked case or an existing repo runs with no hooks at all, and each
      * hook-driven surface is silently dead there (tab alert, Approvals Inbox,
      * push, respawn's definitive idle signals, the wait endpoints' stop/blocked).
-     * Turning it OFF restores the older, narrower behavior — a Codeman hooks
+     * Turning it OFF restores the older, narrower behavior — a Reverie hooks
      * block that is already present is still refreshed when stale, but one is
-     * never added — for a user who wants Codeman to leave their repos alone.
+     * never added — for a user who wants Reverie to leave their repos alone.
      */
     workspaceHooksEnabled: z.boolean().optional(),
     /**
@@ -1449,7 +1449,7 @@ export const SettingsUpdateSchema = z
     /**
      * CLI management (docs/cli-enable-disable-plan.md): the Settings UI section that
      * lets an admin enable/disable a stock CLI, trigger its install, and add/edit/
-     * remove custom CLI entries — all previously hand-edit-only via ~/.codeman/clis.json.
+     * remove custom CLI entries — all previously hand-edit-only via ~/.reverie/clis.json.
      * SYNCED, default OFF: this is a machine-configuration surface (like Custom Model
      * Endpoints), not a display preference, and enabling it is what makes the write
      * endpoints (PUT/POST/DELETE /api/clis...) answer instead of refusing outright.
@@ -1470,9 +1470,9 @@ export const SettingsUpdateSchema = z
     readMyMindModel: z.string().max(100).optional(),
     tunnelEnabled: z.boolean().optional(),
     // Action field (NOT persisted): explicit per-request acknowledgment that the
-    // operator accepts exposing an UNAUTHENTICATED public tunnel (no CODEMAN_PASSWORD).
+    // operator accepts exposing an UNAUTHENTICATED public tunnel (no REVERIE_PASSWORD).
     // Lets the UI enable a tunnel after a confirm dialog without the
-    // CODEMAN_ALLOW_UNAUTHENTICATED_NETWORK env var. Stripped before persisting.
+    // REVERIE_ALLOW_UNAUTHENTICATED_NETWORK env var. Stripped before persisting.
     acknowledgeUnauthTunnel: z.boolean().optional(),
     tabTwoRows: z.boolean().optional(),
     /**
@@ -1487,7 +1487,7 @@ export const SettingsUpdateSchema = z
     tabRailDetail: z.enum(['simple', 'rich']).optional(),
     /**
      * Vertical rail row order. Display key (per-device).
-     * 'activity' = the home screens' order (CodemanSessionOrder): blocked on a
+     * 'activity' = the home screens' order (ReverieSessionOrder): blocked on a
      *              human first, then running longest-first, then quiet
      *              most-recently-quiet first.
      * 'manual'   = the user's tab order, and the only value that leaves the
@@ -2219,12 +2219,12 @@ const WebviewBaseSchema = z.object({
   embedMode: z.enum(['proxy', 'direct']).optional(),
   /**
    * Opt out of the iframe sandbox. Defaults to false: a proxied page is served
-   * from Codeman's own origin, so `allow-same-origin` would let it read this page
+   * from Reverie's own origin, so `allow-same-origin` would let it read this page
    * and call the API that spawns agents.
    */
   trusted: z.boolean().optional(),
   /**
-   * Marks a record Codeman maintains itself. Declared here because a plain
+   * Marks a record Reverie maintains itself. Declared here because a plain
    * `z.object` STRIPS undeclared keys, so an undeclared marker would be dropped
    * on the way in and the dedup it drives would never fire.
    */
@@ -2311,7 +2311,7 @@ export const CustomModelSelectionSchema = z.union([
     endpointId: z.string().regex(/^[a-zA-Z0-9_-]+$/, 'Invalid endpoint id'),
     modelId: z.string().min(1).max(200),
     /**
-     * Two DIFFERENT questions can block a launch, and answering one is not consent to
+     * Two DIFFERENT questions can block a launch, and answering one is not authorization to
      * the other: `confirmedContext` answers "this model's context window is below the
      * floor for this CLI", which affects only the caller, while `confirmedSwap` answers
      * "loading this will unload the model another session is using", which affects

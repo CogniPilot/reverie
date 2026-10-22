@@ -288,14 +288,14 @@ const VoiceInput = {
 
   _getDeepgramConfig() {
     try {
-      return JSON.parse(localStorage.getItem('codeman-voice-settings') || '{}');
+      return JSON.parse(localStorage.getItem('reverie-voice-settings') || '{}');
     } catch (_e) {
       return {};
     }
   },
 
   _saveDeepgramConfig(config) {
-    localStorage.setItem('codeman-voice-settings', JSON.stringify(config));
+    localStorage.setItem('reverie-voice-settings', JSON.stringify(config));
   },
 
   _shouldUseDeepgram() {

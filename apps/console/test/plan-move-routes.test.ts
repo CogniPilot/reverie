@@ -8,7 +8,7 @@ import type { AuthPort, AuthSessionRecord } from '../src/web/ports/auth-port.js'
 describe('owner browser plan move API', () => {
   let app: FastifyInstance;
   const moves = { begin: vi.fn(), get: vi.fn(), cancel: vi.fn(), list: vi.fn() };
-  const headers = { host: 'console.test', origin: 'https://console.test', cookie: 'codeman_session=owner' };
+  const headers = { host: 'console.test', origin: 'https://console.test', cookie: 'reverie_session=owner' };
   const input = {
     id: 'move',
     employeeId: 'casey',
@@ -70,7 +70,7 @@ describe('owner browser plan move API', () => {
   });
 
   it('refuses spoofed agents and cross-site requests before transaction code', async () => {
-    for (const extra of [{ 'x-codeman-parent-session': 'claimed-agent' }, { origin: 'https://other.test' }]) {
+    for (const extra of [{ 'x-reverie-parent-session': 'claimed-agent' }, { origin: 'https://other.test' }]) {
       expect(
         (
           await app.inject({

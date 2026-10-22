@@ -3,7 +3,12 @@ import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { CompanyStore } from '../src/company-store.js';
-import { CompanyError, CompanyService, type CompanyResearchBackend, type ResearchHandle } from '../src/company-service.js';
+import {
+  CompanyError,
+  CompanyService,
+  type CompanyResearchBackend,
+  type ResearchHandle,
+} from '../src/company-service.js';
 import { ChatroomStore } from '../src/chatroom-store.js';
 
 describe('company identities and genuine research lifecycle', () => {
@@ -51,7 +56,7 @@ describe('company identities and genuine research lifecycle', () => {
     });
 
   beforeEach(async () => {
-    directory = await mkdtemp(join(tmpdir(), 'fleet-company-'));
+    directory = await mkdtemp(join(tmpdir(), 'reverie-company-'));
     store = new CompanyStore(join(directory, 'company.json'));
     await store.init();
     rooms = new ChatroomStore();
@@ -76,6 +81,33 @@ describe('company identities and genuine research lifecycle', () => {
   });
   afterEach(async () => {
     await rm(directory, { recursive: true, force: true });
+  });
+
+  it('persists stop intent and retry claims across store reloads without late-observation overwrite', async () => {
+    const employee = await hire();
+    await service.setDesiredRunning(employee.sessionId, true);
+    await service.setDesiredRunning(employee.sessionId, false);
+    await service.setDesiredRunning(employee.sessionId, true, () => false);
+    const restored = new CompanyStore(join(directory, 'company.json'));
+    await restored.init();
+    expect(restored.snapshot().employees[0].desiredRunning).toBe(false);
+    expect(await service.claimWake(employee.id, employee.sessionId, night)).toBe(false);
+    await service.setDesiredRunning(employee.sessionId, true);
+    expect(await service.claimWake(employee.id, employee.sessionId, night)).toBe(true);
+    await restored.init();
+    expect(restored.snapshot().employees[0].wakeAttempts).toEqual([night]);
+    expect(restored.snapshot().employees[0].id).toBe(employee.id);
+  });
+
+  it('validates owner crash selection and allows explicit recovery when automatic wake is disabled', async () => {
+    const employee = await hire();
+    await expect(service.configure(undefined, { crashWakeEmployeeId: 'missing' } as never)).rejects.toThrow(
+      'active company'
+    );
+    await service.configure(undefined, { autoWakeEnabled: false, crashWakeEmployeeId: employee.id } as never);
+    expect(await service.claimWake(employee.id, employee.sessionId, night)).toBe(false);
+    expect(await service.claimWake(employee.id, employee.sessionId, night, false)).toBe(true);
+    expect(service.view().settings.crashWakeEmployeeId).toBe(employee.id);
   });
 
   it('requires an explicitly registered owned real session, preserving durable identity', async () => {
@@ -122,12 +154,23 @@ describe('company identities and genuine research lifecycle', () => {
       research: backend,
       now: () => night,
     });
-    const alice = await service.hire({ name: 'Alice', icon: '🦊', position: 'Local Agent', expertise: ['chat'], sessionId: 'alice-1', researchEnabled: false });
+    const alice = await service.hire({
+      name: 'Alice',
+      icon: '🦊',
+      position: 'Local Agent',
+      expertise: ['chat'],
+      sessionId: 'alice-1',
+      researchEnabled: false,
+    });
     const lounge = rooms.create('Lounge', undefined);
     const game = rooms.create('Game', undefined);
     rooms.addMember(lounge.id, 'alice-1');
     rooms.addMember(game.id, 'alice-1', { role: 'coordinator' });
-    for (const [from, to] of [['alice-1', 'alice-2'], ['alice-2', 'alice-3'], ['alice-3', 'alice-4']]) {
+    for (const [from, to] of [
+      ['alice-1', 'alice-2'],
+      ['alice-2', 'alice-3'],
+      ['alice-3', 'alice-4'],
+    ]) {
       // A successor started with its parent's header may already sit in a room, empty.
       if (to === 'alice-3') rooms.addMember(lounge.id, to);
       await service.rebind(alice.id, undefined, to);
@@ -157,8 +200,15 @@ describe('company identities and genuine research lifecycle', () => {
       research: backend,
       now: () => night,
     });
-    const alice = await service.hire({ name: 'Alice', icon: '🦉', position: 'CTO', expertise: ['ops'], sessionId: 'alice-1', researchEnabled: false });
-    await service.configure(undefined, { ...service.view().settings, ctoId: alice.id });
+    const alice = await service.hire({
+      name: 'Alice',
+      icon: '🦉',
+      position: 'CTO',
+      expertise: ['ops'],
+      sessionId: 'alice-1',
+      researchEnabled: false,
+    });
+    await service.configure(undefined, { ...service.view().settings, coordinatorEmployeeId: alice.id });
     const lounge = rooms.create('Lounge', undefined);
     const other = rooms.create('Other', 'another-owner');
     rooms.addMember(lounge.id, 'alice-1');
@@ -176,9 +226,13 @@ describe('company identities and genuine research lifecycle', () => {
     expect(left).toEqual([lounge.id]);
     expect(failed).toEqual([]);
     // History keeps the retired person's name and session on what they said.
-    expect(rooms.messages(lounge.id).find((m) => m.text === 'Morning, all')?.from).toMatchObject({ kind: 'agent', sessionId: 'alice-1', name: 'Alice' });
+    expect(rooms.messages(lounge.id).find((m) => m.text === 'Morning, all')?.from).toMatchObject({
+      kind: 'agent',
+      sessionId: 'alice-1',
+      name: 'Alice',
+    });
     expect(service.view().employees.map((e) => e.id)).not.toContain(alice.id);
-    expect(service.view().settings.ctoId).toBeUndefined();
+    expect(service.view().settings.coordinatorEmployeeId).toBeUndefined();
     expect(service.view().retired.map((e) => e.id)).toEqual([alice.id]);
     expect(service.view('another-owner').retired).toEqual([]);
     expect(rooms.get(lounge.id)?.members.map((m) => m.sessionId)).not.toContain('alice-1');
@@ -215,7 +269,14 @@ describe('company identities and genuine research lifecycle', () => {
       research: backend,
       now: () => night,
     });
-    const alice = await service.hire({ name: 'Alice', icon: '🦉', position: 'Ops', expertise: ['ops'], sessionId: 'alice-1', researchEnabled: false });
+    const alice = await service.hire({
+      name: 'Alice',
+      icon: '🦉',
+      position: 'Ops',
+      expertise: ['ops'],
+      sessionId: 'alice-1',
+      researchEnabled: false,
+    });
     const lounge = rooms.create('Lounge', undefined);
     rooms.addMember(lounge.id, 'alice-1');
     sessions.delete('alice-1');
@@ -229,26 +290,54 @@ describe('company identities and genuine research lifecycle', () => {
   it('refuses to restore a retired employee whose name another employee now has', async () => {
     sessions.set('alice-1', { id: 'alice-1', name: 'Alice', owner: undefined });
     sessions.set('alice-2', { id: 'alice-2', name: 'Alice', owner: undefined });
-    const alice = await service.hire({ name: 'Alice', icon: '🦉', position: 'Ops', expertise: ['ops'], sessionId: 'alice-1', researchEnabled: false });
+    const alice = await service.hire({
+      name: 'Alice',
+      icon: '🦉',
+      position: 'Ops',
+      expertise: ['ops'],
+      sessionId: 'alice-1',
+      researchEnabled: false,
+    });
     sessions.delete('alice-1');
     await service.retire(alice.id, undefined);
-    await service.hire({ name: 'alice', icon: '🌱', position: 'Ops', expertise: ['ops'], sessionId: 'alice-2', researchEnabled: false });
+    await service.hire({
+      name: 'alice',
+      icon: '🌱',
+      position: 'Ops',
+      expertise: ['ops'],
+      sessionId: 'alice-2',
+      researchEnabled: false,
+    });
     await expect(service.restore(alice.id, undefined)).rejects.toMatchObject({ status: 409 });
     expect(service.view().retired.map((e) => e.id)).toEqual([alice.id]);
   });
 
   it('refuses to restore a retired employee whose session another employee now holds', async () => {
     sessions.set('alice-1', { id: 'alice-1', name: 'Alice', owner: undefined });
-    const alice = await service.hire({ name: 'Alice', icon: '🦉', position: 'Ops', expertise: ['ops'], sessionId: 'alice-1', researchEnabled: false });
+    const alice = await service.hire({
+      name: 'Alice',
+      icon: '🦉',
+      position: 'Ops',
+      expertise: ['ops'],
+      sessionId: 'alice-1',
+      researchEnabled: false,
+    });
     sessions.delete('alice-1');
     await service.retire(alice.id, undefined);
     sessions.set('alice-1', { id: 'alice-1', name: 'Nora', owner: undefined });
-    await service.hire({ name: 'Nora', icon: '🌱', position: 'Ops', expertise: ['ops'], sessionId: 'alice-1', researchEnabled: false });
+    await service.hire({
+      name: 'Nora',
+      icon: '🌱',
+      position: 'Ops',
+      expertise: ['ops'],
+      sessionId: 'alice-1',
+      researchEnabled: false,
+    });
     await expect(service.restore(alice.id, undefined)).rejects.toMatchObject({ status: 409 });
     expect(service.view().retired.map((e) => e.id)).toEqual([alice.id]);
   });
 
-  it('never lets a new session take an employee\'s name; a replacement names the employee id and takes over', async () => {
+  it("never lets a new session take an employee's name; a replacement names the employee id and takes over", async () => {
     for (const id of ['alice-1', 'alice-2', 'alice-3']) sessions.set(id, { id, name: 'Alice', owner: undefined });
     service = new CompanyService(store, {
       getSession: (id) => sessions.get(id),
@@ -262,16 +351,30 @@ describe('company identities and genuine research lifecycle', () => {
       research: backend,
       now: () => night,
     });
-    const alice = await service.hire({ name: 'Alice', icon: '🦊', position: 'Local Agent', expertise: ['chat'], sessionId: 'alice-1', researchEnabled: false });
+    const alice = await service.hire({
+      name: 'Alice',
+      icon: '🦊',
+      position: 'Local Agent',
+      expertise: ['chat'],
+      sessionId: 'alice-1',
+      researchEnabled: false,
+    });
     const lounge = rooms.create('Lounge', undefined);
     rooms.addMember(lounge.id, 'alice-1');
     // By name alone: refused, in any case, whoever asks.
     expect(() => service.prepareSpawn({ owner: undefined, name: 'alice' })).toThrow('existing employee');
-    expect(() => service.prepareSpawn({ owner: undefined, parentSessionId: 'parent-agent', name: 'Alice' })).toThrow('existing employee');
+    expect(() => service.prepareSpawn({ owner: undefined, parentSessionId: 'parent-agent', name: 'Alice' })).toThrow(
+      'existing employee'
+    );
     // An unrelated agent may not replace her; the owner may, and so may her own current session.
-    expect(() => service.prepareSpawn({ owner: undefined, parentSessionId: 'parent-agent', employeeId: alice.id })).toThrow('own session');
+    expect(() =>
+      service.prepareSpawn({ owner: undefined, parentSessionId: 'parent-agent', employeeId: alice.id })
+    ).toThrow('own session');
     expect(() => service.prepareSpawn({ owner: undefined, employeeId: 'nobody' })).toThrow('Unknown employee');
-    for (const [parent, to] of [[undefined, 'alice-2'], ['alice-2', 'alice-3']] as const) {
+    for (const [parent, to] of [
+      [undefined, 'alice-2'],
+      ['alice-2', 'alice-3'],
+    ] as const) {
       const plan = service.prepareSpawn({ owner: undefined, parentSessionId: parent, employeeId: alice.id });
       expect(plan.name).toBe('Alice');
       await service.completeSpawn(to, plan);
@@ -307,7 +410,9 @@ describe('company identities and genuine research lifecycle', () => {
     }
     expect(invited).toBeInstanceOf(CompanyError);
     expect((invited as CompanyError).status).toBe(409);
-    await expect(service.completeSpawn('child', { channelId: room.id, name: 'Kept', icon: '🎨' })).rejects.toMatchObject({
+    await expect(
+      service.completeSpawn('child', { channelId: room.id, name: 'Kept', icon: '🎨' })
+    ).rejects.toMatchObject({
       status: 409,
     });
     expect(store.snapshot().temporaryAgents.some((a) => a.sessionId === 'child')).toBe(false);
@@ -317,14 +422,19 @@ describe('company identities and genuine research lifecycle', () => {
     const room = rooms.create('One', undefined);
     rooms.addMember(room.id, 'parent-agent');
     await store.update((state) => {
-      for (let i = 0; i < 500; i++) state.temporaryAgents.push({ sessionId: `old-${i}`, name: 'Old', icon: '🎨', createdAt: i });
+      for (let i = 0; i < 500; i++)
+        state.temporaryAgents.push({ sessionId: `old-${i}`, name: 'Old', icon: '🎨', createdAt: i });
     });
     expect(() => service.prepareSpawn({ parentSessionId: 'parent-agent' })).toThrow('Profile limit');
-    await expect(service.completeSpawn('child', { channelId: room.id, name: 'New', icon: '🎨' })).rejects.toMatchObject({
-      status: 409,
-    });
+    await expect(service.completeSpawn('child', { channelId: room.id, name: 'New', icon: '🎨' })).rejects.toMatchObject(
+      {
+        status: 409,
+      }
+    );
     expect(room.members.some((m) => m.sessionId === 'child')).toBe(false);
-    expect(store.snapshot().temporaryAgents.map((a) => a.sessionId)).toEqual(Array.from({ length: 500 }, (_, i) => `old-${i}`));
+    expect(store.snapshot().temporaryAgents.map((a) => a.sessionId)).toEqual(
+      Array.from({ length: 500 }, (_, i) => `old-${i}`)
+    );
     // Re-recording a session already on the list is not a new record, so it still succeeds at the cap.
     await service.completeSpawn('old-7', { name: 'Renamed', icon: '🎨' });
     expect(store.snapshot().temporaryAgents).toHaveLength(500);
@@ -343,7 +453,7 @@ describe('company identities and genuine research lifecycle', () => {
     rooms.addMember(two.id, 'parent-agent');
     expect(service.prepareSpawn({ parentSessionId: 'parent-agent' }).channelId).toBeUndefined();
     expect(service.prepareSpawn({ parentSessionId: 'parent-agent', channelId: two.id }).channelId).toBe(two.id);
-    expect(service.prepareSpawn({}).name).toMatch(/^[A-Za-z]+$/);
+    expect(service.prepareSpawn({}).name).toMatch(/^Agent [a-f0-9]{8}$/);
     expect(service.prepareSpawn({}).icon).toBeTruthy();
   });
 
@@ -362,7 +472,7 @@ describe('company identities and genuine research lifecycle', () => {
       morningHour: 8,
       researchMinutes: 60,
       briefingMinutes: 10,
-      ctoId: employee.id,
+      coordinatorEmployeeId: employee.id,
     });
     await Promise.all([service.tick(night), service.tick(night)]);
     expect(backend.start).toHaveBeenCalledTimes(1);
@@ -434,7 +544,7 @@ describe('company identities and genuine research lifecycle', () => {
     expect(backend.stop).not.toHaveBeenCalled();
   });
 
-  it('accepts only actual structured completion, then launches one real CTO briefing after morning', async () => {
+  it('accepts only actual structured completion, then launches one real company briefing after morning', async () => {
     const employee = await hire();
     await service.configure(undefined, {
       enabled: true,
@@ -443,7 +553,7 @@ describe('company identities and genuine research lifecycle', () => {
       morningHour: 8,
       researchMinutes: 60,
       briefingMinutes: 10,
-      ctoId: employee.id,
+      coordinatorEmployeeId: employee.id,
     });
     await service.tick(night);
     Object.assign([...handles.values()][0], { state: 'completed', result });
@@ -454,7 +564,7 @@ describe('company identities and genuine research lifecycle', () => {
     expect(store.snapshot().cycles[1].kind).toBe('briefing');
     Object.assign([...handles.values()][1], {
       state: 'completed',
-      result: { summary: 'CTO briefing of observed prototype results', findings: [] },
+      result: { summary: 'company briefing of observed prototype results', findings: [] },
     });
     await service.tick(Date.parse('2026-10-15T08:01:00Z'));
     await service.tick(Date.parse('2026-10-15T09:00:00Z'));

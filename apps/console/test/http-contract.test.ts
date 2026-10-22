@@ -78,11 +78,11 @@ describe('Stable HTTP contract (live server)', () => {
       internals.cachedLightState = null;
       internals.cachedSessionsList = null;
 
-      vi.stubEnv('CODEMAN_MULTIUSER', '1');
+      vi.stubEnv('REVERIE_MULTIUSER', '1');
       expect(internals.getLightState({ username: 'alice', role: 'user' }).sessionOrder).toEqual(['a1', 'a2']);
       expect(internals.getLightState({ username: 'root', role: 'admin' }).sessionOrder).toEqual(['b1', 'a1', 'a2']);
 
-      vi.stubEnv('CODEMAN_MULTIUSER', '0');
+      vi.stubEnv('REVERIE_MULTIUSER', '0');
       expect(internals.getLightState().sessionOrder).toEqual(['b1', 'a1', 'a2']);
     } finally {
       vi.unstubAllEnvs();

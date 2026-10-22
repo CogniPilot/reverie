@@ -275,7 +275,7 @@ export class SessionAutoOps extends EventEmitter {
   }
 
   /**
-   * Restore auto-resume state after a Codeman restart. A persisted pending
+   * Restore auto-resume state after a Reverie restart. A persisted pending
    * schedule is re-armed; an overdue one fires shortly after boot (the limit
    * footer won't reprint on its own, so without this the pause would stall).
    */

@@ -204,4 +204,114 @@ describe('Company is a page with one People home', () => {
     expect(plans).toContain('function bankedStat(p)');
     expect(plans).toContain("fetch('/api/plans/allocations'");
   });
+  it('owner-only People controls save an explicit recovery capability, with no title-based default', async () => {
+    const { handle, employee, company } = await fixture();
+    company.canManage = true;
+    employee.position = 'CTO';
+    let owner = true;
+    const previous = handle.app._chatApi.bind(handle.app);
+    const writes: Array<{ path: string; options: any }> = [];
+    handle.app._chatApi = async (path: string, options: any) => {
+      if (path === '/api/company') return { ok: true, data: company };
+      if (path === '/api/chatrooms/phone-status') return { ok: true, data: { self: owner ? 'owner' : employee.sessionId, canSetOwn: owner } };
+      if (path === '/api/company/employees/' + employee.id) {
+        writes.push({ path, options });
+        return { ok: true, data: {} };
+      }
+      return previous(path, options);
+    };
+    await handle.shell.openCompany('people');
+    await handle.flush();
+    const checkbox = handle.document.querySelector<HTMLInputElement>('[aria-label="Recovery permission for Reviewer"]')!;
+    expect(checkbox).not.toBeNull();
+    expect(checkbox.checked).toBe(false);
+    checkbox.checked = true;
+    handle.document.querySelector<HTMLButtonElement>('[aria-label="Save permissions for Reviewer"]')!.click();
+    await handle.flush();
+    expect(writes).toEqual([{
+      path: '/api/company/employees/' + employee.id,
+      options: { method: 'PUT', body: { permissions: { recoverEmployees: true } } },
+    }]);
+    owner = false;
+    handle.shell.closePage();
+    await handle.shell.openCompany('people');
+    await handle.flush();
+    expect(handle.document.querySelector('[aria-label="Recovery permission for Reviewer"]')).toBeNull();
+    expect(handle.document.querySelector('[aria-label="Automatic recovery"]')).toBeNull();
+  });
+
+});
+
+async function recoveryFixture(settings: object = {}, extras: object[] = []) {
+  const result = await fixture(extras);
+  const { handle, company } = result;
+  company.canManage = true;
+  Object.assign(company.settings, settings);
+  const previous = handle.app._chatApi.bind(handle.app);
+  const writes: any[] = [];
+  handle.app._chatApi = async (path: string, options: any) => {
+    if (path === '/api/company') return { ok: true, data: company };
+    if (path === '/api/chatrooms/phone-status') return { ok: true, data: { self: 'owner', canSetOwn: true } };
+    if (path === '/api/company/settings') {
+      writes.push(options);
+      return { ok: true, data: { settings: options.body } };
+    }
+    return previous(path, options);
+  };
+  await handle.shell.openCompany('people');
+  await handle.flush();
+  return { ...result, writes };
+}
+
+describe('owner chooses one crash recovery expert', () => {
+  it('allows selecting a report and saving the choice without a title privilege', async () => {
+    const { handle, writes } = await recoveryFixture({}, [{ id: 'report', name: '<Reviewer>', reportsTo: 'employee-one', position: 'Expert' }]);
+    const select = handle.document.querySelector<HTMLSelectElement>('[aria-label="Wake after a crash"]')!;
+    expect(select.options[0].textContent).toBe('Automatic: Reviewer');
+    expect([...select.options].map(option => option.value)).toEqual(['', 'employee-one', 'report']);
+    select.value = 'report';
+    handle.document.querySelector<HTMLButtonElement>('.ca-company-recovery button')!.click();
+    await handle.flush();
+    expect(writes).toEqual([{ method: 'PUT', body: { ownerName: 'Owner name', autoWakeEnabled: true, crashWakeEmployeeId: 'report' } }]);
+    expect(handle.document.querySelector('.ca-company-recovery img')).toBeNull();
+  });
+
+  it('uses the configured coordinator as the default root for older unspecified reporting lines', async () => {
+    const { handle } = await recoveryFixture({ coordinatorEmployeeId: 'employee-one' }, [{ id: 'legacy-report', name: 'Legacy report' }]);
+    const select = handle.document.querySelector<HTMLSelectElement>('[aria-label="Wake after a crash"]')!;
+    expect(select.options[0].textContent).toBe('Automatic: Reviewer');
+    expect(select.value).toBe('');
+  });
+
+  it('keeps the selected expert while disabling automatic recovery', async () => {
+    const { handle, writes } = await recoveryFixture({ autoWakeEnabled: true, crashWakeEmployeeId: 'employee-one' });
+    const enabled = handle.document.querySelector<HTMLInputElement>('[aria-label="Automatic recovery"]')!;
+    const select = handle.document.querySelector<HTMLSelectElement>('[aria-label="Wake after a crash"]')!;
+    expect(select.value).toBe('employee-one');
+    enabled.checked = false;
+    enabled.dispatchEvent(new handle.window.Event('change'));
+    expect(select.disabled).toBe(true);
+    handle.document.querySelector<HTMLButtonElement>('.ca-company-recovery button')!.click();
+    await handle.flush();
+    expect(writes[0].body.autoWakeEnabled).toBe(false);
+    expect(writes[0].body.crashWakeEmployeeId).toBe('employee-one');
+  });
+
+  it('requires a choice for multiple roots and omits a cleared selection', async () => {
+    const { handle, writes } = await recoveryFixture({ crashWakeEmployeeId: 'employee-one' }, [{ id: 'second-root', name: 'Another expert', reportsTo: 'owner' }]);
+    const select = handle.document.querySelector<HTMLSelectElement>('[aria-label="Wake after a crash"]')!;
+    expect(select.options[0].textContent).toBe('Choose an expert');
+    select.value = '';
+    handle.document.querySelector<HTMLButtonElement>('.ca-company-recovery button')!.click();
+    await handle.flush();
+    expect(writes[0].body).not.toHaveProperty('crashWakeEmployeeId');
+  });
+
+  it('shows an unavailable stored choice without silently selecting another expert', async () => {
+    const { handle } = await recoveryFixture({ autoWakeEnabled: false, crashWakeEmployeeId: 'retired' });
+    const select = handle.document.querySelector<HTMLSelectElement>('[aria-label="Wake after a crash"]')!;
+    expect(select.value).toBe('retired');
+    expect(select.selectedOptions[0].textContent).toBe('Unavailable expert');
+    expect(select.disabled).toBe(true);
+  });
 });

@@ -48,7 +48,7 @@ describe('Session.setPromptCache compaction detection', () => {
   });
 
   it('never stamps a first report that is already inside the window', () => {
-    // The first report Codeman sees (a restart mid-window) has no prior value to leave.
+    // The first report Reverie sees (a restart mid-window) has no prior value to leave.
     const s = claudeSession();
     s.setPromptCache({ warm: true, expiresAt: Date.now() + 3600_000, expectedRebuilds: 4 });
     expect(s.promptCache?.compactedAt).toBeUndefined();

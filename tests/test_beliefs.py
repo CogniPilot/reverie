@@ -1,19 +1,19 @@
-import tests  # noqa: F401  isolates CODEMAN_*/FLEET_* before cto is imported
+import tests  # noqa: F401  isolates REVERIE_* before reverie is imported
 import json
 import random
 import tempfile
 import unittest
 from pathlib import Path
 
-from cto.beliefs import SEED_BELIEFS, contradicts_protected, ensure_seeded, protected_root, render
-from cto.chat import ChatDaemon
-from cto.dream import Dreamer
-from cto.embeddings import HashedEmbedder
-from cto.memory import MemoryStore
-from cto.persona import build_system_prompt
-from cto.reflection import Reflector, parse_insights
-from cto.train.config import TrainConfig
-from cto.train.dataset import build_examples, keeps_identity
+from reverie.beliefs import SEED_BELIEFS, contradicts_protected, ensure_seeded, protected_root, render
+from reverie.chat import ChatDaemon
+from reverie.dream import Dreamer
+from reverie.embeddings import HashedEmbedder
+from reverie.memory import MemoryStore
+from reverie.persona import build_system_prompt
+from reverie.reflection import Reflector, parse_insights
+from reverie.train.config import TrainConfig
+from reverie.train.dataset import build_examples, keeps_identity
 from tests.helpers import fake_client, temp_config
 
 

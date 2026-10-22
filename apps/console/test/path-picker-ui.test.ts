@@ -15,7 +15,7 @@ const sessionSource = readFileSync(resolve('src/web/public/session-ui.js'), 'utf
 const indexSource = readFileSync(resolve('src/web/public/index.html'), 'utf8');
 
 function loadTerminalMixin() {
-  const FakeCodemanApp = function () {} as unknown as { prototype: Record<string, (...args: unknown[]) => unknown> };
+  const FakeReverieApp = function () {} as unknown as { prototype: Record<string, (...args: unknown[]) => unknown> };
   const cjkClear = vi.fn();
   const context = vm.createContext({
     console,
@@ -25,13 +25,13 @@ function loadTerminalMixin() {
     setInterval: vi.fn(),
     clearInterval: vi.fn(),
     requestAnimationFrame: vi.fn(),
-    CodemanApp: FakeCodemanApp,
+    ReverieApp: FakeReverieApp,
     CjkInput: { clear: cjkClear },
     window: { addEventListener: vi.fn(), removeEventListener: vi.fn() },
     document: { addEventListener: vi.fn() },
   });
   vm.runInContext(terminalSource, context, { filename: 'terminal-ui.js' });
-  return { mixin: FakeCodemanApp.prototype, cjkClear };
+  return { mixin: FakeReverieApp.prototype, cjkClear };
 }
 
 const terminalHarness = loadTerminalMixin();

@@ -127,7 +127,7 @@ describe('chatroom owner marks', () => {
       url: `/api/chatrooms/${roomId}/messages`,
       payload: { text: 'hello r1', ...opts.payload },
       ...(opts.cookie !== undefined ? { cookies: { [OWNER_COOKIE]: opts.cookie } } : {}),
-      ...(opts.agent ? { headers: { 'x-codeman-parent-session': opts.agent } } : {}),
+      ...(opts.agent ? { headers: { 'x-reverie-parent-session': opts.agent } } : {}),
     });
   const sent = (res: { statusCode: number; json: () => { data: { message: ChatMessage } } }) => {
     expect(res.statusCode).toBe(200);

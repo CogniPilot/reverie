@@ -1,5 +1,8 @@
-"""scripts/setup.sh runs one server from the published image; checked with a fake engine, nothing is started."""
 from __future__ import annotations
+import os
+import shutil
+from tests import executable_script
+"""scripts/setup.sh runs one server from the published image; checked with a fake engine, nothing is started."""
 
 import hashlib
 import json
@@ -19,15 +22,15 @@ class SetupScriptTest(unittest.TestCase):
         self.bin = self.root / "bin"
         self.bin.mkdir()
         podman = self.bin / "podman"
-        podman.write_text('#!/bin/sh\ncase "$1" in\n  image) echo "example.test/reverie@sha256:0123";;\n'
-                          '  container) exit 1;;\nesac\n')
+        podman.write_text(executable_script('#!/bin/sh\ncase "$1" in\n  image) echo "example.test/reverie@sha256:0123";;\n'
+                          '  container) exit 1;;\nesac\n'))
         podman.chmod(0o755)
 
     def tearDown(self):
         self.tmp.cleanup()
 
     def run_setup(self, *args, engine=True):
-        path = f"{self.bin}:/usr/bin:/bin" if engine else "/usr/bin:/bin"
+        path = str(self.bin) + os.pathsep + os.environ["PATH"] if engine else os.environ["PATH"]
         env = {"PATH": path, "HOME": str(self.root), "XDG_CONFIG_HOME": str(self.root / "cfg")}
         return subprocess.run(["bash", str(SETUP), "--dry-run", *args], env=env, capture_output=True, text=True, timeout=60)
 
@@ -43,6 +46,7 @@ class SetupScriptTest(unittest.TestCase):
         run_line = next(line for line in result.stdout.splitlines() if line.startswith("+ podman run"))
         self.assertIn("--publish 127.0.0.1:3100:3000", run_line)
         self.assertIn("type=volume,src=second-data,dst=/instances", run_line)
+        self.assertIn("type=volume,src=second-home,dst=/home/agent", run_line)
         self.assertIn("REVERIE_INSTALL_CLIS=claude-code", run_line)
         self.assertTrue(run_line.endswith("example.test/reverie@sha256:0123"))
         self.assertNotIn("0.0.0.0", run_line)
@@ -87,7 +91,7 @@ class OfflineSetupScriptTest(unittest.TestCase):
         self.log = self.root / "engine.jsonl"
         self.archive = self.root / "reverie-image.tar"
         self.archive.write_bytes(b"test archive")
-        engine_script = '''#!/usr/bin/python3
+        engine_script = executable_script('''#!/usr/bin/python3
 import json, os, sys
 args = sys.argv[1:]
 with open(os.environ["ENGINE_LOG"], "a") as stream:
@@ -104,23 +108,23 @@ if args[0] == "pull":
     sys.exit(99)
 if args[0] == "container" and os.environ.get("MISSING_CONTAINER"):
     sys.exit(1)
-'''
+''')
         for name in ("docker", "podman"):
             executable = self.bin / name
             executable.write_text(engine_script)
             executable.chmod(0o755)
         curl = self.bin / "curl"
-        curl.write_text("#!/bin/sh\nexit 0\n")
+        curl.write_text(executable_script("#!/bin/sh\nexit 0\n"))
         curl.chmod(0o755)
 
     def tearDown(self):
         self.tmp.cleanup()
 
     def run_setup(self, *args, values=None, base_tools=True):
-        env = {"PATH": f"{self.bin}:/usr/bin:/bin" if base_tools else str(self.bin),
+        env = {"PATH": str(self.bin) + os.pathsep + os.environ["PATH"] if base_tools else str(self.bin),
                "HOME": str(self.root), "XDG_CONFIG_HOME": str(self.root / "cfg"),
                "ENGINE_LOG": str(self.log), **(values or {})}
-        return subprocess.run(["/bin/bash", str(SETUP), "--engine", "docker", "--image", "example.test/app", *args],
+        return subprocess.run([shutil.which("bash"), str(SETUP), "--engine", "docker", "--image", "example.test/app", *args],
                               cwd=self.root, env=env, capture_output=True, text=True, timeout=10)
 
     def calls(self):
@@ -143,6 +147,7 @@ if args[0] == "container" and os.environ.get("MISSING_CONTAINER"):
         self.assertEqual(run_call[-1], self.image_id)
         self.assertIn("127.0.0.1:3000:3000", run_call)
         self.assertIn("type=volume,src=reverie-data,dst=/instances", run_call)
+        self.assertIn("type=volume,src=reverie-home,dst=/home/agent", run_call)
         self.assertFalse(any(call[0] == "pull" for call in calls))
         self.assertEqual((self.root / "cfg" / "reverie" / "reverie.versions").read_text(), self.image_id + "\n")
 
@@ -224,7 +229,7 @@ if args[0] == "container" and os.environ.get("MISSING_CONTAINER"):
     def test_offline_has_no_host_curl_or_nix_requirement(self):
         (self.bin / "curl").unlink()
         for name in ("mkdir", "tail", "cat", "grep"):
-            (self.bin / name).symlink_to(Path("/usr/bin") / name)
+            (self.bin / name).symlink_to(Path(shutil.which(name)))
         result = self.run_setup("--offline", base_tools=False)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("--pull=never", next(call for call in self.calls() if call[0] == "run"))
@@ -238,10 +243,10 @@ if args[0] == "container" and os.environ.get("MISSING_CONTAINER"):
         for name in ("setup.sh", "reverie-image.tar", "IMAGE-REF.txt"):
             checksums.append(hashlib.sha256((self.root / name).read_bytes()).hexdigest() + "  " + name)
         (self.root / "SHA256SUMS").write_text("\n".join(checksums) + "\n")
-        env = {"PATH": f"{self.bin}:/usr/bin:/bin", "HOME": str(self.root),
+        env = {"PATH": str(self.bin) + os.pathsep + os.environ["PATH"], "HOME": str(self.root),
                "XDG_CONFIG_HOME": str(self.root / "cfg"), "ENGINE_LOG": str(self.log),
                "LOADED_REF": "example.test/app:1.2.3"}
-        result = subprocess.run(["/bin/bash", "-eu", "-c", commands], cwd=self.root,
+        result = subprocess.run([shutil.which("bash"), "-eu", "-c", commands], cwd=self.root,
                                 env=env, capture_output=True, text=True, timeout=10)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("reverie-image.tar: OK", result.stdout)

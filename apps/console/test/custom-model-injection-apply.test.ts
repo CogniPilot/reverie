@@ -11,7 +11,7 @@
  *    stored claude.ai OAuth session; `projects` is symlinked back into the real
  *    config dir so the response viewer/subagent windows/Read My Mind keep working.
  *
- * Port: N/A (no server; filesystem-only, under a temp CODEMAN data dir from test/setup.ts).
+ * Port: N/A (no server; filesystem-only, under a temp REVERIE data dir from test/setup.ts).
  */
 import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';

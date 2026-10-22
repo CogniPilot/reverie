@@ -59,7 +59,7 @@ describe('TmuxManager restart recovery (test mode safety)', () => {
   it('should report all registered sessions as alive in test mode', async () => {
     manager.registerSession({
       sessionId: 'test-recovery-1',
-      muxName: 'codeman-de51ecaf',
+      muxName: 'reverie-de51ecaf',
       pid: 1,
       createdAt: Date.now(),
       workingDir: '/tmp',
@@ -96,7 +96,7 @@ describe('TmuxManager restart recovery (test mode safety)', () => {
   it('preserves remote SSH metadata across reconcile (mux-sessions.json round-trip source)', async () => {
     manager.registerSession({
       sessionId: 'remote-recovery-1',
-      muxName: 'codeman-de51ecaf',
+      muxName: 'reverie-de51ecaf',
       pid: 1,
       createdAt: Date.now(),
       workingDir: '/home/ubuntu/work',
@@ -124,7 +124,7 @@ describe('TmuxManager restart recovery (test mode safety)', () => {
   it('should not execute any tmux commands in test mode', async () => {
     manager.registerSession({
       sessionId: 'alive-session',
-      muxName: 'codeman-a11eeaaa',
+      muxName: 'reverie-a11eeaaa',
       pid: 1,
       createdAt: Date.now(),
       workingDir: '/tmp',
@@ -143,7 +143,7 @@ describe('TmuxManager restart recovery (test mode safety)', () => {
   it('should handle multiple sessions correctly in test mode', async () => {
     manager.registerSession({
       sessionId: 'session-1',
-      muxName: 'codeman-a11eeaaa',
+      muxName: 'reverie-a11eeaaa',
       pid: 1,
       createdAt: Date.now(),
       workingDir: '/tmp',
@@ -153,7 +153,7 @@ describe('TmuxManager restart recovery (test mode safety)', () => {
     });
     manager.registerSession({
       sessionId: 'session-2',
-      muxName: 'codeman-b22ffbbb',
+      muxName: 'reverie-b22ffbbb',
       pid: 2,
       createdAt: Date.now(),
       workingDir: '/tmp',
@@ -173,7 +173,7 @@ describe('TmuxManager restart recovery (test mode safety)', () => {
   it('should safely remove sessions via killSession in test mode', async () => {
     manager.registerSession({
       sessionId: 'kill-me',
-      muxName: 'codeman-deadbeef',
+      muxName: 'reverie-deadbeef',
       pid: 99999,
       createdAt: Date.now(),
       workingDir: '/tmp',

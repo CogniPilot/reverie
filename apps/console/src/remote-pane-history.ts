@@ -104,7 +104,7 @@ const backoffUntil = new Map<string, number>();
  * taken for it.
  */
 export function newScrollbackMarker(): string {
-  return `codeman-history-${randomBytes(8).toString('hex')}`;
+  return `reverie-history-${randomBytes(8).toString('hex')}`;
 }
 
 /**

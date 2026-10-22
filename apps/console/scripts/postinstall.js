@@ -359,7 +359,7 @@ if (!isGlobalInstall) {
 
 // ----------------------------------------------------------------------------
 // 4b. Fetch gesture-overlay runtime assets (MediaPipe wasm + model) for dev mode
-//     (src/web/public/gesture/). Opt-in feature (CODEMAN_GESTURE=1); non-fatal.
+//     (src/web/public/gesture/). Opt-in feature (REVERIE_GESTURE=1); non-fatal.
 //     Large binaries kept out of git; the build copies them into dist/.
 // ----------------------------------------------------------------------------
 
@@ -436,7 +436,7 @@ if (hasWarnings) {
 const port = parseInt(process.env.PORT || '3000', 10);
 const projectRoot = join(import.meta.dirname, '..');
 
-if (process.env.CI || process.env.CODEMAN_NO_AUTOSTART) {
+if (process.env.CI || process.env.REVERIE_NO_AUTOSTART) {
     // CI or explicit opt-out — just print next steps
     console.log(colors.bold('Next steps:'));
     if (isGlobalInstall) {
@@ -444,7 +444,7 @@ if (process.env.CI || process.env.CODEMAN_NO_AUTOSTART) {
         console.log(colors.dim('  2. Open:   ') + colors.cyan(`http://localhost:${port}`));
     } else {
         console.log(colors.dim('  1. Build:  ') + colors.cyan('npm run build'));
-        console.log(colors.dim('  2. Start:  ') + colors.cyan('npx codeman web'));
+        console.log(colors.dim('  2. Start:  ') + colors.cyan('npx reverie web'));
         console.log(colors.dim('  3. Open:   ') + colors.cyan(`http://localhost:${port}`));
     }
     console.log('');
@@ -477,7 +477,7 @@ if (process.env.CI || process.env.CODEMAN_NO_AUTOSTART) {
                     console.log(colors.green('✓ Build complete'));
                     buildOk = true;
                 } catch {
-                    console.log(colors.yellow('⚠ Build failed — start manually: npm run build && npx codeman web'));
+                    console.log(colors.yellow('⚠ Build failed — start manually: npm run build && npx reverie web'));
                 }
             } else {
                 console.log(colors.yellow('⚠ TypeScript not found — run: npm run build'));
@@ -511,7 +511,7 @@ if (process.env.CI || process.env.CODEMAN_NO_AUTOSTART) {
                 console.log('');
             } catch (err) {
                 console.log(colors.yellow(`⚠ Could not auto-start: ${err.message}`));
-                console.log(colors.dim('  Start manually: npx codeman web'));
+                console.log(colors.dim('  Start manually: npx reverie web'));
                 console.log('');
             }
         }
@@ -526,7 +526,7 @@ console.log(colors.bold('Security:'));
 console.log(colors.dim('  Reverie binds ') + colors.cyan('127.0.0.1') + colors.dim(' (this machine only) — no password needed by default.'));
 console.log(colors.dim('  To reach it from another device, do ONE of:'));
 console.log(colors.dim('    • ') + colors.cyan('tailscale serve') + colors.dim(' / ') + colors.cyan('cloudflared tunnel') + colors.dim('   (recommended), or'));
-console.log(colors.dim('    • ') + colors.cyan('reverie web --host 0.0.0.0') + colors.dim('  AND set ') + colors.cyan('CODEMAN_PASSWORD'));
+console.log(colors.dim('    • ') + colors.cyan('reverie web --host 0.0.0.0') + colors.dim('  AND set ') + colors.cyan('REVERIE_PASSWORD'));
 console.log(colors.dim('  A non-loopback bind without a password still starts, but warns loudly.'));
 console.log(colors.dim('  Details: docs/security-architecture.md'));
 console.log('');

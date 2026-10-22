@@ -23,7 +23,7 @@ describe('DeepSeekWebStartSchema: the authority reaching --trusted-host', () => 
       'localhost:3000',
       '127.0.0.1:5013',
       'tnode.tailf80371.ts.net:8444',
-      'codeman.example.com',
+      'reverie.example.com',
       '[::1]:3000',
       'host-with-dashes.local:80',
     ]) {

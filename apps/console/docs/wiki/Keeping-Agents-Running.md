@@ -172,4 +172,4 @@ run summary and lifecycle log carry the detail.
   autonomous work rather than "keep going".
 - [Cron Jobs](Cron-Jobs) - starting work on a schedule instead of continuing it.
 - [Notifications And Approvals](Notifications-And-Approvals) - being told when it needs you.
-- [`docs/respawn-state-machine.md`](https://github.com/Ark0N/Codeman/blob/master/docs/respawn-state-machine.md) - the state machine itself.
+- [`docs/respawn-state-machine.md`](https://github.com/jgoppert/reverie/blob/main/apps/console/docs/respawn-state-machine.md) - the state machine itself.

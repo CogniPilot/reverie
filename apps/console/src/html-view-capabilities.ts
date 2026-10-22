@@ -1,8 +1,8 @@
 /**
  * @fileoverview Capability tokens for rendering a local HTML file.
  *
- * `file-raw` never serves HTML as HTML: a page rendered from Codeman's own origin
- * could read the Codeman document and drive the agent-spawning API. So an HTML
+ * `file-raw` never serves HTML as HTML: a page rendered from Reverie's own origin
+ * could read the Reverie document and drive the agent-spawning API. So an HTML
  * file is rendered from `/html-view/:cap/*` instead, with a `Content-Security-
  * Policy: sandbox` header that puts the document in an OPAQUE origin no matter how
  * it is opened (iframe or top-level tab). That opaque origin is also why the route

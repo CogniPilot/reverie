@@ -106,7 +106,7 @@ describe('spoken-turn hint on delivery', () => {
       url: `/api/chatrooms/${roomId}/messages`,
       payload: { text, ...(opts.spoken ? { spoken: true } : {}) },
       ...(opts.cookie !== undefined ? { cookies: { [OWNER_COOKIE]: opts.cookie } } : {}),
-      ...(opts.agent ? { headers: { 'x-codeman-parent-session': opts.agent } } : {}),
+      ...(opts.agent ? { headers: { 'x-reverie-parent-session': opts.agent } } : {}),
     });
     expect(res.statusCode).toBe(200);
     return res.json().data.message as ChatMessage;

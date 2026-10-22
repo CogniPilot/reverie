@@ -9,7 +9,7 @@
  *
  * The chrome rows below (the closing row, the right-aligned hint, the composer rules, the
  * footer, the workflow progress row) are verbatim from a live Claude Code 2.1.283 pane on
- * 2026-09-28 (`tmux -L codeman capture-pane -p`, 64 columns). The prose and the names are
+ * 2026-09-28 (`tmux -L reverie capture-pane -p`, 64 columns). The prose and the names are
  * invented.
  */
 import { describe, expect, it, vi, afterEach } from 'vitest';
@@ -167,7 +167,7 @@ function withFakePane(read: () => string, mode: 'claude' | 'codex' = 'claude'): 
     workingDir: '/tmp',
     mode,
     mux,
-    muxSession: { muxName: 'codeman-test', sessionId: 'test', createdAt: Date.now() },
+    muxSession: { muxName: 'reverie-test', sessionId: 'test', createdAt: Date.now() },
   } as ConstructorParameters<typeof Session>[0]);
 }
 

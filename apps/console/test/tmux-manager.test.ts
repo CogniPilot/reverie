@@ -107,25 +107,25 @@ describe('TmuxManager (unit)', () => {
     // A tmux setenv survives respawn-pane, so the absence of a user statusline
     // must UNSET the variable rather than leave a stale one for the exporter
     // to wrap.
-    it('unsets CODEMAN_USER_STATUSLINE_CMD when the user has no statusline', () => {
+    it('unsets REVERIE_USER_STATUSLINE_CMD when the user has no statusline', () => {
       mockedExecSync.mockClear();
       (
         manager as unknown as { _configureStatusLineUserCommand: (m: string, c?: string) => void }
-      )._configureStatusLineUserCommand('codeman-abc', undefined);
+      )._configureStatusLineUserCommand('reverie-abc', undefined);
       const cmds = mockedExecSync.mock.calls.map((c) => String(c[0]));
-      expect(cmds.some((c) => c.includes("setenv -t 'codeman-abc' -u CODEMAN_USER_STATUSLINE_CMD"))).toBe(true);
+      expect(cmds.some((c) => c.includes("setenv -t 'reverie-abc' -u REVERIE_USER_STATUSLINE_CMD"))).toBe(true);
     });
 
-    it('sets CODEMAN_USER_STATUSLINE_CMD, shell-escaped, when the user has one', () => {
+    it('sets REVERIE_USER_STATUSLINE_CMD, shell-escaped, when the user has one', () => {
       mockedExecSync.mockClear();
       (
         manager as unknown as { _configureStatusLineUserCommand: (m: string, c?: string) => void }
-      )._configureStatusLineUserCommand('codeman-abc', `printf '%s' "$1" | jq -r .model`);
+      )._configureStatusLineUserCommand('reverie-abc', `printf '%s' "$1" | jq -r .model`);
       const cmds = mockedExecSync.mock.calls.map((c) => String(c[0]));
-      const setCmd = cmds.find((c) => c.includes('CODEMAN_USER_STATUSLINE_CMD'));
+      const setCmd = cmds.find((c) => c.includes('REVERIE_USER_STATUSLINE_CMD'));
       expect(setCmd).toBeDefined();
       expect(setCmd).not.toContain(' -u ');
-      expect(setCmd).toContain("setenv -t 'codeman-abc' CODEMAN_USER_STATUSLINE_CMD ");
+      expect(setCmd).toContain("setenv -t 'reverie-abc' REVERIE_USER_STATUSLINE_CMD ");
     });
   });
 
@@ -156,8 +156,8 @@ describe('TmuxManager (unit)', () => {
       expect(command).toContain('BatchMode=yes');
       expect(command).toContain('ubuntu@10.0.0.42');
       expect(command).toContain('/home/ubuntu/work');
-      // Dedicated socket + a name that fails a remote Codeman's SAFE_MUX_NAME_PATTERN.
-      expect(command).toContain('tmux -L codeman-remote new-session -A -s codeman-ssh-abc123de');
+      // Dedicated socket + a name that fails a remote Reverie's SAFE_MUX_NAME_PATTERN.
+      expect(command).toContain('tmux -L reverie-remote new-session -A -s reverie-ssh-abc123de');
       expect(command).toContain('exec codx personal');
       // Session options are scoped per-session, never global (-g).
       expect(command).not.toContain('set -g');
@@ -203,7 +203,7 @@ describe('TmuxManager (unit)', () => {
       expect(command).toContain('claude --dangerously-skip-permissions');
     });
 
-    it('pins SSH-remote claude to the Codeman session id so a respawn resumes the same conversation', () => {
+    it('pins SSH-remote claude to the Reverie session id so a respawn resumes the same conversation', () => {
       // Regression (2026-08-29): remote claude was launched as a bare `claude …`,
       // so every reattach/respawn after a pane death (user ctrl-d or ctrl-c exit)
       // started a NEW conversation. The launch now mirrors the docker-claude shape:
@@ -258,8 +258,8 @@ describe('TmuxManager (unit)', () => {
       // Shares the default ConnectTimeout so an unreachable host fails fast (never blocks kill).
       expect(command).toContain('-o ConnectTimeout=10');
       expect(command).toContain('ubuntu@10.0.0.42');
-      expect(command).toContain('tmux -L codeman-remote kill-session -t');
-      expect(command).toContain('codeman-ssh-abc123de');
+      expect(command).toContain('tmux -L reverie-remote kill-session -t');
+      expect(command).toContain('reverie-ssh-abc123de');
     });
   });
 
@@ -270,15 +270,15 @@ describe('TmuxManager (unit)', () => {
   });
 
   describe('getAttachArgs', () => {
-    it('should attach every session through the dedicated Codeman socket', () => {
-      const args = manager.getAttachArgs('codeman-00000030');
-      expect(args).toEqual(['-L', 'fleet', 'attach-session', '-t', 'codeman-00000030']);
+    it('should attach every session through the dedicated Reverie socket', () => {
+      const args = manager.getAttachArgs('reverie-00000030');
+      expect(args).toEqual(['-L', 'reverie', 'attach-session', '-t', 'reverie-00000030']);
     });
 
     it('should attach registered sessions on the same dedicated socket (no per-session socket)', () => {
       manager.registerSession({
         sessionId: 'some-session',
-        muxName: 'codeman-00000030',
+        muxName: 'reverie-00000030',
         pid: 12345,
         createdAt: Date.now(),
         workingDir: '/tmp',
@@ -286,27 +286,27 @@ describe('TmuxManager (unit)', () => {
         attached: false,
       });
 
-      const args = manager.getAttachArgs('codeman-00000030');
-      expect(args).toEqual(['-L', 'fleet', 'attach-session', '-t', 'codeman-00000030']);
+      const args = manager.getAttachArgs('reverie-00000030');
+      expect(args).toEqual(['-L', 'reverie', 'attach-session', '-t', 'reverie-00000030']);
     });
   });
 
   describe('window sizing', () => {
     it('pins a tmux window to manual sizing before browser attach', () => {
-      expect(manager.setManualWindowSize('codeman-00000030')).toBe(true);
+      expect(manager.setManualWindowSize('reverie-00000030')).toBe(true);
 
       expect(mockedExecSync).toHaveBeenCalledWith(
-        "tmux -L 'fleet' set-window-option -t 'codeman-00000030' window-size manual",
+        "tmux -L 'reverie' set-window-option -t 'reverie-00000030' window-size manual",
         expect.objectContaining({ stdio: 'ignore' })
       );
     });
 
-    it('resizes the tmux window when Codeman accepts a desktop resize', () => {
-      expect(manager.resizeWindow('codeman-00000030', 140, 42)).toBe(true);
+    it('resizes the tmux window when Reverie accepts a desktop resize', () => {
+      expect(manager.resizeWindow('reverie-00000030', 140, 42)).toBe(true);
 
       // Non-blocking exec (not execSync) on the interactive resize hot path.
       expect(mockedExec).toHaveBeenCalledWith(
-        "tmux -L 'fleet' resize-window -t 'codeman-00000030' -x 140 -y 42",
+        "tmux -L 'reverie' resize-window -t 'reverie-00000030' -x 140 -y 42",
         expect.objectContaining({ timeout: expect.any(Number) }),
         expect.any(Function)
       );
@@ -319,7 +319,7 @@ describe('TmuxManager (unit)', () => {
         manager as unknown as {
           buildEnvExports(sessionId: string, muxName: string, mode: string): string[];
         }
-      ).buildEnvExports('session-1', 'codeman-00000030', mode);
+      ).buildEnvExports('session-1', 'reverie-00000030', mode);
 
     it('keeps COLORTERM unset for OpenCode sessions', () => {
       expect(callBuildEnvExports('opencode')).toContain('unset COLORTERM');
@@ -332,29 +332,29 @@ describe('TmuxManager (unit)', () => {
       expect(callBuildEnvExports('claude')).toContain('export COLORTERM=truecolor');
     });
 
-    it('exports the server-stamped CODEMAN_API_URL verbatim', () => {
-      const original = process.env.CODEMAN_API_URL;
-      process.env.CODEMAN_API_URL = 'https://127.0.0.1:3199';
+    it('exports the server-stamped REVERIE_API_URL verbatim', () => {
+      const original = process.env.REVERIE_API_URL;
+      process.env.REVERIE_API_URL = 'https://127.0.0.1:3199';
       try {
-        expect(callBuildEnvExports('claude')).toContain('export CODEMAN_API_URL=https://127.0.0.1:3199');
+        expect(callBuildEnvExports('claude')).toContain('export REVERIE_API_URL=https://127.0.0.1:3199');
       } finally {
-        if (original === undefined) delete process.env.CODEMAN_API_URL;
-        else process.env.CODEMAN_API_URL = original;
+        if (original === undefined) delete process.env.REVERIE_API_URL;
+        else process.env.REVERIE_API_URL = original;
       }
     });
 
     // A hardcoded fallback exported the wrong scheme on HTTPS installs; unset must
     // stay unset so in-session guards fail closed instead of curling a bad URL.
-    it('exports no CODEMAN_API_URL at all when the server has not stamped one', () => {
-      const original = process.env.CODEMAN_API_URL;
-      delete process.env.CODEMAN_API_URL;
+    it('exports no REVERIE_API_URL at all when the server has not stamped one', () => {
+      const original = process.env.REVERIE_API_URL;
+      delete process.env.REVERIE_API_URL;
       try {
         const exports = callBuildEnvExports('claude');
-        expect(exports.some((line) => line.startsWith('export CODEMAN_API_URL'))).toBe(false);
+        expect(exports.some((line) => line.startsWith('export REVERIE_API_URL'))).toBe(false);
         expect(exports.join(' ')).not.toContain('localhost:3000');
       } finally {
-        if (original === undefined) delete process.env.CODEMAN_API_URL;
-        else process.env.CODEMAN_API_URL = original;
+        if (original === undefined) delete process.env.REVERIE_API_URL;
+        else process.env.REVERIE_API_URL = original;
       }
     });
   });
@@ -470,7 +470,7 @@ describe('TmuxManager (unit)', () => {
     beforeEach(() => {
       manager.registerSession({
         sessionId: 'test-id',
-        muxName: 'codeman-1e571234',
+        muxName: 'reverie-1e571234',
         pid: 12345,
         createdAt: Date.now(),
         workingDir: '/tmp',
@@ -504,7 +504,7 @@ describe('TmuxManager (unit)', () => {
     it('should return all registered sessions as alive', async () => {
       manager.registerSession({
         sessionId: 'alive-1',
-        muxName: 'codeman-a11ce111',
+        muxName: 'reverie-a11ce111',
         pid: 100,
         createdAt: Date.now(),
         workingDir: '/tmp',
@@ -540,7 +540,7 @@ describe('TmuxManager (unit)', () => {
     it('should remove session from memory in test mode', async () => {
       manager.registerSession({
         sessionId: 'kill-test',
-        muxName: 'codeman-5e1f1111',
+        muxName: 'reverie-5e1f1111',
         pid: 999,
         createdAt: Date.now(),
         workingDir: '/tmp',
@@ -553,14 +553,14 @@ describe('TmuxManager (unit)', () => {
       expect(manager.getSession('kill-test')).toBeUndefined();
     });
 
-    it('should allow kill when session does NOT match CODEMAN_MUX_NAME', async () => {
-      const originalEnv = process.env.CODEMAN_MUX_NAME;
-      process.env.CODEMAN_MUX_NAME = 'codeman-0ther1111';
+    it('should allow kill when session does NOT match REVERIE_MUX_NAME', async () => {
+      const originalEnv = process.env.REVERIE_MUX_NAME;
+      process.env.REVERIE_MUX_NAME = 'reverie-0ther1111';
 
       try {
         manager.registerSession({
           sessionId: 'other-kill-test',
-          muxName: 'codeman-d1ff1111',
+          muxName: 'reverie-d1ff1111',
           pid: 888,
           createdAt: Date.now(),
           workingDir: '/tmp',
@@ -578,21 +578,21 @@ describe('TmuxManager (unit)', () => {
         expect(manager.getSession('other-kill-test')).toBeUndefined();
       } finally {
         if (originalEnv === undefined) {
-          delete process.env.CODEMAN_MUX_NAME;
+          delete process.env.REVERIE_MUX_NAME;
         } else {
-          process.env.CODEMAN_MUX_NAME = originalEnv;
+          process.env.REVERIE_MUX_NAME = originalEnv;
         }
       }
     });
 
-    it('should allow kill when CODEMAN_MUX_NAME is not set', async () => {
-      const originalEnv = process.env.CODEMAN_MUX_NAME;
-      delete process.env.CODEMAN_MUX_NAME;
+    it('should allow kill when REVERIE_MUX_NAME is not set', async () => {
+      const originalEnv = process.env.REVERIE_MUX_NAME;
+      delete process.env.REVERIE_MUX_NAME;
 
       try {
         manager.registerSession({
           sessionId: 'no-env-test',
-          muxName: 'codeman-aaa11111',
+          muxName: 'reverie-aaa11111',
           pid: 777,
           createdAt: Date.now(),
           workingDir: '/tmp',
@@ -606,9 +606,9 @@ describe('TmuxManager (unit)', () => {
         expect(result).toBe(true);
       } finally {
         if (originalEnv === undefined) {
-          delete process.env.CODEMAN_MUX_NAME;
+          delete process.env.REVERIE_MUX_NAME;
         } else {
-          process.env.CODEMAN_MUX_NAME = originalEnv;
+          process.env.REVERIE_MUX_NAME = originalEnv;
         }
       }
     });
@@ -618,7 +618,7 @@ describe('TmuxManager (unit)', () => {
     beforeEach(() => {
       manager.registerSession({
         sessionId: 'meta-test',
-        muxName: 'codeman-ae1a1234',
+        muxName: 'reverie-ae1a1234',
         pid: 300,
         createdAt: Date.now(),
         workingDir: '/tmp',
@@ -681,7 +681,7 @@ describe('TmuxManager (unit)', () => {
     it('should return all registered sessions', () => {
       manager.registerSession({
         sessionId: 's1',
-        muxName: 'codeman-51111111',
+        muxName: 'reverie-51111111',
         pid: 1,
         createdAt: Date.now(),
         workingDir: '/tmp',
@@ -690,7 +690,7 @@ describe('TmuxManager (unit)', () => {
       });
       manager.registerSession({
         sessionId: 's2',
-        muxName: 'codeman-52222222',
+        muxName: 'reverie-52222222',
         pid: 2,
         createdAt: Date.now(),
         workingDir: '/tmp',
@@ -759,14 +759,14 @@ describe('TmuxManager (unit)', () => {
           ([cmd]) => typeof cmd === 'string' && cmd.includes(' new-session ')
         );
         expect(newSessionCall?.[0]).toBe(
-          `tmux -L 'fleet' set-option -g history-limit 250000 \\; new-session -ds "codeman-00000030" -c /tmp \\; set-option -t "codeman-00000030" history-limit 250000`
+          `tmux -L 'reverie' set-option -g history-limit 250000 \\; new-session -ds "reverie-00000030" -c /tmp \\; set-option -t "reverie-00000030" history-limit 250000`
         );
         expect(newSessionCall?.[1]).toEqual(expect.objectContaining({ cwd: '/tmp' }));
 
         const respawnCall = mockedExecSync.mock.calls.find(
           ([cmd]) => typeof cmd === 'string' && cmd.includes(' respawn-pane ')
         );
-        expect(respawnCall?.[0]).toContain(`tmux -L 'fleet' respawn-pane -k -c /tmp -t "codeman-00000030"`);
+        expect(respawnCall?.[0]).toContain(`tmux -L 'reverie' respawn-pane -k -c /tmp -t "reverie-00000030"`);
         expect(respawnCall?.[0]).toContain('cd \\"/mnt/gdrive/project with spaces\\" &&');
       } finally {
         nonTestManager.destroy();
@@ -782,7 +782,7 @@ describe('TmuxManager (unit)', () => {
         const historyCall = mockedExec.mock.calls.find(
           ([cmd]) => typeof cmd === 'string' && cmd.includes(' history-limit ')
         );
-        expect(historyCall?.[0]).toBe(`tmux -L 'fleet' set-option -g history-limit 200000`);
+        expect(historyCall?.[0]).toBe(`tmux -L 'reverie' set-option -g history-limit 200000`);
         expect(historyCall?.[0]).not.toContain(' -t ');
       } finally {
         nonTestManager.destroy();
@@ -810,7 +810,7 @@ describe('TmuxManager (unit)', () => {
           ([cmd]) => typeof cmd === 'string' && cmd.includes(' new-session ')
         );
         expect(newSessionCall?.[0]).toBe(
-          `tmux -L 'fleet' new-session -ds "codeman-00000044" -c /tmp \\; set-option -t "codeman-00000044" history-limit 250000`
+          `tmux -L 'reverie' new-session -ds "reverie-00000044" -c /tmp \\; set-option -t "reverie-00000044" history-limit 250000`
         );
         expect(newSessionCall?.[0]).not.toContain('set-option -g');
 
@@ -819,7 +819,7 @@ describe('TmuxManager (unit)', () => {
         const historyCall = mockedExec.mock.calls.find(
           ([cmd]) => typeof cmd === 'string' && cmd.includes(' history-limit ')
         );
-        expect(historyCall?.[0]).toBe(`tmux -L 'fleet' set-option -t 'codeman-00000044' history-limit 200000`);
+        expect(historyCall?.[0]).toBe(`tmux -L 'reverie' set-option -t 'reverie-00000044' history-limit 200000`);
         expect(historyCall?.[0]).not.toContain('set-option -g');
       } finally {
         nonTestManager.destroy();
@@ -831,7 +831,7 @@ describe('TmuxManager (unit)', () => {
       const nonTestManager = new NonTestTmuxManager();
       nonTestManager.registerSession({
         sessionId: 'respawn1234',
-        muxName: 'codeman-abcd1234',
+        muxName: 'reverie-abcd1234',
         pid: 1000,
         createdAt: Date.now(),
         workingDir: '/tmp',
@@ -851,7 +851,7 @@ describe('TmuxManager (unit)', () => {
         const respawnCall = vi
           .mocked(currentExec)
           .mock.calls.find(([cmd]) => typeof cmd === 'string' && cmd.includes(' respawn-pane '));
-        expect(respawnCall?.[0]).toContain(`tmux -L 'fleet' respawn-pane -k -c /tmp -t "codeman-abcd1234"`);
+        expect(respawnCall?.[0]).toContain(`tmux -L 'reverie' respawn-pane -k -c /tmp -t "reverie-abcd1234"`);
         expect(respawnCall?.[0]).toContain('cd \\"/mnt/gdrive/project\\" &&');
       } finally {
         nonTestManager.destroy();
@@ -862,14 +862,14 @@ describe('TmuxManager (unit)', () => {
       const NonTestTmuxManager = await importWithTmuxCommandsEnabled();
       const nonTestManager = new NonTestTmuxManager();
       nonTestManager.registerSession({
-        sessionId: 'recovery1234', muxName: 'codeman-abcd1234', pid: 1000,
+        sessionId: 'recovery1234', muxName: 'reverie-abcd1234', pid: 1000,
         createdAt: Date.now(), workingDir: '/tmp', mode: 'shell', attached: true,
       });
       try {
         expect(await nonTestManager.respawnPane({ sessionId: 'recovery1234', workingDir: '/tmp', mode: 'shell', onlyIfDead })).toBe(4242);
         const { exec: currentExec } = await import('node:child_process');
         const command = vi.mocked(currentExec).mock.calls.find(([cmd]) => String(cmd).includes(' respawn-pane '))?.[0];
-        expect(command).toContain(`respawn-pane${onlyIfDead ? '' : ' -k'} -c /tmp -t "codeman-abcd1234"`);
+        expect(command).toContain(`respawn-pane${onlyIfDead ? '' : ' -k'} -c /tmp -t "reverie-abcd1234"`);
         if (onlyIfDead) expect(command).not.toMatch(/respawn-pane\s+-k\b/);
       } finally { nonTestManager.destroy(); }
     });
@@ -878,7 +878,7 @@ describe('TmuxManager (unit)', () => {
       const NonTestTmuxManager = await importWithTmuxCommandsEnabled();
       const nonTestManager = new NonTestTmuxManager();
       nonTestManager.registerSession({
-        sessionId: 'recovery5678', muxName: 'codeman-abcd5678', pid: 1000,
+        sessionId: 'recovery5678', muxName: 'reverie-abcd5678', pid: 1000,
         createdAt: Date.now(), workingDir: '/tmp', mode: 'shell', attached: true,
       });
       const { exec: currentExec } = await import('node:child_process');
@@ -908,7 +908,7 @@ describe('TmuxManager (unit)', () => {
       const nonTestManager = new NonTestTmuxManager();
       nonTestManager.registerSession({
         sessionId: 'respawn5678',
-        muxName: 'codeman-abcd5678',
+        muxName: 'reverie-abcd5678',
         pid: 1000,
         createdAt: Date.now(),
         workingDir: '/tmp',
@@ -928,7 +928,7 @@ describe('TmuxManager (unit)', () => {
 
         const setenvCalls = mockedExecSync.mock.calls
           .map(([cmd]) => cmd)
-          .filter((cmd): cmd is string => typeof cmd === 'string' && cmd.includes(" setenv -t 'codeman-abcd5678'"));
+          .filter((cmd): cmd is string => typeof cmd === 'string' && cmd.includes(" setenv -t 'reverie-abcd5678'"));
         const unsetBase = setenvCalls.findIndex((cmd) => cmd.endsWith(' -u ANTHROPIC_BASE_URL'));
         const unsetKey = setenvCalls.findIndex((cmd) => cmd.endsWith(' -u ANTHROPIC_API_KEY'));
         const setKeep = setenvCalls.findIndex((cmd) => cmd.includes(' CLAUDE_CODE_KEEP '));
@@ -960,11 +960,11 @@ describe('parsePaneRows', () => {
   const pids = (output: string) => new Map(parsePaneRows(output).map((row) => [row.sessionName, row.pid]));
 
   it('parses well-formed output into name → pid', () => {
-    const out = 'codeman-aaaa|1234\ncodeman-bbbb|5678\nclaudeman-cccc|9999';
+    const out = 'reverie-aaaa|1234\nreverie-bbbb|5678\nclaudeman-cccc|9999';
     const result = pids(out);
     expect(result.size).toBe(3);
-    expect(result.get('codeman-aaaa')).toBe(1234);
-    expect(result.get('codeman-bbbb')).toBe(5678);
+    expect(result.get('reverie-aaaa')).toBe(1234);
+    expect(result.get('reverie-bbbb')).toBe(5678);
     expect(result.get('claudeman-cccc')).toBe(9999);
   });
 
@@ -973,28 +973,28 @@ describe('parsePaneRows', () => {
   });
 
   it('skips blank lines', () => {
-    const result = pids('\ncodeman-aaaa|100\n\n\ncodeman-bbbb|200\n');
+    const result = pids('\nreverie-aaaa|100\n\n\nreverie-bbbb|200\n');
     expect(result.size).toBe(2);
-    expect(result.get('codeman-aaaa')).toBe(100);
-    expect(result.get('codeman-bbbb')).toBe(200);
+    expect(result.get('reverie-aaaa')).toBe(100);
+    expect(result.get('reverie-bbbb')).toBe(200);
   });
 
   it('skips lines without the separator', () => {
-    const result = pids('codeman-aaaa 1234\ncodeman-bbbb|5678');
+    const result = pids('reverie-aaaa 1234\nreverie-bbbb|5678');
     expect(result.size).toBe(1);
-    expect(result.get('codeman-bbbb')).toBe(5678);
+    expect(result.get('reverie-bbbb')).toBe(5678);
   });
 
   it('skips lines with a non-numeric pid', () => {
-    const result = pids('codeman-aaaa|notapid\ncodeman-bbbb|5678');
+    const result = pids('reverie-aaaa|notapid\nreverie-bbbb|5678');
     expect(result.size).toBe(1);
-    expect(result.get('codeman-bbbb')).toBe(5678);
+    expect(result.get('reverie-bbbb')).toBe(5678);
   });
 
   it('skips lines with an empty session name', () => {
-    const result = pids('|1234\ncodeman-bbbb|5678');
+    const result = pids('|1234\nreverie-bbbb|5678');
     expect(result.size).toBe(1);
-    expect(result.get('codeman-bbbb')).toBe(5678);
+    expect(result.get('reverie-bbbb')).toBe(5678);
   });
 
   it('treats a literal backslash-t in input as part of the session name, not a delimiter', () => {
@@ -1002,14 +1002,14 @@ describe('parsePaneRows', () => {
     // was emitting FORMAT '\t' as the two characters `\` + `t` rather than a
     // tab byte. With the '|' separator, such literals must not be silently
     // treated as a delimiter — the line is discarded because there is no '|'.
-    const literalBackslashT = 'codeman-aaaa\\t1234';
+    const literalBackslashT = 'reverie-aaaa\\t1234';
     expect(parsePaneRows(literalBackslashT)).toEqual([]);
   });
 
   it('keeps a row whose pane_dead fields are missing, and calls its deadness unknown', () => {
     // A tmux old enough to have shipped the previous two-field format, or one
     // that dropped the trailing fields, must still yield its pid.
-    const [row] = parsePaneRows('codeman-aaaa|1234');
+    const [row] = parsePaneRows('reverie-aaaa|1234');
     expect(row.pid).toBe(1234);
     expect(row.dead).toBeUndefined();
     expect(row.exitStatus).toBeUndefined();
@@ -1018,21 +1018,21 @@ describe('parsePaneRows', () => {
 
   it('reads a live pane as not dead, with no status or signal', () => {
     // Measured against tmux 3.2a: a live pane leaves both numeric fields blank.
-    const [row] = parsePaneRows('codeman-aaaa|1234|0|||1');
+    const [row] = parsePaneRows('reverie-aaaa|1234|0|||1');
     expect(row.dead).toBe(false);
     expect(row.exitStatus).toBeUndefined();
     expect(row.exitSignal).toBeUndefined();
   });
 
   it('reads a dead pane with its exit status', () => {
-    const [row] = parsePaneRows('codeman-aaaa|1234|1|7|');
+    const [row] = parsePaneRows('reverie-aaaa|1234|1|7|');
     expect(row.dead).toBe(true);
     expect(row.exitStatus).toBe(7);
     expect(row.exitSignal).toBeUndefined();
   });
 
   it('reads a dead pane with its killing signal', () => {
-    const [row] = parsePaneRows('codeman-aaaa|1234|1||9');
+    const [row] = parsePaneRows('reverie-aaaa|1234|1||9');
     expect(row.dead).toBe(true);
     expect(row.exitStatus).toBeUndefined();
     expect(row.exitSignal).toBe(9);
@@ -1040,24 +1040,24 @@ describe('parsePaneRows', () => {
 
   it('leaves a status of 0 as 0 rather than dropping it', () => {
     // The whole point of the field: a clean exit is the case part 2 acts on.
-    const [row] = parsePaneRows('codeman-aaaa|1234|1|0|');
+    const [row] = parsePaneRows('reverie-aaaa|1234|1|0|');
     expect(row.exitStatus).toBe(0);
   });
 
   it('still reads the pid when a trailing field is junk', () => {
     // Carried over from the retired parsePaneList case 'splits on the first separator only'.
-    expect(pids('codeman-aaaa|1234|extra-field').get('codeman-aaaa')).toBe(1234);
+    expect(pids('reverie-aaaa|1234|extra-field').get('reverie-aaaa')).toBe(1234);
   });
 
   it('calls a non-numeric dead flag unknown rather than false', () => {
-    const [row] = parsePaneRows('codeman-aaaa|1234|?||');
+    const [row] = parsePaneRows('reverie-aaaa|1234|?||');
     expect(row.dead).toBeUndefined();
   });
 
   it('returns one row per pane of a split session, in tmux order', () => {
-    const rows = parsePaneRows('codeman-aaaa|100|0|||\ncodeman-aaaa|200|1|0|');
+    const rows = parsePaneRows('reverie-aaaa|100|0|||\nreverie-aaaa|200|1|0|');
     expect(rows.map((row) => row.pid)).toEqual([100, 200]);
-    expect(rows.map((row) => row.sessionName)).toEqual(['codeman-aaaa', 'codeman-aaaa']);
+    expect(rows.map((row) => row.sessionName)).toEqual(['reverie-aaaa', 'reverie-aaaa']);
   });
 });
 
@@ -1065,45 +1065,45 @@ describe('derivePaneExits', () => {
   const NOW = 1_700_000_000_000;
 
   it('reports a single dead pane with its exit status', () => {
-    const exits = derivePaneExits(parsePaneRows('codeman-aaaa|1234|1|0|'), NOW);
-    expect(exits.get('codeman-aaaa')).toEqual({ panePid: 1234, exit: { status: 0, at: NOW } });
+    const exits = derivePaneExits(parsePaneRows('reverie-aaaa|1234|1|0|'), NOW);
+    expect(exits.get('reverie-aaaa')).toEqual({ panePid: 1234, exit: { status: 0, at: NOW } });
   });
 
   it('reports a signalled death without inventing a status', () => {
     // Folding an absent status into 0 would turn an unexplained death into the
     // clean exit part 2 closes on sight.
-    const exits = derivePaneExits(parsePaneRows('codeman-aaaa|1234|1||9'), NOW);
-    expect(exits.get('codeman-aaaa')).toEqual({ panePid: 1234, exit: { signal: 9, at: NOW } });
+    const exits = derivePaneExits(parsePaneRows('reverie-aaaa|1234|1||9'), NOW);
+    expect(exits.get('reverie-aaaa')).toEqual({ panePid: 1234, exit: { signal: 9, at: NOW } });
   });
 
   it('reports a death tmux could not explain at all', () => {
     // Measured on tmux 3.2a: a SIGKILLed pane reports pane_dead=1 and nothing else.
-    const exits = derivePaneExits(parsePaneRows('codeman-aaaa|1234|1||'), NOW);
-    expect(exits.get('codeman-aaaa')).toEqual({ panePid: 1234, exit: { at: NOW } });
+    const exits = derivePaneExits(parsePaneRows('reverie-aaaa|1234|1||'), NOW);
+    expect(exits.get('reverie-aaaa')).toEqual({ panePid: 1234, exit: { at: NOW } });
   });
 
   it('says nothing about a live pane', () => {
-    const exits = derivePaneExits(parsePaneRows('codeman-aaaa|1234|0|||'), NOW);
-    expect(exits.has('codeman-aaaa')).toBe(false);
+    const exits = derivePaneExits(parsePaneRows('reverie-aaaa|1234|0|||'), NOW);
+    expect(exits.has('reverie-aaaa')).toBe(false);
   });
 
   it('says nothing about a pane whose deadness tmux did not report', () => {
-    expect(derivePaneExits(parsePaneRows('codeman-aaaa|1234'), NOW).size).toBe(0);
+    expect(derivePaneExits(parsePaneRows('reverie-aaaa|1234'), NOW).size).toBe(0);
   });
 
   it('says nothing about a session with more than one pane, even when all are dead', () => {
     // A session the user split by hand has no single "the agent" to report on,
     // and guessing which pane speaks for it could call a live session exited.
-    const exits = derivePaneExits(parsePaneRows('codeman-aaaa|100|1|0|\ncodeman-aaaa|200|1|0|'), NOW);
+    const exits = derivePaneExits(parsePaneRows('reverie-aaaa|100|1|0|\nreverie-aaaa|200|1|0|'), NOW);
     expect(exits.size).toBe(0);
   });
 
   it("answers per session, so one session's split does not silence another", () => {
     const exits = derivePaneExits(
-      parsePaneRows('codeman-aaaa|100|1|0|\ncodeman-bbbb|200|1|0|\ncodeman-bbbb|201|0|||'),
+      parsePaneRows('reverie-aaaa|100|1|0|\nreverie-bbbb|200|1|0|\nreverie-bbbb|201|0|||'),
       NOW
     );
-    expect([...exits.keys()]).toEqual(['codeman-aaaa']);
+    expect([...exits.keys()]).toEqual(['reverie-aaaa']);
   });
 });
 
@@ -1112,30 +1112,30 @@ describe('TmuxManager pane-exit bookkeeping', () => {
 
   it('reports nothing before any tick has run', () => {
     const manager = new TmuxManager();
-    expect(manager.getPaneExit('codeman-aaaa')).toBeUndefined();
+    expect(manager.getPaneExit('reverie-aaaa')).toBeUndefined();
   });
 
   it('keeps the timestamp of the FIRST tick that saw an unchanged exit', () => {
     // The stamp says when the agent was found gone, so a pane that stays dead
     // must not have its age reset every two seconds.
     const manager = new TmuxManager();
-    manager.applyPaneExits(derivePaneExits(parsePaneRows('codeman-aaaa|100|1|0|'), NOW));
-    manager.applyPaneExits(derivePaneExits(parsePaneRows('codeman-aaaa|100|1|0|'), NOW + 2000));
-    expect(manager.getPaneExit('codeman-aaaa')).toEqual({ status: 0, at: NOW });
+    manager.applyPaneExits(derivePaneExits(parsePaneRows('reverie-aaaa|100|1|0|'), NOW));
+    manager.applyPaneExits(derivePaneExits(parsePaneRows('reverie-aaaa|100|1|0|'), NOW + 2000));
+    expect(manager.getPaneExit('reverie-aaaa')).toEqual({ status: 0, at: NOW });
   });
 
   it('starts a new observation when the exit status changes', () => {
     const manager = new TmuxManager();
-    manager.applyPaneExits(derivePaneExits(parsePaneRows('codeman-aaaa|100|1|0|'), NOW));
-    manager.applyPaneExits(derivePaneExits(parsePaneRows('codeman-aaaa|100|1|137|'), NOW + 2000));
-    expect(manager.getPaneExit('codeman-aaaa')).toEqual({ status: 137, at: NOW + 2000 });
+    manager.applyPaneExits(derivePaneExits(parsePaneRows('reverie-aaaa|100|1|0|'), NOW));
+    manager.applyPaneExits(derivePaneExits(parsePaneRows('reverie-aaaa|100|1|137|'), NOW + 2000));
+    expect(manager.getPaneExit('reverie-aaaa')).toEqual({ status: 137, at: NOW + 2000 });
   });
 
   it('forgets the exit once the same session reports a live pane', () => {
     const manager = new TmuxManager();
-    manager.applyPaneExits(derivePaneExits(parsePaneRows('codeman-aaaa|100|1|0|'), NOW));
-    manager.applyPaneExits(derivePaneExits(parsePaneRows('codeman-aaaa|101|0|||'), NOW + 2000));
-    expect(manager.getPaneExit('codeman-aaaa')).toBeUndefined();
+    manager.applyPaneExits(derivePaneExits(parsePaneRows('reverie-aaaa|100|1|0|'), NOW));
+    manager.applyPaneExits(derivePaneExits(parsePaneRows('reverie-aaaa|101|0|||'), NOW + 2000));
+    expect(manager.getPaneExit('reverie-aaaa')).toBeUndefined();
   });
 
   it('prunes an exit for a session an authoritative read did not mention', () => {
@@ -1145,59 +1145,59 @@ describe('TmuxManager pane-exit bookkeeping', () => {
     // killSession(). A FAILED or empty read never reaches here — refreshPaneExits
     // returns before calling this, which is the case the next test covers.
     const manager = new TmuxManager();
-    manager.applyPaneExits(derivePaneExits(parsePaneRows('codeman-aaaa|100|1|0|'), NOW));
-    manager.applyPaneExits(derivePaneExits(parsePaneRows('codeman-bbbb|200|1|0|'), NOW));
-    expect(manager.getPaneExit('codeman-aaaa')).toBeUndefined();
-    expect(manager.getPaneExit('codeman-bbbb')).toEqual({ status: 0, at: NOW });
+    manager.applyPaneExits(derivePaneExits(parsePaneRows('reverie-aaaa|100|1|0|'), NOW));
+    manager.applyPaneExits(derivePaneExits(parsePaneRows('reverie-bbbb|200|1|0|'), NOW));
+    expect(manager.getPaneExit('reverie-aaaa')).toBeUndefined();
+    expect(manager.getPaneExit('reverie-bbbb')).toEqual({ status: 0, at: NOW });
   });
 
   it('starts a new observation when the same status comes from a different pane pid', () => {
     // A second command in the same pane that also exited 0 is a NEW death, and
     // its `at` must say so. Only reachable when the respawn bypassed
-    // respawnPane() — a hand-run `tmux respawn-pane` — since every Codeman path
+    // respawnPane() — a hand-run `tmux respawn-pane` — since every Reverie path
     // clears the entry outright.
     const manager = new TmuxManager();
-    manager.applyPaneExits(derivePaneExits(parsePaneRows('codeman-aaaa|100|1|0|'), NOW));
-    manager.applyPaneExits(derivePaneExits(parsePaneRows('codeman-aaaa|101|1|0|'), NOW + 60_000));
-    expect(manager.getPaneExit('codeman-aaaa')).toEqual({ status: 0, at: NOW + 60_000 });
+    manager.applyPaneExits(derivePaneExits(parsePaneRows('reverie-aaaa|100|1|0|'), NOW));
+    manager.applyPaneExits(derivePaneExits(parsePaneRows('reverie-aaaa|101|1|0|'), NOW + 60_000));
+    expect(manager.getPaneExit('reverie-aaaa')).toEqual({ status: 0, at: NOW + 60_000 });
   });
 
   it('forgets an exit on request, which is what a respawned pane needs', () => {
     const manager = new TmuxManager();
-    manager.applyPaneExits(derivePaneExits(parsePaneRows('codeman-aaaa|100|1|0|'), NOW));
-    manager.clearPaneExit('codeman-aaaa');
-    expect(manager.getPaneExit('codeman-aaaa')).toBeUndefined();
-    expect(manager.getPaneExitReadCount('codeman-aaaa')).toBe(0);
+    manager.applyPaneExits(derivePaneExits(parsePaneRows('reverie-aaaa|100|1|0|'), NOW));
+    manager.clearPaneExit('reverie-aaaa');
+    expect(manager.getPaneExit('reverie-aaaa')).toBeUndefined();
+    expect(manager.getPaneExitReadCount('reverie-aaaa')).toBe(0);
   });
 
   // The clean-exit sweep closes a session only once two reads agreed on its
   // exit (Ark0N/Codeman#446), so the count must rise only on an exact repeat.
   it('counts the reads that agreed on one exit', () => {
     const manager = new TmuxManager();
-    expect(manager.getPaneExitReadCount('codeman-aaaa')).toBe(0);
-    manager.applyPaneExits(derivePaneExits(parsePaneRows('codeman-aaaa|100|1|0|'), NOW));
-    expect(manager.getPaneExitReadCount('codeman-aaaa')).toBe(1);
-    manager.applyPaneExits(derivePaneExits(parsePaneRows('codeman-aaaa|100|1|0|'), NOW + 2000));
-    expect(manager.getPaneExitReadCount('codeman-aaaa')).toBe(2);
+    expect(manager.getPaneExitReadCount('reverie-aaaa')).toBe(0);
+    manager.applyPaneExits(derivePaneExits(parsePaneRows('reverie-aaaa|100|1|0|'), NOW));
+    expect(manager.getPaneExitReadCount('reverie-aaaa')).toBe(1);
+    manager.applyPaneExits(derivePaneExits(parsePaneRows('reverie-aaaa|100|1|0|'), NOW + 2000));
+    expect(manager.getPaneExitReadCount('reverie-aaaa')).toBe(2);
   });
 
   it('starts the count again when the status or the pane pid changes', () => {
     const manager = new TmuxManager();
-    manager.applyPaneExits(derivePaneExits(parsePaneRows('codeman-aaaa|100|1|0|'), NOW));
-    manager.applyPaneExits(derivePaneExits(parsePaneRows('codeman-aaaa|100|1|0|'), NOW + 2000));
-    manager.applyPaneExits(derivePaneExits(parsePaneRows('codeman-aaaa|100|1|1|'), NOW + 4000));
-    expect(manager.getPaneExitReadCount('codeman-aaaa')).toBe(1);
-    manager.applyPaneExits(derivePaneExits(parsePaneRows('codeman-aaaa|101|1|1|'), NOW + 6000));
-    expect(manager.getPaneExitReadCount('codeman-aaaa')).toBe(1);
+    manager.applyPaneExits(derivePaneExits(parsePaneRows('reverie-aaaa|100|1|0|'), NOW));
+    manager.applyPaneExits(derivePaneExits(parsePaneRows('reverie-aaaa|100|1|0|'), NOW + 2000));
+    manager.applyPaneExits(derivePaneExits(parsePaneRows('reverie-aaaa|100|1|1|'), NOW + 4000));
+    expect(manager.getPaneExitReadCount('reverie-aaaa')).toBe(1);
+    manager.applyPaneExits(derivePaneExits(parsePaneRows('reverie-aaaa|101|1|1|'), NOW + 6000));
+    expect(manager.getPaneExitReadCount('reverie-aaaa')).toBe(1);
   });
 
   it('drops the count once a read sees the pane alive again', () => {
     const manager = new TmuxManager();
-    manager.applyPaneExits(derivePaneExits(parsePaneRows('codeman-aaaa|100|1|0|'), NOW));
-    manager.applyPaneExits(derivePaneExits(parsePaneRows('codeman-aaaa|101|0|||'), NOW + 2000));
-    expect(manager.getPaneExitReadCount('codeman-aaaa')).toBe(0);
-    manager.applyPaneExits(derivePaneExits(parsePaneRows('codeman-aaaa|101|1|0|'), NOW + 4000));
-    expect(manager.getPaneExitReadCount('codeman-aaaa')).toBe(1);
+    manager.applyPaneExits(derivePaneExits(parsePaneRows('reverie-aaaa|100|1|0|'), NOW));
+    manager.applyPaneExits(derivePaneExits(parsePaneRows('reverie-aaaa|101|0|||'), NOW + 2000));
+    expect(manager.getPaneExitReadCount('reverie-aaaa')).toBe(0);
+    manager.applyPaneExits(derivePaneExits(parsePaneRows('reverie-aaaa|101|1|0|'), NOW + 4000));
+    expect(manager.getPaneExitReadCount('reverie-aaaa')).toBe(1);
   });
 });
 
@@ -1234,7 +1234,7 @@ describe('the pane-exit watcher tick', () => {
   const localSession = (sessionId = 's1'): MuxSession =>
     ({
       sessionId,
-      muxName: `codeman-${sessionId}`,
+      muxName: `reverie-${sessionId}`,
       pid: 100,
       createdAt: 0,
       workingDir: '/tmp',
@@ -1256,10 +1256,10 @@ describe('the pane-exit watcher tick', () => {
 
   it('reads tmux once a local session exists', async () => {
     const manager = withLocalSession();
-    manager.rows = parsePaneRows('codeman-s1|100|1|0|');
+    manager.rows = parsePaneRows('reverie-s1|100|1|0|');
     await manager.refreshPaneExits(NOW);
     expect(manager.reads).toBe(1);
-    expect(manager.getPaneExit('codeman-s1')).toEqual({ status: 0, at: NOW });
+    expect(manager.getPaneExit('reverie-s1')).toEqual({ status: 0, at: NOW });
   });
 
   it('suppresses a second read while one is still in flight', async () => {
@@ -1279,38 +1279,38 @@ describe('the pane-exit watcher tick', () => {
     // An empty read is "tmux did not answer". Retracting there would turn a
     // transient failure into a silent denial of a death already observed.
     const manager = withLocalSession();
-    manager.rows = parsePaneRows('codeman-s1|100|1|137|');
+    manager.rows = parsePaneRows('reverie-s1|100|1|137|');
     await manager.refreshPaneExits(NOW);
     manager.rows = [];
     await manager.refreshPaneExits(NOW + 2000);
-    expect(manager.getPaneExit('codeman-s1')).toEqual({ status: 137, at: NOW });
+    expect(manager.getPaneExit('reverie-s1')).toEqual({ status: 137, at: NOW });
   });
 
   it('does not count an empty read as confirming an exit', async () => {
     // The clean-exit sweep closes on the second agreeing read. A read tmux did
     // not answer agrees with nothing, so it must not supply that second read.
     const manager = withLocalSession();
-    manager.rows = parsePaneRows('codeman-s1|100|1|0|');
+    manager.rows = parsePaneRows('reverie-s1|100|1|0|');
     await manager.refreshPaneExits(NOW);
     manager.rows = [];
     await manager.refreshPaneExits(NOW + 2000);
-    expect(manager.getPaneExitReadCount('codeman-s1')).toBe(1);
-    manager.rows = parsePaneRows('codeman-s1|100|1|0|');
+    expect(manager.getPaneExitReadCount('reverie-s1')).toBe(1);
+    manager.rows = parsePaneRows('reverie-s1|100|1|0|');
     await manager.refreshPaneExits(NOW + 4000);
-    expect(manager.getPaneExitReadCount('codeman-s1')).toBe(2);
+    expect(manager.getPaneExitReadCount('reverie-s1')).toBe(2);
   });
 
   it('discards a read that started before the pane was cleared', async () => {
     // The guard that stops an in-flight read from republishing a death over
     // the pane that has just replaced it.
     const manager = withLocalSession();
-    manager.rows = parsePaneRows('codeman-s1|100|1|0|');
+    manager.rows = parsePaneRows('reverie-s1|100|1|0|');
     manager.hold = true;
     const pending = manager.refreshPaneExits(NOW);
-    manager.clearPaneExit('codeman-s1');
+    manager.clearPaneExit('reverie-s1');
     manager.releaseAll();
     await pending;
-    expect(manager.getPaneExit('codeman-s1')).toBeUndefined();
+    expect(manager.getPaneExit('reverie-s1')).toBeUndefined();
   });
 
   it('announces each tick so the server can publish it', async () => {
@@ -1319,14 +1319,14 @@ describe('the pane-exit watcher tick', () => {
     vi.useFakeTimers();
     try {
       const manager = withLocalSession();
-      manager.rows = parsePaneRows('codeman-s1|100|1||9');
+      manager.rows = parsePaneRows('reverie-s1|100|1||9');
       const updates: number[] = [];
       manager.on('paneExitsUpdated', () => updates.push(1));
       manager.startPaneExitWatcher(10);
       await vi.advanceTimersByTimeAsync(25);
       manager.stopPaneExitWatcher();
       expect(updates.length).toBeGreaterThan(0);
-      expect(manager.getPaneExit('codeman-s1')).toMatchObject({ signal: 9 });
+      expect(manager.getPaneExit('reverie-s1')).toMatchObject({ signal: 9 });
     } finally {
       vi.useRealTimers();
     }
@@ -1339,7 +1339,7 @@ describe('hasObservablePaneSession', () => {
   // predicate is what keeps that tick from exec'ing tmux to find out.
   const base = {
     sessionId: 's1',
-    muxName: 'codeman-aaaa',
+    muxName: 'reverie-aaaa',
     pid: 100,
     createdAt: 0,
     workingDir: '/tmp',

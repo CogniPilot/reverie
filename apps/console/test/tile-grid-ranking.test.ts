@@ -29,7 +29,7 @@ type Helpers = {
   TILE_GRID_MAX: number;
 };
 
-const T = windowStub.CodemanTileGrid as Helpers;
+const T = windowStub.ReverieTileGrid as Helpers;
 const rank = (rows: Row[]) => T.rankTileSessions(rows.map((r, orderIndex) => ({ orderIndex, ...r })));
 
 describe('rankTileSessions', () => {

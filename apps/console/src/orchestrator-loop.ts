@@ -18,7 +18,7 @@
  * @consumedby web/server (orchestrator routes, SSE)
  * @emits stateChanged, planReady, phaseStarted, phaseCompleted, phaseFailed,
  *   taskAssigned, taskCompleted, taskFailed, verificationResult, completed, error
- * @persistence Orchestrator state saved to `~/.codeman/state.json` (orchestrator key)
+ * @persistence Orchestrator state saved to `~/.reverie/state.json` (orchestrator key)
  *
  * @module orchestrator-loop
  */

@@ -3,7 +3,7 @@
  * menu's "DeepSeek web UI..." entry.
  *
  * The shortcut originally started the server inside an ordinary SHELL SESSION,
- * on the reasoning that Codeman already knows how to supervise those: it was
+ * on the reasoning that Reverie already knows how to supervise those: it was
  * visible, scrollable, killable, and died with its tab, and nothing new had to
  * own a long-lived HTTP server. That reasoning was sound and the result was
  * still wrong in use — clicking "open the DeepSeek web UI" spawned a terminal
@@ -18,10 +18,10 @@
  *   racing it for a port. The old shell-session flow could not do this at all,
  *   because two clicks were simply two sessions.
  * - **Restarted when the authority changes.** `--trusted-host` fences dsh's
- *   `/api` against the browser authority, and a Codeman reachable at both
+ *   `/api` against the browser authority, and a Reverie reachable at both
  *   loopback and a tailnet name has two. Whoever asks last wins, because the
  *   asker is by definition the origin about to load the page.
- * - **Killed on shutdown.** A detached child that outlived Codeman would hold
+ * - **Killed on shutdown.** A detached child that outlived Reverie would hold
  *   its port against the next start, which is exactly the EADDRINUSE this
  *   feature already got wrong once.
  * - **Failures reported, not swallowed.** The shell tab used to be where the

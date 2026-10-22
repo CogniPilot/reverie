@@ -14,4 +14,4 @@ Quick pointers:
 - Tests: `npm test` (the CI gate, safe to run bare) or `npm test -- test/<file>.test.ts` for one file
 - Route tests use `app.inject()`; new tests needing a socket bind port 0 (`new WebServer(0, …)` + `boundPort`); mobile tests use `createTestServer()` and read `server.boundPort`
 - Branch off `master` for all work; Conventional Commit-style messages (`fix(mobile): ...`)
-- Never commit secrets or local state from `~/.codeman/`
+- Never commit secrets or local state from `~/.reverie/`

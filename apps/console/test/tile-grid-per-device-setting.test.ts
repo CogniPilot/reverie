@@ -72,9 +72,9 @@ describe('the device default: ON on desktop, OFF on handhelds and touch-primary 
   const SOURCE = readFileSync(join(PUBLIC, 'settings-ui.js'), 'utf8');
   type Device = { handheld: boolean; touch: boolean; coarse: boolean };
   function defaultsOn({ handheld, touch, coarse }: Device) {
-    const CodemanApp = function CodemanApp(this: unknown) {};
+    const ReverieApp = function ReverieApp(this: unknown) {};
     const context = vm.createContext({
-      CodemanApp,
+      ReverieApp,
       VoiceInput: {},
       localStorage: { getItem: () => null, setItem: () => {} },
       document: { getElementById: () => null },
@@ -91,7 +91,7 @@ describe('the device default: ON on desktop, OFF on handhelds and touch-primary 
       },
     });
     vm.runInContext(SOURCE, context, { filename: 'settings-ui.js' });
-    const app = Object.create(CodemanApp.prototype) as { getDefaultSettings(): Record<string, unknown> };
+    const app = Object.create(ReverieApp.prototype) as { getDefaultSettings(): Record<string, unknown> };
     return app.getDefaultSettings();
   }
   /** What every reader resolves an absent key to: the button, the App Settings chip and the chord. */
@@ -124,9 +124,9 @@ describe('the device default: ON on desktop, OFF on handhelds and touch-primary 
     // so a default taken from the instantaneous primary pointer must not be in it.
     let coarse = true;
     const stored = new Map<string, string>();
-    const CodemanApp = function CodemanApp(this: unknown) {};
+    const ReverieApp = function ReverieApp(this: unknown) {};
     const context = vm.createContext({
-      CodemanApp,
+      ReverieApp,
       VoiceInput: {},
       localStorage: {
         getItem: (k: string) => stored.get(k) ?? null,
@@ -151,7 +151,7 @@ describe('the device default: ON on desktop, OFF on handhelds and touch-primary 
       loadAppSettingsFromStorage(): Record<string, unknown>;
       saveAppSettingsToStorage(s: Record<string, unknown>): void;
     };
-    const app = Object.create(CodemanApp.prototype) as SettingsApp;
+    const app = Object.create(ReverieApp.prototype) as SettingsApp;
     // What every reader resolves (header button, App Settings chip, chord).
     const resolvedNow = () =>
       (app.loadAppSettingsFromStorage().showTileGridButton ?? app.getDefaultSettings().showTileGridButton ?? true) ===
@@ -169,9 +169,9 @@ describe('the device default: ON on desktop, OFF on handhelds and touch-primary 
   });
 
   it('a context with no window at all still answers (the desktop default)', () => {
-    const CodemanApp = function CodemanApp(this: unknown) {};
+    const ReverieApp = function ReverieApp(this: unknown) {};
     const context = vm.createContext({
-      CodemanApp,
+      ReverieApp,
       VoiceInput: {},
       localStorage: { getItem: () => null, setItem: () => {} },
       document: { getElementById: () => null },
@@ -179,7 +179,7 @@ describe('the device default: ON on desktop, OFF on handhelds and touch-primary 
       MobileDetection: { isHandheldDevice: () => false, getDeviceType: () => 'desktop' },
     });
     vm.runInContext(SOURCE, context, { filename: 'settings-ui.js' });
-    const app = Object.create(CodemanApp.prototype) as { getDefaultSettings(): Record<string, unknown> };
+    const app = Object.create(ReverieApp.prototype) as { getDefaultSettings(): Record<string, unknown> };
     expect(app.getDefaultSettings()).toEqual({});
   });
 

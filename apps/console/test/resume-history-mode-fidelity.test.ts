@@ -7,7 +7,7 @@
  * it came from — data loss dressed as a fix. The correction: only retire the row
  * when the new session actually continues something.
  *
- * Loaded via `vm` against a stub CodemanApp, same harness as resume-name.test.ts.
+ * Loaded via `vm` against a stub ReverieApp, same harness as resume-name.test.ts.
  * `fetch` is a shared mutable stub so each test can inspect exactly which requests
  * fired without a real network/server.
  */
@@ -28,7 +28,7 @@ function loadTerminalUiPrototype(): Record<string, (...args: unknown[]) => unkno
   const source = readFileSync(resolve(import.meta.dirname, '../src/web/public/terminal-ui.js'), 'utf8');
   const context = vm.createContext({
     console,
-    CodemanApp: class CodemanApp {},
+    ReverieApp: class ReverieApp {},
     setInterval: vi.fn(),
     clearInterval: vi.fn(),
     setTimeout,
@@ -38,7 +38,7 @@ function loadTerminalUiPrototype(): Record<string, (...args: unknown[]) => unkno
     window: { addEventListener: vi.fn(), removeEventListener: vi.fn() },
     fetch: (...args: unknown[]) => currentFetch(...args),
   });
-  vm.runInContext(`${source}\nglobalThis.__proto = CodemanApp.prototype;`, context);
+  vm.runInContext(`${source}\nglobalThis.__proto = ReverieApp.prototype;`, context);
   return (context as { __proto: Record<string, (...args: unknown[]) => unknown> }).__proto;
 }
 
@@ -106,12 +106,12 @@ describe('resumeHistorySession: row retirement is gated on actual continuation',
   );
 
   // codex continues only when the row carried its thread id. A row without one
-  // is a live session's row, whose sessionId is Codeman's own uuid — sending
+  // is a live session's row, whose sessionId is Reverie's own uuid — sending
   // THAT to `codex resume` asks for a thread that does not exist, so it must
   // stay a fresh session and must not retire the row it came from.
   it('does NOT continue or retire a codex row that carries no resumeId', async () => {
     const app = makeApp();
-    await app.resumeHistorySession.call(app, 'codeman-uuid', '/repo', 'w1-repo', 'codex');
+    await app.resumeHistorySession.call(app, 'reverie-uuid', '/repo', 'w1-repo', 'codex');
 
     expect(createBody(fetchMock)).toMatchObject({ mode: 'codex' });
     expect(createBody(fetchMock).codexConfig).toBeUndefined();
@@ -164,7 +164,7 @@ describe('resumeHistorySession: row retirement is gated on actual continuation',
     expect(deleteCalls(fetchMock)).toEqual(['/api/sessions/old-id?killMux=true']);
   });
 
-  it('never retires a claude row (resumeSessionId is a claudeSessionId, not a Codeman row id)', async () => {
+  it('never retires a claude row (resumeSessionId is a claudeSessionId, not a Reverie row id)', async () => {
     const app = makeApp();
     await app.resumeHistorySession.call(app, 'claude-uuid', '/repo', 'w1-repo', 'claude');
 

@@ -3,7 +3,7 @@
  *
  * A user message (`from.kind === 'user'`) may carry `from.mark`:
  * - `owner_typed`: posted by a request with a valid, unrestricted owner session cookie and no
- *   `X-Codeman-Parent-Session` header;
+ *   `X-Reverie-Parent-Session` header;
  * - `owner_spoken`: the same, for speech (a spoken message or a voice-turn transcript).
  *
  * The mark is set only here, server-side, whatever the enforcement policy (`off` included: the
@@ -25,7 +25,7 @@ export type OwnerVerifier = (req: FastifyRequest) => boolean;
 export const NO_OWNER: OwnerVerifier = () => false;
 
 export function ownerVerifier(deps: Pick<PolicyDeps, 'service' | 'ctx'>): OwnerVerifier {
-  return (req) => req.headers['x-codeman-parent-session'] === undefined && callerOf(req, deps).kind === 'owner';
+  return (req) => req.headers['x-reverie-parent-session'] === undefined && callerOf(req, deps).kind === 'owner';
 }
 
 /** The mark for a user message this request posts, or undefined. */

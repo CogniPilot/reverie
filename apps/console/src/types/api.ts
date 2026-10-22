@@ -165,7 +165,7 @@ export interface CaseInfo {
    */
   unreachable?: boolean;
   /**
-   * Present when Codeman scaffolded this case directory for an AGENT-spawned session
+   * Present when Reverie scaffolded this case directory for an AGENT-spawned session
    * (the packaged skill's workers, or any spawn naming a parent session), read back
    * from the case's own marker file — see `src/agent-case-marker.ts`. Absent for every
    * case a human created, linked or cloned, which is what makes it usable as the
@@ -209,7 +209,7 @@ export interface CaseInfo {
      * only one who can start it. For an owned case it is the NORMAL state before the
      * first session: the container is created on demand by the launch chain, so treating
      * "not found" as a fault there hid every agent mode behind an error telling the user
-     * to start a container Codeman was about to create itself.
+     * to start a container Reverie was about to create itself.
      *
      * It also gates the Add Case panel's "copy an existing case" picker: only an ADOPTED
      * container may back several cases at once (`classifyAdoptContainerConflict`), since an

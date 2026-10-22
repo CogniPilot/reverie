@@ -2,7 +2,7 @@
  * @fileoverview How the workspace hook and statusLine helpers in hooks-config.ts
  * read an "unknown" answer from the bounded path probe. A dead network mount
  * elsewhere on the machine (enough of them to engage the probe's stall cap) must
- * not stop Codeman's hooks from being installed in a healthy workspace, and must
+ * not stop Reverie's hooks from being installed in a healthy workspace, and must
  * not let the plan-usage exporter be injected over a user's own statusLine. A
  * workspace that IS on the dead mount is skipped without hanging the caller.
  *
@@ -16,7 +16,7 @@ import { join } from 'node:path';
 
 const probe = vi.hoisted(() => {
   // Short probe timeout so the stalls below cost ~100 ms each, read at import.
-  process.env.CODEMAN_PATH_PROBE_TIMEOUT_MS = '100';
+  process.env.REVERIE_PATH_PROBE_TIMEOUT_MS = '100';
   return { dead: new Set<string>(), releases: [] as Array<() => void> };
 });
 
@@ -48,7 +48,7 @@ import { applyWorkspaceHooks, resolveStatusLineCliCommand, stripCaseEnvKeys } fr
 import { probePath } from '../src/utils/index.js';
 import { MAX_STALLED_PATH_PROBES } from '../src/config/path-probe.js';
 
-const root = mkdtempSync(join(tmpdir(), 'codeman-unreachable-mount-'));
+const root = mkdtempSync(join(tmpdir(), 'reverie-unreachable-mount-'));
 
 /** Stall `count` paths on unrelated "mounts" until afterEach releases them. */
 async function stallUnrelatedMounts(count: number): Promise<void> {
@@ -71,7 +71,7 @@ afterEach(async () => {
 });
 
 afterAll(() => {
-  delete process.env.CODEMAN_PATH_PROBE_TIMEOUT_MS;
+  delete process.env.REVERIE_PATH_PROBE_TIMEOUT_MS;
 });
 
 describe('workspace helpers while other mounts are unreachable', () => {

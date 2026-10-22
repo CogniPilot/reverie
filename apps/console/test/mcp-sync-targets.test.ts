@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { binaryOnPath, MCP_SYNC_ONLY_TOOLS, mcpSyncOnlyTargets } from '../src/mcp-sync-targets.js';
 import { mcpSyncTargets } from '../src/web/routes/mcp-sync-routes.js';
 
-describe('sync-only MCP targets (tools that are not Codeman run modes)', () => {
+describe('sync-only MCP targets (tools that are not Reverie run modes)', () => {
   it('declares GitHub Copilot CLI with its config file, dialect and relocation var', () => {
     const t = mcpSyncOnlyTargets(new Set(), () => true).find((x) => x.id === 'copilot')!;
     expect(t).toMatchObject({

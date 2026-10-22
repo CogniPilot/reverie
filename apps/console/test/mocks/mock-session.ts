@@ -90,7 +90,7 @@ export class MockSession extends EventEmitter {
   constructor(id: string = 'mock-session-id') {
     super();
     this.id = id;
-    this._muxName = `codeman-test-${id.slice(0, 8)}`;
+    this._muxName = `reverie-test-${id.slice(0, 8)}`;
   }
 
   /**

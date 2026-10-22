@@ -12,7 +12,7 @@
  *   `{ heard, transcript, reply, audioUrl, messages }`.
  * - `GET /api/voice/audio/:id`: the reply audio, proxied from `<voice service>/audio/<id>`.
  *
- * The voice service is `CODEMAN_VOICE_TURN_URL` (default `http://127.0.0.1:8090`), an
+ * The voice service is `REVERIE_VOICE_TURN_URL` (default `http://127.0.0.1:8090`), an
  * operator-configured local process; the browser never talks to it directly, so a
  * phone that reaches the dashboard through Tailscale serve needs nothing else.
  *
@@ -76,7 +76,7 @@ function isFetchTimeout(err: unknown): boolean {
 }
 
 export function voiceServiceUrl(env: NodeJS.ProcessEnv = process.env): string {
-  return (env.CODEMAN_VOICE_TURN_URL?.trim() || 'http://127.0.0.1:8090').replace(/\/+$/, '');
+  return (env.REVERIE_VOICE_TURN_URL?.trim() || 'http://127.0.0.1:8090').replace(/\/+$/, '');
 }
 
 export interface VoiceTurnDeps {

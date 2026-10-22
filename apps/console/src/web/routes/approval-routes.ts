@@ -103,7 +103,7 @@ export function registerApprovalRoutes(app: FastifyInstance, ctx: SessionPort): 
       return createErrorResponse(ApiErrorCode.CONFLICT, 'Session mode cannot have pending approvals');
     }
     // Alert-only items (supervised-hook CLIs such as DeepSeek Harness): the
-    // dialog belongs to a third-party TUI whose keystroke contract Codeman has
+    // dialog belongs to a third-party TUI whose keystroke contract Reverie has
     // not measured, so '1'/Esc would be a blind keystroke into a foreign
     // composer. The item still raises the red alert and clears on the harness's
     // own working/stop reports; answering happens in the terminal.

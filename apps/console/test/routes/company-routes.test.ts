@@ -14,6 +14,7 @@ import type { SessionPort } from '../../src/web/ports/session-port.js';
 import { installRouteErrorHandler } from '../../src/web/route-error-handler.js';
 
 describe('company HTTP ownership and expert invites', () => {
+  const wake = vi.fn(async () => ({ awakened: [], skipped: [] }));
   let app: FastifyInstance;
   let directory: string;
   let service: CompanyService;
@@ -30,7 +31,8 @@ describe('company HTTP ownership and expert invites', () => {
 
   beforeEach(async () => {
     vi.mocked(appendAdminAudit).mockClear();
-    directory = await mkdtemp(join(tmpdir(), 'fleet-company-routes-'));
+    wake.mockClear();
+    directory = await mkdtemp(join(tmpdir(), 'reverie-company-routes-'));
     const store = new CompanyStore(join(directory, 'company.json'));
     await store.init();
     rooms = new ChatroomStore();
@@ -49,7 +51,7 @@ describe('company HTTP ownership and expert invites', () => {
       research: { start: vi.fn(), inspect: vi.fn(), stop: vi.fn() },
     });
     app = Fastify();
-    registerCompanyRoutes(app, { sessions } as unknown as SessionPort, service);
+    registerCompanyRoutes(app, { sessions } as unknown as SessionPort, service, undefined, undefined, wake);
     installRouteErrorHandler(app);
     await app.ready();
   });
@@ -58,19 +60,42 @@ describe('company HTTP ownership and expert invites', () => {
     await rm(directory, { recursive: true, force: true });
   });
 
+  it('requires an explicit recovery grant, never a title, to wake a colleague', async () => {
+    const target = await service.hire(hireBody);
+    const lead = await service.hire({ ...hireBody, name: 'Lead', sessionId: 'parent-session', position: 'COO' });
+    const request = {
+      method: 'POST' as const,
+      url: '/api/company/employees/' + target.id + '/wake',
+      headers: { 'x-reverie-parent-session': 'parent-session' },
+    };
+    expect((await app.inject(request)).statusCode).toBe(403);
+    expect(wake).not.toHaveBeenCalled();
+    const selfGrant = await app.inject({
+      method: 'PUT',
+      url: '/api/company/employees/' + lead.id,
+      headers: request.headers,
+      payload: { permissions: { recoverEmployees: true } },
+    });
+    expect(selfGrant.statusCode).toBe(403);
+    await service.update(lead.id, undefined, { position: 'Engineer', permissions: { recoverEmployees: true } });
+    expect((await app.inject(request)).statusCode).toBe(200);
+    expect(wake).toHaveBeenCalledWith(target.id);
+    expect((await app.inject({ method: 'POST', url: request.url })).statusCode).toBe(200);
+  });
+
   it('allows owner hiring, discovery and assignment while blocking agent configuration', async () => {
     const denied = await app.inject({
       method: 'POST',
       url: '/api/company/employees',
       payload: hireBody,
-      headers: { 'x-codeman-parent-session': 'parent-session' },
+      headers: { 'x-reverie-parent-session': 'parent-session' },
     });
     expect(denied.statusCode).toBe(403);
     const stale = await app.inject({
       method: 'POST',
       url: '/api/company/employees',
       payload: hireBody,
-      headers: { 'x-codeman-parent-session': 'stale-session' },
+      headers: { 'x-reverie-parent-session': 'stale-session' },
     });
     expect(stale.statusCode).toBe(403);
     const created = await app.inject({ method: 'POST', url: '/api/company/employees', payload: hireBody });
@@ -82,32 +107,43 @@ describe('company HTTP ownership and expert invites', () => {
     const configured = await app.inject({
       method: 'PUT',
       url: '/api/company/settings',
-      payload: { enabled: true, timeZone: 'UTC', ctoId: id },
+      payload: { enabled: true, timeZone: 'UTC', coordinatorEmployeeId: id },
     });
     expect(configured.statusCode).toBe(200);
-    expect(service.view().settings.ctoId).toBe(id);
+    expect(service.view().settings.coordinatorEmployeeId).toBe(id);
     expect(
       (
         await app.inject({
           method: 'PUT',
           url: '/api/company/settings',
           payload: { enabled: true },
-          headers: { 'x-codeman-parent-session': 'parent-session' },
+          headers: { 'x-reverie-parent-session': 'parent-session' },
         })
       ).statusCode
     ).toBe(403);
   });
 
   it('lets only the owner retire and restore an employee, only once the session is gone, with one audit line each', async () => {
-    const id = (await app.inject({ method: 'POST', url: '/api/company/employees', payload: hireBody })).json().data.employee.id;
+    const id = (await app.inject({ method: 'POST', url: '/api/company/employees', payload: hireBody })).json().data
+      .employee.id;
     const lounge = rooms.create('Lounge', undefined);
     rooms.addMember(lounge.id, 'expert-session');
-    const agent = { 'x-codeman-parent-session': 'parent-session' };
-    expect((await app.inject({ method: 'POST', url: `/api/company/employees/${id}/retire`, headers: agent })).statusCode).toBe(403);
-    expect((await app.inject({ method: 'POST', url: `/api/company/employees/${id}/retire?q=1`, headers: agent })).statusCode).toBe(403);
-    expect((await app.inject({ method: 'POST', url: `/api/company/employees/${id}/restore`, headers: agent })).statusCode).toBe(403);
+    const agent = { 'x-reverie-parent-session': 'parent-session' };
+    expect(
+      (await app.inject({ method: 'POST', url: `/api/company/employees/${id}/retire`, headers: agent })).statusCode
+    ).toBe(403);
+    expect(
+      (await app.inject({ method: 'POST', url: `/api/company/employees/${id}/retire?q=1`, headers: agent })).statusCode
+    ).toBe(403);
+    expect(
+      (await app.inject({ method: 'POST', url: `/api/company/employees/${id}/restore`, headers: agent })).statusCode
+    ).toBe(403);
     // Odd spellings of the path never reach a handler that acts.
-    for (const url of [`//api/company/employees/${id}/retire`, `/api/company/employees/${id}/%72etire`, `/api/company/employees/${id}%2Fretire`]) {
+    for (const url of [
+      `//api/company/employees/${id}/retire`,
+      `/api/company/employees/${id}/%72etire`,
+      `/api/company/employees/${id}%2Fretire`,
+    ]) {
       expect((await app.inject({ method: 'POST', url, headers: agent })).statusCode).not.toBe(200);
       expect((await app.inject({ method: 'POST', url })).statusCode).not.toBe(200);
     }
@@ -124,7 +160,12 @@ describe('company HTTP ownership and expert invites', () => {
     expect(retired.json().data.rooms).toEqual([lounge.id]);
     expect(appendAdminAudit).toHaveBeenCalledTimes(1);
     expect(appendAdminAudit).toHaveBeenCalledWith(
-      expect.objectContaining({ admin: 'owner', action: 'employee_retire', target: 'Maya', detail: { id, sessionId: 'expert-session', rooms: [lounge.id], failed: [] } })
+      expect.objectContaining({
+        admin: 'owner',
+        action: 'employee_retire',
+        target: 'Maya',
+        detail: { id, sessionId: 'expert-session', rooms: [lounge.id], failed: [] },
+      })
     );
     const company = (await app.inject('/api/company')).json().data;
     expect(company.employees).toEqual([]);
@@ -142,7 +183,12 @@ describe('company HTTP ownership and expert invites', () => {
     const url = `/api/company/employees/${employee.id}`;
     const change = { position: 'Console expert', expertise: ['console', 'tests'], icon: '🧩' };
     for (const header of ['parent-session', 'stale-session', '']) {
-      const res = await app.inject({ method: 'PUT', url, payload: change, headers: { 'x-codeman-parent-session': header } });
+      const res = await app.inject({
+        method: 'PUT',
+        url,
+        payload: change,
+        headers: { 'x-reverie-parent-session': header },
+      });
       expect(res.statusCode).toBe(403);
     }
     expect(service.view().employees[0]).toMatchObject({ position: 'Scientist', icon: '🌱' });
@@ -153,7 +199,11 @@ describe('company HTTP ownership and expert invites', () => {
     expect(ok.json().data.employee).toMatchObject({ position: 'Console expert', icon: '🌱', expertise: ['biology'] });
     expect(appendAdminAudit).toHaveBeenCalledTimes(1);
     expect(appendAdminAudit).toHaveBeenLastCalledWith(
-      expect.objectContaining({ action: 'employee_update', target: 'Maya', detail: expect.objectContaining({ position: { from: 'Scientist', to: 'Console expert' } }) })
+      expect.objectContaining({
+        action: 'employee_update',
+        target: 'Maya',
+        detail: expect.objectContaining({ position: { from: 'Scientist', to: 'Console expert' } }),
+      })
     );
     const all = await app.inject({ method: 'PUT', url, payload: change });
     expect(all.json().data.employee).toMatchObject({ ...change, name: 'Maya', sessionId: 'expert-session' });
@@ -161,12 +211,26 @@ describe('company HTTP ownership and expert invites', () => {
 
   it('refuses an unknown employee, unknown or empty fields, and invalid values on the employee edit', async () => {
     const employee = await service.hire(hireBody);
-    const put = (id: string, payload: unknown) => app.inject({ method: 'PUT', url: `/api/company/employees/${id}`, payload: payload as object });
+    const put = (id: string, payload: unknown) =>
+      app.inject({ method: 'PUT', url: `/api/company/employees/${id}`, payload: payload as object });
     expect((await put('nobody', { position: 'X' })).statusCode).toBe(404);
-    for (const bad of [{}, { sessionId: 'parent-session' }, { position: 'X', sessionId: 'parent-session' }, { position: 'X', name: 'Other' }, { owner: 'x' }, { position: '' }, { expertise: [] }, { icon: 'not an icon at all' }]) {
+    for (const bad of [
+      {},
+      { sessionId: 'parent-session' },
+      { position: 'X', sessionId: 'parent-session' },
+      { position: 'X', name: 'Other' },
+      { owner: 'x' },
+      { position: '' },
+      { expertise: [] },
+      { icon: 'not an icon at all' },
+    ]) {
       expect((await put(employee.id, bad)).statusCode).toBe(400);
     }
-    expect(service.view().employees[0]).toMatchObject({ name: 'Maya', position: 'Scientist', sessionId: 'expert-session' });
+    expect(service.view().employees[0]).toMatchObject({
+      name: 'Maya',
+      position: 'Scientist',
+      sessionId: 'expert-session',
+    });
   });
 
   it('lets authorized agent members invite real registered experts, never unknown substitutes', async () => {
@@ -177,7 +241,7 @@ describe('company HTTP ownership and expert invites', () => {
         method: 'POST',
         url: `/api/company/employees/${employee.id}/invite`,
         payload: { roomId: room.id },
-        headers: { 'x-codeman-parent-session': 'parent-session' },
+        headers: { 'x-reverie-parent-session': 'parent-session' },
       });
     expect((await invite()).statusCode).toBe(403);
     rooms.addMember(room.id, 'parent-session');
@@ -205,7 +269,13 @@ describe('company HTTP ownership and expert invites', () => {
       ).statusCode
     ).toBe(400);
     expect(
-      (await app.inject({ method: 'PUT', url: '/api/company/settings', payload: { ctoId: 'unregistered' } })).statusCode
+      (
+        await app.inject({
+          method: 'PUT',
+          url: '/api/company/settings',
+          payload: { coordinatorEmployeeId: 'unregistered' },
+        })
+      ).statusCode
     ).toBe(400);
     const employee = await service.hire(hireBody);
     expect(
@@ -222,31 +292,46 @@ describe('company HTTP ownership and expert invites', () => {
   it('persists reporting edits, audits their transactional before/after, and remains owner-only', async () => {
     const report = await service.hire(hireBody);
     const lead = await service.hire({ ...hireBody, name: 'Lead', sessionId: 'parent-session', position: 'CTO' });
-    const put = (reportsTo: string, headers = {}) => app.inject({
-      method: 'PUT', url: `/api/company/employees/${report.id}`, payload: { reportsTo }, headers,
-    });
-    expect((await put(lead.id, { 'x-codeman-parent-session': 'parent-session' })).statusCode).toBe(403);
-    expect((await put(lead.id, { 'x-codeman-parent-session': 'stale-agent' })).statusCode).toBe(403);
+    const put = (reportsTo: string, headers = {}) =>
+      app.inject({
+        method: 'PUT',
+        url: `/api/company/employees/${report.id}`,
+        payload: { reportsTo },
+        headers,
+      });
+    expect((await put(lead.id, { 'x-reverie-parent-session': 'parent-session' })).statusCode).toBe(403);
+    expect((await put(lead.id, { 'x-reverie-parent-session': 'stale-agent' })).statusCode).toBe(403);
     expect(appendAdminAudit).not.toHaveBeenCalled();
     expect((await put(lead.id)).json().data.employee.reportsTo).toBe(lead.id);
     expect(service.view().employees.find((e) => e.id === report.id)?.reportsTo).toBe(lead.id);
-    expect(appendAdminAudit).toHaveBeenLastCalledWith(expect.objectContaining({
-      action: 'employee_update', admin: 'owner',
-      detail: expect.objectContaining({ reportsTo: { from: null, to: lead.id } }),
-    }));
+    expect(appendAdminAudit).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        action: 'employee_update',
+        admin: 'owner',
+        detail: expect.objectContaining({ reportsTo: { from: null, to: lead.id } }),
+      })
+    );
     expect((await put('owner')).statusCode).toBe(200);
-    expect(appendAdminAudit).toHaveBeenLastCalledWith(expect.objectContaining({
-      detail: expect.objectContaining({ reportsTo: { from: lead.id, to: 'owner' } }),
-    }));
+    expect(appendAdminAudit).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        detail: expect.objectContaining({ reportsTo: { from: lead.id, to: 'owner' } }),
+      })
+    );
   });
 
   it('rejects strict malformed or authority-changing updates and invalid hierarchy without audit', async () => {
     const report = await service.hire(hireBody);
     for (const payload of [
-      {}, { reportsTo: '' }, { reportsTo: null }, { reportsTo: 7 },
-      { reportsTo: 'owner', owner: 'other' }, { reportsTo: 'owner', sessionId: 'replacement' },
-      { reportsTo: 'owner', name: 'Renamed' }, { reportsTo: 'owner', arbitrary: true },
-      { reportsTo: 'missing-parent' }, { reportsTo: report.id },
+      {},
+      { reportsTo: '' },
+      { reportsTo: null },
+      { reportsTo: 7 },
+      { reportsTo: 'owner', owner: 'other' },
+      { reportsTo: 'owner', sessionId: 'replacement' },
+      { reportsTo: 'owner', name: 'Renamed' },
+      { reportsTo: 'owner', arbitrary: true },
+      { reportsTo: 'missing-parent' },
+      { reportsTo: report.id },
     ]) {
       const res = await app.inject({ method: 'PUT', url: `/api/company/employees/${report.id}`, payload });
       expect(res.statusCode, JSON.stringify(payload)).toBe(400);
@@ -255,4 +340,48 @@ describe('company HTTP ownership and expert invites', () => {
     expect(appendAdminAudit).not.toHaveBeenCalled();
   });
 
+  it('only the owner grants or revokes employee recovery; an agent cannot grant itself permissions', async () => {
+    const employee = await service.hire({ ...hireBody, position: 'CTO' });
+    expect(employee.permissions).toEqual({ recoverEmployees: false });
+    const url = `/api/company/employees/${employee.id}`;
+    const payload = { permissions: { recoverEmployees: true } };
+    for (const sessionId of ['expert-session', 'parent-session', 'stale-agent', '']) {
+      const denied = await app.inject({
+        method: 'PUT',
+        url,
+        payload,
+        headers: { 'x-reverie-parent-session': sessionId },
+      });
+      expect(denied.statusCode).toBe(403);
+    }
+    const self = await app.inject({
+      method: 'POST',
+      url: '/api/company/self',
+      payload,
+      headers: { 'x-reverie-parent-session': 'expert-session' },
+    });
+    expect(self.statusCode).toBe(400);
+    expect(service.view().employees[0].permissions.recoverEmployees).toBe(false);
+    const granted = await app.inject({ method: 'PUT', url, payload });
+    expect(granted.statusCode).toBe(200);
+    expect(granted.json().data.employee.permissions.recoverEmployees).toBe(true);
+    expect(appendAdminAudit).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        action: 'employee_update',
+        detail: expect.objectContaining({
+          permissions: { from: { recoverEmployees: false }, to: { recoverEmployees: true } },
+        }),
+      })
+    );
+    const retitled = await app.inject({ method: 'PUT', url, payload: { position: 'COO' } });
+    expect(retitled.statusCode).toBe(200);
+    expect(retitled.json().data.employee.permissions.recoverEmployees).toBe(true);
+    expect(
+      (await app.inject({ method: 'PUT', url, payload: { permissions: { recoverEmployees: false } } })).statusCode
+    ).toBe(200);
+    expect(service.view().employees[0].permissions.recoverEmployees).toBe(false);
+    expect(
+      (await app.inject({ method: 'PUT', url, payload: { permissions: { unknownPower: true } } })).statusCode
+    ).toBe(400);
+  });
 });

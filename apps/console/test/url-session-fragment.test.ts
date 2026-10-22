@@ -13,11 +13,11 @@ function loadHelper() {
   const context = vm.createContext({ window: {}, globalThis: {}, URLSearchParams });
   const source = readFileSync(resolve(import.meta.dirname, '../src/web/public/constants.js'), 'utf8');
   vm.runInContext(source, context, { filename: 'constants.js' });
-  return (context.window as { CodemanUrlSession: { sessionIdFromFragment: (hash: unknown) => string | null } })
-    .CodemanUrlSession;
+  return (context.window as { ReverieUrlSession: { sessionIdFromFragment: (hash: unknown) => string | null } })
+    .ReverieUrlSession;
 }
 
-describe('CodemanUrlSession.sessionIdFromFragment', () => {
+describe('ReverieUrlSession.sessionIdFromFragment', () => {
   const { sessionIdFromFragment } = loadHelper();
 
   it('reads the id from a #session= fragment', () => {
@@ -83,13 +83,13 @@ function loadApp() {
     MobileDetection: { isTouchDevice: () => false },
   });
   vm.runInContext(
-    `${constants}\n${app}\n${webviewTabs}\nglobalThis.__CodemanApp = CodemanApp;\nglobalThis.__waitMs = URL_SESSION_WAIT_MS;`,
+    `${constants}\n${app}\n${webviewTabs}\nglobalThis.__ReverieApp = ReverieApp;\nglobalThis.__waitMs = URL_SESSION_WAIT_MS;`,
     context
   );
-  const CodemanApp = (context as { __CodemanApp: { prototype: object } }).__CodemanApp;
+  const ReverieApp = (context as { __ReverieApp: { prototype: object } }).__ReverieApp;
   const waitMs = (context as { __waitMs: number }).__waitMs;
   const make = (ids: string[]) => {
-    const inst = Object.create(CodemanApp.prototype) as Record<string, any>;
+    const inst = Object.create(ReverieApp.prototype) as Record<string, any>;
     inst.sessions = new Map(ids.map((id) => [id, { id, name: id }]));
     inst.sessionOrder = [...ids];
     inst.detachedSessions = new Set();
@@ -111,7 +111,7 @@ function loadApp() {
     }
     return inst;
   };
-  return { make, location, history, CodemanApp, waitMs };
+  return { make, location, history, ReverieApp, waitMs };
 }
 
 describe('dashboard handling of a #session=<id> link', () => {
@@ -154,18 +154,18 @@ describe('dashboard handling of a #session=<id> link', () => {
   });
 
   it('retires a waiting link when you pick another tab yourself', async () => {
-    const { make, CodemanApp } = loadApp();
+    const { make, ReverieApp } = loadApp();
     const app = make(['a', 'b']);
-    app.selectSession = (CodemanApp.prototype as Record<string, any>).selectSession;
+    app.selectSession = (ReverieApp.prototype as Record<string, any>).selectSession;
     app._urlSessionId = 'later';
     await app.selectSession('b').catch(() => {});
     expect(app._urlSessionId).toBeNull();
   });
 
   it('keeps a waiting link through a selection the app makes itself', async () => {
-    const { make, CodemanApp } = loadApp();
+    const { make, ReverieApp } = loadApp();
     const app = make(['a', 'b']);
-    app.selectSession = (CodemanApp.prototype as Record<string, any>).selectSession;
+    app.selectSession = (ReverieApp.prototype as Record<string, any>).selectSession;
     app._urlSessionId = 'later';
     await app.selectSession('b', { auto: true }).catch(() => {});
     expect(app._urlSessionId).toBe('later');
@@ -175,7 +175,7 @@ describe('dashboard handling of a #session=<id> link', () => {
     const source = readFileSync(resolve(import.meta.dirname, '../src/web/public/app.js'), 'utf8');
     const link = source.indexOf('if (this._urlSessionId && this.sessions.has(this._urlSessionId))');
     const wait = source.indexOf('if (this._urlSessionId) this._armUrlSessionWait(this._urlSessionId);');
-    const restore = source.indexOf("restoreId = localStorage.getItem('codeman-active-session')");
+    const restore = source.indexOf("restoreId = localStorage.getItem('reverie-active-session')");
     expect(wait).toBeGreaterThan(link);
     expect(wait).toBeLessThan(restore);
   });
@@ -183,7 +183,7 @@ describe('dashboard handling of a #session=<id> link', () => {
   it('puts the link ahead of restoring the last active tab when the page loads', () => {
     const source = readFileSync(resolve(import.meta.dirname, '../src/web/public/app.js'), 'utf8');
     const link = source.indexOf('if (this._urlSessionId && this.sessions.has(this._urlSessionId))');
-    const restore = source.indexOf("restoreId = localStorage.getItem('codeman-active-session')");
+    const restore = source.indexOf("restoreId = localStorage.getItem('reverie-active-session')");
     expect(link).toBeGreaterThan(-1);
     expect(link).toBeLessThan(restore);
   });

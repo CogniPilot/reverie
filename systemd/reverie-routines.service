@@ -18,6 +18,6 @@ Environment=ROUTINES_FLAGS=
 # into the container, and the tick runs no container command at all.
 EnvironmentFile=-%h/.config/reverie/routines.env
 # The host's own build of the package (nix build .#default), not the agent-writable container copy.
-ExecStart=%h/.local/libexec/reverie/fleet-routines tick $ROUTINES_FLAGS
+ExecStart=%h/.local/libexec/reverie/reverie-routines tick $ROUTINES_FLAGS
 TimeoutStartSec=60
 UMask=0077

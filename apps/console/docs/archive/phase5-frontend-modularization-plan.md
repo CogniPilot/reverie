@@ -2,7 +2,7 @@
 
 **Date**: 2026-03-01
 **Prerequisites**: Phase 1-4 complete (utils cleanup, CleanupManager/Debouncer, route extraction, domain splitting)
-**Goal**: Split the 15,196-line `app.js` monolith into focused, independently-loadable modules while preserving the proven `Object.assign(CodemanApp.prototype, ...)` pattern from `ralph-wizard.js`.
+**Goal**: Split the 15,196-line `app.js` monolith into focused, independently-loadable modules while preserving the proven `Object.assign(ReverieApp.prototype, ...)` pattern from `ralph-wizard.js`.
 
 ---
 
@@ -29,11 +29,11 @@
 
 Before starting ANY work, read and follow these rules:
 
-1. **Never run `npx vitest run`** (full suite) — it kills tmux sessions. You are running inside a Codeman-managed tmux session.
+1. **Never run `npx vitest run`** (full suite) — it kills tmux sessions. You are running inside a Reverie-managed tmux session.
 2. **Never test on port 3000** — the live dev server runs there. Tests use ports 3150+.
 3. **After TypeScript changes**: Run `tsc --noEmit` to verify type checking passes.
 4. **Before considering done**: Run `npm run lint` and `npm run format:check` to ensure CI passes.
-5. **Never kill tmux sessions** — check `echo $CODEMAN_MUX` first.
+5. **Never kill tmux sessions** — check `echo $REVERIE_MUX` first.
 6. **Frontend changes require browser verification**: After each step, use Playwright to load the page and verify the UI renders. Use `waitUntil: 'domcontentloaded'` (not `networkidle` — SSE keeps the connection open). Wait 3-4s for polling/async data to populate, then check element visibility, text content, and CSS values.
 7. **Cache busting**: Update the `?v=` query strings in `index.html` for any modified/new JS files after each step.
 8. **Verify dev server**: `npx tsx src/index.ts web --port 3099 &` on a non-production port, confirm `curl -s http://localhost:3099/api/status | jq .status` returns `"ok"`, then kill the background process.
@@ -73,7 +73,7 @@ src/web/public/
 | xterm-zerolag-input (inlined copy) | 1756-2153 | ~398 | No (refs xterm internals) |
 | `extractSyncSegments()` | 2173-2215 | 43 | Yes |
 | `NotificationManager` class | 2218-2663 | ~446 | No (refs `app`, `MobileDetection`; has own `escapeHtml` method) |
-| **`CodemanApp` class | 2665-15176 | **12,512** | No (depends on all above) |
+| **`ReverieApp` class | 2665-15176 | **12,512** | No (depends on all above) |
 | Initialization + export | 15178-15196 | 19 | — |
 
 ### Cross-Reference Pattern
@@ -92,7 +92,7 @@ if (typeof MobileDetection !== 'undefined' && MobileDetection.isTouchDevice()) {
 There are **two** `escapeHtml` methods in app.js:
 
 1. **`NotificationManager.escapeHtml()`** (line 2659) — instance method, used internally by `NotificationManager` at lines 2461-2467
-2. **`CodemanApp.escapeHtml()`** (line 15172) — instance method with static lookup maps (`_htmlEscapeMap`, `_htmlEscapePattern`) for performance. Used ~70 times throughout CodemanApp, and by `ralph-wizard.js` (3 calls via `this.escapeHtml`)
+2. **`ReverieApp.escapeHtml()`** (line 15172) — instance method with static lookup maps (`_htmlEscapeMap`, `_htmlEscapePattern`) for performance. Used ~70 times throughout ReverieApp, and by `ralph-wizard.js` (3 calls via `this.escapeHtml`)
 
 These are independent. Each class owns its own copy. The plan extracts a shared global `escapeHtml()` in `constants.js` and updates both classes + `ralph-wizard.js` to use it.
 
@@ -102,8 +102,8 @@ The `ralph-wizard.js` extraction established the pattern all further extractions
 
 ```javascript
 // File loaded after app.js via <script defer src="ralph-wizard.js">
-Object.assign(CodemanApp.prototype, {
-  methodName() { /* has access to `this` = CodemanApp instance */ },
+Object.assign(ReverieApp.prototype, {
+  methodName() { /* has access to `this` = ReverieApp instance */ },
   anotherMethod() { ... },
 });
 ```
@@ -111,8 +111,8 @@ Object.assign(CodemanApp.prototype, {
 **Key properties of this pattern:**
 - No import/export — uses globals (vanilla JS, no bundler)
 - `Object.assign` adds methods to prototype at load time
-- Loaded with `defer` after `app.js` — guarantees `CodemanApp` exists
-- Zero circular dependencies (one-way from module → CodemanApp prototype)
+- Loaded with `defer` after `app.js` — guarantees `ReverieApp` exists
+- Zero circular dependencies (one-way from module → ReverieApp prototype)
 - HTML controls load order via `<script defer>` tag ordering
 
 ---
@@ -137,7 +137,7 @@ Object.assign(CodemanApp.prototype, {
 
 ### Decision 2: Extraction Scope
 
-Extract **pre-CodemanApp top-level objects** first (Steps 1-6), then **CodemanApp methods** using `Object.assign` (Steps 7-8). Do NOT attempt to break up the CodemanApp constructor or its core session/terminal management in this phase — that's a Phase 6+ effort requiring more invasive changes.
+Extract **pre-ReverieApp top-level objects** first (Steps 1-6), then **ReverieApp methods** using `Object.assign` (Steps 7-8). Do NOT attempt to break up the ReverieApp constructor or its core session/terminal management in this phase — that's a Phase 6+ effort requiring more invasive changes.
 
 ### Decision 3: Module Granularity
 
@@ -196,7 +196,7 @@ Follow existing convention: `kebab-case.js` in `src/web/public/`. No subdirector
 **All top-level constants** (lines 1-159):
 
 ```javascript
-// constants.js — Shared constants and utility functions for Codeman frontend
+// constants.js — Shared constants and utility functions for Reverie frontend
 
 // Web Push
 function urlBase64ToUint8Array(base64String) { ... }
@@ -243,7 +243,7 @@ const BUILTIN_RESPAWN_PRESETS = [ ... ];
 // DEC 2026 sync segment parser
 function extractSyncSegments(data) { ... }
 
-// HTML escape utility (shared by NotificationManager and CodemanApp)
+// HTML escape utility (shared by NotificationManager and ReverieApp)
 const _htmlEscapeMap = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
 const _htmlEscapePattern = /[&<>"']/g;
 function escapeHtml(text) {
@@ -260,9 +260,9 @@ function getEventCoords(e) { ... }
 1. **Delete lines 1-159** (constants section) — moved to `constants.js`
 2. **Delete lines 273-285** (`getEventCoords`) — moved to `constants.js`
 3. **Delete lines 2173-2215** (`extractSyncSegments`) — moved to `constants.js`
-4. **Delete `escapeHtml` instance method** from CodemanApp class (lines 15162-15175, including static maps) — replaced by global `escapeHtml()` in `constants.js`
+4. **Delete `escapeHtml` instance method** from ReverieApp class (lines 15162-15175, including static maps) — replaced by global `escapeHtml()` in `constants.js`
 5. **Delete `escapeHtml` instance method** from NotificationManager class (line 2659-2662) — replaced by global
-6. **Replace `this.escapeHtml(...)` calls** throughout CodemanApp (~70 occurrences) with `escapeHtml(...)` (global)
+6. **Replace `this.escapeHtml(...)` calls** throughout ReverieApp (~70 occurrences) with `escapeHtml(...)` (global)
 7. **Replace `this.escapeHtml(...)` calls** in NotificationManager (lines 2461-2467, 4 calls) with `escapeHtml(...)`
 
 ### What Changes in ralph-wizard.js
@@ -282,7 +282,7 @@ Add the new script tag BEFORE `app.js`:
 ### Verification
 
 1. All constant names are already globals — no reference changes needed in app.js for constants
-2. `escapeHtml` usage changes from `this.escapeHtml()` → `escapeHtml()` (global) in CodemanApp, NotificationManager, and ralph-wizard.js
+2. `escapeHtml` usage changes from `this.escapeHtml()` → `escapeHtml()` (global) in ReverieApp, NotificationManager, and ralph-wizard.js
 3. `extractSyncSegments` is already called as a global function — no change needed
 4. Browser test: load page, verify terminal renders, tabs work, notifications fire
 
@@ -369,12 +369,12 @@ const SwipeHandler = {
 <script defer src="ralph-wizard.js?v=VERSION"></script>
 ```
 
-### CodemanApp.init() Update
+### ReverieApp.init() Update
 
 The `init()` method initializes mobile handlers. Verify this code path still works:
 
 ```javascript
-// In app.js CodemanApp.init():
+// In app.js ReverieApp.init():
 MobileDetection.init();      // Now global from mobile-handlers.js
 KeyboardHandler.init();      // Now global from mobile-handlers.js
 SwipeHandler.init();         // Now global from mobile-handlers.js
@@ -457,7 +457,7 @@ const VoiceInput = {
 <script defer src="ralph-wizard.js?v=VERSION"></script>
 ```
 
-### Important: VoiceInput ↔ CodemanApp References
+### Important: VoiceInput ↔ ReverieApp References
 
 VoiceInput accesses `app` through `typeof app !== 'undefined'` guards in these cases:
 - `app.activeSessionId` — to know which session receives voice input
@@ -527,7 +527,7 @@ class NotificationManager {
 |-----------|-----------|---------------|
 | `NotificationManager` → `this.app` | Constructor injection | Already uses `this.app` — works unchanged |
 | `NotificationManager` → `MobileDetection` | Direct calls (2 places: lines 2269, 2324) | `mobile-handlers.js` loaded first |
-| `CodemanApp` → `NotificationManager` | `this.notificationManager = new NotificationManager(this)` | Constructor creates instance — needs class available |
+| `ReverieApp` → `NotificationManager` | `this.notificationManager = new NotificationManager(this)` | Constructor creates instance — needs class available |
 | `NotificationManager` → `escapeHtml()` | Global function (4 calls) | Already migrated in Step 1 to `constants.js` |
 
 **Note**: NotificationManager does NOT reference VoiceInput.
@@ -535,7 +535,7 @@ class NotificationManager {
 ### What Changes in app.js
 
 1. **Delete lines 2218-2663** (NotificationManager class, including the `relativeTime` and old `escapeHtml` utilities at lines 2650-2662)
-2. The CodemanApp constructor already creates the instance:
+2. The ReverieApp constructor already creates the instance:
    ```javascript
    this.notificationManager = new NotificationManager(this);
    ```
@@ -610,8 +610,8 @@ const KeyboardAccessoryBar = {
 | `FocusTrap` | Standalone | No dependencies |
 | `KeyboardAccessoryBar` → `MobileDetection` | Direct call in `init()` | `mobile-handlers.js` loaded first |
 | `KeyboardAccessoryBar` → `typeof app` | 8+ guards for sending input | `app` defined later |
-| `CodemanApp` → `FocusTrap` | `this.activeFocusTrap = new FocusTrap(el)` | Needs class available |
-| `CodemanApp` → `KeyboardAccessoryBar` | `KeyboardAccessoryBar.init()` in init() | Needs object available |
+| `ReverieApp` → `FocusTrap` | `this.activeFocusTrap = new FocusTrap(el)` | Needs class available |
+| `ReverieApp` → `KeyboardAccessoryBar` | `KeyboardAccessoryBar.init()` in init() | Needs object available |
 | `KeyboardHandler` → `typeof KeyboardAccessoryBar` | 2 guards for show/hide | `keyboard-accessory.js` loaded after `mobile-handlers.js` — **LOAD ORDER MATTERS** |
 | `ralph-wizard.js` → `FocusTrap` | `new FocusTrap(modal)` (direct usage) | `keyboard-accessory.js` loaded before `ralph-wizard.js` |
 
@@ -706,7 +706,7 @@ Then in the built IIFE file, `LocalEchoOverlay` would be available as `XtermZero
    <script defer src="vendor/xterm-zerolag-input.js?v=VERSION"></script>
    ```
 
-5. **Update app.js**: Delete lines 1756-2153 (inlined copy). In CodemanApp where `LocalEchoOverlay` is instantiated, update the reference:
+5. **Update app.js**: Delete lines 1756-2153 (inlined copy). In ReverieApp where `LocalEchoOverlay` is instantiated, update the reference:
    ```javascript
    // Old:
    this._localEchoOverlay = new LocalEchoOverlay(this.terminal);
@@ -757,13 +757,13 @@ This documents the duplication without adding build complexity. The actual code 
 ## Step 7: Create ApiClient Wrapper
 
 **New file**: `src/web/public/api-client.js`
-**Pattern**: `Object.assign(CodemanApp.prototype, { ... })`
+**Pattern**: `Object.assign(ReverieApp.prototype, { ... })`
 **Estimated size**: ~150 lines
 **Time**: ~2 hours
 
 ### Problem
 
-~98 `fetch()` calls scattered through CodemanApp with identical boilerplate:
+~98 `fetch()` calls scattered through ReverieApp with identical boilerplate:
 
 ```javascript
 // Repeated pattern:
@@ -779,9 +779,9 @@ fetch(`/api/sessions/${sessionId}/something`, {
 Extract a centralized API helper and replace repetitive patterns. This doesn't move existing methods — it adds new helper methods and gradually migrates call sites.
 
 ```javascript
-// api-client.js — Centralized API fetch helper for CodemanApp
+// api-client.js — Centralized API fetch helper for ReverieApp
 
-Object.assign(CodemanApp.prototype, {
+Object.assign(ReverieApp.prototype, {
   /**
    * Send a JSON API request. Handles Content-Type, JSON serialization, and error swallowing.
    * @param {string} path - API path (e.g., '/api/sessions/123/input')
@@ -868,16 +868,16 @@ Do NOT replace all 98 fetch calls in this step. Instead:
 
 ### Why After app.js?
 
-`api-client.js` uses `Object.assign(CodemanApp.prototype, ...)`, which requires `CodemanApp` to be defined. Since `app.js` defines the class and immediately instantiates `const app = new CodemanApp()`, the prototype methods will be available on the `app` instance because JavaScript prototype lookup is dynamic.
+`api-client.js` uses `Object.assign(ReverieApp.prototype, ...)`, which requires `ReverieApp` to be defined. Since `app.js` defines the class and immediately instantiates `const app = new ReverieApp()`, the prototype methods will be available on the `app` instance because JavaScript prototype lookup is dynamic.
 
 **However**: Methods added via `Object.assign` AFTER instantiation are still available because JS reads the prototype at call time, not at creation time. So this works:
 
 ```javascript
 // app.js:
-class CodemanApp { ... }
-const app = new CodemanApp();
+class ReverieApp { ... }
+const app = new ReverieApp();
 // api-client.js (loaded after):
-Object.assign(CodemanApp.prototype, { _api() { ... } });
+Object.assign(ReverieApp.prototype, { _api() { ... } });
 // Later:
 app._api('/api/status'); // ✓ Works — looks up prototype chain at call time
 ```
@@ -895,13 +895,13 @@ app._api('/api/status'); // ✓ Works — looks up prototype chain at call time
 ## Step 8: Extract Subagent Window Manager
 
 **New file**: `src/web/public/subagent-windows.js`
-**Pattern**: `Object.assign(CodemanApp.prototype, { ... })`
+**Pattern**: `Object.assign(ReverieApp.prototype, { ... })`
 **Estimated size**: ~700 lines
 **Time**: ~3 hours
 
 ### Problem
 
-Subagent window management is the largest self-contained system within CodemanApp. It handles:
+Subagent window management is the largest self-contained system within ReverieApp. It handles:
 - Floating terminal windows with drag/resize
 - Parent-child connection lines (canvas/SVG)
 - Minimized state + badge indicators
@@ -910,12 +910,12 @@ Subagent window management is the largest self-contained system within CodemanAp
 
 ### What Moves
 
-Extract all subagent window methods from CodemanApp. The actual method names and their locations in app.js:
+Extract all subagent window methods from ReverieApp. The actual method names and their locations in app.js:
 
 ```javascript
 // subagent-windows.js — Floating subagent terminal window management
 
-Object.assign(CodemanApp.prototype, {
+Object.assign(ReverieApp.prototype, {
   // Tab badge (minimized agents indicator)
   renderSubagentTabBadge(sessionId, minimizedAgents) { ... },  // line 5642
   restoreMinimizedSubagent(agentId, sessionId) { ... },        // line 5800
@@ -942,13 +942,13 @@ Object.assign(CodemanApp.prototype, {
 
 ### What Stays in app.js
 
-- The `subagentWindows`, `minimizedSubagents`, `subagentWindowZIndex` **properties** stay in the CodemanApp constructor (they are state, not methods)
+- The `subagentWindows`, `minimizedSubagents`, `subagentWindowZIndex` **properties** stay in the ReverieApp constructor (they are state, not methods)
 - SSE event handlers for `subagent:discovered`, `subagent:updated`, `subagent:completed` stay in `handleSSEEvent()` — they call into the extracted methods
 - The subagent panel rendering stays (it's part of the main UI, not the floating windows)
 
 ### Important: Non-contiguous Methods
 
-Unlike Steps 1-6 (which moved contiguous blocks), the subagent window methods are scattered across CodemanApp:
+Unlike Steps 1-6 (which moved contiguous blocks), the subagent window methods are scattered across ReverieApp:
 - Tab badge methods: lines ~5642-5926
 - State persistence: lines ~9760-9906
 - Connection lines + window lifecycle: lines ~11998-12900
@@ -1001,15 +1001,15 @@ Step 5: keyboard-accessory.js     (depends on mobile-handlers.js for MobileDetec
   ↓
 Step 6: xterm-zerolag-input       (depends on vendor/xterm.js)
   ↓
-Step 7: api-client.js             (depends on CodemanApp — loads after app.js)
+Step 7: api-client.js             (depends on ReverieApp — loads after app.js)
   ↓
-Step 8: subagent-windows.js       (depends on CodemanApp — loads after app.js)
+Step 8: subagent-windows.js       (depends on ReverieApp — loads after app.js)
 ```
 
 **Parallelization opportunities**:
 - Steps 3 + 5 can run in parallel (no cross-dependencies)
 - Steps 4 + 5 can run in parallel (both depend on mobile-handlers but not each other)
-- Steps 7 + 8 can run in parallel (both extend CodemanApp prototype independently)
+- Steps 7 + 8 can run in parallel (both extend ReverieApp prototype independently)
 
 ### index.html Final Script Order
 
@@ -1021,17 +1021,17 @@ Step 8: subagent-windows.js       (depends on CodemanApp — loads after app.js)
 <script defer src="vendor/xterm-addon-unicode11.min.js"></script>
 <script defer src="vendor/xterm-zerolag-input.js"></script>     <!-- Step 6 -->
 
-<!-- Codeman: utilities & standalone modules (no CodemanApp dependency) -->
+<!-- Reverie: utilities & standalone modules (no ReverieApp dependency) -->
 <script defer src="constants.js"></script>                       <!-- Step 1 -->
 <script defer src="mobile-handlers.js"></script>                 <!-- Step 2 -->
 <script defer src="voice-input.js"></script>                     <!-- Step 3 -->
 <script defer src="notification-manager.js"></script>            <!-- Step 4 -->
 <script defer src="keyboard-accessory.js"></script>              <!-- Step 5 -->
 
-<!-- Codeman: core application -->
+<!-- Reverie: core application -->
 <script defer src="app.js"></script>                             <!-- REDUCED -->
 
-<!-- Codeman: prototype extensions (loaded after CodemanApp defined) -->
+<!-- Reverie: prototype extensions (loaded after ReverieApp defined) -->
 <script defer src="ralph-wizard.js"></script>                    <!-- Existing -->
 <script defer src="api-client.js"></script>                      <!-- Step 7 -->
 <script defer src="subagent-windows.js"></script>                <!-- Step 8 -->
@@ -1097,7 +1097,7 @@ After EACH step, verify:
 
 ### What NOT to Touch in This Phase
 
-- **CodemanApp constructor** — Do not split the 42+ properties into sub-objects. That's a Phase 6+ effort requiring careful state management.
+- **ReverieApp constructor** — Do not split the 42+ properties into sub-objects. That's a Phase 6+ effort requiring careful state management.
 - **SSE event handling** — The `handleSSEEvent()` method is the spine of the app. Keep it in app.js.
 - **Terminal rendering pipeline** — `batchTerminalWrite()`, `flushPendingWrites()`, `chunkedTerminalWrite()` are performance-critical and deeply coupled to xterm.js state. Keep in app.js.
 - **`selectSession()`** — 266-line method with complex state transitions. Keep in app.js for now.
@@ -1108,7 +1108,7 @@ After EACH step, verify:
 
 These working patterns should NOT be changed:
 - `typeof X !== 'undefined'` guards for optional globals
-- `Object.assign(CodemanApp.prototype, ...)` for method injection
+- `Object.assign(ReverieApp.prototype, ...)` for method injection
 - `<script defer>` for load ordering
 - `window.app = app` for debugging access
 - `app._elemCache` for DOM element caching
@@ -1128,13 +1128,13 @@ For reference, these are natural follow-up phases after Phase 5:
 - Consolidate MockSession into `test/mocks/`
 - Add server.ts route tests
 
-**Phase 8 — CodemanApp Class Decomposition** (future, requires Phase 5):
+**Phase 8 — ReverieApp Class Decomposition** (future, requires Phase 5):
 - Extract `SessionUI` class (session lifecycle, tab management)
 - Extract `TerminalRenderer` class (batching, sync, flicker filter)
 - Extract `SubagentTracker` class (agent discovery, tool call tracking)
 - Extract `RalphStateUI` class (Ralph panel, state rendering)
 - Extract `SSEConnector` class (EventSource, reconnect, backoff)
-- Reduce CodemanApp to orchestrator (~2000 lines)
+- Reduce ReverieApp to orchestrator (~2000 lines)
 
 **Phase 9 — ES Module Migration** (future, if bundler adopted):
 - Convert all `.js` files to ES modules

@@ -1,13 +1,13 @@
 /**
  * @fileoverview Persistence for web tabs (saved dashboard URLs).
  *
- * Stores `Webview` records in `~/.codeman/webviews.json`, following the same
+ * Stores `Webview` records in `~/.reverie/webviews.json`, following the same
  * read-array / write-array shape as `src/remote-hosts.ts`. Deliberately dumb: no
  * caching, no watchers. The list is small (bounded by MAX_WEBVIEWS) and is read
  * on demand by the route handlers.
  *
  * The file lives under the instance data dir, so a beta instance started with a
- * distinct CODEMAN_INSTANCE keeps its own dashboards.
+ * distinct REVERIE_INSTANCE keeps its own dashboards.
  */
 
 import { existsSync, mkdirSync } from 'node:fs';

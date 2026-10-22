@@ -1,7 +1,7 @@
 # FAQ
 
 The questions that keep arriving in
-[Discussions](https://github.com/Ark0N/Codeman/discussions) and issues. For "why is it
+[Discussions](https://github.com/jgoppert/reverie/discussions) and issues. For "why is it
 doing that", go to [Troubleshooting](Troubleshooting) instead.
 
 ## The basics
@@ -82,7 +82,7 @@ features are Claude-only; [Agent CLIs](Agent-CLIs) lists exactly which.
 Yes. `reverie tui` is a full-screen dashboard of your sessions, with the same
 NEEDS YOU / WORKING / IDLE grouping the web UI uses. `reverie tui --list` prints the
 numbered list and exits, and `reverie tui 2` attaches straight to session 2. `Enter`
-attaches, `F1` comes back. You can also use tmux directly on the `codeman` socket.
+attaches, `F1` comes back. You can also use tmux directly on the `reverie` socket.
 
 ## Running unattended
 
@@ -120,7 +120,7 @@ Tailscale is the recommended answer: your devices join a private network, Reveri
 loopback bind, and you get real HTTPS. The installer sets it up, and `install.sh tailscale`
 retrofits it onto an existing install.
 
-A Cloudflare tunnel gives a public URL faster, and requires `CODEMAN_PASSWORD`. Full
+A Cloudflare tunnel gives a public URL faster, and requires `REVERIE_PASSWORD`. Full
 comparison in [Remote Access](Remote-Access).
 
 ### Why can't other devices reach Reverie?
@@ -135,7 +135,7 @@ The always-on Host-header allowlist blocks DNS rebinding, and it does not know y
 Add it:
 
 ```bash
-CODEMAN_ALLOWED_HOSTS='codeman.example.com,.internal.example.com'
+REVERIE_ALLOWED_HOSTS='reverie.example.com,.internal.example.com'
 ```
 
 A leading dot matches subdomains. Also make sure the proxy forwards WebSocket upgrades.
@@ -162,7 +162,7 @@ under separate OS accounts. See [Multi-User Mode](Multi-User-Mode).
 Give it its own instance name, which scopes the data directory and the tmux socket together:
 
 ```bash
-CODEMAN_INSTANCE=beta CODEMAN_PORT=5000 reverie web
+REVERIE_INSTANCE=beta REVERIE_PORT=5000 reverie web
 ```
 
 Do not skip this. The data directory and tmux socket are process wide, so a second server on
@@ -175,7 +175,7 @@ the defaults discovers and attaches your live sessions.
 | Install route | Update with                                                                 |
 | ------------- | --------------------------------------------------------------------------- |
 | Installer     | Re-run the install one-liner, or **App Settings → System → Updates**.         |
-| npm (upstream package) | `npm update -g aicodeman`                                                     |
+| npm (upstream package) | `npm update -g aireverie`                                                     |
 | git clone     | `git pull && npm install && npm run build`, then restart the service.         |
 
 The in-app updater covers git-clone installs supervised by systemd or launchd. It stashes a
@@ -188,7 +188,7 @@ No. Sessions live in tmux, so restarting the server reattaches to them.
 
 ### Where is my data?
 
-Everything under `~/.codeman/`, with cases created from scratch in `~/codeman-cases/`.
+Everything under `~/.reverie/`, with cases created from scratch in `~/reverie-cases/`.
 Nothing needs root and nothing leaves the machine. Uninstalling does not delete either
 directory.
 
@@ -210,7 +210,7 @@ Yes. Reverie ships an agent skill that lets an agent inside a session drive the 
 list sessions, spawn workers, send prompts, and block until a worker's turn finishes. It is
 off by default and enabled per case.
 
-See [Driving Reverie From An Agent](Driving-Codeman-From-An-Agent).
+See [Driving Reverie From An Agent](Driving-Reverie-From-An-Agent).
 
 ### Can I run a case in a container?
 
@@ -240,12 +240,12 @@ defaults.
 
 ### How do I request a feature?
 
-Open an [Idea](https://github.com/Ark0N/Codeman/discussions/categories/ideas) and it gets
+Open an [Idea](https://github.com/jgoppert/reverie/discussions/categories/ideas) and it gets
 voted on. Roadmap decisions happen there.
 
 ### How do I contribute code?
 
-[CONTRIBUTING.md](https://github.com/Ark0N/Codeman/blob/master/.github/CONTRIBUTING.md) has
+[CONTRIBUTING.md](https://github.com/jgoppert/reverie/blob/main/apps/console/.github/CONTRIBUTING.md) has
 the full map. Small fixes can go straight to a PR; anything larger starts as an issue or
 Discussion so the design gets a nod first. Skins, translations, and docs are good first
 contributions.
@@ -253,6 +253,6 @@ contributions.
 ### How do I fix a mistake in this wiki?
 
 These pages are generated from
-[`docs/wiki/`](https://github.com/Ark0N/Codeman/tree/master/docs/wiki) in the main
+[`docs/wiki/`](https://github.com/jgoppert/reverie/tree/main/apps/console/docs/wiki) in the main
 repository. Editing a page in the browser gets overwritten on the next sync, so send a PR
 against that directory instead.

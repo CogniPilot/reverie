@@ -12,10 +12,10 @@ import { describe, expect, it } from 'vitest';
 function loadRunModeHarness() {
   const elements: Record<string, any> = {};
   const storage = new Map<string, string>();
-  const CodemanApp = function CodemanApp(this: any) {};
+  const ReverieApp = function ReverieApp(this: any) {};
 
   const context = vm.createContext({
-    CodemanApp,
+    ReverieApp,
     VoiceInput: {},
     localStorage: {
       getItem: (key: string) => storage.get(key) ?? null,
@@ -40,7 +40,7 @@ function loadRunModeHarness() {
   elements.runBtn = runBtn;
   elements.runBtnLabel = runBtnLabel;
 
-  const app = new (CodemanApp as any)();
+  const app = new (ReverieApp as any)();
   app.loadAppSettingsFromStorage = () => ({});
   app.saveAppSettingsToStorage = () => {};
   app._apiPut = () => Promise.resolve();
@@ -52,7 +52,7 @@ describe('run mode UI', () => {
   it('updates the visible mode when selecting Claude after server sync set Codex', async () => {
     const { app, storage, runBtnLabel } = loadRunModeHarness();
 
-    storage.set('codeman_runMode', 'claude');
+    storage.set('reverie_runMode', 'claude');
     await app.loadAppSettingsFromServer(Promise.resolve({ runMode: 'codex' }));
     expect(app.runMode).toBe('codex');
     expect(runBtnLabel.textContent).toBe('Run CX');
@@ -66,7 +66,7 @@ describe('run mode UI', () => {
   it('accepts Gemini mode from server sync and updates the run button label', async () => {
     const { app, storage, runBtnLabel } = loadRunModeHarness();
 
-    storage.set('codeman_runMode', 'claude');
+    storage.set('reverie_runMode', 'claude');
     await app.loadAppSettingsFromServer(Promise.resolve({ runMode: 'gemini' }));
 
     expect(app.runMode).toBe('gemini');
@@ -76,7 +76,7 @@ describe('run mode UI', () => {
   it('accepts Antigravity mode from server sync and updates the run button label', async () => {
     const { app, storage, runBtnLabel } = loadRunModeHarness();
 
-    storage.set('codeman_runMode', 'claude');
+    storage.set('reverie_runMode', 'claude');
     await app.loadAppSettingsFromServer(Promise.resolve({ runMode: 'antigravity' }));
 
     expect(app.runMode).toBe('antigravity');
@@ -86,7 +86,7 @@ describe('run mode UI', () => {
   it('accepts OMP mode from server sync and updates the run button label', async () => {
     const { app, storage, runBtnLabel } = loadRunModeHarness();
 
-    storage.set('codeman_runMode', 'claude');
+    storage.set('reverie_runMode', 'claude');
     await app.loadAppSettingsFromServer(Promise.resolve({ runMode: 'omp' }));
 
     expect(app.runMode).toBe('omp');
@@ -96,9 +96,9 @@ describe('run mode UI', () => {
 
 describe('Run launch synchronization', () => {
   it('keeps launch progress out of an active session terminal', () => {
-    const CodemanApp = function CodemanApp(this: any) {};
+    const ReverieApp = function ReverieApp(this: any) {};
     const context = vm.createContext({
-      CodemanApp,
+      ReverieApp,
       localStorage: { getItem: () => null, setItem: () => {} },
       document: { getElementById: () => null },
       console,
@@ -106,7 +106,7 @@ describe('Run launch synchronization', () => {
     const sessionUi = readFileSync(resolve(import.meta.dirname, '../src/web/public/session-ui.js'), 'utf8');
     vm.runInContext(sessionUi, context, { filename: 'session-ui.js' });
 
-    const app = new (CodemanApp as any)();
+    const app = new (ReverieApp as any)();
     app.activeSessionId = 'existing-session';
     app.terminal = {
       clear: vi.fn(),
@@ -126,9 +126,9 @@ describe('Run launch synchronization', () => {
   });
 
   it('still renders launch progress in the terminal on the session-less home screen', () => {
-    const CodemanApp = function CodemanApp(this: any) {};
+    const ReverieApp = function ReverieApp(this: any) {};
     const context = vm.createContext({
-      CodemanApp,
+      ReverieApp,
       localStorage: { getItem: () => null, setItem: () => {} },
       document: { getElementById: () => null },
       console,
@@ -136,7 +136,7 @@ describe('Run launch synchronization', () => {
     const sessionUi = readFileSync(resolve(import.meta.dirname, '../src/web/public/session-ui.js'), 'utf8');
     vm.runInContext(sessionUi, context, { filename: 'session-ui.js' });
 
-    const app = new (CodemanApp as any)();
+    const app = new (ReverieApp as any)();
     app.activeSessionId = null; // home screen: nothing else owns the terminal
     app.terminal = { clear: vi.fn(), writeln: vi.fn() };
     app.showToast = vi.fn();
@@ -218,9 +218,9 @@ describe('Run launch synchronization', () => {
       setAttribute: vi.fn(),
       removeAttribute: vi.fn(),
     };
-    const CodemanApp = function CodemanApp(this: any) {};
+    const ReverieApp = function ReverieApp(this: any) {};
     const context = vm.createContext({
-      CodemanApp,
+      ReverieApp,
       localStorage: { getItem: () => null, setItem: () => {} },
       document: { getElementById: (id: string) => (id === 'runBtn' ? runBtn : null) },
       console,
@@ -228,7 +228,7 @@ describe('Run launch synchronization', () => {
     const sessionUi = readFileSync(resolve(import.meta.dirname, '../src/web/public/session-ui.js'), 'utf8');
     vm.runInContext(sessionUi, context, { filename: 'session-ui.js' });
 
-    const app = new (CodemanApp as any)();
+    const app = new (ReverieApp as any)();
     app._runMinLockMs = 0;
     let finishRun!: () => void;
     app.runClaude = vi.fn(
@@ -253,9 +253,9 @@ describe('Run launch synchronization', () => {
   });
 
   it('renders a POST response session immediately without waiting for SSE', async () => {
-    const CodemanApp = function CodemanApp(this: any) {};
+    const ReverieApp = function ReverieApp(this: any) {};
     const context = vm.createContext({
-      CodemanApp,
+      ReverieApp,
       localStorage: { getItem: () => null, setItem: () => {} },
       document: { getElementById: () => null },
       fetch: vi.fn(),
@@ -264,7 +264,7 @@ describe('Run launch synchronization', () => {
     const sessionUi = readFileSync(resolve(import.meta.dirname, '../src/web/public/session-ui.js'), 'utf8');
     vm.runInContext(sessionUi, context, { filename: 'session-ui.js' });
 
-    const app = new (CodemanApp as any)();
+    const app = new (ReverieApp as any)();
     app.sessions = new Map();
     app._onSessionCreated = vi.fn((session: any) => app.sessions.set(session.id, session));
     app._renderSessionTabsImmediate = vi.fn();
@@ -282,9 +282,9 @@ describe('Run launch synchronization', () => {
     const fetchMock = vi.fn(async () => ({
       json: async () => ({ success: true, data: snapshot }),
     }));
-    const CodemanApp = function CodemanApp(this: any) {};
+    const ReverieApp = function ReverieApp(this: any) {};
     const context = vm.createContext({
-      CodemanApp,
+      ReverieApp,
       localStorage: { getItem: () => null, setItem: () => {} },
       document: { getElementById: () => null },
       fetch: fetchMock,
@@ -293,7 +293,7 @@ describe('Run launch synchronization', () => {
     const sessionUi = readFileSync(resolve(import.meta.dirname, '../src/web/public/session-ui.js'), 'utf8');
     vm.runInContext(sessionUi, context, { filename: 'session-ui.js' });
 
-    const app = new (CodemanApp as any)();
+    const app = new (ReverieApp as any)();
     app.sessions = new Map();
     app._onSessionCreated = vi.fn((session: any) => app.sessions.set(session.id, session));
     app._renderSessionTabsImmediate = vi.fn();
@@ -329,14 +329,14 @@ describe('Codex quick start settings', () => {
   describe('Codex CLI group visibility', () => {
     // Both settings in the group are handed to `codex` at launch, so on an
     // instance where the binary does not resolve the group is a promise nothing
-    // can keep. renderIndexHtml injects window.__codemanCliAvailable; this pins
+    // can keep. renderIndexHtml injects window.__reverieCliAvailable; this pins
     // the client half. Coupled test: it drives the REAL settings-ui.js against a
     // stub element, so deleting the call in openAppSettings() is what it catches.
     function loadSettingsUi(codexAvailable: boolean | undefined) {
       const codexTabBtn = { id: 'appSettingsCodexGroup', style: { display: 'PRISTINE' } };
-      const CodemanApp = function CodemanApp(this: any) {};
+      const ReverieApp = function ReverieApp(this: any) {};
       const context: any = vm.createContext({
-        CodemanApp,
+        ReverieApp,
         MobileDetection: { getDeviceType: () => 'desktop', isTouchDevice: () => false, isHandheldDevice: () => false },
         localStorage: { getItem: () => null, setItem: () => {} },
         document: {
@@ -346,10 +346,10 @@ describe('Codex quick start settings', () => {
         console,
       });
       context.window = context;
-      if (codexAvailable !== undefined) context.__codemanCliAvailable = { codex: codexAvailable };
+      if (codexAvailable !== undefined) context.__reverieCliAvailable = { codex: codexAvailable };
       const settingsUi = readFileSync(resolve(import.meta.dirname, '../src/web/public/settings-ui.js'), 'utf8');
       vm.runInContext(settingsUi, context, { filename: 'settings-ui.js' });
-      return { app: new (CodemanApp as any)(), codexTabBtn };
+      return { app: new (ReverieApp as any)(), codexTabBtn };
     }
 
     it('hides the Codex group when the codex binary is not available', () => {
@@ -416,7 +416,7 @@ describe('Codex quick start settings', () => {
     // Drives the REAL settings-ui.js + session-ui.js against stub elements, including
     // a custom registry entry so a static stock-only list cannot pass this test.
     function loadUi(flags: Record<string, boolean> | undefined, catalog = CATALOG) {
-      const CodemanApp = function CodemanApp(this: any) {};
+      const ReverieApp = function ReverieApp(this: any) {};
       const welcomeCliActions = element();
       const tunnelBtn = element();
       const runModeCliOptions = element();
@@ -431,7 +431,7 @@ describe('Codex quick start settings', () => {
         querySelectorAll: () => Object.values(modeBtns),
       };
       const context: any = vm.createContext({
-        CodemanApp,
+        ReverieApp,
         MobileDetection: { getDeviceType: () => 'desktop', isTouchDevice: () => false, isHandheldDevice: () => false },
         localStorage: { getItem: () => null, setItem: () => {} },
         document: {
@@ -450,14 +450,14 @@ describe('Codex quick start settings', () => {
         console,
       });
       context.window = context;
-      context.__codemanCliCatalog = catalog;
-      if (flags !== undefined) context.__codemanCliAvailable = flags;
+      context.__reverieCliCatalog = catalog;
+      if (flags !== undefined) context.__reverieCliAvailable = flags;
       for (const file of ['settings-ui.js', 'session-ui.js']) {
         const src = readFileSync(resolve(import.meta.dirname, `../src/web/public/${file}`), 'utf8');
         vm.runInContext(src, context, { filename: file });
       }
       return {
-        app: new (CodemanApp as any)(),
+        app: new (ReverieApp as any)(),
         welcomeCliActions,
         tunnelBtn,
         runModeCliOptions,
@@ -730,10 +730,10 @@ describe('Codex quick start settings', () => {
       tabCount: { value: '1' },
     };
     const requests: Array<{ url: string; body?: any }> = [];
-    const CodemanApp = function CodemanApp(this: any) {};
+    const ReverieApp = function ReverieApp(this: any) {};
 
     const context = vm.createContext({
-      CodemanApp,
+      ReverieApp,
       localStorage: {
         getItem: () => null,
         setItem: () => {},
@@ -757,7 +757,7 @@ describe('Codex quick start settings', () => {
     const sessionUi = readFileSync(resolve(import.meta.dirname, '../src/web/public/session-ui.js'), 'utf8');
     vm.runInContext(sessionUi, context, { filename: 'session-ui.js' });
 
-    const app = new (CodemanApp as any)();
+    const app = new (ReverieApp as any)();
     app.terminal = { clear: () => {}, writeln: () => {}, focus: () => {} };
     app.loadAppSettingsFromStorage = () => ({
       codexDangerouslyBypassApprovals: true,
@@ -778,7 +778,7 @@ describe('Codex quick start settings', () => {
     expect(requests.find((req) => req.url === '/api/quick-start')?.body).toMatchObject({
       caseName: 'codex-case',
       mode: 'codex',
-      // tabs follow the w<n>-<case> naming convention (quick-start would otherwise auto-name codeman-<id>)
+      // tabs follow the w<n>-<case> naming convention (quick-start would otherwise auto-name reverie-<id>)
       sessionName: 'w1-codex-case',
       codexConfig: { dangerouslyBypassApprovals: true, animations: false, renderMode: 'hybrid' },
     });
@@ -788,9 +788,9 @@ describe('Codex quick start settings', () => {
 
 describe('case selector refresh', () => {
   it('sorts case picker options alphabetically and filters by case or host label', () => {
-    const CodemanApp = function CodemanApp(this: any) {};
+    const ReverieApp = function ReverieApp(this: any) {};
     const context = vm.createContext({
-      CodemanApp,
+      ReverieApp,
       localStorage: { getItem: () => null, setItem: () => {} },
       document: { getElementById: () => null },
       console,
@@ -799,7 +799,7 @@ describe('case selector refresh', () => {
     const sessionUi = readFileSync(resolve(import.meta.dirname, '../src/web/public/session-ui.js'), 'utf8');
     vm.runInContext(sessionUi, context, { filename: 'session-ui.js' });
 
-    const app = new (CodemanApp as any)();
+    const app = new (ReverieApp as any)();
     const cases = [
       { name: 'zeta' },
       { name: 'moneytrove', location: 'remote', remote: { hostId: 'mac-mini', path: '/Users/saqeb/moneytrove' } },
@@ -822,22 +822,22 @@ describe('case selector refresh', () => {
   });
 
   it('labels dockerized cases with a short "(docker)" tag (or the custom host id)', () => {
-    const CodemanApp = function CodemanApp(this: any) {};
+    const ReverieApp = function ReverieApp(this: any) {};
     const context = vm.createContext({
-      CodemanApp,
+      ReverieApp,
       localStorage: { getItem: () => null, setItem: () => {} },
       document: { getElementById: () => null },
       console,
     });
     const sessionUi = readFileSync(resolve(import.meta.dirname, '../src/web/public/session-ui.js'), 'utf8');
     vm.runInContext(sessionUi, context, { filename: 'session-ui.js' });
-    const app = new (CodemanApp as any)();
+    const app = new (ReverieApp as any)();
 
     const label = (c: any) => app.formatCasePickerLabel(c);
     // default one-click host, the 'local' Docker-tab default, and per-case override
     // hosts all collapse to the short "(docker)" tag.
     expect(
-      label({ name: 'sandbox', location: 'docker', docker: { hostId: 'default', container: 'codeman-case-sandbox' } })
+      label({ name: 'sandbox', location: 'docker', docker: { hostId: 'default', container: 'reverie-case-sandbox' } })
     ).toBe('sandbox (docker)');
     expect(label({ name: 'sandbox', location: 'docker', docker: { hostId: 'local' } })).toBe('sandbox (docker)');
     expect(label({ name: 'sandbox', location: 'docker', docker: { hostId: 'q-sandbox' } })).toBe('sandbox (docker)');
@@ -848,7 +848,7 @@ describe('case selector refresh', () => {
   it('launches the highlighted case with the current run mode when pressing Enter in the picker', () => {
     const elements: Record<string, any> = {};
     const listeners: Record<string, (event: any) => void> = {};
-    const CodemanApp = function CodemanApp(this: any) {};
+    const ReverieApp = function ReverieApp(this: any) {};
 
     elements.quickStartCase = {
       value: 'Alpha',
@@ -874,7 +874,7 @@ describe('case selector refresh', () => {
     };
 
     const context = vm.createContext({
-      CodemanApp,
+      ReverieApp,
       localStorage: { getItem: () => null, setItem: () => {} },
       document: {
         getElementById: (id: string) => elements[id] ?? null,
@@ -887,7 +887,7 @@ describe('case selector refresh', () => {
     const sessionUi = readFileSync(resolve(import.meta.dirname, '../src/web/public/session-ui.js'), 'utf8');
     vm.runInContext(sessionUi, context, { filename: 'session-ui.js' });
 
-    const app = new (CodemanApp as any)();
+    const app = new (ReverieApp as any)();
     app.cases = [
       { name: 'Alpha' },
       { name: 'moneytrove', location: 'remote', remote: { hostId: 'mac-mini', path: '/Users/saqeb/moneytrove' } },
@@ -909,7 +909,7 @@ describe('case selector refresh', () => {
     const elements: Record<string, any> = {};
     const listeners: Record<string, (event: any) => void> = {};
     let listClick: ((event: any) => void) | null = null;
-    const CodemanApp = function CodemanApp(this: any) {};
+    const ReverieApp = function ReverieApp(this: any) {};
     elements.quickStartCase = { value: 'Alpha', dataset: {} };
     elements.quickStartCaseSearch = {
       value: '',
@@ -931,7 +931,7 @@ describe('case selector refresh', () => {
     };
     elements.quickStartCasePicker = { contains: () => true };
     const context = vm.createContext({
-      CodemanApp,
+      ReverieApp,
       localStorage: { getItem: () => null, setItem: () => {} },
       document: { getElementById: (id: string) => elements[id] ?? null, addEventListener: vi.fn() },
       console,
@@ -942,7 +942,7 @@ describe('case selector refresh', () => {
     });
     const sessionUi = readFileSync(resolve(import.meta.dirname, '../src/web/public/session-ui.js'), 'utf8');
     vm.runInContext(sessionUi, context, { filename: 'session-ui.js' });
-    const app = new (CodemanApp as any)();
+    const app = new (ReverieApp as any)();
     app.cases = [{ name: 'Alpha' }, { name: 'zeta' }];
     app.updateDirDisplayForCase = vi.fn();
     app.updateMobileCaseLabel = vi.fn();
@@ -993,10 +993,10 @@ describe('case selector refresh', () => {
       tabCount: { value: '1' },
     };
     const requests: Array<{ url: string; body?: any }> = [];
-    const CodemanApp = function CodemanApp(this: any) {};
+    const ReverieApp = function ReverieApp(this: any) {};
 
     const context = vm.createContext({
-      CodemanApp,
+      ReverieApp,
       localStorage: {
         getItem: () => null,
         setItem: () => {},
@@ -1030,7 +1030,7 @@ describe('case selector refresh', () => {
     const sessionUi = readFileSync(resolve(import.meta.dirname, '../src/web/public/session-ui.js'), 'utf8');
     vm.runInContext(sessionUi, context, { filename: 'session-ui.js' });
 
-    const app = new (CodemanApp as any)();
+    const app = new (ReverieApp as any)();
     app.terminal = { clear: () => {}, writeln: () => {}, focus: () => {} };
     app.sessions = new Map();
     app.cases = [{ name: 'gpu-work', path: 'ubuntu@10.0.0.42:/home/ubuntu/work', location: 'remote' }];
@@ -1053,7 +1053,7 @@ describe('case selector refresh', () => {
   it('removes a deleted selected case from the dropdown and blurs the native picker', async () => {
     const elements: Record<string, any> = {};
     const requests: Array<{ url: string; method: string; body?: any }> = [];
-    const CodemanApp = function CodemanApp(this: any) {};
+    const ReverieApp = function ReverieApp(this: any) {};
     const quickStartCase = {
       value: 'deleted-case',
       innerHTML: '<option value="deleted-case">deleted-case</option><option value="kept-case">kept-case</option>',
@@ -1069,7 +1069,7 @@ describe('case selector refresh', () => {
     elements.dirInput = { value: '' };
 
     const context = vm.createContext({
-      CodemanApp,
+      ReverieApp,
       MobileDetection: { getDeviceType: () => 'desktop' },
       localStorage: {
         getItem: () => null,
@@ -1101,7 +1101,7 @@ describe('case selector refresh', () => {
     const sessionUi = readFileSync(resolve(import.meta.dirname, '../src/web/public/session-ui.js'), 'utf8');
     vm.runInContext(sessionUi, context, { filename: 'session-ui.js' });
 
-    const app = new (CodemanApp as any)();
+    const app = new (ReverieApp as any)();
     app.cases = [
       { name: 'deleted-case', path: '/tmp/deleted-case' },
       { name: 'kept-case', path: '/tmp/kept-case' },
@@ -1133,16 +1133,16 @@ describe('toolbar instance count', () => {
   // _readTabCount(), and an absent stepper (phones and tablets hide the group)
   // has to read as 1, not throw.
   function loadCounter(elements: Record<string, any>) {
-    const CodemanApp = function CodemanApp(this: any) {};
+    const ReverieApp = function ReverieApp(this: any) {};
     const context = vm.createContext({
-      CodemanApp,
+      ReverieApp,
       localStorage: { getItem: () => null, setItem: () => {} },
       document: { getElementById: (id: string) => elements[id] ?? null },
       console,
     });
     const sessionUi = readFileSync(resolve(import.meta.dirname, '../src/web/public/session-ui.js'), 'utf8');
     vm.runInContext(sessionUi, context, { filename: 'session-ui.js' });
-    return new (CodemanApp as any)();
+    return new (ReverieApp as any)();
   }
 
   it('reads the shared stepper and falls back to 1 when it is absent', () => {
@@ -1178,10 +1178,10 @@ describe('Gemini quick start', () => {
       tabCount: { value: '1' },
     };
     const requests: Array<{ url: string; body?: any }> = [];
-    const CodemanApp = function CodemanApp(this: any) {};
+    const ReverieApp = function ReverieApp(this: any) {};
 
     const context = vm.createContext({
-      CodemanApp,
+      ReverieApp,
       localStorage: { getItem: () => null, setItem: () => {} },
       document: { getElementById: (id: string) => elements[id] ?? null },
       // Mock responses use the real wire shape: the server.ts preSerialization
@@ -1201,7 +1201,7 @@ describe('Gemini quick start', () => {
     const sessionUi = readFileSync(resolve(import.meta.dirname, '../src/web/public/session-ui.js'), 'utf8');
     vm.runInContext(sessionUi, context, { filename: 'session-ui.js' });
 
-    const app = new (CodemanApp as any)();
+    const app = new (ReverieApp as any)();
     app.terminal = { clear: () => {}, writeln: () => {}, focus: () => {} };
     app.loadAppSettingsFromStorage = () => ({});
     app.getCaseSettings = () => ({});
@@ -1233,10 +1233,10 @@ describe('Antigravity quick start', () => {
       tabCount: { value: '1' },
     };
     const requests: Array<{ url: string; body?: any }> = [];
-    const CodemanApp = function CodemanApp(this: any) {};
+    const ReverieApp = function ReverieApp(this: any) {};
 
     const context = vm.createContext({
-      CodemanApp,
+      ReverieApp,
       localStorage: { getItem: () => null, setItem: () => {} },
       document: { getElementById: (id: string) => elements[id] ?? null },
       fetch: async (url: string, init?: { body?: string }) => {
@@ -1255,7 +1255,7 @@ describe('Antigravity quick start', () => {
     const sessionUi = readFileSync(resolve(import.meta.dirname, '../src/web/public/session-ui.js'), 'utf8');
     vm.runInContext(sessionUi, context, { filename: 'session-ui.js' });
 
-    const app = new (CodemanApp as any)();
+    const app = new (ReverieApp as any)();
     app.terminal = { clear: () => {}, writeln: () => {}, focus: () => {} };
     app.loadAppSettingsFromStorage = () => ({});
     app.getCaseSettings = () => ({});
@@ -1290,10 +1290,10 @@ describe('Pi quick start', () => {
       tabCount: { value: '1' },
     };
     const requests: Array<{ url: string; body?: any }> = [];
-    const CodemanApp = function CodemanApp(this: any) {};
+    const ReverieApp = function ReverieApp(this: any) {};
 
     const context = vm.createContext({
-      CodemanApp,
+      ReverieApp,
       localStorage: { getItem: () => null, setItem: () => {} },
       document: { getElementById: (id: string) => elements[id] ?? null },
       fetch: async (url: string, init?: { body?: string }) => {
@@ -1314,7 +1314,7 @@ describe('Pi quick start', () => {
     const sessionUi = readFileSync(resolve(import.meta.dirname, '../src/web/public/session-ui.js'), 'utf8');
     vm.runInContext(sessionUi, context, { filename: 'session-ui.js' });
 
-    const app = new (CodemanApp as any)();
+    const app = new (ReverieApp as any)();
     app.terminal = { clear: () => {}, writeln: () => {}, focus: () => {} };
     app.loadAppSettingsFromStorage = () => ({});
     app.getCaseSettings = () => ({});
@@ -1338,9 +1338,9 @@ describe('Pi quick start', () => {
   it('reports the install hint when the CLI is missing and starts nothing', async () => {
     const elements: Record<string, any> = { quickStartCase: { value: 'pi-case' } };
     const requests: string[] = [];
-    const CodemanApp = function CodemanApp(this: any) {};
+    const ReverieApp = function ReverieApp(this: any) {};
     const context = vm.createContext({
-      CodemanApp,
+      ReverieApp,
       localStorage: { getItem: () => null, setItem: () => {} },
       document: { getElementById: (id: string) => elements[id] ?? null },
       fetch: async (url: string) => {
@@ -1354,7 +1354,7 @@ describe('Pi quick start', () => {
     const sessionUi = readFileSync(resolve(import.meta.dirname, '../src/web/public/session-ui.js'), 'utf8');
     vm.runInContext(sessionUi, context, { filename: 'session-ui.js' });
 
-    const app = new (CodemanApp as any)();
+    const app = new (ReverieApp as any)();
     app.terminal = { clear: () => {}, writeln: () => {}, focus: () => {} };
     const errors: string[] = [];
     app._reportSessionLaunchError = (_owns: boolean, msg: string) => errors.push(msg);
@@ -1379,10 +1379,10 @@ describe('Grok quick start', () => {
       tabCount: { value: '1' },
     };
     const requests: Array<{ url: string; body?: any }> = [];
-    const CodemanApp = function CodemanApp(this: any) {};
+    const ReverieApp = function ReverieApp(this: any) {};
 
     const context = vm.createContext({
-      CodemanApp,
+      ReverieApp,
       localStorage: { getItem: () => null, setItem: () => {} },
       document: { getElementById: (id: string) => elements[id] ?? null },
       fetch: async (url: string, init?: { body?: string }) => {
@@ -1406,7 +1406,7 @@ describe('Grok quick start', () => {
     const sessionUi = readFileSync(resolve(import.meta.dirname, '../src/web/public/session-ui.js'), 'utf8');
     vm.runInContext(sessionUi, context, { filename: 'session-ui.js' });
 
-    const app = new (CodemanApp as any)();
+    const app = new (ReverieApp as any)();
     app.terminal = { clear: () => {}, writeln: () => {}, focus: () => {} };
     app.loadAppSettingsFromStorage = () => ({});
     app.getCaseSettings = () => ({});
@@ -1433,9 +1433,9 @@ describe('Grok quick start', () => {
   it('reports the install hint when the CLI is missing and starts nothing', async () => {
     const elements: Record<string, any> = { quickStartCase: { value: 'grok-case' } };
     const requests: string[] = [];
-    const CodemanApp = function CodemanApp(this: any) {};
+    const ReverieApp = function ReverieApp(this: any) {};
     const context = vm.createContext({
-      CodemanApp,
+      ReverieApp,
       localStorage: { getItem: () => null, setItem: () => {} },
       document: { getElementById: (id: string) => elements[id] ?? null },
       fetch: async (url: string) => {
@@ -1449,7 +1449,7 @@ describe('Grok quick start', () => {
     const sessionUi = readFileSync(resolve(import.meta.dirname, '../src/web/public/session-ui.js'), 'utf8');
     vm.runInContext(sessionUi, context, { filename: 'session-ui.js' });
 
-    const app = new (CodemanApp as any)();
+    const app = new (ReverieApp as any)();
     app.terminal = { clear: () => {}, writeln: () => {}, focus: () => {} };
     const errors: string[] = [];
     app._reportSessionLaunchError = (_owns: boolean, msg: string) => errors.push(msg);
@@ -1472,11 +1472,11 @@ describe('Grok quick start', () => {
       tabCount: { value: '3' },
     };
     const requests: Array<{ url: string; body?: any }> = [];
-    const CodemanApp = function CodemanApp(this: any) {};
+    const ReverieApp = function ReverieApp(this: any) {};
     let created = 0;
 
     const context = vm.createContext({
-      CodemanApp,
+      ReverieApp,
       localStorage: { getItem: () => null, setItem: () => {} },
       document: { getElementById: (id: string) => elements[id] ?? null },
       fetch: async (url: string, init?: { body?: string }) => {
@@ -1503,7 +1503,7 @@ describe('Grok quick start', () => {
     const sessionUi = readFileSync(resolve(import.meta.dirname, '../src/web/public/session-ui.js'), 'utf8');
     vm.runInContext(sessionUi, context, { filename: 'session-ui.js' });
 
-    const app = new (CodemanApp as any)();
+    const app = new (ReverieApp as any)();
     app.terminal = { clear: () => {}, writeln: () => {}, focus: () => {} };
     app.loadAppSettingsFromStorage = () => ({});
     app.getCaseSettings = () => ({});
@@ -1532,9 +1532,9 @@ describe('case lookup before a local launch', () => {
     };
     const requests: Array<{ url: string; method?: string }> = [];
     const written: string[] = [];
-    const CodemanApp = function CodemanApp(this: any) {};
+    const ReverieApp = function ReverieApp(this: any) {};
     const context = vm.createContext({
-      CodemanApp,
+      ReverieApp,
       localStorage: { getItem: () => null, setItem: () => {} },
       document: { getElementById: (id: string) => elements[id] ?? null },
       fetch: async (url: string, init?: { method?: string }) => {
@@ -1544,7 +1544,7 @@ describe('case lookup before a local launch', () => {
           return {
             json: async () => ({
               success: true,
-              data: { case: { name: 'nas-case', path: '/home/u/codeman-cases/nas-case' } },
+              data: { case: { name: 'nas-case', path: '/home/u/reverie-cases/nas-case' } },
             }),
           };
         }
@@ -1555,7 +1555,7 @@ describe('case lookup before a local launch', () => {
     });
     const sessionUi = readFileSync(resolve(import.meta.dirname, '../src/web/public/session-ui.js'), 'utf8');
     vm.runInContext(sessionUi, context, { filename: 'session-ui.js' });
-    const app = new (CodemanApp as any)();
+    const app = new (ReverieApp as any)();
     app.terminal = { clear: () => {}, writeln: (line: string) => written.push(line), focus: () => {} };
     app.sessions = new Map();
     app.cases = [];

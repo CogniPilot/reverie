@@ -8,7 +8,7 @@
  * gate itself (registry-aware, keydown-only) plus the static invariants that
  * keep the generic capture loop from ever swallowing the interrupt.
  *
- * Strategy: run terminal-ui.js in a vm with a stub CodemanApp, the same harness
+ * Strategy: run terminal-ui.js in a vm with a stub ReverieApp, the same harness
  * shape test/command-palette-ui.test.ts uses for panels-ui.js. No DOM, no xterm.
  */
 
@@ -26,9 +26,9 @@ type Shortcut = {
 };
 
 function loadTerminalHarness(registry?: Shortcut[]) {
-  const CodemanApp = function CodemanApp(this: unknown) {};
+  const ReverieApp = function ReverieApp(this: unknown) {};
   const context = vm.createContext({
-    CodemanApp,
+    ReverieApp,
     window: {},
     document: { getElementById: () => null, querySelector: () => null },
     console,
@@ -38,7 +38,7 @@ function loadTerminalHarness(registry?: Shortcut[]) {
   const terminalUi = readFileSync(resolve(import.meta.dirname, '../src/web/public/terminal-ui.js'), 'utf8');
   vm.runInContext(terminalUi, context, { filename: 'terminal-ui.js' });
 
-  const app = new (CodemanApp as unknown as new () => Record<string, any>)();
+  const app = new (ReverieApp as unknown as new () => Record<string, any>)();
   if (registry) {
     app.getShortcutRegistry = () => registry;
     // Real implementation, copied by reference from app.js semantics: ctrl/meta are

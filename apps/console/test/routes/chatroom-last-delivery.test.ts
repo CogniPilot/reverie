@@ -42,7 +42,7 @@ describe('last delivery in the room list', () => {
   });
 
   const room = async (name: string) => (await app.inject({ method: 'POST', url: '/api/chatrooms', payload: { name, members: [{ sessionId: A }, { sessionId: B }] } })).json().data.id as string;
-  const mine = async (headers: Record<string, string> = { 'x-codeman-parent-session': A }, query = 'member=self') =>
+  const mine = async (headers: Record<string, string> = { 'x-reverie-parent-session': A }, query = 'member=self') =>
     (await app.inject({ method: 'GET', url: `/api/chatrooms?${query}`, headers })).json().data;
 
   it('tells an agent the room its last prompt came from, then follows the next prompt', async () => {
@@ -71,8 +71,8 @@ describe('last delivery in the room list', () => {
     await app.inject({ method: 'POST', url: `/api/chatrooms/${one}/messages`, payload: { text: 'hi' } });
     await service.delivery.flushAll();
     expect('lastDelivery' in (await mine({}, 'member=self'))).toBe(false);
-    expect('lastDelivery' in (await mine({ 'x-codeman-parent-session': A }, ''))).toBe(false);
-    expect('lastDelivery' in (await mine({ 'x-codeman-parent-session': A }, `member=${B}`))).toBe(false);
+    expect('lastDelivery' in (await mine({ 'x-reverie-parent-session': A }, ''))).toBe(false);
+    expect('lastDelivery' in (await mine({ 'x-reverie-parent-session': A }, `member=${B}`))).toBe(false);
   });
 
   it('is null for an agent that has been delivered nothing yet', async () => {

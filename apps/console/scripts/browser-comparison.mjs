@@ -2,7 +2,7 @@
 /**
  * Browser Framework Comparison Script
  *
- * Compares Playwright, Puppeteer, and Agent-Browser for testing Codeman web UI.
+ * Compares Playwright, Puppeteer, and Agent-Browser for testing Reverie web UI.
  * Run: node scripts/browser-comparison.mjs
  */
 
@@ -19,8 +19,8 @@ const PORTS = {
 
 const results = [];
 
-function isCodemanTitle(title) {
-  return typeof title === 'string' && title.startsWith('codeman:');
+function isReverieTitle(title) {
+  return typeof title === 'string' && title.startsWith('reverie:');
 }
 
 function logSection(title) {
@@ -92,7 +92,7 @@ async function main() {
       const page = await playwrightBrowser.newPage();
       await page.goto(`http://localhost:${PORTS.playwright}`);
       const title = await page.title();
-      if (!isCodemanTitle(title)) throw new Error(`Expected codeman:<hostname>, got ${title}`);
+      if (!isReverieTitle(title)) throw new Error(`Expected reverie:<hostname>, got ${title}`);
       await page.close();
     });
 
@@ -102,7 +102,7 @@ async function main() {
       await page.goto(`http://localhost:${PORTS.playwright}`);
       const logo = await page.locator('.header-brand .logo').textContent();
       const version = await page.locator('#versionDisplay').textContent();
-      if (logo !== 'Codeman') throw new Error('Logo mismatch');
+      if (logo !== 'Reverie') throw new Error('Logo mismatch');
       if (!version.match(/v\d+/)) throw new Error('Version mismatch');
       await page.close();
     });
@@ -153,7 +153,7 @@ async function main() {
       const page = await puppeteerBrowser.newPage();
       await page.goto(`http://localhost:${PORTS.puppeteer}`);
       const title = await page.title();
-      if (!isCodemanTitle(title)) throw new Error(`Expected codeman:<hostname>, got ${title}`);
+      if (!isReverieTitle(title)) throw new Error(`Expected reverie:<hostname>, got ${title}`);
       await page.close();
     });
 
@@ -163,7 +163,7 @@ async function main() {
       await page.goto(`http://localhost:${PORTS.puppeteer}`);
       const logo = await page.$eval('.header-brand .logo', el => el.textContent);
       const version = await page.$eval('#versionDisplay', el => el.textContent);
-      if (logo !== 'Codeman') throw new Error('Logo mismatch');
+      if (logo !== 'Reverie') throw new Error('Logo mismatch');
       if (!version.match(/v\d+/)) throw new Error('Version mismatch');
       await page.close();
     });
@@ -206,7 +206,7 @@ async function main() {
     agentBrowser(`open http://localhost:${PORTS.agentBrowser}`);
     await new Promise(r => setTimeout(r, 2000));
     const title = agentBrowserJson('get title');
-    agentBrowserAvailable = isCodemanTitle(title.title);
+    agentBrowserAvailable = isReverieTitle(title.title);
     console.log('  Browser launched');
 
     // Test 1: Page load
@@ -214,14 +214,14 @@ async function main() {
       agentBrowser(`open http://localhost:${PORTS.agentBrowser}`);
       await new Promise(r => setTimeout(r, 1000));
       const title = agentBrowserJson('get title');
-      if (!isCodemanTitle(title.title)) throw new Error(`Expected codeman:<hostname>, got ${title.title}`);
+      if (!isReverieTitle(title.title)) throw new Error(`Expected reverie:<hostname>, got ${title.title}`);
     });
 
     // Test 2: Element selection
     await runBenchmark('element-selection', 'agent-browser', async () => {
       const logo = agentBrowserJson('get text ".header-brand .logo"');
       const version = agentBrowserJson('get text "#versionDisplay"');
-      if (logo.text !== 'Codeman') throw new Error('Logo mismatch');
+      if (logo.text !== 'Reverie') throw new Error('Logo mismatch');
       if (!version.text.match(/v\d+/)) throw new Error('Version mismatch');
     });
 

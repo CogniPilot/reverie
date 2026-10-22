@@ -1,6 +1,6 @@
 /**
  * @fileoverview `@fastify/static`'s `setHeaders` callback is what sets Cache-Control
- * on every asset Codeman serves, and v10 silently changed its contract.
+ * on every asset Reverie serves, and v10 silently changed its contract.
  *
  * In v9 the first argument was a Node `ServerResponse`, so the body called
  * `res.setHeader(...)`. In v10 it is a `FastifyReply`, which has no `setHeader`, so

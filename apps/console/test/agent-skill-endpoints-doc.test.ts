@@ -2,8 +2,8 @@
  * @fileoverview Static guard: every endpoint the packaged agent skill documents
  * still exists in the routes it is documenting.
  *
- * `skills/codeman/reference/endpoints.md` is injected into cases and read by agents
- * driving Codeman over HTTP. Nothing tied it to the server, so renaming or dropping a
+ * `skills/reverie/reference/endpoints.md` is injected into cases and read by agents
+ * driving Reverie over HTTP. Nothing tied it to the server, so renaming or dropping a
  * route left the skill confidently telling agents to call a 404. This parses the
  * `METHOD /api/...` pairs out of the doc and matches them against the `app.<method>()`
  * registrations in src/web/routes/*.ts plus src/web/server.ts (which registers `/api/events`
@@ -20,13 +20,14 @@
  * Port: N/A (pure static analysis).
  */
 
+import { agentSkillSourceDir } from '../src/agent-skill-source.js';
 import { describe, it, expect } from 'vitest';
 import { readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
 
 const HERE = fileURLToPath(new URL('.', import.meta.url));
-const DOC_PATH = join(HERE, '../skills/codeman/reference/endpoints.md');
+const DOC_PATH = join(agentSkillSourceDir(), 'reference/endpoints.md');
 const ROUTES_DIR = join(HERE, '../src/web/routes');
 /** `/api/events` and `/api/events/subscribe` are registered here, not in routes/. */
 const SERVER_PATH = join(HERE, '../src/web/server.ts');
@@ -79,7 +80,7 @@ function registeredRoutes(): Set<string> {
   return registered;
 }
 
-describe('skills/codeman/reference/endpoints.md', () => {
+describe('skills/reverie/reference/endpoints.md', () => {
   it('parses a plausible number of endpoints out of the doc', () => {
     // A parser that silently matches nothing would make the real assertion below
     // pass vacuously forever.

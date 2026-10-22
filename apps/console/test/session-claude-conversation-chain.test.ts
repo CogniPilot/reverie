@@ -5,7 +5,7 @@
  * Which conversation the response viewer reads is `Session.claudeSessionId`,
  * and `start()` reassigns it to the launch id at THREE separate points. That is
  * correct for a fresh pane and a lie for a re-attached one: a mux session that
- * survived a Codeman restart never stopped, so the CLI may have `/clear`ed hours
+ * survived a Reverie restart never stopped, so the CLI may have `/clear`ed hours
  * ago and moved to a conversation the launch id knows nothing about. The chain
  * is what carries that across the restart, and its tail must therefore outrank
  * the launch id on the restored path only.
@@ -14,7 +14,7 @@
  * caught:
  *
  *  1. **Only a first-hand adoption extends the chain.** The id has to come from
- *     the CLI's own hook payload, delivered under the pane's `$CODEMAN_SESSION_ID`.
+ *     the CLI's own hook payload, delivered under the pane's `$REVERIE_SESSION_ID`.
  *     A history-correlated guess writing into this record would make the
  *     "showed a stranger's conversation" bug permanent instead of transient.
  *  2. **A restored conversation survives every reset point.** The mux branch and

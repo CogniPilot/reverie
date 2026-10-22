@@ -25,20 +25,20 @@
 // ═══════════════════════════════════════════════════════════════
 // Reverse-proxy base path
 // ═══════════════════════════════════════════════════════════════
-// When Reverie is served behind a reverse proxy under a sub-path (e.g. /codeman/),
-// the server injects `window.__CODEMAN_BASE__` (normalized: '' for root, or '/foo').
+// When Reverie is served behind a reverse proxy under a sub-path (e.g. /reverie/),
+// the server injects `window.__REVERIE_BASE__` (normalized: '' for root, or '/foo').
 // The `<base href>` tag in index.html already rewrites the RELATIVE asset refs, but
 // every URL the frontend builds at RUNTIME is root-absolute (`/api/...`, `/ws/...`)
 // and root-absolute URLs ignore `<base>` — so those must be prefixed here instead.
 // Rather than touch ~190 call sites, all runtime URL construction routes through this
-// ONE choke point: `CodemanBase.url()` is the route builder, and a thin wrapper over
+// ONE choke point: `ReverieBase.url()` is the route builder, and a thin wrapper over
 // `fetch` applies it transparently. The handful of EventSource/WebSocket sites call
-// `CodemanBase.url()` / `CodemanBase.base` explicitly. No-op when mounted at root.
-const CodemanBase = (function () {
+// `ReverieBase.url()` / `ReverieBase.base` explicitly. No-op when mounted at root.
+const ReverieBase = (function () {
   // `window` is absent in some unit-test vm contexts that load this module in
   // isolation; guard so the module still evaluates (base degrades to root).
   const _win = typeof window !== 'undefined' ? window : undefined;
-  const base = String((_win && _win.__CODEMAN_BASE__) || '').replace(/\/+$/, '');
+  const base = String((_win && _win.__REVERIE_BASE__) || '').replace(/\/+$/, '');
   /**
    * Prefix a root-absolute application path with the mount base. Leaves untouched:
    * relative paths and fragments/queries (resolved against `<base>`), protocol-relative
@@ -54,19 +54,19 @@ const CodemanBase = (function () {
   }
   return { base, url };
 })();
-if (typeof window !== 'undefined') window.CodemanBase = CodemanBase;
+if (typeof window !== 'undefined') window.ReverieBase = ReverieBase;
 
 // Transparently prefix root-absolute app paths on every fetch, so the many
 // `/api/...` string literals across the frontend need no per-call edit.
-if (typeof window !== 'undefined' && CodemanBase.base && typeof window.fetch === 'function') {
+if (typeof window !== 'undefined' && ReverieBase.base && typeof window.fetch === 'function') {
   const _origFetch = window.fetch.bind(window);
   window.fetch = function (input, init) {
-    if (typeof input === 'string') return _origFetch(CodemanBase.url(input), init);
+    if (typeof input === 'string') return _origFetch(ReverieBase.url(input), init);
     if (typeof Request !== 'undefined' && input instanceof Request) {
       try {
         const u = new URL(input.url);
         if (u.origin === location.origin) {
-          const prefixed = CodemanBase.url(u.pathname);
+          const prefixed = ReverieBase.url(u.pathname);
           if (prefixed !== u.pathname) {
             return _origFetch(new Request(u.origin + prefixed + u.search + u.hash, input), init);
           }
@@ -318,7 +318,7 @@ function computeTabScrollLeft(input) {
 }
 
 // Session lineage lines: geometry for the lines joining a tab to the tabs it
-// spawned (a worker started through the codeman agent skill, which passes its own
+// spawned (a worker started through the reverie agent skill, which passes its own
 // id as parentSessionId). Pure: the caller measures and appends, this decides.
 //
 // ONE TREE PER SPAWNING TAB. Every family is drawn, the selected tab's emphasized
@@ -1415,7 +1415,7 @@ function cleanCopiedSelection(text, options) {
 
 /**
  * GitHub's heading slug: lower-cased, anything that is not a letter, mark, number, `_`, `-` or space
- * dropped, each space a hyphen (`Why `codeman`? → `why-codeman`, `Über uns` → `über-uns`).
+ * dropped, each space a hyphen (`Why `reverie`? → `why-reverie`, `Über uns` → `über-uns`).
  */
 function markdownHeadingSlug(text) {
   return String(text ?? '')
@@ -1466,13 +1466,13 @@ if (typeof window !== 'undefined') {
   window.WEBGL_FALLBACK = WEBGL_FALLBACK;
   window.evaluateWebGLLongTaskTrip = evaluateWebGLLongTaskTrip;
   window.shouldSkipWebGL = shouldSkipWebGL;
-  window.CodemanTabOverflow = {
+  window.ReverieTabOverflow = {
     shouldAutoWrapTabs,
     resolveTabOrientation,
     computeTabScrollLeft,
     TAB_SCROLL_REVEAL_PX,
   };
-  window.CodemanTabRail = {
+  window.ReverieTabRail = {
     DEFAULT_WIDTH: TAB_RAIL_DEFAULT_WIDTH,
     RICH_DEFAULT_WIDTH: TAB_RAIL_RICH_DEFAULT_WIDTH,
     MIN_WIDTH: TAB_RAIL_MIN_WIDTH,
@@ -1480,10 +1480,10 @@ if (typeof window !== 'undefined') {
     resolveWidth: resolveTabRailWidth,
     resolveKeyboardWidth: resolveTabRailKeyboardWidth,
   };
-  window.CodemanWsReconnect = {
+  window.ReverieWsReconnect = {
     plan: planWsReconnect,
   };
-  window.CodemanLineage = {
+  window.ReverieLineage = {
     computeTree: computeLineageTree,
     computeRows: computeLineageRows,
     CORNER_RADIUS_PX: LINEAGE_CORNER_RADIUS_PX,
@@ -1493,57 +1493,57 @@ if (typeof window !== 'undefined') {
     VERTICAL_TRACK_INSET_PX: LINEAGE_VERTICAL_TRACK_INSET_PX,
     COLORS: LINEAGE_COLORS,
   };
-  window.CodemanConnectionLoss = {
+  window.ReverieConnectionLoss = {
     compute: computeConnectionLossUi,
     GRACE_MS: CONNECTION_LOSS_GRACE_MS,
   };
-  window.CodemanSseStale = {
+  window.ReverieSseStale = {
     compute: computeSseStale,
     TIMEOUT_MS: SSE_STALE_TIMEOUT_MS,
   };
-  window.CodemanPromptCache = {
+  window.ReveriePromptCache = {
     format: formatPromptCacheStatus,
   };
-  window.CodemanSessionOrder = {
+  window.ReverieSessionOrder = {
     RANK: SESSION_ACTIVITY_RANK,
     anchor: sessionActivityAnchor,
     compare: compareSessionActivity,
     sort: sortSessionsByActivity,
   };
-  window.CodemanTabClusters = {
+  window.ReverieTabClusters = {
     COLORS: TAB_CLUSTER_COLORS,
     colorFor: tabClusterColorFor,
     compute: computeTabClusters,
     nameSplit: tabClusterNameSplit,
   };
-  window.CodemanTabTriage = {
+  window.ReverieTabTriage = {
     GROUPS: TAB_TRIAGE_GROUPS,
     STRIDE: TAB_TRIAGE_STRIDE,
     groupFor: tabTriageGroupFor,
     layout: computeTabTriageLayout,
   };
-  window.CodemanTabSearch = {
+  window.ReverieTabSearch = {
     needle: tabSearchNeedle,
     filter: filterTabSearchRows,
   };
-  window.CodemanInputLimit = {
+  window.ReverieInputLimit = {
     FRAME_MAX_CHARS: INPUT_FRAME_MAX_CHARS,
     PASTE_MAX_CHARS: INPUT_PASTE_MAX_CHARS,
     split: splitInputFrames,
   };
-  window.CodemanAutoCopy = {
+  window.ReverieAutoCopy = {
     decide: decideAutoCopy,
     MAX_CHARS: AUTO_COPY_MAX_CHARS,
   };
-  window.CodemanCopySelection = {
+  window.ReverieCopySelection = {
     clean: cleanCopiedSelection,
   };
-  window.CodemanMarkdownAnchors = {
+  window.ReverieMarkdownAnchors = {
     slug: markdownHeadingSlug,
     assign: assignMarkdownHeadingAnchors,
     find: findMarkdownAnchorTarget,
   };
-  window.CodemanTerminalFont = {
+  window.ReverieTerminalFont = {
     DEFAULT_STACK: TERMINAL_FONT_DEFAULT_STACK,
     resolve: resolveTerminalFontFamily,
     WEIGHT_DEFAULTS: TERMINAL_FONT_WEIGHT_DEFAULTS,
@@ -1912,7 +1912,7 @@ function getEventCoords(e) {
   return { clientX: e.clientX, clientY: e.clientY };
 }
 
-// HTML escape utility (shared by NotificationManager, CodemanApp, and ralph-wizard.js)
+// HTML escape utility (shared by NotificationManager, ReverieApp, and ralph-wizard.js)
 const _htmlEscapeMap = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
 const _htmlEscapePattern = /[&<>"']/g;
 function escapeHtml(text) {
@@ -2588,7 +2588,7 @@ function tileGridCapacity({ width, height }) {
 }
 
 /**
- * The stored grid (`codeman:tile-grid`: session ids and the layout, never
+ * The stored grid (`reverie:tile-grid`: session ids and the layout, never
  * content) made safe to apply: unknown, deleted, detached and duplicate ids
  * are dropped, the list is capped at TILE_GRID_MAX, `focused` / `zoomed` must
  * name a kept id, and track fractions must be 1 to 3 finite positive numbers.
@@ -3346,7 +3346,7 @@ const CLI_ID_PATTERN = /^[a-z][a-z0-9-]{0,23}$/;
  * endpoint's, whatever the CLI calls it.
  *
  * @param {object} session - a session from app.sessions
- * @param {Array<{id: string, label?: string}>} [catalog] - window.__codemanCliCatalog
+ * @param {Array<{id: string, label?: string}>} [catalog] - window.__reverieCliCatalog
  * @returns {{id: string, label: string, model: string, title: string}}
  */
 function describeSessionHarness(session, catalog) {
@@ -3376,9 +3376,9 @@ function describeSessionHarness(session, catalog) {
 }
 
 if (typeof window !== 'undefined') {
-  window.CodemanSessionHarness = { describeSessionHarness, SESSION_MODEL_MAX_CHARS };
-  window.CodemanHistoryFormat = { formatHistoryBytes, computeHistoryTruncationNotice, computeRewriteScrollLine };
-  window.CodemanFilePaths = {
+  window.ReverieSessionHarness = { describeSessionHarness, SESSION_MODEL_MAX_CHARS };
+  window.ReverieHistoryFormat = { formatHistoryBytes, computeHistoryTruncationNotice, computeRewriteScrollLine };
+  window.ReverieFilePaths = {
     absoluteFilePathPattern,
     findFilePathLinks,
     resolveLinkedFilePath,
@@ -3387,14 +3387,14 @@ if (typeof window !== 'undefined') {
     rendersAsPage,
     HTML_PAGE_EXTENSIONS,
   };
-  window.CodemanTerminalLines = { terminalLogicalLine, terminalPathLine };
-  window.CodemanUrlSession = { sessionIdFromFragment };
-  window.CodemanSplitPane = {
+  window.ReverieTerminalLines = { terminalLogicalLine, terminalPathLine };
+  window.ReverieUrlSession = { sessionIdFromFragment };
+  window.ReverieSplitPane = {
     clampDividerPercent,
     buildSplitPickerSessions,
     SPLIT_PANE_MIN_WIDTH,
   };
-  window.CodemanTileGrid = {
+  window.ReverieTileGrid = {
     computeTileLayout,
     tileGridCapacity,
     sanitizeTileGridState,
@@ -3422,20 +3422,20 @@ if (typeof window !== 'undefined') {
     TILE_FONT_SIZE_DEFAULT,
     TILE_GRID_SSE_FILTER,
   };
-  window.CodemanRenderLiveness = { shouldKickRenderer, RENDER_STALL_MS, RENDER_LIVENESS_POLL_MS };
-  window.CodemanFetchDeadline = {
+  window.ReverieRenderLiveness = { shouldKickRenderer, RENDER_STALL_MS, RENDER_LIVENESS_POLL_MS };
+  window.ReverieFetchDeadline = {
     terminalFetchDeadlineMs,
     FETCH_DEADLINE_TAIL_MS,
     FETCH_DEADLINE_FULL_MS,
     FETCH_DEADLINE_MAX_MS,
   };
-  window.CodemanDiag = { sanitizeDiagEntry, DIAG_ENTRY_MAX_CHARS };
-  window.CodemanDroppedOutput = {
+  window.ReverieDiag = { sanitizeDiagEntry, DIAG_ENTRY_MAX_CHARS };
+  window.ReverieDroppedOutput = {
     shouldRetryDroppedOutputRecovery,
     DROP_RECOVERY_DELAY_MS,
     DROP_RECOVERY_MAX_ATTEMPTS,
   };
-  window.CodemanTerminalGeometry = {
+  window.ReverieTerminalGeometry = {
     clampTerminalDimensions,
     reconcilePtyGeometry,
     TERMINAL_MIN_COLS,

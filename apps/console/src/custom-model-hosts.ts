@@ -1,7 +1,7 @@
 /**
  * @fileoverview Read/write-array store for user-configured custom OpenAI-compatible
  * model endpoints (local or cloud — docs/custom-model-endpoints-plan.md). Same
- * shape as `remote-hosts.ts` / `webview-store.ts`: `~/.codeman/custom-model-hosts.json`
+ * shape as `remote-hosts.ts` / `webview-store.ts`: `~/.reverie/custom-model-hosts.json`
  * holding a plain array, read/written whole. The file can hold API keys, so it is
  * written 0600 via tmp+rename like `intents.json` (`mode` on `writeFile` applies only
  * to a file being created; the rename is what keeps an existing file's bytes and

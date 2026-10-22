@@ -16,10 +16,10 @@ const dom = new JSDOM('<!doctype html><html><head></head><body></body></html>', 
   pretendToBeVisual: true,
 });
 const context = dom.getInternalVMContext();
-vm.runInContext('globalThis.CodemanApp = class {}; globalThis.fetch = () => new Promise(() => {});', context);
+vm.runInContext('globalThis.ReverieApp = class {}; globalThis.fetch = () => new Promise(() => {});', context);
 for (const f of ['chatroom-ui.js', 'voice-chat.js', 'car-mode.js', 'hands-free.js'])
   vm.runInContext(readFileSync(resolve(import.meta.dirname, `../src/web/public/${f}`), 'utf8'), context);
-const Proto = vm.runInContext('CodemanApp.prototype', context);
+const Proto = vm.runInContext('ReverieApp.prototype', context);
 const doc = dom.window.document;
 afterAll(() => dom.window.close());
 
@@ -175,7 +175,7 @@ function car(opts: Parameters<typeof setup>[0] = {}, member: { sessionId: string
 describe('car mode hands-free (server engine)', () => {
   it('on a phone, even with the desktop toggle off: speech is shown as heard and a pause sends it to the voice member', async () => {
     const h = car();
-    dom.window.localStorage.setItem('codeman:handsFreeOff', '1');
+    dom.window.localStorage.setItem('reverie:handsFreeOff', '1');
     await h.start();
     expect(h.asked()).toBe(1);
     h.run(900, 0.002);

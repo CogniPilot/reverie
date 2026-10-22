@@ -135,7 +135,7 @@ describe('shell-mode spawn command (issue #208)', () => {
   it('produces a launch command that parses after the outer sh -c expansion layer', () => {
     const cmd = buildSpawnCommand({ mode: 'shell', sessionId: '00000031-003c-4000-8000-000000000056' });
     // Mirrors tmux-manager: `… bash -c ${JSON.stringify(launchCmd)}` handed to `sh -c`.
-    const launchCmd = `cd ${JSON.stringify('/tmp')} && export CODEMAN_MUX=1 && ${cmd}`;
+    const launchCmd = `cd ${JSON.stringify('/tmp')} && export REVERIE_MUX=1 && ${cmd}`;
     const outer = `bash -n -c ${JSON.stringify(launchCmd)}`;
 
     // `bash -n` parses without executing: exits 0 on the fix, 2 with the dangling `&&`.

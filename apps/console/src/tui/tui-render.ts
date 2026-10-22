@@ -217,7 +217,7 @@ export function glyphsFor(tier: TuiGlyphTier): TuiGlyphSet {
  * explicit override.
  */
 export function detectGlyphTier(env: Record<string, string | undefined>): TuiGlyphTier {
-  const override = env.CODEMAN_TUI_GLYPHS;
+  const override = env.REVERIE_TUI_GLYPHS;
   if (override === 'ascii' || override === 'unicode' || override === 'nerd') return override;
   const term = env.TERM ?? '';
   if (term === '' || term === 'dumb') return 'ascii';

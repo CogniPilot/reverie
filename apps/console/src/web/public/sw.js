@@ -27,10 +27,10 @@
 // anything — hashed assets from every release ever deployed accumulated in one
 // bucket until the origin hit its storage quota.
 const BUILD_ID = 'dev';
-const CACHE_NAME = `codeman-${BUILD_ID}`;
+const CACHE_NAME = `reverie-${BUILD_ID}`;
 
 // Reverse-proxy base path: the worker is served at `<base>/sw.js`, so its own
-// location tells us the mount prefix ('' at root, or '/codeman'). Every URL below
+// location tells us the mount prefix ('' at root, or '/reverie'). Every URL below
 // is prefixed through B() so the cached shell, icons and API calls resolve under
 // the mount instead of escaping to the origin root.
 const SW_BASE = self.location.pathname.replace(/\/sw\.js$/, '');
@@ -147,7 +147,7 @@ self.addEventListener('push', (event) => {
 
   const options = {
     body: body || '',
-    tag: tag || 'codeman-default',
+    tag: tag || 'reverie-default',
     icon: B('/icon-192.png'),
     badge: B('/icon-192.png'),
     data: { sessionId, roomId, approvalId, url: board === true ? B('/board.html') : roomId ? B(`/?room=${encodeURIComponent(roomId)}`) : (sessionId ? B(`/?session=${encodeURIComponent(sessionId)}`) : B('/')) },
@@ -160,7 +160,7 @@ self.addEventListener('push', (event) => {
   // Approve/Deny button answered with the owner's cookie from the lock screen, a confused deputy for
   // forged pushes. Approvals are answered in the app, on the card the server shows.
 
-  // Match the in-page Notification format: "codeman:<host>: <event title>".
+  // Match the in-page Notification format: "reverie:<host>: <event title>".
   // hostTitle is sent by servers >= the hostname-aware push payload change;
   // older servers omit it and we fall back to the bare title.
   const displayTitle = hostTitle && title

@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { safeRmHomeTree } from './mocks/index.js';
 
-const CASES_DIR = join(homedir(), 'codeman-cases');
+const CASES_DIR = join(homedir(), 'reverie-cases');
 
 /**
  * Integration tests for complete user flows
@@ -24,7 +24,7 @@ describe('Integration Flows', () => {
 
   afterEach(() => {
     // Clean up cases created during this test (containment-gated: never
-    // delete a case dir outside the temp HOME, e.g. prod ~/codeman-cases on
+    // delete a case dir outside the temp HOME, e.g. prod ~/reverie-cases on
     // platforms where os.homedir() ignores $HOME).
     while (createdCases.length > 0) {
       safeRmHomeTree(join(CASES_DIR, createdCases.pop()!));

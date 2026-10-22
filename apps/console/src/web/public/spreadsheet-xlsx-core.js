@@ -1083,7 +1083,7 @@
     return { background, foreground: ensureContrast(font || IMPLICIT_SHEET_FOREGROUND, background) };
   }
 
-  global.CodemanSpreadsheetXlsxCore = Object.freeze({
+  global.ReverieSpreadsheetXlsxCore = Object.freeze({
     LIMITS,
     MAX_ROW,
     MAX_COL,

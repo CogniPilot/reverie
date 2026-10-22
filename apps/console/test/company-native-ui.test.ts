@@ -26,7 +26,7 @@ function submit(h:any){h.document.querySelector('.ca-company form').dispatchEven
 it('opens Company directly from the sidebar without the legacy settings window',async()=>{
  const {h}=await setup();const link=h.document.querySelector('.ca-company-nav');expect(link?.textContent).toBe('Company');link.click();await h.flush();
  expect(h.document.querySelector('.ca-page .ca-company')).not.toBeNull();expect(h.document.querySelector('dialog.ca-company')).toBeNull();h.document.querySelector('[data-section="people"]').click();expect(h.document.querySelector('.ca-company').textContent).toContain('Inspector');expect(h.document.querySelector('.ca-company form')).not.toBeNull();
- expect(h.document.querySelector('.fleet-company-dialog')).toBeNull();expect(h.document.querySelector('.ca-company-chart').textContent).toContain('Reporting structure');expect(h.document.querySelector('.ca-company-hire').hidden).toBe(true);h.document.querySelector('[aria-label="Hire"]').click();expect(h.document.querySelector('.ca-company-hire').hidden).toBe(false);expect(h.document.querySelector('.ca-company [name="sessionId"]').textContent).toContain('Writer');
+ expect(h.document.querySelector('.reverie-company-dialog')).toBeNull();expect(h.document.querySelector('.ca-company-chart').textContent).toContain('Reporting structure');expect(h.document.querySelector('.ca-company-hire').hidden).toBe(true);h.document.querySelector('[aria-label="Hire"]').click();expect(h.document.querySelector('.ca-company-hire').hidden).toBe(false);expect(h.document.querySelector('.ca-company [name="sessionId"]').textContent).toContain('Writer');
  expect(h.document.querySelector('.ca-company [name="sessionId"]').textContent).not.toContain('Inspector');
 });
 it('uses named session/reporting dropdowns; sends one object and suppresses double submit',async()=>{
@@ -45,13 +45,13 @@ it('unverified owner does not get hiring controls, even if the legacy company re
 });
 it('company helper and real API client serialize hiring payload exactly once',async()=>{
  class App{}const fetch=vi.fn().mockResolvedValue({ok:true,json:async()=>({success:true,data:{employee:{id:'new'}}})});
- const context={CodemanApp:App,fetch,window:{}};
+ const context={ReverieApp:App,fetch,window:{}};
  runInNewContext(readFileSync(new URL('../src/web/public/api-client.js',import.meta.url),'utf8'),context);
  runInNewContext(readFileSync(new URL('../src/web/public/company-ui.js',import.meta.url),'utf8'),context);
  const app=new App() as any;const body={name:'Writer',expertise:['Review']};await app._companyApi('/employees','POST',body);
  const call=fetch.mock.calls[0];expect(call[0]).toBe('/api/company/employees');expect(JSON.parse(call[1].body)).toEqual(body);expect(typeof JSON.parse(call[1].body)).toBe('object');
 });
 it('legacy settings Company button delegates to the native surface when chat is mounted',async()=>{
- class App{}runInNewContext(readFileSync(new URL('../src/web/public/company-ui.js',import.meta.url),'utf8'),{CodemanApp:App,window:{}});
+ class App{}runInNewContext(readFileSync(new URL('../src/web/public/company-ui.js',import.meta.url),'utf8'),{ReverieApp:App,window:{}});
  const app=new App() as any;const openCompany=vi.fn();app._chatApp={built:true,openCompany};await app.openCompany();expect(openCompany).toHaveBeenCalledOnce();
 });

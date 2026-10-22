@@ -5,7 +5,7 @@
  * analog of the remote-SSH feature in `remote-hosts.ts`. Instead of a local tmux
  * pane running `ssh host` into a durable remote tmux server, a local tmux pane
  * runs `docker exec -it` into a durable IN-CONTAINER tmux server. The container is
- * scoped to the CASE (`codeman-case-<name>`), so multiple sessions can `docker
+ * scoped to the CASE (`reverie-case-<name>`), so multiple sessions can `docker
  * exec` into the same long-lived container.
  *
  * This module mirrors `remote-hosts.ts`:
@@ -23,13 +23,12 @@
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import fs from 'node:fs/promises';
-import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
+import { isAbsolute, join, relative, resolve } from 'node:path';
 import { enabledCliIds, getCli } from './config/cli-registry/registry.js';
 import { STOCK_CLIS } from './config/cli-registry/stock.js';
-import { fileURLToPath } from 'node:url';
 import { homedir } from 'node:os';
 import { createHash } from 'node:crypto';
-import { execFile, spawn } from 'node:child_process';
+import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { dataPath } from './config/instance.js';
 import type {
@@ -51,7 +50,7 @@ const DOCKER_HOSTS_FILE = 'docker-hosts.json';
 const DOCKER_CASES_FILE = 'docker-cases.json';
 
 /** Locally-built base image (see scripts/build-agent-image.mjs). */
-export const DEFAULT_AGENT_IMAGE = 'codeman/agent:base';
+export const DEFAULT_AGENT_IMAGE = 'reverie/agent:base';
 
 /** HOME inside the base image (the `agent` user). Cred mounts + hook-secret land under it. */
 export const CONTAINER_HOME = '/home/agent';
@@ -82,8 +81,8 @@ function containerBinaryFor(mode: SessionMode): string | undefined {
 
 /** Per-case container name prefix. The `case` letters deliberately do NOT matter to
  * tmux; this is a DOCKER name (`^[a-zA-Z0-9][a-zA-Z0-9_.-]+$`), and case names are
- * already validated `^[a-zA-Z0-9_-]+$`, so `codeman-case-<name>` is always valid. */
-const CONTAINER_NAME_PREFIX = 'codeman-case-';
+ * already validated `^[a-zA-Z0-9_-]+$`, so `reverie-case-<name>` is always valid. */
+const CONTAINER_NAME_PREFIX = 'reverie-case-';
 
 /** Sensible resource defaults (all overridable per host). */
 export const DEFAULT_DOCKER_RESOURCES: DockerResourceLimits = {
@@ -196,14 +195,14 @@ export function dockerDisplayPath(
 /**
  * The host-callback gateway alias is ENGINE-SPECIFIC: Docker exposes the host as
  * `host.docker.internal`, Podman as `host.containers.internal`. Both are added to
- * the host-guard allowlist so a mixed fleet keeps working.
+ * the host-guard allowlist so a mixed reverie keeps working.
  */
 export function hostGatewayAlias(engine: DockerEngine): string {
   return engine === 'podman' ? 'host.containers.internal' : 'host.docker.internal';
 }
 
 /**
- * Rewrite the server's own `CODEMAN_API_URL` to a container-reachable one by
+ * Rewrite the server's own `REVERIE_API_URL` to a container-reachable one by
  * swapping ONLY the hostname for the engine's host-gateway alias, preserving
  * scheme AND port (prod is HTTPS on 3000, so hardcoding http://…:3000 breaks
  * every hook). Falls back to `https://<alias>:3000` when the input is absent or
@@ -224,7 +223,7 @@ export function containerApiUrl(processApiUrl: string | undefined, engine: Docke
 
 /**
  * Stable hash of the drift-relevant `docker create` inputs, stored on the
- * container as the `codeman.confighash` label. On launch, a mismatch between the
+ * container as the `reverie.confighash` label. On launch, a mismatch between the
  * desired hash and the running container's label triggers the recreate-on-drift
  * prompt (host config edits actually take effect).
  */
@@ -299,15 +298,15 @@ export function toSessionDocker(host: DockerHost, dockerCase: DockerCase): Sessi
  * One container may back SEVERAL adopted cases, each pointing at a different
  * directory inside it — that is the whole reason to adopt the same container
  * twice, and it is safe because the in-container tmux session is named per
- * SESSION (`dockerTmuxSessionName`, `codeman-dkr-<id8>`) and not per case, so a
+ * SESSION (`dockerTmuxSessionName`, `reverie-dkr-<id8>`) and not per case, so a
  * session teardown kills exactly one session and its siblings on the shared
  * in-container tmux server are untouched. Nothing else reaches an adopted
  * container's lifecycle either: stop/remove throw at the builder, recreate
  * refuses `owned === false`, and the orphan reaper filters on the
- * `codeman.managed=1` label that only Codeman-created containers carry.
+ * `reverie.managed=1` label that only Reverie-created containers carry.
  *
  * So the conflicts that remain are NOT about the tmux server:
- *  - `owned-case`  the container backs a case Codeman CREATED, whose lifecycle
+ *  - `owned-case`  the container backs a case Reverie CREATED, whose lifecycle
  *                  it owns; a recreate or delete there would destroy the
  *                  adopted case's container out from under it.
  *  - `other-owner` already adopted by a different user. Adoption hands out a
@@ -352,7 +351,7 @@ export function classifyAdoptContainerConflict(params: {
 }
 
 /**
- * An ADOPTED container is one the user built and runs themselves. Codeman may
+ * An ADOPTED container is one the user built and runs themselves. Reverie may
  * only exec into it; it must never create, start, stop, restart or remove it.
  * Every lifecycle branch routes through this one predicate so a new call site
  * cannot silently opt out.
@@ -386,9 +385,9 @@ export interface DockerMount {
 /**
  * Resolve a bind source into the Docker daemon's filesystem namespace.
  *
- * A bare-host Codeman process and its Docker daemon see the same HOME, so the
+ * A bare-host Reverie process and its Docker daemon see the same HOME, so the
  * source is returned unchanged. In Docker-outside-of-Docker deployments,
- * `runtimeHome` is the path inside Codeman while `daemonHome` is the host path
+ * `runtimeHome` is the path inside Reverie while `daemonHome` is the host path
  * bind-mounted there. Sources beneath HOME must therefore be translated before
  * they are sent through the Docker socket.
  */
@@ -408,9 +407,9 @@ export function resolveDockerDaemonMountSource(source: string, runtimeHome: stri
  */
 export interface DockerCreateContext {
   docker: SessionDocker;
-  /** Codeman session id (only the first 8 chars are used, for the codeman.session label). */
+  /** Reverie session id (only the first 8 chars are used, for the reverie.session label). */
   sessionId: string;
-  /** CODEMAN_INSTANCE ('' for prod) — scopes the boot reaper so a beta never reaps prod. */
+  /** REVERIE_INSTANCE ('' for prod) — scopes the boot reaper so a beta never reaps prod. */
   instance: string;
   /** Pre-resolved uid/userns tokens: ['--user','1000:0'] | ['--userns','keep-id'] | []. */
   userArgs: string[];
@@ -418,7 +417,7 @@ export interface DockerCreateContext {
   credentialMounts: DockerMount[];
   /** Extra bind mounts (e.g. the read-only hook-secret file). */
   extraMounts: DockerMount[];
-  /** Create-time env (NON-secret, committed-safe): HOME, TERM, COLORTERM, CODEMAN_API_URL, CODEMAN_HOOK_SECRET_FILE. */
+  /** Create-time env (NON-secret, committed-safe): HOME, TERM, COLORTERM, REVERIE_API_URL, REVERIE_HOOK_SECRET_FILE. */
   envCreate: Record<string, string>;
   /** Whether to add `--add-host <alias>:host-gateway` (skipped on Docker Desktop, where the alias is native). */
   addHostGateway: boolean;
@@ -491,13 +490,13 @@ export function buildDockerCreateArgs(ctx: DockerCreateContext): string[] {
     '--name',
     shellescape(docker.containerName),
     '--label',
-    'codeman.managed=1',
+    'reverie.managed=1',
     '--label',
-    shellescape(`codeman.instance=${instance}`),
+    shellescape(`reverie.instance=${instance}`),
     '--label',
-    shellescape(`codeman.session=${sessionId.slice(0, 8)}`),
+    shellescape(`reverie.session=${sessionId.slice(0, 8)}`),
     '--label',
-    shellescape(`codeman.confighash=${docker.configHash ?? dockerConfigHash(docker)}`),
+    shellescape(`reverie.confighash=${docker.configHash ?? dockerConfigHash(docker)}`),
     '--pull=never',
     '--init',
     '--restart',
@@ -538,32 +537,8 @@ export function buildDockerCreateArgs(ctx: DockerCreateContext): string[] {
     args.push(shellescape(extra));
   }
 
-  args.push(shellescape(docker.image), 'sleep', 'infinity');
+  args.push('--entrypoint', '/usr/bin/env', shellescape(docker.image), 'sleep', 'infinity');
   return args;
-}
-
-/**
- * PURE argv for building the agent base image locally (the programmatic mirror of
- * scripts/build-agent-image.mjs): `build -f <dockerfile> -t <image> [--no-cache]
- * <contextDir>`. Kept pure + unit-testable; the caller prepends the engine binary.
- */
-export function agentImageBuildArgs(
-  dockerfile: string,
-  image: string,
-  contextDir: string,
-  noCache = false,
-  buildArgs: Array<[string, string]> = []
-): string[] {
-  return [
-    'build',
-    '-f',
-    dockerfile,
-    '-t',
-    image,
-    ...(noCache ? ['--no-cache'] : []),
-    ...buildArgs.flatMap(([name, value]) => ['--build-arg', `${name}=${value}`]),
-    contextDir,
-  ];
 }
 
 /** Tokens allowed in an npm package name reaching a Dockerfile build arg unquoted. */
@@ -572,8 +547,8 @@ const SAFE_PACKAGE = /^[@A-Za-z0-9][@A-Za-z0-9/._-]*$/;
 /**
  * npm packages the agent image installs in its shared layer, from the STOCK catalogue.
  *
- * ⚠️ Stock, deliberately, NOT the merged registry. A user's `~/.codeman/clis.json` must not
- * change what lands inside an image tagged `codeman/agent:base`, or two machines holding that
+ * ⚠️ Stock, deliberately, NOT the merged registry. A user's `~/.reverie/clis.json` must not
+ * change what lands inside an image tagged `reverie/agent:base`, or two machines holding that
  * same tag hold different images and every cache-hit decision downstream is a lie.
  *
  * ⚠️ An entry carrying `discovery.install.agentImageLayer` is excluded here — see that field's
@@ -611,8 +586,8 @@ export function agentImageNpmPackages(): string[] {
  * ⚠️ Mirrors `GIT_HOST_CLI_BUILD_ARGS` in `scripts/lib/cli-catalog.mjs`; the parity test pins them.
  */
 export const GIT_HOST_CLI_BUILD_ARGS: ReadonlyArray<readonly [string, string]> = [
-  ['CODEMAN_AGENT_IMAGE_INSTALL_GH', 'CODEMAN_INSTALL_GH'],
-  ['CODEMAN_AGENT_IMAGE_INSTALL_AZ', 'CODEMAN_INSTALL_AZ'],
+  ['REVERIE_AGENT_IMAGE_INSTALL_GH', 'REVERIE_INSTALL_GH'],
+  ['REVERIE_AGENT_IMAGE_INSTALL_AZ', 'REVERIE_INSTALL_AZ'],
 ];
 
 /**
@@ -620,8 +595,8 @@ export const GIT_HOST_CLI_BUILD_ARGS: ReadonlyArray<readonly [string, string]> =
  * ⚠️ Mirrors `GIT_IDENTITY_BUILD_ARGS` in `scripts/lib/cli-catalog.mjs`; the parity test pins them.
  */
 export const GIT_IDENTITY_BUILD_ARGS: ReadonlyArray<readonly [string, string]> = [
-  ['CODEMAN_AGENT_IMAGE_GIT_USER_NAME', 'GIT_USER_NAME'],
-  ['CODEMAN_AGENT_IMAGE_GIT_USER_EMAIL', 'GIT_USER_EMAIL'],
+  ['REVERIE_AGENT_IMAGE_GIT_USER_NAME', 'GIT_USER_NAME'],
+  ['REVERIE_AGENT_IMAGE_GIT_USER_EMAIL', 'GIT_USER_EMAIL'],
 ];
 
 /**
@@ -674,13 +649,13 @@ export const CONTAINER_CLAUDE_DIR = `${CONTAINER_HOME}/.claude`;
 /** In-container path of the seeded (writable) `~/.claude.json`. */
 export const CLAUDE_JSON_HOME = `${CONTAINER_HOME}/.claude.json`;
 /** In-container path of the read-only host-seeded `~/.claude.json` (copied into HOME at launch). */
-export const CLAUDE_JSON_SEED = `${CONTAINER_HOME}/.codeman/claude.seed.json`;
+export const CLAUDE_JSON_SEED = `${CONTAINER_HOME}/.reverie/claude.seed.json`;
 /** Read-only seed paths for the files copied into the container's `.claude`. */
-const CLAUDE_CREDS_SEED = `${CONTAINER_HOME}/.codeman/claude-creds.seed.json`;
-const CLAUDE_SETTINGS_SEED = `${CONTAINER_HOME}/.codeman/claude-settings.seed.json`;
-const CLAUDE_STATS_SEED = `${CONTAINER_HOME}/.codeman/claude-stats.seed.json`;
+const CLAUDE_CREDS_SEED = `${CONTAINER_HOME}/.reverie/claude-creds.seed.json`;
+const CLAUDE_SETTINGS_SEED = `${CONTAINER_HOME}/.reverie/claude-settings.seed.json`;
+const CLAUDE_STATS_SEED = `${CONTAINER_HOME}/.reverie/claude-stats.seed.json`;
 /** Staging root for read-only host-cred seed mounts (codex/gemini/gcloud/opencode). */
-const CRED_SEED_DIR = `${CONTAINER_HOME}/.codeman/cred-seeds`;
+const CRED_SEED_DIR = `${CONTAINER_HOME}/.reverie/cred-seeds`;
 
 /**
  * PURE: merge the host `~/.claude.json` into a config that makes an
@@ -725,7 +700,7 @@ function readHostClaudeTheme(home: string): string | undefined {
 /**
  * Resolve the read-only seed mount for `~/.claude.json`. Reads the host file, merges
  * in the seamless-onboarding flags + workspace trust (buildSeamlessClaudeConfig),
- * writes the result to a per-container seed file under `~/.codeman/docker-seeds/`,
+ * writes the result to a per-container seed file under `~/.reverie/docker-seeds/`,
  * and returns its mount. The launch chain copies it to `~/.claude.json` inside HOME
  * once — giving Claude a NORMAL writable, already-onboarded config (no atomic-rename
  * EBUSY, no re-auth, no theme/trust prompts). Falls back to the RAW host file when
@@ -865,7 +840,7 @@ const CRED_STORES: CredStorePolicy[] = [
   // holds user-defined custom providers. Consequence to document: in-container pi
   // sessions are invisible host-side, so `pi -c` inside a Docker case only sees
   // that container's own history (unlike codex, whose `sessions/` is shared RW
-  // precisely because Codeman reads it host-side).
+  // precisely because Reverie reads it host-side).
   {
     rel: '.pi/agent',
     seedFiles: ['auth.json', 'settings.json', 'trust.json', 'models.json', 'models-store.json'],
@@ -895,12 +870,12 @@ const CRED_STORES: CredStorePolicy[] = [
   { rel: '.config/opencode', seedWhole: true },
   // GitHub CLI: `hosts.yml` holds the token wherever no system keyring exists (the
   // Docker server image, a headless Linux host), `config.yml` the preferences. An
-  // agent image built with CODEMAN_INSTALL_GH=1 routes github.com git credentials
+  // agent image built with REVERIE_INSTALL_GH=1 routes github.com git credentials
   // through `gh`, so this seed is what lets an agent clone/push a private repo. A
   // token that lives in a desktop keyring is not in `hosts.yml` and does not carry
   // in; sign `gh` in inside the container. OPT-IN: seeded only when the same switch
   // that builds gh into the agent image is on, never merely because the file exists.
-  { rel: '.config/gh', seedFiles: ['hosts.yml', 'config.yml'], enabledByEnv: 'CODEMAN_AGENT_IMAGE_INSTALL_GH' },
+  { rel: '.config/gh', seedFiles: ['hosts.yml', 'config.yml'], enabledByEnv: 'REVERIE_AGENT_IMAGE_INSTALL_GH' },
   // Azure CLI: only the sign-in state. `~/.azure` also accumulates `logs/`,
   // `commands/`, telemetry and (on a bare host) `cliextensions/`, none of which is
   // needed to authenticate; the agent image carries its own extensions outside HOME.
@@ -909,7 +884,7 @@ const CRED_STORES: CredStorePolicy[] = [
   // OPT-IN like gh: the MSAL cache holds refresh tokens for the whole Azure account.
   {
     rel: '.azure',
-    enabledByEnv: 'CODEMAN_AGENT_IMAGE_INSTALL_AZ',
+    enabledByEnv: 'REVERIE_AGENT_IMAGE_INSTALL_AZ',
     seedFiles: [
       'azureProfile.json',
       'msal_token_cache.json',
@@ -923,11 +898,11 @@ const CRED_STORES: CredStorePolicy[] = [
   // that dir ALSO holds agent.db/history.db/models.db (SQLite caches) and
   // terminal-sessions/blobs/cache (large, regenerable), so seed only the
   // config files. UNLIKE pi/grok, `sessions/` is SHARED (RW), not
-  // host-invisible: Codeman reads `~/.omp/agent/sessions/**/*.jsonl`
+  // host-invisible: Reverie reads `~/.omp/agent/sessions/**/*.jsonl`
   // HOST-SIDE for history recovery and --resume pinning
   // (omp-transcript.ts, omp-session-resolver.ts) — the same reason codex's
   // `sessions/` is shared rather than seeded. Without this, an in-container
-  // OMP conversation would be invisible to Codeman's own history-scan/resume
+  // OMP conversation would be invisible to Reverie's own history-scan/resume
   // logic, silently breaking the kill-survival feature for Docker cases.
   {
     rel: '.omp/agent',
@@ -999,14 +974,14 @@ export interface DockerDriftStatus {
   /** Container exists (daemon reachable AND a container with this name is present). */
   exists: boolean;
   running: boolean;
-  /** The desired configHash no longer matches the container's codeman.confighash label. */
+  /** The desired configHash no longer matches the container's reverie.confighash label. */
   drifted: boolean;
   currentHash?: string;
 }
 
 /**
  * Drift check (docs/docker-cases-plan.md §4): compare the DESIRED configHash
- * against the existing container's `codeman.confighash` label so docker-host
+ * against the existing container's `reverie.confighash` label so docker-host
  * config edits actually take effect instead of being silently ignored by the
  * idempotent inspect-or-create launch chain. `exists:false` (no container /
  * daemon down) means there is nothing to drift. No-op under VITEST.
@@ -1015,7 +990,7 @@ export async function checkDockerConfigDrift(
   docker: Pick<SessionDocker, 'engine' | 'context' | 'daemonHost' | 'containerName' | 'configHash' | 'owned'>
 ): Promise<DockerDriftStatus> {
   if (IS_TEST_MODE) return { exists: false, running: false, drifted: false };
-  // An ADOPTED container carries no `codeman.confighash` label — it was never
+  // An ADOPTED container carries no `reverie.confighash` label — it was never
   // created from our config — so every comparison would report drift and the
   // launch gate would demand a recreate we are not allowed to perform. Ownership
   // of its configuration belongs to the user; report "no drift" and never offer
@@ -1029,7 +1004,7 @@ export async function checkDockerConfigDrift(
         ...argv.slice(1),
         'inspect',
         '-f',
-        '{{.State.Running}}\t{{index .Config.Labels "codeman.confighash"}}',
+        '{{.State.Running}}\t{{index .Config.Labels "reverie.confighash"}}',
         docker.containerName,
       ],
       { timeout: DOCKER_PROBE_TIMEOUT_MS }
@@ -1166,105 +1141,19 @@ export interface EnsureImageResult {
   error?: string;
 }
 
-/** In-flight builds keyed by `engine:image`, so concurrent callers share ONE build. */
-const inFlightImageBuilds = new Map<string, Promise<EnsureImageResult>>();
-
-/**
- * Resolve the repo's Dockerfile + build context. Works from BOTH src (dev/tsx) and
- * dist/index.js (esbuild prod: dist sits at repo root), since both are one level
- * under the repo root. Returns null when the Dockerfile is absent (npm-global
- * installs don't ship docker/ — Docker cases are a git-clone feature).
- */
-function resolveAgentDockerfile(): { dockerfile: string; contextDir: string } | null {
-  const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
-  const dockerfile = join(repoRoot, 'docker', 'agent.Dockerfile');
-  return existsSync(dockerfile) ? { dockerfile, contextDir: repoRoot } : null;
-}
-
-/**
- * Ensure the agent base image exists, BUILDING it locally on first use so a missing
- * image is never a hard blocker (decision: "build locally on first use",
- * docs/docker-cases-plan.md). Idempotent, concurrency-safe (one build per
- * engine:image shared by concurrent callers), and a no-op under VITEST. Only the
- * DEFAULT image is auto-built — we can never build a user's custom ref, and the
- * `--pull=never` invariant forbids pulling. `onProgress` receives build output
- * lines for SSE surfacing.
- */
+/** Missing images must be built from the shared root flake on the daemon host. */
 export async function ensureAgentBaseImage(
   docker: Pick<SessionDocker, 'engine' | 'context' | 'daemonHost'>,
   image: string,
-  opts: { onProgress?: (line: string) => void; noCache?: boolean } = {}
+  _opts: { onProgress?: (line: string) => void; noCache?: boolean } = {}
 ): Promise<EnsureImageResult> {
-  if (IS_TEST_MODE) return { ok: true, built: false, alreadyPresent: true };
-  if (await checkDockerImagePresent(docker, image)) {
+  if (IS_TEST_MODE || await checkDockerImagePresent(docker, image)) {
     return { ok: true, built: false, alreadyPresent: true };
   }
-  if (image !== DEFAULT_AGENT_IMAGE) {
-    return {
-      ok: false,
-      built: false,
-      alreadyPresent: false,
-      error: `image ${image} is not present and only ${DEFAULT_AGENT_IMAGE} is auto-built. Build or pull ${image} yourself.`,
-    };
-  }
-  const key = `${docker.engine}:${image}`;
-  const existing = inFlightImageBuilds.get(key);
-  if (existing) return existing;
-  const build = buildAgentImage(docker, image, opts).finally(() => inFlightImageBuilds.delete(key));
-  inFlightImageBuilds.set(key, build);
-  return build;
-}
-
-function buildAgentImage(
-  docker: Pick<SessionDocker, 'engine' | 'context' | 'daemonHost'>,
-  image: string,
-  opts: { onProgress?: (line: string) => void; noCache?: boolean }
-): Promise<EnsureImageResult> {
-  const resolved = resolveAgentDockerfile();
-  if (!resolved) {
-    return Promise.resolve({
-      ok: false,
-      built: false,
-      alreadyPresent: false,
-      error: `docker/agent.Dockerfile not found in this install; clone the repo or build ${image} manually`,
-    });
-  }
-  let buildArgPairs: Array<[string, string]>;
-  try {
-    buildArgPairs = agentImageBuildArgPairs();
-  } catch (err) {
-    // A malformed CODEMAN_AGENT_IMAGE_* value: report it like any other build failure.
-    return Promise.resolve({ ok: false, built: false, alreadyPresent: false, error: String((err as Error).message) });
-  }
-  const argv = dockerEngineArgv(docker);
-  const args = [
-    ...argv.slice(1),
-    ...agentImageBuildArgs(resolved.dockerfile, image, resolved.contextDir, opts.noCache, buildArgPairs),
-  ];
-  return new Promise<EnsureImageResult>((resolve) => {
-    // async spawn (NEVER spawnSync) so a multi-minute build never wedges the event loop.
-    const child = spawn(argv[0], args, { stdio: ['ignore', 'pipe', 'pipe'] });
-    const forward = (buf: Buffer) => {
-      for (const line of buf.toString('utf-8').split('\n')) {
-        const trimmed = line.trimEnd();
-        if (trimmed) opts.onProgress?.(trimmed);
-      }
-    };
-    child.stdout?.on('data', forward);
-    child.stderr?.on('data', forward);
-    child.on('error', (err) => {
-      resolve({
-        ok: false,
-        built: false,
-        alreadyPresent: false,
-        error: `could not spawn ${argv[0]} build: ${err.message}`,
-      });
-    });
-    child.on('exit', (code) => {
-      if (code === 0) resolve({ ok: true, built: true, alreadyPresent: false });
-      else resolve({ ok: false, built: false, alreadyPresent: false, error: `${argv[0]} build failed (exit ${code})` });
-    });
-  });
+  return {
+    ok: false, built: false, alreadyPresent: false,
+    error: `Image ${image} is missing. On the daemon host, build the root Nix .#dockerImage, load it, and tag reverie:latest as ${image}; or run node apps/console/scripts/build-agent-image.mjs --engine ${docker.engine} --image ${image}.`,
+  };
 }
 
 export interface DockerTmuxCheckResult {
@@ -1295,7 +1184,7 @@ export async function checkDockerTmuxAvailable(
   try {
     const { stdout } = await execFileAsync(
       argv[0],
-      [...argv.slice(1), 'run', '--rm', '--pull=never', docker.image, 'sh', '-lc', 'command -v tmux'],
+      [...argv.slice(1), 'run', '--rm', '--pull=never', '--entrypoint', '/usr/bin/env', docker.image, 'sh', '-lc', 'command -v tmux'],
       { timeout: DOCKER_PROBE_TIMEOUT_MS }
     );
     const tmuxPath = stdout.trim();
@@ -1338,7 +1227,7 @@ export interface DockerContainerInfo {
 
 /**
  * List the engine's containers for the adoption picker (mirror of
- * `listRemoteCodemanSessions`). Read-only and NEVER throws: an unreachable
+ * `listRemoteReverieSessions`). Read-only and NEVER throws: an unreachable
  * daemon, a missing engine or zero containers all return `[]`, because this
  * feeds a convenience picker whose input the user can always type by hand.
  *
@@ -1583,7 +1472,7 @@ export async function detectDockerBridgeGateway(engine: DockerEngine = 'docker')
 
 /**
  * Instance-scoped boot reaper: `docker rm -f` any MANAGED container that belongs
- * to THIS instance (by the `codeman.instance` label) but whose case is no longer
+ * to THIS instance (by the `reverie.instance` label) but whose case is no longer
  * in `docker-cases.json`. The instance scoping is what stops a beta from reaping
  * prod's containers (the cross-instance hazard). No-op under VITEST. Best-effort.
  */
@@ -1602,9 +1491,9 @@ export async function reapOrphanedDockerContainers(
         'ps',
         '-a',
         '--filter',
-        'label=codeman.managed=1',
+        'label=reverie.managed=1',
         '--format',
-        '{{.Names}}\t{{index .Labels "codeman.instance"}}',
+        '{{.Names}}\t{{index .Labels "reverie.instance"}}',
       ],
       { timeout: DOCKER_PROBE_TIMEOUT_MS }
     );
@@ -1622,7 +1511,7 @@ export async function reapOrphanedDockerContainers(
   const expected = new Set(cases.map((c) => c.container ?? dockerContainerName(c.name)));
   // ADOPTED containers are never reapable, and this guard is deliberately
   // independent of the two conditions that already cover them (we never applied
-  // the `codeman.managed=1` label filtered on above, and they are referenced by a
+  // the `reverie.managed=1` label filtered on above, and they are referenced by a
   // live case so they are in `expected`). An adopted container is the user's
   // property; it must survive even if a future edit narrows either condition.
   const adopted = new Set(

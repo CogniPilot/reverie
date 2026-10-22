@@ -38,7 +38,7 @@ ORCHESTRATOR:
 │          └───────────────────┼──────────────────────┘           │
 │                              │                                  │
 │                    ┌─────────▼─────────┐                       │
-│                    │  Existing Codeman  │                       │
+│                    │  Existing Reverie  │                       │
 │                    │  Infrastructure    │                       │
 │                    │                    │                       │
 │                    │  SessionManager    │                       │
@@ -228,7 +228,7 @@ export interface OrchestratorConfig {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// Persistence (saved to ~/.codeman/state.json)
+// Persistence (saved to ~/.reverie/state.json)
 // ═══════════════════════════════════════════════════════════════
 
 export interface OrchestratorPersistState {

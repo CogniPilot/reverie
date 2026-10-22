@@ -59,8 +59,8 @@ describe('file viewer edit mode (real fs)', () => {
     harness = await createRouteTestHarness(registerFileRoutes);
     // realpath: on some hosts tmpdir() contains a symlinked component, which
     // would make validateSessionFilePath's relative() check misfire.
-    workDir = realpathSync(mkdtempSync(join(tmpdir(), 'codeman-edit-ws-')));
-    outsideDir = realpathSync(mkdtempSync(join(tmpdir(), 'codeman-edit-out-')));
+    workDir = realpathSync(mkdtempSync(join(tmpdir(), 'reverie-edit-ws-')));
+    outsideDir = realpathSync(mkdtempSync(join(tmpdir(), 'reverie-edit-out-')));
     harness.ctx._session.workingDir = workDir;
   });
 
@@ -154,7 +154,7 @@ describe('file viewer edit mode (real fs)', () => {
       expect(body.data.size).toBe(Buffer.byteLength(updated));
 
       expect(readFileSync(join(workDir, 'notes.md'), 'utf8')).toBe(updated);
-      const leftovers = readdirSync(workDir).filter((n) => n.includes('codeman-tmp'));
+      const leftovers = readdirSync(workDir).filter((n) => n.includes('reverie-tmp'));
       expect(leftovers).toEqual([]);
     });
 
@@ -328,8 +328,8 @@ describe('file viewer edit mode (real fs)', () => {
 
   describe('multi-user ownership', () => {
     it("404s a non-admin writing to a session they don't own", async () => {
-      const prev = process.env.CODEMAN_MULTIUSER;
-      process.env.CODEMAN_MULTIUSER = '1';
+      const prev = process.env.REVERIE_MULTIUSER;
+      process.env.REVERIE_MULTIUSER = '1';
       try {
         const scoped = await createRouteTestHarness(registerFileRoutes, {
           authUser: { username: 'mallory', role: 'user' },
@@ -346,8 +346,8 @@ describe('file viewer edit mode (real fs)', () => {
         expect(readFileSync(join(workDir, 'owned.md'), 'utf8')).toBe('admin file');
         await scoped.app.close();
       } finally {
-        if (prev === undefined) delete process.env.CODEMAN_MULTIUSER;
-        else process.env.CODEMAN_MULTIUSER = prev;
+        if (prev === undefined) delete process.env.REVERIE_MULTIUSER;
+        else process.env.REVERIE_MULTIUSER = prev;
       }
     });
   });

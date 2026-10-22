@@ -26,7 +26,7 @@ type InputLimit = { FRAME_MAX_CHARS: number; PASTE_MAX_CHARS: number; split: (d:
 function loadLimit(): InputLimit {
   const context = vm.createContext({ window: {}, globalThis: {} });
   vm.runInContext(pub('constants.js'), context, { filename: 'constants.js' });
-  return (context.window as { CodemanInputLimit: InputLimit }).CodemanInputLimit;
+  return (context.window as { ReverieInputLimit: InputLimit }).ReverieInputLimit;
 }
 
 describe('one input limit on both sides', () => {

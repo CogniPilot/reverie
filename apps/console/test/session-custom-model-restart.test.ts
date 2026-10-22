@@ -30,7 +30,7 @@ import { Session } from '../src/session.js';
 import { TmuxManager } from '../src/tmux-manager.js';
 import type { MuxSession, SessionMode } from '../src/types.js';
 
-const workingDir = join(homedir(), 'codeman-cases', 'custom-model-restart');
+const workingDir = join(homedir(), 'reverie-cases', 'custom-model-restart');
 const projectsDir = join(homedir(), '.claude', 'projects', '-custom-model-restart');
 const sessions: Session[] = [];
 
@@ -59,7 +59,7 @@ function liveSession(mode: SessionMode, extra: Record<string, unknown> = {}) {
   const mux = new TmuxManager();
   const muxSession: MuxSession = {
     sessionId: 'placeholder',
-    muxName: 'codeman-cafe0001',
+    muxName: 'reverie-cafe0001',
     pid: 1,
     createdAt: Date.now(),
     workingDir,
@@ -210,12 +210,12 @@ describe('launchModel reaches the CLI through its own launch param', () => {
         modelId: 'qwen3',
         envKeys: ['GROK_HOME'],
         configDir: '/tmp/cfg',
-        launchModel: 'codeman-custom',
+        launchModel: 'reverie-custom',
       },
       { GROK_HOME: '/tmp/cfg' }
     );
     await session.restartCli();
-    expect(respawn.mock.calls[0][0].grokConfig).toEqual({ model: 'codeman-custom' });
+    expect(respawn.mock.calls[0][0].grokConfig).toEqual({ model: 'reverie-custom' });
   });
 
   it('claude: a selection without a launchModel leaves the model param untouched', async () => {

@@ -27,7 +27,7 @@ function translator(language: string) {
     url: 'http://localhost/',
   });
   vm.runInContext(I18N, dom.getInternalVMContext(), { filename: 'i18n.js' });
-  const api = (dom.window as unknown as { CodemanI18n: Api }).CodemanI18n;
+  const api = (dom.window as unknown as { ReverieI18n: Api }).ReverieI18n;
   api.configure({ language });
   return { api, dom };
 }

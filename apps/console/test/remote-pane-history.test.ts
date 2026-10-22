@@ -45,18 +45,18 @@ const remote: SessionRemote = {
 describe('remoteTmuxLocation', () => {
   it('an owned session is the launch command’s session on the private socket', () => {
     expect(remoteTmuxLocation(remote, SESSION_ID)).toEqual({
-      socket: 'codeman-remote',
-      sessionName: 'codeman-ssh-0000001b',
+      socket: 'reverie-remote',
+      sessionName: 'reverie-ssh-0000001b',
     });
   });
 
-  it('a discovered session is the one the attach command joined on -L codeman', () => {
-    const discovered = { ...remote, owned: false, remoteSessionName: 'codeman-disco1' };
-    expect(remoteTmuxLocation(discovered, SESSION_ID)).toEqual({ socket: 'codeman', sessionName: 'codeman-disco1' });
+  it('a discovered session is the one the attach command joined on -L reverie', () => {
+    const discovered = { ...remote, owned: false, remoteSessionName: 'reverie-disco1' };
+    expect(remoteTmuxLocation(discovered, SESSION_ID)).toEqual({ socket: 'reverie', sessionName: 'reverie-disco1' });
   });
 });
 
-const MARKER = 'codeman-history-0123456789abcdef';
+const MARKER = 'reverie-history-0123456789abcdef';
 
 describe('buildRemoteScrollbackCommand', () => {
   it('goes through the shared ssh options and reads the history rows, then the screen', () => {
@@ -65,8 +65,8 @@ describe('buildRemoteScrollbackCommand', () => {
     expect(command).toContain('-p 2222');
     expect(command).toContain('operator@workerfour.lan');
     // Socket and target are shellescaped inside the (itself shellescaped) script.
-    expect(command).toContain('codeman-remote');
-    expect(command).toContain('codeman-ssh-0000001b');
+    expect(command).toContain('reverie-remote');
+    expect(command).toContain('reverie-ssh-0000001b');
     expect(command).toContain('capture-pane -p -e -J -S -10000 -E -1');
     expect(command).toContain('#{history_size}');
     expect(command).toContain(MARKER);
@@ -92,7 +92,7 @@ describe('remoteTailBytes', () => {
 describe('newScrollbackMarker', () => {
   it('is a fresh marker of a fixed shape on every read', () => {
     const a = newScrollbackMarker();
-    expect(a).toMatch(/^codeman-history-[0-9a-f]{16}$/);
+    expect(a).toMatch(/^reverie-history-[0-9a-f]{16}$/);
     expect(newScrollbackMarker()).not.toBe(a);
   });
 });
@@ -182,7 +182,7 @@ describe('parseRemoteScrollbackOutput', () => {
     expect(parseRemoteScrollbackOutput('\x00\x00', MARKER, 0)).toBeNull();
     // Another read's marker.
     expect(
-      parseRemoteScrollbackOutput(read('rows\ncodeman-history-ffffffffffffffff\n2\nscreen\n'), MARKER, 0)
+      parseRemoteScrollbackOutput(read('rows\nreverie-history-ffffffffffffffff\n2\nscreen\n'), MARKER, 0)
     ).toBeNull();
     expect(parseRemoteScrollbackOutput(read(`rows\n${MARKER}\nnot a number\nscreen\n`), MARKER, 0)).toBeNull();
   });
@@ -230,7 +230,7 @@ describe('the remote script under a real shell', () => {
     // A bound that keeps "row\nnewer row\n" of the history: the cut lands in
     // "older row", which the parser then drops.
     const bound = Buffer.byteLength(`row\nnewer row\n${MARKER}\n2\nscreen row\n`);
-    const script = buildRemoteScrollbackScript('codeman', "codeman-it's", 500, bound, MARKER);
+    const script = buildRemoteScrollbackScript('reverie', "reverie-it's", 500, bound, MARKER);
     const stdout = execFileSync('/bin/sh', ['-c', script], {
       encoding: 'utf-8',
       env: { ...process.env, PATH: `${dir}:${process.env.PATH ?? ''}` },
@@ -245,16 +245,16 @@ describe('the remote script under a real shell', () => {
     // One argv entry per line: the exact-match target with a quote in it arrived whole.
     expect(calls[0].split('\n').join('|')).toBe(
       [
-        "-L|codeman|capture-pane|-p|-e|-J|-S|-500|-E|-1|-t|=codeman-it's:",
-        `display-message|-p|-t|=codeman-it's:|${MARKER}`,
-        "display-message|-p|-t|=codeman-it's:|#{history_size}",
-        "capture-pane|-p|-e|-J|-t|=codeman-it's:|",
+        "-L|reverie|capture-pane|-p|-e|-J|-S|-500|-E|-1|-t|=reverie-it's:",
+        `display-message|-p|-t|=reverie-it's:|${MARKER}`,
+        "display-message|-p|-t|=reverie-it's:|#{history_size}",
+        "capture-pane|-p|-e|-J|-t|=reverie-it's:|",
       ].join('|;|')
     );
   });
 
   it('tmux before 3.2: an unterminated last history row still parses, re-terminated', () => {
-    const script = buildRemoteScrollbackScript('codeman', 'old-host', 500, 0, MARKER);
+    const script = buildRemoteScrollbackScript('reverie', 'old-host', 500, 0, MARKER);
     const stdout = execFileSync('/bin/sh', ['-c', script], {
       encoding: 'utf-8',
       env: { ...process.env, PATH: `${dir}:${process.env.PATH ?? ''}`, PRE32: '1' },
@@ -271,7 +271,7 @@ describe('the remote script under a real shell', () => {
     try {
       writeFileSync(join(failing, 'tmux'), '#!/bin/sh\necho "can\'t find session" >&2\nexit 1\n');
       chmodSync(join(failing, 'tmux'), 0o755);
-      const stdout = execFileSync('/bin/sh', ['-c', buildRemoteScrollbackScript('codeman', 'gone', 500, 0, MARKER)], {
+      const stdout = execFileSync('/bin/sh', ['-c', buildRemoteScrollbackScript('reverie', 'gone', 500, 0, MARKER)], {
         encoding: 'utf-8',
         stdio: ['ignore', 'pipe', 'ignore'],
         env: { ...process.env, PATH: `${failing}:${process.env.PATH ?? ''}` },
@@ -399,7 +399,7 @@ describe('joinScrollbackAndFrame with the remote screen', () => {
 
 describe('fetchRemoteScrollback', () => {
   /** The marker a read put in its command line. */
-  const markerIn = (command: string) => /codeman-history-[0-9a-f]{16}/.exec(command)?.[0] ?? 'no-marker';
+  const markerIn = (command: string) => /reverie-history-[0-9a-f]{16}/.exec(command)?.[0] ?? 'no-marker';
   /** A successful read's stdout, answering with the marker the command carries. */
   const OK = async (command: string) => `\x00older row\nnewer row\n${markerIn(command)}\n2\nscreen row\n\x00`;
   const READ = { scrollback: 'older row\nnewer row\n', screen: 'screen row\n' };

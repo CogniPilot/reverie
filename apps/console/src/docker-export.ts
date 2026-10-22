@@ -1,7 +1,7 @@
 /**
  * @fileoverview Docker case export / import: move a container (toolchain + any
  * in-image changes) PLUS its workspace to another machine as one portable
- * `.codeman-container.tgz`, and restore it.
+ * `.reverie-container.tgz`, and restore it.
  *
  * A full-image export = `docker commit` the running container to an image ->
  * `docker save` that image -> tar the bind-mounted workspace -> a manifest, all
@@ -51,7 +51,7 @@ export interface DockerExportManifest {
   containerWorkdir: string;
   network: string;
   createdAt: number;
-  codemanVersion: string;
+  reverieVersion: string;
   mountCredentials: boolean;
   /** True when the bundle provably carries no credentials (convenient-mode workspace, or a full image whose creds were bind-mounted and thus never committed). */
   secretFree: boolean;
@@ -72,17 +72,17 @@ export function dockerArgv(docker: Pick<SessionDocker, 'engine' | 'context' | 'd
 /** Portable bundle filename for a case export. */
 export function exportBundleName(caseName: string, timestamp: number, mode: DockerExportMode): string {
   const suffix = mode === 'workspace' ? 'workspace' : 'container';
-  return `${caseName}-${timestamp}.codeman-${suffix}.tgz`;
+  return `${caseName}-${timestamp}.reverie-${suffix}.tgz`;
 }
 
 /** Quarantined image tag for an imported bundle (never overwrites a local tag). */
 export function importedImageTag(caseName: string, timestamp: number): string {
-  return `codeman/imported-${caseName}:${timestamp}`;
+  return `reverie/imported-${caseName}:${timestamp}`;
 }
 
 /** Intermediate commit tag for a full-image export (unique per export, rmi'd in finally). */
 export function exportImageTag(caseName: string, timestamp: number): string {
-  return `codeman/export-${caseName}:${timestamp}`;
+  return `reverie/export-${caseName}:${timestamp}`;
 }
 
 /**
@@ -245,9 +245,9 @@ export async function exportDockerCase(params: {
   timestamp: number;
   exportsDir: string;
   mode: DockerExportMode;
-  codemanVersion: string;
+  reverieVersion: string;
 }): Promise<ExportResult> {
-  const { docker, caseName, timestamp, exportsDir, mode, codemanVersion } = params;
+  const { docker, caseName, timestamp, exportsDir, mode, reverieVersion } = params;
 
   if (mode === 'full' && !docker.mountCredentials) {
     throw new Error(
@@ -266,7 +266,7 @@ export async function exportDockerCase(params: {
       containerWorkdir: docker.containerWorkdir,
       network: docker.network,
       createdAt: timestamp,
-      codemanVersion,
+      reverieVersion,
       mountCredentials: docker.mountCredentials,
       secretFree: true,
       checksums: {},
@@ -313,9 +313,9 @@ export async function exportDockerCase(params: {
             ...argv.slice(1),
             'commit',
             '-c',
-            'ENV CODEMAN_API_URL=',
+            'ENV REVERIE_API_URL=',
             '-c',
-            'ENV CODEMAN_HOOK_SECRET_FILE=',
+            'ENV REVERIE_HOOK_SECRET_FILE=',
             docker.containerName,
             commitTag,
           ],
@@ -339,7 +339,7 @@ export async function exportDockerCase(params: {
         containerWorkdir: docker.containerWorkdir,
         network: docker.network,
         createdAt: timestamp,
-        codemanVersion,
+        reverieVersion,
         mountCredentials: docker.mountCredentials,
         // Convenient mode keeps creds on bind mounts (never committed), so the bundle is secret-free.
         secretFree: docker.mountCredentials,

@@ -49,7 +49,7 @@ describe('appendClaudeCustomTitle', () => {
     for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
   });
   const tempTranscript = (content: string) => {
-    const dir = mkdtempSync(join(tmpdir(), 'codeman-claude-title-'));
+    const dir = mkdtempSync(join(tmpdir(), 'reverie-claude-title-'));
     dirs.push(dir);
     const path = join(dir, 'conv.jsonl');
     if (content) writeFileSync(path, content);

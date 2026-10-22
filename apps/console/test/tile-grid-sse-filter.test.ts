@@ -19,7 +19,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { fetchSpy, makeGridApp, resetGridHarness, windowStub, type GridApp } from './mocks/tile-grid-vm.js';
 
 const IDS = ['s-a', 's-b', 's-c'];
-const FILTER = (windowStub.CodemanTileGrid as { TILE_GRID_SSE_FILTER: string }).TILE_GRID_SSE_FILTER;
+const FILTER = (windowStub.ReverieTileGrid as { TILE_GRID_SSE_FILTER: string }).TILE_GRID_SSE_FILTER;
 
 /** The app with the REAL _updateSseSubscription, and the filters it posted, in order. */
 function makeApp(): GridApp {

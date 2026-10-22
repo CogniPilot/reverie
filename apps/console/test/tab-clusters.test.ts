@@ -41,10 +41,10 @@ type Clusters = {
 function loadClusters(): Clusters {
   const context = vm.createContext({ window: {}, globalThis: {} });
   vm.runInContext(read('constants.js'), context, { filename: 'constants.js' });
-  return (context.window as { CodemanTabClusters: Clusters }).CodemanTabClusters;
+  return (context.window as { ReverieTabClusters: Clusters }).ReverieTabClusters;
 }
 
-describe('CodemanTabClusters (pure)', () => {
+describe('ReverieTabClusters (pure)', () => {
   const C = loadClusters();
 
   it('groups by case in first-appearance order, members in tab order', () => {
@@ -68,7 +68,7 @@ describe('CodemanTabClusters (pure)', () => {
   });
 
   it('colours a case from the session palette, the same way every time', () => {
-    for (const key of ['/c/web', '/c/api', '/home/x/codeman-cases/long-name', '']) {
+    for (const key of ['/c/web', '/c/api', '/home/x/reverie-cases/long-name', '']) {
       expect(C.COLORS).toContain(C.colorFor(key));
       expect(C.colorFor(key)).toBe(C.colorFor(key));
     }
@@ -85,7 +85,7 @@ describe('CodemanTabClusters (pure)', () => {
 });
 
 describe('tab layouts by case and ledger (app.js)', () => {
-  let CodemanApp: { prototype: Record<string, any> };
+  let ReverieApp: { prototype: Record<string, any> };
   let window: any;
   let document: Document;
 
@@ -114,13 +114,13 @@ describe('tab layouts by case and ledger (app.js)', () => {
         read('mobile-overview.js') +
         '\n' +
         read('webview-tabs.js') +
-        '\n;window.__ClusterCodemanApp = CodemanApp;'
+        '\n;window.__ClusterReverieApp = ReverieApp;'
     );
-    CodemanApp = window.__ClusterCodemanApp;
+    ReverieApp = window.__ClusterReverieApp;
   });
 
   function makeApp(arrangement: 'state' | 'case' | 'ledger' | 'classic' = 'case') {
-    const app = Object.create(CodemanApp.prototype) as Record<string, any>;
+    const app = Object.create(ReverieApp.prototype) as Record<string, any>;
     const root = document.documentElement;
     root.setAttribute('data-tab-orientation', 'horizontal');
     root.dataset.tabRailSort = 'activity';
@@ -282,7 +282,7 @@ describe('tab layouts by case and ledger (app.js)', () => {
     expect(webshop).toHaveLength(3);
     const place = (tops: number[]) =>
       webshop.forEach((el, i) => Object.defineProperty(el, 'offsetTop', { configurable: true, value: tops[i] }));
-    const overflow = CodemanApp.prototype.updateTabOverflowMode;
+    const overflow = ReverieApp.prototype.updateTabOverflowMode;
 
     place([0, 0, 0]);
     overflow.call(app);

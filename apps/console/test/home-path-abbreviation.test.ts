@@ -15,7 +15,7 @@
  * Both now call `_shortenHomePath()`, which is pinned here for both layouts, and
  * a static guard fails if a fourth copy of the pattern appears.
  *
- * Loaded via `vm` against a stub CodemanApp with a fake DOM, same harness as
+ * Loaded via `vm` against a stub ReverieApp with a fake DOM, same harness as
  * history-list-controls.test.ts. Port: none (no browser, no server).
  */
 
@@ -39,7 +39,7 @@ function loadTerminalUiPrototype(): Record<string, any> {
   const source = readFileSync(resolve(PUBLIC, 'terminal-ui.js'), 'utf8');
   const context = vm.createContext({
     console,
-    CodemanApp: class CodemanApp {},
+    ReverieApp: class ReverieApp {},
     setInterval: vi.fn(),
     clearInterval: vi.fn(),
     setTimeout,
@@ -48,7 +48,7 @@ function loadTerminalUiPrototype(): Record<string, any> {
     document: { addEventListener: vi.fn(), getElementById: () => null, createElement: () => ({}) },
     window: { addEventListener: vi.fn(), removeEventListener: vi.fn() },
   });
-  vm.runInContext(`${source}\nglobalThis.__proto = CodemanApp.prototype;`, context);
+  vm.runInContext(`${source}\nglobalThis.__proto = ReverieApp.prototype;`, context);
   return (context as unknown as { __proto: Record<string, any> }).__proto;
 }
 
@@ -56,7 +56,7 @@ function loadSessionUiPrototype(): Record<string, any> {
   const source = readFileSync(resolve(PUBLIC, 'session-ui.js'), 'utf8');
   const context = vm.createContext({
     console,
-    CodemanApp: class CodemanApp {},
+    ReverieApp: class ReverieApp {},
     VoiceInput: {},
     escapeHtml: (t: unknown) => String(t ?? ''),
     setTimeout,
@@ -65,7 +65,7 @@ function loadSessionUiPrototype(): Record<string, any> {
     document: { getElementById: (id: string) => (id === 'caseManageList' ? currentCaseList : null) },
     window: { addEventListener: vi.fn() },
   });
-  vm.runInContext(`${source}\nglobalThis.__proto = CodemanApp.prototype;`, context);
+  vm.runInContext(`${source}\nglobalThis.__proto = ReverieApp.prototype;`, context);
   return (context as unknown as { __proto: Record<string, any> }).__proto;
 }
 
@@ -94,7 +94,7 @@ describe('_shortenHomePath', () => {
     expect(shorten('/Userspace/bob/x')).toBe('/Userspace/bob/x');
     expect(shorten('/home')).toBe('/home');
     expect(shorten('/mnt/d/work')).toBe('/mnt/d/work');
-    expect(shorten('/opt/codeman')).toBe('/opt/codeman');
+    expect(shorten('/opt/reverie')).toBe('/opt/reverie');
   });
 
   it('replaces only the leading occurrence', () => {
@@ -123,15 +123,15 @@ describe('renderCaseManageList path labels', () => {
   }
 
   it('abbreviates a Linux case path (the mirror of #273)', () => {
-    const html = render([{ name: 'demo', path: '/home/arkon/codeman-cases/demo' }]);
-    expect(html).toContain('~/codeman-cases/demo');
-    expect(html).not.toContain('/home/arkon/codeman-cases/demo');
+    const html = render([{ name: 'demo', path: '/home/arkon/reverie-cases/demo' }]);
+    expect(html).toContain('~/reverie-cases/demo');
+    expect(html).not.toContain('/home/arkon/reverie-cases/demo');
   });
 
   it('still abbreviates a macOS case path', () => {
-    const html = render([{ name: 'demo', path: '/Users/jordanryan/codeman-cases/demo' }]);
-    expect(html).toContain('~/codeman-cases/demo');
-    expect(html).not.toContain('/Users/jordanryan/codeman-cases/demo');
+    const html = render([{ name: 'demo', path: '/Users/jordanryan/reverie-cases/demo' }]);
+    expect(html).toContain('~/reverie-cases/demo');
+    expect(html).not.toContain('/Users/jordanryan/reverie-cases/demo');
   });
 
   it('renders the row when a case has no path at all', () => {

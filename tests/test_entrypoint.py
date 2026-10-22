@@ -1,5 +1,6 @@
-"""The image entrypoint prepares an instance on the data volume and survives restarts, upgrades and no network."""
 from __future__ import annotations
+from tests import executable_script
+"""The image entrypoint prepares an instance on the data volume and survives restarts, upgrades and no network."""
 
 import os
 import stat
@@ -20,25 +21,24 @@ class EntrypointTest(unittest.TestCase):
         self.bin.mkdir()
         # npm fails as if offline; the start must continue without the CLI.
         npm = self.bin / "npm"
-        npm.write_text("#!/bin/sh\necho offline >&2\nexit 1\n")
+        npm.write_text(executable_script("#!/bin/sh\necho offline >&2\nexit 1\n"))
         npm.chmod(0o755)
 
     def tearDown(self):
         self.tmp.cleanup()
 
     def start(self, *command, **env):
-        base = {"PATH": f"{self.bin}:/usr/bin:/bin", "HOME": str(self.root), "TMPDIR": str(self.root / "scratch" / "tmp"),
+        base = {"PATH": str(self.bin) + os.pathsep + os.environ["PATH"], "HOME": str(self.root), "TMPDIR": str(self.root / "scratch" / "tmp"),
                 "REVERIE_DATA": str(self.data)}
         base.update(env)
         return subprocess.run(["bash", str(ENTRYPOINT), *command], env=base, capture_output=True, text=True, timeout=60)
 
     def test_first_start_creates_instance_and_private_password(self):
-        result = self.start("sh", "-c", 'printf "%s|%s|%s|%s" "$CODEMAN_USERNAME" "$REVERIE_DATA_DIR" "$FLEET_DATA_DIR" "${#CODEMAN_PASSWORD}"')
+        result = self.start("sh", "-c", 'printf "%s|%s|%s" "$REVERIE_USERNAME" "$REVERIE_DATA_DIR" "${#REVERIE_PASSWORD}"')
         self.assertEqual(result.returncode, 0, result.stderr)
-        user, data_dir, old_data_dir, length = result.stdout.split("|")
+        user, data_dir, length = result.stdout.split("|")
         self.assertEqual(user, "owner")
         self.assertEqual(data_dir, str(self.data / "console"))
-        self.assertEqual(old_data_dir, data_dir)   # the older spelling is exported too, for one release
         self.assertGreaterEqual(int(length), 20)
         secret = self.data / "owner-password"
         self.assertEqual(stat.S_IMODE(secret.stat().st_mode), 0o600)
@@ -49,14 +49,14 @@ class EntrypointTest(unittest.TestCase):
         self.start("true")
         first = (self.data / "owner-password").read_text()
         (self.data / "console" / "state.json").write_text("{}")
-        result = self.start("sh", "-c", 'printf "%s" "$CODEMAN_PASSWORD"')
+        result = self.start("sh", "-c", 'printf "%s" "$REVERIE_PASSWORD"')
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout, first.strip())
         self.assertTrue((self.data / "console" / "state.json").exists())
         self.assertEqual(list((self.data / "backups").iterdir()), [])
 
     def test_given_password_is_used_and_not_stored(self):
-        result = self.start("sh", "-c", 'printf "%s" "$CODEMAN_PASSWORD"', CODEMAN_PASSWORD="chosen")
+        result = self.start("sh", "-c", 'printf "%s" "$REVERIE_PASSWORD"', REVERIE_PASSWORD="chosen")
         self.assertEqual(result.stdout, "chosen")
         self.assertFalse((self.data / "owner-password").exists())
 
@@ -124,7 +124,7 @@ class EntrypointTest(unittest.TestCase):
 
     def test_default_command_is_the_console_on_all_interfaces(self):
         reverie = self.bin / "reverie"
-        reverie.write_text('#!/bin/sh\necho "$@"\n')
+        reverie.write_text(executable_script('#!/bin/sh\necho "$@"\n'))
         reverie.chmod(0o755)
         result = self.start()
         self.assertEqual(result.stdout.strip(), "web --host 0.0.0.0 --port 3000")

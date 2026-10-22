@@ -19,7 +19,7 @@ If you need real isolation:
 - Pair each user with [Docker Cases](Docker-Cases), which gives their work its own
   filesystem and network.
 - Or run separate Reverie instances under separate OS accounts, each with its own
-  `CODEMAN_INSTANCE`.
+  `REVERIE_INSTANCE`.
 
 "Small trusted team" is the honest description of who this is for.
 
@@ -27,7 +27,7 @@ If you need real isolation:
 
 ```bash
 reverie users add alice --admin      # create the first admin, prompts for a password
-reverie web --multiuser              # or CODEMAN_MULTIUSER=1
+reverie web --multiuser              # or REVERIE_MULTIUSER=1
 ```
 
 Then manage users from the CLI or the **Users** entry in App Settings:
@@ -41,14 +41,14 @@ reverie users rm bob
 
 `--password-stdin` reads the password from standard input, for scripts.
 
-Accounts live in `~/.codeman/users.json` with scrypt-hashed passwords, mode 0600.
-Administrative actions are audited to `~/.codeman/admin-audit.jsonl`.
+Accounts live in `~/.reverie/users.json` with scrypt-hashed passwords, mode 0600.
+Administrative actions are audited to `~/.reverie/admin-audit.jsonl`.
 
 ## What each user gets
 
 | Thing               | Scope                                                                        |
 | ------------------- | ---------------------------------------------------------------------------- |
-| **Case space**      | `~/codeman-users/<name>/cases`, their own.                                    |
+| **Case space**      | `~/reverie-users/<name>/cases`, their own.                                    |
 | **Sessions**        | Only theirs are listed, reachable, or controllable.                           |
 | **Events**          | Live event routing is per owner, and fails closed.                            |
 | **Search**          | Scoped on read, including historical results.                                 |
@@ -78,7 +78,7 @@ casually; they do not make the account a sandbox.
 ## Accounts and sessions
 
 Each user authenticates with their own name and password rather than the shared
-`CODEMAN_PASSWORD`. Logins are individually revocable: disable, reset, or delete an account
+`REVERIE_PASSWORD`. Logins are individually revocable: disable, reset, or delete an account
 at any time, and existing browser sessions can be revoked.
 
 ## Gotchas
@@ -94,4 +94,4 @@ at any time, and existing browser sessions can be revoked.
 
 - [Security](Security) - where this fits in the model, and what it does not cover.
 - [Docker Cases](Docker-Cases) - the isolation story that actually isolates.
-- [`docs/multi-user-plan.md`](https://github.com/Ark0N/Codeman/blob/master/docs/multi-user-plan.md) - the design.
+- [`docs/multi-user-plan.md`](https://github.com/jgoppert/reverie/blob/main/apps/console/docs/multi-user-plan.md) - the design.

@@ -6,7 +6,7 @@ points for a cron. **No session/tmux logic will be rebuilt** —
 the new code is purely a trigger + persistence + history layer on top of the
 existing primitives.
 
-Stack: `aicodeman` v1.2.1 — Fastify 5 backend, `node-pty` + tmux sessions,
+Stack: `aireverie` v1.2.1 — Fastify 5 backend, `node-pty` + tmux sessions,
 vanilla-JS SPA frontend served as static assets, JSON file state store, zod
 validation, ports-based dependency injection.
 
@@ -78,7 +78,7 @@ records), kept distinct from the existing `ScheduledRun`.
 
 ## 6. How session state is stored / 7. Existing persistence
 
-- JSON file store: `~/.codeman/state.json` (+ `state-inner.json` for Ralph).
+- JSON file store: `~/.reverie/state.json` (+ `state-inner.json` for Ralph).
   `StateStore` class `src/state-store.ts:71`; `AppState` interface
   `src/types/app-state.ts:99-114`.
 - Pattern: declare a field on `AppState`, add typed get/set methods on
@@ -107,7 +107,7 @@ records), kept distinct from the existing `ScheduledRun`.
 ## 9. Where frontend pages/components live
 
 - Vanilla-JS SPA: single `src/web/public/index.html` + feature mixin files
-  (`Object.assign(CodemanApp.prototype, {...})`). API via `api-client.js`
+  (`Object.assign(ReverieApp.prototype, {...})`). API via `api-client.js`
   (`_apiJson/_apiPost/_apiDelete`). Build = esbuild minify + content-hash, no
   bundler (`scripts/build.mjs`).
 - UI is panels/modals toggled by JS classes; forms use `.form-row` / `.modal`

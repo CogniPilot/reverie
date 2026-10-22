@@ -10,7 +10,7 @@
  * - **Reliable input**: `send-keys -l` sends literal text in a single command
  * - **Teammate support**: Immutable pane IDs enable targeting individual teammates
  *
- * tmux sessions are named `codeman-{sessionId}` and stored in ~/.codeman/mux-sessions.json.
+ * tmux sessions are named `reverie-{sessionId}` and stored in ~/.reverie/mux-sessions.json.
  *
  * Key features:
  * - `send-keys 'text' Enter` sends literal text in a single command
@@ -38,7 +38,7 @@ import { homedir } from 'node:os';
 import {
   dataPath,
   DEFAULT_TMUX_SOCKET,
-  CODEMAN_INSTANCE,
+  REVERIE_INSTANCE,
   SAFE_TMUX_SOCKET_PATTERN,
   resolveTmuxSocketName,
 } from './config/instance.js';
@@ -200,7 +200,7 @@ export const CLAUDE_CODE_NOFILE_LIMIT = 2147483646;
  * - Create a tmux session
  * - Send input to a tmux session
  * - Discover/reconcile real tmux sessions
- * - Read/write ~/.codeman/mux-sessions.json
+ * - Read/write ~/.reverie/mux-sessions.json
  */
 const IS_TEST_MODE = !!process.env.VITEST;
 
@@ -222,7 +222,7 @@ function isRemoteAutoReconnectEnabled(): boolean {
 }
 
 /** Regex to validate tmux session names (only allow safe characters) */
-const SAFE_MUX_NAME_PATTERN = /^codeman-[a-f0-9-]+$/;
+const SAFE_MUX_NAME_PATTERN = /^reverie-[a-f0-9-]+$/;
 
 /** Legacy pattern for pre-rename sessions (claudeman- prefix) */
 const LEGACY_MUX_NAME_PATTERN = /^claudeman-[a-f0-9-]+$/;
@@ -230,9 +230,9 @@ const LEGACY_MUX_NAME_PATTERN = /^claudeman-[a-f0-9-]+$/;
 /** Regex to validate tmux pane targets (e.g., "%0", "%1", "0", "1") */
 const SAFE_PANE_TARGET_PATTERN = /^(%\d+|\d+)$/;
 
-/** Dedicated tmux socket for new Codeman-owned sessions (instance-scoped:
- *  `codeman` for prod, `codeman-beta` on the beta branch). */
-const DEFAULT_CODEMAN_TMUX_SOCKET = DEFAULT_TMUX_SOCKET;
+/** Dedicated tmux socket for new Reverie-owned sessions (instance-scoped:
+ *  `reverie` for prod, `reverie-beta` on the beta branch). */
+const DEFAULT_REVERIE_TMUX_SOCKET = DEFAULT_TMUX_SOCKET;
 
 /**
  * Separator used in `tmux list-panes -F` output between session name and pid.
@@ -362,7 +362,7 @@ export function parsePaneRows(output: string): PaneRow[] {
  *
  * Two rules make a positive answer trustworthy:
  *
- * A session answers only when tmux listed EXACTLY ONE pane for it. Codeman
+ * A session answers only when tmux listed EXACTLY ONE pane for it. Reverie
  * creates one pane per session and `isPaneDead()` reads one pane, so a session
  * the user has split by hand has no single "the agent" to report on, and
  * guessing which of its panes speaks for the session could report a live
@@ -931,20 +931,20 @@ function isValidPath(path: string): boolean {
 }
 
 // ===========================================================================
-// Single-socket architecture: ALL Codeman sessions live on one dedicated tmux
-// socket (`tmux -L codeman`), isolated from the user's default tmux server.
+// Single-socket architecture: ALL Reverie sessions live on one dedicated tmux
+// socket (`tmux -L reverie`), isolated from the user's default tmux server.
 // The socket name is a process-wide constant (env-overridable for test/multi-
 // instance isolation) — it is never stored per-session, so it cannot drift.
 // ===========================================================================
 
 /**
- * Resolve the process-wide Codeman tmux socket name. Always returns a valid
- * name: `CODEMAN_TMUX_SOCKET` env override if safe, else the built-in default.
+ * Resolve the process-wide Reverie tmux socket name. Always returns a valid
+ * name: `REVERIE_TMUX_SOCKET` env override if safe, else the built-in default.
  */
 function resolveConfiguredTmuxSocket(): string {
-  const raw = process.env.CODEMAN_TMUX_SOCKET ?? DEFAULT_CODEMAN_TMUX_SOCKET;
+  const raw = process.env.REVERIE_TMUX_SOCKET ?? DEFAULT_REVERIE_TMUX_SOCKET;
   if (!SAFE_TMUX_SOCKET_PATTERN.test(raw)) {
-    console.warn(`[TmuxManager] Ignoring invalid CODEMAN_TMUX_SOCKET: ${JSON.stringify(raw)}`);
+    console.warn(`[TmuxManager] Ignoring invalid REVERIE_TMUX_SOCKET: ${JSON.stringify(raw)}`);
   }
   return resolveTmuxSocketName();
 }
@@ -1041,7 +1041,7 @@ export function buildSpawnCommand(options: {
   // the pane command ending in a dangling `&&` ("syntax error: unexpected end of
   // file", pane dead on arrival). Resolve it in Node and quote the result.
   // #209: launch it as a LOGIN shell, which is what tmux itself does for a pane
-  // with no `default-command`, so a Codeman shell tab matches a hand-started tmux
+  // with no `default-command`, so a Reverie shell tab matches a hand-started tmux
   // one. That is what picks up /etc/profile and /etc/profile.d/* — a systemd
   // --user service never sourced them, so its PATH is what every pane inherited.
   // The flags come from loginShellArgs() rather than being hardcoded: they are
@@ -1052,42 +1052,42 @@ export function buildSpawnCommand(options: {
 }
 
 /**
- * Dedicated socket for Codeman-launched REMOTE tmux servers, distinct from the
- * canonical local `-L codeman` socket. A remote host that runs its OWN Codeman
- * would otherwise share the `-L codeman` socket AND the `codeman-<hex>` discovery
+ * Dedicated socket for Reverie-launched REMOTE tmux servers, distinct from the
+ * canonical local `-L reverie` socket. A remote host that runs its OWN Reverie
+ * would otherwise share the `-L reverie` socket AND the `reverie-<hex>` discovery
  * name, so its `reconcileSessions()` would ADOPT our session (attach a PTY,
  * resize, respawn-pane it locally) — the cross-machine form of the "2nd instance
  * attaches live sessions" hazard. A private socket keeps our remote sessions off
  * that instance's radar entirely.
  */
-const REMOTE_TMUX_SOCKET = 'codeman-remote';
+const REMOTE_TMUX_SOCKET = 'reverie-remote';
 
 /**
- * Deterministic, reattach-stable remote tmux session name for a Codeman session.
+ * Deterministic, reattach-stable remote tmux session name for a Reverie session.
  *
  * Derived from the same stable field the LOCAL muxName uses (the first 8 chars of
  * the sessionId), so reconnecting (which re-issues the exact same
  * `ssh … new-session -A`) lands back in the SAME remote session. Must NOT be
  * random/time-based — it has to be stable across reconnects.
  *
- * The `codeman-ssh-` prefix is deliberately chosen to FAIL a remote Codeman's
- * `SAFE_MUX_NAME_PATTERN` (`^codeman-[a-f0-9-]+$`) — the `s`/`h` letters mean a
+ * The `reverie-ssh-` prefix is deliberately chosen to FAIL a remote Reverie's
+ * `SAFE_MUX_NAME_PATTERN` (`^reverie-[a-f0-9-]+$`) — the `s`/`h` letters mean a
  * remote instance's discovery never treats this as one of its own sessions (belt
  * to the dedicated-socket suspenders above).
  */
 export function remoteTmuxSessionName(sessionId: string): string {
-  return `codeman-ssh-${sessionId.slice(0, 8)}`;
+  return `reverie-ssh-${sessionId.slice(0, 8)}`;
 }
 
 /**
- * The remote tmux socket and session a remote Codeman session's pane is attached
+ * The remote tmux socket and session a remote Reverie session's pane is attached
  * to, matching the command that attached it: an owned session is the one
  * `buildRemoteLaunchCommand` created on the private socket, a non-owned one is the
- * discovered session `buildRemoteAttachCommand` joined on `-L codeman`.
+ * discovered session `buildRemoteAttachCommand` joined on `-L reverie`.
  */
 export function remoteTmuxLocation(remote: SessionRemote, sessionId: string): { socket: string; sessionName: string } {
   if (remote.owned === false) {
-    return { socket: 'codeman', sessionName: remote.remoteSessionName || remoteTmuxSessionName(sessionId) };
+    return { socket: 'reverie', sessionName: remote.remoteSessionName || remoteTmuxSessionName(sessionId) };
   }
   return { socket: REMOTE_TMUX_SOCKET, sessionName: remoteTmuxSessionName(sessionId) };
 }
@@ -1099,19 +1099,19 @@ export function remoteTmuxLocation(remote: SessionRemote, sessionId: string): { 
  *
  * Emits:
  *   ssh -o BatchMode=yes -t [<COD-107 connection opts>] user@host \
- *     'tmux -L codeman-remote new-session -A -s codeman-ssh-<id> -c <path> "cd <path> && exec <cli>" \
- *        \; set -t codeman-ssh-<id> status off \; set -t codeman-ssh-<id> mouse off \
- *        \; set -t codeman-ssh-<id> prefix C-q \; set -s escape-time 0'
+ *     'tmux -L reverie-remote new-session -A -s reverie-ssh-<id> -c <path> "cd <path> && exec <cli>" \
+ *        \; set -t reverie-ssh-<id> status off \; set -t reverie-ssh-<id> mouse off \
+ *        \; set -t reverie-ssh-<id> prefix C-q \; set -s escape-time 0'
  *
  * COD-107 — the connection options (`-p`, `-i`, `-J`, SOCKS `-o ProxyCommand`,
  * arbitrary `-o`) come from the shared `buildSshConnectionArgs(remote)`, so the
  * prereq tmux probe and this launch connect with identical options.
  *
- * - `new-session -A -s codeman-ssh-<id>` = attach-if-exists-else-create
+ * - `new-session -A -s reverie-ssh-<id>` = attach-if-exists-else-create
  *   (idempotent), so reconnect re-runs the same command and reattaches the
  *   still-running agent.
- * - `-L codeman-remote` = a DEDICATED socket, NOT the canonical `-L codeman` a
- *   remote Codeman would use, so our session never collides with / gets adopted by
+ * - `-L reverie-remote` = a DEDICATED socket, NOT the canonical `-L reverie` a
+ *   remote Reverie would use, so our session never collides with / gets adopted by
  *   an instance running on the remote host.
  * - The `set` options are scoped per-session (`set -t <name>` / server-level
  *   `set -s`), never `-g`, so they never mutate other sessions' prefix/mouse.
@@ -1218,7 +1218,7 @@ export function buildRemoteLaunchCommand(options: {
     `set -t ${remoteName} prefix C-q`,
     'set -s escape-time 0',
     // COD-106 — shared/collaborative sessions: tmux defaults to sizing a window
-    // to the SMALLEST attached client, so two Codemans at different viewports
+    // to the SMALLEST attached client, so two Reveries at different viewports
     // would fight (clamp to the smaller). `window-size latest` sizes to the
     // most-recently-active client instead, so concurrent clients coexist.
     // Per-session scoped (`set -t <name>`, matching #145's hardening) so a shared
@@ -1260,8 +1260,8 @@ export function buildRemoteLaunchCommand(options: {
 /**
  * Build the SSH command that kills the durable remote tmux session created by
  * `buildRemoteLaunchCommand`. Because that session lives on a private socket
- * (`-L codeman-remote`) under a stable name, killing the LOCAL ssh wrapper alone
- * would orphan the remote agent forever (invisible to Codeman, still burning plan
+ * (`-L reverie-remote`) under a stable name, killing the LOCAL ssh wrapper alone
+ * would orphan the remote agent forever (invisible to Reverie, still burning plan
  * quota). This is fired best-effort on session kill; the shared connection args
  * carry the default `-o ConnectTimeout=10` so an unreachable host fails fast.
  */
@@ -1282,12 +1282,12 @@ export function buildRemoteKillCommand(options: { remote: SessionRemote; session
 // docs/docker-cases-plan.md.
 
 /**
- * DEDICATED in-container tmux socket. A Codeman running INSIDE the container uses
- * `-L codeman`; ours is `-L codeman-docker` with a `codeman-dkr-*` session name
- * that deliberately FAILS SAFE_MUX_NAME_PATTERN, so an in-container Codeman never
+ * DEDICATED in-container tmux socket. A Reverie running INSIDE the container uses
+ * `-L reverie`; ours is `-L reverie-docker` with a `reverie-dkr-*` session name
+ * that deliberately FAILS SAFE_MUX_NAME_PATTERN, so an in-container Reverie never
  * adopts/resizes/respawns our session (same defence as the remote socket).
  */
-const DOCKER_TMUX_SOCKET = 'codeman-docker';
+const DOCKER_TMUX_SOCKET = 'reverie-docker';
 /**
  * Deterministic, reattach-stable in-container tmux session name. Derived from the
  * same stable field the local muxName uses (first 8 chars of the sessionId), so a
@@ -1295,7 +1295,7 @@ const DOCKER_TMUX_SOCKET = 'codeman-docker';
  * in-container session. The `dkr` letters make it fail SAFE_MUX_NAME_PATTERN.
  */
 export function dockerTmuxSessionName(sessionId: string): string {
-  return `codeman-dkr-${sessionId.slice(0, 8)}`;
+  return `reverie-dkr-${sessionId.slice(0, 8)}`;
 }
 
 /** Resume ids are UUID-ish; reject anything with shell metacharacters (defensive). */
@@ -1352,9 +1352,9 @@ export interface DockerLaunchOptions {
   sessionId: string;
   resumeSessionId?: string;
   createContext: DockerCreateContext;
-  /** exec-time inline env (non-secret): TERM, COLORTERM, CODEMAN_SESSION_ID, CODEMAN_MUX */
+  /** exec-time inline env (non-secret): TERM, COLORTERM, REVERIE_SESSION_ID, REVERIE_MUX */
   execEnv: Record<string, string>;
-  /** exec-time NAME-ONLY env forwarded from Codeman's process env (codex/gemini keys) */
+  /** exec-time NAME-ONLY env forwarded from Reverie's process env (codex/gemini keys) */
   execEnvNames: string[];
   /**
    * Files to copy from read-only seed mounts into the container's writable HOME once
@@ -1407,8 +1407,8 @@ export function buildDockerLaunchCommand(opts: DockerLaunchOptions): string {
   // are scoped per-session (`set -t`) or server (`set -s`), never `-g`, so a shared
   // in-container tmux server's other sessions keep their own prefix/mouse.
   const tmuxInvocation = [
-    `tmux -L ${DOCKER_TMUX_SOCKET} setenv -g CODEMAN_SESSION_ID ${shellescape(sid)}`,
-    'setenv -g CODEMAN_MUX 1',
+    `tmux -L ${DOCKER_TMUX_SOCKET} setenv -g REVERIE_SESSION_ID ${shellescape(sid)}`,
+    'setenv -g REVERIE_MUX 1',
     `new-session -A -s ${dkrName} -c ${workdir} ${shellescape(paneCommand)}`,
     `set -t ${dkrName} status off`,
     `set -t ${dkrName} mouse off`,
@@ -1418,7 +1418,7 @@ export function buildDockerLaunchCommand(opts: DockerLaunchOptions): string {
 
   const execEnvFlags: string[] = [];
   for (const [k, v] of Object.entries(execEnv)) execEnvFlags.push('--env', shellescape(`${k}=${v}`));
-  // NAME-ONLY forwards: docker reads the VALUE from Codeman's own process env, so
+  // NAME-ONLY forwards: docker reads the VALUE from Reverie's own process env, so
   // the secret never appears in argv (no `ps` leak) and is not committed.
   for (const n of execEnvNames) execEnvFlags.push('--env', n);
   for (const extra of docker.extraExecArgs ?? []) execEnvFlags.push(shellescape(extra));
@@ -1445,7 +1445,7 @@ export function buildDockerLaunchCommand(opts: DockerLaunchOptions): string {
   // create exit status are preserved so mount/config failures remain visible.
   // A session-unique file avoids shell variables and command substitution, both
   // of which would be expanded too early by the nested bash/tmux launch layers.
-  const createOutputPath = shellescape(`/tmp/codeman-create-${sessionId}.log`);
+  const createOutputPath = shellescape(`/tmp/reverie-create-${sessionId}.log`);
   const filteredCreateOutput = `sed '/^WARNING: Your kernel does not support swap limit capabilities or the cgroup is not mounted\\. Memory limited without swap\\.$/d' ${createOutputPath}`;
   const removeCreateOutput = `rm -f ${createOutputPath}`;
   const createCommand = createContext.disableSwapLimit
@@ -1541,7 +1541,7 @@ export function resolveDockerLaunchOptions(
   const uid = typeof process.getuid === 'function' ? process.getuid() : 1000;
   const userArgs: string[] =
     docker.engine === 'podman'
-      ? ['--userns=keep-id'] // rootless podman: map host uid to the image `agent` uid
+      ? ['--userns=keep-id:uid=2000,gid=2000', '--user', '2000:2000'] // shared Nix runtime identity
       : isDesktop
         ? [] // Desktop: run as the image's baked uid (a mac uid wouldn't own /home/agent)
         : ['--user', `${uid}:0`]; // Linux: host uid + GID 0 (OpenShift arbitrary-uid writable HOME)
@@ -1575,37 +1575,37 @@ export function resolveDockerLaunchOptions(
     // workspace bind-mount path traverses it (e.g. a workspace under /tmp/claude-<uid>).
     // A nonexistent HOME subpath is created+owned by the running uid, so this is robust
     // to any workspace location. Non-secret path, safe to be committed on export.
-    CLAUDE_CODE_TMPDIR: `${CONTAINER_HOME}/.cache/codeman-claude-tmp`,
+    CLAUDE_CODE_TMPDIR: `${CONTAINER_HOME}/.cache/reverie-claude-tmp`,
   };
   if (docker.hooksEnabled) {
     // Derive a container-reachable API url (scheme + port preserved; host swapped
     // for the engine gateway alias). Prod is HTTPS on 3000.
-    envCreate.CODEMAN_API_URL = containerApiUrl(process.env.CODEMAN_API_URL, docker.engine);
+    envCreate.REVERIE_API_URL = containerApiUrl(process.env.REVERIE_API_URL, docker.engine);
     const hookSecretPath = dataPath('hook-secret');
     if (existsSync(hookSecretPath)) {
-      const dst = `${CONTAINER_HOME}/.codeman/hook-secret`;
+      const dst = `${CONTAINER_HOME}/.reverie/hook-secret`;
       extraMounts.push({ src: hookSecretPath, dst, readonly: true });
-      envCreate.CODEMAN_HOOK_SECRET_FILE = dst; // a path is non-secret; the bytes ride the bind mount
+      envCreate.REVERIE_HOOK_SECRET_FILE = dst; // a path is non-secret; the bytes ride the bind mount
     }
   }
 
   const createContext: DockerCreateContext = {
     docker,
     sessionId,
-    instance: CODEMAN_INSTANCE,
+    instance: REVERIE_INSTANCE,
     userArgs,
     credentialMounts: credentialMounts.map((mount) => ({
       ...mount,
-      src: resolveDockerDaemonMountSource(mount.src, home, process.env.CODEMAN_DOCKER_HOST_HOME),
+      src: resolveDockerDaemonMountSource(mount.src, home, process.env.REVERIE_DOCKER_HOST_HOME),
     })),
     extraMounts: extraMounts.map((mount) => ({
       ...mount,
-      src: resolveDockerDaemonMountSource(mount.src, home, process.env.CODEMAN_DOCKER_HOST_HOME),
+      src: resolveDockerDaemonMountSource(mount.src, home, process.env.REVERIE_DOCKER_HOST_HOME),
     })),
     envCreate,
     addHostGateway: !isDesktop,
     gatewayAlias,
-    disableSwapLimit: process.env.CODEMAN_DOCKER_DISABLE_SWAP_LIMIT === '1',
+    disableSwapLimit: process.env.REVERIE_DOCKER_DISABLE_SWAP_LIMIT === '1',
   };
 
   const execEnv: Record<string, string> = {
@@ -1616,10 +1616,10 @@ export function resolveDockerLaunchOptions(
     // before this fix (client_utf8 is per-client, resolved from the exec's locale).
     LANG: 'C.UTF-8',
     LC_ALL: 'C.UTF-8',
-    CODEMAN_SESSION_ID: sessionId.slice(0, 8),
-    CODEMAN_MUX: '1',
+    REVERIE_SESSION_ID: sessionId.slice(0, 8),
+    REVERIE_MUX: '1',
   };
-  // NAME-ONLY exec env forwarded from Codeman's process env (the docker client
+  // NAME-ONLY exec env forwarded from Reverie's process env (the docker client
   // inherits it), so API-key CLIs get their key without it appearing in argv.
   const execEnvNames = getCli(mode)?.env.dockerExecEnvNames ?? [];
 
@@ -1627,17 +1627,17 @@ export function resolveDockerLaunchOptions(
 }
 
 /**
- * COD-105 — build the SSH command that ATTACHES to an EXISTING `codeman-*` tmux
- * session on the remote host (one this Codeman didn't create — discovered via
- * `listRemoteCodemanSessions`). Sibling of `buildRemoteLaunchCommand`.
+ * COD-105 — build the SSH command that ATTACHES to an EXISTING `reverie-*` tmux
+ * session on the remote host (one this Reverie didn't create — discovered via
+ * `listRemoteReverieSessions`). Sibling of `buildRemoteLaunchCommand`.
  *
  * Emits:
  *   ssh -o BatchMode=yes -t [<COD-107 connection opts>] user@host \
- *     'tmux -L codeman attach -t <session>'
+ *     'tmux -L reverie attach -t <session>'
  *
  * - `attach` (NOT `new-session -A`) so we only join an existing session; the
  *   remote session keeps running independent of us, which is exactly why the
- *   resulting Codeman session is NON-OWNED (see `SessionRemote.owned`): closing
+ *   resulting Reverie session is NON-OWNED (see `SessionRemote.owned`): closing
  *   the local tab must detach, never `kill-session` the remote.
  * - The remote session name is shell-escaped so a value with metachars stays a
  *   single token inside the quoted tmux invocation.
@@ -1647,7 +1647,7 @@ export function resolveDockerLaunchOptions(
  *   right after `ssh -o BatchMode=yes` (a PTY is required for interactive tmux).
  */
 export function buildRemoteAttachCommand(remote: SessionRemote, remoteSessionName: string): string {
-  const tmuxInvocation = `tmux -L codeman attach -t ${shellescape(remoteSessionName)}`;
+  const tmuxInvocation = `tmux -L reverie attach -t ${shellescape(remoteSessionName)}`;
   const [ssh, batchMode, ...connectionArgs] = buildSshConnectionArgs(remote);
   const sshParts = [ssh, batchMode, '-t', ...connectionArgs, remoteSshTarget(remote), shellescape(tmuxInvocation)];
   return sshParts.join(' ');
@@ -1736,7 +1736,7 @@ const SETENV_PROFILES: Record<
    *
    * Pointing `HERDR_BIN_PATH` at our own generated shim is what upgrades this mode from
    * output-stabilization guessing to DEFINITIVE idle/working/blocked events (see
-   * deepseek-status-shim.ts). The pane id IS the Codeman session id, which is how the shim
+   * deepseek-status-shim.ts). The pane id IS the Reverie session id, which is how the shim
    * attributes a report without trusting anything the agent could influence.
    *
    * Needs a profile rather than key names because it writes an executable to disk and then
@@ -1887,7 +1887,7 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
     }
   }
 
-  /** The dedicated tmux socket all Codeman sessions live on (see {@link TerminalMultiplexer.muxSocket}). */
+  /** The dedicated tmux socket all Reverie sessions live on (see {@link TerminalMultiplexer.muxSocket}). */
   get muxSocket(): string {
     return this.tmuxSocket;
   }
@@ -2015,8 +2015,8 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
       const value =
         typeof item.value === 'string'
           ? item.value
-          : item.value.engine === 'codemanPrefixedSessionId'
-            ? `codeman_${sessionId}`
+          : item.value.engine === 'reveriePrefixedSessionId'
+            ? `reverie_${sessionId}`
             : item.value.engine === 'sessionId'
               ? sessionId
               : item.value.engine === 'muxName'
@@ -2032,17 +2032,17 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
       'export LANG=en_US.UTF-8',
       'export LC_ALL=en_US.UTF-8',
       ...cliEnv,
-      'export CODEMAN_MUX=1',
-      `export CODEMAN_SESSION_ID=${sessionId}`,
-      `export CODEMAN_MUX_NAME=${muxName}`,
+      'export REVERIE_MUX=1',
+      `export REVERIE_SESSION_ID=${sessionId}`,
+      `export REVERIE_MUX_NAME=${muxName}`,
       // Only exported when the server has stamped the real URL (scheme+host+port,
       // set in WebServer.start()). A hardcoded fallback here exported the wrong
       // scheme on HTTPS installs; leaving the variable unset makes in-session
       // guards fail closed instead of curling a URL that was never right.
-      ...(process.env.CODEMAN_API_URL ? [`export CODEMAN_API_URL=${process.env.CODEMAN_API_URL}`] : []),
+      ...(process.env.REVERIE_API_URL ? [`export REVERIE_API_URL=${process.env.REVERIE_API_URL}`] : []),
       // Path only (not the secret value): hook curl commands cat the file at
       // execution time, so the COD-54 hook secret stays off the command line.
-      `export CODEMAN_HOOK_SECRET_FILE="${dataPath('hook-secret')}"`,
+      `export REVERIE_HOOK_SECRET_FILE="${dataPath('hook-secret')}"`,
     ];
   }
 
@@ -2050,7 +2050,7 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
    * Apply user-supplied env overrides to a tmux session via `tmux setenv`.
    * Values stay off the bash command line (not visible in `ps`), and are inherited
    * by new panes — including `respawn-pane`. Persists at tmux-session level, so
-   * Codeman server restarts don't lose the setting as long as the tmux session lives.
+   * Reverie server restarts don't lose the setting as long as the tmux session lives.
    *
    * Key validation is strict (`/^[A-Z_][A-Z0-9_]*$/`) as defense-in-depth against
    * shell-metachar injection even if upstream schema check is bypassed.
@@ -2174,7 +2174,7 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
    * Registry-gated (capabilities.statusLineTelemetry, claude only today), local spawns
    * only (remote/docker have their own separate command builders). Resolving still runs
    * with collection off, because it also self-heals: it strips any legacy disk-written
-   * exporter from an older Codeman build the first time a session starts in that
+   * exporter from an older Reverie build the first time a session starts in that
    * workspace again. `state` lands on the mux record so the Status row can
    * say why no cache report will come, instead of "not reported yet" forever.
    */
@@ -2204,14 +2204,14 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
    *
    * With NO user command the variable is UNSET rather than left alone: a tmux
    * setenv survives respawn-pane, so a user who deleted their own statusline
-   * would otherwise keep getting the stale one wrapped (and lose Codeman's
+   * would otherwise keep getting the stale one wrapped (and lose Reverie's
    * footer print-through) until the tmux session was recreated. Same shape as
    * the CLAUDE_CODE_EFFORT_LEVEL cleanup in applyEnvOverrides.
    */
   private _configureStatusLineUserCommand(muxName: string, command: string | undefined): void {
     const setOrUnset = command
-      ? `CODEMAN_USER_STATUSLINE_CMD ${shellescape(command)}`
-      : '-u CODEMAN_USER_STATUSLINE_CMD';
+      ? `REVERIE_USER_STATUSLINE_CMD ${shellescape(command)}`
+      : '-u REVERIE_USER_STATUSLINE_CMD';
     try {
       execSync(`${this.tmux()} setenv -t ${shellescape(muxName)} ${setOrUnset}`, {
         timeout: EXEC_TIMEOUT_MS,
@@ -2254,7 +2254,7 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
       docker,
       owner,
     } = options;
-    const muxName = `codeman-${sessionId.slice(0, 8)}`;
+    const muxName = `reverie-${sessionId.slice(0, 8)}`;
 
     if (!isValidMuxName(muxName)) {
       throw new Error('Invalid session name: contains unsafe characters');
@@ -2422,7 +2422,7 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
       // Mouse mode is OFF by default so xterm.js handles text selection natively.
       // It gets enabled dynamically when panes are split (agent teams).
       const configPromises: Promise<void>[] = [
-        // Disable tmux status bar — Codeman's web UI provides session info
+        // Disable tmux status bar — Reverie's web UI provides session info
         execAsync(`${this.tmux()} set-option -t "${muxName}" status off`, { timeout: EXEC_TIMEOUT_MS })
           .then(() => {})
           .catch(() => {
@@ -2837,7 +2837,7 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
     }
 
     // SAFETY: Never kill the tmux session we're running inside of
-    const currentMuxName = process.env.CODEMAN_MUX_NAME;
+    const currentMuxName = process.env.REVERIE_MUX_NAME;
     if (currentMuxName && session.muxName === currentMuxName) {
       console.error(`[TmuxManager] BLOCKED: Refusing to kill own tmux session: ${session.muxName}`);
       return false;
@@ -2846,16 +2846,16 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
     // COD-105 — DETACH-NOT-KILL for NON-owned remote sessions.
     //
     // When this session was created by ATTACHING a remote tmux session another
-    // Codeman owns (`remote.owned === false`), closing the tab must NOT propagate
+    // Reverie owns (`remote.owned === false`), closing the tab must NOT propagate
     // a remote `tmux kill-session` — that would nuke work the remote's own
-    // Codeman (or another instance) still relies on. We tear down ONLY the LOCAL
+    // Reverie (or another instance) still relies on. We tear down ONLY the LOCAL
     // pane that holds the ssh client: killing the local ssh sends SIGHUP to its
     // remote `tmux attach`, which DETACHES (the durable remote session survives).
     //
     // This early return is the structural guarantee: no code below this point
     // (now or in future for owned sessions) can ever issue a remote kill-session
     // for a non-owned session. The only `kill-session` we run is on OUR LOCAL
-    // socket (`this.tmux()` = `tmux -L codeman` on THIS host), which kills the
+    // socket (`this.tmux()` = `tmux -L reverie` on THIS host), which kills the
     // local pane — it does NOT reach the REMOTE socket.
     if (session.remote && session.remote.owned === false) {
       console.log(`[TmuxManager] DETACH (non-owned remote): tearing down local pane only for ${session.muxName}`);
@@ -3046,7 +3046,7 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
     const dead: string[] = [];
     const discovered: string[] = [];
 
-    // Single batched query against the one socket Codeman owns. With a single
+    // Single batched query against the one socket Reverie owns. With a single
     // socket a session's location is a constant, so there is no per-session
     // socket tag to reconcile and no cross-socket ambiguity that could mark a
     // live session dead (the root cause of vanished/duplicate tabs).
@@ -3084,7 +3084,7 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
       }
     }
 
-    // Discover untracked codeman/claudeman sessions on our socket. Dedup by
+    // Discover untracked reverie/claudeman sessions on our socket. Dedup by
     // muxName (globally unique) so a name we already track never spawns a
     // second "Restored:" entry.
     const knownMuxNames = new Set<string>();
@@ -3093,9 +3093,9 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
     }
 
     for (const [sessionName, pid] of active) {
-      if (!sessionName.startsWith('codeman-') && !sessionName.startsWith('claudeman-')) continue;
+      if (!sessionName.startsWith('reverie-') && !sessionName.startsWith('claudeman-')) continue;
       // Only admit names that pass the safe-name pattern. A foreign process on the
-      // shared `tmux -L codeman` socket could create a `codeman-…` session whose name
+      // shared `tmux -L reverie` socket could create a `reverie-…` session whose name
       // contains shell metacharacters; rejecting it here keeps it out of this.sessions
       // and away from the name-interpolating tmux call sites (M1).
       if (!isValidMuxName(sessionName)) {
@@ -3104,7 +3104,7 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
       }
       if (knownMuxNames.has(sessionName)) continue;
 
-      const fragment = sessionName.replace(/^(?:codeman|claudeman)-/, '');
+      const fragment = sessionName.replace(/^(?:reverie|claudeman)-/, '');
       const sessionId = `restored-${fragment}`;
       const session: MuxSession = {
         sessionId,
@@ -3116,7 +3116,7 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
         attached: false,
         name: `Restored: ${sessionName}`,
         // Every field above except the name and the pid is a guess: this record
-        // was rebuilt from the socket because Codeman's own bookkeeping did not
+        // was rebuilt from the socket because Reverie's own bookkeeping did not
         // have it. The synthetic id also cannot find the session's state.json
         // entry, so a remote or docker session rediscovered this way arrives
         // looking local. Consumers that would be wrong about such a session
@@ -3312,7 +3312,7 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
    * `|| true`, so a tmux that errored and a socket with genuinely no panes both
    * arrive as empty output. Treating that as "tmux did not answer" is the
    * conservative reading — clearing on it would turn a transient failure into a
-   * silent retraction of a death Codeman had already observed, and the cost of
+   * silent retraction of a death Reverie had already observed, and the cost of
    * being wrong the other way is one stale entry for a socket that no longer
    * has the pane. A NON-empty read is different: `list-panes -a` lists
    * every pane on the socket, so it is authoritative and {@link applyPaneExits}
@@ -3988,7 +3988,7 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
       return false;
     }
 
-    // Build target: sessionName.paneId (e.g., "codeman-abc12345.%1")
+    // Build target: sessionName.paneId (e.g., "reverie-abc12345.%1")
     const target = paneTarget.startsWith('%') ? `${muxName}.${paneTarget}` : `${muxName}.%${paneTarget}`;
     const tmux = this.tmux();
 

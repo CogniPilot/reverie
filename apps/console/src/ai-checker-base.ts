@@ -11,9 +11,9 @@
  * - Event emission for state changes
  *
  * Subclasses implement:
- * - `muxNamePrefix`: Prefix for mux session names (e.g., 'codeman-aicheck-')
+ * - `muxNamePrefix`: Prefix for mux session names (e.g., 'reverie-aicheck-')
  * - `doneMarker`: Completion marker in output file (e.g., '__AICHECK_DONE__')
- * - `tempFilePrefix`: Prefix for temp files (e.g., 'codeman-aicheck')
+ * - `tempFilePrefix`: Prefix for temp files (e.g., 'reverie-aicheck')
  * - `logPrefix`: Prefix for log messages (e.g., '[AiIdleChecker]')
  * - `buildPrompt()`: Build the prompt from terminal buffer
  * - `parseVerdict()`: Parse the verdict from AI output
@@ -147,13 +147,13 @@ export abstract class AiCheckerBase<
 
   // ========== Abstract Properties ==========
 
-  /** Prefix for mux session names (e.g., 'codeman-aicheck-') */
+  /** Prefix for mux session names (e.g., 'reverie-aicheck-') */
   protected abstract readonly muxNamePrefix: string;
 
   /** Marker written to temp file when check is complete */
   protected abstract readonly doneMarker: string;
 
-  /** Prefix for temp files (e.g., 'codeman-aicheck') */
+  /** Prefix for temp files (e.g., 'reverie-aicheck') */
   protected abstract readonly tempFilePrefix: string;
 
   /** Prefix for log messages (e.g., '[AiIdleChecker]') */

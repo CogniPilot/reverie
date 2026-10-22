@@ -41,7 +41,7 @@ describe('an agent resumes only its own conversations', () => {
     return h;
   };
   const create = (h: Awaited<ReturnType<typeof setup>>, body: object, as?: string) =>
-    h.app.inject({ method: 'POST', url: '/api/sessions', headers: as ? { 'x-codeman-parent-session': as } : {}, payload: { workingDir: '/nonexistent-resume-guard', ...body } });
+    h.app.inject({ method: 'POST', url: '/api/sessions', headers: as ? { 'x-reverie-parent-session': as } : {}, payload: { workingDir: '/nonexistent-resume-guard', ...body } });
 
   it('refuses a row that resumes another agent\'s conversation, in any of the three places it can be asked for', async () => {
     const h = await setup();
@@ -76,7 +76,7 @@ describe('82d: every resume field, both creating routes, and no silent fresh or 
     return h;
   };
   const post = (h: Awaited<ReturnType<typeof setup>>, url: string, body: object, as?: string) =>
-    h.app.inject({ method: 'POST', url, headers: as ? { 'x-codeman-parent-session': as } : {}, payload: { workingDir: '/nonexistent-resume-guard', ...body } });
+    h.app.inject({ method: 'POST', url, headers: as ? { 'x-reverie-parent-session': as } : {}, payload: { workingDir: '/nonexistent-resume-guard', ...body } });
 
   const foreign: object[] = [
     { mode: 'opencode', openCodeConfig: { continueSession: 'ses_foreign' } },
@@ -216,7 +216,7 @@ describe('a coordinator continues a gone agent (resume takeover)', () => {
     return { h, audit };
   };
   const create = (h: Awaited<ReturnType<typeof setup>>['h'], as: string, body: object = { resumeSessionId: CONVERSATION_ID }) =>
-    h.app.inject({ method: 'POST', url: '/api/sessions', headers: { 'x-codeman-parent-session': as }, payload: { workingDir: '/nonexistent-resume-guard', ...body } });
+    h.app.inject({ method: 'POST', url: '/api/sessions', headers: { 'x-reverie-parent-session': as }, payload: { workingDir: '/nonexistent-resume-guard', ...body } });
 
   it('lets the room\'s coordinator resume the gone agent\'s thread, and writes one audit line', async () => {
     const { h, audit } = await setup();
@@ -310,7 +310,7 @@ describe('a coordinator continues a gone agent (resume takeover)', () => {
     const res = await h.app.inject({
       method: 'POST',
       url: '/api/sessions',
-      headers: { 'x-codeman-parent-session': PEER },
+      headers: { 'x-reverie-parent-session': PEER },
       payload: { workingDir: '/nonexistent-resume-guard', resumeSessionId: CONVERSATION_ID, parentSessionId: COORD },
     });
     expect(res.statusCode).toBe(403);

@@ -49,14 +49,14 @@ import {
 
 const FOUR = ['s-a', 's-b', 's-c', 's-d'];
 const SIX = ['s-a', 's-b', 's-c', 's-d', 's-e', 's-f'];
-const TILE_TYPE = 'application/x-codeman-tile';
+const TILE_TYPE = 'application/x-reverie-tile';
 
 const headerOf = (id: string) => tileEl(id).children[0];
 const actionsOf = (id: string) => headerOf(id).children[3];
 const nameOf = (id: string) => headerOf(id).children[2].children[0];
 const tile = (id: string) => FakeTile.all.find((t) => t.sessionId === id && !t._destroyed) as FakeTile;
 const slots = () => section.children.filter((el) => el.className.split(' ').includes('tile-slot'));
-const stored = () => JSON.parse(localStore.get('codeman:tile-grid') ?? 'null');
+const stored = () => JSON.parse(localStore.get('reverie:tile-grid') ?? 'null');
 
 const dragEvent = () => ({
   preventDefault: vi.fn(),
@@ -262,7 +262,7 @@ describe('dragging a tile by its header', () => {
 
   it('Escape, or a drop anywhere else, cancels: dragend with no drop moves nothing and clears what was painted', () => {
     const app = openGrid(FOUR);
-    localStore.delete('codeman:tile-grid');
+    localStore.delete('reverie:tile-grid');
     const costsNothing = snapshotCost();
     clearFits();
     startDrag('s-a');
@@ -274,7 +274,7 @@ describe('dragging a tile by its header', () => {
     expect(tileEl('s-c').classList.contains('tile--drop-target')).toBe(false);
     expect(tileEl('s-a').classList.contains('tile--dragging')).toBe(false);
     expect(app._draggedTileId).toBeNull();
-    expect(localStore.has('codeman:tile-grid')).toBe(false);
+    expect(localStore.has('reverie:tile-grid')).toBe(false);
     expect(FakeTile.all.every((t) => t.fit.mock.calls.length === 0)).toBe(true);
     costsNothing();
     // The drag is over: a later drag that is neither a tab nor a tile (a file) is left alone.

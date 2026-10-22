@@ -45,7 +45,7 @@ describe('chatroom media', () => {
     const s = createMockSession(A);
     s.name = 'alpha';
     ctx.sessions.set(A, s as never);
-    roomId = service.createRoom('Fleet', undefined).id;
+    roomId = service.createRoom('Reverie', undefined).id;
     service.addMember(roomId, A);
   });
 
@@ -64,7 +64,7 @@ describe('chatroom media', () => {
     });
 
   it('rejects a persisted attachment index redirected to the bot token store', async () => {
-    vi.stubEnv('FLEET_DATA_DIR', root);
+    vi.stubEnv('REVERIE_DATA_DIR', root);
     writeFileSync(join(root, 'external-chat.json'), '{"token":"test-secret"}');
     const uploaded = (await upload('innocent.txt', 'text/plain', Buffer.from('safe'))).json().data.file;
     const indexPath = join(root, 'chatroom-files', roomId, 'index.json');
@@ -161,7 +161,7 @@ describe('chatroom media', () => {
         payload: { emoji },
       });
     expect((await react('\u{1F44D}')).json().data.reactions).toEqual({ '\u{1F44D}': ['user'] });
-    expect((await react('\u{1F44D}', { 'x-codeman-parent-session': A })).json().data.reactions).toEqual({
+    expect((await react('\u{1F44D}', { 'x-reverie-parent-session': A })).json().data.reactions).toEqual({
       '\u{1F44D}': ['user', A],
     });
     expect((await react('\u{1F44D}')).json().data.reactions).toEqual({ '\u{1F44D}': [A] });
@@ -205,7 +205,7 @@ describe('chatroom media', () => {
     const byAgent = await app.inject({
       method: 'DELETE',
       url: `/api/chatrooms/${roomId}/emotes/globe?scope=global`,
-      headers: { 'x-codeman-parent-session': A },
+      headers: { 'x-reverie-parent-session': A },
     });
     expect(byAgent.statusCode).toBe(403);
   });

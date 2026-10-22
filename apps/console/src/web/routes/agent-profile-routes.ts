@@ -1,13 +1,13 @@
 /**
  * @fileoverview `GET /api/agents/:id/profile`: one agent session's read-only profile for the
  * profile panel: backend, model, effort, usage counters, company and room bindings, runtime
- * supervision and the owner-selected persona. The fleet runtime builds it
- * (`fleet-runtime --policy POLICY profile ID`), so the console and the runtime's own identity
+ * supervision and the owner-selected persona. The reverie runtime builds it
+ * (`reverie-runtime --policy POLICY profile ID`), so the console and the runtime's own identity
  * checks report the same thing.
  *
  * Read-only: the report makes GET calls and local reads only, and lists backend switching as
  * unavailable until owner authentication exists. Enabled when the server's environment names the
- * runtime policy (REVERIE_RUNTIME_POLICY); `fleet-runtime` comes from PATH unless REVERIE_RUNTIME_BIN
+ * runtime policy (REVERIE_RUNTIME_POLICY); `reverie-runtime` comes from PATH unless REVERIE_RUNTIME_BIN
  * names it. Configuration is environment-only, never a settings key, so no API call can choose what
  * this route runs. Single-user only: the report reads the console as its owner. Ownership of the
  * session itself goes through `findSessionOrFail`, like every session-scoped route; an agent caller
@@ -21,7 +21,7 @@ import { ApiErrorCode, createErrorResponse } from '../../types.js';
 import { isMultiUserMode } from '../../config/multiuser.js';
 import type { SessionPort } from '../ports/session-port.js';
 import { findSessionOrFail, ownerFor, resolveParentSessionId } from '../route-helpers.js';
-import { envValue } from '../../config/fleet-env.js';
+import { envValue } from '../../config/reverie-env.js';
 
 /** What a report may include: direct-message rooms only for the owner. */
 export interface ProfileView {
@@ -42,7 +42,7 @@ export const CACHE_MS = 15_000;
  * What the runtime process inherits, by exact name: the lookup path, home and locale, its policy
  * file, the console address and the Claude config directory (where transcripts live). No prefix
  * wildcard, no API keys and, until the enforce service token is added by name, no console
- * credentials (CODEMAN_USERNAME, CODEMAN_PASSWORD).
+ * credentials (REVERIE_USERNAME, REVERIE_PASSWORD).
  */
 const CHILD_ENV_NAMES = new Set([
   'PATH',
@@ -50,13 +50,13 @@ const CHILD_ENV_NAMES = new Set([
   'LANG',
   'CLAUDE_CONFIG_DIR',
   'REVERIE_RUNTIME_POLICY',
-  'FLEET_RUNTIME_POLICY',
-  'CODEMAN_API_URL',
+  'REVERIE_RUNTIME_POLICY',
+  'REVERIE_API_URL',
 ]);
 
 /**
  * The report reads the console as the owner this route serves, never as some agent's parent
- * session, so CODEMAN_SESSION_ID is not in the list.
+ * session, so REVERIE_SESSION_ID is not in the list.
  */
 export function profileChildEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   const out: NodeJS.ProcessEnv = {};
@@ -69,7 +69,7 @@ export function profileChildEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
 export function profileRunnerFromEnv(env: NodeJS.ProcessEnv = process.env): ProfileRunner | null {
   const policy = envValue(env, 'RUNTIME_POLICY');
   if (!policy) return null;
-  const bin = envValue(env, 'RUNTIME_BIN') || 'fleet-runtime';
+  const bin = envValue(env, 'RUNTIME_BIN') || 'reverie-runtime';
   const childEnv = profileChildEnv(env);
   return (sessionId, view) =>
     new Promise((resolve, reject) => {
@@ -121,7 +121,7 @@ export function registerAgentProfileRoutes(
     }
     // The owner (no parent-session header) reads any profile. An agent reads only its own, without
     // its direct-message rooms; any other header, resolvable or not, is refused.
-    const owner = req.headers['x-codeman-parent-session'] === undefined;
+    const owner = req.headers['x-reverie-parent-session'] === undefined;
     if (!owner && resolveParentSessionId(ctx, req, undefined, ownerFor(req)) !== session.id) {
       return reply
         .code(403)
@@ -167,7 +167,7 @@ export function registerAgentProfileRoutes(
     if (!report || typeof report !== 'object' || Array.isArray(report)) {
       return reply
         .code(502)
-        .send(createErrorResponse(ApiErrorCode.OPERATION_FAILED, 'The fleet runtime did not return a profile'));
+        .send(createErrorResponse(ApiErrorCode.OPERATION_FAILED, 'The reverie runtime did not return a profile'));
     }
     const { error, status } = report as { error?: unknown; status?: unknown };
     if (typeof error === 'string') {

@@ -59,10 +59,10 @@ describe('chatroom polls', () => {
   });
 
   const settle = () => new Promise((resolve) => setTimeout(resolve, 70));
-  const as = (id?: string) => (id ? { 'x-codeman-parent-session': id } : {});
+  const as = (id?: string) => (id ? { 'x-reverie-parent-session': id } : {});
 
   async function room(): Promise<string> {
-    const res = await app.inject({ method: 'POST', url: '/api/chatrooms', payload: { name: 'Fleet', members: [{ sessionId: A }, { sessionId: B }] } });
+    const res = await app.inject({ method: 'POST', url: '/api/chatrooms', payload: { name: 'Reverie', members: [{ sessionId: A }, { sessionId: B }] } });
     expect(res.statusCode).toBe(200);
     // The briefings go first; the next delivery waits a little after them.
     await service.delivery.flushAll();

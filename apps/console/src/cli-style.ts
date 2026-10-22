@@ -1,5 +1,5 @@
 /**
- * @fileoverview One style vocabulary for everything the `codeman` CLI prints:
+ * @fileoverview One style vocabulary for everything the `reverie` CLI prints:
  * palette, glyphs, the small block helpers (heading/rule/kv), width-aware table
  * layout, a stderr spinner and a y/N confirm.
  *

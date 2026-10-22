@@ -1,7 +1,13 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { CompanyError, CompanyService } from '../../company-service.js';
-import { CompanySettingsSchema, EmployeeSchema, PronounsSchema, SelfProfileSchema } from '../../company-types.js';
+import {
+  CompanySettingsSchema,
+  EmployeeSchema,
+  EmployeePermissionsSchema,
+  PronounsSchema,
+  SelfProfileSchema,
+} from '../../company-types.js';
 import type { SessionPort } from '../ports/session-port.js';
 import { findSessionOrFail, ownerFor, parseBody, resolveParentSessionId } from '../route-helpers.js';
 import { AvatarError, AvatarStore, MAX_AVATAR_BYTES, avatarUrl, checkAvatar } from '../../agent-avatars.js';
@@ -10,15 +16,25 @@ import { appendAdminAudit } from '../admin-audit.js';
 import { adminGrant } from '../../owner-auth/policy.js';
 import { ownerAvatarKey, ownerAvatarUrl } from '../../owner-avatar.js';
 
-const HireSchema = EmployeeSchema.omit({ id: true, owner: true, createdAt: true, avatar: true });
+const HireSchema = EmployeeSchema.omit({
+  id: true,
+  owner: true,
+  createdAt: true,
+  avatar: true,
+  desiredRunning: true,
+  wakeAttempts: true,
+});
 const SettingsSchema = CompanySettingsSchema.omit({ owner: true, ownerAvatar: true });
 const InviteSchema = z.object({ roomId: z.string().min(1).max(100) });
 // Pronouns: a value sets them, null clears them (owner only, like every field here; an agent only proposes, in chat).
 const UpdateSchema = EmployeeSchema.pick({ position: true, expertise: true, icon: true, reportsTo: true })
-  .extend({ pronouns: PronounsSchema.nullable() })
+  .extend({ pronouns: PronounsSchema.nullable(), permissions: EmployeePermissionsSchema })
   .partial()
   .strict()
-  .refine((v) => Object.keys(v).length > 0, 'Give a position, expertise, icon, reporting parent or pronouns');
+  .refine(
+    (v) => Object.keys(v).length > 0,
+    'Give a position, expertise, icon, reporting parent, pronouns or permissions'
+  );
 const RebindSchema = z.object({ sessionId: z.string().min(1).max(100) });
 const ThreadSchema = z.object({ threadId: z.string().trim().min(1).max(200).nullable() });
 const MemorySchema = z.object({
@@ -32,12 +48,13 @@ export function registerCompanyRoutes(
   ctx: SessionPort,
   service: CompanyService,
   avatars?: AvatarStore,
-  ownerAvatars?: AvatarStore
+  ownerAvatars?: AvatarStore,
+  wakeEmployee?: (id: string) => Promise<unknown>
 ): void {
   const caller = (req: FastifyRequest): string | undefined =>
     resolveParentSessionId(ctx, req, undefined, ownerFor(req));
   const ownerOnly = (req: FastifyRequest): void => {
-    if (req.headers['x-codeman-parent-session'] !== undefined)
+    if (req.headers['x-reverie-parent-session'] !== undefined)
       throw new CompanyError('Only the company owner may configure employees or research', 403);
   };
   // The owner, or an owner-set admin agent the policy let through (owner-auth/policy.ts ADMIN_ROUTES).
@@ -79,7 +96,7 @@ export function registerCompanyRoutes(
 
   app.get('/api/company', async (req) => ({
     success: true,
-    data: { ...service.view(ownerFor(req)), canManage: req.headers['x-codeman-parent-session'] === undefined },
+    data: { ...service.view(ownerFor(req)), canManage: req.headers['x-reverie-parent-session'] === undefined },
   }));
   app.post('/api/company/employees', async (req, reply) =>
     run(reply, async () => {
@@ -93,15 +110,44 @@ export function registerCompanyRoutes(
       return { settings: await service.configure(ownerFor(req), parseBody(SettingsSchema, req.body)) };
     })
   );
+  app.post('/api/company/employees/:id/wake', async (req, reply) =>
+    run(reply, async () => {
+      const owner = ownerFor(req);
+      const view = service.view(owner);
+      const self = caller(req);
+      if (
+        req.headers['x-reverie-parent-session'] !== undefined &&
+        (!self || !view.employees.some((e) => e.sessionId === self && e.permissions.recoverEmployees))
+      )
+        throw new CompanyError('Only the owner or an employee granted recovery permission may wake an employee', 403);
+      const { id } = req.params as { id: string };
+      const employee = view.employees.find((e) => e.id === id);
+      if (!employee) throw new CompanyError('Unknown company employee', 404);
+      if (!wakeEmployee) throw new CompanyError('Recovery is not ready', 503);
+      const result = await wakeEmployee(id);
+      void appendAdminAudit({
+        admin: self ? 'session ' + self : 'owner',
+        action: 'employee_wake',
+        target: employee.name,
+        ip: req.ip,
+        detail: { id, by: self },
+      });
+      return { recovery: result };
+    })
+  );
   app.put('/api/company/employees/:id/session', async (req, reply) =>
     run(reply, async () => {
       const { id } = req.params as { id: string };
       const { sessionId } = parseBody(RebindSchema, req.body);
-      if (req.headers['x-codeman-parent-session'] === undefined)
+      if (req.headers['x-reverie-parent-session'] === undefined)
         return { employee: await service.rebind(id, ownerFor(req), sessionId) };
-      // An agent header: only the CTO/COO recovery of an employee whose session is gone, audited.
+      // An agent needs the owner's explicit recovery grant, checked by the service and audited.
       const self = caller(req);
-      if (!self) throw new CompanyError('Only the owner, the CTO or the COO may recover an employee session', 403);
+      if (!self)
+        throw new CompanyError(
+          'Only the owner or an employee granted recovery permission may recover an employee session',
+          403
+        );
       const employee = await service.recover(id, ownerFor(req), self, sessionId);
       void appendAdminAudit({
         admin: `session ${self}`,
@@ -125,20 +171,24 @@ export function registerCompanyRoutes(
       ownerOnly(req);
       const { id } = req.params as { id: string };
       const change = parseBody(UpdateSchema, req.body);
-      const employee = await service.update(id, ownerFor(req), change, async (before, after) => appendAdminAudit({
-        admin: 'owner',
-        action: 'employee_update',
-        target: after.name,
-        ip: req.ip,
-        detail: {
-          id, fields: Object.keys(change),
-          position: { from: before.position, to: after.position },
-          reportsTo: { from: before.reportsTo ?? null, to: after.reportsTo ?? null },
-          ...(before.pronouns !== after.pronouns
-            ? { pronouns: { from: before.pronouns ?? null, to: after.pronouns ?? null } }
-            : {}),
-        },
-      }));
+      const employee = await service.update(id, ownerFor(req), change, async (before, after) =>
+        appendAdminAudit({
+          admin: 'owner',
+          action: 'employee_update',
+          target: after.name,
+          ip: req.ip,
+          detail: {
+            id,
+            fields: Object.keys(change),
+            position: { from: before.position, to: after.position },
+            permissions: { from: before.permissions, to: after.permissions },
+            reportsTo: { from: before.reportsTo ?? null, to: after.reportsTo ?? null },
+            ...(before.pronouns !== after.pronouns
+              ? { pronouns: { from: before.pronouns ?? null, to: after.pronouns ?? null } }
+              : {}),
+          },
+        })
+      );
       return { employee };
     })
   );
@@ -163,12 +213,18 @@ export function registerCompanyRoutes(
       const by = ownerOrAdmin(req);
       const { id } = req.params as { id: string };
       const employee = await service.restore(id, ownerFor(req));
-      void appendAdminAudit({ admin: by, action: 'employee_restore', target: employee.name, ip: req.ip, detail: { id, sessionId: employee.sessionId } });
+      void appendAdminAudit({
+        admin: by,
+        action: 'employee_restore',
+        target: employee.name,
+        ip: req.ip,
+        detail: { id, sessionId: employee.sessionId },
+      });
       return { employee };
     })
   );
   // An agent edits its OWN display name and icon; there is no target in the path, so it can name no
-  // one else. "Own" is the session X-Codeman-Parent-Session resolves to within the owner's scope:
+  // one else. "Own" is the session X-Reverie-Parent-Session resolves to within the owner's scope:
   // a hint local agent tooling sets, not authentication. No header, or one that does not resolve,
   // is refused; the owner edits employees through the routes above.
   app.post('/api/company/self', async (req, reply) =>
@@ -181,7 +237,7 @@ export function registerCompanyRoutes(
   app.post('/api/company/employees/:id/invite', async (req, reply) =>
     run(reply, () => {
       const self = caller(req);
-      if (req.headers['x-codeman-parent-session'] !== undefined && !self)
+      if (req.headers['x-reverie-parent-session'] !== undefined && !self)
         throw new CompanyError('Unknown agent session', 403);
       const { id } = req.params as { id: string };
       return { employee: service.invite(id, parseBody(InviteSchema, req.body).roomId, ownerFor(req), self) };
@@ -222,7 +278,12 @@ export function registerCompanyRoutes(
           const previous = await ownerAvatars.get(key(req));
           await ownerAvatars.put(key(req), req.body as Buffer);
           try {
-            return { settings: await service.setOwnerAvatar(ownerFor(req), ownerAvatarUrl(ownerFor(req), await service.nextOwnerAvatarVersion(ownerFor(req)))) };
+            return {
+              settings: await service.setOwnerAvatar(
+                ownerFor(req),
+                ownerAvatarUrl(ownerFor(req), await service.nextOwnerAvatarVersion(ownerFor(req)))
+              ),
+            };
           } catch (error) {
             if (previous) await ownerAvatars.put(key(req), previous.data);
             else await ownerAvatars.remove(key(req));

@@ -1,7 +1,7 @@
 /**
  * @fileoverview Plans: subscription accounts paced against their weekly windows.
  *
- * - `GET /api/plans`: every account (Codeman profiles and `acct` accounts) with login
+ * - `GET /api/plans`: every account (Reverie profiles and `acct` accounts) with login
  *   state, 5-hour and weekly usage, the weekly window, elapsed percent, pace, burn rate,
  *   projected end-of-week usage, the sessions on it, the orchestrator mark and a
  *   recommendation (push / steady / ease / stop / login), plus the local GPU.
@@ -25,7 +25,7 @@ import { isAdmin, ownerFor, parseBody } from '../route-helpers.js';
 
 /** Who an agent caller is, for the read-only scoping of `GET /api/plans`. */
 export interface PlansScope {
-  /** The live session this request speaks as (X-Codeman-Parent-Session), undefined when it does not resolve. */
+  /** The live session this request speaks as (X-Reverie-Parent-Session), undefined when it does not resolve. */
   callerSession(req: FastifyRequest): string | undefined;
   /** Does this session hold plans.view_all (Admin, or Lead of a live room)? It sees every account. */
   canViewAll(sessionId: string): boolean;
@@ -52,7 +52,7 @@ export function registerPlansRoutes(
 
   app.get('/api/plans/allocations', async (req, reply) => {
     reply.header('Cache-Control', 'no-store');
-    if (req.headers['x-codeman-parent-session'] !== undefined || !isAdmin(req)) return forbid(reply);
+    if (req.headers['x-reverie-parent-session'] !== undefined || !isAdmin(req)) return forbid(reply);
     return {
       success: true,
       data: { ...(await plans.allocations()), employees: scope?.employees?.(ownerFor(req)) ?? [] },
@@ -60,13 +60,13 @@ export function registerPlansRoutes(
   });
 
   // Read-only and role-scoped, server-side, for the page, `reverie plans` and the MCP tools alike:
-  // - no X-Codeman-Parent-Session header: the owner (admin) sees everything;
+  // - no X-Reverie-Parent-Session header: the owner (admin) sees everything;
   // - an agent holding plans.view_all (an Admin, or the Lead of a live room) sees every account;
   // - any other agent sees only the account its own session runs on (and no GPU line).
   // A header that does not resolve to a live session the caller may speak as is refused.
   // Add, remove and sign-in stay admin-only below; no token is ever part of a plan row.
   app.get('/api/plans', async (req, reply) => {
-    if (req.headers['x-codeman-parent-session'] === undefined) {
+    if (req.headers['x-reverie-parent-session'] === undefined) {
       if (!isAdmin(req)) return forbid(reply);
       return { success: true, data: await plans.plans() };
     }
@@ -74,7 +74,7 @@ export function registerPlansRoutes(
     if (!self) {
       return reply
         .code(403)
-        .send(createErrorResponse(ApiErrorCode.FORBIDDEN, 'X-Codeman-Parent-Session does not name a live session you may speak as'));
+        .send(createErrorResponse(ApiErrorCode.FORBIDDEN, 'X-Reverie-Parent-Session does not name a live session you may speak as'));
     }
     const all = await plans.plans();
     if (scope?.canViewAll(self)) return { success: true, data: all };
@@ -98,7 +98,7 @@ export function registerPlansRoutes(
   // Sign-in is the owner's alone: an agent caller (the parent-session header is present) never starts, reads or ends one.
   app.addHook('preHandler', async (req, reply) => {
     if (req.url.startsWith('/api/plans/accounts/') || req.url.startsWith('/api/plans/login') ) {
-      if (req.headers['x-codeman-parent-session'] !== undefined) {
+      if (req.headers['x-reverie-parent-session'] !== undefined) {
         return reply.code(403).send(createErrorResponse(ApiErrorCode.FORBIDDEN, 'Signing in an account is the owner\'s alone'));
       }
     }

@@ -48,8 +48,8 @@ describe('generated artifact attachments', () => {
 
     it('confines on the resolved path: a workspace symlink to an outside file is rejected', async () => {
       // realpath so a symlinked tmpdir (e.g. macOS /var -> /private/var) can't skew containment checks
-      workspaceDir = await fs.realpath(await fs.mkdtemp(join(tmpdir(), 'codeman-genart-ws-')));
-      outsideDir = await fs.realpath(await fs.mkdtemp(join(tmpdir(), 'codeman-genart-out-')));
+      workspaceDir = await fs.realpath(await fs.mkdtemp(join(tmpdir(), 'reverie-genart-ws-')));
+      outsideDir = await fs.realpath(await fs.mkdtemp(join(tmpdir(), 'reverie-genart-out-')));
       const outsideFile = join(outsideDir, 'private-notes.md');
       await fs.writeFile(outsideFile, 'secret');
       const linkPath = join(workspaceDir, 'x.md');
@@ -61,7 +61,7 @@ describe('generated artifact attachments', () => {
     });
 
     it('registers a real workspace file', async () => {
-      workspaceDir = await fs.realpath(await fs.mkdtemp(join(tmpdir(), 'codeman-genart-ws-')));
+      workspaceDir = await fs.realpath(await fs.mkdtemp(join(tmpdir(), 'reverie-genart-ws-')));
       const filePath = join(workspaceDir, 'mockup.png');
       await fs.writeFile(filePath, 'png-bytes');
 

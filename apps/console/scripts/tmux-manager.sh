@@ -2,7 +2,7 @@
 #
 # Reverie Tmux Session Manager
 # Interactive tool with arrow key navigation
-# Reads from ~/.codeman/mux-sessions.json
+# Reads from ~/.reverie/mux-sessions.json
 #
 
 # Colors
@@ -17,15 +17,15 @@ DIM='\033[2m'
 NC='\033[0m'
 REVERSE='\033[7m'
 
-# Use the same path as codeman (src/tmux-manager.ts)
-SESSIONS_FILE="${HOME}/.codeman/mux-sessions.json"
+# Use the same path as reverie (src/tmux-manager.ts)
+SESSIONS_FILE="${HOME}/.reverie/mux-sessions.json"
 
 # Dedicated tmux socket all Reverie sessions live on. MUST match
-# DEFAULT_CODEMAN_TMUX_SOCKET / CODEMAN_TMUX_SOCKET in src/tmux-manager.ts —
+# DEFAULT_REVERIE_TMUX_SOCKET / REVERIE_TMUX_SOCKET in src/tmux-manager.ts —
 # otherwise this script would talk to the user's default tmux server and never
 # see (or could mis-target) Reverie's sessions.
-CODEMAN_TMUX_SOCKET="${CODEMAN_TMUX_SOCKET:-codeman}"
-TMUX_CMD=(tmux -L "$CODEMAN_TMUX_SOCKET")
+REVERIE_TMUX_SOCKET="${REVERIE_TMUX_SOCKET:-reverie}"
+TMUX_CMD=(tmux -L "$REVERIE_TMUX_SOCKET")
 
 
 # Cached data
@@ -120,7 +120,7 @@ kill_session() {
 
     # SAFETY: Never kill own tmux session. Queried on the Reverie socket; if run
     # from a session on a different socket this returns empty (no match), which
-    # is fine — you can't be "inside" a Codeman-socket session you didn't attach to.
+    # is fine — you can't be "inside" a Reverie-socket session you didn't attach to.
     local current_session=$("${TMUX_CMD[@]}" display-message -p '#{session_name}' 2>/dev/null || echo "")
     if [[ -n "$current_session" && "$mux_name" == "$current_session" ]]; then
         echo -e "${RED}BLOCKED: Cannot kill own tmux session: $mux_name${NC}"

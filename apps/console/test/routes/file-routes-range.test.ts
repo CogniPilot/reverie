@@ -191,7 +191,7 @@ describe('file-raw range requests', () => {
   });
 
   it('still refuses files past the raw size cap before looking at Range', async () => {
-    // 3GB, past the 2GB CODEMAN_MAX_DOWNLOAD_BYTES default. The cap is checked
+    // 3GB, past the 2GB REVERIE_MAX_DOWNLOAD_BYTES default. The cap is checked
     // before the range, so a small slice of an oversized file is refused too.
     mockedStat.mockResolvedValue({ size: 3 * 1024 * 1024 * 1024, isFile: () => true } as never);
 

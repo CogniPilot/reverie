@@ -11,7 +11,7 @@ function handleOutput(session: Session, data: string): void {
 }
 
 describe('Codex terminal output filtering', () => {
-  it('keeps browser scrollback guards but skips Codeman row repair in hybrid render mode', () => {
+  it('keeps browser scrollback guards but skips Reverie row repair in hybrid render mode', () => {
     const session = new Session({ workingDir: '/tmp', mode: 'codex', codexConfig: { renderMode: 'hybrid' } });
     (session as unknown as SessionInternals)._ptyRows = 63;
 
@@ -266,7 +266,7 @@ describe('Codex terminal output filtering', () => {
       session,
       '\x1b[55;1H\x1b[2m• Working (1s)' +
         '\x1b[56;1H\x1b[1m›\x1b[0m ask' +
-        '\x1b[57;3Hgpt-5.5 xhigh fast · codeman · Working · Context 79% left'
+        '\x1b[57;3Hgpt-5.5 xhigh fast · reverie · Working · Context 79% left'
     );
     handleOutput(session, '\x1b[55;1H\x1b[2m• Working (2s)');
 

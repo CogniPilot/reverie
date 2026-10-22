@@ -49,7 +49,7 @@ export interface ActiveBashTool {
  * Used to trigger automatic image popup display in the web UI.
  */
 export interface ImageDetectedEvent {
-  /** Codeman session ID where the image was detected */
+  /** Reverie session ID where the image was detected */
   sessionId: string;
   /** Full path to the detected image file */
   filePath: string;
@@ -79,7 +79,7 @@ export type AttachmentDetectedType =
  * working directory. Used to render a compact attachment card in the web UI.
  */
 export interface AttachmentDetectedEvent {
-  /** Codeman session ID where the attachment was detected */
+  /** Reverie session ID where the attachment was detected */
   sessionId: string;
   /** Full path to the detected attachment file */
   filePath: string;

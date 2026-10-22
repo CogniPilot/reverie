@@ -25,7 +25,7 @@
 
   const STORAGE_KEY = 'reverie:owner-login-redirect';
   const ONCE_WINDOW_MS = 60000;
-  const base = String(global.__CODEMAN_BASE__ || '').replace(/\/+$/, '');
+  const base = String(global.__REVERIE_BASE__ || '').replace(/\/+$/, '');
   const nativeFetch = global.fetch;
   let redirected = false;
 

@@ -14,7 +14,7 @@ import { EmbassyPairing } from '../embassy-pairing.js';
 import { registerWorkspaceIconRoutes } from './routes/workspace-icon-routes.js';
 import { WorkspaceIconStore } from '../workspace-icons.js';
 /**
- * @fileoverview Codeman web server — central hub coordinating all subsystems.
+ * @fileoverview Reverie web server — central hub coordinating all subsystems.
  *
  * Fastify-based web server providing:
  * - ~111 REST API routes (delegated to `src/web/routes/` domain modules)
@@ -57,7 +57,9 @@ import { existsSync, mkdirSync, readFileSync, chmodSync } from 'node:fs';
 import fs from 'node:fs/promises';
 import { execSync } from 'node:child_process';
 import { hostname as getHostname, uptime as osUptime, homedir } from 'node:os';
-import { autoRestorePinnedIfEnabled } from './routes/reboot-restore-routes.js';
+import { deliverRecoveryPrompt } from '../company-recovery-prompt.js';
+import { CompanyWake } from '../company-wake.js';
+import { spendRebootRestore, autoRestorePinnedIfEnabled } from './routes/reboot-restore-routes.js';
 import {
   initStartedAtFromProc,
   looksLikeHostReboot,
@@ -65,7 +67,7 @@ import {
   planRebootRestore,
 } from '../reboot-restore.js';
 import { rebootRestoreRegistry } from './reboot-restore-registry.js';
-import { dataPath, getDataDir, CODEMAN_INSTANCE, resolveTmuxSocketName } from '../config/instance.js';
+import { dataPath, getDataDir, REVERIE_INSTANCE, resolveTmuxSocketName } from '../config/instance.js';
 import { getAugmentedPath, getClaudeBinaryPath } from '../utils/claude-cli-resolver.js';
 import { readRemoteHosts, rehydrateRemoteHostFields } from '../remote-hosts.js';
 import type { RemoteWakeRegistry } from '../remote-wake.js';
@@ -79,7 +81,7 @@ import { RespawnController, RespawnConfig } from '../respawn-controller.js';
 import type { TerminalMultiplexer } from '../mux-interface.js';
 import { createMultiplexer } from '../mux-factory.js';
 import { getStore } from '../state-store.js';
-import { envValue } from '../config/fleet-env.js';
+import { envValue } from '../config/reverie-env.js';
 import { TabLayoutService, type SessionPlacementHint } from '../tab-layout-service.js';
 import type { TabLayout } from '../tab-layout.js';
 import { ownerLayoutKey } from '../tab-layout-persistence.js';
@@ -331,7 +333,7 @@ import {
 
 /**
  * Get or generate a self-signed TLS certificate for HTTPS.
- * Certs are stored in ~/.codeman/certs/ and reused across restarts.
+ * Certs are stored in ~/.reverie/certs/ and reused across restarts.
  */
 function getOrCreateSelfSignedCert(): { key: string; cert: string } {
   const certsDir = dataPath('certs');
@@ -351,7 +353,7 @@ function getOrCreateSelfSignedCert(): { key: string; cert: string } {
   execSync(
     `openssl req -x509 -newkey rsa:2048 -nodes ` +
       `-keyout "${keyPath}" -out "${certPath}" ` +
-      `-days 365 -subj "/CN=codeman" ` +
+      `-days 365 -subj "/CN=reverie" ` +
       `-addext "subjectAltName=DNS:localhost,IP:127.0.0.1,IP:0.0.0.0"`,
     { stdio: 'pipe' }
   );
@@ -400,6 +402,8 @@ export class WebServer extends EventEmitter {
   private inputWatch?: ReturnType<typeof createInputWatch>;
   private chatBackup: ChatBackupScheduler | undefined;
   private companyService!: CompanyService;
+  private companyWake!: CompanyWake;
+  private companyWakeReady = false;
   private cronPort!: CronPort;
   private planService!: PlanService;
   private accountLogins: AccountLoginService | null = null;
@@ -487,7 +491,7 @@ export class WebServer extends EventEmitter {
   private readonly allowUnauthenticatedNetwork: boolean;
   private _pasteImageGcStop: (() => void) | null = null;
   private _eventLoopMonitor: EventLoopMonitorHandle | null = null;
-  /** Opt-in hooks-only listener on the docker bridge gateway (CODEMAN_DOCKER_BRIDGE_HOOKS). */
+  /** Opt-in hooks-only listener on the docker bridge gateway (REVERIE_DOCKER_BRIDGE_HOOKS). */
   private _dockerBridgeServer: import('node:http').Server | import('node:https').Server | null = null;
   private teamWatcherHandlers: {
     teamCreated: (config: unknown) => void;
@@ -510,10 +514,10 @@ export class WebServer extends EventEmitter {
     this.port = port;
     this.https = https;
     // Normalize so callers may pass raw operator input; '' == mounted at root.
-    this.basePath = normalizeBasePath(basePath || process.env.CODEMAN_BASE_URL);
+    this.basePath = normalizeBasePath(basePath || process.env.REVERIE_BASE_URL);
     this.testMode = testMode;
     this.allowUnauthenticatedNetwork =
-      allowUnauthenticatedNetwork || isExplicitlyEnabled(process.env.CODEMAN_ALLOW_UNAUTHENTICATED_NETWORK);
+      allowUnauthenticatedNetwork || isExplicitlyEnabled(process.env.REVERIE_ALLOW_UNAUTHENTICATED_NETWORK);
     this.titleHostname = titleHostname || getHostname();
     this.windowTitle = `reverie:${this.titleHostname}`;
     this.indexHtmlTemplate = readFileSync(join(__dirname, 'public', 'index.html'), 'utf-8');
@@ -641,7 +645,7 @@ export class WebServer extends EventEmitter {
     // QR token rotation — broadcast inline SVG for instant desktop refresh
     this.tunnelManager.on('qrTokenRotated', async () => {
       const url = this.tunnelManager.getUrl();
-      if (url && process.env.CODEMAN_PASSWORD) {
+      if (url && process.env.REVERIE_PASSWORD) {
         try {
           const svg = await this.tunnelManager.getQrSvg(url);
           this.broadcast(SseEvent.TunnelQrRotated, { svg });
@@ -653,7 +657,7 @@ export class WebServer extends EventEmitter {
 
     this.tunnelManager.on('qrTokenRegenerated', async () => {
       const url = this.tunnelManager.getUrl();
-      if (url && process.env.CODEMAN_PASSWORD) {
+      if (url && process.env.REVERIE_PASSWORD) {
         try {
           const svg = await this.tunnelManager.getQrSvg(url);
           this.broadcast(SseEvent.TunnelQrRegenerated, { svg });
@@ -1001,7 +1005,6 @@ export class WebServer extends EventEmitter {
           process.env.REVERIE_RUNTIME_STATE || join(dirname(getDataDir()), 'controller-state.json')
         ),
         employeeOf: (sessionId) => this.companyService?.view().employees.find((e) => e.sessionId === sessionId)?.id,
-        ctoEmployee: () => this.companyService?.view().settings.ctoId,
         keepers: () => ownerAuth.keepers(),
         admins: () => ownerAuth.admins(),
       }),
@@ -1035,9 +1038,9 @@ export class WebServer extends EventEmitter {
     this.app.get('/', async (req, reply) => {
       // A web-tab frame that reloaded on its dashboard's landing page. The proxy's
       // runtime shim maps `/webview/<cap>/` to exactly `/`, so that reload asks for
-      // Codeman's own root as an iframe navigation, and it used to get the app
+      // Reverie's own root as an iframe navigation, and it used to get the app
       // shell rendered inside the web tab. Only the credential-free form is taken
-      // (nothing in Codeman frames its root; the sandboxed frame has no cookie and
+      // (nothing in Reverie frames its root; the sandboxed frame has no cookie and
       // no Authorization); under a password the auth hook has answered it already.
       if (isLostWebviewRootFrame(req)) return sendLostWebviewFramePage(reply);
       return reply
@@ -1208,11 +1211,11 @@ export class WebServer extends EventEmitter {
       // `import('/chunk.js')`, `url(/img.png)` inside a stylesheet) lands here,
       // because `<base href>` cannot rewrite a URL built at runtime. Its Referer says
       // which dashboard to relay to. Deliberately placed on the 404 path so every
-      // real Codeman route still wins.
+      // real Reverie route still wins.
       //
       // Tried BEFORE the API-shaped 404, because a dashboard's own assets commonly
       // live under its `/api/...` namespace and were the one class this could never
-      // rescue. Reaching this handler at all already proves no Codeman route matched,
+      // rescue. Reaching this handler at all already proves no Reverie route matched,
       // and the relay declines unless the Referer carries a live capability, so
       // genuinely unknown `/api` paths still get the envelope below.
       if (await tryWebviewRefererFallback(req, reply, this.basePath)) return reply;
@@ -1288,7 +1291,9 @@ export class WebServer extends EventEmitter {
     registerAgentProfileRoutes(this.app, ctx);
     registerStatusTelemetryRoutes(this.app, ctx);
     registerSubscriptionProfileRoutes(this.app, this.subscriptionUsageReader, async (profileId) =>
-      (await this.planService.rows()).accounts.filter((row) => row.profileId === profileId).flatMap((row) => row.sessions.map((s) => s.name))
+      (await this.planService.rows()).accounts
+        .filter((row) => row.profileId === profileId)
+        .flatMap((row) => row.sessions.map((s) => s.name))
     );
     registerSystemRoutes(this.app, ctx);
     registerCaseRoutes(this.app, ctx);
@@ -1328,11 +1333,17 @@ export class WebServer extends EventEmitter {
     this.chatroomService = new ChatroomService({
       file: dataPath('chatrooms.json'),
       employeeOf: (sessionId) => {
-        const employees = this.companyService?.view(this.sessions.get(sessionId)?.owner).employees.filter((e) => e.sessionId === sessionId) ?? [];
+        const employees =
+          this.companyService
+            ?.view(this.sessions.get(sessionId)?.owner)
+            .employees.filter((e) => e.sessionId === sessionId) ?? [];
         return employees.length === 1 ? employees[0].id : undefined;
       },
       pronounsOf: (sessionId) => {
-        const employees = this.companyService?.view(this.sessions.get(sessionId)?.owner).employees.filter((e) => e.sessionId === sessionId) ?? [];
+        const employees =
+          this.companyService
+            ?.view(this.sessions.get(sessionId)?.owner)
+            .employees.filter((e) => e.sessionId === sessionId) ?? [];
         return employees.length === 1 ? employees[0].pronouns : undefined;
       },
       // Rooms and messages live in SQLite; chatrooms.json is imported once, when chat.db does not exist yet.
@@ -1368,8 +1379,13 @@ export class WebServer extends EventEmitter {
       dir: dataPath('chat-backups'),
       timeZone: () => this.companyService?.view(undefined).settings.timeZone,
       notify: (text, failed) => {
-        if (failed) void sendOwnerAlert(this.pushStore, 'Nightly chat backup failed. Details in #reverie and the console log.', { multiUser: isMultiUserMode() });
-        const room = this.chatroomService.rooms().find((r) => r.kind !== 'dm' && r.name.trim().toLowerCase() === 'reverie');
+        if (failed)
+          void sendOwnerAlert(this.pushStore, 'Nightly chat backup failed. Details in #reverie and the console log.', {
+            multiUser: isMultiUserMode(),
+          });
+        const room = this.chatroomService
+          .rooms()
+          .find((r) => r.kind !== 'dm' && r.name.trim().toLowerCase() === 'reverie');
         if (!room) {
           console.error(`[chat-backup] no #reverie room to post to: ${text}`);
           return;
@@ -1384,7 +1400,7 @@ export class WebServer extends EventEmitter {
       file: dataPath('company-research.json'),
       workspaceRoot:
         envValue(process.env, 'RESEARCH_ROOT') ||
-        join(homedir(), 'scratch', 'agent-fleet', 'research', resolveTmuxSocketName()),
+        join(homedir(), 'scratch', 'reverie', 'research', resolveTmuxSocketName()),
       runtime: companySessionRuntime(ctx),
     });
     await research.init();
@@ -1420,6 +1436,61 @@ export class WebServer extends EventEmitter {
         this.broadcast(SseEvent.SessionUpdated, { session: this.getSessionStateWithRespawn(session) });
       },
     });
+    this.companyWake = new CompanyWake({
+      company: () => companyStore.snapshot(),
+      saved: (id) => this.store.getSession(id) ?? undefined,
+      live: (id) => {
+        const session = this.sessions.get(id);
+        return !!session && session.pid !== null && !session.paneExit && session.status !== 'stopped';
+      },
+      closing: (id) => !this.companyWakeReady || this.cleaningUp.has(id),
+      noteRunning: (id) => this.companyService.setDesiredRunning(id, true, () => !this.cleaningUp.has(id)),
+      claim: (employeeId, sessionId, now, automatic) =>
+        this.companyService.claimWake(employeeId, sessionId, now, automatic),
+      wake: async (entry, allowed) => {
+        if (!allowed() || !rebootRestoreRegistry.beginSpending(entry.owner)) return false;
+        const parked = rebootRestoreRegistry.take((owner) => owner === entry.owner, [entry.sessionId], entry.owner);
+        const unspent = new Set(parked);
+        try {
+          if (!allowed()) return false;
+          const existing = this.sessions.get(entry.sessionId);
+          if (
+            existing?.pid !== null &&
+            existing?.pid !== undefined &&
+            !existing.paneExit &&
+            existing.status !== 'stopped'
+          )
+            return false;
+          if (existing) await this.discardPartiallyBuiltSession(entry.sessionId);
+          if (!allowed()) return false;
+          const result = await spendRebootRestore(this.createRouteContext(), [entry], unspent, allowed);
+          return result.restored.some((s) => s.id === entry.sessionId);
+        } finally {
+          rebootRestoreRegistry.releaseFlight(entry.owner, [...unspent]);
+          rebootRestoreRegistry.endSpending(entry.owner);
+        }
+      },
+      kickoff: async (employee, allowed) => {
+        const session = this.sessions.get(employee.sessionId);
+        if (!session) return;
+        const roster = companyStore
+          .snapshot()
+          .employees.filter((e) => e.owner === employee.owner)
+          .map((e) => ({
+            agentId: e.id,
+            name: e.name,
+            role: e.position,
+            reportsTo: e.reportsTo ?? 'owner',
+            desiredRunning: e.desiredRunning !== false,
+          }));
+        await deliverRecoveryPrompt(
+          session,
+          'Crash recovery: you are the owner-selected recovery expert. Continue with your existing memory and conversation. Wake all eligible desired-running experts in organization order; managers may delegate downward. Preserve deliberately stopped, paused and retired experts, skip already-live agents, and report failures. Stable agent IDs identify experts independently of their runtime sessions or models. With an explicit owner-granted recoverEmployees permission, call POST /api/company/employees/:id/wake through the authenticated console API; selection alone grants no permission. If permission is absent, ask the owner. Organization: ' +
+            JSON.stringify(roster),
+          () => allowed() && this.sessions.get(employee.sessionId) === session
+        );
+      },
+    });
     this.remoteWake = registerSessionRoutes(this.app, ctx, {
       company: this.companyService,
       resumeTakeover: {
@@ -1429,10 +1500,14 @@ export class WebServer extends EventEmitter {
       // A replacement that fails after the old session was stopped leaves the employee without one: record it and tell the owner.
       onReplacementFailed: (info) => {
         void this.chatroomService.auditEntry({ event: 'replacement_failed', ...info }).catch(() => {});
-        void sendOwnerAlert(this.pushStore, `Replacing ${info.employeeId ?? 'an employee'} failed after the old session was stopped; they have no running session. ${info.error}`, {
-          multiUser: isMultiUserMode(),
-          timeoutMs: 5000,
-        });
+        void sendOwnerAlert(
+          this.pushStore,
+          `Replacing ${info.employeeId ?? 'an employee'} failed after the old session was stopped; they have no running session. ${info.error}`,
+          {
+            multiUser: isMultiUserMode(),
+            timeoutMs: 5000,
+          }
+        );
       },
     });
     registerCompanyRoutes(
@@ -1440,7 +1515,8 @@ export class WebServer extends EventEmitter {
       ctx,
       this.companyService,
       new AvatarStore(dataPath('agent-avatars')),
-      new AvatarStore(dataPath('owner-avatars'))
+      new AvatarStore(dataPath('owner-avatars')),
+      (id) => this.companyWake.wakeOne(id)
     );
     // The server's board (one per console): issues, milestones, wins, blockers, decisions, focus. Audited writes.
     const boardStore = new BoardStore(dataPath('board.json'));
@@ -1456,7 +1532,13 @@ export class WebServer extends EventEmitter {
     // New decisions and polls waiting on the owner reach their devices as one batched push per 10 minutes (decision-alert.ts).
     const decisionAlerts = new DecisionAlerts({
       waiting: () => waitingForOwner(boardStore.snapshot(), this.chatroomService.rooms(), Date.now()),
-      alert: (text) => sendOwnerAlert(this.pushStore, text, { multiUser: isMultiUserMode(), timeoutMs: 5000, title: 'Decision waiting', board: true }),
+      alert: (text) =>
+        sendOwnerAlert(this.pushStore, text, {
+          multiUser: isMultiUserMode(),
+          timeoutMs: 5000,
+          title: 'Decision waiting',
+          board: true,
+        }),
     });
     void decisionAlerts.check().catch(() => undefined);
     this.decisionAlertTimer = setInterval(() => void decisionAlerts.check().catch(() => undefined), 60_000);
@@ -1465,7 +1547,10 @@ export class WebServer extends EventEmitter {
 
     // Roles (src/roles.ts): who holds Admin or Moderator is instance data in roles.json; the first holders come from
     // REVERIE_ROLES_SEED, a JSON array of {employeeId, roleId}, read only while the file does not exist.
-    const roles = new RolesStore(dataPath('roles.json'), seedAssignmentsFromEnv(process.env.REVERIE_ROLES_SEED, (line) => console.warn(line)));
+    const roles = new RolesStore(
+      dataPath('roles.json'),
+      seedAssignmentsFromEnv(process.env.REVERIE_ROLES_SEED, (line) => console.warn(line))
+    );
     await roles.init();
     // Embassy rooms joined as a guest: own files, never the chatroom store, so imports wake nothing. The routes need a
     // verified owner session in every policy mode (not only under enforce) and refuse any agent session header.
@@ -1478,37 +1563,55 @@ export class WebServer extends EventEmitter {
       dir: dataPath('embassy-channel'),
       opsFile: dataPath('embassy-host', 'ops.json'),
     });
-    await this.embassyHost.init().catch(() => console.warn('[embassy] channel secret unavailable; hosting stays unconfigured'));
+    await this.embassyHost
+      .init()
+      .catch(() => console.warn('[embassy] channel secret unavailable; hosting stays unconfigured'));
     this.embassyPairing = new EmbassyPairing({ dir: dataPath('embassy-pairings'), guest: this.embassyGuestClient });
     await this.embassyPairing.init();
     registerEmbassyPairingRoutes(this.app, this.embassyHost, this.embassyPairing, verifiedOwner, () =>
       this.getHostPolicy()
     );
-    registerChatroomRoutes(this.app, ctx, this.chatroomService, chatroomFiles, verifiedOwner, roles, (sessionId) =>
-      this.companyService?.view(this.sessions.get(sessionId)?.owner).employees.find((e) => e.sessionId === sessionId)?.id
+    registerChatroomRoutes(
+      this.app,
+      ctx,
+      this.chatroomService,
+      chatroomFiles,
+      verifiedOwner,
+      roles,
+      (sessionId) =>
+        this.companyService?.view(this.sessions.get(sessionId)?.owner).employees.find((e) => e.sessionId === sessionId)
+          ?.id
     );
     // Chat bots: the sender a scheduled 'post' job speaks as (see chat-bots.ts). The registry is instance data.
     const chatBots = new ChatBotRegistry(dataPath('chat-bots.json'));
     registerChatBotRoutes(this.app, chatBots);
     this.inputWatch = createInputWatch({
       ledgerFile: dataPath('input-watch-ledger.json'),
-      bot: () => isMultiUserMode() ? undefined : chatBots.get('input-watch'),
+      bot: () => (isMultiUserMode() ? undefined : chatBots.get('input-watch')),
       employee: (sessionId) => {
         const session = this.sessions.get(sessionId);
         if (!session || session.pid === null) return undefined;
-        return this.companyService.view().employees.find(e => e.sessionId === sessionId);
+        return this.companyService.view().employees.find((e) => e.sessionId === sessionId);
       },
       room: (roomId) => this.chatroomService.room(roomId),
       post: (bot, roomId, text, recent) => {
         this.chatroomService.checkBotPost(bot, roomId, recent);
         // Visibility only: never wake members or create owed replies from an alert.
-        return this.chatroomService.post(roomId, { kind: 'bot', botId: bot.id, name: bot.name,
-          icon: bot.icon ?? '🤖' }, text, 'all', { deliver: false });
+        return this.chatroomService.post(
+          roomId,
+          { kind: 'bot', botId: bot.id, name: bot.name, icon: bot.icon ?? '🤖' },
+          text,
+          'all',
+          { deliver: false }
+        );
       },
       failed: (text) => {
         console.warn(text);
-        void sendOwnerAlert(this.pushStore, text, { multiUser: isMultiUserMode(),
-          timeoutMs: 5000, title: 'Bot alert failed' }).catch(() => undefined);
+        void sendOwnerAlert(this.pushStore, text, {
+          multiUser: isMultiUserMode(),
+          timeoutMs: 5000,
+          title: 'Bot alert failed',
+        }).catch(() => undefined);
       },
     });
     this.cronService.setBotPoster({
@@ -1522,8 +1625,14 @@ export class WebServer extends EventEmitter {
         const room = this.chatroomService.room(roomId);
         if (!room) throw new Error('The room no longer exists');
         if (room.archivedAt) throw new Error('This room is archived');
-        if (!room.members.some((m) => m.sessionId === employee.sessionId)) throw new Error(`${employee.name} is no longer a member of this room`);
-        this.chatroomService.post(roomId, { kind: 'agent', sessionId: employee.sessionId, name: employee.name }, `⏰ routine: ${text}`, 'all');
+        if (!room.members.some((m) => m.sessionId === employee.sessionId))
+          throw new Error(`${employee.name} is no longer a member of this room`);
+        this.chatroomService.post(
+          roomId,
+          { kind: 'agent', sessionId: employee.sessionId, name: employee.name },
+          `⏰ routine: ${text}`,
+          'all'
+        );
         return { name: employee.name };
       },
       notifyDisabled: (employeeId, roomId, text) => {
@@ -1545,7 +1654,8 @@ export class WebServer extends EventEmitter {
         const room = this.chatroomService.room(roomId);
         return !!room && !room.archivedAt && room.members.some((m) => m.sessionId === sessionId);
       },
-      notificationRoomId: () => this.chatroomService.rooms().find((r) => r.kind !== 'dm' && r.name.trim().toLowerCase() === 'general')?.id,
+      notificationRoomId: () =>
+        this.chatroomService.rooms().find((r) => r.kind !== 'dm' && r.name.trim().toLowerCase() === 'general')?.id,
       notify: (roomId, text) => {
         try {
           this.chatroomService.post(roomId, { kind: 'system', name: 'system' }, text, 'all', { deliver: false });
@@ -1577,7 +1687,12 @@ export class WebServer extends EventEmitter {
           const value = req.headers[name];
           if (typeof value === 'string') headers[name] = value;
         }
-        const res = await this.app.inject({ method: 'POST', url: '/api/sessions', headers, payload: sessionCreateBody(launch) });
+        const res = await this.app.inject({
+          method: 'POST',
+          url: '/api/sessions',
+          headers,
+          payload: sessionCreateBody(launch),
+        });
         let json: { success?: boolean; error?: string; session?: { id?: unknown } } | undefined;
         try {
           json = res.json();
@@ -1655,7 +1770,9 @@ export class WebServer extends EventEmitter {
     );
     // Every account is visible to whoever holds plans.view_all: Admin, or a Lead of a live (not archived) room.
     const leadsALiveRoom = (id: string) =>
-      this.chatroomService.rooms().some((r) => !r.archivedAt && r.members.some((m) => m.sessionId === id && m.role === 'coordinator'));
+      this.chatroomService
+        .rooms()
+        .some((r) => !r.archivedAt && r.members.some((m) => m.sessionId === id && m.role === 'coordinator'));
     registerPlansRoutes(this.app, this.planService, this.accountLogins, {
       callerSession: (req) => resolveParentSessionId(ctx, req, undefined, ownerFor(req)),
       employees: (owner) =>
@@ -1689,31 +1806,46 @@ export class WebServer extends EventEmitter {
     const unavailableMoveExecutor = planMoveExecutor({
       ...planMoveRuntime,
       authorized: () => false,
-      request: async () => { throw new PlanMoveError('A signed-in browser request is required', 403); },
+      request: async () => {
+        throw new PlanMoveError('A signed-in browser request is required', 403);
+      },
     });
     const planMoves = new PlanMoves({
       ...unavailableMoveExecutor,
       load: () => planMoveStore.load(),
-      save: records => planMoveStore.save(records),
+      save: (records) => planMoveStore.save(records),
     });
-    registerPlanMoveRoutes(this.app, planMoves, ctx, ownerAuth, request => planMoveExecutor({
-      ...planMoveRuntime,
-      authorized: () => authenticatedPlanMover(request, ctx.authSessions, ownerAuth),
-      request: async (method, url, payload) => {
-        if (!authenticatedPlanMover(request, ctx.authSessions, ownerAuth))
-          throw new PlanMoveError('The owner sign-in expired', 403);
-        const result = await this.app.inject({
-          method,
-          url,
-          headers: { cookie: request.headers.cookie ?? '', host: request.headers.host ?? '', origin: String(request.headers.origin ?? ''), ...(payload === undefined ? {} : { 'content-type': 'application/json' }) },
-          ...(payload === undefined ? {} : { payload: JSON.stringify(payload) }),
-        });
-        const body = result.json();
-        if (result.statusCode >= 400 || body?.success === false)
-          throw new PlanMoveError(body?.error ?? 'The normal session launch path refused the move', result.statusCode >= 400 ? result.statusCode : 409);
-        return body;
-      },
-    }, ownerFor(request)));
+    registerPlanMoveRoutes(this.app, planMoves, ctx, ownerAuth, (request) =>
+      planMoveExecutor(
+        {
+          ...planMoveRuntime,
+          authorized: () => authenticatedPlanMover(request, ctx.authSessions, ownerAuth),
+          request: async (method, url, payload) => {
+            if (!authenticatedPlanMover(request, ctx.authSessions, ownerAuth))
+              throw new PlanMoveError('The owner sign-in expired', 403);
+            const result = await this.app.inject({
+              method,
+              url,
+              headers: {
+                cookie: request.headers.cookie ?? '',
+                host: request.headers.host ?? '',
+                origin: String(request.headers.origin ?? ''),
+                ...(payload === undefined ? {} : { 'content-type': 'application/json' }),
+              },
+              ...(payload === undefined ? {} : { payload: JSON.stringify(payload) }),
+            });
+            const body = result.json();
+            if (result.statusCode >= 400 || body?.success === false)
+              throw new PlanMoveError(
+                body?.error ?? 'The normal session launch path refused the move',
+                result.statusCode >= 400 ? result.statusCode : 409
+              );
+            return body;
+          },
+        },
+        ownerFor(request)
+      )
+    );
 
     registerWsRoutes(this.app, ctx, () => this.getHostPolicy());
   }
@@ -1889,6 +2021,19 @@ export class WebServer extends EventEmitter {
       }
     }
     this.store.setSession(session.id, state);
+    if (session.pid !== null && !session.paneExit && !this.cleaningUp.has(session.id)) {
+      void this.companyService
+        ?.setDesiredRunning(
+          session.id,
+          true,
+          () =>
+            this.sessions.get(session.id) === session &&
+            !this.cleaningUp.has(session.id) &&
+            session.pid !== null &&
+            !session.paneExit
+        )
+        .catch((error) => console.error('[company] could not persist running intent:', getErrorMessage(error)));
+    }
   }
 
   private saveRespawnConfig(sessionId: string, config: RespawnConfig, durationMinutes?: number): void {
@@ -1917,6 +2062,7 @@ export class WebServer extends EventEmitter {
     session?.markClosing(true);
 
     try {
+      if (killMux) await this.companyService?.setDesiredRunning(sessionId, false);
       await this._doCleanupSession(sessionId, killMux, reason);
     } finally {
       this.cleaningUp.delete(sessionId);
@@ -2161,16 +2307,16 @@ export class WebServer extends EventEmitter {
     );
     // Reverse-proxy sub-path support. The template ships `<base href="/">` and all
     // static asset refs are RELATIVE, so pointing the base at the mount prefix
-    // rewrites every asset URL for free. `window.__CODEMAN_BASE__` gives the
+    // rewrites every asset URL for free. `window.__REVERIE_BASE__` gives the
     // frontend the same prefix for the root-absolute URLs it builds at runtime
     // (fetch/SSE/WS), which `<base>` cannot touch. Injected right after `<base>`
     // so it is set before any (deferred) script runs. ONLY when a base is set —
     // at root ('') the template is left byte-identical to the historical output
-    // (the frontend reads a missing `__CODEMAN_BASE__` as root anyway).
+    // (the frontend reads a missing `__REVERIE_BASE__` as root anyway).
     if (this.basePath) {
       html = html.replace(
         '<base href="/">',
-        `<base href="${escapeHtmlText(this.basePath + '/')}">\n  <script>window.__CODEMAN_BASE__=${JSON.stringify(this.basePath)};</script>`
+        `<base href="${escapeHtmlText(this.basePath + '/')}">\n  <script>window.__REVERIE_BASE__=${JSON.stringify(this.basePath)};</script>`
       );
     }
     // Cache-bust same-origin module scripts + stylesheets so a normal reload
@@ -2214,13 +2360,13 @@ export class WebServer extends EventEmitter {
     // this real; the others follow the same rule so the class of bug stays out.
     if (soloSessionId) {
       const safeId = JSON.stringify(soloSessionId).replace(/</g, '\\u003c');
-      html = html.replace('</head>', () => `<script>window.__CODEMAN_SOLO__=${safeId};</script>\n</head>`);
+      html = html.replace('</head>', () => `<script>window.__REVERIE_SOLO__=${safeId};</script>\n</head>`);
     }
     // Gesture-control overlay (Phase 5): dashboard only (not solo popups, which
-    // have no tab strip). `CODEMAN_GESTURE=1` makes the feature *available* on
+    // have no tab strip). `REVERIE_GESTURE=1` makes the feature *available* on
     // this instance (it also widens CSP + serves the assets); the per-user
     // `gestureControlEnabled` setting (App Settings → Input, default OFF) is the
-    // actual on/off. We expose `__codemanGestureAvailable` so the settings UI can
+    // actual on/off. We expose `__reverieGestureAvailable` so the settings UI can
     // show the toggle only when the feature is available, and inject the bundle
     // (served same-origin from /gesture/, so 'self' covers it) only when enabled.
     // Tool availability (#200/#201): the welcome-screen run buttons, the run-mode
@@ -2284,14 +2430,14 @@ export class WebServer extends EventEmitter {
       });
       html = html.replace(
         '</head>',
-        () => `<script>window.__codemanCliAvailable=${JSON.stringify(available)};</script>\n</head>`
+        () => `<script>window.__reverieCliAvailable=${JSON.stringify(available)};</script>\n</head>`
       );
       // The launch surfaces consume this deliberately small projection rather than
       // carrying a second hand-maintained list of CLI ids. It includes disabled
       // entries so Settings can redraw immediately after a toggle, while each
       // renderer filters on `enabled`/`available` before offering a launch action.
       const cliCatalogJson = escapeScriptJson(JSON.stringify(cliCatalog));
-      html = html.replace('</head>', () => `<script>window.__codemanCliCatalog=${cliCatalogJson};</script>\n</head>`);
+      html = html.replace('</head>', () => `<script>window.__reverieCliCatalog=${cliCatalogJson};</script>\n</head>`);
       // Which run modes the Run-menu picker (docs/custom-model-endpoints-plan.md) may
       // generate an entry for: read generically off the registry's `capabilities`
       // (never an id list here) so a CLI whose customModelInjection lands later shows
@@ -2300,21 +2446,21 @@ export class WebServer extends EventEmitter {
       const customModelClis = enabledClis()
         .filter((entry) => entry.kind === 'agent' && entry.capabilities.customModelInjection.kind !== 'unsupported')
         .map((entry) => ({ id: entry.id, label: entry.label }));
-      // Unlike the boolean-only __codemanCliAvailable above, this payload carries
+      // Unlike the boolean-only __reverieCliAvailable above, this payload carries
       // `label`, a string a user's own clis.json can set (CliEntry.label, up to 60
       // chars) — see escapeScriptJson's own doc comment for why that needs escaping
-      // and __codemanCliAvailable's booleans never did.
+      // and __reverieCliAvailable's booleans never did.
       const customModelClisJson = escapeScriptJson(JSON.stringify(customModelClis));
       html = html.replace(
         '</head>',
-        () => `<script>window.__codemanCustomModelClis=${customModelClisJson};</script>\n</head>`
+        () => `<script>window.__reverieCustomModelClis=${customModelClisJson};</script>\n</head>`
       );
     }
     // How many columns each run mode indents its transcript by, so a copy can drop
     // that much. Read off `capabilities` like the payload above and never as an id
     // list here, so a CLI that declares a gutter later needs no frontend change.
     // Ids and small integers only, no user-settable strings, so JSON.stringify
-    // alone is enough (same reasoning as __codemanCliAvailable's booleans).
+    // alone is enough (same reasoning as __reverieCliAvailable's booleans).
     //
     // ⚠️ Outside the `if (!soloSessionId)` block above, unlike every other payload
     // here: a detached session window (`/session/:id`) runs a terminal, so Ctrl+C
@@ -2329,7 +2475,7 @@ export class WebServer extends EventEmitter {
     }
     html = html.replace(
       '</head>',
-      () => `<script>window.__codemanTranscriptGutter=${JSON.stringify(gutterClis)};</script>\n</head>`
+      () => `<script>window.__reverieTranscriptGutter=${JSON.stringify(gutterClis)};</script>\n</head>`
     );
     // Which run modes page their own transcript on PageUp/PageDown, for the scroll
     // fallback over a pane with no local history (`_maybePageCliTranscript`). Read off
@@ -2342,17 +2488,17 @@ export class WebServer extends EventEmitter {
       .map((entry) => entry.id);
     html = html.replace(
       '</head>',
-      () => `<script>window.__codemanTranscriptPageKeys=${JSON.stringify(pageKeyClis)};</script>\n</head>`
+      () => `<script>window.__reverieTranscriptPageKeys=${JSON.stringify(pageKeyClis)};</script>\n</head>`
     );
-    if (!soloSessionId && process.env.CODEMAN_GESTURE === '1') {
-      html = html.replace('</head>', () => `<script>window.__codemanGestureAvailable=true;</script>\n</head>`);
+    if (!soloSessionId && process.env.REVERIE_GESTURE === '1') {
+      html = html.replace('</head>', () => `<script>window.__reverieGestureAvailable=true;</script>\n</head>`);
       if (settings.gestureControlEnabled === true) {
         const v = this.gestureBundleVersion();
         // Relative src so the injected `<base href>` resolves it under the mount
         // prefix (a root-absolute `/gesture/...` would escape a sub-path mount).
         html = html.replace(
           '</head>',
-          () => `<script type="module" src="gesture/gesture-codeman.js${v}"></script>\n</head>`
+          () => `<script type="module" src="gesture/gesture-reverie.js${v}"></script>\n</head>`
         );
       }
     }
@@ -2380,12 +2526,12 @@ export class WebServer extends EventEmitter {
    *  without a version that changes on redeploy the browser would keep running a
    *  stale bundle forever. Empty string if the file is missing. */
   private gestureBundleVersion(): string {
-    const v = this.assetVersion(join(__dirname, 'public', 'gesture', 'gesture-codeman.js'));
+    const v = this.assetVersion(join(__dirname, 'public', 'gesture', 'gesture-reverie.js'));
     return v === null ? '' : `?v=${v}`;
   }
 
   /** Append ?v=<content digest> to every same-origin .js/.css reference in the page so a
-   *  normal reload always serves the latest. Codeman's static assets are sent
+   *  normal reload always serves the latest. Reverie's static assets are sent
    *  with `Cache-Control: max-age=1y, immutable` and the script/link tags carry
    *  no version, so without this an edited module (panels-ui.js, styles.css, …)
    *  stays cached until a manual hard refresh. The digest is memoized (1s TTL) so a
@@ -2482,12 +2628,21 @@ export class WebServer extends EventEmitter {
       // The same two paths as the chat backup: a #reverie system line (shown, not typed into
       // members' panes) and an owner push.
       alertFullAccessMissing: (session: Session, data: FullAccessMissing) => {
-        const why = data.reason === 'no-cli' ? `no ${session.mode} process was found under pane pid ${data.pid}` : `pane pid ${data.pid} lacks ${data.missing.join(' ')}`;
+        const why =
+          data.reason === 'no-cli'
+            ? `no ${session.mode} process was found under pane pid ${data.pid}`
+            : `pane pid ${data.pid} lacks ${data.missing.join(' ')}`;
         const text = `${session.name || session.id} started without full access: ${why}. Check its permissions before relying on it.`;
-        void sendOwnerAlert(this.pushStore, text, { multiUser: isMultiUserMode(), timeoutMs: 5000, title: 'Full access missing' });
+        void sendOwnerAlert(this.pushStore, text, {
+          multiUser: isMultiUserMode(),
+          timeoutMs: 5000,
+          title: 'Full access missing',
+        });
         const room = fullAccessAlertRoom(this.chatroomService?.rooms() ?? [], session.owner);
         if (!room) {
-          console.error(`[full-access] no #reverie room of owner ${session.owner ?? '(single-user)'} to post to: ${text}`);
+          console.error(
+            `[full-access] no #reverie room of owner ${session.owner ?? '(single-user)'} to post to: ${text}`
+          );
           return;
         }
         this.chatroomService.post(room.id, { kind: 'system', name: 'full access' }, text, 'all', { deliver: false });
@@ -2498,12 +2653,12 @@ export class WebServer extends EventEmitter {
   /**
    * Register a terminal-requested external file as a live attachment and
    * broadcast it. Triggered by the session's `attachmentRequested` event
-   * (codeman://attach magic links). Because terminal output is
+   * (reverie://attach magic links). Because terminal output is
    * attacker-influenceable (a prompt-injected session can print an arbitrary
-   * `codeman://attach?path=` link), the scanned path is FORCE-confined to the
+   * `reverie://attach?path=` link), the scanned path is FORCE-confined to the
    * session workspace — passive magic links can't expose arbitrary host files.
    * Deliberate cross-workspace attachment goes through the explicit,
-   * Origin-guarded `POST /attachments` route (and `codeman attach`, which POSTs
+   * Origin-guarded `POST /attachments` route (and `reverie attach`, which POSTs
    * directly inside a managed session). Codex-mode `Saved to:` requests
    * (`source: 'codex-generated'`) instead go through
    * registerGeneratedArtifactAttachment, which stays force-confined unless the
@@ -2597,7 +2752,7 @@ export class WebServer extends EventEmitter {
     return undefined;
   }
 
-  // Read ~/.codeman/settings.json once and return the parsed object.
+  // Read ~/.reverie/settings.json once and return the parsed object.
   // Cached for 2s to avoid redundant reads during session creation bursts.
   // The settings PUT route writes the file without invalidating this cache, so
   // callers that must observe a just-saved value (e.g. renderIndexHtml on a
@@ -2655,18 +2810,18 @@ export class WebServer extends EventEmitter {
     return resolveTerminalHistoryConfig(settings);
   }
 
-  // Whether the Codeman agent skill is injected into cases on Claude session create
+  // Whether the Reverie agent skill is injected into cases on Claude session create
   // (synced `agentSkillEnabled` setting, default OFF; docs/agent-control-plan.md §2).
   private async getAgentSkillEnabled(): Promise<boolean> {
     const settings = await this.readSettings();
     return settings.agentSkillEnabled === true;
   }
 
-  // Whether a Claude session installs Codeman's hooks block into its workspace
+  // Whether a Claude session installs Reverie's hooks block into its workspace
   // (synced `workspaceHooksEnabled` setting). Default ON — an absent key means a
   // user who has never seen this setting, and OFF for them would mean no tab
   // alerts, no Approvals Inbox and no respawn idle signals in every workspace
-  // Codeman did not scaffold itself.
+  // Reverie did not scaffold itself.
   private async getWorkspaceHooksEnabled(): Promise<boolean> {
     const settings = await this.readSettings();
     return settings.workspaceHooksEnabled !== false;
@@ -2919,6 +3074,10 @@ export class WebServer extends EventEmitter {
    */
   private async cleanupStaleSessions(): Promise<number> {
     const activeSessionIds = new Set(this.sessions.keys());
+    for (const employee of this.companyService?.registeredEmployees() ?? []) {
+      if (employee.desiredRunning !== false && this.store.getSession(employee.sessionId))
+        activeSessionIds.add(employee.sessionId);
+    }
     const result = await this.tabLayouts.runStaleSessionCleanup(activeSessionIds, (ids) =>
       this.store.cleanupSessionsByIds(ids)
     );
@@ -3266,7 +3425,7 @@ export class WebServer extends EventEmitter {
     }
 
     const vapidKeys = this.pushStore.getVapidKeys();
-    webpush.setVapidDetails('mailto:codeman@localhost', vapidKeys.publicKey, vapidKeys.privateKey);
+    webpush.setVapidDetails('mailto:reverie@localhost', vapidKeys.publicKey, vapidKeys.privateKey);
 
     // Multi-user: a session-scoped push (all PUSH_EVENT_MAP events carry a sessionId)
     // must reach only the owner's devices (+ admins) — the body embeds the session
@@ -3277,12 +3436,12 @@ export class WebServer extends EventEmitter {
 
     const payload = JSON.stringify({
       title: template.title,
-      // Hostname-aware prefix so OS-level notifications from multiple Codeman
+      // Hostname-aware prefix so OS-level notifications from multiple Reverie
       // instances (laptop / dev box / NAS) are unambiguous in the system tray.
       // Mirrors the in-page Notification format in notification-manager.js.
       hostTitle: this.windowTitle,
       body,
-      tag: `codeman-${event}-${sessionId}`,
+      tag: `reverie-${event}-${sessionId}`,
       sessionId,
       // Approvals Inbox item id: a click opens the app on that card (it never answers from the
       // notification). Gated on the opt-in setting. Supervised-hook CLIs (DeepSeek) omit it upstream.
@@ -3411,22 +3570,22 @@ export class WebServer extends EventEmitter {
   }
 
   async start(): Promise<void> {
-    // Multi-user first boot: create the initial admin from CODEMAN_USERNAME/PASSWORD
+    // Multi-user first boot: create the initial admin from REVERIE_USERNAME/PASSWORD
     // if there are no users yet, else refuse to start (there would be no way in).
     if (isMultiUserMode() && !this.testMode) {
       const boot = await bootstrapInitialAdmin();
       if (boot.status === 'missing-env') {
         throw new Error(
           'Multi-user mode is enabled but users.json has no users. Create the first admin with ' +
-            '`reverie users add <name> --admin` (or set CODEMAN_USERNAME/CODEMAN_PASSWORD for one-time bootstrap).'
+            '`reverie users add <name> --admin` (or set REVERIE_USERNAME/REVERIE_PASSWORD for one-time bootstrap).'
         );
       }
       if (boot.status === 'created') {
         console.log(
-          `✓ Multi-user: bootstrapped initial admin "${boot.username}" from CODEMAN_USERNAME/CODEMAN_PASSWORD`
+          `✓ Multi-user: bootstrapped initial admin "${boot.username}" from REVERIE_USERNAME/REVERIE_PASSWORD`
         );
       }
-      console.log('✓ Multi-user mode active (per-user accounts in users.json; CODEMAN_PASSWORD is ignored for login)');
+      console.log('✓ Multi-user mode active (per-user accounts in users.json; REVERIE_PASSWORD is ignored for login)');
     }
 
     await this.setupRoutes();
@@ -3448,6 +3607,7 @@ export class WebServer extends EventEmitter {
     if (!this.testMode) {
       const restored = await this.restoreMuxSessions();
       await this.finalizeRestoredState(restored);
+      this.companyWakeReady = restored;
       await this.autoRestorePinnedAfterRestart();
 
       // Instance-scoped reaper: after restore, `docker rm -f` managed containers of
@@ -3456,7 +3616,7 @@ export class WebServer extends EventEmitter {
       // still referenced by a restored session are preserved.
       if (restored) {
         void import('../docker-hosts.js')
-          .then(({ reapOrphanedDockerContainers }) => reapOrphanedDockerContainers(getDataDir(), CODEMAN_INSTANCE))
+          .then(({ reapOrphanedDockerContainers }) => reapOrphanedDockerContainers(getDataDir(), REVERIE_INSTANCE))
           .then((reaped) => {
             if (reaped.length > 0)
               console.log(`[Docker] reaped ${reaped.length} orphaned container(s): ${reaped.join(', ')}`);
@@ -3492,7 +3652,7 @@ export class WebServer extends EventEmitter {
 
     await this.app.listen({ port: this.port, host: this.host });
     // A `port: 0` bind gets its number from the OS. Everything below and every later
-    // reader (the banner, CODEMAN_API_URL, the docker bridge listener, the
+    // reader (the banner, REVERIE_API_URL, the docker bridge listener, the
     // unauthenticated-bind warnings, the route context's getter) must see that number,
     // not the 0 that was asked for.
     const address = this.app.server.address();
@@ -3506,7 +3666,7 @@ export class WebServer extends EventEmitter {
     }
     const protocol = this.https ? 'https' : 'http';
     const displayHost = this.host === '0.0.0.0' ? 'localhost' : this.host;
-    // The only startup banner: `codeman web` used to print its own copy of this
+    // The only startup banner: `reverie web` used to print its own copy of this
     // line, but the daemon and service launch paths never go through the CLI.
     console.log(
       palette.ok(
@@ -3533,21 +3693,21 @@ export class WebServer extends EventEmitter {
     // Anti-DNS-rebinding Host allowlist is always on. Localhost, any bare IP, the
     // bind host, *.ts.net / *.trycloudflare.com / *.cfargotunnel.com, and the active
     // managed tunnel are accepted automatically; add any other domain you front this
-    // with (e.g. a custom reverse-proxy host) via CODEMAN_ALLOWED_HOSTS=host1,.suffix.
-    const extraAllowed = (process.env.CODEMAN_ALLOWED_HOSTS || '').trim();
+    // with (e.g. a custom reverse-proxy host) via REVERIE_ALLOWED_HOSTS=host1,.suffix.
+    const extraAllowed = (process.env.REVERIE_ALLOWED_HOSTS || '').trim();
     if (extraAllowed) {
       console.log(`   Host allowlist also accepts: ${extraAllowed}`);
     }
 
-    // Codeman binds loopback (127.0.0.1) by default, which is safe out of the box.
+    // Reverie binds loopback (127.0.0.1) by default, which is safe out of the box.
     // If the user opts into a non-loopback bind (e.g. --host 0.0.0.0) WITHOUT a
     // password we no longer refuse to start — that surprised people whose setups
     // "just worked" before. Instead we start and warn loudly, pointing at the ways
     // to secure it. --allow-unauthenticated-network just acknowledges the risk (a
     // terser note). See docs/security-architecture.md.
     // Multi-user mode with >= 1 enabled user satisfies the auth requirement even
-    // without CODEMAN_PASSWORD (every person has their own credential).
-    const authActive = !!process.env.CODEMAN_PASSWORD || (isMultiUserMode() && (await hasUsers()));
+    // without REVERIE_PASSWORD (every person has their own credential).
+    const authActive = !!process.env.REVERIE_PASSWORD || (isMultiUserMode() && (await hasUsers()));
     if (!isLoopbackBindHost(this.host) && !authActive) {
       // Painted like the CLI's copy of the same warning. chalk degrades to plain
       // text off a TTY, so journald and web.log stay free of escape codes.
@@ -3568,7 +3728,7 @@ export class WebServer extends EventEmitter {
           palette.err(`   Anyone who can reach ${displayHost}:${this.port} can control your Claude sessions.`)
         );
         console.warn(palette.warn('   Secure it with ONE of:'));
-        console.warn(palette.warn('     • set CODEMAN_PASSWORD=<password>   (HTTP Basic auth), or'));
+        console.warn(palette.warn('     • set REVERIE_PASSWORD=<password>   (HTTP Basic auth), or'));
         console.warn(palette.warn('     • bind loopback only: --host 127.0.0.1, then front it with an'));
         console.warn(palette.warn('       authenticated tunnel (cloudflared) or `tailscale serve`, or'));
         console.warn(palette.warn('     • keep this bind and accept the risk: --allow-unauthenticated-network'));
@@ -3579,10 +3739,10 @@ export class WebServer extends EventEmitter {
     // Set API URL for child processes (MCP server, spawned sessions)
     const apiHost =
       this.host === '0.0.0.0' || this.host === 'localhost' || this.host === '::1' ? '127.0.0.1' : this.host;
-    process.env.CODEMAN_API_URL = `${protocol}://${apiHost}:${this.port}`;
+    process.env.REVERIE_API_URL = `${protocol}://${apiHost}:${this.port}`;
 
     // Ensure the COD-54 hook secret exists on disk before any session exports
-    // $CODEMAN_HOOK_SECRET_FILE — hook curls cat that path at execution time.
+    // $REVERIE_HOOK_SECRET_FILE — hook curls cat that path at execution time.
     getHookSecret();
 
     // Main Codex subscription limits come from the signed-in local CLI. Keep
@@ -3594,6 +3754,17 @@ export class WebServer extends EventEmitter {
         this.companyService
           .tick()
           .catch((err: unknown) => console.error('[company] research tick failed:', getErrorMessage(err)));
+      const tickWake = () =>
+        this.companyWake
+          .tick()
+          .then((report) => {
+            for (const item of report.skipped)
+              if (item.reason === 'kickoff-failed' || item.reason === 'wake-failed')
+                console.error('[company] crash recovery needs owner attention:', item.employeeId, item.reason);
+          })
+          .catch((error: unknown) => console.error('[company] crash wake failed:', getErrorMessage(error)));
+      void tickWake();
+      this.cleanup.setInterval(() => void tickWake(), 30_000, { description: 'Company crash recovery' });
       void tickCompany();
       this.cleanup.setInterval(() => void tickCompany(), 30_000, { description: 'Company research schedule' });
       void this.refreshCodexPlanUsage();
@@ -3843,7 +4014,11 @@ export class WebServer extends EventEmitter {
   private async autoRestorePinnedAfterRestart(): Promise<void> {
     try {
       const startedAt = Date.now();
-      const result = await autoRestorePinnedIfEnabled(await this.readSettings(true), this.createRouteContext());
+      const result = await autoRestorePinnedIfEnabled(
+        await this.readSettings(true),
+        this.createRouteContext(),
+        new Set(this.companyService.registeredEmployees().map((e) => e.sessionId))
+      );
       if (!result) return;
       const { restored, skipped } = result;
       // Restores run before listen (that is the ordering guarantee), so log what it cost.
@@ -3950,7 +4125,7 @@ export class WebServer extends EventEmitter {
       session.setAutoClear(saved.autoClearEnabled ?? false, saved.autoClearThreshold);
     }
     if (saved.autoResumeEnabled) {
-      // The stamp is re-armed by default, because a Codeman restart leaves the
+      // The stamp is re-armed by default, because a Reverie restart leaves the
       // limit footer un-reprinted and dropping it there would strand the pause.
       // A reboot restore opts out: that stamp predates the reboot, the pane is
       // new, and honouring it means every session the user restored types
@@ -4028,7 +4203,7 @@ export class WebServer extends EventEmitter {
 
     // --- what anything else may have attached to this id in the meantime ---
     // A rebuild can fail AFTER startInteractive() resolved, and a restored
-    // workspace still carries Codeman's hooks, so the CLI can post a hook event
+    // workspace still carries Reverie's hooks, so the CLI can post a hook event
     // within milliseconds. Each of these outlives the listeners and would
     // otherwise meet the retry, which reuses the same session id by design.
     this.stopTranscriptWatcher(sessionId);
@@ -4449,7 +4624,7 @@ export class WebServer extends EventEmitter {
   }
 
   /**
-   * Install Codeman's hooks into the workspaces of the sessions just recovered.
+   * Install Reverie's hooks into the workspaces of the sessions just recovered.
    *
    * Deduped by workspace, because sessions in one repo share a single
    * `.claude/settings.local.json` and the write is otherwise repeated per tab.
@@ -4458,16 +4633,16 @@ export class WebServer extends EventEmitter {
    * would scaffold a stray directory locally), and never for a docker case that
    * opted out of hooks.
    *
-   * Failures are swallowed per workspace: `ensureCodemanHooks` already refuses
+   * Failures are swallowed per workspace: `ensureReverieHooks` already refuses
    * unsafe targets with a warning, and a workspace we cannot write to must not
    * stop the rest of recovery.
    *
    * Skipped entirely when `workspaceHooksEnabled` is OFF: that setting exists so a
-   * user can keep Codeman out of their repos, and a boot-time sweep is the last
+   * user can keep Reverie out of their repos, and a boot-time sweep is the last
    * place that should ignore it.
    *
    * A workspace that no longer EXISTS is skipped by applyWorkspaceHooks: a tmux
-   * session can outlive its deleted repo, and `ensureCodemanHooks` mkdir -p's, so
+   * session can outlive its deleted repo, and `ensureReverieHooks` mkdir -p's, so
    * the sweep used to resurrect the directory as an empty tree holding only
    * `.claude/settings.local.json`.
    */
@@ -4529,19 +4704,19 @@ export class WebServer extends EventEmitter {
   }
 
   /**
-   * Opt-in (CODEMAN_DOCKER_BRIDGE_HOOKS=1): start a SECOND listener on the docker
+   * Opt-in (REVERIE_DOCKER_BRIDGE_HOOKS=1): start a SECOND listener on the docker
    * bridge gateway IP that serves ONLY the hook endpoints and delegates them into
    * the main Fastify pipeline. This lets in-container hooks reach a loopback-bound
    * server (they call back via host.docker.internal = the bridge gateway) without
    * exposing the full API or the LAN. Bind IP is auto-detected (default bridge
-   * gateway) or set via CODEMAN_DOCKER_BRIDGE_HOST.
+   * gateway) or set via REVERIE_DOCKER_BRIDGE_HOST.
    */
   private async _startDockerBridgeHooksListener(): Promise<void> {
-    if (!isExplicitlyEnabled(process.env.CODEMAN_DOCKER_BRIDGE_HOOKS)) return;
+    if (!isExplicitlyEnabled(process.env.REVERIE_DOCKER_BRIDGE_HOOKS)) return;
     const { detectDockerBridgeGateway } = await import('../docker-hosts.js');
-    const bridgeHost = (process.env.CODEMAN_DOCKER_BRIDGE_HOST || '').trim() || (await detectDockerBridgeGateway());
+    const bridgeHost = (process.env.REVERIE_DOCKER_BRIDGE_HOST || '').trim() || (await detectDockerBridgeGateway());
     if (!bridgeHost) {
-      console.log('[Docker] CODEMAN_DOCKER_BRIDGE_HOOKS set but no docker bridge gateway found — skipping');
+      console.log('[Docker] REVERIE_DOCKER_BRIDGE_HOOKS set but no docker bridge gateway found — skipping');
       return;
     }
     // Only the hook endpoints are served on the bridge — never the full API.
@@ -4607,7 +4782,7 @@ export class WebServer extends EventEmitter {
     }
 
     // The background `dsh web` is detached so its whole plugin tree can be
-    // signalled at once, which also means it would OUTLIVE Codeman and hold its
+    // signalled at once, which also means it would OUTLIVE Reverie and hold its
     // port against the next start — the exact EADDRINUSE this feature already
     // got wrong once.
     void stopDeepSeekWeb();

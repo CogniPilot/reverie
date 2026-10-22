@@ -1,7 +1,7 @@
 /**
  * @fileoverview Status-telemetry route.
  *
- * Receives Claude Code statusline payloads POSTed by the Codeman-managed
+ * Receives Claude Code statusline payloads POSTed by the Reverie-managed
  * statusLine exporter (see `hooks-config.generateStatusLineCommand`) and
  * broadcasts the parsed plan-usage limits (5-hour + weekly) to SSE clients for
  * the header "Plan Usage Limits" chip. Auth-exempt like `/api/hook-event`

@@ -1,10 +1,14 @@
 # Temporary OpenModelica stopgap; persistence plan superseded
 
+
+Here, coordinator means an owner-appointed agent with explicit orchestration
+permission. CTO or COO titles alone grant no approval or host authority.
 **Status:** the copied compiler is a documented temporary stopgap only. Preserve
 it until the owner decides otherwise. The permanent route is agent-managed,
 single-user Nix inside the container/image, using the pinned Rumoca dev shell.
 
-The following proposals are **SUPERSEDED / NOT ADOPTED**: `docker/Containerfile.omc`,
+The following proposals are **SUPERSEDED / NOT ADOPTED**: the removed OpenModelica
+Dockerfile layering proposal,
 `scripts/install-omc-runtime`, and re-unpacking the host-made closure at recreation.
 Do not run the historical restore/build commands below or use those files for a
 new deployment. They remain as review evidence; no copied paths, archives or
@@ -67,7 +71,7 @@ bash -euc 'while IFS= read -r store_path; do nix-store --verify-path "$store_pat
 
 All 55 must verify against the imported host records. A mismatch fails acceptance;
 do not replace expected hashes with hashes computed from the copied contents.
-Follow the CTO's agreed fallback on failure, preserving data and logs. This does
+Follow the owner-appointed coordinator's agreed fallback on failure, preserving data and logs. This does
 not authorize automatic deletion or another host closure copy.
 
 Then, from the Rumoca checkout at the recorded CI commit, evaluate the pinned
@@ -108,38 +112,10 @@ The initial install used a cached exact derivation, so it required zero compilat
 and no dependency downloads. The tar is 1,366,732,800 bytes; the closure NAR size is
 1,336,215,672 bytes. Reserve about 3 GiB for the archive and installed copy.
 
-## Superseded image proposal (historical only)
+## Retired image proposal
 
-`docker/Containerfile.omc` layers only the selected closure onto an already reviewed
-Reverie image. It checks the same archive hash in an extraction stage, then copies
-only the store paths into the final image. The archive is absent from the final
-image filesystem. Do not commit the binary archive to this repository.
-
-After canonical console/runtime reconciliation and image review, build on the host:
-
-```sh
-# Set these to the already reviewed base-image digest and chosen local output tag.
-: "${REVERIE_BASE_IMAGE:?reviewed base-image digest required}"
-: "${REVERIE_OMC_IMAGE:?local output image tag required}"
-omc_context="$HOME/git/scratch/reverie/cache/openmodelica/a96aa1a682c463b0fd2d285b486c09a8b7fe496d"
-scripts/fleet-container engine build --pull=never \
-  --build-context "omc-runtime=$omc_context" \
-  --build-arg "REVERIE_BASE_IMAGE=$REVERIE_BASE_IMAGE" \
-  --file docker/Containerfile.omc --tag "$REVERIE_OMC_IMAGE" .
-```
-
-This is a local image build, not publishing. Review the image and recreate through
-the normal maintenance process, retaining rollback and persistent agent histories.
-The initial installation did not build an image or restart Reverie.
-
-## Verify as the agent user
-
-Run `omc --version` through the sanitized build environment, then load a deliberately
-selected MSL and simulate a tiny model. Confirm the result file and numeric output;
-OMC script exit status alone does not prove that every scripting command succeeded.
-The initial smoke instantiated `Modelica.Blocks.Sources.Sine(amplitude=2, f=1)` and
-simulated to 0.25 seconds, expecting output 2. It used an existing local
-`4.1.0+maint.om` library copy in an isolated scratch HOME and library path. That was
-an installation smoke, not the pinned MSL canary and not a global library install.
-The canary must still load its own verified, pinned Modelica and ModelicaServices
-sources under its approved schedule.
+The former Dockerfile layering proposal was not adopted and has been removed.
+Future image additions must compose the selected OpenModelica package into the
+root Nix runtime derivation and rebuild `.#dockerImage`. Review the resulting
+closure and smoke checks before any owner-authorized deployment; preserve the
+current runtime and private histories until that cutover is approved.

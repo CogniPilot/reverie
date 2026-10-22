@@ -19,7 +19,7 @@ import { installRouteErrorHandler } from '../../src/web/route-error-handler.js';
 import { ApiErrorCode, httpStatusForErrorCode } from '../../src/types.js';
 
 // Keep the handler's IO fast + deterministic: stub the lifecycle log query so it
-// never reads the real ~/.codeman/session-lifecycle.jsonl, and point HOME at an
+// never reads the real ~/.reverie/session-lifecycle.jsonl, and point HOME at an
 // empty temp dir so the ~/.claude/projects transcript scan is a no-op.
 vi.mock('../../src/session-lifecycle-log.js', async (orig) => {
   const actual = await orig<typeof import('../../src/session-lifecycle-log.js')>();
@@ -148,7 +148,7 @@ describe('GET /api/sessions/unified', () => {
     writeFileSync(join(projDir, `${uuid}.jsonl`), line.repeat(60)); // >4000 bytes so the scanner keeps it
 
     const ctx = makeLiveCtx();
-    // Resumed session: the live Codeman session owns that conversation UUID.
+    // Resumed session: the live Reverie session owns that conversation UUID.
     const live = ctx.sessions.get('test-session-1') as unknown as { claudeSessionId?: string };
     live.claudeSessionId = uuid;
     harness = await createEnvelopeHarness(ctx);

@@ -30,7 +30,7 @@ existing shapes:
 
 | Question | Decision | Why |
 | --- | --- | --- |
-| Permission bypass | `GrokConfig.alwaysApprove` -> `--always-approve` | Grok's real flag (verified via `--help`): "Auto-approve all tool executions", i.e. its `bypassPermissions` mode. Config-level deny rules still apply on top. The Run button sends `true`, matching `runAntigravity()` and Claude's own `--dangerously-skip-permissions` default: Codeman sessions exist for autonomous work. |
+| Permission bypass | `GrokConfig.alwaysApprove` -> `--always-approve` | Grok's real flag (verified via `--help`): "Auto-approve all tool executions", i.e. its `bypassPermissions` mode. Config-level deny rules still apply on top. The Run button sends `true`, matching `runAntigravity()` and Claude's own `--dangerously-skip-permissions` default: Reverie sessions exist for autonomous work. |
 | Multi-user clamp branch | only-if-sent (codex/antigravity branch) | A bare `grok` spawn is grok's own ask-mode default, which is already safe, so the clamp only needs to force a SENT `alwaysApprove` off. Contrast pi, whose absent default is an answerable prompt and therefore needs the materialize branch. Cron needs nothing for grok for the same reason (`clampCronExternalCliConfigs`). |
 | Alt-screen strip | OUT of `isAltScreenStripMode()` | Grok is a fullscreen alternate-screen TUI with mouse support (its own scrollback pane, `pager.toml [terminal] alt_screen`), i.e. the opencode case, not the Ink repaint case. It falls through to the narrow tmux-attach strip like opencode/antigravity/pi. |
 | Resolver | version probe, like pi | `grok` has npm squatters (the unrelated `@vibe-kit/grok-cli` installs a `grok` bin). Candidates must pass `grok --version`; `GROK_VERSION_REGEX` is exported and shared with the dependency registry so doctor and run mode cannot disagree. The probe cannot tell two version-printing `grok`s apart, so `GET /api/grok/status` surfaces path AND version. Search dirs: `~/.grok/bin` first (installer target), then `~/.local/bin`, `/usr/local/bin`, `~/bin`. |
@@ -62,7 +62,7 @@ runMode setter), `app.js` (label, `gk` tab badge, kill-menu), `settings-ui.js`,
 `!important` pair are both load-bearing, see the pi plan's §2.9 cascade trap).
 
 Meta: `docker/agent.Dockerfile`, `install.sh`, `package.json` keyword, changeset,
-`skills/codeman/reference/*`, CLAUDE.md, READMEs, `architecture-invariants.md`,
+`skills/reverie/reference/*`, CLAUDE.md, READMEs, `architecture-invariants.md`,
 `remote-sessions.md`, `security-architecture.md`, `docker-cases.md`, `cron-guide.md`.
 
 Tests: `test/grok-mode.test.ts` + `test/grok-cli-resolver.test.ts` (new);
@@ -72,7 +72,7 @@ Tests: `test/grok-mode.test.ts` + `test/grok-cli-resolver.test.ts` (new);
 ## 4. Verification performed
 
 On this box, with grok 1.0.5 really installed and an isolated
-`CODEMAN_INSTANCE=grokwt` server (own data dir, own tmux socket, port 5077):
+`REVERIE_INSTANCE=grokwt` server (own data dir, own tmux socket, port 5077):
 
 1. `npm test` (the CI gate): green, 5900+ tests. `typecheck`, `lint`, `format:check`,
    `check:frontend-syntax`, `check:public-assets`, `check:lockfile`: green.

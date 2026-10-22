@@ -15,7 +15,7 @@ afterEach(async () => {
   for (const dir of owned.splice(0)) await fs.rm(dir, { recursive: true, force: true });
 });
 async function profile(id: string): Promise<SubscriptionProfile> {
-  const configDir = await fs.mkdtemp(join(tmpdir(), 'codeman-subscription-'));
+  const configDir = await fs.mkdtemp(join(tmpdir(), 'reverie-subscription-'));
   owned.push(configDir);
   return { id, label: id, provider: 'anthropic', configDir, openCodeDataDir: join(configDir, 'oc') };
 }

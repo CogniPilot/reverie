@@ -27,9 +27,9 @@ function harness(caseData: Record<string, unknown>, extra: { mode?: string } = {
   const requests: Array<{ url: string; body?: any }> = [];
   const events: string[] = [];
   let counter = 0;
-  const CodemanApp = function CodemanApp(this: any) {};
+  const ReverieApp = function ReverieApp(this: any) {};
   const context = vm.createContext({
-    CodemanApp,
+    ReverieApp,
     localStorage: { getItem: () => null, setItem: () => {} },
     document: { getElementById: (id: string) => elements[id] ?? null },
     fetch: async (url: string, init?: { body?: string }) => {
@@ -61,7 +61,7 @@ function harness(caseData: Record<string, unknown>, extra: { mode?: string } = {
       filename: file,
     });
   }
-  const app = new (CodemanApp as any)();
+  const app = new (ReverieApp as any)();
   app._runMinLockMs = 0;
   app._runMode = extra.mode ?? 'claude';
   app.terminal = { clear: () => {}, writeln: () => {}, focus: () => {}, cols: 80, rows: 24 };

@@ -852,7 +852,7 @@ describe('embassy pairing routes', () => {
       app.inject({ ...opts, headers: { 'x-reverie-csrf': '1', ...(opts.headers as Record<string, string>) } });
     try {
       for (const url of ['/api/embassy-host', '/api/embassy-pairing']) {
-        const agent = await call({ method: 'GET', url, headers: { 'x-codeman-parent-session': 'x' } });
+        const agent = await call({ method: 'GET', url, headers: { 'x-reverie-parent-session': 'x' } });
         expect(agent.statusCode).toBe(403);
         expect(agent.json().errorCode).toBe('OWNER_ONLY');
       }
@@ -931,7 +931,7 @@ describe('embassy pairing routes', () => {
         expect(await code({ method, url, payload, headers: { ...csrf, origin: 'https://evil.example' } })).toBe(early);
         expect(await code({ method, url, payload, headers: { ...csrf, origin: 'null' } })).toBe(early);
         // owner plus agent header
-        expect(await code({ method, url, payload, headers: { ...csrf, 'x-codeman-parent-session': 'x' } })).toBe('OWNER_ONLY');
+        expect(await code({ method, url, payload, headers: { ...csrf, 'x-reverie-parent-session': 'x' } })).toBe('OWNER_ONLY');
         // anonymous with the marker and a good Origin
         owner = false;
         expect(await code({ method, url, payload, headers: { ...csrf, origin: 'http://127.0.0.1:3000' } })).toBe('OWNER_ONLY');

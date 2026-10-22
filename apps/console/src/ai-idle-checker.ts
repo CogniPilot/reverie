@@ -8,7 +8,7 @@
  * ## How It Works
  *
  * 1. Generate temp file path for output capture
- * 2. Spawn tmux: `tmux new-session -d -s codeman-aicheck-<short> bash -c 'claude -p ...'`
+ * 2. Spawn tmux: `tmux new-session -d -s reverie-aicheck-<short> bash -c 'claude -p ...'`
  * 3. Poll the temp file every 500ms for `__AICHECK_DONE__` marker
  * 4. Parse the file content for IDLE/WORKING on the first word
  * 5. Kill tmux session and delete temp file
@@ -132,9 +132,9 @@ Remember: When uncertain, answer WORKING.`;
  * to analyze terminal output and provide a definitive IDLE/WORKING verdict.
  */
 export class AiIdleChecker extends AiCheckerBase<AiCheckVerdict, AiIdleCheckConfig, AiCheckResult, AiCheckState> {
-  protected readonly muxNamePrefix = 'codeman-aicheck-';
+  protected readonly muxNamePrefix = 'reverie-aicheck-';
   protected readonly doneMarker = '__AICHECK_DONE__';
-  protected readonly tempFilePrefix = 'codeman-aicheck';
+  protected readonly tempFilePrefix = 'reverie-aicheck';
   protected readonly logPrefix = '[AiIdleChecker]';
   protected readonly checkDescription = 'AI idle check';
 

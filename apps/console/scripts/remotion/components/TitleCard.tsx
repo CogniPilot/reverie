@@ -110,7 +110,7 @@ export const TitleCard: React.FC<TitleCardProps> = ({
             marginTop: 24,
           }}
         >
-          github.com/Ark0N/Codeman
+          github.com/jgoppert/reverie
         </div>
       )}
     </AbsoluteFill>

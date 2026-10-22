@@ -45,14 +45,14 @@ describe('WebServer index.html <title> templating (#82)', () => {
   // showMultiMonitorButton). Point it at an empty data dir so this test is
   // deterministic regardless of the developer's real settings — otherwise an
   // enabled toggle would strip a marker class and break the byte-identical
-  // assertion below. getDataDir() reads CODEMAN_DATA_DIR fresh per call.
-  const _prevDataDir = process.env.CODEMAN_DATA_DIR;
+  // assertion below. getDataDir() reads REVERIE_DATA_DIR fresh per call.
+  const _prevDataDir = process.env.REVERIE_DATA_DIR;
   beforeAll(() => {
-    process.env.CODEMAN_DATA_DIR = mkdtempSync(join(tmpdir(), 'codeman-title-test-'));
+    process.env.REVERIE_DATA_DIR = mkdtempSync(join(tmpdir(), 'reverie-title-test-'));
   });
   afterAll(() => {
-    if (_prevDataDir === undefined) delete process.env.CODEMAN_DATA_DIR;
-    else process.env.CODEMAN_DATA_DIR = _prevDataDir;
+    if (_prevDataDir === undefined) delete process.env.REVERIE_DATA_DIR;
+    else process.env.REVERIE_DATA_DIR = _prevDataDir;
   });
 
   it('substitutes the bare <title>Reverie</title> with reverie:<host>', async () => {
@@ -108,14 +108,14 @@ describe('WebServer index.html <title> templating (#82)', () => {
     // empty), so it needs stripping on every machine, not just where non-empty.
     const html = (await render('laptop'))
       .replace(/(\.(?:js|css))\?v=[^"]*/g, '$1')
-      .replace(/<script>window\.__codemanCliAvailable=\{.*?\};<\/script>\n/, '')
-      .replace(/<script>window\.__codemanCliCatalog=\[.*?\];<\/script>\n/, '')
-      .replace(/<script>window\.__codemanCustomModelClis=\[.*?\];<\/script>\n/, '')
+      .replace(/<script>window\.__reverieCliAvailable=\{.*?\};<\/script>\n/, '')
+      .replace(/<script>window\.__reverieCliCatalog=\[.*?\];<\/script>\n/, '')
+      .replace(/<script>window\.__reverieCustomModelClis=\[.*?\];<\/script>\n/, '')
       // Injected unconditionally as an object keyed by run mode, empty when no
       // enabled CLI declares a gutter, so it needs stripping on every machine.
-      .replace(/<script>window\.__codemanTranscriptGutter=\{.*?\};<\/script>\n/, '')
+      .replace(/<script>window\.__reverieTranscriptGutter=\{.*?\};<\/script>\n/, '')
       // Likewise the page-key mode list: an array, possibly empty, always injected.
-      .replace(/<script>window\.__codemanTranscriptPageKeys=\[.*?\];<\/script>\n/, '');
+      .replace(/<script>window\.__reverieTranscriptPageKeys=\[.*?\];<\/script>\n/, '');
     const beforeTitle = rawTemplate.split('<title>Reverie</title>')[0];
     const afterTitle = rawTemplate.split('<title>Reverie</title>')[1];
     expect(html.startsWith(beforeTitle)).toBe(true);

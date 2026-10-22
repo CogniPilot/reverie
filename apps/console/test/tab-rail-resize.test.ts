@@ -25,7 +25,7 @@ type RailPolicy = {
 function loadRailPolicy(): RailPolicy {
   const context = vm.createContext({ window: {}, globalThis: {} });
   vm.runInContext(readPublic('constants.js'), context, { filename: 'constants.js' });
-  return (context.window as { CodemanTabRail: RailPolicy }).CodemanTabRail;
+  return (context.window as { ReverieTabRail: RailPolicy }).ReverieTabRail;
 }
 
 afterEach(() => vi.useRealTimers());
@@ -102,9 +102,9 @@ describe('tab rail resize wiring', () => {
   it('coalesces effective changes while persisting the preferred width', async () => {
     vi.useFakeTimers();
     const controller = readPublic('tab-rail-resize.js');
-    class FakeCodemanApp {}
+    class FakeReverieApp {}
     const context = vm.createContext({
-      CodemanApp: FakeCodemanApp,
+      ReverieApp: FakeReverieApp,
       window: {},
       document: { querySelector: () => null },
       console,
@@ -112,7 +112,7 @@ describe('tab rail resize wiring', () => {
       setTimeout,
     });
     vm.runInContext(controller, context, { filename: 'tab-rail-resize.js' });
-    const app = new FakeCodemanApp() as FakeCodemanApp & Record<string, any>;
+    const app = new FakeReverieApp() as FakeReverieApp & Record<string, any>;
     app.activeSessionId = 'session-1';
     app.sendResize = vi.fn(async () => true);
     app._persistTabRailWidth = vi.fn();
@@ -129,11 +129,11 @@ describe('tab rail resize wiring', () => {
 
   it('re-runs the wrap pass when the compact threshold flips, without double-rendering', () => {
     const controller = readPublic('tab-rail-resize.js');
-    class FakeCodemanApp {}
+    class FakeReverieApp {}
     const classes = new Set<string>();
     const context = vm.createContext({
-      CodemanApp: FakeCodemanApp,
-      window: { CodemanTabRail: loadRailPolicy() },
+      ReverieApp: FakeReverieApp,
+      window: { ReverieTabRail: loadRailPolicy() },
       document: {
         documentElement: {
           style: { setProperty: () => {} },
@@ -154,7 +154,7 @@ describe('tab rail resize wiring', () => {
       setTimeout,
     });
     vm.runInContext(controller, context, { filename: 'tab-rail-resize.js' });
-    const app = new FakeCodemanApp() as FakeCodemanApp & Record<string, any>;
+    const app = new FakeReverieApp() as FakeReverieApp & Record<string, any>;
     app._getTabRailBounds = () => ({});
     app.syncTabRailWidthSetting = vi.fn();
     app._fullRenderSessionTabs = vi.fn();
@@ -185,10 +185,10 @@ describe('tab rail resize wiring', () => {
   it('keeps resize-observer ownership for pointer drags longer than the watchdog', async () => {
     vi.useFakeTimers();
     const controller = readPublic('tab-rail-resize.js');
-    class FakeCodemanApp {}
+    class FakeReverieApp {}
     let resizing = true;
     const context = vm.createContext({
-      CodemanApp: FakeCodemanApp,
+      ReverieApp: FakeReverieApp,
       window: {},
       document: {
         body: { classList: { contains: (name: string) => name === 'tab-rail-resizing' && resizing } },
@@ -199,7 +199,7 @@ describe('tab rail resize wiring', () => {
       setTimeout,
     });
     vm.runInContext(controller, context, { filename: 'tab-rail-resize.js' });
-    const app = new FakeCodemanApp() as FakeCodemanApp & Record<string, any>;
+    const app = new FakeReverieApp() as FakeReverieApp & Record<string, any>;
 
     app._claimTabRailResize();
     await vi.advanceTimersByTimeAsync(1100);
@@ -212,7 +212,7 @@ describe('tab rail resize wiring', () => {
 
   it('keeps a viewport-clamped effective width out of the preferred-width control', () => {
     const controller = readPublic('tab-rail-resize.js');
-    class FakeCodemanApp {}
+    class FakeReverieApp {}
     const values = new Map<string, string>();
     const rootClasses = new Set<string>();
     const custom = { textContent: 'Custom' };
@@ -245,7 +245,7 @@ describe('tab rail resize wiring', () => {
       },
     };
     const context = vm.createContext({
-      CodemanApp: FakeCodemanApp,
+      ReverieApp: FakeReverieApp,
       window: { innerWidth: 700 },
       document,
       console,
@@ -254,7 +254,7 @@ describe('tab rail resize wiring', () => {
     });
     vm.runInContext(readPublic('constants.js'), context, { filename: 'constants.js' });
     vm.runInContext(controller, context, { filename: 'tab-rail-resize.js' });
-    const app = new FakeCodemanApp() as FakeCodemanApp & Record<string, any>;
+    const app = new FakeReverieApp() as FakeReverieApp & Record<string, any>;
     app.loadAppSettingsFromStorage = () => ({ tabRailWidth: 360 });
     app.saveAppSettingsToStorage = vi.fn();
 

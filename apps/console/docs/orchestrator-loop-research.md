@@ -31,8 +31,8 @@ A new autonomous loop variant — **Orchestrator Loop** — that takes high-leve
 
 #### 4. Team Agents (`src/team-watcher.ts`, `~/.claude/teams/`)
 - **Already has**: Team creation, member tracking, filesystem inbox messaging, task management via `~/.claude/tasks/{team-name}/`
-- **Limitation**: Codeman can only *observe* teams (TeamWatcher is read-only polling), not *create* or *orchestrate* them
-- **Key insight**: Teams are a Claude Code feature. Codeman monitors them but doesn't control them. We can't programmatically create teammates — Claude Code does that when you use `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`
+- **Limitation**: Reverie can only *observe* teams (TeamWatcher is read-only polling), not *create* or *orchestrate* them
+- **Key insight**: Teams are a Claude Code feature. Reverie monitors them but doesn't control them. We can't programmatically create teammates — Claude Code does that when you use `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`
 
 #### 5. Respawn Controller (`src/respawn-controller.ts`)
 - **Already has**: Preset-based automation (ralph-todo, overnight-autonomous), circuit breaker, health scoring
@@ -44,7 +44,7 @@ A new autonomous loop variant — **Orchestrator Loop** — that takes high-leve
 
 #### 7. Hooks (`src/hooks-config.ts`)
 - **Already has**: `idle_prompt`, `stop`, `teammate_idle`, `task_completed` hook events
-- **Key insight**: Hooks fire POST to `/api/hook-event` — this is how Codeman knows when Claude is idle, stopped, or completed a task. The Orchestrator Loop can listen to these same events
+- **Key insight**: Hooks fire POST to `/api/hook-event` — this is how Reverie knows when Claude is idle, stopped, or completed a task. The Orchestrator Loop can listen to these same events
 
 ### What We Need to Build New
 
@@ -68,7 +68,7 @@ User starts session with CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1
   → Tasks tracked in ~/.claude/tasks/{team-name}/{N}.json
 ```
 
-**Codeman cannot programmatically create team members.** This is a Claude Code internal feature. However, Codeman CAN:
+**Reverie cannot programmatically create team members.** This is a Claude Code internal feature. However, Reverie CAN:
 - Start a session that has teams enabled
 - Send a prompt to the lead that instructs it to use agent teams
 - Monitor team activity via TeamWatcher

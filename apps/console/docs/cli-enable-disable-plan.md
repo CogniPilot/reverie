@@ -29,7 +29,7 @@ verifying each claim against the actual routes/tests, not by re-implementing any
 ### Gotcha found and fixed (commit `0c77dd0a`)
 
 **Toggling a CLI off in Settings had no effect anywhere except the Settings row itself.**
-`window.__codemanCliAvailable` — the flag `isCliAvailable()` reads client-side to gate the
+`window.__reverieCliAvailable` — the flag `isCliAvailable()` reads client-side to gate the
 welcome-screen buttons, the Run-menu dropdown and the mobile overview — is injected **once**, at
 initial page render (`server.ts`), built purely from each CLI's own installed-on-PATH resolver
 (`isClaudeAvailable()` etc.), with **no reference to the registry's `enabled` flag at all**. So
@@ -43,7 +43,7 @@ Fixed two places:
   `enabledClis()`. `git`/`cloudflared` (utility binaries, not CLI registry entries) and
   `deepseekBinary` (a secondary installed-only flag for the "add a profile" affordance) are
   deliberately left alone — they were never registry-gated to begin with.
-- `settings-ui.js`: `toggleCliEnabled()` now patches `window.__codemanCliAvailable` in place and
+- `settings-ui.js`: `toggleCliEnabled()` now patches `window.__reverieCliAvailable` in place and
   refreshes the welcome screen, the mobile overview and an already-open Run menu, mirroring the
   existing `installDeepSeekProfile()` pattern for the same "injected once, needs an explicit
   patch" reason — the server-side fix alone still left every surface stale until the next reload.
@@ -52,7 +52,7 @@ New test in `test/render-index-html.test.ts`: an installed-but-disabled CLI (cod
 `clis.json` + `reloadCliRegistry()`) reads as unavailable, while an installed-and-enabled one
 (claude) is unaffected by the override.
 
-**Verified on the Debian devbox** (`codeman-devbox`, real tmux — this sandbox has none and
+**Verified on the Debian devbox** (`reverie-devbox`, real tmux — this sandbox has none and
 `WebServer`'s constructor hard-requires it): typecheck clean, the new test passes (17/17 in
 `render-index-html.test.ts`), the CLI-registry suites pass (86/86), and the **full CI gate is
 green — 415 test files, 7855 tests, 0 failures**.
@@ -80,7 +80,7 @@ written; treat the **Status** section above as authoritative for what exists.
 > needs it."
 
 Confirmed on `master` (2026-09-21): no `/api/clis` route exists at all (read or write);
-`~/.codeman/clis.json` is hand-edit-only; `resolveInstallCommandForPlatform()` is documented
+`~/.reverie/clis.json` is hand-edit-only; `resolveInstallCommandForPlatform()` is documented
 "Display text only — never executed" — nothing runs an install command server-side today. The
 original #343 review flagged the opposite (`spawn(command, {shell: true})`, `env.allowedPrefixes`
 contributed from a write) as needing its own trust-model decision; that decision was never made
@@ -169,7 +169,7 @@ no server restart.
   gating: empty list for a non-admin, never a 403
 - `src/config/cli-registry/registry.ts` — `listClis()` (every entry, including disabled stock
   ones — this is an admin/settings surface, unlike `enabledClis()`)
-- `window.__codemanCliAvailable`'s resolvers (`isClaudeAvailable()` etc.) — candidate `installed`
+- `window.__reverieCliAvailable`'s resolvers (`isClaudeAvailable()` etc.) — candidate `installed`
   source; confirm whether to reuse directly or the response needs its own probe (Open Question 4,
   carried from the first draft — still genuinely open, decide during this phase not before)
 
@@ -208,7 +208,7 @@ confirmed present.
 
 **Verify:** `npm test` full gate green; `curl -X PUT localhost:3000/api/clis/grok -d '{"enabled":false}'`
 then `GET /api/clis` shows the change with no restart; same against `shell`/`claude` returns an
-error and changes nothing; `ls -la ~/.codeman/clis.json` shows mode 0600.
+error and changes nothing; `ls -la ~/.reverie/clis.json` shows mode 0600.
 
 ---
 
@@ -301,7 +301,7 @@ expect the custom-entry-launch step to fail until the Outstanding gap above is c
 
 ## Remaining Open Questions
 
-1. **Phase 2's `installed` source** — resolved: reuses `window.__codemanCliAvailable`'s existing
+1. **Phase 2's `installed` source** — resolved: reuses `window.__reverieCliAvailable`'s existing
    resolvers via `GET /api/clis`'s own probe (confirmed by reading the route).
 2. **Phase 5's `PUT` endpoint shape** — resolved: a **separate** endpoint
    (`PUT /api/clis/custom/:id`), not Phase 3's toggle route widened.

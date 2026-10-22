@@ -15,7 +15,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
 import { homedir } from 'node:os';
 import { dataPath } from './config/instance.js';
-import { readCodemanCredentials } from './codeman-credentials.js';
+import { readReverieCredentials } from './reverie-credentials.js';
 import { casePath } from './config/cases-dir.js';
 import { assertValidBasePath } from './config/base-path.js';
 import {
@@ -52,11 +52,11 @@ const program = new Command();
 program.name('reverie').description('Reverie company workspace and agent session manager').version(pkg.version);
 
 function makeAttachmentMagicLink(filePath: string): string {
-  return `codeman://attach?path=${encodeURIComponent(filePath)}`;
+  return `reverie://attach?path=${encodeURIComponent(filePath)}`;
 }
 
 async function postAttachment(apiUrl: string, sessionId: string, filePath: string): Promise<boolean> {
-  const { username, password } = readCodemanCredentials();
+  const { username, password } = readReverieCredentials();
   const url = new URL(`/api/sessions/${encodeURIComponent(sessionId)}/attachments`, apiUrl);
   const body = JSON.stringify({ path: filePath });
   const transport = url.protocol === 'https:' ? https : http;
@@ -95,8 +95,8 @@ async function postAttachment(apiUrl: string, sessionId: string, filePath: strin
 program
   .command('attach <path>')
   .description('Show an attachment card for a local file')
-  .option('-s, --session <id>', 'Reverie session ID (defaults to CODEMAN_SESSION_ID)')
-  .option('--url <url>', 'Reverie API URL (defaults to CODEMAN_API_URL or https://127.0.0.1:3000)')
+  .option('-s, --session <id>', 'Reverie session ID (defaults to REVERIE_SESSION_ID)')
+  .option('--url <url>', 'Reverie API URL (defaults to REVERIE_API_URL or https://127.0.0.1:3000)')
   .action(async (filePath, options) => {
     const extension = String(filePath).split('.').pop()?.toLowerCase() || '';
     if (!isAbsolute(filePath) || !isSupportedAttachmentExtension(extension)) {
@@ -108,8 +108,8 @@ program
       process.exit(1);
     }
 
-    const sessionId = options.session || process.env.CODEMAN_SESSION_ID;
-    const apiUrl = options.url || process.env.CODEMAN_API_URL || 'https://127.0.0.1:3000';
+    const sessionId = options.session || process.env.REVERIE_SESSION_ID;
+    const apiUrl = options.url || process.env.REVERIE_API_URL || 'https://127.0.0.1:3000';
     if (sessionId && (await postAttachment(apiUrl, sessionId, filePath))) {
       console.log(palette.ok('✓ Attachment card requested'));
       return;
@@ -129,7 +129,7 @@ const SHUTDOWN_FORCE_EXIT_MS = 10_000;
  * Case name to directory, checking `linked-cases.json` FIRST and falling back to the
  * shared single-user cases dir. Mirrors `resolveCasePath()` in `case-routes.ts`, which
  * is what the web UI and `quick-start` use. Without the linked-cases lookup this
- * command rejected every case linked in from outside `~/codeman-cases` with
+ * command rejected every case linked in from outside `~/reverie-cases` with
  * "Case not found", even though the server resolved the same name fine.
  *
  * Sync and tolerant on purpose: a missing or malformed registry means "no linked
@@ -143,16 +143,16 @@ export function resolveCliCasePath(name: string): string {
   } catch {
     // no registry yet, or unreadable/invalid JSON: fall through to the cases dir
   }
-  // Same resolver the server uses, so CODEMAN_CASES_PATH (Docker Compose) moves
+  // Same resolver the server uses, so REVERIE_CASES_PATH (Docker Compose) moves
   // the CLI's idea of a case with it instead of leaving it on the home default.
   return casePath(name);
 }
 
 /**
  * Resolve where `skill install` / `skill uninstall` operate. Global is
- * `~/.claude/skills/codeman` (Claude Code's user-scope skill dir, read by every new
- * session); `--case <name>` targets `<case>/<skillDir>/codeman` for the given skills
- * directory (default: Claude Code's, `<case>/.claude/skills/codeman`), resolved through
+ * `~/.claude/skills/reverie` (Claude Code's user-scope skill dir, read by every new
+ * session); `--case <name>` targets `<case>/<skillDir>/reverie` for the given skills
+ * directory (default: Claude Code's, `<case>/.claude/skills/reverie`), resolved through
  * `resolveCliCasePath()` above. The web server's automatic per-case injection
  * (`agentSkillEnabled`) covers multi-user spaces; this CLI is a local operator tool
  * and stays single-user.
@@ -170,7 +170,7 @@ export function resolveSkillTargetPath(options: {
     if (!existsSync(casePath)) return { missingCase: casePath };
     return { target: agentSkillDirFor(casePath, options.skillDir ?? CLAUDE_AGENT_SKILL_DIR) };
   }
-  return { target: join(homedir(), '.claude', 'skills', 'codeman') };
+  return { target: join(homedir(), '.claude', 'skills', 'reverie') };
 }
 
 /** Exit-owning wrapper around `resolveSkillTargetPath()` for the two commands below. */
@@ -256,12 +256,12 @@ const skillCmd = program
 
 skillCmd
   .command('install')
-  .description('Install the agent skill globally (~/.claude/skills/codeman) or into one case')
-  .option('-g, --global', 'Install into ~/.claude/skills/codeman, picked up by every new session (the default)')
-  .option('-c, --case <name>', 'Install into <case>/.claude/skills/codeman instead (linked cases resolve too)')
+  .description('Install the agent skill globally (~/.claude/skills/reverie) or into one case')
+  .option('-g, --global', 'Install into ~/.claude/skills/reverie, picked up by every new session (the default)')
+  .option('-c, --case <name>', 'Install into <case>/.claude/skills/reverie instead (linked cases resolve too)')
   .option(
     '-m, --mode <mode>',
-    'With --case: install where that run mode looks for skills (codex: <case>/.agents/skills/codeman)',
+    'With --case: install where that run mode looks for skills (codex: <case>/.agents/skills/reverie)',
     'claude'
   )
   .action(async (options: { global?: boolean; case?: string; mode?: string }) => {
@@ -282,7 +282,7 @@ skillCmd
 skillCmd
   .command('uninstall')
   .description('Remove Reverie-managed agent skill copies (never touches a user-authored one)')
-  .option('-g, --global', 'Remove from ~/.claude/skills/codeman (the default)')
+  .option('-g, --global', 'Remove from ~/.claude/skills/reverie (the default)')
   .option(
     '-c, --case <name>',
     "Remove every Reverie-managed copy from that case instead, whichever CLI's directory it is in (linked cases resolve too)"
@@ -334,7 +334,7 @@ program
   .description(
     'Run a Model Context Protocol server on stdio, so MCP clients (Claude Code, Claude Desktop, Codex, Gemini CLI, Cursor, ...) can start, prompt, wait on, read and delete Reverie sessions'
   )
-  .option('--url <url>', 'Reverie server URL (default: $CODEMAN_API_URL; never guessed)')
+  .option('--url <url>', 'Reverie server URL (default: $REVERIE_API_URL; never guessed)')
   .option(
     '--allow-any-session',
     'Let the tools prompt, interrupt and delete sessions this server did not start (default: only its own)'
@@ -393,7 +393,7 @@ function sessionStatusLabel(status: string): string {
 }
 
 /**
- * The one session listing. `codeman list` used to be a copy of this that had
+ * The one session listing. `reverie list` used to be a copy of this that had
  * drifted (it lost the stopped and web-server sections), so it now calls the
  * same renderer and only opts out of those two sections.
  */
@@ -730,7 +730,7 @@ interface WebServerProbe {
  * GET `<base>/api/status` with a short timeout, tolerating the self-signed cert an
  * `--https` install uses. ANY HTTP answer proves the server is up: a 401 just
  * means it wants credentials (sent when available, same env → data-dir `.env`
- * fallback as `codeman attach`).
+ * fallback as `reverie attach`).
  */
 function probeWebServerAt(base: string): Promise<WebServerProbe | null> {
   let url: URL;
@@ -739,7 +739,7 @@ function probeWebServerAt(base: string): Promise<WebServerProbe | null> {
   } catch {
     return Promise.resolve(null);
   }
-  const { username, password } = readCodemanCredentials();
+  const { username, password } = readReverieCredentials();
   const transport = url.protocol === 'https:' ? https : http;
   const headers: Record<string, string> = { Accept: 'application/json' };
   if (password) {
@@ -796,17 +796,17 @@ function probeWebServerAt(base: string): Promise<WebServerProbe | null> {
 program
   .command('status')
   .description('Show whether the Reverie web server is running, plus session/task state')
-  .option('--url <url>', 'Server URL to probe (defaults to CODEMAN_API_URL, then local port)')
+  .option('--url <url>', 'Server URL to probe (defaults to REVERIE_API_URL, then local port)')
   .action(async (options: { url?: string }) => {
     // Issue #230: this command runs in its own fresh process, and the old output
     // reported THAT process's (always-stopped) Ralph loop under a bare "Status:",
     // reading as "the server is down" while the web service ran fine. Probe the
-    // real server first; the Ralph loop has its own `codeman ralph status`.
-    const port = process.env.CODEMAN_PORT || '3000';
+    // real server first; the Ralph loop has its own `reverie ralph status`.
+    const port = process.env.REVERIE_PORT || '3000';
     const candidates = options.url
       ? [options.url]
-      : process.env.CODEMAN_API_URL
-        ? [process.env.CODEMAN_API_URL]
+      : process.env.REVERIE_API_URL
+        ? [process.env.REVERIE_API_URL]
         : [`https://127.0.0.1:${port}`, `http://127.0.0.1:${port}`];
     let probe: WebServerProbe = { reachable: false, url: candidates[0] };
     for (const candidate of candidates) {
@@ -825,12 +825,12 @@ program
       const version = probe.version ? ` (v${probe.version})` : '';
       console.log(kv('Status', `${palette.ok('running')}${version} at ${probe.url}`));
       if (probe.authRequired) {
-        console.log(palette.muted('  (answers 401: set CODEMAN_PASSWORD/CODEMAN_USERNAME to see session details)'));
+        console.log(palette.muted('  (answers 401: set REVERIE_PASSWORD/REVERIE_USERNAME to see session details)'));
       }
     } else {
       console.log(kv('Status', `${palette.err('not reachable')} at ${candidates.join(' or ')}`));
       console.log(
-        palette.muted('  (start it with `codeman web`, or check your service: systemctl --user status codeman-web)')
+        palette.muted('  (start it with `reverie web`, or check your service: systemctl --user status reverie-web)')
       );
     }
 
@@ -943,22 +943,22 @@ program
 /** Shared option set for the commands that can launch a web server. */
 function addWebLaunchOptions(cmd: Command): Command {
   return cmd
-    .option('-H, --host <host>', 'Host to bind to', process.env.CODEMAN_HOST || '127.0.0.1')
-    .option('-p, --port <port>', 'Port to listen on (env: CODEMAN_PORT)', process.env.CODEMAN_PORT || '3000')
+    .option('-H, --host <host>', 'Host to bind to', process.env.REVERIE_HOST || '127.0.0.1')
+    .option('-p, --port <port>', 'Port to listen on (env: REVERIE_PORT)', process.env.REVERIE_PORT || '3000')
     .option('--https', 'Enable HTTPS with self-signed certificate (only needed for remote access, not localhost)')
     .option(
       '--base-url <path>',
-      'Sub-path Reverie is mounted under behind a reverse proxy, e.g. /codeman (env: CODEMAN_BASE_URL)',
-      process.env.CODEMAN_BASE_URL || '/'
+      'Sub-path Reverie is mounted under behind a reverse proxy, e.g. /reverie (env: REVERIE_BASE_URL)',
+      process.env.REVERIE_BASE_URL || '/'
     )
     .option('--title-hostname <hostname>', 'Override the hostname shown in the browser title')
     .option(
       '--allow-unauthenticated-network',
-      'Allow non-loopback web access without CODEMAN_PASSWORD (dangerous; terminal control is exposed)'
+      'Allow non-loopback web access without REVERIE_PASSWORD (dangerous; terminal control is exposed)'
     )
     .option(
       '--multiuser',
-      'Enable opt-in multi-user mode (named users in ~/.fleet/users.json; env: CODEMAN_MULTIUSER)'
+      'Enable opt-in multi-user mode (named users in ~/.reverie/users.json; env: REVERIE_MULTIUSER)'
     );
 }
 
@@ -1004,10 +1004,10 @@ function warnIfUnauthenticatedNetwork(launch: WebLaunchOptions): void {
   if (isUnauthenticatedNetworkAcknowledged(launch.allowUnauthenticatedNetwork)) return;
   console.log(
     palette.warn(
-      `⚠ Binding ${launch.host} without CODEMAN_PASSWORD: anyone who can reach this port gets terminal control.`
+      `⚠ Binding ${launch.host} without REVERIE_PASSWORD: anyone who can reach this port gets terminal control.`
     )
   );
-  console.log(palette.warn('  Set CODEMAN_PASSWORD, or bind 127.0.0.1 and front it with tailscale serve.'));
+  console.log(palette.warn('  Set REVERIE_PASSWORD, or bind 127.0.0.1 and front it with tailscale serve.'));
 }
 
 // Web interface command
@@ -1019,7 +1019,7 @@ const webCmd = addWebLaunchOptions(program.command('web').description('Start the
 webCmd.action(async (options) => {
   // The flag is surfaced to the rest of the process via the env var so
   // isMultiUserMode() has a single source of truth (see config/multiuser.ts).
-  if (options.multiuser) process.env.CODEMAN_MULTIUSER = '1';
+  if (options.multiuser) process.env.REVERIE_MULTIUSER = '1';
   const launch = toWebLaunchOptions(options);
 
   if (options.stop) {
@@ -1080,7 +1080,7 @@ webCmd.action(async (options) => {
   const allowUnauthenticatedNetwork = launch.allowUnauthenticatedNetwork ?? false;
   const basePath = launch.basePath ?? '';
   // Single source of truth for subsystems that read it directly (e.g. renderers).
-  if (basePath) process.env.CODEMAN_BASE_URL = basePath;
+  if (basePath) process.env.REVERIE_BASE_URL = basePath;
   const displayHost = host === '0.0.0.0' ? 'localhost' : host;
 
   console.log(
@@ -1164,10 +1164,10 @@ addWebLaunchOptions(
   }
   console.log(palette.ok(`✓ ${result.message}`));
   console.log(palette.muted(`  Unit: ${result.unitPath}`));
-  if (process.env.CODEMAN_PASSWORD) {
+  if (process.env.REVERIE_PASSWORD) {
     console.log(
       palette.warn(
-        '  Note: CODEMAN_PASSWORD was NOT copied into the unit file. Add it there yourself if the service needs auth.'
+        '  Note: REVERIE_PASSWORD was NOT copied into the unit file. Add it there yourself if the service needs auth.'
       )
     );
   }
@@ -1204,8 +1204,8 @@ addWebLaunchOptions(
 
 // ============ Multi-user Commands ============
 //
-// Operate directly on ~/.fleet/users.json (via user-store) with NO running
-// server, honoring CODEMAN_INSTANCE. This is the headless bootstrap path and the
+// Operate directly on ~/.reverie/users.json (via user-store) with NO running
+// server, honoring REVERIE_INSTANCE. This is the headless bootstrap path and the
 // recovery answer to "locked out: last admin forgot password".
 
 /** Read a password from stdin without echoing. Falls back to plain read on non-TTY. */
@@ -1375,14 +1375,14 @@ ownerCmd
 ownerCmd
   .command('keepers [action] [entry]')
   .description(
-    'list, add or remove a keeper: `cto` or a company employee id that may nudge, interrupt and read any agent session'
+    'list, add or remove a keeper: a company employee id that may nudge, interrupt and read any agent session'
   )
   .action((action: string | undefined, entry: string | undefined) =>
     ownerAction(async () => {
       const { addKeeper, removeKeeper, listKeepers, OwnerAdminError } = await import('./owner-auth/admin.js');
       const store = await ownerStore();
       if (!action || action === 'list') console.log(listKeepers(store).join('\n') || '(none)');
-      else if (!entry) throw new OwnerAdminError('Name the keeper: `cto` or a company employee id');
+      else if (!entry) throw new OwnerAdminError('Name the keeper: a company employee id');
       else if (action === 'add') console.log((await addKeeper(store, entry)).join('\n'));
       else if (action === 'remove') console.log((await removeKeeper(store, entry)) ? 'Removed.' : 'Not a keeper.');
       else throw new OwnerAdminError('Use list, add or remove');
@@ -1391,14 +1391,14 @@ ownerCmd
 ownerCmd
   .command('admins [action] [entry]')
   .description(
-    'list, add or remove an admin: `cto` or a company employee id that may call the admin routes (session create, company recovery)'
+    'list, add or remove an admin: a company employee id that may call the admin routes (session create, company recovery)'
   )
   .action((action: string | undefined, entry: string | undefined) =>
     ownerAction(async () => {
       const { addAdmin, removeAdmin, listAdmins, OwnerAdminError } = await import('./owner-auth/admin.js');
       const store = await ownerStore();
       if (!action || action === 'list') console.log(listAdmins(store).join('\n') || '(none)');
-      else if (!entry) throw new OwnerAdminError('Name the admin: `cto` or a company employee id');
+      else if (!entry) throw new OwnerAdminError('Name the admin: a company employee id');
       else if (action === 'add') console.log((await addAdmin(store, entry)).join('\n'));
       else if (action === 'remove') console.log((await removeAdmin(store, entry)) ? 'Removed.' : 'Not an admin.');
       else throw new OwnerAdminError('Use list, add or remove');
@@ -1414,7 +1414,7 @@ ownerCmd
     })
   );
 
-const usersCmd = program.command('users').description('Manage multi-user accounts (~/.fleet/users.json)');
+const usersCmd = program.command('users').description('Manage multi-user accounts (~/.reverie/users.json)');
 
 usersCmd
   .command('add <name>')
@@ -1503,7 +1503,7 @@ usersCmd
 usersCmd
   .command('rm <name>')
   .description('Delete a user')
-  .option('--delete-space', "Also delete the user's ~/codeman-users/<name> space")
+  .option('--delete-space', "Also delete the user's ~/reverie-users/<name> space")
   .action(async (name, options) => {
     const { deleteUser, deleteUserSpace } = await import('./user-store.js');
     try {

@@ -1,7 +1,7 @@
 /**
  * @fileoverview Read My Mind prediction-context assembly (docs/readmymind-plan.md).
  *
- * `buildPredictionContext()` turns everything Codeman already knows about a
+ * `buildPredictionContext()` turns everything Reverie already knows about a
  * session into one budgeted, priority-ordered predictor prompt. Pure by
  * design: the route layer and `readmymind-collectors.ts` inject their data,
  * nothing here does IO, so fixture tests can pin exactly what a given

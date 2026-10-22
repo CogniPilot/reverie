@@ -38,19 +38,19 @@ beforeAll(async () => {
   dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'own-data-'));
   spacesDir = await fs.mkdtemp(path.join(os.tmpdir(), 'own-spaces-'));
   for (const k of [
-    'CODEMAN_DATA_DIR',
-    'CODEMAN_USER_SPACES_DIR',
-    'CODEMAN_MULTIUSER',
-    'CODEMAN_PASSWORD',
-    'CODEMAN_USERNAME',
+    'REVERIE_DATA_DIR',
+    'REVERIE_USER_SPACES_DIR',
+    'REVERIE_MULTIUSER',
+    'REVERIE_PASSWORD',
+    'REVERIE_USERNAME',
   ]) {
     saved[k] = process.env[k];
   }
-  process.env.CODEMAN_DATA_DIR = dataDir;
-  process.env.CODEMAN_USER_SPACES_DIR = spacesDir;
-  process.env.CODEMAN_MULTIUSER = '1';
-  delete process.env.CODEMAN_PASSWORD;
-  delete process.env.CODEMAN_USERNAME;
+  process.env.REVERIE_DATA_DIR = dataDir;
+  process.env.REVERIE_USER_SPACES_DIR = spacesDir;
+  process.env.REVERIE_MULTIUSER = '1';
+  delete process.env.REVERIE_PASSWORD;
+  delete process.env.REVERIE_USERNAME;
   invalidateUsersCache();
 
   await createUser({ username: 'root', role: 'admin', password: 'rootpass123' });
@@ -97,7 +97,7 @@ describe('host CRUD is admin-only', () => {
     const res = await fetch(url('/api/docker-hosts'), {
       method: 'POST',
       headers: { ...bob, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id: 'h1', label: 'x', image: 'codeman/agent:base' }),
+      body: JSON.stringify({ id: 'h1', label: 'x', image: 'reverie/agent:base' }),
     });
     expect(res.status).toBe(403);
   });
@@ -160,10 +160,10 @@ describe('session-scoping helpers (multi-user)', () => {
       ['b', fakeSession('alice')],
       ['c', fakeSession('bob')],
     ]);
-    process.env.CODEMAN_MAX_SESSIONS_PER_USER = '2';
+    process.env.REVERIE_MAX_SESSIONS_PER_USER = '2';
     expect(sessionCapacityState(map as never, 'alice').atUserCap).toBe(true);
     expect(sessionCapacityState(map as never, 'bob').atUserCap).toBe(false);
-    delete process.env.CODEMAN_MAX_SESSIONS_PER_USER;
+    delete process.env.REVERIE_MAX_SESSIONS_PER_USER;
   });
 });
 

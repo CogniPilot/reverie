@@ -328,7 +328,7 @@ describe('WebGL longtask auto-fallback', () => {
           if (o.storedPref === undefined) delete seeded.webglRendererEnabled;
           else seeded.webglRendererEnabled = o.storedPref;
           app.saveAppSettingsToStorage(seeded);
-          localStorage.setItem('codeman-webgl-disabled', JSON.stringify({ at: Date.now() }));
+          localStorage.setItem('reverie-webgl-disabled', JSON.stringify({ at: Date.now() }));
           (document.getElementById('appSettingsWebglRenderer') as HTMLInputElement).checked = true;
           app._apiPut = async (_path, body) => {
             captured = body;
@@ -338,14 +338,14 @@ describe('WebGL longtask auto-fallback', () => {
           app._syncPushPreferences = () => {};
           await app.saveAppSettings();
           return {
-            markerCleared: localStorage.getItem('codeman-webgl-disabled') === null,
+            markerCleared: localStorage.getItem('reverie-webgl-disabled') === null,
             payloadHasWebglKey: captured ? 'webglRendererEnabled' in captured : null,
           };
         } finally {
           app._apiPut = origPut;
           app.saveModelConfigFromSettings = origModel;
           app._syncPushPreferences = origSync;
-          localStorage.removeItem('codeman-webgl-disabled');
+          localStorage.removeItem('reverie-webgl-disabled');
           app.saveAppSettingsToStorage(prevStored);
         }
       }, opts);

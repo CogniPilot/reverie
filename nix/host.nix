@@ -1,11 +1,11 @@
-# Optional host account for a fleet deployment. Container sudo stays inside containers.
+# Optional host account for a reverie deployment. Container sudo stays inside containers.
 { config, lib, pkgs, ... }:
-let cfg = config.services.agentFleet;
+let cfg = config.services.reverie;
 in {
-  options.services.agentFleet = {
-    enable = lib.mkEnableOption "a separate rootless agent fleet account";
-    userName = lib.mkOption { type = lib.types.str; default = "fleet"; };
-    home = lib.mkOption { type = lib.types.path; default = "/var/lib/agent-fleet"; };
+  options.services.reverie = {
+    enable = lib.mkEnableOption "a separate rootless Reverie account";
+    userName = lib.mkOption { type = lib.types.str; default = "reverie"; };
+    home = lib.mkOption { type = lib.types.path; default = "/var/lib/reverie"; };
   };
   config = lib.mkIf cfg.enable {
     users.groups.${cfg.userName} = {};
@@ -22,7 +22,7 @@ in {
     };
     virtualisation.podman = { enable = true; dockerCompat = false; dockerSocket.enable = false; };
     systemd.tmpfiles.rules = [
-      "d ${cfg.home}/.local/share/agent-fleet 0700 ${cfg.userName} ${cfg.userName} -"
+      "d ${cfg.home}/.local/share/reverie 0700 ${cfg.userName} ${cfg.userName} -"
       "d ${cfg.home}/projects 0700 ${cfg.userName} ${cfg.userName} -"
     ];
   };

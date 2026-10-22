@@ -62,7 +62,7 @@ function ui() {
     _apiJson = vi.fn();
   }
   const context = vm.createContext({
-    CodemanApp: App,
+    ReverieApp: App,
     localStorage: {
       getItem: (key: string) => selected.get(key) ?? null,
       setItem: (key: string, value: string) => selected.set(key, value),

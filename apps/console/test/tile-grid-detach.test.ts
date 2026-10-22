@@ -1,7 +1,7 @@
 /**
  * @fileoverview Detach Tiles (per-device `tileDetachEnabled`, default OFF): a
  * tile leaves the grid for a window of its own, and comes back into any
- * Codeman window's grid, by dragging.
+ * Reverie window's grid, by dragging.
  *
  * - OFF (the default) changes nothing: a lone tile's header does not drag, a
  *   header let go outside the window opens nothing, and a tile dragged from
@@ -52,7 +52,7 @@ import {
   windowStub,
 } from './mocks/tile-grid-vm.js';
 
-const TILE_TYPE = 'application/x-codeman-tile';
+const TILE_TYPE = 'application/x-reverie-tile';
 const FOUR = ['s-a', 's-b', 's-c', 's-d'];
 const THREE = ['s-a', 's-b', 's-c'];
 // Five tiles lay out 3x2 here: one empty cell, the last.
@@ -240,7 +240,7 @@ describe('dragging a header out of the window', () => {
     await settle();
     expect(windowStub.open).toHaveBeenCalledWith(
       '/session/s-b',
-      'codeman-session-s-b',
+      'reverie-session-s-b',
       'width=2400,height=1200,left=860,top=430,menubar=no,toolbar=no,location=no,status=no'
     );
     expect(app.detachedSessions.has('s-b')).toBe(true);
@@ -300,20 +300,20 @@ describe('another window docking the tile this one dragged', () => {
     const app = openGrid(FOUR);
     startDrag('s-b');
     endDrag('s-b', { clientX: -50, clientY: 300 }, 'move');
-    localStore.set('codeman:tile-grid', docked);
+    localStore.set('reverie:tile-grid', docked);
     app._onWindowMessage({ type: 'tile-adopted', id: 's-b', by: 'c-there' });
     expect(app._tileGrid.ids).toEqual(['s-a', 's-c', 's-d']);
-    expect(localStore.get('codeman:tile-grid')).toBe(docked);
+    expect(localStore.get('reverie:tile-grid')).toBe(docked);
   });
 
   it("the stored grid stays the docking window's when this one's last tile leaves", () => {
     const app = openGrid(['s-b']);
     startDrag('s-b');
     endDrag('s-b', { clientX: -50, clientY: 300 }, 'move');
-    localStore.set('codeman:tile-grid', docked);
+    localStore.set('reverie:tile-grid', docked);
     app._onWindowMessage({ type: 'tile-adopted', id: 's-b', by: 'c-there' });
     expect(app._tileGrid.open).toBe(false);
-    expect(localStore.get('codeman:tile-grid')).toBe(docked);
+    expect(localStore.get('reverie:tile-grid')).toBe(docked);
   });
 
   it('a claim that lands mid-drag lets the tile go, with no tear-off here (Detach Tiles off)', () => {
@@ -542,9 +542,9 @@ describe("a tile's ⋯ menu", () => {
       url: 'http://localhost/',
     });
     const ctx = dom.getInternalVMContext();
-    vm.runInContext('globalThis.CodemanApp = class CodemanApp {};', ctx);
+    vm.runInContext('globalThis.ReverieApp = class ReverieApp {};', ctx);
     vm.runInContext(read('tab-rail-resize.js'), ctx, { filename: 'tab-rail-resize.js' });
-    const App = (dom.window as unknown as { CodemanApp: { prototype: object } }).CodemanApp;
+    const App = (dom.window as unknown as { ReverieApp: { prototype: object } }).ReverieApp;
     const app = Object.assign(Object.create(App.prototype), {
       loadAppSettingsFromStorage: () => ({ showTabDetachButton: tabPopOut }),
       tabDetachButtonEnabled: (s: { showTabDetachButton?: boolean }) => s.showTabDetachButton === true,

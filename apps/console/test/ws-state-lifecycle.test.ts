@@ -1,6 +1,6 @@
 /**
  * @fileoverview Terminal WebSocket state-machine lifecycle tests
- * (`CodemanApp._connectWs` / `ws.onopen` / `ws.onclose` / `_disconnectWs`).
+ * (`ReverieApp._connectWs` / `ws.onopen` / `ws.onclose` / `_disconnectWs`).
  *
  * Unlike test/connection-indicator.test.ts (which pins the pure descriptor per
  * pre-seeded `_wsState`), this suite drives the REAL transitions through a fake
@@ -90,9 +90,9 @@ function loadHarness() {
     window: { addEventListener: vi.fn(), removeEventListener: vi.fn() },
     MobileDetection: {},
   });
-  vm.runInContext(`${constants}\n${source}\nglobalThis.__CodemanApp = CodemanApp;`, context);
-  const CodemanApp = (context as { __CodemanApp: new () => unknown }).__CodemanApp;
-  return { CodemanApp, timers };
+  vm.runInContext(`${constants}\n${source}\nglobalThis.__ReverieApp = ReverieApp;`, context);
+  const ReverieApp = (context as { __ReverieApp: new () => unknown }).__ReverieApp;
+  return { ReverieApp, timers };
 }
 
 function fakeElement() {
@@ -110,10 +110,10 @@ type LifecycleApp = {
 };
 
 function makeApp(
-  CodemanApp: new () => unknown,
+  ReverieApp: new () => unknown,
   overrides: Record<string, unknown> = {}
 ): { app: LifecycleApp; els: Record<string, ReturnType<typeof fakeElement>> } {
-  const app = Object.create((CodemanApp as { prototype: object }).prototype) as LifecycleApp & Record<string, unknown>;
+  const app = Object.create((ReverieApp as { prototype: object }).prototype) as LifecycleApp & Record<string, unknown>;
   const els: Record<string, ReturnType<typeof fakeElement>> = {
     connectionIndicator: fakeElement(),
     connectionDot: fakeElement(),
@@ -149,8 +149,8 @@ function fireNextTimer(timers: FakeTimer[]): FakeTimer {
 
 describe('WS state lifecycle — real _connectWs/onopen/onclose transitions', () => {
   it("_connectWs sets 'connecting', a real onopen sets 'connected' and renders 'WS'", () => {
-    const { CodemanApp } = loadHarness();
-    const { app, els } = makeApp(CodemanApp);
+    const { ReverieApp } = loadHarness();
+    const { app, els } = makeApp(ReverieApp);
 
     app._connectWs('s1');
     expect(app._wsState).toBe('connecting');
@@ -170,8 +170,8 @@ describe('WS state lifecycle — real _connectWs/onopen/onclose transitions', ()
   });
 
   it("_disconnectWs resets the state machine to 'disconnected' and closes the socket", () => {
-    const { CodemanApp } = loadHarness();
-    const { app } = makeApp(CodemanApp);
+    const { ReverieApp } = loadHarness();
+    const { app } = makeApp(ReverieApp);
 
     app._connectWs('s1');
     const ws = FakeWebSocket.instances[0];
@@ -187,8 +187,8 @@ describe('WS state lifecycle — real _connectWs/onopen/onclose transitions', ()
   });
 
   it("a retry-fallback close (4010) shows 'HTTP', and the successful retry returns the chip to 'WS'", () => {
-    const { CodemanApp, timers } = loadHarness();
-    const { app, els } = makeApp(CodemanApp);
+    const { ReverieApp, timers } = loadHarness();
+    const { app, els } = makeApp(ReverieApp);
 
     app._connectWs('s1');
     const ws1 = FakeWebSocket.instances[0];
@@ -213,8 +213,8 @@ describe('WS state lifecycle — real _connectWs/onopen/onclose transitions', ()
 
 describe('WS reconnect backoff — attempts survive the _connectWs → _disconnectWs call', () => {
   it('escalates the transient-close delay ladder instead of replanning at attempt 0', () => {
-    const { CodemanApp, timers } = loadHarness();
-    const { app } = makeApp(CodemanApp);
+    const { ReverieApp, timers } = loadHarness();
+    const { app } = makeApp(ReverieApp);
 
     app._connectWs('s1');
     // Attempt 0: transient close plans 0ms (+ <250ms jitter).
@@ -240,8 +240,8 @@ describe('WS reconnect backoff — attempts survive the _connectWs → _disconne
   });
 
   it('a successful onopen (not an intentional disconnect) is what resets the counter', () => {
-    const { CodemanApp, timers } = loadHarness();
-    const { app } = makeApp(CodemanApp);
+    const { ReverieApp, timers } = loadHarness();
+    const { app } = makeApp(ReverieApp);
 
     app._connectWs('s1');
     FakeWebSocket.instances[0].onclose?.({ code: 1006, reason: '' });
@@ -259,8 +259,8 @@ describe('WS reconnect backoff — attempts survive the _connectWs → _disconne
 
 describe('WS upgrade cid — per-TAB identity (clientId:tabNonce)', () => {
   it('sends the composite cid on the upgrade URL, keeping the bare clientId for input frames', () => {
-    const { CodemanApp } = loadHarness();
-    const { app } = makeApp(CodemanApp);
+    const { ReverieApp } = loadHarness();
+    const { app } = makeApp(ReverieApp);
 
     app._connectWs('s1');
     const url = new URL(FakeWebSocket.instances[0].url);
@@ -268,9 +268,9 @@ describe('WS upgrade cid — per-TAB identity (clientId:tabNonce)', () => {
   });
 
   it('two tabs sharing the browser clientId register DIFFERENT registry keys', () => {
-    const { CodemanApp } = loadHarness();
-    const { app: tabA } = makeApp(CodemanApp, { _wsTabNonce: 'tab-A' });
-    const { app: tabB } = makeApp(CodemanApp, { _wsTabNonce: 'tab-B' });
+    const { ReverieApp } = loadHarness();
+    const { app: tabA } = makeApp(ReverieApp, { _wsTabNonce: 'tab-A' });
+    const { app: tabB } = makeApp(ReverieApp, { _wsTabNonce: 'tab-B' });
 
     tabA._connectWs('s1');
     tabB._connectWs('s1');
@@ -284,8 +284,8 @@ describe('WS upgrade cid — per-TAB identity (clientId:tabNonce)', () => {
   });
 
   it('omits the cid query entirely when no clientId is available', () => {
-    const { CodemanApp } = loadHarness();
-    const { app } = makeApp(CodemanApp, { _clientId: '' });
+    const { ReverieApp } = loadHarness();
+    const { app } = makeApp(ReverieApp, { _clientId: '' });
 
     app._connectWs('s1');
     expect(FakeWebSocket.instances[0].url).not.toContain('cid=');

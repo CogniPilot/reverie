@@ -3,12 +3,12 @@
  *
  * The bug this pins: an agent that arms a monitor, backgrounds a shell or hands work to a
  * cloud session is told to end its turn, so the pane falls quiet, Claude Code's idle
- * notification arrives a minute later, and every Codeman surface files the session under
+ * notification arrives a minute later, and every Reverie surface files the session under
  * NEEDS YOU. Nothing wants the user there. The CLI itself says so on the last row of its
  * screen (`⏵⏵ bypass permissions on · 1 monitor · ← for agents`), and reading that row is
  * what tells a session waiting for its own background work from one waiting for a human.
  *
- * The pane fixtures below are verbatim captures (`tmux -L codeman capture-pane -p`) from a
+ * The pane fixtures below are verbatim captures (`tmux -L reverie capture-pane -p`) from a
  * live Claude Code 2.1.278 session on 2026-09-21.
  */
 import { describe, expect, it, vi, afterEach } from 'vitest';
@@ -33,7 +33,7 @@ const CODEX_TAIL = getCli('codex')!.capabilities.workDetect!.watchingLines!;
  * background-terminal row above that, which is why codex declares its own window.
  */
 const CODEX_STATUS =
-  '  gpt-5.6-sol medium · Context 98% left · ~/codeman-cases/codex-probe · 5h 99% left · weekly 94% left';
+  '  gpt-5.6-sol medium · Context 98% left · ~/reverie-cases/codex-probe · 5h 99% left · weekly 94% left';
 const CODEX_WITH_TERMINAL = [
   '• OK',
   '',
@@ -50,7 +50,7 @@ const CODEX_WITH_TERMINAL = [
  * status line at rest, which pushes the terminal row to FOURTH from the bottom. While a
  * prompt is typed the hint goes away and the row is third again.
  */
-const CODEX_162_STATUS = '  GPT-6-Luna default · ~/codeman-cases/testcase';
+const CODEX_162_STATUS = '  GPT-6-Luna default · ~/reverie-cases/testcase';
 const CODEX_162_WITH_TERMINAL = [
   '• OK',
   '',
@@ -127,7 +127,7 @@ function withFakePane(screen: string | (() => string), mode: 'claude' | 'codex' 
     workingDir: '/tmp',
     mode,
     mux,
-    muxSession: { muxName: 'codeman-test', sessionId: 'test', createdAt: Date.now() },
+    muxSession: { muxName: 'reverie-test', sessionId: 'test', createdAt: Date.now() },
   } as ConstructorParameters<typeof Session>[0]);
 }
 
@@ -216,9 +216,9 @@ describe('watchingLabel', () => {
     // The whole reason the search is confined to the foot of the screen: a session that
     // PRINTS "1 monitor" (this one has been discussing exactly that) is not running one.
     const transcript =
-      '> does Codeman know about watching?\n' +
+      '> does Reverie know about watching?\n' +
       '⏺ The footer says · 1 monitor · while a monitor is armed, and · 2 shells · for\n' +
-      '  backgrounded commands. Codeman reads neither today.\n' +
+      '  backgrounded commands. Reverie reads neither today.\n' +
       '  Nothing else on the screen means background work is running.\n';
     expect(watchingLabel(pane('⏵⏵ bypass permissions on · ← for agents', transcript), CLAUDE_WATCHING)).toBeNull();
   });
@@ -460,7 +460,7 @@ describe('the row Codex draws', () => {
 
 describe('the registry pattern Claude declares', () => {
   it('is one the config-regex guard accepts', () => {
-    // Same guard as `workingLine`: ~/.codeman/clis.json can set this field, and the
+    // Same guard as `workingLine`: ~/.reverie/clis.json can set this field, and the
     // compiled pattern runs over a pane capture on a timer.
     expect(compileVersionRegex(getCli('claude')!.capabilities.workDetect!.watchingLine!)).not.toBeNull();
   });

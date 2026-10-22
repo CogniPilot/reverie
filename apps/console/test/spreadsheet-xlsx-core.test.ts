@@ -44,7 +44,7 @@ type Core = {
 const source = readFileSync(resolve(import.meta.dirname, '../src/web/public/spreadsheet-xlsx-core.js'), 'utf8');
 const context = vm.createContext({ Uint8Array, DataView, TextDecoder, Date, Math, Number, String, Object, Map, Set });
 vm.runInContext(source, context);
-const core = (context as unknown as { CodemanSpreadsheetXlsxCore: Core }).CodemanSpreadsheetXlsxCore;
+const core = (context as unknown as { ReverieSpreadsheetXlsxCore: Core }).ReverieSpreadsheetXlsxCore;
 
 const workbookZip = (sheet = '<worksheet><sheetData><row><c r="A1"/></row></sheetData><mergeCells/></worksheet>') =>
   fflate.zipSync({

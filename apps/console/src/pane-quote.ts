@@ -3,7 +3,7 @@
  * a name, a goal): it is written as one JSON string, so nothing inside it can close the quote, start a new line or
  * pass itself off as a speaker label. Characters that look like punctuation, are invisible or act as keystrokes
  * (DEL is Backspace in a terminal input box) are shown as `\uXXXX` escapes, astral ones as surrogate pairs. Used by
- * chat delivery, the briefings and `codeman agent chat read`.
+ * chat delivery, the briefings and `reverie agent chat read`.
  */
 
 /**

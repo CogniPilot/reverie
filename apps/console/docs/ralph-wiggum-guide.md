@@ -19,7 +19,7 @@
 8. [Prompt Templates](#prompt-templates)
 9. [When to Use (and Not Use)](#when-to-use-and-not-use)
 10. [Real-World Examples](#real-world-examples)
-11. [Reverie Implementation](#codeman-implementation)
+11. [Reverie Implementation](#reverie-implementation)
 12. [Troubleshooting](#troubleshooting)
 
 ---
@@ -159,7 +159,7 @@ The official implementation (and Reverie) prevents false positives when completi
 - **If loop already active**: Emit immediately (explicit loop start via `/ralph-loop:ralph-loop`)
 
 ```typescript
-// From codeman/src/ralph-tracker.ts
+// From reverie/src/ralph-tracker.ts
 private handleCompletionPhrase(phrase: string): void {
   const count = (this._completionPhraseCount.get(phrase) || 0) + 1;
   this._completionPhraseCount.set(phrase, count);

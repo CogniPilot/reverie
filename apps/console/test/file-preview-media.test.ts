@@ -58,14 +58,14 @@ function fakeMedia(tag: 'video' | 'audio'): FakeMedia {
 }
 
 function loadApp(media: FakeMedia[]) {
-  const CodemanApp = function CodemanApp(this: unknown) {} as unknown as new () => Record<string, unknown>;
+  const ReverieApp = function ReverieApp(this: unknown) {} as unknown as new () => Record<string, unknown>;
   const context = vm.createContext({
-    CodemanApp,
+    ReverieApp,
     console: { ...console, warn: vi.fn() },
     localStorage: { getItem: () => null, setItem: () => {}, removeItem: () => {} },
     escapeHtml: (s: string) => String(s),
     // Reverse-proxy route builder from constants.js (not loaded here); identity at root.
-    CodemanBase: { base: '', url: (p: string) => p },
+    ReverieBase: { base: '', url: (p: string) => p },
     // Also from constants.js: no file in this suite renders as an HTML page.
     rendersAsPage: () => false,
     document: { getElementById: () => null, addEventListener: vi.fn() },
@@ -97,7 +97,7 @@ function loadApp(media: FakeMedia[]) {
   const elements: Record<string, unknown> = { filePreviewBody: body, filePreviewOverlay: overlay };
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const app = new CodemanApp() as Record<string, any>;
+  const app = new ReverieApp() as Record<string, any>;
   app.$ = (id: string) => elements[id] ?? null;
   app.filePreviewContent = 'previous content';
   app.context = context;

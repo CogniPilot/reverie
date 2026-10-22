@@ -12,26 +12,40 @@ export const PronounsSchema = z
   .min(1)
   .max(PRONOUNS_MAX)
   .refine((s) => pronounsProblem(s) === undefined, 'Pronouns are one line of text');
-export const EmployeeSchema = z.object({
-  id: text,
-  owner: z.string().optional(),
-  name: text,
-  icon: z.string().refine((s) => !!normalizeIcon(s), 'Choose a valid icon'),
-  /** Profile image (`/api/avatars/<id>?v=<ms>`), set through the avatar routes only. */
-  avatar: z.string().regex(AVATAR_URL).optional(),
-  position: text,
-  /** How to refer to this person ("she/her", "they/them"); the owner sets it (PUT /api/company/employees/:id), never the agent. */
-  pronouns: PronounsSchema.optional(),
-  /** Active employee id in this company, or the company owner. Resolved transactionally by the service. */
-  reportsTo: text.optional(),
-  expertise: z.array(text).min(1).max(20),
-  sessionId: text,
-  /** The CLI conversation thread this person resumes whenever its session is replaced (an OpenCode `ses_...` id). It belongs to the employee, not to any one session. */
-  threadId: z.string().trim().min(1).max(200).optional(),
-  researchEnabled: z.boolean().default(true),
-  createdAt: z.number(),
-}).strict();
+/** Owner-granted company capabilities, independent of an expert's title or identity. */
+export const EmployeePermissionsSchema = z
+  .object({
+    recoverEmployees: z.boolean().default(false),
+  })
+  .strict();
+export const EmployeeSchema = z
+  .object({
+    id: text,
+    owner: z.string().optional(),
+    name: text,
+    icon: z.string().refine((s) => !!normalizeIcon(s), 'Choose a valid icon'),
+    /** Profile image (`/api/avatars/<id>?v=<ms>`), set through the avatar routes only. */
+    avatar: z.string().regex(AVATAR_URL).optional(),
+    position: text,
+    permissions: EmployeePermissionsSchema.default({ recoverEmployees: false }),
+    /** How to refer to this person ("she/her", "they/them"); the owner sets it (PUT /api/company/employees/:id), never the agent. */
+    pronouns: PronounsSchema.optional(),
+    /** Active employee id in this company, or the company owner. Resolved transactionally by the service. */
+    reportsTo: text.optional(),
+    expertise: z.array(text).min(1).max(20),
+    sessionId: text,
+    /** The CLI conversation thread this person resumes whenever its session is replaced (an OpenCode `ses_...` id). It belongs to the employee, not to any one session. */
+    threadId: z.string().trim().min(1).max(200).optional(),
+    researchEnabled: z.boolean().default(true),
+    /** Durable running intent; false is written before an intentional stop. */
+    desiredRunning: z.boolean().optional(),
+    /** Recent automatic starts, persisted to bound recovery across console restarts. */
+    wakeAttempts: z.array(z.number()).default([]),
+    createdAt: z.number(),
+  })
+  .strict();
 export type CompanyEmployee = z.infer<typeof EmployeeSchema>;
+export type CompanyEmployeeInput = z.input<typeof EmployeeSchema>;
 
 /**
  * What an agent may change about itself: its display name and icon, nothing else. Unknown keys
@@ -57,6 +71,8 @@ export const CompanySettingsSchema = z.object({
   ownerAvatar: z.string().regex(OWNER_AVATAR_URL).optional(),
   ownerTitle: z.string().max(100).default(''),
   enabled: z.boolean().default(false),
+  autoWakeEnabled: z.boolean().default(true),
+  crashWakeEmployeeId: z.string().min(1).optional(),
   timeZone: z
     .string()
     .default('UTC')
@@ -72,7 +88,7 @@ export const CompanySettingsSchema = z.object({
   morningHour: z.number().int().min(0).max(23).default(8),
   researchMinutes: z.number().int().min(1).max(120).default(60),
   briefingMinutes: z.number().int().min(1).max(30).default(10),
-  ctoId: text.optional(),
+  coordinatorEmployeeId: text.optional(),
 });
 export type CompanySettings = z.infer<typeof CompanySettingsSchema>;
 export const FindingSchema = z

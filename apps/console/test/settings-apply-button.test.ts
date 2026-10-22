@@ -12,16 +12,16 @@ const html = readFileSync(resolve(publicDir, 'index.html'), 'utf8');
 const settingsUi = readFileSync(resolve(publicDir, 'settings-ui.js'), 'utf8');
 
 function loadApp() {
-  const CodemanApp = function CodemanApp() {} as unknown as { prototype: Record<string, unknown> };
+  const ReverieApp = function ReverieApp() {} as unknown as { prototype: Record<string, unknown> };
   const context = vm.createContext({
-    CodemanApp,
+    ReverieApp,
     localStorage: { getItem: () => null, setItem: () => {} },
     document: { getElementById: () => null, querySelectorAll: () => [], addEventListener: () => {} },
     window: {},
     console,
   });
   vm.runInContext(settingsUi, context, { filename: 'settings-ui.js' });
-  return new (CodemanApp as unknown as new () => Record<string, any>)();
+  return new (ReverieApp as unknown as new () => Record<string, any>)();
 }
 
 describe('Settings Apply button', () => {
@@ -104,10 +104,10 @@ describe('Settings Apply button', () => {
     }
 
     function loadRealApp(put: () => Promise<unknown>) {
-      const CodemanApp = function CodemanApp() {} as unknown as { prototype: Record<string, unknown> };
+      const ReverieApp = function ReverieApp() {} as unknown as { prototype: Record<string, unknown> };
       const el = genericElement();
       const context = vm.createContext({
-        CodemanApp,
+        ReverieApp,
         localStorage: { getItem: () => null, setItem: () => {} },
         document: new Proxy(
           {
@@ -129,7 +129,7 @@ describe('Settings Apply button', () => {
         console,
       });
       vm.runInContext(settingsUi, context, { filename: 'settings-ui.js' });
-      const target = new (CodemanApp as unknown as new () => Record<string, any>)();
+      const target = new (ReverieApp as unknown as new () => Record<string, any>)();
       // saveAppSettings() leans on helpers from the other settings mixins; anything it asks for
       // that is not defined is a harmless stub, while the state the Apply logic owns stays real.
       const state = new Set(['_keepSettingsOpenOnce', '_applyInFlight', '_mcpSyncSavedOn']);
@@ -153,7 +153,7 @@ describe('Settings Apply button', () => {
       app._refreshSettingsAfterApply = vi.fn();
       // The apply*() helpers re-skin and re-lay-out the page from real DOM geometry; that is not what
       // these tests are about, so they are stubbed. applyAppSettings() itself stays real.
-      for (const name of Object.keys(CodemanApp.prototype)) {
+      for (const name of Object.keys(ReverieApp.prototype)) {
         if (/^apply[A-Z]/.test(name) && name !== 'applyAppSettings') app[name] = vi.fn();
       }
       return app;

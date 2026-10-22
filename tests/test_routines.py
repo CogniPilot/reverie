@@ -1,4 +1,4 @@
-import tests  # noqa: F401  isolates CODEMAN_*/FLEET_* before cto is imported
+import tests  # noqa: F401  isolates REVERIE_* before reverie is imported
 import datetime as dt
 import io
 import json
@@ -13,9 +13,9 @@ from unittest import mock
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from cto import routines
-from cto import routines as routines_module
-from cto.routines import TEMPLATES, Console, PolicyError, State, Tick, load_policy, main
+from reverie import routines
+from reverie import routines as routines_module
+from reverie.routines import TEMPLATES, Console, PolicyError, State, Tick, load_policy, main
 
 ZONE = ZoneInfo("America/Chicago")
 MIN = 60_000

@@ -368,7 +368,7 @@ Emitted on `/api/events`, mirrored in `SSE_EVENTS` (`constants.js`):
 
 ## 12. State & persistence
 
-Persisted in `~/.codeman/state.json` via `StateStore`:
+Persisted in `~/.reverie/state.json` via `StateStore`:
 
 - `AppState.cronJobs` — map of `id → CronJob`.
 - `AppState.cronJobRuns` — map of `id → CronJobRun`.
@@ -477,7 +477,7 @@ no reply hint. The notice respects current delivery policy and recovery checks.
 Launch jobs (the ones that start sessions) stay owner-only for every agent, and a delegate cannot turn a post job into one by edit. A delegate cannot create or change bots, their room allowlists or
 caps. Every delegate change is announced in the general and written to the admin audit
 log before it happens, and is refused if the general cannot be told. A caller that
-sends `x-codeman-tainted` (web content in its context) is refused. Data sources remain
+sends `x-reverie-tainted` (web content in its context) is refused. Data sources remain
 owner-only. Until service tokens exist, the caller is identified by the agent header, which
 a process on the host can forge, so the general notice and the audit line are the
 safeguard.

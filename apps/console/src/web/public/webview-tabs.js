@@ -14,7 +14,7 @@
  * trusted. Without that omission the page could read this document and call the
  * API that spawns agents.
  *
- * @mixin Extends CodemanApp.prototype via Object.assign
+ * @mixin Extends ReverieApp.prototype via Object.assign
  * @dependency app.js, api-client.js, constants.js (escapeHtml)
  * @loadorder 12.5 of 16, after session-ui.js (needs the tab strip), before api-client.js
  */
@@ -96,10 +96,10 @@ function linkNeedsWebTabProxy(rawUrl, pageHostname) {
 }
 
 if (typeof window !== 'undefined') {
-  window.CodemanWebviewLinks = { isLoopbackHostname, isOnBoxHostname, webTabOriginKey, linkNeedsWebTabProxy };
+  window.ReverieWebviewLinks = { isLoopbackHostname, isOnBoxHostname, webTabOriginKey, linkNeedsWebTabProxy };
 }
 
-Object.assign(CodemanApp.prototype, {
+Object.assign(ReverieApp.prototype, {
   // ── Loopback links ────────────────────────────────────────────────────────
 
   /**
@@ -200,7 +200,7 @@ Object.assign(CodemanApp.prototype, {
     // open is a workspace-layout choice, not something to sync across machines).
     let saved = [];
     try {
-      saved = JSON.parse(localStorage.getItem('codeman-webview-order') || '[]');
+      saved = JSON.parse(localStorage.getItem('reverie-webview-order') || '[]');
     } catch {
       saved = [];
     }
@@ -240,7 +240,7 @@ Object.assign(CodemanApp.prototype, {
    * starts itself — `location.reload()` (a dev server's full-reload HMR), a
    * root-absolute `location.href = '/login'` — lands on Reverie's root with no
    * capability, where the server answers a static page that does nothing but
-   * post `{type:'codeman:webview-lost', path}` here. The frame is identified by
+   * post `{type:'reverie:webview-lost', path}` here. The frame is identified by
    * `event.source` against the iframes this tab mounted (never by the payload),
    * and remounted inside the prefix at that path. Bounded per frame so a page
    * that reloads itself on every boot cannot spin.
@@ -249,7 +249,7 @@ Object.assign(CodemanApp.prototype, {
     if (this._webviewLostListener) return;
     this._webviewLostListener = (event) => {
       const data = event.data;
-      if (!data || typeof data !== 'object' || data.type !== 'codeman:webview-lost') return;
+      if (!data || typeof data !== 'object' || data.type !== 'reverie:webview-lost') return;
       if (typeof data.path !== 'string' || !event.source) return;
       const layer = document.getElementById('webviewLayer');
       if (!layer) return;
@@ -286,7 +286,7 @@ Object.assign(CodemanApp.prototype, {
 
   _persistWebviewOrder() {
     try {
-      localStorage.setItem('codeman-webview-order', JSON.stringify(this.webviewOrder || []));
+      localStorage.setItem('reverie-webview-order', JSON.stringify(this.webviewOrder || []));
     } catch {
       /* private mode / quota, order is a convenience, never fatal */
     }
@@ -441,7 +441,7 @@ Object.assign(CodemanApp.prototype, {
       // A deep link into an already-mounted dashboard: navigate the live frame
       // instead of tearing it down, so its login and state survive.
       const frame = wrap.querySelector('iframe');
-      if (frame) frame.src = CodemanBase.url(src);
+      if (frame) frame.src = ReverieBase.url(src);
     }
     if (!wrap) {
       wrap = document.createElement('div');
@@ -460,7 +460,7 @@ Object.assign(CodemanApp.prototype, {
       frame.setAttribute('referrerpolicy', 'no-referrer-when-downgrade');
       // Proxied dashboards carry a root-absolute `/webview/<cap>/` embedUrl that must
       // ride the mount prefix; external (trusted) URLs are absolute and pass through.
-      frame.src = CodemanBase.url(src);
+      frame.src = ReverieBase.url(src);
 
       const failure = document.createElement('div');
       failure.className = 'webview-failure';

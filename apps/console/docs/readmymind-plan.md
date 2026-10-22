@@ -1,6 +1,6 @@
 # Read My Mind (design)
 
-A 🧠 button that predicts the prompt you were about to type. Codeman keeps a per-case **intent profile** (your stated goals plus the real prompts you recently sent), feeds it and the live pane tail to a one-shot `claude -p`, and shows the predicted next prompt in a plan-mode-style approval dialog: **Send** / **Rethink** (with an optional steer note) / **Insert** (drop it on the composer to edit) / **Dismiss**. It is also a skill surface: the agent can read the intent profile, record intentions, and request a prediction over the HTTP API. Suggestions are **never auto-sent**; the human click is the boundary.
+A 🧠 button that predicts the prompt you were about to type. Reverie keeps a per-case **intent profile** (your stated goals plus the real prompts you recently sent), feeds it and the live pane tail to a one-shot `claude -p`, and shows the predicted next prompt in a plan-mode-style approval dialog: **Send** / **Rethink** (with an optional steer note) / **Insert** (drop it on the composer to edit) / **Dismiss**. It is also a skill surface: the agent can read the intent profile, record intentions, and request a prediction over the HTTP API. Suggestions are **never auto-sent**; the human click is the boundary.
 
 ## UX flow
 
@@ -44,7 +44,7 @@ Storage: `dataPath('intents.json')`, written mode 0600 (prompts can contain secr
 
 ## Context assembly (how the mind reading actually works)
 
-The quality of the suggestion is decided before the model ever runs, by what we put in front of it. A new pure function `buildPredictionContext()` (in `src/readmymind-context.ts`, unit-testable with fixtures, no IO of its own; collectors inject their data) assembles a budgeted, priority-ordered prompt from every signal Codeman already has:
+The quality of the suggestion is decided before the model ever runs, by what we put in front of it. A new pure function `buildPredictionContext()` (in `src/readmymind-context.ts`, unit-testable with fixtures, no IO of its own; collectors inject their data) assembles a budgeted, priority-ordered prompt from every signal Reverie already has:
 
 | # | Source | What it contributes | Cap |
 | - | ------ | ------------------- | --- |
@@ -72,7 +72,7 @@ Total budget ~30 KB. When over budget, drop from the bottom up (siblings first, 
 
 ## Predictor
 
-New `src/readmymind-predictor.ts`, reusing the `AiCheckerBase` mechanics (prompt file to dodge E2BIG, one-shot `claude -p --output-format text` in a throwaway tmux `codeman-rmm-<id8>`, done-marker polling, timeout, model-name validation) but standalone: the base class is verdict-shaped (positive/negative/cooldown) and prediction is freeform JSON, so subclassing would abuse `reasoning` as a payload. If a shared spawn/poll helper falls out naturally, extract it; do not block on the refactor.
+New `src/readmymind-predictor.ts`, reusing the `AiCheckerBase` mechanics (prompt file to dodge E2BIG, one-shot `claude -p --output-format text` in a throwaway tmux `reverie-rmm-<id8>`, done-marker polling, timeout, model-name validation) but standalone: the base class is verdict-shaped (positive/negative/cooldown) and prediction is freeform JSON, so subclassing would abuse `reasoning` as a payload. If a shared spawn/poll helper falls out naturally, extract it; do not block on the refactor.
 
 - **Model: opus** (decided). `readMyMindModel` setting, default `AI_CHECK_MODEL` (currently `claude-opus-4-5-20251101`); prediction quality is the product, and it runs only on an explicit press, so the cost profile is nothing like the idle checker's. Timeout 90s (opus headroom over a ~30 KB prompt).
 - Input: the assembled context above. The predictor itself stays dumb: text in, JSON out; all intelligence about *what to include* lives in the testable assembler.
@@ -97,7 +97,7 @@ New module `readmymind-ui.js` (@loadorder 11.3, after panels-ui.js), prettier-fo
 
 ## Skill integration
 
-The user-facing promise: the button is also a skill. Extend `skills/codeman`:
+The user-facing promise: the button is also a skill. Extend `skills/reverie`:
 
 - New section "Read My Mind: intent + prediction" with the three intent verbs (read profile, append/replace goals, predict) and the guard notes (single-line prompts, never auto-send to another session without the user asking).
 - Update `reference/endpoints.md` (the endpoints.md drift test pins this).
@@ -137,4 +137,4 @@ Agent use cases this unlocks: a lead session records intentions as the user stat
 
 - CLAUDE.md: Key Patterns entry, State Files (`intents.json`), frontend load order, route count.
 - `docs/api-reference.md`: four endpoints (additive under the 0.9.x contract).
-- `skills/codeman/reference/endpoints.md`: new rows (drift-test enforced).
+- `skills/reverie/reference/endpoints.md`: new rows (drift-test enforced).

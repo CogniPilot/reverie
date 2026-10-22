@@ -85,7 +85,7 @@ export interface DeepSeekTranscriptResult {
  * zstd decompression is a RUNTIME capability here, not an import.
  *
  * Node grew `zlib` zstd support in 22.15 (and `@types/node` still does not
- * declare it), while Codeman's floor is Node 22.0. So it is resolved through a
+ * declare it), while Reverie's floor is Node 22.0. So it is resolved through a
  * narrow cast and checked before use: on an older 22.x a dsh session keeps the
  * pane-segmenter behaviour it had before this module existed instead of
  * throwing on every `last-response` call.
@@ -503,7 +503,7 @@ const TRANSCRIPT_FILES = ['session.jsonl.zstd', 'session.jsonl'];
  * reproduced: every candidate's own header line carries `cwd`, which is
  * authoritative, and matching on it is immune to the next naming change.
  *
- * Pairing a Codeman session with ITS transcript then has one hard rule and one
+ * Pairing a Reverie session with ITS transcript then has one hard rule and one
  * ladder. The rule: a transcript created BEFORE this session started belongs to
  * an earlier conversation in the same directory and is never eligible. Measured
  * cost of getting that wrong — a freshly spawned worker answered its very first
@@ -526,7 +526,7 @@ const TRANSCRIPT_FILES = ['session.jsonl.zstd', 'session.jsonl'];
  * The cost of that choice: after an interactive `/new` in a dsh tab, this
  * reader keeps serving the pre-`/new` conversation (the same session's own
  * earlier turns — stale, never foreign); step 2 is reached only when no
- * boot-window transcript exists. Worker fleets never `/new`, so they only
+ * boot-window transcript exists. Worker reveries never `/new`, so they only
  * ever see step 1.
  */
 export async function findDeepSeekTranscript(options: {

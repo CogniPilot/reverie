@@ -59,7 +59,7 @@ describe('SSE dispatch table', () => {
   });
 
   it('defines every handler in exactly ONE module (a second copy is shadowed)', () => {
-    // Modules mix into `CodemanApp.prototype` and run in script order, so two
+    // Modules mix into `ReverieApp.prototype` and run in script order, so two
     // definitions of the same handler name silently shadow each other: the later file
     // wins and the earlier one never runs. The existence check above cannot see that
     // (both names resolve), which is how a duplicate banner handler can leave a toast

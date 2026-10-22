@@ -144,7 +144,7 @@ describe('a rebuild that fails after the session is registered', () => {
     expect(ctx.sessions.has('a')).toBe(false);
     // NOT the user-initiated delete: that would bank this session's historical
     // tokens into the lifetime totals, demote a pinned record to `stopped`, and
-    // delete the workspace's .codeman-uploads.
+    // delete the workspace's .reverie-uploads.
     expect(ctx.cleanupSession).not.toHaveBeenCalled();
     await app.close();
   });

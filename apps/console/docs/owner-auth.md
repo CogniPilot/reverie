@@ -14,11 +14,11 @@ routes need the owner and which agents may call.
 | `reverie owner reset-2fa` | Lost authenticator: removes two-step, recovery codes and remembered devices; every session ends. |
 | `reverie owner unlock` | Clears a sign-in lockout. |
 | `reverie owner logout-all` | Ends every session and forgets every remembered device. |
-| `reverie owner keepers [list\|add\|remove] [cto\|employee id]` | Names the agents (by company employee, or `cto`) that may nudge, interrupt and read any agent session. |
+| `reverie owner keepers [list\|add\|remove] [employee id]` | Names the agents (by exact company employee id) that may nudge, interrupt and see status for any agent session. |
 | `reverie owner service-token issue\|revoke <name>` | Manages a token (printed once) for a host service, sent as `X-Reverie-Service-Token`. |
 | `reverie owner status` | Account state, without secrets. |
 
-Every `reverie owner` command refuses to run inside an agent session (`CODEMAN_SESSION_ID` set), and
+Every `reverie owner` command refuses to run inside an agent session (`REVERIE_SESSION_ID` set), and
 every action is written to the audit log as `host-cli`.
 
 ## Signing in (browser or installed phone app)
@@ -70,7 +70,7 @@ devices, changes the password, signs out, and signs out everywhere.
 **Who the caller is:**
 - **Owner:** a valid owner session cookie.
 - **Service:** a valid service token.
-- **Agent:** an `X-Codeman-Parent-Session` that resolves to a live session. That header is a routing
+- **Agent:** an `X-Reverie-Parent-Session` that resolves to a live session. That header is a routing
   hint set by agent tooling, not authentication.
 - **Anonymous:** none of the above.
 
@@ -98,7 +98,7 @@ a child "under" another session. This covers stopped sessions' saved records too
     its predecessor's, from the watcher's record (`controller-state.json` next to the data dir, or
     `REVERIE_RUNTIME_STATE`).
   - That file is writable by the agents' uid, so it never grants more than input.
-- **Keepers:** the host names them with `reverie owner keepers add <cto | employee id>`.
+- **Keepers:** the host names them with `reverie owner keepers add <employee-id>`.
   - A session bound to such a company employee may nudge and interrupt **any** agent session.
   - It sees **status only:** the session metadata every agent may read (busy or idle, `paneDialog`,
     mode, last activity). Never another session's terminal or transcript.

@@ -30,7 +30,7 @@ type Helpers = {
   TILE_GRID_COUNT_DEFAULT: number;
   TILE_GRID_MAX: number;
 };
-const T = windowStub.CodemanTileGrid as Helpers;
+const T = windowStub.ReverieTileGrid as Helpers;
 const all = ['t1', 't2', 't3', 't4', 't5', 't6', 't7', 't8'];
 
 describe('sanitizeTileCount', () => {

@@ -1,5 +1,5 @@
 /**
- * @fileoverview Append-only admin audit log (~/.codeman/admin-audit.jsonl).
+ * @fileoverview Append-only admin audit log (~/.reverie/admin-audit.jsonl).
  *
  * Every user-management action (create/patch/reset/delete/logout/assign) writes one
  * JSON line: timestamp, acting admin, action, target, request IP. Same idiom as

@@ -2,7 +2,7 @@
 
 > **Status: SHIPPED — deployed to prod + pushed to master, not yet released (2026-06-14).** App Settings → Display → **Plan Usage Limits** (`showPlanUsageLimits`). **Default changed in 1.9.3: desktop now defaults ON, handhelds stay OFF, resolved via `planUsageChipEnabled()`.** The per-device notes further down describing it as opt-in/synced record the original 2026-06-14 shape, not current behavior. Commits `c82f6c8` (feature) → `4d9d93d` (end-to-end fixes) → `eae225b` (per-user reconcile) → `95fb5fc` (init-snapshot replay). Full suite green (2869), CI green. No changeset/version bump yet.
 >
-> **2026-09-07 rework — the "Injection lifecycle" section below (disk-write reconcile via `applyStatusLineConfig`) is SUPERSEDED and describes the OLD mechanism, kept for history.** That disk write let a Codeman-marked `statusLine.command` in `.claude/settings.local.json` take precedence over the user's own global/project statusline for ANY `claude` run in that directory — including entirely outside Codeman — with no disclosure and no way to undo it (real bug, found 2026-08-31). The exporter is now injected as an EPHEMERAL `claude --settings` CLI flag at spawn (`resolveStatusLineCliCommand`/`ensureStatusLineExporterScript`, hooks-config.ts) — never written to disk — and it WRAPS the user's own real statusline (`findEffectiveUserStatusLineCommand`) rather than replacing it. `showPlanUsageLimits` now doubles as the telemetry COLLECTION switch too: `readPlanUsageTelemetryEnabled()` reads it fresh from `settings.json` at every claude session create/respawn (`TmuxManager.createSession`/`respawnPane`), so it applies uniformly across every claude-creation path — interactive Run, cron, the Ralph Loop API, quick-start — with no per-session state (a Codeman restart cannot silently kill it) and no per-request field on the wire at all. An absent key reads as ON (the reader resolves the default; `GET /api/settings` never writes), and a settings save carries the key only when it flips the chip on that device, so a handheld with the chip off cannot switch collection off for a desktop by saving something unrelated. The exporter prints nothing on failure rather than the bare word `codeman` (discussion #405).
+> **2026-09-07 rework — the "Injection lifecycle" section below (disk-write reconcile via `applyStatusLineConfig`) is SUPERSEDED and describes the OLD mechanism, kept for history.** That disk write let a Reverie-marked `statusLine.command` in `.claude/settings.local.json` take precedence over the user's own global/project statusline for ANY `claude` run in that directory — including entirely outside Reverie — with no disclosure and no way to undo it (real bug, found 2026-08-31). The exporter is now injected as an EPHEMERAL `claude --settings` CLI flag at spawn (`resolveStatusLineCliCommand`/`ensureStatusLineExporterScript`, hooks-config.ts) — never written to disk — and it WRAPS the user's own real statusline (`findEffectiveUserStatusLineCommand`) rather than replacing it. `showPlanUsageLimits` now doubles as the telemetry COLLECTION switch too: `readPlanUsageTelemetryEnabled()` reads it fresh from `settings.json` at every claude session create/respawn (`TmuxManager.createSession`/`respawnPane`), so it applies uniformly across every claude-creation path — interactive Run, cron, the Ralph Loop API, quick-start — with no per-session state (a Reverie restart cannot silently kill it) and no per-request field on the wire at all. An absent key reads as ON (the reader resolves the default; `GET /api/settings` never writes), and a settings save carries the key only when it flips the chip on that device, so a handheld with the chip off cannot switch collection off for a desktop by saving something unrelated. The exporter prints nothing on failure rather than the bare word `reverie` (discussion #405).
 >
 > Two surfaces from one `statusLine` callback:
 > - **Header chip** (top-right) — account-wide **plan limits**: `5h 35% · 7d 38%`, per-window green/yellow/red.
@@ -12,7 +12,7 @@
 
 ## Problem
 
-Codeman had no proactive view of how much of the Claude subscription is left. It only learned about limits **reactively**: `usage-limit-patterns.ts` regex-scrapes ANSI-stripped terminal output for footer strings like `5-hour limit reached ∙ resets 8pm`, extracting only the **reset time**, and only *after* Claude has already stalled. There was no "73% of your 5-hour limit used" anywhere.
+Reverie had no proactive view of how much of the Claude subscription is left. It only learned about limits **reactively**: `usage-limit-patterns.ts` regex-scrapes ANSI-stripped terminal output for footer strings like `5-hour limit reached ∙ resets 8pm`, extracting only the **reset time**, and only *after* Claude has already stalled. There was no "73% of your 5-hour limit used" anywhere.
 
 We wanted a live, always-visible gauge so the operator can see a wall coming and pace overnight/autonomous runs — without hijacking the in-terminal statusline, which should keep showing the current session's status.
 
@@ -39,14 +39,14 @@ Claude Code (**v2.1.80+**; prod box runs **2.1.177**) pipes a JSON blob to a con
 
 - **Only two windows exist: `five_hour` and `seven_day`.** There is **no separate Opus-weekly field**, even on a Max/Opus account.
 - `rate_limits` is **absent on the first render**, **present after the first API response**. UI degrades to "no chip yet."
-- statusLine fires **only in interactive TUI mode**, never `--print`. Fine — Codeman sessions are interactive TUIs (and so are Codeman-spawned ones in tmux).
+- statusLine fires **only in interactive TUI mode**, never `--print`. Fine — Reverie sessions are interactive TUIs (and so are Reverie-spawned ones in tmux).
 - **Subscriber-gated.** Absent for API-key / non-subscriber auth.
 
 ### Bonus telemetry in the same payload — used for the footer
 
 The same stdin object also carries `model.display_name`, `context_window.{used_percentage, total_input_tokens, total_output_tokens, …}`, `cost.total_cost_usd`, `effort.level`, etc. The shipped feature uses **model + token totals + context %** to build the in-terminal footer (so the statusline stays useful even though we own it). The endpoint also broadcasts `contextUsedPercentage`/`costUsd`/`modelDisplayName` alongside the limits for future chip tooltips.
 
-Since Claude Code v2.1.251 the payload also carries a `prompt_cache` object for the main conversation: `warm`, `ttl` (`5m` or `1h`), `expires_at` (epoch seconds), `recache_tokens_if_cold`, `misses`, `expected_rebuilds`, `hit_ratio`, `last_miss_at` and `last_miss_cause`. `StatusTelemetrySchema` lists every documented scalar field null-tolerant (several are documented as possibly null, and the object gains fields across CLI versions, so a strict shape would 400 the post and blank the footer); `parsePromptCache()` normalizes only the subset Codeman stores. The footer appends `cache:until HH:MM` while warm or `cache:cold` otherwise, and Claude re-runs the statusline when `expires_at` passes, so the cold flip arrives without a turn. The Session Options readout adds the hit rate, the last miss's causes, and a `Context compacted at HH:MM` note after a compaction or a tool-result clearing (the first warm report whose `recache_tokens_if_cold` is null after one that carried it; `expected_rebuilds` rises only at the next request, so it is not read; never raised as an alert). The last report is restored on a Codeman restart and the readout is time-aware, so a value whose expiry has passed shows as cold rather than stale-warm.
+Since Claude Code v2.1.251 the payload also carries a `prompt_cache` object for the main conversation: `warm`, `ttl` (`5m` or `1h`), `expires_at` (epoch seconds), `recache_tokens_if_cold`, `misses`, `expected_rebuilds`, `hit_ratio`, `last_miss_at` and `last_miss_cause`. `StatusTelemetrySchema` lists every documented scalar field null-tolerant (several are documented as possibly null, and the object gains fields across CLI versions, so a strict shape would 400 the post and blank the footer); `parsePromptCache()` normalizes only the subset Reverie stores. The footer appends `cache:until HH:MM` while warm or `cache:cold` otherwise, and Claude re-runs the statusline when `expires_at` passes, so the cold flip arrives without a turn. The Session Options readout adds the hit rate, the last miss's causes, and a `Context compacted at HH:MM` note after a compaction or a tool-result clearing (the first warm report whose `recache_tokens_if_cold` is null after one that carried it; `expected_rebuilds` rises only at the next request, so it is not read; never raised as an alert). The last report is restored on a Reverie restart and the readout is time-aware, so a value whose expiry has passed shows as cold rather than stale-warm.
 
 ### Alternatives considered & rejected
 
@@ -65,8 +65,8 @@ Claude TUI (any Claude session, incl. linked-case/real-repo sessions)
   │  renders statusline after each assistant msg (+ /compact, mode change)
   ▼
 statusLine.command (settings.local.json)  ──reads stdin JSON──▶
-  curl -sk POST $CODEMAN_API_URL/api/status-telemetry  {sessionId, data}
-  (X-Codeman-Hook-Secret: $(cat $CODEMAN_HOOK_SECRET_FILE))
+  curl -sk POST $REVERIE_API_URL/api/status-telemetry  {sessionId, data}
+  (X-Reverie-Hook-Secret: $(cat $REVERIE_HOOK_SECRET_FILE))
   │  ◀── HTTP 200 text/plain = current-SESSION status string ──┘
   ▼
 printf '%s' "$body"  →  in-terminal footer: "Opus 4.8 (1M context)  in:… out:…  ctx:…%"
@@ -81,22 +81,22 @@ app.js: _onSessionStatusTelemetry → chip (per-window colors) + localStorage sa
 
 ### 1. The exporter — `generateStatusLineCommand()` in `hooks-config.ts`
 
-Mirrors the hook `curlCmd()`. Reads the stdin JSON, POSTs `{sessionId, data}` to a **fixed** loopback path, and prints the response body back to stdout (print-through, so the footer stays useful). The managed-session env carries `$CODEMAN_SESSION_ID` / `$CODEMAN_API_URL` / `$CODEMAN_HOOK_SECRET_FILE` (from `tmux-manager.buildEnvExports()`).
+Mirrors the hook `curlCmd()`. Reads the stdin JSON, POSTs `{sessionId, data}` to a **fixed** loopback path, and prints the response body back to stdout (print-through, so the footer stays useful). The managed-session env carries `$REVERIE_SESSION_ID` / `$REVERIE_API_URL` / `$REVERIE_HOOK_SECRET_FILE` (from `tmux-manager.buildEnvExports()`).
 
 ```bash
 INPUT=$(cat 2>/dev/null || echo '{}'); \
-printf '{"sessionId":"%s","data":%s}' "$CODEMAN_SESSION_ID" "$INPUT" | \
-curl -sk -X POST "$CODEMAN_API_URL/api/status-telemetry" \
+printf '{"sessionId":"%s","data":%s}' "$REVERIE_SESSION_ID" "$INPUT" | \
+curl -sk -X POST "$REVERIE_API_URL/api/status-telemetry" \
   -H 'Content-Type: application/json' \
-  -H "X-Codeman-Hook-Secret: $(cat "$CODEMAN_HOOK_SECRET_FILE" 2>/dev/null)" \
-  --data @- 2>/dev/null || echo codeman
+  -H "X-Reverie-Hook-Secret: $(cat "$REVERIE_HOOK_SECRET_FILE" 2>/dev/null)" \
+  --data @- 2>/dev/null || echo reverie
 ```
 
 ⚠️ **`curl -sk`, not `curl -s`.** Prod is loopback **HTTPS with a self-signed cert**; without `-k`, curl returns `000` and the statusline silently shows nothing. `-k` is safe (loopback only). *(The existing hook curls use `-s` without `-k` and have the same latent issue on HTTPS installs — a known, separate follow-up.)*
 
 ### 2. Endpoint — `POST /api/status-telemetry` (`status-telemetry-routes.ts`)
 
-Fixed path (sessionId in the **body**, not the URL) so the auth exemption is an exact-match like `/api/hook-event` (`middleware/auth.ts`: loopback-only; `X-Codeman-Hook-Secret`-gated while a tunnel runs). Schema `StatusTelemetrySchema` in `schemas.ts` validates the subset; unknown keys are stripped. Pure parsing/formatting in `usage-telemetry.ts`:
+Fixed path (sessionId in the **body**, not the URL) so the auth exemption is an exact-match like `/api/hook-event` (`middleware/auth.ts`: loopback-only; `X-Reverie-Hook-Secret`-gated while a tunnel runs). Schema `StatusTelemetrySchema` in `schemas.ts` validates the subset; unknown keys are stripped. Pure parsing/formatting in `usage-telemetry.ts`:
 
 - `parseStatusTelemetry(data)` → `{ fiveHour, sevenDay, … }` or `null`. On change (signature dedup; statusline fires often), store last-known (`plan-usage-latest.ts`) and `broadcast('session:statusTelemetry', { sessionId, …telemetry })`.
 - `parseSessionStatus(data)` + `formatSessionStatusText()` → the **footer** string `Opus 4.8 (1M context)  in:562,411 out:1,188  ctx:56%` (returned as `text/plain`). Available from the first render, even before `rate_limits` appears.
@@ -104,7 +104,7 @@ Fixed path (sessionId in the **body**, not the URL) so the auth exemption is an 
 ### 3. SSE + frontend chip
 
 `session:statusTelemetry` registered in `sse-events.ts` + `constants.js`. `app.js`:
-- `_onSessionStatusTelemetry` → `updatePlanUsageChip(data)` + save to `localStorage['codeman:planUsage']`.
+- `_onSessionStatusTelemetry` → `updatePlanUsageChip(data)` + save to `localStorage['reverie:planUsage']`.
 - `updatePlanUsageChip` renders two `5h`/`7d` windows; **per-window color by usage** — green `<60%`, yellow `60–84%`, red `≥85%` (`pu-green/pu-yellow/pu-red`); bold labels/values; reset times in the tooltip. `resets_at*1000 → Date`.
 - Chip element ships hidden (`header-plan-usage--hidden`); `applyHeaderVisibilitySettings()` reveals it client-side when the setting is on (response-viewer pattern — **no `renderIndexHtml` strip**, which kept the "title-only" render contract intact).
 
@@ -120,14 +120,14 @@ The setting `showPlanUsageLimits` is **synced** (in `settings.json`, not a per-d
 
 - ~~**On toggle** (`PUT /api/settings`, `system-routes.ts`): reconcile the exporter across **all active Claude sessions' working dirs** — inject on enable, remove on disable.~~ There is nothing to (re)inject into an already-running session under the new CLI-flag mechanism — the NEXT respawn (a Ralph cycle, `/clear`, a PTY-exit restart) already reads the setting fresh.
 - ~~**On session create** (`session-routes.ts`): **ADD-ONLY** — inject when `statusLineTelemetry` is true; **never remove**.~~ There is no `statusLineTelemetry` request field anymore. `TmuxManager.createSession`/`respawnPane` read `readPlanUsageTelemetryEnabled()` fresh at spawn instead, uniformly across every claude-creation path.
-- ~~`applyStatusLineConfig()` is **`isOurs`-guarded**~~ — `applyStatusLineConfig` still exists but only for the SELF-HEAL path now (`resolveStatusLineCliCommand` strips a legacy disk-written exporter the first time a session starts in a workspace an older Codeman build touched).
+- ~~`applyStatusLineConfig()` is **`isOurs`-guarded**~~ — `applyStatusLineConfig` still exists but only for the SELF-HEAL path now (`resolveStatusLineCliCommand` strips a legacy disk-written exporter the first time a session starts in a workspace an older Reverie build touched).
 
-## Codeman-specific considerations
+## Reverie-specific considerations
 
 1. **Account-global limits.** The 5h/7d pools are shared across all sessions on the account → one shared header chip (freshest sample wins), not a per-tab bar.
 2. **The footer is owned, by necessity.** A statusLine command always replaces Claude's default footer. Since `rate_limits` *only* arrives via statusLine, we reconstruct a useful **session-status** footer (model · tokens · ctx %) from the same payload rather than showing the limits there.
 3. **Never overwrites, now WRAPS.** The exporter composes with a user's own real statusline (`findEffectiveUserStatusLineCommand`) rather than replacing it; `applyStatusLineConfig`'s `isOurs`-guard now only backs the legacy self-heal removal path.
-4. **Security envelope unchanged.** The exporter runs arbitrary shell every render — same trust model as the hook curls (localhost + `$CODEMAN_HOOK_SECRET_FILE`); reuses the hook-secret gate.
+4. **Security envelope unchanged.** The exporter runs arbitrary shell every render — same trust model as the hook curls (localhost + `$REVERIE_HOOK_SECRET_FILE`); reuses the hook-secret gate.
 5. **Claude-only, registry-gated.** Injection is gated on `getCli(mode)?.capabilities.statusLineTelemetry` (currently `true` only for claude) rather than a hardcoded `mode === 'claude'` string.
 6. **Future — auto-resume synergy.** Live percentages would let `SessionAutoOps` pre-arm *before* the wall instead of reacting to the stall footer. Not built.
 
@@ -149,7 +149,7 @@ The setting `showPlanUsageLimits` is **synced** (in `settings.json`, not a per-d
 
 The first "shipped" build passed every test and was broken in practice. End-to-end testing on the real install (the lesson: drive a REAL session, observe the REAL output) surfaced:
 
-1. **`CASES_DIR` injection gate** excluded the user's whole workflow — sessions run in linked cases / real repos, not under `~/codeman-cases`. → dropped the gate.
+1. **`CASES_DIR` injection gate** excluded the user's whole workflow — sessions run in linked cases / real repos, not under `~/reverie-cases`. → dropped the gate.
 2. **`curl -s` → `000`** on the loopback self-signed HTTPS cert; statusline silently empty. → `curl -sk`.
 3. **Remove-on-create-false + shared `settings.local.json`** let a single stale client yank the statusLine out from under all sessions in a repo. → add-only on create; removal only via the toggle reconcile.
 4. **Chip blank after reload** (localStorage-only, lost on restart/fresh browser). → server-side last-known in the init snapshot.
@@ -166,8 +166,8 @@ Captured without touching global settings or any real session:
 
 1. Throwaway dir `/tmp/sl-capture` with an exporter `dump.sh` that appends stdin to `payloads.jsonl` and prints `cap`; a `settings.json` pointing `statusLine.command` at it.
 2. `--print` mode does **not** render a statusline → no capture (confirms TUI-only). Must use interactive.
-3. Launch interactive Claude in an **isolated tmux socket** (`tmux -L slcap`, never `-L codeman`) inside the temp dir, `--settings /tmp/sl-capture/settings.json` (no global mutation). Confirm the workspace-trust dialog (appears even with `--dangerously-skip-permissions`), then send a one-line prompt (literal text + Enter separately, Ink-style).
+3. Launch interactive Claude in an **isolated tmux socket** (`tmux -L slcap`, never `-L reverie`) inside the temp dir, `--settings /tmp/sl-capture/settings.json` (no global mutation). Confirm the workspace-trust dialog (appears even with `--dangerously-skip-permissions`), then send a one-line prompt (literal text + Enter separately, Ink-style).
 4. After the first response, `rate_limits` appears in the **second** captured record (absent in the first). Inspect with `jq '.rate_limits'`.
-5. Tear down: `tmux -L slcap kill-server` + `rm -rf /tmp/sl-capture`; verify the `codeman` socket is untouched.
+5. Tear down: `tmux -L slcap kill-server` + `rm -rf /tmp/sl-capture`; verify the `reverie` socket is untouched.
 
 Related: `docs/claude-code-hooks-reference.md` (hook callback pattern), `src/usage-limit-patterns.ts` (reactive fallback), `docs/respawn-state-machine.md` (auto-resume interplay).

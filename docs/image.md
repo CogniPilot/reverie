@@ -19,7 +19,8 @@ Once the repository is public, `curl -fsSLO https://github.com/jgoppert/reverie/
 works as well, without signing in.
 
 `setup.sh` pulls the release, starts one container named `reverie` with a data volume
-`reverie-data` mounted at `/instances`, and prints the address. The console listens on
+`reverie-data` mounted at `/instances` and a home volume `reverie-home` mounted at
+`/home/agent`, and prints the address. The console listens on
 `127.0.0.1:3000` only. Sign in as `owner` with the password the first start generated:
 
 ```bash
@@ -38,6 +39,12 @@ bash setup.sh --owner
 Options: `--version X.Y.Z`, `--port N`, `--name NAME` (a second server on the same machine),
 `--with-claude-code` (installs that CLI at start, on the volume, under your own account and
 its license; the image does not ship it), `--dry-run`.
+
+The home volume preserves agent tool configuration, provider authorization and conversation
+history that use their normal home or XDG paths. The data volume preserves console state,
+instance configuration and explicitly located memories. Keep both volumes when upgrading or
+recreating the container; neither imports configuration from the host. A custom name
+uses NAME-data and NAME-home. Removing either volume permanently removes its records.
 
 While the package is private, log in to the registry first:
 
@@ -58,7 +65,7 @@ bash setup.sh --version 0.1.1   # the first start of a new release backs up cons
 bash setup.sh --rollback        # back to the previous release, with the state it backed up
 ```
 
-The container is replaced; the volume is kept. `setup.sh` records each release it started
+The container is replaced; both named volumes are kept. `setup.sh` records each release it started
 in `~/.config/reverie/<name>.versions` by image digest, so a rollback returns to the exact
 bytes that ran before.
 
@@ -71,7 +78,7 @@ bytes that ran before.
 2. on the first start after an image change (`REVERIE_VERSION` differs from the volume's
    record), writes a tar backup of `console/` under `backups/` before the console migrates
    its files;
-3. sets the owner login: `CODEMAN_PASSWORD` from the environment, or a generated password
+3. sets the owner login: `REVERIE_PASSWORD` from the environment, or a generated password
    kept at `owner-password` (mode 0600) on the volume. The console never starts without one;
 4. installs the opt-in CLIs named in `REVERIE_INSTALL_CLIS` onto the volume, skipping
    cleanly when offline, and points the default Claude and Codex profiles at
@@ -79,7 +86,7 @@ bytes that ran before.
 5. runs the given command, by default `reverie web --host 0.0.0.0 --port 3000`.
 
 Any other command runs after the same preparation. The development and personal
-launchers (`scripts/fleet-container`, `scripts/reverie-recreate`) bypass it with
+launchers (`scripts/reverie-container`, `scripts/reverie-recreate`) bypass it with
 `--entrypoint /usr/bin/env`, because they mount their own instance and workspace.
 
 ## Hiring the first employee (interim, until hire-by-model lands)

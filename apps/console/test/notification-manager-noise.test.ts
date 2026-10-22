@@ -71,7 +71,7 @@ function loadManager(
   }) as typeof requestAnimationFrame;
 
   if (saved) {
-    win.localStorage.setItem('codeman-notification-prefs', JSON.stringify(saved));
+    win.localStorage.setItem('reverie-notification-prefs', JSON.stringify(saved));
   }
 
   win.eval(`
@@ -179,7 +179,7 @@ describe('notification noise defaults', () => {
     });
 
     expect(manager.preferences.enabled).toBe(false);
-    expect(manager.getStorageKey()).toBe('codeman-notification-prefs-mobile');
+    expect(manager.getStorageKey()).toBe('reverie-notification-prefs-mobile');
   });
 });
 

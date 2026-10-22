@@ -18,7 +18,7 @@
  *   state-store (persistence), session (PTY execution), task (task model)
  * @consumedby web/server (ralph routes, SSE)
  * @emits started, stopped, taskAssigned, taskCompleted, taskFailed, error
- * @persistence Ralph loop state saved to `~/.codeman/state.json` (ralphLoop key)
+ * @persistence Ralph loop state saved to `~/.reverie/state.json` (ralphLoop key)
  *
  * @module ralph-loop
  */

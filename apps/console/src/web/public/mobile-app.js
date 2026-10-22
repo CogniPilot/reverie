@@ -81,7 +81,7 @@
       refresh();
     });
     dialog.querySelector('[data-test]').onclick = (event) => run(event.currentTarget, async () => {
-      const id = window.app._pushSubscriptionId || localStorage.getItem('codeman-push-subscription-id');
+      const id = window.app._pushSubscriptionId || localStorage.getItem('reverie-push-subscription-id');
       if (!id) throw new Error('Enable notifications again to register this device.');
       const result = await window.app._apiJson('/api/push/subscribe/' + encodeURIComponent(id) + '/test', { method: 'POST', body: {} });
       if (!result?.accepted) throw new Error('The push service did not accept the test. Enable notifications again and retry.');

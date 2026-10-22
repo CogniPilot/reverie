@@ -1,6 +1,6 @@
 /**
  * @fileoverview Regression tests for the header connection indicator
- * (`CodemanApp._updateConnectionIndicator`) and the invariant that updating it
+ * (`ReverieApp._updateConnectionIndicator`) and the invariant that updating it
  * never aborts durable input delivery.
  *
  * Guards two regressions from the upstream v1.1.15 merge (fixed in COD-133):
@@ -31,7 +31,7 @@ import { resolve } from 'node:path';
 import vm from 'node:vm';
 import { describe, expect, it, vi } from 'vitest';
 
-function loadCodemanAppClass() {
+function loadReverieAppClass() {
   const constants = readFileSync(resolve(import.meta.dirname, '../src/web/public/constants.js'), 'utf8');
   const source = readFileSync(resolve(import.meta.dirname, '../src/web/public/app.js'), 'utf8');
   const context = vm.createContext({
@@ -55,11 +55,11 @@ function loadCodemanAppClass() {
     window: { addEventListener: vi.fn(), removeEventListener: vi.fn() },
     MobileDetection: {},
   });
-  vm.runInContext(`${constants}\n${source}\nglobalThis.__CodemanApp = CodemanApp;`, context);
-  return (context as { __CodemanApp: new () => unknown }).__CodemanApp;
+  vm.runInContext(`${constants}\n${source}\nglobalThis.__ReverieApp = ReverieApp;`, context);
+  return (context as { __ReverieApp: new () => unknown }).__ReverieApp;
 }
 
-const CodemanApp = loadCodemanAppClass();
+const ReverieApp = loadReverieAppClass();
 
 function fakeElement() {
   return { style: { display: '' }, title: '', textContent: '', className: '' };
@@ -76,7 +76,7 @@ type Indicator = {
 };
 
 function makeApp(overrides: Partial<Indicator> & { queuedBytes?: number } = {}) {
-  const app = Object.create((CodemanApp as { prototype: object }).prototype) as Indicator & {
+  const app = Object.create((ReverieApp as { prototype: object }).prototype) as Indicator & {
     queuedBytes?: number;
   };
   const els: Record<string, ReturnType<typeof fakeElement>> = {
@@ -376,7 +376,7 @@ function countingElement() {
 }
 
 function makeCountingApp(overrides: Partial<Indicator> & { queuedBytes?: number } = {}) {
-  const app = Object.create((CodemanApp as { prototype: object }).prototype) as DescriptorApp & {
+  const app = Object.create((ReverieApp as { prototype: object }).prototype) as DescriptorApp & {
     queuedBytes?: number;
   };
   const els = {

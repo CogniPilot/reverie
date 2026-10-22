@@ -12,7 +12,7 @@
  *      expansion (hiding matches behind "Show more" defeats typing a filter),
  *   4. sorting is alphabetical by name or folder, with pinned rows still on top.
  *
- * Loaded via `vm` against a stub CodemanApp with a fake DOM, same harness as
+ * Loaded via `vm` against a stub ReverieApp with a fake DOM, same harness as
  * resume-name.test.ts. `_buildHistoryItem` is stubbed: this pins WHICH rows get
  * rendered and in what order, not how one row looks.
  */
@@ -80,7 +80,7 @@ function loadTerminalUiPrototype(): Record<string, any> {
   const source = readFileSync(resolve(import.meta.dirname, '../src/web/public/terminal-ui.js'), 'utf8');
   const context = vm.createContext({
     console,
-    CodemanApp: class CodemanApp {},
+    ReverieApp: class ReverieApp {},
     setInterval: vi.fn(),
     clearInterval: vi.fn(),
     setTimeout,
@@ -93,7 +93,7 @@ function loadTerminalUiPrototype(): Record<string, any> {
     },
     window: { addEventListener: vi.fn(), removeEventListener: vi.fn() },
   });
-  vm.runInContext(`${source}\nglobalThis.__proto = CodemanApp.prototype;`, context);
+  vm.runInContext(`${source}\nglobalThis.__proto = ReverieApp.prototype;`, context);
   return (context as unknown as { __proto: Record<string, any> }).__proto;
 }
 

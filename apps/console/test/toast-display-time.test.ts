@@ -13,9 +13,9 @@ const windows: JSDOM[] = [];
 function loadApp(notificationManager?: unknown) {
   const dom = new JSDOM('<!doctype html><body></body>', { url: 'http://localhost/' });
   windows.push(dom);
-  const CodemanApp = function CodemanApp() {} as unknown as { prototype: Record<string, unknown> };
+  const ReverieApp = function ReverieApp() {} as unknown as { prototype: Record<string, unknown> };
   const context = vm.createContext({
-    CodemanApp,
+    ReverieApp,
     document: dom.window.document,
     requestAnimationFrame: (cb: () => void) => cb(),
     setTimeout,
@@ -24,7 +24,7 @@ function loadApp(notificationManager?: unknown) {
   });
   const source = readFileSync(resolve(import.meta.dirname, '../src/web/public/panels-ui.js'), 'utf8');
   vm.runInContext(source, context, { filename: 'panels-ui.js' });
-  const app = new (CodemanApp as unknown as new () => Record<string, any>)();
+  const app = new (ReverieApp as unknown as new () => Record<string, any>)();
   app.notificationManager = notificationManager;
   return app;
 }

@@ -2,7 +2,7 @@
  * @fileoverview Append-only JSONL audit log for session lifecycle events.
  *
  * Records every session creation, start, exit, deletion, recovery, and server
- * start/stop to ~/.codeman/session-lifecycle.jsonl. Survives server restarts
+ * start/stop to ~/.reverie/session-lifecycle.jsonl. Survives server restarts
  * (unlike RunSummary which is in-memory only).
  *
  * @module session-lifecycle-log

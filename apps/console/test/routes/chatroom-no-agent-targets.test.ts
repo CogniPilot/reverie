@@ -17,7 +17,7 @@ import { registerChatroomRoutes } from '../../src/web/routes/chatroom-routes.js'
 
 const A = '0000002d-0035-4000-8000-000000000047';
 const B = '00000038-0043-4000-8000-000000000060';
-const AGENT = (id: string) => ({ 'x-codeman-parent-session': id });
+const AGENT = (id: string) => ({ 'x-reverie-parent-session': id });
 
 describe('no private messages between agents in a channel', () => {
   let app: FastifyInstance;
@@ -45,7 +45,7 @@ describe('no private messages between agents in a channel', () => {
     await app.close();
   });
 
-  const room = async () => (await app.inject({ method: 'POST', url: '/api/chatrooms', payload: { name: 'Fleet', members: [{ sessionId: A }, { sessionId: B }], coordinatorSessionId: B } })).json().data.id as string;
+  const room = async () => (await app.inject({ method: 'POST', url: '/api/chatrooms', payload: { name: 'Reverie', members: [{ sessionId: A }, { sessionId: B }], coordinatorSessionId: B } })).json().data.id as string;
   const say = (id: string, from: string | undefined, to?: string[]) =>
     app.inject({ method: 'POST', url: `/api/chatrooms/${id}/messages`, headers: from ? AGENT(from) : {}, payload: { text: 'hello', ...(to ? { to } : {}) } });
 

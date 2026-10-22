@@ -1,5 +1,5 @@
 /**
- * @fileoverview Response-viewer turn segmentation (`CodemanApp._buildResponseViewerMessage`).
+ * @fileoverview Response-viewer turn segmentation (`ReverieApp._buildResponseViewerMessage`).
  *
  * The server now emits one message per model message instead of concatenating a
  * human turn's replies into one card, so a long autonomous run arrives as tens
@@ -40,7 +40,7 @@ interface MessageBuilder {
   activeSessionId?: string;
 }
 
-function loadCodemanAppClass() {
+function loadReverieAppClass() {
   const constants = readFileSync(resolve(import.meta.dirname, '../src/web/public/constants.js'), 'utf8');
   const source = readFileSync(resolve(import.meta.dirname, '../src/web/public/app.js'), 'utf8');
   const context = vm.createContext({
@@ -59,16 +59,16 @@ function loadCodemanAppClass() {
     window: { addEventListener: vi.fn(), removeEventListener: vi.fn() },
     MobileDetection: {},
   });
-  vm.runInContext(`${constants}\n${source}\nglobalThis.__CodemanApp = CodemanApp;`, context);
+  vm.runInContext(`${constants}\n${source}\nglobalThis.__ReverieApp = ReverieApp;`, context);
   // The context is returned too: app.js closes over the context's own `fetch`, so a
   // test that drives loadFullContext has to replace THAT binding, not globalThis'.
-  return { CodemanApp: (context as { __CodemanApp: { prototype: MessageBuilder } }).__CodemanApp, context };
+  return { ReverieApp: (context as { __ReverieApp: { prototype: MessageBuilder } }).__ReverieApp, context };
 }
 
-const { CodemanApp, context: appContext } = loadCodemanAppClass();
+const { ReverieApp, context: appContext } = loadReverieAppClass();
 
 function build(text: string, role: string, meta?: unknown): HTMLElement {
-  const app = Object.create(CodemanApp.prototype) as MessageBuilder;
+  const app = Object.create(ReverieApp.prototype) as MessageBuilder;
   return app._buildResponseViewerMessage(text, role, 'Claude', meta);
 }
 
@@ -129,7 +129,7 @@ describe('response viewer empty full-context state', () => {
     document.body.append(body, title, more);
     body.textContent = 'No response yet — send a message in this session first.';
 
-    const app = Object.create(CodemanApp.prototype) as MessageBuilder;
+    const app = Object.create(ReverieApp.prototype) as MessageBuilder;
     app.activeSessionId = 's1';
     (appContext as { fetch: unknown }).fetch = vi.fn(async () => ({
       json: async () => ({ data: { messages: [] } }),

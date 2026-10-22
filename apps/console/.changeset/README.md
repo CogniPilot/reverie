@@ -18,7 +18,7 @@ Run `npx changeset` or create a `.md` file in this directory with the following 
 
 ```markdown
 ---
-"codeman": patch
+"reverie": patch
 ---
 
 Description of changes

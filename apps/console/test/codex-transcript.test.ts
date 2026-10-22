@@ -203,13 +203,13 @@ describe('scanCodexSessionsHistory', () => {
       sessionMeta({
         id: '00000038-0046-4000-8000-000000000066',
         cwd: '/repo/nine',
-        originator: 'codeman_2f1c9a44-1111-2222-3333-444455556666',
+        originator: 'reverie_2f1c9a44-1111-2222-3333-444455556666',
       }),
       itemCompletedUser('hello'),
     ]);
 
     const rows = await scanCodexSessionsHistory();
-    expect(rows[0].originator).toBe('codeman_2f1c9a44-1111-2222-3333-444455556666');
+    expect(rows[0].originator).toBe('reverie_2f1c9a44-1111-2222-3333-444455556666');
   });
 
   it('drops a rollout that records no working directory', async () => {
@@ -285,8 +285,8 @@ describe('codexThreadBySessionId', () => {
   const row = (sessionId: string, originator?: string) =>
     ({ sessionId, originator, workingDir: '/w', sizeBytes: 1, lastModified: '2026-09-02T00:00:00.000Z' }) as never;
 
-  it('maps a Codeman-spawned pane to the thread it is writing', () => {
-    const map = codexThreadBySessionId([row('thread-a', 'codeman_sess-1')]);
+  it('maps a Reverie-spawned pane to the thread it is writing', () => {
+    const map = codexThreadBySessionId([row('thread-a', 'reverie_sess-1')]);
     expect(map.get('sess-1')).toBe('thread-a');
   });
 
@@ -298,7 +298,7 @@ describe('codexThreadBySessionId', () => {
   it('keeps the newest rollout when a pane has several', () => {
     // `/new` inside the codex TUI leaves the pane's originator on more than one
     // rollout; the pane is on the most recent, and rows arrive newest-first.
-    const map = codexThreadBySessionId([row('thread-new', 'codeman_sess-1'), row('thread-old', 'codeman_sess-1')]);
+    const map = codexThreadBySessionId([row('thread-new', 'reverie_sess-1'), row('thread-old', 'reverie_sess-1')]);
     expect(map.get('sess-1')).toBe('thread-new');
   });
 });

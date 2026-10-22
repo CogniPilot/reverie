@@ -91,6 +91,6 @@ describe('xterm snapshot/replay (codex tab-switch)', () => {
     // …per-snapshot localStorage writes are size-capped…
     expect(source).toContain('snapshot.length < 256 * 1024');
     // …and the persisted key set is pruned of dead sessions.
-    expect(source).toContain("k.startsWith('codeman-xs-')");
+    expect(source).toContain("k.startsWith('reverie-xs-')");
   });
 });

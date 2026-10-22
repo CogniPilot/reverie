@@ -15,7 +15,7 @@ export function registerWorkspaceIconRoutes(app: FastifyInstance, store: Workspa
   const owner = (req: FastifyRequest): string | undefined => ownerFor(req);
   /** The parent-session header is a hint agent tooling sets, not authentication (same rule as the company routes). */
   const ownerOnly = (req: FastifyRequest, reply: FastifyReply): boolean => {
-    if (req.headers['x-codeman-parent-session'] === undefined) return true;
+    if (req.headers['x-reverie-parent-session'] === undefined) return true;
     void reply.code(403).send({ success: false, error: 'Only the owner sets workspace pictures' });
     return false;
   };

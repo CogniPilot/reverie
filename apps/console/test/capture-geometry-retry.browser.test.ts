@@ -384,7 +384,7 @@ describe('a capture bigger than the terminal', () => {
     // two fetches per tab switch for the life of the page. That is the case the
     // description calls "every time rather than occasionally", a phone whose
     // resize is declined while a desktop claim is live, and it is not the only
-    // one — any pane Codeman cannot size lands there, a second tmux client
+    // one — any pane Reverie cannot size lands there, a second tmux client
     // attached to it included. Each wasted pass costs another `capture-pane`,
     // which is `execSync` on the server's event loop, plus a reset and rewrite,
     // a discarded snapshot, and a dropped and reopened WebSocket.
@@ -462,7 +462,7 @@ describe('a capture bigger than the terminal', () => {
       };
       const settings = w.app.loadAppSettingsFromStorage();
       settings.localEchoEnabled = true;
-      localStorage.setItem('codeman-app-settings', JSON.stringify(settings));
+      localStorage.setItem('reverie-app-settings', JSON.stringify(settings));
       w.app._localEchoEnabled = true;
       w.__sentInputs = [];
       const original = w.app._sendInputAsync.bind(w.app);

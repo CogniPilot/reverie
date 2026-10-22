@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Capture a GIF of subagent spawning on the LIVE Codeman server.
+ * Capture a GIF of subagent spawning on the LIVE Reverie server.
  *
  * Connects to the running server on port 3000, creates a test session,
  * sends a prompt that spawns 3 parallel agents, and captures a tight
@@ -63,7 +63,7 @@ async function capture() {
   try {
     // Create case and seed with real source files
     console.log(`Creating case: ${CASE_NAME}`);
-    const caseDir = join(process.env.HOME, 'codeman-cases', CASE_NAME);
+    const caseDir = join(process.env.HOME, 'reverie-cases', CASE_NAME);
     const caseSrc = join(caseDir, 'src');
     const caseTest = join(caseDir, 'test');
     mkdirSync(caseSrc, { recursive: true });
@@ -118,7 +118,7 @@ async function capture() {
 
     // Configure settings: enable subagents, disable Files pane
     await setupPage.evaluate(() => {
-      const existing = JSON.parse(localStorage.getItem('codeman-app-settings') || '{}');
+      const existing = JSON.parse(localStorage.getItem('reverie-app-settings') || '{}');
       Object.assign(existing, {
         showSubagents: true,
         subagentTrackingEnabled: true,
@@ -128,7 +128,7 @@ async function capture() {
         showFileBrowser: false,
         showTokenCount: false,
       });
-      localStorage.setItem('codeman-app-settings', JSON.stringify(existing));
+      localStorage.setItem('reverie-app-settings', JSON.stringify(existing));
     });
     await setupPage.reload({ waitUntil: 'domcontentloaded' });
     await sleep(1000);
@@ -223,7 +223,7 @@ async function capture() {
 
     // Re-apply settings (new context = fresh localStorage)
     await recordPage.evaluate(() => {
-      const existing = JSON.parse(localStorage.getItem('codeman-app-settings') || '{}');
+      const existing = JSON.parse(localStorage.getItem('reverie-app-settings') || '{}');
       Object.assign(existing, {
         showSubagents: true,
         subagentTrackingEnabled: true,
@@ -233,7 +233,7 @@ async function capture() {
         showFileBrowser: false,
         showTokenCount: false,
       });
-      localStorage.setItem('codeman-app-settings', JSON.stringify(existing));
+      localStorage.setItem('reverie-app-settings', JSON.stringify(existing));
     });
     await recordPage.reload({ waitUntil: 'domcontentloaded' });
     await sleep(1000);

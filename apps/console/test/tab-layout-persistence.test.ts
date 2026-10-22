@@ -226,7 +226,7 @@ describe('normalizeOrMigrateOwnerTabLayout', () => {
 
 describe('StateStore tabLayouts allowlist', () => {
   it('persists and reloads full owner layouts across a restart', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'codeman-tab-layout-'));
+    const dir = mkdtempSync(join(tmpdir(), 'reverie-tab-layout-'));
     tempDirs.push(dir);
     const file = join(dir, 'state.json');
     const layout: TabLayout = {
@@ -245,7 +245,7 @@ describe('StateStore tabLayouts allowlist', () => {
   });
 
   it('does not treat an inherited constructor property as a persisted owner layout', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'codeman-tab-layout-'));
+    const dir = mkdtempSync(join(tmpdir(), 'reverie-tab-layout-'));
     tempDirs.push(dir);
     const file = join(dir, 'state.json');
     const layout: TabLayout = {

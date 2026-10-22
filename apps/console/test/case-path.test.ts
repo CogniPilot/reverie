@@ -14,7 +14,7 @@ beforeEach(() => {
   root = realpathSync(mkdtempSync(join(tmpdir(), 'case-path-')));
   home = join(root, 'home');
   mkdirSync(join(home, 'code'), { recursive: true });
-  ctx = { home, dataDir: join(home, '.codeman') };
+  ctx = { home, dataDir: join(home, '.reverie') };
 });
 afterEach(() => rmSync(root, { recursive: true, force: true }));
 
@@ -28,7 +28,7 @@ describe('expandHome', () => {
 });
 
 describe('blockedReason', () => {
-  const c = { home: '/home/u', dataDir: '/home/u/.codeman' };
+  const c = { home: '/home/u', dataDir: '/home/u/.reverie' };
   it.each([
     ['/', /root/],
     ['/etc', /system directory/],
@@ -40,8 +40,8 @@ describe('blockedReason', () => {
     ['/home/u/.ssh/proj', /credentials/],
     ['/home/u/.aws/x', /credentials/],
     ['/home/u/.claude/skills/x', /configuration/],
-    ['/home/u/.codeman/cases/x', /data folder/],
-    ['/home/u/.codeman-beta/x', /data folder/],
+    ['/home/u/.reverie/cases/x', /data folder/],
+    ['/home/u/.reverie-beta/x', /data folder/],
   ])('refuses %s', (p, why) => expect(blockedReason(p, c)).toMatch(why));
 
   it.each(['/home/u/code/app', '/home/u/.config/app', '/srv/projects/x', '/opt/work', '/tmp/x', '/home/u/etc/app'])(
@@ -55,11 +55,11 @@ describe('blockedReason', () => {
   });
 
   it('refuses a cases directory and anything inside it, when given', () => {
-    const withCases = { ...c, casesDirs: ['/home/u/codeman-cases'] };
-    expect(blockedReason('/home/u/codeman-cases', withCases)).toMatch(/plain Create New/);
-    expect(blockedReason('/home/u/codeman-cases/foo', withCases)).toMatch(/plain Create New/);
-    expect(blockedReason('/home/u/codeman-cases-old/foo', withCases)).toBeNull();
-    expect(blockedReason('/home/u/codeman-cases/foo', c)).toBeNull();
+    const withCases = { ...c, casesDirs: ['/home/u/reverie-cases'] };
+    expect(blockedReason('/home/u/reverie-cases', withCases)).toMatch(/plain Create New/);
+    expect(blockedReason('/home/u/reverie-cases/foo', withCases)).toMatch(/plain Create New/);
+    expect(blockedReason('/home/u/reverie-cases-old/foo', withCases)).toBeNull();
+    expect(blockedReason('/home/u/reverie-cases/foo', c)).toBeNull();
   });
 
   it('judges against the system roots it is given', () => {
@@ -105,13 +105,13 @@ describe('prepareNewCasePath', () => {
     expect(await prepareNewCasePath(raw, ctx)).toMatchObject({ ok: false, code: 'INVALID' });
   });
 
-  it('refuses system, home, credential and Codeman folders as BLOCKED', async () => {
+  it('refuses system, home, credential and Reverie folders as BLOCKED', async () => {
     for (const raw of [
       '/etc/proj',
       '/usr/src/x',
       home,
       join(home, '.ssh', 'x'),
-      join(home, '.codeman', 'cases', 'x'),
+      join(home, '.reverie', 'cases', 'x'),
     ]) {
       expect(await prepareNewCasePath(raw, ctx), raw).toMatchObject({ ok: false, code: 'BLOCKED' });
     }
@@ -133,14 +133,14 @@ describe('prepareNewCasePath', () => {
     symlinkSync(realHome, linkHome);
     // Typed, this reads as <link home>/code/innocent/x; resolved, it is <real home>/.ssh/x.
     symlinkSync(join(realHome, '.ssh'), join(realHome, 'code', 'innocent'));
-    const viaLink = { home: linkHome, dataDir: join(linkHome, '.codeman') };
+    const viaLink = { home: linkHome, dataDir: join(linkHome, '.reverie') };
     expect(await prepareNewCasePath(join(linkHome, 'code', 'innocent', 'x'), viaLink)).toMatchObject({
       ok: false,
       code: 'BLOCKED',
     });
-    // The same for Codeman's data dir given through the link.
-    mkdirSync(join(realHome, '.codeman'));
-    symlinkSync(join(realHome, '.codeman'), join(realHome, 'code', 'state'));
+    // The same for Reverie's data dir given through the link.
+    mkdirSync(join(realHome, '.reverie'));
+    symlinkSync(join(realHome, '.reverie'), join(realHome, 'code', 'state'));
     expect(await prepareNewCasePath(join(linkHome, 'code', 'state', 'x'), viaLink)).toMatchObject({
       ok: false,
       code: 'BLOCKED',
@@ -148,7 +148,7 @@ describe('prepareNewCasePath', () => {
   });
 
   it('refuses a link into a cases directory, judged on its resolved form', async () => {
-    const cases = join(home, 'codeman-cases');
+    const cases = join(home, 'reverie-cases');
     mkdirSync(cases);
     symlinkSync(cases, join(home, 'code', 'shortcut'));
     const r = await prepareNewCasePath(join(home, 'code', 'shortcut', 'app'), { ...ctx, casesDirs: [cases] });

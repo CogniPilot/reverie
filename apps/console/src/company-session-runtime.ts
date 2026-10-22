@@ -13,7 +13,7 @@ import { applyWorkspaceHooks } from './hooks-config.js';
 import { SseEvent } from './web/sse-events.js';
 import type { CompanyResearchBinding, CompanyResearchRuntime } from './company-research-backend.js';
 import type { SessionPort, ConfigPort, EventPort, InfraPort } from './web/ports/index.js';
-import { envValue } from './config/fleet-env.js';
+import { envValue } from './config/reverie-env.js';
 
 type RuntimeContext = SessionPort & ConfigPort & EventPort & Pick<InfraPort, 'mux'>;
 const REPORT = 'RESEARCH_REPORT.json';

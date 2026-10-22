@@ -32,7 +32,7 @@ const TRUST_DIALOG = [
   RULE,
   ' Do you trust the files in this folder?',
   '',
-  ' /home/user/codeman-cases/demo',
+  ' /home/user/reverie-cases/demo',
   '',
   ' ❯ Yes, I trust this folder',
   '   No, exit',

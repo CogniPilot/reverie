@@ -4,7 +4,7 @@
  * the layout, so when I turn tiles off and on, always keep what the last
  * setting was").
  *
- * - Saved on every change (`codeman:tile-grid` in localStorage, never the
+ * - Saved on every change (`reverie:tile-grid` in localStorage, never the
  *   server): which session sits in which cell, holes included, the tile count,
  *   the divider sizes, the focused tile and a zoom the user chose.
  * - The Tiles toggle brings back exactly that, however the grid was closed:
@@ -56,8 +56,8 @@ type Helpers = {
   restoreTileGridCells(stored: unknown, ranked: string[]): Restored;
 };
 
-const T = windowStub.CodemanTileGrid as Helpers;
-const KEY = 'codeman:tile-grid';
+const T = windowStub.ReverieTileGrid as Helpers;
+const KEY = 'reverie:tile-grid';
 const SIX = ['s-a', 's-b', 's-c', 's-d', 's-e', 's-f'];
 const stored = () => JSON.parse(localStore.get(KEY) ?? 'null');
 

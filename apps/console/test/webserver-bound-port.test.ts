@@ -12,7 +12,7 @@ describe('WebServer on an ephemeral port', () => {
   let server: WebServer;
   /** Built BEFORE start(), as setupRoutes() builds it, so a by-value snapshot would read 0. */
   let ctx: { port: number };
-  const savedApiUrl = process.env.CODEMAN_API_URL;
+  const savedApiUrl = process.env.REVERIE_API_URL;
   /** The socket's own answer, so each test stands on its own instead of trusting boundPort. */
   const socketPort = () =>
     ((server as unknown as { app: { server: { address(): AddressInfo } } }).app.server.address() as AddressInfo).port;
@@ -25,8 +25,8 @@ describe('WebServer on an ephemeral port', () => {
 
   afterAll(async () => {
     await server.stop();
-    if (savedApiUrl === undefined) delete process.env.CODEMAN_API_URL;
-    else process.env.CODEMAN_API_URL = savedApiUrl;
+    if (savedApiUrl === undefined) delete process.env.REVERIE_API_URL;
+    else process.env.REVERIE_API_URL = savedApiUrl;
   });
 
   it('reports the port the OS assigned', async () => {
@@ -40,7 +40,7 @@ describe('WebServer on an ephemeral port', () => {
     expect(ctx.port).toBe(socketPort());
   });
 
-  it('exports the real port to the panes as CODEMAN_API_URL', () => {
-    expect(process.env.CODEMAN_API_URL).toBe(`http://127.0.0.1:${socketPort()}`);
+  it('exports the real port to the panes as REVERIE_API_URL', () => {
+    expect(process.env.REVERIE_API_URL).toBe(`http://127.0.0.1:${socketPort()}`);
   });
 });

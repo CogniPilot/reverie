@@ -29,7 +29,7 @@
  *    on the alternate screen, Claude's repaint mode) leaves the xterm no
  *    scrollback, so the wheel pages the CLI's own transcript with
  *    PageUp/PageDown (_maybePageCliTranscript) through the primary pane's gates
- *    and its pure gesture rules (CodemanTerminalInput.pageKeysForGesture), plus
+ *    and its pure gesture rules (ReverieTerminalInput.pageKeysForGesture), plus
  *    an overflow-row discount for this pane's capture-before-resize load
  *    (_localRows), only while the viewport is on the live screen (a wheel-down
  *    from those overflow rows is xterm's, and brings it home), and never while
@@ -50,9 +50,9 @@
  *    Android tablet, or a large foldable unfolded in landscape, reaches.
  *
  * @dependency vendor/xterm.js, vendor/xterm-addon-fit.js
- * @dependency constants.js (window.CodemanTerminalFont, window.CodemanFetchDeadline, DEFAULT_SCROLLBACK, TERMINAL_TAIL_SIZE, SHELL_LOAD_BASE_QUERY, SHELL_LOAD_QUERY, TERMINAL_CHUNK_SIZE)
- * @dependency terminal-ui.js (codemanCurrentXtermTheme, codemanCurrentSkinIsLight, CodemanTerminalInput.shouldSuppressTerminalQueryResponse/isTerminalFocusOrMouseReport/wheelDeltaLines/wheelDeltaWholeLines/sgrWheelReports/pageKeysForGesture, app._shouldForwardWheelToApp/_localScrollbackIsHollow/_terminalViewportAtBottom/_clientPointToCell/_handleDesktopTerminalClick, app.tabAlerts)
- * @dependency terminal-keycode229-recovery.js (window.CodemanKeyCode229Recovery, optional: absent, xterm's own textarea handling stands)
+ * @dependency constants.js (window.ReverieTerminalFont, window.ReverieFetchDeadline, DEFAULT_SCROLLBACK, TERMINAL_TAIL_SIZE, SHELL_LOAD_BASE_QUERY, SHELL_LOAD_QUERY, TERMINAL_CHUNK_SIZE)
+ * @dependency terminal-ui.js (reverieCurrentXtermTheme, reverieCurrentSkinIsLight, ReverieTerminalInput.shouldSuppressTerminalQueryResponse/isTerminalFocusOrMouseReport/wheelDeltaLines/wheelDeltaWholeLines/sgrWheelReports/pageKeysForGesture, app._shouldForwardWheelToApp/_localScrollbackIsHollow/_terminalViewportAtBottom/_clientPointToCell/_handleDesktopTerminalClick, app.tabAlerts)
+ * @dependency terminal-keycode229-recovery.js (window.ReverieKeyCode229Recovery, optional: absent, xterm's own textarea handling stands)
  * @loadorder 7.4 of 16, loaded after terminal-ui.js and before terminal-split.js
  */
 
@@ -208,7 +208,7 @@
       this._onFocusIn = null;
       // Hollow-buffer paging (_maybePageCliTranscript): the gesture in progress
       // (travel short of a whole page, its direction and last event time), the
-      // state CodemanTerminalInput.pageKeysForGesture hands back.
+      // state ReverieTerminalInput.pageKeysForGesture hands back.
       this._pageKeyGesture = null;
       // Shift+wheel travel short of a whole line, carried to the next wheel
       // event (_maybeScrollLocalOnShift).
@@ -229,16 +229,16 @@
     }
 
     async connect() {
-      const savedFontSize = this.fontSize ?? parseInt(localStorage.getItem('codeman-font-size'), 10);
+      const savedFontSize = this.fontSize ?? parseInt(localStorage.getItem('reverie-font-size'), 10);
       this.terminal = new Terminal({
-        theme: { ...global.codemanCurrentXtermTheme() },
-        fontFamily: global.CodemanTerminalFont.resolve(this.fontSettings.terminalFontFamily),
-        ...global.CodemanTerminalFont.resolveWeights(this.fontSettings),
+        theme: { ...global.reverieCurrentXtermTheme() },
+        fontFamily: global.ReverieTerminalFont.resolve(this.fontSettings.terminalFontFamily),
+        ...global.ReverieTerminalFont.resolveWeights(this.fontSettings),
         fontSize: Number.isFinite(savedFontSize) ? savedFontSize : 14,
         lineHeight: 1.2,
         cursorBlink: false,
         cursorStyle: 'block',
-        minimumContrastRatio: global.codemanCurrentSkinIsLight() ? 4.5 : 1,
+        minimumContrastRatio: global.reverieCurrentSkinIsLight() ? 4.5 : 1,
         scrollback: this.scrollback ?? DEFAULT_SCROLLBACK,
         allowTransparency: true,
         allowProposedApi: true,
@@ -282,7 +282,7 @@
       // same keystroke window would stand down and be lost.
       this.terminal.onData((data) => {
         try {
-          const input = global.CodemanTerminalInput;
+          const input = global.ReverieTerminalInput;
           if (!input?.shouldSuppressTerminalQueryResponse?.(data) && !input?.isTerminalFocusOrMouseReport?.(data)) {
             this._keyCode229Recovery?.notifyCanonicalData?.();
           }
@@ -438,7 +438,7 @@
       const app = global.app;
       const cid = app?._clientId ? `${app._clientId}:${app._wsTabNonce}:tile` : '';
       const cidQuery = cid ? `?cid=${encodeURIComponent(cid)}` : '';
-      this._socketUrl = `${proto}//${location.host}${window.CodemanBase.base}/ws/sessions/${this.sessionId}/terminal${cidQuery}`;
+      this._socketUrl = `${proto}//${location.host}${window.ReverieBase.base}/ws/sessions/${this.sessionId}/terminal${cidQuery}`;
       this._openSocket();
     }
 
@@ -569,7 +569,7 @@
     // reaches here for the CURRENT socket, see _openSocket). Everything else,
     // including the redelivery sweep force-closing a silent socket (1005), is
     // transient and reconnects on the primary pane's backoff ladder
-    // (CodemanWsReconnect, constants.js) plus jitter.
+    // (ReverieWsReconnect, constants.js) plus jitter.
     _onSocketClosed(event) {
       this._wsReady = false;
       this._wsClosed = true;
@@ -589,7 +589,7 @@
 
     _scheduleReconnect(code) {
       if (this._destroyed || !this._socketUrl || this._reconnectTimer) return;
-      const plan = global.CodemanWsReconnect?.plan?.(code ?? 1006, this._reconnectAttempts) || {
+      const plan = global.ReverieWsReconnect?.plan?.(code ?? 1006, this._reconnectAttempts) || {
         action: 'reconnect',
         delayMs: 1000,
       };
@@ -623,7 +623,7 @@
     // program asked for, but nobody typed it: it goes out once, never
     // persisted. Same predicates as the primary pane (terminal-ui.js onData).
     _onTerminalData(data) {
-      const input = global.CodemanTerminalInput;
+      const input = global.ReverieTerminalInput;
       if (input?.shouldSuppressTerminalQueryResponse?.(data)) return;
       const app = global.app;
       if (input?.isTerminalFocusOrMouseReport?.(data)) {
@@ -649,7 +649,7 @@
       if (!this.terminal) return;
       try {
         this._keyCode229Recovery =
-          global.CodemanKeyCode229Recovery?.create?.({
+          global.ReverieKeyCode229Recovery?.create?.({
             textarea: this.terminal.textarea,
             emitRecovered: (data) => this._onTerminalData(data),
             getCompositionHelper: () => this.terminal?._core?._compositionHelper,
@@ -731,7 +731,7 @@
     // into this xterm on every load; a shell loads the `tail=` window. A
     // non-shell (TUI) session gets one full replay, or the same bounded window
     // with `boundedLoad` (grid tiles). `fetch` here goes through the global
-    // wrapper (constants.js), which already prefixes CodemanBase, unlike the
+    // wrapper (constants.js), which already prefixes ReverieBase, unlike the
     // raw WebSocket URL above, which does not.
     //
     // A refresh replaces what the pane shows, in the primary pane's order
@@ -762,7 +762,7 @@
         let replayed = false;
         let capturedAt = 0;
         // A deadline covering the body as well as the headers (the primary
-        // pane's budgets, CodemanFetchDeadline): a capture that never answers
+        // pane's budgets, ReverieFetchDeadline): a capture that never answers
         // would otherwise hold this pane's single-flight flag, and in the grid
         // the one load queue every tile waits behind, forever. Re-armed once a
         // refresh's headers land (below), so one signal carries both budgets.
@@ -786,7 +786,7 @@
               : `full=1&tail=${TERMINAL_TAIL_SIZE}${this._historyLinesQuery()}`;
           }
           this._loadAbort = controller;
-          armDeadline(global.CodemanFetchDeadline?.terminalFetchDeadlineMs?.({ full: !shell }) ?? 45000);
+          armDeadline(global.ReverieFetchDeadline?.terminalFetchDeadlineMs?.({ full: !shell }) ?? 45000);
           let payload;
           try {
             const res = await fetch(
@@ -979,7 +979,7 @@
     // refresh it starts achieved.
     _scheduleDropRecovery() {
       if (this._dropRecoveryTimer || this._destroyed) return;
-      const delay = global.CodemanDroppedOutput?.DROP_RECOVERY_DELAY_MS ?? 2000;
+      const delay = global.ReverieDroppedOutput?.DROP_RECOVERY_DELAY_MS ?? 2000;
       this._dropRecoveryTimer = setTimeout(() => {
         this._dropRecoveryTimer = null;
         if (this._destroyed || !this._liveDropped) return;
@@ -1006,7 +1006,7 @@
       // Another try is already on its way: the debounce, or a trailing refresh.
       if (this._dropRecoveryTimer || this._bufferRefreshPending) return;
       const retry =
-        global.CodemanDroppedOutput?.shouldRetryDroppedOutputRecovery?.({
+        global.ReverieDroppedOutput?.shouldRetryDroppedOutputRecovery?.({
           repainted: false,
           timedOut,
           attempt: Math.max(0, this._dropRecoveryAttempt - 1),
@@ -1088,7 +1088,7 @@
     _maybeForwardWheelToCli(ev) {
       if (this._destroyed || !this.terminal || !ev) return false;
       const app = global.app;
-      const input = global.CodemanTerminalInput;
+      const input = global.ReverieTerminalInput;
       if (!app?._shouldForwardWheelToApp || !input?.sgrWheelReports || !input.wheelDeltaWholeLines) return false;
       // xterm's own encoder forwards the wheel while the CLI's tracking reaches
       // it, and its alt-scroll owns the alternate buffer, as in the primary pane.
@@ -1118,7 +1118,7 @@
     // consumed here.
     _maybeScrollLocalOnShift(ev) {
       if (this._destroyed || !this.terminal || !ev?.shiftKey) return false;
-      const input = global.CodemanTerminalInput;
+      const input = global.ReverieTerminalInput;
       if (!input?.wheelDeltaLines) return false;
       // xterm's own encoder forwards the wheel while the CLI's tracking reaches
       // it, and its alt-scroll owns the alternate buffer, as in the primary pane.
@@ -1167,12 +1167,12 @@
     // the active one), so the CLI rules stay in terminal-ui.js and this file
     // names no CLI. The gesture rules (first-event page, notch accumulation,
     // pinch and sideways-swipe consume) are the shared pure
-    // CodemanTerminalInput.pageKeysForGesture, run on this tile's own state.
+    // ReverieTerminalInput.pageKeysForGesture, run on this tile's own state.
     // Returns true when the wheel was consumed here.
     _maybePageCliTranscript(ev) {
       if (this._destroyed || !this.terminal || !ev || ev.shiftKey) return false;
       const app = global.app;
-      const input = global.CodemanTerminalInput;
+      const input = global.ReverieTerminalInput;
       if (!app || !input?.pageKeysForGesture || !input.wheelDeltaLines) return false;
       // xterm's own encoder forwards the wheel while the CLI's tracking reaches
       // it (a shell running htop), as in the primary pane.
@@ -1308,7 +1308,7 @@
       let replayed = false;
       let capturedAt = 0;
       // Two budgets on one signal. The request itself gets the primary pane's
-      // (CodemanFetchDeadline, constants.js): live output is not held while it
+      // (ReverieFetchDeadline, constants.js): live output is not held while it
       // runs, but the single-flight flag is, so a coalesced `{t:'r'}` refresh and
       // the marker owed by a close (_onSocketClosed()) both wait for it, at worst
       // for that whole budget. Once the headers land live output IS held, so the
@@ -1326,7 +1326,7 @@
         abortTimer = setTimeout(() => controller.abort(), ms);
       };
       try {
-        armDeadline(global.CodemanFetchDeadline?.terminalFetchDeadlineMs?.({ full: true }) ?? HISTORY_PULL_TIMEOUT_MS);
+        armDeadline(global.ReverieFetchDeadline?.terminalFetchDeadlineMs?.({ full: true }) ?? HISTORY_PULL_TIMEOUT_MS);
         const res = await fetch(
           `/api/sessions/${this.sessionId}/terminal?full=1&tail=${TERMINAL_TAIL_SIZE}${this._historyLinesQuery()}`,
           { signal: controller?.signal }
@@ -1511,7 +1511,7 @@
     _onPtyGeometryReport(cols, rows) {
       const terminal = this.terminal;
       if (!terminal) return;
-      const verdict = global.CodemanTerminalGeometry?.reconcilePtyGeometry?.(
+      const verdict = global.ReverieTerminalGeometry?.reconcilePtyGeometry?.(
         { cols: terminal.cols, rows: terminal.rows },
         { cols, rows }
       );

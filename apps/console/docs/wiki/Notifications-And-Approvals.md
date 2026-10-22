@@ -38,7 +38,7 @@ CLIs there are no hooks, so you get the coarser output-based signal.
 
 ## Window title and OS notifications
 
-The browser tab title is prefixed `codeman:<host>`, so several Reverie instances across
+The browser tab title is prefixed `reverie:<host>`, so several Reverie instances across
 several machines stay distinguishable at a glance. Override the hostname with
 `reverie web --title-hostname <name>`.
 

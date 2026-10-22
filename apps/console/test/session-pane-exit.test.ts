@@ -1,9 +1,9 @@
 /**
- * @fileoverview `SessionState.paneExit` — Codeman noticing that a pane's agent
+ * @fileoverview `SessionState.paneExit` — Reverie noticing that a pane's agent
  * has exited (Ark0N/Codeman#446).
  *
- * Codeman creates every tmux pane with `remain-on-exit on`, so `/exit` ends the
- * CLI while tmux keeps the pane and the `tmux attach-session` process Codeman
+ * Reverie creates every tmux pane with `remain-on-exit on`, so `/exit` ends the
+ * CLI while tmux keeps the pane and the `tmux attach-session` process Reverie
  * records as the session's pid. No PTY exit handler runs, and the record used to
  * keep both its pid and `status: 'idle'`, so the board showed an exited session
  * as a live idle one.
@@ -42,7 +42,7 @@ const EXIT: PaneExit = { status: 0, at: 1_700_000_000_000 };
 /** The two mux members `Session` reads when it decides whether the field applies. */
 const stubMux = () => ({ isAvailable: () => true }) as unknown as TerminalMultiplexer;
 
-const stubMuxSession = (muxName = 'codeman-aaaa') => ({ muxName, sessionId: 'aaaa' }) as unknown as MuxSession;
+const stubMuxSession = (muxName = 'reverie-aaaa') => ({ muxName, sessionId: 'aaaa' }) as unknown as MuxSession;
 
 const remote: SessionRemote = { hostId: 'h1', label: 'box', host: 'box', user: 'dev' } as SessionRemote;
 
@@ -82,7 +82,7 @@ describe('Session.setPaneExit scoping', () => {
   it('stays unknown for a remote SSH session, whose pane holds the ssh client', () => {
     // A dead ssh client means a transport drop OR an exit, and telling those two
     // apart is the whole of PR #355. Publishing it as an agent exit would assert
-    // the answer Codeman does not have.
+    // the answer Reverie does not have.
     const session = localMuxSession({ remote });
     expect(session.setPaneExit(EXIT)).toBe(false);
     expect(session.paneExit).toBeUndefined();
@@ -126,7 +126,7 @@ describe("the watcher's read gate agrees with the session's scoping", () => {
   const muxSession = (extra: Partial<MuxSession> = {}): MuxSession =>
     ({
       sessionId: 'aaaa',
-      muxName: 'codeman-aaaa',
+      muxName: 'reverie-aaaa',
       pid: 100,
       createdAt: 0,
       workingDir: '/tmp',
@@ -219,7 +219,7 @@ describe('a relaunch in the same pane forgetting the old exit', () => {
     expect(session.toState().paneExit).toBeUndefined();
     // Both halves: the record and the mux layer's cache, the latter of which
     // also invalidates a pane read already in flight.
-    expect(cleared).toEqual(['codeman-aaaa']);
+    expect(cleared).toEqual(['reverie-aaaa']);
   });
 
   it('leaves the exit alone when the relaunch fails', async () => {
@@ -251,7 +251,7 @@ describe('paneExit round trip through state.json', () => {
   });
 
   it('survives a write and a reload, which is what a reboot restore reads', () => {
-    dir = mkdtempSync(join(tmpdir(), 'codeman-pane-exit-'));
+    dir = mkdtempSync(join(tmpdir(), 'reverie-pane-exit-'));
     const file = join(dir, 'state.json');
     const stored: SessionState = {
       ...localMuxSession().toState(),
@@ -267,7 +267,7 @@ describe('paneExit round trip through state.json', () => {
   });
 
   it('reads a record written before the field existed as unknown, needing no migration', () => {
-    dir = mkdtempSync(join(tmpdir(), 'codeman-pane-exit-'));
+    dir = mkdtempSync(join(tmpdir(), 'reverie-pane-exit-'));
     const file = join(dir, 'state.json');
     const legacy = localMuxSession().toState();
     delete legacy.paneExit;

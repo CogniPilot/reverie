@@ -118,10 +118,10 @@ function mountPreviewDom() {
 
 function loadApp(prefs: Record<string, string> = {}) {
   const store = new Map(Object.entries(prefs));
-  const CodemanApp = function CodemanApp(this: unknown) {} as unknown as new () => Record<string, any>;
+  const ReverieApp = function ReverieApp(this: unknown) {} as unknown as new () => Record<string, any>;
   const fetchMock = vi.fn(async (url: string) => fetchStub(url));
   const context = vm.createContext({
-    CodemanApp,
+    ReverieApp,
     console: { ...console, warn: vi.fn(), error: vi.fn() },
     localStorage: {
       getItem: (k: string) => (store.has(k) ? store.get(k) : null),
@@ -142,7 +142,7 @@ function loadApp(prefs: Record<string, string> = {}) {
 
   mountPreviewDom();
 
-  const app = new CodemanApp();
+  const app = new ReverieApp();
   app.$ = (id: string) => document.getElementById(id);
   app._resetFilePreviewEdit = () => {};
   app._isExternalPreviewPath = () => false;
@@ -320,19 +320,19 @@ describe('file viewer rendered markdown', () => {
     expect(pre.matches('pre.file-preview-text')).toBe(true);
     expect(pre.querySelectorAll('.fp-line')).toHaveLength(MD_CONTENT.split('\n').length);
     expect(pre.textContent).toBe(MD_CONTENT);
-    expect(store.get('codeman:filePreviewMdRendered')).toBe('0');
+    expect(store.get('reverie:filePreviewMdRendered')).toBe('0');
     expect(btn.md.getAttribute('aria-pressed')).toBe('false');
     expect(btn.lines.hidden).toBe(false);
     expect(btn.wrap.hidden).toBe(false);
 
     app.toggleFilePreviewMd();
     expect((body.firstElementChild as HTMLElement).matches('.file-preview-md')).toBe(true);
-    expect(store.get('codeman:filePreviewMdRendered')).toBe('1');
+    expect(store.get('reverie:filePreviewMdRendered')).toBe('1');
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it('opens as source when the device pref says so', async () => {
-    const { app, body, btn } = loadApp({ 'codeman:filePreviewMdRendered': '0' });
+    const { app, body, btn } = loadApp({ 'reverie:filePreviewMdRendered': '0' });
 
     await app.openFilePreview('docs/README.md', 's1');
 
@@ -355,12 +355,12 @@ describe('file viewer Lines and Wrap toggles', () => {
 
     app.toggleFilePreviewLines();
     expect(pre.classList.contains('show-lines')).toBe(true);
-    expect(store.get('codeman:filePreviewLineNumbers')).toBe('1');
+    expect(store.get('reverie:filePreviewLineNumbers')).toBe('1');
     expect(btn.lines.getAttribute('aria-pressed')).toBe('true');
 
     app.toggleFilePreviewWrap();
     expect(pre.classList.contains('wrap')).toBe(false);
-    expect(store.get('codeman:filePreviewWrap')).toBe('0');
+    expect(store.get('reverie:filePreviewWrap')).toBe('0');
     expect(btn.wrap.getAttribute('aria-pressed')).toBe('false');
     // Same element, no re-render: the counter gutter is CSS, not text.
     expect(body.firstElementChild).toBe(pre);
@@ -430,14 +430,14 @@ function loadShippingApp(content: string) {
     ),
   });
   vm.runInContext(
-    `${constantsJs}\n${publicFile('app.js')}\n${panelsJs}\nglobalThis.__CodemanApp = CodemanApp;`,
+    `${constantsJs}\n${publicFile('app.js')}\n${panelsJs}\nglobalThis.__ReverieApp = ReverieApp;`,
     context,
     { filename: 'app.js' }
   );
-  const CodemanApp = (context as { __CodemanApp: { prototype: object } }).__CodemanApp;
+  const ReverieApp = (context as { __ReverieApp: { prototype: object } }).__ReverieApp;
 
   mountPreviewDom();
-  const app = Object.create(CodemanApp.prototype) as Record<string, any>;
+  const app = Object.create(ReverieApp.prototype) as Record<string, any>;
   app.$ = (id: string) => document.getElementById(id);
   app.sessions = new Map();
   app.filePreviewContent = '';

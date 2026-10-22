@@ -36,7 +36,7 @@
 23. [Appendix A: OpenCode CLI Reference](#appendix-a-opencode-cli-reference)
 24. [Appendix B: OpenCode Plugin Events](#appendix-b-opencode-plugin-events)
 25. [Appendix C: OpenCode Permission Config](#appendix-c-opencode-permission-config)
-26. [Appendix D: Current Reverie Session Spawn Flow (Annotated)](#appendix-d-current-codeman-session-spawn-flow-annotated)
+26. [Appendix D: Current Reverie Session Spawn Flow (Annotated)](#appendix-d-current-reverie-session-spawn-flow-annotated)
 
 ---
 
@@ -230,10 +230,10 @@ POST /api/sessions/:id/interactive  →  session.startInteractive()
                                               ↓
                                     TmuxManager.createSession()
                                               ↓
-                                    tmux new-session -ds "codeman-<id>"
+                                    tmux new-session -ds "reverie-<id>"
                                     tmux respawn-pane -k -t ... "claude --dangerously-skip-permissions --session-id <id>"
                                               ↓
-                                    pty.spawn('tmux', ['attach-session', '-t', 'codeman-<id>'])
+                                    pty.spawn('tmux', ['attach-session', '-t', 'reverie-<id>'])
                                               ↓
                                     ptyProcess.onData() → emit('terminal') → SSE broadcast → xterm.js
 ```
@@ -246,10 +246,10 @@ POST /api/sessions/:id/interactive  →  session.startInteractive()
                                               ↓
                                     TmuxManager.createSession()
                                               ↓
-                                    tmux new-session -ds "codeman-<id>"
+                                    tmux new-session -ds "reverie-<id>"
                                     tmux respawn-pane -k -t ... "opencode --model <model>"
                                               ↓
-                                    pty.spawn('tmux', ['attach-session', '-t', 'codeman-<id>'])
+                                    pty.spawn('tmux', ['attach-session', '-t', 'reverie-<id>'])
                                               ↓
                                     ptyProcess.onData() → emit('terminal') → SSE broadcast → xterm.js
 ```
@@ -301,7 +301,7 @@ These systems work identically for OpenCode sessions:
 - Terminal data streaming via `ptyProcess.onData()`
 - SSE event broadcasting via `broadcast()`
 - xterm.js terminal rendering in the browser
-- State persistence to `~/.codeman/state.json`
+- State persistence to `~/.reverie/state.json`
 - Session CRUD API routes (create, get, delete)
 - Tab management in frontend
 - Session kill/cleanup logic (`TmuxManager.killSession()`)
@@ -774,10 +774,10 @@ function buildEnvExports(mode: string, sessionId: string, muxName: string, openC
     `export LANG=en_US.UTF-8`,
     `export LC_ALL=en_US.UTF-8`,
     `unset COLORTERM`,  // Prevent color issues in tmux
-    `export CODEMAN_MUX=1`,
-    `export CODEMAN_SESSION_ID=${sessionId}`,
-    `export CODEMAN_MUX_NAME=${muxName}`,
-    `export CODEMAN_API_URL=${process.env.CODEMAN_API_URL || 'http://localhost:3000'}`,
+    `export REVERIE_MUX=1`,
+    `export REVERIE_SESSION_ID=${sessionId}`,
+    `export REVERIE_MUX_NAME=${muxName}`,
+    `export REVERIE_API_URL=${process.env.REVERIE_API_URL || 'http://localhost:3000'}`,
   ];
 
   if (mode === 'opencode') {
@@ -905,7 +905,7 @@ const mode = cmd.includes('opencode') ? 'opencode' : 'claude';
 
 ### Known Limitations (from review)
 
-> **[REVIEW P1-6]** OpenCode does not have `--session-id <codeman-id>` for initial session creation (only `--session <id>` for continuing existing sessions). This means:
+> **[REVIEW P1-6]** OpenCode does not have `--session-id <reverie-id>` for initial session creation (only `--session <id>` for continuing existing sessions). This means:
 > - `_claudeSessionId = this.id` correlation (session.ts:405) won't work for OpenCode
 > - Subagent-session correlation via Session ID matching won't work
 > - Transcript watching via Claude session ID path won't work
@@ -1391,13 +1391,13 @@ Bridge Reverie's hook system with OpenCode's plugin system for rich event forwar
 
 Create a Reverie plugin that OpenCode loads, which communicates back to Reverie's API:
 
-**File: `.opencode/plugins/codeman-bridge.js`** (generated per session)
+**File: `.opencode/plugins/reverie-bridge.js`** (generated per session)
 
 ```javascript
 // This plugin bridges OpenCode events to Reverie's API
-export const codemanBridge = async ({ project, $ }) => {
-  const apiUrl = process.env.CODEMAN_API_URL || 'http://localhost:3000';
-  const sessionId = process.env.CODEMAN_SESSION_ID;
+export const reverieBridge = async ({ project, $ }) => {
+  const apiUrl = process.env.REVERIE_API_URL || 'http://localhost:3000';
+  const sessionId = process.env.REVERIE_SESSION_ID;
 
   if (!sessionId) return {};
 
@@ -1450,8 +1450,8 @@ async function installOpenCodePlugin(workingDir: string, sessionId: string): Pro
   const pluginDir = join(workingDir, '.opencode', 'plugins');
   await mkdirp(pluginDir);
 
-  const pluginContent = generateCodemanBridgePlugin(sessionId);
-  await writeFile(join(pluginDir, 'codeman-bridge.js'), pluginContent);
+  const pluginContent = generateReverieBridgePlugin(sessionId);
+  await writeFile(join(pluginDir, 'reverie-bridge.js'), pluginContent);
 }
 ```
 
@@ -1460,7 +1460,7 @@ async function installOpenCodePlugin(workingDir: string, sessionId: string): Pro
 > **[REVIEW]** Add `session.compacted` to the plugin bridge — it's free and useful for tracking when OpenCode auto-compacts (relevant for token tracking and respawn timing).
 
 ```javascript
-// Add to codeman-bridge.js return object:
+// Add to reverie-bridge.js return object:
 'session.compacted': async (info) => {
   await notifyClademan('session_compacted', { info });
 },
@@ -1807,7 +1807,7 @@ if (this.mode === 'opencode' && this._openCodeConfig?.serverPort) {
 |------|---------|-------|--------|
 | `src/utils/ansi-content-filter.ts` | Strip cosmetic ANSI sequences for idle detection | 4 | DEFERRED |
 | `src/completion-detector.ts` | `CompletionDetector` interface + implementations | 7 | DEFERRED |
-| `src/opencode-plugin-generator.ts` | Generate `.opencode/plugins/codeman-bridge.js` | 6 | DEFERRED |
+| `src/opencode-plugin-generator.ts` | Generate `.opencode/plugins/reverie-bridge.js` | 6 | DEFERRED |
 | `src/opencode-api-client.ts` | Client for OpenCode's REST API (Strategy B) | 8 | DEFERRED |
 | `test/opencode-respawn.test.ts` | Tests for OpenCode respawn cycle (port 3156) | 7 | DEFERRED |
 | `test/ansi-content-filter.test.ts` | Tests for ANSI content filter | 4 | DEFERRED |
@@ -1946,7 +1946,7 @@ npx vitest run test/opencode-respawn.test.ts
 
 6. **How should OpenCode session IDs map to Reverie session IDs?**
    - OpenCode manages its own sessions (SQLite DB)
-   - We could pass `--session <codeman-id>` but OpenCode IDs have different format
+   - We could pass `--session <reverie-id>` but OpenCode IDs have different format
    - Recommendation: Let OpenCode manage its own sessions, store the mapping in SessionState
 
 ---
@@ -2287,15 +2287,15 @@ opencode --model anthropic/claude-sonnet-4-5
    → If none: this._mux.createSession(id, workingDir, 'claude', ...)
 
 4. TmuxManager.createSession() (tmux-manager.ts:225)
-   → tmux new-session -ds "codeman-<shortId>" -c <workingDir> -x 120 -y 40
-   → tmux set-option -t "codeman-<shortId>" remain-on-exit on
+   → tmux new-session -ds "reverie-<shortId>" -c <workingDir> -x 120 -y 40
+   → tmux set-option -t "reverie-<shortId>" remain-on-exit on
    → Build command: "export PATH=... && export LANG=... && claude --dangerously-skip-permissions --session-id <id>"
-   → tmux respawn-pane -k -t "codeman-<shortId>" '<command>'
+   → tmux respawn-pane -k -t "reverie-<shortId>" '<command>'
    → Wait 100ms, configure tmux, get PID
    → Return MuxSession { muxName, pid, mode }
 
 5. Back in startInteractive() (session.ts:~950)
-   → pty.spawn('tmux', ['attach-session', '-t', 'codeman-<shortId>'], {
+   → pty.spawn('tmux', ['attach-session', '-t', 'reverie-<shortId>'], {
        name: 'xterm-256color',
        cols: 120, rows: 40,
        env: { LANG, LC_ALL, TERM }

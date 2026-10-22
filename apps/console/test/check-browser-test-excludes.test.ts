@@ -50,7 +50,7 @@ describe('importsBrowserDriver', () => {
 describe('findBrowserTests (fixture tree)', () => {
   let root: string;
   beforeAll(() => {
-    root = mkdtempSync(join(tmpdir(), 'codeman-browser-excludes-'));
+    root = mkdtempSync(join(tmpdir(), 'reverie-browser-excludes-'));
     const put = (rel: string, src: string) => {
       mkdirSync(join(root, rel, '..'), { recursive: true });
       writeFileSync(join(root, rel), src);

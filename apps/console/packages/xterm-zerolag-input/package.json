@@ -42,13 +42,13 @@
     "write-through"
   ],
   "license": "MIT",
-  "homepage": "https://github.com/Ark0N/Codeman/tree/master/packages/xterm-zerolag-input#readme",
+  "homepage": "https://github.com/jgoppert/reverie/tree/main/apps/console/packages/xterm-zerolag-input#readme",
   "bugs": {
-    "url": "https://github.com/Ark0N/Codeman/issues"
+    "url": "https://github.com/jgoppert/reverie/issues"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Ark0N/Codeman.git",
+    "url": "git+https://github.com/jgoppert/reverie.git",
     "directory": "packages/xterm-zerolag-input"
   },
   "devDependencies": {

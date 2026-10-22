@@ -35,7 +35,7 @@ const read = (name: string) => readFileSync(join(PUBLIC, name), 'utf8');
 const INDEX = read('index.html');
 const HEADER = INDEX.slice(INDEX.indexOf('<header class="header">'), INDEX.indexOf('</header>') + '</header>'.length);
 
-let CodemanApp: { prototype: Record<string, any> };
+let ReverieApp: { prototype: Record<string, any> };
 let window: any;
 let document: Document;
 
@@ -61,13 +61,13 @@ beforeAll(async () => {
       read('settings-ui.js') +
       '\n' +
       read('panels-ui.js') +
-      '\n;window.__HeaderStatsCodemanApp = CodemanApp;'
+      '\n;window.__HeaderStatsReverieApp = ReverieApp;'
   );
-  CodemanApp = window.__HeaderStatsCodemanApp;
+  ReverieApp = window.__HeaderStatsReverieApp;
 });
 
 function makeApp() {
-  const app = Object.create(CodemanApp.prototype) as Record<string, any>;
+  const app = Object.create(ReverieApp.prototype) as Record<string, any>;
   app.$ = (id: string) => document.getElementById(id);
   return app;
 }
@@ -206,16 +206,16 @@ describe('the parts the new styles draw', () => {
         url: 'http://localhost/',
       });
       vm.runInContext(read('i18n.js'), dom.getInternalVMContext(), { filename: 'i18n.js' });
-      const api = (dom.window as unknown as { CodemanI18n: { t(s: string): string; configure(o: object): void } })
-        .CodemanI18n;
+      const api = (dom.window as unknown as { ReverieI18n: { t(s: string): string; configure(o: object): void } })
+        .ReverieI18n;
       api.configure({ language });
       return { t: api.t, close: () => dom.window.close() };
     };
     const zh = translator('zh-CN');
     const en = translator('en');
     try {
-      window.codemanT = zh.t;
-      window.CodemanI18n = { language: 'zh-CN' };
+      window.reverieT = zh.t;
+      window.ReverieI18n = { language: 'zh-CN' };
       const app = makeApp();
       app._computeConnectionDescriptor = () => ({
         display: 'flex',
@@ -230,21 +230,21 @@ describe('the parts the new styles draw', () => {
       // value span is data-i18n-skip, so only applyLocalization (settings-ui.js,
       // which every language change runs) can, and the same descriptor is not
       // skipped as unchanged. No indicator update by hand here.
-      window.CodemanI18n = {
+      window.ReverieI18n = {
         language: 'zh-CN',
         configure({ language }: { language: string }) {
           this.language = language;
-          window.codemanT = language === 'zh-CN' ? zh.t : en.t;
+          window.reverieT = language === 'zh-CN' ? zh.t : en.t;
           return { language };
         },
       };
       app.loadAppSettingsFromStorage = () => ({ language: 'en' });
       app.applyLocalization();
-      expect(window.CodemanI18n.language).toBe('en');
+      expect(window.ReverieI18n.language).toBe('en');
       expect(document.getElementById('connectionTileValue')!.textContent).toBe('live');
 
       // Every value word has its own Chinese, and none is a bare key.
-      window.codemanT = zh.t;
+      window.reverieT = zh.t;
       const values = [
         'connection-dot connected',
         'connection-dot fallback',
@@ -259,8 +259,8 @@ describe('the parts the new styles draw', () => {
       // The span the observer must leave alone (its text is set here, already translated).
       expect(INDEX).toMatch(/id="connectionTileValue" data-i18n-skip>/);
     } finally {
-      delete window.codemanT;
-      delete window.CodemanI18n;
+      delete window.reverieT;
+      delete window.ReverieI18n;
       zh.close();
       en.close();
     }

@@ -17,7 +17,7 @@ vi.mock('node:fs/promises', () => ({
     readFile: vi.fn(async () => Buffer.from('png')),
     readdir: vi.fn(async () => ['converted.pdf']),
     mkdir: vi.fn(async () => undefined),
-    mkdtemp: vi.fn(async () => '/tmp/codeman-thumb-test'),
+    mkdtemp: vi.fn(async () => '/tmp/reverie-thumb-test'),
     rename: vi.fn(async () => undefined),
     rm: vi.fn(async () => undefined),
   },
@@ -38,7 +38,7 @@ describe('document-thumbnailer', () => {
     clearDocumentPreviewCache();
     mockedStat.mockImplementation(async (path) => {
       const pathText = String(path);
-      if (pathText.includes('codeman-document-preview-cache') && pathText.endsWith('.pdf')) {
+      if (pathText.includes('reverie-document-preview-cache') && pathText.endsWith('.pdf')) {
         throw new Error('ENOENT');
       }
 
@@ -47,7 +47,7 @@ describe('document-thumbnailer', () => {
     mockedReadFile.mockResolvedValue(Buffer.from('large thumbnail') as never);
     mockedReaddir.mockResolvedValue(['converted.pdf'] as never);
     mockedMkdir.mockResolvedValue(undefined as never);
-    mockedMkdtemp.mockResolvedValue('/tmp/codeman-thumb-test' as never);
+    mockedMkdtemp.mockResolvedValue('/tmp/reverie-thumb-test' as never);
     mockedRename.mockResolvedValue(undefined as never);
     mockedRm.mockResolvedValue(undefined as never);
     mockedExecFile.mockImplementation((_cmd, _args, _options, callback) => {
@@ -89,9 +89,9 @@ describe('document-thumbnailer', () => {
 
   it('renders Office thumbnails from the cached converted PDF after conversion cleanup', async () => {
     mockedMkdtemp.mockImplementation(async (prefix) =>
-      String(prefix).includes('codeman-document-preview-cache')
-        ? '/tmp/codeman-document-preview-cache/work-test'
-        : '/tmp/codeman-thumb-pdf-test'
+      String(prefix).includes('reverie-document-preview-cache')
+        ? '/tmp/reverie-document-preview-cache/work-test'
+        : '/tmp/reverie-thumb-pdf-test'
     );
     mockedExecFile.mockImplementation((_cmd, _args, _options, callback) => {
       callback(null, { stdout: '', stderr: '' });
@@ -106,7 +106,7 @@ describe('document-thumbnailer', () => {
     });
     const pdftoppmCall = mockedExecFile.mock.calls.find(([cmd]) => cmd === 'pdftoppm');
     expect(pdftoppmCall?.[1]).toEqual(
-      expect.arrayContaining([expect.stringContaining('codeman-document-preview-cache')])
+      expect.arrayContaining([expect.stringContaining('reverie-document-preview-cache')])
     );
   });
 });

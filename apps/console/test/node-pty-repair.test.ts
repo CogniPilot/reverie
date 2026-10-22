@@ -23,7 +23,7 @@ import {
 
 /** Builds a fake node-pty tree; each entry is a directory that gets a spawn-helper. */
 function makeFakePtyDir(helpers: Array<{ dir: string; mode: number }>): string {
-  const root = mkdtempSync(join(tmpdir(), 'codeman-node-pty-'));
+  const root = mkdtempSync(join(tmpdir(), 'reverie-node-pty-'));
   for (const { dir, mode } of helpers) {
     const full = join(root, dir);
     mkdirSync(full, { recursive: true });

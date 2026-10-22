@@ -4,11 +4,11 @@ import vm from 'node:vm';
 import { describe, expect, it, vi } from 'vitest';
 
 function loadTerminalUiHarness() {
-  const CodemanApp = function CodemanApp(this: any) {};
+  const ReverieApp = function ReverieApp(this: any) {};
   let now = 1_000;
   let keyboardVisible = false;
   let activeElement: unknown = null;
-  // The module hangs its constants off window (CodemanTerminalInput) and the URL branch of
+  // The module hangs its constants off window (ReverieTerminalInput) and the URL branch of
   // the link provider opens through window.open, so tests need a handle on the same object.
   const windowRef: Record<string, any> = {};
   const context = vm.createContext({
@@ -20,7 +20,7 @@ function loadTerminalUiHarness() {
       },
       getElementById: () => null,
     },
-    CodemanApp,
+    ReverieApp,
     console: { warn: vi.fn(), log: vi.fn(), debug: vi.fn() },
     _crashDiag: { log: vi.fn() },
     performance: { now: () => now },
@@ -55,7 +55,7 @@ function loadTerminalUiHarness() {
   vm.runInContext(constants, context, { filename: 'constants.js' });
   vm.runInContext(code, context, { filename: 'terminal-ui.js' });
 
-  const app = new (CodemanApp as any)();
+  const app = new (ReverieApp as any)();
   return {
     app,
     windowRef,
@@ -1100,7 +1100,7 @@ describe('terminal link tap', () => {
     // A shell has no TUI to own taps, so _classifyMobileTerminalTap short-circuits to
     // 'input' for the whole screen — gating link taps on the intent would leave every URL
     // in shell output (curl, npm, git remote) inert. The caret line is the real boundary.
-    const line = 'remote: https://github.com/Ark0N/Codeman.git';
+    const line = 'remote: https://github.com/jgoppert/reverie.git';
     const harness = loadTerminalUiHarness();
     const { app, windowRef } = harness;
     app.activeSessionId = 'sess-1';
@@ -1116,7 +1116,7 @@ describe('terminal link tap', () => {
     expect(app._classifyMobileTerminalTap(point.clientX, point.clientY)).toBe('input');
     expect(app._handleMobileTerminalTap(point, false)).toBe('link');
     expect(windowRef.open).toHaveBeenCalledWith(
-      'https://github.com/Ark0N/Codeman.git',
+      'https://github.com/jgoppert/reverie.git',
       '_blank',
       'noopener,noreferrer'
     );

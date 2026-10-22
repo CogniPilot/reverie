@@ -826,7 +826,7 @@ function getFilesystemPreviewKind(fileName: string): FilesystemPreviewKind | und
  * Blocked trees, minus any tree that would swallow a configured picker root
  * whole.
  *
- * `/root` is a default blocked tree, and Codeman running as root (containers,
+ * `/root` is a default blocked tree, and Reverie running as root (containers,
  * plenty of servers) makes `homedir()` exactly `/root` — so the picker's own
  * allowlisted Home root was blocked by the attachment guard, every other
  * candidate lives under it or does not exist, and the endpoint answered 403
@@ -861,11 +861,11 @@ function isBlockedPickerPath(path: string, blockedTrees: readonly string[], dire
   // The shared sensitive-path matcher describes file locations such as
   // ~/.ssh/<key>. Probe a child path as well so the directory itself cannot be
   // opened and used to enumerate those filenames.
-  return directory && isBlockedAttachmentPath(join(path, '__codeman_path_picker_probe__'), blockedTrees);
+  return directory && isBlockedAttachmentPath(join(path, '__reverie_path_picker_probe__'), blockedTrees);
 }
 
 function extraConfiguredPickerRoots(): Array<{ label: string; path: string }> {
-  const extraRoots = process.env.CODEMAN_FILE_PICKER_ROOTS;
+  const extraRoots = process.env.REVERIE_FILE_PICKER_ROOTS;
   if (!extraRoots) return [];
   return extraRoots
     .split(',')
@@ -883,7 +883,7 @@ function extraConfiguredPickerRoots(): Array<{ label: string; path: string }> {
  * authenticated user browse and preview every other user's workspace. The
  * shared `CASES_DIR` leaks the same way, and `/mnt/d` is a broad host mount
  * that a multi-user deployment should not expose by default. Operators who
- * genuinely want a shared area can still name it in `CODEMAN_FILE_PICKER_ROOTS`,
+ * genuinely want a shared area can still name it in `REVERIE_FILE_PICKER_ROOTS`,
  * which stays an explicit opt-in in both modes.
  */
 function configuredFilesystemPickerRoots(req: FastifyRequest): Array<{ label: string; path: string }> {
@@ -971,12 +971,12 @@ async function resolveFilesystemPickerPath(
   // With no explicit path (the "Link Existing" case picker, which passes no
   // sessionId and an empty initialPath until the user has typed something),
   // land on the shared cases root rather than falling through to whichever
-  // root happens to be first. `Codeman Cases` sits inside `Home` only on the
-  // native default (~/codeman-cases); a Docker deployment binds them at
-  // unrelated host paths (CODEMAN_APPDATA_PATH vs CODEMAN_CASES_PATH), so a
+  // root happens to be first. `Reverie Cases` sits inside `Home` only on the
+  // native default (~/reverie-cases); a Docker deployment binds them at
+  // unrelated host paths (REVERIE_APPDATA_PATH vs REVERIE_CASES_PATH), so a
   // Home-first fallback opened the picker somewhere with no cases in sight —
   // and, worse, made an OLD case folder left behind by a since-changed
-  // CODEMAN_CASES_PATH look like a normal thing to stumble across while
+  // REVERIE_CASES_PATH look like a normal thing to stumble across while
   // browsing for one to link.
   const fallbackRoot =
     roots.find((root) => root.label === 'Current Folder') ??
@@ -2084,7 +2084,7 @@ export function registerFileRoutes(app: FastifyInstance, ctx: SessionPort & Even
       const fileMode = stat.mode & 0o777;
       const tmpPath = join(
         dirname(resolvedPath),
-        `.${pathBasename(resolvedPath)}.codeman-tmp-${randomBytes(6).toString('hex')}`
+        `.${pathBasename(resolvedPath)}.reverie-tmp-${randomBytes(6).toString('hex')}`
       );
       let handle;
       try {
@@ -2239,7 +2239,7 @@ export function registerFileRoutes(app: FastifyInstance, ctx: SessionPort & Even
       // link pointing outside the workspace): it is already opening the file, so
       // the attachment card + unread badge would be noise announcing what is
       // filling the screen. Default stays true — every other caller (the
-      // `codeman attach` CLI, codeman-publish) wants the card.
+      // `reverie attach` CLI, reverie-publish) wants the card.
       if (body.notify !== false) {
         ctx.broadcast(SseEvent.AttachmentDetected, event);
       }

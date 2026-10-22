@@ -123,7 +123,7 @@ describe('the harness logo and the model', () => {
 
   /** s-a on dsh's route, s-b claude on its statusline's model, s-c a shell. */
   function harnessGrid(): GridApp {
-    windowStub.__codemanCliCatalog = CATALOG;
+    windowStub.__reverieCliCatalog = CATALOG;
     const app = makeGridApp(IDS);
     app.sessions.get('s-a').mode = 'deepseek';
     app.sessions.get('s-a').displayModel = { model: 'qwen3.8-27b', source: 'screen' };
@@ -249,7 +249,7 @@ describe('the harness logo and the model', () => {
 
   it('an id that is not a CLI id is not a class name; without a catalog the label is the id', () => {
     const app = harnessGrid();
-    delete windowStub.__codemanCliCatalog;
+    delete windowStub.__reverieCliCatalog;
     app.sessions.get('s-a').mode = 'bad id" onclick';
     app.sessions.get('s-b').mode = 'my-cli';
     app._renderTileChrome();

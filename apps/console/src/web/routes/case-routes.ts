@@ -1,6 +1,6 @@
 /**
  * @fileoverview Case management routes.
- * Handles CRUD for cases (directories under ~/codeman-cases and linked folders),
+ * Handles CRUD for cases (directories under ~/reverie-cases and linked folders),
  * cloning a repository into a new case (`/api/cases/clone` + `/clone-preflight`,
  * issue #236 — the URL-safety rules live in `src/git-clone.ts`), fix-plan reading,
  * and ralph-wizard file serving.
@@ -96,7 +96,7 @@ import type { AdoptedContainerProbe, DockerBrowseResult, DockerContainerInfo } f
 import { buildDockerRemoveCommand } from '../../tmux-manager.js';
 import {
   checkRemoteTmuxAvailable,
-  listRemoteCodemanSessions,
+  listRemoteReverieSessions,
   readRemoteCases,
   readRemoteHosts,
   remoteDisplayPath,
@@ -105,7 +105,7 @@ import {
 } from '../../remote-hosts.js';
 
 const LINKED_CASES_FILE = dataPath('linked-cases.json');
-const CODEMAN_CONFIG_DIR = getDataDir();
+const REVERIE_CONFIG_DIR = getDataDir();
 const SAFE_CASE_NAME = /^[a-zA-Z0-9_-]+$/;
 const DOCKER_EXPORTS_DIR = dataPath('docker-exports');
 /** Auto-created host profile for the one-click "Run in Docker" case flow. */
@@ -265,7 +265,7 @@ export function registerCaseRoutes(app: FastifyInstance, ctx: EventPort & Config
       for (const e of entries) {
         if (e.isDirectory() && SAFE_CASE_NAME.test(e.name)) {
           const casePath = join(listBase, e.name);
-          // Only a directory Codeman scaffolded for an agent spawn carries a marker,
+          // Only a directory Reverie scaffolded for an agent spawn carries a marker,
           // so this stays absent for every human-created, linked or cloned case.
           const marker = await readAgentCaseMarker(casePath);
           cases.push({
@@ -303,9 +303,9 @@ export function registerCaseRoutes(app: FastifyInstance, ctx: EventPort & Config
     }
 
     // Get remote cases (owner-scoped; legacy no-owner = admin-only)
-    const remoteHosts = await readRemoteHosts(CODEMAN_CONFIG_DIR);
+    const remoteHosts = await readRemoteHosts(REVERIE_CONFIG_DIR);
     const remoteHostMap = new Map(remoteHosts.map((host) => [host.id, host]));
-    for (const remoteCase of await readRemoteCases(CODEMAN_CONFIG_DIR)) {
+    for (const remoteCase of await readRemoteCases(REVERIE_CONFIG_DIR)) {
       const host = remoteHostMap.get(remoteCase.hostId);
       if (!host || !SAFE_CASE_NAME.test(remoteCase.name)) continue;
       if (!admin && !canAccessOwned(user, remoteCase.owner)) continue;
@@ -331,9 +331,9 @@ export function registerCaseRoutes(app: FastifyInstance, ctx: EventPort & Config
     }
 
     // Get docker cases
-    const dockerHosts = await readDockerHosts(CODEMAN_CONFIG_DIR);
+    const dockerHosts = await readDockerHosts(REVERIE_CONFIG_DIR);
     const dockerHostMap = new Map(dockerHosts.map((host) => [host.id, host]));
-    for (const dockerCase of await readDockerCases(CODEMAN_CONFIG_DIR)) {
+    for (const dockerCase of await readDockerCases(REVERIE_CONFIG_DIR)) {
       const host = dockerHostMap.get(dockerCase.hostId);
       if (!host || !SAFE_CASE_NAME.test(dockerCase.name)) continue;
       if (!admin && !canAccessOwned(user, dockerCase.owner)) continue;
@@ -449,7 +449,7 @@ export function registerCaseRoutes(app: FastifyInstance, ctx: EventPort & Config
     const ownCasesDir = resolveCasesDir(getAuthUser(req));
     if (existsSync(join(ownCasesDir, name))) {
       reply.code(409);
-      return createErrorResponse(ApiErrorCode.ALREADY_EXISTS, 'A case with this name already exists in codeman-cases.');
+      return createErrorResponse(ApiErrorCode.ALREADY_EXISTS, 'A case with this name already exists in reverie-cases.');
     }
     const linkedCases = await readLinkedCases();
     if (linkedCases[name]) {
@@ -501,8 +501,8 @@ export function registerCaseRoutes(app: FastifyInstance, ctx: EventPort & Config
       made.push(join(casePath, '.claude')); // before the write, so a half-written one is undone too
       await writeHooksConfig(casePath);
 
-      const codemanDir = getDataDir();
-      if (!existsSync(codemanDir)) mkdirSync(codemanDir, { recursive: true });
+      const reverieDir = getDataDir();
+      if (!existsSync(reverieDir)) mkdirSync(reverieDir, { recursive: true });
       // Re-read right before writing, so a case linked since the check above is not dropped. This only
       // narrows the window: like POST /api/cases/link, the registry write is not serialized, and two
       // requests that both read before either writes can still lose one entry.
@@ -572,7 +572,7 @@ export function registerCaseRoutes(app: FastifyInstance, ctx: EventPort & Config
    * Ask a remote what it has, without cloning anything.
    *
    * Two jobs: tell the user whether the URL they typed can be cloned *anonymously*
-   * (Codeman supplies no credentials, so "private" and "typo" both have to be
+   * (Reverie supplies no credentials, so "private" and "typo" both have to be
    * distinguishable from "fine"), and hand back the branch/tag lists so the ref
    * field is a picker instead of a guess.
    *
@@ -622,7 +622,7 @@ export function registerCaseRoutes(app: FastifyInstance, ctx: EventPort & Config
    *
    * Repository contents win over scaffolding: an existing CLAUDE.md is left
    * alone, and hooks are MERGED into whatever `.claude/settings.local.json` the
-   * repo ships (`writeHooksConfig` preserves non-Codeman handlers). A repo that
+   * repo ships (`writeHooksConfig` preserves non-Reverie handlers). A repo that
    * ships its own hooks is reported back as a warning, because those run on the
    * user's machine the moment a session starts in the case.
    */
@@ -667,8 +667,8 @@ export function registerCaseRoutes(app: FastifyInstance, ctx: EventPort & Config
       // clone can never be the thing that discovers the collision (it would have
       // spent minutes of network first, and git's own error is about a directory).
       const linkedCases = await readLinkedCases();
-      const dockerCases = await readDockerCases(CODEMAN_CONFIG_DIR);
-      const remoteCases = await readRemoteCases(CODEMAN_CONFIG_DIR);
+      const dockerCases = await readDockerCases(REVERIE_CONFIG_DIR);
+      const remoteCases = await readRemoteCases(REVERIE_CONFIG_DIR);
       if (
         existsSync(casePath) ||
         linkedCases[name] ||
@@ -765,7 +765,7 @@ export function registerCaseRoutes(app: FastifyInstance, ctx: EventPort & Config
   // Hosts are machine-level infra config (ssh users/identity paths): non-admins get an
   // empty list in multi-user mode, matching the admin-only write side. No-op otherwise.
   app.get('/api/remote-hosts', async (req) =>
-    isMultiUserMode() && !isAdmin(req) ? [] : readRemoteHosts(CODEMAN_CONFIG_DIR)
+    isMultiUserMode() && !isAdmin(req) ? [] : readRemoteHosts(REVERIE_CONFIG_DIR)
   );
 
   // Hosts are machine-level resources: only admins may define them in multi-user mode.
@@ -774,11 +774,11 @@ export function registerCaseRoutes(app: FastifyInstance, ctx: EventPort & Config
       ? null
       : (reply.code(403), createErrorResponse(ApiErrorCode.FORBIDDEN, 'Admin only in multi-user mode'));
 
-  // COD-105 — discover `codeman-*` tmux sessions already running on a remote
-  // host (created by the remote's own Codeman, another instance, or this one)
-  // so the operator can attach to one this Codeman didn't launch. Explicit
+  // COD-105 — discover `reverie-*` tmux sessions already running on a remote
+  // host (created by the remote's own Reverie, another instance, or this one)
+  // so the operator can attach to one this Reverie didn't launch. Explicit
   // trigger only (Decision A): the frontend calls this on a "Discover" click,
-  // never automatically on host select. listRemoteCodemanSessions never throws
+  // never automatically on host select. listRemoteReverieSessions never throws
   // (returns [] on unreachable/no-tmux/no-sessions) and is ssh-guarded under test.
   // Hosts are admin-only infra in multi-user mode, so discovery is too.
   app.get(
@@ -787,9 +787,9 @@ export function registerCaseRoutes(app: FastifyInstance, ctx: EventPort & Config
       const denied = adminOnly(req, reply);
       if (denied) return denied;
       const { hostId } = req.params as { hostId: string };
-      const host = (await readRemoteHosts(CODEMAN_CONFIG_DIR)).find((item) => item.id === hostId);
+      const host = (await readRemoteHosts(REVERIE_CONFIG_DIR)).find((item) => item.id === hostId);
       if (!host) return createErrorResponse(ApiErrorCode.NOT_FOUND, 'Remote host not found');
-      const sessions = await listRemoteCodemanSessions(host);
+      const sessions = await listRemoteReverieSessions(host);
       return { success: true, data: { sessions } };
     }
   );
@@ -798,11 +798,11 @@ export function registerCaseRoutes(app: FastifyInstance, ctx: EventPort & Config
     const denied = adminOnly(req, reply);
     if (denied) return denied;
     const host = parseBody(RemoteHostSchema, req.body);
-    const hosts = await readRemoteHosts(CODEMAN_CONFIG_DIR);
+    const hosts = await readRemoteHosts(REVERIE_CONFIG_DIR);
     if (hosts.some((item) => item.id === host.id)) {
       return createErrorResponse(ApiErrorCode.ALREADY_EXISTS, 'Remote host already exists');
     }
-    await writeRemoteHosts(CODEMAN_CONFIG_DIR, [...hosts, host]);
+    await writeRemoteHosts(REVERIE_CONFIG_DIR, [...hosts, host]);
     return { success: true, data: { host } };
   });
 
@@ -811,12 +811,12 @@ export function registerCaseRoutes(app: FastifyInstance, ctx: EventPort & Config
     if (denied) return denied;
     const { id } = req.params as { id: string };
     const host = parseBody(RemoteHostSchema, { ...(req.body as object), id });
-    const hosts = await readRemoteHosts(CODEMAN_CONFIG_DIR);
+    const hosts = await readRemoteHosts(REVERIE_CONFIG_DIR);
     const index = hosts.findIndex((item) => item.id === id);
     if (index === -1) return createErrorResponse(ApiErrorCode.NOT_FOUND, 'Remote host not found');
     const next = [...hosts];
     next[index] = host;
-    await writeRemoteHosts(CODEMAN_CONFIG_DIR, next);
+    await writeRemoteHosts(REVERIE_CONFIG_DIR, next);
     return { success: true, data: { host } };
   });
 
@@ -824,13 +824,13 @@ export function registerCaseRoutes(app: FastifyInstance, ctx: EventPort & Config
     const denied = adminOnly(req, reply);
     if (denied) return denied;
     const { id } = req.params as { id: string };
-    const cases = await readRemoteCases(CODEMAN_CONFIG_DIR);
+    const cases = await readRemoteCases(REVERIE_CONFIG_DIR);
     if (cases.some((item) => item.hostId === id)) {
       return createErrorResponse(ApiErrorCode.OPERATION_FAILED, 'Remote host is still used by remote cases');
     }
-    const hosts = await readRemoteHosts(CODEMAN_CONFIG_DIR);
+    const hosts = await readRemoteHosts(REVERIE_CONFIG_DIR);
     await writeRemoteHosts(
-      CODEMAN_CONFIG_DIR,
+      REVERIE_CONFIG_DIR,
       hosts.filter((item) => item.id !== id)
     );
     return { success: true, data: { id } };
@@ -838,12 +838,12 @@ export function registerCaseRoutes(app: FastifyInstance, ctx: EventPort & Config
 
   app.post('/api/cases/remote-link', async (req): Promise<ApiResponse<{ case: unknown }>> => {
     const remoteCase = { ...parseBody(RemoteCaseLinkSchema, req.body), type: 'remote' as const, owner: ownerFor(req) };
-    const hosts = await readRemoteHosts(CODEMAN_CONFIG_DIR);
+    const hosts = await readRemoteHosts(REVERIE_CONFIG_DIR);
     const host = hosts.find((item) => item.id === remoteCase.hostId);
     if (!host) return createErrorResponse(ApiErrorCode.NOT_FOUND, 'Remote host not found');
 
     const linkedCases = await readLinkedCases();
-    const remoteCases = await readRemoteCases(CODEMAN_CONFIG_DIR);
+    const remoteCases = await readRemoteCases(REVERIE_CONFIG_DIR);
     if (
       remoteCases.some((item) => item.name === remoteCase.name) ||
       linkedCases[remoteCase.name] ||
@@ -860,7 +860,7 @@ export function registerCaseRoutes(app: FastifyInstance, ctx: EventPort & Config
       return createErrorResponse(ApiErrorCode.OPERATION_FAILED, tmuxCheck.error || 'remote host is missing tmux');
     }
 
-    await writeRemoteCases(CODEMAN_CONFIG_DIR, [...remoteCases, remoteCase]);
+    await writeRemoteCases(REVERIE_CONFIG_DIR, [...remoteCases, remoteCase]);
     ctx.broadcast(SseEvent.CaseLinked, { name: remoteCase.name, path: remoteCase.remotePath, type: 'remote' });
     return { success: true, data: { case: remoteCase } };
   });
@@ -870,18 +870,18 @@ export function registerCaseRoutes(app: FastifyInstance, ctx: EventPort & Config
   // Hosts are machine-level infra config (images/mounts/env): non-admins get an empty
   // list in multi-user mode, matching the admin-only write side. No-op otherwise.
   app.get('/api/docker-hosts', async (req) =>
-    isMultiUserMode() && !isAdmin(req) ? [] : readDockerHosts(CODEMAN_CONFIG_DIR)
+    isMultiUserMode() && !isAdmin(req) ? [] : readDockerHosts(REVERIE_CONFIG_DIR)
   );
 
   app.post('/api/docker-hosts', async (req, reply): Promise<ApiResponse<{ host: unknown }>> => {
     const denied = adminOnly(req, reply);
     if (denied) return denied;
     const host = parseBody(DockerHostSchema, req.body);
-    const hosts = await readDockerHosts(CODEMAN_CONFIG_DIR);
+    const hosts = await readDockerHosts(REVERIE_CONFIG_DIR);
     if (hosts.some((item) => item.id === host.id)) {
       return createErrorResponse(ApiErrorCode.ALREADY_EXISTS, 'Docker host already exists');
     }
-    await writeDockerHosts(CODEMAN_CONFIG_DIR, [...hosts, host]);
+    await writeDockerHosts(REVERIE_CONFIG_DIR, [...hosts, host]);
     return { success: true, data: { host } };
   });
 
@@ -890,12 +890,12 @@ export function registerCaseRoutes(app: FastifyInstance, ctx: EventPort & Config
     if (denied) return denied;
     const { id } = req.params as { id: string };
     const host = parseBody(DockerHostSchema, { ...(req.body as object), id });
-    const hosts = await readDockerHosts(CODEMAN_CONFIG_DIR);
+    const hosts = await readDockerHosts(REVERIE_CONFIG_DIR);
     const index = hosts.findIndex((item) => item.id === id);
     if (index === -1) return createErrorResponse(ApiErrorCode.NOT_FOUND, 'Docker host not found');
     const next = [...hosts];
     next[index] = host;
-    await writeDockerHosts(CODEMAN_CONFIG_DIR, next);
+    await writeDockerHosts(REVERIE_CONFIG_DIR, next);
     return { success: true, data: { host } };
   });
 
@@ -903,13 +903,13 @@ export function registerCaseRoutes(app: FastifyInstance, ctx: EventPort & Config
     const denied = adminOnly(req, reply);
     if (denied) return denied;
     const { id } = req.params as { id: string };
-    const cases = await readDockerCases(CODEMAN_CONFIG_DIR);
+    const cases = await readDockerCases(REVERIE_CONFIG_DIR);
     if (cases.some((item) => item.hostId === id)) {
       return createErrorResponse(ApiErrorCode.OPERATION_FAILED, 'Docker host is still used by docker cases');
     }
-    const hosts = await readDockerHosts(CODEMAN_CONFIG_DIR);
+    const hosts = await readDockerHosts(REVERIE_CONFIG_DIR);
     await writeDockerHosts(
-      CODEMAN_CONFIG_DIR,
+      REVERIE_CONFIG_DIR,
       hosts.filter((item) => item.id !== id)
     );
     return { success: true, data: { id } };
@@ -927,12 +927,12 @@ export function registerCaseRoutes(app: FastifyInstance, ctx: EventPort & Config
         type: 'docker' as const,
         owner: ownerFor(req),
       };
-      const hosts = await readDockerHosts(CODEMAN_CONFIG_DIR);
+      const hosts = await readDockerHosts(REVERIE_CONFIG_DIR);
       const host = hosts.find((item) => item.id === dockerCase.hostId);
       if (!host) return createErrorResponse(ApiErrorCode.NOT_FOUND, 'Docker host not found');
 
       const linkedCases = await readLinkedCases();
-      const dockerCases = await readDockerCases(CODEMAN_CONFIG_DIR);
+      const dockerCases = await readDockerCases(REVERIE_CONFIG_DIR);
       if (
         dockerCases.some((item) => item.name === dockerCase.name) ||
         linkedCases[dockerCase.name] ||
@@ -976,7 +976,7 @@ export function registerCaseRoutes(app: FastifyInstance, ctx: EventPort & Config
         return createErrorResponse(ApiErrorCode.OPERATION_FAILED, imageGate.error);
       }
 
-      await writeDockerCases(CODEMAN_CONFIG_DIR, [...dockerCases, dockerCase]);
+      await writeDockerCases(REVERIE_CONFIG_DIR, [...dockerCases, dockerCase]);
       ctx.broadcast(SseEvent.CaseLinked, {
         name: dockerCase.name,
         path: dockerCase.hostWorkspacePath,
@@ -996,7 +996,7 @@ export function registerCaseRoutes(app: FastifyInstance, ctx: EventPort & Config
 
   /**
    * ADOPT an already-running container (`owned: false`). The mirror of the
-   * remote-SSH attach path: Codeman execs into a container the user built and
+   * remote-SSH attach path: Reverie execs into a container the user built and
    * runs, and never creates, starts, stops, restarts or removes it.
    *
    * Everything here is read-only toward the container. The preflight refuses at
@@ -1023,11 +1023,11 @@ export function registerCaseRoutes(app: FastifyInstance, ctx: EventPort & Config
         owner: ownerFor(req),
         owned: false as const,
       };
-      const host = (await readDockerHosts(CODEMAN_CONFIG_DIR)).find((item) => item.id === dockerCase.hostId);
+      const host = (await readDockerHosts(REVERIE_CONFIG_DIR)).find((item) => item.id === dockerCase.hostId);
       if (!host) return createErrorResponse(ApiErrorCode.NOT_FOUND, 'Docker host not found');
 
       const linkedCases = await readLinkedCases();
-      const dockerCases = await readDockerCases(CODEMAN_CONFIG_DIR);
+      const dockerCases = await readDockerCases(REVERIE_CONFIG_DIR);
       if (
         dockerCases.some((item) => item.name === dockerCase.name) ||
         linkedCases[dockerCase.name] ||
@@ -1039,7 +1039,7 @@ export function registerCaseRoutes(app: FastifyInstance, ctx: EventPort & Config
       // directory inside it. What still blocks it, and why, lives in
       // classifyAdoptContainerConflict — note that none of it is about the shared
       // in-container tmux server, which is safe precisely because sessions there
-      // are named per SESSION id (`codeman-dkr-<id8>`), never per case.
+      // are named per SESSION id (`reverie-dkr-<id8>`), never per case.
       const container = dockerCase.container;
       const conflict = classifyAdoptContainerConflict({
         container,
@@ -1099,7 +1099,7 @@ export function registerCaseRoutes(app: FastifyInstance, ctx: EventPort & Config
       // HOST CLIs, which is the wrong question for a case whose agents run inside
       // a container the host knows nothing about.
       const adoptedCase = { ...dockerCase, availableModes: probe.availableModes };
-      await writeDockerCases(CODEMAN_CONFIG_DIR, [...dockerCases, adoptedCase]);
+      await writeDockerCases(REVERIE_CONFIG_DIR, [...dockerCases, adoptedCase]);
       ctx.broadcast(SseEvent.CaseLinked, {
         name: adoptedCase.name,
         path: adoptedCase.hostWorkspacePath,
@@ -1131,7 +1131,7 @@ export function registerCaseRoutes(app: FastifyInstance, ctx: EventPort & Config
       const denied = adminOnly(req, reply);
       if (denied) return denied;
       const { hostId } = req.params as { hostId: string };
-      const host = (await readDockerHosts(CODEMAN_CONFIG_DIR)).find((item) => item.id === hostId);
+      const host = (await readDockerHosts(REVERIE_CONFIG_DIR)).find((item) => item.id === hostId);
       if (!host) return createErrorResponse(ApiErrorCode.NOT_FOUND, 'Docker host not found');
       const containers = await listDockerContainers({
         engine: host.engine ?? 'docker',
@@ -1154,7 +1154,7 @@ export function registerCaseRoutes(app: FastifyInstance, ctx: EventPort & Config
     const denied = adminOnly(req, reply);
     if (denied) return denied;
     const body = parseBody(DockerBrowseSchema, req.body);
-    const host = (await readDockerHosts(CODEMAN_CONFIG_DIR)).find((item) => item.id === body.hostId);
+    const host = (await readDockerHosts(REVERIE_CONFIG_DIR)).find((item) => item.id === body.hostId);
     if (!host) return createErrorResponse(ApiErrorCode.NOT_FOUND, 'Docker host not found');
     const result = await browseInContainer(
       {
@@ -1170,7 +1170,7 @@ export function registerCaseRoutes(app: FastifyInstance, ctx: EventPort & Config
 
   app.post('/api/docker-cases/adopt-preflight', async (req, reply): Promise<ApiResponse<AdoptedContainerProbe>> => {
     const body = parseBody(DockerAdoptPreflightSchema, req.body);
-    const dockerCases = await readDockerCases(CODEMAN_CONFIG_DIR);
+    const dockerCases = await readDockerCases(REVERIE_CONFIG_DIR);
     // ⚠️ NOT plain `adminOnly`, unlike the two routes above: the run menu probes this for
     // every docker case to learn which CLIs the CONTAINER has, so an admin-only gate would
     // hide every agent mode from a non-admin's own docker case. A non-admin may therefore
@@ -1187,7 +1187,7 @@ export function registerCaseRoutes(app: FastifyInstance, ctx: EventPort & Config
         return createErrorResponse(ApiErrorCode.FORBIDDEN, 'Admin only in multi-user mode');
       }
     }
-    const host = (await readDockerHosts(CODEMAN_CONFIG_DIR)).find((item) => item.id === body.hostId);
+    const host = (await readDockerHosts(REVERIE_CONFIG_DIR)).find((item) => item.id === body.hostId);
     if (!host) return createErrorResponse(ApiErrorCode.NOT_FOUND, 'Docker host not found');
     const probe = await probeAdoptableContainer(
       {
@@ -1219,8 +1219,8 @@ export function registerCaseRoutes(app: FastifyInstance, ctx: EventPort & Config
 
       // Collision across every case kind.
       const linkedCases = await readLinkedCases();
-      const dockerCases = await readDockerCases(CODEMAN_CONFIG_DIR);
-      const remoteCases = await readRemoteCases(CODEMAN_CONFIG_DIR);
+      const dockerCases = await readDockerCases(REVERIE_CONFIG_DIR);
+      const remoteCases = await readRemoteCases(REVERIE_CONFIG_DIR);
       if (
         existsSync(casePath) ||
         dockerCases.some((item) => item.name === name) ||
@@ -1256,15 +1256,15 @@ export function registerCaseRoutes(app: FastifyInstance, ctx: EventPort & Config
         resumeOnStart: true,
         hooksEnabled: true,
       };
-      const hosts = await readDockerHosts(CODEMAN_CONFIG_DIR);
+      const hosts = await readDockerHosts(REVERIE_CONFIG_DIR);
       const existing = hosts.find((item) => item.id === desiredHost.id);
       // Reuse the shared default if present; create/refresh a per-case host for overrides.
       const host = existing && !hasOverrides ? existing : desiredHost;
       if (!existing) {
-        await writeDockerHosts(CODEMAN_CONFIG_DIR, [...hosts, desiredHost]);
+        await writeDockerHosts(REVERIE_CONFIG_DIR, [...hosts, desiredHost]);
       } else if (hasOverrides) {
         await writeDockerHosts(
-          CODEMAN_CONFIG_DIR,
+          REVERIE_CONFIG_DIR,
           hosts.map((h) => (h.id === desiredHost.id ? desiredHost : h))
         );
       }
@@ -1302,7 +1302,7 @@ export function registerCaseRoutes(app: FastifyInstance, ctx: EventPort & Config
         return createErrorResponse(ApiErrorCode.OPERATION_FAILED, `Failed to create case: ${getErrorMessage(err)}`);
       }
 
-      await writeDockerCases(CODEMAN_CONFIG_DIR, [...dockerCases, dockerCase]);
+      await writeDockerCases(REVERIE_CONFIG_DIR, [...dockerCases, dockerCase]);
       ctx.broadcast(SseEvent.CaseCreated, { name, path: casePath });
       ctx.broadcast(SseEvent.CaseLinked, { name, path: casePath, type: 'docker' });
       return {
@@ -1324,15 +1324,15 @@ export function registerCaseRoutes(app: FastifyInstance, ctx: EventPort & Config
   app.post('/api/docker-cases/:name/export', async (req): Promise<ApiResponse<{ started: true; bundle: string }>> => {
     const { name } = req.params as { name: string };
     const { mode = 'full' } = parseBody(DockerExportSchema, req.body ?? {});
-    const dockerCase = (await readDockerCases(CODEMAN_CONFIG_DIR)).find((item) => item.name === name);
+    const dockerCase = (await readDockerCases(REVERIE_CONFIG_DIR)).find((item) => item.name === name);
     if (!dockerCase) return createErrorResponse(ApiErrorCode.NOT_FOUND, 'Docker case not found');
-    const host = (await readDockerHosts(CODEMAN_CONFIG_DIR)).find((item) => item.id === dockerCase.hostId);
+    const host = (await readDockerHosts(REVERIE_CONFIG_DIR)).find((item) => item.id === dockerCase.hostId);
     if (!host) return createErrorResponse(ApiErrorCode.NOT_FOUND, 'Docker host not found');
 
     const sessionDocker = toSessionDocker(host, dockerCase);
     // A full export `docker commit`s the container into an image. For an ADOPTED
     // container that means packaging someone else's container — with whatever
-    // credentials its owner logged in with — into a bundle Codeman then hands out,
+    // credentials its owner logged in with — into a bundle Reverie then hands out,
     // and it is the one export step that touches the container at all. The
     // workspace-only export is a plain host-directory tar and stays available.
     if (mode === 'full' && dockerCase.owned === false) {
@@ -1357,7 +1357,7 @@ export function registerCaseRoutes(app: FastifyInstance, ctx: EventPort & Config
       timestamp,
       exportsDir: DOCKER_EXPORTS_DIR,
       mode,
-      codemanVersion: APP_VERSION,
+      reverieVersion: APP_VERSION,
     })
       .then((result) => {
         ctx.broadcast(SseEvent.DockerExportComplete, {
@@ -1411,7 +1411,7 @@ export function registerCaseRoutes(app: FastifyInstance, ctx: EventPort & Config
 
     // Name-collision guard across ALL case kinds.
     const linkedCases = await readLinkedCases();
-    const dockerCases = await readDockerCases(CODEMAN_CONFIG_DIR);
+    const dockerCases = await readDockerCases(REVERIE_CONFIG_DIR);
     if (
       dockerCases.some((item) => item.name === newCaseName) ||
       linkedCases[newCaseName] ||
@@ -1445,7 +1445,7 @@ export function registerCaseRoutes(app: FastifyInstance, ctx: EventPort & Config
     // Refresh matters: after a case-delete + re-import of the same name, a stale
     // `imported-<name>` host would silently pin the PREVIOUS import's image tag.
     const hostId = `imported-${newCaseName}`;
-    const hosts = await readDockerHosts(CODEMAN_CONFIG_DIR);
+    const hosts = await readDockerHosts(REVERIE_CONFIG_DIR);
     const importedHost = {
       id: hostId,
       label: `Imported: ${newCaseName}`,
@@ -1457,7 +1457,7 @@ export function registerCaseRoutes(app: FastifyInstance, ctx: EventPort & Config
         | 'custom',
     };
     await writeDockerHosts(
-      CODEMAN_CONFIG_DIR,
+      REVERIE_CONFIG_DIR,
       hosts.some((h) => h.id === hostId)
         ? hosts.map((h) => (h.id === hostId ? { ...h, ...importedHost } : h))
         : [...hosts, importedHost]
@@ -1470,7 +1470,7 @@ export function registerCaseRoutes(app: FastifyInstance, ctx: EventPort & Config
       containerWorkdir: result.manifest.containerWorkdir,
       owner: ownerFor(req),
     };
-    await writeDockerCases(CODEMAN_CONFIG_DIR, [...dockerCases, newCase]);
+    await writeDockerCases(REVERIE_CONFIG_DIR, [...dockerCases, newCase]);
     ctx.broadcast(SseEvent.DockerImportComplete, { name: newCaseName, path: destWorkspacePath, type: 'docker' });
     return { success: true, data: { case: newCase } };
   });
@@ -1487,7 +1487,7 @@ export function registerCaseRoutes(app: FastifyInstance, ctx: EventPort & Config
       // Ownership gate: recreate DESTROYS a container, so it must be scoped like
       // delete is (`canAccessOwned`). Without it any user could rebuild another
       // user's container by name.
-      const dockerCase = (await readDockerCases(CODEMAN_CONFIG_DIR)).find(
+      const dockerCase = (await readDockerCases(REVERIE_CONFIG_DIR)).find(
         (item) => item.name === name && canAccessOwned(getAuthUser(req), item.owner)
       );
       if (!dockerCase) return createErrorResponse(ApiErrorCode.NOT_FOUND, 'Docker case not found');
@@ -1500,7 +1500,7 @@ export function registerCaseRoutes(app: FastifyInstance, ctx: EventPort & Config
           `Case "${name}" adopted an existing container. Reverie does not own its lifecycle and will not recreate it — rebuild it yourself, or unlink the case.`
         );
       }
-      const host = (await readDockerHosts(CODEMAN_CONFIG_DIR)).find((item) => item.id === dockerCase.hostId);
+      const host = (await readDockerHosts(REVERIE_CONFIG_DIR)).find((item) => item.id === dockerCase.hostId);
       if (!host) return createErrorResponse(ApiErrorCode.NOT_FOUND, 'Docker host not found');
       const sessionDocker = toSessionDocker(host, dockerCase);
 
@@ -1549,7 +1549,7 @@ export function registerCaseRoutes(app: FastifyInstance, ctx: EventPort & Config
     // Check if case name already exists in CASES_DIR
     const casePath = join(resolveCasesDir(getAuthUser(req)), name);
     if (existsSync(casePath)) {
-      return createErrorResponse(ApiErrorCode.ALREADY_EXISTS, 'A case with this name already exists in codeman-cases.');
+      return createErrorResponse(ApiErrorCode.ALREADY_EXISTS, 'A case with this name already exists in reverie-cases.');
     }
 
     // Load existing linked cases
@@ -1566,9 +1566,9 @@ export function registerCaseRoutes(app: FastifyInstance, ctx: EventPort & Config
     // Save the linked case
     linkedCases[name] = expandedPath;
     try {
-      const codemanDir = getDataDir();
-      if (!existsSync(codemanDir)) {
-        mkdirSync(codemanDir, { recursive: true });
+      const reverieDir = getDataDir();
+      if (!existsSync(reverieDir)) {
+        mkdirSync(reverieDir, { recursive: true });
       }
       await fs.writeFile(LINKED_CASES_FILE, JSON.stringify(linkedCases, null, 2));
       ctx.broadcast(SseEvent.CaseLinked, { name, path: expandedPath });
@@ -1591,21 +1591,21 @@ export function registerCaseRoutes(app: FastifyInstance, ctx: EventPort & Config
     // Fold ownership INTO the match (don't early-return): a non-owned same-named remote/
     // docker case is skipped so control falls through to the caller's own local delete.
     // canAccessOwned is all-true for admins/single-user, so flag-OFF stays byte-identical.
-    const remoteCases = await readRemoteCases(CODEMAN_CONFIG_DIR);
+    const remoteCases = await readRemoteCases(REVERIE_CONFIG_DIR);
     if (remoteCases.some((item) => item.name === name && canAccessOwned(user, item.owner))) {
       await writeRemoteCases(
-        CODEMAN_CONFIG_DIR,
+        REVERIE_CONFIG_DIR,
         remoteCases.filter((item) => !(item.name === name && canAccessOwned(user, item.owner)))
       );
       ctx.broadcast(SseEvent.CaseDeleted, { name, type: 'remote-unlinked' });
       return { success: true, data: { name } };
     }
 
-    const dockerCases = await readDockerCases(CODEMAN_CONFIG_DIR);
+    const dockerCases = await readDockerCases(REVERIE_CONFIG_DIR);
     const dockerCase = dockerCases.find((item) => item.name === name && canAccessOwned(user, item.owner));
     if (dockerCase) {
       await writeDockerCases(
-        CODEMAN_CONFIG_DIR,
+        REVERIE_CONFIG_DIR,
         dockerCases.filter((item) => item !== dockerCase)
       );
       // Best-effort `docker rm -f` the per-case container (case-delete is the
@@ -1616,7 +1616,7 @@ export function registerCaseRoutes(app: FastifyInstance, ctx: EventPort & Config
       const host =
         dockerCase.owned === false
           ? undefined
-          : (await readDockerHosts(CODEMAN_CONFIG_DIR)).find((item) => item.id === dockerCase.hostId);
+          : (await readDockerHosts(REVERIE_CONFIG_DIR)).find((item) => item.id === dockerCase.hostId);
       if (host) {
         const sessionDocker = toSessionDocker(host, dockerCase);
         try {
@@ -1699,10 +1699,10 @@ export function registerCaseRoutes(app: FastifyInstance, ctx: EventPort & Config
     // docker case is skipped so control falls through to the caller's own LOCAL case
     // (remote/docker names are globally unique, local names per-user). No metadata is
     // disclosed for a foreign case. canAccessOwned is allow-all for admins/single-user.
-    const remoteCases = await readRemoteCases(CODEMAN_CONFIG_DIR);
+    const remoteCases = await readRemoteCases(REVERIE_CONFIG_DIR);
     const remoteCase = remoteCases.find((item) => item.name === name && canAccessOwned(getAuthUser(req), item.owner));
     if (remoteCase) {
-      const host = (await readRemoteHosts(CODEMAN_CONFIG_DIR)).find((item) => item.id === remoteCase.hostId);
+      const host = (await readRemoteHosts(REVERIE_CONFIG_DIR)).find((item) => item.id === remoteCase.hostId);
       if (!host) return createErrorResponse(ApiErrorCode.NOT_FOUND, 'Remote host not found');
       return {
         name,
@@ -1718,11 +1718,11 @@ export function registerCaseRoutes(app: FastifyInstance, ctx: EventPort & Config
       };
     }
 
-    const dockerCase = (await readDockerCases(CODEMAN_CONFIG_DIR)).find(
+    const dockerCase = (await readDockerCases(REVERIE_CONFIG_DIR)).find(
       (item) => item.name === name && canAccessOwned(getAuthUser(req), item.owner)
     );
     if (dockerCase) {
-      const host = (await readDockerHosts(CODEMAN_CONFIG_DIR)).find((item) => item.id === dockerCase.hostId);
+      const host = (await readDockerHosts(REVERIE_CONFIG_DIR)).find((item) => item.id === dockerCase.hostId);
       if (!host) return createErrorResponse(ApiErrorCode.NOT_FOUND, 'Docker host not found');
       const container = dockerCase.container ?? dockerContainerName(dockerCase.name);
       return {

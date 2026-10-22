@@ -346,7 +346,7 @@ export function createSessionListeners(session: Session, deps: SessionListenerDe
     },
 
     /** Broadcasts `session:limitPauseScheduled` — usage-limit pause detected, auto-resume armed.
-     *  Persisted so a pending schedule survives a Codeman restart. */
+     *  Persisted so a pending schedule survives a Reverie restart. */
     limitPauseScheduled: (data: { resetAt: number; resumeAt: number; matched: string }) => {
       deps.broadcast(SseEvent.SessionLimitPauseScheduled, { sessionId: session.id, ...data });
       deps.broadcastSessionStateDebounced(session.id);

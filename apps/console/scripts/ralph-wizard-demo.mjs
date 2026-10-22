@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import { homedir } from 'node:os';
 
 const BASE_URL = 'https://localhost:3000';
-const CASE_NAME = 'codeman-ios';
+const CASE_NAME = 'reverie-ios';
 
 async function main() {
   console.log('🎬 Starting Ralph Loop Wizard demo...\n');
@@ -25,7 +25,7 @@ async function main() {
   });
   const page = await context.newPage();
 
-  console.log('📱 Opening Codeman web UI...');
+  console.log('📱 Opening Reverie web UI...');
   await page.goto(BASE_URL);
   await page.waitForLoadState('networkidle');
 
@@ -41,8 +41,8 @@ async function main() {
   await page.selectOption('#ralphCaseSelect', CASE_NAME);
 
   // Load initprompt.md if it exists
-  const initPromptPath = join(homedir(), 'codeman-cases', CASE_NAME, 'initprompt.md');
-  let taskDescription = 'Build an awesome iOS app for Codeman!';
+  const initPromptPath = join(homedir(), 'reverie-cases', CASE_NAME, 'initprompt.md');
+  let taskDescription = 'Build an awesome iOS app for Reverie!';
   if (existsSync(initPromptPath)) {
     taskDescription = readFileSync(initPromptPath, 'utf-8').trim();
     console.log(`📝 Loaded initprompt.md (${taskDescription.length} chars)`);

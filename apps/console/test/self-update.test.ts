@@ -6,7 +6,7 @@
  *   npm test -- test/self-update.test.ts
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import {
   parseVersionFromTag,
   compareVersions,
@@ -16,23 +16,28 @@ import {
   parseGitHubRepo,
   reconcileStatusDecision,
   expireStalledStatus,
+  isNixManagedInstall,
+  canSelfUpdateInPlace,
+  checkForUpdate,
+  startUpdate,
+  NIX_UPDATE_MESSAGE,
 } from '../src/web/self-update.js';
 import type { UpdateStatus } from '../src/types/update.js';
 
 describe('parseVersionFromTag', () => {
-  it('parses the codeman@ / aicodeman@ / v / bare forms', () => {
-    expect(parseVersionFromTag('codeman@0.9.3')).toMatchObject({ major: 0, minor: 9, patch: 3, prerelease: '' });
-    expect(parseVersionFromTag('aicodeman@1.2.3')).toMatchObject({ major: 1, minor: 2, patch: 3 });
+  it('parses the reverie@ / aireverie@ / v / bare forms', () => {
+    expect(parseVersionFromTag('reverie@0.9.3')).toMatchObject({ major: 0, minor: 9, patch: 3, prerelease: '' });
+    expect(parseVersionFromTag('aireverie@1.2.3')).toMatchObject({ major: 1, minor: 2, patch: 3 });
     expect(parseVersionFromTag('v0.10.0')).toMatchObject({ major: 0, minor: 10, patch: 0 });
     expect(parseVersionFromTag('0.9.3')).toMatchObject({ major: 0, minor: 9, patch: 3 });
   });
 
   it('captures a prerelease suffix', () => {
-    expect(parseVersionFromTag('codeman@0.9.3-rc1')).toMatchObject({ patch: 3, prerelease: 'rc1' });
+    expect(parseVersionFromTag('reverie@0.9.3-rc1')).toMatchObject({ patch: 3, prerelease: 'rc1' });
   });
 
   it('returns null when there is no X.Y.Z', () => {
-    expect(parseVersionFromTag('codeman@latest')).toBeNull();
+    expect(parseVersionFromTag('reverie@latest')).toBeNull();
     expect(parseVersionFromTag('garbage')).toBeNull();
   });
 });
@@ -72,17 +77,17 @@ describe('isNewerStableVersion', () => {
 describe('pickLatestStableTag', () => {
   it('picks the highest stable tag from ls-remote-style refs', () => {
     const refs = [
-      'deadbeef\trefs/tags/codeman@0.8.2',
-      'cafef00d\trefs/tags/codeman@0.9.3',
-      'abc123\trefs/tags/codeman@0.10.0',
-      'abc123\trefs/tags/codeman@0.10.0^{}', // dereferenced dup
+      'deadbeef\trefs/tags/reverie@0.8.2',
+      'cafef00d\trefs/tags/reverie@0.9.3',
+      'abc123\trefs/tags/reverie@0.10.0',
+      'abc123\trefs/tags/reverie@0.10.0^{}', // dereferenced dup
     ];
-    expect(pickLatestStableTag(refs)).toEqual({ tag: 'codeman@0.10.0', version: '0.10.0' });
+    expect(pickLatestStableTag(refs)).toEqual({ tag: 'reverie@0.10.0', version: '0.10.0' });
   });
 
   it('skips prereleases and unrecognized tags', () => {
-    const refs = ['x\trefs/tags/codeman@0.9.3', 'y\trefs/tags/codeman@0.9.4-rc1', 'z\trefs/tags/some-random-tag'];
-    expect(pickLatestStableTag(refs)).toEqual({ tag: 'codeman@0.9.3', version: '0.9.3' });
+    const refs = ['x\trefs/tags/reverie@0.9.3', 'y\trefs/tags/reverie@0.9.4-rc1', 'z\trefs/tags/some-random-tag'];
+    expect(pickLatestStableTag(refs)).toEqual({ tag: 'reverie@0.9.3', version: '0.9.3' });
   });
 
   it('returns null when nothing matches', () => {
@@ -92,20 +97,20 @@ describe('pickLatestStableTag', () => {
 });
 
 describe('isValidReleaseTag', () => {
-  it('accepts only codeman@/aicodeman@ X.Y.Z (shell-injection guard)', () => {
-    expect(isValidReleaseTag('codeman@0.9.4')).toBe(true);
-    expect(isValidReleaseTag('aicodeman@1.0.0')).toBe(true);
+  it('accepts only reverie@/aireverie@ X.Y.Z (shell-injection guard)', () => {
+    expect(isValidReleaseTag('reverie@0.9.4')).toBe(true);
+    expect(isValidReleaseTag('aireverie@1.0.0')).toBe(true);
     expect(isValidReleaseTag('v0.9.4')).toBe(false);
-    expect(isValidReleaseTag('codeman@0.9.4; rm -rf /')).toBe(false);
-    expect(isValidReleaseTag('codeman@latest')).toBe(false);
+    expect(isValidReleaseTag('reverie@0.9.4; rm -rf /')).toBe(false);
+    expect(isValidReleaseTag('reverie@latest')).toBe(false);
   });
 });
 
 describe('parseGitHubRepo', () => {
   it('handles SSH and HTTPS remotes', () => {
-    expect(parseGitHubRepo('git@github.com:Ark0N/Codeman.git')).toEqual({ owner: 'Ark0N', repo: 'Codeman' });
-    expect(parseGitHubRepo('https://github.com/Ark0N/Codeman.git')).toEqual({ owner: 'Ark0N', repo: 'Codeman' });
-    expect(parseGitHubRepo('https://github.com/Ark0N/Codeman')).toEqual({ owner: 'Ark0N', repo: 'Codeman' });
+    expect(parseGitHubRepo('git@github.com:jgoppert/reverie.git')).toEqual({ owner: 'jgoppert', repo: 'reverie' });
+    expect(parseGitHubRepo('https://github.com/jgoppert/reverie.git')).toEqual({ owner: 'jgoppert', repo: 'reverie' });
+    expect(parseGitHubRepo('https://github.com/jgoppert/reverie')).toEqual({ owner: 'jgoppert', repo: 'reverie' });
   });
   it('returns null for non-GitHub remotes', () => {
     expect(parseGitHubRepo('https://gitlab.com/x/y.git')).toBeNull();
@@ -203,5 +208,20 @@ describe('expireStalledStatus (runtime staleness backstop)', () => {
     expect(expireStalledStatus(null, NOW)).toBeNull();
     expect(expireStalledStatus(base({ phase: 'completed', updatedAt: NOW - 60 * MIN }), NOW)).toBeNull();
     expect(expireStalledStatus(base({ phase: 'failed', updatedAt: NOW - 60 * MIN }), NOW)).toBeNull();
+  });
+});
+
+describe('Nix managed updates', () => {
+  it('requires a package upgrade for both checking and starting an update', async () => {
+    vi.stubEnv('REVERIE_MANAGED_INSTALL', 'nix');
+    try {
+      expect(isNixManagedInstall()).toBe(true);
+      expect(canSelfUpdateInPlace('git')).toBe(false);
+      expect(canSelfUpdateInPlace('docker-compose')).toBe(false);
+      expect(await startUpdate()).toEqual({ ok: false, code: 'disabled', message: NIX_UPDATE_MESSAGE });
+      expect(await checkForUpdate()).toMatchObject({ updateAvailable: false, source: 'none', error: NIX_UPDATE_MESSAGE });
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 });

@@ -14,9 +14,9 @@
  *   3. the generated number is the next free w-index across `this.sessions`,
  *   4. the generated dir segment is the basename of workingDir (or `session` when empty).
  *
- * Loaded via `vm` against a stub `CodemanApp` (no jsdom — same harness as
+ * Loaded via `vm` against a stub `ReverieApp` (no jsdom — same harness as
  * file-browser-reveal.test.ts / connection-indicator.test.ts). terminal-ui.js does
- * `Object.assign(CodemanApp.prototype, {...})` at module-eval, so we capture the real
+ * `Object.assign(ReverieApp.prototype, {...})` at module-eval, so we capture the real
  * `_resolveResumeName` off the prototype and invoke it against a minimal host whose
  * `sessions` is a Map.
  */
@@ -26,12 +26,12 @@ import { resolve } from 'node:path';
 import vm from 'node:vm';
 import { describe, expect, it, vi } from 'vitest';
 
-/** Eval the shipping terminal-ui.js into a vm with a stub CodemanApp, return its prototype. */
+/** Eval the shipping terminal-ui.js into a vm with a stub ReverieApp, return its prototype. */
 function loadTerminalUiPrototype(): Record<string, (...args: unknown[]) => unknown> {
   const source = readFileSync(resolve(import.meta.dirname, '../src/web/public/terminal-ui.js'), 'utf8');
   const context = vm.createContext({
     console,
-    CodemanApp: class CodemanApp {},
+    ReverieApp: class ReverieApp {},
     setInterval: vi.fn(),
     clearInterval: vi.fn(),
     setTimeout,
@@ -40,7 +40,7 @@ function loadTerminalUiPrototype(): Record<string, (...args: unknown[]) => unkno
     document: { addEventListener: vi.fn(), getElementById: vi.fn() },
     window: { addEventListener: vi.fn(), removeEventListener: vi.fn() },
   });
-  vm.runInContext(`${source}\nglobalThis.__proto = CodemanApp.prototype;`, context);
+  vm.runInContext(`${source}\nglobalThis.__proto = ReverieApp.prototype;`, context);
   return (context as { __proto: Record<string, (...args: unknown[]) => unknown> }).__proto;
 }
 

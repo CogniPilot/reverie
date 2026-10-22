@@ -506,11 +506,11 @@ describe('mobile prompt composer', () => {
     (document.querySelector('.paste-cancel') as HTMLButtonElement).click(); // parks the draft
     runTimers();
     // The toolbar Attach put a path on the now-empty prompt with no leading gap.
-    localEcho.pendingText = '/case/.codeman-uploads/paste-1-a.png ';
+    localEcho.pendingText = '/case/.reverie-uploads/paste-1-a.png ';
 
     bar.composePrompt();
 
-    expect(textarea(document).value).toBe('describe this /case/.codeman-uploads/paste-1-a.png ');
+    expect(textarea(document).value).toBe('describe this /case/.reverie-uploads/paste-1-a.png ');
   });
 
   it('finishes an upload into a reopened composer without restoring a deleted session draft', async () => {

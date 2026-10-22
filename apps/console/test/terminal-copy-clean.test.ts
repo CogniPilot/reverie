@@ -3,7 +3,7 @@
  *
  * xterm returns whole screen rows and trims only the cells that were never
  * written to, so a full-screen TUI's padding spaces reach the clipboard. These
- * tests drive the SHIPPED transform (`CodemanCopySelection.clean` in
+ * tests drive the SHIPPED transform (`ReverieCopySelection.clean` in
  * constants.js), the SHIPPED wiring that decides column mode, and both SHIPPED
  * copy paths, because the interesting failures live in the paths rather than in
  * the string handling: a padding-only selection must not silently keep the
@@ -15,7 +15,7 @@
  * because measuring the indent off the SELECTION was built and dropped before
  * #451 merged: see the rule in docs/architecture-invariants.md.
  *
- * Strategy: constants.js and terminal-ui.js in one vm with a stub CodemanApp,
+ * Strategy: constants.js and terminal-ui.js in one vm with a stub ReverieApp,
  * the harness shape test/terminal-auto-copy.test.ts uses. No DOM, no xterm.
  */
 
@@ -37,9 +37,9 @@ function loadHarness(
   settingsOverride?: Record<string, unknown>,
   gutters: Record<string, number> | null = STOCK_GUTTERS
 ) {
-  const CodemanApp = function CodemanApp(this: unknown) {};
+  const ReverieApp = function ReverieApp(this: unknown) {};
   const windowRef: Record<string, any> = {};
-  if (gutters) windowRef.__codemanTranscriptGutter = gutters;
+  if (gutters) windowRef.__reverieTranscriptGutter = gutters;
   const context = vm.createContext({
     window: windowRef,
     document: {
@@ -48,7 +48,7 @@ function loadHarness(
       querySelector: () => null,
       addEventListener: () => {},
     },
-    CodemanApp,
+    ReverieApp,
     console: { warn: vi.fn(), log: vi.fn(), debug: vi.fn() },
     _crashDiag: { log: vi.fn() },
     requestAnimationFrame: () => 1,
@@ -68,7 +68,7 @@ function loadHarness(
   vm.runInContext(read('constants.js'), context, { filename: 'constants.js' });
   vm.runInContext(read('terminal-ui.js'), context, { filename: 'terminal-ui.js' });
 
-  const app = new (CodemanApp as unknown as new () => Record<string, any>)();
+  const app = new (ReverieApp as unknown as new () => Record<string, any>)();
   const toasts: { message: string; type: string }[] = [];
   app.showToast = (message: string, type: string) => toasts.push({ message, type });
   app._copyText = vi.fn(async () => true);
@@ -99,9 +99,9 @@ function loadHarness(
   return { app, windowRef, toasts, setSelection };
 }
 
-const clean = (text: unknown) => loadHarness().windowRef.CodemanCopySelection.clean(text);
+const clean = (text: unknown) => loadHarness().windowRef.ReverieCopySelection.clean(text);
 
-describe('CodemanCopySelection.clean — trailing padding', () => {
+describe('ReverieCopySelection.clean — trailing padding', () => {
   it('drops the padding a full-screen TUI writes across the rest of each row', () => {
     expect(clean('hello     \nworld       ')).toBe('hello\nworld');
   });
@@ -123,7 +123,7 @@ describe('CodemanCopySelection.clean — trailing padding', () => {
   });
 });
 
-describe('CodemanCopySelection.clean — a shared leading indent is kept without a margin', () => {
+describe('ReverieCopySelection.clean — a shared leading indent is kept without a margin', () => {
   // Measured over 401,445 three-row windows across 1,010 tracked files, stripping
   // the run every row shares fired on 73% of them, and the transform cannot tell
   // a TUI margin from content by looking at the selection. These are the cases
@@ -162,7 +162,7 @@ describe('CodemanCopySelection.clean — a shared leading indent is kept without
   });
 });
 
-describe('CodemanCopySelection.clean — one row is treated like any other', () => {
+describe('ReverieCopySelection.clean — one row is treated like any other', () => {
   it('leaves the indent on a single-row selection', () => {
     expect(clean('    hello world   ')).toBe('    hello world');
   });
@@ -176,7 +176,7 @@ describe('CodemanCopySelection.clean — one row is treated like any other', () 
   });
 });
 
-describe('CodemanCopySelection.clean — nothing to clean', () => {
+describe('ReverieCopySelection.clean — nothing to clean', () => {
   it('returns an empty string for an empty selection', () => {
     expect(clean('')).toBe('');
   });
@@ -231,9 +231,9 @@ describe('cleanedTerminalSelection — wiring', () => {
   });
 });
 
-describe('CodemanCopySelection.clean — the margin is a ceiling, never the answer', () => {
+describe('ReverieCopySelection.clean — the margin is a ceiling, never the answer', () => {
   const clean2 = (text: string, options: Record<string, unknown>) =>
-    loadHarness().windowRef.CodemanCopySelection.clean(text, options);
+    loadHarness().windowRef.ReverieCopySelection.clean(text, options);
 
   it('strips a measured margin', () => {
     expect(clean2('  first\n  second', { margin: 2 })).toBe('first\nsecond');
@@ -531,14 +531,14 @@ describe('the transcriptGutter capability, as the registry and server carry it',
   it('reaches the page off the capability rather than as an id list', () => {
     const server = readFileSync(resolve(import.meta.dirname, '../src/web/server.ts'), 'utf8');
     expect(server).toContain('entry.capabilities.transcriptGutter');
-    expect(server).toContain('window.__codemanTranscriptGutter=');
+    expect(server).toContain('window.__reverieTranscriptGutter=');
     // The frontend looks the mode up in that map; the helper holds no id itself.
     const terminalUi = read('terminal-ui.js');
     const helper = terminalUi.slice(
       terminalUi.indexOf('_cliGutterColumns(sessionId) {'),
       terminalUi.indexOf('async copyTerminalSelection')
     );
-    expect(helper).toContain('window.__codemanTranscriptGutter');
+    expect(helper).toContain('window.__reverieTranscriptGutter');
     expect(helper).not.toMatch(/'claude'/);
   });
 });
@@ -638,7 +638,7 @@ describe('the margin strip is not idempotent, so no caller may clean twice', () 
   // claude and codex copy twice on the most-used copy path of the four.
   it('takes more off a block that has already been stripped', () => {
     const h = loadHarness();
-    const clean = h.windowRef.CodemanCopySelection.clean;
+    const clean = h.windowRef.ReverieCopySelection.clean;
     const once = clean('      fix(terminal): trim it', { margin: 2 });
     expect(once).toBe('    fix(terminal): trim it');
     expect(clean(once, { margin: 2 })).toBe('  fix(terminal): trim it');

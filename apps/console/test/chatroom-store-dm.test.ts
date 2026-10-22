@@ -134,7 +134,7 @@ describe('workspaces, categories and archiving', () => {
 describe('read cursor and unread counts', () => {
   it('counts agent messages after the cursor; mentions are those for the user', () => {
     const store = new ChatroomStore();
-    const room = store.create('Fleet', undefined, 0);
+    const room = store.create('Reverie', undefined, 0);
     store.addMember(room.id, A, {}, 0);
     store.post(room.id, agent(A), 'to all', 'all', 10);
     store.post(room.id, agent(A), 'to you', ['user'], 20);
@@ -161,7 +161,7 @@ describe('read cursor and unread counts', () => {
   it('loads rooms saved before DMs and cursors, read up to their newest message', async () => {
     const legacy = {
       id: 'r1',
-      name: 'Fleet',
+      name: 'Reverie',
       createdAt: 1,
       members: [],
       messages: [{ id: 'm', roomId: 'r1', at: 99, from: agent(A), to: ['user'], text: 'old' }],

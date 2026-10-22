@@ -20,7 +20,7 @@
  *     parsed again and every added server comes back as intended.
  *   - Only the MCP table is touched; every other key in the file is preserved. Files are
  *     re-read immediately before the write and replaced via tmp+rename next to the REAL target
- *     (a symlinked dotfile stays a symlink), with the old file kept as `<file>.codeman-bak`
+ *     (a symlinked dotfile stays a symlink), with the old file kept as `<file>.reverie-bak`
  *     (overwritten by each sync).
  *   - Copied servers can carry secrets in `env`/`headers`: a file that receives any is left
  *     readable by its owner only.
@@ -87,7 +87,7 @@ export class McpSyncBusyError extends Error {
 }
 
 /**
- * An error whose message this module wrote itself. It names keys Codeman chose and server names
+ * An error whose message this module wrote itself. It names keys Reverie chose and server names
  * (which the result reports anyway), never a value from the file, so it may be shown as is.
  */
 class McpConfigError extends Error {
@@ -534,7 +534,7 @@ async function exists(file: string): Promise<boolean> {
 }
 
 /**
- * Write `text` over `file`, keeping the old content as `<file>.codeman-bak`. Follows a symlink
+ * Write `text` over `file`, keeping the old content as `<file>.reverie-bak`. Follows a symlink
  * to the real file so a symlinked dotfile stays a symlink. When `secret` is set the result is
  * readable by its owner only.
  */
@@ -556,15 +556,15 @@ async function writeAtomic(file: string, text: string, secret: boolean): Promise
   let mode = 0o600;
   try {
     mode = (await fs.stat(target)).mode & 0o777;
-    await fs.copyFile(target, `${target}.codeman-bak`);
-    await fs.chmod(`${target}.codeman-bak`, 0o600);
+    await fs.copyFile(target, `${target}.reverie-bak`);
+    await fs.chmod(`${target}.reverie-bak`, 0o600);
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
   }
   if (secret) mode &= ~0o077;
 
   await fs.mkdir(dirname(target), { recursive: true });
-  const tmp = `${target}.codeman-tmp-${process.pid}-${randomBytes(4).toString('hex')}`;
+  const tmp = `${target}.reverie-tmp-${process.pid}-${randomBytes(4).toString('hex')}`;
   try {
     await fs.writeFile(tmp, text, { mode });
     // writeFile's mode is masked by the umask; the mode we computed is the one we mean.
@@ -582,7 +582,7 @@ export interface McpSyncOptions {
   home?: string;
   /**
    * Where relocation env vars (`McpSyncTarget.relocation`) are read from: the env the CLIs
-   * Codeman spawns would inherit. Defaults to `process.env`, except when `home` is overridden
+   * Reverie spawns would inherit. Defaults to `process.env`, except when `home` is overridden
    * (tests, throwaway homes): then it defaults to none, so a relocation var in the caller's own
    * env can never aim a write outside that home.
    */

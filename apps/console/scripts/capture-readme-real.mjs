@@ -3,8 +3,8 @@
  * capture-readme-real.mjs
  *
  * Captures README desktop scenes (multi-session dashboard, monitor, subagent
- * windows) from a REAL Codeman instance — intended to run against an ISOLATED
- * dev/beta instance (CODEMAN_INSTANCE=beta on :5000) seeded from prod's settings,
+ * windows) from a REAL Reverie instance — intended to run against an ISOLATED
+ * dev/beta instance (REVERIE_INSTANCE=beta on :5000) seeded from prod's settings,
  * NOT prod itself (never touch prod's live sessions).
  *
  * Reuses the high-quality capture recipe proven in capture-real-overview.mjs:
@@ -48,14 +48,14 @@ async function newCtx(browser) {
   await page.addInitScript(
     ([skin, planUsage, font]) => {
       try {
-        localStorage.setItem('codeman:skin', skin);
-        localStorage.setItem('codeman-font-size', String(font));
+        localStorage.setItem('reverie:skin', skin);
+        localStorage.setItem('reverie-font-size', String(font));
         const blob = { skin, showFileBrowser: false, showProjectInsights: false, showTokenCount: false };
         // Don't auto-hide subagent windows that belong to a non-active tab — the
         // subagent scene re-homes agents and needs both windows visible at once.
         blob.subagentActiveTabOnly = false;
         if (planUsage) blob.showPlanUsageLimits = true;
-        localStorage.setItem('codeman-app-settings', JSON.stringify(blob));
+        localStorage.setItem('reverie-app-settings', JSON.stringify(blob));
       } catch {
         /* ignore */
       }
@@ -175,7 +175,7 @@ async function sceneSubagent(browser) {
   console.log('  agents with live activity:', JSON.stringify(active));
   const openIds = (active.length ? active : agents).map((a) => a.id);
   // Capture-only DOM nudge: on fresh dev sessions, a tab's claudeSessionId stays the
-  // Codeman id and never becomes the real Claude conversation UUID, so the window
+  // Reverie id and never becomes the real Claude conversation UUID, so the window
   // open-gate (claudeSessionId === agent.sessionId) + the activeTabOnly hide rule both
   // fail. Re-home the chosen agents onto the active tab and align its claudeSessionId
   // to the agents' (shared) sessionId so the windows open AND show their live activity.

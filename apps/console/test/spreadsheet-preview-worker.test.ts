@@ -274,7 +274,7 @@ async function requestTile(harness: Harness, sheetId: string, range: Range): Pro
 
 /** The range spreadsheet-preview.js asks for at scroll 0 with its fallback 800x500 viewport. */
 function defaultViewportRange(harness: Harness, sheet: Record<string, any>): Range {
-  const core = harness.self.CodemanSpreadsheetXlsxCore as {
+  const core = harness.self.ReverieSpreadsheetXlsxCore as {
     createSparseAxis(count: number, size: number, overrides: Array<[number, number]>): unknown;
     axisIndexAt(axis: unknown, offset: number): number;
   };
@@ -302,7 +302,7 @@ describe('spreadsheet preview worker: ExcelJS value shapes', () => {
     sheet.getCell('A2').numFmt = 'yyyy-mm-dd hh:mm';
     sheet.getCell('A3').value = day; // ExcelJS's default date format (mm-dd-yy)
     sheet.getCell('A4').value = { richText: [{ text: 'Hello ' }, { font: { bold: true }, text: 'World' }] };
-    sheet.getCell('A5').value = { text: 'Codeman', hyperlink: 'https://example.invalid/' };
+    sheet.getCell('A5').value = { text: 'Reverie', hyperlink: 'https://example.invalid/' };
     sheet.getCell('A6').value = { error: '#DIV/0!' } as ExcelJS.CellErrorValue;
     sheet.getCell('A7').value = { formula: '1/0', result: { error: '#DIV/0!' } } as ExcelJS.CellFormulaValue;
     sheet.getCell('A8').value = { formula: 'ROW()', result: 8, shareType: 'shared', ref: 'A8:A9' } as never;
@@ -325,7 +325,7 @@ describe('spreadsheet preview worker: ExcelJS value shapes', () => {
       2: '2024-01-15 13:45',
       3: '2024-01-15',
       4: 'Hello World',
-      5: 'Codeman',
+      5: 'Reverie',
       6: '#DIV/0!',
       7: '#DIV/0!',
       8: '8',
@@ -497,7 +497,7 @@ describe('spreadsheet preview worker: ExcelJS sees only what admission checked',
     expect(direct.worksheets[0].rowCount).toBe(11_000);
 
     const harness = createHarness();
-    const core = harness.self.CodemanSpreadsheetXlsxCore as {
+    const core = harness.self.ReverieSpreadsheetXlsxCore as {
       admitXlsx(bytes: Uint8Array, zip: typeof fflate): { counts: { cells: number } };
     };
     // Admission walks local headers, so it only ever counts the one-cell decoy.
@@ -1060,7 +1060,7 @@ describe('spreadsheet preview worker: element budget', () => {
   it('refuses a shared string of 2,000,001 empty runs before ExcelJS loads', async () => {
     const crafted = await emptyRunsWorkbook(2_000_001);
     const harness = createHarness();
-    const core = harness.self.CodemanSpreadsheetXlsxCore as {
+    const core = harness.self.ReverieSpreadsheetXlsxCore as {
       admitXlsx(bytes: Uint8Array, zip: typeof fflate, overrides?: Record<string, number>): unknown;
     };
     // Every other cap admits it: only the element budget is in the way.

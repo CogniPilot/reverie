@@ -8,7 +8,7 @@ import { ApiErrorCode, createErrorResponse } from '../../types.js';
 import { ChatBotError, type ChatBotRegistry } from '../../chat-bots.js';
 
 export function registerChatBotRoutes(app: FastifyInstance, bots: ChatBotRegistry): void {
-  const agentCall = (req: FastifyRequest): boolean => req.headers['x-codeman-parent-session'] !== undefined;
+  const agentCall = (req: FastifyRequest): boolean => req.headers['x-reverie-parent-session'] !== undefined;
   const fail = (err: unknown) => {
     if (err instanceof ChatBotError) {
       const code = err.code === 'NOT_FOUND' ? ApiErrorCode.NOT_FOUND : err.code === 'CONFLICT' ? ApiErrorCode.OPERATION_FAILED : ApiErrorCode.INVALID_INPUT;

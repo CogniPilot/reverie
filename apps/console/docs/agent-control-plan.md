@@ -1,7 +1,7 @@
 # Agent Control Plan: skill packaging + wait primitives
 
 **Status**: steps 1 to 8 DONE and RELEASED. The wait primitives and the skill itself
-(steps 1 to 5) shipped in **1.13.0**; the `codeman skill install` CLI, per-case injection
+(steps 1 to 5) shipped in **1.13.0**; the `reverie skill install` CLI, per-case injection
 and `agentSkillEnabled` (step 6) shipped in **1.14.1** and were republished with fixes in
 **1.14.2**. Steps 1 to 5 were multi-round verified on 2026-08-08, step 6 on 2026-08-09;
 see [§7 Build log](#7-build-log-what-actually-happened) for what shipped, what each
@@ -40,18 +40,18 @@ The commands the skill teaches the agent:
 
 ### The honest comparison
 
-herdr and Codeman are not the same product. herdr is a local, keyboard-first multiplexer with
-no server, no web UI, and no autonomy layer. Codeman is a server with a browser and mobile UI,
+herdr and Reverie are not the same product. herdr is a local, keyboard-first multiplexer with
+no server, no web UI, and no autonomy layer. Reverie is a server with a browser and mobile UI,
 remote and Docker cases, respawn, Ralph, cron, and the orchestrator, none of which herdr has.
 
 What herdr genuinely does better is being **callable by the agent running inside it**. For
-Codeman that is a packaging problem plus one missing primitive, not an architecture problem.
+Reverie that is a packaging problem plus one missing primitive, not an architecture problem.
 
 ---
 
 ## 1. Gap analysis
 
-| herdr capability             | Codeman equivalent today                                                                                           | Gap                                                                                   |
+| herdr capability             | Reverie equivalent today                                                                                           | Gap                                                                                   |
 | ---------------------------- | ------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------- |
 | `pane split` + `agent start` | `POST /api/quick-start`, `POST /api/sessions`                                                                      | none, already there                                                                   |
 | `agent prompt`               | `POST /api/sessions/:id/input` with `clientId`+`seq` exactly-once                                                  | no `--wait`                                                                           |
@@ -59,29 +59,29 @@ Codeman that is a packaging problem plus one missing primitive, not an architect
 | `agent list` / `agent get`   | `GET /api/sessions`, `GET /api/sessions/unified`, `GET /api/status`                                                | none                                                                                  |
 | `agent wait --until <state>` | SSE only (`/api/events`)                                                                                           | **missing**, and SSE is impractical from a shell tool                                 |
 | `pane wait-output --match`   | nothing                                                                                                            | **missing**                                                                           |
-| Skill file                   | README section "Driving Codeman from an Agent"                                                                     | **not packaged**, an agent will never find it                                         |
-| Env guard `HERDR_ENV=1`      | `CODEMAN_MUX=1`, `CODEMAN_API_URL`, `CODEMAN_SESSION_ID` already exported at spawn                                 | none, the guard variables exist                                                       |
+| Skill file                   | README section "Driving Reverie from an Agent"                                                                     | **not packaged**, an agent will never find it                                         |
+| Env guard `HERDR_ENV=1`      | `REVERIE_MUX=1`, `REVERIE_API_URL`, `REVERIE_SESSION_ID` already exported at spawn                                 | none, the guard variables exist                                                       |
 | `blocked` state              | hook events (`permission_prompt`, `elicitation_dialog`) plus CSS classes plus the phone overview NEEDS YOU section | not in the wire contract (`SessionStatus = 'idle' \| 'busy' \| 'stopped' \| 'error'`) |
 | `api schema`                 | hand-written `docs/api-reference.md`                                                                               | no machine-readable schema                                                            |
 | Detection manifests          | hardcoded in `usage-limit-patterns.ts`, `respawn-*-patterns`, `regex-patterns.ts`                                  | patterns are code, not data                                                           |
-| Plugin runtime               | deliberately refused, see `docs/extending-codeman.md`                                                              | not a gap, a decision                                                                 |
-| Session handoff on restart   | tmux owns the PTYs, so they already survive a Codeman restart                                                      | not a gap, solved by architecture                                                     |
+| Plugin runtime               | deliberately refused, see `docs/extending-reverie.md`                                                              | not a gap, a decision                                                                 |
+| Session handoff on restart   | tmux owns the PTYs, so they already survive a Reverie restart                                                      | not a gap, solved by architecture                                                     |
 
 **Conclusion**: roughly 90% of the capability surface already exists. Parts 1 and 2 below close
 the two real gaps.
 
 The table is the 2026-08-08 snapshot that motivated the work, kept as written. The three rows
 marked missing are closed since: `GET .../wait` and `GET .../wait-output` shipped in 1.13.0, and
-the skill is packaged at `skills/codeman` (npm tarball included). `blocked` as a wire-contract
+the skill is packaged at `skills/reverie` (npm tarball included). `blocked` as a wire-contract
 state, and the machine-readable schema, are still open (Parts 3 and 4).
 
 ---
 
-## 2. Part 1: the Codeman agent skill
+## 2. Part 1: the Reverie agent skill
 
 ### 2.1 Goal
 
-An agent running inside a Codeman session can discover and correctly drive Codeman without the
+An agent running inside a Reverie session can discover and correctly drive Reverie without the
 user pasting API docs into the prompt, and without inventing dangerous calls.
 
 ### 2.2 Layout and distribution
@@ -93,28 +93,28 @@ symlink, which is the pattern this repo already uses for `remotion-best-practice
 
 ```
 skills/
-  codeman/
+  reverie/
     SKILL.md            <- single source of truth
     reference/
       endpoints.md      <- full endpoint tables, loaded on demand
       recipes.md        <- worked multi-session orchestration examples
-.claude/skills/codeman -> ../../skills/codeman     (symlink, dogfooding in this repo)
+.claude/skills/reverie -> ../../skills/reverie     (symlink, dogfooding in this repo)
 ```
 
 Adding a `skills/` directory to the repo root costs one entry in the GitHub listing. CLAUDE.md
 keeps the root short on purpose, so this needs a conscious sign-off; the alternative is
-`docs/skills/codeman/` with a `--skill` path argument, which breaks the one-liner install.
+`docs/skills/reverie/` with a `--skill` path argument, which breaks the one-liner install.
 **Recommendation**: accept `skills/` at the root, because the install one-liner is the whole
 point of shipping a skill.
 
 Install paths, in order of how a user gets it:
 
-1. `npx skills add Ark0N/Codeman --skill codeman -g` (global, any agent, matches the herdr flow).
-2. `codeman skill install [--global | --case <name>]`, a new CLI subcommand writing the same
+1. `npx skills add jgoppert/reverie --skill reverie -g` (global, any agent, matches the herdr flow).
+2. `reverie skill install [--global | --case <name>]`, a new CLI subcommand writing the same
    file. This is the path for users who installed via npm and never cloned the repo.
 3. **Automatic per-case injection**, modeled exactly on `applyStatusLineConfig(casePath, enabled)`
-   in `hooks-config.ts`: write `<case>/.claude/skills/codeman/SKILL.md` at case creation,
-   gated on a new setting. Codeman already writes `<case>/.claude/settings.local.json` hooks
+   in `hooks-config.ts`: write `<case>/.claude/skills/reverie/SKILL.md` at case creation,
+   gated on a new setting. Reverie already writes `<case>/.claude/settings.local.json` hooks
    through `writeHooksConfig()`, so this is the same mechanism with the same lifecycle.
 
 Setting name: `agentSkillEnabled`. Synced (not per-device), since it changes on-disk case
@@ -129,11 +129,11 @@ Frontmatter, per the skills convention (`name` + `description` required):
 
 ```yaml
 ---
-name: codeman
+name: reverie
 description: >-
-  Control Codeman, the session manager this agent is running inside: list sessions,
+  Control Reverie, the session manager this agent is running inside: list sessions,
   start worker sessions, send prompts, read terminal output, and wait for other agents
-  to finish. Only usable when CODEMAN_MUX=1.
+  to finish. Only usable when REVERIE_MUX=1.
 ---
 ```
 
@@ -142,15 +142,15 @@ Body sections, in order:
 **1. Guard (first thing, non-negotiable).**
 
 ```bash
-test "${CODEMAN_MUX:-}" = 1 || { echo "not inside a Codeman session"; exit 1; }
-API="${CODEMAN_API_URL:?CODEMAN_API_URL not set, refusing to guess}"
-SELF="${CODEMAN_SESSION_ID:-}"
+test "${REVERIE_MUX:-}" = 1 || { echo "not inside a Reverie session"; exit 1; }
+API="${REVERIE_API_URL:?REVERIE_API_URL not set, refusing to guess}"
+SELF="${REVERIE_SESSION_ID:-}"
 ```
 
-If `CODEMAN_MUX` is not `1`, the agent must stop and say it is not running inside a
-Codeman-managed session. Same shape as herdr's `HERDR_ENV` guard, and the variables are
+If `REVERIE_MUX` is not `1`, the agent must stop and say it is not running inside a
+Reverie-managed session. Same shape as herdr's `HERDR_ENV` guard, and the variables are
 already exported by `tmux-manager.buildEnvExports()`. No fallback URL when
-`CODEMAN_API_URL` is unset: any guess is the wrong scheme on an HTTPS install (prod is
+`REVERIE_API_URL` is unset: any guess is the wrong scheme on an HTTPS install (prod is
 HTTPS with a self-signed cert, hence `curl -sk` throughout), and a server the agent
 cannot identify is not one it should be driving.
 
@@ -159,12 +159,12 @@ cannot identify is not one it should be driving.
 - Single-line input only. Multi-line breaks the agent TUI (Ink).
 - Always send `clientId` + a monotonic `seq` on `POST .../input` so a retry cannot double-deliver.
 - Envelope is `{success, data}`; a few legacy GETs are bare, so read `body.data ?? body`.
-- Add `-u admin:"$CODEMAN_PASSWORD"` when a password is set. Prod is HTTPS, so `curl -sk`.
+- Add `-u admin:"$REVERIE_PASSWORD"` when a password is set. Prod is HTTPS, so `curl -sk`.
 - Prefer `/api/v1/*`, the stable alias.
 
 **3. Safety rules (the section that does not exist anywhere today).**
 
-- Never act on `$CODEMAN_SESSION_ID`. That is you.
+- Never act on `$REVERIE_SESSION_ID`. That is you.
 - Only `DELETE` sessions **you created in this conversation**, by exact id. Keep the list.
 - Never bulk-delete, never loop a `DELETE` over `/api/sessions`. There is no undo.
 - Never `tmux kill-session`, `pkill tmux`, `pkill claude`. Use the API.
@@ -175,7 +175,7 @@ cannot identify is not one it should be driving.
 | Task                 | Call                                                                                                                                                                    |
 | -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | list sessions        | `GET /api/v1/sessions`                                                                                                                                                  |
-| find yourself        | match ids by PREFIX of `$CODEMAN_SESSION_ID` (Docker cases truncate it to 8 chars, so an equality check never fires there)                                              |
+| find yourself        | match ids by PREFIX of `$REVERIE_SESSION_ID` (Docker cases truncate it to 8 chars, so an equality check never fires there)                                              |
 | start a worker       | `POST /api/v1/quick-start {caseName, mode, effort}`                                                                                                                     |
 | send a prompt        | `POST /api/v1/sessions/:id/input {input:"…\r", useMux:true, clientId, seq}` (the trailing `\r` is what sends Enter; without it the text sits on the prompt unsubmitted) |
 | send prompt and wait | `POST /api/v1/sessions/:id/input {input:"…\r", wait:"stop", waitTimeout:600000}` (Part 2)                                                                               |
@@ -193,7 +193,7 @@ part of the skill stays small.
 ### 2.4 An ergonomics guard worth adding server-side
 
 The skill will tell the agent not to act on itself, but a confused agent can still try. Propose:
-the skill sends `X-Codeman-Caller-Session: $CODEMAN_SESSION_ID` on every request, and the server
+the skill sends `X-Reverie-Caller-Session: $REVERIE_SESSION_ID` on every request, and the server
 refuses destructive operations (`DELETE /api/sessions/:id`, kill, respawn stop) when that header
 equals the target id, with a clear error.
 
@@ -204,19 +204,19 @@ as such so nobody mistakes it for a boundary. It costs about 10 lines in `route-
 
 Per the always-end-to-end-test rule, "the skill exists" is not done. Done is:
 
-1. Symlink it into `.claude/skills/`, start a real throwaway Codeman session, and ask that agent
+1. Symlink it into `.claude/skills/`, start a real throwaway Reverie session, and ask that agent
    to "start a worker session that runs the test suite and tell me when it finishes".
 2. Confirm from the outside that exactly one new session appeared, got the prompt, and that the
    lead agent waited rather than polling in a busy loop.
-3. Confirm the guard: run the same prompt in a shell with `CODEMAN_MUX` unset and confirm refusal.
+3. Confirm the guard: run the same prompt in a shell with `REVERIE_MUX` unset and confirm refusal.
 4. Confirm cleanup: the worker session is deleted by exact id and no other session was touched.
 
 Never run this against `w1`/`w2`/`w3`.
 
 ### 2.6 Files touched
 
-- `skills/codeman/SKILL.md` (new), `skills/codeman/reference/*.md` (new)
-- `.claude/skills/codeman` symlink (new)
+- `skills/reverie/SKILL.md` (new), `skills/reverie/reference/*.md` (new)
+- `.claude/skills/reverie` symlink (new)
 - `src/cli.ts` (new `skill install` subcommand)
 - `src/hooks-config.ts` (new `applyAgentSkill(casePath, enabled)`, mirroring `applyStatusLineConfig`)
 - `src/web/schemas.ts` (`agentSkillEnabled` in `SettingsUpdateSchema`, which is `.strict()`)
@@ -224,7 +224,7 @@ Never run this against `w1`/`w2`/`w3`.
   from the raw body, per the partial-PUT invariant)
 - `src/web/public/settings-ui.js` + `index.html` (checkbox)
 - `package.json` `files` array, so `skills/` ships to npm
-- README pointer, `docs/extending-codeman.md` seam 3 pointer
+- README pointer, `docs/extending-reverie.md` seam 3 pointer
 
 ---
 
@@ -232,9 +232,9 @@ Never run this against `w1`/`w2`/`w3`.
 
 ### 3.1 Goal
 
-Make Codeman orchestratable from a shell tool. Today the only "tell me when" channel is SSE,
+Make Reverie orchestratable from a shell tool. Today the only "tell me when" channel is SSE,
 which a curl-driven agent cannot practically consume: it would have to hold a streaming
-connection and parse events inline. herdr solves this with blocking CLI calls. Codeman should
+connection and parse events inline. herdr solves this with blocking CLI calls. Reverie should
 solve it with bounded long-poll endpoints.
 
 All three additions are **additive**, so the versioning policy stays intact (new endpoints and
@@ -442,7 +442,7 @@ The skill's recipes must show the loop.
 | Shutdown with a wait pending    | `cancelEverything()` in `stop()`. Verified live: SIGTERM with a 300s wait in flight exits in 1s                                                                                                             |
 | External CLI mode               | `stop` and `blocked` never fire. Reject `until=stop` for those modes with a clear `INVALID_INPUT` rather than hanging until timeout                                                                         |
 | Multi-user                      | goes through `findSessionOrFail(ctx, id, req)`, which already enforces ownership                                                                                                                            |
-| Remote / Docker cases           | signals originate from the same `Session` object, so no special casing. Docker hooks need `CODEMAN_DOCKER_BRIDGE_HOOKS=1` for `stop`/`blocked` to arrive at all; without it, only `idle` works. Document it |
+| Remote / Docker cases           | signals originate from the same `Session` object, so no special casing. Docker hooks need `REVERIE_DOCKER_BRIDGE_HOOKS=1` for `stop`/`blocked` to arrive at all; without it, only `idle` works. Document it |
 | Respawn `/clear` mid-wait       | a respawn cycle emits `idle`. Callers waiting on `stop` are unaffected; callers on `idle` may resolve early. Documented, not fixed                                                                          |
 | Limit pause                     | if the session is paused on a usage limit, nothing will fire until the reset. The wait times out honestly. Consider surfacing `limitPaused: true` in the response so the caller can back off                |
 
@@ -467,8 +467,8 @@ The skill's recipes must show the loop.
 - `src/web/schemas.ts` (`SessionWaitQuerySchema`, `SessionWaitOutputQuerySchema`, extend
   `SessionInputWithLimitSchema`. Note: `.optional()` rejects `null`, so the frontend and any
   generated client must send `undefined`, never `null`)
-- `docs/api-reference.md`, `docs/extending-codeman.md`, README API table
-- `skills/codeman/SKILL.md` recipes (Part 1 depends on this)
+- `docs/api-reference.md`, `docs/extending-reverie.md`, README API table
+- `skills/reverie/SKILL.md` recipes (Part 1 depends on this)
 
 ---
 
@@ -493,7 +493,7 @@ the HTTP contract.
 
 ### Part 4: `GET /api/schema`
 
-herdr ships `herdr api schema`. Every Codeman route is already Zod-validated, so
+herdr ships `herdr api schema`. Every Reverie route is already Zod-validated, so
 `zod-to-json-schema` over `schemas.ts` gives a self-describing API almost free. Value: third-party
 tools and the skill stop drifting from hand-written docs. Open question: whether to emit full
 OpenAPI (`@fastify/swagger` would need per-route schema registration, which is a much larger
@@ -506,16 +506,16 @@ CLI-specific readiness, blocked and usage-limit patterns live in code across
 per-CLI ones into data files would make adding a sixth CLI a data change instead of a code change.
 
 **Do not copy the remote-update part.** herdr auto-fetches manifest updates from herdr.dev.
-Codeman auto-pulling behavioral rules from a vendor server contradicts its security posture.
+Reverie auto-pulling behavioral rules from a vendor server contradicts its security posture.
 Bundled manifests plus local override only, no network.
 
 ### Explicit non-goals
 
-- **Plugin runtime and marketplace.** `docs/extending-codeman.md` already argues this: a plugin
+- **Plugin runtime and marketplace.** `docs/extending-reverie.md` already argues this: a plugin
   runtime means third-party code inside a process that spawns agents with your credentials, on a
   server people expose over a tunnel. The reasoning still holds. If the marketplace _pattern_ is
   wanted, apply it to data (web tabs, case templates, cron recipes), never to executable code.
-- **Live PTY handoff on restart.** herdr needs it because it owns the terminals. Codeman
+- **Live PTY handoff on restart.** herdr needs it because it owns the terminals. Reverie
   delegates to tmux, so PTYs already survive a self-update restart.
 - **Socket API.** HTTP plus SSE is the existing, documented, stable contract. A second transport
   would double the surface for no capability gain.
@@ -527,12 +527,12 @@ Bundled manifests plus local override only, no network.
 | Step | Work                                                                            | Gate                                                                                                                                                                                                                                                                                                                                         |
 | ---- | ------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 1 ✅ | `src/config/agent-wait.ts` + `session-wait-registry.ts` + unit tests            | 48 tests green                                                                                                                                                                                                                                                                                                                               |
-| 2 ✅ | `GET .../wait` + wiring in listener-wiring, hook-event-routes, server teardown  | 15 route tests green; live-verified on an isolated `CODEMAN_INSTANCE=waittest` instance (immediate resolve, 400 on a bad signal, 200+`timedOut` on timeout, hook `stop` and `permission_prompt`→`blocked` waking an in-flight wait, delete delivering `exit`, SIGTERM not blocked); full `test:ci` sweep green                               |
+| 2 ✅ | `GET .../wait` + wiring in listener-wiring, hook-event-routes, server teardown  | 15 route tests green; live-verified on an isolated `REVERIE_INSTANCE=waittest` instance (immediate resolve, 400 on a bad signal, 200+`timedOut` on timeout, hook `stop` and `permission_prompt`→`blocked` waking an in-flight wait, delete delivering `exit`, SIGTERM not blocked); full `test:ci` sweep green                               |
 | 3 ✅ | `GET .../wait-output`                                                           | 16 route tests green; live-verified on real PTY bytes (`echo MARKER` waking a blocked request in ~1s, `from=buffer` immediate hit, never-seen marker timing out at exactly 2001ms, nocase, `regex` refused with a 400); full `test:ci` sweep green                                                                                           |
 | 4 ✅ | `wait` field on `POST .../input`, non-wait path proven unchanged                | 16 route tests green; live-verified (no-wait returns in 26ms with the historical bare body; an idle session did NOT satisfy a `wait` request, blocking the full 2001ms, which is the race the endpoint exists to close; the stop hook resolved a send-and-wait at 1510ms and the input was confirmed in the tmux pane; `wait:null` accepted) |
-| 5 ✅ | `skills/codeman/SKILL.md` + reference files + `.claude/skills` symlink          | live dogfood: a real session orchestrates a worker end to end                                                                                                                                                                                                                                                                                |
-| 6 ✅ | `codeman skill install` CLI + `applyAgentSkill()` + `agentSkillEnabled` setting | 10 unit tests (`test/agent-skill.test.ts`) + real-server case-creation tests (`test/quick-start.test.ts`, incl. the settings PUT accepting the key) green; CLI verified live (install/uninstall, global + `--case`, foreign/symlink refusals)                                                                                                 |
-| 7 ✅ | Docs: api-reference, extending-codeman, README                                  | plus `architecture-invariants.md` (§agent-wait-primitives), `CLAUDE.md` and the API reference's per-mode signal table                                                                                                                                                                                                                        |
+| 5 ✅ | `skills/reverie/SKILL.md` + reference files + `.claude/skills` symlink          | live dogfood: a real session orchestrates a worker end to end                                                                                                                                                                                                                                                                                |
+| 6 ✅ | `reverie skill install` CLI + `applyAgentSkill()` + `agentSkillEnabled` setting | 10 unit tests (`test/agent-skill.test.ts`) + real-server case-creation tests (`test/quick-start.test.ts`, incl. the settings PUT accepting the key) green; CLI verified live (install/uninstall, global + `--case`, foreign/symlink refusals)                                                                                                 |
+| 7 ✅ | Docs: api-reference, extending-reverie, README                                  | plus `architecture-invariants.md` (§agent-wait-primitives), `CLAUDE.md` and the API reference's per-mode signal table                                                                                                                                                                                                                        |
 | 8 ✅ | COM (minor bump: new endpoints, new setting, new optional fields)               | released as 1.13.0 (wait primitives + skill); step 6 followed in 1.14.1 and was republished as 1.14.2 after live-testing the packaged skill                                                                                                                                                                                                  |
 
 Parts 1 and 2 are independent enough to land separately, but the skill is much less useful
@@ -543,10 +543,10 @@ without the wait endpoints, so the wait work goes first.
 1. ✅ `skills/` at the repo root: accepted (built that way; the install one-liner depends on it).
 2. ✅ `agentSkillEnabled` default: **OFF** for the first release, per §2.2's rationale (skills
    cost context on every turn; measure before defaulting on). Flip later if dogfooding earns it.
-3. ✅ Both: global install via `npx skills add` / `codeman skill install`, AND per-case
+3. ✅ Both: global install via `npx skills add` / `reverie skill install`, AND per-case
    auto-injection behind the (default-off) setting. Injection is add-only at session create and
    marker-guarded, so a user-authored copy is never touched.
-4. Is `X-Codeman-Caller-Session` self-protection worth the 10 lines, given it is a footgun guard
+4. Is `X-Reverie-Caller-Session` self-protection worth the 10 lines, given it is a footgun guard
    and not a security boundary? (Still open, not built with step 6.)
 5. ✅ Regex support in `wait-output`: literal-only shipped, and a `regex` query param is
    rejected with a 400 rather than ignored, so an agent that assumed otherwise cannot
@@ -568,25 +568,25 @@ diff. Process artifacts (per-agent briefs, findings, reports) live in the gitign
 | Blocking-wait registry                                                          | `src/web/session-wait-registry.ts` (new, IO-free, unit-tested)                                                                     |
 | `GET .../wait`, `GET .../wait-output`, `wait`/`waitTimeout` on `POST .../input` | `src/web/routes/session-routes.ts`                                                                                                 |
 | Signal wiring                                                                   | `session-listener-wiring.ts` (idle/working/exit + output), `hook-event-routes.ts` (stop/blocked), `server.ts` (teardown, shutdown) |
-| Agent skill                                                                     | `skills/codeman/SKILL.md` + `reference/`, `.claude/skills/codeman` symlink, `package.json` `files`                                 |
-| Docs                                                                            | `api-reference.md`, `extending-codeman.md`, `architecture-invariants.md`, `README.md`, `CLAUDE.md`                                 |
+| Agent skill                                                                     | `skills/reverie/SKILL.md` + `reference/`, `.claude/skills/reverie` symlink, `package.json` `files`                                 |
+| Docs                                                                            | `api-reference.md`, `extending-reverie.md`, `architecture-invariants.md`, `README.md`, `CLAUDE.md`                                 |
 | Tests                                                                           | `test/session-wait-registry.test.ts`, three `test/routes/session-*wait*.test.ts`, `http-contract.test.ts`, `mock-session.ts`       |
 
 ### Bugs found in ADJACENT code, not in the new feature
 
 These are the highest-value output of the exercise and none were on the plan:
 
-1. **Every Codeman hook was dead on HTTPS installs.** `hooks-config.ts` built the hook
+1. **Every Reverie hook was dead on HTTPS installs.** `hooks-config.ts` built the hook
    curl as `curl -s` with no `-k` while the statusline exporter 300 lines below used
    `curl -sk` and documented why. Proven with the real hook command: `curl exit=60`
    without the flag, success with it, and the failure swallowed by the hook's own
    `2>/dev/null || true`. This silently killed `stop`, `permission_prompt`,
    `elicitation_dialog`, `idle_prompt`, `teammate_idle` and `task_completed`, taking
    respawn's definitive idle signals with them. Fixed, **plus** a staleness detector in
-   `refreshStaleCodemanHooks` that regenerates the on-disk config of already-created
+   `refreshStaleReverieHooks` that regenerates the on-disk config of already-created
    cases (23 of 26 local cases carried the broken form; fixing the generator alone would
    have left every one of them broken).
-2. **`buildEnvExports()` exported a wrong-scheme `CODEMAN_API_URL`** (`http://` fallback
+2. **`buildEnvExports()` exported a wrong-scheme `REVERIE_API_URL`** (`http://` fallback
    on an HTTPS install). Now omitted rather than guessed, so in-session guards fail closed.
 3. **Programmatic input is only submitted when it contains `\r`.** `sendInput` sends Enter
    only if the payload has a carriage return; without it the text sits in the composer
@@ -643,7 +643,7 @@ success without running its task. Two traps recurred often enough to name:
   `architecture-invariants#agent-wait-primitives` and `endpoints.md`. The durable
   fix, a latched last-signal-per-turn on the server, stays with deferred Part 3.
 - Docs F7/F8, F4 and the false-`idle` attribution: `api-reference.md`,
-  `extending-codeman.md` and `architecture-invariants.md` rewritten to the post-fix
+  `extending-reverie.md` and `architecture-invariants.md` rewritten to the post-fix
   matcher (one normalized stream, chunk-straddling found, snippet as a rendering of
   the matched window), the real no-PTY answer (`ended:true`, `aborted:false`,
   `delivered:false`), and the startup-idle mechanism (a session parked on the trust
@@ -654,9 +654,9 @@ success without running its task. Two traps recurred often enough to name:
   claude fan-out is pattern A (backgrounded send-and-waits) or the marker gather;
   readiness budgets rebalanced (5 s stage 1, 45 s stage 3) with the virgin-case
   floor named; the auth fallback now also reads the supervisor definition
-  (`codeman-web.service` / launchd plist) and accepts `export`-prefixed `.env`
+  (`reverie-web.service` / launchd plist) and accepts `export`-prefixed `.env`
   lines; `pid != null` is documented as startup-only, never liveness.
-- Both public readiness recipes (extending-codeman.md, README) are bypass-first with
+- Both public readiness recipes (extending-reverie.md, README) are bypass-first with
   the trust probe as the bounded fallback; the worked recipe carries `-k` and fails
   loudly on an empty SID; the hook `-k`/self-heal fix appears in every
   "hooks go missing" list; the multi-word-TUI claim is "unreliable", not "never".
@@ -671,7 +671,7 @@ and the changeset was consumed, committed and deployed. What is left:
   reviews: N2 (create the death-watcher inside its `try`, still built one line above
   it in `GET .../wait`) and converting timeout-shaped test detections into fast
   assertions.
-- §2.4's `X-Codeman-Caller-Session` footgun guard: still not built (open question 4).
+- §2.4's `X-Reverie-Caller-Session` footgun guard: still not built (open question 4).
 
 ### Step 6 (2026-08-09): install command, per-case injection, the setting
 
@@ -680,21 +680,21 @@ Built to the §2.6 file list, mirroring the statusLine mechanism throughout:
 | Piece | Where |
 | ----- | ----- |
 | `applyAgentSkill(casePath, enabled)` + `installAgentSkillInto` / `removeAgentSkillFrom` | `src/hooks-config.ts` |
-| `codeman skill install` / `skill uninstall` (`--global` default, `--case <name>`) | `src/cli.ts` |
+| `reverie skill install` / `skill uninstall` (`--global` default, `--case <name>`) | `src/cli.ts` |
 | `agentSkillEnabled` (SYNCED, default OFF) | `schemas.ts` (`SettingsUpdateSchema`), `getAgentSkillEnabled()` on `ConfigPort`/`server.ts`, checkbox in `index.html` + `settings-ui.js` |
-| Injection call sites (Claude mode only) | `POST /api/sessions` next to `refreshStaleCodemanHooks`; `POST /api/quick-start` after the case-create/self-heal blocks (local + docker cases; remote skipped, its path lives on another host) |
+| Injection call sites (Claude mode only) | `POST /api/sessions` next to `refreshStaleReverieHooks`; `POST /api/quick-start` after the case-create/self-heal blocks (local + docker cases; remote skipped, its path lives on another host) |
 | Tests | `test/agent-skill.test.ts` (10 unit), `test/quick-start.test.ts` (real server: default-off, PUT accepts key, injection on create, shell-mode skipped) |
 
 Decisions worth keeping:
 
 - **Ownership marker, prefix-matched.** The injected SKILL.md ends with
-  `<!-- codeman-managed-agent-skill: … -->`; install/refresh/remove all refuse a copy
+  `<!-- reverie-managed-agent-skill: … -->`; install/refresh/remove all refuse a copy
   without the marker (a user's own skill) and match on the PREFIX so a wording change
   cannot disown older injected copies (the `BACKGROUND_WAKE_MARKER_PREFIX` pattern).
 - **Symlink refusal.** This repo's own dogfooding layout
-  (`.claude/skills/codeman -> ../../skills/codeman`) means the injector must `lstat`
+  (`.claude/skills/reverie -> ../../skills/reverie`) means the injector must `lstat`
   the skill dir AND its `skills/` parent and bail on a symlink, or enabling the
-  setting in the Codeman repo itself would overwrite the skill source through the link.
+  setting in the Reverie repo itself would overwrite the skill source through the link.
 - **ADD-ONLY at session create**, same shared-`.claude` rationale as the statusLine:
   a create while the setting is off must not yank the skill out from under other live
   sessions in the repo. The remove path exists (CLI `skill uninstall`, tests); no
@@ -702,7 +702,7 @@ Decisions worth keeping:
 - **Removal is manifest-based, never `rm -rf`**: only files the packaged source would
   have written are deleted, directories are pruned bottom-up only if they emptied, so
   a user's extra notes in `reference/` survive an uninstall.
-- **Source resolution**: `join(moduleDir, '..', 'skills', 'codeman')` works from
+- **Source resolution**: `join(moduleDir, '..', 'skills', 'reverie')` works from
   `src/` (tsx), `dist/` (tsc build), and the npm tarball alike, because all three sit
   one level below the package root and `files` ships `skills/`.
 - **Nothing acts on the setting at PUT time**: injection reads the merged persisted
@@ -713,10 +713,10 @@ Decisions worth keeping:
 
 Claude Code 2.1.224+ ships cross-session messaging: `ListAgents`/`SendMessage`
 tools, a per-session Unix inbox socket, and a registry in
-`~/.claude/sessions/<pid>.json`. Codeman's claude workers are ordinary local Claude
+`~/.claude/sessions/<pid>.json`. Reverie's claude workers are ordinary local Claude
 Code sessions, so the skill now routes task delivery and result collection over it
 when available, while the HTTP primitives keep spawn, readiness, synchronization,
-liveness and delete. New `skills/codeman/reference/messaging.md` (ships with zero
+liveness and delete. New `skills/reverie/reference/messaging.md` (ships with zero
 installer changes: `readAgentSkillSource()` enumerates `reference/*.md` from disk),
 Flow 5 in recipes.md, and §4 in SKILL.md.
 
@@ -727,19 +727,19 @@ Verified live (claude-cli 2.1.226, Linux):
   messaging unchanged; delivery to a busy session lands between tool calls.
 - First contact needs the `name [ref]` form; the bare name errors with the exact
   string to resend. The `uds:` reply address of an inbound message works as a `to`.
-- The `tmux codeman-<id8>` column in `ListAgents` (and the registry's `tmux` field)
-  is the join key to Codeman session ids. The registry's `sessionId` field starts as
-  the Codeman id (we spawn `claude --session-id <id>`) but drifts after `/clear` or
+- The `tmux reverie-<id8>` column in `ListAgents` (and the registry's `tmux` field)
+  is the join key to Reverie session ids. The registry's `sessionId` field starts as
+  the Reverie id (we spawn `claude --session-id <id>`) but drifts after `/clear` or
   resume, so it must never be the join key.
 - The feature is flag-gated beyond the version: two 2.1.226 sessions on one machine,
   one with an inbox socket and one without. Absence is a fallback case, not an error.
-- Codeman's default `--dangerously-skip-permissions` spawn puts both ends in the
+- Reverie's default `--dangerously-skip-permissions` spawn puts both ends in the
   bypassing class, which delivers; mixed classes hold behind an approval dialog that
   expires unattended (upstream default 5 min), which on a headless worker means the
   message silently dies. The skill's backstop covers it.
 
 Follow-up, landed in the same PR: local claude spawns now pass
-`--name <session name>` so peers carry Codeman session names. The gate is
+`--name <session name>` so peers carry Reverie session names. The gate is
 `buildNameCliArgs()` (session-cli-builder.ts), fail-closed at
 `CLAUDE_NAME_FLAG_MIN_VERSION = 2.1.224`: that is the messaging release, the flag's
 presence there was verified against the installed 2.1.224 binary, and the version
@@ -751,11 +751,11 @@ dashes stripped so it cannot parse as another option, 64-char cap, empty result 
 flag omitted) before the double-quoted interpolation in `buildSpawnCommand`, and
 only the LOCAL command carries it: the docker/remote builders never see it, since
 their CLI is not the binary the probe measured. E2E on an isolated instance
-(`CODEMAN_INSTANCE`): process cmdline `claude ... --name w9-msgtest`, registry
+(`REVERIE_INSTANCE`): process cmdline `claude ... --name w9-msgtest`, registry
 `name: "w9-msgtest"`, `ListAgents` lists it under that name, a message round-trip
 works, and its replies arrive tagged `from-name="w9-msgtest"` (a derived-name
 worker's replies carry no `from-name`). A quick-start without `sessionName` has an
-empty Codeman name, so the peer name stays derived: agents should name their
+empty Reverie name, so the peer name stays derived: agents should name their
 workers. Tests: `test/name-flag-injection.test.ts`.
 
 Later narrowing: `--name` is not only the peer name but also the `/resume` picker
@@ -763,7 +763,7 @@ entry and the terminal title, and a pinned title stops Claude generating its own
 pinning the `w1-myapp` placeholder listed every conversation of a case under the same
 name in `/resume`. Only a manual name is pinned now (`Session.cliPinnedName`,
 `nameSource === 'manual'`, carried to the builders as `cliName`); placeholder and auto
-names leave Claude to title the conversation. A rename in Codeman appends a
+names leave Claude to title the conversation. A rename in Reverie appends a
 `custom-title` row to the conversation's transcript (`claude-session-title.ts`), the
 row `/rename` writes. Tests: `test/claude-resume-title.test.ts`,
 `test/routes/session-name-routes.test.ts`.

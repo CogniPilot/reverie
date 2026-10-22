@@ -29,7 +29,7 @@ type Layout = {
 function loadHelper() {
   const context = vm.createContext({ window: {}, globalThis: {}, setTimeout, clearTimeout });
   vm.runInContext(SOURCE, context, { filename: 'tab-layout-browser.js' });
-  return (context.window as any).CodemanTabLayout;
+  return (context.window as any).ReverieTabLayout;
 }
 
 const s = (id: string, extra: Partial<Ref> = {}): Ref => ({ kind: 'session', id, ...extra });
@@ -244,9 +244,9 @@ describe('Focus collapse is per-device storage', () => {
     const storage = memory();
     expect(h.loadFocusCollapsed(storage)).toEqual({ collapsed: false, ok: true });
     expect(h.saveFocusCollapsed(storage, true)).toEqual({ collapsed: true, ok: true });
-    expect(storage.data.get('codeman:tab-focus-collapsed')).toBe('true');
+    expect(storage.data.get('reverie:tab-focus-collapsed')).toBe('true');
     expect(h.loadFocusCollapsed(storage)).toEqual({ collapsed: true, ok: true });
-    expect(storage.data.has('codeman:tab-groups-collapsed')).toBe(false);
+    expect(storage.data.has('reverie:tab-groups-collapsed')).toBe(false);
     // Group collapse GC (ids of groups that no longer exist) leaves it alone.
     h.loadCollapsedGroupIds(storage, []);
     expect(h.loadFocusCollapsed(storage).collapsed).toBe(true);
@@ -254,7 +254,7 @@ describe('Focus collapse is per-device storage', () => {
 
   it('a junk value reads as expanded, and a throwing store reports failure', () => {
     const storage = memory();
-    storage.setItem('codeman:tab-focus-collapsed', '{nope');
+    storage.setItem('reverie:tab-focus-collapsed', '{nope');
     expect(h.loadFocusCollapsed(storage)).toEqual({ collapsed: false, ok: true });
     const broken = {
       getItem: () => {

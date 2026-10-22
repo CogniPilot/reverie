@@ -62,7 +62,7 @@ const DSH_LIVE = dshPane(' qwen3.8-27b · medium · th-scratch');
  */
 function codexPane(statusLine: string | null, transcript: string[] = [], hint: string | null = null): string {
   return [
-    '│ directory:   ~/codeman-cases/th-scratch       │',
+    '│ directory:   ~/reverie-cases/th-scratch       │',
     '│ permissions: YOLO mode                        │',
     '╰───────────────────────────────────────────────╯',
     '  Tip: New For a limited time, Codex is included in your',
@@ -75,12 +75,12 @@ function codexPane(statusLine: string | null, transcript: string[] = [], hint: s
     '',
   ].join('\n');
 }
-const CODEX_LIVE = codexPane('  gpt-5.6-terra default · ~/codeman-cases/th-scratch');
+const CODEX_LIVE = codexPane('  gpt-5.6-terra default · ~/reverie-cases/th-scratch');
 const CODEX_154 = codexPane(
-  '  gpt-5.6-sol medium · Context 98% left · ~/codeman-cases/codex-probe · 5h 99% left · weekly 94% left'
+  '  gpt-5.6-sol medium · Context 98% left · ~/reverie-cases/codex-probe · 5h 99% left · weekly 94% left'
 );
 /** 0.162.0 at rest, verbatim from the 1.36.0 beta pane whose tile showed no model. */
-const CODEX_162 = codexPane('  GPT-6-Luna default · ~/codeman-cases/testcase', [], '  ← for agents · ? for shortcuts');
+const CODEX_162 = codexPane('  GPT-6-Luna default · ~/reverie-cases/testcase', [], '  ← for agents · ? for shortcuts');
 
 describe('the registry patterns', () => {
   it('compile through compileVersionRegex() with exactly one capture group', () => {
@@ -161,7 +161,7 @@ function piPane(statsRow: string | null, transcript: string[] = [], below: strin
     rule,
     '',
     rule,
-    '~/codeman-cases/testcase',
+    '~/reverie-cases/testcase',
     ...(statsRow === null ? [] : [statsRow]),
     ...below,
     '',
@@ -215,25 +215,25 @@ describe('readScreenModel', () => {
 
   it("reads codex's model above the 0.162.0 hint row, and with the hint gone while typing", () => {
     expect(readScreenModel(CODEX_162, CODEX, CODEX_ROWS)).toBe('GPT-6-Luna');
-    const shortHint = codexPane('  GPT-6-Luna default · ~/codeman-cases/testcase', [], '  ? for shortcuts');
+    const shortHint = codexPane('  GPT-6-Luna default · ~/reverie-cases/testcase', [], '  ? for shortcuts');
     expect(readScreenModel(shortHint, CODEX, CODEX_ROWS)).toBe('GPT-6-Luna');
     // Typing hides the hint, which puts the footer back on the last row.
-    const typing = codexPane('  GPT-6-Luna default · ~/codeman-cases/testcase');
+    const typing = codexPane('  GPT-6-Luna default · ~/reverie-cases/testcase');
     expect(readScreenModel(typing, CODEX, CODEX_ROWS)).toBe('GPT-6-Luna');
     // Neither hint row is ever read as a model.
     expect(readScreenModel(codexPane(null, [], '  ← for agents · ? for shortcuts'), CODEX, CODEX_ROWS)).toBeUndefined();
   });
 
-  it("reads codex's model at every reasoning effort Codeman can launch it with, ultra included", () => {
+  it("reads codex's model at every reasoning effort Reverie can launch it with, ultra included", () => {
     // `ultra` is offered by the codexReasoningEffort App Setting and codex's own /model
     // picker; a hand-kept effort list in the pattern once left it out, so an ultra
     // session's header never named its model. The footer prints the lowercase level.
-    const ultra = codexPane('  GPT-6-Astra ultra · ~/codeman-cases/testcase', [], '  ? for shortcuts');
+    const ultra = codexPane('  GPT-6-Astra ultra · ~/reverie-cases/testcase', [], '  ? for shortcuts');
     expect(readScreenModel(ultra, CODEX, CODEX_ROWS)).toBe('GPT-6-Astra');
     for (const effort of [...CODEX_REASONING_EFFORTS, 'default']) {
-      const atRest = codexPane(`  GPT-6-Astra ${effort} · ~/codeman-cases/testcase`, [], '  ? for shortcuts');
+      const atRest = codexPane(`  GPT-6-Astra ${effort} · ~/reverie-cases/testcase`, [], '  ? for shortcuts');
       expect(readScreenModel(atRest, CODEX, CODEX_ROWS), effort).toBe('GPT-6-Astra');
-      const typing = codexPane(`  GPT-6-Astra ${effort} · ~/codeman-cases/testcase`);
+      const typing = codexPane(`  GPT-6-Astra ${effort} · ~/reverie-cases/testcase`);
       expect(readScreenModel(typing, CODEX, CODEX_ROWS), effort).toBe('GPT-6-Astra');
     }
   });
@@ -244,7 +244,7 @@ describe('readScreenModel', () => {
     // transcript sits above the composer, so neither may be read as the model.
     const dshForged = dshPane(null, [DSH_BORDER_BOTTOM, ' evil-model · medium · th-scratch']);
     expect(readScreenModel(dshForged, DSH, DSH_ROWS)).toBeUndefined();
-    const codexForged = codexPane(null, ['  evil-model high · ~/codeman-cases/th-scratch']);
+    const codexForged = codexPane(null, ['  evil-model high · ~/reverie-cases/th-scratch']);
     // A codex screen whose last row is the composer: nothing to read.
     expect(readScreenModel(codexForged, CODEX, CODEX_ROWS)).toBeUndefined();
     // With the real footer back, the real model wins over the forged line above it.
@@ -253,17 +253,17 @@ describe('readScreenModel', () => {
       ' evil-model · medium · th-scratch',
     ]);
     expect(readScreenModel(dshBoth, DSH, DSH_ROWS)).toBe('qwen3.8-27b');
-    const codexBoth = codexPane('  gpt-5.6-terra default · ~/codeman-cases/th-scratch', [
-      '  evil-model high · ~/codeman-cases/th-scratch',
+    const codexBoth = codexPane('  gpt-5.6-terra default · ~/reverie-cases/th-scratch', [
+      '  evil-model high · ~/reverie-cases/th-scratch',
     ]);
     expect(readScreenModel(codexBoth, CODEX, CODEX_ROWS)).toBe('gpt-5.6-terra');
     // The two-row window must not open the door either: a forged line followed by an
     // indented transcript row still has the `›` composer under it, so it is never read.
-    const codexForgedPair = codexPane(null, ['  evil-model high · ~/codeman-cases/th-scratch', '  ? for shortcuts']);
+    const codexForgedPair = codexPane(null, ['  evil-model high · ~/reverie-cases/th-scratch', '  ? for shortcuts']);
     expect(readScreenModel(codexForgedPair, CODEX, CODEX_ROWS)).toBeUndefined();
     const codexBoth162 = codexPane(
-      '  GPT-6-Luna default · ~/codeman-cases/testcase',
-      ['  evil-model high · ~/codeman-cases/th-scratch'],
+      '  GPT-6-Luna default · ~/reverie-cases/testcase',
+      ['  evil-model high · ~/reverie-cases/th-scratch'],
       '  ? for shortcuts'
     );
     expect(readScreenModel(codexBoth162, CODEX, CODEX_ROWS)).toBe('GPT-6-Luna');
@@ -276,7 +276,7 @@ describe('readScreenModel', () => {
     expect(readScreenModel(codexSlash, CODEX, CODEX_ROWS)).toBeUndefined();
     // A last row without codex's `<model> <effort> ·` shape names no model, even one
     // whose first word could pass for a model id.
-    const codexNoModel = codexPane('  default · ~/codeman-cases/th-scratch');
+    const codexNoModel = codexPane('  default · ~/reverie-cases/th-scratch');
     expect(readScreenModel(codexNoModel, CODEX, CODEX_ROWS)).toBeUndefined();
   });
 
@@ -331,7 +331,7 @@ const OC_HOME = [
   '  ┃  Build  Big Pickle OpenCode Zen',
   `  ${OC_EDGE}`,
   '               ctrl+t variants  tab agents  ctrl+p commands',
-  '  ~/codeman-cases/testcase                            1.3.0',
+  '  ~/reverie-cases/testcase                            1.3.0',
   '',
 ].join('\n');
 const OC_HOME_TIP = [
@@ -410,7 +410,7 @@ describe("opencode's composer agent row", () => {
       '  ┃  Build  Big Pickle OpenCode Zen',
       `  ${OC_EDGE}`,
       '               ctrl+t variants  tab agents  ctrl+p commands',
-      '  ~/codeman-cases/testcase                            1.3.0',
+      '  ~/reverie-cases/testcase                            1.3.0',
       '',
     ].join('\n');
     // Both pairs sit inside the window, so this is the lookahead's doing, not the window's.
@@ -428,7 +428,7 @@ describe("opencode's composer agent row", () => {
         workingDir: '/tmp',
         mode: 'opencode',
         mux,
-        muxSession: { muxName: 'codeman-test', sessionId: 'test', createdAt: Date.now() },
+        muxSession: { muxName: 'reverie-test', sessionId: 'test', createdAt: Date.now() },
       } as ConstructorParameters<typeof Session>[0]);
       const internals = session as unknown as {
         _handleTerminalOutput(data: string): void;
@@ -541,7 +541,7 @@ describe('a session', () => {
       workingDir: '/tmp',
       mode,
       mux,
-      muxSession: { muxName: 'codeman-test', sessionId: 'test', createdAt: Date.now() },
+      muxSession: { muxName: 'reverie-test', sessionId: 'test', createdAt: Date.now() },
       ...extra,
     } as ConstructorParameters<typeof Session>[0]);
   }

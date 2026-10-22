@@ -5,7 +5,7 @@ import { expect, it, vi } from 'vitest';
 it('marks every owner pairing method while preserving JSON and excluding unrelated or foreign routes', async () => {
   class App {}
   const fetch = vi.fn().mockResolvedValue({ ok: true });
-  runInNewContext(readFileSync(new URL('../src/web/public/api-client.js', import.meta.url), 'utf8'), { CodemanApp: App, fetch });
+  runInNewContext(readFileSync(new URL('../src/web/public/api-client.js', import.meta.url), 'utf8'), { ReverieApp: App, fetch });
   const app = new App() as App & { _api(path: string, opts?: object): Promise<unknown> };
   for (const path of ['/api/embassy-host', '/api/embassy-host/posts?after=1', '/api/embassy-pairing', '/api/embassy-pairing/abc/reconnect']) {
     for (const method of ['GET', 'POST', 'DELETE']) {

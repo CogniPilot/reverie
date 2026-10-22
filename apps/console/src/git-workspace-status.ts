@@ -2,7 +2,7 @@
  * @fileoverview "What has this session's workspace not committed or pushed?": a read-only git
  * snapshot of a session's working directory, for the bottom-bar Git indicator and its panel
  * (`GET /api/sessions/:id/git-status`). Agents leave work uncommitted and unpushed; this makes that
- * visible without leaving Codeman.
+ * visible without leaving Reverie.
  *
  * Split so the parts that matter test without a repo:
  *   - pure: `parsePorcelainV2` (status output → branch, upstream, ahead/behind, per-file entries),

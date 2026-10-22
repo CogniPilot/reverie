@@ -4,15 +4,14 @@
 #   REVERIE_VERSION       image build id, set at build time; a change means an upgrade
 #   REVERIE_DATA          instance directory on the mounted volume (default /instances/default)
 #   REVERIE_INSTALL_CLIS  opt-in agent CLIs to install at start, space-separated: claude-code
-#   CODEMAN_PASSWORD      owner password; when unset, one is generated on first start and kept on the volume
+#   REVERIE_PASSWORD      owner password; when unset, one is generated on first start and kept on the volume
 set -euo pipefail
 umask 077
 log() { printf 'reverie-start: %s\n' "$*" >&2; }
 
 DATA=${REVERIE_DATA:-/instances/default}
 mkdir -p "$DATA/console" "$DATA/backups" "$DATA/tools" "${TMPDIR:-/tmp}"
-# REVERIE_DATA_DIR is the name; the older FLEET_DATA_DIR spelling is still read, and both are exported for one release.
-REVERIE_DATA_DIR=${REVERIE_DATA_DIR:-${FLEET_DATA_DIR:-$DATA/console}}; export REVERIE_DATA_DIR FLEET_DATA_DIR="$REVERIE_DATA_DIR"
+REVERIE_DATA_DIR=${REVERIE_DATA_DIR:-$DATA/console}; export REVERIE_DATA_DIR
 
 # Upgrade: the first start of a new image build backs up the console state before the console reads it
 # (the console migrates its own files on start).
@@ -27,7 +26,7 @@ printf '%s\n' "$version" > "$DATA/.image-version"
 
 # Owner authorization: a volume without an owner account or a policy marker starts in enforce, so every
 # owner route (plans, settings, the CLI registry, the mode switch) needs the signed-in owner, never only
-# the shared CODEMAN_PASSWORD that every process in the container inherits. Agents keep their own routes.
+# the shared REVERIE_PASSWORD that every process in the container inherits. Agents keep their own routes.
 # A volume that has an account or a marker keeps its policy. The owner creates the account from a host
 # shell (setup.sh --owner) and signs in at /owner/login.
 owner_marker="$REVERIE_DATA_DIR/owner-auth.policy"
@@ -39,16 +38,18 @@ fi
 
 # Owner login: the console listens on every container interface (port publishing needs that), so it never
 # starts without a password. The password stays on the volume and is never printed.
-if [ -z "${CODEMAN_PASSWORD:-}" ]; then
+if [ -z "${REVERIE_PASSWORD:-}" ]; then
   secret="$DATA/owner-password"
   if [ ! -s "$secret" ]; then
     python3 -I -c 'import secrets; print(secrets.token_urlsafe(18))' > "$secret.tmp" && mv "$secret.tmp" "$secret"
     log "first start: owner password created; read it with: docker exec <container> cat $secret"
   fi
-  CODEMAN_PASSWORD=$(cat "$secret")
-  export CODEMAN_PASSWORD
+  REVERIE_PASSWORD=$(cat "$secret")
+  export REVERIE_PASSWORD
 fi
-export CODEMAN_USERNAME=${CODEMAN_USERNAME:-owner}
+export REVERIE_USERNAME=${REVERIE_USERNAME:-owner}
+printf 'REVERIE_USERNAME=%s\nREVERIE_PASSWORD=%s\n' "$REVERIE_USERNAME" "$REVERIE_PASSWORD" > "$REVERIE_DATA_DIR/.env.tmp"
+mv "$REVERIE_DATA_DIR/.env.tmp" "$REVERIE_DATA_DIR/.env"
 
 # The default Claude and Codex profiles keep their sign-in under these directories; on the volume they survive a recreate.
 mkdir -p "$DATA/accounts/claude" "$DATA/accounts/codex"
@@ -70,5 +71,5 @@ for cli in ${REVERIE_INSTALL_CLIS:-}; do
   fi
 done
 
-[ "$#" -gt 0 ] || set -- reverie web --host 0.0.0.0 --port "${CODEMAN_PORT:-3000}"
+[ "$#" -gt 0 ] || set -- reverie web --host 0.0.0.0 --port "${REVERIE_PORT:-3000}"
 exec "$@"

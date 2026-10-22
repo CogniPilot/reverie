@@ -1,7 +1,7 @@
 /**
  * @fileoverview The exited-agent sweep's decision rule (Ark0N/Codeman#446).
  *
- * Codeman creates every tmux pane with `remain-on-exit on`, so `/exit` ends the
+ * Reverie creates every tmux pane with `remain-on-exit on`, so `/exit` ends the
  * CLI while the pane, the tmux session and the `tmux attach-session` process
  * all live on. Part 1 of #446 records that as `SessionState.paneExit`. This
  * module decides when such a session is closed, the way the X button closes

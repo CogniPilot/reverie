@@ -106,7 +106,7 @@ interface ResetSpec {
 /**
  * Compute the epoch ms for a parsed reset spec. Times are wall-clock in the
  * given IANA timezone when present (and resolvable), otherwise server-local —
- * Claude CLI runs on the same host as Codeman, so local time is the right
+ * Claude CLI runs on the same host as Reverie, so local time is the right
  * default. Returns null when the spec is implausible (> ~8 days out).
  */
 function resolveResetSpec(spec: ResetSpec, now: number): number | null {

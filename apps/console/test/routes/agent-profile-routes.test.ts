@@ -1,5 +1,5 @@
 /**
- * @fileoverview GET /api/agents/:id/profile: the read-only agent profile, built by the fleet
+ * @fileoverview GET /api/agents/:id/profile: the read-only agent profile, built by the reverie
  * runtime's `profile` report. An injected runner stands in for the runtime, except in the
  * runner test, which runs a stub executable. Port: N/A (app.inject()).
  */
@@ -48,7 +48,7 @@ describe('GET /api/agents/:id/profile', () => {
     const self = await app.inject({
       method: 'GET',
       url: '/api/agents/test-session-1/profile',
-      headers: { 'x-codeman-parent-session': 'test-session-1' },
+      headers: { 'x-reverie-parent-session': 'test-session-1' },
     });
     expect(self.statusCode).toBe(200);
     expect(runner).toHaveBeenCalledWith('test-session-1', { includeDms: false });
@@ -56,7 +56,7 @@ describe('GET /api/agents/:id/profile', () => {
       const res = await app.inject({
         method: 'GET',
         url: '/api/agents/test-session-1/profile',
-        headers: { 'x-codeman-parent-session': header },
+        headers: { 'x-reverie-parent-session': header },
       });
       expect(res.statusCode, header).toBe(403);
     }
@@ -71,7 +71,7 @@ describe('GET /api/agents/:id/profile', () => {
     const url = '/api/agents/test-session-1/profile';
     const asOwner = await app.inject({ method: 'GET', url });
     expect(asOwner.json().data.rooms).toContain('dm-with-owner');
-    const asAgent = await app.inject({ method: 'GET', url, headers: { 'x-codeman-parent-session': 'test-session-1' } });
+    const asAgent = await app.inject({ method: 'GET', url, headers: { 'x-reverie-parent-session': 'test-session-1' } });
     expect(asAgent.statusCode).toBe(200);
     expect(asAgent.json().data.rooms).toEqual(['general']);
     expect(runner).toHaveBeenLastCalledWith('test-session-1', { includeDms: false });
@@ -79,7 +79,7 @@ describe('GET /api/agents/:id/profile', () => {
     const agentFirst = await app.inject({
       method: 'GET',
       url: '/api/agents/other-session-2/profile',
-      headers: { 'x-codeman-parent-session': 'other-session-2' },
+      headers: { 'x-reverie-parent-session': 'other-session-2' },
     });
     expect(agentFirst.json().data.rooms).toEqual(['general']);
     const ownerSecond = await app.inject({ method: 'GET', url: '/api/agents/other-session-2/profile' });
@@ -95,16 +95,14 @@ describe('GET /api/agents/:id/profile', () => {
       TMPDIR: '/t',
       CLAUDE_CONFIG_DIR: '/c',
       REVERIE_RUNTIME_POLICY: '/p',
-      FLEET_RUNTIME_POLICY: '/p',
-      CODEMAN_API_URL: 'http://x',
-      CODEMAN_SESSION_ID: 'abc',
-      CODEMAN_USERNAME: 'admin',
-      CODEMAN_PASSWORD: 'secret',
-      CODEMAN_TOKEN: 'nope',
+      REVERIE_API_URL: 'http://x',
+      REVERIE_SESSION_ID: 'abc',
+      REVERIE_USERNAME: 'admin',
+      REVERIE_PASSWORD: 'secret',
       FOO_API_KEY: 'nope',
       AWS_ACCESS_KEY_ID: 'nope',
       AWS_SESSION_TOKEN: 'nope',
-      FLEET_DATA_DIR: '/d',
+      REVERIE_DATA_DIR: '/d',
       REVERIE_TOKEN: 'secret',
       OPENAI_API_KEY: 'nope',
       ANTHROPIC_API_KEY: 'nope',
@@ -113,12 +111,11 @@ describe('GET /api/agents/:id/profile', () => {
     });
     expect(Object.keys(env).sort()).toEqual([
       'CLAUDE_CONFIG_DIR',
-      'CODEMAN_API_URL',
-      'FLEET_RUNTIME_POLICY',
       'HOME',
       'LANG',
       'LC_ALL',
       'PATH',
+      'REVERIE_API_URL',
       'REVERIE_RUNTIME_POLICY',
     ]);
   });
@@ -155,13 +152,13 @@ describe('GET /api/agents/:id/profile', () => {
       async () => 'Traceback (most recent call last)',
       async () => '[1, 2]',
       async () => {
-        throw new Error('spawn fleet-runtime ENOENT');
+        throw new Error('spawn reverie-runtime ENOENT');
       },
     ] as ProfileRunner[]) {
       const { app } = await setup(runner);
       const res = await app.inject({ method: 'GET', url: '/api/agents/test-session-1/profile' });
       expect(res.statusCode).toBe(502);
-      expect(res.json().error).toBe('The fleet runtime did not return a profile');
+      expect(res.json().error).toBe('The reverie runtime did not return a profile');
     }
   });
 
@@ -201,7 +198,7 @@ describe('GET /api/agents/:id/profile', () => {
   });
 
   it('is single-user only, and still hides other users sessions in multi-user mode', async () => {
-    vi.stubEnv('CODEMAN_MULTIUSER', '1');
+    vi.stubEnv('REVERIE_MULTIUSER', '1');
     const runner = vi.fn(async () => JSON.stringify(PROFILE));
     const stranger = await setup(runner, { username: 'someone-else', role: 'user' });
     const hidden = await stranger.app.inject({ method: 'GET', url: '/api/agents/test-session-1/profile' });
@@ -226,17 +223,17 @@ describe('profileRunnerFromEnv', () => {
 
   it('runs the configured binary with the policy, strips the parent session, and keeps an exit-1 report', async () => {
     dir = mkdtempSync(join(tmpdir(), 'agent-profile-'));
-    const bin = join(dir, 'fleet-runtime');
+    const bin = join(dir, 'reverie-runtime');
     writeFileSync(
       bin,
-      '#!/bin/sh\nprintf \'{"args":"%s","parent":"%s"}\' "$*" "${CODEMAN_SESSION_ID:-none}"\nexit 1\n'
+      '#!/bin/sh\nprintf \'{"args":"%s","parent":"%s"}\' "$*" "${REVERIE_SESSION_ID:-none}"\nexit 1\n'
     );
     chmodSync(bin, 0o755);
     const run = profileRunnerFromEnv({
       PATH: '/usr/bin:/bin',
       REVERIE_RUNTIME_POLICY: '/policy.json',
-      FLEET_RUNTIME_BIN: bin,
-      CODEMAN_SESSION_ID: 'some-agent',
+      REVERIE_RUNTIME_BIN: bin,
+      REVERIE_SESSION_ID: 'some-agent',
     });
     expect(JSON.parse(await run!('abc-1', { includeDms: true }))).toEqual({
       args: '--policy /policy.json profile abc-1',

@@ -6,7 +6,7 @@ import { resolve } from 'node:path';
 import vm from 'node:vm';
 import { describe, expect, it, vi } from 'vitest';
 
-function loadCodemanAppClass() {
+function loadReverieAppClass() {
   const constants = readFileSync(resolve(import.meta.dirname, '../src/web/public/constants.js'), 'utf8');
   const source = readFileSync(resolve(import.meta.dirname, '../src/web/public/app.js'), 'utf8');
   const chip = { innerHTML: '', title: '' };
@@ -34,9 +34,9 @@ function loadCodemanAppClass() {
     window: { addEventListener: vi.fn(), removeEventListener: vi.fn() },
     MobileDetection: {},
   });
-  vm.runInContext(`${constants}\n${source}\nglobalThis.__CodemanApp = CodemanApp;`, context);
+  vm.runInContext(`${constants}\n${source}\nglobalThis.__ReverieApp = ReverieApp;`, context);
   return {
-    CodemanApp: (context as { __CodemanApp: new () => unknown }).__CodemanApp,
+    ReverieApp: (context as { __ReverieApp: new () => unknown }).__ReverieApp,
     chip,
   };
 }
@@ -45,8 +45,8 @@ type UsageApp = { updatePlanUsageChip: (data: unknown) => void };
 
 describe('header plan usage chip', () => {
   it('renders Claude first and the main Codex limits underneath', () => {
-    const { CodemanApp, chip } = loadCodemanAppClass();
-    const app = Object.create((CodemanApp as { prototype: object }).prototype) as UsageApp;
+    const { ReverieApp, chip } = loadReverieAppClass();
+    const app = Object.create((ReverieApp as { prototype: object }).prototype) as UsageApp;
 
     app.updatePlanUsageChip({
       fiveHour: { usedPercentage: 97, resetAt: 1000 },
@@ -66,8 +66,8 @@ describe('header plan usage chip', () => {
   });
 
   it('omits unavailable Codex windows instead of inventing zero usage', () => {
-    const { CodemanApp, chip } = loadCodemanAppClass();
-    const app = Object.create((CodemanApp as { prototype: object }).prototype) as UsageApp;
+    const { ReverieApp, chip } = loadReverieAppClass();
+    const app = Object.create((ReverieApp as { prototype: object }).prototype) as UsageApp;
 
     app.updatePlanUsageChip({
       fiveHour: { usedPercentage: 10, resetAt: 1000 },
@@ -85,8 +85,8 @@ describe('header plan usage chip', () => {
     // resets_at has not passed", so between session windows the key is simply
     // absent. The chip used to shrink to a lone 7d segment, which reads as a
     // broken feature rather than an idle window (reported 2026-09-01).
-    const { CodemanApp, chip } = loadCodemanAppClass();
-    const app = Object.create((CodemanApp as { prototype: object }).prototype) as UsageApp;
+    const { ReverieApp, chip } = loadReverieAppClass();
+    const app = Object.create((ReverieApp as { prototype: object }).prototype) as UsageApp;
 
     app.updatePlanUsageChip({ sevenDay: { usedPercentage: 52, resetAt: 2000 } });
 
@@ -99,8 +99,8 @@ describe('header plan usage chip', () => {
   it('renders no row at all for a provider reporting nothing', () => {
     // The placeholder must never stand alone: a row of em dashes would claim a
     // provider is idle when it is really absent.
-    const { CodemanApp, chip } = loadCodemanAppClass();
-    const app = Object.create((CodemanApp as { prototype: object }).prototype) as UsageApp;
+    const { ReverieApp, chip } = loadReverieAppClass();
+    const app = Object.create((ReverieApp as { prototype: object }).prototype) as UsageApp;
 
     app.updatePlanUsageChip({ codex: { sevenDay: { usedPercentage: 40, resetAt: 3000 } } });
 
@@ -109,8 +109,8 @@ describe('header plan usage chip', () => {
   });
 
   it('drops the provider label when Claude is the only provider with limits', () => {
-    const { CodemanApp, chip } = loadCodemanAppClass();
-    const app = Object.create((CodemanApp as { prototype: object }).prototype) as UsageApp;
+    const { ReverieApp, chip } = loadReverieAppClass();
+    const app = Object.create((ReverieApp as { prototype: object }).prototype) as UsageApp;
 
     app.updatePlanUsageChip({
       fiveHour: { usedPercentage: 60, resetAt: 1000 },
@@ -127,8 +127,8 @@ describe('header plan usage chip', () => {
   });
 
   it('drops the provider label when Codex is the only provider with limits', () => {
-    const { CodemanApp, chip } = loadCodemanAppClass();
-    const app = Object.create((CodemanApp as { prototype: object }).prototype) as UsageApp;
+    const { ReverieApp, chip } = loadReverieAppClass();
+    const app = Object.create((ReverieApp as { prototype: object }).prototype) as UsageApp;
 
     app.updatePlanUsageChip({
       codex: { fiveHour: { usedPercentage: 12, resetAt: 3000 } },

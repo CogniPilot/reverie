@@ -1,8 +1,8 @@
 /**
  * @fileoverview VAPID key auto-generation and push subscription CRUD.
  *
- * Persists VAPID keys to ~/.codeman/push-keys.json and subscriptions
- * to ~/.codeman/push-subscriptions.json. Debounced saves prevent
+ * Persists VAPID keys to ~/.reverie/push-keys.json and subscriptions
+ * to ~/.reverie/push-subscriptions.json. Debounced saves prevent
  * excessive disk I/O during rapid subscription updates.
  */
 

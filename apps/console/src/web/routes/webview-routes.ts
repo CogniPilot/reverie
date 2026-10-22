@@ -7,7 +7,7 @@
  * 1. `/api/webviews/*`, ordinary authenticated CRUD, owner-scoped like every
  *    other resource, returning the `ApiResponse` envelope.
  * 2. `/webview/:cap/*`, the proxy. NOT an API surface. It authenticates on an
- *    unguessable capability in the path instead of Codeman's session cookie, and
+ *    unguessable capability in the path instead of Reverie's session cookie, and
  *    is correspondingly exempt from the cookie and Origin checks in
  *    `middleware/auth.ts`. See `src/webview-capabilities.ts` for why a cookie
  *    cannot work here (sandboxed iframes are opaque-origin, so their requests are
@@ -76,8 +76,8 @@ import {
 
 /**
  * Resolved per call rather than captured at module load. `getDataDir()` reads
- * `CODEMAN_DATA_DIR` each time, so a lazy lookup keeps tests writing to a temp dir
- * instead of the developer's real `~/.codeman/webviews.json`.
+ * `REVERIE_DATA_DIR` each time, so a lazy lookup keeps tests writing to a temp dir
+ * instead of the developer's real `~/.reverie/webviews.json`.
  */
 function configDir(): string {
   return getDataDir();
@@ -145,7 +145,7 @@ function registerCrudRoutes(app: FastifyInstance, ctx: EventPort & TabLayoutPort
         url: input.url,
         icon: input.icon,
         // Proxy is the safe default: it is the only mode that works for a plain-HTTP
-        // dashboard on an HTTPS Codeman, which is the common case.
+        // dashboard on an HTTPS Reverie, which is the common case.
         embedMode: input.embedMode ?? 'proxy',
         trusted: input.trusted ?? false,
         managed: input.managed,
@@ -336,7 +336,7 @@ async function probeUrl(url: string): Promise<WebviewProbe> {
     const isHttp = target.protocol === 'http:';
 
     // Direct embedding is only viable for an HTTPS target that permits framing:
-    // an HTTPS Codeman page cannot embed http:// at all (mixed content).
+    // an HTTPS Reverie page cannot embed http:// at all (mixed content).
     const recommendedMode = !isHttp && framable ? 'direct' : 'proxy';
     const reason = isHttp
       ? 'Plain HTTP: an HTTPS Reverie page cannot embed it directly, so it is proxied.'
@@ -553,7 +553,7 @@ async function proxyRequest(
         .type('text/plain')
         .send(
           `Dashboard unreachable: upstream sent no response headers within ${WEBVIEW_UPSTREAM_TIMEOUT_MS}ms ` +
-            `(CODEMAN_WEBVIEW_TIMEOUT_MS raises this limit)`
+            `(REVERIE_WEBVIEW_TIMEOUT_MS raises this limit)`
         );
     }
     const message = err instanceof Error ? err.message : String(err);
@@ -588,7 +588,7 @@ async function proxyRequest(
   for (const [key, value] of Object.entries(cors)) reply.header(key, value);
   for (const cookie of setCookie) reply.header('set-cookie', cookie);
 
-  // registerSecurityHeaders already stamped Codeman's own `default-src 'self'`
+  // registerSecurityHeaders already stamped Reverie's own `default-src 'self'`
   // policy on this reply during onRequest. Left in place it breaks essentially
   // every dashboard (inline scripts, CDN assets), so it is replaced by the
   // upstream's own policy, or removed when the upstream had none.
@@ -621,11 +621,11 @@ async function proxyRequest(
  * `<base href>` fixes relative URLs and the HTML rewrite fixes `src`/`href`/`action`
  * attributes, but neither can reach a URL built at runtime: `fetch('/api/data')`,
  * `import('/chunk.js')`, `url(/img.png)` inside a stylesheet. Those arrive at
- * Codeman's root and 404.
+ * Reverie's root and 404.
  *
  * The `Referer` identifies which dashboard asked, so the request can be routed to
  * the right upstream. Wiring it into the 404 handler rather than a catch-all route
- * is what keeps it contained: every real Codeman route matches first, and this only
+ * is what keeps it contained: every real Reverie route matches first, and this only
  * ever sees requests that were going to fail anyway.
  *
  * @returns true when the request was handled (caller must not also reply).

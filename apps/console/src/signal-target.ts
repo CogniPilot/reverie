@@ -4,7 +4,7 @@
  * ## The incident this guards against
  *
  * On 2026-10-20 at 01:44:40Z the console cleaned up one exited session, and 290 ms
- * later every pane on the shared `-L fleet` tmux server was gone along with the
+ * later every pane on the shared `-L reverie` tmux server was gone along with the
  * server itself. The exact pid that teardown signalled was not recoverable, but
  * killSession could reach that outcome: it fell back from tmux's pane pid to the
  * stored `session.pid`, then signalled that pid's descendants and its process group.
@@ -20,7 +20,7 @@
  * answer we cannot read: no pid or group signal at all, only an exact-name
  * `tmux kill-session -t =NAME` (resolveLivePaneTarget). Session names go to tmux
  * with `=` and are compared exactly here, because a bare `-t NAME` matches by
- * prefix: a gone `codeman-ab` resolves to a live `codeman-abcd`. A
+ * prefix: a gone `reverie-ab` resolves to a live `reverie-abcd`. A
  * process group is signalled only when the pane leads it. Before every later signal
  * the start time is re-checked, so a reused pid is never hit. Without a verified pid,
  * `tmux kill-session` alone does the teardown.

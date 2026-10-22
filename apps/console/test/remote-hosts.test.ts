@@ -24,7 +24,7 @@ describe('remote-hosts domain', () => {
   });
 
   function configDir(): string {
-    dir = mkdtempSync(join(tmpdir(), 'codeman-remote-hosts-'));
+    dir = mkdtempSync(join(tmpdir(), 'reverie-remote-hosts-'));
     return dir;
   }
 

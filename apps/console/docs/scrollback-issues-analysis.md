@@ -64,7 +64,7 @@ browser verbatim and xterm switches to the alternate buffer, where:
    through previous commands, like pressing up".
 
 3. `cancel(ev, true)` calls `preventDefault()` **and `stopPropagation()`**, and xterm's
-   listener sits on `terminal.element` (a child of Codeman's container). So Codeman's own
+   listener sits on `terminal.element` (a child of Reverie's container). So Reverie's own
    container wheel handler, `_shouldForwardWheelToApp` and `_wheelScrollLines` included, is
    **never reached** for these modes. That whole path is dead code for shell.
 

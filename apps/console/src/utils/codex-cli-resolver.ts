@@ -15,7 +15,7 @@ import { parseCodexRateLimitsResponse, type StatusTelemetry } from '../usage-tel
 
 /**
  * Directories probed after `which`, read from this CLI's registry entry so the spawn
- * path, `codeman doctor` and this resolver cannot disagree about where to look.
+ * path, `reverie doctor` and this resolver cannot disagree about where to look.
  * `~` is expanded by `expandHome`; nothing else is interpreted.
  */
 const CODEX_SEARCH_DIRS = (): string[] => (getCli('codex')?.discovery.searchDirs ?? []).map(expandHome);
@@ -113,7 +113,7 @@ function requestCodexRateLimits(binaryPath: string, clientVersion: string, env?:
       method: 'initialize',
       id: 1,
       params: {
-        clientInfo: { name: 'codeman', title: 'Reverie', version: clientVersion },
+        clientInfo: { name: 'reverie', title: 'Reverie', version: clientVersion },
         capabilities: null,
       },
     });

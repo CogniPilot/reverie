@@ -21,7 +21,7 @@
  * `dsh` is a profile LAUNCHER, not an agent: `dsh --profile <name>` boots an
  * ordered stack of plugin-bundle patch layers, and DeepSeek ships only `web`
  * (browser UI), `headless` (one-shot) and `base` (no app). The interactive
- * terminal agent Codeman actually drives is a THIRD-PARTY profile the user
+ * terminal agent Reverie actually drives is a THIRD-PARTY profile the user
  * installs. That is why this module resolves two independent things — a binary
  * AND a profile inventory — and why "available" for the deepseek run mode means
  * both (`isDeepSeekRunnable`, and `resolveDeepSeekLaunchError` in session-routes.ts
@@ -53,7 +53,7 @@ import {
  */
 /**
  * Directories probed after `which`, read from this CLI's registry entry so the spawn
- * path, `codeman doctor` and this resolver cannot disagree about where to look.
+ * path, `reverie doctor` and this resolver cannot disagree about where to look.
  * `~` is expanded by `expandHome`; nothing else is interpreted.
  */
 const DEEPSEEK_SEARCH_DIRS = (): string[] => (getCli('deepseek')?.discovery.searchDirs ?? []).map(expandHome);
@@ -61,7 +61,7 @@ const DEEPSEEK_SEARCH_DIRS = (): string[] => (getCli('deepseek')?.discovery.sear
 /**
  * A real `dsh --version` prints a bare `0.1.1-rc.2` (measured, 0.1.1-rc.2), so
  * the prerelease suffix is part of the token — truncating it to `0.1.1` would
- * misreport a release-candidate as a release in `codeman doctor`.
+ * misreport a release-candidate as a release in `reverie doctor`.
  *
  * Exported and SHARED with the `dsh` entry in `config/dependency-registry.ts`,
  * so the doctor and the run mode cannot disagree about what counts as an
@@ -207,7 +207,7 @@ export function deepSeekProfileFromManifest(name: string, raw: string): DeepSeek
  * Never throws: a missing DSH_HOME (dsh installed but never run) is an empty
  * list, which the callers render as "no profile yet" rather than an error.
  * Deliberately un-cached — a user can create a profile at any moment (including
- * through Codeman's own bootstrap), and the directory scan is cheap next to the
+ * through Reverie's own bootstrap), and the directory scan is cheap next to the
  * two process spawns the binary probe already costs.
  */
 export function listDeepSeekProfiles(): DeepSeekProfile[] {

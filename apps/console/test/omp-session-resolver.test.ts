@@ -7,7 +7,7 @@
  * `~/.claude/projects/*` convention (`-home-user-dev-foo`) this module was
  * originally written to mirror. Getting this wrong doesn't throw — it just
  * makes findLatestOmpSessionId() silently return null for every case under
- * $HOME (virtually all real Codeman cases), so continuation pinning quietly
+ * $HOME (virtually all real Reverie cases), so continuation pinning quietly
  * degraded to omp's own ambiguous `--continue` while appearing to work in
  * manual testing done entirely under /tmp (which sits outside $HOME and was
  * mangled correctly by coincidence).
@@ -30,7 +30,7 @@ import { resolveOmpConfigForCreate } from '../src/web/routes/session-routes.js';
 describe('mangleOmpWorkingDir', () => {
   it('strips the home prefix before dash-replacing a home-relative path', () => {
     const home = homedir();
-    expect(mangleOmpWorkingDir(join(home, 'codeman-cases', 'testcase'))).toBe('-codeman-cases-testcase');
+    expect(mangleOmpWorkingDir(join(home, 'reverie-cases', 'testcase'))).toBe('-reverie-cases-testcase');
   });
 
   it('dash-replaces a path outside $HOME as-is', () => {
@@ -57,14 +57,14 @@ describe('mangleOmpWorkingDir', () => {
 });
 
 describe('findLatestOmpSessionId', () => {
-  const sessionDir = join(homedir(), '.omp', 'agent', 'sessions', '-codeman-cases-testcase');
+  const sessionDir = join(homedir(), '.omp', 'agent', 'sessions', '-reverie-cases-testcase');
 
   afterEach(() => {
     rmSync(join(homedir(), '.omp'), { recursive: true, force: true });
   });
 
   it('finds the newest session file under a home-relative workingDir', () => {
-    const workingDir = join(homedir(), 'codeman-cases', 'testcase');
+    const workingDir = join(homedir(), 'reverie-cases', 'testcase');
     mkdirSync(sessionDir, { recursive: true });
     writeFileSync(join(sessionDir, '2026-08-27T17-15-57-989Z_older-id.jsonl'), '{}');
     const newer = join(sessionDir, '2026-08-27T17-31-08-001Z_newer-id.jsonl');
@@ -116,8 +116,8 @@ describe('resolveOmpConfigForCreate', () => {
   // uuid, not left as the ambiguous continueSession flag alone. This was the
   // one path flagged by review as having zero coverage despite being the
   // exact mechanism the whole resolver module exists to serve.
-  const workingDir = join(homedir(), 'codeman-cases', 'resume-test');
-  const sessionDir = join(homedir(), '.omp', 'agent', 'sessions', '-codeman-cases-resume-test');
+  const workingDir = join(homedir(), 'reverie-cases', 'resume-test');
+  const sessionDir = join(homedir(), '.omp', 'agent', 'sessions', '-reverie-cases-resume-test');
 
   afterEach(() => {
     rmSync(join(homedir(), '.omp'), { recursive: true, force: true });

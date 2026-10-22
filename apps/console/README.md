@@ -1,11 +1,27 @@
 # Reverie Console
 
 Reverie's company dashboard and agent session runtime, maintained as part of the
-[Reverie monorepo](../../README.md). It is an independent fork of the modified
-Codeman console; [UPSTREAM.md](UPSTREAM.md) records provenance and the original
-[MIT license](LICENSE) and attribution remain intact.
+[Reverie monorepo](../../README.md). [UPSTREAM.md](UPSTREAM.md) records its
+provenance; the original [MIT license](LICENSE) and attribution remain intact.
 
-Use Node 22 or newer:
+Install the complete application from the repository root:
+
+```sh
+nix profile install .#default
+reverie web
+```
+
+Build the container with `nix build .#dockerImage`. See the
+[monorepo instructions](../../README.md) for running it and configuring credentials.
+Update by reviewing monorepo changes and rebuilding; the inherited upstream
+self-updater is disabled.
+
+The command is `reverie`. State defaults to `~/.reverie`, with a `reverie` tmux
+socket. Set `REVERIE_INSTANCE`, `REVERIE_DATA_DIR`, `REVERIE_TMUX_SOCKET` and
+`REVERIE_PORT` for an isolated deployment. Set `REVERIE_CASES_PATH` to choose a
+workspace root. Environment variables use the `REVERIE_*` prefix.
+
+For console development, use Node 22 or newer:
 
 ```sh
 npm ci
@@ -13,23 +29,17 @@ npm run build
 node dist/index.js web
 ```
 
-The installed command is `reverie`; `fleet` and `codeman` remain compatibility
-aliases. Reverie defaults to `~/.fleet` and a separate `fleet` tmux socket. Set
-`REVERIE_INSTANCE`, `REVERIE_DATA_DIR`, `REVERIE_TMUX_SOCKET` and `REVERIE_PORT` for an
-isolated deployment. Existing `CODEMAN_*` environment variables, API headers and
-agent tooling remain compatible; explicit `REVERIE_*` settings take precedence.
-Existing Codeman state is never migrated or modified automatically. Internal
-protocol names and the historical case-directory spelling remain compatible;
-use `REVERIE_CASES_PATH` to choose a separate workspace root (the image uses `/scratch/cases`).
-
-Update Reverie by reviewing monorepo changes and rebuilding the image. Installation
-never starts a server, and the inherited upstream self-updater is disabled.
+Every permanent expert uses the same employee and memory model. Positions such as
+CTO and COO are role labels. They grant no authority automatically: the owner
+assigns capabilities such as employee recovery explicitly, and host keeper/admin
+grants name exact employee IDs. The owner may choose any expert as the briefing
+coordinator; that scheduling choice grants no permissions.
 
 The Company panel manages permanent employees, positions, expertise, curated
 notes, expert invitations, nightly research and CTO briefings. Research defaults
 to a 60-minute budget, with an owner-selected timezone and schedule. It is off
 until configured by the owner. Each cycle uses a fresh dedicated session and
-workspace under `~/scratch/agent-fleet/research` (`/scratch/research` in the image;
+workspace under `~/scratch/reverie/research` (`/scratch/research` in the image;
 `REVERIE_RESEARCH_ROOT` overrides it); it never resumes an employee's private conversation. Completed reports
 and honest failures remain visible after restart. Research ideas remain hypotheses
 until corroborated independently. Standard local provider sessions with a declared
@@ -50,10 +60,9 @@ belongs to the project in each account, not to one conversation.
 
 For MCP over stdio, use [config/mcp-client.json](config/mcp-client.json) in your
 MCP client's configuration. It runs the locally installed `reverie mcp`; ensure
-`reverie` is on that client's PATH. Explicitly set `REVERIE_API_URL` or the compatible
-`CODEMAN_API_URL` in the MCP client's inherited environment to select the intended
+`reverie` is on that client's PATH. Explicitly set `REVERIE_API_URL` in the MCP client's inherited environment to select the intended
 Reverie server. No server URL is guessed. If authentication is enabled, supply
-`REVERIE_PASSWORD` or `CODEMAN_PASSWORD` through the client's secret environment,
+`REVERIE_PASSWORD` through the client's secret environment,
 outside the repository. This private fork has no registry publication identity
 and the example never downloads an upstream package.
 

@@ -22,7 +22,7 @@
  *   comes from the participants) and stays between those two: once one has left,
  *   nobody posts. A group DM (three to MAX_DM_PARTICIPANTS) may be named, takes new
  *   participants and lets one leave, and any number of them may share people.
- * - An ordinary room sits in a `workspace` (a Codeman case or project; the rail icon)
+ * - An ordinary room sits in a `workspace` (a Reverie case or project; the rail icon)
  *   under an optional `category`, and can be archived: read-only, kept for history.
  * - `userReadAt` is the user's read cursor; `unreadFor()` counts what came after it.
  */
@@ -186,7 +186,7 @@ export interface ChatRoom {
   kind?: 'dm';
   /** A DM's participants, sorted: `user` and/or session ids (two, or a group of up to MAX_DM_PARTICIPANTS). */
   dm?: string[];
-  /** An ordinary room's workspace (a Codeman case or project); absent = the default one. */
+  /** An ordinary room's workspace (a Reverie case or project); absent = the default one. */
   workspace?: string;
   /** An ordinary room's category heading inside its workspace. */
   category?: string;

@@ -3,23 +3,21 @@
 #
 #   reverie-restore --dry-run              show what would be copied or differs
 #   reverie-restore                        restore home files (credentials, configs, OpenCode DB)
-#   reverie-restore --apply-image-diffs    also copy rescued cto/console files that differ from
+#   reverie-restore --apply-image-diffs    also copy rescued reverie/console files that differ from
 #                                          the image (only needed if the image was built from
 #                                          the repo instead of the rescue; NOT durable)
 #
 # Run as the container user, e.g. on the host:
-#   REVERIE_CONTAINER_NAME=reverie-live ~/.local/libexec/reverie/fleet-container \
+#   REVERIE_CONTAINER_NAME=reverie-live ~/.local/libexec/reverie/reverie-container \
 #     exec bash /scratch/repos/reverie/scripts/reverie-restore --dry-run
 # Never deletes anything: an existing, different destination is kept as NAME.pre-restore-TIMESTAMP.
 # Options: --rescue DIR [REVERIE_RESCUE_DIR, required if unset]  --home DIR [$HOME]
-#          --opt DIR [/opt/fleet]  --force (restore the OpenCode DB although OpenCode runs)
+#          --opt DIR [/opt/reverie]  --force (restore the OpenCode DB although OpenCode runs)
 set -euo pipefail
-# REVERIE_* is the name; the older FLEET_* spelling is still read for one release (the new name wins).
-while IFS= read -r _old; do _new="REVERIE_${_old#FLEET_}"; [[ -n "${!_new:-}" ]] || export "$_new=${!_old}"; done < <(compgen -e | grep '^FLEET_' || true)
 
 rescue="${REVERIE_RESCUE_DIR:-}"
 home="$HOME"
-opt=/opt/fleet
+opt=/opt/reverie
 dry=0
 apply_image=0
 force=0
@@ -100,7 +98,7 @@ compare() {
   echo "$label: $differ file(s) differ from the rescued live copy"
 }
 echo "== Image contents vs. the rescued live copies"
-compare "$rescue/opt-fleet-python/site-packages/cto" "$opt/python/lib/python3.11/site-packages/cto" cto
+compare "$rescue/opt-reverie-python/site-packages/cto" "$opt/python/lib/python3.11/site-packages/reverie" reverie
 compare "$rescue/opt-console" "$opt/apps/console" console
 
 echo "Summary: $restored to restore, $kept already identical, $skipped skipped."

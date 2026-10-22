@@ -6,7 +6,7 @@
  * (builds its own DOM) so it needs no index.html surgery beyond the script tag
  * and button; integrates with the existing App Settings modal by injecting a
  * "Users" tab (admins in multi-user mode only). Live-refreshes on the SSE
- * admin:usersChanged event (wired in app.js → window.codemanAdmin.onUsersChanged).
+ * admin:usersChanged event (wired in app.js → window.reverieAdmin.onUsersChanged).
  *
  * @dependency app.js (window.app), settings-ui.js (App Settings modal + tab switch)
  * @loadorder after settings-ui.js / ultracode-panel.js, before session-ui.js
@@ -387,7 +387,7 @@
       return;
     }
     apUsersCache = users;
-    const meName = (window.__codemanUser || {}).username;
+    const meName = (window.__reverieUser || {}).username;
     const rows = users
       .map((u) => {
         const st = u.stats || {};
@@ -526,7 +526,7 @@
   }
 
   function openAdminPanel() {
-    const me = window.__codemanUser || {};
+    const me = window.__reverieUser || {};
     if (!me.multiUser || me.role !== 'admin') return;
     const el = buildAdminPanel();
     el.querySelector('#apIdentity').textContent = `signed in as ${me.username} (admin)`;
@@ -551,10 +551,10 @@
     } catch {
       /* server may be pre-auth */
     }
-    window.__codemanUser = me || { username: 'admin', role: 'admin', multiUser: false };
-    document.dispatchEvent(new CustomEvent('codeman:me', { detail: window.__codemanUser }));
-    if (window.__codemanUser.mustChangePassword) openChangePassword(true);
-    if (window.__codemanUser.multiUser && window.__codemanUser.role === 'admin') {
+    window.__reverieUser = me || { username: 'admin', role: 'admin', multiUser: false };
+    document.dispatchEvent(new CustomEvent('reverie:me', { detail: window.__reverieUser }));
+    if (window.__reverieUser.mustChangePassword) openChangePassword(true);
+    if (window.__reverieUser.multiUser && window.__reverieUser.role === 'admin') {
       injectUsersTab();
       // Reveal the big header Admin Panel button (template ships it hidden).
       const btn = document.getElementById('adminPanelBtn');
@@ -568,5 +568,5 @@
     boot();
   }
 
-  window.codemanAdmin = { openChangePassword, renderUsers, openAdminPanel, onUsersChanged };
+  window.reverieAdmin = { openChangePassword, renderUsers, openAdminPanel, onUsersChanged };
 })();

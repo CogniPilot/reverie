@@ -48,18 +48,18 @@ function boot(deleteOk = true) {
     { url: 'http://localhost/', runScripts: 'outside-only' }
   );
   const win = dom.window as unknown as Window &
-    typeof globalThis & { app: AppLike; CodemanApp: new () => AppLike; confirm: () => boolean };
+    typeof globalThis & { app: AppLike; ReverieApp: new () => AppLike; confirm: () => boolean };
 
   // webview-tabs.js is a prototype mixin, so it needs the class it extends plus the
   // escapeHtml global from constants.js. Everything else it touches is stubbed.
   // One eval, not three: lexical declarations in a global eval do not survive into
   // the next one, and the class must be a window property for the same reason.
   (win as unknown as { eval: (s: string) => void }).eval(
-    ['window.CodemanApp = class CodemanApp {};', CONSTANTS, WEBVIEW_TABS].join('\n')
+    ['window.ReverieApp = class ReverieApp {};', CONSTANTS, WEBVIEW_TABS].join('\n')
   );
 
   const deleted: string[] = [];
-  const app = new win.CodemanApp();
+  const app = new win.ReverieApp();
   app.webviews = new Map([
     ['id-a', { id: 'id-a', name: 'Bio Dashboard', url: 'https://box.ts.net:4000', icon: '📈' }],
     ['id-b', { id: 'id-b', name: 'Grafana', url: 'http://127.0.0.1:3000/d/x' }],

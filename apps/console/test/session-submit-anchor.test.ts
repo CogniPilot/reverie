@@ -1,5 +1,5 @@
 /**
- * @fileoverview The pane's last-Enter timestamp must survive a Codeman restart.
+ * @fileoverview The pane's last-Enter timestamp must survive a Reverie restart.
  *
  * `start()` resets `claudeSessionId` to the launch id even when re-attaching to
  * a mux session whose CLI has since moved on (a `/clear` before the restart), so

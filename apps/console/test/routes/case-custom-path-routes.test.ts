@@ -4,7 +4,7 @@
  * Port: N/A (app.inject()).
  *
  * This suite deletes and rewrites the linked-cases registry. Under test/setup.ts that file lives in a
- * throwaway HOME; a raw `npx vitest` (no setup) would reach the real ~/.codeman, so every test refuses
+ * throwaway HOME; a raw `npx vitest` (no setup) would reach the real ~/.reverie, so every test refuses
  * to start there. Each test's folders sit in a fresh mkdtemp dir, and everything is removed through
  * safeRmHomeTree, so a run can only ever delete what it created.
  */
@@ -27,9 +27,9 @@ import { dataPath } from '../../src/config/instance.js';
 import { safeRmHomeTree } from '../mocks/index.js';
 
 const LINKED = () => dataPath('linked-cases.json');
-const CASES_DIR = () => join(homedir(), 'codeman-cases');
+const CASES_DIR = () => join(homedir(), 'reverie-cases');
 /** test/setup.ts's temp HOME (its prefix is pinned by test/test-env-isolation.test.ts). */
-const sandboxed = () => basename(homedir()).startsWith('codeman-vitest-');
+const sandboxed = () => basename(homedir()).startsWith('reverie-vitest-');
 let workDir = '';
 const work = () => workDir;
 const linked = (): Record<string, string> => (existsSync(LINKED()) ? JSON.parse(readFileSync(LINKED(), 'utf8')) : {});
@@ -46,7 +46,7 @@ beforeEach(() => {
   workDir = realpathSync(mkdtempSync(join(homedir(), 'case-custom-path-')));
 });
 afterEach(() => {
-  delete process.env.CODEMAN_MULTIUSER;
+  delete process.env.REVERIE_MULTIUSER;
   if (workDir) safeRmHomeTree(workDir);
   workDir = '';
   if (sandboxed()) safeRmHomeTree(LINKED());
@@ -82,10 +82,10 @@ describe('POST /api/cases with a custom path', () => {
     expect(existsSync(join(work(), 'empty-one', 'CLAUDE.md'))).toBe(true);
   });
 
-  it('leaves the cases directory alone: nothing is created under codeman-cases', async () => {
+  it('leaves the cases directory alone: nothing is created under reverie-cases', async () => {
     const { app } = await createRouteTestHarness(registerCaseRoutes);
     await create(app, { name: 'elsewhere', path: join(work(), 'elsewhere') });
-    expect(existsSync(join(homedir(), 'codeman-cases', 'elsewhere'))).toBe(false);
+    expect(existsSync(join(homedir(), 'reverie-cases', 'elsewhere'))).toBe(false);
   });
 
   it('refuses a folder that already has files (409) and touches nothing', async () => {
@@ -154,7 +154,7 @@ describe('POST /api/cases with a custom path', () => {
     const { app } = await createRouteTestHarness(registerCaseRoutes);
     const res = await create(app, { name: 'plain-case' });
     expect(res.statusCode).toBe(200);
-    expect(existsSync(join(homedir(), 'codeman-cases', 'plain-case', 'CLAUDE.md'))).toBe(true);
+    expect(existsSync(join(homedir(), 'reverie-cases', 'plain-case', 'CLAUDE.md'))).toBe(true);
     expect(linked()).toEqual({});
     safeRmHomeTree(join(CASES_DIR(), 'plain-case'));
   });
@@ -184,7 +184,7 @@ describe('POST /api/cases with a custom path', () => {
   });
 
   it('multi-user: a non-admin is refused (403) and nothing is created; an admin is allowed', async () => {
-    process.env.CODEMAN_MULTIUSER = '1';
+    process.env.REVERIE_MULTIUSER = '1';
     const user = await createRouteTestHarness(registerCaseRoutes, { authUser: { username: 'bob', role: 'user' } });
     const denied = await create(user.app, { name: 'bobs', path: join(work(), 'bobs') });
     expect(denied.statusCode).toBe(403);

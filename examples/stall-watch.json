@@ -4,7 +4,7 @@
   },
   "api_url": "http://127.0.0.1:3000",
   "opencode_db": "~/.local/share/opencode/opencode.db",
-  "tmux_socket": "fleet",
+  "tmux_socket": "reverie",
   "state_file": "/instances/<instance>/runtime/stall-watch-state.json",
   "log_file": "/instances/<instance>/runtime/stall-watch.jsonl",
   "pause_file": "/instances/<instance>/runtime/stall-watch-paused",
@@ -18,7 +18,7 @@
   "gpu_lock": "~/.cache/gpu.lock",
   "hold_files": [
     "~/.config/reverie/gpu.hold",
-    "~/.cache/cto.hold"
+    "~/.cache/reverie.hold"
   ],
   "busy_stall_minutes": 6,
   "tool_stall_minutes": 30,

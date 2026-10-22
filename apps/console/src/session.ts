@@ -536,7 +536,7 @@ export class Session extends EventEmitter {
   private _wireActivitySettleUntil: number;
   private _claudeSessionId: string | null = null;
   // Set only when the id came from the CLI's own UserPromptSubmit/Stop hook
-  // payload, keyed on this pane's $CODEMAN_SESSION_ID. That binding is a fact,
+  // payload, keyed on this pane's $REVERIE_SESSION_ID. That binding is a fact,
   // not a correlation: it never consults cwd, so a sibling pane on the same
   // folder cannot steal it. Runtime-only — a restart must re-earn it from the
   // next hook rather than trust a persisted claim.
@@ -700,7 +700,7 @@ export class Session extends EventEmitter {
    */
   private _closing = false;
   /**
-   * This session was rebuilt from the tmux socket rather than from Codeman's
+   * This session was rebuilt from the tmux socket rather than from Reverie's
    * own records, so its `remote`/`docker` metadata is missing rather than known
    * to be absent. See {@link MuxSession.discovered}.
    */
@@ -839,7 +839,7 @@ export class Session extends EventEmitter {
       name?: string;
       /**
        * Who owns the name (see `SessionNameSource`). Omitted, it is inferred
-       * from the name: Codeman's own `w<n>-<case>` placeholders (or no name)
+       * from the name: Reverie's own `w<n>-<case>` placeholders (or no name)
        * stay eligible for auto-naming, anything else counts as the user's.
        */
       nameSource?: SessionNameSource;
@@ -947,7 +947,7 @@ export class Session extends EventEmitter {
     // For omp and codex, `claudeSessionId` doubles as the generic "external
     // transcript id" alias key mergeUnifiedSessions() folds a history row into
     // its owning session by: each mints its OWN thread id, unrelated to this
-    // Codeman id, so without this the conversation's Past-Sessions row (keyed by
+    // Reverie id, so without this the conversation's Past-Sessions row (keyed by
     // that thread id) would never merge with its own live/persisted row (keyed
     // by this id) — it would just show up a second time. For codex a duplicate
     // is worse than cosmetic: the stale row still resumes, so clicking it starts
@@ -1273,7 +1273,7 @@ export class Session extends EventEmitter {
   // that conveys a post-/clear conversation switch.
   //
   // `firstHand` marks an id that came from the CLI process itself — a hook
-  // payload whose delivery was keyed on this pane's $CODEMAN_SESSION_ID. Only
+  // payload whose delivery was keyed on this pane's $REVERIE_SESSION_ID. Only
   // those extend the chain: a history-correlated guess must never be able to
   // write a foreign conversation into this pane's permanent record.
   adoptClaudeSessionId(newId: string, options: { firstHand?: boolean } = {}): void {
@@ -1324,7 +1324,7 @@ export class Session extends EventEmitter {
    *
    * The fourth is a session rebuilt from the socket. Absent `remote`/`docker`
    * normally means "this is local", but on a discovered record it only means
-   * "Codeman never found the metadata": the synthetic `restored-<fragment>` id
+   * "Reverie never found the metadata": the synthetic `restored-<fragment>` id
    * matches no `state.json` entry, so a remote session rediscovered after
    * `mux-sessions.json` was lost arrives looking local, and its next transport
    * drop would be published as an agent exit. Unproven locality fails closed.
@@ -1334,7 +1334,7 @@ export class Session extends EventEmitter {
     return this._useMux && this._muxSession !== null && !this._remote && !this._docker;
   }
 
-  /** What Codeman last observed of this pane's agent, or undefined for UNKNOWN. */
+  /** What Reverie last observed of this pane's agent, or undefined for UNKNOWN. */
   get paneExit(): PaneExit | undefined {
     return this._paneExit ?? undefined;
   }
@@ -1468,7 +1468,7 @@ export class Session extends EventEmitter {
    * Prompt-cache state of the main conversation as Claude Code last reported it on the
    * statusline (v2.1.251+), fed by `POST /api/status-telemetry`. Null until the first
    * report. It rides `toState()` for the Session Options readout and is restored on a
-   * Codeman restart (constructor `promptCache`) so the row is not blank until the pane's
+   * Reverie restart (constructor `promptCache`) so the row is not blank until the pane's
    * next render; the readout is time-aware, so a value whose `expiresAt` has passed renders
    * as cold rather than as a stale warm.
    */
@@ -1646,7 +1646,7 @@ export class Session extends EventEmitter {
   static fullAccessCheckRetries = 5;
 
   /**
-   * Fill this session's unset CLI bypass switches inside the fleet container
+   * Fill this session's unset CLI bypass switches inside the reverie container
    * (full-access-default.ts). Runs before every local launch and relaunch, so a session
    * created, moved or recovered without the switch still starts with full access, and the
    * filled config is what `toState()` persists. True when the config changed.
@@ -1676,7 +1676,7 @@ export class Session extends EventEmitter {
   }
 
   /**
-   * A few seconds after a local launch inside the fleet container, read the real argv of the
+   * A few seconds after a local launch inside the reverie container, read the real argv of the
    * pane's process tree (the CLI runs below the pane's `bash -c` launcher) and report any
    * expected bypass flag that is missing: logged as a `full_access_missing` lifecycle event
    * and emitted as `fullAccessMissing` (the server posts it to #reverie and pushes it to the
@@ -1758,7 +1758,7 @@ export class Session extends EventEmitter {
    * The full selection incl. bookkeeping, for state.json ONLY (`__customModel`, the
    * same disk-only convention as `getEnvOverridesForPersist()`). Carries no env values,
    * so nothing secret lands on disk; recovery re-derives them from the endpoint store.
-   * Without this a Codeman restart left the pane on the custom endpoint (tmux keeps
+   * Without this a Reverie restart left the pane on the custom endpoint (tmux keeps
    * its `setenv`s) while `customModel` came back undefined, so the state was wrong and
    * clearing had nothing to unset. Must NOT be included in any API-bound serializer.
    */
@@ -1967,7 +1967,7 @@ export class Session extends EventEmitter {
     }
   }
 
-  /** Restore auto-resume state (and a pending schedule) after Codeman restart. */
+  /** Restore auto-resume state (and a pending schedule) after Reverie restart. */
   restoreAutoResume(enabled: boolean, resumeAt?: number): void {
     this._autoOps.restoreAutoResume(enabled, resumeAt);
   }
@@ -2140,7 +2140,7 @@ export class Session extends EventEmitter {
       displayModel: this.displayModel,
       // COD-118: runtime-only — surfaced so the frontend can require explicit user
       // intent before restarting a crash-looped session. Deliberately NOT restored
-      // by the constructor: a Codeman restart starts with a fresh breaker so boot
+      // by the constructor: a Reverie restart starts with a fresh breaker so boot
       // recovery can re-attach.
       respawnBlocked: this._respawnBlocked || undefined,
       // Ark0N/Codeman#446 — the agent in this pane has exited, published here so
@@ -2168,7 +2168,7 @@ export class Session extends EventEmitter {
    * secrets — losing them across a restart would silently move a session back
    * to the default Claude account, #255) are included. `OPENCODE_*` keys are
    * filtered out because the schema permits them and they can carry secrets
-   * (e.g., OPENCODE_API_KEY); secrets must not land in `~/.codeman/state.json`.
+   * (e.g., OPENCODE_API_KEY); secrets must not land in `~/.reverie/state.json`.
    * Must NOT be included in any API-bound serializer — see toState() comment.
    */
   getEnvOverridesForPersist(): Record<string, string> | undefined {
@@ -2183,9 +2183,9 @@ export class Session extends EventEmitter {
           'REVERIE_RESEARCH_CYCLE_ID',
           'REVERIE_EMPLOYEE_ID',
           'REVERIE_RESEARCH_DEADLINE_AT',
-          'FLEET_RESEARCH_CYCLE_ID',
-          'FLEET_EMPLOYEE_ID',
-          'FLEET_RESEARCH_DEADLINE_AT',
+          'REVERIE_RESEARCH_CYCLE_ID',
+          'REVERIE_EMPLOYEE_ID',
+          'REVERIE_RESEARCH_DEADLINE_AT',
         ].includes(key) ||
         (this.subscriptionProfile && key === 'XDG_DATA_HOME')
       )
@@ -2367,7 +2367,7 @@ export class Session extends EventEmitter {
     // the host's tmux server or agent CLI. Production still uses the real mux.
     if (!IS_TEST_MODE) {
       // Prevent tmux from letting the newest browser attach dictate global window
-      // size; accepted Codeman resize events update it explicitly below.
+      // size; accepted Reverie resize events update it explicitly below.
       mux.setManualWindowSize?.(this._muxSession!.muxName);
     }
     // Query existing tmux window size so re-attach matches (avoids flicker from 120x40 default).
@@ -2623,7 +2623,7 @@ export class Session extends EventEmitter {
     const chainTail = this._claudeSessionChain[this._claudeSessionChain.length - 1];
     const candidates = [chainTail, options.resumeSessionId, this.id].filter((v): v is string => !!v);
     for (const candidate of candidates) {
-      // A session Codeman DISCOVERED on the socket rather than created carries a
+      // A session Reverie DISCOVERED on the socket rather than created carries a
       // synthetic `restored-<fragment>` id, which fails claude's `uuid` token
       // pattern. The renderer would silently drop the resume flag and emit the
       // unpinned command, so say so here rather than letting the caller believe
@@ -2710,7 +2710,7 @@ export class Session extends EventEmitter {
     const resolvedId = resolveAndClaimOmpSessionId(this.workingDir);
     if (resolvedId) {
       this._ompConfig = { ...this._ompConfig, resumeSessionId: resolvedId };
-      // Alias omp's own session uuid to this Codeman id — see the
+      // Alias omp's own session uuid to this Reverie id — see the
       // constructor's claudeSessionId comment for why this field is the
       // (generically-named) mechanism that folds a Past-Sessions row back
       // into its live/persisted session instead of duplicating it.
@@ -2780,7 +2780,7 @@ export class Session extends EventEmitter {
     //     modes (X10, button-event, any-event, UTF-8, SGR, alt-scroll). Once on,
     //     xterm.js forwards wheel events to the CLI instead of scrolling the
     //     viewport, so the conversation is in scrollback but unreachable.
-    //     (Focus events at ?1004 are left alone — codeman uses them for
+    //     (Focus events at ?1004 are left alone — reverie uses them for
     //     active-tab detection.)
     // Strip them at the source so neither the persisted buffer nor the live
     // SSE/WS stream carries them, keeping everything in the main buffer with
@@ -2836,7 +2836,7 @@ export class Session extends EventEmitter {
       }
     }
 
-    // Scan terminal output for attachment requests. `codeman://attach?...` is an
+    // Scan terminal output for attachment requests. `reverie://attach?...` is an
     // explicit magic link (all modes); Codex generated images report
     // `Saved to: file://...` — that scanner (and its relaxed trust policy) is
     // only enabled for codex-mode sessions. The web server applies the trust
@@ -3038,13 +3038,13 @@ export class Session extends EventEmitter {
         // `_setupOrAttachMuxSession()`'s dead-pane branch) may have JUST aliased
         // this to omp's own session uuid — that already-resolved id must win
         // over the generic `this.id` fallback, or this line clobbers it back
-        // to the Codeman id
+        // to the Reverie id
         // on every single respawn. codex needs the same fallback for the same
         // reason: its thread id lives in `_codexConfig`, so without it every
         // respawn drops a resumed codex session's alias and its Past-Sessions
         // row springs back as a duplicate that still resumes.
         // ⚠️ A RESTORED mux session is the one case where the launch id is a
-        // lie: the CLI never stopped, so a `/clear` before the Codeman restart
+        // lie: the CLI never stopped, so a `/clear` before the Reverie restart
         // already moved it to a conversation `this.id` knows nothing about. The
         // persisted chain's tail is that conversation, reported first-hand by
         // the CLI's own hook, so it outranks every fallback here. A NEW pane has
@@ -3133,7 +3133,7 @@ export class Session extends EventEmitter {
         throw new Error(`${getModeLabel(this.mode)} sessions require tmux. Direct PTY fallback is not supported.`);
       }
       try {
-        // Pass --session-id to use the SAME ID as the Codeman session
+        // Pass --session-id to use the SAME ID as the Reverie session
         // This ensures subagents can be directly matched to the correct tab.
         // No plan-usage statusLine exporter on this path: the ephemeral
         // `--settings` injection (resolveStatusLineCliCommand, hooks-config.ts)
@@ -3309,7 +3309,7 @@ export class Session extends EventEmitter {
 
   /**
    * Answer Claude's workspace-trust dialog, which blocks a fresh case until
-   * someone presses Enter. Codeman sessions run permission-skipping or
+   * someone presses Enter. Reverie sessions run permission-skipping or
    * classifier-guarded modes, so the answer is always "yes, I trust this folder".
    *
    * Reads the RENDERED SCREEN rather than the chunk that just arrived. tmux
@@ -3417,7 +3417,7 @@ export class Session extends EventEmitter {
     // new status line does not rescue it either (tmux repaints partially, so the
     // complete line reaches the PTY only every few tens of seconds). An unbroken run
     // of repaints is the signal that survives. See session-activity.ts for the
-    // measurement. This needs a pane Codeman can read: without a glyph to arm the idle
+    // measurement. This needs a pane Reverie can read: without a glyph to arm the idle
     // confirmation, a session latches busy forever. A CLI that declares work detection
     // supplies its own glyph, and the non-external modes keep the run they always had.
     if (workDetect || !isExternalCliMode(this.mode)) {
@@ -3618,7 +3618,7 @@ export class Session extends EventEmitter {
   /**
    * Re-read the screen of an idle pane every PANE_DIALOG_SCAN_MS. The working probe
    * runs only at transitions, so a dialog that opens while the session already sits
-   * idle (or one left open across a Codeman restart) would otherwise never be seen.
+   * idle (or one left open across a Reverie restart) would otherwise never be seen.
    * One capture per idle session per interval; a working or pane-less session costs
    * nothing.
    */
@@ -3800,7 +3800,7 @@ export class Session extends EventEmitter {
    * Arm the launch settle (`_settlePaneStartup`) for a pane `startInteractive()` just
    * started or re-attached, when one applies:
    * - a NEW pane of an external CLI, whose TUI has no ❯ for the Claude wait to find;
-   * - a RESTORED pane (Codeman restart, auto-reattach, tile Attach) of a CLI that
+   * - a RESTORED pane (Reverie restart, auto-reattach, tile Attach) of a CLI that
    *   declares no `capabilities.workDetect`. It is `busy` from `_resetBuffers()` like a
    *   new pane, and with no composer glyph to arm `_confirmIdle()` nothing else would
    *   ever settle it. A restored claude or codex pane is left to its glyph, which
@@ -3848,7 +3848,7 @@ export class Session extends EventEmitter {
    * A brand-new omp session (never yet respawned, so
    * {@link _pinOmpRespawnId} has never run) has no captured
    * omp-native session id: `_claudeSessionId` still defaults to this
-   * session's OWN Codeman id from the constructor. Until something aliases
+   * session's OWN Reverie id from the constructor. Until something aliases
    * it, the omp history scan's row for this exact conversation (keyed by
    * omp's own uuid) merges with nothing and shows up a second time. The
    * first turn going idle is the first moment omp has definitely written
@@ -4548,7 +4548,7 @@ export class Session extends EventEmitter {
   }
 
   // Parse Claude Code CLI info from terminal startup output
-  // Extracts version, model, and account type for display in Codeman UI
+  // Extracts version, model, and account type for display in Reverie UI
   // Note: Expects cleanData with ANSI codes already stripped by caller
   private parseClaudeCodeInfo(cleanData: string): void {
     // Only parse once per session (during startup)
@@ -4700,7 +4700,7 @@ export class Session extends EventEmitter {
 
   /**
    * A prompt was submitted, reported by the CLI's own UserPromptSubmit hook.
-   * `_trackSubmit` only sees input that flows through Codeman's write path, so
+   * `_trackSubmit` only sees input that flows through Reverie's write path, so
    * a pane the user drives by attaching to tmux directly never stamped this and
    * `lastSubmitAt` stayed 0 for its whole life.
    */

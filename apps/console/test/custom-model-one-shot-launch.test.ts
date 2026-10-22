@@ -32,11 +32,11 @@ function bootApp() {
     </body>`,
     { url: 'http://localhost/', runScripts: 'dangerously' }
   );
-  const win = dom.window as unknown as Window & typeof globalThis & { CodemanApp: new () => any };
-  (win as unknown as { eval: (s: string) => void }).eval('window.CodemanApp = function CodemanApp() {};');
+  const win = dom.window as unknown as Window & typeof globalThis & { ReverieApp: new () => any };
+  (win as unknown as { eval: (s: string) => void }).eval('window.ReverieApp = function ReverieApp() {};');
   (win as unknown as { eval: (s: string) => void }).eval(CONSTANTS_JS);
   (win as unknown as { eval: (s: string) => void }).eval(SESSION_UI_JS);
-  const app = new win.CodemanApp();
+  const app = new win.ReverieApp();
   app.cases = [{ name: 'testcase' }];
   app.terminal = { focus: () => {} };
   app.loadAppSettingsFromStorage = () => ({});
@@ -152,14 +152,14 @@ describe('_quickStartWithCustomModelConfirm', () => {
     expect(data.success).toBe(true);
     expect(data.data.sessionId).toBe('s1');
     expect(app._lastCustomModelLaunchResult).toEqual(data.data);
-    expect(win.localStorage.getItem('codeman:customModelLastUsed:codex:e')).toBe('m');
+    expect(win.localStorage.getItem('reverie:customModelLastUsed:codex:e')).toBe('m');
   });
 
   it('a plain launch with no customModel at all never touches the "last used" key (undefined endpointId/modelId would otherwise silently no-op it)', async () => {
     const { win, app } = bootApp();
     withFetch(win, () => ({ success: true, data: { sessionId: 's1' } }));
     await app._quickStartWithCustomModelConfirm({ mode: 'codex' });
-    expect(win.localStorage.getItem('codeman:customModelLastUsed:codex:undefined')).toBeNull();
+    expect(win.localStorage.getItem('reverie:customModelLastUsed:codex:undefined')).toBeNull();
   });
 
   it('confirming re-sends with confirmedSwap, returns the second response, and only THEN records "last used"', async () => {
@@ -191,7 +191,7 @@ describe('_quickStartWithCustomModelConfirm', () => {
     expect(calls).toBe(2);
     expect(data.data.sessionId).toBe('s1');
     expect(app._lastCustomModelLaunchResult.modelSwapInProgress).toBe(true);
-    expect(win.localStorage.getItem('codeman:customModelLastUsed:codex:e')).toBe('m');
+    expect(win.localStorage.getItem('reverie:customModelLastUsed:codex:e')).toBe('m');
   });
 
   it('cancelling never re-sends, reports a cancellation error, and must NEVER record "last used" for a launch that never happened', async () => {
@@ -217,7 +217,7 @@ describe('_quickStartWithCustomModelConfirm', () => {
     expect(data.success).toBe(false);
     expect(data.error).toMatch(/cancelled/i);
     expect(app._lastCustomModelLaunchResult).toBeUndefined();
-    expect(win.localStorage.getItem('codeman:customModelLastUsed:codex:e')).toBeNull();
+    expect(win.localStorage.getItem('reverie:customModelLastUsed:codex:e')).toBeNull();
   });
 });
 

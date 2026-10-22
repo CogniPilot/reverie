@@ -44,13 +44,13 @@ describe('DeepSeek status shim: provisioning', () => {
     expect(() => execFileSync(process.execPath, ['--check', path!], { stdio: 'pipe' })).not.toThrow();
   });
 
-  it('refreshes a shim written by an older Codeman, and leaves no temp file behind', () => {
+  it('refreshes a shim written by an older Reverie, and leaves no temp file behind', () => {
     const path = deepSeekStatusShimPath();
     ensureDeepSeekStatusShim();
     const current = readFileSync(path, 'utf-8');
 
     // A v1 shim from an older install: right path, stale content.
-    writeFileSync(path, '#!/usr/bin/env node\n// codeman-dsh-status-shim v1\nprocess.exit(0)\n', { mode: 0o700 });
+    writeFileSync(path, '#!/usr/bin/env node\n// reverie-dsh-status-shim v1\nprocess.exit(0)\n', { mode: 0o700 });
     resetDeepSeekStatusShimForTest();
     ensureDeepSeekStatusShim();
 
@@ -90,7 +90,7 @@ describe('DeepSeek status shim: the supervisor contract', () => {
                 return raw;
               }
             })(),
-            secret: req.headers['x-codeman-hook-secret'] as string | undefined,
+            secret: req.headers['x-reverie-hook-secret'] as string | undefined,
           });
           res.writeHead(status, { 'Content-Type': 'application/json' });
           res.end('{}');
@@ -123,8 +123,8 @@ describe('DeepSeek status shim: the supervisor contract', () => {
       const child = spawn(process.execPath, [path, ...args], {
         env: {
           ...process.env,
-          CODEMAN_API_URL: `http://127.0.0.1:${port}`,
-          CODEMAN_SESSION_ID: 'sess-from-env',
+          REVERIE_API_URL: `http://127.0.0.1:${port}`,
+          REVERIE_SESSION_ID: 'sess-from-env',
           ...env,
         },
         stdio: ['ignore', 'pipe', 'pipe'],
@@ -172,7 +172,7 @@ describe('DeepSeek status shim: the supervisor contract', () => {
     const secretFile = `${deepSeekStatusShimPath()}.secret-fixture`;
     writeFileSync(secretFile, 'rotated-secret\n', { mode: 0o600 });
     received.length = 0;
-    const out = await run(report('idle'), { CODEMAN_HOOK_SECRET_FILE: secretFile });
+    const out = await run(report('idle'), { REVERIE_HOOK_SECRET_FILE: secretFile });
     expect(out.status).toBe(0);
     expect(received[0].secret).toBe('rotated-secret');
   });
@@ -195,7 +195,7 @@ describe('DeepSeek status shim: the supervisor contract', () => {
   it('exits non-zero when the post genuinely fails, so the caller retries', async () => {
     resetDeepSeekStatusShimForTest();
 
-    // A rejecting server: transport worked, Codeman said no.
+    // A rejecting server: transport worked, Reverie said no.
     status = 500;
     received.length = 0;
     expect((await run(report('idle'))).status).not.toBe(0);
@@ -203,8 +203,8 @@ describe('DeepSeek status shim: the supervisor contract', () => {
     status = 200;
 
     // Nothing listening at all.
-    expect((await run(report('idle'), { CODEMAN_API_URL: 'http://127.0.0.1:1' })).status).not.toBe(0);
+    expect((await run(report('idle'), { REVERIE_API_URL: 'http://127.0.0.1:1' })).status).not.toBe(0);
     // No API url to post to.
-    expect((await run(report('idle'), { CODEMAN_API_URL: '' })).status).not.toBe(0);
+    expect((await run(report('idle'), { REVERIE_API_URL: '' })).status).not.toBe(0);
   });
 });

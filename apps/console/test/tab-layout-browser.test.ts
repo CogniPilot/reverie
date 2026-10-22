@@ -23,7 +23,7 @@ type Ref = { kind: 'session' | 'webview'; id: string };
 function loadHelper() {
   const context = vm.createContext({ window: {}, globalThis: {} });
   vm.runInContext(SOURCE, context, { filename: 'tab-layout-browser.js' });
-  return (context.window as any).CodemanTabLayout;
+  return (context.window as any).ReverieTabLayout;
 }
 
 const escape = (value: string) =>
@@ -224,7 +224,7 @@ describe('collapsed header alerts', () => {
 describe('per-device collapse storage', () => {
   function storage(initial: string | null = null) {
     const values = new Map<string, string>();
-    if (initial !== null) values.set('codeman:tab-groups-collapsed', initial);
+    if (initial !== null) values.set('reverie:tab-groups-collapsed', initial);
     return {
       getItem: vi.fn((key: string) => values.get(key) ?? null),
       setItem: vi.fn((key: string, next: string) => {
@@ -244,7 +244,7 @@ describe('per-device collapse storage', () => {
     const h = loadHelper();
     const local = storage('["gone","g1"]');
     expect(h.loadCollapsedGroupIds(local, ['g1', 'g2'])).toEqual({ ids: ['g1'], ok: true });
-    expect(local.setItem).toHaveBeenLastCalledWith('codeman:tab-groups-collapsed', '["g1"]');
+    expect(local.setItem).toHaveBeenLastCalledWith('reverie:tab-groups-collapsed', '["g1"]');
   });
 
   it('reports failure (all-expanded) on unreadable or unwritable storage', () => {
@@ -266,7 +266,7 @@ describe('per-device collapse storage', () => {
     for (const bad of ['{"g1":true}', 'not json', '"g1"', 'null']) {
       const local = storage(bad);
       expect(h.loadCollapsedGroupIds(local, ['g1']), bad).toEqual({ ids: [], ok: true });
-      expect(local.setItem, bad).toHaveBeenLastCalledWith('codeman:tab-groups-collapsed', '[]');
+      expect(local.setItem, bad).toHaveBeenLastCalledWith('reverie:tab-groups-collapsed', '[]');
       expect(h.saveCollapsedGroupIds(local, ['g1']), bad).toEqual({ ids: ['g1'], ok: true });
       expect(h.loadCollapsedGroupIds(local, ['g1']), bad).toEqual({ ids: ['g1'], ok: true });
     }

@@ -2,7 +2,7 @@
  * WebServer.renderIndexHtml — server-side gating of the index shell:
  *  - multi-monitor button reveal (stable class-marker, not brittle copy match)
  *  - solo (/session/:id) global injection + escaping, and settings skipped
- *  - gesture overlay availability vs. enablement (CODEMAN_GESTURE + setting)
+ *  - gesture overlay availability vs. enablement (REVERIE_GESTURE + setting)
  *  - settings read FRESH so a post-save reload doesn't render stale state
  *
  * WebServer's constructor only assigns fields (no port bind), so we construct it
@@ -115,10 +115,10 @@ function makeServer(settings: Record<string, unknown> = {}) {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const render = (server: WebServer, solo?: string): Promise<string> => (server as any).renderIndexHtml(solo);
 
-const ORIG_GESTURE = process.env.CODEMAN_GESTURE;
+const ORIG_GESTURE = process.env.REVERIE_GESTURE;
 afterEach(() => {
-  if (ORIG_GESTURE === undefined) delete process.env.CODEMAN_GESTURE;
-  else process.env.CODEMAN_GESTURE = ORIG_GESTURE;
+  if (ORIG_GESTURE === undefined) delete process.env.REVERIE_GESTURE;
+  else process.env.REVERIE_GESTURE = ORIG_GESTURE;
 });
 
 describe('WebServer.renderIndexHtml', () => {
@@ -140,7 +140,7 @@ describe('WebServer.renderIndexHtml', () => {
   it('injects the solo global and skips settings for a /session/:id window', async () => {
     const { server, readSettings } = makeServer({ showMultiMonitorButton: true });
     const html = await render(server, 'sess-123');
-    expect(html).toContain('window.__CODEMAN_SOLO__="sess-123"');
+    expect(html).toContain('window.__REVERIE_SOLO__="sess-123"');
     expect(readSettings).not.toHaveBeenCalled();
     // Solo skips settings, so the button is NOT revealed even though the setting is on.
     expect(html).toContain('btn-multimonitor--hidden');
@@ -151,7 +151,7 @@ describe('WebServer.renderIndexHtml', () => {
     // terminal like the main page does, so it needs the widths the copy strip keys on.
     const { server } = makeServer();
     const html = await render(server, 'sess-123');
-    const match = html.match(/window\.__codemanTranscriptGutter=(\{[^<]*\});/);
+    const match = html.match(/window\.__reverieTranscriptGutter=(\{[^<]*\});/);
     expect(match).not.toBeNull();
     const map = JSON.parse(match![1]) as Record<string, number>;
     expect(map.claude).toBe(2);
@@ -165,7 +165,7 @@ describe('WebServer.renderIndexHtml', () => {
     for (const solo of [undefined, 'sess-123']) {
       const { server } = makeServer();
       const html = await render(server, solo);
-      const match = html.match(/window\.__codemanTranscriptPageKeys=(\[[^<]*\]);/);
+      const match = html.match(/window\.__reverieTranscriptPageKeys=(\[[^<]*\]);/);
       expect(match).not.toBeNull();
       const modes = JSON.parse(match![1]) as string[];
       expect(modes).toContain('claude');
@@ -184,16 +184,16 @@ describe('WebServer.renderIndexHtml', () => {
   });
 
   it('exposes gesture availability but injects the bundle only when enabled', async () => {
-    process.env.CODEMAN_GESTURE = '1';
+    process.env.REVERIE_GESTURE = '1';
     let { server } = makeServer({ gestureControlEnabled: false });
     let html = await render(server);
-    expect(html).toContain('window.__codemanGestureAvailable=true');
-    expect(html).not.toContain('gesture-codeman.js');
+    expect(html).toContain('window.__reverieGestureAvailable=true');
+    expect(html).not.toContain('gesture-reverie.js');
 
     ({ server } = makeServer({ gestureControlEnabled: true }));
     html = await render(server);
-    expect(html).toContain('window.__codemanGestureAvailable=true');
-    expect(html).toContain('gesture-codeman.js');
+    expect(html).toContain('window.__reverieGestureAvailable=true');
+    expect(html).toContain('gesture-reverie.js');
   });
 
   it('reports every tool the welcome buttons, run menu and Codex tab gate on', async () => {
@@ -211,7 +211,7 @@ describe('WebServer.renderIndexHtml', () => {
     vi.mocked(isGitAvailable).mockReturnValue(true);
     const { server } = makeServer({});
     const html = await render(server);
-    const flags = JSON.parse(html.match(/window\.__codemanCliAvailable=(\{.*?\});/)![1]);
+    const flags = JSON.parse(html.match(/window\.__reverieCliAvailable=(\{.*?\});/)![1]);
     // Every key must be PRESENT, not merely truthy where installed: the client
     // treats a missing key as available, so a dropped key silently un-gates.
     expect(flags).toEqual({
@@ -234,7 +234,7 @@ describe('WebServer.renderIndexHtml', () => {
   it('reads as unavailable for a CLI disabled via the registry, even though it is installed', async () => {
     // The bug this guards: a CLI toggled off in Settings (docs/cli-enable-disable-plan.md)
     // still offered itself in the welcome screen / Run menu / mobile overview, because
-    // window.__codemanCliAvailable was built purely from each resolver's own PATH probe —
+    // window.__reverieCliAvailable was built purely from each resolver's own PATH probe —
     // it never consulted the registry's `enabled` flag at all. Installed AND enabled must
     // both hold for `isCliAvailable()` (the client-side gate every one of those surfaces
     // reads) to read true.
@@ -247,7 +247,7 @@ describe('WebServer.renderIndexHtml', () => {
     try {
       const { server } = makeServer({});
       const html = await render(server);
-      const flags = JSON.parse(html.match(/window\.__codemanCliAvailable=(\{.*?\});/)![1]);
+      const flags = JSON.parse(html.match(/window\.__reverieCliAvailable=(\{.*?\});/)![1]);
       expect(flags.codex).toBe(false); // installed, but disabled in the registry
       expect(flags.claude).toBe(true); // installed and enabled — unaffected by codex's override
     } finally {
@@ -259,7 +259,7 @@ describe('WebServer.renderIndexHtml', () => {
   it('injects the full registry catalog for every launch surface, including disabled entries', async () => {
     const { server } = makeServer({});
     const html = await render(server);
-    const catalog = JSON.parse(html.match(/window\.__codemanCliCatalog=(\[.*?\]);/)![1]) as Array<{
+    const catalog = JSON.parse(html.match(/window\.__reverieCliCatalog=(\[.*?\]);/)![1]) as Array<{
       id: string;
       label: string;
       shortBadge: string;
@@ -294,8 +294,8 @@ describe('WebServer.renderIndexHtml', () => {
     // present, with no mock needed since this reads the real stock registry.
     const { server } = makeServer({});
     const html = await render(server);
-    expect(html).toContain('window.__codemanCustomModelClis=');
-    const clis = JSON.parse(html.match(/window\.__codemanCustomModelClis=(\[.*?\]);/)![1]) as Array<{
+    expect(html).toContain('window.__reverieCustomModelClis=');
+    const clis = JSON.parse(html.match(/window\.__reverieCustomModelClis=(\[.*?\]);/)![1]) as Array<{
       id: string;
       label: string;
     }>;
@@ -311,7 +311,7 @@ describe('WebServer.renderIndexHtml', () => {
 
   it('escapeScriptJson neutralizes a literal </script>, and still round-trips as a JS literal', () => {
     // CliEntry.label is a plain string a user's own clis.json can set (up to 60
-    // chars), unlike __codemanCliAvailable's booleans-only payload, so this is
+    // chars), unlike __reverieCliAvailable's booleans-only payload, so this is
     // the one injection that needs it. Exported so this tests the pure
     // function directly rather than needing a real WebServer (which needs tmux).
     const dangerous = JSON.stringify([{ id: 'x', label: '</script><script>alert(1)</script>' }]);
@@ -337,7 +337,7 @@ describe('WebServer.renderIndexHtml', () => {
       const { server } = makeServer({});
       const html = await render(server);
       expect(html.match(/<body>/g)).toHaveLength(1);
-      const clis = JSON.parse(html.match(/window\.__codemanCustomModelClis=(\[.*?\]);/)![1]);
+      const clis = JSON.parse(html.match(/window\.__reverieCustomModelClis=(\[.*?\]);/)![1]);
       expect(clis).toEqual([{ id: 'claude', label }]);
     } finally {
       vi.mocked(enabledClis).mockImplementation(real);
@@ -348,7 +348,7 @@ describe('WebServer.renderIndexHtml', () => {
     const { server } = makeServer({});
     const html = await render(server, "sess$'x");
     expect(html.match(/<body>/g)).toHaveLength(1);
-    expect(html).toContain(`window.__CODEMAN_SOLO__="sess$'x"`);
+    expect(html).toContain(`window.__REVERIE_SOLO__="sess$'x"`);
   });
 
   it('still emits the object when nothing at all is installed', async () => {
@@ -372,8 +372,8 @@ describe('WebServer.renderIndexHtml', () => {
     }
     const { server } = makeServer({});
     const html = await render(server);
-    expect(html).toContain('window.__codemanCliAvailable=');
-    const flags = JSON.parse(html.match(/window\.__codemanCliAvailable=(\{.*?\});/)![1]);
+    expect(html).toContain('window.__reverieCliAvailable=');
+    const flags = JSON.parse(html.match(/window\.__reverieCliAvailable=(\{.*?\});/)![1]);
     expect(Object.entries(flags).every(([key, value]) => key === 'shell' || value === false)).toBe(true);
   });
 
@@ -381,17 +381,17 @@ describe('WebServer.renderIndexHtml', () => {
     vi.mocked(isCodexAvailable).mockReturnValue(true);
     const { server } = makeServer({});
     const html = await render(server, 'sess-123');
-    expect(html).not.toContain('__codemanCliAvailable');
-    expect(html).not.toContain('__codemanCliCatalog');
-    expect(html).not.toContain('__codemanCustomModelClis');
+    expect(html).not.toContain('__reverieCliAvailable');
+    expect(html).not.toContain('__reverieCliCatalog');
+    expect(html).not.toContain('__reverieCustomModelClis');
   });
 
-  it('does not expose gesture at all when CODEMAN_GESTURE is unset', async () => {
-    delete process.env.CODEMAN_GESTURE;
+  it('does not expose gesture at all when REVERIE_GESTURE is unset', async () => {
+    delete process.env.REVERIE_GESTURE;
     const { server } = makeServer({ gestureControlEnabled: true });
     const html = await render(server);
-    expect(html).not.toContain('__codemanGestureAvailable');
-    expect(html).not.toContain('gesture-codeman.js');
+    expect(html).not.toContain('__reverieGestureAvailable');
+    expect(html).not.toContain('gesture-reverie.js');
   });
 });
 
@@ -412,24 +412,24 @@ describe('WebServer.renderIndexHtml reverse-proxy base path', () => {
     const server = makeBaseServer('');
     const html = await render(server);
     expect(html).toContain('<base href="/">');
-    // At root the frontend reads a MISSING __CODEMAN_BASE__ as root, so nothing is
+    // At root the frontend reads a MISSING __REVERIE_BASE__ as root, so nothing is
     // injected and the historical output is byte-identical.
-    expect(html).not.toContain('__CODEMAN_BASE__');
+    expect(html).not.toContain('__REVERIE_BASE__');
   });
 
   it('points the base tag and the base global at a sub-path mount', async () => {
-    const server = makeBaseServer('/codeman');
+    const server = makeBaseServer('/reverie');
     const html = await render(server);
-    expect(html).toContain('<base href="/codeman/">');
-    expect(html).toContain('window.__CODEMAN_BASE__="/codeman"');
+    expect(html).toContain('<base href="/reverie/">');
+    expect(html).toContain('window.__REVERIE_BASE__="/reverie"');
     // The global rides right after <base>, before any (deferred) script.
-    expect(html.indexOf('window.__CODEMAN_BASE__')).toBeLessThan(html.indexOf('</head>'));
+    expect(html.indexOf('window.__REVERIE_BASE__')).toBeLessThan(html.indexOf('</head>'));
   });
 
   it('normalizes a raw operator prefix passed to the constructor', async () => {
-    const server = makeBaseServer('codeman/');
+    const server = makeBaseServer('reverie/');
     const html = await render(server);
-    expect(html).toContain('<base href="/codeman/">');
-    expect(html).toContain('window.__CODEMAN_BASE__="/codeman"');
+    expect(html).toContain('<base href="/reverie/">');
+    expect(html).toContain('window.__REVERIE_BASE__="/reverie"');
   });
 });

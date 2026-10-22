@@ -17,7 +17,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import {
   AGENT_CASE_MARKER_FILE,
-  AGENT_ORIGIN_CODEMAN_SKILL,
+  AGENT_ORIGIN_REVERIE_SKILL,
   AGENT_ORIGIN_SPAWNED_BY_SESSION,
   buildAgentCaseMarker,
   normalizeAgentOrigin,
@@ -28,8 +28,8 @@ import {
 
 describe('normalizeAgentOrigin', () => {
   it('accepts a short lowercase token', () => {
-    expect(normalizeAgentOrigin('codeman-skill')).toBe('codeman-skill');
-    expect(normalizeAgentOrigin('  Codeman-Skill  ')).toBe('codeman-skill');
+    expect(normalizeAgentOrigin('reverie-skill')).toBe('reverie-skill');
+    expect(normalizeAgentOrigin('  Reverie-Skill  ')).toBe('reverie-skill');
     expect(normalizeAgentOrigin('agent.v2_1')).toBe('agent.v2_1');
   });
 
@@ -48,9 +48,9 @@ describe('normalizeAgentOrigin', () => {
 
 describe('buildAgentCaseMarker', () => {
   it('keeps only the fields that were supplied', () => {
-    const marker = buildAgentCaseMarker({ createdBy: AGENT_ORIGIN_CODEMAN_SKILL });
+    const marker = buildAgentCaseMarker({ createdBy: AGENT_ORIGIN_REVERIE_SKILL });
     expect(marker.version).toBe(1);
-    expect(marker.createdBy).toBe(AGENT_ORIGIN_CODEMAN_SKILL);
+    expect(marker.createdBy).toBe(AGENT_ORIGIN_REVERIE_SKILL);
     expect(Date.parse(marker.createdAt)).not.toBeNaN();
     expect('parentSessionId' in marker).toBe(false);
     expect('mode' in marker).toBe(false);
@@ -65,7 +65,7 @@ describe('parseAgentCaseMarker', () => {
   const valid = JSON.stringify({
     version: 1,
     createdAt: '2026-09-07T10:00:00.000Z',
-    createdBy: 'codeman-skill',
+    createdBy: 'reverie-skill',
     parentSessionId: 'sess-1',
     parentSessionName: 'w1-claudeman',
     mode: 'claude',
@@ -77,7 +77,7 @@ describe('parseAgentCaseMarker', () => {
     expect(marker).toEqual({
       version: 1,
       createdAt: '2026-09-07T10:00:00.000Z',
-      createdBy: 'codeman-skill',
+      createdBy: 'reverie-skill',
       parentSessionId: 'sess-1',
       parentSessionName: 'w1-claudeman',
       mode: 'claude',
@@ -103,7 +103,7 @@ describe('writeAgentCaseMarker / readAgentCaseMarker', () => {
   let caseDir: string;
 
   beforeEach(async () => {
-    caseDir = await mkdtemp(join(tmpdir(), 'codeman-agent-case-'));
+    caseDir = await mkdtemp(join(tmpdir(), 'reverie-agent-case-'));
   });
 
   afterEach(async () => {
@@ -112,7 +112,7 @@ describe('writeAgentCaseMarker / readAgentCaseMarker', () => {
 
   it('round-trips through the case directory', async () => {
     const marker = buildAgentCaseMarker({
-      createdBy: AGENT_ORIGIN_CODEMAN_SKILL,
+      createdBy: AGENT_ORIGIN_REVERIE_SKILL,
       parentSessionId: 'sess-1',
       mode: 'claude',
     });
@@ -121,7 +121,7 @@ describe('writeAgentCaseMarker / readAgentCaseMarker', () => {
   });
 
   it('writes a note explaining the file to whoever finds it', async () => {
-    await writeAgentCaseMarker(caseDir, buildAgentCaseMarker({ createdBy: AGENT_ORIGIN_CODEMAN_SKILL }));
+    await writeAgentCaseMarker(caseDir, buildAgentCaseMarker({ createdBy: AGENT_ORIGIN_REVERIE_SKILL }));
     const raw = JSON.parse(await readFile(join(caseDir, AGENT_CASE_MARKER_FILE), 'utf-8'));
     expect(raw.note).toContain('Delete this file');
   });

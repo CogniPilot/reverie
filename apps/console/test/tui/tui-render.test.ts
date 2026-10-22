@@ -60,11 +60,11 @@ function fixture(): TuiModelStore {
     },
     {
       sessionId: 'ccc3',
-      name: 'w1-codeman',
+      name: 'w1-reverie',
       mode: 'claude',
       status: 'busy',
       isWorking: true,
-      workingDir: '/home/dev/codeman',
+      workingDir: '/home/dev/reverie',
       createdAt: NOW - 10_000_000,
       lastActivityAt: NOW,
       lastSubmitAt: NOW - 1_020_000,
@@ -136,7 +136,7 @@ describe('renderFrame structure', () => {
       '  1 w6-docs                    ! 11m│ ▲ requests: Bash(git push origin main)',
       '▶ 2 w4-api-refactor       ▲ 2m 12.3k│   1. Yes',
       " WORKING ───────────────────────────│   2. Yes, don't ask again",
-      '  3 w1-codeman           ▖ 17m 45.2k│   3. No, tell Claude what to do',
+      '  3 w1-reverie           ▖ 17m 45.2k│   3. No, tell Claude what to do',
       ' IDLE ──────────────────────────────│ y approve · n deny · digit chooses',
       '  4 w2-gallery codex            ○ 2h│',
       ' RECENT ────────────────────────────│ Actualizing... (2m 14s)',
@@ -173,8 +173,8 @@ describe('renderFrame structure', () => {
       '▶ 2 w4-api-refactor                     ▲ 2m',
       '    /home/dev/api · 12.3k',
       ' WORKING ───────────────────────────────────',
-      '  3 w1-codeman                         ▖ 17m',
-      '    /home/dev/codeman · 45.2k',
+      '  3 w1-reverie                         ▖ 17m',
+      '    /home/dev/reverie · 45.2k',
       ' IDLE ──────────────────────────────────────',
       '  4 w2-gallery codex                    ○ 2h',
       '    /home/dev/gallery · codex',
@@ -290,7 +290,7 @@ describe('glyph tiers', () => {
     expect(detectGlyphTier({ TERM: 'xterm-256color', LANG: 'C' })).toBe('ascii');
     expect(detectGlyphTier({ TERM: 'dumb' })).toBe('ascii');
     expect(detectGlyphTier({})).toBe('ascii');
-    expect(detectGlyphTier({ TERM: 'xterm-kitty', LANG: 'en_US.UTF-8', CODEMAN_TUI_GLYPHS: 'ascii' })).toBe('ascii');
+    expect(detectGlyphTier({ TERM: 'xterm-kitty', LANG: 'en_US.UTF-8', REVERIE_TUI_GLYPHS: 'ascii' })).toBe('ascii');
   });
 });
 
@@ -425,8 +425,8 @@ describe('formatting helpers', () => {
       rowLabel({
         sessionId: 'abcdef12',
         firstPrompt: 'Login interrupted',
-        workingDir: '/home/u/codeman-cases/mirofish',
-        muxName: 'codeman-abcdef12',
+        workingDir: '/home/u/reverie-cases/mirofish',
+        muxName: 'reverie-abcdef12',
         sources: [],
       })
     ).toBe('mirofish');
@@ -437,7 +437,7 @@ describe('formatting helpers', () => {
       rowLabel({
         sessionId: 'abcdef12',
         firstPrompt: 'do the thing',
-        workingDir: '/home/u/codeman-cases/mirofish',
+        workingDir: '/home/u/reverie-cases/mirofish',
         sources: [],
       })
     ).toBe('do the thing');
@@ -446,7 +446,7 @@ describe('formatting helpers', () => {
   it('prefers a real name over both, on a live row and a history row alike', () => {
     const base = { sessionId: 'abcdef12', firstPrompt: 'Login interrupted', workingDir: '/a/b/case', sources: [] };
     expect(rowLabel({ ...base, name: 'w2-case' })).toBe('w2-case');
-    expect(rowLabel({ ...base, name: 'w2-case', muxName: 'codeman-abcdef12' })).toBe('w2-case');
+    expect(rowLabel({ ...base, name: 'w2-case', muxName: 'reverie-abcdef12' })).toBe('w2-case');
   });
 });
 
@@ -497,7 +497,7 @@ describe('the preview title', () => {
     model.setApprovals([]);
     model.select('ccc3');
     const title = frameLines(render(model, 80, 30))[1];
-    expect(title).toContain('w1-codeman');
+    expect(title).toContain('w1-reverie');
     expect(title).toContain('working');
   });
 

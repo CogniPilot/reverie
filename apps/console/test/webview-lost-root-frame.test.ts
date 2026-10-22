@@ -4,9 +4,9 @@
  *
  * The proxy's runtime shim masks `/webview/<cap>/` off the page's URL, and the
  * landing page masks to exactly `/`. A `location.reload()` there (a Vite dev
- * server on a config change) therefore asks for Codeman's own root as an iframe
+ * server on a config change) therefore asks for Reverie's own root as an iframe
  * navigation. Without a password no auth hook runs, so the request used to reach
- * the index route and render Codeman's app shell INSIDE the web tab, with no
+ * the index route and render Reverie's app shell INSIDE the web tab, with no
  * recovery message and the failed-frame panel cleared because the document loaded
  * fine. `test/webview-auth-exemption.test.ts` pins the password form; this boots a
  * real WebServer in test mode for the passwordless one, where the index route
@@ -40,7 +40,7 @@ describe('landing-page reload of a proxied dashboard, passwordless install', () 
       expect(res.headers['content-type'], url).toContain('text/html');
       expect(res.headers['content-security-policy'], url).toContain("default-src 'none'");
       expect(res.headers['cache-control'], url).toBe('no-store');
-      expect(res.body, url).toContain('codeman:webview-lost');
+      expect(res.body, url).toContain('reverie:webview-lost');
       expect(res.body, url).not.toContain('<base href');
     }
   });
@@ -49,9 +49,9 @@ describe('landing-page reload of a proxied dashboard, passwordless install', () 
     const top = await app.inject({ method: 'GET', url: '/' });
     expect(top.statusCode).toBe(200);
     expect(top.body).toContain('<base href');
-    expect(top.body).not.toContain('codeman:webview-lost');
+    expect(top.body).not.toContain('reverie:webview-lost');
     for (const headers of [
-      { ...lostFrame, cookie: 'codeman_session=abc' },
+      { ...lostFrame, cookie: 'reverie_session=abc' },
       { ...lostFrame, authorization: 'Basic YWRtaW46eA==' },
       { ...lostFrame, 'sec-fetch-dest': 'document' },
     ]) {
@@ -64,7 +64,7 @@ describe('landing-page reload of a proxied dashboard, passwordless install', () 
   it('keeps answering any other lost path from the 404 handler', async () => {
     const res = await app.inject({ method: 'GET', url: '/settings/users', headers: lostFrame });
     expect(res.statusCode).toBe(200);
-    expect(res.body).toContain('codeman:webview-lost');
+    expect(res.body).toContain('reverie:webview-lost');
     // The API-shaped 404 is untouched by the recovery path.
     const api = await app.inject({ method: 'GET', url: '/api/nope', headers: lostFrame });
     expect(api.statusCode).toBe(404);

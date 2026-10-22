@@ -84,7 +84,7 @@ describe('GET /api/sessions/:id/last-response (claude)', () => {
   let previousHome: string | undefined;
 
   beforeEach(async () => {
-    testHome = mkdtempSync(join(tmpdir(), 'codeman-claude-rv-'));
+    testHome = mkdtempSync(join(tmpdir(), 'reverie-claude-rv-'));
     previousHome = process.env.HOME;
     process.env.HOME = testHome;
     harness = await createEnvelopeHarness();
@@ -308,7 +308,7 @@ describe('GET /api/sessions/:id/last-response (claude)', () => {
   });
 
   /**
-   * The brief response is what agent pollers hash (skills/codeman/preamble.sh
+   * The brief response is what agent pollers hash (skills/reverie/preamble.sh
    * last_text()). It must stay the last assistant row and must NEVER be derived
    * from messages.at(-1), which can be the user's own queued prompt.
    */
@@ -448,7 +448,7 @@ describe('GET /api/sessions/:id/last-response (claude conversation pinning)', ()
   const NOW = 1_770_000_000_000;
 
   beforeEach(async () => {
-    testHome = mkdtempSync(join(tmpdir(), 'codeman-claude-pin-'));
+    testHome = mkdtempSync(join(tmpdir(), 'reverie-claude-pin-'));
     previousHome = process.env.HOME;
     process.env.HOME = testHome;
     harness = await createEnvelopeHarness();
@@ -535,7 +535,7 @@ describe('GET /api/sessions/:id/last-response (claude conversation pinning)', ()
     expect(pane.adoptClaudeSessionId).toHaveBeenCalledWith('after-clear');
   });
 
-  it('stays put when the pane has never submitted through Codeman', async () => {
+  it('stays put when the pane has never submitted through Reverie', async () => {
     const pane = addPane('pane-1', 'pane-conversation', 0);
     writeTranscript('pane-conversation', 'my own answer', NOW - 60_000);
     writeTranscript('unrelated-conversation', 'a stranger answer', NOW);
@@ -547,7 +547,7 @@ describe('GET /api/sessions/:id/last-response (claude conversation pinning)', ()
 
   /**
    * The whole point of the UserPromptSubmit hook: a pane driven by attaching to
-   * tmux directly never bumps `lastSubmitAt` (only Codeman's own write path
+   * tmux directly never bumps `lastSubmitAt` (only Reverie's own write path
    * does), so before this the correlation could not run at all for it and the
    * viewer stayed pinned to the launch conversation for the pane's whole life.
    */

@@ -8,8 +8,8 @@
  * - VapidKeys — VAPID key pair (public + private) for Web Push authentication
  *
  * Persistence:
- * - VAPID keys: `~/.codeman/push-keys.json` (auto-generated on first use)
- * - Subscriptions: `~/.codeman/push-subscriptions.json` (expired auto-cleaned on 410/404)
+ * - VAPID keys: `~/.reverie/push-keys.json` (auto-generated on first use)
+ * - Subscriptions: `~/.reverie/push-subscriptions.json` (expired auto-cleaned on 410/404)
  *
  * Push is managed by PushStore (`src/push-store.ts`), served at `GET /api/push/vapid-key`,
  * `POST /api/push/subscribe`. No dependencies on other domain modules.

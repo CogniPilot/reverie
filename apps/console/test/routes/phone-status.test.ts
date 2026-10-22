@@ -19,7 +19,7 @@ it('phone permissions: verified owner any, coordinator agents, member self; stri
   registerChatroomRoutes(f,ctx,service,new ChatFileStore(dir),req=>req.headers.cookie==='verified-owner',undefined,employeeOf);
  });
  await service.init();
- const write=(target:string,who:string|undefined,mode='silent',extra={})=>app.inject({method:'PUT',url:`/api/chatrooms/phone-status/${target}`,headers:who==='owner'?{cookie:'verified-owner'}:who?{'x-codeman-parent-session':who}:{},payload:{mode,...extra}});
+ const write=(target:string,who:string|undefined,mode='silent',extra={})=>app.inject({method:'PUT',url:`/api/chatrooms/phone-status/${target}`,headers:who==='owner'?{cookie:'verified-owner'}:who?{'x-reverie-parent-session':who}:{},payload:{mode,...extra}});
  try {
   expect((await write(b,undefined)).statusCode).toBe(403);
   expect((await write(b,'owner')).statusCode).toBe(200);
@@ -34,7 +34,7 @@ it('phone permissions: verified owner any, coordinator agents, member self; stri
   expect((await write(b,a.slice(0,8))).statusCode).toBe(403);
   for(const extra of [{by:'owner'},{durationMs:1},{focus:true},{owner:'other'}]) expect((await write(b,'owner','ring',extra)).statusCode).toBe(400);
   expect((await write(b,'owner','bad')).statusCode).toBe(400);
-  const room=await app.inject({method:'POST',url:'/api/chatrooms',payload:{name:'Fleet',members:[{sessionId:b}],coordinatorSessionId:a}});
+  const room=await app.inject({method:'POST',url:'/api/chatrooms',payload:{name:'Reverie',members:[{sessionId:b}],coordinatorSessionId:a}});
   expect(room.statusCode).toBe(200);
   expect((await write(b,a,'ring')).statusCode).toBe(200);
   expect(service.alertMode(b)).toBeUndefined();

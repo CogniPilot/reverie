@@ -12,7 +12,7 @@ import {
   type MemoryToolsConfig,
 } from '../src/mcp-memory-tools.js';
 
-const ON: MemoryToolsConfig = { instance: '/instances/x/config/experts/a.json', python: '/py/python3', source: '/src' };
+const ON: MemoryToolsConfig = { instance: '/instances/x/config/experts/a.json', python: '/py/python3', source: '/src/python' };
 
 function recorder(reply: { stdout?: string; stderr?: string; code?: number } = {}) {
   const calls: Array<{ python: string; args: string[]; env: NodeJS.ProcessEnv; input: string }> = [];
@@ -33,8 +33,8 @@ function server(memory: MemoryToolsConfig, runner: BridgeRunner) {
 }
 
 afterEach(() => {
-  delete process.env.CODEMAN_SESSION_ID;
-  delete process.env.CODEMAN_HOOK_SECRET_FILE;
+  delete process.env.REVERIE_SESSION_ID;
+  delete process.env.REVERIE_HOOK_SECRET_FILE;
 });
 
 describe('opt-in', () => {
@@ -60,18 +60,19 @@ describe('opt-in', () => {
 
 describe('requests', () => {
   it('recalls privately by default and from a project when named, on stdin, with a minimal environment', async () => {
-    process.env.CODEMAN_SESSION_ID = 'room-session-secret';
-    process.env.CODEMAN_HOOK_SECRET_FILE = '/secret';
+    process.env.REVERIE_SESSION_ID = 'room-session-secret';
+    process.env.REVERIE_HOOK_SECRET_FILE = '/secret';
     const { calls, runner } = recorder();
     const tools = createMemoryTools(ON, runner);
     const result = await tools.run('memory_recall', { query: '  baseline numbers ' });
     expect(result).toEqual({ text: '[{"text":"a memory"}]' });
     expect(calls[0].python).toBe('/py/python3');
-    expect(calls[0].args).toEqual(['-m', 'cto.memory_cli']);
+    expect(calls[0].args).toEqual(['-m', 'reverie.memory_cli']);
     expect(JSON.parse(calls[0].input)).toEqual({ action: 'recall', query: 'baseline numbers', private: true });
-    expect(calls[0].env.FLEET_INSTANCE_CONFIG).toBe(ON.instance);
-    expect(calls[0].env.PYTHONPATH).toBe('/src');
-    expect(Object.keys(calls[0].env).filter((k) => k.startsWith('CODEMAN_'))).toEqual([]);   // no room credentials
+    expect(calls[0].env.REVERIE_INSTANCE_CONFIG).toBe(ON.instance);
+    expect(calls[0].env.PYTHONPATH).toBe('/src/python');
+    expect(calls[0].env.REVERIE_SESSION_ID).toBeUndefined();
+    expect(calls[0].env.REVERIE_HOOK_SECRET_FILE).toBeUndefined();
     await tools.run('memory_recall', { query: 'q', project: 'slam-web' });
     expect(JSON.parse(calls[1].input)).toEqual({ action: 'recall', query: 'q', project: 'slam-web' });
   });
@@ -81,7 +82,7 @@ describe('requests', () => {
     await createMemoryTools(ON, runner).run('memory_recall', {
       query: 'q', instance: '/other.json', channel: 'work', private: false, data_dir: '/x',
     } as Record<string, unknown>);
-    expect(calls[0].env.FLEET_INSTANCE_CONFIG).toBe(ON.instance);
+    expect(calls[0].env.REVERIE_INSTANCE_CONFIG).toBe(ON.instance);
     expect(JSON.parse(calls[0].input)).toEqual({ action: 'recall', query: 'q', private: true });   // stray keys stripped
   });
 

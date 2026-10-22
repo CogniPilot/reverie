@@ -40,7 +40,7 @@ describe('spreadsheet preview browser boundary', () => {
     const workbook = await workbookBytes();
     const requests: string[] = [];
     page.on('request', (request) => requests.push(request.url()));
-    await page.route('https://codeman.test/**', async (route) => {
+    await page.route('https://reverie.test/**', async (route) => {
       const url = new URL(route.request().url());
       if (url.pathname === '/') {
         await route.fulfill({
@@ -59,7 +59,7 @@ describe('spreadsheet preview browser boundary', () => {
       if (url.pathname === '/start.js') {
         await route.fulfill({
           contentType: 'application/javascript',
-          body: `window.previewHandle = window.CodemanSpreadsheetPreview.open({container:document.querySelector('#preview'),url:'/api/book.xlsx?preview=true',size:${workbook.length}});`,
+          body: `window.previewHandle = window.ReverieSpreadsheetPreview.open({container:document.querySelector('#preview'),url:'/api/book.xlsx?preview=true',size:${workbook.length}});`,
         });
         return;
       }
@@ -82,7 +82,7 @@ describe('spreadsheet preview browser boundary', () => {
       });
     });
 
-    await page.goto('https://codeman.test/');
+    await page.goto('https://reverie.test/');
     await expect.poll(() => page.locator('.spreadsheet-sheet-tab').count()).toBe(2);
     await expect.poll(() => page.locator('.spreadsheet-cell', { hasText: 'Local workbook' }).count()).toBe(1);
     const initialGeometry = await page.locator('.spreadsheet-grid').evaluate((grid) => {
@@ -142,7 +142,7 @@ describe('spreadsheet preview browser boundary', () => {
     );
 
     const origins = new Set(requests.map((request) => new URL(request).origin));
-    expect(origins).toEqual(new Set(['https://codeman.test']));
+    expect(origins).toEqual(new Set(['https://reverie.test']));
     expect(requests.some((request) => /spreadsheet-preview-worker\.js\?v=[a-f0-9]{12}/.test(request))).toBe(true);
     expect(requests.some((request) => /vendor\/exceljs\.min\.js\?v=[a-f0-9]{12}/.test(request))).toBe(true);
     expect(requests.some((request) => /vendor\/fflate\.min\.js\?v=[a-f0-9]{12}/.test(request))).toBe(true);

@@ -12,8 +12,8 @@ export function isExplicitlyEnabled(value: string | undefined): boolean {
  * tunnel-enable guard (COD-55) to refuse publishing an unauthenticated public URL.
  */
 export function isUnauthenticatedNetworkAcknowledged(allowFlag = false): boolean {
-  if (process.env.CODEMAN_PASSWORD) return true;
-  return allowFlag || isExplicitlyEnabled(process.env.CODEMAN_ALLOW_UNAUTHENTICATED_NETWORK);
+  if (process.env.REVERIE_PASSWORD) return true;
+  return allowFlag || isExplicitlyEnabled(process.env.REVERIE_ALLOW_UNAUTHENTICATED_NETWORK);
 }
 
 export function isLoopbackBindHost(host: string): boolean {
@@ -35,17 +35,17 @@ export function isLoopbackBindHost(host: string): boolean {
  * are namespaces an external attacker cannot register DNS-rebinding records under
  * (tailscale MagicDNS, Cloudflare quick/named tunnels), so accepting them keeps
  * the project's documented tunnel access paths working without reopening the
- * rebinding hole. Extend per-deployment via CODEMAN_ALLOWED_HOSTS.
+ * rebinding hole. Extend per-deployment via REVERIE_ALLOWED_HOSTS.
  */
 export const DEFAULT_TRUSTED_HOST_SUFFIXES = ['.ts.net', '.trycloudflare.com', '.cfargotunnel.com'];
 
 /**
  * Container-to-host gateway aliases (Docker / Podman). A hook `curl` from INSIDE a
  * docker case carries `Host: host.docker.internal:<port>` (the derived
- * CODEMAN_API_URL), so the always-on host guard must allow it or every in-container
+ * REVERIE_API_URL), so the always-on host guard must allow it or every in-container
  * hook is blocked 403. These names only resolve to the host from within a
  * container's network namespace, so they are not a DNS-rebinding surface for a
- * normal browser. Both engines' aliases are allowed so a mixed fleet keeps working.
+ * normal browser. Both engines' aliases are allowed so a mixed reverie keeps working.
  */
 export const DOCKER_HOST_GATEWAY_ALIASES = ['host.docker.internal', 'host.containers.internal'];
 
@@ -55,7 +55,7 @@ export interface HostPolicy {
   bindHost: string;
   /** Extra allowed hosts: exact lowercased names, or a leading-dot '.suffix' for suffix matches. */
   allowedHosts: string[];
-  /** Hostname of the currently-active Codeman-managed tunnel, if any. */
+  /** Hostname of the currently-active Reverie-managed tunnel, if any. */
   tunnelHost?: string | null;
 }
 
@@ -82,9 +82,9 @@ export function parseAuthorityHostname(authority: string | undefined): string | 
   return h.toLowerCase() || null;
 }
 
-/** Build a HostPolicy from the bind host, CODEMAN_ALLOWED_HOSTS, and an active tunnel URL. */
+/** Build a HostPolicy from the bind host, REVERIE_ALLOWED_HOSTS, and an active tunnel URL. */
 export function buildHostPolicy(bindHost: string, tunnelUrl?: string | null): HostPolicy {
-  const allowedHosts = (process.env.CODEMAN_ALLOWED_HOSTS || '')
+  const allowedHosts = (process.env.REVERIE_ALLOWED_HOSTS || '')
     .split(',')
     .map((s) => s.trim().toLowerCase())
     .filter(Boolean);

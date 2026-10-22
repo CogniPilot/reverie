@@ -4,7 +4,7 @@
  * An Android WebView wrapper has no browser pop-ups: `window.open` there either
  * does nothing or replaces the page. On a foldable the app can still put a page
  * in a window of its own beside the dashboard, and says so by exposing
- * `window.CodemanHost.openWindow(absoluteUrl)`. When it does:
+ * `window.ReverieHost.openWindow(absoluteUrl)`. When it does:
  *   1. `detachSession` hands the solo URL to the host instead of `window.open`,
  *      marks the tab detached and announces it on the window channel (there is
  *      no WindowProxy, so liveness is the roll-call path a reloaded dashboard
@@ -33,7 +33,7 @@ function load(host?: Record<string, unknown>) {
     close: vi.fn(),
     focus: vi.fn(),
   };
-  if (host) windowStub.CodemanHost = host;
+  if (host) windowStub.ReverieHost = host;
   const context = vm.createContext({
     console,
     performance,
@@ -52,10 +52,10 @@ function load(host?: Record<string, unknown>) {
   });
   const constants = readFileSync(resolve(PUBLIC, 'constants.js'), 'utf8');
   const source = readFileSync(resolve(PUBLIC, 'app.js'), 'utf8');
-  vm.runInContext(`${constants}\n${source}\nglobalThis.__CodemanApp = CodemanApp;`, context);
-  const CodemanApp = (context as { __CodemanApp: { prototype: object } }).__CodemanApp;
+  vm.runInContext(`${constants}\n${source}\nglobalThis.__ReverieApp = ReverieApp;`, context);
+  const ReverieApp = (context as { __ReverieApp: { prototype: object } }).__ReverieApp;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const app = Object.create(CodemanApp.prototype) as Record<string, any>;
+  const app = Object.create(ReverieApp.prototype) as Record<string, any>;
   app.isSoloWindow = false;
   app.sessions = new Map([['s1', {}]]);
   app.detachedSessions = new Set();
@@ -123,7 +123,7 @@ describe('detach through a host window opener', () => {
     expect(app.hasHostWindows()).toBe(false);
     expect(app.openInHostWindow('/session/s1')).toBeNull();
     app.detachSession('s1');
-    expect(windowStub.open).toHaveBeenCalledWith('/session/s1', 'codeman-session-s1', expect.any(String));
+    expect(windowStub.open).toHaveBeenCalledWith('/session/s1', 'reverie-session-s1', expect.any(String));
   });
 
   it('closes and raises a solo window through the host', () => {

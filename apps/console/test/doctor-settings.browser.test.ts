@@ -97,8 +97,8 @@ describe('Diagnostics panel in a real browser', () => {
   it('hides the Diagnostics group from a non-admin in multi-user mode and shows it to an admin', async () => {
     const visible = (user: Record<string, unknown>) =>
       page.evaluate((u) => {
-        (window as any).__codemanUser = u;
-        document.dispatchEvent(new CustomEvent('codeman:me'));
+        (window as any).__reverieUser = u;
+        document.dispatchEvent(new CustomEvent('reverie:me'));
         return getComputedStyle(document.getElementById('doctorGroup')!).display !== 'none';
       }, user);
     expect(await visible({ multiUser: true, role: 'user' })).toBe(false);

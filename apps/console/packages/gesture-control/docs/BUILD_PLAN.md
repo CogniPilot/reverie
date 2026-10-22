@@ -1,13 +1,13 @@
-# Codeman Gesture Control — Prototype Build Plan
+# Reverie Gesture Control — Prototype Build Plan
 
 > Canonical spec for this project. A Jarvis-style hand-tracking input layer for
-> the Codeman dashboard. Webcam sees your hands; you pinch-drag session tabs
+> the Reverie dashboard. Webcam sees your hands; you pinch-drag session tabs
 > between Screen columns and fire discrete gesture commands. Runs entirely
 > in-browser, camera feed never leaves the machine.
 
 Build it as a **standalone prototype first** (its own folder, fake tabs) so the
 input feel can be validated on real hardware before any integration with
-Codeman's existing drag/command code.
+Reverie's existing drag/command code.
 
 ---
 
@@ -30,7 +30,7 @@ mounted at your chosen angle.
 ## Tech stack
 
 - **MediaPipe Tasks Vision** (`@mediapipe/tasks-vision`) — `GestureRecognizer` in `VIDEO` running mode, `numHands: 1` for v1 (add 2 later). Loads the prebuilt `gesture_recognizer.task` model + WASM from CDN.
-- **Vanilla TS + Vite** for the prototype (no framework needed; keep it portable so the module drops into Codeman regardless of its stack). If Codeman is React, the module stays framework-agnostic and you wrap it in a hook at integration time.
+- **Vanilla TS + Vite** for the prototype (no framework needed; keep it portable so the module drops into Reverie regardless of its stack). If Reverie is React, the module stays framework-agnostic and you wrap it in a hook at integration time.
 - **One-Euro filter** for cursor smoothing — implement it directly, it's ~40 lines and is the correct tool for noisy interactive landmark streams (low lag at speed, heavy smoothing when still).
 - **Web Worker** for inference is a **Phase 4** optimization — do NOT start there. Get it working on the main thread first; only move to a worker if the dashboard UI stutters.
 
@@ -116,8 +116,8 @@ gc.stop();
 ```
 
 Keep it **transport-agnostic**: it emits semantic events, it does NOT know about
-Codeman's DOM. Integration is just subscribing to these events and calling
-Codeman's existing tab-move / command functions.
+Reverie's DOM. Integration is just subscribing to these events and calling
+Reverie's existing tab-move / command functions.
 
 ---
 
@@ -138,14 +138,14 @@ Build `tabs.ts`: 3 columns of draggable fake "sessions." Wire the state machine:
 **Phase 4 — Discrete commands + polish (1 day)**
 Add gesture→command bus with debouncing and the 1s open-palm halt. Add an on-screen toast when a command fires. Optional: move inference to a Web Worker if the UI stutters; add second-hand support.
 
-**Phase 5 — Codeman integration (✅ working, 2026-06-07)**
-Drop `gesture/` into Codeman via a new consumer `src/codeman/entry.ts` (the core is unchanged; the demo's `main.ts` is *not* the integration point). It binds `grab`/`drag`/`drop` to real `.session-tab`s (grab-to-detach → `app.detachSession`) and pinch-taps the Run / Run Shell toolbar buttons. Runs in Codeman behind `CODEMAN_GESTURE=1`. See the detailed status under "Implementation status" below.
+**Phase 5 — Reverie integration (✅ working, 2026-06-07)**
+Drop `gesture/` into Reverie via a new consumer `src/reverie/entry.ts` (the core is unchanged; the demo's `main.ts` is *not* the integration point). It binds `grab`/`drag`/`drop` to real `.session-tab`s (grab-to-detach → `app.detachSession`) and pinch-taps the Run / Run Shell toolbar buttons. Runs in Reverie behind `REVERIE_GESTURE=1`. See the detailed status under "Implementation status" below.
 
-> **Prerequisite (decided 2026-06-06, ✅ done 2026-06-07): Codeman tab-detach first.**
-> Codeman needed a **tab-detach / undock** feature — a session pops out into its
+> **Prerequisite (decided 2026-06-06, ✅ done 2026-06-07): Reverie tab-detach first.**
+> Reverie needed a **tab-detach / undock** feature — a session pops out into its
 > own browser window — *before* gesture wiring, because gestures can only drag DOM
 > *within* the one page that owns the camera (you can't drag a node across isolated
-> tabs/OS windows). So undock is a Codeman session-placement op the gesture `drop`
+> tabs/OS windows). So undock is a Reverie session-placement op the gesture `drop`
 > *triggers*. **Shipped** as `app.detachSession(id)` → `/session/:id` solo window +
 > BroadcastChannel sync + re-dock on close (the gesture layer calls it directly).
 > Per-monitor placement via `getScreenDetails` stays in the multi-monitor backlog.
@@ -181,14 +181,14 @@ before Phase 3, since it slightly changes the gesture grammar.
 - ✅ Phase 4 (built) — `commands.ts`: debounced gesture→command bus. `Thumb_Up`→approve, `Victory`→new-session (edge-triggered, fire once per entry), `Open_Palm` held `palmHoldMs`→halt-all (dead-man's-switch) with a 0–1 `haltProgress` charge surfaced on `status`. Commands ignore a pinching (mid-drag) hand.
 - ⛔ **Phase 4 unwired in the demo (2026-06-06).** User wants pinch-drag only — an open palm while reaching to pinch kept charging the hold-to-halt. `main.ts` no longer subscribes to `command`/`haltProgress` and the command/charge toasts are gone. The `GestureController` core is untouched and still emits both events, so Phase 5 (or a re-enabled demo) can pick them up unchanged.
 - 🐛 **Drag-position fix (2026-06-06).** A `.dragging` tab is `position: absolute`; the `.column`s establish a containing block via `backdrop-filter`, so board-local left/top were offset by the column's own position — tabs in the middle/right columns flew to the right on grab. Fix: `tabs.ts` reparents the floating tab onto `#board` (no filter/transform) for the drag, so the coordinates `moveTo` computes match the containing block.
-- ✅ **Phase 5 — WORKING at the desk (2026-06-07).** Prerequisite cleared: Codeman tab-detach/undock works in the runtime (`app.detachSession(id)` is the idempotent hook). The gesture overlay runs live in the real Codeman dashboard on `:5000` and was confirmed by the user (normal tab): fullscreen cam + hand/cursor tracking, undock-by-pinch, and Run/Run Shell taps.
-  - **Integration shape: in-page overlay, built into Codeman beta.** The gesture `core` (`src/gesture/`) ships **unchanged**; the consumer is `src/codeman/entry.ts`, esbuild-bundled (`npm run build:codeman`) and served by Codeman at `/gesture/gesture-codeman.js`. A full-viewport, click-through overlay maps coords straight to `elementFromPoint`.
+- ✅ **Phase 5 — WORKING at the desk (2026-06-07).** Prerequisite cleared: Reverie tab-detach/undock works in the runtime (`app.detachSession(id)` is the idempotent hook). The gesture overlay runs live in the real Reverie dashboard on `:5000` and was confirmed by the user (normal tab): fullscreen cam + hand/cursor tracking, undock-by-pinch, and Run/Run Shell taps.
+  - **Integration shape: in-page overlay, built into Reverie beta.** The gesture `core` (`src/gesture/`) ships **unchanged**; the consumer is `src/reverie/entry.ts`, esbuild-bundled (`npm run build:reverie`) and served by Reverie at `/gesture/gesture-reverie.js`. A full-viewport, click-through overlay maps coords straight to `elementFromPoint`.
   - **Gestures (routed by what the pinch lands on):** (a) **grab → in-page floating panel** *(⚠️ pivoted 2026-06-08 — was grab-to-detach)*: pinch a `.session-tab`, a ghost clone follows the hand, pull >`DETACH_PULL_PX` (70) and release → `floatSession(id, x, y)` spawns a re-grabbable `.cg-float` iframe of `/session/:id` (640×420). This **replaced** `window.app.detachSession(id)` (an OS window is a sealed box the hand can't move again — a one-way trip); the float stays in-page so the hand keeps control. See `../../docs/MULTIMONITOR_DESIGN.md`. (b) **Run / Run Shell taps** — pinch over `#runBtn`→`app.run()` / `.btn-shell`→`app.runShell()` and release in place; drift >`TAP_CANCEL_PX` (45) cancels. `CLICK_SELECTOR` is the extensible list. (c) **Fullscreen dimmed cam** by default, **⛶** toggles corner PiP.
-  - **Self-hosted MediaPipe (no CDN).** `entry.ts` passes `wasmBase: "/gesture/wasm"` + `modelUrl: "/gesture/gesture_recognizer.task"`; Codeman serves them same-origin. The CDN path failed in the normal browser tab (content/ad blocker blocking `jsdelivr`/`googleapis`) → surfaced as `failed: {"isTrusted":true}` once `entry.ts` learned to report non-Error throws. Core also gained a GPU→CPU delegate fallback.
-  - **Gated by `CODEMAN_GESTURE=1` (OFF by default).** Under the flag Codeman injects the module script (dashboard only, not `/session/:id` solo popups), cache-busts it with `?v=<mtime>` (static is `max-age=1y`), and widens CSP (`'wasm-unsafe-eval'` + `worker-src 'self' blob:`; same-origin assets now covered by `'self'`). Flag off ⇒ Codeman HTML/CSP unchanged.
-  - **Codeman-side / version control:** the detach + instance isolation + base gesture overlay are committed on `Ark0N/Codeman` branch `beta/session-detach`, open as **PR #103** (tip `afea6d6`; `ceca853` after I fixed its `auth.ts` format:check → CI green). Gotcha: the local prod clone `~/.codeman/app` tracks only `master`, so the branch is hidden until `git fetch origin beta/session-detach` (this briefly misled me into a bogus local reconstruction `03b31b8`, since deleted). The session improvements — direct-detach via `window.app.detachSession`, Run/Run Shell pinch-taps, self-hosted MediaPipe (`/gesture/wasm` + `.task`), and the `server.ts` mtime cache-bust — were **ported onto PR #103** in commit `eea84db` (CI green); their source is `Ark0N/codeman-gesture-control` (`src/codeman/entry.ts`).
+  - **Self-hosted MediaPipe (no CDN).** `entry.ts` passes `wasmBase: "/gesture/wasm"` + `modelUrl: "/gesture/gesture_recognizer.task"`; Reverie serves them same-origin. The CDN path failed in the normal browser tab (content/ad blocker blocking `jsdelivr`/`googleapis`) → surfaced as `failed: {"isTrusted":true}` once `entry.ts` learned to report non-Error throws. Core also gained a GPU→CPU delegate fallback.
+  - **Gated by `REVERIE_GESTURE=1` (OFF by default).** Under the flag Reverie injects the module script (dashboard only, not `/session/:id` solo popups), cache-busts it with `?v=<mtime>` (static is `max-age=1y`), and widens CSP (`'wasm-unsafe-eval'` + `worker-src 'self' blob:`; same-origin assets now covered by `'self'`). Flag off ⇒ Reverie HTML/CSP unchanged.
+  - **Reverie-side / version control:** the detach + instance isolation + base gesture overlay are committed on `jgoppert/reverie` branch `beta/session-detach`, open as **PR #103** (tip `afea6d6`; `ceca853` after I fixed its `auth.ts` format:check → CI green). Gotcha: the local prod clone `~/.reverie/app` tracks only `master`, so the branch is hidden until `git fetch origin beta/session-detach` (this briefly misled me into a bogus local reconstruction `03b31b8`, since deleted). The session improvements — direct-detach via `window.app.detachSession`, Run/Run Shell pinch-taps, self-hosted MediaPipe (`/gesture/wasm` + `.task`), and the `server.ts` mtime cache-bust — were **ported onto PR #103** in commit `eea84db` (CI green); their source is `Ark0N/codeman-gesture-control` (`src/reverie/entry.ts`).
   - **Commits (gesture-proto):** `ddf9cda` (consumer: detach/cam/errors) → `2dd97da` (detach direct) → `21ef793` (Run/Run Shell taps) → `e055b79` (self-host MediaPipe).
-  - **Next:** tune feel; optional in-strip reorder (deferred — user chose detach-only) and more buttons (Stop). Discrete `command` events remain available but unwired (pinch-only). Hand-off brief: `../docs/CODEMAN_DETACH_BRIEF.md`.
+  - **Next:** tune feel; optional in-strip reorder (deferred — user chose detach-only) and more buttons (Stop). Discrete `command` events remain available but unwired (pinch-only). Hand-off brief: `../docs/REVERIE_DETACH_BRIEF.md`.
 
 ## Backlog (requested, for later)
 
@@ -196,7 +196,7 @@ before Phase 3, since it slightly changes the gesture grammar.
   `:fullscreen` CSS fills the viewport and the coord mapping adapts since it
   reads the stage rect every frame.
 - ✅ **Multi-monitor mode — A+C BUILT & validated at the desk (2026-06-08).** The
-  eventual real goal (fling a Codeman session onto an external display by gesture)
+  eventual real goal (fling a Reverie session onto an external display by gesture)
   is reached. **Design → [`../../docs/MULTIMONITOR_DESIGN.md`](../../docs/MULTIMONITOR_DESIGN.md)**,
   approach **A+C**:
   - **A — in-page floating panels** (`581fcf9`, `3e0447a`): `entry.ts`
@@ -204,18 +204,18 @@ before Phase 3, since it slightly changes the gesture grammar.
     `/session/:id` (640×420) instead of `window.app.detachSession`. The session
     stays in the camera-owning page's DOM, so the hand keeps control — fixing the
     one-way-trip flaw of OS-window detach.
-  - **C-span — spanned window** (`063fd8f`, `59946b8`): `scripts/span-codeman.sh`
+  - **C-span — spanned window** (`063fd8f`, `59946b8`): `scripts/span-reverie.sh`
     launches a Brave-first (`BROWSER=` override) `--app` window sized to the
     display union; prereq macOS "Displays have separate Spaces" OFF + re-login.
-    One-click via the **Codeman header button** → `POST /api/system/span-displays`
+    One-click via the **Reverie header button** → `POST /api/system/span-displays`
     (PR #103 `95b0035`). **Validated:** one window spans both monitors and a panel
     drags across the seam.
   - **C-snap** (`getScreenDetails` snapping + seam dead-band) and the **re-dock**
     gesture/zone are **still pending** — not needed for basic cross-seam dragging.
-  - **Concurrent-rendering question** was RESOLVED first: Codeman already mounts
+  - **Concurrent-rendering question** was RESOLVED first: Reverie already mounts
     live terminals into floating panels (teammate terminals, log-viewer SSE
     windows, the iframe-able `/session/:id` solo route), so the live float needed
-    no new Codeman rendering.
+    no new Reverie rendering.
 
 Note: the public event surface evolved from the original API sketch. The
 controller stays transport-agnostic but emits coordinate-only `grab`/`drag`/

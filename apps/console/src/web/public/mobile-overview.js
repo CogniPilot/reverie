@@ -8,7 +8,7 @@
  * errored sessions), then SPACES (cases, expandable to their sessions), then
  * WORKING and IDLE / DONE.
  *
- * Rows inside a section are ordered by `CodemanSessionOrder` (constants.js),
+ * Rows inside a section are ordered by `ReverieSessionOrder` (constants.js),
  * the SAME comparator the desktop rail uses: blocked longest-first, then
  * running longest-first, then quiet most-recently-quiet first.
  *
@@ -28,8 +28,8 @@
  * `this.cases`, `this.pendingHooks`) — no endpoint, no SSE event, no schema.
  * `buildMobileOverviewModel()` is pure and unit-tested (test/mobile-overview.test.ts).
  *
- * @mixin Extends CodemanApp.prototype via Object.assign
- * @dependency constants.js (CodemanSessionOrder, the shared row comparator)
+ * @mixin Extends ReverieApp.prototype via Object.assign
+ * @dependency constants.js (ReverieSessionOrder, the shared row comparator)
  * @dependency app.js (this.sessions, this.cases, this.pendingHooks, selectSession, run)
  * @dependency ralph-panel.js (formatRelativeTime, the app's one relative-time formatter)
  * @dependency mobile-handlers.js (MobileDetection)
@@ -71,7 +71,7 @@ const watchingBadgeTitle = (label) => 'Still running in the background: ' + labe
 
 function mobileOverviewRunModes() {
   const catalog =
-    typeof window !== 'undefined' && Array.isArray(window.__codemanCliCatalog) ? window.__codemanCliCatalog : [];
+    typeof window !== 'undefined' && Array.isArray(window.__reverieCliCatalog) ? window.__reverieCliCatalog : [];
   if (catalog.length === 0) return MOBILE_OVERVIEW_RUN_MODES;
   return catalog
     .filter((entry) => entry.enabled)
@@ -113,7 +113,7 @@ const MOBILE_OVERVIEW_SINCE_LABEL = {
 /** How often the age stamps are rewritten in place while the home screen is up. */
 const MOBILE_OVERVIEW_CLOCK_MS = 20000;
 
-Object.assign(CodemanApp.prototype, {
+Object.assign(ReverieApp.prototype, {
   // ═══════════════════════════════════════════════════════════════
   // Model (pure)
   // ═══════════════════════════════════════════════════════════════
@@ -261,14 +261,14 @@ Object.assign(CodemanApp.prototype, {
       };
     });
 
-    // Order is `CodemanSessionOrder` (constants.js), shared with the desktop
+    // Order is `ReverieSessionOrder` (constants.js), shared with the desktop
     // rail: blocked first (longest-blocked at the top), then running
     // longest-first, then quiet most-recent-first.
     // Guarded: a stale cached constants.js (iOS Safari after a deploy) must
     // degrade to tab order, not TypeError the overview away.
     const inSection = (states) => {
       const filtered = rows.filter((r) => states.includes(r.state));
-      return window.CodemanSessionOrder ? window.CodemanSessionOrder.sort(filtered) : filtered;
+      return window.ReverieSessionOrder ? window.ReverieSessionOrder.sort(filtered) : filtered;
     };
 
     // Past = conversations from the unified list that are not currently live.
@@ -557,7 +557,7 @@ Object.assign(CodemanApp.prototype, {
 
     const brand = document.createElement('span');
     brand.className = 'mobile-overview-brand';
-    brand.textContent = (window.CodemanI18n && window.CodemanI18n.displayName) || 'Reverie';
+    brand.textContent = (window.ReverieI18n && window.ReverieI18n.displayName) || 'Reverie';
     brand.setAttribute('data-i18n-skip', '');
     top.appendChild(brand);
 

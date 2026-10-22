@@ -119,7 +119,7 @@ describe('hook-event-routes', () => {
      * The pane's live conversation id, reported by the CLI process itself. This
      * is what lets the response viewer stop guessing from ~/.claude/history.jsonl
      * — a guess that could never run at all for a pane the user drives by
-     * attaching to tmux, because `lastSubmitAt` only ever saw Codeman's own
+     * attaching to tmux, because `lastSubmitAt` only ever saw Reverie's own
      * write path.
      */
     it('adopts the conversation id first-hand from a prompt_submitted hook', async () => {

@@ -44,16 +44,16 @@ function envInt(name: string, fallback: number, min: number, max: number): numbe
 }
 
 /** Longest a single wait may block. Requests above this are clamped down, not rejected. */
-export const MAX_WAIT_MS = envInt('CODEMAN_WAIT_MAX_MS', 600_000, MIN_WAIT_MS, HARD_MAX_WAIT_MS);
+export const MAX_WAIT_MS = envInt('REVERIE_WAIT_MAX_MS', 600_000, MIN_WAIT_MS, HARD_MAX_WAIT_MS);
 
 /** Used when the caller omits `timeout`. Never exceeds MAX_WAIT_MS. */
 export const DEFAULT_WAIT_MS = Math.min(
-  envInt('CODEMAN_WAIT_DEFAULT_MS', 60_000, MIN_WAIT_MS, HARD_MAX_WAIT_MS),
+  envInt('REVERIE_WAIT_DEFAULT_MS', 60_000, MIN_WAIT_MS, HARD_MAX_WAIT_MS),
   MAX_WAIT_MS
 );
 
 /** Concurrent waiters (signal + output) allowed against one session. */
-export const MAX_WAITERS_PER_SESSION = envInt('CODEMAN_WAIT_MAX_PER_SESSION', 16, 1, 256);
+export const MAX_WAITERS_PER_SESSION = envInt('REVERIE_WAIT_MAX_PER_SESSION', 16, 1, 256);
 
 /**
  * Ceiling the operator-configurable total is itself clamped to.
@@ -70,7 +70,7 @@ export const MAX_WAITERS_PER_SESSION = envInt('CODEMAN_WAIT_MAX_PER_SESSION', 16
 const HARD_MAX_WAITERS_TOTAL = 512;
 
 /** Concurrent waiters allowed across every session in the process. */
-export const MAX_WAITERS_TOTAL = envInt('CODEMAN_WAIT_MAX_TOTAL', 128, 1, HARD_MAX_WAITERS_TOTAL);
+export const MAX_WAITERS_TOTAL = envInt('REVERIE_WAIT_MAX_TOTAL', 128, 1, HARD_MAX_WAITERS_TOTAL);
 
 /**
  * Concurrent waiters allowed for one owner (multi-user mode's `Session.owner`).
@@ -81,7 +81,7 @@ export const MAX_WAITERS_TOTAL = envInt('CODEMAN_WAIT_MAX_TOTAL', 128, 1, HARD_M
  * admin included. Ignored entirely when the caller has no owner, which is every
  * request in single-user mode.
  */
-export const MAX_WAITERS_PER_OWNER = envInt('CODEMAN_WAIT_MAX_PER_OWNER', 48, 1, HARD_MAX_WAITERS_TOTAL);
+export const MAX_WAITERS_PER_OWNER = envInt('REVERIE_WAIT_MAX_PER_OWNER', 48, 1, HARD_MAX_WAITERS_TOTAL);
 
 /** Bounds on the literal `match` string accepted by wait-output. */
 export const MIN_MATCH_LENGTH = 1;
@@ -96,7 +96,7 @@ export const MAX_MATCH_LENGTH = 200;
  * tail is continuous with the live stream, since `_terminalBuffer.append(data)`
  * and `emit('terminal', data)` receive the same bytes.
  */
-export const MAX_BUFFER_SCAN_BYTES = envInt('CODEMAN_WAIT_BUFFER_SCAN_BYTES', 256 * 1024, 4 * 1024, 8 * 1024 * 1024);
+export const MAX_BUFFER_SCAN_BYTES = envInt('REVERIE_WAIT_BUFFER_SCAN_BYTES', 256 * 1024, 4 * 1024, 8 * 1024 * 1024);
 
 /** Characters of surrounding output returned either side of a wait-output match. */
 export const MAX_SNIPPET_CONTEXT = 80;

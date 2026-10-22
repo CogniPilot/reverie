@@ -33,7 +33,7 @@ const IDS = ['s-a', 's-b', 's-c'];
 
 beforeEach(() => {
   resetGridHarness();
-  windowStub.__codemanCliCatalog = [
+  windowStub.__reverieCliCatalog = [
     { id: 'claude', label: 'Claude Code' },
     { id: 'deepseek', label: 'DeepSeek' },
   ];

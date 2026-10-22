@@ -28,7 +28,7 @@ describe('temporary worker creation with company identity and channel inheritanc
   const threads = new Map<string, string>();
   const failures: Array<{ employeeId?: string; replacedSessionIds: string[]; error: string }> = [];
   beforeEach(async () => {
-    directory = await mkdtemp(join(tmpdir(), 'fleet-company-spawn-'));
+    directory = await mkdtemp(join(tmpdir(), 'reverie-company-spawn-'));
     const store = new CompanyStore(join(directory, 'company.json'));
     await store.init();
     ctx = createMockRouteContext();
@@ -59,7 +59,7 @@ describe('temporary worker creation with company identity and channel inheritanc
     app.inject({
       method: 'POST',
       url: '/api/sessions',
-      headers: { 'x-codeman-parent-session': 'test-session-1' },
+      headers: { 'x-reverie-parent-session': 'test-session-1' },
       payload: { workingDir: directory, mode: 'claude', ...extra },
     });
 
@@ -222,7 +222,7 @@ describe('temporary worker creation with company identity and channel inheritanc
       const response = await app.inject({
         method: 'POST',
         url: '/api/sessions',
-        headers: { 'x-codeman-parent-session': 'test-session-1' },
+        headers: { 'x-reverie-parent-session': 'test-session-1' },
         payload: { workingDir: directory, mode: 'opencode', employeeId: ada.id, parentSessionId: 'zzz' },
       });
       expect(response.json().errorCode).toBe('FORBIDDEN');
@@ -344,7 +344,7 @@ describe('temporary worker creation with company identity and channel inheritanc
     const response = await app.inject({
       method: 'POST',
       url: '/api/quick-start',
-      headers: { 'x-codeman-parent-session': 'test-session-1' },
+      headers: { 'x-reverie-parent-session': 'test-session-1' },
       payload: { caseName: 'company-worker', mode: 'claude' },
     });
     expect(response.statusCode).toBe(200);
@@ -356,7 +356,7 @@ describe('temporary worker creation with company identity and channel inheritanc
     const chosen = await app.inject({
       method: 'POST',
       url: '/api/quick-start',
-      headers: { 'x-codeman-parent-session': 'test-session-1' },
+      headers: { 'x-reverie-parent-session': 'test-session-1' },
       payload: { caseName: 'company-worker2', mode: 'claude', sessionName: 'Taylor', icon: '🎨', chatroomId: room.id },
     });
     expect(chosen.json().identity).toEqual({ name: 'Taylor', icon: '🎨', channelId: room.id });
@@ -368,7 +368,7 @@ describe('temporary worker creation with company identity and channel inheritanc
     const response = await app.inject({
       method: 'POST',
       url: '/api/quick-start',
-      headers: { 'x-codeman-parent-session': 'test-session-1' },
+      headers: { 'x-reverie-parent-session': 'test-session-1' },
       payload: { caseName: 'never-created', chatroomId: room.id },
     });
     expect(response.json().success).toBe(false);

@@ -6,7 +6,7 @@ exit 1
 #
 # Spawned DETACHED by the web server (POST /api/system/update → src/web/self-update.ts).
 # It outlives the service restart it triggers, so it MUST run from a copy OUTSIDE
-# the repo (the server stages it at ~/.codeman/self-update-runner.sh) — `git
+# the repo (the server stages it at ~/.reverie/self-update-runner.sh) — `git
 # checkout` rewrites the in-repo copy and bash reads scripts lazily.
 #
 # ⚠️ The `docker-compose` supervisor is the exception to "outlives": there the
@@ -14,17 +14,17 @@ exit 1
 # because the terminal "restarting" marker is written before the kill and the
 # rebooted server reconciles it — but nothing may be added after that kill.
 #
-# Reports progress by writing ~/.codeman/update-status.json atomically; the
+# Reports progress by writing ~/.reverie/update-status.json atomically; the
 # browser polls GET /api/system/update/status across the restart drop. The
 # freshly-booted server reconciles the final "restarting" → "completed"/"failed".
 #
 # Cross-platform: restarts via systemd (Linux), launchd (macOS), a container exit
 # under Docker Compose (the restart policy relaunches it), or prints a manual
 # command (foreground installs). Linux launches inside a transient systemd scope
-# so `systemctl restart codeman-web` can't kill it mid-build.
+# so `systemctl restart reverie-web` can't kill it mid-build.
 #
 # Args (all from the server, never user input — tag is validated server-side):
-#   --repo <dir> --tag <codeman@X.Y.Z> --supervisor <systemd|launchd|docker-compose|none>
+#   --repo <dir> --tag <reverie@X.Y.Z> --supervisor <systemd|launchd|docker-compose|none>
 #   --status-file <path> --update-id <uuid> --from-version <ver> --node <path>
 #   --log <path> [--prev-sha <sha>] [--stash] [--server-pid <pid>]
 #   [--restart-by-exit 0|1]   (docker-compose only: may we exit the server?)
@@ -85,7 +85,7 @@ if [ ! -x "$NODE" ]; then
   NODE="$(command -v node || echo node)"
 fi
 
-TO_VERSION="${TAG##*@}"   # codeman@0.9.4 → 0.9.4 (tag is validated upstream)
+TO_VERSION="${TAG##*@}"   # reverie@0.9.4 → 0.9.4 (tag is validated upstream)
 STASH_REF=""
 MANUAL_CMD=""
 
@@ -127,7 +127,7 @@ write_status() {
 # log. Returns the wrapped command's exit code.
 run_step() {
   local phase="$1" base="$2"; shift 2
-  local step_log; step_log="$(mktemp "${TMPDIR:-/tmp}/codeman-update.XXXXXX" 2>/dev/null || echo "/tmp/codeman-update.$$")"
+  local step_log; step_log="$(mktemp "${TMPDIR:-/tmp}/reverie-update.XXXXXX" 2>/dev/null || echo "/tmp/reverie-update.$$")"
   write_status "$phase" "$base…"
   echo "[self-update] $phase: $* (output below)"
   "$@" >"$step_log" 2>&1 &
@@ -178,7 +178,7 @@ write_status "preparing" "Preparing update to v$TO_VERSION…"
 # 1) Stash local changes (left for the user to pop — never auto-popped).
 if [[ "$DO_STASH" == "1" ]]; then
   write_status "stashing" "Stashing local changes…"
-  STASH_MSG="codeman-pre-update-$UPDATE_ID"
+  STASH_MSG="reverie-pre-update-$UPDATE_ID"
   if git stash push -u -m "$STASH_MSG" >/dev/null 2>&1; then
     STASH_REF="$STASH_MSG"
     echo "[self-update] stashed local changes as $STASH_MSG"
@@ -205,16 +205,16 @@ run_step "installing" "Installing dependencies" npm install --no-fund --no-audit
 run_step "building" "Building" npm run build || rollback_and_fail "Build failed"
 
 # Docker Compose only: record what HEAD/package-lock.json the freshly-built
-# codeman-dist/codeman-node-modules volumes now reflect. `Start-Codeman.sh`
-# reads this same file (`$appdata_path/.codeman/…`, i.e. this container's own
-# $HOME/.codeman since that path IS the appdata bind mount) to detect source
+# reverie-dist/reverie-node-modules volumes now reflect. `Start-Reverie.sh`
+# reads this same file (`$appdata_path/.reverie/…`, i.e. this container's own
+# $HOME/.reverie since that path IS the appdata bind mount) to detect source
 # changes an EXTERNAL `docker compose build` made and refresh those volumes —
-# without this, the next plain `Start-Codeman.sh` run would see the HEAD this
+# without this, the next plain `Start-Reverie.sh` run would see the HEAD this
 # update just checked out, not recognise it as already accounted for, and wipe
 # the volumes this update just correctly rebuilt right back to the OLDER image.
 if [[ "$SUPERVISOR" == "docker-compose" ]]; then
-  build_source_file="$HOME/.codeman/docker-build-source.json"
-  mkdir -p -- "$HOME/.codeman"
+  build_source_file="$HOME/.reverie/docker-build-source.json"
+  mkdir -p -- "$HOME/.reverie"
   build_head=$(git rev-parse HEAD 2>/dev/null || true)
   build_lockfile_sha=''
   if command -v sha256sum >/dev/null 2>&1; then
@@ -234,12 +234,12 @@ echo "[self-update] build OK, restarting via $SUPERVISOR"
 
 case "$SUPERVISOR" in
   systemd)
-    systemctl --user restart codeman-web.service \
-      || fail "Build succeeded but restart failed — run: systemctl --user restart codeman-web" "systemctl restart"
+    systemctl --user restart reverie-web.service \
+      || fail "Build succeeded but restart failed — run: systemctl --user restart reverie-web" "systemctl restart"
     ;;
   launchd)
-    launchctl kickstart -k "gui/$(id -u)/com.codeman.web" 2>/dev/null || {
-      PLIST="$HOME/Library/LaunchAgents/com.codeman.web.plist"
+    launchctl kickstart -k "gui/$(id -u)/com.reverie.web" 2>/dev/null || {
+      PLIST="$HOME/Library/LaunchAgents/com.reverie.web.plist"
       launchctl unload "$PLIST" 2>/dev/null || true
       launchctl load "$PLIST" 2>/dev/null \
         || fail "Build succeeded but launchd restart failed" "launchctl"
@@ -299,14 +299,14 @@ case "$SUPERVISOR" in
         kill -9 "$SERVER_PID" 2>/dev/null || true
       fi
     else
-      MANUAL_CMD="sudo launchctl kickstart -k system/com.codeman.web"
+      MANUAL_CMD="sudo launchctl kickstart -k system/com.reverie.web"
       write_status "completed-needs-manual-restart" "Update staged — restart Reverie to apply v$TO_VERSION."
       echo "[self-update] launchd-daemon: could not signal server pid '$SERVER_PID' — manual restart required"
       exit 0
     fi
     ;;
   *)
-    MANUAL_CMD="pkill -f 'codeman.*web'; reverie web &"
+    MANUAL_CMD="pkill -f 'reverie.*web'; reverie web &"
     write_status "completed-needs-manual-restart" "Update staged — restart Reverie to apply v$TO_VERSION."
     echo "[self-update] no supervisor — manual restart required"
     exit 0

@@ -10,7 +10,7 @@
  *
  * To close that hole WITHOUT breaking the loop's own (credential-less) hook
  * channel, every locally-generated hook command now presents a per-instance
- * shared secret in the `X-Codeman-Hook-Secret` header. The middleware requires
+ * shared secret in the `X-Reverie-Hook-Secret` header. The middleware requires
  * a matching secret for the bypass WHEN A TUNNEL IS RUNNING. Tunneled internet
  * traffic can't know the secret; local hooks (which we generate) do.
  *
@@ -24,7 +24,7 @@ import { randomBytes } from 'node:crypto';
 import { getDataDir, dataPath } from './instance.js';
 
 /** HTTP header local hooks use to present the shared secret. */
-export const HOOK_SECRET_HEADER = 'X-Codeman-Hook-Secret';
+export const HOOK_SECRET_HEADER = 'X-Reverie-Hook-Secret';
 
 /** Number of random bytes in the secret (256 bits → 64 hex chars). */
 const SECRET_BYTES = 32;

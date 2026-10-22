@@ -56,7 +56,7 @@ function harness({ screenReader = false } = {}) {
   const timers = new Map<number, () => void>();
   let timerId = 0;
 
-  const controller = exposed.CodemanKeyCode229Recovery.create({
+  const controller = exposed.ReverieKeyCode229Recovery.create({
     textarea,
     emitRecovered: (data: string) => emitted.push(data),
     isScreenReaderMode: () => screenReader,
@@ -100,11 +100,11 @@ function loadTerminalInput() {
     window: win,
     globalThis: win,
     document: { addEventListener() {} },
-    CodemanApp: class {},
+    ReverieApp: class {},
   };
-  win.CodemanApp = sandbox.CodemanApp;
+  win.ReverieApp = sandbox.ReverieApp;
   vm.runInNewContext(source, sandbox, { filename: 'terminal-ui.js' });
-  return win.CodemanTerminalInput as {
+  return win.ReverieTerminalInput as {
     shouldSuppressTerminalQueryResponse(data: string): boolean;
     isTerminalFocusOrMouseReport(data: string): boolean;
   };
@@ -144,7 +144,7 @@ describe('orphaned terminal input recovery', () => {
     //
     // So this must not be "tidied" to bubble: on bubble we would silently stop
     // seeing exactly the events xterm handled, and whether we saw them at all
-    // would depend on xterm's `options.cancelEvents`, which Codeman never sets.
+    // would depend on xterm's `options.cancelEvents`, which Reverie never sets.
     const h = harness();
     const input = h.textarea.registrations().filter((entry) => entry.type === 'input');
     expect(input).toHaveLength(1);
@@ -392,7 +392,7 @@ describe('terminal-ui wiring: what counts as "xterm spoke for this keystroke"', 
     // would throw a ReferenceError straight into the surrounding try/catch,
     // which swallows it, and notifyCanonicalData would then NEVER run: the
     // recovery would re-emit a character xterm already delivered.
-    expect(terminalSource.slice(gate - 120, notify)).toContain('window.CodemanTerminalInput');
+    expect(terminalSource.slice(gate - 120, notify)).toContain('window.ReverieTerminalInput');
   });
 
   it('stands down for a real keystroke, but not for a mouse report or a query reply', () => {
@@ -458,7 +458,7 @@ function editSyncHarness() {
     _coreService: { triggerDataEvent: (data: string) => sent.push(data) },
   };
   const create = (withSync: boolean) =>
-    exposed.CodemanKeyCode229Recovery.create({
+    exposed.ReverieKeyCode229Recovery.create({
       textarea,
       emitRecovered: (data: string) => sent.push(data),
       getCompositionHelper: withSync ? () => helper : undefined,
@@ -705,7 +705,7 @@ describe('edit-based sync of the helper textarea (autocorrect replacements)', ()
   });
 
   it('editBetween counts code points and replaces everything after the common prefix', () => {
-    const { editBetween } = editSyncHarness().exposed.CodemanKeyCode229Recovery;
+    const { editBetween } = editSyncHarness().exposed.ReverieKeyCode229Recovery;
     expect(editBetween('abc', 'abcd')).toEqual({ deleted: 0, inserted: 'd' });
     expect(editBetween('abc', 'ab')).toEqual({ deleted: 1, inserted: '' });
     expect(editBetween('testing the peompt', 'testing the prompt ')).toEqual({ deleted: 5, inserted: 'rompt ' });

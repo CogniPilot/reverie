@@ -26,10 +26,10 @@ it('exact-read routes preserve membership scope, require an agent and never ackn
     service.addMember(room.id, a);
     const message = service.post(room.id, { kind: 'user', name: 'owner' }, 'read this', 'all', { deliver: false });
     service.delivery.holdForInspection(a, [{ roomId: room.id, messageId: message.id }]);
-    const headers = { 'x-codeman-parent-session': a };
+    const headers = { 'x-reverie-parent-session': a };
     const url = `/api/chatrooms/${room.id}/messages/${message.id}`;
     expect((await app.inject({ method: 'GET', url })).statusCode).toBe(403);
-    expect((await app.inject({ method: 'GET', url, headers: { 'x-codeman-parent-session': b } })).statusCode).toBe(404);
+    expect((await app.inject({ method: 'GET', url, headers: { 'x-reverie-parent-session': b } })).statusCode).toBe(404);
     const read = await app.inject({ method: 'GET', url, headers });
     expect(read.statusCode).toBe(200);
     expect((await app.inject({ method: 'GET', url: '/api/chatrooms/delivery-status', headers })).json().data.blocked).toBe(true);

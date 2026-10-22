@@ -15,7 +15,7 @@
  *
  * Remote selection (generalizable): by default the union of `origin` and the
  * current branch's `@{upstream}` tracking remote, deduped. Override with the
- * `CODEMAN_UPDATE_REMOTES` env var (comma-separated remote names) for any other
+ * `REVERIE_UPDATE_REMOTES` env var (comma-separated remote names) for any other
  * layout (e.g. the common `origin`=fork / `upstream`=canonical convention).
  *
  * Split PURE helpers (parsing + remote-set/role/compare-ref decisions, unit
@@ -107,7 +107,7 @@ export function parseSymrefDefaultBranch(out: string): string | null {
 /**
  * Reject a value that would be unsafe as a git positional argument (remote name
  * or branch). A leading `-` lets untrusted ls-remote/symref output or a stray
- * `CODEMAN_UPDATE_REMOTES` entry inject an option (e.g. `--upload-pack=<cmd>`)
+ * `REVERIE_UPDATE_REMOTES` entry inject an option (e.g. `--upload-pack=<cmd>`)
  * into a subsequent `git fetch`. Empty values are rejected too.
  */
 export function isSafeGitPositional(value: string | null | undefined): value is string {
@@ -282,7 +282,7 @@ async function statusForRemote(
   const base: RepoRemoteStatus = { name, url, role, compareRef: '', ahead: 0, behind: 0, incoming: [] };
 
   // SECURITY: the remote name reaches git as a positional; reject a `-` prefix
-  // (e.g. a stray CODEMAN_UPDATE_REMOTES entry) before it can act as a flag.
+  // (e.g. a stray REVERIE_UPDATE_REMOTES entry) before it can act as a flag.
   if (!isSafeGitPositional(name)) {
     return { ...base, error: `Refusing unsafe remote name "${name}".` };
   }
@@ -363,11 +363,11 @@ async function computeRepositoryStatus(): Promise<RepositoryStatusResult> {
   const selected = resolveRemoteSet({
     existingRemotes,
     trackingRemote,
-    envRemotes: parseRemotesEnv(process.env.CODEMAN_UPDATE_REMOTES),
+    envRemotes: parseRemotesEnv(process.env.REVERIE_UPDATE_REMOTES),
   });
 
   if (selected.length === 0) {
-    return { ...base, error: 'No comparable remotes found (set CODEMAN_UPDATE_REMOTES to choose).' };
+    return { ...base, error: 'No comparable remotes found (set REVERIE_UPDATE_REMOTES to choose).' };
   }
 
   // Sequential on purpose: concurrent `git fetch` in one repo can contend on

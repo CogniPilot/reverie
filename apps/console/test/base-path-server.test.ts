@@ -13,7 +13,7 @@ describe('reverse-proxy base path: server wiring', () => {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let app: any;
   beforeAll(async () => {
-    server = new WebServer(0, false, true, '127.0.0.1', undefined, false, '/codeman');
+    server = new WebServer(0, false, true, '127.0.0.1', undefined, false, '/reverie');
     await server.start();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     app = (server as any).app;
@@ -23,39 +23,39 @@ describe('reverse-proxy base path: server wiring', () => {
   });
 
   it('routes prefixed, unprefixed and /api/v1 forms', async () => {
-    for (const url of ['/codeman/api/status', '/api/status', '/codeman/api/v1/status']) {
+    for (const url of ['/reverie/api/status', '/api/status', '/reverie/api/v1/status']) {
       const r = await app.inject({ method: 'GET', url });
       expect(r.statusCode, url).toBe(200);
       expect(JSON.parse(r.body).success).toBe(true);
     }
   });
 
-  it('serves the shell with the base injected at /codeman, /codeman/ and /codeman/session/:id', async () => {
-    for (const url of ['/codeman', '/codeman/', '/codeman/session/abc']) {
+  it('serves the shell with the base injected at /reverie, /reverie/ and /reverie/session/:id', async () => {
+    for (const url of ['/reverie', '/reverie/', '/reverie/session/abc']) {
       const r = await app.inject({ method: 'GET', url });
       expect(r.statusCode, url).toBe(200);
-      expect(r.body).toContain('<base href="/codeman/">');
-      expect(r.body).toContain('window.__CODEMAN_BASE__="/codeman"');
+      expect(r.body).toContain('<base href="/reverie/">');
+      expect(r.body).toContain('window.__REVERIE_BASE__="/reverie"');
     }
   });
 
   it('serves sw.js under the prefix', async () => {
-    const r = await app.inject({ method: 'GET', url: '/codeman/sw.js' });
+    const r = await app.inject({ method: 'GET', url: '/reverie/sw.js' });
     expect(r.statusCode).toBe(200);
     expect(r.headers['content-type']).toContain('javascript');
   });
 
   it('rebases root-absolute redirects and never double-prefixes', async () => {
-    const qr = await app.inject({ method: 'GET', url: '/codeman/q/abcdef' });
+    const qr = await app.inject({ method: 'GET', url: '/reverie/q/abcdef' });
     expect(qr.statusCode).toBe(302);
-    expect(qr.headers.location).toBe('/codeman/');
-    const wv = await app.inject({ method: 'GET', url: '/codeman/webview/somecap' });
+    expect(qr.headers.location).toBe('/reverie/');
+    const wv = await app.inject({ method: 'GET', url: '/reverie/webview/somecap' });
     expect(wv.statusCode).toBe(302);
-    expect(wv.headers.location).toBe('/codeman/webview/somecap/');
+    expect(wv.headers.location).toBe('/reverie/webview/somecap/');
   });
 
   it('unknown prefixed API path still gets the 404 envelope', async () => {
-    const r = await app.inject({ method: 'GET', url: '/codeman/api/nope' });
+    const r = await app.inject({ method: 'GET', url: '/reverie/api/nope' });
     expect(r.statusCode).toBe(404);
     expect(JSON.parse(r.body).success).toBe(false);
   });
@@ -70,7 +70,7 @@ describe('reverse-proxy base path: server wiring', () => {
         ws.on('close', (code, reason) => resolve({ code, reason: reason.toString() }));
         ws.on('error', (e) => resolve({ code: -1, reason: String(e) }));
       });
-    const prefixed = await close('/codeman/ws/sessions/nosuch/terminal');
+    const prefixed = await close('/reverie/ws/sessions/nosuch/terminal');
     const bare = await close('/ws/sessions/nosuch/terminal');
     expect(prefixed).toEqual({ code: 4004, reason: 'Session not found' });
     expect(prefixed).toEqual(bare);

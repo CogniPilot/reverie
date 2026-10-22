@@ -2,7 +2,7 @@
  * @fileoverview Clone Repo must not lend the server account's git sign-in to
  * non-admins in multi-user mode (PR #472 review).
  *
- * Every Codeman user's git runs as the one server account, so a credential
+ * Every Reverie user's git runs as the one server account, so a credential
  * helper that account has (the Docker image's opt-in `gh`/`az` helpers, or any
  * `gh auth setup-git`) would otherwise clone a PRIVATE repository with the
  * signed-in admin's credentials into a non-admin's case space, the same
@@ -47,9 +47,9 @@ const REPO = 'https://github.com/example/private-repo.git';
 type Who = { username: string; role: 'admin' | 'user' } | undefined;
 
 async function run(who: Who, multiUser: boolean): Promise<{ probe: unknown; clone: unknown }> {
-  const prev = process.env.CODEMAN_MULTIUSER;
-  if (multiUser) process.env.CODEMAN_MULTIUSER = '1';
-  else delete process.env.CODEMAN_MULTIUSER;
+  const prev = process.env.REVERIE_MULTIUSER;
+  if (multiUser) process.env.REVERIE_MULTIUSER = '1';
+  else delete process.env.REVERIE_MULTIUSER;
   try {
     const { app } = await createRouteTestHarness(registerCaseRoutes, who ? { authUser: who } : undefined);
     await app.inject({ method: 'POST', url: '/api/cases/clone-preflight', payload: { repository: REPO } });
@@ -66,8 +66,8 @@ async function run(who: Who, multiUser: boolean): Promise<{ probe: unknown; clon
       clone: calls.clone[0].withoutCredentialHelpers,
     };
   } finally {
-    if (prev === undefined) delete process.env.CODEMAN_MULTIUSER;
-    else process.env.CODEMAN_MULTIUSER = prev;
+    if (prev === undefined) delete process.env.REVERIE_MULTIUSER;
+    else process.env.REVERIE_MULTIUSER = prev;
   }
 }
 

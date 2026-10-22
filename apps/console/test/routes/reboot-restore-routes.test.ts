@@ -66,7 +66,7 @@ function offerEntry(sessionId: string, owner?: string): RebootRestoreEntry {
   return {
     sessionId,
     name: `session ${sessionId}`,
-    workingDir: `/tmp/codeman-reboot-restore-missing/${sessionId}`,
+    workingDir: `/tmp/reverie-reboot-restore-missing/${sessionId}`,
     owner,
     mode: 'claude',
     resumeConversationId: `conv-${sessionId}`,
@@ -74,7 +74,7 @@ function offerEntry(sessionId: string, owner?: string): RebootRestoreEntry {
       id: sessionId,
       pid: null,
       status: 'idle',
-      workingDir: `/tmp/codeman-reboot-restore-missing/${sessionId}`,
+      workingDir: `/tmp/reverie-reboot-restore-missing/${sessionId}`,
       currentTaskId: null,
       createdAt: 1_760_000_000_000,
       mode: 'claude',
@@ -195,16 +195,16 @@ describe('POST /api/reboot-restore/restore: multi-user workspace confinement', (
   let realDir: string;
 
   beforeEach(() => {
-    saved.CODEMAN_MULTIUSER = process.env.CODEMAN_MULTIUSER;
-    process.env.CODEMAN_MULTIUSER = '1';
+    saved.REVERIE_MULTIUSER = process.env.REVERIE_MULTIUSER;
+    process.env.REVERIE_MULTIUSER = '1';
     // This branch sits AFTER the existsSync check, so the workspace has to be
     // real for the confinement rule to be the thing that rejects the entry.
-    realDir = mkdtempSync(join(tmpdir(), 'codeman-reboot-restore-real-'));
+    realDir = mkdtempSync(join(tmpdir(), 'reverie-reboot-restore-real-'));
   });
 
   afterEach(() => {
-    if (saved.CODEMAN_MULTIUSER === undefined) delete process.env.CODEMAN_MULTIUSER;
-    else process.env.CODEMAN_MULTIUSER = saved.CODEMAN_MULTIUSER;
+    if (saved.REVERIE_MULTIUSER === undefined) delete process.env.REVERIE_MULTIUSER;
+    else process.env.REVERIE_MULTIUSER = saved.REVERIE_MULTIUSER;
     rmSync(realDir, { recursive: true, force: true });
   });
 

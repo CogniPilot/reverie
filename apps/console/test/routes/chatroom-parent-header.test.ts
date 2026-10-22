@@ -45,7 +45,7 @@ describe('chatroom routes: unresolved parent-session header', () => {
     const created = await app.inject({
       method: 'POST',
       url: '/api/chatrooms',
-      payload: { name: 'Fleet', members: [{ sessionId: A }, { sessionId: B }] },
+      payload: { name: 'Reverie', members: [{ sessionId: A }, { sessionId: B }] },
     });
     expect(created.statusCode).toBe(200);
     roomId = created.json().data.id;
@@ -56,7 +56,7 @@ describe('chatroom routes: unresolved parent-session header', () => {
     await app.close();
   });
 
-  const as = (header: string | undefined) => (header === undefined ? {} : { 'x-codeman-parent-session': header });
+  const as = (header: string | undefined) => (header === undefined ? {} : { 'x-reverie-parent-session': header });
 
   it.each([
     ['an unknown id', 'not-a-session'],
@@ -73,7 +73,7 @@ describe('chatroom routes: unresolved parent-session header', () => {
       expect(res.statusCode, `${request.method} ${request.url}`).toBe(403);
       expect(res.json()).toMatchObject({ success: false, errorCode: 'FORBIDDEN' });
     }
-    expect(service.room(roomId)?.name).toBe('Fleet');
+    expect(service.room(roomId)?.name).toBe('Reverie');
     expect(service.room(roomId)?.members.map((m) => m.sessionId)).toEqual([A, B]);
     expect(service.rooms()).toHaveLength(1);
   });

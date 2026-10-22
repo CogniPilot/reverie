@@ -2,7 +2,7 @@
  * @fileoverview Admin user-management routes (multi-user mode only).
  *
  * All handlers: 404 unless multi-user mode is active, requireAdmin, and audit-logged
- * to ~/.codeman/admin-audit.jsonl. Endpoints (docs/multi-user-plan.md section 8):
+ * to ~/.reverie/admin-audit.jsonl. Endpoints (docs/multi-user-plan.md section 8):
  *   GET    /api/admin/users
  *   POST   /api/admin/users
  *   PATCH  /api/admin/users/:username

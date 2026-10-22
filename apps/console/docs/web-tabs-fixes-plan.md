@@ -72,7 +72,7 @@ nested `<iframe src="/api/preview?slug=...">`.
 All three rewrite layers missed that shape:
 
 1. `<base href="/webview/<cap>/">` only affects **relative** URLs. A root-absolute
-   `/api/hero` ignores the base path and resolves against Codeman's origin.
+   `/api/hero` ignores the base path and resolves against Reverie's origin.
 2. `rewriteHtml()` only runs over the **initial HTML document**. This markup is
    created later by page script. (The static header `<img src="/api/logo">` DID
    work, having been rewritten at proxy time, which is why only the
@@ -119,7 +119,7 @@ Two details that mattered:
   (`createContextualFragment`), idempotence, re-injected markup, empty `src`, and
   the pass-throughs (relative, cross-origin, `#hash`, `data:`). 73 tests pass.
 - End-to-end in a real browser against an isolated instance
-  (`CODEMAN_INSTANCE=wvtest`, port 3151), with prod's old build as the negative
+  (`REVERIE_INSTANCE=wvtest`, port 3151), with prod's old build as the negative
   control:
 
   | | before (prod, old build) | after (fixed) |
@@ -138,9 +138,9 @@ Two details that mattered:
 
 Originally deferred, then implemented on request. Both gates had to move, and the
 auth one is the security-sensitive half: auth runs in `onRequest`, before routing,
-so it cannot tell a real Codeman API route from a 404, and simply dropping the
+so it cannot tell a real Reverie API route from a 404, and simply dropping the
 `/api` fence would let a page holding a capability forge a `Referer` and reach
-Codeman's **real** API unauthenticated.
+Reverie's **real** API unauthenticated.
 
 What shipped:
 

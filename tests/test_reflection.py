@@ -1,13 +1,13 @@
-import tests  # noqa: F401  isolates CODEMAN_*/FLEET_* before cto is imported
+import tests  # noqa: F401  isolates REVERIE_* before reverie is imported
 import json
 import tempfile
 import unittest
 from pathlib import Path
 
-from cto.embeddings import HashedEmbedder
-from cto.importance import parse_rating, rate_episode
-from cto.memory import MemoryStore
-from cto.reflection import Reflector, parse_insights
+from reverie.embeddings import HashedEmbedder
+from reverie.importance import parse_rating, rate_episode
+from reverie.memory import MemoryStore
+from reverie.reflection import Reflector, parse_insights
 from tests.helpers import fake_client
 
 
@@ -41,7 +41,7 @@ class ParseTest(unittest.TestCase):
 
 class CleanTest(unittest.TestCase):
     def test_limit_words(self):
-        from cto.llm import limit_words
+        from reverie.llm import limit_words
         self.assertEqual(limit_words("one two three", 5), "one two three")
         self.assertEqual(limit_words("a b c. d e f g", 4), "a b c.")
         self.assertEqual(limit_words("a b c d e f g", 4), "a b c d")

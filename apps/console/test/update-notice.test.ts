@@ -42,7 +42,7 @@ describe('computeFrontendBuildId', () => {
   });
 
   it('answers "unknown" for a missing directory instead of throwing', () => {
-    expect(computeFrontendBuildId(join(tmpdir(), 'does-not-exist-codeman'))).toBe('unknown');
+    expect(computeFrontendBuildId(join(tmpdir(), 'does-not-exist-reverie'))).toBe('unknown');
   });
 });
 
@@ -66,7 +66,7 @@ function loadNotice() {
   const reloads: number[] = [];
   class App {}
   const context = vm.createContext({
-    CodemanApp: App,
+    ReverieApp: App,
     location: { reload: () => reloads.push(1) },
     document: {
       createElement: makeEl,

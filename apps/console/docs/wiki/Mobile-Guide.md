@@ -124,7 +124,7 @@ hand the agent a photo or a video. One tap opens the camera and photo library sh
 else: no editor, no keyboard. The chosen files upload and their paths land on the prompt, so
 you then tap the terminal, write the rest of your message and press Enter. Videos (mp4, webm,
 mov, m4v, ogv) upload as recorded, up to 1 GB each by default
-(`CODEMAN_MAX_PASTE_VIDEO_BYTES` on the server changes it), so a long 4K clip takes a moment
+(`REVERIE_MAX_PASTE_VIDEO_BYTES` on the server changes it), so a long 4K clip takes a moment
 on the way up.
 
 If the keyboard was up when you tapped Attach, iOS closes it to show the photo sheet and does

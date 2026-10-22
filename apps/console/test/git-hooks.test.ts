@@ -51,7 +51,7 @@ const GIT_ENV = {
   GIT_AUTHOR_EMAIL: 'test@example.invalid',
   GIT_COMMITTER_NAME: 'test',
   GIT_COMMITTER_EMAIL: 'test@example.invalid',
-  CODEMAN_SKIP_PREPUSH: '',
+  REVERIE_SKIP_PREPUSH: '',
 };
 
 function git(cwd: string, args: string[], env: NodeJS.ProcessEnv = GIT_ENV): string {
@@ -60,7 +60,7 @@ function git(cwd: string, args: string[], env: NodeJS.ProcessEnv = GIT_ENV): str
 
 let scratch: string;
 beforeAll(() => {
-  scratch = realpathSync(mkdtempSync(join(tmpdir(), 'codeman-git-hooks-')));
+  scratch = realpathSync(mkdtempSync(join(tmpdir(), 'reverie-git-hooks-')));
 });
 afterAll(() => {
   rmSync(scratch, { recursive: true, force: true });
@@ -231,7 +231,7 @@ describe('resolveGitHooksDir (temp repos)', () => {
 
   it("returns null for a copy nested inside someone else's repo (e.g. under node_modules)", () => {
     const repo = newRepo();
-    const nested = join(repo, 'node_modules', 'aicodeman');
+    const nested = join(repo, 'node_modules', 'aireverie');
     mkdirSync(nested, { recursive: true });
     expect(resolveGitHooksDir(nested)).toBeNull();
   });
@@ -322,18 +322,18 @@ describe('the installed hook on a real push (temp repos)', () => {
     expect(spawnSync('git', ['rev-parse', '--verify', '-q', 'refs/heads/main'], { cwd: remote }).status).not.toBe(0);
   });
 
-  it('CODEMAN_SKIP_PREPUSH=1 skips every check', () => {
+  it('REVERIE_SKIP_PREPUSH=1 skips every check', () => {
     const { ran, push } = setup({ failing: 'lint' });
-    const r = push(['-q', 'origin', 'main'], { CODEMAN_SKIP_PREPUSH: '1' });
+    const r = push(['-q', 'origin', 'main'], { REVERIE_SKIP_PREPUSH: '1' });
     expect(r.status, r.stderr).toBe(0);
     expect(ran()).toEqual([]);
   });
 
   it('a delete-only push skips the checks', () => {
     const { ran, push, repo } = setup({ failing: 'lint' });
-    expect(push(['-q', 'origin', 'main'], { CODEMAN_SKIP_PREPUSH: '1' }).status).toBe(0);
+    expect(push(['-q', 'origin', 'main'], { REVERIE_SKIP_PREPUSH: '1' }).status).toBe(0);
     git(repo, ['branch', 'doomed']);
-    expect(push(['-q', 'origin', 'doomed'], { CODEMAN_SKIP_PREPUSH: '1' }).status).toBe(0);
+    expect(push(['-q', 'origin', 'doomed'], { REVERIE_SKIP_PREPUSH: '1' }).status).toBe(0);
     const r = push(['-q', 'origin', '--delete', 'doomed']);
     expect(r.status, r.stderr).toBe(0);
     expect(ran()).toEqual([]);

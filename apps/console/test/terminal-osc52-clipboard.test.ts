@@ -7,7 +7,7 @@
  * copy was dropped. These tests pin the handler itself: decode, UTF-8, the
  * read-query refusal, the replay gates, and the blocked-write fallback.
  *
- * Strategy: run constants.js + terminal-ui.js in a vm with a stub CodemanApp
+ * Strategy: run constants.js + terminal-ui.js in a vm with a stub ReverieApp
  * (the harness shape test/terminal-copy-selection.test.ts uses). The handler
  * tests use a fake terminal whose parser records the registered handler; the
  * replay tests drive the REAL chunkedTerminalWrite into a real
@@ -28,7 +28,7 @@ const { Terminal } = xtermHeadless as unknown as {
 const read = (rel: string) => readFileSync(resolve(import.meta.dirname, '..', rel), 'utf8');
 
 function loadHarness(copyResult = true, focused = true) {
-  const CodemanApp = function CodemanApp(this: unknown) {};
+  const ReverieApp = function ReverieApp(this: unknown) {};
   const document: Record<string, unknown> = {
     getElementById: () => null,
     querySelector: () => null,
@@ -36,7 +36,7 @@ function loadHarness(copyResult = true, focused = true) {
     activeElement: null,
   };
   const context = vm.createContext({
-    CodemanApp,
+    ReverieApp,
     window: {},
     globalThis: {},
     document,
@@ -54,7 +54,7 @@ function loadHarness(copyResult = true, focused = true) {
   vm.runInContext(read('src/web/public/constants.js'), context, { filename: 'constants.js' });
   vm.runInContext(read('src/web/public/terminal-ui.js'), context, { filename: 'terminal-ui.js' });
 
-  const app = new (CodemanApp as unknown as new () => Record<string, any>)();
+  const app = new (ReverieApp as unknown as new () => Record<string, any>)();
   const copied: string[] = [];
   const fallbacks: string[] = [];
   const toasts: string[] = [];
@@ -144,7 +144,7 @@ describe('OSC 52 clipboard handler', () => {
   });
 
   it('copies one Claude Code copy once, though it arrives three times', async () => {
-    // What a single /copy in a Codeman tmux session actually delivers: Claude's
+    // What a single /copy in a Reverie tmux session actually delivers: Claude's
     // own OSC 52 plus tmux forwarding it twice (captured from a live session).
     const h = loadHarness();
     h.app._installOsc52Clipboard(h.terminal);

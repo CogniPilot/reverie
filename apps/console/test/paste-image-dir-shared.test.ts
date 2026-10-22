@@ -2,7 +2,7 @@
  * @fileoverview Deleting a session keeps the upload dirs while a sibling in the
  * same working directory is still live (Ark0N/Codeman#446).
  *
- * `cleanupSession()` removes `{workingDir}/.codeman-uploads` (and the pre-move
+ * `cleanupSession()` removes `{workingDir}/.reverie-uploads` (and the pre-move
  * `.claude-images`) recursively. That
  * dir belongs to the working directory, not to the session, and several
  * sessions routinely share one case directory, so closing one used to delete
@@ -90,7 +90,7 @@ describe('pasteImageDirInUseByOtherSession', () => {
   });
 
   it('matches a sibling that reaches the same directory through a symlink', () => {
-    const root = mkdtempSync(join(tmpdir(), 'codeman-paste-link-'));
+    const root = mkdtempSync(join(tmpdir(), 'reverie-paste-link-'));
     try {
       const real = join(root, 'case');
       mkdirSync(real);
@@ -116,7 +116,7 @@ describe('deleting a session that shares its working directory', () => {
   let base: string;
 
   beforeAll(async () => {
-    workingDir = mkdtempSync(join(tmpdir(), 'codeman-paste-shared-'));
+    workingDir = mkdtempSync(join(tmpdir(), 'reverie-paste-shared-'));
     server = new WebServer(0, false, true);
     await server.start();
     base = `http://localhost:${server.boundPort}`;
@@ -143,7 +143,7 @@ describe('deleting a session that shares its working directory', () => {
     const first = await create();
     const second = await create();
     // Both the current dir and the pre-move one, which a case in use back then still carries.
-    const uploadDir = join(workingDir, '.codeman-uploads');
+    const uploadDir = join(workingDir, '.reverie-uploads');
     const legacyDir = join(workingDir, '.claude-images');
     mkdirSync(uploadDir, { recursive: true });
     mkdirSync(legacyDir, { recursive: true });
@@ -165,20 +165,20 @@ describe('deleting a session that shares its working directory', () => {
   });
 
   it('does not follow a planted symlink at the upload dir into another case when the last session closes', async () => {
-    const other = mkdtempSync(join(tmpdir(), 'codeman-paste-other-'));
-    const otherUploads = join(other, '.codeman-uploads');
+    const other = mkdtempSync(join(tmpdir(), 'reverie-paste-other-'));
+    const otherUploads = join(other, '.reverie-uploads');
     mkdirSync(otherUploads);
     writeFileSync(join(otherUploads, 'paste-7.png'), 'x');
     // Planted by a workspace script. uploadDirs() never lists a link, so the delete
-    // removes nothing here, and the link itself stays: it is not Codeman's to remove.
-    symlinkSync(otherUploads, join(workingDir, '.codeman-uploads'));
+    // removes nothing here, and the link itself stays: it is not Reverie's to remove.
+    symlinkSync(otherUploads, join(workingDir, '.reverie-uploads'));
     try {
       const only = await create();
       expect((await remove(only)).status).toBe(200);
       expect(existsSync(join(otherUploads, 'paste-7.png'))).toBe(true);
-      expect(lstatSync(join(workingDir, '.codeman-uploads')).isSymbolicLink()).toBe(true);
+      expect(lstatSync(join(workingDir, '.reverie-uploads')).isSymbolicLink()).toBe(true);
     } finally {
-      rmSync(join(workingDir, '.codeman-uploads'), { force: true });
+      rmSync(join(workingDir, '.reverie-uploads'), { force: true });
       rmSync(other, { recursive: true, force: true });
     }
   });
@@ -190,7 +190,7 @@ describe('deleting a session that shares its working directory', () => {
     // write, so wait for the record a long-running session would already have.
     const store = (server as unknown as { store: { getSession: (id: string) => unknown } }).store;
     await vi.waitFor(() => expect(store.getSession(detached)).toBeTruthy(), { timeout: 10_000 });
-    const imageDir = join(workingDir, '.codeman-uploads');
+    const imageDir = join(workingDir, '.reverie-uploads');
     mkdirSync(imageDir, { recursive: true });
     writeFileSync(join(imageDir, 'paste-2.png'), 'x');
 

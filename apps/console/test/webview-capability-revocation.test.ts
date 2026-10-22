@@ -95,15 +95,15 @@ describe('POST /api/logout in multi-user mode', () => {
   let savedMode: string | undefined;
 
   beforeAll(async () => {
-    savedMode = process.env.CODEMAN_MULTIUSER;
-    process.env.CODEMAN_MULTIUSER = '1';
+    savedMode = process.env.REVERIE_MULTIUSER;
+    process.env.REVERIE_MULTIUSER = '1';
     harness = await createRouteTestHarness(registerSessionRoutes, { authUser: { username: 'peon', role: 'user' } });
   });
 
   afterAll(async () => {
     await harness.app.close();
-    if (savedMode === undefined) delete process.env.CODEMAN_MULTIUSER;
-    else process.env.CODEMAN_MULTIUSER = savedMode;
+    if (savedMode === undefined) delete process.env.REVERIE_MULTIUSER;
+    else process.env.REVERIE_MULTIUSER = savedMode;
   });
 
   it("revokes only the caller's capabilities, never another user's", async () => {
@@ -130,8 +130,8 @@ describe('admin routes (multi-user)', () => {
   // The temp HOME from test/setup.ts is per-FILE, so users.json persists across
   // the tests in this block.
   beforeAll(async () => {
-    savedMode = process.env.CODEMAN_MULTIUSER;
-    process.env.CODEMAN_MULTIUSER = '1';
+    savedMode = process.env.REVERIE_MULTIUSER;
+    process.env.REVERIE_MULTIUSER = '1';
     invalidateUsersCache();
     await createUser({ username: 'boss', role: 'admin', password: PASSWORD });
     await createUser({ username: 'peon', role: 'user', password: PASSWORD });
@@ -140,8 +140,8 @@ describe('admin routes (multi-user)', () => {
 
   afterAll(async () => {
     await harness.app.close();
-    if (savedMode === undefined) delete process.env.CODEMAN_MULTIUSER;
-    else process.env.CODEMAN_MULTIUSER = savedMode;
+    if (savedMode === undefined) delete process.env.REVERIE_MULTIUSER;
+    else process.env.REVERIE_MULTIUSER = savedMode;
     invalidateUsersCache();
   });
 

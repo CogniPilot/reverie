@@ -33,7 +33,7 @@ import { basename, dirname, join, resolve } from 'node:path';
  * string, so a `v2` would read every installed `v1` hook as foreign and never refresh it.
  * A changed body still reaches installed hooks, because the refresh compares the whole file.
  */
-export const PRE_PUSH_MARKER = '# codeman-managed-hook: pre-push v1';
+export const PRE_PUSH_MARKER = '# reverie-managed-hook: pre-push v1';
 
 /**
  * Checks that make up the fast tier, cheapest first so failures surface sooner. Each entry
@@ -89,10 +89,10 @@ ${PRE_PUSH_MARKER}
 # it is regenerated on npm install. Delete the marker line above to take ownership
 # and the installer will leave your version alone.
 #
-# Skip once:   CODEMAN_SKIP_PREPUSH=1 git push
+# Skip once:   REVERIE_SKIP_PREPUSH=1 git push
 # Skip always: remove this file.
 
-[ "$CODEMAN_SKIP_PREPUSH" = "1" ] && exit 0
+[ "$REVERIE_SKIP_PREPUSH" = "1" ] && exit 0
 
 repo_root=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0
 cd "$repo_root" || exit 0
@@ -140,7 +140,7 @@ if [ -n "$(git --no-optional-locks status --porcelain -- ${watched} 2>/dev/null)
   exit 0
 fi
 
-log=$(mktemp "\${TMPDIR:-/tmp}/codeman-prepush.XXXXXX") || exit 0
+log=$(mktemp "\${TMPDIR:-/tmp}/reverie-prepush.XXXXXX") || exit 0
 trap 'rm -f "$log"' EXIT
 
 failed=''
@@ -159,7 +159,7 @@ ${runs}
 if [ -n "$failed" ]; then
   echo ""
   echo "pre-push: blocked by:$failed"
-  echo "Fix, or push anyway with:  CODEMAN_SKIP_PREPUSH=1 git push"
+  echo "Fix, or push anyway with:  REVERIE_SKIP_PREPUSH=1 git push"
   exit 1
 fi
 
@@ -206,13 +206,13 @@ function canonicalPath(path) {
  * ⚠️ Returns a directory ONLY when it is this repository's own `<git-common-dir>/hooks`.
  * `--git-path hooks` also reports `core.hooksPath`, and that setting is often GLOBAL (a
  * shared hooks directory used by every repo on the machine); installing there would
- * overwrite the user's own hooks and run Codeman's checks on unrelated repos. A
+ * overwrite the user's own hooks and run Reverie's checks on unrelated repos. A
  * `core.hooksPath` that points back at the repo's own hooks dir still resolves, because
  * the comparison is on canonical paths rather than on whether the setting exists.
  *
  * Also returns null unless `repoRoot` is itself the top of a work tree. Without that guard,
  * a copy of this package sitting inside SOMEONE ELSE's repository (e.g. under their
- * node_modules) would resolve to their hooks directory and install Codeman's hook there.
+ * node_modules) would resolve to their hooks directory and install Reverie's hook there.
  *
  * @param {string} repoRoot
  * @returns {string | null}

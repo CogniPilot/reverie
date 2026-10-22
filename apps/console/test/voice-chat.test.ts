@@ -7,7 +7,7 @@ import vm from 'node:vm';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-const context = vm.createContext({ CodemanApp: class {} });
+const context = vm.createContext({ ReverieApp: class {} });
 vm.runInContext(readFileSync(resolve(import.meta.dirname, '../src/web/public/voice-chat.js'), 'utf8'), context);
 const get = (name: string) => vm.runInContext(name, context);
 const chatMicRoute = get('chatMicRoute') as (o: {
@@ -117,9 +117,9 @@ describe('cumulative browser speech results', () => {
       constructor() { instances.push(this); }
       start() {}
     }
-    const sandbox = vm.createContext({ CodemanApp: class {}, window: { SpeechRecognition: Recognition } });
+    const sandbox = vm.createContext({ ReverieApp: class {}, window: { SpeechRecognition: Recognition } });
     vm.runInContext(readFileSync(resolve(import.meta.dirname, '../src/web/public/voice-chat.js'), 'utf8'), sandbox);
-    const app = vm.runInContext('new CodemanApp()', sandbox);
+    const app = vm.runInContext('new ReverieApp()', sandbox);
     const posted: string[] = [];
     Object.assign(app, { _setChatRecording() {}, _chatVoiceStatus() {}, _chatToLabel: () => 'everyone', _dictationDone: (text: string) => posted.push(text) });
     app._startLocalDictation();
@@ -182,7 +182,7 @@ describe('owner-directed room read-aloud', () => {
 
 
 it('speaks an owner-directed broadcast via the actual message callback, not unrelated chatter', () => {
-  const proto = vm.runInContext('CodemanApp.prototype', context);
+  const proto = vm.runInContext('ReverieApp.prototype', context);
   const said: string[] = [];
   const app = { _speakRepliesMode: (id: string) => (id === 'voice' ? 'mine' : 'off'), _chatRoomId: 'voice', _chatOwnerNames: ['Owner'], _chatRoom: { messages: [] }, _readAloudQueue: () => ({ push: (s: string) => said.push(s) }) };
   const data = { roomId: 'voice', message: { id: 'reply', from: { kind: 'agent', name: 'Reviewer' }, to: 'all', text: '@Owner yes, I hear you' } };
@@ -194,7 +194,7 @@ it('speaks an owner-directed broadcast via the actual message callback, not unre
 });
 
 it('leaves only the linked answer of a pending spoken turn out of read-aloud, since the turn plays it', () => {
-  const proto = vm.runInContext('CodemanApp.prototype', context);
+  const proto = vm.runInContext('ReverieApp.prototype', context);
   const said: string[] = [];
   const asked = { id: 'q1', from: { kind: 'user', name: 'Owner' }, to: ['worker'], text: 'status?', spoken: true };
   const typed = { id: 'q2', from: { kind: 'user', name: 'Owner' }, to: ['worker'], text: 'typed' };
@@ -267,7 +267,7 @@ it.each(reportedSpeechCases)('Car mode handles reconstructed reported sequence $
     start() {}, abort() {},
     onresult: null as null | ((event: unknown) => void),
   };
-  const sandbox = vm.createContext({ CodemanApp: class {}, deps: {
+  const sandbox = vm.createContext({ ReverieApp: class {}, deps: {
     createRecognition: () => recognition,
     send: async (text: string) => { sent.push(text); },
     onState() {}, now: () => 1000,
@@ -294,9 +294,9 @@ it.each(reportedSpeechCases)('Car mode handles reconstructed reported sequence $
 it.each(reportedSpeechCases)('composer handles reconstructed reported sequence $id', ({ segments, expected }) => {
   const instances: object[] = [];
   class Recognition { constructor() { instances.push(this); } start() {} }
-  const sandbox = vm.createContext({ CodemanApp: class {}, window: { SpeechRecognition: Recognition } });
+  const sandbox = vm.createContext({ ReverieApp: class {}, window: { SpeechRecognition: Recognition } });
   vm.runInContext(readFileSync(resolve(import.meta.dirname, '../src/web/public/voice-chat.js'), 'utf8'), sandbox);
-  const app = vm.runInContext('new CodemanApp()', sandbox);
+  const app = vm.runInContext('new ReverieApp()', sandbox);
   const sent: string[] = [];
   Object.assign(app, { _setChatRecording() {}, _chatVoiceStatus() {}, _chatToLabel: () => 'everyone', _dictationDone: (text: string) => sent.push(text) });
   app._startLocalDictation();

@@ -1040,7 +1040,7 @@ describe('Vertical rail rename editor with a long prefix', () => {
     const context = await browser.newContext({ viewport: { width: 1280, height: 720 }, deviceScaleFactor: 1 });
     try {
       await context.addInitScript(
-        (value) => localStorage.setItem('codeman-app-settings', JSON.stringify(value)),
+        (value) => localStorage.setItem('reverie-app-settings', JSON.stringify(value)),
         settings
       );
       const page = await context.newPage();

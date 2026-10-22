@@ -47,7 +47,7 @@ function methodSource(source: string, method: string): string {
 /** Real terminal-ui.js mixin, for `_estimateReplayRows` / `_replayWouldShrinkBuffer`. */
 function loadTerminalMixin(): Record<string, unknown> {
   const source = readFileSync(resolve(PUBLIC, 'terminal-ui.js'), 'utf8');
-  const FakeCodemanApp = function () {} as unknown as { prototype: Record<string, unknown> };
+  const FakeReverieApp = function () {} as unknown as { prototype: Record<string, unknown> };
   const context = vm.createContext({
     console,
     performance,
@@ -56,12 +56,12 @@ function loadTerminalMixin(): Record<string, unknown> {
     setInterval: vi.fn(),
     clearInterval: vi.fn(),
     requestAnimationFrame: vi.fn(),
-    CodemanApp: FakeCodemanApp,
+    ReverieApp: FakeReverieApp,
     window: { addEventListener: vi.fn(), removeEventListener: vi.fn() },
     document: { addEventListener: vi.fn() },
   });
   vm.runInContext(source, context);
-  return FakeCodemanApp.prototype;
+  return FakeReverieApp.prototype;
 }
 
 function loadRefetch(): (this: unknown, opts?: { force?: boolean }) => Promise<void> {

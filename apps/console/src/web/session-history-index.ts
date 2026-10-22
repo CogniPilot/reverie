@@ -34,7 +34,7 @@
 
 /** One past-session row in the snapshot. Mirrors what the search corpus needs, nothing more. */
 export interface HistorySessionIndexItem {
-  /** Codeman session id (the search result's session id and dedupe key). */
+  /** Reverie session id (the search result's session id and dedupe key). */
   sessionId: string;
   /** Display name, may be empty for a transcript-only row. */
   name: string;

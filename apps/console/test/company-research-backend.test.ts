@@ -24,7 +24,7 @@ describe('durable tool-capable company research backend', () => {
   const start = () =>
     backend.start({ cycle, employee, prompt: 'Use tools to explore an interesting systems question.' });
   beforeEach(async () => {
-    directory = await mkdtemp(join(tmpdir(), 'fleet-company-backend-'));
+    directory = await mkdtemp(join(tmpdir(), 'reverie-company-backend-'));
     file = join(directory, 'bindings.json');
     employee = {
       id: randomUUID(),
@@ -62,7 +62,7 @@ describe('durable tool-capable company research backend', () => {
       expect(binding.sessionId).not.toBe(employee.sessionId);
       expect(binding.workingDir).toBe(join(directory, 'workspaces', cycle.id));
       expect(env.REVERIE_RESEARCH_CYCLE_ID).toBe(cycle.id);
-      expect(env.FLEET_RESEARCH_CYCLE_ID).toBe(cycle.id);
+      expect(env.REVERIE_RESEARCH_CYCLE_ID).toBe(cycle.id);
       expect(await readFile(join(binding.workingDir, 'RESEARCH_TASK.md'), 'utf8')).toContain('Use tools');
     });
     const first = await start();

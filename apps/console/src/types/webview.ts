@@ -1,15 +1,15 @@
 /**
  * @fileoverview Web tab (dashboard) types.
  *
- * A "webview" is a saved URL that Codeman renders as a tab alongside agent
+ * A "webview" is a saved URL that Reverie renders as a tab alongside agent
  * sessions: Grafana on :3000, a Uptime-Kuma on :4000, an internal status page.
  * It is deliberately NOT a sixth `SessionMode`, it has no PTY, no tmux, no
  * respawn and no idle detection. Same reasoning that keeps Docker and remote-SSH
  * as case overlays rather than modes.
  *
  * Key exports:
- * - Webview, the persisted record (`~/.codeman/webviews.json`).
- * - WebviewEmbedMode, 'proxy' (served through Codeman's origin) or 'direct'
+ * - Webview, the persisted record (`~/.reverie/webviews.json`).
+ * - WebviewEmbedMode, 'proxy' (served through Reverie's origin) or 'direct'
  *   (a plain cross-origin iframe, only viable for HTTPS targets that allow framing).
  * - WebviewProbe, the result of the server-side reachability/framing probe.
  * - WebviewOpenData, what `POST /api/webviews/:id/open` hands the browser.
@@ -21,9 +21,9 @@
 /**
  * How the browser should embed a webview.
  *
- * - `proxy`: the iframe points at `/webview/<capability>/` on Codeman's own
+ * - `proxy`: the iframe points at `/webview/<capability>/` on Reverie's own
  *   origin and the server relays to the target. Required whenever the target is
- *   plain HTTP (an HTTPS Codeman page cannot embed it: mixed content) or refuses
+ *   plain HTTP (an HTTPS Reverie page cannot embed it: mixed content) or refuses
  *   framing via `X-Frame-Options` / `frame-ancestors`.
  * - `direct`: the iframe points at the target URL itself. Cheaper, but only works
  *   for HTTPS targets that permit framing, and needs the target origin added to
@@ -31,9 +31,9 @@
  */
 export type WebviewEmbedMode = 'proxy' | 'direct';
 
-/** A saved dashboard, persisted to `~/.codeman/webviews.json`. */
+/** A saved dashboard, persisted to `~/.reverie/webviews.json`. */
 /**
- * Dashboards Codeman creates and maintains on the user's behalf.
+ * Dashboards Reverie creates and maintains on the user's behalf.
  *
  * A managed record is hidden from the saved-dashboard list, because the shortcut
  * that maintains it is already a menu entry of its own: listing both showed the
@@ -54,13 +54,13 @@ export interface Webview {
   embedMode: WebviewEmbedMode;
   /**
    * When false (the default) the iframe is sandboxed WITHOUT `allow-same-origin`,
-   * so a proxied page runs in an opaque origin and cannot read the Codeman page or
+   * so a proxied page runs in an opaque origin and cannot read the Reverie page or
    * call its API. Setting this to true trades that isolation for the page's own
    * cookies/localStorage, only for dashboards the user fully trusts.
    */
   trusted: boolean;
   /**
-   * Set when Codeman owns this record rather than the user (see
+   * Set when Reverie owns this record rather than the user (see
    * `WebviewManagedKind`). Managed rows are maintained by the shortcut that
    * created them, including repointing the URL when the port changes.
    */
@@ -81,7 +81,7 @@ export interface WebviewProbe {
   xFrameOptions?: string;
   /** The `frame-ancestors` directive extracted from the target's CSP, if any. */
   frameAncestors?: string;
-  /** True when the target permits being framed cross-origin by this Codeman. */
+  /** True when the target permits being framed cross-origin by this Reverie. */
   framable: boolean;
   /** Strategy the UI should default to for this URL. */
   recommendedMode: WebviewEmbedMode;

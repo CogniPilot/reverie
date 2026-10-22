@@ -13,7 +13,7 @@
  * unconditional "third reset point" that runs after both the mux and direct-PTY
  * paths — and both listed only Claude's `resumeSessionId` and omp's. For codex
  * both are undefined, so every mux reattach and every boot recovery reset the
- * alias back to the Codeman id and the duplicate came back. The existing comment
+ * alias back to the Reverie id and the duplicate came back. The existing comment
  * at the third reset point already warned that omitting omp's fallback there
  * "stomps the mux branch's correctly-resolved OMP alias"; codex needed the same.
  *
@@ -29,7 +29,7 @@ import { Session } from '../src/session.js';
 import { TmuxManager } from '../src/tmux-manager.js';
 
 describe('codex: a resumed thread id survives start()', () => {
-  const workingDir = join(homedir(), 'codeman-cases', 'codex-resume-alias');
+  const workingDir = join(homedir(), 'reverie-cases', 'codex-resume-alias');
   const THREAD_ID = '00000003-0003-4000-8000-000000000003';
   const sessions: Session[] = [];
 
@@ -68,7 +68,7 @@ describe('codex: a resumed thread id survives start()', () => {
     await expect(makeSession(false).startInteractive()).rejects.toThrow(/require tmux/i);
   });
 
-  it('a fresh codex session keeps the Codeman id, having no thread of its own', async () => {
+  it('a fresh codex session keeps the Reverie id, having no thread of its own', async () => {
     mkdirSync(workingDir, { recursive: true });
     const session = new Session({ workingDir, mode: 'codex', mux: new TmuxManager(), useMux: true });
     sessions.push(session);

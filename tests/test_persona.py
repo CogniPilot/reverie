@@ -1,10 +1,10 @@
-import tests  # noqa: F401  isolates CODEMAN_*/FLEET_* before cto is imported
+import tests  # noqa: F401  isolates REVERIE_* before reverie is imported
 import tempfile
 import unittest
 from pathlib import Path
 
-from cto.memory import Memory
-from cto.persona import (DEFAULT_PERSONA, build_system_prompt, load_persona, normalize_section, read_profile,
+from reverie.memory import Memory
+from reverie.persona import (DEFAULT_PERSONA, build_system_prompt, load_persona, normalize_section, read_profile,
                           render_profile, write_profile)
 
 
@@ -82,6 +82,6 @@ class LegacySectionCompatibility(unittest.TestCase):
     def test_instance_aliases_come_from_config(self):
         from unittest import mock
         self.assertEqual(normalize_section("alex"), "shared")
-        with mock.patch.dict("os.environ", {"FLEET_OWNER_ALIASES": "alex", "FLEET_AGENT_ALIASES": "robin, sam"}):
+        with mock.patch.dict("os.environ", {"REVERIE_OWNER_ALIASES": "alex", "REVERIE_AGENT_ALIASES": "robin, sam"}):
             self.assertEqual(normalize_section("Alex"), "user")
             self.assertEqual(normalize_section("sam"), "agent")

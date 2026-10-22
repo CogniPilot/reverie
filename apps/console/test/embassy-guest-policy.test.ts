@@ -107,7 +107,6 @@ describe.each(['off', 'log', 'enforce'] as const)('embassy guest routes under po
         rooms: () => [],
         predecessor: () => undefined,
         employeeOf: () => undefined,
-        ctoEmployee: () => undefined,
         keepers: () => service.keepers(),
       }),
     });
@@ -146,9 +145,9 @@ describe.each(['off', 'log', 'enforce'] as const)('embassy guest routes under po
 
   const refusals: Array<[string, boolean, Record<string, string>]> = [
     ['no cookie and no header', false, {}],
-    ['a forged agent header', false, { 'x-codeman-parent-session': FORGED }],
-    ['a real agent session header', false, { 'x-codeman-parent-session': AGENT }],
-    ['a full owner cookie with an agent header', true, { 'x-codeman-parent-session': AGENT }],
+    ['a forged agent header', false, { 'x-reverie-parent-session': FORGED }],
+    ['a real agent session header', false, { 'x-reverie-parent-session': AGENT }],
+    ['a full owner cookie with an agent header', true, { 'x-reverie-parent-session': AGENT }],
   ];
 
   it.each(refusals)('refuses %s on every route, reads included', async (_name, withOwner, headers) => {

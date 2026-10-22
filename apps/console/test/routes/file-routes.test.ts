@@ -160,12 +160,12 @@ describe('file-routes', () => {
       expect([statsFor('notes.txt'), statsFor('src'), statsFor('link')]).toEqual([1, 1, 1]);
     });
 
-    it('defaults to the Codeman Cases root, not Home, when linking a case with no path chosen yet', async () => {
+    it('defaults to the Reverie Cases root, not Home, when linking a case with no path chosen yet', async () => {
       // The "Link Existing" case picker opens with an empty path and no
-      // sessionId. `Home` and `Codeman Cases` are unrelated bind mounts under
+      // sessionId. `Home` and `Reverie Cases` are unrelated bind mounts under
       // Docker, so falling back to whichever root happened to be listed first
       // could open the picker somewhere with no cases in it at all — and, worse,
-      // make a stale directory from a since-changed CODEMAN_CASES_PATH look like
+      // make a stale directory from a since-changed REVERIE_CASES_PATH look like
       // a normal thing to stumble across while browsing for one to link.
       const res = await harness.app.inject({ method: 'GET', url: '/api/filesystem/browse' });
 
@@ -357,22 +357,22 @@ describe('file-routes', () => {
   //   2. `Home` and `CASES_DIR` were unconditional roots, and per-user spaces
   //      live INSIDE homedir(), so Home alone exposed every other user's files.
   describe('filesystem picker multi-user scoping', () => {
-    const SPACES = '/tmp/codeman-test-user-spaces';
+    const SPACES = '/tmp/reverie-test-user-spaces';
     let prevMultiUser: string | undefined;
     let prevSpaces: string | undefined;
 
     beforeEach(() => {
-      prevMultiUser = process.env.CODEMAN_MULTIUSER;
-      prevSpaces = process.env.CODEMAN_USER_SPACES_DIR;
-      process.env.CODEMAN_MULTIUSER = '1';
-      process.env.CODEMAN_USER_SPACES_DIR = SPACES;
+      prevMultiUser = process.env.REVERIE_MULTIUSER;
+      prevSpaces = process.env.REVERIE_USER_SPACES_DIR;
+      process.env.REVERIE_MULTIUSER = '1';
+      process.env.REVERIE_USER_SPACES_DIR = SPACES;
     });
 
     afterEach(() => {
-      if (prevMultiUser === undefined) delete process.env.CODEMAN_MULTIUSER;
-      else process.env.CODEMAN_MULTIUSER = prevMultiUser;
-      if (prevSpaces === undefined) delete process.env.CODEMAN_USER_SPACES_DIR;
-      else process.env.CODEMAN_USER_SPACES_DIR = prevSpaces;
+      if (prevMultiUser === undefined) delete process.env.REVERIE_MULTIUSER;
+      else process.env.REVERIE_MULTIUSER = prevMultiUser;
+      if (prevSpaces === undefined) delete process.env.REVERIE_USER_SPACES_DIR;
+      else process.env.REVERIE_USER_SPACES_DIR = prevSpaces;
     });
 
     const harnessAs = (role: 'admin' | 'user', username: string) =>
@@ -996,7 +996,7 @@ describe('file-routes', () => {
         url: `/api/sessions/${harness.ctx._sessionId}/file-raw?path=enormous.bin`,
       });
       expect(res.statusCode).toBe(413);
-      expect(JSON.parse(res.body).error).toContain('CODEMAN_MAX_DOWNLOAD_BYTES');
+      expect(JSON.parse(res.body).error).toContain('REVERIE_MAX_DOWNLOAD_BYTES');
     });
 
     it('caps an xlsx ?preview=true fetch at 10 MB, leaving downloads and small previews alone', async () => {

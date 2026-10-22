@@ -213,7 +213,7 @@ describe('confirm', () => {
     try {
       process.stdin.isTTY = false;
       expect(isInteractive()).toBe(false);
-      await expect(confirm('Reset all Codeman state?')).resolves.toBe(false);
+      await expect(confirm('Reset all Reverie state?')).resolves.toBe(false);
     } finally {
       process.stdin.isTTY = original;
     }

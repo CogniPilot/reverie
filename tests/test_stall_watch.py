@@ -1,4 +1,4 @@
-import tests  # noqa: F401  isolates CODEMAN_*/FLEET_* before cto is imported
+import tests  # noqa: F401  isolates REVERIE_* before reverie is imported
 import fcntl
 import json
 import os
@@ -12,7 +12,7 @@ from pathlib import Path
 from unittest import mock
 from types import SimpleNamespace
 
-from cto import stall_watch as sw
+from reverie import stall_watch as sw
 
 NOW = 1_800_000_000.0          # 2027-01-15 08:00 UTC
 MS = lambda seconds: int(seconds * 1000)

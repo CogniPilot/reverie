@@ -7,7 +7,7 @@ import { CompanyError, CompanyService, type CompanyResearchBackend } from '../sr
 import { ChatroomStore } from '../src/chatroom-store.js';
 import type { RetiredSession } from '../src/chatroom-service.js';
 
-describe('CTO/COO recovery of an employee whose session is gone', () => {
+describe('Explicitly authorized employee recovery', () => {
   let directory: string;
   let store: CompanyStore;
   let rooms: ChatroomStore;
@@ -42,8 +42,10 @@ describe('CTO/COO recovery of an employee whose session is gone', () => {
     for (const [id, name] of [['cto-1', 'Reviewer'], ['coo-1', 'Worker'], ['dev-1', 'Rosa'], ['ops-new', 'Coordinator']]) add(id, name);
     const hire = (name: string, position: string, sessionId: string) =>
       service.hire({ name, icon: '🧭', position, expertise: ['ops'], sessionId, researchEnabled: false });
-    await hire('Reviewer', 'CTO', 'cto-1');
-    await hire('Worker', 'COO', 'coo-1');
+    const reviewer = await hire('Reviewer', 'CTO', 'cto-1');
+    const worker = await hire('Worker', 'COO', 'coo-1');
+    await service.update(reviewer.id, undefined, { permissions: { recoverEmployees: true } });
+    await service.update(worker.id, undefined, { permissions: { recoverEmployees: true } });
     await hire('Rosa', 'Engineer', 'dev-1');
     await hire('Coordinator', 'Runtime engineer', 'ops-new');
     // A plan switch: ops-old (still running) was retired for ops-new, which then died.
@@ -62,15 +64,36 @@ describe('CTO/COO recovery of an employee whose session is gone', () => {
     expect((error as CompanyError).status).toBe(status);
   };
 
-  it('lets the CTO move a gone employee, with every room seat, back onto its retired predecessor', async () => {
+  it('lets a granted CTO move a gone employee, with every room seat, back onto its retired predecessor', async () => {
     const room = rooms.create('Ops', undefined);
     rooms.addMember(room.id, 'ops-new', { role: 'coordinator' });
     expect((await service.recover(coordinator().id, undefined, 'cto-1', 'ops-old')).sessionId).toBe('ops-old');
     expect(rooms.get(room.id)?.members.map((m) => [m.sessionId, m.role])).toEqual([['ops-old', 'coordinator']]);
   });
 
-  it('lets the COO do the same', async () => {
+  it('lets a granted COO do the same', async () => {
     expect((await service.recover(coordinator().id, undefined, 'coo-1', 'ops-old')).sessionId).toBe('ops-old');
+  });
+
+  it('a CTO or COO title alone grants no recovery rights, including after reload', async () => {
+    for (const title of ['CTO', 'COO']) {
+      const employee = service.view().employees.find((e) => e.position === title)!;
+      await service.update(employee.id, undefined, { permissions: { recoverEmployees: false } });
+      await fails(service.recover(coordinator().id, undefined, employee.sessionId, 'ops-old'), 403);
+    }
+    const reloaded = new CompanyStore(join(directory, 'company.json'));
+    await reloaded.init();
+    expect(reloaded.snapshot().employees.every((e) => !e.permissions.recoverEmployees)).toBe(true);
+  });
+
+  it('lets an explicitly granted expert recover regardless of their title and honors revocation', async () => {
+    const engineer = service.view().employees.find((e) => e.sessionId === 'dev-1')!;
+    expect(engineer.permissions.recoverEmployees).toBe(false);
+    await service.update(engineer.id, undefined, { permissions: { recoverEmployees: true } });
+    await service.update(engineer.id, undefined, { permissions: { recoverEmployees: false } });
+    await fails(service.recover(coordinator().id, undefined, 'dev-1', 'ops-old'), 403);
+    await service.update(engineer.id, undefined, { permissions: { recoverEmployees: true } });
+    expect((await service.recover(coordinator().id, undefined, 'dev-1', 'ops-old')).sessionId).toBe('ops-old');
   });
 
   it('refuses a session renamed to the employee: a name is not identity', async () => {
@@ -82,7 +105,7 @@ describe('CTO/COO recovery of an employee whose session is gone', () => {
     expect(coordinator().sessionId).toBe('ops-new');
   });
 
-  it('refuses a caller that is not the CTO or COO, is not bound, or is gone itself', async () => {
+  it('refuses a caller without the grant, without an employee binding, or whose session is gone', async () => {
     await fails(service.recover(coordinator().id, undefined, 'dev-1', 'ops-old'), 403);
     add('stray', 'Reviewer');
     await fails(service.recover(coordinator().id, undefined, 'stray', 'ops-old'), 403);

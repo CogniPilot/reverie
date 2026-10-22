@@ -135,7 +135,7 @@ describe('selectSession with the grid open', () => {
 
     expect(app._tilesOwnTerminal()).toBe(false);
     expect(FakeTile.all.every((t) => t.destroy.mock.calls.length === 1)).toBe(true);
-    expect(JSON.parse(localStore.get('codeman:tile-grid')!)).toMatchObject({ open: false, ids: IDS, focused: 's-a' });
+    expect(JSON.parse(localStore.get('reverie:tile-grid')!)).toMatchObject({ open: false, ids: IDS, focused: 's-a' });
     // The parked terminal's stale content must not be saved as s-a's snapshot.
     expect(activeAtCleanup).toBeNull();
     expect(app.activeSessionId).toBe('s-other');
@@ -234,7 +234,7 @@ describe('moving focus between tiles', () => {
     const app = openGrid();
     app.goHome();
     expect(app._tilesOwnTerminal()).toBe(false);
-    expect(JSON.parse(localStore.get('codeman:tile-grid')!)).toMatchObject({ open: false, ids: IDS });
+    expect(JSON.parse(localStore.get('reverie:tile-grid')!)).toMatchObject({ open: false, ids: IDS });
     expect(app.activeSessionId).toBeNull();
     expect(app.showWelcome).toHaveBeenCalled();
   });

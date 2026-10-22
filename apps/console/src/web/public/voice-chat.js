@@ -20,7 +20,7 @@
  * `chatMicRoute`, `readAloudText` and `ReadAloudQueue` are pure / dependency-injected
  * for tests (test/voice-chat.test.ts).
  *
- * @mixin Extends CodemanApp.prototype via Object.assign
+ * @mixin Extends ReverieApp.prototype via Object.assign
  * @dependency chatroom-ui.js (_chatEls, _chatApi, _diag, push-to-talk helpers)
  * @loadorder 12.11 (after chatroom-ui.js, before car-mode.js)
  */
@@ -280,10 +280,10 @@ class ReadAloudQueue {
   }
 }
 
-Object.assign(CodemanApp.prototype, {
+Object.assign(ReverieApp.prototype, {
   _voiceSetting(key) {
     try {
-      return localStorage.getItem(`codeman:${key}`) === '1';
+      return localStorage.getItem(`reverie:${key}`) === '1';
     } catch {
       return false;
     }
@@ -291,8 +291,8 @@ Object.assign(CodemanApp.prototype, {
 
   _setVoiceSetting(key, on) {
     try {
-      if (on) localStorage.setItem(`codeman:${key}`, '1');
-      else localStorage.removeItem(`codeman:${key}`);
+      if (on) localStorage.setItem(`reverie:${key}`, '1');
+      else localStorage.removeItem(`reverie:${key}`);
     } catch {
       /* per-device convenience only */
     }
@@ -305,7 +305,7 @@ Object.assign(CodemanApp.prototype, {
   _speakRepliesMode(roomId) {
     if (!roomId) return 'off';
     try {
-      const v = localStorage.getItem(`codeman:speakReplies:${roomId}`);
+      const v = localStorage.getItem(`reverie:speakReplies:${roomId}`);
       return v === 'all' ? 'all' : v === '1' ? 'mine' : 'off';
     } catch {
       return 'off';
@@ -321,8 +321,8 @@ Object.assign(CodemanApp.prototype, {
     if (!roomId) return;
     const m = mode === true ? 'mine' : mode === 'mine' || mode === 'all' ? mode : 'off';
     try {
-      if (m === 'off') localStorage.removeItem(`codeman:speakReplies:${roomId}`);
-      else localStorage.setItem(`codeman:speakReplies:${roomId}`, m === 'all' ? 'all' : '1');
+      if (m === 'off') localStorage.removeItem(`reverie:speakReplies:${roomId}`);
+      else localStorage.setItem(`reverie:speakReplies:${roomId}`, m === 'all' ? 'all' : '1');
     } catch {
       /* per-device convenience only */
     }
@@ -331,7 +331,7 @@ Object.assign(CodemanApp.prototype, {
 
   _readAloudOptions(roomId) {
     let saved;
-    try { saved = JSON.parse(localStorage.getItem(`codeman:readAloudOptions:${roomId}`) || '{}'); } catch {}
+    try { saved = JSON.parse(localStorage.getItem(`reverie:readAloudOptions:${roomId}`) || '{}'); } catch {}
     return {
       seconds: [0, 5, 10, 20, 30].includes(saved?.seconds) ? saved.seconds : null,
       emojis: saved?.emojis !== false,
@@ -343,7 +343,7 @@ Object.assign(CodemanApp.prototype, {
     const options = { ...this._readAloudOptions(roomId), ...change };
     options.seconds = [0, 5, 10, 20, 30].includes(options.seconds) ? options.seconds : null;
     options.emojis = options.emojis !== false;
-    try { localStorage.setItem(`codeman:readAloudOptions:${roomId}`, JSON.stringify(options)); } catch {}
+    try { localStorage.setItem(`reverie:readAloudOptions:${roomId}`, JSON.stringify(options)); } catch {}
     if (roomId === this._chatRoomId) this._readAloud?.clear();
   },
 

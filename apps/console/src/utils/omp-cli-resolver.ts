@@ -5,7 +5,7 @@
  * same as the sibling claude/opencode/codex/gemini/antigravity/pi resolvers:
  * server process PATH first, then common install directories, then — last,
  * because it is the only step that spawns anything — an interactive login
- * shell, which is what finds nvm/Homebrew/user-npm installs when Codeman runs
+ * shell, which is what finds nvm/Homebrew/user-npm installs when Reverie runs
  * as a systemd/launchd service with a minimal PATH.
  *
  * Provides an augmented PATH directory for tmux sessions.
@@ -25,7 +25,7 @@ import {
 
 /**
  * Directories probed after `which`, read from this CLI's registry entry so the spawn
- * path, `codeman doctor` and this resolver cannot disagree about where to look.
+ * path, `reverie doctor` and this resolver cannot disagree about where to look.
  * `~` is expanded by `expandHome`; nothing else is interpreted.
  *
  * `~/.local/bin` still leads, for the reason it always did: omp.sh's installer targets it

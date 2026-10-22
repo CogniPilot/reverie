@@ -2,8 +2,8 @@
  * @fileoverview Unit tests for the multi-user store (src/user-store.ts).
  *
  * Pure helpers (hashing/verify/params-upgrade/username validation/6.3 resolvers)
- * plus the IO layer against a per-test temp data dir (CODEMAN_DATA_DIR) so nothing
- * touches the real ~/.codeman. No server, no tmux.
+ * plus the IO layer against a per-test temp data dir (REVERIE_DATA_DIR) so nothing
+ * touches the real ~/.reverie. No server, no tmux.
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -43,21 +43,21 @@ let spacesDir: string;
 const savedEnv: Record<string, string | undefined> = {};
 
 beforeEach(async () => {
-  tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'codeman-users-'));
-  spacesDir = await fs.mkdtemp(path.join(os.tmpdir(), 'codeman-spaces-'));
+  tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'reverie-users-'));
+  spacesDir = await fs.mkdtemp(path.join(os.tmpdir(), 'reverie-spaces-'));
   for (const k of [
-    'CODEMAN_DATA_DIR',
-    'CODEMAN_USER_SPACES_DIR',
-    'CODEMAN_MULTIUSER',
-    'CODEMAN_MAX_USERS',
-    'CODEMAN_USERNAME',
-    'CODEMAN_PASSWORD',
+    'REVERIE_DATA_DIR',
+    'REVERIE_USER_SPACES_DIR',
+    'REVERIE_MULTIUSER',
+    'REVERIE_MAX_USERS',
+    'REVERIE_USERNAME',
+    'REVERIE_PASSWORD',
   ]) {
     savedEnv[k] = process.env[k];
   }
-  process.env.CODEMAN_DATA_DIR = tmpDir;
-  process.env.CODEMAN_USER_SPACES_DIR = spacesDir;
-  delete process.env.CODEMAN_MAX_USERS;
+  process.env.REVERIE_DATA_DIR = tmpDir;
+  process.env.REVERIE_USER_SPACES_DIR = spacesDir;
+  delete process.env.REVERIE_MAX_USERS;
   invalidateUsersCache();
 });
 
@@ -198,7 +198,7 @@ describe('user store IO', () => {
   });
 
   it('enforces MAX_USERS', async () => {
-    process.env.CODEMAN_MAX_USERS = '2';
+    process.env.REVERIE_MAX_USERS = '2';
     await createUser({ username: 'a1', role: 'admin', password: 'password1' });
     await createUser({ username: 'a2', role: 'user', password: 'password1' });
     await expect(createUser({ username: 'a3', role: 'user', password: 'password1' })).rejects.toMatchObject({
@@ -269,7 +269,7 @@ describe('deleteUserSpace guards (section 8)', () => {
   });
 
   it('refuses to delete a symlinked user space', async () => {
-    const outside = await fs.mkdtemp(path.join(os.tmpdir(), 'codeman-outside-'));
+    const outside = await fs.mkdtemp(path.join(os.tmpdir(), 'reverie-outside-'));
     await fs.symlink(outside, path.join(spacesDir, 'evil'));
     await expect(deleteUserSpace('evil')).rejects.toMatchObject({ code: 'INVALID_INPUT' });
     // the symlink target still exists (was not followed + removed)
@@ -280,17 +280,17 @@ describe('deleteUserSpace guards (section 8)', () => {
 
 describe('bootstrapInitialAdmin', () => {
   it('creates the initial admin from env when no users exist', async () => {
-    process.env.CODEMAN_MULTIUSER = '1';
-    process.env.CODEMAN_USERNAME = 'boss';
-    process.env.CODEMAN_PASSWORD = 'password1';
+    process.env.REVERIE_MULTIUSER = '1';
+    process.env.REVERIE_USERNAME = 'boss';
+    process.env.REVERIE_PASSWORD = 'password1';
     const r = await bootstrapInitialAdmin();
     expect(r).toMatchObject({ status: 'created', username: 'boss' });
     expect((await findUser('boss'))?.role).toBe('admin');
   });
 
   it('reports missing-env when no users and no credentials', async () => {
-    delete process.env.CODEMAN_USERNAME;
-    delete process.env.CODEMAN_PASSWORD;
+    delete process.env.REVERIE_USERNAME;
+    delete process.env.REVERIE_PASSWORD;
     expect(await bootstrapInitialAdmin()).toMatchObject({ status: 'missing-env' });
   });
 

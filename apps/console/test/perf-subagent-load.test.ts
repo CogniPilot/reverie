@@ -1,5 +1,5 @@
 /**
- * Performance tests: Codeman responsiveness under subagent load
+ * Performance tests: Reverie responsiveness under subagent load
  *
  * Measures event loop lag caused by:
  * 1. SubagentWatcher processing many agent files simultaneously
@@ -112,7 +112,7 @@ describe('SubagentWatcher performance', () => {
   let projectsDir: string;
 
   beforeEach(() => {
-    tmpDir = mkdtempSync(join(tmpdir(), 'codeman-perf-'));
+    tmpDir = mkdtempSync(join(tmpdir(), 'reverie-perf-'));
     projectsDir = join(tmpDir, 'projects');
     mkdirSync(projectsDir, { recursive: true });
   });

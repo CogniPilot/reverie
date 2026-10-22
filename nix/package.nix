@@ -1,0 +1,121 @@
+{ pkgs, src }:
+let
+  lib = pkgs.lib;
+  manifest = builtins.fromJSON (builtins.readFile (src + "/apps/console/package.json"));
+  console = pkgs.buildNpmPackage {
+    pname = "reverie-console";
+    version = manifest.version;
+    src = lib.cleanSource (src + "/apps/console");
+    nodejs = pkgs.nodejs_22;
+    npmDepsHash = "sha256-DGKWvITtXvL3pYAsu4vqiynelRLeTR8BkjXJmLqMNc0=";
+    nativeBuildInputs = [ pkgs.python3 pkgs.makeWrapper ];
+    npmFlags = [ "--ignore-scripts" ];
+    npmRebuildFlags = [ "--ignore-scripts" ];
+    CI = "1";
+    REVERIE_NO_AUTOSTART = "1";
+    PUPPETEER_SKIP_DOWNLOAD = "1";
+    PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD = "1";
+    postPatch = ''
+      mkdir -p skills
+      cp -r ${src}/skills/reverie skills/reverie
+    '';
+    preBuild = "npm rebuild node-pty esbuild --offline --ignore-scripts=false";
+    doCheck = true;
+    nativeCheckInputs = [ pkgs.git pkgs.tmux pkgs.curl (lib.getBin pkgs.util-linux) ];
+    checkPhase = ''
+      runHook preCheck
+      npm test -- test/company-recover.test.ts test/routes/company-routes.test.ts \
+        test/company-service.test.ts test/company-hierarchy.test.ts \
+        test/owner-auth-admin-grant.test.ts test/owner-auth-review.test.ts \
+        test/experts-api.test.ts test/self-update.test.ts \
+        test/owner-auth-lock-portability.test.ts test/company-full-page.test.ts \
+        test/service-installer.test.ts test/company-wake.test.ts \
+        test/company-recovery-prompt.test.ts test/company-wake-server.test.ts
+      runHook postCheck
+    '';
+    installPhase = ''
+      runHook preInstall
+      npm prune --omit=dev --ignore-scripts
+      mkdir -p "$out/lib/reverie" "$out/bin"
+      cp -r dist node_modules package.json skills scripts packages LICENSE "$out/lib/reverie/"
+      # node-gyp's build metadata references the download cache; it is not needed
+      # to load the compiled PTY module at runtime.
+      find "$out/lib/reverie/node_modules" -path '*/node-pty/build/config.gypi' -delete
+      makeWrapper ${pkgs.nodejs_22}/bin/node "$out/bin/reverie" \
+        --add-flags "$out/lib/reverie/dist/index.js"
+      runHook postInstall
+    '';
+    meta = { mainProgram = "reverie"; license = lib.licenses.mit; platforms = lib.platforms.linux; };
+  };
+  memoryPackage = pkgs.python3Packages.buildPythonPackage {
+    pname = "reverie-memory";
+    version = "0.1.0";
+    inherit src;
+    pyproject = true;
+    postUnpack = ''sourceRoot="$sourceRoot/python"'';
+    build-system = [ pkgs.python3Packages.setuptools ];
+    nativeCheckInputs = [ pkgs.bash pkgs.coreutils pkgs.git pkgs.nodejs_22 pkgs.tmux pkgs.jq pkgs.python3Packages.pillow ];
+    postPatch = "patchShebangs ../scripts ../docker ../.github/ci";
+    checkPhase = ''
+      (cd ..; PYTHONPATH="$PWD/python" PYTHONWARNINGS=ignore::ResourceWarning python -m unittest discover -s tests -t .)
+    '';
+  };
+  memory = pkgs.python3.withPackages (ps: [ memoryPackage ps.pillow ]);
+  lockTools = pkgs.runCommand "reverie-lock-tools" { } ''
+    mkdir -p "$out/bin"
+    ln -s ${lib.getBin pkgs.util-linux}/bin/flock "$out/bin/flock"
+  '';
+  runtime = pkgs.buildEnv {
+    name = "reverie-runtime";
+    paths = [ console memory pkgs.nodejs_22 pkgs.tmux pkgs.git pkgs.ripgrep
+      pkgs.curl pkgs.coreutils pkgs.bashInteractive pkgs.gnugrep pkgs.gnused
+      pkgs.gawk pkgs.findutils pkgs.gnutar pkgs.gzip pkgs.procps pkgs.which pkgs.gnumake pkgs.gcc
+      pkgs.codex pkgs.opencode pkgs.cacert lockTools ];
+    pathsToLink = [ "/bin" "/share" ];
+  };
+  entrypoint = pkgs.writeShellScript "reverie-start" (builtins.readFile (src + "/docker/entrypoint.sh"));
+  requestUpdate = pkgs.writeShellApplication {
+    name = "reverie-request-update";
+    runtimeInputs = [ pkgs.coreutils ];
+    text = lib.removePrefix "#!/usr/bin/env bash\n" (builtins.readFile (src + "/scripts/reverie-request-update"));
+  };
+  launcher = pkgs.writeShellScript "reverie-launcher" ''
+    export PATH=${runtime}/bin:$PATH
+    export REVERIE_MCP_MEMORY_PYTHON=${memory}/bin/python3
+    export REVERIE_MANAGED_INSTALL=nix
+    export REVERIE_NIX_LAUNCHER="$0"
+    export REVERIE_VERSION=${manifest.version}
+    export REVERIE_FLOCK_BIN=${lib.getBin pkgs.util-linux}/bin/flock
+    if [ "''${REVERIE_CONTAINER:-0}" = 1 ]; then
+      export REVERIE_DATA="''${REVERIE_DATA:-/instances/default}"
+    else
+      export REVERIE_DATA="''${REVERIE_DATA:-''${XDG_DATA_HOME:-$HOME/.local/share}/reverie/default}"
+      export TMPDIR="''${TMPDIR:-$HOME/scratch/reverie/tmp}"
+      mkdir -p "$TMPDIR"
+    fi
+    export REVERIE_DATA_DIR="''${REVERIE_DATA_DIR:-$REVERIE_DATA/console}"
+    export CLAUDE_CONFIG_DIR="''${CLAUDE_CONFIG_DIR:-$REVERIE_DATA/accounts/claude}"
+    export CODEX_HOME="''${CODEX_HOME:-$REVERIE_DATA/accounts/codex}"
+    if [ "''${1:-}" = web ] && [ "''${REVERIE_CONTAINER:-0}" != 1 ]; then
+      exec ${entrypoint} ${console}/bin/reverie "$@"
+    fi
+    exec ${console}/bin/reverie "$@"
+  '';
+  # Runtime dependencies stay private so installing Reverie does not replace a
+  # user's existing Node, Python, Codex, OpenCode, Git or compiler commands.
+  reverie = pkgs.runCommand "reverie-${manifest.version}" {
+    nativeBuildInputs = [ pkgs.makeWrapper ];
+    meta = { mainProgram = "reverie"; license = lib.licenses.mit; platforms = lib.platforms.linux; };
+    passthru = { inherit console memory runtime; };
+  } ''
+    mkdir -p "$out/bin"
+    ln -s ${launcher} "$out/bin/reverie"
+    ln -s ${requestUpdate}/bin/reverie-request-update "$out/bin/reverie-request-update"
+    for command in ${memory}/bin/reverie-*; do
+      makeWrapper "$command" "$out/bin/$(basename "$command")" \
+        --prefix PATH : ${runtime}/bin \
+        --set REVERIE_MCP_MEMORY_PYTHON ${memory}/bin/python3
+    done
+  '';
+
+in { inherit reverie console memory memoryPackage runtime entrypoint; }

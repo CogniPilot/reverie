@@ -9,7 +9,7 @@ Docker mode is a **location overlay on cases**, the direct analog of [remote SSH
 The container needs a base image with the agent toolchain (node, the CLIs, git, tmux). Build it locally once:
 
 ```bash
-node scripts/build-agent-image.mjs          # builds codeman/agent:base
+node scripts/build-agent-image.mjs          # builds reverie/agent:base
 # options: --engine docker|podman  --image <ref>  --no-cache
 ```
 
@@ -29,8 +29,8 @@ a stock CLI that installs with a plain `npm install -g` needs no Dockerfile edit
 defaults to the same list in the same order, so a bare `docker build` produces a byte-identical
 layer — a different order would be a different `RUN` string and so a needless cache miss.
 
-⚠️ It reads the **stock** catalogue, never the merged registry. A user's `~/.codeman/clis.json`
-must not change what is inside an image tagged `codeman/agent:base`, or two machines holding
+⚠️ It reads the **stock** catalogue, never the merged registry. A user's `~/.reverie/clis.json`
+must not change what is inside an image tagged `reverie/agent:base`, or two machines holding
 that tag hold different images and every cache decision downstream is a lie. Each entry's
 `enabled` flag IS honoured, so a CLI that ships disabled is never baked in.
 
@@ -61,7 +61,7 @@ hand and one built by the app could hold different CLIs under the same tag.
 A zero exit code only proves the layers ran, not that the toolchain works. Verify by actually executing each CLI in the image, and check the build log for `Using cache` lines:
 
 ```bash
-docker run --rm codeman/agent:base bash -lc \
+docker run --rm reverie/agent:base bash -lc \
   'for c in claude codex gemini opencode agy pi grok dsh omp; do printf "%-9s " $c; $c --version 2>&1 | head -1; done'
 ```
 
@@ -72,7 +72,7 @@ installs into the agent's HOME as well, or a `mode: 'deepseek'` case starts a pa
 that dies on arrival:
 
 ```bash
-docker run --rm codeman/agent:base ls ~/.dsh/profiles/dsh-tui/package.json
+docker run --rm reverie/agent:base ls ~/.dsh/profiles/dsh-tui/package.json
 ```
 
 Building that profile is also why `pnpm` is in the image: `dsh plugin` forwards straight to a literal `pnpm` and exits 127 without it (issue #352), and pnpm — unlike npm — blocks dependency lifecycle scripts by default and fails the install over it, so the profile step passes `--config.dangerouslyAllowAllBuilds=true`.
@@ -81,13 +81,13 @@ Antigravity (`agy`) and Grok (`grok`) are the two CLIs not installed from npm (G
 
 Pi's credentials are seeded per-FILE rather than as a whole directory (`auth.json`, `settings.json`, `trust.json`, `models.json`, `models-store.json` out of `~/.pi/agent`), because that directory also holds `sessions/`, `extensions/`, `skills/` and the installed package trees — gigabytes on an active host. Consequence: in-container pi sessions are invisible host-side, so `pi -c` inside a Docker case only sees that container's own history. See [`pi-integration.md`](./pi-integration.md). Grok is seeded per-file for the same reason (`auth.json`, `config.toml`, `pager.toml` out of `~/.grok`, which also holds `sessions/`, `memory/` and the ~160MB binary under `downloads/`), with the same consequence for `grok -c`. See [`grok-integration.md`](./grok-integration.md). OMP is the one CLI in this family where `sessions/` is the EXCEPTION rather than the rule: `~/.omp/agent/{config.yml,mcp.json,models.yml,settings.yml}` are seeded per-file (the dir also holds SQLite caches and `terminal-sessions/`), but `~/.omp/agent/sessions/` is shared RW like codex's, not seeded, because Reverie reads it host-side for history recovery and `--resume` pinning. See [`omp-integration.md`](./omp-integration.md).
 
-The image can also carry the GitHub CLI (`gh`) and the Azure CLI (`az` + the `azure-devops` extension, in `AZURE_EXTENSION_DIR=/opt/az-extensions` so it stays out of the seeded HOME), wired into the system git config as credential helpers for github.com and dev.azure.com / *.visualstudio.com, exactly as in `docker/server.Dockerfile`. Their sign-ins are seeded per-FILE like pi's: `~/.config/gh/{hosts.yml,config.yml}` and `~/.azure/{azureProfile.json,msal_token_cache.json,service_principal_entries.json,clouds.config,config}`, never `~/.azure`'s logs, command index or extensions. A token kept in a desktop keyring, or in the encrypted MSAL cache az uses on Windows/macOS, is not in those files and does not carry. None of the three is version-pinned; the `--no-cache` rebuild recommended above is also what refreshes them. Both CLIs are opt-in and OFF by default: `CODEMAN_AGENT_IMAGE_INSTALL_GH=1` / `CODEMAN_AGENT_IMAGE_INSTALL_AZ=1` in the environment of `scripts/build-agent-image.mjs`, or of the Reverie server for its own auto-build (in the Compose deployment, `environment:` in `docker-compose.override.yml`), become the `CODEMAN_INSTALL_GH` / `CODEMAN_INSTALL_AZ` build args and put that CLI, its extension and its helper entry into the image. Unset passes nothing, so a default build's argv is unchanged and the image has neither. The sign-in seeds follow the same switches, read when a case container is created: `.config/gh` only with `CODEMAN_AGENT_IMAGE_INSTALL_GH=1`, `.azure` only with `CODEMAN_AGENT_IMAGE_INSTALL_AZ=1` (`enabledByEnv` in `CRED_STORES`), never merely because the files exist. Seeds are create-time mounts and deliberately not part of the config hash (hashing them would trip the drift gate for every case), so an existing case container picks them up only when it is recreated.
+The image can also carry the GitHub CLI (`gh`) and the Azure CLI (`az` + the `azure-devops` extension, in `AZURE_EXTENSION_DIR=/opt/az-extensions` so it stays out of the seeded HOME), wired into the system git config as credential helpers for github.com and dev.azure.com / *.visualstudio.com, exactly as in `docker/server.Dockerfile`. Their sign-ins are seeded per-FILE like pi's: `~/.config/gh/{hosts.yml,config.yml}` and `~/.azure/{azureProfile.json,msal_token_cache.json,service_principal_entries.json,clouds.config,config}`, never `~/.azure`'s logs, command index or extensions. A token kept in a desktop keyring, or in the encrypted MSAL cache az uses on Windows/macOS, is not in those files and does not carry. None of the three is version-pinned; the `--no-cache` rebuild recommended above is also what refreshes them. Both CLIs are opt-in and OFF by default: `REVERIE_AGENT_IMAGE_INSTALL_GH=1` / `REVERIE_AGENT_IMAGE_INSTALL_AZ=1` in the environment of `scripts/build-agent-image.mjs`, or of the Reverie server for its own auto-build (in the Compose deployment, `environment:` in `docker-compose.override.yml`), become the `REVERIE_INSTALL_GH` / `REVERIE_INSTALL_AZ` build args and put that CLI, its extension and its helper entry into the image. Unset passes nothing, so a default build's argv is unchanged and the image has neither. The sign-in seeds follow the same switches, read when a case container is created: `.config/gh` only with `REVERIE_AGENT_IMAGE_INSTALL_GH=1`, `.azure` only with `REVERIE_AGENT_IMAGE_INSTALL_AZ=1` (`enabledByEnv` in `CRED_STORES`), never merely because the files exist. Seeds are create-time mounts and deliberately not part of the config hash (hashing them would trip the drift gate for every case), so an existing case container picks them up only when it is recreated.
 
-Set `CODEMAN_AGENT_IMAGE_GIT_USER_NAME` and `CODEMAN_AGENT_IMAGE_GIT_USER_EMAIL` together to configure the agent image's Git identity. Rebuild an existing `codeman/agent:base` with `node scripts/build-agent-image.mjs --no-cache`, then recreate Docker-case containers so they use the rebuilt image.
+Set `REVERIE_AGENT_IMAGE_GIT_USER_NAME` and `REVERIE_AGENT_IMAGE_GIT_USER_EMAIL` together to configure the agent image's Git identity. Rebuild an existing `reverie/agent:base` with `node scripts/build-agent-image.mjs --no-cache`, then recreate Docker-case containers so they use the rebuilt image.
 
 ## Quickest path: one-click "Run in Docker"
 
-On the **New case → Create New** tab there's a **🐳 Run in an isolated Docker container** checkbox. Checking it alone is enough: Reverie creates the case folder in `~/codeman-cases/<name>`, spins up a hardened container with sensible defaults (auto-provisioning a shared `default` host), and starts the session inside it. No host/image/network fields to fill in.
+On the **New case → Create New** tab there's a **🐳 Run in an isolated Docker container** checkbox. Checking it alone is enough: Reverie creates the case folder in `~/reverie-cases/<name>`, spins up a hardened container with sensible defaults (auto-provisioning a shared `default` host), and starts the session inside it. No host/image/network fields to fill in.
 
 Click the checkbox's **Container settings** to optionally tweak the predefined defaults, including a **Template** picker:
 
@@ -109,12 +109,12 @@ App → **New case → Docker** tab:
 - **Network**: `bridge` (internet on, default), `none` (fully isolated), or a `custom` bridge.
 - **Advanced**: memory / CPU caps, **Mount host credentials** (on = your existing `~/.claude` login just works; off = a sealed sandbox you log into inside the container), **Resume last conversation on relaunch**.
 
-Then run it like any case (Run Claude / Run Shell / …). The first launch creates the container (`codeman-case-<name>`); subsequent sessions attach to the same one.
+Then run it like any case (Run Claude / Run Shell / …). The first launch creates the container (`reverie-case-<name>`); subsequent sessions attach to the same one.
 
 Equivalent API:
 
 ```bash
-curl -X POST localhost:3000/api/docker-hosts -d '{"id":"local","label":"Local","image":"codeman/agent:base"}'
+curl -X POST localhost:3000/api/docker-hosts -d '{"id":"local","label":"Local","image":"reverie/agent:base"}'
 curl -X POST localhost:3000/api/cases/docker-link -d '{"name":"sandbox","hostId":"local","hostWorkspacePath":"/home/you/projects/sandbox"}'
 curl -X POST localhost:3000/api/quick-start -d '{"caseName":"sandbox","mode":"claude"}'
 ```
@@ -167,7 +167,7 @@ mounts belong to whoever built it, so one mounting `/` would hand the adopter th
 - **Reconnect after a Reverie restart** lands back in the same live agent (the in-container tmux survives).
 - **Container stop / host reboot** restarts the container and **resumes** the last conversation from the bind-mounted transcript. Claude sessions launch with a pinned conversation id (`--session-id <sessionId>`, with a `--resume` fallback when the transcript already exists), and the case remembers its last conversation (`lastClaudeSessionId`), so a relaunch after the container was stopped, rebooted, or recreated continues where it left off.
 - **Killing one session** only kills that session's in-container tmux session; the shared container stays up for sibling sessions.
-- **Editing the docker host config** (image, memory, network, ...) is detected on the next launch: the desired config hash is compared against the container's `codeman.confighash` label, and a mismatch refuses the launch with a "config changed, recreate?" confirm. Confirming calls `POST /api/docker-cases/:name/recreate` (refused while sessions of the case are live), which removes the container so the next launch recreates it with the new config; the workspace and the conversation survive.
+- **Editing the docker host config** (image, memory, network, ...) is detected on the next launch: the desired config hash is compared against the container's `reverie.confighash` label, and a mismatch refuses the launch with a "config changed, recreate?" confirm. Confirming calls `POST /api/docker-cases/:name/recreate` (refused while sessions of the case are live), which removes the container so the next launch recreates it with the new config; the workspace and the conversation survive.
 - **Deleting the case** `docker rm -f`s the container (the bind-mounted workspace on the host survives). An instance-scoped boot reaper removes containers whose case is gone.
 
 ## Isolation & security
@@ -180,24 +180,24 @@ Rootless engines without cgroup-v2 systemd delegation cannot enforce resource ca
 
 **Export** (from the Docker tab, or `POST /api/docker-cases/:name/export`): choose
 
-- **Full image + workspace**: `docker commit` the container to an image, `docker save` it, tar the workspace, and a manifest, all into one portable `<case>-<ts>.codeman-container.tgz` (the whole toolchain, installed packages, and files). Runs in the background; you are notified when the bundle is ready.
+- **Full image + workspace**: `docker commit` the container to an image, `docker save` it, tar the workspace, and a manifest, all into one portable `<case>-<ts>.reverie-container.tgz` (the whole toolchain, installed packages, and files). Runs in the background; you are notified when the bundle is ready.
 - **Workspace only**: just the project files (fast, small).
 
 The container is paused across the capture so the image and workspace are consistent; a full `/var/lib/docker` is guarded against with a free-space precheck; the intermediate image is always cleaned up.
 
-**Import** (`POST /api/docker-cases/import`, or the Manage tab): copy the `.tgz` onto the new machine's `~/.codeman/docker-exports/`, then import it into a new case. The manifest and per-member SHA-256 checksums are validated, the workspace tar is extracted with a path-traversal guard, and the image is `docker load`ed and **re-tagged into a quarantined namespace** (`codeman/imported-<case>:<ts>`) so it never overwrites a local tag. The destination supplies its own credentials, so nothing secret crosses machines.
+**Import** (`POST /api/docker-cases/import`, or the Manage tab): copy the `.tgz` onto the new machine's `~/.reverie/docker-exports/`, then import it into a new case. The manifest and per-member SHA-256 checksums are validated, the workspace tar is extracted with a path-traversal guard, and the image is `docker load`ed and **re-tagged into a quarantined namespace** (`reverie/imported-<case>:<ts>`) so it never overwrites a local tag. The destination supplies its own credentials, so nothing secret crosses machines.
 
 `GET /api/docker-exports` lists bundles; `GET /api/docker-exports/:filename` downloads one; `DELETE` removes one.
 
 ## Hooks require the server to be reachable from the container
 
-In-container hooks (permission events, hook-based idle/stop/task notifications) POST to `CODEMAN_API_URL`, which is derived as `https://host.docker.internal:<port>` (`host.docker.internal` → the docker bridge gateway, e.g. `172.17.0.1`, via `--add-host …:host-gateway`). For that callback to succeed, the Reverie server must be **listening on an interface the container can reach**.
+In-container hooks (permission events, hook-based idle/stop/task notifications) POST to `REVERIE_API_URL`, which is derived as `https://host.docker.internal:<port>` (`host.docker.internal` → the docker bridge gateway, e.g. `172.17.0.1`, via `--add-host …:host-gateway`). For that callback to succeed, the Reverie server must be **listening on an interface the container can reach**.
 
 - If Reverie binds **loopback-only** (`127.0.0.1`, the default and the production systemd config), a container reaching `172.17.0.1:<port>` cannot connect, so by default **in-container hooks do not fire**. The session still works fully: idle/stop detection falls back to **output-based** detection through the `docker exec` PTY (which always works), and claude runs with `--dangerously-skip-permissions` so there are no permission prompts to forward anyway.
-- **To enable in-container hooks on a loopback-only server, set `CODEMAN_DOCKER_BRIDGE_HOOKS=1`** (env). Reverie then starts a SECOND listener bound to the docker bridge gateway (`172.17.0.1`, auto-detected; override with `CODEMAN_DOCKER_BRIDGE_HOST`) that serves **only the hook endpoints** (`/api/hook-event`, `/api/status-telemetry`) and delegates them into the same secret-gated pipeline. The bridge is host-internal (containers + host, not the LAN), and every other path returns `403`, so this does not widen your network exposure. Add `Environment=CODEMAN_DOCKER_BRIDGE_HOOKS=1` to the systemd unit and restart.
-- Alternatively, bind `0.0.0.0` **with `CODEMAN_PASSWORD` set** (exposes on the LAN too).
+- **To enable in-container hooks on a loopback-only server, set `REVERIE_DOCKER_BRIDGE_HOOKS=1`** (env). Reverie then starts a SECOND listener bound to the docker bridge gateway (`172.17.0.1`, auto-detected; override with `REVERIE_DOCKER_BRIDGE_HOST`) that serves **only the hook endpoints** (`/api/hook-event`, `/api/status-telemetry`) and delegates them into the same secret-gated pipeline. The bridge is host-internal (containers + host, not the LAN), and every other path returns `403`, so this does not widen your network exposure. Add `Environment=REVERIE_DOCKER_BRIDGE_HOOKS=1` to the systemd unit and restart.
+- Alternatively, bind `0.0.0.0` **with `REVERIE_PASSWORD` set** (exposes on the LAN too).
 
-The host-gateway mapping, `CODEMAN_API_URL` derivation, host-guard allowlist, and hook-secret mount are all wired correctly; `CODEMAN_DOCKER_BRIDGE_HOOKS` closes the last gap for loopback-only servers.
+The host-gateway mapping, `REVERIE_API_URL` derivation, host-guard allowlist, and hook-secret mount are all wired correctly; `REVERIE_DOCKER_BRIDGE_HOOKS` closes the last gap for loopback-only servers.
 
 ## Notes & limits
 

@@ -96,16 +96,16 @@ describe('approvals UI: a notification opens the drawer, it never answers', () =
     const answerApproval = vi.fn();
     const toggleApprovalsInbox = vi.fn();
     const selectSession = vi.fn();
-    class CodemanApp {
+    class ReverieApp {
       sessions = new Map([['s1', {}]]);
     }
     const document = {
       getElementById: (id: string) =>
         id === 'approvalsDrawer' ? { classList: { contains: (c: string) => c === 'open' && drawerOpen } } : null,
     };
-    const context = vm.createContext({ CodemanApp, document, console });
+    const context = vm.createContext({ ReverieApp, document, console });
     vm.runInContext(readFileSync(resolve(PUBLIC, 'approvals-ui.js'), 'utf8'), context, { filename: 'approvals-ui.js' });
-    const app = new CodemanApp() as unknown as Record<string, (...a: unknown[]) => unknown>;
+    const app = new ReverieApp() as unknown as Record<string, (...a: unknown[]) => unknown>;
     Object.assign(app, { answerApproval, toggleApprovalsInbox, selectSession, approvalsInboxEnabled: () => inbox });
     return { app, answerApproval, toggleApprovalsInbox, selectSession };
   }

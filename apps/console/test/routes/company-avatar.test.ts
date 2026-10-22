@@ -36,7 +36,7 @@ describe('profile images', () => {
   let rooms: string[];
 
   beforeEach(async () => {
-    directory = await mkdtemp(join(tmpdir(), 'fleet-company-avatar-'));
+    directory = await mkdtemp(join(tmpdir(), 'reverie-company-avatar-'));
     const store = new CompanyStore(join(directory, 'company.json'));
     await store.init();
     const sessions = new Map(
@@ -89,7 +89,7 @@ describe('profile images', () => {
       method: 'POST',
       url,
       payload: body,
-      headers: { 'content-type': type, ...(as === undefined ? {} : { 'x-codeman-parent-session': as }) },
+      headers: { 'content-type': type, ...(as === undefined ? {} : { 'x-reverie-parent-session': as }) },
     });
   const member = (roomId: string, id: string) => chatrooms.room(roomId)!.members.find((m) => m.sessionId === id)!;
   const record = (id: string) => service.store.snapshot().temporaryAgents.find((a) => a.sessionId === id);
@@ -136,7 +136,7 @@ describe('profile images', () => {
     const cleared = await app.inject({
       method: 'DELETE',
       url: '/api/company/self/avatar',
-      headers: { 'x-codeman-parent-session': ALPHA },
+      headers: { 'x-reverie-parent-session': ALPHA },
     });
     expect(cleared.json().data.profile).toMatchObject({ avatar: null, rooms: 2 });
     expect(record(ALPHA)?.avatar).toBeUndefined();

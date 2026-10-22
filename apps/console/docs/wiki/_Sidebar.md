@@ -1,6 +1,6 @@
 ### [Reverie Wiki](Home)
 
-[README](https://github.com/Ark0N/Codeman)
+[README](https://github.com/jgoppert/reverie)
 
 **Getting started**
 
@@ -43,7 +43,7 @@
 
 **Automation**
 
-- [Driving It From An Agent](Driving-Codeman-From-An-Agent)
+- [Driving It From An Agent](Driving-Reverie-From-An-Agent)
 - [HTTP API](HTTP-API)
 - [Hooks & Integrations](Hooks-And-Integrations)
 

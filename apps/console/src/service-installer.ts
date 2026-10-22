@@ -1,10 +1,10 @@
 /**
- * @fileoverview `codeman service install|uninstall|status`: write and load the
- * systemd user unit (Linux) or LaunchAgent (macOS) that supervises `codeman web`.
+ * @fileoverview `reverie service install|uninstall|status`: write and load the
+ * systemd user unit (Linux) or LaunchAgent (macOS) that supervises `reverie web`.
  *
  * This is the "always running" half of issue #231, next to the "detached right
  * now" half in daemon-control.ts. `install.sh` already does this for people who
- * install with the one-liner; this exists for `npm i -g aicodeman` users, who
+ * install with the one-liner; this exists for `npm i -g aireverie` users, who
  * otherwise have to hand-write a plist.
  *
  * Two details are load-bearing and easy to get wrong by hand:
@@ -12,13 +12,13 @@
  * - **PATH.** launchd hands a job `/usr/bin:/bin:/usr/sbin:/sbin` and systemd's
  *   user manager is nearly as bare, so a Homebrew or nvm `node`, `tmux` or
  *   `claude` is simply not found and sessions fail in a way that reads as a
- *   Codeman bug. The unit therefore carries the PATH of the shell that ran the
+ *   Reverie bug. The unit therefore carries the PATH of the shell that ran the
  *   install, with the running node's own directory in front.
  * - **The job name.** It is the one `install.sh` and the self-updater already use
  *   (config/service-names.ts), so re-running install.sh later updates this unit
  *   instead of supervising a second copy of the server.
  *
- * Secrets are deliberately NOT written here. `CODEMAN_PASSWORD` in the installing
+ * Secrets are deliberately NOT written here. `REVERIE_PASSWORD` in the installing
  * shell is not copied into the unit; the caller is told where to add it instead,
  * because a unit file is long-lived, world-readable by default, and gets copied
  * into bug reports.
@@ -30,11 +30,11 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, unlinkSync, writeFileSync } from 'node:fs';
+import { accessSync, constants, existsSync, mkdirSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { homedir, userInfo } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, isAbsolute, join } from 'node:path';
 import { LAUNCHD_LABEL, SYSTEMD_UNIT } from './config/service-names.js';
-import { CODEMAN_INSTANCE } from './config/instance.js';
+import { REVERIE_INSTANCE } from './config/instance.js';
 import { EXEC_TIMEOUT_MS } from './config/exec-timeout.js';
 import {
   buildBaseUrl,
@@ -53,6 +53,8 @@ export interface ServicePlan {
   /** systemd unit filename or launchd label. */
   name: string;
   nodePath: string;
+  /** Managed Nix entrypoint; replaces node/script execution when present. */
+  launcherPath?: string;
   /** Runner flags carried over from the current process (tsx loader in dev). */
   execArgv: string[];
   scriptPath: string;
@@ -138,7 +140,7 @@ export function buildServiceEnv(
     HOME: home,
     LANG: lang || 'en_US.UTF-8',
   };
-  if (CODEMAN_INSTANCE) env.CODEMAN_INSTANCE = CODEMAN_INSTANCE;
+  if (REVERIE_INSTANCE) env.REVERIE_INSTANCE = REVERIE_INSTANCE;
   return env;
 }
 
@@ -147,8 +149,14 @@ export function systemdQuote(value: string): string {
   return `"${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
 }
 
+function serviceProgramArguments(plan: ServicePlan): string[] {
+  return plan.launcherPath
+    ? [plan.launcherPath, ...plan.args]
+    : [plan.nodePath, ...plan.execArgv, plan.scriptPath, ...plan.args];
+}
+
 export function buildLaunchAgentPlist(plan: ServicePlan): string {
-  const programArguments = [plan.nodePath, ...plan.execArgv, plan.scriptPath, ...plan.args]
+  const programArguments = serviceProgramArguments(plan)
     .map((arg) => `    <string>${xmlEscape(arg)}</string>`)
     .join('\n');
   const environment = Object.entries(plan.env)
@@ -187,7 +195,7 @@ ${environment}
 }
 
 export function buildSystemdUnit(plan: ServicePlan): string {
-  const execStart = [plan.nodePath, ...plan.execArgv, plan.scriptPath, ...plan.args]
+  const execStart = serviceProgramArguments(plan)
     .map((arg) => (/[\s"'\\]/.test(arg) ? systemdQuote(arg) : arg))
     .join(' ');
   const environment = Object.entries(plan.env)
@@ -197,6 +205,7 @@ export function buildSystemdUnit(plan: ServicePlan): string {
   return `[Unit]
 Description=Reverie Web Server
 After=network.target
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple
@@ -210,7 +219,7 @@ KillMode=process
 ${environment}
 StandardOutput=journal
 StandardError=journal
-SyslogIdentifier=codeman
+SyslogIdentifier=reverie
 LimitNOFILE=65536
 
 [Install]
@@ -236,21 +245,38 @@ export function unitPathFor(kind: ServiceKind): string {
 
 function entryScript(): string {
   const script = process.argv[1];
-  if (!script) throw new Error('cannot determine the codeman entry script to supervise');
+  if (!script) throw new Error('cannot determine the reverie entry script to supervise');
   return script;
 }
 
 /** Resolve a full plan from the current process and the requested web options. */
 export function resolveServicePlan(kind: ServiceKind, options: WebLaunchOptions): ServicePlan {
   const home = homedir();
+  let launcherPath: string | undefined;
+  const env = buildServiceEnv(dirname(process.execPath), process.env.PATH || '', home, process.env.LANG);
+  if (process.env.REVERIE_MANAGED_INSTALL === 'nix') {
+    launcherPath = process.env.REVERIE_NIX_LAUNCHER;
+    if (!launcherPath || !isAbsolute(launcherPath)) throw new Error('Nix service installation requires an absolute REVERIE_NIX_LAUNCHER');
+    try {
+      accessSync(launcherPath, constants.X_OK);
+      if (!statSync(launcherPath).isFile()) throw new Error('not a file');
+    } catch {
+      throw new Error('REVERIE_NIX_LAUNCHER must name an executable file');
+    }
+    // Carry selected instance paths, never credentials, into the restarted launcher.
+    for (const key of ['REVERIE_DATA', 'REVERIE_DATA_DIR', 'XDG_DATA_HOME', 'REVERIE_INSTANCE_CONFIG', 'TMPDIR']) {
+      if (process.env[key]) env[key] = process.env[key]!;
+    }
+  }
   return {
     kind,
     name: kind === 'launchd' ? LAUNCHD_LABEL : SYSTEMD_UNIT,
     nodePath: process.execPath,
+    launcherPath,
     execArgv: [...process.execArgv],
     scriptPath: entryScript(),
     args: buildWebArgs(options),
-    env: buildServiceEnv(dirname(process.execPath), process.env.PATH || '', home, process.env.LANG),
+    env,
     logPath: logFilePath(),
     workingDir: home,
   };
@@ -287,7 +313,12 @@ export async function installService(options: WebLaunchOptions): Promise<Service
     return { ok: false, message: `no supported supervisor on ${process.platform}; use \`reverie web -d\` instead` };
   }
 
-  const plan = resolveServicePlan(kind, options);
+  let plan: ServicePlan;
+  try {
+    plan = resolveServicePlan(kind, options);
+  } catch (error) {
+    return { ok: false, message: String((error as Error).message) };
+  }
   const unitPath = unitPathFor(kind);
   const warnings: string[] = [];
   mkdirSync(dirname(unitPath), { recursive: true });

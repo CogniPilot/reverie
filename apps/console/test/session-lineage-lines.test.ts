@@ -48,7 +48,7 @@ const appJs = read('app.js');
 function loadLineageHelper(): LineageHelper {
   const context = vm.createContext({ window: {}, globalThis: {} });
   vm.runInContext(read('constants.js'), context, { filename: 'constants.js' });
-  return (context.window as { CodemanLineage: LineageHelper }).CodemanLineage;
+  return (context.window as { ReverieLineage: LineageHelper }).ReverieLineage;
 }
 
 const tab = (left: number, top = 4, width = 120, height = 30): Rect => ({ left, top, width, height });
@@ -637,7 +637,7 @@ function loadLineageApp(
   status: Record<string, string> = {},
   layout: { rect?: (i: number) => Rect; style?: Record<string, string> } = {}
 ) {
-  function CodemanApp(this: unknown) {}
+  function ReverieApp(this: unknown) {}
   const ids = Object.keys(sessions);
   const rect = (i: number) => {
     const r = layout.rect ? layout.rect(i) : { left: i * 140, top: 4, width: 120, height: 30 };
@@ -662,7 +662,7 @@ function loadLineageApp(
   const sandbox: Record<string, unknown> = {
     window: {},
     globalThis: {},
-    CodemanApp,
+    ReverieApp,
     MobileDetection: { getDeviceType: () => 'desktop' },
     CSS: { escape: (v: string) => v },
     // The strip's computed style, when a test lays one out (the spine channel).
@@ -684,7 +684,7 @@ function loadLineageApp(
   for (const file of ['constants.js', 'session-lineage.js']) {
     vm.runInContext(read(file), context, { filename: file });
   }
-  const app = new (CodemanApp as unknown as new () => LineageApp)();
+  const app = new (ReverieApp as unknown as new () => LineageApp)();
   app.sessions = new Map(ids.map((id) => [id, { parentSessionId: sessions[id], status: status[id] ?? 'idle' }]));
   app.sessionOrder = ids;
   app.activeSessionId = null;
@@ -714,11 +714,11 @@ const childIds = (families: ReturnType<typeof draw>) =>
   families.flatMap((f) => f.paths.map((p) => p.attrs['data-child-tab']));
 
 describe('lineage focus: every family is drawn, the selected one emphasized', () => {
-  const fleet = { w1: null, a: 'w1', b: 'w1', w2: null, c: 'w2', w3: null };
+  const reverie = { w1: null, a: 'w1', b: 'w1', w2: null, c: 'w2', w3: null };
   const focused = (families: ReturnType<typeof draw>) => families.filter((f) => f.focus).map((f) => f.parent);
 
   it('draws every family whichever tab is selected, the selected one last and emphasized', () => {
-    const { app } = loadLineageApp(fleet);
+    const { app } = loadLineageApp(reverie);
     const families = draw(app, 'w1');
 
     // Drawn last, so no other family's line covers it.
@@ -730,7 +730,7 @@ describe('lineage focus: every family is drawn, the selected one emphasized', ()
   });
 
   it('emphasizes the parent and siblings of a selected child', () => {
-    const { app } = loadLineageApp(fleet);
+    const { app } = loadLineageApp(reverie);
     expect(focused(draw(app, 'a'))).toEqual(['w1']);
     expect(focused(draw(app, 'c'))).toEqual(['w2']);
   });
@@ -744,7 +744,7 @@ describe('lineage focus: every family is drawn, the selected one emphasized', ()
   });
 
   it('still draws everything, emphasizing nothing, for a tab without lineage or a web tab', () => {
-    const { app } = loadLineageApp(fleet);
+    const { app } = loadLineageApp(reverie);
     const plain = draw(app, 'w3');
     expect(plain.map((f) => f.parent)).toEqual(['w1', 'w2']);
     expect(focused(plain)).toEqual([]);
@@ -757,14 +757,14 @@ describe('lineage focus: every family is drawn, the selected one emphasized', ()
   it('keeps every family in its lane when the selection moves', () => {
     // Lanes follow strip order, so selecting another tab changes only the emphasis
     // and the draw order, never where a family's lines run.
-    const { app } = loadLineageApp(fleet);
+    const { app } = loadLineageApp(reverie);
     const before = family(draw(app, 'w1'), 'w2').paths.map((p) => p.attrs.d);
     const after = family(draw(app, 'w2'), 'w2').paths.map((p) => p.attrs.d);
     expect(after).toEqual(before);
   });
 
   it('keeps the data-agent-id the entrance animation looks for, and a dot per child', () => {
-    const { app } = loadLineageApp(fleet);
+    const { app } = loadLineageApp(reverie);
     const w1 = family(draw(app, 'w1'), 'w1');
 
     expect(w1.paths.map((p) => p.attrs['data-agent-id'])).toEqual(['lineage:a', 'lineage:b']);
@@ -772,7 +772,7 @@ describe('lineage focus: every family is drawn, the selected one emphasized', ()
   });
 
   it('puts working routes first, so an idle sibling draws the shared trunk solid', () => {
-    const { app } = loadLineageApp(fleet, { b: 'working' });
+    const { app } = loadLineageApp(reverie, { b: 'working' });
     const w1 = family(draw(app, 'w1'), 'w1');
 
     expect(w1.paths.map((p) => p.attrs['data-child-tab'])).toEqual(['b', 'a']);

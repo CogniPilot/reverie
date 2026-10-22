@@ -31,7 +31,7 @@ describe('chatroom message editing and pins', () => {
   const clearPanes = () => {
     for (const s of [A, B]) (ctx.sessions.get(s) as unknown as { writeBuffer: string[] }).writeBuffer.length = 0;
   };
-  const as = (id?: string) => (id ? { 'x-codeman-parent-session': id } : {});
+  const as = (id?: string) => (id ? { 'x-reverie-parent-session': id } : {});
 
   beforeEach(async () => {
     clock = 1_000_000;
@@ -68,7 +68,7 @@ describe('chatroom message editing and pins', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/chatrooms',
-      payload: { name: 'Fleet', members: [{ sessionId: A }, { sessionId: B }], coordinatorSessionId: B },
+      payload: { name: 'Reverie', members: [{ sessionId: A }, { sessionId: B }], coordinatorSessionId: B },
     });
     expect(res.statusCode).toBe(200);
     await service.delivery.flushAll();

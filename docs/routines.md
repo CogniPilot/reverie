@@ -1,6 +1,6 @@
 # Routines (R1): status rounds, calls, retro and kickoff
 
-A host timer runs `fleet-routines tick` every 5 minutes. R1 does two things:
+A host timer runs `reverie-routines tick` every 5 minutes. R1 does two things:
 - It checks each listed agent's session **status** and reports what it sees (stalled, open
   dialog, down, recovered, identity changed).
 - It sends a one-line wind-down call before each agent's sleep window and a wake-up call after
@@ -44,7 +44,7 @@ It never nudges, never restarts anything, and never reads or posts to a chat roo
   `routines-report v1 <time> <code> <agent> <number> [dry-run]`. Nothing is posted as the user.
 - **Fixed templates.** Every text sent is a fixed template: one printable ASCII line, no `!`
   (typed delivery would flip OpenCode into shell mode).
-- **The shared marker.** Each starts with the fleet's marker,
+- **The shared marker.** Each starts with the reverie's marker,
   `[automated - not the owner - routine <kind>]`. The marker is **unauthenticated**: anyone can
   type it. It only ever lowers trust and never proves who sent a line.
 - **Cost.** Every call and routine line is a model turn on the receiving agent, so it costs that
@@ -206,18 +206,18 @@ Build from a **verified clone**, never from `~/git/reverie`: agents can write th
 ```sh
 git clone --no-local ~/git/reverie /tmp/reverie-verify && cd /tmp/reverie-verify
 git checkout <reviewed commit> && git rev-parse HEAD          # compare with the reviewed hash
-nix build .#default -o ~/.local/libexec/reverie/fleet-pkg
-ln -sf fleet-pkg/bin/fleet-routines ~/.local/libexec/reverie/fleet-routines
+nix build .#default -o ~/.local/libexec/reverie/reverie-pkg
+ln -sf reverie-pkg/bin/reverie-routines ~/.local/libexec/reverie/reverie-routines
 cp examples/routines.json ~/.config/reverie/routines.json     # then edit: ids, windows
-~/.local/libexec/reverie/fleet-routines check-policy
+~/.local/libexec/reverie/reverie-routines check-policy
 cp systemd/reverie-routines.{service,timer} ~/.config/systemd/user/
 systemctl --user daemon-reload && systemctl --user enable --now reverie-routines.timer
 journalctl --user -u reverie-routines.service      # dry run: "..._would_send" lines
-~/.local/libexec/reverie/fleet-routines status      # the dry ledger; add --live for the live one
+~/.local/libexec/reverie/reverie-routines status      # the dry ledger; add --live for the live one
 ```
 
 **Without Nix.** The module is standard-library only, so a host `python3` (3.11 or later) can
-run it from the verified clone: `python3 -I /tmp/reverie-verify/cto/routines.py tick`.
+run it from the verified clone: `nix develop --command python3 -m reverie.routines tick`.
 
 **Going live.** Add `Environment=ROUTINES_FLAGS=--live` in a drop-in. Dry runs keep a separate
 ledger (`routines.dry.sqlite`), so going live starts clean.

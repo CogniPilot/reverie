@@ -1,5 +1,5 @@
 /**
- * @fileoverview Reverie agents start with full access inside the fleet container.
+ * @fileoverview Reverie agents start with full access inside the reverie container.
  *
  * A codex session created, moved (employee replace) or relaunched without
  * `codexConfig.dangerouslyBypassApprovals` used to start with approval prompts on and stall.
@@ -40,10 +40,9 @@ const CLAUDE_FLAG = '--dangerously-skip-permissions';
 const CONTAINER = { REVERIE_CONTAINER: '1' } as NodeJS.ProcessEnv;
 
 describe('withFullAccessDefault', () => {
-  it('reads the container flag under the new name and the older FLEET_ spelling', () => {
+  it('reads the Reverie container flag', () => {
     expect(fullAccessByDefault(CONTAINER)).toBe(true);
-    expect(fullAccessByDefault({ FLEET_CONTAINER: '1' } as NodeJS.ProcessEnv)).toBe(true);
-    expect(fullAccessByDefault({ REVERIE_CONTAINER: '0', FLEET_CONTAINER: '1' } as NodeJS.ProcessEnv)).toBe(false);
+    expect(fullAccessByDefault({ REVERIE_CONTAINER: '0' } as NodeJS.ProcessEnv)).toBe(false);
     expect(fullAccessByDefault({} as NodeJS.ProcessEnv)).toBe(false);
   });
 
@@ -172,7 +171,7 @@ describe('missingFullAccessFlags', () => {
 });
 
 describe('codex sessions launch with full access in the container', () => {
-  const workingDir = join(homedir(), 'codeman-cases', 'full-access-default');
+  const workingDir = join(homedir(), 'reverie-cases', 'full-access-default');
   const sessions: Session[] = [];
   let created: CreateSessionOptions[];
   let respawned: RespawnPaneOptions[];
@@ -237,7 +236,7 @@ describe('codex sessions launch with full access in the container', () => {
   });
 
   it('relaunch (audit requiredRegression 2-3): restart adds the flag and the argv check passes on the real CLI', async () => {
-    const session = make({ muxSession: { sessionId: 'x', muxName: 'codeman-fullaccess', pid: 4242 } as never });
+    const session = make({ muxSession: { sessionId: 'x', muxName: 'reverie-fullaccess', pid: 4242 } as never });
     vi.spyOn(TmuxManager.prototype, 'muxSessionExists').mockReturnValue(true);
     vi.spyOn(TmuxManager.prototype, 'respawnPane').mockImplementation(async (options) => {
       respawned.push(options);
@@ -254,7 +253,7 @@ describe('codex sessions launch with full access in the container', () => {
   });
 
   it('relaunch whose CLI came up without the flag is reported as full_access_missing', async () => {
-    const session = make({ muxSession: { sessionId: 'x', muxName: 'codeman-fullaccess', pid: 4242 } as never });
+    const session = make({ muxSession: { sessionId: 'x', muxName: 'reverie-fullaccess', pid: 4242 } as never });
     vi.spyOn(TmuxManager.prototype, 'muxSessionExists').mockReturnValue(true);
     vi.spyOn(TmuxManager.prototype, 'respawnPane').mockResolvedValue(4343);
     useTable(table([4343, 1, 'bash', '-c', `codex ${FLAG}`], [4344, 4343, 'codex']));
@@ -267,7 +266,7 @@ describe('codex sessions launch with full access in the container', () => {
 
   it('a pane whose CLI never starts is looked at again, then reported as no-cli and alerted', async () => {
     Session.fullAccessCheckRetries = 2;
-    const session = make({ muxSession: { sessionId: 'x', muxName: 'codeman-fullaccess', pid: 4242 } as never });
+    const session = make({ muxSession: { sessionId: 'x', muxName: 'reverie-fullaccess', pid: 4242 } as never });
     vi.spyOn(TmuxManager.prototype, 'muxSessionExists').mockReturnValue(true);
     vi.spyOn(TmuxManager.prototype, 'respawnPane').mockResolvedValue(4343);
     useTable(table([4343, 1, 'bash']));
@@ -282,7 +281,7 @@ describe('codex sessions launch with full access in the container', () => {
 
   it('a CLI that starts on a later look passes and raises nothing', async () => {
     Session.fullAccessCheckRetries = 2;
-    const session = make({ muxSession: { sessionId: 'x', muxName: 'codeman-fullaccess', pid: 4242 } as never });
+    const session = make({ muxSession: { sessionId: 'x', muxName: 'reverie-fullaccess', pid: 4242 } as never });
     vi.spyOn(TmuxManager.prototype, 'muxSessionExists').mockReturnValue(true);
     vi.spyOn(TmuxManager.prototype, 'respawnPane').mockResolvedValue(4343);
     const early = table([4343, 1, 'bash']);
@@ -300,7 +299,7 @@ describe('codex sessions launch with full access in the container', () => {
   });
 
   it('a missing flag reaches the owner/room alert dependency', async () => {
-    const session = make({ muxSession: { sessionId: 'x', muxName: 'codeman-fullaccess', pid: 4242 } as never });
+    const session = make({ muxSession: { sessionId: 'x', muxName: 'reverie-fullaccess', pid: 4242 } as never });
     vi.spyOn(TmuxManager.prototype, 'muxSessionExists').mockReturnValue(true);
     vi.spyOn(TmuxManager.prototype, 'respawnPane').mockResolvedValue(4343);
     useTable(table([4343, 1, 'codex']));
@@ -313,8 +312,8 @@ describe('codex sessions launch with full access in the container', () => {
 
   it('audit requiredRegression 4: the check is per session, so a stale same-name session is not confused with the bound one', async () => {
     useTable(table([700, 1, 'bash'], [701, 700, 'codex', FLAG], [800, 1, 'bash']));
-    const bound = make({ name: 'Ada', muxSession: { sessionId: 'a', muxName: 'codeman-ada-a', pid: 1 } as never });
-    const stale = make({ name: 'Ada', muxSession: { sessionId: 'b', muxName: 'codeman-ada-b', pid: 2 } as never });
+    const bound = make({ name: 'Ada', muxSession: { sessionId: 'a', muxName: 'reverie-ada-a', pid: 1 } as never });
+    const stale = make({ name: 'Ada', muxSession: { sessionId: 'b', muxName: 'reverie-ada-b', pid: 2 } as never });
     vi.spyOn(TmuxManager.prototype, 'muxSessionExists').mockReturnValue(true);
     const pids = [700, 800];
     vi.spyOn(TmuxManager.prototype, 'respawnPane').mockImplementation(async () => pids.shift() as number);
@@ -346,7 +345,7 @@ describe('codex sessions launch with full access in the container', () => {
     useTable(table([900, 1, 'codex']));
     const relaunched = make({
       codexConfig: { dangerouslyBypassApprovals: false },
-      muxSession: { sessionId: 'f', muxName: 'codeman-false', pid: 1 } as never,
+      muxSession: { sessionId: 'f', muxName: 'reverie-false', pid: 1 } as never,
     });
     expect(await relaunched.restartCli()).toBe(true);
     expect(await relaunched.fullAccessCheck).toEqual([]);
@@ -360,7 +359,7 @@ describe('codex sessions launch with full access in the container', () => {
     vi.spyOn(TmuxManager.prototype, 'muxSessionExists').mockReturnValue(true);
     vi.spyOn(TmuxManager.prototype, 'respawnPane').mockResolvedValue(901);
     useTable(table([901, 1, 'codex']));
-    const relaunched = make({ owner: 'bob', muxSession: { sessionId: 'b', muxName: 'codeman-bob', pid: 1 } as never });
+    const relaunched = make({ owner: 'bob', muxSession: { sessionId: 'b', muxName: 'reverie-bob', pid: 1 } as never });
     expect(await relaunched.restartCli()).toBe(true);
     expect(relaunched.toState().codexConfig?.dangerouslyBypassApprovals).toBeUndefined();
     expect(await relaunched.fullAccessCheck).toEqual([]);

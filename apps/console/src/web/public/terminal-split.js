@@ -7,11 +7,11 @@
  * session ends. Desktop-only; see docs/split-pane-sessions-plan.md.
  *
  * @dependency terminal-tile.js (window.TerminalTile)
- * @dependency constants.js (window.CodemanSplitPane, SPLIT_PANE_MIN_WIDTH)
+ * @dependency constants.js (window.ReverieSplitPane, SPLIT_PANE_MIN_WIDTH)
  * @loadorder 7.5 of 16, loaded after terminal-tile.js and before tile-grid.js
  */
 
-Object.assign(CodemanApp.prototype, {
+Object.assign(ReverieApp.prototype, {
   /**
    * Desktop-only gate, same shape as home-sessions.js's shouldShowHomeSessions
    * + matchMedia backstop: a JS width check (so openSplitPane() below can
@@ -53,7 +53,7 @@ Object.assign(CodemanApp.prototype, {
       this.closeSplitPane();
       return;
     }
-    const candidates = window.CodemanSplitPane.buildSplitPickerSessions(
+    const candidates = window.ReverieSplitPane.buildSplitPickerSessions(
       this.sessions,
       this.sessionOrder,
       this.activeSessionId,
@@ -350,7 +350,7 @@ Object.assign(CodemanApp.prototype, {
    * @param {string} logoClass - the header's own class for its logo
    */
   _paintSessionHarness(parts, session, logoClass) {
-    const harness = window.CodemanSessionHarness.describeSessionHarness(session, window.__codemanCliCatalog);
+    const harness = window.ReverieSessionHarness.describeSessionHarness(session, window.__reverieCliCatalog);
     const cls = `${logoClass} run-mode-dot${harness.id ? ` ${harness.id}` : ''}`;
     if (parts.harnessClass !== cls) {
       parts.harnessClass = cls;
@@ -402,7 +402,7 @@ Object.assign(CodemanApp.prototype, {
       if (!container) return;
       const rect = container.getBoundingClientRect();
       const rawPercent = ((clientX - rect.left) / rect.width) * 100;
-      const percent = window.CodemanSplitPane.clampDividerPercent(rawPercent);
+      const percent = window.ReverieSplitPane.clampDividerPercent(rawPercent);
       wrap.style.flexBasis = `${percent}%`;
       paneB.style.flexBasis = `${100 - percent}%`;
       if (this.fitAddon) this.fitAddon.fit();
@@ -492,8 +492,8 @@ Object.assign(CodemanApp.prototype, {
   },
 });
 
-const _originalOnSessionDeleted = CodemanApp.prototype._onSessionDeleted;
-CodemanApp.prototype._onSessionDeleted = function (data) {
+const _originalOnSessionDeleted = ReverieApp.prototype._onSessionDeleted;
+ReverieApp.prototype._onSessionDeleted = function (data) {
   if (this._splitSessionId === data.id) {
     this.closeSplitPane();
   } else if (this._splitPane && this.activeSessionId === data.id) {
@@ -529,15 +529,15 @@ CodemanApp.prototype._onSessionDeleted = function (data) {
 // dimensions via its own `{t:'z',...}` resize frame.
 // Every tab render (any session change: a rename, a model switch) refreshes
 // the split headers too, the way tile-grid.js refreshes the tile headers.
-const _splitOriginalRenderSessionTabsImmediate = CodemanApp.prototype._renderSessionTabsImmediate;
-CodemanApp.prototype._renderSessionTabsImmediate = function (...args) {
+const _splitOriginalRenderSessionTabsImmediate = ReverieApp.prototype._renderSessionTabsImmediate;
+ReverieApp.prototype._renderSessionTabsImmediate = function (...args) {
   const result = _splitOriginalRenderSessionTabsImmediate.apply(this, args);
   this._renderSplitChrome?.();
   return result;
 };
 
-const _originalSelectSession = CodemanApp.prototype.selectSession;
-CodemanApp.prototype.selectSession = function (sessionId, ...args) {
+const _originalSelectSession = ReverieApp.prototype.selectSession;
+ReverieApp.prototype.selectSession = function (sessionId, ...args) {
   if (this._splitPane && this._splitSessionId === sessionId) {
     this.closeSplitPane();
   }

@@ -4,7 +4,7 @@
  * supports a custom-model launch, and the external-mode key set itself.
  * They agree today, but nothing enforced it — the dangerous drift is
  * `supportsCustomModel`: the Run menu's "CLI (endpoint)" rows come from the
- * server-injected `window.__codemanCustomModelClis` (built from
+ * server-injected `window.__reverieCustomModelClis` (built from
  * `capabilities.customModelInjection.kind !== 'unsupported'`), so a CLI that
  * gains a real injection recipe later would be OFFERED in that menu while
  * `_runCliMode` still drops the `customModel` field for it — the session
@@ -38,8 +38,8 @@ interface RunModeLaunchEntry {
 
 function loadRunModeLaunch(): Record<string, RunModeLaunchEntry> {
   const dom = new JSDOM('<!doctype html><body></body>', { url: 'http://localhost/', runScripts: 'dangerously' });
-  const win = dom.window as unknown as Window & typeof globalThis & { CodemanApp: new () => unknown };
-  (win as unknown as { eval: (s: string) => void }).eval('window.CodemanApp = function CodemanApp() {};');
+  const win = dom.window as unknown as Window & typeof globalThis & { ReverieApp: new () => unknown };
+  (win as unknown as { eval: (s: string) => void }).eval('window.ReverieApp = function ReverieApp() {};');
   // The assignment MUST be part of the same evaluated string as
   // SESSION_UI_JS — RUN_MODE_LAUNCH is a bare top-level `const`, so it only
   // exists in the lexical scope of THIS eval call.
@@ -80,7 +80,7 @@ describe('RUN_MODE_LAUNCH (session-ui.js) stays in step with stock.ts', () => {
 
   it('supportsCustomModel matches capabilities.customModelInjection.kind !== "unsupported"', () => {
     // This is the one that fails SILENTLY if it drifts (see file header):
-    // window.__codemanCustomModelClis (server.ts) is built from this same
+    // window.__reverieCustomModelClis (server.ts) is built from this same
     // stock.ts field, so a mismatch here means the Run-menu picker and the
     // actual launch body disagree about which CLIs are custom-model-capable.
     for (const [id, entry] of Object.entries(runModeLaunch)) {

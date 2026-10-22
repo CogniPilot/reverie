@@ -38,7 +38,7 @@ afterEach(() => vi.unstubAllEnvs());
 
 describe('tab layout routes', () => {
   it('maps single-user requests to @single and never accepts an owner override', async () => {
-    vi.stubEnv('CODEMAN_MULTIUSER', '0');
+    vi.stubEnv('REVERIE_MULTIUSER', '0');
     const { app, service } = await harness();
     const response = await app.inject({ method: 'GET', url: '/api/tab-layout?owner=foreign' });
     expect(response.statusCode).toBe(200);
@@ -47,7 +47,7 @@ describe('tab layout routes', () => {
   });
 
   it('uses the authenticated username in multi-user mode, including for admins', async () => {
-    vi.stubEnv('CODEMAN_MULTIUSER', '1');
+    vi.stubEnv('REVERIE_MULTIUSER', '1');
     const { app, service } = await harness('admin-a', 'admin');
     await app.inject({ method: 'GET', url: '/api/tab-layout?owner=someone-else' });
     expect(service.get).toHaveBeenCalledWith('admin-a');
@@ -55,7 +55,7 @@ describe('tab layout routes', () => {
   });
 
   it.each([2, 4])('returns 409 with the authoritative prepared layout when baseVersion=%s', async (baseVersion) => {
-    vi.stubEnv('CODEMAN_MULTIUSER', '1');
+    vi.stubEnv('REVERIE_MULTIUSER', '1');
     const { app, service } = await harness('alice');
     service.put.mockResolvedValueOnce({ status: 'conflict', layout: layout(3) });
     const response = await app.inject({

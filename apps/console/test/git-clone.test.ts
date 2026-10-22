@@ -51,13 +51,13 @@ function rejected(input: string) {
 
 describe('parseGitRepositoryUrl', () => {
   it('accepts an https GitHub URL and pulls out owner/repo/provider', () => {
-    const parsed = accepted('https://github.com/Ark0N/Codeman.git');
+    const parsed = accepted('https://github.com/jgoppert/reverie.git');
     expect(parsed.transport).toBe('https');
     expect(parsed.host).toBe('github.com');
-    expect(parsed.owner).toBe('Ark0N');
-    expect(parsed.repo).toBe('Codeman');
+    expect(parsed.owner).toBe('jgoppert');
+    expect(parsed.repo).toBe('reverie');
     expect(parsed.provider).toBe('GitHub');
-    expect(parsed.suggestedName).toBe('Codeman');
+    expect(parsed.suggestedName).toBe('reverie');
     expect(parsed.warnings).toEqual([]);
   });
 
@@ -338,7 +338,7 @@ describe.skipIf(!gitPresent)('cloneRepository / probeGitRemote (real git)', () =
     execFileSync('git', args, { cwd, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'] });
 
   beforeAll(() => {
-    root = mkdtempSync(join(tmpdir(), 'codeman-clone-test-'));
+    root = mkdtempSync(join(tmpdir(), 'reverie-clone-test-'));
     origin = join(root, 'origin.git');
     mkdirSync(origin);
     git(['init', '--bare', '--quiet'], origin);
@@ -347,7 +347,7 @@ describe.skipIf(!gitPresent)('cloneRepository / probeGitRemote (real git)', () =
     mkdirSync(work);
     git(['init', '--quiet'], work);
     git(['config', 'user.email', 'test@example.com'], work);
-    git(['config', 'user.name', 'Codeman Test'], work);
+    git(['config', 'user.name', 'Reverie Test'], work);
     writeFileSync(join(work, 'README.md'), '# fixture\n');
     git(['add', 'README.md'], work);
     git(['commit', '--quiet', '-m', 'initial'], work);
@@ -489,7 +489,7 @@ describe('git pool queue bounds (fake git)', () => {
   let mod: typeof import('../src/git-clone.js');
 
   beforeAll(async () => {
-    fakeDir = mkdtempSync(join(tmpdir(), 'codeman-fake-git-'));
+    fakeDir = mkdtempSync(join(tmpdir(), 'reverie-fake-git-'));
     writeFileSync(
       join(fakeDir, 'git'),
       '#!/bin/sh\nif [ "$1" = "--version" ]; then echo "git version 2.43.0"; exit 0; fi\nsleep 30\n',
@@ -497,16 +497,16 @@ describe('git pool queue bounds (fake git)', () => {
     );
     savedPath = process.env.PATH;
     process.env.PATH = `${fakeDir}:${savedPath}`;
-    process.env.CODEMAN_MAX_GIT_OPERATIONS = '1';
-    process.env.CODEMAN_MAX_GIT_QUEUE = '1';
+    process.env.REVERIE_MAX_GIT_OPERATIONS = '1';
+    process.env.REVERIE_MAX_GIT_QUEUE = '1';
     vi.resetModules();
     mod = await import('../src/git-clone.js');
   });
 
   afterAll(() => {
     process.env.PATH = savedPath;
-    delete process.env.CODEMAN_MAX_GIT_OPERATIONS;
-    delete process.env.CODEMAN_MAX_GIT_QUEUE;
+    delete process.env.REVERIE_MAX_GIT_OPERATIONS;
+    delete process.env.REVERIE_MAX_GIT_QUEUE;
     rmSync(fakeDir, { recursive: true, force: true });
     vi.resetModules();
   });

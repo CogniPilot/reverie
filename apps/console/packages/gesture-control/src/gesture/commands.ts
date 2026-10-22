@@ -1,6 +1,6 @@
 // Discrete gesture → command detection.
 //
-// Maps the recognizer's canned gesture categories onto Codeman commands, with
+// Maps the recognizer's canned gesture categories onto Reverie commands, with
 // debouncing so each command fires once per gesture *entry* (not every frame
 // while it's held). Open_Palm is special: it must be held continuously for
 // `palmHoldMs` before firing halt-all — a dead-man's-switch that's hard to

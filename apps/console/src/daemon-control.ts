@@ -1,7 +1,7 @@
 /**
- * @fileoverview Detached `codeman web` control: start (-d), stop, status.
+ * @fileoverview Detached `reverie web` control: start (-d), stop, status.
  *
- * Backs `codeman web -d`, `codeman web --stop` and `codeman web --status`. The
+ * Backs `reverie web -d`, `reverie web --stop` and `reverie web --status`. The
  * server itself is unchanged; this module re-launches the SAME entry script in a
  * new session (`detached: true` calls setsid), so the child has no controlling
  * terminal and no shell job entry. That is what actually makes it outlive the
@@ -11,8 +11,8 @@
  *
  * Two rules shape the rest of the module:
  *
- * 1. **Never start a second server on one data dir.** `~/.codeman` and the
- *    `tmux -L codeman` socket are process-wide (config/instance.ts), so a second
+ * 1. **Never start a second server on one data dir.** `~/.reverie` and the
+ *    `tmux -L reverie` socket are process-wide (config/instance.ts), so a second
  *    instance discovers and attaches PTYs to the first one's live sessions and
  *    starts resizing them. A double `-d` therefore has to be a hard error, which
  *    means checking both the pidfile AND the port before spawning.
@@ -71,7 +71,7 @@ export interface StopResult {
 
 export interface DaemonStatus {
   pid: number | null;
-  /** The pid in the pidfile is alive AND still looks like a Codeman web process. */
+  /** The pid in the pidfile is alive AND still looks like a Reverie web process. */
   running: boolean;
   /** Something answered `/api/status` at the expected address. */
   responding: boolean;
@@ -123,17 +123,17 @@ export function parsePidFileContents(text: string): number | null {
 }
 
 /**
- * Does this command line look like a Codeman web server?
+ * Does this command line look like a Reverie web server?
  *
  * Pids are recycled, and a stale pidfile pointing at whatever inherited the
- * number is a live footgun: `codeman web --stop` must not SIGTERM an unrelated
- * process. Both the npm bin (`codeman`/`aicodeman`) and the direct entry
+ * number is a live footgun: `reverie web --stop` must not SIGTERM an unrelated
+ * process. Both the npm bin (`reverie`/`aireverie`) and the direct entry
  * (`node dist/index.js web`, `tsx src/index.ts web`) have to match.
  */
-export function looksLikeCodemanWeb(command: string | null | undefined): boolean {
+export function looksLikeReverieWeb(command: string | null | undefined): boolean {
   if (!command) return false;
   if (!/(^|\s)web(\s|$)/.test(command)) return false;
-  return /(^|[/\s])(?:(?:ai)?codeman|fleet|reverie)(\s|$)/.test(command) || /index\.(js|ts)(\s|$)/.test(command);
+  return /(^|[/\s])(?:ai)?reverie(\s|$)/.test(command) || /index\.(js|ts)(\s|$)/.test(command);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -200,7 +200,7 @@ function removePidFile(): void {
   }
 }
 
-/** Pid of a live Codeman web server recorded in the pidfile, or null. */
+/** Pid of a live Reverie web server recorded in the pidfile, or null. */
 export function readLivePid(): number | null {
   const pid = readPidFile();
   if (pid === null) return null;
@@ -208,7 +208,7 @@ export function readLivePid(): number | null {
   // A recycled pid is not ours. `ps` can also legitimately fail (containers with
   // no procps); treat "cannot tell" as ours rather than orphaning the pidfile.
   const command = readProcessCommand(pid);
-  if (command !== null && !looksLikeCodemanWeb(command)) return null;
+  if (command !== null && !looksLikeReverieWeb(command)) return null;
   return pid;
 }
 
@@ -217,14 +217,14 @@ export function readLivePid(): number | null {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export interface ProbeResult {
-  /** A Codeman server answered. A 401 counts: auth is active, the server is up. */
+  /** A Reverie server answered. A 401 counts: auth is active, the server is up. */
   up: boolean;
   version?: string;
 }
 
 /**
  * Probe `/api/status`. Self-signed certs are accepted (`--https` generates one),
- * and 401 counts as up because `CODEMAN_PASSWORD` gates that route. The body is
+ * and 401 counts as up because `REVERIE_PASSWORD` gates that route. The body is
  * checked so an unrelated service squatting on the port is not read as success.
  */
 export function probeServer(url: string, timeoutMs = 2000): Promise<ProbeResult> {
@@ -307,12 +307,12 @@ function sleep(ms: number): Promise<void> {
  */
 function entryScript(): string {
   const script = process.argv[1];
-  if (!script) throw new Error('cannot determine the codeman entry script to relaunch');
+  if (!script) throw new Error('cannot determine the reverie entry script to relaunch');
   return script;
 }
 
 /** Marks one launch in the append-only log so a tail cannot mix two runs. */
-const LOG_SEPARATOR = '=== codeman web start';
+const LOG_SEPARATOR = '=== reverie web start';
 
 /**
  * Last few lines of the daemon log, for reporting a failed start. The log is
@@ -332,7 +332,7 @@ export function tailLog(maxLines = 15): string {
 }
 
 /**
- * Spawn a detached `codeman web` and wait until it answers before returning.
+ * Spawn a detached `reverie web` and wait until it answers before returning.
  * Refuses when a server is already up on this data dir (see rule 1 in the module
  * docblock).
  */
@@ -449,7 +449,7 @@ export async function stopDaemon(options: WebLaunchOptions): Promise<StopResult>
   }
 
   const command = readProcessCommand(pid);
-  if (command !== null && !looksLikeCodemanWeb(command)) {
+  if (command !== null && !looksLikeReverieWeb(command)) {
     return {
       ok: false,
       reason: 'foreign-pid',

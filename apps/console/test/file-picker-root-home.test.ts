@@ -1,7 +1,7 @@
 /**
- * @fileoverview The picker must offer a root when Codeman runs as root.
+ * @fileoverview The picker must offer a root when Reverie runs as root.
  *
- * `/root` is a DEFAULT blocked tree in the attachment guard, and Codeman running
+ * `/root` is a DEFAULT blocked tree in the attachment guard, and Reverie running
  * as root — containers, plenty of servers — makes `homedir()` exactly `/root`.
  * The picker's own allowlisted Home root was therefore blocked by the guard,
  * every other candidate lives under it or does not exist, and the endpoint
@@ -30,8 +30,8 @@ describe('file picker roots when the server runs as root', () => {
   });
 
   it('also frees a root nested under the blocked tree', () => {
-    // ~/codeman-cases is /root/codeman-cases when running as root.
-    expect(narrow(TREES, ['/root/codeman-cases'])).toEqual(['/etc']);
+    // ~/reverie-cases is /root/reverie-cases when running as root.
+    expect(narrow(TREES, ['/root/reverie-cases'])).toEqual(['/etc']);
   });
 
   it('still refuses secrets inside the freed tree', () => {

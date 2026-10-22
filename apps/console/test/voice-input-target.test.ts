@@ -84,7 +84,7 @@ function load(opts: { insertMode?: string; localEcho?: boolean; focused?: string
     app,
     localStorage: {
       getItem: (key: string) =>
-        key === 'codeman-voice-settings' ? JSON.stringify({ insertMode: opts.insertMode || 'direct' }) : null,
+        key === 'reverie-voice-settings' ? JSON.stringify({ insertMode: opts.insertMode || 'direct' }) : null,
       setItem: () => {},
     },
     document: {

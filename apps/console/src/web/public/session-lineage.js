@@ -1,11 +1,11 @@
 /**
  * @fileoverview Session lineage lines: the tree joining a tab to the tabs it spawned.
  *
- * A session that starts another session (the `codeman` agent skill spawning a worker,
- * which passes its own `$CODEMAN_SESSION_ID`) gets `parentSessionId` stamped on its
+ * A session that starts another session (the `reverie` agent skill spawning a worker,
+ * which passes its own `$REVERIE_SESSION_ID`) gets `parentSessionId` stamped on its
  * state server-side. This module turns that field into a quiet orthogonal tree, one per
  * spawning tab, routed through the gaps between tab rows so it never crosses a label or
- * the terminal (geometry: `CodemanLineage.computeTree` in constants.js).
+ * the terminal (geometry: `ReverieLineage.computeTree` in constants.js).
  *
  * EVERY FAMILY IS ALWAYS DRAWN, AND THE SELECTED TAB'S IS EMPHASIZED: the family the
  * active tab spawned, and the family it belongs to as a child, get the
@@ -33,15 +33,15 @@
  *   `_applyLineEntrances()` queries, so the draw-in animation and its
  *   negative-`animation-delay` resume across `svg.innerHTML = ''` come for free.
  *
- * @mixin Extends CodemanApp.prototype via Object.assign
+ * @mixin Extends ReverieApp.prototype via Object.assign
  * @dependency subagent-windows.js (_updateConnectionLinesImmediate, #connectionLines)
- * @dependency constants.js (window.CodemanLineage.computeTree + .COLORS)
+ * @dependency constants.js (window.ReverieLineage.computeTree + .COLORS)
  * @dependency settings-ui.js (loadAppSettingsFromStorage, getDefaultSettings)
  * @loadorder 15.6 (after ultracode-windows.js — appended to the same SVG pass)
  */
-/* global CodemanApp, MobileDetection */
+/* global ReverieApp, MobileDetection */
 
-Object.assign(CodemanApp.prototype, {
+Object.assign(ReverieApp.prototype, {
   /**
    * Per-device opt-out (App Settings → Appearance), cached because the draw path runs
    * on every tab render, scroll and resize. `applyLineageLineSettings()` refreshes it.
@@ -153,7 +153,7 @@ Object.assign(CodemanApp.prototype, {
   },
 
   /**
-   * Colour for one family, from CodemanLineage.COLORS, keyed on the SPAWNING tab.
+   * Colour for one family, from ReverieLineage.COLORS, keyed on the SPAWNING tab.
    *
    * ⚠ Per PARENT, not per child: every line leaving one tab is the same colour, no
    * matter how many workers it spawns, so the strip reads as "these five came from
@@ -172,7 +172,7 @@ Object.assign(CodemanApp.prototype, {
    * --session-blue, so the first spawning tab keeps the skin-aware blue.
    */
   _lineageColorFor(parentId) {
-    const palette = (window.CodemanLineage && window.CodemanLineage.COLORS) || [];
+    const palette = (window.ReverieLineage && window.ReverieLineage.COLORS) || [];
     if (palette.length === 0) return '';
     if (!this._lineageColorByParent) {
       this._lineageColorByParent = new Map();
@@ -208,7 +208,7 @@ Object.assign(CodemanApp.prototype, {
     // rail. The sidebar is a vertical list with its own scroller and no reserved
     // channel; parent/child adjacency reads fine there without lines.
     if (this.isSessionSidebarActive?.()) return;
-    const computeTree = window.CodemanLineage && window.CodemanLineage.computeTree;
+    const computeTree = window.ReverieLineage && window.ReverieLineage.computeTree;
     if (!computeTree) return;
 
     const edges = this._collectLineageEdges();
@@ -291,7 +291,7 @@ Object.assign(CodemanApp.prototype, {
     // Lanes follow STRIP order, so a family keeps its lane when the selection moves;
     // only the DRAW order changes (the emphasized families last, on top). A row gap
     // fits a few lanes, so they cycle: families that share one are told apart by colour.
-    const laneLimit = Math.max(1, (window.CodemanLineage && window.CodemanLineage.MAX_LANES) || 3);
+    const laneLimit = Math.max(1, (window.ReverieLineage && window.ReverieLineage.MAX_LANES) || 3);
     const laneCount = Math.min(laneLimit, resolvedFamilies.length);
     const drawOrder = resolvedFamilies
       .map((resolved, index) => ({

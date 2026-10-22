@@ -58,7 +58,7 @@ import { enabledClis } from './config/cli-registry/registry.js';
  *   your OWN key removes privilege rather than granting it.)
  * - `OMP_AUTH_BROKER_URL`/`OMP_AUTH_BROKER_TOKEN` are where omp resolves
  *   credentials from — the same shape as `DEEPSEEK_BASE_URL` above, reachable
- *   because `OMP_*` is an allowlisted prefix. Unlike DeepSeek, Codeman does not
+ *   because `OMP_*` is an allowlisted prefix. Unlike DeepSeek, Reverie does not
  *   forward any operator-held key into an omp pane today (omp's provider
  *   credentials live in `~/.omp` config files, not env vars), so there is no
  *   known concrete exfiltration path yet — clamped defensively anyway, since a

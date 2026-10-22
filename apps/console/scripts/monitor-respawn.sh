@@ -4,8 +4,8 @@
 
 SESSION_ID="${1:-0000001a-0020-4000-8000-00000000002b}"
 DURATION_HOURS="${2:-12}"
-ISSUES_FILE="/home/arkon/default/codeman/respawn-monitor-issues.md"
-FIXES_FILE="/home/arkon/default/codeman/respawn-monitor-fixes.md"
+ISSUES_FILE="/home/arkon/default/reverie/respawn-monitor-issues.md"
+FIXES_FILE="/home/arkon/default/reverie/respawn-monitor-fixes.md"
 API_URL="https://localhost:3000"
 POLL_INTERVAL=60  # seconds
 
@@ -54,7 +54,7 @@ while [ $(date +%s) -lt $END_TIME ]; do
 
     if [ -z "$RESP" ]; then
         log_issue "ERROR" "API not responding - server may be down"
-        add_fix "API not responding" "Check if codeman-web service is running:\n\`\`\`bash\nsystemctl --user status codeman-web\nsystemctl --user restart codeman-web\n\`\`\`"
+        add_fix "API not responding" "Check if reverie-web service is running:\n\`\`\`bash\nsystemctl --user status reverie-web\nsystemctl --user restart reverie-web\n\`\`\`"
         sleep $POLL_INTERVAL
         continue
     fi

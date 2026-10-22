@@ -23,10 +23,10 @@
 
 /**
  * Max converter processes allowed to run concurrently across the whole process.
- * Override with CODEMAN_MAX_DOCUMENT_CONVERSIONS (clamped to >= 1).
+ * Override with REVERIE_MAX_DOCUMENT_CONVERSIONS (clamped to >= 1).
  */
 const MAX_CONCURRENT_DOCUMENT_CONVERSIONS = (() => {
-  const raw = Number(process.env.CODEMAN_MAX_DOCUMENT_CONVERSIONS);
+  const raw = Number(process.env.REVERIE_MAX_DOCUMENT_CONVERSIONS);
   return Number.isFinite(raw) && raw >= 1 ? Math.floor(raw) : 3;
 })();
 

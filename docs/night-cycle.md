@@ -1,6 +1,6 @@
 # Night cycle: consolidation and dreams on the local GPU
 
-`fleet-cycle` can run **nights only**: no planning and no day work, only each persistent agent's
+`reverie-cycle` can run **nights only**: no planning and no day work, only each persistent agent's
 consolidation (reflection over its episodes), one dream and sleep. Agents go one at a time on the
 local model, and only while the GPU is idle. A host timer runs one `tick` every 5 minutes, and each
 tick starts at most one model phase.
@@ -15,7 +15,7 @@ or a broken store on the coordinator blocks no one else.
 | `night` | `{"start": "HH:MM", "end": "HH:MM"}` in `timezone`, which is then required. It may wrap past midnight: in 23:00-05:00, a 02:00 tick belongs to the previous date's night. A tick outside the window returns before any network, controller lock or memory store access. Constructing the cycle still creates the state dir and its ledger and reads each instance config. |
 | `night_order` | The agent order (default: policy order). It rotates by one each night, so a shared ceiling never starves the same agent. |
 | agent `night_start` | Optional `HH:MM` inside the window. That agent sleeps only once the night reaches it. |
-| agent `live_resource` | The resource a live runtime of this agent uses (for example the local GPU). Its store's `fleet_last_activity` feeds the GPU gate. |
+| agent `live_resource` | The resource a live runtime of this agent uses (for example the local GPU). Its store's `reverie_last_activity` feeds the GPU gate. |
 | `gpu_gate.min_idle_seconds` | Default 1800. Required with a night window on a local model. |
 | `backup_dir`, `backup_keep` | Required with a night window. Keep defaults to 7. |
 | `episode_chars`, `max_batches` | Each episode is clipped to `episode_chars` (default 2000) in reflection prompts. Consolidation runs at most `max_batches` (default 10) batches, each at most half the model's context. |
@@ -36,14 +36,13 @@ nothing. A changed window takes effect from the next night.
 3. **Consolidation:**
    - It runs in batches that fit the model's context. A huge episode is clipped and can never block every batch.
    - Before each later batch, the cycle checks the GPU gate again and the pause files. A stop after the first batch leaves the rest pending for the next night.
-   - Each batch's insights commit together with the reflection cursor (`MemoryStore.atomic()`). That covers the store's own reflection, belief and state writes. It has no savepoints, so a nested block's error must not be caught and ignored, and writes through `Fleet` documents are separate transactions.
-   - An insight that echoes a credential (`cto/secret_scan.py`) is not stored.
+   - Each batch's insights commit together with the reflection cursor (`MemoryStore.atomic()`). That covers the store's own reflection, belief and state writes. It has no savepoints, so a nested block's error must not be caught and ignored, and writes through `Reverie` documents are separate transactions.
+   - An insight that echoes a credential (`python/reverie/secret_scan.py`) is not stored.
 4. **One dream**, only when `REVERIE_DREAMS_PER_SLEEP` is above 0 (the default is 0).
-   Set `REVERIE_DREAMS_PER_SLEEP=1` to enable it, and enable `dreaming` on an expert
-   profile when using an expert. The cycle's agent policy entry can veto dreams with
+   Set `REVERIE_DREAMS_PER_SLEEP=1` to enable it, and enable `dreaming` on the selected agent profile. The cycle's agent policy entry can veto dreams with
    `dreaming: false`; even `dreaming: true` does not override a global zero quota.
    Disabled scheduled dreams record `skipped` with detail `dreams disabled`, without
-   a model call or usage reservation. An explicit owner-requested `cto-chat --dream`
+   a model call or usage reservation. An explicit owner-requested `reverie-chat --dream`
    remains separate and can run once with background dreaming disabled.
    A dream is not stored if it echoes a credential.
 5. **Sleep.**
@@ -58,12 +57,12 @@ nothing. A changed window takes effect from the next night.
 
 The gate only reads `/slots` for a model that is already loaded, so it never makes a router load one. If a check cannot be made, the phase is deferred (it fails closed). The lock probe is a shared, non-blocking `flock` that never creates the file. A missing lock file means no tenant ever used it; any other error defers.
 
-Known residual: during one long agentic turn, `fleet_last_activity` changes only at its start and end, and `/slots` is idle between generations. So after 30 minutes one batch can overlap that turn. The late window makes this unlikely. The host's `gpu-idle-check` adds what only the host can see: GPU utilisation, other GPU processes, and `~/.config/reverie/gpu.hold`.
+Known residual: during one long agentic turn, `reverie_last_activity` changes only at its start and end, and `/slots` is idle between generations. So after 30 minutes one batch can overlap that turn. The late window makes this unlikely. The host's `gpu-idle-check` adds what only the host can see: GPU utilisation, other GPU processes, and `~/.config/reverie/gpu.hold`.
 
 ## Install (host)
 1. Write the policy inside the container's instance data (for example
    `/instances/<instance>/runtime/cycle/cycle-policy.json`) and check it with
-   `fleet-cycle --policy … status`. That first `status` creates the state dir and the ledger.
+   `reverie-cycle --policy … status`. That first `status` creates the state dir and the ledger.
 2. Set up the host files:
    ```
    install -m 0755 scripts/gpu-idle-check ~/.local/libexec/reverie/gpu-idle-check
@@ -78,25 +77,25 @@ Known residual: during one long agentic turn, `fleet_last_activity` changes only
 4. `systemctl --user enable --now reverie-cycle.timer`.
 
 ## Operating
-- **Stop:** `fleet-cycle --policy … pause`. It takes effect at the next phase or batch boundary; `resume` undoes it.
+- **Stop:** `reverie-cycle --policy … pause`. It takes effect at the next phase or batch boundary; `resume` undoes it.
   - `systemctl --user stop` only ends the podman client of a running tick.
   - `disable --now reverie-cycle.timer` prevents new ticks.
 - **Pause one agent:** `touch <its data_dir>/maintenance.hold`.
 - **Mark the GPU as taken** (a demo, training): `touch ~/.config/reverie/gpu.hold` on the host.
-- **Morning check:** `fleet-cycle --policy … status --night` reports the current or last night. It exits 1 if a night phase needs review or has been running for over an hour.
+- **Morning check:** `reverie-cycle --policy … status --night` reports the current or last night. It exits 1 if a night phase needs review or has been running for over an hour.
 - **A failed or interrupted phase** blocks that agent until the next night. After inspecting the
   ledger and the agent's state:
-  `fleet-cycle --policy … clear-phase AGENT PHASE --day NIGHT --reason "…"`. This is logged to
+  `reverie-cycle --policy … clear-phase AGENT PHASE --day NIGHT --reason "…"`. This is logged to
   `<state_dir>/clear-phase.log`, and the next tick reruns that phase.
 
 ## Restoring an agent's store from a night backup
-Run every file step **inside the container as `cto`** (`fleet-container engine exec --user cto reverie-live …`), so the restored files keep the right owner.
+Run every file step **inside the container as `reverie`** (`reverie-container engine exec --user agent reverie-live …`), so the restored files keep the right owner.
 Live writers keep writing while the cycle is paused: the OpenCode plugin's `record` and `activity`,
-and `fleet-memory remember`. Restoring under them can corrupt the store or lose writes. So:
+and `reverie-memory remember`. Restoring under them can corrupt the store or lose writes. So:
 1. Stop the writers:
    - `touch <data_dir>/maintenance.hold`
-   - `fleet-cycle … pause`
-   - stop the agent's live runtime (the host or Codeman closes its session)
+   - `reverie-cycle … pause`
+   - stop the agent's live runtime (the host or Reverie closes its session)
 2. Keep the current store as evidence:
    `cp -p memory.sqlite memory.sqlite-wal memory.sqlite-shm profile.md <somewhere 0700>/` (whichever exist).
 3. Remove `memory.sqlite-wal` and `memory.sqlite-shm`. A stale WAL beside a restored file corrupts it.

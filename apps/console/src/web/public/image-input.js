@@ -11,7 +11,7 @@
  * @dependency panels-ui.js (provides showToast)
  */
 
-Object.assign(CodemanApp.prototype, {
+Object.assign(ReverieApp.prototype, {
 
   initImageInput() {
     // Phone toolbar Attach (index.html): the tap lands on the file INPUT, which

@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { isSupportedAttachmentExtension } from './attachment-registry.js';
 import { stripAnsi } from './utils/index.js';
 
-const MAGIC_LINK_RE = /codeman:\/\/attach\?([^\s<>"']+)/g;
+const MAGIC_LINK_RE = /reverie:\/\/attach\?([^\s<>"']+)/g;
 const CODEX_SAVED_FILE_RE = /\bSaved to:\s*(file:\/\/[^\s<>"']+)/gi;
 
 export interface TerminalAttachmentRequest {

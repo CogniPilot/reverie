@@ -25,7 +25,7 @@ Confirmed present and shaped as assumed: `subagent-watcher.ts` — `watchSubagen
 
 ## 1. The enabling fact: on-disk artifacts
 
-The Workflow tool (what `ultracode` drives) persists each workflow agent as a transcript under the **same `subagents/` directory Codeman already watches**, one level deeper. Empirically verified against a real run (`wf_a8e09f2c-550`); **re-confirm the shape against a fresh run at implementation time** (§8 mandates a live e2e pass anyway):
+The Workflow tool (what `ultracode` drives) persists each workflow agent as a transcript under the **same `subagents/` directory Reverie already watches**, one level deeper. Empirically verified against a real run (`wf_a8e09f2c-550`); **re-confirm the shape against a fresh run at implementation time** (§8 mandates a live e2e pass anyway):
 
 ```
 ~/.claude/projects/<projHash>/<sessionUuid>/
@@ -134,7 +134,7 @@ No `meta.json` read, no run-state lookup, no description override. `agentId`s ar
 
 - **Watch root:** `~/.claude/projects/<projHash>/<sessionUuid>/workflows/wf_*.json` — **two** levels under `projects` (verified: `projects/*/workflows` is empty; must be `projects/*/*/workflows/`). chokidar `depth:3` + a poll fallback, mirroring `team-watcher`'s dual discovery + interval.
 - **mtime-skip:** `runMtimes: Map<absPath, number>` (mirror `team-watcher.configMtimes`).
-- **Parse:** read `wf_<runId>.json`, take the **top-level structured keys** (`runId`, `workflowName`, `summary`, `status`, `phases:[{title,detail}]`, `agentCount`, `defaultModel`, `durationMs`, `totalTokens`, `totalToolCalls`, `workflowProgress[]`). **Do NOT parse the embedded `script` string** — name/phases/summary are already top-level; the script's `export const meta` is redundant and costly. Derive `sessionUuid` from the dir name, `projectHash` from the dir above; expose `getProjectHash(workingDir)` for Codeman-session correlation.
+- **Parse:** read `wf_<runId>.json`, take the **top-level structured keys** (`runId`, `workflowName`, `summary`, `status`, `phases:[{title,detail}]`, `agentCount`, `defaultModel`, `durationMs`, `totalTokens`, `totalToolCalls`, `workflowProgress[]`). **Do NOT parse the embedded `script` string** — name/phases/summary are already top-level; the script's `export const meta` is redundant and costly. Derive `sessionUuid` from the dir name, `projectHash` from the dir above; expose `getProjectHash(workingDir)` for Reverie-session correlation.
 - **`workflowProgress[] → agents[]`:** filter `type === 'workflow_agent'`, map each to a `WorkflowAgentEntry` (§3c) keyed by `agentId`. **This array is the join source the frontend uses** — no backend `getAgentLabel()` API, no TTL cache, no import from `subagent-watcher`.
 - **Emit** `workflow:run_discovered|updated|removed` carrying `WorkflowRunInfo`; removal by set-diff (mirror `team-watcher`).
 - **Lifecycle:** `start()`/`stop()` with `CleanupManager` teardown of chokidar + interval + caches; `LRUMap`-bounded run cache (24h memory rule).
@@ -238,7 +238,7 @@ Sync requirement (CLAUDE.md): each must appear in **both** `sse-events.ts` (§3d
 - **Limits** — `MAX_TRACKED_AGENTS=500` LRU-evicts workflow agents in the same flat map; no auto-open (50-window budget); the 4h `STARTUP_MAX_FILE_AGE_MS` skip means a run completed >4h ago won't reload after restart (acceptable — live monitoring).
 - **Reconnect/replay** — agents via `getRecentSubagents(15)`; headers via `workflowRuns: getRecentRuns(15)` in `getLightState`. `handleInit` clears `this.workflowRuns` alongside the subagent Maps.
 - **Watcher teardown** — every per-run `fs.watch` and the chokidar watcher closes in `stop()` and on `error`; `CleanupManager` for the new watcher (24h runs create many run dirs).
-- **CLAUDE.md discipline** — read-only `~/.claude/...` artifacts; no new `~/.codeman/...` paths, no env-var prefixes touched. Claude-mode-only by nature (external CLIs don't write workflow transcripts).
+- **CLAUDE.md discipline** — read-only `~/.claude/...` artifacts; no new `~/.reverie/...` paths, no env-var prefixes touched. Claude-mode-only by nature (external CLIs don't write workflow transcripts).
 
 ## 8. Testing & verification
 

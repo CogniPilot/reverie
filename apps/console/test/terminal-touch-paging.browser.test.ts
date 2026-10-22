@@ -93,7 +93,7 @@ describe('touch paging of a hollow Codex pane in a real browser', () => {
       return {
         hollow: app._localScrollbackIsHollow(),
         forwards: app._shouldForwardWheelToApp({ shiftKey: false }),
-        modes: (window as any).__codemanTranscriptPageKeys,
+        modes: (window as any).__reverieTranscriptPageKeys,
       };
     });
     expect(pre.modes).toContain('codex');

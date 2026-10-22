@@ -128,7 +128,7 @@ function makeFakeDocument() {
   };
 }
 
-function loadCodemanAppClass(documentMock: ReturnType<typeof makeFakeDocument>) {
+function loadReverieAppClass(documentMock: ReturnType<typeof makeFakeDocument>) {
   const dir = resolve(import.meta.dirname, '../src/web/public');
   const terminalSplitSrc = readFileSync(resolve(dir, 'terminal-split.js'), 'utf8');
   const context = vm.createContext({
@@ -142,7 +142,7 @@ function loadCodemanAppClass(documentMock: ReturnType<typeof makeFakeDocument>) 
     escapeHtml: (s: unknown) => String(s),
   });
   const fakeAppSrc = `
-    class CodemanApp {
+    class ReverieApp {
       constructor() {
         this.sessions = new Map();
         this.sessionOrder = [];
@@ -152,22 +152,22 @@ function loadCodemanAppClass(documentMock: ReturnType<typeof makeFakeDocument>) 
     }
   `;
   vm.runInContext(
-    `${fakeAppSrc}\nwindow.CodemanSplitPane = { buildSplitPickerSessions: () => [] };\n${terminalSplitSrc}\nglobalThis.__CodemanApp = CodemanApp;`,
+    `${fakeAppSrc}\nwindow.ReverieSplitPane = { buildSplitPickerSessions: () => [] };\n${terminalSplitSrc}\nglobalThis.__ReverieApp = ReverieApp;`,
     context
   );
   return (
-    context as { __CodemanApp: new () => { openSplitPicker: (e?: unknown) => void; _dismissSplitPicker: () => void } }
-  ).__CodemanApp;
+    context as { __ReverieApp: new () => { openSplitPicker: (e?: unknown) => void; _dismissSplitPicker: () => void } }
+  ).__ReverieApp;
 }
 
 describe('terminal-split.js split-picker document-listener leak (repeated open/close)', () => {
   let documentMock: ReturnType<typeof makeFakeDocument>;
-  let CodemanApp: ReturnType<typeof loadCodemanAppClass>;
+  let ReverieApp: ReturnType<typeof loadReverieAppClass>;
 
   beforeEach(() => {
     vi.useFakeTimers();
     documentMock = makeFakeDocument();
-    CodemanApp = loadCodemanAppClass(documentMock);
+    ReverieApp = loadReverieAppClass(documentMock);
   });
 
   afterEach(() => {
@@ -175,7 +175,7 @@ describe('terminal-split.js split-picker document-listener leak (repeated open/c
   });
 
   it('does not grow document click/keydown listeners across repeated open cycles with no dismissal', () => {
-    const app = new CodemanApp();
+    const app = new ReverieApp();
 
     // Simulates the real failure sequence: the button's onclick re-fires
     // `openSplitPicker()` on every click (e.g. landing on the button's inner
@@ -191,7 +191,7 @@ describe('terminal-split.js split-picker document-listener leak (repeated open/c
   });
 
   it('drops to zero listeners after the outside-click handler fires', () => {
-    const app = new CodemanApp();
+    const app = new ReverieApp();
     app.openSplitPicker();
     vi.runAllTimers();
     expect(documentMock.__listenerCount('click')).toBe(1);
@@ -203,7 +203,7 @@ describe('terminal-split.js split-picker document-listener leak (repeated open/c
   });
 
   it('never accumulates listeners across many open→dismiss cycles', () => {
-    const app = new CodemanApp();
+    const app = new ReverieApp();
 
     for (let i = 0; i < 20; i++) {
       app.openSplitPicker();
@@ -216,7 +216,7 @@ describe('terminal-split.js split-picker document-listener leak (repeated open/c
   });
 
   it("does not dismiss when the click lands on the split button's own inner icon (closest() match, not exact-node equality)", () => {
-    const app = new CodemanApp();
+    const app = new ReverieApp();
     app.openSplitPicker();
     vi.runAllTimers();
     expect(documentMock.__listenerCount('click')).toBe(1);
@@ -236,7 +236,7 @@ describe('terminal-split.js split-picker document-listener leak (repeated open/c
   });
 
   it('dismisses and removes both listeners by identity when a genuine outside click fires', () => {
-    const app = new CodemanApp();
+    const app = new ReverieApp();
     app.openSplitPicker();
     vi.runAllTimers();
     expect(documentMock.__listenerCount('click')).toBe(1);
@@ -249,7 +249,7 @@ describe('terminal-split.js split-picker document-listener leak (repeated open/c
   });
 
   it('dismisses and removes both listeners by identity when Escape fires', () => {
-    const app = new CodemanApp();
+    const app = new ReverieApp();
     app.openSplitPicker();
     vi.runAllTimers();
     expect(documentMock.__listenerCount('keydown')).toBe(1);

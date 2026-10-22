@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/Ark0N/Codeman/master/docs/images/codeman-title.svg" alt="Codeman" height="56">
+  <img src="https://raw.githubusercontent.com/Ark0N/Codeman/master/docs/images/codeman-title.svg" alt="Reverie" height="56">
 </p>
 
 <h3 align="center">Mission control for AI coding agents</h3>
@@ -11,14 +11,14 @@ working while you are away from the keyboard: it re-prompts idle agents, resumes
 subscription limit resets, runs jobs on a schedule, and shows every background subagent
 live.
 
-This wiki is the manual. The [README](https://github.com/Ark0N/Codeman) is the overview,
+This wiki is the manual. The [README](https://github.com/jgoppert/reverie) is the overview,
 and the deep internals live in
-[`docs/`](https://github.com/Ark0N/Codeman/tree/master/docs).
+[`docs/`](https://github.com/jgoppert/reverie/tree/main/apps/console/docs).
 
 ```bash
-# upstream Codeman installer (historical provenance: installs upstream, not this checkout)
+# upstream Reverie installer (historical provenance: installs upstream, not this checkout)
 # this checkout: npm ci && npm run build && reverie web
-curl -fsSL https://getcodeman.com/install | bash
+curl -fsSL https://github.com/jgoppert/reverie/install | bash
 reverie web    # then open http://localhost:3000
 ```
 
@@ -43,7 +43,7 @@ reverie web    # then open http://localhost:3000
 
 **Driving it from code**
 
-- [Driving Reverie From An Agent](Driving-Codeman-From-An-Agent) - the bundled skill, worker sessions, wait primitives.
+- [Driving Reverie From An Agent](Driving-Reverie-From-An-Agent) - the bundled skill, worker sessions, wait primitives.
 - [HTTP API](HTTP-API) - the envelope, auth, the endpoint map, SSE events.
 - [Hooks And Integrations](Hooks-And-Integrations) - events flowing back into Reverie.
 
@@ -104,7 +104,7 @@ reverie web    # then open http://localhost:3000
 
 | Page                                                              | What it answers                              |
 | ----------------------------------------------------------------- | -------------------------------------------- |
-| [Driving Reverie From An Agent](Driving-Codeman-From-An-Agent)    | How does an agent spawn and drive workers?   |
+| [Driving Reverie From An Agent](Driving-Reverie-From-An-Agent)    | How does an agent spawn and drive workers?   |
 | [HTTP API](HTTP-API)                                              | What can I call, and what comes back?        |
 | [Hooks And Integrations](Hooks-And-Integrations)                  | How do I wire Reverie into something else?   |
 
@@ -135,7 +135,7 @@ machine.
 
 ## Getting help
 
-- **Questions and setup help**: [Discussions](https://github.com/Ark0N/Codeman/discussions), especially [Q&A](https://github.com/Ark0N/Codeman/discussions/categories/q-a).
-- **Bugs**: [Issues](https://github.com/Ark0N/Codeman/issues). Include your OS, install method, browser, and which CLI the session was running.
-- **Ideas and roadmap**: [Ideas](https://github.com/Ark0N/Codeman/discussions/categories/ideas).
-- **Security**: never a public issue. See [SECURITY.md](https://github.com/Ark0N/Codeman/blob/master/.github/SECURITY.md).
+- **Questions and setup help**: [Discussions](https://github.com/jgoppert/reverie/discussions), especially [Q&A](https://github.com/jgoppert/reverie/discussions/categories/q-a).
+- **Bugs**: [Issues](https://github.com/jgoppert/reverie/issues). Include your OS, install method, browser, and which CLI the session was running.
+- **Ideas and roadmap**: [Ideas](https://github.com/jgoppert/reverie/discussions/categories/ideas).
+- **Security**: never a public issue. See [SECURITY.md](https://github.com/jgoppert/reverie/blob/main/apps/console/.github/SECURITY.md).

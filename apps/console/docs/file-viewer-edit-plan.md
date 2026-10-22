@@ -181,7 +181,7 @@ Handler order (each step is a test case):
 10. Build the output buffer: `applyEol(content, eol ?? detected-from-original)`; re-check
     `Buffer.byteLength` against the cap.
 11. Write atomically in the resolved parent directory:
-    `fs.open(<dir>/.<name>.codeman-tmp-<rand>, 'wx', stat.mode & 0o777)`, then `fchmod(stat.mode & 0o777)`
+    `fs.open(<dir>/.<name>.reverie-tmp-<rand>, 'wx', stat.mode & 0o777)`, then `fchmod(stat.mode & 0o777)`
     (open's mode argument is masked by the process umask, so the chmod is what actually preserves an
     unusual mode), write, `fsync`, close, `fs.rename(tmp, resolvedPath)`, unlink the temp on any failure.
 12. Re-stat, return `{ success: true, data: { path, size, mtimeMs, hash, totalLines } }`.

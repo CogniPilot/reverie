@@ -16,10 +16,10 @@ const dom = new JSDOM('<!doctype html><html><head></head><body></body></html>', 
   pretendToBeVisual: true,
 });
 const context = dom.getInternalVMContext();
-vm.runInContext('globalThis.CodemanApp = class {}; globalThis.fetch = () => new Promise(() => {});', context);
+vm.runInContext('globalThis.ReverieApp = class {}; globalThis.fetch = () => new Promise(() => {});', context);
 for (const f of ['chatroom-ui.js', 'voice-chat.js', 'car-mode.js', 'hands-free.js'])
   vm.runInContext(readFileSync(resolve(import.meta.dirname, `../src/web/public/${f}`), 'utf8'), context);
-const Proto = vm.runInContext('CodemanApp.prototype', context);
+const Proto = vm.runInContext('ReverieApp.prototype', context);
 const Detector = vm.runInContext('HandsFreeDetector', context);
 const doc = dom.window.document;
 afterAll(() => dom.window.close());
@@ -324,18 +324,18 @@ describe('hands-free in the chat panel', () => {
     expect(h.ctx.closed).toBe(1);
     expect(h.state()).toBe('off');
     expect(h.btn().getAttribute('aria-pressed')).toBe('false');
-    expect(dom.window.localStorage.getItem('codeman:handsFreeOff')).toBe('1');
+    expect(dom.window.localStorage.getItem('reverie:handsFreeOff')).toBe('1');
     h.run(600, 0.2);
     expect(h.asked()).toBe(1);
     h.btn().click();
     await settle();
-    expect(dom.window.localStorage.getItem('codeman:handsFreeOff')).toBeNull();
+    expect(dom.window.localStorage.getItem('reverie:handsFreeOff')).toBeNull();
     expect(h.asked()).toBe(2);
   });
 
   it('remembered off: a new page does not open the mic', async () => {
     const h = setup();
-    dom.window.localStorage.setItem('codeman:handsFreeOff', '1');
+    dom.window.localStorage.setItem('reverie:handsFreeOff', '1');
     await h.start();
     h.run(600, 0.2);
     expect(h.asked()).toBe(0);
@@ -380,7 +380,7 @@ describe('hands-free in the chat panel', () => {
     h.btn().click();
     await settle();
     expect(h.asked()).toBe(2);
-    expect(dom.window.localStorage.getItem('codeman:handsFreeOff')).toBeNull();
+    expect(dom.window.localStorage.getItem('reverie:handsFreeOff')).toBeNull();
   });
 
   it('before any click the audio is suspended: it says so, and the first click on the page starts it', async () => {

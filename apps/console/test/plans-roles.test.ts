@@ -34,7 +34,7 @@ async function build() {
   } as unknown as PlanService, logins, {
     employees: () => [{ id: 'employee-one', name: 'Employee One', sessionId: COORD, icon: '🧭' }],
     callerSession: (req) => {
-      const h = req.headers['x-codeman-parent-session'];
+      const h = req.headers['x-reverie-parent-session'];
       return [COORD, WORKER, IDLE].includes(h as string) ? (h as string) : undefined;
     },
     canViewAll: (id) => id === COORD,
@@ -43,7 +43,7 @@ async function build() {
   return started;
 }
 const get = (session?: string) =>
-  app.inject({ method: 'GET', url: '/api/plans', headers: session ? { 'x-codeman-parent-session': session } : {} });
+  app.inject({ method: 'GET', url: '/api/plans', headers: session ? { 'x-reverie-parent-session': session } : {} });
 const ids = (r: { json(): { data: { accounts: Array<{ id: string }> } } }) => r.json().data.accounts.map((a) => a.id);
 
 describe('GET /api/plans by role', () => {
@@ -53,7 +53,7 @@ describe('GET /api/plans by role', () => {
     expect(owner.statusCode).toBe(200);
     expect(owner.json().data.employees).toEqual([{ id: 'employee-one', name: 'Employee One', sessionId: COORD, icon: '🧭' }]);
     for (const session of [COORD, WORKER, IDLE, 'not-a-session']) {
-      const denied = await app.inject({ method: 'GET', url: '/api/plans/allocations', headers: { 'x-codeman-parent-session': session } });
+      const denied = await app.inject({ method: 'GET', url: '/api/plans/allocations', headers: { 'x-reverie-parent-session': session } });
       expect(denied.statusCode).toBe(403);
       expect(denied.json().data).toBeUndefined();
     }
@@ -99,7 +99,7 @@ describe('sign-in stays the owner’s', () => {
   it('an agent caller cannot start, read or cancel a sign-in; the owner can reach the route', async () => {
     const started = await build();
     for (const [method, url] of [['POST', '/api/plans/accounts/work/login'], ['POST', '/api/plans/login-all'], ['GET', '/api/plans/logins/x'], ['DELETE', '/api/plans/logins/x']] as const) {
-      const r = await app.inject({ method, url, headers: { 'x-codeman-parent-session': COORD } });
+      const r = await app.inject({ method, url, headers: { 'x-reverie-parent-session': COORD } });
       expect(r.statusCode, `${method} ${url}`).toBe(403);
     }
     expect(started).toEqual([]);

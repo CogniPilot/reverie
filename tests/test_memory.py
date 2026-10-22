@@ -1,10 +1,10 @@
-import tests  # noqa: F401  isolates CODEMAN_*/FLEET_* before cto is imported
+import tests  # noqa: F401  isolates REVERIE_* before reverie is imported
 import tempfile
 import unittest
 from pathlib import Path
 
-from cto.embeddings import HashedEmbedder
-from cto.memory import EPISODE, REFLECTION, MemoryStore, recency_score, score_memory
+from reverie.embeddings import HashedEmbedder
+from reverie.memory import EPISODE, REFLECTION, MemoryStore, recency_score, score_memory
 
 H = 3600.0
 

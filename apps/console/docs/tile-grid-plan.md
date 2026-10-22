@@ -88,7 +88,7 @@ or settled a question the spec left open. The invariants as built are in
   back on the Tiles button, Tab, a click elsewhere and the keyboard leaving it for another
   element close it (the single view a close starts focuses its terminal when its replay
   lands; a menu left open behind that would send its keys there). A pick is remembered per
-  device in `codeman:tile-count` and opens that many tiles (a stored grid re-formed to
+  device in `reverie:tile-count` and opens that many tiles (a stored grid re-formed to
   it, its tiles first in their cells); with the grid open it re-forms it
   (`_reformTileGrid`): the focused tile always stays, the others leave from the end or
   join from the ranking, filling empty cells first,
@@ -180,7 +180,7 @@ or settled a question the spec left open. The invariants as built are in
   packs the tiles in reading order, which differs from plain packing only when a 2x2 grows
   to a 3x2 (the four tiles stay put). Focus never lands on an empty cell: Alt+Shift+Arrows
   go along the row past one, or to the nearest row with a tile (the same column, else the
-  nearest), and Ctrl+Tab and Alt+[ / ] cycle the tiles only. `codeman:tile-grid` stays ids
+  nearest), and Ctrl+Tab and Alt+[ / ] cycle the tiles only. `reverie:tile-grid` stays ids
   only: its `ids` are the cells, `null` for an empty one (a build before cells drops the
   nulls and reads them packed); a reload brings the holes back when the shape is the same, a
   session gone by then leaves its cell empty, another shape packs, and the old packed format
@@ -202,11 +202,11 @@ or settled a question the spec left open. The invariants as built are in
 
 ## Problem
 
-Codeman's terminal area shows exactly one session at a time. The split pane
+Reverie's terminal area shows exactly one session at a time. The split pane
 (`showSplitButton`, `src/web/public/terminal-split.js`) added a second live
 session beside the active one, but stops at two, gives the second pane
 ("Pane B") a deliberately reduced feature set, and has no reconnect: every
-Codeman restart (every release deploy) leaves Pane B dead until the split is
+Reverie restart (every release deploy) leaves Pane B dead until the split is
 closed and reopened.
 
 The goal is a dashboard of agents: four, six or nine live Claude sessions on
@@ -217,13 +217,13 @@ no `+`, owner decision 9).
 
 ## Goal (v1)
 
-- A **tile grid** of 1 to 9 live sessions in one Codeman window, laid out
+- A **tile grid** of 1 to 9 live sessions in one Reverie window, laid out
   automatically by count, with draggable column and row dividers.
 - Every tile is equal: same terminal class, same features, same header. One
   tile is **focused** and receives the keyboard.
 - The rest of the app follows the focused tile: files panel, git status,
   respawn and Ralph panels, subagent windows, voice, image paste.
-- Tiles survive a Codeman restart (reconnect) and a page reload (per-device
+- Tiles survive a Reverie restart (reconnect) and a page reload (per-device
   persistence).
 - The split pane stays as it is for now (decided). The grid is a separate
   mode that shares the same tile class with it; the two are never open at the
@@ -241,7 +241,7 @@ no `+`, owner decision 9).
   overlay, the CJK input textarea, the keyboard accessory bar, touch gestures,
   mouse-wheel forwarding to Claude's fullscreen renderer, the "Load full
   history" banner. These exist for touch devices or rare cases; a desktop
-  keyboard user types straight into xterm, which is how Codeman behaved before
+  keyboard user types straight into xterm, which is how Reverie behaved before
   those features existed. (One exception, since the 1180 px gate is width
   only and a wide Android tablet clears it: every tile wires the main
   terminal's keyCode-229 soft-keyboard controller, terminal-keycode229-recovery.js,
@@ -282,7 +282,7 @@ Three ways to put N sessions on screen were evaluated:
 |---|---|---|
 | A. Anchor plus light tiles | The main terminal stays as tile 1; other tiles are Pane-B style | Rejected. Tile 1 is privileged. The panels follow tile 1, not the tile you are typing in. Making another tile the "main" one costs two buffer reloads per click. |
 | B. Equal tiles, main parked | Every tile is a `TerminalTile`. The main terminal is hidden and disconnected while the grid is open. `activeSessionId` always equals the focused tile's session. | **Chosen** |
-| C. iframes of solo windows | Each tile is `/session/:id` in an iframe | Rejected. All frames share `codeman:clientId` (localStorage), and `SseStreamManager.addClient` evicts the previous stream with the same clientId, so frames knock each other's SSE offline about every 45 s (the staleness watchdog reconnects, evicting the next one). They also share `codeman:pendingInput`, load N full copies of the app, and play N notification sounds. |
+| C. iframes of solo windows | Each tile is `/session/:id` in an iframe | Rejected. All frames share `reverie:clientId` (localStorage), and `SseStreamManager.addClient` evicts the previous stream with the same clientId, so frames knock each other's SSE offline about every 45 s (the staleness watchdog reconnects, evicting the next one). They also share `reverie:pendingInput`, load N full copies of the app, and play N notification sounds. |
 
 Why B:
 
@@ -402,7 +402,7 @@ the harness/model request; see "As built")
 ### Persistence
 
 Decided: per device (per browser), restored on reload when it was open, and by
-the Tiles toggle however it was closed (decision 11). Stored in localStorage key `codeman:tile-grid`, never on the
+the Tiles toggle however it was closed (decision 11). Stored in localStorage key `reverie:tile-grid`, never on the
 server:
 
 ```json
@@ -476,7 +476,7 @@ behavior listed under "Current architecture". The split orchestration stays in
 `terminal-split.js` and constructs a `TerminalTile` for Pane B; the grid (PR 2)
 constructs one per tile. New in the class:
 
-**Reconnect.** The primary pane's backoff ladder (`CodemanWsReconnect`,
+**Reconnect.** The primary pane's backoff ladder (`ReverieWsReconnect`,
 constants.js: 0, 250 ms, 500 ms, ... capped at 10 s) plus up to 250 ms of
 jitter, the attempt count reset only by a successful open. A reconnect is also kicked when SSE `handleInit` reports the
 server is back. After every reopen the tile runs a bounded refresh (the same
@@ -490,7 +490,7 @@ prevent. Close codes that must NOT reconnect:
 | Code | Meaning | Tile does | Owner decides (via `onExit`) |
 |---|---|---|---|
 | 4009 | Session exited | Stops reconnecting, reports the code | PR 1 split: an "exited" marker in Pane B (the split's existing delete path collapses it if the session is removed). PR 2 grid: the Attach overlay |
-| 4003 / 4004 | Forbidden / session gone | Stops reconnecting, reports the code (4003 is stopped by the tile itself: `CodemanWsReconnect` classes it as transient) | PR 1 split: a marker saying why. PR 2 grid: removes the tile |
+| 4003 / 4004 | Forbidden / session gone | Stops reconnecting, reports the code (4003 is stopped by the tile itself: `ReverieWsReconnect` classes it as transient) | PR 1 split: a marker saying why. PR 2 grid: removes the tile |
 | 4010 | Superseded by a socket with the same cid | Stops, but only for the CURRENT socket (see below) | Same marker as 4003 |
 
 The class never decides what happens to its container; it reports the close
@@ -578,10 +578,10 @@ xterm. Nothing may outlive a removed tile (24-hour sessions rule).
 - `computeTileLayout({ count, width, height })` and
   `tileGridCapacity({ width, height })` (against the minimum tile size,
   `TILE_MIN_W` x `TILE_MIN_H`): pure, in `constants.js`, exported on
-  `window.CodemanTileGrid` beside the existing helper namespaces.
+  `window.ReverieTileGrid` beside the existing helper namespaces.
   `sanitizeTileGridState(raw, liveSessions, detachedIds)`: pure, same place.
 - The controller (in a new `src/web/public/tile-grid.js`, load order 7.6, as
-  `CodemanApp.prototype` methods like the split code) owns: the ordered tile list, `focusedId`,
+  `ReverieApp.prototype` methods like the split code) owns: the ordered tile list, `focusedId`,
   `zoomedId`, track fractions, the `<section class="tile-grid">` element, one
   `ResizeObserver` on that section (the main terminal's observer watches a
   hidden node and stops firing), the divider drags and the load queue.
@@ -616,7 +616,7 @@ hidden xterm (every handler keys on `activeSessionId`). One predicate,
 - the WebGL long-task guard (`_installWebGLLongTaskGuard`). Its
   `PerformanceObserver` watches the WHOLE page and counts every long task while
   the main terminal's WebGL addon exists, so long tasks caused by tile rendering
-  or tile replays would trip it and write the sticky `codeman-webgl-disabled`
+  or tile replays would trip it and write the sticky `reverie-webgl-disabled`
   marker (7 days), silently moving the main terminal to the DOM renderer for
   reasons that have nothing to do with WebGL. While tiles own the terminal the
   observer callback must not count entries.
@@ -637,7 +637,7 @@ are dropped by the guards. (An empty list means "all sessions", so there is no
 1. Destroy every tile, remove `.main.tiles-active`.
 2. `this._lastResizeDims = null` (as `_redock` does).
 3. Invalidate the main terminal's cached content for EVERY tiled id, not just
-   the focused one: the `_xtermSnapshots` entry, the `codeman-xs-<id>`
+   the focused one: the `_xtermSnapshots` entry, the `reverie-xs-<id>`
    localStorage key and the buffer-cache entry. Those were written before the
    grid opened, possibly hours earlier, and `selectSession` paints a snapshot as
    a first frame before its fetch replaces it, so the next switch to a formerly
@@ -668,7 +668,7 @@ if (this._tileGrid?.open) {
 - `++this._selectGeneration` (aborts any in-flight normal select at its next
   `_isStaleSelect` check);
 - `_hideWebviewLayer()`; `activeSessionId = id`; `_activateFileBrowserSession`;
-  the `codeman-active-session` key; `hideWelcome()`;
+  the `reverie-active-session` key; `hideWelcome()`;
 - `markIdleAlertSeen(id)` only when user-initiated (`options.auto !== true`);
 - `_updateActiveTabImmediate`, tab glow, `renderSessionTabs`,
   `closeSessionSidebarOnHandheld`;
@@ -736,7 +736,7 @@ sound/title/desktop notification, so nothing is silently swallowed.
 
 ### 7. Fonts
 
-Tiles get their own per-device font size, `codeman-tile-font-size` (default
+Tiles get their own per-device font size, `reverie-tile-font-size` (default
 13), because a tile is a fraction of the screen. While the grid is open,
 Ctrl +/- changes the tile font for all tiles. A font change is a geometry
 change (#464): every tile re-runs `syncGeometry()` afterwards.
@@ -795,7 +795,7 @@ and share one tile class:
 | A web tab is opened | Grid hidden by CSS; sockets stay up; hidden tiles send no resizes. Selecting a tiled session's tab brings the grid back |
 | Window narrower than 1180 px | Back to single view of the focused session; stored grid kept |
 | Window shrinks below the tiles' minimum size | The focused tile zooms with a short hint; widening restores the grid |
-| Codeman restarts (deploy) | Tiles reconnect; their refreshes drain through the load queue one at a time; `handleInit` reconciles ids without rebuilding live tiles |
+| Reverie restarts (deploy) | Tiles reconnect; their refreshes drain through the load queue one at a time; `handleInit` reconciles ids without rebuilding live tiles |
 | A half-open tile socket when a reconnect is kicked | The old socket's handlers are detached before the replacement opens, so its late 4010 close is ignored |
 | A phone opens a tiled session | Its resize is declined while the desktop holds a sizing claim and was active in the last 90 s (existing `Session.resize` arbitration) |
 | A second desktop browser shows a tiled session full-size | Last resize wins and only the resizing socket hears `zc` (existing behavior, see follow-up 2) |
@@ -848,7 +848,7 @@ Separate follow-up PRs worth doing (see "Follow-ups").
 - **Replay clears are in-stream** (`\x1bc` queued in the write stream), never
   `reset()`.
 - **Capture fetches carry deadlines that cover the body** (reuse
-  `CodemanFetchDeadline`, as `_pullHistory` does).
+  `ReverieFetchDeadline`, as `_pullHistory` does).
 - **Per-device setting**: in `displayKeys`, stripped from the PUT, not in the
   `.strict()` schema; the `--hidden` marker class has a `display: none` rule.
 - **Palette chords** are swallowed in every xterm key handler.
@@ -957,7 +957,7 @@ Commits:
 2. **Tile chrome and entry points.** Header (dot, name, menu, zoom, add,
    remove), the Attach overlay, picker, dividers, drag-a-tab, Ctrl/Cmd+click,
    "Open group as tiles".
-3. **Persistence.** `codeman:tile-grid` restore inside `handleInit` (in place
+3. **Persistence.** `reverie:tile-grid` restore inside `handleInit` (in place
    of the initial select), snapshot invalidation on exit, auto-join of new
    sessions from this tab, the `showTileGridButton` setting.
 4. **Docs.** A tile-grid paragraph in CLAUDE.md beside the split-pane one,
@@ -1018,7 +1018,7 @@ exits green. Use the browser runner for those files and read the file count.
 ## Verification before merging PR 2
 
 - Build in the worktree and run an isolated beta instance (its own
-  `CODEMAN_INSTANCE`, so its own data dir and tmux socket), reached through
+  `REVERIE_INSTANCE`, so its own data dir and tmux socket), reached through
   `tailscale serve` on a never-used port.
 - Six throwaway Claude sessions, as in the target picture; Playwright captures
   at `deviceScaleFactor: 1`, unique filenames.
@@ -1056,7 +1056,7 @@ exits green. Use the browser runner for those files and read the file count.
    has `cliMouseTracking` on, and forwards the wheel to Claude's fullscreen
    renderer as SGR wheel reports from its own cells
    (`TerminalTile._maybeForwardWheelToCli`, encoding shared with the primary
-   pane via `CodemanTerminalInput.sgrWheelReports`), all through the primary
+   pane via `ReverieTerminalInput.sgrWheelReports`), all through the primary
    pane's gates aimed at the tile. Before that, a fullscreen Claude tile left
    the wheel to xterm, which scrolled only stale replayed frames. Shift+wheel
    scrolls the tile's local scrollback itself (`_maybeScrollLocalOnShift`),
@@ -1147,7 +1147,7 @@ Line numbers are approximate (as of 1.35.0) and drift; the names are stable.
 | Area | Where |
 |---|---|
 | Split pane class and orchestration | `src/web/public/terminal-split.js` (`SplitTerminalPane`, `openSplitPane`, `closeSplitPane`, `_installSplitDividerDrag`, the `selectSession` and `_onSessionDeleted` wrappers) |
-| Split helpers | `src/web/public/constants.js` ~1592-1634 (`SPLIT_PANE_MIN_WIDTH`, `clampDividerPercent`, `buildSplitPickerSessions`), exported as `window.CodemanSplitPane` |
+| Split helpers | `src/web/public/constants.js` ~1592-1634 (`SPLIT_PANE_MIN_WIDTH`, `clampDividerPercent`, `buildSplitPickerSessions`), exported as `window.ReverieSplitPane` |
 | `selectSession` | `src/web/public/app.js` ~7844-8644; early return ~7868-7876; deferred panels ~8452-8523 |
 | `_cleanupPreviousSession` | `app.js` ~7377 |
 | Reliable input | `app.js` ~3558-3920 (`_sendInputAsync`, `_reliableSend`, `_nextSeq`, `_drainSession`, `_ackDelivery`, `_onWsInputAck`, `_redeliverSweep`); main socket URL ~3341 |

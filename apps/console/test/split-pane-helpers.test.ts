@@ -7,10 +7,10 @@ function loadSplitPaneHelper() {
   const context = vm.createContext({ window: {}, globalThis: {} });
   const source = readFileSync(resolve(import.meta.dirname, '../src/web/public/constants.js'), 'utf8');
   vm.runInContext(source, context, { filename: 'constants.js' });
-  return (context.window as { CodemanSplitPane: any }).CodemanSplitPane;
+  return (context.window as { ReverieSplitPane: any }).ReverieSplitPane;
 }
 
-describe('CodemanSplitPane.clampDividerPercent', () => {
+describe('ReverieSplitPane.clampDividerPercent', () => {
   it('passes through a value inside the clamp range', () => {
     const { clampDividerPercent } = loadSplitPaneHelper();
     expect(clampDividerPercent(50)).toBe(50);
@@ -34,11 +34,11 @@ describe('CodemanSplitPane.clampDividerPercent', () => {
   });
 });
 
-describe('CodemanSplitPane.buildSplitPickerSessions', () => {
+describe('ReverieSplitPane.buildSplitPickerSessions', () => {
   it('excludes the active session and preserves tab order', () => {
     const { buildSplitPickerSessions } = loadSplitPaneHelper();
     const sessions = new Map([
-      ['a', { name: 'w1-codeman' }],
+      ['a', { name: 'w1-reverie' }],
       ['b', { name: 'w1-mcp-memory' }],
       ['c', { name: null }],
     ]);
@@ -52,15 +52,15 @@ describe('CodemanSplitPane.buildSplitPickerSessions', () => {
 
   it('drops order entries with no matching session (stale ids)', () => {
     const { buildSplitPickerSessions } = loadSplitPaneHelper();
-    const sessions = new Map([['a', { name: 'w1-codeman' }]]);
+    const sessions = new Map([['a', { name: 'w1-reverie' }]]);
     const sessionOrder = ['a', 'ghost'];
     const result = buildSplitPickerSessions(sessions, sessionOrder, null);
-    expect(result).toEqual([{ id: 'a', label: 'w1-codeman' }]);
+    expect(result).toEqual([{ id: 'a', label: 'w1-reverie' }]);
   });
 
   it('returns an empty list when only the excluded session exists', () => {
     const { buildSplitPickerSessions } = loadSplitPaneHelper();
-    const sessions = new Map([['a', { name: 'w1-codeman' }]]);
+    const sessions = new Map([['a', { name: 'w1-reverie' }]]);
     const result = buildSplitPickerSessions(sessions, ['a'], 'a');
     expect(result).toEqual([]);
   });
@@ -68,7 +68,7 @@ describe('CodemanSplitPane.buildSplitPickerSessions', () => {
   it('excludes a session with no PTY attached (pid === null)', () => {
     const { buildSplitPickerSessions } = loadSplitPaneHelper();
     const sessions = new Map([
-      ['a', { name: 'w1-codeman' }],
+      ['a', { name: 'w1-reverie' }],
       ['b', { name: 'w2-exited', pid: null }],
       ['c', { name: 'w3-alive', pid: 12345 }],
     ]);
@@ -79,7 +79,7 @@ describe('CodemanSplitPane.buildSplitPickerSessions', () => {
   it('excludes a detached session even when it also has no PTY', () => {
     const { buildSplitPickerSessions } = loadSplitPaneHelper();
     const sessions = new Map([
-      ['a', { name: 'w1-codeman' }],
+      ['a', { name: 'w1-reverie' }],
       ['b', { name: 'w2-detached', pid: null }],
     ]);
     const result = buildSplitPickerSessions(sessions, ['a', 'b'], 'a', new Set(['b']));

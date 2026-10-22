@@ -406,7 +406,7 @@ export class SubagentWatcher extends EventEmitter {
   /**
    * Run pgrep once and read /proc info for all Claude PIDs in parallel.
    * Returns a Map of pid -> { environ, cmdline } for subagent processes only.
-   * Excludes main Codeman-managed Claude processes (CODEMAN_MUX=1).
+   * Excludes main Reverie-managed Claude processes (REVERIE_MUX=1).
    * Also updates cached PIDs on tracked agents when a match is found.
    */
   private async getClaudePids(): Promise<Map<number, { environ: string; cmdline: string }>> {
@@ -440,8 +440,8 @@ export class SubagentWatcher extends EventEmitter {
           } catch {
             /* skip */
           }
-          // Skip main Codeman-managed Claude processes — only track subagents
-          if (environ.includes('CODEMAN_MUX=1')) return;
+          // Skip main Reverie-managed Claude processes — only track subagents
+          if (environ.includes('REVERIE_MUX=1')) return;
           if (environ || cmdline) {
             result.set(pid, { environ, cmdline });
           }
@@ -648,8 +648,8 @@ export class SubagentWatcher extends EventEmitter {
   }
 
   /**
-   * Get subagents for a specific Codeman session
-   * Maps Codeman working directory to Claude's project hash
+   * Get subagents for a specific Reverie session
+   * Maps Reverie working directory to Claude's project hash
    */
   getSubagentsForSession(workingDir: string): SubagentInfo[] {
     const projectHash = this.getProjectHash(workingDir);
@@ -755,7 +755,7 @@ export class SubagentWatcher extends EventEmitter {
   }
 
   /**
-   * Kill all subagents for a specific Codeman session.
+   * Kill all subagents for a specific Reverie session.
    * IMPORTANT: Must scope to sessionId to avoid cross-session kills.
    * All sessions in the same workingDir share a projectHash, so filtering
    * by workingDir alone would kill subagents belonging to OTHER sessions.
@@ -771,7 +771,7 @@ export class SubagentWatcher extends EventEmitter {
     // each call ran its own `pgrep -f claude` plus a /proc read per match (~85ms on a
     // box with ~100 matching processes), so closing a session right after a workflow
     // paid that once per recently active subagent. The match rules are
-    // findSubagentProcess()'s: getClaudePids() skips CODEMAN_MUX=1 processes too.
+    // findSubagentProcess()'s: getClaudePids() skips REVERIE_MUX=1 processes too.
     const pidMap = await this.getClaudePids();
     const signalled = new Set<number>();
     for (const agent of targets) {
@@ -796,7 +796,7 @@ export class SubagentWatcher extends EventEmitter {
   /**
    * Find the process ID of a Claude subagent by its session ID.
    * Searches /proc for claude processes with matching session ID in environment.
-   * Skips main Codeman-managed Claude processes (identified by CODEMAN_MUX=1).
+   * Skips main Reverie-managed Claude processes (identified by REVERIE_MUX=1).
    * Caches the discovered PID on the matching agent info for future fast checks.
    */
   private async findSubagentProcess(sessionId: string): Promise<number | null> {
@@ -821,9 +821,9 @@ export class SubagentWatcher extends EventEmitter {
           // Can't read this process's environ - skip
         }
 
-        // Defense-in-depth: never kill a main Codeman-managed Claude process.
-        // Main processes have CODEMAN_MUX=1 in their environment; subagents don't.
-        if (environ.includes('CODEMAN_MUX=1')) continue;
+        // Defense-in-depth: never kill a main Reverie-managed Claude process.
+        // Main processes have REVERIE_MUX=1 in their environment; subagents don't.
+        if (environ.includes('REVERIE_MUX=1')) continue;
 
         if (environ.includes(sessionId)) {
           // Cache PID on the matching agent

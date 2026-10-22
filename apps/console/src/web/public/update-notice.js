@@ -7,12 +7,12 @@
  * means the page is stale, so a small notice offers a reload. Never reloads by
  * itself: the user may be mid-prompt.
  *
- * @mixin Extends CodemanApp.prototype via Object.assign
+ * @mixin Extends ReverieApp.prototype via Object.assign
  * @dependency app.js (handleInit calls noteServerBuild)
  * @loadorder 12.15 (after chatroom-ui.js)
  */
 
-Object.assign(CodemanApp.prototype, {
+Object.assign(ReverieApp.prototype, {
   /** Record or compare the server's build id; returns true only when this call put the notice up. */
   noteServerBuild(buildId) {
     if (!buildId || buildId === 'unknown') return false;

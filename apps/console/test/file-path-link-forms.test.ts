@@ -211,7 +211,7 @@ type Link = {
 type Provider = { provideLinks: (line: number, cb: (links: Link[] | undefined) => void) => void };
 
 function loadApp() {
-  const CodemanApp = function CodemanApp(this: unknown) {};
+  const ReverieApp = function ReverieApp(this: unknown) {};
   const context = vm.createContext({
     window: {},
     document: {
@@ -220,7 +220,7 @@ function loadApp() {
       addEventListener: vi.fn(),
       getElementById: () => null,
     },
-    CodemanApp,
+    ReverieApp,
     console: { warn: vi.fn(), log: vi.fn(), debug: vi.fn() },
     _crashDiag: { log: vi.fn() },
     performance: { now: () => 0 },
@@ -232,7 +232,7 @@ function loadApp() {
   });
   vm.runInContext(read('constants.js'), context, { filename: 'constants.js' });
   vm.runInContext(read('terminal-ui.js'), context, { filename: 'terminal-ui.js' });
-  const app = new (CodemanApp as unknown as new () => Record<string, any>)();
+  const app = new (ReverieApp as unknown as new () => Record<string, any>)();
   app.activeSessionId = 's1';
   app.sessions = new Map([['s1', { workingDir: '/mnt/build/neon_getaway-mgr-hebel' }]]);
   app.openFilePreview = vi.fn();
@@ -329,7 +329,7 @@ describe('terminal link provider', () => {
 });
 
 describe('server: ~/ expands on the session host', () => {
-  const root = mkdtempSync(join(tmpdir(), 'codeman-tilde-'));
+  const root = mkdtempSync(join(tmpdir(), 'reverie-tilde-'));
   afterAll(() => rmSync(root, { recursive: true, force: true }));
 
   it('a local session registers ~/… against this host home', async () => {

@@ -8,7 +8,6 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
-  agentImageBuildArgs,
   buildDockerBaseArgs,
   buildDockerCreateArgs,
   buildSeamlessClaudeConfig,
@@ -51,7 +50,7 @@ const CASE: DockerCase = {
 describe('docker-hosts storage', () => {
   let dir: string;
   beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), 'codeman-docker-'));
+    dir = mkdtempSync(join(tmpdir(), 'reverie-docker-'));
   });
   afterEach(() => {
     rmSync(dir, { recursive: true, force: true });
@@ -84,7 +83,7 @@ describe('docker-hosts storage', () => {
 
 describe('naming / display / defaults', () => {
   it('derives a valid per-case container name', () => {
-    expect(dockerContainerName('myproj')).toBe('codeman-case-myproj');
+    expect(dockerContainerName('myproj')).toBe('reverie-case-myproj');
     // valid docker name charset: starts alnum, then [a-zA-Z0-9_.-]
     expect(dockerContainerName('my_proj-2')).toMatch(/^[a-zA-Z0-9][a-zA-Z0-9_.-]+$/);
   });
@@ -97,9 +96,9 @@ describe('naming / display / defaults', () => {
   });
 
   it('formats a container:workdir display path from both shapes', () => {
-    expect(dockerDisplayPath({ container: 'codeman-case-x', path: '/w' })).toBe('codeman-case-x:/w');
+    expect(dockerDisplayPath({ container: 'reverie-case-x', path: '/w' })).toBe('reverie-case-x:/w');
     const sd = toSessionDocker(HOST, CASE);
-    expect(dockerDisplayPath(sd)).toBe('codeman-case-myproj:/home/arkon/cases/myproj');
+    expect(dockerDisplayPath(sd)).toBe('reverie-case-myproj:/home/arkon/cases/myproj');
   });
 });
 
@@ -127,7 +126,7 @@ describe('toSessionDocker / dockerConfigHash', () => {
     const sd = toSessionDocker(HOST, CASE);
     expect(sd.engine).toBe('docker');
     expect(sd.image).toBe(DEFAULT_AGENT_IMAGE);
-    expect(sd.containerName).toBe('codeman-case-myproj');
+    expect(sd.containerName).toBe('reverie-case-myproj');
     expect(sd.hostWorkspacePath).toBe('/home/arkon/cases/myproj');
     expect(sd.containerWorkdir).toBe('/home/arkon/cases/myproj'); // mirror
     expect(sd.network).toBe('bridge');
@@ -159,7 +158,7 @@ describe('toSessionDocker / dockerConfigHash', () => {
     const a = toSessionDocker(HOST, CASE);
     const b = toSessionDocker(HOST, CASE);
     expect(a.configHash).toBe(b.configHash);
-    const c = toSessionDocker({ ...HOST, image: 'codeman/agent:other' }, CASE);
+    const c = toSessionDocker({ ...HOST, image: 'reverie/agent:other' }, CASE);
     expect(c.configHash).not.toBe(a.configHash);
     // lastClaudeSessionId is NOT a drift field
     expect(dockerConfigHash(a)).toBe(dockerConfigHash({ ...a }));
@@ -187,9 +186,9 @@ describe('buildDockerCreateArgs', () => {
       userArgs: ['--user', '1000:0'],
       credentialMounts: [{ src: '/home/arkon/.claude', dst: '/home/agent/.claude' }],
       extraMounts: [
-        { src: '/home/arkon/.codeman/hook-secret', dst: '/home/agent/.codeman/hook-secret', readonly: true },
+        { src: '/home/arkon/.reverie/hook-secret', dst: '/home/agent/.reverie/hook-secret', readonly: true },
       ],
-      envCreate: { HOME: '/home/agent', CODEMAN_API_URL: 'https://host.docker.internal:3000' },
+      envCreate: { HOME: '/home/agent', REVERIE_API_URL: 'https://host.docker.internal:3000' },
       addHostGateway: true,
       gatewayAlias: 'host.docker.internal',
       ...overrides,
@@ -206,8 +205,8 @@ describe('buildDockerCreateArgs', () => {
     expect(s).toContain('--memory 4g --memory-swap 4g');
     expect(s).toContain('--pids-limit 512');
     expect(s).toContain('--ulimit nofile=4096:8192');
-    expect(s).toContain('codeman.managed=1');
-    expect(s).toContain("'codeman.session=1a2b3c4d'"); // first 8 chars only
+    expect(s).toContain('reverie.managed=1');
+    expect(s).toContain("'reverie.session=1a2b3c4d'"); // first 8 chars only
     expect(s).toContain('--network bridge');
   });
 
@@ -217,9 +216,9 @@ describe('buildDockerCreateArgs', () => {
     expect(s).not.toContain('docker.sock');
   });
 
-  it('ends with the image then the sleep-infinity CMD', () => {
+  it('bypasses server initialization before the sleep-infinity CMD', () => {
     const args = buildDockerCreateArgs(ctx());
-    expect(args.slice(-3)).toEqual([`'${DEFAULT_AGENT_IMAGE}'`, 'sleep', 'infinity']);
+    expect(args.slice(-5)).toEqual(['--entrypoint', '/usr/bin/env', `'${DEFAULT_AGENT_IMAGE}'`, 'sleep', 'infinity']);
   });
 
   it('includes the resolved user args and the workspace bind', () => {
@@ -252,12 +251,12 @@ describe('buildDockerCreateArgs', () => {
   it('emits create-time env flags', () => {
     const s = buildDockerCreateArgs(ctx()).join(' ');
     expect(s).toContain("--env 'HOME=/home/agent'");
-    expect(s).toContain("--env 'CODEMAN_API_URL=https://host.docker.internal:3000'");
+    expect(s).toContain("--env 'REVERIE_API_URL=https://host.docker.internal:3000'");
   });
 
   it('uses the custom network name for custom mode', () => {
-    const docker: SessionDocker = { ...toSessionDocker(HOST, CASE), network: 'custom', networkName: 'codeman-net-x' };
-    expect(buildDockerCreateArgs(ctx({ docker })).join(' ')).toContain('--network codeman-net-x');
+    const docker: SessionDocker = { ...toSessionDocker(HOST, CASE), network: 'custom', networkName: 'reverie-net-x' };
+    expect(buildDockerCreateArgs(ctx({ docker })).join(' ')).toContain('--network reverie-net-x');
   });
 
   it('emits --gpus only when GPUs are requested (and never a storage cap)', () => {
@@ -277,13 +276,13 @@ describe('buildDockerCreateArgs', () => {
 });
 
 describe('resolveDockerDaemonMountSource', () => {
-  const runtimeHome = join(tmpdir(), 'codeman-runtime-home');
-  const daemonHome = join(tmpdir(), 'codeman-daemon-home');
+  const runtimeHome = join(tmpdir(), 'reverie-runtime-home');
+  const daemonHome = join(tmpdir(), 'reverie-daemon-home');
 
   it('maps paths beneath the runtime HOME into the daemon-visible HOME', () => {
-    const source = join(runtimeHome, '.codeman', 'docker-seeds', 'codeman-case-test1.json');
+    const source = join(runtimeHome, '.reverie', 'docker-seeds', 'reverie-case-test1.json');
     expect(resolveDockerDaemonMountSource(source, runtimeHome, daemonHome)).toBe(
-      join(daemonHome, '.codeman', 'docker-seeds', 'codeman-case-test1.json')
+      join(daemonHome, '.reverie', 'docker-seeds', 'reverie-case-test1.json')
     );
   });
 
@@ -291,7 +290,7 @@ describe('resolveDockerDaemonMountSource', () => {
     const source = join(runtimeHome, '.claude', 'settings.json');
     expect(resolveDockerDaemonMountSource(source, runtimeHome)).toBe(source);
 
-    const outsideHome = join(tmpdir(), 'codeman-cases', 'test1');
+    const outsideHome = join(tmpdir(), 'reverie-cases', 'test1');
     expect(resolveDockerDaemonMountSource(outsideHome, runtimeHome, daemonHome)).toBe(outsideHome);
   });
 });
@@ -299,7 +298,7 @@ describe('resolveDockerDaemonMountSource', () => {
 describe('resolveDockerCredentialArtifacts (isolated codex/gemini/gcloud/opencode)', () => {
   let home: string;
   beforeEach(() => {
-    home = mkdtempSync(join(tmpdir(), 'codeman-home-'));
+    home = mkdtempSync(join(tmpdir(), 'reverie-home-'));
   });
   afterEach(() => {
     rmSync(home, { recursive: true, force: true });
@@ -339,12 +338,12 @@ describe('resolveDockerCredentialArtifacts (isolated codex/gemini/gcloud/opencod
     const { mounts, seedCopies } = resolveDockerCredentialArtifacts(home);
     // each is mounted read-only at a seed staging path and cp -a'd into the container HOME
     expect(seedCopies).toContainEqual({
-      from: '/home/agent/.codeman/cred-seeds/.gemini',
+      from: '/home/agent/.reverie/cred-seeds/.gemini',
       to: '/home/agent/.gemini',
       recursive: true,
     });
     expect(seedCopies).toContainEqual({
-      from: '/home/agent/.codeman/cred-seeds/.config-gcloud',
+      from: '/home/agent/.reverie/cred-seeds/.config-gcloud',
       to: '/home/agent/.config/gcloud',
       recursive: true,
     });
@@ -364,7 +363,7 @@ describe('resolveDockerCredentialArtifacts (isolated codex/gemini/gcloud/opencod
 
   it('gh + az: the DEFAULT environment seeds neither, even when the host files exist', () => {
     writeGhAzHostFiles();
-    for (const env of [{}, { CODEMAN_AGENT_IMAGE_INSTALL_GH: '0', CODEMAN_AGENT_IMAGE_INSTALL_AZ: '' }]) {
+    for (const env of [{}, { REVERIE_AGENT_IMAGE_INSTALL_GH: '0', REVERIE_AGENT_IMAGE_INSTALL_AZ: '' }]) {
       const { mounts, seedCopies } = resolveDockerCredentialArtifacts(home, env);
       expect(mounts.filter((m) => isGhOrAz(m.src))).toEqual([]);
       expect(seedCopies.filter((s) => isGhOrAz(s.to))).toEqual([]);
@@ -374,14 +373,14 @@ describe('resolveDockerCredentialArtifacts (isolated codex/gemini/gcloud/opencod
   it('gh + az: each store follows ONLY its own switch, and only the exact value 1', () => {
     writeGhAzHostFiles();
     const dests = (env: NodeJS.ProcessEnv) => resolveDockerCredentialArtifacts(home, env).seedCopies.map((s) => s.to);
-    const ghOnly = dests({ CODEMAN_AGENT_IMAGE_INSTALL_GH: '1' });
+    const ghOnly = dests({ REVERIE_AGENT_IMAGE_INSTALL_GH: '1' });
     expect(ghOnly).toContain('/home/agent/.config/gh/hosts.yml');
     expect(ghOnly.some((d) => d.includes('.azure'))).toBe(false);
-    const azOnly = dests({ CODEMAN_AGENT_IMAGE_INSTALL_AZ: '1' });
+    const azOnly = dests({ REVERIE_AGENT_IMAGE_INSTALL_AZ: '1' });
     expect(azOnly).toContain('/home/agent/.azure/msal_token_cache.json');
     expect(azOnly.some((d) => d.includes('.config/gh'))).toBe(false);
     expect(
-      dests({ CODEMAN_AGENT_IMAGE_INSTALL_GH: 'true', CODEMAN_AGENT_IMAGE_INSTALL_AZ: 'yes' }).some(isGhOrAz)
+      dests({ REVERIE_AGENT_IMAGE_INSTALL_GH: 'true', REVERIE_AGENT_IMAGE_INSTALL_AZ: 'yes' }).some(isGhOrAz)
     ).toBe(false);
   });
 
@@ -396,8 +395,8 @@ describe('resolveDockerCredentialArtifacts (isolated codex/gemini/gcloud/opencod
     writeFileSync(join(home, '.azure', 'config'), '');
 
     const { mounts, seedCopies } = resolveDockerCredentialArtifacts(home, {
-      CODEMAN_AGENT_IMAGE_INSTALL_GH: '1',
-      CODEMAN_AGENT_IMAGE_INSTALL_AZ: '1',
+      REVERIE_AGENT_IMAGE_INSTALL_GH: '1',
+      REVERIE_AGENT_IMAGE_INSTALL_AZ: '1',
     });
     const dests = seedCopies.map((s) => s.to);
     expect(dests).toContain('/home/agent/.config/gh/hosts.yml');
@@ -451,7 +450,7 @@ describe('resolveDockerCredentialArtifacts (isolated codex/gemini/gcloud/opencod
 describe('resolveDockerClaudeArtifacts (isolated claude state)', () => {
   let home: string;
   beforeEach(() => {
-    home = mkdtempSync(join(tmpdir(), 'codeman-home-'));
+    home = mkdtempSync(join(tmpdir(), 'reverie-home-'));
   });
   afterEach(() => {
     rmSync(home, { recursive: true, force: true });
@@ -464,7 +463,7 @@ describe('resolveDockerClaudeArtifacts (isolated claude state)', () => {
     writeFileSync(join(home, '.claude', 'settings.json'), JSON.stringify({ theme: 'dark' }));
     writeFileSync(join(home, '.claude', 'stats-cache.json'), '{}');
 
-    const art = resolveDockerClaudeArtifacts(home, 'codeman-case-x', '/ws/x');
+    const art = resolveDockerClaudeArtifacts(home, 'reverie-case-x', '/ws/x');
     // transcripts shared RW (no readonly), whole ~/.claude never mounted
     expect(art.mounts).toContainEqual({ src: join(home, '.claude', 'projects'), dst: '/home/agent/.claude/projects' });
     expect(art.mounts.some((m) => m.dst === '/home/agent/.claude')).toBe(false);
@@ -479,7 +478,7 @@ describe('resolveDockerClaudeArtifacts (isolated claude state)', () => {
   });
 
   it('omits mounts/seeds for artifacts that do not exist', () => {
-    const art = resolveDockerClaudeArtifacts(home, 'codeman-case-y', '/ws/y');
+    const art = resolveDockerClaudeArtifacts(home, 'reverie-case-y', '/ws/y');
     expect(art.mounts).toEqual([]);
     expect(art.seedCopies).toEqual([]);
   });
@@ -488,7 +487,7 @@ describe('resolveDockerClaudeArtifacts (isolated claude state)', () => {
 describe('resolveClaudeJsonSeedMount', () => {
   let home: string;
   beforeEach(() => {
-    home = mkdtempSync(join(tmpdir(), 'codeman-home-'));
+    home = mkdtempSync(join(tmpdir(), 'reverie-home-'));
   });
   afterEach(() => {
     rmSync(home, { recursive: true, force: true });
@@ -534,26 +533,6 @@ describe('buildSeamlessClaudeConfig', () => {
   });
 });
 
-describe('agentImageBuildArgs', () => {
-  it('builds the docker build argv in order', () => {
-    expect(agentImageBuildArgs('/repo/docker/agent.Dockerfile', 'codeman/agent:base', '/repo')).toEqual([
-      'build',
-      '-f',
-      '/repo/docker/agent.Dockerfile',
-      '-t',
-      'codeman/agent:base',
-      '/repo',
-    ]);
-  });
-
-  it('adds --no-cache before the context dir when requested', () => {
-    const args = agentImageBuildArgs('/df', 'img', '/ctx', true);
-    expect(args).toContain('--no-cache');
-    expect(args.indexOf('--no-cache')).toBeLessThan(args.indexOf('/ctx'));
-    expect(args[args.length - 1]).toBe('/ctx');
-  });
-});
-
 describe('ensureAgentBaseImage (no-op under VITEST)', () => {
   it('reports the image as already present without spawning a build', async () => {
     const r = await ensureAgentBaseImage({ engine: 'docker' }, DEFAULT_AGENT_IMAGE);
@@ -576,7 +555,7 @@ describe('daemon probes (no-op under VITEST)', () => {
 
   it('probeDockerCliVersion is undefined under test', async () => {
     expect(
-      await probeDockerCliVersion({ engine: 'docker', containerName: 'codeman-case-x' }, 'claude')
+      await probeDockerCliVersion({ engine: 'docker', containerName: 'reverie-case-x' }, 'claude')
     ).toBeUndefined();
   });
 });

@@ -65,7 +65,7 @@ describe('parseLoginScreen', () => {
   it('reads the exit marker and the last error line', () => {
     const s = parseLoginScreen(
       'anthropic',
-      `${CLAUDE_SCREEN}abc#def\nOAuth error: Invalid code\n__CODEMAN_LOGIN_EXIT=1\n`
+      `${CLAUDE_SCREEN}abc#def\nOAuth error: Invalid code\n__REVERIE_LOGIN_EXIT=1\n`
     );
     expect(s.exitCode).toBe(1);
     expect(s.error).toBe('OAuth error: Invalid code');
@@ -75,7 +75,7 @@ describe('parseLoginScreen', () => {
   it('takes the error off the paste prompt line (captured from a refused code)', () => {
     const s = parseLoginScreen(
       'anthropic',
-      `If the browser didn't open, visit: ${CLAUDE_URL}\nPaste code here if prompted > Login failed: Request failed with status code 400\n__CODEMAN_LOGIN_EXIT=1\n`
+      `If the browser didn't open, visit: ${CLAUDE_URL}\nPaste code here if prompted > Login failed: Request failed with status code 400\n__REVERIE_LOGIN_EXIT=1\n`
     );
     expect(s.error).toBe('Login failed: Request failed with status code 400');
   });
@@ -190,7 +190,7 @@ describe('AccountLoginService', () => {
     const view = await h.svc.start(h.account);
     const create = h.calls.find((c) => c[0] === 'new-session')!;
     expect(create.at(-1)).toContain(`CLAUDE_CONFIG_DIR='${h.account.configDir}'`);
-    expect(create.at(-1)).toMatch(/claude.*auth.*login.*--claudeai.*__CODEMAN_LOGIN_EXIT=/);
+    expect(create.at(-1)).toMatch(/claude.*auth.*login.*--claudeai.*__REVERIE_LOGIN_EXIT=/);
     expect(create.at(-1)).toContain('BROWSER=true');
     expect(view.state).toBe('starting');
 
@@ -208,7 +208,7 @@ describe('AccountLoginService', () => {
 
     h.state.mtime = 5;
     h.state.loggedIn = true;
-    h.state.screen = `${CLAUDE_SCREEN}Login successful.\n__CODEMAN_LOGIN_EXIT=0\n`;
+    h.state.screen = `${CLAUDE_SCREEN}Login successful.\n__REVERIE_LOGIN_EXIT=0\n`;
     h.tick();
     await flush();
     v = h.svc.get(view.id)!;

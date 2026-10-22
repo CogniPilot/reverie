@@ -6,7 +6,7 @@
  * 127.0.0.1 and drive respawn/Ralph signals unauthenticated. The fix gates
  * the bypass behind a shared hook secret. COD-91 makes that requirement
  * UNCONDITIONAL — the loopback bypass requires the secret whether or not a
- * managed tunnel is running, because Codeman can't detect a user's own loopback
+ * managed tunnel is running, because Reverie can't detect a user's own loopback
  * reverse proxy (own cloudflared / `tailscale serve` / nginx → 127.0.0.1).
  * Managed-session hooks always present the secret, so the legitimate channel
  * keeps working.
@@ -51,8 +51,8 @@ describe('COD-54 hook-event auth — tunnel running requires secret', () => {
   let isRunningSpy: ReturnType<typeof vi.spyOn>;
 
   beforeAll(async () => {
-    process.env.CODEMAN_PASSWORD = TEST_PASS;
-    process.env.CODEMAN_USERNAME = TEST_USER;
+    process.env.REVERIE_PASSWORD = TEST_PASS;
+    process.env.REVERIE_USERNAME = TEST_USER;
     // Force the middleware's tunnel check to report "running".
     isRunningSpy = vi.spyOn(TunnelManager.prototype, 'isRunning').mockReturnValue(true);
     server = new WebServer(0, false, true);
@@ -63,8 +63,8 @@ describe('COD-54 hook-event auth — tunnel running requires secret', () => {
   afterAll(async () => {
     await server.stop();
     isRunningSpy.mockRestore();
-    delete process.env.CODEMAN_PASSWORD;
-    delete process.env.CODEMAN_USERNAME;
+    delete process.env.REVERIE_PASSWORD;
+    delete process.env.REVERIE_USERNAME;
   });
 
   it('rejects a localhost hook POST WITHOUT the secret header (closes the tunnel hole)', async () => {
@@ -90,8 +90,8 @@ describe('COD-91 hook-event auth — tunnel down ALSO requires the secret', () =
   let isRunningSpy: ReturnType<typeof vi.spyOn>;
 
   beforeAll(async () => {
-    process.env.CODEMAN_PASSWORD = TEST_PASS;
-    process.env.CODEMAN_USERNAME = TEST_USER;
+    process.env.REVERIE_PASSWORD = TEST_PASS;
+    process.env.REVERIE_USERNAME = TEST_USER;
     // Tunnel NOT running — loopback-only normal prod case.
     isRunningSpy = vi.spyOn(TunnelManager.prototype, 'isRunning').mockReturnValue(false);
     server = new WebServer(0, false, true);
@@ -102,8 +102,8 @@ describe('COD-91 hook-event auth — tunnel down ALSO requires the secret', () =
   afterAll(async () => {
     await server.stop();
     isRunningSpy.mockRestore();
-    delete process.env.CODEMAN_PASSWORD;
-    delete process.env.CODEMAN_USERNAME;
+    delete process.env.REVERIE_PASSWORD;
+    delete process.env.REVERIE_USERNAME;
   });
 
   it('rejects a localhost hook POST WITHOUT a secret even with no tunnel (COD-91)', async () => {
@@ -123,8 +123,8 @@ describe('COD-54 hook-event auth — rate limiting', () => {
   let isRunningSpy: ReturnType<typeof vi.spyOn>;
 
   beforeAll(async () => {
-    process.env.CODEMAN_PASSWORD = TEST_PASS;
-    process.env.CODEMAN_USERNAME = TEST_USER;
+    process.env.REVERIE_PASSWORD = TEST_PASS;
+    process.env.REVERIE_USERNAME = TEST_USER;
     // Tunnel running so unauthorized (no-secret) hook POSTs are rejected and counted.
     isRunningSpy = vi.spyOn(TunnelManager.prototype, 'isRunning').mockReturnValue(true);
     server = new WebServer(0, false, true);
@@ -135,8 +135,8 @@ describe('COD-54 hook-event auth — rate limiting', () => {
   afterAll(async () => {
     await server.stop();
     isRunningSpy.mockRestore();
-    delete process.env.CODEMAN_PASSWORD;
-    delete process.env.CODEMAN_USERNAME;
+    delete process.env.REVERIE_PASSWORD;
+    delete process.env.REVERIE_USERNAME;
   });
 
   it('eventually returns 429 for rapid unauthorized hook POSTs', async () => {
@@ -175,18 +175,18 @@ describe('COD-54 secret delivery — generated hooks + session env present the s
     const { generateHooksConfig } = await import('../src/hooks-config.js');
     const config = generateHooksConfig();
     const commands = JSON.stringify(config);
-    // Header present, value sourced from $CODEMAN_HOOK_SECRET_FILE (not embedded).
+    // Header present, value sourced from $REVERIE_HOOK_SECRET_FILE (not embedded).
     expect(commands).toContain(HOOK_SECRET_HEADER);
-    expect(commands).toContain('$CODEMAN_HOOK_SECRET_FILE');
+    expect(commands).toContain('$REVERIE_HOOK_SECRET_FILE');
     expect(commands).not.toContain(getHookSecret());
   });
 
-  it('session env builders export CODEMAN_HOOK_SECRET_FILE (path only, never the value)', async () => {
+  it('session env builders export REVERIE_HOOK_SECRET_FILE (path only, never the value)', async () => {
     const { buildClaudeEnv, buildShellEnv } = await import('../src/session-cli-builder.js');
     const claudeEnv = buildClaudeEnv('test-session');
     const shellEnv = buildShellEnv('test-session');
-    expect(claudeEnv.CODEMAN_HOOK_SECRET_FILE).toMatch(/hook-secret$/);
-    expect(shellEnv.CODEMAN_HOOK_SECRET_FILE).toMatch(/hook-secret$/);
+    expect(claudeEnv.REVERIE_HOOK_SECRET_FILE).toMatch(/hook-secret$/);
+    expect(shellEnv.REVERIE_HOOK_SECRET_FILE).toMatch(/hook-secret$/);
     expect(JSON.stringify(claudeEnv)).not.toContain(getHookSecret());
   });
 });

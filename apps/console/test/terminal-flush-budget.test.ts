@@ -4,10 +4,10 @@ import vm from 'node:vm';
 import { describe, expect, it, vi } from 'vitest';
 
 function loadTerminalUiHarness(mode: string) {
-  const CodemanApp = function CodemanApp(this: any) {};
+  const ReverieApp = function ReverieApp(this: any) {};
   const context = vm.createContext({
     window: {},
-    CodemanApp,
+    ReverieApp,
     console: { warn: vi.fn(), log: vi.fn() },
     _crashDiag: { log: vi.fn() },
     performance: { now: () => 0 },
@@ -29,7 +29,7 @@ function loadTerminalUiHarness(mode: string) {
   const code = readFileSync(resolve(import.meta.dirname, '../src/web/public/terminal-ui.js'), 'utf8');
   vm.runInContext(code, context, { filename: 'terminal-ui.js' });
 
-  const app = new (CodemanApp as any)();
+  const app = new (ReverieApp as any)();
   const writes: string[] = [];
   app.activeSessionId = 'session-1';
   app.sessions = new Map([['session-1', { mode }]]);
@@ -104,9 +104,9 @@ function loadAppHarness() {
   });
   const constants = readFileSync(resolve(dir, 'constants.js'), 'utf8');
   const appSource = readFileSync(resolve(dir, 'app.js'), 'utf8');
-  vm.runInContext(`${constants}\n${appSource}\nglobalThis.__CodemanApp = CodemanApp;`, context);
-  const CodemanApp = (context as { __CodemanApp: { prototype: object } }).__CodemanApp;
-  return { CodemanApp, fetchMock };
+  vm.runInContext(`${constants}\n${appSource}\nglobalThis.__ReverieApp = ReverieApp;`, context);
+  const ReverieApp = (context as { __ReverieApp: { prototype: object } }).__ReverieApp;
+  return { ReverieApp, fetchMock };
 }
 
 describe('terminal flush budget', () => {
@@ -121,8 +121,8 @@ describe('terminal flush budget', () => {
   });
 
   it('drops redundant SSE terminal events whenever WebSocket owns terminal I/O', () => {
-    const { CodemanApp } = loadAppHarness();
-    const app = Object.create(CodemanApp.prototype) as any;
+    const { ReverieApp } = loadAppHarness();
+    const app = Object.create(ReverieApp.prototype) as any;
     app._wsReady = true;
     app._onSessionTerminal = vi.fn();
     app._onSessionNeedsRefresh = vi.fn();
@@ -138,8 +138,8 @@ describe('terminal flush budget', () => {
   });
 
   it('runs at most one buffer recovery per session and ignores stale-session events', async () => {
-    const { CodemanApp, fetchMock } = loadAppHarness();
-    const app = Object.create(CodemanApp.prototype) as any;
+    const { ReverieApp, fetchMock } = loadAppHarness();
+    const app = Object.create(ReverieApp.prototype) as any;
     app.activeSessionId = 'session-1';
     app.sessions = new Map([['session-1', { mode: 'shell' }]]);
     app.terminal = {};
@@ -170,8 +170,8 @@ describe('terminal flush budget', () => {
   });
 
   it("reloads a cleared shell from tmux's rendered history and an agent from the byte recording", async () => {
-    const { CodemanApp, fetchMock } = loadAppHarness();
-    const app = Object.create(CodemanApp.prototype) as any;
+    const { ReverieApp, fetchMock } = loadAppHarness();
+    const app = Object.create(ReverieApp.prototype) as any;
     app.sessions = new Map([
       ['shell-1', { mode: 'shell' }],
       ['agent-1', { mode: 'claude' }],
@@ -390,8 +390,8 @@ describe('terminal flush budget', () => {
   // decides this, for all four paths that fetch a terminal buffer and write it.
 
   it('replays the tail for a visible-pane capture', () => {
-    const { CodemanApp } = loadAppHarness();
-    const app = Object.create(CodemanApp.prototype) as any;
+    const { ReverieApp } = loadAppHarness();
+    const app = Object.create(ReverieApp.prototype) as any;
 
     expect(app._bufferLoadFinishOpts({ source: 'mux-visible' }, 1234)).toEqual({
       flushQueued: true,
@@ -400,8 +400,8 @@ describe('terminal flush budget', () => {
   });
 
   it('replays the tail for a full-history capture', () => {
-    const { CodemanApp } = loadAppHarness();
-    const app = Object.create(CodemanApp.prototype) as any;
+    const { ReverieApp } = loadAppHarness();
+    const app = Object.create(ReverieApp.prototype) as any;
 
     expect(app._bufferLoadFinishOpts({ source: 'mux-full-history' }, 1234)).toEqual({
       flushQueued: true,
@@ -410,8 +410,8 @@ describe('terminal flush budget', () => {
   });
 
   it('discards the queue for the accumulated byte history', () => {
-    const { CodemanApp } = loadAppHarness();
-    const app = Object.create(CodemanApp.prototype) as any;
+    const { ReverieApp } = loadAppHarness();
+    const app = Object.create(ReverieApp.prototype) as any;
 
     expect(app._bufferLoadFinishOpts({ source: 'history' }, 1234).flushQueued).toBe(false);
   });
@@ -419,8 +419,8 @@ describe('terminal flush budget', () => {
   it('discards the queue for a payload that names no source', () => {
     // Fails toward the safe answer: a duplicated Ink redraw corrupts the screen,
     // while a dropped tail is repaired by the CLI's next full repaint.
-    const { CodemanApp } = loadAppHarness();
-    const app = Object.create(CodemanApp.prototype) as any;
+    const { ReverieApp } = loadAppHarness();
+    const app = Object.create(ReverieApp.prototype) as any;
 
     expect(app._bufferLoadFinishOpts({}, 1234).flushQueued).toBe(false);
     expect(app._bufferLoadFinishOpts(undefined, 1234).flushQueued).toBe(false);

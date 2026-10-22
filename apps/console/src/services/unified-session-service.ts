@@ -9,8 +9,8 @@
  * conversations in their own stores: Claude's `~/.claude/projects`, omp's
  * `~/.omp/agent/sessions` and codex's `~/.codex/sessions`. Each row is keyed by
  * whatever id that CLI names the conversation with, which diverges from the
- * Codeman id for a resumed session and for every non-Claude one — an alias map
- * (claudeSessionId → Codeman id, built from the live/persisted views) folds them
+ * Reverie id for a resumed session and for every non-Claude one — an alias map
+ * (claudeSessionId → Reverie id, built from the live/persisted views) folds them
  * into the owning session item.
  * Higher-precedence sources overwrite scalar fields when present
  * (history < lifecycle < persisted < live), while the `sources` array
@@ -118,7 +118,7 @@ export type HistoryInput = {
   /**
    * The token this CLI's own resume command expects, when it is NOT the row's
    * `sessionId`. Codex names a thread by an id of its own that lives in the
-   * rollout, and a live codex session's `sessionId` is Codeman's uuid instead —
+   * rollout, and a live codex session's `sessionId` is Reverie's uuid instead —
    * so a resume that reused `sessionId` would ask codex for a thread that does
    * not exist. Only a transcript scanner sets this, which is what keeps the two
    * kinds of row apart.
@@ -174,7 +174,7 @@ function overwrite<K extends keyof UnifiedSessionItem>(
 export function mergeUnifiedSessions(sources: UnifiedSources): UnifiedSessionItem[] {
   const map = new Map<string, UnifiedSessionItem>();
 
-  // Alias map: Claude conversation UUID → owning Codeman session id. Resumed
+  // Alias map: Claude conversation UUID → owning Reverie session id. Resumed
   // (claudeSessionId = resumeSessionId != id) and /clear-respawned sessions
   // would otherwise surface twice — once as a live/persisted row and once as a
   // separate history-only row keyed by the conversation UUID. Live wins over
@@ -261,7 +261,7 @@ export function mergeUnifiedSessions(sources: UnifiedSources): UnifiedSessionIte
 
   // firstPrompt backfill (COD-140): the only source that sets firstPrompt is the
   // transcript-history view, keyed by the Claude transcript file's UUID. A live/persisted
-  // row keyed by its Codeman id only inherits firstPrompt when that id happens to equal an
+  // row keyed by its Reverie id only inherits firstPrompt when that id happens to equal an
   // on-disk transcript UUID. When it doesn't (stale/wrong claudeSessionId, post-/clear new
   // uuid, resumed/attached/worktree session, transcript not yet flushed), the row shows
   // "(no prompt captured)" even though a real transcript for that working dir exists under a

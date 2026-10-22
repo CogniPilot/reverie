@@ -257,7 +257,7 @@ export function createServer(rooms, { features = { unread: true, dms: true, plac
     }
     if ((m = url.pathname.match(/^\/api\/agents\/([^/]+)\/profile$/)) && method === 'GET') {
       const p = state.profiles?.[decodeURIComponent(m[1])];
-      return p ? ok(structuredClone(p)) : fail(503, 'The fleet runtime policy is not configured yet');
+      return p ? ok(structuredClone(p)) : fail(503, 'The reverie runtime policy is not configured yet');
     }
     if (url.pathname === '/api/workspace-icons' && method === 'GET') return ok({ icons: structuredClone(state.wsIcons || {}) });
     if (url.pathname === '/api/workspace-icons/image' && method === 'PUT') {
@@ -365,7 +365,7 @@ export async function createHarness({
     removeEventListener() {},
   });
   // The page's own link helper, as constants.js defines it.
-  window.CodemanUrlSession = {
+  window.ReverieUrlSession = {
     sessionIdFromFragment(h) {
       const id = new URLSearchParams(String(h || '').replace(/^#/, '')).get('session');
       return id && id.trim() ? id.trim() : null;
@@ -398,7 +398,7 @@ export async function createHarness({
   }
   window.__approvals = approvals;
   window.eval(`
-    class CodemanApp {
+    class ReverieApp {
       constructor() {
         this.sessions = new Map();
         this.toasts = [];
@@ -406,7 +406,7 @@ export async function createHarness({
         this.approvalsToggled = 0;
         this._connectionStatus = 'connected';
         // The app takes a #session= link out of the address bar as it starts.
-        this._urlSessionId = window.CodemanUrlSession.sessionIdFromFragment(location.hash);
+        this._urlSessionId = window.ReverieUrlSession.sessionIdFromFragment(location.hash);
         if (this._urlSessionId) history.replaceState(null, '', location.pathname);
         this.approvals = new Map();
         this.pendingHooks = new Map();
@@ -455,10 +455,10 @@ export async function createHarness({
         return true;
       }
     }
-    window.CodemanApp = CodemanApp;
+    window.ReverieApp = ReverieApp;
   `);
   for (const f of ['chatroom-ui.js', 'chat-media.js']) window.eval(read(f));
-  window.app = new window.CodemanApp();
+  window.app = new window.ReverieApp();
   for (const s of sessions) window.app.sessions.set(s.id, s);
   const startShell = async () => {
     window.eval(read('chat-app.js'));

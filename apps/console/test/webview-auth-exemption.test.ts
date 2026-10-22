@@ -1,5 +1,5 @@
 /**
- * The web-tab proxy is exempt from Codeman's cookie auth and its cross-site Origin
+ * The web-tab proxy is exempt from Reverie's cookie auth and its cross-site Origin
  * guard, because a sandboxed dashboard iframe is opaque-origin: it sends no session
  * cookie and its writes arrive with `Origin: null`. The capability in the path is
  * the credential instead.
@@ -26,9 +26,9 @@ let htmlCapability: string;
 let savedPassword: string | undefined;
 
 beforeEach(async () => {
-  savedPassword = process.env.CODEMAN_PASSWORD;
+  savedPassword = process.env.REVERIE_PASSWORD;
   // The middleware reads this at registration time; auth is inert without it.
-  process.env.CODEMAN_PASSWORD = PASSWORD;
+  process.env.REVERIE_PASSWORD = PASSWORD;
 
   capability = webviewCapabilities.mint('webview-under-test', undefined);
   htmlCapability = htmlViewCapabilities.mint('/srv/report-under-test', undefined);
@@ -64,8 +64,8 @@ afterEach(async () => {
   await app.close();
   webviewCapabilities.revokeWebview('webview-under-test');
   htmlViewCapabilities.revokeOwner(undefined);
-  if (savedPassword === undefined) delete process.env.CODEMAN_PASSWORD;
-  else process.env.CODEMAN_PASSWORD = savedPassword;
+  if (savedPassword === undefined) delete process.env.REVERIE_PASSWORD;
+  else process.env.REVERIE_PASSWORD = savedPassword;
 });
 
 describe('the exemption applies to a live capability', () => {
@@ -123,9 +123,9 @@ describe('the exemption applies to a live capability', () => {
     expect(res.statusCode).toBe(200);
   });
 
-  it("covers the dashboard's OWN /api namespace, which no Codeman route claims", async () => {
+  it("covers the dashboard's OWN /api namespace, which no Reverie route claims", async () => {
     // A dashboard serving `<img src="/api/hero?slug=x">` from page script is the
-    // case this exists for: the URL is root-absolute, so it lands on Codeman, and
+    // case this exists for: the URL is root-absolute, so it lands on Reverie, and
     // nothing here matches a real route. Refusing it by `/api` prefix (as this once
     // did) left dashboard images permanently broken with no way to rescue them.
     for (const url of ['/api/hero?slug=x', '/api/slide?owner=o&n=01', '/api/preview']) {
@@ -160,7 +160,7 @@ describe('the exemption does NOT widen anywhere else', () => {
     expect((await app.inject({ method: 'GET', url: '/webviewfoo/bar' })).statusCode).toBe(401);
   });
 
-  it('NEVER exempts a real Codeman API route, even with a valid capability in the Referer', async () => {
+  it('NEVER exempts a real Reverie API route, even with a valid capability in the Referer', async () => {
     // This is the hole the Referer form would open if it were not fenced.
     const res = await app.inject({
       method: 'GET',
@@ -247,7 +247,7 @@ describe('authenticated access is unaffected', () => {
  * A web-tab frame that navigated itself off its proxy prefix. The runtime shim
  * masks `/webview/<cap>/` off the document URL so a single-page app routes on its
  * own path; a reload of that page (a dev server's full-reload HMR) then targets
- * Codeman's root with no capability, no cookie (opaque origin) and a Referer that
+ * Reverie's root with no capability, no cookie (opaque origin) and a Referer that
  * names the masked page. It gets the static recovery page, not a login challenge,
  * and it must not count as an auth failure.
  */
@@ -259,10 +259,10 @@ describe('a lost web-tab frame', () => {
     expect(res.statusCode).toBe(200);
     expect(res.headers['content-type']).toContain('text/html');
     expect(res.headers['content-security-policy']).toContain("default-src 'none'");
-    expect(res.body).toContain('codeman:webview-lost');
+    expect(res.body).toContain('reverie:webview-lost');
   });
 
-  it('never for a path Codeman actually serves, and never for a plain navigation', async () => {
+  it('never for a path Reverie actually serves, and never for a plain navigation', async () => {
     expect((await app.inject({ method: 'GET', url: '/webviewfoo/bar', headers: lostFrame })).statusCode).toBe(401);
     expect((await app.inject({ method: 'GET', url: '/api/sessions/abc', headers: lostFrame })).statusCode).toBe(401);
     expect((await app.inject({ method: 'GET', url: '/about' })).statusCode).toBe(401);
@@ -282,19 +282,19 @@ describe('a lost web-tab frame', () => {
 
   /**
    * The landing page. The shim maps `/webview/<cap>/` to exactly `/`, so a reload
-   * there asks for Codeman's ROOT as an iframe navigation, and `/` is a registered
+   * there asks for Reverie's ROOT as an iframe navigation, and `/` is a registered
    * route (the app shell), which the route-table fence cannot tell from a real
    * navigation. It used to answer 401 inside the frame (or the shell itself on a
    * passwordless install), with no recovery message and the failed-frame panel
    * cleared because the document loaded fine. Credentials are the separator:
-   * nothing in Codeman frames its own root, and the sandboxed frame carries none.
+   * nothing in Reverie frames its own root, and the sandboxed frame carries none.
    */
   describe('a reload on the dashboard landing page', () => {
     it('gets the recovery page when the iframe navigation of / carries no credentials', async () => {
       for (const url of ['/', '/?tab=2']) {
         const res = await app.inject({ method: 'GET', url, headers: lostFrame });
         expect(res.statusCode, url).toBe(200);
-        expect(res.body, url).toContain('codeman:webview-lost');
+        expect(res.body, url).toContain('reverie:webview-lost');
         expect(res.headers['content-security-policy']).toContain("default-src 'none'");
       }
     });
@@ -308,7 +308,7 @@ describe('a lost web-tab frame', () => {
       expect(
         (await app.inject({ method: 'GET', url: '/', headers: { ...lostFrame, authorization: wrong } })).statusCode
       ).toBe(401);
-      const cookie = 'codeman_session=stale; other=1';
+      const cookie = 'reverie_session=stale; other=1';
       expect((await app.inject({ method: 'GET', url: '/', headers: { ...lostFrame, cookie } })).statusCode).toBe(401);
     });
 

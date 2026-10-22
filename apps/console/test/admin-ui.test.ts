@@ -32,7 +32,7 @@ async function bootWith(me: Record<string, unknown>) {
     </body>`,
     { url: 'http://localhost/', runScripts: 'outside-only' }
   );
-  const win = dom.window as unknown as Window & typeof globalThis & { __codemanUser?: Record<string, unknown> };
+  const win = dom.window as unknown as Window & typeof globalThis & { __reverieUser?: Record<string, unknown> };
   win.fetch = (async (path: string) => {
     if (path === '/api/me') return resp(200, { success: true, data: me });
     if (path === '/api/admin/users') return resp(200, { success: true, data: [] });
@@ -47,7 +47,7 @@ async function bootWith(me: Record<string, unknown>) {
 describe('admin-ui boot', () => {
   it('exposes the identity and injects the Users section for a multi-user admin', async () => {
     const { win } = await bootWith({ username: 'root', role: 'admin', multiUser: true, mustChangePassword: false });
-    expect(win.__codemanUser).toMatchObject({ username: 'root', role: 'admin', multiUser: true });
+    expect(win.__reverieUser).toMatchObject({ username: 'root', role: 'admin', multiUser: true });
     // The settings modal is a rail over one document: a rail entry, not a tab.
     const btn = win.document.querySelector('[data-section="settings-users"]');
     expect(btn).toBeTruthy();
@@ -113,7 +113,7 @@ describe('admin panel modal', () => {
       return resp(200, { success: true });
     }) as unknown as typeof fetch;
 
-    (win as unknown as { codemanAdmin: { openAdminPanel: () => void } }).codemanAdmin.openAdminPanel();
+    (win as unknown as { reverieAdmin: { openAdminPanel: () => void } }).reverieAdmin.openAdminPanel();
     for (let i = 0; i < 6; i++) await new Promise((r) => setTimeout(r, 0));
     const modal = win.document.getElementById('adminPanelModal') as HTMLElement;
     expect(modal).toBeTruthy();
@@ -128,7 +128,7 @@ describe('admin panel modal', () => {
 
   it('does NOT open for a regular user', async () => {
     const { win } = await bootWith({ username: 'joe', role: 'user', multiUser: true, mustChangePassword: false });
-    (win as unknown as { codemanAdmin: { openAdminPanel: () => void } }).codemanAdmin.openAdminPanel();
+    (win as unknown as { reverieAdmin: { openAdminPanel: () => void } }).reverieAdmin.openAdminPanel();
     expect(win.document.getElementById('adminPanelModal')).toBeFalsy();
   });
 });

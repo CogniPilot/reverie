@@ -14,7 +14,7 @@
  * work exactly as before.
  *
  * The status-line fixtures below are verbatim captures from live panes
- * (`tmux -L codeman capture-pane -p`) on Claude Code 2.1.220, Codex CLI 0.152.1, pi 1.1.0,
+ * (`tmux -L reverie capture-pane -p`) on Claude Code 2.1.220, Codex CLI 0.152.1, pi 1.1.0,
  * opencode 1.3.0, omp 18.8.6 / 18.0.11 and Gemini CLI 0.63.0 (its turns driven by a local
  * stand-in for the Gemini API, since the CLI's look does not depend on the backend).
  */
@@ -62,7 +62,7 @@ function withFakePane(
     workingDir: '/tmp',
     mode,
     mux,
-    muxSession: { muxName: 'codeman-test', sessionId: 'test', createdAt: Date.now() },
+    muxSession: { muxName: 'reverie-test', sessionId: 'test', createdAt: Date.now() },
   } as ConstructorParameters<typeof Session>[0]);
 }
 
@@ -86,7 +86,7 @@ const CODEX_COMPOSER_REPAINT = '\x1b[31;1H\x1b[38;5;246m›\xa0\x1b[39m\x1b[0m';
  * its status into the TOP rule. At rest both rules are plain.
  */
 const PI_RULE = '─'.repeat(48);
-const PI_FOOTER = '~/codeman-cases/testcase\n0.8%/253k (auto)            qwen3.8-27b-pi • xhigh\n';
+const PI_FOOTER = '~/reverie-cases/testcase\n0.8%/253k (auto)            qwen3.8-27b-pi • xhigh\n';
 const PI_WORKING = ` say ok\n── ⠏ Working ${PI_RULE}\n\n${PI_RULE}\n${PI_FOOTER}`;
 const PI_AT_REST = ` Error: Retry failed after 3 attempts: Connection error.\n${PI_RULE}\n\n${PI_RULE}\n${PI_FOOTER}`;
 /** One spinner frame on the wire: pi rewrites the whole top rule each time (~80 ms). */
@@ -372,7 +372,7 @@ describe('Session interactive idle detection', () => {
 
   it('does not mark an uncharacterised CLI working off raw activity', () => {
     vi.useFakeTimers();
-    // Grok renders its own TUI, and Codeman knows no glyph for it, so nothing would arm
+    // Grok renders its own TUI, and Reverie knows no glyph for it, so nothing would arm
     // the idle confirmation and a session marked working here would never recover. A CLI
     // that names no glyph therefore reports no work at all.
     expect(getCli('grok')?.capabilities.workDetect).toBeUndefined();
@@ -434,8 +434,8 @@ describe('external CLI launch settle', () => {
 
   /** Codex at its composer after launch, verbatim from the beta pane that showed the bug. */
   const CODEX_READY =
-    '  >_ OpenAI Codex (v0.162.0)\n     ~/codeman-cases/testcase\n› Ask Codex to do anything\n' +
-    '  GPT-6-Luna default · ~/codeman-cases/testcase\n  ? for shortcuts\n';
+    '  >_ OpenAI Codex (v0.162.0)\n     ~/reverie-cases/testcase\n› Ask Codex to do anything\n' +
+    '  GPT-6-Luna default · ~/reverie-cases/testcase\n  ? for shortcuts\n';
 
   /** A session as `startInteractive()` leaves it: spawn-time `busy`, settle armed if it applies. */
   function launch(session: Session, isRestored = false): string[] {
@@ -576,7 +576,7 @@ describe('external CLI launch settle', () => {
 
   it('settles a RESTORED pane of a CLI without work detection, without a refetch', () => {
     vi.useFakeTimers();
-    // A Codeman restart re-attaches every surviving pane through startInteractive(),
+    // A Reverie restart re-attaches every surviving pane through startInteractive(),
     // which leaves it busy; grok and deepseek have no glyph that would ever clear that.
     for (const mode of ['grok', 'deepseek', 'shell'] as const) {
       expect(getCli(mode)?.capabilities.workDetect).toBeUndefined();

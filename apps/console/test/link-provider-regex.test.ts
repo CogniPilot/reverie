@@ -48,7 +48,7 @@ const PATTERN_NAMES = [
 /** Lines that made 0.9.10's cmdPattern backtrack exponentially (>2s each). */
 const KILLER_LINES = [
   // wrapped git-commit heredoc from real Claude tool output (the 0.9.10 freeze)
-  `      /Users/arbbot/codeman-cases/topagent-control commit -m "$(cat <<'EOF'${' '.repeat(3000)}`,
+  `      /Users/arbbot/reverie-cases/topagent-control commit -m "$(cat <<'EOF'${' '.repeat(3000)}`,
   // aligned table row: trigger word + multi-space-separated columns + mid-token slash
   'watch  ' + 'col   '.repeat(40) + ' BTC/USDT',
   // trigger word followed by many tokens and no token-initial path
@@ -133,11 +133,11 @@ describe('terminal link-provider regexes (shipped source)', () => {
   });
 
   it('the file-path pattern links pasted image/PDF/media attachment paths', () => {
-    // `.codeman-uploads/paste-*.png` is what Codeman writes for a pasted screenshot;
+    // `.reverie-uploads/paste-*.png` is what Reverie writes for a pasted screenshot;
     // without image extensions the path rendered as plain, unclickable text.
     const ext = shippedPattern('FILE_PATH_LINK_PATTERN');
     const cases = [
-      '/home/arkon/default/claudeman/.codeman-uploads/paste-1785164958410-d11eb7d0.png',
+      '/home/arkon/default/claudeman/.reverie-uploads/paste-1785164958410-d11eb7d0.png',
       '/tmp/shot.jpeg',
       '/opt/app/report.pdf',
       '/home/a/diagram.svg',
@@ -146,11 +146,11 @@ describe('terminal link-provider regexes (shipped source)', () => {
       '/tmp/claude-1000/-home-arkon-default-claudeman/7b3fefd2/scratchpad/probe-run-native.png',
       // macOS and WSL roots: unmatched before, so Mac users had no clickable
       // paths at all outside /var and /tmp.
-      '/Users/arbbot/codeman-cases/report.docx',
+      '/Users/arbbot/reverie-cases/report.docx',
       '/mnt/d/captures/demo.mp4',
       // Camera-roll video uploads the agent echoes back (VIDEO_ATTACHMENT_EXTENSIONS).
-      '/home/a/.codeman-uploads/paste-1-ab.m4v',
-      '/home/a/.codeman-uploads/paste-2-cd.ogv',
+      '/home/a/.reverie-uploads/paste-1-ab.m4v',
+      '/home/a/.reverie-uploads/paste-2-cd.ogv',
       // Longer extension of a family must win over its prefix (tsx over ts).
       '/home/a/src/App.tsx',
     ];

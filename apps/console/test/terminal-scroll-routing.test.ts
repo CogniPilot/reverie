@@ -23,23 +23,23 @@ import { STOCK_CLIS } from '../src/config/cli-registry/stock.js';
 
 /**
  * The run modes whose CLI can page its own transcript with PageUp/PageDown, read
- * off the shipped registry exactly as the server builds `__codemanTranscriptPageKeys`,
+ * off the shipped registry exactly as the server builds `__reverieTranscriptPageKeys`,
  * so these tests break if a stock entry loses (or quietly gains) the capability.
  */
 const PAGE_KEY_MODES = STOCK_CLIS.filter((e) => e.capabilities.transcriptPageKeys === true).map((e) => e.id);
 
 function loadTerminalUiHarness(
-  windowGlobals: Record<string, unknown> = { __codemanTranscriptPageKeys: PAGE_KEY_MODES }
+  windowGlobals: Record<string, unknown> = { __reverieTranscriptPageKeys: PAGE_KEY_MODES }
 ) {
-  const CodemanApp = function CodemanApp(this: any) {};
+  const ReverieApp = function ReverieApp(this: any) {};
   const logs: string[] = [];
-  // terminal-ui.js hangs CodemanTerminalInput off window; tests read it there.
+  // terminal-ui.js hangs ReverieTerminalInput off window; tests read it there.
   const windowRef: Record<string, any> = { ...windowGlobals };
   // Mutable so a test can move time (gesture gaps); defaults to a frozen clock.
   const clock = { now: () => 1_000 };
   const context = vm.createContext({
     window: windowRef,
-    CodemanApp,
+    ReverieApp,
     console: { warn: vi.fn(), log: (msg: string) => logs.push(msg) },
     _crashDiag: { log: vi.fn() },
     performance: clock,
@@ -58,7 +58,7 @@ function loadTerminalUiHarness(
 
   const code = readFileSync(resolve(import.meta.dirname, '../src/web/public/terminal-ui.js'), 'utf8');
   vm.runInContext(code, context, { filename: 'terminal-ui.js' });
-  return { app: new (CodemanApp as any)(), logs, windowRef, clock };
+  return { app: new (ReverieApp as any)(), logs, windowRef, clock };
 }
 
 /** A session whose local buffer holds exactly one screen (baseY 0) — a hollow pane. */
@@ -375,7 +375,7 @@ describe('PageUp/PageDown fallback for a hollow local buffer (issue #205 round 2
     expect(bare._localScrollbackIsHollow()).toBe(false);
 
     // A mode the map names pages even if no stock entry has that id.
-    const custom = loadTerminalUiHarness({ __codemanTranscriptPageKeys: ['my-cli'] }).app;
+    const custom = loadTerminalUiHarness({ __reverieTranscriptPageKeys: ['my-cli'] }).app;
     custom.activeSessionId = 'sess-1';
     custom.sessions = new Map([['sess-1', { mode: 'my-cli' }]]);
     custom.terminal = { rows: 36, buffer: { active: { type: 'normal', baseY: 0 } } };
@@ -386,7 +386,7 @@ describe('PageUp/PageDown fallback for a hollow local buffer (issue #205 round 2
       source.indexOf('  _localScrollbackIsHollow(target = {}) {'),
       source.indexOf('  _maybePageCliTranscript(ev, lines) {')
     );
-    expect(helper).toContain('window.__codemanTranscriptPageKeys');
+    expect(helper).toContain('window.__reverieTranscriptPageKeys');
     expect(helper).not.toMatch(/=== '(?:claude|codex)'|!== '(?:claude|codex)'/);
   });
 
@@ -620,7 +620,7 @@ describe('page-key gestures across slow touch drags, slow wheel ticks and jitter
 describe('pageKeysForGesture, the pure gesture rules both panes share', () => {
   const UP = '\x1b[5~';
   const DOWN = '\x1b[6~';
-  const helper = () => loadTerminalUiHarness().windowRef.CodemanTerminalInput.pageKeysForGesture;
+  const helper = () => loadTerminalUiHarness().windowRef.ReverieTerminalInput.pageKeysForGesture;
   type Step = { state: unknown; keys: string };
   /** Runs [lines, msSinceStart, extra] events through the helper; returns every step. */
   function run(events: Array<[number, number, Record<string, unknown>?]>, rows = 36) {
@@ -656,7 +656,7 @@ describe('pageKeysForGesture, the pure gesture rules both panes share', () => {
   });
 
   it('keeps a same-direction pre-paid debt for PAGE_KEY_DEBT_MS, then drops it with its gesture', () => {
-    const { PAGE_KEY_DEBT_MS } = loadTerminalUiHarness().windowRef.CodemanTerminalInput;
+    const { PAGE_KEY_DEBT_MS } = loadTerminalUiHarness().windowRef.ReverieTerminalInput;
     expect(PAGE_KEY_DEBT_MS).toBe(1000);
     // A tick 500 ms later, past the 150 ms gap, pays the debt back instead of
     // pre-paying a second page; a flick after a second of quiet pages at once.
@@ -710,7 +710,7 @@ describe('pageKeysForGesture, the pure gesture rules both panes share', () => {
 describe('the paging gates asked for another pane (a TerminalTile)', () => {
   it('exports the paging math, and the primary pane runs on it', () => {
     const { app, sent, windowRef } = hollowApp();
-    const { wheelDeltaLines, pageKeysForTravel, pageKeysForGesture } = windowRef.CodemanTerminalInput;
+    const { wheelDeltaLines, pageKeysForTravel, pageKeysForGesture } = windowRef.ReverieTerminalInput;
 
     expect(wheelDeltaLines({ deltaY: -50, deltaMode: 0 }, 36)).toBe(-2); // pixels, 25 a line
     expect(wheelDeltaLines({ deltaY: 3, deltaMode: 1 }, 36)).toBe(3); // lines (Firefox)

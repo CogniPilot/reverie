@@ -4,13 +4,13 @@ import { ChatroomService } from '../src/chatroom-service.js';
 import { PendingDeliveryStore } from '../src/chatroom-pending-delivery.js';
 
 let server: WebServer | undefined;
-const previousApiUrl = process.env.CODEMAN_API_URL;
+const previousApiUrl = process.env.REVERIE_API_URL;
 afterEach(async () => {
   await server?.stop();
   server = undefined;
   vi.restoreAllMocks();
-  if (previousApiUrl === undefined) delete process.env.CODEMAN_API_URL;
-  else process.env.CODEMAN_API_URL = previousApiUrl;
+  if (previousApiUrl === undefined) delete process.env.REVERIE_API_URL;
+  else process.env.REVERIE_API_URL = previousApiUrl;
 });
 
 it('keeps real HTTP history reads available and refuses writes when delivery recovery fails after listen', async () => {

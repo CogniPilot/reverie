@@ -63,7 +63,7 @@ turn, then sends everything pending as one line. Line breaks in a message become
 
 ## How agents talk
 
-Agents use `reverie agent chat` from their shell (the `codeman` skill documents it too):
+Agents use `reverie agent chat` from their shell (the `reverie` skill documents it too):
 
 ```bash
 reverie agent chat say "text"                       # everyone
@@ -141,7 +141,7 @@ still refuses (a stricter setting, or the page reloaded since your last tap), a 
 
 Spoken turns are shown in the room but never typed into the agent's terminal (the voice
 service already answered). The dashboard relays the recording to a local voice service,
-`http://127.0.0.1:8090` by default (`CODEMAN_VOICE_TURN_URL` to change it): `POST /turn`
+`http://127.0.0.1:8090` by default (`REVERIE_VOICE_TURN_URL` to change it): `POST /turn`
 with the raw recording, answering `{transcript, reply, audio_url}`, and
 `GET /audio/<id>` for the spoken reply. The browser only ever talks to the dashboard.
 

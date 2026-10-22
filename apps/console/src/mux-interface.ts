@@ -32,9 +32,9 @@ import type {
  * Multiplexer session metadata.
  */
 export interface MuxSession {
-  /** Codeman session ID */
+  /** Reverie session ID */
   sessionId: string;
-  /** Multiplexer session name (e.g., "codeman-abc12345") */
+  /** Multiplexer session name (e.g., "reverie-abc12345") */
   muxName: string;
   /** Process PID */
   pid: number;
@@ -61,7 +61,7 @@ export interface MuxSession {
   /** Whether the current launch carries the statusLine exporter; set on every create and respawn. */
   statusLine?: StatusLineExporter;
   /**
-   * This record was rebuilt from the tmux socket rather than from Codeman's own
+   * This record was rebuilt from the tmux socket rather than from Reverie's own
    * bookkeeping, so everything on it but the name and the pid is a guess. Its
    * synthetic `restored-<fragment>` id cannot find the session's `state.json`
    * entry either, which means a remote or docker session rediscovered this way
@@ -74,7 +74,7 @@ export interface MuxSession {
    * `mux-sessions.json` and `loadSessions()` restores it, so a genuinely local
    * session rediscovered once stays opted out of everything keyed on this for
    * the life of that record. That is the safe direction to fail, and it costs
-   * only the guess Codeman is declining to make.
+   * only the guess Reverie is declining to make.
    */
   discovered?: boolean;
 }
@@ -260,7 +260,7 @@ export interface TerminalMultiplexer extends EventEmitter {
   /** Which backend this instance uses */
   readonly backend: 'tmux';
 
-  /** The dedicated tmux socket name all sessions live on (e.g. "codeman"). */
+  /** The dedicated tmux socket name all sessions live on (e.g. "reverie"). */
   readonly muxSocket: string;
 
   // ========== Lifecycle ==========
@@ -285,7 +285,7 @@ export interface TerminalMultiplexer extends EventEmitter {
   /** Get all tracked sessions */
   getSessions(): MuxSession[];
 
-  /** Get a session by Codeman session ID */
+  /** Get a session by Reverie session ID */
   getSession(sessionId: string): MuxSession | undefined;
 
   /** Get all sessions with process resource statistics */
@@ -358,7 +358,7 @@ export interface TerminalMultiplexer extends EventEmitter {
   /** Pin a mux window so client attaches do not automatically dictate its size. */
   setManualWindowSize?(muxName: string): boolean;
 
-  /** Explicitly resize a mux window after Codeman accepts a terminal resize. */
+  /** Explicitly resize a mux window after Reverie accepts a terminal resize. */
   resizeWindow?(muxName: string, cols: number, rows: number): boolean;
 
   // ========== Availability ==========

@@ -4,12 +4,12 @@ import type { SessionRemote } from '../src/types.js';
 
 // COD-109 — terminate an OWNED durable remote tmux session by propagating
 // `kill-session` to the remote host. Since COD-104 an owned remote session lives
-// in the dedicated `-L codeman-remote` tmux server on the host and outlives the
+// in the dedicated `-L reverie-remote` tmux server on the host and outlives the
 // local ssh pane, so ending a session we OWN must reach the remote socket.
 //
 // The owned-kill command builder was consolidated upstream (PR #145) into the
 // `{ remote, sessionId }` form, which derives the durable session name and kills
-// on the dedicated `codeman-remote` socket (matching buildRemoteLaunchCommand).
+// on the dedicated `reverie-remote` socket (matching buildRemoteLaunchCommand).
 // This suite pins that builder's contract; the killSession integration
 // (owned-only, after COD-105's non-owned detach-only early-return) is exercised
 // against the real remote.
@@ -22,14 +22,14 @@ describe('COD-109 buildRemoteKillCommand (owned durable remote kill)', () => {
     remotePath: '/tmp',
   };
 
-  it('kills the durable session on the dedicated codeman-remote socket (no ssh -t — non-interactive)', () => {
+  it('kills the durable session on the dedicated reverie-remote socket (no ssh -t — non-interactive)', () => {
     const cmd = buildRemoteKillCommand({ remote: base, sessionId: 'abc12345def' });
     expect(cmd.startsWith('ssh -o BatchMode=yes ')).toBe(true);
     expect(cmd).toContain('aakht@192.168.55.170');
-    // Owned sessions launch on `-L codeman-remote`; the kill MUST target the same socket.
-    expect(cmd).toContain('tmux -L codeman-remote kill-session -t');
-    // Deterministic session name derived from the sessionId (codeman-ssh-<first 8>).
-    expect(cmd).toContain('codeman-ssh-abc12345');
+    // Owned sessions launch on `-L reverie-remote`; the kill MUST target the same socket.
+    expect(cmd).toContain('tmux -L reverie-remote kill-session -t');
+    // Deterministic session name derived from the sessionId (reverie-ssh-<first 8>).
+    expect(cmd).toContain('reverie-ssh-abc12345');
     // kill-session needs no PTY — must NOT request the ssh `-t` flag (attach uses
     // `ssh -o BatchMode=yes -t …`; kill must not). The ` -t ` inside the quoted
     // `kill-session -t <name>` is the tmux target flag, which is expected.

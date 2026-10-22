@@ -581,7 +581,7 @@ describe('getGitWorkspaceOverview', () => {
   it('ignores a repository that merely sits above the workspace and is the home folder (a dotfiles repo)', async () => {
     repoAt(home);
     writeFileSync(join(home, 'zshrc'), 'x'); // dirty, and nothing to do with this session
-    const ws = join(home, 'codeman-cases', 'my-case');
+    const ws = join(home, 'reverie-cases', 'my-case');
     mkdir(ws, { recursive: true });
     const none = await getGitWorkspaceOverview(ws, { home });
     expect(none.state).toBe('not-a-repo');

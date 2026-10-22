@@ -150,7 +150,7 @@ describe('AiIdleChecker', () => {
       // Verify tmux was spawned with correct args
       expect(mockedSpawn).toHaveBeenCalledWith(
         'tmux',
-        expect.arrayContaining(['new-session', '-d', '-s', expect.stringContaining('codeman-aicheck-')]),
+        expect.arrayContaining(['new-session', '-d', '-s', expect.stringContaining('reverie-aicheck-')]),
         expect.objectContaining({ detached: true, stdio: 'ignore' })
       );
     });
@@ -164,7 +164,7 @@ describe('AiIdleChecker', () => {
 
       // First call should try to kill existing session
       expect(mockedExecSync).toHaveBeenCalledWith(
-        expect.stringContaining('tmux kill-session -t "codeman-aicheck-'),
+        expect.stringContaining('tmux kill-session -t "reverie-aicheck-'),
         expect.any(Object)
       );
     });
@@ -176,7 +176,7 @@ describe('AiIdleChecker', () => {
       await vi.advanceTimersByTimeAsync(500);
       await checkPromise;
 
-      expect(mockedWriteFileSync).toHaveBeenCalledWith(expect.stringContaining('codeman-aicheck-'), '');
+      expect(mockedWriteFileSync).toHaveBeenCalledWith(expect.stringContaining('reverie-aicheck-'), '');
     });
 
     it('should keep Claude stderr separate from verdict output', async () => {

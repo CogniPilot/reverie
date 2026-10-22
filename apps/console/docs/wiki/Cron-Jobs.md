@@ -151,7 +151,7 @@ curl -s -X POST "$API/api/cron/jobs/<jobId>/run" | jq
 curl -s "$API/api/cron/jobs/<jobId>/runs" | jq
 ```
 
-Add `-u admin:"$CODEMAN_PASSWORD"` when a password is set, and `-k` with the `https://` URL
+Add `-u admin:"$REVERIE_PASSWORD"` when a password is set, and `-k` with the `https://` URL
 on an HTTPS install.
 
 ## Gotchas
@@ -167,4 +167,4 @@ on an HTTPS install.
 
 - [Keeping Agents Running](Keeping-Agents-Running) - continuing work rather than starting it.
 - [Notifications And Approvals](Notifications-And-Approvals) - hearing about a job that got stuck.
-- [`docs/cron-guide.md`](https://github.com/Ark0N/Codeman/blob/master/docs/cron-guide.md) - the complete reference, including the API and SSE events.
+- [`docs/cron-guide.md`](https://github.com/jgoppert/reverie/blob/main/apps/console/docs/cron-guide.md) - the complete reference, including the API and SSE events.

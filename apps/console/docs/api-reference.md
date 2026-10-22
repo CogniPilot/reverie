@@ -115,7 +115,7 @@ The create body requires `name`, `scheduleType` and `enabled`. A `launch` job al
 requires `agentType`, `workingDir`, `promptMode`, `inputMode` and `concurrencyPolicy`;
 a `post` job requires `botId` (or, for an employee's own routine, no bot: the server
 sets `postAs: "author"`), `roomId` and `postText`. The owner (a call without an agent's
-`X-Codeman-Parent-Session` header) creates, edits, enables, deletes or runs any `post`
+`X-Reverie-Parent-Session` header) creates, edits, enables, deletes or runs any `post`
 job; a hired employee with the owner's routines grant does so for its own routines only (see "Post jobs" in the cron
 guide), and a job cannot change its `action`. Additional fields
 are required according to the selected prompt and schedule:
@@ -235,7 +235,7 @@ accepted, and of those only `exit` is dependable: see the caveats under
 `400`; omitting `until` never fails, the server just drops them from the default set
 and echoes the narrowed set back as `wait.until`. Three more places hooks can go
 missing even in `claude` mode: a **Docker case** needs
-`CODEMAN_DOCKER_BRIDGE_HOOKS=1`, since a container cannot reach a loopback-bound
+`REVERIE_DOCKER_BRIDGE_HOOKS=1`, since a container cannot reach a loopback-bound
 Reverie (without it, only `idle` / `working` / `exit` work); a **remote-SSH
 case** runs the agent on another host, whose hooks may never reach this server at
 all; and a case whose hook config was written by **Reverie < 1.13.0 against an
@@ -329,7 +329,7 @@ frame (`GET /api/v1/sessions/:id/terminal?full=1`), send `ESC [ B` while it is o
 Reading the current frame is also what keeps this correct on later runs: the dialog
 text stays in the terminal buffer for the life of the session, so a `trust` probe
 with `from=buffer` keeps matching long after the dialog is gone. A worked version is in
-[`extending-codeman.md`](extending-codeman.md#seam-3-http-api-and-cli).
+[`extending-reverie.md`](extending-reverie.md#seam-3-http-api-and-cli).
 
 ### `GET /api/v1/sessions/:id/wait`
 
@@ -585,14 +585,14 @@ request returns. The capture runs synchronous tmux calls on the server; the
 
 ## The `reverie agent` CLI (client over these endpoints)
 
-`reverie agent ls|spawn|send|wait|read|interrupt|rm` (`src/cli-agent.ts`) is the command-line client for the endpoints above, for agents the skill does not reach (a pi or shell session, a machine without `jq`). It adds no route: `spawn` is `POST /api/v1/quick-start` (+ `wait-output` on the mode's `capabilities.composerReadyMark` from the CLI registry, where it declares one), `send` is `POST …/input` with `clientId`+`seq` (and `wait`/`waitTimeout` for `--wait` / `--until <signals>`; `delivered:false` without `duplicate` and `wait.ended` both exit 3 — the CLI never reports a dead worker as done), `wait` is `GET …/wait` (`--until`) or `GET …/wait-output` (`--match`, `from=buffer` by default), `read` is `GET …/last-response` or `GET …/terminal?tail=`, `interrupt` is `POST …/input` with a bare `\u001b`, `rm` is `DELETE …/sessions/:id`. A fire-and-forget `send` to a sleeping wake-on-LAN host reads the route's `buffered` (own line, exit 0) and `dropped` (exit 1: the chunk is gone). An id may be the 8-character form `ls` prints, resolved through `GET /api/v1/sessions`; anything shorter refuses before any request, the same floor as `PARENT_SESSION_ID_MIN_PREFIX`. Every call carries `X-Codeman-Parent-Session`; only `spawn`'s quick-start carries `X-Codeman-Agent-Origin: codeman-agent-cli` (the agent-scratch label must never reach a request that cannot create the case directory). Basic auth comes from `CODEMAN_PASSWORD` or the data dir's `.env`. Server-side error codes are shown verbatim (`INVALID_INPUT: until=stop …` on a hook-less mode is not hidden); exit codes are `0` ok, `1` error, `2` timeout, `3` the session exited, `4` refused by a client-side guard. See the README section "`reverie agent`" for the guards and `test/cli-agent.test.ts` for the pinned behaviour.
+`reverie agent ls|spawn|send|wait|read|interrupt|rm` (`src/cli-agent.ts`) is the command-line client for the endpoints above, for agents the skill does not reach (a pi or shell session, a machine without `jq`). It adds no route: `spawn` is `POST /api/v1/quick-start` (+ `wait-output` on the mode's `capabilities.composerReadyMark` from the CLI registry, where it declares one), `send` is `POST …/input` with `clientId`+`seq` (and `wait`/`waitTimeout` for `--wait` / `--until <signals>`; `delivered:false` without `duplicate` and `wait.ended` both exit 3 — the CLI never reports a dead worker as done), `wait` is `GET …/wait` (`--until`) or `GET …/wait-output` (`--match`, `from=buffer` by default), `read` is `GET …/last-response` or `GET …/terminal?tail=`, `interrupt` is `POST …/input` with a bare `\u001b`, `rm` is `DELETE …/sessions/:id`. A fire-and-forget `send` to a sleeping wake-on-LAN host reads the route's `buffered` (own line, exit 0) and `dropped` (exit 1: the chunk is gone). An id may be the 8-character form `ls` prints, resolved through `GET /api/v1/sessions`; anything shorter refuses before any request, the same floor as `PARENT_SESSION_ID_MIN_PREFIX`. Every call carries `X-Reverie-Parent-Session`; only `spawn`'s quick-start carries `X-Reverie-Agent-Origin: reverie-agent-cli` (the agent-scratch label must never reach a request that cannot create the case directory). Basic auth comes from `REVERIE_PASSWORD` or the data dir's `.env`. Server-side error codes are shown verbatim (`INVALID_INPUT: until=stop …` on a hook-less mode is not hidden); exit codes are `0` ok, `1` error, `2` timeout, `3` the session exited, `4` refused by a client-side guard. See the README section "`reverie agent`" for the guards and `test/cli-agent.test.ts` for the pinned behaviour.
 
-`codeman mcp` (`src/mcp-server.ts`) is a Model Context Protocol server on stdio over the same endpoints, for MCP clients: `list_sessions` (`GET /api/v1/sessions`), `start_session` (`POST /api/v1/quick-start` with `X-Codeman-Agent-Origin: codeman-mcp`, then `wait-output` on the mode's ready mark), `send_prompt` (`POST …/input` with `wait`/`waitTimeout`), `wait_for_session` (`GET …/wait` or `…/wait-output`), `read_output` (`GET …/last-response` or `…/terminal?tail=`), `interrupt_session` and `delete_session`. It adds no route. The URL comes from `CODEMAN_API_URL` or `--url`, never a guess; prompting, interrupting and deleting are limited to sessions the process started (or the calling session's own children) unless it runs with `--allow-any-session`. See the README section "MCP server" and `test/mcp-server.test.ts`.
+`reverie mcp` (`src/mcp-server.ts`) is a Model Context Protocol server on stdio over the same endpoints, for MCP clients: `list_sessions` (`GET /api/v1/sessions`), `start_session` (`POST /api/v1/quick-start` with `X-Reverie-Agent-Origin: reverie-mcp`, then `wait-output` on the mode's ready mark), `send_prompt` (`POST …/input` with `wait`/`waitTimeout`), `wait_for_session` (`GET …/wait` or `…/wait-output`), `read_output` (`GET …/last-response` or `…/terminal?tail=`), `interrupt_session` and `delete_session`. It adds no route. The URL comes from `REVERIE_API_URL` or `--url`, never a guess; prompting, interrupting and deleting are limited to sessions the process started (or the calling session's own children) unless it runs with `--allow-any-session`. See the README section "MCP server" and `test/mcp-server.test.ts`.
 
 ## Prompt uploads (`POST /api/v1/sessions/:id/paste-image`)
 
 A `multipart/form-data` body with one `image` part. The file is written into the
-session's workspace as `<workingDir>/.codeman-uploads/paste-<ms>-<hex>.<ext>`, and
+session's workspace as `<workingDir>/.reverie-uploads/paste-<ms>-<hex>.<ext>`, and
 `data` carries `path` and `filename` for the client to type the path into the
 prompt. The folder is Reverie's own: hidden, created on first use with a
 `.gitignore` containing `*` (written once, never over a file already there), and
@@ -609,7 +609,7 @@ only if the container itself exposes that host path.
 The optional query flag `?kind=video` selects a second path for a camera-roll
 video: the file streams to disk instead of being buffered, under a far larger
 per-file cap (`MAX_PASTE_VIDEO_BYTES`, 1 GB by default, env
-`CODEMAN_MAX_PASTE_VIDEO_BYTES`), and only video container types are accepted
+`REVERIE_MAX_PASTE_VIDEO_BYTES`), and only video container types are accepted
 (mp4, webm, mov, m4v, ogv, single-sourced from the file viewer's playable set).
 The container is checked from the first bytes as
 the body arrives; a file whose bytes do not match its declared type is unlinked
@@ -632,7 +632,7 @@ without NUL or line breaks, and no other keys) answers `data: { url }`, a
 `/html-view/<cap>/<file>` URL. The capability grants GET access to the files under
 that file's own folder, so a page's relative CSS, scripts, images and data files
 resolve. It is held in memory only (a restart invalidates it), has a rolling TTL
-(`CODEMAN_WEBVIEW_CAPABILITY_TTL_MS`, default 12 h), is reused for the same folder,
+(`REVERIE_WEBVIEW_CAPABILITY_TTL_MS`, default 12 h), is reused for the same folder,
 and is revoked on logout, admin logout and user deletion. Refusals:
 
 - `400`: an invalid body, a remote (SSH) session, or a file that is not HTML (the
@@ -672,11 +672,11 @@ line between the two tabs. Accepted on `POST /api/v1/sessions` and
 
 ```bash
 # as a body field
--d '{"caseName":"worker-1","mode":"claude","parentSessionId":"'"$CODEMAN_SESSION_ID"'"}'
+-d '{"caseName":"worker-1","mode":"claude","parentSessionId":"'"$REVERIE_SESSION_ID"'"}'
 
 # or as a header, which is what an agent driving many spawns should use: set it once
 # on the curl invocation and every spawn call carries it
--H "X-Codeman-Parent-Session: $CODEMAN_SESSION_ID"
+-H "X-Reverie-Parent-Session: $REVERIE_SESSION_ID"
 ```
 
 The body field wins if both are present. The value is resolved against live sessions
@@ -851,7 +851,7 @@ Per-case profiles of what the user is trying to accomplish: user/agent-stated
 goals plus the user's recently submitted prompts, captured from the Claude
 session transcript while the opt-in `readMyMindEnabled` setting is on (default
 OFF). Keyed by owner + workingDir, so the profile survives `/clear`, respawns,
-and session churn. Stored in `~/.codeman/intents.json` (mode 0600); never fed
+and session churn. Stored in `~/.reverie/intents.json` (mode 0600); never fed
 into `/api/v1/search`. Design: [`readmymind-plan.md`](readmymind-plan.md);
 user guide: [`readmymind.md`](readmymind.md).
 
@@ -953,7 +953,7 @@ confirmed? } | { clear: true }` applies (or clears) the session's
   while changing nothing. Two more responses replace the normal
   `{customModel, restarted}` shape, neither an error, and neither restarts
   or creates anything on the first ask. ⚠️ **Each is answered by its OWN
-  flag on the retry, and answering one is not consent to the other**: they
+  flag on the retry, and answering one is not authorization to the other**: they
   are questions about different people, and while they shared a single flag
   a caller who confirmed the context warning silently agreed to evict
   another session's model as well. Send `confirmedContext: true` to proceed
@@ -1008,11 +1008,11 @@ Admin only in multi-user mode (`403`), like `POST /api/cases/link`: it writes ou
 
 ## Agent profile
 
-`GET /api/agents/:id/profile` is what an agent's profile panel reads: the session's backend, model, effort (the spawn-time default, plus the level its newest Claude Code transcript turn used), the console's token and message counters, the company employee and chat rooms it is bound to, whether the fleet runtime supervises it (with that runtime's configured backends), and the owner-selected persona from its instance config. **Read-only:** the fleet runtime builds it (`fleet-runtime --policy POLICY profile ID`) from GET calls and local reads, and reports backend switching as unavailable (`runtime.switch.available: false`), because switching is an owner action that waits for owner authentication.
+`GET /api/agents/:id/profile` is what an agent's profile panel reads: the session's backend, model, effort (the spawn-time default, plus the level its newest Claude Code transcript turn used), the console's token and message counters, the company employee and chat rooms it is bound to, whether the reverie runtime supervises it (with that runtime's configured backends), and the owner-selected persona from its instance config. **Read-only:** the reverie runtime builds it (`reverie-runtime --policy POLICY profile ID`) from GET calls and local reads, and reports backend switching as unavailable (`runtime.switch.available: false`), because switching is an owner action that waits for owner authentication.
 
 - The session resolves like every session route (ownership via `findSessionOrFail`; another user's session is `404`).
-- **Who may read it:** the owner (no `X-Codeman-Parent-Session` header) reads any agent's profile. An agent reads only its **own**, and direct-message rooms are left out of it. Any other header, resolvable or not, gets `403`.
-- `503` until the server's environment names the runtime policy (`REVERIE_RUNTIME_POLICY`; `REVERIE_RUNTIME_BIN` overrides `fleet-runtime` on `PATH`). The command comes only from the environment, so no API call can choose what this route runs.
+- **Who may read it:** the owner (no `X-Reverie-Parent-Session` header) reads any agent's profile. An agent reads only its **own**, and direct-message rooms are left out of it. Any other header, resolvable or not, gets `403`.
+- `503` until the server's environment names the runtime policy (`REVERIE_RUNTIME_POLICY`; `REVERIE_RUNTIME_BIN` overrides `reverie-runtime` on `PATH`). The command comes only from the environment, so no API call can choose what this route runs.
 - `501` in multi-user mode: the report reads the console as its owner.
 - `502` when the runtime fails or prints no JSON object, with its `error` when it reported one; `404` when the session disappeared before the report ran.
 - Concurrent requests for one session share a single report. A finished report is reused for 15 s. At most two reports run at once server-wide; more requests wait their turn.
@@ -1076,7 +1076,7 @@ Result (`data`):
 - `unsupported[]` — labels of enabled agent CLIs with no known MCP config file (nothing is guessed).
   - Only installed CLIs are listed: one that is not installed is left out, as a supported CLI that is not installed reads `absent`.
 
-The result carries server **names** only, never `env` values, `headers` or file content. Each changed file keeps its previous content as `<file>.codeman-bak` (overwritten by each sync); a file that receives servers carrying `env` or `headers` is left mode `0600`.
+The result carries server **names** only, never `env` values, `headers` or file content. Each changed file keeps its previous content as `<file>.reverie-bak` (overwritten by each sync); a file that receives servers carrying `env` or `headers` is left mode `0600`.
 
 ## Diagnostics
 
@@ -1084,8 +1084,8 @@ The result carries server **names** only, never `env` values, `headers` or file 
 
 ## Authentication
 
-Optional HTTP Basic (`CODEMAN_USERNAME`/`CODEMAN_PASSWORD`) → opaque
-`codeman_session` cookie. When enabled, unauthenticated requests get
+Optional HTTP Basic (`REVERIE_USERNAME`/`REVERIE_PASSWORD`) → opaque
+`reverie_session` cookie. When enabled, unauthenticated requests get
 `401 UNAUTHORIZED`; rate-limited requests get `429 RATE_LIMITED`. See
 [`security-architecture.md`](security-architecture.md).
 

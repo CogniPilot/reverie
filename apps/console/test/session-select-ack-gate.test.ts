@@ -29,7 +29,7 @@ import { describe, expect, it, vi } from 'vitest';
 const APP_PATH = resolve(import.meta.dirname, '../src/web/public/app.js');
 const APP_SOURCE = readFileSync(APP_PATH, 'utf8');
 
-function loadCodemanAppClass() {
+function loadReverieAppClass() {
   const constants = readFileSync(resolve(import.meta.dirname, '../src/web/public/constants.js'), 'utf8');
   const context = vm.createContext({
     console: { ...console, log: vi.fn(), warn: vi.fn(), error: vi.fn() },
@@ -47,11 +47,11 @@ function loadCodemanAppClass() {
     window: { addEventListener: vi.fn(), removeEventListener: vi.fn() },
     MobileDetection: { isTouchDevice: () => false },
   });
-  vm.runInContext(`${constants}\n${APP_SOURCE}\nglobalThis.__CodemanApp = CodemanApp;`, context);
-  return (context as { __CodemanApp: new () => unknown }).__CodemanApp;
+  vm.runInContext(`${constants}\n${APP_SOURCE}\nglobalThis.__ReverieApp = ReverieApp;`, context);
+  return (context as { __ReverieApp: new () => unknown }).__ReverieApp;
 }
 
-const CodemanApp = loadCodemanAppClass();
+const ReverieApp = loadReverieAppClass();
 const SID = 'session-with-a-yellow-tab';
 
 /**
@@ -60,7 +60,7 @@ const SID = 'session-with-a-yellow-tab';
  * context, which is why callers swallow the rejection.
  */
 function makeApp(activeSessionId: string | null) {
-  const app = Object.create((CodemanApp as { prototype: object }).prototype) as Record<string, unknown>;
+  const app = Object.create((ReverieApp as { prototype: object }).prototype) as Record<string, unknown>;
   app.markIdleAlertSeen = vi.fn();
   app.pendingHooks = new Map([[SID, new Set(['idle_prompt'])]]);
   app.activeSessionId = activeSessionId;

@@ -5,8 +5,8 @@
  *  - attachment registration (POST /api/sessions/:id/attachments)
  *  - raw / preview / thumbnail serving (defense-in-depth against a record that
  *    was crafted or registered before the guard existed)
- * while still allowing legitimate cross-workspace attachment (codeman-publish
- * skill + the ~/.codeman review-card loop) to succeed.
+ * while still allowing legitimate cross-workspace attachment (reverie-publish
+ * skill + the ~/.reverie review-card loop) to succeed.
  *
  * Uses app.inject() — no real HTTP ports needed.
  * Port: N/A (app.inject doesn't open ports)
@@ -26,7 +26,7 @@ vi.mock('node:fs/promises', () => ({
     writeFile: vi.fn(async () => undefined),
     stat: vi.fn(async () => ({ size: 100, isFile: () => true, mtimeMs: 1 })),
     mkdir: vi.fn(async () => undefined),
-    mkdtemp: vi.fn(async () => '/tmp/codeman-preview-test'),
+    mkdtemp: vi.fn(async () => '/tmp/reverie-preview-test'),
     rename: vi.fn(async () => undefined),
     rm: vi.fn(async () => undefined),
   },
@@ -79,17 +79,17 @@ describe('file-routes attachment path guard (COD-53)', () => {
     await harness.app.close();
     attachmentRegistry.clearSession(harness.ctx._sessionId);
     // Reset attachment-guard env knobs so one test can't leak into the next.
-    delete process.env.CODEMAN_ATTACHMENT_BLOCKED_PATHS;
-    delete process.env.CODEMAN_ATTACHMENT_CONFINE;
+    delete process.env.REVERIE_ATTACHMENT_BLOCKED_PATHS;
+    delete process.env.REVERIE_ATTACHMENT_CONFINE;
   });
 
   // ===== BLOCK: registration rejects a sensitive path =====
 
-  it.each(['.fleet', 'private-console'])(
+  it.each(['.reverie', 'private-console'])(
     'blocks bot credentials through every file egress for %s data dir',
     async (directory) => {
       const dataDir = `${harness.ctx._session.workingDir}/${directory}`;
-      vi.stubEnv('FLEET_DATA_DIR', dataDir);
+      vi.stubEnv('REVERIE_DATA_DIR', dataDir);
       const secretPath = `${dataDir}/external-chat.json`;
       const id = harness.ctx._sessionId;
       const registered = await harness.app.inject({
@@ -197,12 +197,12 @@ describe('file-routes attachment path guard (COD-53)', () => {
 
   // ===== PRESERVE: legitimate cross-workspace attachment still works =====
 
-  it('still registers a normal cross-workspace file (codeman-publish / loop review card)', async () => {
+  it('still registers a normal cross-workspace file (reverie-publish / loop review card)', async () => {
     mockedStat.mockResolvedValue({ size: 512, isFile: () => true, mtimeMs: 5 } as never);
     const res = await harness.app.inject({
       method: 'POST',
       url: `/api/sessions/${harness.ctx._sessionId}/attachments`,
-      payload: { path: `${homedir()}/.codeman/jira-autoloop-questions.md` },
+      payload: { path: `${homedir()}/.reverie/jira-autoloop-questions.md` },
     });
 
     expect(res.statusCode).toBe(200);
@@ -234,7 +234,7 @@ describe('file-routes attachment path guard (COD-53)', () => {
     const registerRes = await harness.app.inject({
       method: 'POST',
       url: `/api/sessions/${harness.ctx._sessionId}/attachments`,
-      payload: { path: `${homedir()}/.codeman/review-card.md` },
+      payload: { path: `${homedir()}/.reverie/review-card.md` },
     });
     const attachmentId = JSON.parse(registerRes.body).data.attachmentId;
 
@@ -268,7 +268,7 @@ describe('file-routes attachment path guard (COD-53)', () => {
     const res = await harness.app.inject({
       method: 'POST',
       url: `/api/sessions/${harness.ctx._sessionId}/attachments`,
-      payload: { path: '/etc/codeman/config-dump.txt' },
+      payload: { path: '/etc/reverie/config-dump.txt' },
     });
 
     expect(res.statusCode).toBe(403);
@@ -292,7 +292,7 @@ describe('file-routes attachment path guard (COD-53)', () => {
   // ===== CONFIG: extend the blocked set via env =====
 
   it('rejects a path added via the extra-blocked-paths config', async () => {
-    process.env.CODEMAN_ATTACHMENT_BLOCKED_PATHS = '/srv/secrets,/data/private';
+    process.env.REVERIE_ATTACHMENT_BLOCKED_PATHS = '/srv/secrets,/data/private';
     const res = await harness.app.inject({
       method: 'POST',
       url: `/api/sessions/${harness.ctx._sessionId}/attachments`,
@@ -305,7 +305,7 @@ describe('file-routes attachment path guard (COD-53)', () => {
   });
 
   it('still allows a normal path NOT in the configured blocked set', async () => {
-    process.env.CODEMAN_ATTACHMENT_BLOCKED_PATHS = '/srv/secrets,/data/private';
+    process.env.REVERIE_ATTACHMENT_BLOCKED_PATHS = '/srv/secrets,/data/private';
     mockedStat.mockResolvedValue({ size: 20, isFile: () => true, mtimeMs: 5 } as never);
     const res = await harness.app.inject({
       method: 'POST',
@@ -322,7 +322,7 @@ describe('file-routes attachment path guard (COD-53)', () => {
   // ===== CONFINEMENT MODE ON (opt-in) =====
 
   it('confinement ON: rejects a file OUTSIDE the session workspace', async () => {
-    process.env.CODEMAN_ATTACHMENT_CONFINE = '1';
+    process.env.REVERIE_ATTACHMENT_CONFINE = '1';
     // Mock session workspace is /tmp/test-workdir; this file resolves elsewhere.
     const res = await harness.app.inject({
       method: 'POST',
@@ -336,7 +336,7 @@ describe('file-routes attachment path guard (COD-53)', () => {
   });
 
   it('confinement ON: allows a file INSIDE the session workspace', async () => {
-    process.env.CODEMAN_ATTACHMENT_CONFINE = '1';
+    process.env.REVERIE_ATTACHMENT_CONFINE = '1';
     // Mock session workspace is /tmp/test-workdir (see MockSession).
     const insidePath = '/tmp/test-workdir/docs/report.pdf';
     mockedRealpathSync.mockReturnValue(insidePath as never);
@@ -356,14 +356,14 @@ describe('file-routes attachment path guard (COD-53)', () => {
   // ===== CONFINEMENT OFF (default) regression: legit cross-workspace attach =====
 
   it('confinement OFF (default): legit cross-workspace attach still succeeds', async () => {
-    // No CODEMAN_ATTACHMENT_CONFINE set → default OFF. A ~/.codeman review-card
+    // No REVERIE_ATTACHMENT_CONFINE set → default OFF. A ~/.reverie review-card
     // file lives OUTSIDE the /tmp/test-workdir session workspace and must still
-    // attach (protects codeman-publish + the loop's review-card channel).
+    // attach (protects reverie-publish + the loop's review-card channel).
     mockedStat.mockResolvedValue({ size: 64, isFile: () => true, mtimeMs: 5 } as never);
     const res = await harness.app.inject({
       method: 'POST',
       url: `/api/sessions/${harness.ctx._sessionId}/attachments`,
-      payload: { path: `${homedir()}/.codeman/jira-autoloop-questions.md` },
+      payload: { path: `${homedir()}/.reverie/jira-autoloop-questions.md` },
     });
 
     expect(res.statusCode).toBe(200);
@@ -373,7 +373,7 @@ describe('file-routes attachment path guard (COD-53)', () => {
   });
 
   // ===== Magic-link scan path: FORCED workspace confinement =====
-  // The terminal-output `codeman://attach` scanner registers with
+  // The terminal-output `reverie://attach` scanner registers with
   // forceWorkspaceConfinement: true so a prompt-injected session printing an
   // arbitrary path can't expose a host file, even though global confine is OFF.
   describe('forced workspace confinement (magic-link scan path)', () => {
@@ -574,9 +574,9 @@ describe('file-routes attachment path guard (COD-53)', () => {
     it.each([
       ['/home/someone/.config/gh/hosts.yml', 'forge token'],
       ['/home/someone/project/.env.json', 'dotenv'],
-      ['/home/someone/.codeman/state.json', 'codeman state (can hold envOverrides secrets)'],
+      ['/home/someone/.reverie/state.json', 'reverie state (can hold envOverrides secrets)'],
       ['/home/someone/deploy/credentials.yaml', 'generic credentials'],
-      ['/etc/codeman/dump.log', 'blocked tree'],
+      ['/etc/reverie/dump.log', 'blocked tree'],
     ])('still refuses %s (%s) now that text is servable', async (path) => {
       mockedStat.mockResolvedValue({ size: 40, isFile: () => true, mtimeMs: 5 } as never);
       const res = await harness.app.inject({

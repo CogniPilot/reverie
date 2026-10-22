@@ -36,7 +36,7 @@ dashed branch means that child is working.
 Desktop only, on by default, and toggled in **App Settings → Appearance**. Lines are skipped
 for tabs scrolled out of view.
 
-See [Driving Reverie From An Agent](Driving-Codeman-From-An-Agent) for the spawning side.
+See [Driving Reverie From An Agent](Driving-Reverie-From-An-Agent) for the spawning side.
 
 ## Agent teams
 
@@ -55,7 +55,7 @@ Teammates are in-process threads rather than separate CLI processes, so they sho
 windows, not tabs.
 
 Notes and the experiment log:
-[`docs/agent-teams/`](https://github.com/Ark0N/Codeman/tree/master/docs/agent-teams).
+[`docs/agent-teams/`](https://github.com/jgoppert/reverie/tree/main/apps/console/docs/agent-teams).
 
 ## Ultracode and workflow runs
 
@@ -114,5 +114,5 @@ are not reading.
 ## Read next
 
 - [The Dashboard](The-Dashboard) - where these surfaces live.
-- [Driving Reverie From An Agent](Driving-Codeman-From-An-Agent) - the other kind of fan-out.
+- [Driving Reverie From An Agent](Driving-Reverie-From-An-Agent) - the other kind of fan-out.
 - [Autonomous Loops](Autonomous-Loops) - the loops that generate this much activity.

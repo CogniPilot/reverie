@@ -58,7 +58,7 @@ function translator(language: string) {
     url: 'http://localhost/',
   });
   vm.runInContext(I18N, dom.getInternalVMContext(), { filename: 'i18n.js' });
-  const api = (dom.window as unknown as { CodemanI18n: Api }).CodemanI18n;
+  const api = (dom.window as unknown as { ReverieI18n: Api }).ReverieI18n;
   api.configure({ language });
   return { api, dom };
 }
@@ -145,7 +145,7 @@ async function exercise() {
   setUp();
   const app = makeGridApp(EIGHT);
   // The harness logos: a CLI-reported model, a launch one, a custom endpoint's, none.
-  windowStub.__codemanCliCatalog = [
+  windowStub.__reverieCliCatalog = [
     { id: 'claude', label: 'Claude Code' },
     { id: 'deepseek', label: 'DeepSeek' },
     { id: 'codex', label: 'Codex' },
@@ -468,7 +468,7 @@ describe('the static markup through the real translator (JSDOM, zh-CN)', () => {
     '<span id="u-group" class="tab-layout-group-name" data-i18n-skip>Tiles</span>' +
     '<span id="control">Tiles</span>';
   doc.body.appendChild(extra);
-  const api = (dom.window as unknown as { CodemanI18n: Api }).CodemanI18n;
+  const api = (dom.window as unknown as { ReverieI18n: Api }).ReverieI18n;
   api.start();
   api.configure({ language: 'zh-CN' });
 
@@ -553,13 +553,13 @@ describe('the loading label: CSS generated content, written in the UI language',
       drop() {}
     };
     try {
-      windowStub.codemanT = zh.api.t;
+      windowStub.reverieT = zh.api.t;
       const app = makeGridApp(EIGHT);
       app.openTileGrid(EIGHT.slice(0, 2));
       const entry = app._tileGrid.tiles.get('s-1');
       expect(entry.body.dataset.loadingLabel).toBe('加载中…');
       // A language switched since is picked up the next time the tile loads.
-      windowStub.codemanT = en.api.t;
+      windowStub.reverieT = en.api.t;
       app._tileLoadQueue();
       queue.onChange!(entry.tile, 'queued');
       expect(entry.el.classList.contains('tile--loading')).toBe(true);
@@ -568,7 +568,7 @@ describe('the loading label: CSS generated content, written in the UI language',
       expect(entry.el.classList.contains('tile--loading')).toBe(false);
     } finally {
       windowStub.TileLoadQueue = Queue;
-      delete windowStub.codemanT;
+      delete windowStub.reverieT;
     }
   });
 

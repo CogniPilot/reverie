@@ -11,7 +11,7 @@
  * (`@deepseek-ai/dsh` profile-boot): every bundle's patch layer, the profile's own
  * `$DSH_HOME/profiles/<profile>/cordis.patch.yml`, the home-level
  * `$DSH_HOME/cordis.patch.yml` (it outranks the profile layer), then `--patch`
- * overlays (Codeman passes none). A patch targets a row by `id`; one whose `name`
+ * overlays (Reverie passes none). A patch targets a row by `id`; one whose `name`
  * does not match the row's is skipped; every other key REPLACES the row's field
  * whole (`applyEntryPatches`), so the last layer carrying `config` for the `dsh-tui`
  * row defines all of it.

@@ -47,7 +47,7 @@ export function createDeferred<T = void>(): {
  * for the day that stops being true (a test that runs outside setup.ts, an
  * env override that anchors a path elsewhere): it refuses to delete anything
  * not under the redirected `process.env.HOME`, so the failure mode is a
- * leftover temp dir rather than a deleted PRODUCTION `~/codeman-cases`.
+ * leftover temp dir rather than a deleted PRODUCTION `~/reverie-cases`.
  * Lexical `resolve()` is used because the leaf often does not exist and
  * `realpathSync` would throw.
  */

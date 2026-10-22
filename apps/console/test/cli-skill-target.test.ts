@@ -1,9 +1,9 @@
 /**
- * @fileoverview Tests for `codeman skill install|uninstall` target resolution
+ * @fileoverview Tests for `reverie skill install|uninstall` target resolution
  * (`resolveCliCasePath` / `resolveSkillTargetPath` in src/cli.ts).
  *
  * The linked-cases lookup shipped in 1.14.2 with no guard: before it, `--case`
- * rejected every case linked in from outside `~/codeman-cases` with "Case not
+ * rejected every case linked in from outside `~/reverie-cases` with "Case not
  * found" even though the server resolved the same name fine. These tests pin both
  * halves of that resolution (registry first, cases dir as fallback) and the
  * tolerance rules around a missing or malformed registry.
@@ -23,12 +23,12 @@ import { program, resolveCliCasePath, resolveSkillTargetPath } from '../src/cli.
 import { getCasesDir } from '../src/config/cases-dir.js';
 
 const LINKED_CASES_FILE = dataPath('linked-cases.json');
-const CASES_DIR = join(homedir(), 'codeman-cases');
+const CASES_DIR = join(homedir(), 'reverie-cases');
 const LINKED_ROOT = join(homedir(), 'elsewhere');
 
 /** Where the packaged skill lands under a case. Mirrors `applyAgentSkill()`. */
 function skillDirIn(casePath: string): string {
-  return join(casePath, '.claude', 'skills', 'codeman');
+  return join(casePath, '.claude', 'skills', 'reverie');
 }
 
 function writeLinkedCases(content: string): void {
@@ -44,7 +44,7 @@ beforeEach(() => {
 
 afterEach(() => {
   // LINKED_CASES_FILE is dataPath('linked-cases.json'), which test/setup.ts
-  // sandboxes (temp HOME, and an inherited CODEMAN_DATA_DIR is stripped), so a
+  // sandboxes (temp HOME, and an inherited REVERIE_DATA_DIR is stripped), so a
   // plain delete is safe here. The case trees still go through the containment
   // gate as defense in depth.
   rmSync(LINKED_CASES_FILE, { force: true });
@@ -55,7 +55,7 @@ afterEach(() => {
 describe('resolveSkillTargetPath (global)', () => {
   it('targets the user-scope skill dir when no --case is given', () => {
     expect(resolveSkillTargetPath({})).toEqual({
-      target: join(homedir(), '.claude', 'skills', 'codeman'),
+      target: join(homedir(), '.claude', 'skills', 'reverie'),
     });
   });
 
@@ -63,13 +63,13 @@ describe('resolveSkillTargetPath (global)', () => {
     // A registry entry named after nothing in particular must not divert the
     // global install, which is not case-scoped at all.
     writeLinkedCases(JSON.stringify({ anything: join(LINKED_ROOT, 'anything') }));
-    expect(resolveSkillTargetPath({}).target).toBe(join(homedir(), '.claude', 'skills', 'codeman'));
+    expect(resolveSkillTargetPath({}).target).toBe(join(homedir(), '.claude', 'skills', 'reverie'));
   });
 });
 
 describe('resolveCliCasePath / resolveSkillTargetPath (--case)', () => {
   it('resolves a LINKED case through linked-cases.json, not the cases dir', () => {
-    // The 1.14.2 regression: a case linked in from outside ~/codeman-cases was
+    // The 1.14.2 regression: a case linked in from outside ~/reverie-cases was
     // resolved to a cases-dir path that does not exist, so install refused it.
     const linkedPath = join(LINKED_ROOT, 'my-repo');
     mkdirSync(linkedPath, { recursive: true });
@@ -145,32 +145,32 @@ describe('skill command wiring', () => {
         .options.map((opt) => opt.long)
         .sort();
     // --mode picks the skill and directory that run mode reads (capabilities.agentSkill);
-    // uninstall needs none, since --case removes every Codeman-managed copy.
+    // uninstall needs none, since --case removes every Reverie-managed copy.
     expect(flagsOf('install')).toEqual(['--case', '--global', '--mode']);
     expect(flagsOf('uninstall')).toEqual(['--case', '--global']);
   });
 });
 
-describe('cases dir override (CODEMAN_CASES_PATH)', () => {
-  // The Docker Compose deployment points Codeman at a host-absolute bind mount
+describe('cases dir override (REVERIE_CASES_PATH)', () => {
+  // The Docker Compose deployment points Reverie at a host-absolute bind mount
   // so a Docker case resolves to the same path inside the container and on the
   // host daemon. The override shipped on the server's CASES_DIR only, which left
-  // the CLI looking in the home default: `codeman skill install --case <name>`
+  // the CLI looking in the home default: `reverie skill install --case <name>`
   // then reported "Case not found" on exactly the deployment it exists for.
-  const saved = process.env.CODEMAN_CASES_PATH;
+  const saved = process.env.REVERIE_CASES_PATH;
   afterEach(() => {
-    if (saved === undefined) delete process.env.CODEMAN_CASES_PATH;
-    else process.env.CODEMAN_CASES_PATH = saved;
+    if (saved === undefined) delete process.env.REVERIE_CASES_PATH;
+    else process.env.REVERIE_CASES_PATH = saved;
   });
 
   it('moves the CLI and the server together', () => {
-    process.env.CODEMAN_CASES_PATH = '/srv/codeman-cases';
-    expect(getCasesDir()).toBe('/srv/codeman-cases');
-    expect(resolveCliCasePath('demo')).toBe(join('/srv/codeman-cases', 'demo'));
+    process.env.REVERIE_CASES_PATH = '/srv/reverie-cases';
+    expect(getCasesDir()).toBe('/srv/reverie-cases');
+    expect(resolveCliCasePath('demo')).toBe(join('/srv/reverie-cases', 'demo'));
   });
 
   it('falls back to the home default when unset', () => {
-    delete process.env.CODEMAN_CASES_PATH;
+    delete process.env.REVERIE_CASES_PATH;
     expect(getCasesDir()).toBe(CASES_DIR);
     expect(resolveCliCasePath('demo')).toBe(join(CASES_DIR, 'demo'));
   });
@@ -178,7 +178,7 @@ describe('cases dir override (CODEMAN_CASES_PATH)', () => {
   it('still lets a linked case win over the override', () => {
     // The registry lookup runs first, so a case linked in from outside the cases
     // dir keeps resolving to its real location under Compose too.
-    process.env.CODEMAN_CASES_PATH = '/srv/codeman-cases';
+    process.env.REVERIE_CASES_PATH = '/srv/reverie-cases';
     writeLinkedCases(JSON.stringify({ linked: join(LINKED_ROOT, 'linked') }));
     expect(resolveCliCasePath('linked')).toBe(join(LINKED_ROOT, 'linked'));
   });

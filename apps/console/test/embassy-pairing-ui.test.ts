@@ -50,7 +50,7 @@ it('the single sidebar plus opens the owner Invite/Join flow and existing-key fa
  expect(h.calls.filter(c=>c.method==='POST')).toHaveLength(0);
 });
 it('unconfigured hosting and company labels cannot enable hosted authority',async()=>{
- const h=await setup();h.state.host='unconfigured';h.window.CodemanI18n={displayName:'Owner company'};await h.pair.open();
+ const h=await setup();h.state.host='unconfigured';h.window.ReverieI18n={displayName:'Owner company'};await h.pair.open();
  expect(h.button('Invite a company').disabled).toBe(true);expect(h.button('Join a company').disabled).toBe(false);
  await h.pair.createInvite();expect(h.calls.filter(c=>c.path.endsWith('/invites')&&c.method==='POST')).toHaveLength(0);
 });

@@ -20,7 +20,7 @@ const terminalSource = readFileSync(resolve('src/web/public/terminal-ui.js'), 'u
 type TerminalInput = { isTerminalFocusOrMouseReport(data: string): boolean };
 type TerminalModule = {
   terminalInput: TerminalInput;
-  CodemanApp: { prototype: Record<string, (...args: never[]) => unknown> };
+  ReverieApp: { prototype: Record<string, (...args: never[]) => unknown> };
   bar: Bar;
 };
 let terminalModule: TerminalModule | null = null;
@@ -29,8 +29,8 @@ let terminalModule: TerminalModule | null = null;
  * terminal-ui.js in a vm, with the REAL accessory bar in the same script scope
  * (it is a `const` singleton, so only a shared scope makes the bare
  * `KeyboardAccessoryBar` reference in the CJK path resolve). Its IIFE only
- * needs a window to hang `CodemanTerminalInput` on, but the rest of the file
- * assigns to CodemanApp.prototype at top level, so constants.js + app.js load
+ * needs a window to hang `ReverieTerminalInput` on, but the rest of the file
+ * assigns to ReverieApp.prototype at top level, so constants.js + app.js load
  * first — the same recipe as test/local-echo-codex-gating.test.ts.
  */
 function loadTerminalModule(): TerminalModule {
@@ -55,13 +55,13 @@ function loadTerminalModule(): TerminalModule {
   });
   vm.runInContext(
     `${read('constants.js')}\n${keyboardSource}\n${read('app.js')}\n${terminalSource}\n` +
-      `globalThis.__CodemanApp = CodemanApp; globalThis.__bar = KeyboardAccessoryBar;`,
+      `globalThis.__ReverieApp = ReverieApp; globalThis.__bar = KeyboardAccessoryBar;`,
     context
   );
-  const exported = context as unknown as { __CodemanApp: TerminalModule['CodemanApp']; __bar: Bar };
+  const exported = context as unknown as { __ReverieApp: TerminalModule['ReverieApp']; __bar: Bar };
   terminalModule = {
-    terminalInput: (windowStub as { CodemanTerminalInput?: TerminalInput }).CodemanTerminalInput!,
-    CodemanApp: exported.__CodemanApp,
+    terminalInput: (windowStub as { ReverieTerminalInput?: TerminalInput }).ReverieTerminalInput!,
+    ReverieApp: exported.__ReverieApp,
     bar: exported.__bar,
   };
   return terminalModule;
@@ -407,11 +407,11 @@ describe('terminal input wiring', () => {
   it('skips terminal-generated focus and mouse reports', () => {
     // Pins the gate itself: without it the modifier is spent by the `\x1b[I`
     // that the Ctrl button's own refocus emits (see the describe below).
-    expect(terminalSource).toContain('!window.CodemanTerminalInput?.isTerminalFocusOrMouseReport(data)');
+    expect(terminalSource).toContain('!window.ReverieTerminalInput?.isTerminalFocusOrMouseReport(data)');
   });
 });
 
-describe('CodemanTerminalInput.isTerminalFocusOrMouseReport', () => {
+describe('ReverieTerminalInput.isTerminalFocusOrMouseReport', () => {
   const isReport = loadTerminalInput().isTerminalFocusOrMouseReport;
 
   it.each([
@@ -493,9 +493,9 @@ describe('one-shot Ctrl through the CJK input field', () => {
   // send path needs the modifier applied too. These drive the REAL
   // _handleCjkInput against the REAL bar, both loaded into one vm scope.
   function cjkApp() {
-    const { CodemanApp, bar } = loadTerminalModule();
+    const { ReverieApp, bar } = loadTerminalModule();
     bar.clearCtrl();
-    const app = Object.create(CodemanApp.prototype) as {
+    const app = Object.create(ReverieApp.prototype) as {
       activeSessionId: string;
       _sendInputAsync: ReturnType<typeof vi.fn>;
       _handleCjkInput(text: string): void;

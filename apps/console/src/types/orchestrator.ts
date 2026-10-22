@@ -223,7 +223,7 @@ export const DEFAULT_ORCHESTRATOR_CONFIG: OrchestratorConfig = {
 // Persistence
 // ═══════════════════════════════════════════════════════════════
 
-/** Orchestrator state persisted to ~/.codeman/state.json */
+/** Orchestrator state persisted to ~/.reverie/state.json */
 export interface OrchestratorPersistState {
   /** Current state machine state */
   state: OrchestratorState;

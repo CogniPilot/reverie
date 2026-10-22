@@ -20,8 +20,8 @@ Three ways to get one, all under **New or link a case…** at the bottom of the 
 
 | How               | Result                                                                                                 |
 | ----------------- | ------------------------------------------------------------------------------------------------------ |
-| **Create New**    | A fresh `~/codeman-cases/<name>` with a scaffolded `CLAUDE.md`, or with **Create in a custom folder**, a new folder inside a parent you choose, scaffolded the same way and registered in place like a linked case. |
-| **Clone Repo**    | A repo cloned into `~/codeman-cases/<name>` and registered as a case. Private repos need this machine's own git credentials (see below). |
+| **Create New**    | A fresh `~/reverie-cases/<name>` with a scaffolded `CLAUDE.md`, or with **Create in a custom folder**, a new folder inside a parent you choose, scaffolded the same way and registered in place like a linked case. |
+| **Clone Repo**    | A repo cloned into `~/reverie-cases/<name>` and registered as a case. Private repos need this machine's own git credentials (see below). |
 | **Link Existing** | An existing folder anywhere on disk, registered in place. Nothing is copied or moved.                    |
 
 Linked cases keep living where they are. Deleting a case in Reverie removes the
@@ -35,7 +35,7 @@ section of `docker/README.md`. Without credentials a private repo fails straight
 authentication error.
 
 **Cases created from scratch are the only copy of that code.** Uninstalling Reverie does not
-delete `~/codeman-cases/`, but treat that directory as real work, not scratch space.
+delete `~/reverie-cases/`, but treat that directory as real work, not scratch space.
 
 ## Session
 
@@ -96,18 +96,18 @@ would. That indirection buys:
 - **Real scrollback.** History is held by tmux, so reconnecting replays what happened while
   you were gone instead of starting from blank.
 - **Attach from anywhere else.** The same session is reachable from a terminal over SSH
-  with `codeman tui`, or plain `tmux -L codeman attach`.
+  with `reverie tui`, or plain `tmux -L reverie attach`.
 - **Secrets off the command line.** Environment overrides are injected with socket-scoped
   `tmux setenv` rather than being visible in the spawn command.
 
-The socket is `tmux -L codeman`, separate from your personal tmux server, so Codeman
+The socket is `tmux -L reverie`, separate from your personal tmux server, so Reverie
 sessions never appear in a bare `tmux ls`.
 
 ## What persists
 
 | Survives                                     | Does not survive                                    |
 | -------------------------------------------- | --------------------------------------------------- |
-| Closing the browser                          | `tmux -L codeman kill-server`                        |
+| Closing the browser                          | `tmux -L reverie kill-server`                        |
 | Losing the network                            | A machine reboot (tmux dies with it)                 |
 | Restarting the Reverie server                 | Killing the session from the UI                      |
 | `reverie web --stop`                          |                                                      |
@@ -120,7 +120,7 @@ screen's **Resume Conversation** list offers.
 
 ## State on disk
 
-Everything Reverie knows lives under `~/.codeman/`:
+Everything Reverie knows lives under `~/.reverie/`:
 
 | File                                     | Holds                                                                |
 | ---------------------------------------- | -------------------------------------------------------------------- |
@@ -135,7 +135,7 @@ Everything Reverie knows lives under `~/.codeman/`:
 | `push-*.json`                            | Web push keys and subscriptions.                                      |
 | `certs/`                                 | Self-signed TLS for `--https`.                                        |
 
-None of it needs root, none of it leaves the machine, and deleting `~/.codeman/` resets
+None of it needs root, none of it leaves the machine, and deleting `~/.reverie/` resets
 Reverie to a fresh install without touching your code.
 
 ## Instances
@@ -148,11 +148,11 @@ touch.
 To run two on purpose, give each its own instance name:
 
 ```bash
-CODEMAN_INSTANCE=beta CODEMAN_PORT=5000 reverie web
+REVERIE_INSTANCE=beta REVERIE_PORT=5000 reverie web
 ```
 
 That scopes the data directory and the tmux socket together, which is the only safe way to
-do it. `CODEMAN_DATA_DIR` and `CODEMAN_TMUX_SOCKET` can be set individually if you need
+do it. `REVERIE_DATA_DIR` and `REVERIE_TMUX_SOCKET` can be set individually if you need
 them apart, but setting only one of the two reproduces exactly the problem you were trying
 to avoid.
 
@@ -190,4 +190,4 @@ See [Hooks And Integrations](Hooks-And-Integrations).
 - [The Dashboard](The-Dashboard) - what the UI is showing you.
 - [Agent CLIs](Agent-CLIs) - the ten run modes in detail.
 - [Keeping Agents Running](Keeping-Agents-Running) - respawn, idle detection, usage limits.
-- [`docs/architecture-invariants.md`](https://github.com/Ark0N/Codeman/blob/master/docs/architecture-invariants.md) - the mechanisms behind all of this, for contributors.
+- [`docs/architecture-invariants.md`](https://github.com/jgoppert/reverie/blob/main/apps/console/docs/architecture-invariants.md) - the mechanisms behind all of this, for contributors.

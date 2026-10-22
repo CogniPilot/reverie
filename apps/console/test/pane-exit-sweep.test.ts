@@ -128,7 +128,7 @@ describe('the sweep on a real server', () => {
     }) as unknown as TerminalMultiplexer;
 
   const addSession = (web: WebServer, extra: Record<string, unknown> = {}) => {
-    const muxName = `codeman-${Math.random().toString(16).slice(2, 10)}`;
+    const muxName = `reverie-${Math.random().toString(16).slice(2, 10)}`;
     const session = new Session({
       workingDir: '/tmp',
       mode: 'claude',
@@ -264,7 +264,7 @@ describe('a session the server is closing', () => {
       mode: 'shell',
       useMux: true,
       mux: { isAvailable: () => true } as unknown as TerminalMultiplexer,
-      muxSession: { muxName: 'codeman-aaaa', sessionId: 'aaaa' } as unknown as MuxSession,
+      muxSession: { muxName: 'reverie-aaaa', sessionId: 'aaaa' } as unknown as MuxSession,
     });
 
   it('refuses to start, so a racing start cannot orphan a tmux session', async () => {
@@ -318,7 +318,7 @@ describe('the pane lifecycle mark on Session', () => {
       mode: 'claude',
       useMux: true,
       mux,
-      muxSession: { muxName: 'codeman-aaaa', sessionId: 'aaaa' } as unknown as MuxSession,
+      muxSession: { muxName: 'reverie-aaaa', sessionId: 'aaaa' } as unknown as MuxSession,
     });
 
     expect(session.paneLifecycleInFlight).toBe(false);

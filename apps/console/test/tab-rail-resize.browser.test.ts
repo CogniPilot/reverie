@@ -21,18 +21,18 @@ describe('COD-358 vertical rail in Chromium', () => {
     await page.setContent(`<!doctype html><html data-tab-orientation="vertical"><head><style>${styles}</style></head>
       <body><header class="header"><div id="sessionTabsHost"></div></header><main class="main" style="width:100%;height:700px">
         <aside class="tab-rail" id="tabRail"><div class="session-tabs" id="sessionTabs"><div class="session-tab active">
-          <span class="tab-info"><span class="tab-name-row"><span class="tab-name"><span class="tab-name-prefix">w2-codeman: </span>super-long-unbroken-session-name-for-wrapping</span></span></span>
+          <span class="tab-info"><span class="tab-name-row"><span class="tab-name"><span class="tab-name-prefix">w2-reverie: </span>super-long-unbroken-session-name-for-wrapping</span></span></span>
         </div></div><div id="tabRailResizeHandle" class="tab-rail-resize-handle" role="separator" tabindex="0" aria-valuemin="208" aria-valuemax="360" aria-valuenow="256"></div></aside>
         <div class="terminal-wrap"><iframe title="terminal"></iframe></div></main>
         <div id="tabRailResizeShield" class="tab-rail-resize-shield" hidden></div>
         <select id="appSettingsTabRailWidth"><option value="custom">Custom</option><option value="208">Compact</option><option value="256">Default</option><option value="320">Wide</option><option value="360">Maximum</option></select>
       </body></html>`);
     await page.addScriptTag({ content: constants });
-    await page.addScriptTag({ content: 'class CodemanApp {}; window.CodemanApp = CodemanApp;' });
+    await page.addScriptTag({ content: 'class ReverieApp {}; window.ReverieApp = ReverieApp;' });
     await page.addScriptTag({ content: settingsUi });
     await page.addScriptTag({ content: controller });
     await page.evaluate(() => {
-      const app = new (window as any).CodemanApp();
+      const app = new (window as any).ReverieApp();
       const settings = { tabOrientation: 'vertical', tabRailWidth: 256 };
       (window as any).__settings = settings;
       (window as any).__deviceType = 'desktop';
@@ -66,7 +66,7 @@ describe('COD-358 vertical rail in Chromium', () => {
         lineHeight: Number.parseFloat(style.lineHeight),
       };
     });
-    expect(metrics.text).toBe('w2-codeman: super-long-unbroken-session-name-for-wrapping');
+    expect(metrics.text).toBe('w2-reverie: super-long-unbroken-session-name-for-wrapping');
     expect(metrics.clamp).toBe('2');
     expect(metrics.whiteSpace).toBe('normal');
     expect(metrics.overflowWrap).toBe('anywhere');

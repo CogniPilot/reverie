@@ -34,7 +34,7 @@ describe('member menu and profile in Chromium', () => {
       ${message.toString()}
       ${createServer.toString()}
       const user = { kind: 'user', name: 'Owner' };
-      window.CodemanUrlSession = { sessionIdFromFragment: () => null };
+      window.ReverieUrlSession = { sessionIdFromFragment: () => null };
       window.__server = createServer([room('r1', 'General', [member('${A}', 'Maple', { goal: 'Review the interface', mode: 'claude' })])]);
       window.__server.profiles = { '${A}': {
         persona: { agent_name: 'Maple', persona: 'Detailed profile. '.repeat(100) },
@@ -47,7 +47,7 @@ describe('member menu and profile in Chromium', () => {
       ${appStub}
     ` });
     for (const name of ['chatroom-ui.js', 'chat-media.js']) await page.addScriptTag({ content: read(name) });
-    await page.addScriptTag({ content: `window.app = new CodemanApp(); window.app.sessions.set('${A}', { id: '${A}', name: 'Maple', mode: 'claude' });` });
+    await page.addScriptTag({ content: `window.app = new ReverieApp(); window.app.sessions.set('${A}', { id: '${A}', name: 'Maple', mode: 'claude' });` });
     await page.addScriptTag({ content: read('chat-app.js') });
     await page.waitForSelector('.ca-member');
   });

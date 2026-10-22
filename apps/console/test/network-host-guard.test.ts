@@ -85,16 +85,16 @@ describe('isAllowedRequestHost — anti-DNS-rebinding', () => {
     expect(isAllowedRequestHost('cool-name.trycloudflare.com', policy)).toBe(true);
   });
 
-  it('honors CODEMAN_ALLOWED_HOSTS exact and .suffix entries', () => {
+  it('honors REVERIE_ALLOWED_HOSTS exact and .suffix entries', () => {
     const policy: HostPolicy = {
       bindHost: '127.0.0.1',
-      allowedHosts: ['codeman.example.com', '.corp.internal'],
+      allowedHosts: ['reverie.example.com', '.corp.internal'],
       tunnelHost: null,
     };
-    expect(isAllowedRequestHost('codeman.example.com', policy)).toBe(true);
+    expect(isAllowedRequestHost('reverie.example.com', policy)).toBe(true);
     expect(isAllowedRequestHost('host1.corp.internal', policy)).toBe(true);
     expect(isAllowedRequestHost('corp.internal', policy)).toBe(true);
-    expect(isAllowedRequestHost('codeman.example.com.evil.com', policy)).toBe(false);
+    expect(isAllowedRequestHost('reverie.example.com.evil.com', policy)).toBe(false);
   });
 });
 
@@ -125,15 +125,15 @@ describe('isAllowedRequestOrigin — cross-site (CSRF) guard', () => {
 });
 
 describe('buildHostPolicy', () => {
-  it('parses CODEMAN_ALLOWED_HOSTS from env', () => {
-    const prev = process.env.CODEMAN_ALLOWED_HOSTS;
-    process.env.CODEMAN_ALLOWED_HOSTS = ' Foo.Example , .bar.internal ,';
+  it('parses REVERIE_ALLOWED_HOSTS from env', () => {
+    const prev = process.env.REVERIE_ALLOWED_HOSTS;
+    process.env.REVERIE_ALLOWED_HOSTS = ' Foo.Example , .bar.internal ,';
     try {
       const p = buildHostPolicy('127.0.0.1', null);
       expect(p.allowedHosts).toEqual(['foo.example', '.bar.internal']);
     } finally {
-      if (prev === undefined) delete process.env.CODEMAN_ALLOWED_HOSTS;
-      else process.env.CODEMAN_ALLOWED_HOSTS = prev;
+      if (prev === undefined) delete process.env.REVERIE_ALLOWED_HOSTS;
+      else process.env.REVERIE_ALLOWED_HOSTS = prev;
     }
   });
 

@@ -14,15 +14,15 @@ import { runWithConversionLimit } from './document-conversion-limiter.js';
 const execFileAsync = promisify(execFile);
 
 const OFFICE_CONVERSION_TIMEOUT_MS = 5 * 60_000;
-const DOCUMENT_PREVIEW_CACHE_DIR = join(tmpdir(), 'codeman-document-preview-cache');
+const DOCUMENT_PREVIEW_CACHE_DIR = join(tmpdir(), 'reverie-document-preview-cache');
 /**
  * Cap on persistent converted-PDF files kept in DOCUMENT_PREVIEW_CACHE_DIR.
  * The cache key embeds the source mtime, so every edit to a doc orphans its
  * prior PDF; without a cap the dir grows unbounded across long-running sessions.
- * Override with CODEMAN_MAX_PREVIEW_CACHE_FILES (clamped to >= 1).
+ * Override with REVERIE_MAX_PREVIEW_CACHE_FILES (clamped to >= 1).
  */
 const MAX_PREVIEW_CACHE_FILES = (() => {
-  const raw = Number(process.env.CODEMAN_MAX_PREVIEW_CACHE_FILES);
+  const raw = Number(process.env.REVERIE_MAX_PREVIEW_CACHE_FILES);
   return Number.isFinite(raw) && raw >= 1 ? Math.floor(raw) : 100;
 })();
 function buildWordExportPdfScript(sourcePath: string, outputPath: string): string {
@@ -288,7 +288,7 @@ function wslMountPathToWindowsPath(filePath: string): string | null {
 function getWindowsUserTempCacheDir(filePath: string): string | null {
   const match = filePath.match(/^\/mnt\/([a-zA-Z])\/Users\/([^/]+)\//);
   if (!match) return null;
-  return `/mnt/${match[1].toLowerCase()}/Users/${match[2]}/AppData/Local/Temp/codeman-document-preview-cache`;
+  return `/mnt/${match[1].toLowerCase()}/Users/${match[2]}/AppData/Local/Temp/reverie-document-preview-cache`;
 }
 
 function toPowerShellSingleQuotedString(value: string): string {

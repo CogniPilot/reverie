@@ -1,7 +1,7 @@
 # Stall watchdog for the local OpenCode agent
 
 The runtime watcher (`docs/runtime-watcher.md`) restarts an agent that **crashed**. The stall watchdog
-(`cto/stall_watch.py`) handles one that is **alive but stuck**:
+(`python/reverie/stall_watch.py`) handles one that is **alive but stuck**:
 - It never restarts anything and never starts a new session or thread.
 - It types at most `max_nudges` lines per `nudge_window_minutes`.
 - It **fails safe**: when in doubt it does nothing, or only reports.
@@ -65,7 +65,7 @@ Checked every tick, before any action:
 3. **Report-only, never typing or pressing Esc:**
    - **the night window:** the cycle policy's `night` and `timezone` (`cycle_policy`), else this config's `night`
    - **the shared GPU lock** held by a non-chat role (a dream, training, a review). Like the watcher's lock, it is read from `/proc/locks`, never taken, and its role comes from the holder's JSON in the lock file.
-   - **a hold file:** `hold_files`, by default `~/.config/reverie/gpu.hold` and `~/.cache/cto.hold`
+   - **a hold file:** `hold_files`, by default `~/.config/reverie/gpu.hold` and `~/.cache/reverie.hold`
    - **the owner's runtime pause file** (the runtime policy's `pause_file`)
    - the watchdog's own `pause_file` stops it entirely
 4. **Write-ahead:** the nudge count and the episode step are saved **before** an action. If that save fails, nothing is done, so a full or broken disk cannot lift the cap.
@@ -116,7 +116,7 @@ per room per interval and at most the daily cap per room.
 
 **The tick runs only the installed package:** the unit uses `podman exec --workdir /` and
 `python3 -I -m`. The container's default working directory is the agent-editable work tree, and
-`python -m` would import `cto` from there.
+`python -m` would import `reverie` from there.
 
 **Old configs:** `report_as` is gone. A config that still sets it is refused with a clear message;
 `report_as: null` is accepted. `report_rooms` is ignored: the rooms are host config now.
@@ -149,12 +149,12 @@ per room per interval and at most the daily cap per room.
    - Run `reverie owner service-token issue stall-watch` from a host shell.
    - Write `~/.config/reverie/stall-watch.env` (mode 0600, on the host) with:
      - `REVERIE_SERVICE_TOKEN=…`
-     - `STALL_WATCH_REPORTS="<room id>=<to>[,<to>] …"`, for example `"<lounge>=<cto name> <platform room>=coordinator"`
+     - `STALL_WATCH_REPORTS="<room id>=<to>[,<to>] …"`, for example `"<lounge>=<reverie name> <platform room>=coordinator"`
      - `STALL_WATCH_TARGET_NAME=<agent name>`
      - optionally `STALL_WATCH_MIN_INTERVAL` (seconds) and `STALL_WATCH_DAILY_CAP` (notices per room per day)
    - Nothing from this file is passed into the container.
 
-Manual tick: `python3 -m cto.stall_watch --config FILE [--dry-run]` (inside the container, as the console's user).
+Manual tick: `python3 -m reverie.stall_watch --config FILE [--dry-run]` (inside the container, as the console's user).
 
 ## Hooks wanted in host-owned code
 1. **Console delivery for OpenCode panes:** a bracketed paste instead of typed keys (root cause above).

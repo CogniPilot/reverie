@@ -1,5 +1,5 @@
 /**
- * The delivered-line format is a contract with the agent harnesses (cto/plugins parse it to find the room, whether the
+ * The delivered-line format is a contract with the agent harnesses (python/reverie/plugins parse it to find the room, whether the
  * owner spoke, and whether the turn is a private DM). This renders the canonical cases with the real renderer and
  * compares them to test/fixtures/delivery-lines.json; the harness tests parse the same fixture. Changing the format
  * fails this test until the fixture is regenerated (UPDATE_DELIVERY_FIXTURE=1) and the harness parsers follow.

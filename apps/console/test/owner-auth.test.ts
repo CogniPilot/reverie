@@ -439,13 +439,13 @@ describe('owner sign-in', () => {
       await app.close();
       await build('enforce'); // sessions live in memory: a restart signs the owner out
       const session = cookie(await login(NEW_PASSWORD))!;
-      const agent = { headers: { 'x-codeman-parent-session': AGENT } };
+      const agent = { headers: { 'x-reverie-parent-session': AGENT } };
       expect((await call('PUT', '/api/settings')).statusCode).toBe(401);
       expect((await call('PUT', '/api/settings', agent)).statusCode).toBe(403); // header-only owner call
       expect((await call('GET', '/api/sessions', agent)).statusCode).toBe(200); // the agent CLI still works
       expect((await call('GET', '/api/sessions')).statusCode).toBe(401);
       expect(
-        (await call('GET', '/api/sessions', { headers: { 'x-codeman-parent-session': 'bogus' } })).statusCode
+        (await call('GET', '/api/sessions', { headers: { 'x-reverie-parent-session': 'bogus' } })).statusCode
       ).toBe(403);
       expect((await call('PUT', '/api/settings', { cookies: as(session) })).statusCode).toBe(200);
       const page = await call('GET', '/');
@@ -495,7 +495,7 @@ describe('owner sign-in', () => {
         await login('wrong-password');
       }
       expect(store.read()!.throttles?.['src:loopback']?.lockedUntil).toBeGreaterThan(clock);
-      expect((await call('GET', '/api/sessions', { headers: { 'x-codeman-parent-session': AGENT } })).statusCode).toBe(
+      expect((await call('GET', '/api/sessions', { headers: { 'x-reverie-parent-session': AGENT } })).statusCode).toBe(
         200
       );
     });

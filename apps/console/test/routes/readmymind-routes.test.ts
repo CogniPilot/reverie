@@ -219,13 +219,13 @@ describe('multi-user scoping', () => {
   let savedMultiuser: string | undefined;
 
   beforeEach(() => {
-    savedMultiuser = process.env.CODEMAN_MULTIUSER;
-    process.env.CODEMAN_MULTIUSER = '1';
+    savedMultiuser = process.env.REVERIE_MULTIUSER;
+    process.env.REVERIE_MULTIUSER = '1';
   });
 
   afterEach(() => {
-    if (savedMultiuser === undefined) delete process.env.CODEMAN_MULTIUSER;
-    else process.env.CODEMAN_MULTIUSER = savedMultiuser;
+    if (savedMultiuser === undefined) delete process.env.REVERIE_MULTIUSER;
+    else process.env.REVERIE_MULTIUSER = savedMultiuser;
   });
 
   it("404s (never 403s) another user's session", async () => {

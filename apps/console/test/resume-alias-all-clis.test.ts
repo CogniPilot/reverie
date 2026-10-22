@@ -12,7 +12,7 @@ import { Session } from '../src/session.js';
 import { TmuxManager } from '../src/tmux-manager.js';
 
 describe('every CLI resume field becomes the thread alias, and survives start()', () => {
-  const workingDir = join(homedir(), 'codeman-cases', 'resume-alias-all');
+  const workingDir = join(homedir(), 'reverie-cases', 'resume-alias-all');
   const sessions: Session[] = [];
   afterEach(() => {
     for (const s of sessions.splice(0)) s.stop();

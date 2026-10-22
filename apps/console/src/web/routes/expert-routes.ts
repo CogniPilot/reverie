@@ -3,7 +3,7 @@
  *
  * - Reading (`GET /api/experts`, `GET /api/experts/:id`) is open to any caller.
  * - Changing a template or the settings is the owner's alone: a request carrying an
- *   `X-Codeman-Parent-Session` header, with any value (empty too), is refused and changes nothing.
+ *   `X-Reverie-Parent-Session` header, with any value (empty too), is refused and changes nothing.
  * - Hiring and retiring: the owner, or an agent session the owner listed in `settings.hireDelegates`.
  *   Caps (`maxHiresPerDay` over a rolling 24 hours, `maxActive`) are refused at the limit with 409;
  *   nothing is retired or trimmed to make room.
@@ -83,7 +83,7 @@ export const BUDGET_READING_STALE_MS = 2 * HOUR_MS;
 
 export interface ExpertRouteDeps {
   store: ExpertStore;
-  /** The agent session an `X-Codeman-Parent-Session` header resolves to, if any. */
+  /** The agent session an `X-Reverie-Parent-Session` header resolves to, if any. */
   callerSession(req: FastifyRequest): string | undefined;
   /** Create the session through the console's session-creation route; resolves to its id. */
   createSession(req: FastifyRequest, launch: SessionLaunch): Promise<string>;
@@ -168,7 +168,7 @@ const isInside = (root: string, path: string): boolean =>
 export function registerExpertRoutes(app: FastifyInstance, deps: ExpertRouteDeps): ExpertRoutes {
   const now = () => (deps.now ?? Date.now)();
   const realpath = deps.realpath ?? ((p: string) => fs.realpath(p));
-  const agentCall = (req: FastifyRequest): boolean => req.headers['x-codeman-parent-session'] !== undefined;
+  const agentCall = (req: FastifyRequest): boolean => req.headers['x-reverie-parent-session'] !== undefined;
   const ownerOnly = (req: FastifyRequest, what: string): void => {
     if (agentCall(req)) throw new ExpertError(`Only the owner ${what}`, 403);
   };

@@ -13,7 +13,7 @@
  * - DEFAULT_CONFIG — default AppConfig values
  * - createInitialState() — factory for fresh AppState
  *
- * Persisted to `~/.codeman/state.json` via StateStore (debounced 500ms writes).
+ * Persisted to `~/.reverie/state.json` via StateStore (debounced 500ms writes).
  * Served at `GET /api/status` (full state) and `GET /api/config` (config subset).
  *
  * Cross-domain imports: SessionState, TaskState, RalphLoopState, RespawnConfig.

@@ -1,11 +1,11 @@
 /**
- * @fileoverview The tile grid's pure helpers (constants.js, `window.CodemanTileGrid`).
+ * @fileoverview The tile grid's pure helpers (constants.js, `window.ReverieTileGrid`).
  *
  * - `computeTileLayout`: columns x rows by tile count (the spec's table), with
  *   the 3-tile special case (3x1 only on a wide grid area) and whether every
  *   cell clears the minimum tile size.
  * - `tileGridCapacity`: how many tiles a grid area can hold.
- * - `sanitizeTileGridState`: the stored `codeman:tile-grid` value made safe to
+ * - `sanitizeTileGridState`: the stored `reverie:tile-grid` value made safe to
  *   apply (unknown, deleted, detached and duplicate ids dropped); the stored
  *   `ids` are the grid's cells, `null` for a hole, and come back as `cells`
  *   (holes kept, a dropped id a hole) beside the packed `ids`. The old packed
@@ -46,7 +46,7 @@ function loadTileGrid(): TileGrid {
   const context = vm.createContext({ window: {}, globalThis: {} });
   const source = readFileSync(resolve(import.meta.dirname, '../src/web/public/constants.js'), 'utf8');
   vm.runInContext(source, context, { filename: 'constants.js' });
-  return (context.window as { CodemanTileGrid: TileGrid }).CodemanTileGrid;
+  return (context.window as { ReverieTileGrid: TileGrid }).ReverieTileGrid;
 }
 
 const T = loadTileGrid();

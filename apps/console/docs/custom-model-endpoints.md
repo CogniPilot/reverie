@@ -1,6 +1,6 @@
 # Custom Model Endpoint Profiles
 
-Point any Codeman-supported harness — Claude, opencode, Codex, Gemini, Pi,
+Point any Reverie-supported harness — Claude, opencode, Codex, Gemini, Pi,
 Grok, DeepSeek, or OMP — at a custom OpenAI-compatible endpoint instead of
 its native cloud backend, for a given session. "Custom endpoint" covers both
 **local** hardware (llama.cpp, Ollama, vLLM, a home GPU rig, or purpose-built
@@ -169,7 +169,7 @@ the toolbar's Run dropdown grows a **Custom Endpoints** section: one entry
 per (harness that can redirect to a custom endpoint, saved endpoint) pair,
 e.g. "Claude Code (llama.cpp)". The harness list is read off the CLI
 registry's own `capabilities.customModelInjection` at page render
-(`window.__codemanCustomModelClis`, `server.ts`) — never a hardcoded id list
+(`window.__reverieCustomModelClis`, `server.ts`) — never a hardcoded id list
 in the frontend — so a CLI whose injection recipe lands later shows up with
 no frontend change, and Antigravity (`unsupported`) never does.
 
@@ -195,7 +195,7 @@ under your thumb:
   modal invisible for the full 5s after the Run menu has already closed.
 - **"Last used"** — shown only when nothing is currently loaded: the model
   actually launched last for this exact (harness, endpoint) pair, read
-  from the per-device `codeman:customModelLastUsed:<mode>:<endpointId>`
+  from the per-device `reverie:customModelLastUsed:<mode>:<endpointId>`
   localStorage key. Written by `_runCustomModelEntryViaRestart` (claude)
   and `_quickStartWithCustomModelConfirm` (every one-shot launch; the
   `runCustomModelEntry` entry point itself only dispatches between the
@@ -277,7 +277,7 @@ endpoint config at process start, not per-turn, so there is no live
 hot-swap. A Claude session is relaunched with `--resume <conversation> ||
 --session-id <id>`, so it continues the conversation it was on; pi, omp and
 grok are relaunched with the `--model` value that selects the injected
-provider (`custom/<modelId>` for pi and omp, `codeman-custom` for grok),
+provider (`custom/<modelId>` for pi and omp, `reverie-custom` for grok),
 since for those three the config file alone does not switch the model.
 **Remote (SSH) and Docker sessions are refused** (400) for now: their restart
 reattaches the durable remote/in-container tmux rather than relaunching the
@@ -466,7 +466,7 @@ curl -sk -X POST https://localhost:3000/api/sessions/<sessionId>/custom-model \
 Clearing also removes the env vars the selection injected from the tmux
 session (they persist there and would otherwise be inherited by the
 relaunched CLI) and deletes the per-session config directory
-(`~/.codeman/custom-model-configs/<sessionId>`, written 0600 because pi and
+(`~/.reverie/custom-model-configs/<sessionId>`, written 0600 because pi and
 omp embed the API key in it). That directory is also removed when the
 session is deleted. The selection survives a Reverie restart: the endpoint
 id, model and injected key NAMES are persisted, the values are re-derived

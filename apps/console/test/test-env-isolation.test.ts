@@ -3,12 +3,12 @@
  *
  * The suite's hermeticity rests on a temp `HOME` plus a short list of env vars that are
  * deleted before any application module loads. That list is easy to under-maintain: it grew
- * once for auth (`CODEMAN_PASSWORD`/`CODEMAN_USERNAME`) and once for `CODEMAN_GESTURE`, both
+ * once for auth (`REVERIE_PASSWORD`/`REVERIE_USERNAME`) and once for `REVERIE_GESTURE`, both
  * times only after a leak had already produced a confusing failure, and it was still missing
  * the three INSTANCE-selection vars.
  *
  * Those three matter more than the ones already on the list, because `src/config/instance.ts`
- * derives BOTH the data dir and the tmux socket from them, and `CODEMAN_DATA_DIR` is an
+ * derives BOTH the data dir and the tmux socket from them, and `REVERIE_DATA_DIR` is an
  * absolute path that bypasses `HOME` entirely — so a developer who exports it has the suite
  * reading and writing their real `state.json` rather than a throwaway tree.
  *
@@ -27,15 +27,15 @@ import { fileURLToPath } from 'node:url';
 
 /** Every env var `setup.ts` must strip, with why it would otherwise leak. */
 const STRIPPED_ENV_VARS: Array<[name: string, why: string]> = [
-  ['CODEMAN_PASSWORD', 'auth from a running instance would make protected routes behave differently'],
-  ['CODEMAN_USERNAME', 'same, and it changes which owner scoping resolves to'],
-  ['CODEMAN_GESTURE', 'flips renderIndexHtml output and breaks byte-identity assertions'],
-  ['CODEMAN_BASE_URL', 'mounts the server under a sub-path and breaks the root-install byte-identity assertions'],
-  ['CODEMAN_INSTANCE', 'moves the data dir to ~/.codeman-<name> and the tmux socket to codeman-<name>'],
-  ['CODEMAN_DATA_DIR', 'ABSOLUTE override: bypasses the temp HOME and points the suite at a real data dir'],
-  ['CODEMAN_TMUX_SOCKET', 'renames the socket resolveTmuxSocketName() returns'],
+  ['REVERIE_PASSWORD', 'auth from a running instance would make protected routes behave differently'],
+  ['REVERIE_USERNAME', 'same, and it changes which owner scoping resolves to'],
+  ['REVERIE_GESTURE', 'flips renderIndexHtml output and breaks byte-identity assertions'],
+  ['REVERIE_BASE_URL', 'mounts the server under a sub-path and breaks the root-install byte-identity assertions'],
+  ['REVERIE_INSTANCE', 'moves the data dir to ~/.reverie-<name> and the tmux socket to reverie-<name>'],
+  ['REVERIE_DATA_DIR', 'ABSOLUTE override: bypasses the temp HOME and points the suite at a real data dir'],
+  ['REVERIE_TMUX_SOCKET', 'renames the socket resolveTmuxSocketName() returns'],
   ['CLAUDE_CONFIG_DIR', 'relocates the Claude tree, so transcript fixtures under the temp HOME read as missing'],
-  ['CODEMAN_CASES_PATH', 'bypasses the temporary HOME and points case routes at a deployment bind mount'],
+  ['REVERIE_CASES_PATH', 'bypasses the temporary HOME and points case routes at a deployment bind mount'],
 ];
 
 const SETUP_SOURCE = readFileSync(fileURLToPath(new URL('./setup.ts', import.meta.url)), 'utf-8');
@@ -50,8 +50,8 @@ const SETUP_SOURCE = readFileSync(fileURLToPath(new URL('./setup.ts', import.met
 const SETUP_STRIP_SECTION = SETUP_SOURCE.split(/^afterEach\(/m)[0];
 
 describe('test environment isolation', () => {
-  it('removes every inherited CODEMAN_* environment variable', () => {
-    expect(Object.keys(process.env).filter((key) => key.startsWith('CODEMAN_'))).toEqual([]);
+  it('removes every inherited REVERIE_* environment variable', () => {
+    expect(Object.keys(process.env).filter((key) => key.startsWith('REVERIE_'))).toEqual([]);
   });
 
   it.each(STRIPPED_ENV_VARS)('%s is unset while the suite runs', (name) => {
@@ -64,11 +64,11 @@ describe('test environment isolation', () => {
   });
 
   it('runs against a throwaway HOME, not the real one', () => {
-    // The property every other test's isolation is built on: `~/.codeman` and `~/codeman-cases`
+    // The property every other test's isolation is built on: `~/.reverie` and `~/reverie-cases`
     // both resolve under here, so a test that writes state cannot reach the developer's own.
     const home = process.env.HOME ?? process.env.USERPROFILE;
     expect(home).toBeTruthy();
-    expect(home).toContain('codeman-vitest-');
+    expect(home).toContain('reverie-vitest-');
   });
 
   it('lists every name the setup file strips (anti-drift)', () => {

@@ -1,5 +1,5 @@
 /**
- * @fileoverview Static and VM regressions for Codeman UI/xterm skin parity.
+ * @fileoverview Static and VM regressions for Reverie UI/xterm skin parity.
  */
 
 import { readFileSync } from 'node:fs';
@@ -67,18 +67,18 @@ function contrastRatio(first: string, second: string): number {
 }
 
 function loadTerminalThemes() {
-  const FakeCodemanApp = function () {} as unknown as { prototype: Record<string, (...args: unknown[]) => unknown> };
+  const FakeReverieApp = function () {} as unknown as { prototype: Record<string, (...args: unknown[]) => unknown> };
   const document = { documentElement: { dataset: { skin: 'paper-gray' } } };
   const window: Record<string, unknown> = {};
-  vm.runInNewContext(terminalSource, { CodemanApp: FakeCodemanApp, document, window }, { filename: 'terminal-ui.js' });
+  vm.runInNewContext(terminalSource, { ReverieApp: FakeReverieApp, document, window }, { filename: 'terminal-ui.js' });
   return {
-    mixin: FakeCodemanApp.prototype,
-    themes: window.CODEMAN_XTERM_THEMES as Record<string, Record<string, string>>,
-    isLight: window.codemanCurrentSkinIsLight as (skin?: string) => boolean,
+    mixin: FakeReverieApp.prototype,
+    themes: window.REVERIE_XTERM_THEMES as Record<string, Record<string, string>>,
+    isLight: window.reverieCurrentSkinIsLight as (skin?: string) => boolean,
   };
 }
 
-describe('Codeman light skins', () => {
+describe('Reverie light skins', () => {
   const terminal = loadTerminalThemes();
 
   it('keeps the picker, pre-paint allowlist, CSS, and xterm palette in sync', () => {
@@ -108,8 +108,8 @@ describe('Codeman light skins', () => {
   it('names the selection layer the way xterm 6 does, and keeps it visible', () => {
     const XTERM_DEFAULT_SELECTION = 'rgba(255, 255, 255, 0.3)';
     const themeBlock = terminalSource.slice(
-      terminalSource.indexOf('const CODEMAN_XTERM_THEMES = {'),
-      terminalSource.indexOf('const CODEMAN_LIGHT_SKINS')
+      terminalSource.indexOf('const REVERIE_XTERM_THEMES = {'),
+      terminalSource.indexOf('const REVERIE_LIGHT_SKINS')
     );
     // The renderer only knows this spelling (xterm.js >= 5, and package.json pins ^6);
     // a palette key it does not know is dropped without an error, so the name IS the fix.

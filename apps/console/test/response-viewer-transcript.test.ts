@@ -84,13 +84,13 @@ gpt-5.4 medium · kb · main · Ready · Context 92% left
     const transcript = `
 ────────────────────────────────────────────────────────────────────────
 
-• The launcher supports CODEMAN_APP_DIR, so I can deploy this exact worktree without merging it back first.
+• The launcher supports REVERIE_APP_DIR, so I can deploy this exact worktree without merging it back first.
 
 ────────────────────────────────────────────────────────────────────────
 
 • Deployed.
 
-The local Codeman service is now running from the worktree at app/.worktrees/cod-215-response-viewer on
+The local Reverie service is now running from the worktree at app/.worktrees/cod-215-response-viewer on
 commit 8bbcf77bafbdbf01a34653386c256b685898ad06.
 
 Verified:

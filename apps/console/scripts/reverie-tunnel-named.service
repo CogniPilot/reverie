@@ -1,0 +1,19 @@
+[Unit]
+Description=Reverie Cloudflare Named Tunnel
+After=network-online.target reverie-web.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/cloudflared tunnel --config %h/.cloudflared/reverie.yml run reverie
+Restart=always
+RestartSec=5
+KillMode=process
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=reverie-tunnel-named
+
+[Install]
+WantedBy=default.target

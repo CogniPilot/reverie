@@ -22,7 +22,7 @@ import { describe, expect, it, vi } from 'vitest';
 const read = (f: string) => readFileSync(resolve(import.meta.dirname, `../src/web/public/${f}`), 'utf8');
 
 function loadApp() {
-  const CodemanApp = function CodemanApp(this: unknown) {};
+  const ReverieApp = function ReverieApp(this: unknown) {};
   const context = vm.createContext({
     window: {},
     document: {
@@ -31,7 +31,7 @@ function loadApp() {
       addEventListener: vi.fn(),
       getElementById: () => null,
     },
-    CodemanApp,
+    ReverieApp,
     console: { warn: vi.fn(), log: vi.fn(), debug: vi.fn(), error: vi.fn() },
     _crashDiag: { log: vi.fn() },
     performance: { now: () => 0 },
@@ -44,7 +44,7 @@ function loadApp() {
   });
   vm.runInContext(read('constants.js'), context, { filename: 'constants.js' });
   vm.runInContext(read('terminal-ui.js'), context, { filename: 'terminal-ui.js' });
-  const app = new (CodemanApp as unknown as new () => Record<string, any>)();
+  const app = new (ReverieApp as unknown as new () => Record<string, any>)();
   app.activeSessionId = 'session-a';
   app.terminal = { clear: vi.fn(), cols: 120, rows: 40 };
   app.showToast = vi.fn();

@@ -11,9 +11,9 @@ function fixture(userAgent: string, mobile?: boolean, width = 390) {
   if (mobile !== undefined) Object.defineProperty(dom.window.navigator, 'userAgentData', { value: { mobile } });
   Object.defineProperty(dom.window, 'innerWidth', { value: width });
   const context = dom.getInternalVMContext();
-  vm.runInContext('globalThis.CodemanApp = class {}; globalThis.fetch = () => new Promise(() => {});', context);
+  vm.runInContext('globalThis.ReverieApp = class {}; globalThis.fetch = () => new Promise(() => {});', context);
   vm.runInContext(readFileSync(resolve(import.meta.dirname, '../src/web/public/chatroom-ui.js'), 'utf8'), context);
-  const app = vm.runInContext('Object.create(CodemanApp.prototype)', context);
+  const app = vm.runInContext('Object.create(ReverieApp.prototype)', context);
   const mic = dom.window.document.createElement('button'), car = dom.window.document.createElement('button');
   Object.assign(app, { _chatEls: { mic }, _chatroomPanel: { querySelector: () => car }, _chatRoom: { members: [{ voice: true }] }, _chatVoiceTarget: () => ({ name: 'Worker' }), _chatMicRoute: () => 'local' });
   return { app, mic, car };

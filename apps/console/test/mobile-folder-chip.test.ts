@@ -21,7 +21,7 @@ function chip(app: Record<string, unknown>) {
 
 describe('footer folder chip', () => {
   it('shows the active session folder, not the last-used case', () => {
-    const { label, self } = chip({ activeSessionId: 's', sessions: new Map([['s', { workingDir: '/home/cto/work/worker-desk/' }]]) });
+    const { label, self } = chip({ activeSessionId: 's', sessions: new Map([['s', { workingDir: '/home/agent/work/worker-desk/' }]]) });
     (self.updateMobileCaseLabel as (c: string) => void)('smoke-test');
     expect(label.textContent).toBe('worker-desk');
     expect(label.title).toContain('smoke-test');

@@ -6,15 +6,15 @@
  * token statistics, toast notifications, and system stats.
  * Includes 19 SSE handlers for tasks, mux, bash tools, subagents, and images.
  *
- * @mixin Extends CodemanApp.prototype via Object.assign
- * @dependency app.js (CodemanApp class, this.subagents, this.subagentWindows, this.sessions)
+ * @mixin Extends ReverieApp.prototype via Object.assign
+ * @dependency app.js (ReverieApp class, this.subagents, this.subagentWindows, this.sessions)
  * @dependency constants.js (escapeHtml, ZINDEX_* constants)
  * @dependency subagent-windows.js (openSubagentWindow, closeSubagentWindow)
  * @loadorder 11 of 15 — loaded after settings-ui.js, before session-ui.js
  */
 
-const AWAY_DIGEST_LAST_VIEWED_KEY = 'codeman-away-digest-last-viewed';
-const FILE_BROWSER_SHOW_HIDDEN_KEY = 'codeman:fileBrowserShowHidden';
+const AWAY_DIGEST_LAST_VIEWED_KEY = 'reverie-away-digest-last-viewed';
+const FILE_BROWSER_SHOW_HIDDEN_KEY = 'reverie:fileBrowserShowHidden';
 // Bounds for the by-id text preview, mirroring what the workspace text preview
 // already does server-side (500 lines). The byte cap rides a Range request, so
 // a huge log is a partial read rather than a download the viewer throws away.
@@ -29,10 +29,10 @@ const MARKDOWN_EXTS = new Set(['md', 'markdown']);
 // rebuilt from the settings modal on save, so a key toggled from the viewer
 // would be dropped on the next save).
 const FILE_PREVIEW_PREF_KEYS = {
-  mdRendered: 'codeman:filePreviewMdRendered',
-  htmlRendered: 'codeman:filePreviewHtmlRendered',
-  lineNumbers: 'codeman:filePreviewLineNumbers',
-  wrap: 'codeman:filePreviewWrap',
+  mdRendered: 'reverie:filePreviewMdRendered',
+  htmlRendered: 'reverie:filePreviewHtmlRendered',
+  lineNumbers: 'reverie:filePreviewLineNumbers',
+  wrap: 'reverie:filePreviewWrap',
 };
 const FILE_PREVIEW_PREF_DEFAULTS = { mdRendered: true, htmlRendered: true, lineNumbers: false, wrap: true };
 const AWAY_DIGEST_SECTIONS = [
@@ -43,7 +43,7 @@ const AWAY_DIGEST_SECTIONS = [
   ['informational', 'Informational'],
 ];
 
-Object.assign(CodemanApp.prototype, {
+Object.assign(ReverieApp.prototype, {
   _addActivityEntry(agentId, entry, maxSize = 50) {
     const activity = this.subagentActivity.get(agentId) || [];
     activity.push(entry);
@@ -137,7 +137,7 @@ Object.assign(CodemanApp.prototype, {
   // Wake-on-LAN from user input on a sleeping remote host (see remote-wake.ts).
   // ⚠️ The `remote:hostWaking` / `remote:hostWakeFailed` HANDLERS live in
   // `host-wake-ui.js`, which owns the banner state. They are NOT redefined here:
-  // both files mix into `CodemanApp.prototype` and `host-wake-ui.js` is loaded
+  // both files mix into `ReverieApp.prototype` and `host-wake-ui.js` is loaded
   // later, so a second definition would silently shadow the banner update (and the
   // toast would never fire — the exact silent no-op `sse-dispatch-table.test.ts`
   // exists to prevent, which cannot see shadowing). The toasts are shown from the
@@ -2392,12 +2392,12 @@ Object.assign(CodemanApp.prototype, {
 
       const fontSettings = this.loadAppSettingsFromStorage?.() || {};
       const terminal = new Terminal({
-        theme: { ...window.codemanCurrentXtermTheme() },
-        minimumContrastRatio: window.codemanCurrentSkinIsLight() ? 4.5 : 1,
-        fontFamily: window.CodemanTerminalFont.resolve(fontSettings.terminalFontFamily),
+        theme: { ...window.reverieCurrentXtermTheme() },
+        minimumContrastRatio: window.reverieCurrentSkinIsLight() ? 4.5 : 1,
+        fontFamily: window.ReverieTerminalFont.resolve(fontSettings.terminalFontFamily),
         // A pane opened after a weight change must match the main terminal;
         // one open across the change is repainted by applyTerminalFontWeights().
-        ...window.CodemanTerminalFont.resolveWeights(fontSettings),
+        ...window.ReverieTerminalFont.resolveWeights(fontSettings),
         fontSize: 12,
         lineHeight: 1.2,
         cursorBlink: true,
@@ -3563,7 +3563,7 @@ Object.assign(CodemanApp.prototype, {
       const nameClass = isDir ? 'file-tree-name directory' : 'file-tree-name';
 
       const downloadBtn = !isDir
-        ? `<a class="file-tree-download" href="${escapeHtml(CodemanBase.url(`/api/sessions/${encodeURIComponent(owner)}/file-raw?path=${encodeURIComponent(node.path)}&download=true`))}" title="Download" onclick="event.stopPropagation()">&#x2B07;</a>`
+        ? `<a class="file-tree-download" href="${escapeHtml(ReverieBase.url(`/api/sessions/${encodeURIComponent(owner)}/file-raw?path=${encodeURIComponent(node.path)}&download=true`))}" title="Download" onclick="event.stopPropagation()">&#x2B07;</a>`
         : '';
 
       html.push(`
@@ -3738,7 +3738,7 @@ Object.assign(CodemanApp.prototype, {
             : '';
           const nameClass = isDir ? 'file-tree-name directory' : 'file-tree-name';
           const downloadBtn = !isDir
-            ? `<a class="file-tree-download" href="${escapeHtml(CodemanBase.url(`/api/sessions/${ownerPath}/file-raw?path=${encodeURIComponent(match.path)}&download=true`))}" title="Download" onclick="event.stopPropagation()">&#x2B07;</a>`
+            ? `<a class="file-tree-download" href="${escapeHtml(ReverieBase.url(`/api/sessions/${ownerPath}/file-raw?path=${encodeURIComponent(match.path)}&download=true`))}" title="Download" onclick="event.stopPropagation()">&#x2B07;</a>`
             : '';
           return `
             <div class="file-tree-item" data-path="${escapeHtml(match.path)}" data-type="${escapeHtml(match.type)}" data-owner="${escapeHtml(ownerSessionId)}">
@@ -4190,7 +4190,7 @@ Object.assign(CodemanApp.prototype, {
       : folderFile
         ? `/api/sessions/${sessionId}/folders/${encodeURIComponent(folderFile.folderId)}/files/${encodeURIComponent(folderFile.name)}`
         : null;
-    this.filePreviewDetachUrl = CodemanBase.url(
+    this.filePreviewDetachUrl = ReverieBase.url(
       byIdBase
         ? `${byIdBase}/${officeDoc ? 'preview' : 'raw'}`
         : officeDoc
@@ -4204,7 +4204,7 @@ Object.assign(CodemanApp.prototype, {
     // raw. (Workspace-path previews fall through to the file-content endpoint.)
     // A folder-grid file renders the same way, from its folder's by-name routes.
     if (byIdBase) {
-      const base = CodemanBase.url(byIdBase);
+      const base = ReverieBase.url(byIdBase);
       const IMAGE_EXTS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg']);
       // VIDEO/AUDIO mirror VIDEO_ATTACHMENT_EXTENSIONS/AUDIO_ATTACHMENT_EXTENSIONS
       // (src/attachment-registry.ts, the single source); the frontend cannot import
@@ -4274,13 +4274,13 @@ Object.assign(CodemanApp.prototype, {
     // to file-content below, which would dump the binary bytes as mojibake.
     if (ext === 'docx' || ext === 'pptx') {
       footerEl.textContent = ext.toUpperCase();
-      const previewSrc = CodemanBase.url(`/api/sessions/${sessionId}/file-preview?path=${encodeURIComponent(filePath)}`);
+      const previewSrc = ReverieBase.url(`/api/sessions/${sessionId}/file-preview?path=${encodeURIComponent(filePath)}`);
       bodyEl.innerHTML = `<iframe src="${escapeHtml(previewSrc)}" title="${escapeHtml(filePath)}"></iframe>`;
       return;
     }
     if (ext === 'pdf') {
       footerEl.textContent = 'PDF';
-      const rawSrc = CodemanBase.url(`/api/sessions/${sessionId}/file-raw?path=${encodeURIComponent(filePath)}`);
+      const rawSrc = ReverieBase.url(`/api/sessions/${sessionId}/file-raw?path=${encodeURIComponent(filePath)}`);
       bodyEl.innerHTML = `<iframe src="${escapeHtml(rawSrc)}" title="${escapeHtml(filePath)}"></iframe>`;
       return;
     }
@@ -4323,22 +4323,22 @@ Object.assign(CodemanApp.prototype, {
       const data = result.data;
 
       if (data.type === 'image') {
-        bodyEl.innerHTML = `<img src="${escapeHtml(CodemanBase.url(data.url))}" alt="${escapeHtml(filePath)}">`;
+        bodyEl.innerHTML = `<img src="${escapeHtml(ReverieBase.url(data.url))}" alt="${escapeHtml(filePath)}">`;
         footerEl.textContent = `${this.formatFileSize(data.size)} \u2022 ${data.extension}`;
       } else if (data.type === 'video') {
         // playsinline: iOS otherwise hijacks playback into its fullscreen
         // player, which leaves the overlay behind it and its own close button
         // as the only way back.
-        bodyEl.innerHTML = `<video src="${escapeHtml(CodemanBase.url(data.url))}" controls autoplay playsinline preload="metadata"></video>`;
+        bodyEl.innerHTML = `<video src="${escapeHtml(ReverieBase.url(data.url))}" controls autoplay playsinline preload="metadata"></video>`;
         footerEl.textContent = `${this.formatFileSize(data.size)} \u2022 ${data.extension}`;
       } else if (data.type === 'audio') {
-        bodyEl.innerHTML = `<audio src="${escapeHtml(CodemanBase.url(data.url))}" controls autoplay preload="metadata"></audio>`;
+        bodyEl.innerHTML = `<audio src="${escapeHtml(ReverieBase.url(data.url))}" controls autoplay preload="metadata"></audio>`;
         footerEl.textContent = `${this.formatFileSize(data.size)} \u2022 ${data.extension}`;
       } else if (data.type === 'spreadsheet') {
-        this._openSpreadsheetPreview(bodyEl, CodemanBase.url(data.url), data.size);
+        this._openSpreadsheetPreview(bodyEl, ReverieBase.url(data.url), data.size);
         footerEl.textContent = `${this.formatFileSize(data.size)} \u2022 ${data.extension}`;
       } else if (data.type === 'binary') {
-        const downloadHref = CodemanBase.url(`/api/sessions/${sessionId}/file-raw?path=${encodeURIComponent(filePath)}&download=true`);
+        const downloadHref = ReverieBase.url(`/api/sessions/${sessionId}/file-raw?path=${encodeURIComponent(filePath)}&download=true`);
         bodyEl.innerHTML = `<div class="binary-message">Binary file (${this.formatFileSize(data.size)})<br>Cannot preview<br><a href="${escapeHtml(downloadHref)}" download>Download</a></div>`;
         footerEl.textContent = data.extension || 'binary';
       } else {
@@ -4504,7 +4504,7 @@ Object.assign(CodemanApp.prototype, {
   },
 
   _folderFileUrl(grid, name, suffix) {
-    return CodemanBase.url(
+    return ReverieBase.url(
       `/api/sessions/${grid.sessionId}/folders/${encodeURIComponent(grid.folderId)}/files/${encodeURIComponent(name)}${suffix}`
     );
   },
@@ -4694,7 +4694,7 @@ Object.assign(CodemanApp.prototype, {
    */
   _openSpreadsheetPreview(bodyEl, url, size) {
     this._disposeSpreadsheetPreview();
-    const renderer = window.CodemanSpreadsheetPreview;
+    const renderer = window.ReverieSpreadsheetPreview;
     if (!renderer?.open) {
       bodyEl.innerHTML = '<div class="binary-message">Spreadsheet preview is unavailable.</div>';
       return;
@@ -4859,7 +4859,7 @@ Object.assign(CodemanApp.prototype, {
       }
       if (isWorkspaceRef(src)) {
         const path = resolveRef(src);
-        img.setAttribute('src', CodemanBase.url(`/api/sessions/${sessionId}/file-raw?path=${encodeURIComponent(path)}`));
+        img.setAttribute('src', ReverieBase.url(`/api/sessions/${sessionId}/file-raw?path=${encodeURIComponent(path)}`));
       }
       img.addEventListener('error', () => img.replaceWith(img.getAttribute('alt') || src), { once: true });
     }
@@ -4916,7 +4916,7 @@ Object.assign(CodemanApp.prototype, {
         body: JSON.stringify({ path: filePath }),
       });
       const result = await res.json().catch(() => ({}));
-      return res.ok && result.success ? CodemanBase.url(result.data.url) : null;
+      return res.ok && result.success ? ReverieBase.url(result.data.url) : null;
     } catch {
       return null;
     }
@@ -5168,7 +5168,7 @@ Object.assign(CodemanApp.prototype, {
   },
 
   openAttachmentInNewTab(sessionId, filePath, attachmentId = null) {
-    const url = CodemanBase.url(
+    const url = ReverieBase.url(
       attachmentId
         ? `/api/sessions/${sessionId}/attachments/${encodeURIComponent(attachmentId)}/raw`
         : `/api/sessions/${sessionId}/file-raw?path=${encodeURIComponent(filePath)}`
@@ -5208,17 +5208,17 @@ Object.assign(CodemanApp.prototype, {
     const stack = this.ensureAttachmentCardStack();
     const session = this.sessions.get(sessionId);
     const sessionName = session?.name || sessionId.substring(0, 8);
-    const attachmentRawUrl = CodemanBase.url(
+    const attachmentRawUrl = ReverieBase.url(
       rawUrl ||
         (attachmentId
           ? `/api/sessions/${sessionId}/attachments/${encodeURIComponent(attachmentId)}/raw`
           : `/api/sessions/${sessionId}/file-raw?path=${encodeURIComponent(filePath)}`)
     );
-    const attachmentPreviewUrl = CodemanBase.url(
+    const attachmentPreviewUrl = ReverieBase.url(
       previewUrl ||
         (attachmentId ? `/api/sessions/${sessionId}/attachments/${encodeURIComponent(attachmentId)}/preview` : null)
     );
-    const attachmentThumbnailUrl = CodemanBase.url(
+    const attachmentThumbnailUrl = ReverieBase.url(
       thumbnailUrl ||
         (attachmentId
           ? `/api/sessions/${sessionId}/attachments/${encodeURIComponent(attachmentId)}/thumbnail`
@@ -5487,7 +5487,7 @@ Object.assign(CodemanApp.prototype, {
       .join(' • ');
     const thumb =
       item.thumbnailUrl && !item.missing
-        ? `<img class="attachment-history-thumb-img" src="${escapeHtml(CodemanBase.url(item.thumbnailUrl))}" alt="">`
+        ? `<img class="attachment-history-thumb-img" src="${escapeHtml(ReverieBase.url(item.thumbnailUrl))}" alt="">`
         : '';
     const disabled = item.missing ? 'disabled aria-disabled="true"' : '';
     return `
@@ -5527,7 +5527,7 @@ Object.assign(CodemanApp.prototype, {
     const item = this.getAttachmentHistoryItem(itemId);
     if (!item || item.missing) return;
     if (item.rawUrl || item.url) {
-      window.open(CodemanBase.url(item.rawUrl || item.url), '_blank');
+      window.open(ReverieBase.url(item.rawUrl || item.url), '_blank');
       return;
     }
     this.openAttachmentInNewTab(item.sessionId, item.relativePath || item.fileName, item.attachmentId || null);
@@ -5536,7 +5536,7 @@ Object.assign(CodemanApp.prototype, {
   downloadAttachmentHistoryItem(itemId) {
     const item = this.getAttachmentHistoryItem(itemId);
     if (!item || item.missing || !item.downloadUrl) return;
-    window.open(CodemanBase.url(item.downloadUrl), '_blank');
+    window.open(ReverieBase.url(item.downloadUrl), '_blank');
   },
 
   reshowAttachmentCard(itemId) {
@@ -5682,7 +5682,7 @@ Object.assign(CodemanApp.prototype, {
 
     // Connect to SSE stream
     const eventSource = new EventSource(
-      CodemanBase.url(`/api/sessions/${sessionId}/tail-file?path=${encodeURIComponent(filePath)}&lines=50`)
+      ReverieBase.url(`/api/sessions/${sessionId}/tail-file?path=${encodeURIComponent(filePath)}&lines=50`)
     );
 
     eventSource.onmessage = (e) => {
@@ -5824,7 +5824,7 @@ Object.assign(CodemanApp.prototype, {
 
     // Build image URL using the existing file-raw endpoint
     // Use relativePath (path from working dir) instead of fileName (basename) for subdirectory images
-    const imageUrl = CodemanBase.url(`/api/sessions/${sessionId}/file-raw?path=${encodeURIComponent(relativePath || fileName)}`);
+    const imageUrl = ReverieBase.url(`/api/sessions/${sessionId}/file-raw?path=${encodeURIComponent(relativePath || fileName)}`);
 
     // Create window element
     const win = document.createElement('div');
@@ -5979,7 +5979,7 @@ Object.assign(CodemanApp.prototype, {
           this.sessions.clear();
           this.muxSessions = [];
           this.activeSessionId = null;
-          try { localStorage.removeItem('codeman-active-session'); } catch {}
+          try { localStorage.removeItem('reverie-active-session'); } catch {}
           this.renderSessionTabs();
           this.renderMuxSessions();
           // Not a replay path, so the ordering hazard does not apply here — but
@@ -5992,7 +5992,7 @@ Object.assign(CodemanApp.prototype, {
         // Just remove tabs, keep mux sessions running
         this.sessions.clear();
         this.activeSessionId = null;
-        try { localStorage.removeItem('codeman-active-session'); } catch {}
+        try { localStorage.removeItem('reverie-active-session'); } catch {}
         this.renderSessionTabs();
         this._resetTerminalForReplay();
         this.toast('All tabs removed, tmux still running', 'info');
@@ -6183,7 +6183,7 @@ Object.assign(CodemanApp.prototype, {
   },
 
   // Open a Reverie window stretched across all displays (multi-monitor mode).
-  // The server spawns scripts/span-codeman.sh, which launches a fresh, spanning
+  // The server spawns scripts/span-reverie.sh, which launches a fresh, spanning
   // browser --app window so in-page floating panels can cross the monitor seam.
   async launchMultiMonitor() {
     try {

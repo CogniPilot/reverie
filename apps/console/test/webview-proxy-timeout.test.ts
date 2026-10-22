@@ -7,7 +7,7 @@
  * upstream http server on an ephemeral port (inject fakes only the inbound
  * request; the proxy's outbound fetch is real). Port: ephemeral (server.listen(0)).
  *
- * The timeout is shrunk via CODEMAN_WEBVIEW_TIMEOUT_MS inside vi.hoisted(), which
+ * The timeout is shrunk via REVERIE_WEBVIEW_TIMEOUT_MS inside vi.hoisted(), which
  * runs before the module graph loads (webview-limits reads the env at import).
  */
 
@@ -16,7 +16,7 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import { createServer, type Server } from 'node:http';
 
 const TIMEOUT_MS = vi.hoisted(() => {
-  process.env.CODEMAN_WEBVIEW_TIMEOUT_MS = '400';
+  process.env.REVERIE_WEBVIEW_TIMEOUT_MS = '400';
   return 400;
 });
 
@@ -118,7 +118,7 @@ describe('webview proxy upstream timeout (#237)', () => {
       // The body names the limit and the env var that raises it; the old message
       // was an opaque "The operation was aborted due to timeout".
       expect(res.body).toContain(`no response headers within ${TIMEOUT_MS}ms`);
-      expect(res.body).toContain('CODEMAN_WEBVIEW_TIMEOUT_MS');
+      expect(res.body).toContain('REVERIE_WEBVIEW_TIMEOUT_MS');
       // And it is logged server-side (the old path was completely silent), with
       // the sanitized target and the webview's name.
       const logged = warn.mock.calls.map((args) => args.join(' ')).join('\n');

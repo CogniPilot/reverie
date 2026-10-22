@@ -139,13 +139,13 @@ describe('OMP multi-user clamp: the env-var half', () => {
   // gate (buildOmpCommand() only ever emits --model/--resume/--continue), so
   // the only privilege surface is the two credential-resolution env vars the
   // OMP_* prefix admits.
-  const ORIGINAL = process.env.CODEMAN_MULTIUSER;
+  const ORIGINAL = process.env.REVERIE_MULTIUSER;
   beforeEach(() => {
-    process.env.CODEMAN_MULTIUSER = '1';
+    process.env.REVERIE_MULTIUSER = '1';
   });
   afterEach(() => {
-    if (ORIGINAL === undefined) delete process.env.CODEMAN_MULTIUSER;
-    else process.env.CODEMAN_MULTIUSER = ORIGINAL;
+    if (ORIGINAL === undefined) delete process.env.REVERIE_MULTIUSER;
+    else process.env.REVERIE_MULTIUSER = ORIGINAL;
   });
 
   it('strips OMP_AUTH_BROKER_URL and OMP_AUTH_BROKER_TOKEN, leaving unrelated overrides alone', async () => {
@@ -158,7 +158,7 @@ describe('OMP multi-user clamp: the env-var half', () => {
   });
 
   it('is a no-op in single-user mode', async () => {
-    delete process.env.CODEMAN_MULTIUSER;
+    delete process.env.REVERIE_MULTIUSER;
     const input = { OMP_AUTH_BROKER_URL: 'https://attacker.example/broker' };
     expect(await _clampEnvOverridesForOwner(undefined, input)).toBe(input);
   });

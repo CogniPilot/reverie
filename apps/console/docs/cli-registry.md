@@ -12,20 +12,20 @@ Every run mode Reverie can launch — Claude Code, Terminal/Shell, OpenCode, Cod
 | `argv.ts` | The argv engine: the only code that turns typed tokens into a command string. |
 | `patterns.ts` | The NAMED value patterns (`model`, `uuid`, `path-segment`, …) and the regex-compilation guard. |
 | `profiles.ts` | The names of behaviours that genuinely need code, kept import-free so `schema.ts` can validate one. |
-| `registry.ts` | Loading, merging `~/.codeman/clis.json`, and the accessors (`getCli`, `enabledClis`). |
+| `registry.ts` | Loading, merging `~/.reverie/clis.json`, and the accessors (`getCli`, `enabledClis`). |
 
 `src/session-cli-registry-bridge.ts` maps the legacy per-mode option bag onto the engine, and `src/utils/cli-resolver.ts` / `src/utils/cli-launcher.ts` do registry-driven binary resolution and launcher-profile dispatch.
 
 ## The override file
 
-`~/.codeman/clis.json` (instance-scoped through `dataPath()`) holds overrides and custom entries only, never a copy of the stock catalog: `{ "clis": { "<id>": { ...partial entry... } } }`. Objects merge key-wise onto the stock entry, arrays replace wholesale. **The file must be mode 0600**; the loader refuses any group/world permission bit, read bits included, so a file created with a normal umask (0644) is ignored until you `chmod 600` it. Every reason a file was ignored or an entry dropped is logged once, prefixed `[cli-registry]`, on the first load. A stock entry whose override fails validation falls back to the shipped definition; a custom entry that fails is dropped. The file is read once per process and re-read after a change made through CLI management (below).
+`~/.reverie/clis.json` (instance-scoped through `dataPath()`) holds overrides and custom entries only, never a copy of the stock catalog: `{ "clis": { "<id>": { ...partial entry... } } }`. Objects merge key-wise onto the stock entry, arrays replace wholesale. **The file must be mode 0600**; the loader refuses any group/world permission bit, read bits included, so a file created with a normal umask (0644) is ignored until you `chmod 600` it. Every reason a file was ignored or an entry dropped is logged once, prefixed `[cli-registry]`, on the first load. A stock entry whose override fails validation falls back to the shipped definition; a custom entry that fails is dropped. The file is read once per process and re-read after a change made through CLI management (below).
 
 ## Managing CLIs from Settings
 
 App Settings → Agents & CLIs → **CLI management** (`cliManagementEnabled`, default OFF; admin-only in multi-user mode) lists every entry with an installed/not-installed badge and:
 
 - toggles any entry on or off. A `kind: 'shell'` entry cannot be disabled, and the row shows no switch for it. A disabled CLI disappears from the Run menu, the welcome screen and the phone overview, and new session requests for it are rejected.
-- installs a missing **stock** CLI by running its shipped install command, after a confirm that names the exact command. Only one install per CLI runs at a time, and the command runs without any `CODEMAN_*` variable in its environment. An `npm install -g` command is pointed at `~/.local` (which every resolver searches) when the npm global prefix is not writable by the server user, for example a system node under `/usr`; a writable prefix, a prefix that does not exist yet but could be created, and an explicit `NPM_CONFIG_PREFIX` are left alone. A custom entry's install command is never executed.
+- installs a missing **stock** CLI by running its shipped install command, after a confirm that names the exact command. Only one install per CLI runs at a time, and the command runs without any `REVERIE_*` variable in its environment. An `npm install -g` command is pointed at `~/.local` (which every resolver searches) when the npm global prefix is not writable by the server user, for example a system node under `/usr`; a writable prefix, a prefix that does not exist yet but could be created, and an explicit `NPM_CONFIG_PREFIX` are left alone. A custom entry's install command is never executed.
 - adds, edits and deletes **custom** entries (id, label, badge, binaries, launch argv). The server re-validates the whole assembled entry through `CliEntrySchema`, so the form cannot bypass the load-time rules.
 
 These are the only writes to `clis.json`. They are serialized, and a file that does not parse or has unsafe permissions is refused rather than overwritten; fix it (or `chmod 600` it) and retry. The HTTP routes are listed in `docs/api-reference.md` under *CLI management*.
@@ -130,15 +130,15 @@ sure its row is one the agent cannot write.
 
 ### Where the agent skill lands
 
-`agentSkillInjection` says a CLI's sessions get the agent skill (`skills/codeman`) and its per-session preamble when the synced `agentSkillEnabled` setting is on; `agentSkillDir` says which workspace directory the CLI scans for skills, read through `agentSkillDir()` (hooks-config.ts), so no call site branches on a CLI id. Absent with the boolean on means `.claude/skills`, which is what the boolean meant before the field existed.
+`agentSkillInjection` says a CLI's sessions get the agent skill (`skills/reverie`) and its per-session preamble when the synced `agentSkillEnabled` setting is on; `agentSkillDir` says which workspace directory the CLI scans for skills, read through `agentSkillDir()` (hooks-config.ts), so no call site branches on a CLI id. Absent with the boolean on means `.claude/skills`, which is what the boolean meant before the field existed.
 
 | CLI | Skill directory |
 | --- | --- |
-| claude | `.claude/skills/codeman` |
-| codex, gemini, opencode, antigravity, grok, deepseek, omp | `.agents/skills/codeman` |
+| claude | `.claude/skills/reverie` |
+| codex, gemini, opencode, antigravity, grok, deepseek, omp | `.agents/skills/reverie` |
 | pi, shell | none |
 
-Measured 2026-10-11 against the installed builds or their source: every CLI in the middle row scans `<workspace>/.agents/skills/` (gemini only in its cwd, dsh only at the git root, else cwd), and Claude Code does not read it, so a case shared with a claude session lists the skill once there (opencode, grok and omp read both directories and see the same skill twice, identical, under one name). ⚠️ pi is left out on purpose: any project-level `.agents/skills` or `.pi/skills` makes pi ask "Trust project folder?" at startup, which would stall a spawned worker on a dialog; it reads the user-level `~/.agents/skills` without the prompt (`npx skills add Ark0N/Codeman --skill codeman -g`). A codex, gemini or other session's copy in a case that pi sessions also use triggers that prompt once for the human there. ⚠️ `agentSkillDir` is a closed enum (`AGENT_SKILL_DIRS`, schema.ts), never a free path: `clis.json` can set it and it decides where the server writes. ⚠️ Two codex traps the skill names rather than fixes: codex's default sandbox blocks network even to loopback (the skill needs **Bypass approvals and sandbox**), and codex 0.162 runs tool commands through a shared `app-server` daemon whose environment (`CODEMAN_SESSION_ID`, `CODEMAN_API_URL`) is that of the session that started it.
+Measured 2026-10-11 against the installed builds or their source: every CLI in the middle row scans `<workspace>/.agents/skills/` (gemini only in its cwd, dsh only at the git root, else cwd), and Claude Code does not read it, so a case shared with a claude session lists the skill once there (opencode, grok and omp read both directories and see the same skill twice, identical, under one name). ⚠️ pi is left out on purpose: any project-level `.agents/skills` or `.pi/skills` makes pi ask "Trust project folder?" at startup, which would stall a spawned worker on a dialog; it reads the user-level `~/.agents/skills` without the prompt (`npx skills add jgoppert/reverie --skill reverie -g`). A codex, gemini or other session's copy in a case that pi sessions also use triggers that prompt once for the human there. ⚠️ `agentSkillDir` is a closed enum (`AGENT_SKILL_DIRS`, schema.ts), never a free path: `clis.json` can set it and it decides where the server writes. ⚠️ Two codex traps the skill names rather than fixes: codex's default sandbox blocks network even to loopback (the skill needs **Bypass approvals and sandbox**), and codex 0.162 runs tool commands through a shared `app-server` daemon whose environment (`REVERIE_SESSION_ID`, `REVERIE_API_URL`) is that of the session that started it.
 
 ## The newline chord
 

@@ -1,4 +1,4 @@
-import tests  # noqa: F401  isolates CODEMAN_*/FLEET_* before cto is imported
+import tests  # noqa: F401  isolates REVERIE_* before reverie is imported
 import io
 import json
 import tarfile
@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from cto import image_check
+from reverie import image_check
 
 TOKEN = 'ghp_' + 'abcdefghijklmnopqrstuvwxyz0123456789'
 
@@ -51,23 +51,49 @@ class ImageCheckTests(unittest.TestCase):
         return image_check.check(_image(self.dir.name, layers, config), allow)
 
     def test_a_clean_image_passes(self):
-        result = self.run_check([[('opt/fleet/cto/a.py', b'print(1)\n'), ('workspace', None), ('scratch', None)]])
+        result = self.run_check([[('opt/reverie/reverie/a.py', b'print(1)\n'), ('workspace', None), ('scratch', None)]])
         self.assertTrue(result['clean'], result)
 
     def test_a_credential_in_our_tree_is_named_not_copied(self):
-        result = self.run_check([[('opt/fleet/cto/a.py', f'KEY = "{TOKEN}"\n'.encode())]])
-        self.assertEqual(result['findings'], [{'where': 'layer 0: /opt/fleet/cto/a.py', 'detector': 'github_token'}])
+        result = self.run_check([[('opt/reverie/reverie/a.py', f'KEY = "{TOKEN}"\n'.encode())]])
+        self.assertEqual(result['findings'], [{'where': 'layer 0: /opt/reverie/reverie/a.py', 'detector': 'github_token'}])
         self.assertNotIn(TOKEN, json.dumps(result))
 
+    def test_owned_nix_outputs_are_scanned_except_console_dependencies(self):
+        store = "nix/store/" + "a" * 32 + "-"
+        owned = [store + "reverie-console-1.41.1/lib/reverie/dist/index.js",
+                 store + "reverie-console-1.41.1/lib/reverie/skills/example.md",
+                 store + "reverie-console-1.41.1/lib/reverie/scripts/start.js",
+                 store + "reverie-console-1.41.1/lib/reverie/packages/tool.js",
+                 store + "reverie-console-1.41.1/lib/reverie/node_modules-lookalike/test.js",
+                 store + "python3.13-reverie-memory-0.1.0/lib/python3.13/site-packages/reverie/memory.py",
+                 store + "python3.13-reverie-memory-0.1.0/lib/python3.13/site-packages/experts/profiles.py",
+                 store + "reverie-start",
+                 store + "reverie-1.41.1/bin/reverie",
+                 store + "reverie-runtime/bin/helper"]
+        fixtures = [store + "reverie-console-1.41.1/lib/reverie/node_modules/example/test.js",
+                    store + "python3.13-some-dependency-1.0/test.py"]
+        result = self.run_check([[(path, TOKEN.encode()) for path in owned + fixtures]])
+        self.assertEqual({finding["where"] for finding in result["findings"]},
+                         {"layer 0: /" + path for path in owned})
+        self.assertEqual(result["unread_third_party"]["nix/store/"]["files"], 2)
+
+    def test_nix_dependencies_still_refuse_instance_filenames_and_links(self):
+        store = "nix/store/" + "a" * 32 + "-dependency-1.0/"
+        result = self.run_check([[(store + "auth.json", b"{}"),
+                                 (store + "config", ("sym", "/instances/default/instance.json"))]])
+        self.assertEqual({finding["detector"] for finding in result["findings"]},
+                         {"instance_file", "link_to_instance_file", "link_into_mount_point"})
+
     def test_a_file_deleted_by_a_later_layer_is_still_found(self):
-        result = self.run_check([[('opt/fleet/cto/a.py', TOKEN.encode())],
-                                 [('opt/fleet/cto/.wh.a.py', b'')]])
-        self.assertEqual([f['where'] for f in result['findings']], ['layer 0: /opt/fleet/cto/a.py'])
+        result = self.run_check([[('opt/reverie/reverie/a.py', TOKEN.encode())],
+                                 [('opt/reverie/reverie/.wh.a.py', b'')]])
+        self.assertEqual([f['where'] for f in result['findings']], ['layer 0: /opt/reverie/reverie/a.py'])
 
     def test_instance_files_are_refused_anywhere_by_name(self):
-        result = self.run_check([[('home/cto/.config/reverie/deploy/github.token', b'x'),
+        result = self.run_check([[('home/reverie/.config/reverie/deploy/github.token', b'x'),
                                   ('usr/lib/x/memory.sqlite', b'x'),
-                                  ('opt/fleet/apps/console/node_modules/p/.env', b'x')]])
+                                  ('opt/reverie/apps/console/node_modules/p/.env', b'x')]])
         self.assertEqual({f['detector'] for f in result['findings']}, {'instance_file'})
         self.assertEqual(len(result['findings']), 3)
 
@@ -80,14 +106,14 @@ class ImageCheckTests(unittest.TestCase):
         self.assertEqual(result['findings'], [{'where': 'layer 0: /workspace/notes.md', 'detector': 'mount_point_not_empty'}])
 
     def test_links_into_instance_data_are_refused(self):
-        result = self.run_check([[('opt/fleet/data', ('sym', '/instances/example')),
-                                  ('opt/fleet/cto/key', ('sym', '../../../home/user/.config/gh.token')),
+        result = self.run_check([[('opt/reverie/data', ('sym', '/instances/example')),
+                                  ('opt/reverie/reverie/key', ('sym', '../../../home/user/.config/gh.token')),
                                   ('usr/local/bin/creds', ('lnk', 'root/.git-credentials')),
-                                  ('usr/local/bin/reverie', ('sym', '/opt/fleet/apps/console/dist/index.js')),
+                                  ('usr/local/bin/reverie', ('sym', '/opt/reverie/apps/console/dist/index.js')),
                                   ('usr/bin/py', ('sym', 'python3'))]])
         self.assertEqual([(f['where'], f['detector']) for f in result['findings']], [
-            ('layer 0: /opt/fleet/data', 'link_into_mount_point'),
-            ('layer 0: /opt/fleet/cto/key', 'link_to_instance_file'),
+            ('layer 0: /opt/reverie/data', 'link_into_mount_point'),
+            ('layer 0: /opt/reverie/reverie/key', 'link_to_instance_file'),
             ('layer 0: /usr/local/bin/creds', 'link_to_instance_file'),
         ])
 
@@ -95,30 +121,30 @@ class ImageCheckTests(unittest.TestCase):
         # Home directories, binaries and large files are read too, and a key across a chunk boundary is found.
         large = b'x' * (image_check.CHUNK - 10) + b' ' + TOKEN.encode() + b' ' + b'y' * (5 * image_check.CHUNK)
         result = self.run_check([[('home/user/notes.txt', TOKEN.encode()),
-                                  ('opt/fleet/bin/tool', b'\x7fELF\0\0' + TOKEN.encode() + b'\0\xff'),
-                                  ('opt/fleet/data/big.txt', large)]])
+                                  ('opt/reverie/bin/tool', b'\x7fELF\0\0' + TOKEN.encode() + b'\0\xff'),
+                                  ('opt/reverie/data/big.txt', large)]])
         self.assertEqual([f['where'] for f in result['findings']],
-                         ['layer 0: /home/user/notes.txt', 'layer 0: /opt/fleet/bin/tool', 'layer 0: /opt/fleet/data/big.txt'])
+                         ['layer 0: /home/user/notes.txt', 'layer 0: /opt/reverie/bin/tool', 'layer 0: /opt/reverie/data/big.txt'])
 
     def test_unread_third_party_files_are_counted(self):
         result = self.run_check([[('usr/lib/x/a.js', b'abc'), ('usr/share/doc/b', b'de'),
-                                  ('opt/fleet/apps/console/node_modules/p/c.js', b'f')]])
+                                  ('opt/reverie/apps/console/node_modules/p/c.js', b'f')]])
         self.assertEqual(result['unread_third_party'], {'usr/': {'files': 2, 'bytes': 5},
-                                                        'opt/fleet/apps/console/node_modules/': {'files': 1, 'bytes': 1}})
+                                                        'opt/reverie/apps/console/node_modules/': {'files': 1, 'bytes': 1}})
 
     def test_third_party_contents_are_not_read(self):
-        result = self.run_check([[('opt/fleet/apps/console/node_modules/p/test.js', TOKEN.encode()),
+        result = self.run_check([[('opt/reverie/apps/console/node_modules/p/test.js', TOKEN.encode()),
                                   ('usr/lib/node_modules/q/fixture.js', TOKEN.encode())]])
         self.assertTrue(result['clean'], result)
 
     def test_dotenv_templates_pass_by_name_but_are_read(self):
-        result = self.run_check([[('opt/fleet/apps/console/docker/.env.example', b'PUID=1000'),
-                                  ('opt/fleet/a/.env.sample', TOKEN.encode()), ('opt/fleet/b/.env.local', b'x'),
-                                  ('opt/fleet/c/.env.example.bak', b'x')]])
+        result = self.run_check([[('opt/reverie/apps/console/docker/.env.example', b'PUID=1000'),
+                                  ('opt/reverie/a/.env.sample', TOKEN.encode()), ('opt/reverie/b/.env.local', b'x'),
+                                  ('opt/reverie/c/.env.example.bak', b'x')]])
         self.assertEqual([(f['where'], f['detector']) for f in result['findings']],
-                         [('layer 0: /opt/fleet/a/.env.sample', 'github_token'),
-                          ('layer 0: /opt/fleet/b/.env.local', 'instance_file'),
-                          ('layer 0: /opt/fleet/c/.env.example.bak', 'instance_file')])
+                         [('layer 0: /opt/reverie/a/.env.sample', 'github_token'),
+                          ('layer 0: /opt/reverie/b/.env.local', 'instance_file'),
+                          ('layer 0: /opt/reverie/c/.env.example.bak', 'instance_file')])
 
     def test_our_scripts_inside_third_party_trees_are_read(self):
         result = self.run_check([[('usr/local/bin/start', f'#!/bin/sh\nGH={TOKEN}\n'.encode()),
@@ -129,18 +155,18 @@ class ImageCheckTests(unittest.TestCase):
     def test_config_env_labels_and_history_are_checked(self):
         config = {'config': {'Env': [f'GH={TOKEN}'], 'Labels': {'k': TOKEN}},
                   'history': [{'created_by': f'RUN echo {TOKEN}'}]}
-        result = self.run_check([[('opt/fleet/cto/a.py', b'')]], config)
+        result = self.run_check([[('opt/reverie/reverie/a.py', b'')]], config)
         self.assertEqual([f['where'] for f in result['findings']], ['config.Env', 'config.Labels', 'config.history'])
 
     def test_allowed_fixtures_pass_only_for_their_detector(self):
-        layers = [[('opt/fleet/apps/console/test/k.ts', f'"{TOKEN}" -----BEGIN ' 'PRIVATE KEY-----'.encode())]]
-        result = self.run_check(layers, allow={('opt/fleet/apps/console/test/k.ts', 'private_key')})
+        layers = [[('opt/reverie/apps/console/test/k.ts', f'"{TOKEN}" -----BEGIN ' 'PRIVATE KEY-----'.encode())]]
+        result = self.run_check(layers, allow={('opt/reverie/apps/console/test/k.ts', 'private_key')})
         self.assertEqual([f['detector'] for f in result['findings']], ['github_token'])
 
     def test_the_command_line_exit_status(self):
-        clean = _image(self.dir.name, [[('opt/fleet/cto/a.py', b'')]])
+        clean = _image(self.dir.name, [[('opt/reverie/reverie/a.py', b'')]])
         self.assertEqual(image_check.main([clean]), 0)
-        dirty = _image(self.dir.name, [[('opt/fleet/cto/a.py', TOKEN.encode())]])
+        dirty = _image(self.dir.name, [[('opt/reverie/reverie/a.py', TOKEN.encode())]])
         self.assertEqual(image_check.main([dirty]), 1)
         bad = Path(self.dir.name) / 'bad.tar'
         bad.write_bytes(_tar([('manifest.json', b'[]')]))

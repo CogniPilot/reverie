@@ -11,7 +11,7 @@ export function authenticatedPlanMover(
   sessions: Pick<NonNullable<AuthPort['authSessions']>, 'get'> | null,
   ownerAuth?: Pick<OwnerAuthService, 'session'>
 ): boolean {
-  if (request.headers['x-codeman-parent-session'] !== undefined || !sameOrigin(request)) return false;
+  if (request.headers['x-reverie-parent-session'] !== undefined || !sameOrigin(request)) return false;
   const ownerSession = ownerAuth?.session(request.cookies?.[OWNER_COOKIE]);
   if (ownerSession && !ownerSession.restricted && !isMultiUserMode()) return true;
   const token = request.cookies?.[AUTH_COOKIE_NAME];

@@ -22,7 +22,7 @@ can be changed or removed without opening it first.
 Switching tabs does **not** reload a dashboard. Frames stay alive in the background,
 so a dashboard that took a while to authenticate is still there when you come back.
 Past six live frames the least-recently-viewed one is dropped to bound memory
-(`CODEMAN_MAX_LIVE_WEBVIEW_FRAMES`).
+(`REVERIE_MAX_LIVE_WEBVIEW_FRAMES`).
 
 ## Why dashboards are proxied
 
@@ -97,9 +97,9 @@ Unchecking **Open sandboxed** grants `allow-same-origin`. Do that only for a
 dashboard you fully trust, and only if you need it, which in practice means a
 dashboard with its own login that stores a session in a cookie or `localStorage`.
 
-Even in trusted mode, Codeman never forwards its own credentials upstream: the
-`Authorization` header and the `codeman_session` cookie are stripped on the way out,
-so `CODEMAN_PASSWORD` cannot leak into a dashboard.
+Even in trusted mode, Reverie never forwards its own credentials upstream: the
+`Authorization` header and the `reverie_session` cookie are stripped on the way out,
+so `REVERIE_PASSWORD` cannot leak into a dashboard.
 
 ⚠️ **Sandboxed tabs may not work when Reverie itself is behind a
 cookie-authenticated reverse proxy** (Cloudflare Access, Authelia, oauth2-proxy and
@@ -128,15 +128,15 @@ capability (tabs re-mint transparently on next click).
 
 | Variable                             | Default | Meaning                                    |
 | ------------------------------------ | ------- | ------------------------------------------ |
-| `CODEMAN_MAX_WEBVIEWS`               | 50      | Saved dashboards per owner                 |
-| `CODEMAN_MAX_LIVE_WEBVIEW_FRAMES`    | 6       | Iframes kept mounted at once               |
-| `CODEMAN_WEBVIEW_CAPABILITY_TTL_MS`  | 12h     | Rolling capability lifetime                |
-| `CODEMAN_WEBVIEW_TIMEOUT_MS`         | 30000   | Upstream request timeout                   |
-| `CODEMAN_WEBVIEW_PROBE_TIMEOUT_MS`   | 8000    | Timeout for the Test button                |
-| `CODEMAN_MAX_WEBVIEW_HTML_BYTES`     | 8MB     | Largest HTML document rewritten            |
-| `CODEMAN_MAX_WEBVIEW_SOCKETS`        | 8       | Concurrent proxied WebSockets per dashboard |
+| `REVERIE_MAX_WEBVIEWS`               | 50      | Saved dashboards per owner                 |
+| `REVERIE_MAX_LIVE_WEBVIEW_FRAMES`    | 6       | Iframes kept mounted at once               |
+| `REVERIE_WEBVIEW_CAPABILITY_TTL_MS`  | 12h     | Rolling capability lifetime                |
+| `REVERIE_WEBVIEW_TIMEOUT_MS`         | 30000   | Upstream request timeout                   |
+| `REVERIE_WEBVIEW_PROBE_TIMEOUT_MS`   | 8000    | Timeout for the Test button                |
+| `REVERIE_MAX_WEBVIEW_HTML_BYTES`     | 8MB     | Largest HTML document rewritten            |
+| `REVERIE_MAX_WEBVIEW_SOCKETS`        | 8       | Concurrent proxied WebSockets per dashboard |
 
-Saved dashboards live in `~/.codeman/webviews.json`. Which tabs you have open is
+Saved dashboards live in `~/.reverie/webviews.json`. Which tabs you have open is
 per-device (`localStorage`), since that is workspace layout rather than config.
 
 ## How a dashboard's own API calls keep working
@@ -218,10 +218,10 @@ then every API call fails, which looks like the dashboard being broken.
   them to its login provider and the app loads broken while Test reports reachable.
   Use trusted mode behind Cloudflare Access and friends; see the warning above.
 - **Slow endpoints and the upstream timeout** (#237). The proxy waits
-  `CODEMAN_WEBVIEW_TIMEOUT_MS` (default 300s) for the upstream's response *headers*,
+  `REVERIE_WEBVIEW_TIMEOUT_MS` (default 300s) for the upstream's response *headers*,
   then streams the body without any time bound; a header timeout is logged
   server-side and answered as a 502 that names the limit. WebSocket handshakes use
-  the separate `CODEMAN_WEBVIEW_WS_HANDSHAKE_TIMEOUT_MS` (default 30s).
+  the separate `REVERIE_WEBVIEW_WS_HANDSHAKE_TIMEOUT_MS` (default 30s).
 - **Not a security boundary, with one carve-out.** The proxy reaches whatever the
   Reverie server can reach (a `localhost` dashboard is the point), so it is not an
   escalation for someone who already commands `--dangerously-skip-permissions`

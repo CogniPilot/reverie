@@ -64,7 +64,7 @@ describe('the pronouns field on the employee record', () => {
   });
 
   it('a company.json written before the field loads unchanged, retired rows included; retired rows take it too', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'fleet-pronouns-old-'));
+    const dir = await mkdtemp(join(tmpdir(), 'reverie-pronouns-old-'));
     try {
       const file = join(dir, 'company.json');
       const old = {
@@ -102,7 +102,7 @@ describe('who may set pronouns', () => {
 
   beforeEach(async () => {
     vi.mocked(appendAdminAudit).mockClear();
-    directory = await mkdtemp(join(tmpdir(), 'fleet-pronouns-routes-'));
+    directory = await mkdtemp(join(tmpdir(), 'reverie-pronouns-routes-'));
     file = join(directory, 'company.json');
     const store = new CompanyStore(file);
     await store.init();
@@ -190,7 +190,7 @@ describe('who may set pronouns', () => {
     const before = await readFile(file, 'utf8');
     for (const header of ['parent-session', 'expert-session', 'stale-session', '']) {
       for (const pronouns of ['he/him', null]) {
-        const res = await put({ pronouns }, { 'x-codeman-parent-session': header });
+        const res = await put({ pronouns }, { 'x-reverie-parent-session': header });
         expect(res.statusCode).toBe(403);
       }
     }
@@ -205,7 +205,7 @@ describe('who may set pronouns', () => {
         method: 'POST',
         url: '/api/company/self',
         payload,
-        headers: { 'x-codeman-parent-session': 'expert-session' },
+        headers: { 'x-reverie-parent-session': 'expert-session' },
       });
       expect(res.statusCode).toBe(400);
     }
@@ -242,7 +242,7 @@ describe('who may set pronouns', () => {
           method: options.method as 'POST',
           url: options.path.replace('/api/v1/', '/api/'),
           payload: options.body as object,
-          headers: { 'x-codeman-parent-session': 'expert-session' },
+          headers: { 'x-reverie-parent-session': 'expert-session' },
         });
         return { status: res.statusCode, text: res.body, json: res.json() };
       },
@@ -269,7 +269,7 @@ describe('pronouns in the room member list', () => {
   let directory: string;
   let chatrooms: ChatroomService;
   beforeEach(async () => {
-    directory = await mkdtemp(join(tmpdir(), 'fleet-pronouns-rooms-'));
+    directory = await mkdtemp(join(tmpdir(), 'reverie-pronouns-rooms-'));
   });
   afterEach(async () => {
     await chatrooms?.stop();

@@ -1,9 +1,9 @@
 /**
  * @fileoverview Capability tokens for the web-tab proxy.
  *
- * The proxy cannot authenticate on Codeman's session cookie. A sandboxed iframe
+ * The proxy cannot authenticate on Reverie's session cookie. A sandboxed iframe
  * (no `allow-same-origin`) runs in an OPAQUE origin, so every request it makes is
- * cross-site: the `SameSite=lax` `codeman_session` cookie is not sent, and its
+ * cross-site: the `SameSite=lax` `reverie_session` cookie is not sent, and its
  * non-GET requests and WebSocket upgrades arrive with `Origin: null`, which the
  * host guard rejects by design.
  *

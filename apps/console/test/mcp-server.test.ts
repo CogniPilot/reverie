@@ -1,7 +1,7 @@
 /**
- * @fileoverview `codeman mcp` (src/mcp-server.ts): the dual-era MCP protocol core, the
+ * @fileoverview `reverie mcp` (src/mcp-server.ts): the dual-era MCP protocol core, the
  * seven tools against a recording fake transport, and one end-to-end run of the real
- * CLI over stdio against a local fake Codeman.
+ * CLI over stdio against a local fake Reverie.
  *
  * Pinned invariants: no guessed URL (unconfigured = tools answer how to configure, list
  * still works); prompting/interrupting/deleting only sessions this server started (or
@@ -53,8 +53,8 @@ interface FakeCall extends RequestOptions {
   url: string;
 }
 
-/** A fake Codeman: a session list plus per-route answers; records every call. */
-function fakeCodeman(
+/** A fake Reverie: a session list plus per-route answers; records every call. */
+function fakeReverie(
   rows: Array<Record<string, unknown>> = [
     { id: SELF, name: 'lead', mode: 'claude', status: 'busy' },
     { id: USERS, name: 'w1-myapp', mode: 'claude', status: 'idle' },
@@ -88,7 +88,7 @@ function fakeCodeman(
   return { request, calls };
 }
 
-function runner(cfg: McpConfig, fake = fakeCodeman()) {
+function runner(cfg: McpConfig, fake = fakeReverie()) {
   return {
     ...fake,
     tools: createToolRunner({ config: cfg, request: fake.request, started: new Set(), clientId: 'c', now: () => 1 }),
@@ -96,7 +96,7 @@ function runner(cfg: McpConfig, fake = fakeCodeman()) {
 }
 
 /** Drive the protocol core; returns every message it wrote. */
-function server(cfg: McpConfig = config(), fake = fakeCodeman()) {
+function server(cfg: McpConfig = config(), fake = fakeReverie()) {
   const out: Array<Record<string, unknown>> = [];
   const srv = createMcpServer({
     config: cfg,
@@ -120,7 +120,7 @@ describe('protocol: both eras', () => {
     await send({ jsonrpc: '2.0', id: 2, method: 'initialize', params: { protocolVersion: '2030-01-01' } });
     const [first, second] = out as Array<{ result: Record<string, unknown> }>;
     expect(first.result.protocolVersion).toBe('2025-06-18');
-    expect(first.result.serverInfo).toMatchObject({ name: 'codeman', title: 'Reverie' });
+    expect(first.result.serverInfo).toMatchObject({ name: 'reverie', title: 'Reverie' });
     expect(first.result.capabilities).toEqual({ tools: { listChanged: false } });
     expect(first.result.resultType).toBeUndefined();
     expect(second.result.protocolVersion).toBe('2025-11-25');
@@ -133,7 +133,7 @@ describe('protocol: both eras', () => {
     expect(result.resultType).toBe('complete');
     expect(result.supportedVersions).toEqual(['2026-07-28']);
     expect((result._meta as Record<string, unknown>)['io.modelcontextprotocol/serverInfo']).toMatchObject({
-      name: 'codeman',
+      name: 'reverie',
     });
   });
 
@@ -218,7 +218,7 @@ describe('protocol: both eras', () => {
 
   it('a cancelled call aborts its HTTP request and is never answered', async () => {
     let seen: AbortSignal | undefined;
-    const fake = fakeCodeman(undefined, {
+    const fake = fakeReverie(undefined, {
       'GET /api/v1/sessions/*': (call) =>
         new Promise((_resolve, reject) => {
           seen = call.signal;
@@ -246,7 +246,7 @@ describe('protocol: both eras', () => {
     await send({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'list_sessions', arguments: {} } });
     const result = (out[0] as { result: { isError: boolean; content: Array<{ text: string }> } }).result;
     expect(result.isError).toBe(true);
-    expect(result.content[0].text).toContain('CODEMAN_API_URL');
+    expect(result.content[0].text).toContain('REVERIE_API_URL');
   });
 });
 
@@ -274,8 +274,8 @@ describe('tool definitions', () => {
 });
 
 describe('configuration never guesses a server', () => {
-  it('takes --url over CODEMAN_API_URL, and neither means unconfigured', () => {
-    const env = { CODEMAN_API_URL: 'https://127.0.0.1:3000/' };
+  it('takes --url over REVERIE_API_URL, and neither means unconfigured', () => {
+    const env = { REVERIE_API_URL: 'https://127.0.0.1:3000/' };
     expect(resolveMcpConfig({ version: 'x' }, env, () => ({})).apiUrl).toBe('https://127.0.0.1:3000');
     expect(resolveMcpConfig({ url: 'http://10.0.0.2:5000', version: 'x' }, env, () => ({})).apiUrl).toBe(
       'http://10.0.0.2:5000'
@@ -289,11 +289,11 @@ describe('configuration never guesses a server', () => {
     expect(cfg.urlError).toContain('not an http(s) URL');
   });
 
-  it('knows its own session only inside a Codeman pane', () => {
-    expect(resolveMcpConfig({ version: 'x' }, { CODEMAN_MUX: '1', CODEMAN_SESSION_ID: SELF }, () => ({})).selfId).toBe(
+  it('knows its own session only inside a Reverie pane', () => {
+    expect(resolveMcpConfig({ version: 'x' }, { REVERIE_MUX: '1', REVERIE_SESSION_ID: SELF }, () => ({})).selfId).toBe(
       SELF
     );
-    expect(resolveMcpConfig({ version: 'x' }, { CODEMAN_SESSION_ID: SELF }, () => ({})).selfId).toBeUndefined();
+    expect(resolveMcpConfig({ version: 'x' }, { REVERIE_SESSION_ID: SELF }, () => ({})).selfId).toBeUndefined();
   });
 
   it('an unconfigured tool call makes no request at all', async () => {
@@ -329,7 +329,7 @@ describe('who may be prompted, interrupted and deleted', () => {
     expect((await tools.run('send_prompt', { session_id: MINE, text: 'again' })).isError).toBe(true);
   });
 
-  it('inside Codeman, the calling session can drive its own children', async () => {
+  it('inside Reverie, the calling session can drive its own children', async () => {
     const { tools } = runner(config({ selfId: SELF }));
     expect((await tools.run('send_prompt', { session_id: CHILD, text: 'go', wait: false })).isError).toBe(false);
     expect((await tools.run('send_prompt', { session_id: USERS, text: 'go', wait: false })).isError).toBe(true);
@@ -360,14 +360,14 @@ describe('the tools', () => {
     const result = await tools.run('start_session', { case: 'review-1', mode: 'claude', name: 'rev' });
     const post = calls.find((c) => c.path === '/api/v1/quick-start')!;
     expect(post.body).toEqual({ caseName: 'review-1', mode: 'claude', parentSessionId: SELF, sessionName: 'rev' });
-    expect(post.headers).toEqual({ 'X-Codeman-Agent-Origin': 'codeman-mcp' });
+    expect(post.headers).toEqual({ 'X-Reverie-Agent-Origin': 'reverie-mcp' });
     const ready = calls.find((c) => c.path.endsWith('/wait-output'))!;
     expect(ready.query?.timeout).toBe(DEFAULT_WAIT_MS);
     expect(result.structured).toMatchObject({ session_id: MINE, ready: true });
   });
 
   it('start_session still returns the session id when only the readiness call fails', async () => {
-    const busy = fakeCodeman(undefined, {
+    const busy = fakeReverie(undefined, {
       'GET /api/v1/sessions/*': () => ({
         status: 429,
         json: { success: false, error: 'too many waiters', errorCode: 'WAIT_CAPACITY' },
@@ -389,7 +389,7 @@ describe('the tools', () => {
   });
 
   it('send_prompt says when "finished" is definite and when it is a quiet-screen guess', async () => {
-    const quiet = fakeCodeman(undefined, {
+    const quiet = fakeReverie(undefined, {
       'POST /api/v1/sessions/*': () => ok({ delivered: true, wait: { signal: 'idle', until: ['idle', 'exit'] } }),
     });
     const { tools } = runner(config({ allowAnySession: true }), quiet);
@@ -405,7 +405,7 @@ describe('the tools', () => {
   });
 
   it('send_prompt reports a still-working timeout and a dead pane distinctly', async () => {
-    const slow = fakeCodeman(undefined, {
+    const slow = fakeReverie(undefined, {
       'POST /api/v1/sessions/*': () => ok({ delivered: true, wait: { signal: null, timedOut: true } }),
     });
     expect(
@@ -416,7 +416,7 @@ describe('the tools', () => {
         })
       ).structured
     ).toMatchObject({ outcome: 'still_working' });
-    const dead = fakeCodeman(undefined, { 'POST /api/v1/sessions/*': () => ok({ delivered: false }) });
+    const dead = fakeReverie(undefined, { 'POST /api/v1/sessions/*': () => ok({ delivered: false }) });
     const result = await runner(config({ allowAnySession: true }), dead).tools.run('send_prompt', {
       session_id: USERS,
       text: 'go',
@@ -448,7 +448,7 @@ describe('the tools', () => {
 
   it('read_output strips the terminal of escape codes and keeps its tail under the cap, as text only', async () => {
     const huge = `\u001b[31mred\u001b[0m${'x'.repeat(MAX_OUTPUT_CHARS + 500)}END`;
-    const fake = fakeCodeman(undefined, { 'GET /api/v1/sessions/*': () => ok({ terminalBuffer: huge }) });
+    const fake = fakeReverie(undefined, { 'GET /api/v1/sessions/*': () => ok({ terminalBuffer: huge }) });
     const result = await runner(config(), fake).tools.run('read_output', { session_id: USERS, source: 'terminal' });
     const [note, body] = [
       result.text.slice(0, result.text.indexOf('\n')),
@@ -465,27 +465,27 @@ describe('the tools', () => {
 
   it('read_output tidies a pane capture: LF line ends, blank runs collapsed, no trailing blanks', async () => {
     const pane = 'one\r\ntwo   \r\n\r\n\r\n\r\nthree\r\n\r\n\r\n';
-    const fake = fakeCodeman(undefined, { 'GET /api/v1/sessions/*': () => ok({ terminalBuffer: pane }) });
+    const fake = fakeReverie(undefined, { 'GET /api/v1/sessions/*': () => ok({ terminalBuffer: pane }) });
     const result = await runner(config(), fake).tools.run('read_output', { session_id: USERS, source: 'terminal' });
     expect(result.text).toBe('one\ntwo\n\nthree');
   });
 
   it('read_output says what to try when there is no answer yet', async () => {
-    const fake = fakeCodeman(undefined, { 'GET /api/v1/sessions/*': () => ok({ text: '' }) });
+    const fake = fakeReverie(undefined, { 'GET /api/v1/sessions/*': () => ok({ text: '' }) });
     const result = await runner(config(), fake).tools.run('read_output', { session_id: USERS });
     expect(result.text).toContain('source terminal');
   });
 
   it('refuses a session id shorter than 8 characters and an ambiguous prefix', async () => {
     const twins = [{ id: '00000046-0059-4000-8000-00000000008a' }, { id: '00000046-005a-4000-8000-00000000008b' }];
-    const { tools } = runner(config(), fakeCodeman(twins));
+    const { tools } = runner(config(), fakeReverie(twins));
     expect((await tools.run('read_output', { session_id: 'eeee' })).text).toContain('shorter than 8');
     expect((await tools.run('read_output', { session_id: '00000046' })).text).toContain('ambiguous');
   });
 });
 
-describe('codeman mcp over real stdio', () => {
-  it('handshakes and lists sessions from a live (fake) Codeman', async () => {
+describe('reverie mcp over real stdio', () => {
+  it('handshakes and lists sessions from a live (fake) Reverie', async () => {
     const api = http.createServer((req, res) => {
       res.setHeader('Content-Type', 'application/json');
       if (req.url === '/api/v1/sessions') {
@@ -498,9 +498,9 @@ describe('codeman mcp over real stdio', () => {
     await new Promise<void>((resolve) => api.listen(0, '127.0.0.1', resolve));
     const port = (api.address() as AddressInfo).port;
     try {
-      const env = { ...process.env, CODEMAN_API_URL: `http://127.0.0.1:${port}` };
-      delete env.CODEMAN_MUX;
-      delete env.CODEMAN_SESSION_ID;
+      const env = { ...process.env, REVERIE_API_URL: `http://127.0.0.1:${port}` };
+      delete env.REVERIE_MUX;
+      delete env.REVERIE_SESSION_ID;
       const child = spawn('npx', ['tsx', 'src/index.ts', 'mcp'], { cwd: process.cwd(), env });
       let stdout = '';
       let stderr = '';
@@ -544,6 +544,6 @@ describe('the private Reverie MCP client example (config/mcp-client.json)', () =
 
   it('runs the installed local Reverie executable over stdio without downloading another package', () => {
     expect(config).toEqual({ mcpServers: { reverie: { command: 'reverie', args: ['mcp'] } } });
-    expect(pkg.bin).toEqual({ reverie: './dist/index.js', fleet: './dist/index.js', codeman: './dist/index.js' });
+    expect(pkg.bin).toEqual({ reverie: './dist/index.js' });
   });
 });

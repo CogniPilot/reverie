@@ -17,7 +17,7 @@ import { registerChatroomRoutes } from '../../src/web/routes/chatroom-routes.js'
 const A = '0000002d-0035-4000-8000-000000000047';
 const B = '00000038-0043-4000-8000-000000000060';
 const C = '0000003e-004c-4000-8000-00000000006f';
-const AS = (id: string) => ({ 'x-codeman-parent-session': id });
+const AS = (id: string) => ({ 'x-reverie-parent-session': id });
 
 describe('public and private channels', () => {
   let app: FastifyInstance;

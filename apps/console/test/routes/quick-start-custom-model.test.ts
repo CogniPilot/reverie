@@ -154,7 +154,7 @@ describe('POST /api/quick-start: customModel (one-shot custom-model launch)', ()
     expect(res.statusCode).toBe(200);
     const { sessionId } = res.json();
     const session = ctx.sessions.get(sessionId) as unknown as Session;
-    expect(session.getCustomModelForPersist()?.launchModel).toBe('codeman-custom');
+    expect(session.getCustomModelForPersist()?.launchModel).toBe('reverie-custom');
     expect(restartSpy).not.toHaveBeenCalled();
   });
 

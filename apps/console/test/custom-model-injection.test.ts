@@ -123,8 +123,8 @@ describe('buildCustomModelInjection', () => {
     expect(result.files[0].content).toContain('base_url = "http://192.168.1.50:8080/v1"');
     expect(result.files[0].content).toContain('wire_api = "responses"');
     expect(result.files[0].content).not.toContain('api_key ='); // never a literal TOML field
-    expect(result.files[0].content).toContain('env_key = "CODEMAN_CUSTOM_MODEL_API_KEY"');
-    expect(result.extraEnv).toEqual({ CODEMAN_CUSTOM_MODEL_API_KEY: 'my-key' });
+    expect(result.files[0].content).toContain('env_key = "REVERIE_CUSTOM_MODEL_API_KEY"');
+    expect(result.extraEnv).toEqual({ REVERIE_CUSTOM_MODEL_API_KEY: 'my-key' });
   });
 
   it('codex: escapes a quote in the model id so it cannot break out of the TOML string', () => {

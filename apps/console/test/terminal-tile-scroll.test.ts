@@ -44,7 +44,7 @@ const fetchMock = vi.fn();
 
 /**
  * The run modes that page, read off the shipped registry exactly as the server
- * builds `window.__codemanTranscriptPageKeys` (renderIndexHtml), which is the only
+ * builds `window.__reverieTranscriptPageKeys` (renderIndexHtml), which is the only
  * place either pane learns them.
  */
 const PAGE_KEY_MODES = STOCK_CLIS.filter((e) => e.capabilities.transcriptPageKeys === true).map((e) => e.id);
@@ -60,8 +60,8 @@ function loadContext() {
   const windowStub: Record<string, unknown> = {
     addEventListener: vi.fn(),
     removeEventListener: vi.fn(),
-    CodemanBase: { base: '' },
-    __codemanTranscriptPageKeys: PAGE_KEY_MODES,
+    ReverieBase: { base: '' },
+    __reverieTranscriptPageKeys: PAGE_KEY_MODES,
   };
   const context = vm.createContext({
     console: { ...console, log: vi.fn(), debug: vi.fn() },
@@ -78,7 +78,7 @@ function loadContext() {
     Terminal: FakeTerminal,
     FitAddon: { FitAddon: FakeFit },
     fetch: (...args: unknown[]) => fetchMock(...args),
-    location: { protocol: 'http:', host: 'codeman.test' },
+    location: { protocol: 'http:', host: 'reverie.test' },
     document: { addEventListener: vi.fn(), documentElement: { dataset: {} } },
     localStorage: { length: 0, key: vi.fn(), getItem: vi.fn(), setItem: vi.fn(), removeItem: vi.fn() },
     window: windowStub,
@@ -90,16 +90,16 @@ function loadContext() {
   });
   vm.runInContext(
     `${read('constants.js')}\n${read('app.js')}\n${read('terminal-ui.js')}\n${read('terminal-tile.js')}\n` +
-      'globalThis.__CodemanApp = CodemanApp;',
+      'globalThis.__ReverieApp = ReverieApp;',
     context
   );
   return {
-    CodemanApp: (context as unknown as { __CodemanApp: { prototype: object } }).__CodemanApp,
+    ReverieApp: (context as unknown as { __ReverieApp: { prototype: object } }).__ReverieApp,
     windowStub,
   };
 }
 
-const { CodemanApp, windowStub } = loadContext();
+const { ReverieApp, windowStub } = loadContext();
 
 type Session = { mode: string; cliVersion?: string; cliMouseTracking?: boolean };
 type App = Record<string, unknown> & {
@@ -110,7 +110,7 @@ type App = Record<string, unknown> & {
 };
 
 function makeApp(sessions: Record<string, Session>, activeSessionId: string | null = 'other'): App {
-  const app = Object.create(CodemanApp.prototype) as App;
+  const app = Object.create(ReverieApp.prototype) as App;
   app._clientId = 'c-test';
   app._wsTabNonce = 'nonce-1';
   app._seqCounters = new Map();

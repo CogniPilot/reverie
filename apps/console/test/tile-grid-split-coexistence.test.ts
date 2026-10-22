@@ -69,7 +69,7 @@ describe('opening the grid over an open split', () => {
 
   it("with a count of 2, exactly the split's two", () => {
     const app = makeGridApp(IDS);
-    localStore.set('codeman:tile-count', '2');
+    localStore.set('reverie:tile-count', '2');
     openSplit(app);
     app.toggleTileGrid();
     expect(app._tileGrid.ids).toEqual(['s-a', 's-b']);
@@ -81,7 +81,7 @@ describe('opening the grid over an open split', () => {
     app.openTileGrid(['s-c']);
     app.closeTileGrid({ reselect: false });
     app.activeSessionId = 's-a';
-    localStore.set('codeman:tile-count', '2');
+    localStore.set('reverie:tile-count', '2');
     const paneB = openSplit(app);
     app.sendResize.mockClear();
 
@@ -140,7 +140,7 @@ describe('opening the grid over an open split', () => {
 
   it('Ctrl/Cmd+click over a split opens the remembered count in total, never one more', () => {
     const app = makeGridApp(IDS);
-    localStore.set('codeman:tile-count', '2');
+    localStore.set('reverie:tile-count', '2');
     openSplit(app);
 
     app.addSessionToTiles('s-c');
@@ -159,7 +159,7 @@ describe('opening the grid over an open split', () => {
     app.openTileGrid(['s-other', 's-c']);
     app.closeTileGrid({ reselect: false });
     app.activeSessionId = 's-a';
-    localStore.set('codeman:tile-count', '2');
+    localStore.set('reverie:tile-count', '2');
     openSplit(app);
 
     app.addSessionToTiles('s-b');

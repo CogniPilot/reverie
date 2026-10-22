@@ -24,13 +24,13 @@
  *
  * ## Credentials are deliberately absent
  *
- * Codeman collects no tokens, and a URL carrying `user:password@` is rejected —
+ * Reverie collects no tokens, and a URL carrying `user:password@` is rejected —
  * it would end up in error text, logs and (via the case name suggestion) the UI.
  * `GIT_TERMINAL_PROMPT=0` plus the askpass/BatchMode env below guarantees a
  * private repo fails FAST instead of hanging the open HTTP request on an
  * invisible username prompt. If the host's own git config (a credential helper,
  * an ssh agent, `insteadOf` rules) happens to authenticate, that is the user's
- * existing setup working — Codeman neither supplies nor stores anything.
+ * existing setup working — Reverie neither supplies nor stores anything.
  *
  * ## Bounded by construction
  *
@@ -67,20 +67,20 @@ function envMs(name: string, fallback: number, min: number, max: number): number
  * Wall-clock budget for one `git clone`. Deliberately generous (a real repo over
  * a slow link legitimately takes minutes) but always finite: the HTTP request is
  * held open for the duration, so an unbounded clone would be an unbounded
- * request. Override with CODEMAN_GIT_CLONE_TIMEOUT_MS.
+ * request. Override with REVERIE_GIT_CLONE_TIMEOUT_MS.
  */
-export const GIT_CLONE_TIMEOUT_MS = envMs('CODEMAN_GIT_CLONE_TIMEOUT_MS', 300_000, 10_000, 3_600_000);
+export const GIT_CLONE_TIMEOUT_MS = envMs('REVERIE_GIT_CLONE_TIMEOUT_MS', 300_000, 10_000, 3_600_000);
 
 /**
  * Budget for the `ls-remote` preflight. Short on purpose — it exists to answer
  * "can this be cloned without credentials?" while the user is still typing.
- * Override with CODEMAN_GIT_LS_REMOTE_TIMEOUT_MS.
+ * Override with REVERIE_GIT_LS_REMOTE_TIMEOUT_MS.
  */
-export const GIT_LS_REMOTE_TIMEOUT_MS = envMs('CODEMAN_GIT_LS_REMOTE_TIMEOUT_MS', 20_000, 2_000, 120_000);
+export const GIT_LS_REMOTE_TIMEOUT_MS = envMs('REVERIE_GIT_LS_REMOTE_TIMEOUT_MS', 20_000, 2_000, 120_000);
 
-/** Concurrent git network operations allowed process-wide. Override with CODEMAN_MAX_GIT_OPERATIONS. */
+/** Concurrent git network operations allowed process-wide. Override with REVERIE_MAX_GIT_OPERATIONS. */
 const MAX_CONCURRENT_GIT_OPERATIONS = (() => {
-  const raw = Number(process.env.CODEMAN_MAX_GIT_OPERATIONS);
+  const raw = Number(process.env.REVERIE_MAX_GIT_OPERATIONS);
   return Number.isFinite(raw) && raw >= 1 ? Math.floor(raw) : 2;
 })();
 
@@ -89,10 +89,10 @@ const MAX_CONCURRENT_GIT_OPERATIONS = (() => {
  * BUSY. Without a bound, every queued request holds its HTTP connection (and
  * its closure) open indefinitely, so a burst of clone requests becomes the
  * memory/socket exhaustion the pool exists to prevent. Override with
- * CODEMAN_MAX_GIT_QUEUE (0 disables queuing entirely).
+ * REVERIE_MAX_GIT_QUEUE (0 disables queuing entirely).
  */
 const MAX_QUEUED_GIT_OPERATIONS = (() => {
-  const raw = Number(process.env.CODEMAN_MAX_GIT_QUEUE);
+  const raw = Number(process.env.REVERIE_MAX_GIT_QUEUE);
   return Number.isFinite(raw) && raw >= 0 ? Math.floor(raw) : 16;
 })();
 
@@ -109,7 +109,7 @@ const MAX_REFS_RETURNED = 500;
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
-/** Transports Codeman is willing to hand to git. */
+/** Transports Reverie is willing to hand to git. */
 export type GitTransport = 'https' | 'http' | 'ssh' | 'git' | 'local';
 
 export type GitUrlRejectionCode =
@@ -123,7 +123,7 @@ export type GitUrlRejectionCode =
   | 'NO_REPOSITORY_NAME'
   | 'BAD_SYNTAX';
 
-/** A repository operand Codeman is willing to clone. */
+/** A repository operand Reverie is willing to clone. */
 export interface GitUrlAccepted {
   cloneable: true;
   /** The exact operand handed to git, after `--`. Never shell-interpolated. */
@@ -143,7 +143,7 @@ export interface GitUrlAccepted {
   warnings: string[];
 }
 
-/** A repository operand Codeman refuses, with the reason to show the user. */
+/** A repository operand Reverie refuses, with the reason to show the user. */
 export interface GitUrlRejected {
   cloneable: false;
   code: GitUrlRejectionCode;
@@ -231,7 +231,7 @@ const HOST_RE = /^(?:\[[0-9a-fA-F:.]+\]|[a-zA-Z0-9](?:[a-zA-Z0-9\-.]*[a-zA-Z0-9]
 const SAFE_REF_RE = /^[A-Za-z0-9][A-Za-z0-9._/\-+]*$/;
 
 /**
- * Turn a repository name into a Codeman case name.
+ * Turn a repository name into a Reverie case name.
  *
  * Case names are `[a-zA-Z0-9_-]+` everywhere else in the app (`SAFE_CASE_NAME`
  * in case-routes.ts, `CreateCaseSchema`), so anything else collapses to `-`.
@@ -278,7 +278,7 @@ function accept(
 }
 
 /**
- * Decide whether `input` is something Codeman will hand to `git clone`, and pull
+ * Decide whether `input` is something Reverie will hand to `git clone`, and pull
  * the pieces the UI needs (provider, owner/repo, suggested case name) out of it.
  *
  * This is the security boundary for the clone endpoint. Read the module header
@@ -441,7 +441,7 @@ export function isSafeGitRef(ref: string): boolean {
 /**
  * Global git options that empty the credential-helper list for one run.
  *
- * Every Codeman user in multi-user mode runs git as the SAME OS account, so a
+ * Every Reverie user in multi-user mode runs git as the SAME OS account, so a
  * helper that account has (the Docker image's opt-in `gh`/`az` helpers, or a
  * user's own `gh auth setup-git`) would read private repositories on the
  * signed-in admin's behalf for anyone who can reach Clone Repo. An empty
@@ -594,7 +594,7 @@ export function classifyGitFailure(stderr: string, timedOut: boolean, spawnError
     return {
       code: 'TIMEOUT',
       message:
-        'Git timed out. Large repositories may need the shallow option, or a longer CODEMAN_GIT_CLONE_TIMEOUT_MS.',
+        'Git timed out. Large repositories may need the shallow option, or a longer REVERIE_GIT_CLONE_TIMEOUT_MS.',
       stderr: clean,
     };
   }
@@ -606,7 +606,7 @@ export function classifyGitFailure(stderr: string, timedOut: boolean, spawnError
     return {
       code: 'AUTH_REQUIRED',
       message:
-        "That repository needs authentication. Reverie never asks for credentials, so sign this server's git in first (for example `gh auth login` or `az login` from a shell session; the Docker image can include both, see docker/README.md), or clone it outside Reverie and add it with Link Existing.",
+        "That repository needs authentication. Reverie never asks for credentials, so sign this server's git in first (for example `gh auth login` or `az login` from a shell session; install the chosen credential helper through the owner-managed runtime), or clone it outside Reverie and add it with Link Existing.",
       stderr: clean,
     };
   }

@@ -1,9 +1,9 @@
 /**
  * @fileoverview Agent skill per CLI: which workspace directory each CLI's sessions get
  * the one packaged skill in (`capabilities.agentSkillDir`), and the
- * `codeman skill install|uninstall` resolution that follows the registry.
+ * `reverie skill install|uninstall` resolution that follows the registry.
  *
- * The skill is read from the REAL packaged source (`skills/codeman/`), so this also
+ * The skill is read from the REAL packaged source (`skills/reverie/`), so this also
  * guards that it meets the Agent Skills format every CLI (and the `npx skills`
  * installer) parses: a `name` equal to its directory, lowercase with hyphens, and a
  * description of at most 1024 characters.
@@ -11,6 +11,7 @@
  * Pure filesystem and registry tests in a per-test temp dir. Port: N/A.
  */
 
+import { agentSkillSourceDir } from '../src/agent-skill-source.js';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtemp, rm, mkdir, readFile, readdir } from 'node:fs/promises';
 import { existsSync, readFileSync } from 'node:fs';
@@ -21,7 +22,7 @@ import { getCli, listClis } from '../src/config/cli-registry/registry.js';
 import { CliEntrySchema } from '../src/config/cli-registry/schema.js';
 import { registryAgentSkillDirs, resolveSkillInstallDir } from '../src/cli.js';
 
-const MARKER_PREFIX = '<!-- codeman-managed-agent-skill';
+const MARKER_PREFIX = '<!-- reverie-managed-agent-skill';
 const AGENTS_DIR = '.agents/skills' as const;
 
 /** The frontmatter fields the Agent Skills format defines, with a `>-` folded description joined. */
@@ -50,7 +51,7 @@ function frontmatter(skillMd: string): { name?: string; description?: string } {
 let casePath: string;
 
 beforeEach(async () => {
-  casePath = await mkdtemp(join(tmpdir(), 'codeman-agent-skill-dirs-'));
+  casePath = await mkdtemp(join(tmpdir(), 'reverie-agent-skill-dirs-'));
 });
 
 afterEach(async () => {
@@ -58,27 +59,29 @@ afterEach(async () => {
 });
 
 describe('the packaged skill meets the Agent Skills format', () => {
-  it('skills/codeman/SKILL.md: name equals the directory, description within limits', () => {
-    const fm = frontmatter(readFileSync(join(process.cwd(), 'skills', 'codeman', 'SKILL.md'), 'utf-8'));
-    expect(fm.name).toBe('codeman');
+  it('skills/reverie/SKILL.md: name equals the directory, description within limits', () => {
+    const fm = frontmatter(readFileSync(join(agentSkillSourceDir(), 'SKILL.md'), 'utf-8'));
+    expect(fm.name).toBe('reverie');
     expect(fm.name).toMatch(/^[a-z0-9]+(-[a-z0-9]+)*$/);
     expect(fm.description, 'description').toBeTruthy();
     expect(fm.description!.length).toBeLessThanOrEqual(1024);
     // It refuses outside Reverie, and says so where every CLI reads first.
-    expect(fm.description).toContain('CODEMAN_MUX=1');
+    expect(fm.description).toContain('REVERIE_MUX=1');
   });
 
-  it('is the only packaged skill (one skill for every CLI)', async () => {
-    expect(await readdir(join(process.cwd(), 'skills'))).toEqual(['codeman']);
+  it('the shared skill contains its installable payload for every CLI)', async () => {
+    expect(await readdir(agentSkillSourceDir())).toEqual(
+      expect.arrayContaining(['SKILL.md', 'preamble.sh', 'reference'])
+    );
   });
 });
 
 describe('applyAgentSkill with a directory', () => {
-  it('installs into <case>/.agents/skills/codeman, marker appended, and nothing under .claude', async () => {
+  it('installs into <case>/.agents/skills/reverie, marker appended, and nothing under .claude', async () => {
     expect(await applyAgentSkill(casePath, true, AGENTS_DIR)).toBe('installed');
-    const skillDir = join(casePath, '.agents', 'skills', 'codeman');
+    const skillDir = join(casePath, '.agents', 'skills', 'reverie');
     const skillMd = await readFile(join(skillDir, 'SKILL.md'), 'utf-8');
-    expect(skillMd.startsWith('---\nname: codeman')).toBe(true);
+    expect(skillMd.startsWith('---\nname: reverie')).toBe(true);
     expect(skillMd).toContain(MARKER_PREFIX);
     expect(existsSync(join(skillDir, 'reference', 'endpoints.md'))).toBe(true);
     expect(existsSync(join(casePath, '.claude'))).toBe(false);
@@ -95,8 +98,8 @@ describe('applyAgentSkill with a directory', () => {
   it('two CLIs sharing one workspace each get an identical copy where they look', async () => {
     await applyAgentSkill(casePath, true, CLAUDE_AGENT_SKILL_DIR);
     await applyAgentSkill(casePath, true, AGENTS_DIR);
-    const claudeCopy = await readFile(join(casePath, '.claude', 'skills', 'codeman', 'SKILL.md'), 'utf-8');
-    const agentsCopy = await readFile(join(casePath, '.agents', 'skills', 'codeman', 'SKILL.md'), 'utf-8');
+    const claudeCopy = await readFile(join(casePath, '.claude', 'skills', 'reverie', 'SKILL.md'), 'utf-8');
+    const agentsCopy = await readFile(join(casePath, '.agents', 'skills', 'reverie', 'SKILL.md'), 'utf-8');
     expect(agentsCopy).toBe(claudeCopy);
   });
 
@@ -168,7 +171,7 @@ describe('capabilities.agentSkillDir validation (clis.json is user-editable)', (
   });
 });
 
-describe('codeman skill install|uninstall follow the registry', () => {
+describe('reverie skill install|uninstall follow the registry', () => {
   it('--mode claude (the default) installs into .claude/skills, user-level or per case', () => {
     expect(resolveSkillInstallDir({})).toEqual({ skillDir: CLAUDE_AGENT_SKILL_DIR });
     expect(resolveSkillInstallDir({ mode: 'claude', case: 'x' })).toEqual({ skillDir: CLAUDE_AGENT_SKILL_DIR });

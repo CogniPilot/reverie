@@ -29,15 +29,15 @@
  *  - SSE (`remote:hostWaking`, `remote:hostWakeFailed`, `remote:sessionReconnected`)
  *    keeps the banner in sync while a wake is running.
  *
- * @mixin Extends CodemanApp.prototype via Object.assign
- * @dependency app.js (CodemanApp class, this.sessions, this.activeSessionId, showToast)
+ * @mixin Extends ReverieApp.prototype via Object.assign
+ * @dependency app.js (ReverieApp class, this.sessions, this.activeSessionId, showToast)
  * @dependency constants.js (SSE_EVENTS — the remote:hostWaking / remote:hostWakeFailed names)
  * @loadorder 12.2 — loaded after session-ui.js, before webview-tabs.js
  */
 
 const HOST_WAKE_POLL_MS = 30_000;
 
-Object.assign(CodemanApp.prototype, {
+Object.assign(ReverieApp.prototype, {
   /** Per-tab banner state (single active session at a time). */
   _hostWake: null,
   /** The page-wide poller interval (created once, see `_ensureHostWakePoller`). */
@@ -271,7 +271,7 @@ Object.assign(CodemanApp.prototype, {
    * is not allowed to see — the save is admin-only, and that is what it should say.
    */
   _wakeConfigUnavailableMessage() {
-    const me = window.__codemanUser || {};
+    const me = window.__reverieUser || {};
     return me.multiUser && me.role !== 'admin' ? 'Wake-on-LAN configuration is admin-only' : 'Remote host not found';
   },
 
@@ -381,7 +381,7 @@ Object.assign(CodemanApp.prototype, {
    * SSE `remote:hostWaking` — a wake is running (ours or one started by typing).
    *
    * ⚠️ The ONLY definition of this handler: `panels-ui.js` must not define it too.
-   * Both mix into `CodemanApp.prototype` and this file loads later, so a second copy
+   * Both mix into `ReverieApp.prototype` and this file loads later, so a second copy
    * would be silently shadowed (the guard in `sse-dispatch-table.test.ts` sees that a
    * handler exists, not that two modules claim the same name). The toast is
    * deliberately UNCONDITIONAL — a wake can start for a background session (input on

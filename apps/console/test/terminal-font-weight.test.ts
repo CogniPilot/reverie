@@ -36,7 +36,7 @@ import { describe, expect, it, vi } from 'vitest';
 const publicDir = resolve(import.meta.dirname, '../src/web/public');
 
 function loadTerminalMixin(): Record<string, unknown> {
-  const FakeCodemanApp = function () {} as unknown as { prototype: Record<string, unknown> };
+  const FakeReverieApp = function () {} as unknown as { prototype: Record<string, unknown> };
   const context = vm.createContext({
     console,
     performance,
@@ -45,16 +45,16 @@ function loadTerminalMixin(): Record<string, unknown> {
     setInterval: vi.fn(),
     clearInterval: vi.fn(),
     requestAnimationFrame: vi.fn(),
-    CodemanApp: FakeCodemanApp,
+    ReverieApp: FakeReverieApp,
     window: { addEventListener: vi.fn(), removeEventListener: vi.fn() },
     document: undefined,
   });
   const constants = readFileSync(resolve(publicDir, 'constants.js'), 'utf8');
   const source = readFileSync(resolve(publicDir, 'terminal-ui.js'), 'utf8');
   vm.runInContext(`${constants}\n${source}`, context);
-  // constants.js publishes CodemanTerminalFont onto the context's window, which
+  // constants.js publishes ReverieTerminalFont onto the context's window, which
   // is the one the mixin closes over.
-  return FakeCodemanApp.prototype;
+  return FakeReverieApp.prototype;
 }
 
 const mixin = loadTerminalMixin();

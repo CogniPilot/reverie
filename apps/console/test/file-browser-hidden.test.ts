@@ -16,7 +16,7 @@
  *      mode) taking the whole panel down with it.
  *
  * Loaded via `vm` with a stubbed context (no jsdom; see connection-indicator.test.ts).
- * `CodemanApp`'s real constructor calls `init()`, so the prototype is exercised on
+ * `ReverieApp`'s real constructor calls `init()`, so the prototype is exercised on
  * a bare object instead of a real instance; the app.js wiring that seeds the flag
  * is pinned statically at the bottom.
  */
@@ -31,7 +31,7 @@ const appJs = readFileSync(resolve(PUBLIC, 'app.js'), 'utf8');
 const indexHtml = readFileSync(resolve(PUBLIC, 'index.html'), 'utf8');
 const stylesCss = readFileSync(resolve(PUBLIC, 'styles.css'), 'utf8');
 
-const STORAGE_KEY = 'codeman:fileBrowserShowHidden';
+const STORAGE_KEY = 'reverie:fileBrowserShowHidden';
 
 interface FakeElement {
   innerHTML: string;
@@ -67,7 +67,7 @@ function fakeElement(): FakeElement {
 
 /** Load panels-ui.js's mixin onto a bare object, with a stubbed DOM + storage. */
 function loadPanel(store: Map<string, string> | null) {
-  const CodemanApp = function CodemanApp(this: unknown) {} as unknown as new () => Record<string, unknown>;
+  const ReverieApp = function ReverieApp(this: unknown) {} as unknown as new () => Record<string, unknown>;
   const localStorage = {
     getItem: (key: string) => {
       if (!store) throw new Error('localStorage is disabled');
@@ -80,7 +80,7 @@ function loadPanel(store: Map<string, string> | null) {
     removeItem: (key: string) => store?.delete(key),
   };
   const context = vm.createContext({
-    CodemanApp,
+    ReverieApp,
     console,
     localStorage,
     escapeHtml: (s: string) => String(s),
@@ -102,7 +102,7 @@ function loadPanel(store: Map<string, string> | null) {
   };
   elements.fileBrowserPanel.classList.toggle('visible', true);
   const requests: string[] = [];
-  const app = new CodemanApp() as Record<string, any>;
+  const app = new ReverieApp() as Record<string, any>;
   app.$ = (id: string) => elements[id] ?? null;
   app.activeSessionId = 'sess-1';
   app.fileBrowserData = null;

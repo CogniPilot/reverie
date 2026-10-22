@@ -4,7 +4,7 @@ Status: **IMPLEMENTED on `feat/multiuser-mode`** (phases 1-5; opt-in, off by def
 
 Shipped by phase:
 
-- **Phase 1** (user store + mode plumbing + CLI): `src/user-store.ts` (scrypt, atomic 0600 writes, last-admin invariants, serialized read-modify-write), `src/config/multiuser.ts`, `codeman users add|passwd|list|rm`, `--multiuser` flag, bootstrap-on-first-boot. Tests: `test/user-store.test.ts`.
+- **Phase 1** (user store + mode plumbing + CLI): `src/user-store.ts` (scrypt, atomic 0600 writes, last-admin invariants, serialized read-modify-write), `src/config/multiuser.ts`, `reverie users add|passwd|list|rm`, `--multiuser` flag, bootstrap-on-first-boot. Tests: `test/user-store.test.ts`.
 - **Phase 2** (multi-user auth): parallel async auth branch (`src/web/middleware/auth.ts`), `req.authUser`, per-username rate bucket, `mustChangePassword` lockbox, `GET /api/me` + `POST /api/me/password`, QR identity-bound minting, network-bind + tunnel exemptions, new error codes. Tests: `test/multiuser-auth.test.ts`.
 - **Phase 3** (ownership threading): `Session.owner` at every create path + recovery mirror; `findSessionOrFail` owner check + list filtering; §6.3 permission policy (`resolveClaudeModeForUser` at all spawn sites incl. one-shots via `buildPromptArgs`; shell/launchCommand grant); per-user case spaces (`resolveCasesDir`) + owner-scoped case list + admin-only host CRUD; `workingDir` confinement; `sessionCapacityState` per-user cap. Tests: `test/ownership-scoping.test.ts`.
 - **Phase 4** (event fan-out): WS owner gate; SSE per-client identity + `broadcast`/terminal-batch routing (`deriveSseHint`, fail-closed); `getLightState` per-identity filtering; file-route preview/thumbnail/history + `GET /api/search` scoping.
@@ -14,21 +14,21 @@ Deferred follow-ups (documented, non-blocking): away-digest + subagent/workflow 
 
 ## 1. Summary
 
-Today Codeman is strictly single-user: one optional credential pair (`CODEMAN_USERNAME`/`CODEMAN_PASSWORD`), one shared `~/codeman-cases` folder, one global session list, and a global SSE/WS fan-out. This plan adds an opt-in **multi-user mode**:
+Today Reverie is strictly single-user: one optional credential pair (`REVERIE_USERNAME`/`REVERIE_PASSWORD`), one shared `~/reverie-cases` folder, one global session list, and a global SSE/WS fan-out. This plan adds an opt-in **multi-user mode**:
 
 - **Off by default.** Without the flag, behavior stays byte-identical to today (same auth path, same paths, same payloads). All new code is gated behind `isMultiUserMode()`.
-- **`codeman web --multiuser`** (or `CODEMAN_MULTIUSER=1`) enables named users with individually hashed passwords stored in `~/.codeman/users.json`.
-- **Each user gets their own space**: `~/codeman-users/<username>/cases/<case>` replaces the shared `~/codeman-cases` for that user. Sessions, cases, attachments, search, digests, and SSE events are scoped to their owner.
+- **`reverie web --multiuser`** (or `REVERIE_MULTIUSER=1`) enables named users with individually hashed passwords stored in `~/.reverie/users.json`.
+- **Each user gets their own space**: `~/reverie-users/<username>/cases/<case>` replaces the shared `~/reverie-cases` for that user. Sessions, cases, attachments, search, digests, and SSE events are scoped to their owner.
 - **Admin panel** (App Settings, admin-only "Users" tab): create/delete users, change/reset passwords, enable/disable accounts, delete a user's space, see per-user live sessions and disk usage, force logout.
 
 ## 2. Threat Model (read first, be honest about this)
 
 Multi-user mode is **workspace separation for a trusted team, NOT security isolation between mutually distrusting users**:
 
-- Every session still runs as the **same OS account** with `claude --dangerously-skip-permissions`. Any user can ask their agent to `cat /home/<host>/codeman-users/otheruser/...`. The web layer enforces scoping; the agent layer cannot.
+- Every session still runs as the **same OS account** with `claude --dangerously-skip-permissions`. Any user can ask their agent to `cat /home/<host>/reverie-users/otheruser/...`. The web layer enforces scoping; the agent layer cannot.
 - **Shell sessions and custom launch commands are the bluntest holes**: `SessionMode = 'shell'` hands out a raw shell as the host account, and a cron job's `launchCommand` runs an arbitrary command; no Claude permission classifier is involved in either. These must be gated behind the same grant as bypass (section 6.3), otherwise the `auto`-mode mitigation below is theater.
-- All sessions share one tmux socket (`-L codeman`), one `~/.claude` (transcripts, credentials, plan usage), one Claude subscription.
-- Mitigation for stronger isolation: pair a user's cases with **Docker cases** (container per case, `docs/docker-cases.md`), or run separate Codeman instances per user (`CODEMAN_INSTANCE`, separate OS accounts). True per-user OS isolation is explicitly **out of scope** for this feature.
+- All sessions share one tmux socket (`-L reverie`), one `~/.claude` (transcripts, credentials, plan usage), one Claude subscription.
+- Mitigation for stronger isolation: pair a user's cases with **Docker cases** (container per case, `docs/docker-cases.md`), or run separate Reverie instances per user (`REVERIE_INSTANCE`, separate OS accounts). True per-user OS isolation is explicitly **out of scope** for this feature.
 - Partial mitigation at the agent layer: non-admin users default to Claude's `auto` permission mode (section 6.3), whose safety classifier blocks destructive actions and credential exfiltration. That reduces, but does not eliminate, cross-user snooping; the `canBypassPermissions` grant reopens it and should be given deliberately.
 
 This must be stated loudly in `docs/security-architecture.md`, the README section, and the admin panel UI ("Users share the host account; this separates workspaces, it does not sandbox users from each other").
@@ -39,17 +39,17 @@ Also note the flip side: multi-user mode strictly _improves_ today's network pos
 
 | Condition                                                     | Behavior                                                                                                                                                                                                                                                                   |
 | ------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| No flag (default)                                             | Exactly today's behavior. `users.json` is never read. Single-user auth via `CODEMAN_PASSWORD` if set.                                                                                                                                                                      |
-| `--multiuser` / `CODEMAN_MULTIUSER=1`, `users.json` has users | Multi-user auth active. `CODEMAN_PASSWORD` is ignored for login (warn if set).                                                                                                                                                                                             |
-| `--multiuser`, no `users.json` (first boot)                   | Bootstrap: if `CODEMAN_USERNAME`/`CODEMAN_PASSWORD` are set, create that user as the initial admin and continue. Otherwise refuse to start with instructions to run `codeman users add <name> --admin`. Never start multi-user with zero users (there would be no way in). |
-| `--multiuser` on a non-loopback bind                          | Allowed without `CODEMAN_PASSWORD`: `server.ts start()` treats "multi-user with >= 1 enabled user" as satisfying the auth requirement in the loud-warning check (wire into the existing `isLoopbackBindHost()` branch).                                                    |
+| No flag (default)                                             | Exactly today's behavior. `users.json` is never read. Single-user auth via `REVERIE_PASSWORD` if set.                                                                                                                                                                      |
+| `--multiuser` / `REVERIE_MULTIUSER=1`, `users.json` has users | Multi-user auth active. `REVERIE_PASSWORD` is ignored for login (warn if set).                                                                                                                                                                                             |
+| `--multiuser`, no `users.json` (first boot)                   | Bootstrap: if `REVERIE_USERNAME`/`REVERIE_PASSWORD` are set, create that user as the initial admin and continue. Otherwise refuse to start with instructions to run `reverie users add <name> --admin`. Never start multi-user with zero users (there would be no way in). |
+| `--multiuser` on a non-loopback bind                          | Allowed without `REVERIE_PASSWORD`: `server.ts start()` treats "multi-user with >= 1 enabled user" as satisfying the auth requirement in the loud-warning check (wire into the existing `isLoopbackBindHost()` branch).                                                    |
 | Flag later removed                                            | Single-user mode again. Sessions/state that carry `owner` fields keep working (owner is simply ignored); user spaces remain on disk untouched.                                                                                                                             |
 
-Plumbing: flag in `src/cli.ts` (web command), env in a new `src/config/multiuser.ts` exporting `isMultiUserMode()`. Per-instance like everything else: a beta instance (`CODEMAN_INSTANCE=beta`) has its own `users.json` via `dataPath()`.
+Plumbing: flag in `src/cli.ts` (web command), env in a new `src/config/multiuser.ts` exporting `isMultiUserMode()`. Per-instance like everything else: a beta instance (`REVERIE_INSTANCE=beta`) has its own `users.json` via `dataPath()`.
 
 ## 4. Data Model and Disk Layout
 
-### 4.1 `~/.codeman/users.json` (via `dataPath('users.json')`, mode 0600, atomic write: tmp + rename)
+### 4.1 `~/.reverie/users.json` (via `dataPath('users.json')`, mode 0600, atomic write: tmp + rename)
 
 ```jsonc
 {
@@ -83,27 +83,27 @@ Plumbing: flag in `src/cli.ts` (web command), env in a new `src/config/multiuser
 ### 4.2 User spaces
 
 ```
-~/codeman-users/
+~/reverie-users/
   alice/
     cases/
-      my-project/          <- same layout as today's ~/codeman-cases/<case>
+      my-project/          <- same layout as today's ~/reverie-cases/<case>
   bob/
     cases/
 ```
 
 - New helper in `route-helpers.ts`:
   `resolveCasesDir(user?: AuthUser): string`
-  single-user mode: returns `CASES_DIR` (today's `~/codeman-cases`); multi-user: returns `join(USER_SPACES_DIR, user.username, 'cases')`, creating it lazily on first use.
+  single-user mode: returns `CASES_DIR` (today's `~/reverie-cases`); multi-user: returns `join(USER_SPACES_DIR, user.username, 'cases')`, creating it lazily on first use.
 - `CASES_DIR` stays exported for single-user code paths, but every route usage (see 6) switches to the resolver.
-- The **user folder** (`~/codeman-users/<username>/`) is the deletion unit for "delete user + space" and leaves room for future per-user extras (uploads, exports) beside `cases/`.
-- Legacy `~/codeman-cases` in multi-user mode: surfaces to admins only, as a read-only "Unassigned (legacy)" group in the case list, with an admin action `POST /api/admin/cases/assign { case, username }` that `fs.rename`s the folder into a user's space (same-filesystem move, cheap). No automatic migration.
+- The **user folder** (`~/reverie-users/<username>/`) is the deletion unit for "delete user + space" and leaves room for future per-user extras (uploads, exports) beside `cases/`.
+- Legacy `~/reverie-cases` in multi-user mode: surfaces to admins only, as a read-only "Unassigned (legacy)" group in the case list, with an admin action `POST /api/admin/cases/assign { case, username }` that `fs.rename`s the folder into a user's space (same-filesystem move, cheap). No automatic migration.
 
 ## 5. Auth Pipeline Changes (`src/web/middleware/auth.ts`)
 
 Keep the existing single-user branch untouched. Add a parallel multi-user branch selected once at registration time:
 
 1. **Credential check**: Basic header parsed into `username:password`, verified against the user store (scrypt + `timingSafeEqual`). Disabled users fail closed.
-2. **Cookie sessions**: same `codeman_session` cookie and `StaleExpirationMap`, but `AuthSessionRecord` gains `username` and `role`. All existing TTL/sliding/eviction logic reused. Eviction cap becomes per-user aware (evict oldest _of that user_ first) so one user cannot flush everyone's sessions by logging in 100 times.
+2. **Cookie sessions**: same `reverie_session` cookie and `StaleExpirationMap`, but `AuthSessionRecord` gains `username` and `role`. All existing TTL/sliding/eviction logic reused. Eviction cap becomes per-user aware (evict oldest _of that user_ first) so one user cannot flush everyone's sessions by logging in 100 times.
 3. **Request identity**: decorate `req.authUser = { username, role }` (Fastify decorateRequest). In single-user mode `req.authUser` is `{ username: 'admin', role: 'admin' }` when auth is on, and a synthetic admin when auth is off, so downstream code has ONE code path.
 4. **Rate limiting**: keep the per-IP bucket; add a per-username failure bucket (same `StaleExpirationMap` pattern) so a botnet cannot brute-force one account across IPs, and one flaky user behind a NAT cannot lock out the rest.
 5. **`mustChangePassword` gate**: when set, every API request except `GET /api/me`, `POST /api/me/password`, and static assets returns 403 with `errorCode: 'PASSWORD_CHANGE_REQUIRED'`; the frontend intercepts that code and shows the change-password modal.
@@ -132,11 +132,11 @@ Role guard helper in `route-helpers.ts`: `requireAdmin(req, reply): boolean` use
 - Registries that map case names to metadata become owner-scoped. `remote-cases.json`/`docker-cases.json` are arrays of objects, so entries simply gain `owner?: string` (absent = legacy: admin-only). `linked-cases.json` is a flat `Record<caseName, path>` with no room for a field: it needs a v2 shape (`{ "version": 2, "cases": { "<name>": { "path": "...", "owner": "..." } } }`) with read-time migration of the v1 form; it is read in two places (case-routes AND inline in quick-start), both must move to the new reader. Case names only need to be unique per user.
 - **Remote hosts and Docker hosts are machine-level resources**: CRUD on `/api/docker-hosts` and remote-host endpoints becomes admin-only in multi-user mode; regular users can _use_ hosts on their own cases but not define them. (Docker containers exec as the host account; letting any user define arbitrary `docker run` args is admin-equivalent.)
 - Case deletion, exports (`docker-exports/`), and imports check ownership; export filenames get an owner prefix to avoid collisions (fits the existing `^[a-zA-Z0-9._-]+\.tgz$` download guard).
-- **Workspace confinement for non-admins (the linchpin, do not skip)**: today `POST /api/sessions` accepts ANY host directory as `workingDir` (the only check is `statSync().isDirectory()`, session-routes.ts:305-318), and file-routes/attachments confine reads to `session.workingDir`. Without a new rule the whole scoping story is circular: a user points a session at `~/codeman-users/bob` (or `/home`) and the web layer itself serves that subtree, no agent needed. Rule: in multi-user mode a non-admin's `workingDir` must realpath-resolve inside their own space, enforced at `POST /api/sessions`, `POST /api/run`, cron job create AND fire time (the dir can change owners between the two), and Ralph auto-configure. Admins are unrestricted. This one rule is what makes the section 6.4 file-route line ("own space or own sessions' workingDirs") meaningful.
+- **Workspace confinement for non-admins (the linchpin, do not skip)**: today `POST /api/sessions` accepts ANY host directory as `workingDir` (the only check is `statSync().isDirectory()`, session-routes.ts:305-318), and file-routes/attachments confine reads to `session.workingDir`. Without a new rule the whole scoping story is circular: a user points a session at `~/reverie-users/bob` (or `/home`) and the web layer itself serves that subtree, no agent needed. Rule: in multi-user mode a non-admin's `workingDir` must realpath-resolve inside their own space, enforced at `POST /api/sessions`, `POST /api/run`, cron job create AND fire time (the dir can change owners between the two), and Ralph auto-configure. Admins are unrestricted. This one rule is what makes the section 6.4 file-route line ("own space or own sessions' workingDirs") meaningful.
 
 ### 6.3 Per-user Claude permission-mode policy
 
-Codeman now ships a global **Startup Mode** picker (App Settings, Claude CLI tab: `settings.claudeMode`, values `dangerously-skip-permissions` (default) | `auto` | `normal` | `allowedTools`; `auto` emits `--permission-mode auto`, Anthropic's classifier-guarded low-prompt mode). Multi-user mode layers a per-user policy on top of it:
+Reverie now ships a global **Startup Mode** picker (App Settings, Claude CLI tab: `settings.claudeMode`, values `dangerously-skip-permissions` (default) | `auto` | `normal` | `allowedTools`; `auto` emits `--permission-mode auto`, Anthropic's classifier-guarded low-prompt mode). Multi-user mode layers a per-user policy on top of it:
 
 - **Default for regular users: `auto` only.** A non-admin's Claude sessions are forced to `--permission-mode auto` regardless of the global `claudeMode` setting. `normal` and `allowedTools` are also permitted (they are strictly more restrictive than auto), but `dangerously-skip-permissions` is NOT.
 - **Bypass is an explicit admin grant**: `canBypassPermissions: true` on the user record (default `false`, section 4.1). Only with that grant does the global skip-permissions default (or a future per-user choice) apply to their sessions.
@@ -158,7 +158,7 @@ Codeman now ships a global **Startup Mode** picker (App Settings, Claude CLI tab
 | `GET /api/away-digest`                                                     | Aggregate only owned sessions/events                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | `GET /api/subagents`, workflow runs                                        | Filter by owning session (`claudeSessionId -> session -> owner`); agents not attributable to any session: admin-only                                                                                                                                                                                                                                                                                                                                      |
 | Push (`push-routes.ts`)                                                    | Subscription records currently carry NO identity (keyed by endpoint only): `subscribe` stamps `username`. All 8 `PUSH_EVENT_MAP` events are session-scoped, so routing = resolve owner from `data.sessionId`, deliver to that owner's (plus admins') subscriptions. Legacy identity-less subscriptions: admin-only delivery                                                                                                                               |
-| Screenshots `/api/screenshots` (deprecated)                                | Deprecated: removed in a later MAJOR, so no per-user subdir is planned; the replacement `POST /api/sessions/:id/paste-image` is already session-scoped. Former plan: per-user subdir `~/.codeman/screenshots/<username>/` in multi-user mode. Note: `GET /:name` deliberately rejects `/` in names as traversal, so derive the subdir server-side from `req.authUser` and keep client-visible names flat                                                  |
+| Screenshots `/api/screenshots` (deprecated)                                | Deprecated: removed in a later MAJOR, so no per-user subdir is planned; the replacement `POST /api/sessions/:id/paste-image` is already session-scoped. Former plan: per-user subdir `~/.reverie/screenshots/<username>/` in multi-user mode. Note: `GET /:name` deliberately rejects `/` in names as traversal, so derive the subdir server-side from `req.authUser` and keep client-visible names flat                                                  |
 | Attachments                                                                | Already session-scoped; inherits the session owner check. `attachmentConfineToWorkspace` is a global, default-OFF setting today: in multi-user mode it is FORCED ON for non-admins regardless of the setting (their attachments must resolve inside their own space); the setting keeps meaning what it means for admins                                                                                                                                  |
 | File routes (browse/preview)                                               | Path allowlist adds: non-admin paths must resolve (realpath) inside their own space or their own sessions' workingDirs                                                                                                                                                                                                                                                                                                                                    |
 | Settings (`settings.json`)                                                 | Global, admin-only writes in multi-user mode; reads allowed (per-device display keys stay in localStorage as today). Per-user server settings: out of scope v1                                                                                                                                                                                                                                                                                            |
@@ -186,18 +186,18 @@ All handlers: multi-user mode only (404 otherwise), `requireAdmin`, Zod schemas 
 | `PATCH /api/admin/users/:username`               | `{ role?, disabled?, canBypassPermissions? }`. Demoting/disabling the last enabled admin: 409 `LAST_ADMIN`. Disable also revokes cookie sessions. `canBypassPermissions` is the section 6.3 grant (default false)                                                                                                                                                                                                       |
 | `POST /api/admin/users/:username/reset-password` | Generates one-time password (returned once), sets `mustChangePassword`, revokes cookie sessions                                                                                                                                                                                                                                                                                                                         |
 | `POST /api/admin/users/:username/logout`         | Revoke all cookie sessions for that user. Honest limit under Basic auth: the browser silently re-sends cached credentials and gets a fresh cookie on the next request, so logout only truly ends QR-issued sessions; to actually lock someone out, disable the account or reset the password. Say so in the panel tooltip until Phase 6                                                                                 |
-| `DELETE /api/admin/users/:username`              | `{ deleteSpace?: boolean }` (default false). Refuses last admin. Kills the user's live sessions first (normal kill flow, incl. docker/remote teardown per case), revokes cookies, removes from store. With `deleteSpace`: guarded recursive delete of `~/codeman-users/<username>` (realpath must be inside `USER_SPACES_DIR`, top-level dir must not be a symlink), plus their registry entries and push subscriptions |
-| `POST /api/admin/cases/assign`                   | Move a legacy `~/codeman-cases/<case>` into a user's space (`fs.rename`)                                                                                                                                                                                                                                                                                                                                                |
+| `DELETE /api/admin/users/:username`              | `{ deleteSpace?: boolean }` (default false). Refuses last admin. Kills the user's live sessions first (normal kill flow, incl. docker/remote teardown per case), revokes cookies, removes from store. With `deleteSpace`: guarded recursive delete of `~/reverie-users/<username>` (realpath must be inside `USER_SPACES_DIR`, top-level dir must not be a symlink), plus their registry entries and push subscriptions |
+| `POST /api/admin/cases/assign`                   | Move a legacy `~/reverie-cases/<case>` into a user's space (`fs.rename`)                                                                                                                                                                                                                                                                                                                                                |
 | Self-service `GET /api/me`                       | `{ username, role, mustChangePassword }` (works in single-user mode too: synthetic admin; the frontend uses it to decide whether to render admin UI)                                                                                                                                                                                                                                                                    |
 | Self-service `POST /api/me/password`             | `{ currentPassword, newPassword }`, verifies current, min length 8, revokes other sessions, clears `mustChangePassword`                                                                                                                                                                                                                                                                                                 |
 
-**Audit log**: append-only `~/.codeman/admin-audit.jsonl` (same idiom as `session-lifecycle.jsonl`): timestamp, acting admin, action, target, request IP. User management without an audit trail is not acceptable even for a homelab tool.
+**Audit log**: append-only `~/.reverie/admin-audit.jsonl` (same idiom as `session-lifecycle.jsonl`): timestamp, acting admin, action, target, request IP. User management without an audit trail is not acceptable even for a homelab tool.
 
 SSE additions (both `sse-events.ts` and `constants.js`): `admin:usersChanged` (adminOnly; the panel re-fetches) and `auth:passwordChangeRequired` (targeted to the user).
 
 ## 9. Frontend
 
-- **`GET /api/me` on boot** (app.js init): stores `window.__codemanUser`; everything below keys off it. Single-user mode returns the synthetic admin, so the UI needs no mode awareness beyond "am I admin".
+- **`GET /api/me` on boot** (app.js init): stores `window.__reverieUser`; everything below keys off it. Single-user mode returns the synthetic admin, so the UI needs no mode awareness beyond "am I admin".
 - **Admin panel**: new tab "Users" in the App Settings modal (settings-ui.js), rendered only for admins in multi-user mode. Table of users with actions (create, reset password showing the one-time password in a copy-to-clipboard reveal, enable/disable, role toggle, logout, delete with a typed-username confirm for the delete-space variant). No new header button (mobile header policy test stays green; the settings modal is already reachable everywhere).
 - **Change-password modal**: shown on `PASSWORD_CHANGE_REQUIRED` (fetch interceptor in api-client.js) and reachable from settings for self-service.
 - **Owner badges**: admin's session tabs and the session palette/manager show `owner` on foreign sessions; regular users see no change.
@@ -208,17 +208,17 @@ SSE additions (both `sse-events.ts` and `constants.js`): `admin:usersChanged` (a
 Headless bootstrap and recovery must not require the web UI:
 
 ```
-codeman users add <name> [--admin]     # prompts for password (hidden input), or --password-stdin
-codeman users passwd <name>            # reset password
-codeman users list
-codeman users rm <name> [--delete-space]
+reverie users add <name> [--admin]     # prompts for password (hidden input), or --password-stdin
+reverie users passwd <name>            # reset password
+reverie users list
+reverie users rm <name> [--delete-space]
 ```
 
-These operate directly on `users.json` via `user-store.ts` (no server needed), honoring `CODEMAN_INSTANCE`. This is also the answer to "locked out: last admin forgot password".
+These operate directly on `users.json` via `user-store.ts` (no server needed), honoring `REVERIE_INSTANCE`. This is also the answer to "locked out: last admin forgot password".
 
 ## 11. Limits and Config
 
-- New `src/config/multiuser.ts`: `isMultiUserMode()`, `USER_SPACES_DIR` (`~/codeman-users`, overridable via `CODEMAN_USER_SPACES_DIR` for tests), `MAX_USERS` (default 25), per-user session cap (default: global cap / 2, env `CODEMAN_MAX_SESSIONS_PER_USER`).
+- New `src/config/multiuser.ts`: `isMultiUserMode()`, `USER_SPACES_DIR` (`~/reverie-users`, overridable via `REVERIE_USER_SPACES_DIR` for tests), `MAX_USERS` (default 25), per-user session cap (default: global cap / 2, env `REVERIE_MAX_SESSIONS_PER_USER`).
 - Cap enforcement is currently COPY-PASTED: the global `MAX_CONCURRENT_SESSIONS` (50, `config/map-limits.ts:25`) check appears at 6 independent sites (session-routes.ts:298/1622/1683, ralph-routes.ts:275, cron-service.ts:340, server.ts:1595). Do not add a 7th copy per site: extract one `assertSessionCapacity(ctx, owner?)` helper doing the global + per-user checks and use it everywhere, or the per-user cap WILL miss a path.
 - Global limits (50 sessions, SSE clients 100, terminal buffers) are unchanged and shared; the per-user session cap is the fairness lever.
 
@@ -228,7 +228,7 @@ These operate directly on `users.json` via `user-store.ts` (no server needed), h
 | ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Default (no flag)  | No behavior change. No new file reads on the hot path. All new fields optional in state                                                                                                                     |
 | State round-trip   | `SessionState.owner`, `MuxSession.owner`, `CronJob.owner`, registry `owner` fields are optional; old state loads clean; new state loaded by an old build ignores unknown fields (existing tolerant parsing) |
-| Instance isolation | `users.json` and the audit log via `dataPath()`; user spaces dir is shared across instances like `~/codeman-cases` is today (documented)                                                                    |
+| Instance isolation | `users.json` and the audit log via `dataPath()`; user spaces dir is shared across instances like `~/reverie-cases` is today (documented)                                                                    |
 | API versioning     | HTTP API is internal per `docs/versioning-policy.md`; still, all changes are additive. Ship as a **minor** version                                                                                          |
 | Hooks              | Unchanged (instance-level hook secret; owner resolved from the session)                                                                                                                                     |
 
@@ -242,7 +242,7 @@ Tests: `test/user-store.test.ts` (hashing, verify, params upgrade, username vali
 
 **Phase 2: multi-user auth**
 Auth middleware branch, `req.authUser` decoration, cookie records with username/role, per-username rate bucket, `mustChangePassword` gate, WS upgrade identity plumbing + unauthenticated-upgrade regression test (section 5.8), QR on-demand minting + identity binding (section 5.9), `GET /api/me`, `POST /api/me/password`, error codes, network-bind check integration.
-Tests: `test/multiuser-auth.test.ts` (live server, unique port 3170+; wrong password, disabled user, cookie carries identity, per-user rate limit isolation, mustChangePassword lockbox, QR redemption identity). Reuse the `delete process.env.CODEMAN_PASSWORD` idiom from `test/setup.ts`.
+Tests: `test/multiuser-auth.test.ts` (live server, unique port 3170+; wrong password, disabled user, cookie carries identity, per-user rate limit isolation, mustChangePassword lockbox, QR redemption identity). Reuse the `delete process.env.REVERIE_PASSWORD` idiom from `test/setup.ts`.
 
 **Phase 3: ownership threading**
 Session `owner` + persistence + `MuxSession` mirror + recovery; `resolveCasesDir()` refactor across case/session/ralph/plan routes (consolidating the duplicated case-path resolution); registry owner fields incl. the linked-cases v2 shape; `findSessionOrFail` owner check + the direct-`sessions.get` audit; list filtering; owner stamping across ALL create paths from 6.1; **non-admin workingDir confinement** (6.2); permission-mode/shell/launchCommand policy (6.3); `assertSessionCapacity` helper + per-user cap.
@@ -274,7 +274,7 @@ Replace Basic with a form + `POST /api/login` in multi-user mode only (fixes bro
 
 ## 15. Open Questions (answer before Phase 3)
 
-1. Should admins' own cases live in `~/codeman-users/<admin>/cases` (symmetric, proposed) or keep using legacy `~/codeman-cases`? Proposed: symmetric; legacy dir is a migration source only.
+1. Should admins' own cases live in `~/reverie-users/<admin>/cases` (symmetric, proposed) or keep using legacy `~/reverie-cases`? Proposed: symmetric; legacy dir is a migration source only.
 2. Per-user settings (respawn presets, notification prefs): global-only in v1. Worth a `users/<name>/settings.json` overlay later?
 3. Should regular users be allowed to create Docker cases on admin-defined hosts (proposed: yes) or is Docker entirely admin-only?
 4. Session handoff: does an admin need "reassign session/case to another user"? (Cheap to add next to `cases/assign`; not in v1 scope.)

@@ -21,7 +21,7 @@ describe('mergeUnifiedSessions', () => {
     // Session sets claudeSessionId from codexConfig.resumeSessionId, so the live
     // row already names the thread the rollout is keyed by.
     const merged = mergeUnifiedSessions({
-      live: [{ id: 'codeman-uuid', status: 'idle', mode: 'codex', claudeSessionId: 'codex-thread-id' }],
+      live: [{ id: 'reverie-uuid', status: 'idle', mode: 'codex', claudeSessionId: 'codex-thread-id' }],
       history: [
         {
           sessionId: 'codex-thread-id',
@@ -34,7 +34,7 @@ describe('mergeUnifiedSessions', () => {
       ],
     });
     expect(merged).toHaveLength(1);
-    expect(merged[0].sessionId).toBe('codeman-uuid');
+    expect(merged[0].sessionId).toBe('reverie-uuid');
     expect([...merged[0].sources].sort()).toEqual(['history', 'live']);
   });
 
@@ -43,8 +43,8 @@ describe('mergeUnifiedSessions', () => {
     // the live row from session_meta.originator (see codexThreadBySessionId).
     // This is that stamped row.
     const merged = mergeUnifiedSessions({
-      live: [{ id: 'codeman-uuid', status: 'busy', mode: 'codex', claudeSessionId: 'fresh-thread-id' }],
-      persisted: [{ id: 'codeman-uuid', status: 'idle', mode: 'codex', claudeSessionId: 'fresh-thread-id' }],
+      live: [{ id: 'reverie-uuid', status: 'busy', mode: 'codex', claudeSessionId: 'fresh-thread-id' }],
+      persisted: [{ id: 'reverie-uuid', status: 'idle', mode: 'codex', claudeSessionId: 'fresh-thread-id' }],
       history: [
         {
           sessionId: 'fresh-thread-id',
@@ -57,13 +57,13 @@ describe('mergeUnifiedSessions', () => {
       ],
     });
     expect(merged).toHaveLength(1);
-    expect(merged[0].sessionId).toBe('codeman-uuid');
+    expect(merged[0].sessionId).toBe('reverie-uuid');
     expect(merged[0].status).toBe('busy');
   });
 
   it('leaves an unrelated codex rollout as its own row', () => {
     const merged = mergeUnifiedSessions({
-      live: [{ id: 'codeman-uuid', status: 'idle', mode: 'codex', claudeSessionId: 'thread-one' }],
+      live: [{ id: 'reverie-uuid', status: 'idle', mode: 'codex', claudeSessionId: 'thread-one' }],
       history: [
         {
           sessionId: 'thread-two',
@@ -75,15 +75,15 @@ describe('mergeUnifiedSessions', () => {
         },
       ],
     });
-    expect(merged.map((m) => m.sessionId).sort()).toEqual(['codeman-uuid', 'thread-two']);
+    expect(merged.map((m) => m.sessionId).sort()).toEqual(['reverie-uuid', 'thread-two']);
   });
 
   it("carries a transcript row's own resume token, and stamps none on a live row", () => {
-    // codex names a thread by an id in its rollout, not by Codeman's session id.
+    // codex names a thread by an id in its rollout, not by Reverie's session id.
     // The scanner sets `resumeId`; a live session never does, which is what stops
-    // a resume from asking codex for a thread whose id is really Codeman's uuid.
+    // a resume from asking codex for a thread whose id is really Reverie's uuid.
     const merged = mergeUnifiedSessions({
-      live: [{ id: 'codeman-uuid', status: 'idle', mode: 'codex' }],
+      live: [{ id: 'reverie-uuid', status: 'idle', mode: 'codex' }],
       history: [
         {
           sessionId: 'codex-thread-id',
@@ -96,7 +96,7 @@ describe('mergeUnifiedSessions', () => {
       ],
     });
     const fromTranscript = merged.find((m) => m.sessionId === 'codex-thread-id');
-    const fromLive = merged.find((m) => m.sessionId === 'codeman-uuid');
+    const fromLive = merged.find((m) => m.sessionId === 'reverie-uuid');
     expect(fromTranscript?.resumeId).toBe('codex-thread-id');
     expect(fromTranscript?.mode).toBe('codex');
     expect(fromLive?.resumeId).toBeUndefined();
@@ -252,12 +252,12 @@ describe('mergeUnifiedSessions', () => {
     expect(merged[0].projectKey).toBe('-repo-alpha');
   });
 
-  // COD-140: firstPrompt backfill — live sessions whose Codeman id does not match an
+  // COD-140: firstPrompt backfill — live sessions whose Reverie id does not match an
   // on-disk transcript UUID still surface a first prompt (by claudeSessionId join, then
   // by newest transcript in the same workingDir).
   it('backfills firstPrompt onto a live session by claudeSessionId join (uuid-join)', () => {
     const merged = mergeUnifiedSessions({
-      live: [{ id: 'codeman-1', status: 'working', claudeSessionId: 'uuid-A', workingDir: '/w' }],
+      live: [{ id: 'reverie-1', status: 'working', claudeSessionId: 'uuid-A', workingDir: '/w' }],
       history: [
         {
           sessionId: 'uuid-A',
@@ -268,7 +268,7 @@ describe('mergeUnifiedSessions', () => {
         },
       ],
     });
-    const live = merged.find((m) => m.sessionId === 'codeman-1');
+    const live = merged.find((m) => m.sessionId === 'reverie-1');
     expect(live).toBeDefined();
     expect(live!.firstPrompt).toBe('fix the bug');
     // The upstream unified-service alias map (COD-160/161) folds a history row keyed
@@ -281,7 +281,7 @@ describe('mergeUnifiedSessions', () => {
 
   it('falls back to the workingDir transcript when no uuid join exists (workingDir fallback)', () => {
     const merged = mergeUnifiedSessions({
-      live: [{ id: 'codeman-2', status: 'working', claudeSessionId: 'uuid-missing', workingDir: '/w2' }],
+      live: [{ id: 'reverie-2', status: 'working', claudeSessionId: 'uuid-missing', workingDir: '/w2' }],
       history: [
         {
           sessionId: 'uuid-other',
@@ -292,14 +292,14 @@ describe('mergeUnifiedSessions', () => {
         },
       ],
     });
-    const live = merged.find((m) => m.sessionId === 'codeman-2');
+    const live = merged.find((m) => m.sessionId === 'reverie-2');
     expect(live).toBeDefined();
     expect(live!.firstPrompt).toBe('borrowed prompt');
   });
 
   it('uses the newest transcript per workingDir for the fallback (newest-wins)', () => {
     const merged = mergeUnifiedSessions({
-      live: [{ id: 'codeman-3', status: 'working', claudeSessionId: 'uuid-missing', workingDir: '/w3' }],
+      live: [{ id: 'reverie-3', status: 'working', claudeSessionId: 'uuid-missing', workingDir: '/w3' }],
       history: [
         {
           sessionId: 'uuid-old',
@@ -317,7 +317,7 @@ describe('mergeUnifiedSessions', () => {
         },
       ],
     });
-    const live = merged.find((m) => m.sessionId === 'codeman-3');
+    const live = merged.find((m) => m.sessionId === 'reverie-3');
     expect(live).toBeDefined();
     expect(live!.firstPrompt).toBe('newer prompt');
   });
@@ -351,9 +351,9 @@ describe('mergeUnifiedSessions', () => {
 
   it('leaves firstPrompt undefined when there is no transcript at all (no transcript)', () => {
     const merged = mergeUnifiedSessions({
-      live: [{ id: 'codeman-5', status: 'working', claudeSessionId: 'uuid-none', workingDir: '/empty' }],
+      live: [{ id: 'reverie-5', status: 'working', claudeSessionId: 'uuid-none', workingDir: '/empty' }],
     });
-    const live = merged.find((m) => m.sessionId === 'codeman-5');
+    const live = merged.find((m) => m.sessionId === 'reverie-5');
     expect(live).toBeDefined();
     expect(live!.firstPrompt).toBeUndefined();
   });
@@ -400,7 +400,7 @@ describe('mergeUnifiedSessions', () => {
     // the plain history-only case above, but for the resumed-session path the
     // backfill mechanism was actually built for.
     const merged = mergeUnifiedSessions({
-      live: [{ id: 'codeman-resumed', status: 'working', claudeSessionId: 'resumed-uuid', workingDir: '/shared' }],
+      live: [{ id: 'reverie-resumed', status: 'working', claudeSessionId: 'resumed-uuid', workingDir: '/shared' }],
       history: [
         // The resumed session's OWN transcript -- aliased in via claudeSessionId,
         // but its own extraction found nothing.
@@ -421,7 +421,7 @@ describe('mergeUnifiedSessions', () => {
         },
       ],
     });
-    const resumed = merged.find((m) => m.sessionId === 'codeman-resumed');
+    const resumed = merged.find((m) => m.sessionId === 'reverie-resumed');
     expect(resumed).toBeDefined();
     expect([...resumed!.sources].sort()).toEqual(['history', 'live']);
     expect(resumed!.firstPrompt).toBeUndefined();
@@ -431,7 +431,7 @@ describe('mergeUnifiedSessions', () => {
   // most-recent user prompt also reaches live rows whose id ≠ transcript UUID.
   it('backfills lastPrompt onto a live session by claudeSessionId join (uuid-join)', () => {
     const merged = mergeUnifiedSessions({
-      live: [{ id: 'codeman-l1', status: 'working', claudeSessionId: 'uuid-LA', workingDir: '/wl' }],
+      live: [{ id: 'reverie-l1', status: 'working', claudeSessionId: 'uuid-LA', workingDir: '/wl' }],
       history: [
         {
           sessionId: 'uuid-LA',
@@ -443,7 +443,7 @@ describe('mergeUnifiedSessions', () => {
         },
       ],
     });
-    const live = merged.find((m) => m.sessionId === 'codeman-l1');
+    const live = merged.find((m) => m.sessionId === 'reverie-l1');
     expect(live).toBeDefined();
     expect(live!.lastPrompt).toBe('now ship it');
     // The upstream unified-service alias map (COD-160/161) folds the UUID-keyed
@@ -455,7 +455,7 @@ describe('mergeUnifiedSessions', () => {
 
   it('falls back to the workingDir transcript for lastPrompt when no uuid join exists (workingDir fallback)', () => {
     const merged = mergeUnifiedSessions({
-      live: [{ id: 'codeman-l2', status: 'working', claudeSessionId: 'uuid-missing', workingDir: '/wl2' }],
+      live: [{ id: 'reverie-l2', status: 'working', claudeSessionId: 'uuid-missing', workingDir: '/wl2' }],
       history: [
         {
           sessionId: 'uuid-other',
@@ -467,14 +467,14 @@ describe('mergeUnifiedSessions', () => {
         },
       ],
     });
-    const live = merged.find((m) => m.sessionId === 'codeman-l2');
+    const live = merged.find((m) => m.sessionId === 'reverie-l2');
     expect(live).toBeDefined();
     expect(live!.lastPrompt).toBe('borrowed last');
   });
 
   it('uses the newest transcript per workingDir for the lastPrompt fallback (newest-wins)', () => {
     const merged = mergeUnifiedSessions({
-      live: [{ id: 'codeman-l3', status: 'working', claudeSessionId: 'uuid-missing', workingDir: '/wl3' }],
+      live: [{ id: 'reverie-l3', status: 'working', claudeSessionId: 'uuid-missing', workingDir: '/wl3' }],
       history: [
         {
           sessionId: 'uuid-old',
@@ -494,7 +494,7 @@ describe('mergeUnifiedSessions', () => {
         },
       ],
     });
-    const live = merged.find((m) => m.sessionId === 'codeman-l3');
+    const live = merged.find((m) => m.sessionId === 'reverie-l3');
     expect(live).toBeDefined();
     expect(live!.lastPrompt).toBe('newer last');
   });

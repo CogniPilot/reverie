@@ -26,7 +26,7 @@ function deps(json: boolean, answer?: { status: number; json: unknown }) {
         return {
           status: 200,
           text: '',
-          json: { success: true, data: { rooms: [{ id: 'room-1', name: 'Fleet', members: [] }] } },
+          json: { success: true, data: { rooms: [{ id: 'room-1', name: 'Reverie', members: [] }] } },
         };
       }
       if (answer) return { status: answer.status, text: '', json: answer.json as never };
@@ -118,7 +118,7 @@ describe('agent chat say --reply-to', () => {
         req.on('end', () => {
           res.setHeader('Content-Type', 'application/json');
           if (req.method === 'GET') {
-            res.end(JSON.stringify({ success: true, data: { rooms: [{ id: 'room-1', name: 'Fleet', members: [] }] } }));
+            res.end(JSON.stringify({ success: true, data: { rooms: [{ id: 'room-1', name: 'Reverie', members: [] }] } }));
             return;
           }
           const body = JSON.parse(Buffer.concat(chunks).toString('utf8')) as { replyTo?: string };
@@ -132,9 +132,9 @@ describe('agent chat say --reply-to', () => {
         });
       });
       await new Promise<void>((r) => server!.listen(0, '127.0.0.1', r));
-      vi.stubEnv('CODEMAN_MUX', '1');
-      vi.stubEnv('CODEMAN_API_URL', `http://127.0.0.1:${(server.address() as AddressInfo).port}`);
-      vi.stubEnv('CODEMAN_SESSION_ID', '0000002d-0035-4000-8000-000000000047');
+      vi.stubEnv('REVERIE_MUX', '1');
+      vi.stubEnv('REVERIE_API_URL', `http://127.0.0.1:${(server.address() as AddressInfo).port}`);
+      vi.stubEnv('REVERIE_SESSION_ID', '0000002d-0035-4000-8000-000000000047');
       const out = vi.spyOn(console, 'log').mockImplementation(() => {});
       vi.spyOn(console, 'error').mockImplementation(() => {});
       const program = new Command().exitOverride();

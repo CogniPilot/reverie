@@ -71,7 +71,7 @@ describe('owner alert', () => {
     const data = mkdtempSync(join(tmpdir(), 'owner-alert-'));
     const cli = resolve('src/owner-alert-cli.ts');
     const tsx = resolve('node_modules/.bin/tsx');
-    const env = { PATH: process.env.PATH ?? '', HOME: data, FLEET_DATA_DIR: data };
+    const env = { PATH: process.env.PATH ?? '', HOME: data, REVERIE_DATA_DIR: data };
     const none = spawnSync(tsx, [cli, 'console keeps failing'], { env, encoding: 'utf-8' });
     expect(none.stdout).toContain('owner alert: 0 device(s)');
     expect(none.status).toBe(2);

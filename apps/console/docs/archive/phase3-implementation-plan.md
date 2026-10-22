@@ -10,12 +10,12 @@
 
 Before starting ANY work, read and follow these rules:
 
-1. **Never run `npx vitest run`** (full suite) — it kills tmux sessions. You are running inside a Codeman-managed tmux session.
+1. **Never run `npx vitest run`** (full suite) — it kills tmux sessions. You are running inside a Reverie-managed tmux session.
 2. **Run individual tests only**: `npx vitest run test/<file>.test.ts`
 3. **Never test on port 3000** — the live dev server runs there. Tests use ports 3150+.
 4. **After TypeScript changes**: Run `tsc --noEmit` to verify type checking passes.
 5. **Before considering done**: Run `npm run lint` and `npm run format:check` to ensure CI passes.
-6. **Never kill tmux sessions** — check `echo $CODEMAN_MUX` first.
+6. **Never kill tmux sessions** — check `echo $REVERIE_MUX` first.
 7. **Verify the dev server starts**: After each task, run `npx tsx src/index.ts web --port 3099 &` on a non-production port, confirm `curl -s http://localhost:3099/api/status | jq .status` returns `"ok"`, then kill the background process. This is essential — there are zero server.ts tests.
 
 ---
@@ -382,7 +382,7 @@ Extract the `onRequest` hook registration into a standalone function:
  * @fileoverview HTTP Basic Auth middleware with session cookies and rate limiting.
  *
  * Extracted from server.ts setupRoutes() auth section.
- * Only active when CODEMAN_PASSWORD environment variable is set.
+ * Only active when REVERIE_PASSWORD environment variable is set.
  *
  * @module web/middleware/auth
  */
@@ -396,24 +396,24 @@ const AUTH_SESSION_TTL_MS = 24 * 60 * 60 * 1000;  // 24 hours
 const MAX_AUTH_SESSIONS = 100;
 const AUTH_FAILURE_WINDOW_MS = 15 * 60 * 1000;     // 15 minutes
 const AUTH_FAILURE_MAX = 10;
-const AUTH_COOKIE_NAME = 'codeman_session';
+const AUTH_COOKIE_NAME = 'reverie_session';
 
 /**
  * Register HTTP Basic Auth with session cookies and rate limiting.
  *
- * Does nothing if CODEMAN_PASSWORD is not set.
+ * Does nothing if REVERIE_PASSWORD is not set.
  * Exempts /api/hook-event from localhost (Claude Code hooks curl this).
  */
 export function registerAuthMiddleware(app: FastifyInstance, https: boolean): {
   authSessions: StaleExpirationMap<string, string> | null;
   authFailures: StaleExpirationMap<string, number> | null;
 } {
-  const authPassword = process.env.CODEMAN_PASSWORD;
+  const authPassword = process.env.REVERIE_PASSWORD;
   if (!authPassword) {
     return { authSessions: null, authFailures: null };
   }
 
-  const authUsername = process.env.CODEMAN_USERNAME || 'admin';
+  const authUsername = process.env.REVERIE_USERNAME || 'admin';
   const expectedHeader = 'Basic ' + Buffer.from(`${authUsername}:${authPassword}`).toString('base64');
 
   const authSessions = new StaleExpirationMap<string, string>({
@@ -477,7 +477,7 @@ export function registerAuthMiddleware(app: FastifyInstance, https: boolean): {
 
     // Failed — track and reject
     authFailures.set(clientIp, failures + 1);
-    reply.code(401).header('WWW-Authenticate', 'Basic realm="Codeman"').send('Unauthorized');
+    reply.code(401).header('WWW-Authenticate', 'Basic realm="Reverie"').send('Unauthorized');
   });
 
   return { authSessions, authFailures };
@@ -510,7 +510,7 @@ Move the auth constants (`AUTH_SESSION_TTL_MS`, `MAX_AUTH_SESSIONS`, `AUTH_FAILU
 tsc --noEmit
 npm run lint
 # Start server and verify auth still works:
-CODEMAN_PASSWORD=test npx tsx src/index.ts web --port 3099 &
+REVERIE_PASSWORD=test npx tsx src/index.ts web --port 3099 &
 sleep 3
 # Should get 401 without credentials:
 curl -s -o /dev/null -w "%{http_code}" http://localhost:3099/api/status

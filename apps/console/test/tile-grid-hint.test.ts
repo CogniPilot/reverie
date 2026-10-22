@@ -186,7 +186,7 @@ describe('what it says', () => {
   it('the remembered count, live, and open or close by the grid', () => {
     const app = hintApp();
     btn.classList.remove('btn-tile-grid--hidden');
-    localStore.set('codeman:tile-count', '2');
+    localStore.set('reverie:tile-count', '2');
     app._renderTileHint();
     show();
     expect(visibleText()[0]).toBe('Tiles · 2');
@@ -226,7 +226,7 @@ describe('what it says', () => {
       'Right-click: choose 2, 4 or 6 tiles',
       'This window fits 4 tiles: a click opens 4',
     ]);
-    localStore.set('codeman:tile-count', '4');
+    localStore.set('reverie:tile-count', '4');
     app._renderTileHint();
     expect(visibleText()).toHaveLength(3);
   });

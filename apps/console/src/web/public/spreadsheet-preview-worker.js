@@ -21,7 +21,7 @@ const spreadsheetAssetVersion = new URL(self.location.href).searchParams.get('v'
 const spreadsheetAssetQuery = `?v=${encodeURIComponent(spreadsheetAssetVersion)}`;
 importScripts(`vendor/fflate.min.js${spreadsheetAssetQuery}`, `spreadsheet-xlsx-core.js${spreadsheetAssetQuery}`);
 
-const core = self.CodemanSpreadsheetXlsxCore;
+const core = self.ReverieSpreadsheetXlsxCore;
 let workbook = null;
 let sheetsById = new Map();
 // Per sheet: its populated rows in order, each with its populated cells in

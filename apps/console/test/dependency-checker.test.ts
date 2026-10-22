@@ -30,7 +30,7 @@ describe('dependencyRegistry()', () => {
       .map((t) => t.id)
       .sort();
     expect(required).toEqual(['node', 'tmux']);
-    // all agent CLIs are optional (Codeman runs any of them)
+    // all agent CLIs are optional (Reverie runs any of them)
     const agentClis = ['claude', 'opencode', 'codex'];
     expect(
       dependencyRegistry()
@@ -66,7 +66,7 @@ describe('dependencyRegistry()', () => {
 
   it('keeps a doctor row for every CLI that has a binary to probe', () => {
     // An earlier draft of the registry refactor silently dropped the grok and dsh rows, so
-    // `codeman doctor` stopped reporting two shipped CLIs entirely. Derive the expectation
+    // `reverie doctor` stopped reporting two shipped CLIs entirely. Derive the expectation
     // from the registry so this cannot pass by being updated to match a shrunken table.
     const probeable = enabledClis().filter((c) => c.discovery.binaries.length > 0);
     expect(probeable.length).toBeGreaterThanOrEqual(8);
@@ -75,7 +75,7 @@ describe('dependencyRegistry()', () => {
       const row = dependencyRegistry().find((t) =>
         t.resolvers.some((r) => r.resolver.kind === 'path' && r.resolver.bins.includes(bin))
       );
-      expect(row, `no codeman doctor row probes ${bin} (for CLI "${cli.id as string}")`).toBeDefined();
+      expect(row, `no reverie doctor row probes ${bin} (for CLI "${cli.id as string}")`).toBeDefined();
     }
   });
 

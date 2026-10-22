@@ -173,7 +173,7 @@ describe('a reload restoring the grid', () => {
     const queue = captureQueue();
     try {
       localStore.set(
-        'codeman:tile-grid',
+        'reverie:tile-grid',
         JSON.stringify({
           v: 1,
           open: true,

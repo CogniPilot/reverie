@@ -1,5 +1,5 @@
 /**
- * @fileoverview The settings a user puts on a session survive a Codeman restart.
+ * @fileoverview The settings a user puts on a session survive a Reverie restart.
  *
  * `restoreMuxSessions()` (server.ts) rebuilds a Session around a surviving tmux pane from
  * `state.json`, and `reapplyPersistedSessionState()` does the same for a reboot restore. A

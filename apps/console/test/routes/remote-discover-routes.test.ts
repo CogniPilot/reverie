@@ -1,7 +1,7 @@
 /**
  * @fileoverview COD-105 — GET /api/remote-hosts/:hostId/sessions discovery endpoint.
  *
- * The endpoint reads the saved host config by id, runs listRemoteCodemanSessions
+ * The endpoint reads the saved host config by id, runs listRemoteReverieSessions
  * (ssh-guarded under VITEST), and returns the discovered sessions in the
  * ApiResponse envelope. We mock the remote-hosts module so the test controls the
  * host record and the session list WITHOUT any real ssh / filesystem.
@@ -17,7 +17,7 @@ import { installRouteErrorHandler } from '../../src/web/route-error-handler.js';
 import { ApiErrorCode, httpStatusForErrorCode } from '../../src/types.js';
 import type { RemoteHost, RemoteSessionInfo } from '../../src/types.js';
 
-// Mock the remote-hosts module: control readRemoteHosts + listRemoteCodemanSessions.
+// Mock the remote-hosts module: control readRemoteHosts + listRemoteReverieSessions.
 const mockHosts: RemoteHost[] = [];
 let mockSessions: RemoteSessionInfo[] = [];
 let lastListArg: unknown = undefined;
@@ -28,7 +28,7 @@ vi.mock('../../src/remote-hosts.js', async (importOriginal) => {
     ...actual,
     readRemoteHosts: vi.fn(async () => mockHosts),
     readRemoteCases: vi.fn(async () => []),
-    listRemoteCodemanSessions: vi.fn(async (remote: unknown) => {
+    listRemoteReverieSessions: vi.fn(async (remote: unknown) => {
       lastListArg = remote;
       return mockSessions;
     }),
@@ -81,13 +81,13 @@ describe('COD-105 GET /api/remote-hosts/:hostId/sessions', () => {
 
   it('returns discovered sessions for a known host in the envelope', async () => {
     mockHosts.push({ id: 'aa-desktop', label: 'aa', host: '1.2.3.4', username: 'aakht', port: 2222 });
-    mockSessions = [{ name: 'codeman-disco1', attached: false, created: 1700000000, windows: 1 }];
+    mockSessions = [{ name: 'reverie-disco1', attached: false, created: 1700000000, windows: 1 }];
 
     const res = await app.inject({ method: 'GET', url: '/api/remote-hosts/aa-desktop/sessions' });
     expect(res.statusCode).toBe(200);
     const body = JSON.parse(res.body);
     expect(body.success).toBe(true);
-    expect(body.data.sessions).toEqual([{ name: 'codeman-disco1', attached: false, created: 1700000000, windows: 1 }]);
+    expect(body.data.sessions).toEqual([{ name: 'reverie-disco1', attached: false, created: 1700000000, windows: 1 }]);
     // The host config (incl. port) was threaded to the discovery call.
     expect((lastListArg as { host?: string; port?: number }).host).toBe('1.2.3.4');
     expect((lastListArg as { port?: number }).port).toBe(2222);

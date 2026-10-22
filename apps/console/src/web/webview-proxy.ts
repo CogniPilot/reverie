@@ -4,9 +4,9 @@
  * The proxy exists because an iframe pointing straight at a dashboard cannot work
  * in the deployment that matters: prod serves HTTPS (behind `tailscale serve`), so
  * a plain-HTTP dashboard is hard-blocked as mixed content; many dashboards also
- * refuse framing outright via `X-Frame-Options` / `frame-ancestors`; and Codeman's
+ * refuse framing outright via `X-Frame-Options` / `frame-ancestors`; and Reverie's
  * own CSP (`default-src 'self'`) blocks cross-origin frames anyway. Serving the
- * dashboard through Codeman's own origin dissolves all three at once, and keeps
+ * dashboard through Reverie's own origin dissolves all three at once, and keeps
  * the production CSP byte-for-byte unchanged because `/webview/...` is `'self'`.
  *
  * ## Origin-scoped, not path-scoped
@@ -24,17 +24,17 @@
  * - `content-encoding` / `content-length`: dropped, because undici's `fetch`
  *   already decoded the body. Forwarding them makes the browser try to gunzip
  *   plaintext.
- * - `authorization` + the `codeman_session` cookie: stripped on the way OUT. In
- *   trusted mode the iframe is same-origin, so the browser attaches Codeman's own
+ * - `authorization` + the `reverie_session` cookie: stripped on the way OUT. In
+ *   trusted mode the iframe is same-origin, so the browser attaches Reverie's own
  *   Basic-auth header and session cookie to every proxied request. Forwarding
- *   those would hand CODEMAN_PASSWORD to the dashboard.
+ *   those would hand REVERIE_PASSWORD to the dashboard.
  * - `Location` and `Set-Cookie`: remapped into the proxy path, else a redirect or
- *   a login cookie escapes the prefix and lands on Codeman's root.
+ *   a login cookie escapes the prefix and lands on Reverie's root.
  * - `<base href>` + root-absolute attribute rewriting: relative and `/`-rooted
- *   URLs in the HTML resolve back through the proxy instead of hitting Codeman.
+ *   URLs in the HTML resolve back through the proxy instead of hitting Reverie.
  *
  * No `X-Forwarded-*` is sent deliberately: apps that honor it generate absolute
- * URLs against Codeman's root, which would bypass the `/webview/<cap>/` prefix
+ * URLs against Reverie's root, which would bypass the `/webview/<cap>/` prefix
  * that everything else here works to preserve.
  */
 
@@ -57,7 +57,7 @@ const HOP_BY_HOP = new Set([
 
 /**
  * Request headers dropped on the way to the upstream. `authorization` and `cookie`
- * carry Codeman's own credentials on a same-origin (trusted) frame; `host`,
+ * carry Reverie's own credentials on a same-origin (trusted) frame; `host`,
  * `content-length` and `accept-encoding` are recomputed by undici.
  */
 const DROP_REQUEST_HEADERS = new Set([
@@ -69,7 +69,7 @@ const DROP_REQUEST_HEADERS = new Set([
   'cookie',
   'origin',
   'referer',
-  'x-codeman-hook-secret',
+  'x-reverie-hook-secret',
 ]);
 
 /** Response headers dropped on the way back to the browser. */
@@ -80,7 +80,7 @@ const DROP_RESPONSE_HEADERS = new Set([
   'x-frame-options',
   'content-security-policy-report-only',
   // Cross-origin isolation headers describe the UPSTREAM's origin policy; applied
-  // to a frame on Codeman's origin they only produce blocked-resource surprises.
+  // to a frame on Reverie's origin they only produce blocked-resource surprises.
   'cross-origin-opener-policy',
   'cross-origin-embedder-policy',
   'cross-origin-resource-policy',
@@ -261,9 +261,9 @@ export function rewriteLocation(location: string, requestUrl: URL, capability: s
 /**
  * Rewrite an upstream `Set-Cookie` so it applies to the proxy path only.
  *
- * `Domain` is dropped (the cookie now belongs to Codeman's host), `Path` is
+ * `Domain` is dropped (the cookie now belongs to Reverie's host), `Path` is
  * rebased onto the proxy prefix so two dashboards cannot collide on a shared
- * cookie name, and `Secure` is dropped when Codeman itself is serving plain HTTP
+ * cookie name, and `Secure` is dropped when Reverie itself is serving plain HTTP
  * in dev, where a Secure cookie would simply be discarded.
  */
 export function rewriteSetCookie(cookie: string, capability: string, secureContext: boolean, basePath = ''): string {
@@ -354,7 +354,7 @@ export function buildUpstreamRequestHeaders(
  *
  * Also returns the CSP to apply: the upstream's, minus `frame-ancestors`. Callers
  * MUST set (or explicitly clear) this, because `registerSecurityHeaders` has
- * already stamped Codeman's own `default-src 'self'` policy onto the reply, and
+ * already stamped Reverie's own `default-src 'self'` policy onto the reply, and
  * that policy would break virtually every dashboard.
  */
 export function buildDownstreamResponseHeaders(
@@ -393,7 +393,7 @@ export function buildDownstreamResponseHeaders(
   // Every URL inside the frame carries the capability, and a dashboard that sets
   // `no-referrer-when-downgrade` or `unsafe-url` would hand it to any third-party
   // host it links or embeds. `same-origin` keeps the Referer on requests back to
-  // Codeman (the 404 fallback and `refererPath` rely on it; both compare URL
+  // Reverie (the 404 fallback and `refererPath` rely on it; both compare URL
   // origins, which an opaque-origin frame still satisfies) and strips it for
   // everyone else. A `<meta name="referrer">` inside the document can still
   // override this; that is the dashboard author's own decision about their page.
@@ -409,12 +409,12 @@ export function buildDownstreamResponseHeaders(
  * ROOT-ABSOLUTE URLs built at runtime so they stay inside the proxy prefix.
  *
  * `<base href>` only governs URLs the HTML parser resolves. A dashboard that calls
- * `fetch('/api/data')` bypasses it entirely and the request lands on Codeman's own
+ * `fetch('/api/data')` bypasses it entirely and the request lands on Reverie's own
  * root, where it 404s. That is not a rare shape: it is how most dashboards talk to
  * their own backend, and it presents as the dashboard's own "Failed to fetch".
  *
  * The `Referer`-keyed 404 fallback catches some of these, but it is a rescue rather
- * than a fix (it only fires for a request that already missed every Codeman route,
+ * than a fix (it only fires for a request that already missed every Reverie route,
  * and only when the browser sends a usable `Referer`). Rewriting inside the iframe
  * removes the whole class instead: the page never emits a root-absolute request in
  * the first place.
@@ -735,7 +735,7 @@ export function upstreamWebSocketUrl(target: URL): string {
  */
 const LOST_FRAME_SCRIPT = `(function(){try{
 var path=location.pathname+location.search+location.hash;
-if(window.parent&&window.parent!==window){window.parent.postMessage({type:'codeman:webview-lost',path:path},'*');}
+if(window.parent&&window.parent!==window){window.parent.postMessage({type:'reverie:webview-lost',path:path},'*');}
 }catch(e){}})();`;
 
 const LOST_FRAME_SCRIPT_HASH = createHash('sha256').update(LOST_FRAME_SCRIPT, 'utf8').digest('base64');
@@ -749,16 +749,16 @@ export const LOST_FRAME_PAGE_CSP = `default-src 'none'; script-src 'sha256-${LOS
  * The runtime shim masks `/webview/<cap>/` off the document URL so a single-page
  * app routes on the path it expects. The price is that a navigation the page
  * starts ITSELF — `location.reload()` (a dev server's full-reload HMR), a
- * root-absolute `location.href = '/login'` — now targets Codeman's own root with
+ * root-absolute `location.href = '/login'` — now targets Reverie's own root with
  * no capability anywhere on it: no prefix in the path, no cookie in an
  * opaque-origin frame, and a Referer that names the masked page. Such a request
  * is recognisable by shape alone: a top-level navigation of an `<iframe>`
- * (`Sec-Fetch-Dest`), asking for HTML, for a path Codeman does not serve. The
+ * (`Sec-Fetch-Dest`), asking for HTML, for a path Reverie does not serve. The
  * one served path that still qualifies is `/` itself, which the callers admit
  * only when the request carries no credentials (see carriesAuthCredentials).
  *
  * The answer is `lostWebviewFramePage()`, a static page whose only content is a
- * `postMessage` to the parent naming the path; the Codeman tab that owns the
+ * `postMessage` to the parent naming the path; the Reverie tab that owns the
  * frame remounts it inside the prefix at that path. Nothing is exempted from
  * auth by this except that static page, which carries no data.
  */
@@ -776,14 +776,14 @@ export function isLostWebviewFrameNavigation(req: {
 }
 
 /**
- * Whether a request carries something Codeman's auth would recognise: the
+ * Whether a request carries something Reverie's auth would recognise: the
  * session cookie, or an `Authorization` header (Basic auth, which a browser
  * re-sends on every request to the realm once it has been accepted).
  *
  * `/` is the one lost-frame path a registered route also serves (the app shell),
  * so the route table cannot tell a landing-page reload of a proxied dashboard
  * (the runtime shim maps `/webview/<cap>/` to exactly `/`) from a genuine
- * navigation. Credentials can: nothing in Codeman frames its own root, and a
+ * navigation. Credentials can: nothing in Reverie frames its own root, and a
  * sandboxed web-tab frame is opaque-origin and carries neither, so an `<iframe>`
  * navigation of `/` with NEITHER credential can only be that frame. A framed
  * `/` that does carry credentials is left to the shell.

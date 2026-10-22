@@ -21,20 +21,20 @@ import { constants as fsConstants, promises as fs, statSync, readFileSync } from
 import { dirname, join } from 'node:path';
 import type { PasswordHash } from '../types.js';
 
-const FLOCK = '/usr/bin/flock';
 const LOCK_WAIT_SECONDS = 10;
 const LOCK_BUSY = 75;
 
 /** flock(2) LOCK_EX on `fd` (an open file description of ours), waiting up to `waitSeconds`. */
 function takeLock(fd: number, lockFile: string, waitSeconds: number): Promise<void> {
+  const flock = process.env.REVERIE_FLOCK_BIN || 'flock';
   return new Promise((resolve, reject) => {
-    const child = spawn(FLOCK, ['--exclusive', '--wait', String(waitSeconds), '--conflict-exit-code', String(LOCK_BUSY), '3'], {
+    const child = spawn(flock, ['--exclusive', '--wait', String(waitSeconds), '--conflict-exit-code', String(LOCK_BUSY), '3'], {
       stdio: ['ignore', 'ignore', 'pipe', fd],
-      env: {},
+      env: { PATH: process.env.PATH },
     });
     let stderr = '';
     child.stderr?.on('data', (chunk) => { stderr += String(chunk); });
-    child.on('error', (error) => reject(new Error(`Cannot lock the owner account (${FLOCK}: ${(error as NodeJS.ErrnoException).code ?? error.message}); nothing was written`)));
+    child.on('error', (error) => reject(new Error(`Cannot lock the owner account (${flock}: ${(error as NodeJS.ErrnoException).code ?? error.message}); nothing was written`)));
     child.on('close', (code) => {
       if (code === 0) resolve();
       else if (code === LOCK_BUSY) reject(new Error(`The owner account is busy: another writer has held ${lockFile} for ${waitSeconds} s; nothing was written, try again`));
@@ -90,9 +90,9 @@ export interface OwnerAccount {
   /** Bumped by "log out everywhere" and by a password change: every older session is invalid. */
   epoch: number;
   policy: OwnerPolicy;
-  /** Owner-set keepers (`cto`, or company employee ids): may nudge, interrupt and read any agent session. */
+  /** Owner-set keepers (company employee ids): may nudge, interrupt and read any agent session. */
   keepers?: string[];
-  /** Owner-set admins (`cto`, or company employee ids): may call the admin routes (policy.ts ADMIN_ROUTES). */
+  /** Owner-set admins (company employee ids): may call the admin routes (policy.ts ADMIN_ROUTES). */
   admins?: string[];
 }
 

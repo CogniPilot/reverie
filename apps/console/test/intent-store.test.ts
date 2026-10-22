@@ -2,8 +2,8 @@
  * @fileoverview Unit tests for the Read My Mind intent store (src/intent-store.ts).
  *
  * Pure helpers (key derivation, capturability filter, sanitization, append fold)
- * plus the IO layer against a per-test temp data dir (CODEMAN_DATA_DIR) so
- * nothing touches the real ~/.codeman. No server, no tmux.
+ * plus the IO layer against a per-test temp data dir (REVERIE_DATA_DIR) so
+ * nothing touches the real ~/.reverie. No server, no tmux.
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -29,14 +29,14 @@ let tmpDir: string;
 let savedDataDir: string | undefined;
 
 beforeEach(async () => {
-  tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'codeman-intents-'));
-  savedDataDir = process.env.CODEMAN_DATA_DIR;
-  process.env.CODEMAN_DATA_DIR = tmpDir;
+  tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'reverie-intents-'));
+  savedDataDir = process.env.REVERIE_DATA_DIR;
+  process.env.REVERIE_DATA_DIR = tmpDir;
 });
 
 afterEach(async () => {
-  if (savedDataDir === undefined) delete process.env.CODEMAN_DATA_DIR;
-  else process.env.CODEMAN_DATA_DIR = savedDataDir;
+  if (savedDataDir === undefined) delete process.env.REVERIE_DATA_DIR;
+  else process.env.REVERIE_DATA_DIR = savedDataDir;
   await fs.rm(tmpDir, { recursive: true, force: true });
 });
 

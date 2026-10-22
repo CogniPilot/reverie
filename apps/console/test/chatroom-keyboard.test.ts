@@ -12,7 +12,7 @@ import { resolve } from 'node:path';
 const dom = new JSDOM('<!doctype html><html><head></head><body></body></html>', { runScripts: 'outside-only' });
 const context = dom.getInternalVMContext();
 // The loader revalidates the shell assets with fetch; a fetch that never answers keeps the test off the network.
-vm.runInContext('globalThis.CodemanApp = class {}; globalThis.fetch = () => new Promise(() => {});', context);
+vm.runInContext('globalThis.ReverieApp = class {}; globalThis.fetch = () => new Promise(() => {});', context);
 vm.runInContext(readFileSync(resolve(import.meta.dirname, '../src/web/public/chatroom-ui.js'), 'utf8'), context);
 const inset = vm.runInContext('chatKeyboardInset', context) as (h: number, vv: unknown) => number;
 

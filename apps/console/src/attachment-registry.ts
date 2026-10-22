@@ -55,7 +55,7 @@ export const AUDIO_ATTACHMENT_EXTENSIONS: ReadonlySet<string> = new Set([
 export const TEXT_ATTACHMENT_EXTENSIONS: ReadonlySet<string> = EDITABLE_EXTENSIONS;
 
 /**
- * Document types an attachment card previews. Also the list `codeman attach`'s
+ * Document types an attachment card previews. Also the list `reverie attach`'s
  * error text names, so the help cannot drift from what is accepted. `xlsx` is
  * previewed client-side (spreadsheet-preview-worker.js) and served raw like the rest.
  */
@@ -215,18 +215,18 @@ export interface RegisterExternalAttachmentOptions {
   /**
    * The registering session's working directory. Required to enforce workspace
    * confinement — either when the global mode is enabled
-   * (`attachmentConfineToWorkspace` / `CODEMAN_ATTACHMENT_CONFINE`) or when
+   * (`attachmentConfineToWorkspace` / `REVERIE_ATTACHMENT_CONFINE`) or when
    * {@link forceWorkspaceConfinement} is set for this call.
    */
   sessionWorkingDir?: string;
   /**
    * Force workspace confinement for THIS registration regardless of the global
-   * setting. Used by the terminal-output `codeman://attach` magic-link scanner:
+   * setting. Used by the terminal-output `reverie://attach` magic-link scanner:
    * terminal output is attacker-influenceable (a prompt-injected session can
    * print an arbitrary path), so passive magic links may only reference files
    * inside the session workspace. Deliberate cross-workspace attachment still
    * works through the explicit, Origin-guarded `POST /attachments` route and the
-   * `codeman attach` CLI (which POSTs directly when a session id is known).
+   * `reverie attach` CLI (which POSTs directly when a session id is known).
    */
   forceWorkspaceConfinement?: boolean;
   /**
@@ -372,7 +372,7 @@ export async function registerExternalAttachment(
   // depth): pre-populated secret locations + the /root and /etc trees + any
   // operator-configured extra trees. Symlinks are already resolved above.
   // Cross-workspace attachment of non-blocked files stays allowed, so
-  // codeman-publish and the ~/.codeman review loop keep working.
+  // reverie-publish and the ~/.reverie review loop keep working.
   //
   // The list is a pattern list over ABSOLUTE paths, so it is host-agnostic and holds
   // for a remote path exactly as it does for a local one, with ONE exception worth

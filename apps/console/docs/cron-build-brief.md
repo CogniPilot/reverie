@@ -1,41 +1,41 @@
-# Claude Code Build Brief: Add Scheduling to Codeman
+# Claude Code Build Brief: Add Scheduling to Reverie
 
 ## 0. Purpose of This Brief
 
-You are Claude Code working inside the Codeman repository.
+You are Claude Code working inside the Reverie repository.
 
-Your task is to add a **small, reliable scheduling layer** to Codeman while preserving Codeman's existing architecture and session-management behavior.
+Your task is to add a **small, reliable scheduling layer** to Reverie while preserving Reverie's existing architecture and session-management behavior.
 
 This is not a greenfield rewrite. This is not a full product rebuild. This is a focused extension.
 
-The target user wants Codeman-like tmux/web/session management, but with first-class scheduled jobs for Claude, Codex, OpenCode, Terminal, or any other configurable coding-agent harness.
+The target user wants Reverie-like tmux/web/session management, but with first-class scheduled jobs for Claude, Codex, OpenCode, Terminal, or any other configurable coding-agent harness.
 
 ---
 
 ## 1. Non-Negotiable Goal
 
-Add scheduling to Codeman so a user can define a scheduled coding-agent job that:
+Add scheduling to Reverie so a user can define a scheduled coding-agent job that:
 
 1. Has a name.
-2. Uses an existing Codeman-supported agent/session type where possible.
+2. Uses an existing Reverie-supported agent/session type where possible.
 3. Has a working directory.
 4. Has a prompt or prompt file.
 5. Has a schedule.
 6. Can be enabled or disabled.
 7. Can be manually run now.
-8. When due, creates a Codeman/tmux session.
+8. When due, creates a Reverie/tmux session.
 9. Sends the configured prompt into that session.
 10. Records last run, next run, status, and run history.
 
-The first working version should prioritize **scheduling correctness and reuse of Codeman's existing tmux/session system** over UI polish.
+The first working version should prioritize **scheduling correctness and reuse of Reverie's existing tmux/session system** over UI polish.
 
 ---
 
 ## 2. Core Architectural Rule
 
-Do **not** rebuild Codeman's session layer.
+Do **not** rebuild Reverie's session layer.
 
-Reuse existing Codeman functionality for:
+Reuse existing Reverie functionality for:
 
 - Creating sessions.
 - Naming sessions.
@@ -53,13 +53,13 @@ If no reusable function exists, create a thin wrapper around the existing implem
 
 ## 3. Product Boundary
 
-This build is **Codeman + Scheduler**.
+This build is **Reverie + Scheduler**.
 
 It is not yet:
 
 - A full quota engine.
 - A full lock manager.
-- A replacement for Codeman's terminal UI.
+- A replacement for Reverie's terminal UI.
 - A new FastAPI application.
 - A multi-tenant SaaS platform.
 - A complex cron-management product.
@@ -99,10 +99,10 @@ Create a form for scheduled jobs with these fields:
 
 - `name`
 - `agent_type`
-  - Reuse Codeman's existing session/agent types where possible.
+  - Reuse Reverie's existing session/agent types where possible.
   - Include at least Terminal/custom command if supported.
 - `working_directory`
-- `launch_command` if needed by Codeman's model.
+- `launch_command` if needed by Reverie's model.
 - `prompt_mode`
   - `inline_text`
   - `prompt_file_path`
@@ -131,15 +131,15 @@ Every scheduled job must support a `Run Now` action.
 
 Run Now should:
 
-1. Create a new session through Codeman's existing session creation logic.
-2. Send the configured prompt into the session using Codeman's existing input mechanism.
+1. Create a new session through Reverie's existing session creation logic.
+2. Send the configured prompt into the session using Reverie's existing input mechanism.
 3. Create a run-history record.
 4. Update last-run fields.
-5. Redirect or link the user to the created Codeman session.
+5. Redirect or link the user to the created Reverie session.
 
 ### 4.4 Background Scheduler Loop
 
-Add a small background scheduler loop that runs inside the Codeman backend process.
+Add a small background scheduler loop that runs inside the Reverie backend process.
 
 The loop should:
 
@@ -147,7 +147,7 @@ The loop should:
 2. Load enabled schedules.
 3. Find schedules where `next_run_at <= now`.
 4. Create a scheduled run.
-5. Launch the session using existing Codeman session logic.
+5. Launch the session using existing Reverie session logic.
 6. Send the prompt.
 7. Record run history.
 8. Compute the next run time.
@@ -163,7 +163,7 @@ Track:
 
 - `id`
 - `scheduled_job_id`
-- `session_id` or Codeman session reference.
+- `session_id` or Reverie session reference.
 - `session_name` if applicable.
 - `started_at`
 - `finished_at` optional.
@@ -221,7 +221,7 @@ After launch:
 
 ### 5.5 Timezone
 
-Use the server's local timezone for v0.1 unless Codeman already has timezone handling.
+Use the server's local timezone for v0.1 unless Reverie already has timezone handling.
 
 Add a visible note in the UI:
 
@@ -233,14 +233,14 @@ Do not overbuild timezone support in v0.1.
 
 ## 6. Data Storage Decision
 
-First inspect Codeman's existing persistence model.
+First inspect Reverie's existing persistence model.
 
-If Codeman already has a database or persistence layer:
+If Reverie already has a database or persistence layer:
 
 - Reuse it.
 - Add scheduled job and scheduled run models/tables/records using the existing pattern.
 
-If Codeman uses files or JSON state:
+If Reverie uses files or JSON state:
 
 - Use the same style for v0.1.
 - Prefer simple persistence over introducing a heavy new dependency.
@@ -266,7 +266,7 @@ Minimum acceptable approach:
 - Use a schedule-level `last_triggered_at` or `last_due_key` to avoid double launching.
 - If launch fails, record failure clearly.
 
-Do not build distributed locks. Codeman is expected to be local/single-instance for v0.1.
+Do not build distributed locks. Reverie is expected to be local/single-instance for v0.1.
 
 ---
 
@@ -308,7 +308,7 @@ Input mode:
 1. Paste mode.
 2. Typed mode.
 
-If only one input mode is easy with Codeman's current internals, implement that first and structure the code so the other can be added later.
+If only one input mode is easy with Reverie's current internals, implement that first and structure the code so the other can be added later.
 
 Important:
 
@@ -341,7 +341,7 @@ Recommended pages/routes:
 - `/schedules/:id/disable`
 - `/schedules/:id/delete`
 
-Use Codeman's existing frontend conventions and routing style.
+Use Reverie's existing frontend conventions and routing style.
 
 ---
 
@@ -349,7 +349,7 @@ Use Codeman's existing frontend conventions and routing style.
 
 Keep scheduler code separate from existing session code.
 
-Recommended logical modules, adapted to Codeman's actual structure:
+Recommended logical modules, adapted to Reverie's actual structure:
 
 - `scheduler/model` or equivalent.
 - `scheduler/store` or equivalent.
@@ -360,13 +360,13 @@ Recommended logical modules, adapted to Codeman's actual structure:
 
 Do not mix scheduling logic directly into terminal rendering, xterm handling, or low-level tmux code.
 
-The scheduler service should call session services; it should not own tmux directly unless Codeman has no session abstraction.
+The scheduler service should call session services; it should not own tmux directly unless Reverie has no session abstraction.
 
 ---
 
 ## 12. Required Discovery Phase Before Coding
 
-Before implementing, inspect the Codeman repo and produce a short architecture note in the terminal or in a file called:
+Before implementing, inspect the Reverie repo and produce a short architecture note in the terminal or in a file called:
 
 `docs/cron-discovery.md`
 
@@ -423,7 +423,7 @@ Deliverable:
 
 - Create scheduled job.
 - Click Run Now.
-- Codeman session is created.
+- Reverie session is created.
 - Prompt is sent.
 - Run history is recorded.
 - UI links to the session.
@@ -460,9 +460,9 @@ The build is acceptable when all these pass.
 
 1. Create a schedule/job with inline prompt.
 2. Click Run Now.
-3. A new Codeman/tmux session starts.
+3. A new Reverie/tmux session starts.
 4. Prompt is sent into that session.
-5. The created session is visible in Codeman's normal session UI.
+5. The created session is visible in Reverie's normal session UI.
 6. Run history shows success or failure.
 
 ### One-Time Schedule
@@ -525,11 +525,11 @@ Do not implement these unless all required scope is already working:
 
 Follow these rules while coding:
 
-1. Reuse existing Codeman services and conventions.
+1. Reuse existing Reverie services and conventions.
 2. Keep scheduler code isolated.
 3. Prefer boring, readable code over clever abstractions.
 4. Add error messages that a human can understand.
-5. Do not break existing Codeman sessions.
+5. Do not break existing Reverie sessions.
 6. Do not rename existing core concepts unnecessarily.
 7. Do not introduce large dependencies without strong reason.
 8. Keep v0.1 local-first and single-instance.
@@ -573,15 +573,15 @@ Keep these in mind but do not build unless v0.1 is complete:
 
 ## 19. Final Reminder
 
-The goal is to add **scheduling** to Codeman quickly and cleanly.
+The goal is to add **scheduling** to Reverie quickly and cleanly.
 
 Do not drift into building a new platform.
 
 The highest-priority path is:
 
-1. Discover existing Codeman integration points.
+1. Discover existing Reverie integration points.
 2. Add scheduled job persistence.
 3. Add Run Now.
 4. Add background due-job loop.
 5. Add minimal UI.
-6. Verify that scheduled jobs create real Codeman/tmux sessions and send prompts.
+6. Verify that scheduled jobs create real Reverie/tmux sessions and send prompts.

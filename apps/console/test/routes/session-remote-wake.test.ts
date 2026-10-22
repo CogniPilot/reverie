@@ -69,7 +69,7 @@ const remoteSession: SessionRemote = {
   label: 'Hufflepuff',
   host: '192.168.50.137',
   username: 'j',
-  remotePath: '/home/j/codeman-pi-test',
+  remotePath: '/home/j/reverie-pi-test',
   wakeCommand: '/home/joe/bin/whuff',
 };
 
@@ -296,8 +296,8 @@ describe('POST /api/sessions + attachRemoteSession — authorization before the 
   // held for the wake budget, and only THEN get a 403 for the workingDir (reproduced
   // upstream: wake spy fired once, response 403).
   it('403s a non-admin in multi-user mode without probing or waking the host', async () => {
-    const prev = process.env.CODEMAN_MULTIUSER;
-    process.env.CODEMAN_MULTIUSER = '1';
+    const prev = process.env.REVERIE_MULTIUSER;
+    process.env.REVERIE_MULTIUSER = '1';
     try {
       // `session-routes.ts` reads hosts from the sandboxed data dir (module-load-time
       // constant), so a host with a wake command is written THERE: a regression would
@@ -319,7 +319,7 @@ describe('POST /api/sessions + attachRemoteSession — authorization before the 
       const res = await h.app.inject({
         method: 'POST',
         url: '/api/sessions',
-        payload: { attachRemoteSession: { hostId: 'hufflepuff', remoteSessionName: 'codeman-abc12345' } },
+        payload: { attachRemoteSession: { hostId: 'hufflepuff', remoteSessionName: 'reverie-abc12345' } },
       });
       expect(res.statusCode).toBe(403);
       expect(res.json().error).toMatch(/admin-only/);
@@ -328,8 +328,8 @@ describe('POST /api/sessions + attachRemoteSession — authorization before the 
       expect(h.events).toEqual([]);
       await h.app.close();
     } finally {
-      if (prev === undefined) delete process.env.CODEMAN_MULTIUSER;
-      else process.env.CODEMAN_MULTIUSER = prev;
+      if (prev === undefined) delete process.env.REVERIE_MULTIUSER;
+      else process.env.REVERIE_MULTIUSER = prev;
     }
   });
 });

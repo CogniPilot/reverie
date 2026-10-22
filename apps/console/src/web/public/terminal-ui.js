@@ -3,8 +3,8 @@
  * (batch writes, flicker filter, chunked writes, local echo), terminal controls (clear, font, resize),
  * and directory input.
  *
- * @mixin Extends CodemanApp.prototype via Object.assign
- * @dependency app.js (CodemanApp class, this.terminal, this.fitAddon, this.sessions)
+ * @mixin Extends ReverieApp.prototype via Object.assign
+ * @dependency app.js (ReverieApp class, this.terminal, this.fitAddon, this.sessions)
  * @dependency constants.js (DEC_SYNC_STRIP_RE, OSC52_STRIP_RE, OSC52_DEDUPE_MS, TIMING constants)
  * @dependency mobile-handlers.js (MobileDetection)
  * @dependency vendor/xterm.js, vendor/xterm-addon-fit.js, vendor/xterm-addon-webgl.js
@@ -349,7 +349,7 @@
   // highlight was effectively invisible, which is what a long-press selection that
   // "did nothing" actually looked like. A key only works here if xterm knows its name;
   // test/skin-themes.test.ts pins the name AND that the blend stays visible.
-  const CODEMAN_XTERM_THEMES = {
+  const REVERIE_XTERM_THEMES = {
     og: { background: '#0d0d0d', foreground: '#e0e0e0', cursor: '#e0e0e0', cursorAccent: '#0d0d0d', selectionBackground: 'rgba(255,255,255,0.3)', black: '#0d0d0d', red: '#ff6b6b', green: '#51cf66', yellow: '#ffd43b', blue: '#339af0', magenta: '#cc5de8', cyan: '#22b8cf', white: '#e0e0e0', brightBlack: '#495057', brightRed: '#ff8787', brightGreen: '#69db7c', brightYellow: '#ffe066', brightBlue: '#5c7cfa', brightMagenta: '#da77f2', brightCyan: '#66d9e8', brightWhite: '#ffffff' },
     'daylight-green': { background: '#161b23', foreground: '#dfe6ef', cursor: '#2fd3aa', cursorAccent: '#161b23', selectionBackground: 'rgba(47,211,170,0.22)', black: '#161b23', red: '#ff8585', green: '#34d8a0', yellow: '#f0c25a', blue: '#5cc6e8', magenta: '#c79af2', cyan: '#2bcbbb', white: '#dfe6ef', brightBlack: '#5b6675', brightRed: '#ffa0a0', brightGreen: '#5fe6b8', brightYellow: '#ffd884', brightBlue: '#82d4ee', brightMagenta: '#d6b3f7', brightCyan: '#5ee0d4', brightWhite: '#f3f6fa' },
     'daylight-blue': { background: '#161b23', foreground: '#dfe6ef', cursor: '#38b6f0', cursorAccent: '#161b23', selectionBackground: 'rgba(56,182,240,0.22)', black: '#161b23', red: '#ff8585', green: '#34d8a0', yellow: '#f0c25a', blue: '#5cc6e8', magenta: '#c79af2', cyan: '#2bcbbb', white: '#dfe6ef', brightBlack: '#5b6675', brightRed: '#ffa0a0', brightGreen: '#5fe6b8', brightYellow: '#ffd884', brightBlue: '#82d4ee', brightMagenta: '#d6b3f7', brightCyan: '#5ee0d4', brightWhite: '#f3f6fa' },
@@ -358,19 +358,19 @@
     'catppuccin-latte': { background: '#eff1f5', foreground: '#4c4f69', cursor: '#1e66f5', cursorAccent: '#ffffff', selectionBackground: 'rgba(30,102,245,0.18)', black: '#5c5f77', red: '#d20f39', green: '#3b8f2b', yellow: '#a86605', blue: '#1e66f5', magenta: '#8839ef', cyan: '#177f86', white: '#6c6f85', brightBlack: '#7c7f93', brightRed: '#b50930', brightGreen: '#2f7622', brightYellow: '#8b5604', brightBlue: '#174fbf', brightMagenta: '#6f2bc5', brightCyan: '#116b71', brightWhite: '#4c4f69' },
     'rose-pine-dawn': { background: '#faf4ed', foreground: '#575279', cursor: '#286983', cursorAccent: '#fffaf3', selectionBackground: 'rgba(40,105,131,0.2)', black: '#575279', red: '#b4637a', green: '#286983', yellow: '#96681f', blue: '#477f91', magenta: '#907aa9', cyan: '#3f7f8b', white: '#6e6a86', brightBlack: '#797593', brightRed: '#984d66', brightGreen: '#1f5266', brightYellow: '#7d5417', brightBlue: '#386b7c', brightMagenta: '#765f90', brightCyan: '#326b76', brightWhite: '#575279' },
   };
-  const CODEMAN_LIGHT_SKINS = new Set(['paper-gray', 'solarized-light', 'catppuccin-latte', 'rose-pine-dawn']);
+  const REVERIE_LIGHT_SKINS = new Set(['paper-gray', 'solarized-light', 'catppuccin-latte', 'rose-pine-dawn']);
   function currentSkin() {
     return (typeof document !== 'undefined' && document.documentElement.dataset.skin) || 'daylight-blue';
   }
   function currentXtermTheme() {
     const skin = currentSkin();
-    return CODEMAN_XTERM_THEMES[skin] || CODEMAN_XTERM_THEMES['daylight-blue'];
+    return REVERIE_XTERM_THEMES[skin] || REVERIE_XTERM_THEMES['daylight-blue'];
   }
   function currentSkinIsLight(skin = currentSkin()) {
-    return CODEMAN_LIGHT_SKINS.has(skin);
+    return REVERIE_LIGHT_SKINS.has(skin);
   }
 
-  global.CodemanTerminalInput = {
+  global.ReverieTerminalInput = {
     isTerminalQueryResponse,
     shouldSuppressTerminalQueryResponse,
     isTerminalFocusOrMouseReport,
@@ -403,12 +403,12 @@
     TOUCH_SELECT_LONG_PRESS_MS,
     TOUCH_SELECT_FOCUS_GUARD_MS,
   };
-  global.CODEMAN_XTERM_THEMES = CODEMAN_XTERM_THEMES;
-  global.codemanCurrentXtermTheme = currentXtermTheme;
-  global.codemanCurrentSkinIsLight = currentSkinIsLight;
+  global.REVERIE_XTERM_THEMES = REVERIE_XTERM_THEMES;
+  global.reverieCurrentXtermTheme = currentXtermTheme;
+  global.reverieCurrentSkinIsLight = currentSkinIsLight;
 })(window);
 
-Object.assign(CodemanApp.prototype, {
+Object.assign(ReverieApp.prototype, {
   // ═══════════════════════════════════════════════════════════════
   // Terminal Setup — xterm.js config and input handling
   // ═══════════════════════════════════════════════════════════════
@@ -437,7 +437,7 @@ Object.assign(CodemanApp.prototype, {
       // Best-effort node cleanup only.
     }
     try {
-      this._mobileImePreviewHelpers?.classList?.remove('codeman-ime-preview-owned');
+      this._mobileImePreviewHelpers?.classList?.remove('reverie-ime-preview-owned');
     } catch {
       // Best-effort ownership cleanup only.
     }
@@ -486,7 +486,7 @@ Object.assign(CodemanApp.prototype, {
       preview = document.createElement('span');
       this._mobileImePreviewNode = preview;
       this._mobileImePreviewHelpers = helpers;
-      preview.className = 'codeman-ime-preview';
+      preview.className = 'reverie-ime-preview';
       preview.setAttribute('aria-hidden', 'true');
       preview.hidden = true;
       helpers.appendChild(preview);
@@ -505,7 +505,7 @@ Object.assign(CodemanApp.prototype, {
           let background = theme?.background;
           if (!foreground || !background) {
             try {
-              const current = window.codemanCurrentXtermTheme?.();
+              const current = window.reverieCurrentXtermTheme?.();
               foreground = foreground || current?.foreground;
               background = background || current?.background;
             } catch {
@@ -542,7 +542,7 @@ Object.assign(CodemanApp.prototype, {
           delete preview.dataset.phase;
         } catch {}
         try {
-          helpers.classList.remove('codeman-ime-preview-owned');
+          helpers.classList.remove('reverie-ime-preview-owned');
         } catch {}
       };
       const clearPreview = () => {
@@ -563,7 +563,7 @@ Object.assign(CodemanApp.prototype, {
               // No prompt found = nothing drawn: fall back to the span.
               if (!text || overlay.state?.visible) {
                 hideSpan();
-                helpers.classList.toggle('codeman-ime-preview-owned', !!text);
+                helpers.classList.toggle('reverie-ime-preview-owned', !!text);
                 return;
               }
               overlay.setComposition('');
@@ -574,7 +574,7 @@ Object.assign(CodemanApp.prototype, {
             preview.textContent = text;
             preview.dataset.phase = phase;
             preview.hidden = !text;
-            helpers.classList.toggle('codeman-ime-preview-owned', !!text);
+            helpers.classList.toggle('reverie-ime-preview-owned', !!text);
           } catch {
             clearPreview();
           }
@@ -654,23 +654,23 @@ Object.assign(CodemanApp.prototype, {
   initTerminal() {
     // Load scrollback setting from localStorage, treating DEFAULT_SCROLLBACK as a floor
     // so users who picked up the previous (smaller) default get the new minimum on upgrade.
-    const stored = parseInt(localStorage.getItem('codeman-scrollback'));
+    const stored = parseInt(localStorage.getItem('reverie-scrollback'));
     const scrollback = Number.isFinite(stored) && stored > 0 ? Math.max(stored, DEFAULT_SCROLLBACK) : DEFAULT_SCROLLBACK;
 
     this._destroyKeyCode229Recovery();
     const fontSettings = this.loadAppSettingsFromStorage?.() || {};
     this.terminal = new Terminal({
-      theme: { ...window.codemanCurrentXtermTheme() },
-      fontFamily: window.CodemanTerminalFont.resolve(fontSettings.terminalFontFamily),
+      theme: { ...window.reverieCurrentXtermTheme() },
+      fontFamily: window.ReverieTerminalFont.resolve(fontSettings.terminalFontFamily),
       // Both weight slots, each falling back to xterm's own default for that
       // slot, so an untouched install renders exactly as it always has.
-      ...window.CodemanTerminalFont.resolveWeights(fontSettings),
+      ...window.ReverieTerminalFont.resolveWeights(fontSettings),
       // Use smaller font on mobile to fit more columns (prevents wrapping of Claude's status line)
       fontSize: MobileDetection.getDeviceType() === 'mobile' ? 10 : 14,
       lineHeight: 1.2,
       cursorBlink: false,
       cursorStyle: 'block',
-      minimumContrastRatio: window.codemanCurrentSkinIsLight() ? 4.5 : 1,
+      minimumContrastRatio: window.reverieCurrentSkinIsLight() ? 4.5 : 1,
       scrollback: scrollback,
       allowTransparency: true,
       allowProposedApi: true,
@@ -908,13 +908,13 @@ Object.assign(CodemanApp.prototype, {
     const _params = new URLSearchParams(location.search);
     const _stickyDisabled = (() => {
       try {
-        const raw = localStorage.getItem('codeman-webgl-disabled');
+        const raw = localStorage.getItem('reverie-webgl-disabled');
         if (!raw) return false;
         const { at } = JSON.parse(raw);
         // Auto-expire after WEBGL_FALLBACK.STICKY_EXPIRY_MS so we retry
         // (driver/Chrome may have been updated).
         if (Date.now() - at > WEBGL_FALLBACK.STICKY_EXPIRY_MS) {
-          localStorage.removeItem('codeman-webgl-disabled');
+          localStorage.removeItem('reverie-webgl-disabled');
           return false;
         }
         return true;
@@ -936,7 +936,7 @@ Object.assign(CodemanApp.prototype, {
     // toggle ON is incidental (checkbox defaults checked) and must not defeat
     // the sticky safety net. An OFF→ON flip clears it in saveAppSettings().
     if (_clearWebglSticky) {
-      try { localStorage.removeItem('codeman-webgl-disabled'); } catch {}
+      try { localStorage.removeItem('reverie-webgl-disabled'); } catch {}
     }
     if (skipWebGL && _stickyDisabled) {
       console.log('[CRASH-DIAG] WebGL sticky-disabled from prior stalls — DOM renderer in use. Re-enable: ?webgl=force');
@@ -960,7 +960,7 @@ Object.assign(CodemanApp.prototype, {
     // load, codex falls back to plain PTY echo exactly like 1.12.2.
     this._predictiveEcho =
       typeof PredictiveEchoOverlay !== 'undefined' ? new PredictiveEchoOverlay(this.terminal) : null;
-    this._predictiveEcho?.setPredictWhen((terminal) => window.CodemanTerminalInput.isCodexComposerRow(terminal));
+    this._predictiveEcho?.setPredictWhen((terminal) => window.ReverieTerminalInput.isCodexComposerRow(terminal));
     if (MobileDetection.isTouchDevice()) {
       this.terminal.onCursorMove(() => this._syncMobileHelperTextareaToCursor());
       this.terminal.onRender(() => this._syncMobileHelperTextareaToCursor());
@@ -1222,7 +1222,7 @@ Object.assign(CodemanApp.prototype, {
       let tapStartIntentCache = null;
       // px — ignore micro-drift to distinguish tap from scroll. Shared with the
       // keyboard-dismiss handler so both classify the same gesture the same way.
-      const TAP_THRESHOLD = window.CodemanTerminalInput.MOBILE_KEYBOARD_DISMISS_TAP_SLOP;
+      const TAP_THRESHOLD = window.ReverieTerminalInput.MOBILE_KEYBOARD_DISMISS_TAP_SLOP;
       container.addEventListener(
         'touchstart',
         (ev) => {
@@ -1274,7 +1274,7 @@ Object.assign(CodemanApp.prototype, {
             longPressTimer = setTimeout(() => {
               longPressTimer = null;
               this._beginTouchSelection(longPressStartX, longPressStartY);
-            }, window.CodemanTerminalInput.TOUCH_SELECT_LONG_PRESS_MS);
+            }, window.ReverieTerminalInput.TOUCH_SELECT_LONG_PRESS_MS);
             lastTime = 0;
             if (scrollFrame) {
               cancelAnimationFrame(scrollFrame);
@@ -1665,7 +1665,7 @@ Object.assign(CodemanApp.prototype, {
         if (
           cjkEl?.classList.contains('cjk-input-visible') &&
           document.activeElement === this.terminal.textarea &&
-          !window.CodemanTerminalInput?.shouldSuppressTerminalQueryResponse(data)
+          !window.ReverieTerminalInput?.shouldSuppressTerminalQueryResponse(data)
         ) {
           _crashDiag.log('CJK regain-focus (onData swallowed input)');
           cjkEl.focus();
@@ -1677,7 +1677,7 @@ Object.assign(CodemanApp.prototype, {
         // Forwarding them through the WebSocket injects DA/DSR/CPR replies
         // into the foreground process as typed input (for example "0;276;0c").
         if (
-          window.CodemanTerminalInput?.shouldSuppressTerminalQueryResponse(data)
+          window.ReverieTerminalInput?.shouldSuppressTerminalQueryResponse(data)
         ) {
           return;
         }
@@ -1698,7 +1698,7 @@ Object.assign(CodemanApp.prototype, {
         if (
           typeof KeyboardAccessoryBar !== 'undefined' &&
           KeyboardAccessoryBar.isCtrlArmed?.() &&
-          !window.CodemanTerminalInput?.isTerminalFocusOrMouseReport(data)
+          !window.ReverieTerminalInput?.isTerminalFocusOrMouseReport(data)
         ) {
           data = KeyboardAccessoryBar.consumeCtrl(data);
         }
@@ -1799,7 +1799,7 @@ Object.assign(CodemanApp.prototype, {
               // paste-burst handling drops keystrokes that arrive in the SAME
               // PTY read as a bracketed paste (verified against codex 0.147),
               // mirroring the delayed \r in the Enter branch above.
-              if (data.startsWith(window.CodemanTerminalInput.BRACKETED_PASTE_START)) {
+              if (data.startsWith(window.ReverieTerminalInput.BRACKETED_PASTE_START)) {
                 const hadPending = !!this._localEchoOverlay?.pendingText;
                 this._flushLocalEchoPending();
                 if (hadPending) {
@@ -1819,7 +1819,7 @@ Object.assign(CodemanApp.prototype, {
               // then hand the session to plain PTY echo until Enter/Ctrl+C.
               // The cursor may now sit mid-text, where append-only buffering
               // cannot track edits (issue #218).
-              if (window.CodemanTerminalInput.isComposerNavKey(data)) {
+              if (window.ReverieTerminalInput.isComposerNavKey(data)) {
                 this._flushLocalEchoPending();
                 if (!this._echoPassthroughSessions) this._echoPassthroughSessions = new Set();
                 this._echoPassthroughSessions.add(this.activeSessionId);
@@ -1985,7 +1985,7 @@ Object.assign(CodemanApp.prototype, {
     // connect() key handler and onData) wires its own controller the same way
     // for every grid tile and the split's Pane B; keep the two in step.
     try {
-      this._keyCode229Recovery = window.CodemanKeyCode229Recovery?.create?.({
+      this._keyCode229Recovery = window.ReverieKeyCode229Recovery?.create?.({
         textarea: this.terminal.textarea,
         emitRecovered: (data) => handleTerminalData(data),
         getCompositionHelper: () => this.terminal?._core?._compositionHelper,
@@ -2008,7 +2008,7 @@ Object.assign(CodemanApp.prototype, {
       // the case this exists for. Narrowing the counter cannot cause a
       // duplicate: it only ever makes the controller less sure it can stand down.
       try {
-        const input = window.CodemanTerminalInput;
+        const input = window.ReverieTerminalInput;
         if (!input?.shouldSuppressTerminalQueryResponse(data) && !input?.isTerminalFocusOrMouseReport(data)) {
           this._keyCode229Recovery?.notifyCanonicalData?.();
         }
@@ -2089,7 +2089,7 @@ Object.assign(CodemanApp.prototype, {
         // Bounded so a screenful of full-width output (wide tables, box drawing)
         // cannot make every hover stitch and re-scan the entire viewport.
         const MAX_STITCHED_ROWS = 12;
-        const logical = window.CodemanTerminalLines?.terminalPathLine(
+        const logical = window.ReverieTerminalLines?.terminalPathLine(
           buffer,
           bufferLineNumber - 1,
           terminal.cols,
@@ -2170,7 +2170,7 @@ Object.assign(CodemanApp.prototype, {
 
         // Pattern 2: Paths with common extensions — absolute, `~/` and relative
         // (`findFilePathLinks`, constants.js). Image/PDF/media extensions are
-        // included so pasted-attachment paths (`.codeman-uploads/paste-*.png`) and
+        // included so pasted-attachment paths (`.reverie-uploads/paste-*.png`) and
         // screenshots an agent just wrote are clickable; those open the file
         // preview rather than the log viewer (see addLink).
         //
@@ -2426,8 +2426,8 @@ Object.assign(CodemanApp.prototype, {
    */
   _installTouchSelectionFocusGuard() {
     const textarea = this.terminal?.textarea;
-    if (!textarea || textarea._codemanSelectionFocusGuard) return;
-    textarea._codemanSelectionFocusGuard = true;
+    if (!textarea || textarea._reverieSelectionFocusGuard) return;
+    textarea._reverieSelectionFocusGuard = true;
     textarea.addEventListener('focus', () => {
       if (!this._touchSelectionFocusGuarded()) return;
       // Same task as the focus: a keyboard that opens and closes still shoves the
@@ -2444,7 +2444,7 @@ Object.assign(CodemanApp.prototype, {
   /** Re-arm the focus guard; called at every step of the gesture. */
   _armTouchSelectionFocusGuard() {
     this._touchSelectionFocusGuardUntil =
-      performance.now() + (window.CodemanTerminalInput?.TOUCH_SELECT_FOCUS_GUARD_MS || 800);
+      performance.now() + (window.ReverieTerminalInput?.TOUCH_SELECT_FOCUS_GUARD_MS || 800);
   },
 
   /** The absolute 0-based buffer cell under a viewport point, or null. */
@@ -2468,8 +2468,8 @@ Object.assign(CodemanApp.prototype, {
   _touchSelectionLogicalLine(row) {
     const buffer = this.terminal?.buffer?.active;
     const cols = Math.max(1, this.terminal?.cols || 1);
-    if (!buffer || typeof window.CodemanTerminalLines?.terminalLogicalLine !== 'function') return null;
-    return window.CodemanTerminalLines.terminalLogicalLine(buffer, row, cols);
+    if (!buffer || typeof window.ReverieTerminalLines?.terminalLogicalLine !== 'function') return null;
+    return window.ReverieTerminalLines.terminalLogicalLine(buffer, row, cols);
   },
 
   /**
@@ -3287,7 +3287,7 @@ Object.assign(CodemanApp.prototype, {
   _HISTORY_FETCH_LIMIT: 200,
 
   /** localStorage key for the per-device sort choice (#263). */
-  _HISTORY_SORT_KEY: 'codeman:historySort',
+  _HISTORY_SORT_KEY: 'reverie:historySort',
 
   async loadHistorySessions() {
     const container = document.getElementById('historySessions');
@@ -3329,7 +3329,7 @@ Object.assign(CodemanApp.prototype, {
    * Wire the filter box and sort select once; both re-render from the cached
    * corpus. The sort choice is restored from (and saved to) localStorage, it is
    * a per-device display preference, so it stays out of the synced settings
-   * schema, same as `codeman:skin`.
+   * schema, same as `reverie:skin`.
    */
   _wireHistoryControls() {
     if (this._historyControlsWired) return;
@@ -3845,7 +3845,7 @@ Object.assign(CodemanApp.prototype, {
   _estimateReplayRows(text, cols) {
     if (typeof text !== 'string' || !text) return 0;
     const width = cols > 0 ? cols : 80;
-    const plain = text.replace(window.CodemanTerminalInput.REPLAY_ESCAPE_RE, '');
+    const plain = text.replace(window.ReverieTerminalInput.REPLAY_ESCAPE_RE, '');
     let rows = 0;
     for (const line of plain.split('\n')) {
       const cells = line.endsWith('\r') ? line.length - 1 : line.length;
@@ -3939,7 +3939,7 @@ Object.assign(CodemanApp.prototype, {
 
   _hasRecentUserScrollUp() {
     if (typeof this._lastUserScrollUpAt !== 'number') return false;
-    return performance.now() - this._lastUserScrollUpAt < window.CodemanTerminalInput.USER_SCROLL_STICKY_SUPPRESS_MS;
+    return performance.now() - this._lastUserScrollUpAt < window.ReverieTerminalInput.USER_SCROLL_STICKY_SUPPRESS_MS;
   },
 
   /**
@@ -3985,8 +3985,8 @@ Object.assign(CodemanApp.prototype, {
     this._lastTerminalWriteAt = 0;
     this._renderLivenessTimer = setInterval(() => {
       try {
-        if (typeof CodemanRenderLiveness === 'undefined') return;
-        const kick = CodemanRenderLiveness.shouldKickRenderer({
+        if (typeof ReverieRenderLiveness === 'undefined') return;
+        const kick = ReverieRenderLiveness.shouldKickRenderer({
           wroteAt: this._lastTerminalWriteAt || 0,
           renderedAt: this._lastRenderAt || 0,
           now: Date.now(),
@@ -4197,7 +4197,7 @@ Object.assign(CodemanApp.prototype, {
           find: (terminal) => {
             try {
               const buf = terminal.buffer.active;
-              const row = window.CodemanTerminalInput.cursorViewportRow(terminal);
+              const row = window.ReverieTerminalInput.cursorViewportRow(terminal);
               if (row === null) return null;
               const line = buf.getLine(buf.viewportY + row);
               if (!line) return null;
@@ -4236,7 +4236,7 @@ Object.assign(CodemanApp.prototype, {
           find: (terminal) => {
             try {
               const buf = terminal.buffer.active;
-              const cursorRow = window.CodemanTerminalInput.cursorViewportRow(terminal);
+              const cursorRow = window.ReverieTerminalInput.cursorViewportRow(terminal);
               if (cursorRow === null) return null;
               const lowest = Math.max(0, buf.baseY - buf.viewportY);
               for (let row = cursorRow; row >= lowest; row--) {
@@ -4277,7 +4277,7 @@ Object.assign(CodemanApp.prototype, {
   _predictHookOnData(data) {
     if (this._localEchoPolicy !== 'predict' || !this._predictiveEcho) return;
     try {
-      const kind = window.CodemanTerminalInput.classifyPredictInput(data);
+      const kind = window.ReverieTerminalInput.classifyPredictInput(data);
       if (kind === 'char') this._predictiveEcho.predictChar(data);
       else if (kind === 'backspace') this._predictiveEcho.predictBackspace();
       // 'clear' AND 'text' (plain paste, IME word commits) both change the
@@ -4978,7 +4978,7 @@ Object.assign(CodemanApp.prototype, {
 
   /**
    * xterm's current selection, cleaned for the clipboard. The transform itself
-   * is CodemanCopySelection.clean in constants.js, beside decideAutoCopy; this
+   * is ReverieCopySelection.clean in constants.js, beside decideAutoCopy; this
    * is the half that needs the live terminal.
    *
    * `text` is for the callers that already read the selection to decide whether
@@ -5010,7 +5010,7 @@ Object.assign(CodemanApp.prototype, {
     const raw = text ?? (terminal?.hasSelection?.() ? terminal.getSelection() : '');
     if (!raw) return '';
     if (terminal?._core?._selectionService?._activeSelectionMode === 3) return raw;
-    const clean = window.CodemanCopySelection?.clean;
+    const clean = window.ReverieCopySelection?.clean;
     if (!clean) return raw;
     const range = this._normalisedSelectionRange(terminal);
     return clean(raw, {
@@ -5050,7 +5050,7 @@ Object.assign(CodemanApp.prototype, {
    * the active session, and Pane B of a split passes its own, so both panes of a
    * split strip the width their own CLI declares rather than Pane A's.
    *
-   * ⚠️ Read from `window.__codemanTranscriptGutter`, the map the server derives
+   * ⚠️ Read from `window.__reverieTranscriptGutter`, the map the server derives
    * from the `transcriptGutter` CAPABILITY at render time — never an id literal
    * here, which is the registry's standing rule and is also what lets a CLI that
    * declares a gutter later work with no change to this file.
@@ -5074,7 +5074,7 @@ Object.assign(CodemanApp.prototype, {
    */
   _cliGutterColumns(sessionId) {
     if (!this._copyStripMarginEnabled()) return 0;
-    const byMode = window.__codemanTranscriptGutter;
+    const byMode = window.__reverieTranscriptGutter;
     if (!byMode || typeof byMode !== 'object') return 0;
     const mode = this.sessions?.get(sessionId ?? this.activeSessionId)?.mode;
     const columns = mode ? byMode[mode] : 0;
@@ -5213,7 +5213,7 @@ Object.assign(CodemanApp.prototype, {
    * the way through); the Clipboard API path never moves focus at all.
    */
   async _flushAutoCopySelection() {
-    const decide = window.CodemanAutoCopy?.decide;
+    const decide = window.ReverieAutoCopy?.decide;
     if (!decide || !this.terminal) return;
     // The toggle is read FIRST because Auto Copy is off by default: reading and
     // cleaning a selection that can run to the 50 000-row scrollback ceiling
@@ -5388,7 +5388,7 @@ Object.assign(CodemanApp.prototype, {
         Math.max(
           0,
           rows -
-            window.CodemanTerminalInput
+            window.ReverieTerminalInput
               .TUI_PROMPT_DEFAULT_ROWS_FROM_BOTTOM
         )
     ) {
@@ -5459,7 +5459,7 @@ Object.assign(CodemanApp.prototype, {
       if (moved || !ev.touches.length) return;
       const dx = ev.touches[0].clientX - startX;
       const dy = ev.touches[0].clientY - startY;
-      const slop = window.CodemanTerminalInput.MOBILE_KEYBOARD_DISMISS_TAP_SLOP;
+      const slop = window.ReverieTerminalInput.MOBILE_KEYBOARD_DISMISS_TAP_SLOP;
       if (Math.abs(dx) > slop || Math.abs(dy) > slop) {
         moved = true;
       }
@@ -5470,7 +5470,7 @@ Object.assign(CodemanApp.prototype, {
       const target = ev.target;
       if (!target || typeof target.closest !== 'function') return;
       if (target.closest('#terminalContainer')) return;
-      if (target.closest(window.CodemanTerminalInput.MOBILE_KEYBOARD_DISMISS_EXEMPT_SELECTOR)) return;
+      if (target.closest(window.ReverieTerminalInput.MOBILE_KEYBOARD_DISMISS_EXEMPT_SELECTOR)) return;
       this._blurMobileTerminalInput();
     };
     // Passive throughout: this never calls preventDefault, so it must not make
@@ -5812,16 +5812,16 @@ Object.assign(CodemanApp.prototype, {
   // Claude mode the same value also capped the forwarded SGR report at one tick.
   _wheelScrollLines(ev) {
     // Pure horizontal swipe: 0, never the ±1 fallback (wheelDeltaWholeLines).
-    return window.CodemanTerminalInput.wheelDeltaWholeLines(ev, this.terminal?.rows);
+    return window.ReverieTerminalInput.wheelDeltaWholeLines(ev, this.terminal?.rows);
   },
 
   /** Unrounded variant for the smooth local-scroll path, which accumulates
    *  sub-line fractions across events instead of forcing every tiny trackpad
    *  delta to a whole ±1 line. Same unit handling and Shift-axis trap. The
-   *  math is the pure CodemanTerminalInput.wheelDeltaLines (top of this file),
+   *  math is the pure ReverieTerminalInput.wheelDeltaLines (top of this file),
    *  which a TerminalTile calls with its own row count. */
   _wheelScrollLinesFloat(ev) {
-    return window.CodemanTerminalInput.wheelDeltaLines(ev, this.terminal?.rows);
+    return window.ReverieTerminalInput.wheelDeltaLines(ev, this.terminal?.rows);
   },
 
   // `target` ({ terminal, sessionId }) asks the question for a TerminalTile:
@@ -5886,13 +5886,13 @@ Object.assign(CodemanApp.prototype, {
   // scroll-speed multiplier and acceleration on top), and the queue is bounded
   // so a wild scroll can't build a backlog that keeps scrolling after the finger
   // stops. Flushed via _sendInputEphemeral — loss-tolerant, off the durable queue.
-  // The encoding is the pure CodemanTerminalInput.sgrWheelReports, which a
+  // The encoding is the pure ReverieTerminalInput.sgrWheelReports, which a
   // TerminalTile calls with its own cell (TerminalTile._maybeForwardWheelToCli).
   _sendSyntheticSgrWheel(clientX, clientY, lines) {
     if (!this.activeSessionId || !lines) return;
     const pos = this._clientPointToCell(clientX, clientY);
     if (!pos) return;
-    this._queueScrollBytes(window.CodemanTerminalInput.sgrWheelReports(lines, pos));
+    this._queueScrollBytes(window.ReverieTerminalInput.sgrWheelReports(lines, pos));
   },
 
   /**
@@ -5934,7 +5934,7 @@ Object.assign(CodemanApp.prototype, {
    *    the full strip hides from xterm, and pages on PageUp/PageDown while SGR
    *    wheel reports do nothing.
    *
-   * ⚠️ Which modes page is read from `window.__codemanTranscriptPageKeys`, the
+   * ⚠️ Which modes page is read from `window.__reverieTranscriptPageKeys`, the
    * list the server builds from the `transcriptPageKeys` CAPABILITY, never an id
    * literal here. A missing list means no mode pages.
    *
@@ -5946,7 +5946,7 @@ Object.assign(CodemanApp.prototype, {
    */
   _localScrollbackIsHollow(target = {}) {
     const mode = this.sessions?.get(target.sessionId || this.activeSessionId)?.mode || 'claude';
-    const pagingModes = window.__codemanTranscriptPageKeys;
+    const pagingModes = window.__reverieTranscriptPageKeys;
     if (!Array.isArray(pagingModes) || !pagingModes.includes(mode)) return false;
     const buf = (target.terminal || this.terminal)?.buffer?.active;
     if (!buf || buf.type === 'alternate') return false;
@@ -5997,7 +5997,7 @@ Object.assign(CodemanApp.prototype, {
    * @returns true when the gesture was consumed here (the caller must not also
    *          scroll locally).
    *
-   * The gesture rules above live in the pure CodemanTerminalInput.pageKeysForGesture
+   * The gesture rules above live in the pure ReverieTerminalInput.pageKeysForGesture
    * (top of this file); this method adds the gates and keeps the state.
    *
    * Twin: TerminalTile._maybePageCliTranscript (terminal-tile.js) pages a tile
@@ -6021,7 +6021,7 @@ Object.assign(CodemanApp.prototype, {
       this._pageKeySession = this.activeSessionId;
       this._pageKeyGesture = null;
     }
-    const step = window.CodemanTerminalInput.pageKeysForGesture(
+    const step = window.ReverieTerminalInput.pageKeysForGesture(
       this._pageKeyGesture,
       ev,
       lines,
@@ -6133,8 +6133,8 @@ Object.assign(CodemanApp.prototype, {
    */
   _installShiftDragSelection() {
     const el = this.terminal?.element;
-    if (!el || el._codemanShiftDragInstalled) return;
-    el._codemanShiftDragInstalled = true;
+    if (!el || el._reverieShiftDragInstalled) return;
+    el._reverieShiftDragInstalled = true;
     el.addEventListener(
       'mousedown',
       (ev) => {
@@ -6154,9 +6154,9 @@ Object.assign(CodemanApp.prototype, {
 
   _installMobileTapMouseGuard() {
     const el = this.terminal?.element;
-    if (!el || el._codemanTapMouseGuardInstalled) return;
+    if (!el || el._reverieTapMouseGuardInstalled) return;
     if (typeof MobileDetection !== 'undefined' && MobileDetection.isTouchDevice && !MobileDetection.isTouchDevice()) return;
-    el._codemanTapMouseGuardInstalled = true;
+    el._reverieTapMouseGuardInstalled = true;
     const suppressTrustedCompatMouse = (ev) => {
       const suppressUntil = this._trustedTapMouseSuppressUntil || 0;
       if (!ev.isTrusted || performance.now() > suppressUntil) return;
@@ -6168,7 +6168,7 @@ Object.assign(CodemanApp.prototype, {
   },
 
   _suppressTrustedTapMouseEvents() {
-    const ms = window.CodemanTerminalInput?.TOUCH_COMPAT_MOUSE_SUPPRESS_MS || 450;
+    const ms = window.ReverieTerminalInput?.TOUCH_COMPAT_MOUSE_SUPPRESS_MS || 450;
     this._trustedTapMouseSuppressUntil = performance.now() + ms;
   },
 
@@ -6195,7 +6195,7 @@ Object.assign(CodemanApp.prototype, {
     this.terminal.options.fontSize = size;
     document.getElementById('fontSizeDisplay').textContent = size;
     this._refitAfterCellSizeChange();
-    localStorage.setItem('codeman-font-size', size);
+    localStorage.setItem('reverie-font-size', size);
     // Update overlay font cache and re-render at new cell dimensions
     this._localEchoOverlay?.refreshFont();
     this._predictiveEcho?.refreshFont();
@@ -6216,7 +6216,7 @@ Object.assign(CodemanApp.prototype, {
    * font so predictions keep landing on the right cells.
    */
   applyTerminalFontFamily(custom) {
-    const resolved = window.CodemanTerminalFont.resolve(custom);
+    const resolved = window.ReverieTerminalFont.resolve(custom);
     if (!this.terminal || this.terminal.options.fontFamily === resolved) return;
     this.terminal.options.fontFamily = resolved;
     // Changing the family at runtime is the same race as the boot-time one: the
@@ -6259,7 +6259,7 @@ Object.assign(CodemanApp.prototype, {
    *    move the cell.
    */
   applyTerminalFontWeights(settings) {
-    const { fontWeight, fontWeightBold } = window.CodemanTerminalFont.resolveWeights(settings);
+    const { fontWeight, fontWeightBold } = window.ReverieTerminalFont.resolveWeights(settings);
     if (!this.terminal) return;
     if (this.terminal.options.fontWeight === fontWeight && this.terminal.options.fontWeightBold === fontWeightBold) {
       return;
@@ -6294,7 +6294,7 @@ Object.assign(CodemanApp.prototype, {
   },
 
   loadFontSize() {
-    const saved = localStorage.getItem('codeman-font-size');
+    const saved = localStorage.getItem('reverie-font-size');
     if (saved) {
       const size = parseInt(saved, 10);
       if (size >= 10 && size <= 24) {
@@ -6375,7 +6375,7 @@ Object.assign(CodemanApp.prototype, {
     // timer and the resize observer, where an exception takes the rest of the
     // callback (the padding fit, the scroll restore, the SIGWINCH) with it.
     try {
-      return window.CodemanTerminalGeometry.clampTerminalDimensions(this.fitAddon?.proposeDimensions());
+      return window.ReverieTerminalGeometry.clampTerminalDimensions(this.fitAddon?.proposeDimensions());
     } catch {
       return null;
     }
@@ -6589,7 +6589,7 @@ Object.assign(CodemanApp.prototype, {
   _onPtyGeometryReport(sessionId, cols, rows) {
     if (!this.terminal || sessionId !== this.activeSessionId) return;
     const local = { cols: this.terminal.cols, rows: this.terminal.rows };
-    const { adopt } = window.CodemanTerminalGeometry.reconcilePtyGeometry(local, { cols, rows });
+    const { adopt } = window.ReverieTerminalGeometry.reconcilePtyGeometry(local, { cols, rows });
     // Columns only, and the local row count is kept — see reconcilePtyGeometry
     // for why adopting rows put the CLI's input line below the container with
     // nothing able to scroll to it.
@@ -6737,8 +6737,8 @@ Object.assign(CodemanApp.prototype, {
   // Uses the xterm v5+ live setter (full object assignment triggers a repaint for both
   // DOM and WebGL renderers) plus a belt-and-suspenders refresh().
   applyTerminalSkin(skin) {
-    const theme = { ...(window.CODEMAN_XTERM_THEMES[skin] || window.CODEMAN_XTERM_THEMES['daylight-blue']) };
-    const minimumContrastRatio = window.codemanCurrentSkinIsLight(skin) ? 4.5 : 1;
+    const theme = { ...(window.REVERIE_XTERM_THEMES[skin] || window.REVERIE_XTERM_THEMES['daylight-blue']) };
+    const minimumContrastRatio = window.reverieCurrentSkinIsLight(skin) ? 4.5 : 1;
     if (this.terminal) {
       this.terminal.options.minimumContrastRatio = minimumContrastRatio;
       this.terminal.options.theme = theme;
@@ -6793,10 +6793,10 @@ Object.assign(CodemanApp.prototype, {
     );
   }
 
-  global.CodemanSearch = { SEARCH_DEBOUNCE_MS, SEARCH_LIMIT, SOURCE_LABELS, formatSearchTime };
+  global.ReverieSearch = { SEARCH_DEBOUNCE_MS, SEARCH_LIMIT, SOURCE_LABELS, formatSearchTime };
 })(window);
 
-Object.assign(CodemanApp.prototype, {
+Object.assign(ReverieApp.prototype, {
   /**
    * Wire up the search box, filter chips, and selects inside the welcome
    * history panel. Idempotent — safe to call every time the overlay opens.
@@ -6902,7 +6902,7 @@ Object.assign(CodemanApp.prototype, {
   /** Debounced trigger from the input event. */
   _scheduleSearch() {
     clearTimeout(this._searchDebounceTimer);
-    this._searchDebounceTimer = setTimeout(() => this._runSearch(), window.CodemanSearch.SEARCH_DEBOUNCE_MS);
+    this._searchDebounceTimer = setTimeout(() => this._runSearch(), window.ReverieSearch.SEARCH_DEBOUNCE_MS);
   },
 
   _clearSearch() {
@@ -6929,7 +6929,7 @@ Object.assign(CodemanApp.prototype, {
     const params = new URLSearchParams();
     params.set('q', q.slice(0, 200));
     if (types.length > 0 && types.length < 3) params.set('types', types.join(','));
-    params.set('limit', String(window.CodemanSearch.SEARCH_LIMIT));
+    params.set('limit', String(window.ReverieSearch.SEARCH_LIMIT));
 
     const seq = ++this._searchSeq;
     const data = await this._apiJson('/api/search?' + params.toString());
@@ -7020,7 +7020,7 @@ Object.assign(CodemanApp.prototype, {
       header.className = 'search-group-header';
       const label = document.createElement('span');
       label.className = 'search-group-label';
-      label.textContent = window.CodemanSearch.SOURCE_LABELS[group.type] || group.type;
+      label.textContent = window.ReverieSearch.SOURCE_LABELS[group.type] || group.type;
       const count = document.createElement('span');
       count.className = 'search-group-count';
       count.textContent = String(group.results.length);
@@ -7055,7 +7055,7 @@ Object.assign(CodemanApp.prototype, {
     const isPast = r.jumpTo && r.jumpTo.kind === 'resume-session';
     const badge = document.createElement('span');
     badge.className = 'search-result-badge search-badge-' + r.type + (isPast ? ' search-badge-past' : '');
-    badge.textContent = isPast ? 'Resume' : (window.CodemanSearch.SOURCE_LABELS[r.type] || r.type).replace(/s$/, '');
+    badge.textContent = isPast ? 'Resume' : (window.ReverieSearch.SOURCE_LABELS[r.type] || r.type).replace(/s$/, '');
 
     const name = document.createElement('span');
     name.className = 'search-result-name';
@@ -7063,7 +7063,7 @@ Object.assign(CodemanApp.prototype, {
 
     const time = document.createElement('span');
     time.className = 'search-result-time';
-    time.textContent = window.CodemanSearch.formatSearchTime(r.timestamp);
+    time.textContent = window.ReverieSearch.formatSearchTime(r.timestamp);
 
     topRow.append(badge, name, time);
 

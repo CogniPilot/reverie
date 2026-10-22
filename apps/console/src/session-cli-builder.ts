@@ -61,7 +61,7 @@ export function buildEffortCliArgs(effort?: EffortLevel): string[] {
  *
  * ⚠️ Carried as the `advisorModel` SETTINGS key, never the `--advisor` flag. The flag EXITS at
  * launch on any pairing the CLI refuses (`claude --advisor haiku` prints "cannot be used as an
- * advisor" and exits 1, as does a Fable advisor still awaiting usage-credit consent), which
+ * advisor" and exits 1, as does a Fable advisor still awaiting usage-credit authorization), which
  * would leave a dead pane on every spawn and respawn. The settings key degrades instead: the
  * CLI simply does not attach an advisor it cannot use. It is a SOFT default either way:
  * `/advisor` still switches or turns it off inside the running session.
@@ -85,7 +85,7 @@ export function buildAdvisorSettings(advisorModel?: string): { advisorModel?: st
 export const CLAUDE_NAME_FLAG_MIN_VERSION = '2.1.224';
 
 /**
- * Reduce a Codeman session name to a string safe to pass as the Claude CLI
+ * Reduce a Reverie session name to a string safe to pass as the Claude CLI
  * `--name` value. Allowlist, not escaping: keeps Unicode letters/digits (CJK
  * session names survive) plus ` . _ : -`, which excludes every character that is
  * special inside the double-quoted shell interpolation buildSpawnCommand uses
@@ -111,7 +111,7 @@ export function sanitizeCliSessionName(name?: string): string | undefined {
  * Returns [] unless the CLI version is KNOWN to support the flag (>= 2.1.224):
  * a null/undefined version (probe failed, or running under vitest where
  * getClaudeCliVersion() is hermetically null) yields [], keeping the spawn
- * command identical to a Codeman without this feature. The name itself is a
+ * command identical to a Reverie without this feature. The name itself is a
  * SOFT default, exactly like model and effort: `/rename` in-session still works.
  */
 export function buildNameCliArgs(sessionName: string | undefined, cliVersion: string | null | undefined): string[] {
@@ -123,12 +123,12 @@ export function buildNameCliArgs(sessionName: string | undefined, cliVersion: st
 /**
  * Build args for an interactive Claude CLI session (direct PTY, non-mux fallback).
  *
- * @param sessionId - The Codeman session ID (passed as --session-id to Claude)
+ * @param sessionId - The Reverie session ID (passed as --session-id to Claude)
  * @param claudeMode - Permission mode for the CLI
  * @param model - Optional model override (e.g., 'opus', 'sonnet')
  * @param allowedTools - Optional comma-separated allowed tools list
  * @param effort - Optional effort level, injected via --settings (overridable in-session)
- * @param sessionName - Optional Codeman session name, passed as `--name` (version-gated)
+ * @param sessionName - Optional Reverie session name, passed as `--name` (version-gated)
  * @param cliVersion - Installed Claude CLI version for the `--name` gate (null = omit the flag)
  * @param advisorModel - Optional advisor model, merged into the one `--settings` JSON (see buildAdvisorSettings)
  * @returns Array of CLI arguments
@@ -190,9 +190,9 @@ export function buildPromptArgs(
  * - UTF-8 locale settings
  * - Augmented PATH (includes Claude CLI directory)
  * - xterm-256color terminal type
- * - Codeman session identification vars
+ * - Reverie session identification vars
  *
- * @param sessionId - The Codeman session ID
+ * @param sessionId - The Reverie session ID
  * @returns Environment variables object for pty.spawn
  */
 export function buildClaudeEnv(sessionId: string): Record<string, string | undefined> {
@@ -205,12 +205,12 @@ export function buildClaudeEnv(sessionId: string): Record<string, string | undef
   // The colour and identity vars come from the registry entry, the same source
   // buildEnvExports() and buildMuxAttachEnv() read, so this fallback cannot drift from
   // the tmux pane the way a hand-maintained list here did.
-  // ⚠️ This block runs BEFORE Codeman's own keys are assigned, mirroring
-  // buildEnvExports(), where `...cliEnv` is emitted ahead of `export CODEMAN_MUX=1`.
+  // ⚠️ This block runs BEFORE Reverie's own keys are assigned, mirroring
+  // buildEnvExports(), where `...cliEnv` is emitted ahead of `export REVERIE_MUX=1`.
   // Applied afterwards it would outrank them: `unset` and `exports` are config
-  // (`~/.codeman/clis.json` overrides any entry), so an entry naming
-  // CODEMAN_HOOK_SECRET_FILE or PATH would strip or rewrite it on this path while the
-  // tmux pane, where Codeman's exports come last, kept its own value.
+  // (`~/.reverie/clis.json` overrides any entry), so an entry naming
+  // REVERIE_HOOK_SECRET_FILE or PATH would strip or rewrite it on this path while the
+  // tmux pane, where Reverie's exports come last, kept its own value.
   // COD-115: `delete`, not `= undefined` — node-pty serializes a present-with-undefined
   // key as the literal string "KEY=undefined" (see buildMuxAttachEnv below).
   const cliEnv = getCli('claude')?.env;
@@ -223,8 +223,8 @@ export function buildClaudeEnv(sessionId: string): Record<string, string | undef
         ? item.value
         : item.value.engine === 'sessionId'
           ? sessionId
-          : item.value.engine === 'codemanPrefixedSessionId'
-            ? `codeman_${sessionId}`
+          : item.value.engine === 'reveriePrefixedSessionId'
+            ? `reverie_${sessionId}`
             : undefined;
     if (value !== undefined) env[item.name] = value;
   }
@@ -232,22 +232,22 @@ export function buildClaudeEnv(sessionId: string): Record<string, string | undef
   Object.assign(env, {
     PATH: getAugmentedPath(),
     TERM: 'xterm-256color',
-    // Inform Claude it's running within Codeman (helps prevent self-termination)
-    CODEMAN_MUX: '1',
-    CODEMAN_SESSION_ID: sessionId,
-    // CODEMAN_API_URL rides in via the process.env spread when the server has
+    // Inform Claude it's running within Reverie (helps prevent self-termination)
+    REVERIE_MUX: '1',
+    REVERIE_SESSION_ID: sessionId,
+    // REVERIE_API_URL rides in via the process.env spread when the server has
     // stamped it (WebServer.start()); no fallback: a hardcoded one was the wrong
     // scheme on HTTPS installs, and a present-with-undefined key would serialize
-    // as the literal "CODEMAN_API_URL=undefined" (COD-115).
+    // as the literal "REVERIE_API_URL=undefined" (COD-115).
     // Path only (not the secret value) — hook curls cat it at execution time (COD-54)
-    CODEMAN_HOOK_SECRET_FILE: dataPath('hook-secret'),
+    REVERIE_HOOK_SECRET_FILE: dataPath('hook-secret'),
   });
   return env;
 }
 
 /**
  * Build environment variables for mux-attached PTY sessions (tmux attach).
- * Lighter than buildClaudeEnv — no PATH augmentation or Codeman vars needed
+ * Lighter than buildClaudeEnv — no PATH augmentation or Reverie vars needed
  * since the mux session already has those set.
  *
  * @param truecolorEnabled - When true, set COLORTERM=truecolor (COD-75 opt-in);
@@ -281,7 +281,7 @@ export function buildMuxAttachEnv(truecolorEnabled?: boolean): Record<string, st
 /**
  * Build environment variables for a direct shell session (non-mux fallback).
  *
- * @param sessionId - The Codeman session ID
+ * @param sessionId - The Reverie session ID
  * @returns Environment variables object for pty.spawn
  */
 export function buildShellEnv(sessionId: string): Record<string, string | undefined> {
@@ -290,11 +290,11 @@ export function buildShellEnv(sessionId: string): Record<string, string | undefi
     LANG: 'en_US.UTF-8',
     LC_ALL: 'en_US.UTF-8',
     TERM: 'xterm-256color',
-    CODEMAN_MUX: '1',
-    CODEMAN_SESSION_ID: sessionId,
-    // CODEMAN_API_URL rides in via the process.env spread when set; no fallback
+    REVERIE_MUX: '1',
+    REVERIE_SESSION_ID: sessionId,
+    // REVERIE_API_URL rides in via the process.env spread when set; no fallback
     // (same reasoning as buildClaudeEnv above).
     // Path only (not the secret value) — hook curls cat it at execution time (COD-54)
-    CODEMAN_HOOK_SECRET_FILE: dataPath('hook-secret'),
+    REVERIE_HOOK_SECRET_FILE: dataPath('hook-secret'),
   };
 }

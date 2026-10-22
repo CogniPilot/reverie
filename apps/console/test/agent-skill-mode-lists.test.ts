@@ -2,7 +2,7 @@
  * @fileoverview Static guard: the packaged agent skill's run-mode enumerations stay in
  * step with the modes the server actually accepts.
  *
- * `skills/codeman/**` is injected into cases and read by agents driving Codeman over
+ * `skills/reverie/**` is injected into cases and read by agents driving Reverie over
  * HTTP, so a mode missing from its lists is not cosmetic: the agent is told a backend
  * does not exist, or that a whole-class caveat ("these modes write no transcript")
  * covers four modes when it covers five. Adding pi (#206) left every one of those lists
@@ -30,8 +30,8 @@
  *     the REAL classes inside the external family, each one a capability some of those
  *     CLIs have and the rest do not:
  *
- *       - "writes no transcript" drops `codex` (a rollout Codeman reads back) and
- *         `deepseek` (a JSONL session file Codeman reads back);
+ *       - "writes no transcript" drops `codex` (a rollout Reverie reads back) and
+ *         `deepseek` (a JSONL session file Reverie reads back);
  *       - "delivers no hook signals" drops `deepseek`, whose harness reports its own
  *         lifecycle -- that one is derived from `hooksAvailableForMode()` rather than
  *         restated, so the predicate and the prose cannot drift apart;
@@ -44,6 +44,7 @@
  * Port: N/A (pure static analysis).
  */
 
+import { agentSkillSourceDir } from '../src/agent-skill-source.js';
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -54,7 +55,7 @@ import { hooksAvailableForMode } from '../src/web/session-wait-registry.js';
 import type { SessionMode } from '../src/types/session.js';
 
 const HERE = fileURLToPath(new URL('.', import.meta.url));
-const SKILL_DIR = join(HERE, '../skills/codeman');
+const SKILL_DIR = agentSkillSourceDir();
 const SKILL_FILES = [
   'SKILL.md',
   'reference/endpoints.md',
@@ -80,7 +81,7 @@ const MODES = schemaModes();
 const EXTERNAL_MODES = MODES.filter(isExternalCliMode);
 
 /**
- * External modes whose ANSWERS Codeman can read: codex from its rollout,
+ * External modes whose ANSWERS Reverie can read: codex from its rollout,
  * deepseek from `$DSH_HOME/sessions/**`. Stated here rather than derived because
  * `last-response` branches per mode into a per-CLI reader and there is no single
  * predicate to import; the runtime facts are `readCodexLastResponse` and

@@ -1,5 +1,5 @@
 /**
- * Plans: accounts merged from Codeman profiles and acct directories, sessions mapped
+ * Plans: accounts merged from Reverie profiles and acct directories, sessions mapped
  * to their accounts, pace and recommendation per row, and the suggestion.
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';

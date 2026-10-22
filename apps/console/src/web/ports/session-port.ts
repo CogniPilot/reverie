@@ -38,7 +38,7 @@ export interface SessionPort {
     options?: {
       /**
        * Re-arm a PENDING auto-resume schedule from the record's `autoResumeAt`.
-       * Default true, which is what a Codeman restart wants: the limit footer
+       * Default true, which is what a Reverie restart wants: the limit footer
        * will not reprint on its own, so dropping the stamp there strands the
        * pause. A reboot restore passes false: the stamp predates the reboot,
        * the pane is new, and re-arming means every restored session types

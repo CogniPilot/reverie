@@ -1,7 +1,7 @@
 /**
  * @fileoverview Cloudflare Tunnel Manager
  *
- * Manages a cloudflared child process for remote access to Codeman.
+ * Manages a cloudflared child process for remote access to Reverie.
  * Spawns `cloudflared tunnel --url` as a child process and parses
  * the trycloudflare.com URL from its stderr output.
  *
@@ -190,7 +190,7 @@ export class TunnelManager extends EventEmitter {
         this.process?.stdout?.off('data', handleOutput);
         this.process?.stderr?.off('data', handleOutput);
         // Start QR token rotation when tunnel URL is acquired (only if auth enabled)
-        if (process.env.CODEMAN_PASSWORD) {
+        if (process.env.REVERIE_PASSWORD) {
           this.startTokenRotation();
         }
         this.emit('started', { url: this.url });

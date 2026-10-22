@@ -1,9 +1,9 @@
 /**
- * @fileoverview Carry a Codeman rename into Claude Code's own session title.
+ * @fileoverview Carry a Reverie rename into Claude Code's own session title.
  *
  * Claude Code keeps a conversation's title in its transcript as a
  * `{"type":"custom-title"}` row (what `/rename` writes), last row wins, and the
- * `/resume` picker shows `customTitle ?? aiTitle`. Renaming a tab in Codeman
+ * `/resume` picker shows `customTitle ?? aiTitle`. Renaming a tab in Reverie
  * used to change only the tab, so `/resume` kept listing the old name.
  *
  * Appending the row is enough for a pane that was spawned WITHOUT `--name`

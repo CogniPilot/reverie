@@ -80,7 +80,7 @@ interface RichRow {
 const SHELL = `
   <header class="header">
     <div class="header-brand">
-      <span class="logo">Codeman</span>
+      <span class="logo">Reverie</span>
       <button class="btn-icon-header btn-sidebar-toggle btn-sidebar-toggle--hidden"
         id="sidebarToggleBtn" aria-expanded="true" aria-controls="sessionSidebar"
         title="Collapse session sidebar" aria-label="Collapse session sidebar"></button>
@@ -117,7 +117,7 @@ function boot(
     url: 'http://localhost/',
     runScripts: 'outside-only',
   });
-  const win = dom.window as unknown as Window & typeof globalThis & { __CodemanApp: new () => LayoutApp };
+  const win = dom.window as unknown as Window & typeof globalThis & { __ReverieApp: new () => LayoutApp };
 
   // Whether the sidebar is a docked column or a modal overlay is decided by
   // WIDTH (< 1024px), not by MobileDetection.getDeviceType() — that one calls
@@ -131,14 +131,14 @@ function boot(
   // handheld harness must seed the handheld key or the layout silently stays
   // on the header strip.
   const settingsKey =
-    (options.deviceType ?? 'desktop') === 'desktop' ? 'codeman-app-settings' : 'codeman-app-settings-mobile';
+    (options.deviceType ?? 'desktop') === 'desktop' ? 'reverie-app-settings' : 'reverie-app-settings-mobile';
   if (options.stored) {
     win.localStorage.setItem(settingsKey, JSON.stringify(options.stored));
   }
 
   // app.js assigns window.MobileDetection at top level from the global that
   // mobile-handlers.js declares, so it has to exist before the source runs.
-  // One eval, not three: `class CodemanApp` is a lexical binding and would not
+  // One eval, not three: `class ReverieApp` is a lexical binding and would not
   // survive into a second global eval, and settings-ui.js needs it at load time.
   (win as unknown as { eval: (s: string) => void }).eval(
     [
@@ -151,13 +151,13 @@ function boot(
       CONSTANTS,
       APP,
       SETTINGS_UI,
-      'window.__CodemanApp = CodemanApp;',
+      'window.__ReverieApp = ReverieApp;',
     ].join('\n')
   );
 
   // Object.create, not `new`: the constructor boots SSE, timers and the whole
   // terminal stack. Only the layout surface is under test here.
-  const app = Object.create(win.__CodemanApp.prototype) as LayoutApp;
+  const app = Object.create(win.__ReverieApp.prototype) as LayoutApp;
   app.soloSessionId = options.solo ?? null;
   app.isSoloWindow = !!app.soloSessionId;
   app.sessions = new Map();
@@ -206,7 +206,7 @@ describe('session list layout', () => {
     expect(tabsEl(win).getAttribute('aria-orientation')).toBe('vertical');
 
     win.localStorage.setItem(
-      'codeman-app-settings',
+      'reverie-app-settings',
       JSON.stringify({ sessionListLayout: 'header', tabOrientation: 'horizontal' })
     );
     delete (app as unknown as { _cachedAppSettings?: unknown })._cachedAppSettings;
@@ -243,7 +243,7 @@ describe('session list layout', () => {
     expect(original.parentElement?.id).toBe('sessionSidebarList');
 
     // …and back again.
-    win.localStorage.setItem('codeman-app-settings', JSON.stringify({ sessionListLayout: 'header' }));
+    win.localStorage.setItem('reverie-app-settings', JSON.stringify({ sessionListLayout: 'header' }));
     delete (app as unknown as { _cachedAppSettings?: unknown })._cachedAppSettings;
     app.applySessionListLayout();
     expect(tabsEl(win)).toBe(original);
@@ -287,14 +287,14 @@ describe('session list layout', () => {
     expect(aside.classList.contains('open')).toBe(true);
 
     app.toggleSessionSidebar();
-    expect(win.localStorage.getItem('codeman-sidebar-collapsed')).toBe('1');
+    expect(win.localStorage.getItem('reverie-sidebar-collapsed')).toBe('1');
     expect(win.document.documentElement.dataset.sidebar).toBe('collapsed');
     expect(toggleBtn(win).getAttribute('aria-expanded')).toBe('false');
     expect(toggleBtn(win).getAttribute('aria-label')).toBe('Expand session sidebar');
     expect(aside.classList.contains('open')).toBe(false);
 
     app.toggleSessionSidebar();
-    expect(win.localStorage.getItem('codeman-sidebar-collapsed')).toBe('0');
+    expect(win.localStorage.getItem('reverie-sidebar-collapsed')).toBe('0');
     expect(win.document.documentElement.dataset.sidebar).toBe('expanded');
     expect(toggleBtn(win).getAttribute('aria-expanded')).toBe('true');
     expect(toggleBtn(win).getAttribute('aria-label')).toBe('Collapse session sidebar');
@@ -312,14 +312,14 @@ describe('session list layout', () => {
     expect(win.document.getElementById('sessionSidebar')?.classList.contains('open')).toBe(false);
 
     // An explicit choice still wins over the device default.
-    win.localStorage.setItem('codeman-sidebar-collapsed', '0');
+    win.localStorage.setItem('reverie-sidebar-collapsed', '0');
     app.applySessionListLayout();
     expect(win.document.documentElement.dataset.sidebar).toBe('expanded');
   });
 
   it('dismisses the handheld drawer on selection but never the docked desktop sidebar', () => {
     const handheld = boot({ stored: { sessionListLayout: 'sidebar' }, deviceType: 'mobile' });
-    handheld.win.localStorage.setItem('codeman-sidebar-collapsed', '0');
+    handheld.win.localStorage.setItem('reverie-sidebar-collapsed', '0');
     handheld.app.applySessionListLayout();
     handheld.app.closeSessionSidebarOnHandheld();
     expect(handheld.win.document.documentElement.dataset.sidebar).toBe('collapsed');
@@ -334,7 +334,7 @@ describe('session list layout', () => {
     const { win, app } = boot();
     app.applySessionListLayout();
     app.toggleSessionSidebar();
-    expect(win.localStorage.getItem('codeman-sidebar-collapsed')).toBeNull();
+    expect(win.localStorage.getItem('reverie-sidebar-collapsed')).toBeNull();
     expect(win.document.documentElement.dataset.sidebar).toBe('expanded');
   });
 
@@ -378,7 +378,7 @@ describe('session list layout', () => {
     app.applySidebarFilter('api');
     expect(tabsEl(win).querySelectorAll('.tab-filtered-out')).toHaveLength(1);
 
-    win.localStorage.setItem('codeman-app-settings', JSON.stringify({ sessionListLayout: 'header' }));
+    win.localStorage.setItem('reverie-app-settings', JSON.stringify({ sessionListLayout: 'header' }));
     delete (app as unknown as { _cachedAppSettings?: unknown })._cachedAppSettings;
     app.applySessionListLayout();
 
@@ -418,7 +418,7 @@ describe('session list layout', () => {
     app.applySessionListLayout();
     expect(win.document.documentElement.dataset.sidebar).toBe('collapsed');
 
-    win.localStorage.setItem('codeman-sidebar-collapsed', '0');
+    win.localStorage.setItem('reverie-sidebar-collapsed', '0');
     app.applySessionListLayout();
     expect(win.document.documentElement.dataset.sidebar).toBe('expanded');
     app.closeSessionSidebarOnHandheld();
@@ -439,7 +439,7 @@ describe('session list layout', () => {
     expect(drawer.hasAttribute('aria-hidden')).toBe(false);
 
     const desktop = boot({ stored: { sessionListLayout: 'sidebar' } });
-    desktop.win.localStorage.setItem('codeman-sidebar-collapsed', '1');
+    desktop.win.localStorage.setItem('reverie-sidebar-collapsed', '1');
     desktop.app.applySessionListLayout();
     const rail = desktop.win.document.getElementById('sessionSidebar')!;
     expect(desktop.win.document.documentElement.dataset.sidebar).toBe('collapsed');
@@ -453,7 +453,7 @@ describe('session list layout', () => {
     const rows = `<div class="session-tab active" data-id="a" tabindex="0" aria-label="api"></div>`;
 
     const desktop = boot({ stored: { sessionListLayout: 'sidebar' } });
-    desktop.win.localStorage.setItem('codeman-sidebar-collapsed', '1');
+    desktop.win.localStorage.setItem('reverie-sidebar-collapsed', '1');
     desktop.app.applySessionListLayout();
     tabsEl(desktop.win).innerHTML = rows;
     desktop.app.toggleSessionSidebar();
@@ -665,7 +665,7 @@ describe('rich session sidebar', () => {
     app.applySessionListLayout();
     (app._fullRenderSessionTabs as unknown as { mockClear(): void }).mockClear();
 
-    win.localStorage.setItem('codeman-app-settings', JSON.stringify({ sessionListLayout: 'sidebar-rich' }));
+    win.localStorage.setItem('reverie-app-settings', JSON.stringify({ sessionListLayout: 'sidebar-rich' }));
     delete (app as unknown as { _cachedAppSettings?: unknown })._cachedAppSettings;
     app.applySessionListLayout();
 
@@ -801,7 +801,7 @@ describe('rich session sidebar', () => {
     app.applySessionListLayout();
     expect(app._sidebarRichClock).toBeTruthy();
 
-    win.localStorage.setItem('codeman-app-settings', JSON.stringify({ sessionListLayout: 'sidebar' }));
+    win.localStorage.setItem('reverie-app-settings', JSON.stringify({ sessionListLayout: 'sidebar' }));
     delete (app as unknown as { _cachedAppSettings?: unknown })._cachedAppSettings;
     app.applySessionListLayout();
     // A leaked interval would keep rewriting stamps in a list that no longer
@@ -909,7 +909,7 @@ describe('detailed rows in the vertical tab rail', () => {
     (app._fullRenderSessionTabs as unknown as { mockClear(): void }).mockClear();
 
     win.localStorage.setItem(
-      'codeman-app-settings',
+      'reverie-app-settings',
       JSON.stringify({ sessionListLayout: 'header', tabOrientation: 'vertical', tabRailDetail: 'rich' })
     );
     delete (app as unknown as { _cachedAppSettings?: unknown })._cachedAppSettings;
@@ -951,7 +951,7 @@ describe('detailed rows in the vertical tab rail', () => {
     (app._fullRenderSessionTabs as unknown as { mockClear(): void }).mockClear();
 
     win.localStorage.setItem(
-      'codeman-app-settings',
+      'reverie-app-settings',
       JSON.stringify({ sessionListLayout: 'header', tabOrientation: 'vertical', tabRailDetail: 'simple' })
     );
     delete (app as unknown as { _cachedAppSettings?: unknown })._cachedAppSettings;

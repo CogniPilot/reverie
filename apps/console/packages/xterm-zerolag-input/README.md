@@ -14,11 +14,11 @@
   </p>
 </p>
 
-> ### Made for [**Codeman**](https://getcodeman.com)
+> ### Made for [**Reverie**](https://github.com/jgoppert/reverie)
 >
-> This overlay is the local echo engine of [**Codeman**](https://github.com/Ark0N/Codeman), mission control for AI coding agents: run and monitor a dozen Claude Code, Codex, OpenCode and Antigravity sessions at once, watch their subagents work in live floating windows, let them run autonomously overnight, and drive all of it from your phone.
+> This overlay is the local echo engine of [**Reverie**](https://github.com/jgoppert/reverie), mission control for AI coding agents: run and monitor a dozen Claude Code, Codex, OpenCode and Antigravity sessions at once, watch their subagents work in live floating windows, let them run autonomously overnight, and drive all of it from your phone.
 >
-> That last part is why this library exists. The demo below is a real Codeman session on two phones.
+> That last part is why this library exists. The demo below is a real Reverie session on two phones.
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/Ark0N/Codeman/master/docs/images/zerolag-demo-20260728.gif" alt="Side-by-side phones typing into the same remote session: with zerolag the text appears at 0ms, without it every keystroke waits 600ms to 2.7s for the server echo" width="900">
@@ -65,7 +65,7 @@ Since 0.2.0 the package ships **two addons for two kinds of TUIs**:
 | **Backspace that actually works** | A three-layer cascade (unsent, in-flight, already on screen) tells you exactly what to forward to the PTY, so editing works through any mix of typed, flushed and tab-completed text. |
 | **You keep control of input** | The addon never hooks `onData` for you. You decide what gets echoed and what gets forwarded, which is what makes char-at-a-time, buffered, and multi-session tab switching all possible. |
 | **Small and self-contained** | 6.1 kB gzipped, zero runtime dependencies, dual CJS/ESM with full type declarations. |
-| **Proven under load** | Extracted from [Codeman](https://getcodeman.com), hardened over thousands of hours of real remote and mobile usage, 175 tests over every state transition. |
+| **Proven under load** | Extracted from [Reverie](https://github.com/jgoppert/reverie), hardened over thousands of hours of real remote and mobile usage, 175 tests over every state transition. |
 
 Built for anything that puts a terminal behind a network hop: SSH web clients, cloud IDEs, mobile terminals, Kubernetes and container consoles, remote agent dashboards, browser-based dev environments.
 
@@ -392,7 +392,7 @@ get state(): PredictionState;         // { outstanding, confirmedTotal, droppedT
   that rewrap): `PredictiveEchoAddon`. It never withholds bytes, so the TUI
   behaves exactly as with no addon at all; you just stop waiting for the RTT.
 - Both can be loaded on one terminal and toggled per session mode; that is
-  exactly what Codeman does (buffer for Claude Code, predict for Codex).
+  exactly what Reverie does (buffer for Claude Code, predict for Codex).
 
 ---
 
@@ -552,11 +552,11 @@ The overlay hides while the cursor row is scrolled out of the viewport and re-re
 
 ## Origin
 
-[Codeman](https://getcodeman.com) needed this before anyone else did. A coding agent you drive from your phone over a tunnel is unusable if every keystroke costs a round trip.
+[Reverie](https://github.com/jgoppert/reverie) needed this before anyone else did. A coding agent you drive from your phone over a tunnel is unusable if every keystroke costs a round trip.
 
-So the overlay was built there, ran in production for thousands of hours, and survived three deep code audits before being pulled out into this standalone library with its tests intact. Nothing was reimplemented for the extraction: the engine here is the one Codeman ships.
+So the overlay was built there, ran in production for thousands of hours, and survived three deep code audits before being pulled out into this standalone library with its tests intact. Nothing was reimplemented for the extraction: the engine here is the one Reverie ships.
 
-Want the whole thing? [**getcodeman.com**](https://getcodeman.com) · [github.com/Ark0N/Codeman](https://github.com/Ark0N/Codeman)
+Want the whole thing? [**github.com/jgoppert/reverie**](https://github.com/jgoppert/reverie) · [github.com/jgoppert/reverie](https://github.com/jgoppert/reverie)
 
 ## License
 

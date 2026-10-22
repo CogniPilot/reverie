@@ -97,14 +97,14 @@ describe('agent-created case marker', () => {
 
   it('labels a case directory created for a spawn carrying the skill origin header', async () => {
     const res = await quickStart('agentcase1', {
-      headers: { 'x-codeman-agent-origin': 'codeman-skill', 'x-codeman-parent-session': PARENT_ID },
+      headers: { 'x-reverie-agent-origin': 'reverie-skill', 'x-reverie-parent-session': PARENT_ID },
     });
 
     expect(res.statusCode).toBe(200);
     const marker = await readMarker('agentcase1');
     expect(marker).toMatchObject({
       version: 1,
-      createdBy: 'codeman-skill',
+      createdBy: 'reverie-skill',
       parentSessionId: PARENT_ID,
       mode: 'claude',
     });
@@ -113,7 +113,7 @@ describe('agent-created case marker', () => {
 
   it('accepts the origin as a body field too, with the body winning', async () => {
     await quickStart('agentcase2', {
-      headers: { 'x-codeman-agent-origin': 'codeman-skill' },
+      headers: { 'x-reverie-agent-origin': 'reverie-skill' },
       payload: { agentOrigin: 'my-orchestrator' },
     });
 
@@ -121,7 +121,7 @@ describe('agent-created case marker', () => {
   });
 
   it('labels a spawn that carries only the lineage header, which is how an older skill copy still gets swept up', async () => {
-    await quickStart('agentcase3', { headers: { 'x-codeman-parent-session': PARENT_ID } });
+    await quickStart('agentcase3', { headers: { 'x-reverie-parent-session': PARENT_ID } });
 
     expect(await readMarker('agentcase3')).toMatchObject({
       createdBy: 'agent-session',
@@ -147,7 +147,7 @@ describe('agent-created case marker', () => {
     const res = await harness.app.inject({
       method: 'POST',
       url: '/api/quick-start',
-      headers: { 'x-codeman-agent-origin': 'codeman-skill' },
+      headers: { 'x-reverie-agent-origin': 'reverie-skill' },
       payload: { caseName: name, mode: 'claude' },
     });
 
@@ -156,7 +156,7 @@ describe('agent-created case marker', () => {
   });
 
   it('never labels the working directory of a POST /api/sessions, header or not', async () => {
-    // `codeman agent` sends the origin only on quick-start, but the server must not
+    // `reverie agent` sends the origin only on quick-start, but the server must not
     // trust that: a session created on an EXISTING workingDir (somebody's real repo)
     // is never marked as agent scratch, whatever the request carries.
     const name = 'existingrepo1';
@@ -167,7 +167,7 @@ describe('agent-created case marker', () => {
     const res = await harness.app.inject({
       method: 'POST',
       url: '/api/sessions',
-      headers: { 'x-codeman-agent-origin': 'codeman-agent-cli', 'x-codeman-parent-session': PARENT_ID },
+      headers: { 'x-reverie-agent-origin': 'reverie-agent-cli', 'x-reverie-parent-session': PARENT_ID },
       payload: { workingDir: dir, mode: 'claude' },
     });
 
@@ -175,14 +175,14 @@ describe('agent-created case marker', () => {
     expect(await readMarker(name)).toBeNull();
   });
 
-  it('labels a case quick-start creates for `codeman agent spawn`, and not one that existed', async () => {
-    await quickStart('agentclicase1', { headers: { 'x-codeman-agent-origin': 'codeman-agent-cli' } });
-    expect(await readMarker('agentclicase1')).toMatchObject({ createdBy: 'codeman-agent-cli' });
+  it('labels a case quick-start creates for `reverie agent spawn`, and not one that existed', async () => {
+    await quickStart('agentclicase1', { headers: { 'x-reverie-agent-origin': 'reverie-agent-cli' } });
+    expect(await readMarker('agentclicase1')).toMatchObject({ createdBy: 'reverie-agent-cli' });
 
     const name = 'preexisting2';
     created.push(name);
     await mkdir(join(getCasesDir(), name), { recursive: true });
-    await quickStart(name, { headers: { 'x-codeman-agent-origin': 'codeman-agent-cli' } });
+    await quickStart(name, { headers: { 'x-reverie-agent-origin': 'reverie-agent-cli' } });
     expect(await readMarker(name)).toBeNull();
   });
 
@@ -201,16 +201,16 @@ describe('agent-created case marker', () => {
   });
 
   it('publishes the label on GET /api/cases and hides it from cases without one', async () => {
-    await quickStart('agentcase6', { headers: { 'x-codeman-agent-origin': 'codeman-skill' } });
+    await quickStart('agentcase6', { headers: { 'x-reverie-agent-origin': 'reverie-skill' } });
     await quickStart('humancase2');
 
     const cases = await listCases();
-    expect(cases.find((c) => c.name === 'agentcase6')?.agentCreated).toMatchObject({ createdBy: 'codeman-skill' });
+    expect(cases.find((c) => c.name === 'agentcase6')?.agentCreated).toMatchObject({ createdBy: 'reverie-skill' });
     expect(cases.find((c) => c.name === 'humancase2')?.agentCreated).toBeUndefined();
   });
 
   it('lists only agent cases in the cleanup listing, newest first', async () => {
-    await quickStart('agentcase7', { headers: { 'x-codeman-agent-origin': 'codeman-skill' } });
+    await quickStart('agentcase7', { headers: { 'x-reverie-agent-origin': 'reverie-skill' } });
     await quickStart('humancase3');
 
     const listed = await listAgentCases();
@@ -223,7 +223,7 @@ describe('agent-created case marker', () => {
   it('flags a case a live session is still working in as inUse', async () => {
     // Deleting one of these would pull the rug out from under a running worker, so
     // the UI excludes it rather than confirming it away.
-    await quickStart('agentcase8', { headers: { 'x-codeman-agent-origin': 'codeman-skill' } });
+    await quickStart('agentcase8', { headers: { 'x-reverie-agent-origin': 'reverie-skill' } });
     const busyPath = join(getCasesDir(), 'agentcase8');
     const busy = createMockSession('busy-session') as unknown as { workingDir: string };
     busy.workingDir = busyPath;

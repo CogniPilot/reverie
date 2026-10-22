@@ -25,7 +25,7 @@ import {
   SettingsUpdateSchema,
 } from '../src/web/schemas.js';
 
-const EXPORTER_CMD = 'curl -sfk -X POST "$CODEMAN_API_URL/api/status-telemetry" --data @- 2>/dev/null || true';
+const EXPORTER_CMD = 'curl -sfk -X POST "$REVERIE_API_URL/api/status-telemetry" --data @- 2>/dev/null || true';
 
 /**
  * What the direct-PTY fallback hands `pty.spawn`. The file and argv are recorded, then a

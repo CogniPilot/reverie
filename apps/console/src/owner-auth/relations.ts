@@ -16,20 +16,17 @@
  *   no recorded parent; for this rule only, it inherits its predecessor's, read from the watcher's
  *   record (`restore_source.from -> to`). That file is writable by the agents' uid, so it never
  *   grants more than input.
- * - **keeper**: the caller is bound to a company employee on the owner-set keeper list (`cto` names
- *   the company's CTO). Keeping every agent awake is their job, but they see status only (the
+ * - **keeper**: the caller is bound to a company employee on the owner-set keeper list. Keeping every agent awake is their job, but they see status only (the
  *   session metadata every agent may read), never another session's terminal or transcript. The
  *   list is set only by the host (`reverie owner keepers`), and an employee's session binding only
  *   by the owner or a service, so neither can be self-declared.
  *
- * **admin** (not a session relation): the caller is bound to an employee on the owner-set admin list
- * (`cto` names the company's CTO). The policy lets it call the few company and session routes on the
+ * **admin** (not a session relation): the caller is bound to an employee on the owner-set admin list. The policy lets it call the few company and session routes on the
  * admin list (`policy.ts` ADMIN_ROUTES). Same sources as keeper: the list is set only by the host
  * (`reverie owner admins`) and the binding only by the owner or a service. Never a name or a title.
  */
 import { readFileSync, statSync } from 'node:fs';
 
-export const CTO_KEEPER = 'cto';
 const MAX_HOPS = 32;
 
 export interface RoomMember {
@@ -51,11 +48,9 @@ export interface RelationSources {
   predecessor(id: string): string | undefined;
   /** The company employee bound to a session. */
   employeeOf(sessionId: string): string | undefined;
-  /** The company CTO's employee id. */
-  ctoEmployee(): string | undefined;
-  /** Owner-set keeper entries: employee ids, or `cto`. */
+  /** Owner-set keeper entries: exact employee ids. */
   keepers(): readonly string[];
-  /** Owner-set admin entries: employee ids, or `cto`. */
+  /** Owner-set admin entries: exact employee ids. */
   admins(): readonly string[];
 }
 
@@ -95,11 +90,11 @@ export function relations(src: RelationSources): Relations {
     return false;
   };
   const rooms = () => [...src.rooms()];
-  // The caller's bound employee is on an owner-set list (`cto` = the company's current CTO).
+  // The caller's bound employee is on an owner-set list of exact employee ids.
   const listed = (caller: string, list: readonly string[]): boolean => {
     const employee = src.employeeOf(caller);
     if (!employee) return false;
-    return list.includes(employee) || (list.includes(CTO_KEEPER) && employee === src.ctoEmployee());
+    return list.includes(employee);
   };
   return {
     known: (id) => src.known(id),

@@ -16,7 +16,7 @@
  *     Yes, I trust this folder
  *   Enter to confirm · Esc to cancel
  *
- * Codeman sessions run permission-skipping or classifier-guarded modes, so the
+ * Reverie sessions run permission-skipping or classifier-guarded modes, so the
  * answer is always yes, and a session parked on this dialog is simply stuck.
  *
  * ⚠️ **Never press Enter without reading the selection.** The options are now

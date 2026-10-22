@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Cloudflare Tunnel manager for Codeman
+# Cloudflare Tunnel manager for Reverie
 # Usage: ./scripts/tunnel.sh [quick|named] [start|stop|status|url]
 #
 # Modes:
@@ -7,9 +7,9 @@
 #   named  — Named tunnel on a fixed hostname (requires setup, see below)
 #
 # Environment variables:
-#   CLOUDFLARED_TUNNEL_NAME     — tunnel name (default: codeman)
+#   CLOUDFLARED_TUNNEL_NAME     — tunnel name (default: reverie)
 #   CLOUDFLARED_TUNNEL_ID       — tunnel UUID (from: cloudflared tunnel list)
-#   CODEMAN_TUNNEL_HOSTNAME     — public hostname (e.g. codeman.example.com)
+#   REVERIE_TUNNEL_HOSTNAME     — public hostname (e.g. reverie.example.com)
 #
 # First-time named tunnel setup:
 #   cloudflared tunnel login
@@ -18,12 +18,12 @@
 #   ./scripts/tunnel.sh named setup   # writes ~/.cloudflared/<tunnel-name>.yml
 set -euo pipefail
 
-QUICK_SERVICE="codeman-tunnel"
-NAMED_SERVICE="codeman-tunnel-named"
-TUNNEL_NAME="${CLOUDFLARED_TUNNEL_NAME:-codeman}"
-TUNNEL_HOSTNAME="${CODEMAN_TUNNEL_HOSTNAME:-codeman.example.com}"
-CODEMAN_PORT="3000"
-LOG_FILE="$HOME/.codeman/tunnel.log"
+QUICK_SERVICE="reverie-tunnel"
+NAMED_SERVICE="reverie-tunnel-named"
+TUNNEL_NAME="${CLOUDFLARED_TUNNEL_NAME:-reverie}"
+TUNNEL_HOSTNAME="${REVERIE_TUNNEL_HOSTNAME:-reverie.example.com}"
+REVERIE_PORT="3000"
+LOG_FILE="$HOME/.reverie/tunnel.log"
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -51,9 +51,9 @@ _install_service() {
 _install_named_service() {
   if ! systemctl --user cat "$NAMED_SERVICE" &>/dev/null 2>&1; then
     # Generate service file with the configured tunnel name
-    sed "s/codeman\.yml/$TUNNEL_NAME.yml/g; s/run codeman/run $TUNNEL_NAME/g" \
-      "$(dirname "$0")/codeman-tunnel-named.service" \
-      > "$HOME/.config/systemd/user/codeman-tunnel-named.service"
+    sed "s/reverie\.yml/$TUNNEL_NAME.yml/g; s/run reverie/run $TUNNEL_NAME/g" \
+      "$(dirname "$0")/reverie-tunnel-named.service" \
+      > "$HOME/.config/systemd/user/reverie-tunnel-named.service"
     systemctl --user daemon-reload
     echo "Service $NAMED_SERVICE installed (tunnel: $TUNNEL_NAME)."
   fi
@@ -82,7 +82,7 @@ credentials-file: $creds_file
 
 ingress:
   - hostname: $TUNNEL_HOSTNAME
-    service: http://localhost:$CODEMAN_PORT
+    service: http://localhost:$REVERIE_PORT
   - service: http_status:404
 EOF
 
@@ -99,7 +99,7 @@ EOF
 
 _quick_start() {
   if ! systemctl --user is-active "$QUICK_SERVICE" &>/dev/null; then
-    _install_service "codeman-tunnel.service" "$QUICK_SERVICE"
+    _install_service "reverie-tunnel.service" "$QUICK_SERVICE"
     systemctl --user start "$QUICK_SERVICE"
     echo "Quick tunnel starting... waiting for URL"
     sleep 6

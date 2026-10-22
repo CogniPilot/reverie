@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { safeRmHomeTree } from './mocks/index.js';
 
-const CASES_DIR = join(homedir(), 'codeman-cases');
+const CASES_DIR = join(homedir(), 'reverie-cases');
 
 describe('Edge Cases and Error Handling', () => {
   let server: WebServer;
@@ -347,9 +347,9 @@ describe('Concurrent Session Handling', () => {
       }
     }
 
-    // Cleanup (containment-gated: never touch prod ~/codeman-cases)
+    // Cleanup (containment-gated: never touch prod ~/reverie-cases)
     for (const name of createdCases) {
-      safeRmHomeTree(join(homedir(), 'codeman-cases', name));
+      safeRmHomeTree(join(homedir(), 'reverie-cases', name));
     }
   });
 });

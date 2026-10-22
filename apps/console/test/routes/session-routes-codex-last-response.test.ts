@@ -133,7 +133,7 @@ describe('GET /api/sessions/:id/last-response (codex)', () => {
   }
 
   beforeEach(async () => {
-    codexHome = mkdtempSync(join(tmpdir(), 'codeman-codex-rv-'));
+    codexHome = mkdtempSync(join(tmpdir(), 'reverie-codex-rv-'));
     prevCodexHome = process.env.CODEX_HOME;
     process.env.CODEX_HOME = codexHome;
 
@@ -163,12 +163,12 @@ describe('GET /api/sessions/:id/last-response (codex)', () => {
     // Pane B's rollout is NEWER — the naive cwd+mtime heuristic would show it for pane A.
     writeRollout(
       `rollout-2026-07-01T00-00-00-${UUID_A}.jsonl`,
-      [sessionMeta(workdir, `codeman_${session.id}`), assistantMsg('answer A')],
+      [sessionMeta(workdir, `reverie_${session.id}`), assistantMsg('answer A')],
       BASE_MTIME
     );
     writeRollout(
       `rollout-2026-07-01T00-01-00-${UUID_B}.jsonl`,
-      [sessionMeta(workdir, 'codeman_codex-b'), assistantMsg('answer B')],
+      [sessionMeta(workdir, 'reverie_codex-b'), assistantMsg('answer B')],
       BASE_MTIME + 100
     );
 
@@ -182,7 +182,7 @@ describe('GET /api/sessions/:id/last-response (codex)', () => {
 
   it('cwd fallback excludes rollouts claimed by other panes and skips foreign cwds', async () => {
     // Pane has no originator-stamped rollout (pre-existing pane). Newest same-cwd
-    // rollout belongs to another codeman pane → must fall through to the unclaimed one.
+    // rollout belongs to another reverie pane → must fall through to the unclaimed one.
     writeRollout(
       `rollout-2026-07-01T00-00-00-${UUID_A}.jsonl`,
       [sessionMeta(workdir), assistantMsg('unclaimed answer')],
@@ -190,7 +190,7 @@ describe('GET /api/sessions/:id/last-response (codex)', () => {
     );
     writeRollout(
       `rollout-2026-07-01T00-01-00-${UUID_B}.jsonl`,
-      [sessionMeta(workdir, 'codeman_some-other-pane'), assistantMsg('sibling answer')],
+      [sessionMeta(workdir, 'reverie_some-other-pane'), assistantMsg('sibling answer')],
       BASE_MTIME + 100
     );
     writeRollout(
@@ -237,7 +237,7 @@ describe('GET /api/sessions/:id/last-response (codex)', () => {
     // UUID_B inside the TUI — the history pin must follow it there.
     writeRollout(
       `rollout-2026-07-01T00-00-00-${UUID_A}.jsonl`,
-      [sessionMeta(workdir, `codeman_${session.id}`), assistantMsg('originator answer')],
+      [sessionMeta(workdir, `reverie_${session.id}`), assistantMsg('originator answer')],
       BASE_MTIME + 600
     );
     writeRollout(
@@ -256,7 +256,7 @@ describe('GET /api/sessions/:id/last-response (codex)', () => {
     writeRollout(
       `rollout-2026-07-01T00-00-00-${UUID_A}.jsonl`,
       [
-        sessionMeta(workdir, `codeman_${session.id}`),
+        sessionMeta(workdir, `reverie_${session.id}`),
         // Old-codex turn: response_item only, no event_msg twin — must survive.
         legacyUserMsg('old prompt'),
         assistantMsg('old answer'),
@@ -282,7 +282,7 @@ describe('GET /api/sessions/:id/last-response (codex)', () => {
     writeRollout(
       `rollout-2026-07-01T00-00-00-${UUID_A}.jsonl`,
       [
-        sessionMeta(workdir, `codeman_${session.id}`),
+        sessionMeta(workdir, `reverie_${session.id}`),
         legacyUserMsg('# AGENTS.md instructions for the workspace'),
         legacyUserMsg('<environment_context>\n<cwd>/somewhere</cwd>'),
         eventUserMsg('<user_instructions>be nice</user_instructions>'),
@@ -303,7 +303,7 @@ describe('GET /api/sessions/:id/last-response (codex)', () => {
     writeRollout(
       `rollout-2026-07-01T00-00-00-${UUID_A}.jsonl`,
       [
-        sessionMeta(workdir, `codeman_${session.id}`),
+        sessionMeta(workdir, `reverie_${session.id}`),
         { timestamp: '2026-07-01T00:00:00Z', type: 'event_msg', payload: { type: 'user_message', images: ['a', 'b'] } },
         assistantMsg('looked at the images'),
       ],
@@ -323,7 +323,7 @@ describe('GET /api/sessions/:id/last-response (codex)', () => {
   it('returns the {success:true,data:{text,timestamp}} envelope; messages only with ?context=full', async () => {
     writeRollout(
       `rollout-2026-07-01T00-00-00-${UUID_A}.jsonl`,
-      [sessionMeta(workdir, `codeman_${session.id}`), assistantMsg('the answer', '2026-07-01T01:02:03Z')],
+      [sessionMeta(workdir, `reverie_${session.id}`), assistantMsg('the answer', '2026-07-01T01:02:03Z')],
       BASE_MTIME
     );
 
@@ -349,7 +349,7 @@ describe('GET /api/sessions/:id/last-response (codex)', () => {
   });
 
   it('leaves Claude-mode sessions on the ~/.claude/projects reader (regression guard)', async () => {
-    const fakeHome = mkdtempSync(join(tmpdir(), 'codeman-claude-home-'));
+    const fakeHome = mkdtempSync(join(tmpdir(), 'reverie-claude-home-'));
     const prevHome = process.env.HOME;
     process.env.HOME = fakeHome;
     try {
@@ -367,7 +367,7 @@ describe('GET /api/sessions/:id/last-response (codex)', () => {
       // A codex rollout for the same session id must NOT be consulted in claude mode.
       writeRollout(
         `rollout-2026-07-01T00-00-00-${UUID_A}.jsonl`,
-        [sessionMeta(workdir, `codeman_${session.id}`), assistantMsg('codex answer')],
+        [sessionMeta(workdir, `reverie_${session.id}`), assistantMsg('codex answer')],
         BASE_MTIME
       );
 

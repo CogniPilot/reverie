@@ -3,7 +3,7 @@
 // The desktop home screen's tab column (src/web/public/home-sessions.js) fills
 // the welcome overlay's left gutter. Two things about it can silently go wrong
 // and are pinned here: the row ORDER (shared with the phone overview via
-// CodemanSessionOrder, with the number badge still carrying the TAB index so
+// ReverieSessionOrder, with the number badge still carrying the TAB index so
 // Alt+N keeps working), and the WIDTH GATE, which lives in two places at once —
 // the JS constant and a CSS media query — because the column is absolutely
 // positioned and would overlap the search panel in a narrow window.
@@ -41,9 +41,9 @@ function fakeElement(): any {
  * quietly testing a divergent copy.
  */
 function loadHomeSessionsApp(overrides: Record<string, any> = {}, innerWidth = 1512, tabOrientation = 'horizontal') {
-  const CodemanApp = function CodemanApp(this: any) {};
+  const ReverieApp = function ReverieApp(this: any) {};
   const context = vm.createContext({
-    CodemanApp,
+    ReverieApp,
     console,
     window: { innerWidth },
     document: {
@@ -60,7 +60,7 @@ function loadHomeSessionsApp(overrides: Record<string, any> = {}, innerWidth = 1
     vm.runInContext(readFileSync(resolve(PUBLIC, file), 'utf8'), context, { filename: file });
   }
 
-  const app = new (CodemanApp as any)();
+  const app = new (ReverieApp as any)();
   app.getSessionName = (session: any) => session.name || session.id.slice(0, 8);
   app._shortenHomePath = (p: string) => (p || '').replace(/^\/home\/[^/]+\//, '~/');
   app.loadAppSettingsFromStorage = () => ({});
@@ -293,7 +293,7 @@ describe('home sessions column: wiring', () => {
 
 describe('home screens: one order, one numbering', () => {
   it('produces the same order on the rail and the phone overview for one input', () => {
-    // Both surfaces claim to share CodemanSessionOrder. Nothing used to assert
+    // Both surfaces claim to share ReverieSessionOrder. Nothing used to assert
     // they actually produce one order for one input, so a future local sort in
     // either builder would silently split them. The rail is one list; the phone
     // splits NEEDS YOU / CURRENT, so rail order must equal the concatenation.

@@ -13,7 +13,7 @@
  * or already has its config file (Copilot CLI, which is not a registry CLI, takes part when installed
  * or when its config file exists); one that is enabled but absent from the machine is reported
  * `absent` and never created. Its file is located with this process's env (the env the CLIs
- * Codeman spawns inherit), so a relocation var such as `CODEX_HOME` is followed.
+ * Reverie spawns inherit), so a relocation var such as `CODEX_HOME` is followed.
  */
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';

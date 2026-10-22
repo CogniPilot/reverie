@@ -3,13 +3,13 @@
  * respawn presets (CRUD, built-in presets), and run summary modal (timeline, export).
  * Includes 12 SSE handlers for respawn events.
  *
- * @mixin Extends CodemanApp.prototype via Object.assign
- * @dependency app.js (CodemanApp class, this.respawnStatus, this.respawnTimers, this.respawnCountdownTimers)
+ * @mixin Extends ReverieApp.prototype via Object.assign
+ * @dependency app.js (ReverieApp class, this.respawnStatus, this.respawnTimers, this.respawnCountdownTimers)
  * @dependency constants.js (escapeHtml, SSE_EVENTS)
  * @loadorder 8 of 15 — loaded after terminal-ui.js, before ralph-panel.js
  */
 
-Object.assign(CodemanApp.prototype, {
+Object.assign(ReverieApp.prototype, {
   // Respawn
   _onRespawnStarted(data) {
     this.respawnStatus[data.sessionId] = data.status;
@@ -586,7 +586,7 @@ Object.assign(CodemanApp.prototype, {
     // Custom presets: prefer server-synced cache, fall back to legacy localStorage key
     const serverCache = this._serverRespawnPresets;
     if (serverCache) return [...BUILTIN_RESPAWN_PRESETS, ...serverCache];
-    const saved = localStorage.getItem('codeman-respawn-presets');
+    const saved = localStorage.getItem('reverie-respawn-presets');
     const custom = saved ? JSON.parse(saved) : [];
     return [...BUILTIN_RESPAWN_PRESETS, ...custom];
   },
@@ -596,7 +596,7 @@ Object.assign(CodemanApp.prototype, {
     const custom = presets.filter(p => !p.builtIn);
     // Update local cache + legacy localStorage
     this._serverRespawnPresets = custom;
-    localStorage.setItem('codeman-respawn-presets', JSON.stringify(custom));
+    localStorage.setItem('reverie-respawn-presets', JSON.stringify(custom));
     // Persist to server (cross-device sync)
     this._apiPut('/api/settings', { respawnPresets: custom }).catch(() => {});
   },

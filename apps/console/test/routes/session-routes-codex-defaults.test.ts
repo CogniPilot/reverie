@@ -128,7 +128,7 @@ describe('Codex launch defaults', () => {
   it('does not record unused defaults for a Docker quick-start', async () => {
     await writeFile(
       join(getDataDir(), 'docker-hosts.json'),
-      JSON.stringify([{ id: 'docker1', label: 'Docker', image: 'codeman/agent:base' }])
+      JSON.stringify([{ id: 'docker1', label: 'Docker', image: 'reverie/agent:base' }])
     );
     await writeFile(
       join(getDataDir(), 'docker-cases.json'),
@@ -138,13 +138,13 @@ describe('Codex launch defaults', () => {
           type: 'docker',
           hostId: 'docker1',
           hostWorkspacePath: workingDir,
-          container: 'codeman-default-test',
+          container: 'reverie-default-test',
         },
       ])
     );
     expect(await createdConfig('/api/quick-start')).toBeUndefined();
     const session = [...harness.ctx.sessions.values()].at(-1) as Session;
-    expect(session.docker?.containerName).toBe('codeman-default-test');
+    expect(session.docker?.containerName).toBe('reverie-default-test');
     expect(session.toState().model).toBeUndefined();
   });
 
@@ -156,7 +156,7 @@ describe('Codex launch defaults', () => {
     expect(
       await createdConfig('/api/sessions', {
         workingDir: undefined,
-        attachRemoteSession: { hostId: 'remote1', remoteSessionName: 'codeman-existing' },
+        attachRemoteSession: { hostId: 'remote1', remoteSessionName: 'reverie-existing' },
       })
     ).toBeUndefined();
     const session = [...harness.ctx.sessions.values()].at(-1) as Session;

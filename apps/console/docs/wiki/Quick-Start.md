@@ -42,7 +42,7 @@ To make a new one, click **+** next to the picker. The Add Case dialog has three
 
 | Tab               | Use it when                                                                                                        |
 | ----------------- | ------------------------------------------------------------------------------------------------------------------ |
-| **Create New**    | Starting a fresh project. Creates `~/codeman-cases/<name>` and scaffolds a `CLAUDE.md` into it. Tick **Create in a custom folder** to put it somewhere else instead. |
+| **Create New**    | Starting a fresh project. Creates `~/reverie-cases/<name>` and scaffolds a `CLAUDE.md` into it. Tick **Create in a custom folder** to put it somewhere else instead. |
 | **Clone Repo**    | Working on an existing repo: public, or private once this machine's git can authenticate (the Docker image can include `gh`/`az` helpers for this). Paste the URL; Reverie preflights it as you type, offers the repo's real branches and tags, and fills in the case name. |
 | **Link Existing** | The code is already on disk. Point at the folder, with **Browse** if you would rather click than type.               |
 
@@ -133,9 +133,9 @@ the tmux server or rebooting the machine.
 | Interrupt the current turn | `Ctrl+C` with nothing selected, or the **Stop** button.            |
 | Close one session          | The tab's close control (`Ctrl+W` is delete-word in the terminal). |
 | Stop the server, keep agents | `reverie web --stop`. The tmux sessions stay alive.              |
-| Stop everything            | `tmux -L codeman kill-server`.                                     |
+| Stop everything            | `tmux -L reverie kill-server`.                                     |
 
-If you are working *inside* a Reverie-managed session (`echo $CODEMAN_MUX` prints `1`),
+If you are working *inside* a Reverie-managed session (`echo $REVERIE_MUX` prints `1`),
 never run `tmux kill-session` or `pkill claude` by hand. You will kill the session you are
 sitting in, along with its siblings.
 
@@ -152,5 +152,5 @@ feature Reverie exists for.
 run modes, and what state lives where.
 
 **Automate it.** [Cron Jobs](Cron-Jobs) for scheduled work,
-[Driving Reverie From An Agent](Driving-Codeman-From-An-Agent) for agents that spawn and
+[Driving Reverie From An Agent](Driving-Reverie-From-An-Agent) for agents that spawn and
 supervise other agents.

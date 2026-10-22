@@ -92,13 +92,13 @@ function loadPasteHarness(): Harness {
     console,
   });
 
-  vm.runInContext('class CodemanApp {}', context);
+  vm.runInContext('class ReverieApp {}', context);
   vm.runInContext(imageInputSource, context, { filename: 'image-input.js' });
-  const CodemanApp = vm.runInContext('CodemanApp', context) as new () => Record<string, unknown>;
+  const ReverieApp = vm.runInContext('ReverieApp', context) as new () => Record<string, unknown>;
 
   const pastedText: string[] = [];
   const uploadedBatches: Array<Array<{ type: string }>> = [];
-  const app = new CodemanApp();
+  const app = new ReverieApp();
   app.activeSessionId = 'session-1';
   app.terminal = {
     paste: (text: string) => pastedText.push(text),
@@ -136,10 +136,10 @@ function loadPasteHarness(): Harness {
 
 function loadImageInputApp() {
   const context = vm.createContext({ console, window: {}, document: {} });
-  vm.runInContext('class CodemanApp {}', context);
+  vm.runInContext('class ReverieApp {}', context);
   vm.runInContext(imageInputSource, context, { filename: 'image-input.js' });
-  const CodemanApp = vm.runInContext('CodemanApp', context) as new () => Record<string, unknown>;
-  const app = new CodemanApp();
+  const ReverieApp = vm.runInContext('ReverieApp', context) as new () => Record<string, unknown>;
+  const app = new ReverieApp();
   app.activeSessionId = 'session-1';
   app.showToast = vi.fn();
   app.sendInput = vi.fn(async () => {});

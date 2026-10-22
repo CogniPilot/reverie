@@ -1,5 +1,5 @@
 /**
- * @fileoverview Unit tests for the decisions `codeman tui` makes, without a
+ * @fileoverview Unit tests for the decisions `reverie tui` makes, without a
  * terminal.
  *
  * Everything the app does that can be stated as a function of its inputs is
@@ -46,7 +46,7 @@ const GLYPHS = glyphsFor('unicode');
 
 function tmuxSession(overrides: Partial<TuiTmuxSession> & { muxName: string }): TuiTmuxSession {
   return {
-    sessionIdPrefix: overrides.muxName.replace(/^codeman-/, ''),
+    sessionIdPrefix: overrides.muxName.replace(/^reverie-/, ''),
     attached: false,
     ...overrides,
   };
@@ -59,8 +59,8 @@ function row(state: TuiRow['state'], sessionId = '0000003223'): TuiRow {
 
 describe('tmuxSocketFromEnv', () => {
   it('reads the socket name out of a $TMUX value', () => {
-    expect(tmuxSocketFromEnv('/tmp/tmux-1000/codeman,31415,0')).toBe('codeman');
-    expect(tmuxSocketFromEnv('/tmp/tmux-1000/codeman-beta,7,2')).toBe('codeman-beta');
+    expect(tmuxSocketFromEnv('/tmp/tmux-1000/reverie,31415,0')).toBe('reverie');
+    expect(tmuxSocketFromEnv('/tmp/tmux-1000/reverie-beta,7,2')).toBe('reverie-beta');
     // A bare default socket is still the name a `-L` comparison needs.
     expect(tmuxSocketFromEnv('/tmp/tmux-1000/default,7,2')).toBe('default');
   });
@@ -74,35 +74,35 @@ describe('tmuxSocketFromEnv', () => {
 
 describe('planAttach', () => {
   it('attaches with the instance socket when the terminal is not inside tmux', () => {
-    const plan = planAttach('codeman-00000032', { socket: 'codeman' });
+    const plan = planAttach('reverie-00000032', { socket: 'reverie' });
     expect(plan).toEqual({
       kind: 'attach',
       file: 'tmux',
-      args: ['-L', 'codeman', 'attach-session', '-t', 'codeman-00000032'],
+      args: ['-L', 'reverie', 'attach-session', '-t', 'reverie-00000032'],
     });
   });
 
   it('switches the current client when already inside tmux on the same socket', () => {
-    const plan = planAttach('codeman-00000032', { socket: 'codeman', tmux: '/tmp/tmux-1000/codeman,31415,0' });
+    const plan = planAttach('reverie-00000032', { socket: 'reverie', tmux: '/tmp/tmux-1000/reverie,31415,0' });
     expect(plan).toEqual({
       kind: 'switch',
       file: 'tmux',
-      args: ['-L', 'codeman', 'switch-client', '-t', 'codeman-00000032'],
+      args: ['-L', 'reverie', 'switch-client', '-t', 'reverie-00000032'],
     });
   });
 
   it('refuses to nest when the surrounding tmux is a different server', () => {
-    const plan = planAttach('codeman-00000032', { socket: 'codeman', tmux: '/tmp/tmux-1000/default,31415,0' });
+    const plan = planAttach('reverie-00000032', { socket: 'reverie', tmux: '/tmp/tmux-1000/default,31415,0' });
     expect(plan.kind).toBe('refuse');
     if (plan.kind !== 'refuse') throw new Error('expected a refusal');
     expect(plan.reason).toBe('nested-foreign-socket');
     expect(plan.message).toContain('default');
-    expect(plan.message).toContain('codeman');
+    expect(plan.message).toContain('reverie');
   });
 
   it('refuses a row with no tmux session behind it', () => {
     for (const name of [undefined, '', '   ']) {
-      const plan = planAttach(name, { socket: 'codeman' });
+      const plan = planAttach(name, { socket: 'reverie' });
       expect(plan.kind).toBe('refuse');
       if (plan.kind !== 'refuse') throw new Error('expected a refusal');
       expect(plan.reason).toBe('no-mux-name');
@@ -110,7 +110,7 @@ describe('planAttach', () => {
   });
 
   it('never builds a shell string: every field is its own argv entry', () => {
-    const plan = planAttach('codeman-00000032', { socket: 'codeman' });
+    const plan = planAttach('reverie-00000032', { socket: 'reverie' });
     if (plan.kind !== 'attach') throw new Error('expected an attach');
     expect(plan.args.some((arg) => arg.includes(' '))).toBe(false);
   });
@@ -120,15 +120,15 @@ describe('isSelfSession', () => {
   const id = '00000032-003d-4000-8000-000000000057';
 
   it('recognizes the session the TUI runs in, however the id was truncated', () => {
-    expect(isSelfSession(id, { CODEMAN_SESSION_ID: id })).toBe(true);
-    expect(isSelfSession(id, { CODEMAN_SESSION_ID: '00000032' })).toBe(true);
-    expect(isSelfSession('00000032', { CODEMAN_SESSION_ID: id })).toBe(true);
+    expect(isSelfSession(id, { REVERIE_SESSION_ID: id })).toBe(true);
+    expect(isSelfSession(id, { REVERIE_SESSION_ID: '00000032' })).toBe(true);
+    expect(isSelfSession('00000032', { REVERIE_SESSION_ID: id })).toBe(true);
   });
 
   it('is false for another session, and for env that identifies nothing', () => {
-    expect(isSelfSession(id, { CODEMAN_SESSION_ID: 'ffffffff' })).toBe(false);
+    expect(isSelfSession(id, { REVERIE_SESSION_ID: 'ffffffff' })).toBe(false);
     expect(isSelfSession(id, {})).toBe(false);
-    expect(isSelfSession(id, { CODEMAN_SESSION_ID: 'abc' })).toBe(false);
+    expect(isSelfSession(id, { REVERIE_SESSION_ID: 'abc' })).toBe(false);
   });
 });
 
@@ -307,21 +307,21 @@ describe('the repaint test', () => {
 
 describe('degraded-mode rows', () => {
   const sessions: TuiTmuxSession[] = [
-    tmuxSession({ muxName: 'codeman-00000032', sessionId: '00000032-003d', name: 'w4-api', workingDir: '/dev/api' }),
-    tmuxSession({ muxName: 'codeman-99887766', createdAt: 1_000_000 }),
+    tmuxSession({ muxName: 'reverie-00000032', sessionId: '00000032-003d', name: 'w4-api', workingDir: '/dev/api' }),
+    tmuxSession({ muxName: 'reverie-99887766', createdAt: 1_000_000 }),
   ];
 
   it('keeps the tmux name and falls back to it as the row key', () => {
     const rows = tmuxRowsToSessions(sessions);
     expect(rows[0]).toMatchObject({
       sessionId: '00000032-003d',
-      muxName: 'codeman-00000032',
+      muxName: 'reverie-00000032',
       name: 'w4-api',
       workingDir: '/dev/api',
     });
     // No state.json entry: the mux name is the only identity there is.
-    expect(rows[1].sessionId).toBe('codeman-99887766');
-    expect(rows[1].muxName).toBe('codeman-99887766');
+    expect(rows[1].sessionId).toBe('reverie-99887766');
+    expect(rows[1].muxName).toBe('reverie-99887766');
   });
 
   it('classifies a running pane as IDLE rather than history', () => {
@@ -336,8 +336,8 @@ describe('degraded-mode rows', () => {
 
 describe('applyMuxNames', () => {
   const tmux: TuiTmuxSession[] = [
-    tmuxSession({ muxName: 'codeman-00000032', sessionId: '00000032-003d-4000' }),
-    tmuxSession({ muxName: 'codeman-99887766' }),
+    tmuxSession({ muxName: 'reverie-00000032', sessionId: '00000032-003d-4000' }),
+    tmuxSession({ muxName: 'reverie-99887766' }),
   ];
 
   it('joins on the 8-character prefix a mux name carries', () => {
@@ -349,8 +349,8 @@ describe('applyMuxNames', () => {
       ],
       tmux
     );
-    expect(rows[0].muxName).toBe('codeman-00000032');
-    expect(rows[1].muxName).toBe('codeman-99887766');
+    expect(rows[0].muxName).toBe('reverie-00000032');
+    expect(rows[1].muxName).toBe('reverie-99887766');
     // Nothing in tmux backs it, so attach has to refuse rather than guess.
     expect(rows[2].muxName).toBeUndefined();
   });
@@ -473,7 +473,7 @@ describe('the one-key way out', () => {
     // is the bug this whole series started with.
     const withSwitch = buildAttachBanner({ oneKey: 'F1', switchKeys: true, cols: 150 })['status-format[0]'];
     expect(withSwitch).toContain('alt+1-9 switch');
-    expect(withSwitch).toContain('back to the codeman dashboard');
+    expect(withSwitch).toContain('back to the reverie dashboard');
     expect(buildAttachBanner({ oneKey: 'F1', cols: 150 })['status-format[0]']).not.toContain('alt+1-9');
   });
 
@@ -492,14 +492,14 @@ describe('the one-key way out', () => {
       const visible = bar.replace(/#\[[^\]]*\]/g, '');
       expect({ cols, fits: visible.length <= cols }).toEqual({ cols, fits: true });
       expect(visible).toContain('alt+1-9 switch');
-      expect(visible).toContain('back to the codeman dashboard');
+      expect(visible).toContain('back to the reverie dashboard');
     }
   });
 
   it('puts ONE instruction on the bar, not a menu of ways out', () => {
     const banner = buildAttachBanner({ prefix: 'C-b', detachKey: 'd', heldAlias: 'C-d', oneKey: 'F1' });
     const bar = banner['status-format[0]'];
-    expect(bar).toContain('#[bold]F1#[nobold] back to the codeman dashboard');
+    expect(bar).toContain('#[bold]F1#[nobold] back to the reverie dashboard');
     // Even though both fallbacks still work, the bar must not offer them: a bar
     // listing three ways to leave is what the tester called way too complicated.
     expect(bar).not.toContain('Ctrl+B');
@@ -599,12 +599,12 @@ describe('the held-Ctrl detach alias', () => {
 describe('naming a session the TUI starts', () => {
   it("follows the web UI's w<n>-<case> convention", () => {
     expect(nextSessionName('mirofish', [])).toBe('w1-mirofish');
-    expect(nextSessionName('mirofish', ['w1-codeman', 'w2-codeman'])).toBe('w3-mirofish');
+    expect(nextSessionName('mirofish', ['w1-reverie', 'w2-reverie'])).toBe('w3-mirofish');
   });
 
   it('counts past names that are not w<n>- at all', () => {
     // A session named by hand, or by another surface, must not reset the run.
-    expect(nextSessionName('demo', ['tui-demo-agent', 'w4-codeman', ''])).toBe('w5-demo');
+    expect(nextSessionName('demo', ['tui-demo-agent', 'w4-reverie', ''])).toBe('w5-demo');
   });
 
   it('never returns an empty name, which is what caused the bad label', () => {
@@ -650,14 +650,14 @@ describe('the way out of an attach', () => {
   });
 
   it('builds ONE status-format option, so tmux draws no window list beside it', () => {
-    const banner = buildAttachBanner({ prefix: 'C-b', label: 'w3-codeman' });
+    const banner = buildAttachBanner({ prefix: 'C-b', label: 'w3-reverie' });
     expect(Object.keys(banner).sort()).toEqual(['status', 'status-format[0]', 'status-position', 'status-style']);
     expect(banner.status).toBe('on');
     // Top, where the web UI keeps its tabs.
     expect(banner['status-position']).toBe('top');
     expect(banner['status-format[0]']).toContain('#[bold]Ctrl+B then d#[nobold]');
     // With no strip to draw, the session's own name is the fallback.
-    expect(banner['status-format[0]']).toContain('w3-codeman');
+    expect(banner['status-format[0]']).toContain('w3-reverie');
   });
 
   it('sets status-style, or tmux paints its stock green bar under the bar', () => {
@@ -679,12 +679,12 @@ describe('the way out of an attach', () => {
   });
 
   it('truncates a long label instead of pushing the instruction off the bar', () => {
-    const banner = buildAttachBanner({ label: 'w12-codeman: a very long session label indeed' });
+    const banner = buildAttachBanner({ label: 'w12-reverie: a very long session label indeed' });
     const left = (banner['status-format[0]'].split('#[align=right]')[0] ?? '').replace('#[align=left]', '');
     // 28 characters of label plus the space either side.
     expect(left.length).toBeLessThanOrEqual(30);
     expect(left).toContain('…');
-    expect(banner['status-format[0]']).toContain('back to the codeman dashboard');
+    expect(banner['status-format[0]']).toContain('back to the reverie dashboard');
   });
 
   it('always keeps the way out on the bar, whatever else is on it', () => {
@@ -698,7 +698,7 @@ describe('the way out of an attach', () => {
         active: i === 9,
       })),
     });
-    expect(crowded['status-format[0]']).toContain('#[bold]F1#[nobold] back to the codeman dashboard');
+    expect(crowded['status-format[0]']).toContain('#[bold]F1#[nobold] back to the reverie dashboard');
   });
 
   it('fits the strip to the terminal, measuring VISIBLE columns not format bytes', () => {
@@ -706,7 +706,7 @@ describe('the way out of an attach', () => {
     // always was. tmux truncates what it cannot fit and drops the right-aligned
     // segment, so on a real terminal the hint vanished at every width tested
     // while that assertion stayed green.
-    const hint = ' F1 back to the codeman dashboard ';
+    const hint = ' F1 back to the reverie dashboard ';
     for (const cols of [80, 100, 120, 176]) {
       const bar = buildAttachBanner({
         oneKey: 'F1',
@@ -730,7 +730,7 @@ describe('the way out of an attach', () => {
       tabs: [{ index: 1, label: 'w1-case', active: true }],
     })['status-format[0]'];
     expect(bar).toContain('1 w1-case');
-    expect(bar).toContain('back to the codeman dashboard');
+    expect(bar).toContain('back to the reverie dashboard');
   });
 
   it("tells the help overlay how to get back, in the socket's own prefix", () => {
@@ -749,19 +749,19 @@ describe('planResume', () => {
     const plan = planResume({
       ...base,
       claudeSessionId: '00000038-0045-4000-8000-000000000064',
-      workingDir: '/home/dev/codeman',
-      name: 'w7-codeman',
+      workingDir: '/home/dev/reverie',
+      name: 'w7-reverie',
     });
     expect(plan).toEqual({
       kind: 'resume',
-      workingDir: '/home/dev/codeman',
+      workingDir: '/home/dev/reverie',
       resumeSessionId: '00000038-0045-4000-8000-000000000064',
-      sessionName: 'w7-codeman',
+      sessionName: 'w7-reverie',
     });
   });
 
   it('falls back to the row id when the row IS the transcript', () => {
-    const plan = planResume({ ...base, workingDir: '/home/dev/codeman' });
+    const plan = planResume({ ...base, workingDir: '/home/dev/reverie' });
     expect(plan).toMatchObject({ kind: 'resume', resumeSessionId: base.sessionId });
     // No name to keep: the server names it rather than the TUI inventing one.
     expect(plan).not.toHaveProperty('sessionName');
@@ -772,14 +772,14 @@ describe('planResume', () => {
   });
 
   it('refuses a non-claude row, since resume is a Claude Code feature', () => {
-    const plan = planResume({ ...base, workingDir: '/home/dev/codeman', mode: 'codex' });
+    const plan = planResume({ ...base, workingDir: '/home/dev/reverie', mode: 'codex' });
     expect(plan.kind).toBe('refuse');
     if (plan.kind === 'refuse') expect(plan.message).toContain('codex');
   });
 
   it('refuses an id the server would reject anyway', () => {
     // The route validates `/^[a-f0-9-]+$/`; a mux-derived row id is not that.
-    expect(planResume({ ...base, sessionId: 'codeman-w1', workingDir: '/home/dev' })).toMatchObject({
+    expect(planResume({ ...base, sessionId: 'reverie-w1', workingDir: '/home/dev' })).toMatchObject({
       kind: 'refuse',
     });
   });

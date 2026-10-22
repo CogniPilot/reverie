@@ -1,7 +1,7 @@
 /**
  * SSE staleness policy.
  *
- * `CodemanSseStale.compute(input)` is the pure decision behind app.js's
+ * `ReverieSseStale.compute(input)` is the pure decision behind app.js's
  * watchdog: given when the last SSE frame arrived, the transport status and
  * the browser's online flag, it says whether the stream has gone quiet while
  * still claiming to be connected: a zombie that has to be rebuilt.
@@ -35,9 +35,9 @@ function loadPolicy() {
   vm.runInContext(source, context, { filename: 'constants.js' });
   return (
     context.window as {
-      CodemanSseStale: { compute: (input: StaleInput) => boolean; TIMEOUT_MS: number };
+      ReverieSseStale: { compute: (input: StaleInput) => boolean; TIMEOUT_MS: number };
     }
-  ).CodemanSseStale;
+  ).ReverieSseStale;
 }
 
 const T0 = 1_000_000;

@@ -14,7 +14,7 @@
  * Everything user-supplied is rendered with textContent / element attributes; emote
  * images come only from this room's own emote route.
  *
- * @mixin Extends CodemanApp.prototype via Object.assign
+ * @mixin Extends ReverieApp.prototype via Object.assign
  * @dependency chatroom-ui.js (_chatEl, _chatApi, _chatEls, _chatRoom, _chatUrl)
  * @loadorder 12.105 (after chatroom-ui.js, before voice-chat.js)
  */
@@ -353,7 +353,7 @@ function chatFileSize(bytes) {
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
 
-Object.assign(CodemanApp.prototype, {
+Object.assign(ReverieApp.prototype, {
   // ─── Composer ────────────────────────────────────────────────────────────────
 
   /** Called once from _buildChatroomPanel: adds emoji, paperclip, pending tray, autocomplete. */

@@ -1,11 +1,11 @@
 /**
- * @fileoverview The marker file that records a case directory as one Codeman scaffolded
+ * @fileoverview The marker file that records a case directory as one Reverie scaffolded
  * FOR an agent-spawned session, so scratch worker workspaces can be told apart from the
  * user's real projects long after the sessions that created them are gone.
  *
- * Why a file in the case directory rather than a central registry in `~/.codeman`:
+ * Why a file in the case directory rather than a central registry in `~/.reverie`:
  * the thing being labelled is a directory on the user's disk, and the label has to
- * survive everything that can happen to Codeman's own state (a wiped data dir, a
+ * survive everything that can happen to Reverie's own state (a wiped data dir, a
  * different instance, a hand-moved case). A registry would also need stale-entry
  * pruning and owner scoping of its own, while a marker is deleted by the same `rm -rf`
  * that deletes the case, and is discoverable by a user who just runs `ls -a`.
@@ -28,7 +28,7 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 /** Marker filename inside the case directory. Dot-prefixed so it stays out of the way. */
-export const AGENT_CASE_MARKER_FILE = '.codeman-agent-case.json';
+export const AGENT_CASE_MARKER_FILE = '.reverie-agent-case.json';
 
 /** Current marker schema version. A marker of any other version reads as absent. */
 export const AGENT_CASE_MARKER_VERSION = 1;
@@ -42,7 +42,7 @@ export const AGENT_CASE_MARKER_VERSION = 1;
 export const AGENT_ORIGIN_SPAWNED_BY_SESSION = 'agent-session';
 
 /** Origin the packaged agent skill sends on its shared curl invocation. */
-export const AGENT_ORIGIN_CODEMAN_SKILL = 'codeman-skill';
+export const AGENT_ORIGIN_REVERIE_SKILL = 'reverie-skill';
 
 /** Longest accepted origin token (the value is echoed into the UI and the marker). */
 const MAX_ORIGIN_LENGTH = 32;
@@ -67,7 +67,7 @@ export interface AgentCaseMarker {
   version: typeof AGENT_CASE_MARKER_VERSION;
   /** ISO timestamp of the spawn that created the directory. */
   createdAt: string;
-  /** Who asked: `codeman-skill`, `agent-session`, or another caller's own token. */
+  /** Who asked: `reverie-skill`, `agent-session`, or another caller's own token. */
   createdBy: string;
   /** Full id of the session that spawned the worker, when one resolved. */
   parentSessionId?: string;
@@ -81,7 +81,7 @@ export interface AgentCaseMarker {
 
 /**
  * Validate an origin token coming off the wire (`agentOrigin` body field or the
- * `X-Codeman-Agent-Origin` header). Returns `undefined` for anything that is not a
+ * `X-Reverie-Agent-Origin` header). Returns `undefined` for anything that is not a
  * short lowercase token — the value reaches the UI and a JSON file, so it is
  * allowlisted rather than escaped at each use.
  */

@@ -21,12 +21,12 @@ each `(clientId, seq)` at most once, so a resend can't type the prompt twice.
 
 ### Client (`app.js`)
 
-- A stable **`clientId`** (`localStorage['codeman:clientId']`) identifies this
+- A stable **`clientId`** (`localStorage['reverie:clientId']`) identifies this
   browser to the server's dedup across reconnects and reloads.
 - Each input frame gets a **monotonic per-session `seq`**. Frame records
   (`{seq,data,useMux,ts,tries,sentAt}`) live in `_pendingDeliveries`
   (`Map<sessionId, record[]>`), persisted (debounced, + flushed on `pagehide`/
-  `visibilitychange`) to `localStorage['codeman:pendingInput']`. The seq counters
+  `visibilitychange`) to `localStorage['reverie:pendingInput']`. The seq counters
   persist too, so seqs stay monotonic across reloads (never reset — a reset would
   let the server treat fresh input as an already-applied duplicate).
 - **Delivery** (`_drainSession`):
@@ -76,7 +76,7 @@ at the head of the queue, was re-sent every 2 s forever, blocked every later
 input for the session, and came back from localStorage on each reload.
 
 - `_sendInputAsync()` splits a paste over the frame limit into in-limit frames
-  (`CodemanInputLimit.split`, constants.js, never cutting a surrogate pair). They
+  (`ReverieInputLimit.split`, constants.js, never cutting a surrogate pair). They
   go out in seq order, so the PTY sees one contiguous stream. A paste over
   `PASTE_MAX_CHARS` (1 MiB), or an oversized `useMux` write (line-oriented, never
   split), is refused with a toast and never queued.

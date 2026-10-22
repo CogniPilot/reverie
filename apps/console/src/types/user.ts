@@ -1,7 +1,7 @@
 /**
  * @fileoverview Multi-user mode types (opt-in `--multiuser`).
  *
- * Users live in `~/.codeman/users.json` (via `dataPath`, mode 0600). Each record
+ * Users live in `~/.reverie/users.json` (via `dataPath`, mode 0600). Each record
  * carries a scrypt password hash with its own parameters so hashing cost can be
  * raised later and old records rehashed on next login. `AuthUser` is the
  * request-scoped identity decorated onto Fastify requests; in SINGLE-user mode a

@@ -1,7 +1,7 @@
 /**
- * @fileoverview Subagent floating window management mixed into CodemanApp.prototype.
+ * @fileoverview Subagent floating window management mixed into ReverieApp.prototype.
  *
- * Extends CodemanApp with methods for managing floating terminal windows that display
+ * Extends ReverieApp with methods for managing floating terminal windows that display
  * Claude Code background agent (subagent) output. Each subagent window has its own
  * xterm.js terminal instance, drag/resize handles, minimize/close controls, and
  * connection lines drawn to the parent session tab.
@@ -12,16 +12,16 @@
  * - Cross-browser state persistence (localStorage + server-backed PUT /api/subagent-window-states)
  * - Window state saved on every minimize/restore/close action
  *
- * @mixin Extends CodemanApp.prototype via Object.assign
- * @dependency app.js (CodemanApp class, this.subagents, this.subagentWindows, this.minimizedSubagents)
+ * @mixin Extends ReverieApp.prototype via Object.assign
+ * @dependency app.js (ReverieApp class, this.subagents, this.subagentWindows, this.minimizedSubagents)
  * @dependency constants.js (escapeHtml)
  * @loadorder 15 of 15 — loaded last, after api-client.js
  */
 
-// Reverie — Subagent window management for CodemanApp
-// Loaded after app.js (needs CodemanApp class defined)
+// Reverie — Subagent window management for ReverieApp
+// Loaded after app.js (needs ReverieApp class defined)
 
-Object.assign(CodemanApp.prototype, {
+Object.assign(ReverieApp.prototype, {
   // Render subagent badge with dropdown for minimized agents on a tab
   renderSubagentTabBadge(sessionId, minimizedAgents) {
     if (!minimizedAgents || minimizedAgents.size === 0) return '';
@@ -129,7 +129,7 @@ Object.assign(CodemanApp.prototype, {
     const windowStates = { minimized: minimizedState, open: openWindows };
 
     // Save to localStorage for quick restore
-    localStorage.setItem('codeman-subagent-window-states', JSON.stringify(windowStates));
+    localStorage.setItem('reverie-subagent-window-states', JSON.stringify(windowStates));
 
     // Save to server for cross-browser persistence
     try {

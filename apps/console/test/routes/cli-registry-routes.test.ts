@@ -102,7 +102,7 @@ function disableCliManagement(): void {
 
 describe('GET /api/clis', () => {
   afterEach(() => {
-    delete process.env.CODEMAN_MULTIUSER;
+    delete process.env.REVERIE_MULTIUSER;
   });
 
   it('single-user mode: returns every registry entry, disabled stock CLIs included', async () => {
@@ -146,7 +146,7 @@ describe('GET /api/clis', () => {
   });
 
   it('multi-user mode: an admin sees the full list', async () => {
-    process.env.CODEMAN_MULTIUSER = '1';
+    process.env.REVERIE_MULTIUSER = '1';
     const { app } = await createRouteTestHarness(registerCliRegistryRoutes, {
       authUser: { username: 'root', role: 'admin' },
     });
@@ -156,7 +156,7 @@ describe('GET /api/clis', () => {
   });
 
   it('multi-user mode: a non-admin sees an empty list, not a 403', async () => {
-    process.env.CODEMAN_MULTIUSER = '1';
+    process.env.REVERIE_MULTIUSER = '1';
     const { app } = await createRouteTestHarness(registerCliRegistryRoutes, {
       authUser: { username: 'bob', role: 'user' },
     });
@@ -169,7 +169,7 @@ describe('GET /api/clis', () => {
 
 describe('PUT /api/clis/:id (Phase 3: enable/disable)', () => {
   afterEach(() => {
-    delete process.env.CODEMAN_MULTIUSER;
+    delete process.env.REVERIE_MULTIUSER;
   });
 
   it('rejects when cliManagementEnabled is off — no settings.json write at all', async () => {
@@ -233,7 +233,7 @@ describe('PUT /api/clis/:id (Phase 3: enable/disable)', () => {
 
   it('multi-user: non-admin is rejected before the write', async () => {
     enableCliManagement();
-    process.env.CODEMAN_MULTIUSER = '1';
+    process.env.REVERIE_MULTIUSER = '1';
     const { app } = await createRouteTestHarness(registerCliRegistryRoutes, {
       authUser: { username: 'bob', role: 'user' },
     });
@@ -274,7 +274,7 @@ describe('PUT /api/clis/:id (Phase 3: enable/disable)', () => {
 
 describe('POST /api/clis/:id/install (Phase 4)', () => {
   afterEach(() => {
-    delete process.env.CODEMAN_MULTIUSER;
+    delete process.env.REVERIE_MULTIUSER;
   });
 
   it('rejects when cliManagementEnabled is off', async () => {
@@ -299,7 +299,7 @@ describe('POST /api/clis/:id/install (Phase 4)', () => {
 
   it('multi-user: non-admin is rejected before any spawn', async () => {
     enableCliManagement();
-    process.env.CODEMAN_MULTIUSER = '1';
+    process.env.REVERIE_MULTIUSER = '1';
     const { app } = await createRouteTestHarness(registerCliRegistryRoutes, {
       authUser: { username: 'bob', role: 'user' },
     });
@@ -310,7 +310,7 @@ describe('POST /api/clis/:id/install (Phase 4)', () => {
 
 describe('Custom CLI entries (Phase 5)', () => {
   afterEach(() => {
-    delete process.env.CODEMAN_MULTIUSER;
+    delete process.env.REVERIE_MULTIUSER;
   });
 
   it('rejects create when cliManagementEnabled is off', async () => {
@@ -353,7 +353,7 @@ describe('Custom CLI entries (Phase 5)', () => {
     const byAgent = await app.inject({
       method: 'POST',
       url: '/api/clis',
-      headers: { 'x-codeman-parent-session': '0000002d-0035-4000-8000-000000000047' },
+      headers: { 'x-reverie-parent-session': '0000002d-0035-4000-8000-000000000047' },
       payload,
     });
     expect(byAgent.statusCode).toBe(403);
@@ -376,7 +376,7 @@ describe('Custom CLI entries (Phase 5)', () => {
     const { app } = await createRouteTestHarness(registerCliRegistryRoutes);
     const payload = { id: 'test-poll', label: 'Poller', shortBadge: 'P', binaries: ['poll-bin'], argv: ['poll-bin'], chatDelivery: 'poll' };
     expect((await app.inject({ method: 'POST', url: '/api/clis', payload,
-      headers: { 'x-codeman-parent-session': '0000002d-0035-4000-8000-000000000047' } })).statusCode).toBe(403);
+      headers: { 'x-reverie-parent-session': '0000002d-0035-4000-8000-000000000047' } })).statusCode).toBe(403);
     expect((await app.inject({ method: 'POST', url: '/api/clis', payload })).statusCode).toBe(200);
     expect(getCli('test-poll')?.capabilities.chatDelivery).toBe('poll');
     expect(modePollsChat('test-poll')).toBe(true);
@@ -493,7 +493,7 @@ describe('Custom CLI entries (Phase 5)', () => {
 
   it('multi-user: non-admin is rejected on create/update/delete', async () => {
     enableCliManagement();
-    process.env.CODEMAN_MULTIUSER = '1';
+    process.env.REVERIE_MULTIUSER = '1';
     const { app } = await createRouteTestHarness(registerCliRegistryRoutes, {
       authUser: { username: 'bob', role: 'user' },
     });
@@ -746,31 +746,31 @@ describe('registry writes are serialized and never clobber a file the reader wou
     expect(third.statusCode).toBe(200);
   });
 
-  it('hands the install script an environment with every CODEMAN_* variable stripped', async () => {
+  it('hands the install script an environment with every REVERIE_* variable stripped', async () => {
     enableCliManagement();
-    process.env.CODEMAN_TEST_SECRET = 'do-not-leak';
+    process.env.REVERIE_TEST_SECRET = 'do-not-leak';
     try {
       spawnMock.mockImplementation(() => fakeInstallChild(0));
       const { app } = await createRouteTestHarness(registerCliRegistryRoutes);
       await app.inject({ method: 'POST', url: '/api/clis/grok/install' });
       const env = spawnMock.mock.calls[0][1].env as NodeJS.ProcessEnv;
-      expect(Object.keys(env).filter((k) => k.startsWith('CODEMAN_'))).toEqual([]);
+      expect(Object.keys(env).filter((k) => k.startsWith('REVERIE_'))).toEqual([]);
       expect(env.PATH).toBe(process.env.PATH);
     } finally {
-      delete process.env.CODEMAN_TEST_SECRET;
+      delete process.env.REVERIE_TEST_SECRET;
     }
-    expect(installEnv({ CODEMAN_PASSWORD: 'x', HOME: '/h' }, () => true)).toEqual({ HOME: '/h' });
+    expect(installEnv({ REVERIE_PASSWORD: 'x', HOME: '/h' }, () => true)).toEqual({ HOME: '/h' });
   });
 
   it('redirects npm installs to the persistent HOME inside the Compose container', () => {
     expect(
-      installEnv({ CODEMAN_IN_CONTAINER: '1', HOME: '/home/codeman', NPM_CONFIG_PREFIX: '/opt/codeman-cli' })
-    ).toEqual({ HOME: '/home/codeman', NPM_CONFIG_PREFIX: '/home/codeman/.local' });
+      installEnv({ REVERIE_IN_CONTAINER: '1', HOME: '/home/reverie', NPM_CONFIG_PREFIX: '/opt/reverie-cli' })
+    ).toEqual({ HOME: '/home/reverie', NPM_CONFIG_PREFIX: '/home/reverie/.local' });
   });
 
   it('redirects npm installs to ~/.local on a native install whose global prefix is not writable', () => {
     // A system node under /usr: `npm install -g` as the server user dies with EACCES (exit 243).
-    expect(installEnv({ HOME: '/home/dev', CODEMAN_PASSWORD: 'x' }, () => false)).toEqual({
+    expect(installEnv({ HOME: '/home/dev', REVERIE_PASSWORD: 'x' }, () => false)).toEqual({
       HOME: '/home/dev',
       NPM_CONFIG_PREFIX: '/home/dev/.local',
     });
@@ -798,7 +798,7 @@ describe('registry writes are serialized and never clobber a file the reader wou
       NPM_CONFIG_PREFIX: '/h/.local',
     });
     expect(
-      installEnv({ CODEMAN_IN_CONTAINER: '1', HOME: '/h', npm_config_prefix: '/usr', NPM_CONFIG_PREFIX: '/opt/x' })
+      installEnv({ REVERIE_IN_CONTAINER: '1', HOME: '/h', npm_config_prefix: '/usr', NPM_CONFIG_PREFIX: '/opt/x' })
     ).toEqual({ HOME: '/h', NPM_CONFIG_PREFIX: '/h/.local' });
     // The operator guard is the uppercase key only: npm run always injects the lowercase one.
     expect(installEnv({ HOME: '/h', npm_config_prefix: '/usr' }, () => true)).toEqual({

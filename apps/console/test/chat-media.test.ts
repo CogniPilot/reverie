@@ -7,7 +7,7 @@ import vm from 'node:vm';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-const context = vm.createContext({ CodemanApp: class {}, URL });
+const context = vm.createContext({ ReverieApp: class {}, URL });
 vm.runInContext(readFileSync(resolve(import.meta.dirname, '../src/web/public/chat-media.js'), 'utf8'), context);
 const get = (n: string) => vm.runInContext(n, context);
 const matches = get('chatEmojiMatches') as (

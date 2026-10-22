@@ -16,7 +16,7 @@ import { registerChatroomRoutes } from '../../src/web/routes/chatroom-routes.js'
 const A = '0000002d-0035-4000-8000-000000000047';
 const B = '00000038-0043-4000-8000-000000000060';
 const C = '0000003e-004c-4000-8000-00000000006f';
-const AS = (id: string) => ({ 'x-codeman-parent-session': id });
+const AS = (id: string) => ({ 'x-reverie-parent-session': id });
 
 describe('what an agent has seen of a room', () => {
   let app: FastifyInstance;
@@ -46,7 +46,7 @@ describe('what an agent has seen of a room', () => {
   });
 
   it('typed is not seen; an agent read moves only its own marker, to the newest message it got', async () => {
-    const res = await app.inject({ method: 'POST', url: '/api/chatrooms', payload: { name: 'Fleet', members: [{ sessionId: A }, { sessionId: B }] } });
+    const res = await app.inject({ method: 'POST', url: '/api/chatrooms', payload: { name: 'Reverie', members: [{ sessionId: A }, { sessionId: B }] } });
     const room = res.json().data.id as string;
     const ids: string[] = [];
     for (const text of ['first', 'second']) {
@@ -85,7 +85,7 @@ describe('what an agent has seen of a room', () => {
       options?.onOutcome?.('submitted');
       return true;
     };
-    const res = await app.inject({ method: 'POST', url: '/api/chatrooms', payload: { name: 'Fleet', members: [{ sessionId: A }, { sessionId: B }] } });
+    const res = await app.inject({ method: 'POST', url: '/api/chatrooms', payload: { name: 'Reverie', members: [{ sessionId: A }, { sessionId: B }] } });
     const room = res.json().data.id as string;
     clock += 1_000;
     const r = await app.inject({ method: 'POST', url: `/api/chatrooms/${room}/messages`, payload: { text: '@bravo please look' } });

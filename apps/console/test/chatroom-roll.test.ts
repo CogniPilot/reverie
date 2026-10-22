@@ -68,7 +68,7 @@ describe('/roll through the message route', () => {
     const mine = await post(room, '/roll 1d20+3 for stealth');
     expect(mine.statusCode).toBe(200);
     expect(mine.json().data.message.text).toMatch(/^🎲 .* rolls 1d20\+3 for stealth: \*\*\d+\*\* \(\d+ \+ 3\)/);
-    const agent = await post(room, '/roll 1d20', { 'x-codeman-parent-session': A });
+    const agent = await post(room, '/roll 1d20', { 'x-reverie-parent-session': A });
     expect(agent.json().data.message.text).toBe('/roll 1d20');
     const bad = await post(room, '/roll 9d');
     expect(bad.statusCode).toBe(400);

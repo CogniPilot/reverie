@@ -31,7 +31,7 @@ function translator(language: string) {
     url: 'http://localhost/',
   });
   vm.runInContext(I18N, dom.getInternalVMContext(), { filename: 'i18n.js' });
-  const api = (dom.window as unknown as { CodemanI18n: Api }).CodemanI18n;
+  const api = (dom.window as unknown as { ReverieI18n: Api }).ReverieI18n;
   api.configure({ language });
   return { api, dom };
 }
@@ -141,7 +141,7 @@ describe('the Help modal and the shortcut overlay in zh-CN', () => {
   const control = doc.createElement('button');
   control.textContent = 'Home';
   doc.body.appendChild(control);
-  const api = (dom.window as unknown as { CodemanI18n: Api & { start(): void } }).CodemanI18n;
+  const api = (dom.window as unknown as { ReverieI18n: Api & { start(): void } }).ReverieI18n;
   api.start();
   api.configure({ language: 'zh-CN' });
 

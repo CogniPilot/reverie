@@ -237,12 +237,12 @@ describe('embassy guest routes', () => {
     const app = Fastify();
     // A verifier that accepts: the owner-session matrix is in embassy-guest-policy.test.ts.
     registerEmbassyGuestRoutes(app, t.client, () => true);
-    const agent = await app.inject({ method: 'GET', url: '/api/embassy-guest', headers: { 'x-codeman-parent-session': 'x' } });
+    const agent = await app.inject({ method: 'GET', url: '/api/embassy-guest', headers: { 'x-reverie-parent-session': 'x' } });
     expect(agent.statusCode).toBe(403);
     const agentJoin = await app.inject({
       method: 'POST',
       url: '/api/embassy-guest/join',
-      headers: { 'x-codeman-parent-session': 'x' },
+      headers: { 'x-reverie-parent-session': 'x' },
       payload: { key: KEY, confirmedOrigin: ORIGIN },
     });
     expect(agentJoin.statusCode).toBe(403);

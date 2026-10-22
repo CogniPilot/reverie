@@ -95,16 +95,16 @@ rules and why each exists:
   return; the consumer forwards `\x7f` unconditionally). Deleting already-echoed
   text renders at RTT in v1.
 - **CJK/wide**: 2-cell spans, stacking by cumulative visual width, leading-cell
-  confirm. In Codeman, IME input never reaches the hook (`window.cjkActive`
+  confirm. In Reverie, IME input never reaches the hook (`window.cjkActive`
   returns from onData first); package support exists for other consumers.
 
-## Integration map (Codeman)
+## Integration map (Reverie)
 
 - Policy: `_localEchoPolicy` (`'buffer' | 'predict' | 'off'`) computed at the
   end of `_updateLocalEchoState()`; codex + `localEchoEnabled` -> `'predict'`
   while `_localEchoEnabled` stays false (every 1.12.2 consumer unchanged).
 - onData hook sits between the buffer block and Normal Mode, classifies via
-  `classifyPredictInput()` (pure, on `window.CodemanTerminalInput`), never
+  `classifyPredictInput()` (pure, on `window.ReverieTerminalInput`), never
   returns, try/catch-wrapped: the wire path below is byte-identical with the
   predictor active, absent, or throwing.
 - Composer gate: `isCodexComposerRow()` set via `setPredictWhen()` at

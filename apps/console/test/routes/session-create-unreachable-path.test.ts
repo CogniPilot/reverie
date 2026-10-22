@@ -20,9 +20,9 @@ import fastifyMultipart from '@fastify/multipart';
 
 const dead = vi.hoisted(() => {
   // Short probe timeout so a stalled stat costs ~200 ms here. Read at import.
-  process.env.CODEMAN_PATH_PROBE_TIMEOUT_MS = '200';
+  process.env.REVERIE_PATH_PROBE_TIMEOUT_MS = '200';
   return {
-    root: '/mnt/codeman-test-dead-mount',
+    root: '/mnt/reverie-test-dead-mount',
     blockMs: 3_000,
     syncTouches: [] as string[],
     releases: [] as Array<() => void>,
@@ -91,7 +91,7 @@ describe('session creation on an unreachable mount', () => {
   beforeEach(async () => {
     dead.syncTouches.length = 0;
     warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    scratch = await mkdtemp(join(tmpdir(), 'codeman-unreachable-create-'));
+    scratch = await mkdtemp(join(tmpdir(), 'reverie-unreachable-create-'));
     app = Fastify({ logger: false });
     await app.register(fastifyCookie);
     await app.register(fastifyMultipart, { limits: { fileSize: 10 * 1024 * 1024, files: 1 } });
@@ -111,7 +111,7 @@ describe('session creation on an unreachable mount', () => {
   });
 
   afterAll(() => {
-    delete process.env.CODEMAN_PATH_PROBE_TIMEOUT_MS;
+    delete process.env.REVERIE_PATH_PROBE_TIMEOUT_MS;
   });
 
   it('POST /api/sessions answers promptly, and not as "does not exist", for a workingDir on a dead mount', async () => {
@@ -188,7 +188,7 @@ describe('session creation on an unreachable mount', () => {
     const res = await app.inject({
       method: 'POST',
       url: `/api/sessions/${ctx._sessionId}/paste-image`,
-      headers: { 'x-codeman-csrf': '1', 'content-type': 'multipart/form-data; boundary=b' },
+      headers: { 'x-reverie-csrf': '1', 'content-type': 'multipart/form-data; boundary=b' },
       payload: '--b--\r\n',
     });
     const elapsed = Date.now() - started;

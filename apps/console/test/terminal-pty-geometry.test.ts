@@ -45,14 +45,14 @@ function loadGeometry() {
   vm.runInContext(read('src/web/public/constants.js'), context, { filename: 'constants.js' });
   return (
     context.window as {
-      CodemanTerminalGeometry: {
+      ReverieTerminalGeometry: {
         clampTerminalDimensions: (p: Partial<Dims> | null | undefined) => Dims | null;
         reconcilePtyGeometry: (local: Dims | null, pty: Partial<Dims> | null) => { adopt: boolean; oversized: boolean };
         TERMINAL_MIN_COLS: number;
         TERMINAL_MIN_ROWS: number;
       };
     }
-  ).CodemanTerminalGeometry;
+  ).ReverieTerminalGeometry;
 }
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -475,20 +475,20 @@ describe('while another device holds the width', () => {
   const SESSION = 'session-A';
 
   function makeApp() {
-    const FakeCodemanApp = function () {} as unknown as { prototype: Record<string, unknown> };
+    const FakeReverieApp = function () {} as unknown as { prototype: Record<string, unknown> };
     const context = vm.createContext({
       console,
       setTimeout,
       clearTimeout,
       setInterval: vi.fn(),
       clearInterval: vi.fn(),
-      CodemanApp: FakeCodemanApp,
+      ReverieApp: FakeReverieApp,
       window: { addEventListener: vi.fn(), removeEventListener: vi.fn(), innerWidth: 400 },
       document: { addEventListener: vi.fn(), getElementById: () => null },
     });
     vm.runInContext(read('src/web/public/constants.js'), context, { filename: 'constants.js' });
     vm.runInContext(read('src/web/public/terminal-ui.js'), context, { filename: 'terminal-ui.js' });
-    const mixin = FakeCodemanApp.prototype as Record<string, (...a: unknown[]) => unknown>;
+    const mixin = FakeReverieApp.prototype as Record<string, (...a: unknown[]) => unknown>;
     // The phone's container: 57x13. Every resize xterm performs is recorded,
     // because a resize is a re-wrap of the whole buffer.
     const resizes: Array<[number, number]> = [];

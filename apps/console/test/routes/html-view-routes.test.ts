@@ -114,10 +114,10 @@ describe('html-view routes', () => {
     expect(res.body).toBe('<h1>hi</h1>');
   });
 
-  it("serves exactly the sandbox CSP with open network, replacing Codeman's own policy (owner decision)", async () => {
+  it("serves exactly the sandbox CSP with open network, replacing Reverie's own policy (owner decision)", async () => {
     // Owner decision 2026-10-13 (#547): a rendered page reaches the network like a
     // file opened from disk, so the policy is the `sandbox` directive alone. Built
-    // with Codeman's own security headers registered first, as in production, to
+    // with Reverie's own security headers registered first, as in production, to
     // prove their `default-src 'self'` policy does not survive onto the page.
     const app = Fastify({ logger: false });
     registerSecurityHeaders(app, false);
@@ -213,8 +213,8 @@ describe('html-view routes', () => {
   describe('outside the workspace', () => {
     let outsideDir: string;
     const saved = {
-      confine: process.env.CODEMAN_ATTACHMENT_CONFINE,
-      blocked: process.env.CODEMAN_ATTACHMENT_BLOCKED_PATHS,
+      confine: process.env.REVERIE_ATTACHMENT_CONFINE,
+      blocked: process.env.REVERIE_ATTACHMENT_BLOCKED_PATHS,
     };
 
     beforeEach(() => {
@@ -225,8 +225,8 @@ describe('html-view routes', () => {
 
     afterEach(() => {
       for (const [key, value] of [
-        ['CODEMAN_ATTACHMENT_CONFINE', saved.confine],
-        ['CODEMAN_ATTACHMENT_BLOCKED_PATHS', saved.blocked],
+        ['REVERIE_ATTACHMENT_CONFINE', saved.confine],
+        ['REVERIE_ATTACHMENT_BLOCKED_PATHS', saved.blocked],
       ] as const) {
         if (value === undefined) delete process.env[key];
         else process.env[key] = value;
@@ -238,7 +238,7 @@ describe('html-view routes', () => {
     });
 
     it('refuses a page in a blocked tree', async () => {
-      process.env.CODEMAN_ATTACHMENT_BLOCKED_PATHS = outsideDir;
+      process.env.REVERIE_ATTACHMENT_BLOCKED_PATHS = outsideDir;
       expect((await open(join(outsideDir, 'report.html'))).statusCode).toBe(403);
     });
 
@@ -249,7 +249,7 @@ describe('html-view routes', () => {
       expect((await harness.app.inject({ method: 'GET', url })).statusCode).toBe(200);
       const inside = await openUrl();
 
-      process.env.CODEMAN_ATTACHMENT_CONFINE = '1';
+      process.env.REVERIE_ATTACHMENT_CONFINE = '1';
       expect((await harness.app.inject({ method: 'GET', url })).statusCode).toBe(404);
       // A page minted from inside the workspace is not affected.
       expect((await harness.app.inject({ method: 'GET', url: inside })).statusCode).toBe(200);
@@ -263,7 +263,7 @@ describe('html-view routes', () => {
     });
 
     it('refuses every out-of-workspace page when attachments are confined to the workspace', async () => {
-      process.env.CODEMAN_ATTACHMENT_CONFINE = '1';
+      process.env.REVERIE_ATTACHMENT_CONFINE = '1';
       expect((await open(join(outsideDir, 'report.html'))).statusCode).toBe(403);
       // The workspace itself is still fine.
       expect((await open(join(workspace, 'index.html'))).statusCode).toBe(200);

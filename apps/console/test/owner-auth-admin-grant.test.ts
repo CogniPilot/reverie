@@ -54,7 +54,6 @@ describe('owner auth: board, admins and the enforce lockout guard', () => {
   let store: OwnerAuthStore;
   let service: OwnerAuthService;
   let app: FastifyInstance;
-  let ctoEmployee: string | undefined;
   const sessions = new Map<string, { id: string; parentSessionId?: string }>([
     [REVIEWER, { id: REVIEWER }],
     [CHILD, { id: CHILD, parentSessionId: REVIEWER }],
@@ -66,20 +65,18 @@ describe('owner auth: board, admins and the enforce lockout guard', () => {
     rooms: () => [],
     predecessor: () => undefined,
     employeeOf: (id) => (id === REVIEWER ? EMPLOYEE : undefined),
-    ctoEmployee: () => ctoEmployee,
     keepers: () => service.keepers(),
     admins: () => service.admins(),
   });
   const auditFile = () => join(dir, 'owner-auth-audit.jsonl');
   const audit = async () => readFile(auditFile(), 'utf8').catch(() => '');
-  const asAgent = (id: string) => ({ 'x-codeman-parent-session': id });
+  const asAgent = (id: string) => ({ 'x-reverie-parent-session': id });
   const call = (method: string, url: string, who?: string) =>
     app.inject({ method: method as 'GET', url, headers: who ? asAgent(who) : {}, ...(method === 'GET' ? {} : { payload: {} }) });
 
   beforeEach(async () => {
     dir = await mkdtemp(join(tmpdir(), 'owner-auth-admin-'));
     store = new OwnerAuthStore(join(dir, 'owner-auth.json'));
-    ctoEmployee = undefined;
     await admin.bootstrap(store, USER);
     await admin.setPolicy(store, 'enforce', { forceLockoutRisk: true }); // setup; the guard is tested below
     service = new OwnerAuthService({ store, auditFile: auditFile() });
@@ -147,12 +144,12 @@ describe('owner auth: board, admins and the enforce lockout guard', () => {
     expect(await audit()).toMatch(/"event":"admin_removed"/);
   });
 
-  it('`cto` follows the company CTO setting, never a title', async () => {
+  it('admin grants match exact employee ids and never a role selector', async () => {
     await admin.addAdmin(store, 'cto');
     expect((await call('POST', '/api/sessions', REVIEWER)).statusCode).toBe(403);
-    ctoEmployee = EMPLOYEE;
+    await admin.addAdmin(store, EMPLOYEE);
     expect((await call('POST', '/api/sessions', REVIEWER)).statusCode).toBe(200);
-    ctoEmployee = 'someone-else';
+    await admin.removeAdmin(store, EMPLOYEE);
     expect((await call('POST', '/api/sessions', REVIEWER)).statusCode).toBe(403);
   });
 
@@ -179,7 +176,7 @@ describe('owner auth: board, admins and the enforce lockout guard', () => {
     expect((await call('POST', '/api/company/temporary/prune')).statusCode).toBe(401);
   });
 
-  it('admins: only `cto` or an employee id, listed, and removing an unknown one says so', async () => {
+  it('admins: exact employee ids are listed and removing an unknown one says so', async () => {
     await expect(admin.addAdmin(store, 'not an id!')).rejects.toThrow(/admin/);
     await admin.addAdmin(store, 'cto');
     await admin.addAdmin(store, 'cto');
@@ -424,9 +421,10 @@ describe('owner auth: board, admins and the enforce lockout guard', () => {
     it('a lock held past the wait fails closed: nothing is written', async () => {
       await ready();
       const impatient = new OwnerAuthStore(store.file, 1);
-      const holder = spawn('/usr/bin/flock', ['--close', impatient.lockFile, 'sleep', '30'], { stdio: 'ignore' });
+      const flock = process.env.REVERIE_FLOCK_BIN || 'flock';
+      const holder = spawn(flock, ['--close', impatient.lockFile, 'sleep', '30'], { stdio: 'ignore' });
       try {
-        for (let i = 0; i < 250 && spawnSync('/usr/bin/flock', ['--nonblock', impatient.lockFile, 'true']).status === 0; i++) await pause(20);
+        for (let i = 0; i < 250 && spawnSync(flock, ['--nonblock', impatient.lockFile, 'true']).status === 0; i++) await pause(20);
         await expect(impatient.update((a) => { a.policy = 'enforce'; })).rejects.toThrow(/busy.*nothing was written/);
         await expect(admin.setPolicy(impatient, 'enforce', { now: NOW })).rejects.toThrow(/busy/);
         await expect(impatient.replace({ ...store.read()!, policy: 'off' })).rejects.toThrow(/busy/); // the bootstrap writer too

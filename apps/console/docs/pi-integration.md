@@ -151,9 +151,9 @@ the next pi session starts without the warning. Existing sessions keep the old
 setting until they respawn.
 
 ```bash
-tmux -L codeman set -s extended-keys on
-tmux -L codeman set -s extended-keys-format csi-u   # tmux 3.5+ only, see below
-tmux -L codeman show-options -s | grep extended     # verify
+tmux -L reverie set -s extended-keys on
+tmux -L reverie set -s extended-keys-format csi-u   # tmux 3.5+ only, see below
+tmux -L reverie show-options -s | grep extended     # verify
 ```
 
 On **tmux 3.4 and older, `extended-keys-format` does not exist** and the second

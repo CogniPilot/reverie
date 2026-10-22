@@ -21,7 +21,7 @@ It renders what it can:
 | PDF and Office documents | Converted for preview when a converter is available.                       |
 | Anything else            | Download.                                                                  |
 
-Caps: 10 MB for text preview, 2 GB for raw and download (set `CODEMAN_MAX_DOWNLOAD_BYTES`
+Caps: 10 MB for text preview, 2 GB for raw and download (set `REVERIE_MAX_DOWNLOAD_BYTES`
 to change it, `0` for no limit — these bodies are streamed, so a large file costs a read
 stream rather than server memory). Sensitive paths (`.env`, anything
 matching credentials, `~/.ssh`, AWS credentials) are blocked from download, and SVG and HTML
@@ -70,7 +70,7 @@ An attachment card appears in the session, and the file can be previewed inline.
 attachment gets a stable id, and browser requests use that id rather than carrying absolute
 paths around.
 
-Agents can register attachments too, by emitting a `codeman://attach?...` link in their
+Agents can register attachments too, by emitting a `reverie://attach?...` link in their
 output. That path is **prompt-injectable by nature**, so it is force-confined to the
 session's workspace: a hostile prompt cannot use it to pull arbitrary host files into the
 event stream. The gate is an extension allowlist rather than a blocklist.
@@ -163,7 +163,7 @@ choice is remembered per device. The picker inserts the path into your prompt
 key clears the unsent prompt, and never sends the agent's `/clear` command.
 
 This is a separate file-serving surface from the viewer, with its own rules: it allowlists
-your home directory, the cases directory, and anything in `CODEMAN_FILE_PICKER_ROOTS`, and
+your home directory, the cases directory, and anything in `REVERIE_FILE_PICKER_ROOTS`, and
 blocks sensitive trees. In multi-user mode a non-admin gets only their own user space as a
 root, because per-user spaces live inside the home directory and a home-directory root would
 expose everyone.
@@ -178,7 +178,7 @@ editor does the same into the editor. Dropping a video onto the terminal works t
 
 HEIC images from an iPhone are converted to JPEG on the way in.
 Videos (mp4, webm, mov, m4v, ogv) are stored as recorded, up to 1 GB each by default
-(`CODEMAN_MAX_PASTE_VIDEO_BYTES`); they stream to disk rather than through server memory.
+(`REVERIE_MAX_PASTE_VIDEO_BYTES`); they stream to disk rather than through server memory.
 
 ## Generated artifacts
 
@@ -221,7 +221,7 @@ It is read-only and offline: Reverie never fetches, commits or changes the repos
 workspace is skipped even from a local session (a container can write there, and git would run
 that repository's own configuration on the host). The
 data comes from `GET /api/sessions/:id/git-status` and `GET /api/sessions/:id/git-diff`
-(see the [API reference](https://github.com/Ark0N/Codeman/blob/master/docs/api-reference.md)).
+(see the [API reference](https://github.com/jgoppert/reverie/blob/main/apps/console/docs/api-reference.md)).
 
 ## Gotchas
 
@@ -240,4 +240,4 @@ data comes from `GET /api/sessions/:id/git-status` and `GET /api/sessions/:id/gi
 - [The Dashboard](The-Dashboard) - where the panels live.
 - [Input And Voice](Input-And-Voice) - other ways to get content into a session.
 - [Security](Security) - how the file surfaces are confined.
-- [`docs/file-viewer-edit-plan.md`](https://github.com/Ark0N/Codeman/blob/master/docs/file-viewer-edit-plan.md) - the edit-mode design.
+- [`docs/file-viewer-edit-plan.md`](https://github.com/jgoppert/reverie/blob/main/apps/console/docs/file-viewer-edit-plan.md) - the edit-mode design.

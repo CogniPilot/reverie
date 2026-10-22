@@ -1,11 +1,11 @@
-# Codeman Frontend Notification System -- Detailed Report
+# Reverie Frontend Notification System -- Detailed Report
 
 > Generated: 2026-02-17
 > Source files analyzed:
-> - `/home/arkon/default/codeman/src/web/public/app.js` (main frontend, ~15k lines)
-> - `/home/arkon/default/codeman/src/web/public/index.html`
-> - `/home/arkon/default/codeman/src/web/public/styles.css`
-> - `/home/arkon/default/codeman/src/web/public/mobile.css`
+> - `/home/arkon/default/reverie/src/web/public/app.js` (main frontend, ~15k lines)
+> - `/home/arkon/default/reverie/src/web/public/index.html`
+> - `/home/arkon/default/reverie/src/web/public/styles.css`
+> - `/home/arkon/default/reverie/src/web/public/mobile.css`
 
 ---
 
@@ -87,8 +87,8 @@ const defaults = {
 #### Storage Keys (lines 952-956)
 
 Device-specific localStorage keys prevent mobile settings from overriding desktop settings:
-- Desktop: `codeman-notification-prefs`
-- Mobile: `codeman-notification-prefs-mobile`
+- Desktop: `reverie-notification-prefs`
+- Mobile: `reverie-notification-prefs-mobile`
 
 #### Version Migrations (lines 928-940)
 
@@ -260,8 +260,8 @@ Mobile override: full-width with safe area padding (mobile.css lines 1049-1058).
 
 When the tab is not visible and there are unread notifications:
 1. `setInterval` at 1500ms toggles between:
-   - Warning emoji + unread count: `"(3) Codeman"`
-   - Original title: `"Codeman"`
+   - Warning emoji + unread count: `"(3) Reverie"`
+   - Original title: `"Reverie"`
 2. Set immediately on first notification (no wait for first interval tick)
 
 ### Stopping
@@ -311,7 +311,7 @@ sendBrowserNotif() called
 ### Notification Object (lines 1127-1143)
 
 ```js
-new Notification(`Codeman: ${title}`, {
+new Notification(`Reverie: ${title}`, {
   body,
   tag,           // Groups same-tag notifications (replaces previous with same tag)
   icon: '/favicon.ico',
@@ -341,10 +341,10 @@ In settings (index.html line 993), a `<span class="settings-status" id="notifPer
 
 The settings UI shows a hint (index.html line 996):
 ```
-For remote access, HTTPS is required. Start with: codeman web --https
+For remote access, HTTPS is required. Start with: reverie web --https
 ```
 
-Browser Notification API requires a secure context (HTTPS or localhost). This hint warns users who access Codeman remotely over HTTP.
+Browser Notification API requires a secure context (HTTPS or localhost). This hint warns users who access Reverie remotely over HTTP.
 
 ---
 
@@ -579,7 +579,7 @@ On mobile devices:
 
 ### Mobile Storage Key (lines 952-956)
 
-Mobile uses a separate localStorage key (`codeman-notification-prefs-mobile`) so that enabling notifications on desktop does not accidentally enable them on a mobile device viewing the same Codeman instance.
+Mobile uses a separate localStorage key (`reverie-notification-prefs-mobile`) so that enabling notifications on desktop does not accidentally enable them on a mobile device viewing the same Reverie instance.
 
 ### Mobile Drawer Styling (mobile.css lines 1049-1058)
 

@@ -31,7 +31,7 @@ const PUBLIC = resolve(import.meta.dirname, '../src/web/public');
 const accessoryJs = readFileSync(resolve(PUBLIC, 'keyboard-accessory.js'), 'utf8');
 const stylesCss = readFileSync(resolve(PUBLIC, 'styles.css'), 'utf8');
 
-const STORAGE_KEY = 'codeman:pathPickerShowHidden';
+const STORAGE_KEY = 'reverie:pathPickerShowHidden';
 
 const dom = new JSDOM('<!DOCTYPE html><html><body></body></html>', { url: 'https://localhost/' });
 const jsdomWindow = dom.window as unknown as Window & typeof globalThis;

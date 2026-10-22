@@ -3,7 +3,7 @@
  *
  * Both halves come from one habit users bring from a native terminal running a
  * mouse-tracking TUI (claude, codex): hold Shift to select locally, then
- * right-click to copy. In Codeman both halves were broken, for two unrelated
+ * right-click to copy. In Reverie both halves were broken, for two unrelated
  * reasons, and the pair dead-ended the whole gesture.
  */
 import { readFileSync } from 'node:fs';
@@ -12,12 +12,12 @@ import vm from 'node:vm';
 import { describe, expect, it, vi } from 'vitest';
 
 function loadHarness() {
-  const CodemanApp = function CodemanApp(this: unknown) {};
+  const ReverieApp = function ReverieApp(this: unknown) {};
   const windowRef: Record<string, unknown> = {};
   const context = vm.createContext({
     window: windowRef,
     document: { body: { classList: { contains: () => false } }, getElementById: () => null, activeElement: null },
-    CodemanApp,
+    ReverieApp,
     console: { warn: vi.fn(), log: vi.fn(), debug: vi.fn() },
     _crashDiag: { log: vi.fn() },
     performance: { now: () => 1000 },
@@ -33,7 +33,7 @@ function loadHarness() {
   });
   vm.runInContext(readFileSync(resolve(import.meta.dirname, '../src/web/public/constants.js'), 'utf8'), context);
   vm.runInContext(readFileSync(resolve(import.meta.dirname, '../src/web/public/terminal-ui.js'), 'utf8'), context);
-  return new (CodemanApp as unknown as new () => Record<string, (...a: unknown[]) => unknown>)();
+  return new (ReverieApp as unknown as new () => Record<string, (...a: unknown[]) => unknown>)();
 }
 
 /** A terminal whose element records the capture-phase mousedown listener we install. */

@@ -41,7 +41,7 @@ function loadContext() {
   const windowStub: Record<string, unknown> = {
     addEventListener: vi.fn(),
     removeEventListener: vi.fn(),
-    CodemanBase: { base: '' },
+    ReverieBase: { base: '' },
     // The keyCode-229 controller defaults its timers to window's. Late-bound,
     // like the context's own, so vi.useFakeTimers() reaches it; without them
     // its create() throws into the tile's catch and every controller test
@@ -64,7 +64,7 @@ function loadContext() {
     Terminal: FakeTerminal,
     FitAddon: { FitAddon: FakeFit },
     fetch: (...args: unknown[]) => fetchMock(...args),
-    location: { protocol: 'http:', host: 'codeman.test' },
+    location: { protocol: 'http:', host: 'reverie.test' },
     document: { addEventListener: vi.fn(), documentElement: { dataset: {} } },
     localStorage: { length: 0, key: vi.fn(), getItem: vi.fn(), setItem: vi.fn(), removeItem: vi.fn() },
     window: windowStub,
@@ -77,16 +77,16 @@ function loadContext() {
   vm.runInContext(
     `${read('constants.js')}\n${read('terminal-keycode229-recovery.js')}\n${read('app.js')}\n` +
       `${read('terminal-ui.js')}\n${read('terminal-tile.js')}\n` +
-      'globalThis.__CodemanApp = CodemanApp;',
+      'globalThis.__ReverieApp = ReverieApp;',
     context
   );
   return {
-    CodemanApp: (context as unknown as { __CodemanApp: { prototype: object } }).__CodemanApp,
+    ReverieApp: (context as unknown as { __ReverieApp: { prototype: object } }).__ReverieApp,
     windowStub,
   };
 }
 
-const { CodemanApp, windowStub } = loadContext();
+const { ReverieApp, windowStub } = loadContext();
 
 type App = Record<string, unknown> & {
   _pendingDeliveries: Map<string, Array<{ seq: number; data: string }>>;
@@ -94,7 +94,7 @@ type App = Record<string, unknown> & {
 };
 
 function makeApp(): App {
-  const app = Object.create(CodemanApp.prototype) as App;
+  const app = Object.create(ReverieApp.prototype) as App;
   app._clientId = 'c-test';
   app._wsTabNonce = 'nonce-1';
   app._seqCounters = new Map();
@@ -963,7 +963,7 @@ describe('TerminalTile live-output flow control: a flood cannot pile up in xterm
       await settle();
     }
 
-    const { DROP_RECOVERY_MAX_ATTEMPTS } = windowStub.CodemanDroppedOutput as { DROP_RECOVERY_MAX_ATTEMPTS: number };
+    const { DROP_RECOVERY_MAX_ATTEMPTS } = windowStub.ReverieDroppedOutput as { DROP_RECOVERY_MAX_ATTEMPTS: number };
     expect(fetchMock).toHaveBeenCalledTimes(DROP_RECOVERY_MAX_ATTEMPTS);
     expect(term.writes).not.toContain('held back');
     out(ws, 'flowing');
@@ -1233,8 +1233,8 @@ describe("TerminalTile wires the primary pane's soft-keyboard controller (#441, 
   it('control: without the controller, xterm alone duplicates the line exactly as the device did', async () => {
     vi.useFakeTimers();
     const helpers = withCompositionHelpers();
-    const saved = windowStub.CodemanKeyCode229Recovery;
-    delete windowStub.CodemanKeyCode229Recovery;
+    const saved = windowStub.ReverieKeyCode229Recovery;
+    delete windowStub.ReverieKeyCode229Recovery;
     try {
       const { tile, ws, term } = await connectTile(makeApp());
       expect((tile as ControllerTile)._keyCode229Recovery).toBeNull();
@@ -1250,7 +1250,7 @@ describe("TerminalTile wires the primary pane's soft-keyboard controller (#441, 
 
       expect(lineOf(ws.inputFrames())).toBe('testing the peompttesting the prompt rompt ');
     } finally {
-      windowStub.CodemanKeyCode229Recovery = saved;
+      windowStub.ReverieKeyCode229Recovery = saved;
     }
   });
 
@@ -1375,10 +1375,10 @@ describe('the controller can never break a tile', () => {
   };
   let saved: unknown;
   beforeEach(() => {
-    saved = windowStub.CodemanKeyCode229Recovery;
+    saved = windowStub.ReverieKeyCode229Recovery;
   });
   afterEach(() => {
-    windowStub.CodemanKeyCode229Recovery = saved;
+    windowStub.ReverieKeyCode229Recovery = saved;
   });
 
   const fakeController = (overrides: Partial<FakeController> = {}): FakeController => ({
@@ -1389,7 +1389,7 @@ describe('the controller can never break a tile', () => {
   });
 
   it('a create() that throws leaves the tile connected and typing', async () => {
-    windowStub.CodemanKeyCode229Recovery = {
+    windowStub.ReverieKeyCode229Recovery = {
       create: () => {
         throw new Error('broken');
       },
@@ -1409,7 +1409,7 @@ describe('the controller can never break a tile', () => {
         throw new Error('broken');
       }),
     });
-    windowStub.CodemanKeyCode229Recovery = { create: () => controller };
+    windowStub.ReverieKeyCode229Recovery = { create: () => controller };
     const { term } = await connectTile(makeApp());
 
     expect(term.keyHandler!({ type: 'keydown', key: '1', code: 'Digit1', altKey: true })).toBe(false);
@@ -1426,7 +1426,7 @@ describe('the controller can never break a tile', () => {
         throw new Error('broken');
       }),
     });
-    windowStub.CodemanKeyCode229Recovery = { create: () => controller };
+    windowStub.ReverieKeyCode229Recovery = { create: () => controller };
     const { tile, term } = await connectTile(makeApp());
     const dispose = vi.spyOn(term, 'dispose');
 
@@ -1439,7 +1439,7 @@ describe('the controller can never break a tile', () => {
 
   it('each tile gets its own controller on its own textarea, and destroys only its own', async () => {
     const made: Array<{ options: { textarea: unknown }; controller: FakeController }> = [];
-    windowStub.CodemanKeyCode229Recovery = {
+    windowStub.ReverieKeyCode229Recovery = {
       create: (options: { textarea: unknown }) => {
         const controller = fakeController();
         made.push({ options, controller });

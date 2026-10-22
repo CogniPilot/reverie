@@ -1,4 +1,4 @@
-import tests  # noqa: F401  isolates CODEMAN_*/FLEET_* before cto is imported
+import tests  # noqa: F401  isolates REVERIE_* before reverie is imported
 import json
 import subprocess
 import tempfile
@@ -8,10 +8,10 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-from cto.chat import Brain, ChatDaemon
-from cto.embeddings import HashedEmbedder
-from cto.memory import MemoryStore
-from cto.voice import (AudioStore, Synthesizer, Transcriber, VoiceConfig, VoiceService, clean_transcript, download,
+from reverie.chat import Brain, ChatDaemon
+from reverie.embeddings import HashedEmbedder
+from reverie.memory import MemoryStore
+from reverie.voice import (AudioStore, Synthesizer, Transcriber, VoiceConfig, VoiceService, clean_transcript, download,
                         format_hint, parse_multipart, piper_voice_url, serve, silent_wav, wav_duration_ms)
 from tests.helpers import FakeRoom, fake_client, temp_config
 
@@ -251,7 +251,7 @@ class HttpTest(unittest.TestCase):
         self.assertEqual(wav_duration_ms(audio), 200)
         code, headers, raw = self.req("POST", "/tts?raw=1", json.dumps({"text": "Hi"}).encode(), {"Content-Type": "application/json"})
         self.assertEqual((code, headers["Content-Type"]), (200, "audio/wav"))
-        code, _, body = self.req("POST", "/turn", wav, {"Content-Type": "audio/mp4", "X-Codeman-Room": "room-1"})
+        code, _, body = self.req("POST", "/turn", wav, {"Content-Type": "audio/mp4", "X-Reverie-Room": "room-1"})
         self.assertEqual(code, 200)
         out = json.loads(body)
         self.assertEqual(out["reply"], "Restful, thank you for asking.")

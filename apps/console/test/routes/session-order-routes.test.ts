@@ -72,7 +72,7 @@ describe('PUT /api/session-order', () => {
   let harness: LocalHarness;
 
   beforeEach(async () => {
-    vi.stubEnv('CODEMAN_MULTIUSER', '1');
+    vi.stubEnv('REVERIE_MULTIUSER', '1');
     harness = await buildHarness();
   });
 

@@ -18,8 +18,8 @@ type Reply = { status: number; body?: unknown };
 type GuardWin = Window &
   typeof globalThis & {
     ReverieOwnerLoginGuard: { navigate: (u: string) => void; safeNext: (raw: unknown) => string; STORAGE_KEY: string };
-    __CODEMAN_BASE__?: string;
-    CodemanApp?: unknown;
+    __REVERIE_BASE__?: string;
+    ReverieApp?: unknown;
   };
 
 function resp(status: number, body: unknown) {
@@ -42,7 +42,7 @@ const UNAUTH = { status: 401, body: { success: false, error: 'Sign in as the own
 function boot(url: string, reply: (path: string) => Reply, opts: { base?: string; storage?: Record<string, string> } = {}) {
   const dom = new JSDOM('<!doctype html><body></body>', { url, runScripts: 'outside-only' });
   const win = dom.window as unknown as GuardWin;
-  if (opts.base) win.__CODEMAN_BASE__ = opts.base;
+  if (opts.base) win.__REVERIE_BASE__ = opts.base;
   for (const [k, v] of Object.entries(opts.storage ?? {})) win.sessionStorage.setItem(k, v);
   const calls: string[] = [];
   win.fetch = (async (input: string) => {
@@ -80,10 +80,10 @@ describe('owner-login-guard: when it redirects', () => {
   });
 
   it('keeps the mount base under a reverse-proxy sub-path', async () => {
-    const { win, navigations } = boot('http://localhost/codeman/?app=1', () => UNAUTH, { base: '/codeman' });
+    const { win, navigations } = boot('http://localhost/reverie/?app=1', () => UNAUTH, { base: '/reverie' });
     await win.fetch('/api/status');
     await settle();
-    expect(navigations).toEqual(['/codeman/owner/login?next=' + encodeURIComponent('/codeman/?app=1')]);
+    expect(navigations).toEqual(['/reverie/owner/login?next=' + encodeURIComponent('/reverie/?app=1')]);
   });
 });
 
@@ -195,9 +195,9 @@ describe('owner-login-guard: notification click / focus path', () => {
     const { win, navigations, calls } = boot('http://localhost/?app=1', (p) =>
       p.startsWith('/api/chatrooms/') ? UNAUTH : { status: 200, body: { success: true, data: {} } }
     );
-    // The real settings-ui.js service-worker wiring, on a minimal CodemanApp.
-    const CodemanApp = function CodemanApp() {};
-    win.CodemanApp = CodemanApp;
+    // The real settings-ui.js service-worker wiring, on a minimal ReverieApp.
+    const ReverieApp = function ReverieApp() {};
+    win.ReverieApp = ReverieApp;
     (win as unknown as { eval: (s: string) => void }).eval(SETTINGS_UI);
     const sw = new win.EventTarget() as EventTarget & Record<string, unknown>;
     const registration = { active: {}, pushManager: { getSubscription: async () => null } };
@@ -205,7 +205,7 @@ describe('owner-login-guard: notification click / focus path', () => {
     sw.ready = Promise.resolve(registration);
     Object.defineProperty(win.navigator, 'serviceWorker', { value: sw, configurable: true });
     win.focus = () => {};
-    const app = new (CodemanApp as unknown as new () => Record<string, (...a: unknown[]) => unknown>)();
+    const app = new (ReverieApp as unknown as new () => Record<string, (...a: unknown[]) => unknown>)();
     app.openChatroom = async (roomId: unknown) => {
       await win.fetch('/api/chatrooms/' + encodeURIComponent(String(roomId)));
     };

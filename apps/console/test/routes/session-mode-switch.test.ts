@@ -93,7 +93,7 @@ describe('POST /api/sessions/:id/mode', () => {
 
   it('refuses an agent caller, whoever it is, and changes nothing', async () => {
     for (const who of ['test-session-1', 'someone-else', '']) {
-      expect((await post({ mode: 'claude' }, { 'x-codeman-parent-session': who })).statusCode, who).toBe(403);
+      expect((await post({ mode: 'claude' }, { 'x-reverie-parent-session': who })).statusCode, who).toBe(403);
     }
     untouched();
   });

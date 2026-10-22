@@ -23,14 +23,14 @@
  * `_appendUltracodeConnectionLines` at the end of its render pass), so both the
  * subagent and ultracode lines live in one batched read→write reflow pass.
  *
- * @mixin Extends CodemanApp.prototype via Object.assign
+ * @mixin Extends ReverieApp.prototype via Object.assign
  * @dependency subagent-windows.js (makeWindowDraggable, updateConnectionLines, #connectionLines)
  * @dependency ultracode-panel.js (workflowRuns/workflowRunDetails, _workflowAgentCardHtml, _fmtNum)
  * @loadorder 15.5 (after subagent-windows.js — needs makeWindowDraggable at runtime)
  */
-/* global CodemanApp, escapeHtml */
+/* global ReverieApp, escapeHtml */
 
-Object.assign(CodemanApp.prototype, {
+Object.assign(ReverieApp.prototype, {
   /** Lazily seed the floating-window state maps (constructor also seeds them). */
   _ensureUltracodeWindowState() {
     if (!this.ultracodeWindows) this.ultracodeWindows = new Map(); // runId -> { element, parentSessionId, dragListeners }

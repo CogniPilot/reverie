@@ -72,7 +72,7 @@ describe('folder grid routes — local folder', () => {
   beforeEach(async () => {
     harness = await createRouteTestHarness(registerFileRoutes);
     sessionId = harness.ctx._sessionId;
-    root = mkdtempSync(join(tmpdir(), 'codeman-folder-grid-'));
+    root = mkdtempSync(join(tmpdir(), 'reverie-folder-grid-'));
     dir = join(root, 'renders');
     mkdirSync(dir);
     touch(join(dir, 'old.png'), 'old-png', 1_700_000_000);
@@ -89,8 +89,8 @@ describe('folder grid routes — local folder', () => {
     await harness.app.close();
     folderGrants.clearSession(sessionId);
     rmSync(root, { recursive: true, force: true });
-    delete process.env.CODEMAN_ATTACHMENT_CONFINE;
-    delete process.env.CODEMAN_ATTACHMENT_BLOCKED_PATHS;
+    delete process.env.REVERIE_ATTACHMENT_CONFINE;
+    delete process.env.REVERIE_ATTACHMENT_BLOCKED_PATHS;
   });
 
   async function grant(path: string) {
@@ -122,11 +122,11 @@ describe('folder grid routes — local folder', () => {
   });
 
   it('refuses a blocked folder and a folder outside a confined workspace', async () => {
-    process.env.CODEMAN_ATTACHMENT_BLOCKED_PATHS = dir;
+    process.env.REVERIE_ATTACHMENT_BLOCKED_PATHS = dir;
     expect((await grant(dir)).statusCode).toBe(403);
-    delete process.env.CODEMAN_ATTACHMENT_BLOCKED_PATHS;
+    delete process.env.REVERIE_ATTACHMENT_BLOCKED_PATHS;
 
-    process.env.CODEMAN_ATTACHMENT_CONFINE = '1';
+    process.env.REVERIE_ATTACHMENT_CONFINE = '1';
     harness.ctx._session.workingDir = join(dir, 'shots');
     expect((await grant(dir)).statusCode).toBe(403);
     harness.ctx._session.workingDir = root;
@@ -136,7 +136,7 @@ describe('folder grid routes — local folder', () => {
   it('never reads a refused folder: the guard runs on the resolved folder first', async () => {
     const readdir = vi.spyOn(fs, 'readdir');
     try {
-      process.env.CODEMAN_ATTACHMENT_BLOCKED_PATHS = dir;
+      process.env.REVERIE_ATTACHMENT_BLOCKED_PATHS = dir;
       expect((await grant(dir)).statusCode).toBe(403);
       expect(readdir).not.toHaveBeenCalled();
     } finally {
@@ -227,7 +227,7 @@ describe('folder grid routes — local folder', () => {
     writeFileSync(join(secret, 'key.png'), 'secret');
     symlinkSync(join(secret, 'key.png'), join(dir, 'innocent.png'));
     const { folderId } = JSON.parse((await grant(dir)).body).data;
-    process.env.CODEMAN_ATTACHMENT_BLOCKED_PATHS = secret;
+    process.env.REVERIE_ATTACHMENT_BLOCKED_PATHS = secret;
     const res = await harness.app.inject({
       method: 'GET',
       url: `/api/sessions/${sessionId}/folders/${folderId}/files/innocent.png/raw`,
@@ -329,8 +329,8 @@ describe('folder grid routes — local folder', () => {
         hostId: 'local',
         label: 'local',
         engine: 'docker',
-        image: 'codeman-sandbox',
-        containerName: 'codeman-case-test',
+        image: 'reverie-sandbox',
+        containerName: 'reverie-case-test',
         hostWorkspacePath: root,
         containerWorkdir: root,
         network: 'bridge',
@@ -358,7 +358,7 @@ describe('folder grid routes — local folder', () => {
 
   it('keeps resolving ~/ for a session that is not in a Docker case', async () => {
     // The contrast: only the Docker case is turned away, `~/` itself still works.
-    const res = await grant('~/this-folder-does-not-exist-codeman-test');
+    const res = await grant('~/this-folder-does-not-exist-reverie-test');
     expect(res.statusCode).toBe(404);
   });
 
@@ -511,7 +511,7 @@ describe('folder grid routes — remote (SSH) case', () => {
 describe('remote folder listing script (real sh)', () => {
   let root: string;
   beforeEach(() => {
-    root = mkdtempSync(join(tmpdir(), 'codeman-folder-sh-'));
+    root = mkdtempSync(join(tmpdir(), 'reverie-folder-sh-'));
   });
   afterEach(() => rmSync(root, { recursive: true, force: true }));
 

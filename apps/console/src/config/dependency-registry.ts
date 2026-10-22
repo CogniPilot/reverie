@@ -1,6 +1,6 @@
 /**
  * @fileoverview Static registry of downstream tool dependencies probed by
- * `codeman doctor`. Each entry declares per-environment resolvers and the
+ * `reverie doctor`. Each entry declares per-environment resolvers and the
  * skills that use it. EXTENSION POINT: skill-manifest-driven discovery
  * (COD follow-up) will merge dynamically-found entries into this list.
  *
@@ -80,7 +80,7 @@ const ALL: ProbeEnvironment[] = ['linux', 'darwin', 'wsl', 'win32'];
 /**
  * The doctor's ROW IDENTITY for a CLI, where it differs from the registry id.
  *
- * These are two separate contracts and they have never been the same thing: `codeman doctor`
+ * These are two separate contracts and they have never been the same thing: `reverie doctor`
  * prints a tool table whose ids predate the registry, and `dsh` names the BINARY while the
  * run mode is `deepseek`. Keeping the historical id here means the doctor's output does not
  * shift under a refactor that was supposed to change nothing a user can see.
@@ -104,11 +104,11 @@ const DOCTOR_ROW_OVERRIDES: Record<string, { id?: string; label?: string; usedBy
 };
 
 /**
- * Build one `codeman doctor` row per enabled CLI, straight from its registry entry.
+ * Build one `reverie doctor` row per enabled CLI, straight from its registry entry.
  *
  * This replaces eight hand-written rows that had to be kept in step with the run modes by
  * hand — and were not: an earlier draft of this refactor silently dropped the Grok and
- * DeepSeek rows, so `codeman doctor` stopped reporting two shipped CLIs at all. Deriving
+ * DeepSeek rows, so `reverie doctor` stopped reporting two shipped CLIs at all. Deriving
  * the list makes that class of omission impossible.
  *
  * ⚠️ The version regex is compiled through `compileVersionRegex()`, NOT `new RegExp()`. It
@@ -162,7 +162,7 @@ function cliDependencyEntries(): ToolDependency[] {
 }
 
 /**
- * The tools `codeman doctor` probes, resolved AT CALL TIME.
+ * The tools `reverie doctor` probes, resolved AT CALL TIME.
  *
  * ⚠️ A FUNCTION, not a module-level const, and for the same reason `sessionModeSchema()` and
  * `allowedEnvPrefixes()` are functions: `cliDependencyEntries()` reads the CLI registry, and

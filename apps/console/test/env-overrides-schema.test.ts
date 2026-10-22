@@ -52,7 +52,7 @@ describe('envOverrides exact-key allowlist', () => {
   });
 
   it('still blocks security-sensitive keys', () => {
-    for (const key of ['PATH', 'LD_PRELOAD', 'NODE_OPTIONS', 'CODEMAN_MUX_NAME']) {
+    for (const key of ['PATH', 'LD_PRELOAD', 'NODE_OPTIONS', 'REVERIE_MUX_NAME']) {
       expect(() =>
         CreateSessionSchema.parse({
           workingDir: '/tmp',

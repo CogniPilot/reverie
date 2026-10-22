@@ -2,7 +2,7 @@
  * @fileoverview COD-55 — tunnel password guard.
  *
  * Enabling the Cloudflare tunnel publishes the whole app (full terminal control =
- * effectively RCE) to a public *.trycloudflare.com URL. When no CODEMAN_PASSWORD
+ * effectively RCE) to a public *.trycloudflare.com URL. When no REVERIE_PASSWORD
  * is set, requests through that URL are unauthenticated. These tests assert the
  * PUT /api/settings tunnel-enable path REFUSES to start the tunnel unless a
  * password is set OR the unauthenticated-network opt-in is acknowledged.
@@ -50,8 +50,8 @@ function makeTunnelManager(running = false) {
 describe('COD-55 tunnel password guard (PUT /api/settings tunnelEnabled)', () => {
   let harness: RouteTestHarness;
   let tunnel: ReturnType<typeof makeTunnelManager>;
-  const savedPassword = process.env.CODEMAN_PASSWORD;
-  const savedOptIn = process.env.CODEMAN_ALLOW_UNAUTHENTICATED_NETWORK;
+  const savedPassword = process.env.REVERIE_PASSWORD;
+  const savedOptIn = process.env.REVERIE_ALLOW_UNAUTHENTICATED_NETWORK;
 
   beforeEach(async () => {
     harness = await createRouteTestHarness(registerSystemRoutes);
@@ -60,16 +60,16 @@ describe('COD-55 tunnel password guard (PUT /api/settings tunnelEnabled)', () =>
     tunnel = makeTunnelManager(false);
     // tunnelManager is null in the default mock ctx — inject our spy.
     (harness.ctx as unknown as { tunnelManager: unknown }).tunnelManager = tunnel;
-    delete process.env.CODEMAN_PASSWORD;
-    delete process.env.CODEMAN_ALLOW_UNAUTHENTICATED_NETWORK;
+    delete process.env.REVERIE_PASSWORD;
+    delete process.env.REVERIE_ALLOW_UNAUTHENTICATED_NETWORK;
   });
 
   afterEach(async () => {
     await harness.app.close();
-    if (savedPassword === undefined) delete process.env.CODEMAN_PASSWORD;
-    else process.env.CODEMAN_PASSWORD = savedPassword;
-    if (savedOptIn === undefined) delete process.env.CODEMAN_ALLOW_UNAUTHENTICATED_NETWORK;
-    else process.env.CODEMAN_ALLOW_UNAUTHENTICATED_NETWORK = savedOptIn;
+    if (savedPassword === undefined) delete process.env.REVERIE_PASSWORD;
+    else process.env.REVERIE_PASSWORD = savedPassword;
+    if (savedOptIn === undefined) delete process.env.REVERIE_ALLOW_UNAUTHENTICATED_NETWORK;
+    else process.env.REVERIE_ALLOW_UNAUTHENTICATED_NETWORK = savedOptIn;
   });
 
   it('REFUSES tunnel-enable with no password and no opt-in (4xx, start not called)', async () => {
@@ -84,15 +84,15 @@ describe('COD-55 tunnel password guard (PUT /api/settings tunnelEnabled)', () =>
     const body = JSON.parse(res.body);
     expect(body.success).toBe(false);
     // Message should tell the user how to fix it.
-    expect(body.error).toMatch(/CODEMAN_PASSWORD|CODEMAN_ALLOW_UNAUTHENTICATED_NETWORK/);
+    expect(body.error).toMatch(/REVERIE_PASSWORD|REVERIE_ALLOW_UNAUTHENTICATED_NETWORK/);
     // The tunnel must NOT have been started.
     expect(tunnel.start).not.toHaveBeenCalled();
     // And tunnelEnabled:true must NOT have been persisted.
     expect(mockedWriteFile).not.toHaveBeenCalled();
   });
 
-  it('ALLOWS tunnel-enable when CODEMAN_PASSWORD is set (start called, 200)', async () => {
-    process.env.CODEMAN_PASSWORD = 'hunter2';
+  it('ALLOWS tunnel-enable when REVERIE_PASSWORD is set (start called, 200)', async () => {
+    process.env.REVERIE_PASSWORD = 'hunter2';
 
     const res = await harness.app.inject({
       method: 'PUT',
@@ -105,7 +105,7 @@ describe('COD-55 tunnel password guard (PUT /api/settings tunnelEnabled)', () =>
   });
 
   it('ALLOWS tunnel-enable with the unauthenticated-network opt-in acknowledged (start called, 200)', async () => {
-    process.env.CODEMAN_ALLOW_UNAUTHENTICATED_NETWORK = '1';
+    process.env.REVERIE_ALLOW_UNAUTHENTICATED_NETWORK = '1';
 
     const res = await harness.app.inject({
       method: 'PUT',

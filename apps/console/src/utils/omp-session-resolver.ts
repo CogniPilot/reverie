@@ -7,10 +7,10 @@
  * (workingDir mangled the same way Claude Code mangles `~/.claude/projects/*`:
  * every `/` replaced with `-`). `--continue` picks whichever file in that
  * directory is newest, which silently drifts to the WRONG conversation the
- * moment two Codeman sessions ever touch the same directory — exactly what a
+ * moment two Reverie sessions ever touch the same directory — exactly what a
  * closed-then-resumed row plus a still-running duplicate produces. Resolving
  * the id once and pinning it with `--resume` removes that ambiguity for every
- * later relaunch of the same Codeman session.
+ * later relaunch of the same Reverie session.
  *
  * @module utils/omp-session-resolver
  */
@@ -49,7 +49,7 @@ export function stripTrailingSlash(workingDir: string): string {
  * Getting this wrong doesn't error, it just silently returns an empty
  * directory listing: findLatestOmpSessionId() below then always falls through
  * to null, so continuation pinning quietly degrades to omp's own ambiguous
- * `--continue` for every case under $HOME (i.e. virtually all real Codeman
+ * `--continue` for every case under $HOME (i.e. virtually all real Reverie
  * cases) while appearing to work in `/tmp`-based manual testing.
  * Pure so it's unit-testable without touching the filesystem.
  */
@@ -157,7 +157,7 @@ function readOmpSessionHeader(filePath: string): { id: string; cwd: string } | n
 }
 
 /**
- * Process-wide registry of OMP session ids already pinned to a live Codeman
+ * Process-wide registry of OMP session ids already pinned to a live Reverie
  * session. Two omp tabs in the same case dir (`w1-foo`, `w2-foo`) resolve
  * against the SAME directory on disk — without this, both could pick the
  * newest file and alias onto each other's conversation (found in upstream PR

@@ -52,7 +52,7 @@ describe('POST /api/sessions parentSessionId', () => {
   };
 
   beforeEach(async () => {
-    workingDir = await mkdtemp(join(tmpdir(), 'codeman-lineage-'));
+    workingDir = await mkdtemp(join(tmpdir(), 'reverie-lineage-'));
     harness = await createHarness();
   });
 
@@ -72,13 +72,13 @@ describe('POST /api/sessions parentSessionId', () => {
     expect(created(res.body).parentSessionId).toBe(PARENT_ID);
   });
 
-  it('accepts the X-Codeman-Parent-Session header, which is how the skill sends it', async () => {
+  it('accepts the X-Reverie-Parent-Session header, which is how the skill sends it', async () => {
     // The agent skill puts this on its shared curl invocation, so every spawn
     // recipe carries it without a per-recipe edit.
     const res = await harness.app.inject({
       method: 'POST',
       url: '/api/sessions',
-      headers: { 'x-codeman-parent-session': PARENT_ID },
+      headers: { 'x-reverie-parent-session': PARENT_ID },
       payload: { name: 'child', mode: 'claude', workingDir },
     });
 
@@ -92,7 +92,7 @@ describe('POST /api/sessions parentSessionId', () => {
     const res = await harness.app.inject({
       method: 'POST',
       url: '/api/sessions',
-      headers: { 'x-codeman-parent-session': 'other-session' },
+      headers: { 'x-reverie-parent-session': 'other-session' },
       payload: { name: 'child', mode: 'claude', workingDir, parentSessionId: PARENT_ID },
     });
 
@@ -166,7 +166,7 @@ describe('POST /api/sessions parentSessionId', () => {
     const res = await harness.app.inject({
       method: 'POST',
       url: '/api/sessions',
-      headers: { 'x-codeman-parent-session': 'x'.repeat(500) },
+      headers: { 'x-reverie-parent-session': 'x'.repeat(500) },
       payload: { name: 'child', mode: 'claude', workingDir },
     });
 

@@ -23,7 +23,7 @@ function loadSettingsUi(data: Record<string, unknown>) {
       return elements[id] ?? null;
     }
   }
-  const context = vm.createContext({ CodemanApp: App, window: {}, document: {} });
+  const context = vm.createContext({ ReverieApp: App, window: {}, document: {} });
   for (const file of ['constants.js', 'settings-ui.js']) {
     vm.runInContext(readFileSync(resolve(import.meta.dirname, '../src/web/public', file), 'utf8'), context, {
       filename: file,
@@ -70,8 +70,8 @@ describe('manual update policy visibility', () => {
     expect(elements.updateResult.innerHTML).toBe(
       'Reverie is maintained in this monorepo. Rebuild its container image to update.'
     );
-    expect(elements.updateResult.innerHTML).not.toContain('CODEMAN_DISABLE_SELF_UPDATE');
-    expect(elements.updateResult.innerHTML).not.toContain('aicodeman');
+    expect(elements.updateResult.innerHTML).not.toContain('REVERIE_DISABLE_SELF_UPDATE');
+    expect(elements.updateResult.innerHTML).not.toContain('aireverie');
   });
 
   it('preserves the enabled git update flow', async () => {

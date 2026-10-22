@@ -31,14 +31,14 @@ Types live in `src/types/session.ts`; persistence in `src/remote-hosts.ts`.
 | `RemoteCase` | A working directory on a host: `name`, `type: 'remote'`, `hostId`, `remotePath`. |
 | `SessionRemote` (extends `RemoteSshOptions`) | The resolved bundle stamped onto a live session: host coordinates + `remotePath` + `commands`, plus **`owned?`** and **`remoteSessionName?`** (COD-105 — see [Ownership](#ownership-launched-vs-discovered-and-attached-cod-105)). Built by `toSessionRemote(host, case)` (sets `owned: true`) for the launch path, or `toAttachedSessionRemote(host, name, path)` (sets `owned: false`) for the attach path. Both copy the advanced SSH options through so every connection is identical. |
 | `RemoteCommandMode` | `Extract<SessionMode, 'shell' \| 'claude' \| 'opencode' \| 'codex' \| 'gemini' \| 'antigravity' \| 'pi' \| 'grok' \| 'deepseek' \| 'omp'>` — the modes that can run remotely. |
-| `RemoteSessionInfo` (COD-105) | One discovered remote tmux session: `name` (always `codeman-*`), `attached` (a client is connected), `created` (epoch s), `windows`. Returned by `listRemoteCodemanSessions()`. |
+| `RemoteSessionInfo` (COD-105) | One discovered remote tmux session: `name` (always `reverie-*`), `attached` (a client is connected), `created` (epoch s), `windows`. Returned by `listRemoteReverieSessions()`. |
 
 Persistence is two flat JSON arrays in the instance data dir:
 
-- `~/.codeman/remote-hosts.json` — `readRemoteHosts()` / `writeRemoteHosts()`
-- `~/.codeman/remote-cases.json` — `readRemoteCases()` / `writeRemoteCases()`
+- `~/.reverie/remote-hosts.json` — `readRemoteHosts()` / `writeRemoteHosts()`
+- `~/.reverie/remote-cases.json` — `readRemoteCases()` / `writeRemoteCases()`
 
-(Paths via `remoteHostsPath()` / `remoteCasesPath()`; both honor `CODEMAN_INSTANCE`
+(Paths via `remoteHostsPath()` / `remoteCasesPath()`; both honor `REVERIE_INSTANCE`
 because the config dir is the instance data dir.)
 
 On the live `Session`, the remote rides as `_remote?: SessionRemote`. When
@@ -91,27 +91,27 @@ builds the command that launches (or **reattaches** to) the remote session:
 
 ```
 ssh -o BatchMode=yes -t <connection-args> user@host \
-  'tmux -L codeman-remote new-session -A -s codeman-ssh-<id8> -c <remotePath> "cd <remotePath> && exec <cli>" \; \
-     set -t codeman-ssh-<id8> status off \; set -t codeman-ssh-<id8> mouse off \; \
-     set -t codeman-ssh-<id8> prefix C-q \; set -s escape-time 0 \; \
-     set -t codeman-ssh-<id8> window-size latest'
+  'tmux -L reverie-remote new-session -A -s reverie-ssh-<id8> -c <remotePath> "cd <remotePath> && exec <cli>" \; \
+     set -t reverie-ssh-<id8> status off \; set -t reverie-ssh-<id8> mouse off \; \
+     set -t reverie-ssh-<id8> prefix C-q \; set -s escape-time 0 \; \
+     set -t reverie-ssh-<id8> window-size latest'
 ```
 
 Key points:
 
-- **`new-session -A -s codeman-ssh-<id8>`** = attach-if-exists-else-create, so a
-  reconnect (same deterministic `remoteTmuxSessionName(sessionId)` — `codeman-ssh-` +
+- **`new-session -A -s reverie-ssh-<id8>`** = attach-if-exists-else-create, so a
+  reconnect (same deterministic `remoteTmuxSessionName(sessionId)` — `reverie-ssh-` +
   the first 8 chars of the session id) lands back in
   the **same** remote session rather than spawning a duplicate. This is what makes
   the remote agent survive an SSH drop. The name deliberately fails
   `SAFE_MUX_NAME_PATTERN` so a Reverie running ON the remote host never adopts it.
-- **`-L codeman-remote`** = a DEDICATED socket for sessions launched by remote
-  Codemans, NOT the canonical `-L codeman` socket the remote host's own Reverie
+- **`-L reverie-remote`** = a DEDICATED socket for sessions launched by remote
+  Reveries, NOT the canonical `-L reverie` socket the remote host's own Reverie
   uses. Options are set per-session (`set -t`), never `-g`, so a shared remote
   tmux server's other sessions are untouched (#145 hardening). Note the
-  asymmetry: **discovery/attach (COD-105) target the canonical `-L codeman`
+  asymmetry: **discovery/attach (COD-105) target the canonical `-L reverie`
   socket** — they join sessions the remote's own Reverie manages, while owned
-  durable launches live on `-L codeman-remote`.
+  durable launches live on `-L reverie-remote`.
 - **`exec <cli>`** replaces the pane shell with the agent, so the pane PID *is*
   the agent. The per-mode command comes from `remote.commands?.[mode]` or
   `defaultRemoteCommandForMode(mode)` (`exec claude` / `exec opencode` /
@@ -153,7 +153,7 @@ skipped; command construction is still asserted by unit tests.
 ## Ownership: launched vs. discovered-and-attached (COD-105)
 
 COD-104 (above) was Phase 1 — Reverie *launches* a remote session and owns it.
-COD-105 is Phase 2 — Reverie can also **discover** `codeman-*` tmux sessions
+COD-105 is Phase 2 — Reverie can also **discover** `reverie-*` tmux sessions
 already running on a remote host (created by the remote's own Reverie or another
 instance) and **attach** to one it didn't launch. Ownership decides what happens
 when the tab closes.
@@ -168,9 +168,9 @@ when the tab closes.
 
 ### Discovery
 
-`listRemoteCodemanSessions(host)` lists the remote's `codeman-*` sessions:
+`listRemoteReverieSessions(host)` lists the remote's `reverie-*` sessions:
 
-- `buildRemoteListSessionsCommand()` runs `tmux -L codeman list-sessions -F "…"`
+- `buildRemoteListSessionsCommand()` runs `tmux -L reverie list-sessions -F "…"`
   over SSH (connection args from the shared `buildSshConnectionArgs`, so discovery
   connects identically to launch/probe). `2>/dev/null` swallows tmux's "no server
   running" stderr.
@@ -178,8 +178,8 @@ when the tab closes.
   remote tmux's `-F "…\t…"` format emits the **literal two-character `\t`**, not a
   real tab (verified on tmux next-3.7), so the parser splits on `/\\t|\t/` (literal
   backslash-t **or** a real tab, for builds that do expand it). It keeps only
-  `codeman-*` names, coerces types, and skips malformed lines.
-- `listRemoteCodemanSessions()` **never throws** — unreachable host / no tmux / no
+  `reverie-*` names, coerces types, and skips malformed lines.
+- `listRemoteReverieSessions()` **never throws** — unreachable host / no tmux / no
   sessions all map to `[]`. Like the prereq probe, it **no-ops to `[]` under
   `VITEST`** so a request path never opens a real ssh connection.
 
@@ -192,7 +192,7 @@ host; Reverie never auto-discovers on host select.
 remote command line by ownership:
 
 - **`owned === false`** → `buildRemoteAttachCommand(remote, name)` — emits
-  `ssh … -t … 'tmux -L codeman attach -t <remoteSessionName>'`. It uses **`attach`,
+  `ssh … -t … 'tmux -L reverie attach -t <remoteSessionName>'`. It uses **`attach`,
   NOT `new-session -A`**, so it only *joins* an existing session and never creates
   one.
 - **owned (default)** → `buildRemoteLaunchCommand` (the COD-104 path above).
@@ -200,7 +200,7 @@ remote command line by ownership:
 ### Detach-not-kill
 
 `TmuxManager.killSession()` has an **early return for non-owned remote sessions**:
-it tears down **only the LOCAL pane** holding the ssh client (`tmux -L codeman
+it tears down **only the LOCAL pane** holding the ssh client (`tmux -L reverie
 kill-session` on *this* host's socket). Killing the local ssh sends SIGHUP to the
 remote `tmux attach`, which **detaches** — the durable remote session survives.
 The early return is a structural guarantee that **no code path can ever issue a
@@ -242,8 +242,8 @@ reconnects with bounded backoff. It must **never** revive a session whose agent
 exited cleanly (Ctrl-C, Ctrl-D, `exit`) — that tears down the durable remote
 tmux session itself, and a transport-level `isPaneDead()` cannot tell that apart
 from a plain network drop. `remoteTmuxSessionAlive()` (#355) resolves this by
-probing the remote host directly: `tmux -L codeman-remote has-session -t
-codeman-ssh-<id8>` over the same `buildSshConnectionArgs` as launch, classified
+probing the remote host directly: `tmux -L reverie-remote has-session -t
+reverie-ssh-<id8>` over the same `buildSshConnectionArgs` as launch, classified
 by **exit status alone** (`classifyRemoteAliveExit`: `0` = alive, ssh's `255` or
 a timeout = unknown, anything else = gone) — `has-session` prints nothing on
 success, so reading stdout would misclassify every live session as gone. An
@@ -373,7 +373,7 @@ by the transport:
    directory, so they do not match a remote home at a different path. Everything else in
    the list is depth-anchored (`/.ssh/`, `/.aws/credentials`, `/.claude/.credentials.json`,
    `/etc/shadow`, ...) and applies to a remote path unchanged.
-5. Size cap (`CODEMAN_MAX_DOWNLOAD_BYTES`) applied to the **remote** size, before the
+5. Size cap (`REVERIE_MAX_DOWNLOAD_BYTES`) applied to the **remote** size, before the
    body is requested.
 
 The path arrives from the browser (`?path=`) and is interpolated as a single
@@ -385,11 +385,11 @@ the first stderr line, the timeout, or the exit code; never Node's `Command fail
 message, which would carry the identity-file path and the probe script into the body.
 
 **Connections are bounded.** Every probe and buffered read runs through a small global
-semaphore (`src/remote-ssh-limiter.ts`, default 4, `CODEMAN_MAX_REMOTE_FILE_SSH`), the
+semaphore (`src/remote-ssh-limiter.ts`, default 4, `REVERIE_MAX_REMOTE_FILE_SSH`), the
 attachment-history list resolves its whole history in one batched probe instead of one
 handshake per entry, and probes are chunked at 40 paths per round trip. Terminal output
 in a remote session is written on the remote host, so a prompt-injected agent printing
-hundreds of `codeman://attach` links used to make the server fork one `ssh` per link,
+hundreds of `reverie://attach` links used to make the server fork one `ssh` per link,
 each holding a 20 s probe timeout, and a 100-entry history re-listed on every
 `attachment:detected` event tripped OpenSSH's default `MaxStartups 10:30:100`. Streams
 (`file-raw`, by-id `raw`) are not counted: one is held per browser request for the life
@@ -600,7 +600,7 @@ Routes are registered in `src/web/routes/case-routes.ts`:
 | `POST` | `/api/remote-hosts` | Create a host |
 | `PUT` | `/api/remote-hosts/:id` | Update a host |
 | `DELETE` | `/api/remote-hosts/:id` | Delete a host |
-| `GET` | `/api/remote-hosts/:hostId/sessions` | Discover `codeman-*` sessions on the host (COD-105; `listRemoteCodemanSessions`, never errors) |
+| `GET` | `/api/remote-hosts/:hostId/sessions` | Discover `reverie-*` sessions on the host (COD-105; `listRemoteReverieSessions`, never errors) |
 | `POST` | `/api/cases/remote-link` | Link a case to a remote host (creates the `RemoteCase`) |
 
 `RemoteHost` accepts the optional `wakeMac` (magic packet, sent by Reverie) and `wakeCommand`
@@ -609,7 +609,7 @@ input** above.
 
 Attaching to a discovered session is a **session-create** path, not a host route:
 `POST /api/sessions` accepts `attachRemoteSession: { hostId, remoteSessionName }`
-(schema in `schemas.ts`; `remoteSessionName` must match `^codeman-[a-zA-Z0-9._-]+$`),
+(schema in `schemas.ts`; `remoteSessionName` must match `^reverie-[a-zA-Z0-9._-]+$`),
 which `session-routes.ts` turns into a non-owned (`owned: false`) session.
 
 Frontend touchpoints: the remote-host management UI is in `session-ui.js` /

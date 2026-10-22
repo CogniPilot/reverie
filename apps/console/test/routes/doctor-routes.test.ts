@@ -1,5 +1,5 @@
 /**
- * @fileoverview GET /api/doctor: the `codeman doctor` report for Settings → System → Diagnostics.
+ * @fileoverview GET /api/doctor: the `reverie doctor` report for Settings → System → Diagnostics.
  * The route runs the probe out of process (the engine is synchronous), so every test injects the
  * runner; the default runner's parsing is covered against a faked `execFile`, and the CLI contract
  * it relies on is exercised for real in test/doctor-cli-json.test.ts.
@@ -27,7 +27,7 @@ const REPORT: DependencyReportJson = {
 };
 
 afterEach(() => {
-  delete process.env.CODEMAN_MULTIUSER;
+  delete process.env.REVERIE_MULTIUSER;
   execFileMock.mockReset();
 });
 
@@ -84,7 +84,7 @@ describe('GET /api/doctor', () => {
   });
 
   it('multi-user: a non-admin is refused and nothing is probed', async () => {
-    process.env.CODEMAN_MULTIUSER = '1';
+    process.env.REVERIE_MULTIUSER = '1';
     const runner = vi.fn<DoctorRunner>(async () => REPORT);
     const { app } = await createRouteTestHarness((a) => registerDoctorRoutes(a, runner), {
       authUser: { username: 'bob', role: 'user' },
@@ -95,7 +95,7 @@ describe('GET /api/doctor', () => {
   });
 
   it('multi-user: an admin is allowed', async () => {
-    process.env.CODEMAN_MULTIUSER = '1';
+    process.env.REVERIE_MULTIUSER = '1';
     const { app } = await createRouteTestHarness((a) => registerDoctorRoutes(a, async () => REPORT), {
       authUser: { username: 'root', role: 'admin' },
     });

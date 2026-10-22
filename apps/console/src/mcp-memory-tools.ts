@@ -3,8 +3,8 @@
  *
  * Opt-in per agent. They exist only when this MCP server's own environment names an instance configuration
  * (`REVERIE_MCP_MEMORY_INSTANCE`, set in that agent's MCP entry). The caller is that instance: no tool argument
- * can select another agent's store. Each call runs the fleet's existing portable memory bridge
- * (`python -m cto.memory_cli`) with the request on stdin, never interpolated into a command line, so the
+ * can select another agent's store. Each call runs the reverie's existing portable memory bridge
+ * (`python -m reverie.memory_cli`) with the request on stdin, never interpolated into a command line, so the
  * bridge's own scope rules and hard floors apply unchanged.
  *
  * Scope: with `project`, the shared project store; without it, the caller's private store.
@@ -12,7 +12,7 @@
 import { execFile } from 'node:child_process';
 import { isAbsolute } from 'node:path';
 import type { ToolDefinition, ToolResult } from './mcp-server.js';
-import { bothNames, envValue } from './config/fleet-env.js';
+import { environmentEntry, envValue } from './config/reverie-env.js';
 
 export const MEMORY_TOOL_NAMES = ['memory_recall', 'memory_remember'] as const;
 
@@ -26,7 +26,7 @@ export interface MemoryToolsConfig {
   instance?: string;
   /** Interpreter that runs the bridge. */
   python: string;
-  /** Source tree on PYTHONPATH (the installed fleet runtime). */
+  /** Python source root on PYTHONPATH (python/, containing the reverie package). */
   source: string;
 }
 
@@ -41,8 +41,8 @@ export function resolveMemoryToolsConfig(env: NodeJS.ProcessEnv = process.env): 
   const instance = env.REVERIE_MCP_MEMORY_INSTANCE?.trim();
   return {
     instance: instance && isAbsolute(instance) ? instance : undefined,
-    python: env.REVERIE_MCP_MEMORY_PYTHON?.trim() || '/opt/fleet/python/bin/python3',
-    source: env.REVERIE_MCP_MEMORY_SOURCE?.trim() || '/workspace',
+    python: env.REVERIE_MCP_MEMORY_PYTHON?.trim() || '/opt/reverie/python/bin/python3',
+    source: env.REVERIE_MCP_MEMORY_SOURCE?.trim() || '/workspace/python',
   };
 }
 
@@ -138,11 +138,11 @@ export function createMemoryTools(config: MemoryToolsConfig, runner: BridgeRunne
         PATH: process.env.PATH ?? '/usr/bin:/bin',
         HOME: process.env.HOME ?? '/tmp',
         PYTHONPATH: config.source,
-        ...(config.instance ? bothNames('INSTANCE_CONFIG', config.instance) : {}),
-        ...(apiBase ? bothNames('API_BASE', apiBase) : {}),
-        ...(embedUrl ? bothNames('EMBED_URL', embedUrl) : {}),
+        ...(config.instance ? environmentEntry('INSTANCE_CONFIG', config.instance) : {}),
+        ...(apiBase ? environmentEntry('API_BASE', apiBase) : {}),
+        ...(embedUrl ? environmentEntry('EMBED_URL', embedUrl) : {}),
       };
-      const out = await runner(config.python, ['-m', 'cto.memory_cli'], {
+      const out = await runner(config.python, ['-m', 'reverie.memory_cli'], {
         env,
         input: JSON.stringify(body),
         timeoutMs: BRIDGE_TIMEOUT_MS,

@@ -24,7 +24,7 @@
  *
  * `HandsFreeDetector` is pure (test/hands-free.test.ts).
  *
- * @mixin Extends CodemanApp.prototype via Object.assign
+ * @mixin Extends ReverieApp.prototype via Object.assign
  * @dependency chatroom-ui.js (_chatEls, _sendChatVoice, _chatVoiceStatus, _diag),
  *   voice-chat.js (_chatMicRoute, _transcribeOnServer, _readAloud, _voiceSetting), car-mode.js (_carScreen)
  * @loadorder 12.13 (after car-mode.js)
@@ -134,7 +134,7 @@ const HANDS_FREE_TITLES = {
   paused: 'Hands-free: paused in car mode. Tap the screen to listen',
 };
 
-Object.assign(CodemanApp.prototype, {
+Object.assign(ReverieApp.prototype, {
   /** Called once when the composer is built (chatroom-ui.js): the toggle goes right after the mic. */
   _buildHandsFree(mic) {
     const btn = this._chatEl('button', 'chatroom-handsfree', 'Hands-free');

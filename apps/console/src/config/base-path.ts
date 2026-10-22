@@ -1,15 +1,15 @@
 /**
  * @fileoverview Reverse-proxy base-path support — the single source of truth for
- * the URL prefix Codeman is mounted under.
+ * the URL prefix Reverie is mounted under.
  *
- * When Codeman runs behind a reverse proxy at a sub-path (e.g. `/codeman/`), the
+ * When Reverie runs behind a reverse proxy at a sub-path (e.g. `/reverie/`), the
  * proxy forwards the FULL request path INCLUDING that prefix (it does not strip
  * it). Every URL the server emits to the browser (the HTML shell, redirects,
  * the manifest/service-worker) and every URL the browser builds (fetch/SSE/WS)
  * must therefore carry the prefix too.
  *
  * This module normalizes the operator-supplied value (`--base-url` / the
- * `CODEMAN_BASE_URL` env var) into ONE canonical form used everywhere:
+ * `REVERIE_BASE_URL` env var) into ONE canonical form used everywhere:
  *   - `''`      — mounted at the origin root (the default, `/`)
  *   - `/foo`    — mounted at a sub-path (leading slash, NO trailing slash)
  *
@@ -31,8 +31,8 @@ const VALID_BASE_PATH = /^(?:\/[A-Za-z0-9._~-]+)+$/;
 /**
  * Normalize an operator-supplied base path into the canonical form.
  *
- * Accepts loose input (`codeman`, `/codeman`, `/codeman/`, `//codeman//`) and
- * returns `''` for root or `/codeman` otherwise. Does NOT validate the character
+ * Accepts loose input (`reverie`, `/reverie`, `/reverie/`, `//reverie//`) and
+ * returns `''` for root or `/reverie` otherwise. Does NOT validate the character
  * set — call {@link assertValidBasePath} (or {@link isValidBasePath}) for that.
  */
 export function normalizeBasePath(input: string | undefined | null): string {
@@ -59,7 +59,7 @@ export function assertValidBasePath(input: string | undefined | null): string {
   const normalized = normalizeBasePath(input);
   if (!isValidBasePath(normalized)) {
     throw new Error(
-      `Invalid --base-url ${JSON.stringify(input)}: use a plain path like "/codeman" ` +
+      `Invalid --base-url ${JSON.stringify(input)}: use a plain path like "/reverie" ` +
         `(letters, digits, and ._~- in each segment).`
     );
   }

@@ -4,9 +4,9 @@ import { parseAttachmentMagicLinks, parseTerminalAttachmentRequests } from '../s
 import { isSupportedAttachmentExtension } from '../src/attachment-registry.js';
 
 describe('attachment magic links', () => {
-  it('extracts absolute paths from codeman attach magic URLs', () => {
+  it('extracts absolute paths from reverie attach magic URLs', () => {
     const links = parseAttachmentMagicLinks(
-      'Preview this: codeman://attach?path=%2Fmnt%2Fc%2FDecks%2FBoard%20Update.pptx'
+      'Preview this: reverie://attach?path=%2Fmnt%2Fc%2FDecks%2FBoard%20Update.pptx'
     );
 
     expect(links).toEqual(['/mnt/c/Decks/Board Update.pptx']);
@@ -15,9 +15,9 @@ describe('attachment magic links', () => {
   it('ignores duplicate links in one terminal chunk', () => {
     const links = parseAttachmentMagicLinks(
       [
-        'codeman://attach?path=/tmp/report.pdf',
-        'codeman://attach?path=/tmp/report.pdf',
-        'codeman://attach?path=/tmp/brief.docx',
+        'reverie://attach?path=/tmp/report.pdf',
+        'reverie://attach?path=/tmp/report.pdf',
+        'reverie://attach?path=/tmp/brief.docx',
       ].join('\n')
     );
 
@@ -26,7 +26,7 @@ describe('attachment magic links', () => {
 
   it('accepts markdown and plain-text magic paths', () => {
     const links = parseAttachmentMagicLinks(
-      ['codeman://attach?path=/tmp/notes.md', 'codeman://attach?path=/tmp/run.txt'].join('\n')
+      ['reverie://attach?path=/tmp/notes.md', 'reverie://attach?path=/tmp/run.txt'].join('\n')
     );
 
     expect(links).toEqual(['/tmp/notes.md', '/tmp/run.txt']);
@@ -35,9 +35,9 @@ describe('attachment magic links', () => {
   it('rejects relative or unsupported magic paths', () => {
     const links = parseAttachmentMagicLinks(
       [
-        'codeman://attach?path=relative.pdf',
-        'codeman://attach?path=/tmp/archive.zip',
-        'codeman://attach?path=/tmp/deck.pptx',
+        'reverie://attach?path=relative.pdf',
+        'reverie://attach?path=/tmp/archive.zip',
+        'reverie://attach?path=/tmp/deck.pptx',
       ].join('\n')
     );
 
@@ -50,7 +50,7 @@ describe('attachment magic links', () => {
     session.on('attachmentRequested', (event: { path: string }) => requested.push(event.path));
 
     (session as unknown as { _handleTerminalOutput(data: string): void })._handleTerminalOutput(
-      'codeman://attach?path=%2Ftmp%2Fdeck.pptx'
+      'reverie://attach?path=%2Ftmp%2Fdeck.pptx'
     );
 
     expect(requested).toEqual(['/tmp/deck.pptx']);

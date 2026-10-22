@@ -24,7 +24,7 @@ function harness(respond: (o: RequestOptions) => { status: number; json: unknown
 }
 const ok = (data: unknown) => ({ status: 200, json: { success: true, data } });
 const refuse = (status: number, error: string) => ({ status, json: { success: false, error } });
-const mine = { id: '0000000f-0013-4000-8000-000000000019', name: 'Fleet', visibility: 'private', members: [{ sessionId: SELF, role: 'agent' }] };
+const mine = { id: '0000000f-0013-4000-8000-000000000019', name: 'Reverie', visibility: 'private', members: [{ sessionId: SELF, role: 'agent' }] };
 
 describe('agent chat rooms', () => {
   it('lists the rooms you are in with their visibility, and only those', async () => {
@@ -32,7 +32,7 @@ describe('agent chat rooms', () => {
     expect(await agentChatRooms(deps)).toBe(0);
     expect(calls).toHaveLength(1);
     expect(out[0]).toContain('private');
-    expect(out[0]).toContain('Fleet');
+    expect(out[0]).toContain('Reverie');
   });
 
   it('--all also lists the public channels you are not in, with a way to join, and none you already are in', async () => {
@@ -89,8 +89,8 @@ describe('agent chat join and leave', () => {
 
   it('leaves the room by removing itself', async () => {
     const { deps, calls, out } = harness((o) => (o.method === 'DELETE' ? ok({}) : ok({ rooms: [mine] })));
-    expect(await agentChatLeave(deps, { room: 'Fleet' })).toBe(0);
+    expect(await agentChatLeave(deps, { room: 'Reverie' })).toBe(0);
     expect(calls.at(-1)).toMatchObject({ method: 'DELETE', path: `/api/v1/chatrooms/${mine.id}/members/${SELF}` });
-    expect(out.join('\n')).toContain('left "Fleet"');
+    expect(out.join('\n')).toContain('left "Reverie"');
   });
 });

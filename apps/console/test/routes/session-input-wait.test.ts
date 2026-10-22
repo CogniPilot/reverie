@@ -544,7 +544,7 @@ describe('POST /api/sessions/:id/input over real HTTP: hang-up handling', () => 
  * `tmux send-keys` SUCCEEDS against a dead pane, so `writeViaMux` returns true and the
  * old `delivered` was true for bytes written into a corpse — with `timedOut: true`
  * alongside it, which tells an agent to wait longer when the truth is "restart the
- * worker". Live: `pane_dead=1 status=42`, Codeman `pid=309406 status=idle`,
+ * worker". Live: `pane_dead=1 status=42`, Reverie `pid=309406 status=idle`,
  * `delivered: true`.
  */
 describe('POST /api/sessions/:id/input: the pane is dead', () => {

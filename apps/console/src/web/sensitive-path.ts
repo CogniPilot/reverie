@@ -6,8 +6,8 @@
  * download, cross-workspace attachment registration, raw/preview serving).
  *
  * This is intentionally a BLOCKLIST, not a workspace-confinement check:
- * cross-workspace attachment is a supported feature (codeman-publish skill +
- * the automated review-card loop attaching files under ~/.codeman/), so a
+ * cross-workspace attachment is a supported feature (reverie-publish skill +
+ * the automated review-card loop attaching files under ~/.reverie/), so a
  * strict session-workspace boundary would break legitimate use. The blocklist
  * rejects well-known secret locations (system password files, SSH keys, cloud
  * credentials, dotenv files) while leaving ordinary cross-workspace files
@@ -21,7 +21,7 @@
  * so every credential location below has to be named. Adding a new browse
  * surface means re-reading this file, not assuming it already covers you.
  *
- * ⚠️ Deliberately NOT whole-tree blocks: `~/.codeman/` (the publish skill
+ * ⚠️ Deliberately NOT whole-tree blocks: `~/.reverie/` (the publish skill
  * attaches from it) and `~/.claude/` (transcripts and team state are ordinary
  * files worth attaching). Only their secret-bearing members are named.
  *
@@ -119,7 +119,7 @@ export function isSensitivePath(absPath: string): boolean {
   if (SENSITIVE_PATTERNS.some((pattern) => pattern.test(absPath))) return true;
   // Keep legacy/default/named-instance protections even when those stores are
   // not the currently selected instance (also applies to remote file paths).
-  for (const match of absPath.matchAll(/\/\.(?:codeman|fleet)[^/]*(?=\/)/g)) {
+  for (const match of absPath.matchAll(/\/\.reverie[^/]*(?=\/)/g)) {
     if (isPrivateRuntimeMember(absPath.slice(match.index + match[0].length + 1))) return true;
   }
   // A configured data directory need not have a recognizable name. Compare its

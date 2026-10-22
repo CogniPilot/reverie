@@ -1,14 +1,14 @@
 /**
- * @fileoverview Everything `codeman tui` needs from the outside world.
+ * @fileoverview Everything `reverie tui` needs from the outside world.
  *
  * The TUI is a CLIENT of the running server, never a second brain (see
  * docs/tui-plan.md §4): states, approvals and history all come from the same
  * API the web UI uses, so the two surfaces can never disagree. This module is
  * the only place in `src/tui/` that does IO. It covers four jobs:
  *
- * 1. **Discovery + auth**: find the instance's server (`CODEMAN_API_URL`, else
- *    loopback on `CODEMAN_PORT`), accepting the self-signed cert `--https`
- *    generates, and read credentials the way `codeman attach` already does
+ * 1. **Discovery + auth**: find the instance's server (`REVERIE_API_URL`, else
+ *    loopback on `REVERIE_PORT`), accepting the self-signed cert `--https`
+ *    generates, and read credentials the way `reverie attach` already does
  *    (env, then the data dir's `.env`).
  * 2. **Typed API calls** that unwrap the `{success,data}` envelope and throw a
  *    `TuiApiError` carrying the status and `errorCode` on failure.
@@ -26,7 +26,7 @@
  * LIMITATIONS (server surfaces that do not exist, worked around here rather
  * than by touching `src/web/`):
  * - There is no endpoint that reports the server's hostname, so the header's
- *   hostname is this machine's (`os.hostname()`) unless `CODEMAN_API_URL`
+ *   hostname is this machine's (`os.hostname()`) unless `REVERIE_API_URL`
  *   points somewhere non-loopback, in which case that host is used.
  * - Plan usage has no route of its own: the last-known snapshot rides
  *   `GET /api/status` as `planUsage` (`web/plan-usage-latest.ts`) and updates
@@ -47,13 +47,13 @@ import http from 'node:http';
 import https from 'node:https';
 import { hostname as osHostname } from 'node:os';
 import { promisify } from 'node:util';
-import { CODEMAN_INSTANCE, dataPath, resolveTmuxSocketName } from '../config/instance.js';
+import { REVERIE_INSTANCE, dataPath, resolveTmuxSocketName } from '../config/instance.js';
 import {
   basicAuthHeader,
   parseEnvFile,
-  readCodemanCredentials,
-  type CodemanCredentials,
-} from '../codeman-credentials.js';
+  readReverieCredentials,
+  type ReverieCredentials,
+} from '../reverie-credentials.js';
 import { EXEC_TIMEOUT_MS } from '../config/exec-timeout.js';
 import { probeServer } from '../daemon-control.js';
 import { getErrorMessage } from '../types/api.js';
@@ -94,7 +94,7 @@ export interface TuiServerInfo {
   baseUrl: string;
   version?: string;
   hostname?: string;
-  /** `CODEMAN_INSTANCE`, empty string for the production layout. */
+  /** `REVERIE_INSTANCE`, empty string for the production layout. */
   instance: string;
   /** A server answered but rejected our credentials. */
   authRequired?: boolean;
@@ -118,7 +118,7 @@ export interface TuiResumeOptions {
 export interface TuiClientOptions {
   /** Skip discovery and talk to this origin. */
   baseUrl?: string;
-  /** Loopback port to probe. Outranks `CODEMAN_API_URL`, so a caller that names a port cannot be redirected by the ambient environment. */
+  /** Loopback port to probe. Outranks `REVERIE_API_URL`, so a caller that names a port cannot be redirected by the ambient environment. */
   port?: number | string;
   username?: string;
   password?: string;
@@ -246,7 +246,7 @@ export type TuiExecFile = (file: string, args: readonly string[]) => Promise<{ s
 /** One tmux session as degraded mode sees it. */
 export interface TuiTmuxSession {
   muxName: string;
-  /** The `codeman-<prefix>` fragment; mux names carry only the first 8 chars of the id. */
+  /** The `reverie-<prefix>` fragment; mux names carry only the first 8 chars of the id. */
   sessionIdPrefix: string;
   /** Full id, when `state.json` had exactly one session starting with the prefix. */
   sessionId?: string;
@@ -275,7 +275,7 @@ function normalizeOrigin(url: string): string {
 }
 
 /**
- * Origins to probe, in preference order. `CODEMAN_API_URL` (the variable hooks
+ * Origins to probe, in preference order. `REVERIE_API_URL` (the variable hooks
  * already get) wins outright; otherwise both schemes on loopback, https first
  * because a production install is HTTPS-only and a plain-http server rejects a
  * TLS handshake immediately rather than hanging.
@@ -288,8 +288,8 @@ export function tuiServerCandidates(env: { apiUrl?: string; port?: string | numb
 }
 
 // One credential reader for every client of the API (attach, tui, agent).
-export { parseEnvFile, readCodemanCredentials, basicAuthHeader };
-export type TuiCredentials = CodemanCredentials;
+export { parseEnvFile, readReverieCredentials, basicAuthHeader };
+export type TuiCredentials = ReverieCredentials;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Degraded mode
@@ -307,12 +307,12 @@ const defaultExecFile: TuiExecFile = async (file, args) => {
 };
 
 /**
- * Session names Codeman owns on this socket. Remote (`codeman-ssh-…`) and
- * docker (`codeman-dkr-…`) names deliberately fail this pattern (they live on
+ * Session names Reverie owns on this socket. Remote (`reverie-ssh-…`) and
+ * docker (`reverie-dkr-…`) names deliberately fail this pattern (they live on
  * their own sockets and must never be adopted), and the letters they use are
  * outside `[a-f0-9-]`, so this is the same fence `tmux-manager.ts` draws.
  */
-const MUX_NAME_PATTERN = /^(?:codeman|claudeman)-([a-f0-9-]+)$/;
+const MUX_NAME_PATTERN = /^(?:reverie|claudeman)-([a-f0-9-]+)$/;
 
 /** Field separator for `list-sessions -F`. Session names cannot contain a tab. */
 const TMUX_FIELD_SEPARATOR = '\t';
@@ -361,7 +361,7 @@ export function parseTmuxSessionList(stdout: string): TuiTmuxSession[] {
 /**
  * How tmux is sizing a session's window, as `readWindowSizing()` found it.
  *
- * Codeman pins every window it owns to the size the BROWSER dictates
+ * Reverie pins every window it owns to the size the BROWSER dictates
  * (`window-size manual` plus an explicit `resize-window`, see
  * `tmux-manager.ts`), which is what stops a stray attach from shrinking the web
  * terminal. The cost is paid by the terminal: a client of any other shape
@@ -392,7 +392,7 @@ export function parseWindowSizing(stdout: string): TuiWindowSizing | null {
  * Session-level tmux options, as `readSessionOptions()` found them. `null` is
  * "not set on this session", which restores by UNSETTING rather than by writing
  * a value back: writing tmux's inherited value would pin an option the session
- * never had, and Codeman's own `status off` is exactly such a session-level
+ * never had, and Reverie's own `status off` is exactly such a session-level
  * option that must survive the round trip.
  */
 export type TuiSessionOptions = Record<string, string | null>;
@@ -451,7 +451,7 @@ export function parsePrefixBinding(stdout: string, key: string, table: TuiKeyTab
  * `buildAttachBanner()` composes its text from this constant rather than
  * repeating the words.
  */
-export const ATTACH_BANNER_MARKER = 'back to the codeman dashboard';
+export const ATTACH_BANNER_MARKER = 'back to the reverie dashboard';
 
 /**
  * The tmux key tables an attach touches. `root` is the one without a prefix:
@@ -495,7 +495,7 @@ function unquoteTmuxValue(value: string): string {
 }
 
 /**
- * List Codeman's tmux sessions without a server, decorating them with whatever
+ * List Reverie's tmux sessions without a server, decorating them with whatever
  * `state.json` remembers. Attach is all this supports: there are no states, no
  * approvals and no previews when nothing is running the classification.
  *
@@ -552,13 +552,13 @@ export class TuiClient {
   private readonly statePath: string;
   private readonly socket: string;
   private readonly streams = new Set<SseStream>();
-  private readonly clientId = `codeman-tui-${process.pid}`;
+  private readonly clientId = `reverie-tui-${process.pid}`;
   private seq = 0;
   private server: TuiServerInfo | null = null;
 
   constructor(private readonly options: TuiClientOptions = {}) {
     this.base = options.baseUrl ? normalizeOrigin(options.baseUrl) : null;
-    const credentials = readCodemanCredentials(options.envFilePath ?? dataPath('.env'));
+    const credentials = readReverieCredentials(options.envFilePath ?? dataPath('.env'));
     this.credentials = {
       username: options.username ?? credentials.username,
       ...((options.password ?? credentials.password) ? { password: options.password ?? credentials.password } : {}),
@@ -584,14 +584,14 @@ export class TuiClient {
    * which is the app's cue to fall back to `enumerateTmuxSessions()`.
    */
   async connect(): Promise<TuiServerInfo | null> {
-    // An explicit port outranks the ambient `CODEMAN_API_URL` (which every
-    // Codeman-managed session exports): a caller that named a port must not be
+    // An explicit port outranks the ambient `REVERIE_API_URL` (which every
+    // Reverie-managed session exports): a caller that named a port must not be
     // silently redirected at whatever server happens to own this shell.
     const candidates = this.base
       ? [this.base]
       : this.options.port !== undefined
         ? tuiServerCandidates({ port: this.options.port })
-        : tuiServerCandidates({ apiUrl: process.env.CODEMAN_API_URL, port: process.env.CODEMAN_PORT });
+        : tuiServerCandidates({ apiUrl: process.env.REVERIE_API_URL, port: process.env.REVERIE_PORT });
 
     const probes = await Promise.all(
       candidates.map((origin) => probeServer(`${origin}/api/status`, this.probeTimeoutMs))
@@ -605,7 +605,7 @@ export class TuiClient {
     this.base = candidates[index];
     const info: TuiServerInfo = {
       baseUrl: this.base,
-      instance: CODEMAN_INSTANCE,
+      instance: REVERIE_INSTANCE,
       hostname: this.resolveHostname(this.base),
     };
     if (probes[index].version) info.version = probes[index].version;
@@ -1025,7 +1025,7 @@ export class TuiClient {
    * Is this session's active pane DEAD — the process it ran has exited and tmux
    * is holding the corpse on screen?
    *
-   * Codeman sets `remain-on-exit on` for every pane it owns, so a session whose
+   * Reverie sets `remain-on-exit on` for every pane it owns, so a session whose
    * agent exited does not disappear: it stays listed, the server still reports
    * it `idle`, and attaching hands the terminal to a pane that reads no input.
    * A beta tester hit exactly that and could not type or get out.
@@ -1119,7 +1119,7 @@ export class TuiClient {
    * self-healing.
    *
    * Only a bar carrying our own marker is touched, and it is put back the way
-   * Codeman creates its panes (`status off`), which is the only state this bar
+   * Reverie creates its panes (`status off`), which is the only state this bar
    * is ever applied over.
    *
    * The held-Ctrl detach alias is deliberately NOT swept here. It is invisible,

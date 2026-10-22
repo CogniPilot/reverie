@@ -27,7 +27,7 @@ queries Anthropic on Claude's behalf. Codex polling invokes its own app-server u
 the profile's `CODEX_HOME`.
 
 Profiles store only names, provider IDs, and local directories in
-`~/.codeman/subscription-profiles.json` (or the instance's data directory). They never
+`~/.reverie/subscription-profiles.json` (or the instance's data directory). They never
 store tokens. Credentials stay in the CLI/OpenCode authentication files. Session
 state preserves the account label and login directories across dashboard restarts;
 it never persists arbitrary OpenCode configuration blobs or API keys.

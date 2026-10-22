@@ -50,7 +50,7 @@ minimum ceremony. This does **not** relax correctness or the safety rules in
   or fail locally. Always pass a file or `-t`, or use `test:ci`.
 - ⚠️ **Never COM without verifying the change actually works** first (curl the
   endpoint / Playwright the UI). "Compiles" ≠ "works".
-- ⚠️ **Session safety** — check `$CODEMAN_MUX`; never `tmux kill-session` /
+- ⚠️ **Session safety** — check `$REVERIE_MUX`; never `tmux kill-session` /
   `pkill claude` in a managed session.
 - ⚠️ **Single-line prompts** for any programmatic session input.
 

@@ -86,7 +86,7 @@ export interface ApprovalItem {
    */
   options?: ApprovalOption[];
   /**
-   * When true the dialog belongs to a third-party TUI whose keystrokes Codeman
+   * When true the dialog belongs to a third-party TUI whose keystrokes Reverie
    * cannot verify (today: DeepSeek Harness / `hooks: 'supervised'`). The item
    * is an ALERT only: the answer route refuses keystrokes, push omits Approve/
    * Deny actions, and the UI offers "Open session" instead of answer buttons.

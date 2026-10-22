@@ -28,7 +28,7 @@ import {
   ATTACH_BANNER_MARKER,
   parseTmuxSessionList,
   parseWindowSizing,
-  readCodemanCredentials,
+  readReverieCredentials,
   tuiServerCandidates,
   type TuiExecFile,
 } from '../../src/tui/tui-client.js';
@@ -79,7 +79,7 @@ const defaultResponder: Responder = (req, res) => {
   if (url.startsWith('/api/sessions/unified')) {
     return sendJson(res, 200, {
       success: true,
-      data: { sessions: [{ sessionId: 'abc', name: 'w1-codeman', sources: ['live'] }], total: 1 },
+      data: { sessions: [{ sessionId: 'abc', name: 'w1-reverie', sources: ['live'] }], total: 1 },
     });
   }
   if (url === '/api/sessions' || url.startsWith('/api/sessions?')) {
@@ -132,15 +132,15 @@ function client(overrides: Record<string, unknown> = {}): TuiClient {
 }
 
 let server: http.Server;
-const originalApiUrl = process.env.CODEMAN_API_URL;
-const originalPort = process.env.CODEMAN_PORT;
+const originalApiUrl = process.env.REVERIE_API_URL;
+const originalPort = process.env.REVERIE_PORT;
 
 beforeAll(async () => {
-  // This suite runs inside a Codeman-managed session, which exports
-  // CODEMAN_API_URL pointing at the LIVE server. Discovery consults it, so it
+  // This suite runs inside a Reverie-managed session, which exports
+  // REVERIE_API_URL pointing at the LIVE server. Discovery consults it, so it
   // has to be out of the way before any test calls connect().
-  delete process.env.CODEMAN_API_URL;
-  delete process.env.CODEMAN_PORT;
+  delete process.env.REVERIE_API_URL;
+  delete process.env.REVERIE_PORT;
 
   server = http.createServer((req, res) => {
     let body = '';
@@ -161,8 +161,8 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await new Promise<void>((resolve) => server.close(() => resolve()));
-  if (originalApiUrl !== undefined) process.env.CODEMAN_API_URL = originalApiUrl;
-  if (originalPort !== undefined) process.env.CODEMAN_PORT = originalPort;
+  if (originalApiUrl !== undefined) process.env.REVERIE_API_URL = originalApiUrl;
+  if (originalPort !== undefined) process.env.REVERIE_PORT = originalPort;
 });
 
 beforeEach(() => {
@@ -172,9 +172,9 @@ beforeEach(() => {
 
 describe('parseEnvFile', () => {
   it('reads plain assignments and skips comments and blanks', () => {
-    expect(parseEnvFile('# comment\n\nCODEMAN_USERNAME=bob\nCODEMAN_PASSWORD=hunter2\n')).toEqual({
-      CODEMAN_USERNAME: 'bob',
-      CODEMAN_PASSWORD: 'hunter2',
+    expect(parseEnvFile('# comment\n\nREVERIE_USERNAME=bob\nREVERIE_PASSWORD=hunter2\n')).toEqual({
+      REVERIE_USERNAME: 'bob',
+      REVERIE_PASSWORD: 'hunter2',
     });
   });
 
@@ -191,27 +191,27 @@ describe('parseEnvFile', () => {
   });
 });
 
-describe('readCodemanCredentials', () => {
+describe('readReverieCredentials', () => {
   it('falls back to the data dir .env when the environment has nothing', () => {
     const envPath = dataPath('.env');
     mkdirSync(dirname(envPath), { recursive: true });
-    writeFileSync(envPath, 'CODEMAN_USERNAME=fileuser\nCODEMAN_PASSWORD=filepass\n', 'utf-8');
-    expect(readCodemanCredentials()).toEqual({ username: 'fileuser', password: 'filepass' });
+    writeFileSync(envPath, 'REVERIE_USERNAME=fileuser\nREVERIE_PASSWORD=filepass\n', 'utf-8');
+    expect(readReverieCredentials()).toEqual({ username: 'fileuser', password: 'filepass' });
   });
 
   it('lets the environment win over the file', () => {
     const envPath = dataPath('.env');
-    writeFileSync(envPath, 'CODEMAN_USERNAME=fileuser\nCODEMAN_PASSWORD=filepass\n', 'utf-8');
-    process.env.CODEMAN_PASSWORD = 'envpass';
+    writeFileSync(envPath, 'REVERIE_USERNAME=fileuser\nREVERIE_PASSWORD=filepass\n', 'utf-8');
+    process.env.REVERIE_PASSWORD = 'envpass';
     try {
-      expect(readCodemanCredentials()).toEqual({ username: 'fileuser', password: 'envpass' });
+      expect(readReverieCredentials()).toEqual({ username: 'fileuser', password: 'envpass' });
     } finally {
-      delete process.env.CODEMAN_PASSWORD;
+      delete process.env.REVERIE_PASSWORD;
     }
   });
 
   it('reports admin with no password when nothing is configured', () => {
-    expect(readCodemanCredentials('/nonexistent/codeman/.env')).toEqual({ username: 'admin' });
+    expect(readReverieCredentials('/nonexistent/reverie/.env')).toEqual({ username: 'admin' });
   });
 });
 
@@ -241,7 +241,7 @@ describe('tuiServerCandidates', () => {
 describe('TuiClient envelope handling', () => {
   it('unwraps the sessions list', async () => {
     const sessions = await client().fetchUnifiedSessions(10);
-    expect(sessions).toEqual([{ sessionId: 'abc', name: 'w1-codeman', sources: ['live'] }]);
+    expect(sessions).toEqual([{ sessionId: 'abc', name: 'w1-reverie', sources: ['live'] }]);
     expect(recorded[0].url).toBe('/api/sessions/unified?limit=10');
   });
 
@@ -279,7 +279,7 @@ describe('TuiClient envelope handling', () => {
     expect(recorded[0].headers.authorization).toBe(`Basic ${Buffer.from('admin:s3cret').toString('base64')}`);
 
     recorded.length = 0;
-    await client({ envFilePath: '/nonexistent/codeman/.env' }).fetchApprovals();
+    await client({ envFilePath: '/nonexistent/reverie/.env' }).fetchApprovals();
     expect(recorded[0].headers.authorization).toBeUndefined();
   });
 });
@@ -340,7 +340,7 @@ describe('TuiClient.sendInput', () => {
     const bodies = recorded.map((entry) => JSON.parse(entry.body) as { clientId: string; seq: number });
     expect(bodies.map((b) => b.seq)).toEqual([1, 2, 3]);
     expect(new Set(bodies.map((b) => b.clientId)).size).toBe(1);
-    expect(bodies[0].clientId).toMatch(/^codeman-tui-\d+$/);
+    expect(bodies[0].clientId).toMatch(/^reverie-tui-\d+$/);
     expect(c.lastInputSeq).toBe(3);
   });
 });
@@ -416,7 +416,7 @@ describe('TuiClient.connect', () => {
 
   it('reports a server that rejects our credentials instead of calling it down', async () => {
     responder = (_req, res) => {
-      res.writeHead(401, { 'WWW-Authenticate': 'Basic realm="codeman"' });
+      res.writeHead(401, { 'WWW-Authenticate': 'Basic realm="reverie"' });
       res.end('Unauthorized');
     };
     const info = await new TuiClient({ port, probeTimeoutMs: 1000 }).connect();
@@ -435,16 +435,16 @@ describe('TuiClient.connect', () => {
 
 describe('degraded-mode tmux enumeration', () => {
   const listing = [
-    'codeman-0000000b\t1\t1700000000\t1',
-    'codeman-deadbeef\t0\t1700000100\t2',
+    'reverie-0000000b\t1\t1700000000\t1',
+    'reverie-deadbeef\t0\t1700000100\t2',
     'claudeman-cafe0001\t0\t1700000200\t1',
     'my-own-tmux-session\t1\t1700000300\t1',
-    'codeman-ssh-abc\t0\t1700000400\t1',
+    'reverie-ssh-abc\t0\t1700000400\t1',
   ].join('\n');
 
-  it('parses the list format and keeps only Codeman-owned names', () => {
+  it('parses the list format and keeps only Reverie-owned names', () => {
     const rows = parseTmuxSessionList(listing);
-    expect(rows.map((row) => row.muxName)).toEqual(['codeman-0000000b', 'codeman-deadbeef', 'claudeman-cafe0001']);
+    expect(rows.map((row) => row.muxName)).toEqual(['reverie-0000000b', 'reverie-deadbeef', 'claudeman-cafe0001']);
     expect(rows[0]).toMatchObject({ sessionIdPrefix: '0000000b', attached: true, createdAt: 1_700_000_000_000 });
     expect(rows[1]).toMatchObject({ attached: false, windows: 2 });
   });
@@ -455,10 +455,10 @@ describe('degraded-mode tmux enumeration', () => {
       calls.push({ file, args });
       return { stdout: listing, stderr: '' };
     };
-    await enumerateTmuxSessions({ exec, socket: 'codeman-beta', statePath: '/nonexistent/state.json' });
+    await enumerateTmuxSessions({ exec, socket: 'reverie-beta', statePath: '/nonexistent/state.json' });
     expect(calls).toHaveLength(1);
     expect(calls[0].file).toBe('tmux');
-    expect(calls[0].args.slice(0, 4)).toEqual(['-L', 'codeman-beta', 'list-sessions', '-F']);
+    expect(calls[0].args.slice(0, 4)).toEqual(['-L', 'reverie-beta', 'list-sessions', '-F']);
   });
 
   it('decorates rows with names and dirs from state.json, matching on the id prefix', async () => {
@@ -468,8 +468,8 @@ describe('degraded-mode tmux enumeration', () => {
       JSON.stringify({
         sessions: {
           '0000000b-000e-4000-8000-000000000011': {
-            name: 'w1-codeman',
-            workingDir: '/home/dev/codeman',
+            name: 'w1-reverie',
+            workingDir: '/home/dev/reverie',
             mode: 'claude',
           },
         },
@@ -480,8 +480,8 @@ describe('degraded-mode tmux enumeration', () => {
     const rows = await enumerateTmuxSessions({ exec, statePath });
     expect(rows[0]).toMatchObject({
       sessionId: '0000000b-000e-4000-8000-000000000011',
-      name: 'w1-codeman',
-      workingDir: '/home/dev/codeman',
+      name: 'w1-reverie',
+      workingDir: '/home/dev/reverie',
       mode: 'claude',
     });
     // No state entry: the row still exists, it just has no decoration.
@@ -501,14 +501,14 @@ describe('degraded-mode tmux enumeration', () => {
       }),
       'utf-8'
     );
-    const exec: TuiExecFile = async () => ({ stdout: 'codeman-0000000b\t0\t1700000000\t1', stderr: '' });
+    const exec: TuiExecFile = async () => ({ stdout: 'reverie-0000000b\t0\t1700000000\t1', stderr: '' });
     const rows = await enumerateTmuxSessions({ exec, statePath });
     expect(rows[0].name).toBeUndefined();
   });
 
   it('treats a dead tmux server as an empty list', async () => {
     const exec: TuiExecFile = async () => {
-      throw new Error('no server running on /tmp/tmux-1000/codeman');
+      throw new Error('no server running on /tmp/tmux-1000/reverie');
     };
     await expect(enumerateTmuxSessions({ exec })).resolves.toEqual([]);
   });
@@ -517,7 +517,7 @@ describe('degraded-mode tmux enumeration', () => {
 describe('attach window sizing', () => {
   /** A client that only ever needs its injected exec: none of this talks to a server. */
   function sizingClient(exec: TuiExecFile): TuiClient {
-    return new TuiClient({ baseUrl, socket: 'codeman-beta', exec });
+    return new TuiClient({ baseUrl, socket: 'reverie-beta', exec });
   }
 
   it('parses the sizing format, and rejects a window tmux could not measure', () => {
@@ -535,12 +535,12 @@ describe('attach window sizing', () => {
       calls.push(args);
       return { stdout: '120\t40\tmanual', stderr: '' };
     });
-    await expect(client.readWindowSizing('codeman-0000000b')).resolves.toEqual({
+    await expect(client.readWindowSizing('reverie-0000000b')).resolves.toEqual({
       cols: 120,
       rows: 40,
       mode: 'manual',
     });
-    expect(calls[0].slice(0, 6)).toEqual(['-L', 'codeman-beta', 'display-message', '-p', '-t', 'codeman-0000000b']);
+    expect(calls[0].slice(0, 6)).toEqual(['-L', 'reverie-beta', 'display-message', '-p', '-t', 'reverie-0000000b']);
   });
 
   it('hands the window to the attaching client with window-size latest', async () => {
@@ -549,13 +549,13 @@ describe('attach window sizing', () => {
       calls.push(args);
       return { stdout: '', stderr: '' };
     });
-    await expect(client.followAttachingClient('codeman-0000000b')).resolves.toBe(true);
+    await expect(client.followAttachingClient('reverie-0000000b')).resolves.toBe(true);
     expect(calls[0]).toEqual([
       '-L',
-      'codeman-beta',
+      'reverie-beta',
       'set-window-option',
       '-t',
-      'codeman-0000000b',
+      'reverie-0000000b',
       'window-size',
       'latest',
     ]);
@@ -567,14 +567,14 @@ describe('attach window sizing', () => {
       calls.push(args);
       return { stdout: '', stderr: '' };
     });
-    await client.restoreWindowSizing('codeman-0000000b', { cols: 120, rows: 40, mode: 'manual' });
+    await client.restoreWindowSizing('reverie-0000000b', { cols: 120, rows: 40, mode: 'manual' });
     expect(calls).toHaveLength(1);
     expect(calls[0]).toEqual([
       '-L',
-      'codeman-beta',
+      'reverie-beta',
       'resize-window',
       '-t',
-      'codeman-0000000b',
+      'reverie-0000000b',
       '-x',
       '120',
       '-y',
@@ -588,32 +588,32 @@ describe('attach window sizing', () => {
       calls.push(args);
       return { stdout: '', stderr: '' };
     });
-    await client.restoreWindowSizing('codeman-0000000b', { cols: 120, rows: 40, mode: 'latest' });
+    await client.restoreWindowSizing('reverie-0000000b', { cols: 120, rows: 40, mode: 'latest' });
     expect(calls).toEqual([
-      ['-L', 'codeman-beta', 'set-window-option', '-t', 'codeman-0000000b', 'window-size', 'latest'],
+      ['-L', 'reverie-beta', 'set-window-option', '-t', 'reverie-0000000b', 'window-size', 'latest'],
     ]);
   });
 
-  it('never targets a name Codeman does not own', async () => {
+  it('never targets a name Reverie does not own', async () => {
     const calls: Array<readonly string[]> = [];
     const client = sizingClient(async (_file, args) => {
       calls.push(args);
       return { stdout: '120\t40\tmanual', stderr: '' };
     });
-    await expect(client.readWindowSizing('codeman-ssh-prod')).resolves.toBeNull();
+    await expect(client.readWindowSizing('reverie-ssh-prod')).resolves.toBeNull();
     await expect(client.followAttachingClient('other-session')).resolves.toBe(false);
-    await client.restoreWindowSizing('codeman-dkr-box', { cols: 80, rows: 24, mode: 'manual' });
+    await client.restoreWindowSizing('reverie-dkr-box', { cols: 80, rows: 24, mode: 'manual' });
     expect(calls).toEqual([]);
   });
 
   it('swallows a dead tmux: an attach must never fail over cosmetics', async () => {
     const client = sizingClient(async () => {
-      throw new Error('no server running on /tmp/tmux-1000/codeman-beta');
+      throw new Error('no server running on /tmp/tmux-1000/reverie-beta');
     });
-    await expect(client.readWindowSizing('codeman-0000000b')).resolves.toBeNull();
-    await expect(client.followAttachingClient('codeman-0000000b')).resolves.toBe(false);
+    await expect(client.readWindowSizing('reverie-0000000b')).resolves.toBeNull();
+    await expect(client.followAttachingClient('reverie-0000000b')).resolves.toBe(false);
     await expect(
-      client.restoreWindowSizing('codeman-0000000b', { cols: 120, rows: 40, mode: 'manual' })
+      client.restoreWindowSizing('reverie-0000000b', { cols: 120, rows: 40, mode: 'manual' })
     ).resolves.toBeUndefined();
   });
 });
@@ -631,14 +631,14 @@ describe('TuiClient.bindSwitchKey', () => {
       calls.push([...args]);
       return { stdout: '', stderr: '' };
     };
-    const client = new TuiClient({ baseUrl, socket: 'codeman-beta', exec });
-    return client.bindSwitchKey('M-2', 'codeman-aaaa1111').then(() => {
+    const client = new TuiClient({ baseUrl, socket: 'reverie-beta', exec });
+    return client.bindSwitchKey('M-2', 'reverie-aaaa1111').then(() => {
       const bind = calls.find((args) => args.includes('bind-key'));
       expect(bind).toBeDefined();
       expect(bind).toContain('\\;');
       expect(bind).not.toContain(';');
       // Both commands have to be in the ONE binding.
-      expect(bind?.join(' ')).toContain('switch-client -t codeman-aaaa1111');
+      expect(bind?.join(' ')).toContain('switch-client -t reverie-aaaa1111');
       expect(bind?.join(' ')).toContain('window-size latest');
     });
   });
@@ -688,13 +688,13 @@ describe('TuiClient.clearLeakedAttachBanners', () => {
       }
       return { stdout: '', stderr: '' };
     };
-    return { client: new TuiClient({ baseUrl, socket: 'codeman-beta', exec }), calls };
+    return { client: new TuiClient({ baseUrl, socket: 'reverie-beta', exec }), calls };
   }
 
   it('takes down a bar a killed TUI left behind, and puts status back off', async () => {
     // The case that produced this: the tester closed the terminal window while
     // attached, so restore() never ran and the bar stayed pinned.
-    const { client, calls } = sweeper({ 'codeman-aaaa1111': OURS });
+    const { client, calls } = sweeper({ 'reverie-aaaa1111': OURS });
     expect(await client.clearLeakedAttachBanners()).toBe(1);
     const sets = calls.filter((args) => args.includes('set-option'));
     // The array whole, never one index: unsetting `status-format[0]` alone
@@ -711,31 +711,31 @@ describe('TuiClient.clearLeakedAttachBanners', () => {
   });
 
   it('never touches a status bar that is not ours', async () => {
-    const { client, calls } = sweeper({ 'codeman-bbbb2222': '#[align=right] my own bar ' });
+    const { client, calls } = sweeper({ 'reverie-bbbb2222': '#[align=right] my own bar ' });
     expect(await client.clearLeakedAttachBanners()).toBe(0);
     expect(calls.filter((args) => args.includes('set-option'))).toEqual([]);
   });
 
   it('sweeps only the sessions that leaked, leaving the rest alone', async () => {
     const { client } = sweeper({
-      'codeman-aaaa1111': OURS,
-      'codeman-bbbb2222': '',
-      'codeman-cccc3333': OURS,
+      'reverie-aaaa1111': OURS,
+      'reverie-bbbb2222': '',
+      'reverie-cccc3333': OURS,
     });
     expect(await client.clearLeakedAttachBanners()).toBe(2);
   });
 
   it('reports nothing rather than throwing when there is no tmux server', async () => {
     const exec: TuiExecFile = async () => {
-      throw new Error('no server running on /tmp/tmux-1000/codeman-beta');
+      throw new Error('no server running on /tmp/tmux-1000/reverie-beta');
     };
-    const client = new TuiClient({ baseUrl, socket: 'codeman-beta', exec });
+    const client = new TuiClient({ baseUrl, socket: 'reverie-beta', exec });
     await expect(client.clearLeakedAttachBanners()).resolves.toBe(0);
   });
 });
 
 describe('parseDetachKey', () => {
-  // Verbatim from `tmux -L codeman list-keys -T prefix` on tmux 3.4, trimmed to
+  // Verbatim from `tmux -L reverie list-keys -T prefix` on tmux 3.4, trimmed to
   // the two lines that matter. They differ only by case, which is the whole
   // point: `D` is choose-client and advertising it leaves the tester attached.
   const REAL_TMUX_34 = [
@@ -777,7 +777,7 @@ describe('parseDetachKey', () => {
 
 describe('attach status bar options', () => {
   function optionsClient(exec: TuiExecFile): TuiClient {
-    return new TuiClient({ baseUrl, socket: 'codeman-beta', exec });
+    return new TuiClient({ baseUrl, socket: 'reverie-beta', exec });
   }
 
   const SHOW = [
@@ -817,7 +817,7 @@ describe('attach status bar options', () => {
       // Session level says nothing; the global answer is the real one.
       return { stdout: args.includes('-gv') ? 'C-a\n' : '\n', stderr: '' };
     });
-    return expect(client.readPrefixKey('codeman-0000000b'))
+    return expect(client.readPrefixKey('reverie-0000000b'))
       .resolves.toBe('C-a')
       .then(() => {
         expect(calls).toHaveLength(2);
@@ -831,25 +831,25 @@ describe('attach status bar options', () => {
       calls.push(args);
       return { stdout: '', stderr: '' };
     });
-    await client.restoreSessionOptions('codeman-0000000b', {
+    await client.restoreSessionOptions('reverie-0000000b', {
       status: 'off',
       'status-format[0]': null,
       'status-format[1]': '#[align=right] second ',
     });
     // Unsetting one index leaves an EMPTY array (a blank status bar), so the
     // base option goes first and the survivors are written back on top.
-    expect(calls[0].slice(2)).toEqual(['set-option', '-u', '-t', 'codeman-0000000b', 'status-format']);
+    expect(calls[0].slice(2)).toEqual(['set-option', '-u', '-t', 'reverie-0000000b', 'status-format']);
     expect(calls.map((args) => args.slice(2))).toContainEqual([
       'set-option',
       '-t',
-      'codeman-0000000b',
+      'reverie-0000000b',
       'status',
       'off',
     ]);
     expect(calls.map((args) => args.slice(2))).toContainEqual([
       'set-option',
       '-t',
-      'codeman-0000000b',
+      'reverie-0000000b',
       'status-format[1]',
       '#[align=right] second ',
     ]);
@@ -863,8 +863,8 @@ describe('attach status bar options', () => {
       calls.push(args);
       return { stdout: '', stderr: '' };
     });
-    await client.restoreSessionOptions('codeman-0000000b', { status: null });
-    expect(calls[0].slice(2)).toEqual(['set-option', '-u', '-t', 'codeman-0000000b', 'status']);
+    await client.restoreSessionOptions('reverie-0000000b', { status: null });
+    expect(calls[0].slice(2)).toEqual(['set-option', '-u', '-t', 'reverie-0000000b', 'status']);
   });
 
   it('writes the banner one option at a time, and never at a foreign session', async () => {
@@ -873,12 +873,12 @@ describe('attach status bar options', () => {
       calls.push(args);
       return { stdout: '', stderr: '' };
     });
-    await client.applySessionOptions('codeman-0000000b', { status: 'on', 'status-format[0]': 'x' });
+    await client.applySessionOptions('reverie-0000000b', { status: 'on', 'status-format[0]': 'x' });
     expect(calls).toHaveLength(2);
-    expect(calls[0].slice(2)).toEqual(['set-option', '-t', 'codeman-0000000b', 'status', 'on']);
+    expect(calls[0].slice(2)).toEqual(['set-option', '-t', 'reverie-0000000b', 'status', 'on']);
     calls.length = 0;
-    await client.applySessionOptions('codeman-ssh-prod', { status: 'on' });
-    await client.restoreSessionOptions('codeman-dkr-box', { status: null });
+    await client.applySessionOptions('reverie-ssh-prod', { status: 'on' });
+    await client.restoreSessionOptions('reverie-dkr-box', { status: null });
     await expect(client.readPrefixKey('other-thing')).resolves.toBeNull();
     expect(calls).toEqual([]);
   });
@@ -890,7 +890,7 @@ describe('attach status bar options', () => {
       if (args.includes('status-format[0]')) throw new Error('unknown option');
       return { stdout: '', stderr: '' };
     });
-    await client.applySessionOptions('codeman-0000000b', { 'status-format[0]': 'x', status: 'on' });
+    await client.applySessionOptions('reverie-0000000b', { 'status-format[0]': 'x', status: 'on' });
     expect(seen).toBe(2);
   });
 });
@@ -908,9 +908,9 @@ describe('resumeSession', () => {
       res.end(JSON.stringify({ success: true, data: {} }));
     };
     const id = await client().resumeSession({
-      workingDir: '/home/dev/codeman',
+      workingDir: '/home/dev/reverie',
       resumeSessionId: '00000038-0045-4000-8000-000000000064',
-      sessionName: 'w7-codeman',
+      sessionName: 'w7-reverie',
     });
     expect(id).toBe('new-session-id');
     expect(recorded.map((entry) => `${entry.method} ${entry.url}`)).toEqual([
@@ -920,10 +920,10 @@ describe('resumeSession', () => {
       'POST /api/sessions/new-session-id/interactive',
     ]);
     expect(JSON.parse(recorded[0].body)).toMatchObject({
-      workingDir: '/home/dev/codeman',
+      workingDir: '/home/dev/reverie',
       resumeSessionId: '00000038-0045-4000-8000-000000000064',
       mode: 'claude',
-      name: 'w7-codeman',
+      name: 'w7-reverie',
     });
   });
 

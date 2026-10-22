@@ -42,10 +42,10 @@ describe('service worker precache contract', () => {
   // The cache key must vary per build, or `activate`'s cleanup — which deletes
   // every cache whose key is not the current one — never deletes anything, and
   // hashed assets from every past release accumulate until the origin hits its
-  // storage quota. That is what the old constant 'codeman-v1' did.
+  // storage quota. That is what the old constant 'reverie-v1' did.
   it('derives the cache name from the build id rather than a constant', () => {
-    expect(sw).toContain('const CACHE_NAME = `codeman-${BUILD_ID}`;');
-    expect(sw).not.toMatch(/const CACHE_NAME = ['"]codeman-v\d+['"]/);
+    expect(sw).toContain('const CACHE_NAME = `reverie-${BUILD_ID}`;');
+    expect(sw).not.toMatch(/const CACHE_NAME = ['"]reverie-v\d+['"]/);
   });
 
   // The whole point of the rewrite: the shell is derived, not hand-listed.

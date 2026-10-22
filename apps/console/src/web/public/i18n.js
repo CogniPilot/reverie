@@ -10,7 +10,7 @@
  * @loadorder 1.5 of 16
  */
 
-(function initCodemanI18n(global) {
+(function initReverieI18n(global) {
   'use strict';
 
   const DEFAULT_NAME = 'Reverie';
@@ -1054,18 +1054,18 @@
       '远程主机上的绝对路径；{name}不会创建或删除该目录。',
     'Absolute path to an existing project folder, e.g. /home/you/my-project':
       '现有项目文件夹的绝对路径，例如 /home/you/my-project',
-    'Letters, numbers, hyphens, underscores only. Created in ~/codeman-cases/':
-      '仅允许字母、数字、连字符和下划线；将在 ~/codeman-cases/ 中创建。',
+    'Letters, numbers, hyphens, underscores only. Created in ~/reverie-cases/':
+      '仅允许字母、数字、连字符和下划线；将在 ~/reverie-cases/ 中创建。',
     'Letters, numbers, hyphens, underscores only. Created inside the parent folder below.':
       '仅允许字母、数字、连字符和下划线；将在下方的父文件夹中创建。',
-    'A fresh workspace under ~/codeman-cases, scaffolded with its own CLAUDE.md.':
-      '在 ~/codeman-cases 下新建工作区，并生成独立的 CLAUDE.md。',
+    'A fresh workspace under ~/reverie-cases, scaffolded with its own CLAUDE.md.':
+      '在 ~/reverie-cases 下新建工作区，并生成独立的 CLAUDE.md。',
     'A fresh workspace in a folder you choose, scaffolded with its own CLAUDE.md.':
       '在你选择的文件夹中新建工作区，并生成独立的 CLAUDE.md。',
     'Create in a custom folder': '在自定义文件夹中创建',
     '📁 Create in a custom folder': '📁 在自定义文件夹中创建',
-    'By default a new case is created under ~/codeman-cases. Choose another folder and the case is created there instead; it is listed like any other case.':
-      '新案例默认创建在 ~/codeman-cases 下。选择其他文件夹后，案例会改为创建在那里，并像其他案例一样列出。',
+    'By default a new case is created under ~/reverie-cases. Choose another folder and the case is created there instead; it is listed like any other case.':
+      '新案例默认创建在 ~/reverie-cases 下。选择其他文件夹后，案例会改为创建在那里，并像其他案例一样列出。',
     'Parent Folder': '父文件夹',
     'Pick the folder the new case folder should be created inside.': '选择要在其中创建新案例文件夹的文件夹。',
     'Choose the folder to create the case in': '选择要在其中创建案例的文件夹',
@@ -1141,8 +1141,8 @@
     'Scroll local history (when mouse passthrough is active)': '滚动本地历史（鼠标直通启用时）',
     'Plain wheel/trackpad pages the terminal scrollback': '使用普通滚轮/触控板翻阅终端历史',
     'Camera hand-tracking overlay (applied on reload)': '摄像头手势跟踪覆盖层（重新加载后生效）',
-    'Enable the camera hand-tracking gesture overlay (applied on reload). The instance must run with CODEMAN_GESTURE=1.':
-      '启用摄像头手势跟踪覆盖层（重新加载后生效）；实例必须以 CODEMAN_GESTURE=1 运行。',
+    'Enable the camera hand-tracking gesture overlay (applied on reload). The instance must run with REVERIE_GESTURE=1.':
+      '启用摄像头手势跟踪覆盖层（重新加载后生效）；实例必须以 REVERIE_GESTURE=1 运行。',
     'How Claude CLI is started in screen sessions. Auto Mode runs without routine prompts behind a background safety classifier (needs Claude Code 2.1.207+ and Opus 4.6+/Sonnet 4.6+/Fable 5)':
       '设置 Claude CLI 在会话中的启动方式。自动模式由后台安全分类器保护，无需常规确认（需要 Claude Code 2.1.207+ 和 Opus 4.6+/Sonnet 4.6+/Fable 5）。',
     'Auto-enable for new sessions (otherwise auto-enables on Ralph pattern detection)':
@@ -1197,7 +1197,7 @@
 
   const textState = new WeakMap();
   const attributeState = new WeakMap();
-  let language = normalizeLanguage(global.__codemanLanguage);
+  let language = normalizeLanguage(global.__reverieLanguage);
   let displayName = DEFAULT_NAME;
   let observer = null;
   let applying = false;
@@ -1476,8 +1476,8 @@
     const previousDisplayName = displayName;
     language = normalizeLanguage(options.language ?? language);
     displayName = normalizeDisplayName(options.displayName ?? displayName);
-    global.__codemanLanguage = language;
-    global.__codemanDisplayName = displayName;
+    global.__reverieLanguage = language;
+    global.__reverieDisplayName = displayName;
     document.documentElement.lang = language;
     document.documentElement.dataset.language = language;
     if (previousDisplayName !== displayName) {
@@ -1534,8 +1534,8 @@
     },
   });
 
-  global.CodemanI18n = api;
-  global.codemanT = t;
+  global.ReverieI18n = api;
+  global.reverieT = t;
   const nativeConfirm = typeof global.confirm === 'function' ? global.confirm.bind(global) : null;
   const nativeAlert = typeof global.alert === 'function' ? global.alert.bind(global) : null;
   if (nativeConfirm) global.confirm = (message) => nativeConfirm(t(String(message)));

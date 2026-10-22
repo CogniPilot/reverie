@@ -40,7 +40,7 @@ class FakeUtterance {
 }
 
 const context = vm.createContext({
-  CodemanApp: class {},
+  ReverieApp: class {},
   window: { speechSynthesis: phone },
   SpeechSynthesisUtterance: FakeUtterance,
   AbortSignal,
@@ -50,7 +50,7 @@ const context = vm.createContext({
 });
 vm.runInContext(readFileSync(resolve(import.meta.dirname, '../src/web/public/voice-chat.js'), 'utf8'), context);
 vm.runInContext(readFileSync(resolve(import.meta.dirname, '../src/web/public/car-mode.js'), 'utf8'), context);
-const App = vm.runInContext('CodemanApp', context) as new () => Record<string, unknown>;
+const App = vm.runInContext('ReverieApp', context) as new () => Record<string, unknown>;
 const READ_ALOUD_SERVER_SLACK_MS = vm.runInContext('READ_ALOUD_SERVER_SLACK_MS', context) as number;
 
 const flush = async () => {

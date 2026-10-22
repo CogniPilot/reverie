@@ -23,7 +23,7 @@ function fixture(extra: Record<string, unknown> = {}) {
   const session = new Session({
     workingDir: '/tmp', mode: 'opencode', useMux: true,
     mux: mux as unknown as TerminalMultiplexer,
-    muxSession: { sessionId: 'test-session', muxName: 'codeman-aaaaaaaa', pid: 4241 } as MuxSession,
+    muxSession: { sessionId: 'test-session', muxName: 'reverie-aaaaaaaa', pid: 4241 } as MuxSession,
     openCodeConfig: { model: 'local/model', continueSession: 'ses_000000000000000000000001' },
     ...extra,
   });
@@ -49,7 +49,7 @@ describe('interactive recovery with a retained attach client', () => {
     expect(session.pid).toBe(attach.pid);
     expect(attach.kill).not.toHaveBeenCalled();
     expect(session.paneExit).toBeUndefined();
-    expect(mux.clearPaneExit).toHaveBeenCalledWith('codeman-aaaaaaaa');
+    expect(mux.clearPaneExit).toHaveBeenCalledWith('reverie-aaaaaaaa');
     expect(session.paneLifecycleInFlight).toBe(false);
   });
 

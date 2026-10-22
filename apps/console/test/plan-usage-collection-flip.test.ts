@@ -17,16 +17,16 @@ import { describe, expect, it } from 'vitest';
 const SOURCE = readFileSync(resolve(import.meta.dirname, '../src/web/public/settings-ui.js'), 'utf8');
 
 function loadSettingsUi(defaultChip: boolean) {
-  const CodemanApp = function CodemanApp(this: unknown) {};
+  const ReverieApp = function ReverieApp(this: unknown) {};
   const context = vm.createContext({
-    CodemanApp,
+    ReverieApp,
     VoiceInput: {},
     localStorage: { getItem: () => null, setItem: () => {} },
     document: { getElementById: () => null },
     console,
   });
   vm.runInContext(SOURCE, context, { filename: 'settings-ui.js' });
-  const app = Object.create(CodemanApp.prototype) as {
+  const app = Object.create(ReverieApp.prototype) as {
     getDefaultSettings: () => { showPlanUsageLimits: boolean };
     planUsageCollectionFlip: (prev: Record<string, unknown> | null, now: boolean) => boolean | undefined;
   };

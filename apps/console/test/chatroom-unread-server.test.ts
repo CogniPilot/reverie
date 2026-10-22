@@ -81,7 +81,7 @@ describe('server counts and read cursor', () => {
     return app.inject({
       method: 'POST',
       url: `/api/chatrooms/${id}/messages`,
-      headers: { 'x-codeman-parent-session': from },
+      headers: { 'x-reverie-parent-session': from },
       payload: { text, ...(to ? { to } : {}) },
     });
   };
@@ -93,21 +93,21 @@ describe('server counts and read cursor', () => {
     ) as Record<string, Room & { userReadAt: number }>;
 
   it('counts agent messages after the cursor, with the ones that name the owner or the room apart', async () => {
-    const id = await makeRoom('Fleet');
+    const id = await makeRoom('Reverie');
     clock += 10;
     await say(id, A, 'plain one');
     await say(id, B, 'plain two');
     await say(id, A, '@Pat this one is for you');
-    const r = (await listed()).Fleet;
+    const r = (await listed()).Reverie;
     expect(r.unread).toBe(3);
     expect(r.mentions).toBe(1);
   });
 
   it('a mention is @user, @owner, the owner\u2019s name or @everyone; not @all, @here, a part of a word or an address', async () => {
-    const id = await makeRoom('Fleet');
+    const id = await makeRoom('Reverie');
     clock += 10;
     for (const text of ['@user please look', 'ping @OWNER', 'thanks @pat.', '@everyone standup']) await say(id, A, text);
-    expect((await listed()).Fleet.mentions).toBe(4);
+    expect((await listed()).Reverie.mentions).toBe(4);
     const quiet = await makeRoom('Quiet');
     clock += 10;
     for (const text of ['mail pat@user.io', 'ask @users', '@patrick is away', '@allies', 'email me@here.com', 'no names at all', 'heads up @all', '@here now']) await say(quiet, A, text);
@@ -117,15 +117,15 @@ describe('server counts and read cursor', () => {
   });
 
   it('an older message addressed to the user still counts as a mention', async () => {
-    const id = await makeRoom('Fleet');
+    const id = await makeRoom('Reverie');
     clock += 10;
     service.room(id)!.messages.push({ id: 'old-1', at: clock + 1, from: { kind: 'agent', sessionId: A, name: 'alpha' }, to: ['user'], text: 'kept from before' } as never);
-    const r = (await listed()).Fleet;
+    const r = (await listed()).Reverie;
     expect(r.mentions).toBe(1);
   });
 
   it("does not count the user's own messages or system lines", async () => {
-    const id = await makeRoom('Fleet');
+    const id = await makeRoom('Reverie');
     clock += 10;
     await app.inject({ method: 'POST', url: `/api/chatrooms/${id}/messages`, payload: { text: 'from me' } });
     service.room(id)!.messages.push({
@@ -135,13 +135,13 @@ describe('server counts and read cursor', () => {
       text: 'someone joined',
       to: 'all',
     } as never);
-    const r = (await listed()).Fleet;
+    const r = (await listed()).Reverie;
     expect(r.unread).toBe(0);
     expect(r.mentions).toBe(0);
   });
 
   it('clears on read, never moves backward, and never past the newest message', async () => {
-    const id = await makeRoom('Fleet');
+    const id = await makeRoom('Reverie');
     await say(id, A, 'one');
     const second = (await say(id, A, 'two')).json().data.message.at as number;
     await say(id, A, 'three');
@@ -153,13 +153,13 @@ describe('server counts and read cursor', () => {
     expect(future.json().data).toMatchObject({ unread: 0, mentions: 0 });
     // A message after the (clamped) cursor is unread again: the future was not pre-read.
     await say(id, A, 'four');
-    expect((await listed()).Fleet.unread).toBe(1);
+    expect((await listed()).Reverie.unread).toBe(1);
     const all = await app.inject({ method: 'POST', url: `/api/chatrooms/${id}/read`, payload: {} });
     expect(all.json().data.unread).toBe(0);
   });
 
   it('persists the cursor with the room so it survives a reload and any device', async () => {
-    const id = await makeRoom('Fleet');
+    const id = await makeRoom('Reverie');
     await say(id, A, 'one');
     await say(id, A, 'to you', ['user']);
     await app.inject({ method: 'POST', url: `/api/chatrooms/${id}/read`, payload: {} });
@@ -171,7 +171,7 @@ describe('server counts and read cursor', () => {
   });
 
   it('tells other devices: a cursor move broadcasts a read change, a no-op does not', async () => {
-    const id = await makeRoom('Fleet');
+    const id = await makeRoom('Reverie');
     await say(id, A, 'one');
     events.length = 0;
     await app.inject({ method: 'POST', url: `/api/chatrooms/${id}/read`, payload: {} });
@@ -182,20 +182,20 @@ describe('server counts and read cursor', () => {
   });
 
   it('keeps the cursor for the user: an agent cannot mark a room read', async () => {
-    const id = await makeRoom('Fleet');
+    const id = await makeRoom('Reverie');
     await say(id, B, 'one', ['user']);
     const res = await app.inject({
       method: 'POST',
       url: `/api/chatrooms/${id}/read`,
-      headers: { 'x-codeman-parent-session': A },
+      headers: { 'x-reverie-parent-session': A },
       payload: {},
     });
     expect(res.statusCode).toBe(403);
-    expect((await listed()).Fleet.unread).toBe(1);
+    expect((await listed()).Reverie.unread).toBe(1);
   });
 
   it('rejects a malformed body and an unknown room', async () => {
-    const id = await makeRoom('Fleet');
+    const id = await makeRoom('Reverie');
     expect((await app.inject({ method: 'POST', url: `/api/chatrooms/${id}/read`, payload: { at: 'x' } })).statusCode).toBe(400);
     expect((await app.inject({ method: 'POST', url: `/api/chatrooms/${id}/read`, payload: { nope: 1 } })).statusCode).toBe(400);
     expect((await app.inject({ method: 'POST', url: '/api/chatrooms/missing/read', payload: {} })).statusCode).toBe(404);
@@ -210,7 +210,7 @@ describe('server counts and read cursor', () => {
   });
 
   it('keeps timestamps strictly increasing in a room, so a message sharing the read millisecond stays unread', async () => {
-    const id = await makeRoom('Fleet');
+    const id = await makeRoom('Reverie');
     clock += 10;
     const first = (await say(id, A, 'one')).json().data.message.at as number;
     // Same millisecond on the server clock: no tick between the two posts.
@@ -218,20 +218,20 @@ describe('server counts and read cursor', () => {
       await app.inject({
         method: 'POST',
         url: `/api/chatrooms/${id}/messages`,
-        headers: { 'x-codeman-parent-session': A },
+        headers: { 'x-reverie-parent-session': A },
         payload: { text: 'two' },
       })
     ).json().data.message.at as number;
     expect(second).toBeGreaterThan(first);
     await app.inject({ method: 'POST', url: `/api/chatrooms/${id}/read`, payload: { at: first } });
-    expect((await listed()).Fleet.unread).toBe(1);
+    expect((await listed()).Reverie.unread).toBe(1);
     // A clock that steps backwards cannot reorder messages either.
     clock -= 5_000;
     const third = (
       await app.inject({
         method: 'POST',
         url: `/api/chatrooms/${id}/messages`,
-        headers: { 'x-codeman-parent-session': B },
+        headers: { 'x-reverie-parent-session': B },
         payload: { text: 'three' },
       })
     ).json().data.message.at as number;
@@ -267,8 +267,8 @@ describe('read cursor per owner in multi-user mode', () => {
   let app: FastifyInstance;
 
   const build = async (authUser: { username: string; role: 'admin' | 'user' }) => {
-    previous = process.env.CODEMAN_MULTIUSER;
-    process.env.CODEMAN_MULTIUSER = '1';
+    previous = process.env.REVERIE_MULTIUSER;
+    process.env.REVERIE_MULTIUSER = '1';
     const file = join(mkdtempSync(join(tmpdir(), 'chat-unread-mu-')), 'chatrooms.json');
     const harness = await createRouteTestHarness(
       (fastify, c) => {
@@ -285,8 +285,8 @@ describe('read cursor per owner in multi-user mode', () => {
     app = harness.app;
   };
   afterEach(async () => {
-    if (previous === undefined) delete process.env.CODEMAN_MULTIUSER;
-    else process.env.CODEMAN_MULTIUSER = previous;
+    if (previous === undefined) delete process.env.REVERIE_MULTIUSER;
+    else process.env.REVERIE_MULTIUSER = previous;
     await service.stop();
     await app.close();
   });

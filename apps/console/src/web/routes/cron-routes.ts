@@ -31,7 +31,7 @@ export function registerCronRoutes(app: FastifyInstance, ctx: CronPort): void {
   // (shell mode, a launchCommand, or full permissions), so they are owner-only. In single-user mode
   // canAccessOwned and the privileged-command grant are always true, so without this ANY caller,
   // including any agent, could schedule them. Same rule as company-routes' ownerOnly: a request that
-  // carries X-Codeman-Parent-Session (any value) is an agent and is refused; an ABSENT header still
+  // carries X-Reverie-Parent-Session (any value) is an agent and is refused; an ABSENT header still
   // means the owner until owner authentication closes that. Reads are unchanged.
   //
   // Post jobs are the one exception: they only make a bot say a line, never start a session, so an agent's request
@@ -39,7 +39,7 @@ export function registerCronRoutes(app: FastifyInstance, ctx: CronPort): void {
   // a request naming a job needs the STORED job to be a post job, and an edit may not change its action. Launch
   // jobs stay refused for every agent header.
   const refuseAgentCaller = async (req: FastifyRequest, reply: FastifyReply) => {
-    if (req.headers['x-codeman-parent-session'] === undefined) return;
+    if (req.headers['x-reverie-parent-session'] === undefined) return;
     const body = (req.body ?? {}) as { action?: unknown };
     const id = (req.params as { id?: string } | undefined)?.id;
     const postTraffic = id
@@ -78,7 +78,7 @@ export function registerCronRoutes(app: FastifyInstance, ctx: CronPort): void {
     job: CronJob | undefined,
     body?: { name?: string; postSource?: string | null; roomId?: string | null }
   ): Promise<ReturnType<typeof createErrorResponse> | undefined> => {
-    const caller = header(req, 'x-codeman-parent-session');
+    const caller = header(req, 'x-reverie-parent-session');
     const name = body?.name ?? job?.name ?? 'post job';
     const detail = { job: job?.id, verb, fields: body ? Object.keys(body) : [] };
     if (caller === undefined) {
@@ -91,7 +91,7 @@ export function registerCronRoutes(app: FastifyInstance, ctx: CronPort): void {
     const policy = ctx.routines;
     if (!policy) return refuse('Only the owner creates or edits a post job');
     // A tainted caller (web content in its context) never schedules posts, whoever it is.
-    if (header(req, 'x-codeman-tainted') !== undefined) return refuse('Refused while web content is in the caller context');
+    if (header(req, 'x-reverie-tainted') !== undefined) return refuse('Refused while web content is in the caller context');
     const employee = policy.findEmployee(caller);
     if (!employee) {
       return refuse('Temporary agents cannot own routines, because the routine would outlive the agent. Ask the owner to hire this agent first');
@@ -123,7 +123,7 @@ export function registerCronRoutes(app: FastifyInstance, ctx: CronPort): void {
 
   app.get('/api/routines-grants', async () => ({ success: true, data: ctx.routines?.grants.snapshot() ?? null }));
   app.put('/api/routines-grants', async (req) => {
-    if (header(req, 'x-codeman-parent-session') !== undefined || !ctx.routines) {
+    if (header(req, 'x-reverie-parent-session') !== undefined || !ctx.routines) {
       return createErrorResponse(ApiErrorCode.FORBIDDEN, 'Only the owner grants the routines permission');
     }
     try {
@@ -144,7 +144,7 @@ export function registerCronRoutes(app: FastifyInstance, ctx: CronPort): void {
       if (user.role !== 'admin') jobs = (jobs as CronJob[]).filter((j) => canAccessOwned(user, j.owner));
     }
     // An agent sees its own routines in full; ?all=1 adds everyone's name, room and schedule, never another author's text.
-    const caller = header(req, 'x-codeman-parent-session');
+    const caller = header(req, 'x-reverie-parent-session');
     if (caller === undefined) return jobs;
     const mine = authorOf(caller);
     const all = (req.query as { all?: string } | undefined)?.all === '1';
@@ -170,7 +170,7 @@ export function registerCronRoutes(app: FastifyInstance, ctx: CronPort): void {
     // (e.g. "runAt is required for a one-time schedule").
     // An employee's routine always speaks as its author: the server says so, and the body may not.
     const raw = (req.body ?? {}) as Record<string, unknown>;
-    const asEmployee = header(req, 'x-codeman-parent-session') !== undefined && raw.action === 'post';
+    const asEmployee = header(req, 'x-reverie-parent-session') !== undefined && raw.action === 'post';
     if (asEmployee && raw.postAs !== undefined) {
       reply.code(403);
       return createErrorResponse(ApiErrorCode.FORBIDDEN, 'postAs can only be set by the owner');
@@ -180,7 +180,7 @@ export function registerCronRoutes(app: FastifyInstance, ctx: CronPort): void {
       const refused = await gatePost(req, 'created', undefined, body);
       if (refused) return refused;
       // The author comes from the caller's own session, never from the body.
-      const caller = header(req, 'x-codeman-parent-session');
+      const caller = header(req, 'x-reverie-parent-session');
       const author = caller === undefined ? undefined : ctx.routines?.findEmployee(caller);
       if (caller === undefined && body.postAs === 'author') {
         return createErrorResponse(ApiErrorCode.INVALID_INPUT, 'postAs author is only for an employee\'s own routine');
@@ -212,7 +212,7 @@ export function registerCronRoutes(app: FastifyInstance, ctx: CronPort): void {
     const { id } = req.params as { id: string };
     const job = ctx.cron.getJob(id);
     if (!canTouch(req, job)) return createErrorResponse(ApiErrorCode.NOT_FOUND, 'Cron job not found');
-    const caller = header(req, 'x-codeman-parent-session');
+    const caller = header(req, 'x-reverie-parent-session');
     if (caller !== undefined && !isMine(authorOf(caller), job)) return publicJob(job);
     return job;
   });
@@ -297,14 +297,14 @@ export function registerCronRoutes(app: FastifyInstance, ctx: CronPort): void {
     const job = ctx.cron.getJob(id);
     if (!canTouch(req, job)) return createErrorResponse(ApiErrorCode.NOT_FOUND, 'Cron job not found');
     // An agent reads the history of its own routines; for anyone else's it gets the times and outcomes, not the messages.
-    const caller = header(req, 'x-codeman-parent-session');
+    const caller = header(req, 'x-reverie-parent-session');
     const runs = ctx.cron.listRuns(id);
     return caller !== undefined && !isMine(authorOf(caller), job) ? runs.map(publicRun) : runs;
   });
 
   app.get('/api/cron/runs', async (req) => {
     let runs = ctx.cron.listRuns();
-    const caller = header(req, 'x-codeman-parent-session');
+    const caller = header(req, 'x-reverie-parent-session');
     if (caller !== undefined) {
       // Owner scope below still applies; then an agent keeps its own runs whole and sees only times and outcomes of the rest.
       const jobById = new Map(ctx.cron.listJobs().map((j): [string, CronJob] => [j.id, j]));

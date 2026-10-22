@@ -218,7 +218,7 @@ describe('GET /api/search: past sessions (history index)', () => {
 
   afterEach(() => {
     resetHistorySessionIndex();
-    delete process.env.CODEMAN_MULTIUSER;
+    delete process.env.REVERIE_MULTIUSER;
   });
 
   it('matches a past session by folder name with no live session at all', async () => {
@@ -261,7 +261,7 @@ describe('GET /api/search: past sessions (history index)', () => {
   });
 
   it('multi-user: a non-admin sees neither another user’s past session nor unowned host-wide history', async () => {
-    process.env.CODEMAN_MULTIUSER = '1';
+    process.env.REVERIE_MULTIUSER = '1';
     const app = Fastify({ logger: false });
     app.addHook('onRequest', async (req) => {
       (req as unknown as { authUser: unknown }).authUser = { username: 'bob', role: 'user' };

@@ -3,7 +3,7 @@
  *
  * `Session._model` is what becomes `claude --model <id>`: the caller's per-session `model`
  * from POST /api/sessions, or the app-wide default. It lives in memory, so it reaches a
- * relaunch after a Codeman restart or a reboot restore only if `toState()` persists it and
+ * relaunch after a Reverie restart or a reboot restore only if `toState()` persists it and
  * both recovery constructors hand it back. Without that, a recovered session silently
  * relaunches on the account default.
  *
@@ -28,7 +28,7 @@ import type { EffortLevel } from '../src/types.js';
 const SRC = fileURLToPath(new URL('../src', import.meta.url));
 
 describe('the launch model survives recovery', () => {
-  const workingDir = join(homedir(), 'codeman-cases', 'session-model-recovery');
+  const workingDir = join(homedir(), 'reverie-cases', 'session-model-recovery');
   const sessions: Session[] = [];
 
   afterEach(() => {
@@ -186,7 +186,7 @@ describe('a launch model and an advisor survive recovery together', () => {
         mode: state.mode,
         mux,
         useMux: true,
-        muxSession: { muxName: 'codeman-aaaa', sessionId: state.id } as unknown as MuxSession,
+        muxSession: { muxName: 'reverie-aaaa', sessionId: state.id } as unknown as MuxSession,
         effort: state.effort,
         model: state.model,
         advisorModel: state.advisorModel,

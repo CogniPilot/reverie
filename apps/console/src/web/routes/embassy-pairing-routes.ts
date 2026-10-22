@@ -38,7 +38,7 @@ export function registerEmbassyPairingRoutes(
   const handle =
     (fn: (req: FastifyRequest) => unknown) =>
     async (req: FastifyRequest, reply: FastifyReply): Promise<unknown> => {
-      if (req.headers['x-codeman-parent-session'] !== undefined)
+      if (req.headers['x-reverie-parent-session'] !== undefined)
         return refuse(reply, 403, 'OWNER_ONLY', 'Embassy pairing requires a signed-in owner');
       // Every method, GET included: the marker, and an Origin that is absent or allowed. `null` is refused even
       // where the global guard would accept a web-tab capability.

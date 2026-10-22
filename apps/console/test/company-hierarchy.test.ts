@@ -68,7 +68,7 @@ describe('transactional employee hierarchy', () => {
     const lead = await hire('lead', undefined, chief.id);
     const specialist = await hire('specialist', undefined, lead.id);
     await expect(service.update(chief.id, undefined, { reportsTo: specialist.id })).rejects.toThrow('cycle');
-    await service.configure(undefined, { ctoId: chief.id } as never);
+    await service.configure(undefined, { coordinatorEmployeeId: chief.id } as never);
     const implicit = await hire('implicit');
     await expect(service.update(chief.id, undefined, { reportsTo: implicit.id })).rejects.toThrow('cycle');
     expect(store.snapshot().employees.find((e) => e.id === chief.id)?.reportsTo).toBe('owner');

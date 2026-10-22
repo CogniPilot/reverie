@@ -84,8 +84,8 @@ Unchecking **Open sandboxed** grants a real origin. Do that only for a dashboard
 trust, and only when you need it, which in practice means one with its own login that stores
 a session in a cookie.
 
-Either way, Codeman never forwards its own credentials upstream. The `Authorization` header
-and the `codeman_session` cookie are stripped on the way out, so `CODEMAN_PASSWORD` cannot
+Either way, Reverie never forwards its own credentials upstream. The `Authorization` header
+and the `reverie_session` cookie are stripped on the way out, so `REVERIE_PASSWORD` cannot
 leak into a dashboard.
 
 ## Known incompatibility: cookie-authenticated reverse proxies
@@ -121,4 +121,4 @@ same-host requests being CORS-checked with a null origin. Both present as the da
 
 - [The Dashboard](The-Dashboard) - the tab strip these share.
 - [Security](Security) - why the sandbox default is what it is.
-- [`docs/web-tabs.md`](https://github.com/Ark0N/Codeman/blob/master/docs/web-tabs.md) - the full reference.
+- [`docs/web-tabs.md`](https://github.com/jgoppert/reverie/blob/main/apps/console/docs/web-tabs.md) - the full reference.

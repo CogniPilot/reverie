@@ -5,7 +5,7 @@ through it, so anything the dashboard can do, a script can do.
 
 This page is the orientation. The complete specification, including every wait semantic and
 the SSE catalogue, is
-[`docs/api-reference.md`](https://github.com/Ark0N/Codeman/blob/master/docs/api-reference.md).
+[`docs/api-reference.md`](https://github.com/jgoppert/reverie/blob/main/apps/console/docs/api-reference.md).
 
 ## What is stable
 
@@ -53,11 +53,11 @@ a parse error rather than showing the failure, so check the status first.
 
 ## Authentication
 
-With no password set, and the default loopback bind, there is none. With `CODEMAN_PASSWORD`
+With no password set, and the default loopback bind, there is none. With `REVERIE_PASSWORD`
 set, use HTTP Basic or the session cookie:
 
 ```bash
-curl -s -u admin:"$CODEMAN_PASSWORD" "$API/api/sessions"
+curl -s -u admin:"$REVERIE_PASSWORD" "$API/api/sessions"
 ```
 
 A **missing** `Origin` header is allowed, so curl and CLI tools work unchanged. A
@@ -116,7 +116,7 @@ single-job GET has the job itself, create/update/enable have `{ job }`, delete h
 `{}`, and Run Now has `{ run, activeAgents }`. Prompt delivery is asynchronous;
 `session_started` and `prompt_sent` describe launch/delivery, not task success.
 
-The [cron API reference](https://github.com/Ark0N/Codeman/blob/master/docs/api-reference.md#cron-jobs)
+The [cron API reference](https://github.com/jgoppert/reverie/blob/main/apps/console/docs/api-reference.md#cron-jobs)
 lists all request and response fields, validation, and ownership restrictions.
 [Creating a job](Cron-Jobs) covers the UI and schedule semantics.
 
@@ -165,7 +165,7 @@ es.addEventListener('session:created', (e) => console.log(JSON.parse(e.data)));
 ## Quick examples
 
 ```bash
-API="${CODEMAN_API_URL:-http://localhost:3000}"
+API="${REVERIE_API_URL:-http://localhost:3000}"
 
 curl -s "$API/api/status" | jq                     # whole-system snapshot
 curl -s "$API/api/sessions" | jq '.data[].name'    # live sessions
@@ -197,7 +197,7 @@ Most are environment-overridable. See `src/config/`.
 
 ## Read next
 
-- [Driving Reverie From An Agent](Driving-Codeman-From-An-Agent) - the practical version, with recipes.
+- [Driving Reverie From An Agent](Driving-Reverie-From-An-Agent) - the practical version, with recipes.
 - [Hooks And Integrations](Hooks-And-Integrations) - events flowing back into Reverie.
 - [Versioning](Versioning) - what the version number promises.
-- [`docs/api-reference.md`](https://github.com/Ark0N/Codeman/blob/master/docs/api-reference.md) - the full specification.
+- [`docs/api-reference.md`](https://github.com/jgoppert/reverie/blob/main/apps/console/docs/api-reference.md) - the full specification.

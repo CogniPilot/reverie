@@ -19,7 +19,7 @@ import { installRouteErrorHandler } from '../../src/web/route-error-handler.js';
 const PNG = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(64, 7)]);
 const WEBP = Buffer.concat([Buffer.from('RIFF'), Buffer.from([1, 0, 0, 0]), Buffer.from('WEBP'), Buffer.alloc(16, 2)]);
 const SVG = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" onload="alert(1)"/>');
-const AGENT = { 'x-codeman-parent-session': 'alpha-session' };
+const AGENT = { 'x-reverie-parent-session': 'alpha-session' };
 
 describe('the owner profile picture', () => {
   let app: FastifyInstance;
@@ -28,7 +28,7 @@ describe('the owner profile picture', () => {
   let changed: ReturnType<typeof vi.fn>;
 
   beforeEach(async () => {
-    directory = await mkdtemp(join(tmpdir(), 'fleet-owner-avatar-'));
+    directory = await mkdtemp(join(tmpdir(), 'reverie-owner-avatar-'));
     const store = new CompanyStore(join(directory, 'company.json'));
     await store.init();
     const chatrooms = new ChatroomService({ file: join(directory, 'chatrooms.json'), getSession: () => undefined, broadcast: () => {} });

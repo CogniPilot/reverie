@@ -60,8 +60,8 @@ export function agentImageNpmPackages(catalog) {
  * ⚠️ Mirrored by `GIT_HOST_CLI_BUILD_ARGS` in `src/docker-hosts.ts`; the parity test pins them.
  */
 export const GIT_HOST_CLI_BUILD_ARGS = [
-  ['CODEMAN_AGENT_IMAGE_INSTALL_GH', 'CODEMAN_INSTALL_GH'],
-  ['CODEMAN_AGENT_IMAGE_INSTALL_AZ', 'CODEMAN_INSTALL_AZ'],
+  ['REVERIE_AGENT_IMAGE_INSTALL_GH', 'REVERIE_INSTALL_GH'],
+  ['REVERIE_AGENT_IMAGE_INSTALL_AZ', 'REVERIE_INSTALL_AZ'],
 ];
 
 /**
@@ -69,8 +69,8 @@ export const GIT_HOST_CLI_BUILD_ARGS = [
  * ⚠️ Mirrored by `GIT_IDENTITY_BUILD_ARGS` in `src/docker-hosts.ts`; the parity test pins them.
  */
 export const GIT_IDENTITY_BUILD_ARGS = [
-  ['CODEMAN_AGENT_IMAGE_GIT_USER_NAME', 'GIT_USER_NAME'],
-  ['CODEMAN_AGENT_IMAGE_GIT_USER_EMAIL', 'GIT_USER_EMAIL'],
+  ['REVERIE_AGENT_IMAGE_GIT_USER_NAME', 'GIT_USER_NAME'],
+  ['REVERIE_AGENT_IMAGE_GIT_USER_EMAIL', 'GIT_USER_EMAIL'],
 ];
 
 /**

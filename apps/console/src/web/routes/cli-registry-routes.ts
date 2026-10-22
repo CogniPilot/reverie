@@ -124,7 +124,7 @@ function refusedWriteResponse(err: unknown): ApiResponse<never> {
 async function requireCliManagementGate(req: FastifyRequest): Promise<ApiResponse<never> | null> {
   // Registering a CLI decides what runs in panes and what room text is typed into; the
   // user does that, never an agent session calling the API.
-  if (req.headers['x-codeman-parent-session'] !== undefined) {
+  if (req.headers['x-reverie-parent-session'] !== undefined) {
     return createErrorResponse(ApiErrorCode.FORBIDDEN, 'Only the user manages CLIs');
   }
   if (isMultiUserMode() && !isAdmin(req)) {
@@ -269,13 +269,13 @@ export async function npmGlobalPrefixWritable(source: NodeJS.ProcessEnv): Promis
 }
 
 /**
- * The server's environment minus every `CODEMAN_*` variable. An install script is third-party
- * code, and those variables carry Codeman's own secrets and wiring (`CODEMAN_PASSWORD`, the
+ * The server's environment minus every `REVERIE_*` variable. An install script is third-party
+ * code, and those variables carry Reverie's own secrets and wiring (`REVERIE_PASSWORD`, the
  * data dir, the tmux socket), none of which an installer needs.
  *
  * It also points `NPM_CONFIG_PREFIX` at `$HOME/.local` so an `npm install -g` lands somewhere the
- * server user can write and Codeman's resolvers already search (`~/.local/bin`):
- *  - inside the Docker Compose container (`CODEMAN_IN_CONTAINER=1`), so installs survive an image
+ * server user can write and Reverie's resolvers already search (`~/.local/bin`):
+ *  - inside the Docker Compose container (`REVERIE_IN_CONTAINER=1`), so installs survive an image
  *    update (the image's own prefix is image content);
  *  - on a native install whose npm global prefix is not writable by the server user (a system node
  *    under `/usr`, installed by root). Without this `npm install -g` died with EACCES (exit 243),
@@ -288,13 +288,13 @@ export function installEnv(
 ): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {};
   for (const [key, value] of Object.entries(source)) {
-    if (!key.startsWith('CODEMAN_')) env[key] = value;
+    if (!key.startsWith('REVERIE_')) env[key] = value;
   }
-  // ⚠️ In the Docker Compose deployment the image sets NPM_CONFIG_PREFIX=/opt/codeman-cli, which is IMAGE
-  // content: `Update-Codeman.sh` recreates the container and every CLI installed there (dsh, pi, ...)
+  // ⚠️ In the Docker Compose deployment the image sets NPM_CONFIG_PREFIX=/opt/reverie-cli, which is IMAGE
+  // content: `Update-Reverie.sh` recreates the container and every CLI installed there (dsh, pi, ...)
   // vanishes. HOME is the persistent bind mount and `~/.local/bin` is already on every resolver's search
   // list, so npm-based installs are redirected there. curl|bash installers already target HOME.
-  if (source.CODEMAN_IN_CONTAINER === '1' && source.HOME) {
+  if (source.REVERIE_IN_CONTAINER === '1' && source.HOME) {
     redirectNpmPrefix(env, source.HOME);
   } else if (process.platform !== 'win32' && source.HOME && !source.NPM_CONFIG_PREFIX && !prefixWritable(env)) {
     redirectNpmPrefix(env, source.HOME);
@@ -321,7 +321,7 @@ async function installEnvFor(command: string, source: NodeJS.ProcessEnv = proces
   const usesNpm = /\bnpm\b/.test(command);
   const probeNeeded =
     usesNpm &&
-    source.CODEMAN_IN_CONTAINER !== '1' &&
+    source.REVERIE_IN_CONTAINER !== '1' &&
     process.platform !== 'win32' &&
     !!source.HOME &&
     !source.NPM_CONFIG_PREFIX;
@@ -414,7 +414,7 @@ export function registerCliRegistryRoutes(app: FastifyInstance): void {
   // enabledClis() instead). Deliberately excludes launch/env/capabilities/
   // overlays/discovery — the same rule every other catalogue-export surface in
   // this codebase follows, with one deliberate exception: the page catalog
-  // (`window.__codemanCliCatalog`, server.ts) carries `capabilities.external`,
+  // (`window.__reverieCliCatalog`, server.ts) carries `capabilities.external`,
   // which Session Options reads to keep Claude's Respawn and Ralph tabs.
   //
   // NOT gated on cliManagementEnabled: reading the list is cheap and is not
@@ -476,7 +476,7 @@ export function registerCliRegistryRoutes(app: FastifyInstance): void {
   });
 
   // ---- Phase 4: auto-install (stock only) --------------------------------
-  // One install per id at a time (409 otherwise), and the script never sees CODEMAN_* env.
+  // One install per id at a time (409 otherwise), and the script never sees REVERIE_* env.
   // POST /api/clis/:id/install — runs the entry's already-vetted install
   // command. Separate endpoint from Phase 3's toggle: installing is a bigger
   // action than a boolean flip and gets its own audit entry. Never auto-

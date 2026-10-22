@@ -15,7 +15,7 @@ describe('mux-routes', () => {
   beforeEach(async () => {
     // Add mux methods that mux-routes needs but mock-route-context doesn't provide
     harness = await createRouteTestHarness(registerMuxRoutes);
-    harness.ctx.mux.getSessionsWithStats = vi.fn(async () => [{ name: 'codeman-abc', pid: 1234, created: Date.now() }]);
+    harness.ctx.mux.getSessionsWithStats = vi.fn(async () => [{ name: 'reverie-abc', pid: 1234, created: Date.now() }]);
     harness.ctx.mux.isAvailable = vi.fn(() => true);
     harness.ctx.mux.reconcileSessions = vi.fn(async () => ({
       orphaned: [],
@@ -42,7 +42,7 @@ describe('mux-routes', () => {
       const body = JSON.parse(res.body);
       expect(body.muxAvailable).toBe(true);
       expect(body.sessions).toHaveLength(1);
-      expect(body.sessions[0].name).toBe('codeman-abc');
+      expect(body.sessions[0].name).toBe('reverie-abc');
     });
 
     it('returns muxAvailable false when mux is unavailable', async () => {
@@ -68,12 +68,12 @@ describe('mux-routes', () => {
 
       const res = await harness.app.inject({
         method: 'DELETE',
-        url: '/api/mux-sessions/codeman-abc',
+        url: '/api/mux-sessions/reverie-abc',
       });
       expect(res.statusCode).toBe(200);
       const body = JSON.parse(res.body);
       expect(body.killed).toBe(true);
-      expect(harness.ctx.mux.killSession).toHaveBeenCalledWith('codeman-abc');
+      expect(harness.ctx.mux.killSession).toHaveBeenCalledWith('reverie-abc');
     });
 
     it('returns success false when kill fails', async () => {

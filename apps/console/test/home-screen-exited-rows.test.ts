@@ -52,9 +52,9 @@ function classNames(el: any): string[] {
 }
 
 function loadApp({ withPaneExitLabel = true } = {}) {
-  const CodemanApp = function CodemanApp(this: any) {};
+  const ReverieApp = function ReverieApp(this: any) {};
   const context = vm.createContext({
-    CodemanApp,
+    ReverieApp,
     console,
     window: { innerWidth: 1512 },
     document: {
@@ -69,7 +69,7 @@ function loadApp({ withPaneExitLabel = true } = {}) {
   for (const file of ['constants.js', 'mobile-overview.js', 'home-sessions.js']) {
     vm.runInContext(readFileSync(resolve(PUBLIC, file), 'utf8'), context, { filename: file });
   }
-  const app = new (CodemanApp as any)();
+  const app = new (ReverieApp as any)();
   app.getSessionName = (session: any) => session.name || session.id.slice(0, 8);
   app._shortenHomePath = (p: string) => p || '';
   app.loadAppSettingsFromStorage = () => ({});

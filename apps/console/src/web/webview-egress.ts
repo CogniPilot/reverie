@@ -30,7 +30,7 @@ import type { LookupFunction } from 'node:net';
 import { Agent, fetch as undiciFetch, type RequestInit, type Response } from 'undici';
 import { blockedWebviewHostReason, isBlockedEgressAddress } from './webview-egress-policy.js';
 
-export const EGRESS_BLOCKED_CODE = 'CODEMAN_EGRESS_BLOCKED';
+export const EGRESS_BLOCKED_CODE = 'REVERIE_EGRESS_BLOCKED';
 
 /** Thrown (or delivered as the lookup error) when a target resolves into a blocked range. */
 export class WebviewEgressBlockedError extends Error {

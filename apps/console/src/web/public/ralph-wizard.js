@@ -1,7 +1,7 @@
 /**
  * @fileoverview Ralph Loop Wizard — multi-step modal for configuring autonomous task loops.
  *
- * Extends CodemanApp.prototype with wizard methods for the Ralph Loop setup flow:
+ * Extends ReverieApp.prototype with wizard methods for the Ralph Loop setup flow:
  *   Step 1: Task description, completion phrase, iteration limit, case selection
  *   Step 2: AI-powered plan generation (optional) with research agent → planner agent pipeline
  *   Step 3: Respawn configuration (idle timeout, kickstart prompt, auto-clear/init)
@@ -15,8 +15,8 @@
  * - Focus trap for modal accessibility
  * - Abort controller for cancelling in-flight plan generation
  *
- * @mixin Extends CodemanApp.prototype via Object.assign
- * @dependency app.js (CodemanApp class must be defined)
+ * @mixin Extends ReverieApp.prototype via Object.assign
+ * @dependency app.js (ReverieApp class must be defined)
  * @dependency keyboard-accessory.js (FocusTrap class for modal focus management)
  * @dependency constants.js (escapeHtml)
  * @loadorder 13 of 15 — loaded after session-ui.js, before api-client.js
@@ -26,7 +26,7 @@
 // Ralph Loop Wizard
 // ═══════════════════════════════════════════════════════════════
 
-Object.assign(CodemanApp.prototype, {
+Object.assign(ReverieApp.prototype, {
 
   showRalphWizard() {
     // Reset wizard state

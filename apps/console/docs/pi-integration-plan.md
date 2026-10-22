@@ -38,7 +38,7 @@ Three consequences shape the whole integration:
 
 1. **There is no `--dangerously-skip-permissions` analog and none is needed.** Pi never prompts for
    tool approval. The Claude/Codex/Gemini/Antigravity pattern of "send the bypass flag so the session
-   is not stuck on a modal" does not apply. Codeman must not invent a flag here.
+   is not stuck on a modal" does not apply. Reverie must not invent a flag here.
 2. **The one privileged knob is `--approve` / `-a`** (trust project-local files for this run), which
    makes pi load and execute project `.pi/extensions` TypeScript **and run an npm install of missing
    project packages**. That is the field the multi-user clamp has to cover. Its explicit inverse
@@ -80,7 +80,7 @@ stabilization used by the other external CLIs.
 Pi stays **out** of `isAltScreenStripMode()` (`session.ts:197-199`, currently codex/claude/gemini;
 antigravity and opencode are deliberately excluded). Pi's default TUI renders into the main screen
 with terminal-owned scrollback, so there is nothing to strip. The fullscreen mode **shipped in
-0.84.0 and is runtime-switchable via `/settings`**, so Codeman cannot assume a pi session stays
+0.84.0 and is runtime-switchable via `/settings`**, so Reverie cannot assume a pi session stays
 main-screen for its lifetime; staying out of the strip list is exactly what makes that safe (the alt
 screen is load-bearing when the user flips to fullscreen, as it is for `opencode`). Putting pi IN
 the strip list would corrupt fullscreen sessions. Three mirrors must stay consistent (all unchanged
@@ -124,7 +124,7 @@ single global list applied by one Zod refine with no mode context (`safeEnvOverr
 `schemas.ts:153-165`), so allowlisting bare provider keys for pi would widen the allowlist for
 **every** mode at once, violating the multi-CLI prefix discipline in CLAUDE.md. Users authenticate
 pi through `/login` (stored in `~/.pi/agent/auth.json`, auto-refreshed) or by exporting the key in
-the Codeman server process's own environment.
+the Reverie server process's own environment.
 
 Making the allowlist mode-aware is the clean fix, listed as a follow-up in §9. Do not smuggle it
 into this change.
@@ -153,7 +153,7 @@ so exports remain secret-free.
 
 Trade-off to accept and document: in-container pi sessions are not visible host-side, so `pi -c`
 inside a Docker case only sees that container's own history. Codex shares `sessions/` RW precisely
-because Codeman reads it host-side for the response viewer; there is no such reader for pi yet
+because Reverie reads it host-side for the response viewer; there is no such reader for pi yet
 (the response-viewer follow-up in §9 would justify flipping this).
 
 ### 2.6 The `pi` binary name is generic
@@ -167,7 +167,7 @@ skip under `VITEST`, and require output matching `/^\d+\.\d+\.\d+/`; on mismatch
 unavailable and log the rejected path. Surface `{ available, path, version }` from
 `GET /api/pi/status` so a misresolution is diagnosable from the UI (additive relative to the sibling
 endpoints' `{ available, path }`). The `dependency-registry` entry carries `versionArg: '--version'`
-for `codeman doctor`.
+for `reverie doctor`.
 
 ### 2.7 tmux extended keys (a real pi-specific footgun)
 
@@ -181,15 +181,15 @@ set -g extended-keys-format csi-u
 tmux collapses `Shift+Enter` and `Ctrl+Enter` into a plain `\r` (and `Alt+Enter` into `\x1b\r`), and
 pi's editor uses those for newline vs submit. `extended-keys-format` requires tmux 3.5+; tmux
 3.2-3.4 works with `extended-keys on` alone (pi then falls back to xterm `modifyOtherKeys`).
-Codeman's own browser input path sends `\r` for submit, so basic use works unconfigured, but
+Reverie's own browser input path sends `\r` for submit, so basic use works unconfigured, but
 newline-in-editor is degraded both for a user typing in an attached terminal (`sc`) and potentially
 for the browser Shift+Enter path.
 
 Upstream recommends `~/.tmux.conf` and notes the setting may need a full `tmux kill-server` restart
-to take effect. **Codeman must NEVER run `kill-server` on its socket** (it would kill every live
+to take effect. **Reverie must NEVER run `kill-server` on its socket** (it would kill every live
 session, including `w1`/`w2`/`w3`). Action: attempt to set both options **server-scoped on
-Codeman's own socket only** (`tmux -L codeman set -s ...`, never `-g` on the user's default socket)
-at the point the tmux server is first started, verify with `tmux -L codeman show-options -s` and an
+Reverie's own socket only** (`tmux -L reverie set -s ...`, never `-g` on the user's default socket)
+at the point the tmux server is first started, verify with `tmux -L reverie show-options -s` and an
 empirical Shift+Enter test which scope actually takes for the installed tmux version, and fall back
 to a documented manual step in `docs/pi-integration.md` (a `~/.tmux.conf` snippet plus the
 kill-server caveat) if it cannot be applied safely to an already-running server. Upstream does not
@@ -201,8 +201,8 @@ on an **already-running** server with **no `kill-server`** — pi's own startup 
 (`Warning: tmux extended-keys is off…`, a convenient in-band probe) disappears for the next session
 started afterwards. `extended-keys-format` does **not exist on tmux 3.4** and errors with
 `invalid option: extended-keys-format`, so the two options must be issued independently rather than
-chained. Decision: Codeman does **not** set this itself — it is a server-wide tmux option affecting
-every session of every backend, so silently changing key encoding is not Codeman's call. It is
+chained. Decision: Reverie does **not** set this itself — it is a server-wide tmux option affecting
+every session of every backend, so silently changing key encoding is not Reverie's call. It is
 documented as a user step in `docs/pi-integration.md` instead, carrying the measured facts.
 
 ### 2.8 The completeness trap: which mode tables fail loud vs silent
@@ -228,7 +228,7 @@ silently fall back to `exec bash -l` via the `|| commands.shell` on the lookup. 
 - The `runMode` accessor's **setter whitelist** (`session-ui.js:2949-2960`) coerces any unknown mode
   to `'claude'`. Omitting `pi` there makes the mode **unselectable while every other edit appears to
   work**: this is the single most deceptive omission in the frontend.
-- `window.__codemanCliAvailable` (injected by `renderIndexHtml`, `server.ts:1375-1407`): the client
+- `window.__reverieCliAvailable` (injected by `renderIndexHtml`, `server.ts:1375-1407`): the client
   treats a **missing key as available** (`isCliAvailable` in settings-ui.js), so forgetting the
   injection un-gates pi on boxes without the CLI instead of hiding it.
 
@@ -305,7 +305,7 @@ export interface PiConfig {
   thinking?: 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
   /** Continue the most recent session (-c). Per-cwd scoping is strongly implied upstream but not documented; treat as probable. */
   continueSession?: boolean;
-  /** Resume a specific session by ID or partial UUID (--session). Codeman deliberately accepts ids only, never paths. */
+  /** Resume a specific session by ID or partial UUID (--session). Reverie deliberately accepts ids only, never paths. */
   resumeSessionId?: string;
   /**
    * Tri-state project trust (repo-local `.pi/` settings/extensions/skills, plus installing
@@ -337,7 +337,7 @@ because the result lands in a `bash -c "..."` string):
 - `--api-key <key>`: ⚠️ **never wire this.** It puts a provider secret on the spawn command line,
   which is exactly what the socket-scoped `tmux setenv` discipline exists to prevent (visible in
   `ps`, tmux server state, and logs). Listed here so nobody "helpfully" adds it later.
-- `--tui-mode` (released in 0.84.0): never passed by Codeman. The main-screen default is the
+- `--tui-mode` (released in 0.84.0): never passed by Reverie. The main-screen default is the
   friendly case for the browser terminal, and fullscreen remains the user's own runtime choice via
   `/settings` (§2.2 is designed for that). `--use-theme` (still unreleased) likewise.
 - `--name <name>` (`-n`): nice for `/resume` readability, but names contain spaces and would be the
@@ -438,7 +438,7 @@ Both files are unchanged since the 2026-08-06 verification; all anchors stand.
 - `docs/pi-integration.md` (**new**, user-facing): install (both installers uninstall via npm), auth
   (`/login` OAuth for six providers vs API keys; `pi auth check` for preflight; Claude Pro/Max
   third-party harness usage bills as Anthropic "extra usage" per token, not plan limits; OpenRouter
-  login supports pasting the redirect URL, which matters over remote SSH), what Codeman wires up
+  login supports pasting the redirect URL, which matters over remote SSH), what Reverie wires up
   and deliberately does not (§3, incl. never passing `--tui-mode`), the tmux extended-keys note
   from §2.7 with the manual `~/.tmux.conf` fallback, Docker/remote behaviour (in-container sessions
   invisible host-side), the trust model in §1 words, known gaps.
@@ -488,8 +488,8 @@ Both files are unchanged since the 2026-08-06 verification; all anchors stand.
 6. **Remote SSH.** `pi` mode goes through `defaultRemoteCommandForMode` and therefore
    `buildSshConnectionArgs()`. No hand-built ssh line anywhere.
 7. **No sandbox claims.** Pi documents that it has no sandbox and no permission prompts, and that
-   extensions run with the user's full permissions. Codeman docs must say plainly that a pi session
-   can read, write and execute anything the Codeman user can, and point at Docker cases as the
+   extensions run with the user's full permissions. Reverie docs must say plainly that a pi session
+   can read, write and execute anything the Reverie user can, and point at Docker cases as the
    isolation story. Do not imply the trust prompt is a safety boundary (upstream itself says it is
    not). Worth one doc sentence: `pi auth print-api-key` / `print-bearer-token` (0.83.0) and
    `pi auth check` (0.84.1) mean a pi session can print its own provider credentials by design;
@@ -525,7 +525,7 @@ Both files are unchanged since the 2026-08-06 verification; all anchors stand.
   stubbed `/api/pi/status` + `/api/quick-start`, asserting the posted body has `mode: 'pi'` and
   **no `piConfig`**, and that the envelope is unwrapped. (The short-label assertion pattern is at
   `:82`, `'Run AG'`.)
-- `test/render-index-html.test.ts` `:141`: the injected `window.__codemanCliAvailable` is asserted
+- `test/render-index-html.test.ts` `:141`: the injected `window.__reverieCliAvailable` is asserted
   with an exact `toEqual` and now carries **seven** keys (claude, opencode, codex, gemini,
   antigravity, cloudflared, and since 1.12+ `git`), so it **must** gain the `pi` key (and the
   resolver mock an `isPiAvailable`); its comment explains why: a dropped key silently un-gates
@@ -591,7 +591,7 @@ step 1 is a real step). Before shipping:
     login-shell wrapper resolves the npm global bin.
 11. Only then: changeset, `COM minor` (new capability, additive to the API surface).
 
-**Verification actually performed** (2026-08-13, pi 0.84.1, isolated `CODEMAN_INSTANCE=pi-beta`
+**Verification actually performed** (2026-08-13, pi 0.84.1, isolated `REVERIE_INSTANCE=pi-beta`
 server on :5055 with its own tmux socket and data dir): steps 1-8 pass. Highlights:
 `/api/pi/status` resolved through the **search-dir fallback** (pi installed to `~/.npm-global/bin`,
 deliberately not on PATH) and reported
@@ -604,7 +604,7 @@ case containing `.pi/extensions` + `.pi/settings.json`, and `--no-approve` suppr
 `linear-gradient(135deg, rgb(190,24,93), rgb(244,114,182))` — genuinely rose and **distinct from
 claude's blue**, so the §2.9 cascade trap is avoided; and flipping `/settings` to the fullscreen TUI
 put the pane into the alt screen (`alternate_on=1`), **empirically confirming §2.2**: had pi been in
-the strip list, Codeman would have stripped that switch and corrupted the session. Steps 9-10 need a
+the strip list, Reverie would have stripped that switch and corrupted the session. Steps 9-10 need a
 Docker daemon and a remote host respectively.
 
 ---
@@ -632,7 +632,7 @@ follow-up surfaces in from the start (login-shell routing in Phase 1, availabili
 
 ## 9. Out of scope, tracked as follow-ups
 
-- **A Codeman pi extension for real idle/completion events (highest value, now fully de-risked).**
+- **A Reverie pi extension for real idle/completion events (highest value, now fully de-risked).**
   Pi extensions are TypeScript modules with Node built-ins and npm deps available, so an HTTP POST
   to `/api/hook-event` is trivial. The **`agent_settled`** event **shipped in 0.84.0** and is
   documented for exactly this use case (fires only when pi will not continue on its own: after
@@ -641,7 +641,7 @@ follow-up surfaces in from the start (login-shell routing in Phase 1, availabili
   hooks give Claude sessions. The bash tool exposes five env vars (`PI_SESSION_ID`,
   `PI_SESSION_FILE`, `PI_PROVIDER`, `PI_MODEL`, `PI_REASONING_LEVEL`), injected per command. Bonus:
   an extension can own the **`project_trust`** event (first yes/no wins, and CLI `-e` extensions
-  load *before* trust resolution), so Codeman could answer the trust prompt programmatically, a
+  load *before* trust resolution), so Reverie could answer the trust prompt programmatically, a
   cleaner mechanism than the `--approve` flag for both the single-user convenience case and the
   multi-user deny case.
 - **Response viewer for pi.** Sessions are JSONL v3 under

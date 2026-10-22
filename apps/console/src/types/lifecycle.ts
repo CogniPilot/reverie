@@ -1,7 +1,7 @@
 /**
  * @fileoverview Session lifecycle audit types.
  *
- * Types for the append-only JSONL audit log at `~/.codeman/session-lifecycle.jsonl`.
+ * Types for the append-only JSONL audit log at `~/.reverie/session-lifecycle.jsonl`.
  * Records session creation, PTY launch/exit, server start/stop, tmux recovery,
  * and QR auth events. Written by `SessionLifecycleLog`, read for debugging.
  *

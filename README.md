@@ -1,177 +1,95 @@
 # Reverie
 
 Reverie is our independently maintained fork of [Codeman](https://github.com/Ark0N/Codeman),
-with persistent agent identities, memory, dreaming and CTO-led orchestration.
+with persistent agent identities, memory, dreaming and permission-based orchestration.
 The modified console source lives in `apps/console` and is built into the same
 container as the agent runtime. Credit goes to Ark0N and the Codeman contributors;
 the original MIT license and copyright remain in `apps/console/LICENSE`.
 See [upstream notices](THIRD_PARTY_NOTICES.md) and
 [source provenance](apps/console/UPSTREAM.md).
 
-Use `reverie` inside the container. Existing `fleet` and `codeman` CLI aliases,
-`REVERIE_*` settings, storage paths and `fleet-*` tools remain compatible.
+Use `reverie` inside the container, `REVERIE_*` settings, and `reverie-*` tools.
 The fork has no automatic upstream package update or synchronization process.
 
 ## What it is
 
 A shareable agent workspace with persistent identities, private and project memory,
-reflection, dreams and provider-independent handoffs. An instance selects its organizational role independently of its harness and
-permissions. `kind: "agent"` provides a conversation-first local agent with chat
-and bounded coding profiles; `kind: "cto"` retains the CTO template. Names, personal style, relationships, memories and instance credentials
+reflection, dreams and provider-independent handoffs. Every expert is a generic AI
+agent with its own memory. CTO, COO and specialist titles describe organizational
+roles; explicit permissions control tools and orchestration independently of titles.
+Chat and coding are working modes of the same agent. Names, personal style, relationships, memories and instance credentials
 are external data. No personal instance is included in this repository.
 
 The current native runtime adapter uses OpenCode and its provider/model selection.
 The portable memory CLI and skill also work from Codex, Claude Code and other CLIs.
 Full automatic conversation ingestion for those other harnesses is future work;
 installing the skill alone does not hook every completed turn automatically.
-The implementation lives in `cto/`; generic specialist templates live in `experts/`.
+The implementation lives in `python/reverie/`; generic specialist templates live in `python/experts/`.
 Personal identities and their histories live in the ignored `local/` directory.
 Existing SQLite history columns are read compatibly during migration.
 
 ## Setup
 
-Two ways to run Reverie: the published container image (Docker or Podman), or
-natively from a clone. Both end with the same first-login steps.
-[docs/image.md](docs/image.md) and [docs/setup.md](docs/setup.md) have the details.
-
-Plan about 15 minutes for a first run on a normal connection; the image pull is most
-of it. Recreating later takes under 5 minutes because the data volume keeps the
-sign-ins. Add a few minutes once for the GitHub steps (accepting the invitation,
-creating a token).
-
-### With Docker or Podman
-
-If you received a release bundle, use its local image instead of signing in to
-GitHub or a registry. The host needs Docker Engine running, Bash, tar, coreutils,
-grep and a browser; it does not need Nix, Skopeo, Node or Python. Match the host
-CPU architecture to the image architecture stated in the bundled README.
-From the extracted bundle directory:
+[Install Nix](https://nixos.org/download/) if needed, then clone Reverie
+(collaborator access is required while the repository is private):
 
 ```bash
-sha256sum -c SHA256SUMS
-IMAGE_REF=$(cat IMAGE-REF.txt)
-bash setup.sh --engine docker --offline ./reverie-image.tar \
-  --image "${IMAGE_REF%:*}" --version "${IMAGE_REF##*:}"
-bash setup.sh --engine docker --password
-bash setup.sh --engine docker --owner
+gh repo clone jgoppert/reverie
+cd reverie
+export NIX_CONFIG="experimental-features = nix-command flakes"
 ```
 
-The local install refuses a missing archive or mismatched tag before replacing
-an existing container and starts with `--pull=never`. Keep the two passwords
-private and continue with First login below. See
-[offline installation](docs/offline-install.md) for details and updates.
-Provider sign-ins, hosted models and optional CLI installation still need internet.
+## Default local deployment
 
-For a registry-based installation instead:
+From a clone, start the default Docker deployment with:
 
-While the repository is private, you need to be a collaborator on it with Read
-access to the `reverie` package. The repository owner adds you as a collaborator,
-then either grants you Read on the package or links the package to the repository
-so collaborators inherit access. With the [GitHub CLI](https://cli.github.com/) and
-your own GitHub account:
+~~~bash
+nix run .#start
+~~~
+
+This builds the current flake image and creates an editable ~/reverie/deployment.json
+only on first run. Company state and provider logins live under
+~/reverie/companies/default; working projects live in ~/reverie/workspace.
+~/reverie/scratch links to ~/scratch/reverie by default, so large builds and agent
+scratch use the large disk. You can edit the validated paths, port, container name,
+memory limit and process limit in deployment.json. Existing containers are retained;
+a changed deployment requires a new container name rather than silent replacement.
+
+Source code, host configuration and host update requests are not exposed by default.
+To explicitly expose a chosen project on the first launch:
+
+~~~bash
+nix run .#start -- --source /absolute/path/to/project
+~~~
+
+The project appears at /workspace. The ordinary workspace is /reverie_workspace.
+Add --allow-updates only when you also configure the owner-controlled host updater;
+this exposes only its request directory, not a Docker socket or host configuration.
+Use --root /absolute/path to select another contained deployment directory.
+
+**Native:** install the complete application and start it:
 
 ```bash
-gh auth login
-gh release download v0.1.1 --repo jgoppert/reverie --pattern setup.sh
+nix profile install .#default
+reverie service install --host 127.0.0.1 --port 3000
 ```
 
-Create a classic personal access token with only the `read:packages` scope
-(GitHub → Settings → Developer settings → Personal access tokens → Tokens (classic)).
-GHCR refuses fine-grained tokens. Sign in to the registry with the token on stdin,
-so it never appears on the command line or in your shell history:
+**Docker:** build the same application as an image, load it, and start it with
+persistent instance data:
 
 ```bash
-read -rs GHCR_TOKEN && printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u YOUR_GITHUB_USER --password-stdin; unset GHCR_TOKEN
+mkdir -p "$HOME/scratch/reverie"
+nix build .#dockerImage --out-link "$HOME/scratch/reverie/image"
+docker load --input "$HOME/scratch/reverie/image"
+docker run --detach --restart unless-stopped --name reverie --publish 127.0.0.1:3000:3000 --volume reverie-data:/instances --volume reverie-home:/home/agent reverie:latest
 ```
 
-Use `podman login` instead of `docker login` with Podman. Then start Reverie:
-
-```bash
-bash setup.sh
-```
-
-`setup.sh` pulls the release, starts a container named `reverie` with its data on
-the `reverie-data` volume, and prints the address (`http://127.0.0.1:3000`, loopback
-only). Print the console password the first start generated:
-
-```bash
-bash setup.sh --password
-```
-
-A new server requires owner sign-in from the start. Create the owner account once,
-from this host shell (not from inside a Reverie session), and note the one-time
-password it prints:
-
-```bash
-bash setup.sh --owner
-```
-
-Removing someone's access stops their future pulls only. An image they have
-already pulled keeps working on their machine.
-
-### Without Docker
-
-Prerequisites: Node 22 or newer, Python 3.11 or newer, tmux, git, and a C++
-compiler with make for the terminal module. With [Nix](https://nixos.org/download/),
-one shell provides all of them:
-
-```bash
-nix shell nixpkgs#nodejs_22 nixpkgs#python3 nixpkgs#tmux nixpkgs#git nixpkgs#gcc nixpkgs#gnumake
-```
-
-Clone the repository (as a collaborator while it is private) and install the
-memory runtime into its own virtual environment:
-
-```bash
-gh repo clone jgoppert/reverie && cd reverie
-python3 -m venv ~/.local/share/reverie/python
-~/.local/share/reverie/python/bin/pip install -e .
-```
-
-Build the console:
-
-```bash
-cd apps/console && npm ci && npm run build && cd ../..
-```
-
-The console keeps its state in `~/.fleet` unless `REVERIE_DATA_DIR` names another
-directory; use the same value for every command below. Before the first start,
-create the owner account with sign-in required, and note the one-time password it
-prints:
-
-```bash
-node apps/console/dist/index.js owner bootstrap --username owner --enforce
-```
-
-Choose a console password, then start the console on loopback:
-
-```bash
-read -rs CODEMAN_PASSWORD && export CODEMAN_PASSWORD CODEMAN_USERNAME=owner REVERIE_MCP_MEMORY_PYTHON=$HOME/.local/share/reverie/python/bin/python3
-node apps/console/dist/index.js web --host 127.0.0.1 --port 3000
-```
-
-[docs/setup.md](docs/setup.md) covers instance configuration, the native adapter
-and memory skill, the runtime watcher and running the console as a service.
-
-### First login
-
-1. Open `http://127.0.0.1:3000`. The browser first asks for the console password
-   (user `owner`, the password from `setup.sh --password` or the one you chose). It
-   then shows the owner sign-in page: sign in as `owner` with the one-time password
-   (valid 30 minutes; `reverie owner reset-password` from the host prints a new one)
-   and choose your own password when asked. Both are required: the console
-   password alone does not open owner pages, settings or plan accounts.
-2. Add a plan: open the account menu in the header, choose **Add account**, name
-   it and pick the provider (Claude or ChatGPT / Codex), then **Sign in** and follow
-   the provider's link or code. **Plans** in the same menu shows each account's use.
-3. Hire: until hiring by model ships, open `http://127.0.0.1:3000/?legacy=1`,
-   choose the plan account and model in its Run controls and start a session,
-   then open **Company** and hire that session. See
-   [docs/image.md](docs/image.md#hiring-the-first-employee-interim-until-hire-by-model-lands).
-
-To reach the console from another device, front it with an authenticated proxy or
-tunnel such as `tailscale serve`; do not publish the port on all interfaces.
-
+Open `http://127.0.0.1:3000`. Follow [first login](docs/setup.md#first-login) for
+the console password, owner account and provider sign-in. Published Docker images
+can also be pulled without Nix; see [image installation](docs/image.md).
+Keep both named volumes across container recreation: the data volume holds console and
+configured instance state; the home volume holds agent tool settings, provider logins
+and conversation history. Neither mounts or restores host configuration.
 
 ## Code and instance data
 
@@ -184,7 +102,7 @@ local/assistant/                               personal identity, config and mem
 ~/.local/share/reverie/instances/shared/       separately configured shared instance
 ~/.local/share/reverie/engine/             persistent images and container layers
 ~/.local/share/reverie/home/               persistent agent home and native histories
-~/git/scratch/reverie/                     disposable clones, worktrees, builds and caches
+~/scratch/reverie/                     disposable clones, worktrees, builds and caches
 ```
 
 Copy `examples/shared.json` to the chosen instance's `config/instance.json`,
@@ -210,10 +128,10 @@ provider tokenizers and the harness still enforce the final context window.
 Install rootless Podman and its user-namespace prerequisites, then:
 
 ```bash
-scripts/fleet-container build
-scripts/fleet-container up
-scripts/fleet-container exec bash
-scripts/fleet-container exec python3 -m unittest discover -s tests
+scripts/reverie-container build
+scripts/reverie-container up
+scripts/reverie-container exec bash
+scripts/reverie-container exec python3 -m unittest discover -s tests
 ```
 
 `REVERIE_PODMAN`, `REVERIE_SCRATCH`, `REVERIE_INSTANCE_DATA`, `REVERIE_CONTAINER_NAME`
@@ -221,20 +139,20 @@ and `REVERIE_IMAGE` can override local engine/path choices. After an image or mo
 `REVERIE_CONTAINER_NAME`: `up` refuses to reuse mismatched containers and preserves
 their sessions. The launcher requires a rootless engine. Image layers live under
 `~/.local/share/reverie/engine`; builds, caches and temporary downloads go under
-`~/git/scratch/reverie` (which may link to a larger disk). The development container mounts this source
+`~/scratch/reverie` (which may link to a larger disk). The development container mounts this source
 checkout and its own scratch workspace, not a personal data directory or host engine
-socket. Its CTO has passwordless container sudo, with a bounded capability set and
+socket. Its Linux runtime account has passwordless container sudo, with a bounded capability set and
 no privileged mode, host PID namespace or host root filesystem mount. The source,
 scratch and selected private console-state binds are writable from the container.
 No provider ports are exposed. Host-loopback access is off by default. For a trusted
 personal development container, explicitly select
-`REVERIE_ALLOW_HOST_LOOPBACK=1`, `REVERIE_CODEMAN_API_URL` and `REVERIE_MODEL_API_BASE`.
+`REVERIE_ALLOW_HOST_LOOPBACK=1`, `REVERIE_API_URL` and `REVERIE_MODEL_API_BASE`.
 A shared deployment needs a separate authenticated Reverie instance and scoped
 service connections. Do not give shared containers a route to the personal
 instance's API. The development setup is not that shared access-control layer.
 
-The CTO OpenCode installer defaults to broad command/edit/tool permissions when run
-in this fleet container. Host execution retains the restricted initial profile.
+Agents share the same tool gates. The console owns explicit role permissions;
+CTO and COO titles do not grant broader command, edit or delegation access.
 Owner-controlled lifecycle decisions retain their own confirmation rules. Personal
 self-revision cannot grant new host permissions. Containers share the host kernel;
 use a VM for workloads requiring a stronger boundary.
@@ -247,7 +165,7 @@ provenance in `apps/console/UPSTREAM.md`.
 
 For a recovered deployment, `scripts/reverie-recreate --dry-run` shows
 the mounts before creation. The personal launcher mounts `~/.local/share/reverie/home`
-at `/home/cto`, so native conversations and login configuration survive recreation.
+at `/home/agent`, so native conversations and login configuration survive recreation.
 Persistent instance handoffs belong under `/instances/example/runtime/handoffs`;
 only disposable working copies belong under `/scratch`.
 
@@ -255,11 +173,11 @@ Inside the container, `reverie web --host 0.0.0.0 --port 3000` starts the consol
 The default development launcher does not publish dashboard ports or start a
 server. Choose the network exposure and authentication for the intended deployment;
 existing host services and live sessions are untouched by an image build.
-Console state persists by default at `~/.local/share/reverie/instances/development/console`,
-mounted privately at `/home/cto/.fleet`. Override `REVERIE_INSTANCE_DATA` for a separate
+Console state persists by default at `~/.local/share/reverie/development/console`,
+mounted privately at `/home/agent/.reverie`. Override `REVERIE_INSTANCE_DATA` for a separate
 instance before creating a new container. `REVERIE_DATA_DIR` configures other launches.
-The monorepo contains `apps/console` (TypeScript/JavaScript), `cto` (the shared Python
-memory runtime), `experts` (specialist templates), `docker`, `scripts`, shared skills
+The monorepo contains `apps/console` (TypeScript/JavaScript), `python/reverie` (the shared Python
+memory runtime), `python/experts` (specialist templates), `docker`, `scripts`, shared skills
 and their tests.
 
 Open **Company** to register permanent employees with names, icons, positions and
@@ -269,15 +187,15 @@ explicit names and channel choices are preserved. Permanent employee identities
 and curated research survive terminal session replacement through explicit rebind.
 
 Nightly research is owner-configured, normally 60 minutes per employee, with an
-IANA timezone and morning CTO briefing. Each cycle runs real tools in a separate
+IANA timezone and morning coordinator briefing. Each cycle runs real tools in a separate
 session/workspace, with persisted launch ownership and deadline enforcement.
 Restart recovery never blindly repeats uncertain work. Reports and failures appear
 in Company; imagination and unverified findings remain hypotheses. Existing private
 memory and personal reflection retain their separate storage and lifecycle.
 
 `nix/host.nix` provides an optional separate host account with rootless Podman,
-private home and lingering. Import it and set `services.agentFleet.enable = true`.
-Its default account is `fleet`; configure a personal deployment's name/home outside
+private home and lingering. Import it and set `services.reverie.enable = true`.
+Its default account is `reverie`; configure a personal deployment's name/home outside
 this repository. It grants no host sudo, wheel membership or rootful Docker access.
 Account activation and runtime cutover are separate from creating the container.
 
@@ -286,13 +204,13 @@ Account activation and runtime cutover are separate from creating the container.
 From an environment where this package and OpenCode are installed:
 
 ```bash
-python3 -m cto.opencode --install /path/to/runtime \
+python3 -m reverie.opencode --install /path/to/runtime \
   --instance /path/to/instance/config/instance.json --model provider/model
 ```
 
 The installer copies the memory skill into `.agents/skills`, `.claude/skills` and
 `.opencode/skills`, and records the explicit instance path in bridge metadata.
-Read [fleet-memory](cto/skills/fleet-memory/SKILL.md) for the portable lookup/write
+Read [reverie-memory](python/reverie/skills/reverie-memory/SKILL.md) for the portable lookup/write
 workflow. Use concise, verified project handoffs with source receipts. Private
 notes stay private; dream ideas are unverified hypotheses until checked.
 
@@ -304,14 +222,14 @@ Optional training tools are not run by installation.
 
 ## Runtime selection and recovery
 
-The [fleet-runtime skill](cto/skills/fleet-runtime/SKILL.md) covers Reverie backend
+The [reverie-runtime skill](python/reverie/skills/reverie-runtime/SKILL.md) covers Reverie backend
 handoffs. Configure `examples/runtime-policy.json` outside the repository, with
 actual enabled model IDs and a verified adopted case. The generic image installs
-`fleet-backend`; configure Reverie's per-mode commands to `fleet-backend opencode`,
-`fleet-backend codex` or `fleet-backend claude` after installing and signing in the
+`reverie-backend`; configure Reverie's per-mode commands to `reverie-backend opencode`,
+`reverie-backend codex` or `reverie-backend claude` after installing and signing in the
 corresponding CLI. This wrapper reads the session's actual model setting and passes
 it to the CLI; it does not infer model IDs from display names. Install a dedicated
-instance workspace before launching a CTO runtime. `fleet-runtime switch` and
+instance workspace before launching an agent runtime. `reverie-runtime switch` and
 `reboot` save a handoff and provision a candidate via Reverie's API. Verification,
 role transfer and activation precede closing the original session. The Python
 `watch` command provisions a local fallback after abnormal exits, with bounded
@@ -328,15 +246,16 @@ Model weights remain fixed. There is no nightly backpropagation or automatic
 fine-tuning. Reflection and dreaming write external agent memory. Optional legacy
 training tools are retained for compatibility but are outside the runtime workflow.
 
-## CTO context preparation
+## Agent context preparation
 
-The CTO curates each worker's short-term context: task, acceptance checks, constraints,
+An owner-appointed coordinator with explicit orchestration permission curates each
+worker's short-term context: task, acceptance checks, constraints,
 verified findings with sources, relevant files/tools and targeted memory queries.
-Use [fleet-context](cto/skills/fleet-context/SKILL.md) and `cto_fleet` action `brief`.
+Use [reverie-context](python/reverie/skills/reverie-context/SKILL.md) and `reverie_tools` action `brief`.
 The builder budgets against model context/output limits and occupied prompt space,
 preserves complete required instructions, and reports omitted optional items. If the
 essentials do not fit, split or shorten the task. It never injects private histories
-or entire long-term stores. The CTO improves selection from worker feedback; model
+or entire long-term stores. The coordinator improves selection from worker feedback; model
 quality and available evidence still limit how good a brief can be.
 
 ## Local GPU keep-alive
@@ -350,11 +269,11 @@ a reachable scoped endpoint instead of assuming `127.0.0.1` reaches the host.
 Install the selected provider into a dedicated runtime workspace:
 
 ```bash
-fleet-opencode --install /path/to/runtime --instance /path/to/config/instance.json \
+reverie-opencode --install /path/to/runtime --instance /path/to/config/instance.json \
   --model local_agent/MODEL_ID \
   --api-base http://MODEL_HOST:8080/v1 --context-window 32768 --output-tokens 4096
-fleet-runtime --policy /path/to/config/runtime-policy.json local-health
-fleet-runtime --policy /path/to/config/runtime-policy.json watch
+reverie-runtime --policy /path/to/config/runtime-policy.json local-health
+reverie-runtime --policy /path/to/config/runtime-policy.json watch
 ```
 
 Configure `keep_alive` in the external policy using `examples/runtime-policy.json`:
@@ -376,14 +295,29 @@ The watcher never restarts the host machine or overrides an owner pause/stop.
 
 ## Task cleanup
 
+Scratch directories can stay on separate drives. For native tasks, select the
+location with `reverie-workspaces --root /path/on/drive create TASK`; set `TMPDIR`
+and compiler cache variables per task as needed.
+
+The optional development container accepts any number of additional scratch mounts:
+
+```bash
+scripts/reverie-container --scratch-mount /path/on/drive2 /scratch2 --scratch-mount /path/on/drive3 /scratch3 up
+```
+
+Sources must already exist. Destinations are `/scratch2`, `/scratch3`, and so on.
+The default `/scratch` location still uses `REVERIE_WORKSPACE`. Reusing a container
+requires exactly the same image and mounts; choose a new container name after a
+mount change. The launcher does not mount physical drives or pool their storage.
+
 Task scratch is owned separately from source, private data and shared caches:
 
 ```bash
-fleet-workspaces create compiler-check
-fleet-workspaces run compiler-check -- command-for-this-task
-fleet-workspaces finish compiler-check --handoff 'Verified project handoff receipt'
-fleet-workspaces clean compiler-check
-fleet-workspaces clean compiler-check --apply
+reverie-workspaces create compiler-check
+reverie-workspaces run compiler-check -- command-for-this-task
+reverie-workspaces finish compiler-check --handoff 'Verified project handoff receipt'
+reverie-workspaces clean compiler-check
+reverie-workspaces clean compiler-check --apply
 ```
 
 `clean` previews by default. The admin can apply cleanup after a task is complete,

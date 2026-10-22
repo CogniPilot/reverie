@@ -30,17 +30,17 @@ function boot(html: string) {
       runScripts: 'outside-only',
     }
   );
-  const win = dom.window as unknown as Window & { eval(code: string): unknown; CodemanMarkdownAnchors: Anchors };
+  const win = dom.window as unknown as Window & { eval(code: string): unknown; ReverieMarkdownAnchors: Anchors };
   win.eval(CONSTANTS);
   const doc = win.document.querySelector('.doc') as Element;
-  return { win, doc, anchors: win.CodemanMarkdownAnchors };
+  return { win, doc, anchors: win.ReverieMarkdownAnchors };
 }
 
 describe('markdownHeadingSlug (GitHub rules)', () => {
   const { anchors } = boot('');
   it.each([
     ['Installation', 'installation'],
-    ['Why `codeman`?', 'why-codeman'],
+    ['Why `reverie`?', 'why-reverie'],
     ['Über uns', 'über-uns'],
     ['A  B', 'a--b'],
     ['  Trim me  ', 'trim-me'],

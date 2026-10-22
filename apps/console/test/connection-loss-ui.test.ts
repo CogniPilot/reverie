@@ -1,8 +1,8 @@
 /**
  * Connection-loss UI policy.
  *
- * `CodemanConnectionLoss.compute(input)` is the pure decision behind the
- * offline banner and the full-screen "can't reach Codeman" overlay in app.js:
+ * `ReverieConnectionLoss.compute(input)` is the pure decision behind the
+ * offline banner and the full-screen "can't reach Reverie" overlay in app.js:
  * given the browser's online flag, the SSE transport status, whether server
  * state has ever loaded this page load, and how long the transport has been
  * down, it returns which surface to show and what it should say.
@@ -44,9 +44,9 @@ function loadPolicy() {
   vm.runInContext(source, context, { filename: 'constants.js' });
   return (
     context.window as {
-      CodemanConnectionLoss: { compute: (input: LossInput) => LossState; GRACE_MS: number };
+      ReverieConnectionLoss: { compute: (input: LossInput) => LossState; GRACE_MS: number };
     }
-  ).CodemanConnectionLoss;
+  ).ReverieConnectionLoss;
 }
 
 const T0 = 1_000_000;

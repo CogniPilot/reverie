@@ -288,42 +288,42 @@ describe('stopPtyChild', () => {
 });
 
 describe('parseLivePane', () => {
-  const NAME = 'codeman-ab';
+  const NAME = 'reverie-ab';
 
   it('returns the pid of the one live pane of the exactly-named session', () => {
-    expect(parseLivePane('0 7001 codeman-ab\n0 7002 codeman-cd\n', NAME)).toEqual({ state: 'live', pid: 7001 });
+    expect(parseLivePane('0 7001 reverie-ab\n0 7002 reverie-cd\n', NAME)).toEqual({ state: 'live', pid: 7001 });
   });
 
   it('a dead remain-on-exit pane is dead, whatever pid tmux still reports for it', () => {
-    expect(parseLivePane('1 7001 codeman-ab\n0 7001 codeman-cd\n', NAME)).toEqual({ state: 'dead' });
+    expect(parseLivePane('1 7001 reverie-ab\n0 7001 reverie-cd\n', NAME)).toEqual({ state: 'dead' });
   });
 
   it('ignores sessions whose names only start with the target (tmux -t prefix match)', () => {
-    expect(parseLivePane('0 7002 codeman-abcd\n0 7003 codeman-ab-x\n', NAME)).toEqual({ state: 'missing' });
+    expect(parseLivePane('0 7002 reverie-abcd\n0 7003 reverie-ab-x\n', NAME)).toEqual({ state: 'missing' });
   });
 
   it('a name with spaces cannot shift the fields onto the target', () => {
-    expect(parseLivePane('0 7002 codeman-ab 0 7003\n', NAME)).toEqual({ state: 'missing' });
+    expect(parseLivePane('0 7002 reverie-ab 0 7003\n', NAME)).toEqual({ state: 'missing' });
   });
 
   it('more than one pane is ambiguous', () => {
-    expect(parseLivePane('0 7001 codeman-ab\n0 7004 codeman-ab\n', NAME)).toEqual({ state: 'ambiguous' });
+    expect(parseLivePane('0 7001 reverie-ab\n0 7004 reverie-ab\n', NAME)).toEqual({ state: 'ambiguous' });
   });
 
   it.each([
     ['no tmux answer', null],
-    ['empty pane_dead', ' 7001 codeman-ab'],
-    ['pane_dead not 0/1', '2 7001 codeman-ab'],
-    ['pid 0', '0 0 codeman-ab'],
-    ['pid not a number', '0 x codeman-ab'],
-    ['negative pid', '0 -1 codeman-ab'],
+    ['empty pane_dead', ' 7001 reverie-ab'],
+    ['pane_dead not 0/1', '2 7001 reverie-ab'],
+    ['pid 0', '0 0 reverie-ab'],
+    ['pid not a number', '0 x reverie-ab'],
+    ['negative pid', '0 -1 reverie-ab'],
   ])('%s is unreadable', (_label, out) => {
     expect(parseLivePane(out, NAME)).toEqual({ state: 'unreadable' });
   });
 });
 
 describe('resolveLivePaneTarget (TG-K3)', () => {
-  const NAME = 'codeman-ab';
+  const NAME = 'reverie-ab';
   const SIBLING: ProcStat = { ppid: SERVER, pgid: 7001, startTime: 555 };
 
   function lister(...outputs: Array<string | null>) {
@@ -336,7 +336,7 @@ describe('resolveLivePaneTarget (TG-K3)', () => {
     // pane_dead=1, pane_pid=7001 retained; 7001 now a live sibling pane: child of our
     // server, leading its own group. r2 bound this and signalled -7001.
     const stats: number[] = [];
-    const l = lister('1 7001 codeman-ab\n0 7001 codeman-cd\n');
+    const l = lister('1 7001 reverie-ab\n0 7001 reverie-cd\n');
     const r = await resolveLivePaneTarget(l.fn, NAME, {
       ...ctx({ 7001: SIBLING }),
       stat: (pid) => (stats.push(pid), SIBLING),
@@ -347,26 +347,26 @@ describe('resolveLivePaneTarget (TG-K3)', () => {
   });
 
   it('a gone session whose name prefixes a live one gets no target', async () => {
-    const r = await resolveLivePaneTarget(lister('0 7002 codeman-abcd\n').fn, NAME, ctx({ 7002: pane }));
+    const r = await resolveLivePaneTarget(lister('0 7002 reverie-abcd\n').fn, NAME, ctx({ 7002: pane }));
     expect(r.target).toBeNull();
     expect(r.pane.state).toBe('missing');
   });
 
   it('binds a live pane that tmux still reports live after the /proc read', async () => {
-    const l = lister('0 7001 codeman-ab\n');
+    const l = lister('0 7001 reverie-ab\n');
     const r = await resolveLivePaneTarget(l.fn, NAME, ctx({ 7001: pane }));
     expect(r.target).toEqual({ pid: 7001, startTime: 111, ownGroup: true });
     expect(l.calls()).toBe(2);
   });
 
   it('a pane that dies between the two reads gets no target', async () => {
-    const r = await resolveLivePaneTarget(lister('0 7001 codeman-ab\n', '1 7001 codeman-ab\n').fn, NAME, ctx({ 7001: pane }));
+    const r = await resolveLivePaneTarget(lister('0 7001 reverie-ab\n', '1 7001 reverie-ab\n').fn, NAME, ctx({ 7001: pane }));
     expect(r).toEqual({ target: null, pane: { state: 'dead' } });
   });
 
   it('a pane replaced by another pid between the two reads gets no target', async () => {
     const r = await resolveLivePaneTarget(
-      lister('0 7001 codeman-ab\n', '0 7009 codeman-ab\n').fn,
+      lister('0 7001 reverie-ab\n', '0 7009 reverie-ab\n').fn,
       NAME,
       ctx({ 7001: pane, 7009: pane })
     );
@@ -375,7 +375,7 @@ describe('resolveLivePaneTarget (TG-K3)', () => {
 
   it('a pid whose start time changed between the reads gets no target', async () => {
     let n = 0;
-    const r = await resolveLivePaneTarget(lister('0 7001 codeman-ab\n').fn, NAME, {
+    const r = await resolveLivePaneTarget(lister('0 7001 reverie-ab\n').fn, NAME, {
       ...ctx({}),
       stat: () => (n++ === 0 ? pane : { ...pane, startTime: 999 }),
     });
@@ -383,12 +383,12 @@ describe('resolveLivePaneTarget (TG-K3)', () => {
   });
 
   it('tmux not answering the second read gets no target', async () => {
-    const r = await resolveLivePaneTarget(lister('0 7001 codeman-ab\n', null).fn, NAME, ctx({ 7001: pane }));
+    const r = await resolveLivePaneTarget(lister('0 7001 reverie-ab\n', null).fn, NAME, ctx({ 7001: pane }));
     expect(r).toEqual({ target: null, pane: { state: 'unreadable' } });
   });
 
   it('a live pane that fails /proc verification (the server pid) gets no target', async () => {
-    const r = await resolveLivePaneTarget(lister(`0 ${SERVER} codeman-ab\n`).fn, NAME, ctx({ [SERVER]: pane }));
+    const r = await resolveLivePaneTarget(lister(`0 ${SERVER} reverie-ab\n`).fn, NAME, ctx({ [SERVER]: pane }));
     expect(r.target).toBeNull();
   });
 });
@@ -407,21 +407,21 @@ describe.skipIf(!hasTmux())('parseLivePane against a private tmux server', () =>
     const sock = `signal-target-test-${process.pid}`;
     const tmux = (...a: string[]) => execFileSync('tmux', ['-L', sock, '-f', '/dev/null', ...a], { encoding: 'utf8' });
     try {
-      tmux('new-session', '-d', '-s', 'codeman-abcd', 'sleep 30');
+      tmux('new-session', '-d', '-s', 'reverie-abcd', 'sleep 30');
       tmux('set-option', '-g', 'remain-on-exit', 'on');
-      const original = Number(tmux('new-session', '-d', '-P', '-F', '#{pane_pid}', '-s', 'codeman-ab', 'true').trim());
+      const original = Number(tmux('new-session', '-d', '-P', '-F', '#{pane_pid}', '-s', 'reverie-ab', 'true').trim());
       const list = () => tmux('list-panes', '-a', '-F', PANE_LIVENESS_FORMAT);
-      for (let i = 0; i < 50 && !/^1 \d+ codeman-ab$/m.test(list()); i++) await new Promise((r) => setTimeout(r, 50));
+      for (let i = 0; i < 50 && !/^1 \d+ reverie-ab$/m.test(list()); i++) await new Promise((r) => setTimeout(r, 50));
       const out = list();
-      const retained = Number(/^1 (\d+) codeman-ab$/m.exec(out)?.[1]);
+      const retained = Number(/^1 (\d+) reverie-ab$/m.exec(out)?.[1]);
       expect(original).toBeGreaterThan(1);
       expect(retained).toBe(original);
-      expect(parseLivePane(out, 'codeman-ab')).toEqual({ state: 'dead' });
-      expect(parseLivePane(out, 'codeman-abcd').state).toBe('live');
-      expect(parseLivePane(out, 'codeman-abc')).toEqual({ state: 'missing' });
+      expect(parseLivePane(out, 'reverie-ab')).toEqual({ state: 'dead' });
+      expect(parseLivePane(out, 'reverie-abcd').state).toBe('live');
+      expect(parseLivePane(out, 'reverie-abc')).toEqual({ state: 'missing' });
       // The exact-name kill the teardown uses: =NAME never falls through to a prefix.
-      expect(() => tmux('kill-session', '-t', '=codeman-abc')).toThrow();
-      expect(parseLivePane(list(), 'codeman-abcd').state).toBe('live');
+      expect(() => tmux('kill-session', '-t', '=reverie-abc')).toThrow();
+      expect(parseLivePane(list(), 'reverie-abcd').state).toBe('live');
     } finally {
       try {
         tmux('kill-server');

@@ -15,7 +15,7 @@ vi.mock('node:fs/promises', () => ({
     stat: vi.fn(),
     mkdir: vi.fn(async () => undefined),
     copyFile: vi.fn(async () => undefined),
-    mkdtemp: vi.fn(async () => '/tmp/codeman-document-preview-cache/work-test'),
+    mkdtemp: vi.fn(async () => '/tmp/reverie-document-preview-cache/work-test'),
     readdir: vi.fn(async () => ['deck.pdf']),
     rename: vi.fn(async () => undefined),
     rm: vi.fn(async () => undefined),
@@ -34,7 +34,7 @@ describe('document-preview-cache', () => {
     let cachedPdfExists = false;
     mockedStat.mockImplementation(async (path) => {
       const pathText = String(path);
-      if (pathText.includes('codeman-document-preview-cache') && pathText.endsWith('.pdf')) {
+      if (pathText.includes('reverie-document-preview-cache') && pathText.endsWith('.pdf')) {
         if (!cachedPdfExists) throw new Error('ENOENT');
         return { size: 4096, isFile: () => true } as never;
       }
@@ -80,11 +80,11 @@ describe('document-preview-cache', () => {
 
   it('prefers Microsoft Word for DOCX files on Windows-mounted paths', async () => {
     const result = await getOfficePreviewPdfPath(
-      '/mnt/c/Users/aakhter/Documents/codeman-inline-viewer-test.docx',
+      '/mnt/c/Users/aakhter/Documents/reverie-inline-viewer-test.docx',
       'docx'
     );
 
-    expect(result).toContain('/mnt/c/Users/aakhter/AppData/Local/Temp/codeman-document-preview-cache/');
+    expect(result).toContain('/mnt/c/Users/aakhter/AppData/Local/Temp/reverie-document-preview-cache/');
     expect(mockedExecFile).toHaveBeenCalledWith(
       'powershell.exe',
       expect.arrayContaining(['-NoProfile', '-NonInteractive', '-EncodedCommand']),
@@ -95,7 +95,7 @@ describe('document-preview-cache', () => {
     const encodedCommand = powerShellCall?.[1]?.at(-1);
     const decodedCommand = Buffer.from(String(encodedCommand), 'base64').toString('utf16le');
     expect(decodedCommand).toContain('$source = ');
-    expect(decodedCommand).toContain('C:\\Users\\aakhter\\AppData\\Local\\Temp\\codeman-document-preview-cache\\');
+    expect(decodedCommand).toContain('C:\\Users\\aakhter\\AppData\\Local\\Temp\\reverie-document-preview-cache\\');
     expect(decodedCommand).toContain('.docx');
     expect(decodedCommand).toContain('$output = ');
     expect(decodedCommand).toContain('.pdf');

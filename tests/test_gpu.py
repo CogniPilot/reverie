@@ -1,4 +1,4 @@
-import tests  # noqa: F401  isolates CODEMAN_*/FLEET_* before cto is imported
+import tests  # noqa: F401  isolates REVERIE_* before reverie is imported
 import json
 import os
 import subprocess
@@ -8,18 +8,18 @@ import time
 import unittest
 from pathlib import Path
 
-from cto.gpu import GpuLock
+from reverie.gpu import GpuLock
 
 
 class CliTest(unittest.TestCase):
     def setUp(self):
         d = Path(tempfile.mkdtemp())
-        self.env = {**os.environ, "FLEET_GPU_LOCK": str(d / "gpu.lock"), "FLEET_GPU_YIELD": str(d / "gpu.yield"),
-                    "FLEET_GPU_ACTIVITY": str(d / "gpu.activity"), "PYTHONPATH": str(Path(__file__).resolve().parents[1])}
+        self.env = {**os.environ, "REVERIE_GPU_LOCK": str(d / "gpu.lock"), "REVERIE_GPU_YIELD": str(d / "gpu.yield"),
+                    "REVERIE_GPU_ACTIVITY": str(d / "gpu.activity"), "PYTHONPATH": str(Path(__file__).resolve().parents[1] / "python")}
         self.d = d
 
     def run_cli(self, *args, timeout=30):
-        return subprocess.run([sys.executable, "-m", "cto.gpu", *args], env=self.env, capture_output=True, text=True, timeout=timeout)
+        return subprocess.run([sys.executable, "-m", "reverie.gpu", *args], env=self.env, capture_output=True, text=True, timeout=timeout)
 
     def test_hold_runs_command_and_releases(self):
         r = self.run_cli("hold", "review", "--", sys.executable, "-c", "import sys; print('ran'); sys.exit(3)")
@@ -39,7 +39,7 @@ class CliTest(unittest.TestCase):
 
     def test_hold_preempt(self):
         holder = subprocess.Popen(
-            [sys.executable, "-m", "cto.gpu", "hold", "train", "--min-idle", "0", "--preempt", "--",
+            [sys.executable, "-m", "reverie.gpu", "hold", "train", "--min-idle", "0", "--preempt", "--",
              sys.executable, "-c", "import time; time.sleep(30)"], env=self.env)
         try:
             for _ in range(100):
@@ -90,11 +90,11 @@ class GpuLockTest(unittest.TestCase):
         # a second process holds the lock as "train"; chat asks it to yield and times out politely
         lock_path, yield_path, act = self.paths
         code = (
-            "import sys, time; sys.path.insert(0, %r); from cto.gpu import GpuLock; from pathlib import Path\n"
+            "import sys, time; sys.path.insert(0, %r); from reverie.gpu import GpuLock; from pathlib import Path\n"
             "l = GpuLock('train', Path(%r), Path(%r), Path(%r)); l.acquire(timeout=0); print('held', flush=True)\n"
             "while not l.should_yield(): time.sleep(0.05)\n"
             "l.release(); print('released', flush=True); time.sleep(2)\n"
-        ) % (str(Path(__file__).resolve().parents[1]), str(lock_path), str(yield_path), str(act))
+        ) % (str(Path(__file__).resolve().parents[1] / "python"), str(lock_path), str(yield_path), str(act))
         proc = subprocess.Popen([sys.executable, "-c", code], stdout=subprocess.PIPE, text=True)
         try:
             self.assertEqual(proc.stdout.readline().strip(), "held")

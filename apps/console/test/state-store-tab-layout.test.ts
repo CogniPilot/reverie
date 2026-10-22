@@ -18,7 +18,7 @@ afterEach(() => {
 });
 
 function createStore(seed: { sessionOrder?: string[]; tabLayouts?: Record<string, TabLayout> } = {}): StateStore {
-  const dir = mkdtempSync(join(tmpdir(), 'codeman-state-tab-layout-'));
+  const dir = mkdtempSync(join(tmpdir(), 'reverie-state-tab-layout-'));
   tempDirs.push(dir);
   const file = join(dir, 'state.json');
   writeFileSync(file, JSON.stringify(seed));

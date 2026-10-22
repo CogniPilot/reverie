@@ -32,7 +32,7 @@ function load(voices: Voice[] = VOICES) {
     ) {}
   }
   const context = vm.createContext({
-    CodemanApp: class {},
+    ReverieApp: class {},
     localStorage,
     Option,
     window: { speechSynthesis: { getVoices: () => voices } },
@@ -40,7 +40,7 @@ function load(voices: Voice[] = VOICES) {
   vm.runInContext(readFileSync(resolve(import.meta.dirname, '../src/web/public/voice-chat.js'), 'utf8'), context);
   vm.runInContext(readFileSync(resolve(import.meta.dirname, '../src/web/public/car-mode.js'), 'utf8'), context);
   const get = (name: string) => vm.runInContext(name, context);
-  return { get, store, Proto: get('CodemanApp').prototype };
+  return { get, store, Proto: get('ReverieApp').prototype };
 }
 
 /** An app with a car screen holding just the voice select, talking to `member`. */
@@ -117,7 +117,7 @@ describe('car mode per-member voice', () => {
     expect(worker.a._carVoice()?.name).toBe(pick(VOICES, null, 'worker-id')?.name);
     expect([...store.keys()]).toEqual([key('coordinator-id')]);
     // No legacy shared key is read or written.
-    store.set('codeman:carVoice', 'English India');
+    store.set('reverie:carVoice', 'English India');
     worker.a._fillCarVoices();
     expect(worker.select.value).toBe(team);
   });
@@ -138,7 +138,7 @@ describe('car mode per-member voice', () => {
     expect(src).toContain('localStorage.setItem(carModeVoiceKey(id), voice.value)');
     // Owner 10-20: the menu is not shown in the car.
     expect(src).toContain('voice.hidden = true;');
-    expect(src).not.toContain("'codeman:carVoice'");
+    expect(src).not.toContain("'reverie:carVoice'");
   });
 });
 

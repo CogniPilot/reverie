@@ -19,7 +19,7 @@ import {
 import { toSessionDocker } from '../src/docker-hosts.js';
 import type { DockerCase, DockerHost } from '../src/types.js';
 
-const HOST: DockerHost = { id: 'local', label: 'Local', image: 'codeman/agent:base' };
+const HOST: DockerHost = { id: 'local', label: 'Local', image: 'reverie/agent:base' };
 const CASE: DockerCase = {
   name: 'myproj',
   type: 'docker',
@@ -42,12 +42,12 @@ describe('dockerArgv', () => {
 
 describe('bundle / tag naming', () => {
   it('names bundles by case + timestamp + mode', () => {
-    expect(exportBundleName('myproj', 1234, 'full')).toBe('myproj-1234.codeman-container.tgz');
-    expect(exportBundleName('myproj', 1234, 'workspace')).toBe('myproj-1234.codeman-workspace.tgz');
+    expect(exportBundleName('myproj', 1234, 'full')).toBe('myproj-1234.reverie-container.tgz');
+    expect(exportBundleName('myproj', 1234, 'workspace')).toBe('myproj-1234.reverie-workspace.tgz');
   });
   it('quarantines imported images and tags export intermediates uniquely', () => {
-    expect(importedImageTag('myproj', 99)).toBe('codeman/imported-myproj:99');
-    expect(exportImageTag('myproj', 99)).toBe('codeman/export-myproj:99');
+    expect(importedImageTag('myproj', 99)).toBe('reverie/imported-myproj:99');
+    expect(exportImageTag('myproj', 99)).toBe('reverie/export-myproj:99');
   });
 });
 
@@ -71,11 +71,11 @@ describe('validateImportManifest (untrusted cross-machine input)', () => {
     caseName: 'myproj',
     mode: 'full',
     engine: 'docker',
-    image: 'codeman/agent:base',
+    image: 'reverie/agent:base',
     containerWorkdir: '/home/arkon/cases/myproj',
     network: 'bridge',
     createdAt: 1,
-    codemanVersion: '1.4.1',
+    reverieVersion: '1.4.1',
     mountCredentials: true,
     secretFree: true,
     checksums: {},
@@ -107,7 +107,7 @@ describe('parseLoadedImageRef', () => {
     expect(parseLoadedImageRef('Loaded image ID: sha256:abc123def')).toBe('sha256:abc123def');
   });
   it('parses "Loaded image: repo:tag"', () => {
-    expect(parseLoadedImageRef('Loaded image: codeman/export-x:1234')).toBe('codeman/export-x:1234');
+    expect(parseLoadedImageRef('Loaded image: reverie/export-x:1234')).toBe('reverie/export-x:1234');
   });
   it('returns null on unrecognized output', () => {
     expect(parseLoadedImageRef('some other text')).toBeNull();
@@ -123,12 +123,12 @@ describe('exportDockerCase (VITEST stub)', () => {
       timestamp: 42,
       exportsDir: '/tmp/exports',
       mode: 'full',
-      codemanVersion: '9.9.9',
+      reverieVersion: '9.9.9',
     });
     expect(res.manifest.schemaVersion).toBe(DOCKER_EXPORT_SCHEMA);
     expect(res.manifest.caseName).toBe('myproj');
     expect(res.manifest.mode).toBe('full');
-    expect(res.bundlePath).toBe('/tmp/exports/myproj-42.codeman-container.tgz');
+    expect(res.bundlePath).toBe('/tmp/exports/myproj-42.reverie-container.tgz');
   });
 
   it('refuses a full-image export for a sealed container', async () => {
@@ -140,7 +140,7 @@ describe('exportDockerCase (VITEST stub)', () => {
         timestamp: 42,
         exportsDir: '/tmp/exports',
         mode: 'full',
-        codemanVersion: '9.9.9',
+        reverieVersion: '9.9.9',
       })
     ).rejects.toThrow(/sealed/);
   });
@@ -153,7 +153,7 @@ describe('exportDockerCase (VITEST stub)', () => {
       timestamp: 42,
       exportsDir: '/tmp/exports',
       mode: 'workspace',
-      codemanVersion: '9.9.9',
+      reverieVersion: '9.9.9',
     });
     expect(res.manifest.mode).toBe('workspace');
   });

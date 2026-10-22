@@ -7,7 +7,7 @@
 
 ## Executive Summary
 
-Three independent research passes analyzed the Codeman codebase for performance bottlenecks across frontend rendering, backend hot paths, and system-level resource usage. The codebase already has strong foundational optimizations (per-session adaptive batching, rAF terminal writes, DEC 2026 sync markers, backpressure handling). This plan targets the remaining high-impact opportunities.
+Three independent research passes analyzed the Reverie codebase for performance bottlenecks across frontend rendering, backend hot paths, and system-level resource usage. The codebase already has strong foundational optimizations (per-session adaptive batching, rAF terminal writes, DEC 2026 sync markers, backpressure handling). This plan targets the remaining high-impact opportunities.
 
 **Key finding**: The biggest wins come from **skipping unnecessary work** — serializing unchanged state, processing output nobody is watching, and reducing broadcast volume.
 

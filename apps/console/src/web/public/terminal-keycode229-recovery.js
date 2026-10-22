@@ -354,5 +354,5 @@
     return Object.freeze({ handleKeyEvent, notifyCanonicalData, destroy });
   }
 
-  global.CodemanKeyCode229Recovery = Object.freeze({ create, editBetween });
+  global.ReverieKeyCode229Recovery = Object.freeze({ create, editBetween });
 })(typeof window !== 'undefined' ? window : globalThis);

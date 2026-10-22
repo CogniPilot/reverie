@@ -139,7 +139,7 @@ describe('the probe script on a real shell', () => {
   let shimDir: string;
 
   beforeAll(() => {
-    root = mkdtempSync(join(tmpdir(), 'codeman-remote-probe-'));
+    root = mkdtempSync(join(tmpdir(), 'reverie-remote-probe-'));
     shimDir = join(root, 'shim-bin');
     mkdirSync(shimDir);
     const realReadlink = execFileSync('sh', ['-c', 'command -v readlink']).toString().trim();
@@ -243,7 +243,7 @@ describe('the probe script on a real shell', () => {
   it('treats a hostile filename as data, never as a command', () => {
     // No slashes in the payload: it has to be a legal FILENAME on this host while
     // still being a command substitution to a shell.
-    const marker = `codeman_pwned_${process.pid}`;
+    const marker = `reverie_pwned_${process.pid}`;
     const hostile = join(root, `it's; touch ${marker}; $(id).txt`);
     writeFileSync(hostile, 'hostile');
 

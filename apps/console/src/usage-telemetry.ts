@@ -4,9 +4,9 @@
  * Claude Code (v2.1.80+) pipes a JSON blob to a configured `statusLine.command`
  * on each render. On Pro/Max subscriptions that blob carries a `rate_limits`
  * object with the 5-hour rolling and 7-day weekly plan windows. The
- * Codeman-managed statusLine exporter (see `hooks-config.generateStatusLineCommand`)
+ * Reverie-managed statusLine exporter (see `hooks-config.generateStatusLineCommand`)
  * POSTs that blob to `/api/status-telemetry`; these helpers normalize the subset
- * Codeman displays and format the compact in-terminal footer string.
+ * Reverie displays and format the compact in-terminal footer string.
  *
  * Confirmed schema (empirically captured, CC 2.1.177, Claude Max — see
  * `docs/usage-limits-display-plan.md`):
@@ -18,7 +18,7 @@
  * Since Claude Code v2.1.251 the same blob carries a `prompt_cache` object for the
  * main conversation (`warm`, `ttl`, `expires_at`, `recache_tokens_if_cold`,
  * `misses`, `last_miss_cause`, ...). `parsePromptCache` normalizes the subset
- * Codeman reads, and the footer shows it as `cache:until HH:MM` while warm and
+ * Reverie reads, and the footer shows it as `cache:until HH:MM` while warm and
  * `cache:cold` otherwise. Claude re-runs the statusline when `expires_at` passes,
  * so the footer flips to cold on its own.
  *
@@ -49,7 +49,7 @@ export interface BankedResets {
   earliestExpiresAt: number | null;
 }
 
-/** Normalized telemetry Codeman broadcasts to the UI. */
+/** Normalized telemetry Reverie broadcasts to the UI. */
 export interface StatusTelemetry {
   fiveHour?: UsageWindow;
   sevenDay?: UsageWindow;
@@ -76,7 +76,7 @@ export interface RawStatuslinePayload {
   prompt_cache?: RawPromptCache | null;
 }
 
-/** Raw `prompt_cache` object as Claude emits it (the subset Codeman reads; every field null-tolerant). */
+/** Raw `prompt_cache` object as Claude emits it (the subset Reverie reads; every field null-tolerant). */
 export interface RawPromptCache {
   warm?: boolean | null;
   ttl?: string | null;
@@ -121,7 +121,7 @@ function parseWindow(w?: { used_percentage?: number; resets_at?: number }): Usag
 }
 
 /**
- * Normalize a raw statusline payload to the telemetry Codeman displays. Returns
+ * Normalize a raw statusline payload to the telemetry Reverie displays. Returns
  * null when there is no plan-limit data to show (pre-first-response or a
  * non-subscriber account) so the caller can skip broadcasting.
  */
@@ -229,7 +229,7 @@ export function parseCodexRateLimitsResponse(value: unknown): StatusTelemetry | 
 /**
  * Current-session status for the in-terminal statusline footer. This is the
  * "status of the current session" the user sees in Claude's footer — distinct
- * from the account-wide plan limits, which live ONLY in the Codeman header chip.
+ * from the account-wide plan limits, which live ONLY in the Reverie header chip.
  */
 export interface SessionStatus {
   modelDisplayName?: string;
@@ -284,10 +284,10 @@ function formatCacheGroup(c: PromptCacheStatus, now: number): string {
 /**
  * Format the in-terminal statusline footer: the CURRENT SESSION's status —
  * `Opus 4.8 (1M context)  in:562,411 out:1,188  ctx:56%  cache:until 19:00` — NOT
- * the plan limits, which live in the Codeman header chip. Claude requires a
+ * the plan limits, which live in the Reverie header chip. Claude requires a
  * statusLine command to emit the rate_limits JSON at all, so this is what that
  * command prints back when it has no statusline of the user's own to wrap. With
- * nothing to show it returns '' rather than a brand word: a bare `codeman` on the
+ * nothing to show it returns '' rather than a brand word: a bare `reverie` on the
  * statusline is the symptom discussion #405 opened with. `now` is injectable so
  * the cache group is testable.
  */

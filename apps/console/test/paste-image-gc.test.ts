@@ -1,6 +1,6 @@
 /**
  * @fileoverview The hourly upload sweep reads BOTH upload dirs of a live session:
- * `.codeman-uploads` and the `.claude-images` a case in use before the move still
+ * `.reverie-uploads` and the `.claude-images` a case in use before the move still
  * carries. Only `paste-*` regular files past the age cap go. `uploadDirs()` never
  * lists a planted symlink, a directory that is or contains the data dir, anything
  * under a workspace whose bounded probe did not answer, or anything for a remote
@@ -31,7 +31,7 @@ describe('sweepPasteImagesOnce', () => {
   });
 
   it('ages paste-* files out of both the current and the legacy upload dir', async () => {
-    const workingDir = mkdtempSync(join(tmpdir(), 'codeman-gc-'));
+    const workingDir = mkdtempSync(join(tmpdir(), 'reverie-gc-'));
     dirs.push(workingDir);
     const now = Date.now();
     const current = join(workingDir, UPLOADS_DIR);
@@ -64,8 +64,8 @@ describe('sweepPasteImagesOnce', () => {
   });
 
   it('never reads through a planted symlink at the upload dir', async () => {
-    const workingDir = mkdtempSync(join(tmpdir(), 'codeman-gc-'));
-    const other = mkdtempSync(join(tmpdir(), 'codeman-gc-other-'));
+    const workingDir = mkdtempSync(join(tmpdir(), 'reverie-gc-'));
+    const other = mkdtempSync(join(tmpdir(), 'reverie-gc-other-'));
     dirs.push(workingDir, other);
     const now = Date.now();
     const old = (now - 8 * DAY_MS) / 1000;
@@ -84,41 +84,41 @@ describe('sweepPasteImagesOnce', () => {
 
 describe('uploadDirs', () => {
   const dirs: string[] = [];
-  const savedDataDir = process.env.CODEMAN_DATA_DIR;
+  const savedDataDir = process.env.REVERIE_DATA_DIR;
   afterEach(() => {
-    if (savedDataDir === undefined) delete process.env.CODEMAN_DATA_DIR;
-    else process.env.CODEMAN_DATA_DIR = savedDataDir;
+    if (savedDataDir === undefined) delete process.env.REVERIE_DATA_DIR;
+    else process.env.REVERIE_DATA_DIR = savedDataDir;
     for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
   });
 
   it('lists the upload dir of a home workspace, which sits beside the data dir, not inside it', async () => {
-    // The home-as-workspace case the flat name exists for: `<home>/.codeman-uploads`
-    // is a sibling of `<home>/.codeman`, so a prefix test without the separator would
+    // The home-as-workspace case the flat name exists for: `<home>/.reverie-uploads`
+    // is a sibling of `<home>/.reverie`, so a prefix test without the separator would
     // wrongly refuse it.
-    const home = mkdtempSync(join(tmpdir(), 'codeman-gc-home-'));
+    const home = mkdtempSync(join(tmpdir(), 'reverie-gc-home-'));
     dirs.push(home);
-    process.env.CODEMAN_DATA_DIR = join(home, '.codeman');
+    process.env.REVERIE_DATA_DIR = join(home, '.reverie');
     const dir = join(home, UPLOADS_DIR);
     mkdirSync(dir);
     expect(await uploadDirs({ workingDir: home })).toEqual([dir]);
   });
 
   it('refuses an upload dir that is the data dir or contains it, and lists one inside it', async () => {
-    const root = mkdtempSync(join(tmpdir(), 'codeman-gc-data-'));
-    const parent = mkdtempSync(join(tmpdir(), 'codeman-gc-link-'));
+    const root = mkdtempSync(join(tmpdir(), 'reverie-gc-data-'));
+    const parent = mkdtempSync(join(tmpdir(), 'reverie-gc-link-'));
     dirs.push(root, parent);
     const uploads = join(root, UPLOADS_DIR);
     mkdirSync(join(uploads, 'state'), { recursive: true });
-    // `CODEMAN_INSTANCE=uploads` on a home workspace: the upload dir IS the data dir.
-    process.env.CODEMAN_DATA_DIR = uploads;
+    // `REVERIE_INSTANCE=uploads` on a home workspace: the upload dir IS the data dir.
+    process.env.REVERIE_DATA_DIR = uploads;
     expect(await uploadDirs({ workingDir: root })).toEqual([]);
     // A data dir pointed inside the upload dir: the recursive delete would take it.
-    process.env.CODEMAN_DATA_DIR = join(uploads, 'state');
+    process.env.REVERIE_DATA_DIR = join(uploads, 'state');
     expect(await uploadDirs({ workingDir: root })).toEqual([]);
     // An upload dir strictly inside the data dir only ever holds uploads (install.sh
-    // clones the app to ~/.codeman/app), so it is listed, directly and through a
+    // clones the app to ~/.reverie/app), so it is listed, directly and through a
     // symlinked working directory.
-    process.env.CODEMAN_DATA_DIR = root;
+    process.env.REVERIE_DATA_DIR = root;
     expect(await uploadDirs({ workingDir: root })).toEqual([uploads]);
     symlinkSync(root, join(parent, 'ws'));
     expect(await uploadDirs({ workingDir: join(parent, 'ws') })).toEqual([join(parent, 'ws', UPLOADS_DIR)]);
@@ -127,7 +127,7 @@ describe('uploadDirs', () => {
   it('skips a workspace whose bounded probe does not answer, without touching it', async () => {
     // A linked case on a mount that stopped answering reads `unknown` (#516): the
     // sweep must not lstat under it, which would hold a threadpool worker.
-    const workingDir = mkdtempSync(join(tmpdir(), 'codeman-gc-stalled-'));
+    const workingDir = mkdtempSync(join(tmpdir(), 'reverie-gc-stalled-'));
     dirs.push(workingDir);
     mkdirSync(join(workingDir, UPLOADS_DIR));
     vi.mocked(probePathKind).mockResolvedValueOnce('unknown');
@@ -143,7 +143,7 @@ describe('uploadDirs', () => {
 
   it('lists nothing for a remote session, whose workingDir is the remote path', async () => {
     // The same path on THIS host belongs to whoever has a local case there.
-    const workingDir = mkdtempSync(join(tmpdir(), 'codeman-gc-remote-'));
+    const workingDir = mkdtempSync(join(tmpdir(), 'reverie-gc-remote-'));
     dirs.push(workingDir);
     mkdirSync(join(workingDir, UPLOADS_DIR));
     writeFileSync(join(workingDir, UPLOADS_DIR, 'paste-1-aa.png'), 'x');

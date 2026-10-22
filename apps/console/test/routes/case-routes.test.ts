@@ -26,10 +26,10 @@ import { MAX_STALLED_PATH_PROBES } from '../../src/config/path-probe.js';
 // A short path-probe timeout keeps the unreachable-mount tests quick. Read when the
 // probe's config module is first imported, so it is set before any import runs.
 vi.hoisted(() => {
-  process.env.CODEMAN_PATH_PROBE_TIMEOUT_MS = '300';
+  process.env.REVERIE_PATH_PROBE_TIMEOUT_MS = '300';
 });
 afterAll(() => {
-  delete process.env.CODEMAN_PATH_PROBE_TIMEOUT_MS;
+  delete process.env.REVERIE_PATH_PROBE_TIMEOUT_MS;
 });
 
 // Mock filesystem modules

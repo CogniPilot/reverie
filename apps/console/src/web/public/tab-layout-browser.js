@@ -25,17 +25,17 @@
  * rail exactly as it was.
  *
  * @dependency none
- * @loadorder 5.9 (before app.js, which reads window.CodemanTabLayout)
+ * @loadorder 5.9 (before app.js, which reads window.ReverieTabLayout)
  */
 
-(function initCodemanTabLayout(global) {
+(function initReverieTabLayout(global) {
   'use strict';
 
-  const COLLAPSED_STORAGE_KEY = 'codeman:tab-groups-collapsed';
+  const COLLAPSED_STORAGE_KEY = 'reverie:tab-groups-collapsed';
   // The Focus section's collapse, per device. Its own key, not an entry in the
   // group list above: that list is garbage-collected against the layout's group
   // ids, and Focus is not a group.
-  const FOCUS_COLLAPSED_STORAGE_KEY = 'codeman:tab-focus-collapsed';
+  const FOCUS_COLLAPSED_STORAGE_KEY = 'reverie:tab-focus-collapsed';
 
   const refKey = (ref) => `${ref.kind}:${ref.id}`;
   const validRef = (ref) =>
@@ -911,7 +911,7 @@
     };
   }
 
-  global.CodemanTabLayout = {
+  global.ReverieTabLayout = {
     normalizeLayout,
     hasGroups,
     project,

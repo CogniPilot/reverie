@@ -64,9 +64,9 @@ const SUBAGENT_VIEWPORT = { width: 1440, height: 810 };
 // Terminal content visible before the agents spawn
 const TERMINAL_PRESPAWN = [
   '',
-  `${GRN}●${RST} Working on ${CYN}/home/arkon/codeman-cases/testcase${RST} - I'll use the ${BOLD}Task tool${RST} to spawn parallel agents.`,
+  `${GRN}●${RST} Working on ${CYN}/home/arkon/reverie-cases/testcase${RST} - I'll use the ${BOLD}Task tool${RST} to spawn parallel agents.`,
   '',
-  `${GRN}●${RST} ${BOLD}Read${RST}(/home/arkon/codeman-cases/testcase/CLAUDE.md)`,
+  `${GRN}●${RST} ${BOLD}Read${RST}(/home/arkon/reverie-cases/testcase/CLAUDE.md)`,
   `  ${GRY}░${RST} Read ${BOLD}127${RST} lines ${GRY}│${RST} ${CYN}1.2KB${RST}`,
   '',
   `${GRN}●${RST} ${BOLD}Bash${RST}(find . -name "*.ts" -not -path "*/node_modules/*" | head -20)`,
@@ -137,7 +137,7 @@ function buildSubagentTimeline() {
         '',
       ]),
     },
-    tool(2200, 'agent-001', 'Read', { file_path: '/home/arkon/codeman/src/web/server.ts' }),
+    tool(2200, 'agent-001', 'Read', { file_path: '/home/arkon/reverie/src/web/server.ts' }),
     {
       t: 2500,
       kind: 'discover',
@@ -161,7 +161,7 @@ function buildSubagentTimeline() {
       agent: makeAgent('agent-003', 'Analyze TypeScript type definitions in src/types.ts', 400),
       x: 660, y: 400,
     },
-    tool(4100, 'agent-002', 'Read', { file_path: '/home/arkon/codeman/test/respawn-test-utils.ts' }),
+    tool(4100, 'agent-002', 'Read', { file_path: '/home/arkon/reverie/test/respawn-test-utils.ts' }),
     {
       t: 4500,
       kind: 'term',
@@ -170,14 +170,14 @@ function buildSubagentTimeline() {
         '',
       ]),
     },
-    tool(4700, 'agent-003', 'Read', { file_path: '/home/arkon/codeman/src/types.ts' }),
-    tool(5200, 'agent-001', 'Read', { file_path: '/home/arkon/codeman/src/web/schemas.ts' }),
-    tool(5600, 'agent-002', 'Read', { file_path: '/home/arkon/codeman/config/vitest.config.ts' }),
+    tool(4700, 'agent-003', 'Read', { file_path: '/home/arkon/reverie/src/types.ts' }),
+    tool(5200, 'agent-001', 'Read', { file_path: '/home/arkon/reverie/src/web/schemas.ts' }),
+    tool(5600, 'agent-002', 'Read', { file_path: '/home/arkon/reverie/config/vitest.config.ts' }),
     tool(6100, 'agent-003', 'Grep', { pattern: 'export (interface|type)', path: 'src/types/' }),
     msg(6700, 'agent-001', 'Found 47 API endpoints across server.ts. Documenting REST paths...'),
     tool(7100, 'agent-002', 'Grep', { pattern: 'const PORT =', path: 'test/' }),
     msg(7700, 'agent-002', 'Analyzing test patterns: MockSession, unique ports, fileParallelism: false...'),
-    tool(8100, 'agent-003', 'Read', { file_path: '/home/arkon/codeman/src/types/index.ts' }),
+    tool(8100, 'agent-003', 'Read', { file_path: '/home/arkon/reverie/src/types/index.ts' }),
     msg(8700, 'agent-003', 'Mapped 38 exported interfaces across 15 domain files. Building summary...'),
     {
       t: 9300,
@@ -190,7 +190,7 @@ function buildSubagentTimeline() {
       ]),
     },
     tool(10100, 'agent-001', 'Glob', { pattern: 'src/web/routes/*.ts' }),
-    tool(10600, 'agent-002', 'Read', { file_path: '/home/arkon/codeman/test/setup.ts' }),
+    tool(10600, 'agent-002', 'Read', { file_path: '/home/arkon/reverie/test/setup.ts' }),
     tool(11100, 'agent-003', 'Grep', { pattern: 'assertNever', path: 'src/' }),
     {
       t: 11600,
@@ -442,11 +442,11 @@ async function recordZerolagScene(browser, videoDir) {
 
 async function main() {
   console.log('='.repeat(60));
-  console.log('Codeman README GIF Capture');
+  console.log('Reverie README GIF Capture');
   console.log('='.repeat(60));
 
   const server = await startStaticServer();
-  const videoDir = mkdtempSync(join(tmpdir(), 'codeman-gifs-'));
+  const videoDir = mkdtempSync(join(tmpdir(), 'reverie-gifs-'));
   let browser;
 
   try {

@@ -1,5 +1,5 @@
 /**
- * @fileoverview Shared Fastify error handler for Codeman's HTTP routes.
+ * @fileoverview Shared Fastify error handler for Reverie's HTTP routes.
  *
  * Route helpers (`findSessionOrFail`, `parseBody` in route-helpers.ts) throw
  * structured errors carrying `{ statusCode, body }`. This handler renders them

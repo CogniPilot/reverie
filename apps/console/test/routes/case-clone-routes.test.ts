@@ -10,7 +10,7 @@
  * repository's own files, and that a rejected URL never reaches git.
  *
  * `test/setup.ts` points HOME at a per-file temp dir, so CASES_DIR
- * (`join(homedir(), 'codeman-cases')`) resolves inside the fixture; cleanup
+ * (`join(homedir(), 'reverie-cases')`) resolves inside the fixture; cleanup
  * below still goes through `safeRmHomeTree`, which refuses to delete anything
  * outside the temp HOME, so a wrong anchor can never reach the real tree.
  *
@@ -23,8 +23,8 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } 
 // network mount that went away), so the bounded path probe can be driven to its
 // stall cap. Every other stat is the real one. The short timeout is read at import.
 const deadMount = vi.hoisted(() => {
-  process.env.CODEMAN_PATH_PROBE_TIMEOUT_MS = '200';
-  return { root: '/mnt/codeman-clone-test-dead', releases: [] as Array<() => void> };
+  process.env.REVERIE_PATH_PROBE_TIMEOUT_MS = '200';
+  return { root: '/mnt/reverie-clone-test-dead', releases: [] as Array<() => void> };
 });
 vi.mock('node:fs/promises', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:fs/promises')>();
@@ -37,7 +37,7 @@ vi.mock('node:fs/promises', async (importOriginal) => {
   return { ...actual, stat, default: { ...actual, stat } };
 });
 afterAll(() => {
-  delete process.env.CODEMAN_PATH_PROBE_TIMEOUT_MS;
+  delete process.env.REVERIE_PATH_PROBE_TIMEOUT_MS;
 });
 import Fastify, { type FastifyInstance } from 'fastify';
 import fastifyCookie from '@fastify/cookie';
@@ -62,7 +62,7 @@ import { isGitAvailable } from '../../src/git-clone.js';
 import { probePath } from '../../src/utils/index.js';
 import { MAX_STALLED_PATH_PROBES } from '../../src/config/path-probe.js';
 
-const CASES_DIR = join(homedir(), 'codeman-cases');
+const CASES_DIR = join(homedir(), 'reverie-cases');
 const gitPresent = isGitAvailable();
 
 let app: FastifyInstance;
@@ -134,7 +134,7 @@ describe('POST /api/cases/clone — input rejection', () => {
   });
 
   it('refuses a transport helper before touching git', async () => {
-    const res = await clone({ name: 'pwned', repository: 'ext::sh -c "touch /tmp/codeman-pwned"' });
+    const res = await clone({ name: 'pwned', repository: 'ext::sh -c "touch /tmp/reverie-pwned"' });
     expect(res.statusCode).toBe(400);
     const body = JSON.parse(res.body);
     expect(body.errorCode).toBe(ApiErrorCode.INVALID_INPUT);
@@ -189,7 +189,7 @@ describe.skipIf(!gitPresent)('POST /api/cases/clone — real clone', () => {
     execFileSync('git', args, { cwd, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'] });
 
   beforeAll(() => {
-    root = mkdtempSync(join(tmpdir(), 'codeman-clone-route-'));
+    root = mkdtempSync(join(tmpdir(), 'reverie-clone-route-'));
     origin = join(root, 'origin.git');
     mkdirSync(origin);
     git(['init', '--bare', '--quiet'], origin);
@@ -198,7 +198,7 @@ describe.skipIf(!gitPresent)('POST /api/cases/clone — real clone', () => {
     mkdirSync(work);
     git(['init', '--quiet'], work);
     git(['config', 'user.email', 'test@example.com'], work);
-    git(['config', 'user.name', 'Codeman Test'], work);
+    git(['config', 'user.name', 'Reverie Test'], work);
     writeFileSync(join(work, 'README.md'), '# fixture\n');
     // The repo ships BOTH files the scaffolder would otherwise write.
     writeFileSync(join(work, 'CLAUDE.md'), '# repository-owned CLAUDE.md\n');
@@ -228,7 +228,7 @@ describe.skipIf(!gitPresent)('POST /api/cases/clone — real clone', () => {
     mkdirSync(hostileWork);
     git(['init', '--quiet'], hostileWork);
     git(['config', 'user.email', 'test@example.com'], hostileWork);
-    git(['config', 'user.name', 'Codeman Test'], hostileWork);
+    git(['config', 'user.name', 'Reverie Test'], hostileWork);
     writeFileSync(join(hostileWork, 'README.md'), '# hostile fixture\n');
     symlinkSync(victimFile, join(hostileWork, 'CLAUDE.md'));
     symlinkSync(victimDir, join(hostileWork, '.claude'));
@@ -294,7 +294,7 @@ describe.skipIf(!gitPresent)('POST /api/cases/clone — real clone', () => {
     }
   });
 
-  it('installs Codeman hooks alongside whatever the repo shipped', async () => {
+  it('installs Reverie hooks alongside whatever the repo shipped', async () => {
     created.push('hooked');
     await clone({ name: 'hooked', repository: origin });
     const settingsPath = join(CASES_DIR, 'hooked', '.claude', 'settings.local.json');

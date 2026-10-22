@@ -125,7 +125,7 @@ export class ImageWatcher extends EventEmitter {
   /**
    * Start watching a session's working directory for new images.
    *
-   * @param sessionId - Codeman session ID
+   * @param sessionId - Reverie session ID
    * @param workingDir - Path to the session's working directory
    */
   watchSession(sessionId: string, workingDir: string): void {
@@ -158,7 +158,7 @@ export class ImageWatcher extends EventEmitter {
         // Watch all subdirectories (images may be saved in src/, assets/, etc.)
         // Ignore common heavy directories for performance
         ignored: (path: string) => {
-          // Skip node_modules, .git, and other heavy directories, and Codeman's
+          // Skip node_modules, .git, and other heavy directories, and Reverie's
           // own upload folders: a pdf the user handed to the agent is not a file
           // the agent produced.
           if (
@@ -196,7 +196,7 @@ export class ImageWatcher extends EventEmitter {
   /**
    * Stop watching a session's working directory.
    *
-   * @param sessionId - Codeman session ID to stop watching
+   * @param sessionId - Reverie session ID to stop watching
    */
   unwatchSession(sessionId: string): void {
     const watcher = this.sessionWatchers.get(sessionId);

@@ -41,7 +41,7 @@ const body = {
 };
 // What an employee sends: no bot, no author; the server takes both from the caller.
 const { botId: _bot, ...mine } = body;
-const as = (p: { session: string }) => ({ 'x-codeman-parent-session': p.session });
+const as = (p: { session: string }) => ({ 'x-reverie-parent-session': p.session });
 
 let notices: string[];
 let noticeWorks: boolean;
@@ -110,7 +110,7 @@ describe('delegated post jobs', () => {
     await app.close();
   });
 
-  it.each([['unknown session', { 'x-codeman-parent-session': 'garbage' }], ['empty header', { 'x-codeman-parent-session': '' }]])(
+  it.each([['unknown session', { 'x-reverie-parent-session': 'garbage' }], ['empty header', { 'x-reverie-parent-session': '' }]])(
     'refuses an unknown caller (%s) and changes nothing',
     async (_n, headers) => {
       const { app } = await setup();
@@ -124,7 +124,7 @@ describe('delegated post jobs', () => {
 
   it('refuses a caller flagged as holding web content, even with the permission', async () => {
     const { app } = await setup();
-    const res = await app.inject({ method: 'POST', url: '/api/cron/jobs', headers: { ...as(DANA), 'x-codeman-tainted': '1' }, payload: mine });
+    const res = await app.inject({ method: 'POST', url: '/api/cron/jobs', headers: { ...as(DANA), 'x-reverie-tainted': '1' }, payload: mine });
     expect(res.json()).toMatchObject({ success: false, errorCode: 'FORBIDDEN' });
     expect(Object.keys(jobs)).toHaveLength(0);
     await app.close();

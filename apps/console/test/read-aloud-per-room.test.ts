@@ -14,10 +14,10 @@ const dom = new JSDOM('<!doctype html><html><head></head><body></body></html>', 
   url: 'http://localhost/',
 });
 const context = dom.getInternalVMContext();
-vm.runInContext('globalThis.CodemanApp = class {}; globalThis.fetch = () => new Promise(() => {});', context);
+vm.runInContext('globalThis.ReverieApp = class {}; globalThis.fetch = () => new Promise(() => {});', context);
 for (const f of ['chatroom-ui.js', 'voice-chat.js', 'car-mode.js'])
   vm.runInContext(readFileSync(resolve(import.meta.dirname, `../src/web/public/${f}`), 'utf8'), context);
-const Proto = vm.runInContext('CodemanApp.prototype', context);
+const Proto = vm.runInContext('ReverieApp.prototype', context);
 const carModeSpeakable = vm.runInContext('carModeSpeakable', context) as (t: string) => string;
 const doc = dom.window.document;
 const storage = dom.window.localStorage;
@@ -61,12 +61,12 @@ describe('speak replies aloud, per room', () => {
     expect(a._speakRepliesIn('voice-2')).toBe(false);
     expect(a._speakRepliesIn('')).toBe(false);
     expect(a._speakRepliesIn(null)).toBe(false);
-    expect(storage.getItem('codeman:speakReplies:voice')).toBe('1');
+    expect(storage.getItem('reverie:speakReplies:voice')).toBe('1');
   });
 
   it('the old device-wide setting turns on no room', () => {
     const { a } = setup();
-    storage.setItem('codeman:speakReplies', '1');
+    storage.setItem('reverie:speakReplies', '1');
     expect(a._speakRepliesIn('voice')).toBe(false);
   });
 
@@ -76,7 +76,7 @@ describe('speak replies aloud, per room', () => {
     expect(clears()).toBe(0);
     a._setSpeakReplies('voice', false);
     expect(a._speakRepliesIn('voice')).toBe(false);
-    expect(storage.getItem('codeman:speakReplies:voice')).toBeNull();
+    expect(storage.getItem('reverie:speakReplies:voice')).toBeNull();
     expect(clears()).toBe(1);
     a._setSpeakReplies('', true);
     expect(storage.length).toBe(0);
@@ -112,7 +112,7 @@ describe('speak replies aloud, per room', () => {
     expect(pushed).toEqual([]);
     a._setSpeakReplies('voice', 'all');
     expect(a._speakRepliesMode('voice')).toBe('all');
-    expect(storage.getItem('codeman:speakReplies:voice')).toBe('all');
+    expect(storage.getItem('reverie:speakReplies:voice')).toBe('all');
     a._readAloudOnMessage(chatter('@Planner build is green'));
     a._readAloudOnMessage(msg('And to you.'));
     expect(pushed.map((p) => p[0])).toEqual(['Coordinator says: @Planner build is green', 'Reviewer says: And to you.']);
@@ -136,7 +136,7 @@ describe('speak replies aloud, per room', () => {
     a._setSpeakReplies('voice', 'loud');
     expect(a._speakRepliesMode('voice')).toBe('off');
     expect(clears()).toBe(1);
-    storage.setItem('codeman:speakReplies:voice', 'yes');
+    storage.setItem('reverie:speakReplies:voice', 'yes');
     expect(a._speakRepliesMode('voice')).toBe('off');
   });
 

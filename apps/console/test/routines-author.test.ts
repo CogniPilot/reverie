@@ -24,7 +24,7 @@ interface Person { id: string; name: string; position: string; session: string }
 const ALICE: Person = { id: 'e-alice', name: 'Alice', position: 'Tech lead', session: '0000002d-0035-4000-8000-000000000047' };
 const BOB: Person = { id: 'e-bob', name: 'Bob', position: 'Designer', session: '00000038-0043-4000-8000-000000000060' };
 const TEMP = { session: '0000003e-004c-4000-8000-00000000006f' };
-const as = (p: { session: string }) => ({ 'x-codeman-parent-session': p.session });
+const as = (p: { session: string }) => ({ 'x-reverie-parent-session': p.session });
 const mine = {
   name: 'standup', action: 'post', roomId: 'room-1', postText: 'standup in 5',
   scheduleType: 'daily', dailyTime: '09:00', timeZone: 'America/New_York', enabled: true,
@@ -153,7 +153,7 @@ describe('agent routines: what the server accepts', () => {
     expect(temp.error).toContain('Temporary agents cannot own routines');
     await grants.set({ roles: [], employees: { [BOB.id]: false } });
     expect((await create(BOB)).json()).toMatchObject({ errorCode: 'FORBIDDEN' });
-    const tainted = await app.inject({ method: 'POST', url: '/api/cron/jobs', headers: { ...as(ALICE), 'x-codeman-tainted': '1' }, payload: mine });
+    const tainted = await app.inject({ method: 'POST', url: '/api/cron/jobs', headers: { ...as(ALICE), 'x-reverie-tainted': '1' }, payload: mine });
     expect(tainted.json()).toMatchObject({ errorCode: 'FORBIDDEN' });
     for (const extra of [{ postSource: 'host-load', postText: '{load}' }, { dryRun: true }, { postChangeOnly: true }]) {
       expect((await create(ALICE, extra)).json(), JSON.stringify(extra)).toMatchObject({ success: false });

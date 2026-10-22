@@ -1,4 +1,4 @@
-# Codeman Performance Optimization Plan
+# Reverie Performance Optimization Plan
 
 ## Current State
 
@@ -8,11 +8,11 @@ The backend is **already production-grade** — SSE broadcasting, state persiste
 
 ### 1. V8 Compile Cache (10-20% faster cold start)
 
-**Files:** `scripts/codeman-web.service`, `package.json`
+**Files:** `scripts/reverie-web.service`, `package.json`
 
 Node.js re-parses and compiles all JS on every cold start. `NODE_COMPILE_CACHE` caches V8 compiled bytecode to disk, reusing it on subsequent starts.
 
-- Added `Environment=NODE_COMPILE_CACHE=/home/arkon/.codeman/compile-cache` to systemd service
+- Added `Environment=NODE_COMPILE_CACHE=/home/arkon/.reverie/compile-cache` to systemd service
 - Added to `npm start` script for non-systemd usage
 - Zero code changes, immediate win on every restart
 

@@ -1,7 +1,7 @@
 /**
  * @fileoverview File Viewer server-side search (COD-341).
  *
- * The browser module is loaded as the real CodemanApp mixin in a VM. The fake
+ * The browser module is loaded as the real ReverieApp mixin in a VM. The fake
  * DOM intentionally implements only the element contract used by the File
  * Viewer, while fetch responses and timers remain controllable so races can be
  * exercised without jsdom.
@@ -147,7 +147,7 @@ function response(body: unknown, ok = true): FakeResponse {
 }
 
 function loadPanel(options: { sessionId?: string | null; showHidden?: boolean } = {}) {
-  const CodemanApp = function CodemanApp(this: unknown) {} as unknown as new () => Record<string, unknown>;
+  const ReverieApp = function ReverieApp(this: unknown) {} as unknown as new () => Record<string, unknown>;
   const elements: Record<string, FakeElement> = {
     fileBrowserPanel: fakeElement(['visible']),
     fileBrowserTree: fakeElement(),
@@ -158,11 +158,11 @@ function loadPanel(options: { sessionId?: string | null; showHidden?: boolean } 
   };
   const pending: Array<{ url: string; reply: ReturnType<typeof deferred<FakeResponse>> }> = [];
   const context = vm.createContext({
-    CodemanApp,
+    ReverieApp,
     console,
     escapeHtml,
     // Reverse-proxy route builder from constants.js (not loaded here); identity at root.
-    CodemanBase: { base: '', url: (p: string) => p },
+    ReverieBase: { base: '', url: (p: string) => p },
     localStorage: { getItem: () => null, setItem: vi.fn() },
     document: {
       getElementById: (id: string) => elements[id] ?? null,
@@ -182,7 +182,7 @@ function loadPanel(options: { sessionId?: string | null; showHidden?: boolean } 
   vm.runInContext(settingsJs, context, { filename: 'settings-ui.js' });
   vm.runInContext(panelsJs, context, { filename: 'panels-ui.js' });
 
-  const app = new CodemanApp() as Record<string, any>;
+  const app = new ReverieApp() as Record<string, any>;
   app.$ = (id: string) => elements[id] ?? null;
   app.activeSessionId = options.sessionId === undefined ? 'session/A' : options.sessionId;
   app.fileBrowserData = null;
@@ -225,7 +225,7 @@ function loadRealSelectSessionHarness(options: { terminalFailure?: boolean } = {
     HTMLCanvasElement: class HTMLCanvasElement {},
     WebSocket: { OPEN: 1 },
     // Reverse-proxy route builder from constants.js (not loaded here); identity at root.
-    CodemanBase: { base: '', url: (p: string) => p },
+    ReverieBase: { base: '', url: (p: string) => p },
     MobileDetection: { isTouchDevice: () => false },
     localStorage: { length: 0, key: vi.fn(), getItem: vi.fn(), setItem: vi.fn(), removeItem: vi.fn() },
     document: {
@@ -252,10 +252,10 @@ function loadRealSelectSessionHarness(options: { terminalFailure?: boolean } = {
       return Promise.reject(new Error(`Unexpected fetch: ${url}`));
     },
   });
-  vm.runInContext(`${constantsJs}\n${appJs}\n${panelsJs}\nglobalThis.__CodemanApp = CodemanApp;`, context);
+  vm.runInContext(`${constantsJs}\n${appJs}\n${panelsJs}\nglobalThis.__ReverieApp = ReverieApp;`, context);
 
-  const CodemanApp = (context as { __CodemanApp: new () => unknown }).__CodemanApp;
-  const app = Object.create(CodemanApp.prototype) as Record<string, any>;
+  const ReverieApp = (context as { __ReverieApp: new () => unknown }).__ReverieApp;
+  const app = Object.create(ReverieApp.prototype) as Record<string, any>;
   const terminalBoundary = deferred<boolean>();
   let resizeCalls = 0;
   app.activeSessionId = 'session/A';

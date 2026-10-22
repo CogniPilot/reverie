@@ -8,9 +8,9 @@
  *   `{ audioUrl, engine: 'kokoro' | 'piper' }`; play `audioUrl` from the same origin.
  * - `GET /api/voice/speech/:id`: that audio, range-aware, for a few minutes.
  *
- * Kokoro is `CODEMAN_KOKORO_URL` (default `http://127.0.0.1:8091`), an operator-run local
+ * Kokoro is `REVERIE_KOKORO_URL` (default `http://127.0.0.1:8091`), an operator-run local
  * process that owns the cast (name -> voice). If it fails, the voice service's Piper
- * (`CODEMAN_VOICE_TURN_URL`, its `/tts?raw=1`) speaks instead; if both fail the route
+ * (`REVERIE_VOICE_TURN_URL`, its `/tts?raw=1`) speaks instead; if both fail the route
  * answers 502 and the page uses the phone's own voice.
  *
  * ⚠️ The text is the page's to choose (it speaks what it shows), so the route only checks
@@ -46,7 +46,7 @@ const SpeakSchema = z
   .strict();
 
 export function kokoroUrl(env: NodeJS.ProcessEnv = process.env): string {
-  return (env.CODEMAN_KOKORO_URL?.trim() || 'http://127.0.0.1:8091').replace(/\/+$/, '');
+  return (env.REVERIE_KOKORO_URL?.trim() || 'http://127.0.0.1:8091').replace(/\/+$/, '');
 }
 
 /** Pure: the name the cast knows a member by ("Workspace: Worker" -> "Worker"). */

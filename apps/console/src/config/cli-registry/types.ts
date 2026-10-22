@@ -1,6 +1,6 @@
 /**
  * @fileoverview Type definitions for the CLI registry — the single source of truth for
- * which agent CLIs Codeman supports and how each one is discovered, launched and treated.
+ * which agent CLIs Reverie supports and how each one is discovered, launched and treated.
  *
  * This replaces the hard-coded `SessionMode` union and the ~123 per-mode branches that grew
  * out of it. The guiding rule: NO code may branch on a CLI's id. Behaviour that genuinely
@@ -29,8 +29,8 @@ export type EngineValue =
   | 'muxName'
   | 'effortLevel'
   | 'effortSettingsJson'
-  /** `sessionId` prefixed `codeman_<id>` — codex's unique per-pane rollout originator. */
-  | 'codemanPrefixedSessionId'
+  /** `sessionId` prefixed `reverie_<id>` — codex's unique per-pane rollout originator. */
+  | 'reveriePrefixedSessionId'
   /**
    * For a launcher CLI (`discovery.launcherProfile`), the target to launch when the caller
    * named none — deepseek's default `dsh` profile. Resolved at spawn time, never frozen
@@ -72,7 +72,7 @@ export type QuoteStyle = 'auto' | 'bare' | 'double' | 'single';
 /**
  * Workspace-relative directories an agent CLI scans for project skills. A closed list
  * rather than a free path: the value decides where the server WRITES, and
- * `~/.codeman/clis.json` can set it, so it must never be able to name `..` or an
+ * `~/.reverie/clis.json` can set it, so it must never be able to name `..` or an
  * absolute path.
  */
 export type AgentSkillDir = '.claude/skills' | '.agents/skills';
@@ -358,7 +358,7 @@ export interface CliCapabilities {
   /**
    * How to read this CLI's own TUI for whether it is mid-turn.
    *
-   * Codeman infers a working agent from the pane, so the two strings it needs are the
+   * Reverie infers a working agent from the pane, so the two strings it needs are the
    * ones that differ per CLI: the glyph on the composer row, and the status line the CLI
    * draws while a turn runs. Holding them here is what lets a non-Claude CLI report work
    * at all — `external` used to gate the whole detector, so every external CLI reported
@@ -368,7 +368,7 @@ export interface CliCapabilities {
    * turn ended, because a CLI redraws its composer throughout a turn. `workingLine` is
    * the evidence, and `_confirmIdle` consults it before believing the pane went quiet.
    *
-   * An entry that omits this field keeps Codeman's historical behaviour: the Claude glyph
+   * An entry that omits this field keeps Reverie's historical behaviour: the Claude glyph
    * arms the confirmation and the Claude working line answers it. Leave it out for a CLI
    * whose TUI nobody has characterised, and its sessions report work exactly as before.
    */
@@ -380,7 +380,7 @@ export interface CliCapabilities {
     /**
      * Source of a regex matching the row this CLI draws while work it started in the
      * background is still running, e.g. Claude's `· 1 monitor ·` footer chip or Codex's
-     * `1 background terminal running · /ps to view`. Capture group 1 is the label Codeman
+     * `1 background terminal running · /ps to view`. Capture group 1 is the label Reverie
      * shows, and the whole match stands in when the pattern declares no group. A CLI that
      * omits this reports no background work, which is what every CLI did before the field
      * existed.
@@ -433,7 +433,7 @@ export interface CliCapabilities {
    */
   transcriptGutter?: number;
   /**
-   * Literal text the TUI draws once its composer can take a prompt — what `codeman agent
+   * Literal text the TUI draws once its composer can take a prompt — what `reverie agent
    * spawn` waits for (a `wait-output` match) before it calls a worker ready.
    *
    * Deliberately NOT `workDetect.promptGlyph`: claude's `❯` also marks the selected row
@@ -450,9 +450,9 @@ export interface CliCapabilities {
    *
    * ⚠️ A TRI-STATE, not a boolean, because for one CLI this is a per-SESSION question:
    *   'none'       — no hook signals, ever (every external CLI, and `shell`).
-   *   'always'     — the CLI installs Codeman's hooks (claude).
+   *   'always'     — the CLI installs Reverie's hooks (claude).
    *   'supervised' — the CLI REPORTS its own idle/working/blocked state to a supervisor
-   *                  over a generic env-gated contract, and Codeman is that supervisor
+   *                  over a generic env-gated contract, and Reverie is that supervisor
    *                  (deepseek, via deepseek-status-shim.ts). Definitive rather than
    *                  inferred, so it earns real signals — but the session can disarm the
    *                  bridge (`deepSeekConfig.statusReporting: false`), and a docker or
@@ -521,7 +521,7 @@ export interface CliCapabilities {
    * The CLI pages its OWN transcript on PageUp/PageDown, so a wheel or touch scroll over
    * a pane with no local history can be turned into those keys instead of doing nothing
    * (`_maybePageCliTranscript` in terminal-ui.js). Read by the frontend through
-   * `window.__codemanTranscriptPageKeys`, which the server builds from this field.
+   * `window.__reverieTranscriptPageKeys`, which the server builds from this field.
    *
    * ⚠ NOT wheel forwarding. `wheelForward` above sends SGR mouse wheel REPORTS; this sends
    * plain keys, and only when the local buffer is hollow (normal buffer, `baseY === 0`).
@@ -540,17 +540,17 @@ export interface CliCapabilities {
   respawn: boolean;
   effort: boolean;
   /**
-   * Codeman may write its agent skill (`skills/codeman`) into this CLI's workspace and
+   * Reverie may write its agent skill (`skills/reverie`) into this CLI's workspace and
    * seed its per-session preamble (behind the synced `agentSkillEnabled` setting,
    * add-only, marker-owned). Where it lands comes from `agentSkillDir` below.
    */
   agentSkillInjection: boolean;
   /**
    * The workspace-relative directory this CLI scans for project skills, so the skill
-   * lands at `<workspace>/<agentSkillDir>/codeman/SKILL.md` where the CLI discovers it.
+   * lands at `<workspace>/<agentSkillDir>/reverie/SKILL.md` where the CLI discovers it.
    * Measured per CLI. Absent with `agentSkillInjection: true` means Claude Code's
    * `.claude/skills`, which is what the boolean meant before this field existed, so a
-   * `~/.codeman/clis.json` written against the old schema keeps its behaviour.
+   * `~/.reverie/clis.json` written against the old schema keeps its behaviour.
    */
   agentSkillDir?: AgentSkillDir;
   statusLineTelemetry: boolean;
@@ -676,7 +676,7 @@ export interface CliCapabilities {
    *
    * `relocation` names the env var the CLI itself reads to move that file (codex's
    * `CODEX_HOME`, claude's `CLAUDE_CONFIG_DIR`, opencode's `XDG_CONFIG_HOME`). When the SERVER
-   * process env (what the CLIs Codeman spawns inherit) sets it to an absolute directory, the
+   * process env (what the CLIs Reverie spawns inherit) sets it to an absolute directory, the
    * file is `<that dir>/<relocation.path>` instead; set to anything else, the target is
    * reported `skipped` rather than written somewhere the CLI never reads. Absent = the file
    * only follows `$HOME`.
@@ -722,7 +722,7 @@ export interface CliCapabilities {
    * `{modelId}` is the chosen model id. Writing the config file is not enough
    * for pi and omp (`--model custom/<id>`, or the CLI stays on its own default
    * provider and reports "No API key found for the selected model") or for
-   * grok (`--model codeman-custom`, the `[model.<name>]` block the config
+   * grok (`--model reverie-custom`, the `[model.<name>]` block the config
    * declares). Absent = the config alone selects the model (claude's env vars,
    * opencode's blob, codex's top-level `model` key). Applied by the session's
    * respawn options through the entry's `legacyConfigField`, never by id.
@@ -832,7 +832,7 @@ export interface CliOverlays {
    * declare it when the normal `command` would be REFUSED as root: claude's carries
    * `--dangerously-skip-permissions`, which Claude Code rejects outright under root, and
    * the rejection is visible only inside the container, so the pane dies with no clue on
-   * the outside. Codeman's own base image runs a non-root user and never selects this; an
+   * the outside. Reverie's own base image runs a non-root user and never selects this; an
    * ADOPTED container belongs to its owner and is frequently root. Absent = use `command`.
    */
   docker?: { command?: string; rootCommand?: string } | { disabled: true };
@@ -911,7 +911,7 @@ export interface CliEntry {
 }
 
 /**
- * The on-disk shape of ~/.codeman/clis.json — overrides and custom entries only, never the
+ * The on-disk shape of ~/.reverie/clis.json — overrides and custom entries only, never the
  * full catalog. Small and hand-readable by design.
  *
  * ⚠️ READ-ONLY in this build. Nothing here writes this file: there is no settings UI and no

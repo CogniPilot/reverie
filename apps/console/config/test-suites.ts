@@ -14,7 +14,7 @@
  */
 
 /**
- * Playwright-driven: needs chromium and, in most cases, a live Codeman server
+ * Playwright-driven: needs chromium and, in most cases, a live Reverie server
  * on a real port. Deterministic where the environment provides both, which is
  * why these are a runnable suite (`npm run test:browser`) rather than skipped.
  */

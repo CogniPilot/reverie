@@ -308,8 +308,8 @@ describe('QR Auth Integration', () => {
   let baseUrl: string;
 
   beforeAll(async () => {
-    process.env.CODEMAN_PASSWORD = TEST_PASS;
-    process.env.CODEMAN_USERNAME = TEST_USER;
+    process.env.REVERIE_PASSWORD = TEST_PASS;
+    process.env.REVERIE_USERNAME = TEST_USER;
     server = new WebServer(0, false, true);
     await server.start();
     baseUrl = `http://localhost:${server.boundPort}`;
@@ -317,8 +317,8 @@ describe('QR Auth Integration', () => {
 
   afterAll(async () => {
     await server.stop();
-    delete process.env.CODEMAN_PASSWORD;
-    delete process.env.CODEMAN_USERNAME;
+    delete process.env.REVERIE_PASSWORD;
+    delete process.env.REVERIE_USERNAME;
   });
 
   beforeEach(() => {
@@ -343,15 +343,15 @@ describe('QR Auth Integration', () => {
 
   it('GET /q/:code should redirect to / when no auth configured', async () => {
     // Temporarily remove password
-    const savedPass = process.env.CODEMAN_PASSWORD;
-    delete process.env.CODEMAN_PASSWORD;
+    const savedPass = process.env.REVERIE_PASSWORD;
+    delete process.env.REVERIE_PASSWORD;
 
     try {
       const res = await fetch(`${baseUrl}/q/ANYCODE`, { redirect: 'manual' });
       expect(res.status).toBe(302);
       expect(res.headers.get('location')).toBe('/');
     } finally {
-      process.env.CODEMAN_PASSWORD = savedPass;
+      process.env.REVERIE_PASSWORD = savedPass;
     }
   });
 
@@ -381,9 +381,9 @@ describe('QR Auth Integration', () => {
     });
     expect(authRes.status).toBe(200);
     const setCookie = authRes.headers.get('set-cookie')!;
-    const cookieMatch = setCookie.match(/codeman_session=([^;]+)/);
+    const cookieMatch = setCookie.match(/reverie_session=([^;]+)/);
     expect(cookieMatch).toBeTruthy();
-    const cookie = `codeman_session=${cookieMatch![1]}`;
+    const cookie = `reverie_session=${cookieMatch![1]}`;
 
     // Verify cookie works
     const beforeRes = await fetch(`${baseUrl}/api/status`, {
@@ -414,18 +414,18 @@ describe('QR Auth Integration', () => {
     const auth1 = await fetch(`${baseUrl}/api/status`, {
       headers: { Authorization: basicAuthHeader(TEST_USER, TEST_PASS) },
     });
-    const cookie1 = auth1.headers.get('set-cookie')!.match(/codeman_session=([^;]+)/)![1];
+    const cookie1 = auth1.headers.get('set-cookie')!.match(/reverie_session=([^;]+)/)![1];
 
     const auth2 = await fetch(`${baseUrl}/api/status`, {
       headers: { Authorization: basicAuthHeader(TEST_USER, TEST_PASS) },
     });
-    const cookie2 = auth2.headers.get('set-cookie')!.match(/codeman_session=([^;]+)/)![1];
+    const cookie2 = auth2.headers.get('set-cookie')!.match(/reverie_session=([^;]+)/)![1];
 
     // Revoke only cookie1
     await fetch(`${baseUrl}/api/auth/revoke`, {
       method: 'POST',
       headers: {
-        Cookie: `codeman_session=${cookie2}`,
+        Cookie: `reverie_session=${cookie2}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({ sessionToken: cookie1 }),
@@ -433,13 +433,13 @@ describe('QR Auth Integration', () => {
 
     // cookie1 should fail
     const res1 = await fetch(`${baseUrl}/api/status`, {
-      headers: { Cookie: `codeman_session=${cookie1}` },
+      headers: { Cookie: `reverie_session=${cookie1}` },
     });
     expect(res1.status).toBe(401);
 
     // cookie2 should still work
     const res2 = await fetch(`${baseUrl}/api/status`, {
-      headers: { Cookie: `codeman_session=${cookie2}` },
+      headers: { Cookie: `reverie_session=${cookie2}` },
     });
     expect(res2.status).toBe(200);
   });
@@ -470,12 +470,12 @@ describe('QR Auth Integration', () => {
       expect(qrRes.headers.get('location')).toBe('/');
 
       const setCookie = qrRes.headers.get('set-cookie')!;
-      const cookieMatch = setCookie.match(/codeman_session=([^;]+)/);
+      const cookieMatch = setCookie.match(/reverie_session=([^;]+)/);
       expect(cookieMatch).toBeTruthy();
 
       // Use the cookie to access an authenticated endpoint
       const apiRes = await fetch(`${baseUrl}/api/status`, {
-        headers: { Cookie: `codeman_session=${cookieMatch![1]}` },
+        headers: { Cookie: `reverie_session=${cookieMatch![1]}` },
       });
       expect(apiRes.status).toBe(200);
     } finally {
@@ -581,7 +581,7 @@ describe('QR Auth Integration', () => {
       expect(res.status).toBe(302);
 
       const setCookie = res.headers.get('set-cookie')!;
-      const token = setCookie.match(/codeman_session=([^;]+)/)![1];
+      const token = setCookie.match(/reverie_session=([^;]+)/)![1];
 
       const authSessions = (
         server as unknown as {
@@ -604,8 +604,8 @@ describe('QR SVG Endpoint (GET /api/tunnel/qr)', () => {
   let baseUrl: string;
 
   beforeAll(async () => {
-    process.env.CODEMAN_PASSWORD = TEST_PASS;
-    process.env.CODEMAN_USERNAME = TEST_USER;
+    process.env.REVERIE_PASSWORD = TEST_PASS;
+    process.env.REVERIE_USERNAME = TEST_USER;
     server = new WebServer(0, false, true);
     await server.start();
     baseUrl = `http://localhost:${server.boundPort}`;
@@ -613,8 +613,8 @@ describe('QR SVG Endpoint (GET /api/tunnel/qr)', () => {
 
   afterAll(async () => {
     await server.stop();
-    delete process.env.CODEMAN_PASSWORD;
-    delete process.env.CODEMAN_USERNAME;
+    delete process.env.REVERIE_PASSWORD;
+    delete process.env.REVERIE_USERNAME;
   });
 
   function getTunnelManager(): TunnelManager {
@@ -660,8 +660,8 @@ describe('QR SVG Endpoint (GET /api/tunnel/qr)', () => {
   it('should return SVG with authEnabled=false when tunnel running + no auth', async () => {
     const tm = getTunnelManager();
     simulateTunnelRunning(tm);
-    const savedPass = process.env.CODEMAN_PASSWORD;
-    delete process.env.CODEMAN_PASSWORD;
+    const savedPass = process.env.REVERIE_PASSWORD;
+    delete process.env.REVERIE_PASSWORD;
     try {
       // Auth middleware was initialized with password (closure), so still need headers.
       // But route handler checks env var on each request — sees no password → no-auth path.
@@ -674,7 +674,7 @@ describe('QR SVG Endpoint (GET /api/tunnel/qr)', () => {
       expect(data.data.svg).toContain('<svg');
       expect(data.data.svg).toContain('</svg>');
     } finally {
-      process.env.CODEMAN_PASSWORD = savedPass;
+      process.env.REVERIE_PASSWORD = savedPass;
       simulateTunnelStopped(tm);
     }
   });
@@ -718,8 +718,8 @@ describe('QR SVG Endpoint (GET /api/tunnel/qr)', () => {
     const tm = getTunnelManager();
     const tunnelUrl = 'https://raw-url-test.trycloudflare.com';
     simulateTunnelRunning(tm, tunnelUrl);
-    const savedPass = process.env.CODEMAN_PASSWORD;
-    delete process.env.CODEMAN_PASSWORD;
+    const savedPass = process.env.REVERIE_PASSWORD;
+    delete process.env.REVERIE_PASSWORD;
     try {
       const res = await fetch(`${baseUrl}/api/tunnel/qr`, {
         headers: { Authorization: basicAuthHeader(TEST_USER, savedPass!) },
@@ -729,7 +729,7 @@ describe('QR SVG Endpoint (GET /api/tunnel/qr)', () => {
       expect(data.data.svg).toContain('<svg');
       expect(data.data.authEnabled).toBe(false);
     } finally {
-      process.env.CODEMAN_PASSWORD = savedPass;
+      process.env.REVERIE_PASSWORD = savedPass;
       simulateTunnelStopped(tm);
     }
   });

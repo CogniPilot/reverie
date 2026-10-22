@@ -3,8 +3,8 @@
  *
  * A CLI's approval bypass is a launch param (codex `--dangerously-bypass-approvals-and-sandbox`),
  * so a session created, moved or relaunched without it starts with approval prompts on and
- * stalls on the first command. Inside the fleet container (`REVERIE_CONTAINER=1`, or the older
- * `FLEET_CONTAINER=1`) the bypass is therefore the default: every boolean param a CLI entry
+ * stalls on the first command. Inside the reverie container (`REVERIE_CONTAINER=1`, or the older
+ * `REVERIE_CONTAINER=1`) the bypass is therefore the default: every boolean param a CLI entry
  * lists in `privilegedParams` with `clampTo: false` is filled with `true` where the session's
  * config leaves it unset.
  *
@@ -31,9 +31,9 @@ import { basename } from 'node:path';
 import { getCli } from './config/cli-registry/registry.js';
 import type { ClaudeMode } from './types/session.js';
 import { canUsernameRunPrivilegedCommands } from './user-store.js';
-import { envValue } from './config/fleet-env.js';
+import { envValue } from './config/reverie-env.js';
 
-/** True when this console runs inside the fleet container. */
+/** True when this console runs inside the reverie container. */
 export function fullAccessByDefault(env: NodeJS.ProcessEnv = process.env): boolean {
   return envValue(env, 'CONTAINER') === '1';
 }

@@ -30,8 +30,8 @@ it('own-mode API refuses missing/unbound callers and caps leases without changin
     expect(ctx.sessions.has(a)).toBe(true);
     const url = '/api/chatrooms/alert-mode';
     expect((await app.inject({ method: 'GET', url })).statusCode).toBe(403);
-    expect((await app.inject({ method: 'GET', url, headers: { 'x-codeman-parent-session': b } })).statusCode).toBe(403);
-    const headers = { 'x-codeman-parent-session': a };
+    expect((await app.inject({ method: 'GET', url, headers: { 'x-reverie-parent-session': b } })).statusCode).toBe(403);
+    const headers = { 'x-reverie-parent-session': a };
     const quiet = await app.inject({ method: 'POST', url, headers, payload: { mode: 'silent', durationMs: 3600000 } });
     expect(quiet.statusCode).toBe(200);
     expect(quiet.json().data.alertMode.mode).toBe('silent');

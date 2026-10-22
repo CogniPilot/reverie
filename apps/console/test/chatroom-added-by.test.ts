@@ -56,7 +56,7 @@ describe('chatroom members record who added them', () => {
     const add = await app.inject({
       method: 'POST',
       url: `/api/chatrooms/${ownedId}/members`,
-      headers: { 'x-codeman-parent-session': LEAD },
+      headers: { 'x-reverie-parent-session': LEAD },
       payload: { sessionId: OTHER },
     });
     expect(add.statusCode).toBe(200);
@@ -66,7 +66,7 @@ describe('chatroom members record who added them', () => {
     const built = await app.inject({
       method: 'POST',
       url: '/api/chatrooms',
-      headers: { 'x-codeman-parent-session': LEAD },
+      headers: { 'x-reverie-parent-session': LEAD },
       payload: { name: 'Built', members: [{ sessionId: OTHER }] },
     });
     expect(built.statusCode).toBe(200);

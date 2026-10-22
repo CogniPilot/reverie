@@ -140,7 +140,7 @@ describe('mobile IME preview with real xterm', () => {
  * Loads the real pieces: xterm 6, the overlay bundled from its package source
  * exactly as scripts/postinstall.js bundles it (plus the same LocalEchoOverlay
  * alias), styles.css, mobile-ime-preview.js, and terminal-ui.js's own
- * `_initMobileImePreview` on a bare CodemanApp prototype.
+ * `_initMobileImePreview` on a bare ReverieApp prototype.
  */
 describe('mobile IME preview over the local echo overlay', () => {
   let browser: Browser;
@@ -171,7 +171,7 @@ describe('mobile IME preview over the local echo overlay', () => {
     await page.addScriptTag({ path: resolve(root, 'node_modules/@xterm/xterm/lib/xterm.js') });
     await page.addScriptTag({ content: overlayBundle });
     await page.addScriptTag({ path: resolve(root, 'src/web/public/mobile-ime-preview.js') });
-    await page.addScriptTag({ content: 'window.CodemanApp = class CodemanApp {};' });
+    await page.addScriptTag({ content: 'window.ReverieApp = class ReverieApp {};' });
     await page.addScriptTag({ path: resolve(root, 'src/web/public/terminal-ui.js') });
   }, 60000);
 
@@ -201,7 +201,7 @@ describe('mobile IME preview over the local echo overlay', () => {
         });
         term.open(host);
         await new Promise<void>((r) => term.write('\u276f ', () => r()));
-        const app = new w.CodemanApp();
+        const app = new w.ReverieApp();
         app.terminal = term;
         app._localEchoEnabled = true;
         app._localEchoOverlay = new w.LocalEchoOverlay(term);
@@ -236,7 +236,7 @@ describe('mobile IME preview over the local echo overlay', () => {
           return {
             text: el?.textContent ?? null,
             composition: !!el?.closest?.('[data-zerolag-composition]'),
-            preview: !!el?.closest?.('.codeman-ime-preview'),
+            preview: !!el?.closest?.('.reverie-ime-preview'),
           };
         };
         const afterPending = paintedAt(2 + widthOf(pending));
@@ -318,7 +318,7 @@ describe('mobile IME preview over the local echo overlay', () => {
         });
         term.open(host);
         await new Promise<void>((r) => term.write('❯ ', () => r()));
-        const app = new w.CodemanApp();
+        const app = new w.ReverieApp();
         Object.assign(app, {
           terminal: term,
           _localEchoEnabled: true,

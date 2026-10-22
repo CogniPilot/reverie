@@ -28,8 +28,8 @@ in the six external CLIs before it.
 
 | Question | Decision | Why |
 | --- | --- | --- |
-| What does a pane run? | `dsh --profile <name>`, profile discovered | **The decision that shapes everything else.** DeepSeek ships `web`, `headless` and `base` — no terminal agent. The interactive front door is always a third-party plugin, so Codeman resolves a binary AND a profile inventory, and "available" means both. `resolveDefaultDeepSeekProfile()` prefers a recognized TUI, then an UNRECOGNIZED profile (anyone can publish an app bundle; a classifier that has not heard of one must not hide it), and refuses `web`/`headless`, which cannot occupy a pane. |
-| Which TUI? | none blessed; default for BOOTSTRAP only | `POST /api/deepseek/install-profile` defaults to `@deepseek-harness-tui/dsh-tui` (~27.5k weekly downloads, ~4x the next, MIT, and it speaks the status contract in §2.3), but accepts any npm name and the resolver never assumes that profile exists. Codeman offers a default; it does not pick a winner. |
+| What does a pane run? | `dsh --profile <name>`, profile discovered | **The decision that shapes everything else.** DeepSeek ships `web`, `headless` and `base` — no terminal agent. The interactive front door is always a third-party plugin, so Reverie resolves a binary AND a profile inventory, and "available" means both. `resolveDefaultDeepSeekProfile()` prefers a recognized TUI, then an UNRECOGNIZED profile (anyone can publish an app bundle; a classifier that has not heard of one must not hide it), and refuses `web`/`headless`, which cannot occupy a pane. |
+| Which TUI? | none blessed; default for BOOTSTRAP only | `POST /api/deepseek/install-profile` defaults to `@deepseek-harness-tui/dsh-tui` (~27.5k weekly downloads, ~4x the next, MIT, and it speaks the status contract in §2.3), but accepts any npm name and the resolver never assumes that profile exists. Reverie offers a default; it does not pick a winner. |
 | Permission bypass | `DSH_PERMISSION_MODE` env export, no flag | The harness has NO command-line permission option; its sandbox/approval rows read one env var with three presets (`read-only` / `workspace-write` / `danger-full-access`, read off `dsh --dump-default-config`). This is the one legitimate exception to the `CLAUDE_CODE_EFFORT_LEVEL` ban: that var hard-locks in-session switching, whereas the harness reads this with `??` as a boot-time DEFAULT, so it stays soft. Exported via `tmux setenv`, never on the command line. The Run button sends `danger-full-access`, matching every sibling Run button. |
 | Multi-user clamp branch | only-if-sent, clamped to `workspace-write`, **plus an env-var half** | Omitting the export leaves the harness on `workspace-write`, which still ASKS, so an absent config is already safe (the codex/antigravity/grok shape, not pi's materialize). Clamping to `workspace-write` rather than `read-only` is deliberate: the clamp removes privilege, it must not break a session's ability to edit its own workspace. ⚠️ Unlike every sibling, clamping the CONFIG is only half the gate: the switch is an env var, `DSH_*` is an allowlisted `envOverrides` prefix, and `applyEnvOverrides()` runs AFTER `_configureDeepSeek()`, so `envOverrides: {DSH_PERMISSION_MODE: 'danger-full-access'}` on the same request would land last and win. `clampEnvOverridesForOwner()` drops `DSH_PERMISSION_MODE` and `DSH_HOME` for a non-granted owner (dropping falls through to the clamped export). `DSH_HOME` because it aims the launcher at a profile tree whose plugin code runs at BOOT, before any approval row. |
 | `hooksAvailableForMode()` granularity | per SESSION for deepseek, per mode for everything else | `deepSeekConfig.statusReporting: false` disarms the `HERDR_*` export, and the triple is the only reason a dsh session posts anything, so a mode-only answer would accept `until=stop` where nothing can send one — the infinite-wait the predicate exists to prevent. Call sites pass `sessionHookOptions(session)`; the default stays permissive so a forgotten one degrades to the old behaviour. ⚠️ Profile conformance stays unknowable at request time (an unrecognized profile is deliberately launchable), so a non-conforming TUI still times out on an explicit `stop`; the default set keeps `idle`/`exit` for that. ⚠️ The predicate is NOT "is this claude": Read My Mind and intent capture read Claude's transcript and were silently widened by this change, so they compare `mode === 'claude'` directly now. |
@@ -48,10 +48,10 @@ in the six external CLIs before it.
 
 The browser UI is the only interactive surface DeepSeek ships itself, so it gets
 a **shortcut, not a run mode**: `Run ▸ DeepSeek web UI…` starts
-`dsh web --no-open --host 127.0.0.1 --port <free> --trusted-host <codeman-authority>`
+`dsh web --no-open --host 127.0.0.1 --port <free> --trusted-host <reverie-authority>`
 as a background process and opens the URL as an ordinary web tab.
 
-The server was a **shell session** first, on the reasoning that Codeman already
+The server was a **shell session** first, on the reasoning that Reverie already
 supervises those (visible, scrollable, killable, dies with its tab) so nothing
 new had to own a long-lived HTTP server. That version worked and was still
 wrong in use: clicking "open the DeepSeek web UI" put a terminal tab on screen
@@ -61,7 +61,7 @@ launch the terminal was pure noise. Opening a dashboard should open one tab.
 So `POST /api/deepseek/web` owns it instead (`src/deepseek-web-server.ts`), and
 what the session gave away for free is now explicit: exactly one server, reused
 rather than raced on a second click; restarted when the requested authority
-changes; killed on Codeman shutdown (a detached child would otherwise hold its
+changes; killed on Reverie shutdown (a detached child would otherwise hold its
 port against the next start — the very EADDRINUSE this feature already got
 wrong once); and boot output captured, since with no shell tab there is nowhere
 else for a stack trace to land. It is fenced at the same bar as the profile
@@ -69,10 +69,10 @@ installer: booting a dsh profile executes the plugin code in it, so it requires
 the privileged grant in multi-user mode.
 
 `--trusted-host` is load-bearing — dsh fences its `/api` behind a browser-trust
-check on the request authority, and a Codeman web tab reaches it through
-Codeman's own origin via the webview proxy, not directly. The authority comes
+check on the request authority, and a Reverie web tab reaches it through
+Reverie's own origin via the webview proxy, not directly. The authority comes
 from the CLIENT (`location.host`) because only the browser knows which of a
-multi-homed Codeman's origins is actually in play.
+multi-homed Reverie's origins is actually in play.
 
 Three things about this shortcut are load-bearing and each came from it failing
 in exactly that way against a real install:
@@ -93,8 +93,8 @@ in exactly that way against a real install:
   every `/api` call regardless of what `--trusted-host` names. Passing
   `location.host` only means anything once the frame actually carries that
   origin. The trade is real — a trusted proxied frame is same-origin with
-  Codeman and can reach Codeman's API — and is defensible only because this
-  particular dashboard is an agent harness Codeman just started itself on
+  Reverie and can reach Reverie's API — and is defensible only because this
+  particular dashboard is an agent harness Reverie just started itself on
   loopback, which can already run code as the user. It is not a precedent for
   trusting third-party dashboards generally.
 
@@ -138,7 +138,7 @@ label, external-CLI gates), `app.js` (label, `ds` tab badge, kill-menu, SSE map)
 skin block and the mobile `!important` pair are both load-bearing).
 
 Meta: `docker/agent.Dockerfile`, `install.sh`, `package.json` keyword,
-`skills/codeman/reference/*`, CLAUDE.md, `architecture-invariants.md`.
+`skills/reverie/reference/*`, CLAUDE.md, `architecture-invariants.md`.
 
 Tests: `test/deepseek-mode.test.ts` + `test/deepseek-cli-resolver.test.ts` (new);
 `run-mode-ui`, `render-index-html`, `mobile-overview`, `agent-skill-mode-lists`
@@ -169,7 +169,7 @@ behaviour covered by 31 new unit tests; and an isolated instance used to exercis
 
 - **Response viewer**: read `~/.dsh/sessions/**` (JSONL) the way codex rollouts
   are read back. Highest-value follow-up, and very achievable.
-- **`headless` as an execution backend** for Codeman's own AI checks
+- **`headless` as an execution backend** for Reverie's own AI checks
   (`ai-idle-checker`, `ai-plan-checker`), today Claude-only.
 - **Profile/model picker in Session Options**, reading `GET /api/deepseek/status`
   `.profiles`.

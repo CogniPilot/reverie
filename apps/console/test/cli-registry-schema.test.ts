@@ -1,7 +1,7 @@
 /**
  * @fileoverview Validation rules for a `CliEntry`.
  *
- * `~/.codeman/clis.json` is hand-editable and selects the binaries Codeman spawns, so this
+ * `~/.reverie/clis.json` is hand-editable and selects the binaries Reverie spawns, so this
  * schema is a security boundary, not a typo-catcher. Two properties carry that weight:
  *
  *  - **Everything is `.strict()`.** An unknown key is a hard error. On a permissive schema a

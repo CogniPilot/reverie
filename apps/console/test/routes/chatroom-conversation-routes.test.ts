@@ -24,7 +24,7 @@ describe('conversation routes', () => {
   let file: string;
 
   const panes = (id: string): string[] => (ctx.sessions.get(id) as unknown as { writeBuffer: string[] }).writeBuffer;
-  const as = (id: string) => ({ 'x-codeman-parent-session': id });
+  const as = (id: string) => ({ 'x-reverie-parent-session': id });
 
   beforeEach(async () => {
     clock = 1_000_000;
@@ -150,7 +150,7 @@ describe('conversation routes', () => {
 
   describe('placement and archive', () => {
     it('moves a room into a workspace and category, and back out with empty strings', async () => {
-      const id = await makeRoom('Fleet');
+      const id = await makeRoom('Reverie');
       const moved = await app.inject({
         method: 'PUT',
         url: `/api/chatrooms/${id}/placement`,
@@ -176,7 +176,7 @@ describe('conversation routes', () => {
     });
 
     it('is the user\'s to arrange: an agent cannot move or archive a room, and bodies are validated', async () => {
-      const id = await makeRoom('Fleet');
+      const id = await makeRoom('Reverie');
       expect((await app.inject({ method: 'PUT', url: `/api/chatrooms/${id}/placement`, headers: as(A), payload: { category: 'x' } })).statusCode).toBe(403);
       expect((await app.inject({ method: 'PUT', url: `/api/chatrooms/${id}/archive`, headers: as(A), payload: { archived: true } })).statusCode).toBe(403);
       expect((await app.inject({ method: 'PUT', url: `/api/chatrooms/${id}/placement`, payload: { category: 'x'.repeat(41) } })).statusCode).toBe(400);
@@ -278,7 +278,7 @@ describe('conversation routes', () => {
       }
     };
     it('logs the report, sends it in the coordinator\'s direct message (not the room), and survives a later delete', async () => {
-      const room = service.createRoom('Fleet', undefined);
+      const room = service.createRoom('Reverie', undefined);
       service.addMember(room.id, A, { role: 'coordinator' });
       service.addMember(room.id, B, {});
       clock += 10;
@@ -296,7 +296,7 @@ describe('conversation routes', () => {
       expect(dmId).not.toBe(room.id);
       expect(message.roomId).toBe(dmId);
       await drain();
-      expect(panes(A).join('')).toMatch(/REPORT from the user about a message in \\"Fleet\\" by .*\\"rude words\\" Reason: \\"abusive\\"/);
+      expect(panes(A).join('')).toMatch(/REPORT from the user about a message in \\"Reverie\\" by .*\\"rude words\\" Reason: \\"abusive\\"/);
       // the reported agent and the room never see it
       expect(panes(B).join('')).not.toContain('REPORT');
       const roomNow = (await app.inject({ url: `/api/chatrooms/${room.id}` })).json().data;
@@ -334,7 +334,7 @@ describe('conversation routes', () => {
     });
 
     it('refuses a report of the coordinator\'s own message', async () => {
-      const room = service.createRoom('Fleet2', undefined);
+      const room = service.createRoom('Reverie2', undefined);
       service.addMember(room.id, A, { role: 'coordinator' });
       clock += 10;
       const said = (await app.inject({ method: 'POST', url: `/api/chatrooms/${room.id}/messages`, headers: as(A), payload: { text: 'mine' } })).json().data.message;
@@ -354,18 +354,18 @@ describe('conversation routes', () => {
 
   describe('channel topic', () => {
     it('is set with the name by the user only, shows in the room and the list, and clears', async () => {
-      const id = await makeRoom('Fleet');
+      const id = await makeRoom('Reverie');
       expect((await app.inject({ method: 'PUT', url: `/api/chatrooms/${id}`, headers: as(A), payload: { topic: 'x' } })).statusCode).toBe(403);
       expect((await app.inject({ method: 'PUT', url: `/api/chatrooms/${id}`, payload: {} })).statusCode).toBe(400);
       expect((await app.inject({ method: 'PUT', url: `/api/chatrooms/${id}`, payload: { topic: 'x'.repeat(501) } })).statusCode).toBe(400);
-      const set = await app.inject({ method: 'PUT', url: `/api/chatrooms/${id}`, payload: { name: 'Fleet ops', topic: '  Builds and deploys  ' } });
+      const set = await app.inject({ method: 'PUT', url: `/api/chatrooms/${id}`, payload: { name: 'Reverie ops', topic: '  Builds and deploys  ' } });
       expect(set.statusCode).toBe(200);
-      expect(set.json().data).toMatchObject({ name: 'Fleet ops', topic: 'Builds and deploys' });
+      expect(set.json().data).toMatchObject({ name: 'Reverie ops', topic: 'Builds and deploys' });
       const listed = (await app.inject({ url: '/api/chatrooms' })).json().data.rooms.find((r: { id: string }) => r.id === id);
       expect(listed.topic).toBe('Builds and deploys');
       const cleared = await app.inject({ method: 'PUT', url: `/api/chatrooms/${id}`, payload: { topic: '' } });
       expect(cleared.json().data.topic).toBeUndefined();
-      expect(cleared.json().data.name).toBe('Fleet ops');
+      expect(cleared.json().data.name).toBe('Reverie ops');
     });
 
     it('refuses a topic on a direct message', async () => {
@@ -376,7 +376,7 @@ describe('conversation routes', () => {
 
   describe('review fixes for deleting', () => {
     it('keeps a deleted message\'s attachment references so the upload sweep leaves its files for a restore', async () => {
-      const id = await makeRoom('Fleet');
+      const id = await makeRoom('Reverie');
       const up = await app.inject({ method: 'POST', url: `/api/chatrooms/${id}/files?name=a.txt&type=text/plain`, headers: { 'content-type': 'application/octet-stream' }, payload: Buffer.from('keep me') });
       expect(up.statusCode).toBe(200);
       const fileId = up.json().data.file.id;
@@ -414,7 +414,7 @@ describe('conversation routes', () => {
 
   describe('a deleted message\'s files', () => {
     it('are not listed in the API and not served while only the tombstone refers to them, and come back with a restore', async () => {
-      const id = await makeRoom('Fleet');
+      const id = await makeRoom('Reverie');
       const up = await app.inject({ method: 'POST', url: `/api/chatrooms/${id}/files?name=a.txt&type=text/plain`, headers: { 'content-type': 'application/octet-stream' }, payload: Buffer.from('secret') });
       const fileId = up.json().data.file.id;
       const msg = (await app.inject({ method: 'POST', url: `/api/chatrooms/${id}/messages`, payload: { text: 'see file', attachments: [fileId] } })).json().data.message;

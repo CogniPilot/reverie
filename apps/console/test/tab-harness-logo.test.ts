@@ -7,7 +7,7 @@
  *    menus all draw the same mark. Claude used to get nothing at all and the
  *    other CLIs a two-letter text pill, so a claude tab read as "no harness".
  *  - The shell is not an agent and keeps its SH pill.
- *  - A CLI added through ~/.codeman/clis.json still gets the slot (its plain
+ *  - A CLI added through ~/.reverie/clis.json still gets the slot (its plain
  *    dot), and a mode string never reaches the markup unescaped.
  *  - Every stock agent CLI has a logo rule, so a new stock CLI cannot ship a
  *    tab that shows only the plain dot.
@@ -28,7 +28,7 @@ const PUBLIC = join(process.cwd(), 'src/web/public');
 const read = (name: string) => readFileSync(join(PUBLIC, name), 'utf8');
 
 describe('session tab harness logo (app.js)', () => {
-  let CodemanApp: { prototype: Record<string, any> };
+  let ReverieApp: { prototype: Record<string, any> };
   let window: any;
   let document: Document;
 
@@ -59,13 +59,13 @@ describe('session tab harness logo (app.js)', () => {
         read('home-sessions.js') +
         '\n' +
         read('webview-tabs.js') +
-        '\n;window.__HarnessCodemanApp = CodemanApp;'
+        '\n;window.__HarnessReverieApp = ReverieApp;'
     );
-    CodemanApp = window.__HarnessCodemanApp;
+    ReverieApp = window.__HarnessReverieApp;
   });
 
   function makeApp(sessions: Array<Record<string, unknown>>) {
-    const app = Object.create(CodemanApp.prototype) as Record<string, any>;
+    const app = Object.create(ReverieApp.prototype) as Record<string, any>;
     const root = document.documentElement;
     root.setAttribute('data-tab-orientation', 'horizontal');
     root.dataset.tabRailSort = 'activity';

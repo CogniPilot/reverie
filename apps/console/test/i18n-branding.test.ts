@@ -26,11 +26,11 @@ function makeDom(body = '<span class="logo">Reverie</span><button title="App Set
 }
 
 describe('custom display name and browser localization', () => {
-  const previousDataDir = process.env.CODEMAN_DATA_DIR;
+  const previousDataDir = process.env.REVERIE_DATA_DIR;
 
   afterEach(() => {
-    if (previousDataDir === undefined) delete process.env.CODEMAN_DATA_DIR;
-    else process.env.CODEMAN_DATA_DIR = previousDataDir;
+    if (previousDataDir === undefined) delete process.env.REVERIE_DATA_DIR;
+    else process.env.REVERIE_DATA_DIR = previousDataDir;
   });
 
   it('accepts bounded Chinese display names and rejects invalid values', () => {
@@ -58,7 +58,7 @@ describe('custom display name and browser localization', () => {
       <div id="dynamic"></div>
     `);
     const { window } = dom;
-    const api = window.CodemanI18n;
+    const api = window.ReverieI18n;
     api.start();
     api.configure({ language: 'zh-CN', displayName: '小码助手' });
 
@@ -91,7 +91,7 @@ describe('custom display name and browser localization', () => {
   it('does not walk what a terminal renders: one check per mutation inside a skipped surface', async () => {
     const dom = makeDom('<div class="xterm"><div class="xterm-rows" id="rows"></div></div><div id="app"></div>');
     const { window } = dom;
-    const api = window.CodemanI18n;
+    const api = window.ReverieI18n;
     api.start();
     api.configure({ language: 'zh-CN' });
     // i18n.js also starts itself on DOMContentLoaded (one walk of the body).
@@ -137,7 +137,7 @@ describe('custom display name and browser localization', () => {
         '<div class="xterm-rows" id="stray"></div>'
     );
     const { window } = dom;
-    const api = window.CodemanI18n;
+    const api = window.ReverieI18n;
     api.start();
     api.configure({ language: 'zh-CN' });
     await new Promise((resolve) => window.setTimeout(resolve, 0));
@@ -184,7 +184,7 @@ describe('custom display name and browser localization', () => {
 
   it('keeps a quoted group name apart from the fixed "Move to" entries in zh-CN', () => {
     const dom = makeDom('');
-    const api = dom.window.CodemanI18n;
+    const api = dom.window.ReverieI18n;
     api.configure({ language: 'zh-CN' });
     const labels = ['Move to "New group"', 'Move to new group', 'Move to "ungrouped"', 'Move to Ungrouped'].map(
       (label) => api.t(label)
@@ -202,7 +202,7 @@ describe('custom display name and browser localization', () => {
       `<div id="sessionTabs">${tab('New session')}${tab('Follows up on bug')}</div><div id="menu"></div>`
     );
     const { window } = dom;
-    const api = window.CodemanI18n;
+    const api = window.ReverieI18n;
     api.start();
     api.configure({ language: 'zh-CN' });
     const names = () => [...window.document.querySelectorAll('.tab-name')].map((el) => el.textContent);
@@ -221,7 +221,7 @@ describe('custom display name and browser localization', () => {
 
   it('renders hostile-looking names as text rather than HTML', () => {
     const dom = makeDom('<span class="logo">Reverie</span>');
-    const api = dom.window.CodemanI18n;
+    const api = dom.window.ReverieI18n;
     api.start();
     api.configure({ displayName: '<img src=x onerror=alert(1)>', language: 'en' });
     const logo = dom.window.document.querySelector('.logo');
@@ -240,8 +240,8 @@ describe('custom display name and browser localization', () => {
   });
 
   it('uses the escaped custom name in the server-rendered window title', async () => {
-    const dataDir = mkdtempSync(join(tmpdir(), 'codeman-brand-title-'));
-    process.env.CODEMAN_DATA_DIR = dataDir;
+    const dataDir = mkdtempSync(join(tmpdir(), 'reverie-brand-title-'));
+    process.env.REVERIE_DATA_DIR = dataDir;
     writeFileSync(join(dataDir, 'settings.json'), JSON.stringify({ displayName: '小码<&助手' }));
     const server = new WebServer(0, false, true, '127.0.0.1', 'laptop');
     const html = await (server as unknown as { renderIndexHtml: () => Promise<string> }).renderIndexHtml();

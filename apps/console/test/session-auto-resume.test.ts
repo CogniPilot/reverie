@@ -270,7 +270,7 @@ describe('SessionAutoOps auto-resume', () => {
     });
   });
 
-  describe('restoreAutoResume (recovery after Codeman restart)', () => {
+  describe('restoreAutoResume (recovery after Reverie restart)', () => {
     it('re-arms a future schedule', () => {
       ops.restoreAutoResume(true, Date.now() + 30 * 60_000);
       expect(ops.autoResumeEnabled).toBe(true);

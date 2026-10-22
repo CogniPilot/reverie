@@ -48,7 +48,7 @@ const fakeDocument = {
 const rafCalls: Array<() => void> = [];
 const cancelledRafs: number[] = [];
 
-function loadCodemanAppClass() {
+function loadReverieAppClass() {
   const dir = resolve(import.meta.dirname, '../src/web/public');
   const terminalSplitSrc = readFileSync(resolve(dir, 'terminal-split.js'), 'utf8');
   const context = vm.createContext({
@@ -62,12 +62,12 @@ function loadCodemanAppClass() {
     requestAnimationFrame: (fn: () => void) => rafCalls.push(fn),
     cancelAnimationFrame: (id: number) => cancelledRafs.push(id),
   });
-  // A minimal fake CodemanApp — terminal-split.js only needs `_onSessionDeleted`
+  // A minimal fake ReverieApp — terminal-split.js only needs `_onSessionDeleted`
   // and `selectSession` to already exist on the prototype (it wraps both), and
   // neither wrapped body executes at module-load time (only inside method
-  // calls), so no xterm/WebSocket/CodemanSplitPane globals are needed here.
+  // calls), so no xterm/WebSocket/ReverieSplitPane globals are needed here.
   const fakeAppSrc = `
-    class CodemanApp {
+    class ReverieApp {
       _onSessionDeleted(data) {
         (this.__originalDeletedCalls ??= []).push(data);
       }
@@ -76,8 +76,8 @@ function loadCodemanAppClass() {
       }
     }
   `;
-  vm.runInContext(`${fakeAppSrc}\n${terminalSplitSrc}\nglobalThis.__CodemanApp = CodemanApp;`, context);
-  return (context as { __CodemanApp: new () => unknown }).__CodemanApp as {
+  vm.runInContext(`${fakeAppSrc}\n${terminalSplitSrc}\nglobalThis.__ReverieApp = ReverieApp;`, context);
+  return (context as { __ReverieApp: new () => unknown }).__ReverieApp as {
     prototype: {
       _onSessionDeleted: (this: unknown, data: { id: string }) => unknown;
       closeSplitPane: (this: unknown, options?: { skipPrimaryResize?: boolean }) => unknown;
@@ -87,7 +87,7 @@ function loadCodemanAppClass() {
   };
 }
 
-const CodemanApp = loadCodemanAppClass();
+const ReverieApp = loadReverieAppClass();
 
 type TestApp = {
   activeSessionId: string | null;
@@ -101,7 +101,7 @@ type TestApp = {
 
 /** A split-active instance: Pane A === activeSessionId, Pane B === _splitSessionId. */
 function makeSplitActiveApp(): TestApp {
-  const app = Object.create((CodemanApp as { prototype: object }).prototype) as TestApp;
+  const app = Object.create((ReverieApp as { prototype: object }).prototype) as TestApp;
   app.activeSessionId = 'session-a';
   app._splitSessionId = 'session-b';
   app._splitPane = { destroy: vi.fn() };
@@ -125,7 +125,7 @@ describe('terminal-split.js _onSessionDeleted wrapper (I6)', () => {
   it('Pane A ends: closes the split and promotes Pane B via selectSession(ORIGINAL splitSessionId)', () => {
     const app = makeSplitActiveApp();
 
-    CodemanApp.prototype._onSessionDeleted.call(app, { id: 'session-a' });
+    ReverieApp.prototype._onSessionDeleted.call(app, { id: 'session-a' });
 
     expect(app.closeSplitPane).toHaveBeenCalledTimes(1);
     // activeSessionId is still the deleted id while the split collapses (the
@@ -144,7 +144,7 @@ describe('terminal-split.js _onSessionDeleted wrapper (I6)', () => {
   it('Pane B ends: closes the split without promoting anything', () => {
     const app = makeSplitActiveApp();
 
-    CodemanApp.prototype._onSessionDeleted.call(app, { id: 'session-b' });
+    ReverieApp.prototype._onSessionDeleted.call(app, { id: 'session-b' });
 
     expect(app.closeSplitPane).toHaveBeenCalledTimes(1);
     // Pane A's session is alive and stays active: the closing resize is
@@ -157,7 +157,7 @@ describe('terminal-split.js _onSessionDeleted wrapper (I6)', () => {
   it('an unrelated session ending leaves the split untouched', () => {
     const app = makeSplitActiveApp();
 
-    CodemanApp.prototype._onSessionDeleted.call(app, { id: 'session-c' });
+    ReverieApp.prototype._onSessionDeleted.call(app, { id: 'session-c' });
 
     expect(app.closeSplitPane).not.toHaveBeenCalled();
     expect(app.selectSession).not.toHaveBeenCalled();
@@ -167,7 +167,7 @@ describe('terminal-split.js _onSessionDeleted wrapper (I6)', () => {
   });
 
   it('the original _onSessionDeleted always fires, split-active or not', () => {
-    const app = Object.create((CodemanApp as { prototype: object }).prototype) as TestApp;
+    const app = Object.create((ReverieApp as { prototype: object }).prototype) as TestApp;
     app.activeSessionId = 'session-a';
     app._splitSessionId = null;
     app._splitPane = null;
@@ -175,7 +175,7 @@ describe('terminal-split.js _onSessionDeleted wrapper (I6)', () => {
     app.closeSplitPane = vi.fn();
     app.selectSession = vi.fn();
 
-    CodemanApp.prototype._onSessionDeleted.call(app, { id: 'session-a' });
+    ReverieApp.prototype._onSessionDeleted.call(app, { id: 'session-a' });
 
     expect(app.closeSplitPane).not.toHaveBeenCalled();
     expect(app.selectSession).not.toHaveBeenCalled();
@@ -189,7 +189,7 @@ describe('terminal-split.js _onSessionDeleted wrapper (I6)', () => {
     const app = makeSplitActiveApp();
     app._closingSessions.add('session-a');
 
-    CodemanApp.prototype._onSessionDeleted.call(app, { id: 'session-a' });
+    ReverieApp.prototype._onSessionDeleted.call(app, { id: 'session-a' });
 
     expect(app.closeSplitPane).toHaveBeenCalledTimes(1);
     expect(app.selectSession).not.toHaveBeenCalled();
@@ -244,7 +244,7 @@ describe('closeSplitPane() tears down a divider drag that is still in progress',
    * than the already-collapsed early return.
    */
   function makeDraggingApp() {
-    const app = Object.create((CodemanApp as { prototype: object }).prototype) as DragTestApp;
+    const app = Object.create((ReverieApp as { prototype: object }).prototype) as DragTestApp;
     app.activeSessionId = 'session-a';
     app._splitSessionId = 'session-b';
     app._splitPane = { destroy: vi.fn() };
@@ -256,7 +256,7 @@ describe('closeSplitPane() tears down a divider drag that is still in progress',
     const container = { querySelector: () => wrap, parentElement: { insertBefore: vi.fn() }, remove: vi.fn() };
     fakeDocument.querySelector = (selector: string) => (selector === '.terminal-split-container' ? container : null);
 
-    CodemanApp.prototype._installSplitDividerDrag.call(app, divider, wrap, paneB);
+    ReverieApp.prototype._installSplitDividerDrag.call(app, divider, wrap, paneB);
     const [onDown] = divider.listeners.get('pointerdown')!;
     onDown({ button: 0, pointerId: 7, preventDefault: vi.fn() });
     return { app, divider, container };
@@ -276,7 +276,7 @@ describe('closeSplitPane() tears down a divider drag that is still in progress',
   it('clears body.split-pane-resizing, releases capture and drops the drag listeners', () => {
     const { app, divider, container } = makeDraggingApp();
 
-    CodemanApp.prototype.closeSplitPane.call(app);
+    ReverieApp.prototype.closeSplitPane.call(app);
 
     // The lock is `cursor: col-resize; user-select: none` on EVERY element
     // (styles.css); left set, it outlives the split until a reload.
@@ -299,7 +299,7 @@ describe('closeSplitPane() tears down a divider drag that is still in progress',
     onMove({ clientX: 400 });
     const queuedRafId = rafCalls.length;
 
-    CodemanApp.prototype.closeSplitPane.call(app);
+    ReverieApp.prototype.closeSplitPane.call(app);
 
     expect(cancelledRafs).toContain(queuedRafId);
   });
@@ -307,7 +307,7 @@ describe('closeSplitPane() tears down a divider drag that is still in progress',
   it('closeSplitPane({ skipPrimaryResize: true }) collapses without resizing the primary session', () => {
     const { app, container } = makeDraggingApp();
 
-    CodemanApp.prototype.closeSplitPane.call(app, { skipPrimaryResize: true });
+    ReverieApp.prototype.closeSplitPane.call(app, { skipPrimaryResize: true });
 
     expect(app.sendResize).not.toHaveBeenCalled();
     expect(app._splitPane).toBeNull();
@@ -333,7 +333,7 @@ describe('openSplitPane() re-applies the picker exclusions at open time', () => 
   const DOM_REACHED = 'sentinel: openSplitPane reached the DOM stage';
 
   function makeApp(): OpenTestApp {
-    const app = Object.create((CodemanApp as { prototype: object }).prototype) as OpenTestApp;
+    const app = Object.create((ReverieApp as { prototype: object }).prototype) as OpenTestApp;
     app.activeSessionId = 'session-a';
     app.activeWebviewId = null;
     app._splitPane = null;
@@ -362,27 +362,27 @@ describe('openSplitPane() re-applies the picker exclusions at open time', () => 
 
   it('control: a listed, attached session gets past every guard to the DOM stage', () => {
     const app = makeApp();
-    expect(() => CodemanApp.prototype.openSplitPane.call(app, 'session-ok')).toThrow(DOM_REACHED);
+    expect(() => ReverieApp.prototype.openSplitPane.call(app, 'session-ok')).toThrow(DOM_REACHED);
     expect(fakeDocument.querySelector).toHaveBeenCalledWith('.terminal-wrap');
   });
 
   it('refuses a session whose CLI has exited (pid === null) without touching the DOM', () => {
     const app = makeApp();
-    expect(CodemanApp.prototype.openSplitPane.call(app, 'session-exited')).toBeUndefined();
+    expect(ReverieApp.prototype.openSplitPane.call(app, 'session-exited')).toBeUndefined();
     expect(fakeDocument.querySelector).not.toHaveBeenCalled();
     expect(app._splitPane).toBeNull();
   });
 
   it('refuses a detached (popped-out) session', () => {
     const app = makeApp();
-    expect(CodemanApp.prototype.openSplitPane.call(app, 'session-detached')).toBeUndefined();
+    expect(ReverieApp.prototype.openSplitPane.call(app, 'session-detached')).toBeUndefined();
     expect(fakeDocument.querySelector).not.toHaveBeenCalled();
     expect(app._splitPane).toBeNull();
   });
 
   it('refuses an id with no session record at all', () => {
     const app = makeApp();
-    expect(CodemanApp.prototype.openSplitPane.call(app, 'session-ghost')).toBeUndefined();
+    expect(ReverieApp.prototype.openSplitPane.call(app, 'session-ghost')).toBeUndefined();
     expect(fakeDocument.querySelector).not.toHaveBeenCalled();
     expect(app._splitPane).toBeNull();
   });
@@ -392,7 +392,7 @@ describe('openSplitPane() re-applies the picker exclusions at open time', () => 
     app._splitPane = { destroy: vi.fn() };
     app._splitSessionId = 'session-ok';
 
-    CodemanApp.prototype.openSplitPane.call(app, 'session-exited');
+    ReverieApp.prototype.openSplitPane.call(app, 'session-exited');
 
     expect(app.closeSplitPane).not.toHaveBeenCalled();
     expect(app._splitPane).not.toBeNull();

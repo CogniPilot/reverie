@@ -25,7 +25,7 @@ import { tmpdir, homedir } from 'node:os';
 import { spawn } from 'node:child_process';
 import {
   applyStatusLineConfig,
-  ensureCodemanHooks,
+  ensureReverieHooks,
   ensureStatusLineExporterScript,
   findEffectiveUserStatusLineCommand,
   generateBackgroundWakeScript,
@@ -33,7 +33,7 @@ import {
   generateStatusLineCommand,
   generateSubagentStopGuardScript,
   readPlanUsageTelemetryEnabled,
-  refreshStaleCodemanHooks,
+  refreshStaleReverieHooks,
   resolveStatusLineCliCommand,
   settingsWriteBlocker,
   stripCaseEnvKeys,
@@ -66,7 +66,7 @@ describe('generateHooksConfig', () => {
     expect(config.hooks.UserPromptSubmit).toHaveLength(1);
     const command = (config.hooks.UserPromptSubmit as Array<{ hooks: Array<{ command: string }> }>)[0].hooks[0].command;
     expect(command).toContain('"event":"prompt_submitted"');
-    expect(command).toContain('$CODEMAN_SESSION_ID');
+    expect(command).toContain('$REVERIE_SESSION_ID');
     // ⚠️ Claude Code injects a UserPromptSubmit hook's stdout into the model's
     // context ("Exit code 0 - stdout shown to Claude"), so without this the API
     // envelope is pasted into the user's own prompt on every turn. Every other
@@ -151,8 +151,8 @@ describe('generateHooksConfig', () => {
     const config = generateHooksConfig();
     const notifHooks = config.hooks.Notification as Array<{ hooks: Array<{ command: string }> }>;
     const cmd = notifHooks[0].hooks[0].command;
-    expect(cmd).toContain('$CODEMAN_API_URL');
-    expect(cmd).toContain('$CODEMAN_SESSION_ID');
+    expect(cmd).toContain('$REVERIE_API_URL');
+    expect(cmd).toContain('$REVERIE_SESSION_ID');
     expect(cmd).not.toContain('localhost');
   });
 
@@ -162,7 +162,7 @@ describe('generateHooksConfig', () => {
     expect(notifHooks[0].hooks[0].command).toContain('|| true');
   });
 
-  // On --https/tailscale installs CODEMAN_API_URL is HTTPS with a self-signed cert.
+  // On --https/tailscale installs REVERIE_API_URL is HTTPS with a self-signed cert.
   // A `-k`-less hook curl exits 60 there, the `|| true` swallows it, and every hook
   // event (stop, permission_prompt, elicitation_dialog, idle_prompt, teammate_idle,
   // task_completed) dies silently — killing respawn's idle signals and the wait
@@ -207,7 +207,7 @@ describe('generateHooksConfig', () => {
 });
 
 describe('writeHooksConfig', () => {
-  const testDir = join(tmpdir(), 'codeman-hooks-test-' + Date.now());
+  const testDir = join(tmpdir(), 'reverie-hooks-test-' + Date.now());
 
   beforeEach(() => {
     if (!existsSync(testDir)) {
@@ -293,8 +293,8 @@ describe('writeHooksConfig', () => {
     symlinkSync(outsideFile, join(caseDir, '.claude', 'settings.local.json'));
 
     await writeHooksConfig(caseDir);
-    await ensureCodemanHooks(caseDir);
-    await refreshStaleCodemanHooks(caseDir);
+    await ensureReverieHooks(caseDir);
+    await refreshStaleReverieHooks(caseDir);
     await updateCaseModel(caseDir, 'opus');
     await updateCaseEnvVars(caseDir, { CLAUDE_CODE_NEW: 'value' });
     await stripCaseEnvKeys(caseDir, ['CLAUDE_CODE_KEEP']);
@@ -321,7 +321,7 @@ describe('writeHooksConfig', () => {
     expect(parsed.hooks).toBeDefined();
   });
 
-  it('should upgrade Codeman-owned hooks that predate background rewake', async () => {
+  it('should upgrade Reverie-owned hooks that predate background rewake', async () => {
     const claudeDir = join(testDir, '.claude');
     const settingsPath = join(claudeDir, 'settings.local.json');
     mkdirSync(claudeDir, { recursive: true });
@@ -329,12 +329,12 @@ describe('writeHooksConfig', () => {
     delete oldHooks.PostToolUse;
     writeFileSync(settingsPath, JSON.stringify({ hooks: oldHooks }, null, 2));
 
-    await refreshStaleCodemanHooks(testDir);
+    await refreshStaleReverieHooks(testDir);
 
     const parsed = JSON.parse(readFileSync(settingsPath, 'utf-8'));
     expect(parsed.hooks.PostToolUse).toHaveLength(1);
-    expect(JSON.stringify(parsed.hooks.PostToolUse)).toContain('CODEMAN_BACKGROUND_REWAKE_V3');
-    expect(JSON.stringify(parsed.hooks.SubagentStop)).toContain('CODEMAN_SUBAGENT_STOP_GUARD_V1');
+    expect(JSON.stringify(parsed.hooks.PostToolUse)).toContain('REVERIE_BACKGROUND_REWAKE_V3');
+    expect(JSON.stringify(parsed.hooks.SubagentStop)).toContain('REVERIE_SUBAGENT_STOP_GUARD_V1');
   });
 
   it('should replace an older rewake script version without duplicating it', async () => {
@@ -351,7 +351,7 @@ describe('writeHooksConfig', () => {
           {
             type: 'command',
             command: 'node',
-            args: ['-e', 'const CODEMAN_BACKGROUND_REWAKE_V1 = true; process.exit(0);'],
+            args: ['-e', 'const REVERIE_BACKGROUND_REWAKE_V1 = true; process.exit(0);'],
             asyncRewake: true,
             timeout: 21600,
           },
@@ -360,14 +360,14 @@ describe('writeHooksConfig', () => {
     ];
     writeFileSync(settingsPath, JSON.stringify({ hooks }, null, 2));
 
-    await refreshStaleCodemanHooks(testDir);
+    await refreshStaleReverieHooks(testDir);
 
     const parsed = JSON.parse(readFileSync(settingsPath, 'utf-8'));
     const serialized = JSON.stringify(parsed.hooks.PostToolUse);
     expect(parsed.hooks.PostToolUse).toHaveLength(1);
     expect(parsed.hooks.PostToolUse[0].hooks).toHaveLength(1);
-    expect(serialized).toContain('CODEMAN_BACKGROUND_REWAKE_V3');
-    expect(serialized).not.toContain('CODEMAN_BACKGROUND_REWAKE_V1');
+    expect(serialized).toContain('REVERIE_BACKGROUND_REWAKE_V3');
+    expect(serialized).not.toContain('REVERIE_BACKGROUND_REWAKE_V1');
   });
 
   it('heals a hooks block written before UserPromptSubmit existed', async () => {
@@ -380,7 +380,7 @@ describe('writeHooksConfig', () => {
     delete hooks.UserPromptSubmit;
     writeFileSync(settingsPath, JSON.stringify({ hooks }, null, 2));
 
-    await refreshStaleCodemanHooks(testDir);
+    await refreshStaleReverieHooks(testDir);
 
     const parsed = JSON.parse(readFileSync(settingsPath, 'utf-8'));
     expect(JSON.stringify(parsed.hooks.UserPromptSubmit)).toContain('prompt_submitted');
@@ -398,7 +398,7 @@ describe('writeHooksConfig', () => {
     writeFileSync(settingsPath, JSON.stringify({ hooks: generateHooksConfig().hooks }, null, 2));
     const before = readFileSync(settingsPath, 'utf-8');
 
-    await refreshStaleCodemanHooks(testDir);
+    await refreshStaleReverieHooks(testDir);
 
     expect(readFileSync(settingsPath, 'utf-8')).toBe(before);
   });
@@ -408,18 +408,18 @@ describe('writeHooksConfig', () => {
     const settingsPath = join(claudeDir, 'settings.local.json');
     mkdirSync(claudeDir, { recursive: true });
     const oldSettings = JSON.stringify({ hooks: generateHooksConfig().hooks }, null, 2).replaceAll(
-      'CODEMAN_BACKGROUND_REWAKE_V3',
-      'CODEMAN_BACKGROUND_REWAKE_V2'
+      'REVERIE_BACKGROUND_REWAKE_V3',
+      'REVERIE_BACKGROUND_REWAKE_V2'
     );
     writeFileSync(settingsPath, oldSettings);
 
-    await refreshStaleCodemanHooks(testDir);
+    await refreshStaleReverieHooks(testDir);
 
     const parsed = JSON.parse(readFileSync(settingsPath, 'utf-8'));
     const postToolUse = JSON.stringify(parsed.hooks.PostToolUse);
     expect(parsed.hooks.PostToolUse).toHaveLength(1);
-    expect(postToolUse).toContain('CODEMAN_BACKGROUND_REWAKE_V3');
-    expect(postToolUse).not.toContain('CODEMAN_BACKGROUND_REWAKE_V2');
+    expect(postToolUse).toContain('REVERIE_BACKGROUND_REWAKE_V3');
+    expect(postToolUse).not.toContain('REVERIE_BACKGROUND_REWAKE_V2');
   });
 
   it('should not add rewake hooks to a user-owned hook configuration', async () => {
@@ -436,13 +436,13 @@ describe('writeHooksConfig', () => {
     };
     writeFileSync(settingsPath, JSON.stringify({ hooks: userHooks }, null, 2));
 
-    await refreshStaleCodemanHooks(testDir);
+    await refreshStaleReverieHooks(testDir);
 
     const parsed = JSON.parse(readFileSync(settingsPath, 'utf-8'));
     expect(parsed.hooks).toEqual(userHooks);
   });
 
-  it('should preserve user hook events while installing Codeman hooks', async () => {
+  it('should preserve user hook events while installing Reverie hooks', async () => {
     const claudeDir = join(testDir, '.claude');
     mkdirSync(claudeDir, { recursive: true });
     writeFileSync(join(claudeDir, 'settings.local.json'), JSON.stringify({ hooks: { oldHook: [] } }, null, 2));
@@ -454,7 +454,7 @@ describe('writeHooksConfig', () => {
     expect(parsed.hooks.Notification).toBeDefined();
   });
 
-  it('should safely add Codeman hooks to an existing managed-case settings file', async () => {
+  it('should safely add Reverie hooks to an existing managed-case settings file', async () => {
     const claudeDir = join(testDir, '.claude');
     const settingsPath = join(claudeDir, 'settings.local.json');
     mkdirSync(claudeDir, { recursive: true });
@@ -463,13 +463,13 @@ describe('writeHooksConfig', () => {
     };
     writeFileSync(settingsPath, JSON.stringify({ hooks: userHooks, permissions: { allow: ['Read'] } }, null, 2));
 
-    await ensureCodemanHooks(testDir);
+    await ensureReverieHooks(testDir);
 
     const parsed = JSON.parse(readFileSync(settingsPath, 'utf-8'));
     expect(parsed.permissions).toEqual({ allow: ['Read'] });
     expect(parsed.hooks.PostToolUse).toEqual(expect.arrayContaining(userHooks.PostToolUse));
-    expect(JSON.stringify(parsed.hooks)).toContain('CODEMAN_BACKGROUND_REWAKE_V3');
-    expect(JSON.stringify(parsed.hooks)).toContain('CODEMAN_SUBAGENT_STOP_GUARD_V1');
+    expect(JSON.stringify(parsed.hooks)).toContain('REVERIE_BACKGROUND_REWAKE_V3');
+    expect(JSON.stringify(parsed.hooks)).toContain('REVERIE_SUBAGENT_STOP_GUARD_V1');
   });
 
   it('should not replace a malformed managed-case settings file', async () => {
@@ -478,7 +478,7 @@ describe('writeHooksConfig', () => {
     mkdirSync(claudeDir, { recursive: true });
     writeFileSync(settingsPath, '{ malformed');
 
-    await ensureCodemanHooks(testDir);
+    await ensureReverieHooks(testDir);
 
     expect(readFileSync(settingsPath, 'utf-8')).toBe('{ malformed');
   });
@@ -502,7 +502,7 @@ describe('writeHooksConfig', () => {
 });
 
 describe('background task rewake helper', () => {
-  const testDir = join(tmpdir(), 'codeman-background-rewake-test-' + Date.now());
+  const testDir = join(tmpdir(), 'reverie-background-rewake-test-' + Date.now());
 
   beforeEach(() => {
     mkdirSync(testDir, { recursive: true });
@@ -623,10 +623,10 @@ describe('background task rewake helper', () => {
       outputPath,
       [
         'launcher output',
-        '=== CODEMAN_RESULT_BEGIN ===',
+        '=== REVERIE_RESULT_BEGIN ===',
         'Summary line',
         'Detail after the old 30-line preview boundary',
-        '=== CODEMAN_RESULT_END ===',
+        '=== REVERIE_RESULT_END ===',
       ].join('\n')
     );
 
@@ -651,14 +651,14 @@ describe('background task rewake helper', () => {
 
     const result = await resultPromise;
     expect(result.code).toBe(2);
-    expect(result.stderr).toContain('<codeman-background-result>');
+    expect(result.stderr).toContain('<reverie-background-result>');
     expect(result.stderr).toContain('Summary line');
     expect(result.stderr).toContain('Detail after the old 30-line preview boundary');
   });
 });
 
 describe('subagent stop guard helper', () => {
-  const testDir = join(tmpdir(), 'codeman-subagent-stop-guard-test-' + Date.now());
+  const testDir = join(tmpdir(), 'reverie-subagent-stop-guard-test-' + Date.now());
 
   beforeEach(() => {
     mkdirSync(testDir, { recursive: true });
@@ -1243,8 +1243,8 @@ describe('Hook Config Generation - Extended', () => {
     const config = generateHooksConfig();
     const notifHooks = config.hooks.Notification as Array<{ hooks: Array<{ command: string }> }>;
     const cmd = notifHooks[0].hooks[0].command;
-    expect(cmd).toContain('$CODEMAN_API_URL');
-    expect(cmd).toContain('$CODEMAN_SESSION_ID');
+    expect(cmd).toContain('$REVERIE_API_URL');
+    expect(cmd).toContain('$REVERIE_SESSION_ID');
   });
 
   it('should generate POST curl commands', () => {
@@ -1374,7 +1374,7 @@ describe('readPlanUsageTelemetryEnabled', () => {
 });
 
 describe('resolveStatusLineCliCommand', () => {
-  const testDir = join(tmpdir(), 'codeman-statusline-cli-test-' + Date.now());
+  const testDir = join(tmpdir(), 'reverie-statusline-cli-test-' + Date.now());
 
   beforeEach(() => {
     mkdirSync(testDir, { recursive: true });
@@ -1400,13 +1400,13 @@ describe('resolveStatusLineCliCommand', () => {
     expect(existsSync(cmd!)).toBe(true);
     const stat = statSync(cmd!);
     expect(stat.mode & 0o111).not.toBe(0); // executable
-    expect(readFileSync(cmd!, 'utf-8')).toContain('CODEMAN_STATUSLINE_EXPORTER_V');
+    expect(readFileSync(cmd!, 'utf-8')).toContain('REVERIE_STATUSLINE_EXPORTER_V');
   });
 
   it('refreshes a stale exporter script atomically: executable on arrival, no temp file left behind', async () => {
     const scriptPath = (await resolveStatusLineCliCommand(testDir, true))!;
     // Simulate a script an older build wrote (different marker suffix).
-    writeFileSync(scriptPath, '#!/bin/sh\n# CODEMAN_STATUSLINE_EXPORTER_V0\necho stale\n');
+    writeFileSync(scriptPath, '#!/bin/sh\n# REVERIE_STATUSLINE_EXPORTER_V0\necho stale\n');
     chmodSync(scriptPath, 0o644);
 
     const again = await resolveStatusLineCliCommand(testDir, true);
@@ -1419,7 +1419,7 @@ describe('resolveStatusLineCliCommand', () => {
 
   it('survives concurrent refreshes in the same millisecond (sessions created at once)', async () => {
     const scriptPath = (await resolveStatusLineCliCommand(testDir, true))!;
-    writeFileSync(scriptPath, '#!/bin/sh\n# CODEMAN_STATUSLINE_EXPORTER_V0\necho stale\n');
+    writeFileSync(scriptPath, '#!/bin/sh\n# REVERIE_STATUSLINE_EXPORTER_V0\necho stale\n');
     // A frozen clock makes every writer agree on the timestamp, which is what two
     // session creates in one millisecond do. A temp name built from pid + Date.now()
     // is then shared: the first rename consumes it, every later rename fails ENOENT,
@@ -1452,7 +1452,7 @@ describe('resolveStatusLineCliCommand', () => {
     expect(parsed.statusLine.command).toBe('echo my-own-prompt');
   });
 
-  it('self-heals: strips a legacy disk-written exporter from an older Codeman build', async () => {
+  it('self-heals: strips a legacy disk-written exporter from an older Reverie build', async () => {
     // Simulate a workspace touched by the pre-fix applyStatusLineConfig(dir, true).
     await applyStatusLineConfig(testDir, true);
     const settingsPath = join(testDir, '.claude', 'settings.local.json');
@@ -1478,8 +1478,8 @@ describe('resolveStatusLineCliCommand', () => {
 });
 
 describe('statusline exporter script (real shell execution)', () => {
-  const testDir = join(tmpdir(), 'codeman-statusline-script-exec-test-' + Date.now());
-  const binDir = join(tmpdir(), 'codeman-statusline-script-exec-bin-' + Date.now());
+  const testDir = join(tmpdir(), 'reverie-statusline-script-exec-test-' + Date.now());
+  const binDir = join(tmpdir(), 'reverie-statusline-script-exec-bin-' + Date.now());
 
   beforeEach(() => {
     mkdirSync(testDir, { recursive: true });
@@ -1524,9 +1524,9 @@ describe('statusline exporter script (real shell execution)', () => {
   }
 
   const baseEnv = {
-    CODEMAN_SESSION_ID: 'x',
-    CODEMAN_API_URL: 'http://127.0.0.1:1',
-    CODEMAN_HOOK_SECRET_FILE: '/dev/null',
+    REVERIE_SESSION_ID: 'x',
+    REVERIE_API_URL: 'http://127.0.0.1:1',
+    REVERIE_HOOK_SECRET_FILE: '/dev/null',
   };
 
   it('no-user-statusline branch: the POST runs in the foreground and its OWN stdout becomes the footer', async () => {
@@ -1545,24 +1545,24 @@ describe('statusline exporter script (real shell execution)', () => {
   it('asks curl to fail on HTTP errors (-f) so an error body never becomes the footer', async () => {
     const scriptPath = await resolveStatusLineCliCommand(testDir, true);
     expect(readFileSync(scriptPath!, 'utf-8')).toContain('curl -sfk');
-    expect(readFileSync(scriptPath!, 'utf-8')).not.toContain('echo codeman');
+    expect(readFileSync(scriptPath!, 'utf-8')).not.toContain('echo reverie');
   });
 
   it('wrap branch: never blocks a reader-to-EOF on a slow/hung curl (background subshell closes stdin too)', async () => {
     writeFakeCurl(`sleep 3`);
-    const result = await runExporter({ ...baseEnv, CODEMAN_USER_STATUSLINE_CMD: 'echo my-own-statusline' });
+    const result = await runExporter({ ...baseEnv, REVERIE_USER_STATUSLINE_CMD: 'echo my-own-statusline' });
     expect(result.stdout.trim()).toBe('my-own-statusline');
     expect(result.durationMs).toBeLessThan(1000);
   }, 10000);
 
-  it('curl is bounded with --max-time so a HUNG (not just refused) Codeman cannot wedge the render', async () => {
+  it('curl is bounded with --max-time so a HUNG (not just refused) Reverie cannot wedge the render', async () => {
     const scriptPath = await resolveStatusLineCliCommand(testDir, true);
     expect(readFileSync(scriptPath!, 'utf-8')).toContain('--max-time');
   });
 });
 
 describe('findEffectiveUserStatusLineCommand', () => {
-  const testDir = join(tmpdir(), 'codeman-statusline-precedence-test-' + Date.now());
+  const testDir = join(tmpdir(), 'reverie-statusline-precedence-test-' + Date.now());
   const userSettingsPath = join(homedir(), '.claude', 'settings.json');
 
   beforeEach(() => {
@@ -1621,7 +1621,7 @@ describe('findEffectiveUserStatusLineCommand', () => {
     expect(await findEffectiveUserStatusLineCommand(testDir)).toBe('echo project-local');
   });
 
-  it('skips a legacy Codeman-marked entry in project settings.local.json and falls through', async () => {
+  it('skips a legacy Reverie-marked entry in project settings.local.json and falls through', async () => {
     await applyStatusLineConfig(testDir, true); // simulates a pre-fix disk-written exporter
     const projectClaudeDir = join(testDir, '.claude');
     writeFileSync(

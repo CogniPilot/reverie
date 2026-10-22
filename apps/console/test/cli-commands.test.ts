@@ -171,7 +171,7 @@ describe('registered arguments', () => {
   it.each([
     ['attach', ['path']],
     ['start', []],
-    // Optional: bare `codeman tui` opens the dashboard.
+    // Optional: bare `reverie tui` opens the dashboard.
     ['tui', ['n']],
   ])('declares the operands of `%s`', (name, expected) => {
     const args = find(program, name)!.registeredArguments.map((arg) => arg.name());
@@ -192,7 +192,7 @@ describe('help text', () => {
   it('documents the unauthenticated network override in the real web command help', () => {
     const help = find(program, 'web')!.helpInformation();
     expect(help).toContain('--allow-unauthenticated-network');
-    expect(help).toMatch(/without\s+CODEMAN_PASSWORD/);
+    expect(help).toMatch(/without\s+REVERIE_PASSWORD/);
   });
 
   it('describes `attach` as the attachment card command, not a hook context', () => {

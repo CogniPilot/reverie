@@ -15,8 +15,8 @@ import {
 import { DEFAULT_AGENT_IMAGE, toSessionDocker, type DockerCreateContext } from '../src/docker-hosts.js';
 import type { DockerCase, DockerHost, SessionMode } from '../src/types.js';
 
-// The exact adopt-guard the in-container Codeman would use to discover its own sessions.
-const SAFE_MUX_NAME_PATTERN = /^codeman-[a-f0-9-]+$/;
+// The exact adopt-guard the in-container Reverie would use to discover its own sessions.
+const SAFE_MUX_NAME_PATTERN = /^reverie-[a-f0-9-]+$/;
 
 const HOST: DockerHost = { id: 'local', label: 'Local', image: DEFAULT_AGENT_IMAGE };
 const CASE: DockerCase = {
@@ -35,7 +35,7 @@ function launchOpts(overrides: Partial<DockerLaunchOptions> = {}): DockerLaunchO
     userArgs: ['--user', '1000:0'],
     credentialMounts: [{ src: '/home/arkon/.claude', dst: '/home/agent/.claude' }],
     extraMounts: [],
-    envCreate: { HOME: '/home/agent', CODEMAN_API_URL: 'https://host.docker.internal:3000' },
+    envCreate: { HOME: '/home/agent', REVERIE_API_URL: 'https://host.docker.internal:3000' },
     addHostGateway: true,
     gatewayAlias: 'host.docker.internal',
   };
@@ -44,7 +44,7 @@ function launchOpts(overrides: Partial<DockerLaunchOptions> = {}): DockerLaunchO
     docker,
     sessionId: '1a2b3c4d5e6f',
     createContext,
-    execEnv: { TERM: 'xterm-256color', CODEMAN_SESSION_ID: '1a2b3c4d', CODEMAN_MUX: '1' },
+    execEnv: { TERM: 'xterm-256color', REVERIE_SESSION_ID: '1a2b3c4d', REVERIE_MUX: '1' },
     execEnvNames: [],
     ...overrides,
   };
@@ -52,10 +52,10 @@ function launchOpts(overrides: Partial<DockerLaunchOptions> = {}): DockerLaunchO
 
 describe('dockerTmuxSessionName', () => {
   it('is stable from the first 8 chars of the sessionId', () => {
-    expect(dockerTmuxSessionName('1a2b3c4d5e6f')).toBe('codeman-dkr-1a2b3c4d');
+    expect(dockerTmuxSessionName('1a2b3c4d5e6f')).toBe('reverie-dkr-1a2b3c4d');
   });
   it('deliberately FAILS the in-container adopt guard', () => {
-    // 'k'/'r' are not hex, so an in-container Codeman never adopts our session
+    // 'k'/'r' are not hex, so an in-container Reverie never adopts our session
     expect(SAFE_MUX_NAME_PATTERN.test(dockerTmuxSessionName('1a2b3c4d5e6f'))).toBe(false);
   });
 });
@@ -75,9 +75,9 @@ describe('buildDockerLaunchCommand', () => {
 
   it('ensures the container idempotently (inspect-or-create) with --pull=never', () => {
     const cmd = buildDockerLaunchCommand(launchOpts());
-    expect(cmd).toContain("docker inspect 'codeman-case-myproj' >/dev/null 2>&1 || docker create");
+    expect(cmd).toContain("docker inspect 'reverie-case-myproj' >/dev/null 2>&1 || docker create");
     expect(cmd).toContain('--pull=never');
-    expect(cmd).toContain("docker start 'codeman-case-myproj'");
+    expect(cmd).toContain("docker start 'reverie-case-myproj'");
   });
 
   it('avoids eager create expansion, tolerates a concurrent creator, and preserves real failures in compatibility mode', () => {
@@ -87,12 +87,12 @@ describe('buildDockerLaunchCommand', () => {
     // No command substitution or shell variables: either could expand eagerly
     // before the inspect side of || short-circuits in a nested launch shell.
     expect(cmd).not.toContain('$(');
-    expect(cmd).not.toContain('codeman_create_output');
+    expect(cmd).not.toContain('reverie_create_output');
     expect(cmd).toContain('if docker create');
-    expect(cmd).toContain("'/tmp/codeman-create-1a2b3c4d5e6f.log'");
+    expect(cmd).toContain("'/tmp/reverie-create-1a2b3c4d5e6f.log'");
     // If another session created the case between inspect and create, re-inspect
     // succeeds and the losing creator continues without printing the conflict.
-    expect(cmd).toContain("elif docker inspect 'codeman-case-myproj' >/dev/null 2>&1; then rm -f");
+    expect(cmd).toContain("elif docker inspect 'reverie-case-myproj' >/dev/null 2>&1; then rm -f");
     expect(cmd).toContain('Your kernel does not support swap limit capabilities');
     expect(cmd).toContain('else sed');
     expect(cmd).toContain('>&2; rm -f');
@@ -103,8 +103,8 @@ describe('buildDockerLaunchCommand', () => {
   it('execs a TTY into the durable in-container tmux', () => {
     const cmd = buildDockerLaunchCommand(launchOpts());
     expect(cmd).toContain("exec docker exec -it --workdir '/home/arkon/cases/myproj'");
-    expect(cmd).toContain('tmux -L codeman-docker setenv -g CODEMAN_SESSION_ID');
-    expect(cmd).toContain('new-session -A -s codeman-dkr-1a2b3c4d');
+    expect(cmd).toContain('tmux -L reverie-docker setenv -g REVERIE_SESSION_ID');
+    expect(cmd).toContain('new-session -A -s reverie-dkr-1a2b3c4d');
     expect(cmd).toContain("sh -lc '");
   });
 
@@ -149,10 +149,10 @@ describe('buildDockerLaunchCommand', () => {
     expect(codex).not.toMatch(/--env OPENAI_API_KEY=/); // never a value
   });
 
-  it('primes CODEMAN_SESSION_ID / CODEMAN_MUX at exec time', () => {
+  it('primes REVERIE_SESSION_ID / REVERIE_MUX at exec time', () => {
     const cmd = buildDockerLaunchCommand(launchOpts());
-    expect(cmd).toContain("--env 'CODEMAN_SESSION_ID=1a2b3c4d'");
-    expect(cmd).toContain("--env 'CODEMAN_MUX=1'");
+    expect(cmd).toContain("--env 'REVERIE_SESSION_ID=1a2b3c4d'");
+    expect(cmd).toContain("--env 'REVERIE_MUX=1'");
   });
 
   it('keeps a workspace path with spaces a single token through every layer', () => {
@@ -177,25 +177,25 @@ describe('buildDockerLaunchCommand', () => {
     const cmd = buildDockerLaunchCommand(
       launchOpts({
         seedCopies: [
-          { from: '/home/agent/.codeman/claude.seed.json', to: '/home/agent/.claude.json' },
-          { from: '/home/agent/.codeman/claude-creds.seed.json', to: '/home/agent/.claude/.credentials.json' },
+          { from: '/home/agent/.reverie/claude.seed.json', to: '/home/agent/.claude.json' },
+          { from: '/home/agent/.reverie/claude-creds.seed.json', to: '/home/agent/.claude/.credentials.json' },
           // whole-dir credential seed → cp -a
-          { from: '/home/agent/.codeman/cred-seeds/.gemini', to: '/home/agent/.gemini', recursive: true },
+          { from: '/home/agent/.reverie/cred-seeds/.gemini', to: '/home/agent/.gemini', recursive: true },
         ],
       })
     );
     // Each copy mkdir -p's its parent then is guarded so a reconnect never clobbers config.
     expect(cmd).toContain(
-      'mkdir -p /home/agent 2>/dev/null; [ -e /home/agent/.claude.json ] || cp /home/agent/.codeman/claude.seed.json /home/agent/.claude.json'
+      'mkdir -p /home/agent 2>/dev/null; [ -e /home/agent/.claude.json ] || cp /home/agent/.reverie/claude.seed.json /home/agent/.claude.json'
     );
     expect(cmd).toContain(
-      'mkdir -p /home/agent/.claude 2>/dev/null; [ -e /home/agent/.claude/.credentials.json ] || cp /home/agent/.codeman/claude-creds.seed.json /home/agent/.claude/.credentials.json'
+      'mkdir -p /home/agent/.claude 2>/dev/null; [ -e /home/agent/.claude/.credentials.json ] || cp /home/agent/.reverie/claude-creds.seed.json /home/agent/.claude/.credentials.json'
     );
     // recursive whole-dir seed uses cp -a
     expect(cmd).toContain(
-      '[ -e /home/agent/.gemini ] || cp -a /home/agent/.codeman/cred-seeds/.gemini /home/agent/.gemini'
+      '[ -e /home/agent/.gemini ] || cp -a /home/agent/.reverie/cred-seeds/.gemini /home/agent/.gemini'
     );
-    expect(cmd.indexOf('.claude.json')).toBeLessThan(cmd.indexOf('tmux -L codeman-docker'));
+    expect(cmd.indexOf('.claude.json')).toBeLessThan(cmd.indexOf('tmux -L reverie-docker'));
   });
 
   it('omits the seed-copy step when there are no seedCopies', () => {
@@ -208,7 +208,7 @@ describe('buildDockerKillCommand (multi-session safe)', () => {
   it('kills ONLY this session in-container tmux, never the shared container', () => {
     const docker = toSessionDocker(HOST, CASE);
     const cmd = buildDockerKillCommand({ docker, sessionId: '1a2b3c4d5e6f' });
-    expect(cmd).toBe("docker exec 'codeman-case-myproj' tmux -L codeman-docker kill-session -t 'codeman-dkr-1a2b3c4d'");
+    expect(cmd).toBe("docker exec 'reverie-case-myproj' tmux -L reverie-docker kill-session -t 'reverie-dkr-1a2b3c4d'");
     expect(cmd).not.toContain('docker stop');
     expect(cmd).not.toContain('docker rm');
   });
@@ -217,12 +217,12 @@ describe('buildDockerKillCommand (multi-session safe)', () => {
 describe('explicit teardown commands', () => {
   it('stop and remove target the whole container', () => {
     const docker = toSessionDocker(HOST, CASE);
-    expect(buildDockerStopCommand(docker)).toBe("docker stop -t 10 'codeman-case-myproj'");
-    expect(buildDockerRemoveCommand(docker)).toBe("docker rm -f 'codeman-case-myproj'");
+    expect(buildDockerStopCommand(docker)).toBe("docker stop -t 10 'reverie-case-myproj'");
+    expect(buildDockerRemoveCommand(docker)).toBe("docker rm -f 'reverie-case-myproj'");
   });
 
   it('uses the podman engine prefix when configured', () => {
     const docker = toSessionDocker({ ...HOST, engine: 'podman' }, CASE);
-    expect(buildDockerStopCommand(docker)).toBe("podman stop -t 10 'codeman-case-myproj'");
+    expect(buildDockerStopCommand(docker)).toBe("podman stop -t 10 'reverie-case-myproj'");
   });
 });

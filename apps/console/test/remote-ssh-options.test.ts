@@ -138,7 +138,7 @@ describe('COD-107 buildRemoteLaunchCommand — threads connection args', () => {
     expect(command).toContain("-o 'StrictHostKeyChecking=accept-new'");
     expect(command).toContain('-t');
     expect(command).toContain('aakht@192.168.55.170');
-    expect(command).toContain('tmux -L codeman-remote new-session -A');
+    expect(command).toContain('tmux -L reverie-remote new-session -A');
 
     // Connection options come BEFORE -t / the target / the tmux command.
     const idxProxy = command.indexOf('ProxyCommand=');
@@ -150,14 +150,14 @@ describe('COD-107 buildRemoteLaunchCommand — threads connection args', () => {
     const command = buildRemoteLaunchCommand({ mode: 'shell', remote: baseRemote, sessionId: SESSION_ID });
     // Reconstruct the command using the SAME nested POSIX single-quote escaping the
     // production code uses, to prove byte-identity. Session runs on the DEDICATED
-    // `-L codeman-remote` socket under a `codeman-ssh-` name that a remote Codeman's
+    // `-L reverie-remote` socket under a `reverie-ssh-` name that a remote Reverie's
     // discovery ignores; set-options are scoped per-session (never `-g`).
     const sh = (s: string) => "'" + s.replace(/'/g, "'\\''") + "'";
-    const remoteName = `codeman-ssh-${SESSION_ID.slice(0, 8)}`;
+    const remoteName = `reverie-ssh-${SESSION_ID.slice(0, 8)}`;
     const path = sh('/home/ubuntu/work');
     const paneCommand = `cd ${path} && exec "\${SHELL:-/bin/sh}" -i -l`;
     const tmuxInvocation = [
-      `tmux -L codeman-remote new-session -A -s ${remoteName} -c ${path} ${sh(paneCommand)}`,
+      `tmux -L reverie-remote new-session -A -s ${remoteName} -c ${path} ${sh(paneCommand)}`,
       `set -t ${remoteName} status off`,
       `set -t ${remoteName} mouse off`,
       `set -t ${remoteName} prefix C-q`,

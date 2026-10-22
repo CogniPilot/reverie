@@ -24,7 +24,7 @@ describe('PUT /api/sessions/:id/name', () => {
   let harness: RouteTestHarness;
   let session: Session;
   const updateSessionName = vi.fn(() => true);
-  const transcriptDir = mkdtempSync(join(tmpdir(), 'codeman-rename-title-'));
+  const transcriptDir = mkdtempSync(join(tmpdir(), 'reverie-rename-title-'));
   const transcriptPath = join(transcriptDir, '0000001e-0024-4000-8000-000000000030.jsonl');
   const transcriptRows = () =>
     readFileSync(transcriptPath, 'utf8')

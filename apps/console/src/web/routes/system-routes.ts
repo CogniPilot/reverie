@@ -63,7 +63,7 @@ import { resolveTerminalHistoryConfig } from '../../config/terminal-history.js';
  *
  * The package is the community terminal front door with by far the widest use
  * (~27.5k weekly downloads at time of writing, roughly 4x the next), MIT, and
- * the one whose supervisor-reporting contract Codeman's status bridge speaks.
+ * the one whose supervisor-reporting contract Reverie's status bridge speaks.
  * It is a DEFAULT, not a hardcoding: the endpoint accepts any npm name, and the
  * resolver never assumes this profile exists.
  */
@@ -176,7 +176,7 @@ export function registerSystemRoutes(
     return {
       ...status,
       sseClients,
-      authEnabled: !!process.env.CODEMAN_PASSWORD,
+      authEnabled: !!process.env.REVERIE_PASSWORD,
       authSessions: sessions,
     };
   });
@@ -194,7 +194,7 @@ export function registerSystemRoutes(
         const svg = await ctx.tunnelManager.getQrSvgForCode(url, shortCode);
         return { svg, authEnabled: true };
       }
-      const authPassword = process.env.CODEMAN_PASSWORD;
+      const authPassword = process.env.REVERIE_PASSWORD;
       if (authPassword) {
         // Auth enabled — use cached SVG with embedded short code
         const svg = await ctx.tunnelManager.getQrSvg(url);
@@ -218,7 +218,7 @@ export function registerSystemRoutes(
   app.get('/q/:code', async (req, reply) => {
     const shortCode = (req.params as { code: string }).code;
     const multiUser = isMultiUserMode();
-    const authPassword = process.env.CODEMAN_PASSWORD;
+    const authPassword = process.env.REVERIE_PASSWORD;
 
     // No point if auth isn't enabled — just redirect. Multi-user is always "enabled".
     if (!multiUser && !authPassword) {
@@ -320,10 +320,10 @@ export function registerSystemRoutes(
   });
 
   // ═══════════════════════════════════════════════════════════════
-  // Multi-monitor: span Codeman across all displays
+  // Multi-monitor: span Reverie across all displays
   // ═══════════════════════════════════════════════════════════════
 
-  // Spawn scripts/span-codeman.sh, which opens a fresh, maximized browser --app
+  // Spawn scripts/span-reverie.sh, which opens a fresh, maximized browser --app
   // window sized to the union of all displays — so in-page floating session
   // panels can be dragged across the physical monitor seam. macOS only; needs
   // the one-time "Displays have separate Spaces" OFF prerequisite (see script).
@@ -338,14 +338,14 @@ export function registerSystemRoutes(
           createErrorResponse(
             ApiErrorCode.INVALID_INPUT,
             'Multi-monitor spanning runs on the Reverie server, which is not macOS. ' +
-              'If your monitors are on a remote Mac, run scripts/span-codeman.sh locally on that Mac with this server URL — see the script header for details.'
+              'If your monitors are on a remote Mac, run scripts/span-reverie.sh locally on that Mac with this server URL — see the script header for details.'
           )
         );
     }
     // Resolve the bundled launcher relative to this module (works from src/ and dist/).
-    const scriptPath = join(dirname(fileURLToPath(import.meta.url)), '../../../scripts/span-codeman.sh');
+    const scriptPath = join(dirname(fileURLToPath(import.meta.url)), '../../../scripts/span-reverie.sh');
     if (!existsSync(scriptPath)) {
-      return reply.code(500).send(createErrorResponse(ApiErrorCode.INTERNAL_ERROR, 'span-codeman.sh not found'));
+      return reply.code(500).send(createErrorResponse(ApiErrorCode.INTERNAL_ERROR, 'span-reverie.sh not found'));
     }
     // Point the spanning window at THIS server (localhost + sanitized port).
     const url = resolveSpanUrl(req.headers.host);
@@ -569,11 +569,11 @@ export function registerSystemRoutes(
   //
   // This exists because DeepSeek ships NO terminal front door: `dsh` on its own
   // can only serve a browser UI or answer one headless task, and the agent a
-  // Codeman pane runs is always a plugin the user installed. Without this the
+  // Reverie pane runs is always a plugin the user installed. Without this the
   // mode's first-run experience is a dead Run button and a paragraph of shell
   // instructions.
   //
-  // It is the only endpoint in Codeman that installs third-party code, so it is
+  // It is the only endpoint in Reverie that installs third-party code, so it is
   // fenced accordingly:
   //   - the privileged grant is required in multi-user mode (same bar as a
   //     `shell` session, which can already do strictly more);
@@ -819,7 +819,7 @@ export function registerSystemRoutes(
         totalCost: session.totalCost,
       }));
 
-    // Run-summary trackers are keyed by Codeman session id → filter by that session's owner.
+    // Run-summary trackers are keyed by Reverie session id → filter by that session's owner.
     const runSummaries = Array.from(ctx.runSummaryTrackers.entries())
       .filter(([id]) => canAccessOwned(user, ctx.sessions.get(id)?.owner))
       .map(([, tracker]) => tracker.getSummary());
@@ -968,23 +968,23 @@ export function registerSystemRoutes(
     // COD-55: enabling the Cloudflare tunnel publishes the whole app (full terminal
     // control = effectively RCE) to a public *.trycloudflare.com URL. Because the
     // tunnel binds to loopback, server.ts's non-loopback bind guard never trips, and
-    // with no CODEMAN_PASSWORD the auth middleware is inactive — so the tunnel URL is
+    // with no REVERIE_PASSWORD the auth middleware is inactive — so the tunnel URL is
     // unauthenticated. Refuse to start a tunnel unless auth is configured OR exposure
-    // is acknowledged: either the CODEMAN_ALLOW_UNAUTHENTICATED_NETWORK env var, or an
+    // is acknowledged: either the REVERIE_ALLOW_UNAUTHENTICATED_NETWORK env var, or an
     // explicit per-request `acknowledgeUnauthTunnel:true` (the UI sends this after a
     // confirm dialog). This keeps curl/API/CLI callers protected by default while
     // letting an operator opt in from the browser without setting the env var.
     // Guard runs BEFORE persisting so a refused tunnelEnabled:true is not saved.
     if (settings.tunnelEnabled === true && !ctx.tunnelManager.isRunning()) {
       // Multi-user mode makes the tunnel authenticated (every person has their own
-      // credential), so it satisfies the same requirement as CODEMAN_PASSWORD.
+      // credential), so it satisfies the same requirement as REVERIE_PASSWORD.
       const acknowledged =
         isMultiUserMode() || isUnauthenticatedNetworkAcknowledged() || settings.acknowledgeUnauthTunnel === true;
       if (!acknowledged) {
         const msg =
           'Refusing to start the Cloudflare tunnel without authentication: it would publish ' +
-          'full terminal control to a public URL with no password. Set CODEMAN_PASSWORD to ' +
-          'require login, set CODEMAN_ALLOW_UNAUTHENTICATED_NETWORK=1, or resend with ' +
+          'full terminal control to a public URL with no password. Set REVERIE_PASSWORD to ' +
+          'require login, set REVERIE_ALLOW_UNAUTHENTICATED_NETWORK=1, or resend with ' +
           'acknowledgeUnauthTunnel:true to acknowledge an unauthenticated public tunnel.';
         throw Object.assign(new Error(msg), {
           statusCode: 403,
@@ -993,11 +993,11 @@ export function registerSystemRoutes(
       }
       // Loud warning whenever a public tunnel is started with no password — whether
       // acknowledged via env var or the per-request UI confirmation.
-      if (!process.env.CODEMAN_PASSWORD) {
+      if (!process.env.REVERIE_PASSWORD) {
         console.warn(
-          '⚠️  [tunnel] Starting an UNAUTHENTICATED public Cloudflare tunnel — no CODEMAN_PASSWORD set. ' +
+          '⚠️  [tunnel] Starting an UNAUTHENTICATED public Cloudflare tunnel — no REVERIE_PASSWORD set. ' +
             'Anyone with the tunnel URL gets full terminal control (effectively RCE). ' +
-            'Set CODEMAN_PASSWORD to require login.'
+            'Set REVERIE_PASSWORD to require login.'
         );
       }
     }
@@ -1063,7 +1063,7 @@ export function registerSystemRoutes(
       // ACTIVE Claude session's settings.local.json so live % started flowing
       // without a new session. That disk write was the bug fixed 2026-08-31 (it
       // took precedence over the user's own statusline for ANY `claude` run in
-      // that directory, including outside Codeman, with no way to undo it).
+      // that directory, including outside Reverie, with no way to undo it).
       // Collection is now decided by TmuxManager.createSession/respawnPane reading
       // `showPlanUsageLimits` FRESH from settings.json at spawn time — no
       // per-session field, no per-request threading through cron/Ralph-loop/
@@ -1394,7 +1394,7 @@ export function registerSystemRoutes(
       ext = map[ctMatch[1].toLowerCase()] ?? ext;
     }
 
-    // Save to ~/.codeman/screenshots/
+    // Save to ~/.reverie/screenshots/
     if (!existsSync(SCREENSHOTS_DIR)) {
       mkdirSync(SCREENSHOTS_DIR, { recursive: true });
     }

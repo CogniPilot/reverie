@@ -52,7 +52,7 @@ describe('PUT /api/sessions/:id/opencode-thread', () => {
   });
 
   it('refuses an agent caller, whoever it is, and changes nothing', async () => {
-    const res = await put({ thread: NEW }, { 'x-codeman-parent-session': 'test-session-1' });
+    const res = await put({ thread: NEW }, { 'x-reverie-parent-session': 'test-session-1' });
     expect(res.statusCode).toBe(403);
     expect(h.ctx._session.openCodeThread).toBe(OLD);
     expect(log).not.toHaveBeenCalled();

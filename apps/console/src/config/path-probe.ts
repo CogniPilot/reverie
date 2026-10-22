@@ -23,7 +23,7 @@ function envInt(name: string, fallback: number, min: number, max: number): numbe
 }
 
 /** How long a caller waits for one path probe before the answer is "unknown". */
-export const PATH_PROBE_TIMEOUT_MS = envInt('CODEMAN_PATH_PROBE_TIMEOUT_MS', 1_500, 100, 60_000);
+export const PATH_PROBE_TIMEOUT_MS = envInt('REVERIE_PATH_PROBE_TIMEOUT_MS', 1_500, 100, 60_000);
 
 /**
  * Hard ceiling on timed-out probes left pending, for every caller, `pastCap` ones
@@ -44,5 +44,5 @@ export const PATH_PROBE_STALL_CEILING = Math.max(1, (Number(process.env.UV_THREA
  */
 export const MAX_STALLED_PATH_PROBES = Math.min(
   PATH_PROBE_STALL_CEILING,
-  envInt('CODEMAN_PATH_PROBE_MAX_STALLED', Math.max(1, PATH_PROBE_STALL_CEILING - 1), 1, 64)
+  envInt('REVERIE_PATH_PROBE_MAX_STALLED', Math.max(1, PATH_PROBE_STALL_CEILING - 1), 1, 64)
 );

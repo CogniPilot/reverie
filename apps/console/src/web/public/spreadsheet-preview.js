@@ -1,7 +1,7 @@
 /**
  * @fileoverview Read-only, virtualized XLSX preview for the file-preview overlay.
  *
- * `CodemanSpreadsheetPreview.open({ container, url, size })` fetches the workbook
+ * `ReverieSpreadsheetPreview.open({ container, url, size })` fetches the workbook
  * bytes (same-origin only, `?preview=true` so the server applies its 10 MB
  * preview cap), hands them to spreadsheet-preview-worker.js, and renders only
  * the visible tile of cells. Parsing happens entirely in the browser worker; the
@@ -13,14 +13,14 @@
  * terminates the worker; panels-ui.js calls it whenever the overlay is reused
  * or closed.
  *
- * @dependency constants.js (CodemanBase.url for the worker URL under --base-url)
+ * @dependency constants.js (ReverieBase.url for the worker URL under --base-url)
  * @loadorder 16.5 (after image-input.js; only defines a global, used on demand)
  */
 
 (function initSpreadsheetPreview(global) {
   'use strict';
 
-  const SPREADSHEET_ASSET_VERSION = 'fd81c01bef7b';
+  const SPREADSHEET_ASSET_VERSION = '0ce316a1197b';
   const MAX_PREVIEW_BYTES = 10 * 1024 * 1024;
   const DEFAULT_TIMEOUT_MS = 20000;
   const MAX_SCROLL_PX = 8000000;
@@ -67,7 +67,7 @@
   const UNSUPPORTED_FORMAT_PREFIX = 'Unsupported number format: ';
 
   function translate(text) {
-    return global.codemanT?.(text) || text;
+    return global.reverieT?.(text) || text;
   }
 
   function own(map, key) {
@@ -510,7 +510,7 @@
         previewUrl = safePreviewUrl(options.url);
         controller = new AbortController();
         // Root-absolute paths ignore <base href>; route through the mount prefix.
-        worker = new Worker(global.CodemanBase?.url ? global.CodemanBase.url(assets.workerUrl) : assets.workerUrl);
+        worker = new Worker(global.ReverieBase?.url ? global.ReverieBase.url(assets.workerUrl) : assets.workerUrl);
         const ready = new Promise((resolve, reject) => {
           worker.onerror = () => reject(new Error('Spreadsheet parser failed to start'));
           worker.onmessageerror = () => reject(new Error('Spreadsheet parser message failed'));
@@ -550,6 +550,6 @@
     return Object.freeze({ dispose, selectSheet, resize: requestTile });
   }
 
-  global.CodemanSpreadsheetPreviewAssets = assets;
-  global.CodemanSpreadsheetPreview = Object.freeze({ open, MAX_PREVIEW_BYTES });
+  global.ReverieSpreadsheetPreviewAssets = assets;
+  global.ReverieSpreadsheetPreview = Object.freeze({ open, MAX_PREVIEW_BYTES });
 })(window);

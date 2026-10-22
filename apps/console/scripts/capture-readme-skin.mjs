@@ -103,7 +103,7 @@ function makeSession(id, name, mode, status, extra = {}) {
     id,
     pid: status === 'idle' ? null : 12345 + Math.floor(Math.random() * 10000),
     status,
-    workingDir: '/home/arkon/codeman-cases/testcase',
+    workingDir: '/home/arkon/reverie-cases/testcase',
     currentTaskId: null,
     createdAt: Date.now() - 3600000,
     lastActivityAt: Date.now() - (status === 'idle' ? 60000 : 5000),
@@ -403,7 +403,7 @@ const TERMINAL_WORKING = {
     `${GRN}●${RST} The codebase is essentially a template/scaffold with just a CLAUDE.md file and empty ${BOLD}src/${RST} directory. Since there's already a comprehensive`,
     `CLAUDE.md file present, let me read it fully and suggest improvements based on the /init command requirements:`,
     '',
-    `${GRN}●${RST} ${BOLD}Read${RST}(/home/arkon/codeman-cases/testcase/CLAUDE.md)`,
+    `${GRN}●${RST} ${BOLD}Read${RST}(/home/arkon/reverie-cases/testcase/CLAUDE.md)`,
     `  ${GRY}░${RST} Read ${BOLD}407${RST} lines`,
     '',
     `${GRN}●${RST} ${BOLD}Bash${RST}(find . -maxdepth 2 -type f -not -path "*/node_modules/*" | head)`,
@@ -478,15 +478,15 @@ const TERMINAL_RALPH = {
 const SUBAGENT_ACTIVITY = {
   'agent-001': [
     { type: 'tool', tool: 'Glob', input: { pattern: 'src/**/*.ts' }, timestamp: new Date().toISOString(), agentId: 'agent-001' },
-    { type: 'tool', tool: 'Read', input: { file_path: '/home/arkon/codeman/src/web/server.ts' }, timestamp: new Date().toISOString(), agentId: 'agent-001' },
+    { type: 'tool', tool: 'Read', input: { file_path: '/home/arkon/reverie/src/web/server.ts' }, timestamp: new Date().toISOString(), agentId: 'agent-001' },
     { type: 'tool', tool: 'Grep', input: { pattern: 'app\\.get|app\\.post|app\\.put|app\\.delete', path: 'src/' }, timestamp: new Date().toISOString(), agentId: 'agent-001' },
-    { type: 'tool', tool: 'Read', input: { file_path: '/home/arkon/codeman/src/web/schemas.ts' }, timestamp: new Date().toISOString(), agentId: 'agent-001' },
+    { type: 'tool', tool: 'Read', input: { file_path: '/home/arkon/reverie/src/web/schemas.ts' }, timestamp: new Date().toISOString(), agentId: 'agent-001' },
     { type: 'message', role: 'assistant', text: 'Found 47 API endpoints across server.ts. Documenting REST paths...', timestamp: new Date().toISOString(), agentId: 'agent-001' },
   ],
   'agent-002': [
     { type: 'tool', tool: 'Glob', input: { pattern: 'test/**/*.test.ts' }, timestamp: new Date().toISOString(), agentId: 'agent-002' },
-    { type: 'tool', tool: 'Read', input: { file_path: '/home/arkon/codeman/test/respawn-test-utils.ts' }, timestamp: new Date().toISOString(), agentId: 'agent-002' },
-    { type: 'tool', tool: 'Read', input: { file_path: '/home/arkon/codeman/config/vitest.config.ts' }, timestamp: new Date().toISOString(), agentId: 'agent-002' },
+    { type: 'tool', tool: 'Read', input: { file_path: '/home/arkon/reverie/test/respawn-test-utils.ts' }, timestamp: new Date().toISOString(), agentId: 'agent-002' },
+    { type: 'tool', tool: 'Read', input: { file_path: '/home/arkon/reverie/config/vitest.config.ts' }, timestamp: new Date().toISOString(), agentId: 'agent-002' },
     { type: 'message', role: 'assistant', text: 'Analyzing test patterns: MockSession, unique ports, fileParallelism: false...', timestamp: new Date().toISOString(), agentId: 'agent-002' },
   ],
 };
@@ -495,9 +495,9 @@ const SUBAGENT_ACTIVITY = {
 const TERMINAL_SUBAGENT = {
   body: [
   '',
-  `${GRN}●${RST} Working on ${CYN}/home/arkon/codeman-cases/testcase${RST} - I'll use the ${BOLD}Task tool${RST} to spawn parallel agents.`,
+  `${GRN}●${RST} Working on ${CYN}/home/arkon/reverie-cases/testcase${RST} - I'll use the ${BOLD}Task tool${RST} to spawn parallel agents.`,
   '',
-  `${GRN}●${RST} ${BOLD}Read${RST}(/home/arkon/codeman-cases/testcase/CLAUDE.md)`,
+  `${GRN}●${RST} ${BOLD}Read${RST}(/home/arkon/reverie-cases/testcase/CLAUDE.md)`,
   `  ${GRY}░${RST} Read ${BOLD}127${RST} lines ${GRY}│${RST} ${CYN}1.2KB${RST}`,
   '',
   `${GRN}●${RST} ${BOLD}Bash${RST}(find . -name "*.ts" -not -path "*/node_modules/*" | head -20)`,
@@ -756,7 +756,7 @@ async function injectState(page, initPayload, terminalContent, activeSessionId) 
     // fills ~93% of the height. injectState re-fits the terminal to the enlarged
     // container right after this, so the extra space becomes real terminal rows.
     const slim = document.createElement('style');
-    slim.id = 'codeman-screenshot-slim';
+    slim.id = 'reverie-screenshot-slim';
     slim.textContent = `
       :root { --header-height: 22px !important; --toolbar-height: 28px !important; }
       .header { min-height: 22px !important; padding: 1px 10px !important; align-items: center !important; }
@@ -995,7 +995,7 @@ async function captureMultiSessionMonitor(page) {
 
 async function main() {
   console.log('='.repeat(60));
-  console.log(`Codeman README Screenshot Capture — skin: ${SKIN}`);
+  console.log(`Reverie README Screenshot Capture — skin: ${SKIN}`);
   console.log('='.repeat(60));
   console.log(`Port: ${PORT} | Viewport: ${VIEWPORT.width}x${VIEWPORT.height}`);
   console.log(`Output: ${OUT_DIR}`);
@@ -1028,10 +1028,10 @@ async function main() {
       page.setDefaultTimeout(30000);
 
       // Force the chosen theme skin before any page script runs (matches the
-      // pre-paint <head> contract in index.html: localStorage 'codeman:skin').
+      // pre-paint <head> contract in index.html: localStorage 'reverie:skin').
       await page.addInitScript((skin) => {
         try {
-          localStorage.setItem('codeman:skin', skin);
+          localStorage.setItem('reverie:skin', skin);
         } catch {
           /* ignore */
         }

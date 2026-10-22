@@ -65,7 +65,6 @@ describe('owner sign-in review fixes', () => {
   ]);
   const lineage = new Map<string, string>([[RESTARTED, OLD]]);
   const employees = new Map<string, string>([[KEEPER, EMPLOYEE]]);
-  let ctoEmployee: string | undefined;
   const rooms: Array<{ members: Array<{ sessionId: string; role: string; addedBy?: string }> }> = [
     { members: [{ sessionId: A, role: 'coordinator' }, { sessionId: MEMBER, role: 'agent' }] },
   ];
@@ -75,7 +74,6 @@ describe('owner sign-in review fixes', () => {
     rooms: () => rooms,
     predecessor: (id) => lineage.get(id),
     employeeOf: (id) => employees.get(id),
-    ctoEmployee: () => ctoEmployee,
     keepers: () => service.keepers(),
     admins: () => service.admins(),
   });
@@ -108,7 +106,6 @@ describe('owner sign-in review fixes', () => {
     dir = await mkdtemp(join(tmpdir(), 'owner-auth-review-'));
     store = new OwnerAuthStore(join(dir, 'owner-auth.json'));
     clock = 1_700_000_000_000;
-    ctoEmployee = undefined;
     rooms.length = 1;
     oneTime = (await admin.bootstrap(store, USER, { now: clock })).oneTimePassword;
     await build();
@@ -174,7 +171,7 @@ describe('owner sign-in review fixes', () => {
   });
 
   describe('H1: agents act only on related sessions', () => {
-    const asAgent = { 'x-codeman-parent-session': A };
+    const asAgent = { 'x-reverie-parent-session': A };
     it('allows itself, descendants and members of rooms it coordinates; refuses any other session', async () => {
       await app.close();
       await build('enforce');
@@ -317,7 +314,7 @@ describe('owner sign-in review fixes', () => {
       const agent = await app.inject({
         method: 'GET',
         url: `/api/sessions/${A}/terminal`,
-        headers: { 'x-codeman-parent-session': A },
+        headers: { 'x-reverie-parent-session': A },
       });
       expect(agent.statusCode).toBe(200);
       await audited('account_file_missing');
@@ -332,7 +329,7 @@ describe('owner sign-in review fixes', () => {
       const agent = await app.inject({
         method: 'GET',
         url: `/api/sessions/${A}`,
-        headers: { 'x-codeman-parent-session': A },
+        headers: { 'x-reverie-parent-session': A },
       });
       expect(agent.statusCode).toBe(200);
       await audited('account_file_corrupt');
@@ -376,8 +373,8 @@ describe('owner sign-in review fixes', () => {
     });
 
     it('refuses inside an agent session unless --host', () => {
-      expect(() => admin.assertHostShell({ CODEMAN_SESSION_ID: A }, false)).toThrow('host shell');
-      expect(() => admin.assertHostShell({ CODEMAN_SESSION_ID: A }, true)).not.toThrow();
+      expect(() => admin.assertHostShell({ REVERIE_SESSION_ID: A }, false)).toThrow('host shell');
+      expect(() => admin.assertHostShell({ REVERIE_SESSION_ID: A }, true)).not.toThrow();
       expect(() => admin.assertHostShell({}, false)).not.toThrow();
     });
   });
@@ -451,7 +448,7 @@ describe('owner sign-in review fixes', () => {
   });
 
   describe('Delta v4', () => {
-    const asAgent = (id: string) => ({ 'x-codeman-parent-session': id });
+    const asAgent = (id: string) => ({ 'x-reverie-parent-session': id });
     const act = (caller: string, method: 'POST' | 'GET' | 'DELETE', target: string) =>
       app.inject({
         method,
@@ -465,13 +462,13 @@ describe('owner sign-in review fixes', () => {
     };
 
     it('D1: the owner cookies never reach a web tab upstream, on either proxy path', () => {
-      const raw = 'reverie_owner=tok; Reverie_Owner_Device=dev; codeman_session=s; app=1; theme=dark';
-      expect(upstreamCookieHeader(raw, 'codeman_session')).toBe('app=1; theme=dark');
-      expect(upstreamCookieHeader(['reverie_owner=tok', 'a=b'], 'codeman_session')).toBe('a=b');
-      expect(upstreamCookieHeader('reverie_owner=tok', 'codeman_session')).toBeUndefined();
+      const raw = 'reverie_owner=tok; Reverie_Owner_Device=dev; reverie_session=s; app=1; theme=dark';
+      expect(upstreamCookieHeader(raw, 'reverie_session')).toBe('app=1; theme=dark');
+      expect(upstreamCookieHeader(['reverie_owner=tok', 'a=b'], 'reverie_session')).toBe('a=b');
+      expect(upstreamCookieHeader('reverie_owner=tok', 'reverie_session')).toBeUndefined();
       const headers = buildUpstreamRequestHeaders({ cookie: raw }, new URL('http://127.0.0.1:9000/'), {
         forwardCookies: true,
-        sessionCookieName: 'codeman_session',
+        sessionCookieName: 'reverie_session',
       });
       expect(headers.cookie).toBe('app=1; theme=dark');
       // The WebSocket path uses the same filter (and no longer copies the raw header).
@@ -539,11 +536,11 @@ describe('owner sign-in review fixes', () => {
     });
 
     it('D6: the CLI refusal does not suggest how to bypass it', () => {
-      expect(() => admin.assertHostShell({ CODEMAN_SESSION_ID: 'x' }, false)).toThrow(/host shell/);
-      expect(() => admin.assertHostShell({ CODEMAN_SESSION_ID: 'x' }, false)).not.toThrow(/--host/);
+      expect(() => admin.assertHostShell({ REVERIE_SESSION_ID: 'x' }, false)).toThrow(/host shell/);
+      expect(() => admin.assertHostShell({ REVERIE_SESSION_ID: 'x' }, false)).not.toThrow(/--host/);
     });
 
-    it('keepers: an owner-set employee (or the CTO) may nudge and interrupt any session, see status only, never end one', async () => {
+    it('keepers: an owner-set employee may nudge and interrupt any session, see status only, never end one', async () => {
       await enforce();
       expect((await act(KEEPER, 'POST', STRANGER)).statusCode).toBe(403);
       await admin.addKeeper(store, EMPLOYEE);
@@ -555,11 +552,9 @@ describe('owner sign-in review fixes', () => {
       expect((await act(STRANGER, 'POST', KEEPER)).statusCode).toBe(403); // not symmetric
       await admin.removeKeeper(store, EMPLOYEE);
       expect((await act(KEEPER, 'POST', STRANGER)).statusCode).toBe(403);
-      // `cto` follows the company's CTO setting.
+      // A role-like string is only a literal employee id; it grants no role-based authority.
       await admin.addKeeper(store, 'cto');
       expect((await act(KEEPER, 'POST', STRANGER)).statusCode).toBe(403);
-      ctoEmployee = EMPLOYEE;
-      expect((await act(KEEPER, 'POST', STRANGER)).statusCode).toBe(200);
       await audited(/"event":"keeper_added".*"actor":"host-cli"/);
       await audited(/"event":"keeper_removed"/);
       await audited(/"event":"keeper_action"/);
@@ -599,7 +594,7 @@ describe('owner sign-in review fixes', () => {
   });
 
   describe('Delta v5', () => {
-    const asAgent = (id: string) => ({ 'x-codeman-parent-session': id });
+    const asAgent = (id: string) => ({ 'x-reverie-parent-session': id });
     const quickStart = (caller: string, parentSessionId?: string) =>
       app.inject({
         method: 'POST',

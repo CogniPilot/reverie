@@ -1,5 +1,5 @@
 /**
- * @fileoverview The shipped stock catalog — one `CliEntry` per CLI Codeman supports out of
+ * @fileoverview The shipped stock catalog — one `CliEntry` per CLI Reverie supports out of
  * the box, transcribed to be byte-identical (via the argv engine) to the hand-written
  * builders in tmux-manager.ts that they replace.
  *
@@ -77,7 +77,7 @@ function agentDefaults(): Pick<
 }
 
 /**
- * The agent skill in `<workspace>/.agents/skills/codeman`, the one project skills
+ * The agent skill in `<workspace>/.agents/skills/reverie`, the one project skills
  * directory every CLI that spreads this scans. Measured per CLI on
  * 2026-10-11 against the installed builds or their source: codex 0.162 (every dir from
  * the git root down to cwd), gemini (cwd only, behind folder trust, which `--skip-trust`
@@ -209,7 +209,7 @@ const CLAUDE: CliEntry = {
     // Each dark background lands on ESC[40m, the terminal's own black, so the block
     // Claude draws behind the user's own messages renders invisible. PR #3 unset
     // COLORTERM here against xterm.js#484, which xterm.js had already closed in 2019,
-    // and Codeman now ships @xterm/xterm 6 and sets `terminal-overrides *:Tc` itself.
+    // and Reverie now ships @xterm/xterm 6 and sets `terminal-overrides *:Tc` itself.
     // The other truecolor CLIs also unset NO_COLOR. Claude does not, so a user who
     // exports NO_COLOR globally keeps the monochrome panes they asked for.
     // CLAUDECODE stays unset, because Claude reads it as a signal that it is running
@@ -245,7 +245,7 @@ const CLAUDE: CliEntry = {
       // Claude prints what it started in the background on the footer row beneath its
       // composer, as `⏵⏵ bypass permissions on · 1 monitor · ← for agents`. The labels are
       // the CLI's own words for each kind of background task, and group 1 is the one
-      // Codeman badges the session with. Verified against a live 2.1.278 pane on
+      // Reverie badges the session with. Verified against a live 2.1.278 pane on
       // 2026-09-21.
       // ⚠️ Two things keep an agent from writing its own label here, and both matter.
       // The footer is the LAST row, so the default one-row window (`WATCHING_TAIL_LINES`)
@@ -276,7 +276,7 @@ const CLAUDE: CliEntry = {
       awaitingLine: String.raw`^✻ Waiting for \d+ (?:background agents?|dynamic workflows?)\b`,
     },
     requiresMux: false,
-    // Claude installs Codeman's own hooks block into every workspace it runs in, so its
+    // Claude installs Reverie's own hooks block into every workspace it runs in, so its
     // stop/idle signals are unconditional — no per-session veto, unlike deepseek's bridge.
     hooks: 'always',
     transcript: 'claude-jsonl',
@@ -569,7 +569,7 @@ const OPENCODE: CliEntry = {
     },
     // Verified by hand against a real llama.cpp server. Reuses the SAME env var opencode's
     // own `env.configContentVar` already declares — the builder in custom-model-injection.ts
-    // must merge into whatever opencode config Codeman would otherwise send, not clobber it.
+    // must merge into whatever opencode config Reverie would otherwise send, not clobber it.
     customModelInjection: { kind: 'configContentEnv', envVar: 'OPENCODE_CONFIG_CONTENT', template: 'opencode-json' },
     // OPENCODE_CONFIG_CONTENT already matches the OPENCODE_ allowedPrefix above, so it was
     // ALREADY reachable via plain envOverrides before this feature existed — it replaces
@@ -623,7 +623,7 @@ const CODEX: CliEntry = {
           { lit: 'codex' },
           // Each session runs its own in-process app server. Codex 0.163 otherwise attaches
           // to one shared daemon per CODEX_HOME, and that daemon's tool children inherit
-          // the environment of whichever session started it, CODEMAN_SESSION_ID included,
+          // the environment of whichever session started it, REVERIE_SESSION_ID included,
           // so a later session's tools posted under the first session's id (i-5e8b6439).
           { lit: '--no-daemon' },
           { flag: '--dangerously-bypass-approvals-and-sandbox', when: { param: 'bypassApprovals', is: true } },
@@ -650,7 +650,7 @@ const CODEX: CliEntry = {
   env: {
     exports: [
       { name: 'COLORTERM', value: 'truecolor' },
-      { name: 'CODEX_INTERNAL_ORIGINATOR_OVERRIDE', value: { engine: 'codemanPrefixedSessionId' } },
+      { name: 'CODEX_INTERNAL_ORIGINATOR_OVERRIDE', value: { engine: 'reveriePrefixedSessionId' } },
     ],
     unset: ['NO_COLOR'],
     tmuxSetenvKeys: ['OPENAI_API_KEY', 'CODEX_API_KEY', 'CODEX_HOME'],
@@ -703,7 +703,7 @@ const CODEX: CliEntry = {
       watchingLines: 4,
     },
     // The footer under the composer, measured on a live 0.147.0 pane:
-    // `  gpt-5.6-terra default · ~/codeman-cases/th-scratch` (model, reasoning effort,
+    // `  gpt-5.6-terra default · ~/reverie-cases/th-scratch` (model, reasoning effort,
     // cwd). It sits below the composer, so the transcript never reaches it, and the
     // effort word right after the model is codex's own format: an open slash-command
     // popup or a bare line of prose does not have that shape. A footer without an effort
@@ -775,9 +775,9 @@ const CODEX: CliEntry = {
     // config.toml a non-granted owner fully controls, which can restate sandbox/approval
     // policy INSIDE that file — a path the argv-level `bypassApprovals` clamp above
     // cannot see or stop.
-    // CODEMAN_CUSTOM_MODEL_API_KEY: the credential config.toml's env_key references
+    // REVERIE_CUSTOM_MODEL_API_KEY: the credential config.toml's env_key references
     // (see custom-model-injection.ts) — same reasoning as CODEX_HOME above.
-    privilegedEnvKeys: ['CODEX_HOME', 'CODEMAN_CUSTOM_MODEL_API_KEY'],
+    privilegedEnvKeys: ['CODEX_HOME', 'REVERIE_CUSTOM_MODEL_API_KEY'],
   },
   overlays: {
     credStore: {
@@ -1065,7 +1065,7 @@ const PI: CliEntry = {
     // or `.pi/skills` makes pi ask "Trust project folder?" at startup
     // (hasTrustRequiringProjectResources, pi 1.1.0), which would stall a spawned worker on
     // a dialog. pi reads the user-level `~/.agents/skills` without that prompt, so a pi
-    // user installs it there (`npx skills add Ark0N/Codeman --skill codeman -g`).
+    // user installs it there (`npx skills add jgoppert/reverie --skill reverie -g`).
     altScreen: 'preserve', // pi's TUI renders into the main screen with terminal-owned scrollback
     echo: { policy: 'buffer', anchor: { kind: 'cursor' } },
     // Measured on a live pi 1.1.0 pane (capture-pane every 250 ms through a turn,
@@ -1105,7 +1105,7 @@ const PI: CliEntry = {
     privilegedParams: [{ param: 'approveProjectTrust', clampTo: false, materializeWhenAbsent: true }],
     // CORRECTED after live-testing: `PI_CONFIG_DIR` does NOT exist anywhere in pi's own
     // bundled source (grepped the installed package directly) — it does nothing for pi
-    // itself, despite being a real Codeman env var that OTHER things (omp) read. The
+    // itself, despite being a real Reverie env var that OTHER things (omp) read. The
     // confirmed working redirect is `HOME` itself: pi hardcodes `~/.pi/agent/models.json`
     // with no dedicated override, so redirecting the CHILD PROCESS's HOME is what
     // actually relocates it (verified: a model written under an isolated HOME's
@@ -1243,7 +1243,7 @@ const GROK: CliEntry = {
       // The `[model.<name>]` block the grok-toml template writes; `--model <name>` is what
       // selects it (GROK_CUSTOM_MODEL_NAME in custom-model-injection.ts, pinned equal by
       // test/custom-model-injection.test.ts so the two cannot drift).
-      launchModel: 'codeman-custom',
+      launchModel: 'reverie-custom',
     },
     // GROK_HOME already matches the GROK_ allowedPrefix above, so it was ALREADY
     // reachable via plain envOverrides before this feature existed — same reasoning
@@ -1296,7 +1296,7 @@ const DEEPSEEK: CliEntry = {
     // Checked BEFORE the version probe: dancer's shell answers --version happily, so a
     // version match alone would accept it.
     identity: { arg: '--help', regex: 'DeepSeek\\s+Harness' },
-    // Keeps the `-rc.2` prerelease tail — dsh ships them, and the `codeman doctor` row
+    // Keeps the `-rc.2` prerelease tail — dsh ships them, and the `reverie doctor` row
     // shares this regex so the two cannot disagree about what version a binary reports.
     version: {
       arg: '--version',
@@ -1391,7 +1391,7 @@ const DEEPSEEK: CliEntry = {
     ...agentDefaults(),
     ...AGENTS_DIR_SKILL,
     // Definitive rather than inferred: the harness TUI reports idle/working/blocked to a
-    // supervisor and Codeman is that supervisor. 'supervised' rather than 'always' because
+    // supervisor and Reverie is that supervisor. 'supervised' rather than 'always' because
     // the session can disarm the bridge, and docker/remote cannot reach it at all.
     hooks: 'supervised',
     // dsh's composer glyph, drawn once the harness TUI can take a prompt.
@@ -1559,7 +1559,7 @@ const OMP: CliEntry = {
     // Fullscreen alt-screen TUI, same shape as antigravity/grok: only the
     // tmux-attach-time smcup strip, not Ink's full erase-scrollback+DECSET strip.
     altScreen: 'strip-mux-only',
-    // Codeman reads omp's own `~/.omp/agent/sessions/**/*.jsonl` host-side, which is what
+    // Reverie reads omp's own `~/.omp/agent/sessions/**/*.jsonl` host-side, which is what
     // makes an omp conversation survive a full session kill.
     transcript: 'omp-jsonl',
     echo: { policy: 'buffer', anchor: { kind: 'cursor' } },
@@ -1607,9 +1607,9 @@ const OMP: CliEntry = {
     // `~/.omp/agent` also holds agent.db/history.db/models.db (SQLite caches) and
     // terminal-sessions/blobs/cache (large, regenerable), so only the config files are
     // seeded. UNLIKE pi/grok, `sessions/` is SHARED (RW) rather than host-invisible:
-    // Codeman reads it HOST-SIDE for history recovery and `--resume` pinning, the same
+    // Reverie reads it HOST-SIDE for history recovery and `--resume` pinning, the same
     // reason codex's `sessions/` is shared — without it an in-container omp conversation
-    // would be invisible to Codeman's own resume logic.
+    // would be invisible to Reverie's own resume logic.
     credStore: {
       rel: '.omp/agent',
       shareDirs: ['sessions'],

@@ -6,7 +6,7 @@
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│                          CODEMAN WEB UI                             │
+│                          REVERIE WEB UI                             │
 │  ┌──────────────────────────────────────────────────────────────┐  │
 │  │  Orchestrator Dashboard                                       │  │
 │  │  [Goal Input] [Plan View] [Phase Progress] [Agent Activity]  │  │
@@ -32,7 +32,7 @@
 │         │                   │                       │              │
 │         ▼                   ▼                       ▼              │
 │  ┌──────────────────────────────────────────────────────────────┐  │
-│  │              EXISTING CODEMAN INFRASTRUCTURE                  │  │
+│  │              EXISTING REVERIE INFRASTRUCTURE                  │  │
 │  │                                                               │  │
 │  │  SessionManager ←→ Sessions ←→ PTY (Claude CLI)              │  │
 │  │       ↑                ↑              ↑                       │  │

@@ -31,7 +31,7 @@ function loadToolbar(sessionId: string | null = 'session-1', localEcho = true, k
   };
   const fetchMock = vi.fn(async () => ({
     ok: true,
-    json: async () => ({ data: { path: '/case/.codeman-uploads/p' } }),
+    json: async () => ({ data: { path: '/case/.reverie-uploads/p' } }),
   }));
   const context = vm.createContext({
     window,
@@ -43,10 +43,10 @@ function loadToolbar(sessionId: string | null = 'session-1', localEcho = true, k
     fetch: fetchMock,
     KeyboardAccessoryBar: composerBar,
   });
-  vm.runInContext('class CodemanApp {}', context);
+  vm.runInContext('class ReverieApp {}', context);
   vm.runInContext(imageInputSource, context, { filename: 'image-input.js' });
-  const CodemanApp = vm.runInContext('CodemanApp', context) as new () => any;
-  const app = new CodemanApp();
+  const ReverieApp = vm.runInContext('ReverieApp', context) as new () => any;
+  const app = new ReverieApp();
   app.activeSessionId = sessionId;
   app.showToast = vi.fn();
   app.sendInput = vi.fn(async () => {});
@@ -68,8 +68,8 @@ function loadToolbar(sessionId: string | null = 'session-1', localEcho = true, k
       }
     : null;
   app._uploadAndInsertImages = vi.fn(async () => [
-    '/case/.codeman-uploads/paste-1-a.png',
-    '/case/.codeman-uploads/paste-2-b.jpg',
+    '/case/.reverie-uploads/paste-1-a.png',
+    '/case/.reverie-uploads/paste-2-b.jpg',
   ]);
   app.initImageInput();
   const button = window.document.getElementById('attachBtnMobile') as HTMLButtonElement;
@@ -132,7 +132,7 @@ describe('phone toolbar Attach button', () => {
     await vi.waitFor(() => expect(app._localEchoOverlay.appendText).toHaveBeenCalledTimes(1));
     expect(app._uploadAndInsertImages).toHaveBeenCalledWith([a, b], { insert: false, sessionId: 'session-1' });
     expect(app._localEchoOverlay.appendText).toHaveBeenCalledWith(
-      '/case/.codeman-uploads/paste-1-a.png /case/.codeman-uploads/paste-2-b.jpg '
+      '/case/.reverie-uploads/paste-1-a.png /case/.reverie-uploads/paste-2-b.jpg '
     );
     expect(app._sendInputAsync).not.toHaveBeenCalled();
   });
@@ -143,7 +143,7 @@ describe('phone toolbar Attach button', () => {
     await vi.waitFor(() => expect(app._sendInputAsync).toHaveBeenCalledTimes(1));
     expect(app._sendInputAsync).toHaveBeenCalledWith(
       'session-1',
-      ' /case/.codeman-uploads/paste-1-a.png /case/.codeman-uploads/paste-2-b.jpg '
+      ' /case/.reverie-uploads/paste-1-a.png /case/.reverie-uploads/paste-2-b.jpg '
     );
   });
 
@@ -166,7 +166,7 @@ describe('phone toolbar Attach button', () => {
     await vi.waitFor(() => expect(app._sendInputAsync).toHaveBeenCalledTimes(1));
     expect(app._sendInputAsync).toHaveBeenCalledWith(
       'session-1',
-      ' /case/.codeman-uploads/paste-1-a.png /case/.codeman-uploads/paste-2-b.jpg '
+      ' /case/.reverie-uploads/paste-1-a.png /case/.reverie-uploads/paste-2-b.jpg '
     );
     expect(app._localEchoOverlay.appendText).not.toHaveBeenCalled();
   });
@@ -177,7 +177,7 @@ describe('phone toolbar Attach button', () => {
     select([new window.File(['a'], 'a.png', { type: 'image/png' })]);
     await vi.waitFor(() => expect(app._localEchoOverlay.appendText).toHaveBeenCalledTimes(1));
     expect(app._localEchoOverlay.appendText.mock.calls[0][0]).toBe(
-      ' /case/.codeman-uploads/paste-1-a.png /case/.codeman-uploads/paste-2-b.jpg '
+      ' /case/.reverie-uploads/paste-1-a.png /case/.reverie-uploads/paste-2-b.jpg '
     );
   });
 
@@ -204,13 +204,13 @@ describe('phone toolbar Attach button', () => {
     app._uploadAndInsertImages.mockImplementation(async () => {
       // The user switches tabs while the upload is in flight.
       app.activeSessionId = 'session-2';
-      return ['/case/.codeman-uploads/paste-1-a.png'];
+      return ['/case/.reverie-uploads/paste-1-a.png'];
     });
     select([new window.File(['a'], 'a.png', { type: 'image/png' })]);
     await vi.waitFor(() => expect(app._sendInputAsync).toHaveBeenCalledTimes(1));
-    expect(app._sendInputAsync).toHaveBeenCalledWith('session-1', ' /case/.codeman-uploads/paste-1-a.png ');
+    expect(app._sendInputAsync).toHaveBeenCalledWith('session-1', ' /case/.reverie-uploads/paste-1-a.png ');
     // A background session's prompt is tracked, or a later composer open erases the wrong tail.
-    expect(app._flushedTexts.get('session-1')).toBe(' /case/.codeman-uploads/paste-1-a.png ');
+    expect(app._flushedTexts.get('session-1')).toBe(' /case/.reverie-uploads/paste-1-a.png ');
     expect(app._localEchoOverlay.appendText).not.toHaveBeenCalled();
     // The keyboard belongs to whatever the user is looking at now, not to us.
     expect(app.terminal.focus).not.toHaveBeenCalled();
@@ -255,11 +255,11 @@ describe('phone toolbar Attach button', () => {
     app._echoPassthroughSessions.add('session-1');
     app._uploadAndInsertImages.mockImplementation(async () => {
       app.activeSessionId = 'session-2';
-      return ['/case/.codeman-uploads/paste-1-a.png'];
+      return ['/case/.reverie-uploads/paste-1-a.png'];
     });
     select([new window.File(['a'], 'a.png', { type: 'image/png' })]);
     await vi.waitFor(() => expect(app._sendInputAsync).toHaveBeenCalledTimes(1));
-    expect(app._sendInputAsync).toHaveBeenCalledWith('session-1', ' /case/.codeman-uploads/paste-1-a.png ');
+    expect(app._sendInputAsync).toHaveBeenCalledWith('session-1', ' /case/.reverie-uploads/paste-1-a.png ');
     // Nothing tracks a passthrough composer and Enter there never clears the maps,
     // so a record would offset the overlay for that session's next prompt.
     expect(app._flushedTexts.has('session-1')).toBe(false);
@@ -277,7 +277,7 @@ describe('phone toolbar Attach button', () => {
     app._uploadAndInsertImages.mockImplementation(async () => {
       app.sessions.delete('session-1');
       app.activeSessionId = 'session-2';
-      return ['/case/.codeman-uploads/paste-1-a.png'];
+      return ['/case/.reverie-uploads/paste-1-a.png'];
     });
     select([new window.File(['a'], 'a.png', { type: 'image/png' })]);
     await vi.waitFor(() => expect(app._uploadAndInsertImages).toHaveBeenCalledTimes(1));

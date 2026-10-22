@@ -47,7 +47,7 @@ beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'git-status-route-'));
 });
 afterEach(() => {
-  delete process.env.CODEMAN_MULTIUSER;
+  delete process.env.REVERIE_MULTIUSER;
   rmSync(dir, { recursive: true, force: true });
 });
 
@@ -138,7 +138,7 @@ describe('GET /api/sessions/:id/git-status', () => {
   });
 
   it('multi-user: another user’s session is not found, and git is not run for it', async () => {
-    process.env.CODEMAN_MULTIUSER = '1';
+    process.env.REVERIE_MULTIUSER = '1';
     const runner = vi.fn<GitRunner>(async () => '');
     const { app } = await setup({ git: runner, authUser: { username: 'bob', role: 'user' } });
     session.owner = 'alice';
@@ -148,7 +148,7 @@ describe('GET /api/sessions/:id/git-status', () => {
   });
 
   it('multi-user: the owner and an admin can read it', async () => {
-    process.env.CODEMAN_MULTIUSER = '1';
+    process.env.REVERIE_MULTIUSER = '1';
     const runner = vi.fn<GitRunner>(async () => '');
     for (const authUser of [
       { username: 'alice', role: 'user' as const },
@@ -219,7 +219,7 @@ describe('GET /api/sessions/:id/git-diff', () => {
   });
 
   it('multi-user: another user’s session is not found', async () => {
-    process.env.CODEMAN_MULTIUSER = '1';
+    process.env.REVERIE_MULTIUSER = '1';
     const { app } = await setup({ authUser: { username: 'bob', role: 'user' } });
     session.owner = 'alice';
     const res = await app.inject({ method: 'GET', url: url({ repo: root, path: 'a.txt', kind: 'unstaged' }) });

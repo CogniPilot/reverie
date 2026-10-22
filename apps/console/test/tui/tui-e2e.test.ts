@@ -1,5 +1,5 @@
 /**
- * @fileoverview End-to-end test for `codeman tui` in a real terminal.
+ * @fileoverview End-to-end test for `reverie tui` in a real terminal.
  *
  * The dashboard is spawned under node-pty against a fake API server, so this
  * covers everything the pure tests cannot: raw-mode key decoding, the frame
@@ -225,19 +225,19 @@ function pushEvent(event: string, data: unknown): void {
 function childEnv(): Record<string, string> {
   const env: Record<string, string> = {};
   for (const [key, value] of Object.entries(process.env)) if (value !== undefined) env[key] = value;
-  // The suite runs inside a Codeman-managed tmux pane, whose environment would
+  // The suite runs inside a Reverie-managed tmux pane, whose environment would
   // otherwise point the child at the LIVE server and make it think it is nested.
   delete env.TMUX;
   delete env.TMUX_PANE;
-  delete env.CODEMAN_SESSION_ID;
+  delete env.REVERIE_SESSION_ID;
   delete env.FORCE_COLOR;
-  delete env.CODEMAN_PORT;
+  delete env.REVERIE_PORT;
   return {
     ...env,
-    CODEMAN_API_URL: baseUrl,
-    CODEMAN_DATA_DIR: dataDir,
-    CODEMAN_TMUX_SOCKET: 'codeman-tui-e2e',
-    CODEMAN_TUI_GLYPHS: 'ascii',
+    REVERIE_API_URL: baseUrl,
+    REVERIE_DATA_DIR: dataDir,
+    REVERIE_TMUX_SOCKET: 'reverie-tui-e2e',
+    REVERIE_TUI_GLYPHS: 'ascii',
     NO_COLOR: '1',
     TERM: 'xterm-256color',
     LANG: 'C.UTF-8',
@@ -268,7 +268,7 @@ function readBody(req: http.IncomingMessage): Promise<Record<string, unknown>> {
 }
 
 beforeAll(async () => {
-  dataDir = mkdtempSync(join(tmpdir(), 'codeman-tui-e2e-'));
+  dataDir = mkdtempSync(join(tmpdir(), 'reverie-tui-e2e-'));
   resetSessions();
   server = http.createServer((req, res) => {
     const url = req.url ?? '';
@@ -409,7 +409,7 @@ async function waitFor(predicate: () => boolean, what: string, timeoutMs = 15_00
 // The dashboard
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe('codeman tui (under a pty)', () => {
+describe('reverie tui (under a pty)', () => {
   let term: pty.IPty;
   let output = '';
   let exitCode: number | null = null;
@@ -478,7 +478,7 @@ describe('codeman tui (under a pty)', () => {
 
   it('shows the header facts and only the keys that work', () => {
     const lines = frameLines(output);
-    expect(lines[0]).toContain('codeman');
+    expect(lines[0]).toContain('reverie');
     expect(lines[0]).toContain('v9.9.9');
     // Two live rows; the history row is not a session you have open.
     expect(lines[0]).toContain('2 sessions');
@@ -758,7 +758,7 @@ function runPiped(args: string[]): Promise<RunResult> {
   });
 }
 
-describe('codeman tui --list', () => {
+describe('reverie tui --list', () => {
   it('prints the numbered list and exits 0 when piped', async () => {
     const result = await runPiped(['tui', '--list']);
     expect(result.code).toBe(0);
@@ -772,7 +772,7 @@ describe('codeman tui --list', () => {
   }, 30_000);
 });
 
-describe('codeman tui without a terminal', () => {
+describe('reverie tui without a terminal', () => {
   it('refuses to open the dashboard and points at the fast paths', async () => {
     const result = await runPiped(['tui']);
     expect(result.code).toBe(1);

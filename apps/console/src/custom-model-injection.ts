@@ -185,11 +185,11 @@ function renderConfigContent(
   }
 }
 
-const CODEX_API_KEY_ENV_VAR = 'CODEMAN_CUSTOM_MODEL_API_KEY';
+const CODEX_API_KEY_ENV_VAR = 'REVERIE_CUSTOM_MODEL_API_KEY';
 
 /** The `[model.<name>]` block name grok's config.toml uses for the injected model — also
  *  what `-m <name>` in the standalone script's ONE_SHOT argv must reference to select it. */
-export const GROK_CUSTOM_MODEL_NAME = 'codeman-custom';
+export const GROK_CUSTOM_MODEL_NAME = 'reverie-custom';
 
 function renderConfigFile(
   template: 'codex-toml' | 'pi-models-json' | 'omp-models-yml' | 'grok-toml',

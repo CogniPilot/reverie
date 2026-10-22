@@ -28,8 +28,8 @@ What it needs:
 
 | Needs | What you get |
 | --- | --- |
-| **Full features** | A running Reverie server (states, approvals, preview, prompts, search, digest). The TUI finds it the way `reverie attach` does: `CODEMAN_API_URL`, else loopback on `CODEMAN_PORT` for this `CODEMAN_INSTANCE`. The self-signed certificate an `--https` install generates is accepted, as it is everywhere else in the CLI. |
-| **Server down** | It still starts, in **degraded mode**: sessions are enumerated straight from `tmux -L codeman` plus a read-only peek at `state.json`, and attach is the only verb. See [Troubleshooting](#troubleshooting). |
+| **Full features** | A running Reverie server (states, approvals, preview, prompts, search, digest). The TUI finds it the way `reverie attach` does: `REVERIE_API_URL`, else loopback on `REVERIE_PORT` for this `REVERIE_INSTANCE`. The self-signed certificate an `--https` install generates is accepted, as it is everywhere else in the CLI. |
+| **Server down** | It still starts, in **degraded mode**: sessions are enumerated straight from `tmux -L reverie` plus a read-only peek at `state.json`, and attach is the only verb. See [Troubleshooting](#troubleshooting). |
 | **A terminal** | `reverie tui` refuses to run when stdin/stdout are not a TTY, and says to use `--list` instead. A cron job or a pipe therefore fails loudly rather than emitting escape codes into a log. |
 
 ## What it looks like
@@ -38,12 +38,12 @@ A real frame at 100x30 (`NO_COLOR`, trailing blank rows trimmed). The selected
 session has a pending permission dialog, so the preview pane leads with the card:
 
 ```
- codeman  ⚠ 2  tnode · v1.19.0 · 5 sessions · 5h 32% · wk 61%                        ? help  q quit
+ reverie  ⚠ 2  tnode · v1.19.0 · 5 sessions · 5h 32% · wk 61%                        ? help  q quit
  NEEDS YOU ─────────────────────────│ w4-api-refactor · claude · /home/you/dev/api · blocked
   1 w6-docs                   ✋ 11m│ ⚠ requests: Bash(git push origin main)
 ▶ 2 w4-api-refactor             ⚠ 2m│   1. Yes
  WORKING ───────────────────────────│   2. Yes, and do not ask again
-  3 w1-codeman                  ∗ 1h│   3. No, tell Claude what to do
+  3 w1-reverie                  ∗ 1h│   3. No, tell Claude what to do
   4 w2-gallery                 ∗ 15m│ y approve · n deny · digit chooses
  IDLE ──────────────────────────────│
   5 w3-promo shell              ○ 2h│ > refactor the api routes onto the shared port interface
@@ -75,7 +75,7 @@ The same world through `--list`:
 ```
   1 waiting w6-docs         /home/you/dev/docs
   2 blocked w4-api-refactor /home/you/dev/api
-  3 working w1-codeman      /home/you/dev/codeman
+  3 working w1-reverie      /home/you/dev/reverie
   4 working w2-gallery      /home/you/dev/gallery
   5 idle    w3-promo        /home/you/dev/promo
   6 done    api-hotfix      /home/you/dev/api
@@ -181,7 +181,7 @@ You do not have to remember any of it. For as long as the attach lasts the pane
 wears a bar across the top:
 
 ```
- 1 w3-codeman-…  2 w4-codeman-…  3 testcase …     alt+1-9 switch · F1 back to the codeman dashboard
+ 1 w3-reverie-…  2 w4-reverie-…  3 testcase …     alt+1-9 switch · F1 back to the reverie dashboard
 ```
 
 That is the **session strip**: the other sessions stay visible from inside a pane,
@@ -205,7 +205,7 @@ Three cases:
 
 | Where you are | What happens |
 | --- | --- |
-| Not in tmux | `tmux -L codeman attach-session` |
+| Not in tmux | `tmux -L reverie attach-session` |
 | Already in tmux on Reverie's socket | `switch-client`, so you do not nest |
 | In tmux on a **different** socket | Refused, with an explanation: detach from that tmux first, then run `reverie tui` again |
 
@@ -236,19 +236,19 @@ immediately; there is no mode flag to set.
 ## Troubleshooting
 
 **"The Reverie server rejected these credentials."** The server has
-`CODEMAN_PASSWORD` set. Export `CODEMAN_PASSWORD` (and `CODEMAN_USERNAME` if it is
-not `admin`), or put them in the data dir's `.env` (`~/.codeman/.env`), which is
+`REVERIE_PASSWORD` set. Export `REVERIE_PASSWORD` (and `REVERIE_USERNAME` if it is
+not `admin`), or put them in the data dir's `.env` (`~/.reverie/.env`), which is
 where `reverie attach` already reads them from.
 
 **`server not running: attach only`** in a yellow banner. Nothing answered on the
 expected port, so the TUI fell back to enumerating tmux. You get names and attach;
 you do not get states, approvals or previews, because those only exist on the
-server. Start the server (`codeman web -d`, or `systemctl --user start codeman-web`)
+server. Start the server (`reverie web -d`, or `systemctl --user start reverie-web`)
 and the banner clears on its own: the TUI keeps re-probing.
 
 **It found the wrong server, or none.** Discovery is instance-scoped. A beta
-instance (`CODEMAN_INSTANCE=beta`) has its own data dir *and* its own tmux socket,
-so its TUI sees only its own sessions. Set `CODEMAN_PORT` or `CODEMAN_API_URL`
+instance (`REVERIE_INSTANCE=beta`) has its own data dir *and* its own tmux socket,
+so its TUI sees only its own sessions. Set `REVERIE_PORT` or `REVERIE_API_URL`
 explicitly when you run more than one.
 
 **"this terminal is already inside tmux on socket ..."** You are in a tmux session
@@ -258,7 +258,7 @@ prefix keys collide. Detach from that tmux and run `reverie tui` from outside.
 **Boxes and glyphs render as garbage.** The TUI picks a glyph tier from the
 environment: no `TERM` (or `dumb`), or a non-UTF-8 locale, gets the ASCII set
 (`[!] [w] [*] [-]`, `+`/`-`/`|` frames). Force it either way with
-`CODEMAN_TUI_GLYPHS=ascii|unicode|nerd`.
+`REVERIE_TUI_GLYPHS=ascii|unicode|nerd`.
 
 **Colors.** Standard `NO_COLOR` / `FORCE_COLOR` handling (chalk's, the same as the
 rest of the CLI). Under `NO_COLOR` the frame is cursor addressing and text only,

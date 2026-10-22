@@ -40,7 +40,7 @@ describe('POST /api/sessions model', () => {
   let harness: Harness;
 
   beforeEach(async () => {
-    workingDir = await mkdtemp(join(tmpdir(), 'codeman-session-model-'));
+    workingDir = await mkdtemp(join(tmpdir(), 'reverie-session-model-'));
     harness = await createHarness();
   });
 
@@ -138,7 +138,7 @@ describe('POST /api/sessions model', () => {
       url: '/api/sessions',
       payload: {
         mode: 'claude',
-        attachRemoteSession: { hostId: 'h1', remoteSessionName: 'codeman-ssh-abc123' },
+        attachRemoteSession: { hostId: 'h1', remoteSessionName: 'reverie-ssh-abc123' },
         ...extra,
       },
     });

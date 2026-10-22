@@ -25,10 +25,10 @@ function fixture(surface: 'sidebar' | 'rail', active = false) {
 }
 
 async function installActionMenuController(page: Page) {
-  await page.addScriptTag({ content: 'class CodemanApp {}; window.CodemanApp = CodemanApp;' });
+  await page.addScriptTag({ content: 'class ReverieApp {}; window.ReverieApp = ReverieApp;' });
   await page.addScriptTag({ content: controller });
   await page.evaluate(() => {
-    const app = new (window as any).CodemanApp();
+    const app = new (window as any).ReverieApp();
     app.loadAppSettingsFromStorage = () => ({ showTabDetachButton: false });
     app.openSessionOptions = () => undefined;
     app.requestCloseSession = () => undefined;

@@ -1,9 +1,9 @@
 /**
- * @fileoverview Multi-user store: `~/.codeman/users.json` (via `dataPath`, 0600).
+ * @fileoverview Multi-user store: `~/.reverie/users.json` (via `dataPath`, 0600).
  *
  * Mirrors the storage-module pattern of `remote-hosts.ts` / `docker-hosts.ts`, but
  * because it holds password hashes it writes atomically (tmp + rename) at mode
- * 0600 and keeps only a SHORT in-process cache so the CLI (`codeman users …`) can
+ * 0600 and keeps only a SHORT in-process cache so the CLI (`reverie users …`) can
  * edit the file while the server runs and have changes picked up within the TTL.
  *
  * Pure, IO-free helpers (`isValidUsername`, `hashPassword`, `verifyPasswordHash`,
@@ -200,7 +200,7 @@ async function writeUsers(users: UserRecord[]): Promise<void> {
   const dir = getDataDir();
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
   const finalPath = dataPath(USERS_FILE);
-  // Unique per-writer tmp name (pid + random) so the CLI (`codeman users …`) and
+  // Unique per-writer tmp name (pid + random) so the CLI (`reverie users …`) and
   // the live server — designed to write this file concurrently across processes —
   // never share a single `users.json.tmp` inode and tear each other's payload.
   // Matches the state-store.ts / self-update.ts convention.
@@ -241,7 +241,7 @@ export async function hasUsers(): Promise<boolean> {
 // as a real verify (defeats username-enumeration by timing). Created once, lazily.
 let dummyHashPromise: Promise<PasswordHash> | null = null;
 function getDummyHash(): Promise<PasswordHash> {
-  if (!dummyHashPromise) dummyHashPromise = hashPassword('codeman-timing-equalization-placeholder');
+  if (!dummyHashPromise) dummyHashPromise = hashPassword('reverie-timing-equalization-placeholder');
   return dummyHashPromise;
 }
 
@@ -412,7 +412,7 @@ export async function deleteUser(username: string): Promise<void> {
 
 /**
  * First-boot bootstrap: in multi-user mode with no users yet, create the initial
- * admin from `CODEMAN_USERNAME`/`CODEMAN_PASSWORD` if both are set. Returns a
+ * admin from `REVERIE_USERNAME`/`REVERIE_PASSWORD` if both are set. Returns a
  * status the caller (server start / CLI) uses to decide whether to refuse boot.
  */
 export async function bootstrapInitialAdmin(): Promise<{
@@ -420,8 +420,8 @@ export async function bootstrapInitialAdmin(): Promise<{
   username?: string;
 }> {
   if (await hasUsers()) return { status: 'exists' };
-  const username = process.env.CODEMAN_USERNAME;
-  const password = process.env.CODEMAN_PASSWORD;
+  const username = process.env.REVERIE_USERNAME;
+  const password = process.env.REVERIE_PASSWORD;
   if (!username || !password) return { status: 'missing-env' };
   const created = await createUser({ username, role: 'admin', password });
   return { status: 'created', username: created.username };

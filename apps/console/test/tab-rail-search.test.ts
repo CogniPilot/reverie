@@ -2,7 +2,7 @@
  * @fileoverview Session-name search on the vertical tab rail.
  *
  * What is pinned, and why:
- * - The pure matcher (`CodemanTabSearch` in constants.js): trimmed,
+ * - The pure matcher (`ReverieTabSearch` in constants.js): trimmed,
  *   case-insensitive substring, a whitespace-only query is no query, and every
  *   section that ends up empty is reported so the caller can hide it.
  * - It is a VIEW filter over the one #sessionTabs list, the same row classes the
@@ -63,10 +63,10 @@ type TabSearch = {
 function loadSearch(): TabSearch {
   const context = vm.createContext({ window: {}, globalThis: {} });
   vm.runInContext(read('constants.js'), context, { filename: 'constants.js' });
-  return (context.window as { CodemanTabSearch: TabSearch }).CodemanTabSearch;
+  return (context.window as { ReverieTabSearch: TabSearch }).ReverieTabSearch;
 }
 
-describe('CodemanTabSearch (pure)', () => {
+describe('ReverieTabSearch (pure)', () => {
   const search = loadSearch();
 
   it('normalizes a query: trimmed, lower-cased, anything else is empty', () => {
@@ -148,7 +148,7 @@ describe('CodemanTabSearch (pure)', () => {
       context
     );
     vm.runInContext(read('constants.js'), context, { filename: 'constants.js' });
-    const turkish = (context.window as { CodemanTabSearch: TabSearch }).CodemanTabSearch;
+    const turkish = (context.window as { ReverieTabSearch: TabSearch }).ReverieTabSearch;
     expect(vm.runInContext("'API'.toLocaleLowerCase()", context)).toBe('apı');
 
     expect(turkish.needle('API')).toBe('api');
@@ -158,9 +158,9 @@ describe('CodemanTabSearch (pure)', () => {
   });
 });
 
-// ─── The rail, driven through the shipping CodemanApp ────────────────────────
+// ─── The rail, driven through the shipping ReverieApp ────────────────────────
 
-let CodemanApp: { prototype: Record<string, any> };
+let ReverieApp: { prototype: Record<string, any> };
 let window: any;
 let document: Document;
 let localStorage: Storage;
@@ -193,9 +193,9 @@ beforeAll(async () => {
       read('subagent-windows.js') +
       '\n' +
       read('ultracode-windows.js') +
-      '\n;window.__RailSearchCodemanApp = CodemanApp;'
+      '\n;window.__RailSearchReverieApp = ReverieApp;'
   );
-  CodemanApp = window.__RailSearchCodemanApp;
+  ReverieApp = window.__RailSearchReverieApp;
 });
 
 const LAYOUT = {
@@ -223,7 +223,7 @@ const LAYOUT = {
 };
 
 function makeApp(options: { tabLayout?: unknown } = {}) {
-  const app = Object.create(CodemanApp.prototype) as Record<string, any>;
+  const app = Object.create(ReverieApp.prototype) as Record<string, any>;
   document.documentElement.setAttribute('data-tab-orientation', 'vertical');
   document.documentElement.dataset.tabRailSort = 'manual';
   document.body.innerHTML = `
@@ -292,7 +292,7 @@ const emptyNote = () => document.getElementById('tabRailSearchEmpty') as HTMLEle
 beforeEach(() => {
   document.documentElement.setAttribute('data-tab-orientation', 'horizontal');
   document.body.innerHTML = '';
-  localStorage.removeItem('codeman:tab-groups-collapsed');
+  localStorage.removeItem('reverie:tab-groups-collapsed');
 });
 
 afterEach(() => vi.restoreAllMocks());
@@ -300,7 +300,7 @@ afterEach(() => vi.restoreAllMocks());
 describe('grouped rail search', () => {
   it('shows a match inside a collapsed group without touching the stored collapse state', () => {
     const app = makeApp();
-    localStorage.setItem('codeman:tab-groups-collapsed', '["plan"]');
+    localStorage.setItem('reverie:tab-groups-collapsed', '["plan"]');
     app.collapsedTabGroupIds = new Set(['plan']);
     app._fullRenderSessionTabs();
     expect(visibleRows()).toEqual(['alpha', 'web', 'notes']);
@@ -315,7 +315,7 @@ describe('grouped rail search', () => {
     // Counts follow the search, so a header never claims rows it is not showing.
     expect(plan.querySelector('.tab-layout-group-count')?.textContent).toBe('1');
     expect([...app.collapsedTabGroupIds]).toEqual(['plan']);
-    expect(localStorage.getItem('codeman:tab-groups-collapsed')).toBe('["plan"]');
+    expect(localStorage.getItem('reverie:tab-groups-collapsed')).toBe('["plan"]');
     // Alt+N badges name the session order, never the filtered position.
     expect(['alpha', 'notes'].map(badgeOf)).toEqual(badgesBefore);
     expect(badgeOf('review')).toBe('3');
@@ -323,7 +323,7 @@ describe('grouped rail search', () => {
 
   it('will not collapse or expand a group while searching, and restores collapse on clear', () => {
     const app = makeApp();
-    localStorage.setItem('codeman:tab-groups-collapsed', '["plan"]');
+    localStorage.setItem('reverie:tab-groups-collapsed', '["plan"]');
     app.collapsedTabGroupIds = new Set(['plan']);
     app._fullRenderSessionTabs();
     app.setTabRailSearch('review');
@@ -331,7 +331,7 @@ describe('grouped rail search', () => {
     expect(app.toggleTabGroupCollapsed('plan')).toBe(false);
     expect(app.toggleTabGroupCollapsed('eng', true)).toBe(false);
     expect([...app.collapsedTabGroupIds]).toEqual(['plan']);
-    expect(localStorage.getItem('codeman:tab-groups-collapsed')).toBe('["plan"]');
+    expect(localStorage.getItem('reverie:tab-groups-collapsed')).toBe('["plan"]');
     expect(visibleRows()).toEqual(['review']);
 
     app.clearTabRailSearch();
@@ -924,7 +924,7 @@ describe('markup and zh-CN', () => {
     const dom = new JSDOM(INDEX, { runScripts: 'outside-only', url: 'http://localhost/' });
     doms.push(dom);
     vm.runInContext(read('i18n.js'), dom.getInternalVMContext(), { filename: 'i18n.js' });
-    const api = (dom.window as unknown as { CodemanI18n: { start(): void; configure(o: object): void } }).CodemanI18n;
+    const api = (dom.window as unknown as { ReverieI18n: { start(): void; configure(o: object): void } }).ReverieI18n;
     api.start();
     api.configure({ language: 'zh-CN' });
     const doc = dom.window.document;

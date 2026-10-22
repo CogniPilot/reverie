@@ -232,7 +232,7 @@ describe('file routes in a remote (SSH) case', () => {
 
     describe('when a path with the same absolute name ALSO exists on this host', () => {
       // The case that really happens in practice: the remote tree is mounted on the
-      // Codeman host at the identical absolute path (an sshfs mount, which is the
+      // Reverie host at the identical absolute path (an sshfs mount, which is the
       // documented stop-gap workaround for this very bug). The remote host stays the
       // source of truth: there is deliberately no local fallback, because a fallback
       // would silently serve the OTHER filesystem's bytes under the same path.
@@ -240,7 +240,7 @@ describe('file routes in a remote (SSH) case', () => {
       let shadowFile: string;
 
       beforeEach(() => {
-        shadowRoot = mkdtempSync(join(tmpdir(), 'codeman-remote-shadow-'));
+        shadowRoot = mkdtempSync(join(tmpdir(), 'reverie-remote-shadow-'));
         shadowFile = join(shadowRoot, 'img.png');
         writeFileSync(shadowFile, 'LOCAL BYTES');
         harness.ctx._session.workingDir = shadowRoot;
@@ -686,7 +686,7 @@ describe('file routes in a remote (SSH) case', () => {
     let shadowFile: string;
 
     beforeEach(() => {
-      shadowRoot = mkdtempSync(join(tmpdir(), 'codeman-remote-put-'));
+      shadowRoot = mkdtempSync(join(tmpdir(), 'reverie-remote-put-'));
       shadowFile = join(shadowRoot, 'notes.txt');
       writeFileSync(shadowFile, 'LOCAL TEXT');
       harness.ctx._session.workingDir = shadowRoot;

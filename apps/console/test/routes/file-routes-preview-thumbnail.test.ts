@@ -16,7 +16,7 @@ vi.mock('node:fs/promises', () => ({
     stat: vi.fn(async () => ({ size: 100, isFile: () => true, mtimeMs: 1 })),
     readdir: vi.fn(async () => []),
     mkdir: vi.fn(async () => undefined),
-    mkdtemp: vi.fn(async () => '/tmp/codeman-preview-test'),
+    mkdtemp: vi.fn(async () => '/tmp/reverie-preview-test'),
     rename: vi.fn(async () => undefined),
     rm: vi.fn(async () => undefined),
   },
@@ -32,7 +32,7 @@ vi.mock('../../src/document-thumbnailer.js', () => ({
   generateFirstPageThumbnail: vi.fn(async () => ({ content: Buffer.from('\x89PNG fake'), contentType: 'image/png' })),
 }));
 vi.mock('../../src/document-preview-cache.js', () => ({
-  getOfficePreviewPdfPath: vi.fn(async () => '/tmp/codeman-document-preview-cache/out.pdf'),
+  getOfficePreviewPdfPath: vi.fn(async () => '/tmp/reverie-document-preview-cache/out.pdf'),
   getPreviewPdfDownloadName: vi.fn((name: string) => `${name.replace(/\.[^.]+$/, '')}.pdf`),
 }));
 

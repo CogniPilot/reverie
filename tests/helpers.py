@@ -1,5 +1,5 @@
-"""Shared fakes: an in-memory LLM, a fake room, and a temporary Config."""
 from __future__ import annotations
+"""Shared fakes: an in-memory LLM, a fake room, and a temporary Config."""
 
 import json
 from contextlib import contextmanager
@@ -7,9 +7,9 @@ import tempfile
 from pathlib import Path
 from typing import Callable
 
-from cto.config import Config
-from cto.llm import ChatClient
-from cto.room import Room
+from reverie.config import Config
+from reverie.llm import ChatClient
+from reverie.room import Room
 
 
 class FakeTransport:
@@ -70,7 +70,7 @@ def temp_config() -> Config:
     cfg.persona_path = d / "persona.txt"
     cfg.legacy_history = d / "legacy-history.json"
     cfg.hold_path = d / "hold"
-    cfg.log_path = d / "cto.log"
+    cfg.log_path = d / "reverie.log"
     cfg.gpu_lock_path = d / "gpu.lock"
     cfg.gpu_yield_path = d / "gpu.yield"
     cfg.gpu_activity_path = d / "gpu.activity"
@@ -79,17 +79,18 @@ def temp_config() -> Config:
     return cfg
 
 
-def safety_floor_terms() -> tuple[str, str]:
-    """Neutral tokens used only inside synthetic_safety_lexicon()."""
-    return "age_marker", "content_marker"
+def output_policy_terms() -> tuple[str, str]:
+    """Neutral tokens used by the synthetic owner-selected policy."""
+    return "policy_marker", "restricted_marker"
 
 
 @contextmanager
-def synthetic_safety_lexicon():
-    """Exercise the production detector code with neutral test-only vocabulary."""
+def synthetic_output_policy():
+    """Exercise output rejection without shipping a default topic policy."""
+    import json
     import re
     from unittest.mock import patch
-    with patch.multiple("cto.floors", _MINOR=re.compile(r"\bage_marker\b", re.I),
-                        _EXPLICIT=re.compile(r"\bcontent_marker\b", re.I),
-                        _ABUSE=re.compile(r"\b(?:abuse_marker|lives at)\b", re.I)):
+    policy = json.dumps({"denied_patterns": [r"(?s)(?=.*\bpolicy_marker\b)(?=.*\brestricted_marker\b)"]})
+    with patch.dict("os.environ", {"REVERIE_OUTPUT_POLICY": policy}), patch(
+            "reverie.floors._ABUSE", re.compile(r"\b(?:abuse_marker|lives at)\b", re.I)):
         yield

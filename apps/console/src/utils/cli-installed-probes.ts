@@ -1,7 +1,7 @@
 /**
  * @fileoverview One answer to "is this CLI installed here?", shared by the page render
- * (`renderIndexHtml` in server.ts, which injects `window.__codemanCliAvailable` and
- * `window.__codemanCliCatalog`) and `GET /api/clis` (the Settings list's badge).
+ * (`renderIndexHtml` in server.ts, which injects `window.__reverieCliAvailable` and
+ * `window.__reverieCliCatalog`) and `GET /api/clis` (the Settings list's badge).
  *
  * The two used to keep their own copies of the per-CLI probe map, so they could drift apart
  * and the badge could disagree with the Run menu.

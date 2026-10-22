@@ -46,7 +46,7 @@ describe('parseEnvKeys', () => {
   it('does NOT treat a commented-out key as set', () => {
     // .env.example documents optional overrides as `# PUID=1000`. Counting those
     // as required would block every update on settings the user should not set.
-    expect(parseEnvKeys('# PUID=1000\nCODEMAN_PORT=3000')).toEqual(['CODEMAN_PORT']);
+    expect(parseEnvKeys('# PUID=1000\nREVERIE_PORT=3000')).toEqual(['REVERIE_PORT']);
   });
 
   it('handles `export` prefixes and repeated keys', () => {
@@ -123,9 +123,9 @@ describe('computeEnvironmentBlockers', () => {
   });
 
   it('blocks and NAMES missing env keys', () => {
-    const blockers = computeEnvironmentBlockers({ ...CLEAN, missingEnvKeys: ['CODEMAN_NEW_THING'] });
+    const blockers = computeEnvironmentBlockers({ ...CLEAN, missingEnvKeys: ['REVERIE_NEW_THING'] });
     expect(blockers[0].kind).toBe('env-keys-missing');
-    expect(blockers[0].details).toEqual(['CODEMAN_NEW_THING']);
+    expect(blockers[0].details).toEqual(['REVERIE_NEW_THING']);
   });
 
   it('blocks when the container would not come back', () => {

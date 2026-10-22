@@ -93,10 +93,10 @@ describe('ImageWatcher', () => {
       expect(watcher.getWatchedSessions()).toHaveLength(1);
     });
 
-    it("ignores Codeman's own upload folders, so a pdf the user handed over is not a detected artifact", () => {
+    it("ignores Reverie's own upload folders, so a pdf the user handed over is not a detected artifact", () => {
       watcher.watchSession('session-1', '/home/user/project');
       const [, opts] = vi.mocked(watch).mock.calls.at(-1) as unknown as [string, { ignored: (p: string) => boolean }];
-      expect(opts.ignored('/home/user/project/.codeman-uploads/paste-1-ab.pdf')).toBe(true);
+      expect(opts.ignored('/home/user/project/.reverie-uploads/paste-1-ab.pdf')).toBe(true);
       expect(opts.ignored('/home/user/project/.claude-images/paste-1-ab.png')).toBe(true);
       expect(opts.ignored('/home/user/project/docs/report.pdf')).toBe(false);
     });

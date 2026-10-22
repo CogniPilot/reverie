@@ -34,9 +34,9 @@ function fakeElement(): any {
 }
 
 function loadOverviewApp(overrides: Record<string, any> = {}) {
-  const CodemanApp = function CodemanApp(this: any) {};
+  const ReverieApp = function ReverieApp(this: any) {};
   const context = vm.createContext({
-    CodemanApp,
+    ReverieApp,
     console,
     window: {},
     document: {
@@ -46,14 +46,14 @@ function loadOverviewApp(overrides: Record<string, any> = {}) {
     },
     MobileDetection: { getDeviceType: () => 'mobile' },
   });
-  // constants.js first: it installs the row comparator (window.CodemanSessionOrder)
+  // constants.js first: it installs the row comparator (window.ReverieSessionOrder)
   // that buildMobileOverviewModel() sorts every section with, shared with the
   // desktop rail so the two home screens cannot order the same list differently.
   for (const file of ['constants.js', 'mobile-overview.js']) {
     vm.runInContext(readFileSync(resolve(PUBLIC, file), 'utf8'), context, { filename: file });
   }
 
-  const app = new (CodemanApp as any)();
+  const app = new (ReverieApp as any)();
   app.getSessionName = (session: any) => session.name || session.workingDir?.split('/').pop() || session.id.slice(0, 8);
   app._shortenHomePath = (p: string) => (p || '').replace(/^\/home\/[^/]+\//, '~/');
   app.loadAppSettingsFromStorage = () => ({});
@@ -63,7 +63,7 @@ function loadOverviewApp(overrides: Record<string, any> = {}) {
 
 const CASES = [
   { name: 'claudeman', path: '/home/arkon/default/claudeman', location: 'local' },
-  { name: 'beta', path: '/home/arkon/codeman-cases/beta', location: 'local' },
+  { name: 'beta', path: '/home/arkon/reverie-cases/beta', location: 'local' },
   { name: 'boxed', path: '/srv/boxed', location: 'docker' },
 ];
 
@@ -203,7 +203,7 @@ describe('mobile overview model', () => {
         { sessionId: 'live-1', workingDir: '/home/arkon/default/claudeman', lastActivityAt: 500 },
         {
           sessionId: 'old-a',
-          workingDir: '/home/arkon/codeman-cases/beta',
+          workingDir: '/home/arkon/reverie-cases/beta',
           firstPrompt: 'fix the mobile header',
           claudeSessionId: 'claude-uuid-a',
           lastActivityAt: 100,
@@ -222,7 +222,7 @@ describe('mobile overview model', () => {
       title: 'fix the mobile header',
       caseName: 'beta',
       claudeSessionId: 'claude-uuid-a',
-      workingDir: '/home/arkon/codeman-cases/beta',
+      workingDir: '/home/arkon/reverie-cases/beta',
     });
     // A row with no prompt falls back to its name, so it is never a bare UUID.
     expect(model.past[0].title).toBe('w4-claudeman');
@@ -236,7 +236,7 @@ describe('mobile overview model', () => {
       history: [
         {
           sessionId: 'rollout-1',
-          workingDir: '/home/arkon/codeman-cases/beta',
+          workingDir: '/home/arkon/reverie-cases/beta',
           firstPrompt: 'port the parser',
           mode: 'codex',
           resumeId: 'codex-thread-id',
@@ -266,7 +266,7 @@ describe('mobile overview model', () => {
       cases: CASES,
       history: [
         { sessionId: 'blank', workingDir: '/home/arkon/default/claudeman', firstPrompt: '(no content)' },
-        { sessionId: 'spaces', workingDir: '/home/arkon/codeman-cases/beta', firstPrompt: '   ' },
+        { sessionId: 'spaces', workingDir: '/home/arkon/reverie-cases/beta', firstPrompt: '   ' },
       ],
     });
 
@@ -543,9 +543,9 @@ describe('mobile overview watching badge', () => {
 describe('mobile overview Run picker, driven by the registry catalogue', () => {
   function loadRunModes(catalog: unknown[] | undefined) {
     const context = vm.createContext({
-      CodemanApp: function CodemanApp() {},
+      ReverieApp: function ReverieApp() {},
       console,
-      window: catalog ? { __codemanCliCatalog: catalog } : {},
+      window: catalog ? { __reverieCliCatalog: catalog } : {},
       document: {
         getElementById: () => null,
         createElement: () => fakeElement(),

@@ -8,14 +8,14 @@ import { createHarness, member, room } from './helpers/chat-app-harness.mjs';
 const source = readFileSync(resolve(import.meta.dirname, '../src/web/public/voice-chat.js'), 'utf8');
 const dom = new JSDOM('', { url: 'http://localhost/', runScripts: 'outside-only' });
 const context = dom.getInternalVMContext();
-vm.runInContext('globalThis.CodemanApp = class {};', context);
+vm.runInContext('globalThis.ReverieApp = class {};', context);
 vm.runInContext(source, context);
 vm.runInContext(readFileSync(resolve(import.meta.dirname, '../src/web/public/car-mode.js'), 'utf8'), context);
 const clean = vm.runInContext('readAloudClean', context) as (text: string, names?: string[], emojis?: boolean) => string;
 const limit = vm.runInContext('readAloudLimit', context) as (text: string, seconds: number) => string;
 const estimate = vm.runInContext('readAloudSeconds', context) as (text: string) => number;
 const chunks = vm.runInContext('readAloudChunks', context) as (text: string) => string[];
-const Proto = vm.runInContext('CodemanApp.prototype', context);
+const Proto = vm.runInContext('ReverieApp.prototype', context);
 afterAll(() => dom.window.close());
 
 describe('speech-only normalization', () => {
@@ -97,9 +97,9 @@ describe('per-device, per-room settings and live message path', () => {
     expect(cleared()).toBe(1);
     expect(app._readAloudOptions('room-b')).toEqual({ seconds: null, emojis: true });
     expect(Object.create(Proto)._readAloudOptions('room-a')).toEqual({ seconds: 10, emojis: false });
-    dom.window.localStorage.setItem('codeman:readAloudOptions:room-a', '{bad');
+    dom.window.localStorage.setItem('reverie:readAloudOptions:room-a', '{bad');
     expect(app._readAloudOptions('room-a')).toEqual({ seconds: null, emojis: true });
-    dom.window.localStorage.setItem('codeman:readAloudOptions:room-a', '{"seconds":-99,"emojis":"false"}');
+    dom.window.localStorage.setItem('reverie:readAloudOptions:room-a', '{"seconds":-99,"emojis":"false"}');
     expect(app._readAloudOptions('room-a')).toEqual({ seconds: null, emojis: true });
   });
 

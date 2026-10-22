@@ -280,41 +280,41 @@ describe('Session State Management', () => {
 
   describe('Mux Session Environment', () => {
     interface MuxEnv {
-      CODEMAN_MUX: string;
-      CODEMAN_SESSION_ID: string;
-      CODEMAN_MUX_NAME: string;
+      REVERIE_MUX: string;
+      REVERIE_SESSION_ID: string;
+      REVERIE_MUX_NAME: string;
     }
 
     const createMuxEnv = (sessionId: string, muxName: string): MuxEnv => ({
-      CODEMAN_MUX: '1',
-      CODEMAN_SESSION_ID: sessionId,
-      CODEMAN_MUX_NAME: muxName,
+      REVERIE_MUX: '1',
+      REVERIE_SESSION_ID: sessionId,
+      REVERIE_MUX_NAME: muxName,
     });
 
-    const isCodemanSession = (env: Record<string, string | undefined>): boolean => {
-      return env.CODEMAN_MUX === '1';
+    const isReverieSession = (env: Record<string, string | undefined>): boolean => {
+      return env.REVERIE_MUX === '1';
     };
 
     it('should create valid mux environment', () => {
-      const env = createMuxEnv('session-123', 'codeman-test');
-      expect(env.CODEMAN_MUX).toBe('1');
-      expect(env.CODEMAN_SESSION_ID).toBe('session-123');
-      expect(env.CODEMAN_MUX_NAME).toBe('codeman-test');
+      const env = createMuxEnv('session-123', 'reverie-test');
+      expect(env.REVERIE_MUX).toBe('1');
+      expect(env.REVERIE_SESSION_ID).toBe('session-123');
+      expect(env.REVERIE_MUX_NAME).toBe('reverie-test');
     });
 
-    it('should detect codeman session', () => {
-      const env = createMuxEnv('session-123', 'codeman-test');
-      expect(isCodemanSession(env)).toBe(true);
+    it('should detect reverie session', () => {
+      const env = createMuxEnv('session-123', 'reverie-test');
+      expect(isReverieSession(env)).toBe(true);
     });
 
-    it('should detect non-codeman session', () => {
-      const env = { CODEMAN_MUX: '0' };
-      expect(isCodemanSession(env)).toBe(false);
+    it('should detect non-reverie session', () => {
+      const env = { REVERIE_MUX: '0' };
+      expect(isReverieSession(env)).toBe(false);
     });
 
     it('should handle missing environment variable', () => {
       const env = {};
-      expect(isCodemanSession(env)).toBe(false);
+      expect(isReverieSession(env)).toBe(false);
     });
   });
 

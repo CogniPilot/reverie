@@ -2,8 +2,8 @@
  * @fileoverview Claude Code hooks configuration generator.
  *
  * Generates `.claude/settings.local.json` with hook definitions that POST
- * to Codeman's `/api/hook-event` endpoint when Claude Code fires hooks.
- * Uses `$CODEMAN_API_URL`, `$CODEMAN_SESSION_ID`, and `$CODEMAN_HOOK_SECRET_FILE`
+ * to Reverie's `/api/hook-event` endpoint when Claude Code fires hooks.
+ * Uses `$REVERIE_API_URL`, `$REVERIE_SESSION_ID`, and `$REVERIE_HOOK_SECRET_FILE`
  * env vars (set on every managed session) so the config is static per case
  * directory and free of secret values.
  *
@@ -12,7 +12,7 @@
  * - `writeHooksConfig(casePath)` — writes hooks + env config to disk
  * - `applyWorkspaceHooks(workspace, install?)` — the ONE install-vs-refresh decision
  *   point every claude-session create path routes through (see its doc comment)
- * - `ensureCodemanHooks(casePath)` — safely installs/updates hooks for a managed case
+ * - `ensureReverieHooks(casePath)` — safely installs/updates hooks for a managed case
  * - `updateCaseEnvVars(casePath, envVars)` — merges env vars into settings
  *
  * Hook events generated: `idle_prompt`, `permission_prompt`, `elicitation_dialog`,
@@ -29,11 +29,11 @@
  * @module hooks-config
  */
 
+import { agentSkillSourceDir } from './agent-skill-source.js';
 import { randomBytes } from 'node:crypto';
 import { readFile, writeFile, mkdir, lstat, readdir, realpath, rename, unlink, rmdir, chmod } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
 
 import type { HookEventType } from './types.js';
 import type { AgentSkillDir, CliCapabilities } from './config/cli-registry/types.js';
@@ -101,18 +101,18 @@ async function absentOrUnreachable(path: string): Promise<'absent' | 'unreachabl
 const settingsWriteLocks = new Map<string, Promise<unknown>>();
 /**
  * Version-agnostic ownership prefix: every rewake script version embeds a marker
- * starting with this, and `isCodemanHookHandler` matches on the prefix. That way a
+ * starting with this, and `isReverieHookHandler` matches on the prefix. That way a
  * version bump replaces the old handler instead of duplicating it (matching on the
  * full versioned marker would disown every older script).
  */
-const BACKGROUND_WAKE_MARKER_PREFIX = 'CODEMAN_BACKGROUND_REWAKE_V';
+const BACKGROUND_WAKE_MARKER_PREFIX = 'REVERIE_BACKGROUND_REWAKE_V';
 /**
  * Current script version. Bump the suffix whenever `generateBackgroundWakeScript`
- * changes: `refreshStaleCodemanHooks` treats the absence of the CURRENT marker as
+ * changes: `refreshStaleReverieHooks` treats the absence of the CURRENT marker as
  * stale, so healed cases pick up the new script on next launch.
  */
 const BACKGROUND_WAKE_MARKER = `${BACKGROUND_WAKE_MARKER_PREFIX}3`;
-const SUBAGENT_STOP_GUARD_MARKER_PREFIX = 'CODEMAN_SUBAGENT_STOP_GUARD_V';
+const SUBAGENT_STOP_GUARD_MARKER_PREFIX = 'REVERIE_SUBAGENT_STOP_GUARD_V';
 const SUBAGENT_STOP_GUARD_MARKER = `${SUBAGENT_STOP_GUARD_MARKER_PREFIX}1`;
 const BACKGROUND_WAKE_TIMEOUT_SECONDS = 6 * 60 * 60;
 
@@ -138,8 +138,8 @@ export function generateBackgroundWakeScript(): string {
     "const path = require('node:path');",
     `const ${BACKGROUND_WAKE_MARKER} = true;`,
     `const deadline = Date.now() + ${BACKGROUND_WAKE_TIMEOUT_SECONDS} * 1000;`,
-    "const RESULT_BEGIN = '=== CODEMAN_RESULT_BEGIN ===';",
-    "const RESULT_END = '=== CODEMAN_RESULT_END ===';",
+    "const RESULT_BEGIN = '=== REVERIE_RESULT_BEGIN ===';",
+    "const RESULT_END = '=== REVERIE_RESULT_END ===';",
     'const MAX_RESULT_CHARS = 65536;',
     'let input = {};',
     "try { input = JSON.parse(fs.readFileSync(0, 'utf8') || '{}'); } catch { process.exit(0); }",
@@ -197,7 +197,7 @@ export function generateBackgroundWakeScript(): string {
     '      const half = Math.floor(MAX_RESULT_CHARS / 2);',
     "      result = result.slice(0, half) + '\\n\\n[report truncated by Reverie]\\n\\n' + result.slice(-half);",
     '    }',
-    "    return '\\n\\nCompleted task report:\\n<codeman-background-result>\\n' + result + '\\n</codeman-background-result>';",
+    "    return '\\n\\nCompleted task report:\\n<reverie-background-result>\\n' + result + '\\n</reverie-background-result>';",
     "  } catch { return ''; }",
     '}',
     'function inspect(text) {',
@@ -400,7 +400,7 @@ async function withSafeSettingsWrite(
  * Generates the hooks section for .claude/settings.local.json
  *
  * The hook commands read stdin JSON from Claude Code (contains tool_name,
- * tool_input, etc.) and forward it as the `data` field to Codeman's API.
+ * tool_input, etc.) and forward it as the `data` field to Reverie's API.
  * Env vars are resolved at runtime by the shell, so the config is static
  * per case directory.
  */
@@ -409,27 +409,27 @@ export function generateHooksConfig(): { hooks: Record<string, unknown[]> } {
   // Falls back to empty object if stdin is unavailable or malformed.
   // COD-54: present the per-instance hook secret so the bypass keeps working while
   // a tunnel is running. The value is read from the secret file AT EXECUTION TIME
-  // (path via $CODEMAN_HOOK_SECRET_FILE, set in every managed session's env), so it
+  // (path via $REVERIE_HOOK_SECRET_FILE, set in every managed session's env), so it
   // never lands in this config and rotation needs no respawn. If the var/file is
   // missing the header is empty — the middleware then allows the request only on
   // the plain loopback bypass (tunnel down), same as pre-secret behavior.
   const curlCmd = (event: HookEventType, options: { discardStdout?: boolean } = {}) =>
     `HOOK_DATA=$(cat 2>/dev/null || echo '{}'); ` +
-    `printf '{"event":"${event}","sessionId":"%s","data":%s}' "$CODEMAN_SESSION_ID" "$HOOK_DATA" | ` +
-    // `-k`, same as the statusline exporter: CODEMAN_API_URL is loopback HTTPS with
+    `printf '{"event":"${event}","sessionId":"%s","data":%s}' "$REVERIE_SESSION_ID" "$HOOK_DATA" | ` +
+    // `-k`, same as the statusline exporter: REVERIE_API_URL is loopback HTTPS with
     // a self-signed cert on --https/tailscale installs. Without it curl exits 60,
     // the `|| true` swallows it, and ALL SIX hook events die silently: respawn loses
     // its definitive idle signals and the wait endpoints lose stop/blocked.
-    `curl -sk ${options.discardStdout ? '-o /dev/null ' : ''}-X POST "$CODEMAN_API_URL/api/hook-event" ` +
+    `curl -sk ${options.discardStdout ? '-o /dev/null ' : ''}-X POST "$REVERIE_API_URL/api/hook-event" ` +
     `-H 'Content-Type: application/json' ` +
-    `-H "X-Codeman-Hook-Secret: $(cat "$CODEMAN_HOOK_SECRET_FILE" 2>/dev/null)" ` +
+    `-H "X-Reverie-Hook-Secret: $(cat "$REVERIE_HOOK_SECRET_FILE" 2>/dev/null)" ` +
     `--data @- ` +
     `2>/dev/null || true`;
 
   // The same POST with stdout DISCARDED, via curl's own `-o`. UserPromptSubmit is
   // one of the hook events whose stdout Claude Code injects into the model's
   // context (the CLI's own hook reference: "Exit code 0 - stdout shown to
-  // Claude"), so an undiscarded curl pastes Codeman's `{"success":true,…}`
+  // Claude"), so an undiscarded curl pastes Reverie's `{"success":true,…}`
   // envelope into the user's prompt on every single turn.
   // ⚠️ It MUST be curl's flag, not a trailing redirect. `curlCmd` already ends
   // `… 2>/dev/null || true`, and in `pipeline || true >/dev/null` the shell binds
@@ -474,7 +474,7 @@ export function generateHooksConfig(): { hooks: Record<string, unknown[]> } {
       // The pane's LIVE conversation id, reported by the CLI process itself.
       // Without it the response viewer has to guess which `<uuid>.jsonl` a pane
       // is on after a `/clear`, and the only anchor it can guess from is an
-      // Enter that went THROUGH Codeman — so a user who attaches to tmux
+      // Enter that went THROUGH Reverie — so a user who attaches to tmux
       // directly never gets one and stays pinned to the launch conversation.
       UserPromptSubmit: [
         {
@@ -521,7 +521,7 @@ export function generateHooksConfig(): { hooks: Record<string, unknown[]> } {
   };
 }
 
-function isCodemanHookHandler(value: unknown): boolean {
+function isReverieHookHandler(value: unknown): boolean {
   try {
     const serialized = JSON.stringify(value);
     // Prefixes, not versioned markers: older script versions must still be ours.
@@ -536,10 +536,10 @@ function isCodemanHookHandler(value: unknown): boolean {
 }
 
 /**
- * Replace only Codeman-owned command handlers while preserving user events,
+ * Replace only Reverie-owned command handlers while preserving user events,
  * matcher entries, and sibling handlers in mixed entries.
  */
-function mergeCodemanHooks(existingValue: unknown, generated: Record<string, unknown[]>): Record<string, unknown[]> {
+function mergeReverieHooks(existingValue: unknown, generated: Record<string, unknown[]>): Record<string, unknown[]> {
   const existing =
     existingValue && typeof existingValue === 'object' && !Array.isArray(existingValue)
       ? (existingValue as Record<string, unknown>)
@@ -558,13 +558,13 @@ function mergeCodemanHooks(existingValue: unknown, generated: Record<string, unk
     let insertedGenerated = false;
     for (const entry of existingEntries) {
       if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
-        if (!isCodemanHookHandler(entry)) entries.push(entry);
+        if (!isReverieHookHandler(entry)) entries.push(entry);
         continue;
       }
 
       const record = entry as Record<string, unknown>;
       if (!Array.isArray(record.hooks)) {
-        if (isCodemanHookHandler(record)) {
+        if (isReverieHookHandler(record)) {
           if (!insertedGenerated) {
             entries.push(...generatedEntries);
             insertedGenerated = true;
@@ -575,13 +575,13 @@ function mergeCodemanHooks(existingValue: unknown, generated: Record<string, unk
         continue;
       }
 
-      const retainedHandlers = record.hooks.filter((handler) => !isCodemanHookHandler(handler));
-      const removedCodemanHandler = retainedHandlers.length !== record.hooks.length;
-      if (removedCodemanHandler && !insertedGenerated) {
+      const retainedHandlers = record.hooks.filter((handler) => !isReverieHookHandler(handler));
+      const removedReverieHandler = retainedHandlers.length !== record.hooks.length;
+      if (removedReverieHandler && !insertedGenerated) {
         entries.push(...generatedEntries);
         insertedGenerated = true;
       }
-      if (retainedHandlers.length > 0 || !removedCodemanHandler) {
+      if (retainedHandlers.length > 0 || !removedReverieHandler) {
         entries.push(retainedHandlers.length === record.hooks.length ? entry : { ...record, hooks: retainedHandlers });
       }
     }
@@ -596,7 +596,7 @@ function mergeCodemanHooks(existingValue: unknown, generated: Record<string, unk
 /**
  * Remove a subset of env keys from .claude/settings.local.json.env if present.
  * Used during the disk→tmux-setenv migration: when the caller is actively setting
- * a fresh value for a Codeman-managed key, any stale disk entry for THAT KEY is
+ * a fresh value for a Reverie-managed key, any stale disk entry for THAT KEY is
  * superseded and should be removed. Keys NOT in `keysToRemove` are left alone
  * (they may be user-managed). No-op if the file/keys don't exist.
  */
@@ -711,7 +711,7 @@ export async function writeHooksConfig(casePath: string): Promise<void> {
     const hooksConfig = generateHooksConfig();
     const merged = {
       ...existing,
-      hooks: mergeCodemanHooks(existing.hooks, hooksConfig.hooks),
+      hooks: mergeReverieHooks(existing.hooks, hooksConfig.hooks),
     };
 
     await writeFile(settingsPath, JSON.stringify(merged, null, 2) + '\n');
@@ -719,21 +719,21 @@ export async function writeHooksConfig(casePath: string): Promise<void> {
 }
 
 /**
- * Ensures a workspace Codeman is about to run Claude in has the current Codeman hooks.
+ * Ensures a workspace Reverie is about to run Claude in has the current Reverie hooks.
  *
- * Unlike `refreshStaleCodemanHooks`, this may ADD Codeman handlers to a settings
- * file that has none (a linked case, a cloned repo, any directory Codeman did not
+ * Unlike `refreshStaleReverieHooks`, this may ADD Reverie handlers to a settings
+ * file that has none (a linked case, a cloned repo, any directory Reverie did not
  * scaffold). It merges rather than replaces, so a user's own hook entries survive,
  * and a malformed existing file is left untouched rather than replaced.
  *
  * ⚠️ That "may add" is a deliberate POLICY, adopted 2026-08-15 after the symptom it
- * causes was reported: hooks were only ever written when Codeman CREATED a case
+ * causes was reported: hooks were only ever written when Reverie CREATED a case
  * directory, so every session in a linked case ran with no hooks at all and each
  * hook-driven surface was silently dead there — an AskUserQuestion dialog blocking
  * the pane while the tab and the phone overview both read a calm `idle`, no
  * Approvals Inbox item, no push, no definitive `stop`/`idle_prompt` for respawn, and
  * no `stop`/`blocked` for the agent wait endpoints. The cost of the policy is the
- * other direction: a user who DELETES Codeman's hooks from a workspace gets them
+ * other direction: a user who DELETES Reverie's hooks from a workspace gets them
  * back on the next session create there, because nothing on disk distinguishes
  * "removed on purpose" from "never had any".
  *
@@ -742,7 +742,7 @@ export async function writeHooksConfig(casePath: string): Promise<void> {
  * on the next server start. Claude Code re-reads the file, so a session ALREADY running
  * in the workspace picks the hooks up without a restart (verified live, 2026-08-15).
  */
-export async function ensureCodemanHooks(casePath: string): Promise<void> {
+export async function ensureReverieHooks(casePath: string): Promise<void> {
   await withSafeSettingsWrite(casePath, 'hooks (ensure)', async (claudeDir, settingsPath) => {
     if (!(await pathExistsForWrite(claudeDir))) {
       await mkdir(claudeDir, { recursive: true });
@@ -758,7 +758,7 @@ export async function ensureCodemanHooks(casePath: string): Promise<void> {
     }
 
     const generated = generateHooksConfig();
-    const hooks = mergeCodemanHooks(existing.hooks, generated.hooks);
+    const hooks = mergeReverieHooks(existing.hooks, generated.hooks);
     if (JSON.stringify(existing.hooks ?? {}) === JSON.stringify(hooks)) return;
 
     await writeFile(settingsPath, JSON.stringify({ ...existing, hooks }, null, 2) + '\n');
@@ -766,24 +766,24 @@ export async function ensureCodemanHooks(casePath: string): Promise<void> {
 }
 
 /**
- * Self-heal a case's Codeman-owned hooks block.
+ * Self-heal a case's Reverie-owned hooks block.
  *
  * `writeHooksConfig` only runs when a case is first CREATED. Cases created before the
- * X-Codeman-Hook-Secret header was added (COD-54, 2026-06-10) keep hook curls in their
+ * X-Reverie-Hook-Secret header was added (COD-54, 2026-06-10) keep hook curls in their
  * settings.local.json that POST to /api/hook-event WITHOUT the secret — which, once the
  * gate requires it unconditionally (COD-91), silently 401 on a password-protected install.
- * Older Codeman blocks also lack the current background Bash async-rewake hook or the
+ * Older Reverie blocks also lack the current background Bash async-rewake hook or the
  * SubagentStop guard. A further stale shape: hook curls without `-k`, which exit 60 on
  * every --https/tailscale install (the cert is self-signed), swallowed by the hooks'
  * own `|| true` — all six hook events die silently. Refresh any of these stale shapes
  * on launch so existing cases heal.
  *
  * Deliberately surgical: regenerates ONLY when settings.local.json already contains
- * Codeman's own hook curls (they target `/api/hook-event`) and they are stale. No-op
+ * Reverie's own hook curls (they target `/api/hook-event`) and they are stale. No-op
  * when the file/hooks are absent (we never impose hooks on a user who removed them) or
  * when the hooks aren't ours, so it is cheap enough to call on every Claude spawn.
  */
-export async function refreshStaleCodemanHooks(casePath: string): Promise<void> {
+export async function refreshStaleReverieHooks(casePath: string): Promise<void> {
   if (await absentOrUnreachable(join(casePath, '.claude', 'settings.local.json'))) return;
   await withSafeSettingsWrite(casePath, 'hooks (refresh)', async (_claudeDir, settingsPath) => {
     let existing: Record<string, unknown>;
@@ -796,7 +796,7 @@ export async function refreshStaleCodemanHooks(casePath: string): Promise<void> 
     const isOurs = hooksJson.includes('/api/hook-event');
     // The generated curl carries this header literal (see generateHooksConfig); its
     // absence on our own hooks means they predate COD-54 and need regenerating.
-    const hasSecret = hooksJson.includes('X-Codeman-Hook-Secret');
+    const hasSecret = hooksJson.includes('X-Reverie-Hook-Secret');
     const hasBackgroundWake = hooksJson.includes(BACKGROUND_WAKE_MARKER);
     // The pre--k curl shape: `curl -sk -X POST` does not contain `curl -s -X POST`
     // as a substring, so this cleanly identifies hook curls that die with exit 60
@@ -827,7 +827,7 @@ export async function refreshStaleCodemanHooks(casePath: string): Promise<void> 
     const generated = generateHooksConfig();
     const merged = {
       ...existing,
-      hooks: mergeCodemanHooks(existing.hooks, generated.hooks),
+      hooks: mergeReverieHooks(existing.hooks, generated.hooks),
     };
     await writeFile(settingsPath, JSON.stringify(merged, null, 2) + '\n');
   });
@@ -840,15 +840,15 @@ export async function refreshStaleCodemanHooks(casePath: string): Promise<void> 
  * recovery sweep — so the `workspaceHooksEnabled` setting cannot apply to some of
  * them only.
  *
- * ON (the default): INSTALL Codeman's hooks block (`ensureCodemanHooks`), merging so
+ * ON (the default): INSTALL Reverie's hooks block (`ensureReverieHooks`), merging so
  * a user's own hook entries and every other settings key survive. Hooks used to be
- * written only when Codeman CREATED the case DIRECTORY, so a linked case or any
+ * written only when Reverie CREATED the case DIRECTORY, so a linked case or any
  * pre-existing repo — where most sessions actually run — had none, and every
- * hook-driven surface was silently dead there (full history on `ensureCodemanHooks`).
+ * hook-driven surface was silently dead there (full history on `ensureReverieHooks`).
  *
- * OFF: the older, narrower behavior. A Codeman block that is already there is still
+ * OFF: the older, narrower behavior. A Reverie block that is already there is still
  * refreshed when stale (COD-91: a pre-secret block 401s once the hook-secret gate
- * went unconditional), but one is never added, so Codeman leaves the repo alone.
+ * went unconditional), but one is never added, so Reverie leaves the repo alone.
  *
  * `install` overrides the setting read: route handlers resolve it through their
  * ConfigPort (`ctx.getWorkspaceHooksEnabled()`, which tests stub), and the boot sweep
@@ -859,7 +859,7 @@ export async function refreshStaleCodemanHooks(casePath: string): Promise<void> 
  * Callers gate on their own context (claude mode only; local — never a remote
  * workingDir, which is a path on ANOTHER host, and never a docker case that opted
  * out of hooks). The guards EVERY caller needs live here instead:
- *  - a workspace that does not exist is skipped — `ensureCodemanHooks` mkdir -p's,
+ *  - a workspace that does not exist is skipped — `ensureReverieHooks` mkdir -p's,
  *    so a deleted repo whose tmux session survived would otherwise be resurrected
  *    as an empty directory tree holding only `.claude/settings.local.json`;
  *  - errors are swallowed — a session create must never fail on hooks.
@@ -878,7 +878,7 @@ export async function applyWorkspaceHooks(workspace: string, install?: boolean):
       return;
     }
     const shouldInstall = install ?? (await readWorkspaceHooksEnabled());
-    await (shouldInstall ? ensureCodemanHooks(workspace) : refreshStaleCodemanHooks(workspace));
+    await (shouldInstall ? ensureReverieHooks(workspace) : refreshStaleReverieHooks(workspace));
   } catch {
     // Best-effort by contract (see doc comment): hooks degrade to output-based
     // idle detection; the create goes ahead.
@@ -890,7 +890,7 @@ export async function applyWorkspaceHooks(workspace: string, install?: boolean):
  * for callers that live outside the web layer (cron, scheduled runs, the plan
  * orchestrator). Default ON: an absent key means a user who has never seen the
  * setting, and OFF for them would mean no tab alerts, no Approvals Inbox and no
- * respawn idle signals in every workspace Codeman did not scaffold itself.
+ * respawn idle signals in every workspace Reverie did not scaffold itself.
  */
 async function readWorkspaceHooksEnabled(): Promise<boolean> {
   try {
@@ -901,35 +901,35 @@ async function readWorkspaceHooksEnabled(): Promise<boolean> {
   }
 }
 
-/** Unique marker identifying Codeman's own statusLine command (vs a user's). */
+/** Unique marker identifying Reverie's own statusLine command (vs a user's). */
 const STATUSLINE_MARKER = '/api/status-telemetry';
 
 /**
  * The plan-usage statusLine exporter command. Mirrors the hook `curlCmd` pattern:
- * reads Claude Code's statusline stdin JSON, POSTs `{sessionId,data}` to Codeman,
+ * reads Claude Code's statusline stdin JSON, POSTs `{sessionId,data}` to Reverie,
  * and prints the response body (a compact "⟳ 5h 15% · 7d 34%" footer) back to
  * stdout so the in-terminal statusline stays useful. Env vars resolve at runtime
  * (present in every managed session via tmux setenv), so the config is static.
  */
 export function generateStatusLineCommand(): string {
-  // `curl -sfk`: CODEMAN_API_URL is loopback HTTPS with a self-signed cert in the
+  // `curl -sfk`: REVERIE_API_URL is loopback HTTPS with a self-signed cert in the
   // production setup; without -k curl returns 000 and the statusline shows
   // nothing. -k is safe here (loopback only); -f keeps an HTTP error body off
-  // the statusline. On any failure it prints NOTHING: the old `|| echo codeman`
+  // the statusline. On any failure it prints NOTHING: the old `|| echo reverie`
   // is the bare word that a hand-run `claude` in a managed repo rendered, and
   // that reads as a broken config (discussion #405).
   return (
     `INPUT=$(cat 2>/dev/null || echo '{}'); ` +
-    `printf '{"sessionId":"%s","data":%s}' "$CODEMAN_SESSION_ID" "$INPUT" | ` +
-    `curl -sfk -X POST "$CODEMAN_API_URL${STATUSLINE_MARKER}" ` +
+    `printf '{"sessionId":"%s","data":%s}' "$REVERIE_SESSION_ID" "$INPUT" | ` +
+    `curl -sfk -X POST "$REVERIE_API_URL${STATUSLINE_MARKER}" ` +
     `-H 'Content-Type: application/json' ` +
-    `-H "X-Codeman-Hook-Secret: $(cat "$CODEMAN_HOOK_SECRET_FILE" 2>/dev/null)" ` +
+    `-H "X-Reverie-Hook-Secret: $(cat "$REVERIE_HOOK_SECRET_FILE" 2>/dev/null)" ` +
     `--data @- 2>/dev/null || true`
   );
 }
 
 /**
- * Add or remove Codeman's plan-usage statusLine exporter in
+ * Add or remove Reverie's plan-usage statusLine exporter in
  * `.claude/settings.local.json`. Only ever touches a statusLine that is OURS
  * (command targets `/api/status-telemetry`), so a user's hand-authored
  * statusLine is never removed OR overwritten — on both the enable and disable
@@ -971,11 +971,11 @@ export async function applyStatusLineConfig(casePath: string, enabled: boolean):
  * whenever the script content changes so `ensureStatusLineExporterScript`'s
  * content comparison rewrites stale copies on next use.
  */
-const STATUSLINE_EXPORTER_SCRIPT_MARKER = 'CODEMAN_STATUSLINE_EXPORTER_V4';
+const STATUSLINE_EXPORTER_SCRIPT_MARKER = 'REVERIE_STATUSLINE_EXPORTER_V4';
 
 function statusLineExporterScriptContent(): string {
   // Where the telemetry POST runs depends on who owns the footer. When the pane's
-  // env carries CODEMAN_USER_STATUSLINE_CMD (set via tmux setenv by TmuxManager
+  // env carries REVERIE_USER_STATUSLINE_CMD (set via tmux setenv by TmuxManager
   // when findEffectiveUserStatusLineCommand found the user's own REAL statusLine —
   // see that function's doc comment), the user's command owns the footer, so the
   // POST runs in a BACKGROUND subshell with stdin/stdout/stderr all closed
@@ -988,24 +988,24 @@ function statusLineExporterScriptContent(): string {
   // Absent a user statusline, NOTHING else will print the footer, so the POST runs
   // in the FOREGROUND and ITS OWN stdout becomes the footer — `/api/status-telemetry`
   // returns formatSessionStatusText(...) (model/tokens/context %) precisely so this
-  // can happen. If curl itself fails (refused/unreachable Codeman, or an HTTP
+  // can happen. If curl itself fails (refused/unreachable Reverie, or an HTTP
   // error, which `-f` keeps off stdout) the footer is simply EMPTY (`|| true`):
-  // the old `|| echo codeman` rendered a bare brand word that reads as a broken
+  // the old `|| echo reverie` rendered a bare brand word that reads as a broken
   // config, the symptom discussion #405 opened with. `--max-time` bounds a
-  // HUNG (not just refused) Codeman so it cannot wedge the render indefinitely.
+  // HUNG (not just refused) Reverie so it cannot wedge the render indefinitely.
   const post =
-    `printf '{"sessionId":"%s","data":%s}' "$CODEMAN_SESSION_ID" "$INPUT" | ` +
-    `curl -sfk --max-time 5 -X POST "$CODEMAN_API_URL${STATUSLINE_MARKER}" ` +
+    `printf '{"sessionId":"%s","data":%s}' "$REVERIE_SESSION_ID" "$INPUT" | ` +
+    `curl -sfk --max-time 5 -X POST "$REVERIE_API_URL${STATUSLINE_MARKER}" ` +
     `-H 'Content-Type: application/json' ` +
-    `-H "X-Codeman-Hook-Secret: $(cat "$CODEMAN_HOOK_SECRET_FILE" 2>/dev/null)" ` +
+    `-H "X-Reverie-Hook-Secret: $(cat "$REVERIE_HOOK_SECRET_FILE" 2>/dev/null)" ` +
     `--data @-`;
   return (
     `#!/bin/sh\n` +
     `# ${STATUSLINE_EXPORTER_SCRIPT_MARKER} — auto-generated by Reverie; safe to delete, regenerated on demand.\n` +
     `INPUT=$(cat 2>/dev/null || echo '{}')\n` +
-    `if [ -n "$CODEMAN_USER_STATUSLINE_CMD" ]; then\n` +
+    `if [ -n "$REVERIE_USER_STATUSLINE_CMD" ]; then\n` +
     `  ( ${post} ) >/dev/null 2>&1 </dev/null &\n` +
-    `  printf '%s' "$INPUT" | sh -c "$CODEMAN_USER_STATUSLINE_CMD"\n` +
+    `  printf '%s' "$INPUT" | sh -c "$REVERIE_USER_STATUSLINE_CMD"\n` +
     `else\n` +
     `  ${post} 2>/dev/null || true\n` +
     `fi\n`
@@ -1030,7 +1030,7 @@ async function readStatusLineCommandFromFile(settingsPath: string): Promise<stri
  * the user's global `~/.claude/settings.json`. Returns undefined when none of
  * the three configures one.
  *
- * A legacy Codeman-marked entry in the project's OWN settings.local.json
+ * A legacy Reverie-marked entry in the project's OWN settings.local.json
  * (written by an older build's disk-based mechanism) is never treated as a
  * real user command — resolveStatusLineCliCommand strips it before this ever
  * runs, so ordinarily this function never even sees one; the marker check
@@ -1054,8 +1054,8 @@ export async function findEffectiveUserStatusLineCommand(workingDir: string): Pr
  * path. Idempotent: only rewrites when the marker-versioned content differs.
  *
  * This is the fix for a real bug found live 2026-08-31: the exporter's
- * command string legitimately depends on `$CODEMAN_SESSION_ID`,
- * `$CODEMAN_API_URL`, `$CODEMAN_HOOK_SECRET_FILE`, and its own internal
+ * command string legitimately depends on `$REVERIE_SESSION_ID`,
+ * `$REVERIE_API_URL`, `$REVERIE_HOOK_SECRET_FILE`, and its own internal
  * `$INPUT` — all meant to be expanded ONLY when Claude Code itself finally
  * executes the statusLine command, using the PANE's tmux-setenv'd
  * environment. Passing that command as literal TEXT through
@@ -1106,7 +1106,7 @@ export async function ensureStatusLineExporterScript(): Promise<string> {
  * second persisted flag: it's the SAME boolean the App Settings chip checkbox
  * already writes (see `planUsageChipEnabled()` in settings-ui.js).
  *
- * This is what lets the on/off decision survive a Codeman restart (there is
+ * This is what lets the on/off decision survive a Reverie restart (there is
  * no per-session state to lose — see the now-removed `Session._statusLineTelemetry`,
  * which WAS such a per-session field and went stale on every restart) and
  * apply uniformly across every claude session-creation path — interactive
@@ -1118,7 +1118,7 @@ export async function ensureStatusLineExporterScript(): Promise<string> {
  * An ABSENT key means ON, mirroring readWorkspaceHooksEnabled() above: the
  * client shows the chip and its checkbox as already on for a desktop that has
  * never touched the setting (planUsageChipEnabled() in settings-ui.js), and
- * the exporter only ever posts to THIS Codeman over loopback, so the honest
+ * the exporter only ever posts to THIS Reverie over loopback, so the honest
  * default for an install that never said otherwise is the one the user can
  * see. Resolving the default here, in the reader, is what lets
  * `GET /api/settings` stay a plain read: a reconcile write there ran on every
@@ -1137,11 +1137,11 @@ export async function readPlanUsageTelemetryEnabled(): Promise<boolean> {
  * session-cli-registry-bridge.ts) — never written to disk. This supersedes
  * the old applyStatusLineConfig(path, true) disk-write: a file-based
  * statusLine leaked into any plain `claude` run in that directory outside
- * Codeman entirely (it took precedence over the user's own global/project
+ * Reverie entirely (it took precedence over the user's own global/project
  * statusline with no disclosure and no way to remove it — found live
  * 2026-08-31).
  *
- * Also self-heals: if an OLDER Codeman build already wrote its marked
+ * Also self-heals: if an OLDER Reverie build already wrote its marked
  * exporter into this workspace's settings.local.json, it is stripped here
  * (isOurs-guarded, same as applyStatusLineConfig's removal branch) so every
  * workspace migrates off the disk-based mechanism the first time a session
@@ -1197,24 +1197,14 @@ export async function resolveStatusLineCliCommand(
  * `BACKGROUND_WAKE_MARKER_PREFIX`: ownership is decided on the prefix so a wording
  * change in the full marker cannot disown every previously injected copy.
  */
-const AGENT_SKILL_MARKER_PREFIX = '<!-- codeman-managed-agent-skill';
+const AGENT_SKILL_MARKER_PREFIX = '<!-- reverie-managed-agent-skill';
 
 /**
  * Marker appended to the injected SKILL.md. Its presence is what makes a copy OURS:
- * install/refresh/remove all refuse to touch a `skills/codeman` whose SKILL.md lacks
+ * install/refresh/remove all refuse to touch a `skills/reverie` whose SKILL.md lacks
  * it, so a user's hand-authored or hand-edited-and-de-marked skill is never clobbered.
  */
-const AGENT_SKILL_MARKER = `${AGENT_SKILL_MARKER_PREFIX}: installed by Codeman; edits are overwritten while the agent-skill setting is on -->`;
-
-/**
- * Packaged source of the skill: `skills/codeman/` at the package root. Resolved
- * relative to this module so it works from `src/` (tsx dev), `dist/` (tsc build),
- * and an npm install (`files` includes `skills`), all of which sit one level below
- * the package root.
- */
-function agentSkillSourceDir(): string {
-  return join(dirname(fileURLToPath(import.meta.url)), '..', 'skills', 'codeman');
-}
+const AGENT_SKILL_MARKER = `${AGENT_SKILL_MARKER_PREFIX}: installed by Reverie; edits are overwritten while the agent-skill setting is on -->`;
 
 interface AgentSkillFile {
   /** Path relative to the target skill dir (e.g. `reference/endpoints.md`). */
@@ -1250,7 +1240,7 @@ async function readAgentSkillSource(): Promise<AgentSkillFile[]> {
  * the file (20KB+, several write() syscalls) lets a load that lands mid-write see a
  * TRUNCATED skill. rename() swaps the finished file in one step, so a
  * reader sees either the old copy or the new one. The pid+random temp name matters
- * because `codeman skill install` writes these same paths from a DIFFERENT process than
+ * because `reverie skill install` writes these same paths from a DIFFERENT process than
  * the server, where the in-process lock cannot help: a shared temp name would let the
  * two tear each other's payload (same reasoning as user-store.ts).
  */
@@ -1285,13 +1275,13 @@ export type AgentSkillApplyResult =
   | 'symlink'; // the skill dir (or its parent) is a symlink; left untouched
 
 /**
- * Install or refresh the Codeman agent skill into `skillDir` (a `.../codeman`
- * directory, e.g. `<case>/.claude/skills/codeman`, `~/.claude/skills/codeman` or
- * `<case>/.agents/skills/codeman`).
+ * Install or refresh the Reverie agent skill into `skillDir` (a `.../reverie`
+ * directory, e.g. `<case>/.claude/skills/reverie`, `~/.claude/skills/reverie` or
+ * `<case>/.agents/skills/reverie`).
  *
  * Refuses two shapes rather than writing through them:
  * - a SYMLINK at the skill dir or its `skills/` parent: this repo's own dogfooding
- *   layout (`.claude/skills/codeman -> ../../skills/codeman`) would otherwise have
+ *   layout (`.claude/skills/reverie -> ../../skills/reverie`) would otherwise have
  *   the injector overwrite the repo source through the link;
  * - a FOREIGN copy (SKILL.md present without our marker): that is the user's own
  *   skill, and per the statusLine rule we never clobber what we did not write.
@@ -1338,8 +1328,8 @@ export async function installAgentSkillInto(skillDir: string): Promise<AgentSkil
 }
 
 /**
- * Seed a session's agent preamble file (`$XDG_CACHE_HOME/codeman-agent-<id>.sh`,
- * default `~/.cache/`) from the packaged `skills/codeman/preamble.sh`, so the agent
+ * Seed a session's agent preamble file (`$XDG_CACHE_HOME/reverie-agent-<id>.sh`,
+ * default `~/.cache/`) from the packaged `skills/reverie/preamble.sh`, so the agent
  * skill's §0 bootstrap collapses to a two-line loader instead of a ~150-line block the
  * model has to type out (measured live: that paste alone cost a spawn run ~47 s of
  * generation time). The path formula must match the skill's
@@ -1350,7 +1340,7 @@ export async function installAgentSkillInto(skillDir: string): Promise<AgentSkil
  * claude-specific; a remote or in-container HOME is not this filesystem) and treat it as
  * best-effort: the skill's §0 fallback block self-heals a missing or stale file. Codex
  * caveat: codex 0.162 runs tool commands in a shared app-server daemon whose
- * `CODEMAN_SESSION_ID` is the starting session's, so its loader looks for that session's
+ * `REVERIE_SESSION_ID` is the starting session's, so its loader looks for that session's
  * file and its self id is wrong; the skill tells the agent how to notice.
  */
 export async function seedAgentSessionPreamble(sessionId: string): Promise<void> {
@@ -1364,13 +1354,13 @@ function agentPreambleCacheDir(): string {
   return process.env.XDG_CACHE_HOME || join(homedir(), '.cache');
 }
 
-/** `codeman-agent-<sessionId>.sh` in that directory. */
+/** `reverie-agent-<sessionId>.sh` in that directory. */
 function agentPreamblePath(sessionId: string): string {
-  return join(agentPreambleCacheDir(), `codeman-agent-${sessionId}.sh`);
+  return join(agentPreambleCacheDir(), `reverie-agent-${sessionId}.sh`);
 }
 
 /** Matches exactly what seedAgentSessionPreamble writes, and nothing else in ~/.cache. */
-const AGENT_PREAMBLE_FILE_PATTERN = /^codeman-agent-(.+)\.sh$/;
+const AGENT_PREAMBLE_FILE_PATTERN = /^reverie-agent-(.+)\.sh$/;
 
 /** How long a preamble cache with no live session behind it is kept before the sweep takes it. */
 export const AGENT_PREAMBLE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
@@ -1432,11 +1422,11 @@ export async function pruneAgentSessionPreambles(
 }
 
 /**
- * Refresh the USER-LEVEL skill copy (`~/.claude/skills/codeman`) IF one exists and is
- * Codeman-managed. `codeman skill install` (no `--case`) writes that copy once, and
+ * Refresh the USER-LEVEL skill copy (`~/.claude/skills/reverie`) IF one exists and is
+ * Reverie-managed. `reverie skill install` (no `--case`) writes that copy once, and
  * unlike per-case copies (re-installed on every session create) nothing ever refreshed
  * it, so it stayed at whatever version installed it. That matters because Claude Code
- * loads the USER-LEVEL copy over a case's fresh one when both carry the name `codeman`:
+ * loads the USER-LEVEL copy over a case's fresh one when both carry the name `reverie`:
  * observed live 2026-08-14, an Aug 9 user copy (pre fast-path, pre lineage header)
  * shadowed the current per-case injections, so every agent-driven spawn ran the old
  * recipes, spawned workers serially, and lost their lineage arcs.
@@ -1445,7 +1435,7 @@ export async function pruneAgentSessionPreambles(
  * copy), and foreign/symlink copies are refused by installAgentSkillInto itself.
  */
 export async function refreshUserAgentSkill(): Promise<AgentSkillApplyResult | 'absent'> {
-  const skillDir = join(homedir(), '.claude', 'skills', 'codeman');
+  const skillDir = join(homedir(), '.claude', 'skills', 'reverie');
   try {
     const existing = await readFile(join(skillDir, 'SKILL.md'), 'utf-8');
     if (!existing.includes(AGENT_SKILL_MARKER_PREFIX)) return 'foreign';
@@ -1456,7 +1446,7 @@ export async function refreshUserAgentSkill(): Promise<AgentSkillApplyResult | '
 }
 
 /**
- * Remove a Codeman-managed skill copy from `skillDir`. Same ownership and symlink
+ * Remove a Reverie-managed skill copy from `skillDir`. Same ownership and symlink
  * refusals as the install path. Deletes only files the packaged source would have
  * written (never `rm -rf`, so a user's extra files in the directory survive), then
  * prunes the directories bottom-up if they emptied.
@@ -1507,13 +1497,13 @@ export function agentSkillDir(
   return capabilities.agentSkillDir ?? CLAUDE_AGENT_SKILL_DIR;
 }
 
-/** `<casePath>/<dir>/codeman`, the directory the skill's SKILL.md lives in. */
+/** `<casePath>/<dir>/reverie`, the directory the skill's SKILL.md lives in. */
 export function agentSkillDirFor(casePath: string, dir: AgentSkillDir): string {
-  return join(casePath, dir, 'codeman');
+  return join(casePath, dir, 'reverie');
 }
 
 /**
- * Add or remove the Codeman agent skill in `<case>/<dir>/codeman`, where `dir` is the
+ * Add or remove the Reverie agent skill in `<case>/<dir>/reverie`, where `dir` is the
  * skills directory the session's CLI scans (default: Claude Code's `.claude/skills`;
  * callers resolve it with `agentSkillDir()`), mirroring `applyStatusLineConfig`'s
  * shape. Gated by the synced `agentSkillEnabled` app setting (default OFF).
@@ -1527,7 +1517,7 @@ export function agentSkillDirFor(casePath: string, dir: AgentSkillDir): string {
  * no server-side toggle-off sweep (it would have to walk every case, including ones
  * with live sessions, and would hit exactly the shared-workspace hazard above), so
  * already-injected copies stay on disk until removed per case with
- * `codeman skill uninstall --case <name>`, which removes the Codeman-managed copy from
+ * `reverie skill uninstall --case <name>`, which removes the Reverie-managed copy from
  * every skills directory the registry could have written. The `enabled: false` branch
  * here backs that CLI and the tests; it has no server call site. Keep the README's
  * Agent Skill note in sync if this ever changes.

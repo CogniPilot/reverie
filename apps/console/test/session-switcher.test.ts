@@ -12,7 +12,7 @@ type Row = { id: string; state: string; hooks?: string[]; since?: number };
 type Ranked = Array<{ id: string; level: number; reason: string }>;
 
 function load(): { rank(rows: Row[]): Ranked } {
-  const context = vm.createContext({ CodemanApp: class {} });
+  const context = vm.createContext({ ReverieApp: class {} });
   vm.runInContext(readFileSync(resolve(import.meta.dirname, '../src/web/public/session-switcher.js'), 'utf8'), context);
   return { rank: (rows) => JSON.parse(JSON.stringify(context.rankSessionsNeedingHelp(rows))) };
 }
@@ -71,7 +71,7 @@ describe('rankSessionsNeedingHelp', () => {
 describe('switcher rows', () => {
   it('turns a quiet session with an open dialog into a "dialog" row, never over a permission prompt', () => {
     class App {}
-    const context = vm.createContext({ CodemanApp: App });
+    const context = vm.createContext({ ReverieApp: App });
     vm.runInContext(
       readFileSync(resolve(import.meta.dirname, '../src/web/public/session-switcher.js'), 'utf8'),
       context

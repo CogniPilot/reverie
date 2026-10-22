@@ -83,11 +83,11 @@ describe('real company session adapter with isolated mocked CLI IO', () => {
       binding,
       employee,
       prompt: 'Explore with real tools',
-      env: { FLEET_RESEARCH_CYCLE_ID: binding.cycleId, FLEET_EMPLOYEE_ID: employee.id },
+      env: { REVERIE_RESEARCH_CYCLE_ID: binding.cycleId, REVERIE_EMPLOYEE_ID: employee.id },
     });
 
   beforeEach(async () => {
-    directory = await mkdtemp(join(tmpdir(), 'fleet-company-runtime-'));
+    directory = await mkdtemp(join(tmpdir(), 'reverie-company-runtime-'));
     harness.configs = [];
     harness.buffer = 'shift+tab';
     harness.startupError = false;
@@ -175,7 +175,7 @@ describe('real company session adapter with isolated mocked CLI IO', () => {
     expect(config.codexConfig.resumeSessionId).toBeUndefined();
     expect(config.geminiConfig.resumeSession).toBeUndefined();
     expect(config.antigravityConfig.resumeConversationId).toBeUndefined();
-    expect(config.envOverrides.FLEET_RESEARCH_CYCLE_ID).toBe(binding.cycleId);
+    expect(config.envOverrides.REVERIE_RESEARCH_CYCLE_ID).toBe(binding.cycleId);
     expect(harness.send).toHaveBeenCalledOnce();
     expect(ctx.sessions.get(main.id)).toBe(main);
     expect(ctx.cleanupSession).not.toHaveBeenCalledWith(main.id, expect.anything(), expect.anything());

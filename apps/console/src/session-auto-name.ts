@@ -5,14 +5,14 @@
  * what it is doing. Once the user submits a real prompt the tab can carry a
  * title derived from it (`w3-myapp: fix the login redirect`), and this module
  * holds the three pure pieces of that: a tracker that reconstructs the composer
- * text from the keystrokes Codeman forwards, the title heuristic, and the
+ * text from the keystrokes Reverie forwards, the title heuristic, and the
  * prefix-preserving composition.
  *
  * Deliberately no LLM: the prompt already passes through the input boundary,
  * so a local title is private, deterministic and identical for every CLI.
  *
  * ⚠️ The tracker sits on the raw keystroke stream, which carries far more than
- * the prompt: cursor keys, mouse reports Codeman forwards to the CLI, bracketed
+ * the prompt: cursor keys, mouse reports Reverie forwards to the CLI, bracketed
  * pastes, Alt chords, the bare Esc that interrupts a turn. Every one of those
  * once named a tab something wrong (a lone Esc ate the next prompt's first
  * character; a wheel tick mid-word dropped the first half of the prompt), so
@@ -341,7 +341,7 @@ function fitTitle(title: string, maxUnits: number): string {
   return truncateCodePoints(title, keep + 1);
 }
 
-/** Codeman's own `w<n>-<case>` / `s<n>-<case>` placeholders, the only names auto-naming replaces. */
+/** Reverie's own `w<n>-<case>` / `s<n>-<case>` placeholders, the only names auto-naming replaces. */
 export function isGeneratedSessionName(name: string): boolean {
   return /^[ws]\d+-[a-zA-Z0-9_-]+$/.test(name);
 }

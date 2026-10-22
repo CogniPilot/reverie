@@ -32,7 +32,9 @@ vi.mock('node:fs', async (importOriginal) => {
 });
 
 import { FileStreamManager } from '../src/file-stream-manager.js';
-import { existsSync, statSync } from 'node:fs';
+import { existsSync, statSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 /**
  * Creates a mock ChildProcess-like EventEmitter with stdout/stderr streams.
@@ -66,16 +68,22 @@ describe('FileStreamManager', () => {
   // ========== Stream Creation ==========
 
   it('refuses to tail a bot token store inside an otherwise allowed workspace', async () => {
-    vi.stubEnv('FLEET_DATA_DIR', '/workspace/private-console');
-    const result = await manager.createStream({
-      sessionId: 'test-secret',
-      filePath: '/workspace/private-console/external-chat.json',
-      workingDir: '/workspace',
-      onData: () => {},
-    });
-    expect(result.success).toBe(false);
-    expect(result.error).toContain('blocked');
-    expect(mockSpawn).not.toHaveBeenCalled();
+    const workspace = mkdtempSync(join(tmpdir(), 'reverie-file-stream-'));
+    const dataDir = join(workspace, 'private-console');
+    vi.stubEnv('REVERIE_DATA_DIR', dataDir);
+    try {
+      const result = await manager.createStream({
+        sessionId: 'test-secret',
+        filePath: join(dataDir, 'external-chat.json'),
+        workingDir: workspace,
+        onData: () => {},
+      });
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('blocked');
+      expect(mockSpawn).not.toHaveBeenCalled();
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+    }
   });
 
   describe('createStream', () => {

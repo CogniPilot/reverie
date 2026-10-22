@@ -16,7 +16,7 @@
  * routes on ADMIN_ROUTES, whatever their class; the route handlers ask `adminGrant(req)`.
  *
  * The caller is the owner (a valid owner session cookie), a service (a service token), an agent
- * (an `X-Codeman-Parent-Session` that resolves; a routing hint, not authentication), or anonymous.
+ * (an `X-Reverie-Parent-Session` that resolves; a routing hint, not authentication), or anonymous.
  * An owner-cookie request that changes state, or opens a WebSocket, must come from the console's
  * own origin (the Origin's host equals the Host header): same-site pages on another port or tailnet
  * name cannot ride the cookie.
@@ -58,6 +58,7 @@ const AGENT_ROUTES = new Set([
   'POST /api/quick-start',
   'GET /api/session-lifecycle',
   'GET /api/company',
+  'POST /api/company/employees/:id/wake', // route checks the explicit owner-granted recovery capability
   'GET /api/plans', // read-only; the route scopes by role (coordinators all accounts, other agents their own)
   'POST /api/company/self',
   'POST /api/company/self/avatar',
@@ -193,7 +194,7 @@ export function callerOf(req: FastifyRequest, deps: Pick<PolicyDeps, 'service' |
   if (session) return { kind: session.restricted ? 'restricted-owner' : 'owner' };
   const token = req.headers[SERVICE_HEADER];
   if (typeof token === 'string' && deps.service.service(token)) return { kind: 'service' };
-  if (req.headers['x-codeman-parent-session'] !== undefined) {
+  if (req.headers['x-reverie-parent-session'] !== undefined) {
     const id = resolveParentSessionId(deps.ctx, req, undefined, ownerFor(req));
     return id ? { kind: 'agent', session: id } : { kind: 'invalid' };
   }
@@ -243,7 +244,8 @@ export function registerOwnerPolicy(app: FastifyInstance, deps: PolicyDeps): voi
     if (!PARENT_BODY_ROUTES.has(key) || declared === undefined || declared === null || declared === '') return;
     if (typeof declared === 'string' && deps.relations.related(caller.session!, declared)) return;
     const detail = { caller: caller.session, route: key, declared: String(declared).slice(0, 100) };
-    if (policy === 'log') return auditHourly('policy_would_deny', `agent parent_declared ${key}`, { ...detail, reason: 'parent_declared' });
+    if (policy === 'log')
+      return auditHourly('policy_would_deny', `agent parent_declared ${key}`, { ...detail, reason: 'parent_declared' });
     delete body!.parentSessionId;
     auditHourly('parent_ignored', `${caller.session} ${key}`, detail);
   });
@@ -271,7 +273,11 @@ export function registerOwnerPolicy(app: FastifyInstance, deps: PolicyDeps): voi
     const upgrade = String(req.headers.upgrade ?? '').toLowerCase() === 'websocket';
     const deny = (status: 401 | 403, message: string, reason: string, code?: ApiErrorCode) => {
       if (policy === 'log')
-        return auditHourly('policy_would_deny', `${caller.kind} ${reason} ${key}`, { caller: caller.kind, reason, route: key });
+        return auditHourly('policy_would_deny', `${caller.kind} ${reason} ${key}`, {
+          caller: caller.kind,
+          reason,
+          route: key,
+        });
       return refuse(reply, status, message, code);
     };
 

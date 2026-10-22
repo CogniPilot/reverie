@@ -122,7 +122,7 @@ export function verifyPtySpawn(ptyDir) {
     try {
         const pty = require(ptyDir); // directory require → node-pty's "main" (lib/index.js)
         const file = process.platform === 'win32' ? process.env.COMSPEC || 'cmd.exe' : '/bin/echo';
-        const args = process.platform === 'win32' ? ['/c', 'exit'] : ['codeman-node-pty-check'];
+        const args = process.platform === 'win32' ? ['/c', 'exit'] : ['reverie-node-pty-check'];
         child = pty.spawn(file, args, {
             name: 'xterm-color',
             cols: 80,
@@ -157,7 +157,7 @@ export function verifyPtySpawn(ptyDir) {
  */
 function rebuildFromSource(ptyDir, cwd) {
     const prebuilds = join(ptyDir, 'prebuilds');
-    const backup = join(ptyDir, '.prebuilds-codeman-backup');
+    const backup = join(ptyDir, '.prebuilds-reverie-backup');
 
     let backedUp = false;
     if (existsSync(prebuilds)) {

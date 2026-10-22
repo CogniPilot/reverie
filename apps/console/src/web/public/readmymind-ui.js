@@ -22,15 +22,15 @@
  *
  * Backend: src/web/routes/readmymind-routes.ts, design: docs/readmymind-plan.md.
  *
- * @mixin Extends CodemanApp.prototype via Object.assign
- * @dependency app.js (CodemanApp class, this.sessions, this.activeSessionId, showToast)
+ * @mixin Extends ReverieApp.prototype via Object.assign
+ * @dependency app.js (ReverieApp class, this.sessions, this.activeSessionId, showToast)
  * @dependency mobile-handlers.js (MobileDetection.isTouchDevice, focus policy)
  * @dependency settings-ui.js (loadAppSettingsFromStorage)
  * @dependency api-client.js at runtime (this._apiJson; loads later but is only called after init)
  * @loadorder 11.3, after panels-ui.js, before ultracode-panel.js
  */
 
-Object.assign(CodemanApp.prototype, {
+Object.assign(ReverieApp.prototype, {
   /** Synced setting, default OFF, opt-in via App Settings → Panels. */
   readMyMindEnabled() {
     return this.loadAppSettingsFromStorage().readMyMindEnabled === true;
@@ -120,7 +120,7 @@ Object.assign(CodemanApp.prototype, {
     alternates.replaceChildren();
     // The container is data-i18n-skip (suggestion text must never be mistaken
     // for app copy), so the one piece of app copy inside it is pre-translated.
-    const translate = window.codemanT || ((s) => s);
+    const translate = window.reverieT || ((s) => s);
     state.suggestions.forEach((suggestion, index) => {
       if (index === state.selected) return;
       const row = document.createElement('button');

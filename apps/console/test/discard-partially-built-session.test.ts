@@ -38,7 +38,7 @@ interface ServerInternals {
   discardPartiallyBuiltSession(sessionId: string): Promise<void>;
 }
 
-const WORKSPACE = join(homedir(), '.codeman-test-discard');
+const WORKSPACE = join(homedir(), '.reverie-test-discard');
 const SESSION_ID = 'a1b2c3d4e5f60718';
 
 let server: WebServer;

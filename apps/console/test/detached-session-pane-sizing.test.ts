@@ -35,7 +35,7 @@ let currentFetch: ReturnType<typeof vi.fn> = vi.fn();
 
 function loadTerminalMixin(): Record<string, unknown> {
   const source = readFileSync(resolve(import.meta.dirname, '../src/web/public/terminal-ui.js'), 'utf8');
-  const FakeCodemanApp = function () {} as unknown as { prototype: Record<string, unknown> };
+  const FakeReverieApp = function () {} as unknown as { prototype: Record<string, unknown> };
   const context = vm.createContext({
     console,
     performance,
@@ -44,13 +44,13 @@ function loadTerminalMixin(): Record<string, unknown> {
     setInterval: vi.fn(),
     clearInterval: vi.fn(),
     requestAnimationFrame: vi.fn(),
-    CodemanApp: FakeCodemanApp,
+    ReverieApp: FakeReverieApp,
     window: { addEventListener: vi.fn(), removeEventListener: vi.fn(), innerWidth: 1600 },
     document: { addEventListener: vi.fn() },
     fetch: (...args: unknown[]) => currentFetch(...args),
   });
   vm.runInContext(source, context);
-  return FakeCodemanApp.prototype;
+  return FakeReverieApp.prototype;
 }
 
 const mixin = loadTerminalMixin();
@@ -126,7 +126,7 @@ describe('detached sessions own their pane size', () => {
 });
 
 /**
- * `_redock` lives on the CodemanApp class rather than the terminal mixin, so it
+ * `_redock` lives on the ReverieApp class rather than the terminal mixin, so it
  * needs app.js loaded. Same `vm` approach as terminal-flush-budget.test.ts.
  */
 function loadAppClass() {
@@ -149,15 +149,15 @@ function loadAppClass() {
   });
   const constants = readFileSync(resolve(dir, 'constants.js'), 'utf8');
   const appSource = readFileSync(resolve(dir, 'app.js'), 'utf8');
-  vm.runInContext(`${constants}\n${appSource}\nglobalThis.__CodemanApp = CodemanApp;`, context);
-  return (context as { __CodemanApp: { prototype: Record<string, unknown> } }).__CodemanApp;
+  vm.runInContext(`${constants}\n${appSource}\nglobalThis.__ReverieApp = ReverieApp;`, context);
+  return (context as { __ReverieApp: { prototype: Record<string, unknown> } }).__ReverieApp;
 }
 
 describe('redock takes the sizing back', () => {
-  const CodemanApp = loadAppClass();
+  const ReverieApp = loadAppClass();
 
   function makeDashboard(activeSessionId: string | null) {
-    const app = Object.create(CodemanApp.prototype) as Record<string, any>;
+    const app = Object.create(ReverieApp.prototype) as Record<string, any>;
     app.detachedSessions = new Set([SESSION]);
     app.detachedWindows = new Map();
     app._detachWatchTimers = new Map();

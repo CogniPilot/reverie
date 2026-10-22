@@ -1,7 +1,7 @@
 /**
  * @fileoverview A fresh image volume starts in enforce: docker/entrypoint.sh writes the policy marker
  * `enforce` before any owner account exists, and bootstrap keeps it. Pins that the shared Basic
- * password (CODEMAN_PASSWORD, inherited by every process in the container) never reaches an owner
+ * password (REVERIE_PASSWORD, inherited by every process in the container) never reaches an owner
  * route on its own, that an agent header with it is refused, and that the signed-in owner gets through,
  * across a restart. Same hook order as server.ts: Basic auth, then the owner policy.
  * Synthetic fixtures only. Port: N/A (app.inject()).
@@ -100,8 +100,8 @@ describe('fresh volume: enforce by default', () => {
   }
 
   beforeEach(async () => {
-    savedPassword = process.env.CODEMAN_PASSWORD;
-    process.env.CODEMAN_PASSWORD = PASSWORD; // the middleware reads it at registration
+    savedPassword = process.env.REVERIE_PASSWORD;
+    process.env.REVERIE_PASSWORD = PASSWORD; // the middleware reads it at registration
     dir = await mkdtemp(join(tmpdir(), 'owner-fresh-'));
     store = new OwnerAuthStore(join(dir, 'owner-auth.json'));
     clock = 1_700_000_000_000;
@@ -109,8 +109,8 @@ describe('fresh volume: enforce by default', () => {
   });
   afterEach(async () => {
     await app?.close();
-    if (savedPassword === undefined) delete process.env.CODEMAN_PASSWORD;
-    else process.env.CODEMAN_PASSWORD = savedPassword;
+    if (savedPassword === undefined) delete process.env.REVERIE_PASSWORD;
+    else process.env.REVERIE_PASSWORD = savedPassword;
     await rm(dir, { recursive: true, force: true });
   });
 
@@ -121,10 +121,10 @@ describe('fresh volume: enforce by default', () => {
     for (const [method, url] of OWNER_ROUTES) {
       expect((await call(method, url, { basic: false })).statusCode, `${method} ${url} no Basic`).toBe(401);
       expect((await call(method, url)).statusCode, `${method} ${url} Basic only`).toBe(401);
-      const agent = await call(method, url, { headers: { 'x-codeman-parent-session': AGENT } });
+      const agent = await call(method, url, { headers: { 'x-reverie-parent-session': AGENT } });
       expect(agent.statusCode, `${method} ${url} Basic + agent`).toBe(403);
     }
-    expect((await call('GET', '/api/sessions', { headers: { 'x-codeman-parent-session': AGENT } })).statusCode).toBe(200);
+    expect((await call('GET', '/api/sessions', { headers: { 'x-reverie-parent-session': AGENT } })).statusCode).toBe(200);
     const page = await call('GET', '/');
     expect(page.statusCode).toBe(302);
     expect(page.headers.location).toBe('/owner/login?next=%2F');
@@ -151,7 +151,7 @@ describe('fresh volume: enforce by default', () => {
       expect((await call(method, url, { cookies: { [OWNER_COOKIE]: owner } })).statusCode, `${method} ${url} owner`).toBe(expected);
     }
     for (const [method, url] of OWNER_ROUTES) {
-      const agent = await call(method, url, { headers: { 'x-codeman-parent-session': AGENT } });
+      const agent = await call(method, url, { headers: { 'x-reverie-parent-session': AGENT } });
       expect(agent.statusCode, `${method} ${url} Basic + agent after sign-in`).toBe(403);
     }
 

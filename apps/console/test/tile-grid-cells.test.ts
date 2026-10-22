@@ -12,7 +12,7 @@
  *   to 3x2), else the tiles pack in reading order (fitTileCells).
  * - Focus never lands on an empty cell: the Alt+Shift+Arrow chords skip it,
  *   and Ctrl+Tab / Alt+[ ] cycle through the tiles only.
- * - `codeman:tile-grid` stores the cells (ids, `null` for a hole); a reload
+ * - `reverie:tile-grid` stores the cells (ids, `null` for a hole); a reload
  *   brings the holes back when the shape is the same, a session gone by then
  *   frees its cell for the ranking to fill (empty only when no other session
  *   is left), a different shape packs, and the old packed format reads
@@ -37,7 +37,7 @@ import {
 
 const SIX = ['s-a', 's-b', 's-c', 's-d', 's-e', 's-f'];
 const FIVE = SIX.slice(0, 5);
-const KEY = 'codeman:tile-grid';
+const KEY = 'reverie:tile-grid';
 const slots = () => section.children.filter((el) => el.className.split(' ').includes('tile-slot'));
 const stored = () => JSON.parse(localStore.get(KEY) ?? 'null');
 const tile = (id: string) => FakeTile.all.find((t) => t.sessionId === id && !t._destroyed) as FakeTile;

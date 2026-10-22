@@ -4,8 +4,8 @@
  * session options tabs (Ralph config tab), case settings (CRUD, links),
  * create case modal, and mobile case picker.
  *
- * @mixin Extends CodemanApp.prototype via Object.assign
- * @dependency app.js (CodemanApp class, this.sessions, this.cases, this.activeSessionId)
+ * @mixin Extends ReverieApp.prototype via Object.assign
+ * @dependency app.js (ReverieApp class, this.sessions, this.cases, this.activeSessionId)
  * @dependency constants.js (escapeHtml)
  * @dependency mobile-handlers.js (MobileDetection)
  * @loadorder 12 of 15 — loaded after panels-ui.js, before ralph-wizard.js
@@ -140,7 +140,7 @@ const EXTERNAL_CLI_MODES = new Set(Object.keys(RUN_MODE_LAUNCH));
 const BUILT_IN_RUN_MODES = new Set(['claude', 'shell', ...Object.keys(RUN_MODE_LAUNCH)]);
 
 function registryCliCatalog() {
-  return typeof window !== 'undefined' && Array.isArray(window.__codemanCliCatalog) ? window.__codemanCliCatalog : [];
+  return typeof window !== 'undefined' && Array.isArray(window.__reverieCliCatalog) ? window.__reverieCliCatalog : [];
 }
 
 function registryCliById(id) {
@@ -158,7 +158,7 @@ function isExternalCliSession(mode) {
   return registryCliById(mode)?.external ?? isExternalCliRunMode(mode);
 }
 
-Object.assign(CodemanApp.prototype, {
+Object.assign(ReverieApp.prototype, {
   /**
    * Build envOverrides payload from case + global settings.
    * Single source of truth for the server-side tmux setenv values.
@@ -564,7 +564,7 @@ Object.assign(CodemanApp.prototype, {
       } else {
         // No cases exist yet - show the default case name as directory
         select.value = 'testcase';
-        document.getElementById('dirDisplay').textContent = '~/codeman-cases/testcase';
+        document.getElementById('dirDisplay').textContent = '~/reverie-cases/testcase';
         this.updateMobileCaseLabel('testcase');
       }
       this.updateCasePickerInput(select.value);
@@ -690,7 +690,7 @@ Object.assign(CodemanApp.prototype, {
 
   setRunMode(mode) {
     this._runMode = mode;
-    try { localStorage.setItem('codeman_runMode', mode); } catch {}
+    try { localStorage.setItem('reverie_runMode', mode); } catch {}
     this._applyRunMode();
     // Sync to server for cross-device persistence
     this._apiPut('/api/settings', { runMode: mode }).catch(() => {});
@@ -783,7 +783,7 @@ Object.assign(CodemanApp.prototype, {
     // perfectly installed while no pane-capable profile exists, because DeepSeek
     // ships no terminal front door. In that state the honest offer is "add one",
     // not a hidden entry with no explanation anywhere.
-    const avail = window.__codemanCliAvailable || {};
+    const avail = window.__reverieCliAvailable || {};
     const dsInstall = menu.querySelector('#runModeDeepSeekInstall');
     if (dsInstall) {
       dsInstall.style.display = !avail.deepseek && avail.deepseekBinary ? 'flex' : 'none';
@@ -825,7 +825,7 @@ Object.assign(CodemanApp.prototype, {
    * feature is off, no endpoint has a usable default model, or the active case is
    * remote/docker (the apply route refuses both — see session-routes.ts).
    *
-   * `window.__codemanCustomModelClis` is server-injected at render time from the
+   * `window.__reverieCustomModelClis` is server-injected at render time from the
    * CLI registry's own `capabilities.customModelInjection` (never a hardcoded id
    * list here), so a CLI gaining or losing the capability shows up with no
    * frontend change.
@@ -845,7 +845,7 @@ Object.assign(CodemanApp.prototype, {
     // Matches _refreshRunModeAvailability's own gate: a stock entry for an
     // uninstalled CLI is hidden, so a generated one must be too, or a box with
     // no codex still offers "Codex (llama.cpp)" and fails at launch.
-    const capableClis = (window.__codemanCustomModelClis || []).filter((cli) => this.isCliAvailable(cli.id));
+    const capableClis = (window.__reverieCustomModelClis || []).filter((cli) => this.isCliAvailable(cli.id));
     if (!settings.customModelEndpointsEnabled || capableClis.length === 0) return hide();
 
     const caseName = document.getElementById('quickStartCase')?.value;
@@ -919,9 +919,9 @@ Object.assign(CodemanApp.prototype, {
     await this._openCustomModelPickModal(mode, host);
   },
 
-  /** localStorage key for the last model launched on a given (harness, endpoint) pair — per-device by design, like every other `codeman:*` UI preference, never synced. */
+  /** localStorage key for the last model launched on a given (harness, endpoint) pair — per-device by design, like every other `reverie:*` UI preference, never synced. */
   _customModelLastUsedKey(mode, endpointId) {
-    return `codeman:customModelLastUsed:${mode}:${endpointId}`;
+    return `reverie:customModelLastUsed:${mode}:${endpointId}`;
   },
 
   /** Reads the last model chosen for this (harness, endpoint) pair, or null. Never throws — a blocked/full localStorage just means no promotion, not a broken picker. */
@@ -1012,7 +1012,7 @@ Object.assign(CodemanApp.prototype, {
     }
 
     this._pendingCustomModelPick = { mode, endpointId: host.id };
-    const cliLabel = (window.__codemanCustomModelClis || []).find((c) => c.id === mode)?.label || mode;
+    const cliLabel = (window.__reverieCustomModelClis || []).find((c) => c.id === mode)?.label || mode;
     // A static title (translatable by i18n.js's exact-string walker) plus a
     // dynamic hint carrying the specifics — same split webviewModalTitle uses,
     // since the walker cannot i18n a string a variable is already spliced into.
@@ -1655,7 +1655,7 @@ Object.assign(CodemanApp.prototype, {
       });
       const data = await res.json();
       if (!data.success) throw new Error(data.error || 'Failed to install the profile');
-      window.__codemanCliAvailable = { ...(window.__codemanCliAvailable || {}), deepseek: !!data.data.runnable };
+      window.__reverieCliAvailable = { ...(window.__reverieCliAvailable || {}), deepseek: !!data.data.runnable };
       this._appendSessionLaunchStatus(ownsLaunchTerminal, `Installed ${data.data.package} into profile "${data.data.profile}".`);
       this.showToast?.(`DeepSeek profile "${data.data.profile}" installed`, 'success');
       const menu = document.getElementById('runModeMenu');
@@ -1861,7 +1861,7 @@ Object.assign(CodemanApp.prototype, {
   _initRunMode() {
     this.renderRegistryRunOptions();
     let savedMode = 'claude';
-    try { savedMode = localStorage.getItem('codeman_runMode') || 'claude'; } catch { /* localStorage unavailable */ }
+    try { savedMode = localStorage.getItem('reverie_runMode') || 'claude'; } catch { /* localStorage unavailable */ }
     // Go through the setter so a CLI disabled after the previous visit, or a
     // removed custom CLI, cannot survive in localStorage as a runnable mode.
     this.runMode = savedMode;
@@ -1971,7 +1971,7 @@ Object.assign(CodemanApp.prototype, {
       // through /api/quick-start, which resolves the remote case + launches via ssh.
       if (caseData.location === 'remote' || caseData.location === 'docker') {
         // Name remote/docker tabs with the same w<n>-<case> convention as local
-        // sessions (quick-start would otherwise auto-generate codeman-<id>).
+        // sessions (quick-start would otherwise auto-generate reverie-<id>).
         const startNumber = this._nextCaseSessionStartNumber(caseName);
         // Docker (NOT remote): the App Settings Claude Model choice applies — the
         // workspace is a real host dir, so quick-start writes it to the case's
@@ -2461,7 +2461,7 @@ Object.assign(CodemanApp.prototype, {
   _tabDetachOverrides() {
     if (this._tabDetachOverrideMap === undefined) {
       try {
-        this._tabDetachOverrideMap = JSON.parse(localStorage.getItem('codeman:tab-detach-overrides') || '{}') || {};
+        this._tabDetachOverrideMap = JSON.parse(localStorage.getItem('reverie:tab-detach-overrides') || '{}') || {};
       } catch (_e) {
         this._tabDetachOverrideMap = {};
       }
@@ -2484,7 +2484,7 @@ Object.assign(CodemanApp.prototype, {
       if (key !== id && this.sessions && !this.sessions.has(key)) delete map[key];
     }
     try {
-      localStorage.setItem('codeman:tab-detach-overrides', JSON.stringify(map));
+      localStorage.setItem('reverie:tab-detach-overrides', JSON.stringify(map));
     } catch (_e) {
       /* storage full/blocked: the in-memory map still applies this page load */
     }
@@ -2832,14 +2832,14 @@ Object.assign(CodemanApp.prototype, {
   /**
    * Session Options → Respawn → "Prompt cache": the main conversation's cache state as
    * Claude Code reports it on the statusline (`session.promptCache`, v2.1.251+), worded by
-   * the pure `CodemanPromptCache.format` (constants.js). Refreshed on open and on the
+   * the pure `ReveriePromptCache.format` (constants.js). Refreshed on open and on the
    * `session:promptCache` SSE event while the modal shows that session.
    */
   updatePromptCacheStatus(sessionId) {
     const el = document.getElementById('promptCacheStatus');
     if (!el || this.editingSessionId !== sessionId) return;
     const session = this.sessions.get(sessionId);
-    el.textContent = window.CodemanPromptCache.format(session?.promptCache, Date.now(), session?.statusLineExporter);
+    el.textContent = window.ReveriePromptCache.format(session?.promptCache, Date.now(), session?.statusLineExporter);
   },
 
   _onSessionPromptCache(data) {
@@ -3294,7 +3294,7 @@ Object.assign(CodemanApp.prototype, {
     if (customToggle) customToggle.checked = false;
     const customPath = document.getElementById('newCasePath');
     if (customPath) customPath.value = '';
-    const me = window.__codemanUser || {};
+    const me = window.__reverieUser || {};
     const customRow = document.getElementById('newCaseCustomPathToggleRow');
     if (customRow) customRow.style.display = me.multiUser && me.role !== 'admin' ? 'none' : '';
     this.toggleNewCaseCustomPath();
@@ -3476,18 +3476,18 @@ Object.assign(CodemanApp.prototype, {
     const row = document.getElementById('newCaseCustomPathRow');
     if (!custom || !row) return;
     row.style.display = custom.checked ? '' : 'none';
-    // The "under ~/codeman-cases" wording is wrong while a custom folder is picked.
+    // The "under ~/reverie-cases" wording is wrong while a custom folder is picked.
     const blurb = document.getElementById('newCaseBlurb');
     if (blurb) {
       blurb.textContent = custom.checked
         ? 'A fresh workspace in a folder you choose, scaffolded with its own CLAUDE.md.'
-        : 'A fresh workspace under ~/codeman-cases, scaffolded with its own CLAUDE.md.';
+        : 'A fresh workspace under ~/reverie-cases, scaffolded with its own CLAUDE.md.';
     }
     const nameHint = document.getElementById('newCaseNameHint');
     if (nameHint) {
       nameHint.textContent = custom.checked
         ? 'Letters, numbers, hyphens, underscores only. Created inside the parent folder below.'
-        : 'Letters, numbers, hyphens, underscores only. Created in ~/codeman-cases/';
+        : 'Letters, numbers, hyphens, underscores only. Created in ~/reverie-cases/';
     }
     custom.disabled = !!docker?.checked;
     custom.title = docker?.checked ? 'Not available for a Docker case' : '';
@@ -4279,7 +4279,7 @@ Object.assign(CodemanApp.prototype, {
     const adopting = !!document.getElementById('dockerAdoptExisting')?.checked;
     const container = document.getElementById('dockerContainerName')?.value.trim() || '';
     const adoptWorkdir = document.getElementById('dockerAdoptWorkdir')?.value.trim() || '';
-    const image = document.getElementById('dockerImage').value.trim() || 'codeman/agent:base';
+    const image = document.getElementById('dockerImage').value.trim() || 'reverie/agent:base';
     const network = document.getElementById('dockerNetwork').value;
     const memory = document.getElementById('dockerMemory').value.trim();
     const cpus = document.getElementById('dockerCpus').value.trim();
@@ -4406,7 +4406,7 @@ Object.assign(CodemanApp.prototype, {
           return `<div class="case-manage-item" style="display:flex; align-items:center; gap:8px; justify-content:space-between;">
             <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${nm}">${nm} <span class="form-hint">(${mb} MB)</span></span>
             <span style="flex-shrink:0;">
-              <a class="btn-toolbar" href="${CodemanBase.url(`/api/docker-exports/${encodeURIComponent(e.name)}`)}" download>Download</a>
+              <a class="btn-toolbar" href="${ReverieBase.url(`/api/docker-exports/${encodeURIComponent(e.name)}`)}" download>Download</a>
               <button class="btn-toolbar" onclick="app.importDockerBundle('${nm.replace(/'/g, "\\'")}')">Import</button>
               <button class="btn-toolbar" onclick="app.deleteDockerExport('${nm.replace(/'/g, "\\'")}')">Delete</button>
             </span>
@@ -4519,7 +4519,7 @@ Object.assign(CodemanApp.prototype, {
 
   /**
    * Explicit Discover action (Decision A — never auto-runs on host select).
-   * Saves the host config (idempotent), then queries the host for `codeman-*`
+   * Saves the host config (idempotent), then queries the host for `reverie-*`
    * tmux sessions it didn't create and renders an Attach action per session.
    */
   async discoverRemoteSessions() {
@@ -4564,7 +4564,7 @@ Object.assign(CodemanApp.prototype, {
     const results = document.getElementById('remoteDiscoverResults');
     if (!results) return;
     if (!sessions.length) {
-      results.innerHTML = '<div class="form-hint">No <code>codeman-*</code> sessions running on this host (or it is unreachable).</div>';
+      results.innerHTML = '<div class="form-hint">No <code>reverie-*</code> sessions running on this host (or it is unreachable).</div>';
       return;
     }
     const now = Math.floor(Date.now() / 1000);
@@ -5091,7 +5091,7 @@ Object.assign(CodemanApp.prototype, {
   },
 });
 
-Object.defineProperty(CodemanApp.prototype, 'runMode', {
+Object.defineProperty(ReverieApp.prototype, 'runMode', {
   configurable: true,
   enumerable: true,
   get() {

@@ -17,7 +17,7 @@
  * the session resolves owner + workingDir server-side, so a caller can never
  * address another case's profile by guessing keys.
  *
- * Predict gathers every signal Codeman already has (intent profile, pending
+ * Predict gathers every signal Reverie already has (intent profile, pending
  * approval dialog, transcript tail, git state, run-summary events, sibling
  * sessions), assembles a budgeted prompt via the pure
  * `buildPredictionContext()`, and runs the one-shot predictor. Claude-mode

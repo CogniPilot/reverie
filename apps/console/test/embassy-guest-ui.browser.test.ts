@@ -18,7 +18,7 @@ beforeEach(async()=>{
  await page.addScriptTag({content:`
  ${member.toString()} ${room.toString()} ${message.toString()} ${createServer.toString()}
  const user={kind:'user',name:'Owner'};
- window.CodemanUrlSession={sessionIdFromFragment:()=>null};window.__server=createServer([room('r1','General',[member('local','Local')])]);
+ window.ReverieUrlSession={sessionIdFromFragment:()=>null};window.__server=createServer([room('r1','General',[member('local','Local')])]);
  window.fetch=()=>Promise.resolve({ok:true});
  window.__eg={calls:[],failPost:false,connections:['one','two'].map(id=>({id,origin:'https://'+id+'.example.test',roomId:'remote-'+id,roomName:'Shared room',hostCompany:'Remote',guest:{company:'Visitor',identity:'Guest'},expiresAt:Date.now()+3600000,enabled:true,status:'live',postCount:1})),histories:{one:[{ackId:'p1',sequence:1,at:1,text:'<img src=x> @everyone /command',author:{company:'Remote',identity:'Visitor'},trust:'guest'}],two:[{ackId:'p2',sequence:1,at:1,text:'Another independent conversation',author:{company:'Other',identity:'Guest'},trust:'guest'}]}};
  const oldHandle=window.__server.handle;
@@ -39,7 +39,7 @@ beforeEach(async()=>{
  ${appStub}
  `});
  for(const f of ['chatroom-ui.js','chat-media.js'])await page.addScriptTag({content:read(f)});
- await page.addScriptTag({content:'window.app=new CodemanApp();'});await page.addScriptTag({content:read('chat-app.js')});
+ await page.addScriptTag({content:'window.app=new ReverieApp();'});await page.addScriptTag({content:read('chat-app.js')});
  await page.waitForSelector('.eg-channel');
 });
 it('CAT1-CAT3 shows real category rows, keyboard collapse and independently bound conversations',async()=>{

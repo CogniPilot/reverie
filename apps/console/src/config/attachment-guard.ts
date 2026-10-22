@@ -10,16 +10,16 @@
  *     trees `/root` and `/etc` (anything under them is blocked). The operator
  *     EXTENDS — never shrinks — this set with additional absolute directory
  *     trees via the settings key `attachmentBlockedPaths: string[]` and/or the
- *     env var `CODEMAN_ATTACHMENT_BLOCKED_PATHS` (comma-separated).
+ *     env var `REVERIE_ATTACHMENT_BLOCKED_PATHS` (comma-separated).
  *
  *  2. **Workspace confinement (OPTIONAL, default OFF).** When enabled, an
  *     attachment must resolve INSIDE the registering session's workingDir
  *     (reusing `validateSessionFilePath` containment semantics). This is
  *     strictly more restrictive than the blocklist and breaks intentional
- *     cross-workspace attachment (codeman-publish, the ~/.codeman review-card
+ *     cross-workspace attachment (reverie-publish, the ~/.reverie review-card
  *     loop), so it is OFF by default. Toggle via settings
  *     `attachmentConfineToWorkspace: boolean` and/or env
- *     `CODEMAN_ATTACHMENT_CONFINE` (`1`/`true`).
+ *     `REVERIE_ATTACHMENT_CONFINE` (`1`/`true`).
  *
  * All paths passed to the predicates here MUST be absolute and symlink-resolved
  * (realpath) by the caller, mirroring `isSensitivePath`'s contract.
@@ -78,7 +78,7 @@ export function isUnderTree(absPath: string, tree: string): boolean {
 
 /** Parses the comma-separated env override into a list of normalized trees. */
 function parseEnvBlockedTrees(): string[] {
-  const raw = process.env.CODEMAN_ATTACHMENT_BLOCKED_PATHS;
+  const raw = process.env.REVERIE_ATTACHMENT_BLOCKED_PATHS;
   if (!raw) return [];
   return raw
     .split(',')
@@ -88,7 +88,7 @@ function parseEnvBlockedTrees(): string[] {
 
 /** Parses the env confinement toggle (`1`/`true`/`yes`/`on`, case-insensitive). */
 function parseEnvConfine(): boolean | undefined {
-  const raw = process.env.CODEMAN_ATTACHMENT_CONFINE;
+  const raw = process.env.REVERIE_ATTACHMENT_CONFINE;
   if (raw === undefined) return undefined;
   return /^(1|true|yes|on)$/i.test(raw.trim());
 }

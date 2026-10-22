@@ -70,7 +70,7 @@ describe('chatroom:turn', () => {
   const post = (id: string, text: string) => app.inject({ method: 'POST', url: `/api/chatrooms/${id}/messages`, payload: { text } });
 
   it('is sent for each member a message wakes, in the room it came from, with no text', async () => {
-    const id = await room('Fleet');
+    const id = await room('Reverie');
     await flush();
     expect(turns()).toEqual([]); // the briefings are not turns the page should show as "thinking in the room"
     await post(id, '@alpha secret plan');
@@ -86,7 +86,7 @@ describe('chatroom:turn', () => {
   });
 
   it('is not sent for a held message, and is sent once a later message wakes the member', async () => {
-    const id = await room('Fleet');
+    const id = await room('Reverie');
     await flush();
     await post(id, 'quiet note');
     await flush();
@@ -109,7 +109,7 @@ describe('chatroom:turn', () => {
   });
 
   it('is not sent when the line could not be written', async () => {
-    const id = await room('Fleet');
+    const id = await room('Reverie');
     await flush();
     events.length = 0;
     (ctx.sessions.get(A) as unknown as { writeViaMux: () => Promise<boolean> }).writeViaMux = async () => false;

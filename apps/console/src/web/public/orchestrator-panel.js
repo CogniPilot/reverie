@@ -3,8 +3,8 @@
  * Shows orchestrator state, plan phases, task progress, and verification results.
  * Provides controls for start, approve, reject, pause, resume, stop, skip, retry.
  *
- * @mixin Extends CodemanApp.prototype via Object.assign
- * @dependency app.js (CodemanApp class, this.orchestratorState)
+ * @mixin Extends ReverieApp.prototype via Object.assign
+ * @dependency app.js (ReverieApp class, this.orchestratorState)
  * @dependency constants.js (SSE_EVENTS, escapeHtml)
  * @loadorder 9.5 of 16 — loaded after ralph-panel.js, before settings-ui.js
  */
@@ -33,7 +33,7 @@ const ORCH_PHASE_STATUS_ICONS = {
   skipped: '\u2192',    // →
 };
 
-Object.assign(CodemanApp.prototype, {
+Object.assign(ReverieApp.prototype, {
 
   // ═══════════════════════════════════════════════════════════════
   // SSE Event Handlers

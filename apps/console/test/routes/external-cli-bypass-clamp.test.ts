@@ -49,7 +49,7 @@ describe('clampExternalCliBypassForOwner — multi-user mode', () => {
   // The temp HOME from test/setup.ts is per-FILE, so users.json survives between
   // tests here — create the three accounts once.
   beforeAll(async () => {
-    process.env.CODEMAN_MULTIUSER = '1';
+    process.env.REVERIE_MULTIUSER = '1';
     invalidateUsersCache();
     await createUser({ username: 'boss', role: 'admin', password: PASSWORD });
     await createUser({ username: 'peon', role: 'user', password: PASSWORD });
@@ -57,7 +57,7 @@ describe('clampExternalCliBypassForOwner — multi-user mode', () => {
   });
 
   afterAll(() => {
-    delete process.env.CODEMAN_MULTIUSER;
+    delete process.env.REVERIE_MULTIUSER;
     invalidateUsersCache();
   });
 

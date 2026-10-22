@@ -51,30 +51,55 @@ jobs:
           echo "tag $TAG is $actual; release notes name ${reviewed:-nothing}"
           test -n "$reviewed" && test "$reviewed" = "$actual"
 
-      - name: Build
-        env:
-          VERSION: ${{ github.event.release.tag_name || github.sha }}
+      - uses: cachix/install-nix-action@448cde739abec1eaf0646249e3d25bb8d9bc7702 # v31
+
+      - name: Check and build the flake on vanilla Ubuntu
         run: |
-          docker build --file docker/Containerfile --tag "reverie:$GITHUB_SHA" \
-            --build-arg "REVERIE_VERSION=${VERSION#v}" \
-            --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" \
-            --label "org.opencontainers.image.revision=$GITHUB_SHA" .
+          mkdir -p "$HOME/scratch/reverie/build" "$HOME/scratch/reverie/tmp"
+          export TMPDIR="$HOME/scratch/reverie/tmp"
+          nix flake check --print-build-logs
+          nix build .#default --out-link "$HOME/scratch/reverie/build/app"
+          "$HOME/scratch/reverie/build/app/bin/reverie" --version
+          nix build .#memory --out-link "$HOME/scratch/reverie/build/memory"
+          "$HOME/scratch/reverie/build/memory/bin/python3" -I -c 'import reverie, experts; from reverie.memory import MemoryStore; MemoryStore(":memory:").close()'
+          nix build .#dockerImage --out-link "$HOME/scratch/reverie/build/docker-image"
+          docker load --input "$HOME/scratch/reverie/build/docker-image"
+          docker tag reverie:latest "reverie:$GITHUB_SHA"
           docker image inspect --format '{{.Id}}' "reverie:$GITHUB_SHA" | tee image-id.txt
+
+      - name: Start the native application with an empty instance
+        run: |
+          app="$HOME/scratch/reverie/build/app/bin/reverie"
+          native_home=$(mktemp -d "$HOME/scratch/reverie/tmp/native-home.XXXXXX")
+          HOME="$native_home" REVERIE_DATA_DIR="$native_home/data" REVERIE_PASSWORD=ci-local-password \
+            "$app" web --host 127.0.0.1 --port 3100 > "$native_home/console.log" 2>&1 &
+          native_pid=$!
+          trap 'kill "$native_pid" 2>/dev/null || true; wait "$native_pid" 2>/dev/null || true' EXIT
+          code=000
+          for _ in $(seq 1 60); do
+            code=$(curl --silent --output /dev/null --write-out '%{http_code}' http://127.0.0.1:3100/api/status || true)
+            [ "$code" = 401 ] && break
+            kill -0 "$native_pid" || { cat "$native_home/console.log"; exit 1; }
+            sleep 1
+          done
+          [ "$code" = 401 ] || { cat "$native_home/console.log"; exit 1; }
 
       - name: Check the image contents
         run: |
-          docker save "reverie:$GITHUB_SHA" --output image.tar
-          python3 -m cto.image_check image.tar --allow docker/image-check-allow.tsv --json image-check.json
+          image_archive="$HOME/scratch/reverie/build/image.tar"
+          docker save "reverie:$GITHUB_SHA" --output "$image_archive"
+          "$HOME/scratch/reverie/build/memory/bin/python3" -I -m reverie.image_check "$image_archive" --allow docker/image-check-allow.tsv --json image-check.json
           unpacked=$(docker image inspect --format '{{.Size}}' "reverie:$GITHUB_SHA")
-          compressed=$(gzip -1 --stdout image.tar | wc -c)
+          compressed=$(gzip -1 --stdout "$image_archive" | wc -c)
           echo "image size: $((unpacked / 1000000)) MB unpacked, about $((compressed / 1000000)) MB compressed" \
             | tee -a "$GITHUB_STEP_SUMMARY"
-          rm image.tar
+          rm "$image_archive"
 
-      - name: Boot with an empty instance and no mounts
+      - name: Boot an empty instance and preserve it across recreation
         run: |
           # The image's own start script and default command, as a user would run it.
-          docker run --detach --name boot --network none "reverie:$GITHUB_SHA"
+          trap 'docker rm --force boot 2>/dev/null || true; docker volume rm reverie-ci-instance reverie-ci-home 2>/dev/null || true' EXIT
+          docker run --detach --restart unless-stopped --name boot --network none --volume reverie-ci-instance:/instances --volume reverie-ci-home:/home/agent "reverie:$GITHUB_SHA"
           status() { docker exec boot curl -sS -o /dev/null -w '%{http_code}' "$@" http://127.0.0.1:3000/api/status || true; }
           for _ in $(seq 1 60); do
             code=$(status)
@@ -96,10 +121,55 @@ jobs:
           # change, owner route 200, and the refusals. The one-time password stays in 0600 files.
           docker exec -i boot bash -s < .github/ci/boot-owner.sh || ok=
           test "$(docker exec boot stat -c %a /instances/default/owner-password)" = 600 || ok=
-          docker exec boot /opt/fleet/python/bin/python3 -I -c 'import cto, experts' || ok=
+          docker exec boot /opt/reverie/python/bin/python3 -I -c 'import reverie, experts' || ok=
           docker inspect --format 'state {{.State.Status}}, exit code {{.State.ExitCode}}' boot
           docker logs boot 2>&1 | tail -n 40
+          docker exec boot bash -c 'mkdir -p "$HOME/.config/reverie-ci"; printf preserved > "$HOME/.config/reverie-ci/home-marker"'
+          before=$(docker exec boot sha256sum /instances/default/owner-password /instances/default/console/owner-auth.json /instances/default/console/owner-auth.policy /home/agent/.config/reverie-ci/home-marker)
           docker rm --force boot
+          docker run --detach --restart unless-stopped --name boot --network none --volume reverie-ci-instance:/instances --volume reverie-ci-home:/home/agent "reverie:$GITHUB_SHA"
+          code=000
+          for _ in $(seq 1 60); do
+            code=$(status)
+            [ "$code" = 401 ] && break
+            sleep 1
+          done
+          [ "$code" = 401 ] || ok=
+          after=$(docker exec boot sha256sum /instances/default/owner-password /instances/default/console/owner-auth.json /instances/default/console/owner-auth.policy /home/agent/.config/reverie-ci/home-marker)
+          [ "$before" = "$after" ] || ok=
+          # Let Docker consider startup successful before testing its restart policy.
+          sleep 10
+          restart_before=$(docker inspect --format '{{.RestartCount}}' boot)
+          pid=$(docker inspect --format '{{.State.Pid}}' boot)
+          test "$(docker inspect --format '{{.Name}} {{.State.Running}}' boot)" = '/boot true'
+          [[ "$pid" =~ ^[0-9]+$ ]] || exit 1
+          [ "$pid" -gt 1 ] || exit 1
+          # docker kill marks the container manually stopped and suppresses this policy.
+          # Kill only this fresh test container's inspected host PID1 as an unexpected crash.
+          sudo kill -KILL -- "$pid"
+          restarted=0
+          for _ in $(seq 1 60); do
+            restart_after=$(docker inspect --format '{{.RestartCount}}' boot)
+            running=$(docker inspect --format '{{.State.Running}}' boot)
+            if [ "$restart_after" -gt "$restart_before" ] && [ "$running" = true ]; then restarted=1; break; fi
+            sleep 1
+          done
+          [ "$restarted" = 1 ] || { docker logs boot; exit 1; }
+          # Readiness is checked only after a confirmed new process starts.
+          code=000
+          for _ in $(seq 1 60); do
+            code=$(status)
+            [ "$code" = 401 ] && break
+            sleep 1
+          done
+          [ "$code" = 401 ] || ok=
+          recovered=$(docker exec boot sha256sum /instances/default/owner-password /instances/default/console/owner-auth.json /instances/default/console/owner-auth.policy /home/agent/.config/reverie-ci/home-marker)
+          [ "$before" = "$recovered" ] || ok=
+          docker stop --time 5 boot
+          stopped_restarts=$(docker inspect --format '{{.RestartCount}}' boot)
+          sleep 2
+          test "$(docker inspect --format '{{.State.Running}}' boot)" = false
+          test "$(docker inspect --format '{{.RestartCount}}' boot)" = "$stopped_restarts"
           test "${ok:-}" = 1
 
       - name: Publish the release

@@ -106,7 +106,7 @@ describe('Pi CLI resolver', () => {
     // resolution SUCCEEDS, and this test fails — pinning hermeticity by
     // behavior rather than by source text. (The suites must never execute
     // whatever `pi` binary the machine running them happens to carry.)
-    const root = mkdtempSync(join(tmpdir(), 'codeman-pi-vitest-gate-'));
+    const root = mkdtempSync(join(tmpdir(), 'reverie-pi-vitest-gate-'));
     temporaryDirectories.push(root);
     const binaryPath = join(root, 'pi');
     writeFileSync(binaryPath, '#!/bin/sh\necho 0.99.0\n');

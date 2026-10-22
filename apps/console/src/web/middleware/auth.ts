@@ -43,7 +43,7 @@ declare module 'fastify' {
 }
 
 // Auth session cookie name
-export const AUTH_COOKIE_NAME = 'codeman_session';
+export const AUTH_COOKIE_NAME = 'reverie_session';
 
 /** State returned from registerAuthMiddleware for cleanup in server stop() */
 interface AuthState {
@@ -136,7 +136,7 @@ function isPasswordChangeExempt(req: FastifyRequest): boolean {
  * Requests under `/webview/<cap>/` cannot authenticate the normal way. The iframe
  * rendering a dashboard is sandboxed without `allow-same-origin`, so it runs in an
  * opaque origin: every request it makes is cross-site, meaning the `SameSite=lax`
- * `codeman_session` cookie is never attached, and non-GET requests and WebSocket
+ * `reverie_session` cookie is never attached, and non-GET requests and WebSocket
  * upgrades arrive with `Origin: null`. Both the cookie check and the CSRF Origin
  * guard would therefore reject a perfectly legitimate dashboard asset load.
  *
@@ -159,18 +159,18 @@ function hasValidWebviewCapability(req: FastifyRequest, basePath = ''): boolean 
   if (fromPath) return webviewCapabilities.resolve(fromPath) !== undefined;
 
   // Referer form: a dashboard subresource requested with a ROOT-ABSOLUTE URL, which
-  // lands on Codeman's root and is relayed by the 404 fallback. Without this the
+  // lands on Reverie's root and is relayed by the 404 fallback. Without this the
   // asset would be rejected here, before the fallback ever runs.
   //
   // This is the only exemption decided by a header the request itself supplies, so
-  // it is fenced in hard: safe methods only, and never for Codeman's own functional
+  // it is fenced in hard: safe methods only, and never for Reverie's own functional
   // surfaces. Without those fences a page could present a webview Referer and skip
   // auth on /api. It is not a privilege escalation even so, holding a live
   // capability already implies an authenticated `POST /api/webviews/:id/open`, but
   // the exemption should stay no wider than the problem it solves.
   if (req.method !== 'GET' && req.method !== 'HEAD') return false;
   if (url.startsWith('/ws/') || url.startsWith('/q/')) return false;
-  // Anything that resolves to a REAL Codeman route is refused, which is the fence
+  // Anything that resolves to a REAL Reverie route is refused, which is the fence
   // that keeps this from being an auth bypass. `/api/` used to be refused by prefix
   // instead, but dashboards legitimately serve assets from their own `/api/...`
   // namespace (`<img src="/api/hero?slug=x">`), and those requests were the one
@@ -215,17 +215,17 @@ function hasValidHtmlViewCapability(req: FastifyRequest): boolean {
  * the credential checks, so the reload of a proxied dashboard neither shows a
  * login challenge inside the tab nor counts as a failed attempt against the
  * caller's IP — a dev server that full-reloads on every save would otherwise
- * rate-limit its own user out of Codeman. Fenced like the Referer exemption: a
+ * rate-limit its own user out of Reverie. Fenced like the Referer exemption: a
  * path that resolves to a real route (/api, /q, a registered handler) is never
  * answered this way, so a genuine unauthenticated navigation still gets the 401.
  *
  * `/` is the one registered route that IS answered here, and only when the
  * request carries neither the session cookie nor an Authorization header. The
  * shim maps `/webview/<cap>/` to exactly `/`, so a dashboard that reloads on its
- * landing page (a Vite dev server on a config change) asks for Codeman's root
- * as an iframe navigation; answering that with the app shell put Codeman inside
+ * landing page (a Vite dev server on a config change) asks for Reverie's root
+ * as an iframe navigation; answering that with the app shell put Reverie inside
  * its own web tab, and with a password it was a 401 in the frame. Nothing in
- * Codeman frames its own root and the sandboxed frame has no credentials, so the
+ * Reverie frames its own root and the sandboxed frame has no credentials, so the
  * credential-free form can only be that frame; a framed `/` WITH credentials is
  * still the shell. Property worth knowing: a non-browser client can set these
  * headers too, so an unauthenticated caller can tell a registered route (401)
@@ -249,7 +249,7 @@ function serveLostWebviewFrame(req: FastifyRequest, reply: FastifyReply): boolea
 
 /**
  * The landing-page case of serveLostWebviewFrame, for the index route. Without
- * CODEMAN_PASSWORD no auth hook runs at all, so a lost frame's reload of `/`
+ * REVERIE_PASSWORD no auth hook runs at all, so a lost frame's reload of `/`
  * reaches `GET /` directly and the route asks this before rendering the shell.
  * Under a password the hook has already answered a credential-free lost frame,
  * so here it only ever sees the credentialed form, which stays the shell.
@@ -268,7 +268,7 @@ export function sendLostWebviewFramePage(reply: FastifyReply): FastifyReply {
 }
 
 /**
- * Whether `url` resolves to a route Codeman actually registered.
+ * Whether `url` resolves to a route Reverie actually registered.
  *
  * `hasRoute()` is the wrong tool: it matches the registered PATTERN literally, so
  * `/api/sessions/abc` reports false against a registered `/api/sessions/:id` and
@@ -299,7 +299,7 @@ function matchesRegisteredRoute(req: FastifyRequest, url: string): boolean {
 
 /**
  * Register HTTP Basic Auth middleware with session cookies and rate limiting.
- * Only active when CODEMAN_PASSWORD is set.
+ * Only active when REVERIE_PASSWORD is set.
  *
  * The `/api/hook-event` + `/api/status-telemetry` localhost bypass requires the
  * shared hook secret unconditionally (COD-91) — see the onRequest hook below.
@@ -320,11 +320,11 @@ export function registerAuthMiddleware(app: FastifyInstance, https: boolean, bas
   if (!app.hasRequestDecorator('authUser')) app.decorateRequest('authUser', undefined);
 
   const multiUser = isMultiUserMode();
-  const authPassword = process.env.CODEMAN_PASSWORD;
+  const authPassword = process.env.REVERIE_PASSWORD;
 
   // No auth at all: single-user with no password (byte-identical to legacy). In
   // multi-user mode auth is ALWAYS active (users authenticate individually), even
-  // without CODEMAN_PASSWORD.
+  // without REVERIE_PASSWORD.
   if (!multiUser && !authPassword) return state;
 
   // Session token store — active sessions extend TTL on access
@@ -370,8 +370,8 @@ export function registerAuthMiddleware(app: FastifyInstance, https: boolean, bas
     return state;
   }
 
-  // ── Single-user Basic Auth (unchanged behavior; CODEMAN_PASSWORD required) ──
-  const authUsername = process.env.CODEMAN_USERNAME || 'admin';
+  // ── Single-user Basic Auth (unchanged behavior; REVERIE_PASSWORD required) ──
+  const authUsername = process.env.REVERIE_USERNAME || 'admin';
   const expectedHeader = 'Basic ' + Buffer.from(`${authUsername}:${authPassword}`).toString('base64');
 
   app.addHook('onRequest', (req, reply, done) => {
@@ -549,7 +549,7 @@ function registerMultiUserAuthHook(
     const record = sessionToken ? authSessions.get(sessionToken) : undefined;
     if (record && record.username) {
       // Security: re-validate the cookie identity against the store on every request so
-      // an out-of-band mutation the in-memory map can't see (the `codeman users` CLI,
+      // an out-of-band mutation the in-memory map can't see (the `reverie users` CLI,
       // a separate process, deleting/disabling/demoting a user) takes effect promptly
       // instead of riding the 24h cookie. findUser is cached ~1s, so this is cheap.
       let live: Awaited<ReturnType<typeof findUser>>;
@@ -689,12 +689,12 @@ export function registerHostGuard(app: FastifyInstance, getPolicy: () => HostPol
  * Register security headers and CORS middleware on every response.
  */
 export function registerSecurityHeaders(app: FastifyInstance, https: boolean, basePath = ''): void {
-  // Gesture-control overlay (opt-in via CODEMAN_GESTURE=1) runs MediaPipe, which
+  // Gesture-control overlay (opt-in via REVERIE_GESTURE=1) runs MediaPipe, which
   // needs WebAssembly eval (script-src) and blob workers (worker-src). Its wasm
   // runtime + model are self-hosted under /gesture/ (same-origin, covered by
   // 'self'), so no CDN connect-src entries are needed. OFF by default so the
   // production CSP is byte-for-byte unchanged.
-  const gesture = process.env.CODEMAN_GESTURE === '1';
+  const gesture = process.env.REVERIE_GESTURE === '1';
   const scriptSrc =
     "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net" + (gesture ? " 'wasm-unsafe-eval'" : '');
   const connectSrc = "connect-src 'self' wss://api.deepgram.com";

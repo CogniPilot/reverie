@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/images/codeman-title.svg" alt="Reverie" height="60">
+  <img src="docs/images/reverie-title.svg" alt="Reverie" height="60">
 </p>
 
 <h2 align="center">AI 编程智能体的任务控制中心</h2>
@@ -17,10 +17,10 @@
   <a href="https://nodejs.org/"><img src="https://img.shields.io/badge/Node.js-22%2B-22c55e?style=flat-square&logo=node.js&logoColor=white" alt="Node.js 22+"></a>
   <a href="https://www.typescriptlang.org/"><img src="https://img.shields.io/badge/TypeScript-5.9-3b82f6?style=flat-square&logo=typescript&logoColor=white" alt="TypeScript 5.9"></a>
   <a href="https://fastify.dev/"><img src="https://img.shields.io/badge/Fastify-5.x-1e3a5f?style=flat-square&logo=fastify&logoColor=white" alt="Fastify"></a>
-  <a href="https://www.npmjs.com/package/aicodeman"><img src="https://img.shields.io/npm/v/aicodeman?style=flat-square&label=npm&color=22c55e" alt="npm version"></a>
-  <a href="https://github.com/Ark0N/Codeman/stargazers"><img src="https://img.shields.io/github/stars/Ark0N/Codeman?style=flat-square&color=eab308" alt="GitHub stars"></a>
-  <a href="https://github.com/Ark0N/Codeman/graphs/contributors"><img src="https://img.shields.io/github/contributors/Ark0N/Codeman?style=flat-square&color=3b82f6" alt="Contributors"></a>
-  <a href="https://github.com/Ark0N/Codeman/commits/master"><img src="https://img.shields.io/github/commit-activity/t/Ark0N/Codeman?style=flat-square&color=1e3a5f" alt="Total commits"></a>
+  <a href="https://www.npmjs.com/package/aireverie"><img src="https://img.shields.io/npm/v/aireverie?style=flat-square&label=npm&color=22c55e" alt="npm version"></a>
+  <a href="https://github.com/jgoppert/reverie/stargazers"><img src="https://img.shields.io/github/stars/jgoppert/reverie?style=flat-square&color=eab308" alt="GitHub stars"></a>
+  <a href="https://github.com/jgoppert/reverie/graphs/contributors"><img src="https://img.shields.io/github/contributors/jgoppert/reverie?style=flat-square&color=3b82f6" alt="Contributors"></a>
+  <a href="https://github.com/jgoppert/reverie/commits/master"><img src="https://img.shields.io/github/commit-activity/t/jgoppert/reverie?style=flat-square&color=1e3a5f" alt="Total commits"></a>
 </p>
 
 <p align="center">
@@ -33,10 +33,10 @@
 
 一行命令即可安装（macOS 和 Linux，Windows 通过 WSL）：
 
-> **来源说明 / Provenance.** 下面的 `curl ... getcodeman.com/install` 与 `npm ... aicodeman` 命令安装的是上游 Codeman 项目，而不是本仓库，仅作历史记录保留。从本仓库运行：`npm ci && npm run build`，然后 `reverie web`；容器方式见 `docker/README.md`（`docker/Start-Codeman.sh`）。
+> **来源说明 / Provenance.** 下面的 `curl ... github.com/jgoppert/reverie/install` 与 `npm ... aireverie` 命令安装的是上游 Reverie 项目，而不是本仓库，仅作历史记录保留。从本仓库运行：`npm ci && npm run build`，然后 `reverie web`；容器方式见 根目录的 `README.md`（Nix 构建镜像）。
 
 ```bash
-curl -fsSL https://getcodeman.com/install | bash
+curl -fsSL https://github.com/jgoppert/reverie/install | bash
 ```
 
 ```bash
@@ -54,7 +54,7 @@ reverie web
 - **自托管、私有**：默认仅环回、MIT 许可、无遥测，完全运行在你自己的机器上
 
 <p align="center">
-  <img src="docs/images/codeman-tour-20260724.png" alt="Reverie 仪表盘导览：按项目分组的会话标签页、一键 Run 启动新智能体、页头实时用量" width="900">
+  <img src="docs/images/reverie-tour-20260724.png" alt="Reverie 仪表盘导览：按项目分组的会话标签页、一键 Run 启动新智能体、页头实时用量" width="900">
 </p>
 
 ---
@@ -62,15 +62,15 @@ reverie web
 ## 快速开始 — 安装
 
 ```bash
-curl -fsSL https://getcodeman.com/install | bash
+curl -fsSL https://github.com/jgoppert/reverie/install | bash
 ```
 
-该脚本会在缺失时自动安装 Node.js、tmux 和一套构建工具链（node-pty 没有 Linux 预编译包，需要从源码编译），把 Reverie 克隆到 `~/.codeman/app` 并完成构建。几点须知：
+该脚本会在缺失时自动安装 Node.js、tmux 和一套构建工具链（node-pty 没有 Linux 预编译包，需要从源码编译），把 Reverie 克隆到 `~/.reverie/app` 并完成构建。几点须知：
 
 - **先询问，后改动。** 所有系统级改动（安装软件包、下载 AI CLI）都会先征求确认；结束时的菜单可选择：直接在本终端运行、安装为后台服务（systemd/launchd，开机自启），或暂不启动。不选就不会有任何后台进程。
 - **怎么访问，由你决定。** 安装器提供三种到达仪表盘的方式：**Tailscale**（环回绑定，由 `tailscale serve` 代理，得到带真实证书的 `https://<机器名>.<tailnet>.ts.net`，用你的 tailnet 当登录，无需密码）、**局域网内任意设备**（`0.0.0.0`，会提示设置一个强烈推荐的密码），或**仅本机**（`127.0.0.1`，最安全）。绑定网络却跳过密码需要显式确认，并以醒目警告收尾。高亮的默认项反映机器上已有的状态（已在用 Tailscale 时默认 Tailscale，重跑时沿用现有绑定），直接回车绝不会引入新软件。手动运行的 `reverie web` 仍默认仅环回。
-- **重跑即更新。** 再次运行同一条命令即可原地更新已完成的安装：`~/.codeman/app` 中的本地改动会被 stash（绝不丢弃），运行中的服务会自动重启并校验。若首次安装中途失败，重跑会继续完成完整的安装流程。也可以使用 `install.sh update` 与 `install.sh uninstall`。
-- **CI / 无终端环境：** 没有终端时，涉及系统改动的步骤会带着说明中止，而不是静默执行；在自动化场景设置 `CODEMAN_NONINTERACTIVE=1` 即可批准这些步骤。
+- **重跑即更新。** 再次运行同一条命令即可原地更新已完成的安装：`~/.reverie/app` 中的本地改动会被 stash（绝不丢弃），运行中的服务会自动重启并校验。若首次安装中途失败，重跑会继续完成完整的安装流程。也可以使用 `install.sh update` 与 `install.sh uninstall`。
+- **CI / 无终端环境：** 没有终端时，涉及系统改动的步骤会带着说明中止，而不是静默执行；在自动化场景设置 `REVERIE_NONINTERACTIVE=1` 即可批准这些步骤。
 
 你至少需要安装一个 AI 编程 CLI —— [Claude Code](https://docs.anthropic.com/en/docs/claude-code)、[OpenCode](https://opencode.ai)、[Codex](https://developers.openai.com/codex/cli)、[Antigravity](https://antigravity.google)、[Gemini CLI](https://github.com/google-gemini/gemini-cli)、[Pi](https://pi.dev)、[Grok Build](https://github.com/xai-org/grok-build)、[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 或 [OMP](https://github.com/can1357/oh-my-pi)（任意组合均可；自 Google 面向消费者停售后，Gemini CLI 仅限企业版，Antigravity 是其继任者）。安装器会自动检测这九个中已安装的任意一个；若一个都没有，会给出一个菜单让你安装其中任意一个（DeepSeek 除外，它的 npm 包只装一个启动器，没有可运行的 profile），也可以选择跳过、稍后自行安装。安装完成后：
 
@@ -86,7 +86,7 @@ reverie users add alice --admin      # 创建第一个管理员账号
 reverie web --multiuser              # 命名登录 + 按用户隔离的案例空间
 ```
 
-**更喜欢 Docker Compose？** `docker/` 里附带一套本地镜像的 Compose 部署：把 `docker/.env.example` 复制为 `docker/.env`，设置 `CODEMAN_PASSWORD`，然后在 Linux 上运行 `bash docker/Start-Codeman.sh`。Reverie 自己跑在容器里，并通过宿主机的 socket 把 Docker 案例作为并列容器拉起。更新之后请再跑一次这个脚本，而不是直接 `docker compose up`，这样重建的镜像、刷新的卷和新的入口脚本会一起就位。直接的 Compose 命令、存储与网络选项见 [Docker 部署指南](docker/README.md)（英文）。
+**更喜欢 Docker Compose？** `docker/` 里附带一套本地镜像的 Compose 部署：把 `docker/.env.example` 复制为 `docker/.env`，设置 `REVERIE_PASSWORD`，然后在 Linux 上运行 `bash docker/Start-Reverie.sh`。Reverie 自己跑在容器里，并通过宿主机的 socket 把 Docker 案例作为并列容器拉起。更新之后请再跑一次这个脚本，而不是直接 `docker compose up`，这样重建的镜像、刷新的卷和新的入口脚本会一起就位。直接的 Compose 命令、存储与网络选项见 [Docker 部署指南](docker/README.md)（英文）。
 
 详见下文[多用户模式](#多用户模式可选启用)。
 
@@ -96,14 +96,14 @@ reverie web --multiuser              # 命名登录 + 按用户隔离的案例�
 想让它活过你启动它的那个 shell，而且什么都不用配置：
 
 ```bash
-reverie web -d          # 脱离终端；日志写到 ~/.codeman/web.log
+reverie web -d          # 脱离终端；日志写到 ~/.reverie/web.log
 reverie web --status    # 是否在运行，pid 是多少
 reverie web --stop      # 优雅的 SIGTERM；智能体继续留在 tmux 里运行
 ```
 
 `-d` 会等到服务器真正应答后才报告成功，并且拒绝在同一个数据目录上启动第二个（两个服务器共用一个 tmux socket 会互相附着对方的会话）。
 
-想让它在重启后自动回来，就装成服务。安装器结尾的菜单（选项 2）会替你完成；`codeman service` 是 `npm i -g aicodeman` 安装的等价物：
+想让它在重启后自动回来，就装成服务。安装器结尾的菜单（选项 2）会替你完成；`reverie service` 是 `npm i -g aireverie` 安装的等价物：
 
 ```bash
 reverie service install     # systemd 用户单元（Linux）或 LaunchAgent（macOS）
@@ -111,7 +111,7 @@ reverie service status
 reverie service uninstall
 ```
 
-`service install` 会把你当前的 PATH 写进单元文件，这比听起来重要得多：launchd 只给任务 `/usr/bin:/bin:/usr/sbin:/sbin`，所以手写的 plist 根本找不到 Homebrew 或 nvm 装的 `node`、`tmux` 或 `claude`。它绝不会把 `CODEMAN_PASSWORD` 复制进单元文件；服务需要认证的话请自行添加。
+`service install` 会把你当前的 PATH 写进单元文件，这比听起来重要得多：launchd 只给任务 `/usr/bin:/bin:/usr/sbin:/sbin`，所以手写的 plist 根本找不到 Homebrew 或 nvm 装的 `node`、`tmux` 或 `claude`。它绝不会把 `REVERIE_PASSWORD` 复制进单元文件；服务需要认证的话请自行添加。
 
 如需手动编写单元文件：
 
@@ -119,14 +119,14 @@ reverie service uninstall
 
 ```bash
 mkdir -p ~/.config/systemd/user
-cat > ~/.config/systemd/user/codeman-web.service << EOF
+cat > ~/.config/systemd/user/reverie-web.service << EOF
 [Unit]
 Description=Reverie Web Server
 After=network.target
 
 [Service]
 Type=simple
-ExecStart=$(which node) $HOME/.codeman/app/dist/index.js web
+ExecStart=$(which node) $HOME/.reverie/app/dist/index.js web
 Restart=always
 RestartSec=10
 
@@ -134,7 +134,7 @@ RestartSec=10
 WantedBy=default.target
 EOF
 systemctl --user daemon-reload
-systemctl --user enable --now codeman-web
+systemctl --user enable --now reverie-web
 loginctl enable-linger $USER
 ```
 
@@ -142,30 +142,30 @@ loginctl enable-linger $USER
 
 ```bash
 mkdir -p ~/Library/LaunchAgents
-cat > ~/Library/LaunchAgents/com.codeman.web.plist << EOF
+cat > ~/Library/LaunchAgents/com.reverie.web.plist << EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
   "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
   <key>Label</key>
-  <string>com.codeman.web</string>
+  <string>com.reverie.web</string>
   <key>ProgramArguments</key>
   <array>
     <string>$(which node)</string>
-    <string>$HOME/.codeman/app/dist/index.js</string>
+    <string>$HOME/.reverie/app/dist/index.js</string>
     <string>web</string>
   </array>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
   <key>StandardOutPath</key>
-  <string>/tmp/codeman.log</string>
+  <string>/tmp/reverie.log</string>
   <key>StandardErrorPath</key>
-  <string>/tmp/codeman.log</string>
+  <string>/tmp/reverie.log</string>
 </dict>
 </plist>
 EOF
-launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.codeman.web.plist
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.reverie.web.plist
 ```
 
 </details>
@@ -174,7 +174,7 @@ launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.codeman.web.plist
 <summary><strong>Windows（WSL）</strong></summary>
 
 ```powershell
-wsl bash -c "curl -fsSL https://getcodeman.com/install | bash"
+wsl bash -c "curl -fsSL https://github.com/jgoppert/reverie/install | bash"
 ```
 
 Reverie 依赖 tmux，因此 Windows 用户需要 [WSL](https://learn.microsoft.com/en-us/windows/wsl/install)。如果还没装 WSL：在管理员 PowerShell 中运行 `wsl --install`，重启，打开 Ubuntu，然后在 WSL 内安装你偏好的 AI 编程 CLI（[Claude Code](https://docs.anthropic.com/en/docs/claude-code)、[OpenCode](https://opencode.ai)、[Codex](https://developers.openai.com/codex/cli)、[Antigravity](https://antigravity.google)、[Gemini CLI](https://github.com/google-gemini/gemini-cli)、[Pi](https://pi.dev)、[Grok Build](https://github.com/xai-org/grok-build)、[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 或 [OMP](https://github.com/can1357/oh-my-pi)）。安装完成后，即可从 Windows 浏览器访问 `http://localhost:3000`。
@@ -223,7 +223,7 @@ reverie web --https
 # 在手机上打开：https://<你的IP>:3000
 ```
 
-> `localhost` 走纯 HTTP 即可。从其他设备访问时请使用 `--https`，或使用 [Tailscale](https://tailscale.com/)（推荐）：安装器可以替你配好（在网络访问提示处选择 **Tailscale**，或在已有安装上运行 `bash ~/.codeman/app/install.sh tailscale`）。这样你会得到带真实证书的 `https://<你的机器>.<tailnet>.ts.net`：只对你的 tailnet 可见、无需密码，手机上的 PWA 安装和推送通知也都能用。
+> `localhost` 走纯 HTTP 即可。从其他设备访问时请使用 `--https`，或使用 [Tailscale](https://tailscale.com/)（推荐）：安装器可以替你配好（在网络访问提示处选择 **Tailscale**，或在已有安装上运行 `bash ~/.reverie/app/install.sh tailscale`）。这样你会得到带真实证书的 `https://<你的机器>.<tailnet>.ts.net`：只对你的 tailnet 可见、无需密码，手机上的 PWA 安装和推送通知也都能用。
 
 ### 安全的二维码认证
 
@@ -243,9 +243,9 @@ reverie web --https
 
 ```bash
 reverie web                       # localhost:3000（仅环回 —— 安全默认值）
-reverie web --port 8080           # 自定义端口（或设置 CODEMAN_PORT）
+reverie web --port 8080           # 自定义端口（或设置 REVERIE_PORT）
 reverie web --https               # 自签名 TLS（仅远程访问时需要）
-reverie web -H 0.0.0.0            # 绑定局域网 —— 必须设置 CODEMAN_PASSWORD（见「安全」）
+reverie web -H 0.0.0.0            # 绑定局域网 —— 必须设置 REVERIE_PASSWORD（见「安全」）
 reverie web -d                    # 脱离终端：关掉 shell 也在跑（--status、--stop）
 reverie service install           # systemd/launchd 服务：重启后自动回来
 ```
@@ -292,7 +292,7 @@ reverie service install           # systemd/launchd 服务：重启后自动回�
 ### 6. 随时随地访问
 
 - **手机/平板** —— UI 完全触控优化；扫描桌面上的**二维码**即可免密码登录。
-- **网络之外** —— `./scripts/tunnel.sh start` 打开一条 Cloudflare 隧道（先设置 `CODEMAN_PASSWORD`）。
+- **网络之外** —— `./scripts/tunnel.sh start` 打开一条 Cloudflare 隧道（先设置 `REVERIE_PASSWORD`）。
 - **SSH** —— `reverie tui` 是终端里的全屏会话面板（`reverie tui --list` 列出，`reverie tui 2` 直接附着到某个会话）。
 
 ### 7. 运维与维护
@@ -302,7 +302,7 @@ reverie service install           # systemd/launchd 服务：重启后自动回�
 - **自更新** —— git-clone 安装可在 **App Settings → System → Updates** 中原地更新。
 - **部署你自己的改动** —— 见[开发](#开发)。
 
-> ⚠️ **安全提示：** 如果你正在 Reverie 受管会话*内部*工作（`echo $CODEMAN_MUX` → `1`），绝不要直接运行 `tmux kill-session` / `pkill claude` —— 请使用 Web UI 或 `./scripts/tmux-manager.sh`。
+> ⚠️ **安全提示：** 如果你正在 Reverie 受管会话*内部*工作（`echo $REVERIE_MUX` → `1`），绝不要直接运行 `tmux kill-session` / `pkill claude` —— 请使用 Web UI 或 `./scripts/tmux-manager.sh`。
 
 ---
 
@@ -406,14 +406,14 @@ WATCHING → IDLE DETECTED → SEND UPDATE → /clear → /init → CONTINUE →
 
 ### 主机名感知的窗口标题
 
-在多台主机上运行 Reverie（笔记本、开发机、NAS）？浏览器标签标题是 `codeman:<主机名>`，让你无需点进去就能分辨每个标签对应哪个后端：
+在多台主机上运行 Reverie（笔记本、开发机、NAS）？浏览器标签标题是 `reverie:<主机名>`，让你无需点进去就能分辨每个标签对应哪个后端：
 
 ```bash
-reverie web                                # codeman:<os.hostname()>
-reverie web --title-hostname dev-box       # codeman:dev-box（用于覆盖嘈杂的主机名）
+reverie web                                # reverie:<os.hostname()>
+reverie web --title-hostname dev-box       # reverie:dev-box（用于覆盖嘈杂的主机名）
 ```
 
-标题在首字节时就被模板化进所提供的 HTML 中，因此从第一帧绘制起就是正确的，且无需 JavaScript 也能工作。同样的主机名前缀也应用于标签闪烁格式（`⚠️ (N) codeman:<host>`）和操作系统级桌面通知（`codeman:<host>: <事件>`），让系统通知中心里的跨主机提醒也不再含糊。
+标题在首字节时就被模板化进所提供的 HTML 中，因此从第一帧绘制起就是正确的，且无需 JavaScript 也能工作。同样的主机名前缀也应用于标签闪烁格式（`⚠️ (N) reverie:<host>`）和操作系统级桌面通知（`reverie:<host>: <事件>`），让系统通知中心里的跨主机提醒也不再含糊。
 
 ### 智能 Token 管理
 
@@ -450,9 +450,9 @@ PTY 输出 → 16ms 服务端批处理 → DEC 2026 包裹 → SSE → 客户端
 
 ## 更多特性
 
-- **后台守护进程与服务安装** —— `reverie web -d` 以脱离终端的方式运行服务器，带 pid 文件、`~/.codeman/web.log` 和经过校验的启动（它会轮询到服务器应答为止，所以端口冲突绝不会被当成成功）；`reverie service install` 写入一个 systemd 用户单元（Linux）或 LaunchAgent（macOS），并把你 shell 的 PATH 一并写进去，这样 nvm 或 Homebrew 装的 `node`、`tmux` 和 `claude` 才真的找得到。机密永远不会写进单元文件
+- **后台守护进程与服务安装** —— `reverie web -d` 以脱离终端的方式运行服务器，带 pid 文件、`~/.reverie/web.log` 和经过校验的启动（它会轮询到服务器应答为止，所以端口冲突绝不会被当成成功）；`reverie service install` 写入一个 systemd 用户单元（Linux）或 LaunchAgent（macOS），并把你 shell 的 PATH 一并写进去，这样 nvm 或 Homebrew 装的 `node`、`tmux` 和 `claude` 才真的找得到。机密永远不会写进单元文件
 - **自更新** —— systemd/launchd 管理下的 git-clone 安装可在 **App Settings → System → Updates** 中原地更新：它会检测最新发行版，自动暂存（stash）脏工作树，并在服务重启期间流式展示构建进度（npm 安装会被报告为不可更新）
-- **把 GitHub 仓库克隆成 case** —— 在 **Add Case → Clone Repo** 里粘贴一个仓库 URL，Reverie 会把它克隆到 `~/codeman-cases/<name>` 并注册为普通 case，随时可以跑智能体。输入时它会预检 URL（告诉你能否匿名克隆，并为可选的分支/标签字段提供仓库真实的分支与标签），从 URL 里填好 case 名，还让你选 Run 按钮该用哪个 CLI。支持 `https://` 的公开仓库；Reverie 绝不收集或保存凭据
+- **把 GitHub 仓库克隆成 case** —— 在 **Add Case → Clone Repo** 里粘贴一个仓库 URL，Reverie 会把它克隆到 `~/reverie-cases/<name>` 并注册为普通 case，随时可以跑智能体。输入时它会预检 URL（告诉你能否匿名克隆，并为可选的分支/标签字段提供仓库真实的分支与标签），从 URL 里填好 case 名，还让你选 Run 按钮该用哪个 CLI。支持 `https://` 的公开仓库；Reverie 绝不收集或保存凭据
 - **多 CLI** —— 每个会话可选 **Claude Code**、**OpenCode**、**Codex**、**Antigravity**、**Gemini**、**Pi**、**Grok**、**DeepSeek Harness** 或 **OMP**；环境变量前缀自动隔离（`CLAUDE_CODE_*`、`OPENCODE_*`、`CODEX_*`、`ANTIGRAVITY_*`、`GEMINI_*`/`GOOGLE_*`、`PI_*`、`GROK_*`/`XAI_*`、`DSH_*`/`DEEPSEEK_*` 与 `OMP_*`）。详见 [`docs/opencode-integration.md`](docs/opencode-integration.md)、[`docs/pi-integration.md`](docs/pi-integration.md)、[`docs/grok-integration.md`](docs/grok-integration.md)、[`docs/deepseek-integration.md`](docs/deepseek-integration.md) 与 [`docs/omp-integration.md`](docs/omp-integration.md)
 - **自定义模型端点**（1.29.0 新增，目前仅 HTTP API）—— 让某个会话的 CLI 指向任意 OpenAI 兼容端点，而不是它自己的官方后端：本地的 llama.cpp、llama-swap、Ollama 或 vLLM 机器，也可以是 Azure AI Foundry、OpenRouter 这类云端网关。端点只需保存一次（`POST /api/model-endpoints`，模型列表从它的 `/v1/models` 自动发现），再应用到会话（`POST /api/sessions/:id/custom-model`），CLI 就会在原地重启并接上该端点。Claude、OpenCode、Pi、Grok 与 OMP 已实测通过；Codex、Gemini 与 DeepSeek 存在已记录的缺口，Antigravity 没有可用机制。工具栏选择器是下一步。详见 [`docs/custom-model-endpoints.md`](docs/custom-model-endpoints.md)
 - **Web 标签页** —— 把 Grafana、Uptime Kuma、一个 Vite 开发服务器或任何仪表盘 URL 作为标签页打开在会话旁边（Run 下拉菜单 → **Web / URL** → **Add URL**）。仪表盘通过 Reverie 自己的源代理，因此 `http://` 目标在手机上走 HTTPS 也能用、走隧道也能用；单页应用能在自己的路径上正常路由，页面自己重载后也能自行恢复。智能体打印出的 `localhost` 链接会自动以 Web 标签页打开。详见 [`docs/web-tabs.md`](docs/web-tabs.md)
@@ -461,14 +461,14 @@ PTY 输出 → 16ms 服务端批处理 → DEC 2026 包裹 → SSE → 客户端
 - **Effort 与 Ultracode** —— 设置每会话的默认 effort（`low`–`max`），或启用 **ultracode**（动态多智能体工作流）。这些都只是软默认值 —— 会话中可随时用 `/effort` 切换。扩展思考预算也可配置
 - **语音输入** —— 用 Deepgram Nova-3 口述提示，或者干脆用这台机器的 Claude Code 登录、不需要任何 API key（App Settings → Voice；带 Web Speech API 回退）：切换录音、自动静音停止、实时音量表（`Ctrl+Shift+V`）
 - **图像输入** —— 直接把图片粘贴或拖放进会话
-- **手势控制** _(可选)_ —— 一个 MediaPipe 手部追踪叠加层，可徒手抓取/拖动会话窗口并捏合按钮。用 `CODEMAN_GESTURE=1` + App Settings → Terminal & Input 启用
+- **手势控制** _(可选)_ —— 一个 MediaPipe 手部追踪叠加层，可徒手抓取/拖动会话窗口并捏合按钮。用 `REVERIE_GESTURE=1` + App Settings → Terminal & Input 启用
 - **多显示器横跨** _(macOS)_ —— 一键打开一个横跨所有显示器最大化的浏览器窗口，让浮动的智能体/手势面板可以跨越物理拼接缝
 - **文件查看器按钮** _(可选)_ —— 页头新增一个按钮，一键切换内置文件浏览器面板；在 App Settings → Header & Panels → Header buttons 中启用
 - **CJK / 输入法支持** —— 完整支持中文 / 日文 / 韩文的组合输入，Ctrl、Alt 修饰的导航键也会原样透传给 CLI
 - **页头里的套餐用量** —— 页头实时显示 Claude 订阅用量（5 小时窗口与每周窗口），数据来自 Reverie 在拉起 `claude` 时临时交给它的 statusline 导出器，绝不会写进你的设置文件；Codex 的限额则来自它自己的 app-server。按设备生效：桌面默认开，手机默认关
 - **会话列表，随你摆** —— 页头横条、带筛选框的左侧边栏，或一条竖向导轨，导轨的详细行带有创建时间与状态时长并按活动状态排序；手机首页和桌面首页导轨用的是同一套顺序
 - **终端外观** —— 七套皮肤（其中四套浅色）、按设备保存的字体与字重（内置的 JetBrains Mono 覆盖 100 到 800 的字重），以及可选启用的入场动画，覆盖标签、智能体窗口、终端面板和连接线
-- **操作系统通知与主机名感知标题** —— 桌面提醒与标签标题以 `codeman:<host>` 为前缀，使多主机配置不再含糊
+- **操作系统通知与主机名感知标题** —— 桌面提醒与标签标题以 `reverie:<host>` 为前缀，使多主机配置不再含糊
 
 ---
 
@@ -495,7 +495,7 @@ PTY 输出 → 16ms 服务端批处理 → DEC 2026 包裹 → SSE → 客户端
 
 - **天生持久**：智能体运行在远程主机上一个专用的 tmux 会话里，SSH 断连、网络切换或笔记本休眠都不会中断任务。重新连接后回到同一个活跃对话。
 - **自动重连**：一个带上限退避的监视器发现 SSH 面板断开后，会静默重新附着到仍在运行的远程会话（设置中有总开关；主动杀掉的会话绝不会被复活）。
-- **发现与附着**：列出主机上已在运行的 `codeman-*` 会话（由那台机器自己的 Reverie 或其他操作者启动）并附着其一。非你所有的已附着会话在关闭标签时**只分离，绝不杀掉**。
+- **发现与附着**：列出主机上已在运行的 `reverie-*` 会话（由那台机器自己的 Reverie 或其他操作者启动）并附着其一。非你所有的已附着会话在关闭标签时**只分离，绝不杀掉**。
 - **共享会话**：多个客户端可以以不同窗口尺寸同时附着同一个远程会话而互不挤压；发现列表会显示带客户端计数的「shared」徽标。
 - **注入安全**：所有 ssh 命令行都经由单一的 shell 转义构建器生成，主机/路径/身份文件字段均有模式校验。
 - **文件也行**：远程 case 里的预览、下载和文本读取走同一条 ssh 连接（一次 `realpath` + `stat` 探测，然后流式 `cat`，支持 `Range` 拖动进度），所以点一个路径打开的就是智能体所在那台机器上的文件。什么都不会复制到 Reverie 主机；编辑和 Office 预览会明确返回 400，而不是一个误导性的 404。
@@ -508,7 +508,7 @@ PTY 输出 → 16ms 服务端批处理 → DEC 2026 包裹 → SSE → 客户端
 
 与一个小型互信团队共享同一个 Reverie，每人拥有自己的登录与工作空间。**默认关闭**：不加该开关时，行为与单用户完全一致。
 
-用 `reverie web --multiuser`（或 `CODEMAN_MULTIUSER=1`）启用。创建第一个管理员后，可通过 CLI 或 App Settings 中的 **Users** 标签页管理用户：
+用 `reverie web --multiuser`（或 `REVERIE_MULTIUSER=1`）启用。创建第一个管理员后，可通过 CLI 或 App Settings 中的 **Users** 标签页管理用户：
 
 ```bash
 reverie users add alice --admin      # 提示输入密码（或 --password-stdin）
@@ -516,8 +516,8 @@ reverie users add bob                # 普通用户
 reverie users list
 ```
 
-- **按用户的空间**：每个用户的案例位于 `~/codeman-users/<name>/cases`；会话、案例、搜索与实时事件都按属主隔离。管理员可以看到全部。
-- **可单独吊销的登录**：命名用户的密码以 scrypt 哈希保存在 `~/.codeman/users.json`；可随时禁用、重置（一次性密码）或删除账号。管理员操作审计记录在 `~/.codeman/admin-audit.jsonl`。
+- **按用户的空间**：每个用户的案例位于 `~/reverie-users/<name>/cases`；会话、案例、搜索与实时事件都按属主隔离。管理员可以看到全部。
+- **可单独吊销的登录**：命名用户的密码以 scrypt 哈希保存在 `~/.reverie/users.json`；可随时禁用、重置（一次性密码）或删除账号。管理员操作审计记录在 `~/.reverie/admin-audit.jsonl`。
 - **普通用户的更安全默认值**：非管理员以 `--permission-mode auto` 运行 Claude（Anthropic 的分类器护栏模式）；raw shell 会话、cron `launchCommand` 与跳过权限模式需要按用户显式授权。
 
 > ⚠️ **这只是工作空间的划分，不是用户之间的沙箱。** 所有会话都以同一个操作系统账户运行，因此有心用户的智能体依然能触及他人的文件。若需要真正的隔离，请结合 **Docker 案例**，或在不同的操作系统账户下运行独立实例。参见 [`docs/multi-user-plan.md`](docs/multi-user-plan.md) 与 [`docs/security-architecture.md`](docs/security-architecture.md) 的多用户章节。
@@ -532,7 +532,7 @@ reverie users list
 浏览器（手机/平板）→ Cloudflare 边缘（HTTPS）→ cloudflared → localhost:3000
 ```
 
-**前置条件：** 安装 [`cloudflared`](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/) 并在环境中设置 `CODEMAN_PASSWORD`。
+**前置条件：** 安装 [`cloudflared`](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/) 并在环境中设置 `REVERIE_PASSWORD`。
 
 ```bash
 # 快速开始
@@ -549,7 +549,7 @@ reverie users list
 
 ```bash
 # 启用为持久服务
-systemctl --user enable codeman-tunnel
+systemctl --user enable reverie-tunnel
 loginctl enable-linger $USER
 
 # 或通过 Reverie Web UI：App Settings → System → Remote access → Cloudflare Tunnel
@@ -560,12 +560,12 @@ loginctl enable-linger $USER
 <details>
 <summary><strong>认证</strong></summary>
 
-1. 首次请求 → 浏览器弹出 Basic Auth 提示（用户名：`admin` 或 `CODEMAN_USERNAME`）
-2. 成功后 → 服务端签发 `codeman_session` cookie（24 小时 TTL，活动时自动延长）
+1. 首次请求 → 浏览器弹出 Basic Auth 提示（用户名：`admin` 或 `REVERIE_USERNAME`）
+2. 成功后 → 服务端签发 `reverie_session` cookie（24 小时 TTL，活动时自动延长）
 3. 后续请求通过 cookie 静默认证
 4. 同一 IP 失败 10 次 → 429 速率限制（15 分钟衰减）
 
-通过隧道暴露前**务必设置 `CODEMAN_PASSWORD`** —— 否则任何拿到 URL 的人都能完全访问你的会话。
+通过隧道暴露前**务必设置 `REVERIE_PASSWORD`** —— 否则任何拿到 URL 的人都能完全访问你的会话。
 
 </details>
 
@@ -651,8 +651,8 @@ Reverie 默认用 `--dangerously-skip-permissions` 启动会话，因此 Web UI 
 
 ### 网络与访问
 
-- **默认仅环回** —— 绑定 `127.0.0.1`，仅可从本机访问，因此「无密码」默认配置开箱即安全。在未设置 `CODEMAN_PASSWORD` 的情况下绑定非环回主机会*启动但打印一条醒目警告*，并给出三个具体修复方案（设置密码、环回 + 一个带认证的隧道，或用 `--allow-unauthenticated-network` 显式确认）
-- **可选认证，真实会话** —— 通过 `CODEMAN_USERNAME`（默认 `admin`）/ `CODEMAN_PASSWORD` 的 HTTP Basic 认证。成功后签发一个不透明的 256 位 `codeman_session` cookie（`randomBytes(32)`）—— 服务端校验，而非客户端签名，因此无法离线伪造（24h TTL、自动延长、设备上下文审计日志）
+- **默认仅环回** —— 绑定 `127.0.0.1`，仅可从本机访问，因此「无密码」默认配置开箱即安全。在未设置 `REVERIE_PASSWORD` 的情况下绑定非环回主机会*启动但打印一条醒目警告*，并给出三个具体修复方案（设置密码、环回 + 一个带认证的隧道，或用 `--allow-unauthenticated-network` 显式确认）
+- **可选认证，真实会话** —— 通过 `REVERIE_USERNAME`（默认 `admin`）/ `REVERIE_PASSWORD` 的 HTTP Basic 认证。成功后签发一个不透明的 256 位 `reverie_session` cookie（`randomBytes(32)`）—— 服务端校验，而非客户端签名，因此无法离线伪造（24h TTL、自动延长、设备上下文审计日志）
 - **按 IP 速率限制** —— 失败 10 次 → `429` 并带 `Retry-After`（15 分钟衰减）。即便攻击者在同一 IP 上猛攻，有效 cookie 或正确密码也能*立即*恢复 —— 这很重要，因为所有隧道流量共享同一个环回 IP。二维码认证有自己独立的限制器
 - **可配置的权限模式**：`--dangerously-skip-permissions` 只是默认值。**App Settings → Agents & CLIs → Claude → Startup Mode** 可以把新会话切换为 Anthropic 的分类器护栏 `auto` 模式（低打扰，需要 Claude Code 2.1.207+）、`normal` 提示模式，或一份显式的允许工具列表。多用户模式下，未获授权的用户会被强制为 `auto`，shell 会话与跳过权限需要按用户显式授权
 
@@ -660,7 +660,7 @@ Reverie 默认用 `--dangerously-skip-permissions` 启动会话，因此 Web UI 
 
 以下对**每个**请求都生效 —— 在认证之前，即便是默认的无密码环回安装：
 
-- **Host 头允许列表 → 阻断 DNS 重绑定。** 一个被重绑定到 `127.0.0.1` 的自定义域名会在任何处理器运行前被 `403 host not allowed` 拒绝。允许：`localhost`、任意 IP 字面量、绑定主机、`.ts.net` / `.trycloudflare.com` / `.cfargotunnel.com`、当前受管隧道，以及 `CODEMAN_ALLOWED_HOSTS`（在此添加自定义反向代理域名 —— 逗号分隔；精确主机或前导点 `.suffix` 匹配子域名）
+- **Host 头允许列表 → 阻断 DNS 重绑定。** 一个被重绑定到 `127.0.0.1` 的自定义域名会在任何处理器运行前被 `403 host not allowed` 拒绝。允许：`localhost`、任意 IP 字面量、绑定主机、`.ts.net` / `.trycloudflare.com` / `.cfargotunnel.com`、当前受管隧道，以及 `REVERIE_ALLOWED_HOSTS`（在此添加自定义反向代理域名 —— 逗号分隔；精确主机或前导点 `.suffix` 匹配子域名）
 - **跨站 Origin / CSRF 防护。** 对变更状态的方法（`POST`/`PUT`/`PATCH`/`DELETE`），`Origin` 必须通过同一允许列表，否则返回 `403 cross-site request blocked`。*缺失*的 Origin 被允许（因此 `curl`、CLI 与 Claude Code hook 仍可工作）；只有存在但外来、或不透明的 `null` origin 才会被拒绝
 - **原始 `text/plain` 请求体。** 全局解析器不再对 `text/plain` 做 JSON 解析，封堵了那个跨站 `fetch` 能在无预检的情况下把 JSON 走私进写路由的 CORS「简单请求」CSRF 向量
 - **WebSocket Origin 校验。** 终端 WS 升级运行同样的 Host + Origin 检查，失败时以代码 `4003` 关闭（反 CSWSH）
@@ -669,13 +669,13 @@ Reverie 默认用 `--dangerously-skip-permissions` 启动会话，因此 Web UI 
 ### 输入、文件与响应头
 
 - **模式校验的输入** —— 每个 API 请求体都用 Zod v4 模式检查；一个 `CLAUDE_CODE_*` / `OPENCODE_*` / `CODEX_*` / `ANTIGRAVITY_*` / `GEMINI_*` / `GOOGLE_*` / `PI_*` / `GROK_*` / `XAI_*` / `DSH_*` / `DEEPSEEK_*` / `OMP_*` 环境变量前缀允许列表把控每个 CLI 能接收哪些设置，而那些能把 CLI 流量改道的键（base URL、配置目录）对非管理员用户会被钳制
-- **路径限定** —— 文件路由在边界检查前先 `realpath`（无 TOCTOU）；`..`、绝对路径、以及解析到工作目录之外的符号链接都会被拒绝。上限：10 MB 文本预览 / 2 GB 原始与下载（`CODEMAN_MAX_DOWNLOAD_BYTES`；响应体是流式的并支持 `Range` 请求，所以这个上限只是合理性边界，不是内存保护）；`/api/download` 对敏感路径（`.env`、`*credentials*`、`~/.ssh/`、`.aws/credentials`）做黑名单。SVG/HTML 以 `octet-stream` + `nosniff` + attachment 提供，因此会被下载而非执行
+- **路径限定** —— 文件路由在边界检查前先 `realpath`（无 TOCTOU）；`..`、绝对路径、以及解析到工作目录之外的符号链接都会被拒绝。上限：10 MB 文本预览 / 2 GB 原始与下载（`REVERIE_MAX_DOWNLOAD_BYTES`；响应体是流式的并支持 `Range` 请求，所以这个上限只是合理性边界，不是内存保护）；`/api/download` 对敏感路径（`.env`、`*credentials*`、`~/.ssh/`、`.aws/credentials`）做黑名单。SVG/HTML 以 `octet-stream` + `nosniff` + attachment 提供，因此会被下载而非执行
 - **安全响应头** —— `Content-Security-Policy`（`default-src 'self'`，每个例外都逐条列举）、`X-Content-Type-Options: nosniff`、`X-Frame-Options: SAMEORIGIN`、HTTPS 下的 HSTS，以及**仅**对 `localhost` / `127.0.0.1` / `::1` 反射的 CORS
 
 ### 供应链与隔离
 
 - **锁定并校验的依赖** —— 安全敏感的传递依赖通过 npm `overrides` 强制为已打补丁版本；每次提交/PR 都检查锁文件完整性（所有条目都解析到 `registry.npmjs.org` 且带 `sha512` 哈希）。公共资源在 CI 中做 NUL 字节扫描与 `node --check` 校验
-- **多实例隔离** —— `CODEMAN_INSTANCE` 同时限定 tmux 套接字（`-L codeman-<name>`）与数据目录（`~/.codeman-<name>`），因此两个实例绝不会互相附着对方的活动会话
+- **多实例隔离** —— `REVERIE_INSTANCE` 同时限定 tmux 套接字（`-L reverie-<name>`）与数据目录（`~/.reverie-<name>`），因此两个实例绝不会互相附着对方的活动会话
 
 > 移动端登录使用一次性、60 秒二维码令牌 —— 完整设计见上文[二维码认证](#二维码认证)（它应对了 USENIX Security 2025 二维码登录研究中的全部 6 个缺陷）。
 
@@ -733,19 +733,18 @@ Web UI 仍是主要界面；完整指南见 **[docs/tui.md](docs/tui.md)**（英
 
 ### 智能体技能（从这里开始）
 
-这一节的所有内容也打包成了一个 **Claude Code 技能**，位于 [`skills/codeman`](skills/codeman/SKILL.md)。装一次，就再也不用把 API 文档粘进提示词。你用大白话说想要什么，已经坐在 Reverie 会话里的智能体会自己加载配方并驱动 API。
+这一节的所有内容也打包成了一个 **Claude Code 技能**，位于 [`skills/reverie`](skills/reverie/SKILL.md)。装一次，就再也不用把 API 文档粘进提示词。你用大白话说想要什么，已经坐在 Reverie 会话里的智能体会自己加载配方并驱动 API。
 
 #### 第 1 步：安装
 
 | 方式             | 命令                                                       | 范围                                                                                       |
 | ---------------- | ---------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
-| Skills CLI       | `npx skills add Ark0N/Codeman --skill codeman -g`          | 全局，任何支持技能的智能体都能用                                                           |
-| Claude Code 插件 | `/plugin marketplace add Ark0N/Codeman`，然后 `/plugin install codeman@codeman` | 全局，通过 Claude Code 自带的插件管理器；`/plugin update codeman` 跟随新版本。与 `codeman skill install` 二选一：两者都装会让技能出现两次（`codeman` 和 `codeman:codeman`） |
-| 内置 CLI         | `reverie skill install`                                    | 全局（`~/.claude/skills/codeman`），给那些从 npm 安装、从未克隆过仓库的用户                |
+| Skills CLI       | `npx skills add jgoppert/reverie --skill reverie -g`          | 全局，任何支持技能的智能体都能用                                                           |
+| 内置 CLI         | `reverie skill install`                                    | 全局（`~/.claude/skills/reverie`），给那些从 npm 安装、从未克隆过仓库的用户                |
 | 内置 CLI         | `reverie skill install --case <name>`                      | 仅一个 case                                                                                |
 | Web UI           | App Settings → Agents & CLIs → Claude → **Agent Skill**    | 每次在某个 case 创建 Claude 会话时自动注入（`agentSkillEnabled`，跨设备同步，默认关闭）    |
 
-`reverie skill uninstall [--case <name>]` 可以撤销 CLI 安装，并且绝不会碰你自己写的 `skills/codeman`。
+`reverie skill uninstall [--case <name>]` 可以撤销 CLI 安装，并且绝不会碰你自己写的 `skills/reverie`。
 
 #### 第 2 步：开口要
 
@@ -785,17 +784,17 @@ deleted 9f2d8e5f, aff9c691, be9f1f15    标签消失
 
 | 文件                                                                | 内容                                                                                        |
 | ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| [`SKILL.md`](skills/codeman/SKILL.md)                               | 安全规则、现成的快速路径（起 N 个工作会话、派任务、收集）和动词索引。始终加载。              |
-| [`reference/verbs.md`](skills/codeman/reference/verbs.md)           | 14 个动词的详细说明：就绪、发送并等待、标记、中断、清理。按需加载。                          |
-| [`reference/recipes.md`](skills/codeman/reference/recipes.md)       | 8 个完整流程：claude、DeepSeek Harness 与 shell 工作会话、扇出、盯住被卡住的工作会话、消息扇出。按需加载。 |
-| [`reference/endpoints.md`](skills/codeman/reference/endpoints.md)   | 完整端点表、错误码、各模式的信号表、容量限制。按需加载。                                     |
-| [`reference/messaging.md`](skills/codeman/reference/messaging.md)   | 通过 Claude Code 跨会话消息直接和 claude 工作会话对话。按需加载。                            |
+| [`SKILL.md`](skills/reverie/SKILL.md)                               | 安全规则、现成的快速路径（起 N 个工作会话、派任务、收集）和动词索引。始终加载。              |
+| [`reference/verbs.md`](skills/reverie/reference/verbs.md)           | 14 个动词的详细说明：就绪、发送并等待、标记、中断、清理。按需加载。                          |
+| [`reference/recipes.md`](skills/reverie/reference/recipes.md)       | 8 个完整流程：claude、DeepSeek Harness 与 shell 工作会话、扇出、盯住被卡住的工作会话、消息扇出。按需加载。 |
+| [`reference/endpoints.md`](skills/reverie/reference/endpoints.md)   | 完整端点表、错误码、各模式的信号表、容量限制。按需加载。                                     |
+| [`reference/messaging.md`](skills/reverie/reference/messaging.md)   | 通过 Claude Code 跨会话消息直接和 claude 工作会话对话。按需加载。                            |
 
 里面的每一个配方都在真实服务器上验证过，注释记录的是实测出来而不是猜出来的失败模式。
 
 #### 两件值得知道的事
 
-- **它会自我门禁。** 不在 Reverie 会话里（`CODEMAN_MUX` 未设置）时，技能拒绝动作，也不去猜 API 地址，所以全局安装对无关的 Claude Code 会话没有任何代价。
+- **它会自我门禁。** 不在 Reverie 会话里（`REVERIE_MUX` 未设置）时，技能拒绝动作，也不去猜 API 地址，所以全局安装对无关的 Claude Code 会话没有任何代价。
 - **它刻意保守。** 未经提示，它只会拉起会话、给它们发提示，并删除**它在同一段对话里自己创建的**会话（按精确 id，经由一个拒绝删除智能体自身会话的失败即关闭守卫）。删除 case（会抹掉一个真实的代码目录）、批量杀会话、改动 respawn/ralph/cron/orchestrator 以及写设置，都需要你开口并指名目标。
 
 ⚠️ 把 `agentSkillEnabled` 关回去**不会删掉已经注入的副本**（在创建时做清扫，会把技能从共用同一个 `.claude/` 目录的其他活动会话脚下抽走）。要删就按 case 删：`reverie skill uninstall --case <name>`。
@@ -810,16 +809,16 @@ deleted 9f2d8e5f, aff9c691, be9f1f15    标签消失
 
 | 变量                       | 含义                                                                                                                 |
 | -------------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| `CODEMAN_MUX=1`            | 你在一个受管 tmux 会话里。**绝不要** `tmux kill-session` / `pkill claude` / `pkill tmux` —— 你会杀掉自己或兄弟会话。 |
-| `CODEMAN_API_URL`          | API 的基础 URL（例如 `https://127.0.0.1:3000`）。下面每个调用都用它。                                                |
-| `CODEMAN_SESSION_ID`       | *你自己的*会话 id。用它避免对自己下手。                                                                              |
-| `CODEMAN_HOOK_SECRET_FILE` | hook 密钥文件的路径（受管隧道开启时调用 `/api/hook-event` 必需）。                                                   |
+| `REVERIE_MUX=1`            | 你在一个受管 tmux 会话里。**绝不要** `tmux kill-session` / `pkill claude` / `pkill tmux` —— 你会杀掉自己或兄弟会话。 |
+| `REVERIE_API_URL`          | API 的基础 URL（例如 `https://127.0.0.1:3000`）。下面每个调用都用它。                                                |
+| `REVERIE_SESSION_ID`       | *你自己的*会话 id。用它避免对自己下手。                                                                              |
+| `REVERIE_HOOK_SECRET_FILE` | hook 密钥文件的路径（受管隧道开启时调用 `/api/hook-event` 必需）。                                                   |
 
 ### 行路规则（POST 之前先读）
 
 1. **只发单行输入，而且必须以 `\r` 结尾。** 编程输入按字面文本发送，**只有当输入里含回车符时才会触发 Enter**：`{"input":"run tests\r"}`。少了 `\r`，文本就停在会话的输入框里不被提交（同一次调用里的 `wait` 还会在一个压根没开始的回合上耗满整个超时）。内嵌的换行会被剥掉而不是报错，因此 `"echo A\necho B\r"` 执行的是拼起来的 `echo Aecho B`：一次调用只发一行。
 2. **让输入幂等。** 在 `POST …/input` 上带上稳定的 `clientId` 和按会话单调递增的 `seq`。服务端会去重，因此连接中断后的重试不会重复投递提示。
-3. **认证。** 若设置了 `CODEMAN_PASSWORD`，发送 HTTP Basic 认证（用户 `admin` 或 `CODEMAN_USERNAME`）或 `codeman_session` cookie。默认的环回安装无密码。缺失的 `Origin` 头被允许，因此普通 `curl` 可用；跨站的浏览器 origin 会被拒绝（CSRF 防护）。⚠️ `401` 回的是裸字符串 `Unauthorized`，**不是** JSON 信封，直接喂给 `jq` 只会抛解析错误而看不到真正的失败原因：先看状态码，再解析。
+3. **认证。** 若设置了 `REVERIE_PASSWORD`，发送 HTTP Basic 认证（用户 `admin` 或 `REVERIE_USERNAME`）或 `reverie_session` cookie。默认的环回安装无密码。缺失的 `Origin` 头被允许，因此普通 `curl` 可用；跨站的浏览器 origin 会被拒绝（CSRF 防护）。⚠️ `401` 回的是裸字符串 `Unauthorized`，**不是** JSON 信封，直接喂给 `jq` 只会抛解析错误而看不到真正的失败原因：先看状态码，再解析。
 4. **响应信封。** 多数端点返回 `{ "success": true, "data": … }`（错误：`{ "success": false, "error", "errorCode" }`）。少数遗留 GET 返回裸响应体 —— **两种都要处理**（`body.data ?? body`）。
 5. **`/api/v1/*`** 是 `/api/*` 的稳定别名。
 6. **用等待代替轮询，别把超时当成错误。** 等待类端点在没等到事情发生时也以 HTTP `200` 加 `wait.timedOut: true` 应答，所以要循环调用短等待（默认 60 秒），而不是发一个超长的调用：隧道会掐断空闲连接。`wait.timeoutMs` 告诉你服务端钳制之后真正采用的超时（上限 600 秒）。
@@ -829,11 +828,11 @@ deleted 9f2d8e5f, aff9c691, be9f1f15    标签消失
 ### 常用配方
 
 ```bash
-# 每个 Reverie 会话里都自动设好了 CODEMAN_API_URL，协议也是对的。
+# 每个 Reverie 会话里都自动设好了 REVERIE_API_URL，协议也是对的。
 # 下面的兜底值适用于标准安装；在 --https 安装上请自己写 https:// 的地址，
 # 并给每个 curl 加上 -k（自签名证书）。
-API="${CODEMAN_API_URL:-http://127.0.0.1:3000}"
-# （若设置了密码，给每个调用加上  -u admin:"$CODEMAN_PASSWORD"）
+API="${REVERIE_API_URL:-http://127.0.0.1:3000}"
+# （若设置了密码，给每个调用加上  -u admin:"$REVERIE_PASSWORD"）
 
 # 1. 看看有什么在运行
 curl -s "$API/api/sessions" | jq '.data // .'
@@ -923,13 +922,13 @@ curl -s "$API/api/status" | jq
 
 ### 或使用内置 CLI
 
-同样的操作也有命令形式（`codeman <cmd>`，括号内为别名）—— 在会话内的 shell 工具里很顺手：
+同样的操作也有命令形式（`reverie <cmd>`，括号内为别名）—— 在会话内的 shell 工具里很顺手：
 
 ```bash
 reverie session start -d /path/to/repo   # (s)  启动会话
 reverie session list                     #      列出会话
 reverie session logs <id>                #      查看输出
-codeman task add "fix the failing test"  # (t)  排入任务
+reverie task add "fix the failing test"  # (t)  排入任务
 reverie attach <path>                    #      为本地文件显示一张附件卡片
 reverie tui --list                       #      带编号的会话列表（管道输出时为纯文本）
 reverie tui 3                            #      附着到该列表里的第 3 个会话
@@ -937,7 +936,7 @@ reverie tui 3                            #      附着到该列表里的第 3 �
 
 ### Hook（事件*回流*到 Reverie）
 
-Reverie 会注册 Claude Code hook，它们 `POST /api/hook-event`（`permission_prompt`、`idle_prompt`、`stop`、`task_completed` 等），让仪表盘实时响应。该端点在环回上免认证，但在受管隧道下需要 `X-Codeman-Hook-Secret` 头（从 `$CODEMAN_HOOK_SECRET_FILE` 读取）。通常你不需要手动调用它 —— Reverie 会自动接好 —— 但自主层正是靠它「看见」智能体在做什么。
+Reverie 会注册 Claude Code hook，它们 `POST /api/hook-event`（`permission_prompt`、`idle_prompt`、`stop`、`task_completed` 等），让仪表盘实时响应。该端点在环回上免认证，但在受管隧道下需要 `X-Reverie-Hook-Secret` 头（从 `$REVERIE_HOOK_SECRET_FILE` 读取）。通常你不需要手动调用它 —— Reverie 会自动接好 —— 但自主层正是靠它「看见」智能体在做什么。
 
 > 完整端点列表与请求/响应形状见下文。
 
@@ -1014,7 +1013,7 @@ Reverie 会注册 Claude Code hook，它们 `POST /api/hook-event`（`permission
 | `GET` / `POST` | `/api/model-endpoints`  | 列出 / 保存自定义的 OpenAI 兼容端点（`PUT` / `DELETE` `/:id`；多用户模式下仅管理员） |
 | `GET`  | `/api/sessions/:id/run-summary` | 时间线 + 统计                            |
 
-> **想在 Reverie 之上做集成？**[`docs/extending-codeman.md`](docs/extending-codeman.md)（英文）是集成指南：把你自己的界面作为标签页嵌入、订阅 SSE 事件流以便在 agent 需要你时做出响应、用脚本驱动 Reverie，以及动手前值得先了解的那些坑。Reverie 刻意不提供插件运行时，所以一个集成就是你自己的进程在讲 HTTP。
+> **想在 Reverie 之上做集成？**[`docs/extending-reverie.md`](docs/extending-reverie.md)（英文）是集成指南：把你自己的界面作为标签页嵌入、订阅 SSE 事件流以便在 agent 需要你时做出响应、用脚本驱动 Reverie，以及动手前值得先了解的那些坑。Reverie 刻意不提供插件运行时，所以一个集成就是你自己的进程在讲 HTTP。
 
 ---
 
@@ -1088,7 +1087,7 @@ npm test                    # 运行测试（与 CI 相同；浏览器/移动端
 
 ## 社区
 
-提问、安装求助和想法都在 [GitHub Discussions](https://github.com/Ark0N/Codeman/discussions)：[Q&A 板块](https://github.com/Ark0N/Codeman/discussions/categories/q-a)回答了最常见的那些（手机访问、通宵运行、更新），路线图则在 [Ideas](https://github.com/Ark0N/Codeman/discussions/categories/ideas) 里决定。Bug 请提到 [issues](https://github.com/Ark0N/Codeman/issues)；报告通常一天内会得到回复，每个发行版都会点名感谢报告者和贡献者。想参与贡献？[CONTRIBUTING.md](.github/CONTRIBUTING.md) 是地图：皮肤、翻译和文档都是很好的第一个 PR，更大的特性先从一个 Discussion 开始。如果你对自己的配置很自豪，发到 [Show and tell](https://github.com/Ark0N/Codeman/discussions/300) 来。
+提问、安装求助和想法都在 [GitHub Discussions](https://github.com/jgoppert/reverie/discussions)：[Q&A 板块](https://github.com/jgoppert/reverie/discussions/categories/q-a)回答了最常见的那些（手机访问、通宵运行、更新），路线图则在 [Ideas](https://github.com/jgoppert/reverie/discussions/categories/ideas) 里决定。Bug 请提到 [issues](https://github.com/jgoppert/reverie/issues)；报告通常一天内会得到回复，每个发行版都会点名感谢报告者和贡献者。想参与贡献？[CONTRIBUTING.md](.github/CONTRIBUTING.md) 是地图：皮肤、翻译和文档都是很好的第一个 PR，更大的特性先从一个 Discussion 开始。如果你对自己的配置很自豪，发到 [Show and tell](https://github.com/Ark0N/Codeman/discussions/300) 来。
 
 ---
 
@@ -1140,6 +1139,6 @@ MIT —— 见 [LICENSE](LICENSE)
 </p>
 
 <p align="center">
-  如果 Codeman 帮你省了时间，<a href="https://github.com/Ark0N/Codeman/stargazers">点个 star</a> 能让更多人找到它。<br>
-  欢迎到 <a href="https://github.com/Ark0N/Codeman/issues">Issues</a> 报告 bug 和提出特性想法。
+  如果 Reverie 帮你省了时间，<a href="https://github.com/jgoppert/reverie/stargazers">点个 star</a> 能让更多人找到它。<br>
+  欢迎到 <a href="https://github.com/jgoppert/reverie/issues">Issues</a> 报告 bug 和提出特性想法。
 </p>

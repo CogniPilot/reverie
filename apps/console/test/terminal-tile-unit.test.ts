@@ -1,6 +1,6 @@
 // test/terminal-tile-unit.test.ts
 // Port: N/A (no server/browser; TerminalTile is loaded via `vm`, like
-// split-pane-auto-collapse-unit.test.ts loads the CodemanApp patches).
+// split-pane-auto-collapse-unit.test.ts loads the ReverieApp patches).
 //
 // Unit coverage for the two TerminalTile (terminal-tile.js, the split pane's
 // Pane B until it moved out of terminal-split.js) fixes from
@@ -87,7 +87,7 @@ function loadTerminalTile() {
     window: {
       app: { _estimateReplayRows: (text: string) => text.split('\n').length },
       // The primary pane's capture budget (constants.js): the full-capture default.
-      CodemanFetchDeadline: { terminalFetchDeadlineMs: () => 45_000 },
+      ReverieFetchDeadline: { terminalFetchDeadlineMs: () => 45_000 },
       AbortController: class {
         signal = { aborted: false };
         abort() {
@@ -114,8 +114,8 @@ function loadTerminalTile() {
     SHELL_LOAD_BASE_QUERY,
     SHELL_LOAD_QUERY,
   });
-  // The module's tail patches CodemanApp.prototype; nothing on it runs here.
-  vm.runInContext(`class CodemanApp { _onSessionDeleted() {} selectSession() {} }\n${SOURCE}`, context);
+  // The module's tail patches ReverieApp.prototype; nothing on it runs here.
+  vm.runInContext(`class ReverieApp { _onSessionDeleted() {} selectSession() {} }\n${SOURCE}`, context);
   return (context.window as { TerminalTile: new (id: string, mount: unknown, opts?: object) => PaneUnderTest })
     .TerminalTile;
 }
@@ -1054,7 +1054,7 @@ describe('TerminalTile scroll-to-top history pull', () => {
 
   it('ends on the disconnected marker if the socket closes mid-fetch, before the queue opens', async () => {
     // The close lands while the request is in flight, so the HTTP pull still
-    // succeeds (a Codeman restart drops the WS while the tmux session, and so
+    // succeeds (a Reverie restart drops the WS while the tmux session, and so
     // the pull, survives). The marker waits for the load to finish, then goes
     // below the replay.
     const pane = makePane('shell');

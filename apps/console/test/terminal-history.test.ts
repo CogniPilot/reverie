@@ -31,12 +31,12 @@ describe('resolveTerminalHistoryConfig', () => {
     expect(DEFAULT_TERMINAL_BUFFER_TRIM_BYTES).toBe(24 * 1024 * 1024);
   });
 
-  it('clamps the env-derived trim default below an env-lowered max (CODEMAN_MAX_TERMINAL_BUFFER only)', async () => {
-    const originalMax = process.env.CODEMAN_MAX_TERMINAL_BUFFER;
-    const originalTrim = process.env.CODEMAN_TRIM_TERMINAL_TO;
+  it('clamps the env-derived trim default below an env-lowered max (REVERIE_MAX_TERMINAL_BUFFER only)', async () => {
+    const originalMax = process.env.REVERIE_MAX_TERMINAL_BUFFER;
+    const originalTrim = process.env.REVERIE_TRIM_TERMINAL_TO;
     vi.resetModules();
-    process.env.CODEMAN_MAX_TERMINAL_BUFFER = String(2 * 1024 * 1024);
-    delete process.env.CODEMAN_TRIM_TERMINAL_TO;
+    process.env.REVERIE_MAX_TERMINAL_BUFFER = String(2 * 1024 * 1024);
+    delete process.env.REVERIE_TRIM_TERMINAL_TO;
     try {
       const mod = await import('../src/config/terminal-history.js');
       expect(mod.DEFAULT_TERMINAL_BUFFER_MAX_BYTES).toBe(2 * 1024 * 1024);
@@ -44,10 +44,10 @@ describe('resolveTerminalHistoryConfig', () => {
       expect(mod.DEFAULT_TERMINAL_BUFFER_TRIM_BYTES).toBeLessThan(mod.DEFAULT_TERMINAL_BUFFER_MAX_BYTES);
       expect(mod.DEFAULT_TERMINAL_BUFFER_TRIM_BYTES).toBe(Math.floor(2 * 1024 * 1024 * 0.75));
     } finally {
-      if (originalMax === undefined) delete process.env.CODEMAN_MAX_TERMINAL_BUFFER;
-      else process.env.CODEMAN_MAX_TERMINAL_BUFFER = originalMax;
-      if (originalTrim === undefined) delete process.env.CODEMAN_TRIM_TERMINAL_TO;
-      else process.env.CODEMAN_TRIM_TERMINAL_TO = originalTrim;
+      if (originalMax === undefined) delete process.env.REVERIE_MAX_TERMINAL_BUFFER;
+      else process.env.REVERIE_MAX_TERMINAL_BUFFER = originalMax;
+      if (originalTrim === undefined) delete process.env.REVERIE_TRIM_TERMINAL_TO;
+      else process.env.REVERIE_TRIM_TERMINAL_TO = originalTrim;
       vi.resetModules();
     }
   });

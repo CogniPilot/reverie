@@ -179,7 +179,7 @@ describe('parking the main terminal', () => {
     for (const id of [...IDS, 's-other']) {
       app._xtermSnapshots.set(id, 'old');
       app.terminalBufferCache.set(id, 'old');
-      localStore.set(`codeman-xs-${id}`, 'old');
+      localStore.set(`reverie-xs-${id}`, 'old');
     }
     app.openTileGrid(IDS);
     app.closeTileGrid();
@@ -187,10 +187,10 @@ describe('parking the main terminal', () => {
     for (const id of IDS) {
       expect(app._xtermSnapshots.has(id)).toBe(false);
       expect(app.terminalBufferCache.has(id)).toBe(false);
-      expect(localStore.has(`codeman-xs-${id}`)).toBe(false);
+      expect(localStore.has(`reverie-xs-${id}`)).toBe(false);
     }
     expect(app._xtermSnapshots.get('s-other')).toBe('old');
-    expect(localStore.get('codeman-xs-s-other')).toBe('old');
+    expect(localStore.get('reverie-xs-s-other')).toBe('old');
   });
 
   it('closing with reselect: false leaves the next selection to the caller', () => {
@@ -422,7 +422,7 @@ describe('panes and fonts while the grid is open', () => {
     app.setFontSize = vi.fn();
     app.increaseFontSize();
     expect(app.setFontSize).not.toHaveBeenCalled();
-    expect(localStore.get('codeman-tile-font-size')).toBe('15');
+    expect(localStore.get('reverie-tile-font-size')).toBe('15');
     expect(FakeTile.all.every((t) => t.terminal.options.fontSize === 15 && t.fit.mock.calls.length > 0)).toBe(true);
   });
 });

@@ -1,5 +1,5 @@
 /**
- * File Link Click Tests for Codeman Web UI
+ * File Link Click Tests for Reverie Web UI
  *
  * Tests that file paths displayed in terminal output are clickable
  * and open the log viewer window correctly.
@@ -91,7 +91,7 @@ describe('File Link Click Tests', () => {
     closeBrowser();
 
     // Create test directory and log file
-    testDir = join(tmpdir(), `codeman-link-test-${Date.now()}`);
+    testDir = join(tmpdir(), `reverie-link-test-${Date.now()}`);
     mkdirSync(testDir, { recursive: true });
     testLogFile = join(testDir, 'test.log');
     writeFileSync(testLogFile, '=== Test Log Started ===\n');
@@ -106,7 +106,7 @@ describe('File Link Click Tests', () => {
       browser(`open ${baseUrl}`);
       await new Promise((r) => setTimeout(r, 2000));
       const title = browserJson<{ title: string }>('get title');
-      browserAvailable = title.title.startsWith('codeman:');
+      browserAvailable = title.title.startsWith('reverie:');
     } catch (e) {
       console.warn('Browser not available, skipping browser tests:', (e as Error).message);
       browserAvailable = false;

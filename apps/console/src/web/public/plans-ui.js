@@ -13,7 +13,7 @@
  * (open here, copy, or a QR code for another device), Codex's one-time code, or a field
  * for the code Claude shows after signing in, polling until it settles.
  *
- * @mixin Extends CodemanApp.prototype via Object.assign
+ * @mixin Extends ReverieApp.prototype via Object.assign
  * @dependency app.js, api-client.js (_api), chatroom-ui.js (_chatApi)
  * @loadorder 12.13 (after car-mode.js)
  */
@@ -30,7 +30,7 @@ const PLAN_RECOMMENDATION = {
   unknown: { label: 'No data', hint: 'The provider gave no usage reading' },
 };
 
-Object.assign(CodemanApp.prototype, {
+Object.assign(ReverieApp.prototype, {
   async openPlans() {
     this.closeAccountMenu?.();
     this._buildPlans();

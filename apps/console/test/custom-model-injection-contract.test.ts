@@ -14,7 +14,7 @@
  * binary actually reads that env var / config file the way its docs say —
  * that's still the job of `scripts/test-local-llm-harnesses.ts` against a
  * real endpoint and real binaries. This suite catches regressions in
- * Codeman's own injection logic; it cannot catch a CLI changing its env-var
+ * Reverie's own injection logic; it cannot catch a CLI changing its env-var
  * name in a future release.
  *
  * Port: N/A (mock server binds a random free port, not a fixed one)
@@ -99,12 +99,12 @@ describe('custom-model-injection contract (mock server)', () => {
     expect(model).toBe('qwen3');
     expect(toml).toContain('wire_api = "responses"');
     expect(toml).not.toContain('api_key ='); // never a literal TOML field
-    expect(envKeyName).toBe('CODEMAN_CUSTOM_MODEL_API_KEY');
-    expect(injection.extraEnv).toEqual({ CODEMAN_CUSTOM_MODEL_API_KEY: 'contract-test-key' });
+    expect(envKeyName).toBe('REVERIE_CUSTOM_MODEL_API_KEY');
+    expect(injection.extraEnv).toEqual({ REVERIE_CUSTOM_MODEL_API_KEY: 'contract-test-key' });
 
     // The real credential rides as an env var (env_key names it) — replay it, not a
     // value read from the file, since the file itself never carries the secret.
-    const apiKey = injection.extraEnv!.CODEMAN_CUSTOM_MODEL_API_KEY;
+    const apiKey = injection.extraEnv!.REVERIE_CUSTOM_MODEL_API_KEY;
     await fetch(`${baseUrl}/responses`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', authorization: `Bearer ${apiKey}` },

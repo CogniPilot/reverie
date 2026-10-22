@@ -6,7 +6,7 @@ import { describe, expect, it, vi } from 'vitest';
 function loadPaletteHarness(overrides: Record<string, any> = {}) {
   const elements: Record<string, any> = {};
   const listeners: Record<string, (event: any) => void> = {};
-  const CodemanApp = function CodemanApp(this: any) {};
+  const ReverieApp = function ReverieApp(this: any) {};
 
   const makeClassList = () => {
     const classes = new Set<string>();
@@ -48,7 +48,7 @@ function loadPaletteHarness(overrides: Record<string, any> = {}) {
   };
 
   const context = vm.createContext({
-    CodemanApp,
+    ReverieApp,
     document: {
       getElementById: (id: string) => elements[id] ?? null,
       createElement: (tagName: string) => ({
@@ -71,7 +71,7 @@ function loadPaletteHarness(overrides: Record<string, any> = {}) {
   const panelsUi = readFileSync(resolve(import.meta.dirname, '../src/web/public/panels-ui.js'), 'utf8');
   vm.runInContext(panelsUi, context, { filename: 'panels-ui.js' });
 
-  const app = new (CodemanApp as any)();
+  const app = new (ReverieApp as any)();
   app.sessions = new Map([
     [
       'sess-alpha',
@@ -626,13 +626,13 @@ describe('overlay focus restoration (Escape must not strand the keyboard)', () =
 
 describe('panel close helpers', () => {
   it('closes panels when the mobile header helper is unavailable', () => {
-    const CodemanApp = function CodemanApp(this: any) {};
+    const ReverieApp = function ReverieApp(this: any) {};
     const elements: Record<string, any> = {
       monitorPanel: { classList: { remove: vi.fn() } },
       subagentsPanel: { classList: { remove: vi.fn() } },
     };
     const context = vm.createContext({
-      CodemanApp,
+      ReverieApp,
       document: {
         getElementById: (id: string) => elements[id] ?? null,
       },
@@ -642,7 +642,7 @@ describe('panel close helpers', () => {
     const settingsUi = readFileSync(resolve(import.meta.dirname, '../src/web/public/settings-ui.js'), 'utf8');
     vm.runInContext(settingsUi, context, { filename: 'settings-ui.js' });
 
-    const app = new (CodemanApp as any)();
+    const app = new (ReverieApp as any)();
     app.closeSessionOptions = vi.fn();
     app.closeAppSettings = vi.fn();
     app.cancelCloseSession = vi.fn();

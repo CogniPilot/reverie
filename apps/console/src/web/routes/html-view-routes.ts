@@ -9,7 +9,7 @@
  *
  * ⚠️ Every response carries `Content-Security-Policy: sandbox ...` WITHOUT
  * `allow-same-origin`, so the page runs in an opaque origin whether it is framed or
- * opened as a top-level tab: it can run its own scripts but cannot read the Codeman
+ * opened as a top-level tab: it can run its own scripts but cannot read the Reverie
  * document, its cookies or its API. That is what makes rendering safe at all; see
  * html-view-capabilities.ts for why the route authenticates on a capability.
  * Network access is deliberately OPEN (owner decision, see {@link HTML_VIEW_CSP}).
@@ -78,18 +78,18 @@ const ASSET_TYPES: Record<string, string> = {
 
 /**
  * The whole Content-Security-Policy every response is served under: the `sandbox`
- * directive and nothing else. It REPLACES Codeman's own policy (`default-src 'self'`
+ * directive and nothing else. It REPLACES Reverie's own policy (`default-src 'self'`
  * and the rest, set earlier by registerSecurityHeaders). No `allow-same-origin`:
  * that one token is the difference between "a page" and "a page that can drive
- * Codeman".
+ * Reverie".
  *
  * ⚠️ Network access is OPEN, by the owner's decision (2026-10-13, #547): a rendered
  * page behaves like a file opened from disk in a browser, so there is deliberately
  * no fetch directive (`default-src`, `script-src`, `connect-src`, ...). It loads
  * scripts, styles, fonts, images and media from anywhere (an agent's dashboard
  * pulling Chart.js from a CDN) and may fetch, XHR, open WebSockets, send beacons and
- * post forms anywhere. What confines it is the opaque origin (no Codeman cookies, no
- * Codeman API) and the capability serving only its own folder. Do not add a fetch
+ * post forms anywhere. What confines it is the opaque origin (no Reverie cookies, no
+ * Reverie API) and the capability serving only its own folder. Do not add a fetch
  * directive, or `allow-same-origin`, without the owner. test/routes/html-view-routes.test.ts
  * pins the exact value.
  */

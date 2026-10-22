@@ -3,7 +3,7 @@
  * names the directories they live in.
  *
  * Without cleanup, /api/sessions/:id/paste-image accumulates files indefinitely
- * under {workingDir}/.codeman-uploads/. The route only triggers cleanup on
+ * under {workingDir}/.reverie-uploads/. The route only triggers cleanup on
  * killMux=true session deletion, so long-lived sessions can fill disk under
  * heavy pasting. This sweeper bounds disk use by deleting `paste-*` files
  * older than MAX_AGE_MS from each live session's upload dirs on an interval.
@@ -29,11 +29,11 @@ const INITIAL_DELAY_MS = 30 * 1000; // 30s after startup
  * identically for a local agent and a container (only the workspace is
  * bind-mounted, at the same absolute path); hidden, so it stays out of
  * `git status` and the agent's view of the repository; FLAT, because a nested
- * `<workspace>/.codeman/` is Codeman's own data dir when the workspace is the
+ * `<workspace>/.reverie/` is Reverie's own data dir when the workspace is the
  * home directory; and self-ignoring, through a `.gitignore` of `*` the route
  * writes once.
  */
-export const UPLOADS_DIR = '.codeman-uploads';
+export const UPLOADS_DIR = '.reverie-uploads';
 /** Where uploads landed before the move: written to by nothing, readable for one release. */
 export const LEGACY_UPLOADS_DIR = '.claude-images';
 /** Every upload dir name, current first. Retiring the legacy one here retires it for every reader. */
@@ -43,12 +43,12 @@ export const UPLOAD_DIR_NAMES = [UPLOADS_DIR, LEGACY_UPLOADS_DIR];
  * Every directory a session's uploads sit in, current first. Both consumers
  * act on what this returns, the hourly sweep and the recursive delete in
  * cleanupSession(), so it lists only REAL directories (a link planted by a
- * workspace script, `.codeman-uploads -> /other-case/.codeman-uploads`, is
+ * workspace script, `.reverie-uploads -> /other-case/.reverie-uploads`, is
  * not one; readdir follows a link to a directory), none that is or contains
  * this instance's data dir (a home workspace reaches it under a contrived
- * instance name, `CODEMAN_INSTANCE=uploads`, and `CODEMAN_DATA_DIR` can point
+ * instance name, `REVERIE_INSTANCE=uploads`, and `REVERIE_DATA_DIR` can point
  * inside one; a directory strictly below the data dir only ever holds uploads
- * and is listed, or the uploads of a workspace like `~/.codeman/app` would
+ * and is listed, or the uploads of a workspace like `~/.reverie/app` would
  * never be collected), and nothing for a remote (SSH) session, whose
  * workingDir is the remote path and would name a same-named LOCAL directory
  * here. The working directory is a user-chosen path, so it is probed BOUNDED

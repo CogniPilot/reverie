@@ -49,7 +49,7 @@ supervised by systemd or launchd; npm installs report as non-updatable. See
 | Trim The Pane Margin On Copy  | On                   | Takes the left margin a full-screen agent CLI paints down its own edge off a copy, so the text pastes flush. Each CLI declares its own width, and the strip never exceeds the indent every selected line shares, so nesting is kept. Claude Code and Codex declare a margin; a shell does not. |
 | Normal / Bold font weight     | xterm defaults       | Per device, each slot from 100 to 900. The bundled JetBrains Mono renders every step, so a lighter normal weight makes Claude's bold headings stand out. Applies live to the terminal, both echo overlays and open team panes. |
 | WebGL Renderer                | On                   | With a GPU-stall watchdog that falls back to DOM rendering.            |
-| Gesture Control               | Off                  | Camera hand tracking. Also needs `CODEMAN_GESTURE=1` on the server.    |
+| Gesture Control               | Off                  | Camera hand tracking. Also needs `REVERIE_GESTURE=1` on the server.    |
 | Key tester                    | n/a                  | A diagnostic that stores nothing. Click the box and press keys to see what this browser reports (key, code, modifiers) for keydown, keypress and keyup, for when a chord such as Shift+Enter behaves differently on one device. Keys pressed there reach no session and trigger no shortcut. |
 
 ### Header & Panels
@@ -146,14 +146,14 @@ instead of its native cloud backend. See [Custom Model Endpoints](Custom-Model-E
 | Allowed Tools                    | The list used by the explicit mode.                                                            |
 | Ralph / Todo Tracker             | Enables the Ralph loop surfaces.                                                               |
 | Agent Teams                      | Experimental teams. Also needs the CLI's own environment flag.                                 |
-| Reverie Agent Skill              | Under **All agent CLIs**. Injects the agent skill into each new session's case, where that session's CLI looks for skills (every CLI except Pi and a plain shell). Off by default. See [Driving Reverie From An Agent](Driving-Codeman-From-An-Agent). |
+| Reverie Agent Skill              | Under **All agent CLIs**. Injects the agent skill into each new session's case, where that session's CLI looks for skills (every CLI except Pi and a plain shell). Off by default. See [Driving Reverie From An Agent](Driving-Reverie-From-An-Agent). |
 | Remote auto-reconnect            | Reattaches dropped remote SSH sessions. On by default.                                         |
 | Nice priority / value            | Runs agent processes at a lower CPU priority.                                                  |
 | Default Codex model              | Model for new local Codex sessions; empty uses Codex's own config. Letters, digits, `.` `_` `-` `/` only. |
 | Default Codex reasoning effort   | Reasoning level for new local Codex sessions; empty uses Codex's own config.                   |
 | Bypass approvals and sandbox     | Starts new Codex sessions with `--dangerously-bypass-approvals-and-sandbox`. Read [Agent CLIs](Agent-CLIs) before enabling. |
 | Animated status effects          | Cosmetic.                                                                                      |
-| MCP server sync                  | Copies the MCP servers each installed, enabled CLI (Claude, Codex, Gemini, OpenCode, Antigravity) and GitHub Copilot CLI has into the others' own config files. Synced, off by default, admin only in multi-user mode. Turn it on and **Apply** or **Save** (Apply keeps Settings open), then **Preview** shows what would change and **Sync now** applies it. It only adds missing servers, keeps the previous file as `.codeman-bak`, and leaves a file that receives env values or headers readable by you only. A config dir moved by `CODEX_HOME`, `CLAUDE_CONFIG_DIR`, `XDG_CONFIG_HOME`, `GEMINI_CLI_HOME` or `COPILOT_HOME` in Reverie's own environment is followed. |
+| MCP server sync                  | Copies the MCP servers each installed, enabled CLI (Claude, Codex, Gemini, OpenCode, Antigravity) and GitHub Copilot CLI has into the others' own config files. Synced, off by default, admin only in multi-user mode. Turn it on and **Apply** or **Save** (Apply keeps Settings open), then **Preview** shows what would change and **Sync now** applies it. It only adds missing servers, keeps the previous file as `.reverie-bak`, and leaves a file that receives env values or headers readable by you only. A config dir moved by `CODEX_HOME`, `CLAUDE_CONFIG_DIR`, `XDG_CONFIG_HOME`, `GEMINI_CLI_HOME` or `COPILOT_HOME` in Reverie's own environment is followed. |
 
 ### Notifications
 
@@ -204,23 +204,23 @@ Some things are configured before the server starts, not in the UI:
 
 | Variable                            | Effect                                                                 |
 | ----------------------------------- | ---------------------------------------------------------------------- |
-| `CODEMAN_PORT`                      | Listen port.                                                            |
-| `CODEMAN_HOST`                      | Bind address. Loopback by default.                                      |
-| `CODEMAN_PASSWORD` / `CODEMAN_USERNAME` | HTTP Basic credentials. Username defaults to `admin`.               |
-| `CODEMAN_ALLOWED_HOSTS`             | Extra Host and Origin allowlist entries for a reverse proxy.            |
-| `CODEMAN_INSTANCE`                  | Scopes the data directory and tmux socket together. Required for a second instance. |
-| `CODEMAN_MULTIUSER`                 | Enables multi-user mode.                                                |
-| `CODEMAN_GESTURE`                   | Makes gesture control available to be enabled.                          |
-| `CODEMAN_DOCKER_BRIDGE_HOOKS`       | Lets in-container hooks reach the host on a loopback bind.              |
-| `CODEMAN_FILE_PICKER_ROOTS`         | Extra roots for the path picker.                                        |
-| `CODEMAN_ALLOW_UNAUTHENTICATED_NETWORK` | Acknowledges exposing the server with no password.                  |
-| `CODEMAN_BASE_URL`                  | Mounts Reverie under a sub-path behind a reverse proxy that forwards the prefix unchanged. See [Remote Access](Remote-Access). |
-| `CODEMAN_MAX_DOWNLOAD_BYTES`        | Cap on raw file bodies and downloads. 2 GB by default, `0` for none.    |
-| `CODEMAN_MAX_PASTE_IMAGE_BYTES`     | Cap on one pasted, dropped or attached image. 50 MB by default.         |
-| `CODEMAN_MAX_PASTE_VIDEO_BYTES`     | Cap on one attached video (phone Attach, drop). 1 GB by default; videos stream to disk, so this bounds disk use, not memory. |
-| `CODEMAN_MAX_REMOTE_FILE_SSH`       | Concurrent ssh reads for files in remote cases. 4 by default.           |
-| `CODEMAN_PATH_PROBE_TIMEOUT_MS`     | How long a linked case's folder may take to answer before it is shown as unreachable. 1500 ms by default; raise it for a slow but healthy mount. |
-| `CODEMAN_PATH_PROBE_MAX_STALLED`    | Unanswered folder checks allowed to pile up before new ones are refused. 2 by default: one below the threadpool size minus one, so it follows `UV_THREADPOOL_SIZE` (4 unless set), and it is never allowed above that ceiling. A check you start by opening one case or session may use the one slot left above it. |
+| `REVERIE_PORT`                      | Listen port.                                                            |
+| `REVERIE_HOST`                      | Bind address. Loopback by default.                                      |
+| `REVERIE_PASSWORD` / `REVERIE_USERNAME` | HTTP Basic credentials. Username defaults to `admin`.               |
+| `REVERIE_ALLOWED_HOSTS`             | Extra Host and Origin allowlist entries for a reverse proxy.            |
+| `REVERIE_INSTANCE`                  | Scopes the data directory and tmux socket together. Required for a second instance. |
+| `REVERIE_MULTIUSER`                 | Enables multi-user mode.                                                |
+| `REVERIE_GESTURE`                   | Makes gesture control available to be enabled.                          |
+| `REVERIE_DOCKER_BRIDGE_HOOKS`       | Lets in-container hooks reach the host on a loopback bind.              |
+| `REVERIE_FILE_PICKER_ROOTS`         | Extra roots for the path picker.                                        |
+| `REVERIE_ALLOW_UNAUTHENTICATED_NETWORK` | Acknowledges exposing the server with no password.                  |
+| `REVERIE_BASE_URL`                  | Mounts Reverie under a sub-path behind a reverse proxy that forwards the prefix unchanged. See [Remote Access](Remote-Access). |
+| `REVERIE_MAX_DOWNLOAD_BYTES`        | Cap on raw file bodies and downloads. 2 GB by default, `0` for none.    |
+| `REVERIE_MAX_PASTE_IMAGE_BYTES`     | Cap on one pasted, dropped or attached image. 50 MB by default.         |
+| `REVERIE_MAX_PASTE_VIDEO_BYTES`     | Cap on one attached video (phone Attach, drop). 1 GB by default; videos stream to disk, so this bounds disk use, not memory. |
+| `REVERIE_MAX_REMOTE_FILE_SSH`       | Concurrent ssh reads for files in remote cases. 4 by default.           |
+| `REVERIE_PATH_PROBE_TIMEOUT_MS`     | How long a linked case's folder may take to answer before it is shown as unreachable. 1500 ms by default; raise it for a slow but healthy mount. |
+| `REVERIE_PATH_PROBE_MAX_STALLED`    | Unanswered folder checks allowed to pile up before new ones are refused. 2 by default: one below the threadpool size minus one, so it follows `UV_THREADPOOL_SIZE` (4 unless set), and it is never allowed above that ceiling. A check you start by opening one case or session may use the one slot left above it. |
 
 ## Gotchas
 

@@ -16,7 +16,7 @@ const publicDir = resolve(import.meta.dirname, '../src/web/public');
 const read = (name: string) => readFileSync(resolve(publicDir, name), 'utf8');
 
 function loadHarness() {
-  const CodemanApp = function CodemanApp(this: any) {};
+  const ReverieApp = function ReverieApp(this: any) {};
   const windowRef: Record<string, any> = {};
   const documentListeners = new Map<string, ((ev: any) => void)[]>();
   let activeElement: any = null;
@@ -42,7 +42,7 @@ function loadHarness() {
         documentListeners.set(type, list);
       },
     },
-    CodemanApp,
+    ReverieApp,
     console: { warn: vi.fn(), log: vi.fn(), debug: vi.fn() },
     _crashDiag: { log: vi.fn() },
     Date: DateStub,
@@ -64,7 +64,7 @@ function loadHarness() {
   vm.runInContext(read('constants.js'), context, { filename: 'constants.js' });
   vm.runInContext(read('terminal-ui.js'), context, { filename: 'terminal-ui.js' });
 
-  const app = new (CodemanApp as any)();
+  const app = new (ReverieApp as any)();
   const toasts: { message: string; type: string }[] = [];
   app.showToast = (message: string, type: string) => toasts.push({ message, type });
   app._copyText = vi.fn(async () => true);
@@ -90,7 +90,7 @@ function loadHarness() {
 }
 
 describe('decideAutoCopy', () => {
-  const decide = (params: Record<string, unknown>) => loadHarness().windowRef.CodemanAutoCopy.decide(params);
+  const decide = (params: Record<string, unknown>) => loadHarness().windowRef.ReverieAutoCopy.decide(params);
 
   it('does nothing while the setting is off', () => {
     expect(decide({ enabled: false, text: 'hello', pending: true })).toBe('skip');
@@ -121,8 +121,8 @@ describe('decideAutoCopy', () => {
 
   it('refuses a selection past the size cap instead of truncating it', () => {
     const { windowRef } = loadHarness();
-    const huge = 'x'.repeat(windowRef.CodemanAutoCopy.MAX_CHARS + 1);
-    expect(windowRef.CodemanAutoCopy.decide({ enabled: true, text: huge, pending: true })).toBe('too-large');
+    const huge = 'x'.repeat(windowRef.ReverieAutoCopy.MAX_CHARS + 1);
+    expect(windowRef.ReverieAutoCopy.decide({ enabled: true, text: huge, pending: true })).toBe('too-large');
   });
 });
 
@@ -261,7 +261,7 @@ describe('_flushAutoCopySelection', () => {
 
   it('refuses an oversized selection and says how to copy it anyway', async () => {
     const { app, toasts, windowRef } = loadHarness();
-    const huge = 'x'.repeat(windowRef.CodemanAutoCopy.MAX_CHARS + 1);
+    const huge = 'x'.repeat(windowRef.ReverieAutoCopy.MAX_CHARS + 1);
     app.terminal.getSelection = () => huge;
     app._autoCopyPending = true;
 

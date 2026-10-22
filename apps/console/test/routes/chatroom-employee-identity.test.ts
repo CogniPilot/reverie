@@ -35,7 +35,7 @@ describe('employee identity on the chat HTTP representations', () => {
     for (const sessionId of [OLD, NEXT]) harness.ctx.sessions.set(sessionId, createMockSession(sessionId) as never);
     const room = service!.createRoom('Identity', undefined);
     service!.addMember(room.id, OLD, {});
-    const response = await harness.app.inject({ method: 'POST', url: `/api/chatrooms/${room.id}/messages`, headers: { 'x-codeman-parent-session': OLD }, payload: { text: 'New post' } });
+    const response = await harness.app.inject({ method: 'POST', url: `/api/chatrooms/${room.id}/messages`, headers: { 'x-reverie-parent-session': OLD }, payload: { text: 'New post' } });
     expect(response.statusCode).toBe(200);
     expect(response.json().data.message.from.employeeId).toBe(EMPLOYEE);
     const legacy: ChatMessage = { id: 'legacy', roomId: room.id, at: 1, from: { kind: 'agent', sessionId: OLD, name: 'Old signature' }, text: 'Before the migration', to: 'all', pinned: { at: 2, by: 'Owner', kind: 'user' } };
@@ -45,14 +45,14 @@ describe('employee identity on the chat HTTP representations', () => {
     await service!.replaceSession(OLD, NEXT, 'Owner', () => true);
     harness.ctx.sessions.delete(OLD);
     for (const suffix of ['', '/messages']) {
-      const read = await harness.app.inject({ method: 'GET', url: `/api/chatrooms/${room.id}${suffix}`, headers: { 'x-codeman-parent-session': NEXT } });
+      const read = await harness.app.inject({ method: 'GET', url: `/api/chatrooms/${room.id}${suffix}`, headers: { 'x-reverie-parent-session': NEXT } });
       expect(read.statusCode).toBe(200);
       expect(read.json().data.messages.find((entry: ChatMessage) => entry.id === legacy.id).from).toEqual({ ...legacy.from, employeeId: EMPLOYEE });
     }
-    const pins = await harness.app.inject({ method: 'GET', url: `/api/chatrooms/${room.id}/pins`, headers: { 'x-codeman-parent-session': NEXT } });
+    const pins = await harness.app.inject({ method: 'GET', url: `/api/chatrooms/${room.id}/pins`, headers: { 'x-reverie-parent-session': NEXT } });
     expect(pins.statusCode).toBe(200);
     expect(pins.json().data.pins[0].from.employeeId).toBe(EMPLOYEE);
-    const exact = await harness.app.inject({ method: 'GET', url: `/api/chatrooms/${room.id}/messages/${legacy.id}`, headers: { 'x-codeman-parent-session': NEXT } });
+    const exact = await harness.app.inject({ method: 'GET', url: `/api/chatrooms/${room.id}/messages/${legacy.id}`, headers: { 'x-reverie-parent-session': NEXT } });
     expect(exact.statusCode).toBe(200);
     expect(exact.json().data.message.from.employeeId).toBe(EMPLOYEE);
     expect(legacy.from).not.toHaveProperty('employeeId');

@@ -7,7 +7,7 @@
  * schedule (once/interval/daily/weekly), enable/disable, next-run calculation,
  * and a history of `CronJobRun` records. The two do not interact.
  *
- * Persisted to `~/.codeman/state.json` via StateStore (see AppState).
+ * Persisted to `~/.reverie/state.json` via StateStore (see AppState).
  */
 
 import type { SessionMode } from './session.js';
@@ -74,7 +74,7 @@ export interface CronJob {
   postChangeOnly?: boolean;
   /** Internal: the last rendered text this job posted (for postChangeOnly). */
   postLastText?: string;
-  /** Reuses Codeman's existing session modes; 'shell' covers Terminal/custom. */
+  /** Reuses Reverie's existing session modes; 'shell' covers Terminal/custom. */
   agentType: SessionMode;
   workingDir: string;
   /** Optional custom launch command (only meaningful for 'shell' mode). */

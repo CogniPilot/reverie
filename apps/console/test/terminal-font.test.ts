@@ -9,19 +9,19 @@ function loadFontHelper() {
   vm.runInContext(source, context, { filename: 'constants.js' });
   return (
     context.window as {
-      CodemanTerminalFont: {
+      ReverieTerminalFont: {
         DEFAULT_STACK: string;
         resolve: (custom?: unknown) => string;
         WEIGHT_DEFAULTS: { fontWeight: string; fontWeightBold: string };
         resolveWeights: (settings?: unknown) => { fontWeight: string | number; fontWeightBold: string | number };
       };
     }
-  ).CodemanTerminalFont;
+  ).ReverieTerminalFont;
 }
 
 const font = loadFontHelper();
 
-describe('CodemanTerminalFont', () => {
+describe('ReverieTerminalFont', () => {
   it('returns the default stack for empty or missing input', () => {
     expect(font.resolve(undefined)).toBe(font.DEFAULT_STACK);
     expect(font.resolve('')).toBe(font.DEFAULT_STACK);
@@ -59,7 +59,7 @@ describe('CodemanTerminalFont', () => {
   });
 });
 
-describe('CodemanTerminalFont.resolveWeights', () => {
+describe('ReverieTerminalFont.resolveWeights', () => {
   const DEFAULTS = { fontWeight: 'normal', fontWeightBold: 'bold' };
 
   it("leaves an untouched install on xterm's own defaults", () => {

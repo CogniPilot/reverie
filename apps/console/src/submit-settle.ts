@@ -87,7 +87,7 @@ export function turnStarted(screen: string | null, text: string, signals: TurnSi
     try {
       if (new RegExp(signals.workingLine).test(stripAnsi(screen))) return true;
     } catch {
-      // A bad pattern from ~/.codeman/clis.json is no evidence either way.
+      // A bad pattern from ~/.reverie/clis.json is no evidence either way.
     }
   }
   const still = signals.glyph ? promptStillInComposer(screen, text, signals.glyph) : undefined;

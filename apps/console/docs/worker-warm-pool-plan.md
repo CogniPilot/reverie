@@ -7,7 +7,7 @@ Design sketch. Status: **proposed**, not started. Opt-in (`workerPoolSize`, defa
 ## 1. Problem and numbers
 
 Measured against prod 1.18.3 on 2026-08-15, AFTER the SKILL.md fast-path hardening
-(no recon turns), on the identical "spawn two codeman workers" prompt:
+(no recon turns), on the identical "spawn two reverie workers" prompt:
 
 - **Cold orchestrator** (fresh session, skill loaded from disk): **20.2 s** prompt to
   final report. Breakdown: 3.9 s Skill-load turn, 6.4 s generating the one fused Bash
@@ -37,7 +37,7 @@ Target: hand out an already-ready worker in **under 1 s**.
 
 A new `src/worker-pool.ts` singleton service, following the `CronService` pattern: it **reuses the existing session layer** (`SessionManager` create + the normal spawn path) and never rebuilds tmux logic.
 
-A pool member is a real claude `Session`, pre-spawned in a reserved scratch case (`~/codeman-cases/.pool-<n>`, created with the standard scaffold + hooks), already past readiness: composer drawn, hooks installed, preamble file seeded. It sits idle at the composer costing no tokens.
+A pool member is a real claude `Session`, pre-spawned in a reserved scratch case (`~/reverie-cases/.pool-<n>`, created with the standard scaffold + hooks), already past readiness: composer drawn, hooks installed, preamble file seeded. It sits idle at the composer costing no tokens.
 
 The claim happens **transparently inside `POST /api/quick-start`**: when a request is pool-eligible (§3) and a healthy member is available, quick-start returns that member instead of cold-spawning. The agent skill, the UI Run button, and every existing caller change **nothing**. Ineligible or pool-empty requests cold-spawn exactly as today, so the pool is only ever a fast path, never a behavior change.
 
@@ -56,10 +56,10 @@ Claim only when ALL of these hold; otherwise fall through to a cold spawn:
 2. Health-probe it: `isPaneDead` (the existing ~750 ms-cached mux probe) plus one `capturePaneText` asserting a clean composer. A dead, limit-paused, or dirty member is recycled, and the claim tries the next member or falls through to cold spawn.
 3. Rename the session to the normal `w<n>-<case>` name, set `parentSessionId` via the existing `resolveParentSessionId()`, clear the pool flag, persist state.
 4. Emit `session_created` **now** (it was suppressed at warm-spawn time, §5). The tab appears here, sub-second after the request.
-5. Return the **pool case** as `casePath`/`workingDir` and do NOT create a directory under the requested name: an empty dir the worker's CLI does not run in is a trap (files written there are invisible to the worker at cwd), and the agent skill greps the RETURNED `casePath` for Codeman hooks before trusting the worker, so the response must point at the directory that really carries them.
+5. Return the **pool case** as `casePath`/`workingDir` and do NOT create a directory under the requested name: an empty dir the worker's CLI does not run in is a trap (files written there are invisible to the worker at cwd), and the agent skill greps the RETURNED `casePath` for Reverie hooks before trusting the worker, so the response must point at the directory that really carries them.
 6. Kick a background refill (§6).
 
-**The identity wrinkle, stated honestly:** the session id, `CODEMAN_SESSION_ID` inside the pane, the seeded preamble file, and the CLI's cwd are all fixed at warm-spawn and survive the claim unchanged. So a claimed worker's `workingDir` is the pool dir, not `~/codeman-cases/<requested-name>`; the requested name is a **label**. The API must report the truthful `workingDir`. Transcript projHash, response viewer, subagent windows, and Read My Mind all key off the real path and keep working precisely because we do not lie about it. This is acceptable for the dominant use (ephemeral skill workers that are deleted after answering) and is documented in the skill; a caller that needs the real case as cwd is by definition not pool-eligible.
+**The identity wrinkle, stated honestly:** the session id, `REVERIE_SESSION_ID` inside the pane, the seeded preamble file, and the CLI's cwd are all fixed at warm-spawn and survive the claim unchanged. So a claimed worker's `workingDir` is the pool dir, not `~/reverie-cases/<requested-name>`; the requested name is a **label**. The API must report the truthful `workingDir`. Transcript projHash, response viewer, subagent windows, and Read My Mind all key off the real path and keep working precisely because we do not lie about it. This is acceptable for the dominant use (ephemeral skill workers that are deleted after answering) and is documented in the skill; a caller that needs the real case as cwd is by definition not pool-eligible.
 
 **Verified skill compatibility (zero preamble changes).** Checked against the shipped 1.18.3 preamble: `spawn_worker`'s readiness probe (`_composer_up`) is a `wait-output` call with `from=buffer`, which scans output that already scrolled past before blocking, so a pooled member's long-since-drawn composer matches instantly instead of stranding a fresh-stream wait. The trust-dialog fallback never fires (members passed the dialog at warm time), and the hooks grep passes because the pool case carries the standard scaffold. Pooled and cold spawns are indistinguishable to the skill except in speed and the additive `pooled: true`.
 

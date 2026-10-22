@@ -17,7 +17,7 @@ import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { safeRmHomeTree } from './mocks/index.js';
 
-const CASES_DIR = join(homedir(), 'codeman-cases');
+const CASES_DIR = join(homedir(), 'reverie-cases');
 
 describe('Ralph Integration Tests', () => {
   let server: WebServer;

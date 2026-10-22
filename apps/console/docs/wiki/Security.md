@@ -18,7 +18,7 @@ expose it.
 
 In order of how much they matter:
 
-1. **Do not expose it without `CODEMAN_PASSWORD`.** Binding a non-loopback host without one
+1. **Do not expose it without `REVERIE_PASSWORD`.** Binding a non-loopback host without one
    starts, but warns loudly. A tunnel refuses outright unless you acknowledge the exposure
    in the UI.
 2. **Prefer Tailscale over a public tunnel.** Keeping the loopback bind and putting a
@@ -40,7 +40,7 @@ These run on **every** request, including on a default no-password loopback inst
 
 | Layer                        | What it stops                                                                                  |
 | ---------------------------- | ----------------------------------------------------------------------------------------------- |
-| **Host-header allowlist**    | DNS rebinding. A domain rebound to `127.0.0.1` is rejected before any handler runs. Add your own domains with `CODEMAN_ALLOWED_HOSTS`. |
+| **Host-header allowlist**    | DNS rebinding. A domain rebound to `127.0.0.1` is rejected before any handler runs. Add your own domains with `REVERIE_ALLOWED_HOSTS`. |
 | **Cross-site Origin guard**  | CSRF on state-changing requests. A *missing* Origin is allowed so curl, the CLI, and hooks keep working; a foreign or opaque one is rejected. |
 | **Raw `text/plain` bodies**  | The CORS simple-request CSRF vector, where a cross-site form could smuggle JSON into a write route with no preflight. |
 | **WebSocket origin check**   | Cross-site WebSocket hijacking. The terminal upgrade closes with code `4003` on failure.        |
@@ -51,7 +51,7 @@ When authentication is enabled:
 
 | Layer               | Behaviour                                                                                       |
 | ------------------- | ------------------------------------------------------------------------------------------------ |
-| **HTTP Basic**      | `CODEMAN_USERNAME` (default `admin`) and `CODEMAN_PASSWORD`.                                      |
+| **HTTP Basic**      | `REVERIE_USERNAME` (default `admin`) and `REVERIE_PASSWORD`.                                      |
 | **Session cookie**  | A 256-bit opaque token validated server side, so it cannot be forged offline. 24 hours, extended on activity, with a device-context audit trail. |
 | **Rate limiting**   | Ten failed attempts per IP produce a `429` with a 15 minute decay. A correct password or valid cookie recovers immediately even under attack, which matters because all tunnel traffic shares one loopback address. |
 | **QR auth**         | Single-use 60-second tokens with their own separate rate limiter, so a mistyped password cannot lock out QR login. |
@@ -79,7 +79,7 @@ in the page.
   integrity is checked on every push and pull request: every entry must resolve to the public
   registry with a hash.
 - Public assets are scanned for NUL bytes and syntax-checked in CI.
-- `CODEMAN_INSTANCE` scopes the tmux socket and the data directory together, so two
+- `REVERIE_INSTANCE` scopes the tmux socket and the data directory together, so two
   instances never attach each other's live sessions.
 
 ## What Reverie does not protect against
@@ -110,7 +110,7 @@ dictation through your Claude login, and the Read My Mind prediction call.
 ## Reporting a vulnerability
 
 **Never in a public issue.**
-[SECURITY.md](https://github.com/Ark0N/Codeman/blob/master/.github/SECURITY.md) has the
+[SECURITY.md](https://github.com/jgoppert/reverie/blob/main/apps/console/.github/SECURITY.md) has the
 private disclosure process and the current list of known limitations.
 
 ## Read next
@@ -118,4 +118,4 @@ private disclosure process and the current list of known limitations.
 - [Remote Access](Remote-Access) - the safe ways to expose it.
 - [Multi-User Mode](Multi-User-Mode) - what it does and does not separate.
 - [Docker Cases](Docker-Cases) - real isolation for untrusted work.
-- [`docs/security-architecture.md`](https://github.com/Ark0N/Codeman/blob/master/docs/security-architecture.md) - the complete model.
+- [`docs/security-architecture.md`](https://github.com/jgoppert/reverie/blob/main/apps/console/docs/security-architecture.md) - the complete model.

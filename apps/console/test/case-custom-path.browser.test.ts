@@ -105,7 +105,7 @@ describe('Create a case in a custom folder', () => {
       return Array.isArray(body) ? body : body.data;
     });
     expect(cases.find((c: { name: string }) => c.name === 'in-custom')).toMatchObject({ path: target });
-    expect(existsSync(join(homedir(), 'codeman-cases', 'in-custom'))).toBe(false);
+    expect(existsSync(join(homedir(), 'reverie-cases', 'in-custom'))).toBe(false);
     expect(await page.isVisible('#createCaseModal.active')).toBe(false);
   });
 
@@ -125,15 +125,15 @@ describe('Create a case in a custom folder', () => {
     expect(existsSync(join(busy, 'CLAUDE.md'))).toBe(false);
   });
 
-  it('rewords the "under ~/codeman-cases" hints while a custom folder is picked', async () => {
+  it('rewords the "under ~/reverie-cases" hints while a custom folder is picked', async () => {
     await open();
-    expect(await page.textContent('#newCaseNameHint')).toMatch(/Created in ~\/codeman-cases/);
+    expect(await page.textContent('#newCaseNameHint')).toMatch(/Created in ~\/reverie-cases/);
     await page.click('label.checkbox-row:has(#newCaseCustomPathToggle)');
     expect(await page.textContent('#newCaseNameHint')).toMatch(/parent folder below/);
     expect(await page.textContent('#newCaseBlurb')).toMatch(/a folder you choose/);
     await page.click('label.checkbox-row:has(#newCaseCustomPathToggle)');
-    expect(await page.textContent('#newCaseNameHint')).toMatch(/Created in ~\/codeman-cases/);
-    expect(await page.textContent('#newCaseBlurb')).toMatch(/under ~\/codeman-cases/);
+    expect(await page.textContent('#newCaseNameHint')).toMatch(/Created in ~\/reverie-cases/);
+    expect(await page.textContent('#newCaseBlurb')).toMatch(/under ~\/reverie-cases/);
   });
 
   it('keeps / as the root parent instead of sending an empty path', async () => {

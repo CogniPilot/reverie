@@ -115,7 +115,7 @@ describe('Grok CLI resolver', () => {
     // probeGrokVersion is ever removed, the probe runs this script, the
     // resolution SUCCEEDS, and this test fails, pinning hermeticity by
     // behavior rather than by source text.
-    const root = mkdtempSync(join(tmpdir(), 'codeman-grok-vitest-gate-'));
+    const root = mkdtempSync(join(tmpdir(), 'reverie-grok-vitest-gate-'));
     temporaryDirectories.push(root);
     const binaryPath = join(root, 'grok');
     writeFileSync(binaryPath, '#!/bin/sh\necho "grok 9.9.9 (deadbeef)"\n');

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Browser test for clickable file links in Codeman terminal
+ * Browser test for clickable file links in Reverie terminal
  * Uses Playwright directly to ignore HTTPS errors
  */
 
@@ -33,8 +33,8 @@ async function main() {
   const page = await context.newPage();
 
   try {
-    // Navigate to Codeman
-    console.log('Navigating to Codeman...');
+    // Navigate to Reverie
+    console.log('Navigating to Reverie...');
     await page.goto(BASE_URL, { waitUntil: 'networkidle', timeout: 30000 });
     console.log('Page loaded: ' + await page.title());
 
@@ -63,9 +63,9 @@ async function main() {
       await page.waitForTimeout(2000);
     }
 
-    // Get active session (use codeman session if exists)
-    const codemanSession = sessions.find(s => s.workingDir?.includes('codeman'));
-    const sessionId = codemanSession?.id || sessions[0]?.id;
+    // Get active session (use reverie session if exists)
+    const reverieSession = sessions.find(s => s.workingDir?.includes('reverie'));
+    const sessionId = reverieSession?.id || sessions[0]?.id;
     console.log(`Using session: ${sessionId}\n`);
 
     // Send a command that outputs file paths
@@ -81,8 +81,8 @@ async function main() {
     await page.waitForTimeout(2000);
 
     // Take screenshot
-    await page.screenshot({ path: '/tmp/codeman-link-test-1.png' });
-    console.log('Screenshot saved: /tmp/codeman-link-test-1.png\n');
+    await page.screenshot({ path: '/tmp/reverie-link-test-1.png' });
+    console.log('Screenshot saved: /tmp/reverie-link-test-1.png\n');
 
     // Check if terminal contains our file path
     const terminalContent = await page.evaluate(() => {
@@ -132,8 +132,8 @@ async function main() {
     console.log('Log viewer windows:', logViewerCount);
 
     // Take final screenshot
-    await page.screenshot({ path: '/tmp/codeman-link-test-2.png' });
-    console.log('\nFinal screenshot: /tmp/codeman-link-test-2.png');
+    await page.screenshot({ path: '/tmp/reverie-link-test-2.png' });
+    console.log('\nFinal screenshot: /tmp/reverie-link-test-2.png');
 
     // Test the link provider registration
     console.log('\n--- Link Provider Debug ---');
@@ -155,8 +155,8 @@ async function main() {
 
   } catch (error) {
     console.error('Error:', error.message);
-    await page.screenshot({ path: '/tmp/codeman-link-test-error.png' });
-    console.log('Error screenshot saved to /tmp/codeman-link-test-error.png');
+    await page.screenshot({ path: '/tmp/reverie-link-test-error.png' });
+    console.log('Error screenshot saved to /tmp/reverie-link-test-error.png');
   } finally {
     await browser.close();
     console.log('\nBrowser closed');

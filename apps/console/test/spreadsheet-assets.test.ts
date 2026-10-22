@@ -138,7 +138,7 @@ describe('build preflight for the spreadsheet vendor packages', () => {
     // A copy of build.mjs outside the repo: nothing resolves from there, and its ROOT
     // (derived from its own location) is the temp dir, so a missing preflight could
     // only ever act on that throwaway tree.
-    const tree = mkdtempSync(join(tmpdir(), 'codeman-build-preflight-'));
+    const tree = mkdtempSync(join(tmpdir(), 'reverie-build-preflight-'));
     try {
       mkdirSync(join(tree, 'scripts'));
       const copy = join(tree, 'scripts', 'build.mjs');

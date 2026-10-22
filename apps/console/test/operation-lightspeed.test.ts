@@ -1044,8 +1044,8 @@ describe('Operation Lightspeed', () => {
       const caseEvent = events.find((e) => e.event === 'case:created');
       expect(caseEvent).toBeDefined();
 
-      // Cleanup (containment-gated: never touch prod ~/codeman-cases)
-      safeRmHomeTree(join(homedir(), 'codeman-cases', caseName));
+      // Cleanup (containment-gated: never touch prod ~/reverie-cases)
+      safeRmHomeTree(join(homedir(), 'reverie-cases', caseName));
     });
 
     it('should deliver session:created to every client, even those with a mismatched filter', async () => {

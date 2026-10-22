@@ -4,14 +4,14 @@
  * persistent parent associations, and help modal.
  * Includes 13 SSE handlers for hooks and tunnel events.
  *
- * @mixin Extends CodemanApp.prototype via Object.assign
- * @dependency app.js (CodemanApp class, this.notificationManager, this._tunnelUrl)
+ * @mixin Extends ReverieApp.prototype via Object.assign
+ * @dependency app.js (ReverieApp class, this.notificationManager, this._tunnelUrl)
  * @dependency constants.js (escapeHtml)
  * @dependency keyboard-accessory.js (FocusTrap)
  * @loadorder 10 of 15 — loaded after ralph-panel.js, before panels-ui.js
  */
 
-Object.assign(CodemanApp.prototype, {
+Object.assign(ReverieApp.prototype, {
   // Hooks (Claude Code hook events)
   _onHookIdlePrompt(data) {
     // A prompt the server opened ALREADY acknowledged raises no alert here. Today that
@@ -198,7 +198,7 @@ Object.assign(CodemanApp.prototype, {
     if (this._swReady) return this._swReady;
     // Behind a sub-path mount the worker is served at <base>/sw.js and controls
     // <base>/ (Service-Worker-Allowed is '/', so this narrower scope is permitted).
-    const _swBase = window.CodemanBase?.base || '';
+    const _swBase = window.ReverieBase?.base || '';
     this._swReady = navigator.serviceWorker.register(_swBase + '/sw.js', { scope: _swBase + '/', updateViaCache: 'none' }).then(async (registration) => {
       const reg = registration.active ? registration : await navigator.serviceWorker.ready;
       this._swRegistration = reg;
@@ -270,7 +270,7 @@ Object.assign(CodemanApp.prototype, {
     });
     if (!data?.id) throw new Error('Failed to register this device');
     this._pushSubscriptionId = data.id;
-    localStorage.setItem('codeman-push-subscription-id', data.id);
+    localStorage.setItem('reverie-push-subscription-id', data.id);
   },
 
   async unsubscribeFromPush() {
@@ -278,13 +278,13 @@ Object.assign(CodemanApp.prototype, {
       if (this._pushSubscription) {
         await this._pushSubscription.unsubscribe();
       }
-      const subId = this._pushSubscriptionId || localStorage.getItem('codeman-push-subscription-id');
+      const subId = this._pushSubscriptionId || localStorage.getItem('reverie-push-subscription-id');
       if (subId) {
         await fetch(`/api/push/subscribe/${subId}`, { method: 'DELETE' }).catch(() => {});
       }
       this._pushSubscription = null;
       this._pushSubscriptionId = null;
-      localStorage.removeItem('codeman-push-subscription-id');
+      localStorage.removeItem('reverie-push-subscription-id');
       this._updatePushUI(false);
       this.showToast('Push notifications disabled', 'success');
     } catch (err) {
@@ -302,7 +302,7 @@ Object.assign(CodemanApp.prototype, {
 
   /** Sync push preferences to server */
   async _syncPushPreferences() {
-    const subId = this._pushSubscriptionId || localStorage.getItem('codeman-push-subscription-id');
+    const subId = this._pushSubscriptionId || localStorage.getItem('reverie-push-subscription-id');
     if (!subId) return;
     try {
       await fetch(`/api/push/subscribe/${subId}`, {
@@ -472,11 +472,11 @@ Object.assign(CodemanApp.prototype, {
     document.getElementById('appSettingsGitStatusMaxRepos').value = settings.gitStatusMaxRepos ?? defaults.gitStatusMaxRepos ?? 12;
     document.getElementById('appSettingsGitStatusTimeout').value = settings.gitStatusTimeoutSeconds ?? defaults.gitStatusTimeoutSeconds ?? 30;
     // Gesture control lives in the Input section (alongside Local Echo / CJK Input)
-    // but is only available when the instance runs with CODEMAN_GESTURE=1 (server sets
-    // window.__codemanGestureAvailable). Hide just this item otherwise so the toggle
+    // but is only available when the instance runs with REVERIE_GESTURE=1 (server sets
+    // window.__reverieGestureAvailable). Hide just this item otherwise so the toggle
     // can't promise something that won't work.
     const gestureItem = document.getElementById('appSettingsGestureControlItem');
-    if (gestureItem) gestureItem.style.display = window.__codemanGestureAvailable ? '' : 'none';
+    if (gestureItem) gestureItem.style.display = window.__reverieGestureAvailable ? '' : 'none';
     document.getElementById('appSettingsGestureControl').checked = settings.gestureControlEnabled ?? defaults.gestureControlEnabled ?? false;
     document.getElementById('appSettingsSubagentTracking').checked = settings.subagentTrackingEnabled ?? defaults.subagentTrackingEnabled ?? true;
     document.getElementById('appSettingsSubagentActiveTabOnly').checked = settings.subagentActiveTabOnly ?? defaults.subagentActiveTabOnly ?? true;
@@ -504,7 +504,7 @@ Object.assign(CodemanApp.prototype, {
     document.getElementById('appSettingsShowTabCliLogos').checked = this.tabCliLogosEnabled(settings);
     document.getElementById('appSettingsTabOrientation').value =
       settings.tabOrientation ?? defaults.tabOrientation ?? 'horizontal';
-    const tabRailWidth = window.CodemanTabRail?.resolveWidth({
+    const tabRailWidth = window.ReverieTabRail?.resolveWidth({
       // Same default resolution as applyTabRailWidth(): a rail that has never
       // been sized shows the width it is actually rendering at, which for
       // detailed rows is the Wide preset rather than 256. The rich-aware
@@ -691,7 +691,7 @@ Object.assign(CodemanApp.prototype, {
    * effects) are passed to `codex` at launch, so on a box without codex the
    * group is a promise nothing can keep.
    *
-   * Availability comes from the injected `window.__codemanCliAvailable`, shared
+   * Availability comes from the injected `window.__reverieCliAvailable`, shared
    * with the welcome buttons and the run-mode dropdown, so the group never
    * flickers in and back out. The inputs stay in the DOM either way, so a user
    * without codex can never silently wipe the codex prefs of an instance that
@@ -703,7 +703,7 @@ Object.assign(CodemanApp.prototype, {
    */
   _applyCodexSettingsVisibility() {
     const group = document.getElementById('appSettingsCodexGroup');
-    if (group) group.style.display = window.__codemanCliAvailable?.codex === true ? '' : 'none';
+    if (group) group.style.display = window.__reverieCliAvailable?.codex === true ? '' : 'none';
   },
 
   /**
@@ -1218,25 +1218,25 @@ Object.assign(CodemanApp.prototype, {
   /**
    * Both /api/mcp-sync verbs are admin-only in multi-user mode (they write files in the server
    * user's home), so a non-admin gets no MCP group at all, switch included, the same way
-   * _applyCliManagementAdminGate hides the CLI list. Also wired to `codeman:me`, because
-   * `window.__codemanUser`'s real role can resolve after settings were opened once.
+   * _applyCliManagementAdminGate hides the CLI list. Also wired to `reverie:me`, because
+   * `window.__reverieUser`'s real role can resolve after settings were opened once.
    */
   _applyMcpSyncAdminGate() {
     const group = document.getElementById('mcpSyncGroup');
     if (!group) return;
-    const me = window.__codemanUser || {};
+    const me = window.__reverieUser || {};
     group.style.display = me.multiUser && me.role !== 'admin' ? 'none' : '';
   },
 
   /**
    * GET /api/doctor is admin-only in multi-user mode (it names install paths on the host), so a
    * non-admin gets no Diagnostics group instead of a button that can only answer 403. Also
-   * wired to `codeman:me` for the same late-resolving role as the groups above.
+   * wired to `reverie:me` for the same late-resolving role as the groups above.
    */
   _applyDoctorAdminGate() {
     const group = document.getElementById('doctorGroup');
     if (!group) return;
-    const me = window.__codemanUser || {};
+    const me = window.__reverieUser || {};
     group.style.display = me.multiUser && me.role !== 'admin' ? 'none' : '';
   },
 
@@ -1285,7 +1285,7 @@ Object.assign(CodemanApp.prototype, {
   },
 
   /**
-   * Settings → System → Diagnostics: run `codeman doctor` on the server (GET /api/doctor) and list
+   * Settings → System → Diagnostics: run `reverie doctor` on the server (GET /api/doctor) and list
    * each tool. Built with DOM nodes and textContent: paths and versions come from the host.
    */
   async runDoctor() {
@@ -1386,7 +1386,7 @@ Object.assign(CodemanApp.prototype, {
     if (data.installKind && data.installKind !== 'git' && data.installKind !== 'docker-compose') {
       const hint =
         data.supervisor === 'docker-compose'
-          ? 'Update from the Docker host with <code>docker/Start-Codeman.sh</code>.'
+          ? 'Update from the Docker host with <code>reverie-request-update</code>.'
           : 'Rebuild from this checkout (<code>npm ci &amp;&amp; npm run build</code>) and restart.';
       this._setUpdateResult(`This install can't update itself (${escapeHtml(data.installKind)}). ${hint}`);
       return;
@@ -1410,7 +1410,7 @@ Object.assign(CodemanApp.prototype, {
       this._setUpdateResult(
         `<strong>v${escapeHtml(data.latestVersion || '')}</strong> needs a rebuild on the Docker host` +
           ` (current v${escapeHtml(data.currentVersion || '')}):<ul>${reasons}</ul>` +
-          `Run <code>${escapeHtml(data.environment?.hostCommand || 'docker/Start-Codeman.sh')}</code> there to apply it.`
+          `Run <code>${escapeHtml(data.environment?.hostCommand || 'reverie-request-update')}</code> there to apply it.`
       );
       if (notes && data.notes) {
         notes.style.display = 'block';
@@ -1531,7 +1531,7 @@ Object.assign(CodemanApp.prototype, {
   },
 
   /**
-   * Is `tool` installed on the server? Reads `window.__codemanCliAvailable`,
+   * Is `tool` installed on the server? Reads `window.__reverieCliAvailable`,
    * injected by renderIndexHtml (see the comment there for why this is injected
    * rather than fetched per surface).
    *
@@ -1541,7 +1541,7 @@ Object.assign(CodemanApp.prototype, {
    * mode for a genuinely missing CLI is just an error toast.
    */
   isCliAvailable(tool) {
-    const flags = window.__codemanCliAvailable;
+    const flags = window.__reverieCliAvailable;
     if (!flags || typeof flags !== 'object') return true;
     return flags[tool] !== false;
   },
@@ -1565,7 +1565,7 @@ Object.assign(CodemanApp.prototype, {
   renderWelcomeCliActions() {
     const container = document.getElementById('welcomeCliActions');
     if (!container) return;
-    const catalog = Array.isArray(window.__codemanCliCatalog) ? window.__codemanCliCatalog : [];
+    const catalog = Array.isArray(window.__reverieCliCatalog) ? window.__reverieCliCatalog : [];
     const offered = catalog.filter((cli) => cli.enabled && this.isCliAvailable(cli.id));
     const primary = offered.find((cli) => cli.kind !== 'shell') || offered[0];
     // "Run <label>", the strings i18n.js translates ("Run Claude Code", "Run Shell");
@@ -2138,14 +2138,14 @@ Object.assign(CodemanApp.prototype, {
   /**
    * COD-55: detect the server's refusal to start an unauthenticated public tunnel.
    * The PUT /api/settings route returns a 4xx with { success:false, error } when no
-   * CODEMAN_PASSWORD is set and the unauthenticated-network opt-in is not acknowledged.
+   * REVERIE_PASSWORD is set and the unauthenticated-network opt-in is not acknowledged.
    * Shows the server's (actionable) message as an error toast.
    * @param {Response|null} res - the fetch Response from the settings PUT
    * @returns {Promise<boolean>} true if the tunnel-enable was refused (caller should abort)
    */
   async _handleTunnelEnableRefusal(res) {
     if (!res || res.ok) return false;
-    let message = 'Tunnel refused: set CODEMAN_PASSWORD before exposing Reverie publicly.';
+    let message = 'Tunnel refused: set REVERIE_PASSWORD before exposing Reverie publicly.';
     try {
       const body = await res.json();
       if (body && body.error) message = body.error;
@@ -2160,7 +2160,7 @@ Object.assign(CodemanApp.prototype, {
           'Enabling the Cloudflare tunnel will publish THIS machine to a public URL with ' +
           'NO login. Anyone who gets the URL has full terminal control — effectively remote ' +
           'code execution on your computer.\n\n' +
-          'Strongly recommended: set CODEMAN_PASSWORD instead.\n\n' +
+          'Strongly recommended: set REVERIE_PASSWORD instead.\n\n' +
           'Enable the unauthenticated public tunnel anyway?'
       );
       if (!confirmed) {
@@ -2414,10 +2414,10 @@ Object.assign(CodemanApp.prototype, {
     // as "previously off" — used below to detect a real OFF→ON flip.
     const _prevWebglEnabled = (_prev.webglRendererEnabled ?? true) === true;
     const settings = {
-      displayName: window.CodemanI18n?.normalizeDisplayName(
+      displayName: window.ReverieI18n?.normalizeDisplayName(
         document.getElementById('appSettingsDisplayName').value
       ) || 'Reverie',
-      language: window.CodemanI18n?.normalizeLanguage(
+      language: window.ReverieI18n?.normalizeLanguage(
         document.getElementById('appSettingsLanguage').value
       ) || 'en',
       defaultClaudeMdPath: document.getElementById('appSettingsClaudeMdPath').value.trim(),
@@ -2549,7 +2549,7 @@ Object.assign(CodemanApp.prototype, {
     // defeat the sticky safety net (shouldSkipWebGL treats stored true like the
     // untouched default at page load).
     if (!_prevWebglEnabled && settings.webglRendererEnabled) {
-      try { localStorage.removeItem('codeman-webgl-disabled'); } catch {}
+      try { localStorage.removeItem('reverie-webgl-disabled'); } catch {}
     }
 
     // Save voice settings to localStorage + include in server payload for cross-device sync
@@ -2933,14 +2933,14 @@ Object.assign(CodemanApp.prototype, {
    * per-row Edit/Discover/Delete button on its own. The "+ Add endpoint" button
    * has no row to hide behind, so it needs its own gate — otherwise a non-admin
    * can open the form, fill it in, and get a 403 toast on Save. Wired to the
-   * `codeman:me` event (admin-ui.js) as well as called from
-   * applyCustomModelEndpointsVisibility(), because `window.__codemanUser`'s
+   * `reverie:me` event (admin-ui.js) as well as called from
+   * applyCustomModelEndpointsVisibility(), because `window.__reverieUser`'s
    * real role can resolve AFTER settings have already been opened once.
    */
   _applyCustomModelAdminGate() {
     const addBtn = document.getElementById('customModelHostAddBtn');
     if (!addBtn) return;
-    const me = window.__codemanUser || {};
+    const me = window.__reverieUser || {};
     const blocked = me.multiUser && me.role !== 'admin';
     addBtn.style.display = blocked ? 'none' : '';
   },
@@ -3137,7 +3137,7 @@ Object.assign(CodemanApp.prototype, {
   _applyCliManagementAdminGate() {
     const group = document.getElementById('cliListGroup');
     if (!group) return;
-    const me = window.__codemanUser || {};
+    const me = window.__reverieUser || {};
     const blocked = me.multiUser && me.role !== 'admin';
     const featureOn = document.getElementById('appSettingsCliManagement')?.checked ?? false;
     group.style.display = blocked || !featureOn ? 'none' : '';
@@ -3161,9 +3161,9 @@ Object.assign(CodemanApp.prototype, {
     // /api/clis rows carry no capabilities, so keep the served catalog's `external`
     // (isExternalCliSession() reads it). A new custom CLI has none and falls back to `kind`.
     const previous = new Map(
-      (Array.isArray(window.__codemanCliCatalog) ? window.__codemanCliCatalog : []).map((cli) => [cli.id, cli])
+      (Array.isArray(window.__reverieCliCatalog) ? window.__reverieCliCatalog : []).map((cli) => [cli.id, cli])
     );
-    window.__codemanCliCatalog = this._cliList.map((cli) => ({
+    window.__reverieCliCatalog = this._cliList.map((cli) => ({
       id: cli.id,
       label: cli.label,
       shortBadge: cli.shortBadge,
@@ -3173,11 +3173,11 @@ Object.assign(CodemanApp.prototype, {
       enabled: cli.enabled,
       available: cli.kind === 'shell' || (cli.enabled && cli.installed),
     }));
-    window.__codemanCliAvailable = {
-      ...(window.__codemanCliAvailable || {}),
+    window.__reverieCliAvailable = {
+      ...(window.__reverieCliAvailable || {}),
       ...Object.fromEntries(this._cliList.map((cli) => [cli.id, cli.kind === 'shell' || (cli.enabled && cli.installed)])),
     };
-    if (!window.__codemanCliCatalog.some((cli) => cli.id === this.runMode && cli.enabled)) {
+    if (!window.__reverieCliCatalog.some((cli) => cli.id === this.runMode && cli.enabled)) {
       this.setRunMode?.('claude');
     }
     this.applyWelcomeCliVisibility?.();
@@ -3241,9 +3241,9 @@ Object.assign(CodemanApp.prototype, {
   },
 
   /**
-   * ⚠️ A successful toggle must patch `window.__codemanCliAvailable` and refresh
+   * ⚠️ A successful toggle must patch `window.__reverieCliAvailable` and refresh
    * every surface that reads it, or the change is invisible everywhere except
-   * this settings row until the next full page reload — `window.__codemanCliAvailable`
+   * this settings row until the next full page reload — `window.__reverieCliAvailable`
    * is injected ONCE at initial page render (server.ts) and nothing else refetches
    * it. Same pattern `installDeepSeekProfile()` already uses for the same reason.
    */
@@ -3399,7 +3399,7 @@ Object.assign(CodemanApp.prototype, {
   getSettingsStorageKey() {
     const isHandheld =
       MobileDetection.isHandheldDevice?.() ?? MobileDetection.getDeviceType() === 'mobile';
-    return isHandheld ? 'codeman-app-settings-mobile' : 'codeman-app-settings';
+    return isHandheld ? 'reverie-app-settings-mobile' : 'reverie-app-settings';
   },
 
   // Get default settings based on device type
@@ -3514,19 +3514,19 @@ Object.assign(CodemanApp.prototype, {
   },
 
   // Apply the chosen skin live: sets the html[data-skin] attribute, syncs BOTH
-  // localStorage locations (the standalone 'codeman:skin' key the pre-paint head
+  // localStorage locations (the standalone 'reverie:skin' key the pre-paint head
   // script reads + the app-settings blob field written by saveAppSettingsToStorage),
-  // updates window.__codemanSkin, and re-themes any live terminals.
+  // updates window.__reverieSkin, and re-themes any live terminals.
   applySkin() {
     const settings = this.loadAppSettingsFromStorage();
     const defaults = this.getDefaultSettings();
     const skin = settings.skin ?? defaults.skin ?? 'daylight-blue';
     document.documentElement.setAttribute('data-skin', skin);
-    window.__codemanSkin = skin;
+    window.__reverieSkin = skin;
     const themeColor = getComputedStyle(document.documentElement).getPropertyValue('--bg-dark').trim();
     if (themeColor) document.querySelector('meta[name="theme-color"]')?.setAttribute('content', themeColor);
     try {
-      localStorage.setItem('codeman:skin', skin);
+      localStorage.setItem('reverie:skin', skin);
     } catch (_e) {
       /* private mode */
     }
@@ -3537,7 +3537,7 @@ Object.assign(CodemanApp.prototype, {
   // The i18n layer updates both existing static nodes and future dynamic DOM.
   applyLocalization() {
     const settings = this.loadAppSettingsFromStorage();
-    const result = window.CodemanI18n?.configure({
+    const result = window.ReverieI18n?.configure({
       language: settings.language,
       displayName: settings.displayName,
     });
@@ -3747,7 +3747,7 @@ Object.assign(CodemanApp.prototype, {
     }
 
     // Split button — hidden by default, and hard-gated to desktop widths
-    // regardless of the setting (window.CodemanSplitPane.SPLIT_PANE_MIN_WIDTH,
+    // regardless of the setting (window.ReverieSplitPane.SPLIT_PANE_MIN_WIDTH,
     // matching HOME_SESSIONS_MIN_WIDTH's JS-check + media-query-backstop
     // pattern — the CSS in styles.css is the backstop, this is the check).
     const showSplitButton = settings.showSplitButton ?? defaults.showSplitButton ?? false;
@@ -3846,8 +3846,8 @@ Object.assign(CodemanApp.prototype, {
     const defaults = this.getDefaultSettings();
     const sidebarOwnsTabs = this.isSessionSidebarActive?.() === true;
     const orientation =
-      !this.isSoloWindow && !sidebarOwnsTabs && window.CodemanTabOverflow?.resolveTabOrientation
-        ? window.CodemanTabOverflow.resolveTabOrientation({
+      !this.isSoloWindow && !sidebarOwnsTabs && window.ReverieTabOverflow?.resolveTabOrientation
+        ? window.ReverieTabOverflow.resolveTabOrientation({
             deviceType: MobileDetection.getDeviceType(),
             setting: settings.tabOrientation ?? defaults.tabOrientation ?? 'horizontal',
           })
@@ -4177,14 +4177,14 @@ Object.assign(CodemanApp.prototype, {
     try {
       if (
         (MobileDetection.isHandheldDevice?.() ?? MobileDetection.getDeviceType() === 'mobile') &&
-        !localStorage.getItem('codeman:planUsagePerDeviceMigrated')
+        !localStorage.getItem('reverie:planUsagePerDeviceMigrated')
       ) {
         const s = this.loadAppSettingsFromStorage();
         if (s && s.showPlanUsageLimits) {
           s.showPlanUsageLimits = false;
           this.saveAppSettingsToStorage(s);
         }
-        localStorage.setItem('codeman:planUsagePerDeviceMigrated', '1');
+        localStorage.setItem('reverie:planUsagePerDeviceMigrated', '1');
       }
     } catch {
       /* best-effort migration */
@@ -4255,7 +4255,7 @@ Object.assign(CodemanApp.prototype, {
 
         // Sync voice settings from server (seed localStorage if no local API key)
         if (voiceSettings) {
-          const localVoice = localStorage.getItem('codeman-voice-settings');
+          const localVoice = localStorage.getItem('reverie-voice-settings');
           if (!localVoice || !JSON.parse(localVoice).apiKey) {
             VoiceInput._saveDeepgramConfig(voiceSettings);
           }
@@ -4265,10 +4265,10 @@ Object.assign(CodemanApp.prototype, {
         if (respawnPresets && Array.isArray(respawnPresets)) {
           this._serverRespawnPresets = respawnPresets;
           // Also update localStorage for offline access
-          localStorage.setItem('codeman-respawn-presets', JSON.stringify(respawnPresets));
+          localStorage.setItem('reverie-respawn-presets', JSON.stringify(respawnPresets));
         } else {
           // Migration: push existing localStorage presets to server
-          const localPresets = localStorage.getItem('codeman-respawn-presets');
+          const localPresets = localStorage.getItem('reverie-respawn-presets');
           if (localPresets) {
             const parsed = JSON.parse(localPresets);
             if (parsed.length > 0) {
@@ -4281,7 +4281,7 @@ Object.assign(CodemanApp.prototype, {
         // Sync run mode from server
         if (runMode) {
           this.runMode = runMode;
-          try { localStorage.setItem('codeman_runMode', runMode); } catch {}
+          try { localStorage.setItem('reverie_runMode', runMode); } catch {}
           this._applyRunMode();
         }
 
@@ -4308,7 +4308,7 @@ Object.assign(CodemanApp.prototype, {
         const env = await res.json();
         states = env?.success === true ? env.data : env;
         // Also update localStorage
-        localStorage.setItem('codeman-subagent-window-states', JSON.stringify(states));
+        localStorage.setItem('reverie-subagent-window-states', JSON.stringify(states));
       }
     } catch (err) {
       console.error('Failed to load subagent window states from server:', err);
@@ -4317,7 +4317,7 @@ Object.assign(CodemanApp.prototype, {
     // Fallback to localStorage
     if (!states) {
       try {
-        const saved = localStorage.getItem('codeman-subagent-window-states');
+        const saved = localStorage.getItem('reverie-subagent-window-states');
         if (saved) {
           states = JSON.parse(saved);
         }
@@ -4345,7 +4345,7 @@ Object.assign(CodemanApp.prototype, {
 
     // Save to localStorage for instant recovery
     try {
-      localStorage.setItem('codeman-subagent-parents', JSON.stringify(mapData));
+      localStorage.setItem('reverie-subagent-parents', JSON.stringify(mapData));
     } catch (err) {
       console.error('Failed to save subagent parents to localStorage:', err);
     }
@@ -4376,7 +4376,7 @@ Object.assign(CodemanApp.prototype, {
         const env = await res.json();
         mapData = env?.success === true ? env.data : env;
         // Update localStorage as cache
-        localStorage.setItem('codeman-subagent-parents', JSON.stringify(mapData));
+        localStorage.setItem('reverie-subagent-parents', JSON.stringify(mapData));
       }
     } catch (err) {
       console.error('Failed to load subagent parents from server:', err);
@@ -4385,7 +4385,7 @@ Object.assign(CodemanApp.prototype, {
     // Fallback to localStorage
     if (!mapData) {
       try {
-        const saved = localStorage.getItem('codeman-subagent-parents');
+        const saved = localStorage.getItem('reverie-subagent-parents');
         if (saved) {
           mapData = JSON.parse(saved);
         }
@@ -4610,7 +4610,7 @@ Object.assign(CodemanApp.prototype, {
   },
 });
 
-// window.__codemanUser's real role can resolve after settings have already been
+// window.__reverieUser's real role can resolve after settings have already been
 // opened once (admin-ui.js fetches /api/me asynchronously and dispatches this on
 // arrival), so the Custom Model Endpoints admin gate needs to be re-applied when
 // it does, not just when the modal opens. Optional chaining on addEventListener
@@ -4618,7 +4618,7 @@ Object.assign(CodemanApp.prototype, {
 // context with a minimal fake `document` that has no event-target methods at
 // all, and a module-level statement that throws there fails the whole file's
 // evaluation, not just this feature.
-document.addEventListener?.('codeman:me', () => {
+document.addEventListener?.('reverie:me', () => {
   window.app?._applyCustomModelAdminGate?.();
   window.app?._applyCliManagementAdminGate?.();
   window.app?._applyMcpSyncAdminGate?.();

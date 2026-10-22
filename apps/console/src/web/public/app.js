@@ -1,7 +1,7 @@
 /**
  * @fileoverview Core UI controller for Reverie — tab-based terminal manager with xterm.js.
  *
- * Defines the CodemanApp class (constructor, init, SSE connection, session lifecycle, tabs,
+ * Defines the ReverieApp class (constructor, init, SSE connection, session lifecycle, tabs,
  * navigation). Domain-specific methods are mixed in from separate modules via Object.assign:
  *
  *   terminal-ui.js   — Terminal setup, rendering pipeline, controls
@@ -18,7 +18,7 @@
  * ═══ Sections in this file ═══
  *
  *   SSE Handler Map            — Event-to-method routing table (resolves at runtime via `this`)
- *   CodemanApp Class           — Constructor and all state initialization (~80 properties)
+ *   ReverieApp Class           — Constructor and all state initialization (~80 properties)
  *   Pending Hooks              — Hook state machine for tab alerts
  *   Init                       — App bootstrap, mobile setup, WebGL init
  *   Event Listeners            — Keyboard shortcuts, resize, beforeunload
@@ -34,8 +34,8 @@
  *   Timer / Tokens             — Session timer, token/cost display
  *   Module Init                — localStorage migration, app instantiation
  *
- * @class CodemanApp
- * @globals {CodemanApp} app - Singleton instance (also on window.app)
+ * @class ReverieApp
+ * @globals {ReverieApp} app - Singleton instance (also on window.app)
  *
  * @dependency constants.js (SSE_EVENTS, timing constants, escapeHtml, DEC_SYNC_STRIP_RE)
  * @dependency mobile-handlers.js (MobileDetection, KeyboardHandler, SwipeHandler)
@@ -56,7 +56,7 @@
 // Global Error & Performance Diagnostics
 // ═══════════════════════════════════════════════════════════════
 // Writes breadcrumbs to localStorage so they survive tab freezes.
-// After a crash, check: localStorage.getItem('codeman-crash-diag')
+// After a crash, check: localStorage.getItem('reverie-crash-diag')
 
 const _crashDiag = {
   _entries: [],
@@ -71,12 +71,12 @@ const _crashDiag = {
     // control (a WebSocket close `reason` arrives from the server). A newline
     // in there forges extra entries in the trail; an unbounded string can fill
     // the storage quota and silently kill every later breadcrumb. Flatten and
-    // cap. CodemanDiag is loaded before app.js, but guard anyway — a
+    // cap. ReverieDiag is loaded before app.js, but guard anyway — a
     // diagnostic that can throw is worse than no diagnostic.
-    // Bound to a local FIRST: `CodemanDiag?.x` still throws a ReferenceError
+    // Bound to a local FIRST: `ReverieDiag?.x` still throws a ReferenceError
     // when the identifier was never declared, and this is the one function in
     // the app that must never throw.
-    const diag = typeof CodemanDiag !== 'undefined' ? CodemanDiag : null;
+    const diag = typeof ReverieDiag !== 'undefined' ? ReverieDiag : null;
     const flat = diag?.sanitizeDiagEntry
       ? diag.sanitizeDiagEntry(msg)
       : String(msg == null ? '' : msg)
@@ -85,7 +85,7 @@ const _crashDiag = {
     const entry = `${new Date().toISOString().slice(11,23)} ${flat}`;
     this._entries.push(entry);
     if (this._entries.length > this._maxEntries) this._entries.shift();
-    try { localStorage.setItem('codeman-crash-diag', this._entries.join('\n')); } catch {}
+    try { localStorage.setItem('reverie-crash-diag', this._entries.join('\n')); } catch {}
   }
 };
 
@@ -93,10 +93,10 @@ const _crashDiag = {
 // distinct page id — an iOS PWA reload wipes the in-memory trail, and without
 // this the fresh page's first beacon would be all the server ever sees.
 try {
-  const prev = localStorage.getItem('codeman-crash-diag');
+  const prev = localStorage.getItem('reverie-crash-diag');
   if (prev) {
     console.log('[CRASH-DIAG] Previous session breadcrumbs:\n' + prev);
-    navigator.sendBeacon(CodemanBase.url('/api/crash-diag'), JSON.stringify({ data: prev, id: _crashDiag._pageId + '-prev' }));
+    navigator.sendBeacon(ReverieBase.url('/api/crash-diag'), JSON.stringify({ data: prev, id: _crashDiag._pageId + '-prev' }));
   }
 } catch {}
 _crashDiag.log('PAGE LOAD');
@@ -105,12 +105,12 @@ _crashDiag.log('PAGE LOAD');
 function _crashDiagBeacon() {
   try {
     if (_crashDiag._entries.length > 0) {
-      navigator.sendBeacon(CodemanBase.url('/api/crash-diag'), JSON.stringify({ data: _crashDiag._entries.join('\n'), id: _crashDiag._pageId }));
+      navigator.sendBeacon(ReverieBase.url('/api/crash-diag'), JSON.stringify({ data: _crashDiag._entries.join('\n'), id: _crashDiag._pageId }));
     }
   } catch {}
 }
 setInterval(() => {
-  try { localStorage.setItem('codeman-crash-heartbeat', String(Date.now())); } catch {}
+  try { localStorage.setItem('reverie-crash-heartbeat', String(Date.now())); } catch {}
   _crashDiagBeacon();
 }, 2000);
 // iOS suspends JS the instant the app is backgrounded — entries logged since
@@ -692,7 +692,7 @@ const DEFAULT_SHORTCUTS = [
 
 
 // ═══════════════════════════════════════════════════════════════
-// CodemanApp Class — constructor and global state
+// ReverieApp Class — constructor and global state
 // ═══════════════════════════════════════════════════════════════
 
 /**
@@ -721,7 +721,7 @@ const TAB_LAYOUT_PENDING_MAX_AGE_MS = 60000;
 /** How long a collapsed group's header stays marked after a tab arrives in it. */
 const TAB_GROUP_ARRIVAL_MS = 2000;
 
-class CodemanApp {
+class ReverieApp {
   constructor() {
     this.sessions = new Map();
     this._shortIdCache = new Map(); // Cache session ID .slice(0, 8) results
@@ -983,7 +983,7 @@ class CodemanApp {
     // (computeSseStale in constants.js); these are its inputs. The threshold
     // is an instance field so a browser test can shrink it.
     this._sseLastMessageAt = 0;
-    this._sseStaleTimeoutMs = window.CodemanSseStale?.TIMEOUT_MS ?? 45000;
+    this._sseStaleTimeoutMs = window.ReverieSseStale?.TIMEOUT_MS ?? 45000;
     this._sseStaleWatchdog = null;
 
     // Connection-loss UI (banner + full-screen overlay). The decision itself is
@@ -1389,7 +1389,7 @@ class CodemanApp {
 
   _disableWebGLSticky(reason) {
     try {
-      localStorage.setItem('codeman-webgl-disabled', JSON.stringify({ reason, at: Date.now() }));
+      localStorage.setItem('reverie-webgl-disabled', JSON.stringify({ reason, at: Date.now() }));
     } catch {}
   }
 
@@ -1595,7 +1595,7 @@ class CodemanApp {
    * which an SSE reconnect rebuilds with the grid still open.
    */
   _sseFilterSessionId(sessionId) {
-    if (this._tilesOwnTerminal?.()) return window.CodemanTileGrid?.TILE_GRID_SSE_FILTER || sessionId;
+    if (this._tilesOwnTerminal?.()) return window.ReverieTileGrid?.TILE_GRID_SSE_FILTER || sessionId;
     return sessionId;
   }
 
@@ -1637,11 +1637,11 @@ class CodemanApp {
    *  server-injected global (fallback). Returns null for the normal dashboard. */
   _detectSoloSessionId() {
     try {
-      if (typeof window !== 'undefined' && typeof window.__CODEMAN_SOLO__ === 'string' && window.__CODEMAN_SOLO__) {
-        return window.__CODEMAN_SOLO__;
+      if (typeof window !== 'undefined' && typeof window.__REVERIE_SOLO__ === 'string' && window.__REVERIE_SOLO__) {
+        return window.__REVERIE_SOLO__;
       }
       // Strip the reverse-proxy base so the match works under a sub-path mount.
-      const base = window.CodemanBase?.base || '';
+      const base = window.ReverieBase?.base || '';
       let path = location.pathname;
       if (base && path.startsWith(base)) path = path.slice(base.length) || '/';
       const m = path.match(/^\/session\/([^/]+)\/?$/);
@@ -1653,7 +1653,7 @@ class CodemanApp {
    *  link to the same session is then a change the browser reports, even
    *  after you have clicked away to another tab. Returns the id or null. */
   _takeUrlSession() {
-    const id = window.CodemanUrlSession?.sessionIdFromFragment(location.hash) ?? null;
+    const id = window.ReverieUrlSession?.sessionIdFromFragment(location.hash) ?? null;
     if (id) {
       try { history.replaceState(history.state, '', location.pathname + location.search); } catch {}
     }
@@ -1744,7 +1744,7 @@ class CodemanApp {
     // either, so a hosted tab could never re-dock: refuse before asking the host.
     const hosted = this.hasHostWindows() && !this.windowChannel
       ? false
-      : this.openInHostWindow(CodemanBase.url('/session/' + encodeURIComponent(id)));
+      : this.openInHostWindow(ReverieBase.url('/session/' + encodeURIComponent(id)));
     if (hosted !== null) {
       if (!hosted) {
         this.showToast?.('Could not open a new window for this session', 'error');
@@ -1756,7 +1756,7 @@ class CodemanApp {
     }
     const features = this._detachWindowFeatures(placement);
     let win = null;
-    try { win = window.open(CodemanBase.url('/session/' + encodeURIComponent(id)), 'codeman-session-' + id, features); } catch {}
+    try { win = window.open(ReverieBase.url('/session/' + encodeURIComponent(id)), 'reverie-session-' + id, features); } catch {}
     if (!win) {
       this.showToast?.('Pop-out blocked — allow popups for this site to detach a session', 'error');
       return;
@@ -1785,14 +1785,14 @@ class CodemanApp {
 
   /**
    * The embedding app's window opener, when there is one. A native wrapper
-   * exposes `window.CodemanHost.openWindow(absoluteUrl)` (anything but false
+   * exposes `window.ReverieHost.openWindow(absoluteUrl)` (anything but false
    * counts as opened) to say it can put a page in a window of its own; browsers
    * never define it.
    * @returns {boolean} whether a host window opener is present
    */
   hasHostWindows() {
     try {
-      return typeof window !== 'undefined' && typeof window.CodemanHost?.openWindow === 'function';
+      return typeof window !== 'undefined' && typeof window.ReverieHost?.openWindow === 'function';
     } catch { return false; }
   }
 
@@ -1817,7 +1817,7 @@ class CodemanApp {
   openInHostWindow(url) {
     if (!this.hasHostWindows()) return null;
     try {
-      return window.CodemanHost.openWindow(new URL(url, location.href).href) !== false;
+      return window.ReverieHost.openWindow(new URL(url, location.href).href) !== false;
     } catch { return false; }
   }
 
@@ -1921,7 +1921,7 @@ class CodemanApp {
   /** Open the cross-window BroadcastChannel and wire role-specific handlers. */
   _initWindowChannel() {
     if (typeof BroadcastChannel === 'undefined') return;
-    try { this.windowChannel = new BroadcastChannel('codeman-windows'); }
+    try { this.windowChannel = new BroadcastChannel('reverie-windows'); }
     catch { this.windowChannel = null; return; }
     this.windowChannel.onmessage = (e) => this._onWindowMessage(e.data);
     if (this.isSoloWindow) {
@@ -1961,7 +1961,7 @@ class CodemanApp {
       // open by window.open, so ask the host when it offers the call.
       if (msg.type === 'close-request') { this._releaseSoloWindow(); }
       else if (msg.type === 'focus-request') {
-        try { if (typeof window.CodemanHost?.focusWindow === 'function') window.CodemanHost.focusWindow(); else window.focus(); } catch {}
+        try { if (typeof window.ReverieHost?.focusWindow === 'function') window.ReverieHost.focusWindow(); else window.focus(); } catch {}
       }
       return;
     }
@@ -2024,7 +2024,7 @@ class CodemanApp {
   /** Solo window: close itself (the re-dock button and a dashboard close-request). */
   _closeSoloWindow() {
     try {
-      if (typeof window.CodemanHost?.closeWindow === 'function') window.CodemanHost.closeWindow();
+      if (typeof window.ReverieHost?.closeWindow === 'function') window.ReverieHost.closeWindow();
       else window.close();
     } catch {}
   }
@@ -2081,7 +2081,7 @@ class CodemanApp {
     if (redock) redock.style.display = '';
     // Detach Tiles: the title drags onto a dashboard's tiles to dock there.
     this._installSoloTileHandle?.();
-    document.title = name + ' — ' + (window.CodemanI18n?.displayName || 'Reverie');
+    document.title = name + ' — ' + (window.ReverieI18n?.displayName || 'Reverie');
     if (this.notificationManager) this.notificationManager.originalTitle = document.title;
     // Neutralize the dashboard-only brand click in a solo window.
     const logo = document.querySelector('.header-brand .logo');
@@ -2099,8 +2099,8 @@ class CodemanApp {
       + '<p>This session has ended or is no longer available.</p>'
       + '<button class="btn-primary" onclick="app._closeSoloWindow()">Close window</button>';
     document.body.appendChild(el);
-    document.title = (window.codemanT?.('Session ended') || 'Session ended')
-      + ' — ' + (window.CodemanI18n?.displayName || 'Reverie');
+    document.title = (window.reverieT?.('Session ended') || 'Session ended')
+      + ' — ' + (window.ReverieI18n?.displayName || 'Reverie');
   }
 
   connectSSE() {
@@ -2147,7 +2147,7 @@ class CodemanApp {
     const _sseParams = new URLSearchParams({ clientId: this._clientId });
     const _sseFilterId = this._sseFilterSessionId(this.activeSessionId);
     if (_sseFilterId) _sseParams.set('sessions', _sseFilterId);
-    this.eventSource = new EventSource(CodemanBase.url(`/api/events?${_sseParams.toString()}`));
+    this.eventSource = new EventSource(ReverieBase.url(`/api/events?${_sseParams.toString()}`));
 
     // Store all event listeners for cleanup on reconnect.
     //
@@ -2309,7 +2309,7 @@ class CodemanApp {
     });
     // Multi-user admin: live-refresh whichever admin views (panel/Users tab) are open.
     addListener(SSE_EVENTS.ADMIN_USERS_CHANGED, () => {
-      window.codemanAdmin?.onUsersChanged?.();
+      window.reverieAdmin?.onUsersChanged?.();
     });
     // Base image auto-build on first Docker case (build-on-first-use). A single
     // multi-minute event; surface start/finish so the Run spinner is explained.
@@ -2382,7 +2382,7 @@ class CodemanApp {
    * nothing at all.
    */
   _checkSseStale() {
-    const policy = window.CodemanSseStale;
+    const policy = window.ReverieSseStale;
     if (!policy) return;
     const now = Date.now();
     const stale = policy.compute({
@@ -2504,7 +2504,7 @@ class CodemanApp {
     // when the thing you were looking at was taken away.
     if (this.activeSessionId === data.id && !this._closingSessions.has(data.id)) {
       this.activeSessionId = null;
-      try { localStorage.removeItem('codeman-active-session'); } catch {}
+      try { localStorage.removeItem('reverie-active-session'); } catch {}
       this.terminal.clear();
       this.showWelcome();
     }
@@ -2646,7 +2646,7 @@ class CodemanApp {
       } catch {
         // Treated as "did not repaint" — retrying is the entire point of this.
       }
-      const retry = window.CodemanDroppedOutput.shouldRetryDroppedOutputRecovery({
+      const retry = window.ReverieDroppedOutput.shouldRetryDroppedOutputRecovery({
         repainted,
         timedOut,
         attempt,
@@ -2660,7 +2660,7 @@ class CodemanApp {
       // a bare global resolves in a browser but not in the vm harnesses the gate
       // runs app.js under, and this body executes inside a timer where a
       // ReferenceError would be swallowed — taking the recovery with it.
-    }, window.CodemanDroppedOutput.DROP_RECOVERY_DELAY_MS);
+    }, window.ReverieDroppedOutput.DROP_RECOVERY_DELAY_MS);
   }
 
   // ═══════════════════════════════════════════════════════════════
@@ -2753,7 +2753,7 @@ class CodemanApp {
     const placeholders = [];
     const masked = text.replace(fenceRe, (m) => {
       placeholders.push(m);
-      return `__CODEMAN_FENCE_${placeholders.length - 1}__`;
+      return `__REVERIE_FENCE_${placeholders.length - 1}__`;
     });
 
     // Split on blank-line paragraph boundaries; wrap any paragraph containing
@@ -2763,13 +2763,13 @@ class CodemanApp {
       .map((chunk) => {
         if (/^\n{2,}$/.test(chunk)) return chunk; // keep separators
         if (!chunk.trim()) return chunk;
-        if (chunk.includes('__CODEMAN_FENCE_')) return chunk;
+        if (chunk.includes('__REVERIE_FENCE_')) return chunk;
         if (BOX_PATTERN.test(chunk)) return '\n```\n' + chunk + '\n```\n';
         return chunk;
       })
       .join('');
 
-    return processed.replace(/__CODEMAN_FENCE_(\d+)__/g, (_m, i) => placeholders[Number(i)]);
+    return processed.replace(/__REVERIE_FENCE_(\d+)__/g, (_m, i) => placeholders[Number(i)]);
   }
 
   /**
@@ -2901,7 +2901,7 @@ class CodemanApp {
         ev.preventDefault();
         ev.stopPropagation();
         const root = fragmentLink.closest('.rv-text') || body;
-        const target = window.CodemanMarkdownAnchors?.find(root, fragmentLink.getAttribute('href'));
+        const target = window.ReverieMarkdownAnchors?.find(root, fragmentLink.getAttribute('href'));
         if (target) {
           const calm = window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches;
           target.scrollIntoView({ block: 'start', behavior: calm ? 'auto' : 'smooth' });
@@ -3151,7 +3151,7 @@ class CodemanApp {
         this._bindResponseViewerInteractions(body);
       } else {
         body.textContent =
-          window.codemanT?.('No response yet — send a message in this session first.') ||
+          window.reverieT?.('No response yet — send a message in this session first.') ||
           'No response yet — send a message in this session first.';
       }
 
@@ -3203,7 +3203,7 @@ class CodemanApp {
           body.appendChild(notice);
         }
         const emptyText = 'No full conversation history available for this session';
-        notice.textContent = window.codemanT?.(emptyText) || emptyText;
+        notice.textContent = window.reverieT?.(emptyText) || emptyText;
         return;
       }
 
@@ -3250,7 +3250,7 @@ class CodemanApp {
    * machinery stays armed behind it.
    *
    * The budget scales with what is being asked for and with how many captures
-   * are already running (see CodemanFetchDeadline): a full scrollback on a slow
+   * are already running (see ReverieFetchDeadline): a full scrollback on a slow
    * uplink legitimately needs longer than a tail, and eight tabs resuming must
    * not all expire together because each assumed it had the link to itself.
    *
@@ -3279,8 +3279,8 @@ class CodemanApp {
    */
   async _fetchTerminalCapture(url, opts = {}) {
     const deadlineMs =
-      typeof CodemanFetchDeadline !== 'undefined'
-        ? CodemanFetchDeadline.terminalFetchDeadlineMs({
+      typeof ReverieFetchDeadline !== 'undefined'
+        ? ReverieFetchDeadline.terminalFetchDeadlineMs({
             full: !!opts.full,
             inflight: this._terminalCaptureInflight || 0,
           })
@@ -3623,7 +3623,7 @@ class CodemanApp {
     // Persist last-known so the chip shows immediately on the next page load /
     // SSE reconnect, instead of staying blank until a session next renders.
     try {
-      localStorage.setItem('codeman:planUsage', JSON.stringify({ t: Date.now(), data }));
+      localStorage.setItem('reverie:planUsage', JSON.stringify({ t: Date.now(), data }));
     } catch {}
   }
 
@@ -3631,7 +3631,7 @@ class CodemanApp {
   // slow-moving; ignored if older than 12h). Live events refresh it.
   restorePlanUsageChip() {
     try {
-      const raw = localStorage.getItem('codeman:planUsage');
+      const raw = localStorage.getItem('reverie:planUsage');
       if (!raw) return;
       const saved = JSON.parse(raw);
       if (saved?.data && Date.now() - (saved.t || 0) < 12 * 3600 * 1000) {
@@ -3780,7 +3780,7 @@ class CodemanApp {
     // up to the limit).
     const cid = this._clientId ? `${this._clientId}:${this._wsTabNonce}` : '';
     const cidQuery = cid ? `?cid=${encodeURIComponent(cid)}` : '';
-    const url = `${proto}//${location.host}${CodemanBase.base}/ws/sessions/${sessionId}/terminal${cidQuery}`;
+    const url = `${proto}//${location.host}${ReverieBase.base}/ws/sessions/${sessionId}/terminal${cidQuery}`;
     const ws = new WebSocket(url);
     this._ws = ws;
     this._wsSessionId = sessionId;
@@ -3863,7 +3863,7 @@ class CodemanApp {
       //                    fallback but keep retrying so we return to WS when it clears.
       //   give-up        → 4004 (not found) / 4009 (terminated); the session is gone.
       // _disconnectWs() nulls onclose for intentional disconnects, so we never land here for those.
-      const plan = window.CodemanWsReconnect.plan(event.code, this._wsReconnectAttempts || 0);
+      const plan = window.ReverieWsReconnect.plan(event.code, this._wsReconnectAttempts || 0);
       _crashDiag.log(
         `WS CLOSE code=${event.code} reason=${event.reason || ''} action=${plan.action} attempts=${this._wsReconnectAttempts || 0}`
       );
@@ -4003,7 +4003,7 @@ class CodemanApp {
     // oversized paste goes out as several in-limit frames, delivered in seq order
     // as one contiguous stream. A mux write is line-oriented (it strips newlines
     // and sends Enter on its own), so it is never split: refuse it instead.
-    const limit = window.CodemanInputLimit;
+    const limit = window.ReverieInputLimit;
     if (limit && input.length > limit.FRAME_MAX_CHARS) {
       if (useMux || input.length > limit.PASTE_MAX_CHARS) {
         const max = useMux ? limit.FRAME_MAX_CHARS : limit.PASTE_MAX_CHARS;
@@ -4346,20 +4346,20 @@ class CodemanApp {
   _loadReliableState() {
     // Stable client identity for server-side dedup across reconnects/reloads.
     try {
-      this._clientId = localStorage.getItem('codeman:clientId') || '';
+      this._clientId = localStorage.getItem('reverie:clientId') || '';
     } catch {
       this._clientId = '';
     }
     if (!this._clientId) {
       this._clientId = 'c-' + Math.random().toString(36).slice(2) + '-' + Date.now().toString(36);
       try {
-        localStorage.setItem('codeman:clientId', this._clientId);
+        localStorage.setItem('reverie:clientId', this._clientId);
       } catch {
         /* storage disabled — dedup degrades to per-load, still no loss */
       }
     }
     try {
-      const raw = localStorage.getItem('codeman:pendingInput');
+      const raw = localStorage.getItem('reverie:pendingInput');
       if (!raw) return;
       const saved = JSON.parse(raw);
       if (saved && saved.seqs) {
@@ -4370,7 +4370,7 @@ class CodemanApp {
       if (saved && saved.pending) {
         for (const [s, recs] of Object.entries(saved.pending)) {
           if (Array.isArray(recs) && recs.length) {
-            const frameMax = window.CodemanInputLimit?.FRAME_MAX_CHARS ?? Infinity;
+            const frameMax = window.ReverieInputLimit?.FRAME_MAX_CHARS ?? Infinity;
             const kept = recs
               .filter((r) => r && typeof r.data === 'string' && Number.isInteger(r.seq))
               // A frame over the server's limit can never be ACKed; one persisted
@@ -4429,7 +4429,7 @@ class CodemanApp {
       // the in-memory queue still delivers; only cross-reload durability is lost.
       const payload =
         bytes > this._reliableMaxBytes ? { seqs } : { seqs, pending };
-      localStorage.setItem('codeman:pendingInput', JSON.stringify(payload));
+      localStorage.setItem('reverie:pendingInput', JSON.stringify(payload));
     } catch {
       /* QuotaExceeded or disabled storage — in-memory delivery is unaffected */
     }
@@ -4553,7 +4553,7 @@ class CodemanApp {
   _connectionTileValueText(value) {
     if (!value) return '';
     const key = `Connection tile: ${value}`;
-    const translated = typeof window.codemanT === 'function' ? window.codemanT(key) : key;
+    const translated = typeof window.reverieT === 'function' ? window.reverieT(key) : key;
     return translated && translated !== key ? translated : value;
   }
 
@@ -4570,7 +4570,7 @@ class CodemanApp {
     const prev = this._lastIndicatorDescriptor;
     // The tile's value word is written in the UI language, so a language
     // switch counts as a change too.
-    const language = window.CodemanI18n?.language || 'en';
+    const language = window.ReverieI18n?.language || 'en';
     if (
       prev &&
       language === this._lastIndicatorLanguage &&
@@ -4626,7 +4626,7 @@ class CodemanApp {
 
   /** Apply the offline banner / overlay for the current connection state. */
   _updateConnectionLossUi() {
-    const policy = window.CodemanConnectionLoss;
+    const policy = window.ReverieConnectionLoss;
     const banner = this.$('offlineBanner');
     const overlay = this.$('offlineOverlay');
     if (!policy || !banner || !overlay) return;
@@ -4946,13 +4946,13 @@ class CodemanApp {
     // Server is source of truth for open sessions — don't resurrect stale tabs
     // from localStorage (would show phantom "ended" tabs when a session was closed
     // on another device).
-    try { localStorage.removeItem('codeman-tab-meta'); } catch {}
+    try { localStorage.removeItem('reverie-tab-meta'); } catch {}
 
     // COD-131: server is authoritative for global tab order. Seed localStorage
     // from the server snapshot (if present) so syncSessionOrder() reconciles
     // against the cross-device order rather than this device's stale local copy.
     if (Array.isArray(data.sessionOrder) && data.sessionOrder.length) {
-      try { localStorage.setItem('codeman-session-order', JSON.stringify(data.sessionOrder)); } catch {}
+      try { localStorage.setItem('reverie-session-order', JSON.stringify(data.sessionOrder)); } catch {}
     }
 
     // Sync sessionOrder with current sessions (preserve order, add new, remove stale)
@@ -5092,7 +5092,7 @@ class CodemanApp {
       // Priority: current active > localStorage > first session
       let restoreId = previousActiveId;
       if (!restoreId || !this.sessions.has(restoreId)) {
-        try { restoreId = localStorage.getItem('codeman-active-session'); } catch {}
+        try { restoreId = localStorage.getItem('reverie-active-session'); } catch {}
       }
       if (keepTerminal && restoreId === previousActiveId && this.sessions.has(restoreId)) {
         // Reconnect onto the session already on screen. renderSessionTabs() ran
@@ -5273,7 +5273,7 @@ class CodemanApp {
   /**
    * True when the VERTICAL TAB RAIL orders its cards the way both home screens
    * do — blocked on you first, then running longest-first, then quiet
-   * most-recently-quiet first (`CodemanSessionOrder`, constants.js) — instead of
+   * most-recently-quiet first (`ReverieSessionOrder`, constants.js) — instead of
    * leaving them in the user's tab order.
    *
    * Read off <html> like the other two rail gates, because the render loop asks
@@ -5303,7 +5303,7 @@ class CodemanApp {
    * forcing the full rebuild that would restart every card's animation.
    *
    * Rows are classified by `_mobileOverviewState()` and compared by
-   * `CodemanSessionOrder` — the same two helpers both home screens use, so the
+   * `ReverieSessionOrder` — the same two helpers both home screens use, so the
    * rail cannot disagree with them about what "working" means or what sorts
    * first. `orderIndex` is the tab-strip position, which the comparator uses as
    * its deterministic final tiebreak.
@@ -5316,7 +5316,7 @@ class CodemanApp {
    */
   _tabRailSortOrder(ids) {
     if (!this.isTabRailSorted()) return null;
-    if (!window.CodemanSessionOrder || typeof this._mobileOverviewState !== 'function') return null;
+    if (!window.ReverieSessionOrder || typeof this._mobileOverviewState !== 'function') return null;
     const rows = [];
     for (let i = 0; i < ids.length; i++) {
       const session = this.sessions.get(ids[i]);
@@ -5329,7 +5329,7 @@ class CodemanApp {
         orderIndex: i,
       });
     }
-    const sorted = window.CodemanSessionOrder.sort(rows);
+    const sorted = window.ReverieSessionOrder.sort(rows);
     const out = new Map();
     for (let i = 0; i < sorted.length; i++) out.set(sorted[i].id, i);
     return out;
@@ -5351,7 +5351,7 @@ class CodemanApp {
 
   /**
    * Order values and visible groups for one render pass, or null when the list
-   * is not grouped by state. The pure core is `CodemanTabTriage.layout()`
+   * is not grouped by state. The pure core is `ReverieTabTriage.layout()`
    * (constants.js); this only feeds it the same classification both home
    * screens and the sorted rail use.
    *
@@ -5365,7 +5365,7 @@ class CodemanApp {
    */
   _tabTriageLayout(ids, groupProjection, railSortOrder) {
     if (groupProjection || !this.isTabTriage()) return null;
-    if (!window.CodemanTabTriage || typeof this._mobileOverviewState !== 'function') return null;
+    if (!window.ReverieTabTriage || typeof this._mobileOverviewState !== 'function') return null;
     const rows = [];
     for (let i = 0; i < ids.length; i++) {
       const session = this.sessions.get(ids[i]);
@@ -5380,7 +5380,7 @@ class CodemanApp {
     }
     const webviewIds = (this.webviewOrder || []).filter((wid) => this.webviews?.has(wid));
     const reverse = document.documentElement.dataset.tabStateOrder === 'urgent-last';
-    return window.CodemanTabTriage.layout(rows, webviewIds, { reverse });
+    return window.ReverieTabTriage.layout(rows, webviewIds, { reverse });
   }
 
   /**
@@ -5563,7 +5563,7 @@ class CodemanApp {
     if (!dragged) return false;
     // Clusters are real boxes: a drop belongs to the box it lands in.
     if (clusters) return dragged.closest('.tab-cluster') !== targetTab.closest('.tab-cluster');
-    const stride = window.CodemanTabTriage?.STRIDE || 10000;
+    const stride = window.ReverieTabTriage?.STRIDE || 10000;
     const band = (el) => Math.floor((Number(el.style.order) || 0) / stride);
     return band(dragged) !== band(targetTab);
   }
@@ -5610,13 +5610,13 @@ class CodemanApp {
    * @param {object|null} groupProjection the grouped rail's projection, if any
    */
   _tabClusterLayout(ids, groupProjection) {
-    if (groupProjection || !this.isTabClusters() || !window.CodemanTabClusters) return null;
+    if (groupProjection || !this.isTabClusters() || !window.ReverieTabClusters) return null;
     const rows = [];
     for (const id of ids) {
       const session = this.sessions.get(id);
       if (session) rows.push({ id, ...this._tabClusterIdentity(session, id) });
     }
-    const clusters = window.CodemanTabClusters.compute(rows);
+    const clusters = window.ReverieTabClusters.compute(rows);
     // Only a cluster with company drops the case from its tab names.
     const labelFor = new Map();
     for (const cluster of clusters) {
@@ -5667,7 +5667,7 @@ class CodemanApp {
     if (parsed && parsed.suffix) {
       return `<span class="tab-name-prefix">${escapeHtml(parsed.prefix)}: </span>${escapeHtml(parsed.suffix)}`;
     }
-    const split = clusterLabel ? window.CodemanTabClusters?.nameSplit(name, clusterLabel) : null;
+    const split = clusterLabel ? window.ReverieTabClusters?.nameSplit(name, clusterLabel) : null;
     if (split) return `${escapeHtml(split.shown)}<span class="tab-name-case">${escapeHtml(split.hidden)}</span>`;
     return escapeHtml(name);
   }
@@ -5704,7 +5704,7 @@ class CodemanApp {
    * Collapse state is per-device and lives in its OWN localStorage key, not in
    * the app-settings blob: saveAppSettings() rebuilds that blob from the DOM
    * controls, so any key without a control is silently wiped on every Save.
-   * Precedent: codeman:skin, codeman-session-order, codeman-active-session.
+   * Precedent: reverie:skin, reverie-session-order, reverie-active-session.
    */
   isSessionSidebarCollapsed() {
     // In-memory intent wins over storage: where localStorage throws (Safari
@@ -5714,7 +5714,7 @@ class CodemanApp {
     if (this._sidebarCollapsedOverride !== undefined) return this._sidebarCollapsedOverride;
     let raw = null;
     try {
-      raw = localStorage.getItem('codeman-sidebar-collapsed');
+      raw = localStorage.getItem('reverie-sidebar-collapsed');
     } catch {}
     // Never chosen yet: the docked desktop sidebar starts open, the overlay
     // drawer starts CLOSED — "expanded" there would mean a drawer covering the
@@ -5866,7 +5866,7 @@ class CodemanApp {
     const collapsed = !this.isSessionSidebarCollapsed();
     this._sidebarCollapsedOverride = collapsed;
     try {
-      localStorage.setItem('codeman-sidebar-collapsed', collapsed ? '1' : '0');
+      localStorage.setItem('reverie-sidebar-collapsed', collapsed ? '1' : '0');
     } catch {}
     // Collapsing hides the filter row. If focus is sitting in there it would be
     // reset to <body>, dropping the user back to the top of the tab order — so
@@ -5939,7 +5939,7 @@ class CodemanApp {
    * the vertical rail's search box (only one of the two hosts the list at a
    * time). Classes only, over whatever the last render drew, so grouping, order,
    * Alt+N badges and the server layout never move; the matching itself is the
-   * pure CodemanTabSearch (constants.js).
+   * pure ReverieTabSearch (constants.js).
    *
    * - Sidebar: name (aria-label) + working directory (title), as it always has.
    * - Rail: the NAME only, a web tab's title included (it is a row in the same
@@ -5974,7 +5974,7 @@ class CodemanApp {
       // Web tabs carry no alerts; only a session row can be kept.
       keep: !tab.dataset.webviewId && !!tab.dataset.id && !!this.tabAlerts?.get(tab.dataset.id),
     }));
-    const result = window.CodemanTabSearch?.filter(rows, query);
+    const result = window.ReverieTabSearch?.filter(rows, query);
     if (!result) return;
     // Whether anything appeared or disappeared: the rows below it then moved.
     let moved = false;
@@ -6034,7 +6034,7 @@ class CodemanApp {
 
   /** True while the vertical rail's search box is narrowing the list. */
   _tabRailSearchActive() {
-    return this._tabOrientation() === 'vertical' && !!window.CodemanTabSearch?.needle(this._tabRailSearch);
+    return this._tabOrientation() === 'vertical' && !!window.ReverieTabSearch?.needle(this._tabRailSearch);
   }
 
   /**
@@ -6365,7 +6365,7 @@ class CodemanApp {
       return;
     }
 
-    const policy = window.CodemanTabOverflow?.computeTabScrollLeft;
+    const policy = window.ReverieTabOverflow?.computeTabScrollLeft;
     if (!policy) return;
     const containerRect = container.getBoundingClientRect();
     const tabRect = tab.getBoundingClientRect();
@@ -6395,7 +6395,7 @@ class CodemanApp {
    *
    * Grouped by state (tabArrangement 'state'), the phone/tablet strip is still
    * one scrolling row, but its tabs come in bands of `order` values, one band
-   * per state (CodemanTabTriage, constants.js). The active session changing
+   * per state (ReverieTabTriage, constants.js). The active session changing
    * state (a prompt sent: idle to working; a permission prompt: needs you)
    * moves its tab into another band while scrollLeft stays put, so the tab in
    * use slid out of view (measured at 390px: x 165 to -870). Both render paths
@@ -6419,7 +6419,7 @@ class CodemanApp {
       return false;
     }
     const order = tab.style.order;
-    const stride = window.CodemanTabTriage?.STRIDE || 10000;
+    const stride = window.ReverieTabTriage?.STRIDE || 10000;
     const band = order === '' ? null : Math.floor(Number(order) / stride);
     this._activeTabBand = { id, band };
     return !!prev && prev.id === id && prev.band !== band;
@@ -6703,7 +6703,7 @@ class CodemanApp {
           const _p = parseSessionPrefix(name);
           if (nameEl.dataset.fullName !== name) {
             nameEl.replaceChildren();
-            const _split = _p && _p.suffix ? null : window.CodemanTabClusters?.nameSplit(name, clusterLayout?.labelFor.get(id));
+            const _split = _p && _p.suffix ? null : window.ReverieTabClusters?.nameSplit(name, clusterLayout?.labelFor.get(id));
             if (_p && _p.suffix) {
               const prefix = document.createElement('span');
               prefix.className = 'tab-name-prefix';
@@ -6856,8 +6856,8 @@ class CodemanApp {
     const defaults = this.getDefaultSettings();
     const manualTwoRows = deviceType === 'desktop' ? (settings.tabTwoRows ?? defaults.tabTwoRows ?? false) : false;
 
-    const orientation = window.CodemanTabOverflow?.resolveTabOrientation
-      ? window.CodemanTabOverflow.resolveTabOrientation({
+    const orientation = window.ReverieTabOverflow?.resolveTabOrientation
+      ? window.ReverieTabOverflow.resolveTabOrientation({
           deviceType,
           setting: settings.tabOrientation ?? defaults.tabOrientation ?? 'horizontal',
         })
@@ -6887,8 +6887,8 @@ class CodemanApp {
 
     // Measure the natural one-row overflow, then enable wrapping only if needed.
     container.classList.remove('tabs-auto-wrap');
-    const shouldWrap = window.CodemanTabOverflow?.shouldAutoWrapTabs
-      ? window.CodemanTabOverflow.shouldAutoWrapTabs({
+    const shouldWrap = window.ReverieTabOverflow?.shouldAutoWrapTabs
+      ? window.ReverieTabOverflow.shouldAutoWrapTabs({
           deviceType,
           manualTwoRows,
           tabCount: this.sessions.size,
@@ -7071,7 +7071,7 @@ class CodemanApp {
       // every agent CLI, claude included, shows its logo through PR #532's
       // `run-mode-dot <id>` slot, the id as DATA, so the tab, the tile and split
       // headers and the Run menus draw the same mark. An id with no logo rule (a
-      // CLI added through ~/.codeman/clis.json) gets that slot's plain dot. The
+      // CLI added through ~/.reverie/clis.json) gets that slot's plain dot. The
       // span is always emitted: CLI Logos on Tabs (`showTabCliLogos`) hides it
       // in CSS under html[data-tab-logos='off'], so a toggle never re-renders.
       const tabModeHtml = mode === 'shell'
@@ -7116,7 +7116,7 @@ class CodemanApp {
         (this.webviewOrder || []).filter((wid) => this.webviews?.has(wid)).map((wid, i) => [wid, _tabIdx + i])
       );
       parts.push(
-        window.CodemanTabLayout.renderProjection(
+        window.ReverieTabLayout.renderProjection(
           groupProjection,
           (ref) =>
             ref.kind === 'session'
@@ -7415,7 +7415,7 @@ class CodemanApp {
    * alerts change without a rebuild.
    */
   _syncTabGroupHeaderAlerts(container, projection) {
-    const alerts = window.CodemanTabLayout?.hiddenGroupAlerts(projection, (id) => this.tabAlerts?.get(id)) || {};
+    const alerts = window.ReverieTabLayout?.hiddenGroupAlerts(projection, (id) => this.tabAlerts?.get(id)) || {};
     for (const header of container.querySelectorAll('[data-tab-group-header]')) {
       const alert = alerts[header.dataset.tabGroupHeader];
       header.classList.toggle('tab-alert-action', alert === 'action');
@@ -7596,7 +7596,7 @@ class CodemanApp {
   // Load session order from localStorage
   loadSessionOrder() {
     try {
-      const saved = localStorage.getItem('codeman-session-order');
+      const saved = localStorage.getItem('reverie-session-order');
       return saved ? JSON.parse(saved) : [];
     } catch {
       return [];
@@ -7608,7 +7608,7 @@ class CodemanApp {
   // fallback; the server is authoritative and echoes back via SSE.
   saveSessionOrder() {
     try {
-      localStorage.setItem('codeman-session-order', JSON.stringify(this.sessionOrder));
+      localStorage.setItem('reverie-session-order', JSON.stringify(this.sessionOrder));
     } catch {
       // Ignore storage errors
     }
@@ -7628,7 +7628,7 @@ class CodemanApp {
   _onSessionOrderChanged(data) {
     if (!data || !Array.isArray(data.order)) return;
     try {
-      localStorage.setItem('codeman-session-order', JSON.stringify(data.order));
+      localStorage.setItem('reverie-session-order', JSON.stringify(data.order));
     } catch {
       // Ignore storage errors
     }
@@ -7654,8 +7654,8 @@ class CodemanApp {
 
   _ensureTabLayoutCoordinator() {
     if (this._tabLayoutCoordinator) return this._tabLayoutCoordinator;
-    if (!window.CodemanTabLayout) return null;
-    this._tabLayoutCoordinator = window.CodemanTabLayout.createLoadCoordinator({
+    if (!window.ReverieTabLayout) return null;
+    this._tabLayoutCoordinator = window.ReverieTabLayout.createLoadCoordinator({
       fetchLayout: async () => {
         const data = await this._apiJson('/api/tab-layout');
         if (!data?.layout) throw new Error('Tab layout unavailable');
@@ -7681,7 +7681,7 @@ class CodemanApp {
 
   /** SSE tab:layoutChanged carries `{ owner, version }`; the layout itself is re-read. */
   _onTabLayoutChanged(data) {
-    const me = window.__codemanUser;
+    const me = window.__reverieUser;
     // Another user's layout changed: nothing of ours moved. (The GET is
     // owner-scoped server-side, so this is a saved request, not a guard.)
     if (me?.multiUser && typeof data?.owner === 'string' && data.owner !== me.username) return;
@@ -7700,7 +7700,7 @@ class CodemanApp {
     let next = null;
     if (layout) {
       try {
-        next = window.CodemanTabLayout.normalizeLayout(layout);
+        next = window.ReverieTabLayout.normalizeLayout(layout);
       } catch {
         next = null;
       }
@@ -7732,7 +7732,7 @@ class CodemanApp {
     this.tabLayout = next;
     const storage = this._getTabCollapseStorage();
     const collapsed = storage && next
-      ? window.CodemanTabLayout.loadCollapsedGroupIds(storage, next.groups.map((group) => group.id))
+      ? window.ReverieTabLayout.loadCollapsedGroupIds(storage, next.groups.map((group) => group.id))
       : { ids: [], ok: !next };
     if (!collapsed.ok) this._tabCollapseStorageFailed = true;
     this.collapsedTabGroupIds = new Set(collapsed.ids);
@@ -7768,8 +7768,8 @@ class CodemanApp {
    * no layout yet, a failed read, or a layout without groups.
    */
   _projectTabGroups() {
-    if (!this.tabLayout || this._tabOrientation() !== 'vertical' || !window.CodemanTabLayout) return null;
-    return window.CodemanTabLayout.project(this.tabLayout, {
+    if (!this.tabLayout || this._tabOrientation() !== 'vertical' || !window.ReverieTabLayout) return null;
+    return window.ReverieTabLayout.project(this.tabLayout, {
       // sessionOrder, not the sessions Map: rows are built in that order, so a
       // session the layout has not placed yet lands where the flat strip has it.
       liveSessionIds: this.sessionOrder.filter((id) => this.sessions.has(id)),
@@ -7786,7 +7786,7 @@ class CodemanApp {
   }
 
   _tabGroupStructureKey(projection) {
-    return window.CodemanTabLayout?.structureKey(this.tabLayout, projection, [...this.collapsedTabGroupIds]) ?? null;
+    return window.ReverieTabLayout?.structureKey(this.tabLayout, projection, [...this.collapsedTabGroupIds]) ?? null;
   }
 
   /** True when the DOM's grouping no longer matches what a render would draw. */
@@ -7810,7 +7810,7 @@ class CodemanApp {
     else next.delete(groupId);
     const storage = this._getTabCollapseStorage();
     const saved = storage
-      ? window.CodemanTabLayout.saveCollapsedGroupIds(storage, [...next])
+      ? window.ReverieTabLayout.saveCollapsedGroupIds(storage, [...next])
       : { ids: [], ok: false };
     if (!saved.ok) this._tabCollapseStorageFailed = true;
     this.collapsedTabGroupIds = new Set(saved.ids);
@@ -7856,7 +7856,7 @@ class CodemanApp {
   _tabFocusCollapsedNow() {
     if (this._tabFocusCollapsed === undefined) {
       const storage = this._getTabCollapseStorage();
-      const loaded = storage ? window.CodemanTabLayout.loadFocusCollapsed(storage) : { collapsed: false, ok: false };
+      const loaded = storage ? window.ReverieTabLayout.loadFocusCollapsed(storage) : { collapsed: false, ok: false };
       if (!loaded.ok) this._tabCollapseStorageFailed = true;
       this._tabFocusCollapsed = loaded.collapsed;
     }
@@ -7867,7 +7867,7 @@ class CodemanApp {
   toggleTabFocusCollapsed(forceCollapsed) {
     const shouldCollapse = forceCollapsed === undefined ? !this._tabFocusCollapsedNow() : forceCollapsed === true;
     const storage = this._getTabCollapseStorage();
-    const saved = storage ? window.CodemanTabLayout.saveFocusCollapsed(storage, shouldCollapse) : { collapsed: false, ok: false };
+    const saved = storage ? window.ReverieTabLayout.saveFocusCollapsed(storage, shouldCollapse) : { collapsed: false, ok: false };
     if (!saved.ok) this._tabCollapseStorageFailed = true;
     this._tabFocusCollapsed = saved.collapsed;
     if (this._renderTabFocus()) this.updateConnectionLines?.();
@@ -7877,8 +7877,8 @@ class CodemanApp {
 
   /** The focused refs this rail draws now ([] off the vertical rail or without a layout). */
   _tabFocusRefs() {
-    if (!this.tabLayout || this._tabOrientation() !== 'vertical' || !window.CodemanTabLayout) return [];
-    return window.CodemanTabLayout.focusRefs(this.tabLayout, {
+    if (!this.tabLayout || this._tabOrientation() !== 'vertical' || !window.ReverieTabLayout) return [];
+    return window.ReverieTabLayout.focusRefs(this.tabLayout, {
       liveSessionIds: this.sessionOrder.filter((id) => this.sessions.has(id)),
       openWebviewIds: (this.webviewOrder || []).filter((id) => this.webviews?.has(id)),
     });
@@ -8050,7 +8050,7 @@ class CodemanApp {
   // header strip, the sidebar and phones never offer it.
 
   _tabLayoutEditable() {
-    return !!(this.tabLayout && window.CodemanTabLayout && this._tabOrientation() === 'vertical');
+    return !!(this.tabLayout && window.ReverieTabLayout && this._tabOrientation() === 'vertical');
   }
 
   /** child session id -> parent session id, so a moved session takes the sessions that follow it. */
@@ -8075,7 +8075,7 @@ class CodemanApp {
 
   _ensureTabLayoutEditor() {
     if (this._tabLayoutEditor || !this.tabLayout) return this._tabLayoutEditor || null;
-    this._tabLayoutEditor = window.CodemanTabLayout.createEditCoordinator({
+    this._tabLayoutEditor = window.ReverieTabLayout.createEditCoordinator({
       initialLayout: this.tabLayout,
       put: (request) => this._putTabLayout(request),
       fetchLayout: async () => {
@@ -8104,7 +8104,7 @@ class CodemanApp {
     const storage = this._getTabCollapseStorage();
     if (storage) {
       // Forget collapse state for groups that no longer exist.
-      const collapsed = window.CodemanTabLayout.loadCollapsedGroupIds(storage, layout.groups.map((group) => group.id));
+      const collapsed = window.ReverieTabLayout.loadCollapsedGroupIds(storage, layout.groups.map((group) => group.id));
       if (collapsed.ok) this.collapsedTabGroupIds = new Set(collapsed.ids);
     }
     this._fullRenderSessionTabs();
@@ -8141,7 +8141,7 @@ class CodemanApp {
   createTabGroup({ ref = null, index } = {}) {
     if (!this._tabLayoutEditable()) return false;
     const id = this._newTabGroupId();
-    const name = window.CodemanI18n?.t?.('New group') || 'New group';
+    const name = window.ReverieI18n?.t?.('New group') || 'New group';
     if (!this.editTabLayout({ type: 'createGroup', id, name, ...(Number.isInteger(index) ? { index } : {}) }, `group:${id}`)) {
       return false;
     }
@@ -8186,7 +8186,7 @@ class CodemanApp {
     const parents = this._tabLayoutParents();
     let destination;
     try {
-      destination = window.CodemanTabLayout.moveDestination(this.tabLayout, ref, groupId, anchor, placement, parents);
+      destination = window.ReverieTabLayout.moveDestination(this.tabLayout, ref, groupId, anchor, placement, parents);
     } catch {
       return false;
     }
@@ -8209,7 +8209,7 @@ class CodemanApp {
     if (grouped && !this.isTabRailSorted()) {
       // The sessions that follow this one move with it, so "down" means past
       // the first row that is not part of that block.
-      const moving = new Set(window.CodemanTabLayout.movingRefKeys(this.tabLayout, ref, this._tabLayoutParents()));
+      const moving = new Set(window.ReverieTabLayout.movingRefKeys(this.tabLayout, ref, this._tabLayoutParents()));
       const previous = location.refs[location.index - 1];
       const next = location.refs.slice(location.index + 1).find((candidate) => !moving.has(`${candidate.kind}:${candidate.id}`));
       if (previous) actions.push({ label: 'Move up', run: () => this.moveTabRef(ref, location.groupId, previous, 'before') });
@@ -8240,7 +8240,7 @@ class CodemanApp {
     // default): off, every spawned tab is hand-placed, so there is nothing to say.
     if (this.loadAppSettingsFromStorage?.()?.spawnedTabsFollowParent !== true) return [];
     const parents = this._tabLayoutParents();
-    const placement = window.CodemanTabLayout.placementState(this.tabLayout, ref, parents);
+    const placement = window.ReverieTabLayout.placementState(this.tabLayout, ref, parents);
     if (!placement) return [];
     const parent = this.sessions.get(placement.parentId);
     const parentName = parent ? this.getSessionName(parent) : placement.parentId;
@@ -8309,7 +8309,7 @@ class CodemanApp {
   }
 
   _canCreateTabGroup() {
-    const max = window.CodemanTabLayout?.MAX_GROUPS;
+    const max = window.ReverieTabLayout?.MAX_GROUPS;
     return !max || (this.tabLayout?.groups?.length || 0) < max;
   }
 
@@ -8629,7 +8629,7 @@ class CodemanApp {
     const target = drag.active ? this._tabLayoutDropTarget(e.clientX, e.clientY, container) || drag.target : null;
     this._cancelTabLayoutPointerDrag(container);
     if (!target) return;
-    const operation = window.CodemanTabLayout.dropOperation(this.tabLayout, drag.source, target, this._tabLayoutParents());
+    const operation = window.ReverieTabLayout.dropOperation(this.tabLayout, drag.source, target, this._tabLayoutParents());
     if (!operation) return;
     const identity = drag.source.type === 'group' ? `group:${drag.source.groupId}` : `${drag.source.ref.kind}:${drag.source.ref.id}`;
     this.editTabLayout(operation, identity);
@@ -8649,7 +8649,7 @@ class CodemanApp {
     if (!operations.length) return false;
     try {
       sessionStorage.setItem(
-        'codeman:tab-layout-pending',
+        'reverie:tab-layout-pending',
         JSON.stringify({ owner: this._tabLayoutOwnerKey(), baseVersion: editor.baseVersion(), savedAt: Date.now(), operations })
       );
     } catch {}
@@ -8667,7 +8667,7 @@ class CodemanApp {
 
   /** Whose layout this page edits, as the server keys it (`@single` without multi-user). */
   _tabLayoutOwnerKey() {
-    const me = window.__codemanUser;
+    const me = window.__reverieUser;
     if (!me) return null;
     return me.multiUser ? me.username : '@single';
   }
@@ -8681,7 +8681,7 @@ class CodemanApp {
   _restorePendingTabLayoutEdits() {
     let saved;
     try {
-      const raw = sessionStorage.getItem('codeman:tab-layout-pending');
+      const raw = sessionStorage.getItem('reverie:tab-layout-pending');
       if (!raw) return false;
       saved = JSON.parse(raw);
     } catch {
@@ -8693,7 +8693,7 @@ class CodemanApp {
       if (!this._tabLayoutRestoreWaiting) {
         this._tabLayoutRestoreWaiting = true;
         document.addEventListener(
-          'codeman:me',
+          'reverie:me',
           () => {
             this._tabLayoutRestoreWaiting = false;
             this._restorePendingTabLayoutEdits();
@@ -8704,10 +8704,10 @@ class CodemanApp {
       return false;
     }
     try {
-      sessionStorage.removeItem('codeman:tab-layout-pending');
+      sessionStorage.removeItem('reverie:tab-layout-pending');
     } catch {}
     const operations = saved?.operations;
-    if (!Array.isArray(operations) || !operations.length || !this.tabLayout || !window.CodemanTabLayout) return false;
+    if (!Array.isArray(operations) || !operations.length || !this.tabLayout || !window.ReverieTabLayout) return false;
     if (saved.owner !== owner) return false;
     const age = Date.now() - saved.savedAt;
     if (!Number.isFinite(age) || age < 0 || age > TAB_LAYOUT_PENDING_MAX_AGE_MS) return false;
@@ -8925,7 +8925,7 @@ class CodemanApp {
    * threw before the prune could run, permanently disabling persistence.
    */
   _persistXtermSnapshot(key, snapshot) {
-    const PREFIX = 'codeman-xs-';
+    const PREFIX = 'reverie-xs-';
     const MAX_KEYS = 10;
     const others = () => Object.keys(localStorage).filter((k) => k.startsWith(PREFIX) && k !== key);
     try {
@@ -8998,11 +8998,11 @@ class CodemanApp {
           // buffer-replay produces a visual mess of stacked banner redraws when
           // no snapshot exists, so persistence matters more here than for claude.
           if (snapshot.length < 256 * 1024) {
-            this._persistXtermSnapshot(`codeman-xs-${this.activeSessionId}`, snapshot);
+            this._persistXtermSnapshot(`reverie-xs-${this.activeSessionId}`, snapshot);
           }
         } else {
           this._xtermSnapshots.delete(this.activeSessionId);
-          try { localStorage.removeItem(`codeman-xs-${this.activeSessionId}`); } catch {}
+          try { localStorage.removeItem(`reverie-xs-${this.activeSessionId}`); } catch {}
         }
       } catch (_err) {
         /* Serialize failed — fall back to server buffer replay */
@@ -9536,7 +9536,7 @@ class CodemanApp {
     if (this.activeSessionId === sessionId && forceReload) {
       this.terminalBufferCache?.delete(sessionId);
       this._xtermSnapshots?.delete(sessionId);
-      try { localStorage.removeItem(`codeman-xs-${sessionId}`); } catch {}
+      try { localStorage.removeItem(`reverie-xs-${sessionId}`); } catch {}
       this._clearTimer('syncWaitTimeout');
       this.pendingWrites = [];
       this.writeFrameScheduled = false;
@@ -9589,7 +9589,7 @@ class CodemanApp {
     // live output, so the notice waits for a scroll to the top again.
     this._historyNoticeRevealedFor = null;
     this._renderHistoryTruncationBanner();
-    try { localStorage.setItem('codeman-active-session', sessionId); } catch {}
+    try { localStorage.setItem('reverie-active-session', sessionId); } catch {}
     // Narrow SSE filter to the active session — server stops streaming
     // session:terminal events for other sessions to this client. Cuts
     // SSE traffic ~Nx for N concurrent sessions. Fire-and-forget; on the
@@ -9738,7 +9738,7 @@ class CodemanApp {
       this._paneWidthRefused = false;
       this.syncTerminalGeometry();
 
-      // Also push the new dimensions to the PTY. Without this, codex/codeman
+      // Also push the new dimensions to the PTY. Without this, codex/reverie
       // sees the size that was set the last time the throttled resize handler
       // fired (often the size of a different session's container, or the
       // initial tmux default). The visible symptom is codex rendering inside
@@ -9773,7 +9773,7 @@ class CodemanApp {
       }
       if (!snapshot) {
         try {
-          const persisted = localStorage.getItem(`codeman-xs-${sessionId}`);
+          const persisted = localStorage.getItem(`reverie-xs-${sessionId}`);
           if (persisted && this._isUsableXtermSnapshot(persisted)) {
             snapshot = persisted;
             // Hoist into in-memory cache for next time (delete-before-set keeps
@@ -9781,7 +9781,7 @@ class CodemanApp {
             this._xtermSnapshots?.delete(sessionId);
             this._xtermSnapshots?.set(sessionId, persisted);
           } else if (persisted) {
-            localStorage.removeItem(`codeman-xs-${sessionId}`);
+            localStorage.removeItem(`reverie-xs-${sessionId}`);
           }
         } catch (_e) {
           /* localStorage unavailable — proceed without snapshot */
@@ -10368,7 +10368,7 @@ class CodemanApp {
     this.terminalBufferCache.delete(sessionId);
     this._clearHistoryTruncation(sessionId);
     this._xtermSnapshots?.delete(sessionId);
-    try { localStorage.removeItem(`codeman-xs-${sessionId}`); } catch {}
+    try { localStorage.removeItem(`reverie-xs-${sessionId}`); } catch {}
 
     this._flushedOffsets?.delete(sessionId);
     this._flushedTexts?.delete(sessionId);
@@ -10428,7 +10428,7 @@ class CodemanApp {
     // Tile grid open: the fallback is the NEIGHBOURING TILE, never the first
     // sessionOrder entry (often not tiled, which would collapse the grid).
     const grid = this._tileGrid;
-    const tileNeighborId = grid?.has(sessionId) ? window.CodemanTileGrid.tileNeighbor(grid.ids, sessionId) : null;
+    const tileNeighborId = grid?.has(sessionId) ? window.ReverieTileGrid.tileNeighbor(grid.ids, sessionId) : null;
     this._closingSessions.add(sessionId);
     let res = null;
     try {
@@ -10443,7 +10443,7 @@ class CodemanApp {
         this._selectTiledSession(target, { auto: true });
       } else if (wasActive) {
         this.activeSessionId = null;
-        try { localStorage.removeItem('codeman-active-session'); } catch {}
+        try { localStorage.removeItem('reverie-active-session'); } catch {}
         // Next tab in the user's own order, skipping ids the cleanup has not
         // caught up with yet: sessionOrder can transiently hold a dead id
         // (delete racing the order sync), which is the same reason Alt+N
@@ -10588,7 +10588,7 @@ class CodemanApp {
     this.closeTileGrid?.({ keepStored: true, reselect: false });
     // Deselect active session and show welcome screen
     this.activeSessionId = null;
-    try { localStorage.removeItem('codeman-active-session'); } catch {}
+    try { localStorage.removeItem('reverie-active-session'); } catch {}
     this.terminal.clear();
     this.showWelcome();
     this.renderSessionTabs();
@@ -10647,11 +10647,11 @@ class CodemanApp {
       this._xtermSnapshots?.clear();
       try {
         for (const k of Object.keys(localStorage)) {
-          if (k.startsWith('codeman-xs-')) localStorage.removeItem(k);
+          if (k.startsWith('reverie-xs-')) localStorage.removeItem(k);
         }
       } catch {}
       this.activeSessionId = null;
-      try { localStorage.removeItem('codeman-active-session'); } catch {}
+      try { localStorage.removeItem('reverie-active-session'); } catch {}
       this.respawnStatus = {};
       this.respawnCountdownTimers = {};
       this.respawnActionLogs = {};
@@ -10866,12 +10866,12 @@ class CodemanApp {
 // Module Init — localStorage migration and app start
 // ═══════════════════════════════════════════════════════════════
 
-// Migrate legacy localStorage keys (claudeman-* → codeman-*)
+// Migrate legacy localStorage keys (claudeman-* → reverie-*)
 try {
   for (let i = 0; i < localStorage.length; i++) {
     const key = localStorage.key(i);
     if (key && (key.startsWith('claudeman-') || key.startsWith('claudeman_'))) {
-      const newKey = key.replace(/^claudeman[-_]/, (m) => 'codeman' + m.charAt(m.length - 1));
+      const newKey = key.replace(/^claudeman[-_]/, (m) => 'reverie' + m.charAt(m.length - 1));
       if (localStorage.getItem(newKey) === null) {
         localStorage.setItem(newKey, localStorage.getItem(key));
       }
@@ -10881,10 +10881,10 @@ try {
 
 // Initialize — use DOMContentLoaded to ensure all defer'd mixin modules
 // (terminal-ui.js, settings-ui.js, etc.) have executed their Object.assign
-// onto CodemanApp.prototype before we instantiate.
+// onto ReverieApp.prototype before we instantiate.
 let app;
 document.addEventListener('DOMContentLoaded', () => {
-  app = new CodemanApp();
+  app = new ReverieApp();
   window.app = app;
 });
 window.MobileDetection = MobileDetection;

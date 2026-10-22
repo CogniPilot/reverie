@@ -3,7 +3,7 @@
  *
  * Who may write: the owner (no agent header) and owner-made room coordinators may do anything; any member may file an issue (it
  * lands in triage), add a win, edit its own issues and set its own focus. Only the owner and coordinators import.
- * An agent is identified by its x-codeman-parent-session header, which must resolve to exactly itself (no prefix, and a
+ * An agent is identified by its x-reverie-parent-session header, which must resolve to exactly itself (no prefix, and a
  * body field never stands in for it). Every write appends an audit line BEFORE the board is saved; if the audit
  * cannot be written the write is refused (500) and the board is unchanged.
  */
@@ -130,7 +130,7 @@ export function registerBoardRoutes(app: FastifyInstance, ctx: SessionPort & Par
 
   const caller = (req: FastifyRequest): Caller => {
     const owner = ownerFor(req);
-    const header = req.headers['x-codeman-parent-session'];
+    const header = req.headers['x-reverie-parent-session'];
     if (header === undefined) return { kind: 'owner', by: 'owner', owner };
     const sessionId = resolveParentSessionId(ctx, req, undefined, owner);
     // The header must name exactly this session: no prefix, no body field standing in for it.

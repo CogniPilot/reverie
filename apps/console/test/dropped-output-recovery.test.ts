@@ -31,13 +31,13 @@ function loadConstants() {
   vm.runInContext(readFileSync(resolve(publicDir, 'constants.js'), 'utf8'), context, { filename: 'constants.js' });
   return (
     context.window as {
-      CodemanDroppedOutput: {
+      ReverieDroppedOutput: {
         shouldRetryDroppedOutputRecovery: (s: RetryState) => boolean;
         DROP_RECOVERY_DELAY_MS: number;
         DROP_RECOVERY_MAX_ATTEMPTS: number;
       };
     }
-  ).CodemanDroppedOutput;
+  ).ReverieDroppedOutput;
 }
 
 const { shouldRetryDroppedOutputRecovery, DROP_RECOVERY_MAX_ATTEMPTS, DROP_RECOVERY_DELAY_MS } = loadConstants();
@@ -101,11 +101,11 @@ function loadAppPrototype(): Record<string, unknown> {
   vm.runInContext(
     `${readFileSync(resolve(publicDir, 'constants.js'), 'utf8')}\n` +
       `${readFileSync(resolve(publicDir, 'app.js'), 'utf8')}\n` +
-      `globalThis.__CodemanApp = CodemanApp;\nglobalThis.__crashDiag = _crashDiag;`,
+      `globalThis.__ReverieApp = ReverieApp;\nglobalThis.__crashDiag = _crashDiag;`,
     context
   );
   crashTrail = (context as { __crashDiag: { _entries: string[] } }).__crashDiag._entries;
-  return (context as { __CodemanApp: { prototype: Record<string, unknown> } }).__CodemanApp.prototype;
+  return (context as { __ReverieApp: { prototype: Record<string, unknown> } }).__ReverieApp.prototype;
 }
 
 let crashTrail: string[] = [];

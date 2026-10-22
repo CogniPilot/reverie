@@ -18,7 +18,7 @@ import {
 /** Common directories where the Antigravity CLI binary may be installed */
 /**
  * Directories probed after `which`, read from this CLI's registry entry so the spawn
- * path, `codeman doctor` and this resolver cannot disagree about where to look.
+ * path, `reverie doctor` and this resolver cannot disagree about where to look.
  * `~` is expanded by `expandHome`; nothing else is interpreted.
  */
 const ANTIGRAVITY_SEARCH_DIRS = (): string[] => (getCli('antigravity')?.discovery.searchDirs ?? []).map(expandHome);

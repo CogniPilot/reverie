@@ -58,7 +58,7 @@ function recordingMux() {
   return { mux: mux as unknown as TerminalMultiplexer, calls };
 }
 
-const muxSession = (muxName = 'codeman-aaaa') => ({ muxName, sessionId: 'aaaa' }) as unknown as MuxSession;
+const muxSession = (muxName = 'reverie-aaaa') => ({ muxName, sessionId: 'aaaa' }) as unknown as MuxSession;
 
 /**
  * A mux whose `respawnPane` fails, which is what sends
@@ -76,7 +76,7 @@ function failingRespawnMux() {
     respawnPane: async () => 0,
     createSession: async (options: CreateSessionOptions) => {
       calls.push(options);
-      return muxSession('codeman-recreated');
+      return muxSession('reverie-recreated');
     },
   };
   return { mux: mux as unknown as TerminalMultiplexer, calls };
@@ -102,7 +102,7 @@ function vanishedSessionMux() {
     },
     createSession: async (options: CreateSessionOptions) => {
       calls.push(options);
-      return muxSession('codeman-recreated');
+      return muxSession('reverie-recreated');
     },
   };
   return { mux: mux as unknown as TerminalMultiplexer, calls, respawns };
@@ -114,7 +114,7 @@ let configDir: string;
 
 /** A relocated Claude config dir, so the transcript gate reads a real fixture. */
 beforeEach(() => {
-  configDir = mkdtempSync(join(tmpdir(), 'codeman-transcript-'));
+  configDir = mkdtempSync(join(tmpdir(), 'reverie-transcript-'));
 });
 
 afterEach(() => {
@@ -448,7 +448,7 @@ describe('what the pin renders', () => {
 
   it('drops a synthetic discovered id, which fails the uuid token pattern', () => {
     // `reconcileSessions()` mints `restored-<fragment>` for a tmux session
-    // Codeman found but does not own. The renderer emits the unpinned command,
+    // Reverie found but does not own. The renderer emits the unpinned command,
     // so those panes keep the pre-existing behaviour.
     expect(render('restored-40568a29')).not.toContain('--resume');
   });

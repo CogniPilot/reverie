@@ -12,12 +12,12 @@
  *
  * Standalone: reads only the workflow-run endpoints; never touches subagent state.
  *
- * @mixin Extends CodemanApp.prototype via Object.assign
+ * @mixin Extends ReverieApp.prototype via Object.assign
  * @loadorder 11.5 (after panels-ui.js, before session-ui.js)
  */
-/* global CodemanApp, SSE_EVENTS, escapeHtml */
+/* global ReverieApp, SSE_EVENTS, escapeHtml */
 
-Object.assign(CodemanApp.prototype, {
+Object.assign(ReverieApp.prototype, {
   /** Ensure workflow state maps exist (lazy — constructor also seeds them). */
   _ensureWorkflowState() {
     if (!this.workflowRuns) this.workflowRuns = new Map(); // runId -> summary

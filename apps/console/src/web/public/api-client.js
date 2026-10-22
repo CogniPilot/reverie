@@ -1,19 +1,19 @@
 /**
- * @fileoverview Centralized API fetch helpers mixed into CodemanApp.prototype.
+ * @fileoverview Centralized API fetch helpers mixed into ReverieApp.prototype.
  *
  * Provides _api(), _apiJson(), _apiPost(), _apiPut(), _apiDelete() methods that handle
  * JSON serialization, Content-Type headers, and error swallowing. All API calls in the
  * frontend route through these helpers.
  *
- * @mixin Extends CodemanApp.prototype via Object.assign
- * @dependency app.js (CodemanApp class must be defined)
+ * @mixin Extends ReverieApp.prototype via Object.assign
+ * @dependency app.js (ReverieApp class must be defined)
  * @loadorder 14 of 15 — loaded after ralph-wizard.js
  */
 
-// Reverie — Centralized API fetch helpers for CodemanApp
-// Loaded after app.js (needs CodemanApp class defined)
+// Reverie — Centralized API fetch helpers for ReverieApp
+// Loaded after app.js (needs ReverieApp class defined)
 
-Object.assign(CodemanApp.prototype, {
+Object.assign(ReverieApp.prototype, {
   /**
    * Send a JSON API request. Handles Content-Type, JSON serialization, and error swallowing.
    * @param {string} path - API path (e.g., '/api/sessions/123/input')

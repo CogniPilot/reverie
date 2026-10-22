@@ -38,14 +38,14 @@ describe('plan move browser credential gate, independent of owner-auth log mode'
   });
 
   it('refuses invalid or expired credentials', async () => {
-    expect(await request({ ...origin, cookie: 'codeman_session=expired' }, credential)).toEqual({
+    expect(await request({ ...origin, cookie: 'reverie_session=expired' }, credential)).toEqual({
       code: 403,
       moved: false,
     });
   });
 
   it('accepts a current signed-in owner cookie from the same origin', async () => {
-    expect(await request({ ...origin, cookie: 'codeman_session=signed-in' }, credential)).toEqual({
+    expect(await request({ ...origin, cookie: 'reverie_session=signed-in' }, credential)).toEqual({
       code: 200,
       moved: true,
     });
@@ -54,7 +54,7 @@ describe('plan move browser credential gate, independent of owner-auth log mode'
   it('refuses any agent hint even with a valid owner cookie', async () => {
     expect(
       await request(
-        { ...origin, cookie: 'codeman_session=signed-in', 'x-codeman-parent-session': 'claimed-live-session' },
+        { ...origin, cookie: 'reverie_session=signed-in', 'x-reverie-parent-session': 'claimed-live-session' },
         credential
       )
     ).toEqual({ code: 403, moved: false });
@@ -63,17 +63,17 @@ describe('plan move browser credential gate, independent of owner-auth log mode'
   it('refuses cross-origin requests and password-change-only credentials', async () => {
     expect(
       await request(
-        { host: 'console.test', origin: 'https://other.test', cookie: 'codeman_session=signed-in' },
+        { host: 'console.test', origin: 'https://other.test', cookie: 'reverie_session=signed-in' },
         credential
       )
     ).toEqual({ code: 403, moved: false });
     expect(
-      await request({ ...origin, cookie: 'codeman_session=signed-in' }, { ...credential, mustChangePassword: true })
+      await request({ ...origin, cookie: 'reverie_session=signed-in' }, { ...credential, mustChangePassword: true })
     ).toEqual({ code: 403, moved: false });
   });
 
   it('never gives a regular multi-user cookie owner move authority', async () => {
-    expect(await request({ ...origin, cookie: 'codeman_session=signed-in' }, { ...credential, role: 'user' })).toEqual({
+    expect(await request({ ...origin, cookie: 'reverie_session=signed-in' }, { ...credential, role: 'user' })).toEqual({
       code: 403,
       moved: false,
     });

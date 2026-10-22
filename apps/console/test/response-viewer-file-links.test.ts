@@ -1,5 +1,5 @@
 /**
- * @fileoverview Response-viewer file-path linkifier (`CodemanApp._linkifyFilePaths`).
+ * @fileoverview Response-viewer file-path linkifier (`ReverieApp._linkifyFilePaths`).
  *
  * The viewer renders markdown, so a path an agent wrote — "wrote the chart to
  * /tmp/.../chart.png" — arrived as inert text: the terminal's link provider
@@ -30,7 +30,7 @@ import { describe, expect, it, vi } from 'vitest';
 const dom = new JSDOM('<!DOCTYPE html><html><body></body></html>');
 const { document, NodeFilter } = dom.window;
 
-function loadCodemanAppClass() {
+function loadReverieAppClass() {
   const constants = readFileSync(resolve(import.meta.dirname, '../src/web/public/constants.js'), 'utf8');
   const source = readFileSync(resolve(import.meta.dirname, '../src/web/public/app.js'), 'utf8');
   const context = vm.createContext({
@@ -49,16 +49,16 @@ function loadCodemanAppClass() {
     window: { addEventListener: vi.fn(), removeEventListener: vi.fn() },
     MobileDetection: {},
   });
-  vm.runInContext(`${constants}\n${source}\nglobalThis.__CodemanApp = CodemanApp;`, context);
-  return (context as { __CodemanApp: { prototype: { _linkifyFilePaths(root: unknown): void } } }).__CodemanApp;
+  vm.runInContext(`${constants}\n${source}\nglobalThis.__ReverieApp = ReverieApp;`, context);
+  return (context as { __ReverieApp: { prototype: { _linkifyFilePaths(root: unknown): void } } }).__ReverieApp;
 }
 
-const CodemanApp = loadCodemanAppClass();
+const ReverieApp = loadReverieAppClass();
 const APP_SOURCE = readFileSync(resolve(import.meta.dirname, '../src/web/public/app.js'), 'utf8');
 
 /** Render `html` into a detached .rv-text div and run the linkifier over it. */
 function linkify(html: string): HTMLElement {
-  const app = Object.create(CodemanApp.prototype) as { _linkifyFilePaths(root: unknown): void };
+  const app = Object.create(ReverieApp.prototype) as { _linkifyFilePaths(root: unknown): void };
   const root = document.createElement('div');
   root.className = 'rv-text';
   root.innerHTML = html;

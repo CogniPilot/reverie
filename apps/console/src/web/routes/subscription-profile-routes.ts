@@ -105,7 +105,7 @@ export function registerSubscriptionProfileRoutes(
   // (admin in multi-user mode) and takes a label and nothing else. An agent caller is refused: the
   // parent-session header counts as present with any value, so a malformed id cannot fall back to the owner.
   app.patch<{ Params: { id: string } }>('/api/subscription-profiles/:id', async (req, reply) => {
-    if (req.headers['x-codeman-parent-session'] !== undefined)
+    if (req.headers['x-reverie-parent-session'] !== undefined)
       return reply.code(403).send(createErrorResponse(ApiErrorCode.FORBIDDEN, 'Only the owner renames accounts'));
     if (!authorize(req))
       return reply.code(403).send(createErrorResponse(ApiErrorCode.FORBIDDEN, 'Account profiles are owner-only'));
@@ -131,7 +131,7 @@ export function registerSubscriptionProfileRoutes(
   // Owner-only like rename. Unlists the account (its login directory is never touched) and is refused while
   // a session runs on it, so no running agent loses its account underneath it.
   app.delete<{ Params: { id: string } }>('/api/subscription-profiles/:id', async (req, reply) => {
-    if (req.headers['x-codeman-parent-session'] !== undefined)
+    if (req.headers['x-reverie-parent-session'] !== undefined)
       return reply.code(403).send(createErrorResponse(ApiErrorCode.FORBIDDEN, 'Only the owner removes accounts'));
     if (!authorize(req))
       return reply.code(403).send(createErrorResponse(ApiErrorCode.FORBIDDEN, 'Account profiles are owner-only'));

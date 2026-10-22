@@ -128,7 +128,7 @@ describe('Pi spawn command', () => {
     expect(buildSpawnCommand({ mode: 'pi', sessionId: 'a', piConfig: { approveProjectTrust: false } })).toBe(
       'pi --no-approve'
     );
-    // Absent = pi's own defaultProjectTrust; Codeman must not decide it.
+    // Absent = pi's own defaultProjectTrust; Reverie must not decide it.
     expect(buildSpawnCommand({ mode: 'pi', sessionId: 'a', piConfig: {} })).toBe('pi');
   });
 

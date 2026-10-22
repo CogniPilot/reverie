@@ -1,13 +1,13 @@
 /**
  * @fileoverview Fetch the gesture-overlay runtime assets (MediaPipe wasm + the
- * gesture-recognizer model) into src/web/public/gesture/ so Codeman can serve
+ * gesture-recognizer model) into src/web/public/gesture/ so Reverie can serve
  * them same-origin (a browser content-blocker otherwise blocks the public CDNs
  * and the overlay fails to start). These are large binaries (~27 MB) kept OUT of
  * git (ignored explicitly via `src/web/public/gesture/wasm/` + `*.task` in
  * .gitignore); they are fetched here at install (postinstall) and build time.
  *
  * Idempotent: skips files already present. Non-fatal: the gesture overlay is
- * opt-in (CODEMAN_GESTURE=1), so a fetch failure only warns — it must not break
+ * opt-in (REVERIE_GESTURE=1), so a fetch failure only warns — it must not break
  * `npm install` / `npm run build`. The build then copies src/web/public into
  * dist/ as usual, so prod gets these too.
  *

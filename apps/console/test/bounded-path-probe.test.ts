@@ -159,9 +159,9 @@ describe('probePath', () => {
     hangOn(dead);
     await stall(dead);
 
-    expect(await probePath('/home/user/codeman-cases/healthy')).toBe('present');
-    expect(await boundedPathExists('/home/user/codeman-cases/healthy/CLAUDE.md')).toBe(true);
-    expect(isNearStalledPath('/home/user/codeman-cases/healthy')).toBe(false);
+    expect(await probePath('/home/user/reverie-cases/healthy')).toBe('present');
+    expect(await boundedPathExists('/home/user/reverie-cases/healthy/CLAUDE.md')).toBe(true);
+    expect(isNearStalledPath('/home/user/reverie-cases/healthy')).toBe(false);
   });
 
   it('answers unknown, without a stat, for paths near a stalled one', async () => {
@@ -197,7 +197,7 @@ describe('probePath', () => {
 
     expect(await probePath('/srv/projects/stuck/CLAUDE.md')).toBe('unknown');
     expect(await probePath('/srv/projects/other')).toBe('present');
-    expect(await probePath('/home/user/codeman-cases/one')).toBe('present');
+    expect(await probePath('/home/user/reverie-cases/one')).toBe('present');
   });
 
   it('narrows a stall on a local mount to the stalled path, even when that mount is not /', async () => {
@@ -210,8 +210,8 @@ describe('probePath', () => {
     stat.mockClear();
 
     expect(await probePath('/home/user/nas/project/CLAUDE.md')).toBe('unknown');
-    expect(isNearStalledPath('/home/user/codeman-cases/one')).toBe(false);
-    expect(await probePath('/home/user/codeman-cases/one')).toBe('present');
+    expect(isNearStalledPath('/home/user/reverie-cases/one')).toBe(false);
+    expect(await probePath('/home/user/reverie-cases/one')).toBe('present');
     expect(await probePath('/home/user/nas/other')).toBe('present');
     expect(stat).toHaveBeenCalledTimes(2);
   });
@@ -319,14 +319,14 @@ describe('probePath', () => {
 
   it('keeps the bulk cap below the ceiling, so a pastCap probe has room', async () => {
     // Read under a controlled environment: the limits are computed at import from
-    // UV_THREADPOOL_SIZE and CODEMAN_PATH_PROBE_MAX_STALLED, which the test process
+    // UV_THREADPOOL_SIZE and REVERIE_PATH_PROBE_MAX_STALLED, which the test process
     // could otherwise inherit.
-    const saved = { uv: process.env.UV_THREADPOOL_SIZE, max: process.env.CODEMAN_PATH_PROBE_MAX_STALLED };
+    const saved = { uv: process.env.UV_THREADPOOL_SIZE, max: process.env.REVERIE_PATH_PROBE_MAX_STALLED };
     const limitsUnder = async (uv: string | undefined, max: string | undefined) => {
       if (uv === undefined) delete process.env.UV_THREADPOOL_SIZE;
       else process.env.UV_THREADPOOL_SIZE = uv;
-      if (max === undefined) delete process.env.CODEMAN_PATH_PROBE_MAX_STALLED;
-      else process.env.CODEMAN_PATH_PROBE_MAX_STALLED = max;
+      if (max === undefined) delete process.env.REVERIE_PATH_PROBE_MAX_STALLED;
+      else process.env.REVERIE_PATH_PROBE_MAX_STALLED = max;
       vi.resetModules();
       return import('../src/config/path-probe.js');
     };
@@ -341,8 +341,8 @@ describe('probePath', () => {
     } finally {
       if (saved.uv === undefined) delete process.env.UV_THREADPOOL_SIZE;
       else process.env.UV_THREADPOOL_SIZE = saved.uv;
-      if (saved.max === undefined) delete process.env.CODEMAN_PATH_PROBE_MAX_STALLED;
-      else process.env.CODEMAN_PATH_PROBE_MAX_STALLED = saved.max;
+      if (saved.max === undefined) delete process.env.REVERIE_PATH_PROBE_MAX_STALLED;
+      else process.env.REVERIE_PATH_PROBE_MAX_STALLED = saved.max;
       vi.resetModules();
     }
   });

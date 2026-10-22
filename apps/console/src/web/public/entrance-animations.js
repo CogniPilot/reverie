@@ -54,7 +54,7 @@
  * replay, a window and a line, and replays the tile grid in place, so styles
  * can be compared without spawning real sessions or agents.
  *
- * @mixin Extends CodemanApp.prototype via Object.assign
+ * @mixin Extends ReverieApp.prototype via Object.assign
  * @dependency app.js (tab render pipeline), subagent-windows.js (window + line hooks),
  *   tile-grid.js (tile mount, reveal and still-copy hooks)
  * @dependency constants.js (escapeHtml)
@@ -195,18 +195,18 @@ const TAB_ANIM_STAGGER_DEFAULT = 90;
 const TAB_ANIM_BATCH_WINDOW_MS = 600;
 
 const ANIM_KEYS = {
-  tab: 'codeman:tabAnim',
-  win: 'codeman:winAnim',
-  line: 'codeman:lineAnim',
-  term: 'codeman:termAnim',
-  tile: 'codeman:tileAnim',
-  tileOrder: 'codeman:tileAnimOrder',
-  termSwitch: 'codeman:termAnimOnSwitch',
-  stagger: 'codeman:tabAnimStagger',
-  speed: 'codeman:tabAnimSpeed',
+  tab: 'reverie:tabAnim',
+  win: 'reverie:winAnim',
+  line: 'reverie:lineAnim',
+  term: 'reverie:termAnim',
+  tile: 'reverie:tileAnim',
+  tileOrder: 'reverie:tileAnimOrder',
+  termSwitch: 'reverie:termAnimOnSwitch',
+  stagger: 'reverie:tabAnimStagger',
+  speed: 'reverie:tabAnimSpeed',
 };
 
-Object.assign(CodemanApp.prototype, {
+Object.assign(ReverieApp.prototype, {
   // ── Setup ─────────────────────────────────────────────────────────────────
 
   /** Resolve every style/timing and stamp them on <html>. Called once at startup. */
@@ -830,7 +830,7 @@ Object.assign(CodemanApp.prototype, {
   playTileScreenEntrance(body) {
     if (!body || (this._termAnimStyle || TERM_ANIM_DEFAULT) === 'off') return;
     if (window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches) return;
-    body._codemanScreenDone?.();
+    body._reverieScreenDone?.();
     // Content that lands while the frame is still flying in waits (held at
     // its first keyframe, so hidden) until the frame has nearly landed: two
     // beats, frame then screen, rather than both at once.
@@ -849,9 +849,9 @@ Object.assign(CodemanApp.prototype, {
       body.removeEventListener('animationcancel', done);
       body.classList.remove('term-enter');
       body.style.removeProperty('--tile-screen-delay');
-      if (body._codemanScreenDone === done) body._codemanScreenDone = null;
+      if (body._reverieScreenDone === done) body._reverieScreenDone = null;
     };
-    body._codemanScreenDone = done;
+    body._reverieScreenDone = done;
     body.addEventListener('animationend', done);
     body.addEventListener('animationcancel', done);
     // Backstop, as the main pane's: a backgrounded tab never fires animationend.

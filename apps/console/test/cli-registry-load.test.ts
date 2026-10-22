@@ -1,5 +1,5 @@
 /**
- * @fileoverview Loading and merging `~/.codeman/clis.json` over the stock catalog.
+ * @fileoverview Loading and merging `~/.reverie/clis.json` over the stock catalog.
  *
  * Two properties matter most here and neither is obvious from reading the loader:
  *

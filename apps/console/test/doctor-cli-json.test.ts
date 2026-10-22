@@ -33,12 +33,12 @@ function hermeticDoctorEnv(): { home: string; bare: string; env: NodeJS.ProcessE
   const clis = Object.fromEntries(
     STOCK_CLIS.map((e) => [e.id, { discovery: { searchDirs: e.discovery.searchDirs.filter((d) => !isAbsolute(d)) } }])
   );
-  mkdirSync(join(home, '.codeman'), { recursive: true });
+  mkdirSync(join(home, '.reverie'), { recursive: true });
   // 0600 or the registry ignores the file (isUnsafePermissions).
-  writeFileSync(join(home, '.codeman', 'clis.json'), JSON.stringify({ schemaVersion: 1, clis }), { mode: 0o600 });
+  writeFileSync(join(home, '.reverie', 'clis.json'), JSON.stringify({ schemaVersion: 1, clis }), { mode: 0o600 });
   const env: NodeJS.ProcessEnv = { ...process.env, HOME: home, PATH: bare };
-  delete env.CODEMAN_DATA_DIR;
-  delete env.CODEMAN_INSTANCE;
+  delete env.REVERIE_DATA_DIR;
+  delete env.REVERIE_INSTANCE;
   return {
     home,
     bare,
@@ -68,7 +68,7 @@ function runDoctor(env: NodeJS.ProcessEnv): Promise<DoctorRun> {
   });
 }
 
-describe('codeman doctor --json', () => {
+describe('reverie doctor --json', () => {
   it('prints a report that includes Node and a summary, whatever the exit code', async () => {
     const h = hermeticDoctorEnv();
     try {

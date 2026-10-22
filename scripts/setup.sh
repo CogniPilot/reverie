@@ -9,7 +9,7 @@
 #   setup.sh --offline [PATH]   load a local image archive (default ./reverie-image.tar); never pull
 #   setup.sh --dry-run ...      print every command, change nothing
 #
-# Options: --port N (default 3000), --name NAME (default reverie; also the data volume NAME-data),
+# Options: --port N (default 3000), --name NAME (default reverie; also the volumes NAME-data and NAME-home),
 #          --image REF (default ghcr.io/jgoppert/reverie), --with-claude-code (installs that CLI at start,
 #          under your own account and its license), --engine docker|podman.
 # The server listens on 127.0.0.1 only. Expose it further only behind your own authenticated proxy or tunnel.
@@ -55,6 +55,7 @@ if [ -z "$engine" ]; then
   fi
 fi
 volume="$name-data"
+home_volume="$name-home"
 state_dir=${XDG_CONFIG_HOME:-$HOME/.config}/reverie
 state="$state_dir/$name.versions"   # one image reference per line, newest last
 
@@ -78,7 +79,7 @@ pull() {
   fi
 }
 
-start() {  # start IMAGE_REF: replace the container, keep the volume
+start() {  # start IMAGE_REF: replace the container, keep both volumes
   if exists; then run "$engine" stop --time 30 "$name"; run "$engine" rm "$name"; fi
   local restart=(--restart unless-stopped)
   [ "$engine" = podman ] && restart=(--restart always)
@@ -87,6 +88,7 @@ start() {  # start IMAGE_REF: replace the container, keep the volume
   run "$engine" run "${pull_policy[@]}" --detach --name "$name" "${restart[@]}" \
     --publish "127.0.0.1:$port:3000" \
     --mount "type=volume,src=$volume,dst=/instances" \
+    --mount "type=volume,src=$home_volume,dst=/home/agent" \
     --env "REVERIE_INSTALL_CLIS=$clis" \
     "$1"
 }
@@ -152,5 +154,6 @@ Reverie is running: http://127.0.0.1:$port
 Owner login: user "owner", password from:  $0 --password${name:+ --name $name}
 Owner sign-in: on first install run  $0 --owner${name:+ --name $name}  and sign in at /owner/login
 Data volume: $volume (kept across upgrades; console backups inside it)
+Home volume: $home_volume (agent tools, provider logins and conversation history)
 Upgrade:     $0 --version X.Y.Z      Roll back: $0 --rollback
 EOF

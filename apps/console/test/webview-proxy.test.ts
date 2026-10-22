@@ -155,7 +155,7 @@ describe('isFramableCrossOrigin', () => {
 
   it('allows a wildcard or explicit host', () => {
     expect(isFramableCrossOrigin(undefined, 'frame-ancestors *')).toBe(true);
-    expect(isFramableCrossOrigin(undefined, 'frame-ancestors https://codeman.example')).toBe(true);
+    expect(isFramableCrossOrigin(undefined, 'frame-ancestors https://reverie.example')).toBe(true);
   });
 });
 
@@ -193,7 +193,7 @@ describe('rewriteSetCookie', () => {
     expect(rewriteSetCookie('sid=abc; HttpOnly', CAP, true)).toContain(`Path=${PREFIX}`);
   });
 
-  it('drops Secure when Codeman itself is serving plain HTTP', () => {
+  it('drops Secure when Reverie itself is serving plain HTTP', () => {
     // A Secure cookie over http is silently discarded by the browser.
     expect(rewriteSetCookie('sid=abc; Path=/; Secure', CAP, false)).not.toMatch(/secure/i);
     expect(rewriteSetCookie('sid=abc; Path=/; Secure', CAP, true)).toMatch(/Secure/);
@@ -205,24 +205,24 @@ describe('rewriteSetCookie', () => {
 });
 
 describe('filterCookieHeader', () => {
-  it("removes Codeman's own session cookie and keeps the dashboard's", () => {
-    expect(filterCookieHeader('codeman_session=SECRET; dash=1; other=2', ['codeman_session'])).toBe('dash=1; other=2');
+  it("removes Reverie's own session cookie and keeps the dashboard's", () => {
+    expect(filterCookieHeader('reverie_session=SECRET; dash=1; other=2', ['reverie_session'])).toBe('dash=1; other=2');
   });
 
   it('returns undefined when nothing survives', () => {
-    expect(filterCookieHeader('codeman_session=SECRET', ['codeman_session'])).toBeUndefined();
-    expect(filterCookieHeader(undefined, ['codeman_session'])).toBeUndefined();
+    expect(filterCookieHeader('reverie_session=SECRET', ['reverie_session'])).toBeUndefined();
+    expect(filterCookieHeader(undefined, ['reverie_session'])).toBeUndefined();
   });
 });
 
 describe('buildUpstreamRequestHeaders', () => {
   const upstream = new URL('http://127.0.0.1:4000/panel');
 
-  it('NEVER forwards Codeman credentials to the dashboard', () => {
+  it('NEVER forwards Reverie credentials to the dashboard', () => {
     const headers = buildUpstreamRequestHeaders(
-      { authorization: 'Basic CODEMANCREDS', cookie: 'codeman_session=SECRET; dash=1', accept: '*/*' },
+      { authorization: 'Basic REVERIECREDS', cookie: 'reverie_session=SECRET; dash=1', accept: '*/*' },
       upstream,
-      { forwardCookies: false, sessionCookieName: 'codeman_session' }
+      { forwardCookies: false, sessionCookieName: 'reverie_session' }
     );
     expect(headers.authorization).toBeUndefined();
     expect(headers.cookie).toBeUndefined();
@@ -230,18 +230,18 @@ describe('buildUpstreamRequestHeaders', () => {
   });
 
   it('forwards the dashboard cookies but strips the session cookie in trusted mode', () => {
-    const headers = buildUpstreamRequestHeaders({ cookie: 'codeman_session=SECRET; dash=1' }, upstream, {
+    const headers = buildUpstreamRequestHeaders({ cookie: 'reverie_session=SECRET; dash=1' }, upstream, {
       forwardCookies: true,
-      sessionCookieName: 'codeman_session',
+      sessionCookieName: 'reverie_session',
     });
     expect(headers.cookie).toBe('dash=1');
     expect(headers.authorization).toBeUndefined();
   });
 
   it('presents Origin/Referer as if the browser talked to the dashboard directly', () => {
-    const headers = buildUpstreamRequestHeaders({ origin: 'https://codeman.local' }, upstream, {
+    const headers = buildUpstreamRequestHeaders({ origin: 'https://reverie.local' }, upstream, {
       forwardCookies: false,
-      sessionCookieName: 'codeman_session',
+      sessionCookieName: 'reverie_session',
     });
     expect(headers.origin).toBe('http://127.0.0.1:4000');
     expect(headers.referer).toBe('http://127.0.0.1:4000/panel');
@@ -249,9 +249,9 @@ describe('buildUpstreamRequestHeaders', () => {
 
   it('drops hop-by-hop and recomputed headers', () => {
     const headers = buildUpstreamRequestHeaders(
-      { host: 'codeman.local', connection: 'keep-alive', 'transfer-encoding': 'chunked', 'content-length': '5' },
+      { host: 'reverie.local', connection: 'keep-alive', 'transfer-encoding': 'chunked', 'content-length': '5' },
       upstream,
-      { forwardCookies: false, sessionCookieName: 'codeman_session' }
+      { forwardCookies: false, sessionCookieName: 'reverie_session' }
     );
     expect(headers.host).toBeUndefined();
     expect(headers.connection).toBeUndefined();
@@ -366,8 +366,8 @@ describe('buildProxyCorsHeaders', () => {
   });
 
   it('allows credentials for a real origin (trusted mode)', () => {
-    const h = buildProxyCorsHeaders('https://codeman.local');
-    expect(h['access-control-allow-origin']).toBe('https://codeman.local');
+    const h = buildProxyCorsHeaders('https://reverie.local');
+    expect(h['access-control-allow-origin']).toBe('https://reverie.local');
     expect(h['access-control-allow-credentials']).toBe('true');
   });
 
@@ -401,7 +401,7 @@ describe('runtimeUrlShim', () => {
    * Execute the shim against a fake window and return the patched globals, so the
    * rewrite logic is tested for real rather than by reading the source.
    */
-  function runShim(host = 'codeman.local') {
+  function runShim(host = 'reverie.local') {
     const calls: string[] = [];
     const win: Record<string, unknown> = {
       fetch: (input: unknown) => {
@@ -460,8 +460,8 @@ describe('runtimeUrlShim', () => {
 
   it('rewrites a same-origin ABSOLUTE URL built from location', () => {
     const { win, calls } = runShim();
-    (win.fetch as (u: string) => void)('https://codeman.local/api/data');
-    expect(calls[0]).toBe(`https://codeman.local${PREFIX}api/data`);
+    (win.fetch as (u: string) => void)('https://reverie.local/api/data');
+    expect(calls[0]).toBe(`https://reverie.local${PREFIX}api/data`);
   });
 
   it('patches XMLHttpRequest.open', () => {
@@ -488,7 +488,7 @@ describe('runtimeUrlShim', () => {
  * The bug being pinned: a dashboard rendering `<img src="/api/hero?slug=x">` from
  * page script escapes `<base>` (which never applies to root-absolute URLs) and
  * escapes `rewriteHtml()` (which only sees the initial document), so every image
- * 404s on Codeman's own root while the dashboard's fetch-driven data loads fine.
+ * 404s on Reverie's own root while the dashboard's fetch-driven data loads fine.
  *
  * Node environment on purpose, like test/markdown-sanitizer.test.ts: a per-file
  * jsdom environment directive would externalize node builtins under vite. The
@@ -503,7 +503,7 @@ describe('runtimeUrlShim DOM sinks', () => {
 
   function newDom() {
     const dom = new JSDOM('<!doctype html><html><head></head><body><div id="box"></div></body></html>', {
-      url: `https://codeman.local${PREFIX}page`,
+      url: `https://reverie.local${PREFIX}page`,
       runScripts: 'outside-only',
     });
     dom.window.eval(body);
@@ -690,7 +690,7 @@ describe('referrer policy on proxied responses', () => {
 });
 
 describe('reverse-proxy base path', () => {
-  const BASE = '/codeman';
+  const BASE = '/reverie';
   const BASED_PREFIX = `${BASE}/webview/${CAP}/`;
 
   it('rides the mount into the iframe prefix', () => {
@@ -719,7 +719,7 @@ describe('reverse-proxy base path', () => {
   it('extracts the capability from a browser Referer that carries the mount prefix', () => {
     expect(capabilityFromReferer(`https://box.ts.net${BASED_PREFIX}page`, BASE)).toBe(CAP);
     // A same-named sibling path must not be mistaken for the mount.
-    expect(capabilityFromReferer(`https://box.ts.net/codeman-docs/webview/${CAP}/page`, BASE)).toBeNull();
+    expect(capabilityFromReferer(`https://box.ts.net/reverie-docs/webview/${CAP}/page`, BASE)).toBeNull();
     // Without the base arg the prefixed Referer no longer matches (documents why the arg exists).
     expect(capabilityFromReferer(`https://box.ts.net${BASED_PREFIX}page`)).toBeNull();
   });
@@ -748,18 +748,18 @@ describe('runtimeUrlShim route masking', () => {
   }
 
   it('masks the proxy prefix off the document URL so the router sees its own path', () => {
-    const win = boot(`https://codeman.local${PREFIX}pages/report?tab=2#top`);
+    const win = boot(`https://reverie.local${PREFIX}pages/report?tab=2#top`);
     expect(win.location.pathname).toBe('/pages/report');
     expect(win.location.search).toBe('?tab=2');
     expect(win.location.hash).toBe('#top');
   });
 
   it('maps the landing page to /', () => {
-    expect(boot(`https://codeman.local${PREFIX}`).location.pathname).toBe('/');
+    expect(boot(`https://reverie.local${PREFIX}`).location.pathname).toBe('/');
   });
 
   it('keeps rewriting root-absolute URLs into the prefix after masking', () => {
-    const win = boot(`https://codeman.local${PREFIX}`);
+    const win = boot(`https://reverie.local${PREFIX}`);
     const calls: string[] = [];
     // Patched fetch is a closure over the ORIGINAL window.fetch; jsdom has none,
     // so exercise the same rewrite through an <a> href, which is a patched sink.
@@ -770,12 +770,12 @@ describe('runtimeUrlShim route masking', () => {
   });
 
   it('leaves a document that is not under the prefix alone', () => {
-    const win = boot('https://codeman.local/somewhere/else');
+    const win = boot('https://reverie.local/somewhere/else');
     expect(win.location.pathname).toBe('/somewhere/else');
   });
 
   it('patches window.open so a popup stays inside the prefix', () => {
-    const win = boot(`https://codeman.local${PREFIX}`);
+    const win = boot(`https://reverie.local${PREFIX}`);
     const opened: string[] = [];
     // The shim wrapped the original; swap the original out from under it by
     // re-running against a stub is not possible, so verify the wrapper shape.
@@ -809,7 +809,7 @@ describe('lost-frame recovery', () => {
   it('serves a page whose only script posts the lost path to the parent, and hashes it in the CSP', async () => {
     const page = lostWebviewFramePage();
     const script = /<script>([\s\S]*?)<\/script>/.exec(page)?.[1] ?? '';
-    expect(script).toContain("postMessage({type:'codeman:webview-lost',path:path},'*')");
+    expect(script).toContain("postMessage({type:'reverie:webview-lost',path:path},'*')");
     const { createHash } = await import('node:crypto');
     const hash = createHash('sha256').update(script, 'utf8').digest('base64');
     expect(LOST_FRAME_PAGE_CSP).toContain(`'sha256-${hash}'`);
@@ -820,13 +820,13 @@ describe('lost-frame recovery', () => {
 
   it('tells a credential-free request (a sandboxed frame reloading on /) from one that could authenticate', () => {
     const has = (headers: Record<string, string | string[] | undefined>) =>
-      carriesAuthCredentials(headers, 'codeman_session');
+      carriesAuthCredentials(headers, 'reverie_session');
     expect(has({})).toBe(false);
-    expect(has({ cookie: 'theme=dark; codeman_sessions=lookalike' })).toBe(false);
+    expect(has({ cookie: 'theme=dark; reverie_sessions=lookalike' })).toBe(false);
     expect(has({ authorization: '' })).toBe(false);
-    expect(has({ cookie: 'codeman_session=abc' })).toBe(true);
-    expect(has({ cookie: 'theme=dark; codeman_session=abc' })).toBe(true);
-    expect(has({ cookie: ['theme=dark', 'codeman_session=abc'] })).toBe(true);
+    expect(has({ cookie: 'reverie_session=abc' })).toBe(true);
+    expect(has({ cookie: 'theme=dark; reverie_session=abc' })).toBe(true);
+    expect(has({ cookie: ['theme=dark', 'reverie_session=abc'] })).toBe(true);
     expect(has({ authorization: 'Basic YWRtaW46eA==' })).toBe(true);
   });
 });

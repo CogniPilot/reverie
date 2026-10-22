@@ -48,7 +48,7 @@ const RENDERED_DIALOG = [
  */
 const RENDERED_DIALOG_2_1_252 = [
   ' Accessing workspace:',
-  ' /home/arkon/codeman-cases/trustprobe1',
+  ' /home/arkon/reverie-cases/trustprobe1',
   ' Quick safety check: Is this a project you created or one you trust? (Like your own code, a well-known open source',
   " project, or work from your team). If not, take a moment to review what's in this folder first.",
   " Claude Code'll be able to read, edit, and execute files here.",
@@ -159,7 +159,7 @@ describe('Session trust-dialog auto-accept', () => {
       workingDir: '/tmp',
       mode: 'claude',
       mux,
-      muxSession: { muxName: 'codeman-test', sessionId: 'test', createdAt: Date.now() },
+      muxSession: { muxName: 'reverie-test', sessionId: 'test', createdAt: Date.now() },
     } as ConstructorParameters<typeof Session>[0]);
     const internals = session as unknown as {
       _maybeAcceptTrustDialog(): void;

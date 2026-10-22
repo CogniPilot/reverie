@@ -1,5 +1,5 @@
 /** Company roster and genuine nightly research receipts. All supplied text uses textContent. */
-Object.assign(CodemanApp.prototype, {
+Object.assign(ReverieApp.prototype, {
   async _companyApi(path, method = 'GET', body) {
     const response = await this._api(`/api/company${path}`, {
       method,
@@ -20,7 +20,7 @@ Object.assign(CodemanApp.prototype, {
     if (!this._companyPanel) {
       const panel = document.createElement('dialog');
       panel.setAttribute('aria-label', 'Company agents');
-      panel.className = 'fleet-company-dialog';
+      panel.className = 'reverie-company-dialog';
       Object.assign(panel.style, {
         overflow: 'auto',
         color: 'var(--text-primary, #eee)',
@@ -72,7 +72,7 @@ Object.assign(CodemanApp.prototype, {
       panel.append(
         el(
           'p',
-          'Permanent employees are explicitly registered experts with stable identities. Temporary workers get a human name and icon and join their parent’s channel when it is unambiguous. Personal memories remain with the configured agent runtime.'
+          'Permanent employees are explicitly registered experts with stable identities. Temporary workers get an Agent identifier and icon and join their parent’s channel when it is unambiguous. Personal memories remain with the configured agent runtime.'
         )
       );
       // Owner header
@@ -84,18 +84,18 @@ Object.assign(CodemanApp.prototype, {
       }
       // Org chart
       const orgChart = el('section');
-      orgChart.append(el('h3', 'Fleet organization'));
+      orgChart.append(el('h3', 'Reverie organization'));
       const tree = el('pre');
       tree.style.cssText = 'font-size:0.9em;line-height:1.6;color:var(--text-secondary,#bbb);';
       const lines = [];
       lines.push(`${data.settings.ownerName || 'Owner'} (${data.settings.ownerTitle || 'CEO'})`);
-      const cto = data.employees.find((e) => e.id === data.settings.ctoId);
-      const nonCto = data.employees.filter((e) => e.id !== data.settings.ctoId);
-      for (const emp of nonCto) {
+      const coordinator = data.employees.find((e) => e.id === data.settings.coordinatorEmployeeId);
+      const otherEmployees = data.employees.filter((e) => e.id !== data.settings.coordinatorEmployeeId);
+      for (const emp of otherEmployees) {
         lines.push(`├── ${emp.icon} ${emp.name} (${emp.position})`);
       }
-      if (cto) {
-        lines.push(`└── ${cto.icon} ${cto.name} (${cto.position})`);
+      if (coordinator) {
+        lines.push(`└── ${coordinator.icon} ${coordinator.name} (${coordinator.position})`);
         const tempWorkers = data.temporaryAgents || [];
         for (const tw of tempWorkers) {
           lines.push(`    └── ${tw.icon} ${tw.name} (temporary)`);
@@ -129,6 +129,21 @@ Object.assign(CodemanApp.prototype, {
         );
         card.append(form);
         if (data.canManage) {
+          const recoveryLabel = el('label', ' May recover disconnected employee sessions ');
+          const recovery = el('input');
+          recovery.type = 'checkbox';
+          recovery.checked = employee.permissions?.recoverEmployees === true;
+          recovery.setAttribute('aria-label', `Recovery permission for ${employee.name}`);
+          recoveryLabel.prepend(recovery);
+          card.append(
+            recoveryLabel,
+            button('Save permissions', async () => {
+              await this._companyApi(`/employees/${employee.id}`, 'PUT', {
+                permissions: { recoverEmployees: recovery.checked },
+              });
+              status.textContent = 'Employee permissions saved.';
+            })
+          );
           const reconnect = el('input');
           reconnect.placeholder = 'Owned session ID for this permanent identity';
           reconnect.setAttribute('aria-label', `Registered session for ${employee.name}`);
@@ -141,8 +156,8 @@ Object.assign(CodemanApp.prototype, {
             })
           );
           card.append(
-            button('Assign CTO', async () => {
-              await this._companyApi('/settings', 'PUT', { ...data.settings, ctoId: employee.id });
+            button('Assign briefing coordinator', async () => {
+              await this._companyApi('/settings', 'PUT', { ...data.settings, coordinatorEmployeeId: employee.id });
               await this._renderCompany();
             })
           );
@@ -242,7 +257,7 @@ Object.assign(CodemanApp.prototype, {
           ['nightHour', 'Night hour (0–23)', 'number'],
           ['morningHour', 'Morning hour (0–23)', 'number'],
           ['researchMinutes', 'Research minutes per employee (1–120)', 'number'],
-          ['briefingMinutes', 'CTO briefing minutes (1–30)', 'number'],
+          ['briefingMinutes', 'company briefing minutes (1–30)', 'number'],
         ]) {
           const input = el('input');
           input.type = type;
@@ -266,13 +281,13 @@ Object.assign(CodemanApp.prototype, {
           settings,
           el(
             'p',
-            `CTO: ${data.employees.find((e) => e.id === data.settings.ctoId)?.name || 'Unassigned'}. Research uses separate sessions and cannot interrupt an employee’s working session.`
+            `Briefing coordinator: ${data.employees.find((e) => e.id === data.settings.coordinatorEmployeeId)?.name || 'Unassigned'}. Research uses separate sessions and cannot interrupt an employee’s working session.`
           )
         );
       }
       const reports = el('section');
       reports.append(
-        el('h3', 'Research receipts & CTO briefings'),
+        el('h3', 'Research receipts & company briefings'),
         el(
           'p',
           'Observed results below are agent reports with evidence for review. Hypotheses and imagination are unverified. No completion is shown until an actual agent session returns a report.'

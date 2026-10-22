@@ -2,9 +2,9 @@
 const ADD_ACCOUNT_OPTION = '__add-account__';
 const LOGIN_HELP_OPTION = '__login-help__';
 
-Object.assign(CodemanApp.prototype, {
+Object.assign(ReverieApp.prototype, {
   subscriptionRequestFields(mode) {
-    const id = localStorage.getItem(`codeman:account:${mode}`);
+    const id = localStorage.getItem(`reverie:account:${mode}`);
     const profile = this._subscriptionProfiles?.find((p) => p.id === id);
     if (!id) return {};
     if (profile && !profile.modes.includes(mode)) return {};
@@ -18,7 +18,7 @@ Object.assign(CodemanApp.prototype, {
   },
 
   selectSubscriptionProfile(id) {
-    const key = `codeman:account:${this.runMode}`;
+    const key = `reverie:account:${this.runMode}`;
     if (id) localStorage.setItem(key, id);
     else localStorage.removeItem(key);
   },
@@ -33,7 +33,7 @@ Object.assign(CodemanApp.prototype, {
       const profiles = response.profiles.filter((p) => p.modes.includes(this.runMode));
       container.hidden = profiles.length === 0;
       const select = document.getElementById('subscriptionProfileSelect');
-      const selected = localStorage.getItem(`codeman:account:${this.runMode}`) || '';
+      const selected = localStorage.getItem(`reverie:account:${this.runMode}`) || '';
       select.replaceChildren(new Option('Agent default', ''));
       for (const profile of profiles)
         select.append(
@@ -126,7 +126,7 @@ Object.assign(CodemanApp.prototype, {
   },
 
   showSubscriptionLogin(id) {
-    const selected = id || localStorage.getItem(`codeman:account:${this.runMode}`);
+    const selected = id || localStorage.getItem(`reverie:account:${this.runMode}`);
     const profile = this._subscriptionProfiles?.find((p) => p.id === selected);
     if (!profile) {
       this.showToast('Choose an account first', 'info');
@@ -197,7 +197,7 @@ Object.assign(CodemanApp.prototype, {
   primarySubscriptionAccount(accounts) {
     let id = null;
     try {
-      id = localStorage.getItem(`codeman:account:${this.runMode}`);
+      id = localStorage.getItem(`reverie:account:${this.runMode}`);
     } catch {}
     const chosen = id && accounts.find((a) => a.id === id);
     if (chosen) return chosen;
@@ -295,7 +295,7 @@ Object.assign(CodemanApp.prototype, {
     const menu = document.createElement('div');
     menu.className = 'pu-menu';
     menu.setAttribute('role', 'menu');
-    const selected = localStorage.getItem(`codeman:account:${this.runMode}`);
+    const selected = localStorage.getItem(`reverie:account:${this.runMode}`);
     for (const account of accounts) {
       const item = document.createElement('div');
       item.className = 'pu-menu-row';

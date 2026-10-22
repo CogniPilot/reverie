@@ -105,12 +105,12 @@ function makeLocalStorage() {
 }
 
 function loadSettingsHarness() {
-  const CodemanApp = function CodemanApp(this: any) {};
+  const ReverieApp = function ReverieApp(this: any) {};
   const localStorage = makeLocalStorage();
   const elements: Record<string, any> = {};
   const holder: { queryResult: any } = { queryResult: null };
   const context = vm.createContext({
-    CodemanApp,
+    ReverieApp,
     MobileDetection: { getDeviceType: () => 'desktop', isMobile: () => false, isTouchDevice: () => false },
     localStorage,
     document: {
@@ -124,7 +124,7 @@ function loadSettingsHarness() {
   const settingsUi = readFileSync(resolve(import.meta.dirname, '../src/web/public/settings-ui.js'), 'utf8');
   vm.runInContext(settingsUi, context, { filename: 'settings-ui.js' });
 
-  const app = new (CodemanApp as any)();
+  const app = new (ReverieApp as any)();
   return { app, localStorage, elements, holder };
 }
 
@@ -135,15 +135,15 @@ describe('shortcut settings persistence and capture', () => {
     app.toggleShortcutEnabled('close-session', false);
 
     // Written to the SAME key loadAppSettingsFromStorage() reads (NOT the
-    // legacy 'codeman:settings' key), and the in-memory cache stays coherent.
-    const raw = localStorage.getItem('codeman-app-settings');
+    // legacy 'reverie:settings' key), and the in-memory cache stays coherent.
+    const raw = localStorage.getItem('reverie-app-settings');
     expect(raw).toBeTruthy();
     expect(JSON.parse(raw!).shortcutOverrides['close-session']).toMatchObject({ disabled: true });
-    expect(localStorage.getItem('codeman:settings')).toBeNull();
+    expect(localStorage.getItem('reverie:settings')).toBeNull();
     expect(app.readShortcutOverridesFromSettings()['close-session']).toMatchObject({ disabled: true });
 
     app.resetShortcutOverride('close-session');
-    const after = JSON.parse(localStorage.getItem('codeman-app-settings')!);
+    const after = JSON.parse(localStorage.getItem('reverie-app-settings')!);
     expect(after.shortcutOverrides['close-session']).toBeUndefined();
     expect(app.readShortcutOverridesFromSettings()['close-session']).toBeUndefined();
   });
@@ -176,7 +176,7 @@ describe('shortcut settings persistence and capture', () => {
       stopPropagation: vi.fn(),
     });
     expect(input.removeEventListener).toHaveBeenCalledTimes(1);
-    const stored = JSON.parse(localStorage.getItem('codeman-app-settings')!);
+    const stored = JSON.parse(localStorage.getItem('reverie-app-settings')!);
     expect(stored.shortcutOverrides['clear-terminal'].bindings[0]).toMatchObject({
       modifiers: ['ctrl', 'shift'],
       key: 'P',
@@ -198,7 +198,7 @@ describe('shortcut settings persistence and capture', () => {
     app.startShortcutCapture('clear-terminal');
     listeners[0]({ key: 'x', code: 'KeyX', preventDefault: vi.fn(), stopPropagation: vi.fn() });
 
-    expect(localStorage.getItem('codeman-app-settings')).toBeNull();
+    expect(localStorage.getItem('reverie-app-settings')).toBeNull();
     expect(app.showToast).toHaveBeenCalledWith('Shortcut must include Ctrl, Cmd, or Alt', 'error');
   });
 

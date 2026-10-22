@@ -29,7 +29,7 @@ export const LOGIN_TIMEOUT_MS = 15 * 60 * 1000;
 /** A finished login stays readable this long, then is forgotten. */
 const LOGIN_KEEP_MS = 10 * 60 * 1000;
 const POLL_MS = 1000;
-const EXIT_MARKER = '__CODEMAN_LOGIN_EXIT=';
+const EXIT_MARKER = '__REVERIE_LOGIN_EXIT=';
 /** What a pasted Claude authorization code may contain (it is typed into the pane verbatim). */
 export const LOGIN_CODE_PATTERN = /^[A-Za-z0-9#_.~+/=-]{8,1024}$/;
 
@@ -54,7 +54,7 @@ export function parseLoginScreen(provider: SubscriptionProvider, text: string): 
   const needsCode = lines.some((l) => /paste code here/i.test(l));
   // After a paste, the CLI's answer lands on the prompt's own line.
   const answers = lines.map((l) => l.replace(/^.*paste code here if prompted >\s*/i, ''));
-  const exit = lines.map((l) => l.match(/__CODEMAN_LOGIN_EXIT=(\d+)/)).find(Boolean);
+  const exit = lines.map((l) => l.match(/__REVERIE_LOGIN_EXIT=(\d+)/)).find(Boolean);
   const urls = lines.flatMap((l) => l.match(/https:\/\/[^\s"'<>]+/g) ?? []);
   const url =
     provider === 'anthropic'

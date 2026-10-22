@@ -1,7 +1,7 @@
 /**
  * @fileoverview Tests for the DeepSeek Harness (`dsh`) resolver and profile inventory.
  *
- * `dsh` needs the strictest identity probe of any CLI Codeman resolves. pi and
+ * `dsh` needs the strictest identity probe of any CLI Reverie resolves. pi and
  * grok are short names with npm squatters; `dsh` is worse — it is an EXISTING,
  * widely packaged Unix program (Debian's dancer's shell, `apt install dsh`),
  * which would sail through a version-token probe and then be handed a spawn
@@ -132,7 +132,7 @@ describe('DeepSeek CLI resolver', () => {
     // resolution SUCCEEDS, and this test fails — pinning hermeticity by
     // behavior rather than by source text. That matters more here than for any
     // sibling: `dsh` is a name real machines genuinely carry.
-    const root = mkdtempSync(join(tmpdir(), 'codeman-dsh-vitest-gate-'));
+    const root = mkdtempSync(join(tmpdir(), 'reverie-dsh-vitest-gate-'));
     temporaryDirectories.push(root);
     const binaryPath = join(root, 'dsh');
     writeFileSync(
@@ -172,7 +172,7 @@ describe('DeepSeek profile inventory', () => {
   }
 
   beforeEach(() => {
-    home = mkdtempSync(join(tmpdir(), 'codeman-dsh-home-'));
+    home = mkdtempSync(join(tmpdir(), 'reverie-dsh-home-'));
     temporaryDirectories.push(home);
     process.env.DSH_HOME = home;
   });
@@ -200,7 +200,7 @@ describe('DeepSeek profile inventory', () => {
     expect(profiles.map((p) => `${p.name}:${p.kind}`).sort()).toEqual(['headless:headless', 'web:web']);
     expect(profiles.every((p) => !isLaunchableProfile(p))).toBe(true);
     // The whole point: a perfectly installed dsh with only the shipped profiles
-    // still cannot start a Codeman session.
+    // still cannot start a Reverie session.
     expect(resolveDefaultDeepSeekProfile()).toBeNull();
   });
 

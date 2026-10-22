@@ -61,7 +61,7 @@ afterEach(() => {
   // Pane-liveness state is module-level (one cache, one watcher per pane), so it has
   // to be reset or a cached probe leaks into the next test.
   _resetPaneLivenessState();
-  delete process.env.CODEMAN_MULTIUSER;
+  delete process.env.REVERIE_MULTIUSER;
 });
 
 /**
@@ -384,7 +384,7 @@ describe('GET /api/sessions/:id/wait: capacity errors name the cap that was hit'
   it('maps the per-owner cap to RATE_LIMITED / 429 and charges the request to its user', async () => {
     // Also proves the route passes ownerFor(req): without it the owner cap can never
     // trip, and one user could hold the whole process-wide pool.
-    process.env.CODEMAN_MULTIUSER = '1';
+    process.env.REVERIE_MULTIUSER = '1';
     const { app } = await harness({ authUser: { username: 'alice', role: 'admin' } });
 
     const pending = app.inject({ method: 'GET', url: `/api/sessions/${SESSION_ID}/wait?until=stop` });
@@ -636,11 +636,11 @@ describe('a PTY exit releases waiters that did not ask for exit', () => {
 /**
  * Worker liveness for a tmux-backed session.
  *
- * `session.pid` is the local `tmux attach` CLIENT, not the worker. Codeman sets
+ * `session.pid` is the local `tmux attach` CLIENT, not the worker. Reverie sets
  * `remain-on-exit on`, so when the command inside the pane exits tmux keeps the pane
  * (`pane_dead=1`), the tmux session survives, the attach client keeps running, `pid`
  * never goes null and NO exit event fires. Reproduced live on a shell worker killed
- * with `exit 42`: tmux said `pane_dead=1 status=42` while Codeman said
+ * with `exit 42`: tmux said `pane_dead=1 status=42` while Reverie said
  * `pid=309406 status=idle` and the default wait answered
  * `{signal:"idle", immediate:true, waitedMs:0}` for a corpse.
  *

@@ -1,7 +1,7 @@
 /**
  * @fileoverview End to end through the real WebServer: a session created with a
  * `tabGroupId` lands in that group in ONE layout version, and a session spawned
- * by another one (the X-Codeman-Parent-Session header) lands after its parent in
+ * by another one (the X-Reverie-Parent-Session header) lands after its parent in
  * the parent's group: hand-placed from then on by default, or following its
  * parent until moved by hand with the synced `spawnedTabsFollowParent` setting.
  *
@@ -26,7 +26,7 @@ type Layout = {
 describe('grouped session creation through the server', () => {
   let server: WebServer;
   let base = '';
-  const workingDir = mkdtempSync(join(tmpdir(), 'codeman-grouped-create-'));
+  const workingDir = mkdtempSync(join(tmpdir(), 'reverie-grouped-create-'));
 
   const api = async (
     path: string,
@@ -88,7 +88,7 @@ describe('grouped session creation through the server', () => {
   it('by default a spawned child lands after its parent once and is hand-placed', async () => {
     const start = await layout();
     const parentId = start.groups[0].refs[0].id;
-    const child = await create({ name: 'pinned-child' }, { 'X-Codeman-Parent-Session': parentId });
+    const child = await create({ name: 'pinned-child' }, { 'X-Reverie-Parent-Session': parentId });
     const after = await layout();
     expect(after.groups[0].refs.slice(0, 2)).toEqual([
       { kind: 'session', id: parentId },
@@ -101,7 +101,7 @@ describe('grouped session creation through the server', () => {
     expect(saved.status).toBe(200);
     const start = await layout();
     const parentId = start.groups[0].refs[0].id;
-    const child = await create({ name: 'child' }, { 'X-Codeman-Parent-Session': parentId });
+    const child = await create({ name: 'child' }, { 'X-Reverie-Parent-Session': parentId });
     const followed = await layout();
     expect(followed.groups[0].refs.slice(0, 2)).toEqual([
       { kind: 'session', id: parentId },

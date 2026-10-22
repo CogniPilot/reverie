@@ -23,8 +23,8 @@ import { z } from 'zod';
  * - `GET    /api/chatrooms/:id/messages[?since=&limit=]`  history
  * - `POST   /api/chatrooms/:id/messages`                post `{text, to?}`
  *
- * Who is speaking: a request carrying `X-Codeman-Parent-Session` (every
- * `codeman agent` call does) that resolves to a live session the caller can see
+ * Who is speaking: a request carrying `X-Reverie-Parent-Session` (every
+ * `reverie agent` call does) that resolves to a live session the caller can see
  * speaks AS that session; anything else (the browser) speaks as the user.
  * Agents may post, read, set their OWN synopsis, and (the coordinator only) add
  * or remove other members. An agent that is the coordinator of a room it can see may also
@@ -148,13 +148,13 @@ export function registerChatroomRoutes(
   // every chatroom route, so only an ABSENT header still means the user, the rule company-routes'
   // ownerOnly already uses. An absent header is still trusted; owner authentication closes that.
   const refuseUnresolvedParent = async (req: FastifyRequest, reply: FastifyReply) => {
-    if (req.headers['x-codeman-parent-session'] === undefined || caller(req)) return;
+    if (req.headers['x-reverie-parent-session'] === undefined || caller(req)) return;
     return reply
       .code(403)
       .send(
         createErrorResponse(
           ApiErrorCode.FORBIDDEN,
-          'X-Codeman-Parent-Session does not name a live session you may speak as'
+          'X-Reverie-Parent-Session does not name a live session you may speak as'
         )
       );
   };
@@ -167,8 +167,8 @@ export function registerChatroomRoutes(
   const phoneSchema = z.object({ mode: z.enum(['ring', 'vibrate', 'silent']) }).strict();
   const phoneActor = (req: FastifyRequest) => {
     const self = caller(req);
-    const owner = verifiedOwner(req) && req.headers['x-codeman-parent-session'] === undefined;
-    if (!owner && (!self || req.headers['x-codeman-parent-session'] !== self || !employeeOf(self))) {
+    const owner = verifiedOwner(req) && req.headers['x-reverie-parent-session'] === undefined;
+    if (!owner && (!self || req.headers['x-reverie-parent-session'] !== self || !employeeOf(self))) {
       throw new PhoneStatusForbidden('Verified owner or exact bound employee caller required');
     }
     const coordinator = !!self && service.rooms().some(room => room.owner === ownerFor(req) && !room.archivedAt &&

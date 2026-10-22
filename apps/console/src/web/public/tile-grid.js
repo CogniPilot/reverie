@@ -3,7 +3,7 @@
 /**
  * @fileoverview The tile grid: 1 to TILE_GRID_MAX (6) live sessions side by
  * side in one window, each in its own TerminalTile (terminal-tile.js), laid
- * out by count (window.CodemanTileGrid, constants.js). Desktop only; see
+ * out by count (window.ReverieTileGrid, constants.js). Desktop only; see
  * docs/tile-grid-plan.md.
  *
  * While the grid is open the main terminal (terminal-ui.js) is PARKED: hidden,
@@ -17,12 +17,12 @@
  * because each is a synchronous tmux call on the server.
  *
  * @dependency terminal-tile.js (window.TerminalTile, window.TileLoadQueue)
- * @dependency constants.js (window.CodemanTileGrid, SPLIT_PANE_MIN_WIDTH)
+ * @dependency constants.js (window.ReverieTileGrid, SPLIT_PANE_MIN_WIDTH)
  * @loadorder 7.6 of 16, loaded after terminal-split.js and before respawn-ui.js
  */
 
 // Per-device tile font size (a tile is a fraction of the screen).
-const TILE_GRID_FONT_KEY = 'codeman-tile-font-size';
+const TILE_GRID_FONT_KEY = 'reverie-tile-font-size';
 // The grid this browser last had, as the user left it (sanitizeTileGridState,
 // constants.js): `{ v: 1, open, ids, count, focused, zoomed, colFr, rowFr }`,
 // `ids` being the cells in reading order with `null` for an empty one, `count`
@@ -31,11 +31,11 @@ const TILE_GRID_FONT_KEY = 'codeman-tile-font-size';
 // Written on every change while the grid is open; `open: false` keeps it for
 // the Tiles toggle, which brings it back exactly; a grid stored open is
 // restored on reload inside handleInit. Never sent to the server.
-const TILE_GRID_STORAGE_KEY = 'codeman:tile-grid';
+const TILE_GRID_STORAGE_KEY = 'reverie:tile-grid';
 // The count last picked in the Tiles button's right-click menu (2, 4 or 6;
 // owner decision 10), per device: what a click opens when there is no stored
 // grid to bring back, and what a pick re-forms the grid to.
-const TILE_GRID_COUNT_KEY = 'codeman:tile-count';
+const TILE_GRID_COUNT_KEY = 'reverie:tile-count';
 // The leaving tiles' fade (styles.css .tile--leaving) plus slack: the still
 // copy of a closing grid goes even if animationend never comes (a hidden tab,
 // a cancelled animation).
@@ -59,7 +59,7 @@ const TILE_GRID_PADDING_PX = 4;
 // What a tile's header drag (and a popped-out window's title drag) carries:
 // the session id under a type of its own, never text, so no text field or
 // terminal takes it as typing. Another Reverie window reads it on drop.
-const TILE_DRAG_TYPE = 'application/x-codeman-tile';
+const TILE_DRAG_TYPE = 'application/x-reverie-tile';
 // Detach Tiles: a tile dropped outside every window waits this long before it
 // opens as a window of its own, so another window that took it (a
 // 'tile-adopted' message on the window channel) can still say so first.
@@ -115,7 +115,7 @@ function isTextFieldTarget(target) {
  * (2x1, 2x2, 3x2) as small rounded cells.
  */
 function tileCountGlyph(n) {
-  const { cols, rows } = window.CodemanTileGrid.computeTileLayout({ count: n });
+  const { cols, rows } = window.ReverieTileGrid.computeTileLayout({ count: n });
   const NS = 'http://www.w3.org/2000/svg';
   const svg = document.createElementNS(NS, 'svg');
   svg.setAttribute('class', 'tile-count-glyph');
@@ -207,7 +207,7 @@ class TileGridModel {
   }
 }
 
-Object.assign(CodemanApp.prototype, {
+Object.assign(ReverieApp.prototype, {
   /**
    * True while the grid owns the terminal area and the main terminal is parked.
    * Every main-terminal path that would write, fetch, resize or reconnect checks
@@ -234,7 +234,7 @@ Object.assign(CodemanApp.prototype, {
     } catch {
       /* Storage unavailable: the default below. */
     }
-    return saved >= 10 && saved <= 24 ? saved : window.CodemanTileGrid.TILE_FONT_SIZE_DEFAULT;
+    return saved >= 10 && saved <= 24 ? saved : window.ReverieTileGrid.TILE_FONT_SIZE_DEFAULT;
   },
 
   /** Ctrl +/- while the grid is open: every tile, then each tile's PTY (a font change is a size change, #464). */
@@ -288,7 +288,7 @@ Object.assign(CodemanApp.prototype, {
    */
   _setTileLoadingLabel(body) {
     if (!body) return;
-    const t = window.codemanT;
+    const t = window.reverieT;
     body.dataset.loadingLabel = typeof t === 'function' ? t('Loading…') : 'Loading…';
   },
 
@@ -372,7 +372,7 @@ Object.assign(CodemanApp.prototype, {
   openTileGrid(ids, { focusedId = null, auto = true, mergeSplit = true } = {}) {
     if (!this.canOpenTileGrid()) return false;
     const grid = (this._tileGrid ||= new TileGridModel());
-    const max = window.CodemanTileGrid.TILE_GRID_MAX;
+    const max = window.ReverieTileGrid.TILE_GRID_MAX;
     // The grid and the split are never open together. An open split becomes the
     // grid's first two tiles (Pane A focused, Pane B beside it), so "split, then
     // want more" is one step.
@@ -519,7 +519,7 @@ Object.assign(CodemanApp.prototype, {
     for (const id of ids) {
       this._xtermSnapshots?.delete(id);
       try {
-        localStorage.removeItem(`codeman-xs-${id}`);
+        localStorage.removeItem(`reverie-xs-${id}`);
       } catch {
         /* Nothing stored. */
       }
@@ -835,7 +835,7 @@ Object.assign(CodemanApp.prototype, {
    * so a large monitor never reads "this window fits 6".
    */
   _tileGridLimit() {
-    const T = window.CodemanTileGrid;
+    const T = window.ReverieTileGrid;
     const max = T.TILE_GRID_MAX;
     const el = this._tilesOwnTerminal() ? this._tileGridSection() : document.querySelector('.terminal-wrap');
     const rect = el?.getBoundingClientRect?.() || { width: 0, height: 0 };
@@ -861,12 +861,12 @@ Object.assign(CodemanApp.prototype, {
     } catch {
       /* Storage unavailable: the default. */
     }
-    return window.CodemanTileGrid.sanitizeTileCount(raw);
+    return window.ReverieTileGrid.sanitizeTileCount(raw);
   },
 
   _rememberTileGridCount(count) {
     try {
-      localStorage.setItem(TILE_GRID_COUNT_KEY, String(window.CodemanTileGrid.sanitizeTileCount(count)));
+      localStorage.setItem(TILE_GRID_COUNT_KEY, String(window.ReverieTileGrid.sanitizeTileCount(count)));
     } catch {
       /* Per-device convenience only. */
     }
@@ -896,7 +896,7 @@ Object.assign(CodemanApp.prototype, {
       return;
     }
     if (!this.canOpenTileGrid()) return;
-    const T = window.CodemanTileGrid;
+    const T = window.ReverieTileGrid;
     const capacity = this._tileGridLimit().capacity;
     const fitsText = `This window fits ${capacity} tile${capacity === 1 ? '' : 's'}`;
     const current = this._tileGridCount();
@@ -1053,7 +1053,7 @@ Object.assign(CodemanApp.prototype, {
       this._activateTileGrid({ count });
       return;
     }
-    const T = window.CodemanTileGrid;
+    const T = window.ReverieTileGrid;
     const n = Math.min(T.sanitizeTileCount(count), this._tileGridLimit().capacity);
     // The tiles that join are the ranking's best (_tileGridRanking).
     this._reformTileGrid(T.tileGridSetForCount(grid.ids, this._tileGridRanking(), n, grid.focusedId));
@@ -1076,7 +1076,7 @@ Object.assign(CodemanApp.prototype, {
   _reformTileGrid(target) {
     const grid = this._tileGrid;
     if (!grid?.open) return;
-    const T = window.CodemanTileGrid;
+    const T = window.ReverieTileGrid;
     const leaving = grid.ids.filter((id) => !target.includes(id));
     const joining = target.filter((id) => !grid.tiles.has(id));
     if (leaving.length === 0 && joining.length === 0) return;
@@ -1242,7 +1242,7 @@ Object.assign(CodemanApp.prototype, {
    * to it too. `stored` saves a second read.
    */
   _tileGridOpenSet(stored = this._readStoredTileGrid(), count = null) {
-    const T = window.CodemanTileGrid;
+    const T = window.ReverieTileGrid;
     const n = Math.max(1, Math.min(count ?? this._tileGridCount(), this._tileGridLimit().capacity));
     const ranked = this._tileGridRanking();
     const set = T.tileGridOpenSet({
@@ -1276,7 +1276,7 @@ Object.assign(CodemanApp.prototype, {
    * @returns {string[]}
    */
   _tileGridRanking() {
-    const T = window.CodemanTileGrid;
+    const T = window.ReverieTileGrid;
     const open = T.buildTilePickerSessions(this.sessions, this.sessionOrder, this.detachedSessions);
     if (typeof this._mobileOverviewState !== 'function' || typeof T.rankTileSessions !== 'function') {
       return open.map((c) => c.id);
@@ -1299,7 +1299,7 @@ Object.assign(CodemanApp.prototype, {
     const grid = this._tileGrid;
     if (!grid?.open) return;
     // Over the cells: focus skips an empty one, never lands on it.
-    const id = window.CodemanTileGrid.tileInDirection(grid.cells, grid.focusedId, direction, grid.cols);
+    const id = window.ReverieTileGrid.tileInDirection(grid.cells, grid.focusedId, direction, grid.cols);
     if (id) this.selectSession(id);
   },
 
@@ -1311,7 +1311,7 @@ Object.assign(CodemanApp.prototype, {
   _cycleTileFocus(delta) {
     const grid = this._tileGrid;
     if (!grid?.open) return false;
-    const id = window.CodemanTileGrid.cycleTile(grid.ids, this.activeSessionId, delta);
+    const id = window.ReverieTileGrid.cycleTile(grid.ids, this.activeSessionId, delta);
     if (id) this.selectSession(id);
     return true;
   },
@@ -1339,7 +1339,7 @@ Object.assign(CodemanApp.prototype, {
     }
     this.activeSessionId = null;
     try {
-      localStorage.removeItem('codeman-active-session');
+      localStorage.removeItem('reverie-active-session');
     } catch {
       /* Nothing stored. */
     }
@@ -1359,7 +1359,7 @@ Object.assign(CodemanApp.prototype, {
   addTile(sessionId, { cell = -1, enterIndex = 0 } = {}) {
     const grid = this._tileGrid;
     if (!grid?.open || grid.tiles.has(sessionId)) return false;
-    if (grid.ids.length >= window.CodemanTileGrid.TILE_GRID_MAX) return false;
+    if (grid.ids.length >= window.ReverieTileGrid.TILE_GRID_MAX) return false;
     if (!this._mountTile(sessionId, { enterIndex })) return false;
     this._placeTile(sessionId, cell);
     grid.count = grid.ids.length;
@@ -1381,7 +1381,7 @@ Object.assign(CodemanApp.prototype, {
   _placeTile(sessionId, cell = -1) {
     const grid = this._tileGrid;
     const { cols, rows } = this._tileShapeFor(grid.ids.length + 1);
-    grid.cells = window.CodemanTileGrid.fitTileCells(grid.cells, grid.cols, cols, rows);
+    grid.cells = window.ReverieTileGrid.fitTileCells(grid.cells, grid.cols, cols, rows);
     grid.cols = cols;
     grid.rows = rows;
     const k = Number.isInteger(cell) && grid.cells[cell] === null ? cell : grid.cells.indexOf(null);
@@ -1394,7 +1394,7 @@ Object.assign(CodemanApp.prototype, {
   /** Columns x rows (and whether they fit) for `count` tiles in the grid area as it is now. */
   _tileShapeFor(count) {
     const rect = this._tileGridSection().getBoundingClientRect?.() || { width: 0, height: 0 };
-    return window.CodemanTileGrid.computeTileLayout({
+    return window.ReverieTileGrid.computeTileLayout({
       count,
       width: rect.width || window.innerWidth,
       height: rect.height || window.innerHeight,
@@ -1424,7 +1424,7 @@ Object.assign(CodemanApp.prototype, {
       return true;
     }
     const wasFocused = grid.focusedId === sessionId;
-    const neighbor = window.CodemanTileGrid.tileNeighbor(grid.ids, sessionId);
+    const neighbor = window.ReverieTileGrid.tileNeighbor(grid.ids, sessionId);
     // A divider drag in progress was measured against this tile; a header
     // drag of this tile has nothing left to drop.
     this._tileDividerDragTeardown?.();
@@ -1700,7 +1700,7 @@ Object.assign(CodemanApp.prototype, {
     const grid = this._tileGrid;
     if (!grid?.open || grid.zoomedId || !grid.focusedId) return;
     const from = grid.cells.indexOf(grid.focusedId);
-    const to = window.CodemanTileGrid.tileCellInDirection(from, direction, grid.cols, grid.cells.length);
+    const to = window.ReverieTileGrid.tileCellInDirection(from, direction, grid.cols, grid.cells.length);
     if (to === -1) return;
     if (grid.cells[to]) this._swapTiles(grid.focusedId, grid.cells[to]);
     else this._moveTileToCell(grid.focusedId, to);
@@ -1865,7 +1865,7 @@ Object.assign(CodemanApp.prototype, {
       fontSettings: this.loadAppSettingsFromStorage?.() || {},
       detachedSessions: this.detachedSessions,
       scheduleLoad: (t, kind, run) => this._tileLoadQueue().schedule(t, kind, run),
-      scrollback: window.CodemanTileGrid.TILE_SCROLLBACK,
+      scrollback: window.ReverieTileGrid.TILE_SCROLLBACK,
       fontSize: this._tileGridFontSize(),
       boundedLoad: true,
       onExit: (code) => this._onTileExit(sessionId, tile, code),
@@ -2366,7 +2366,7 @@ Object.assign(CodemanApp.prototype, {
     const grid = this._tileGrid;
     const section = this._tileGridSection();
     const { cols, rows, fits } = this._tileShapeFor(grid.ids.length);
-    grid.cells = window.CodemanTileGrid.fitTileCells(grid.cells, grid.cols, cols, rows);
+    grid.cells = window.ReverieTileGrid.fitTileCells(grid.cells, grid.cols, cols, rows);
     if (grid.colFr.length !== cols) grid.colFr = new Array(cols).fill(1);
     if (grid.rowFr.length !== rows) grid.rowFr = new Array(rows).fill(1);
     grid.cols = cols;
@@ -2501,7 +2501,7 @@ Object.assign(CodemanApp.prototype, {
     e.preventDefault?.();
     e.stopPropagation?.();
     this._tileDividerDragTeardown?.();
-    const T = window.CodemanTileGrid;
+    const T = window.ReverieTileGrid;
     const section = this._tileGridSection();
     const rect = section.getBoundingClientRect();
     const isCol = axis === 'col';
@@ -2666,7 +2666,7 @@ Object.assign(CodemanApp.prototype, {
     }
     this._activateFileBrowserSession?.(sessionId);
     try {
-      localStorage.setItem('codeman-active-session', sessionId);
+      localStorage.setItem('reverie-active-session', sessionId);
     } catch {
       /* Per-device convenience only. */
     }
@@ -2706,7 +2706,7 @@ Object.assign(CodemanApp.prototype, {
     this._persistTileGrid();
   },
 
-  // ── Persistence (codeman:tile-grid, per browser: ids and layout, never content) ──
+  // ── Persistence (reverie:tile-grid, per browser: ids and layout, never content) ──
 
   /**
    * Writes the open grid as it is, on every change (a move, a divider drag, a
@@ -2730,7 +2730,7 @@ Object.assign(CodemanApp.prototype, {
       ids: grid.cells.slice(),
       // Never fewer than the tiles shown (a build before `count` derives it
       // from `ids`, and ignores it).
-      count: Math.min(Math.max(grid.count || 0, grid.ids.length), window.CodemanTileGrid.TILE_GRID_MAX),
+      count: Math.min(Math.max(grid.count || 0, grid.ids.length), window.ReverieTileGrid.TILE_GRID_MAX),
       focused: grid.focusedId,
       zoomed: grid.autoZoom ? null : grid.zoomedId,
       colFr: grid.colFr.slice(),
@@ -2761,7 +2761,7 @@ Object.assign(CodemanApp.prototype, {
       return null;
     }
     if (!raw) return null;
-    return window.CodemanTileGrid.sanitizeTileGridState(raw, this.sessions, this.detachedSessions);
+    return window.ReverieTileGrid.sanitizeTileGridState(raw, this.sessions, this.detachedSessions);
   },
 
   /**
@@ -2772,7 +2772,7 @@ Object.assign(CodemanApp.prototype, {
    */
   _storedTileGridSet(stored = this._readStoredTileGrid()) {
     if (!stored) return null;
-    return window.CodemanTileGrid.restoreTileGridCells(stored, this._tileGridRanking());
+    return window.ReverieTileGrid.restoreTileGridCells(stored, this._tileGridRanking());
   },
 
   /**
@@ -2798,7 +2798,7 @@ Object.assign(CodemanApp.prototype, {
     { focusedId = null, auto = true, keepCount = true } = {}
   ) {
     if (!set?.ids?.length) return false;
-    const T = window.CodemanTileGrid;
+    const T = window.ReverieTileGrid;
     const focus = focusedId || set.focusedId;
     // An open split closes without joining it (decision 8, case a).
     this._tilePersistHold = true;
@@ -3029,7 +3029,7 @@ Object.assign(CodemanApp.prototype, {
     }
     this.activeSessionId = null;
     try {
-      localStorage.removeItem('codeman-active-session');
+      localStorage.removeItem('reverie-active-session');
     } catch {
       /* Nothing stored. */
     }
@@ -3165,7 +3165,7 @@ Object.assign(CodemanApp.prototype, {
     return !!this.detachedSessions?.has(sessionId);
   },
 
-  // ── For the gesture overlay (packages/gesture-control, src/codeman/entry.ts)
+  // ── For the gesture overlay (packages/gesture-control, src/reverie/entry.ts)
   //
   // A hand is no native drag: the overlay asks where it is and what is under
   // it, and every move still goes through the paths a mouse drag takes
@@ -3252,16 +3252,16 @@ Object.assign(CodemanApp.prototype, {
    */
   _installSoloTileHandle() {
     const title = document.getElementById('soloSessionTitle');
-    if (!this.isSoloWindow || !title || title._codemanTileHandle) return;
-    title._codemanTileHandle = true;
+    if (!this.isSoloWindow || !title || title._reverieTileHandle) return;
+    title._reverieTileHandle = true;
     const sync = () => {
       this._cachedAppSettings = null;
       const on = this.tileDetachEnabled();
       title.setAttribute('draggable', on ? 'true' : 'false');
       title.classList.toggle('solo-session-title--handle', on);
       const label = on ? "Drag onto a Reverie window's tiles to dock this session there" : '';
-      if (title._codemanTileHandleLabel !== label) {
-        title._codemanTileHandleLabel = label;
+      if (title._reverieTileHandleLabel !== label) {
+        title._reverieTileHandleLabel = label;
         title.title = label;
       }
     };
@@ -3291,12 +3291,12 @@ Object.assign(CodemanApp.prototype, {
 // closes the grid without a reselect, and the original handler then shows the
 // welcome screen as in the single view. A close started from this tab
 // (closeSession, in _closingSessions) owns its own follow-up: only the tile goes.
-const _tileGridOriginalOnSessionDeleted = CodemanApp.prototype._onSessionDeleted;
-CodemanApp.prototype._onSessionDeleted = function (data) {
+const _tileGridOriginalOnSessionDeleted = ReverieApp.prototype._onSessionDeleted;
+ReverieApp.prototype._onSessionDeleted = function (data) {
   const grid = this._tileGrid;
   if (grid?.has(data.id)) {
     const wasFocused = grid.focusedId === data.id;
-    const neighbor = window.CodemanTileGrid.tileNeighbor(grid.ids, data.id);
+    const neighbor = window.ReverieTileGrid.tileNeighbor(grid.ids, data.id);
     this.removeTile(data.id, { refocus: false, gone: true });
     if (wasFocused && grid.open && neighbor && !this._closingSessions?.has(data.id)) {
       this._selectTiledSession(neighbor, { auto: true, focus: false });
@@ -3308,8 +3308,8 @@ CodemanApp.prototype._onSessionDeleted = function (data) {
 // Every tab render (any session change: status, hooks, name) refreshes the
 // tile headers too, so a tile's dot, name and needs border follow the same
 // state the tab shows.
-const _tileGridOriginalRenderSessionTabsImmediate = CodemanApp.prototype._renderSessionTabsImmediate;
-CodemanApp.prototype._renderSessionTabsImmediate = function (...args) {
+const _tileGridOriginalRenderSessionTabsImmediate = ReverieApp.prototype._renderSessionTabsImmediate;
+ReverieApp.prototype._renderSessionTabsImmediate = function (...args) {
   const result = _tileGridOriginalRenderSessionTabsImmediate.apply(this, args);
   this._renderTileChrome?.();
   return result;

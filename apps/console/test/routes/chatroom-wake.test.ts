@@ -19,7 +19,7 @@ import type { ChatMessage, ChatRoom } from '../../src/chatroom-store.js';
 const A = '0000002d-0035-4000-8000-000000000047';
 const B = '00000038-0043-4000-8000-000000000060';
 const C = '0000003e-004c-4000-8000-00000000006f';
-const AS = (id: string) => ({ 'x-codeman-parent-session': id });
+const AS = (id: string) => ({ 'x-reverie-parent-session': id });
 
 describe('mention-only delivery', () => {
   let app: FastifyInstance;
@@ -52,7 +52,7 @@ describe('mention-only delivery', () => {
   });
 
   /** A room of the three agents (with `lead` as coordinator unless told not to), briefings already delivered and cleared. */
-  const room = async (name = 'Fleet', coordinator = true, wake: 'mentions' | 'all' | null = 'mentions') => {
+  const room = async (name = 'Reverie', coordinator = true, wake: 'mentions' | 'all' | null = 'mentions') => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/chatrooms',
@@ -399,8 +399,8 @@ describe('the wake setting of a room', () => {
   };
 
   it('is set by the owner only, shows in the room view, validates the mode, and is cleared by default', async () => {
-    const id = await make('Fleet');
-    expect((await setWake(id, 'mentions', { 'x-codeman-parent-session': A })).statusCode).toBe(403);
+    const id = await make('Reverie');
+    expect((await setWake(id, 'mentions', { 'x-reverie-parent-session': A })).statusCode).toBe(403);
     expect((await setWake(id, 'sometimes')).statusCode).toBe(400);
     expect((await setWake('nope', 'mentions')).statusCode).toBe(404);
     const set = await setWake(id, 'mentions');
@@ -439,7 +439,7 @@ describe('the wake setting of a room', () => {
   });
 
   it('is kept when the console restarts, and a direct message refuses it', async () => {
-    const id = await make('Fleet');
+    const id = await make('Reverie');
     await setWake(id, 'mentions');
     await service.stop();
     const again = new ChatroomService({ file, getSession: (sid) => ctx.sessions.get(sid), broadcast: () => {}, now: () => clock });

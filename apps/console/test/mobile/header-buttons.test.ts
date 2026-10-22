@@ -47,9 +47,9 @@ describe('Header button visibility (E2E)', () => {
     const { page } = await createDevicePage(REPRESENTATIVE_DEVICES['large-tablet'], baseUrl);
     // Desktop-class devices use the non-mobile settings blob.
     await page.evaluate(() => {
-      const cur = JSON.parse(localStorage.getItem('codeman-app-settings') || '{}');
+      const cur = JSON.parse(localStorage.getItem('reverie-app-settings') || '{}');
       cur.showAttachmentsButton = true;
-      localStorage.setItem('codeman-app-settings', JSON.stringify(cur));
+      localStorage.setItem('reverie-app-settings', JSON.stringify(cur));
     });
     await page.reload({ waitUntil: 'domcontentloaded' });
     await page.waitForTimeout(WAIT.PAGE_SETTLE);

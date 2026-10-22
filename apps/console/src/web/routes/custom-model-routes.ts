@@ -25,7 +25,7 @@ import { CustomModelHostSchema } from '../schemas.js';
 import { readCustomModelHosts, writeCustomModelHosts, type CustomModelHost } from '../../custom-model-hosts.js';
 import type { CliEntry } from '../../config/cli-registry/types.js';
 
-const CODEMAN_CONFIG_DIR = getDataDir();
+const REVERIE_CONFIG_DIR = getDataDir();
 const DISCOVER_TIMEOUT_MS = 8000;
 const PROPS_TIMEOUT_MS = 5000;
 
@@ -729,7 +729,7 @@ export async function detectCustomModelSwapDisplacements(
 export function registerCustomModelRoutes(app: FastifyInstance): void {
   app.get('/api/model-endpoints', async (req): Promise<RedactedHost[]> => {
     if (isMultiUserMode() && !isAdmin(req)) return [];
-    const hosts = await readCustomModelHosts(CODEMAN_CONFIG_DIR);
+    const hosts = await readCustomModelHosts(REVERIE_CONFIG_DIR);
     return hosts.map(redactApiKey);
   });
 
@@ -742,11 +742,11 @@ export function registerCustomModelRoutes(app: FastifyInstance): void {
     }
     const badDefault = invalidDefaultModel(host);
     if (badDefault) return badDefault;
-    const hosts = await readCustomModelHosts(CODEMAN_CONFIG_DIR);
+    const hosts = await readCustomModelHosts(REVERIE_CONFIG_DIR);
     if (hosts.some((item) => item.id === host.id)) {
       return createErrorResponse(ApiErrorCode.ALREADY_EXISTS, 'Model endpoint already exists');
     }
-    await writeCustomModelHosts(CODEMAN_CONFIG_DIR, [...hosts, host]);
+    await writeCustomModelHosts(REVERIE_CONFIG_DIR, [...hosts, host]);
     return { success: true, data: { host: redactApiKey(host) } };
   });
 
@@ -760,13 +760,13 @@ export function registerCustomModelRoutes(app: FastifyInstance): void {
     }
     const badDefault = invalidDefaultModel(incoming);
     if (badDefault) return badDefault;
-    const hosts = await readCustomModelHosts(CODEMAN_CONFIG_DIR);
+    const hosts = await readCustomModelHosts(REVERIE_CONFIG_DIR);
     const index = hosts.findIndex((item) => item.id === id);
     if (index === -1) return createErrorResponse(ApiErrorCode.NOT_FOUND, 'Model endpoint not found');
     const host = applyDiscoveredFields(applyStoredApiKey(incoming, hosts[index]), hosts[index]);
     const next = [...hosts];
     next[index] = host;
-    await writeCustomModelHosts(CODEMAN_CONFIG_DIR, next);
+    await writeCustomModelHosts(REVERIE_CONFIG_DIR, next);
     return { success: true, data: { host: redactApiKey(host) } };
   });
 
@@ -774,9 +774,9 @@ export function registerCustomModelRoutes(app: FastifyInstance): void {
     const denied = adminOnly(req, reply);
     if (denied) return denied;
     const { id } = req.params as { id: string };
-    const hosts = await readCustomModelHosts(CODEMAN_CONFIG_DIR);
+    const hosts = await readCustomModelHosts(REVERIE_CONFIG_DIR);
     await writeCustomModelHosts(
-      CODEMAN_CONFIG_DIR,
+      REVERIE_CONFIG_DIR,
       hosts.filter((item) => item.id !== id)
     );
     return { success: true, data: { id } };
@@ -788,7 +788,7 @@ export function registerCustomModelRoutes(app: FastifyInstance): void {
       const denied = adminOnly(req, reply);
       if (denied) return denied;
       const { id } = req.params as { id: string };
-      const hosts = await readCustomModelHosts(CODEMAN_CONFIG_DIR);
+      const hosts = await readCustomModelHosts(REVERIE_CONFIG_DIR);
       const index = hosts.findIndex((item) => item.id === id);
       if (index === -1) return createErrorResponse(ApiErrorCode.NOT_FOUND, 'Model endpoint not found');
       const host = hosts[index];
@@ -799,7 +799,7 @@ export function registerCustomModelRoutes(app: FastifyInstance): void {
         const result = await discoverModels(host);
         const next = [...hosts];
         next[index] = applyDiscoveredModels(host, result);
-        await writeCustomModelHosts(CODEMAN_CONFIG_DIR, next);
+        await writeCustomModelHosts(REVERIE_CONFIG_DIR, next);
         return { success: true, data: { models: result.models } };
       } catch (err) {
         const blocked = egressBlockedReason(err);
@@ -826,7 +826,7 @@ export function registerCustomModelRoutes(app: FastifyInstance): void {
       }>
     > => {
       const { id } = req.params as { id: string };
-      const hosts = await readCustomModelHosts(CODEMAN_CONFIG_DIR);
+      const hosts = await readCustomModelHosts(REVERIE_CONFIG_DIR);
       const host = hosts.find((item) => item.id === id);
       if (!host) return createErrorResponse(ApiErrorCode.NOT_FOUND, 'Model endpoint not found');
       if (isBlockedWebviewUrl(host.baseUrl)) {

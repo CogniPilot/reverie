@@ -7,7 +7,7 @@ import vm from 'node:vm';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-const context = vm.createContext({ CodemanApp: class {} });
+const context = vm.createContext({ ReverieApp: class {} });
 vm.runInContext(readFileSync(resolve(import.meta.dirname, '../src/web/public/voice-chat.js'), 'utf8'), context);
 vm.runInContext(readFileSync(resolve(import.meta.dirname, '../src/web/public/car-mode.js'), 'utf8'), context);
 const get = (name: string) => vm.runInContext(name, context);

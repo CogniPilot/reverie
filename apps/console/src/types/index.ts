@@ -1,5 +1,5 @@
 /**
- * @fileoverview Barrel re-export for all Codeman type definitions.
+ * @fileoverview Barrel re-export for all Reverie type definitions.
  *
  * The type system is split into 13 domain modules for maintainability.
  * Import from `'./types'` (or `'./types/index.js'`) to access any type:
@@ -14,19 +14,19 @@
  * | Module       | Key exports                                                           | Persistence / API                              |
  * |--------------|-----------------------------------------------------------------------|-------------------------------------------------|
  * | common       | Disposable, BufferConfig, CleanupRegistration, NiceConfig, ProcessStats | In-memory only                                 |
- * | session      | SessionState, SessionConfig, SessionStatus, SessionMode, ClaudeMode, OpenCodeConfig | `~/.codeman/state.json` → `GET /api/sessions`  |
- * | task         | TaskDefinition, TaskState, TaskStatus                                 | `~/.codeman/state.json` → `GET /api/tasks`     |
- * | app-state    | AppState, AppConfig, GlobalStats, TokenStats, DEFAULT_CONFIG          | `~/.codeman/state.json` → `GET /api/status`    |
+ * | session      | SessionState, SessionConfig, SessionStatus, SessionMode, ClaudeMode, OpenCodeConfig | `~/.reverie/state.json` → `GET /api/sessions`  |
+ * | task         | TaskDefinition, TaskState, TaskStatus                                 | `~/.reverie/state.json` → `GET /api/tasks`     |
+ * | app-state    | AppState, AppConfig, GlobalStats, TokenStats, DEFAULT_CONFIG          | `~/.reverie/state.json` → `GET /api/status`    |
  * | respawn      | RespawnConfig, RespawnPreset, RespawnCycleMetrics, RalphLoopHealthScore, TimingHistory | Per-session in state.json → `GET /api/sessions/:id/respawn` |
  * | ralph        | RalphTrackerState, RalphTodoItem, CircuitBreakerStatus, RalphStatusBlock, RalphSessionState | Per-session → `GET /api/sessions/:id/ralph-state` |
  * | api          | ApiResponse, ApiErrorCode, HookEventType, CaseInfo, createErrorResponse, getErrorMessage | Used by all route handlers                     |
- * | lifecycle    | LifecycleEntry, LifecycleEventType                                    | `~/.codeman/session-lifecycle.jsonl` (append-only) |
+ * | lifecycle    | LifecycleEntry, LifecycleEventType                                    | `~/.reverie/session-lifecycle.jsonl` (append-only) |
  * | run-summary  | RunSummary, RunSummaryEvent, RunSummaryStats                          | In-memory → `GET /api/sessions/:id/run-summary` |
  * | tools        | ActiveBashTool, ImageDetectedEvent                                    | In-memory, broadcast via SSE                   |
  * | teams        | TeamConfig, TeamMember, TeamTask, InboxMessage, PaneInfo              | `~/.claude/teams/`, `~/.claude/tasks/` → `GET /api/teams` |
- * | push         | PushSubscriptionRecord, VapidKeys | `~/.codeman/push-keys.json`, `~/.codeman/push-subscriptions.json` |
+ * | push         | PushSubscriptionRecord, VapidKeys | `~/.reverie/push-keys.json`, `~/.reverie/push-subscriptions.json` |
  * | plan         | PlanItem, PlanTaskStatus, TddPhase                                    | In-memory → `GET /api/sessions/:id/plan/tasks` |
- * | orchestrator | OrchestratorState, OrchestratorPlan, OrchestratorConfig, OrchestratorPersistState | `~/.codeman/state.json` → `GET /api/orchestrator/status` |
+ * | orchestrator | OrchestratorState, OrchestratorPlan, OrchestratorConfig, OrchestratorPersistState | `~/.reverie/state.json` → `GET /api/orchestrator/status` |
  * | mcp-sync     | McpSyncResult, McpSyncTargetResult                                    | Other CLIs' own config files → `GET`/`POST /api/mcp-sync` |
  *
  * ## Cross-domain relationship map

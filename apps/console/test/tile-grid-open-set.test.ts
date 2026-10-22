@@ -31,8 +31,8 @@ import {
 type OpenSet = { source: string; ids: string[]; focusedId: string | null } | null;
 type Helpers = { tileGridOpenSet(p: Record<string, unknown>): OpenSet; TILE_GRID_MAX: number };
 
-// constants.js as the harness loaded it (window.CodemanTileGrid).
-const T = windowStub.CodemanTileGrid as Helpers;
+// constants.js as the harness loaded it (window.ReverieTileGrid).
+const T = windowStub.ReverieTileGrid as Helpers;
 const INDEX_HTML = readFileSync(resolve(import.meta.dirname, '../src/web/public/index.html'), 'utf8');
 
 const order = Array.from({ length: 9 }, (_, i) => `t${i + 1}`);

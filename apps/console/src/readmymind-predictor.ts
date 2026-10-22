@@ -114,7 +114,7 @@ export function parsePredictionOutput(raw: string): ReadMyMindSuggestion[] {
 // ========== Spawn/poll runner ==========
 
 export interface PredictOptions {
-  /** Codeman session id; only its first 8 chars name the throwaway tmux session. */
+  /** Reverie session id; only its first 8 chars name the throwaway tmux session. */
   sessionId: string;
   /** The assembled context prompt (readmymind-context.ts). */
   prompt: string;
@@ -133,10 +133,10 @@ async function runPrediction(options: PredictOptions): Promise<PredictionResult>
 
   const shortId = sessionId.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 8) || 'rmm';
   const timestamp = Date.now();
-  const outFile = join(tmpdir(), `codeman-rmm-${shortId}-${timestamp}.txt`);
-  const stderrFile = join(tmpdir(), `codeman-rmm-stderr-${shortId}-${timestamp}.txt`);
-  const promptFile = join(tmpdir(), `codeman-rmm-prompt-${shortId}-${timestamp}.txt`);
-  const muxName = `codeman-rmm-${shortId}`;
+  const outFile = join(tmpdir(), `reverie-rmm-${shortId}-${timestamp}.txt`);
+  const stderrFile = join(tmpdir(), `reverie-rmm-stderr-${shortId}-${timestamp}.txt`);
+  const promptFile = join(tmpdir(), `reverie-rmm-prompt-${shortId}-${timestamp}.txt`);
+  const muxName = `reverie-rmm-${shortId}`;
   if (!isValidMuxName(muxName)) {
     throw new Error(`Invalid mux name generated: ${muxName.substring(0, 50)}`);
   }

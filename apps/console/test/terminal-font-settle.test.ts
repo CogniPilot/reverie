@@ -34,7 +34,7 @@ let currentDocument: unknown;
 
 function loadTerminalMixin(): Record<string, unknown> {
   const dir = resolve(import.meta.dirname, '../src/web/public');
-  const FakeCodemanApp = function () {} as unknown as { prototype: Record<string, unknown> };
+  const FakeReverieApp = function () {} as unknown as { prototype: Record<string, unknown> };
   const context = vm.createContext({
     console,
     performance,
@@ -43,7 +43,7 @@ function loadTerminalMixin(): Record<string, unknown> {
     setInterval: vi.fn(),
     clearInterval: vi.fn(),
     requestAnimationFrame: vi.fn(),
-    CodemanApp: FakeCodemanApp,
+    ReverieApp: FakeReverieApp,
     window: { addEventListener: vi.fn(), removeEventListener: vi.fn() },
     get document() {
       return currentDocument;
@@ -53,7 +53,7 @@ function loadTerminalMixin(): Record<string, unknown> {
   const constants = readFileSync(resolve(dir, 'constants.js'), 'utf8');
   const source = readFileSync(resolve(dir, 'terminal-ui.js'), 'utf8');
   vm.runInContext(`${constants}\n${source}`, context);
-  return FakeCodemanApp.prototype;
+  return FakeReverieApp.prototype;
 }
 
 const mixin = loadTerminalMixin();

@@ -28,8 +28,8 @@ import { TmuxManager } from '../src/tmux-manager.js';
 import type { MuxSession, SessionRemote } from '../src/types.js';
 
 describe('OMP: fresh session vs. reattach must not share resumeSessionId resolution', () => {
-  const workingDir = join(homedir(), 'codeman-cases', 'resume-test');
-  const sessionDir = join(homedir(), '.omp', 'agent', 'sessions', '-codeman-cases-resume-test');
+  const workingDir = join(homedir(), 'reverie-cases', 'resume-test');
+  const sessionDir = join(homedir(), '.omp', 'agent', 'sessions', '-reverie-cases-resume-test');
   const sessions: Session[] = [];
 
   afterEach(() => {
@@ -75,7 +75,7 @@ describe('OMP: fresh session vs. reattach must not share resumeSessionId resolut
 
     const muxSession: MuxSession = {
       sessionId: 'placeholder',
-      muxName: 'codeman-deadbeef',
+      muxName: 'reverie-deadbeef',
       pid: 1,
       createdAt: Date.now(),
       workingDir,
@@ -104,7 +104,7 @@ describe('OMP: fresh session vs. reattach must not share resumeSessionId resolut
 
     const muxSession: MuxSession = {
       sessionId: 'placeholder',
-      muxName: 'codeman-deadbeef',
+      muxName: 'reverie-deadbeef',
       pid: 1,
       createdAt: Date.now(),
       workingDir,
@@ -145,7 +145,7 @@ describe('OMP: fresh session vs. reattach must not share resumeSessionId resolut
 
     const muxSession: MuxSession = {
       sessionId: 'placeholder',
-      muxName: 'codeman-deadbeef',
+      muxName: 'reverie-deadbeef',
       pid: 1,
       createdAt: Date.now(),
       workingDir,
@@ -190,7 +190,7 @@ describe('OMP: fresh session vs. reattach must not share resumeSessionId resolut
 
     const muxSession: MuxSession = {
       sessionId: 'placeholder',
-      muxName: 'codeman-deadbeef',
+      muxName: 'reverie-deadbeef',
       pid: 1,
       createdAt: Date.now(),
       workingDir,

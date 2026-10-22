@@ -217,7 +217,7 @@ export function buildSshConnectionArgs(remote: RemoteSshOptions & Pick<RemoteHos
  * COD-104 — build the SSH command that checks the remote host has tmux.
  *
  * Durable remote sessions run the agent inside a tmux server ON the remote host
- * (`tmux -L codeman new-session -A …`), so tmux is now a hard prerequisite there.
+ * (`tmux -L reverie new-session -A …`), so tmux is now a hard prerequisite there.
  * `command -v tmux` exits 0 (and prints the path) when tmux is installed.
  *
  * COD-107 — connects with the SAME options as the real launch
@@ -353,8 +353,8 @@ export async function probeRemoteCliVersion(
 }
 
 /**
- * COD-108 — build the SSH command that asks whether THIS Codeman's durable
- * remote tmux session (`-L codeman-remote -s codeman-ssh-<id>`) is still alive
+ * COD-108 — build the SSH command that asks whether THIS Reverie's durable
+ * remote tmux session (`-L reverie-remote -s reverie-ssh-<id>`) is still alive
  * on the remote host.
  *
  * `has-session` exits 0 when the session exists, non-zero otherwise (and
@@ -367,12 +367,12 @@ export function buildRemoteSessionAliveCommand(
   remoteSessionName: string
 ): string {
   const [ssh, ...connectionArgs] = buildSshConnectionArgs(host);
-  const remoteCmd = `tmux -L codeman-remote has-session -t ${shellescape(remoteSessionName)} 2>/dev/null`;
+  const remoteCmd = `tmux -L reverie-remote has-session -t ${shellescape(remoteSessionName)} 2>/dev/null`;
   return [ssh, ...connectionArgs, remoteSshTarget(host), shellescape(remoteCmd)].join(' ');
 }
 
 /**
- * COD-108 — resolve whether THIS Codeman's durable remote tmux session is still
+ * COD-108 — resolve whether THIS Reverie's durable remote tmux session is still
  * alive on the remote host, for the auto-reconnect watcher.
  *
  * Returns:
@@ -431,8 +431,8 @@ export function classifyRemoteAliveExit(code: number | null, killed: boolean): b
 }
 
 /**
- * COD-105 — build the SSH command that lists `codeman-*` tmux sessions on a
- * remote host's canonical `-L codeman` socket.
+ * COD-105 — build the SSH command that lists `reverie-*` tmux sessions on a
+ * remote host's canonical `-L reverie` socket.
  *
  * `list-sessions` exits NON-ZERO with empty output when no sessions exist (and
  * the server isn't running), so `2>/dev/null` swallows tmux's "no server
@@ -452,7 +452,7 @@ export function buildRemoteListSessionsCommand(
   // the remote login shell runs it verbatim. The `-F` format uses literal `\t`
   // separators (tmux expands them); `2>/dev/null` is inside the quoted command.
   const remoteCmd =
-    'tmux -L codeman list-sessions -F "#{session_name}\\t#{session_attached}\\t#{session_created}\\t#{session_windows}" 2>/dev/null';
+    'tmux -L reverie list-sessions -F "#{session_name}\\t#{session_attached}\\t#{session_created}\\t#{session_windows}" 2>/dev/null';
   parts.push(remoteSshTarget(host), shellescape(remoteCmd));
   return parts.join(' ');
 }
@@ -469,7 +469,7 @@ export function buildRemoteListSessionsCommand(
  *   backslash-t sequence; we also tolerate a real tab in case a tmux build
  *   does expand it. (A real TAB is the regex `\t`; a literal backslash-t is the
  *   regex `\\t`.)
- * - Keeps ONLY sessions whose name starts with `codeman-` (ignores foreign tmux
+ * - Keeps ONLY sessions whose name starts with `reverie-` (ignores foreign tmux
  *   sessions that happen to share the socket).
  * - Coerces: `attached` → boolean (`'1'`), `created`/`windows` → finite ints.
  * - Skips malformed lines (wrong column count or non-numeric created/windows)
@@ -485,7 +485,7 @@ export function parseRemoteSessionList(stdout: string): RemoteSessionInfo[] {
     const cols = line.split(/\\t|\t/);
     if (cols.length !== 4) continue;
     const [name, attachedStr, createdStr, windowsStr] = cols;
-    if (!name.startsWith('codeman-')) continue;
+    if (!name.startsWith('reverie-')) continue;
     const created = Number(createdStr);
     const windows = Number(windowsStr);
     if (!Number.isFinite(created) || !Number.isFinite(windows)) continue;
@@ -504,9 +504,9 @@ export function parseRemoteSessionList(stdout: string): RemoteSessionInfo[] {
 }
 
 /**
- * COD-105 — discover `codeman-*` tmux sessions already running on a remote host
- * (created by the remote's own Codeman, another instance, or this one), so the
- * operator can attach to one this Codeman didn't launch.
+ * COD-105 — discover `reverie-*` tmux sessions already running on a remote host
+ * (created by the remote's own Reverie, another instance, or this one), so the
+ * operator can attach to one this Reverie didn't launch.
  *
  * NEVER throws: returns `[]` on unreachable host / no tmux / no sessions
  * (`list-sessions` exits non-zero with empty output when there are none).
@@ -516,7 +516,7 @@ export function parseRemoteSessionList(stdout: string): RemoteSessionInfo[] {
  * ~10s timeout). The command construction is covered by
  * `buildRemoteListSessionsCommand` and the parse by `parseRemoteSessionList`.
  */
-export async function listRemoteCodemanSessions(
+export async function listRemoteReverieSessions(
   remote: Pick<RemoteHost, 'username' | 'host' | 'port'> & RemoteSshOptions
 ): Promise<RemoteSessionInfo[]> {
   if (process.env.VITEST) {
@@ -545,7 +545,7 @@ export function remoteDisplayPath(
  *
  * A session's `remote` block is persisted at launch time (mux-sessions.json /
  * state.json) and recovery uses that snapshot, so a field ADDED to the host config
- * later never reaches an already-running session — not even across a Codeman
+ * later never reaches an already-running session — not even across a Reverie
  * restart. That is exactly how a `wakeCommand` added to `remote-hosts.json` would
  * silently do nothing until the session is relaunched (which for an owned remote
  * session means killing the remote tmux).
@@ -593,10 +593,10 @@ export function toSessionRemote(host: RemoteHost, remoteCase: RemoteCase): Sessi
 }
 
 /**
- * COD-105 — build a NON-owned `SessionRemote` for ATTACHING to a `codeman-*`
+ * COD-105 — build a NON-owned `SessionRemote` for ATTACHING to a `reverie-*`
  * session already running on a remote host (discovered via
- * `listRemoteCodemanSessions`). The resulting session's pane runs
- * `tmux -L codeman attach -t <remoteSessionName>` (see
+ * `listRemoteReverieSessions`). The resulting session's pane runs
+ * `tmux -L reverie attach -t <remoteSessionName>` (see
  * `buildRemoteAttachCommand`), and because we did NOT create the remote session,
  * `owned: false` means closing the tab DETACHES rather than killing it.
  *
@@ -621,7 +621,7 @@ export function toAttachedSessionRemote(
     // creator does not change whether the host is asleep.
     wakeCommand: host.wakeCommand,
     wakeMac: host.wakeMac,
-    // Discovered + attached — another Codeman created it. Detach-not-kill.
+    // Discovered + attached — another Reverie created it. Detach-not-kill.
     owned: false,
     remoteSessionName,
     identityFile: host.identityFile,

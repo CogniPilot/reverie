@@ -17,11 +17,11 @@ describe('COD-106 shared remote sessions', () => {
 
   it('launch command sets window-size latest (so multi-client attach does not clamp to smallest)', () => {
     const cmd = buildRemoteLaunchCommand({ mode: 'shell', remote, sessionId: 'cod106aaa' });
-    // Per-session scoped on the dedicated `codeman-remote` socket (PR #145 hardening).
-    expect(cmd).toContain('set -t codeman-ssh-cod106aa window-size latest');
+    // Per-session scoped on the dedicated `reverie-remote` socket (PR #145 hardening).
+    expect(cmd).toContain('set -t reverie-ssh-cod106aa window-size latest');
     // still has the COD-104 config (no regression)
-    expect(cmd).toContain('set -t codeman-ssh-cod106aa status off');
-    expect(cmd).toContain('new-session -A -s codeman-ssh-cod106aa');
+    expect(cmd).toContain('set -t reverie-ssh-cod106aa status off');
+    expect(cmd).toContain('new-session -A -s reverie-ssh-cod106aa');
   });
 
   it('remote omp relaunch resumes the pinned conversation instead of starting fresh (2026-08-29)', () => {
@@ -36,7 +36,7 @@ describe('COD-106 shared remote sessions', () => {
     // dead-pane respawn lands back in the same conversation.
     expect(cmd).toContain('omp --model llm-proxy/crof/glm-5.3-flash --resume 00000002-0002-4000-8000-000000000002');
     // still a durable, idempotent remote tmux session
-    expect(cmd).toContain('new-session -A -s codeman-ssh-cod106aa');
+    expect(cmd).toContain('new-session -A -s reverie-ssh-cod106aa');
   });
 
   it('remote omp relaunch falls back to --continue when no id is pinned', () => {
@@ -51,14 +51,14 @@ describe('COD-106 shared remote sessions', () => {
 
   it('parses session_attached as a CLIENT COUNT (>1 = shared)', () => {
     const rows = parseRemoteSessionList(
-      ['codeman-solo\\t1\\t100\\t1', 'codeman-shared\\t2\\t200\\t3', 'codeman-idle\\t0\\t300\\t1'].join('\n')
+      ['reverie-solo\\t1\\t100\\t1', 'reverie-shared\\t2\\t200\\t3', 'reverie-idle\\t0\\t300\\t1'].join('\n')
     );
     const byName = Object.fromEntries(rows.map((r) => [r.name, r]));
-    expect(byName['codeman-solo'].attachedClients).toBe(1);
-    expect(byName['codeman-solo'].attached).toBe(true);
-    expect(byName['codeman-shared'].attachedClients).toBe(2); // shared
-    expect(byName['codeman-shared'].attached).toBe(true);
-    expect(byName['codeman-idle'].attachedClients).toBe(0);
-    expect(byName['codeman-idle'].attached).toBe(false);
+    expect(byName['reverie-solo'].attachedClients).toBe(1);
+    expect(byName['reverie-solo'].attached).toBe(true);
+    expect(byName['reverie-shared'].attachedClients).toBe(2); // shared
+    expect(byName['reverie-shared'].attached).toBe(true);
+    expect(byName['reverie-idle'].attachedClients).toBe(0);
+    expect(byName['reverie-idle'].attached).toBe(false);
   });
 });

@@ -16,7 +16,7 @@ import { registerChatroomRoutes } from '../../src/web/routes/chatroom-routes.js'
 const A = '0000002d-0035-4000-8000-000000000047';
 const B = '00000038-0043-4000-8000-000000000060';
 const C = '0000003e-004c-4000-8000-00000000006f';
-const AS = (id: string) => ({ 'x-codeman-parent-session': id });
+const AS = (id: string) => ({ 'x-reverie-parent-session': id });
 
 describe('an agent chooses what wakes it', () => {
   let app: FastifyInstance;
@@ -49,7 +49,7 @@ describe('an agent chooses what wakes it', () => {
   });
 
   /** A room of the three agents (with `lead` as coordinator unless told not to), briefings already delivered and cleared. */
-  const room = async (name = 'Fleet', coordinator = true, wake: 'mentions' | 'all' | null = null) => {
+  const room = async (name = 'Reverie', coordinator = true, wake: 'mentions' | 'all' | null = null) => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/chatrooms',

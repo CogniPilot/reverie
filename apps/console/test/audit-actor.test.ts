@@ -2,7 +2,7 @@
  * @fileoverview The employee replacement audit names who asked, not the lineage parent.
  *
  * `resolveParentSessionId` reads a body `parentSessionId` before the caller's
- * `X-Codeman-Parent-Session` header, because lineage is a UI hint any caller may set. The
+ * `X-Reverie-Parent-Session` header, because lineage is a UI hint any caller may set. The
  * audit actor of a spawn that replaces an employee comes from the header alone
  * (`auditActor`), so an owner request with a body parent stays 'owner' and an agent is never
  * logged as the body parent it named.
@@ -55,17 +55,17 @@ describe('spawn audit actor', () => {
   });
 
   it('agent request records the actual caller, not a different body lineage parent, in both routes', () => {
-    expect(actors({ 'x-codeman-parent-session': caller })).toEqual([caller, caller]);
+    expect(actors({ 'x-reverie-parent-session': caller })).toEqual([caller, caller]);
   });
 
   it('an agent header alone names that agent; no header and no body names the owner', () => {
-    expect(auditActor(ctx, request({ 'x-codeman-parent-session': caller }), undefined)).toBe(caller);
+    expect(auditActor(ctx, request({ 'x-reverie-parent-session': caller }), undefined)).toBe(caller);
     expect(auditActor(ctx, request({}), undefined)).toBe('owner');
   });
 
   it('a header naming an unknown or other-owner session is not trusted as the actor', () => {
-    expect(auditActor(ctx, request({ 'x-codeman-parent-session': '0000000f-0014-4000-8000-00000000001c' }), undefined)).toBe('owner');
-    expect(auditActor(ctx, request({ 'x-codeman-parent-session': caller }), 'someone-else')).toBe('owner');
+    expect(auditActor(ctx, request({ 'x-reverie-parent-session': '0000000f-0014-4000-8000-00000000001c' }), undefined)).toBe('owner');
+    expect(auditActor(ctx, request({ 'x-reverie-parent-session': caller }), 'someone-else')).toBe('owner');
   });
 });
 
@@ -75,7 +75,7 @@ describe('employee replacement audit names the caller', () => {
   afterEach(() => rmSync(directory, { recursive: true, force: true }));
 
   it("records the asking session, and 'owner' for the owner's own request", async () => {
-    directory = mkdtempSync(join(tmpdir(), 'fleet-audit-actor-'));
+    directory = mkdtempSync(join(tmpdir(), 'reverie-audit-actor-'));
     const store = new CompanyStore(join(directory, 'company.json'));
     await store.init();
     const rooms = new ChatroomStore();

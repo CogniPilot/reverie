@@ -18,7 +18,7 @@
  * behaviour on wider screens is unchanged. Names, modes and reasons are rendered
  * with textContent.
  *
- * @mixin Extends CodemanApp.prototype via Object.assign
+ * @mixin Extends ReverieApp.prototype via Object.assign
  * @dependency app.js, mobile-overview.js (_mobileOverviewState), chatroom-ui.js (_chatAccent, optional)
  * @loadorder 12.565 (after home-sessions.js)
  */
@@ -68,7 +68,7 @@ const SESSION_SWITCHER_STATUS_LABEL = {
   done: 'stopped',
 };
 
-Object.assign(CodemanApp.prototype, {
+Object.assign(ReverieApp.prototype, {
   /** Rows for the switcher, in tab order. */
   _sessionSwitcherRows() {
     const ids = this.sessionOrder?.length ? this.sessionOrder : [...(this.sessions?.keys() || [])];

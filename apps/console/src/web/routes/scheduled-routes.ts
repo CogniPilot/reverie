@@ -20,9 +20,9 @@ import type { SessionPort, EventPort, InfraPort, ScheduledRun } from '../ports/i
 
 // Stopgap until owner authentication, as in cron-routes: a scheduled run is an unattended session with
 // full permissions, so starting or stopping one is owner-only. A request carrying
-// X-Codeman-Parent-Session (any value) is an agent and is refused; an ABSENT header still means the owner.
+// X-Reverie-Parent-Session (any value) is an agent and is refused; an ABSENT header still means the owner.
 const refuseAgentCaller = async (req: FastifyRequest, reply: FastifyReply) => {
-  if (req.headers['x-codeman-parent-session'] === undefined) return;
+  if (req.headers['x-reverie-parent-session'] === undefined) return;
   return reply.code(403).send(createErrorResponse(ApiErrorCode.FORBIDDEN, 'Only the owner may start or stop scheduled runs'));
 };
 

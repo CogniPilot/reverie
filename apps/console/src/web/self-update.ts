@@ -1,7 +1,7 @@
 /**
  * @fileoverview Server-side logic for the in-app self-updater.
  *
- * Powers App Settings → Updates. Codeman is installed as a git clone and run
+ * Powers App Settings → Updates. Reverie is installed as a git clone and run
  * under systemd (Linux) or launchd (macOS); updating means `git checkout <release
  * tag> && npm install && npm run build && restart-the-service`. The hard part is
  * that the update restarts the very process performing it, so the actual work
@@ -9,7 +9,7 @@
  * progress to `dataPath('update-status.json')` which the browser polls across the
  * connection drop.
  *
- * Channel: latest tagged RELEASE (tags look like `codeman@0.9.3`). Dirty trees
+ * Channel: latest tagged RELEASE (tags look like `reverie@0.9.3`). Dirty trees
  * are auto-stashed (stash left for the user). Detection is manual (a button).
  *
  * Split into PURE helpers (semver/tag parsing, reconcile decision) that are unit
@@ -56,7 +56,7 @@ const require = createRequire(import.meta.url);
 const { version: APP_VERSION } = require('../../package.json') as { version: string };
 
 // Unit name / job label live in config/service-names.ts so install.sh, this
-// detector and `codeman service install` cannot drift apart. Unchanged for the
+// detector and `reverie service install` cannot drift apart. Unchanged for the
 // default instance.
 /** Path to the persisted update status file. */
 const STATUS_FILE = dataPath('update-status.json');
@@ -94,7 +94,7 @@ export interface ParsedVersion {
 }
 
 /**
- * Parse a semver out of a release tag. Accepts `codeman@0.9.3`, `aicodeman@0.9.3`,
+ * Parse a semver out of a release tag. Accepts `reverie@0.9.3`, `aireverie@0.9.3`,
  * `v0.9.3`, and bare `0.9.3` (with optional `-prerelease`). Returns null if no
  * `X.Y.Z` is present.
  */
@@ -137,13 +137,13 @@ export function isNewerStableVersion(current: string, latest: string): boolean {
 export function pickLatestStableTag(tagRefs: string[]): { tag: string; version: string } | null {
   let best: { tag: string; parsed: ParsedVersion } | null = null;
   for (const raw of tagRefs) {
-    // Accept `refs/tags/codeman@0.9.3`, dereferenced `...^{}`, or bare tag names.
+    // Accept `refs/tags/reverie@0.9.3`, dereferenced `...^{}`, or bare tag names.
     const tag = raw
       .replace(/^.*refs\/tags\//, '')
       .replace(/\^\{\}$/, '')
       .trim();
     if (!tag) continue;
-    if (!/^(codeman|aicodeman)@\d+\.\d+\.\d+$/.test(tag) && !/^v?\d+\.\d+\.\d+$/.test(tag)) continue;
+    if (!/^(reverie|aireverie)@\d+\.\d+\.\d+$/.test(tag) && !/^v?\d+\.\d+\.\d+$/.test(tag)) continue;
     const parsed = parseVersionFromTag(tag);
     if (!parsed || parsed.prerelease) continue;
     if (!best || compareVersions(parsed, best.parsed) > 0) {
@@ -156,7 +156,7 @@ export function pickLatestStableTag(tagRefs: string[]): { tag: string; version: 
 
 /** Tags must match this before they're ever passed to the shell. */
 export function isValidReleaseTag(tag: string): boolean {
-  return /^(codeman|aicodeman)@\d+\.\d+\.\d+$/.test(tag);
+  return /^(reverie|aireverie)@\d+\.\d+\.\d+$/.test(tag);
 }
 
 /** Derive `{owner, repo}` from a GitHub SSH or HTTPS remote URL. */
@@ -190,7 +190,7 @@ export function reconcileStatusDecision(
 
   // A staged update that asked for a manual restart: if we're now running the
   // target version, the user (or supervisor) did restart — mark it completed so
-  // the UI stops showing the stale "restart Codeman to apply" instruction.
+  // the UI stops showing the stale "restart Reverie to apply" instruction.
   if (status.phase === 'completed-needs-manual-restart') {
     if (status.toVersion && runningVersion === status.toVersion) {
       return { ...status, phase: 'completed', message: `Updated to v${runningVersion}`, updatedAt: now };
@@ -254,7 +254,7 @@ export function expireStalledStatus(status: UpdateStatus | null, now: number): U
 // ─────────────────────────────────────────────────────────────────────────────
 
 /** Host command that resolves every environment blocker. */
-export const DOCKER_HOST_UPDATE_COMMAND = 'docker/Start-Codeman.sh';
+export const DOCKER_HOST_UPDATE_COMMAND = 'reverie-request-update';
 
 /**
  * Parse the SET keys out of a dotenv file. Commented-out lines are deliberately
@@ -287,7 +287,7 @@ export function diffRequiredEnvKeys(targetExample: string, userEnv: string): str
 
 /**
  * True when the container's restart policy relaunches it after the server exits.
- * `no` and an empty policy mean an in-place update would take Codeman DOWN
+ * `no` and an empty policy mean an in-place update would take Reverie DOWN
  * rather than restart it, so the update is refused instead.
  */
 export function isAutoRestartPolicy(name: string | null | undefined): boolean {
@@ -296,7 +296,7 @@ export function isAutoRestartPolicy(name: string | null | undefined): boolean {
 
 /**
  * PURE: may the container updater restart the server by exiting? Yes when the
- * Compose file declared it (`CODEMAN_RESTART_BY_EXIT=1`, set only there, since
+ * Compose file declared it (`REVERIE_RESTART_BY_EXIT=1`, set only there, since
  * that file is what sets `restart: unless-stopped`) or when the daemon reports an
  * auto-restart policy. Otherwise the answer is NO, and the updater stages the
  * build and asks for a manual restart instead of exiting: an unknown policy is
@@ -310,7 +310,7 @@ export function shouldRestartByExit(declared: boolean, restartPolicy: string | n
 
 /** The Compose file's declaration that exiting relaunches this container. */
 export function restartByExitDeclared(): boolean {
-  return process.env.CODEMAN_RESTART_BY_EXIT === '1';
+  return process.env.REVERIE_RESTART_BY_EXIT === '1';
 }
 
 export interface EnvironmentGateInput {
@@ -338,7 +338,7 @@ export interface EnvironmentGateInput {
  * ⚠️ An unknown hash (null) is NOT treated as "changed": a first update from a
  * container created before the fingerprint file existed has no baseline, and
  * failing closed there would block every such install from ever updating. The
- * baseline is written by `Start-Codeman.sh`, so it exists from the first
+ * baseline is written by `Start-Reverie.sh`, so it exists from the first
  * host-side start onward. An unknown restart policy is likewise not a blocker —
  * the shipped Compose file sets `unless-stopped`, and the probe needs the Docker
  * socket, which a user may not have mounted.
@@ -459,7 +459,7 @@ export function resolveInstallDir(): string {
  * also holds under runtimes that omit that file.
  */
 export function isRunningInContainer(): boolean {
-  return process.env.CODEMAN_IN_CONTAINER === '1' || existsSync('/.dockerenv');
+  return process.env.REVERIE_IN_CONTAINER === '1' || existsSync('/.dockerenv');
 }
 
 function detectInstallKind(dir: string): InstallKind {
@@ -474,11 +474,19 @@ function detectInstallKind(dir: string): InstallKind {
 }
 
 /** Install kinds whose update is applied in place by `scripts/self-update.sh`. */
+export const NIX_UPDATE_MESSAGE = 'Upgrade the Nix package or rebuild the image.';
+
+/** Immutable Nix installations are updated by their package manager, never by the console. */
+export function isNixManagedInstall(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env.REVERIE_MANAGED_INSTALL === 'nix';
+}
+
 export function canSelfUpdateInPlace(kind: InstallKind): boolean {
+  if (isNixManagedInstall()) return false;
   return kind === 'git' || kind === 'docker-compose';
 }
 
-/** Path of the fingerprint baseline written by `docker/Start-Codeman.sh`. */
+/** Path of the fingerprint baseline written by `reverie-request-update`. */
 const DOCKER_ENV_APPLIED_FILE = dataPath('docker-env-applied.json');
 
 /** Files whose content defines the container ENVIRONMENT (vs. the app's code). */
@@ -506,7 +514,7 @@ function readFileOrNull(path: string): string | null {
 
 /**
  * The fingerprints the RUNNING container was created from, recorded on the host
- * by `Start-Codeman.sh` at each build/recreate. Returns nulls when absent (a
+ * by `Start-Reverie.sh` at each build/recreate. Returns nulls when absent (a
  * container started before this file existed) — `computeEnvironmentBlockers()`
  * deliberately treats an unknown baseline as "not a blocker".
  */
@@ -598,7 +606,7 @@ export function detectSupervisor(): SupervisorKind {
   if (isRunningInContainer()) return 'docker-compose';
   if (process.platform === 'darwin') {
     if (existsSync(join(homedir(), 'Library', 'LaunchAgents', `${LAUNCHD_LABEL}.plist`))) return 'launchd';
-    // Headless Macs (no GUI login → no gui domain) run Codeman as a system-level
+    // Headless Macs (no GUI login → no gui domain) run Reverie as a system-level
     // LaunchDaemon instead. Restarting one needs no root IF it has KeepAlive: the
     // updater just kills the server and launchd respawns it on the new build. Only
     // claim this supervisor when the daemon is actually bootstrapped and KeepAlive.
@@ -657,7 +665,7 @@ export async function checkForUpdate(): Promise<UpdateCheckResult> {
     htmlUrl: null,
     checkedAt: Date.now(),
     source: 'none',
-    error: 'Reverie is maintained in this monorepo. Rebuild its container image to update.',
+    error: NIX_UPDATE_MESSAGE,
   };
 }
 
@@ -677,7 +685,7 @@ export type StartUpdateResult =
  * Copy the updater script OUT of the repo before running it. The script lives in
  * the very repo it's about to `git checkout`, and bash reads scripts lazily — so
  * running the in-repo copy risks executing torn/old-tag bytes after checkout.
- * Run a snapshot under ~/.codeman instead (git never touches it).
+ * Run a snapshot under ~/.reverie instead (git never touches it).
  */
 function stageRunner(installDir: string): string | null {
   const src = join(installDir, 'scripts', 'self-update.sh');
@@ -691,7 +699,7 @@ function stageRunner(installDir: string): string | null {
 /**
  * Launch the updater so it OUTLIVES the service restart it triggers.
  * - Linux + systemd: a transient `--scope` cgroup, independent of the
- *   codeman-web service lifecycle (survives `systemctl restart` regardless of
+ *   reverie-web service lifecycle (survives `systemctl restart` regardless of
  *   the unit's KillMode). Inherits our env so node/npm/git stay on PATH.
  * - Everything else: `setsid` into a new session (escapes launchd's process-group
  *   kill); plain detached spawn as the last resort.
@@ -732,12 +740,13 @@ function launchDetached(runner: string, args: string[]): void {
  * detached updater. Returns immediately — progress is reported via the status file.
  */
 export async function startUpdate(): Promise<StartUpdateResult> {
+  if (isNixManagedInstall()) return { ok: false, code: 'disabled', message: NIX_UPDATE_MESSAGE };
   const info = getInstallInfo();
   if (!info.selfUpdateEnabled) {
     return {
       ok: false,
       code: 'disabled',
-      message: 'Reverie updates come from this monorepo. Rebuild its container image.',
+      message: NIX_UPDATE_MESSAGE,
     };
   }
   if (!canSelfUpdateInPlace(info.installKind)) {
@@ -745,8 +754,8 @@ export async function startUpdate(): Promise<StartUpdateResult> {
       ok: false,
       code: 'not-git',
       message: isRunningInContainer()
-        ? 'This container has no repository mounted. Update from the host with docker/Start-Codeman.sh.'
-        : 'This is not a git install. Rebuild from this checkout (npm ci && npm run build), or from the Docker host with docker/Start-Codeman.sh.',
+        ? 'This container has no repository mounted. Update from the host with reverie-request-update.'
+        : 'This is not a git install. Rebuild from this checkout (npm ci && npm run build), or from the Docker host with reverie-request-update.',
     };
   }
   const existing = readCurrentUpdateStatus();
@@ -799,7 +808,7 @@ export async function startUpdate(): Promise<StartUpdateResult> {
   };
   writeUpdateStatusAtomic(status);
 
-  const logFile = join(tmpdir(), `codeman-update-${updateId}.log`);
+  const logFile = join(tmpdir(), `reverie-update-${updateId}.log`);
   const args = [
     '--repo',
     info.installDir,

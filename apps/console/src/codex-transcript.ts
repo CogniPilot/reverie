@@ -4,7 +4,7 @@
  * (omp-transcript.ts) does for omp and `scanProjectDir()` (session-routes.ts)
  * does for Claude's own `~/.claude/projects` transcripts.
  *
- * Without this a codex conversation is invisible to Codeman the moment its
+ * Without this a codex conversation is invisible to Reverie the moment its
  * session record goes away, even though codex itself never forgot it: the
  * unified list is built from `~/.claude/projects` plus omp's own store, and
  * codex writes to neither. A user who wanted to pick a codex thread back up had
@@ -80,8 +80,8 @@ export interface CodexHistorySession {
   sessionId: string;
   /**
    * `session_meta.originator`, which codex stamps from
-   * CODEX_INTERNAL_ORIGINATOR_OVERRIDE — `codeman_<sessionId>` for every pane
-   * Codeman spawns. The only link between a FRESH codex pane and the rollout it
+   * CODEX_INTERNAL_ORIGINATOR_OVERRIDE — `reverie_<sessionId>` for every pane
+   * Reverie spawns. The only link between a FRESH codex pane and the rollout it
    * is writing, since such a pane knows no thread id of its own.
    */
   originator?: string;
@@ -99,7 +99,7 @@ interface RolloutIdentity {
   cwd?: string;
   /** `'subagent'` marks a thread codex spawned for itself. */
   threadSource?: string;
-  /** `codeman_<sessionId>` for a pane Codeman spawned; codex's own default otherwise. */
+  /** `reverie_<sessionId>` for a pane Reverie spawned; codex's own default otherwise. */
   originator?: string;
   firstPrompt?: string;
 }
@@ -365,11 +365,11 @@ export async function scanCodexSessionsHistory(): Promise<CodexHistorySession[]>
 }
 
 /**
- * Which codex thread each Codeman-spawned pane is writing, keyed by Codeman
+ * Which codex thread each Reverie-spawned pane is writing, keyed by Reverie
  * session id.
  *
- * Codeman spawns every codex pane with
- * CODEX_INTERNAL_ORIGINATOR_OVERRIDE=codeman_<sessionId>, and codex stamps that
+ * Reverie spawns every codex pane with
+ * CODEX_INTERNAL_ORIGINATOR_OVERRIDE=reverie_<sessionId>, and codex stamps that
  * into `session_meta.originator`. That is the ONLY link between a fresh codex
  * pane and the rollout it is writing: such a pane knows no thread id of its own,
  * so it cannot be folded into its own Past-Sessions row from its own side.
@@ -381,7 +381,7 @@ export async function scanCodexSessionsHistory(): Promise<CodexHistorySession[]>
 export function codexThreadBySessionId(rows: CodexHistorySession[]): Map<string, string> {
   const out = new Map<string, string>();
   for (const row of rows) {
-    const owner = /^codeman_(.+)$/.exec(row.originator ?? '')?.[1];
+    const owner = /^reverie_(.+)$/.exec(row.originator ?? '')?.[1];
     if (owner && !out.has(owner)) out.set(owner, row.sessionId);
   }
   return out;

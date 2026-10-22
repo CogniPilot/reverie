@@ -1,7 +1,7 @@
 /**
  * @fileoverview Blocking-wait registry backing the agent wait primitives.
  *
- * Codeman's only "tell me when" channel today is SSE, which an agent driving the
+ * Reverie's only "tell me when" channel today is SSE, which an agent driving the
  * API from a shell tool cannot practically consume (it would have to hold a
  * streaming connection and parse events inline). This registry is the piece that
  * lets a request *block* until something happens instead, so an orchestrating
@@ -193,7 +193,7 @@ export interface HookCapabilityOptions {
 }
 
 /**
- * Whether this session ever POSTs Codeman hook events, and therefore whether
+ * Whether this session ever POSTs Reverie hook events, and therefore whether
  * `stop` / `blocked` can ever fire for it.
  *
  * `claude` always (Claude Code fires the hooks itself), `deepseek` when its
@@ -228,11 +228,11 @@ export function hooksAvailableForMode(mode: SessionMode, options: HookCapability
   // different questions — see CliCapabilities.hooks.
   switch (getCli(mode)?.capabilities.hooks) {
     case 'always':
-      // The CLI installs Codeman's own hooks block into its workspace (claude), so the
+      // The CLI installs Reverie's own hooks block into its workspace (claude), so the
       // signals are unconditional.
       return true;
     case 'supervised':
-      // The CLI REPORTS its own state to a supervisor and Codeman is that supervisor
+      // The CLI REPORTS its own state to a supervisor and Reverie is that supervisor
       // (deepseek, via deepseek-status-shim.ts) — definitive signals rather than inferred
       // ones, which is what earns it a yes. But the user can disarm the bridge, and a
       // docker/remote session cannot reach it at all; in either case nothing on the box

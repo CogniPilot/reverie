@@ -13,7 +13,7 @@ import { parseBody } from '../route-helpers.js';
 import type { InfraPort } from '../ports/index.js';
 
 export function registerPushRoutes(app: FastifyInstance, ctx: InfraPort): void {
-  const isHuman = (req: FastifyRequest): boolean => !req.headers['x-codeman-parent-session'];
+  const isHuman = (req: FastifyRequest): boolean => !req.headers['x-reverie-parent-session'];
   const ownsDevice = (req: FastifyRequest, id: string): boolean => {
     const sub = ctx.pushStore.get(id);
     return !!sub && isHuman(req) && (!isMultiUserMode() || (!!req.authUser && sub.username === req.authUser.username));

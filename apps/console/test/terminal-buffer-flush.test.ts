@@ -30,7 +30,7 @@
  * Loaded via `vm` with a stubbed context (no jsdom — jsdom is broken on this
  * box; see connection-indicator.test.ts). We extract the REAL
  * `_beginBufferLoad`/`_finishBufferLoad` mixin methods from terminal-ui.js by
- * running it against a fake `CodemanApp` and capturing `CodemanApp.prototype`,
+ * running it against a fake `ReverieApp` and capturing `ReverieApp.prototype`,
  * then copy them onto a minimal stub whose `batchTerminalWrite` is a spy. This
  * exercises the real flush/discard logic without a full xterm fake.
  */
@@ -40,10 +40,10 @@ import { resolve } from 'node:path';
 import vm from 'node:vm';
 import { describe, expect, it, vi } from 'vitest';
 
-/** Run terminal-ui.js in a vm against a fake CodemanApp and return the captured prototype mixin. */
+/** Run terminal-ui.js in a vm against a fake ReverieApp and return the captured prototype mixin. */
 function loadTerminalMixin(): Record<string, unknown> {
   const source = readFileSync(resolve(import.meta.dirname, '../src/web/public/terminal-ui.js'), 'utf8');
-  const FakeCodemanApp = function () {} as unknown as { prototype: Record<string, unknown> };
+  const FakeReverieApp = function () {} as unknown as { prototype: Record<string, unknown> };
   const context = vm.createContext({
     console,
     performance,
@@ -52,13 +52,13 @@ function loadTerminalMixin(): Record<string, unknown> {
     setInterval: vi.fn(),
     clearInterval: vi.fn(),
     requestAnimationFrame: vi.fn(),
-    CodemanApp: FakeCodemanApp,
+    ReverieApp: FakeReverieApp,
     // terminal-ui.js IIFE is invoked with `window`; it reads/writes a few globals.
     window: { addEventListener: vi.fn(), removeEventListener: vi.fn() },
     document: { addEventListener: vi.fn() },
   });
   vm.runInContext(source, context);
-  return FakeCodemanApp.prototype;
+  return FakeReverieApp.prototype;
 }
 
 const mixin = loadTerminalMixin();

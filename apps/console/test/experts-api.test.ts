@@ -23,7 +23,7 @@ import {
 import { installRouteErrorHandler } from '../src/web/route-error-handler.js';
 import { classify } from '../src/owner-auth/policy.js';
 
-const HEADER = 'x-codeman-parent-session';
+const HEADER = 'x-reverie-parent-session';
 const DELEGATE = '00000027-002e-4000-8000-00000000003d';
 const OTHER_AGENT = '00000027-002e-4000-8000-00000000003e';
 
@@ -276,7 +276,7 @@ describe('experts api', () => {
       socket.on('error', reject);
       socket.write(
         `PUT /api/experts/alpha HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\nContent-Type: application/json\r\n` +
-          `X-Codeman-Parent-Session:\r\nContent-Length: ${Buffer.byteLength(body)}\r\n\r\n${body}`
+          `X-Reverie-Parent-Session:\r\nContent-Length: ${Buffer.byteLength(body)}\r\n\r\n${body}`
       );
     });
     expect(raw.split('\r\n')[0]).toContain('403');
@@ -350,6 +350,15 @@ describe('experts api', () => {
       expect(ok.statusCode).toBe(200);
       expect(ok.json().data.hire.by).toBe(`agent:${DELEGATE}`);
       expect(audits.at(-1)).toMatchObject({ admin: `agent:${DELEGATE}`, action: 'expert_hire' });
+    });
+
+    it('a delegated hire cannot grant employee permissions through its input or template', async () => {
+      const refused = await hire('alpha', DELEGATE, { permissions: { recoverEmployees: true } });
+      expect(refused.statusCode).toBe(400);
+      expect(launches).toHaveLength(0);
+      const ok = await hire('alpha', DELEGATE);
+      expect(ok.statusCode).toBe(200);
+      expect(company.view().employees[0].permissions).toEqual({ recoverEmployees: false });
     });
 
     it('refuses the third hire in 24 hours with 409 and creates nothing', async () => {

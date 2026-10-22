@@ -1259,7 +1259,7 @@ describe('org chart: connected-worker projection without teardown', () => {
     const live = { id: B, name: 'live-temp', mode: 'codex', pid: 123 };
     const disconnected = { id: '97329593', name: 'old', pid: null, pinned: true };
     const company = {
-      settings: { ownerName: 'Pat', ctoId: 'chief' },
+      settings: { ownerName: 'Pat', coordinatorEmployeeId: 'chief' },
       employees: [
         { id: 'chief', name: 'Chief', position: 'CTO', sessionId: A, reportsTo: 'owner' },
         { id: 'lead', name: 'Lead', position: 'Tech lead', sessionId: 'lead-offline', available: false, reportsTo: 'chief' },
@@ -1295,7 +1295,7 @@ describe('org chart: connected-worker projection without teardown', () => {
 
 describe('org chart', () => {
   const company = {
-    settings: { ownerName: 'Pat', ctoId: 'c' },
+    settings: { ownerName: 'Pat', coordinatorEmployeeId: 'c' },
     employees: [
       { id: 'c', name: 'Chief', position: 'CTO', sessionId: A, icon: '\u{1F9ED}' },
       { id: 'w', name: 'Wren', position: 'Engineer', sessionId: 'gone', reportsTo: 'c', available: false },
@@ -1472,7 +1472,7 @@ describe('edit channel', () => {
       .querySelector('input,textarea') as HTMLInputElement;
 
   it('opens from the gear on a channel row, shows its fields, and offers Save only after a change', async () => {
-    const h = await createHarness({ sessions, rooms: rs(), stored: { 'codeman:chatroom': 'r1' } });
+    const h = await createHarness({ sessions, rooms: rs(), stored: { 'reverie:chatroom': 'r1' } });
     (h.document.querySelector('[data-key="ws:Acme"]') as HTMLElement).click();
     await settle(30);
     const root = await open(h);
@@ -1631,7 +1631,7 @@ describe('the owner name', () => {
     nightHour: 1,
     morningHour: 8,
     enabled: false,
-    ctoId: 'c',
+    coordinatorEmployeeId: 'c',
     owner: 'x',
   };
   const rs = () => [room('r1', 'General', [member(A, 'alpha')], { messages: [message('m1', 'r1', user, 'hi', 1000)] })];
@@ -1670,7 +1670,7 @@ describe('the owner name', () => {
       nightHour: 1,
       morningHour: 8,
       enabled: false,
-      ctoId: 'c',
+      coordinatorEmployeeId: 'c',
     });
     expect(h.document.querySelector('.ca-user-name')?.textContent).toBe('Pat');
   });
@@ -1809,7 +1809,7 @@ describe("agent profile: the runtime's full profile", () => {
     const h = await createHarness({ sessions: s, rooms: rs() });
     const card = await open(h);
     expect(card.textContent).toContain(
-      'The full profile is not available: The fleet runtime policy is not configured yet'
+      'The full profile is not available: The reverie runtime policy is not configured yet'
     );
     expect(card.textContent).toContain('local-fallback');
     expect(card.querySelector('.ca-switch')).toBeNull();
@@ -1953,7 +1953,7 @@ describe('notification settings', () => {
     JSON.parse(h.window.localStorage.getItem('reverie:chat:notify') || '{}');
 
   it('the header bell offers Mute and the four levels, and a level changes what the sidebar shows', async () => {
-    const h = await createHarness({ sessions, rooms: rs(), stored: { 'codeman:chatroom': 'r1' } });
+    const h = await createHarness({ sessions, rooms: rs(), stored: { 'reverie:chatroom': 'r1' } });
     // r2 has 2 unread: a dot/count shows; choose "Nothing" for it by selecting it first
     await h.shell.selectRoom('r2');
     (h.document.querySelector('.ca-head [aria-label^="Notification settings"]') as HTMLElement).click();
@@ -1967,7 +1967,7 @@ describe('notification settings', () => {
   });
 
   it('muting dims the channel, hides its unread, and Unmute brings it back', async () => {
-    const h = await createHarness({ sessions, rooms: rs(), stored: { 'codeman:chatroom': 'r2' } });
+    const h = await createHarness({ sessions, rooms: rs(), stored: { 'reverie:chatroom': 'r2' } });
     expect(row(h, 'r1').className).toContain('is-unread');
     row(h, 'r1').dispatchEvent(
       new h.window.MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 30, clientY: 30 })
@@ -1996,7 +1996,7 @@ describe('notification settings', () => {
   });
 
   it('the channel menu has the same notification settings, and "Nothing" removes the badges for that channel only', async () => {
-    const h = await createHarness({ sessions, rooms: rs(), stored: { 'codeman:chatroom': 'r2' } });
+    const h = await createHarness({ sessions, rooms: rs(), stored: { 'reverie:chatroom': 'r2' } });
     expect(row(h, 'r1').querySelector('.ca-count')).not.toBeNull();
     row(h, 'r1').dispatchEvent(
       new h.window.MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 30, clientY: 30 })
@@ -2010,7 +2010,7 @@ describe('notification settings', () => {
     const again = await createHarness({
       sessions,
       rooms: rs(),
-      stored: { 'codeman:chatroom': 'r2', 'reverie:chat:notify': JSON.stringify({ r1: { level: 'none', until: 0 } }) },
+      stored: { 'reverie:chatroom': 'r2', 'reverie:chat:notify': JSON.stringify({ r1: { level: 'none', until: 0 } }) },
     });
     expect(row(again, 'r1').querySelector('.ca-count')).toBeNull();
   });
@@ -2191,7 +2191,7 @@ describe('workspace menu and settings', () => {
   });
 
   it('a workspace-level choice applies to its channels, and "Hide muted channels" hides the muted ones', async () => {
-    const h = await createHarness({ sessions, rooms: rs(), stored: { 'codeman:chatroom': 'r2' } });
+    const h = await createHarness({ sessions, rooms: rs(), stored: { 'reverie:chatroom': 'r2' } });
     (h.document.querySelector('.ca-rail [data-key="ws:Acme"]') as HTMLElement).click();
     expect(h.document.querySelector('.ca-item[data-key="room:r1"]')!.className).toContain('is-unread');
     railMenu(h, 'Acme');
@@ -2268,7 +2268,7 @@ describe('the owner name write-back', () => {
       nightHour: 1,
       morningHour: 8,
       enabled: false,
-      ctoId: 'c',
+      coordinatorEmployeeId: 'c',
     };
     const h = await createHarness({
       sessions,
@@ -2338,7 +2338,7 @@ describe('Close DM', () => {
     JSON.parse(h.window.localStorage.getItem('reverie:chat:closedDms') || '{}');
 
   it('the DM menu has Close DM, which hides the row and keeps the conversation', async () => {
-    const h = await createHarness({ sessions, rooms: rs(), stored: { 'codeman:chatroom': 'r1' } });
+    const h = await createHarness({ sessions, rooms: rs(), stored: { 'reverie:chatroom': 'r1' } });
     h.shell.selectWorkspace('home');
     expect(dmRows(h).length).toBe(2);
     (h.document.querySelector('[data-key="room:dm2"]') as HTMLElement).dispatchEvent(
@@ -2358,7 +2358,7 @@ describe('Close DM', () => {
   });
 
   it('the hover x closes it too, and closing the open DM moves you to another conversation', async () => {
-    const h = await createHarness({ sessions, rooms: rs(), stored: { 'codeman:chatroom': 'dm1' } });
+    const h = await createHarness({ sessions, rooms: rs(), stored: { 'reverie:chatroom': 'dm1' } });
     h.shell.selectWorkspace('home');
     expect(h.document.querySelector('.ca-head-name')?.textContent).toBe('alpha');
     (h.document.querySelector('[data-key="close:dm1"]') as HTMLElement).click();
@@ -2372,7 +2372,7 @@ describe('Close DM', () => {
       sessions,
       rooms: rs(),
       stored: {
-        'codeman:chatroom': 'r1',
+        'reverie:chatroom': 'r1',
         'reverie:chat:closedDms': JSON.stringify({ dm2: Date.now(), dm1: Date.now() }),
       },
     });
@@ -2641,7 +2641,7 @@ describe('review leftovers: rename keeps notifications, car mode opens the right
       room('r1', 'General', [member(A, 'alpha')], {}),
       room('r2', 'Standup', [member(A, 'alpha', { voice: true })], {}),
     ];
-    const h = await createHarness({ sessions, rooms, stored: { 'codeman:chatroom': 'r1' } });
+    const h = await createHarness({ sessions, rooms, stored: { 'reverie:chatroom': 'r1' } });
     let openedIn = '';
     h.app.openCarMode = () => {
       openedIn = h.shell.roomId;
@@ -3396,7 +3396,7 @@ describe('the "is typing" line', () => {
   ];
 
   it('shows who is typing, with moving dots hidden from a screen reader, only in the room that woke it', async () => {
-    const h = await createHarness({ sessions, rooms: twoRooms(), stored: { 'codeman:chatroom': 'r1' } });
+    const h = await createHarness({ sessions, rooms: twoRooms(), stored: { 'reverie:chatroom': 'r1' } });
     expect(lineOf(h).hidden).toBe(true);
     turn(h, B);
     expect(lineOf(h).hidden).toBe(false);
@@ -3414,7 +3414,7 @@ describe('the "is typing" line', () => {
   });
 
   it('ends when the turn ends (busy, then not), but not before it has started', async () => {
-    const h = await createHarness({ sessions, rooms: twoRooms(), stored: { 'codeman:chatroom': 'r1' } });
+    const h = await createHarness({ sessions, rooms: twoRooms(), stored: { 'reverie:chatroom': 'r1' } });
     turn(h, B);
     // the pane was idle when the line was typed: still thinking, the turn has not shown as busy yet
     h.app._onSessionUpdated({ session: { id: B, status: 'idle' } });
@@ -3430,7 +3430,7 @@ describe('the "is typing" line', () => {
   });
 
   it('ends when the member posts in that room, and a post in another room does not end it', async () => {
-    const h = await createHarness({ sessions, rooms: twoRooms(), stored: { 'codeman:chatroom': 'r1' } });
+    const h = await createHarness({ sessions, rooms: twoRooms(), stored: { 'reverie:chatroom': 'r1' } });
     turn(h, B);
     h.app._onChatroomMessage({
       roomId: 'r2',
@@ -3447,7 +3447,7 @@ describe('the "is typing" line', () => {
   });
 
   it('expires on its own: never started, or never seen to end', async () => {
-    const h = await createHarness({ sessions, rooms: twoRooms(), stored: { 'codeman:chatroom': 'r1' } });
+    const h = await createHarness({ sessions, rooms: twoRooms(), stored: { 'reverie:chatroom': 'r1' } });
     turn(h, B);
     const key = `r1|${B}`;
     h.app._chatApp.turns.get(key).at -= 46_000;
@@ -3463,7 +3463,7 @@ describe('the "is typing" line', () => {
   });
 
   it('arms two safety timers (45 s without starting, 4 min at most) that really end the line, and clears them when it ends sooner', async () => {
-    const h = await createHarness({ sessions, rooms: twoRooms(), stored: { 'codeman:chatroom': 'r1' } });
+    const h = await createHarness({ sessions, rooms: twoRooms(), stored: { 'reverie:chatroom': 'r1' } });
     const armed: Array<{ fn: () => void; ms: number; id: number; cleared: boolean }> = [];
     const view = h.window as unknown as {
       setTimeout: (fn: () => void, ms: number) => number;
@@ -3526,7 +3526,7 @@ describe('the "is typing" line', () => {
     const rooms = [
       room('r1', 'General', [member(A, 'alpha'), member(B, 'bravo'), member(C, 'carol', { alive: false })], {}),
     ];
-    const h = await createHarness({ sessions, rooms, stored: { 'codeman:chatroom': 'r1' } });
+    const h = await createHarness({ sessions, rooms, stored: { 'reverie:chatroom': 'r1' } });
     turn(h, A);
     turn(h, B);
     expect(lineOf(h).textContent).toBe('alpha and bravo are typing\u2026');
@@ -3541,7 +3541,7 @@ describe('the profile card on a phone', () => {
     const h = await createHarness({
       sessions,
       rooms: [room('r1', 'General', [member(A, 'alpha'), member(B, 'bravo')], {})],
-      stored: { 'codeman:chatroom': 'r1' },
+      stored: { 'reverie:chatroom': 'r1' },
     });
     Object.defineProperty(h.window, 'innerWidth', { value: width, configurable: true });
     (h.document.querySelector('.ca-member[aria-label^="bravo,"]') as HTMLElement).click();
@@ -3580,7 +3580,7 @@ describe('private channels have a lock, and the owner decides who can join', () 
     h.document.querySelector(`[data-key="room:${key}"]`) as HTMLElement;
 
   it('a private channel shows a # with a small lock, says private in words, and a public one keeps the #', async () => {
-    const h = await createHarness({ sessions, rooms: rooms(), stored: { 'codeman:chatroom': 'r1' } });
+    const h = await createHarness({ sessions, rooms: rooms(), stored: { 'reverie:chatroom': 'r1' } });
     expect((row(h, 'r2').querySelector('.ca-hash') as HTMLElement).dataset.glyph).toBe('private');
     expect(row(h, 'r2').getAttribute('aria-label')).toContain('private');
     expect(row(h, 'r1').querySelector('.ca-hash')!.textContent).toBe('#');
@@ -3600,7 +3600,7 @@ describe('private channels have a lock, and the owner decides who can join', () 
       { ...room('r3', 'Standup', [{ ...member(A, 'alpha'), voice: true }], {}), visibility: 'public' },
       { ...room('r4', 'Briefing', [{ ...member(A, 'alpha'), voice: true }], {}), visibility: 'private' },
     ];
-    const h = await createHarness({ sessions, rooms: mixed, stored: { 'codeman:chatroom': 'r1' } });
+    const h = await createHarness({ sessions, rooms: mixed, stored: { 'reverie:chatroom': 'r1' } });
     const mark = (id: string) => row(h, id).querySelector('.ca-hash') as HTMLElement;
     expect(['r1', 'r2', 'r3', 'r4'].map((id) => mark(id).dataset.glyph)).toEqual([
       'text',
@@ -3629,12 +3629,12 @@ describe('private channels have a lock, and the owner decides who can join', () 
 
   it('a server that does not say gets no lock (nothing is called private by guesswork)', async () => {
     const plain = [room('r1', 'General', [member(A, 'alpha')], {}), room('r2', 'general', [member(A, 'alpha')], {})];
-    const h = await createHarness({ sessions, rooms: plain, stored: { 'codeman:chatroom': 'r1' } });
+    const h = await createHarness({ sessions, rooms: plain, stored: { 'reverie:chatroom': 'r1' } });
     expect(row(h, 'r2').querySelector('.ca-hash')!.textContent).toBe('#');
   });
 
   it('the channel settings let the owner switch between private and public, and say what each means', async () => {
-    const h = await createHarness({ sessions, rooms: rooms(), stored: { 'codeman:chatroom': 'r2' } });
+    const h = await createHarness({ sessions, rooms: rooms(), stored: { 'reverie:chatroom': 'r2' } });
     await h.app._chatApp.openChannelSettings('r2');
     const radios = [...h.document.querySelectorAll('.ca-visibility:not(.ca-wake) input[type="radio"]')] as HTMLInputElement[];
     expect(radios.map((r) => [r.value, r.checked])).toEqual([
@@ -3655,7 +3655,7 @@ describe('private channels have a lock, and the owner decides who can join', () 
   });
 
   it('computed styles on the real settings markup: 44px tiles and 20px radios', async () => {
-    const h = await createHarness({ sessions, rooms: rooms(), stored: { 'codeman:chatroom': 'r2' } });
+    const h = await createHarness({ sessions, rooms: rooms(), stored: { 'reverie:chatroom': 'r2' } });
     await h.app._chatApp.openChannelSettings('r2');
     const style = h.document.createElement('style');
     style.textContent = readFileSync(resolve(import.meta.dirname, '../src/web/public/chat-app.css'), 'utf8');
@@ -3670,7 +3670,7 @@ describe('private channels have a lock, and the owner decides who can join', () 
   });
 
   it('the visibility styles reach the real settings markup, which is portaled outside .ca-root', async () => {
-    const h = await createHarness({ sessions, rooms: rooms(), stored: { 'codeman:chatroom': 'r2' } });
+    const h = await createHarness({ sessions, rooms: rooms(), stored: { 'reverie:chatroom': 'r2' } });
     await h.app._chatApp.openChannelSettings('r2');
     const fieldset = h.document.querySelector('.ca-visibility')!;
     expect(fieldset.closest('.ca-root')).toBeNull();
@@ -3698,7 +3698,7 @@ describe('Add people is easy to find and tap', () => {
     h.document.querySelector('.ca-head .ca-head-invite') as HTMLButtonElement;
 
   it('the open channel has an always-visible Add people button right beside its name, with a label and a tooltip', async () => {
-    const h = await createHarness({ sessions: S, rooms: mk(), stored: { 'codeman:chatroom': 'r1' } });
+    const h = await createHarness({ sessions: S, rooms: mk(), stored: { 'reverie:chatroom': 'r1' } });
     const btn = headBtn(h);
     expect(btn).not.toBeNull();
     expect(btn.hidden).toBe(false);
@@ -3712,7 +3712,7 @@ describe('Add people is easy to find and tap', () => {
   });
 
   it('follows the open channel, and is not there for a direct message', async () => {
-    const h = await createHarness({ sessions: S, rooms: mk(), stored: { 'codeman:chatroom': 'r1' } });
+    const h = await createHarness({ sessions: S, rooms: mk(), stored: { 'reverie:chatroom': 'r1' } });
     (h.document.querySelector('[data-key="room:r2"]') as HTMLElement).click();
     await settle(80);
     expect(headBtn(h).getAttribute('aria-label')).toBe('Add people to Other');
@@ -3723,7 +3723,7 @@ describe('Add people is easy to find and tap', () => {
   });
 
   it('the open channel\u2019s row is marked so its Add people and Edit icons stay visible without hovering; the others are not', async () => {
-    const h = await createHarness({ sessions: S, rooms: mk(), stored: { 'codeman:chatroom': 'r1' } });
+    const h = await createHarness({ sessions: S, rooms: mk(), stored: { 'reverie:chatroom': 'r1' } });
     const wrap = (key: string) =>
       (h.document.querySelector(`[data-key="room:${key}"]`) as HTMLElement).closest('.ca-item-wrap') as HTMLElement;
     expect(wrap('r1').classList.contains('is-active')).toBe(true);
@@ -3847,7 +3847,7 @@ describe('editing your own messages and pinning', () => {
 
   it('a direct message has no pins button or Pin entry', async () => {
     const dm = { ...room('d1', '', [member(A, 'alpha')], {}), kind: 'dm', dm: ['user', A], messages: [message('d1m1', 'd1', user, 'hi', 1000)] };
-    const h = await createHarness({ sessions, rooms: [dm], stored: { 'codeman:chatroom': 'd1' } });
+    const h = await createHarness({ sessions, rooms: [dm], stored: { 'reverie:chatroom': 'd1' } });
     expect((h.document.querySelector('.ca-head-pins') as HTMLElement).hidden).toBe(true);
     expect(menu(h, 'd1m1').map((b) => b.textContent)).not.toContain('Pin message');
   });
@@ -3973,7 +3973,7 @@ describe('who a message wakes', () => {
   ];
 
   it('channel settings let the owner pick the room\'s wake mode, with what each means', async () => {
-    const h = await createHarness({ sessions, rooms: rooms({ wake: 'mentions' }), stored: { 'codeman:chatroom': 'r1' } });
+    const h = await createHarness({ sessions, rooms: rooms({ wake: 'mentions' }), stored: { 'reverie:chatroom': 'r1' } });
     await h.app._chatApp.openChannelSettings('r1');
     const radios = [...h.document.querySelectorAll('.ca-wake input[type="radio"]')] as HTMLInputElement[];
     expect(radios.map((r) => [r.value, r.checked])).toEqual([['default', false], ['all', false], ['mentions', true]]);
@@ -3986,7 +3986,7 @@ describe('who a message wakes', () => {
   });
 
   it('shows what wakes each member on its card, and the owner can override it', async () => {
-    const h = await createHarness({ sessions, rooms: rooms(), stored: { 'codeman:chatroom': 'r1' } });
+    const h = await createHarness({ sessions, rooms: rooms(), stored: { 'reverie:chatroom': 'r1' } });
     const members = [...h.document.querySelectorAll('.ca-member')] as HTMLButtonElement[];
     const bravo = members.find((b) => b.textContent!.includes('bravo'))!;
     bravo.click();
@@ -4007,7 +4007,7 @@ describe('who a message wakes', () => {
   });
 
   it('is absent on a server that does not have it', async () => {
-    const h = await createHarness({ sessions, rooms: rooms(), features: { unread: true, dms: true, replies: true }, stored: { 'codeman:chatroom': 'r1' } });
+    const h = await createHarness({ sessions, rooms: rooms(), features: { unread: true, dms: true, replies: true }, stored: { 'reverie:chatroom': 'r1' } });
     await h.app._chatApp.openChannelSettings('r1');
     expect(h.document.querySelector('.ca-wake')).toBeNull();
     ([...h.document.querySelectorAll('.ca-member')][0] as HTMLButtonElement).click();
@@ -4023,7 +4023,7 @@ describe('moving an agent to its new session, and retired sessions', () => {
 
   it('an offline member\'s card offers Move to new session; the new one is picked from the open sessions, same name first', async () => {
     const S = [...sessions, { id: B, name: 'Pat', mode: 'claude' }, { id: '00000048-005c-4000-8000-00000000008d', name: 'zed', mode: 'claude' }];
-    const h = await createHarness({ sessions: S, rooms: rooms(), stored: { 'codeman:chatroom': 'r1' } });
+    const h = await createHarness({ sessions: S, rooms: rooms(), stored: { 'reverie:chatroom': 'r1' } });
     const offline = ([...h.document.querySelectorAll('.ca-member')] as HTMLButtonElement[]).find((b) => b.textContent!.includes('Pat'))!;
     offline.click();
     const move = [...h.document.querySelectorAll('.ca-profile button')].find((b) => b.textContent === 'Move to new session') as HTMLElement;
@@ -4040,17 +4040,17 @@ describe('moving an agent to its new session, and retired sessions', () => {
   });
 
   it('a running member has no such button, and an older server shows none', async () => {
-    const h = await createHarness({ sessions, rooms: rooms(), stored: { 'codeman:chatroom': 'r1' } });
+    const h = await createHarness({ sessions, rooms: rooms(), stored: { 'reverie:chatroom': 'r1' } });
     const online = ([...h.document.querySelectorAll('.ca-member')] as HTMLButtonElement[]).find((b) => b.textContent!.includes('alpha'))!;
     online.click();
     expect([...h.document.querySelectorAll('.ca-profile button')].some((b) => b.textContent === 'Move to new session')).toBe(false);
-    const old = await createHarness({ sessions, rooms: rooms(), features: { unread: true, dms: true, replies: true }, stored: { 'codeman:chatroom': 'r1' } });
+    const old = await createHarness({ sessions, rooms: rooms(), features: { unread: true, dms: true, replies: true }, stored: { 'reverie:chatroom': 'r1' } });
     ([...old.document.querySelectorAll('.ca-member')] as HTMLButtonElement[]).find((b) => b.textContent!.includes('Pat'))!.click();
     expect([...old.document.querySelectorAll('.ca-profile button')].some((b) => b.textContent === 'Move to new session')).toBe(false);
   });
 
   it('retired sessions are hidden from the pickers, listed in a dialog from the workspace menu, and can be restored or deleted', async () => {
-    const h = await createHarness({ sessions: [...sessions, { id: OLD, name: 'Pat', mode: 'claude' }], rooms: rooms(), stored: { 'codeman:chatroom': 'r1' } });
+    const h = await createHarness({ sessions: [...sessions, { id: OLD, name: 'Pat', mode: 'claude' }], rooms: rooms(), stored: { 'reverie:chatroom': 'r1' } });
     h.server.retired = [{ sessionId: OLD, name: 'Pat', successorId: B, at: 5000, rooms: [{ id: 'r1', name: 'General' }], restorable: true }];
     await h.app._loadChatRooms('r1');
     expect(h.app._chatCandidateSessions(new Set()).some((s: { id: string }) => s.id === OLD)).toBe(false);
@@ -4070,7 +4070,7 @@ describe('moving an agent to its new session, and retired sessions', () => {
   });
 
   it('Delete asks first, and the menu entry is absent when nothing is retired', async () => {
-    const h = await createHarness({ sessions, rooms: rooms(), stored: { 'codeman:chatroom': 'r1' } });
+    const h = await createHarness({ sessions, rooms: rooms(), stored: { 'reverie:chatroom': 'r1' } });
     expect((h.app._chatApp.workspaceEntries('', { full: true }) as Array<{ label?: string }>).some((e) => e.label === 'Retired sessions')).toBe(false);
     h.server.retired = [{ sessionId: OLD, name: 'Pat', successorId: B, at: 5000, rooms: [], restorable: false }];
     await h.app._chatApp.openRetiredDialog();

@@ -1,13 +1,13 @@
 #!/usr/bin/env -S npx tsx
 /**
- * Standalone smoke-test for pointing each Codeman-supported harness CLI at a
+ * Standalone smoke-test for pointing each Reverie-supported harness CLI at a
  * custom OpenAI-compatible endpoint — local (llama.cpp, Ollama, vLLM, ...) or
  * cloud (Azure AI Foundry's OpenAI-compatible endpoint, OpenRouter, a
  * self-hosted gateway, ...). Anything that answers GET /v1/models and POST
  * /v1/chat/completions in the standard shape qualifies; --base-url is not
  * assumed to be a LAN address.
  *
- * This is intentionally OUTSIDE the npm test suite and outside Codeman's own
+ * This is intentionally OUTSIDE the npm test suite and outside Reverie's own
  * session/tmux machinery: it spawns each real CLI binary directly, one-shot,
  * with the env vars / config files that CLI's own docs say redirect it to a
  * custom endpoint, and checks it can answer "hello world".
@@ -316,7 +316,7 @@ const ONE_SHOT: Record<string, OneShot> = {
     // but the actual prompt now runs and returns the real answer. Confirmed against
     // a real llama-swap server. ⚠️ `--bare` also disables hooks/LSP/plugin sync/
     // CLAUDE.md auto-discovery — fine for this ISOLATED one-shot test, never safe to
-    // apply to a real interactive Codeman session (which needs hooks).
+    // apply to a real interactive Reverie session (which needs hooks).
     argv: (prompt) => ['--dangerously-skip-permissions', '--bare', '-p', prompt],
   },
   opencode: { confidence: 'verified', argv: (prompt) => ['run', prompt] },
@@ -550,7 +550,7 @@ async function runHarness(
   if (injection.kind === 'env') {
     env = injection.envOverrides;
   } else if (injection.kind === 'configDir') {
-    tempDir = mkdtempSync(join(tmpdir(), `codeman-local-llm-test-${id}-`));
+    tempDir = mkdtempSync(join(tmpdir(), `reverie-local-llm-test-${id}-`));
     env = applyConfigDirInjection(tempDir, injection);
   }
   // injection.kind === 'unsupported' already handled via injectionCap above.

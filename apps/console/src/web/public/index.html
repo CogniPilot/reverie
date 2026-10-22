@@ -38,7 +38,7 @@
   <script defer src="vendor/xterm-addon-fit.min.js"></script>
   <!-- SerializeAddon: snapshots xterm state (viewport + scrollback + attrs) for
        per-session restore on tab switches. Lets codex tabs survive switch-away
-       without codeman having to replay codex's byte stream (which loses earlier
+       without reverie having to replay codex's byte stream (which loses earlier
        conversation because codex's TUI redraws drop it from the viewport). -->
   <script defer src="vendor/xterm-addon-serialize.min.js"></script>
   <!-- WebGL addon lazy-loaded by app.js on desktop only (skipped on mobile, saving 244KB) -->
@@ -52,11 +52,11 @@
   <!-- Synchronous mobile detection — runs before first paint to prevent panel flash -->
   <script>if(window.innerWidth<768||(('ontouchstart' in window||navigator.maxTouchPoints>0)&&window.innerWidth<1024))document.documentElement.classList.add('mobile-init');</script>
   <!-- Synchronous skin selection — runs before first paint to prevent theme flash -->
-  <script>try{var s=localStorage.getItem('codeman:skin'),a=['og','daylight-green','daylight-blue','paper-gray','solarized-light','catppuccin-latte','rose-pine-dawn'];if(a.indexOf(s)<0)s='daylight-blue';document.documentElement.dataset.skin=s;window.__codemanSkin=s;}catch(e){document.documentElement.dataset.skin='daylight-blue';window.__codemanSkin='daylight-blue';}</script>
+  <script>try{var s=localStorage.getItem('reverie:skin'),a=['og','daylight-green','daylight-blue','paper-gray','solarized-light','catppuccin-latte','rose-pine-dawn'];if(a.indexOf(s)<0)s='daylight-blue';document.documentElement.dataset.skin=s;window.__reverieSkin=s;}catch(e){document.documentElement.dataset.skin='daylight-blue';window.__reverieSkin='daylight-blue';}</script>
   <!-- Apply the saved per-device language before first paint. The full translation
        layer loads below; setting lang/dir here prevents an English accessibility
        tree from flashing while the deferred scripts start. -->
-  <script>try{var m=window.innerWidth<768||(('ontouchstart' in window||navigator.maxTouchPoints>0)&&window.innerWidth<1024);var k=m?'codeman-app-settings-mobile':'codeman-app-settings';var l=JSON.parse(localStorage.getItem(k)||'{}').language;l=l==='zh-CN'?'zh-CN':'en';document.documentElement.lang=l;window.__codemanLanguage=l;}catch(e){document.documentElement.lang='en';window.__codemanLanguage='en';}</script>
+  <script>try{var m=window.innerWidth<768||(('ontouchstart' in window||navigator.maxTouchPoints>0)&&window.innerWidth<1024);var k=m?'reverie-app-settings-mobile':'reverie-app-settings';var l=JSON.parse(localStorage.getItem(k)||'{}').language;l=l==='zh-CN'?'zh-CN':'en';document.documentElement.lang=l;window.__reverieLanguage=l;}catch(e){document.documentElement.lang='en';window.__reverieLanguage='en';}</script>
   <!-- Apply the saved session-list layout (header strip vs. left sidebar) and the
        sidebar collapse state before first paint, so the loading skeleton and the
        first frame already match. Same per-device settings key as the language
@@ -68,7 +68,7 @@
        app.js, NOT the handheld storage-key test `m`. Use a different predicate
        here and boot will contradict this value, animating the drawer open by
        itself on every load between 768 and 1023px. -->
-  <script>try{var m=window.innerWidth<768||(('ontouchstart' in window||navigator.maxTouchPoints>0)&&window.innerWidth<1024);var k=m?'codeman-app-settings-mobile':'codeman-app-settings';var A=JSON.parse(localStorage.getItem(k)||'{}');var L=A.sessionListLayout;var F=Number(A.sessionSidebarFontSize);var solo=/^\/session\//.test(location.pathname);var C=localStorage.getItem('codeman-sidebar-collapsed');var S=(L==='sidebar'||L==='sidebar-rich')&&!solo;document.documentElement.dataset.sessionList=S?'sidebar':'header';document.documentElement.dataset.sidebarDetail=(S&&L==='sidebar-rich')?'rich':'simple';document.documentElement.dataset.sidebar=(C===null?window.innerWidth<1024:C==='1')?'collapsed':'expanded';var V=A.tabOrientation==='vertical'&&!S&&!solo&&window.innerWidth>=768;document.documentElement.dataset.tabOrientation=V?'vertical':'horizontal';document.documentElement.dataset.tabRailDetail=(A.tabRailDetail==='simple')?'simple':'rich';document.documentElement.dataset.tabRailSort=(A.tabRailSort==='manual')?'manual':'activity';var T=A.tabArrangement;document.documentElement.dataset.tabArrangement=(T==='state'||T==='case'||T==='ledger')?T:'classic';document.documentElement.dataset.tabStateOrder=(A.tabStateOrder==='urgent-last')?'urgent-last':'urgent-first';document.documentElement.dataset.tabLogos=(A.showTabCliLogos===false)?'off':'on';var H=A.headerStatsStyle;document.documentElement.dataset.headerStats=(window.innerWidth<768||solo)?'classic':(H==='classic'||H==='tiles')?H:'compact';var W=Number(A.tabRailWidth);if(V){if(Number.isInteger(W)&&W>=208&&W<=360)document.documentElement.style.setProperty('--tab-rail-width',W+'px');else if(document.documentElement.dataset.tabRailDetail!=='simple')document.documentElement.style.setProperty('--tab-rail-width','320px');}if(Number.isInteger(F)&&F>=11&&F<=18)document.documentElement.style.setProperty('--session-sidebar-name-font-size',F+'px');}catch(e){document.documentElement.dataset.sessionList='header';document.documentElement.dataset.sidebarDetail='simple';document.documentElement.dataset.sidebar='expanded';document.documentElement.dataset.tabOrientation='horizontal';document.documentElement.dataset.tabRailDetail='rich';document.documentElement.dataset.tabRailSort='activity';document.documentElement.dataset.tabArrangement='classic';document.documentElement.dataset.tabStateOrder='urgent-first';document.documentElement.dataset.headerStats='classic';document.documentElement.dataset.tabLogos='on';}</script>
+  <script>try{var m=window.innerWidth<768||(('ontouchstart' in window||navigator.maxTouchPoints>0)&&window.innerWidth<1024);var k=m?'reverie-app-settings-mobile':'reverie-app-settings';var A=JSON.parse(localStorage.getItem(k)||'{}');var L=A.sessionListLayout;var F=Number(A.sessionSidebarFontSize);var solo=/^\/session\//.test(location.pathname);var C=localStorage.getItem('reverie-sidebar-collapsed');var S=(L==='sidebar'||L==='sidebar-rich')&&!solo;document.documentElement.dataset.sessionList=S?'sidebar':'header';document.documentElement.dataset.sidebarDetail=(S&&L==='sidebar-rich')?'rich':'simple';document.documentElement.dataset.sidebar=(C===null?window.innerWidth<1024:C==='1')?'collapsed':'expanded';var V=A.tabOrientation==='vertical'&&!S&&!solo&&window.innerWidth>=768;document.documentElement.dataset.tabOrientation=V?'vertical':'horizontal';document.documentElement.dataset.tabRailDetail=(A.tabRailDetail==='simple')?'simple':'rich';document.documentElement.dataset.tabRailSort=(A.tabRailSort==='manual')?'manual':'activity';var T=A.tabArrangement;document.documentElement.dataset.tabArrangement=(T==='state'||T==='case'||T==='ledger')?T:'classic';document.documentElement.dataset.tabStateOrder=(A.tabStateOrder==='urgent-last')?'urgent-last':'urgent-first';document.documentElement.dataset.tabLogos=(A.showTabCliLogos===false)?'off':'on';var H=A.headerStatsStyle;document.documentElement.dataset.headerStats=(window.innerWidth<768||solo)?'classic':(H==='classic'||H==='tiles')?H:'compact';var W=Number(A.tabRailWidth);if(V){if(Number.isInteger(W)&&W>=208&&W<=360)document.documentElement.style.setProperty('--tab-rail-width',W+'px');else if(document.documentElement.dataset.tabRailDetail!=='simple')document.documentElement.style.setProperty('--tab-rail-width','320px');}if(Number.isInteger(F)&&F>=11&&F<=18)document.documentElement.style.setProperty('--session-sidebar-name-font-size',F+'px');}catch(e){document.documentElement.dataset.sessionList='header';document.documentElement.dataset.sidebarDetail='simple';document.documentElement.dataset.sidebar='expanded';document.documentElement.dataset.tabOrientation='horizontal';document.documentElement.dataset.tabRailDetail='rich';document.documentElement.dataset.tabRailSort='activity';document.documentElement.dataset.tabArrangement='classic';document.documentElement.dataset.tabStateOrder='urgent-first';document.documentElement.dataset.headerStats='classic';document.documentElement.dataset.tabLogos='on';}</script>
   <!-- Inline critical CSS for instant skeleton paint (before styles.css loads) -->
   <style>
     .loading-skeleton{display:flex;flex-direction:column;height:100vh;height:100dvh;background:var(--bg-dark,#11151c)}
@@ -147,7 +147,7 @@
 
       <div class="header-right" id="headerRight">
 
-        <button class="btn-admin-panel btn-admin-panel--hidden" id="adminPanelBtn" onclick="window.codemanAdmin.openAdminPanel()" title="Admin Panel (multi-user administration)" aria-label="Open admin panel">
+        <button class="btn-admin-panel btn-admin-panel--hidden" id="adminPanelBtn" onclick="window.reverieAdmin.openAdminPanel()" title="Admin Panel (multi-user administration)" aria-label="Open admin panel">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
           <span>Admin Panel</span>
         </button>
@@ -2003,7 +2003,7 @@
                   <div class="set-row" id="appSettingsGestureControlItem" data-search="gesture control camera hand tracking">
                     <div class="set-row-text">
                       <span class="set-row-label">Gesture Control <span class="set-tag set-tag-beta">beta</span> <span class="set-scope">synced</span></span>
-                      <span class="set-row-desc">Camera hand-tracking overlay. Applied on reload; the instance must run with CODEMAN_GESTURE=1.</span>
+                      <span class="set-row-desc">Camera hand-tracking overlay. Applied on reload; the instance must run with REVERIE_GESTURE=1.</span>
                     </div>
                     <label class="switch switch-sm"><input type="checkbox" id="appSettingsGestureControl"><span class="slider"></span></label>
                   </div>
@@ -2048,7 +2048,7 @@
                 <div class="set-preview-frame" data-i18n-skip>
                   <div class="set-preview-bar">
                     <span class="set-preview-logo">C</span>
-                    <span class="set-preview-tab">w1-codeman</span>
+                    <span class="set-preview-tab">w1-reverie</span>
                     <span class="set-preview-tab set-preview-tab-dim">w2-docs</span>
                     <span class="set-preview-gap"></span>
                     <span class="set-preview-btns" id="appSettingsPreviewHeader"></span>
@@ -2679,7 +2679,7 @@
 
               <div class="set-group" id="cliManagementGroup">
                 <div class="set-group-head"><h4>CLI management</h4><span class="set-scope">synced</span></div>
-                <p class="set-group-hint">Enable/disable a CLI, install one that's missing, or add your own — without hand-editing ~/.codeman/clis.json.</p>
+                <p class="set-group-hint">Enable/disable a CLI, install one that's missing, or add your own — without hand-editing ~/.reverie/clis.json.</p>
                 <div class="set-group-body">
                   <div class="set-row" data-search="cli management enable disable install custom">
                     <div class="set-row-text">
@@ -2738,7 +2738,7 @@
               <div class="set-group" id="agentSkillGroup">
                 <div class="set-group-head"><h4>All agent CLIs</h4><span class="set-scope">synced</span></div>
                 <div class="set-group-body">
-                  <div class="set-row" data-search="agent skill codeman reverie api workers codex gemini opencode pi grok deepseek omp antigravity">
+                  <div class="set-row" data-search="agent skill reverie reverie api workers codex gemini opencode pi grok deepseek omp antigravity">
                     <div class="set-row-text">
                       <span class="set-row-label">Reverie Agent Skill</span>
                       <span class="set-row-desc">Write Reverie's agent skill into each new session's folder, where that CLI looks for skills, so the agent in it can start workers in any installed CLI, send them prompts and wait for results. Every CLI except Pi and a plain shell.</span>
@@ -2872,7 +2872,7 @@
                   <div class="set-row" id="mcpSyncActionRow" style="display:none" data-search="mcp server sync preview">
                     <div class="set-row-text">
                       <span class="set-row-label">Sync MCP servers across CLIs</span>
-                      <span class="set-row-desc">Copies each installed, enabled CLI's MCP servers (and GitHub Copilot CLI's) into the others. Only adds missing servers; never edits, removes or copies a server you switched off. Env values and headers are copied too, so a file that receives them is left readable by you only. The previous file is kept as <code>.codeman-bak</code> (overwritten by each sync). A config dir moved by the CLI's own env var (<code>CODEX_HOME</code>, <code>CLAUDE_CONFIG_DIR</code>, <code>XDG_CONFIG_HOME</code>, <code>GEMINI_CLI_HOME</code>, <code>COPILOT_HOME</code>) is followed as Reverie's server sees it; a per-session override is not.</span>
+                      <span class="set-row-desc">Copies each installed, enabled CLI's MCP servers (and GitHub Copilot CLI's) into the others. Only adds missing servers; never edits, removes or copies a server you switched off. Env values and headers are copied too, so a file that receives them is left readable by you only. The previous file is kept as <code>.reverie-bak</code> (overwritten by each sync). A config dir moved by the CLI's own env var (<code>CODEX_HOME</code>, <code>CLAUDE_CONFIG_DIR</code>, <code>XDG_CONFIG_HOME</code>, <code>GEMINI_CLI_HOME</code>, <code>COPILOT_HOME</code>) is followed as Reverie's server sees it; a per-session override is not.</span>
                     </div>
                     <span>
                       <button class="btn-toolbar btn-sm" id="mcpSyncPreviewBtn" onclick="app.mcpSync(false)">Preview</button>
@@ -3190,7 +3190,7 @@
                   <div class="set-row" data-search="cloudflare tunnel remote access url">
                     <div class="set-row-text">
                       <span class="set-row-label">Cloudflare Tunnel</span>
-                      <span class="set-row-desc">Expose Reverie on a public URL. Set CODEMAN_PASSWORD first.</span>
+                      <span class="set-row-desc">Expose Reverie on a public URL. Set REVERIE_PASSWORD first.</span>
                     </div>
                     <label class="switch switch-sm"><input type="checkbox" id="appSettingsTunnelEnabled"><span class="slider"></span></label>
                   </div>
@@ -3288,11 +3288,11 @@
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M12 8v8M8 12h8"/></svg>
               <h2>Create New</h2>
             </div>
-            <p class="set-section-blurb" id="newCaseBlurb">A fresh workspace under ~/codeman-cases, scaffolded with its own CLAUDE.md.</p>
+            <p class="set-section-blurb" id="newCaseBlurb">A fresh workspace under ~/reverie-cases, scaffolded with its own CLAUDE.md.</p>
             <div class="form-row">
               <label>Case Name</label>
               <input type="text" id="newCaseName" placeholder="my-project" pattern="[a-zA-Z0-9_-]+" autocomplete="off" autocapitalize="off" spellcheck="false" oninput="app.updateNewCasePathPreview()">
-              <span class="form-hint" id="newCaseNameHint">Letters, numbers, hyphens, underscores only. Created in ~/codeman-cases/</span>
+              <span class="form-hint" id="newCaseNameHint">Letters, numbers, hyphens, underscores only. Created in ~/reverie-cases/</span>
             </div>
             <div class="form-row">
               <label>Description (optional)</label>
@@ -3300,7 +3300,7 @@
             </div>
             <div class="form-row" id="newCaseCustomPathToggleRow">
               <label class="checkbox-row"><input type="checkbox" id="newCaseCustomPathToggle" onchange="app.toggleNewCaseCustomPath()"> 📁 Create in a custom folder</label>
-              <span class="form-hint">By default a new case is created under ~/codeman-cases. Choose another folder and the case is created there instead; it is listed like any other case.</span>
+              <span class="form-hint">By default a new case is created under ~/reverie-cases. Choose another folder and the case is created there instead; it is listed like any other case.</span>
             </div>
             <div class="form-row" id="newCaseCustomPathRow" style="display:none">
               <label>Parent Folder</label>
@@ -3351,7 +3351,7 @@
                 </div>
                 <div class="form-row">
                   <label>Image</label>
-                  <input type="text" id="quickDockerImage" placeholder="codeman/agent:base" autocomplete="off" spellcheck="false">
+                  <input type="text" id="quickDockerImage" placeholder="reverie/agent:base" autocomplete="off" spellcheck="false">
                 </div>
                 <div class="form-row">
                   <label class="checkbox-row"><input type="checkbox" id="quickDockerMountCreds" checked> Mount host credentials (~/.claude etc.)</label>
@@ -3374,7 +3374,7 @@
             <div class="form-row">
               <label>Case Name</label>
               <input type="text" id="cloneCaseName" placeholder="repo" pattern="[a-zA-Z0-9_-]+" autocomplete="off" autocapitalize="off" spellcheck="false" oninput="app.onCloneNameEdited()">
-              <span class="form-hint">Filled in from the URL. Cloned into ~/codeman-cases/&lt;name&gt;, so deleting the case deletes this working tree.</span>
+              <span class="form-hint">Filled in from the URL. Cloned into ~/reverie-cases/&lt;name&gt;, so deleting the case deletes this working tree.</span>
             </div>
             <div class="form-row">
               <label>Branch or Tag (optional)</label>
@@ -3512,7 +3512,7 @@
             <details class="advanced-options" id="remoteDiscoverSection">
               <summary><svg class="set-adv-chev" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg><span>Discover existing sessions</span></summary>
               <div class="advanced-options-content">
-                <span class="form-hint">Find <code>codeman-*</code> tmux sessions already running on this host (started by the remote's own Reverie or another instance) and attach to one. Attaching shares the session; closing the tab detaches it — it is never killed.</span>
+                <span class="form-hint">Find <code>reverie-*</code> tmux sessions already running on this host (started by the remote's own Reverie or another instance) and attach to one. Attaching shares the session; closing the tab detaches it — it is never killed.</span>
                 <div class="form-row" style="margin-top: 8px;">
                   <button type="button" class="btn-toolbar" id="remoteDiscoverBtn" onclick="app.discoverRemoteSessions()">Discover existing sessions</button>
                 </div>
@@ -3572,7 +3572,7 @@
             </div>
             <div class="form-row docker-create-only">
               <label>Image</label>
-              <input type="text" id="dockerImage" placeholder="codeman/agent:base" autocomplete="off" autocapitalize="off" spellcheck="false">
+              <input type="text" id="dockerImage" placeholder="reverie/agent:base" autocomplete="off" autocapitalize="off" spellcheck="false">
               <span class="form-hint">Build it once with <code>node scripts/build-agent-image.mjs</code>. Contains node + claude/opencode/codex/gemini/agy/pi/grok/dsh/omp + tmux.</span>
             </div>
             <div class="form-row docker-create-only">

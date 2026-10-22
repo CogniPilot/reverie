@@ -11,11 +11,11 @@ import { describe, expect, it, vi } from 'vitest';
 const PUBLIC = resolve(import.meta.dirname, '../src/web/public');
 
 function loadSettingsUi(confirmAnswer: boolean) {
-  const CodemanApp = function CodemanApp(this: any) {};
+  const ReverieApp = function ReverieApp(this: any) {};
   const rows = { innerHTML: '' };
   const confirm = vi.fn(() => confirmAnswer);
   const context = vm.createContext({
-    CodemanApp,
+    ReverieApp,
     console,
     confirm,
     window: {},
@@ -31,7 +31,7 @@ function loadSettingsUi(confirmAnswer: boolean) {
   for (const file of ['constants.js', 'settings-ui.js']) {
     vm.runInContext(readFileSync(resolve(PUBLIC, file), 'utf8'), context, { filename: file });
   }
-  const app = new (CodemanApp as any)();
+  const app = new (ReverieApp as any)();
   app._api = vi.fn(async () => ({ ok: true, json: async () => ({ success: true }) }));
   app.showToast = vi.fn();
   app.loadCliListForSettings = vi.fn(async () => {});

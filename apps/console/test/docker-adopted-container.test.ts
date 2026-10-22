@@ -1,7 +1,7 @@
 /**
  * @fileoverview Adopting an ALREADY-RUNNING container (`DockerCase.owned === false`).
  *
- * The whole point of adoption is a negative guarantee: Codeman execs into a
+ * The whole point of adoption is a negative guarantee: Reverie execs into a
  * container the user built and runs, and never creates, starts, stops, restarts
  * or removes it. A negative guarantee cannot be observed by using the feature —
  * only by asserting that the mutating verbs are absent — so these tests read the
@@ -31,7 +31,7 @@ import {
 } from '../src/tmux-manager.js';
 import type { DockerCase, DockerHost, SessionDocker } from '../src/types.js';
 
-const HOST: DockerHost = { id: 'h1', label: 'local', engine: 'docker', image: 'codeman/agent:base' };
+const HOST: DockerHost = { id: 'h1', label: 'local', engine: 'docker', image: 'reverie/agent:base' };
 
 function caseFor(owned: boolean | undefined): DockerCase {
   return {
@@ -364,7 +364,7 @@ describe('adopted container: both path fields get a folder picker', () => {
 
 describe('adopted container: drift is not evaluated', () => {
   it('reports no drift rather than demanding a recreate we may not perform', async () => {
-    // An adopted container carries no codeman.confighash label, so a real
+    // An adopted container carries no reverie.confighash label, so a real
     // comparison would always report drift and the launch gate would 409 forever.
     const status = await checkDockerConfigDrift(toSessionDocker(HOST, caseFor(false)));
     expect(status.drifted).toBe(false);
@@ -497,13 +497,13 @@ describe('adopted container: one container may back several cases', () => {
     expect(conflict).toEqual({ kind: 'duplicate', caseName: 'web' });
   });
 
-  it('still refuses a container backing a case Codeman CREATED', () => {
-    // Codeman owns that container's lifecycle: a recreate or case-delete there
+  it('still refuses a container backing a case Reverie CREATED', () => {
+    // Reverie owns that container's lifecycle: a recreate or case-delete there
     // would destroy the adopted case's container out from under it.
     const conflict = classifyAdoptContainerConflict({
-      container: 'codeman-case-web',
+      container: 'reverie-case-web',
       containerWorkdir: '/app/api',
-      existing: [mk({ name: 'web', container: 'codeman-case-web', owned: true })],
+      existing: [mk({ name: 'web', container: 'reverie-case-web', owned: true })],
       canAccess: mine,
     });
     expect(conflict).toEqual({ kind: 'owned-case', caseName: 'web' });

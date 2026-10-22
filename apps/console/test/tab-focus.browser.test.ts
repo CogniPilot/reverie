@@ -60,10 +60,10 @@ describe('Focus section in Chromium', () => {
   beforeAll(async () => {
     browser = await chromium.launch({ headless: true });
     page = await browser.newPage({ viewport: { width: 1280, height: 800 }, deviceScaleFactor: 1 });
-    await page.route('http://codeman.test/', (route) =>
+    await page.route('http://reverie.test/', (route) =>
       route.fulfill({ contentType: 'text/html', body: '<!doctype html><html><body></body></html>' })
     );
-    await page.route('http://codeman.test/api/tab-layout', async (route) => {
+    await page.route('http://reverie.test/api/tab-layout', async (route) => {
       const request = route.request();
       if (request.method() !== 'PUT') return route.fulfill({ status: 404, body: '' });
       const body = JSON.parse(request.postData() || '{}');
@@ -73,7 +73,7 @@ describe('Focus section in Chromium', () => {
         body: JSON.stringify({ success: true, data: { layout: { ...body.layout, version: body.baseVersion + 1 } } }),
       });
     });
-    await page.goto('http://codeman.test/');
+    await page.goto('http://reverie.test/');
     await page.setContent(`<!doctype html>
       <html data-tab-orientation="vertical" data-tab-rail-sort="manual">
         <head><style>${read('styles.css')}</style></head>
@@ -93,14 +93,14 @@ describe('Focus section in Chromium', () => {
         read('tab-layout-browser.js') +
         '\n' +
         read('app.js') +
-        '\nwindow.CodemanApp = CodemanApp; window.__setApp = (value) => { app = value; };',
+        '\nwindow.ReverieApp = ReverieApp; window.__setApp = (value) => { app = value; };',
     });
     await page.addScriptTag({ content: read('tab-rail-resize.js') });
     await page.addScriptTag({ content: read('api-client.js') });
     await page.addScriptTag({ content: read('webview-tabs.js') });
     await page.evaluate(() => {
       const w = window as any;
-      const app = Object.create(w.CodemanApp.prototype);
+      const app = Object.create(w.ReverieApp.prototype);
       app.$ = (id: string) => document.getElementById(id);
       app.sessions = new Map([
         ['one', { id: 'one', name: 'One', status: 'idle' }],
@@ -253,7 +253,7 @@ describe('Focus section in Chromium', () => {
   it('the toggle collapses per device, and a drag from a shortcut moves nothing', async () => {
     await page.click('#tabFocusToggle');
     expect(await page.locator('#tabFocusList').isHidden()).toBe(true);
-    expect(await page.evaluate(() => localStorage.getItem('codeman:tab-focus-collapsed'))).toBe('true');
+    expect(await page.evaluate(() => localStorage.getItem('reverie:tab-focus-collapsed'))).toBe('true');
     await page.click('#tabFocusToggle');
     const a = await box('#tabFocus .tab-focus-item');
     const b = await box('[data-tab-group-header="gy"]');

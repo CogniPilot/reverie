@@ -48,7 +48,7 @@ The secret lives in the data directory, and its path is exported into every mana
 - **HTTPS.** Hook callbacks must accept the self-signed certificate. Recent versions
   self-heal existing cases; older cases need recreating.
 - **Docker cases on a loopback bind.** A container cannot reach `127.0.0.1` on the host, so
-  in-container hooks silently do not fire. Set `CODEMAN_DOCKER_BRIDGE_HOOKS=1` to open a
+  in-container hooks silently do not fire. Set `REVERIE_DOCKER_BRIDGE_HOOKS=1` to open a
   hooks-only listener on the bridge gateway. See [Docker Cases](Docker-Cases).
 
 ## Integration seams
@@ -78,7 +78,7 @@ needs a human is a short script over this stream.
 
 Everything the dashboard does. Create sessions, send input, block on wait primitives, read
 terminals, manage cron. See [HTTP API](HTTP-API) and
-[Driving Reverie From An Agent](Driving-Codeman-From-An-Agent).
+[Driving Reverie From An Agent](Driving-Reverie-From-An-Agent).
 
 ### 4. Hooks
 
@@ -94,6 +94,6 @@ in Reverie to work properly, open an issue or a Discussion first.
 ## Read next
 
 - [HTTP API](HTTP-API) - the endpoint map and envelope.
-- [Driving Reverie From An Agent](Driving-Codeman-From-An-Agent) - the agent-facing path.
-- [`docs/extending-codeman.md`](https://github.com/Ark0N/Codeman/blob/master/docs/extending-codeman.md) - the seams in full, with examples.
-- [`docs/claude-code-hooks-reference.md`](https://github.com/Ark0N/Codeman/blob/master/docs/claude-code-hooks-reference.md) - upstream hook semantics.
+- [Driving Reverie From An Agent](Driving-Reverie-From-An-Agent) - the agent-facing path.
+- [`docs/extending-reverie.md`](https://github.com/jgoppert/reverie/blob/main/apps/console/docs/extending-reverie.md) - the seams in full, with examples.
+- [`docs/claude-code-hooks-reference.md`](https://github.com/jgoppert/reverie/blob/main/apps/console/docs/claude-code-hooks-reference.md) - upstream hook semantics.

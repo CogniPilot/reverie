@@ -4,7 +4,7 @@
  * through the real parser), while `element` is a jsdom div the addon can
  * paint spans into. Works because XtermTerminal is structurally typed.
  *
- * Also carries the test-side mirror of Codeman's classifyPredictInput() and
+ * Also carries the test-side mirror of Reverie's classifyPredictInput() and
  * codex composer gate (the real ones live in terminal-ui.js and are pinned by
  * the repo's Layer 4 vm tests; keep the two in sync).
  */
@@ -143,9 +143,9 @@ export function createReplayTerminal(cols: number, rows: number): ReplayTerminal
   };
 }
 
-// ─── Codeman-side mirrors (keep in sync with terminal-ui.js) ────────────
+// ─── Reverie-side mirrors (keep in sync with terminal-ui.js) ────────────
 
-/** Mirror of window.CodemanTerminalInput.classifyPredictInput. */
+/** Mirror of window.ReverieTerminalInput.classifyPredictInput. */
 export function classifyPredictInput(data: string): 'char' | 'backspace' | 'clear' | 'text' {
   const cps = Array.from(data);
   if (cps.length === 1) {

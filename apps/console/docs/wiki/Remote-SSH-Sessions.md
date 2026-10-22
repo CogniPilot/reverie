@@ -44,7 +44,7 @@ change, or a closed laptop kills the local pane, not the remote session. Reconne
 back in the same live conversation.
 
 The remote session name is deliberately chosen so that a Reverie **running on the target
-host** will not adopt it as one of its own. Two Codemans, one host, no interference.
+host** will not adopt it as one of its own. Two Reveries, one host, no interference.
 
 ## Auto-reconnect
 
@@ -59,7 +59,7 @@ verifiably still alive. Only a transport drop is reconnected.
 
 ## Discover and attach
 
-Reverie can list the `codeman-*` sessions already running on a host, whether that machine's
+Reverie can list the `reverie-*` sessions already running on a host, whether that machine's
 own Reverie started them or another operator did, and attach to one.
 
 The distinction that matters:
@@ -109,4 +109,4 @@ Reverie does not store SSH passwords. Use keys, as you would for any other autom
 - [Core Concepts](Core-Concepts) - overlays versus run modes.
 - [Docker Cases](Docker-Cases) - the other overlay.
 - [Security](Security) - the wider model.
-- [`docs/remote-sessions.md`](https://github.com/Ark0N/Codeman/blob/master/docs/remote-sessions.md) - the full design.
+- [`docs/remote-sessions.md`](https://github.com/jgoppert/reverie/blob/main/apps/console/docs/remote-sessions.md) - the full design.

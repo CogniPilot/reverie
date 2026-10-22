@@ -1,5 +1,5 @@
 /**
- * @fileoverview Probe engine for `codeman doctor`. Resolves each registry tool
+ * @fileoverview Probe engine for `reverie doctor`. Resolves each registry tool
  * against an injectable ProbeHost (real impl uses child_process/fs; tests inject
  * fakes) and returns structured results. Pure given the host — no global I/O.
  *

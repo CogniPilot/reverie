@@ -4,7 +4,7 @@
  * The single view's file drop (image-input.js) listens on #terminalContainer,
  * which is hidden while tiles are open. Nothing else cancelled a file drag,
  * so dropping a screenshot on a tile made the browser open the file in place
- * of Codeman. Now the grid section itself takes every file drag (bubble
+ * of Reverie. Now the grid section itself takes every file drag (bubble
  * phase): anywhere over it (a tile, an empty cell, a divider, its padding)
  * dragover and drop are cancelled, so the page never navigates, and a drop on
  * a tile uploads its files to THAT tile's session, through the same classifier

@@ -141,7 +141,7 @@ every state change with
 ```
 
 Reverie points `HERDR_BIN_PATH` at a small generated shim
-(`~/.codeman/dsh-status-shim.mjs`, written at session create) which forwards each
+(`~/.reverie/dsh-status-shim.mjs`, written at session create) which forwards each
 report to `POST /api/hook-event`. The mapping:
 
 | Harness state | Reverie hook event | What you get                                             |
@@ -255,7 +255,7 @@ segmenter, coarse but real. The splash caveat above applies to them accordingly.
 
 Because dsh has both halves — a real end-of-turn signal and a real transcript — an
 agent can drive a dsh session the same way it drives a claude one, and the bundled
-`codeman` agent skill does. Spawning `beta:deepseek` in its worker list gives a
+`reverie` agent skill does. Spawning `beta:deepseek` in its worker list gives a
 worker that is tasked, waited on and read with the same calls as its claude
 siblings; no other external CLI mode qualifies. Two edges are worth repeating here:
 
@@ -272,7 +272,7 @@ siblings; no other external CLI mode qualifies. Two edges are worth repeating he
 
 The browser UI is the one interactive surface DeepSeek ships itself, so it gets a
 shortcut rather than a run mode: **Run ▸ DeepSeek web UI…** starts
-`dsh web --no-open --host 127.0.0.1 --port <free> --trusted-host <codeman-host>`
+`dsh web --no-open --host 127.0.0.1 --port <free> --trusted-host <reverie-host>`
 as a background child process (`src/deepseek-web-server.ts`, behind
 `POST/GET/DELETE /api/deepseek/web`) and opens it as a Reverie web tab once the
 server actually answers.

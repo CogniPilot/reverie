@@ -17,7 +17,7 @@ const A = '0000002d-0035-4000-8000-000000000047';
 const B = '00000038-0043-4000-8000-000000000060';
 const C = '0000003e-004c-4000-8000-00000000006f';
 const D = '00000043-0053-4000-8000-00000000007a';
-const AS = (id: string) => ({ 'x-codeman-parent-session': id });
+const AS = (id: string) => ({ 'x-reverie-parent-session': id });
 
 describe('a plan switch: the old session\'s place moves to its successor', () => {
   let app: FastifyInstance;
@@ -53,7 +53,7 @@ describe('a plan switch: the old session\'s place moves to its successor', () =>
   });
 
   /** A room of the three agents (with `lead` as coordinator unless told not to), briefings already delivered and cleared. */
-  const room = async (name = 'Fleet', coordinator = true, wake: 'mentions' | 'all' | null = null) => {
+  const room = async (name = 'Reverie', coordinator = true, wake: 'mentions' | 'all' | null = null) => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/chatrooms',
@@ -71,7 +71,7 @@ describe('a plan switch: the old session\'s place moves to its successor', () =>
     for (const id of names.keys()) panes(id).length = 0;
   };
   const sessionOf = (id: string) => ctx.sessions.get(id) as unknown as { claudeSessionId: string | null };
-  const as = (id?: string) => (id ? { 'x-codeman-parent-session': id } : {});
+  const as = (id?: string) => (id ? { 'x-reverie-parent-session': id } : {});
   const replace = (from: string, to: string, caller?: string) =>
     app.inject({ method: 'POST', url: '/api/chatrooms/members/replace', headers: as(caller), payload: { from, to } });
   const make = async (name: string, members: string[], coordinator?: string) =>

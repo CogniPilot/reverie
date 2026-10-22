@@ -1,7 +1,7 @@
 /**
  * POST /api/system/span-displays (multi-monitor launcher) + resolveSpanUrl.
  *
- * The route shells out to scripts/span-codeman.sh, so we mock child_process.spawn
+ * The route shells out to scripts/span-reverie.sh, so we mock child_process.spawn
  * to avoid actually opening a browser (and to assert the sanitized URL passed to
  * it). process.platform is overridden per-case so the macOS-only guard is tested
  * deterministically regardless of where the suite runs.
@@ -72,7 +72,7 @@ describe('POST /api/system/span-displays', () => {
     expect(spawnMock).toHaveBeenCalledTimes(1);
     const [cmd, args] = spawnMock.mock.calls[0] as [string, string[]];
     expect(cmd).toBe('bash');
-    expect(args[0]).toMatch(/span-codeman\.sh$/);
+    expect(args[0]).toMatch(/span-reverie\.sh$/);
     expect(args[1]).toBe('http://localhost:5000');
     await app.close();
   });

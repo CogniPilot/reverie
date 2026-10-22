@@ -12,7 +12,7 @@ import {
   buildStatusUrl,
   buildWebArgs,
   isProcessAlive,
-  looksLikeCodemanWeb,
+  looksLikeReverieWeb,
   parsePidFileContents,
   probeServer,
 } from '../src/daemon-control.js';
@@ -64,9 +64,9 @@ describe('buildWebArgs', () => {
   });
 
   it('forwards --base-url so a detached/service relaunch keeps the mount prefix', () => {
-    const args = buildWebArgs({ host: '127.0.0.1', port: 3000, https: false, basePath: '/codeman' });
+    const args = buildWebArgs({ host: '127.0.0.1', port: 3000, https: false, basePath: '/reverie' });
     expect(args).toContain('--base-url');
-    expect(args[args.indexOf('--base-url') + 1]).toBe('/codeman');
+    expect(args[args.indexOf('--base-url') + 1]).toBe('/reverie');
   });
 
   it('omits --base-url at root (empty basePath)', () => {
@@ -123,23 +123,23 @@ describe('parsePidFileContents', () => {
   });
 });
 
-describe('looksLikeCodemanWeb', () => {
+describe('looksLikeReverieWeb', () => {
   it('matches the ways the server is actually launched', () => {
-    expect(looksLikeCodemanWeb('/usr/bin/node /home/u/.codeman/app/dist/index.js web')).toBe(true);
-    expect(looksLikeCodemanWeb('/usr/bin/node dist/index.js web --https')).toBe(true);
-    expect(looksLikeCodemanWeb('node /repo/src/index.ts web --port 3000')).toBe(true);
-    expect(looksLikeCodemanWeb('/opt/homebrew/bin/reverie web')).toBe(true);
-    expect(looksLikeCodemanWeb('/opt/homebrew/bin/fleet web')).toBe(true);
-    expect(looksLikeCodemanWeb('/opt/homebrew/bin/codeman web')).toBe(true);
-    expect(looksLikeCodemanWeb('aicodeman web --host 0.0.0.0')).toBe(true);
+    expect(looksLikeReverieWeb('/usr/bin/node /home/u/.reverie/app/dist/index.js web')).toBe(true);
+    expect(looksLikeReverieWeb('/usr/bin/node dist/index.js web --https')).toBe(true);
+    expect(looksLikeReverieWeb('node /repo/src/index.ts web --port 3000')).toBe(true);
+    expect(looksLikeReverieWeb('/opt/homebrew/bin/reverie web')).toBe(true);
+    expect(looksLikeReverieWeb('/opt/homebrew/bin/reverie web')).toBe(true);
+    expect(looksLikeReverieWeb('/opt/homebrew/bin/reverie web')).toBe(true);
+    expect(looksLikeReverieWeb('aireverie web --host 0.0.0.0')).toBe(true);
   });
 
   it('rejects anything that inherited a recycled pid', () => {
-    expect(looksLikeCodemanWeb(null)).toBe(false);
-    expect(looksLikeCodemanWeb('')).toBe(false);
-    expect(looksLikeCodemanWeb('/usr/bin/node dist/index.js session list')).toBe(false);
-    expect(looksLikeCodemanWeb('vim web')).toBe(false);
-    expect(looksLikeCodemanWeb('/usr/lib/systemd/systemd --user')).toBe(false);
+    expect(looksLikeReverieWeb(null)).toBe(false);
+    expect(looksLikeReverieWeb('')).toBe(false);
+    expect(looksLikeReverieWeb('/usr/bin/node dist/index.js session list')).toBe(false);
+    expect(looksLikeReverieWeb('vim web')).toBe(false);
+    expect(looksLikeReverieWeb('/usr/lib/systemd/systemd --user')).toBe(false);
   });
 });
 
@@ -190,7 +190,7 @@ describe('probeServer', () => {
     expect(result.up).toBe(true);
   });
 
-  it('does not mistake an unrelated service squatting on the port for Codeman', async () => {
+  it('does not mistake an unrelated service squatting on the port for Reverie', async () => {
     const result = await probeServer(`http://127.0.0.1:${port}/foreign`);
     expect(result.up).toBe(false);
   });

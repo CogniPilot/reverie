@@ -1,9 +1,9 @@
 /**
  * @fileoverview Types for the in-app self-updater.
  *
- * Codeman can update itself from the web UI (App Settings → Updates). The flow
+ * Reverie can update itself from the web UI (App Settings → Updates). The flow
  * is driven by a detached `scripts/self-update.sh` that outlives the service
- * restart it triggers, and a status file at `~/.codeman/update-status.json`
+ * restart it triggers, and a status file at `~/.reverie/update-status.json`
  * (see `dataPath('update-status.json')`) that the browser polls across the
  * restart boundary.
  *
@@ -28,7 +28,7 @@
 export type SupervisorKind = 'systemd' | 'launchd' | 'launchd-daemon' | 'docker-compose' | 'none';
 
 /**
- * How Codeman was installed. `git` and `docker-compose` can self-update in
+ * How Reverie was installed. `git` and `docker-compose` can self-update in
  * place; `docker-compose` is a git checkout bind-mounted into the container, so
  * the pull/build happen on the host filesystem and survive container recreation.
  */
@@ -47,7 +47,7 @@ export type InstallKind = 'git' | 'docker-compose' | 'npm' | 'unknown';
  *   EMPTY STRING and starts anyway, so without this check a new required setting
  *   arrives as a silently blank env var.
  * - `no-auto-restart`: the container's restart policy would not bring it back
- *   after the server exits, so applying the update would take Codeman down.
+ *   after the server exits, so applying the update would take Reverie down.
  */
 export type EnvironmentBlockerKind = 'dockerfile-changed' | 'compose-changed' | 'env-keys-missing' | 'no-auto-restart';
 
@@ -101,7 +101,7 @@ export interface UpdateStatus {
   fromVersion: string;
   /** Target version (parsed from the release tag). */
   toVersion?: string;
-  /** Target git tag, e.g. `codeman@0.9.4`. */
+  /** Target git tag, e.g. `reverie@0.9.4`. */
   toTag?: string;
   /** Commit the repo was on before the update, for rollback. */
   prevSha?: string;
@@ -128,7 +128,7 @@ export interface InstallInfo {
   dirty: boolean;
   supervisor: SupervisorKind;
   currentVersion: string;
-  /** False when `CODEMAN_DISABLE_SELF_UPDATE=1`. */
+  /** False when `REVERIE_DISABLE_SELF_UPDATE=1`. */
   selfUpdateEnabled: boolean;
 }
 
@@ -155,7 +155,7 @@ export interface UpdateCheckResult {
  * - `tracking`: the current branch's `@{upstream}` remote (where `git pull` goes).
  * - `upstream`: the canonical project (a remote named `origin`/`upstream` that is
  *   not the tracking remote).
- * - `other`: anything else explicitly requested via `CODEMAN_UPDATE_REMOTES`.
+ * - `other`: anything else explicitly requested via `REVERIE_UPDATE_REMOTES`.
  */
 export type RepoRemoteRole = 'tracking' | 'upstream' | 'other';
 

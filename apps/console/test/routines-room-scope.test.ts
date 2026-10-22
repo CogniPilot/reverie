@@ -17,7 +17,7 @@ vi.mock('../src/web/admin-audit.js', () => ({ appendAdminAudit: audit }));
 
 const A = '0000002d-0035-4000-8000-000000000047';
 const B = '00000038-0043-4000-8000-000000000060';
-const headers = (session: string) => ({ 'x-codeman-parent-session': session });
+const headers = (session: string) => ({ 'x-reverie-parent-session': session });
 const source = ts.createSourceFile('server.ts', readFileSync(new URL('../src/web/server.ts', import.meta.url), 'utf8'), ts.ScriptTarget.Latest, true);
 let posterSource: string;
 let membershipSource: string;

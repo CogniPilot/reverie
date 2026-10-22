@@ -16,7 +16,7 @@ import { registerChatroomRoutes } from '../../src/web/routes/chatroom-routes.js'
 const A = '0000002d-0035-4000-8000-000000000047';
 const B = '00000038-0043-4000-8000-000000000060';
 const C = '0000003e-004c-4000-8000-00000000006f';
-const AS = (id: string) => ({ 'x-codeman-parent-session': id });
+const AS = (id: string) => ({ 'x-reverie-parent-session': id });
 
 describe('post warnings', () => {
   let app: FastifyInstance;
@@ -49,7 +49,7 @@ describe('post warnings', () => {
   });
 
   /** A room of the three agents (with `lead` as coordinator unless told not to), briefings already delivered and cleared. */
-  const room = async (name = 'Fleet', coordinator = true, wake: 'mentions' | 'all' | null = null) => {
+  const room = async (name = 'Reverie', coordinator = true, wake: 'mentions' | 'all' | null = null) => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/chatrooms',
@@ -79,7 +79,7 @@ describe('post warnings', () => {
       {
         code: 'stray-mention',
         names: ['linus'],
-        text: '@linus is not in "Fleet", so they will not see this; ask a coordinator to add them, or post where they are',
+        text: '@linus is not in "Reverie", so they will not see this; ask a coordinator to add them, or post where they are',
       },
     ]);
   });
@@ -117,7 +117,7 @@ describe('post warnings', () => {
     expect(res.statusCode).toBe(200);
     expect(res.json().data.warnings).toHaveLength(1);
     expect(res.json().data.warnings[0].names).toEqual(['linus', 'ada']);
-    expect(res.json().data.warnings[0].text).toContain('@linus, @ada are not in "Fleet"');
+    expect(res.json().data.warnings[0].text).toContain('@linus, @ada are not in "Reverie"');
   });
 
   it('a refused post carries no warning and a DM is called "Direct message"', async () => {
@@ -140,7 +140,7 @@ describe('post warnings', () => {
   const idOf = async (res: ReturnType<typeof post>) => (await res).json().data.message.id as string;
 
   it('warns about newer messages from others, in this room only, never counting its own posts', async () => {
-    const id = await room('Fleet');
+    const id = await room('Reverie');
     const other = await room('Other');
     const first = await idOf(post(id, 'one', B));
     await post(id, 'two', C);
@@ -154,13 +154,13 @@ describe('post warnings', () => {
       {
         code: 'newer-unread',
         names: ['lead', 'bravo'],
-        text: '2 newer messages from lead, bravo in "Fleet" came in before this was posted; run: reverie agent chat read',
+        text: '2 newer messages from lead, bravo in "Reverie" came in before this was posted; run: reverie agent chat read',
       },
     ]);
   });
 
   it('is quiet when caught up, when the server has no record, or for a caller that is not an agent', async () => {
-    const id = await room('Fleet');
+    const id = await room('Reverie');
     await post(id, 'one', B);
     const last = await idOf(post(id, 'two', C));
     seenAs(() => last);
@@ -177,7 +177,7 @@ describe('post warnings', () => {
   });
 
   it("names the owner by their display name, not the stored 'user'", async () => {
-    const id = await room('Fleet');
+    const id = await room('Reverie');
     const first = await idOf(post(id, 'one', B));
     await post(id, 'owner here');
     seenAs(() => first);
@@ -186,11 +186,11 @@ describe('post warnings', () => {
     service.ownerNames = () => ['Pat Doe', 'pat'];
     const named = await post(id, 'again', A);
     expect(named.json().data.warnings[0].names).toEqual(['Pat Doe']);
-    expect(named.json().data.warnings[0].text).toContain('from Pat Doe in "Fleet"');
+    expect(named.json().data.warnings[0].text).toContain('from Pat Doe in "Reverie"');
   });
 
   it('puts a stray @name and a newer-unread line side by side, one of each', async () => {
-    const id = await room('Fleet');
+    const id = await room('Reverie');
     const first = await idOf(post(id, 'one', B));
     await post(id, 'two', C);
     seenAs(() => first);
@@ -199,7 +199,7 @@ describe('post warnings', () => {
   });
 
   it('keeps an away note on the member, shows it in the room, and clears it with an empty one', async () => {
-    const id = await room('Fleet');
+    const id = await room('Reverie');
     const set = (away: string) =>
       app.inject({ method: 'POST', url: `/api/chatrooms/${id}/members/${A}/status`, headers: AS(A), payload: { away } });
     const awayOf = async () => {

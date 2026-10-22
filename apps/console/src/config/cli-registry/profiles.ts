@@ -67,7 +67,7 @@ export const LAUNCHER_PROFILE_NAMES = [
  */
 export const SETENV_PROFILE_NAMES = [
   // DeepSeek's terminal front door reports idle/working/blocked to a supervisor over the
-  // generic env-gated Herdr contract; this makes Codeman that supervisor. It needs a
+  // generic env-gated Herdr contract; this makes Reverie that supervisor. It needs a
   // profile rather than key names because it writes an executable shim to disk and then
   // exports that shim's path along with the session's own pane id.
   'deepseek-status-bridge',

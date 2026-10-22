@@ -1,5 +1,5 @@
 /**
- * @fileoverview `codeman tui`: the full-screen dashboard plus the two
+ * @fileoverview `reverie tui`: the full-screen dashboard plus the two
  * non-interactive fast paths (`--list`, `<n>`).
  *
  * This is the IO half of `src/tui/`: it owns the terminal, the timers, stdin
@@ -48,7 +48,7 @@ import { spawnSync } from 'node:child_process';
 import { hostname as osHostname } from 'node:os';
 import chalk from 'chalk';
 import { palette, table, tint, type Tone } from '../cli-style.js';
-import { CODEMAN_INSTANCE, resolveTmuxSocketName } from '../config/instance.js';
+import { REVERIE_INSTANCE, resolveTmuxSocketName } from '../config/instance.js';
 import { getErrorMessage } from '../types/api.js';
 import { dropSeveredEscape, foldPreviewGlyphs, toDisplayLines } from './tui-ansi.js';
 import { approvalAnswerForKey, newApprovalIds } from './tui-approvals.js';
@@ -325,7 +325,7 @@ function escapeTmuxFormat(value: string): string {
 /**
  * The status line an attached session wears, as tmux option → value.
  *
- * Codeman turns the status bar OFF on every pane it owns (tmux-manager.ts): the
+ * Reverie turns the status bar OFF on every pane it owns (tmux-manager.ts): the
  * web UI carries that information around the terminal instead. A terminal
  * attach has no such frame, so the way out is invisible, and "how do I get out
  * of this?" is answered by exiting the agent (measured: a tester left a dead
@@ -479,7 +479,7 @@ export function nextSessionName(caseName: string, existing: readonly string[]): 
  *
  * Resuming is Claude Code's `--resume`, so it is claude-only, needs the
  * directory the conversation ran in, and needs the CONVERSATION's id
- * (`claudeSessionId`) rather than the Codeman row's: a `/clear`-respawned or
+ * (`claudeSessionId`) rather than the Reverie row's: a `/clear`-respawned or
  * re-attached session carries a different one, and the server's regex only
  * accepts the hex-and-dashes shape a real transcript id has.
  */
@@ -529,7 +529,7 @@ export interface TuiAttachHandoff {
  * Prepare a tmux window for a human terminal: let it follow the attaching
  * client's shape, and give it a status bar naming the way out. Both halves are
  * best-effort and both are put back by `restore()`, so a session that was
- * `window-size manual` with no status bar (what Codeman creates) is exactly
+ * `window-size manual` with no status bar (what Reverie creates) is exactly
  * that again after the detach.
  */
 export async function beginAttachHandoff(
@@ -543,7 +543,7 @@ export async function beginAttachHandoff(
   const prefix = (await client.readPrefixKey(muxName)) ?? undefined;
   // Read, not assumed: see detachChord() for the `d` vs `D` mix-up this closes.
   const detachKey = (await client.readDetachKey()) ?? undefined;
-  // Codeman pins its windows to the size the BROWSER dictates (`window-size
+  // Reverie pins its windows to the size the BROWSER dictates (`window-size
   // manual` + `resize-window`, tmux-manager.ts), so a terminal of any other
   // shape attaches to a window that does not fill it and tmux pads the gap with
   // dots. `latest` (not a one-off resize to our size) is also what makes a
@@ -610,7 +610,7 @@ export async function beginAttachHandoff(
     if (snapshot) dressed.push({ muxName: target, options: snapshot });
     await client.applySessionOptions(target, bannerFor(target, targetLabel));
     // ⚠️ Sizing for EVERY switchable session, not just the one being attached.
-    // Codeman pins each window `window-size manual` at the BROWSER's size, so a
+    // Reverie pins each window `window-size manual` at the BROWSER's size, so a
     // session switched into from inside a pane stays pinned and tmux pads the
     // gap with dots — the pane filled half the terminal and the rest was a dot
     // grid (reported from the beta, with a screenshot, after Alt+N switching
@@ -639,13 +639,13 @@ export async function beginAttachHandoff(
 }
 
 /**
- * Is this the session the TUI itself runs in? Codeman exports
- * `CODEMAN_SESSION_ID` into every managed pane, and killing that one would take
+ * Is this the session the TUI itself runs in? Reverie exports
+ * `REVERIE_SESSION_ID` into every managed pane, and killing that one would take
  * the TUI down with it. Ids reach agents truncated, so either side may be the
  * prefix; anything shorter than 8 characters is not identification.
  */
-export function isSelfSession(sessionId: string, env: { CODEMAN_SESSION_ID?: string } = {}): boolean {
-  const self = (env.CODEMAN_SESSION_ID ?? '').trim();
+export function isSelfSession(sessionId: string, env: { REVERIE_SESSION_ID?: string } = {}): boolean {
+  const self = (env.REVERIE_SESSION_ID ?? '').trim();
   if (self.length < 8 || sessionId.length < 8) return false;
   return sessionId.startsWith(self) || self.startsWith(sessionId);
 }
@@ -919,7 +919,7 @@ export function tmuxRowsToSessions(sessions: readonly TuiTmuxSession[]): TuiSess
 
 /**
  * Stamp each row with the tmux session that backs it. The mux name carries only
- * the first 8 characters of the session id (`codeman-<prefix>`), so the join is
+ * the first 8 characters of the session id (`reverie-<prefix>`), so the join is
  * by prefix; a row that matches nothing keeps no mux name and cannot be
  * attached, which is exactly what the attach path then reports.
  */
@@ -972,7 +972,7 @@ const STATE_TONE: Record<TuiSessionState, Tone> = {
 };
 
 export interface TuiListLine {
-  /** 1-based position, the same number `codeman tui <n>` takes. */
+  /** 1-based position, the same number `reverie tui <n>` takes. */
   index: number;
   state: TuiSessionState;
   label: string;
@@ -1181,8 +1181,8 @@ class TuiApp {
       this.client.close();
       process.stderr.write(
         `${palette.err('The Reverie server rejected these credentials.')}\n` +
-          `Set ${palette.info('CODEMAN_PASSWORD')} (and ${palette.info('CODEMAN_USERNAME')} if it is not "admin"), ` +
-          'or put them in ~/.codeman/.env, then run reverie tui again.\n'
+          `Set ${palette.info('REVERIE_PASSWORD')} (and ${palette.info('REVERIE_USERNAME')} if it is not "admin"), ` +
+          'or put them in ~/.reverie/.env, then run reverie tui again.\n'
       );
       return 1;
     }
@@ -1200,7 +1200,7 @@ class TuiApp {
       // No server to name the machine, and tmux is local by definition.
       this.model.setHeader({
         hostname: osHostname(),
-        ...(CODEMAN_INSTANCE ? { instance: CODEMAN_INSTANCE } : {}),
+        ...(REVERIE_INSTANCE ? { instance: REVERIE_INSTANCE } : {}),
       });
       this.startProbing();
     }
@@ -1320,7 +1320,7 @@ class TuiApp {
       // the rows on screen stay, the banner explains why they may be stale.
       this.model.setConnection('reconnecting');
       this.paint();
-      if (this.env.CODEMAN_TUI_DEBUG) process.stderr.write(`refresh failed: ${getErrorMessage(error)}\n`);
+      if (this.env.REVERIE_TUI_DEBUG) process.stderr.write(`refresh failed: ${getErrorMessage(error)}\n`);
     }
   }
 
@@ -1612,7 +1612,7 @@ class TuiApp {
    *
    * A SNAPSHOT taken at attach time and not refreshed: the TUI is blocked in
    * `spawnSync` for the whole attach, so there is no loop to update it from,
-   * and tmux's own format language cannot map a `codeman-<hex>` session name
+   * and tmux's own format language cannot map a `reverie-<hex>` session name
    * back to the label a human recognises. A strip that is a few minutes stale
    * about a session created elsewhere is worth far more than no strip.
    */
@@ -2171,7 +2171,7 @@ class TuiApp {
   /**
    * Wait for a just-created session's tmux pane to exist, by the same prefix
    * join `applyMuxNames()` uses. Enumeration is the only honest evidence the
-   * pane is really there; deriving `codeman-<prefix>` by hand would attach to a
+   * pane is really there; deriving `reverie-<prefix>` by hand would attach to a
    * name that may not exist yet.
    */
   private async awaitPane(sessionId: string, timeoutMs = RESUME_PANE_TIMEOUT_MS): Promise<string | null> {
@@ -2215,7 +2215,7 @@ class TuiApp {
       return;
     }
 
-    // A dead pane still LISTS, because Codeman keeps `remain-on-exit on`: the
+    // A dead pane still LISTS, because Reverie keeps `remain-on-exit on`: the
     // row looks ordinary and the server still calls it idle. Attaching to one
     // hands the terminal to a pane that reads nothing, which a beta tester
     // experienced as the TUI freezing with no way out.
@@ -2556,7 +2556,7 @@ type Snapshot = { kind: 'ok'; rows: TuiRow[]; degraded: boolean } | { kind: 'aut
 /**
  * One read of the world for the non-interactive paths. Same client, same
  * classification and same ordering as the dashboard, so `--list`'s numbers are
- * the numbers `codeman tui <n>` takes.
+ * the numbers `reverie tui <n>` takes.
  */
 async function snapshot(client: TuiClient): Promise<Snapshot> {
   const server = await client.connect();
@@ -2573,7 +2573,7 @@ async function snapshot(client: TuiClient): Promise<Snapshot> {
     client.fetchLiveSessionMetrics().catch(() => [] as TuiLiveSessionMetrics[]),
   ]);
   // Same merge as the dashboard, so `--list`'s numbers stay the numbers
-  // `codeman tui <n>` takes: the WORKING group's order depends on it.
+  // `reverie tui <n>` takes: the WORKING group's order depends on it.
   model.replaceSessions(applyLiveMetrics(applyMuxNames(sessions, tmux), metrics));
   model.setApprovals(approvals);
   return { kind: 'ok', rows: model.rows(), degraded: false };
@@ -2582,8 +2582,8 @@ async function snapshot(client: TuiClient): Promise<Snapshot> {
 function authHint(): string {
   return (
     `${palette.err('The Reverie server rejected these credentials.')}\n` +
-    `Set ${palette.info('CODEMAN_PASSWORD')} (and ${palette.info('CODEMAN_USERNAME')} if it is not "admin"), ` +
-    'or put them in ~/.codeman/.env.\n'
+    `Set ${palette.info('REVERIE_PASSWORD')} (and ${palette.info('REVERIE_USERNAME')} if it is not "admin"), ` +
+    'or put them in ~/.reverie/.env.\n'
   );
 }
 
@@ -2602,7 +2602,7 @@ export async function runTui(options: TuiRunOptions = {}): Promise<number> {
 }
 
 /**
- * `codeman tui --list`: prints and exits, colored when the output is a terminal
+ * `reverie tui --list`: prints and exits, colored when the output is a terminal
  * and plain when it is piped (chalk's call, not ours), so it composes with
  * grep/awk.
  */
@@ -2641,7 +2641,7 @@ export async function runTuiList(options: TuiRunOptions = {}): Promise<number> {
 }
 
 /**
- * `codeman tui <n>`: attach straight to the nth row of `--list`. No screen setup
+ * `reverie tui <n>`: attach straight to the nth row of `--list`. No screen setup
  * at all, so it is as fast as the API call it makes.
  */
 export async function runTuiAttach(position: number, options: TuiRunOptions = {}): Promise<number> {

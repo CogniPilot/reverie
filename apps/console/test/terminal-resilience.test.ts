@@ -10,7 +10,7 @@
 // deferred — and xterm's RenderDebouncer only clears its `_animationFrame`
 // handle from inside that callback. One drop leaves the handle permanently set,
 // so every later refresh() returns immediately and the terminal freezes while
-// its buffer keeps updating correctly. Codeman has exactly one xterm instance
+// its buffer keeps updating correctly. Reverie has exactly one xterm instance
 // per page load, so a single backgrounding can wedge it until a reload.
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -24,7 +24,7 @@ function loadConstants() {
   const source = readFileSync(resolve(import.meta.dirname, '../src/web/public/constants.js'), 'utf8');
   vm.runInContext(source, context, { filename: 'constants.js' });
   const w = context.window as {
-    CodemanRenderLiveness: {
+    ReverieRenderLiveness: {
       shouldKickRenderer: (s: {
         wroteAt: number;
         renderedAt: number;
@@ -35,13 +35,13 @@ function loadConstants() {
       RENDER_STALL_MS: number;
       RENDER_LIVENESS_POLL_MS: number;
     };
-    CodemanFetchDeadline: {
+    ReverieFetchDeadline: {
       terminalFetchDeadlineMs: (s: { full?: boolean; inflight?: number }) => number;
       FETCH_DEADLINE_TAIL_MS: number;
       FETCH_DEADLINE_FULL_MS: number;
       FETCH_DEADLINE_MAX_MS: number;
     };
-    CodemanDiag: {
+    ReverieDiag: {
       sanitizeDiagEntry: (msg: unknown) => string;
       DIAG_ENTRY_MAX_CHARS: number;
     };
@@ -50,8 +50,8 @@ function loadConstants() {
 }
 
 describe('shouldKickRenderer', () => {
-  const { CodemanRenderLiveness } = loadConstants();
-  const { shouldKickRenderer, RENDER_STALL_MS } = CodemanRenderLiveness;
+  const { ReverieRenderLiveness } = loadConstants();
+  const { shouldKickRenderer, RENDER_STALL_MS } = ReverieRenderLiveness;
 
   // The signature of the real failure: bytes were written, the element is
   // visible, and no frame has been produced since.
@@ -93,14 +93,14 @@ describe('shouldKickRenderer', () => {
   });
 
   it('polls coarsely enough not to wake an idle phone every second', () => {
-    expect(CodemanRenderLiveness.RENDER_LIVENESS_POLL_MS).toBeGreaterThanOrEqual(1000);
+    expect(ReverieRenderLiveness.RENDER_LIVENESS_POLL_MS).toBeGreaterThanOrEqual(1000);
   });
 });
 
 describe('terminalFetchDeadlineMs', () => {
-  const { CodemanFetchDeadline } = loadConstants();
+  const { ReverieFetchDeadline } = loadConstants();
   const { terminalFetchDeadlineMs, FETCH_DEADLINE_TAIL_MS, FETCH_DEADLINE_FULL_MS, FETCH_DEADLINE_MAX_MS } =
-    CodemanFetchDeadline;
+    ReverieFetchDeadline;
 
   // A full scrollback capture can be megabytes where a tail is one frame, so a
   // single fixed timeout is wrong in both directions on a mobile link.
@@ -130,8 +130,8 @@ describe('terminalFetchDeadlineMs', () => {
 });
 
 describe('sanitizeDiagEntry', () => {
-  const { CodemanDiag } = loadConstants();
-  const { sanitizeDiagEntry, DIAG_ENTRY_MAX_CHARS } = CodemanDiag;
+  const { ReverieDiag } = loadConstants();
+  const { sanitizeDiagEntry, DIAG_ENTRY_MAX_CHARS } = ReverieDiag;
 
   // The crash trail is joined with '\n' into one localStorage value and
   // beaconed, and at least one call site interpolates a WebSocket close

@@ -49,7 +49,7 @@ export interface SessionSearchInput {
    * conversation instead of switching to a tab that no longer exists.
    */
   history?: boolean;
-  /** Claude conversation UUID to resume, when it differs from the Codeman id. */
+  /** Claude conversation UUID to resume, when it differs from the Reverie id. */
   claudeSessionId?: string;
 }
 

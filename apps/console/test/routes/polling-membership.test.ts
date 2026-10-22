@@ -37,7 +37,7 @@ it('normal owner/coordinator Add chooses polling transport; no pane delivery; re
   service=new ChatroomService({file,getSession:id=>c.sessions.get(id),broadcast:()=>{}});
   registerChatroomRoutes(f,c,service,new ChatFileStore(dir));
  });await service.init();
- const headers={'x-codeman-parent-session':B};
+ const headers={'x-reverie-parent-session':B};
  try {
   const room=await app.inject({method:'POST',url:'/api/chatrooms',payload:{name:'Office',coordinatorSessionId:A}});expect(room.statusCode).toBe(200);const id=room.json().data.id;
   const add=(target:string,extra={},h={})=>app.inject({method:'POST',url:`/api/chatrooms/${id}/members`,headers:h,payload:{sessionId:target,...extra}});
@@ -46,7 +46,7 @@ it('normal owner/coordinator Add chooses polling transport; no pane delivery; re
   expect((await add(C,{pollingLead:true,voice:true})).statusCode).toBe(400);
   expect((await add(C,{voice:true})).statusCode).toBe(400);
   expect((await add(C,{role:'coordinator'})).statusCode).toBe(400);
-  const joined=await add(B,{postOnly:false},{'x-codeman-parent-session':A});expect(joined.statusCode).toBe(200);expect(joined.json().data.member.postOnly).toBe(true);
+  const joined=await add(B,{postOnly:false},{'x-reverie-parent-session':A});expect(joined.statusCode).toBe(200);expect(joined.json().data.member.postOnly).toBe(true);
   const voice=await app.inject({method:'POST',url:`/api/chatrooms/${id}/members/${B}/status`,payload:{voice:true}});expect(voice.statusCode).toBe(200);expect(service.room(id)?.members.find(m=>m.sessionId===B)?.voice).toBe(true);
   const lead=await app.inject({method:'POST',url:`/api/chatrooms/${id}/coordinator`,payload:{sessionId:B}});expect(lead.statusCode).toBe(200);expect(service.room(id)?.members.find(m=>m.sessionId===B)?.role).toBe('coordinator');expect(service.room(id)?.members.find(m=>m.sessionId===B)?.postOnly).toBe(true);
   expect((await add(C,{postOnly:true})).statusCode).toBe(200);

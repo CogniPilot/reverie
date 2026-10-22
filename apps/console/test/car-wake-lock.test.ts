@@ -5,7 +5,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { JSDOM } from 'jsdom';
 
 const source = readFileSync(resolve(import.meta.dirname, '../src/web/public/car-mode.js'), 'utf8');
-const context = vm.createContext({ CodemanApp: class {} });
+const context = vm.createContext({ ReverieApp: class {} });
 vm.runInContext(source, context);
 const makeController = (deps: unknown) => {
   const Controller = vm.runInContext('CarScreenWakeLock', context);
@@ -106,8 +106,8 @@ it('real Car UI shows an accessible notice and retry when secure context is miss
     const w = dom.window;
     Object.defineProperty(w, 'isSecureContext', { value: false });
     Object.defineProperty(w.document, 'visibilityState', { value: 'visible' });
-    w.eval('window.CodemanApp = class {}'); w.eval(source);
-    const app = w.eval('new CodemanApp()');
+    w.eval('window.ReverieApp = class {}'); w.eval(source);
+    const app = w.eval('new ReverieApp()');
     app._buildCarMode({ name: 'Test voice' }); app._carScreen.hidden = false;
     await app._keepCarScreenAwake();
     const notice = w.document.querySelector('.car-wake-notice') as HTMLElement;

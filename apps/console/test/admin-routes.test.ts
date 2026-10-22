@@ -31,19 +31,19 @@ beforeAll(async () => {
   dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'admin-data-'));
   spacesDir = await fs.mkdtemp(path.join(os.tmpdir(), 'admin-spaces-'));
   for (const k of [
-    'CODEMAN_DATA_DIR',
-    'CODEMAN_USER_SPACES_DIR',
-    'CODEMAN_MULTIUSER',
-    'CODEMAN_PASSWORD',
-    'CODEMAN_USERNAME',
+    'REVERIE_DATA_DIR',
+    'REVERIE_USER_SPACES_DIR',
+    'REVERIE_MULTIUSER',
+    'REVERIE_PASSWORD',
+    'REVERIE_USERNAME',
   ]) {
     saved[k] = process.env[k];
   }
-  process.env.CODEMAN_DATA_DIR = dataDir;
-  process.env.CODEMAN_USER_SPACES_DIR = spacesDir;
-  process.env.CODEMAN_MULTIUSER = '1';
-  delete process.env.CODEMAN_PASSWORD;
-  delete process.env.CODEMAN_USERNAME;
+  process.env.REVERIE_DATA_DIR = dataDir;
+  process.env.REVERIE_USER_SPACES_DIR = spacesDir;
+  process.env.REVERIE_MULTIUSER = '1';
+  delete process.env.REVERIE_PASSWORD;
+  delete process.env.REVERIE_USERNAME;
   invalidateUsersCache();
   await createUser({ username: 'root', role: 'admin', password: 'rootpass123' });
   await createUser({ username: 'joe', role: 'user', password: 'joepass1234' });
@@ -135,12 +135,12 @@ describe('admin API', () => {
 
   it('404s admin routes in single-user mode', async () => {
     // Flip the flag off for one request path check.
-    process.env.CODEMAN_MULTIUSER = '';
+    process.env.REVERIE_MULTIUSER = '';
     try {
       const res = await fetch(url('/api/admin/users'), { headers: admin });
       expect(res.status).toBe(404);
     } finally {
-      process.env.CODEMAN_MULTIUSER = '1';
+      process.env.REVERIE_MULTIUSER = '1';
     }
   });
 });

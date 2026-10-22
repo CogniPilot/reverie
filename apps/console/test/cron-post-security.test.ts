@@ -99,7 +99,7 @@ describe('post jobs and bots are owner-only', () => {
   it.each(AGENT_HEADERS)('refuses an agent header %j on every post-job and bot route', async (header) => {
     const { app, cron, registry } = await setup();
     const owner = cron.createJob(body as never);
-    const h = { 'x-codeman-parent-session': header };
+    const h = { 'x-reverie-parent-session': header };
     const before = JSON.stringify(cron.getJob(owner.id));
     const botBefore = JSON.stringify(registry.list());
 

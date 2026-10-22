@@ -8,13 +8,13 @@
  *     name the same extensions, so the terminal, the preview and the route
  *     agree on what a page is.
  *  2. A successful mint renders an iframe whose `sandbox` carries scripts but
- *     never `allow-same-origin` (with it, the page could drive Codeman), with
+ *     never `allow-same-origin` (with it, the page could drive Reverie), with
  *     the Page pill shown and pressed.
  *  3. A refused mint (remote case, broad folder, hidden directory) falls
  *     through to the source view with its Edit button, and hides the pill,
  *     which would only retry a page the server just refused.
  *  4. The pill flips between page and source and persists
- *     `codeman:filePreviewHtmlRendered` per device; with it off the preview
+ *     `reverie:filePreviewHtmlRendered` per device; with it off the preview
  *     opens as source without asking the server for a page at all.
  *
  * Loaded via `vm` with a jsdom document injected, like
@@ -67,10 +67,10 @@ function makeFetch(mint: 'ok' | 'refuse') {
 
 function loadApp(mint: 'ok' | 'refuse', prefs: Record<string, string> = {}) {
   const store = new Map(Object.entries(prefs));
-  const CodemanApp = function CodemanApp(this: unknown) {} as unknown as new () => Record<string, any>;
+  const ReverieApp = function ReverieApp(this: unknown) {} as unknown as new () => Record<string, any>;
   const fetchMock = makeFetch(mint);
   const context = vm.createContext({
-    CodemanApp,
+    ReverieApp,
     console: { ...console, warn: vi.fn(), error: vi.fn() },
     localStorage: {
       getItem: (k: string) => (store.has(k) ? store.get(k) : null),
@@ -98,7 +98,7 @@ function loadApp(mint: 'ok' | 'refuse', prefs: Record<string, string> = {}) {
     <button id="filePreviewDetachBtn" hidden></button>
     <div id="filePreviewBody"></div><div id="filePreviewFooter"></div>`;
 
-  const app = new CodemanApp();
+  const app = new ReverieApp();
   app.$ = (id: string) => document.getElementById(id);
   app._resetFilePreviewEdit = () => {
     const edit = document.getElementById('filePreviewEditBtn');
@@ -188,7 +188,7 @@ describe('file viewer HTML page', () => {
     expect(body.querySelector('iframe')).not.toBeNull();
 
     await app.toggleFilePreviewPage();
-    expect(store.get('codeman:filePreviewHtmlRendered')).toBe('0');
+    expect(store.get('reverie:filePreviewHtmlRendered')).toBe('0');
     expect(body.querySelector('iframe')).toBeNull();
     expect(body.querySelector('pre.file-preview-text')!.textContent).toBe(HTML_SOURCE);
     expect(page.hidden).toBe(false);
@@ -198,14 +198,14 @@ describe('file viewer HTML page', () => {
     expect(mintCalls(fetchMock)).toHaveLength(1);
 
     await app.toggleFilePreviewPage();
-    expect(store.get('codeman:filePreviewHtmlRendered')).toBe('1');
+    expect(store.get('reverie:filePreviewHtmlRendered')).toBe('1');
     expect(body.querySelector('iframe')!.getAttribute('src')).toBe(PAGE_URL);
     expect(page.getAttribute('aria-pressed')).toBe('true');
     expect(mintCalls(fetchMock)).toHaveLength(2);
   });
 
   it('opens as source, pill offered, when the device pref says so', async () => {
-    const { app, fetchMock, body, page } = loadApp('ok', { 'codeman:filePreviewHtmlRendered': '0' });
+    const { app, fetchMock, body, page } = loadApp('ok', { 'reverie:filePreviewHtmlRendered': '0' });
 
     await app.openFilePreview(PAGE_PATH, 's1');
 

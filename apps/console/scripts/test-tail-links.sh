@@ -1,8 +1,8 @@
 #!/bin/bash
-# Test script for clickable file links in Codeman terminal
+# Test script for clickable file links in Reverie terminal
 # Creates a log file and continuously writes timestamped data
 
-LOGFILE="/tmp/codeman-test-$(date +%s).log"
+LOGFILE="/tmp/reverie-test-$(date +%s).log"
 
 echo "Created log file: $LOGFILE"
 echo ""

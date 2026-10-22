@@ -18,13 +18,13 @@ function loadTabOverflowHelper() {
   vm.runInContext(source, context, { filename: 'constants.js' });
   return (
     context.window as {
-      CodemanTabOverflow: {
+      ReverieTabOverflow: {
         shouldAutoWrapTabs: (input: unknown) => boolean;
         computeTabScrollLeft: (input: ScrollInput) => number;
         TAB_SCROLL_REVEAL_PX: number;
       };
     }
-  ).CodemanTabOverflow;
+  ).ReverieTabOverflow;
 }
 
 describe('tab overflow layout policy', () => {

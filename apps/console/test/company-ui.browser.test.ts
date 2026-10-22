@@ -19,7 +19,7 @@ describe('company roster and research reports in Chromium', () => {
     await page?.close();
     page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
     await page.setContent('<!doctype html><html><body></body></html>');
-    await page.addScriptTag({ content: 'class CodemanApp {} window.CodemanApp = CodemanApp;' });
+    await page.addScriptTag({ content: 'class ReverieApp {} window.ReverieApp = ReverieApp;' });
     await page.addScriptTag({
       content: await readFile(resolve(import.meta.dirname, '../src/web/public/company-ui.js'), 'utf8'),
     });
@@ -63,9 +63,9 @@ describe('company roster and research reports in Chromium', () => {
           },
         ],
       };
-      w.app = new w.CodemanApp();
+      w.app = new w.ReverieApp();
       w.app._api = async (path: string, options: any) => {
-        w.calls.push({ path, method: options.method, body: options.body ? JSON.parse(options.body) : undefined });
+        w.calls.push({ path, method: options.method, body: typeof options.body === 'string' ? JSON.parse(options.body) : options.body });
         return { ok: true, json: async () => ({ success: true, data: path === '/api/company' ? w.companyData : {} }) };
       };
     });
@@ -110,7 +110,29 @@ describe('company roster and research reports in Chromium', () => {
       await w.app._renderCompany();
     });
     expect(await page.getByRole('button', { name: 'Hire registered session' }).count()).toBe(0);
-    expect(await page.getByRole('button', { name: 'Assign CTO' }).count()).toBe(0);
+    expect(await page.getByRole('button', { name: 'Assign briefing coordinator' }).count()).toBe(0);
     expect(await page.getByRole('button', { name: 'Invite to channel' }).isVisible()).toBe(true);
   });
+  it('lets only the owner edit an explicit recovery grant independently of the briefing coordinator', async () => {
+    await page.evaluate(() => (window as any).app.openCompany());
+    const grant = page.getByRole('checkbox', { name: /^Recovery permission for / });
+    expect(await grant.isChecked()).toBe(false);
+    await grant.check();
+    await page.getByRole('button', { name: 'Save permissions', exact: true }).click();
+    expect(await page.evaluate(() => (window as any).calls.find((c: any) => c.path === '/api/company/employees/ada'))).toEqual({
+      path: '/api/company/employees/ada',
+      method: 'PUT',
+      body: { permissions: { recoverEmployees: true } },
+    });
+    await page.getByRole('button', { name: 'Assign briefing coordinator', exact: true }).click();
+    expect(await page.evaluate(() => (window as any).calls.find((c: any) => c.path === '/api/company/settings').body.coordinatorEmployeeId)).toBe('ada');
+    await page.evaluate(async () => {
+      const w = window as any;
+      w.companyData.canManage = false;
+      await w.app._renderCompany();
+    });
+    expect(await page.getByRole('checkbox', { name: /^Recovery permission for / }).count()).toBe(0);
+    expect(await page.getByRole('button', { name: 'Save permissions', exact: true }).count()).toBe(0);
+  });
+
 });

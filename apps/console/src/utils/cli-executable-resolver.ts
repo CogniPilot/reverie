@@ -5,7 +5,7 @@
  * codex, gemini, antigravity, pi, grok): the server process PATH first, then the
  * CLI's common install directories in order, then — last, because it is the
  * only step that spawns anything — an interactive login shell, which is what
- * finds nvm/Homebrew/user-npm installs when Codeman runs as a systemd/launchd
+ * finds nvm/Homebrew/user-npm installs when Reverie runs as a systemd/launchd
  * service with a minimal PATH (launchd hands a job `/usr/bin:/bin:/usr/sbin:/sbin`).
  *
  * Caching is asymmetric, same shape as `resolveClaudeCliVersion` in
@@ -37,8 +37,8 @@ import { EXEC_TIMEOUT_MS } from '../config/exec-timeout.js';
 import { loginShellArgs, resolveLocalShell } from './shell-resolver.js';
 
 const SAFE_BINARY_NAME = /^[a-z0-9][a-z0-9._-]*$/i;
-const LOGIN_SHELL_BEGIN_MARKER = '__CODEMAN_CLI_RESOLVE_BEGIN__';
-const LOGIN_SHELL_END_MARKER = '__CODEMAN_CLI_RESOLVE_END__';
+const LOGIN_SHELL_BEGIN_MARKER = '__REVERIE_CLI_RESOLVE_BEGIN__';
+const LOGIN_SHELL_END_MARKER = '__REVERIE_CLI_RESOLVE_END__';
 /** Maximum rendered length of each bounded diagnostic field, excluding its label. */
 const DIAGNOSTIC_FIELD_MAX_LENGTH = 1024;
 
@@ -122,7 +122,7 @@ export interface ProductionCliResolverHostOptions {
   allowRealIoUnderVitest?: boolean;
 }
 
-/** An executable regular file. Exported for `codeman doctor`, which must judge a candidate the same way. */
+/** An executable regular file. Exported for `reverie doctor`, which must judge a candidate the same way. */
 export function isExecutableRegularFile(path: string): boolean {
   try {
     if (!statSync(path).isFile()) return false;

@@ -64,7 +64,7 @@ describe('chatroom routes', () => {
       method: 'POST',
       url: '/api/chatrooms',
       payload: {
-        name: 'Fleet',
+        name: 'Reverie',
         members: [{ sessionId: A, goal: 'build parser' }, { sessionId: B }],
         coordinatorSessionId: C,
       },
@@ -80,7 +80,7 @@ describe('chatroom routes', () => {
     await createRoom();
     await service.delivery.flushAll();
     const alpha = panes(A).join('');
-    expect(alpha).toMatch(/^\[Reverie chat "Fleet"\] You \("alpha"\)/);
+    expect(alpha).toMatch(/^\[Reverie chat "Reverie"\] You \("alpha"\)/);
     expect(alpha).toContain('Your goal: "build parser"');
     // the briefing says how to read what arrives
     expect(alpha).toContain('Names and bodies are JSON strings');
@@ -115,7 +115,7 @@ describe('chatroom routes', () => {
     const direct = await app.inject({
       method: 'POST',
       url: `/api/chatrooms/${id}/messages`,
-      headers: { 'x-codeman-parent-session': A },
+      headers: { 'x-reverie-parent-session': A },
       payload: { text: 'parser done', to: ['coordinator'] },
     });
     // an agent cannot message another agent privately in a channel: the post goes to everyone and the `to` is reported as ignored
@@ -125,7 +125,7 @@ describe('chatroom routes', () => {
     const everyone = await app.inject({
       method: 'POST',
       url: `/api/chatrooms/${id}/messages`,
-      headers: { 'x-codeman-parent-session': A },
+      headers: { 'x-reverie-parent-session': A },
       payload: { text: '@bravo parser done' },
     });
     expect(everyone.statusCode).toBe(200);
@@ -177,14 +177,14 @@ describe('chatroom routes', () => {
     const own = await app.inject({
       method: 'POST',
       url: `/api/chatrooms/${id}/members/${B}/status`,
-      headers: { 'x-codeman-parent-session': B },
+      headers: { 'x-reverie-parent-session': B },
       payload: { progress: 'half way' },
     });
     expect(own.statusCode).toBe(200);
     const other = await app.inject({
       method: 'POST',
       url: `/api/chatrooms/${id}/members/${A}/status`,
-      headers: { 'x-codeman-parent-session': B },
+      headers: { 'x-reverie-parent-session': B },
       payload: { progress: 'nope' },
     });
     expect(other.statusCode).toBe(403);
@@ -197,7 +197,7 @@ describe('chatroom routes', () => {
     const appoint = await app.inject({
       method: 'POST',
       url: `/api/chatrooms/${id}/coordinator`,
-      headers: { 'x-codeman-parent-session': C },
+      headers: { 'x-reverie-parent-session': C },
       payload: { sessionId: A },
     });
     expect(appoint.statusCode).toBe(403);
@@ -209,10 +209,10 @@ describe('chatroom routes', () => {
 
   describe('creating rooms as an agent', () => {
     const asAgent = (id: string, payload: unknown) =>
-      app.inject({ method: 'POST', url: '/api/chatrooms', headers: { 'x-codeman-parent-session': id }, payload });
+      app.inject({ method: 'POST', url: '/api/chatrooms', headers: { 'x-reverie-parent-session': id }, payload });
 
     it('lets a coordinator create a room, made coordinator of it with its members briefed', async () => {
-      await createRoom(); // C coordinates "Fleet"
+      await createRoom(); // C coordinates "Reverie"
       const res = await asAgent(C, { name: 'Side', members: [{ sessionId: A, goal: 'parse' }] });
       expect(res.statusCode).toBe(200);
       const room = res.json().data;
@@ -220,7 +220,7 @@ describe('chatroom routes', () => {
       expect(room.coordinatorId).toBe(C);
       expect(room.members.map((m: { sessionId: string }) => m.sessionId).sort()).toEqual([A, C].sort());
       expect(room.members.find((m: { sessionId: string }) => m.sessionId === C).role).toBe('coordinator');
-      // The Fleet briefing went out on its own timer a moment ago; deliveries to one pane are spaced.
+      // The Reverie briefing went out on its own timer a moment ago; deliveries to one pane are spaced.
       clock += 10_000;
       await service.delivery.flushAll();
       expect(panes(A).join('')).toContain('"Side"');
@@ -233,14 +233,14 @@ describe('chatroom routes', () => {
       const lone = createMockSession('00000043-0053-4000-8000-00000000007a');
       ctx.sessions.set(lone.id, lone as never);
       expect((await asAgent(lone.id, { name: 'Nope' })).statusCode).toBe(403);
-      expect(service.rooms().map((r) => r.name)).toEqual(['Fleet']);
+      expect(service.rooms().map((r) => r.name)).toEqual(['Reverie']);
     });
 
     it('does not let a coordinator appoint someone else, nor mark itself the voice', async () => {
       await createRoom();
       expect((await asAgent(C, { name: 'X', coordinatorSessionId: A })).statusCode).toBe(403);
       expect((await asAgent(C, { name: 'X', members: [{ sessionId: C, voice: true }] })).statusCode).toBe(403);
-      expect(service.rooms().map((r) => r.name)).toEqual(['Fleet']);
+      expect(service.rooms().map((r) => r.name)).toEqual(['Reverie']);
       // Naming itself as the coordinator is the same thing as the default.
       expect((await asAgent(C, { name: 'Same', coordinatorSessionId: C })).statusCode).toBe(200);
     });
@@ -249,14 +249,14 @@ describe('chatroom routes', () => {
       await createRoom();
       const res = await asAgent(C, { name: 'Ghost', members: [{ sessionId: '00000046-0058-4000-8000-000000000089' }] });
       expect(res.statusCode).toBeGreaterThanOrEqual(400);
-      expect(service.rooms().map((r) => r.name)).toEqual(['Fleet']);
+      expect(service.rooms().map((r) => r.name)).toEqual(['Reverie']);
     });
 
     it('does not let the coordinator of only an archived room create rooms', async () => {
-      const id = await createRoom(); // C coordinates "Fleet"
+      const id = await createRoom(); // C coordinates "Reverie"
       service.room(id)!.archivedAt = clock;
       expect((await asAgent(C, { name: 'Late' })).statusCode).toBe(403);
-      expect(service.rooms().map((r) => r.name)).toEqual(['Fleet']);
+      expect(service.rooms().map((r) => r.name)).toEqual(['Reverie']);
     });
 
     it('refuses a full house before creating anything: 50 members plus the creator is 51', async () => {
@@ -269,7 +269,7 @@ describe('chatroom routes', () => {
       }
       const full = await asAgent(C, { name: 'Crowd', members: ids.map((sessionId) => ({ sessionId })) });
       expect(full.statusCode).toBe(409);
-      expect(service.rooms().map((r) => r.name)).toEqual(['Fleet']);
+      expect(service.rooms().map((r) => r.name)).toEqual(['Reverie']);
       // 49 members plus the creator is exactly the limit and is fine.
       const ok = await asAgent(C, { name: 'Crowd', members: ids.slice(0, 49).map((sessionId) => ({ sessionId })) });
       expect(ok.statusCode).toBe(200);
@@ -279,7 +279,7 @@ describe('chatroom routes', () => {
     it('keeps rename, delete and appointment with the user', async () => {
       await createRoom();
       const id = (await asAgent(C, { name: 'Mine' })).json().data.id;
-      const h = { 'x-codeman-parent-session': C };
+      const h = { 'x-reverie-parent-session': C };
       expect((await app.inject({ method: 'PUT', url: `/api/chatrooms/${id}`, headers: h, payload: { name: 'Z' } })).statusCode).toBe(403);
       expect((await app.inject({ method: 'DELETE', url: `/api/chatrooms/${id}`, headers: h })).statusCode).toBe(403);
       const appoint = await app.inject({
@@ -302,7 +302,7 @@ describe('chatroom routes', () => {
     const byAgent = await app.inject({
       method: 'POST',
       url: `/api/chatrooms/${id}/members`,
-      headers: { 'x-codeman-parent-session': A },
+      headers: { 'x-reverie-parent-session': A },
       payload: { sessionId: B },
     });
     // an agent that is not in the room does not even see it (404); a plain member is refused (403, below)
@@ -310,7 +310,7 @@ describe('chatroom routes', () => {
     const byCoordinator = await app.inject({
       method: 'POST',
       url: `/api/chatrooms/${id}/members`,
-      headers: { 'x-codeman-parent-session': C },
+      headers: { 'x-reverie-parent-session': C },
       payload: { sessionId: B, goal: 'tests' },
     });
     expect(byCoordinator.statusCode).toBe(200);
@@ -337,7 +337,7 @@ describe('chatroom routes', () => {
     });
     expect(created.statusCode).toBe(400);
     expect(service.rooms().some((r) => r.name === 'Shelly')).toBe(false); // nothing half-created
-    expect((await add({ sessionId: W, postOnly: true }, { 'x-codeman-parent-session': C })).statusCode).toBe(403);
+    expect((await add({ sessionId: W, postOnly: true }, { 'x-reverie-parent-session': C })).statusCode).toBe(403);
     expect((await add({ sessionId: W, postOnly: true, role: 'coordinator' })).statusCode).toBe(400);
     expect((await add({ sessionId: W, postOnly: true, voice: true })).statusCode).toBe(400);
     const ok = await add({ sessionId: W, postOnly: true });
@@ -360,7 +360,7 @@ describe('chatroom routes', () => {
     const alert = await app.inject({
       method: 'POST',
       url: `/api/chatrooms/${id}/messages`,
-      headers: { 'x-codeman-parent-session': W },
+      headers: { 'x-reverie-parent-session': W },
       payload: { text: 'watcher alert', requireAgent: true },
     });
     expect(alert.statusCode).toBe(200);
@@ -399,7 +399,7 @@ describe('chatroom routes', () => {
 
   it('refuses a requireAgent post whose caller session does not resolve instead of posting as the user', async () => {
     const id = await createRoom();
-    for (const headers of [{}, { 'x-codeman-parent-session': '00000046-0058-4000-8000-000000000084' }]) {
+    for (const headers of [{}, { 'x-reverie-parent-session': '00000046-0058-4000-8000-000000000084' }]) {
       const res = await app.inject({
         method: 'POST',
         url: `/api/chatrooms/${id}/messages`,
@@ -411,7 +411,7 @@ describe('chatroom routes', () => {
     const agent = await app.inject({
       method: 'POST',
       url: `/api/chatrooms/${id}/messages`,
-      headers: { 'x-codeman-parent-session': A },
+      headers: { 'x-reverie-parent-session': A },
       payload: { text: 'watcher alert', requireAgent: true },
     });
     expect(agent.statusCode).toBe(200);
@@ -438,14 +438,14 @@ describe('chatroom routes', () => {
     const outsider = await app.inject({
       method: 'POST',
       url: `/api/chatrooms/${id}/messages`,
-      headers: { 'x-codeman-parent-session': '00000043-0053-4000-8000-00000000007a' },
+      headers: { 'x-reverie-parent-session': '00000043-0053-4000-8000-00000000007a' },
       payload: { text: 'let me in' },
     });
     expect(outsider.statusCode).toBe(404); // a private channel is not there for a session outside it
     const mine = await app.inject({
       method: 'GET',
       url: '/api/chatrooms?member=self',
-      headers: { 'x-codeman-parent-session': A },
+      headers: { 'x-reverie-parent-session': A },
     });
     expect(mine.json().data.self).toBe(A);
     expect(mine.json().data.rooms).toHaveLength(1);
@@ -460,25 +460,25 @@ describe('chatroom routes', () => {
     const other = await app.inject({
       method: 'POST',
       url: `/api/chatrooms/${id}/members/${B}/brief`,
-      headers: { 'x-codeman-parent-session': A },
+      headers: { 'x-reverie-parent-session': A },
     });
     expect(other.statusCode).toBe(403);
     const all = await app.inject({
       method: 'POST',
       url: `/api/chatrooms/${id}/members/all/brief`,
-      headers: { 'x-codeman-parent-session': A },
+      headers: { 'x-reverie-parent-session': A },
     });
     expect(all.statusCode).toBe(403);
     const self = await app.inject({
       method: 'POST',
       url: `/api/chatrooms/${id}/members/${A}/brief`,
-      headers: { 'x-codeman-parent-session': A },
+      headers: { 'x-reverie-parent-session': A },
     });
     expect(self.statusCode).toBe(200);
     const byCoordinator = await app.inject({
       method: 'POST',
       url: `/api/chatrooms/${id}/members/all/brief`,
-      headers: { 'x-codeman-parent-session': C },
+      headers: { 'x-reverie-parent-session': C },
     });
     expect(byCoordinator.json().data.briefed).toBe(3);
   });
@@ -526,14 +526,14 @@ describe('chatroom routes', () => {
     const own = await app.inject({
       method: 'POST',
       url: `/api/chatrooms/${id}/members/${C}/status`,
-      headers: { 'x-codeman-parent-session': C },
+      headers: { 'x-reverie-parent-session': C },
       payload: { icon: 'OK' },
     });
     expect(own.statusCode).toBe(200);
     const other = await app.inject({
       method: 'POST',
       url: `/api/chatrooms/${id}/members/${A}/status`,
-      headers: { 'x-codeman-parent-session': C },
+      headers: { 'x-reverie-parent-session': C },
       payload: { icon: 'X' },
     });
     expect(other.statusCode).toBe(403);
@@ -616,14 +616,14 @@ describe('chatroom routes', () => {
     const self = await app.inject({
       method: 'POST',
       url: `/api/chatrooms/${id}/members/${A}/status`,
-      headers: { 'x-codeman-parent-session': A },
+      headers: { 'x-reverie-parent-session': A },
       payload: { voice: true },
     });
     expect(self.statusCode).toBe(403);
     const byCoordinator = await app.inject({
       method: 'POST',
       url: `/api/chatrooms/${id}/members/${A}/status`,
-      headers: { 'x-codeman-parent-session': C },
+      headers: { 'x-reverie-parent-session': C },
       payload: { voice: true },
     });
     expect(byCoordinator.statusCode).toBe(200);
@@ -631,7 +631,7 @@ describe('chatroom routes', () => {
     const synopsis = await app.inject({
       method: 'POST',
       url: `/api/chatrooms/${id}/members/${A}/status`,
-      headers: { 'x-codeman-parent-session': C },
+      headers: { 'x-reverie-parent-session': C },
       payload: { voice: true, progress: 'x' },
     });
     expect(synopsis.statusCode).toBe(403);
@@ -669,7 +669,7 @@ describe('chatroom routes', () => {
     const byAgent = await app.inject({
       method: 'POST',
       url: `/api/chatrooms/${id}/messages`,
-      headers: { 'x-codeman-parent-session': A },
+      headers: { 'x-reverie-parent-session': A },
       payload: { text: 'pretend speech', spoken: true },
     });
     expect(byAgent.json().data.message.spoken).toBeUndefined();
@@ -680,7 +680,7 @@ describe('chatroom routes', () => {
     const self = await app.inject({
       method: 'POST',
       url: `/api/chatrooms/${id}/members/${C}/status`,
-      headers: { 'x-codeman-parent-session': C },
+      headers: { 'x-reverie-parent-session': C },
       payload: { voice: true },
     });
     expect(self.statusCode).toBe(403);
@@ -696,7 +696,7 @@ describe('chatroom routes', () => {
     const viaAdd = await app.inject({
       method: 'POST',
       url: `/api/chatrooms/${id}/members`,
-      headers: { 'x-codeman-parent-session': C },
+      headers: { 'x-reverie-parent-session': C },
       payload: { sessionId: C, voice: true },
     });
     expect(viaAdd.statusCode).toBe(403);
@@ -725,8 +725,8 @@ describe('chatroom creation by a coordinator in multi-user mode', () => {
   let previous: string | undefined;
 
   beforeEach(async () => {
-    previous = process.env.CODEMAN_MULTIUSER;
-    process.env.CODEMAN_MULTIUSER = '1';
+    previous = process.env.REVERIE_MULTIUSER;
+    process.env.REVERIE_MULTIUSER = '1';
     const file = join(mkdtempSync(join(tmpdir(), 'chatroom-mu-')), 'chatrooms.json');
     const harness = await createRouteTestHarness(
       (fastify, c) => {
@@ -756,14 +756,14 @@ describe('chatroom creation by a coordinator in multi-user mode', () => {
   });
 
   afterEach(async () => {
-    if (previous === undefined) delete process.env.CODEMAN_MULTIUSER;
-    else process.env.CODEMAN_MULTIUSER = previous;
+    if (previous === undefined) delete process.env.REVERIE_MULTIUSER;
+    else process.env.REVERIE_MULTIUSER = previous;
     await service.stop();
     await app.close();
   });
 
   const asLead = (payload: unknown) =>
-    app.inject({ method: 'POST', url: '/api/chatrooms', headers: { 'x-codeman-parent-session': ALICE_LEAD }, payload });
+    app.inject({ method: 'POST', url: '/api/chatrooms', headers: { 'x-reverie-parent-session': ALICE_LEAD }, payload });
 
   it('stamps the new room with the creator\'s owner', async () => {
     const res = await asLead({ name: 'Alice side room', members: [{ sessionId: ALICE_WORKER }] });

@@ -1,10 +1,10 @@
 # Owner authentication for the console (design notes, for review; no code)
 
 ## Problem
-The console decides "is this the owner?" by the **absence** of `X-Codeman-Parent-Session`.
+The console decides "is this the owner?" by the **absence** of `X-Reverie-Parent-Session`.
 - Agent tooling sets that header; the owner's browser does not.
 - So any request without it is treated as the owner: an agent with `curl`, a script with
-  `CODEMAN_SESSION_ID` unset, or anyone who can reach the listener.
+  `REVERIE_SESSION_ID` unset, or anyone who can reach the listener.
 - The H2 stopgap closed the "bogus header" variant on chat-room routes. The "no header" variant is
   open everywhere. Inventory: `reports/owner-header-stopgap-README.md`.
 - The inventory, in short:
@@ -18,11 +18,11 @@ The console decides "is this the owner?" by the **absence** of `X-Codeman-Parent
 | Fact | Consequence |
 |---|---|
 | The console listens on `0.0.0.0:3000` with `--allow-unauthenticated-network`, and no password is set | Anyone who can reach the port is the owner. Review the instance network and authentication configuration before exposing it. |
-| The console has HTTP Basic auth with session cookies (`web/middleware/auth.ts`, `CODEMAN_PASSWORD`, cookie `codeman_session`) | A login and cookie mechanism already exists and can be reused. |
-| Agent tooling reads the **same** password from the data dir's `.env` (`codeman-credentials.ts`) | Turning the password on stops the network, but does not tell the owner apart from agents. |
-| The console and all agents run as uid `cto`; the data dir is `0700 cto` | Every file the console can read or write, an agent can too: tokens, password hashes, settings. |
+| The console has HTTP Basic auth with session cookies (`web/middleware/auth.ts`, `REVERIE_PASSWORD`, cookie `reverie_session`) | A login and cookie mechanism already exists and can be reused. |
+| Agent tooling reads the **same** password from the data dir's `.env` (`reverie-credentials.ts`) | Turning the password on stops the network, but does not tell the owner apart from agents. |
+| The console and all agents run as uid `agent`; the data dir is `0700 agent` | Every file the console can read or write, an agent can too: tokens, password hashes, settings. |
 | `/proc/<console>/environ` is readable by agents; `/proc/<console>/mem` is not (Yama `ptrace_scope=1`) | A secret held only in console memory resists a non-root agent; one in env or on disk does not. |
-| **Agents have passwordless `sudo` in the container** | A determined agent is root. It can read process memory, sniff loopback, and edit `/opt/fleet/apps/console` or the data dir. **No in-container check can stop a malicious agent.** |
+| **Agents have passwordless `sudo` in the container** | A determined agent is root. It can read process memory, sniff loopback, and edit `/opt/reverie/apps/console` or the data dir. **No in-container check can stop a malicious agent.** |
 
 ## Threat tiers (the owner chooses the target)
 - **T1: network.** Anyone on the LAN or tunnel acts as the owner. *Fixable now, inside the container.*
@@ -77,7 +77,7 @@ The console decides "is this the owner?" by the **absence** of `X-Codeman-Parent
 
 ### D. Isolation: the only real T3 fix (host work, separate approval)
 1. **Drop agent root.** Remove passwordless `sudo` for agent sessions (keep a separate admin path for the host).
-2. **Separate uids.** The console runs as `reverie` and agents as `cto`. The console's data dir is
+2. **Separate uids.** The console runs as `reverie` and agents as `agent`. The console's data dir is
    `0700 reverie`, and the code under `/opt` is root-owned and read-only. Agents talk only over HTTP.
 3. **Owner passphrase hash on the host**, bind-mounted read-only into the console's uid only.
 4. **Loopback sniffing** is then impossible without root. Keep the console on a Unix socket or

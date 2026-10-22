@@ -8,7 +8,7 @@
  * WebServer: under VITEST the mux layer is a pure in-memory mock and Session
  * spawns an echo PTY, so no real codex would ever run. The lab server is a
  * CHILD PROCESS with the VITEST markers stripped from its env, isolated via
- * CODEMAN_INSTANCE=codexlab (own data dir under the per-test fixture HOME +
+ * REVERIE_INSTANCE=codexlab (own data dir under the per-test fixture HOME +
  * own tmux socket) on port 3222 (3220/3221 are taken; see the port sweep in
  * the plan). Codex runs against a throwaway CODEX_HOME with a fake API key
  * (never leaves the box: the first request 401s, which is fine — every
@@ -26,7 +26,7 @@ import { chromium, type Browser, type BrowserContext, type Page } from 'playwrig
 const PORT = 3222;
 const BASE_URL = `http://localhost:${PORT}`;
 const INSTANCE = 'codexlab';
-const TMUX = `tmux -L codeman-${INSTANCE}`;
+const TMUX = `tmux -L reverie-${INSTANCE}`;
 const ROOT = resolve(import.meta.dirname, '..');
 const CODEX_BIN_DIR = `${userInfo().homedir}/.local/bin`;
 
@@ -119,7 +119,7 @@ async function openInBrowser(id: string): Promise<void> {
   await page.waitForFunction(
     () => {
       const w = window as any;
-      return w.CodemanTerminalInput.isCodexComposerRow(w.app.terminal);
+      return w.ReverieTerminalInput.isCodexComposerRow(w.app.terminal);
     },
     undefined,
     { timeout: 20000 }
@@ -143,7 +143,7 @@ async function resetComposer(): Promise<void> {
   await page.waitForFunction(
     () => {
       const w = window as any;
-      return w.CodemanTerminalInput.isCodexComposerRow(w.app.terminal);
+      return w.ReverieTerminalInput.isCodexComposerRow(w.app.terminal);
     },
     undefined,
     { timeout: 25000 }
@@ -175,7 +175,7 @@ async function cancelRetryLoop(): Promise<void> {
       await new Promise((r) => setTimeout(r, 1000));
       const alive = await page.evaluate(() => {
         const w = window as any;
-        return w.CodemanTerminalInput.isCodexComposerRow(w.app.terminal);
+        return w.ReverieTerminalInput.isCodexComposerRow(w.app.terminal);
       });
       if (!alive) {
         stable = false;
@@ -205,7 +205,7 @@ beforeAll(async () => {
   delete env.VITEST_POOL_ID;
   delete env.VITEST_WORKER_ID;
   delete env.NODE_ENV;
-  env.CODEMAN_INSTANCE = INSTANCE;
+  env.REVERIE_INSTANCE = INSTANCE;
   env.PATH = `${CODEX_BIN_DIR}:${env.PATH}`;
 
   server = spawn('npx', ['tsx', 'src/index.ts', 'web', '--port', String(PORT)], {
@@ -232,7 +232,7 @@ beforeAll(async () => {
   context = await browser.newContext({ viewport: { width: 1280, height: 800 } });
   page = await context.newPage();
   await page.addInitScript(() => {
-    localStorage.setItem('codeman-app-settings', JSON.stringify({ localEchoEnabled: true }));
+    localStorage.setItem('reverie-app-settings', JSON.stringify({ localEchoEnabled: true }));
   });
   await page.goto(BASE_URL, { waitUntil: 'domcontentloaded' });
   await page.waitForFunction(() => document.body.classList.contains('app-loaded'), { timeout: 10000 });

@@ -35,7 +35,7 @@ export function customModelConfigDir(sessionId: string): string {
  * `~/.codex`, `~/.pi`, etc.).
  *
  * pi and omp embed the API key literally in the file, so the tree is written
- * 0700/0600 like every other secret-bearing file under `~/.codeman`; the chmod
+ * 0700/0600 like every other secret-bearing file under `~/.reverie`; the chmod
  * covers a re-apply onto a file that already exists (`mode` only applies at
  * creation).
  */
@@ -50,7 +50,7 @@ export function applyConfigDirInjection(baseDir: string, injection: ConfigDirInj
 }
 
 /**
- * Real, shared Claude config directory Codeman's own host process runs under — honors
+ * Real, shared Claude config directory Reverie's own host process runs under — honors
  * `CLAUDE_CONFIG_DIR` the same way `claudeProjectsDir()` (utils/claude-transcript.ts)
  * does, so the symlink below points at wherever `~/.claude/projects` actually lives
  * rather than assuming the plain default.

@@ -25,7 +25,7 @@ export function registerEmbassyGuestRoutes(
   const handle =
     (fn: (req: FastifyRequest) => unknown) =>
     async (req: FastifyRequest, reply: FastifyReply): Promise<unknown> => {
-      if (req.headers['x-codeman-parent-session'] !== undefined || !verifiedOwner(req)) {
+      if (req.headers['x-reverie-parent-session'] !== undefined || !verifiedOwner(req)) {
         return reply
           .code(403)
           .send(createErrorResponse(ApiErrorCode.FORBIDDEN, 'Embassy rooms require a signed-in owner'));

@@ -330,7 +330,7 @@ describe('xterm key handlers swallow a chord that applies', () => {
     const windowStub: Record<string, unknown> = {
       addEventListener: vi.fn(),
       removeEventListener: vi.fn(),
-      CodemanBase: { base: '' },
+      ReverieBase: { base: '' },
       innerWidth: 2400,
     };
     const context = vm.createContext({
@@ -357,7 +357,7 @@ describe('xterm key handlers swallow a chord that applies', () => {
         },
       },
       fetch: fetchMock,
-      location: { protocol: 'http:', host: 'codeman.test' },
+      location: { protocol: 'http:', host: 'reverie.test' },
       document: { addEventListener: vi.fn(), documentElement: { dataset: {} } },
       localStorage: { getItem: vi.fn(), setItem: vi.fn(), removeItem: vi.fn() },
       window: windowStub,
@@ -365,10 +365,10 @@ describe('xterm key handlers swallow a chord that applies', () => {
     });
     vm.runInContext(
       `${read('constants.js')}\n${read('app.js')}\n${read('terminal-ui.js')}\n${read('terminal-tile.js')}\n` +
-        `${read('terminal-split.js')}\n${read('tile-grid.js')}\nglobalThis.__CodemanApp = CodemanApp;`,
+        `${read('terminal-split.js')}\n${read('tile-grid.js')}\nglobalThis.__ReverieApp = ReverieApp;`,
       context
     );
-    const App = (context as unknown as { __CodemanApp: { prototype: object } }).__CodemanApp;
+    const App = (context as unknown as { __ReverieApp: { prototype: object } }).__ReverieApp;
     const TerminalTile = windowStub.TerminalTile as new (
       id: string,
       mount: unknown,

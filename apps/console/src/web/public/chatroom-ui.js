@@ -11,7 +11,7 @@
  *
  * Everything user- or agent-supplied is rendered with textContent.
  *
- * @mixin Extends CodemanApp.prototype via Object.assign
+ * @mixin Extends ReverieApp.prototype via Object.assign
  * @dependency app.js, api-client.js (_api), constants.js (SSE_EVENTS)
  * @loadorder 12.1 (after session-ui.js)
  */
@@ -67,7 +67,7 @@ const CHAT_LAYOUTS = ['overlay', 'dock', 'full'];
 /** Below this viewport width a docked chat would squeeze the terminal to nothing. */
 const CHAT_DOCK_MIN_VIEWPORT = 900;
 
-Object.assign(CodemanApp.prototype, {
+Object.assign(ReverieApp.prototype, {
   /** fetch + envelope unwrap that keeps the server's error message. */
   async _chatApi(path, opts = {}) {
     const res = await this._api(path, opts);
@@ -444,7 +444,7 @@ Object.assign(CodemanApp.prototype, {
     panel.prepend(this._chatResizeHandle(panel));
     let saved = 0;
     try {
-      saved = Number(localStorage.getItem('codeman:chatroomWidth')) || 0;
+      saved = Number(localStorage.getItem('reverie:chatroomWidth')) || 0;
     } catch {
       /* per-device convenience only */
     }
@@ -476,7 +476,7 @@ Object.assign(CodemanApp.prototype, {
   setChatroomLayout(mode) {
     this._chatLayout = CHAT_LAYOUTS.includes(mode) ? mode : 'overlay';
     try {
-      localStorage.setItem('codeman:chatroomLayout', this._chatLayout);
+      localStorage.setItem('reverie:chatroomLayout', this._chatLayout);
     } catch {
       /* per-device convenience only */
     }
@@ -488,7 +488,7 @@ Object.assign(CodemanApp.prototype, {
     if (!panel) return;
     if (!this._chatLayout) {
       try {
-        this._chatLayout = localStorage.getItem('codeman:chatroomLayout') || 'overlay';
+        this._chatLayout = localStorage.getItem('reverie:chatroomLayout') || 'overlay';
       } catch {
         this._chatLayout = 'overlay';
       }
@@ -529,7 +529,7 @@ Object.assign(CodemanApp.prototype, {
     grip.title = 'Drag to resize';
     const save = (w) => {
       try {
-        localStorage.setItem('codeman:chatroomWidth', String(w));
+        localStorage.setItem('reverie:chatroomWidth', String(w));
       } catch {
         /* per-device convenience only */
       }
@@ -564,7 +564,7 @@ Object.assign(CodemanApp.prototype, {
     grip.addEventListener('dblclick', () => {
       panel.style.width = '';
       try {
-        localStorage.removeItem('codeman:chatroomWidth');
+        localStorage.removeItem('reverie:chatroomWidth');
       } catch {
         /* per-device convenience only */
       }
@@ -601,7 +601,7 @@ Object.assign(CodemanApp.prototype, {
     let id = preferId || this._chatRoomId;
     if (!this._chatRooms.some((r) => r.id === id)) {
       try {
-        id = localStorage.getItem('codeman:chatroom') || '';
+        id = localStorage.getItem('reverie:chatroom') || '';
       } catch {
         id = '';
       }
@@ -698,7 +698,7 @@ Object.assign(CodemanApp.prototype, {
     if (synced) this._chatSyncedFrom(id, synced);
     (this._chatCache ||= new Map()).set(id, data);
     try {
-      localStorage.setItem('codeman:chatroom', id);
+      localStorage.setItem('reverie:chatroom', id);
     } catch {
       /* per-device convenience only */
     }
@@ -1127,7 +1127,7 @@ Object.assign(CodemanApp.prototype, {
 
   /** Root-absolute dashboard URL, under a reverse-proxy base path when there is one. */
   _chatUrl(path) {
-    return typeof CodemanBase !== 'undefined' && CodemanBase.url ? CodemanBase.url(path) : path;
+    return typeof ReverieBase !== 'undefined' && ReverieBase.url ? ReverieBase.url(path) : path;
   },
 
   _chatVoiceStatus(text, kind = '') {
@@ -1911,11 +1911,11 @@ Object.assign(CodemanApp.prototype, {
   const root = document.documentElement;
   const legacy = new URLSearchParams(location.search).get('legacy') === '1';
   root.toggleAttribute('data-reverie-legacy', legacy);
-  const solo = typeof window.__CODEMAN_SOLO__ === 'string' && !!window.__CODEMAN_SOLO__;
+  const solo = typeof window.__REVERIE_SOLO__ === 'string' && !!window.__REVERIE_SOLO__;
   let link = false;
   let stored = '';
   try {
-    link = !!window.CodemanUrlSession?.sessionIdFromFragment?.(location.hash);
+    link = !!window.ReverieUrlSession?.sessionIdFromFragment?.(location.hash);
     stored = sessionStorage.getItem('reverie:view') || '';
   } catch {
     /* private mode: default view */

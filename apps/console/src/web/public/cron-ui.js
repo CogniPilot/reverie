@@ -1,13 +1,13 @@
 /**
  * @fileoverview Cron Jobs UI mixed into
- * CodemanApp.prototype. Renders the job list + create/edit form in the
+ * ReverieApp.prototype. Renders the job list + create/edit form in the
  * #cronModal, and reacts to cron:* SSE events.
  *
- * @mixin Extends CodemanApp.prototype via Object.assign
+ * @mixin Extends ReverieApp.prototype via Object.assign
  * @dependency app.js, api-client.js, constants.js (escapeHtml)
  */
 
-Object.assign(CodemanApp.prototype, {
+Object.assign(ReverieApp.prototype, {
   // ── SSE handlers ──────────────────────────────────────────────────────────
 
   _onCronJobsChanged(data) {

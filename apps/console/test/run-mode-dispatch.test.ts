@@ -47,17 +47,17 @@ function loadHarness(catalog: Array<{ id: string; kind: string; enabled: boolean
   const win = dom.window as unknown as {
     eval: (s: string) => void;
     document: Document;
-    CodemanApp: new () => HarnessApp;
+    ReverieApp: new () => HarnessApp;
     __TEST_RUN_MODE_LAUNCH: Record<string, unknown>;
-    __codemanCliCatalog: Array<{ id: string; kind: string; enabled: boolean }>;
+    __reverieCliCatalog: Array<{ id: string; kind: string; enabled: boolean }>;
   };
-  win.__codemanCliCatalog = catalog;
-  win.eval('window.CodemanApp = function CodemanApp() {};');
+  win.__reverieCliCatalog = catalog;
+  win.eval('window.ReverieApp = function ReverieApp() {};');
   // The assignment rides in the SAME evaluated string as the module:
   // RUN_MODE_LAUNCH is a bare top-level `const`, visible only to this eval call
   // (see test/run-mode-launch-table-drift.test.ts for the measurement).
   win.eval(`${SESSION_UI_JS}\nwindow.__TEST_RUN_MODE_LAUNCH = RUN_MODE_LAUNCH;`);
-  const app = new win.CodemanApp();
+  const app = new win.ReverieApp();
   app._runMinLockMs = 0; // run() otherwise holds its lock for >= 500ms per call
   app.runClaude = vi.fn(async () => 'claude');
   app.runShell = vi.fn(async () => 'shell');

@@ -1,6 +1,6 @@
 # Session lineage lines (spawn lines between tabs)
 
-**Goal:** when a session spawns another session (the `codeman` agent skill starting a
+**Goal:** when a session spawns another session (the `reverie` agent skill starting a
 worker, or anything else that says who it is), draw the same kind of glowing connection
 line the subagent windows already use, but **tab → tab**, so a glance at the strip shows
 which tab spawned which.
@@ -25,7 +25,7 @@ There is no spawn-parent link between sessions anywhere in the codebase:
   (`SO_PEERCRED` needs a unix socket; the API is TCP).
 
 So the caller has to **tell** us. It already knows its own id: every managed pane gets
-`CODEMAN_SESSION_ID` exported by `session-cli-builder.ts` (and the skill's §0 preamble
+`REVERIE_SESSION_ID` exported by `session-cli-builder.ts` (and the skill's §0 preamble
 already binds it to `$SELF`).
 
 ## 2. Wire format
@@ -35,7 +35,7 @@ Two ways in, because they serve different callers. Body wins when both are prese
 | Where | Shape | Who uses it |
 | --- | --- | --- |
 | body field | `"parentSessionId": "<uuid>"` | anything hand-writing one create call |
-| request header | `X-Codeman-Parent-Session: <uuid>` | the skill: added **once** to the `CURL` array in the §0 preamble, so every present and future create call carries it with no per-recipe edit |
+| request header | `X-Reverie-Parent-Session: <uuid>` | the skill: added **once** to the `CURL` array in the §0 preamble, so every present and future create call carries it with no per-recipe edit |
 
 Rules, all of them deliberate:
 
@@ -82,7 +82,7 @@ the end, sharing the `rects` cache so no layer forces a second reflow.
 
 Lineage lines follow that exactly: a new module `src/web/public/session-lineage.js`
 (load order 15.6, after `ultracode-windows.js`) exporting
-`_appendLineageConnectionLines(svg, rects)` onto `CodemanApp.prototype`, called from the
+`_appendLineageConnectionLines(svg, rects)` onto `ReverieApp.prototype`, called from the
 same tail. **The core function keeps ownership of the read/write split**; the new layer
 only reads through the shared `rects` map and only appends paths.
 
@@ -229,13 +229,13 @@ owner if the convention should win instead.
 
 ## 7. Skill side (owned by the release session, not this plan)
 
-One line in the `codeman` skill's §0 preamble covers every spawn recipe:
+One line in the `reverie` skill's §0 preamble covers every spawn recipe:
 
 ```bash
-CURL=(curl -sk "${AUTH[@]}" -H "X-Codeman-Parent-Session: $SELF")
+CURL=(curl -sk "${AUTH[@]}" -H "X-Reverie-Parent-Session: $SELF")
 ```
 
-plus a `CODEMAN_PREAMBLE` version bump so stale cached preambles fail loudly instead of
+plus a `REVERIE_PREAMBLE` version bump so stale cached preambles fail loudly instead of
 silently spawning unparented workers. Recipes that build a create payload by hand can
 alternatively send `"parentSessionId":"'"$SELF"'"`.
 

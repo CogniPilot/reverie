@@ -241,7 +241,7 @@ export const idleCallbacks: Array<() => void> = [];
 export const windowStub: Record<string, unknown> = {
   addEventListener: vi.fn(),
   removeEventListener: vi.fn(),
-  CodemanBase: { base: '' },
+  ReverieBase: { base: '' },
   innerWidth: 2400,
   innerHeight: 1200,
 };
@@ -270,7 +270,7 @@ const context = vm.createContext({
   WebSocket: { OPEN: 1 },
   fetch: (...args: unknown[]) => fetchSpy(...args),
   navigator: { onLine: true },
-  location: { protocol: 'http:', host: 'codeman.test', pathname: '/', search: '', hash: '' },
+  location: { protocol: 'http:', host: 'reverie.test', pathname: '/', search: '', hash: '' },
   history: { replaceState: vi.fn(), state: null },
   document: {
     addEventListener: documentAddEventListener,
@@ -300,7 +300,7 @@ const context = vm.createContext({
 vm.runInContext(
   `${read('constants.js')}\n${read('app.js')}\n${read('terminal-ui.js')}\n${read('terminal-split.js')}\n` +
     `${read('tile-grid.js')}\n${read('mobile-overview.js')}\n` +
-    'globalThis.__CodemanApp = CodemanApp;',
+    'globalThis.__ReverieApp = ReverieApp;',
   context
 );
 windowStub.TerminalTile = FakeTile;
@@ -311,7 +311,7 @@ windowStub.TileLoadQueue = class {
   drop() {}
 };
 
-export const CodemanApp = (context as unknown as { __CodemanApp: { prototype: Record<string, unknown> } }).__CodemanApp;
+export const ReverieApp = (context as unknown as { __ReverieApp: { prototype: Record<string, unknown> } }).__ReverieApp;
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type GridApp = Record<string, any>;
@@ -346,7 +346,7 @@ const STUBS = [
  * never tiled), `s-a` active, nothing open.
  */
 export function makeGridApp(ids: string[] = ['s-a', 's-b', 's-c']): GridApp {
-  const app = Object.create(CodemanApp.prototype) as GridApp;
+  const app = Object.create(ReverieApp.prototype) as GridApp;
   app.sessions = new Map(
     [...ids, 's-other'].map((id) => [id, { id, name: id, mode: 'claude', pid: 1, workingDir: '/w' }])
   );
@@ -377,7 +377,7 @@ export function resetGridHarness() {
   localStore.clear();
   windowStub.innerWidth = 2400;
   // The CLI catalog the server injects (labels for the harness logos); a test sets its own.
-  delete windowStub.__codemanCliCatalog;
+  delete windowStub.__reverieCliCatalog;
   section.children = [];
   // The grid binds its file-drop guard on the section once per app; an earlier
   // test's app must not still be listening there.

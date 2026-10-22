@@ -28,7 +28,7 @@ export interface SearchJumpTarget {
    * tab that does not exist.
    */
   kind: 'session' | 'run-summary' | 'file-preview' | 'resume-session';
-  /** Owning Codeman session id (always present — every result is session-scoped). */
+  /** Owning Reverie session id (always present — every result is session-scoped). */
   sessionId: string;
   /**
    * Secondary identifier for the target:
@@ -44,7 +44,7 @@ export interface SearchJumpTarget {
   relativePath?: string;
   /**
    * `resume-session` only: the Claude conversation UUID to resume, when it differs
-   * from the Codeman session id (resumed and `/clear`-respawned sessions).
+   * from the Reverie session id (resumed and `/clear`-respawned sessions).
    */
   claudeSessionId?: string;
   /**
@@ -58,7 +58,7 @@ export interface SearchJumpTarget {
 export interface SearchResult {
   /** Which federated source produced this result. */
   type: SearchSourceType;
-  /** Owning Codeman session id. */
+  /** Owning Reverie session id. */
   sessionId: string;
   /** Display name of the owning session / case. */
   sessionName: string;

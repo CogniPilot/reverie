@@ -3,7 +3,7 @@
  *
  * The rail lists exactly the sessions both home screens list (the phone
  * overview and the desktop home rail), so it now answers their question the
- * same way: `CodemanSessionOrder` (constants.js) puts whatever is blocked on a
+ * same way: `ReverieSessionOrder` (constants.js) puts whatever is blocked on a
  * human first, then whatever has been running longest, then the most recently
  * quiet. Three things about that can go wrong silently and are pinned here.
  *
@@ -53,7 +53,7 @@ type Root = { dataset: Record<string, string>; getAttribute: (name: string) => s
  * <html>, and stubbing THAT out on the instance would leave the shipped gate
  * untested while these assertions kept passing.
  */
-function loadCodemanAppClass(): { CodemanApp: new () => unknown; root: Root } {
+function loadReverieAppClass(): { ReverieApp: new () => unknown; root: Root } {
   const attrs: Record<string, string> = {};
   const root: Root = { dataset: {}, getAttribute: (name: string) => attrs[name] ?? null };
   Object.defineProperty(root, '__attrs', { value: attrs });
@@ -80,13 +80,13 @@ function loadCodemanAppClass(): { CodemanApp: new () => unknown; root: Root } {
   });
   const read = (f: string) => readFileSync(resolve(PUBLIC, f), 'utf8');
   vm.runInContext(
-    `${read('constants.js')}\n${read('app.js')}\n${read('mobile-overview.js')}\nglobalThis.__CodemanApp = CodemanApp;`,
+    `${read('constants.js')}\n${read('app.js')}\n${read('mobile-overview.js')}\nglobalThis.__ReverieApp = ReverieApp;`,
     context
   );
-  return { CodemanApp: (context as { __CodemanApp: new () => unknown }).__CodemanApp, root };
+  return { ReverieApp: (context as { __ReverieApp: new () => unknown }).__ReverieApp, root };
 }
 
-const { CodemanApp, root: railRoot } = loadCodemanAppClass();
+const { ReverieApp, root: railRoot } = loadReverieAppClass();
 
 /** Point the shared <html> stub at one rail configuration. */
 function setLayout(attrs: Record<string, string>): void {
@@ -118,7 +118,7 @@ type RailApp = {
  */
 function makeApp(rows: Row[], attrs: Record<string, string> = {}): RailApp {
   setLayout(attrs);
-  const app = Object.create((CodemanApp as { prototype: object }).prototype) as RailApp & Record<string, unknown>;
+  const app = Object.create((ReverieApp as { prototype: object }).prototype) as RailApp & Record<string, unknown>;
   app.sessions = new Map(rows.map((r) => [r.id, { ...r, mode: 'claude' }]));
   app.pendingHooks = new Map(rows.filter((r) => r.hooks).map((r) => [r.id, new Set(r.hooks)]));
   return app;
@@ -167,7 +167,7 @@ describe('vertical tab rail row order', () => {
     expect(positions(app, ids)).toEqual({ 'just-finished': 0, yesterday: 1 });
   });
 
-  it('orders the whole fleet blocked → running → quiet', () => {
+  it('orders the whole reverie blocked → running → quiet', () => {
     const ids = ['idle-a', 'working', 'needs', 'waiting', 'idle-b'];
     const app = makeApp([
       { id: 'idle-a', status: 'idle', lastActivityAt: minsAgo(2) },
@@ -237,7 +237,7 @@ describe('vertical tab rail row order', () => {
 
   it('classifies and compares through the shared helpers, never a local copy', () => {
     const fn = appJs.slice(appJs.indexOf('_tabRailSortOrder(ids) {'), appJs.indexOf('_tabRailSortOrder(ids) {') + 1200);
-    expect(fn).toContain('window.CodemanSessionOrder.sort(rows)');
+    expect(fn).toContain('window.ReverieSessionOrder.sort(rows)');
     expect(fn).toContain('this._mobileOverviewState(session, this.pendingHooks?.get(ids[i]))');
     // Both raw stamps, or the comparator silently ranks every running turn as
     // freshly started (see the file header).
@@ -246,7 +246,7 @@ describe('vertical tab rail row order', () => {
     expect(fn).toContain('orderIndex: i');
     // Degrades to tab order rather than throwing when a cached constants.js or
     // mobile-overview.js is stale.
-    expect(fn).toContain("!window.CodemanSessionOrder || typeof this._mobileOverviewState !== 'function'");
+    expect(fn).toContain("!window.ReverieSessionOrder || typeof this._mobileOverviewState !== 'function'");
   });
 });
 

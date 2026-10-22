@@ -26,8 +26,8 @@ function basicAuthHeader(user: string, pass: string): string {
 }
 
 async function startAuthServer(): Promise<{ server: WebServer; baseUrl: string }> {
-  process.env.CODEMAN_PASSWORD = TEST_PASS;
-  process.env.CODEMAN_USERNAME = TEST_USER;
+  process.env.REVERIE_PASSWORD = TEST_PASS;
+  process.env.REVERIE_USERNAME = TEST_USER;
   const server = new WebServer(0, false, true);
   await server.start();
   return { server, baseUrl: `http://localhost:${server.boundPort}` };
@@ -40,9 +40,9 @@ async function getSessionCookie(baseUrl: string): Promise<string> {
   expect(res.status).toBe(200);
   const setCookie = res.headers.get('set-cookie');
   expect(setCookie).toBeTruthy();
-  const cookieMatch = setCookie!.match(/codeman_session=([^;]+)/);
+  const cookieMatch = setCookie!.match(/reverie_session=([^;]+)/);
   expect(cookieMatch).toBeTruthy();
-  return `codeman_session=${cookieMatch![1]}`;
+  return `reverie_session=${cookieMatch![1]}`;
 }
 
 async function exhaustAuthFailures(baseUrl: string, prefix: string): Promise<void> {
@@ -59,8 +59,8 @@ describe('Auth Security', () => {
   let baseUrl: string;
 
   beforeAll(async () => {
-    process.env.CODEMAN_PASSWORD = TEST_PASS;
-    process.env.CODEMAN_USERNAME = TEST_USER;
+    process.env.REVERIE_PASSWORD = TEST_PASS;
+    process.env.REVERIE_USERNAME = TEST_USER;
     server = new WebServer(0, false, true);
     await server.start();
     baseUrl = `http://localhost:${server.boundPort}`;
@@ -68,8 +68,8 @@ describe('Auth Security', () => {
 
   afterAll(async () => {
     await server.stop();
-    delete process.env.CODEMAN_PASSWORD;
-    delete process.env.CODEMAN_USERNAME;
+    delete process.env.REVERIE_PASSWORD;
+    delete process.env.REVERIE_USERNAME;
   });
 
   describe('Basic Auth', () => {
@@ -122,7 +122,7 @@ describe('Auth Security', () => {
       expect(res.status).toBe(200);
       const setCookie = res.headers.get('set-cookie');
       expect(setCookie).toBeTruthy();
-      expect(setCookie).toContain('codeman_session=');
+      expect(setCookie).toContain('reverie_session=');
       expect(setCookie).toContain('HttpOnly');
       expect(setCookie).toContain('SameSite=Lax');
     });
@@ -133,9 +133,9 @@ describe('Auth Security', () => {
         headers: { Authorization: basicAuthHeader(TEST_USER, TEST_PASS) },
       });
       const setCookie = authRes.headers.get('set-cookie')!;
-      const cookieMatch = setCookie.match(/codeman_session=([^;]+)/);
+      const cookieMatch = setCookie.match(/reverie_session=([^;]+)/);
       expect(cookieMatch).toBeTruthy();
-      const cookie = `codeman_session=${cookieMatch![1]}`;
+      const cookie = `reverie_session=${cookieMatch![1]}`;
 
       // Use the cookie without Basic Auth header
       const res = await fetch(`${baseUrl}/api/status`, {
@@ -146,7 +146,7 @@ describe('Auth Security', () => {
 
     it('should reject requests with invalid session cookie', async () => {
       const res = await fetch(`${baseUrl}/api/status`, {
-        headers: { Cookie: 'codeman_session=invalid-token-value' },
+        headers: { Cookie: 'reverie_session=invalid-token-value' },
       });
       expect(res.status).toBe(401);
     });
@@ -159,9 +159,9 @@ describe('Auth Security', () => {
         headers: { Authorization: basicAuthHeader(TEST_USER, TEST_PASS) },
       });
       const setCookie = authRes.headers.get('set-cookie')!;
-      const cookieMatch = setCookie.match(/codeman_session=([^;]+)/);
+      const cookieMatch = setCookie.match(/reverie_session=([^;]+)/);
       expect(cookieMatch).toBeTruthy();
-      const cookie = `codeman_session=${cookieMatch![1]}`;
+      const cookie = `reverie_session=${cookieMatch![1]}`;
 
       // Verify cookie works
       const beforeRes = await fetch(`${baseUrl}/api/status`, {
@@ -226,7 +226,7 @@ describe('Auth Security', () => {
       });
 
       expect(res.status).toBe(200);
-      expect(res.headers.get('set-cookie')).toContain('codeman_session=');
+      expect(res.headers.get('set-cookie')).toContain('reverie_session=');
     });
 
     it('should clear failed attempt count after correct credentials recover access', async () => {
@@ -339,17 +339,17 @@ describe('No-Auth Server Startup Policy', () => {
   let server: WebServer;
 
   beforeAll(async () => {
-    delete process.env.CODEMAN_PASSWORD;
-    delete process.env.CODEMAN_USERNAME;
-    delete process.env.CODEMAN_ALLOW_UNAUTHENTICATED_NETWORK;
+    delete process.env.REVERIE_PASSWORD;
+    delete process.env.REVERIE_USERNAME;
+    delete process.env.REVERIE_ALLOW_UNAUTHENTICATED_NETWORK;
     server = new WebServer(0, false, true, '127.0.0.1');
     await server.start();
   });
 
   afterAll(async () => {
-    delete process.env.CODEMAN_PASSWORD;
-    delete process.env.CODEMAN_USERNAME;
-    delete process.env.CODEMAN_ALLOW_UNAUTHENTICATED_NETWORK;
+    delete process.env.REVERIE_PASSWORD;
+    delete process.env.REVERIE_USERNAME;
+    delete process.env.REVERIE_ALLOW_UNAUTHENTICATED_NETWORK;
     await server.stop();
   });
 
@@ -371,20 +371,20 @@ describe('No-Auth Server Startup Policy', () => {
 
     const warned = warnSpy.mock.calls.flat().join('\n');
     expect(warned).toMatch(/non-loopback host|NO password/i);
-    expect(warned).toMatch(/CODEMAN_PASSWORD/);
+    expect(warned).toMatch(/REVERIE_PASSWORD/);
 
     warnSpy.mockRestore();
     await networkServer.stop();
   });
 
-  it('allows non-loopback startup when CODEMAN_PASSWORD is configured', async () => {
-    process.env.CODEMAN_PASSWORD = TEST_PASS;
+  it('allows non-loopback startup when REVERIE_PASSWORD is configured', async () => {
+    process.env.REVERIE_PASSWORD = TEST_PASS;
     const networkServer = new WebServer(0, false, true, '0.0.0.0');
 
     await networkServer.start();
     await networkServer.stop();
 
-    delete process.env.CODEMAN_PASSWORD;
+    delete process.env.REVERIE_PASSWORD;
   });
 
   it('allows non-loopback startup with the explicit unauthenticated-network override', async () => {
@@ -397,12 +397,12 @@ describe('No-Auth Server Startup Policy', () => {
   });
 
   it('allows non-loopback startup with the explicit unauthenticated-network env override', async () => {
-    process.env.CODEMAN_ALLOW_UNAUTHENTICATED_NETWORK = 'true';
+    process.env.REVERIE_ALLOW_UNAUTHENTICATED_NETWORK = 'true';
     const networkServer = new WebServer(0, false, true, '0.0.0.0');
 
     await networkServer.start();
     await networkServer.stop();
 
-    delete process.env.CODEMAN_ALLOW_UNAUTHENTICATED_NETWORK;
+    delete process.env.REVERIE_ALLOW_UNAUTHENTICATED_NETWORK;
   });
 });

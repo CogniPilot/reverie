@@ -1,4 +1,4 @@
-/** `codeman agent chat new`: the coordinator-only create verb is a thin client of POST /api/v1/chatrooms. */
+/** `reverie agent chat new`: the coordinator-only create verb is a thin client of POST /api/v1/chatrooms. */
 import { describe, expect, it } from 'vitest';
 import http from 'node:http';
 import { agentChatNew, httpRequest, type AgentDeps, type RequestOptions } from '../src/cli-agent.js';
@@ -60,7 +60,7 @@ describe('agent chat new', () => {
     }
   });
 
-  it('sends X-Codeman-Parent-Session over the real transport, which is what makes the server see a coordinator', async () => {
+  it('sends X-Reverie-Parent-Session over the real transport, which is what makes the server see a coordinator', async () => {
     let seen: http.IncomingHttpHeaders = {};
     const server = http.createServer((req, res) => {
       seen = req.headers;
@@ -79,7 +79,7 @@ describe('agent chat new', () => {
         request: httpRequest,
       };
       expect(await agentChatNew(deps, { name: 'Wire', members: [] })).toBe(0);
-      expect(seen['x-codeman-parent-session']).toBe(SELF);
+      expect(seen['x-reverie-parent-session']).toBe(SELF);
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }

@@ -13,7 +13,7 @@
  * The data shaping is pure (the `ca*` / `chat*` functions at the top) so it is tested without
  * a DOM; ReverieChatApp only paints and wires.
  *
- * @dependency chatroom-ui.js, chat-media.js, app.js (CodemanApp)
+ * @dependency chatroom-ui.js, chat-media.js, app.js (ReverieApp)
  * @loadorder after chatroom-ui.js (injected by it)
  */
 
@@ -753,7 +753,7 @@ function caAgentFacts(session) {
 /**
  * The reporting tree from a GET /api/company payload. Optional fields: owner{name,title} (else the
  * settings' owner name/title), employees[].reportsTo (employee id | 'owner'), temporaryAgents[].parentSessionId,
- * settings.ctoId. No reportsTo -> under the CTO (or the owner when there is none, or when it is the CTO
+ * settings.coordinatorEmployeeId. No reportsTo -> under the briefing coordinator (or the owner when there is none, or when it is the coordinator
  * itself); a temporary with no known parent -> under the CTO, else the owner. Cycles fall back to the owner.
  */
 function caConnectedSessionIds(sessions) {
@@ -766,7 +766,7 @@ function caOrgTree(company, liveIds) {
   const data = company || {};
   const employees = Array.isArray(data.employees) ? data.employees : [];
   const temps = Array.isArray(data.temporaryAgents) ? data.temporaryAgents : [];
-  const ctoId = data.settings?.ctoId;
+  const coordinatorEmployeeId = data.settings?.coordinatorEmployeeId;
   const root = {
     key: 'owner',
     name: data.owner?.name || data.settings?.ownerName || 'Owner',
@@ -788,11 +788,11 @@ function caOrgTree(company, liveIds) {
       children: [],
     });
   }
-  const cto = ctoId ? nodes.get(ctoId) : undefined;
+  const coordinator = coordinatorEmployeeId ? nodes.get(coordinatorEmployeeId) : undefined;
   const parents = new Map();
   const attach = (child, parentRef) => {
     let parent = parentRef === 'owner' ? root : nodes.get(parentRef);
-    if (!parent || parent === child) parent = cto && cto !== child ? cto : root;
+    if (!parent || parent === child) parent = coordinator && coordinator !== child ? coordinator : root;
     for (let up = parent, hops = 0; up && up !== root; hops++) {
       if (up === child || hops > nodes.size) {
         parent = root;
@@ -803,7 +803,7 @@ function caOrgTree(company, liveIds) {
     parents.set(child, parent);
     parent.children.push(child);
   };
-  for (const e of employees) attach(nodes.get(e.id), e.reportsTo ?? (e.id === ctoId ? 'owner' : undefined));
+  for (const e of employees) attach(nodes.get(e.id), e.reportsTo ?? (e.id === coordinatorEmployeeId ? 'owner' : undefined));
   const bySession = new Map([...nodes.values()].filter((n) => n.sessionId).map((n) => [n.sessionId, n]));
   // Only connected temporary workers belong in the chart. This never changes stored profiles or sessions.
   // A session that is also an employee's is drawn once, as the employee (its temporary record is just the profile it had before).
@@ -821,14 +821,14 @@ function caOrgTree(company, liveIds) {
       available: true,
       children: [],
     };
-    const parent = (t.parentSessionId && bySession.get(t.parentSessionId)) || cto || root;
+    const parent = (t.parentSessionId && bySession.get(t.parentSessionId)) || coordinator || root;
     parent.children.push(node);
   }
   return root;
 }
 
 /**
- * The sections of an agent's profile from GET /api/agents/:id/profile (the fleet runtime's read-only view). Every
+ * The sections of an agent's profile from GET /api/agents/:id/profile (the reverie runtime's read-only view). Every
  * part is optional; a part the payload does not have is left out. Returns { persona, sections, switchInfo, error }.
  */
 function caAgentProfile(data) {
@@ -861,7 +861,7 @@ function caAgentProfile(data) {
   add('Runtime', [
     ['Backend', b.mode ? (Object.hasOwn(CA_BACKENDS, b.mode) ? CA_BACKENDS[b.mode] : String(b.mode)) : ''],
     // The card's headline (Model, Effort) is what the page knows: the model the CLI reports and the effort it was started with. These are
-    // what the fleet runtime measured, labelled as such so the two can never read as a contradiction.
+    // what the reverie runtime measured, labelled as such so the two can never read as a contradiction.
     ['Runtime model', b.display_model || b.model || ''],
     ['Last turn effort', effort.observed?.level ? `${effort.observed.level}${effort.observed.at ? ` (${when(effort.observed.at)})` : ''}` : ''],
     ['Configured effort', effort.configured || ''],
@@ -1042,7 +1042,7 @@ function caPageFromHash(hash) {
 /* ───────────────────────── the app ───────────────────────── */
 
 class ReverieChatApp {
-  /** @param {object} app the CodemanApp singleton @param {Document} doc */
+  /** @param {object} app the ReverieApp singleton @param {Document} doc */
   constructor(app, doc = document) {
     this.profileRefreshMs = 4000;
     this.app = app;
@@ -1320,7 +1320,7 @@ class ReverieChatApp {
   }
 
   async loadRooms(preferId) {
-    const stored = preferId || caRead('local', 'codeman:chatroom', '') || undefined;
+    const stored = preferId || caRead('local', 'reverie:chatroom', '') || undefined;
     await this.app._loadChatRooms(stored);
     this.renderAll();
   }
@@ -2293,6 +2293,22 @@ class ReverieChatApp {
         title.append(this.el('span', 'ca-company-icon', employee.icon || '👤'), this.literalText('strong', '', employee.name));
         const parent = employee.reportsTo && employee.reportsTo !== 'owner' ? employees.find(e => e.id === employee.reportsTo)?.name : data.settings?.ownerName || 'Owner';
         card.append(title, this.literalText('span', 'ca-company-role', employee.position || ''), parent ? this.literalText('span', 'ca-company-parent', parent) : this.el('span', 'ca-company-parent', 'Unassigned'), this.el('span', `ca-company-state${employee.available ? ' is-connected' : ''}`, employee.available ? 'Connected' : 'Disconnected'));
+        if (manage) {
+          const label = this.el('label', 'ca-hint', ' May recover disconnected employee sessions');
+          const recovery = this.el('input', '');
+          recovery.type = 'checkbox';
+          recovery.checked = employee.permissions?.recoverEmployees === true;
+          recovery.setAttribute('aria-label', `Recovery permission for ${employee.name}`);
+          label.prepend(recovery);
+          const save = this.button('ca-btn', 'Save permissions', async () => {
+            const result = await this.app._chatApi(`/api/company/employees/${encodeURIComponent(employee.id)}`, {
+              method: 'PUT', body: { permissions: { recoverEmployees: recovery.checked } },
+            });
+            status.textContent = result.ok ? 'Employee permissions saved.' : `Could not save permissions: ${result.error || 'request failed'}`;
+          });
+          save.setAttribute('aria-label', `Save permissions for ${employee.name}`);
+          card.append(label, save);
+        }
         const work = this.el('div', 'ca-company-work');
         work.dataset.employeeId = employee.id;
         work.append(this.el('p', 'ca-hint', 'Loading work status…'));
@@ -2331,6 +2347,55 @@ class ReverieChatApp {
       if (!employees.length) chart.append(this.el('p', 'ca-hint', 'No permanent team members yet.'));
       const people = this.el('section', 'ca-company-people');
       people.append(this.el('h3', '', `People · ${employees.length}`), this.el('p', 'ca-hint', "Ring = today's issues done of planned. Receipts are checkable facts, not claims."), chart);
+      if (manage) {
+        const recovery = this.el('form', 'ca-company-form ca-company-recovery');
+        recovery.append(this.el('h3', '', 'Crash recovery'));
+        const enabledLabel = this.el('label', 'ca-label');
+        const enabled = this.el('input', ''); enabled.type = 'checkbox';
+        enabled.checked = data.settings?.autoWakeEnabled !== false;
+        enabled.setAttribute('aria-label', 'Automatic recovery');
+        enabledLabel.append(enabled, this.el('span', '', 'Automatic recovery'));
+        const expertLabel = this.el('label', 'ca-label');
+        expertLabel.append(this.el('span', 'ca-label-text', 'Wake after a crash'));
+        const expert = this.el('select', 'ca-field');
+        expert.setAttribute('aria-label', 'Wake after a crash');
+        const coordinator = data.settings?.coordinatorEmployeeId;
+        const roots = employees.filter(employee => {
+          const parent = employee.reportsTo ?? (employee.id === coordinator ? 'owner' : coordinator);
+          return !parent || parent === 'owner';
+        });
+        const automatic = this.literalText('option', '', roots.length === 1 ? `Automatic: ${roots[0].name}` : 'Choose an expert');
+        automatic.value = ''; expert.append(automatic);
+        for (const employee of employees) {
+          const option = this.literalText('option', '', employee.name);
+          option.value = employee.id; expert.append(option);
+        }
+        const selected = data.settings?.crashWakeEmployeeId || '';
+        if (selected && !employees.some(employee => employee.id === selected)) {
+          const missing = this.el('option', '', 'Unavailable expert'); missing.value = selected;
+          expert.append(missing);
+        }
+        expert.value = selected;
+        expert.disabled = !enabled.checked;
+        enabled.addEventListener('change', () => { expert.disabled = !enabled.checked; });
+        expertLabel.append(expert);
+        const save = this.el('button', 'ca-btn', 'Save recovery'); save.type = 'submit';
+        recovery.append(enabledLabel, expertLabel, this.el('p', 'ca-hint', 'Only this expert wakes automatically. They can wake reports with permission.'), save);
+        recovery.addEventListener('submit', async event => {
+          event.preventDefault(); save.disabled = true;
+          const changes = { ...data.settings, autoWakeEnabled: enabled.checked };
+          if (expert.value) changes.crashWakeEmployeeId = expert.value;
+          else delete changes.crashWakeEmployeeId;
+          try {
+            const result = await this.app._chatApi('/api/company/settings', { method: 'PUT', body: changes });
+            status.textContent = result.ok ? 'Recovery settings saved.' : `Could not save recovery settings: ${result.error || 'request failed'}`;
+            if (result.ok) data.settings = result.data?.settings || changes;
+          } catch {
+            status.textContent = 'Could not save recovery settings. Try again.';
+          } finally { save.disabled = false; }
+        });
+        people.insertBefore(recovery, chart);
+      }
       content.replaceChildren(people);
       let workLoading = false;
       this._companyRefresh = async () => {
@@ -3118,7 +3183,7 @@ class ReverieChatApp {
 
   /** The src of an icon that is an image (see caIconImage), through the page's base path. */
   iconImage(icon) {
-    return caIconImage(icon, (p) => this.doc.defaultView?.CodemanBase?.url?.(p) ?? p);
+    return caIconImage(icon, (p) => this.doc.defaultView?.ReverieBase?.url?.(p) ?? p);
   }
 
   /** Draw an image icon into an avatar element, replacing its letter or emoji. Returns whether it was an image. */
@@ -3168,7 +3233,7 @@ class ReverieChatApp {
   }
 
   userName() {
-    return this.profile.name || this.ownerName || this.doc.defaultView?.__codemanUser?.username || 'You';
+    return this.profile.name || this.ownerName || this.doc.defaultView?.__reverieUser?.username || 'You';
   }
 
   /** Your avatar: the chosen emoji (or initial) on the chosen colour. */
@@ -3947,7 +4012,7 @@ class ReverieChatApp {
   }
 
   defaultWorkspaceName() {
-    return this.doc.defaultView?.CodemanI18n?.displayName || 'Reverie';
+    return this.doc.defaultView?.ReverieI18n?.displayName || 'Reverie';
   }
 
   renderSidebar() {
@@ -5218,7 +5283,7 @@ class ReverieChatApp {
     top.append(this.userAvatar('md', 'online'));
     const names = this.el('div', 'ca-profile-names');
     names.append(this.el('strong', '', name));
-    const account = this.doc.defaultView?.__codemanUser?.username;
+    const account = this.doc.defaultView?.__reverieUser?.username;
     const sub = [account && account !== name ? account : '', p.pronouns].filter(Boolean).join(' \u2022 ');
     if (sub) names.append(this.el('span', 'ca-profile-sub', sub));
     top.append(names);
@@ -5327,7 +5392,7 @@ class ReverieChatApp {
       wrap.append(input);
       return { wrap, input };
     };
-    const fallback = this.ownerName || this.doc.defaultView?.__codemanUser?.username || 'You';
+    const fallback = this.ownerName || this.doc.defaultView?.__reverieUser?.username || 'You';
     const name = field('Display name', p.name, 32, fallback);
     // Optionally make the name the instance's owner name: it follows you to other browsers and the org chart.
     const instance = this.el('label', 'ca-check');
@@ -6403,7 +6468,7 @@ class ReverieChatApp {
   }
 }
 
-/* ───────────────────────── wiring into CodemanApp ───────────────────────── */
+/* ───────────────────────── wiring into ReverieApp ───────────────────────── */
 
 function caInstall(proto) {
   const original = {
@@ -6605,7 +6670,7 @@ function caInstall(proto) {
   });
 }
 
-/** Start the app once the CodemanApp singleton exists. */
+/** Start the app once the ReverieApp singleton exists. */
 /** Pairing QR parsers are local and inert: no navigation, redeem or authority from labels. */
 function caPairFields(value, version) {
   if (typeof value !== 'string' || value.length > 512 || new TextEncoder().encode(value).length > 512) throw new Error('Invalid pairing QR');
@@ -7803,7 +7868,7 @@ class ReverieEmbassyPairingView {
 }
 
 function caBoot() {
-  const proto = typeof CodemanApp !== 'undefined' ? CodemanApp.prototype : null;
+  const proto = typeof ReverieApp !== 'undefined' ? ReverieApp.prototype : null;
   if (!proto || proto._caInstalled) return;
   proto._caInstalled = true;
   caInstall(proto);
@@ -7837,7 +7902,7 @@ function caBoot() {
   go();
 }
 
-if (typeof window !== 'undefined' && typeof document !== 'undefined' && typeof CodemanApp !== 'undefined') {
+if (typeof window !== 'undefined' && typeof document !== 'undefined' && typeof ReverieApp !== 'undefined') {
   caBoot();
 }
 

@@ -173,9 +173,9 @@ describe('session-routes', () => {
   // ========== POST /api/sessions/:id/send-key ==========
 
   describe('POST /api/sessions/:id/send-key', () => {
-    it('routes tmux send-keys through the dedicated Codeman socket (-L)', async () => {
+    it('routes tmux send-keys through the dedicated Reverie socket (-L)', async () => {
       // Regression guard: bare `tmux` would hit the user's default server and never
-      // find a session that lives only on the Codeman socket (#80 regression class).
+      // find a session that lives only on the Reverie socket (#80 regression class).
       execFile.mockReset();
       execFile.mockImplementation((_bin: string, _argv: string[], _opts: unknown, cb: (e: Error | null) => void) =>
         cb(null)
@@ -191,7 +191,7 @@ describe('session-routes', () => {
       expect(execFile).toHaveBeenCalledTimes(1);
       const [bin, argv] = execFile.mock.calls[0];
       expect(bin).toBe('tmux');
-      expect((argv as string[]).slice(0, 2)).toEqual(['-L', 'codeman']);
+      expect((argv as string[]).slice(0, 2)).toEqual(['-L', 'reverie']);
       expect(argv).toContain('send-keys');
       expect(argv).toContain('-H');
     });
@@ -296,18 +296,18 @@ describe('session-routes', () => {
     }
 
     it('converts HEIC paste images to JPEG attachments when browser-side normalization falls back', async () => {
-      const workDir = await mkdtemp(join(tmpdir(), 'codeman-heic-'));
+      const workDir = await mkdtemp(join(tmpdir(), 'reverie-heic-'));
       harness.ctx._session.workingDir = workDir;
       heicConvert.mockClear();
 
-      const boundary = 'codeman-test-boundary';
+      const boundary = 'reverie-test-boundary';
       const heic = Buffer.from('00000034667479706865696300000000', 'hex');
       const res = await harness.app.inject({
         method: 'POST',
         url: `/api/sessions/${harness.ctx._sessionId}/paste-image`,
         headers: {
-          host: 'codeman.test',
-          origin: 'http://codeman.test',
+          host: 'reverie.test',
+          origin: 'http://reverie.test',
           'content-type': `multipart/form-data; boundary=${boundary}`,
         },
         payload: imageUploadBody(boundary, 'IMG_4996.HEIC', 'image/heic', heic),
@@ -318,16 +318,16 @@ describe('session-routes', () => {
       expect(res.statusCode).toBe(200);
       const body = JSON.parse(res.body);
       expect(body.success).toBe(true);
-      expect(body.data.path).toMatch(/\/\.codeman-uploads\/paste-\d+-[a-f0-9]{8}\.jpg$/);
+      expect(body.data.path).toMatch(/\/\.reverie-uploads\/paste-\d+-[a-f0-9]{8}\.jpg$/);
       expect(heicConvert).toHaveBeenCalledWith(heic);
     });
 
     it('converts mislabeled HEIC (declared image/jpeg, HEIF bytes — the MIUI/Android case) via magic sniff', async () => {
-      const workDir = await mkdtemp(join(tmpdir(), 'codeman-heic-mislabel-'));
+      const workDir = await mkdtemp(join(tmpdir(), 'reverie-heic-mislabel-'));
       harness.ctx._session.workingDir = workDir;
       heicConvert.mockClear();
 
-      const boundary = 'codeman-test-boundary';
+      const boundary = 'reverie-test-boundary';
       // ftyp brand mif1 — HEIF bytes hiding under a JPEG filename + MIME.
       const heic = Buffer.from('000000346674797061696631000000006d69663168656963', 'hex');
       heic.write('mif1', 8, 'ascii'); // major brand
@@ -335,8 +335,8 @@ describe('session-routes', () => {
         method: 'POST',
         url: `/api/sessions/${harness.ctx._sessionId}/paste-image`,
         headers: {
-          host: 'codeman.test',
-          origin: 'http://codeman.test',
+          host: 'reverie.test',
+          origin: 'http://reverie.test',
           'content-type': `multipart/form-data; boundary=${boundary}`,
         },
         payload: imageUploadBody(boundary, 'IMG_2001.jpg', 'image/jpeg', heic),
@@ -347,7 +347,7 @@ describe('session-routes', () => {
       expect(res.statusCode).toBe(200);
       const body = JSON.parse(res.body);
       expect(body.success).toBe(true);
-      expect(body.data.path).toMatch(/\/\.codeman-uploads\/paste-\d+-[a-f0-9]{8}\.jpg$/);
+      expect(body.data.path).toMatch(/\/\.reverie-uploads\/paste-\d+-[a-f0-9]{8}\.jpg$/);
       expect(heicConvert).toHaveBeenCalledWith(heic);
     });
 
@@ -357,35 +357,35 @@ describe('session-routes', () => {
         method: 'POST',
         url: `/api/sessions/${harness.ctx._sessionId}/paste-image`,
         headers: {
-          host: 'codeman.test',
-          origin: 'http://codeman.test',
-          'content-type': 'multipart/form-data; boundary=codeman-test-boundary',
+          host: 'reverie.test',
+          origin: 'http://reverie.test',
+          'content-type': 'multipart/form-data; boundary=reverie-test-boundary',
         },
-        payload: imageUploadBody('codeman-test-boundary', name, mime, bytes),
+        payload: imageUploadBody('reverie-test-boundary', name, mime, bytes),
       });
 
-    it('writes into .codeman-uploads with a self-ignoring .gitignore, written once and never over a file already there', async () => {
-      const workDir = await mkdtemp(join(tmpdir(), 'codeman-uploads-'));
+    it('writes into .reverie-uploads with a self-ignoring .gitignore, written once and never over a file already there', async () => {
+      const workDir = await mkdtemp(join(tmpdir(), 'reverie-uploads-'));
       harness.ctx._session.workingDir = workDir;
       try {
         const first = await upload('shot.jpg', 'image/jpeg', jpeg);
         expect(first.statusCode).toBe(200);
-        expect(JSON.parse(first.body).data.path).toMatch(/\/\.codeman-uploads\/paste-\d+-[a-f0-9]{8}\.jpg$/);
-        expect(await readdir(workDir)).toEqual(['.codeman-uploads']);
-        expect(await readFile(join(workDir, '.codeman-uploads', '.gitignore'), 'utf8')).toBe('*\n');
+        expect(JSON.parse(first.body).data.path).toMatch(/\/\.reverie-uploads\/paste-\d+-[a-f0-9]{8}\.jpg$/);
+        expect(await readdir(workDir)).toEqual(['.reverie-uploads']);
+        expect(await readFile(join(workDir, '.reverie-uploads', '.gitignore'), 'utf8')).toBe('*\n');
 
-        await writeFile(join(workDir, '.codeman-uploads', '.gitignore'), 'theirs\n');
+        await writeFile(join(workDir, '.reverie-uploads', '.gitignore'), 'theirs\n');
         expect((await upload('shot.jpg', 'image/jpeg', jpeg)).statusCode).toBe(200);
-        expect(await readFile(join(workDir, '.codeman-uploads', '.gitignore'), 'utf8')).toBe('theirs\n');
+        expect(await readFile(join(workDir, '.reverie-uploads', '.gitignore'), 'utf8')).toBe('theirs\n');
       } finally {
         await rm(workDir, { recursive: true });
       }
     });
 
     it('takes back an ignore file whose write failed, so the next upload writes a real one', async () => {
-      const workDir = await mkdtemp(join(tmpdir(), 'codeman-uploads-'));
+      const workDir = await mkdtemp(join(tmpdir(), 'reverie-uploads-'));
       harness.ctx._session.workingDir = workDir;
-      const ignoreFile = join(workDir, '.codeman-uploads', '.gitignore');
+      const ignoreFile = join(workDir, '.reverie-uploads', '.gitignore');
       // The exclusive create succeeds and the two-byte write fails, as on a full disk.
       const spy = vi.spyOn(fs, 'writeFile').mockImplementationOnce(async (path) => {
         await writeFile(path as string, '');
@@ -402,15 +402,15 @@ describe('session-routes', () => {
       }
     });
 
-    it('refuses a planted symlink at .codeman-uploads and writes nothing through it', async () => {
-      const workDir = await mkdtemp(join(tmpdir(), 'codeman-uploads-'));
-      const elsewhere = await mkdtemp(join(tmpdir(), 'codeman-elsewhere-'));
+    it('refuses a planted symlink at .reverie-uploads and writes nothing through it', async () => {
+      const workDir = await mkdtemp(join(tmpdir(), 'reverie-uploads-'));
+      const elsewhere = await mkdtemp(join(tmpdir(), 'reverie-elsewhere-'));
       harness.ctx._session.workingDir = workDir;
-      await symlink(elsewhere, join(workDir, '.codeman-uploads'));
+      await symlink(elsewhere, join(workDir, '.reverie-uploads'));
       try {
         const res = await upload('shot.jpg', 'image/jpeg', jpeg);
         expect(res.statusCode).toBe(403);
-        expect(JSON.parse(res.body).error).toBe('.codeman-uploads is not a regular directory');
+        expect(JSON.parse(res.body).error).toBe('.reverie-uploads is not a regular directory');
         expect(await readdir(elsewhere)).toEqual([]);
       } finally {
         await rm(workDir, { recursive: true });
@@ -419,7 +419,7 @@ describe('session-routes', () => {
     });
 
     it('refuses an upload for a remote session before touching disk', async () => {
-      const workDir = await mkdtemp(join(tmpdir(), 'codeman-uploads-'));
+      const workDir = await mkdtemp(join(tmpdir(), 'reverie-uploads-'));
       harness.ctx._session.workingDir = workDir;
       // A remote session's workingDir is the REMOTE path: a file written here is unreadable there.
       (harness.ctx._session as unknown as { remote: unknown }).remote = { hostId: 'gpu-box' };
@@ -438,14 +438,14 @@ describe('session-routes', () => {
       heicConvert.mockClear();
       heicConvert.mockRejectedValueOnce(new Error('HEIC dimensions 30000x30000 exceed the 64MP decode limit'));
 
-      const boundary = 'codeman-test-boundary';
+      const boundary = 'reverie-test-boundary';
       const heic = Buffer.from('00000034667479706865696300000000', 'hex');
       const res = await harness.app.inject({
         method: 'POST',
         url: `/api/sessions/${harness.ctx._sessionId}/paste-image`,
         headers: {
-          host: 'codeman.test',
-          origin: 'http://codeman.test',
+          host: 'reverie.test',
+          origin: 'http://reverie.test',
           'content-type': `multipart/form-data; boundary=${boundary}`,
         },
         payload: imageUploadBody(boundary, 'IMG_4997.HEIC', 'image/heic', heic),
@@ -461,14 +461,14 @@ describe('session-routes', () => {
     it('rejects ftyp brands heic-decode cannot convert (e.g. heim) without invoking the converter', async () => {
       heicConvert.mockClear();
 
-      const boundary = 'codeman-test-boundary';
+      const boundary = 'reverie-test-boundary';
       const heim = Buffer.from('00000034667479706865696d00000000', 'hex');
       const res = await harness.app.inject({
         method: 'POST',
         url: `/api/sessions/${harness.ctx._sessionId}/paste-image`,
         headers: {
-          host: 'codeman.test',
-          origin: 'http://codeman.test',
+          host: 'reverie.test',
+          origin: 'http://reverie.test',
           'content-type': `multipart/form-data; boundary=${boundary}`,
         },
         payload: imageUploadBody(boundary, 'IMG_4998.HEIC', 'image/heic', heim),
@@ -480,7 +480,7 @@ describe('session-routes', () => {
     });
 
     it('probes the session workspace past the stall cap before writing (#516)', async () => {
-      const workDir = await mkdtemp(join(tmpdir(), 'codeman-uploads-'));
+      const workDir = await mkdtemp(join(tmpdir(), 'reverie-uploads-'));
       harness.ctx._session.workingDir = workDir;
       try {
         // Clear right before the request so only THIS upload's call can satisfy the pin.
@@ -494,7 +494,7 @@ describe('session-routes', () => {
     });
 
     it('refuses with the describeUnknownPath message, and writes nothing, when the workspace does not answer', async () => {
-      const workDir = await mkdtemp(join(tmpdir(), 'codeman-uploads-'));
+      const workDir = await mkdtemp(join(tmpdir(), 'reverie-uploads-'));
       harness.ctx._session.workingDir = workDir;
       pathProbe.kind = 'unknown';
       try {
@@ -512,17 +512,17 @@ describe('session-routes', () => {
 
     // `?kind=video`: the phone Attach button's camera-roll videos. Streamed to
     // disk under their own cap; without the flag the route stays image-only.
-    const boundary = 'codeman-test-boundary';
+    const boundary = 'reverie-test-boundary';
     const movHeaders = {
-      host: 'codeman.test',
-      origin: 'http://codeman.test',
+      host: 'reverie.test',
+      origin: 'http://reverie.test',
       'content-type': `multipart/form-data; boundary=${boundary}`,
     };
     // size + ftyp + "qt  " brand, as an iPhone writes it, padded past the 12-byte sniff.
     const qtMov = Buffer.concat([Buffer.from('0000001466747970717420200000000071742020', 'hex'), Buffer.alloc(20)]);
 
-    it('streams a ?kind=video upload to .codeman-uploads under the video extension', async () => {
-      const workDir = await mkdtemp(join(tmpdir(), 'codeman-video-'));
+    it('streams a ?kind=video upload to .reverie-uploads under the video extension', async () => {
+      const workDir = await mkdtemp(join(tmpdir(), 'reverie-video-'));
       harness.ctx._session.workingDir = workDir;
       const res = await harness.app.inject({
         method: 'POST',
@@ -532,7 +532,7 @@ describe('session-routes', () => {
       });
       expect(res.statusCode).toBe(200);
       const body = JSON.parse(res.body);
-      expect(body.data.path).toMatch(/\/\.codeman-uploads\/paste-\d+-[a-f0-9]{8}\.mov$/);
+      expect(body.data.path).toMatch(/\/\.reverie-uploads\/paste-\d+-[a-f0-9]{8}\.mov$/);
       expect(await readFile(body.data.path)).toEqual(qtMov);
       await rm(workDir, { recursive: true });
     });
@@ -541,7 +541,7 @@ describe('session-routes', () => {
       // The admitted set is VIDEO_ATTACHMENT_EXTENSIONS (mp4/webm/mov/m4v/ogv); mov is
       // covered above. These three exercise the three sniff families: ISO BMFF (m4v),
       // EBML (webm) and Ogg (ogv). Three per session stays inside the 3/min video budget.
-      const workDir = await mkdtemp(join(tmpdir(), 'codeman-video-'));
+      const workDir = await mkdtemp(join(tmpdir(), 'reverie-video-'));
       harness.ctx._session.workingDir = workDir;
       const m4v = Buffer.concat([Buffer.from('00000018667479706d703432', 'hex'), Buffer.alloc(16)]); // ftyp mp42
       const webm = Buffer.concat([Buffer.from('1a45dfa3a3428681', 'hex'), Buffer.alloc(16)]); // EBML
@@ -564,7 +564,7 @@ describe('session-routes', () => {
     });
 
     it('refuses 3gp and mkv, which a phone camera roll does not produce and the viewer cannot play', async () => {
-      const workDir = await mkdtemp(join(tmpdir(), 'codeman-video-'));
+      const workDir = await mkdtemp(join(tmpdir(), 'reverie-video-'));
       harness.ctx._session.workingDir = workDir;
       const threeGp = Buffer.concat([Buffer.from('0000001866747970336770340000000033677034', 'hex'), Buffer.alloc(20)]);
       const mkv = Buffer.concat([Buffer.from('1a45dfa3a3428681', 'hex'), Buffer.alloc(24)]);
@@ -608,7 +608,7 @@ describe('session-routes', () => {
     });
 
     it('unlinks a ?kind=video upload whose bytes are not a video container', async () => {
-      const workDir = await mkdtemp(join(tmpdir(), 'codeman-video-'));
+      const workDir = await mkdtemp(join(tmpdir(), 'reverie-video-'));
       harness.ctx._session.workingDir = workDir;
       const png = Buffer.concat([Buffer.from('89504e470d0a1a0a', 'hex'), Buffer.alloc(24)]);
       const res = await harness.app.inject({
@@ -618,12 +618,12 @@ describe('session-routes', () => {
         payload: imageUploadBody(boundary, 'fake.mov', 'video/quicktime', png),
       });
       expect(res.statusCode).toBe(415);
-      expect(await readdir(join(workDir, '.codeman-uploads'))).toEqual(['.gitignore']); // the folder's own ignore file, no upload
+      expect(await readdir(join(workDir, '.reverie-uploads'))).toEqual(['.gitignore']); // the folder's own ignore file, no upload
       await rm(workDir, { recursive: true });
     });
 
     it('leaves no partial file behind when a ?kind=video transfer ends early', async () => {
-      const workDir = await mkdtemp(join(tmpdir(), 'codeman-video-'));
+      const workDir = await mkdtemp(join(tmpdir(), 'reverie-video-'));
       harness.ctx._session.workingDir = workDir;
       // The body stops mid-part: no closing boundary ever arrives.
       const cut = imageUploadBody(boundary, 'IMG_0003.MOV', 'video/quicktime', qtMov).subarray(0, -12);
@@ -634,12 +634,12 @@ describe('session-routes', () => {
         payload: cut,
       });
       expect(res.statusCode).toBeGreaterThanOrEqual(400); // "Premature close" out of the write loop
-      expect(await readdir(join(workDir, '.codeman-uploads'))).toEqual(['.gitignore']); // the folder's own ignore file, no upload
+      expect(await readdir(join(workDir, '.reverie-uploads'))).toEqual(['.gitignore']); // the folder's own ignore file, no upload
       await rm(workDir, { recursive: true });
     });
 
     it('unlinks a ?kind=video upload over the video cap and answers 413', async () => {
-      const workDir = await mkdtemp(join(tmpdir(), 'codeman-video-'));
+      const workDir = await mkdtemp(join(tmpdir(), 'reverie-video-'));
       harness.ctx._session.workingDir = workDir;
       const big = Buffer.concat([qtMov, Buffer.alloc(200)]); // cap is mocked to 64 bytes
       const res = await harness.app.inject({
@@ -650,12 +650,12 @@ describe('session-routes', () => {
       });
       expect(res.statusCode).toBe(413);
       expect(JSON.parse(res.body).error).toMatch(/too large/);
-      expect(await readdir(join(workDir, '.codeman-uploads'))).toEqual(['.gitignore']); // the folder's own ignore file, no upload
+      expect(await readdir(join(workDir, '.reverie-uploads'))).toEqual(['.gitignore']); // the folder's own ignore file, no upload
       await rm(workDir, { recursive: true });
     });
 
     it('judges a ?kind=video upload on its header, before the body has landed on disk', async () => {
-      const workDir = await mkdtemp(join(tmpdir(), 'codeman-video-'));
+      const workDir = await mkdtemp(join(tmpdir(), 'reverie-video-'));
       harness.ctx._session.workingDir = workDir;
       // Mislabeled AND over the (64-byte) cap: the header verdict comes first, so the
       // answer is 415, never the 413 that would mean the whole body was taken in.
@@ -667,12 +667,12 @@ describe('session-routes', () => {
         payload: imageUploadBody(boundary, 'fake.mov', 'video/quicktime', big),
       });
       expect(res.statusCode).toBe(415);
-      expect(await readdir(join(workDir, '.codeman-uploads'))).toEqual(['.gitignore']); // the folder's own ignore file, no upload
+      expect(await readdir(join(workDir, '.reverie-uploads'))).toEqual(['.gitignore']); // the folder's own ignore file, no upload
       await rm(workDir, { recursive: true });
     });
 
     it('refuses an upload for a remote session before touching disk, video or image', async () => {
-      const workDir = await mkdtemp(join(tmpdir(), 'codeman-video-'));
+      const workDir = await mkdtemp(join(tmpdir(), 'reverie-video-'));
       harness.ctx._session.workingDir = workDir;
       // A remote session's workingDir is the REMOTE path: a file written here is unreadable there.
       (harness.ctx._session as unknown as { remote: unknown }).remote = { hostId: 'gpu-box' };
@@ -700,7 +700,7 @@ describe('session-routes', () => {
     });
 
     it('keeps the image path on its own size cap: a valid image past the video cap is accepted without the flag', async () => {
-      const workDir = await mkdtemp(join(tmpdir(), 'codeman-uploads-'));
+      const workDir = await mkdtemp(join(tmpdir(), 'reverie-uploads-'));
       harness.ctx._session.workingDir = workDir;
       try {
         // A real PNG far larger than the mocked 64-byte video cap but well under the
@@ -716,7 +716,7 @@ describe('session-routes', () => {
         });
         expect(res.statusCode).toBe(200);
         const body = JSON.parse(res.body);
-        expect(body.data.path).toMatch(/\/\.codeman-uploads\/paste-\d+-[a-f0-9]{8}\.png$/);
+        expect(body.data.path).toMatch(/\/\.reverie-uploads\/paste-\d+-[a-f0-9]{8}\.png$/);
         expect(await readFile(body.data.path)).toEqual(png);
       } finally {
         await rm(workDir, { recursive: true });
@@ -724,7 +724,7 @@ describe('session-routes', () => {
     });
 
     it('caps ?kind=video at 3 per minute per session, far below the image rate, on its own bucket', async () => {
-      const workDir = await mkdtemp(join(tmpdir(), 'codeman-uploads-'));
+      const workDir = await mkdtemp(join(tmpdir(), 'reverie-uploads-'));
       harness.ctx._session.workingDir = workDir;
       try {
         for (let i = 0; i < 3; i++) {
@@ -2442,13 +2442,13 @@ describe('session-routes', () => {
       expect(body.data.sessions.length).toBeLessThanOrEqual(50);
     });
 
-    it('decodes a dotdir working directory (e.g. ~/.codeman) instead of falling back to $HOME', async () => {
+    it('decodes a dotdir working directory (e.g. ~/.reverie) instead of falling back to $HOME', async () => {
       // Claude Code's project-key encoding maps both '/' and '.' to '-', so
       // "/home/x/.dotcase" and "/home/x/dotcase" collapse to the same-looking
       // dash run except for a doubled dash. decodeProjectKey() must still
       // recover the real (dotdir) path rather than silently falling back to
-      // bare $HOME (COD bug: 2026-08-01, ~/.codeman resumed sessions got
-      // workingDir "/home/timkjr" instead of "/home/timkjr/.codeman").
+      // bare $HOME (COD bug: 2026-08-01, ~/.reverie resumed sessions got
+      // workingDir "/home/timkjr" instead of "/home/timkjr/.reverie").
       const home = process.env.HOME as string;
       const realDir = join(home, '.dotcase');
       await mkdir(realDir, { recursive: true });
@@ -2989,7 +2989,7 @@ describe('session-routes', () => {
           const res = await harness.app.inject({
             method: 'POST',
             url: '/api/sessions',
-            payload: { attachRemoteSession: { hostId: 'hufflepuff', remoteSessionName: 'codeman-abc12345' } },
+            payload: { attachRemoteSession: { hostId: 'hufflepuff', remoteSessionName: 'reverie-abc12345' } },
           });
 
           expect(res.statusCode).toBe(200);

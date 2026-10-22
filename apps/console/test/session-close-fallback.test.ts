@@ -30,7 +30,7 @@ import { resolve } from 'node:path';
 import vm from 'node:vm';
 import { describe, expect, it, vi } from 'vitest';
 
-function loadCodemanAppClass() {
+function loadReverieAppClass() {
   const dir = resolve(import.meta.dirname, '../src/web/public');
   const constants = readFileSync(resolve(dir, 'constants.js'), 'utf8');
   const source = readFileSync(resolve(dir, 'app.js'), 'utf8');
@@ -50,11 +50,11 @@ function loadCodemanAppClass() {
     window: { addEventListener: vi.fn(), removeEventListener: vi.fn() },
     MobileDetection: { isTouchDevice: () => false },
   });
-  vm.runInContext(`${constants}\n${source}\nglobalThis.__CodemanApp = CodemanApp;`, context);
-  return (context as { __CodemanApp: new () => unknown }).__CodemanApp;
+  vm.runInContext(`${constants}\n${source}\nglobalThis.__ReverieApp = ReverieApp;`, context);
+  return (context as { __ReverieApp: new () => unknown }).__ReverieApp;
 }
 
-const CodemanApp = loadCodemanAppClass();
+const ReverieApp = loadReverieAppClass();
 const A = 'session-a';
 const B = 'session-b';
 
@@ -70,7 +70,7 @@ type TestApp = Record<string, unknown> & {
 
 /** Instance with the session bookkeeping real and everything visual stubbed. */
 function makeApp(active: string | null, order = [A, B]): TestApp {
-  const app = Object.create((CodemanApp as { prototype: object }).prototype) as TestApp;
+  const app = Object.create((ReverieApp as { prototype: object }).prototype) as TestApp;
   app.activeSessionId = active;
   app.sessionOrder = [...order];
   app.sessions = new Map(order.map((id) => [id, { id }]));

@@ -1,12 +1,12 @@
-# Codeman Mobile Test Suite
+# Reverie Mobile Test Suite
 
-Comprehensive mobile UI testing for Codeman's web interface using Playwright with dual-engine support (Chromium + WebKit).
+Comprehensive mobile UI testing for Reverie's web interface using Playwright with dual-engine support (Chromium + WebKit).
 
 **326 tests across 138 devices — all passing.**
 
 ## Purpose
 
-Validates Codeman's mobile UI across 138 devices, covering:
+Validates Reverie's mobile UI across 138 devices, covering:
 
 - **Keyboard simulation** — 3-layer approach to emulate virtual keyboards in headless browsers
 - **Touch/swipe interactions** — CDP trusted events (Chromium) + synthetic fallback (WebKit)

@@ -16,7 +16,7 @@
  * every log line goes to stderr.
  *
  * Invariants (each asserted in test/mcp-server.test.ts):
- * 1. Never guesses a server: the URL comes from `--url` or `CODEMAN_API_URL`. Without
+ * 1. Never guesses a server: the URL comes from `--url` or `REVERIE_API_URL`. Without
  *    one the server still starts and lists its tools (registries introspect that way),
  *    and every tool call answers with how to configure it.
  * 2. Prompting, interrupting and deleting are limited to sessions this process started,
@@ -70,7 +70,7 @@ import {
   type RequestOptions,
   type WaitResult,
 } from './cli-agent.js';
-import { credentialsFrom, readCodemanEnvFile } from './codeman-credentials.js';
+import { credentialsFrom, readReverieEnvFile } from './reverie-credentials.js';
 import { listClis } from './config/cli-registry/registry.js';
 import { getErrorMessage } from './types.js';
 import { createMemoryTools, resolveMemoryToolsConfig, type BridgeRunner, type MemoryToolsConfig } from './mcp-memory-tools.js';
@@ -105,7 +105,7 @@ export const MAX_WAIT_MS = 600_000;
 /** Cap on text handed back to the model, so one read cannot flood its context. */
 export const MAX_OUTPUT_CHARS = 40_000;
 /** Agent-scratch label for a case directory a start_session CREATES (agent-case-marker.ts). */
-const MCP_AGENT_ORIGIN = 'codeman-mcp';
+const MCP_AGENT_ORIGIN = 'reverie-mcp';
 const WAIT_SIGNALS = ['stop', 'idle', 'exit', 'working', 'blocked'] as const;
 
 /**
@@ -148,15 +148,15 @@ export interface McpConfig {
 
 /**
  * Resolve the configuration from flags and the environment. Never guesses a URL: only
- * `--url` or `CODEMAN_API_URL` set one. A session id counts only inside a Reverie pane
- * (`CODEMAN_MUX=1`); a desktop client's environment has no session of its own.
+ * `--url` or `REVERIE_API_URL` set one. A session id counts only inside a Reverie pane
+ * (`REVERIE_MUX=1`); a desktop client's environment has no session of its own.
  */
 export function resolveMcpConfig(
   options: { url?: string; allowAnySession?: boolean; chat?: boolean; version: string },
   env: NodeJS.ProcessEnv = process.env,
-  envFile: () => Record<string, string> = readCodemanEnvFile
+  envFile: () => Record<string, string> = readReverieEnvFile
 ): McpConfig {
-  const raw = (options.url ?? env.CODEMAN_API_URL ?? '').trim();
+  const raw = (options.url ?? env.REVERIE_API_URL ?? '').trim();
   let apiUrl: string | undefined;
   let urlError: string | undefined;
   if (raw) {
@@ -168,7 +168,7 @@ export function resolveMcpConfig(
       urlError = `"${raw}" is not a valid URL`;
     }
   }
-  const selfId = env.CODEMAN_MUX === '1' ? env.CODEMAN_SESSION_ID?.trim() || undefined : undefined;
+  const selfId = env.REVERIE_MUX === '1' ? env.REVERIE_SESSION_ID?.trim() || undefined : undefined;
   const credentials = credentialsFrom(env, envFile());
   return {
     apiUrl,
@@ -701,8 +701,8 @@ export function createToolRunner(deps: ToolRunnerDeps) {
       throw new ToolError(
         config.urlError
           ? `Reverie URL refused: ${config.urlError}.`
-          : 'This MCP server does not know where Reverie runs. Set CODEMAN_API_URL in its environment (for example ' +
-              'https://127.0.0.1:3000, the address you open Reverie at) or pass --url, plus CODEMAN_PASSWORD when the ' +
+          : 'This MCP server does not know where Reverie runs. Set REVERIE_API_URL in its environment (for example ' +
+              'https://127.0.0.1:3000, the address you open Reverie at) or pass --url, plus REVERIE_PASSWORD when the ' +
               'server has one, then restart the MCP server.'
       );
     }
@@ -830,7 +830,7 @@ export function createToolRunner(deps: ToolRunnerDeps) {
           method: 'POST',
           path: '/api/v1/quick-start',
           body,
-          headers: { 'X-Codeman-Agent-Origin': MCP_AGENT_ORIGIN },
+          headers: { 'X-Reverie-Agent-Origin': MCP_AGENT_ORIGIN },
           timeoutMs: 120_000,
         },
         signal
@@ -1062,7 +1062,7 @@ export function createToolRunner(deps: ToolRunnerDeps) {
     if (!config.selfId) {
       throw new ToolError(
         'The chat tools speak as the Reverie session this server runs in, and this server is not running inside one ' +
-          '(they need CODEMAN_SESSION_ID and CODEMAN_MUX=1 in its environment, which a Reverie pane sets).'
+          '(they need REVERIE_SESSION_ID and REVERIE_MUX=1 in its environment, which a Reverie pane sets).'
       );
     }
     const out: string[] = [];
@@ -1206,7 +1206,7 @@ function isObject(value: unknown): value is Record<string, unknown> {
 export function createMcpServer(options: McpServerOptions) {
   const { config, write } = options;
   const log = options.log ?? (() => {});
-  const serverInfo = { name: 'codeman', title: 'Reverie', version: config.version };
+  const serverInfo = { name: 'reverie', title: 'Reverie', version: config.version };
   const memory = createMemoryTools(options.memory ?? resolveMemoryToolsConfig(), options.memoryRunner);
   const serverInstructions = config.chat ? BASE_SERVER_INSTRUCTIONS + CHAT_SERVER_INSTRUCTIONS : BASE_SERVER_INSTRUCTIONS;
   const tools = [...buildToolDefinitions(options.modes ?? registryModes(), { chat: config.chat }), ...memory.definitions()];
@@ -1214,7 +1214,7 @@ export function createMcpServer(options: McpServerOptions) {
     config,
     request: options.request ?? httpRequest,
     started: new Set<string>(),
-    clientId: `codeman-mcp-${randomBytes(4).toString('hex')}`,
+    clientId: `reverie-mcp-${randomBytes(4).toString('hex')}`,
     now: options.now,
   });
   const inflight = new Map<JsonRpcId, AbortController>();
@@ -1400,7 +1400,7 @@ export async function runMcpStdio(
     log,
   });
   log(
-    `reverie mcp ${config.version}: ${config.apiUrl ? `driving ${config.apiUrl}` : `not configured (${config.urlError ?? 'set CODEMAN_API_URL or --url'})`}` +
+    `reverie mcp ${config.version}: ${config.apiUrl ? `driving ${config.apiUrl}` : `not configured (${config.urlError ?? 'set REVERIE_API_URL or --url'})`}` +
       `${config.selfId ? `, inside session ${config.selfId.slice(0, 8)}` : ''}` +
       `${config.allowAnySession ? ', --allow-any-session' : ''}`
   );

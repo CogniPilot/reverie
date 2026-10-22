@@ -61,7 +61,7 @@ const read = (f: string) => readFileSync(resolve(import.meta.dirname, `../src/we
 const windowStub: Record<string, unknown> = {
   addEventListener: vi.fn(),
   removeEventListener: vi.fn(),
-  CodemanBase: { base: '' },
+  ReverieBase: { base: '' },
   AbortController,
 };
 const context = vm.createContext({
@@ -78,7 +78,7 @@ const context = vm.createContext({
   Terminal: FakeTerminal,
   FitAddon: { FitAddon: FakeFit },
   fetch: (...args: Parameters<typeof fetchMock>) => fetchMock(...args),
-  location: { protocol: 'http:', host: 'codeman.test' },
+  location: { protocol: 'http:', host: 'reverie.test' },
   document: { addEventListener: vi.fn(), documentElement: { dataset: {} } },
   localStorage: { length: 0, key: vi.fn(), getItem: vi.fn(), setItem: vi.fn(), removeItem: vi.fn() },
   window: windowStub,
@@ -86,11 +86,11 @@ const context = vm.createContext({
 });
 vm.runInContext(
   `${read('constants.js')}\n${read('app.js')}\n${read('terminal-ui.js')}\n${read('terminal-tile.js')}\n` +
-    'globalThis.__CodemanApp = CodemanApp;',
+    'globalThis.__ReverieApp = ReverieApp;',
   context
 );
-const CodemanApp = (context as unknown as { __CodemanApp: { prototype: object } }).__CodemanApp;
-const TileGrid = windowStub.CodemanTileGrid as { TILE_SCROLLBACK: number };
+const ReverieApp = (context as unknown as { __ReverieApp: { prototype: object } }).__ReverieApp;
+const TileGrid = windowStub.ReverieTileGrid as { TILE_SCROLLBACK: number };
 const TAIL = 1024 * 1024;
 // A grid tile's full captures read no more tmux history than its xterm keeps:
 // TILE_SCROLLBACK plus the screen (the fake terminal has 24 rows).
@@ -115,7 +115,7 @@ const TerminalTile = windowStub.TerminalTile as new (id: string, mount: unknown,
 const TileLoadQueue = windowStub.TileLoadQueue as new (opts?: object) => Queue;
 
 function makeApp() {
-  const app = Object.create(CodemanApp.prototype) as Record<string, unknown>;
+  const app = Object.create(ReverieApp.prototype) as Record<string, unknown>;
   app._clientId = 'c-test';
   app._wsTabNonce = 'nonce-1';
   app._seqCounters = new Map();
@@ -417,7 +417,7 @@ describe('teardown', () => {
     await settle();
     expect(captures).toHaveLength(1);
 
-    // The full-capture budget (CodemanFetchDeadline, 45 s for a TUI).
+    // The full-capture budget (ReverieFetchDeadline, 45 s for a TUI).
     await vi.advanceTimersByTimeAsync(45_000);
     await settle();
     expect(captures[0].aborted).toBe(true);

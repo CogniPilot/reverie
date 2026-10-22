@@ -21,8 +21,8 @@ vi.mock('node:child_process', async (importOriginal) => {
   return { ...actual, execFileSync: execFileSyncSpy };
 });
 
-const BEGIN_MARKER = '__CODEMAN_CLI_RESOLVE_BEGIN__';
-const END_MARKER = '__CODEMAN_CLI_RESOLVE_END__';
+const BEGIN_MARKER = '__REVERIE_CLI_RESOLVE_BEGIN__';
+const END_MARKER = '__REVERIE_CLI_RESOLVE_END__';
 
 const temporaryDirectories: string[] = [];
 
@@ -289,7 +289,7 @@ describe('createProductionCliResolverHost', () => {
   // shell — route tests hitting the per-CLI status endpoints would otherwise
   // walk the real PATH and execute real binaries on whatever box runs the suite.
   it('never scans the machine or spawns a login shell under vitest without injected IO', () => {
-    const root = mkdtempSync(join(tmpdir(), 'codeman-cli-vitest-gate-'));
+    const root = mkdtempSync(join(tmpdir(), 'reverie-cli-vitest-gate-'));
     temporaryDirectories.push(root);
     writeFileSync(join(root, 'codex'), '#!/bin/sh\n');
     chmodSync(join(root, 'codex'), 0o755);
@@ -356,7 +356,7 @@ describe('createProductionCliResolverHost', () => {
   });
 
   it('accepts only executable regular files with the production predicate', () => {
-    const root = mkdtempSync(join(tmpdir(), 'codeman-cli-resolver-'));
+    const root = mkdtempSync(join(tmpdir(), 'reverie-cli-resolver-'));
     temporaryDirectories.push(root);
     const executableDirectory = join(root, 'executable');
     const plainDirectory = join(root, 'plain');

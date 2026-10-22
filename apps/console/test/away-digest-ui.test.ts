@@ -27,7 +27,7 @@ describe('away digest UI', () => {
 
   it('fetches the aggregate endpoint and preserves since-last-visit until successful close', () => {
     expect(panelsJs).toContain('/api/away-digest');
-    expect(panelsJs).toContain('codeman-away-digest-last-viewed');
+    expect(panelsJs).toContain('reverie-away-digest-last-viewed');
     expect(panelsJs).toContain('openAwayDigest');
     expect(panelsJs).toContain('closeAwayDigest');
   });

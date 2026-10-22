@@ -132,7 +132,7 @@ describe('resolveRemoteSet', () => {
     expect(set).toEqual(['origin']);
   });
 
-  it('honors CODEMAN_UPDATE_REMOTES order and filters to existing remotes', () => {
+  it('honors REVERIE_UPDATE_REMOTES order and filters to existing remotes', () => {
     const set = resolveRemoteSet({
       existingRemotes: ['origin', 'bitbucket', 'fork'],
       trackingRemote: 'bitbucket',

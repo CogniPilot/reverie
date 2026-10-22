@@ -83,7 +83,7 @@ describe('voice turn routes', () => {
           method: req.method,
           url: req.url,
           type: req.headers['content-type'],
-          room: req.headers['x-codeman-room'] as string | undefined,
+          room: req.headers['x-reverie-room'] as string | undefined,
           bytes: raw.length,
           ...(req.url === '/tts' ? { json: JSON.parse(raw.toString('utf8') || 'null') } : {}),
         });
@@ -127,7 +127,7 @@ describe('voice turn routes', () => {
     const other = createMockSession(OTHER);
     other.name = 'worker';
     ctx.sessions.set(OTHER, other as never);
-    roomId = service.createRoom('Fleet', undefined).id;
+    roomId = service.createRoom('Reverie', undefined).id;
     service.addMember(roomId, VOICE, { voice: true });
     service.addMember(roomId, OTHER);
   });
@@ -448,9 +448,9 @@ describe('voice turn routes', () => {
     expect(listeners()).toBe(0);
   });
 
-  it('defaults to the local service and honours CODEMAN_VOICE_TURN_URL', () => {
+  it('defaults to the local service and honours REVERIE_VOICE_TURN_URL', () => {
     expect(voiceServiceUrl({})).toBe('http://127.0.0.1:8090');
-    expect(voiceServiceUrl({ CODEMAN_VOICE_TURN_URL: 'http://127.0.0.1:9000/' })).toBe('http://127.0.0.1:9000');
+    expect(voiceServiceUrl({ REVERIE_VOICE_TURN_URL: 'http://127.0.0.1:9000/' })).toBe('http://127.0.0.1:9000');
   });
 
   it('stores uploaded diagnostics privately and names the file', async () => {

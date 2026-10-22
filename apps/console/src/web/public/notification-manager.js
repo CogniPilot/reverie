@@ -3,7 +3,7 @@
  *
  * The NotificationManager class implements five notification layers:
  *   1. In-app notification drawer (slide-out panel with grouped notifications)
- *   2. Tab title flash (alternating "⚠️ (N) codeman:<host>" / "codeman:<host>" when tab is hidden; uses this.originalTitle so it tracks any per-host title)
+ *   2. Tab title flash (alternating "⚠️ (N) reverie:<host>" / "reverie:<host>" when tab is hidden; uses this.originalTitle so it tracks any per-host title)
  *   3. Browser Notification API (desktop push; auto-closes after 8s by default, configurable per device in Settings → Notifications)
  *   4. Web Push via service worker (OS-level notifications when tab is closed)
  *   5. Audio alerts (Web Audio API beep, user-opt-in)
@@ -18,7 +18,7 @@
  * - iOS Safari bfcache support via pageshow event
  *
  * @class NotificationManager
- * @param {CodemanApp} app - Reference to the main app instance
+ * @param {ReverieApp} app - Reference to the main app instance
  *
  * @dependency constants.js (STUCK_THRESHOLD_DEFAULT_MS, timing constants)
  * @dependency mobile-handlers.js (MobileDetection stable handheld identity/device type)
@@ -214,8 +214,8 @@ class NotificationManager {
   // Get storage key for notification prefs (device-specific)
   getStorageKey() {
     return this._usesMobilePreferences()
-      ? 'codeman-notification-prefs-mobile'
-      : 'codeman-notification-prefs';
+      ? 'reverie-notification-prefs-mobile'
+      : 'reverie-notification-prefs';
   }
 
   savePreferences() {
@@ -411,12 +411,12 @@ class NotificationManager {
     if (now - this.lastBrowserNotifTime < BROWSER_NOTIF_RATE_LIMIT_MS) return;
     this.lastBrowserNotifTime = now;
 
-    const localizedTitle = window.codemanT?.(title) || title;
-    const localizedBody = window.codemanT?.(body) || body;
+    const localizedTitle = window.reverieT?.(title) || title;
+    const localizedBody = window.reverieT?.(body) || body;
     const notif = new Notification(`${this.originalTitle}: ${localizedTitle}`, {
       body: localizedBody,
       tag, // Groups same-tag notifications
-      icon: (window.CodemanBase?.url || ((p) => p))('/favicon.ico'),
+      icon: (window.ReverieBase?.url || ((p) => p))('/favicon.ico'),
       silent: true, // We handle audio ourselves
     });
 

@@ -66,7 +66,7 @@ export const REMOTE_WAKE_REQUEST_READY_TIMEOUT_MS = 40_000;
 export const REMOTE_WAKE_COMMAND_TIMEOUT_MS = 10_000;
 /**
  * Settle time between respawning the ssh pane and flushing buffered input: the
- * respawned `ssh` needs a moment to run `tmux -L codeman-remote … -A` and attach,
+ * respawned `ssh` needs a moment to run `tmux -L reverie-remote … -A` and attach,
  * and bytes written into a still-connecting pane land in nothing.
  */
 export const REMOTE_WAKE_ATTACH_SETTLE_MS = 1_500;

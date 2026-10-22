@@ -28,7 +28,7 @@ import {
 /** Common directories where the Pi CLI binary may be installed */
 /**
  * Directories probed after `which`, read from this CLI's registry entry so the spawn
- * path, `codeman doctor` and this resolver cannot disagree about where to look.
+ * path, `reverie doctor` and this resolver cannot disagree about where to look.
  * `~` is expanded by `expandHome`; nothing else is interpreted.
  */
 const PI_SEARCH_DIRS = (): string[] => (getCli('pi')?.discovery.searchDirs ?? []).map(expandHome);
@@ -37,7 +37,7 @@ const PI_SEARCH_DIRS = (): string[] => (getCli('pi')?.discovery.searchDirs ?? []
  * A real `pi --version` prints a semver-shaped string (e.g. `0.84.1`).
  *
  * Exported and SHARED with the `pi` entry in `config/dependency-registry.ts`, so
- * `codeman doctor` and the run mode cannot disagree about what counts as an installed
+ * `reverie doctor` and the run mode cannot disagree about what counts as an installed
  * pi: two copies of this rule would let the Dependencies panel report "Pi CLI ✓" on a
  * box where `resolvePiDir()` rejects the same binary and Run Pi stays hidden.
  *

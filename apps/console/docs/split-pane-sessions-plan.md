@@ -14,13 +14,13 @@
 
 ## Problem
 
-Codeman's terminal area shows exactly one active session (pane) at a time —
+Reverie's terminal area shows exactly one active session (pane) at a time —
 switching panes re-binds the single xterm instance and the single WebSocket
-to a different session. Multi-monitor spanning (`scripts/span-codeman.sh` /
-`span-codeman.ps1`) turned out to solve a different problem: it makes one
+to a different session. Multi-monitor spanning (`scripts/span-reverie.sh` /
+`span-reverie.ps1`) turned out to solve a different problem: it makes one
 browser window bigger, but that window still shows one session; floating
 subagent windows are draggable overlays on top of it, not tiled panes. There
-is no way today to see two live sessions (e.g. `w1-codeman` and
+is no way today to see two live sessions (e.g. `w1-reverie` and
 `w1-mcp-memory`) side-by-side in one window, even on a monitor wide enough to
 fit both.
 
@@ -62,7 +62,7 @@ one shared instance.
 in a genuinely separate browser window (`isSoloWindow` mode) with its own
 independent WebSocket, and two of those can already be snapped side-by-side
 today with zero new code. That covers "two sessions visible at once" but not
-what this spec is for: one Codeman window with two panes and a divider you
+what this spec is for: one Reverie window with two panes and a divider you
 can drag without leaving your seat, each still a full participant in that
 window's floating subagent windows, header, and settings. This spec builds
 past detach, not a duplicate of it.
@@ -90,7 +90,7 @@ view needs a wide viewport). So:
   resize-on-divider-drag, and plain keyboard input. It does **not** get the
   local-echo overlay, CJK IME composition, touch/mobile handlers, or the
   keyboard accessory bar. On a desktop, typing directly into an xterm
-  instance with no overlay is exactly how Codeman behaved before the local-
+  instance with no overlay is exactly how Reverie behaved before the local-
   echo overlay existed for touch devices — normal, not degraded, for a
   keyboard-and-mouse user. (Since moved to `TerminalTile`, terminal-tile.js,
   which has gained three pieces of the primary pane: hollow-buffer wheel
@@ -172,7 +172,7 @@ Closing (via Pane B's × or the header button toggling off):
    container's size changes)
 
 v2 note (not designed): dragging a session tab onto the active pane as an
-alternate trigger. You confirmed right-click doesn't work today (Codeman
+alternate trigger. You confirmed right-click doesn't work today (Reverie
 doesn't intercept it) and declined a keybind, so v1 is button+picker only.
 
 ### 4. Failure / edge cases

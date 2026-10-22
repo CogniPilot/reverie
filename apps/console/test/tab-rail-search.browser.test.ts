@@ -62,10 +62,10 @@ describe('vertical rail session search in Chromium', () => {
   beforeAll(async () => {
     browser = await chromium.launch({ headless: true });
     page = await browser.newPage({ viewport: { width: 1280, height: 800 }, deviceScaleFactor: 1 });
-    await page.route('http://codeman.test/', (route) =>
+    await page.route('http://reverie.test/', (route) =>
       route.fulfill({ contentType: 'text/html', body: '<!doctype html><html><body></body></html>' })
     );
-    await page.goto('http://codeman.test/');
+    await page.goto('http://reverie.test/');
     await page.setContent(`<!doctype html>
       <html data-tab-orientation="vertical" data-tab-rail-sort="manual">
         <head><style>${read('styles.css')}</style></head>
@@ -82,13 +82,13 @@ describe('vertical rail session search in Chromium', () => {
         read('tab-layout-browser.js') +
         '\n' +
         read('app.js') +
-        '\nwindow.CodemanApp = CodemanApp; window.__setApp = (value) => { app = value; };',
+        '\nwindow.ReverieApp = ReverieApp; window.__setApp = (value) => { app = value; };',
     });
     await page.addScriptTag({ content: read('webview-tabs.js') });
     await page.addScriptTag({ content: read('subagent-windows.js') });
     await page.evaluate(() => {
       const w = window as any;
-      const app = Object.create(w.CodemanApp.prototype);
+      const app = Object.create(w.ReverieApp.prototype);
       app.$ = (id: string) => document.getElementById(id);
       app.sessions = new Map([
         ['alpha', { id: 'alpha', name: 'Alpha API', status: 'idle' }],
@@ -150,7 +150,7 @@ describe('vertical rail session search in Chromium', () => {
           'beforeend',
           '<div class="session-tabs" id="sessionTabs" role="tablist" aria-label="Session tabs"></div>'
         );
-      localStorage.setItem('codeman:tab-groups-collapsed', '["plan"]');
+      localStorage.setItem('reverie:tab-groups-collapsed', '["plan"]');
       app._tabKeydownHandler = null;
       app._tabTreeFocusinHandler = null;
       app.tabLayout = layout;
@@ -204,7 +204,7 @@ describe('vertical rail session search in Chromium', () => {
     expect(await clear.isHidden()).toBe(true);
     expect(await page.locator('[data-tab-group-header="plan"]').getAttribute('aria-expanded')).toBe('false');
     expect(await paintedRows()).toEqual(['alpha', 'web', 'notes']);
-    expect(await page.evaluate(() => localStorage.getItem('codeman:tab-groups-collapsed'))).toBe('["plan"]');
+    expect(await page.evaluate(() => localStorage.getItem('reverie:tab-groups-collapsed'))).toBe('["plan"]');
   });
 
   it('says so when nothing matches, and Escape in the box clears it', async () => {

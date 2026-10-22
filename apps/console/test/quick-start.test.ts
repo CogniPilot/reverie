@@ -5,8 +5,8 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
 const ORIGINAL_HOME = process.env.HOME;
-const TEST_HOME = mkdtempSync(join(tmpdir(), 'codeman-quick-start-'));
-const CASES_DIR = join(TEST_HOME, 'codeman-cases');
+const TEST_HOME = mkdtempSync(join(tmpdir(), 'reverie-quick-start-'));
+const CASES_DIR = join(TEST_HOME, 'reverie-cases');
 let webServerModule: Promise<typeof import('../src/web/server.js')> | undefined;
 
 process.env.HOME = TEST_HOME;
@@ -364,7 +364,7 @@ describe('Agent skill injection (agentSkillEnabled)', () => {
     });
     const offData = await offResponse.json();
     expect(offData.success).toBe(true);
-    expect(existsSync(join(CASES_DIR, offCase, '.claude', 'skills', 'codeman'))).toBe(false);
+    expect(existsSync(join(CASES_DIR, offCase, '.claude', 'skills', 'reverie'))).toBe(false);
 
     // 2. The `.strict()` settings schema accepts the new synced key.
     const putResponse = await fetch(`${baseUrl}/api/settings`, {
@@ -389,11 +389,11 @@ describe('Agent skill injection (agentSkillEnabled)', () => {
     const onData = await onResponse.json();
     expect(onData.success).toBe(true);
 
-    const skillDir = join(CASES_DIR, onCase, '.claude', 'skills', 'codeman');
+    const skillDir = join(CASES_DIR, onCase, '.claude', 'skills', 'reverie');
     const { readFileSync } = await import('node:fs');
     const skillMd = readFileSync(join(skillDir, 'SKILL.md'), 'utf-8');
-    expect(skillMd.startsWith('---\nname: codeman')).toBe(true);
-    expect(skillMd).toContain('<!-- codeman-managed-agent-skill');
+    expect(skillMd.startsWith('---\nname: reverie')).toBe(true);
+    expect(skillMd).toContain('<!-- reverie-managed-agent-skill');
     expect(existsSync(join(skillDir, 'reference', 'endpoints.md'))).toBe(true);
     expect(existsSync(join(skillDir, 'reference', 'recipes.md'))).toBe(true);
   }, 30000);
@@ -408,6 +408,6 @@ describe('Agent skill injection (agentSkillEnabled)', () => {
     });
     const data = await response.json();
     expect(data.success).toBe(true);
-    expect(existsSync(join(CASES_DIR, shellCase, '.claude', 'skills', 'codeman'))).toBe(false);
+    expect(existsSync(join(CASES_DIR, shellCase, '.claude', 'skills', 'reverie'))).toBe(false);
   });
 });

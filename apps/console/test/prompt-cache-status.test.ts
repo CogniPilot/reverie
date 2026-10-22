@@ -1,5 +1,5 @@
 /**
- * The Session Options "Prompt cache" readout (`CodemanPromptCache.format`, constants.js):
+ * The Session Options "Prompt cache" readout (`ReveriePromptCache.format`, constants.js):
  * the one sentence that tells the user whether the next turn reads the conversation
  * from cache or re-processes it cold. Loaded the way the other constants.js policies are.
  */
@@ -22,8 +22,8 @@ function loadFormat() {
   const context = vm.createContext({ window: {}, globalThis: {} });
   const source = readFileSync(resolve(import.meta.dirname, '../src/web/public/constants.js'), 'utf8');
   vm.runInContext(source, context, { filename: 'constants.js' });
-  return (context.window as { CodemanPromptCache: { format: (c: Cache | null | undefined, now: number) => string } })
-    .CodemanPromptCache.format as (c: Cache | null | undefined, now: number, statusLine?: string) => string;
+  return (context.window as { ReveriePromptCache: { format: (c: Cache | null | undefined, now: number) => string } })
+    .ReveriePromptCache.format as (c: Cache | null | undefined, now: number, statusLine?: string) => string;
 }
 
 const clock = (ms: number) => new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });

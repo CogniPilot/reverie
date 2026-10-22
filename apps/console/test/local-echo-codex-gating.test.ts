@@ -82,17 +82,17 @@ function loadContext() {
     },
   });
   vm.runInContext(
-    `${read('constants.js')}\n${read('app.js')}\n${read('terminal-ui.js')}\nglobalThis.__CodemanApp = CodemanApp;`,
+    `${read('constants.js')}\n${read('app.js')}\n${read('terminal-ui.js')}\nglobalThis.__ReverieApp = ReverieApp;`,
     context
   );
-  const CodemanApp = (context as unknown as { __CodemanApp: { prototype: object } }).__CodemanApp;
+  const ReverieApp = (context as unknown as { __ReverieApp: { prototype: object } }).__ReverieApp;
   return {
-    CodemanApp,
-    terminalInput: (windowStub as { CodemanTerminalInput?: Record<string, unknown> }).CodemanTerminalInput!,
+    ReverieApp,
+    terminalInput: (windowStub as { ReverieTerminalInput?: Record<string, unknown> }).ReverieTerminalInput!,
   };
 }
 
-const { CodemanApp, terminalInput } = loadContext();
+const { ReverieApp, terminalInput } = loadContext();
 const isComposerNavKey = terminalInput.isComposerNavKey as (data: string) => boolean;
 
 function makeOverlay(pending = ''): OverlayStub {
@@ -116,7 +116,7 @@ function makeOverlay(pending = ''): OverlayStub {
 }
 
 function makeApp(mode: string, overlay = makeOverlay()): AppInstance {
-  const app = Object.create(CodemanApp.prototype) as AppInstance;
+  const app = Object.create(ReverieApp.prototype) as AppInstance;
   app.activeSessionId = 's1';
   app.sessions = new Map([['s1', { mode }]]);
   app._localEchoOverlay = overlay;
@@ -128,7 +128,7 @@ function makeApp(mode: string, overlay = makeOverlay()): AppInstance {
   return app;
 }
 
-describe('CodemanTerminalInput.isComposerNavKey', () => {
+describe('ReverieTerminalInput.isComposerNavKey', () => {
   it.each([
     '\x1b[A',
     '\x1b[B',
@@ -264,7 +264,7 @@ function makePredictor(): PredictorStub {
 const classifyPredictInput = terminalInput.classifyPredictInput as (data: string) => string;
 const isCodexComposerRow = terminalInput.isCodexComposerRow as (t: unknown) => boolean;
 
-describe('CodemanTerminalInput.classifyPredictInput', () => {
+describe('ReverieTerminalInput.classifyPredictInput', () => {
   it.each([
     ['a', 'char'],
     [' ', 'char'],
@@ -291,7 +291,7 @@ describe('CodemanTerminalInput.classifyPredictInput', () => {
   });
 });
 
-describe('CodemanTerminalInput.isCodexComposerRow', () => {
+describe('ReverieTerminalInput.isCodexComposerRow', () => {
   function terminalWithCursorRow(text: string | null) {
     return {
       buffer: {
@@ -471,7 +471,7 @@ describe('insertTerminalText under predict policy', () => {
   });
 });
 
-describe('CodemanTerminalInput.cursorViewportRow', () => {
+describe('ReverieTerminalInput.cursorViewportRow', () => {
   const cursorViewportRow = terminalInput.cursorViewportRow as (t: unknown) => number | null;
   const term = (viewportY: number, baseY: number, cursorY: number, rows = 24) => ({
     rows,

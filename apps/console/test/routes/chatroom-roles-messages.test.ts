@@ -26,7 +26,7 @@ describe('chatroom roles: messages family', () => {
   let ctx: MockRouteContext;
   let service: ChatroomService;
   let roomId: string;
-  const as = (id?: string) => (id ? { 'x-codeman-parent-session': id } : {});
+  const as = (id?: string) => (id ? { 'x-reverie-parent-session': id } : {});
 
   beforeEach(async () => {
     const dir = mkdtempSync(join(tmpdir(), 'chatroom-roles-'));
@@ -49,7 +49,7 @@ describe('chatroom roles: messages family', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/chatrooms',
-      payload: { name: 'Fleet', members: [{ sessionId: MEMBER }, { sessionId: MOD }, { sessionId: ADMIN }], coordinatorSessionId: LEAD },
+      payload: { name: 'Reverie', members: [{ sessionId: MEMBER }, { sessionId: MOD }, { sessionId: ADMIN }], coordinatorSessionId: LEAD },
     });
     roomId = res.json().data.id;
   });

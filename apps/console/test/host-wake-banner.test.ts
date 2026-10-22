@@ -38,9 +38,9 @@ function loadWakeApp() {
     ['hostWakeBannerDetail', fakeElement()],
     ['hostWakeBannerAction', fakeElement()],
   ]);
-  const CodemanApp = function CodemanApp(this: unknown) {};
+  const ReverieApp = function ReverieApp(this: unknown) {};
   const context = vm.createContext({
-    CodemanApp,
+    ReverieApp,
     console,
     setInterval: () => 1,
     clearInterval: () => {},
@@ -57,7 +57,7 @@ function loadWakeApp() {
   });
   vm.runInContext(readFileSync(resolve(PUBLIC, 'host-wake-ui.js'), 'utf8'), context, { filename: 'host-wake-ui.js' });
 
-  const app = new (CodemanApp as new () => Record<string, unknown>)();
+  const app = new (ReverieApp as new () => Record<string, unknown>)();
   app.$ = (id: string) => elements.get(id) ?? null;
   app.activeSessionId = REMOTE_ID;
   app.sessions = new Map<string, { remote?: Record<string, unknown> }>([
@@ -148,7 +148,7 @@ describe('host wake banner visibility', () => {
 
 describe('host wake banner polling', () => {
   // Each poll is a TCP connect to the host from the server. The timer is the one
-  // trigger that is not a user action, so it must not fire for a host Codeman could
+  // trigger that is not a user action, so it must not fire for a host Reverie could
   // not wake anyway (it cannot wake it, but it can keep an activity-based suspend timer
   // from firing), and a proxied host is never polled: the probe cannot reach it.
   const tick = (app: Record<string, unknown>, periodic: boolean) =>

@@ -414,7 +414,7 @@ describe('syncMcpServers', () => {
     expect(Object.keys(JSON.parse(get('.gemini/settings.json')).mcpServers).sort()).toEqual(['fs', 'web']);
     expect(JSON.parse(get('.config/opencode/opencode.json')).mcp.fs.command).toEqual(['npx', '-y', 'fs']);
     expect(get('.codex/config.toml')).toContain('model = "gpt-5"');
-    expect(existsSync(join(home, '.claude.json.codeman-bak'))).toBe(true);
+    expect(existsSync(join(home, '.claude.json.reverie-bak'))).toBe(true);
 
     const again = await syncMcpServers(TARGETS, { apply: true, home });
     expect(again.targets.every((t) => t.added.length === 0)).toBe(true);
@@ -496,7 +496,7 @@ describe('syncMcpServers', () => {
       expect(JSON.parse(readFileSync(join(home, 'dotfiles/gemini-settings.json'), 'utf8')).mcpServers.fs.command).toBe(
         'npx'
       );
-      expect(existsSync(join(home, 'dotfiles/gemini-settings.json.codeman-bak'))).toBe(true);
+      expect(existsSync(join(home, 'dotfiles/gemini-settings.json.reverie-bak'))).toBe(true);
     });
 
     it('reports a dangling symlink as failed and writes nothing', async () => {
@@ -520,7 +520,7 @@ describe('syncMcpServers', () => {
       await expect(syncMcpServers(only('claude', 'gemini'), { apply: false, home })).resolves.toBeDefined();
       // ...and the lock is released afterwards.
       await expect(syncMcpServers(only('claude', 'gemini'), { apply: true, home })).resolves.toBeDefined();
-      const leftovers = readdirSync(join(home, '.gemini')).filter((f) => f.includes('codeman-tmp'));
+      const leftovers = readdirSync(join(home, '.gemini')).filter((f) => f.includes('reverie-tmp'));
       expect(leftovers).toEqual([]);
     });
   });

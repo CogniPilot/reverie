@@ -45,9 +45,9 @@ function makeApp(settings: Record<string, unknown> = {}): App {
     window: { addEventListener: vi.fn(), removeEventListener: vi.fn() },
     MobileDetection: {},
   });
-  vm.runInContext(`${read('constants.js')}\n${read('app.js')}\nglobalThis.__CodemanApp = CodemanApp;`, context);
-  const CodemanApp = (context as unknown as { __CodemanApp: { prototype: object } }).__CodemanApp;
-  const app = Object.create(CodemanApp.prototype) as App;
+  vm.runInContext(`${read('constants.js')}\n${read('app.js')}\nglobalThis.__ReverieApp = ReverieApp;`, context);
+  const ReverieApp = (context as unknown as { __ReverieApp: { prototype: object } }).__ReverieApp;
+  const app = Object.create(ReverieApp.prototype) as App;
   app.loadAppSettingsFromStorage = () => settings;
   return app;
 }

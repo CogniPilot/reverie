@@ -165,7 +165,7 @@ describe('POST /api/sessions/:id/custom-model', () => {
     const { app, ctx } = await setup();
     const session = ctx.sessions.get('test-session-1')!;
     session.mode = 'claude';
-    session.docker = { containerName: 'codeman-case' };
+    session.docker = { containerName: 'reverie-case' };
 
     for (const payload of [{ endpointId: 'ep1', modelId: 'qwen3' }, { clear: true }]) {
       const res = await app.inject({ method: 'POST', url: '/api/sessions/test-session-1/custom-model', payload });
@@ -302,13 +302,13 @@ describe('POST /api/sessions/:id/custom-model', () => {
       const saved: Record<string, string | undefined> = {};
 
       beforeEach(() => {
-        saved.CODEMAN_MULTIUSER = process.env.CODEMAN_MULTIUSER;
-        process.env.CODEMAN_MULTIUSER = '1';
+        saved.REVERIE_MULTIUSER = process.env.REVERIE_MULTIUSER;
+        process.env.REVERIE_MULTIUSER = '1';
       });
 
       afterEach(() => {
-        if (saved.CODEMAN_MULTIUSER === undefined) delete process.env.CODEMAN_MULTIUSER;
-        else process.env.CODEMAN_MULTIUSER = saved.CODEMAN_MULTIUSER;
+        if (saved.REVERIE_MULTIUSER === undefined) delete process.env.REVERIE_MULTIUSER;
+        else process.env.REVERIE_MULTIUSER = saved.REVERIE_MULTIUSER;
       });
 
       it("still blocks the swap pending confirmation, but omits a foreign owner's session from affectedSessions", async () => {
@@ -472,7 +472,7 @@ describe('POST /api/sessions/:id/custom-model', () => {
     // session. They shared one `confirmed` flag until this release, and because the
     // context check runs first, clicking "launch anyway" past the context warning silently
     // answered the swap question too and evicted another session's model unasked.
-    describe('answering one question is not consent to the other', () => {
+    describe('answering one question is not authorization to the other', () => {
       async function bothConditions() {
         const { app, ctx } = await setup();
         await writeCustomModelHosts(getDataDir(), [CLAUDE_ENDPOINT, SMALL_CTX_ENDPOINT]);
@@ -729,13 +729,13 @@ describe('Claude multi-user clamp: the env-var half', () => {
   // a PERSISTED one is now stripped on reboot-restore for such an owner too — see
   // session-env-clamp.ts's own fileoverview for why that pass used to be a no-op for
   // claude specifically.
-  const ORIGINAL = process.env.CODEMAN_MULTIUSER;
+  const ORIGINAL = process.env.REVERIE_MULTIUSER;
   beforeEach(() => {
-    process.env.CODEMAN_MULTIUSER = '1';
+    process.env.REVERIE_MULTIUSER = '1';
   });
   afterEach(() => {
-    if (ORIGINAL === undefined) delete process.env.CODEMAN_MULTIUSER;
-    else process.env.CODEMAN_MULTIUSER = ORIGINAL;
+    if (ORIGINAL === undefined) delete process.env.REVERIE_MULTIUSER;
+    else process.env.REVERIE_MULTIUSER = ORIGINAL;
   });
 
   it('strips CLAUDE_CONFIG_DIR and CLAUDE_CODE_MAX_CONTEXT_TOKENS for a non-granted owner, leaving unrelated CLAUDE_CODE_* keys alone', async () => {
@@ -748,7 +748,7 @@ describe('Claude multi-user clamp: the env-var half', () => {
   });
 
   it('is a no-op in single-user mode', async () => {
-    delete process.env.CODEMAN_MULTIUSER;
+    delete process.env.REVERIE_MULTIUSER;
     const input = { CLAUDE_CONFIG_DIR: '/home/attacker/fake-claude-config' };
     expect(await _clampEnvOverridesForOwner(undefined, input)).toBe(input);
   });

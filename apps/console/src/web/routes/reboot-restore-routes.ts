@@ -134,9 +134,9 @@ export function registerRebootRestoreRoutes(app: FastifyInstance, ctx: RebootRes
 export async function spendRebootRestore(
   ctx: RebootRestoreCtx,
   taken: readonly RebootRestoreEntry[],
-  unspent: Set<RebootRestoreEntry>
+  unspent: Set<RebootRestoreEntry>,
+  shouldRestore: () => boolean = () => true
 ): Promise<{ restored: ReturnType<typeof toBannerItem>[]; skipped: RebootRestoreRejection[] }> {
-
   // The plan was built at boot and the board has moved on since. A conversation
   // the user resumed by hand from the Resume list is already on screen, and a
   // second pane on it would fight the first for the same transcript. This one
@@ -231,7 +231,7 @@ export async function spendRebootRestore(
         claudeMode: await resolveClaudeModeForUsername(claudeModeConfig.claudeMode, saved.owner),
         allowedTools: claudeModeConfig.allowedTools,
         // OpenCode resumes from its own config (`--session <thread>`), never from the
-        // Claude-style resume id, which for it would name a Codeman id.
+        // Claude-style resume id, which for it would name a Reverie id.
         resumeSessionId: nativeOpenCodeThread(saved) ? undefined : entry.resumeConversationId,
         // Kept whatever the mode, as on recovery: a session switched off OpenCode still owns its thread.
         openCodeConfig: saved.openCodeConfig,
@@ -261,6 +261,7 @@ export async function spendRebootRestore(
       // custom-model environment and the nice priority shape the process.
       await ctx.reapplyPersistedSessionState(session, saved, 'before-spawn');
       await ctx.setupSessionListeners(session);
+      if (!shouldRestore()) throw new Error('Recovery canceled by current owner intent');
       await session.startInteractive();
       // The session's own history, applied only once the pane exists: on a
       // failed start these totals would belong to a session that never ran.
@@ -284,7 +285,7 @@ export async function spendRebootRestore(
       // idle events for respawn, no Approvals Inbox item, no red tab on a
       // blocking dialog. The boot-time sweep finished hours ago, so the click
       // path installs them itself. `hooks: 'always'` is the capability that says
-      // this CLI installs Codeman's hooks into the workspace.
+      // this CLI installs Reverie's hooks into the workspace.
       if (workspaceHooksEnabled && getCli(session.mode)?.capabilities.hooks === 'always') {
         await applyWorkspaceHooks(session.workingDir, true).catch((err: unknown) =>
           console.warn(`[reboot-restore] hook install failed for ${session.workingDir}: ${getErrorMessage(err)}`)
@@ -323,7 +324,7 @@ export async function spendRebootRestore(
       // count this session's historical tokens into the lifetime totals, demote
       // a pinned record to `stopped` (which this pass reads as an intentional
       // kill, making the session permanently unrestorable) and delete the
-      // workspace's `.codeman-uploads`. This undoes only the construction.
+      // workspace's `.reverie-uploads`. This undoes only the construction.
       await ctx
         .discardPartiallyBuiltSession(entry.sessionId)
         .catch((discardErr: unknown) =>
@@ -358,18 +359,21 @@ export async function spendRebootRestore(
  */
 export async function autoRestorePinnedIfEnabled(
   settings: Record<string, unknown>,
-  ctx: RebootRestoreCtx
+  ctx: RebootRestoreCtx,
+  excluded: ReadonlySet<string> = new Set()
 ): Promise<{ restored: string[]; skipped: RebootRestoreRejection[] } | null> {
   if (settings.rebootRestoreAutoPinned !== true) return null;
-  return autoRestorePinnedSessions(ctx);
+  return autoRestorePinnedSessions(ctx, excluded);
 }
 
 export async function autoRestorePinnedSessions(
-  ctx: RebootRestoreCtx
+  ctx: RebootRestoreCtx,
+  excluded: ReadonlySet<string> = new Set()
 ): Promise<{ restored: string[]; skipped: RebootRestoreRejection[] }> {
   const everyone = () => true;
   const byOwner = new Map<string | undefined, string[]>();
   for (const entry of autoRestorableEntries(rebootRestoreRegistry.list(everyone))) {
+    if (excluded.has(entry.sessionId)) continue;
     byOwner.set(entry.owner, [...(byOwner.get(entry.owner) ?? []), entry.sessionId]);
   }
   const restored: string[] = [];

@@ -455,7 +455,7 @@ textarea:focus-visible {
   font-size: 16px !important; /* prevent iOS auto-zoom on focus */
 }
 
-.xterm-helpers .codeman-ime-preview {
+.xterm-helpers .reverie-ime-preview {
   position: absolute;
   left: var(--xterm-helper-left, 0px);
   top: var(--xterm-helper-top, 0px);
@@ -471,12 +471,12 @@ textarea:focus-visible {
   height: 1.2em;
 }
 
-.xterm-helpers .codeman-ime-preview[data-phase='provisional'] {
+.xterm-helpers .reverie-ime-preview[data-phase='provisional'] {
   text-decoration: underline;
   text-decoration-style: dotted;
 }
 
-.touch-device .xterm-helpers.codeman-ime-preview-owned .composition-view.active {
+.touch-device .xterm-helpers.reverie-ime-preview-owned .composition-view.active {
   display: none;
 }
 
@@ -5931,7 +5931,7 @@ html[data-skin="og"] .welcome-primary:hover {
    colour dot. The toolbar menu, the phone overview picker, the Custom Endpoint
    rows and the model picker all render `.run-mode-dot <id>`, so they pick this
    up with no markup change. An id with no rule here (a CLI added through
-   ~/.codeman/clis.json, say) keeps the plain 8px dot.
+   ~/.reverie/clis.json, say) keeps the plain 8px dot.
    Logos: @lobehub/icons-static-svg 1.95.1 (MIT, (c) LobeHub); the OMP mark is
    the one omp.sh draws in its own header (oh-my-pi, MIT). The marks are their
    owners' trademarks, shown only to name the CLI a row launches. */
@@ -11041,7 +11041,7 @@ kbd {
    working child's route is dashed.
 
    Colour: every rule reads --lineage-color, which session-lineage.js sets INLINE
-   per path and dot from the CodemanLineage.COLORS palette (per SPAWNING tab,
+   per path and dot from the ReverieLineage.COLORS palette (per SPAWNING tab,
    first-seen order). The first spawning tab gets no override and falls through to
    --session-blue, which EVERY skin block already defines and tunes for its own
    background. Do not add a per-skin `.lineage-line` override inside the
@@ -23217,7 +23217,7 @@ html.car-mode-open { overflow: hidden; }
   padding-right: calc(16px + var(--fold-inline-end));
   padding-bottom: calc(16px + var(--fold-block-end));
 }
-.fleet-company-dialog {
+.reverie-company-dialog {
   box-sizing: border-box;
   width: min(900px, calc(100vw - 32px - var(--fold-inline-end, 0px)));
   max-height: calc(100dvh - 32px - var(--fold-block-end, 0px));

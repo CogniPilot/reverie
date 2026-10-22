@@ -30,7 +30,7 @@ vi.mock('../../src/utils/cli-launcher.js', async (importOriginal) => {
   return { ...actual, resolveCliLaunchError: vi.fn().mockResolvedValue(null) };
 });
 
-const MARKER_PREFIX = '<!-- codeman-managed-agent-skill';
+const MARKER_PREFIX = '<!-- reverie-managed-agent-skill';
 
 interface Harness {
   app: FastifyInstance;
@@ -51,10 +51,10 @@ describe('POST /api/sessions agent-skill injection', () => {
   let workingDir: string;
   let harness: Harness | undefined;
 
-  const skillDir = () => join(workingDir, '.claude', 'skills', 'codeman');
+  const skillDir = () => join(workingDir, '.claude', 'skills', 'reverie');
 
   beforeEach(async () => {
-    workingDir = await mkdtemp(join(tmpdir(), 'codeman-create-skill-'));
+    workingDir = await mkdtemp(join(tmpdir(), 'reverie-create-skill-'));
   });
 
   afterEach(async () => {
@@ -76,7 +76,7 @@ describe('POST /api/sessions agent-skill injection', () => {
     expect(harness.ctx.getAgentSkillEnabled).toHaveBeenCalled();
 
     const skillMd = await readFile(join(skillDir(), 'SKILL.md'), 'utf-8');
-    expect(skillMd.startsWith('---\nname: codeman')).toBe(true);
+    expect(skillMd.startsWith('---\nname: reverie')).toBe(true);
     // The marker is what makes the copy ours: without it, uninstall refuses to
     // remove what this create wrote.
     expect(skillMd).toContain(MARKER_PREFIX);
@@ -123,16 +123,16 @@ describe('POST /api/sessions agent-skill injection', () => {
     });
 
     expect(res.statusCode).toBe(200);
-    const skillMd = await readFile(join(workingDir, '.agents', 'skills', 'codeman', 'SKILL.md'), 'utf-8');
-    expect(skillMd.startsWith('---\nname: codeman')).toBe(true);
+    const skillMd = await readFile(join(workingDir, '.agents', 'skills', 'reverie', 'SKILL.md'), 'utf-8');
+    expect(skillMd.startsWith('---\nname: reverie')).toBe(true);
     expect(skillMd).toContain(MARKER_PREFIX);
-    expect(existsSync(join(workingDir, '.agents', 'skills', 'codeman', 'reference', 'endpoints.md'))).toBe(true);
+    expect(existsSync(join(workingDir, '.agents', 'skills', 'reverie', 'reference', 'endpoints.md'))).toBe(true);
     expect(existsSync(skillDir())).toBe(false);
 
     // The preamble cache is seeded for it too, so the skill's §0 is the two-line loader
     // in codex as in claude (nothing in the preamble is claude-specific).
     const sessionId = (JSON.parse(res.body) as { session: { id: string } }).session.id;
-    const preamble = join(process.env.XDG_CACHE_HOME || join(homedir(), '.cache'), `codeman-agent-${sessionId}.sh`);
+    const preamble = join(process.env.XDG_CACHE_HOME || join(homedir(), '.cache'), `reverie-agent-${sessionId}.sh`);
     expect(existsSync(preamble)).toBe(true);
   });
 

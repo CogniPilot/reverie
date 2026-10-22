@@ -297,7 +297,7 @@ describe('SSE Event Types', () => {
       expect((caseCreated?.data as any).name).toBe(caseName);
 
       // Cleanup (containment-gated)
-      safeRmHomeTree(join(homedir(), 'codeman-cases', caseName));
+      safeRmHomeTree(join(homedir(), 'reverie-cases', caseName));
     });
   });
 });

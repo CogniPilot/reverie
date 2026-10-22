@@ -11,7 +11,7 @@ import {
 } from './company-types.js';
 import type { CompanyResearchBackend, ResearchHandle } from './company-service.js';
 import { writeCompanyStateFile } from './company-store.js';
-import { bothNames } from './config/fleet-env.js';
+import { environmentEntry } from './config/reverie-env.js';
 
 const BindingSchema = z.object({
   cycleId: z.string().uuid(),
@@ -182,9 +182,9 @@ export class DurableCompanyResearchBackend implements CompanyResearchBackend {
         employee: input.employee,
         prompt: input.prompt,
         env: {
-          ...bothNames('RESEARCH_CYCLE_ID', cycle.id),
-          ...bothNames('EMPLOYEE_ID', input.employee.id),
-          ...bothNames('RESEARCH_DEADLINE_AT', String(cycle.deadlineAt)),
+          ...environmentEntry('RESEARCH_CYCLE_ID', cycle.id),
+          ...environmentEntry('EMPLOYEE_ID', input.employee.id),
+          ...environmentEntry('RESEARCH_DEADLINE_AT', String(cycle.deadlineAt)),
         },
       });
       binding.phase = 'running';

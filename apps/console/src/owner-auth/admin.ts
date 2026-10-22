@@ -56,7 +56,7 @@ function auditFile(store: OwnerAuthStore): string {
  */
 export function assertHostShell(env: NodeJS.ProcessEnv, host: boolean): void {
   if (host) return;
-  if (env.CODEMAN_SESSION_ID || env.REVERIE_SESSION_ID) {
+  if (env.REVERIE_SESSION_ID) {
     throw new OwnerAdminError('Run `reverie owner` from a host shell, not inside an agent session');
   }
 }
@@ -287,19 +287,19 @@ export async function setPolicy(
   return { audited };
 }
 
-/** A keeper entry: `cto` (the company's CTO, whoever that is) or a company employee id. */
-const KEEPER_ENTRY = /^(cto|[A-Za-z0-9][A-Za-z0-9-]{0,99})$/;
+/** A keeper entry is an exact company employee id. */
+const KEEPER_ENTRY = /^[A-Za-z0-9][A-Za-z0-9-]{0,99}$/;
 
 export function listKeepers(store: OwnerAuthStore): string[] {
   return store.read()?.keepers ?? [];
 }
 
 /**
- * Let an agent keep others awake: its company employee (or the CTO, `cto`) may nudge, interrupt and
+ * Let an agent keep others awake: its explicitly listed company employee may nudge, interrupt and
  * read any agent session. Only this host command sets it, and it is audited.
  */
 export async function addKeeper(store: OwnerAuthStore, entry: string): Promise<string[]> {
-  if (!KEEPER_ENTRY.test(entry)) throw new OwnerAdminError('A keeper is `cto` or a company employee id');
+  if (!KEEPER_ENTRY.test(entry)) throw new OwnerAdminError('A keeper is a company employee id');
   const keepers = await store.update((a) => {
     a.keepers = [...new Set([...(a.keepers ?? []), entry])];
     return a.keepers;
@@ -323,11 +323,10 @@ export function listAdmins(store: OwnerAuthStore): string[] {
 }
 
 /**
- * Let an agent call the admin routes (policy.ts ADMIN_ROUTES): its company employee, or the CTO
- * (`cto`). Only this host command sets it, and it is audited.
+ * Let an agent call the admin routes (policy.ts ADMIN_ROUTES): its exact company employee id must be listed. Only this host command sets it, and it is audited.
  */
 export async function addAdmin(store: OwnerAuthStore, entry: string): Promise<string[]> {
-  if (!KEEPER_ENTRY.test(entry)) throw new OwnerAdminError('An admin is `cto` or a company employee id');
+  if (!KEEPER_ENTRY.test(entry)) throw new OwnerAdminError('An admin is a company employee id');
   const admins = await store.update((a) => {
     a.admins = [...new Set([...(a.admins ?? []), entry])];
     return a.admins;

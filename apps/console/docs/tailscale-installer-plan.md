@@ -5,7 +5,7 @@
 > occupied `:443`, the opt-in rename, flags, and the done screen with a QR code. The
 > state machine and safety rules below still hold.
 
-Goal: make "Codeman over Tailscale, with real HTTPS" a first-class, guided path in
+Goal: make "Reverie over Tailscale, with real HTTPS" a first-class, guided path in
 `install.sh`, instead of a one-line hint pointing at the docs. Today the safest
 recommended deployment (loopback bind + `tailscale serve`) is exactly what the
 maintainer's own prod runs, but a new user has to discover and wire it by hand.
@@ -26,16 +26,16 @@ Everything on the app side already works; this is almost purely installer UX:
 
 - `.ts.net` is already in `DEFAULT_TRUSTED_HOST_SUFFIXES`
   (`src/web/network-auth-policy.ts`), so the always-on Host/Origin guard accepts
-  `tailscale serve` traffic with zero configuration. No `CODEMAN_ALLOWED_HOSTS`
+  `tailscale serve` traffic with zero configuration. No `REVERIE_ALLOWED_HOSTS`
   needed.
 - The loopback bind is the server default and prints no warning; nothing to
-  acknowledge, no `CODEMAN_PASSWORD` strictly required (the tailnet is the auth
+  acknowledge, no `REVERIE_PASSWORD` strictly required (the tailnet is the auth
   boundary; Tailscale authenticates the device before a packet ever reaches us).
 - `tailscale serve` terminates TLS with a real Let's Encrypt certificate for
   `<node>.<tailnet>.ts.net`. That gives users valid HTTPS with no self-signed
   cert warnings, and (because it is a proper secure context) working service
   worker, PWA install, and web push on phones. This is strictly better than
-  `codeman web --https` for remote access.
+  `reverie web --https` for remote access.
 - SSE and WebSockets work through serve (proven by prod:
   `https://tnode.tailf80371.ts.net` fronting `127.0.0.1:3000` daily).
 - `docs/security-architecture.md` section "A. Tailscale serve (recommended)"
@@ -52,7 +52,7 @@ menu, with Tailscale first when it can be recommended:
 ```
   Network access
 
-  How should the Codeman dashboard be reachable?
+  How should the Reverie dashboard be reachable?
 
     1) Tailscale (recommended)
        Private VPN access from your phone/laptop, real HTTPS,
@@ -122,13 +122,13 @@ setup, handling each state in order:
      replace it or skip. (Prod itself has a second serve on :5000; blind
      `tailscale serve reset` would destroy user config. NEVER use `reset`.)
 6. **Configure.** `tailscale serve --bg $PORT` where `$PORT` is the install's
-   Codeman port (default 3000; honor a preset `CODEMAN_PORT`). Serve targets
+   Reverie port (default 3000; honor a preset `REVERIE_PORT`). Serve targets
    plain HTTP on loopback; TLS terminates at tailscaled with the real cert.
    The `--bg` config persists in tailscaled state across reboots, so no extra
    service unit is needed.
-   (Note: do NOT combine this with `codeman web --https`; that is what forces
+   (Note: do NOT combine this with `reverie web --https`; that is what forces
    the awkward `https+insecure://` proxy target prod historically used. New
-   installs should keep Codeman on plain HTTP behind serve.)
+   installs should keep Reverie on plain HTTP behind serve.)
 7. **Verify end-to-end.** Derive the URL from `.Self.DNSName` (strip the
    trailing dot) and curl `https://<dnsname>/api/status` after the service is
    up, retrying for ~30s: the first request can be slow while the Let's
@@ -171,13 +171,13 @@ start/stop wrapper to manage; tailscaled owns the lifecycle).
 
 ### 5. Non-interactive / automation
 
-- `CODEMAN_TAILSCALE=1` presets choice 1 (analogous to presetting
-  `CODEMAN_HOST`). In non-interactive runs it only proceeds through states
+- `REVERIE_TAILSCALE=1` presets choice 1 (analogous to presetting
+  `REVERIE_HOST`). In non-interactive runs it only proceeds through states
   that need no human (already installed + logged in + HTTPS-enabled tailnet);
   anything requiring interaction (login URL, admin-console toggle, replacing a
   foreign serve mapping) warns and falls back to loopback. It never installs
   tailscale non-interactively.
-- `CODEMAN_NONINTERACTIVE=1` with an existing serve mapping: preserve it, same
+- `REVERIE_NONINTERACTIVE=1` with an existing serve mapping: preserve it, same
   "never silently loosen/change" policy as `read_existing_binding`.
 - Document both in the header comment block of install.sh (the env-var
   reference at the top) and in the README.
@@ -191,10 +191,10 @@ start/stop wrapper to manage; tailscaled owns the lifecycle).
 | Port 443 serve exists for another app | Prompt replace/skip; never `tailscale serve reset` (destroys unrelated mappings). |
 | First cert issuance latency | Verify step retries ~30s and says why the first load may be slow. |
 | `tailscale up` needs auth | Print the auth URL prominently, poll with timeout, skip gracefully. Works headless. |
-| Custom `CODEMAN_PORT` | Serve target uses the actual port; `install.sh tailscale` re-reads it from the service file. |
-| Funnel (public internet) | OUT OF SCOPE for v1. If ever added it must mirror the tunnel guard: refuse without `CODEMAN_PASSWORD` (`isUnauthenticatedNetworkAcknowledged`). Funnel exposes to the whole internet and is a different risk class than tailnet-only serve. Mention `tailscale funnel` in docs only, with the password warning. |
+| Custom `REVERIE_PORT` | Serve target uses the actual port; `install.sh tailscale` re-reads it from the service file. |
+| Funnel (public internet) | OUT OF SCOPE for v1. If ever added it must mirror the tunnel guard: refuse without `REVERIE_PASSWORD` (`isUnauthenticatedNetworkAcknowledged`). Funnel exposes to the whole internet and is a different risk class than tailnet-only serve. Mention `tailscale funnel` in docs only, with the password warning. |
 | Uninstall | Best effort: if `serve status --json` shows 443 proxying to our port, run the targeted `tailscale serve --https=443 off` (still accepted by current CLIs); if the CLI rejects it, print manual instructions. Never touch other mappings, never uninstall tailscale itself. |
-| User already fronting Codeman some other way (reverse proxy etc.) | The serve check only looks at tailscale state; other proxies are invisible and unaffected (same stance as the loopback-exemption note in security-architecture). |
+| User already fronting Reverie some other way (reverse proxy etc.) | The serve check only looks at tailscale state; other proxies are invisible and unaffected (same stance as the loopback-exemption note in security-architecture). |
 
 ## What does NOT change
 
@@ -211,7 +211,7 @@ start/stop wrapper to manage; tailscaled owns the lifecycle).
 
 | File | Change |
 | ---- | ------ |
-| `install.sh` | New: `check_tailscale`, `get_tailscale_path`, `tailscale_status_field` (jq-free JSON field extraction; the installer cannot assume jq: use `sed`/`grep` like existing helpers or `tailscale status --json` piped to `node -e` since node is guaranteed post-install), `offer_install_tailscale`, `ensure_tailscale_login`, `ensure_tailscale_operator`, `ensure_tailnet_https`, `setup_tailscale_serve`, `verify_tailscale_access`, `setup_tailscale_access` (orchestrator). Modified: `choose_network_binding` (3-way menu), summary block, `print_security_notice`, subcommand dispatch (`tailscale`), `uninstall` (targeted serve removal), header env-var docs (`CODEMAN_TAILSCALE`). |
+| `install.sh` | New: `check_tailscale`, `get_tailscale_path`, `tailscale_status_field` (jq-free JSON field extraction; the installer cannot assume jq: use `sed`/`grep` like existing helpers or `tailscale status --json` piped to `node -e` since node is guaranteed post-install), `offer_install_tailscale`, `ensure_tailscale_login`, `ensure_tailscale_operator`, `ensure_tailnet_https`, `setup_tailscale_serve`, `verify_tailscale_access`, `setup_tailscale_access` (orchestrator). Modified: `choose_network_binding` (3-way menu), summary block, `print_security_notice`, subcommand dispatch (`tailscale`), `uninstall` (targeted serve removal), header env-var docs (`REVERIE_TAILSCALE`). |
 | `README.md` | Remote-access section: promote the Tailscale path with the one-liner and `install.sh tailscale`; keep the tailscale-IP HTTP note for non-serve users but recommend serve + HTTPS. |
 | `docs/security-architecture.md` | Section A gains "the installer can set this up for you" + `install.sh tailscale` pointer. |
 | `CLAUDE.md` | One line in Scripts & Tunnel: installer offers Tailscale setup (`install.sh tailscale` to redo). |
@@ -227,14 +227,14 @@ start/stop wrapper to manage; tailscaled owns the lifecycle).
 6. Second serve mapping on another port present => untouched (prod-like state).
 7. Port 443 already proxying another target => replace/skip prompt honored.
 8. `install.sh tailscale` on an existing loopback install (the retrofit path).
-9. `CODEMAN_NONINTERACTIVE=1` re-run => preserves everything, no prompts.
+9. `REVERIE_NONINTERACTIVE=1` re-run => preserves everything, no prompts.
 10. macOS (Mac mini `arbbot` box): GUI-app CLI path detection + full flow.
 11. Uninstall removes only our 443 mapping, leaves others.
 12. Phone check: PWA install + push from the `https://*.ts.net` origin.
 
 ## Release
 
-Changeset: `minor` (new documented installer capability + new `CODEMAN_TAILSCALE`
+Changeset: `minor` (new documented installer capability + new `REVERIE_TAILSCALE`
 env var). The feature is installer-only, so it ships with zero risk to running
 servers; `install.sh update` does not invoke the new flow (updates never rewrite
 access config), only fresh installs and the explicit `install.sh tailscale`

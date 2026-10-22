@@ -43,7 +43,7 @@ describe('create routes: tabGroupId', () => {
   beforeEach(async () => {
     vi.spyOn(Session.prototype, 'startInteractive').mockResolvedValue(undefined);
     vi.spyOn(Session.prototype, 'startShell').mockResolvedValue(undefined);
-    workingDir = await mkdtemp(join(tmpdir(), 'codeman-tab-group-'));
+    workingDir = await mkdtemp(join(tmpdir(), 'reverie-tab-group-'));
     app = Fastify({ logger: false });
     await app.register(fastifyCookie);
     ctx = createMockRouteContext();
@@ -142,7 +142,7 @@ describe('create routes: tabGroupId through the real layout service', () => {
 
   beforeEach(async () => {
     vi.spyOn(Session.prototype, 'startShell').mockResolvedValue(undefined);
-    workingDir = await mkdtemp(join(tmpdir(), 'codeman-tab-group-real-'));
+    workingDir = await mkdtemp(join(tmpdir(), 'reverie-tab-group-real-'));
     app = Fastify({ logger: false });
     await app.register(fastifyCookie);
     ctx = createMockRouteContext();

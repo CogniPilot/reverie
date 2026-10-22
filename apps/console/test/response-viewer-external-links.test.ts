@@ -1,5 +1,5 @@
 /**
- * @fileoverview Response-viewer links open in a NEW tab (`CodemanApp._renderMarkdown`).
+ * @fileoverview Response-viewer links open in a NEW tab (`ReverieApp._renderMarkdown`).
  *
  * `marked` emits a bare `<a href>` and the markdown sanitizer's allowlist carries no
  * `target`, so every link in the chat used to navigate the CURRENT tab. On a phone that
@@ -9,7 +9,7 @@
  *
  * `_renderMarkdown` therefore decorates anchors AFTER sanitizing, which makes it the single
  * source of both attributes: whatever an agent wrote is already stripped by then, and `rel`
- * is set on the same element in the same pass, so no page Codeman opens can reach back
+ * is set on the same element in the same pass, so no page Reverie opens can reach back
  * through `window.opener` (reverse tabnabbing).
  *
  * Drives the SHIPPING artifacts — vendored `marked`, vendored DOMPurify + `sanitize-html.js`,
@@ -59,7 +59,7 @@ function loadShippingMarked(): { parse: (src: string, opts?: unknown) => string 
 
 type RenderApp = { _renderMarkdown(text: string): string };
 
-function loadCodemanAppClass(): { prototype: RenderApp } {
+function loadReverieAppClass(): { prototype: RenderApp } {
   const context = vm.createContext({
     console,
     performance,
@@ -80,17 +80,17 @@ function loadCodemanAppClass(): { prototype: RenderApp } {
     MobileDetection: {},
   });
   vm.runInContext(
-    `${publicFile('constants.js')}\n${publicFile('app.js')}\nglobalThis.__CodemanApp = CodemanApp;`,
+    `${publicFile('constants.js')}\n${publicFile('app.js')}\nglobalThis.__ReverieApp = ReverieApp;`,
     context
   );
-  return (context as { __CodemanApp: { prototype: RenderApp } }).__CodemanApp;
+  return (context as { __ReverieApp: { prototype: RenderApp } }).__ReverieApp;
 }
 
-const CodemanApp = loadCodemanAppClass();
+const ReverieApp = loadReverieAppClass();
 
 /** Render markdown the way the response viewer does and return the resulting element. */
 function render(markdown: string): HTMLElement {
-  const app = Object.create(CodemanApp.prototype) as RenderApp;
+  const app = Object.create(ReverieApp.prototype) as RenderApp;
   const root = document.createElement('div');
   root.className = 'rv-text';
   root.innerHTML = app._renderMarkdown(markdown);

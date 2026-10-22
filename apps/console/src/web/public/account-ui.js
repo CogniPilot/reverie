@@ -1,7 +1,7 @@
 /**
  * Account sign-in dialogs and session account labels shared by Reverie and its terminal.
  * Usage, pacing and reset displays live on the Board.
- * @mixin Extends CodemanApp.prototype via Object.assign
+ * @mixin Extends ReverieApp.prototype via Object.assign
  * @dependency app.js, api-client.js (_api), chatroom-ui.js (_chatApi)
  */
 const ACCOUNT_MAP_TTL_MS = 60_000;
@@ -13,7 +13,7 @@ function accountUiEl(tag, cls, text) {
   return node;
 }
 
-Object.assign(CodemanApp.prototype, {
+Object.assign(ReverieApp.prototype, {
   // ─── Sign in ─────────────────────────────────────────────────────────────────
 
   /** Sign an account in from the dashboard: link, QR, code, poll until it settles. */

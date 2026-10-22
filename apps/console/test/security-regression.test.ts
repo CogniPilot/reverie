@@ -68,7 +68,7 @@ function wsCloseCode(path: string, origin?: string): Promise<number> {
 let server: WebServer;
 
 beforeAll(async () => {
-  delete process.env.CODEMAN_PASSWORD; // guard must work even on the no-auth default
+  delete process.env.REVERIE_PASSWORD; // guard must work even on the no-auth default
   server = new WebServer(0, false, true);
   await server.start();
 });

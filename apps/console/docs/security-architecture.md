@@ -1,20 +1,20 @@
 # Security Architecture
 
-This document describes Codeman's security model: how it decides who may reach
+This document describes Reverie's security model: how it decides who may reach
 the web UI, how requests are authenticated, how the file-serving and tmux layers
 are hardened, and the recommended ways to expose an instance safely.
 
-Codeman spawns and drives Claude/OpenCode CLIs with
+Reverie spawns and drives Claude/OpenCode CLIs with
 `--dangerously-skip-permissions`. **Anyone who can reach an unauthenticated
 instance can run arbitrary commands as your user.** The defaults below are chosen
 so that a fresh install is safe on the machine it runs on, while remote access is
 an explicit, guided opt‑in.
 
-> TL;DR — Codeman binds **loopback only (`127.0.0.1`) by default**, so out of the
+> TL;DR — Reverie binds **loopback only (`127.0.0.1`) by default**, so out of the
 > box it is reachable only from the same machine and needs no password. To reach
 > it from elsewhere, either put it behind an **authenticated tunnel**
 > (`tailscale serve` / `cloudflared`) **or** bind a wider host **and set
-> `CODEMAN_PASSWORD`**. If you bind a non‑loopback host with no password, Codeman
+> `REVERIE_PASSWORD`**. If you bind a non‑loopback host with no password, Reverie
 > still starts but prints a **loud warning** telling you how to secure it.
 
 ---
@@ -37,7 +37,7 @@ an explicit, guided opt‑in.
 
 ## Trust model
 
-**The security boundary is the network bind plus authentication — not the code Codeman
+**The security boundary is the network bind plus authentication — not the code Reverie
 runs.** Because sessions launch with `--dangerously-skip-permissions`, the web UI is by
 design a remote‑code‑execution surface for whoever is allowed to reach it. Everything
 below exists to control *who* that is.
@@ -49,7 +49,7 @@ below exists to control *who* that is.
 | Unauthenticated remote client | Only if you bind a non‑loopback host with no password | Full session control — the exact case every default and warning works to prevent. |
 | Clients behind a loopback‑connecting tunnel | A reverse tunnel terminates on `127.0.0.1` | Inherit `req.ip = 127.0.0.1`, so they hit the localhost‑only exemptions (§3) unless a password is set. |
 
-**Explicitly out of scope.** Codeman is access control for the operator console, not a
+**Explicitly out of scope.** Reverie is access control for the operator console, not a
 sandbox for the code that console runs. It does **not** defend against: a compromised
 local user account (loopback is trusted), malicious contents in a workspace you
 deliberately open, or the breadth of filesystem a session's `workingDir` is pointed at
@@ -61,8 +61,8 @@ deliberately open, or the breadth of filesystem a session's `workingDir` is poin
 
 | Setting | Default | Source |
 |---------|---------|--------|
-| Bind host | `127.0.0.1` (loopback) | `--host` / `CODEMAN_HOST` → `WebServer` ctor |
-| Port | `3000` | `--port` / `CODEMAN_PORT` |
+| Bind host | `127.0.0.1` (loopback) | `--host` / `REVERIE_HOST` → `WebServer` ctor |
+| Port | `3000` | `--port` / `REVERIE_PORT` |
 | TLS | off (`--https` to enable) | `--https` |
 
 ### Bind host classification
@@ -86,7 +86,7 @@ non‑loopback (you'll get a warning, not a silent wide‑open bind) — use
 
 At `WebServer.start()`:
 
-| Bind host | `CODEMAN_PASSWORD` | Behavior |
+| Bind host | `REVERIE_PASSWORD` | Behavior |
 |-----------|--------------------|----------|
 | loopback (default) | unset | **Start.** Safe — reachable only from this machine. |
 | loopback | set | **Start.** Auth required even locally. |
@@ -101,13 +101,13 @@ At `WebServer.start()`:
 
 The warning points at three ways to secure the instance:
 
-1. `CODEMAN_PASSWORD=<password>` — turns on HTTP Basic auth (see §2).
+1. `REVERIE_PASSWORD=<password>` — turns on HTTP Basic auth (see §2).
 2. `--host 127.0.0.1` + an authenticated tunnel (`cloudflared` / `tailscale serve`).
-3. `--allow-unauthenticated-network` / `CODEMAN_ALLOW_UNAUTHENTICATED_NETWORK=1`
+3. `--allow-unauthenticated-network` / `REVERIE_ALLOW_UNAUTHENTICATED_NETWORK=1`
    — explicitly accept the risk (downgrades the warning to a one‑line note). This
    flag is **only** an acknowledgement; it does not change reachability.
 
-`CODEMAN_API_URL` (used by hooks/child processes) is always derived as a loopback
+`REVERIE_API_URL` (used by hooks/child processes) is always derived as a loopback
 address (`0.0.0.0`/`localhost`/`::1` → `127.0.0.1`) so in‑process hooks reach the
 server over loopback regardless of the public bind.
 
@@ -117,10 +117,10 @@ server over loopback regardless of the public bind.
 
 Auth is **optional** and controlled by env vars captured at startup:
 
-- `CODEMAN_USERNAME` (default `admin` when only a password is set)
-- `CODEMAN_PASSWORD`
+- `REVERIE_USERNAME` (default `admin` when only a password is set)
+- `REVERIE_PASSWORD`
 
-When `CODEMAN_PASSWORD` is unset, no auth is enforced — which is why the default
+When `REVERIE_PASSWORD` is unset, no auth is enforced — which is why the default
 loopback bind matters. The auth pipeline (`src/web/middleware/auth.ts`,
 `onRequest` hook) runs in this order:
 
@@ -129,10 +129,10 @@ loopback bind matters. The auth pipeline (`src/web/middleware/auth.ts`,
    web‑tab exemptions (§10b: the capability in the path, the `Referer` form, and
    the lost‑frame recovery page) sit in this same slot, ahead of the credential checks. While the
    **managed tunnel is running**, the hook‑event exemption additionally requires
-   the per‑instance `X-Codeman-Hook-Secret` header (COD‑54); failed presentations
+   the per‑instance `X-Reverie-Hook-Secret` header (COD‑54); failed presentations
    are rate‑limited in a **dedicated bucket** (separate from Basic‑Auth failures)
    so misfiring hooks can never lock out the login path.
-2. **Session cookie** check — a valid `codeman_session` cookie short‑circuits to
+2. **Session cookie** check — a valid `reverie_session` cookie short‑circuits to
    allow.
 3. **HTTP Basic** check — correct credentials short‑circuit to allow and clear
    that IP's failure counter.
@@ -142,7 +142,7 @@ loopback bind matters. The auth pipeline (`src/web/middleware/auth.ts`,
 
 ### Session cookies
 
-On successful Basic auth the server issues `codeman_session`, an opaque
+On successful Basic auth the server issues `reverie_session`, an opaque
 server‑side token (`randomBytes(32)`), valid 24h with auto‑extend and device
 context for the audit log. Tokens are **not** client‑signed — they're validated
 by presence in a server‑side map, so they cannot be forged offline.
@@ -173,10 +173,10 @@ with `req.ip = 127.0.0.1`**. The localhost‑only exemptions then treat those
 requests as local:
 
 - `POST /api/hook-event` — auth‑exempt for loopback **only while no managed tunnel
-  is running**. When Codeman's own tunnel is up, the exemption requires the
-  per‑instance shared secret (`X-Codeman-Hook-Secret`, 256‑bit hex in
-  `~/.codeman/hook-secret`, mode 0600, COD‑54). Local hook commands read the
-  secret file at execution time (`$CODEMAN_HOOK_SECRET_FILE`, exported into every
+  is running**. When Reverie's own tunnel is up, the exemption requires the
+  per‑instance shared secret (`X-Reverie-Hook-Secret`, 256‑bit hex in
+  `~/.reverie/hook-secret`, mode 0600, COD‑54). Local hook commands read the
+  secret file at execution time (`$REVERIE_HOOK_SECRET_FILE`, exported into every
   managed session), so they keep working — tunneled internet traffic can't know
   it. Even without the secret the impact is bounded: the route is
   `HookEventSchema`‑validated and requires a valid in‑memory `sessionId`; it can
@@ -190,10 +190,10 @@ requests as local:
 - QR `/q/` — still protected by its own short‑code brute‑force limiter
   (10 failures / 60s against a 62⁶ space).
 
-**Mitigation:** set `CODEMAN_PASSWORD` whenever a loopback‑connecting tunnel is
+**Mitigation:** set `REVERIE_PASSWORD` whenever a loopback‑connecting tunnel is
 up — it gates everything except the (secret‑gated) hook exemption and is the
 documented practice; since COD‑55 enabling the managed tunnel **refuses** to start
-without it unless `CODEMAN_ALLOW_UNAUTHENTICATED_NETWORK=1` explicitly
+without it unless `REVERIE_ALLOW_UNAUTHENTICATED_NETWORK=1` explicitly
 acknowledges the exposure. Prefer `tailscale serve` (below), which authenticates
 at the tailnet layer so untrusted clients never reach the loopback port at all.
 
@@ -213,7 +213,7 @@ operator merely visits.
   `localhost`; **any** IP literal (IPv4/IPv6 — a browser hitting a numeric address
   can't be a rebinding victim); the bind host; the suffixes `.ts.net`,
   `.trycloudflare.com`, `.cfargotunnel.com`; the hostname of the active
-  Codeman‑managed tunnel; and anything in `CODEMAN_ALLOWED_HOSTS`. A missing/empty
+  Reverie‑managed tunnel; and anything in `REVERIE_ALLOWED_HOSTS`. A missing/empty
   `Host` is rejected.
 - **Origin / CSRF guard.** On **state‑changing** methods (everything except
   `GET`/`HEAD`/`OPTIONS`) the `Origin` header must also pass the same allowlist,
@@ -236,9 +236,9 @@ The policy is rebuilt per request from
 `buildHostPolicy(bindHost, tunnelManager.getUrl())`, so starting or stopping a
 tunnel at runtime updates the allowlist with no restart.
 
-> **Reverse‑proxy operators:** a custom proxy domain (e.g. `codeman.example.com`)
+> **Reverse‑proxy operators:** a custom proxy domain (e.g. `reverie.example.com`)
 > is **not** in the default allowlist and gets `403 host not allowed`. Add it via
-> `CODEMAN_ALLOWED_HOSTS` — comma‑separated, case‑insensitive; an exact hostname
+> `REVERIE_ALLOWED_HOSTS` — comma‑separated, case‑insensitive; an exact hostname
 > matches only itself, while a leading‑dot entry (`.corp.internal`) matches the
 > bare domain **and** all subdomains. Behaviour is covered by
 > `test/network-host-guard.test.ts`.
@@ -256,23 +256,23 @@ installer sets this up for you**: choose **Tailscale** at the network-access
 prompt, or retrofit an existing install with:
 
 ```bash
-bash ~/.codeman/app/install.sh tailscale
+bash ~/.reverie/app/install.sh tailscale
 ```
 
 The guided flow installs Tailscale if needed, walks through login and the
 tailnet HTTPS-certificates toggle, and configures the equivalent of:
 
 ```bash
-codeman web                    # binds 127.0.0.1:3000 (plain HTTP is fine here)
+reverie web                    # binds 127.0.0.1:3000 (plain HTTP is fine here)
 tailscale serve --bg 3000      # HTTPS at https://<node>.<tailnet>.ts.net
 ```
 
 Only devices on your tailnet can reach it; Tailscale handles identity and
 terminates TLS with a real Let's Encrypt certificate (so PWA install and web
 push work). No app password and no `0.0.0.0` bind required. (This is the
-maintainer's production setup.) `CODEMAN_TAILSCALE=1` or `--tailscale` presets
+maintainer's production setup.) `REVERIE_TAILSCALE=1` or `--tailscale` presets
 the choice for automation. When `:443` on the node already belongs to another
-app, the installer mounts Codeman under `/codeman` (`tailscale serve --set-path`
+app, the installer mounts Reverie under `/reverie` (`tailscale serve --set-path`
 plus `--base-url`, which keeps the loopback bind and the same host guard) or on a
 second port rather than replacing it. The installer never runs `tailscale serve
 reset`, never touches serve mappings other than the one it created, never opens a
@@ -283,26 +283,26 @@ and defaults to no, because the tailnet name is also the machine's SSH identity.
 ### B. Authenticated cloudflared tunnel + password
 
 ```bash
-export CODEMAN_PASSWORD=<password>
-codeman web --https
+export REVERIE_PASSWORD=<password>
+reverie web --https
 cloudflared tunnel --url https://localhost:3000
 ```
 
-Always set `CODEMAN_PASSWORD` here — the tunnel connects over loopback, so the
+Always set `REVERIE_PASSWORD` here — the tunnel connects over loopback, so the
 hook‑event exemption (§3) would otherwise be reachable from the public URL.
 
 ### C. Direct LAN bind + password
 
 ```bash
-export CODEMAN_PASSWORD=<password>
-codeman web --https --host 0.0.0.0
+export REVERIE_PASSWORD=<password>
+reverie web --https --host 0.0.0.0
 ```
 
 Exposes the port on all interfaces; the password is the only thing protecting it.
 
 ### Avoid
 
-`--host 0.0.0.0` **without** a password. Codeman will start (and warn), but
+`--host 0.0.0.0` **without** a password. Reverie will start (and warn), but
 anyone on the network can control your Claude sessions. Never re‑expose `0.0.0.0`
 without a password.
 
@@ -320,7 +320,7 @@ TOCTOU window.
 | Route | Cap | Notes |
 |-------|-----|-------|
 | `file-content` | 10 MB | text preview |
-| `file-raw` | 2 GB (`CODEMAN_MAX_DOWNLOAD_BYTES`, `0` = unlimited) | inline MIME map; **`X-Content-Type-Options: nosniff` on all responses**; streamed, `Range`-aware (206 slices come from the same validated path, and the cap is checked before the range) |
+| `file-raw` | 2 GB (`REVERIE_MAX_DOWNLOAD_BYTES`, `0` = unlimited) | inline MIME map; **`X-Content-Type-Options: nosniff` on all responses**; streamed, `Range`-aware (206 slices come from the same validated path, and the cap is checked before the range) |
 | `GET /api/download` | same cap | forced `attachment`; sensitive‑path blocklist; streamed, `Range`-aware |
 
 ### SVG / content‑type XSS
@@ -352,7 +352,7 @@ is by id (`GET /api/sessions/:id/attachments/:attachmentId/raw`, same download c
 `nosniff`) and re‑resolves the symlink + re‑checks the **attachment guard**
 (`src/config/attachment-guard.ts`: the shared sensitive‑path blocklist **plus**
 the `/root` and `/etc` trees, extendable via `attachmentBlockedPaths` /
-`CODEMAN_ATTACHMENT_BLOCKED_PATHS`) on every request. Unlike the workspace file
+`REVERIE_ATTACHMENT_BLOCKED_PATHS`) on every request. Unlike the workspace file
 routes, attachments are intentionally **cross‑workspace** — so the effective gate
 is the blocklist + an extension allowlist (`SUPPORTED_ATTACHMENT_EXTENSIONS` in
 `src/attachment-registry.ts`: images, pdf/docx/pptx/xlsx, audio/video, md/txt and
@@ -360,11 +360,11 @@ other text), not realpath containment.
 
 Two registration paths, with **different trust**:
 
-- **Explicit `POST /api/sessions/:id/attachments`** (and `codeman attach`, which
+- **Explicit `POST /api/sessions/:id/attachments`** (and `reverie attach`, which
   POSTs directly inside a managed session) — a deliberate, Origin‑guarded HTTP
   request. Allowed cross‑workspace (subject to the guard). This is the supported
-  path for codeman‑publish and the `~/.codeman` review‑card loop.
-- **Terminal `codeman://attach?path=…` magic links** — scanned passively from
+  path for reverie‑publish and the `~/.reverie` review‑card loop.
+- **Terminal `reverie://attach?path=…` magic links** — scanned passively from
   session output. Terminal output is **attacker‑influenceable** (a prompt‑injected
   session can print an arbitrary path), and registration here is server‑side with
   no Origin gate and broadcasts the `rawUrl` over SSE to all clients. This path is
@@ -463,14 +463,14 @@ transient mount blip at launch poisons tmux's long‑lived cwd and crashes
 
 ## 8. Multi‑instance isolation
 
-The tmux socket (`tmux -L codeman[-<instance>]`) and data dir
-(`~/.codeman[-<instance>]`) are **process‑wide and shared by every Codeman on the
-machine**, derived from `CODEMAN_INSTANCE` (`src/config/instance.ts`). A second
+The tmux socket (`tmux -L reverie[-<instance>]`) and data dir
+(`~/.reverie[-<instance>]`) are **process‑wide and shared by every Reverie on the
+machine**, derived from `REVERIE_INSTANCE` (`src/config/instance.ts`). A second
 instance on the **same** socket discovers and attaches PTYs to the first
 instance's live sessions. To run instances side by side, give each a distinct
-`CODEMAN_INSTANCE` (scopes both dir + socket), or set `CODEMAN_TMUX_SOCKET` +
-`CODEMAN_DATA_DIR` individually. `CODEMAN_INSTANCE` defaults to empty = the
-production layout (`~/.codeman`, `-L codeman`, port 3000).
+`REVERIE_INSTANCE` (scopes both dir + socket), or set `REVERIE_TMUX_SOCKET` +
+`REVERIE_DATA_DIR` individually. `REVERIE_INSTANCE` defaults to empty = the
+production layout (`~/.reverie`, `-L reverie`, port 3000).
 
 ---
 
@@ -494,7 +494,7 @@ production layout (`~/.codeman`, `-L codeman`, port 3000).
   - `connect-src` allows `wss://api.deepgram.com` (streaming voice input).
   - `img-src` allows `data:` and `blob:` (inline / generated images, QR codes).
   - `frame-ancestors 'self'`.
-  - **Gesture opt‑in (`CODEMAN_GESTURE=1`):** `script-src` gains
+  - **Gesture opt‑in (`REVERIE_GESTURE=1`):** `script-src` gains
     `'wasm-unsafe-eval'` and a `worker-src 'self' blob:` directive is added, for
     self‑hosted MediaPipe. Its wasm runtime + model are same‑origin under
     `/gesture/`, so no extra `connect-src` entry is needed. OFF by default, so the
@@ -515,11 +515,11 @@ production layout (`~/.codeman`, `-L codeman`, port 3000).
 Docker cases (1.4.0) run a session inside a per‑case container instead of on the host. The security posture:
 
 - **Hardened create flags, always** — `--cap-drop ALL`, `--security-opt no-new-privileges`, `--pids-limit` (fork‑bomb guard), `--memory` == `--memory-swap` (a real OOM cap), `--init`, and non‑root: `--user <hostUid>:0` on Linux (host uid → workspace files stay host‑owned; GID 0 keeps `$HOME` writable), `--userns=keep-id` on rootless Podman. **Never** `--privileged`, and **never** the docker socket — the pure builder in `docker-hosts.ts` cannot emit them and the schema cannot represent them.
-- **Credentials never enter an image** — the convenient default bind‑mounts host cred dirs (`~/.claude`, `~/.codex`, `~/.gemini` — which also carries Antigravity's `antigravity-cli/` state — `~/.config/{gcloud,opencode}`, five seeded files from `~/.pi/agent`, three from `~/.grok`, and, only when their opt-in switches `CODEMAN_AGENT_IMAGE_INSTALL_GH` / `_AZ` are `1`, `~/.config/gh/{hosts.yml,config.yml}` and the sign-in files from `~/.azure`) read‑write. Bind mounts are physically excluded from `docker commit`, so exported images are secret‑free. API‑key CLIs get their key as an exec‑time NAME‑ONLY `--env OPENAI_API_KEY` (no `=value`, no `ps` leak, never committed); a create‑time `-e` for a secret is never used. The **sealed** profile (`mountCredentials:false` + `network:none`) drops the host mounts; full‑image export is then refused (an in‑container login would ride the committed layer) unless a pre‑commit scrub is opted into.
+- **Credentials never enter an image** — the convenient default bind‑mounts host cred dirs (`~/.claude`, `~/.codex`, `~/.gemini` — which also carries Antigravity's `antigravity-cli/` state — `~/.config/{gcloud,opencode}`, five seeded files from `~/.pi/agent`, three from `~/.grok`, and, only when their opt-in switches `REVERIE_AGENT_IMAGE_INSTALL_GH` / `_AZ` are `1`, `~/.config/gh/{hosts.yml,config.yml}` and the sign-in files from `~/.azure`) read‑write. Bind mounts are physically excluded from `docker commit`, so exported images are secret‑free. API‑key CLIs get their key as an exec‑time NAME‑ONLY `--env OPENAI_API_KEY` (no `=value`, no `ps` leak, never committed); a create‑time `-e` for a secret is never used. The **sealed** profile (`mountCredentials:false` + `network:none`) drops the host mounts; full‑image export is then refused (an in‑container login would ride the committed layer) unless a pre‑commit scrub is opted into.
 - **Blast radius — accept it explicitly** — the convenient profile mounts an arbitrary host workspace RW plus the host credential dirs RW into a network‑enabled container, so container‑run agent code can read/modify those host trees and reach the network at once. Still a net improvement over today's on‑host `--dangerously-skip-permissions` execution; use the sealed profile for genuinely untrusted work.
-- **Import is untrusted‑bundle‑safe** — `/api/docker-cases/import` validates the manifest + per‑member SHA‑256 before extraction, rejects absolute / `..` tar members (traversal guard), and re‑tags the loaded image into a quarantined namespace so it can never overwrite `codeman/agent:base` or a pre‑existing tag.
-- **Host guard & the bridge‑hooks listener** — in‑container hook callbacks carry `Host: host.docker.internal` / `host.containers.internal`; both are on the always‑on host‑header allowlist (`DOCKER_HOST_GATEWAY_ALIASES`) and resolve to the host only from inside a container netns, so they are not a browser DNS‑rebinding surface. On a loopback‑only server, in‑container hooks are opt‑in via `CODEMAN_DOCKER_BRIDGE_HOOKS=1`, which binds a SECOND listener on the docker bridge gateway serving **only** the hook endpoints (every other path → `403`) into the same hook‑secret‑gated pipeline. The bridge is host‑internal (containers + host), not the LAN, so it does not widen network exposure; the hook secret is bind‑mounted read‑only and referenced by path.
-- **Instance isolation** — every managed container is labeled `codeman.instance=<CODEMAN_INSTANCE>`; the boot reaper reaps orphans of its OWN instance only, so a beta never removes a prod container. The in‑container tmux socket (`-L codeman-docker`) + session name (`codeman-dkr-*`) deliberately fail a nested Codeman's discovery pattern.
+- **Import is untrusted‑bundle‑safe** — `/api/docker-cases/import` validates the manifest + per‑member SHA‑256 before extraction, rejects absolute / `..` tar members (traversal guard), and re‑tags the loaded image into a quarantined namespace so it can never overwrite `reverie/agent:base` or a pre‑existing tag.
+- **Host guard & the bridge‑hooks listener** — in‑container hook callbacks carry `Host: host.docker.internal` / `host.containers.internal`; both are on the always‑on host‑header allowlist (`DOCKER_HOST_GATEWAY_ALIASES`) and resolve to the host only from inside a container netns, so they are not a browser DNS‑rebinding surface. On a loopback‑only server, in‑container hooks are opt‑in via `REVERIE_DOCKER_BRIDGE_HOOKS=1`, which binds a SECOND listener on the docker bridge gateway serving **only** the hook endpoints (every other path → `403`) into the same hook‑secret‑gated pipeline. The bridge is host‑internal (containers + host), not the LAN, so it does not widen network exposure; the hook secret is bind‑mounted read‑only and referenced by path.
+- **Instance isolation** — every managed container is labeled `reverie.instance=<REVERIE_INSTANCE>`; the boot reaper reaps orphans of its OWN instance only, so a beta never removes a prod container. The in‑container tmux socket (`-L reverie-docker`) + session name (`reverie-dkr-*`) deliberately fail a nested Reverie's discovery pattern.
 
 Full feature guide: [`docker-cases.md`](docker-cases.md).
 
@@ -527,26 +527,26 @@ Full feature guide: [`docker-cases.md`](docker-cases.md).
 
 ## 10a. Multi‑user mode (opt‑in)
 
-`codeman web --multiuser` (or `CODEMAN_MULTIUSER=1`) turns on named users with individually scrypt‑hashed passwords in `~/.codeman/users.json` (mode 0600). OFF by default; when off, nothing here applies and behavior is byte‑identical to single‑user. Design + phase status: [`multi-user-plan.md`](multi-user-plan.md).
+`reverie web --multiuser` (or `REVERIE_MULTIUSER=1`) turns on named users with individually scrypt‑hashed passwords in `~/.reverie/users.json` (mode 0600). OFF by default; when off, nothing here applies and behavior is byte‑identical to single‑user. Design + phase status: [`multi-user-plan.md`](multi-user-plan.md).
 
-- **It is workspace separation, NOT a security boundary between users.** Every session still runs as the SAME OS account with agent code that can read the whole host. Any user can ask their agent to `cat` another user's files; the WEB layer enforces scoping, the AGENT layer cannot. Mitigations: give non‑admins the default `auto` permission mode (classifier‑guarded), pair users with **Docker cases** (container per case) for real isolation, or run separate Codeman instances under separate OS accounts. Stated loudly in the admin panel and the plan's threat model (section 2).
-- **It strictly improves network posture.** It removes the single shared `CODEMAN_PASSWORD` and gives each person a revocable credential; a non‑loopback bind and the tunnel‑enable guard are satisfied by "multi‑user with ≥1 enabled user" without a shared password.
+- **It is workspace separation, NOT a security boundary between users.** Every session still runs as the SAME OS account with agent code that can read the whole host. Any user can ask their agent to `cat` another user's files; the WEB layer enforces scoping, the AGENT layer cannot. Mitigations: give non‑admins the default `auto` permission mode (classifier‑guarded), pair users with **Docker cases** (container per case) for real isolation, or run separate Reverie instances under separate OS accounts. Stated loudly in the admin panel and the plan's threat model (section 2).
+- **It strictly improves network posture.** It removes the single shared `REVERIE_PASSWORD` and gives each person a revocable credential; a non‑loopback bind and the tunnel‑enable guard are satisfied by "multi‑user with ≥1 enabled user" without a shared password.
 - **Auth is a parallel branch** (`middleware/auth.ts`) that leaves the single‑user path untouched: per‑user scrypt verify (`timingSafeEqual`, timing‑equalized against user enumeration), identity‑carrying cookies, a per‑username failure bucket (a botnet can't brute one account across IPs; one NATed user can't lock out the rest), and a `mustChangePassword` lockbox. The hook‑secret loopback bypass, host guard, and Origin/CSRF guard are unchanged (hooks authenticate the INSTANCE, not a user).
-- **Ownership is enforced server‑side only** and fails closed: `req.authUser` (a synthetic admin in single‑user), `findSessionOrFail` returns NOT_FOUND (never 403) for a foreign session, list/SSE/WS/file‑preview/search all filter by `session.owner`, and SSE routing defaults session‑scoped events to their owner (unresolved owner → withheld). The load‑bearing rule is **non‑admin `workingDir` confinement**: a non‑admin's session/one‑shot working dir must realpath‑resolve inside `~/codeman-users/<name>/cases`, checked BEFORE any disk write.
+- **Ownership is enforced server‑side only** and fails closed: `req.authUser` (a synthetic admin in single‑user), `findSessionOrFail` returns NOT_FOUND (never 403) for a foreign session, list/SSE/WS/file‑preview/search all filter by `session.owner`, and SSE routing defaults session‑scoped events to their owner (unresolved owner → withheld). The load‑bearing rule is **non‑admin `workingDir` confinement**: a non‑admin's session/one‑shot working dir must realpath‑resolve inside `~/reverie-users/<name>/cases`, checked BEFORE any disk write.
 - **Privileged actions are a one‑bit grant** (`canBypassPermissions`, default off): only granted users (and admins) get `--dangerously-skip-permissions` (others are silently downgraded to `--permission-mode auto`), shell‑mode sessions, cron `launchCommand`, and other CLIs' bypass flags. Machine‑level resources (remote/Docker host definitions, tunnel, self‑update, settings writes) are admin‑only.
-- **Clone Repo does not lend the server's git sign-in to non-admins.** A clone writes only inside the caller's own case space, so it is not admin-gated, but the server account's git credential helpers (the Docker image's opt-in `gh`/`az` helpers, or any `gh auth setup-git`) are shared by every user. A non-admin's clone and preflight therefore run with `git -c credential.helper=`, which empties the helper list including the URL-scoped entries (`cloneWithoutCredentialHelpers` in `case-routes.ts`, argv pinned in `test/git-clone.test.ts`). This closes the Clone Repo path only: the account's SSH keys still apply to an `ssh://` URL, and a non-admin's agent sessions run as the same account, consistent with the first bullet above. Docker cases are a second route to the same sign-in: with `CODEMAN_AGENT_IMAGE_INSTALL_GH`/`_AZ` on, a non-admin's Docker case with credential seeding on (the default) receives a copy of the server account's `gh`/`az` sign-in, exactly as it receives the Claude and Codex credentials.
-- **Admin actions are audited** append‑only to `~/.codeman/admin-audit.jsonl` (acting admin, action, target, IP). Passwords set by an admin create/reset are one‑time (returned once, force change). Under Basic auth, `logout` only truly ends QR‑issued sessions — to lock someone out, disable the account or reset the password (a proper login form is a deferred Phase 6).
+- **Clone Repo does not lend the server's git sign-in to non-admins.** A clone writes only inside the caller's own case space, so it is not admin-gated, but the server account's git credential helpers (the Docker image's opt-in `gh`/`az` helpers, or any `gh auth setup-git`) are shared by every user. A non-admin's clone and preflight therefore run with `git -c credential.helper=`, which empties the helper list including the URL-scoped entries (`cloneWithoutCredentialHelpers` in `case-routes.ts`, argv pinned in `test/git-clone.test.ts`). This closes the Clone Repo path only: the account's SSH keys still apply to an `ssh://` URL, and a non-admin's agent sessions run as the same account, consistent with the first bullet above. Docker cases are a second route to the same sign-in: with `REVERIE_AGENT_IMAGE_INSTALL_GH`/`_AZ` on, a non-admin's Docker case with credential seeding on (the default) receives a copy of the server account's `gh`/`az` sign-in, exactly as it receives the Claude and Codex credentials.
+- **Admin actions are audited** append‑only to `~/.reverie/admin-audit.jsonl` (acting admin, action, target, IP). Passwords set by an admin create/reset are one‑time (returned once, force change). Under Basic auth, `logout` only truly ends QR‑issued sessions — to lock someone out, disable the account or reset the password (a proper login form is a deferred Phase 6).
 
 ---
 
 ## 10b. Web tabs (dashboard proxy)
 
-A saved dashboard URL renders as a tab, served through Codeman's own origin at `/webview/<capability>/`. User guide: [`web-tabs.md`](web-tabs.md). Four properties carry the security weight:
+A saved dashboard URL renders as a tab, served through Reverie's own origin at `/webview/<capability>/`. User guide: [`web-tabs.md`](web-tabs.md). Four properties carry the security weight:
 
 - **The proxy is exempt from cookie auth and the Origin/CSRF guard, and that is deliberate.** The iframe is sandboxed without `allow-same-origin`, so it is opaque‑origin: its requests are cross‑site, meaning the `SameSite=lax` session cookie is never attached and its writes and WS upgrades arrive with `Origin: null`. The credential is instead a 192‑bit capability in the path, minted only by an authenticated `POST /api/webviews/:id/open`, held in memory (a restart invalidates every one), rolling TTL, bound to the minting user, and granting nothing but "relay bytes to this one saved URL". ⚠️ **The Host allowlist is NOT bypassed**, so DNS‑rebinding protection is unaffected. A second `Referer`‑keyed form exists for root‑absolute assets and is the only exemption decided by a request‑supplied header, so it is fenced to safe methods on non‑`/api`, non‑`/ws`, non‑`/q` paths. Edges pinned by `test/webview-auth-exemption.test.ts`.
-- **The lost‑frame recovery page is the third unauthenticated 200, and the only one decided by request headers alone.** The proxy's runtime shim masks `/webview/<cap>/` off the page's own URL so a single‑page app routes on the path it expects; a navigation the page then starts itself (`location.reload()`, a root‑absolute `location.href`) lands on Codeman's root with no capability anywhere, no cookie (opaque origin) and a Referer naming the masked page. `serveLostWebviewFrame()` in `middleware/auth.ts` recognises it by shape (`GET`/`HEAD`, `Sec-Fetch-Dest: iframe` or `frame`, `Accept: text/html`, `Sec-Fetch-Mode: navigate` or absent) and answers, BEFORE the credential checks and without counting an auth failure, with a static page whose only content is a `postMessage` of the lost path to the parent tab (`default-src 'none'` plus the hash of that one script, `no-store`, `referrer: no-referrer`, no reflected input). It is fenced to paths that are NOT registered routes and never `/api/`, `/ws/` or `/q/`, with one carve‑out: `/` itself, because the landing page masks to exactly `/` and its reload otherwise rendered Codeman's app shell inside the web tab. `/` is admitted only when the request carries neither the `codeman_session` cookie nor an `Authorization` header: nothing in Codeman frames its own root and a sandboxed frame has neither, while a framed `/` that does carry credentials still gets the shell. On a passwordless install no auth hook runs, so the index route applies the same test itself (`isLostWebviewRootFrame`). ⚠️ Known property, accepted rather than mitigated: those headers are trivially set by a non‑browser client, so an unauthenticated caller can distinguish a registered route (401) from a non‑route (200) and enumerate the route table; the routes are public in `docs/api-reference.md`, so nothing is learned. Pinned by `test/webview-auth-exemption.test.ts` (password) and `test/webview-lost-root-frame.test.ts` (passwordless).
-- **Sandboxed by default; `allow-same-origin` is an explicit per‑dashboard opt‑in.** A proxied page is same‑origin with Codeman, so without the sandbox its JavaScript could read the Codeman document and call the agent‑spawning API. ⚠️ In BOTH modes the `Authorization` header and the `codeman_session` cookie are stripped before the upstream request, because a trusted (same‑origin) frame makes the browser attach Codeman's own Basic‑auth credentials to every proxied request; forwarding them would hand `CODEMAN_PASSWORD` to the dashboard.
-- **Rendered HTML files (`/html-view/<capability>/`) are the other capability-gated route that skips cookie auth.** A clicked `.html` file renders through it so an agent's report can be viewed from any device. The exemption is narrower than the proxy's: `GET`/`HEAD` only (plus the page's CORS preflight, which `registerSecurityHeaders` answers itself with `Access-Control-Allow-Methods: GET, HEAD` and never hands to a route), the capability in the path only (no `Referer` form), and it is a separate store, so a web-tab capability never opens a page and vice versa. The capability is minted by an authenticated `POST /api/sessions/:id/html-view` (session ownership via `findSessionOrFail`, the attachment guard for out-of-workspace files), held in memory with a rolling TTL and revoked with the web-tab ones on logout, admin logout and user deletion. Every response carries `Content-Security-Policy: sandbox` without `allow-same-origin`, so the page is opaque-origin even when opened as a top-level tab and cannot read Codeman's document, cookies or API. **Network access is open, by the owner's decision (2026-10-13):** that `sandbox` directive is the whole policy (it replaces Codeman's own `default-src 'self'` CSP and carries no fetch directive), so a rendered page behaves like a file opened from disk in a browser. What a page CAN do: load scripts, styles, fonts, images and media from any host (an agent's dashboard pulling Chart.js from a CDN), make fetch, XHR, WebSocket, beacon and form requests to any host, and read the files of its own folder through its capability. What it CANNOT do: act as Codeman's origin, read Codeman's cookies or document, use Codeman's API (a write arrives with `Origin: null` and the Origin guard refuses it; a read's response stays unreadable, because Codeman answers CORS only for its own localhost origins, and with a password set the request carries no session cookie either), or read any folder other than its own. The accepted consequence is that a page can send what it can read, its own folder, to any host, which is why the folder rules below are the boundary that matters. `Referrer-Policy: no-referrer` keeps the capability URL out of the `Referer` the page's third-party requests carry. Pinned by the exact-header test in `test/routes/html-view-routes.test.ts`. It may read its own directory tree (non-dot, asset-allowlisted, realpath-confined, blocklist applied; the dot and extension rules hold for the symlink-resolved target as well as the requested name), so minting is refused for an HTML file in a hidden directory or directly in a broad root (`/`, home, `/tmp`, `/var/tmp` and `$TMPDIR`, the cases and user-space roots, a drive's mount point) or in a directory above one (`/home`, `/Users`). Pinned by `test/routes/html-view-routes.test.ts` and the html-view block in `test/webview-auth-exemption.test.ts`.
+- **The lost‑frame recovery page is the third unauthenticated 200, and the only one decided by request headers alone.** The proxy's runtime shim masks `/webview/<cap>/` off the page's own URL so a single‑page app routes on the path it expects; a navigation the page then starts itself (`location.reload()`, a root‑absolute `location.href`) lands on Reverie's root with no capability anywhere, no cookie (opaque origin) and a Referer naming the masked page. `serveLostWebviewFrame()` in `middleware/auth.ts` recognises it by shape (`GET`/`HEAD`, `Sec-Fetch-Dest: iframe` or `frame`, `Accept: text/html`, `Sec-Fetch-Mode: navigate` or absent) and answers, BEFORE the credential checks and without counting an auth failure, with a static page whose only content is a `postMessage` of the lost path to the parent tab (`default-src 'none'` plus the hash of that one script, `no-store`, `referrer: no-referrer`, no reflected input). It is fenced to paths that are NOT registered routes and never `/api/`, `/ws/` or `/q/`, with one carve‑out: `/` itself, because the landing page masks to exactly `/` and its reload otherwise rendered Reverie's app shell inside the web tab. `/` is admitted only when the request carries neither the `reverie_session` cookie nor an `Authorization` header: nothing in Reverie frames its own root and a sandboxed frame has neither, while a framed `/` that does carry credentials still gets the shell. On a passwordless install no auth hook runs, so the index route applies the same test itself (`isLostWebviewRootFrame`). ⚠️ Known property, accepted rather than mitigated: those headers are trivially set by a non‑browser client, so an unauthenticated caller can distinguish a registered route (401) from a non‑route (200) and enumerate the route table; the routes are public in `docs/api-reference.md`, so nothing is learned. Pinned by `test/webview-auth-exemption.test.ts` (password) and `test/webview-lost-root-frame.test.ts` (passwordless).
+- **Sandboxed by default; `allow-same-origin` is an explicit per‑dashboard opt‑in.** A proxied page is same‑origin with Reverie, so without the sandbox its JavaScript could read the Reverie document and call the agent‑spawning API. ⚠️ In BOTH modes the `Authorization` header and the `reverie_session` cookie are stripped before the upstream request, because a trusted (same‑origin) frame makes the browser attach Reverie's own Basic‑auth credentials to every proxied request; forwarding them would hand `REVERIE_PASSWORD` to the dashboard.
+- **Rendered HTML files (`/html-view/<capability>/`) are the other capability-gated route that skips cookie auth.** A clicked `.html` file renders through it so an agent's report can be viewed from any device. The exemption is narrower than the proxy's: `GET`/`HEAD` only (plus the page's CORS preflight, which `registerSecurityHeaders` answers itself with `Access-Control-Allow-Methods: GET, HEAD` and never hands to a route), the capability in the path only (no `Referer` form), and it is a separate store, so a web-tab capability never opens a page and vice versa. The capability is minted by an authenticated `POST /api/sessions/:id/html-view` (session ownership via `findSessionOrFail`, the attachment guard for out-of-workspace files), held in memory with a rolling TTL and revoked with the web-tab ones on logout, admin logout and user deletion. Every response carries `Content-Security-Policy: sandbox` without `allow-same-origin`, so the page is opaque-origin even when opened as a top-level tab and cannot read Reverie's document, cookies or API. **Network access is open, by the owner's decision (2026-10-13):** that `sandbox` directive is the whole policy (it replaces Reverie's own `default-src 'self'` CSP and carries no fetch directive), so a rendered page behaves like a file opened from disk in a browser. What a page CAN do: load scripts, styles, fonts, images and media from any host (an agent's dashboard pulling Chart.js from a CDN), make fetch, XHR, WebSocket, beacon and form requests to any host, and read the files of its own folder through its capability. What it CANNOT do: act as Reverie's origin, read Reverie's cookies or document, use Reverie's API (a write arrives with `Origin: null` and the Origin guard refuses it; a read's response stays unreadable, because Reverie answers CORS only for its own localhost origins, and with a password set the request carries no session cookie either), or read any folder other than its own. The accepted consequence is that a page can send what it can read, its own folder, to any host, which is why the folder rules below are the boundary that matters. `Referrer-Policy: no-referrer` keeps the capability URL out of the `Referer` the page's third-party requests carry. Pinned by the exact-header test in `test/routes/html-view-routes.test.ts`. It may read its own directory tree (non-dot, asset-allowlisted, realpath-confined, blocklist applied; the dot and extension rules hold for the symlink-resolved target as well as the requested name), so minting is refused for an HTML file in a hidden directory or directly in a broad root (`/`, home, `/tmp`, `/var/tmp` and `$TMPDIR`, the cases and user-space roots, a drive's mount point) or in a directory above one (`/home`, `/Users`). Pinned by `test/routes/html-view-routes.test.ts` and the html-view block in `test/webview-auth-exemption.test.ts`.
 - **Not an open relay, and not a privilege boundary.** `resolveUpstreamUrl()` refuses anything leaving the saved origin, and cross‑origin redirects are handed back unchanged rather than followed. The proxy does reach whatever the SERVER can reach, which is not an escalation for someone who already commands `--dangerously-skip-permissions` agents, but in multi‑user mode it means a non‑admin's dashboard is fetched from the server's network position. Saved URLs are validated to plain http(s) with no embedded credentials, and there is deliberately **no magic‑link path**: terminal output can never create a webview (the mistake the attachment scanner had to be walled off from). The one refused destination class is link‑local and cloud‑metadata addresses (`169.254.0.0/16`, `fe80::/10`, `fd00:ec2::254`, `168.63.129.16`, `100.100.100.200`, `metadata.google.internal`): `webview-egress-policy.ts` refuses them at save time, and `webview-egress.ts` re‑judges the RESOLVED address at connect time through a `lookup` hook on the proxy's undici Agent and on its WebSocket client, so a DNS name pointing into those ranges is refused as well. Loopback and RFC1918 stay allowed on purpose. Capabilities are revoked on logout, admin logout and user deletion, and proxied responses carry `Referrer-Policy: same-origin` so a dashboard cannot hand the capability‑bearing URL to a third‑party host it links.
 
 ---
@@ -555,19 +555,19 @@ A saved dashboard URL renders as a tab, served through Codeman's own origin at `
 
 | Env / flag | Effect |
 |------------|--------|
-| `CODEMAN_PASSWORD` (+ `CODEMAN_USERNAME`) | Enable HTTP Basic auth |
-| `--host` / `CODEMAN_HOST` | Bind host (default `127.0.0.1`) |
-| `CODEMAN_ALLOWED_HOSTS` | Extra `Host`/`Origin` allowlist entries for reverse proxies (comma‑separated; exact host, or leading‑dot `.suffix` for subdomains) — see §3 |
-| `--base-url` / `CODEMAN_BASE_URL` | Sub‑path prefix Codeman is mounted under behind a reverse proxy, e.g. `/codeman` (default `/`); the proxy must forward the prefix unchanged. Independent of `CODEMAN_ALLOWED_HOSTS` |
-| `--allow-unauthenticated-network` / `CODEMAN_ALLOW_UNAUTHENTICATED_NETWORK` | Acknowledge an unauthenticated non‑loopback bind (downgrades the warning) |
+| `REVERIE_PASSWORD` (+ `REVERIE_USERNAME`) | Enable HTTP Basic auth |
+| `--host` / `REVERIE_HOST` | Bind host (default `127.0.0.1`) |
+| `REVERIE_ALLOWED_HOSTS` | Extra `Host`/`Origin` allowlist entries for reverse proxies (comma‑separated; exact host, or leading‑dot `.suffix` for subdomains) — see §3 |
+| `--base-url` / `REVERIE_BASE_URL` | Sub‑path prefix Reverie is mounted under behind a reverse proxy, e.g. `/reverie` (default `/`); the proxy must forward the prefix unchanged. Independent of `REVERIE_ALLOWED_HOSTS` |
+| `--allow-unauthenticated-network` / `REVERIE_ALLOW_UNAUTHENTICATED_NETWORK` | Acknowledge an unauthenticated non‑loopback bind (downgrades the warning) |
 | `--https` | Enable TLS (adds HSTS) |
-| `CODEMAN_INSTANCE` | Scope tmux socket + data dir for isolation |
-| `CODEMAN_GESTURE=1` | Make the gesture overlay available (widens CSP) |
-| `CODEMAN_DOCKER_BRIDGE_HOOKS=1` | Serve the hook endpoints on the docker bridge gateway (host‑internal, hooks‑only, `403` elsewhere) so in‑container hooks reach a loopback‑bound server — see §10 |
-| `CODEMAN_DOCKER_BRIDGE_HOST` | Override the bridge gateway IP the hooks listener binds (default: auto‑detect) |
+| `REVERIE_INSTANCE` | Scope tmux socket + data dir for isolation |
+| `REVERIE_GESTURE=1` | Make the gesture overlay available (widens CSP) |
+| `REVERIE_DOCKER_BRIDGE_HOOKS=1` | Serve the hook endpoints on the docker bridge gateway (host‑internal, hooks‑only, `403` elsewhere) so in‑container hooks reach a loopback‑bound server — see §10 |
+| `REVERIE_DOCKER_BRIDGE_HOST` | Override the bridge gateway IP the hooks listener binds (default: auto‑detect) |
 
 **Audit log:** session lifecycle and server start are recorded in
-`~/.codeman/session-lifecycle.jsonl`.
+`~/.reverie/session-lifecycle.jsonl`.
 
 ### Key source files
 

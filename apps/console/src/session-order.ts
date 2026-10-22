@@ -3,7 +3,7 @@
  *
  * Tab order (drag-and-drop reorder + Ctrl+Shift+{/}) is persisted server-side
  * so it follows the user across devices. The server is authoritative; the
- * browser's localStorage (`codeman-session-order`) is the offline fallback.
+ * browser's localStorage (`reverie-session-order`) is the offline fallback.
  *
  * These helpers are pure (no IO) so they can be unit-tested in isolation and
  * reused by both the PUT /api/session-order route and the StateStore accessor.

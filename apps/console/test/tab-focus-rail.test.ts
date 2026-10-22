@@ -1,5 +1,5 @@
 /**
- * @fileoverview The Focus section of the vertical rail, driven through the shipping CodemanApp.
+ * @fileoverview The Focus section of the vertical rail, driven through the shipping ReverieApp.
  *
  * A ref flagged `focus: true` gets a SHORTCUT in a "Focus" section pinned above
  * the rail's list; the row itself stays in its group. Pinned here:
@@ -34,7 +34,7 @@ type Layout = {
   ungrouped: Ref[];
 };
 
-let CodemanApp: { prototype: Record<string, any> };
+let ReverieApp: { prototype: Record<string, any> };
 let win: any;
 let document: Document;
 
@@ -65,9 +65,9 @@ beforeAll(async () => {
       read('api-client.js') +
       '\n' +
       read('webview-tabs.js') +
-      '\n;window.__FocusCodemanApp = CodemanApp;'
+      '\n;window.__FocusReverieApp = ReverieApp;'
   );
-  CodemanApp = win.__FocusCodemanApp;
+  ReverieApp = win.__FocusReverieApp;
 });
 
 const s = (id: string, extra: Partial<Ref> = {}): Ref => ({ kind: 'session', id, ...extra });
@@ -101,7 +101,7 @@ function installFetch() {
 }
 
 function makeApp(layout: Layout | null = grouped(), orientation = 'vertical') {
-  const app = Object.create(CodemanApp.prototype) as Record<string, any>;
+  const app = Object.create(ReverieApp.prototype) as Record<string, any>;
   document.documentElement.setAttribute('data-tab-orientation', orientation);
   document.documentElement.dataset.tabRailSort = 'manual';
   document.body.innerHTML =
@@ -183,7 +183,7 @@ beforeEach(() => {
   win.localStorage.clear();
   win.sessionStorage.clear();
   document.body.innerHTML = '';
-  win.__codemanUser = { username: 'admin', role: 'admin', multiUser: false };
+  win.__reverieUser = { username: 'admin', role: 'admin', multiUser: false };
   installFetch();
 });
 
@@ -360,8 +360,8 @@ describe('collapse and keyboard', () => {
     document.getElementById('tabFocusToggle')!.click();
     expect(document.getElementById('tabFocusList')!.hidden).toBe(true);
     expect(document.getElementById('tabFocusToggle')!.getAttribute('aria-expanded')).toBe('false');
-    expect(win.localStorage.getItem('codeman:tab-focus-collapsed')).toBe('true');
-    expect(JSON.parse(win.localStorage.getItem('codeman:tab-groups-collapsed') || '[]')).toEqual([]);
+    expect(win.localStorage.getItem('reverie:tab-focus-collapsed')).toBe('true');
+    expect(JSON.parse(win.localStorage.getItem('reverie:tab-groups-collapsed') || '[]')).toEqual([]);
     expect(app.collapsedTabGroupIds.size).toBe(0);
     makeApp();
     expect(document.getElementById('tabFocusList')!.hidden).toBe(true);
@@ -402,7 +402,7 @@ describe('zh-CN', () => {
       url: 'http://localhost/',
     });
     vm.runInContext(I18N, dom.getInternalVMContext(), { filename: 'i18n.js' });
-    const api = (dom.window as any).CodemanI18n;
+    const api = (dom.window as any).ReverieI18n;
     api.configure({ language: 'zh-CN' });
     const strings = ['Focus', 'Add to Focus', 'Remove from Focus', 'Focus actions'];
     const untranslated = strings.filter((text) => api.t(text) === text || /[A-Za-z]/.test(api.t(text)));

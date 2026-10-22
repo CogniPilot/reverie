@@ -60,14 +60,14 @@ describe('shared account UI in Chromium', () => {
     await page.addStyleTag({ content: read('styles.css') });
     await page.addScriptTag({
       content: `
-      class CodemanApp {
+      class ReverieApp {
         async _chatApi(path, opts = {}) {
           return (await fetch(path, { method: opts.method || 'GET' })).json();
         }
         refreshSubscriptionUsage() { this.refreshed = (this.refreshed || 0) + 1; }
         _scheduleSessionSwitcher() { this.labelsChanged = true; }
       }
-      window.app = new CodemanApp();
+      window.app = new ReverieApp();
     `,
     });
     await page.addScriptTag({ content: read('account-ui.js') });

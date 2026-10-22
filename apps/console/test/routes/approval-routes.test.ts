@@ -509,13 +509,13 @@ describe('approval routes: multi-user scoping', () => {
   const saved: Record<string, string | undefined> = {};
 
   beforeEach(() => {
-    saved.CODEMAN_MULTIUSER = process.env.CODEMAN_MULTIUSER;
-    process.env.CODEMAN_MULTIUSER = '1';
+    saved.REVERIE_MULTIUSER = process.env.REVERIE_MULTIUSER;
+    process.env.REVERIE_MULTIUSER = '1';
   });
 
   afterEach(() => {
-    if (saved.CODEMAN_MULTIUSER === undefined) delete process.env.CODEMAN_MULTIUSER;
-    else process.env.CODEMAN_MULTIUSER = saved.CODEMAN_MULTIUSER;
+    if (saved.REVERIE_MULTIUSER === undefined) delete process.env.REVERIE_MULTIUSER;
+    else process.env.REVERIE_MULTIUSER = saved.REVERIE_MULTIUSER;
     for (const item of approvalInbox.listPending()) {
       approvalInbox.resolveForSession(item.sessionId, 'dismissed');
     }

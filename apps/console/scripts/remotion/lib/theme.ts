@@ -1,4 +1,4 @@
-// Design tokens extracted from Codeman's styles.css and index.html
+// Design tokens extracted from Reverie's styles.css and index.html
 
 export const colors = {
   bg: {

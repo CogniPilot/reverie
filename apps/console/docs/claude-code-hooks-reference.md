@@ -157,7 +157,7 @@ The task ID keeps each wake targeted. The helper does not send terminal input,
 so it cannot submit a user's partially written prompt.
 
 For script-dispatched Codex work, `codex-run.sh` writes the final response
-between `CODEMAN_RESULT_BEGIN/END` markers in the background task output. The
+between `REVERIE_RESULT_BEGIN/END` markers in the background task output. The
 rewake helper includes a maximum of 64 KiB of that report in its feedback. UI
 subagent discovery and dispatcher result delivery are separate contracts.
 

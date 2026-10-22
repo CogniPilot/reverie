@@ -1,7 +1,7 @@
 /**
  * @fileoverview Loads, merges and re-validates the CLI registry.
  *
- * `~/.codeman/clis.json` holds OVERRIDES and CUSTOM entries only — never a full copy of the
+ * `~/.reverie/clis.json` holds OVERRIDES and CUSTOM entries only — never a full copy of the
  * stock catalog — so a shipped fix to a stock definition actually reaches an existing
  * install, and the file stays small enough to hand-edit.
  *
@@ -49,7 +49,7 @@ function filePath(): string {
 }
 
 /**
- * The resolved path of `~/.codeman/clis.json`, exported for the write API
+ * The resolved path of `~/.reverie/clis.json`, exported for the write API
  * (`cli-registry-writer.ts`, docs/cli-enable-disable-plan.md Phases 3/5) so both the read and
  * write sides resolve the SAME path through the SAME instance-scoped helper — never a second
  * `dataPath('clis.json')` call that could drift from this one under a future `dataPath()` change.
@@ -93,7 +93,7 @@ export interface LoadResult {
 
 /**
  * Refuse a registry file with any group/world permission bit — same posture as the ssh-key
- * discipline, so 0600 is the only accepted mode. This file selects the binaries Codeman
+ * discipline, so 0600 is the only accepted mode. This file selects the binaries Reverie
  * spawns, so a writable one is a way to redirect every session.
  *
  * POSIX only: Windows has no meaningful group/world bits on NTFS (Node reports every file

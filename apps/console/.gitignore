@@ -88,15 +88,15 @@ tmp/
 
 # Opt-in gesture overlay runtime assets: large MediaPipe wasm + model (~27 MB)
 # fetched at build/install by scripts/fetch-gesture-assets.mjs, kept out of git.
-# (The gesture bundle itself, gesture-codeman.js, IS tracked — built from
+# (The gesture bundle itself, gesture-reverie.js, IS tracked — built from
 # packages/gesture-control source by `npm run build:gesture`.)
 src/web/public/gesture/wasm/
 src/web/public/gesture/*.task
 
 # Gesture-control workspace package build outputs (source is tracked; the
-# Codeman bundle is emitted to src/web/public/gesture/gesture-codeman.js instead).
+# Reverie bundle is emitted to src/web/public/gesture/gesture-reverie.js instead).
 packages/gesture-control/dist/
-packages/gesture-control/dist-codeman/
+packages/gesture-control/dist-reverie/
 packages/gesture-control/.vite/
 
 # Claude Code plan tracking
@@ -111,7 +111,7 @@ readme-preview.mjs
 
 # Prompt uploads land here under each session working dir (runtime artifact);
 # .claude-images/ is where they landed before the move.
-.codeman-uploads/
+.reverie-uploads/
 .claude-images/
 
 # Local-LLM harness smoke-test config (real IPs/keys) — see the .example.json

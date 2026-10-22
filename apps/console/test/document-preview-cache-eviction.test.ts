@@ -28,7 +28,7 @@ describe('pruneDocumentPreviewCache', () => {
     const names = Array.from({ length: 102 }, (_, i) => `f${i}.pdf`);
     mockedReaddir.mockResolvedValue(names as never);
 
-    await pruneDocumentPreviewCache('/tmp/codeman-document-preview-cache');
+    await pruneDocumentPreviewCache('/tmp/reverie-document-preview-cache');
 
     // 102 - 100 = 2 oldest removed
     expect(mockedRm).toHaveBeenCalledTimes(2);
@@ -42,7 +42,7 @@ describe('pruneDocumentPreviewCache', () => {
     const names = [...Array.from({ length: 50 }, (_, i) => `f${i}.pdf`), 'work-abc', 'work-def'];
     mockedReaddir.mockResolvedValue(names as never);
 
-    await pruneDocumentPreviewCache('/tmp/codeman-document-preview-cache');
+    await pruneDocumentPreviewCache('/tmp/reverie-document-preview-cache');
 
     expect(mockedRm).not.toHaveBeenCalled(); // 50 pdfs <= cap
   });

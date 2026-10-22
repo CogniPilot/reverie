@@ -26,13 +26,13 @@ const HOME = '/home/dev';
 
 describe('isSensitivePath', () => {
   afterEach(() => vi.unstubAllEnvs());
-  describe('Fleet runtime secrets', () => {
+  describe('Reverie runtime secrets', () => {
     it('keeps nested conventional stores and credential trees protected', () => {
-      expect(isSensitivePath(`${HOME}/.fleet/archive/.codeman/state.json`)).toBe(true);
-      expect(isSensitivePath(`${HOME}/.fleet/.fleet-classroom/external-chat.json`)).toBe(true);
-      expect(isSensitivePath(`${HOME}/.fleet/accounts/.fleet-profile/report.md`)).toBe(true);
+      expect(isSensitivePath(`${HOME}/.reverie/archive/.reverie/state.json`)).toBe(true);
+      expect(isSensitivePath(`${HOME}/.reverie/.reverie-classroom/external-chat.json`)).toBe(true);
+      expect(isSensitivePath(`${HOME}/.reverie/accounts/.reverie-profile/report.md`)).toBe(true);
     });
-    it.each(['.fleet', '.fleet-teaching', '.codeman', '.codeman-beta'])(
+    it.each(['.reverie', '.reverie-teaching', '.reverie-beta'])(
       'protects secret and state members in %s',
       (directory) => {
         for (const member of [
@@ -64,7 +64,7 @@ describe('isSensitivePath', () => {
         expect(isSensitivePath(`${HOME}/${directory}/external-chat.json.example`)).toBe(false);
       }
     );
-    it.each(['FLEET_DATA_DIR', 'CODEMAN_DATA_DIR'])(
+    it.each(['REVERIE_DATA_DIR', 'REVERIE_DATA_DIR'])(
       'protects explicit %s without hiding ordinary artifacts or adjacent directories',
       (key) => {
         vi.stubEnv(key, join(homedir(), 'private-console'));
@@ -94,7 +94,7 @@ describe('isSensitivePath', () => {
       const actual = fs.mkdtempSync(join(homedir(), 'sensitive-runtime-'));
       const alias = `${actual}-alias`;
       fs.symlinkSync(actual, alias, 'dir');
-      vi.stubEnv('FLEET_DATA_DIR', alias);
+      vi.stubEnv('REVERIE_DATA_DIR', alias);
       expect(isSensitivePath(join(actual, 'external-chat.json'))).toBe(true);
       expect(isSensitivePath(join(alias, 'external-chat.json'))).toBe(true);
       expect(isSensitivePath(join(actual, 'research', 'finding.md'))).toBe(false);
@@ -148,23 +148,23 @@ describe('isSensitivePath', () => {
       ['mysql client config', `${HOME}/.my.cnf`],
 
       ['claude oauth token', `${HOME}/.claude/.credentials.json`],
-      ['codeman hook secret', `${HOME}/.codeman/hook-secret`],
-      ['codeman user table', `${HOME}/.codeman/users.json`],
-      ['codeman hook secret on a named instance', `${HOME}/.codeman-beta/hook-secret`],
+      ['reverie hook secret', `${HOME}/.reverie/hook-secret`],
+      ['reverie user table', `${HOME}/.reverie/users.json`],
+      ['reverie hook secret on a named instance', `${HOME}/.reverie-beta/hook-secret`],
       // state.json persists SessionState.envOverrides, and the env allowlist
       // admits key-shaped names (GEMINI_API_KEY, CLAUDE_CODE_*), so it can hold
       // a live credential. Named once .json became previewable from outside the
       // workspace.
-      ['codeman state file', `${HOME}/.codeman/state.json`],
-      ['codeman state file on a named instance', `${HOME}/.codeman-beta/state.json`],
-      ['codeman state sibling (same payload)', `${HOME}/.codeman/state-inner.json`],
+      ['reverie state file', `${HOME}/.reverie/state.json`],
+      ['reverie state file on a named instance', `${HOME}/.reverie-beta/state.json`],
+      ['reverie state sibling (same payload)', `${HOME}/.reverie/state-inner.json`],
       // settings.json holds voiceSettings.apiKey by schema; push-keys.json holds
       // the VAPID PRIVATE key; intents.json is 0600 because captured prompts can
       // contain secrets and is deliberately kept out of /api/search.
-      ['codeman settings (Deepgram key)', `${HOME}/.codeman/settings.json`],
-      ['codeman push keys (VAPID private)', `${HOME}/.codeman/push-keys.json`],
-      ['codeman intent profiles', `${HOME}/.codeman/intents.json`],
-      ['codeman intents on a named instance', `${HOME}/.codeman-beta/intents.json`],
+      ['reverie settings (Deepgram key)', `${HOME}/.reverie/settings.json`],
+      ['reverie push keys (VAPID private)', `${HOME}/.reverie/push-keys.json`],
+      ['reverie intent profiles', `${HOME}/.reverie/intents.json`],
+      ['reverie intents on a named instance', `${HOME}/.reverie-beta/intents.json`],
     ];
 
     it.each(blocked)('blocks the %s', (_label, path) => {
@@ -179,8 +179,8 @@ describe('isSensitivePath', () => {
       ['a hidden CI directory', '/srv/app/.github/workflows/ci.yml'],
       // The publish skill and the review-card loop attach from these trees, so
       // only their named secret members are blocked, never the whole tree.
-      ['a codeman screenshot', `${HOME}/.codeman/screenshots/shot.png`],
-      ['a codeman lifecycle log', `${HOME}/.codeman/session-lifecycle.jsonl`],
+      ['a reverie screenshot', `${HOME}/.reverie/screenshots/shot.png`],
+      ['a reverie lifecycle log', `${HOME}/.reverie/session-lifecycle.jsonl`],
       ['a claude transcript', `${HOME}/.claude/projects/proj/session.jsonl`],
       ['a claude team inbox', `${HOME}/.claude/teams/alpha/inboxes/bob.json`],
       // isUnderTree-style separator awareness: a sibling name that merely starts

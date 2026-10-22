@@ -17,9 +17,9 @@ function loadPolicy() {
   vm.runInContext(read('src/web/public/constants.js'), context, { filename: 'constants.js' });
   return (
     context.window as {
-      CodemanTabOverflow: { resolveTabOrientation: (input: unknown) => string };
+      ReverieTabOverflow: { resolveTabOrientation: (input: unknown) => string };
     }
-  ).CodemanTabOverflow;
+  ).ReverieTabOverflow;
 }
 
 describe('vertical tab orientation policy', () => {

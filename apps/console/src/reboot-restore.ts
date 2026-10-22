@@ -21,7 +21,7 @@
  *
  * ⚠️ Ending the AGENT rather than the session leaves no trace in `status` or
  * `pid`. `/exit` ends the CLI inside the pane, `remain-on-exit` keeps the pane,
- * and the PTY Codeman owns is the `tmux attach-session` process, which stays
+ * and the PTY Reverie owns is the `tmux attach-session` process, which stays
  * alive throughout — so no exit handler runs, no lifecycle `exit` is logged,
  * and the record keeps both its pid and `status: 'idle'`. Ark0N/Codeman#446
  * handles it in two steps. The pane-exit watcher persists `paneExit`, and the
@@ -86,11 +86,11 @@ export interface RebootEvidence {
  *
  * ⚠️ `os.uptime()` reports the HOST's uptime, which a container shares, and that
  * cuts BOTH ways rather than simply switching the feature off in Docker. After a
- * genuine host reboot a containerized Codeman sees the host's short uptime, so the
+ * genuine host reboot a containerized Reverie sees the host's short uptime, so the
  * banner DOES appear and the feature works. What it cannot see is a container-only
  * restart: the host uptime is long, the boot test fails, and no banner appears
  * although every in-container pane is gone (`docker/server.Dockerfile` installs
- * tmux inside the Codeman container, and the self-updater restarts the Compose
+ * tmux inside the Reverie container, and the self-updater restarts the Compose
  * deployment by exiting the container, so that is the case where this would help
  * most). Failing quiet is the safe direction, and closing the gap needs a boot
  * signal the container owns (PID 1's start time, gated on the existing
@@ -180,7 +180,8 @@ export interface RebootRestorePlan {
 export function planRebootRestore(
   deadSessionIds: readonly string[],
   persisted: Readonly<Record<string, SessionState>>,
-  workspaceExists: (workingDir: string) => boolean
+  workspaceExists: (workingDir: string) => boolean,
+  options?: { allowMissingPid?: boolean }
 ): RebootRestorePlan {
   const restore: RebootRestoreEntry[] = [];
   const skipped: RebootRestoreRejection[] = [];
@@ -197,7 +198,7 @@ export function planRebootRestore(
       skipped.push({ sessionId, reason: 'intentionally-ended' });
       continue;
     }
-    if (state.pid === null || state.pid === undefined) {
+    if (!options?.allowMissingPid && (state.pid === null || state.pid === undefined)) {
       // No attach process when the record was last written: the session never
       // started, or its pane died outright rather than its agent exiting inside a
       // surviving pane. Either way there was nothing running to bring back.
@@ -296,7 +297,12 @@ export function autoRestorableEntries(entries: readonly RebootRestoreEntry[]): R
  * supported architecture. Undefined when either file is unreadable or malformed, so the
  * caller falls back to host uptime.
  */
-export function initStartedAtFromProc(stat: string, uptime: string, now: number, ticksPerSecond = 100): number | undefined {
+export function initStartedAtFromProc(
+  stat: string,
+  uptime: string,
+  now: number,
+  ticksPerSecond = 100
+): number | undefined {
   const fields = stat.slice(stat.lastIndexOf(')') + 2).split(' ');
   const startTicks = Number(fields[19]);
   const uptimeSeconds = Number(uptime.split(' ')[0]);

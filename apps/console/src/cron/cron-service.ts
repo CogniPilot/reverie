@@ -2,7 +2,7 @@
  * @fileoverview Cron service: CRUD for cron jobs, manual Run Now,
  * the background due-job tick, and run-history recording.
  *
- * It does NOT own session/tmux logic — it reuses Codeman's existing session
+ * It does NOT own session/tmux logic — it reuses Reverie's existing session
  * layer (create → addSession → setupSessionListeners → startInteractive/Shell →
  * send prompt via writeViaMux/write), mirroring the "quick start" route flow.
  */

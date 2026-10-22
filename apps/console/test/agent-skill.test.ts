@@ -2,7 +2,7 @@
  * @fileoverview Unit tests for the agent-skill injection helpers in hooks-config.ts
  * (`applyAgentSkill`, `installAgentSkillInto`, `removeAgentSkillFrom`).
  *
- * These run against the REAL packaged source (`skills/codeman/` at the repo root),
+ * These run against the REAL packaged source (`skills/reverie/` at the repo root),
  * so they double as a guard that the skill files exist and are readable: an npm
  * publish without them would be caught here before the `files` entry silently
  * ignores the missing directory.
@@ -10,6 +10,7 @@
  * Pure filesystem tests in a per-test temp dir. Port: N/A.
  */
 
+import { agentSkillSourceDir } from '../src/agent-skill-source.js';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtemp, rm, mkdir, writeFile, readFile, symlink, readdir, stat, utimes } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
@@ -25,7 +26,7 @@ import {
   pruneAgentSessionPreambles,
 } from '../src/hooks-config.js';
 
-const MARKER_PREFIX = '<!-- codeman-managed-agent-skill';
+const MARKER_PREFIX = '<!-- reverie-managed-agent-skill';
 
 /** Run `fn` against a throwaway XDG cache dir, restoring the env afterwards. */
 async function withCacheDir(fn: (cacheDir: string) => Promise<void>): Promise<void> {
@@ -41,10 +42,10 @@ async function withCacheDir(fn: (cacheDir: string) => Promise<void>): Promise<vo
 }
 
 let casePath: string;
-const skillDir = () => join(casePath, '.claude', 'skills', 'codeman');
+const skillDir = () => join(casePath, '.claude', 'skills', 'reverie');
 
 beforeEach(async () => {
-  casePath = await mkdtemp(join(tmpdir(), 'codeman-agent-skill-'));
+  casePath = await mkdtemp(join(tmpdir(), 'reverie-agent-skill-'));
 });
 
 afterEach(async () => {
@@ -57,14 +58,11 @@ describe('installAgentSkillInto / applyAgentSkill(enabled)', () => {
     expect(result).toBe('installed');
 
     const skillMd = await readFile(join(skillDir(), 'SKILL.md'), 'utf-8');
-    expect(skillMd.startsWith('---\nname: codeman')).toBe(true);
+    expect(skillMd.startsWith('---\nname: reverie')).toBe(true);
     expect(skillMd).toContain(MARKER_PREFIX);
 
     // Reference files ride along byte-for-byte (no marker there).
-    const sourceEndpoints = await readFile(
-      join(process.cwd(), 'skills', 'codeman', 'reference', 'endpoints.md'),
-      'utf-8'
-    );
+    const sourceEndpoints = await readFile(join(agentSkillSourceDir(), 'reference', 'endpoints.md'), 'utf-8');
     const injectedEndpoints = await readFile(join(skillDir(), 'reference', 'endpoints.md'), 'utf-8');
     expect(injectedEndpoints).toBe(sourceEndpoints);
     expect(existsSync(join(skillDir(), 'reference', 'recipes.md'))).toBe(true);
@@ -75,7 +73,7 @@ describe('installAgentSkillInto / applyAgentSkill(enabled)', () => {
     expect(await applyAgentSkill(casePath, true)).toBe('unchanged');
   });
 
-  it('refreshes a stale Codeman-managed copy back to the packaged content', async () => {
+  it('refreshes a stale Reverie-managed copy back to the packaged content', async () => {
     await applyAgentSkill(casePath, true);
     const original = await readFile(join(skillDir(), 'SKILL.md'), 'utf-8');
     // Simulate an older injected version: content differs but the marker is intact.
@@ -85,9 +83,9 @@ describe('installAgentSkillInto / applyAgentSkill(enabled)', () => {
     expect(await readFile(join(skillDir(), 'SKILL.md'), 'utf-8')).toBe(original);
   });
 
-  it('never clobbers a user-authored skills/codeman (no marker)', async () => {
+  it('never clobbers a user-authored skills/reverie (no marker)', async () => {
     await mkdir(skillDir(), { recursive: true });
-    await writeFile(join(skillDir(), 'SKILL.md'), '---\nname: codeman\n---\nmy own skill\n');
+    await writeFile(join(skillDir(), 'SKILL.md'), '---\nname: reverie\n---\nmy own skill\n');
 
     expect(await applyAgentSkill(casePath, true)).toBe('foreign');
     expect(await readFile(join(skillDir(), 'SKILL.md'), 'utf-8')).toContain('my own skill');
@@ -143,7 +141,7 @@ describe('removeAgentSkillFrom / applyAgentSkill(disabled)', () => {
 });
 
 describe('preamble single-source (seed + §0 heredoc parity)', () => {
-  const packagedDir = join(process.cwd(), 'skills', 'codeman');
+  const packagedDir = agentSkillSourceDir();
 
   it("SKILL.md's §0 heredoc is byte-identical to the packaged preamble.sh", async () => {
     const skillMd = await readFile(join(packagedDir, 'SKILL.md'), 'utf-8');
@@ -169,10 +167,10 @@ describe('preamble single-source (seed + §0 heredoc parity)', () => {
     process.env.XDG_CACHE_HOME = cacheDir;
     try {
       await seedAgentSessionPreamble('seed-test-session');
-      const target = join(cacheDir, 'codeman-agent-seed-test-session.sh');
+      const target = join(cacheDir, 'reverie-agent-seed-test-session.sh');
       const content = await readFile(target, 'utf-8');
       expect(content.startsWith('# ---- Reverie agent preamble')).toBe(true);
-      expect(content).toMatch(/\nCODEMAN_PREAMBLE=\d+\.\d+\.\d+\n$/);
+      expect(content).toMatch(/\nREVERIE_PREAMBLE=\d+\.\d+\.\d+\n$/);
       expect((await stat(target)).mode & 0o777).toBe(0o600);
     } finally {
       if (prevXdg === undefined) delete process.env.XDG_CACHE_HOME;
@@ -185,10 +183,10 @@ describe('preamble single-source (seed + §0 heredoc parity)', () => {
     // (236 leftovers measured on a working machine); session teardown calls this.
     await withCacheDir(async (cacheDir) => {
       await seedAgentSessionPreamble('gone-session');
-      expect(existsSync(join(cacheDir, 'codeman-agent-gone-session.sh'))).toBe(true);
+      expect(existsSync(join(cacheDir, 'reverie-agent-gone-session.sh'))).toBe(true);
 
       await removeAgentSessionPreamble('gone-session');
-      expect(existsSync(join(cacheDir, 'codeman-agent-gone-session.sh'))).toBe(false);
+      expect(existsSync(join(cacheDir, 'reverie-agent-gone-session.sh'))).toBe(false);
 
       await expect(removeAgentSessionPreamble('never-existed')).resolves.toBeUndefined();
     });
@@ -202,20 +200,20 @@ describe('preamble single-source (seed + §0 heredoc parity)', () => {
       }
       // Age two of them past the cutoff; `dead-fresh` stays new.
       const old = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-      await utimes(aged('codeman-agent-live-old.sh'), old, old);
-      await utimes(aged('codeman-agent-dead-old.sh'), old, old);
+      await utimes(aged('reverie-agent-live-old.sh'), old, old);
+      await utimes(aged('reverie-agent-dead-old.sh'), old, old);
       // An unrelated file in the same cache dir must be invisible to the sweep.
       await writeFile(aged('someone-elses-file.sh'), 'not ours\n');
 
       const removed = await pruneAgentSessionPreambles(['live-old']);
 
       expect(removed).toBe(1);
-      expect(existsSync(aged('codeman-agent-dead-old.sh'))).toBe(false);
+      expect(existsSync(aged('reverie-agent-dead-old.sh'))).toBe(false);
       // A live session's cache is load-bearing: the skill's two-line loader reads it
       // mid-run, so age alone must never take it.
-      expect(existsSync(aged('codeman-agent-live-old.sh'))).toBe(true);
+      expect(existsSync(aged('reverie-agent-live-old.sh'))).toBe(true);
       // And a recently-seeded one belongs to a session this process may not know about.
-      expect(existsSync(aged('codeman-agent-dead-fresh.sh'))).toBe(true);
+      expect(existsSync(aged('reverie-agent-dead-fresh.sh'))).toBe(true);
       expect(existsSync(aged('someone-elses-file.sh'))).toBe(true);
     });
   });
@@ -237,7 +235,7 @@ describe('preamble single-source (seed + §0 heredoc parity)', () => {
     try {
       await seedAgentSessionPreamble('seed-home-session');
       // setup.ts points HOME at a per-file fixture, so this never touches the real ~.
-      const target = join(homedir(), '.cache', 'codeman-agent-seed-home-session.sh');
+      const target = join(homedir(), '.cache', 'reverie-agent-seed-home-session.sh');
       expect(existsSync(target)).toBe(true);
     } finally {
       if (prevXdg !== undefined) process.env.XDG_CACHE_HOME = prevXdg;
@@ -246,22 +244,22 @@ describe('preamble single-source (seed + §0 heredoc parity)', () => {
 });
 
 describe('refreshUserAgentSkill (the user-level copy must not rot)', () => {
-  const userSkillDir = () => join(homedir(), '.claude', 'skills', 'codeman');
+  const userSkillDir = () => join(homedir(), '.claude', 'skills', 'reverie');
 
   it('reports absent and installs nothing when there is no user-level copy', async () => {
     expect(await refreshUserAgentSkill()).toBe('absent');
     expect(existsSync(userSkillDir())).toBe(false);
   });
 
-  it('refreshes a stale Codeman-managed user copy back to the packaged content', async () => {
+  it('refreshes a stale Reverie-managed user copy back to the packaged content', async () => {
     await mkdir(userSkillDir(), { recursive: true });
     // An old injected version: different content, marker intact. This is the exact
     // shape that shadowed every fresh per-case injection on 2026-08-14.
-    await writeFile(join(userSkillDir(), 'SKILL.md'), `old skill body\n\n${MARKER_PREFIX}: installed by Codeman -->\n`);
+    await writeFile(join(userSkillDir(), 'SKILL.md'), `old skill body\n\n${MARKER_PREFIX}: installed by Reverie -->\n`);
 
     expect(await refreshUserAgentSkill()).toBe('refreshed');
     const refreshed = await readFile(join(userSkillDir(), 'SKILL.md'), 'utf-8');
-    expect(refreshed.startsWith('---\nname: codeman')).toBe(true);
+    expect(refreshed.startsWith('---\nname: reverie')).toBe(true);
     expect(existsSync(join(userSkillDir(), 'reference', 'endpoints.md'))).toBe(true);
 
     // And a second run settles to unchanged.
@@ -270,8 +268,8 @@ describe('refreshUserAgentSkill (the user-level copy must not rot)', () => {
 
   it("leaves a user's own (unmarked) skill alone", async () => {
     await mkdir(userSkillDir(), { recursive: true });
-    await writeFile(join(userSkillDir(), 'SKILL.md'), 'my own codeman skill\n');
+    await writeFile(join(userSkillDir(), 'SKILL.md'), 'my own reverie skill\n');
     expect(await refreshUserAgentSkill()).toBe('foreign');
-    expect(await readFile(join(userSkillDir(), 'SKILL.md'), 'utf-8')).toBe('my own codeman skill\n');
+    expect(await readFile(join(userSkillDir(), 'SKILL.md'), 'utf-8')).toBe('my own reverie skill\n');
   });
 });

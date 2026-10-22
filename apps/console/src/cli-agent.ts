@@ -1,17 +1,17 @@
 /**
- * @fileoverview `codeman agent …` — session-to-session verbs for the agent running
- * inside a Codeman session, in every CLI mode.
+ * @fileoverview `reverie agent …` — session-to-session verbs for the agent running
+ * inside a Reverie session, in every CLI mode.
  *
  * A thin HTTP client over endpoints that already exist (`quick-start`, `input`,
  * `wait`, `wait-output`, `last-response`, `terminal`, `DELETE sessions/:id`). It
- * invents no route and no transport: everything goes through `CODEMAN_API_URL`, so
+ * invents no route and no transport: everything goes through `REVERIE_API_URL`, so
  * auth, ownership and the per-session waiter cap apply unchanged. The behaviour is
- * the packaged agent skill's (`skills/codeman`), ported from shell prose into code
+ * the packaged agent skill's (`skills/reverie`), ported from shell prose into code
  * with tests, so a `codex`/`opencode`/`pi` agent — which never gets the claude-only
  * preamble — has the same verbs from one line in its AGENTS.md.
  *
  * Invariants (each asserted in `test/cli-agent.test.ts`):
- * 1. Refuses outside a Codeman session (`CODEMAN_MUX=1` + `CODEMAN_API_URL`); it
+ * 1. Refuses outside a Reverie session (`REVERIE_MUX=1` + `REVERIE_API_URL`); it
  *    never guesses a URL — a server you are not part of is not yours to drive.
  * 2. `send` transmits printable text plus `\r` only. ESC exists solely as
  *    `interrupt`, which never appends `\r`. A stray control byte is a dead session
@@ -34,9 +34,9 @@ import type { Command } from 'commander';
 import {
   basicAuthHeader,
   credentialsFrom,
-  readCodemanEnvFile,
-  type CodemanCredentials,
-} from './codeman-credentials.js';
+  readReverieEnvFile,
+  type ReverieCredentials,
+} from './reverie-credentials.js';
 import { getCli } from './config/cli-registry/registry.js';
 import { GLYPH, palette, table } from './cli-style.js';
 import { getErrorMessage } from './types.js';
@@ -53,15 +53,15 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 // ─────────────────────────────────────────────────────────────────────────────
 
 export interface AgentContext {
-  /** Base URL of the Codeman server, from `CODEMAN_API_URL`. */
+  /** Base URL of the Reverie server, from `REVERIE_API_URL`. */
   apiUrl: string;
-  /** This session's id, from `CODEMAN_SESSION_ID`. */
+  /** This session's id, from `REVERIE_SESSION_ID`. */
   selfId: string;
   /** Basic-auth credentials, when the server has a password. */
-  auth?: CodemanCredentials;
+  auth?: ReverieCredentials;
 }
 
-/** Thrown when the process is not inside a Codeman-managed session. */
+/** Thrown when the process is not inside a Reverie-managed session. */
 export class AgentGuardError extends Error {}
 
 /** Exit codes shared by every verb; a shell agent can branch on them. */
@@ -77,24 +77,24 @@ export const EXIT = {
  * Resolve the context from the environment, or throw `AgentGuardError`.
  *
  * Credentials in the order every client of the API uses (`credentialsFrom`, shared
- * with `codeman attach` and the TUI): each field from the environment (a session
+ * with `reverie attach` and the TUI): each field from the environment (a session
  * inherits the server's), then the data dir's `.env`. No password means the server
  * is open (single-user) — or it is not, and the 401 says so.
  */
 export function resolveAgentContext(
   env: NodeJS.ProcessEnv = process.env,
-  envFile: () => Record<string, string> = readCodemanEnvFile
+  envFile: () => Record<string, string> = readReverieEnvFile
 ): AgentContext {
-  if (env.CODEMAN_MUX !== '1') {
-    throw new AgentGuardError('Not inside a Reverie-managed session (CODEMAN_MUX is not 1); refusing to act.');
+  if (env.REVERIE_MUX !== '1') {
+    throw new AgentGuardError('Not inside a Reverie-managed session (REVERIE_MUX is not 1); refusing to act.');
   }
-  const apiUrl = env.CODEMAN_API_URL?.trim();
+  const apiUrl = env.REVERIE_API_URL?.trim();
   if (!apiUrl) {
-    throw new AgentGuardError('CODEMAN_API_URL is not set; refusing to guess a server.');
+    throw new AgentGuardError('REVERIE_API_URL is not set; refusing to guess a server.');
   }
-  const selfId = env.CODEMAN_SESSION_ID?.trim();
+  const selfId = env.REVERIE_SESSION_ID?.trim();
   if (!selfId) {
-    throw new AgentGuardError('CODEMAN_SESSION_ID is not set; cannot tell which session is me.');
+    throw new AgentGuardError('REVERIE_SESSION_ID is not set; cannot tell which session is me.');
   }
   const credentials = credentialsFrom(env, envFile());
   return { apiUrl, selfId, auth: credentials.password ? credentials : undefined };
@@ -182,7 +182,7 @@ export function buildInterruptBody(clientId: string, seq: number): Record<string
 
 /** `clientId` for this caller: fixed per sending session, so `seq` stays monotonic. */
 export function defaultClientId(selfId: string, suffix = ''): string {
-  return `codeman-agent-cli-${selfId.slice(0, 8)}${suffix ? `-${suffix}` : ''}`;
+  return `reverie-agent-cli-${selfId.slice(0, 8)}${suffix ? `-${suffix}` : ''}`;
 }
 
 /**
@@ -271,11 +271,11 @@ export type ApiRequest = (ctx: AgentContext, options: RequestOptions) => Promise
 export function baseHeaders(ctx: AgentContext): Record<string, string> {
   const headers: Record<string, string> = { Accept: 'application/json' };
   // Tags sessions this caller spawns as its children (lineage in the web UI).
-  // Cosmetic, never fails a call. NOT X-Codeman-Agent-Origin: that one marks a case
+  // Cosmetic, never fails a call. NOT X-Reverie-Agent-Origin: that one marks a case
   // directory as deletable agent scratch, so it rides only the spawn request that
   // may create one (see agentSpawn), never anything else. Absent for a caller outside
-  // any session (`codeman mcp` launched by a desktop MCP client), which has no self.
-  if (ctx.selfId) headers['X-Codeman-Parent-Session'] = ctx.selfId;
+  // any session (`reverie mcp` launched by a desktop MCP client), which has no self.
+  if (ctx.selfId) headers['X-Reverie-Parent-Session'] = ctx.selfId;
   const authorization = ctx.auth ? basicAuthHeader(ctx.auth) : undefined;
   if (authorization) headers.Authorization = authorization;
   return headers;
@@ -314,7 +314,7 @@ export const httpRequest: ApiRequest = (ctx, options) => {
         const chunks: Buffer[] = [];
         res.on('data', (chunk: Buffer) => chunks.push(chunk));
         // A connection dropped mid-body emits 'error' and never 'end'; without this the
-        // promise never settles (and a long-lived `codeman mcp` never answers the call).
+        // promise never settles (and a long-lived `reverie mcp` never answers the call).
         res.on('error', reject);
         res.on('end', () => {
           const text = Buffer.concat(chunks).toString('utf-8');
@@ -343,7 +343,7 @@ export function describeFailure(res: ApiResponse): string {
   }
   const text = res.text.trim().split('\n')[0] ?? '';
   if (res.status === 401)
-    return `HTTP 401 ${text}: the server wants a password (CODEMAN_PASSWORD, or the data dir's .env)`;
+    return `HTTP 401 ${text}: the server wants a password (REVERIE_PASSWORD, or the data dir's .env)`;
   return `HTTP ${res.status}${text ? ` ${text}` : ''}`;
 }
 
@@ -475,7 +475,7 @@ export interface SpawnOptions {
  * such directories, so this header must never ride any other request: mislabelling a
  * real repo there is the one failure in this area that costs actual work.
  */
-export const AGENT_ORIGIN_HEADER = { 'X-Codeman-Agent-Origin': 'codeman-agent-cli' } as const;
+export const AGENT_ORIGIN_HEADER = { 'X-Reverie-Agent-Origin': 'reverie-agent-cli' } as const;
 
 /**
  * What the mode's TUI draws once its composer can take a prompt, from the CLI registry
@@ -547,7 +547,7 @@ export async function agentSpawn(deps: AgentDeps, options: SpawnOptions): Promis
   if (deps.json) {
     emitJson(deps, { ...data, ready, readinessError });
   } else {
-    // Human lines go to stderr so `SID=$(codeman agent spawn …)` captures the id alone.
+    // Human lines go to stderr so `SID=$(reverie agent spawn …)` captures the id alone.
     const say = (line: string) => deps.io.err(line);
     say(palette.ok(`${GLYPH.ok} spawned ${sid} (${options.mode}, case ${data.caseName ?? options.caseName})`));
     if (ready === true) say(palette.muted('  composer up: the worker can take a prompt'));
@@ -1514,7 +1514,7 @@ export async function agentProfile(
   const problem = pronouns === undefined ? undefined : pronounsProblem(pronouns);
   if (problem) return fail(deps, `refusing: ${problem}`, EXIT.refused);
   if (!deps.ctx.selfId)
-    return fail(deps, 'run this inside a Reverie agent session (CODEMAN_SESSION_ID is not set)', EXIT.refused);
+    return fail(deps, 'run this inside a Reverie agent session (REVERIE_SESSION_ID is not set)', EXIT.refused);
   if (pronouns !== undefined) return proposePronouns(deps, pronouns, options.room);
   let image: Buffer | undefined;
   if (options.image !== undefined) {
@@ -1596,7 +1596,7 @@ export async function agentChatNew(deps: AgentDeps, options: { name: string; mem
     return fail(
       deps,
       `room "${room?.name ?? options.name}" (${room?.id ?? '?'}) was created but you are not its coordinator; ` +
-        'check CODEMAN_SESSION_ID (the server did not recognise this session)'
+        'check REVERIE_SESSION_ID (the server did not recognise this session)'
     );
   }
   if (!deps.json) {
@@ -2110,7 +2110,7 @@ function registerRoutineCommands(program: Command, run: typeof runAgentVerb): vo
 }
 
 
-/** Register `codeman agent …` on the program. */
+/** Register `reverie agent …` on the program. */
 export function registerAgentCommands(program: Command): Command {
   const agent = program
     .command('agent')

@@ -117,7 +117,7 @@ Where the data lives: the profile is keyed by owner and the resolved working dir
 it survives `/clear` and respawns. Prompts can contain secrets, so the store is written
 0600 and is deliberately excluded from cross-session search.
 
-Guide: [`docs/readmymind.md`](https://github.com/Ark0N/Codeman/blob/master/docs/readmymind.md).
+Guide: [`docs/readmymind.md`](https://github.com/jgoppert/reverie/blob/main/apps/console/docs/readmymind.md).
 
 ## Programmatic input
 
@@ -129,7 +129,7 @@ Input is also **single line**. Embedded newlines are stripped rather than reject
 `"echo A\necho B\r"` runs the joined `echo Aecho B`. Put multi-line content in a file and
 tell the agent to read it.
 
-See [Driving Reverie From An Agent](Driving-Codeman-From-An-Agent).
+See [Driving Reverie From An Agent](Driving-Reverie-From-An-Agent).
 
 ## Gotchas
 

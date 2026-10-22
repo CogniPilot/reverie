@@ -276,7 +276,7 @@ const customEntries: DeviceEntry[] = [
   custom('Pixel Tablet', 888, 1280, 2, ANDROID_TABLET_UA('14', 'GPD8'), false),
   custom('Lenovo Tab P12 Pro', 900, 1440, 2, ANDROID_TABLET_UA('13', 'TB-Q706F'), false),
   // Find N5 inner display is 2248x2480 physical pixels. At DPR 2 its full-
-  // resolution CSS viewport crosses Codeman's desktop breakpoint while the
+  // resolution CSS viewport crosses Reverie's desktop breakpoint while the
   // browser remains a mobile/touch device.
   custom('OPPO Find N5 (unfolded)', 1124, 1240, 2, ANDROID_MOBILE_UA('15', 'CPH2671'), false),
 

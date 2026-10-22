@@ -32,7 +32,7 @@ import {
 /** Common directories where the Grok CLI binary may be installed */
 /**
  * Directories probed after `which`, read from this CLI's registry entry so the spawn
- * path, `codeman doctor` and this resolver cannot disagree about where to look.
+ * path, `reverie doctor` and this resolver cannot disagree about where to look.
  * `~` is expanded by `expandHome`; nothing else is interpreted.
  */
 const GROK_SEARCH_DIRS = (): string[] => (getCli('grok')?.discovery.searchDirs ?? []).map(expandHome);
@@ -41,7 +41,7 @@ const GROK_SEARCH_DIRS = (): string[] => (getCli('grok')?.discovery.searchDirs ?
  * A real `grok --version` prints `grok 1.0.5 (5115b46bc9)` (measured, 1.0.5).
  *
  * Exported and SHARED with the `grok` entry in `config/dependency-registry.ts`,
- * so `codeman doctor` and the run mode cannot disagree about what counts as an
+ * so `reverie doctor` and the run mode cannot disagree about what counts as an
  * installed grok (the same single-source rule as PI_VERSION_REGEX). Shape is
  * dictated by the doctor's `extractVersion()` (first capture group, whole-output
  * scan): hence a capturing group and a leading boundary instead of `^`. No `g`

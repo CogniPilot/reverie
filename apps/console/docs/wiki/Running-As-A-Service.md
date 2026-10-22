@@ -17,7 +17,7 @@ stops the agents.
 ## Detached mode
 
 ```bash
-reverie web -d          # start detached; logs to ~/.codeman/web.log
+reverie web -d          # start detached; logs to ~/.reverie/web.log
 reverie web --status    # is it up, and on which pid
 reverie web --stop      # graceful stop; agents keep running
 ```
@@ -53,7 +53,7 @@ Notable behaviours:
   `/usr/bin:/bin:/usr/sbin:/sbin`, which finds neither a Homebrew or nvm `node` nor `tmux`
   or `claude`. This is the single most common cause of a hand-written unit that starts and
   immediately dies.
-- **`CODEMAN_PASSWORD` is never written into the unit file.** Add it yourself if the service
+- **`REVERIE_PASSWORD` is never written into the unit file.** Add it yourself if the service
   needs authentication.
 - **It refuses when a server is already running** on that data directory, for the same reason
   detached mode does.
@@ -69,7 +69,7 @@ loginctl enable-linger $USER
 
 On macOS, a LaunchAgent starts when you log in, not at boot. A headless Mac (no GUI login)
 needs a system LaunchDaemon instead, written by hand as root. The installer recognises an
-existing `/Library/LaunchDaemons/com.codeman.web.plist` and leaves it alone rather than
+existing `/Library/LaunchDaemons/com.reverie.web.plist` and leaves it alone rather than
 installing a LaunchAgent next to it, since the two would fight over the port; remove the
 daemon first if you want to switch. The same login caveat applies to the App Store and
 standalone Tailscale apps, so on a headless Mac the Tailscale URL only comes back after a
@@ -81,14 +81,14 @@ reboot if the open-source `tailscaled` is used.
 
 ```bash
 mkdir -p ~/.config/systemd/user
-cat > ~/.config/systemd/user/codeman-web.service << EOF
+cat > ~/.config/systemd/user/reverie-web.service << EOF
 [Unit]
 Description=Reverie Web Server
 After=network.target
 
 [Service]
 Type=simple
-ExecStart=$(which node) $HOME/.codeman/app/dist/index.js web
+ExecStart=$(which node) $HOME/.reverie/app/dist/index.js web
 Restart=always
 RestartSec=10
 
@@ -96,7 +96,7 @@ RestartSec=10
 WantedBy=default.target
 EOF
 systemctl --user daemon-reload
-systemctl --user enable --now codeman-web
+systemctl --user enable --now reverie-web
 loginctl enable-linger $USER
 ```
 
@@ -104,30 +104,30 @@ loginctl enable-linger $USER
 
 ```bash
 mkdir -p ~/Library/LaunchAgents
-cat > ~/Library/LaunchAgents/com.codeman.web.plist << EOF
+cat > ~/Library/LaunchAgents/com.reverie.web.plist << EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
   "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
   <key>Label</key>
-  <string>com.codeman.web</string>
+  <string>com.reverie.web</string>
   <key>ProgramArguments</key>
   <array>
     <string>$(which node)</string>
-    <string>$HOME/.codeman/app/dist/index.js</string>
+    <string>$HOME/.reverie/app/dist/index.js</string>
     <string>web</string>
   </array>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
   <key>StandardOutPath</key>
-  <string>/tmp/codeman.log</string>
+  <string>/tmp/reverie.log</string>
   <key>StandardErrorPath</key>
-  <string>/tmp/codeman.log</string>
+  <string>/tmp/reverie.log</string>
 </dict>
 </plist>
 EOF
-launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.codeman.web.plist
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.reverie.web.plist
 ```
 
 Prefer `reverie service install` where you can. It handles the PATH problem for you.
@@ -135,8 +135,8 @@ Prefer `reverie service install` where you can. It handles the PATH problem for 
 ## Logs
 
 ```bash
-journalctl --user -u codeman-web -f    # systemd
-tail -f ~/.codeman/web.log             # detached mode
+journalctl --user -u reverie-web -f    # systemd
+tail -f ~/.reverie/web.log             # detached mode
 log stream --predicate 'process == "node"'   # macOS, noisy
 ```
 
@@ -145,9 +145,9 @@ log stream --predicate 'process == "node"'   # macOS, noisy
 | Install route | Update with                                                             |
 | ------------- | ------------------------------------------------------------------------ |
 | Installer     | Re-run the one-liner, or **App Settings → System → Updates**.             |
-| npm (upstream package) | `npm update -g aicodeman`                                                 |
+| npm (upstream package) | `npm update -g aireverie`                                                 |
 | git clone     | `git pull && npm install && npm run build`, then restart.                 |
-| Docker Compose | Re-run `Start-Codeman.sh`, or the in-app updater, which restarts the container in place. |
+| Nix-built Docker image | Use the owner-configured `reverie-request-update` flow or rebuild and replace from the host. |
 
 ### The in-app updater
 
@@ -171,30 +171,26 @@ The data directory and the tmux socket are process wide, so a second server on t
 will discover and attach the first one's sessions. Scope both together:
 
 ```bash
-CODEMAN_INSTANCE=beta CODEMAN_PORT=5000 reverie web
+REVERIE_INSTANCE=beta REVERIE_PORT=5000 reverie web
 ```
 
 Service unit names are instance-scoped too, so a beta instance can be installed as its own
-service without colliding with the main one. `CODEMAN_DATA_DIR` and `CODEMAN_TMUX_SOCKET`
+service without colliding with the main one. `REVERIE_DATA_DIR` and `REVERIE_TMUX_SOCKET`
 exist for the rare case where they need to differ, but setting only one of them recreates
 exactly the problem you were avoiding.
 
 ## Running Reverie itself in Docker
 
-The Compose deployment in `docker/` runs the server in a container and spawns Docker cases
-as sibling containers through the mounted host socket. Start it with
-`bash docker/Start-Codeman.sh` rather than a bare `docker compose up`: the script pre-creates
-the bind-mounted directories with the right owner, honours a `docker-compose.override.yml`,
-and refreshes the build volumes when the checkout moved under them. The in-app updater
-applies code only and restarts by letting the container exit, so it refuses a release that
-changes the Dockerfile, the compose file, or adds a new `.env` key, until you re-run the
-script. Guide:
-[`docker/README.md`](https://github.com/Ark0N/Codeman/blob/master/docker/README.md).
+Use the root flake's Nix-built image and persistent instance/home storage. The
+standalone console Compose deployment has been removed. See the
+[root setup guide](../../../../docs/setup.md). If the owner enables the fixed
+host updater, run `reverie-request-update` after changing mounted source; no
+Docker socket is exposed inside the application.
 
 ## The tunnel as a service
 
 ```bash
-systemctl --user enable codeman-tunnel
+systemctl --user enable reverie-tunnel
 loginctl enable-linger $USER
 ```
 

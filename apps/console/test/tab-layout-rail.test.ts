@@ -1,5 +1,5 @@
 /**
- * @fileoverview The grouped vertical rail, driven through the shipping CodemanApp.
+ * @fileoverview The grouped vertical rail, driven through the shipping ReverieApp.
  *
  * Covers the app.js half of the owner-tab-layout frontend: the rail renders the
  * owner's groups only when it is vertical AND there is at least one group (every
@@ -24,7 +24,7 @@ import { JSDOM } from 'jsdom';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const PUBLIC = join(process.cwd(), 'src/web/public');
-let CodemanApp: { prototype: Record<string, any> };
+let ReverieApp: { prototype: Record<string, any> };
 let window: any;
 let document: Document;
 let localStorage: Storage;
@@ -35,7 +35,7 @@ beforeAll(async () => {
     url: 'https://localhost/',
     runScripts: 'outside-only',
   });
-  // Evaluate after DOMContentLoaded so app.js's own bootstrap (new CodemanApp()
+  // Evaluate after DOMContentLoaded so app.js's own bootstrap (new ReverieApp()
   // on that event) never runs: each test builds the instance it needs.
   if (dom.window.document.readyState !== 'complete') {
     await new Promise((resolve) => dom.window.addEventListener('load', resolve));
@@ -60,9 +60,9 @@ beforeAll(async () => {
       read('webview-tabs.js') +
       '\n' +
       read('session-lineage.js') +
-      '\n;window.__GroupedRailCodemanApp = CodemanApp;'
+      '\n;window.__GroupedRailReverieApp = ReverieApp;'
   );
-  CodemanApp = window.__GroupedRailCodemanApp;
+  ReverieApp = window.__GroupedRailReverieApp;
 });
 
 const layout = {
@@ -83,7 +83,7 @@ const layout = {
 };
 
 function makeApp(options: { tabLayout?: unknown } = {}) {
-  const app = Object.create(CodemanApp.prototype) as Record<string, any>;
+  const app = Object.create(ReverieApp.prototype) as Record<string, any>;
   document.documentElement.setAttribute('data-tab-orientation', 'vertical');
   document.documentElement.dataset.tabRailSort = 'manual';
   document.body.innerHTML = '<div id="sessionTabs"></div>';
@@ -130,10 +130,10 @@ const badges = () =>
   );
 
 beforeEach(() => {
-  delete window.__codemanUser;
+  delete window.__reverieUser;
   document.documentElement.setAttribute('data-tab-orientation', 'horizontal');
   document.body.innerHTML = '';
-  localStorage.removeItem('codeman:tab-groups-collapsed');
+  localStorage.removeItem('reverie:tab-groups-collapsed');
 });
 
 afterEach(() => {
@@ -201,7 +201,7 @@ describe('grouped vertical rail', () => {
     app.toggleTabGroupCollapsed(button.dataset.tabGroupHeader);
 
     expect([...app.collapsedTabGroupIds]).toEqual(['group-x']);
-    expect(localStorage.getItem('codeman:tab-groups-collapsed')).toBe('["group-x"]');
+    expect(localStorage.getItem('reverie:tab-groups-collapsed')).toBe('["group-x"]');
     const header = document.querySelector('[data-tab-group-header="group-x"]')!;
     expect(header.getAttribute('aria-expanded')).toBe('false');
     expect(header.querySelector('.tab-layout-group-count')?.textContent).toBe('3');
@@ -210,7 +210,7 @@ describe('grouped vertical rail', () => {
 
     app.toggleTabGroupCollapsed('group-x');
     expect(rowIds()).toEqual(['s2', 'w1', 's1', 's3']);
-    expect(localStorage.getItem('codeman:tab-groups-collapsed')).toBe('[]');
+    expect(localStorage.getItem('reverie:tab-groups-collapsed')).toBe('[]');
   });
 
   it('reveals a hidden session when it is selected, without expanding its group', () => {
@@ -282,13 +282,13 @@ describe('grouped vertical rail', () => {
   });
 
   it('keeps collapse working after a malformed stored value, and repairs it', () => {
-    localStorage.setItem('codeman:tab-groups-collapsed', '{"group-x":true}');
+    localStorage.setItem('reverie:tab-groups-collapsed', '{"group-x":true}');
     const app = makeApp({ tabLayout: null });
     app._applyTabLayout(layout);
     expect(app._tabCollapseStorageFailed).toBe(false);
-    expect(localStorage.getItem('codeman:tab-groups-collapsed')).toBe('[]');
+    expect(localStorage.getItem('reverie:tab-groups-collapsed')).toBe('[]');
     expect(app.toggleTabGroupCollapsed('group-x', true)).toBe(true);
-    expect(localStorage.getItem('codeman:tab-groups-collapsed')).toBe('["group-x"]');
+    expect(localStorage.getItem('reverie:tab-groups-collapsed')).toBe('["group-x"]');
     expect(document.querySelector('[data-tab-group-header="group-x"]')?.getAttribute('aria-expanded')).toBe('false');
   });
 
@@ -354,11 +354,11 @@ describe('grouped vertical rail', () => {
 
 describe('layout adoption', () => {
   it('garbage-collects stale collapse ids and renders on adoption; a failed read renders flat', () => {
-    localStorage.setItem('codeman:tab-groups-collapsed', '["gone","group-x"]');
+    localStorage.setItem('reverie:tab-groups-collapsed', '["gone","group-x"]');
     const app = makeApp({ tabLayout: null });
     app._applyTabLayout(layout);
     expect([...app.collapsedTabGroupIds]).toEqual(['group-x']);
-    expect(localStorage.getItem('codeman:tab-groups-collapsed')).toBe('["group-x"]');
+    expect(localStorage.getItem('reverie:tab-groups-collapsed')).toBe('["group-x"]');
     expect(document.querySelectorAll('.tab-layout-group')).toHaveLength(2);
 
     app._applyTabLayout(null);
@@ -445,7 +445,7 @@ describe('layout adoption', () => {
     app._onTabLayoutChanged({ owner: '@single', version: 9 });
     expect(app._loadTabLayout).toHaveBeenCalledTimes(1);
 
-    window.__codemanUser = { username: 'alice', multiUser: true };
+    window.__reverieUser = { username: 'alice', multiUser: true };
     app._onTabLayoutChanged({ owner: 'bob', version: 20 });
     expect(app._loadTabLayout).toHaveBeenCalledTimes(1);
     app._onTabLayoutChanged({ owner: 'alice', version: 20 });
@@ -702,11 +702,11 @@ describe('grouped rail tree semantics', () => {
   });
 
   it('exempts tree items from the touch keyboard dismissal, like every other control', () => {
-    // terminal-ui.js publishes the selector on window.CodemanTerminalInput; its
-    // top level only needs a window and a CodemanApp prototype to assign to.
-    const context = vm.createContext({ window: {}, CodemanApp: function CodemanApp() {} });
+    // terminal-ui.js publishes the selector on window.ReverieTerminalInput; its
+    // top level only needs a window and a ReverieApp prototype to assign to.
+    const context = vm.createContext({ window: {}, ReverieApp: function ReverieApp() {} });
     vm.runInContext(readFileSync(join(PUBLIC, 'terminal-ui.js'), 'utf8'), context);
-    const selector = (context.window as any).CodemanTerminalInput.MOBILE_KEYBOARD_DISMISS_EXEMPT_SELECTOR as string;
+    const selector = (context.window as any).ReverieTerminalInput.MOBILE_KEYBOARD_DISMISS_EXEMPT_SELECTOR as string;
 
     const app = makeTreeApp();
     app._fullRenderSessionTabs();

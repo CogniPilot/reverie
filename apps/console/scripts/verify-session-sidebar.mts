@@ -2,13 +2,13 @@
  * Manual verification harness for the session-sidebar feature.
  *
  * Renders the real UI in headless Chromium against a testMode WebServer,
- * injects a synthetic 25-session fleet, and screenshots every layout state.
+ * injects a synthetic 25-session reverie, and screenshots every layout state.
  * Not part of the automated suite — run it by hand:
  *
  *   npx tsx scripts/verify-session-sidebar.mts
  *
  * SAFETY: uses the repo's own test harness (temp HOME, testMode server) on a
- * dedicated port. It never touches a real Codeman instance or tmux socket.
+ * dedicated port. It never touches a real Reverie instance or tmux socket.
  */
 import { chromium } from 'playwright';
 import { WebServer } from '../src/web/server.js';
@@ -18,11 +18,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 // Mirror test/setup.ts: isolate HOME before the app modules touch state.
-process.env.HOME = mkdtempSync(join(tmpdir(), 'codeman-sidebar-verify-'));
+process.env.HOME = mkdtempSync(join(tmpdir(), 'reverie-sidebar-verify-'));
 process.env.VITEST = 'true';
 
 const PORT = 3299;
-const OUT = process.env.SIDEBAR_SHOTS_DIR ?? join(tmpdir(), 'codeman-sidebar-shots');
+const OUT = process.env.SIDEBAR_SHOTS_DIR ?? join(tmpdir(), 'reverie-sidebar-shots');
 mkdirSync(OUT, { recursive: true });
 
 // Generic on purpose: these names end up in the harness screenshots, so they
@@ -34,14 +34,14 @@ const PROJECTS = [
   ['mobile-app', 'codex'],
   ['data-pipeline', 'claude'],
   ['shared-lib', 'gemini'],
-  ['codeman', 'claude'],
+  ['reverie', 'claude'],
   ['docs-site', 'claude'],
   ['batch-jobs', 'opencode'],
   ['search-index', 'claude'],
 ];
 const STATUSES = ['idle', 'busy', 'idle', 'busy', 'error', 'idle'];
 
-function fleet(n: number) {
+function reverie(n: number) {
   const out: any[] = [];
   for (let i = 0; i < n; i++) {
     const [proj, mode] = PROJECTS[i % PROJECTS.length];
@@ -71,7 +71,7 @@ function fleet(n: number) {
   return out;
 }
 
-const SESSIONS = fleet(25);
+const SESSIONS = reverie(25);
 
 async function main() {
   const server = new WebServer(PORT, false, true);
@@ -94,10 +94,10 @@ async function main() {
     const collapsed = opts.collapsed === undefined ? null : opts.collapsed ? '1' : '0';
     await page.addInitScript(
       ([s, c]) => {
-        localStorage.setItem('codeman-app-settings', s as string);
-        localStorage.setItem('codeman-app-settings-mobile', s as string);
-        if (c !== null) localStorage.setItem('codeman-sidebar-collapsed', c as string);
-        else localStorage.removeItem('codeman-sidebar-collapsed');
+        localStorage.setItem('reverie-app-settings', s as string);
+        localStorage.setItem('reverie-app-settings-mobile', s as string);
+        if (c !== null) localStorage.setItem('reverie-sidebar-collapsed', c as string);
+        else localStorage.removeItem('reverie-sidebar-collapsed');
       },
       [settings, collapsed]
     );

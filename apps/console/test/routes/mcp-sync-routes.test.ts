@@ -108,7 +108,7 @@ beforeEach(() => {
   setEnabled(true);
 });
 afterEach(() => {
-  delete process.env.CODEMAN_MULTIUSER;
+  delete process.env.REVERIE_MULTIUSER;
   rmSync(registryFilePath(), { force: true });
   rmSync(SETTINGS_PATH, { force: true });
   reloadCliRegistry();
@@ -252,7 +252,7 @@ describe('/api/mcp-sync', () => {
   });
 
   it('multi-user: a non-admin is refused on both verbs and nothing is written', async () => {
-    process.env.CODEMAN_MULTIUSER = '1';
+    process.env.REVERIE_MULTIUSER = '1';
     const { app } = await createRouteTestHarness(registerMcpSyncRoutes, {
       authUser: { username: 'bob', role: 'user' },
     });
@@ -265,7 +265,7 @@ describe('/api/mcp-sync', () => {
   });
 
   it('multi-user: an admin is allowed', async () => {
-    process.env.CODEMAN_MULTIUSER = '1';
+    process.env.REVERIE_MULTIUSER = '1';
     const { app } = await createRouteTestHarness(registerMcpSyncRoutes, {
       authUser: { username: 'root', role: 'admin' },
     });

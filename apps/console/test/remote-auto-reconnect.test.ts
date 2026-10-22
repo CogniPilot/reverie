@@ -223,11 +223,11 @@ describe('decideReconnect (pure eligibility)', () => {
 
 describe('remote has-session probe (pure)', () => {
   it('builds the probe through the shared ssh connection args, has-session by name', () => {
-    const cmd = buildRemoteSessionAliveCommand({ username: 'dev', host: 'box', port: 2222 }, 'codeman-ssh-abc');
+    const cmd = buildRemoteSessionAliveCommand({ username: 'dev', host: 'box', port: 2222 }, 'reverie-ssh-abc');
     // Literal pin: the session name is shellescaped inside the remote command,
     // which is itself one shellescaped ssh argument.
     expect(cmd).toBe(
-      "ssh -o BatchMode=yes -o ConnectTimeout=10 -p 2222 dev@box 'tmux -L codeman-remote has-session -t '\\''codeman-ssh-abc'\\'' 2>/dev/null'"
+      "ssh -o BatchMode=yes -o ConnectTimeout=10 -p 2222 dev@box 'tmux -L reverie-remote has-session -t '\\''reverie-ssh-abc'\\'' 2>/dev/null'"
     );
   });
 
@@ -259,7 +259,7 @@ describe('TmuxManager remote reconnect watcher (integration)', () => {
   function registerRemote(sessionId: string): void {
     manager.registerSession({
       sessionId,
-      muxName: `codeman-${sessionId}`,
+      muxName: `reverie-${sessionId}`,
       pid: 4242,
       createdAt: Date.now(),
       workingDir: '/home/aakhter',

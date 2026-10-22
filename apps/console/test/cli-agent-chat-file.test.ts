@@ -1,5 +1,5 @@
 /**
- * `codeman agent chat say --file`: each file is uploaded raw into the room, then the
+ * `reverie agent chat say --file`: each file is uploaded raw into the room, then the
  * message names the uploaded ids.
  */
 import { describe, expect, it } from 'vitest';
@@ -18,7 +18,7 @@ describe('agent chat say --file', () => {
           return {
             status: 200,
             text: '',
-            json: { success: true, data: { rooms: [{ id: 'room-1', name: 'Fleet', members: [] }] } },
+            json: { success: true, data: { rooms: [{ id: 'room-1', name: 'Reverie', members: [] }] } },
           };
         }
         if (options.path.endsWith('/files')) {

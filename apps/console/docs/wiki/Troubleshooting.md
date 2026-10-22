@@ -34,7 +34,7 @@ and start again. There is no tmux-free mode: sessions live in tmux.
 ### The port is already in use
 
 ```bash
-reverie web --port 8080     # or set CODEMAN_PORT
+reverie web --port 8080     # or set REVERIE_PORT
 ```
 
 If you believe nothing is on 3000, check for a Reverie you already started:
@@ -77,7 +77,7 @@ The Host header is not in the allowlist, which is the DNS-rebinding guard doing 
 your domain:
 
 ```bash
-CODEMAN_ALLOWED_HOSTS='codeman.example.com,.internal.example.com'
+REVERIE_ALLOWED_HOSTS='reverie.example.com,.internal.example.com'
 ```
 
 A leading dot matches subdomains.
@@ -150,7 +150,7 @@ Two Reverie servers are running against the same data directory and tmux socket.
 one discovers and attaches the first one's sessions. Give each instance its own scope:
 
 ```bash
-CODEMAN_INSTANCE=beta CODEMAN_PORT=5000 reverie web
+REVERIE_INSTANCE=beta REVERIE_PORT=5000 reverie web
 ```
 
 `reverie web -d` and `reverie service install` both refuse to start a second server on one
@@ -199,7 +199,7 @@ on screen has not necessarily reached the agent yet. Press Enter, or the phone t
 
 If you are sending input over the API instead, your payload must end with `\r` or no Enter
 is ever sent. The request still succeeds and the text sits unsubmitted in the composer. See
-[Driving Reverie From An Agent](Driving-Codeman-From-An-Agent).
+[Driving Reverie From An Agent](Driving-Reverie-From-An-Agent).
 
 ## Mobile
 
@@ -256,7 +256,7 @@ That case is missing its hooks block. Recreating the case rewrites it.
 ### Docker sessions do not detect idle
 
 On a loopback-only bind, a container cannot reach `127.0.0.1` on the host, so in-container
-hooks have nothing to call. Set `CODEMAN_DOCKER_BRIDGE_HOOKS=1` to open a hooks-only
+hooks have nothing to call. Set `REVERIE_DOCKER_BRIDGE_HOOKS=1` to open a hooks-only
 listener on the docker bridge gateway. Without it, idle detection falls back to output
 watching.
 
@@ -278,11 +278,11 @@ remote case every click failed while the file plainly existed on the other machi
 now go over ssh; see [Working With Files](Working-With-Files). Editing and Office previews
 stay unavailable remotely and say so with a 400.
 
-### Compose: the server crash-loops with `EACCES` on first start
+### The Docker server cannot write its persistent directories
 
-Start the stack with `bash docker/Start-Codeman.sh` rather than a plain `docker compose up`,
-and update: since 1.29.0 the entrypoint corrects a root-owned bind mount before dropping
-privileges. See [Running As A Service](Running-As-A-Service).
+Check that the configured runtime UID owns its mounted instance, home and workspace
+directories. Follow the root [setup guide](../../../../docs/setup.md); the former
+console-only Compose entrypoint and setup scripts have been removed.
 
 ### A remote SSH session dropped and did not come back
 
@@ -296,16 +296,16 @@ is still running.
 ```bash
 reverie doctor                                # dependency check
 curl -s localhost:3000/api/status | jq        # full app state
-tmux -L codeman list-sessions                 # what tmux thinks is alive
-journalctl --user -u codeman-web -f           # service logs (Linux)
-tail -f ~/.codeman/web.log                    # detached mode logs
+tmux -L reverie list-sessions                 # what tmux thinks is alive
+journalctl --user -u reverie-web -f           # service logs (Linux)
+tail -f ~/.reverie/web.log                    # detached mode logs
 ```
 
 On an HTTPS install, add `-k` to the curl commands and use the `https://` URL.
 
 ## Filing a good bug report
 
-Open an [issue](https://github.com/Ark0N/Codeman/issues) with:
+Open an [issue](https://github.com/jgoppert/reverie/issues) with:
 
 - OS and version.
 - Install method: installer, npm, or git clone.
@@ -318,6 +318,6 @@ Reports usually get a response within a day, and every release credits its repor
 name.
 
 Questions and setup help fit better in
-[Discussions](https://github.com/Ark0N/Codeman/discussions). Security problems never go in a
+[Discussions](https://github.com/jgoppert/reverie/discussions). Security problems never go in a
 public issue; see
-[SECURITY.md](https://github.com/Ark0N/Codeman/blob/master/.github/SECURITY.md).
+[SECURITY.md](https://github.com/jgoppert/reverie/blob/main/apps/console/.github/SECURITY.md).

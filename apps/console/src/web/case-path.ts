@@ -7,7 +7,7 @@
  *   - it must be an absolute path (a leading `~` is expanded) with no traversal and none of the shell
  *     metacharacters a session's working directory is later rejected for (`isValidWorkingDir`), so
  *     a case this accepts is one a session can actually start in;
- *   - it must not be a system directory, the home directory itself, Codeman's own data directory, or
+ *   - it must not be a system directory, the home directory itself, Reverie's own data directory, or
  *     a credential/config tree (`~/.ssh`, `~/.aws`, `~/.claude`, ...). Judged on the path as typed AND on
  *     its symlink-resolved form, against both the given and the symlink-resolved roots (a home reached
  *     through a link, macOS's `/etc` -> `/private/etc`), so a link into a blocked tree is not a way
@@ -51,7 +51,7 @@ const BLOCKED_HOME_DIRS = ['.ssh', '.gnupg', '.aws', '.kube', '.docker', '.claud
 
 export interface NewCasePathContext {
   home: string;
-  /** Codeman's own state directory (`getDataDir()`), which must never become a case. */
+  /** Reverie's own state directory (`getDataDir()`), which must never become a case. */
   dataDir: string;
   /**
    * The cases directories (the caller's own and the shared one). A folder in one of them is already
@@ -92,11 +92,11 @@ export function blockedReason(
     if (isWithin(absPath, join(ctx.home, dir))) return `~/${dir} holds credentials or another tool's configuration`;
   }
   if (isWithin(absPath, ctx.dataDir)) return "Reverie's own data folder cannot be a case";
-  // Any Codeman instance's data dir under the home folder (~/.codeman, ~/.codeman-beta, ...), not only
+  // Any Reverie instance's data dir under the home folder (~/.reverie, ~/.reverie-beta, ...), not only
   // the one this process uses.
   if (absPath.startsWith(ctx.home + sep)) {
     const firstSegment = absPath.slice(ctx.home.length + 1).split(sep)[0];
-    if (/^\.codeman/.test(firstSegment)) return "Reverie's own data folder cannot be a case";
+    if (/^\.reverie/.test(firstSegment)) return "Reverie's own data folder cannot be a case";
   }
   for (const dir of ctx.casesDirs ?? []) {
     if (isWithin(absPath, dir)) {

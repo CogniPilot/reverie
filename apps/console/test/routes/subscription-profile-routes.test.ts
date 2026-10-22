@@ -132,7 +132,7 @@ describe('subscription profile API', () => {
     await server.inject({
       method: 'PATCH',
       url: '/api/subscription-profiles/openai-default',
-      headers: { 'x-codeman-parent-session': 'not-an-id' },
+      headers: { 'x-reverie-parent-session': 'not-an-id' },
       payload: { label: 'Codex y@example.com' },
     });
     const lines = (await fs.readFile(audit, 'utf8'))
@@ -152,7 +152,7 @@ describe('subscription profile API', () => {
       const res = await server.inject({
         method: 'PATCH',
         url: '/api/subscription-profiles/openai-default',
-        headers: { 'x-codeman-parent-session': id },
+        headers: { 'x-reverie-parent-session': id },
         payload: { label: 'Codex agent@example.com' },
       });
       expect(res.statusCode).toBe(403);

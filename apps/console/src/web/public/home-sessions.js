@@ -7,7 +7,7 @@
  * list a phone gets on its home screen (mobile-overview.js), turned vertical:
  * one row per live tab.
  *
- * Rows are ordered by `CodemanSessionOrder` (constants.js), the same comparator
+ * Rows are ordered by `ReverieSessionOrder` (constants.js), the same comparator
  * the phone overview uses: blocked on you first, then running longest-first,
  * then quiet most-recently-quiet first. The number badge stays the tab-strip
  * index (Alt+1..9), so it is deliberately NOT sequential down a sorted rail:
@@ -39,9 +39,9 @@
  * mobile-overview.js rather than re-derived, so the two home screens can never
  * disagree about what "working" means.
  *
- * @mixin Extends CodemanApp.prototype via Object.assign
+ * @mixin Extends ReverieApp.prototype via Object.assign
  * @dependency app.js (this.sessions, this.cases, this.pendingHooks, selectSession)
- * @dependency constants.js (CodemanSessionOrder, the shared row comparator)
+ * @dependency constants.js (ReverieSessionOrder, the shared row comparator)
  * @dependency mobile-overview.js (_mobileOverviewState, _mobileOverviewCaseFor, shouldUseMobileOverview)
  * @dependency ralph-panel.js (formatRelativeTime — the app's one relative-time formatter)
  * @dependency webview-tabs.js (this.webviews, this.webviewOrder, openWebview)
@@ -79,7 +79,7 @@ const HOME_SESSIONS_MODE_BADGE = {
   shell: 'sh',
 };
 
-Object.assign(CodemanApp.prototype, {
+Object.assign(ReverieApp.prototype, {
   // ═══════════════════════════════════════════════════════════════
   // Gate + visibility
   // ═══════════════════════════════════════════════════════════════
@@ -173,7 +173,7 @@ Object.assign(CodemanApp.prototype, {
   /**
    * One row per live session, in overview order: whatever is blocked on you
    * first, then whatever is running (longest turn first), then the quiet ones
-   * most-recently-quiet first. The comparator is `CodemanSessionOrder`
+   * most-recently-quiet first. The comparator is `ReverieSessionOrder`
    * (constants.js), shared with the phone overview, and state classification is
    * `_mobileOverviewState()` (mobile-overview.js), so the two home screens can
    * neither disagree about what "working" means nor about what sorts first.
@@ -232,7 +232,7 @@ Object.assign(CodemanApp.prototype, {
     // Guarded like every other constants.js consumer: a stale cached
     // constants.js (iOS Safari serves old JS after a deploy) must degrade to
     // tab order, not TypeError the whole home screen away.
-    return window.CodemanSessionOrder ? window.CodemanSessionOrder.sort(rows) : rows;
+    return window.ReverieSessionOrder ? window.ReverieSessionOrder.sort(rows) : rows;
   },
 
   // ═══════════════════════════════════════════════════════════════

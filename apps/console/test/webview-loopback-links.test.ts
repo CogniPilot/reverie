@@ -2,7 +2,7 @@
  * @fileoverview Loopback links open through a proxied web tab (webview-tabs.js).
  *
  * An agent prints `http://localhost:5173/` and the user taps it on a phone. The
- * browser there can never reach the Codeman box's loopback, so the link was a
+ * browser there can never reach the Reverie box's loopback, so the link was a
  * guaranteed connection error — while the web-tab proxy fetches from the server,
  * where it works. Pinned here:
  *
@@ -50,11 +50,11 @@ function boot(pageUrl = 'http://192.168.1.135:8095/') {
     { url: pageUrl, runScripts: 'outside-only' }
   );
   const win = dom.window as unknown as Window &
-    typeof globalThis & { app: AppLike; CodemanApp: new () => AppLike; CodemanWebviewLinks: WebviewLinks };
+    typeof globalThis & { app: AppLike; ReverieApp: new () => AppLike; ReverieWebviewLinks: WebviewLinks };
   (win as unknown as { eval: (s: string) => void }).eval(
     [
-      'window.CodemanApp = class CodemanApp {};',
-      'window.CodemanBase = { url: (p) => p };',
+      'window.ReverieApp = class ReverieApp {};',
+      'window.ReverieBase = { url: (p) => p };',
       'if (!window.CSS) window.CSS = { escape: (s) => s };',
       'window.requestAnimationFrame = (fn) => { fn(); return 1; };',
       CONSTANTS,
@@ -63,7 +63,7 @@ function boot(pageUrl = 'http://192.168.1.135:8095/') {
   );
 
   const calls: Array<{ path: string; method: string; body?: unknown }> = [];
-  const app = new win.CodemanApp();
+  const app = new win.ReverieApp();
   app.webviews = new Map([
     ['dev', { id: 'dev', name: 'localhost:5173', url: 'http://localhost:5173/' }],
     ['direct', { id: 'direct', name: 'Direct', url: 'https://localhost:9443/', embedMode: 'direct' }],
@@ -108,7 +108,7 @@ const frameSrc = (win: Window, id: string) =>
 
 describe('loopback link decision', () => {
   const { win } = boot();
-  const links = win.CodemanWebviewLinks;
+  const links = win.ReverieWebviewLinks;
 
   it('recognises every loopback spelling and nothing else', () => {
     for (const host of ['localhost', 'LOCALHOST', '127.0.0.1', '127.1.2.3', '0.0.0.0', '[::1]', '::1']) {
@@ -133,7 +133,7 @@ describe('loopback link decision', () => {
     // *.localhost locally and has a search domain configured, it NXDOMAINs as
     // absolute and is retried as `evil.localhost.<search domain>`. The link
     // source is agent-written terminal output, so this set is the whole
-    // confinement on a tap that makes Codeman fetch a URL and persist it.
+    // confinement on a tap that makes Reverie fetch a URL and persist it.
     expect(links.isLoopbackHostname('app.localhost')).toBe(false);
     expect(links.isLoopbackHostname('evil.localhost')).toBe(false);
     expect(links.linkNeedsWebTabProxy('http://evil.localhost/', '192.168.1.135')).toBe(false);
@@ -251,7 +251,7 @@ describe('openLinkThroughWebTabIfLoopback', () => {
     });
   });
 
-  it("does not reuse a TRUSTED dashboard, whose frame runs on Codeman's own origin", async () => {
+  it("does not reuse a TRUSTED dashboard, whose frame runs on Reverie's own origin", async () => {
     // A trusted webview is mounted with `allow-same-origin`. The link being
     // followed came from agent output, so auto-reusing that frame would let an
     // agent-chosen path be opened inside a privileged origin on one tap. A fresh
@@ -325,7 +325,7 @@ describe('lost-frame recovery', () => {
   const lost = (win: Window, source: unknown, path: unknown) =>
     win.dispatchEvent(
       new (win as unknown as { MessageEvent: typeof MessageEvent }).MessageEvent('message', {
-        data: { type: 'codeman:webview-lost', path },
+        data: { type: 'reverie:webview-lost', path },
         source: source as Window,
       })
     );
@@ -361,7 +361,7 @@ describe('lost-frame recovery', () => {
     lost(win, frameOf(win, 'dev').contentWindow, 42);
     win.dispatchEvent(
       new (win as unknown as { MessageEvent: typeof MessageEvent }).MessageEvent('message', {
-        data: 'codeman:webview-lost',
+        data: 'reverie:webview-lost',
         source: frameOf(win, 'dev').contentWindow as Window,
       })
     );

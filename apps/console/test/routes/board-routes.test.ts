@@ -76,7 +76,7 @@ describe('board routes', () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  const as = (session?: string) => (session ? { 'x-codeman-parent-session': session } : {});
+  const as = (session?: string) => (session ? { 'x-reverie-parent-session': session } : {});
   const post = (url: string, payload: unknown, session?: string) => app.inject({ method: 'POST', url, payload: payload as object, headers: as(session) });
   const patch = (url: string, payload: unknown, session?: string) => app.inject({ method: 'PATCH', url, payload: payload as object, headers: as(session) });
 

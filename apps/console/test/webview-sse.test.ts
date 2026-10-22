@@ -105,10 +105,10 @@ describe('webview routes → SSE, end to end', () => {
   const apps: FastifyInstance[] = [];
 
   beforeEach(async () => {
-    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'codeman-webview-sse-'));
-    savedDataDir = process.env.CODEMAN_DATA_DIR;
-    savedMode = process.env.CODEMAN_MULTIUSER;
-    process.env.CODEMAN_DATA_DIR = tmpDir;
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'reverie-webview-sse-'));
+    savedDataDir = process.env.REVERIE_DATA_DIR;
+    savedMode = process.env.REVERIE_MULTIUSER;
+    process.env.REVERIE_DATA_DIR = tmpDir;
     cleanup = new CleanupManager();
     manager = new SseStreamManager({ getSessionStateWithRespawn: () => null }, cleanup);
   });
@@ -116,10 +116,10 @@ describe('webview routes → SSE, end to end', () => {
   afterEach(async () => {
     for (const app of apps.splice(0)) await app.close();
     cleanup.dispose();
-    if (savedDataDir === undefined) delete process.env.CODEMAN_DATA_DIR;
-    else process.env.CODEMAN_DATA_DIR = savedDataDir;
-    if (savedMode === undefined) delete process.env.CODEMAN_MULTIUSER;
-    else process.env.CODEMAN_MULTIUSER = savedMode;
+    if (savedDataDir === undefined) delete process.env.REVERIE_DATA_DIR;
+    else process.env.REVERIE_DATA_DIR = savedDataDir;
+    if (savedMode === undefined) delete process.env.REVERIE_MULTIUSER;
+    else process.env.REVERIE_MULTIUSER = savedMode;
     await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
   });
 
@@ -143,7 +143,7 @@ describe('webview routes → SSE, end to end', () => {
   }
 
   it("multi-user: another user's SSE stream never sees a web-tab create, edit or delete", async () => {
-    process.env.CODEMAN_MULTIUSER = '1';
+    process.env.REVERIE_MULTIUSER = '1';
     const aliceApp = await appAs({ username: 'alice', role: 'user' });
     const alice = client();
     const bob = client();
@@ -172,7 +172,7 @@ describe('webview routes → SSE, end to end', () => {
   });
 
   it("multi-user: an admin editing a user's web tab notifies that user, not a bystander", async () => {
-    process.env.CODEMAN_MULTIUSER = '1';
+    process.env.REVERIE_MULTIUSER = '1';
     const aliceApp = await appAs({ username: 'alice', role: 'user' });
     const adminApp = await appAs({ username: 'root', role: 'admin' });
     const id = (

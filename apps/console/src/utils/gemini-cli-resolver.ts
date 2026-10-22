@@ -14,7 +14,7 @@ import { createCliExecutableResolver, formatCliNotFoundMessage } from './cli-exe
 /** Common directories where the Gemini CLI binary may be installed */
 /**
  * Directories probed after `which`, read from this CLI's registry entry so the spawn
- * path, `codeman doctor` and this resolver cannot disagree about where to look.
+ * path, `reverie doctor` and this resolver cannot disagree about where to look.
  * `~` is expanded by `expandHome`; nothing else is interpreted.
  */
 const GEMINI_SEARCH_DIRS = (): string[] => (getCli('gemini')?.discovery.searchDirs ?? []).map(expandHome);

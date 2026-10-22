@@ -13,7 +13,7 @@ deliberate step away from that.
 
 Two rules that make the rest of this page simple:
 
-1. **Never expose Reverie on a network without `CODEMAN_PASSWORD`.** Binding a non-loopback
+1. **Never expose Reverie on a network without `REVERIE_PASSWORD`.** Binding a non-loopback
    host without one starts, but prints a loud warning with the fixes.
 2. **Prefer keeping the loopback bind** and putting an authenticated tunnel in front of it,
    over binding wide and relying on a password alone.
@@ -58,11 +58,11 @@ The URL is the machine's MagicDNS name, so on a machine called `tnode` it is
 | You want                                   | How                                                                                                   |
 | ------------------------------------------ | ----------------------------------------------------------------------------------------------------- |
 | The machine's existing name (default)      | Nothing. This is what the installer does unless you say otherwise.                                     |
-| `https://codeman-<hostname>.<tailnet>.ts.net` | Answer yes to the installer's name question, pass `--name codeman-<hostname>`, or run `install.sh name`. This renames the machine tailnet-wide (SSH included), which is why the installer defaults to no. `install.sh uninstall` offers to rename it back. |
-| `https://codeman.<tailnet>.ts.net`         | A [Tailscale Service](https://tailscale.com/docs/features/tailscale-services). Only a **tagged** node can host one (a device signed in with a user account cannot), the service is defined and approved in the admin console, and the feature is in beta. The installer does not set this up; it is a `tailscale serve --service=svc:codeman --https=443 127.0.0.1:3000` on a tagged host once the service exists. |
+| `https://reverie-<hostname>.<tailnet>.ts.net` | Answer yes to the installer's name question, pass `--name reverie-<hostname>`, or run `install.sh name`. This renames the machine tailnet-wide (SSH included), which is why the installer defaults to no. `install.sh uninstall` offers to rename it back. |
+| `https://reverie.<tailnet>.ts.net`         | A [Tailscale Service](https://tailscale.com/docs/features/tailscale-services). Only a **tagged** node can host one (a device signed in with a user account cannot), the service is defined and approved in the admin console, and the feature is in beta. The installer does not set this up; it is a `tailscale serve --service=svc:reverie --https=443 127.0.0.1:3000` on a tagged host once the service exists. |
 
 If `:443` on your node already belongs to another app, the installer offers Reverie under
-`https://<machine>.<tailnet>.ts.net/codeman` (the default, via `tailscale serve --set-path`
+`https://<machine>.<tailnet>.ts.net/reverie` (the default, via `tailscale serve --set-path`
 plus Reverie's `--base-url`), on a second port (`https://<machine>.<tailnet>.ts.net:8443`),
 or replacing the other mapping. It never replaces anything without asking.
 
@@ -70,7 +70,7 @@ Notes:
 
 - Keep the loopback bind. `tailscale serve` connects to `127.0.0.1:3000` locally, so
   binding wider adds exposure and buys nothing.
-- Your tailnet is the authentication boundary. Setting `CODEMAN_PASSWORD` as well is
+- Your tailnet is the authentication boundary. Setting `REVERIE_PASSWORD` as well is
   reasonable defence in depth, especially if other people have devices on your tailnet.
 - Reverie's Host-header allowlist already accepts `.ts.net`, so no extra configuration is
   needed.
@@ -91,7 +91,7 @@ Browser → Cloudflare edge (HTTPS) → cloudflared → localhost:3000
 ```
 
 Prerequisites: [`cloudflared`](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/)
-installed, and `CODEMAN_PASSWORD` set.
+installed, and `REVERIE_PASSWORD` set.
 
 ```bash
 ./scripts/tunnel.sh start     # starts the tunnel, prints the public URL
@@ -107,7 +107,7 @@ named tunnel.
 To survive reboots:
 
 ```bash
-systemctl --user enable codeman-tunnel
+systemctl --user enable reverie-tunnel
 loginctl enable-linger $USER
 ```
 
@@ -121,14 +121,14 @@ you.
 ## LAN plus password
 
 ```bash
-export CODEMAN_PASSWORD='something long'
+export REVERIE_PASSWORD='something long'
 reverie web -H 0.0.0.0 --https
 ```
 
 Every device on your local network can now reach the login page. `--https` generates a
-self-signed certificate into `~/.codeman/certs/`, which your browser will warn about once.
+self-signed certificate into `~/.reverie/certs/`, which your browser will warn about once.
 
-`CODEMAN_USERNAME` defaults to `admin`.
+`REVERIE_USERNAME` defaults to `admin`.
 
 The installer offers this path and prompts for the password. On re-runs it preserves
 whichever binding you already chose.
@@ -166,7 +166,7 @@ Someone holding only the tunnel URL still meets the normal password prompt. The 
 fast path, not a bypass.
 
 Design detail and the threat analysis it is built against:
-[`docs/qr-auth-plan.md`](https://github.com/Ark0N/Codeman/blob/master/docs/qr-auth-plan.md).
+[`docs/qr-auth-plan.md`](https://github.com/jgoppert/reverie/blob/main/apps/console/docs/qr-auth-plan.md).
 
 ## Behind a reverse proxy
 
@@ -178,7 +178,7 @@ tunnel.
 **Your own domain is not on that list.** Add it:
 
 ```bash
-CODEMAN_ALLOWED_HOSTS='codeman.example.com,.internal.example.com'
+REVERIE_ALLOWED_HOSTS='reverie.example.com,.internal.example.com'
 ```
 
 A bare entry matches that exact host; a leading dot matches subdomains. Without this, a
@@ -191,26 +191,26 @@ upgrade runs the same Host and Origin checks, closing with code `4003` on failur
 ### Mounting under a sub-path
 
 By default Reverie assumes it is served at the origin root (`/`). To mount it under a
-sub-path — e.g. `https://example.com/codeman/` — start it with `--base-url` (or the
-`CODEMAN_BASE_URL` env var):
+sub-path — e.g. `https://example.com/reverie/` — start it with `--base-url` (or the
+`REVERIE_BASE_URL` env var):
 
 ```bash
-reverie web --base-url /codeman
+reverie web --base-url /reverie
 # or
-CODEMAN_BASE_URL=/codeman reverie web
+REVERIE_BASE_URL=/reverie reverie web
 ```
 
 The value is a plain path prefix; `/` (the default) means "mounted at the root". With a
 prefix set, Reverie emits every URL — the HTML shell and its assets, API/SSE/WebSocket
 calls, redirects, the PWA manifest and the service worker — under that prefix, so a browser
-loading `https://example.com/codeman/` stays inside the mount.
+loading `https://example.com/reverie/` stays inside the mount.
 
 **Forward the prefix unchanged — do NOT strip it.** Reverie expects the proxy to pass the
-full path (including `/codeman/`) straight through. A minimal nginx block:
+full path (including `/reverie/`) straight through. A minimal nginx block:
 
 ```nginx
-location /codeman/ {
-    proxy_pass         http://127.0.0.1:3000;   # note: no trailing slash — keep the /codeman/ prefix
+location /reverie/ {
+    proxy_pass         http://127.0.0.1:3000;   # note: no trailing slash — keep the /reverie/ prefix
     proxy_http_version 1.1;
     proxy_set_header   Host              $host;
     proxy_set_header   Upgrade           $http_upgrade;   # WebSocket
@@ -220,7 +220,7 @@ location /codeman/ {
 
 Notes and current limits:
 
-- The prefix must still be paired with `CODEMAN_ALLOWED_HOSTS` for your domain, exactly as
+- The prefix must still be paired with `REVERIE_ALLOWED_HOSTS` for your domain, exactly as
   above — the two are independent.
 - Health checks, Claude Code hooks and the docker bridge connect to the raw port directly
   (bypassing the proxy), so Reverie also keeps answering at the un-prefixed paths on the port
@@ -232,7 +232,7 @@ Notes and current limits:
 ## Session cookies and rate limits
 
 The first request prompts for HTTP Basic credentials. On success the server issues an opaque
-`codeman_session` cookie (24 hour lifetime, extended on activity, validated server-side so
+`reverie_session` cookie (24 hour lifetime, extended on activity, validated server-side so
 it cannot be forged offline). Ten failed attempts from one IP produce a `429` with a 15
 minute decay.
 
@@ -252,14 +252,14 @@ reverie tui --list    # numbered list, then exit
 
 `Enter` attaches into the pane and `F1` comes back. Under 72 columns it drops the preview
 and becomes a single-column list, so it stays usable on a phone. The sessions are the same
-ones the dashboard shows. See [docs/tui.md](https://github.com/Ark0N/Codeman/blob/master/docs/tui.md)
+ones the dashboard shows. See [docs/tui.md](https://github.com/jgoppert/reverie/blob/main/apps/console/docs/tui.md)
 for the full guide.
 
 ## Common problems
 
 | Symptom                                                     | Cause and fix                                                                                          |
 | ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
-| `403 host not allowed`                                       | Your domain is not in the allowlist. Set `CODEMAN_ALLOWED_HOSTS`.                                       |
+| `403 host not allowed`                                       | Your domain is not in the allowlist. Set `REVERIE_ALLOWED_HOSTS`.                                       |
 | Assets 404 / blank page under a sub-path                     | Start Reverie with `--base-url /<prefix>` and have the proxy forward the prefix unchanged (don't strip it). |
 | Phone shows the login page but the terminal never connects   | The proxy is not forwarding WebSocket upgrades.                                                         |
 | Browser warns about the certificate                          | Expected with `--https` and its self-signed certificate. Tailscale gives you a real one instead.        |
@@ -272,4 +272,4 @@ for the full guide.
 - [Security](Security) - the whole model, and the hardening checklist.
 - [Mobile Guide](Mobile-Guide) - once you can reach it from the phone.
 - [Running As A Service](Running-As-A-Service) - keeping server and tunnel up across reboots.
-- [`docs/security-architecture.md`](https://github.com/Ark0N/Codeman/blob/master/docs/security-architecture.md) - the full model.
+- [`docs/security-architecture.md`](https://github.com/jgoppert/reverie/blob/main/apps/console/docs/security-architecture.md) - the full model.

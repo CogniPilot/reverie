@@ -3,7 +3,7 @@
 /**
  * capture-video-screenshots.mjs
  *
- * Captures real Codeman UI screenshots for the Remotion demo video.
+ * Captures real Reverie UI screenshots for the Remotion demo video.
  * Uses Playwright + page.route() mock injection (same pattern as capture-readme-screenshots.mjs).
  * No real Claude CLI or server needed — all API responses are mocked.
  *
@@ -673,7 +673,7 @@ async function captureMobileOpencode(browser) {
 
 async function main() {
   console.log('='.repeat(60));
-  console.log('Codeman Video Screenshot Capture');
+  console.log('Reverie Video Screenshot Capture');
   console.log('='.repeat(60));
   console.log(`Port: ${PORT}`);
   console.log(`Desktop: ${DESKTOP_VIEWPORT.width}x${DESKTOP_VIEWPORT.height}`);

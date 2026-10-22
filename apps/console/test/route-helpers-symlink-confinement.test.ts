@@ -21,7 +21,7 @@ import { validateSessionFilePath } from '../src/web/route-helpers.js';
 
 // realpath the root itself so the fixture controls which side is symlinked,
 // rather than inheriting whatever os.tmpdir() happens to be on this platform.
-const root = realpathSync(mkdtempSync(join(tmpdir(), 'codeman-confinement-')));
+const root = realpathSync(mkdtempSync(join(tmpdir(), 'reverie-confinement-')));
 const realWorkspace = join(root, 'real-workspace');
 const linkedWorkspace = join(root, 'linked-workspace');
 

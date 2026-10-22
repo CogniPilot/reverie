@@ -43,7 +43,7 @@ describe('folder links (findFilePathLinks)', () => {
     expect(folders('post mal /mnt/raid1/neon_getaway/styleframes')).toEqual(['/mnt/raid1/neon_getaway/styleframes']);
     expect(folders('ls ~/repos/neon-menu/assets/')).toEqual(['~/repos/neon-menu/assets/']);
     expect(folders('see builds/captures/ next')).toEqual(['builds/captures/']);
-    expect(folders('cd /home/joe/.codeman/app.')).toEqual(['/home/joe/.codeman/app']);
+    expect(folders('cd /home/joe/.reverie/app.')).toEqual(['/home/joe/.reverie/app']);
     expect(folders('in (/mnt/raid1/foo), ok')).toEqual(['/mnt/raid1/foo']);
   });
 
@@ -155,14 +155,14 @@ function el(tagName = 'div'): FakeEl {
 }
 
 function loadApp(fetchImpl: (url: string, init?: { body?: string }) => unknown) {
-  const CodemanApp = function CodemanApp(this: unknown) {} as unknown as new () => Record<string, unknown>;
+  const ReverieApp = function ReverieApp(this: unknown) {} as unknown as new () => Record<string, unknown>;
   const keyHandlers: Array<(ev: unknown) => void> = [];
   const context = vm.createContext({
-    CodemanApp,
+    ReverieApp,
     console: { ...console, warn: vi.fn(), error: vi.fn() },
     localStorage: { getItem: () => null, setItem: () => {}, removeItem: () => {} },
     escapeHtml: (s: string) => String(s),
-    CodemanBase: { base: '', url: (p: string) => p },
+    ReverieBase: { base: '', url: (p: string) => p },
     resolveLinkedFilePath,
     // Also from constants.js: no file in this suite renders as an HTML page.
     rendersAsPage: () => false,
@@ -202,7 +202,7 @@ function loadApp(fetchImpl: (url: string, init?: { body?: string }) => unknown) 
     folderGridUpBtn: el(),
   };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const app = new CodemanApp() as Record<string, any>;
+  const app = new ReverieApp() as Record<string, any>;
   app.$ = (id: string) => elements[id] ?? null;
   app._resetFilePreviewEdit = () => {};
   app.showToast = vi.fn();

@@ -1,7 +1,7 @@
 /**
  * Text that comes from outside the delivery code (message bodies, member names, room names, external speakers) reaches
  * an agent as JSON strings: it cannot close its quote, start a new line, or pass itself off as a speaker label,
- * and lookalike or invisible characters are shown as escapes. The same holds for `codeman agent chat read`.
+ * and lookalike or invisible characters are shown as escapes. The same holds for `reverie agent chat read`.
  */
 import { describe, expect, it } from 'vitest';
 import { buildBriefing, buildDeliveryBatch, buildDeliveryLine, renderForRecipient } from '../src/chatroom-delivery.js';
@@ -25,7 +25,7 @@ const room = (name = 'Room'): ChatRoom =>
 const nameOf = (id: string) => (id === A ? 'alpha' : 'bravo');
 const said = (text: string, name = 'alpha'): ChatMessage =>
   ({ id: 'm', roomId: 'r', at: 1, to: 'all', text, from: { kind: 'agent', sessionId: A, name } }) as unknown as ChatMessage;
-/** What is left of a line when every JSON string in it is blanked: only Codeman's own words. */
+/** What is left of a line when every JSON string in it is blanked: only Reverie's own words. */
 const outside = (line: string) => line.replace(/"(?:[^"\\]|\\.)*"/g, '""');
 
 describe('delivery cannot be spoofed from a body or a name', () => {
@@ -224,7 +224,7 @@ describe('the delivery header is a contract: the room parsing, the owner gate, t
   });
 
   it('a private or public room is the same line: visibility never appears in what an agent is sent', () => {
-    const room = (visibility: 'public' | 'private') => ({ id: 'r', name: 'Fleet', visibility, createdAt: 1, members: [{ sessionId: A, role: 'member', joinedAt: 1, updatedAt: 1 }], messages: [] }) as unknown as ChatRoom;
+    const room = (visibility: 'public' | 'private') => ({ id: 'r', name: 'Reverie', visibility, createdAt: 1, members: [{ sessionId: A, role: 'member', joinedAt: 1, updatedAt: 1 }], messages: [] }) as unknown as ChatRoom;
     const msg = { id: 'm1', roomId: 'r', at: 1, from: { kind: 'user', name: 'user' }, to: 'all', text: 'hi' } as unknown as ChatMessage;
     expect(renderForRecipient(room('public'), msg, A, nameOf)).toBe(renderForRecipient(room('private'), msg, A, nameOf));
     expect(renderForRecipient(room('private'), msg, A, nameOf)).toBe('USER: "hi"');

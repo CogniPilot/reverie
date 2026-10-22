@@ -1,5 +1,5 @@
 /**
- * @fileoverview The grid survives a page reload, per device (`codeman:tile-grid`).
+ * @fileoverview The grid survives a page reload, per device (`reverie:tile-grid`).
  *
  * - What is stored: ids (the cells), the tile count, focus, a zoom the user
  *   chose and the divider fractions, never content. Closing the grid (Tiles,
@@ -26,7 +26,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { FakeTile, localStore, makeGridApp, resetGridHarness, windowStub, type GridApp } from './mocks/tile-grid-vm.js';
 
 const IDS = ['s-a', 's-b', 's-c', 's-d'];
-const KEY = 'codeman:tile-grid';
+const KEY = 'reverie:tile-grid';
 const stored = () => JSON.parse(localStore.get(KEY) ?? 'null');
 
 /** A fresh page: the app as handleInit leaves it on its FIRST run (gen 1). */
@@ -248,8 +248,8 @@ describe('page load with a stored open grid', () => {
 
   it('a stored closed grid leaves the single view, and the Tiles toggle brings it back', () => {
     localStore.set(KEY, JSON.stringify({ v: 1, open: false, ids: ['s-b', 's-c'], focused: 's-c' }));
-    localStore.set('codeman:tile-count', '2');
-    const app = pageLoad(IDS, (a) => localStore.set('codeman-active-session', 's-a'));
+    localStore.set('reverie:tile-count', '2');
+    const app = pageLoad(IDS, (a) => localStore.set('reverie-active-session', 's-a'));
     expect(app._tilesOwnTerminal()).toBe(false);
     expect(app.selectSession).toHaveBeenCalledWith('s-a', { auto: true });
 
@@ -263,7 +263,7 @@ describe('page load with a stored open grid', () => {
     // Owner request ("always keep what the last setting was"), superseding
     // decision 10's answer that the count wins over a remembered grid's size.
     localStore.set(KEY, JSON.stringify({ v: 1, open: false, ids: ['s-b', 's-c'], focused: 's-c' }));
-    const app = pageLoad(IDS, (a) => localStore.set('codeman-active-session', 's-a'));
+    const app = pageLoad(IDS, (a) => localStore.set('reverie-active-session', 's-a'));
     app.activeSessionId = 's-a';
     app.toggleTileGrid();
     expect(app._tileGrid.cells).toEqual(['s-b', 's-c']);
@@ -286,7 +286,7 @@ describe('page load with a stored open grid', () => {
   });
 
   it('a reload brings back exactly the stored grid, whatever the count', () => {
-    localStore.set('codeman:tile-count', '6');
+    localStore.set('reverie:tile-count', '6');
     storeGrid({ ids: ['s-b', 's-c'], focused: 's-c' });
     const app = pageLoad(IDS);
     expect(app._tileGrid.ids).toEqual(['s-b', 's-c']);
@@ -340,14 +340,14 @@ describe('leaving the grid', () => {
     for (const id of [...IDS, 's-other']) {
       app._xtermSnapshots.set(id, 'old');
       app.terminalBufferCache.set(id, 'old');
-      localStore.set(`codeman-xs-${id}`, 'old');
+      localStore.set(`reverie-xs-${id}`, 'old');
     }
     app.openTileGrid(['s-a', 's-b']);
     app.closeTileGrid();
     for (const id of ['s-a', 's-b']) {
       expect(app._xtermSnapshots.has(id)).toBe(false);
       expect(app.terminalBufferCache.has(id)).toBe(false);
-      expect(localStore.has(`codeman-xs-${id}`)).toBe(false);
+      expect(localStore.has(`reverie-xs-${id}`)).toBe(false);
     }
     expect(app._xtermSnapshots.get('s-c')).toBe('old');
   });

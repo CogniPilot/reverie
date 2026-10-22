@@ -87,9 +87,9 @@ interface FrontendApp {
  * is stubbed to record rather than to render.
  */
 function loadFrontend(seed: ApprovalItem[] = []): FrontendApp {
-  const CodemanApp = function CodemanApp(this: unknown) {} as unknown as { prototype: Record<string, unknown> };
+  const ReverieApp = function ReverieApp(this: unknown) {} as unknown as { prototype: Record<string, unknown> };
   const context = vm.createContext({
-    CodemanApp,
+    ReverieApp,
     console,
     window: {},
     CSS: { escape: (s: string) => s },
@@ -106,7 +106,7 @@ function loadFrontend(seed: ApprovalItem[] = []): FrontendApp {
     vm.runInContext(readFileSync(resolve(PUBLIC, file), 'utf8'), context, { filename: file });
   }
 
-  const app = Object.create(CodemanApp.prototype) as FrontendApp & Record<string, unknown>;
+  const app = Object.create(ReverieApp.prototype) as FrontendApp & Record<string, unknown>;
   app.pendingHooks = new Map();
   app.notifications = [];
   app.approvals = new Map();
@@ -138,7 +138,7 @@ describe('a watching session raises no alert on any surface', () => {
     expect(watched.acknowledgedReason).toBe('watching 1 monitor');
   });
 
-  it('codeman tui leaves the row out of NEEDS YOU', () => {
+  it('reverie tui leaves the row out of NEEDS YOU', () => {
     const groups = groupSessions(buildRows([row()], new Map([[SESSION, watched]])));
     const needsYou = groups.find((group) => group.key === 'needs-you')!;
     expect(needsYou.rows).toEqual([]);
@@ -160,7 +160,7 @@ describe('a watching session raises no alert on any surface', () => {
     expect(app.approvals.get(watched.id)?.acknowledgedReason).toBe('watching 1 monitor');
   });
 
-  it('the header bell does not count the card, matching codeman tui', () => {
+  it('the header bell does not count the card, matching reverie tui', () => {
     const app = loadFrontend() as FrontendApp & { pendingApprovalsCount(): number };
     app.approvals.set('watched', watched);
     app.approvals.set('plain', itemFor(null));
@@ -182,7 +182,7 @@ describe('an ordinary idle prompt still alerts everywhere', () => {
     expect(plain.acknowledgedAt).toBeUndefined();
   });
 
-  it('codeman tui puts the row in NEEDS YOU', () => {
+  it('reverie tui puts the row in NEEDS YOU', () => {
     const groups = groupSessions(buildRows([row()], new Map([[SESSION, plain]])));
     expect(groups[0].rows.map((r) => r.session.sessionId)).toEqual([SESSION]);
   });
@@ -218,7 +218,7 @@ describe('a dialog blocking the agent alerts even while it watches', () => {
     expect(app.notifications).toEqual(['hook-permission']);
   });
 
-  it('codeman tui shows it as blocked', () => {
+  it('reverie tui shows it as blocked', () => {
     const inbox = new ApprovalInbox();
     const item = inbox.notePrompt({
       sessionId: SESSION,

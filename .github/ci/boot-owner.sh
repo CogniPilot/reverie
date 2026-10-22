@@ -2,7 +2,7 @@
 # Secrets stay in 0600 files under $TMPDIR; nothing secret is echoed. Prints one line per check.
 set -u; umask 077; ok=1
 api=http://127.0.0.1:3000; d=$TMPDIR/owner-ci; mkdir -p "$d"
-py=/opt/fleet/python/bin/python3
+py=/opt/reverie/python/bin/python3
 code() { curl -sS -o "$d/body" -w '%{http_code}' --netrc-file "$TMPDIR/netrc" -H "Origin: $api" "$@" || true; }
 expect() { echo "$1: got $2, want $3"; [ "$2" = "$3" ] || ok=; }
 # 1. The console password alone must be refused under enforce.
@@ -22,5 +22,5 @@ expect "password change" "$(code -b "$d/jar" -c "$d/jar" -H 'Content-Type: appli
 # 6. The signed-in owner reaches an owner route.
 expect "signed-in owner, GET /api/status" "$(code -b "$d/jar" "$api/api/status")" 200
 # 7. Basic plus an agent header never reaches it.
-expect "console password + agent header" "$(code -H 'x-codeman-parent-session: 0000002d-0035-4000-8000-000000000047' "$api/api/status")" 403
+expect "console password + agent header" "$(code -H 'x-reverie-parent-session: 0000002d-0035-4000-8000-000000000047' "$api/api/status")" 403
 rm -rf "$d"; test "${ok:-}" = 1

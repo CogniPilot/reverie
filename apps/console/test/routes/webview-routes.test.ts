@@ -1,8 +1,8 @@
 /**
  * CRUD + capability behaviour for /api/webviews.
  *
- * Uses app.inject() (no port) against a temp CODEMAN_DATA_DIR, so nothing touches
- * the developer's real ~/.codeman/webviews.json.
+ * Uses app.inject() (no port) against a temp REVERIE_DATA_DIR, so nothing touches
+ * the developer's real ~/.reverie/webviews.json.
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
@@ -28,9 +28,9 @@ const webviewCreated = vi.fn(async () => {});
 const webviewDeleted = vi.fn(async () => {});
 
 beforeEach(async () => {
-  tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'codeman-webviews-'));
-  savedDataDir = process.env.CODEMAN_DATA_DIR;
-  process.env.CODEMAN_DATA_DIR = tmpDir;
+  tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'reverie-webviews-'));
+  savedDataDir = process.env.REVERIE_DATA_DIR;
+  process.env.REVERIE_DATA_DIR = tmpDir;
   broadcasts.length = 0;
   webviewCreated.mockClear();
   webviewDeleted.mockClear();
@@ -49,8 +49,8 @@ beforeEach(async () => {
 
 afterEach(async () => {
   await app.close();
-  if (savedDataDir === undefined) delete process.env.CODEMAN_DATA_DIR;
-  else process.env.CODEMAN_DATA_DIR = savedDataDir;
+  if (savedDataDir === undefined) delete process.env.REVERIE_DATA_DIR;
+  else process.env.REVERIE_DATA_DIR = savedDataDir;
   await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
 });
 

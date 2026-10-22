@@ -6,7 +6,7 @@
  *    (vm-loaded): each named operation, the PUT payload and version, ONE write
  *    in flight at a time, a 409 rebased onto the server's layout, and the
  *    drag-drop -> operation mapping;
- *  - the app.js wiring driven through the shipping CodemanApp inside JSDOM:
+ *  - the app.js wiring driven through the shipping ReverieApp inside JSDOM:
  *    row and group menus, inline group rename, menu dismissal, SSE deferral
  *    while a write is in flight, recovery of unsaved edits across a reload, and
  *    the flat rail staying byte-identical when no group exists.
@@ -34,7 +34,7 @@ type Layout = {
 function loadHelper() {
   const context = vm.createContext({ window: {}, globalThis: {}, setTimeout, clearTimeout });
   vm.runInContext(read('tab-layout-browser.js'), context, { filename: 'tab-layout-browser.js' });
-  return (context.window as any).CodemanTabLayout;
+  return (context.window as any).ReverieTabLayout;
 }
 
 const s = (id: string): Ref => ({ kind: 'session', id });
@@ -493,7 +493,7 @@ describe('edit coordinator', () => {
 
 // ─── app.js wiring ─────────────────────────────────────────────────────
 
-let CodemanApp: { prototype: Record<string, any> };
+let ReverieApp: { prototype: Record<string, any> };
 let win: any;
 let document: Document;
 
@@ -524,9 +524,9 @@ beforeAll(async () => {
       read('api-client.js') +
       '\n' +
       read('webview-tabs.js') +
-      '\n;window.__EditCodemanApp = CodemanApp;'
+      '\n;window.__EditReverieApp = ReverieApp;'
   );
-  CodemanApp = win.__EditCodemanApp;
+  ReverieApp = win.__EditReverieApp;
 });
 
 const serverLayout = (version = 8): Layout => ({
@@ -558,7 +558,7 @@ function installFetch(responses: Array<(body: any) => { status: number; body: un
 }
 
 function makeApp(layout: unknown = serverLayout()) {
-  const app = Object.create(CodemanApp.prototype) as Record<string, any>;
+  const app = Object.create(ReverieApp.prototype) as Record<string, any>;
   document.documentElement.setAttribute('data-tab-orientation', 'vertical');
   document.documentElement.dataset.tabRailSort = 'manual';
   document.body.innerHTML = '<div id="sessionTabs" role="tablist" aria-label="Session tabs"></div>';
@@ -624,7 +624,7 @@ beforeEach(() => {
   win.localStorage.clear();
   win.sessionStorage.clear();
   document.body.innerHTML = '';
-  win.__codemanUser = { username: 'admin', role: 'admin', multiUser: false };
+  win.__reverieUser = { username: 'admin', role: 'admin', multiUser: false };
 });
 
 afterEach(() => {
@@ -964,7 +964,7 @@ describe('new session in a group', () => {
     expect(app.run).toHaveBeenCalledTimes(1);
     expect(app.run).toHaveBeenCalledWith({ count: 1, tabGroupId: 'gx' });
     expect(app.collapsedTabGroupIds.has('gx')).toBe(false);
-    expect(JSON.parse(win.localStorage.getItem('codeman:tab-groups-collapsed'))).toEqual([]);
+    expect(JSON.parse(win.localStorage.getItem('reverie:tab-groups-collapsed'))).toEqual([]);
     expect(document.querySelector('.tab-layout-group-action-menu')).toBeNull();
   });
 
@@ -1323,7 +1323,7 @@ describe('server echoes and reloads', () => {
   it("replays only its own owner's recent copy of unsaved edits", async () => {
     const copy = (extra: Record<string, unknown>) =>
       win.sessionStorage.setItem(
-        'codeman:tab-layout-pending',
+        'reverie:tab-layout-pending',
         JSON.stringify({
           owner: '@single',
           baseVersion: 8,
@@ -1337,7 +1337,7 @@ describe('server echoes and reloads', () => {
       const puts = installFetch();
       makeApp();
       await flush();
-      expect(win.sessionStorage.getItem('codeman:tab-layout-pending')).toBeNull();
+      expect(win.sessionStorage.getItem('reverie:tab-layout-pending')).toBeNull();
       return puts.length;
     };
     expect(await replays({})).toBe(1);
@@ -1347,20 +1347,20 @@ describe('server echoes and reloads', () => {
     expect(await replays({ baseVersion: 30 })).toBe(0);
 
     // Multi-user: the copy is keyed by the user name.
-    win.__codemanUser = { username: 'alice', role: 'user', multiUser: true };
+    win.__reverieUser = { username: 'alice', role: 'user', multiUser: true };
     expect(await replays({ owner: 'alice' })).toBe(1);
     expect(await replays({ owner: '@single' })).toBe(0);
 
     // Identity not known yet: hold the copy until /api/me answers.
-    win.__codemanUser = undefined;
+    win.__reverieUser = undefined;
     copy({});
     const late = installFetch();
     makeApp();
     await flush();
     expect(late).toHaveLength(0);
-    expect(win.sessionStorage.getItem('codeman:tab-layout-pending')).not.toBeNull();
-    win.__codemanUser = { username: 'admin', role: 'admin', multiUser: false };
-    document.dispatchEvent(new win.CustomEvent('codeman:me'));
+    expect(win.sessionStorage.getItem('reverie:tab-layout-pending')).not.toBeNull();
+    win.__reverieUser = { username: 'admin', role: 'admin', multiUser: false };
+    document.dispatchEvent(new win.CustomEvent('reverie:me'));
     await flush();
     expect(late).toHaveLength(1);
     expect(late[0].layout.groups[1].name).toBe('Replayed');
@@ -1390,7 +1390,7 @@ describe('server echoes and reloads', () => {
     );
     expect(puts.at(-1).baseVersion).toBe(8);
     expect(puts.at(-1).layout.groups[1].name).toBe('Unsaved');
-    const stored = JSON.parse(win.sessionStorage.getItem('codeman:tab-layout-pending'));
+    const stored = JSON.parse(win.sessionStorage.getItem('reverie:tab-layout-pending'));
     expect(stored.operations).toEqual([{ type: 'renameGroup', groupId: 'gy', name: 'Unsaved' }]);
     expect(stored.owner).toBe('@single');
     expect(stored.baseVersion).toBe(8);
@@ -1407,11 +1407,11 @@ describe('server echoes and reloads', () => {
     expect(next).toHaveLength(1);
     expect(next[0].baseVersion).toBe(12);
     expect(next[0].layout.groups.map((g: any) => g.name)).toEqual(['<Core & Ops>', 'Unsaved', 'Z']);
-    expect(win.sessionStorage.getItem('codeman:tab-layout-pending')).toBeNull();
+    expect(win.sessionStorage.getItem('reverie:tab-layout-pending')).toBeNull();
 
     // And when the keepalive DID land, nothing is re-sent.
     win.sessionStorage.setItem(
-      'codeman:tab-layout-pending',
+      'reverie:tab-layout-pending',
       JSON.stringify({
         owner: '@single',
         baseVersion: 8,

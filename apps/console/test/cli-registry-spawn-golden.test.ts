@@ -11,7 +11,7 @@
  *
  * ⚠️ If a change here makes one of these fail, the question is never "what is the new string?"
  * It is "which real CLI invocation just changed, and is that intended?" A byte that moves in
- * this file is a byte that moves in a command line Codeman executes.
+ * this file is a byte that moves in a command line Reverie executes.
  *
  * Coverage note: every mode with a launch spec is pinned, `grok` and `deepseek` included.
  * Grok had no parity coverage at all in the first draft of the registry, and deepseek did not
@@ -135,7 +135,7 @@ describe('codex', () => {
 
   it('always runs its own app server, never the shared daemon (i-5e8b6439)', () => {
     // A shared daemon per CODEX_HOME hands its tool children the env of whichever session
-    // started it, so another session's CODEMAN_SESSION_ID leaked into this one's tools.
+    // started it, so another session's REVERIE_SESSION_ID leaked into this one's tools.
     for (const cfg of [undefined, { dangerouslyBypassApprovals: true }, { model: 'gpt-5', resumeSessionId: 'roll_42' }]) {
       expect(cx(cfg).split(' ').slice(0, 2)).toEqual(['codex', '--no-daemon']);
     }

@@ -19,7 +19,7 @@
  * The bottom toolbar's right group is hidden on phones (mobile.css), so this surface is desktop and
  * tablet only by construction.
  *
- * @mixin Extends CodemanApp.prototype via Object.assign
+ * @mixin Extends ReverieApp.prototype via Object.assign
  * @dependency app.js (this.activeSessionId, this.loadAppSettingsFromStorage, this.getDefaultSettings, this.$)
  * @dependency panels-ui.js (openFilePreview)
  * @loadorder 12.57 of 16, after home-sessions.js, before entrance-animations.js
@@ -43,7 +43,7 @@ const GIT_STATUS_BADGE_TITLE = {
   '?': 'Untracked',
 };
 
-Object.assign(CodemanApp.prototype, {
+Object.assign(ReverieApp.prototype, {
   /** Per-device setting, default OFF. */
   isGitStatusEnabled() {
     const settings = this.loadAppSettingsFromStorage();

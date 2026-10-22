@@ -1,11 +1,11 @@
 /**
  * COD-134 — Terminal WebSocket reconnect policy.
  *
- * `CodemanWsReconnect.plan(code, attempt)` is the pure decision behind the
+ * `ReverieWsReconnect.plan(code, attempt)` is the pure decision behind the
  * client WS `onclose` handler in app.js: given a WebSocket close code and the
  * number of consecutive reconnects already attempted, it returns the action to
  * take (`reconnect` | `retry-fallback` | `give-up`) and a backoff delay. It is
- * exposed on `window.CodemanWsReconnect` and tested here in a plain node VM
+ * exposed on `window.ReverieWsReconnect` and tested here in a plain node VM
  * context (no jsdom — jsdom env setup is broken on some hosts).
  */
 import { readFileSync } from 'node:fs';
@@ -19,8 +19,8 @@ function loadHelper() {
   const context = vm.createContext({ window: {}, globalThis: {} });
   const source = readFileSync(resolve(import.meta.dirname, '../src/web/public/constants.js'), 'utf8');
   vm.runInContext(source, context, { filename: 'constants.js' });
-  return (context.window as { CodemanWsReconnect: { plan: (code: number, attempt: number) => Plan } })
-    .CodemanWsReconnect;
+  return (context.window as { ReverieWsReconnect: { plan: (code: number, attempt: number) => Plan } })
+    .ReverieWsReconnect;
 }
 
 describe('COD-134 WS reconnect plan policy', () => {

@@ -2,7 +2,7 @@
  * @fileoverview Cron and scheduled-run WRITE routes are owner-only (stopgap until owner
  * authentication). They create or start unattended sessions (shell mode, a launchCommand, or full
  * permissions), and in single-user mode canAccessOwned and the privileged-command grant are always
- * true, so any agent could otherwise schedule them. A request carrying X-Codeman-Parent-Session (any
+ * true, so any agent could otherwise schedule them. A request carrying X-Reverie-Parent-Session (any
  * value) is refused; an absent header is still the owner; reads are unchanged. Port: N/A (app.inject()).
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -12,7 +12,7 @@ import { registerCronRoutes } from '../../src/web/routes/cron-routes.js';
 import { registerScheduledRoutes } from '../../src/web/routes/scheduled-routes.js';
 import { installRouteErrorHandler } from '../../src/web/route-error-handler.js';
 
-const AGENT = { 'x-codeman-parent-session': '0000002d-0035-4000-8000-000000000047' };
+const AGENT = { 'x-reverie-parent-session': '0000002d-0035-4000-8000-000000000047' };
 const job = {
   id: 'job-1',
   name: 'nightly',
@@ -73,7 +73,7 @@ describe('cron and scheduled-run writes are owner-only', () => {
 
   for (const write of writes) {
     it(`${write.method} ${write.url}: an agent is refused and nothing happens`, async () => {
-      for (const header of [AGENT, { 'x-codeman-parent-session': '' }, { 'x-codeman-parent-session': 'bogus' }]) {
+      for (const header of [AGENT, { 'x-reverie-parent-session': '' }, { 'x-reverie-parent-session': 'bogus' }]) {
         const res = await app.inject({ method: write.method, url: write.url, payload: write.payload, headers: header });
         expect(res.statusCode).toBe(403);
         expect(res.json().success).toBe(false);

@@ -1,6 +1,6 @@
 # Approvals Inbox (design)
 
-One cross-session inbox for every prompt that is waiting on a human: permission dialogs, questions (AskUserQuestion / elicitation), and idle prompts. Cards are answerable in place (option digits, Esc, or a typed prompt) from desktop, phone overview, and push notification action buttons. Inspired by Cloudflare OS's Gatekeeper approval queue (https://github.com/cloudflare/cloudflare-os, asynchronous human-in-the-loop approvals): with a fleet of sessions the human is the bottleneck, and today answering means finding the right tab.
+One cross-session inbox for every prompt that is waiting on a human: permission dialogs, questions (AskUserQuestion / elicitation), and idle prompts. Cards are answerable in place (option digits, Esc, or a typed prompt) from desktop, phone overview, and push notification action buttons. Inspired by Cloudflare OS's Gatekeeper approval queue (https://github.com/cloudflare/cloudflare-os, asynchronous human-in-the-loop approvals): with a reverie of sessions the human is the bottleneck, and today answering means finding the right tab.
 
 ## Problems this fixes (all real today)
 
@@ -53,7 +53,7 @@ Module-level singleton in the style of `session-wait-registry.ts` (pure, no `Ses
 - `hook-event-routes.ts`: on `permission_prompt` / `elicitation_dialog` / `idle_prompt`, call `notePrompt` with sanitized data + a pane capture callback (`mux.capturePaneBuffer(muxName)` visible frame, ANSI-stripped via existing utils; fall back to `session.terminalBuffer` tail). On `stop` / `elicitation_complete` / `elicitation_response`, `resolveForSession(id, 'resolved_in_terminal')`.
 - `session-listener-wiring.ts`: `working` listener resolves **idle items only** (`working` is heuristic and can flap mid-turn, so it must never clear a pending permission/question dialog); `exit` resolves with `session_ended`. Same singleton-import pattern as `sessionWaits`.
 - Session delete route: resolve with `session_ended`.
-- **New hook matchers** `elicitation_complete` + `elicitation_response` added to `generateHooksConfig()`, `HookEventType`, `HookEventSchema`, and both SSE registries. `refreshStaleCodemanHooks` gets a staleness probe for them (`hooksJson.includes('elicitation_complete')`) so existing cases heal on next Claude spawn, exactly like the `-k`/secret/marker probes.
+- **New hook matchers** `elicitation_complete` + `elicitation_response` added to `generateHooksConfig()`, `HookEventType`, `HookEventSchema`, and both SSE registries. `refreshStaleReverieHooks` gets a staleness probe for them (`hooksJson.includes('elicitation_complete')`) so existing cases heal on next Claude spawn, exactly like the `-k`/secret/marker probes.
 - `sanitizeHookData`: allowlist `message` (bounded 500 chars). This also un-deadens the existing notification text paths.
 
 ### Routes: `src/web/routes/approval-routes.ts`

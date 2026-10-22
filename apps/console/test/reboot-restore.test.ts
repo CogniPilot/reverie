@@ -325,7 +325,7 @@ describe('which conversation a rebuilt pane resumes', () => {
 });
 
 describe('the recovery construction path can create a resumed pane', () => {
-  const workingDir = join(homedir(), 'codeman-cases', 'reboot-restore-spike');
+  const workingDir = join(homedir(), 'reverie-cases', 'reboot-restore-spike');
   const sessions: Session[] = [];
 
   afterEach(() => {

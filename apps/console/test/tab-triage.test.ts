@@ -53,10 +53,10 @@ type Triage = {
 function loadTriage(): Triage {
   const context = vm.createContext({ window: {}, globalThis: {} });
   vm.runInContext(read('constants.js'), context, { filename: 'constants.js' });
-  return (context.window as { CodemanTabTriage: Triage }).CodemanTabTriage;
+  return (context.window as { ReverieTabTriage: Triage }).ReverieTabTriage;
 }
 
-describe('CodemanTabTriage (pure)', () => {
+describe('ReverieTabTriage (pure)', () => {
   const triage = loadTriage();
 
   it('has four groups, most urgent first', () => {
@@ -151,7 +151,7 @@ describe('CodemanTabTriage (pure)', () => {
 });
 
 describe('tab grouping in the render paths (app.js)', () => {
-  let CodemanApp: { prototype: Record<string, any> };
+  let ReverieApp: { prototype: Record<string, any> };
   let window: any;
   let document: Document;
 
@@ -180,13 +180,13 @@ describe('tab grouping in the render paths (app.js)', () => {
         read('mobile-overview.js') +
         '\n' +
         read('webview-tabs.js') +
-        '\n;window.__TriageCodemanApp = CodemanApp;'
+        '\n;window.__TriageReverieApp = ReverieApp;'
     );
-    CodemanApp = window.__TriageCodemanApp;
+    ReverieApp = window.__TriageReverieApp;
   });
 
   function makeApp(arrangement: 'state' | 'case' | 'ledger' | 'classic' = 'state') {
-    const app = Object.create(CodemanApp.prototype) as Record<string, any>;
+    const app = Object.create(ReverieApp.prototype) as Record<string, any>;
     const root = document.documentElement;
     root.setAttribute('data-tab-orientation', 'horizontal');
     root.dataset.tabRailSort = 'activity';
@@ -537,7 +537,7 @@ describe('tab grouping in the render paths (app.js)', () => {
     /** An app whose updateTabOverflowMode() is the real one, as the resize handler calls it. */
     function liveOverflowApp(deviceType: string) {
       const app = makeApp();
-      app.updateTabOverflowMode = CodemanApp.prototype.updateTabOverflowMode;
+      app.updateTabOverflowMode = ReverieApp.prototype.updateTabOverflowMode;
       app.loadAppSettingsFromStorage = () => ({});
       app.getDefaultSettings = () => ({});
       window.MobileDetection.getDeviceType = () => deviceType;

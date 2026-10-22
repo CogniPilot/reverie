@@ -10,7 +10,7 @@
 export interface IntentPromptEntry {
   /** Capture time (ms epoch). */
   ts: number;
-  /** Codeman session the prompt was sent in. */
+  /** Reverie session the prompt was sent in. */
   sessionId: string;
   /** The prompt text, sanitized and bounded. */
   text: string;

@@ -19,7 +19,7 @@ import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { createRouteTestHarness, type RouteTestHarness } from './_route-test-utils.js';
 import { registerFileRoutes } from '../../src/web/routes/file-routes.js';
 
-const root = mkdtempSync(join(tmpdir(), 'codeman-file-search-'));
+const root = mkdtempSync(join(tmpdir(), 'reverie-file-search-'));
 mkdirSync(join(root, 'src', 'deep', 'nested'), { recursive: true });
 mkdirSync(join(root, 'node_modules', 'pkg'), { recursive: true });
 writeFileSync(join(root, 'README.md'), '#\n');

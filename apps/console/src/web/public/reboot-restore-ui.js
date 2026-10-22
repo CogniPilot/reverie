@@ -23,8 +23,8 @@
  * Saying so is what keeps an empty pane from reading as a broken restore.
  * Backend: src/web/reboot-restore-registry.ts, src/web/routes/reboot-restore-routes.ts.
  *
- * @mixin Extends CodemanApp.prototype via Object.assign
- * @dependency app.js (CodemanApp class, showToast)
+ * @mixin Extends ReverieApp.prototype via Object.assign
+ * @dependency app.js (ReverieApp class, showToast)
  * @dependency api-client.js at runtime (this._api / this._apiJson)
  * @loadorder 11.65, after approvals-ui.js and before admin-ui.js (11.7)
  */
@@ -47,7 +47,7 @@ function rebootSkipReason(reason) {
   }
 }
 
-Object.assign(CodemanApp.prototype, {
+Object.assign(ReverieApp.prototype, {
   /** Ask the server whether a reboot left anything on offer, and show the banner if so. */
   async initRebootRestoreBanner() {
     const data = await this._apiJson('/api/reboot-restore');

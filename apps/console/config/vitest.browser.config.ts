@@ -7,7 +7,7 @@ const root = resolve(import.meta.dirname, '..');
 /**
  * The Playwright-driven suite `npm test` skips — `npm run test:browser`.
  *
- * Needs chromium and, for most of these, a live Codeman server on a real port;
+ * Needs chromium and, for most of these, a live Reverie server on a real port;
  * codex-predictive-echo also needs a real codex binary. Expect failures where
  * the machine cannot provide those, and read them as "not runnable here", not
  * as a regression.

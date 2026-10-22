@@ -1,5 +1,5 @@
 /**
- * @fileoverview `codeman agent …` — the three invariants from `src/cli-agent.ts`
+ * @fileoverview `reverie agent …` — the three invariants from `src/cli-agent.ts`
  * plus every verb against a recording fake transport, and the real HTTP transport
  * against a local server (headers, auth, query encoding).
  */
@@ -41,7 +41,7 @@ import {
   type ApiResponse,
   type RequestOptions,
 } from '../src/cli-agent.js';
-import { readCodemanEnvFile } from '../src/codeman-credentials.js';
+import { readReverieEnvFile } from '../src/reverie-credentials.js';
 
 const SELF = '00000004-0004-4000-8000-000000000004';
 const OTHER = '00000024-002a-4000-8000-000000000038';
@@ -92,30 +92,30 @@ function apiError(status: number, errorCode: string, error: string): ApiResponse
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('resolveAgentContext (guard)', () => {
-  const inside = { CODEMAN_MUX: '1', CODEMAN_API_URL: 'http://127.0.0.1:3459', CODEMAN_SESSION_ID: SELF };
+  const inside = { REVERIE_MUX: '1', REVERIE_API_URL: 'http://127.0.0.1:3459', REVERIE_SESSION_ID: SELF };
 
-  it('refuses outside a Codeman session', () => {
+  it('refuses outside a Reverie session', () => {
     expect(() => resolveAgentContext({}, () => ({}))).toThrow(AgentGuardError);
-    expect(() => resolveAgentContext({ ...inside, CODEMAN_MUX: '0' }, () => ({}))).toThrow(/CODEMAN_MUX/);
+    expect(() => resolveAgentContext({ ...inside, REVERIE_MUX: '0' }, () => ({}))).toThrow(/REVERIE_MUX/);
   });
 
   it('never guesses an API URL', () => {
-    expect(() => resolveAgentContext({ ...inside, CODEMAN_API_URL: '' }, () => ({}))).toThrow(/refusing to guess/);
-    expect(() => resolveAgentContext({ ...inside, CODEMAN_API_URL: undefined }, () => ({}))).toThrow(AgentGuardError);
+    expect(() => resolveAgentContext({ ...inside, REVERIE_API_URL: '' }, () => ({}))).toThrow(/refusing to guess/);
+    expect(() => resolveAgentContext({ ...inside, REVERIE_API_URL: undefined }, () => ({}))).toThrow(AgentGuardError);
   });
 
   it('needs its own session id to tell self from others', () => {
-    expect(() => resolveAgentContext({ ...inside, CODEMAN_SESSION_ID: '' }, () => ({}))).toThrow(/CODEMAN_SESSION_ID/);
+    expect(() => resolveAgentContext({ ...inside, REVERIE_SESSION_ID: '' }, () => ({}))).toThrow(/REVERIE_SESSION_ID/);
   });
 
   it('takes the password from the environment first, the .env file second, and none means open', () => {
     expect(
-      resolveAgentContext({ ...inside, CODEMAN_PASSWORD: 'pw' }, () => ({ CODEMAN_PASSWORD: 'file' })).auth
+      resolveAgentContext({ ...inside, REVERIE_PASSWORD: 'pw' }, () => ({ REVERIE_PASSWORD: 'file' })).auth
     ).toEqual({
       username: 'admin',
       password: 'pw',
     });
-    expect(resolveAgentContext(inside, () => ({ CODEMAN_USERNAME: 'joe', CODEMAN_PASSWORD: 'file' })).auth).toEqual({
+    expect(resolveAgentContext(inside, () => ({ REVERIE_USERNAME: 'joe', REVERIE_PASSWORD: 'file' })).auth).toEqual({
       username: 'joe',
       password: 'file',
     });
@@ -125,17 +125,17 @@ describe('resolveAgentContext (guard)', () => {
   it('resolves each field the way attach and the TUI do (one shared order)', () => {
     // Password from the environment, username from the file: joe, not admin.
     expect(
-      resolveAgentContext({ ...inside, CODEMAN_PASSWORD: 'pw' }, () => ({ CODEMAN_USERNAME: 'joe' })).auth
+      resolveAgentContext({ ...inside, REVERIE_PASSWORD: 'pw' }, () => ({ REVERIE_USERNAME: 'joe' })).auth
     ).toEqual({ username: 'joe', password: 'pw' });
   });
 
   it('reads a hand-authored .env with quotes and export prefixes', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'codeman-agent-env-'));
+    const dir = mkdtempSync(join(tmpdir(), 'reverie-agent-env-'));
     try {
       const file = join(dir, '.env');
-      writeFileSync(file, '# comment\nexport CODEMAN_USERNAME="joe"\nCODEMAN_PASSWORD=\'s3cret\'\nnot a line\n');
-      expect(readCodemanEnvFile(file)).toEqual({ CODEMAN_USERNAME: 'joe', CODEMAN_PASSWORD: 's3cret' });
-      expect(readCodemanEnvFile(join(dir, 'missing'))).toEqual({});
+      writeFileSync(file, '# comment\nexport REVERIE_USERNAME="joe"\nREVERIE_PASSWORD=\'s3cret\'\nnot a line\n');
+      expect(readReverieEnvFile(file)).toEqual({ REVERIE_USERNAME: 'joe', REVERIE_PASSWORD: 's3cret' });
+      expect(readReverieEnvFile(join(dir, 'missing'))).toEqual({});
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -226,7 +226,7 @@ describe('rm fails closed', () => {
 
 describe('agent ls', () => {
   const sessions = [
-    { id: SELF, mode: 'claude', status: 'busy', name: 'w1-Codeman' },
+    { id: SELF, mode: 'claude', status: 'busy', name: 'w1-Reverie' },
     { id: OTHER, mode: 'opencode', status: 'idle', workingDir: '/home/joe/wiki' },
   ];
 
@@ -234,7 +234,7 @@ describe('agent ls', () => {
     const deps = fakeDeps([ok(sessions)]);
     expect(await agentLs(deps)).toBe(EXIT.ok);
     const text = deps.out.join('\n');
-    expect(text).toMatch(/\*\s+00000004\s+claude\s+busy\s+w1-Codeman/);
+    expect(text).toMatch(/\*\s+00000004\s+claude\s+busy\s+w1-Reverie/);
     expect(text).toMatch(/00000024\s+opencode\s+idle\s+\/home\/joe\/wiki/);
   });
 
@@ -268,7 +268,7 @@ describe('agent send', () => {
     expect(deps.calls[0]).toMatchObject({
       method: 'POST',
       path: `/api/v1/sessions/${OTHER}/input`,
-      body: { input: 'say DONE_1\r', useMux: true, clientId: 'codeman-agent-cli-00000004', seq: 1_700_000_000_000 },
+      body: { input: 'say DONE_1\r', useMux: true, clientId: 'reverie-agent-cli-00000004', seq: 1_700_000_000_000 },
     });
     expect(deps.calls[0].body).not.toHaveProperty('wait');
   });
@@ -420,7 +420,7 @@ describe('agent interrupt', () => {
     expect(deps.calls[0].body).toEqual({
       input: '\u001b',
       useMux: true,
-      clientId: 'codeman-agent-cli-00000004-interrupt',
+      clientId: 'reverie-agent-cli-00000004-interrupt',
       seq: 1_700_000_000_000,
     });
     const self = fakeDeps([]);
@@ -524,8 +524,8 @@ describe('agent spawn', () => {
     // the request that can CREATE a case directory (quick-start), never anything else.
     const spawn = fakeDeps([ok({ sessionId: OTHER, caseName: 'c' }), ok({ wait: { matched: true } })]);
     await agentSpawn(spawn, { caseName: 'c', mode: 'claude', ready: true, timeoutMs: 1000 });
-    expect(spawn.calls[0].headers).toEqual({ 'X-Codeman-Agent-Origin': 'codeman-agent-cli' });
-    expect(spawn.calls[1].headers?.['X-Codeman-Agent-Origin']).toBeUndefined(); // the readiness wait
+    expect(spawn.calls[0].headers).toEqual({ 'X-Reverie-Agent-Origin': 'reverie-agent-cli' });
+    expect(spawn.calls[1].headers?.['X-Reverie-Agent-Origin']).toBeUndefined(); // the readiness wait
 
     const everyOther = fakeDeps((o) =>
       o.path === '/api/v1/sessions' ? ok([]) : ok({ wait: { signal: 'stop' }, text: '' })
@@ -537,8 +537,8 @@ describe('agent spawn', () => {
     await agentInterrupt(everyOther, { id: OTHER });
     await agentRm(everyOther, { id: OTHER });
     expect(everyOther.calls.length).toBeGreaterThan(5);
-    for (const call of everyOther.calls) expect(call.headers?.['X-Codeman-Agent-Origin'], call.path).toBeUndefined();
-    expect(baseHeaders(ctx())).not.toHaveProperty('X-Codeman-Agent-Origin');
+    for (const call of everyOther.calls) expect(call.headers?.['X-Reverie-Agent-Origin'], call.path).toBeUndefined();
+    expect(baseHeaders(ctx())).not.toHaveProperty('X-Reverie-Agent-Origin');
   });
 
   it('takes the readiness mark from the CLI registry, not from a mode list', () => {
@@ -731,8 +731,8 @@ describe('httpRequest', () => {
     expect(res.json).toEqual({ success: true, data: { echo: true } });
     const last = seen.at(-1)!;
     expect(last.url).toBe('/api/v1/sessions/x/wait-output?match=shift%2Btab&from=buffer&timeout=1000');
-    expect(last.headers['x-codeman-parent-session']).toBe(SELF);
-    expect(last.headers['x-codeman-agent-origin']).toBeUndefined(); // only spawn's quick-start carries it
+    expect(last.headers['x-reverie-parent-session']).toBe(SELF);
+    expect(last.headers['x-reverie-agent-origin']).toBeUndefined(); // only spawn's quick-start carries it
     expect(last.headers.authorization).toBe(`Basic ${Buffer.from('joe:pw').toString('base64')}`);
   });
 

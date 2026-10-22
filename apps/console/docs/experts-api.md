@@ -45,7 +45,7 @@ error names the field and never echoes the matched text.
 | `POST /api/experts/:id/hire` | owner or delegate | `{ workingDir, mode?, model?, effort?, accountProfileId?, reason, budgetStop? }` |
 | `POST /api/experts/:id/retire` | owner or delegate | `{ sessionId, reason }` |
 
-**Owner only.** A request that carries an `X-Codeman-Parent-Session` header with any value,
+**Owner only.** A request that carries an `X-Reverie-Parent-Session` header with any value,
 even an empty one, gets 403 and changes nothing. The header is a routing hint and does not
 authenticate anyone. Under the owner policy, the template and settings routes are
 owner-only. The two GET routes and hire/retire are open to agents, and they make their own

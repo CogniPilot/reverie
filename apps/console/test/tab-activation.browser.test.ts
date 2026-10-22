@@ -10,7 +10,7 @@
  * DOM emulation cannot answer either question (hit testing, hover reveal and
  * layout are Chromium's), which is why this runs in a real browser. The shipping
  * app.js, webview-tabs.js, terminal-ui.js (for the touch keyboard dismissal) and
- * styles.css are loaded into a page; the CodemanApp instance gets stub actions
+ * styles.css are loaded into a page; the ReverieApp instance gets stub actions
  * that only record what ran.
  *
  * Port: none (page.setContent, no server).
@@ -32,10 +32,10 @@ describe('tab row activation in Chromium', () => {
     browser = await chromium.launch({ headless: true });
     page = await browser.newPage({ viewport: { width: 1280, height: 800 }, deviceScaleFactor: 1 });
     // A real origin, so localStorage (per-device collapse) works as it does in the app.
-    await page.route('http://codeman.test/', (route) =>
+    await page.route('http://reverie.test/', (route) =>
       route.fulfill({ contentType: 'text/html', body: '<!doctype html><html><body></body></html>' })
     );
-    await page.goto('http://codeman.test/');
+    await page.goto('http://reverie.test/');
     await page.setContent(`<!doctype html>
       <html data-tab-orientation="horizontal" data-tab-rail-sort="manual">
         <head><style>${read('styles.css')}</style></head>
@@ -55,13 +55,13 @@ describe('tab row activation in Chromium', () => {
         read('tab-layout-browser.js') +
         '\n' +
         read('app.js') +
-        '\nwindow.CodemanApp = CodemanApp; window.__setApp = (value) => { app = value; };',
+        '\nwindow.ReverieApp = ReverieApp; window.__setApp = (value) => { app = value; };',
     });
     await page.addScriptTag({ content: read('webview-tabs.js') });
     await page.addScriptTag({ content: read('terminal-ui.js') });
     await page.evaluate(() => {
       const w = window as any;
-      const app = Object.create(w.CodemanApp.prototype);
+      const app = Object.create(w.ReverieApp.prototype);
       app.$ = (id: string) => document.getElementById(id);
       app.sessions = new Map([
         ['one', { id: 'one', name: 'One', status: 'idle', mode: 'shell' }],

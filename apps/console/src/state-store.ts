@@ -1,10 +1,10 @@
 /**
- * @fileoverview Persistent JSON state storage for Codeman.
+ * @fileoverview Persistent JSON state storage for Reverie.
  *
  * Persists application state with debounced writes (500ms) to prevent excessive disk I/O.
  * State is split into two files:
- * - `~/.codeman/state.json` — main app state (sessions, tasks, config, global stats)
- * - `~/.codeman/state-inner.json` — Ralph loop state per session (changes rapidly)
+ * - `~/.reverie/state.json` — main app state (sessions, tasks, config, global stats)
+ * - `~/.reverie/state-inner.json` — Ralph loop state per session (changes rapidly)
  *
  * Key exports:
  * - `StateStore` class — singleton store with circuit breaker for save failures

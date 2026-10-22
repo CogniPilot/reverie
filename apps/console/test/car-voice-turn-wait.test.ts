@@ -12,10 +12,10 @@ import { resolve } from 'node:path';
 const dom = new JSDOM('<!doctype html><html><head></head><body></body></html>', { runScripts: 'outside-only' });
 const context = dom.getInternalVMContext();
 // The shell loader revalidates assets with fetch as chatroom-ui.js loads: keep it off the network.
-vm.runInContext('globalThis.CodemanApp = class {}; globalThis.fetch = () => new Promise(() => {});', context);
+vm.runInContext('globalThis.ReverieApp = class {}; globalThis.fetch = () => new Promise(() => {});', context);
 for (const f of ['chatroom-ui.js', 'voice-chat.js', 'car-mode.js'])
   vm.runInContext(readFileSync(resolve(import.meta.dirname, `../src/web/public/${f}`), 'utf8'), context);
-const Proto = vm.runInContext('CodemanApp.prototype', context);
+const Proto = vm.runInContext('ReverieApp.prototype', context);
 const doc = dom.window.document;
 afterAll(() => dom.window.close());
 

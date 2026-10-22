@@ -25,7 +25,7 @@ successful build.
 A zero exit code proves the layers ran, not that the toolchain works. Verify:
 
 ```bash
-docker run --rm codeman/agent:base bash -lc \
+docker run --rm reverie/agent:base bash -lc \
   'for c in claude codex gemini opencode agy pi grok dsh omp; do printf "%-9s " $c; $c --version 2>&1 | head -1; done'
 ```
 
@@ -139,19 +139,10 @@ This hands a GitHub token and an Azure sign-in to every agent in a seeded Docker
 same trust you already give it with Claude, Codex or gcloud. Turn seeding off for a case that
 should not have them.
 
-Both CLIs are opt-in. To build the agent image with them, set
-`CODEMAN_AGENT_IMAGE_INSTALL_GH=1` and/or `CODEMAN_AGENT_IMAGE_INSTALL_AZ=1` where the image
-is built: in front of `node scripts/build-agent-image.mjs`, or in the Reverie server's
-environment for the image it builds automatically (in the Docker deployment, `environment:`
-in `docker-compose.override.yml`), then rebuild the image with `--no-cache`.
-`docker/README.md` ("Private repositories") has the details and the matching switches for
-the server image.
-
-To give agents a fixed Git commit identity, set `CODEMAN_AGENT_IMAGE_GIT_USER_NAME` and
-`CODEMAN_AGENT_IMAGE_GIT_USER_EMAIL` together in that same environment (in the Docker
-deployment, set `GIT_USER_NAME` and `GIT_USER_EMAIL` in `docker/.env` instead, which feeds
-both images). An existing `codeman/agent:base` only picks it up after a `--no-cache` rebuild
-and recreated case containers; `docker/README.md` ("Git commit identity") has the details.
+The owner chooses credential helpers in the shared Nix runtime. There are no
+standalone Dockerfile build arguments or automatic npm image builds. Configure
+Git identity in persistent agent-home configuration. See the root
+[setup guide](../../../../docs/setup.md).
 
 ## Isolation
 
@@ -189,7 +180,7 @@ The container is paused across the capture so image and workspace are consistent
 is checked first, and the intermediate image is cleaned up. Exports run in the background
 and notify you when the bundle is ready.
 
-**Import** on the other machine: copy the `.tgz` into `~/.codeman/docker-exports/` and
+**Import** on the other machine: copy the `.tgz` into `~/.reverie/docker-exports/` and
 import it into a new case. The manifest and per-member checksums are verified, the workspace
 tar is extracted with a traversal guard, and the image is loaded under a **quarantined tag**
 so it can never overwrite a local image. The destination supplies its own credentials, so
@@ -208,7 +199,7 @@ the exec PTY, and with permission prompts skipped there is nothing to forward an
 To enable them:
 
 ```bash
-CODEMAN_DOCKER_BRIDGE_HOOKS=1
+REVERIE_DOCKER_BRIDGE_HOOKS=1
 ```
 
 Reverie then starts a second listener bound to the docker bridge gateway that serves **only**
@@ -230,4 +221,4 @@ this does not widen your network exposure. Add it to the service unit and restar
 - [Core Concepts](Core-Concepts) - why this is an overlay rather than a run mode.
 - [Security](Security) - where containers fit in the model.
 - [Remote SSH Sessions](Remote-SSH-Sessions) - the other overlay.
-- [`docs/docker-cases.md`](https://github.com/Ark0N/Codeman/blob/master/docs/docker-cases.md) - the full reference.
+- [`docs/docker-cases.md`](https://github.com/jgoppert/reverie/blob/main/apps/console/docs/docker-cases.md) - the full reference.

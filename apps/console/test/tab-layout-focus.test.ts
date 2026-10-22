@@ -308,7 +308,7 @@ describe('persistence and the HTTP route', () => {
   });
 
   it('PUT /api/tab-layout with focus round-trips through GET and a StateStore reload', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'codeman-tab-focus-'));
+    const dir = mkdtempSync(join(tmpdir(), 'reverie-tab-focus-'));
     dirs.push(dir);
     const file = join(dir, 'state.json');
     writeFileSync(file, JSON.stringify({}));
@@ -327,7 +327,7 @@ describe('persistence and the HTTP route', () => {
     registerTabLayoutRoutes(app, { tabLayouts: service } as never);
     installRouteErrorHandler(app);
     await app.ready();
-    vi.stubEnv('CODEMAN_MULTIUSER', '0');
+    vi.stubEnv('REVERIE_MULTIUSER', '0');
     try {
       const read = await app.inject({ method: 'GET', url: '/api/tab-layout' });
       const layout = read.json().data.layout as TabLayout;

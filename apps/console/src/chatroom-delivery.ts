@@ -176,7 +176,7 @@ export function pollSummary(message: ChatMessage): string {
 
 /**
  * Context for one spoken turn (car mode): it rides on that message only, so written work stays as full as ever.
- * Codeman's words, never the speaker's: it sits after the quoted text, where nothing a sender writes can reach.
+ * Reverie's words, never the speaker's: it sits after the quoted text, where nothing a sender writes can reach.
  */
 export const SPOKEN_TURN_HINT =
   '(spoken in car mode: reply in 1-3 short sentences of natural speech, result first; keep paths, commands, ids, logs and code out of the spoken reply and put any details in a separate written post)';
@@ -203,7 +203,7 @@ export function renderForRecipient(
   else to = describeRecipients(message, nameOf);
   // Attachments reach an agent as absolute paths it can read, still on the one line.
   const files = (message.attachments ?? []).map((a) => ` [attached: ${quoteForPane(a.path, 400)}]`).join('');
-  // An attachment-only message says so in Codeman's own words, outside any quote (the sender wrote nothing).
+  // An attachment-only message says so in Reverie's own words, outside any quote (the sender wrote nothing).
   const text = message.poll
     ? quoteForPane(pollSummary(message))
     : message.text
@@ -304,7 +304,7 @@ function memberLine(room: ChatRoom, nameOf: (id: string) => string, exclude?: st
 /**
  * The room's name in a delivered header. A direct message is named by its id (`DM:<roomId>`), so a harness can tell it is
  * private and reply into exactly that DM; "Direct message" is only its label, the same for every DM. Harness parsers
- * (cto/plugins) read this; test/fixtures/delivery-lines.json pins the format for both sides.
+ * (python/reverie/plugins) read this; test/fixtures/delivery-lines.json pins the format for both sides.
  */
 export function deliveryRoomName(room: { id: string; name: string; kind?: 'dm'; dm?: string[] }): string {
   return isDm(room as never) ? `DM:${room.id}` : roomLabel(room);

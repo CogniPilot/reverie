@@ -26,7 +26,7 @@
  *   TeamConfig.leadSessionId (teams), RespawnCycleMetrics.sessionId (respawn),
  *   TaskState.assignedSessionId (task)
  *
- * Persisted to `~/.codeman/state.json`. Served at `GET /api/sessions` and
+ * Persisted to `~/.reverie/state.json`. Served at `GET /api/sessions` and
  * `GET /api/sessions/:id`.
  */
 
@@ -59,7 +59,7 @@ export type SessionMode =
   | 'omp';
 
 /**
- * Who owns a session's name. `placeholder`: Codeman's own `w<n>-<case>` (or no
+ * Who owns a session's name. `placeholder`: Reverie's own `w<n>-<case>` (or no
  * name at all), still eligible for auto-naming. `auto`: titled after its first
  * prompt (`w<n>-<case>: <title>`), which happens once. `manual`: set by a
  * person; auto-naming never touches it.
@@ -98,7 +98,7 @@ export type RemoteCommandMode = Extract<
  *
  * COD-107 — all fields are optional; every field absent reproduces today's
  * behavior (port-22, default-identity, directly-SSH-able hosts). These describe
- * HOW Codeman reaches the host (identity, proxy, jump host, arbitrary `-o`),
+ * HOW Reverie reaches the host (identity, proxy, jump host, arbitrary `-o`),
  * letting it connect to e.g. a host fronted by a cloudflared SOCKS5 proxy on a
  * custom port — the same connection `ssh-aa-desktop` makes — without a wrapper.
  */
@@ -129,7 +129,7 @@ export interface RemoteHost extends RemoteSshOptions {
   commands?: Partial<Record<RemoteCommandMode, string>>;
   /**
    * Optional Wake-on-LAN MAC address(es), comma-separated (e.g.
-   * `04:d9:f5:80:c6:58`). Codeman sends the magic packet itself (UDP port 9
+   * `04:d9:f5:80:c6:58`). Reverie sends the magic packet itself (UDP port 9
    * broadcast), so the common case needs no external script. A SLEEPING host's
    * port-22 probe still fails, which is what triggers the wake — this only
    * controls HOW the host is woken.
@@ -166,13 +166,13 @@ export interface SessionRemote extends RemoteSshOptions {
   remotePath: string;
   commands?: Partial<Record<RemoteCommandMode, string>>;
   /**
-   * COD-105 — whether THIS Codeman created the remote tmux session.
+   * COD-105 — whether THIS Reverie created the remote tmux session.
    *
    * - `true` (default for COD-104 launched sessions): we own the remote session;
    *   an explicit "kill" may propagate a remote `tmux kill-session`.
-   * - `false` (discovered + attached an existing remote session another Codeman
+   * - `false` (discovered + attached an existing remote session another Reverie
    *   created): closing the local tab must DETACH only — we must NEVER issue a
-   *   remote `kill-session`, or we'd nuke work the remote's own Codeman (or
+   *   remote `kill-session`, or we'd nuke work the remote's own Reverie (or
    *   another instance) still relies on. See `killSession()` gate.
    *
    * Absent is treated as owned (legacy/COD-104 sessions persisted before this
@@ -181,8 +181,8 @@ export interface SessionRemote extends RemoteSshOptions {
   owned?: boolean;
   /**
    * COD-105 — for a NON-owned (discovered + attached) session, the EXISTING
-   * remote tmux session name to `attach -t` (e.g. `codeman-disco1`). It differs
-   * from this Codeman's deterministic `codeman-<id>` name because the remote
+   * remote tmux session name to `attach -t` (e.g. `reverie-disco1`). It differs
+   * from this Reverie's deterministic `reverie-<id>` name because the remote
    * session was created elsewhere. Only meaningful when `owned === false`.
    */
   remoteSessionName?: string;
@@ -196,12 +196,12 @@ export interface SessionRemote extends RemoteSshOptions {
 }
 
 /**
- * COD-105 — a `codeman-*` tmux session discovered on a remote host's
- * `tmux -L codeman` socket (may have been created by the remote's own Codeman,
- * another instance, or this one). Returned by `listRemoteCodemanSessions`.
+ * COD-105 — a `reverie-*` tmux session discovered on a remote host's
+ * `tmux -L reverie` socket (may have been created by the remote's own Reverie,
+ * another instance, or this one). Returned by `listRemoteReverieSessions`.
  */
 export interface RemoteSessionInfo {
-  /** tmux session name (always starts `codeman-`). */
+  /** tmux session name (always starts `reverie-`). */
   name: string;
   /** Whether at least one client is currently attached to the remote session. */
   attached: boolean;
@@ -236,7 +236,7 @@ export type DockerEngine = 'docker' | 'podman';
  * unrepresentable (never in this union, never emitted by the flag builder).
  * - `bridge`: own netns, NAT egress, no inbound (default — every API CLI needs egress)
  * - `none`: fully offline sandbox (breaks API CLIs; reserved for `shell`)
- * - `custom`: a user-defined bridge `codeman-net-<slug>` (future egress-allowlist chokepoint)
+ * - `custom`: a user-defined bridge `reverie-net-<slug>` (future egress-allowlist chokepoint)
  */
 export type DockerNetworkMode = 'bridge' | 'none' | 'custom';
 
@@ -260,7 +260,7 @@ export interface DockerHost {
   label: string;
   /** Engine; when absent the availability probe resolves it (docker, else podman). */
   engine?: DockerEngine;
-  /** Base image ref (built locally by scripts/build-agent-image.mjs, e.g. codeman/agent:base). */
+  /** Base image ref (built locally by scripts/build-agent-image.mjs, e.g. reverie/agent:base). */
   image: string;
   /** Advanced: remote daemon (-H ssh://user@host or a DOCKER_HOST value). */
   daemonHost?: string;
@@ -298,19 +298,19 @@ export interface DockerCase {
   hostWorkspacePath: string;
   /** Container path (default = hostWorkspacePath: mirror -> transcript projHash correlates). */
   containerWorkdir?: string;
-  /** Container name (default codeman-case-<slug>). */
+  /** Container name (default reverie-case-<slug>). */
   container?: string;
   /**
-   * Whether THIS Codeman created the container (mirror of `SessionRemote.owned`).
+   * Whether THIS Reverie created the container (mirror of `SessionRemote.owned`).
    *
-   * - `true` (default for cases Codeman linked/quick-created): we own the
+   * - `true` (default for cases Reverie linked/quick-created): we own the
    *   container; drift may recreate it, case-delete may `docker rm -f` it, and
    *   the launch chain may create + start it.
    * - `false` (ADOPTED: an already-running container the user built and runs
-   *   themselves): Codeman must never create, start, stop, restart or remove it.
+   *   themselves): Reverie must never create, start, stop, restart or remove it.
    *   The launch chain fails closed when the container is missing or not running
    *   instead of touching its lifecycle, drift is not evaluated (there is no
-   *   `codeman.confighash` label to compare), and no credential seed is copied
+   *   `reverie.confighash` label to compare), and no credential seed is copied
    *   into its HOME. Only the in-container tmux session is ever created or
    *   killed — exactly the `owned:false` remote-SSH contract.
    *
@@ -391,7 +391,7 @@ export function isEffortLevel(value: string | undefined): value is EffortLevel {
 
 /**
  * Reasoning effort levels codex accepts as `model_reasoning_effort` (codex-cli 0.154.0).
- * Which of them a given model honours is codex's business; Codeman only keeps the value
+ * Which of them a given model honours is codex's business; Reverie only keeps the value
  * to a known word, since it lands in the launch argv.
  */
 export const CODEX_REASONING_EFFORTS = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'] as const;
@@ -410,7 +410,7 @@ export const ADVISOR_MODEL_ALIASES = ['fable', 'opus', 'sonnet'] as const;
 const ADVISOR_MODEL_ID_PATTERN = /^claude-(?:fable|opus|sonnet)-[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
 /**
- * Type guard: is the value an advisor model Codeman will pass to claude? An alias from
+ * Type guard: is the value an advisor model Reverie will pass to claude? An alias from
  * ADVISOR_MODEL_ALIASES or a full fable/opus/sonnet model id. ⚠️ This allowlist is also the
  * injection guard: the value is rendered inside the single-quoted `--settings` JSON argument.
  */
@@ -558,7 +558,7 @@ export interface GrokConfig {
  *   workspace-write    sandbox workspace-write,    approval ask     <- default
  *   danger-full-access sandbox danger-full-access, approval never
  *
- * This is the one place a Codeman env export is the RIGHT mechanism rather than
+ * This is the one place a Reverie env export is the RIGHT mechanism rather than
  * the forbidden one: unlike `CLAUDE_CODE_EFFORT_LEVEL` (which hard-locks
  * in-session `/effort`), `DSH_PERMISSION_MODE` is read with `??` as a boot-time
  * DEFAULT, so it stays a soft default the user can still change in-session. It
@@ -583,7 +583,7 @@ export interface DeepSeekConfig {
   /** Resume a specific session by ID (`--resume <id>`). Wins over resumeSession. */
   resumeSessionId?: string;
   /**
-   * Report idle/working/blocked back to Codeman through the Herdr-compatible
+   * Report idle/working/blocked back to Reverie through the Herdr-compatible
    * status shim (see `deepseek-status-shim.ts`). Default ON: it upgrades this
    * mode from output-stabilization guessing to definitive hook events. Only
    * TUIs that implement the contract report; for one that does not, this is
@@ -621,7 +621,7 @@ export type SessionAttachmentHistorySource = 'detected' | 'external';
 export interface SessionAttachmentHistoryItem {
   /** Stable history identity used for dedupe and list rendering */
   id: string;
-  /** Codeman session ID this item belongs to */
+  /** Reverie session ID this item belongs to */
   sessionId: string;
   /** Display filename */
   fileName: string;
@@ -690,13 +690,13 @@ export interface CustomModelBookkeeping extends CustomModelSelection {
 /**
  * The agent inside a LOCAL tmux pane has exited, and the pane survived it.
  *
- * Codeman creates every pane with `remain-on-exit on`, so `/exit` ends the CLI
+ * Reverie creates every pane with `remain-on-exit on`, so `/exit` ends the CLI
  * while tmux keeps the pane, the tmux session and the `tmux attach-session`
- * process Codeman records as the session's pid. No PTY exit handler runs, so
+ * process Reverie records as the session's pid. No PTY exit handler runs, so
  * without this record the session reads as a live idle one (Ark0N/Codeman#446).
  *
  * The field is TRI-STATE, and the third state is the absence of the field:
- * `undefined` means Codeman does not know, and it must never be rendered as
+ * `undefined` means Reverie does not know, and it must never be rendered as
  * "alive". It is absent for a direct-PTY session (no pane exists), for a remote
  * SSH session (the local pane holds the ssh client, whose death means transport
  * drop OR exit) and for a docker case (the local pane holds a `docker exec`
@@ -759,7 +759,7 @@ export interface PromptCacheStatus {
   /** Claude Code's diagnosis of the last miss, e.g. `ttl_expired_1h` or `tools_changed`. */
   lastMissCauses?: string[];
   /**
-   * Epoch MS when Codeman saw the context compacted (`/compact`, Claude Code's own idle
+   * Epoch MS when Reverie saw the context compacted (`/compact`, Claude Code's own idle
    * compaction, or a clearing of old tool results): the first warm report whose
    * `recacheTokensIfCold` is null after one that carried it. Carried while the null window holds,
    * dropped at the next request. Derived in `Session.setPromptCache`, not reported by the
@@ -770,13 +770,13 @@ export interface PromptCacheStatus {
 }
 
 /**
- * Whether this launch carries Codeman's statusLine exporter, the only source of
+ * Whether this launch carries Reverie's statusLine exporter, the only source of
  * `promptCache`, and why not when it does not. Decided once per claude spawn
  * (`TmuxManager`), so a setting flipped later does not change it until the next launch.
  * - `injected`: the exporter is on the launch.
  * - `collection-off`: plan-usage collection (`showPlanUsageLimits`) was off at launch.
  * - `workspace-statusline`: the workspace's own `.claude/settings.local.json` sets a
- *   statusLine (or could not be read), and Codeman never replaces one there.
+ *   statusLine (or could not be read), and Reverie never replaces one there.
  * - `remote`: remote and Docker launches never carry the exporter.
  */
 export type StatusLineExporter = 'injected' | 'collection-off' | 'workspace-statusline' | 'remote';
@@ -799,8 +799,8 @@ export interface SessionState {
   /** Owning username in multi-user mode; undefined in single-user (ignored when the flag is off) */
   owner?: string;
   /**
-   * The Codeman session that spawned this one, supplied by the caller at create time
-   * (`parentSessionId` body field or the `X-Codeman-Parent-Session` header) and resolved
+   * The Reverie session that spawned this one, supplied by the caller at create time
+   * (`parentSessionId` body field or the `X-Reverie-Parent-Session` header) and resolved
    * against live sessions before being stored.
    *
    * ⚠️ UI DECORATION ONLY — it draws the lineage lines between tabs. It is never an
@@ -950,7 +950,7 @@ export interface SessionState {
   /**
    * Wall-clock ms of this pane's last Enter (Session.lastSubmitAt). Persisted
    * because it is the response-viewer's only anchor for re-deriving the pane's
-   * live conversation after a Codeman restart: `start()` resets
+   * live conversation after a Reverie restart: `start()` resets
    * `claudeSessionId` to the launch id even when re-attaching to a mux session
    * whose CLI has since moved on via `/clear`, and the correlation cannot run
    * again until the pane's own Enter is known.

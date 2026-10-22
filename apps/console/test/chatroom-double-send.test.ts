@@ -10,7 +10,7 @@ import { resolve } from 'node:path';
 
 const dom = new JSDOM('<!doctype html><html><head></head><body></body></html>', { runScripts: 'outside-only' });
 const context = dom.getInternalVMContext();
-vm.runInContext('globalThis.CodemanApp = class {}; globalThis.fetch = () => new Promise(() => {});', context);
+vm.runInContext('globalThis.ReverieApp = class {}; globalThis.fetch = () => new Promise(() => {});', context);
 vm.runInContext(readFileSync(resolve(import.meta.dirname, '../src/web/public/chatroom-ui.js'), 'utf8'), context);
 afterAll(() => dom.window.close());
 
@@ -19,7 +19,7 @@ type Answer = { ok: boolean; status?: number; errorCode?: string; error?: string
 const stored = (): Answer => ({ ok: true, data: { message: { id: 'p1', text: 'I ran it' } } });
 
 function composer(api: (url: string, o: unknown) => Promise<Answer>) {
-  const self = vm.runInContext('Object.create(CodemanApp.prototype)', context) as Record<string, unknown>;
+  const self = vm.runInContext('Object.create(ReverieApp.prototype)', context) as Record<string, unknown>;
   const input = { value: 'I ran it', focus() {} };
   Object.assign(self, {
     _chatEls: { input, to: { value: '' }, send: { disabled: false } },

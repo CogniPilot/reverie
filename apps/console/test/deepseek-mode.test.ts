@@ -297,13 +297,13 @@ describe('DeepSeek status bridge', () => {
 });
 
 describe('DeepSeek multi-user clamp', () => {
-  const ORIGINAL = process.env.CODEMAN_MULTIUSER;
+  const ORIGINAL = process.env.REVERIE_MULTIUSER;
   beforeEach(() => {
-    process.env.CODEMAN_MULTIUSER = '1';
+    process.env.REVERIE_MULTIUSER = '1';
   });
   afterEach(() => {
-    if (ORIGINAL === undefined) delete process.env.CODEMAN_MULTIUSER;
-    else process.env.CODEMAN_MULTIUSER = ORIGINAL;
+    if (ORIGINAL === undefined) delete process.env.REVERIE_MULTIUSER;
+    else process.env.REVERIE_MULTIUSER = ORIGINAL;
   });
 
   it('clamps a sent danger-full-access down to workspace-write, not read-only', () => {
@@ -333,13 +333,13 @@ describe('DeepSeek multi-user clamp', () => {
 });
 
 describe('DeepSeek multi-user clamp: the env-var half', () => {
-  const ORIGINAL = process.env.CODEMAN_MULTIUSER;
+  const ORIGINAL = process.env.REVERIE_MULTIUSER;
   beforeEach(() => {
-    process.env.CODEMAN_MULTIUSER = '1';
+    process.env.REVERIE_MULTIUSER = '1';
   });
   afterEach(() => {
-    if (ORIGINAL === undefined) delete process.env.CODEMAN_MULTIUSER;
-    else process.env.CODEMAN_MULTIUSER = ORIGINAL;
+    if (ORIGINAL === undefined) delete process.env.REVERIE_MULTIUSER;
+    else process.env.REVERIE_MULTIUSER = ORIGINAL;
   });
 
   it('strips DSH_PERMISSION_MODE, which would otherwise undo the config clamp on the same request', async () => {
@@ -382,7 +382,7 @@ describe('DeepSeek multi-user clamp: the env-var half', () => {
   });
 
   it('is a no-op in single-user mode', async () => {
-    delete process.env.CODEMAN_MULTIUSER;
+    delete process.env.REVERIE_MULTIUSER;
     const input = { DSH_PERMISSION_MODE: 'danger-full-access', DSH_HOME: '/opt/dsh' };
     // canUsernameRunPrivilegedCommands() returns true when !isMultiUserMode(), so
     // the single-user behaviour has to be byte-identical to before this clamp.

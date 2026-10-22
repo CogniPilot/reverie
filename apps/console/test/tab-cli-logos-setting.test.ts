@@ -41,8 +41,8 @@ const MOBILE = read('mobile.css');
 const I18N = read('i18n.js');
 const SCRIPTS = ['constants.js', 'app.js', 'settings-ui.js'].map(read);
 
-const DESKTOP_KEY = 'codeman-app-settings';
-const PHONE_KEY = 'codeman-app-settings-mobile';
+const DESKTOP_KEY = 'reverie-app-settings';
+const PHONE_KEY = 'reverie-app-settings-mobile';
 
 type Device = 'desktop' | 'mobile';
 type Settings = Record<string, unknown>;
@@ -108,7 +108,7 @@ async function boot(device: Device = 'desktop', stored?: Settings) {
   const dom = new JSDOM(INDEX, { url: 'http://localhost/', runScripts: 'outside-only' });
   const win = dom.window as unknown as Window & typeof globalThis & { eval(src: string): void; __App: any };
   windows.push(win);
-  // After load, so app.js's DOMContentLoaded boot (new CodemanApp(): SSE,
+  // After load, so app.js's DOMContentLoaded boot (new ReverieApp(): SSE,
   // timers, the terminal) never runs; only the prototype is under test.
   if (win.document.readyState !== 'complete') await new Promise((resolve) => win.addEventListener('load', resolve));
   win.setInterval = (() => 0) as unknown as typeof win.setInterval;
@@ -127,7 +127,7 @@ async function boot(device: Device = 'desktop', stored?: Settings) {
        var FocusTrap = function () { this.activate = () => {}; this.deactivate = () => {}; };
        var DEFAULT_VOICE_KEYTERMS = '';`,
       ...SCRIPTS,
-      'window.__App = CodemanApp;',
+      'window.__App = ReverieApp;',
     ].join('\n')
   );
   const target = Object.create(win.__App.prototype);
@@ -427,7 +427,7 @@ describe('zh-CN', () => {
   const english = rowText(new JSDOM(INDEX).window.document);
   const dom = new JSDOM(INDEX, { runScripts: 'outside-only', url: 'http://localhost/' });
   vm.runInContext(I18N, dom.getInternalVMContext(), { filename: 'i18n.js' });
-  const api = (dom.window as unknown as { CodemanI18n: { start(): void; configure(o: object): void } }).CodemanI18n;
+  const api = (dom.window as unknown as { ReverieI18n: { start(): void; configure(o: object): void } }).ReverieI18n;
   api.start();
   api.configure({ language: 'zh-CN' });
   const chinese = rowText(dom.window.document);

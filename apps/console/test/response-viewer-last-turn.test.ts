@@ -61,7 +61,7 @@ describe('response viewer brief view (last answered turn)', () => {
   const dom = new JSDOM('<!DOCTYPE html><html><body></body></html>');
   const { document, NodeFilter } = dom.window;
 
-  function loadCodemanAppClass() {
+  function loadReverieAppClass() {
     const constants = readFileSync(resolve(import.meta.dirname, '../src/web/public/constants.js'), 'utf8');
     const source = readFileSync(resolve(import.meta.dirname, '../src/web/public/app.js'), 'utf8');
     const context = vm.createContext({
@@ -80,11 +80,11 @@ describe('response viewer brief view (last answered turn)', () => {
       window: { addEventListener: vi.fn(), removeEventListener: vi.fn() },
       MobileDetection: {},
     });
-    vm.runInContext(`${constants}\n${source}\nglobalThis.__CodemanApp = CodemanApp;`, context);
-    return { CodemanApp: (context as { __CodemanApp: { prototype: object } }).__CodemanApp, context };
+    vm.runInContext(`${constants}\n${source}\nglobalThis.__ReverieApp = ReverieApp;`, context);
+    return { ReverieApp: (context as { __ReverieApp: { prototype: object } }).__ReverieApp, context };
   }
 
-  const { CodemanApp, context: appContext } = loadCodemanAppClass();
+  const { ReverieApp, context: appContext } = loadReverieAppClass();
 
   interface ViewerApp {
     toggleResponseViewer(): Promise<void>;
@@ -108,7 +108,7 @@ describe('response viewer brief view (last answered turn)', () => {
   }
 
   function makeApp(payload: unknown): { app: ViewerApp; fetchMock: ReturnType<typeof vi.fn> } {
-    const app = Object.create(CodemanApp.prototype) as ViewerApp;
+    const app = Object.create(ReverieApp.prototype) as ViewerApp;
     app.activeSessionId = 's1';
     app.sessions = new Map([['s1', { mode: 'claude' }]]);
     const fetchMock = vi.fn(async () => ({ json: async () => ({ data: payload }) }));

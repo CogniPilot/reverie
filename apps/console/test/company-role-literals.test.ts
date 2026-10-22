@@ -23,8 +23,8 @@ async function fixture() {
   handles.push(handle);
   handle.server.profiles = { [SESSION]: { employee, persona: null } };
   handle.window.eval(i18n);
-  handle.window.CodemanI18n.configure({ language: 'en', displayName: 'Workspace' });
-  handle.window.CodemanI18n.start();
+  handle.window.ReverieI18n.configure({ language: 'en', displayName: 'Workspace' });
+  handle.window.ReverieI18n.start();
   await handle.flush(10);
   return handle;
 }
@@ -39,7 +39,7 @@ describe('employee values remain literal under UI branding', () => {
     expect(handle.document.querySelector('.ca-company-parent')!.textContent).toBe(OWNER);
     expect(handle.document.querySelector('.ca-company-tree')!.textContent).toContain(OWNER);
     expect(handle.document.querySelector('.ca-company-tree')!.textContent).toContain(NAME);
-    handle.window.CodemanI18n.configure({ language: 'zh-CN', displayName: 'Other workspace' });
+    handle.window.ReverieI18n.configure({ language: 'zh-CN', displayName: 'Other workspace' });
     await handle.flush(10);
     expect(handle.document.querySelector('.ca-company-role')!.textContent).toBe(ROLE);
     const control = handle.document.createElement('button');

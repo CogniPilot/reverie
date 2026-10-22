@@ -49,10 +49,10 @@
 // preference with the File Viewer: that tree is confined to one workspace, while
 // the picker browses Home and every configured root, so wanting dotfiles in a
 // project does not imply wanting them in ~.
-const PATH_PICKER_SHOW_HIDDEN_KEY = 'codeman:pathPickerShowHidden';
+const PATH_PICKER_SHOW_HIDDEN_KEY = 'reverie:pathPickerShowHidden';
 // Per-device like the hidden toggle: how you scan a folder is a habit of the
 // hand, not of the workspace.
-const PATH_PICKER_SORT_KEY = 'codeman:pathPickerSort';
+const PATH_PICKER_SORT_KEY = 'reverie:pathPickerSort';
 const PATH_PICKER_SORT_MODES = [
   { value: 'name-asc', label: 'Name A→Z' },
   { value: 'name-desc', label: 'Name Z→A' },
@@ -478,7 +478,7 @@ const PathPicker = {
     // A hidden file is only reachable while the toggle is on, and the preview
     // endpoint re-resolves the path independently, so it needs the flag too.
     if (this._showHidden) params.set('showHidden', 'true');
-    const previewUrl = (window.CodemanBase?.url || ((p) => p))(`/api/filesystem/preview?${params.toString()}`);
+    const previewUrl = (window.ReverieBase?.url || ((p) => p))(`/api/filesystem/preview?${params.toString()}`);
 
     const overlay = document.createElement('div');
     overlay.className = 'path-preview-overlay';
@@ -1479,7 +1479,7 @@ const KeyboardAccessoryBar = {
     const textarea = overlay.querySelector('.prompt-composer-textarea');
     // i18n.js skips <textarea> subtrees (what is typed there is user content),
     // so the placeholder and label are translated here, when the dialog is built.
-    const i18n = typeof window !== 'undefined' ? window.CodemanI18n : undefined;
+    const i18n = typeof window !== 'undefined' ? window.ReverieI18n : undefined;
     if (typeof i18n?.t === 'function') {
       textarea.placeholder = i18n.t('Write your prompt…');
       textarea.setAttribute('aria-label', i18n.t('Prompt'));

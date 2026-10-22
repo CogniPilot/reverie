@@ -76,7 +76,7 @@ describe('channel order', () => {
 
   it('no agent sets it, and the order survives a restart', async () => {
     const [x, y] = [await make('X'), await make('Y')];
-    expect((await order([y, x], { 'x-codeman-parent-session': A })).statusCode).toBe(403);
+    expect((await order([y, x], { 'x-reverie-parent-session': A })).statusCode).toBe(403);
     expect(await positions()).toEqual({ X: undefined, Y: undefined });
     await order([y, x]);
     await service.stop();
@@ -91,7 +91,7 @@ describe('channel order', () => {
     events.length = 0;
     await order([x]);
     expect(events).toContain('chatroom:changed');
-    const mine = (await app.inject({ method: 'GET', url: '/api/chatrooms?member=self', headers: { 'x-codeman-parent-session': A } })).json().data.rooms;
+    const mine = (await app.inject({ method: 'GET', url: '/api/chatrooms?member=self', headers: { 'x-reverie-parent-session': A } })).json().data.rooms;
     expect(mine.length).toBe(2);
   });
 });

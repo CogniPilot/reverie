@@ -15,7 +15,7 @@
  *   picks, Escape closes and gives the keyboard back to the Tiles button (the
  *   menu owns its Escape in the global handler, like the tab-group menu), Tab
  *   and a click elsewhere close it.
- * - A pick is remembered per device (`codeman:tile-count`; `codeman:tile-grid`
+ * - A pick is remembered per device (`reverie:tile-count`; `reverie:tile-grid`
  *   holds ids and layout, never content) and opens that many tiles: the
  *   session to focus included, the rest from the ranking (all quiet and
  *   unstamped here: tab order). The click and Ctrl+Shift+G then open with it
@@ -166,12 +166,12 @@ describe('the count menu', () => {
 
   it('checks the remembered count; a bad stored value reads as the default', () => {
     const app = gridApp();
-    localStore.set('codeman:tile-count', '4');
+    localStore.set('reverie:tile-count', '4');
     open(app);
     expect(items().map((i) => i.attrs['aria-checked'])).toEqual(['false', 'true', 'false']);
     expect(focused()).toBe('4');
     app.closeTileCountMenu();
-    localStore.set('codeman:tile-count', '5');
+    localStore.set('reverie:tile-count', '5');
     open(app);
     expect(item(6).attrs['aria-checked']).toBe('true');
   });
@@ -204,7 +204,7 @@ describe('the count menu', () => {
     item(6).focus();
     key(app, 'Enter');
     expect(app._tilesOwnTerminal()).toBe(false);
-    expect(localStore.has('codeman:tile-count')).toBe(false);
+    expect(localStore.has('reverie:tile-count')).toBe(false);
   });
 
   it('arrows move over the counts that fit and wrap; Home and End', () => {
@@ -312,9 +312,9 @@ describe('picking a count', () => {
     expect(menu()).toBeNull();
     expect(app._tileGrid.ids).toEqual(['s-other', 's-c']);
     expect(app._tileGrid.focusedId).toBe('s-c');
-    expect(localStore.get('codeman:tile-count')).toBe('2');
+    expect(localStore.get('reverie:tile-count')).toBe('2');
     // The grid's own key holds ids and layout only (its tile count included), never content.
-    const stored = JSON.parse(localStore.get('codeman:tile-grid')!);
+    const stored = JSON.parse(localStore.get('reverie:tile-grid')!);
     expect(Object.keys(stored).sort()).toEqual(['colFr', 'count', 'focused', 'ids', 'open', 'rowFr', 'v', 'zoomed']);
     expect(stored.count).toBe(2);
   });
@@ -333,12 +333,12 @@ describe('picking a count', () => {
 
   it('then the click and Ctrl+Shift+G open with the remembered count', () => {
     const app = gridApp();
-    localStore.set('codeman:tile-count', '4');
+    localStore.set('reverie:tile-count', '4');
     app.toggleTileGrid();
     expect(app._tileGrid.ids).toEqual(['s-other', 's-a', 's-b', 's-c']);
     app.toggleTileGrid();
-    localStore.delete('codeman:tile-grid');
-    localStore.set('codeman:tile-count', '2');
+    localStore.delete('reverie:tile-grid');
+    localStore.set('reverie:tile-count', '2');
     app.runTileShortcut('toggle-tile-grid');
     expect(app._tileGrid.ids).toHaveLength(2);
   });
@@ -364,7 +364,7 @@ describe('picking a count', () => {
 describe('Ctrl/Cmd+click on a tab with the grid closed', () => {
   it('opens the remembered count in total, the clicked session among them and focused (owner answer 2)', () => {
     const app = gridApp();
-    localStore.set('codeman:tile-count', '4');
+    localStore.set('reverie:tile-count', '4');
     app.addSessionToTiles('s-f');
     expect(app._tileGrid.ids).toEqual(['s-other', 's-a', 's-b', 's-f']);
     expect(app._tileGrid.focusedId).toBe('s-f');
@@ -390,7 +390,7 @@ describe('re-forming an open grid', () => {
     // The dropped ones were destroyed, not reloaded or kept connected.
     const destroyed = FakeTile.all.filter((t) => t.destroy.mock.calls.length).map((t) => t.sessionId);
     expect(destroyed.sort()).toEqual(['s-b', 's-c', 's-d', 's-f']);
-    expect(localStore.get('codeman:tile-count')).toBe('2');
+    expect(localStore.get('reverie:tile-count')).toBe('2');
   });
 
   it('2 to 6 keeps both in their cells and fills from tab order; nothing remounts', () => {

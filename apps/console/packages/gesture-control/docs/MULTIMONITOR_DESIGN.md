@@ -4,7 +4,7 @@
 (`getScreenDetails` snapping) still pending. Decided + built 2026-06-08.
 **Supersedes** the OS-window detach as the *gesture* verb (see "Why detach
 broke movability") — *now actually replaced in `entry.ts`, not just planned.*
-**Companion docs:** `CODEMAN_DETACH_BRIEF.md` (the original window.open detach),
+**Companion docs:** `REVERIE_DETACH_BRIEF.md` (the original window.open detach),
 `../gesture-proto/docs/BUILD_PLAN.md` (canonical build spec, Phase 5).
 
 > ## Implementation status (2026-06-08)
@@ -12,13 +12,13 @@ broke movability") — *now actually replaced in `entry.ts`, not just planned.*
 >   a `.cg-float` div with an `<iframe src="/session/:id">` (640×420) at the drop
 >   point; panels are re-grabbable. Replaces `window.app.detachSession`. Commits
 >   `581fcf9`, `3e0447a`.
-> - ✅ **C-span — spanned window.** `scripts/span-codeman.sh` (Brave-first;
+> - ✅ **C-span — spanned window.** `scripts/span-reverie.sh` (Brave-first;
 >   `BROWSER=` override) launches a `--app` window sized to the display union.
 >   Commits `063fd8f`, `59946b8`. **Validated at the desk:** one window spans
 >   both monitors (3432×1080) and a panel drags across the seam.
-> - ✅ **Launch entry point in Codeman.** A header "multi-monitor" button (replaces
+> - ✅ **Launch entry point in Reverie.** A header "multi-monitor" button (replaces
 >   the notification bell) → `POST /api/system/span-displays` → spawns the span
->   script. Bundled `span-codeman.sh` into Codeman's repo. **PR #103** `95b0035`.
+>   script. Bundled `span-reverie.sh` into Reverie's repo. **PR #103** `95b0035`.
 > - ✅ **Cache-bust** all same-origin module scripts/CSS (`renderIndexHtml` →
 >   `cacheBustAssets`), so frontend edits show on a normal reload. PR #103 `b5ea711`.
 > - ⏳ **C-snap** (`getScreenDetails` snapping + seam dead-band) — not built; not
@@ -32,7 +32,7 @@ broke movability") — *now actually replaced in `entry.ts`, not just planned.*
 
 ## Goal
 
-Pinch a Codeman session, drag it anywhere — including **across a second
+Pinch a Reverie session, drag it anywhere — including **across a second
 physical monitor** — drop it, and have it stay where you put it and stay
 grabbable again. The "fling a session onto the external display by gesture"
 end-goal from the BUILD_PLAN backlog, made real **without losing the ability to
@@ -56,7 +56,7 @@ page's DOM.** This design honors that with two composed pieces:
 - **A — In-page floating panels.** "Detach" pops a session into a free-floating,
   absolutely-positioned element *in the same page* (not an OS window), so the
   hand keeps control forever.
-- **C — One window spanning both monitors.** Run Codeman in a single window
+- **C — One window spanning both monitors.** Run Reverie in a single window
   stretched across both physical displays, so "drag across monitors" is just
   "drag across the page," and the second monitor's pixels are actually used.
 
@@ -69,7 +69,7 @@ and reintroduces the cross-window wall this design exists to avoid.
 
 ## Part A — In-page floating panels
 
-### Codeman already has the primitive
+### Reverie already has the primitive
 
 `panels-ui.js` has a `.detached` "floating window": an absolutely-positioned
 `<div>` with `panel.style.top/left/width/height` and a drag handler
@@ -84,7 +84,7 @@ shared `this.terminal` opened into `#terminalContainer` in `terminal-ui.js:26`,
 swapped by `selectSession()`). But the page is **not** limited to one terminal —
 the PR #103 branch already ships **three independent in-page concurrent
 floating-content subsystems** we can reuse, so a live floating panel per session
-needs **no new Codeman rendering architecture**:
+needs **no new Reverie rendering architecture**:
 
 1. **Teammate terminals** (`panels-ui.js` `teammateTerminals` Map +
    `subagent-windows.js`). A `Map` of **concurrent live `new Terminal()`
@@ -138,7 +138,7 @@ The grab/drag/drop plumbing already exists; only the **drop action** changes.
   → move it; drop anywhere → it stays. This is the capability detach lost.
 - **Drop a panel back over the tab strip** (or a dock zone) → **re-dock**
   (remove the float; session returns to a plain tab). Mirrors the `.detached` →
-  attach toggle Codeman already has.
+  attach toggle Reverie already has.
 - **Keep `window.open` detach as a separate, deliberate verb** — e.g. a button,
   or a distinct "throw up and off-screen" gesture — for intentionally parking a
   session in its own OS window. It is *not* the default pinch action anymore.
@@ -162,7 +162,7 @@ The grab/drag/drop plumbing already exists; only the **drop action** changes.
 
 ## Part C — One window spanning both monitors
 
-Once the Codeman window physically covers both displays, Part A's panels drag
+Once the Reverie window physically covers both displays, Part A's panels drag
 across the seam for free, because the gesture cursor is already in viewport
 pixels and the viewport now spans both monitors.
 
@@ -171,14 +171,14 @@ pixels and the viewport now spans both monitors.
 1. **System Settings → Desktop & Dock → uncheck "Displays have separate
    Spaces."** (Requires a logout/login.) This is what lets a single window
    straddle two physical displays.
-2. Run Codeman **maximized, not fullscreen.** Browser fullscreen is *per
+2. Run Reverie **maximized, not fullscreen.** Browser fullscreen is *per
    display* and will **not** span — use a maximized/borderless window dragged to
    cover both monitors. (A kiosk/`--app` Chrome window sized to the union rect is
-   the cleanest.) **Automated by `scripts/span-codeman.sh`** — it reads the
+   the cleanest.) **Automated by `scripts/span-reverie.sh`** — it reads the
    display-union rect (Finder desktop bounds) and launches a **Brave-first**
    Chromium-family `--app` window sized to it (fresh per-browser profile so the
    geometry flags are honored; `BROWSER=` overrides — plain Chrome bounced on the
-   desk machine). One-click from the **Codeman header "multi-monitor" button**
+   desk machine). One-click from the **Reverie header "multi-monitor" button**
    (`POST /api/system/span-displays`, which spawns this script), or run it
    directly. Step 1 + logout is still manual; the script warns if spanning isn't
    active.
@@ -219,10 +219,10 @@ pixels and the viewport now spans both monitors.
    still TBD). Movability restored — the live session rides inside the page. (The
    method is named `floatSession`, not the design-sketch `floatPanel`.)
 2. ✅ **C-span — span the window (DONE, `063fd8f`/`59946b8`; validated at desk).**
-   macOS "separate Spaces" off + `scripts/span-codeman.sh` launches a maximized
+   macOS "separate Spaces" off + `scripts/span-reverie.sh` launches a maximized
    `--app` window across the display union (Brave-first; `BROWSER=` override).
    **Confirmed:** panels drag across the seam — viewport mapping held with zero
-   `entry.ts` change. Launchable one-click from the **Codeman header button** →
+   `entry.ts` change. Launchable one-click from the **Reverie header button** →
    `POST /api/system/span-displays` (PR #103 `95b0035`), or by running the script.
 3. ⏳ **C-snap — screen-aware snapping (pending).** Add `getScreenDetails`; snap a
    panel to the screen it's dropped on; add the seam dead-band.
@@ -253,8 +253,8 @@ pixels and the viewport now spans both monitors.
 
 | Layer | File | Change | Status |
 |-------|------|--------|--------|
-| Gesture consumer | `gesture-proto/src/codeman/entry.ts` | `detach()` → `floatSession()`; `floats` map; panel re-grab; (later) re-dock branch + `getScreenDetails` snapping | ✅ float+re-grab done (`581fcf9`/`3e0447a`); re-dock/snap pending |
+| Gesture consumer | `gesture-proto/src/reverie/entry.ts` | `detach()` → `floatSession()`; `floats` map; panel re-grab; (later) re-dock branch + `getScreenDetails` snapping | ✅ float+re-grab done (`581fcf9`/`3e0447a`); re-dock/snap pending |
 | Gesture core | `gesture-proto/src/gesture/*` | **none** — stays transport-agnostic | ✅ unchanged |
-| Codeman — launch | `src/web/routes/system-routes.ts`, `src/web/public/{index.html,panels-ui.js}`, `scripts/span-codeman.sh` | header button → `POST /api/system/span-displays` → spawn span script (bundled into repo) | ✅ PR #103 `95b0035` |
-| Codeman — caching | `src/web/server.ts` | `cacheBustAssets()` — `?v=<mtime>` on all same-origin `.js`/`.css` so frontend edits show on normal reload | ✅ PR #103 `b5ea711` |
-| Ops | macOS display settings + `scripts/span-codeman.sh` | "separate Spaces" off + re-login; Brave-first maximized spanning window | ✅ validated at desk |
+| Reverie — launch | `src/web/routes/system-routes.ts`, `src/web/public/{index.html,panels-ui.js}`, `scripts/span-reverie.sh` | header button → `POST /api/system/span-displays` → spawn span script (bundled into repo) | ✅ PR #103 `95b0035` |
+| Reverie — caching | `src/web/server.ts` | `cacheBustAssets()` — `?v=<mtime>` on all same-origin `.js`/`.css` so frontend edits show on normal reload | ✅ PR #103 `b5ea711` |
+| Ops | macOS display settings + `scripts/span-reverie.sh` | "separate Spaces" off + re-login; Brave-first maximized spanning window | ✅ validated at desk |

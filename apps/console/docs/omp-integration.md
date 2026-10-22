@@ -89,8 +89,8 @@ pinned id via `--resume` instead of re-guessing with `--continue`.
 
 ⚠️ **The directory mangling is NOT a straight `/` → `-` replace.** Unlike Claude
 Code's `~/.claude/projects/*` convention (which keeps the full path, e.g.
-`-home-user-codeman-cases-foo`), omp strips the `$HOME` prefix FIRST and only then
-dash-replaces (`/home/user/codeman-cases/foo` → `-codeman-cases-foo`; a path outside
+`-home-user-reverie-cases-foo`), omp strips the `$HOME` prefix FIRST and only then
+dash-replaces (`/home/user/reverie-cases/foo` → `-reverie-cases-foo`; a path outside
 `$HOME`, like `/tmp/...`, is dash-replaced as-is with no stripping). Getting this
 wrong doesn't error — `findLatestOmpSessionId()` just silently returns null for
 every case under `$HOME` (virtually all real Reverie cases), so pinning quietly

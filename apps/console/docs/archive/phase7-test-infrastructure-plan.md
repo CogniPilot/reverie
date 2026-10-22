@@ -10,12 +10,12 @@
 
 Before starting ANY work, read and follow these rules:
 
-1. **Never run `npx vitest run`** (full suite) — it kills tmux sessions. You are running inside a Codeman-managed tmux session.
+1. **Never run `npx vitest run`** (full suite) — it kills tmux sessions. You are running inside a Reverie-managed tmux session.
 2. **Run individual tests only**: `npx vitest run test/<file>.test.ts`
 3. **Never test on port 3000** — the live dev server runs there. Tests use ports 3150+.
 4. **After TypeScript changes**: Run `tsc --noEmit` to verify type checking passes.
 5. **Before considering done**: Run `npm run lint` and `npm run format:check` to ensure CI passes.
-6. **Never kill tmux sessions** — check `echo $CODEMAN_MUX` first.
+6. **Never kill tmux sessions** — check `echo $REVERIE_MUX` first.
 7. **Port assignments for this phase**: New tests use ports 3220–3229 (see individual tasks for assignments).
 
 ---

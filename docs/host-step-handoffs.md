@@ -1,5 +1,8 @@
 # Reducing manual host work
 
+
+Here, coordinator means an owner-appointed agent with explicit orchestration
+permission. CTO or COO titles alone grant no approval or host authority.
 Status, 2026-10-17: documentation for CTO review. No host installation, image build,
 restart, configuration activation or cleanup is authorized by these notes.
 
@@ -14,9 +17,9 @@ agents a host engine socket or administrator access.
 | Install browser OS dependencies in the live layer | Image supplies reviewed package list; agents install pinned browsers in their own cache and run isolated checks | [Browser testing](browser-testing.md); both engines pass as runtime user; no host package install next time |
 | Supply OMC from the host | Runtime engineer completes tested single-user Nix setup, then image reproduces that setup; agents use pinned flakes themselves | [OMC transition](openmodelica-runtime.md) and image item 10; host-registration export is already complete, not a recurring task |
 | Add GPU tooling/device access | Owner activates reviewed host toolkit with ordinary authentication; runtime engineer prepares image/helper and runs Light acceptance | [GPU plan](gpu-container-plan.md); reviewed owner steps in the private handoff; no lease/MPS/monitor or public access |
-| Recreate the container and resume agents | Runtime engineer supplies complete reviewed deployment package; CTO grants window; host operator performs only bounded engine/service cutover | [Cutover handoff](host-recreate-handoff.md); current identities/native threads, durable mounts, one watcher and retained rollback |
+| Recreate the container and resume agents | Runtime engineer supplies complete reviewed deployment package; owner-authorized coordinator grants window; host operator performs only bounded engine/service cutover | [Cutover handoff](host-recreate-handoff.md); current identities/native threads, durable mounts, one watcher and retained rollback |
 | Recover a failed local agent or restore bindings | Runtime engineer maintains tested runtime watcher and supported console recovery flow | [Watcher design](runtime-watcher.md) and [identity design](durable-identity.md) are historical design notes; verify actual deployed behavior and owner-auth gates before automation |
-| Receive ops and report results | Agents mention the configured host identity in its approved channels; active CTO records approval for delegated host operations | Existing configured host bridge/profile; a mention wakes the host identity but is not itself approval; no private profile/token contents in source or chat |
+| Receive ops and report results | Agents mention the configured host identity in its approved channels; active coordinator records approval for delegated host operations | Existing configured host bridge/profile; a mention wakes the host identity but is not itself approval; no private profile/token contents in source or chat |
 
 Tracked prerequisite **RECREATE-001** is OPEN, assigned to the runtime engineer:
 build the candidate before stopping production and retain the old container/image.
@@ -25,7 +28,7 @@ It blocks the next recreate; see the acceptance criteria in the
 the assigned person, actual paths, access routes, schedule and current deployment.
 
 The Nix how-to and permanent image patch are still pending, as is owner host-toolkit
-activation. Preserve the OMC stopgap until the CTO provides an owner-approved removal
+activation. Preserve the OMC stopgap until the coordinator provides an owner-approved removal
 scope after Nix acceptance. No additional closure copies, re-unpack automation or
 deletion follows from this handoff.
 

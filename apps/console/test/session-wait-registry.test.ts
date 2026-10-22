@@ -886,8 +886,8 @@ describe('SessionWaitRegistry: output waits', () => {
     // `match=tnode:` failed on a prompt that plainly reads `tnode:` while `match=(B`
     // succeeded. Silent: a full-length timeout, no error anywhere.
     const reg = new SessionWaitRegistry();
-    const promise = reg.waitForOutput('s1', { match: 'tnode:~/codeman-cases', timeoutMs: 5000 });
-    reg.notifyOutput('s1', 'clear\narkon@tnode\x1b(B\x1b[m:~/codeman-cases/e2edocs-shell$ ');
+    const promise = reg.waitForOutput('s1', { match: 'tnode:~/reverie-cases', timeoutMs: 5000 });
+    reg.notifyOutput('s1', 'clear\narkon@tnode\x1b(B\x1b[m:~/reverie-cases/e2edocs-shell$ ');
     expect((await promise).matched).toBe(true);
   });
 

@@ -20,7 +20,7 @@ type Link = { text: string; activate: (ev: unknown, text: string) => void; hover
 type Provider = { provideLinks: (line: number, cb: (links: Link[] | undefined) => void) => void };
 
 function loadHarness() {
-  const CodemanApp = function CodemanApp(this: unknown) {};
+  const ReverieApp = function ReverieApp(this: unknown) {};
   const windowRef: Record<string, unknown> = {};
   const context = vm.createContext({
     window: windowRef,
@@ -30,7 +30,7 @@ function loadHarness() {
       addEventListener: vi.fn(),
       getElementById: () => null,
     },
-    CodemanApp,
+    ReverieApp,
     console: { warn: vi.fn(), log: vi.fn(), debug: vi.fn() },
     _crashDiag: { log: vi.fn() },
     performance: { now: () => 0 },
@@ -44,7 +44,7 @@ function loadHarness() {
   const read = (f: string) => readFileSync(resolve(import.meta.dirname, `../src/web/public/${f}`), 'utf8');
   vm.runInContext(read('constants.js'), context, { filename: 'constants.js' });
   vm.runInContext(read('terminal-ui.js'), context, { filename: 'terminal-ui.js' });
-  return new (CodemanApp as unknown as new () => Record<string, any>)();
+  return new (ReverieApp as unknown as new () => Record<string, any>)();
 }
 
 /** A one-screen xterm stand-in holding `lines`, recording every provider registered on it. */

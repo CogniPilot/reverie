@@ -172,7 +172,7 @@ describe('session attachment history', () => {
         remotePath: '/Users/remote/project',
       })
     ).toBe('/tmp');
-    expect(resolveMuxAttachCwd('/opt/projects/Codeman')).toBe('/opt/projects/Codeman');
+    expect(resolveMuxAttachCwd('/opt/projects/Reverie')).toBe('/opt/projects/Reverie');
   });
 
   it('round-trips remote metadata through the Session constructor (restart-recovery contract)', () => {

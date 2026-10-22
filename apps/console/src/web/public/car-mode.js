@@ -15,12 +15,12 @@
  *   the chat panel (tap to talk, tap to send), using the /api/voice/turn path.
  *
  * A tap anywhere toggles listening; a tap while she speaks cuts her off and listens.
- * The mode is remembered per device (`codeman:carMode`) and the screen is kept awake.
+ * The mode is remembered per device (`reverie:carMode`) and the screen is kept awake.
  *
  * `CarModeController` is the state machine with every browser API injected, so it is
  * unit-tested with fakes (test/car-mode.test.ts); the rest is DOM glue.
  *
- * @mixin Extends CodemanApp.prototype via Object.assign
+ * @mixin Extends ReverieApp.prototype via Object.assign
  * @dependency app.js, chatroom-ui.js (_chatApi, _chatRoom, push-to-talk helpers), voice-chat.js (snapshot helpers)
  * @loadorder 12.12 (after voice-chat.js)
  */
@@ -204,7 +204,7 @@ function carModePickVoice(voices, savedName, memberId, pronouns) {
 
 /** The per-device storage key for one member's car-mode voice. */
 function carModeVoiceKey(memberId) {
-  return `codeman:carVoice:${memberId}`;
+  return `reverie:carVoice:${memberId}`;
 }
 
 /** The voice menu's value for the member's own server voice (no phone voice is named this). */
@@ -771,7 +771,7 @@ class CarScreenWakeLock {
   }
 }
 
-Object.assign(CodemanApp.prototype, {
+Object.assign(ReverieApp.prototype, {
   /** The member car mode talks to: the one marked as the room's voice, or a DM's agent (chatVoiceMember). */
   _carVoiceMember() {
     if (typeof chatVoiceMember === 'function') return chatVoiceMember(this._chatRoom);
@@ -802,7 +802,7 @@ Object.assign(CodemanApp.prototype, {
       return;
     }
     try {
-      localStorage.setItem('codeman:carMode', '1');
+      localStorage.setItem('reverie:carMode', '1');
     } catch {
       /* per-device convenience only */
     }
@@ -895,7 +895,7 @@ Object.assign(CodemanApp.prototype, {
     this._carAwake?.stop();
     this._carAwake = null;
     try {
-      localStorage.removeItem('codeman:carMode');
+      localStorage.removeItem('reverie:carMode');
     } catch {
       /* per-device convenience only */
     }
@@ -907,7 +907,7 @@ Object.assign(CodemanApp.prototype, {
     this._carRestored = true;
     let on = false;
     try {
-      on = localStorage.getItem('codeman:carMode') === '1';
+      on = localStorage.getItem('reverie:carMode') === '1';
     } catch {
       on = false;
     }

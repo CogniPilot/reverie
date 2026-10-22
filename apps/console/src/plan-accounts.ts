@@ -3,7 +3,7 @@
  * sessions running on it, and the local GPU, for the Plans view and `/api/plans`.
  *
  * Accounts come from two places, merged by the real login directory:
- * - Codeman's subscription profiles (`subscription-profiles.json`, the Run menu's picker);
+ * - Reverie's subscription profiles (`subscription-profiles.json`, the Run menu's picker);
  * - the `acct` tool's accounts (`~/.claude-accounts/<name>`, `~/.codex-accounts/<name>`),
  *   which `acct spawn` selects with a `CLAUDE_CONFIG_DIR` / `CODEX_HOME` override.
  * A profile and an `acct` account that resolve to the same directory are one account,
@@ -109,7 +109,7 @@ async function real(path: string): Promise<string> {
   }
 }
 
-/** Codeman profiles plus `acct` accounts, one entry per real login directory. */
+/** Reverie profiles plus `acct` accounts, one entry per real login directory. */
 export async function planCatalogue(home = homedir()): Promise<PlanAccount[]> {
   const profiles = await readSubscriptionProfiles().catch(() => defaultSubscriptionProfiles());
   const defaults = new Map<SubscriptionProvider, string>();

@@ -8,12 +8,12 @@
  * terminal-ui's throttled ResizeObserver) and performs ONE settle-time resize,
  * reverting per-frame below 40 columns so the PTY is never thrashed.
  *
- * @dependency CodemanApp (app.js) - methods attach to its prototype
- * @dependency CodemanTabRail (constants.js) - width policy (resolveWidth, bounds)
+ * @dependency ReverieApp (app.js) - methods attach to its prototype
+ * @dependency ReverieTabRail (constants.js) - width policy (resolveWidth, bounds)
  * @loadorder 6.5 (after app.js, before terminal-ui.js)
  */
 
-Object.assign(CodemanApp.prototype, {
+Object.assign(ReverieApp.prototype, {
   _getTabRailMinimumTerminalWidth() {
     const cellWidth = this.terminal?._core?._renderService?.dimensions?.css?.cell?.width;
     if (Number.isFinite(cellWidth) && cellWidth > 0) return Math.ceil(cellWidth * 40 + 24);
@@ -33,14 +33,14 @@ Object.assign(CodemanApp.prototype, {
     const fromCss = Number.parseFloat(document.documentElement.style.getPropertyValue('--tab-rail-width'));
     if (Number.isFinite(fromCss)) return fromCss;
     const measured = document.getElementById('tabRail')?.getBoundingClientRect?.().width;
-    return Number.isFinite(measured) && measured > 0 ? measured : window.CodemanTabRail?.DEFAULT_WIDTH || 256;
+    return Number.isFinite(measured) && measured > 0 ? measured : window.ReverieTabRail?.DEFAULT_WIDTH || 256;
   },
 
   readTabRailWidthSetting() {
     const select = document.getElementById('appSettingsTabRailWidth');
     if (!select) return this._getCurrentTabRailWidth();
     if (select.value === 'custom') return Number(select.dataset.currentWidth) || this._getCurrentTabRailWidth();
-    return Number(select.value) || window.CodemanTabRail?.DEFAULT_WIDTH || 256;
+    return Number(select.value) || window.ReverieTabRail?.DEFAULT_WIDTH || 256;
   },
 
   syncTabRailWidthSetting(width) {
@@ -59,7 +59,7 @@ Object.assign(CodemanApp.prototype, {
   },
 
   _setTabRailWidth(width) {
-    const policy = window.CodemanTabRail;
+    const policy = window.ReverieTabRail;
     if (!policy) return 256;
     const preferred = policy.resolveWidth({ width });
     const bounds = this._getTabRailBounds();
@@ -179,14 +179,14 @@ Object.assign(CodemanApp.prototype, {
    */
   _defaultTabRailWidth() {
     const rich = document.documentElement.dataset.tabRailDetail !== 'simple';
-    if (rich) return window.CodemanTabRail?.RICH_DEFAULT_WIDTH ?? 320;
-    return window.CodemanTabRail?.DEFAULT_WIDTH ?? 256;
+    if (rich) return window.ReverieTabRail?.RICH_DEFAULT_WIDTH ?? 320;
+    return window.ReverieTabRail?.DEFAULT_WIDTH ?? 256;
   },
 
   applyTabRailWidth(options = {}) {
     const settings = this.loadAppSettingsFromStorage();
     const requested = settings.tabRailWidth ?? this._defaultTabRailWidth();
-    const preferred = window.CodemanTabRail?.resolveWidth({ width: requested }) ?? 256;
+    const preferred = window.ReverieTabRail?.resolveWidth({ width: requested }) ?? 256;
     if (options.settle) this._claimTabRailResize();
     const resolved = this._setTabRailWidth(preferred);
     if (options.persist !== false && requested !== preferred) this._persistTabRailWidth(preferred);
@@ -228,12 +228,12 @@ Object.assign(CodemanApp.prototype, {
     try {
       if (handle.hasPointerCapture?.(pointerId)) handle.releasePointerCapture(pointerId);
     } catch {}
-    const preferred = window.CodemanTabRail?.resolveWidth({ width: this._tabRailDragWidth }) ?? this._tabRailDragWidth;
+    const preferred = window.ReverieTabRail?.resolveWidth({ width: this._tabRailDragWidth }) ?? this._tabRailDragWidth;
     this._scheduleTabRailSettle(this._tabRailDragWidth || this._getCurrentTabRailWidth(), preferred);
   },
 
   _onTabRailKeyDown(event) {
-    const width = window.CodemanTabRail?.resolveKeyboardWidth({
+    const width = window.ReverieTabRail?.resolveKeyboardWidth({
       key: event.key,
       shiftKey: event.shiftKey,
       currentWidth: this._getCurrentTabRailWidth(),
@@ -244,7 +244,7 @@ Object.assign(CodemanApp.prototype, {
     event.preventDefault();
     this._claimTabRailResize();
     const effective = this._setTabRailWidth(width);
-    this._scheduleTabRailSettle(effective, window.CodemanTabRail.resolveWidth({ width }));
+    this._scheduleTabRailSettle(effective, window.ReverieTabRail.resolveWidth({ width }));
   },
 
   initTabRailResize() {
@@ -282,7 +282,7 @@ Object.assign(CodemanApp.prototype, {
       this._claimTabRailResize();
       // Rich-aware: resetting a detailed rail to 256 would land it below the
       // 288px tight threshold and silently drop the created stamp.
-      const preferred = this._defaultTabRailWidth?.() ?? (window.CodemanTabRail?.DEFAULT_WIDTH || 256);
+      const preferred = this._defaultTabRailWidth?.() ?? (window.ReverieTabRail?.DEFAULT_WIDTH || 256);
       const effective = this._setTabRailWidth(preferred);
       this._scheduleTabRailSettle(effective, preferred);
     });

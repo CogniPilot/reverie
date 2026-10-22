@@ -12,13 +12,13 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { SubmitVerifier, promptStillInComposer, SUBMIT_VERIFY_DELAYS_MS } from '../src/session-submit-verifier.js';
 
 const PROMPT =
-  'Read /home/arkon/.codeman/pr-bot/jobs/pr-439/brief.md and carry out the review it describes. Do not ask questions.';
+  'Read /home/arkon/.reverie/pr-bot/jobs/pr-439/brief.md and carry out the review it describes. Do not ask questions.';
 
 /** Measured 2026-09-19: typed, wrapped, a no-break space after the glyph, never sent. */
 const STRANDED = [
   ' ▐▛███▛█   Claude Code v2.1.278',
   '──────────────────────────────────────── prbot-439 ─',
-  '❯ Read /home/arkon/.codeman/pr-bot/jobs/pr-439/brief.md and carry out the review it describes. Do not ask',
+  '❯ Read /home/arkon/.reverie/pr-bot/jobs/pr-439/brief.md and carry out the review it describes. Do not ask',
   '  questions.',
   '────────────────────────────────────────────────────',
   '  Opus 5 (1M context)  in:0 out:0',
@@ -27,7 +27,7 @@ const STRANDED = [
 
 /** The same pane once taken: echoed in the transcript, composer empty. */
 const TAKEN = [
-  '❯ Read /home/arkon/.codeman/pr-bot/jobs/pr-439/brief.md and carry out the review it describes.',
+  '❯ Read /home/arkon/.reverie/pr-bot/jobs/pr-439/brief.md and carry out the review it describes.',
   '● Reading the brief.',
   '✻ Actioning… (48s · ↓ 6.6k tokens)',
   '──────────────────────────────────────── prbot-439 ─',

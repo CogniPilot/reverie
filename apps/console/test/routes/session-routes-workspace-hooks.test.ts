@@ -3,12 +3,12 @@
  *
  * Regression cover for the 2026-08-15 report: a session in a LINKED case (the user's
  * own repo, where most sessions live) ran with no hooks block at all, because
- * `writeHooksConfig` only fires when Codeman CREATES a case directory and the old
+ * `writeHooksConfig` only fires when Reverie CREATES a case directory and the old
  * self-heal call deliberately never ADDED one. The visible symptom was an
  * AskUserQuestion dialog blocking the pane while the tab and the phone overview both
  * showed a calm `idle` — no hook event, so no pending-hook state, so no alert.
  *
- * Asserts bytes on disk (the real `ensureCodemanHooks`), not a spy call.
+ * Asserts bytes on disk (the real `ensureReverieHooks`), not a spy call.
  * Uses app.inject(), so no real HTTP port is needed.
  *
  * Also covers the post-#304 follow-ups: the quick-start existing-case branch, the
@@ -41,12 +41,12 @@ interface HooksFile {
 }
 
 /**
- * A faithful PRE-SECRET Codeman hooks block (what a case created before COD-54
+ * A faithful PRE-SECRET Reverie hooks block (what a case created before COD-54
  * contains): it targets /api/hook-event, so it is recognisably ours, but carries
- * no X-Codeman-Hook-Secret header and no -k. Used to prove the self-heal still
+ * no X-Reverie-Hook-Secret header and no -k. Used to prove the self-heal still
  * runs with the setting OFF.
  */
-function staleCodemanHooks() {
+function staleReverieHooks() {
   return {
     Stop: [
       {
@@ -56,8 +56,8 @@ function staleCodemanHooks() {
             type: 'command',
             command:
               "HOOK_DATA=$(cat 2>/dev/null || echo '{}'); " +
-              'printf \'{"event":"stop","sessionId":"%s","data":%s}\' "$CODEMAN_SESSION_ID" "$HOOK_DATA" | ' +
-              'curl -s -X POST "$CODEMAN_API_URL/api/hook-event" -H \'Content-Type: application/json\' --data @- 2>/dev/null || true',
+              'printf \'{"event":"stop","sessionId":"%s","data":%s}\' "$REVERIE_SESSION_ID" "$HOOK_DATA" | ' +
+              'curl -s -X POST "$REVERIE_API_URL/api/hook-event" -H \'Content-Type: application/json\' --data @- 2>/dev/null || true',
             timeout: 5,
           },
         ],
@@ -87,7 +87,7 @@ describe('POST /api/sessions workspace hooks', () => {
   };
 
   beforeEach(async () => {
-    workingDir = await mkdtemp(join(tmpdir(), 'codeman-workspace-hooks-'));
+    workingDir = await mkdtemp(join(tmpdir(), 'reverie-workspace-hooks-'));
     app = Fastify({ logger: false });
     await app.register(fastifyCookie);
     registerSessionRoutes(app, createMockRouteContext());
@@ -122,7 +122,7 @@ describe('POST /api/sessions workspace hooks', () => {
     const serialized = JSON.stringify(settings.hooks);
     // The two shapes that have historically shipped dead hooks: no secret header
     // (401 once the gate went unconditional) and no -k (exit 60 on HTTPS installs).
-    expect(serialized).toContain('X-Codeman-Hook-Secret');
+    expect(serialized).toContain('X-Reverie-Hook-Secret');
     expect(serialized).toContain('curl -sk -X POST');
   });
 
@@ -171,10 +171,10 @@ describe('POST /api/sessions workspace hooks', () => {
     // remote attaches.
     // SAFETY (2026-08-29): write straight to `getDataDir()` — `test/setup.ts`
     // already sandboxes the data dir for the whole file (temp HOME, inherited
-    // CODEMAN_DATA_DIR stripped; same convention as the docker-hosts fixtures
+    // REVERIE_DATA_DIR stripped; same convention as the docker-hosts fixtures
     // below). A prior version of this test stubbed
-    // CODEMAN_DATA_DIR to a SEPARATE throwaway dir for just this write, but
-    // `session-routes.ts`'s `CODEMAN_CONFIG_DIR` is a module-load-time constant
+    // REVERIE_DATA_DIR to a SEPARATE throwaway dir for just this write, but
+    // `session-routes.ts`'s `REVERIE_CONFIG_DIR` is a module-load-time constant
     // (frozen at the sandboxed dir before this test ever runs), so that fixture
     // landed somewhere the route handler could never read it — the remote host
     // lookup silently failed and the test passed for the wrong reason (Fastify
@@ -189,10 +189,10 @@ describe('POST /api/sessions workspace hooks', () => {
     const res = await createSession({
       name: 'hooks-remote',
       mode: 'claude',
-      attachRemoteSession: { hostId: 'h1', remoteSessionName: 'codeman-ssh-abc123' },
+      attachRemoteSession: { hostId: 'h1', remoteSessionName: 'reverie-ssh-abc123' },
     });
     expect(res.statusCode).toBe(200);
-    expect(existsSync(join(process.cwd(), 'dev@10.0.0.5:codeman-ssh-abc123'))).toBe(false);
+    expect(existsSync(join(process.cwd(), 'dev@10.0.0.5:reverie-ssh-abc123'))).toBe(false);
   });
 
   it('leaves a malformed settings file untouched rather than replacing it', async () => {
@@ -210,19 +210,19 @@ describe('POST /api/sessions workspace hooks', () => {
     expect(existsSync(settingsPath())).toBe(false);
   });
 
-  it('still heals a stale Codeman block when workspaceHooksEnabled is OFF', async () => {
+  it('still heals a stale Reverie block when workspaceHooksEnabled is OFF', async () => {
     // The setting turns off ADDING hooks, not the COD-91 self-heal: a pre-secret
     // block 401s against the now-unconditional hook-secret gate, so a workspace that
     // already opted in must not be left with hooks that silently fail.
     await useApp(false);
     await mkdir(join(workingDir, '.claude'), { recursive: true });
-    await writeFile(settingsPath(), JSON.stringify({ model: 'opus', hooks: staleCodemanHooks() }));
+    await writeFile(settingsPath(), JSON.stringify({ model: 'opus', hooks: staleReverieHooks() }));
 
     expect((await createSession({ name: 'hooks-off-stale', mode: 'claude', workingDir })).statusCode).toBe(200);
 
     const settings = await readSettings();
     expect(settings.model).toBe('opus');
-    expect(JSON.stringify(settings.hooks)).toContain('X-Codeman-Hook-Secret');
+    expect(JSON.stringify(settings.hooks)).toContain('X-Reverie-Hook-Secret');
   });
 
   it('writes the hooks the generator produces, so the two cannot drift', async () => {
@@ -259,10 +259,10 @@ describe('POST /api/quick-start workspace hooks', () => {
     // Docker fixtures + case dirs must not leak into the next test.
     await rm(join(getDataDir(), 'docker-hosts.json'), { force: true });
     await rm(join(getDataDir(), 'docker-cases.json'), { force: true });
-    // SAFETY (2026-08-29): CASES_DIR is `join(homedir(), 'codeman-cases')`, and
+    // SAFETY (2026-08-29): CASES_DIR is `join(homedir(), 'reverie-cases')`, and
     // on environments where `os.homedir()` ignores `$HOME` it resolves to the
     // PROD case tree. `safeRmHomeTree` refuses to delete anything not under the
-    // redirected test HOME, so a run can never nuke the real `~/codeman-cases`.
+    // redirected test HOME, so a run can never nuke the real `~/reverie-cases`.
     safeRmHomeTree(CASES_DIR);
   });
 
@@ -276,7 +276,7 @@ describe('POST /api/quick-start workspace hooks', () => {
     expect(res.statusCode).toBe(200);
 
     const raw = await readFile(hooksFileIn(casePath), 'utf-8');
-    expect(raw).toContain('X-Codeman-Hook-Secret');
+    expect(raw).toContain('X-Reverie-Hook-Secret');
     expect(raw).toContain('/api/hook-event');
   });
 
@@ -285,7 +285,7 @@ describe('POST /api/quick-start workspace hooks', () => {
     await mkdir(getDataDir(), { recursive: true });
     await writeFile(
       join(getDataDir(), 'docker-hosts.json'),
-      JSON.stringify([{ id: 'd1', label: 'box', image: 'codeman/agent:base' }])
+      JSON.stringify([{ id: 'd1', label: 'box', image: 'reverie/agent:base' }])
     );
     await writeFile(
       join(getDataDir(), 'docker-cases.json'),
@@ -296,12 +296,12 @@ describe('POST /api/quick-start workspace hooks', () => {
   it('docker branch scaffolds hooks for a claude session', async () => {
     // Companion to the shell test below: proves the docker fixture path is live,
     // so the shell assertion cannot pass vacuously.
-    const ws = await mkdtemp(join(tmpdir(), 'codeman-docker-claude-'));
+    const ws = await mkdtemp(join(tmpdir(), 'reverie-docker-claude-'));
     try {
       await writeDockerFixtures('dockclaude', ws);
 
       expect((await quickStart({ caseName: 'dockclaude', mode: 'claude' })).statusCode).toBe(200);
-      expect(await readFile(hooksFileIn(ws), 'utf-8')).toContain('X-Codeman-Hook-Secret');
+      expect(await readFile(hooksFileIn(ws), 'utf-8')).toContain('X-Reverie-Hook-Secret');
     } finally {
       await rm(ws, { recursive: true, force: true });
     }
@@ -311,7 +311,7 @@ describe('POST /api/quick-start workspace hooks', () => {
     // The branch used to exclude only the five external CLIs, so a shell
     // quick-start into a docker case wrote a `.claude` block of its own —
     // contradicting the existing-case branch's rule that only claude reads it.
-    const ws = await mkdtemp(join(tmpdir(), 'codeman-docker-shell-'));
+    const ws = await mkdtemp(join(tmpdir(), 'reverie-docker-shell-'));
     try {
       await writeDockerFixtures('dockshell', ws);
 
@@ -323,7 +323,7 @@ describe('POST /api/quick-start workspace hooks', () => {
   });
 
   it.each(['codex', 'gemini'] as const)('does not pass a saved Claude conversation id to Docker %s', async (mode) => {
-    const ws = await mkdtemp(join(tmpdir(), `codeman-docker-${mode}-`));
+    const ws = await mkdtemp(join(tmpdir(), `reverie-docker-${mode}-`));
     try {
       await writeDockerFixtures('dockexternal', ws, '00000045-0057-4000-8000-000000000083');
 
@@ -337,7 +337,7 @@ describe('POST /api/quick-start workspace hooks', () => {
   });
 
   it('passes a saved Claude conversation id only to Docker Claude', async () => {
-    const ws = await mkdtemp(join(tmpdir(), 'codeman-docker-resume-'));
+    const ws = await mkdtemp(join(tmpdir(), 'reverie-docker-resume-'));
     const resumeId = '00000045-0057-4000-8000-000000000083';
     try {
       await writeDockerFixtures('dockresume', ws, resumeId);
@@ -367,7 +367,7 @@ describe('applyWorkspaceHooks (the shared decision core in hooks-config)', () =>
   };
 
   beforeEach(async () => {
-    workspace = await mkdtemp(join(tmpdir(), 'codeman-hooks-core-'));
+    workspace = await mkdtemp(join(tmpdir(), 'reverie-hooks-core-'));
   });
 
   afterEach(async () => {
@@ -379,7 +379,7 @@ describe('applyWorkspaceHooks (the shared decision core in hooks-config)', () =>
     await applyWorkspaceHooks(workspace);
 
     const raw = await readFile(wsSettingsPath(), 'utf-8');
-    expect(raw).toContain('X-Codeman-Hook-Secret');
+    expect(raw).toContain('X-Reverie-Hook-Secret');
     expect(raw).toContain('curl -sk -X POST');
   });
 
@@ -390,16 +390,16 @@ describe('applyWorkspaceHooks (the shared decision core in hooks-config)', () =>
     expect(existsSync(wsSettingsPath())).toBe(false);
   });
 
-  it('still heals a stale Codeman block when the setting is OFF (COD-91 self-heal)', async () => {
+  it('still heals a stale Reverie block when the setting is OFF (COD-91 self-heal)', async () => {
     await setWorkspaceHooksSetting(false);
     await mkdir(join(workspace, '.claude'), { recursive: true });
-    await writeFile(wsSettingsPath(), JSON.stringify({ model: 'opus', hooks: staleCodemanHooks() }));
+    await writeFile(wsSettingsPath(), JSON.stringify({ model: 'opus', hooks: staleReverieHooks() }));
 
     await applyWorkspaceHooks(workspace);
 
     const settings: HooksFile = JSON.parse(await readFile(wsSettingsPath(), 'utf-8'));
     expect(settings.model).toBe('opus');
-    expect(JSON.stringify(settings.hooks)).toContain('X-Codeman-Hook-Secret');
+    expect(JSON.stringify(settings.hooks)).toContain('X-Reverie-Hook-Secret');
   });
 
   it('leaves a malformed settings file untouched rather than replacing it', async () => {
@@ -411,7 +411,7 @@ describe('applyWorkspaceHooks (the shared decision core in hooks-config)', () =>
   });
 
   it('skips a workspace that no longer exists (the boot-sweep resurrection bug)', async () => {
-    // ensureCodemanHooks mkdir -p's, so the sweep used to recreate a DELETED repo
+    // ensureReverieHooks mkdir -p's, so the sweep used to recreate a DELETED repo
     // as an empty directory tree holding only .claude/settings.local.json.
     const gone = join(workspace, 'deleted-repo');
 

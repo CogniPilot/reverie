@@ -15,7 +15,7 @@
  * rebuild: tab order, Alt+N numbering and drag stay exactly the strip's own. Only the
  * horizontal header strip folds; the vertical rail and the sidebar show every session.
  *
- * @mixin Extends CodemanApp.prototype via Object.assign
+ * @mixin Extends ReverieApp.prototype via Object.assign
  * @dependency app.js, session-switcher.js (rows, ranking, scheduler, avatars)
  * @loadorder 12.566 (after session-switcher.js)
  */
@@ -57,10 +57,10 @@ function computeTabFamilies(rows, activeId) {
   return { hidden, families };
 }
 
-const TAB_FAMILIES_KEY = 'codeman:tabFamiliesFolded';
-const TAB_STRIP_COLLAPSED_KEY = 'codeman:tabStripCollapsed';
+const TAB_FAMILIES_KEY = 'reverie:tabFamiliesFolded';
+const TAB_STRIP_COLLAPSED_KEY = 'reverie:tabStripCollapsed';
 
-Object.assign(CodemanApp.prototype, {
+Object.assign(ReverieApp.prototype, {
   _tabPref(key, fallback) {
     try {
       const v = localStorage.getItem(key);

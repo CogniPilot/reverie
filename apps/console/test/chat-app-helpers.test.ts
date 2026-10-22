@@ -506,7 +506,7 @@ describe('org chart tree: former workers', () => {
   type Node = { name: string; kind: string; title: string; available?: boolean; children: Node[] };
   const tree = fn<(c: unknown, live?: Set<string>) => Node>('caOrgTree');
   const company = {
-    settings: { ownerName: 'Pat', ctoId: 'c' },
+    settings: { ownerName: 'Pat', coordinatorEmployeeId: 'c' },
     employees: [{ id: 'c', name: 'Chief', position: 'CTO', sessionId: 's1' }],
     temporaryAgents: [
       { sessionId: 'live', name: 'Here', icon: '' },
@@ -565,7 +565,7 @@ describe('org chart tree', () => {
 
   it('puts the CTO under the owner (from the settings), reports under who they name, temporaries under the CTO', () => {
     const t = tree({
-      settings: { ownerName: 'Pat', ownerTitle: 'Owner', ctoId: 'c' },
+      settings: { ownerName: 'Pat', ownerTitle: 'Owner', coordinatorEmployeeId: 'c' },
       employees: [
         { id: 'c', name: 'Cto', position: 'CTO', sessionId: 's1' },
         { id: 'a', name: 'Ann', reportsTo: 'c' },
@@ -611,7 +611,7 @@ describe('agent profile from the runtime', () => {
     employee: { position: 'CTO', expertise: ['Planning', 'Review'] },
     rooms: [{ id: 'r1', name: 'General', role: 'coordinator' }],
     runtime: { supervised: true, backend: 'claude', phase: 'working', backends: [{ name: 'claude', mode: 'claude', model: 'opus', enabled: true }, { name: 'local', mode: 'opencode', model: 'qwen', enabled: false }], switch: { available: false, reason: 'Owner authentication is not set up yet.' } },
-    persona: { agent_name: 'Alpha', role: 'Planner', kind: 'expert', persona: 'Careful and curious.', source: '.fleet-instance' },
+    persona: { agent_name: 'Alpha', role: 'Planner', kind: 'expert', persona: 'Careful and curious.', source: '.reverie-instance' },
   };
   it('turns the runtime payload into labelled sections, and keeps the switch reason', () => {
     const p = prof(data);

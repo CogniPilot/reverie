@@ -1,8 +1,8 @@
 /**
  * @fileoverview Tests for the version-gated `--name <session name>` claude spawn flag.
  *
- * The flag makes a Codeman claude worker's cross-session-messaging peer name equal
- * its Codeman session name. The gate MUST be fail-closed: a claude CLI older than
+ * The flag makes a Reverie claude worker's cross-session-messaging peer name equal
+ * its Reverie session name. The gate MUST be fail-closed: a claude CLI older than
  * 2.1.224 aborts startup on an unknown option, which would kill every session spawn,
  * so an unknown/absent version must produce a command byte-identical to the
  * pre-`--name` one. Covers both spawn paths (buildInteractiveArgs for the direct
@@ -20,7 +20,7 @@ import {
 import { buildSpawnCommand } from '../src/tmux-manager.js';
 
 describe('sanitizeCliSessionName', () => {
-  it('passes ordinary Codeman session names through', () => {
+  it('passes ordinary Reverie session names through', () => {
     expect(sanitizeCliSessionName('w1-msgtest-worker')).toBe('w1-msgtest-worker');
     expect(sanitizeCliSessionName('w18-claudeman: pi')).toBe('w18-claudeman: pi');
   });

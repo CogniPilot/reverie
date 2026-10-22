@@ -44,7 +44,7 @@ failure signatures, now analyzed against the SHIPPED 1.12.0 code (not the pre-fi
 - Ephemeral transport: `_sendInputEphemeral` (app.js) has a POST fallback when WS is down.
 - Service worker: sw.js is network-first with cache fallback; it serves stale JS only when the
   fetch FAILS (flaky mobile connection can do this — relevant to "unreliable" on the phone,
-  and the fixed `CACHE_NAME = 'codeman-v1'` never invalidates that offline copy).
+  and the fixed `CACHE_NAME = 'reverie-v1'` never invalidates that offline copy).
 
 ### The load-bearing observation: PageUp works, the wheel does not
 
@@ -208,7 +208,7 @@ there rather than damaging. Lesson for the next mode added to the forward list: 
 proves nothing, write a real SGR report into a live pane and diff the capture first.
 
 Verified end-to-end in Chromium against a live codex session on an isolated instance
-(`CODEMAN_INSTANCE=codexwheel`, port 5055, `envOverrides.CODEX_HOME` pointing at the fake auth
+(`REVERIE_INSTANCE=codexwheel`, port 5055, `envOverrides.CODEX_HOME` pointing at the fake auth
 dir): trusted `page.mouse.wheel` up now logs
 `[scroll] … → local-scrollback (mode=codex, …, localScrollbackRows=43)`, moves the viewport
 39 → 4 (back to the Codex banner), and sends ZERO bytes to the PTY. Unit coverage:
@@ -262,7 +262,7 @@ Chain: shell mode is excluded from the alt-screen strip (correctly) → tmux att
 - What this buys, all natively: tmux enables mouse tracking on the outer terminal → xterm `mouseTrackingMode` goes non-none → the container handler stands down (line ~2830 check) and xterm's own encoder forwards wheel as SGR reports → tmux scrolls its OWN copy-mode history on wheel-up, auto-exits at bottom. The alt-scroll arrow conversion disappears too (tracking mode takes precedence). Desktop is fully fixed with no new endpoints.
 - **Touch**: still needs one small client change: in the touchmove path, when the active session is `shell` AND `mouseTrackingMode !== 'none'`, convert accumulated lines to `_sendSyntheticSgrWheel(x, y, lines)` instead of `scrollLines()`. The 40ms coalescing already prevents the tmux process storm (each send is a tmux send-keys server-side; unbatched flicks would spawn dozens of processes: this constraint is documented at `_sendSyntheticSgrWheel`, do not bypass it).
 - **Selection tradeoff to verify**: with tracking on, xterm hands drag events to tmux instead of doing local browser selection. Shift+drag still does local selection (xterm shift-override). Verify this UX on desktop before shipping; if it's unacceptable, fall back to approach (b).
-- **Also verify**: vim/less/htop inside the shell still behave (they'll now receive real mouse events via tmux, generally an improvement); remote shell sessions run tmux on the REMOTE host (`tmux -L codeman-remote`) and need the same option set there if remote shells are in scope (fine to defer, note it in the changeset if skipped).
+- **Also verify**: vim/less/htop inside the shell still behave (they'll now receive real mouse events via tmux, generally an improvement); remote shell sessions run tmux on the REMOTE host (`tmux -L reverie-remote`) and need the same option set there if remote shells are in scope (fine to defer, note it in the changeset if skipped).
 
 **Fallback approach (b), only if (a)'s selection tradeoff fails testing**: keep mouse off; when a shell session is in the alt buffer, have the client send scroll intents to a small server endpoint that drives `tmux copy-mode -e -t <pane>` + `send-keys -X -N <n> scroll-up/down`. Preserves selection semantics exactly, but needs a new endpoint, server-side batching, AND suppression of xterm's native alt-scroll arrow conversion (capture-phase wheel listener with `stopPropagation`, or `attachCustomWheelEventHandler` if the vendored xterm version has it). More moving parts; (a) should be tried first.
 
@@ -270,7 +270,7 @@ Chain: shell mode is excluded from the alt-screen strip (correctly) → tmux att
 
 ### Bug C: mtiller's phone/iPad case — UNREPRODUCED, do not guess
 
-Touch is always-local by design, and Claude sessions keep content in the normal buffer (strip), so touch scrollback "should" work there. Before coding anything: build a repro matrix (iPhone Safari / iPad Safari / Android Chrome × claude / shell) on the current release. Plausible candidates if it does reproduce: auto-scroll-to-bottom fighting user scrolls (`_noteTerminalUserScroll`, ~line 2004), or they were in shell sessions on mobile too (then Bug B covers it). Ask mtiller on #205 for session mode + Codeman version if the matrix comes up clean.
+Touch is always-local by design, and Claude sessions keep content in the normal buffer (strip), so touch scrollback "should" work there. Before coding anything: build a repro matrix (iPhone Safari / iPad Safari / Android Chrome × claude / shell) on the current release. Plausible candidates if it does reproduce: auto-scroll-to-bottom fighting user scrolls (`_noteTerminalUserScroll`, ~line 2004), or they were in shell sessions on mobile too (then Bug B covers it). Ask mtiller on #205 for session mode + Reverie version if the matrix comes up clean.
 
 ## Invariants the implementation MUST respect
 
@@ -285,7 +285,7 @@ Touch is always-local by design, and Claude sessions keep content in the normal 
 ## Testing (per repo rules)
 
 - `npm test -- test/<file>.test.ts` only; never bare `npm test`. New test ports 3150+, never 3000.
-- Browser-test traps (documented in CLAUDE.md Testing): drive input/scroll through real events (`page.mouse.wheel`, real touch), not app internals; headless Chromium reports `isTouchDevice()` false even with `hasTouch: true`; assert on real state (xterm viewport position, `tmux -L codeman capture-pane`), not HTTP 200.
+- Browser-test traps (documented in CLAUDE.md Testing): drive input/scroll through real events (`page.mouse.wheel`, real touch), not app internals; headless Chromium reports `isTouchDevice()` false even with `hasTouch: true`; assert on real state (xterm viewport position, `tmux -L reverie capture-pane`), not HTTP 200.
 - Shell-mode E2E: create a throwaway shell session, `seq 1 500`, then (1) wheel up on desktop shows earlier lines, not history cycling; (2) touch-scroll on a phone shows earlier lines; (3) `vim` + `less` still enter/leave the alt screen cleanly; (4) Shift+drag still selects text.
 - Firefox E2E: Playwright `firefox` project, wheel over a Claude session's finished output, assert viewport moved more than 1 line per notch.
 - End-to-end against the REAL environment before claiming done (standing user rule). w1/w2/w3 tmux sessions are the user's live sessions: never send input to them; create your own throwaway session and DELETE it by exact id when done.

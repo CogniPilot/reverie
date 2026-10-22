@@ -63,7 +63,7 @@ function loadRenderer(fetchMock: ReturnType<typeof vi.fn>) {
     console,
   });
   vm.runInContext(source, context);
-  return (window as any).CodemanSpreadsheetPreview as { open(options: Record<string, unknown>): { dispose(): void } };
+  return (window as any).ReverieSpreadsheetPreview as { open(options: Record<string, unknown>): { dispose(): void } };
 }
 
 function metadata() {
@@ -89,7 +89,7 @@ describe('spreadsheet preview renderer', () => {
   beforeEach(() => {
     WorkerMock.instances = [];
     document.body.innerHTML = '<div id="preview"></div>';
-    delete (window as any).CodemanSpreadsheetPreview;
+    delete (window as any).ReverieSpreadsheetPreview;
     window.requestAnimationFrame = (callback: FrameRequestCallback) =>
       setTimeout(() => callback(0), 0) as unknown as number;
     window.cancelAnimationFrame = (id: number) => clearTimeout(id);
@@ -412,7 +412,7 @@ describe('spreadsheet preview text the user reads', () => {
       url: 'http://localhost/',
     });
     vm.runInContext(i18nSource, i18nDom.getInternalVMContext(), { filename: 'i18n.js' });
-    const api = (i18nDom.window as any).CodemanI18n as { t: Translate; configure(o: object): void };
+    const api = (i18nDom.window as any).ReverieI18n as { t: Translate; configure(o: object): void };
     api.configure({ language });
     return api.t;
   };
@@ -424,7 +424,7 @@ describe('spreadsheet preview text the user reads', () => {
   beforeEach(() => {
     WorkerMock.instances = [];
     document.body.innerHTML = '<div id="preview"></div>';
-    delete (window as any).codemanT;
+    delete (window as any).reverieT;
     window.requestAnimationFrame = (callback: FrameRequestCallback) =>
       setTimeout(() => callback(0), 0) as unknown as number;
     window.cancelAnimationFrame = (id: number) => clearTimeout(id);
@@ -506,9 +506,9 @@ describe('spreadsheet preview text the user reads', () => {
     );
     // The real English translator reads the feature words as plain words too,
     // never as their scoped keys.
-    (window as any).codemanT = en;
+    (window as any).reverieT = en;
     expect(await notice()).toBe(english);
-    (window as any).codemanT = zh;
+    (window as any).reverieT = zh;
     const chinese = await notice();
     // The format code is workbook text: kept as is ({name} is not a placeholder here).
     expect(chinese).toContain('不支持的数字格式: {name}"x"');
@@ -523,7 +523,7 @@ describe('spreadsheet preview text the user reads', () => {
 
   it('keeps the notice bar away from the page translator, so a format code is never rewritten', async () => {
     // The real i18n.js in the renderer's own window. configure() walks the whole
-    // body with t(), which fills `{name}` and rebrands "Codeman" in every text
+    // body with t(), which fills `{name}` and rebrands "Reverie" in every text
     // node it reaches; the bar is written already translated, item by item, and
     // ends with workbook text.
     const { confirm, alert } = window;
@@ -537,7 +537,7 @@ describe('spreadsheet preview text the user reads', () => {
     });
     vm.runInContext(i18nSource, context, { filename: 'i18n.js' });
     try {
-      const i18n = (window as any).CodemanI18n as { configure(o: object): void };
+      const i18n = (window as any).ReverieI18n as { configure(o: object): void };
       i18n.configure({ language: 'en', displayName: 'Acme' });
       const worker = await openLoaded();
       worker.emit({ ...metadata(), warnings: ['charts'] });
@@ -547,18 +547,18 @@ describe('spreadsheet preview text the user reads', () => {
         requestId: request.requestId,
         sheetId: '1',
         cells: [],
-        warnings: ['Unsupported number format: {name}"Codeman"0'],
+        warnings: ['Unsupported number format: {name}"Reverie"0'],
       });
       const bar = document.querySelector('.spreadsheet-preview-notice')!;
-      const written = 'Some workbook features are not shown: charts, Unsupported number format: {name}"Codeman"0';
+      const written = 'Some workbook features are not shown: charts, Unsupported number format: {name}"Reverie"0';
       expect(bar.textContent).toBe(written);
       // A language or display-name change re-walks the page.
       i18n.configure({ language: 'en', displayName: 'Acme' });
       expect(bar.textContent).toBe(written);
       expect(bar.hasAttribute('data-i18n-skip')).toBe(true);
     } finally {
-      delete (window as any).CodemanI18n;
-      delete (window as any).codemanT;
+      delete (window as any).ReverieI18n;
+      delete (window as any).reverieT;
       window.confirm = confirm;
       window.alert = alert;
     }
@@ -588,12 +588,12 @@ describe('file-preview overlay spreadsheet wiring', () => {
       return handle;
     });
     const fetchMock = vi.fn(async () => ({ ok: true, json: async () => ({ success: true, data: fileContent }) }));
-    const CodemanApp = function CodemanApp(this: unknown) {} as unknown as new () => Record<string, any>;
+    const ReverieApp = function ReverieApp(this: unknown) {} as unknown as new () => Record<string, any>;
     const context = vm.createContext({
-      CodemanApp,
+      ReverieApp,
       console,
       escapeHtml: (value: unknown) => String(value ?? ''),
-      CodemanBase: { base: '', url: (p: string) => p },
+      ReverieBase: { base: '', url: (p: string) => p },
       // From constants.js (not loaded here): a workbook never renders as an HTML page.
       rendersAsPage: () => false,
       fetch: fetchMock,
@@ -601,13 +601,13 @@ describe('file-preview overlay spreadsheet wiring', () => {
       clearTimeout,
       confirm: () => true,
       document,
-      window: { CodemanSpreadsheetPreview: { open }, addEventListener: vi.fn(), removeEventListener: vi.fn() },
+      window: { ReverieSpreadsheetPreview: { open }, addEventListener: vi.fn(), removeEventListener: vi.fn() },
     });
     vm.runInContext(panelsSource, context, { filename: 'panels-ui.js' });
     document.body.innerHTML =
       '<div id="filePreviewOverlay"></div><div id="filePreviewTitle"></div><div id="filePreviewBody"></div>' +
       '<div id="filePreviewFooter"></div>';
-    const app = new CodemanApp();
+    const app = new ReverieApp();
     app.$ = (id: string) => document.getElementById(id);
     app.sessions = new Map([['s1', { workingDir: '/work' }]]);
     app.formatFileSize = () => '8 KB';

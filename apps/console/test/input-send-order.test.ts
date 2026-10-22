@@ -1,6 +1,6 @@
 /**
  * @fileoverview Input dispatch ordering for the durable, acknowledged delivery
- * layer (`CodemanApp._sendInputAsync` → `_reliableSend` → `_drainSession`).
+ * layer (`ReverieApp._sendInputAsync` → `_reliableSend` → `_drainSession`).
  *
  * Local replaced the upstream best-effort "coalescing fallback queue" with the
  * durable per-(clientId, seq) layer in commit 1255e28 (docs/reliable-input-
@@ -19,7 +19,7 @@ import { resolve } from 'node:path';
 import vm from 'node:vm';
 import { describe, expect, it, vi } from 'vitest';
 
-function loadCodemanAppClass() {
+function loadReverieAppClass() {
   const constants = readFileSync(resolve(import.meta.dirname, '../src/web/public/constants.js'), 'utf8');
   const source = readFileSync(resolve(import.meta.dirname, '../src/web/public/app.js'), 'utf8');
   const context = vm.createContext({
@@ -44,11 +44,11 @@ function loadCodemanAppClass() {
     window: { addEventListener: vi.fn(), removeEventListener: vi.fn() },
     MobileDetection: {},
   });
-  vm.runInContext(`${constants}\n${source}\nglobalThis.__CodemanApp = CodemanApp;`, context);
-  return (context as { __CodemanApp: new () => unknown }).__CodemanApp;
+  vm.runInContext(`${constants}\n${source}\nglobalThis.__ReverieApp = ReverieApp;`, context);
+  return (context as { __ReverieApp: new () => unknown }).__ReverieApp;
 }
 
-const CodemanApp = loadCodemanAppClass();
+const ReverieApp = loadReverieAppClass();
 
 async function waitForCalls(calls: unknown[], count: number) {
   for (let i = 0; i < 50; i++) {
@@ -69,7 +69,7 @@ type App = {
 };
 
 function makeApp(): App {
-  const app = Object.create((CodemanApp as { prototype: object }).prototype) as App & Record<string, unknown>;
+  const app = Object.create((ReverieApp as { prototype: object }).prototype) as App & Record<string, unknown>;
   app._clientId = 'c-test';
   app._seqCounters = new Map();
   app._pendingDeliveries = new Map();

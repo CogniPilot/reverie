@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Build script for Codeman.
+ * Build script for Reverie.
  * Extracted from the package.json one-liner for readability and debuggability.
  *
  * Steps:
@@ -63,7 +63,7 @@ run('prepare dirs', 'mkdir -p dist/web dist/templates dist/web/public/vendor');
 // non-fatal, kept out of git) so the copy below carries them into dist/.
 run('gesture assets', 'node scripts/fetch-gesture-assets.mjs');
 // Rebuild the gesture overlay bundle from its vendored source (packages/gesture-control)
-// into src/web/public/gesture/gesture-codeman.js, so prod always reflects current source.
+// into src/web/public/gesture/gesture-reverie.js, so prod always reflects current source.
 run('gesture bundle', 'node scripts/build-gesture-bundle.mjs');
 run('copy web assets', 'cp -r src/web/public dist/web/');
 run('copy template', 'cp src/templates/case-template.md dist/templates/');
@@ -219,7 +219,7 @@ console.log('\n[build] content-hash cache busting');
   for (const [orig, hashed] of Object.entries(manifest)) {
     console.log(`    ${orig} -> ${hashed}`);
   }
-  console.log(`  sw.js: cache bucket codeman-${buildId}, ${hashedAssets.length} precached assets`);
+  console.log(`  sw.js: cache bucket reverie-${buildId}, ${hashedAssets.length} precached assets`);
 }
 
 // 6. Compress with gzip + brotli

@@ -11,8 +11,8 @@
  * fall back to Approve/Deny (permission/question) or a text prompt (idle).
  * Backend: src/web/approval-inbox.ts, design: docs/approvals-inbox-plan.md.
  *
- * @mixin Extends CodemanApp.prototype via Object.assign
- * @dependency app.js (CodemanApp class, this.approvals, setPendingHook/clearPendingHooks, selectSession)
+ * @mixin Extends ReverieApp.prototype via Object.assign
+ * @dependency app.js (ReverieApp class, this.approvals, setPendingHook/clearPendingHooks, selectSession)
  * @dependency constants.js (escapeHtml)
  * @dependency api-client.js at runtime (this._apiJson; loads later but is only called after init)
  * @loadorder 11.6 of 17, after ultracode-panel.js, before admin-ui.js
@@ -23,7 +23,7 @@ function approvalKindToHook(kind) {
   return kind === 'permission' ? 'permission_prompt' : kind === 'question' ? 'elicitation_dialog' : 'idle_prompt';
 }
 
-Object.assign(CodemanApp.prototype, {
+Object.assign(ReverieApp.prototype, {
   /** Synced setting, default OFF, opt-in via App Settings → Panels. */
   approvalsInboxEnabled() {
     return this.loadAppSettingsFromStorage().approvalsInboxEnabled === true;
@@ -200,7 +200,7 @@ Object.assign(CodemanApp.prototype, {
    * Items still waiting on a human. An acknowledged item (a human already looked, or the
    * session opened it acknowledged because it is watching its own background work) keeps
    * its card but arms no alert, so it must not light the bell either; this is the same
-   * count `pendingApprovalCount()` gives `codeman tui`.
+   * count `pendingApprovalCount()` gives `reverie tui`.
    */
   pendingApprovalsCount() {
     if (!this.approvals) return 0;

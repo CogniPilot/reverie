@@ -1,4 +1,4 @@
-import tests  # noqa: F401  isolates CODEMAN_*/FLEET_* before cto is imported
+import tests  # noqa: F401  isolates REVERIE_* before reverie is imported
 from pathlib import Path
 import fcntl
 import json
@@ -13,14 +13,14 @@ import urllib.error
 import urllib.parse
 import io
 from unittest.mock import patch
-from cto.runtime import Runtime, atomic_write
+from reverie.runtime import Runtime, atomic_write
 
 class FakeAPI:
     def __init__(self): self.calls=[]; self.session={"pid":12,"paneExit":None}; self.fail=False
     def call(self, method, path, body=None):
         self.calls.append((method,path,body))
         if self.fail: raise TimeoutError("ambiguous network timeout")
-        if method=="POST": return {"sessionId":"candidate-id", "caseName":"test-fleet"}
+        if method=="POST": return {"sessionId":"candidate-id", "caseName":"test-reverie"}
         if "chatrooms" in path: return {"coordinatorId":"old-id"}
         return {"session":self.session}
 
@@ -28,22 +28,20 @@ class RuntimeTests(unittest.TestCase):
     def setUp(self):
         self.temp=tempfile.TemporaryDirectory(); self.addCleanup(self.temp.cleanup)
         self.root=Path(self.temp.name); self.path=self.root/"policy.json"
-        self.policy={"api_url":"http://localhost:3000", "case_name":"test-fleet", "state_file":"state.json",
+        self.policy={"api_url":"http://localhost:3000", "case_name":"test-reverie", "state_file":"state.json",
             "pause_file":"paused", "fallback":"local", "backends":{
                 "local":{"mode":"opencode","model":"local/qwen","enabled":True},
                 "cloud":{"mode":"codex","model":"configured-model","enabled":True},
                 "disabled":{"mode":"claude","model":"configured-model","enabled":False}}}
         self.path.write_text(json.dumps(self.policy)); self.api=FakeAPI(); self.runtime=Runtime(self.path,self.api,cgroup=self.root/"no-cgroup")
 
-    def test_rebranded_client_preserves_session_header_and_import_compatibility(self):
-        from cto.runtime import Reverie, Codeman
-        self.assertIs(Codeman, Reverie)
-        with patch.dict(os.environ, {"CODEMAN_SESSION_ID": "session-a"}, clear=True):
-            with patch("cto.runtime.urllib.request.urlopen", return_value=io.BytesIO(b'{"success":true,"data":{}}')) as opened:
+    def test_client_propagates_session_header(self):
+        from reverie.runtime import Reverie
+        with patch.dict(os.environ, {"REVERIE_SESSION_ID": "session-a"}, clear=True):
+            with patch("reverie.runtime.urllib.request.urlopen", return_value=io.BytesIO(b'{"success":true,"data":{}}')) as opened:
                 Reverie("http://localhost:3000").call("GET", "/api/sessions")
                 headers = {k.lower(): v for k, v in opened.call_args.args[0].headers.items()}
-                self.assertEqual(headers["x-codeman-parent-session"], "session-a")
-                self.assertNotIn("x-reverie-parent-session", headers)
+                self.assertEqual(headers["x-reverie-parent-session"], "session-a")
 
     def test_switch_saves_handoff_and_maps_backend_without_erasing_history(self):
         self.runtime.state={"current":"old-id", "backend":"local"}
@@ -97,7 +95,7 @@ class RuntimeTests(unittest.TestCase):
     def test_disabled_profile_and_coordinator_gate_are_respected(self):
         with self.assertRaises(ValueError): self.runtime.start("disabled","handoff")
         self.runtime.start("local","handoff")
-        self.runtime.policy["room_id"]="fleet-room"
+        self.runtime.policy["room_id"]="reverie-room"
         with self.assertRaisesRegex(ValueError,"owner must transfer"):
             self.runtime.activate("candidate-id")
         self.assertEqual(self.runtime.state["candidate"],"candidate-id")
@@ -111,12 +109,12 @@ class RuntimeTests(unittest.TestCase):
         self.runtime.policy["keep_alive"] = {"model_api_url":"http://gpu.example/v1", "model_id":"qwen"}
         self.runtime.state={"current":"cloud-id", "backend":"cloud", "handoff":"Saved work"}
         self.api.session={"pid":None,"paneExit":{"status":1}}
-        with patch("cto.runtime.urllib.request.urlopen", return_value=io.BytesIO(b'{"data":[]}')):
+        with patch("reverie.runtime.urllib.request.urlopen", return_value=io.BytesIO(b'{"data":[]}')):
             result=self.runtime.check(now=1000)
         self.assertEqual(result["blocked"], "local keep-alive unavailable")
         self.assertNotIn("recovery_attempts", self.runtime.state)
         self.assertFalse(any(method=="POST" for method,_,_ in self.api.calls))
-        with patch("cto.runtime.urllib.request.urlopen", side_effect=lambda *a, **kw:
+        with patch("reverie.runtime.urllib.request.urlopen", side_effect=lambda *a, **kw:
                    io.BytesIO(b'{"data":[{"id":"qwen","status":{"value":"unloaded"}}]}')):
             self.assertEqual(self.runtime.check(now=1001)["backend"], "local")
         self.runtime.policy["keep_alive"]["model_id"]="wrong-model"
@@ -128,14 +126,14 @@ class RuntimeTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "without embedded credentials"):
             self.runtime.local_health()
         self.runtime.policy["keep_alive"]["model_api_url"]="http://gpu/v1"
-        with patch("cto.runtime.urllib.request.urlopen", side_effect=OSError("private connection info")):
+        with patch("reverie.runtime.urllib.request.urlopen", side_effect=OSError("private connection info")):
             result=self.runtime.local_health()
         self.assertFalse(result["ready"])
         self.assertNotIn("private connection info", json.dumps(result))
 
 
-class CodemanFake:
-    """Just enough of Codeman's API: sessions, lifecycle, room membership and company bindings."""
+class ReverieFake:
+    """Just enough of Reverie's API: sessions, lifecycle, room membership and company bindings."""
     CASE = "/cases/cto"
     def __init__(self):
         self.calls=[]; self.sessions={}; self.add("old-id","cto-agent",created_at=0)
@@ -152,10 +150,10 @@ class CodemanFake:
         route=path.split("?")[0]; query=dict(urllib.parse.parse_qsl(path.split("?",1)[1])) if "?" in path else {}
         if route in self.refuse: raise urllib.error.HTTPError(path,403,"forbidden",{},None)
         if route in self.fail_once: self.fail_once.discard(route); raise urllib.error.HTTPError(path,502,"bad gateway",{},None)
-        if route in self.reject_once: self.reject_once.discard(route); raise RuntimeError("Codeman rejected the operation")
+        if route in self.reject_once: self.reject_once.discard(route); raise RuntimeError("Reverie rejected the operation")
         if method=="POST" and route=="/api/v1/quick-start":
             self.created+=1; sid="new-%d" % self.created; self.add(sid, body["sessionName"], body["mode"]); return {"sessionId":sid}
-        if method=="GET" and route=="/api/v1/session-lifecycle":   # newest first, like Codeman's backwards read
+        if method=="GET" and route=="/api/v1/session-lifecycle":   # newest first, like Reverie's backwards read
             # `since` is deliberately ignored here: the client must not depend on the server filtering.
             entries=[e for e in self.lifecycle if e["sessionId"]==query["sessionId"]]
             return {"entries":sorted(entries,key=lambda e:-e["ts"])[:int(query["limit"])]}
@@ -175,8 +173,8 @@ class CodemanFake:
             room=next(r for r in self.rooms if r["id"]==route.split("/")[4])
             room["members"].append({"sessionId":body["sessionId"],"role":"agent"}); return {}
         if method=="POST" and route.endswith("/messages"):
-            # Codeman's fallback: an unresolved parent session posts AS THE USER unless refused.
-            parent=os.environ.get("CODEMAN_SESSION_ID")
+            # Reverie's fallback: an unresolved parent session posts AS THE USER unless refused.
+            parent=os.environ.get("REVERIE_SESSION_ID")
             if parent in self.sessions and self.resolves_parent: sender={"kind":"agent","sessionId":parent}
             elif body.get("requireAgent") and self.honors_require_agent: raise urllib.error.HTTPError(path,403,"forbidden",{},None)
             else: sender={"kind":"user","name":"admin"}
@@ -198,7 +196,7 @@ class WatcherTests(unittest.TestCase):
             "pause_file":"owner-paused","fallback":"local","max_recoveries":2,
             "backends":{"local":{"mode":"opencode","model":"local/qwen","enabled":True},
                         "cloud":{"mode":"claude","model":"configured-model","enabled":True}}}))
-        self.api=CodemanFake()
+        self.api=ReverieFake()
         atomic_write(self.root/"state.json", {"current":"old-id","backend":"local","phase":"running","handoff":"Saved work"})
         self.cgroup=self.root/"cgroup"; self.cgroup.mkdir(); self.set_memory(used=1<<30)
         self.runtime=Runtime(self.path,self.api,cgroup=self.cgroup)
@@ -220,7 +218,7 @@ class WatcherTests(unittest.TestCase):
     def test_healthy_tick_records_identity_and_bindings_for_later_restore(self):
         self.assertTrue(self.runtime.check(now=100)["healthy"])
         state=self.reopen().state
-        self.assertEqual((state["current_name"],state["current_dir"],state["last_seen_at"]),("cto-agent",CodemanFake.CASE,100))
+        self.assertEqual((state["current_name"],state["current_dir"],state["last_seen_at"]),("cto-agent",ReverieFake.CASE,100))
         self.assertEqual(state["bindings"]["rooms"],[{"room_id":"room-1","room":"general","role":"agent"}])
         self.assertEqual(state["bindings"]["employees"],[{"employee_id":"emp-1","name":"cto-agent"}])
 
@@ -400,7 +398,7 @@ class WatcherTests(unittest.TestCase):
     def test_watcher_never_adopts_its_own_session(self):
         self.seen_then_restarted()
         self.api.add("watcher","cto-agent")
-        with patch.dict(os.environ, {"CODEMAN_SESSION_ID":"watcher"}):
+        with patch.dict(os.environ, {"REVERIE_SESSION_ID":"watcher"}):
             self.assertEqual(self.reopen().check(now=200)["session_id"],"new-1")
 
     def test_dead_adopted_candidate_alerts_once_and_spawns_nothing(self):
@@ -409,7 +407,7 @@ class WatcherTests(unittest.TestCase):
         self.reopen().check(now=200)
         del self.api.sessions["manual"]
         self.enable_alerts()
-        with patch.dict("os.environ", {"CODEMAN_SESSION_ID":"watcher"}):
+        with patch.dict("os.environ", {"REVERIE_SESSION_ID":"watcher"}):
             result=self.reopen().check(now=300)
         self.assertEqual(result["candidate"],"manual"); self.assertEqual(result["posted"],"room-1")
         posted=[c for c in self.api.calls if c[1].endswith("/messages")]
@@ -419,16 +417,16 @@ class WatcherTests(unittest.TestCase):
 
     def enable_alerts(self, member=True):
         policy=json.loads(self.path.read_text()); policy["alert_room"]="room-1"; self.path.write_text(json.dumps(policy))
-        self.api.add("watcher","fleet-runtime watcher",mode="shell")
+        self.api.add("watcher","reverie-runtime watcher",mode="shell")
         if member: self.api.rooms[0]["members"].append({"sessionId":"watcher","role":"agent"})
 
     def test_alert_is_never_posted_as_the_user(self):
         self.enable_alerts()
-        scenarios={"no identity":{}, "inherits the CTO id":{"CODEMAN_SESSION_ID":"old-id"},
-                   "unknown to Codeman":{"CODEMAN_SESSION_ID":"ghost"}}
+        scenarios={"no identity":{}, "inherits the CTO id":{"REVERIE_SESSION_ID":"old-id"},
+                   "unknown to Reverie":{"REVERIE_SESSION_ID":"ghost"}}
         for label,env in scenarios.items():
             with self.subTest(label), patch.dict(os.environ, env):
-                os.environ.pop("CODEMAN_SESSION_ID", None) if not env else None
+                os.environ.pop("REVERIE_SESSION_ID", None) if not env else None
                 result=self.reopen().alert("recovery stopped")
                 self.assertNotIn("posted", result); self.assertIn("undelivered", result)
                 self.assertEqual([c for c in self.api.writes() if c[1].endswith("/messages")],[])
@@ -436,7 +434,7 @@ class WatcherTests(unittest.TestCase):
 
     def test_alert_requires_room_membership_and_flags_a_server_fallback(self):
         self.enable_alerts(member=False)
-        with patch.dict(os.environ, {"CODEMAN_SESSION_ID":"watcher"}):
+        with patch.dict(os.environ, {"REVERIE_SESSION_ID":"watcher"}):
             self.assertEqual(self.reopen().alert("x")["undelivered"],"watcher is not a member of the alert room")
             self.api.rooms[0]["members"].append({"sessionId":"watcher","role":"agent"})
             self.api.resolves_parent=False                      # e.g. session owned by another user
@@ -487,10 +485,10 @@ class WatcherTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,"inspect Reverie"): self.reopen().reset()
         self.assertFalse(self.reopen().reset(creation_inspected=True)["current"] is None)
 
-    def test_codeman_rejection_during_restore_is_returned_not_raised(self):
+    def test_reverie_rejection_during_restore_is_returned_not_raised(self):
         self.seen_then_restarted()
         self.reopen().check(now=200)
-        self.api.reject_once.add("/api/v1/company/employees/emp-1/session")   # Codeman success:false
+        self.api.reject_once.add("/api/v1/company/employees/emp-1/session")   # Reverie success:false
         result=self.reopen().activate("new-1")
         self.assertIn("rejected", result["bindings"]["error"])
         self.assertEqual(self.reopen().state["current"],"new-1")
@@ -511,7 +509,7 @@ class WatcherTests(unittest.TestCase):
         self.assertEqual(report["findings"][2]["count"],2)
         self.assertEqual(report["findings"][4]["live_same_name"],[])    # no lead for an unknown name
         actions=report["owner_actions"]
-        self.assertIn("fleet-runtime activate fresh", actions[0]["action"])
+        self.assertIn("reverie-runtime activate fresh", actions[0]["action"])
         self.assertEqual(actions[1],{"authority":"owner","method":"PUT","path":"/api/v1/company/employees/emp-1/session",
                                      "body":{"sessionId":"fresh"}})
         self.assertEqual(actions[2]["path"],"/api/v1/chatrooms/room-1/members")
@@ -520,7 +518,7 @@ class WatcherTests(unittest.TestCase):
         self.assertEqual(self.reopen().state["current"],"old-id")             # state untouched
 
     def test_identity_report_encodes_ids_and_cli_reports_errors_without_traceback(self):
-        from cto.runtime import main
+        from reverie.runtime import main
         self.seen_then_restarted()
         self.api.add("fresh","cto-agent",created_at=160_000)
         self.api.employees[0].update(id="emp/1?x", sessionId="long-gone")
@@ -530,7 +528,7 @@ class WatcherTests(unittest.TestCase):
         self.assertEqual(actions[2]["path"],"/api/v1/chatrooms/room%201%2Fa/members")
         class Down:
             def call(self, *a, **k): raise OSError("connection refused")
-        with patch("cto.runtime.Reverie", return_value=Down()), patch("sys.stdout", new=io.StringIO()) as out:
+        with patch("reverie.runtime.Reverie", return_value=Down()), patch("sys.stdout", new=io.StringIO()) as out:
             self.assertEqual(main(["--policy",str(self.path),"identity"]),0)
         self.assertEqual(json.loads(out.getvalue()),{"error":"connection refused"})
 
@@ -543,7 +541,7 @@ class WatcherTests(unittest.TestCase):
     def test_profile_reports_backend_bindings_and_persona_of_the_supervised_runtime_read_only(self):
         workspace=self.root/"workspace"; workspace.mkdir()
         instance=self.write_instance(self.root/"config"/"alpha.json","Alpha","Calm and exact. "*200)
-        (workspace/".fleet-instance").write_text(json.dumps({"instance":str(instance)}))
+        (workspace/".reverie-instance").write_text(json.dumps({"instance":str(instance)}))
         policy=json.loads(self.path.read_text()); policy["instances_dir"]="config"; self.path.write_text(json.dumps(policy))
         self.api.sessions["old-id"].update(workingDir=str(workspace), model="local/qwen", pinned=True, status="idle",
                                            tokens={"input":30,"output":20,"total":50}, totalCost=0, messageCount=4)
@@ -567,9 +565,9 @@ class WatcherTests(unittest.TestCase):
         self.assertEqual(self.reopen().state,{"current":"old-id","backend":"local","phase":"running","handoff":"Saved work"})
         # The agent writes its own marker: one naming a file outside the instances dir is ignored.
         outside=self.write_instance(self.root/"elsewhere"/"evil.json","Mallory","x")
-        (workspace/".fleet-instance").write_text(json.dumps({"instance":str(outside)}))
+        (workspace/".reverie-instance").write_text(json.dumps({"instance":str(outside)}))
         self.assertIsNone(self.reopen().profile("old-id")["persona"])
-        (workspace/".fleet-instance").write_text(json.dumps({"instance":str(self.root/"config"/"broken.json")}))
+        (workspace/".reverie-instance").write_text(json.dumps({"instance":str(self.root/"config"/"broken.json")}))
         (self.root/"config"/"broken.json").write_text('{"secret": "do not echo"}')
         self.assertEqual(self.reopen().profile("old-id")["persona"]["error"],"instance config unreadable")
         # Direct-message rooms are left out for a non-owner caller.
@@ -579,7 +577,7 @@ class WatcherTests(unittest.TestCase):
 
     def test_profile_reads_claude_effort_from_its_transcript_and_persona_from_the_policy_only(self):
         workspace=self.root/"workspace"; workspace.mkdir()
-        (workspace/".fleet-instance").write_text(json.dumps({"instance":str(self.write_instance(self.root/"config"/"alpha.json","Alpha","A"))}))
+        (workspace/".reverie-instance").write_text(json.dumps({"instance":str(self.write_instance(self.root/"config"/"alpha.json","Alpha","A"))}))
         conversation="00000004-0004-4000-8000-000000000004"
         self.api.add("lead","lead-agent",mode="claude",working_dir=str(workspace))  # shares the runtime's workspace
         self.api.sessions["lead"].update(claudeSessionChain=["00000005-0005-4000-8000-000000000005",conversation],
@@ -620,7 +618,7 @@ class WatcherTests(unittest.TestCase):
         self.write_instance(self.root/"config"/"alpha.json","Alpha","A")
         policy=json.loads(self.path.read_text()); policy["instances_dir"]="config"; self.path.write_text(json.dumps(policy))
         self.api.sessions["old-id"].update(workingDir=str(workspace))
-        marker=workspace/".fleet-instance"
+        marker=workspace/".reverie-instance"
         persona=lambda: self.finishes(lambda: self.reopen().profile("old-id")["persona"])
         marker.write_text(json.dumps({"instance":"../config/alpha.json"}))          # relative to the workspace
         self.assertEqual(persona()["agent_name"],"Alpha")
@@ -680,7 +678,7 @@ class WatcherTests(unittest.TestCase):
         self.assertEqual(persona("config/beta.json")["persona"],"Curious.")
 
     def test_profile_effort_reads_only_a_bounded_tail_of_a_regular_transcript(self):
-        from cto.runtime import observed_effort
+        from reverie.runtime import observed_effort
         conversation="00000004-0004-4000-8000-000000000004"
         projects=self.root/"projects"; (projects/"slug").mkdir(parents=True)
         transcript=projects/"slug"/(conversation+".jsonl")
@@ -707,19 +705,19 @@ class WatcherTests(unittest.TestCase):
         finally: os.close(writer)
 
     def test_profile_cli_no_dms_leaves_out_direct_message_rooms(self):
-        from cto.runtime import main
+        from reverie.runtime import main
         self.api.rooms.append({"id":"dm-1","name":"","kind":"dm","members":[{"sessionId":"old-id","role":"agent"}]})
         def rooms(*args):
-            with patch("cto.runtime.Reverie", return_value=self.api), patch("sys.stdout", new=io.StringIO()) as out:
+            with patch("reverie.runtime.Reverie", return_value=self.api), patch("sys.stdout", new=io.StringIO()) as out:
                 self.assertEqual(main(["--policy",str(self.path),"profile","old-id",*args]),0)
             return [r["id"] for r in json.loads(out.getvalue())["rooms"]]
         self.assertEqual(rooms(),["room-1","dm-1"])
         self.assertEqual(rooms("--no-dms"),["room-1"])
 
     def test_profile_cli_reports_unknown_and_invalid_ids_and_never_takes_the_watcher_lock(self):
-        from cto.runtime import main
+        from reverie.runtime import main
         def run(*args):
-            with patch("cto.runtime.Reverie", return_value=self.api), patch("sys.stdout", new=io.StringIO()) as out:
+            with patch("reverie.runtime.Reverie", return_value=self.api), patch("sys.stdout", new=io.StringIO()) as out:
                 code=main(["--policy",str(self.path),"profile",*args])
             return code, json.loads(out.getvalue())
         with (self.root/"state.lock").open("a") as held:
@@ -754,7 +752,7 @@ class WatcherTests(unittest.TestCase):
 
 class AdmissionTests(unittest.TestCase):
     def test_sizes_limits_and_unlimited_cgroup(self):
-        from cto.admission import admit, parse_size, session_admission
+        from reverie.admission import admit, parse_size, session_admission
         self.assertEqual(parse_size("1.5G"), 3<<29); self.assertEqual(parse_size("512M"), 512<<20)
         with tempfile.TemporaryDirectory() as name:
             cgroup=Path(name)
@@ -771,7 +769,7 @@ class AdmissionTests(unittest.TestCase):
             self.assertTrue(session_admission(policy, "opencode", cgroup)["admitted"])
 
     def test_cli_refuses_with_tempfail(self):
-        from cto import admission
+        from reverie import admission
         with patch.object(admission, "admit", return_value={"admitted":False,"reason":"short"}):
             self.assertEqual(admission.main(["--expect","1G","--","true"]), admission.EX_TEMPFAIL)
 
@@ -788,21 +786,21 @@ class WatchLoopTests(unittest.TestCase):
             "poll_seconds":10},**keep_alive),"backends":{"local":{"mode":"opencode","model":"local/qwen","enabled":True}}}))
 
     def run_watch(self, step, ticks, alarms=None):
-        from cto.runtime import watch
+        from reverie.runtime import watch
         lines=[]
         watch(self.path, step, ticks=ticks, sleep=lambda s: None, out=lambda line, flush=True: lines.append(line),
               alarm=(alarms.append if alarms is not None else (lambda s: None)))
         return lines
 
     def test_failing_ticks_are_ticking_but_not_healthy(self):
-        from cto.runtime import watcher_health
+        from reverie.runtime import watcher_health
         runtime=Runtime(self.path, FakeAPI())
         self.assertEqual(watcher_health(runtime)["reason"],"no heartbeat yet")
-        def failing(): raise RuntimeError("Codeman down during container start")
+        def failing(): raise RuntimeError("Reverie down during container start")
         lines=self.run_watch(failing, ticks=2)
         health=watcher_health(runtime)
         self.assertEqual((health["ticking"],health["healthy"],health["consecutive_errors"]),(True,False,2))
-        self.assertIn("Codeman down", health["last_error"])
+        self.assertIn("Reverie down", health["last_error"])
         self.assertEqual(len(lines),1)                                  # unchanged results print once
         self.run_watch(lambda: {"healthy":True}, ticks=1)
         health=watcher_health(runtime)
@@ -814,7 +812,7 @@ class WatchLoopTests(unittest.TestCase):
         self.assertFalse(watcher_health(runtime, now=time.time()+61)["ticking"])   # 3*10+30 s limit
 
     def test_bad_policy_is_a_failed_tick_not_a_crash(self):
-        from cto.runtime import watcher_health
+        from reverie.runtime import watcher_health
         calls=[]
         def step():
             calls.append(1)
@@ -835,7 +833,7 @@ class WatchLoopTests(unittest.TestCase):
 
     def test_a_hung_tick_kills_the_watcher_and_frees_the_lock(self):
         self.write_policy(tick_timeout_seconds=2)
-        script=("import sys,time; sys.path.insert(0,%r); from cto.runtime import watch; "
+        script=("import sys,time; sys.path.insert(0,%r); from reverie.runtime import watch; "
                 "watch(%r, lambda: time.sleep(60), sleep=lambda s: None)" % (str(Path.cwd()), str(self.path)))
         started=time.monotonic()
         code=subprocess.run([sys.executable,"-c",script],timeout=30).returncode
@@ -846,7 +844,7 @@ class WatchLoopTests(unittest.TestCase):
 
     def test_second_watcher_waits_as_standby_and_takes_over(self):
         import threading
-        from cto.runtime import watch
+        from reverie.runtime import watch
         held=(self.root/"state.watch.lock").open("a"); fcntl.flock(held, fcntl.LOCK_EX)
         ran=[]; lines=[]
         standby=threading.Thread(target=watch, args=(self.path, lambda: ran.append(1) or {"ok":True}),
@@ -861,14 +859,14 @@ class WatchLoopTests(unittest.TestCase):
         self.assertEqual((self.root/"state.watch.lock").read_text(), str(os.getpid()))
 
     def test_stop_watcher_ends_active_and_standby_watchers_of_this_policy_only(self):
-        from cto.runtime import stop_watchers
+        from reverie.runtime import stop_watchers
         proc=self.root/"proc"
         def fake(pid, *argv):
             (proc/str(pid)).mkdir(parents=True); (proc/str(pid)/"cmdline").write_bytes(b"\0".join(a.encode() for a in argv)+b"\0")
-        fake(101,"/opt/fleet/python/bin/python3","/opt/fleet/python/bin/fleet-runtime","--policy",str(self.path),"watch")
-        fake(102,"python3","-m","cto.runtime","--policy",str(self.path),"watch")
-        fake(103,"python3","/x/fleet-runtime","--policy",str(self.root/"other.json"),"watch")
-        fake(104,"python3","/x/fleet-runtime","--policy",str(self.path),"status")
+        fake(101,"/opt/reverie/python/bin/python3","/opt/reverie/python/bin/reverie-runtime","--policy",str(self.path),"watch")
+        fake(102,"python3","-m","reverie.runtime","--policy",str(self.path),"watch")
+        fake(103,"python3","/x/reverie-runtime","--policy",str(self.root/"other.json"),"watch")
+        fake(104,"python3","/x/reverie-runtime","--policy",str(self.path),"status")
         fake(105,"bash","-c","echo watch")
         sent=[]
         result=stop_watchers(self.path, proc=proc, kill=lambda pid, sig: sent.append((pid, sig)), wait=lambda s: None)
@@ -877,22 +875,22 @@ class WatchLoopTests(unittest.TestCase):
         self.assertEqual(sent,[(101,signal.SIGTERM),(102,signal.SIGTERM),(101,signal.SIGKILL),(102,signal.SIGKILL)])
 
     def test_only_real_watcher_command_lines_match(self):
-        from cto.runtime import is_watcher_argv
+        from reverie.runtime import is_watcher_argv
         p="/instances/p.json"
-        for argv in (["/opt/fleet/python/bin/python3","/opt/fleet/python/bin/fleet-runtime","--policy",p,"watch"],
-                     ["python3","-m","cto.runtime","--policy",p,"watch"], ["/usr/bin/fleet-runtime","--policy",p,"watch"]):
+        for argv in (["/opt/reverie/python/bin/python3","/opt/reverie/python/bin/reverie-runtime","--policy",p,"watch"],
+                     ["python3","-m","reverie.runtime","--policy",p,"watch"], ["/usr/bin/reverie-runtime","--policy",p,"watch"]):
             self.assertTrue(is_watcher_argv(argv), argv)
-        for argv in (["watch","-n5","fleet-runtime","--policy",p,"status"],          # procps watch
-                     ["watch","fleet-runtime","--policy",p,"watch"],
-                     ["python3","/x/fleet-runtime","--policy",p,"watch","--help"],
-                     ["bash","-c","fleet-runtime --policy %s watch" % p],
-                     ["python3","-c","import cto.runtime","--policy",p,"watch"], ["watch"]):
+        for argv in (["watch","-n5","reverie-runtime","--policy",p,"status"],          # procps watch
+                     ["watch","reverie-runtime","--policy",p,"watch"],
+                     ["python3","/x/reverie-runtime","--policy",p,"watch","--help"],
+                     ["bash","-c","reverie-runtime --policy %s watch" % p],
+                     ["python3","-c","import reverie.runtime","--policy",p,"watch"], ["watch"]):
             self.assertFalse(is_watcher_argv(argv), argv)
 
     def test_a_tick_killed_by_the_alarm_is_reported_by_the_next_watcher(self):
-        from cto.runtime import heartbeat_path, watcher_health
+        from reverie.runtime import heartbeat_path, watcher_health
         self.write_policy(tick_timeout_seconds=2)
-        script=("import sys,time; sys.path.insert(0,%r); from cto.runtime import watch; "
+        script=("import sys,time; sys.path.insert(0,%r); from reverie.runtime import watch; "
                 "watch(%r, lambda: time.sleep(60), sleep=lambda s: None)" % (str(Path.cwd()), str(self.path)))
         subprocess.run([sys.executable,"-c",script],timeout=30)
         runtime=Runtime(self.path, FakeAPI())
@@ -906,7 +904,7 @@ class WatchLoopTests(unittest.TestCase):
         self.assertEqual(watcher_health(runtime)["consecutive_errors"], 2)   # the killed tick + this failure
 
     def test_health_cli_exit_codes(self):
-        from cto.runtime import main, heartbeat_path
+        from reverie.runtime import main, heartbeat_path
         with patch("sys.stdout", new=io.StringIO()):
             self.assertEqual(main(["--policy",str(self.path),"watcher-health"]),1)
             atomic_write(heartbeat_path(self.root/"state.json"), {"consecutive_errors":3,"last_ok_at":None})

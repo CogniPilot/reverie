@@ -40,12 +40,12 @@ const TERMINAL_TOP = 185;
 const TERMINAL_LEFT = 14;
 const TERMINAL_FONT = 21; // Slightly smaller to fit toolbar below
 
-// Codeman toolbar from screenshot (bottom section showing /init, /clear, Run, etc.)
+// Reverie toolbar from screenshot (bottom section showing /init, /clear, Run, etc.)
 const TOOLBAR_H = 95;
 
 // ─── Typing schedule ───
 const CORRECT_TEXT =
-  'zerolag technology brings in a visual dom overlay to make typing instant, even if your codeman server is on the other side of the world';
+  'zerolag technology brings in a visual dom overlay to make typing instant, even if your reverie server is on the other side of the world';
 const FRAME_GAP = 4; // ~133ms per keystroke (~75 WPM)
 
 // Remote connection lag: 600ms–2.7s per char (18–80 frames @ 30fps).
@@ -181,7 +181,7 @@ const TypingOverlay: React.FC<{
 };
 
 // ─── Single phone: iPhone 17 Pro + Claude Code header + typing + keyboard ───
-const MobileCodeman: React.FC<{
+const MobileReverie: React.FC<{
   typed: string;
   cursorVisible: boolean;
   activeKey?: string;
@@ -254,7 +254,7 @@ const MobileCodeman: React.FC<{
       {/* Typing animation */}
       <TypingOverlay typed={typed} cursorVisible={cursorVisible} />
 
-      {/* Codeman toolbar from screenshot (/init, /clear, /compact, Run, Run Shell, voice) */}
+      {/* Reverie toolbar from screenshot (/init, /clear, /compact, Run, Run Shell, voice) */}
       <div
         style={{
           position: 'absolute',
@@ -367,8 +367,8 @@ const PromoBanners: React.FC = () => (
         <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z" />
       </svg>
       <div>
-        <div style={{ fontSize: 18, fontWeight: 700, fontFamily: fonts.ui, color: '#e0e0e0' }}>Codeman</div>
-        <div style={{ fontSize: 12, fontFamily: fonts.mono, color: '#888' }}>github.com/Ark0N/Codeman</div>
+        <div style={{ fontSize: 18, fontWeight: 700, fontFamily: fonts.ui, color: '#e0e0e0' }}>Reverie</div>
+        <div style={{ fontSize: 12, fontFamily: fonts.mono, color: '#888' }}>github.com/jgoppert/reverie</div>
       </div>
     </div>
     <div
@@ -442,7 +442,7 @@ const OutroScene: React.FC = () => {
   return (
     <AbsoluteFill style={{ background: colors.bg.dark, justifyContent: 'center', alignItems: 'center', opacity }}>
       <div style={{ textAlign: 'center' }}>
-        <div style={{ fontSize: 56, fontWeight: 700, fontFamily: fonts.ui, color: '#fff' }}>Codeman</div>
+        <div style={{ fontSize: 56, fontWeight: 700, fontFamily: fonts.ui, color: '#fff' }}>Reverie</div>
         <div style={{ fontSize: 26, fontFamily: fonts.ui, color: colors.accent.green, marginTop: 10 }}>
           Zero-latency mobile input
         </div>
@@ -490,7 +490,7 @@ const TypingDemo: React.FC = () => {
             dotColor={colors.accent.green}
             detailColor={colors.accent.green}
           />
-          <MobileCodeman typed={zerolagTyped} cursorVisible activeKey={activeKey} pressAge={pressAge} noAnimation showPromo />
+          <MobileReverie typed={zerolagTyped} cursorVisible activeKey={activeKey} pressAge={pressAge} noAnimation showPromo />
         </div>
         <div>
           <PhoneLabel
@@ -499,7 +499,7 @@ const TypingDemo: React.FC = () => {
             dotColor={colors.accent.red}
             detailColor={colors.accent.red}
           />
-          <MobileCodeman typed={laggyTyped} cursorVisible activeKey={activeKey} pressAge={pressAge} noAnimation />
+          <MobileReverie typed={laggyTyped} cursorVisible activeKey={activeKey} pressAge={pressAge} noAnimation />
         </div>
       </div>
     </AbsoluteFill>
@@ -532,7 +532,7 @@ const PanelsEntrance: React.FC = () => {
             dotColor={colors.accent.green}
             detailColor={colors.accent.green}
           />
-          <MobileCodeman typed="" cursorVisible noAnimation />
+          <MobileReverie typed="" cursorVisible noAnimation />
         </div>
         <div>
           <PhoneLabel
@@ -541,7 +541,7 @@ const PanelsEntrance: React.FC = () => {
             dotColor={colors.accent.red}
             detailColor={colors.accent.red}
           />
-          <MobileCodeman typed="" cursorVisible noAnimation />
+          <MobileReverie typed="" cursorVisible noAnimation />
         </div>
       </div>
     </AbsoluteFill>

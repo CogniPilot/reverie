@@ -13,7 +13,7 @@
  * - TaskState.assignedSessionId links to SessionState.id (session domain)
  * - TaskState is stored in AppState.tasks (app-state domain)
  *
- * Persisted to `~/.codeman/state.json`. No dependencies on other domain modules.
+ * Persisted to `~/.reverie/state.json`. No dependencies on other domain modules.
  */
 
 /** Status of a task in the queue */

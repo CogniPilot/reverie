@@ -3,11 +3,11 @@
  * the omp analog of what `scanProjectDir()` (session-routes.ts) does for
  * Claude's own `~/.claude/projects` transcripts.
  *
- * Without this, an omp conversation exists ONLY as a Codeman-level live/
+ * Without this, an omp conversation exists ONLY as a Reverie-level live/
  * persisted session record — delete that (a "Kill Tmux" close, or any other
  * cleanup) and the conversation vanishes from Past Sessions entirely, even
  * though `omp` itself never forgot it. Claude conversations don't have that
- * problem because Codeman already reads them back from Claude's own
+ * problem because Reverie already reads them back from Claude's own
  * transcript files independent of its own session bookkeeping; this gives
  * omp conversations the same treatment.
  *

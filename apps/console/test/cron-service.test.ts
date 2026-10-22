@@ -28,9 +28,9 @@ import { MAX_CRON_JOBS } from '../src/config/map-limits.js';
 import type { CronJob, CronJobRun } from '../src/types/cron.js';
 import type { CronJobInput } from '../src/cron/cron-input.js';
 
-const MISSING_DIR = '/nonexistent-codeman-cron-test-dir';
+const MISSING_DIR = '/nonexistent-reverie-cron-test-dir';
 /** A real dir: createJob/updateJob validate workingDir existence up front. */
-const VALID_DIR = mkdtempSync(join(tmpdir(), 'codeman-cron-wd-'));
+const VALID_DIR = mkdtempSync(join(tmpdir(), 'reverie-cron-wd-'));
 const flush = (): Promise<void> => new Promise((r) => setImmediate(r));
 
 type FakeSession = { mode: string; status?: string };
@@ -348,7 +348,7 @@ describe('CronService', () => {
     // A real workspace dir for the in-workspace / confinement cases.
     let ws: string;
     beforeEach(() => {
-      ws = mkdtempSync(join(tmpdir(), 'codeman-cron-ws-'));
+      ws = mkdtempSync(join(tmpdir(), 'reverie-cron-ws-'));
     });
 
     const fileJob = (promptFilePath: string, workingDir: string) =>
@@ -389,7 +389,7 @@ describe('CronService', () => {
     );
 
     it('blocks a regular file that lives OUTSIDE the job workspace', async () => {
-      const outside = mkdtempSync(join(tmpdir(), 'codeman-cron-outside-'));
+      const outside = mkdtempSync(join(tmpdir(), 'reverie-cron-outside-'));
       const file = join(outside, 'prompt.md');
       writeFileSync(file, 'do the thing');
       const run = await svc.service.runNow(fileJob(file, ws).id);
@@ -529,7 +529,7 @@ describe('CronService', () => {
     });
 
     it('fails the run when the prompt file is multi-line', async () => {
-      const ws = mkdtempSync(join(tmpdir(), 'codeman-cron-ml-'));
+      const ws = mkdtempSync(join(tmpdir(), 'reverie-cron-ml-'));
       const file = join(ws, 'prompt.md');
       writeFileSync(file, 'line one\nline two\n');
       const job = svc.service.createJob(
@@ -541,7 +541,7 @@ describe('CronService', () => {
     });
 
     it('tolerates trailing newlines in a prompt file (every editor writes one)', async () => {
-      const ws = mkdtempSync(join(tmpdir(), 'codeman-cron-tn-'));
+      const ws = mkdtempSync(join(tmpdir(), 'reverie-cron-tn-'));
       const file = join(ws, 'prompt.md');
       writeFileSync(file, 'do the thing\n');
       const job = svc.service.createJob(

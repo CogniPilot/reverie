@@ -147,7 +147,7 @@ import {
   refreshUserAgentSkill,
   seedAgentSessionPreamble,
   applyWorkspaceHooks,
-  refreshStaleCodemanHooks,
+  refreshStaleReverieHooks,
 } from '../../hooks-config.js';
 import { generateClaudeMd } from '../../templates/claude-md.js';
 import { imageWatcher } from '../../image-watcher.js';
@@ -216,7 +216,7 @@ import { normalizeIcon } from '../../chatroom-store.js';
 
 // Path to linked-cases registry (same file used by case-routes resolveCasePath)
 const LINKED_CASES_FILE = dataPath('linked-cases.json');
-const CODEMAN_CONFIG_DIR = getDataDir();
+const REVERIE_CONFIG_DIR = getDataDir();
 
 // Pre-compiled regex for terminal buffer cleaning (avoids per-request compilation)
 // eslint-disable-next-line no-control-regex
@@ -400,9 +400,9 @@ export function imageMagicMatchesExt(data: Buffer, ext: string): boolean {
 }
 
 /**
- * Create or re-verify `{workingDir}/.codeman-uploads` for a prompt upload, or
+ * Create or re-verify `{workingDir}/.reverie-uploads` for a prompt upload, or
  * null when something other than a regular directory sits there. An agent or
- * postinstall script could plant `.codeman-uploads -> ~/.ssh/` and redirect
+ * postinstall script could plant `.reverie-uploads -> ~/.ssh/` and redirect
  * future writes outside workingDir: lstat (not stat) sees the symlink itself,
  * and mkdir without `recursive` does not follow one for the leaf either;
  * O_EXCL|O_NOFOLLOW on the file open makes the write itself symlink-safe.
@@ -674,12 +674,12 @@ function currentSignalFor(session: { pid: number | null; status: SessionStatus }
 
 // ── Worker liveness for tmux-backed sessions ────────────────────────────────
 //
-// `session.pid` is the LOCAL `tmux attach` client, not the worker. Codeman sets
+// `session.pid` is the LOCAL `tmux attach` client, not the worker. Reverie sets
 // `remain-on-exit on` for every session it creates, so when the command inside the
 // pane exits, tmux keeps the pane (`pane_dead=1`), the tmux session survives, the
 // attach client keeps running and `pid` never goes null — no `exit` event is emitted
 // and nothing in `Session` changes. Measured on a shell worker killed with `exit 42`:
-// tmux reports `pane_dead=1 status=42` while Codeman reports `pid=309406 status=idle`
+// tmux reports `pane_dead=1 status=42` while Reverie reports `pid=309406 status=idle`
 // and the DEFAULT wait answers `{signal:"idle", immediate:true}` in 0 ms for a corpse.
 // So the liveness check has to ask the mux layer. `pid === null` still matters: it is
 // the right (and only) answer for a direct-PTY session, which has no pane to ask about.
@@ -831,7 +831,7 @@ function abortOnClientHangUp(reply: FastifyReply): AbortController {
  * Inject the agent skill into a case on create, surfacing only the REFUSALS.
  *
  * `applyAgentSkill` declines two shapes rather than writing through them ('foreign':
- * an unmarked skills/codeman the user authored; 'symlink': the skill dir or its
+ * an unmarked skills/reverie the user authored; 'symlink': the skill dir or its
  * parent is a link). Both were silent: the user flips `agentSkillEnabled` on, nothing
  * appears in the case, and there is nowhere to look for why. The ordinary outcomes
  * ('installed'/'refreshed'/'unchanged') stay unlogged since they would print on every
@@ -843,8 +843,8 @@ function abortOnClientHangUp(reply: FastifyReply): AbortController {
 async function injectAgentSkill(casePath: string, dir: AgentSkillDir): Promise<void> {
   const skillDir = agentSkillDirFor(casePath, dir);
   try {
-    // Claude Code loads a same-named USER-LEVEL skill (`~/.claude/skills/codeman`,
-    // written once by `codeman skill install`) over the case copy injected below, so a
+    // Claude Code loads a same-named USER-LEVEL skill (`~/.claude/skills/reverie`,
+    // written once by `reverie skill install`) over the case copy injected below, so a
     // stale user copy silently replaces every fresh injection (observed 2026-08-14: an
     // old copy cost every spawned worker its lineage arc and the fast path). Keep it
     // current on the same trigger. Refresh-only + marker-guarded; quiet on refusal,
@@ -875,7 +875,7 @@ async function injectAgentSkill(casePath: string, dir: AgentSkillDir): Promise<v
 /**
  * A "Resume"/"continue" request for a NEW omp-mode session (the frontend's
  * resumeHistorySession(), or anyone hitting the API directly) carries
- * `continueSession: true` but no id — omp has none to give it, since Codeman
+ * `continueSession: true` but no id — omp has none to give it, since Reverie
  * has never tracked its own conversation UUID. Left as `--continue`, that
  * picks whichever session file in the directory is newest, which silently
  * drifts to the WRONG conversation the moment a second omp session (this
@@ -1043,7 +1043,7 @@ export function registerSessionRoutes(
         resolveRemote: async (session) => {
           const remote = session.remote;
           if (!remote) return undefined;
-          const hosts = await readRemoteHosts(CODEMAN_CONFIG_DIR);
+          const hosts = await readRemoteHosts(REVERIE_CONFIG_DIR);
           return rehydrateRemoteHostFields(remote, new Map(hosts.map((host) => [host.id, host])));
         },
       })
@@ -1114,9 +1114,9 @@ export function registerSessionRoutes(
     const parentSessionId = resolveParentSessionId(ctx, req, body.parentSessionId, owner);
     // An agent may only resume a conversation of its OWN (its row id, its native thread or an earlier one in its chain). A row created
     // "resuming" another agent's thread would pass for that agent's successor, so it is refused at the source.
-    if (req.headers['x-codeman-parent-session'] !== undefined && parentSessionId) {
+    if (req.headers['x-reverie-parent-session'] !== undefined && parentSessionId) {
       const owns = (id: string) => agentOwnsConversation(ctx.sessions.get(parentSessionId), id);
-      const refusal = resumeRefusalForAgent(body, owns, takeoverFor(parentSessionId, req.headers['x-codeman-parent-session']));
+      const refusal = resumeRefusalForAgent(body, owns, takeoverFor(parentSessionId, req.headers['x-reverie-parent-session']));
       if (refusal) return reply.code(403).send(createErrorResponse(ApiErrorCode.FORBIDDEN, refusal));
       const auditRefusal = await auditTakeovers(body, parentSessionId, owns);
       if (auditRefusal) {
@@ -1132,7 +1132,7 @@ export function registerSessionRoutes(
         spawnIdentity = options.company.prepareSpawn({
           owner,
           parentSessionId,
-          agentCaller: req.headers['x-codeman-parent-session'] !== undefined,
+          agentCaller: req.headers['x-reverie-parent-session'] !== undefined,
           channelId: body.channelId ?? body.chatroomId,
           name: body.name,
           icon: body.icon,
@@ -1180,7 +1180,7 @@ export function registerSessionRoutes(
         return createErrorResponse(ApiErrorCode.FORBIDDEN, 'Remote hosts are admin-only in multi-user mode');
       }
       const { hostId, remoteSessionName } = body.attachRemoteSession;
-      const host = (await readRemoteHosts(CODEMAN_CONFIG_DIR)).find((item) => item.id === hostId);
+      const host = (await readRemoteHosts(REVERIE_CONFIG_DIR)).find((item) => item.id === hostId);
       if (!host) return createErrorResponse(ApiErrorCode.NOT_FOUND, 'Remote host not found');
       // An explicit wake request is the only thing that may wake a host, and the user
       // pressing Attach IS one (see quick-start for the same gate, and
@@ -1240,9 +1240,9 @@ export function registerSessionRoutes(
     // envOverrides flow through Session → tmux setenv (ephemeral, per-session).
     //
     // For keys the caller is actively setting, strip any stale disk entry a prior
-    // Codeman version may have written. Scope limited to:
+    // Reverie version may have written. Scope limited to:
     //   - Claude mode (OpenCode/Codex/Gemini/Antigravity don't read .claude/settings.local.json)
-    //   - workingDir inside CASES_DIR / the per-user case space (Codeman's managed
+    //   - workingDir inside CASES_DIR / the per-user case space (Reverie's managed
     //     territory — we never mutate .claude/settings.local.json in arbitrary user
     //     repos that POST /api/sessions can target, as those may have hand-authored
     //     values).
@@ -1267,16 +1267,16 @@ export function registerSessionRoutes(
     // Plan-usage telemetry (App Settings → header chip): no request-time field
     // here anymore, and NO disk write — a settings.local.json statusLine used
     // to take precedence over the user's own global/project statusLine for ANY
-    // `claude` run in that directory, including entirely outside Codeman, with
+    // `claude` run in that directory, including entirely outside Reverie, with
     // no disclosure and no way to undo it (real bug, found 2026-08-31).
     // TmuxManager.createSession reads the persisted `showPlanUsageLimits`
     // setting FRESH at spawn (readPlanUsageTelemetryEnabled in hooks-config.ts)
     // and resolves it into an EPHEMERAL `claude --settings` CLI flag — never
-    // written to disk, so a plain `claude` run outside Codeman is untouched —
+    // written to disk, so a plain `claude` run outside Reverie is untouched —
     // and applies uniformly to every claude creation path (this route, cron,
     // the Ralph Loop API, quick-start), not just this one. That resolution
     // also self-heals: it strips any legacy disk-written exporter an older
-    // Codeman build left behind.
+    // Reverie build left behind.
 
     // Hooks for the workspace this session runs in (install vs refresh-only is the
     // `workspaceHooksEnabled` setting; see applyWorkspaceHooks). Never for a remote
@@ -1405,7 +1405,7 @@ export function registerSessionRoutes(
           ? launchBody.openCodeConfig.continueSession
           : employeeThread(ctx, spawnIdentity)
         : undefined;
-    const claim = await claimEmployeeThread(ctx, spawnIdentity, launchThread, req.headers['x-codeman-parent-session'] !== undefined);
+    const claim = await claimEmployeeThread(ctx, spawnIdentity, launchThread, req.headers['x-reverie-parent-session'] !== undefined);
     if (claim.refusal) return createErrorResponse(ApiErrorCode.CONFLICT, claim.refusal);
     try {
       const session = new Session({
@@ -1584,7 +1584,7 @@ export function registerSessionRoutes(
     // cryptic 400 from the CLI itself. Answered by `confirmedContext` (or the legacy
     // `confirmed`, which still means both) — NOT by `confirmedSwap`: this warning is
     // about the caller's own session, and the swap warning below is about someone
-    // else's, so an answer to one is not consent to the other.
+    // else's, so an answer to one is not authorization to the other.
     if (!(body.confirmed || body.confirmedContext) && exceedsSafeContextFloor(entry, contextLength)) {
       return {
         requiresContextWarning: true,
@@ -2175,7 +2175,7 @@ export function registerSessionRoutes(
     const autoMux = useMux === undefined && isPlainPromptInput(inputStr);
     // An agent's `send` (the request names its calling session) must not trip OpenCode's "!" shell-mode key;
     // a person's own typing, which names no session, is left exactly as typed.
-    const agentCaller = typeof req.headers['x-codeman-parent-session'] === 'string' && req.headers['x-codeman-parent-session'] !== '';
+    const agentCaller = typeof req.headers['x-reverie-parent-session'] === 'string' && req.headers['x-reverie-parent-session'] !== '';
     const muxOptions = agentCaller ? { fromUser: true, opencodeGuard: true } : { fromUser: true };
     // The direct PTY writes (a mux failure's fallback, an explicit raw write) carry the same text: an agent's goes in without "!".
     const rawInput = agentCaller && session.mode === 'opencode' ? guardShellKey(inputStr) : inputStr;
@@ -2276,7 +2276,7 @@ export function registerSessionRoutes(
   // ========== Wait For A Signal (agent orchestration) ==========
   //
   // A bounded long-poll: block until the session hits one of `until`, then answer.
-  // This exists because SSE is the only "tell me when" channel Codeman has, and an
+  // This exists because SSE is the only "tell me when" channel Reverie has, and an
   // agent driving the API from a shell tool cannot hold a stream and parse events
   // inline. See docs/agent-control-plan.md.
   //
@@ -2460,7 +2460,7 @@ export function registerSessionRoutes(
         : NEWLINE_HEX[getCli(session.mode)?.capabilities.newline ?? 'line-feed'];
 
     try {
-      // Route through the dedicated Codeman socket — bare `tmux` would target the
+      // Route through the dedicated Reverie socket — bare `tmux` would target the
       // user's default server and never find this session (same #80 regression class).
       await new Promise<void>((resolve, reject) => {
         execFile(
@@ -2519,7 +2519,7 @@ export function registerSessionRoutes(
   // POST /api/sessions comment).
   //
   // The pane's own Enter is what makes an entry OURS. `project` alone is not:
-  // a cwd is shared by every other Codeman tab on it, by tabs long since
+  // a cwd is shared by every other Reverie tab on it, by tabs long since
   // closed, and by any plain `claude` the user runs in their own terminal —
   // adopting the newest entry for the cwd pinned the viewer to whichever of
   // those conversations was typed in last, so the eye showed a stranger's
@@ -2531,7 +2531,7 @@ export function registerSessionRoutes(
     projectsDir: string
   ): Promise<string | null> {
     // A pane whose conversation id came from its OWN hook needs no correlation:
-    // $CODEMAN_SESSION_ID (the pane's env) -> data.session_id (the CLI's own
+    // $REVERIE_SESSION_ID (the pane's env) -> data.session_id (the CLI's own
     // stdin JSON) is a first-hand binding that never looks at cwd, so it cannot
     // be stolen by a sibling pane, a closed tab, or a bare `claude` in a
     // terminal. Guessing can only be worse than the fact. This is also what
@@ -2783,7 +2783,7 @@ export function registerSessionRoutes(
   async function findClaudeTranscript(
     projectsDir: string,
     conversationId: string,
-    codemanSessionId: string
+    reverieSessionId: string
   ): Promise<{ sessionId: string; path: string } | null> {
     let projectDirs: import('node:fs').Dirent[];
     try {
@@ -2792,7 +2792,7 @@ export function registerSessionRoutes(
       return null;
     }
 
-    const safeIds = [...new Set([conversationId, codemanSessionId])].filter((value) => /^[a-zA-Z0-9._-]+$/.test(value));
+    const safeIds = [...new Set([conversationId, reverieSessionId])].filter((value) => /^[a-zA-Z0-9._-]+$/.test(value));
     for (const candidateId of safeIds) {
       for (const projectDir of projectDirs) {
         if (!projectDir.isDirectory()) continue;
@@ -2807,10 +2807,10 @@ export function registerSessionRoutes(
     }
 
     // If mux-sessions.json was lost or stale, reconcileSessions() historically
-    // recovered `codeman-40568a29` as `restored-40568a29` and used the server cwd.
+    // recovered `reverie-40568a29` as `restored-40568a29` and used the server cwd.
     // The tmux name still carries the first eight UUID characters, which safely
     // reconnects the viewer when exactly one matching top-level transcript exists.
-    const restoredMatch = /^restored-([a-f0-9]{8,})$/i.exec(codemanSessionId);
+    const restoredMatch = /^restored-([a-f0-9]{8,})$/i.exec(reverieSessionId);
     if (!restoredMatch) return null;
     const fragment = restoredMatch[1].toLowerCase();
     const candidates: Array<{ sessionId: string; path: string; mtimeMs: number }> = [];
@@ -2914,7 +2914,7 @@ export function registerSessionRoutes(
       ctx.persistSessionState(session);
       // Docker sessions: keep the case's resume seed following the live conversation.
       if (session.docker) {
-        void persistDockerCaseClaudeSessionId(CODEMAN_CONFIG_DIR, session.docker.containerName, activeId).catch(
+        void persistDockerCaseClaudeSessionId(REVERIE_CONFIG_DIR, session.docker.containerName, activeId).catch(
           () => {}
         );
       }
@@ -2935,7 +2935,7 @@ export function registerSessionRoutes(
       session.adoptClaudeSessionId(transcript.sessionId);
       if (session.docker) {
         void persistDockerCaseClaudeSessionId(
-          CODEMAN_CONFIG_DIR,
+          REVERIE_CONFIG_DIR,
           session.docker.containerName,
           transcript.sessionId
         ).catch(() => {});
@@ -3053,8 +3053,8 @@ export function registerSessionRoutes(
   //   0. history match — the thread the pane last submitted a message to
   //      (see resolveCodexThreadFromHistory); tracks the pane through
   //      /resume //new //fork typed inside the TUI.
-  //   1. originator match — Codeman spawns codex panes with
-  //      CODEX_INTERNAL_ORIGINATOR_OVERRIDE=codeman_<sessionId>, which codex
+  //   1. originator match — Reverie spawns codex panes with
+  //      CODEX_INTERNAL_ORIGINATOR_OVERRIDE=reverie_<sessionId>, which codex
   //      writes into session_meta.originator of every rollout it creates
   //      (including new files after /new in the same pane; newest match wins).
   //   2. resume-id match — resumed rollouts keep their ORIGINAL session_meta
@@ -3063,7 +3063,7 @@ export function registerSessionRoutes(
   //   3. legacy cwd+mtime heuristic — panes started before this feature, or
   //      TUI-resumed threads before their first tracked submit. Case-blind
   //      cwd compare (codex records the launch-time case, /mnt paths vary)
-  //      and rollouts claimed by OTHER codeman panes are excluded.
+  //      and rollouts claimed by OTHER reverie panes are excluded.
   async function findActiveCodexFile(session: {
     id: string;
     workingDir: string;
@@ -3114,7 +3114,7 @@ export function registerSessionRoutes(
     // still scanned — a /new rollout may land in the same clock tick). The
     // 128 KiB head budget covers the session_meta line, which embeds full
     // base_instructions (observed max ~22 KiB on codex 0.144).
-    const originator = `codeman_${session.id}`;
+    const originator = `reverie_${session.id}`;
     const wantCwd = session.workingDir.toLowerCase();
     const headBuf = Buffer.alloc(131072);
     let cwdFallback: { path: string; mtimeMs: number } | undefined;
@@ -3127,8 +3127,8 @@ export function registerSessionRoutes(
         !cwdFallback &&
         !idMatch &&
         meta.cwd?.toLowerCase() === wantCwd &&
-        // A rollout stamped by another codeman pane belongs to that pane.
-        !(meta.originator?.startsWith('codeman_') && meta.originator !== originator)
+        // A rollout stamped by another reverie pane belongs to that pane.
+        !(meta.originator?.startsWith('reverie_') && meta.originator !== originator)
       ) {
         cwdFallback = f;
       }
@@ -3673,7 +3673,7 @@ export function registerSessionRoutes(
   // it (identity, policies, pin, rooms) stay; nothing is restarted here. Owner only: an agent never moves a session's thread.
   app.put('/api/sessions/:id/opencode-thread', async (req, reply) => {
     const { id } = req.params as { id: string };
-    if (req.headers['x-codeman-parent-session'] !== undefined) {
+    if (req.headers['x-reverie-parent-session'] !== undefined) {
       return reply.code(403).send(createErrorResponse(ApiErrorCode.FORBIDDEN, 'Only the owner may change a session thread'));
     }
     const { thread } = parseBody(OpenCodeThreadSchema, req.body, 'Invalid request body');
@@ -3715,7 +3715,7 @@ export function registerSessionRoutes(
   const modeSwitches = new Set<string>();
   app.post('/api/sessions/:id/mode', async (req, reply) => {
     const { id } = req.params as { id: string };
-    if (req.headers['x-codeman-parent-session'] !== undefined) {
+    if (req.headers['x-reverie-parent-session'] !== undefined) {
       return reply.code(403).send(createErrorResponse(ApiErrorCode.FORBIDDEN, 'Only the owner may switch a session CLI'));
     }
     // A registry id; custom CLI ids are SessionModes by registration (docker-hosts.ts does the same cast).
@@ -3926,10 +3926,10 @@ export function registerSessionRoutes(
     // (agent-case-marker.ts) and draws the tab lineage line on the session below.
     const qsParentSessionId = resolveParentSessionId(ctx, req, parentSessionId, owner);
     // Same source guard as POST /api/sessions: an agent resumes only a conversation of its own, and never "the latest".
-    if (req.headers['x-codeman-parent-session'] !== undefined && qsParentSessionId) {
+    if (req.headers['x-reverie-parent-session'] !== undefined && qsParentSessionId) {
       const resumes = { openCodeConfig, codexConfig, geminiConfig, antigravityConfig, piConfig, grokConfig, ompConfig, deepSeekConfig };
       const owns = (id: string) => agentOwnsConversation(ctx.sessions.get(qsParentSessionId), id);
-      const refusal = resumeRefusalForAgent(resumes, owns, takeoverFor(qsParentSessionId, req.headers['x-codeman-parent-session']));
+      const refusal = resumeRefusalForAgent(resumes, owns, takeoverFor(qsParentSessionId, req.headers['x-reverie-parent-session']));
       if (refusal) return createErrorResponse(ApiErrorCode.FORBIDDEN, refusal);
       const auditRefusal = await auditTakeovers(resumes, qsParentSessionId, owns);
       if (auditRefusal) return createErrorResponse(ApiErrorCode.OPERATION_FAILED, auditRefusal.message);
@@ -3943,7 +3943,7 @@ export function registerSessionRoutes(
         qsSpawnIdentity = options.company.prepareSpawn({
           owner,
           parentSessionId: qsParentSessionId,
-          agentCaller: req.headers['x-codeman-parent-session'] !== undefined,
+          agentCaller: req.headers['x-reverie-parent-session'] !== undefined,
           channelId: channelId ?? chatroomId,
           name: sessionName?.slice(0, MAX_SESSION_NAME_LENGTH),
           icon,
@@ -3972,17 +3972,17 @@ export function registerSessionRoutes(
     // own LOCAL case — remote/docker names are globally unique but local names are
     // per-user, so a name collision must not shadow the caller's own case. canAccessOwned
     // is allow-all for admins/single-user, so flag-OFF stays byte-identical.
-    const remoteCases = await readRemoteCases(CODEMAN_CONFIG_DIR);
+    const remoteCases = await readRemoteCases(REVERIE_CONFIG_DIR);
     const remoteCase = remoteCases.find(
       (item) => item.name === caseName && canAccessOwned(getAuthUser(req), item.owner)
     );
     const dockerCase = remoteCase
       ? undefined
-      : (await readDockerCases(CODEMAN_CONFIG_DIR)).find(
+      : (await readDockerCases(REVERIE_CONFIG_DIR)).find(
           (item) => item.name === caseName && canAccessOwned(getAuthUser(req), item.owner)
         );
     if (remoteCase) {
-      const host = (await readRemoteHosts(CODEMAN_CONFIG_DIR)).find((item) => item.id === remoteCase.hostId);
+      const host = (await readRemoteHosts(REVERIE_CONFIG_DIR)).find((item) => item.id === remoteCase.hostId);
       if (!host) return createErrorResponse(ApiErrorCode.NOT_FOUND, 'Remote host not found');
 
       // Per-session config that is applied to the LOCAL tmux/CLI wrapper (env vars via
@@ -4059,7 +4059,7 @@ export function registerSessionRoutes(
       // exec`, so the LOCAL availability gates below don't apply. Mirror the remote
       // branch's rejection of per-session config that would not cross into the
       // container (it would silently no-op). (Ownership is enforced in the .find above.)
-      const host = (await readDockerHosts(CODEMAN_CONFIG_DIR)).find((item) => item.id === dockerCase.hostId);
+      const host = (await readDockerHosts(REVERIE_CONFIG_DIR)).find((item) => item.id === dockerCase.hostId);
       if (!host) return createErrorResponse(ApiErrorCode.NOT_FOUND, 'Docker host not found');
       if (
         subscriptionLaunch(req).selection ||
@@ -4136,7 +4136,7 @@ export function registerSessionRoutes(
       }
 
       // Config drift (docs/docker-cases-plan.md §4): the desired create-config no
-      // longer matches the existing container's codeman.confighash label. Refuse to
+      // longer matches the existing container's reverie.confighash label. Refuse to
       // silently launch into the stale container — the frontend confirms a recreate
       // (POST /api/docker-cases/:name/recreate; workspace + transcripts ride bind
       // mounts and the conversation resumes), or the user reverts the host edit.
@@ -4275,7 +4275,7 @@ export function registerSessionRoutes(
         return createErrorResponse(ApiErrorCode.OPERATION_FAILED, `Failed to create case: ${getErrorMessage(err)}`);
       }
     } else if (!remote && !docker && mode !== 'opencode') {
-      // EXISTING case directory (a linked case, a cloned repo, anything Codeman did
+      // EXISTING case directory (a linked case, a cloned repo, anything Reverie did
       // not scaffold): install-or-refresh per the setting (see applyWorkspaceHooks).
       // Other modes keep the narrower COD-91 self-heal unconditionally: only claude
       // reads `.claude` hooks, so a shell/codex quick-start should not author a block
@@ -4284,7 +4284,7 @@ export function registerSessionRoutes(
       if (getCli(mode)?.capabilities.hooks === 'always') {
         await applyWorkspaceHooks(resolvedCasePath, await ctx.getWorkspaceHooksEnabled());
       } else {
-        await refreshStaleCodemanHooks(resolvedCasePath).catch(() => {});
+        await refreshStaleReverieHooks(resolvedCasePath).catch(() => {});
       }
     }
 
@@ -4439,7 +4439,7 @@ export function registerSessionRoutes(
       if (cmEntry.capabilities.customModelInjection.kind === 'unsupported') {
         return createErrorResponse(ApiErrorCode.OPERATION_FAILED, `${mode} has no known custom-model mechanism`);
       }
-      const cmHosts = await readCustomModelHosts(CODEMAN_CONFIG_DIR);
+      const cmHosts = await readCustomModelHosts(REVERIE_CONFIG_DIR);
       const cmEndpoint = cmHosts.find((h) => h.id === customModel.endpointId);
       if (!cmEndpoint) return createErrorResponse(ApiErrorCode.NOT_FOUND, 'Model endpoint not found');
       const cmContextLength = cmEndpoint.modelContextLengths?.[customModel.modelId];
@@ -4593,7 +4593,7 @@ export function registerSessionRoutes(
         qsSessionOptions.model = qsCustomModelLaunchModel;
       }
     }
-    const qsClaim = await claimEmployeeThread(ctx, qsSpawnIdentity, qsThread, req.headers['x-codeman-parent-session'] !== undefined);
+    const qsClaim = await claimEmployeeThread(ctx, qsSpawnIdentity, qsThread, req.headers['x-reverie-parent-session'] !== undefined);
     if (qsClaim.refusal) return createErrorResponse(ApiErrorCode.CONFLICT, qsClaim.refusal);
     const session = new Session(qsSessionOptions);
 
@@ -4668,7 +4668,7 @@ export function registerSessionRoutes(
       // listener). Hook/last-response adoption updates it again after /clear.
       if (docker && mode === 'claude') {
         void persistDockerCaseClaudeSessionId(
-          CODEMAN_CONFIG_DIR,
+          REVERIE_CONFIG_DIR,
           docker.containerName,
           session.claudeSessionId || session.id
         ).catch(() => {});
@@ -5026,7 +5026,7 @@ export function registerSessionRoutes(
         }
       }
       // The encoder maps both '/' and '.' to '-', so a literal '.' in the
-      // original path (e.g. "/home/timkjr/.codeman") collapses into an empty
+      // original path (e.g. "/home/timkjr/.reverie") collapses into an empty
       // split segment here. Retry this window as a dotdir/dotfile: ".<join>".
       if (segments[idx] === '' && idx + 1 < segments.length) {
         const dotMaxLook = Math.min(idx + 1 + 4, segments.length);
@@ -5501,8 +5501,8 @@ export function registerSessionRoutes(
       // Fold a FRESH codex pane into its own rollout row. A resumed one already
       // folds, because Session sets `claudeSessionId` from the resume id it was
       // given; a fresh one has no thread id until codex writes the rollout, so
-      // the link has to come from the other side. Codeman spawns every codex pane
-      // with CODEX_INTERNAL_ORIGINATOR_OVERRIDE=codeman_<sessionId>, and codex
+      // the link has to come from the other side. Reverie spawns every codex pane
+      // with CODEX_INTERNAL_ORIGINATOR_OVERRIDE=reverie_<sessionId>, and codex
       // stamps that into session_meta.originator, so the rollout names the pane.
       //
       // Newest rollout wins: `/new` typed inside the TUI leaves several rollouts
@@ -5657,7 +5657,7 @@ export function registerSessionRoutes(
     // (no preflight), so a cross-origin <form enctype="multipart/form-data">
     // submit attaches the session cookie unimpeded. Reject unless Origin/Referer
     // matches req.host. Non-browser clients (no Origin AND no Referer) must
-    // supply X-Codeman-CSRF — a header browsers cannot add cross-origin without
+    // supply X-Reverie-CSRF — a header browsers cannot add cross-origin without
     // a preflight, which our CORS config does not allow from other origins.
     const reqHost = req.headers.host;
     const origin = req.headers.origin;
@@ -5676,7 +5676,7 @@ export function registerSessionRoutes(
         /* invalid Referer → not ok */
       }
     } else {
-      csrfOk = !!req.headers['x-codeman-csrf'];
+      csrfOk = !!req.headers['x-reverie-csrf'];
     }
     if (!csrfOk) {
       reply.code(403);
@@ -5906,7 +5906,7 @@ export function registerSessionRoutes(
       return createErrorResponse(ApiErrorCode.INVALID_INPUT, `Image bytes do not match declared type ${ext}`);
     }
 
-    // {workingDir}/.codeman-uploads/, see ensureUploadDir.
+    // {workingDir}/.reverie-uploads/, see ensureUploadDir.
     const imageDir = await ensureUploadDir(session.workingDir);
     if (!imageDir) {
       reply.code(403);

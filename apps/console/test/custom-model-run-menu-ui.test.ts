@@ -29,7 +29,7 @@ function resp(body: unknown, ok = true) {
 }
 
 /**
- * Boots a minimal CodemanApp instance with constants.js + session-ui.js
+ * Boots a minimal ReverieApp instance with constants.js + session-ui.js
  * evaluated against a real JSDOM window, so escapeHtml and the picker's own
  * innerHTML-building code run exactly as they do in the browser.
  */
@@ -68,16 +68,16 @@ function bootApp(
   );
   const win = dom.window as unknown as Window &
     typeof globalThis & {
-      CodemanApp: new () => any;
-      __codemanCustomModelClis?: Array<{ id: string; label: string }>;
+      ReverieApp: new () => any;
+      __reverieCustomModelClis?: Array<{ id: string; label: string }>;
     };
-  (win as unknown as { eval: (s: string) => void }).eval('window.CodemanApp = function CodemanApp() {};');
+  (win as unknown as { eval: (s: string) => void }).eval('window.ReverieApp = function ReverieApp() {};');
   (win as unknown as { eval: (s: string) => void }).eval(CONSTANTS_JS);
   (win as unknown as { eval: (s: string) => void }).eval(SESSION_UI_JS);
 
-  win.__codemanCustomModelClis = options.customModelClis ?? [{ id: 'claude', label: 'Claude Code' }];
+  win.__reverieCustomModelClis = options.customModelClis ?? [{ id: 'claude', label: 'Claude Code' }];
 
-  const app = new win.CodemanApp();
+  const app = new win.ReverieApp();
   app.cases = options.activeCase ? [{ name: 'testcase', ...options.activeCase }] : [{ name: 'testcase' }];
   app.loadAppSettingsFromStorage = () => ({ customModelEndpointsEnabled: options.settingsEnabled ?? true });
   app.isCliAvailable = options.cliAvailable ?? (() => true);
@@ -108,18 +108,18 @@ function bootApp(
  */
 function bootAppWithRealCenterStatus() {
   const dom = new JSDOM('<!doctype html><body></body>', { url: 'http://localhost/', runScripts: 'dangerously' });
-  const win = dom.window as unknown as Window & typeof globalThis & { CodemanApp: new () => any };
+  const win = dom.window as unknown as Window & typeof globalThis & { ReverieApp: new () => any };
   // jsdom doesn't polyfill requestAnimationFrame, and _showCenterStatus calls it to add
   // the 'show' class — run it synchronously, which is all a non-visual test needs.
   (win as unknown as { requestAnimationFrame: (cb: () => void) => number }).requestAnimationFrame = (cb) => {
     cb();
     return 0;
   };
-  (win as unknown as { eval: (s: string) => void }).eval('window.CodemanApp = function CodemanApp() {};');
+  (win as unknown as { eval: (s: string) => void }).eval('window.ReverieApp = function ReverieApp() {};');
   (win as unknown as { eval: (s: string) => void }).eval(CONSTANTS_JS);
   (win as unknown as { eval: (s: string) => void }).eval(SESSION_UI_JS);
   (win as unknown as { eval: (s: string) => void }).eval(PANELS_UI_JS);
-  const app = new win.CodemanApp();
+  const app = new win.ReverieApp();
   return { win, app };
 }
 
@@ -305,7 +305,7 @@ describe('Custom Model Endpoint Profiles: the "which model" picker', () => {
       return origApiJson(path);
     };
     // Simulate a prior launch on this exact (harness, endpoint) pair having picked llama3.
-    win.localStorage.setItem('codeman:customModelLastUsed:claude:llama-box', 'llama3');
+    win.localStorage.setItem('reverie:customModelLastUsed:claude:llama-box', 'llama3');
 
     await app.selectCustomModelEntry('claude', 'llama-box');
 
@@ -326,7 +326,7 @@ describe('Custom Model Endpoint Profiles: the "which model" picker', () => {
       }
       return origApiJson(path);
     };
-    win.localStorage.setItem('codeman:customModelLastUsed:claude:llama-box', 'llama3');
+    win.localStorage.setItem('reverie:customModelLastUsed:claude:llama-box', 'llama3');
 
     await app.selectCustomModelEntry('claude', 'llama-box');
 
@@ -386,7 +386,7 @@ describe('Custom Model Endpoint Profiles: the "which model" picker', () => {
       if (path === '/api/model-endpoints/llama-box/running-status') return { isLlamaSwap: false, running: [] };
       return origApiJson(path);
     };
-    win.localStorage.setItem('codeman:customModelLastUsed:claude:llama-box', 'llama3');
+    win.localStorage.setItem('reverie:customModelLastUsed:claude:llama-box', 'llama3');
 
     await app.selectCustomModelEntry('claude', 'llama-box');
 
@@ -434,7 +434,7 @@ describe('Custom Model Endpoint Profiles: the "which model" picker', () => {
 
     await app.runCustomModelEntry('claude', 'llama-box', 'qwen3');
 
-    expect(win.localStorage.getItem('codeman:customModelLastUsed:claude:llama-box')).toBe('qwen3');
+    expect(win.localStorage.getItem('reverie:customModelLastUsed:claude:llama-box')).toBe('qwen3');
   });
 
   it('a slower currently-loaded probe for an earlier pick must never clobber a faster, later pick for a different endpoint', async () => {
@@ -1286,7 +1286,7 @@ describe("Custom Model Endpoint Profiles: requiresContextWarning (this CLI's own
       { endpointId: 'llama-box', modelId: 'qwen3' },
       { endpointId: 'llama-box', modelId: 'qwen3', confirmedContext: true },
     ]);
-    expect(win.localStorage.getItem('codeman:customModelLastUsed:claude:llama-box')).toBe('qwen3');
+    expect(win.localStorage.getItem('reverie:customModelLastUsed:claude:llama-box')).toBe('qwen3');
   });
 
   it('declining the in-app context-warning modal keeps the native backend, never re-sends the apply, and must NEVER record this model as "last used" — it cannot work with this CLI at all', async () => {
@@ -1303,7 +1303,7 @@ describe("Custom Model Endpoint Profiles: requiresContextWarning (this CLI's own
 
     expect(applyBodies).toHaveLength(1); // no second (confirmed) call
     expect(toastMessage).toMatch(/context window too small/i);
-    expect(win.localStorage.getItem('codeman:customModelLastUsed:claude:llama-box')).toBeNull();
+    expect(win.localStorage.getItem('reverie:customModelLastUsed:claude:llama-box')).toBeNull();
   });
 });
 

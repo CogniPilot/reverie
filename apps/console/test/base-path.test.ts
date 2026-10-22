@@ -23,23 +23,23 @@ describe('normalizeBasePath', () => {
   });
 
   it('adds a leading slash and drops trailing slashes', () => {
-    expect(normalizeBasePath('codeman')).toBe('/codeman');
-    expect(normalizeBasePath('/codeman')).toBe('/codeman');
-    expect(normalizeBasePath('/codeman/')).toBe('/codeman');
-    expect(normalizeBasePath('codeman///')).toBe('/codeman');
+    expect(normalizeBasePath('reverie')).toBe('/reverie');
+    expect(normalizeBasePath('/reverie')).toBe('/reverie');
+    expect(normalizeBasePath('/reverie/')).toBe('/reverie');
+    expect(normalizeBasePath('reverie///')).toBe('/reverie');
   });
 
   it('collapses duplicate slashes and keeps nested segments', () => {
     expect(normalizeBasePath('//a//b//')).toBe('/a/b');
-    expect(normalizeBasePath('/tools/codeman')).toBe('/tools/codeman');
+    expect(normalizeBasePath('/tools/reverie')).toBe('/tools/reverie');
   });
 });
 
 describe('isValidBasePath / assertValidBasePath', () => {
   it('accepts root and well-formed segments', () => {
     expect(isValidBasePath('')).toBe(true);
-    expect(isValidBasePath('/codeman')).toBe(true);
-    expect(isValidBasePath('/tools/codeman-2')).toBe(true);
+    expect(isValidBasePath('/reverie')).toBe(true);
+    expect(isValidBasePath('/tools/reverie-2')).toBe(true);
     expect(isValidBasePath('/a_b.c~d')).toBe(true);
   });
 
@@ -51,7 +51,7 @@ describe('isValidBasePath / assertValidBasePath', () => {
   });
 
   it('assertValidBasePath normalizes valid input and throws on bad', () => {
-    expect(assertValidBasePath('/codeman/')).toBe('/codeman');
+    expect(assertValidBasePath('/reverie/')).toBe('/reverie');
     expect(assertValidBasePath('/')).toBe('');
     expect(() => assertValidBasePath('/a b')).toThrow(/Invalid --base-url/);
     expect(() => assertValidBasePath('?x')).toThrow(/Invalid --base-url/);
@@ -65,29 +65,29 @@ describe('joinBasePath (frontend/egress route builder)', () => {
   });
 
   it('prefixes root-absolute app paths', () => {
-    expect(joinBasePath('/codeman', '/api/x')).toBe('/codeman/api/x');
-    expect(joinBasePath('/codeman', '/')).toBe('/codeman/');
-    expect(joinBasePath('/codeman', '/ws/sessions/1/terminal')).toBe('/codeman/ws/sessions/1/terminal');
+    expect(joinBasePath('/reverie', '/api/x')).toBe('/reverie/api/x');
+    expect(joinBasePath('/reverie', '/')).toBe('/reverie/');
+    expect(joinBasePath('/reverie', '/ws/sessions/1/terminal')).toBe('/reverie/ws/sessions/1/terminal');
   });
 
   it('leaves absolute, protocol-relative, and relative URLs alone', () => {
-    expect(joinBasePath('/codeman', 'https://x/y')).toBe('https://x/y');
-    expect(joinBasePath('/codeman', 'ws://x/y')).toBe('ws://x/y');
-    expect(joinBasePath('/codeman', '//host/y')).toBe('//host/y');
-    expect(joinBasePath('/codeman', 'app.js')).toBe('app.js');
-    expect(joinBasePath('/codeman', '#frag')).toBe('#frag');
-    expect(joinBasePath('/codeman', 'data:image/png;base64,AAAA')).toBe('data:image/png;base64,AAAA');
+    expect(joinBasePath('/reverie', 'https://x/y')).toBe('https://x/y');
+    expect(joinBasePath('/reverie', 'ws://x/y')).toBe('ws://x/y');
+    expect(joinBasePath('/reverie', '//host/y')).toBe('//host/y');
+    expect(joinBasePath('/reverie', 'app.js')).toBe('app.js');
+    expect(joinBasePath('/reverie', '#frag')).toBe('#frag');
+    expect(joinBasePath('/reverie', 'data:image/png;base64,AAAA')).toBe('data:image/png;base64,AAAA');
   });
 
   it('is idempotent — never double-prefixes', () => {
-    expect(joinBasePath('/codeman', '/codeman/api/x')).toBe('/codeman/api/x');
-    expect(joinBasePath('/codeman', '/codeman')).toBe('/codeman');
-    expect(joinBasePath('/codeman', '/codeman?y=1')).toBe('/codeman?y=1');
+    expect(joinBasePath('/reverie', '/reverie/api/x')).toBe('/reverie/api/x');
+    expect(joinBasePath('/reverie', '/reverie')).toBe('/reverie');
+    expect(joinBasePath('/reverie', '/reverie?y=1')).toBe('/reverie?y=1');
   });
 
   it('does not treat a same-named sibling path as already-prefixed', () => {
-    // /codeman-docs must NOT be mistaken for the /codeman mount.
-    expect(joinBasePath('/codeman', '/codeman-docs/x')).toBe('/codeman/codeman-docs/x');
+    // /reverie-docs must NOT be mistaken for the /reverie mount.
+    expect(joinBasePath('/reverie', '/reverie-docs/x')).toBe('/reverie/reverie-docs/x');
   });
 });
 
@@ -97,21 +97,21 @@ describe('stripBasePath (server ingress)', () => {
   });
 
   it('strips the prefix from proxied requests', () => {
-    expect(stripBasePath('/codeman', '/codeman/api/x')).toBe('/api/x');
-    expect(stripBasePath('/codeman', '/codeman')).toBe('/');
-    expect(stripBasePath('/codeman', '/codeman/')).toBe('/');
-    expect(stripBasePath('/codeman', '/codeman?y=1')).toBe('/?y=1');
+    expect(stripBasePath('/reverie', '/reverie/api/x')).toBe('/api/x');
+    expect(stripBasePath('/reverie', '/reverie')).toBe('/');
+    expect(stripBasePath('/reverie', '/reverie/')).toBe('/');
+    expect(stripBasePath('/reverie', '/reverie?y=1')).toBe('/?y=1');
   });
 
   it('leaves un-prefixed requests unchanged (direct-to-port: hooks, health, docker bridge)', () => {
-    expect(stripBasePath('/codeman', '/api/x')).toBe('/api/x');
-    expect(stripBasePath('/codeman', '/api/hook-event')).toBe('/api/hook-event');
+    expect(stripBasePath('/reverie', '/api/x')).toBe('/api/x');
+    expect(stripBasePath('/reverie', '/api/hook-event')).toBe('/api/hook-event');
     // A same-named sibling is not the mount.
-    expect(stripBasePath('/codeman', '/codeman-docs/x')).toBe('/codeman-docs/x');
+    expect(stripBasePath('/reverie', '/reverie-docs/x')).toBe('/reverie-docs/x');
   });
 
   it('round-trips with joinBasePath', () => {
-    const base = '/tools/codeman';
+    const base = '/tools/reverie';
     for (const p of ['/', '/api/x', '/ws/y', '/session/abc']) {
       expect(stripBasePath(base, joinBasePath(base, p))).toBe(p);
     }

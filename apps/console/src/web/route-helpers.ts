@@ -37,7 +37,7 @@ import { AGENT_ORIGIN_SPAWNED_BY_SESSION, normalizeAgentOrigin } from '../agent-
 // Shared path constants used across route modules. CASES_DIR (project folders)
 // stays shared across instances; SETTINGS_PATH is per-instance runtime state.
 // The cases dir is resolved in ONE place (config/cases-dir.ts) because the CLI
-// resolves it too, and CODEMAN_CASES_PATH must move both or neither.
+// resolves it too, and REVERIE_CASES_PATH must move both or neither.
 export const CASES_DIR = getCasesDir();
 export const SETTINGS_PATH = dataPath('settings.json');
 
@@ -169,8 +169,8 @@ export function ownerFor(req: FastifyRequest): string | undefined {
 }
 
 /**
- * The cases directory for a request/user: the shared ~/codeman-cases in single-user
- * mode, or the per-user ~/codeman-users/<username>/cases in multi-user (created
+ * The cases directory for a request/user: the shared ~/reverie-cases in single-user
+ * mode, or the per-user ~/reverie-users/<username>/cases in multi-user (created
  * lazily). Admins are NOT auto-scoped here — an admin acting on a specific user's
  * case resolves through the owner-aware case resolver instead.
  */
@@ -360,7 +360,7 @@ const PARENT_SESSION_ID_MIN_PREFIX = 8;
 
 /**
  * Resolve the "who spawned me" hint a create request may carry, for the tab lineage
- * lines in the web UI. Reads the body field first, then the `X-Codeman-Parent-Session`
+ * lines in the web UI. Reads the body field first, then the `X-Reverie-Parent-Session`
  * header (the agent skill sets that once on its shared curl invocation, so every spawn
  * recipe carries it without a per-recipe edit).
  *
@@ -371,7 +371,7 @@ const PARENT_SESSION_ID_MIN_PREFIX = 8;
  *   owner as the session being created, so a multi-user caller cannot staple their
  *   session under someone else's tab.
  * - Exact id match first, then a UNIQUE prefix of >= 8 chars, because ids appear
- *   truncated to 8 in mux names and in a Docker export's `$CODEMAN_SESSION_ID`.
+ *   truncated to 8 in mux names and in a Docker export's `$REVERIE_SESSION_ID`.
  *   An ambiguous prefix resolves to nothing rather than to a guess.
  *
  * Returns the parent's FULL id, which is what the frontend matches tabs on.
@@ -382,7 +382,7 @@ export function resolveParentSessionId(
   bodyValue: string | undefined,
   owner: string | undefined
 ): string | undefined {
-  const header = req.headers['x-codeman-parent-session'];
+  const header = req.headers['x-reverie-parent-session'];
   const raw = bodyValue ?? (Array.isArray(header) ? header[0] : header);
   const candidate = typeof raw === 'string' ? raw.trim() : '';
   // The body field is schema-capped; the header is not, so cap it here too.
@@ -404,7 +404,7 @@ export function resolveParentSessionId(
 }
 
 /**
- * Who asked, for an audit line: the session in the caller's own `X-Codeman-Parent-Session`
+ * Who asked, for an audit line: the session in the caller's own `X-Reverie-Parent-Session`
  * header (validated as in `resolveParentSessionId`), else 'owner'. A body `parentSessionId` is
  * lineage the caller may set for anyone, so it never names the actor.
  */
@@ -414,10 +414,10 @@ export function auditActor(ctx: SessionPort, req: FastifyRequest, owner: string 
 
 /**
  * Resolve "an agent asked for this", the signal that labels a case directory
- * Codeman is about to CREATE as an agent scratch workspace (see agent-case-marker.ts).
+ * Reverie is about to CREATE as an agent scratch workspace (see agent-case-marker.ts).
  *
  * Two signals, in order:
- * 1. an explicit `agentOrigin` body field, or the `X-Codeman-Agent-Origin` header the
+ * 1. an explicit `agentOrigin` body field, or the `X-Reverie-Agent-Origin` header the
  *    packaged skill sets once on its shared curl invocation, so every spawn recipe
  *    carries it without a per-recipe edit. The body wins, mirroring parentSessionId;
  * 2. failing that, an already-RESOLVED parent session id. A create request that names
@@ -434,7 +434,7 @@ export function resolveAgentCaseOrigin(
   bodyValue: string | undefined,
   resolvedParentSessionId: string | undefined
 ): string | undefined {
-  const header = req.headers['x-codeman-agent-origin'];
+  const header = req.headers['x-reverie-agent-origin'];
   const raw = bodyValue ?? (Array.isArray(header) ? header[0] : header);
   return normalizeAgentOrigin(raw) ?? (resolvedParentSessionId ? AGENT_ORIGIN_SPAWNED_BY_SESSION : undefined);
 }
