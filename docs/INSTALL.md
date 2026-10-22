@@ -17,7 +17,7 @@ system Docker starts automatically; if needed run
 
 ```bash
 sha256sum -c SHA256SUMS
-./setup.sh --offline reverie-image.tar
+./setup.sh --engine docker --offline reverie-image.tar
 ```
 
 Open http://127.0.0.1:3000 on this machine and create your owner account.
@@ -27,15 +27,18 @@ The service binds only to loopback. Save the owner password securely.
 IMAGE-REF.txt records the commit, version and Docker image ID. The archive loads
 both ghcr.io/jgoppert/reverie:latest and ghcr.io/jgoppert/reverie:X.Y.Z.
 Docker volumes reverie-data and reverie-home retain state across restarts.
-Do not remove these volumes to upgrade. Optional provider CLIs require a network
-connection and your own provider login; they are not installed by this command.
+Do not remove these volumes to upgrade. On first start with network access the
+container installs the Claude Code, Codex and opencode CLIs in the background
+(without network it skips them; a provider is prepared again when first used).
+Each needs your own provider login and license.
 
 ## Alternative: run the image from GHCR
 
 The same image is published as ghcr.io/jgoppert/reverie:X.Y.Z (and :latest).
 Nix is not required; you need Docker (installed and the docker group set up as
 above), network access, and a GitHub account that has read access to the package.
-Create a GitHub personal access token with the read:packages scope. Run the
+Create a GitHub personal access token (classic) with the read:packages scope;
+GHCR does not accept fine-grained tokens for this. Run the
 commands below in Bash (the default Debian login shell), from the extracted
 bundle directory. First log in once; the token is read without echoing it to
 the terminal or saving it in shell history:
@@ -52,7 +55,7 @@ rollback and waits until the server answers:
 
 ```shell
 VERSION=$(sed -n 's/^Version: //p' IMAGE-REF.txt)
-./setup.sh --version "$VERSION"
+./setup.sh --engine docker --version "$VERSION"
 ```
 
 Or run it directly with Docker, with the same port, volumes and restart policy:
