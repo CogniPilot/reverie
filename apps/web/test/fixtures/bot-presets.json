@@ -1,0 +1,23 @@
+{
+  "sender": { "id": "updates", "name": "Updates", "rooms": ["engineering"], "maxPerHour": 12 },
+  "watcher": {
+    "schemaVersion": 1,
+    "type": "github-watcher",
+    "id": "repository-updates",
+    "brokerContractVersion": 1,
+    "logExcerptLines": 40,
+    "botId": "updates",
+    "roomId": "engineering",
+    "repositories": ["example/project", "other-owner/second-project"],
+    "events": ["ci-failure", "issue", "pull-request", "review-request", "review-result"]
+  },
+  "routine": {
+    "schemaVersion": 1,
+    "type": "routine-bot",
+    "id": "daily-reminder",
+    "botId": "updates",
+    "roomId": "engineering",
+    "schedule": { "scheduleType": "daily", "dailyTime": "09:00", "timeZone": "America/New_York" },
+    "post": { "kind": "text", "text": "Review the current work queue." }
+  }
+}
