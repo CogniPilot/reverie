@@ -22,7 +22,7 @@ Updated as work is tested and deployed. Existing backups must remain intact.
 - [x] Replace the existing-session hiring picker with plan, model, effort and harness selection; deployed for owner testing.
 - [x] Surface local model endpoint selection with compatible owner-configured harnesses.
 - [x] Add a way to delete a workspace/channel grouping while preserving channels and messages.
-- [x] Deploy the original illustrated avatar pack and uploaded photos, remove the Unicode icon selector, and use initials as fallback.
+- [x] Deploy the original illustrated avatar pack for experts and humans, company logos (including Lucid Eye), uploaded photos, and initials as fallback.
 - [x] Compact avatar chooser with a random hiring default, working initials, and saving for disconnected experts.
 - [x] Show provider sign-in status independently from usage data, including Claude.
 - [ ] Enable and exercise the host rebuild request service, including replacement, persisted settings and rollback.
@@ -33,13 +33,13 @@ Updated as work is tested and deployed. Existing backups must remain intact.
 - [x] Preserve the owner account across replacement and refuse expired API sessions without the browser's Basic-auth popup.
 - [x] Combine Company plans and people into one page; compact repeated Company/Board headers.
 - [x] Optional pronouns and persistent voice selection with playable samples in hire/profile forms; Kokoro service packaging remains below.
-- [x] Simplify the member popover and keep wake controls on member status.
-- [ ] Refine medium-sized plan cards, remove plot labels, and replace the legacy research/settings panel.
-- [ ] Left-click an expert to edit runtime Plan, Harness (including registered custom harnesses), Model and Effort; validate compatibility and preserve identity, memories, photos and room membership.
-- [ ] Recover Alex's runtime after upgrading OpenCode and checking that the selected subscription model is actually used.
-- [ ] Add a compact disk gauge with capacity details for company data, workspace and scratch mounts.
+- [x] Simplify the member popover, keep wake controls on member status, and add confirmed expert restart controls.
+- [x] Refine medium-sized plan cards, remove plot labels, and replace the legacy research/settings panel.
+- [x] Left-click an expert to edit runtime Plan, Harness (including registered custom harnesses), Model and Effort; validate compatibility and preserve identity, memories, photos and room membership.
+- [x] Restore Alex's exact saved Codex runtime as stopped and pinned, ready for an explicit owner restart; preserve retired experts.
+- [x] Add a compact disk gauge with capacity details for company data, workspace and scratch mounts.
 - [x] Verify a complete Claude conversation through the managed harness in an isolated selected-plan fixture, independently of provider sign-in and usage retrieval.
-- [ ] Prepare selected Claude profiles for first launch without changing their chosen permission mode; verify credentials-only startup without manual setup.
+- [x] Prepare selected Claude profiles for first launch without changing their chosen permission mode; verify credentials-only hiring, an owner mention and a stored assistant reply without manual terminal setup.
 - [ ] Let additional humans register and appear alongside agents in company people, with explicit roles and permissions.
 - [x] Deploy the consolidated root skills and removal of legacy console Docker/plugin packaging.
 - [ ] Finish first-run bootstrap checks: editable deployment defaults, source/config access off by default, multiple mounts supported.
