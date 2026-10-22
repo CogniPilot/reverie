@@ -5825,20 +5825,38 @@ class ReverieChatApp {
     const dialog = this.el('dialog', 'ca-dialog ca-company-confirm ca-employee-restart');
     dialog.setAttribute('aria-label', `Restart session: ${employee.name}`);
     dialog.append(this.literalText('h2', '', `Restart session · ${employee.name}`), this.literalText('p', 'ca-dialog-note', `Restart ${employee.name} using their saved runtime settings? Their expert identity, memory and channel memberships stay the same. Wait for any current work to finish first.`));
+    const recoverLabel = this.el('label', 'ca-hint');
+    const recover = this.doc.createElement('input'); recover.type = 'checkbox'; recover.disabled = true;
+    recoverLabel.append(recover, this.doc.createTextNode(' Recover a stalled session. Only use if the expert has stopped responding; running tasks or activity within two minutes prevent recovery.'));
+    dialog.append(recoverLabel);
     const error = this.el('p', 'ca-company-error'); error.setAttribute('role', 'alert');
     const status = this.el('p', 'ca-hint', 'Checking owner access…'); status.setAttribute('role', 'status');
     const actions = this.el('div', 'ca-dialog-actions');
     const cancel = this.button('ca-btn', 'Cancel', () => dialog.close(), { text: 'Cancel' }); cancel.autofocus = true;
+    let unconfirmed = false;
+    const showUnconfirmed = () => {
+      unconfirmed = true;
+      error.textContent = '';
+      status.textContent = 'Restart could not be confirmed. The expert may already be restarting. Check their status before trying again.';
+      cancel.textContent = 'Close'; cancel.setAttribute('aria-label', 'Close');
+      recover.disabled = true;
+    };
     const restart = this.button('ca-btn is-primary', 'Restart session', async () => {
       if (restart.disabled || this._restartingEmployees.has(employee.id)) return;
       this._restartingEmployees.add(employee.id); restart.disabled = true; error.textContent = ''; status.textContent = 'Restarting session…';
       try {
-        const result = await this.app._chatApi(`/api/company/employees/${encodeURIComponent(employee.id)}/restart`, { method: 'POST', body: {} });
-        if (!result.ok) { error.textContent = result.error || 'The session could not restart. Check Runtime settings, then try again.'; status.textContent = ''; return; }
+        const result = await this.app._chatApi(`/api/company/employees/${encodeURIComponent(employee.id)}/restart`, { method: 'POST', body: recover.checked ? { forceRestart: true, confirmSessionId: employee.sessionId } : {} });
+        if (!result.ok) {
+          // A missing HTTP response cannot tell us whether the POST committed.
+          if (!result.status) showUnconfirmed();
+          else { error.textContent = result.error || 'The session could not restart. Check Runtime settings, then try again.'; status.textContent = ''; }
+          return;
+        }
         await this.loadOwner(); await onSaved?.(); dialog.close(); this.toast(`Session restarted for ${employee.name}.`, 'info');
-      } catch { error.textContent = 'The restart could not be confirmed. Check the expert’s status before trying again.'; status.textContent = ''; }
-      finally { this._restartingEmployees.delete(employee.id); restart.disabled = false; }
+      } catch { showUnconfirmed(); }
+      finally { this._restartingEmployees.delete(employee.id); restart.disabled = unconfirmed; }
     }, { text: 'Restart session' });
+    recover.addEventListener('change', () => { restart.textContent = recover.checked ? 'Recover and restart' : 'Restart session'; });
     restart.disabled = true; actions.append(cancel, restart); dialog.append(status, error, actions);
     dialog.addEventListener('cancel', event => { event.preventDefault(); dialog.close(); });
     dialog.addEventListener('close', () => dialog.remove()); this.doc.body.append(dialog); dialog.showModal(); cancel.focus();
@@ -5848,7 +5866,7 @@ class ReverieChatApp {
       status.textContent = '';
       if (this.app._chatSelf || this.company?.canManage !== true || !auth.ok || auth.data?.self !== 'owner' || auth.data?.canSetOwn !== true) error.textContent = 'Sign in as the owner to restart this session.';
       else if (employee.onVacation) error.textContent = 'Return this expert from vacation before restarting.';
-      else restart.disabled = false;
+      else { restart.disabled = false; recover.disabled = false; }
     } catch { if (dialog.isConnected) { status.textContent = ''; error.textContent = 'Owner access could not be checked. Close this dialog and try again.'; } }
   }
 
