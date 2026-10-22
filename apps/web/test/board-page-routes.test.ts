@@ -117,7 +117,7 @@ describe('shipped Company plans page', () => {
     run(svg, { weekStart, reset, points: [{ t: weekStart + 864e5, used: 30 }], used: 30, rate: 3, proj: 462, at: weekStart + 864e5 });
     const line = /<line class="nominal" x1="([\d.]+)" y1="([\d.]+)" x2="([\d.]+)" y2="([\d.]+)"/.exec(svg.innerHTML);
     expect(line?.slice(1).map(Number)).toEqual([28, 102, 312, 8 + (1 - 100 / 110) * 94]);
-    expect(svg.innerHTML).toContain('>even pace</text>');
+    expect(svg.innerHTML).not.toContain('>even pace</text>');
     const projection = /<line class="projection" x1="([\d.]+)" y1="([\d.]+)" x2="([\d.]+)" y2="([\d.]+)"/.exec(svg.innerHTML);
     const runout = /<circle class="runout" cx="([\d.]+)" cy="([\d.]+)"/.exec(svg.innerHTML);
     const runoutX = 28 + (864e5 + 70 / 3 * 36e5) / (7 * 864e5) * 284;
@@ -131,11 +131,11 @@ describe('shipped Company plans page', () => {
 
     expect(svg.innerHTML.indexOf('class="nominal"')).toBeLessThan(svg.innerHTML.indexOf('<polyline'));
     expect(html).toContain('Dashed grey line = even pace to the stop point');
-    // Start and reset days: vertical lines at both edges, labelled.
+    // Start and reset stay visible as edges; prose belongs in the help text.
     const edges = [...svg.innerHTML.matchAll(/<line class="edge" x1="([\d.]+)" x2="([\d.]+)" y1="([\d.]+)" y2="([\d.]+)"/g)].map((m) => m.slice(1).map(Number));
     expect(edges).toEqual([[28, 28, 8, 102], [312, 312, 8, 102]]);
-    expect(svg.innerHTML).toContain('>start</text>');
-    expect(svg.innerHTML).toContain('>reset</text>');
+    expect(svg.innerHTML).not.toContain('>start</text>');
+    expect(svg.innerHTML).not.toContain('>reset</text>');
   });
 
   it.each([9, 5])('stops at the banked expiry %i days after week start and retains the weekly reset reference', (expiryDays) => {
@@ -162,7 +162,8 @@ describe('shipped Company plans page', () => {
       expect(Number(svg.querySelector('.nominal')!.getAttribute('x2'))).toBeCloseTo(stopX);
       expect(Number(svg.querySelector('.projection')!.getAttribute('x2'))).toBeCloseTo(stopX);
       expect(Number(svg.querySelector('.projection')!.getAttribute('y2'))).toBeGreaterThan(8);
-      expect(svg.textContent).toContain(expiryDays === 9 ? 'expires 10/29' : 'expires 10/25');
+      expect(svg.querySelector('title')!.textContent).toContain(expiryDays === 9 ? 'Oct 29' : 'Oct 25');
+      expect([...svg.querySelectorAll('text')].some((node) => /start|reset|even pace|expires/.test(node.textContent || ''))).toBe(false);
       expect(svg.querySelector('title')!.textContent).toContain('Stop at banked-reset expiry');
       expect(svg.querySelector('title')!.textContent).toContain('weekly reset');
       expect(svg.innerHTML).not.toMatch(/NaN|Infinity/);
@@ -187,7 +188,7 @@ describe('shipped Company plans page', () => {
     const weekStart = 1_000_000_000_000, reset = weekStart + 7 * 864e5;
     run(svg, { weekStart, reset, banked, points: [], used: 40, rate: 0.1, proj: 54.4, at: weekStart + 864e5 });
     expect(svg.innerHTML).toContain('Stop at weekly reset');
-    expect(svg.innerHTML).toContain('>reset</text>');
+    expect(svg.innerHTML).not.toContain('>reset</text>');
     expect(svg.innerHTML).not.toContain('class="weekly-reset"');
     expect(svg.innerHTML).not.toMatch(/NaN|Infinity/);
   });
