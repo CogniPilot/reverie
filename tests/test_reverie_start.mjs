@@ -1,13 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, chmodSync, existsSync, lstatSync, rmSync } from 'node:fs';
+import { mkdtempSync, realpathSync, mkdirSync, writeFileSync, readFileSync, chmodSync, existsSync, lstatSync, readlinkSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 
 const script = resolve(import.meta.dirname, '../scripts/reverie-start');
 function fixture(t) {
-  const root = mkdtempSync(join(tmpdir(), 'reverie-start-'));
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'reverie-start-')));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const bin = join(root, 'bin'), home = join(root, 'home'), log = join(root, 'calls');
   mkdirSync(bin); mkdirSync(home);
@@ -45,8 +45,31 @@ test('first start with an existing image contains company state, workspace and s
   ]) assert.ok(command.includes(mount), mount);
   assert.equal(command[command.indexOf('--user') + 1], process.getuid() + ':' + process.getgid());
   assert.ok(command.includes('REVERIE_CASES_PATH=/reverie_workspace/cases'));
+  assert.equal(command[command.indexOf('--workdir') + 1], '/reverie_workspace');
   assert.ok(!command.some(value => /dst=\/workspace(?:,|$)|reverie-control/.test(value)));
   assert.ok(f.calls().find(([tool, args]) => tool === 'nix' && args.includes('path:' + resolve(import.meta.dirname, '..') + '#dockerImage')));
+});
+test('project access requires an explicit grant and links only the selected checkout into the workspace', t => {
+  const f = fixture(t), repo = join(f.root, 'chosen-repo'); mkdirSync(repo);
+  const result = f.run(['--project', 'reverie=' + repo]);
+  assert.equal(result.status, 0, result.stderr);
+  const command = f.calls().find(([tool, args]) => tool === 'docker' && args[0] === 'run')[1];
+  assert.ok(command.includes('type=bind,src=' + repo + ',dst=/projects/reverie'));
+  const link = join(f.deploy, 'workspace/reverie');
+  assert.ok(lstatSync(link).isSymbolicLink());
+  assert.equal(readlinkSync(link), '/projects/reverie');
+  assert.ok(!command.some(value => /dst=\/workspace(?:,|$)/.test(value)));
+});
+test('project grants reject traversal, duplicates and existing workspace files before creating containers', t => {
+  for (const args of [['--project', '../bad=/'], ['--project', 'same=/', '--project', 'same=/']]) {
+    const f = fixture(t), result = f.run(args);
+    assert.equal(result.status, 1); assert.equal(f.calls().length, 0);
+  }
+  const f = fixture(t); mkdirSync(join(f.deploy, 'workspace'), { recursive: true });
+  const file = join(f.deploy, 'workspace/reverie'); writeFileSync(file, 'owner data');
+  const result = f.run(['--project', 'reverie=' + f.root]);
+  assert.equal(result.status, 1); assert.match(result.stderr, /different contents/);
+  assert.equal(readFileSync(file, 'utf8'), 'owner data'); assert.equal(f.calls().length, 0);
 });
 test('edited JSON is preserved and explicit source and update access are opt in', t => {
   const f = fixture(t); assert.equal(f.run().status, 0);

@@ -15,7 +15,7 @@
 # Options (defaults in brackets):
 #   --name NAME              container name [reverie-live]
 #   --image IMAGE            image tag to build and run [localhost/reverie:live]
-#   --repo DIR               host repo mounted at /workspace [~/git/reverie]
+#   --repo DIR               explicitly mount this host repo at /workspace [none]
 #   --scratch DIR            host scratch mounted at /scratch [~/scratch/reverie/runtime]
 #   --instance DIR           private instance directory [~/reverie/companies/default/data]
 #   --instance-name NAME     it is mounted at /instances/NAME [default]
@@ -40,7 +40,7 @@ source_repo="$(cd -- "$here/.." && pwd)"
 launcher="${REVERIE_LAUNCHER:-$here/reverie-container}"
 name=reverie-live
 image="${REVERIE_IMAGE:-localhost/reverie:live}"
-repo="$HOME/git/reverie"
+repo=""
 scratch="$HOME/scratch/reverie/runtime"
 instance="${REVERIE_ROOT:-$HOME/reverie}/companies/default/data"
 instance_name=default
@@ -98,7 +98,7 @@ run() {
 
 [ -x "$launcher" ] || die "launcher not executable: $launcher (set REVERIE_LAUNCHER)"
 resolve_dir() { [ -d "$2" ] || die "$1 does not exist: $2"; (cd -- "$2" && pwd -P); }
-repo="$(resolve_dir repo "$repo")"
+if [ -n "$repo" ]; then repo="$(resolve_dir repo "$repo")"; fi
 scratch="$(resolve_dir scratch "$scratch")"
 instance="$(resolve_dir instance "$instance")"
 # Never mount an empty or wrong directory over the private instance or the shared scratch.
@@ -119,7 +119,8 @@ exists=0
 if "$launcher" engine container exists "$name"; then exists=1; fi
 
 echo "Container:      $name (image $image)"
-echo "Mounts:         $repo -> /workspace"
+echo "Source mount:   ${repo:-none (opt in with --repo)}"
+if [ -n "$repo" ]; then echo "Mounts:         $repo -> /workspace"; fi
 echo "                $scratch -> /scratch"
 echo "                $instance -> $target"
 echo "Model:          ${model:-instance default} at ${api_base:-instance default}"
@@ -169,10 +170,10 @@ if [ -n "$model" ]; then args+=(--env "REVERIE_MODEL=$model"); fi
 args+=(--env REVERIE_CASES_PATH=/scratch/cases --env REVERIE_RESEARCH_ROOT=/scratch/research
   --env REVERIE_API_URL=http://127.0.0.1:3000
   --log-driver=k8s-file --log-opt=max-size=10mb
-  --mount "type=bind,src=$repo,dst=/workspace"
   --mount "type=bind,src=$scratch,dst=/scratch"
-  --mount "type=bind,src=$instance,dst=$target"
-  --entrypoint /usr/bin/env "$image" /usr/local/bin/reverie web --host 0.0.0.0 --port 3000 --allow-unauthenticated-network)
+  --mount "type=bind,src=$instance,dst=$target")
+if [ -n "$repo" ]; then args+=(--mount "type=bind,src=$repo,dst=/workspace"); fi
+args+=(--entrypoint /usr/bin/env "$image" /usr/local/bin/reverie web --host 0.0.0.0 --port 3000 --allow-unauthenticated-network)
 run "$launcher" engine "${args[@]}"
 
 if [ "$install_launcher" = 1 ]; then

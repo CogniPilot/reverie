@@ -62,7 +62,19 @@ To explicitly expose a chosen project on the first launch:
 nix run .#start -- --source /absolute/path/to/project
 ~~~
 
-The project appears at /workspace. The ordinary workspace is /reverie_workspace.
+The ordinary workspace is /reverie_workspace. To explicitly grant a project and
+add a link to it from that workspace:
+
+~~~bash
+nix run .#start -- --project reverie=/absolute/path/to/reverie
+~~~
+
+This mounts only the selected directory at /projects/reverie and creates
+/reverie_workspace/reverie pointing to it. No source checkout is mounted by default.
+A link alone cannot expose host files through Docker; the explicit mount grants
+access. Removing the link does not revoke the mount; recreate the container without
+that project grant to revoke access. The older --source option mounts its selected
+project at /workspace without changing the default working directory.
 Add --allow-updates only when you also configure the owner-controlled host updater;
 this exposes only its request directory, not a Docker socket or host configuration.
 Use --root /absolute/path to select another contained deployment directory.

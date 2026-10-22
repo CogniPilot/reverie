@@ -1,7 +1,7 @@
 // Run with node --test tests/test_recovery_scripts.mjs. Fake engine only: no podman, no host changes.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, chmodSync, statSync, readdirSync } from "node:fs";
+import { mkdtempSync, realpathSync, mkdirSync, writeFileSync, readFileSync, existsSync, chmodSync, statSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -25,7 +25,7 @@ esac
 `;
 
 function hostTree() {
-  const root = mkdtempSync(join(tmpdir(), "reverie-recreate-"));
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "reverie-recreate-")));
   const dirs = {
     root, home: join(root, "home"), repo: join(root, "repo"), scratch: join(root, "scratch"),
     instance: join(root, "instance"), bin: join(root, "bin"),
@@ -130,7 +130,7 @@ test("publish options and launcher installation", () => {
 
 test("defaults are generic: repo sources, /instances/default, no model settings unless given", () => {
   const t = hostTree();                       // a dated rescue tree exists in scratch, but is never picked up implicitly
-  const bare = (...args) => spawnSync("bash", [join(scripts, "reverie-recreate"), "--repo", t.repo, "--scratch", t.scratch,
+  const bare = (...args) => spawnSync("bash", [join(scripts, "reverie-recreate"), "--scratch", t.scratch,
     "--instance", t.instance, ...args], {
     env: { PATH: process.env.PATH, HOME: t.home, TMPDIR: t.root, REVERIE_LAUNCHER: join(t.bin, "reverie-container") },
     encoding: "utf8",
@@ -140,7 +140,7 @@ test("defaults are generic: repo sources, /instances/default, no model settings 
   const runLine = r.stdout.split("\n").find((l) => l.includes(" engine create ")).replace(/\\/g, "");
   assert.ok(runLine.includes(`src=${t.instance},dst=/instances/default`), runLine);
   assert.ok(runLine.includes("REVERIE_INSTANCE_CONFIG=/instances/default/config/instance.json"), runLine);
-  assert.doesNotMatch(runLine, /API_BASE=|_MODEL=|\/instances\/personal/);
+  assert.doesNotMatch(runLine, /API_BASE=|_MODEL=|\/instances\/personal|dst=\/workspace/);
   assert.match(r.stdout, new RegExp(`Image console: +${resolve(scripts, "..", "apps", "web")}\n`));
   assert.match(r.stdout, new RegExp(`Image reverie: +${resolve(scripts, "..", "python", "reverie")}\n`));
   assert.doesNotMatch(r.stdout, /rescue/);

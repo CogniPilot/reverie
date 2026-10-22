@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Host bootstrap: JSON is data; no deployment value is evaluated by a shell.
-import { existsSync, mkdirSync, readFileSync, writeFileSync, symlinkSync, realpathSync, statSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync, symlinkSync, realpathSync, statSync, lstatSync, readlinkSync } from 'node:fs';
 import { dirname, resolve, join, isAbsolute } from 'node:path';
 import { homedir, totalmem } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -20,10 +20,19 @@ function directory(path) {
 function main() {
   const args = process.argv.slice(2);
   let root = process.env.REVERIE_ROOT || join(homedir(), 'reverie'), source = null, updates = false;
+  const projects = [];
   while (args.length) {
     const flag = args.shift();
-    if (flag === '--help') { console.log('reverie-start [--root DIR] [--source PATH] [--allow-updates]'); return; }
+    if (flag === '--help') { console.log('reverie-start [--root DIR] [--project NAME=PATH] [--source PATH] [--allow-updates]'); return; }
     if (flag === '--allow-updates') { updates = true; continue; }
+    if (flag === '--project') {
+      const value = args.shift() || '', separator = value.indexOf('=');
+      const name = value.slice(0, separator), path = value.slice(separator + 1);
+      if (separator < 1 || !/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,62}$/.test(name) || !path || projects.some(p => p.name === name)) fail('--project requires a unique NAME=PATH.');
+      projects.push({ name, path: realpathSync(directory(resolve(path))) });
+      if (!statSync(projects.at(-1).path).isDirectory()) fail('--project must select a directory.');
+      continue;
+    }
     if (!['--root', '--source'].includes(flag) || !args.length) fail('Unknown or incomplete option: ' + flag);
     const value = resolve(args.shift());
     if (flag === '--root') root = value; else source = value;
@@ -52,7 +61,13 @@ function main() {
   }
   const uid = process.getuid(), gid = process.getgid();
   if (uid === 0) fail('Run as the ordinary host owner, without sudo.');
-  const signature = createHash('sha256').update(JSON.stringify({ config, source, updates, uid, gid })).digest('hex');
+  const signature = createHash('sha256').update(JSON.stringify({ config, source, updates, uid, gid, ...(projects.length ? { projects } : {}) })).digest('hex');
+  // Refuse to replace owner files, including dangling or differently targeted symlinks.
+  for (const project of projects) {
+    const link = join(config.workspace, project.name), target = '/projects/' + project.name;
+    const entry = lstatSync(link, { throwIfNoEntry: false });
+    if (entry && (!entry.isSymbolicLink() || readlinkSync(link) !== target)) fail('Project link already exists with different contents: ' + link);
+  }
   const inspected = run('docker', ['inspect', '--type', 'container', '--format', '{{json .}}', config.containerName], true);
   if (inspected.status === 0) {
     const container = JSON.parse(inspected.stdout);
@@ -64,6 +79,10 @@ function main() {
   // First-run layout uses ordinary owner storage. Scratch may be any owner-selected directory or symlink.
   mkdirSync(config.companyRoot, { recursive: true, mode: 0o700 });
   mkdirSync(config.workspace, { recursive: true, mode: 0o700 });
+  for (const project of projects) {
+    const link = join(config.workspace, project.name);
+    if (!lstatSync(link, { throwIfNoEntry: false })) symlinkSync('/projects/' + project.name, link);
+  }
   const scratchRoot = join(root, 'scratch');
   if (!existsSync(scratchRoot)) {
     const target = join(homedir(), 'scratch', 'reverie');
@@ -85,6 +104,7 @@ function main() {
   if (!isAbsolute(image)) fail('Nix did not return an image archive path.');
   run('docker', ['load', '--input', image]);
   const command = ['run', '--detach', '--name', config.containerName, '--restart', 'unless-stopped',
+    '--workdir', '/reverie_workspace',
     '--user', uid + ':' + gid, '--memory', config.memoryMiB + 'm', '--memory-swap', config.memoryMiB + 'm',
     '--pids-limit', String(config.pidsLimit), '--publish', '127.0.0.1:' + config.port + ':3000',
     '--label', 'reverie.deployment=' + signature];
@@ -101,6 +121,7 @@ function main() {
   mount(join(identity, 'passwd'), '/etc/passwd', true); mount(join(identity, 'group'), '/etc/group', true);
   command.push('--env', 'REVERIE_CASES_PATH=/reverie_workspace/cases', '--env', 'REVERIE_RESEARCH_ROOT=/reverie_workspace/research');
   if (source) mount(source, '/workspace');
+  for (const project of projects) mount(project.path, '/projects/' + project.name);
   if (updates) {
     const control = join(root, 'runtime', 'control'); mkdirSync(control, { recursive: true, mode: 0o700 });
     mount(control, '/run/reverie-control');

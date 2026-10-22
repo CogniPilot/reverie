@@ -8,7 +8,7 @@ in pkgs.dockerTools.buildLayeredImage {
   contents = [ runtime pkgs.dockerTools.binSh pkgs.dockerTools.usrBinEnv
     pkgs.dockerTools.caCertificates pkgs.sudo ];
   extraCommands = ''
-    mkdir -p etc bin usr/local/bin opt/reverie home/agent workspace scratch/tmp instances tmp
+    mkdir -p etc bin usr/local/bin opt/reverie home/agent workspace reverie_workspace scratch/tmp instances tmp
     unlink bin/reverie
     ln -s ${reverie}/bin/reverie bin/reverie
     ln -s ${reverie}/bin/reverie-request-update bin/reverie-request-update
@@ -29,7 +29,7 @@ in pkgs.dockerTools.buildLayeredImage {
     chmod 1777 tmp
   '';
   fakeRootCommands = ''
-    chown -R 2000:2000 home/agent workspace scratch instances
+    chown -R 2000:2000 home/agent workspace reverie_workspace scratch instances
     chgrp -R 0 home/agent scratch
     chmod 2770 home/agent scratch scratch/tmp
     chmod 0440 etc/sudoers
@@ -43,7 +43,7 @@ in pkgs.dockerTools.buildLayeredImage {
   enableFakechroot = true;
   config = {
     User = "2000:2000";
-    WorkingDir = "/workspace";
+    WorkingDir = "/reverie_workspace";
     Entrypoint = [ "/usr/local/bin/reverie-start" ];
     Cmd = [ "reverie" "web" "--host" "0.0.0.0" "--port" "3000" ];
     Env = [ "PATH=/bin" "HOME=/home/agent" "REVERIE_CONTAINER=1" "REVERIE_MANAGED_INSTALL=nix"
