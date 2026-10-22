@@ -11,7 +11,7 @@ import { fileURLToPath } from 'node:url';
 const providers = [
   { id: 'claude', package: '@anthropic-ai/claude-code', version: '2.1.284', integrity: 'sha512-IuENsoLa+Y5fx5VaP0Md3n5UO7aYxjbFE/iydSDw6tMo2171oaxaaBa9oIepPG9NILd1owSx74ozsqAkTbEOjw==' },
   { id: 'codex', package: '@openai/codex', version: '0.146.0', integrity: 'sha512-yG3sPWNda/2YAIQIDq9MrrjoCTIQ7rxYM5IasrG3VBcuhCLTkgeg/JzqmJq1V98RE4MJ5jCxDXXQlOjrditFRw==' },
-  { id: 'opencode', package: 'opencode-ai', version: '1.15.10', integrity: 'sha512-/JOvvD50/fVW3se3dS6ZAZ3E4P/A8uD6+XmcuRzr2WGzoDvEjAvrYagT7plv5SB+yL+lcN5JIKPdPbyw74ih9g==' },
+  { id: 'opencode', package: 'opencode-ai', version: '1.19.3', integrity: 'sha512-wDRcUlMDibaLzecIGvVGUA9naghXVqzCWcUE7N3qagpGiLSUlU4VbixI+bpsErwJp+AAuSO2lhSr/XxJl7XbrQ==' },
 ];
 process.umask(0o077);
 const root = process.env.REVERIE_ROOT || join(homedir(), 'reverie');

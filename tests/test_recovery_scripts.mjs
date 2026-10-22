@@ -97,7 +97,7 @@ test("the image is built from the rescued console (without node_modules) and res
   const r = recreate(t);
   assert.equal(r.status, 0, r.stderr);
   const ctx = r.calls.filter((c) => c.startsWith("ctx "));
-  assert.ok(ctx.includes("ctx ./apps/console/package.json"));
+  assert.ok(ctx.includes("ctx ./apps/web/package.json"));
   assert.ok(ctx.includes("ctx ./docker") && ctx.includes("ctx ./python/pyproject.toml"));
   assert.equal(ctx.some((c) => c.includes("node_modules")), false);
   assert.ok(r.calls.includes("ctx-reverie rescued-runtime"));
@@ -141,7 +141,7 @@ test("defaults are generic: repo sources, /instances/default, no model settings 
   assert.ok(runLine.includes(`src=${t.instance},dst=/instances/default`), runLine);
   assert.ok(runLine.includes("REVERIE_INSTANCE_CONFIG=/instances/default/config/instance.json"), runLine);
   assert.doesNotMatch(runLine, /API_BASE=|_MODEL=|\/instances\/personal/);
-  assert.match(r.stdout, new RegExp(`Image console: +${resolve(scripts, "..", "apps", "console")}\n`));
+  assert.match(r.stdout, new RegExp(`Image console: +${resolve(scripts, "..", "apps", "web")}\n`));
   assert.match(r.stdout, new RegExp(`Image reverie: +${resolve(scripts, "..", "python", "reverie")}\n`));
   assert.doesNotMatch(r.stdout, /rescue/);
   const named = bare("--dry-run", "--instance-name", "lab", "--api-base", "http://192.0.2.7:8080/v1", "--model", "m");
@@ -168,7 +168,7 @@ function restoreTree() {
   write(join(rescue, "home-cto", "scratch", "console-backup", "company-ui.js"), "backup");
   for (const f of ["opencode.db", "opencode.db-wal", "opencode.db-shm", "opencode.log"]) write(join(rescue, "opencode", f), f);
   write(join(rescue, "opt-console", "src", "a.ts"), "live-a"); write(join(rescue, "opt-console", "dist", "x.js"), "dist");
-  write(join(opt, "apps", "console", "src", "a.ts"), "image-a"); write(join(opt, "apps", "console", "dist", "x.js"), "other-dist");
+  write(join(opt, "apps", "web", "src", "a.ts"), "image-a"); write(join(opt, "apps", "web", "dist", "x.js"), "other-dist");
   write(join(rescue, "opt-reverie-python", "site-packages", "cto", "runtime.py"), "rt");
   write(join(opt, "python", "lib", "python3.11", "site-packages", "reverie", "runtime.py"), "rt");
   write(join(home, ".claude", "settings.json"), "newer-settings");
@@ -198,7 +198,7 @@ test("restore: dry run changes nothing; a real run restores with backups and pri
   assert.match(r.stdout, /console differs: src\/a.ts/);                 // reported, not applied by default
   assert.doesNotMatch(r.stdout, /dist\/x.js/);                          // the image rebuilds dist
   assert.match(r.stdout, /reverie: 0 file\(s\) differ/);
-  assert.equal(readFileSync(join(t.opt, "apps", "console", "src", "a.ts"), "utf8"), "image-a");
+  assert.equal(readFileSync(join(t.opt, "apps", "web", "src", "a.ts"), "utf8"), "image-a");
   const again = restore(t, "false");
   assert.match(again.stdout, /Summary: 0 to restore/);
 });
@@ -210,8 +210,8 @@ test("restore: never replaces the OpenCode DB under a running OpenCode; applies 
   assert.equal(existsSync(join(t.home, ".local", "share", "opencode", "opencode.db")), false);
   const applied = restore(t, "true", "--force", "--apply-image-diffs");
   assert.equal(applied.status, 0, applied.stderr);
-  assert.equal(readFileSync(join(t.opt, "apps", "console", "src", "a.ts"), "utf8"), "live-a");
-  assert.ok(readdirSync(join(t.opt, "apps", "console", "src")).some((n) => n.startsWith("a.ts.pre-restore-")));
+  assert.equal(readFileSync(join(t.opt, "apps", "web", "src", "a.ts"), "utf8"), "live-a");
+  assert.ok(readdirSync(join(t.opt, "apps", "web", "src")).some((n) => n.startsWith("a.ts.pre-restore-")));
   assert.equal(readFileSync(join(t.home, ".local", "share", "opencode", "opencode.db"), "utf8"), "opencode.db");
 });
 

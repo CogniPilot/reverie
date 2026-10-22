@@ -4,7 +4,7 @@
     reverie-gpu-publisher --loop 30    write every 30 s until stopped
 
 The container has no GPU device and no nvidia-smi, so the console reads what this writes. Contract
-(apps/console/docs/host-gpu.md): {"updatedAt": <epoch ms>, "gpus": [{"name", "utilization",
+(apps/web/docs/host-gpu.md): {"updatedAt": <epoch ms>, "gpus": [{"name", "utilization",
 "memoryUsedMb", "memoryTotalMb"}]}, atomic, heartbeat 30 s, the reader treats more than 60 s as stale.
 
 Where it writes, and why only there: ONLY under ~/reverie/runtime/ (default published/gpu.json),

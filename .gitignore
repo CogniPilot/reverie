@@ -34,4 +34,4 @@ dist/
 /local
 
 # Public compatibility template; runtime .env files remain private.
-!apps/console/docker/.env.example
+!apps/web/docker/.env.example

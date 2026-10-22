@@ -23,7 +23,7 @@ in pkgs.dockerTools.buildLayeredImage {
     printf 'auth sufficient ${pkgs.linux-pam}/lib/security/pam_permit.so\naccount required ${pkgs.linux-pam}/lib/security/pam_permit.so\nsession required ${pkgs.linux-pam}/lib/security/pam_permit.so\n' > etc/pam.d/sudo
     ln -s ${console}/lib/reverie opt/reverie/console
     mkdir -p opt/reverie/apps
-    ln -s ${console}/lib/reverie opt/reverie/apps/console
+    ln -s ${console}/lib/reverie opt/reverie/apps/web
     ln -s ${memory} opt/reverie/python
     ln -s ${entrypoint} usr/local/bin/reverie-start
     chmod 1777 tmp

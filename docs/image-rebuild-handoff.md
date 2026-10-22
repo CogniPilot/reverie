@@ -15,12 +15,12 @@ revision, source hashes, test evidence and resulting image digest in the handoff
 
 ## 1. Establish the actual source of truth
 
-- The runtime engineer inventories the CURRENT `/opt/reverie/apps/console`, installed
+- The runtime engineer inventories the CURRENT `/opt/reverie/apps/web`, installed
   `reverie` package, `/workspace/python/reverie`, supervisor and relevant dependency versions.
   Capture the deploy log and a new relative-path/SHA256 manifest. Preserve files
   needed for source, tests, build, skills and plugins; never stage private instance
   data, agent homes, credentials or raw conversations into an image context.
-- Reconcile the deployed console with canonical `apps/console` in an isolated
+- Reconcile the deployed console with canonical `apps/web` in an isolated
   worktree. Preserve both versions and obtain independent review of every delta.
   Historical drift counts are not a current measurement.
 - Checklist item 11 requires a fresh carry snapshot from the CURRENT deployment.

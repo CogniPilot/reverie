@@ -18,10 +18,10 @@ if [ -x "$python" ] && [ -f "$supervisor" ]; then
   # The console's env file (state/child.env) may only name files under the instance's runtime dir: the parent of
   # the data dir, which comes from the container's own environment. Without a data dir it is not read.
   if [ -n "$data_dir" ]; then
-    exec "$python" -I "$supervisor" run --state "$state" --rollback-dist /opt/reverie/apps/console/dist \
+    exec "$python" -I "$supervisor" run --state "$state" --rollback-dist /opt/reverie/apps/web/dist \
       --env-root "$(dirname "$data_dir")" -- "$@"
   fi
-  exec "$python" -I "$supervisor" run --state "$state" --rollback-dist /opt/reverie/apps/console/dist -- "$@"
+  exec "$python" -I "$supervisor" run --state "$state" --rollback-dist /opt/reverie/apps/web/dist -- "$@"
 fi
 echo "reverie-supervise: supervisor unavailable; starting the console unsupervised" >&2
 exec "$@"

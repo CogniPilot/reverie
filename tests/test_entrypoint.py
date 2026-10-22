@@ -55,6 +55,19 @@ class EntrypointTest(unittest.TestCase):
         self.assertTrue((self.data / "console" / "state.json").exists())
         self.assertEqual(list((self.data / "backups").iterdir()), [])
 
+    def test_first_start_creates_explicit_nested_data_directory(self):
+        data_dir = self.root / "custom instance" / "nested" / "data"
+        result = self.start("sh", "-c", 'printf "%s" "$REVERIE_DATA_DIR"',
+                            REVERIE_DATA_DIR=str(data_dir), REVERIE_PASSWORD="chosen")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, str(data_dir))
+        self.assertEqual((data_dir / ".env").read_text(),
+                         "REVERIE_USERNAME=owner\nREVERIE_PASSWORD=chosen\n")
+        self.assertEqual(stat.S_IMODE(data_dir.stat().st_mode), 0o700)
+        self.assertEqual(stat.S_IMODE((data_dir / ".env").stat().st_mode), 0o600)
+        self.assertFalse((data_dir / ".env.tmp").exists())
+        self.assertNotIn("chosen", result.stderr + result.stdout)
+
     def test_given_password_is_used_and_not_stored(self):
         result = self.start("sh", "-c", 'printf "%s" "$REVERIE_PASSWORD"', REVERIE_PASSWORD="chosen")
         self.assertEqual(result.stdout, "chosen")

@@ -2,11 +2,11 @@
 
 Reverie is our independently maintained fork of [Codeman](https://github.com/Ark0N/Codeman),
 with persistent agent identities, memory, dreaming and permission-based orchestration.
-The modified console source lives in `apps/console` and is built into the same
+The modified console source lives in `apps/web` and is built into the same
 container as the agent runtime. Credit goes to Ark0N and the Codeman contributors;
-the original MIT license and copyright remain in `apps/console/LICENSE`.
+the original MIT license and copyright remain in `apps/web/LICENSE`.
 See [upstream notices](THIRD_PARTY_NOTICES.md) and
-[source provenance](apps/console/UPSTREAM.md).
+[source provenance](apps/web/UPSTREAM.md).
 
 Use `reverie` inside the container, `REVERIE_*` settings, and `reverie-*` tools.
 The fork has no automatic upstream package update or synchronization process.
@@ -121,9 +121,9 @@ installed on first start into persistent private tool storage; they are not
 distributed in the image. Native and container installations use the same pinned
 installer. Provider sign-in and company state survive container replacement.
 
-Open **Company → People → Hire** to create an expert from a provider plan or local
+Open **Company → Hire** to create an expert from a provider plan or local
 model profile, then choose its harness, model and effort. Each expert has a persistent
-identity and memory. Unicode profile icons are available, with optional photo overrides.
+identity and memory. Choose an illustrated avatar, upload a photo, or use initials.
 Explicit permissions control orchestration independently of organizational titles.
 
 Nightly research is owner-configured, normally 60 minutes per employee, with an

@@ -107,7 +107,7 @@ Migration order (owner): deploy the reviewed code, identify and stop any existin
 manual watcher that does not take `watch.lock`, install and enable the units, then confirm
 `reverie-runtime status` shows `watcher.alive: true`.
 
-## Shell members never receive room text (console patch, `apps/console`)
+## Shell members never receive room text (console patch, `apps/web`)
 
 Reverie delivers room messages by typing them plus Enter into each member's pane, so a
 shell member would run them as commands. `ChatroomDelivery.flush()`, the only writer,
@@ -152,14 +152,14 @@ intended deployment before choosing overrides. The policy may override them with
 `memory_admission.{reserve_bytes,session_cost_bytes}`. Heavy commands use the same
 gate: `python3 -m reverie.admission --expect 1.5G -- npm test` exits 75 when refused.
 
-Console tests: a root `apps/console/vitest.config.ts` makes a bare `npx vitest run`
+Console tests: a root `apps/web/vitest.config.ts` makes a bare `npx vitest run`
 use the CI config (and therefore `test/setup.ts`). `test/setup.ts` throws when
 `REVERIE_DATA_DIR` holds a live `state.json`.
 
 ## Agent profile (read-only)
 
 `reverie-runtime --policy POLICY profile SESSION_ID` prints one agent session's profile as JSON for
-the console's profile panel (`GET /api/agents/:id/profile`, `apps/console`):
+the console's profile panel (`GET /api/agents/:id/profile`, `apps/web`):
 - backend, model, and effort: the console's spawn default, plus the level the newest Claude Code
   transcript turn used
 - the console's usage counters

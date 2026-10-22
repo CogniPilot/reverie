@@ -22,10 +22,21 @@ Updated as work is tested and deployed. Existing backups must remain intact.
 - [x] Replace the existing-session hiring picker with plan, model, effort and harness selection; deployed for owner testing.
 - [x] Surface local model endpoint selection with compatible owner-configured harnesses.
 - [x] Add a way to delete a workspace/channel grouping while preserving channels and messages.
-- [x] Keep Unicode profile icons with a curated picker; uploaded photos or original portraits override the icon and can be cleared.
+- [x] Deploy the original illustrated avatar pack and uploaded photos, remove the Unicode icon selector, and use initials as fallback.
+- [x] Compact avatar chooser with a random hiring default, working initials, and saving for disconnected experts.
 - [x] Show provider sign-in status independently from usage data, including Claude.
 - [ ] Enable and exercise the host rebuild request service, including replacement, persisted settings and rollback.
-- [ ] Start with no placeholder provider plans and allow removing unused default plans.
+- [x] Fix Codex launch and recovery compatibility; retain retired experts without waking them.
+- [x] Add confirmed retirement and reversible vacation controls for experts, using in-app confirmation dialogs.
+- [x] Start with no placeholder provider plans and allow removing unused default plans.
+- [x] Refresh hiring plan choices immediately after account changes without resetting the profile draft.
+- [x] Preserve the owner account across replacement and refuse expired API sessions without the browser's Basic-auth popup.
+- [x] Combine Company plans and people into one page; compact repeated Company/Board headers.
+- [x] Optional pronouns and persistent voice selection with playable samples in hire/profile forms; Kokoro service packaging remains below.
+- [x] Simplify the member popover and keep wake controls on member status.
+- [ ] Refine medium-sized plan cards, remove plot labels, and replace the legacy research/settings panel.
+- [ ] Left-click an expert to edit runtime Plan, Harness (including registered custom harnesses), Model and Effort; validate compatibility and preserve identity, memories, photos and room membership.
+- [ ] Recover Alex's runtime after upgrading OpenCode and checking that the selected subscription model is actually used.
 - [ ] Let additional humans register and appear alongside agents in company people, with explicit roles and permissions.
 - [x] Deploy the consolidated root skills and removal of legacy console Docker/plugin packaging.
 - [ ] Finish first-run bootstrap checks: editable deployment defaults, source/config access off by default, multiple mounts supported.
@@ -38,7 +49,27 @@ Updated as work is tested and deployed. Existing backups must remain intact.
 - [ ] Inspect and unmount the old loop-mounted deployment data without deleting its backing image or backups.
 - [x] Remove task validation containers, their images and volumes; archive inactive validation-engine metadata.
 
+## Organization cleanup
+
+- [x] Main application lives in `apps/web`; Nix, CI and documentation paths follow the layout.
+- [ ] Gradually split the large server and browser modules by feature, migrating browser JavaScript to TypeScript.
+
+## Next hiring experience
+
+- [ ] Hire always opens a wizard: select a role template, modify the profile, review and hire; reuse the editor for existing experts. Do not prompt for model or effort during hiring; use the selected plan's defaults and allow authorized runtime changes later without changing identity.
+- [ ] Detailed generic role briefs and skill profiles, including CTO/COO templates with editable explicit authority presets; emphasize evidence, responsibilities and uncertainty rather than omniscience.
+- [ ] Share templates and validation with an agent-callable hiring API enforcing Can hire, allowed plans and grant limits.
+- [ ] One canonical employee profile page with permission-based editing, shared by hiring and later edits.
+- [ ] Owner/admin/moderator/member defaults; plan Use and Manage grants remain separate from server roles and are editable during hiring.
+- [ ] Curated editable name/avatar/Kokoro voice tags as soft randomization preferences; avoid duplicate names and preset photos within a company.
+- [ ] Randomizable, editable personality, communication style and interests; preserve evidence-based role standards independently of personality.
+- [ ] Dream and Sleep opt-in checkboxes, off by default, with short explanatory tooltips. Sleep permits memory consolidation; it does not enable an independent nightly timer.
+- [ ] Agents can request Sleep as a Gantt task. A coordinator with explicit scheduling permission (such as the appointed COO/CTO) fits it around company work; record requests, approval and the scheduled window.
+- [ ] Package and run the optional Kokoro-ONNX service with contained model storage; keep voice choice and preview independent from pronouns.
+
 ## Deferred
+
+- [ ] Generate a custom expert avatar from a description; explicitly deferred until the core site is working.
 
 - [ ] Owner-managed PAT grants to selected persistent agent IDs.
 - [ ] Further Python-to-TypeScript migration.

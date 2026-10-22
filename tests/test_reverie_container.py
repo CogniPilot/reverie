@@ -102,7 +102,7 @@ elif args[0] not in ("start", "run"):
         self.env["FAKE_EXISTS"] = "0"
         result = self.run_launcher()
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn(f"type=bind,src={extra},dst=/scratch2", self.calls()[-1])
+        self.assertIn(f"type=bind,src={extra.resolve()},dst=/scratch2", self.calls()[-1])
 
     def test_matching_second_workspace_reuses_existing_container(self):
         extra = self.extra_workspace()
@@ -128,7 +128,7 @@ elif args[0] not in ("start", "run"):
         self.env["FAKE_EXISTS"] = "0"
         result = self.run_launcher()
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn(f"type=bind,src={third},dst=/scratch3", self.calls()[-1])
+        self.assertIn(f"type=bind,src={third.resolve()},dst=/scratch3", self.calls()[-1])
         self.env["FAKE_EXISTS"] = "1"
         self.env["FAKE_MOUNTS"] = json.dumps(self.mounts + [["/scratch2", str(extra)], ["/scratch3", str(third)]])
         result = self.run_launcher()

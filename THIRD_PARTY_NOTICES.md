@@ -3,10 +3,10 @@
 Reverie is a fork of Codeman by Ark0N and the Codeman contributors:
 https://github.com/Ark0N/Codeman
 
-The locally modified session manager is maintained in `apps/console` and built
+The locally modified session manager is maintained in `apps/web` and built
 from this repository. The container does not install the upstream npm package.
-Its original license is retained in `apps/console/LICENSE`; source provenance is
-recorded in `apps/console/UPSTREAM.md`. The following MIT notice is reproduced
+Its original license is retained in `apps/web/LICENSE`; source provenance is
+recorded in `apps/web/UPSTREAM.md`. The following MIT notice is reproduced
 for credit.
 
 MIT License

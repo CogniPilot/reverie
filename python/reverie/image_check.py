@@ -39,7 +39,7 @@ INSTANCE_FILES = re.compile(
 MOUNT_POINTS = ("instances/", "workspace/", "scratch/")
 # Dependency trees checked by file name only, except the first-party overrides below.
 THIRD_PARTY = ("usr/", "bin/", "sbin/", "lib/", "lib64/", "var/lib/dpkg/", "var/lib/apt/", "var/cache/",
-               "opt/yarn-", "opt/reverie/python/lib/", "opt/reverie/apps/console/node_modules/", "nix/store/")
+               "opt/yarn-", "opt/reverie/python/lib/", "opt/reverie/apps/web/node_modules/", "nix/store/")
 # Reverie installs its own scripts here, inside a third-party tree, so these are read in full.
 FIRST_PARTY = ("usr/local/bin/",)
 # Reviewed image-package boundary from nix/package.nix and nix/image.nix. Nix

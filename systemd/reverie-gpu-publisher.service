@@ -1,5 +1,5 @@
 # Template, not installed. Publishes the host GPUs' numbers for the console's GPU chip (display only).
-# Contract: apps/console/docs/host-gpu.md (heartbeat 30 s; the reader treats >60 s as stale).
+# Contract: apps/web/docs/host-gpu.md (heartbeat 30 s; the reader treats >60 s as stale).
 # It writes ONLY ~/reverie/runtime/published/gpu.json (never bind-mounted read-write; the container
 # sees the directory read-only at /host-published). See python/reverie/gpu_publisher.py.
 [Unit]

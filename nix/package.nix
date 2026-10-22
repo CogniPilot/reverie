@@ -1,12 +1,12 @@
 { pkgs, src }:
 let
   lib = pkgs.lib;
-  manifest = builtins.fromJSON (builtins.readFile (src + "/apps/console/package.json"));
+  manifest = builtins.fromJSON (builtins.readFile (src + "/apps/web/package.json"));
   consoleSkill = lib.cleanSource (src + "/skills/reverie");
   console = pkgs.buildNpmPackage {
     pname = "reverie-console";
     version = manifest.version;
-    src = lib.cleanSource (src + "/apps/console");
+    src = lib.cleanSource (src + "/apps/web");
     nodejs = pkgs.nodejs_22;
     npmDepsHash = "sha256-DGKWvITtXvL3pYAsu4vqiynelRLeTR8BkjXJmLqMNc0=";
     nativeBuildInputs = [ pkgs.python3 pkgs.makeWrapper ];
@@ -22,7 +22,7 @@ let
     '';
     preBuild = "npm rebuild node-pty esbuild --offline --ignore-scripts=false";
     doCheck = true;
-    nativeCheckInputs = [ pkgs.git pkgs.tmux pkgs.curl (lib.getBin pkgs.util-linux) ];
+    nativeCheckInputs = [ pkgs.git pkgs.tmux pkgs.curl pkgs.which (lib.getBin pkgs.util-linux) ];
     checkPhase = ''
       runHook preCheck
       npm test -- test/company-recover.test.ts test/routes/company-routes.test.ts \
@@ -38,7 +38,16 @@ let
         test/account-login.test.ts test/chat-workspace-delete.test.ts \
         test/routes/company-hire-routes.test.ts test/company-native-ui.test.ts \
         test/local-model-profile.test.ts test/routes/quick-start-custom-model.test.ts \
-        test/plan-auth-status.test.ts
+        test/plan-auth-status.test.ts test/plan-account-management.test.ts \
+        test/subscription-profile-remove.test.ts test/subscription-profiles.test.ts \
+        test/cli-registry-spawn-golden.test.ts test/company-lifecycle-ui.test.ts test/company-voice-ui.test.ts \
+        test/employee-pronouns.test.ts test/routes/voice-speak-routes.test.ts \
+        test/read-aloud-team-voice.test.ts test/session-cli-builder.test.ts test/board-page-routes.test.ts test/company-logos.test.ts \
+        test/reboot-restore.test.ts test/reboot-restore-persistent.test.ts \
+        test/routes/reboot-restore-routes.test.ts test/codex-transcript.test.ts test/routes/company-avatar.test.ts \
+        test/company-avatar-picker-ui.test.ts test/company-hire-plan-refresh.test.ts \
+        test/company-settings-ui.test.ts test/cli-config-content.test.ts \
+        test/render-index-html.test.ts test/asset-content-version.test.ts
       runHook postCheck
     '';
     installPhase = ''

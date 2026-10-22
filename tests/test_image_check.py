@@ -104,7 +104,7 @@ class ImageCheckTests(unittest.TestCase):
     def test_instance_files_are_refused_anywhere_by_name(self):
         result = self.run_check([[('home/reverie/.config/reverie/deploy/github.token', b'x'),
                                   ('usr/lib/x/memory.sqlite', b'x'),
-                                  ('opt/reverie/apps/console/node_modules/p/.env', b'x')]])
+                                  ('opt/reverie/apps/web/node_modules/p/.env', b'x')]])
         self.assertEqual({f['detector'] for f in result['findings']}, {'instance_file'})
         self.assertEqual(len(result['findings']), 3)
 
@@ -120,7 +120,7 @@ class ImageCheckTests(unittest.TestCase):
         result = self.run_check([[('opt/reverie/data', ('sym', '/instances/example')),
                                   ('opt/reverie/reverie/key', ('sym', '../../../home/user/.config/gh.token')),
                                   ('usr/local/bin/creds', ('lnk', 'root/.git-credentials')),
-                                  ('usr/local/bin/reverie', ('sym', '/opt/reverie/apps/console/dist/index.js')),
+                                  ('usr/local/bin/reverie', ('sym', '/opt/reverie/apps/web/dist/index.js')),
                                   ('usr/bin/py', ('sym', 'python3'))]])
         self.assertEqual([(f['where'], f['detector']) for f in result['findings']], [
             ('layer 0: /opt/reverie/data', 'link_into_mount_point'),
@@ -139,17 +139,17 @@ class ImageCheckTests(unittest.TestCase):
 
     def test_unread_third_party_files_are_counted(self):
         result = self.run_check([[('usr/lib/x/a.js', b'abc'), ('usr/share/doc/b', b'de'),
-                                  ('opt/reverie/apps/console/node_modules/p/c.js', b'f')]])
+                                  ('opt/reverie/apps/web/node_modules/p/c.js', b'f')]])
         self.assertEqual(result['unread_third_party'], {'usr/': {'files': 2, 'bytes': 5},
-                                                        'opt/reverie/apps/console/node_modules/': {'files': 1, 'bytes': 1}})
+                                                        'opt/reverie/apps/web/node_modules/': {'files': 1, 'bytes': 1}})
 
     def test_third_party_contents_are_not_read(self):
-        result = self.run_check([[('opt/reverie/apps/console/node_modules/p/test.js', TOKEN.encode()),
+        result = self.run_check([[('opt/reverie/apps/web/node_modules/p/test.js', TOKEN.encode()),
                                   ('usr/lib/node_modules/q/fixture.js', TOKEN.encode())]])
         self.assertTrue(result['clean'], result)
 
     def test_dotenv_templates_pass_by_name_but_are_read(self):
-        result = self.run_check([[('opt/reverie/apps/console/docker/.env.example', b'PUID=1000'),
+        result = self.run_check([[('opt/reverie/apps/web/docker/.env.example', b'PUID=1000'),
                                   ('opt/reverie/a/.env.sample', TOKEN.encode()), ('opt/reverie/b/.env.local', b'x'),
                                   ('opt/reverie/c/.env.example.bak', b'x')]])
         self.assertEqual([(f['where'], f['detector']) for f in result['findings']],
@@ -170,8 +170,8 @@ class ImageCheckTests(unittest.TestCase):
         self.assertEqual([f['where'] for f in result['findings']], ['config.Env', 'config.Labels', 'config.history'])
 
     def test_allowed_fixtures_pass_only_for_their_detector(self):
-        layers = [[('opt/reverie/apps/console/test/k.ts', f'"{TOKEN}" -----BEGIN ' 'PRIVATE KEY-----'.encode())]]
-        result = self.run_check(layers, allow={('opt/reverie/apps/console/test/k.ts', 'private_key')})
+        layers = [[('opt/reverie/apps/web/test/k.ts', f'"{TOKEN}" -----BEGIN ' 'PRIVATE KEY-----'.encode())]]
+        result = self.run_check(layers, allow={('opt/reverie/apps/web/test/k.ts', 'private_key')})
         self.assertEqual([f['detector'] for f in result['findings']], ['github_token'])
 
     def test_the_command_line_exit_status(self):

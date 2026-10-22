@@ -22,7 +22,7 @@ The console decides "is this the owner?" by the **absence** of `X-Reverie-Parent
 | Agent tooling reads the **same** password from the data dir's `.env` (`reverie-credentials.ts`) | Turning the password on stops the network, but does not tell the owner apart from agents. |
 | The console and all agents run as uid `agent`; the data dir is `0700 agent` | Every file the console can read or write, an agent can too: tokens, password hashes, settings. |
 | `/proc/<console>/environ` is readable by agents; `/proc/<console>/mem` is not (Yama `ptrace_scope=1`) | A secret held only in console memory resists a non-root agent; one in env or on disk does not. |
-| **Agents have passwordless `sudo` in the container** | A determined agent is root. It can read process memory, sniff loopback, and edit `/opt/reverie/apps/console` or the data dir. **No in-container check can stop a malicious agent.** |
+| **Agents have passwordless `sudo` in the container** | A determined agent is root. It can read process memory, sniff loopback, and edit `/opt/reverie/apps/web` or the data dir. **No in-container check can stop a malicious agent.** |
 
 ## Threat tiers (the owner chooses the target)
 - **T1: network.** Anyone on the LAN or tunnel acts as the owner. *Fixable now, inside the container.*

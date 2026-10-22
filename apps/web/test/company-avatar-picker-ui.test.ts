@@ -1,0 +1,191 @@
+import { afterEach, expect, it, vi } from 'vitest';
+import { createHarness } from './helpers/chat-app-harness.mjs';
+
+const opened: any[] = [];
+afterEach(() => {
+  for (const h of opened.splice(0)) h.dom.window.close();
+  vi.restoreAllMocks();
+});
+const avatars = Array.from({ length: 50 }, (_, index) => {
+  const id = `pack-${String(index + 1).padStart(2, '0')}`;
+  return { id, name: `Avatar ${index + 1}`, src: `/assets/avatars/${id}.png` };
+});
+const photo = 'data:image/png;base64,iVBORw0KGgo=';
+async function fixture({ random = true, current = '' } = {}) {
+  const h = await createHarness();
+  opened.push(h);
+  const form = h.document.createElement('form');
+  const name = h.document.createElement('input');
+  name.value = 'Alex';
+  form.append(name);
+  h.document.body.append(form);
+  const blob = new h.window.Blob(['avatar'], { type: 'image/png' });
+  const fetch = vi.spyOn(h.window, 'fetch').mockImplementation(
+    async (path: string) =>
+      ({
+        ok: true,
+        json: async () => ({ avatars }),
+        blob: async () => blob,
+      }) as Response
+  );
+  h.shell.imageToIcon = vi.fn(async () => photo);
+  const mount = () => h.shell.expertAppearanceFields(form, current, { name, random });
+  const button = (label: string) =>
+    [...form.querySelectorAll('button')].find((item: any) => item.textContent === label)!;
+  return { h, form, name, blob, fetch, mount, button };
+}
+
+it('gives a new hire one random avatar from the pack without an inline gallery or reroll on typing', async () => {
+  const { h, form, name, fetch, mount } = await fixture();
+  vi.spyOn(h.window.Math, 'random').mockReturnValue(0.54);
+  const appearance = mount();
+  await h.flush();
+  expect(fetch.mock.calls.map((call) => call[0])).toEqual([
+    '/assets/avatars/pack-manifest.json',
+    '/assets/avatars/pack-28.png',
+  ]);
+  expect(appearance.picture.value()).toBe(photo);
+  expect(form.querySelector('.ca-expert-portraits')).toBeNull();
+  expect([...form.querySelectorAll('button')].map((item: any) => item.textContent)).toEqual([
+    'Upload picture',
+    'Choose avatar',
+    'Use initials',
+  ]);
+  name.value = 'Morgan';
+  name.dispatchEvent(new h.window.Event('input'));
+  await h.flush();
+  expect(h.shell.imageToIcon).toHaveBeenCalledTimes(1);
+  expect(appearance.picture.value()).toBe(photo);
+});
+
+it('shows live typed initials and never lets a late manifest override an explicit initials choice', async () => {
+  const { h, name, form, fetch, mount, button } = await fixture();
+  let finish!: (value: unknown) => void;
+  fetch.mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      })
+  );
+  const appearance = mount();
+  expect(appearance.pending()).toBe(false);
+  button('Use initials').click();
+  name.value = 'Alex';
+  name.dispatchEvent(new h.window.Event('input'));
+  expect(form.querySelector('.ca-picture-preview')!.textContent).toBe('A');
+  expect(button('Use initials').hidden).toBe(false);
+  finish({ ok: true, json: async () => ({ avatars }) });
+  await h.flush();
+  expect(appearance.picture.value()).toBe('');
+  expect(fetch).toHaveBeenCalledTimes(1);
+  expect(form.querySelector('.ca-picture-preview')!.textContent).toBe('A');
+});
+
+it('cancels a superseded random conversion immediately when initials are chosen', async () => {
+  const { h, form, mount, button } = await fixture();
+  let finish!: (value: string) => void;
+  h.shell.imageToIcon = vi.fn(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      })
+  );
+  const appearance = mount();
+  await h.flush();
+  expect(appearance.pending()).toBe(true);
+  button('Use initials').click();
+  expect(appearance.pending()).toBe(false);
+  finish(photo);
+  await h.flush();
+  expect(appearance.picture.value()).toBe('');
+  expect(form.querySelector('.ca-picture-preview')!.textContent).toBe('A');
+});
+
+it('keeps an explicit upload when an older automatic conversion finishes later', async () => {
+  const { h, form, mount } = await fixture();
+  let finishRandom!: (value: string) => void;
+  h.shell.imageToIcon = vi
+    .fn()
+    .mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishRandom = resolve;
+        })
+    )
+    .mockResolvedValueOnce(photo);
+  const appearance = mount();
+  await h.flush();
+  const input = form.querySelector('input[type=file]')!;
+  Object.defineProperty(input, 'files', { configurable: true, value: [{ type: 'image/png', size: 4 }] });
+  input.dispatchEvent(new h.window.Event('change'));
+  await h.flush();
+  expect(appearance.picture.value()).toBe(photo);
+  finishRandom('data:image/png;base64,AAAA');
+  await h.flush();
+  expect(appearance.picture.value()).toBe(photo);
+  expect(appearance.pending()).toBe(false);
+});
+
+it('preserves an existing profile and makes Cancel and Escape leave its photo unchanged', async () => {
+  const current = '/api/avatars/existing?v=1';
+  const { h, fetch, mount, button } = await fixture({ random: false, current });
+  const appearance = mount();
+  await h.flush();
+  expect(fetch).toHaveBeenCalledTimes(1);
+  expect(h.shell.imageToIcon).not.toHaveBeenCalled();
+  for (const method of ['cancel', 'escape']) {
+    button('Choose avatar').click();
+    await h.flush();
+    const dialog = h.document.querySelector('.ca-avatar-dialog')!;
+    expect(dialog.querySelectorAll('.ca-expert-portraits button')).toHaveLength(50);
+    if (method === 'cancel') dialog.querySelector('[aria-label=Cancel]').click();
+    else dialog.dispatchEvent(new h.window.Event('cancel', { cancelable: true }));
+    await h.flush();
+    expect(h.document.querySelector('.ca-avatar-dialog')).toBeNull();
+    expect(appearance.picture.value()).toBe(current);
+  }
+});
+
+it('selects from the modal and uses the existing profile picture upload endpoint on save', async () => {
+  const { h, blob, fetch } = await fixture({ random: false });
+  const employee = { id: 'expert', sessionId: 'runtime', name: 'Alex' };
+  h.shell.loadOwner = vi.fn(async () => {});
+  h.app._chatApi = vi.fn(async () => ({ ok: true, data: { employee } }));
+  h.shell.openEmployeeProfile(employee);
+  h.document.querySelector('.ca-expert-profile [aria-label="Choose avatar"]').click();
+  await h.flush();
+  h.document.querySelector('.ca-avatar-dialog [aria-label="Use Avatar 50"]').click();
+  await h.flush();
+  expect(h.document.querySelector('.ca-avatar-dialog')).toBeNull();
+  expect(h.shell.imageToIcon).toHaveBeenCalledWith(blob);
+  h.document
+    .querySelector('.ca-expert-profile form')
+    .dispatchEvent(new h.window.Event('submit', { bubbles: true, cancelable: true }));
+  await h.flush();
+  expect(fetch).toHaveBeenCalledWith(
+    '/api/company/agents/runtime/avatar',
+    expect.objectContaining({ method: 'POST', headers: { 'Content-Type': 'image/png' } })
+  );
+});
+
+it('cancels an in-flight modal selection before its conversion can change the preview', async () => {
+  const { h, mount, button } = await fixture({ random: false });
+  const appearance = mount();
+  button('Choose avatar').click();
+  await h.flush();
+  let finish!: (value: string) => void;
+  h.shell.imageToIcon = vi.fn(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      })
+  );
+  h.document.querySelector('.ca-avatar-dialog [aria-label="Use Avatar 1"]').click();
+  await h.flush();
+  expect(appearance.pending()).toBe(true);
+  h.document.querySelector('.ca-avatar-dialog [aria-label=Cancel]').click();
+  expect(appearance.pending()).toBe(false);
+  finish(photo);
+  await h.flush();
+  expect(appearance.picture.value()).toBe('');
+});

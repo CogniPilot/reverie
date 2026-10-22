@@ -223,11 +223,11 @@ Owner-controlled lifecycle decisions retain their own confirmation rules. Person
 self-revision cannot grant new host permissions. Containers share the host kernel;
 use a VM for workloads requiring a stronger boundary.
 
-The modified dashboard lives in `apps/console` and is built into the same image
+The modified dashboard lives in `apps/web` and is built into the same image
 as the memory runtime. The image uses this checkout's source; no upstream
 package is downloaded. `reverie` is the product and CLI name. The original MIT
-license and copyright are retained in `apps/console/LICENSE`, with source
-provenance in `apps/console/UPSTREAM.md`.
+license and copyright are retained in `apps/web/LICENSE`, with source
+provenance in `apps/web/UPSTREAM.md`.
 
 For a recovered personal deployment, `scripts/reverie-recreate --dry-run` shows
 the mounts before creation. The personal launcher mounts `~/reverie/companies/default/home`
@@ -242,7 +242,7 @@ existing host services and live sessions are untouched by an image build.
 Console state persists by default at `~/reverie/companies/development/data/console`,
 mounted privately at `/home/agent/.reverie`. Override `REVERIE_INSTANCE_DATA` for a separate
 instance before creating a new container. `REVERIE_DATA_DIR` configures other launches.
-The monorepo contains `apps/console` (TypeScript/JavaScript), `python/reverie` (the shared Python
+The monorepo contains `apps/web` (TypeScript/JavaScript), `python/reverie` (the shared Python
 memory runtime), `python/experts` (specialist templates), `docker`, `scripts`, shared skills
 and their tests.
 
@@ -259,7 +259,7 @@ Restart recovery never blindly repeats uncertain work. Reports and failures appe
 in Company; imagination and unverified findings remain hypotheses. Existing private
 memory and personal reflection retain their separate storage and lifecycle.
 
-See [console setup](../apps/console/README.md) for running the dashboard on its own.
+See [console setup](../apps/web/README.md) for running the dashboard on its own.
 
 `nix/host.nix` provides an optional separate host account with rootless Podman,
 private home and lingering. Import it and set `services.reverie.enable = true`.

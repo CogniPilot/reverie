@@ -423,7 +423,7 @@ test("Delivery-format contract, DM privacy, the turn clock and the web taint", a
       assert.deepEqual(plugin.ownerRoomsOf(c.line), c.expect.ownerRooms, c.case);
       assert.equal(plugin.channelOf(c.line), c.expect.channel, c.case);
     }
-    const consoleFixture = join(process.env.REVERIE_CONSOLE_DIR ?? "/opt/reverie/apps/console", "test/fixtures/delivery-lines.json");
+    const consoleFixture = join(process.env.REVERIE_CONSOLE_DIR ?? "/opt/reverie/apps/web", "test/fixtures/delivery-lines.json");
     const installed = await readFile(consoleFixture, "utf8").catch(() => null);
     if (installed !== null) assert.deepEqual(JSON.parse(installed), fixture, "console and harness fixtures drifted apart");
     // A DM delivered under its label (older consoles) is private, never work.

@@ -19,7 +19,7 @@
 #   --scratch DIR            host scratch mounted at /scratch [~/scratch/reverie/runtime]
 #   --instance DIR           private instance directory [~/reverie/companies/default/data]
 #   --instance-name NAME     it is mounted at /instances/NAME [default]
-#   --console-source DIR     console tree baked into the image, e.g. a rescued copy [repo: apps/console]
+#   --console-source DIR     console tree baked into the image, e.g. a rescued copy [repo: apps/web]
 #   --reverie-source DIR         reverie package baked into the image, e.g. a rescued copy [repo: python/reverie/]
 #   --port PORT              host port for the console [3001]
 #   --bind ADDR              host address it listens on [127.0.0.1]
@@ -105,7 +105,7 @@ instance="$(resolve_dir instance "$instance")"
 [ -f "$instance/config/instance.json" ] || die "instance has no config/instance.json: $instance"
 [ -d "$scratch/repos" ] || die "scratch has no repos/ (wrong directory?): $scratch"
 
-if [ -z "$console_source" ] || [ "$console_source" = repo ]; then console_source="$source_repo/apps/console"; fi
+if [ -z "$console_source" ] || [ "$console_source" = repo ]; then console_source="$source_repo/apps/web"; fi
 if [ -z "$reverie_source" ] || [ "$reverie_source" = repo ]; then reverie_source="$source_repo/python/reverie"; fi
 console_source="$(resolve_dir console-source "$console_source")"
 reverie_source="$(resolve_dir reverie-source "$reverie_source")"
@@ -147,10 +147,10 @@ elif [ "$build" = 1 ]; then
   for f in flake.nix flake.lock nix README.md LICENSE THIRD_PARTY_NOTICES.md docker scripts tests; do
     cp -a -- "$source_repo/$f" "$context/"
   done
-  mkdir -p "$context/apps/console" "$context/python/reverie"
+  mkdir -p "$context/apps/web" "$context/python/reverie"
   cp -a -- "$source_repo/python/experts" "$context/python/experts"
   cp -a -- "$source_repo/python/pyproject.toml" "$source_repo/python/README.md" "$source_repo/python/LICENSE" "$context/python/"
-  (cd -- "$console_source" && tar --exclude=./node_modules --exclude=./.git -cf - .) | (cd -- "$context/apps/console" && tar -xf -)
+  (cd -- "$console_source" && tar --exclude=./node_modules --exclude=./.git -cf - .) | (cd -- "$context/apps/web" && tar -xf -)
   (cd -- "$reverie_source" && tar --exclude=__pycache__ -cf - .) | (cd -- "$context/python/reverie" && tar -xf -)
   run env REVERIE_REPO="$context" REVERIE_IMAGE="$image" "$launcher" build
 fi

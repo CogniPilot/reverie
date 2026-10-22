@@ -1,0 +1,1567 @@
+/**
+ * @fileoverview Docker cases: storage, pure command-arg builders, and daemon probes.
+ *
+ * Docker mode is a LOCATION OVERLAY on cases (not a 6th SessionMode), the direct
+ * analog of the remote-SSH feature in `remote-hosts.ts`. Instead of a local tmux
+ * pane running `ssh host` into a durable remote tmux server, a local tmux pane
+ * runs `docker exec -it` into a durable IN-CONTAINER tmux server. The container is
+ * scoped to the CASE (`reverie-case-<name>`), so multiple sessions can `docker
+ * exec` into the same long-lived container.
+ *
+ * This module mirrors `remote-hosts.ts`:
+ *  - JSON storage for hosts (`docker-hosts.json`) and cases (`docker-cases.json`)
+ *  - `toSessionDocker()` (mirror of `toSessionRemote`)
+ *  - `buildDockerBaseArgs()` / `buildDockerCreateArgs()` (mirror of `buildSshConnectionArgs`)
+ *  - `checkDockerAvailable()` / `checkDockerTmuxAvailable()` (mirror of `checkRemoteTmuxAvailable`)
+ *
+ * The launch/kill command orchestration (`buildDockerLaunchCommand`,
+ * `buildDockerKillCommand`, `dockerTmuxSessionName`) lives in `tmux-manager.ts`,
+ * mirroring where `buildRemoteLaunchCommand` lives.
+ *
+ * @module docker-hosts
+ */
+
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import fs from 'node:fs/promises';
+import { isAbsolute, join, relative, resolve } from 'node:path';
+import { enabledCliIds, getCli } from './config/cli-registry/registry.js';
+import { STOCK_CLIS } from './config/cli-registry/stock.js';
+import { homedir } from 'node:os';
+import { createHash } from 'node:crypto';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { dataPath } from './config/instance.js';
+import type {
+  DockerCase,
+  DockerEngine,
+  DockerHost,
+  DockerNetworkMode,
+  DockerResourceLimits,
+  SessionDocker,
+  SessionMode,
+} from './types.js';
+
+const execFileAsync = promisify(execFile);
+
+/** Under vitest, all real `docker` invocations no-op (mirror of tmux-manager's IS_TEST_MODE). */
+const IS_TEST_MODE = !!process.env.VITEST;
+
+const DOCKER_HOSTS_FILE = 'docker-hosts.json';
+const DOCKER_CASES_FILE = 'docker-cases.json';
+
+/** Locally-built base image (see scripts/build-agent-image.mjs). */
+export const DEFAULT_AGENT_IMAGE = 'reverie/agent:base';
+
+/** HOME inside the base image (the `agent` user). Cred mounts + hook-secret land under it. */
+export const CONTAINER_HOME = '/home/agent';
+
+/**
+ * Modes the adoption preflight probes for inside an existing container, derived from the
+ * CLI registry so a newly-enabled CLI is probed without a second list to remember.
+ *
+ * No arm for `shell` here: it declares no binary, so `probeAdoptableContainer` drops it
+ * from the `command -v` list and reports it available unconditionally, which is the same
+ * answer a special case would have produced.
+ */
+export function dockerAdoptProbeModes(): SessionMode[] {
+  return enabledCliIds() as SessionMode[];
+}
+
+/**
+ * The BINARY a mode looks for inside a container. ⚠️ NOT always the mode name:
+ * `antigravity` ships as `agy` and `deepseek` as `dsh`, so probing by mode name
+ * would report those two as missing on a container that has them. Same source
+ * `probeDockerCliVersion` reads, and the same one `defaultDockerCommandForMode`
+ * launches from — a local table here duplicated the registry with nothing
+ * keeping the two in step.
+ */
+function containerBinaryFor(mode: SessionMode): string | undefined {
+  return getCli(mode)?.discovery.binaries[0];
+}
+
+/** Per-case container name prefix. The `case` letters deliberately do NOT matter to
+ * tmux; this is a DOCKER name (`^[a-zA-Z0-9][a-zA-Z0-9_.-]+$`), and case names are
+ * already validated `^[a-zA-Z0-9_-]+$`, so `reverie-case-<name>` is always valid. */
+const CONTAINER_NAME_PREFIX = 'reverie-case-';
+
+/** Sensible resource defaults (all overridable per host). */
+export const DEFAULT_DOCKER_RESOURCES: DockerResourceLimits = {
+  memory: '4g',
+  cpus: '2',
+  pidsLimit: 512,
+  nofile: '4096:8192',
+};
+
+// ========== Storage (mirror of remote-hosts.ts) ==========
+
+export function dockerHostsPath(configDir: string): string {
+  return join(configDir, DOCKER_HOSTS_FILE);
+}
+
+export function dockerCasesPath(configDir: string): string {
+  return join(configDir, DOCKER_CASES_FILE);
+}
+
+async function readJsonArray<T>(path: string): Promise<T[]> {
+  try {
+    const raw = await fs.readFile(path, 'utf-8');
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? (parsed as T[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+async function writeJsonArray<T>(configDir: string, path: string, value: T[]): Promise<void> {
+  if (!existsSync(configDir)) mkdirSync(configDir, { recursive: true });
+  await fs.writeFile(path, JSON.stringify(value, null, 2));
+}
+
+export async function readDockerHosts(configDir: string): Promise<DockerHost[]> {
+  return readJsonArray<DockerHost>(dockerHostsPath(configDir));
+}
+
+export async function writeDockerHosts(configDir: string, hosts: DockerHost[]): Promise<void> {
+  await writeJsonArray(configDir, dockerHostsPath(configDir), hosts);
+}
+
+export async function readDockerCases(configDir: string): Promise<DockerCase[]> {
+  return readJsonArray<DockerCase>(dockerCasesPath(configDir));
+}
+
+export async function writeDockerCases(configDir: string, cases: DockerCase[]): Promise<void> {
+  await writeJsonArray(configDir, dockerCasesPath(configDir), cases);
+}
+
+/**
+ * Persist the case's last Claude conversation id (the `--resume` seed for the
+ * container-recreated relaunch, docs/docker-cases-plan.md two-layer durability).
+ * Keyed by container name so callers that only hold a SessionDocker can update it.
+ * No-op when the id is unchanged or the case is gone.
+ */
+export async function persistDockerCaseClaudeSessionId(
+  configDir: string,
+  containerName: string,
+  claudeSessionId: string
+): Promise<void> {
+  const cases = await readDockerCases(configDir);
+  const idx = cases.findIndex((c) => (c.container ?? dockerContainerName(c.name)) === containerName);
+  if (idx === -1 || cases[idx].lastClaudeSessionId === claudeSessionId) return;
+  cases[idx] = { ...cases[idx], lastClaudeSessionId: claudeSessionId };
+  await writeDockerCases(configDir, cases);
+}
+
+// ========== Naming / display / defaults ==========
+
+/** Per-case container name. Mirrors how remote derives a stable name from the case. */
+export function dockerContainerName(caseName: string): string {
+  return `${CONTAINER_NAME_PREFIX}${caseName}`;
+}
+
+/**
+ * Default in-container pane command per CLI mode (mirror of defaultRemoteCommandForMode).
+ *
+ * ⚠️ Read from the registry (`overlays.docker`), not from a hardcoded
+ * `Record<DockerCommandMode, string>`. That table duplicated the registry exactly with
+ * nothing keeping the two in step. `shell` is the one arm still written here, because it is
+ * the entry that declares `docker: { disabled: true }` — a container has no per-user login
+ * shell to resolve, so it gets a plain `bash -l` rather than a CLI invocation.
+ *
+ * ⚠️ `runsAsRoot` selects the overlay's `rootCommand` when it declares one. Claude Code
+ * REFUSES `--dangerously-skip-permissions` under uid 0 ("cannot be used with root/sudo
+ * privileges", still true in 2.1.261), and the refusal is only visible INSIDE the
+ * container, so the pane just dies. Our own base image runs a non-root user and never hits
+ * it; an ADOPTED container's user belongs to its owner and is frequently root. Which flag
+ * to drop is a per-CLI fact, so it lives in the registry rather than in a branch here.
+ */
+export function defaultDockerCommandForMode(mode: SessionMode, runsAsRoot = false): string {
+  const entry = getCli(mode);
+  const overlay = entry?.overlays.docker;
+  if (!entry || (overlay && 'disabled' in overlay)) return 'exec bash -l';
+  // Mirrors the LOCAL default for each CLI; claude's carries
+  // `--dangerously-skip-permissions` so the in-container agent runs non-interactively.
+  const cli = (runsAsRoot ? overlay?.rootCommand : undefined) ?? overlay?.command ?? entry.discovery.binaries[0];
+  return cli ? `exec ${cli}` : 'exec bash -l';
+}
+
+/** `container:/workdir` display string (mirror of remoteDisplayPath's `user@host:path`). */
+export function dockerDisplayPath(
+  docker: Pick<SessionDocker, 'containerName' | 'containerWorkdir'> | { container: string; path: string }
+): string {
+  if ('containerName' in docker) return `${docker.containerName}:${docker.containerWorkdir}`;
+  return `${docker.container}:${docker.path}`;
+}
+
+/**
+ * The host-callback gateway alias is ENGINE-SPECIFIC: Docker exposes the host as
+ * `host.docker.internal`, Podman as `host.containers.internal`. Both are added to
+ * the host-guard allowlist so a mixed reverie keeps working.
+ */
+export function hostGatewayAlias(engine: DockerEngine): string {
+  return engine === 'podman' ? 'host.containers.internal' : 'host.docker.internal';
+}
+
+/**
+ * Rewrite the server's own `REVERIE_API_URL` to a container-reachable one by
+ * swapping ONLY the hostname for the engine's host-gateway alias, preserving
+ * scheme AND port (prod is HTTPS on 3000, so hardcoding http://…:3000 breaks
+ * every hook). Falls back to `https://<alias>:3000` when the input is absent or
+ * unparseable.
+ */
+export function containerApiUrl(processApiUrl: string | undefined, engine: DockerEngine): string {
+  const alias = hostGatewayAlias(engine);
+  if (!processApiUrl) return `https://${alias}:3000`;
+  try {
+    const url = new URL(processApiUrl);
+    url.hostname = alias;
+    // origin drops any trailing path/slash and keeps scheme + (non-default) port
+    return url.origin;
+  } catch {
+    return `https://${alias}:3000`;
+  }
+}
+
+/**
+ * Stable hash of the drift-relevant `docker create` inputs, stored on the
+ * container as the `reverie.confighash` label. On launch, a mismatch between the
+ * desired hash and the running container's label triggers the recreate-on-drift
+ * prompt (host config edits actually take effect).
+ */
+export function dockerConfigHash(
+  docker: Pick<
+    SessionDocker,
+    | 'engine'
+    | 'image'
+    | 'containerWorkdir'
+    | 'network'
+    | 'networkName'
+    | 'resources'
+    | 'gpus'
+    | 'mountCredentials'
+    | 'extraCreateArgs'
+  >
+): string {
+  const normalized = JSON.stringify({
+    engine: docker.engine,
+    image: docker.image,
+    containerWorkdir: docker.containerWorkdir,
+    network: docker.network,
+    networkName: docker.networkName ?? null,
+    resources: docker.resources ?? null,
+    gpus: docker.gpus ?? null,
+    mountCredentials: docker.mountCredentials,
+    extraCreateArgs: docker.extraCreateArgs ?? null,
+  });
+  return createHash('sha256').update(normalized).digest('hex').slice(0, 12);
+}
+
+/**
+ * Build the flattened per-session Docker metadata from a host profile + a case,
+ * resolving every default (mirror of toSessionRemote). The `configHash` is
+ * computed last over the resolved values.
+ */
+export function toSessionDocker(host: DockerHost, dockerCase: DockerCase): SessionDocker {
+  const engine: DockerEngine = host.engine ?? 'docker';
+  const containerWorkdir = dockerCase.containerWorkdir ?? dockerCase.hostWorkspacePath;
+  const base: Omit<SessionDocker, 'configHash'> = {
+    hostId: host.id,
+    label: host.label,
+    engine,
+    image: host.image || DEFAULT_AGENT_IMAGE,
+    containerName: dockerCase.container ?? dockerContainerName(dockerCase.name),
+    hostWorkspacePath: dockerCase.hostWorkspacePath,
+    containerWorkdir,
+    network: host.network ?? 'bridge',
+    networkName: host.networkName,
+    resources: host.resources ?? DEFAULT_DOCKER_RESOURCES,
+    gpus: host.gpus,
+    mountCredentials: host.mountCredentials ?? true,
+    hooksEnabled: host.hooksEnabled ?? true,
+    resumeOnStart: host.resumeOnStart ?? true,
+    daemonHost: host.daemonHost,
+    context: host.context,
+    commands: host.commands,
+    extraCreateArgs: host.extraCreateArgs,
+    extraExecArgs: host.extraExecArgs,
+  };
+  // `owned` is deliberately applied AFTER the hash: dockerConfigHash() picks an
+  // explicit field list, so ownership can never shift an existing case's hash and
+  // mass-trip the drift gate.
+  const session: SessionDocker = { ...base, configHash: dockerConfigHash(base) };
+  if (dockerCase.owned === false) session.owned = false;
+  return session;
+}
+
+/**
+ * Which existing case, if any, blocks adopting `container` at `containerWorkdir`.
+ *
+ * One container may back SEVERAL adopted cases, each pointing at a different
+ * directory inside it — that is the whole reason to adopt the same container
+ * twice, and it is safe because the in-container tmux session is named per
+ * SESSION (`dockerTmuxSessionName`, `reverie-dkr-<id8>`) and not per case, so a
+ * session teardown kills exactly one session and its siblings on the shared
+ * in-container tmux server are untouched. Nothing else reaches an adopted
+ * container's lifecycle either: stop/remove throw at the builder, recreate
+ * refuses `owned === false`, and the orphan reaper filters on the
+ * `reverie.managed=1` label that only Reverie-created containers carry.
+ *
+ * So the conflicts that remain are NOT about the tmux server:
+ *  - `owned-case`  the container backs a case Reverie CREATED, whose lifecycle
+ *                  it owns; a recreate or delete there would destroy the
+ *                  adopted case's container out from under it.
+ *  - `other-owner` already adopted by a different user. Adoption hands out a
+ *                  shell inside someone else's container, so it stays scoped.
+ *  - `duplicate`   same container AND same directory: the second case would
+ *                  behave identically to the first, so name the first instead
+ *                  of silently creating a twin. A DIFFERENT directory is the
+ *                  supported case and returns null.
+ */
+export type AdoptContainerConflict =
+  | { kind: 'owned-case'; caseName: string }
+  | { kind: 'other-owner'; caseName: string }
+  | { kind: 'duplicate'; caseName: string }
+  | null;
+
+export function classifyAdoptContainerConflict(params: {
+  container: string;
+  /** Directory inside the container this adoption targets (already defaulted). */
+  containerWorkdir: string;
+  existing: ReadonlyArray<
+    Pick<DockerCase, 'name' | 'container' | 'containerWorkdir' | 'hostWorkspacePath' | 'owned' | 'owner'>
+  >;
+  /** Owner visibility test (canAccessOwned bound to the caller). */
+  canAccess: (owner?: string) => boolean;
+}): AdoptContainerConflict {
+  const { container, containerWorkdir, existing, canAccess } = params;
+  const sharing = existing.filter((item) => (item.container ?? dockerContainerName(item.name)) === container);
+  if (sharing.length === 0) return null;
+
+  // `owned` is optional and an ABSENT flag means owned (legacy cases predate the
+  // field), so this must test `!== false` rather than truthiness.
+  const owned = sharing.find((item) => item.owned !== false);
+  if (owned) return { kind: 'owned-case', caseName: owned.name };
+
+  const foreign = sharing.find((item) => !canAccess(item.owner));
+  if (foreign) return { kind: 'other-owner', caseName: foreign.name };
+
+  const twin = sharing.find((item) => (item.containerWorkdir ?? item.hostWorkspacePath) === containerWorkdir);
+  if (twin) return { kind: 'duplicate', caseName: twin.name };
+
+  return null;
+}
+
+/**
+ * An ADOPTED container is one the user built and runs themselves. Reverie may
+ * only exec into it; it must never create, start, stop, restart or remove it.
+ * Every lifecycle branch routes through this one predicate so a new call site
+ * cannot silently opt out.
+ */
+export function isAdoptedContainer(docker: Pick<SessionDocker, 'owned'>): boolean {
+  return docker.owned === false;
+}
+
+// ========== Shell escaping ==========
+
+/**
+ * POSIX single-quote shell-escaping (end-quote, escaped-quote, restart-quote).
+ * Mirror of the helper in remote-hosts.ts / tmux-manager.ts. Every dynamic value
+ * interpolated into the outer `bash -c "..."` launch layer is escaped through
+ * this so a path with spaces stays a single shell token. Operator-entered fields
+ * are ALSO schema-rejected for `$`/backtick (NO_SHELL_META) as defense in depth.
+ */
+export function shellescape(str: string): string {
+  return "'" + str.replace(/'/g, "'\\''") + "'";
+}
+
+// ========== Pure command-arg builders ==========
+
+/** A resolved bind mount (source existence already checked by the caller). */
+export interface DockerMount {
+  src: string;
+  dst: string;
+  readonly?: boolean;
+}
+
+/**
+ * Resolve a bind source into the Docker daemon's filesystem namespace.
+ *
+ * A bare-host Reverie process and its Docker daemon see the same HOME, so the
+ * source is returned unchanged. In Docker-outside-of-Docker deployments,
+ * `runtimeHome` is the path inside Reverie while `daemonHome` is the host path
+ * bind-mounted there. Sources beneath HOME must therefore be translated before
+ * they are sent through the Docker socket.
+ */
+export function resolveDockerDaemonMountSource(source: string, runtimeHome: string, daemonHome?: string): string {
+  const configuredDaemonHome = daemonHome?.trim();
+  if (!configuredDaemonHome) return source;
+
+  const relativeSource = relative(resolve(runtimeHome), resolve(source));
+  if (relativeSource.startsWith('..') || isAbsolute(relativeSource)) return source;
+  return resolve(configuredDaemonHome, relativeSource);
+}
+
+/**
+ * Resolved, IO-free context for buildDockerCreateArgs. The caller (tmux-manager)
+ * resolves the environment-dependent bits (host uid, existing cred mounts, the
+ * derived api url, Desktop detection) so this builder stays pure and unit-testable.
+ */
+export interface DockerCreateContext {
+  docker: SessionDocker;
+  /** Reverie session id (only the first 8 chars are used, for the reverie.session label). */
+  sessionId: string;
+  /** REVERIE_INSTANCE ('' for prod) — scopes the boot reaper so a beta never reaps prod. */
+  instance: string;
+  /** Pre-resolved uid/userns tokens: ['--user','1000:0'] | ['--userns','keep-id'] | []. */
+  userArgs: string[];
+  /** Existing host credential bind mounts (convenient mode). Empty in sealed mode. */
+  credentialMounts: DockerMount[];
+  /** Extra bind mounts (e.g. the read-only hook-secret file). */
+  extraMounts: DockerMount[];
+  /** Create-time env (NON-secret, committed-safe): HOME, TERM, COLORTERM, REVERIE_API_URL, REVERIE_HOOK_SECRET_FILE. */
+  envCreate: Record<string, string>;
+  /** Whether to add `--add-host <alias>:host-gateway` (skipped on Docker Desktop, where the alias is native). */
+  addHostGateway: boolean;
+  /** Engine host-gateway alias (host.docker.internal / host.containers.internal). */
+  gatewayAlias: string;
+  /** Omit --memory-swap when the host kernel cannot enforce swap limits. */
+  disableSwapLimit?: boolean;
+}
+
+/**
+ * Engine prefix tokens shared by every docker invocation (mirror of
+ * buildSshConnectionArgs). Returns e.g. ['docker'] or ['podman','--context','ctx'].
+ */
+export function buildDockerBaseArgs(docker: Pick<SessionDocker, 'engine' | 'context' | 'daemonHost'>): string[] {
+  const parts: string[] = [docker.engine === 'podman' ? 'podman' : 'docker'];
+  if (docker.context) parts.push('--context', shellescape(docker.context));
+  if (docker.daemonHost) parts.push('-H', shellescape(docker.daemonHost));
+  return parts;
+}
+
+function mountSpec(m: DockerMount): string {
+  return `type=bind,src=${m.src},dst=${m.dst}${m.readonly ? ',readonly' : ''}`;
+}
+
+function resourceFlags(resources?: DockerResourceLimits, disableSwapLimit = false): string[] {
+  if (!resources) return [];
+  const flags: string[] = [];
+  if (resources.memory) {
+    flags.push('--memory', resources.memory);
+    // memory-swap == memory disables swap where the daemon supports swap
+    // accounting. Some kernels, including the deployed Unraid host, do not;
+    // requesting it there emits a warning and Docker ignores the value.
+    if (!disableSwapLimit) flags.push('--memory-swap', resources.memory);
+  }
+  if (resources.cpus) flags.push('--cpus', resources.cpus);
+  if (resources.pidsLimit) flags.push('--pids-limit', String(resources.pidsLimit));
+  if (resources.nofile) flags.push('--ulimit', `nofile=${resources.nofile}`);
+  if (resources.shmSize) flags.push('--shm-size', resources.shmSize);
+  return flags;
+}
+
+function networkArg(network: DockerNetworkMode, networkName?: string): string {
+  if (network === 'custom' && networkName) return networkName;
+  return network; // 'bridge' | 'none'
+}
+
+/**
+ * Build the `docker create` token list (from `create` through the `sleep
+ * infinity` CMD) for a long-lived, hardened, per-case container. PURE: every
+ * dynamic value is shellescaped; the caller joins with spaces into the launch
+ * string. Security invariants baked in: --cap-drop ALL, --security-opt
+ * no-new-privileges, --pids-limit, --memory==--memory-swap, --init,
+ * --pull=never, --restart no, NEVER --privileged, NEVER the docker socket.
+ */
+export function buildDockerCreateArgs(ctx: DockerCreateContext): string[] {
+  const {
+    docker,
+    sessionId,
+    instance,
+    userArgs,
+    credentialMounts,
+    extraMounts,
+    envCreate,
+    addHostGateway,
+    gatewayAlias,
+  } = ctx;
+
+  const args: string[] = [
+    'create',
+    '--name',
+    shellescape(docker.containerName),
+    '--label',
+    'reverie.managed=1',
+    '--label',
+    shellescape(`reverie.instance=${instance}`),
+    '--label',
+    shellescape(`reverie.session=${sessionId.slice(0, 8)}`),
+    '--label',
+    shellescape(`reverie.confighash=${docker.configHash ?? dockerConfigHash(docker)}`),
+    '--pull=never',
+    '--init',
+    '--restart',
+    'no',
+    ...userArgs,
+    '--workdir',
+    shellescape(docker.containerWorkdir),
+    // Workspace bind: mirror the host path inside the container so the transcript
+    // projHash correlates and file features read real host bytes.
+    '--mount',
+    shellescape(mountSpec({ src: docker.hostWorkspacePath, dst: docker.containerWorkdir })),
+    ...credentialMounts.flatMap((m) => ['--mount', shellescape(mountSpec(m))]),
+    ...extraMounts.flatMap((m) => ['--mount', shellescape(mountSpec(m))]),
+  ];
+
+  if (addHostGateway) args.push('--add-host', `${gatewayAlias}:host-gateway`);
+
+  args.push(
+    ...resourceFlags(docker.resources, ctx.disableSwapLimit),
+    // GPU passthrough (needs the NVIDIA container toolkit on the host). No storage
+    // cap is set, so the container's writable layer + volumes grow elastically as
+    // data flows in (bounded only by host disk).
+    ...(docker.gpus ? ['--gpus', shellescape(docker.gpus)] : []),
+    '--cap-drop',
+    'ALL',
+    '--security-opt',
+    'no-new-privileges',
+    '--network',
+    networkArg(docker.network, docker.networkName)
+  );
+
+  for (const [key, value] of Object.entries(envCreate)) {
+    args.push('--env', shellescape(`${key}=${value}`));
+  }
+
+  // Operator escape-hatch args (schema-validated NO_SHELL_INJECTION), escaped again here.
+  for (const extra of docker.extraCreateArgs ?? []) {
+    args.push(shellescape(extra));
+  }
+
+  args.push('--entrypoint', '/usr/bin/env', shellescape(docker.image), 'sleep', 'infinity');
+  return args;
+}
+
+/** Tokens allowed in an npm package name reaching a Dockerfile build arg unquoted. */
+const SAFE_PACKAGE = /^[@A-Za-z0-9][@A-Za-z0-9/._-]*$/;
+
+/**
+ * npm packages the agent image installs in its shared layer, from the STOCK catalogue.
+ *
+ * ⚠️ Stock, deliberately, NOT the merged registry. A user's `~/.reverie/clis.json` must not
+ * change what lands inside an image tagged `reverie/agent:base`, or two machines holding that
+ * same tag hold different images and every cache-hit decision downstream is a lie.
+ *
+ * ⚠️ An entry carrying `discovery.install.agentImageLayer` is excluded here — see that field's
+ * doc comment in `types.ts` for why some CLIs need their own hand-written Dockerfile layer
+ * instead of the shared one, and `test/docker-agent-image-coverage.test.ts` for the guard that
+ * an exclusion here still lands in the Dockerfile somewhere.
+ *
+ * ⚠️ This mirrors `agentImageNpmPackages()` in `scripts/lib/cli-catalog.mjs`, which the CLI
+ * build path uses because a `.mjs` cannot import TypeScript. Two producers of one command
+ * line drift; `test/agent-image-build-args-parity.test.ts` is what stops them — including the
+ * SAFE_PACKAGE regex below, which is duplicated (not imported) in that file for the same
+ * reason and must stay byte-identical to it.
+ */
+export function agentImageNpmPackages(): string[] {
+  const packages: string[] = [];
+  for (const entry of STOCK_CLIS) {
+    if (!entry.enabled || entry.discovery.install.agentImageLayer) continue;
+    const pkg = entry.discovery.install.npmPackage;
+    if (!pkg) continue;
+    // The value is interpolated into a Dockerfile ARG expanded UNQUOTED (word splitting is
+    // how the list becomes several arguments), so a token with whitespace or shell
+    // metacharacters would change what the RUN line means. The source is `stock.ts`, so the
+    // practical risk is nil, but this is the in-app auto-build path and the only one of the
+    // two producers where that had gone unchecked.
+    if (!SAFE_PACKAGE.test(pkg)) {
+      throw new Error(`Refusing unsafe npm package name for "${String(entry.id)}": ${JSON.stringify(pkg)}`);
+    }
+    packages.push(pkg);
+  }
+  return packages;
+}
+
+/**
+ * Environment variable → agent.Dockerfile ARG for the optional git-host CLIs (gh, az).
+ * ⚠️ Mirrors `GIT_HOST_CLI_BUILD_ARGS` in `scripts/lib/cli-catalog.mjs`; the parity test pins them.
+ */
+export const GIT_HOST_CLI_BUILD_ARGS: ReadonlyArray<readonly [string, string]> = [
+  ['REVERIE_AGENT_IMAGE_INSTALL_GH', 'REVERIE_INSTALL_GH'],
+  ['REVERIE_AGENT_IMAGE_INSTALL_AZ', 'REVERIE_INSTALL_AZ'],
+];
+
+/**
+ * Environment variable → Dockerfile ARG for the image's system Git identity.
+ * ⚠️ Mirrors `GIT_IDENTITY_BUILD_ARGS` in `scripts/lib/cli-catalog.mjs`; the parity test pins them.
+ */
+export const GIT_IDENTITY_BUILD_ARGS: ReadonlyArray<readonly [string, string]> = [
+  ['REVERIE_AGENT_IMAGE_GIT_USER_NAME', 'GIT_USER_NAME'],
+  ['REVERIE_AGENT_IMAGE_GIT_USER_EMAIL', 'GIT_USER_EMAIL'],
+];
+
+/**
+ * The `--build-arg` pairs for the optional git-host CLIs. PURE. An unset or empty variable
+ * contributes NOTHING, so the Dockerfile's own default (off) applies and the argv is the same
+ * as before these existed; anything other than 0/1 is refused rather than guessed at.
+ */
+export function gitHostCliBuildArgPairs(env: NodeJS.ProcessEnv): Array<[string, string]> {
+  const pairs: Array<[string, string]> = [];
+  for (const [envName, argName] of GIT_HOST_CLI_BUILD_ARGS) {
+    const value = env[envName];
+    if (value === undefined || value === '') continue;
+    if (value !== '0' && value !== '1') {
+      throw new Error(`${envName} must be 0 or 1, got ${JSON.stringify(value)}`);
+    }
+    pairs.push([argName, value]);
+  }
+  return pairs;
+}
+
+/**
+ * The `--build-arg` pairs for a configured Git identity. An absent pair leaves
+ * Git unconfigured, preserving existing deployments; a partial pair is refused.
+ * ⚠️ Mirrors `gitIdentityBuildArgPairs()` in `scripts/lib/cli-catalog.mjs`; the parity test pins them.
+ */
+export function gitIdentityBuildArgPairs(env: NodeJS.ProcessEnv): Array<[string, string]> {
+  const pairs = GIT_IDENTITY_BUILD_ARGS.map(([envName, argName]) => [argName, env[envName] ?? ''] as [string, string]);
+  const configured = pairs.filter(([, value]) => value !== '');
+  if (configured.length === 0) return [];
+  if (configured.length !== pairs.length) {
+    const names = GIT_IDENTITY_BUILD_ARGS.map(([envName]) => envName).join(' and ');
+    throw new Error(`${names} must both be set when configuring Git identity`);
+  }
+  return pairs;
+}
+
+/** The `--build-arg` pairs the agent image takes. PURE given `env`. */
+export function agentImageBuildArgPairs(env: NodeJS.ProcessEnv = process.env): Array<[string, string]> {
+  return [
+    ['CLI_NPM_PACKAGES', agentImageNpmPackages().join(' ')],
+    ...gitHostCliBuildArgPairs(env),
+    ...gitIdentityBuildArgPairs(env),
+  ];
+}
+
+// ========== Credential mount resolution (IO) ==========
+
+/** Container Claude config dir (created gid-0 writable in the image). */
+export const CONTAINER_CLAUDE_DIR = `${CONTAINER_HOME}/.claude`;
+/** In-container path of the seeded (writable) `~/.claude.json`. */
+export const CLAUDE_JSON_HOME = `${CONTAINER_HOME}/.claude.json`;
+/** In-container path of the read-only host-seeded `~/.claude.json` (copied into HOME at launch). */
+export const CLAUDE_JSON_SEED = `${CONTAINER_HOME}/.reverie/claude.seed.json`;
+/** Read-only seed paths for the files copied into the container's `.claude`. */
+const CLAUDE_CREDS_SEED = `${CONTAINER_HOME}/.reverie/claude-creds.seed.json`;
+const CLAUDE_SETTINGS_SEED = `${CONTAINER_HOME}/.reverie/claude-settings.seed.json`;
+const CLAUDE_STATS_SEED = `${CONTAINER_HOME}/.reverie/claude-stats.seed.json`;
+/** Staging root for read-only host-cred seed mounts (codex/gemini/gcloud/opencode). */
+const CRED_SEED_DIR = `${CONTAINER_HOME}/.reverie/cred-seeds`;
+
+/**
+ * PURE: merge the host `~/.claude.json` into a config that makes an
+ * already-authenticated Claude skip its INTERACTIVE onboarding inside the container
+ * (the host file itself lacks these flags — the host install is grandfathered, so a
+ * verbatim copy still triggers the theme picker + login wizard + folder-trust
+ * prompt). Forces `hasCompletedOnboarding`, a `theme` (so the theme picker is
+ * skipped), and marks the workspace project trusted + onboarded. Auth still comes
+ * from the copied `oauthAccount` + the dir-mounted `~/.claude/.credentials.json`.
+ */
+export function buildSeamlessClaudeConfig(
+  hostConfig: Record<string, unknown>,
+  workspacePath: string,
+  theme = 'dark'
+): Record<string, unknown> {
+  const merged: Record<string, unknown> = { ...hostConfig };
+  merged.hasCompletedOnboarding = true;
+  if (typeof merged.theme !== 'string') merged.theme = theme;
+  const projects = { ...((merged.projects as Record<string, Record<string, unknown>> | undefined) ?? {}) };
+  const existing = (projects[workspacePath] as Record<string, unknown> | undefined) ?? {};
+  const seenCount = existing.projectOnboardingSeenCount;
+  projects[workspacePath] = {
+    ...existing,
+    hasTrustDialogAccepted: true,
+    hasCompletedProjectOnboarding: true,
+    projectOnboardingSeenCount: typeof seenCount === 'number' && seenCount > 0 ? seenCount : 1,
+  };
+  merged.projects = projects;
+  return merged;
+}
+
+/** Best-effort read of the host `~/.claude/settings.json` theme (drives the seed's theme). */
+function readHostClaudeTheme(home: string): string | undefined {
+  try {
+    const parsed = JSON.parse(readFileSync(join(home, '.claude', 'settings.json'), 'utf-8')) as { theme?: unknown };
+    return typeof parsed.theme === 'string' ? parsed.theme : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Resolve the read-only seed mount for `~/.claude.json`. Reads the host file, merges
+ * in the seamless-onboarding flags + workspace trust (buildSeamlessClaudeConfig),
+ * writes the result to a per-container seed file under `~/.reverie/docker-seeds/`,
+ * and returns its mount. The launch chain copies it to `~/.claude.json` inside HOME
+ * once — giving Claude a NORMAL writable, already-onboarded config (no atomic-rename
+ * EBUSY, no re-auth, no theme/trust prompts). Falls back to the RAW host file when
+ * parse/write fails (auth still works; the wizard may show). Returns null when the
+ * host has no `~/.claude.json`. IO; under VITEST returns the raw mount (no write).
+ */
+export function resolveClaudeJsonSeedMount(
+  home: string = homedir(),
+  containerName?: string,
+  workspacePath?: string
+): DockerMount | null {
+  const src = join(home, '.claude.json');
+  if (!existsSync(src)) return null;
+  const rawMount: DockerMount = { src, dst: CLAUDE_JSON_SEED, readonly: true };
+  if (IS_TEST_MODE || !containerName || !workspacePath) return rawMount;
+  try {
+    const hostConfig = JSON.parse(readFileSync(src, 'utf-8')) as Record<string, unknown>;
+    const merged = buildSeamlessClaudeConfig(hostConfig, workspacePath, readHostClaudeTheme(home) ?? 'dark');
+    const seedsDir = dataPath('docker-seeds');
+    if (!existsSync(seedsDir)) mkdirSync(seedsDir, { recursive: true });
+    const seedFile = join(seedsDir, `${containerName}.json`);
+    writeFileSync(seedFile, JSON.stringify(merged), { mode: 0o600 });
+    return { src: seedFile, dst: CLAUDE_JSON_SEED, readonly: true };
+  } catch {
+    return rawMount; // partial host write / unreadable — auth still carries, wizard may show
+  }
+}
+
+/** A file (or dir, when `recursive`) copied into the container HOME once at launch
+ *  (`[ -e to ] || cp [-a] from to`). */
+export interface DockerSeedCopy {
+  from: string;
+  to: string;
+  /** `cp -a` for whole-directory credential seeds (gemini/gcloud/opencode). */
+  recursive?: boolean;
+}
+
+export interface DockerClaudeArtifacts {
+  /** Bind mounts to add: the shared `projects/` transcripts (RW) + read-only seed files. */
+  mounts: DockerMount[];
+  /** Files copied into the container's writable HOME/.claude (+ HOME/.claude.json) at launch. */
+  seedCopies: DockerSeedCopy[];
+}
+
+/**
+ * Resolve the ISOLATED Claude artifacts for a docker session (replaces the old
+ * whole-`~/.claude` RW mount that polluted the host). Shares ONLY what must cross
+ * the boundary and seeds the rest as writable copies:
+ *  - `~/.claude/projects` → RW dir mount (transcripts: host watchers + `--resume`).
+ *  - `~/.claude.json` → merged onboarding seed, copied to HOME (no re-auth/wizard).
+ *  - `~/.claude/.credentials.json` + `~/.claude/settings.json` → read-only seeds
+ *    copied into the container's own `~/.claude` (token + global prefs carry in;
+ *    the container refreshes its own copy and never writes back to the host).
+ * Everything else Claude writes (backups, tasks, teams, session-env, history) stays
+ * container-local. IO (reads host files, writes the merged `.claude.json` seed).
+ */
+export function resolveDockerClaudeArtifacts(
+  home: string,
+  containerName: string,
+  workspacePath: string
+): DockerClaudeArtifacts {
+  const mounts: DockerMount[] = [];
+  const seedCopies: DockerSeedCopy[] = [];
+
+  // The ONE genuinely-shared part: conversation transcripts (dir mount → renames work).
+  const projectsSrc = join(home, '.claude', 'projects');
+  if (existsSync(projectsSrc)) {
+    mounts.push({ src: projectsSrc, dst: `${CONTAINER_CLAUDE_DIR}/projects` });
+  }
+
+  // ~/.claude.json → merged, onboarding-complete seed at HOME root.
+  const jsonSeed = resolveClaudeJsonSeedMount(home, containerName, workspacePath);
+  if (jsonSeed) {
+    mounts.push(jsonSeed);
+    seedCopies.push({ from: CLAUDE_JSON_SEED, to: CLAUDE_JSON_HOME });
+  }
+
+  // credentials (token) + settings (theme/model/effort/permissions) + stats-cache
+  // (drives the model/effort status indicator) → writable copies inside the
+  // container's own ~/.claude (never a wholesale mount → no host pollution).
+  const files: Array<[rel: string, seed: string, dest: string]> = [
+    ['.credentials.json', CLAUDE_CREDS_SEED, `${CONTAINER_CLAUDE_DIR}/.credentials.json`],
+    ['settings.json', CLAUDE_SETTINGS_SEED, `${CONTAINER_CLAUDE_DIR}/settings.json`],
+    ['stats-cache.json', CLAUDE_STATS_SEED, `${CONTAINER_CLAUDE_DIR}/stats-cache.json`],
+  ];
+  for (const [rel, seed, dest] of files) {
+    const src = join(home, '.claude', rel);
+    if (existsSync(src)) {
+      mounts.push({ src, dst: seed, readonly: true });
+      seedCopies.push({ from: seed, to: dest });
+    }
+  }
+
+  return { mounts, seedCopies };
+}
+
+/**
+ * Per-CLI credential-store isolation policy (the codex/gemini/gcloud/opencode analog
+ * of resolveDockerClaudeArtifacts). Codex is the direct Claude-analog: its
+ * `sessions/` rollouts + `history.jsonl` are read HOST-SIDE (response-viewer +
+ * `codex resume`), so they are SHARED (RW), while `auth.json`/`config.toml` are
+ * seeded. The other three have no host-read/resume dependency and are fully
+ * seed-copied (writable copy in the container, no write-back to the host).
+ */
+interface CredStorePolicy {
+  /** Path relative to HOME (host + container), e.g. '.codex' or '.config/gcloud'. */
+  rel: string;
+  /** Subdirs bind-mounted RW (shared: resume + host reads). */
+  shareDirs?: string[];
+  /** Files bind-mounted RW (append-only, e.g. codex history.jsonl — never renamed). */
+  shareFiles?: string[];
+  /** Files seeded (RO mount → cp) into the container's own copy. */
+  seedFiles?: string[];
+  /** Seed the WHOLE dir (RO mount → cp -a) — for stores with no shared/host-read state. */
+  seedWhole?: boolean;
+  /**
+   * Seed this store ONLY when this environment variable is exactly `1`, read when
+   * the container is created. For credentials that belong to an opt-in tool rather
+   * than to an agent CLI every case already trusts: they are not inert just because
+   * the image lacks the tool (a gh `hosts.yml` token or an Azure refresh token is
+   * usable by anything in the container, and the agent in it is prompt-injectable).
+   */
+  enabledByEnv?: string;
+}
+
+const CRED_STORES: CredStorePolicy[] = [
+  { rel: '.codex', shareDirs: ['sessions'], shareFiles: ['history.jsonl'], seedFiles: ['auth.json', 'config.toml'] },
+  // Also covers Antigravity: `agy` nests its whole state (auth `jetski_state.pbtxt`,
+  // `conversations/`, `knowledge/`) under `~/.gemini/antigravity-cli/`, so it needs no
+  // entry of its own. There is no `~/.antigravity` credential dir to add.
+  { rel: '.gemini', seedWhole: true },
+  // Pi (pi.dev) keeps auth + config in `~/.pi/agent`, but that dir ALSO holds
+  // `sessions/`, `extensions/`, `skills/` and the installed package trees
+  // (`npm/`, `git/`) — easily gigabytes on an active host, so seedWhole would
+  // `cp -a` all of it into every container start. Seed only what pi needs to
+  // authenticate and behave consistently; `models.json` is in the list because it
+  // holds user-defined custom providers. Consequence to document: in-container pi
+  // sessions are invisible host-side, so `pi -c` inside a Docker case only sees
+  // that container's own history (unlike codex, whose `sessions/` is shared RW
+  // precisely because Reverie reads it host-side).
+  {
+    rel: '.pi/agent',
+    seedFiles: ['auth.json', 'settings.json', 'trust.json', 'models.json', 'models-store.json'],
+  },
+  // Grok (xAI) keeps auth + config in `~/.grok`, but that dir ALSO holds
+  // `sessions/`, `memory/`, `downloads/` (the ~100MB binary itself) and `bin/`,
+  // so seedWhole would copy all of it into every container start. Seed only what
+  // grok needs to authenticate and behave consistently. Same trade-off as pi:
+  // in-container grok sessions are invisible host-side, so `grok -c` inside a
+  // Docker case only sees that container's own history.
+  {
+    rel: '.grok',
+    seedFiles: ['auth.json', 'config.toml', 'pager.toml'],
+  },
+  // DeepSeek Harness keeps credentials in `~/.dsh/.env` (0600) and composition in
+  // `settings.yaml` / `cordis.patch.yml`. `profiles/` is deliberately NOT seeded:
+  // it is a pnpm workspace holding a full node_modules tree per profile, which is
+  // both enormous and host-arch-specific. An in-container dsh therefore needs its
+  // profile installed IN the image (see docker/agent.Dockerfile), and the seeded
+  // files only supply auth and model composition. Same host-invisibility trade-off
+  // as pi and grok: `~/.dsh/sessions` inside a container is that container's own.
+  {
+    rel: '.dsh',
+    seedFiles: ['.env', 'settings.yaml', 'cordis.patch.yml'],
+  },
+  { rel: '.config/gcloud', seedWhole: true },
+  { rel: '.config/opencode', seedWhole: true },
+  // GitHub CLI: `hosts.yml` holds the token wherever no system keyring exists (the
+  // Docker server image, a headless Linux host), `config.yml` the preferences. An
+  // agent image built with REVERIE_INSTALL_GH=1 routes github.com git credentials
+  // through `gh`, so this seed is what lets an agent clone/push a private repo. A
+  // token that lives in a desktop keyring is not in `hosts.yml` and does not carry
+  // in; sign `gh` in inside the container. OPT-IN: seeded only when the same switch
+  // that builds gh into the agent image is on, never merely because the file exists.
+  { rel: '.config/gh', seedFiles: ['hosts.yml', 'config.yml'], enabledByEnv: 'REVERIE_AGENT_IMAGE_INSTALL_GH' },
+  // Azure CLI: only the sign-in state. `~/.azure` also accumulates `logs/`,
+  // `commands/`, telemetry and (on a bare host) `cliextensions/`, none of which is
+  // needed to authenticate; the agent image carries its own extensions outside HOME.
+  // `msal_token_cache.json` is plaintext only on Linux (Windows/macOS encrypt it), so
+  // this carries a sign-in from the Docker server image or a Linux host.
+  // OPT-IN like gh: the MSAL cache holds refresh tokens for the whole Azure account.
+  {
+    rel: '.azure',
+    enabledByEnv: 'REVERIE_AGENT_IMAGE_INSTALL_AZ',
+    seedFiles: [
+      'azureProfile.json',
+      'msal_token_cache.json',
+      'service_principal_entries.json',
+      'clouds.config',
+      'config',
+    ],
+  },
+  // OMP keeps its config in `~/.omp/agent` (config.yml/mcp.json/models.yml/
+  // settings.yml — small, no bigger than grok's config.toml/pager.toml), but
+  // that dir ALSO holds agent.db/history.db/models.db (SQLite caches) and
+  // terminal-sessions/blobs/cache (large, regenerable), so seed only the
+  // config files. UNLIKE pi/grok, `sessions/` is SHARED (RW), not
+  // host-invisible: Reverie reads `~/.omp/agent/sessions/**/*.jsonl`
+  // HOST-SIDE for history recovery and --resume pinning
+  // (omp-transcript.ts, omp-session-resolver.ts) — the same reason codex's
+  // `sessions/` is shared rather than seeded. Without this, an in-container
+  // OMP conversation would be invisible to Reverie's own history-scan/resume
+  // logic, silently breaking the kill-survival feature for Docker cases.
+  {
+    rel: '.omp/agent',
+    shareDirs: ['sessions'],
+    seedFiles: ['config.yml', 'mcp.json', 'models.yml', 'settings.yml'],
+  },
+];
+
+/**
+ * Resolve the ISOLATED codex/gemini/gcloud/opencode artifacts (replaces the old
+ * whole-dir RW mounts that let each in-container CLI write its refreshed tokens +
+ * session state back into the host). Every path is existsSync-gated (on most hosts
+ * only a subset exists). Pure-ish IO (no writes; just existence checks + mount specs).
+ */
+export function resolveDockerCredentialArtifacts(
+  home: string = homedir(),
+  env: NodeJS.ProcessEnv = process.env
+): DockerClaudeArtifacts {
+  const mounts: DockerMount[] = [];
+  const seedCopies: DockerSeedCopy[] = [];
+  for (const store of CRED_STORES) {
+    if (store.enabledByEnv && env[store.enabledByEnv] !== '1') continue;
+    const hostBase = join(home, store.rel);
+    if (!existsSync(hostBase)) continue;
+    const containerBase = `${CONTAINER_HOME}/${store.rel}`;
+    const seedName = store.rel.replace(/\//g, '-'); // '.config/gcloud' → '.config-gcloud'
+    if (store.seedWhole) {
+      const seed = `${CRED_SEED_DIR}/${seedName}`;
+      mounts.push({ src: hostBase, dst: seed, readonly: true });
+      seedCopies.push({ from: seed, to: containerBase, recursive: true });
+      continue;
+    }
+    for (const sub of store.shareDirs ?? []) {
+      const src = join(hostBase, sub);
+      if (existsSync(src)) mounts.push({ src, dst: `${containerBase}/${sub}` });
+    }
+    for (const file of store.shareFiles ?? []) {
+      const src = join(hostBase, file);
+      if (existsSync(src)) mounts.push({ src, dst: `${containerBase}/${file}` });
+    }
+    for (const file of store.seedFiles ?? []) {
+      const src = join(hostBase, file);
+      if (existsSync(src)) {
+        const seed = `${CRED_SEED_DIR}/${seedName}-${file}`;
+        mounts.push({ src, dst: seed, readonly: true });
+        seedCopies.push({ from: seed, to: `${containerBase}/${file}` });
+      }
+    }
+  }
+  return { mounts, seedCopies };
+}
+
+// ========== Daemon probes (IO; no-op under VITEST) ==========
+
+/**
+ * UNESCAPED argv prefix for execFile-based probes. The shellescaped
+ * buildDockerBaseArgs variant is for interpolation into the `bash -c` launch
+ * string; argv arrays must NOT carry literal quotes (mirror of docker-export's
+ * dockerArgv).
+ */
+function dockerEngineArgv(docker: Pick<SessionDocker, 'engine' | 'context' | 'daemonHost'>): string[] {
+  const argv: string[] = [docker.engine === 'podman' ? 'podman' : 'docker'];
+  if (docker.context) argv.push('--context', docker.context);
+  if (docker.daemonHost) argv.push('-H', docker.daemonHost);
+  return argv;
+}
+
+export interface DockerDriftStatus {
+  /** Container exists (daemon reachable AND a container with this name is present). */
+  exists: boolean;
+  running: boolean;
+  /** The desired configHash no longer matches the container's reverie.confighash label. */
+  drifted: boolean;
+  currentHash?: string;
+}
+
+/**
+ * Drift check (docs/docker-cases-plan.md §4): compare the DESIRED configHash
+ * against the existing container's `reverie.confighash` label so docker-host
+ * config edits actually take effect instead of being silently ignored by the
+ * idempotent inspect-or-create launch chain. `exists:false` (no container /
+ * daemon down) means there is nothing to drift. No-op under VITEST.
+ */
+export async function checkDockerConfigDrift(
+  docker: Pick<SessionDocker, 'engine' | 'context' | 'daemonHost' | 'containerName' | 'configHash' | 'owned'>
+): Promise<DockerDriftStatus> {
+  if (IS_TEST_MODE) return { exists: false, running: false, drifted: false };
+  // An ADOPTED container carries no `reverie.confighash` label — it was never
+  // created from our config — so every comparison would report drift and the
+  // launch gate would demand a recreate we are not allowed to perform. Ownership
+  // of its configuration belongs to the user; report "no drift" and never offer
+  // to rebuild it.
+  if (isAdoptedContainer(docker)) return { exists: true, running: false, drifted: false };
+  const argv = dockerEngineArgv(docker);
+  try {
+    const { stdout } = await execFileAsync(
+      argv[0],
+      [
+        ...argv.slice(1),
+        'inspect',
+        '-f',
+        '{{.State.Running}}\t{{index .Config.Labels "reverie.confighash"}}',
+        docker.containerName,
+      ],
+      { timeout: DOCKER_PROBE_TIMEOUT_MS }
+    );
+    const [running = '', hash = ''] = stdout.trim().split('\t');
+    return { exists: true, running: running === 'true', drifted: hash !== docker.configHash, currentHash: hash };
+  } catch {
+    return { exists: false, running: false, drifted: false };
+  }
+}
+
+/**
+ * `docker rm -f` the case container (the recreate-on-drift confirm action; the
+ * launch chain recreates it with the new config on next start). Workspace +
+ * transcripts ride bind mounts and survive; the conversation resumes via the
+ * case's lastClaudeSessionId. No-op under VITEST.
+ */
+export async function removeDockerContainer(
+  docker: Pick<SessionDocker, 'engine' | 'context' | 'daemonHost' | 'containerName' | 'owned'>
+): Promise<void> {
+  // Fail CLOSED at the lowest layer: an adopted container is the user's, and no
+  // caller — recreate-on-drift, case delete, a future teardown — may remove it.
+  if (isAdoptedContainer(docker)) {
+    throw new Error(
+      `Refusing to remove adopted container "${docker.containerName}": Reverie does not own its lifecycle.`
+    );
+  }
+  if (IS_TEST_MODE) return;
+  const argv = dockerEngineArgv(docker);
+  await execFileAsync(argv[0], [...argv.slice(1), 'rm', '-f', docker.containerName], { timeout: 30_000 });
+}
+
+export interface DockerAvailability {
+  ok: boolean;
+  engine: DockerEngine;
+  rootless: boolean;
+  isDesktop: boolean;
+  cgroupV2: boolean;
+  /** Best-effort: are --memory/--cpus/--pids-limit actually enforced on this engine? */
+  capsEnforced: boolean;
+  error?: string;
+}
+
+const DOCKER_PROBE_TIMEOUT_MS = 15_000;
+
+interface DockerInfoJson {
+  ServerVersion?: string;
+  CgroupVersion?: string;
+  SecurityOptions?: string[];
+  OperatingSystem?: string;
+  OSType?: string;
+  Name?: string;
+}
+
+async function runDockerInfo(engine: DockerEngine): Promise<DockerInfoJson | null> {
+  try {
+    const { stdout } = await execFileAsync(engine, ['info', '--format', '{{json .}}'], {
+      timeout: DOCKER_PROBE_TIMEOUT_MS,
+    });
+    return JSON.parse(stdout) as DockerInfoJson;
+  } catch {
+    return null;
+  }
+}
+
+function classifyDockerInfo(engine: DockerEngine, info: DockerInfoJson): DockerAvailability {
+  const security = info.SecurityOptions ?? [];
+  const rootless = security.some((opt) => opt.includes('rootless'));
+  const cgroupV2 = info.CgroupVersion === '2';
+  const os = `${info.OperatingSystem ?? ''}`.toLowerCase();
+  const isDesktop = os.includes('docker desktop') || os.includes('desktop');
+  // Under rootless, resource caps are only reliably enforced with cgroup v2 +
+  // systemd delegation. We can't detect delegation from `docker info`, so we
+  // treat rootless+cgroupv2 as "likely enforced" and rootless+cgroupv1 as not.
+  const capsEnforced = !rootless || cgroupV2;
+  return { ok: true, engine, rootless, isDesktop, cgroupV2, capsEnforced };
+}
+
+/**
+ * Probe the container engine: server up, cgroup version, rootless, Desktop, and
+ * whether resource caps are enforceable. Auto-detects docker then podman when no
+ * engine is given. No-op canned value under VITEST.
+ */
+export async function checkDockerAvailable(engine?: DockerEngine): Promise<DockerAvailability> {
+  if (IS_TEST_MODE) {
+    return {
+      ok: true,
+      engine: engine ?? 'docker',
+      rootless: false,
+      isDesktop: false,
+      cgroupV2: true,
+      capsEnforced: true,
+    };
+  }
+  const candidates: DockerEngine[] = engine ? [engine] : ['docker', 'podman'];
+  for (const candidate of candidates) {
+    const info = await runDockerInfo(candidate);
+    if (info) return classifyDockerInfo(candidate, info);
+  }
+  return {
+    ok: false,
+    engine: engine ?? 'docker',
+    rootless: false,
+    isDesktop: false,
+    cgroupV2: false,
+    capsEnforced: false,
+    error: 'Docker/Podman not available. Install docker (or podman) and ensure the daemon is running.',
+  };
+}
+
+/** Is the base image present on the host's daemon? (never triggers an auto-pull).
+ *  Honors context/daemonHost so a remote-daemon host is probed on the RIGHT daemon. */
+export async function checkDockerImagePresent(
+  docker: Pick<SessionDocker, 'engine' | 'context' | 'daemonHost'>,
+  image: string
+): Promise<boolean> {
+  if (IS_TEST_MODE) return true;
+  const argv = dockerEngineArgv(docker);
+  try {
+    await execFileAsync(argv[0], [...argv.slice(1), 'image', 'inspect', '--format', '{{.Id}}', image], {
+      timeout: DOCKER_PROBE_TIMEOUT_MS,
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export interface EnsureImageResult {
+  ok: boolean;
+  /** true when this call actually ran a build (vs. the image already existing). */
+  built: boolean;
+  alreadyPresent: boolean;
+  error?: string;
+}
+
+/** Missing images must be built from the shared root flake on the daemon host. */
+export async function ensureAgentBaseImage(
+  docker: Pick<SessionDocker, 'engine' | 'context' | 'daemonHost'>,
+  image: string,
+  _opts: { onProgress?: (line: string) => void; noCache?: boolean } = {}
+): Promise<EnsureImageResult> {
+  if (IS_TEST_MODE || await checkDockerImagePresent(docker, image)) {
+    return { ok: true, built: false, alreadyPresent: true };
+  }
+  return {
+    ok: false, built: false, alreadyPresent: false,
+    error: `Image ${image} is missing. On the daemon host, build the root Nix .#dockerImage, load it, and tag reverie:latest as ${image}; or run node apps/web/scripts/build-agent-image.mjs --engine ${docker.engine} --image ${image}.`,
+  };
+}
+
+export interface DockerTmuxCheckResult {
+  ok: boolean;
+  tmuxPath?: string;
+  /** Distinguishes "image missing" (build it) from "tmux missing in image" (rebuild it). */
+  imageMissing?: boolean;
+  error?: string;
+}
+
+/**
+ * Verify the base image is present AND contains tmux (a HARD prerequisite: the
+ * in-container tmux is what makes reconnect durable). Never triggers a pull
+ * (`--pull=never`). No-op under VITEST. Mirror of checkRemoteTmuxAvailable.
+ */
+export async function checkDockerTmuxAvailable(
+  docker: Pick<SessionDocker, 'engine' | 'image' | 'context' | 'daemonHost'>
+): Promise<DockerTmuxCheckResult> {
+  if (IS_TEST_MODE) return { ok: true, tmuxPath: '/usr/bin/tmux' };
+  if (!(await checkDockerImagePresent(docker, docker.image))) {
+    return {
+      ok: false,
+      imageMissing: true,
+      error: `image ${docker.image} not present (the default image is auto-built on first use; a custom image must be built or pulled first)`,
+    };
+  }
+  const argv = dockerEngineArgv(docker);
+  try {
+    const { stdout } = await execFileAsync(
+      argv[0],
+      [...argv.slice(1), 'run', '--rm', '--pull=never', '--entrypoint', '/usr/bin/env', docker.image, 'sh', '-lc', 'command -v tmux'],
+      { timeout: DOCKER_PROBE_TIMEOUT_MS }
+    );
+    const tmuxPath = stdout.trim();
+    if (!tmuxPath) {
+      return { ok: false, error: `base image ${docker.image} is missing tmux (required for durable sessions)` };
+    }
+    return { ok: true, tmuxPath };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: `could not verify tmux in ${docker.image}: ${msg}` };
+  }
+}
+
+/** Preflight facts about an ALREADY-RUNNING container the user wants to adopt. */
+export interface AdoptedContainerProbe {
+  ok: boolean;
+  exists: boolean;
+  running: boolean;
+  /** The container's own image ref (informational — we never enforce ours on it). */
+  image?: string;
+  /** `command -v tmux` inside the container; required for durable sessions. */
+  tmuxPath?: string;
+  /** Modes whose CLI resolved inside the container (`command -v <mode>`). */
+  availableModes?: SessionMode[];
+  /** Whether the requested working directory exists INSIDE the container. */
+  workdirExists?: boolean;
+  /** Whether the container's exec user is root (uid 0). */
+  runsAsRoot?: boolean;
+  error?: string;
+}
+
+/** One container on the engine, as offered to the adoption picker. */
+export interface DockerContainerInfo {
+  name: string;
+  image: string;
+  running: boolean;
+  /** Engine's own status string, e.g. "Up 3 hours" / "Exited (0) 2 days ago". */
+  status: string;
+}
+
+/**
+ * List the engine's containers for the adoption picker (mirror of
+ * `listRemoteReverieSessions`). Read-only and NEVER throws: an unreachable
+ * daemon, a missing engine or zero containers all return `[]`, because this
+ * feeds a convenience picker whose input the user can always type by hand.
+ *
+ * Stopped containers ARE included, sorted after running ones and carrying their
+ * status: adoption requires a running container, but hiding a stopped one turns
+ * "my container is not in the list" into a dead end with no explanation, while
+ * showing `my-box (Exited (0) 2 days ago)` says exactly what to fix.
+ */
+export async function listDockerContainers(
+  docker: Pick<SessionDocker, 'engine' | 'context' | 'daemonHost'>
+): Promise<DockerContainerInfo[]> {
+  if (IS_TEST_MODE) return [];
+  const argv = dockerEngineArgv(docker);
+  try {
+    const { stdout } = await execFileAsync(
+      argv[0],
+      [...argv.slice(1), 'ps', '-a', '--format', '{{.Names}}\t{{.Image}}\t{{.State}}\t{{.Status}}'],
+      { timeout: DOCKER_PROBE_TIMEOUT_MS }
+    );
+    const rows = stdout
+      .split('\n')
+      .map((line) => line.split('\t'))
+      .filter((parts) => parts.length >= 4 && parts[0])
+      .map(([name, image, state, status]) => ({
+        name,
+        image: image || '',
+        running: state === 'running',
+        status: status || '',
+      }));
+    // Running first, then by name, so the containers a user can actually adopt
+    // are the ones at the top of the list.
+    return rows.sort((a, b) => Number(b.running) - Number(a.running) || a.name.localeCompare(b.name));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Preflight an EXISTING container for adoption. Read-only by construction: it
+ * runs `inspect` plus one `exec` of `command -v`, and never creates, starts or
+ * modifies anything. Refusing here is what keeps the failure at link time — a
+ * clear message — instead of at session launch, where the only alternatives
+ * would be a dead pane or starting a container we do not own.
+ *
+ * `--pull=never` is irrelevant here: adoption never touches images. The image
+ * ref is reported only so the UI can show what the user is attaching to.
+ */
+export async function probeAdoptableContainer(
+  docker: Pick<SessionDocker, 'engine' | 'context' | 'daemonHost' | 'containerName'>,
+  modes: SessionMode[] = [],
+  containerWorkdir?: string
+): Promise<AdoptedContainerProbe> {
+  if (IS_TEST_MODE) {
+    return {
+      ok: true,
+      exists: true,
+      running: true,
+      tmuxPath: '/usr/bin/tmux',
+      availableModes: modes,
+      workdirExists: true,
+    };
+  }
+  const argv = dockerEngineArgv(docker);
+  let running = false;
+  let image: string | undefined;
+  try {
+    const { stdout } = await execFileAsync(
+      argv[0],
+      [...argv.slice(1), 'inspect', '-f', '{{.State.Running}}\t{{.Config.Image}}', docker.containerName],
+      { timeout: DOCKER_PROBE_TIMEOUT_MS }
+    );
+    const [state = '', img = ''] = stdout.trim().split('\t');
+    running = state === 'true';
+    image = img || undefined;
+  } catch {
+    return {
+      ok: false,
+      exists: false,
+      running: false,
+      error: `container "${docker.containerName}" not found (adoption never creates a container — start it yourself first)`,
+    };
+  }
+  if (!running) {
+    return {
+      ok: false,
+      exists: true,
+      running: false,
+      image,
+      error: `container "${docker.containerName}" exists but is not running (Reverie never starts a container it does not own — start it yourself, then retry)`,
+    };
+  }
+  // One exec resolves tmux plus every requested CLI, so adoption costs a single
+  // round trip. Binaries are fixed mode names, never user input.
+  // A mode with no binary of its own (`shell`) is dropped: there is nothing to look up,
+  // and `command -v ''` would make the whole probe meaningless.
+  const wanted = modes.filter((m) => !!containerBinaryFor(m));
+  const probes = ['tmux', ...wanted.map((m) => containerBinaryFor(m) as string)];
+  // `; exit 0` is load-bearing: the script's status is its LAST command's, so a
+  // missing final CLI made the whole `sh -lc` exit 1 and the probe reported
+  // "could not exec into the container" for a container that was perfectly fine.
+  // Absence of a CLI is data here, not failure — only a real exec error is.
+  const steps = probes.map((bin) => `command -v ${bin} >/dev/null 2>&1 && echo ${bin}`);
+  // The workdir is checked INSIDE the container, and that is a fact independent
+  // of hostWorkspacePath: an owned container gets the host dir bind-mounted at the
+  // same absolute path at create time, but adoption mounts nothing, so the two
+  // paths only coincide if the user mounted it there themselves. `docker exec
+  // --workdir <missing>` fails with an OCI chdir error the pane surfaces as a bare
+  // "execvp failed", so it is resolved here into an actionable message.
+  if (containerWorkdir) steps.push(`[ -d ${shellescape(containerWorkdir)} ] && echo __workdir__`);
+  // Claude Code REFUSES --dangerously-skip-permissions as root. Our own base
+  // image runs a non-root user so an owned container never hits it; an adopted
+  // container's user belongs to its owner and is frequently root.
+  steps.push(`[ "$(id -u)" = 0 ] && echo __root__`);
+  const script = `${steps.join('; ')}; exit 0`;
+  try {
+    const { stdout } = await execFileAsync(
+      argv[0],
+      [...argv.slice(1), 'exec', docker.containerName, 'sh', '-lc', script],
+      { timeout: DOCKER_PROBE_TIMEOUT_MS }
+    );
+    const found = new Set(
+      stdout
+        .split('\n')
+        .map((line) => line.trim())
+        .filter(Boolean)
+    );
+    if (!found.has('tmux')) {
+      return {
+        ok: false,
+        exists: true,
+        running: true,
+        image,
+        error: `container "${docker.containerName}" has no tmux (required for durable sessions; install it inside the container)`,
+      };
+    }
+    const workdirExists = containerWorkdir ? found.has('__workdir__') : undefined;
+    if (containerWorkdir && !workdirExists) {
+      return {
+        ok: false,
+        exists: true,
+        running: true,
+        image,
+        workdirExists: false,
+        error: `"${containerWorkdir}" does not exist inside container "${docker.containerName}". Adoption mounts nothing, so the container workdir must already exist there — set it to a path inside the container (it need not match the host workspace path).`,
+      };
+    }
+    return {
+      ok: true,
+      exists: true,
+      running: true,
+      image,
+      tmuxPath: 'tmux',
+      availableModes: modes.filter((m) => {
+        const bin = containerBinaryFor(m);
+        return bin ? found.has(bin) : true; // `shell` needs no binary
+      }),
+      workdirExists,
+      runsAsRoot: found.has('__root__'),
+    };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, exists: true, running: true, image, error: `could not exec into the container: ${msg}` };
+  }
+}
+
+/** One directory listing from INSIDE a container, shaped like the host picker's. */
+export interface DockerBrowseResult {
+  path: string;
+  parent: string | null;
+  entries: Array<{ name: string; path: string; type: 'directory' | 'file' }>;
+  error?: string;
+}
+
+/**
+ * List a directory INSIDE a container, for the adoption form's container-workdir
+ * picker. The host filesystem picker cannot serve this: the path lives in the
+ * container, and for an adopted container nothing is mounted at a matching host
+ * location, so the user would otherwise be typing a path blind.
+ *
+ * Read-only: one `ls` through `docker exec`, no writes, no lifecycle. The path
+ * is shell-escaped like every other value this module interpolates, and output
+ * is parsed as NUL-free lines with a leading type marker so a filename with
+ * spaces survives.
+ */
+export async function browseInContainer(
+  docker: Pick<SessionDocker, 'engine' | 'context' | 'daemonHost' | 'containerName'>,
+  path: string
+): Promise<DockerBrowseResult> {
+  const target = path && path.startsWith('/') ? path : '/';
+  const parent = target === '/' ? null : target.replace(/\/+$/, '').split('/').slice(0, -1).join('/') || '/';
+  if (IS_TEST_MODE) return { path: target, parent, entries: [] };
+  const argv = dockerEngineArgv(docker);
+  // `-p` marks directories with a trailing slash; `-A` shows dotfiles but not
+  // the . and .. entries the picker navigates with its own Up control.
+  const script = `cd ${shellescape(target)} 2>/dev/null && ls -Ap 2>/dev/null || echo __ERR__`;
+  try {
+    const { stdout } = await execFileAsync(
+      argv[0],
+      [...argv.slice(1), 'exec', docker.containerName, 'sh', '-lc', script],
+      { timeout: DOCKER_PROBE_TIMEOUT_MS, maxBuffer: 4 * 1024 * 1024 }
+    );
+    if (stdout.includes('__ERR__')) return { path: target, parent, entries: [], error: 'Not a readable directory' };
+    const base = target.endsWith('/') ? target : `${target}/`;
+    const entries = stdout
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .map((name) => {
+        const isDir = name.endsWith('/');
+        const clean = isDir ? name.slice(0, -1) : name;
+        return { name: clean, path: `${base}${clean}`, type: (isDir ? 'directory' : 'file') as 'directory' | 'file' };
+      })
+      .sort((a, b) => Number(b.type === 'directory') - Number(a.type === 'directory') || a.name.localeCompare(b.name));
+    return { path: target, parent, entries };
+  } catch (err) {
+    return { path: target, parent, entries: [], error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+/**
+ * Resolve the host's IP on the default docker bridge (the address a container
+ * reaches as `host.docker.internal`), so the server can bind a hooks-only listener
+ * there and in-container hooks can call back. Defaults to the conventional
+ * 172.17.0.1 when the inspect fails but docker is up; null when docker is absent.
+ * No-op canned value under VITEST.
+ */
+export async function detectDockerBridgeGateway(engine: DockerEngine = 'docker'): Promise<string | null> {
+  if (IS_TEST_MODE) return '172.17.0.1';
+  const bin = engine === 'podman' ? 'podman' : 'docker';
+  try {
+    const { stdout } = await execFileAsync(
+      bin,
+      ['network', 'inspect', 'bridge', '--format', '{{(index .IPAM.Config 0).Gateway}}'],
+      { timeout: DOCKER_PROBE_TIMEOUT_MS }
+    );
+    const ip = stdout.trim();
+    return /^\d{1,3}(\.\d{1,3}){3}$/.test(ip) ? ip : '172.17.0.1';
+  } catch {
+    return null; // docker not available — nothing to bind
+  }
+}
+
+/**
+ * Instance-scoped boot reaper: `docker rm -f` any MANAGED container that belongs
+ * to THIS instance (by the `reverie.instance` label) but whose case is no longer
+ * in `docker-cases.json`. The instance scoping is what stops a beta from reaping
+ * prod's containers (the cross-instance hazard). No-op under VITEST. Best-effort.
+ */
+export async function reapOrphanedDockerContainers(
+  configDir: string,
+  instance: string,
+  engine: DockerEngine = 'docker'
+): Promise<string[]> {
+  if (IS_TEST_MODE) return [];
+  const bin = engine === 'podman' ? 'podman' : 'docker';
+  let rows: Array<{ name: string; inst: string }> = [];
+  try {
+    const { stdout } = await execFileAsync(
+      bin,
+      [
+        'ps',
+        '-a',
+        '--filter',
+        'label=reverie.managed=1',
+        '--format',
+        '{{.Names}}\t{{index .Labels "reverie.instance"}}',
+      ],
+      { timeout: DOCKER_PROBE_TIMEOUT_MS }
+    );
+    rows = stdout
+      .split('\n')
+      .filter(Boolean)
+      .map((line) => {
+        const [name, inst = ''] = line.split('\t');
+        return { name, inst };
+      });
+  } catch {
+    return []; // daemon down / engine absent — nothing to reap
+  }
+  const cases = await readDockerCases(configDir);
+  const expected = new Set(cases.map((c) => c.container ?? dockerContainerName(c.name)));
+  // ADOPTED containers are never reapable, and this guard is deliberately
+  // independent of the two conditions that already cover them (we never applied
+  // the `reverie.managed=1` label filtered on above, and they are referenced by a
+  // live case so they are in `expected`). An adopted container is the user's
+  // property; it must survive even if a future edit narrows either condition.
+  const adopted = new Set(
+    cases.filter((item) => item.owned === false).map((item) => item.container ?? dockerContainerName(item.name))
+  );
+  const reaped: string[] = [];
+  for (const { name, inst } of rows) {
+    if (inst !== instance) continue; // only THIS instance's containers
+    if (adopted.has(name)) continue; // never reap a container we do not own
+    if (expected.has(name)) continue; // still referenced by a live case
+    try {
+      await execFileAsync(bin, ['rm', '-f', name], { timeout: DOCKER_PROBE_TIMEOUT_MS });
+      reaped.push(name);
+    } catch {
+      /* best-effort */
+    }
+  }
+  return reaped;
+}
+
+/**
+ * Read the IN-CONTAINER Claude CLI version (`docker exec <container> claude
+ * --version`). Feeds Session.cliVersion for docker sessions (the LOCAL claude
+ * would report the wrong version and disable trackpad wheel-forwarding, #154).
+ * Returns undefined on any failure. No-op under VITEST.
+ */
+export async function probeDockerCliVersion(
+  docker: Pick<SessionDocker, 'engine' | 'containerName' | 'context' | 'daemonHost'>,
+  mode: SessionMode
+): Promise<string | undefined> {
+  if (IS_TEST_MODE) return undefined;
+  // ⚠️ The MODE NAME IS NOT ALWAYS THE BINARY NAME — `antigravity` runs `agy`. This used
+  // to pass the mode straight through as the command, which would have probed a binary that
+  // does not exist. Only claude reaches this today (it is the one CLI with a version gate),
+  // so nothing was actually broken, but the registry is what makes it correct for the next
+  // CLI that needs a version.
+  const bin = getCli(mode)?.discovery.binaries[0];
+  if (!bin) return undefined; // `shell` has no binary of its own
+  const argv = dockerEngineArgv(docker);
+  try {
+    const { stdout } = await execFileAsync(
+      argv[0],
+      [...argv.slice(1), 'exec', docker.containerName, bin, '--version'],
+      {
+        timeout: DOCKER_PROBE_TIMEOUT_MS,
+      }
+    );
+    const match = stdout.trim().match(/\d+\.\d+\.\d+/);
+    return match ? match[0] : stdout.trim() || undefined;
+  } catch {
+    return undefined;
+  }
+}

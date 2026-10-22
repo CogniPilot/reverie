@@ -99,6 +99,6 @@ compare() {
 }
 echo "== Image contents vs. the rescued live copies"
 compare "$rescue/opt-reverie-python/site-packages/cto" "$opt/python/lib/python3.11/site-packages/reverie" reverie
-compare "$rescue/opt-console" "$opt/apps/console" console
+compare "$rescue/opt-console" "$opt/apps/web" console
 
 echo "Summary: $restored to restore, $kept already identical, $skipped skipped."

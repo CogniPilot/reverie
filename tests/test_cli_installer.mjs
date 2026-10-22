@@ -37,7 +37,7 @@ test('first start installs exact pins on persistent storage and matching version
   try {
     const first = f.run();
     assert.equal(first.status, 0, first.stderr);
-    assert.deepEqual(f.calls().map(args => args.at(-1)), ['@anthropic-ai/claude-code@2.1.284', '@openai/codex@0.146.0', 'opencode-ai@1.15.10']);
+    assert.deepEqual(f.calls().map(args => args.at(-1)), ['@anthropic-ai/claude-code@2.1.284', '@openai/codex@0.146.0', 'opencode-ai@1.19.3']);
     assert.ok(f.calls().every(args => args.includes(join(f.root,'data/tools'))));
     assert.ok(!first.stdout.includes('synthetic private diagnostic'));
     assert.equal(f.run().status, 0);
@@ -116,7 +116,7 @@ test('Nix OpenCode launches untouched baseline ELF through its loader before any
   const f = fixture();
   try {
     const loader = join(f.root, 'loader');
-    writeFileSync(loader, `#!${process.execPath}\nconsole.log('1.15.10');\n`, { mode: 0o700 });
+    writeFileSync(loader, `#!${process.execPath}\nconsole.log('1.19.3');\n`, { mode: 0o700 });
     const result = f.run({ REVERIE_INSTALL_CLIS: 'opencode', CREATE_NATIVE: '1', FAIL_POSTINSTALL: '1', REVERIE_ELF_INTERPRETER: loader, REVERIE_ELF_LIBRARY_PATH: '/nix/test/lib' });
     assert.equal(result.status, 0, result.stderr);
     assert.equal(JSON.parse(readFileSync(join(f.root,'data/tools/.install-opencode.json'))).state, 'ready');
