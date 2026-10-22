@@ -165,7 +165,11 @@ describe('permanent employee across three runtime replacements', () => {
   it('does not merge another employee merely because its name is also Worker', async () => {
     const hired = await employee();
     pane('different-employee');
-    const other = await employee('different-employee');
+    // Old stores can contain duplicate display names. Seed that persisted legacy
+    // state directly: new hires intentionally require distinct company names.
+    const other = { ...hired, id: 'legacy-other-employee', sessionId: 'different-employee' };
+    await companyStore.update(state => { state.employees.push(other); });
+    await companyStore.init();
     const room = chat.createRoom('other employee room', undefined);
     chat.addMember(room.id, 'different-employee');
     for (let i = 1; i <= 3; i++) await company.rebind(hired.id, undefined, `worker-${i}`);

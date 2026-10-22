@@ -90,6 +90,8 @@ export interface ExpertRouteDeps {
   /** Stop a session through the console's cleanup path (no history or data directories are removed). */
   stopSession(sessionId: string): Promise<void>;
   sessionExists(sessionId: string): boolean;
+  /** Current names in this company, for distinct template hires (identity stays the employee id). */
+  employeeNames(owner: string | undefined): string[];
   hireEmployee(input: {
     owner?: string;
     name: string;
@@ -358,10 +360,15 @@ export function registerExpertRoutes(app: FastifyInstance, deps: ExpertRouteDeps
           throw new ExpertError(`Active expert limit reached: ${active} of ${settings.maxActive}; retire one first`, 409);
         if (state.hires.length >= MAX_HIRE_RECORDS) throw new ExpertError('Hire record limit reached', 409);
 
+        const names = new Set(deps.employeeNames(owner).map(name => name.normalize('NFKC').toLowerCase()));
+        let employeeName = template.name;
+        for (let suffix = 2; names.has(employeeName.normalize('NFKC').toLowerCase()); suffix++) {
+          employeeName = `${template.name} ${suffix}`;
+        }
         const sessionId = await deps.createSession(req, {
           workingDir: body.workingDir,
           mode: body.mode ?? template.defaults.mode,
-          name: template.name,
+          name: employeeName,
           icon: template.icon,
           model: body.model ?? (body.mode && body.mode !== template.defaults.mode ? undefined : template.defaults.model),
           effort: body.effort ?? template.defaults.effort,
@@ -376,7 +383,7 @@ export function registerExpertRoutes(app: FastifyInstance, deps: ExpertRouteDeps
         try {
           const employee = await deps.hireEmployee({
             owner,
-            name: template.name,
+            name: employeeName,
             icon: template.icon,
             position: template.role,
             expertise: template.expertise.length ? template.expertise.slice(0, 12) : [template.role],
@@ -412,7 +419,7 @@ export function registerExpertRoutes(app: FastifyInstance, deps: ExpertRouteDeps
           try {
             await deps.postNotice(
               room,
-              `Expert hired: ${template.icon} ${template.name} (${template.role}) from template "${template.id}" by ${record.by}. ` +
+              `Expert hired: ${template.icon} ${employeeName} (${template.role}) from template "${template.id}" by ${record.by}. ` +
                 `Reason: ${flat(body.reason)}. Session ${sessionId}. ` +
                 (body.budgetStop
                   ? `Budget stop: plan ${body.budgetStop.planId} at ${body.budgetStop.weeklyPercent}% weekly. `

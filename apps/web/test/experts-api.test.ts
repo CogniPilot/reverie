@@ -102,6 +102,7 @@ describe('experts api', () => {
         sessions.delete(id);
       },
       sessionExists: (id) => sessions.has(id),
+      employeeNames: (owner) => company.view(owner).employees.map(employee => employee.name),
       hireEmployee: (input) => company.hire({ ...input, researchEnabled: false }),
       inviteEmployee: (employeeId, roomId, owner) => void company.invite(employeeId, roomId, owner),
       removeEmployee: async (employeeId) => {
@@ -335,6 +336,19 @@ describe('experts api', () => {
           detail: expect.objectContaining({ template: 'alpha', sessionId, by: 'owner' }),
         }),
       ]);
+    });
+
+    it('disambiguates repeated template hires against actual company names before launch, preserving stable identities', async () => {
+      await setSettings({ maxHiresPerDay: 10, maxActive: 10 });
+      const first = (await hire('alpha')).json().data;
+      await company.hire({ name: 'ALPHA 2', icon: 'A', position: 'Existing colleague', expertise: ['Testing'], sessionId: OTHER_AGENT, researchEnabled: false });
+      const second = (await hire('alpha')).json().data;
+      const third = (await hire('alpha')).json().data;
+      expect(launches.map(launch => launch.name)).toEqual(['Alpha', 'Alpha 3', 'Alpha 4']);
+      expect(company.view().employees.map(employee => employee.name)).toEqual(['Alpha', 'ALPHA 2', 'Alpha 3', 'Alpha 4']);
+      expect(new Set([first.employeeId, second.employeeId, third.employeeId]).size).toBe(3);
+      expect((await state()).hires.map((record: any) => record.templateId)).toEqual(['alpha', 'alpha', 'alpha']);
+      expect(rooms.get(noticeRoom)!.messages.at(-1)?.text).toContain('Alpha 4');
     });
 
     it('lets a listed delegate hire and refuses an unlisted or unknown agent', async () => {

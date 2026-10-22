@@ -1822,6 +1822,7 @@ export class WebServer extends EventEmitter {
       },
       stopSession: (id) => this.cleanupSession(id, true, 'expert_retire'),
       sessionExists: (id) => this.sessions.has(id),
+      employeeNames: (owner) => company.view(owner).employees.map(employee => employee.name),
       // Nightly research stays off: putting an expert on a schedule is a separate owner step.
       hireEmployee: (input) => company.hire({ ...input, researchEnabled: false }),
       inviteEmployee: (employeeId, roomId, owner) => void company.invite(employeeId, roomId, owner),
