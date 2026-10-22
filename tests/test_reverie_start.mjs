@@ -16,7 +16,7 @@ function fixture(t) {
     writeFileSync(file, '#!' + process.execPath + '\n' +
       "const fs=require('node:fs'); const a=process.argv.slice(2); fs.appendFileSync(process.env.CALLS,JSON.stringify([process.env.TOOL,a])+'\\n');" +
       (name === 'nix' ? "console.log('/nix/store/example-image.tar');" :
-        "if(a[0]==='inspect'){if(process.env.INSPECT){console.log(process.env.INSPECT)}else process.exit(1)}"));
+        "if(a[0]==='inspect'){if(process.env.INSPECT){console.log(process.env.INSPECT)}else if(a.includes('--type'))process.exit(1);else console.log(JSON.stringify({Id:'existing-image',Config:{}}))}"));
     // Each stub embeds its own tool identity without invoking a shell.
     writeFileSync(file, readFileSync(file, 'utf8').replace('process.env.TOOL', JSON.stringify(name)));
     chmodSync(file, 0o755);
@@ -28,7 +28,7 @@ function fixture(t) {
   const calls = () => existsSync(log) ? readFileSync(log, 'utf8').trim().split('\n').filter(Boolean).map(JSON.parse) : [];
   return { root, home, deploy, run, calls };
 }
-test('first start contains company state, workspace and scratch with no source or control mount', t => {
+test('first start with an existing image contains company state, workspace and scratch without source or control access', t => {
   const f = fixture(t), result = f.run();
   assert.equal(result.status, 0, result.stderr);
   const config = JSON.parse(readFileSync(join(f.deploy, 'deployment.json'), 'utf8'));

@@ -53,7 +53,7 @@ function main() {
   const uid = process.getuid(), gid = process.getgid();
   if (uid === 0) fail('Run as the ordinary host owner, without sudo.');
   const signature = createHash('sha256').update(JSON.stringify({ config, source, updates, uid, gid })).digest('hex');
-  const inspected = run('docker', ['inspect', '--format', '{{json .}}', config.containerName], true);
+  const inspected = run('docker', ['inspect', '--type', 'container', '--format', '{{json .}}', config.containerName], true);
   if (inspected.status === 0) {
     const container = JSON.parse(inspected.stdout);
     if (container.Config?.Labels?.['reverie.deployment'] !== signature) fail('Existing container differs from this deployment. Preserve it and choose another containerName; nothing was replaced.');
