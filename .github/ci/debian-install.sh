@@ -22,7 +22,7 @@ PY
 su - installer -c 'bash /home/installer/step-0.sh'
 # Containers have no systemd. This is the only infrastructure substitution;
 # the packaged Debian daemon and client run entirely inside this container.
-dockerd --storage-driver=vfs > /tmp/dockerd.log 2>&1 &
+dockerd > /tmp/dockerd.log 2>&1 &
 daemon_pid=$!
 trap 'docker rm -f reverie >/dev/null 2>&1 || true; kill "$daemon_pid" 2>/dev/null || true' EXIT
 ready=0
@@ -31,6 +31,12 @@ for _ in $(seq 1 60); do
   sleep 1
 done
 [ "$ready" = 1 ] || { cat /tmp/dockerd.log; exit 1; }
+# The runner bind-mount supplies ordinary filesystem storage for overlay2.
+# Refuse a fallback to vfs, whose full-layer copies exhausted the CI disk.
+driver=$(docker info --format '{{.Driver}}')
+echo "Debian Docker storage driver: $driver"
+[ "$driver" = overlay2 ] || { cat /tmp/dockerd.log; exit 1; }
+df -h / /var/lib/docker
 # Fresh login picks up the group; no curl installed, exercising setup's TCP fallback.
 su - installer -c 'bash /home/installer/step-1.sh'
 test "$(docker exec reverie curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3000/api/status)" = 401

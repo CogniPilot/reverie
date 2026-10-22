@@ -249,9 +249,19 @@ jobs:
         with:
           name: offline-bundle
           path: bundle
+      - name: Free runner space and prepare Debian Docker storage
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup
+          docker image prune --all --force
+          sudo mkdir -p /mnt/debian-docker
+          df -h / /mnt/debian-docker
       - name: Install the bundle on Debian 12 with its own Docker daemon
         run: |
-          docker run --rm --privileged --volume "$PWD/bundle:/input:ro" --volume "$PWD/.github/ci:/ci:ro" debian:12 bash /ci/debian-install.sh
+          docker run --rm --privileged \
+            --volume /mnt/debian-docker:/var/lib/docker \
+            --volume "$PWD/bundle:/input:ro" \
+            --volume "$PWD/.github/ci:/ci:ro" \
+            debian:12 bash /ci/debian-install.sh
 
   release-assets:
     needs: [image, debian-install]
