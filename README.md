@@ -92,6 +92,36 @@ container deployment requires a running Docker engine. Its image is built by Nix
 there is no separate Dockerfile build. For manual image loading or published
 images, see [image installation](docs/image.md).
 
+## Access over Tailscale
+
+Install and sign in to [Tailscale](https://tailscale.com/download/) on the host and
+on devices that need access. Keep Reverie listening at `http://127.0.0.1:3000`,
+then run on the host:
+
+~~~bash
+sudo tailscale serve --bg --https=443 http://127.0.0.1:3000
+tailscale serve status
+~~~
+
+Open the HTTPS address printed by Serve, such as
+`https://your-machine.your-tailnet.ts.net`. Port 443 needs no port suffix. Serve
+manages HTTPS and background mode survives host restarts; enable tailnet HTTPS
+certificates if Tailscale prompts you. Sign in with your Reverie owner account.
+Access remains limited to devices and people permitted by your Tailscale policy.
+See the [Tailscale Serve documentation](https://tailscale.com/docs/reference/tailscale-cli/serve).
+
+If port 443 already serves another app, review `tailscale serve status` before
+replacing it. To deliberately discard all old Serve/Funnel routes, run
+`sudo tailscale serve reset`, then run the Serve command above. To keep other apps,
+choose an unused HTTPS port instead and include it in the address.
+
+For embassies, enter this same HTTPS origin in **Embassies → Invite a company →
+Shareable HTTPS address**. The other company must be able to reach this host through
+Tailscale, using a permitted tailnet membership or shared device. An invitation
+still requires explicit pairing approval; it does not grant company administration.
+Serve is private to Tailscale; public internet hosting through Funnel is a separate
+choice.
+
 ## Code and instance data
 
 Keep the clone shareable. REVERIE_ROOT defaults to ~/reverie; setting it selects another

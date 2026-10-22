@@ -56,6 +56,9 @@ Add --allow-updates only when you also configure the owner-controlled host updat
 this exposes only its request directory, not a Docker socket or host configuration.
 Use --root /absolute/path to select another contained deployment directory.
 
+For private HTTPS access on port 443 and the Embassy address, see
+[Access over Tailscale](../README.md#access-over-tailscale).
+
 ## Keeping the runtime available
 
 The native command `reverie service install --host 127.0.0.1 --port 3000` installs
@@ -82,7 +85,8 @@ They begin as fresh container storage; no host configuration is mounted or resto
 ## Requesting a reproducible image update
 
 When the owner enables the host update service, agents can edit the mounted source
-at `/workspace` and run `reverie-request-update`. This touches only
+through their explicitly granted project link (for example `/reverie_workspace/reverie`)
+and run `reverie-request-update`. This touches only
 `/run/reverie-control/update.request`; it supplies no shell command and needs no
 Docker socket inside the container.
 
