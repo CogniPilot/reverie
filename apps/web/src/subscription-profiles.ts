@@ -6,6 +6,7 @@ import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { getDataDir } from './config/instance.js';
 import { getCli, listClis } from './config/cli-registry/registry.js';
+import { ensureOpenCodeSubscriptionAuth } from './opencode-subscription-auth.js';
 
 export const subscriptionProviderSchema = z.enum(['anthropic', 'openai']);
 export type SubscriptionProvider = z.infer<typeof subscriptionProviderSchema>;
@@ -232,29 +233,7 @@ export async function selectedSubscription(
   const profile = (await readSubscriptionProfiles()).find((p) => p.id === id);
   if (!profile) throw new Error('The selected account profile no longer exists');
   if (profile.provider === 'openai' && subscriptionBinding(mode, profile.provider) === 'opencode') {
-    const readAccount = async (path: string): Promise<unknown> => {
-      try {
-        return JSON.parse(await fs.readFile(path, 'utf8'));
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
-        throw new Error('Account login data could not be read. Sign in again.');
-      }
-    };
-    const native = (await readAccount(join(profile.configDir, 'auth.json'))) as {
-      tokens?: { account_id?: string };
-    } | null;
-    const openCode = (await readAccount(join(profile.openCodeDataDir, 'opencode/auth.json'))) as {
-      openai?: { accountId?: string };
-    } | null;
-    if (
-      native?.tokens?.account_id &&
-      openCode?.openai?.accountId &&
-      native.tokens.account_id !== openCode.openai.accountId
-    ) {
-      throw new Error(
-        'Codex CLI and OpenCode are signed into different accounts for this profile. Sign both into the same account.'
-      );
-    }
+    await ensureOpenCodeSubscriptionAuth(profile);
   }
   return {
     selection: { id: profile.id, label: profile.label, provider: profile.provider },

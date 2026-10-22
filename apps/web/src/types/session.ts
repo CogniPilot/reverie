@@ -782,6 +782,8 @@ export interface PromptCacheStatus {
 export type StatusLineExporter = 'injected' | 'collection-off' | 'workspace-statusline' | 'remote';
 
 export interface SessionState {
+  /** Native conversation bindings by account/endpoint and harness; never credential values. */
+  runtimeThreads?: Record<string, string>;
   /** Public account label; credential paths and tokens stay server-side. */
   subscriptionProfile?: { id: string; label: string; provider: 'anthropic' | 'openai' };
   /** Unique session identifier */

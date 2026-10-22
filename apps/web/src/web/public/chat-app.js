@@ -2303,6 +2303,10 @@ class ReverieChatApp {
           save.textContent = 'Save permissions';
           const controls = this.el('div', 'ca-company-person-controls');
           controls.append(label, save, this.button('ca-btn', `Edit profile for ${employee.name}`, () => this.openEmployeeProfile(employee, paint), { text: 'Edit profile' }));
+          const restart = this.button('ca-btn', `Restart session for ${employee.name}`, () => this.openEmployeeRestart(employee, paint), { text: 'Restart session' });
+          restart.disabled = employee.onVacation === true;
+          if (restart.disabled) restart.title = 'Return this expert from vacation before restarting.';
+          controls.append(restart);
           card.append(controls);
           const lifecycle = this.el('div', 'ca-company-actions');
           const lifecycleError = this.el('p', 'ca-company-error');
@@ -2385,7 +2389,7 @@ class ReverieChatApp {
       chart.append(tree);
       if (!employees.length) chart.append(this.el('p', 'ca-hint', 'No permanent team members yet.'));
       const people = this.el('section', 'ca-company-people');
-      people.append(this.el('h3', '', `People · ${employees.length}`), this.el('p', 'ca-hint', "Ring = today's issues done of planned. Receipts are checkable facts, not claims."), chart);
+      people.append(this.el('h3', '', `People · ${employees.length}`), chart);
       if (manage) {
         const recovery = this.el('form', 'ca-company-form ca-company-recovery');
         recovery.append(this.el('h3', '', 'Crash recovery'));
@@ -2462,7 +2466,7 @@ class ReverieChatApp {
       section.hidden = true; section.id = 'ca-company-hire';
       const hire = this.button('ca-btn is-primary', 'Hire', () => { section.hidden = !section.hidden; hire.setAttribute('aria-expanded', String(!section.hidden)); if (!section.hidden) { section.scrollIntoView({ block: 'nearest' }); plan.focus(); } }, { text: '+ Hire' });
       hire.setAttribute('aria-expanded', 'false'); hire.setAttribute('aria-controls', section.id); head.insertBefore(hire, head.lastElementChild);
-      section.append(this.el('h3', '', 'Hire an agent'), this.el('p', 'ca-hint', 'Create a permanent expert with its own memory. Choose a plan or local model profile, then its harness, model and effort.'));
+      section.append(this.el('h3', '', 'Hire an agent'), this.el('p', 'ca-hint', 'Create a permanent expert with its own memory. Choose a plan and harness. Model and effort use the defaults and can be changed later in Runtime settings.'));
       const form = this.el('form', 'ca-company-form');
       const field = (name, label, tag = 'input') => {
         const wrap = this.el('label', 'ca-label'); wrap.append(this.el('span', 'ca-label-text', label));
@@ -2481,27 +2485,15 @@ class ReverieChatApp {
       }
       plan.disabled = !sources.some(source => source.modes?.length);
       const harness = field('mode', 'Harness', 'select'); harness.required = true;
-      const model = field('model', 'Model'); model.maxLength = 100;
-      const models = this.el('datalist'); models.id = 'ca-hire-models'; model.setAttribute('list', models.id); form.append(models);
-      const effort = field('effort', 'Effort', 'select');
       const selectedSource = () => sources.find((source) => `${source.kind}:${source.id}` === plan.value);
-      const updateEffort = (preserve = false) => {
-        const previous = effort.value;
-        effort.replaceChildren();
-        const fallback = this.el('option', '', 'Harness default'); fallback.value = ''; effort.append(fallback);
-        const values = harnesses.find((h) => h.id === harness.value)?.efforts || [];
-        for (const value of values) { const option = this.el('option', '', value); option.value = value; effort.append(option); }
-        if (preserve && values.includes(previous)) effort.value = previous;
-        effort.disabled = !values.length;
-      };
       const updatePlan = (preserve = false) => {
         const source = selectedSource();
-        const previous = harness.value;
+        const previous = preserve ? harness.value : source?.defaultMode || source?.modes?.[0];
         if (preserve && !source) {
-          harness.disabled = true; effort.disabled = true; models.replaceChildren(); model.required = false;
+          harness.disabled = true;
           return;
         }
-        harness.replaceChildren(); models.replaceChildren();
+        harness.replaceChildren();
         for (const id of source?.modes || []) {
           const entry = harnesses.find((h) => h.id === id);
           if (!entry) continue;
@@ -2509,13 +2501,8 @@ class ReverieChatApp {
         }
         if ([...harness.options].some((option) => option.value === previous)) harness.value = previous;
         harness.disabled = !harness.options.length;
-        if (!preserve) model.value = source?.defaultModel || '';
-        model.required = source?.kind === 'local';
-        model.placeholder = source?.kind === 'local' ? 'Choose a saved model' : 'Leave empty for the harness default';
-        for (const id of source?.models || []) { const option = this.el('option'); option.value = id; models.append(option); }
-        updateEffort(preserve);
       };
-      plan.addEventListener('change', () => updatePlan(false)); harness.addEventListener('change', () => updateEffort(false)); updatePlan();
+      plan.addEventListener('change', () => updatePlan(false)); updatePlan();
       const name = field('name', 'Name'); name.required = true; name.maxLength = 100;
       const pronouns = field('pronouns', 'Pronouns (optional)'); pronouns.maxLength = 24; pronouns.placeholder = 'e.g. they/them';
       const voice = this.expertVoiceFields(form, pronouns, name);
@@ -2564,7 +2551,7 @@ class ReverieChatApp {
         saving = true; submit.disabled = true; error.textContent = '';
         const source = selectedSource();
         if (!source || !harness.value) { saving = false; submit.disabled = false; error.textContent = 'Choose a plan and a compatible harness.'; return; }
-        const payload = { source: source.kind === 'local' ? { kind: 'local', endpointId: source.id } : { kind: 'subscription', profileId: source.id }, mode: harness.value, ...(model.value.trim() ? { model: model.value.trim() } : {}), ...(effort.value ? { effort: effort.value } : {}), name: name.value.trim(), icon: this.expertInitial(name.value), ...(pronouns.value.trim() ? { pronouns: pronouns.value.trim() } : {}), ...(voice.value() ? { voice: voice.value() } : {}), position: position.value.trim(), expertise: skills, reportsTo: parent.value };
+        const payload = { source: source.kind === 'local' ? { kind: 'local', endpointId: source.id } : { kind: 'subscription', profileId: source.id }, mode: harness.value, name: name.value.trim(), icon: this.expertInitial(name.value), ...(pronouns.value.trim() ? { pronouns: pronouns.value.trim() } : {}), ...(voice.value() ? { voice: voice.value() } : {}), position: position.value.trim(), expertise: skills, reportsTo: parent.value };
         try {
           const result = await this.app._chatApi('/api/company/hire', { method: 'POST', body: payload });
           if (!result.ok) { error.textContent = result.error || 'Could not hire this agent.'; return; }
@@ -5067,20 +5054,13 @@ class ReverieChatApp {
     const remove = manage || own;
     const entries = [
       { label: 'Profile', run: () => this.openProfile(m, anchor) },
-      { label: 'Mention', run: () => {
-        const input = this.app._chatEls?.input;
-        if (!input) return;
-        const start = input.selectionStart ?? input.value.length;
-        const end = input.selectionEnd ?? start;
-        const prefix = start && !/\s$/.test(input.value.slice(0, start)) ? ' ' : '';
-        const text = `${prefix}@${m.name} `;
-        input.setRangeText(text, start, end, 'end');
-        input.focus();
-        input.dispatchEvent(new this.doc.defaultView.Event('input', { bubbles: true }));
-      } },
     ];
     if (this.serverFeatures.dms && !caIsDm(this.room)) {
       entries.push({ label: 'Message', run: () => this.startDm(m.sessionId) });
+    }
+    const employee = this.company?.employees?.find(entry => entry.sessionId === m.sessionId);
+    if (!this.app._chatSelf && employee && this.company?.canManage === true && this.phoneStatus?.self === 'owner' && this.phoneStatus?.canSetOwn === true) {
+      entries.push({ label: 'Restart session', disabled: employee.onVacation === true, reason: employee.onVacation ? 'Return this expert from vacation before restarting' : '', run: () => this.openEmployeeRestart(employee) });
     }
     if (!caIsDm(this.room)) {
       entries.push(
@@ -5229,7 +5209,7 @@ class ReverieChatApp {
     top.append(this.app._chatAvatar(m.sessionId, m.name, { size: 'md', state: this.presenceOf(m) }));
     const names = this.el('div', 'ca-profile-names');
     names.append(this.literalText('strong', '', m.name));
-    const tags = [m.role === 'coordinator' ? 'Admin' : 'Member', m.mode, CA_STATE_LABEL[this.presenceOf(m)]].filter(Boolean).join(' · ');
+    const tags = [m.role === 'coordinator' ? 'Admin' : 'Member', CA_STATE_LABEL[this.presenceOf(m)]].filter(Boolean).join(' · ');
     names.append(this.el('span', 'ca-profile-sub', tags));
     // Who they are in the company: position and the owner-set pronouns, from the employee record.
     const employee = (Array.isArray(this.company?.employees) ? this.company.employees : []).find((e) => e?.sessionId === m.sessionId);
@@ -5238,30 +5218,32 @@ class ReverieChatApp {
     if (who) names.append(this.literalText('span', 'ca-profile-sub ca-profile-who', who));
     top.append(names);
     card.append(top);
-    const kv = (k, v) => {
+    const technical = this.profileSection('Technical details');
+    technical.classList.add('ca-profile-technical');
+    const diagnosticLabel = label => label === 'Backend' ? 'Harness' : label === 'Account' ? 'Plan' : label;
+    const kv = (k, v, target = card) => {
       if (!v) return;
       const row = this.el('div', 'ca-kv');
-      row.append(this.el('span', 'ca-k', k), this.el('span', 'ca-v', v));
-      card.append(row);
+      row.append(this.el('span', 'ca-k', diagnosticLabel(k)), this.el('span', 'ca-v', v));
+      target.append(row);
     };
     const session = this.app.sessions?.get?.(m.sessionId);
     const facts = caAgentFacts(session);
-    // What it runs on, up top: the model it reports and its effort level.
-    for (const [k, v] of facts.headline) kv(k, v);
+    for (const [k, v] of facts.headline) kv(k, v, technical);
     kv('Goal', m.goal);
     kv('Progress', m.progress ? `${m.progress}${m.updatedAt ? ` · ${this.app._chatAgo(m.updatedAt)}` : ''}` : '');
-    if (this.serverFeatures.notify && !caIsDm(this.room)) kv('Wakes on', m.notify === 'mentions' ? 'Only @mentions, replies and you' : 'What the room says');
+    if (this.serverFeatures.notify && !caIsDm(this.room)) kv('Wakes on', m.notify === 'mentions' ? 'Only @mentions, replies and you' : 'What the room says', technical);
     // What the page already knows is shown at once; the runtime's fuller profile replaces it when it arrives.
     const local = this.el('div', 'ca-profile-local');
     const full = this.el('div', 'ca-profile-full');
     full.setAttribute('aria-live', 'polite');
-    card.append(local, full);
+    technical.append(local, full);
     const section = (title, rows) => {
       if (!rows.length) return;
       const group = this.profileSection(title);
       for (const [k, v] of rows) {
         const row = this.el('div', 'ca-kv');
-        row.append(this.el('span', 'ca-k', k), this.el('span', 'ca-v', v));
+        row.append(this.el('span', 'ca-k', diagnosticLabel(k)), this.el('span', 'ca-v', v));
         group.append(row);
       }
       local.append(group);
@@ -5275,6 +5257,7 @@ class ReverieChatApp {
       ]);
     }
     const actions = this.el('div', 'ca-profile-actions');
+    let actionHost = actions;
     const manage = this.canManageMembers(this.room);
     const own = this.app._chatSelf === m.sessionId;
     const act = (label, fn, primary, tip, reason = '') => {
@@ -5288,9 +5271,18 @@ class ReverieChatApp {
       });
       item.append(b);
       if (tip) this.describeButton(item, b, reason || tip);
-      actions.append(item);
+      actionHost.append(item);
     };
     if (this.serverFeatures.dms && !caIsDm(this.room)) act('Message', () => this.startDm(m.sessionId), true, 'Start a private chat with this agent');
+    if (!this.app._chatSelf && employee && this.company?.canManage === true && this.phoneStatus?.self === 'owner' && this.phoneStatus?.canSetOwn === true) {
+      act('Runtime settings', () => this.openRuntimeSettings(employee), false, 'Change this expert’s plan, harness, model and effort');
+      act('Edit profile', () => this.openEmployeeProfile(employee, () => {
+        this._profilesAt = 0;
+        this.refreshProfiles();
+      }), false, 'Edit this expert’s picture and optional profile details');
+      act('Restart session', () => this.openEmployeeRestart(employee), false, 'Restart this expert’s session while keeping their identity and channels', employee.onVacation ? 'Return this expert from vacation before restarting' : '');
+    }
+    const secondary = this.el('div', 'ca-profile-secondary'); actions.append(secondary); actionHost = secondary;
     if (this.app.sessions?.has?.(m.sessionId)) act('Debug terminal', () => this.showDebug(m.sessionId), false, "Open this agent's live terminal");
     if (!caIsDm(this.room)) {
       if (m.role !== 'coordinator') act('Make lead', () => this.app._appointChatCoordinator(m.sessionId), false, 'Change the room coordinator seat', !this.canAppointLead(this.room) ? 'Only the owner or a server Admin can change the channel lead' : '');
@@ -5299,12 +5291,6 @@ class ReverieChatApp {
         act('Move to new session', () => this.openReplaceDialog(m), false, "Give this offline agent's place in every room to its new session");
       }
       act('Remove from channel', () => this.app._removeChatMember(m), false, 'Take this agent out of this channel', !manage && !own ? 'Only the user or channel lead can remove another member' : '');
-    }
-    if (!this.app._chatSelf && employee && this.company?.canManage === true && this.phoneStatus?.self === 'owner' && this.phoneStatus?.canSetOwn === true) {
-      act('Edit profile', () => this.openEmployeeProfile(employee, () => {
-        this._profilesAt = 0;
-        this.refreshProfiles();
-      }), false, 'Edit this expert’s picture and optional profile details');
     }
     // Hover has no touch equivalent, so on a touch screen an (i) toggle shows each button's one-liner under it.
     if (this.doc.defaultView?.matchMedia?.('(hover: none)')?.matches) {
@@ -5315,7 +5301,7 @@ class ReverieChatApp {
       toggle.setAttribute('aria-pressed', 'false');
       card.append(toggle);
     }
-    card.append(actions);
+    card.append(actions, technical);
     this.presentCard(card, anchor);
     this.loadAgentProfile(m, card, local, full);
   }
@@ -5345,7 +5331,8 @@ class ReverieChatApp {
     const res = await this.app._chatApi(`/api/agents/${encodeURIComponent(m.sessionId)}/profile`);
     if (!card.isConnected) return;
     if (!res.ok) {
-      full.replaceChildren(this.el('p', 'ca-hint', `The full profile is not available: ${res.error}`));
+      if (this.company?.employees?.some(employee => employee.sessionId === m.sessionId)) { full.replaceChildren(); return; }
+      full.replaceChildren(this.el('p', 'ca-hint', 'The technical profile is unavailable.'));
       return;
     }
     const profile = caAgentProfile(res.data);
@@ -5356,20 +5343,20 @@ class ReverieChatApp {
       if (head) about.append(this.el('p', 'ca-persona-head', head));
       if (profile.persona.text) about.append(this.el('p', 'ca-persona', profile.persona.text));
       full.append(about);
-    } else if (profile.personaError) {
-      full.append(this.el('p', 'ca-hint', `About: ${profile.personaError}`));
+    } else if (profile.personaError && !this.company?.employees?.some(employee => employee.sessionId === m.sessionId)) {
+      full.append(this.el('p', 'ca-hint', 'Personality details are unavailable.'));
     }
     for (const sec of profile.sections) {
       const group = this.profileSection(sec.title === 'Channels' ? `Channels · in ${sec.rows.length} channels` : sec.title);
       for (const [k, v] of sec.rows) {
         const row = this.el('div', 'ca-kv');
-        row.append(this.el('span', 'ca-k', k), sec.title === 'Role' ? this.literalText('span', 'ca-v', v) : this.el('span', 'ca-v', v));
+        row.append(this.el('span', 'ca-k', k === 'Backend' ? 'Harness' : k === 'Account' ? 'Plan' : k), sec.title === 'Role' ? this.literalText('span', 'ca-v', v) : this.el('span', 'ca-v', v));
         group.append(row);
       }
       full.append(group);
     }
-    if (profile.switchInfo && !this.app._chatSelf) {
-      const group = this.profileSection('Backend switch');
+    if (profile.switchInfo && !this.app._chatSelf && !this.company?.employees?.some(employee => employee.sessionId === m.sessionId)) {
+      const group = this.profileSection('Harness switch');
       group.append(this.switchEl(profile.switchInfo));
       full.append(group);
     }
@@ -5379,9 +5366,9 @@ class ReverieChatApp {
   /** The backend switch: shown, and disabled with the runtime's own reason while switching is not available. */
   switchEl(info) {
     const box = this.el('div', 'ca-switch');
-    box.append(this.el('h3', 'ca-profile-section', 'Backend'));
+    box.append(this.el('h3', 'ca-profile-section', 'Harness'));
     const label = this.el('label', 'ca-label');
-    label.append(this.el('span', '', 'Switch backend'));
+    label.append(this.el('span', '', 'Switch harness'));
     const sel = this.el('select', 'ca-field');
     sel.disabled = !info.available;
     for (const b of info.backends) {
@@ -5658,11 +5645,140 @@ class ReverieChatApp {
     } catch { return false; }
   }
 
+  async openEmployeeRestart(employee, onSaved) {
+    const existing = this.doc.querySelector('.ca-employee-restart');
+    if (existing) { existing.querySelector('button')?.focus(); return; }
+    this._restartingEmployees ||= new Set();
+    if (this._restartingEmployees.has(employee.id)) return this.toast(`A restart is already in progress for ${employee.name}.`, 'info');
+    const dialog = this.el('dialog', 'ca-dialog ca-company-confirm ca-employee-restart');
+    dialog.setAttribute('aria-label', `Restart session: ${employee.name}`);
+    dialog.append(this.literalText('h2', '', `Restart session · ${employee.name}`), this.literalText('p', 'ca-dialog-note', `Restart ${employee.name} using their saved runtime settings? Their expert identity, memory and channel memberships stay the same. Wait for any current work to finish first.`));
+    const error = this.el('p', 'ca-company-error'); error.setAttribute('role', 'alert');
+    const status = this.el('p', 'ca-hint', 'Checking owner access…'); status.setAttribute('role', 'status');
+    const actions = this.el('div', 'ca-dialog-actions');
+    const cancel = this.button('ca-btn', 'Cancel', () => dialog.close(), { text: 'Cancel' }); cancel.autofocus = true;
+    const restart = this.button('ca-btn is-primary', 'Restart session', async () => {
+      if (restart.disabled || this._restartingEmployees.has(employee.id)) return;
+      this._restartingEmployees.add(employee.id); restart.disabled = true; error.textContent = ''; status.textContent = 'Restarting session…';
+      try {
+        const result = await this.app._chatApi(`/api/company/employees/${encodeURIComponent(employee.id)}/restart`, { method: 'POST', body: {} });
+        if (!result.ok) { error.textContent = result.error || 'The session could not restart. Check Runtime settings, then try again.'; status.textContent = ''; return; }
+        await this.loadOwner(); await onSaved?.(); dialog.close(); this.toast(`Session restarted for ${employee.name}.`, 'info');
+      } catch { error.textContent = 'The restart could not be confirmed. Check the expert’s status before trying again.'; status.textContent = ''; }
+      finally { this._restartingEmployees.delete(employee.id); restart.disabled = false; }
+    }, { text: 'Restart session' });
+    restart.disabled = true; actions.append(cancel, restart); dialog.append(status, error, actions);
+    dialog.addEventListener('cancel', event => { event.preventDefault(); dialog.close(); });
+    dialog.addEventListener('close', () => dialog.remove()); this.doc.body.append(dialog); dialog.showModal(); cancel.focus();
+    try {
+      const auth = await this.app._chatApi('/api/chatrooms/phone-status');
+      if (!dialog.isConnected) return;
+      status.textContent = '';
+      if (this.app._chatSelf || this.company?.canManage !== true || !auth.ok || auth.data?.self !== 'owner' || auth.data?.canSetOwn !== true) error.textContent = 'Sign in as the owner to restart this session.';
+      else if (employee.onVacation) error.textContent = 'Return this expert from vacation before restarting.';
+      else restart.disabled = false;
+    } catch { if (dialog.isConnected) { status.textContent = ''; error.textContent = 'Owner access could not be checked. Close this dialog and try again.'; } }
+  }
+
+  async openRuntimeSettings(employee, onSaved) {
+    const existing = this.doc.querySelector('.ca-runtime-settings');
+    if (existing) { existing.querySelector('button')?.focus(); return; }
+    const dialog = this.el('dialog', 'ca-dialog ca-runtime-settings');
+    dialog.setAttribute('aria-label', `Runtime settings: ${employee.name}`);
+    dialog.append(this.literalText('h2', '', `Runtime settings · ${employee.name}`), this.el('p', 'ca-dialog-note', 'Changes restart this expert’s runtime. Their identity, memory and channel memberships stay with them.'));
+    const status = this.el('p', 'ca-hint', 'Loading runtime settings…'); status.setAttribute('role', 'status');
+    const error = this.el('p', 'ca-company-error'); error.setAttribute('role', 'alert');
+    const body = this.el('div');
+    const close = this.button('ca-btn', 'Close runtime settings', () => dialog.close(), { text: 'Close' });
+    dialog.append(status, error, body, close);
+    dialog.addEventListener('close', () => { this._companyConfirm?.(false); dialog.remove(); });
+    this.doc.body.append(dialog); dialog.showModal(); close.focus();
+    try {
+      const path = `/api/sessions/${encodeURIComponent(employee.sessionId)}/runtime`;
+      const [runtime, options, auth] = await Promise.all([this.app._chatApi(path), this.app._chatApi('/api/company/hire-options'), this.app._chatApi('/api/chatrooms/phone-status')]);
+      if (!dialog.isConnected) return;
+      if (this.app._chatSelf || this.company?.canManage !== true || !auth.ok || auth.data?.self !== 'owner' || auth.data?.canSetOwn !== true) throw new Error('Sign in as the owner to change runtime settings.');
+      if (!runtime.ok) throw new Error(runtime.error || 'Runtime settings are unavailable.');
+      if (!options.ok) throw new Error(options.error || 'Plans and harnesses are unavailable.');
+      const current = runtime.data || {};
+      const sources = Array.isArray(options.data?.sources) ? options.data.sources : [];
+      const harnesses = Array.isArray(options.data?.harnesses) ? options.data.harnesses : [];
+      const form = this.el('form', 'ca-runtime-form');
+      const field = (name, label, tag = 'input') => {
+        const wrap = this.el('label', 'ca-label');
+        const input = this.el(tag, 'ca-field'); input.name = name; input.setAttribute('aria-label', label);
+        wrap.append(this.el('span', 'ca-label-text', label), input); form.append(wrap); return input;
+      };
+      const plan = field('source', 'Plan', 'select'); plan.required = true;
+      const placeholder = this.el('option', '', 'Choose a plan or local model'); placeholder.value = ''; plan.append(placeholder);
+      for (const source of sources) {
+        const option = this.literalText('option', '', `${source.label}${source.kind === 'local' ? ' · Local model' : ''}`);
+        option.value = `${source.kind}:${source.id}`; option.disabled = !source.modes?.length; plan.append(option);
+      }
+      const currentKey = current.source?.kind === 'subscription' ? `subscription:${current.source.profileId}` : current.source?.kind === 'local' ? `local:${current.source.endpointId}` : '';
+      if (currentKey && !sources.some(source => `${source.kind}:${source.id}` === currentKey)) {
+        const unavailable = this.el('option', '', 'Current plan unavailable'); unavailable.value = currentKey; unavailable.disabled = true; plan.append(unavailable);
+      }
+      plan.value = currentKey;
+      const harness = field('mode', 'Harness', 'select'); harness.required = true;
+      const model = field('model', 'Model'); model.maxLength = 100;
+      const models = this.el('datalist'); models.id = 'ca-runtime-models'; model.setAttribute('list', models.id); form.append(models);
+      const effort = field('effort', 'Effort', 'select');
+      const source = () => sources.find(entry => `${entry.kind}:${entry.id}` === plan.value);
+      const compatible = () => !!source()?.modes?.includes(harness.value) && harnesses.some(entry => entry.id === harness.value);
+      const apply = this.el('button', 'ca-btn is-primary', 'Apply runtime settings'); apply.type = 'submit';
+      const updateEffort = value => {
+        effort.replaceChildren();
+        const automatic = this.el('option', '', 'Harness default'); automatic.value = ''; effort.append(automatic);
+        const values = harnesses.find(entry => entry.id === harness.value)?.efforts || [];
+        for (const entry of values) { const option = this.el('option', '', entry); option.value = entry; effort.append(option); }
+        effort.value = values.includes(value) ? value : ''; effort.disabled = !values.length;
+      };
+      const updateSource = initial => {
+        const selected = source(); const previous = initial ? current.mode : selected?.defaultMode || selected?.modes?.[0];
+        harness.replaceChildren();
+        const empty = this.el('option', '', 'Choose a harness'); empty.value = ''; harness.append(empty);
+        for (const id of selected?.modes || []) {
+          const entry = harnesses.find(item => item.id === id); if (!entry) continue;
+          const option = this.literalText('option', '', entry.label); option.value = id; harness.append(option);
+        }
+        harness.value = [...harness.options].some(option => option.value === previous) ? previous : initial ? '' : harness.options[1]?.value || '';
+        harness.disabled = harness.options.length < 2;
+        model.value = initial ? current.model || '' : selected?.defaultModel || '';
+        model.required = selected?.kind === 'local'; model.placeholder = selected?.kind === 'local' ? 'Choose a local model' : 'Leave empty for the harness default';
+        models.replaceChildren(); for (const id of selected?.models || []) { const option = this.el('option'); option.value = id; models.append(option); }
+        updateEffort(initial ? current.effort : ''); apply.disabled = !compatible();
+      };
+      plan.addEventListener('change', () => updateSource(false));
+      harness.addEventListener('change', () => { model.value = source()?.defaultModel || ''; updateEffort(''); apply.disabled = !compatible(); });
+      updateSource(true);
+      const actions = this.el('div', 'ca-dialog-actions'); actions.append(apply); form.append(actions);
+      let saving = false;
+      form.addEventListener('submit', async event => {
+        event.preventDefault(); if (saving || !form.reportValidity()) return;
+        if (!compatible()) { error.textContent = 'Choose a compatible plan and harness.'; return; }
+        saving = true; apply.disabled = true; error.textContent = ''; status.textContent = '';
+        const selected = source();
+        const payload = { mode: harness.value, source: selected.kind === 'local' ? { kind: 'local', endpointId: selected.id } : { kind: 'subscription', profileId: selected.id }, ...(model.value.trim() ? { model: model.value.trim() } : {}), ...(effort.value ? { effort: effort.value } : {}) };
+        try {
+          if (!await this.confirmCompanyAction(employee.name, `Apply runtime settings for ${employee.name}? This restarts their runtime using ${selected.label} and ${harness.selectedOptions[0].textContent}. Their identity, memory and channel memberships stay the same.`, 'Apply runtime settings') || !dialog.isConnected) return;
+          const result = await this.app._chatApi(path, { method: 'POST', body: payload });
+          if (!result.ok) { error.textContent = result.error || 'Runtime settings could not be applied.'; return; }
+          await this.loadOwner(); await onSaved?.(); dialog.close();
+          this.toast(`Runtime settings updated for ${employee.name}.`, 'info');
+        } catch { error.textContent = 'Runtime settings could not be applied. Check the current runtime before trying again.'; }
+        finally { saving = false; apply.disabled = !compatible(); }
+      });
+      body.append(form); status.textContent = '';
+    } catch (failure) { if (dialog.isConnected) { status.textContent = ''; error.textContent = failure.message || 'Runtime settings are unavailable.'; } }
+  }
+
   openEmployeeProfile(employee, onSaved) {
     this.doc.querySelector('.ca-expert-profile')?.remove();
     const dialog = this.el('dialog', 'ca-dialog ca-expert-profile');
     dialog.setAttribute('aria-label', `Edit profile: ${employee.name}`);
     dialog.append(this.literalText('h2', '', employee.name));
+    dialog.append(this.button('ca-btn', 'Runtime settings', () => this.openRuntimeSettings(employee, onSaved), { text: 'Runtime settings' }));
     const form = this.el('form');
     const pronounLabel = this.el('label', 'ca-label'); pronounLabel.append(this.el('span', 'ca-label-text', 'Pronouns (optional)'));
     const pronouns = this.el('input', 'ca-field'); pronouns.name = 'pronouns'; pronouns.maxLength = 24; pronouns.value = employee.pronouns || ''; pronouns.placeholder = 'e.g. they/them'; pronounLabel.append(pronouns); form.append(pronounLabel);
@@ -5807,7 +5923,7 @@ class ReverieChatApp {
     const dlg = this.el('dialog', 'ca-dialog ca-profile-edit');
     dlg.setAttribute('aria-label', firstRun ? 'Your name' : 'Edit profile');
     dlg.append(this.el('h2', '', firstRun ? 'What should we call you?' : 'Edit profile'));
-    dlg.append(this.el('p', 'ca-dialog-note', firstRun ? 'Your name appears in chat and your organization. You can change it later in your profile.' : 'Shown on your messages and replies. Saved in this browser; agents still see you as the user.'));
+    dlg.append(this.el('p', 'ca-dialog-note', firstRun ? 'Your name appears in chat and your organization. You can change it later in your profile.' : 'Your name and picture appear with your messages.'));
     const form = this.el('form', 'ca-form');
     const field = (label, value, max, placeholder = '') => {
       const wrap = this.el('label', 'ca-label');
@@ -5820,18 +5936,19 @@ class ReverieChatApp {
       return { wrap, input };
     };
     const fallback = this.ownerName || this.doc.defaultView?.__reverieUser?.username || 'You';
-    const name = field(firstRun ? 'Your name' : 'Display name', p.name, firstRun ? 100 : 32, firstRun ? '' : fallback);
+    const name = field(firstRun ? 'Your name' : 'Display name', p.name || (firstRun ? '' : fallback), firstRun ? 100 : 32, firstRun ? '' : fallback);
     if (firstRun) { name.input.required = true; name.input.setAttribute('aria-label', 'Your name'); }
     // Optionally make the name the instance's owner name: it follows you to other browsers and the org chart.
     const instance = this.el('label', 'ca-check');
     const instanceBox = this.el('input');
     instanceBox.type = 'checkbox';
-    instance.append(instanceBox, this.el('span', '', 'Also set this as my name for the whole instance (other browsers, org chart). Without it, the default stays the account name.'));
+    instance.append(instanceBox, this.el('span', '', 'Use this name across browsers and in the company chart.'));
     const pronouns = field('Pronouns', p.pronouns, 24, 'e.g. they/them');
     const status = field('Status', p.status, 60, 'What are you up to?');
-    const icon = field('Avatar (an emoji or up to two characters)', p.icon, 4, 'leave empty for your initial');
     const pictureBefore = this.ownerAvatar || p.image;
-    const pic = this.pictureField('Avatar picture', pictureBefore, () => {});
+    if (!firstRun) form.append(name.wrap, instance, pronouns.wrap, status.wrap);
+    const appearance = !firstRun ? this.expertAppearanceFields(form, pictureBefore, { name: name.input }) : null;
+    const pic = appearance?.picture;
     const swatches = this.el('div', 'ca-swatches');
     swatches.setAttribute('role', 'radiogroup');
     swatches.setAttribute('aria-label', 'Profile colour');
@@ -5871,7 +5988,7 @@ class ReverieChatApp {
     row.append(this.el('span', 'ca-spacer'), cancel, save);
     const nameError = this.el('p', 'ca-company-error'); nameError.setAttribute('role', 'alert');
     if (firstRun) form.append(name.wrap, nameError, row);
-    else form.append(name.wrap, instance, pronouns.wrap, status.wrap, icon.wrap, pic.wrap, colourWrap, row);
+    else form.append(colourWrap, row);
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
       if (firstRun) {
@@ -5885,6 +6002,8 @@ class ReverieChatApp {
         finally { save.disabled = false; }
         return;
       }
+      if (save.disabled || appearance.pending()) return;
+      save.disabled = true;
       // The picture goes to the server (owner only), so it shows on your messages for everyone; if that is refused it stays in this
       // browser. A server link is never kept locally.
       let image = pic.value();
@@ -5895,7 +6014,7 @@ class ReverieChatApp {
         else this.toast('Your picture could not be removed on the server, so it is still shown.', 'error');
       }
       if (image.startsWith('/api/')) image = '';
-      this.saveProfile({ name: name.input.value, pronouns: pronouns.input.value, status: status.input.value, icon: icon.input.value, image, hue });
+      this.saveProfile({ name: name.input.value, pronouns: pronouns.input.value, status: status.input.value, icon: '', image, hue });
       if (instanceBox.checked && name.input.value.trim()) await this.saveOwnerName(name.input.value.trim());
       dlg.close();
     });

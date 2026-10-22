@@ -1,3 +1,4 @@
+import { runtimeSwitches } from './session-runtime-routes.js';
 import { clampExternalCliBypassForOwner } from '../../session-config-clamp.js';
 /**
  * @fileoverview Session management routes.
@@ -3748,7 +3749,7 @@ export function registerSessionRoutes(
   // rooms, pin, employee, OpenCode thread) stay. Owner only and pinned only: a pinned record survives an exit as
   // `stopped` instead of being removed. Processes of the old command that outlive the restart are reported, never
   // signalled here.
-  const modeSwitches = new Set<string>();
+  const modeSwitches = runtimeSwitches;
   app.post('/api/sessions/:id/mode', async (req, reply) => {
     const { id } = req.params as { id: string };
     if (req.headers['x-reverie-parent-session'] !== undefined) {
@@ -3952,6 +3953,7 @@ export function registerSessionRoutes(
     if (capMsg) return createErrorResponse(ApiErrorCode.SESSION_BUSY, capMsg);
 
     const {
+      pinned,
       caseName = 'testcase',
       sessionName,
       icon,
@@ -3976,6 +3978,7 @@ export function registerSessionRoutes(
       customModel,
       tabGroupId,
     } = parseBody(QuickStartSchema, req.body);
+    if (pinned && req.headers['x-reverie-parent-session'] !== undefined) return createErrorResponse(ApiErrorCode.FORBIDDEN, 'Only the owner may pin an expert runtime');
     let openCodeConfig = requestedOpenCodeConfig;
 
     // Resolved ONCE here: the same value labels a case directory this request creates
@@ -4674,6 +4677,7 @@ export function registerSessionRoutes(
     );
     if (qsClaim.refusal) return createErrorResponse(ApiErrorCode.CONFLICT, qsClaim.refusal);
     const session = new Session(qsSessionOptions);
+    if (pinned) session.setPinned(true);
 
     // Records the selection for session.customModel/getCustomModelForPersist() and future
     // clear/switch calls — the actual env vars and launch-model config are already part of

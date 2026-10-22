@@ -7,6 +7,8 @@ import { SubscriptionUsageReader } from '../src/subscription-usage.js';
 
 // A source regression tripwire, backed by a runtime check below. This is not
 // a general JavaScript information-flow proof or a provider-policy verdict.
+// The authorized read-only Claude adapter has its own behavioral security tests;
+// credential handling stays out of telemetry ingestion, storage, and routing.
 const guardedFiles = [
   'src/plan-accounts.ts',
   'src/subscription-usage.ts',
@@ -81,7 +83,7 @@ describe('plan usage subscription boundary', () => {
     ).toEqual([]);
   });
 
-  it('the actual Claude reader never opens content or fetches, including with no telemetry', async () => {
+  it('a signed-out Claude reader never opens credentials or fetches', async () => {
     vi.spyOn(fs, 'stat').mockResolvedValue({ mtimeMs: 123 } as Awaited<ReturnType<typeof fs.stat>>);
     vi.spyOn(fs, 'access').mockResolvedValue(undefined);
     const read = vi.spyOn(fs, 'readFile').mockRejectedValue(new Error('credential reads prohibited'));
@@ -90,14 +92,14 @@ describe('plan usage subscription boundary', () => {
       throw new Error('network prohibited');
     });
     vi.stubGlobal('fetch', fetcher);
-    const reading = await new SubscriptionUsageReader('guard').read({
+    const reading = await new SubscriptionUsageReader('guard', async () => 'signed-out').read({
       id: 'guard-claude',
       label: 'guard',
       provider: 'anthropic',
       configDir: '/nonexistent/guard-claude',
       openCodeDataDir: '/nonexistent/guard-opencode',
     });
-    expect(reading).toMatchObject({ status: 'ready', usage: null });
+    expect(reading).toMatchObject({ status: 'signed-out', usage: null });
     expect(read).not.toHaveBeenCalled();
     expect(open).not.toHaveBeenCalled();
     expect(fetcher).not.toHaveBeenCalled();

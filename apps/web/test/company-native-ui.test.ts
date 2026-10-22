@@ -49,7 +49,7 @@ async function setup(verified = true) {
             { id: 'opencode', label: 'OpenCode', efforts: [] },
           ],
           sources: [
-            { kind: 'subscription', id: 'plan-one', label: 'Work plan', modes: ['codex'], models: [] },
+            { kind: 'subscription', id: 'plan-one', label: 'Work plan', modes: ['opencode', 'codex'], defaultMode: 'codex', models: [] },
             {
               kind: 'local',
               id: 'local-one',
@@ -78,8 +78,6 @@ function fill(h: any) {
   field('plan').value = 'subscription:plan-one';
   field('plan').dispatchEvent(new h.window.Event('change', { bubbles: true }));
   field('name').value = 'Writer';
-  field('model').value = 'model-main';
-  field('effort').value = 'high';
   field('position').value = 'Flight-stack reviewer';
   field('expertise').value = 'Code review, Flight systems';
   field('reportsTo').value = 'lead';
@@ -108,7 +106,7 @@ it('opens Company directly from the sidebar without the legacy settings window',
   expect(h.document.querySelector('.ca-company [name="sessionId"]')).toBeNull();
   expect(h.document.querySelector('.ca-company [name="plan"]').textContent).toContain('Work plan');
 });
-it('chooses a plan, model and effort for a fresh expert; sends one object and suppresses double submit', async () => {
+it('chooses a plan and harness with backend runtime defaults for a fresh expert; sends one object and suppresses double submit', async () => {
   const { h, data, calls, resolve } = await setup();
   await h.shell.openCompany('people');
   const fields = fill(h);
@@ -121,8 +119,6 @@ it('chooses a plan, model and effort for a fresh expert; sends one object and su
     body: {
       source: { kind: 'subscription', profileId: 'plan-one' },
       mode: 'codex',
-      model: 'model-main',
-      effort: 'high',
       name: 'Writer',
       icon: 'W',
       position: 'Flight-stack reviewer',
@@ -145,14 +141,14 @@ it('uses the same local model profile through an independently selected OpenCode
   fields('plan').dispatchEvent(new h.window.Event('change', { bubbles: true }));
   fields('mode').value = 'opencode';
   fields('mode').dispatchEvent(new h.window.Event('change', { bubbles: true }));
-  expect(fields('model').value).toBe('model-local');
-  expect(fields('effort').disabled).toBe(true);
+  expect(fields('model')).toBeNull();
+  expect(fields('effort')).toBeNull();
   submit(h);
   expect(calls[0].body).toMatchObject({
     source: { kind: 'local', endpointId: 'local-one' },
     mode: 'opencode',
-    model: 'model-local',
   });
+  expect(calls[0].body).not.toHaveProperty('model');
   expect(calls[0].body).not.toHaveProperty('effort');
   expect(calls[0].body).not.toHaveProperty('sessionId');
   resolve({ ok: false, error: 'Synthetic refusal' });
@@ -315,4 +311,18 @@ it('offers optional pronouns at hire and carries an explicit choice into the sav
   expect(calls[0].body.pronouns).toBe('they/them');
   resolve({ ok: false, error: 'test refusal' });
   await h.flush();
+});
+
+it('uses the selected plan’s default harness without carrying a previous OpenCode choice', async () => {
+  const { h } = await setup();
+  await h.shell.openCompany();
+  const fields = fill(h);
+  fields('plan').value = 'local:local-one';
+  fields('plan').dispatchEvent(new h.window.Event('change'));
+  fields('mode').value = 'opencode';
+  fields('plan').value = 'subscription:plan-one';
+  fields('plan').dispatchEvent(new h.window.Event('change'));
+  expect(fields('mode').value).toBe('codex');
+  expect(fields('name').value).toBe('Writer');
+  expect(fields('position').value).toBe('Flight-stack reviewer');
 });

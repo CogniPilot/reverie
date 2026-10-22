@@ -6,7 +6,7 @@ afterEach(() => {
   for (const h of opened.splice(0)) h.dom.window.close();
 });
 const settle = () => new Promise((resolve) => setTimeout(resolve, 60));
-const source = (id: string, label = id) => ({ kind: 'subscription', id, label, modes: ['codex'], models: [] });
+const source = (id: string, label = id) => ({ kind: 'subscription', id, label, modes: ['opencode', 'codex'], defaultMode: 'codex', models: [] });
 const PIXEL = 'data:image/png;base64,iVBORw0KGgo=';
 
 async function setup(initial = [source('default', 'Default Codex')]) {
@@ -24,7 +24,7 @@ async function setup(initial = [source('default', 'Default Codex')]) {
       state.requests++;
       return {
         ok: true,
-        data: { sources: state.sources, harnesses: [{ id: 'codex', label: 'Codex', efforts: ['low', 'high'] }] },
+        data: { sources: state.sources, harnesses: [{ id: 'codex', label: 'Codex', efforts: ['low', 'high'] }, { id: 'opencode', label: 'OpenCode', efforts: [] }] },
       };
     }
     if (path === '/api/voice/options') return { ok: true, data: { voices: [] } };
@@ -50,9 +50,8 @@ it('updates added, renamed and removed plans while preserving the entire open hi
   const { h, state, form, field, changed } = await setup();
   field('plan').value = 'subscription:default';
   field('plan').dispatchEvent(new h.window.Event('change'));
+  field('mode').value = 'opencode';
   field('name').value = 'Ellis';
-  field('model').value = 'custom-model';
-  field('effort').value = 'high';
   field('pronouns').value = 'they/them';
   field('position').value = 'Engineer';
   field('expertise').value = 'Systems';
@@ -64,8 +63,11 @@ it('updates added, renamed and removed plans while preserving the entire open hi
   const preserved = () => {
     expect(h.document.querySelector('.ca-company-hire form')).toBe(form);
     expect(field('name').value).toBe('Ellis');
-    expect(field('model').value).toBe('custom-model');
-    expect(field('effort').value).toBe('high');
+    expect(field('model')).toBeNull();
+    expect(field('effort')).toBeNull();
+    expect(field('mode').value).toBe('opencode');
+    expect(field('position').value).toBe('Engineer');
+    expect(field('expertise').value).toBe('Systems');
     expect(field('pronouns').value).toBe('they/them');
     expect(JSON.parse(field('voice').value).id).toBe('my-voice');
     expect(form.querySelector('.ca-picture-preview img')?.getAttribute('src')).toBe(PIXEL);
@@ -84,11 +86,20 @@ it('updates added, renamed and removed plans while preserving the entire open hi
   expect(field('plan').value).toBe('');
   field('plan').value = 'subscription:gmail';
   field('plan').dispatchEvent(new h.window.Event('change'));
-  field('model').value = 'custom-model';
-  field('effort').value = 'high';
+  expect(field('mode').value).toBe('codex');
   form.dispatchEvent(new h.window.Event('submit', { cancelable: true }));
   await settle();
   expect(state.hired.source).toEqual({ kind: 'subscription', profileId: 'gmail' });
+  expect(state.hired).toMatchObject({
+    mode: 'codex',
+    name: 'Ellis',
+    position: 'Engineer',
+    expertise: ['Systems'],
+    pronouns: 'they/them',
+    voice: { provider: 'browser', id: 'my-voice' },
+  });
+  expect(state.hired).not.toHaveProperty('model');
+  expect(state.hired).not.toHaveProperty('effort');
 });
 
 it('ignores messages from another frame or origin and refreshes safely on plan focus', async () => {
@@ -99,11 +110,15 @@ it('ignores messages from another frame or origin and refreshes safely on plan f
   changed(h.window.location.origin, h.window);
   await settle();
   expect(state.requests).toBe(before);
-  field('model').value = 'keep-this-model';
+  field('name').value = 'Ellis';
+  field('position').value = 'Engineer';
   field('plan').dispatchEvent(new h.window.Event('focus'));
   await settle();
   expect(state.requests).toBe(before + 1);
-  expect(field('model').value).toBe('keep-this-model');
+  expect(field('name').value).toBe('Ellis');
+  expect(field('position').value).toBe('Engineer');
+  expect(field('model')).toBeNull();
+  expect(field('effort')).toBeNull();
   expect([...field('plan').querySelectorAll('option')].some((option) => option.value === 'subscription:gmail')).toBe(
     true
   );

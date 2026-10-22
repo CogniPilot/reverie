@@ -64,6 +64,7 @@ export interface PlanRow {
   acctName: string | null;
   isDefault: boolean;
   authState?: SubscriptionUsage['authState'];
+  usageError?: string;
   signedIn: boolean;
   status: SubscriptionUsage['status'];
   updatedAt: number;
@@ -380,9 +381,9 @@ export class PlanService {
       let usageSource: PlanRow['usageSource'] = reading.usage ? 'provider' : null;
       let usageAsOf: number | null = reading.usage ? reading.updatedAt : null;
       let seeded = false;
-      if (a.provider === 'anthropic' && !reading.usage && reading.status === 'ready') {
+      if (a.provider === 'anthropic' && !reading.usage && (reading.authState === 'signed-in' || reading.status === 'ready')) {
         // Claude Code reports its own limits through its status line; use the newest report from any
-        // session on this account. Nothing is fetched. After a restart, fall back to the last saved sample.
+        // session on this account when polling is unavailable. After a restart, fall back to the last saved sample.
         const reported = getLatestAccountPlanUsage(a.id);
         if (reported?.usage) {
           reading = { ...reading, usage: reported.usage };
@@ -431,6 +432,7 @@ export class PlanService {
         signedIn: reading.authState ? reading.authState === 'signed-in' : reading.status === 'ready',
         status: reading.status,
         authState: reading.authState,
+        usageError: reading.usageError,
         updatedAt: reading.updatedAt,
         usageSource,
         usageAsOf,
@@ -440,6 +442,7 @@ export class PlanService {
           fiveHour: reading.usage?.fiveHour ?? null,
           sevenDay: reading.usage?.sevenDay ?? null,
           samples: history[a.id] ?? [],
+          bankedResets: reading.usage?.bankedResets,
           now,
         }),
         bankedResets: reading.usage?.bankedResets ?? null,

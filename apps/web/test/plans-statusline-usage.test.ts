@@ -26,7 +26,7 @@ describe('Plans Claude usage from the status line', () => {
   const savedHome = process.env.HOME;
   let clock = NOW;
 
-  const service = () =>
+  const service = (usageError?: string) =>
     new PlanService({
       reader: {
         // Same as the live reader: signed in, no usage of its own.
@@ -34,7 +34,9 @@ describe('Plans Claude usage from the status line', () => {
           id: p.id,
           label: p.label,
           provider: p.provider,
-          status: 'ready' as const,
+          status: usageError ? 'unavailable' as const : 'ready' as const,
+          authState: 'signed-in' as const,
+          usageError,
           updatedAt: clock,
           usage: null,
         }),
@@ -95,6 +97,15 @@ describe('Plans Claude usage from the status line', () => {
     expect(row.pace.weekly).toBe(42);
     expect(row.pace.fiveHour).toBe(11);
     expect(row.pace.weekReset).toBe(RESET);
+  });
+
+  it('retains a status-line reading and exposes a safe polling error when the provider is unavailable', async () => {
+    report(NOW - 60_000);
+    const row = (await service('Claude usage is rate limited. Retry in five minutes.').rows()).accounts.find(r => r.id === 'acct-anthropic-secondary')!;
+    expect(row.signedIn).toBe(true);
+    expect(row.usageSource).toBe('statusline');
+    expect(row.pace.weekly).toBe(42);
+    expect(row.usageError).toContain('rate limited');
   });
 
   it('marks the numbers stale after 30 minutes but keeps them with their as-of time', async () => {

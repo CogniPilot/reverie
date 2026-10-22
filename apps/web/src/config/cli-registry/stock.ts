@@ -621,6 +621,9 @@ const CODEX: CliEntry = {
         id: 'default',
         args: [
           { lit: 'codex' },
+          // Reverie installs pinned CLIs. An interactive updater can consume the
+          // expert bootstrap input before the composer exists, then exit.
+          { flag: '--config', value: 'check_for_update_on_startup=false' },
           { flag: '--dangerously-bypass-approvals-and-sandbox', when: { param: 'bypassApprovals', is: true } },
           { flag: '--config', value: 'tui.animations=true', when: { param: 'animations', is: true } },
           { flag: '--config', value: 'tui.animations=false', when: { param: 'animations', is: false } },

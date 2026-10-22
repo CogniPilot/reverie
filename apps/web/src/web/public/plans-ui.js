@@ -185,6 +185,7 @@ Object.assign(ReverieApp.prototype, {
     }
     if (reset) fact('resets', reset.toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' }));
     card.append(facts);
+    if (a.usageError) card.append(el('p', 'plans-note', a.usageError));
     card.append(this._planResets(a));
     const sessions = el('div', 'plans-sessions');
     if (!a.sessions.length) sessions.append(el('span', 'plans-none', 'no sessions'));

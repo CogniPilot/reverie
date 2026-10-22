@@ -242,6 +242,7 @@ export async function spendRebootRestore(
         // Re-resolved against the owner's CURRENT grant, never replayed from the
         // record: a grant held when the record was written may be gone now.
         subscriptionProfile: saved.subscriptionProfile,
+        runtimeThreads: saved.runtimeThreads,
         envOverrides: await clampEnvOverridesForOwner(
           saved.owner,
           (saved as { __envOverrides?: Record<string, string> }).__envOverrides

@@ -1146,6 +1146,7 @@ export const DockerQuickCreateSchema = z.object({
  * Creates case (if needed) and starts interactive session.
  */
 export const QuickStartSchema = z.object({
+  pinned: z.boolean().optional(),
   subscriptionProfileId: z
     .string()
     .regex(/^[a-z0-9][a-z0-9_-]{0,63}$/)

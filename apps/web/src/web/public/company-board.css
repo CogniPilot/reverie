@@ -160,7 +160,7 @@ dialog .qr svg{width:160px;height:160px;background:#fff;padding:6px;border-radiu
 :root[data-company-plans-embedded="true"] .wrap > header > div:first-child,
 :root[data-board-embedded="true"] #company-link { display:none; }
 
-:root[data-company-plans-embedded="true"] #plans { grid-template-columns:repeat(auto-fill,minmax(min(100%,360px),1fr)); }
+:root[data-company-plans-embedded="true"] #plans { grid-template-columns:repeat(auto-fill,minmax(min(100%,360px),420px)); }
 .plan[data-has-usage="false"] .stats,.plan[data-has-usage="false"] > svg { display:none; }
 .plan-help { color:var(--muted); font-size:12px; }
 .plan-help summary { cursor:pointer; }

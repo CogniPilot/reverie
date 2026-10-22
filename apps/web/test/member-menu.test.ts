@@ -37,7 +37,7 @@ describe('compact member actions', () => {
     h.server.calls.length = 0;
     const menu = open(h);
     expect([...menu.querySelectorAll('button')].map((b) => b.textContent)).toEqual([
-      'Profile', 'Mention', 'Message', 'Make lead', 'Remove from channel',
+      'Profile', 'Message', 'Make lead', 'Remove from channel',
       'Debug terminal', 'Copy session id',
     ]);
     expect(menu.querySelectorAll('hr')).toHaveLength(3);
@@ -62,29 +62,46 @@ describe('compact member actions', () => {
     const card = h.document.querySelector('.ca-profile')!;
     const groups = [...card.querySelectorAll<HTMLDetailsElement>('details')];
     expect(groups.map((g) => g.querySelector('summary')!.textContent)).toEqual([
-      'About', 'Role', 'Runtime', 'Usage', 'Session', 'Channels · in 12 channels', 'Backend switch',
+      'Technical details', 'About', 'Role', 'Runtime', 'Usage', 'Session', 'Channels · in 12 channels', 'Harness switch',
     ]);
     expect(groups.every((g) => !g.open)).toBe(true);
-    const channels = groups.find((g) => g.textContent!.includes('in 12 channels'))!;
+    groups[0].querySelector('summary')!.click();
+    const channels = groups.find((g) => g.querySelector('summary')?.textContent === 'Channels · in 12 channels')!;
     channels.querySelector('summary')!.click();
     expect(channels.open).toBe(true);
     expect(channels.querySelectorAll('.ca-kv')).toHaveLength(12);
   });
 
-  it('arrows and Enter insert a mention into the draft without sending', async () => {
+  it('arrows and Enter select Message while leaving the draft untouched', async () => {
     const h = await setup();
+    const dm = vi.spyOn(h.shell, 'startDm').mockImplementation(() => {});
     const input = h.document.querySelector('.chatroom-input') as HTMLTextAreaElement;
     input.value = 'Please review';
     input.setSelectionRange(7, 7);
     open(h);
     expect(h.document.activeElement).toBe(item(h, 'Profile'));
     key(h, 'ArrowDown');
-    expect(h.document.activeElement).toBe(item(h, 'Mention'));
+    expect(item(h, 'Mention')).toBeUndefined();
+    expect(h.document.activeElement).toBe(item(h, 'Message'));
     key(h, 'Enter');
-    expect(input.value).toBe('Please @Maple review');
-    expect(h.document.activeElement).toBe(input);
+    expect(input.value).toBe('Please review');
+    expect(dm).toHaveBeenCalledExactlyOnceWith(A);
     expect(h.document.querySelector('.ca-member-menu')).toBeNull();
     expect(h.server.posts).toHaveLength(0);
+  });
+
+  it('offers the shared restart confirmation only for a verified owner and registered expert', async () => {
+    const h = await setup();
+    const employee = { id: 'expert', sessionId: A, name: 'Maple' };
+    h.shell.company = { canManage: true, employees: [employee] };
+    h.shell.phoneStatus = { self: 'owner', canSetOwn: true };
+    const restart = vi.spyOn(h.shell, 'openEmployeeRestart').mockImplementation(() => {});
+    open(h); expect(item(h, 'Mention')).toBeUndefined(); item(h, 'Restart session').click();
+    expect(restart).toHaveBeenCalledExactlyOnceWith(employee);
+    expect(h.document.querySelector('.ca-member-menu')).toBeNull();
+    h.shell.phoneStatus.canSetOwn = false; open(h); expect(item(h, 'Restart session')).toBeUndefined();
+    h.shell.phoneStatus.canSetOwn = true; h.app._chatSelf = A; open(h); expect(item(h, 'Restart session')).toBeUndefined();
+    h.app._chatSelf = null; open(h, B); expect(item(h, 'Restart session')).toBeUndefined();
   });
 
   it('Escape restores focus, outside pointer closes, and the menu key opens it', async () => {

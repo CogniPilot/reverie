@@ -498,7 +498,8 @@ export class Session extends EventEmitter {
   readonly workingDir: string;
   readonly createdAt: number;
   private _mode: SessionMode;
-  readonly subscriptionProfile?: SessionState['subscriptionProfile'];
+  subscriptionProfile?: SessionState['subscriptionProfile'];
+  private _runtimeThreads: Record<string, string> = {};
 
   // Task description cache (extracted to SessionTaskCache)
   private _taskCache = new SessionTaskCache();
@@ -878,6 +879,7 @@ export class Session extends EventEmitter {
       /** Extra env vars exported to the CLI at spawn time (no disk persistence) */
       envOverrides?: Record<string, string>;
       subscriptionProfile?: SessionState['subscriptionProfile'];
+      runtimeThreads?: Record<string, string>;
       /** Claude CLI effort level (soft default via --settings, switchable in-session via /effort) */
       effort?: EffortLevel;
       /** Claude advisor model (soft default via --settings, switchable in-session via /advisor) */
@@ -924,6 +926,7 @@ export class Session extends EventEmitter {
     this.createdAt = config.createdAt || Date.now();
     this._mode = config.mode || 'claude';
     this.subscriptionProfile = config.subscriptionProfile;
+    this._runtimeThreads = { ...config.runtimeThreads };
     this._name = config.name || '';
     this._nameSource =
       config.nameSource ?? (!this._name || isGeneratedSessionName(this._name) ? 'placeholder' : 'manual');
@@ -1881,6 +1884,54 @@ export class Session extends EventEmitter {
     this._cliVersion = '';
   }
 
+  /** Stage an owner-selected runtime. The returned rollback never serializes private environment values. */
+  configureRuntime(options: {
+    mode: SessionMode; selection?: SessionState['subscriptionProfile']; env: Record<string, string>;
+    sourceKey: string; model?: string; effort?: string; effortField?: string;
+  }): () => void {
+    const record = this as unknown as Record<string, unknown>;
+    const fields = ['_mode', '_acceptsPrompts', '_cliVersion', 'subscriptionProfile', '_envOverrides', '_customModel',
+      '_model', '_effort', '_resumeSessionId', '_claudeSessionId', '_claudeSessionChain', '_runtimeThreads',
+      '_openCodeConfig', '_codexConfig', '_geminiConfig', '_antigravityConfig', '_piConfig', '_grokConfig', '_deepSeekConfig', '_ompConfig'];
+    const before = new Map(fields.map((key) => [key, structuredClone(record[key])]));
+    const pending = new Set(this._pendingEnvUnsets);
+    const currentSource = this._customModel ? 'local:' + this._customModel.endpointId : 'subscription:' + (this.subscriptionProfile?.id ?? '');
+    const currentKey = this.mode + ':' + currentSource;
+    const currentField = getCli(this.mode)?.launch.legacyConfigField;
+    const currentConfig = currentField ? record['_' + currentField] as Record<string, unknown> | undefined : undefined;
+    const thread = currentConfig?.continueSession || currentConfig?.resumeSessionId || this._resumeSessionId || (this._claudeSessionId !== this.id ? this._claudeSessionId : undefined);
+    if (typeof thread === 'string') this._runtimeThreads[currentKey] = thread;
+    this.setCustomModel(undefined);
+    this._envOverrides ??= {};
+    for (const key of ['CODEX_HOME', 'CLAUDE_CONFIG_DIR', 'XDG_DATA_HOME', 'OPENCODE_CONFIG_CONTENT']) {
+      delete this._envOverrides[key]; this._pendingEnvUnsets.add(key);
+    }
+    Object.assign(this._envOverrides, options.env);
+    for (const key of Object.keys(options.env)) this._pendingEnvUnsets.delete(key);
+    this.subscriptionProfile = options.selection;
+    this.setMode(options.mode);
+    const targetThread = this._runtimeThreads[options.mode + ':' + options.sourceKey];
+    this._resumeSessionId = undefined;
+    this._claudeSessionId = targetThread ?? this.id;
+    this._claudeSessionChain = targetThread ? [targetThread] : [];
+    this._model = options.model;
+    this._effort = options.effort as EffortLevel | undefined;
+    const field = getCli(options.mode)?.launch.legacyConfigField;
+    if (field) {
+      const next = { ...(record['_' + field] as object ?? {}) } as Record<string, unknown>;
+      delete next.continueSession; delete next.resumeSessionId; delete next.forkSession; delete next.configContent;
+      next.model = options.model;
+      if (options.effortField) next[options.effortField] = options.effort;
+      if (targetThread) next[options.mode === 'opencode' ? 'continueSession' : 'resumeSessionId'] = targetThread;
+      record['_' + field] = next;
+    } else this._resumeSessionId = targetThread;
+    return () => {
+      const changedKeys = Object.keys(this._envOverrides ?? {});
+      for (const [key, value] of before) record[key] = value;
+      this._pendingEnvUnsets = new Set([...pending, ...changedKeys.filter((key) => !this._envOverrides?.[key])]);
+    };
+  }
+
   get name(): string {
     return this._name;
   }
@@ -2099,6 +2150,7 @@ export class Session extends EventEmitter {
       nameSource: this._nameSource,
       mode: this.mode,
       ...(this.subscriptionProfile && { subscriptionProfile: this.subscriptionProfile }),
+      runtimeThreads: { ...this._runtimeThreads },
       autoClearEnabled: this._autoOps.autoClearEnabled,
       autoClearThreshold: this._autoOps.autoClearThreshold,
       autoCompactEnabled: this._autoOps.autoCompactEnabled,

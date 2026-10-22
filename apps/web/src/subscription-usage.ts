@@ -1,4 +1,4 @@
-/** Per-profile quotas. Codex is polled through its own app-server; Claude rows come from Claude Code's statusline. */
+/** Per-profile quotas. Codex uses its app-server; Claude uses read-only quota metadata. */
 import fs from 'node:fs/promises';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -27,6 +27,7 @@ import { join } from 'node:path';
 import type { SubscriptionProfile } from './subscription-profiles.js';
 import type { StatusTelemetry } from './usage-telemetry.js';
 import { readCodexProfilePlanUsage, resolveCodexBinaryPath } from './utils/codex-cli-resolver.js';
+import { readClaudePlanUsage } from './claude-plan-usage.js';
 
 export interface SubscriptionUsage {
   id: string;
@@ -36,6 +37,7 @@ export interface SubscriptionUsage {
   authState?: ProviderAuthState;
   updatedAt: number;
   usage: StatusTelemetry | null;
+  usageError?: string;
 }
 
 export class SubscriptionUsageReader {
@@ -55,7 +57,8 @@ export class SubscriptionUsageReader {
     const stamp = JSON.stringify(profile) + ':' + mtime;
     const cached = this.cache.get(profile.id);
     // Credential changes invalidate immediately; briefly cache provider status commands.
-    if (cached?.stamp === stamp && Date.now() - cached.result.updatedAt < 15_000) return cached.result;
+    const cacheMs = profile.provider === 'anthropic' ? 5 * 60_000 : 15_000;
+    if (cached?.stamp === stamp && Date.now() - cached.result.updatedAt < cacheMs) return cached.result;
     const pending = this.inFlight.get(profile.id);
     if (pending) return pending;
     const promise = this.collect(profile)
@@ -79,10 +82,10 @@ export class SubscriptionUsageReader {
         const usage = binary ? await readCodexProfilePlanUsage(binary, this.version, profile.configDir) : null;
         return { ...authenticated, status: usage ? 'ready' : 'unavailable', usage };
       }
-      // Claude Code reports its own usage through its statusline; nothing is fetched on its behalf.
-      // The login file is only checked for existence, never read.
       await fs.access(join(profile.configDir, '.credentials.json'));
-      return { ...authenticated, status: 'ready', usage: null };
+      if (authState !== 'signed-in') return { ...authenticated, status: authState === 'signed-out' ? 'signed-out' : 'unavailable', usage: null };
+      const result = await readClaudePlanUsage(profile.configDir);
+      return { ...authenticated, status: result.usage ? 'ready' : 'unavailable', ...result };
     } catch (error) {
       return {
         ...authenticated,

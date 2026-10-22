@@ -729,10 +729,14 @@ describe('the profile card', () => {
     const buttons = [...h.document.querySelectorAll<HTMLButtonElement>('.ca-profile button')];
     expect(h.document.activeElement).toBe(buttons[0]);
     buttons.at(-1)!.focus();
+    // The final collapsed technical summary now follows the action buttons.
+    expect(tab(h).defaultPrevented).toBe(false);
+    const technical = h.document.querySelector('.ca-profile-technical > summary') as HTMLElement;
+    technical.focus();
     expect(tab(h).defaultPrevented).toBe(true);
-    expect(h.document.activeElement).toBe(h.document.querySelector('.ca-profile summary'));
+    expect(h.document.activeElement).toBe(buttons[0]);
     expect(tab(h, true).defaultPrevented).toBe(true);
-    expect(h.document.activeElement).toBe(buttons.at(-1));
+    expect(h.document.activeElement).toBe(technical);
     h.document.dispatchEvent(new h.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
     expect(h.document.querySelector('.ca-profile')).toBeNull();
     expect(h.document.activeElement).toBe(member);
@@ -1116,19 +1120,18 @@ describe('your profile', () => {
     expect(card.textContent).toContain('Edit profile');
     (card.querySelector('button') as HTMLElement).click();
     const dlg = h.document.querySelector('.ca-profile-edit') as HTMLDialogElement;
-    const [name, pronouns, status, icon] = [
-      ...dlg.querySelectorAll('input:not([type=checkbox])'),
+    const [name, pronouns, status] = [
+      ...dlg.querySelectorAll('input:not([type=checkbox]):not([type=file])'),
     ] as HTMLInputElement[];
     name.value = 'Sam';
     pronouns.value = 'they/them';
     status.value = 'shipping';
-    icon.value = '\u{1F980}';
     (dlg.querySelector('[data-hue="160"]') as HTMLElement).click();
     (dlg.querySelector('form') as HTMLFormElement).requestSubmit();
     expect(h.document.querySelector('.ca-profile-edit')).toBeNull();
     expect(h.document.querySelector('.ca-user-name')?.textContent).toBe('Sam');
     expect(h.document.querySelector('.ca-msg-from')?.textContent).toBe('Sam');
-    expect(h.document.querySelector('.ca-msg .chatroom-avatar-glyph')?.textContent).toBe('\u{1F980}');
+    expect(h.document.querySelector('.ca-msg .chatroom-avatar-glyph')?.textContent).toBe('S');
     expect(h.window.localStorage.getItem('reverie:chat:profile')).toContain('"pronouns":"they/them"');
     (h.document.querySelector('.ca-user-btn') as HTMLElement).click();
     expect(h.document.querySelector('.ca-me-card')?.textContent).toContain('shipping');
@@ -1169,7 +1172,7 @@ describe('agent profile details', () => {
     const text = card.textContent || '';
     for (const want of [
       'Runtime',
-      'Backend',
+      'Harness',
       'Codex',
       'gpt-5',
       'Effort',
@@ -1183,7 +1186,7 @@ describe('agent profile details', () => {
     expect(text).not.toContain('Output tokens');
   });
 
-  it('puts the running model and the effort level at the top of the card, and follows a model change', async () => {
+  it('keeps model and effort in collapsed technical details after the primary profile and actions', async () => {
     const s = [
       {
         id: A,
@@ -1203,7 +1206,12 @@ describe('agent profile details', () => {
       [...h.document.querySelectorAll('.ca-profile > .ca-kv')].map(
         (r) => `${r.querySelector('.ca-k')?.textContent}=${r.querySelector('.ca-v')?.textContent}`
       );
-    expect(rows().slice(0, 3)).toEqual(['Model=Opus 5.5', 'Effort=high', 'Goal=ship it']);
+    expect(rows()).toEqual(['Goal=ship it']);
+    const technical = h.document.querySelector('.ca-profile-technical') as HTMLDetailsElement;
+    expect(technical.open).toBe(false);
+    expect(technical.querySelector('summary')?.textContent).toBe('Technical details');
+    expect([...technical.querySelectorAll(':scope > .ca-kv')].map(r => r.textContent)).toEqual(['ModelOpus 5.5', 'Efforthigh', 'Wakes onWhat the room says']);
+    expect(technical.previousElementSibling?.classList.contains('ca-profile-actions')).toBe(true);
     // a Claude session with no launch effort says so, and one that only has its launch model says that too
     const bare = await createHarness({
       sessions: [{ id: A, name: 'alpha', mode: 'opencode', displayModel: { model: 'local/qwen', source: 'launch' } }],
@@ -1795,7 +1803,7 @@ describe("agent profile: the runtime's full profile", () => {
       'Careful and curious.',
       'Opus 5.5',
       '4.0k',
-      'Switch backend',
+      'Switch harness',
       'Owner authentication is not set up yet.',
     ])
       expect(text).toContain(want);
@@ -1810,8 +1818,10 @@ describe("agent profile: the runtime's full profile", () => {
     const h = await createHarness({ sessions: s, rooms: rs() });
     const card = await open(h);
     expect(card.textContent).toContain(
-      'The full profile is not available: The reverie runtime policy is not configured yet'
+      'The technical profile is unavailable.'
     );
+    expect(card.textContent).not.toContain('REVERIE_RUNTIME_POLICY');
+    expect(card.querySelector('.ca-profile-technical .ca-profile-full')).not.toBeNull();
     expect(card.textContent).toContain('local-fallback');
     expect(card.querySelector('.ca-switch')).toBeNull();
   });
@@ -2515,7 +2525,7 @@ describe('picture icons', () => {
     await settle(30);
     // the picture went to the server (so everyone sees it) and this browser keeps no copy
     expect(h.server.ownerAvatarCalls).toEqual([{ kind: 'put', type: 'image/png', size: expect.any(Number) }]);
-    expect(JSON.parse(h.window.localStorage.getItem('reverie:chat:profile') || '{}').image).toBeUndefined();
+    expect(JSON.parse(h.window.localStorage.getItem('reverie:chat:profile') || '{}').image || '').toBe('');
     expect(h.document.querySelector('.ca-user .chatroom-avatar-img')?.getAttribute('src')).toMatch(
       /^\/api\/owner-avatar\/9{32}\?v=\d+$/
     );
@@ -3270,7 +3280,7 @@ describe('the owner\u2019s picture on the server', () => {
     (dlg.querySelector('form') as HTMLFormElement).requestSubmit();
     await settle(120);
     expect(h.server.ownerAvatarCalls).toEqual([{ kind: 'put', type: 'image/png', size: 8 }]);
-    expect(JSON.parse(h.window.localStorage.getItem('reverie:chat:profile') || '{}').image).toBeUndefined();
+    expect(JSON.parse(h.window.localStorage.getItem('reverie:chat:profile') || '{}').image || '').toBe('');
     expect(mine(h).every((s) => /^\/api\/owner-avatar\/9{32}\?v=\d+$/.test(s || ''))).toBe(true);
     expect(mine(h).length).toBeGreaterThan(0);
   });
@@ -3316,7 +3326,7 @@ describe('the owner\u2019s picture on the server', () => {
     await settle(120);
     h2.server.ownerAvatarRefuse = true;
     const dlg2 = openEditor(h2);
-    ([...dlg2.querySelectorAll('.ca-picture button')].find((b) => b.textContent === 'Remove') as HTMLElement).click();
+    ([...dlg2.querySelectorAll('.ca-picture button')].find((b) => b.textContent === 'Use initials') as HTMLElement).click();
     (dlg2.querySelector('form') as HTMLFormElement).requestSubmit();
     await settle(120);
     expect(h2.app.toasts.some((t: { text: string }) => t.text.includes('could not be removed on the server'))).toBe(

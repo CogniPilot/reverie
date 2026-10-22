@@ -108,7 +108,7 @@ describe('opencode', () => {
   const oc = (openCodeConfig?: SpawnBridgeOptions['openCodeConfig']) =>
     render({ mode: 'opencode', sessionId: SID, openCodeConfig });
 
-  it('spawns bare by default', () => {
+  it('disables the interactive updater for the centrally managed CLI', () => {
     expect(oc()).toBe('opencode');
   });
 
@@ -130,7 +130,7 @@ describe('codex', () => {
     render({ mode: 'codex', sessionId: SID, codexConfig });
 
   it('spawns bare by default', () => {
-    expect(cx()).toBe('codex');
+    expect(cx()).toBe('codex --config check_for_update_on_startup=false');
   });
 
   it('uses arguments supported by the installed Codex CLI', () => {
@@ -140,28 +140,28 @@ describe('codex', () => {
   });
 
   it('emits the bypass flag only when asked', () => {
-    expect(cx({ dangerouslyBypassApprovals: true })).toBe('codex --dangerously-bypass-approvals-and-sandbox');
-    expect(cx({ dangerouslyBypassApprovals: false })).toBe('codex');
+    expect(cx({ dangerouslyBypassApprovals: true })).toBe('codex --config check_for_update_on_startup=false --dangerously-bypass-approvals-and-sandbox');
+    expect(cx({ dangerouslyBypassApprovals: false })).toBe('codex --config check_for_update_on_startup=false');
   });
 
   it('sends animations as an explicit true/false config pair', () => {
-    expect(cx({ animations: true })).toBe('codex --config tui.animations=true');
-    expect(cx({ animations: false })).toBe('codex --config tui.animations=false');
+    expect(cx({ animations: true })).toBe('codex --config check_for_update_on_startup=false --config tui.animations=true');
+    expect(cx({ animations: false })).toBe('codex --config check_for_update_on_startup=false --config tui.animations=false');
   });
 
   it('resumes with a POSITIONAL subcommand, not a flag', () => {
-    expect(cx({ model: 'gpt-5', resumeSessionId: 'roll_42' })).toBe('codex --model gpt-5 resume roll_42');
+    expect(cx({ model: 'gpt-5', resumeSessionId: 'roll_42' })).toBe('codex --config check_for_update_on_startup=false --model gpt-5 resume roll_42');
   });
 
   it('sends reasoning effort as one model_reasoning_effort config value, for every level', () => {
     for (const level of CODEX_REASONING_EFFORTS) {
-      expect(cx({ reasoningEffort: level })).toBe(`codex --config model_reasoning_effort=${level}`);
+      expect(cx({ reasoningEffort: level })).toBe(`codex --config check_for_update_on_startup=false --config model_reasoning_effort=${level}`);
     }
   });
 
   it('keeps reasoning effort ahead of the resume subcommand', () => {
     expect(cx({ model: 'gpt-5', reasoningEffort: 'high', resumeSessionId: 'roll_42' })).toBe(
-      'codex --model gpt-5 --config model_reasoning_effort=high resume roll_42'
+      'codex --config check_for_update_on_startup=false --model gpt-5 --config model_reasoning_effort=high resume roll_42'
     );
   });
 });

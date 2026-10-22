@@ -47,7 +47,10 @@ let
         test/routes/reboot-restore-routes.test.ts test/codex-transcript.test.ts test/routes/company-avatar.test.ts \
         test/company-avatar-picker-ui.test.ts test/company-hire-plan-refresh.test.ts \
         test/company-settings-ui.test.ts test/cli-config-content.test.ts \
-        test/render-index-html.test.ts test/asset-content-version.test.ts
+        test/session-runtime.test.ts test/company-runtime-ui.test.ts test/opencode-subscription-auth.test.ts \
+        test/expert-runtime-recipe.test.ts test/company-employee-restart.test.ts test/company-restart-ui.test.ts test/routes/session-mode-switch.test.ts \
+        test/claude-plan-usage.test.ts test/claude-usage-display.test.ts test/subscription-usage.test.ts test/plan-usage-compliance.test.ts test/plan-pace.test.ts \
+        test/member-menu.test.ts test/render-index-html.test.ts test/asset-content-version.test.ts
       runHook postCheck
     '';
     installPhase = ''

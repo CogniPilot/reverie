@@ -60,6 +60,17 @@ describe('company HTTP ownership and expert invites', () => {
     await rm(directory, { recursive: true, force: true });
   });
 
+  it('rejects runtime recipes in public hire and update payloads', async () => {
+    const runtimeRecipe = { mode: 'opencode', workingDir: '/workspace', configs: { openCodeConfig: { configContent: 'secret' } } };
+    const hire = await app.inject({ method: 'POST', url: '/api/company/employees', payload: { ...hireBody, runtimeRecipe } });
+    expect(hire.statusCode).toBe(400);
+    expect(service.view().employees).toHaveLength(0);
+    const employee = await service.hire(hireBody);
+    const update = await app.inject({ method: 'PUT', url: '/api/company/employees/' + employee.id, payload: { runtimeRecipe } });
+    expect(update.statusCode).toBe(400);
+    expect(service.view().employees[0].runtimeRecipe).toBeUndefined();
+  });
+
   it('requires an explicit recovery grant, never a title, to wake a colleague', async () => {
     const target = await service.hire(hireBody);
     const lead = await service.hire({ ...hireBody, name: 'Lead', sessionId: 'parent-session', position: 'COO' });

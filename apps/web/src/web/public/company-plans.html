@@ -17,7 +17,7 @@
   </header>
   <div class="banner" id="banner" hidden></div>
   <section class="panel" id="sec-burn">
-    <div class="phead"><h2>Burn rate · this week per plan</h2><details class="plan-help"><summary>How usage is projected</summary><p class="hint">Grey edges = week start and stop point. A banked-reset expiry overrides the weekly stop; the weekly reset stays as a thin reference. Dashed grey line = even pace to the stop point (above it = burning faster). Dotted line = current-rate projection, ending at 100% if the budget runs out before the stop point.</p></details><button type="button" class="btn" id="addAcct" hidden>Add account</button></div>
+    <div class="phead"><h2>Burn rate · this week per plan</h2><details class="plan-help"><summary>How usage is projected</summary><p class="hint">Grey edges = week start and stop point. The stop is the earlier of the next banked-reset expiry and weekly reset; a later weekly reset stays as a thin reference. Dashed grey line = even pace to the stop point (above it = burning faster). Dotted line = current-rate projection, ending at 100% if the budget runs out before the stop point.</p></details><button type="button" class="btn" id="addAcct" hidden>Add account</button></div>
     <div class="tools"><button type="button" class="btn" id="planMoveHistory" hidden>Recent plan moves</button></div>
     <div class="grid2" id="plans"></div>
   </section>
@@ -115,7 +115,7 @@ function planLanding(p) {
     rateLabel: primary == null ? '–' : num(primary, 1) + unit,
     rateTooltip: other == null ? 'No alternate-period rate available' : num(other, 1) + otherUnit + '; same current rate, different time unit',
     multipleLabel: multiple == null ? '–' : multiple.toFixed(1) + '×',
-    multipleTooltip: sustainable == null ? 'Landing pace unavailable or no budget remains' : '1.0× uses the remaining budget by the weekly reset; landing pace ' + num(sustainable, 2) + '%/hr',
+    multipleTooltip: sustainable == null ? 'Landing pace unavailable or no budget remains' : '1.0× uses the remaining budget by the stop point; landing pace ' + num(sustainable, 2) + '%/hr',
     tone: multiple == null ? 'muted' : multiple > 1 ? 'bad' : 'good',
   };
 }
@@ -147,6 +147,7 @@ function plans() {
     const badge = risk === 'bad' ? `runs out ${dayLbl(p.runsOut).split(',')[0]} ${hm(p.runsOut)}` : risk === 'warn' ? 'tight' : p.used == null ? 'no data' : 'on track';
     return `<div class="plan" data-has-usage="${p.used != null || p.proj != null}"><h3>${esc(p.name)}<span class="badge ${p.used == null ? 'mute' : risk}">${esc(badge)}</span></h3>
       <div class="who" data-auth-state="${esc(p.authState || '')}">${esc(planAuthLabel(p))}</div>
+      ${p.usageError ? `<div class="hint" data-usage-error role="status">${esc(p.usageError)}</div>` : ''}
       <div class="who">${p.reset ? 'Resets ' + dayLbl(p.reset) + ' ' + hm(p.reset) + ' ' + esc(zoneShort()) : ''}</div>
       <div class="plan-members" data-plan-members="${esc(p.id)}" role="group" aria-label="${esc('People allocated to ' + p.name)}" aria-live="polite"></div>
       <div class="stats"><div class="plan-projection"><b style="color:${css('--' + risk)}">${p.proj == null ? '–' : Math.round(p.proj) + '%'}</b>at reset</div><div class="plan-runout"><b>${p.runsOut ? esc(hm(p.runsOut)) : '–'}</b>${p.runsOut ? 'runs out ' + esc(dayLbl(p.runsOut)) + ' ' + esc(zoneShort()) : 'no run-out projected'}</div><div class="plan-landing" title="${esc(landing.multipleTooltip)}"><b style="color:${css('--' + landing.tone)}">${esc(landing.multipleLabel)}</b>landing pace</div><div class="plan-rate" title="${esc(landing.rateTooltip)}"><b>${esc(landing.rateLabel)}</b>burn now</div><div><b>${esc(num(p.used))}${p.used == null ? '' : '%'}</b>used</div>${bankedStat(p)}</div>
@@ -546,8 +547,8 @@ document.getElementById('addAcct').onclick = openAdd;
 function burnChart(svg, p) {
   const W = 320, Hh = 120, L = 28, R = 8, T = 8, Bm = 18, pts0 = p.points || [];
   const s = p.weekStart;
-  const bankedStop = p.banked?.count > 0 && Number.isFinite(p.banked.expiresAt) && p.banked.expiresAt > s;
-  const stop = bankedStop ? p.banked.expiresAt : p.reset, e = Math.max(stop, p.reset);
+  const bankedStop = p.banked?.count > 0 && Number.isFinite(p.banked.expiresAt) && p.banked.expiresAt > Date.now() && p.banked.expiresAt < p.reset;
+  const stop = bankedStop ? Math.min(p.banked.expiresAt, p.reset) : p.reset, e = p.reset;
   const last = pts0[pts0.length - 1] || {t: p.at, used: p.used};
   const projected = last.used + (p.rate || 0) * Math.max(0, stop - last.t) / H;
   const ymax = 110;

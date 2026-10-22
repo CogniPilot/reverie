@@ -1,3 +1,4 @@
+import type { RuntimeRecipe } from '../../expert-runtime-recipe.js';
 /** Owner hiring: create a fresh runtime, then bind a persistent expert identity. */
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
@@ -50,6 +51,7 @@ export interface CompanyHireDeps {
   endpoints(): Promise<CustomModelHost[]>;
   /** Normal quick-start route, with the owner's credentials and Origin preserved. */
   start(req: FastifyRequest, body: Record<string, unknown>): Promise<string>;
+  captureRuntime?(sessionId: string): RuntimeRecipe;
   stop(sessionId: string): Promise<void>;
   forget(owner: string | undefined, sessionId: string): Promise<void>;
 }
@@ -74,21 +76,34 @@ export function registerCompanyHireRoutes(app: FastifyInstance, deps: CompanyHir
     run(req, reply, async () => {
       const harnesses = listClis().filter((c) => c.enabled && c.kind === 'agent');
       const [profiles, endpoints] = await Promise.all([deps.profiles(), deps.endpoints()]);
+      const localHarnesses = harnesses.filter((c) => c.capabilities.customModelInjection.kind !== 'unsupported');
+      const localDefault = localHarnesses.find((c) => c.id === 'opencode') ?? localHarnesses.find((c) => !c.stock) ?? localHarnesses[0];
       return {
         harnesses: harnesses.map((c) => ({ id: c.id, label: c.label, efforts: hireEffort(c.id).values })),
         sources: [
-          ...profiles.map((p) => ({
+          ...profiles.map((p) => {
+            const compatible = harnesses.filter((c) => subscriptionBinding(c.id, p.provider));
+            const official = p.provider === 'openai' ? 'codex' : 'claude';
+            const modes = [
+              ...compatible.filter((c) => c.id === official),
+              ...compatible.filter((c) => c.id !== official && subscriptionBinding(c.id, p.provider) === 'native'),
+              ...compatible.filter((c) => subscriptionBinding(c.id, p.provider) !== 'native'),
+            ].map((c) => c.id);
+            return {
             kind: 'subscription',
             id: p.id,
             label: p.label,
-            modes: harnesses.filter((c) => subscriptionBinding(c.id, p.provider)).map((c) => c.id),
+            modes,
+            defaultMode: modes[0],
             models: [],
-          })),
+            };
+          }),
           ...endpoints.map((p) => ({
             kind: 'local',
             id: p.id,
             label: p.label,
-            modes: harnesses.filter((c) => c.capabilities.customModelInjection.kind !== 'unsupported').map((c) => c.id),
+            modes: localHarnesses.map((c) => c.id),
+            defaultMode: localDefault?.id,
             models: p.models,
             defaultModel: p.defaultModelId,
           })),
@@ -142,6 +157,7 @@ export function registerCompanyHireRoutes(app: FastifyInstance, deps: CompanyHir
       }
       const sessionId = await deps.start(req, {
         ...launch,
+        pinned: true,
         caseName: 'expert-' + randomUUID(),
         sessionName: body.name,
         ...(customModel ? { customModel } : {}),
@@ -156,6 +172,7 @@ export function registerCompanyHireRoutes(app: FastifyInstance, deps: CompanyHir
           pronouns: body.pronouns,
           voice: body.voice,
           sessionId,
+          runtimeRecipe: deps.captureRuntime?.(sessionId),
           owner,
           researchEnabled: false,
           desiredRunning: true,

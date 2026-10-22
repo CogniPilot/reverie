@@ -6,73 +6,122 @@
       "id": "company-01",
       "name": "Folded Crescent",
       "src": "/assets/company-logos/company-01.png",
-      "tags": ["moon", "crescent", "folded", "night"]
+      "tags": [
+        "moon",
+        "crescent",
+        "folded",
+        "night"
+      ]
     },
     {
       "id": "company-02",
       "name": "Dream Portal",
       "src": "/assets/company-logos/company-02.png",
-      "tags": ["portal", "arch", "gateway"]
+      "tags": [
+        "portal",
+        "arch",
+        "gateway"
+      ]
     },
     {
       "id": "company-03",
       "name": "Orbit Loom",
       "src": "/assets/company-logos/company-03.png",
-      "tags": ["orbit", "woven", "celestial"]
+      "tags": [
+        "orbit",
+        "woven",
+        "celestial"
+      ]
     },
     {
       "id": "company-04",
       "name": "Dreamwave",
       "src": "/assets/company-logos/company-04.png",
-      "tags": ["wave", "flow", "ribbon"]
+      "tags": [
+        "wave",
+        "flow",
+        "ribbon"
+      ]
     },
     {
       "id": "company-05",
       "name": "Cloud Gate",
       "src": "/assets/company-logos/company-05.png",
-      "tags": ["cloud", "gateway", "dream"]
+      "tags": [
+        "cloud",
+        "gateway",
+        "dream"
+      ]
     },
     {
       "id": "company-06",
       "name": "Lunar Prism",
       "src": "/assets/company-logos/company-06.png",
-      "tags": ["moon", "prism", "crystal"]
+      "tags": [
+        "moon",
+        "prism",
+        "crystal"
+      ]
     },
     {
       "id": "company-07",
       "name": "Star Lattice",
       "src": "/assets/company-logos/company-07.png",
-      "tags": ["star", "lattice", "woven"]
+      "tags": [
+        "star",
+        "lattice",
+        "woven"
+      ]
     },
     {
       "id": "company-08",
       "name": "Aurora Fan",
       "src": "/assets/company-logos/company-08.png",
-      "tags": ["aurora", "fan", "flow"]
+      "tags": [
+        "aurora",
+        "fan",
+        "flow"
+      ]
     },
     {
       "id": "company-09",
       "name": "Moonrise Horizon",
       "src": "/assets/company-logos/company-09.png",
-      "tags": ["moonrise", "horizon", "night"]
+      "tags": [
+        "moonrise",
+        "horizon",
+        "night"
+      ]
     },
     {
       "id": "company-10",
-      "name": "Lucid Seed",
+      "name": "Lucid Eye",
       "src": "/assets/company-logos/company-10.png",
-      "tags": ["seed", "lucid", "growth"]
+      "tags": [
+        "eye",
+        "lucid",
+        "vision"
+      ]
     },
     {
       "id": "company-11",
       "name": "Dream Sail",
       "src": "/assets/company-logos/company-11.png",
-      "tags": ["sail", "origami", "journey"]
+      "tags": [
+        "sail",
+        "origami",
+        "journey"
+      ]
     },
     {
       "id": "company-12",
       "name": "Sleep Spiral",
       "src": "/assets/company-logos/company-12.png",
-      "tags": ["spiral", "sleep", "labyrinth"]
+      "tags": [
+        "spiral",
+        "sleep",
+        "labyrinth"
+      ]
     }
   ]
 }

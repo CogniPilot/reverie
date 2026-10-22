@@ -215,3 +215,22 @@ describe('addSample', () => {
     expect(s).toEqual([{ at: 9 * 24 * H, weekly: 5 }]);
   });
 });
+
+describe('banked credit cutoff', () => {
+  it.each([5, 9])('uses the earlier future credit expiry or weekly reset (%i days)', (days) => {
+    const now = START + 24 * H;
+    const p = planPace({ signedIn: true, sevenDay: { usedPercentage: 20, resetAt: RESET }, now,
+      bankedResets: { availableCount: 2, earliestExpiresAt: START + days * 24 * H },
+      samples: [{ at: now - 2 * H, weekly: 18 }, { at: now, weekly: 20 }] });
+    const stop = Math.min(RESET, START + days * 24 * H);
+    expect(p.weekReset).toBe(RESET);
+    expect(p.budgetStop).toBe(stop);
+    expect(p.hoursToReset).toBe((stop - now) / H);
+    expect(p.projected).toBe(20 + (stop - now) / H);
+  });
+  it.each([null, NaN, 0, START])('ignores unavailable or expired credit expiry %s', (expiry) => {
+    const p = planPace({ signedIn: true, sevenDay: { usedPercentage: 20, resetAt: RESET }, now: START + H,
+      bankedResets: { availableCount: 1, earliestExpiresAt: expiry } });
+    expect(p.budgetStop).toBe(RESET);
+  });
+});

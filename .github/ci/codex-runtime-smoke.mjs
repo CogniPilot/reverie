@@ -2,10 +2,11 @@
 // The pinned provider is installed at runtime, never added to a published image.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { stripVTControlCharacters } from 'node:util';
 
 const consoleRoot = '/opt/reverie/console';
 const { STOCK_CLIS } = await import(pathToFileURL(join(consoleRoot, 'dist/config/cli-registry/stock.js')));
@@ -23,6 +24,11 @@ const scratch = mkdtempSync(join(process.env.TMPDIR || '/scratch/tmp', 'codex-ru
 try {
   const home = join(scratch, 'home');
   mkdirSync(join(home, '.codex'), { recursive: true });
+  // A synthetic known update must never intercept the expert's first message.
+  // No account is needed and the container has no network connection.
+  writeFileSync(join(home, '.codex', 'version.json'), JSON.stringify({
+    latest_version: '999.0.0', last_checked_at: new Date().toISOString(), dismissed_version: null,
+  }));
   // Construct rather than inherit: no API keys, provider logins, or user configuration.
   const env = { HOME: home, CODEX_HOME: join(home, '.codex'), TMPDIR: scratch,
     PATH: `${join(tools, 'bin')}:/bin`, TERM: 'xterm-256color', LANG: 'C.UTF-8', LC_ALL: 'C.UTF-8' };
@@ -45,6 +51,7 @@ try {
   }));
   for (const [index, command] of commands.entries()) {
     assert.ok(command?.startsWith('codex'), 'Application failed to render a Codex launch');
+    assert.ok(command.includes('--config check_for_update_on_startup=false'), 'Managed Codex launch permits an interactive updater');
     assert.equal(run(`exec ${command} --help`).status, 0,
       `Generated stock Codex launch variant ${index} failed real CLI argument parsing: ${command}`);
   }
@@ -66,10 +73,11 @@ try {
     const timer = setTimeout(() => {
       stopping = true;
       terminal.kill('SIGKILL');
-      if (!output.trim() || /unexpected argument|unknown (?:option|flag)|unrecognized option|setlocale:.*cannot change locale/i.test(output)) {
+      const plain = stripVTControlCharacters(output);
+      if (!plain.trim() || /unexpected argument|unknown (?:option|flag)|unrecognized option|setlocale:.*cannot change locale|update available|update now/i.test(plain)) {
         reject(new Error('Codex did not reach a clean interactive startup'));
       } else resolve();
-    }, 5000);
+    }, 20_000);
     terminal.onExit(() => {
       if (stopping) return;
       clearTimeout(timer);

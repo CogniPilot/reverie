@@ -131,9 +131,9 @@ describe('TmuxManager (unit)', () => {
 
   describe('Codex command builder', () => {
     it('controls decorative TUI animation through Codex config', () => {
-      expect(buildCodexCommand({ animations: false })).toBe('codex --config tui.animations=false');
-      expect(buildCodexCommand({ animations: true })).toBe('codex --config tui.animations=true');
-      expect(buildCodexCommand()).toBe('codex');
+      expect(buildCodexCommand({ animations: false })).toBe('codex --config check_for_update_on_startup=false --config tui.animations=false');
+      expect(buildCodexCommand({ animations: true })).toBe('codex --config check_for_update_on_startup=false --config tui.animations=true');
+      expect(buildCodexCommand()).toBe('codex --config check_for_update_on_startup=false');
     });
   });
 

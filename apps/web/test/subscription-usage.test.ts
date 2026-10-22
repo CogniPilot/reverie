@@ -27,16 +27,16 @@ async function credential(p: SubscriptionProfile, token: string): Promise<void> 
 }
 
 describe('per-subscription usage', () => {
-  it('never reads the Claude login or contacts Anthropic; the row is unknown until Claude Code reports', async () => {
+  it('reads Claude quota metadata immediately after sign-in without exposing credentials', async () => {
     const p = await profile('claude');
     await credential(p, 'secret-token');
-    const fetcher = vi.fn();
+    const fetcher = vi.fn(async () => new Response(JSON.stringify({ five_hour: { utilization: 12, resets_at: '2026-10-22T12:00:00Z' }, seven_day: { utilization: 34, resets_at: '2026-10-28T12:00:00Z' } })));
     vi.stubGlobal('fetch', fetcher);
     try {
       const reading = await new SubscriptionUsageReader('test', async () => 'signed-in').read(p);
-      expect(reading).toMatchObject({ status: 'ready', authState: 'signed-in', usage: null });
+      expect(reading).toMatchObject({ status: 'ready', authState: 'signed-in', usage: { fiveHour: { usedPercentage: 12 }, sevenDay: { usedPercentage: 34 } } });
       expect(JSON.stringify(reading)).not.toContain('secret-token');
-      expect(fetcher).not.toHaveBeenCalled();
+      expect(fetcher).toHaveBeenCalledOnce();
     } finally {
       vi.unstubAllGlobals();
     }
@@ -46,7 +46,8 @@ describe('per-subscription usage', () => {
     const reader = new SubscriptionUsageReader('test', async () => 'signed-in');
     expect((await reader.read(a)).status).toBe('signed-out');
     await credential(a, 'new-token');
-    expect((await reader.read(a)).status).toBe('ready');
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ five_hour: { utilization: 0, resets_at: '2026-10-22T12:00:00Z' } }))));
+    try { expect((await reader.read(a)).status).toBe('ready'); } finally { vi.unstubAllGlobals(); }
   });
   it('keeps authentication errors and signed-out state separate from absent usage', async () => {
     const p = await profile('expired');

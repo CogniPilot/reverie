@@ -11,6 +11,23 @@ const avatars = Array.from({ length: 50 }, (_, index) => {
   return { id, name: `Avatar ${index + 1}`, src: `/assets/avatars/${id}.png` };
 });
 const photo = 'data:image/png;base64,iVBORw0KGgo=';
+it('uses the shared compact picker for human profiles without overriding a saved picture', async () => {
+  const h = await createHarness({ stored: { 'reverie:chat:profile': JSON.stringify({ name: 'Alex', image: photo }) } });
+  opened.push(h);
+  const fetch = vi.spyOn(h.window, 'fetch').mockResolvedValue({ ok: true, json: async () => ({ avatars }) } as Response);
+  h.shell.openProfileEditor(); await h.flush();
+  const dialog = h.document.querySelector('.ca-profile-edit')!;
+  expect(dialog.querySelector('.ca-picture-preview img')?.getAttribute('src')).toBe(photo);
+  expect(fetch.mock.calls.map(call => call[0])).toEqual(['/assets/avatars/pack-manifest.json']);
+  expect(dialog.textContent).not.toContain('emoji'); expect(dialog.textContent).not.toContain('agents still see');
+  expect(dialog.querySelector('.ca-expert-portraits')).toBeNull();
+  const initials = [...dialog.querySelectorAll('button')].find(item => item.textContent === 'Use initials')!;
+  initials.click(); const name = dialog.querySelector('input[maxlength="32"]')!;
+  name.value = 'Morgan'; name.dispatchEvent(new h.window.Event('input'));
+  expect(dialog.querySelector('.ca-picture-preview')!.textContent).toBe('M');
+  dialog.querySelector('form')!.dispatchEvent(new h.window.Event('submit', { bubbles: true, cancelable: true })); await h.flush();
+  expect(h.shell.profile.name).toBe('Morgan'); expect(h.shell.profile.image).toBe(''); expect(h.shell.profile.icon).toBe('');
+});
 async function fixture({ random = true, current = '' } = {}) {
   const h = await createHarness();
   opened.push(h);

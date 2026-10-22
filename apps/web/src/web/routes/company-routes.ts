@@ -25,6 +25,7 @@ const HireSchema = EmployeeSchema.omit({
   desiredRunning: true,
   wakeAttempts: true,
   onVacation: true,
+  runtimeRecipe: true,
 });
 const SettingsSchema = CompanySettingsSchema.omit({ owner: true, ownerAvatar: true });
 const InviteSchema = z.object({ roomId: z.string().min(1).max(100) });

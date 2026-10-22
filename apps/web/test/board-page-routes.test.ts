@@ -138,33 +138,36 @@ describe('shipped Company plans page', () => {
     expect(svg.innerHTML).not.toContain('>reset</text>');
   });
 
-  it.each([9, 5])('stops at the banked expiry %i days after week start and retains the weekly reset reference', (expiryDays) => {
+  it.each([9, 5])('stops at the earlier banked expiry or weekly reset for a %i-day credit', (expiryDays) => {
     const dom = new JSDOM('<svg></svg>');
     try {
       const svg = dom.window.document.querySelector('svg')!;
       const weekStart = Date.parse('2026-10-20T14:48:00-04:00'), reset = weekStart + 7 * 864e5;
       const expiresAt = weekStart + expiryDays * 864e5;
       const run = new vm.Script(`${/const esc = .*/.exec(script)?.[0]}\n${between('function burnChart(svg, p)', "document.getElementById('refresh').onclick")}; burnChart`).runInNewContext({
+        Date: { now: () => weekStart + 864e5 },
         css: (value: string) => value,
         fmt: (timestamp: number, options: Intl.DateTimeFormatOptions) => new Intl.DateTimeFormat('en-US', { ...options, timeZone: 'America/New_York' }).format(timestamp),
         startOfDay: (timestamp: number) => timestamp, D: 864e5, H: 36e5, planRisk: () => 'good',
       }) as (svg: object, plan: object) => void;
       const plan = { weekStart, reset, banked: { count: 2, expiresAt }, points: [], used: 40, rate: 0.1, proj: 54.4, at: weekStart + 864e5 };
       run(svg, plan);
-      const extent = Math.max(reset, expiresAt) - weekStart;
-      const stopX = 28 + (expiresAt - weekStart) / extent * 284;
+      const extent = reset - weekStart;
+      const stopX = 28 + (Math.min(reset, expiresAt) - weekStart) / extent * 284;
       const resetX = 28 + (reset - weekStart) / extent * 284;
       const weekly = svg.querySelector('.weekly-reset')!;
       const edges = svg.querySelectorAll('.edge');
       expect(Number(edges[1].getAttribute('x1'))).toBeCloseTo(stopX);
-      expect(Number(weekly.getAttribute('x1'))).toBeCloseTo(resetX);
-      expect(Number(weekly.getAttribute('stroke-width'))).toBeLessThan(Number(edges[1].getAttribute('stroke-width')));
+      if (expiryDays < 7) {
+        expect(Number(weekly.getAttribute('x1'))).toBeCloseTo(resetX);
+        expect(Number(weekly.getAttribute('stroke-width'))).toBeLessThan(Number(edges[1].getAttribute('stroke-width')));
+      } else expect(weekly).toBeNull();
       expect(Number(svg.querySelector('.nominal')!.getAttribute('x2'))).toBeCloseTo(stopX);
       expect(Number(svg.querySelector('.projection')!.getAttribute('x2'))).toBeCloseTo(stopX);
       expect(Number(svg.querySelector('.projection')!.getAttribute('y2'))).toBeGreaterThan(8);
-      expect(svg.querySelector('title')!.textContent).toContain(expiryDays === 9 ? 'Oct 29' : 'Oct 25');
+      expect(svg.querySelector('title')!.textContent).toContain(expiryDays === 9 ? 'Oct 27' : 'Oct 25');
       expect([...svg.querySelectorAll('text')].some((node) => /start|reset|even pace|expires/.test(node.textContent || ''))).toBe(false);
-      expect(svg.querySelector('title')!.textContent).toContain('Stop at banked-reset expiry');
+      expect(svg.querySelector('title')!.textContent).toContain(expiryDays < 7 ? 'Stop at banked-reset expiry' : 'Stop at weekly reset');
       expect(svg.querySelector('title')!.textContent).toContain('weekly reset');
       expect(svg.innerHTML).not.toMatch(/NaN|Infinity/);
       expect(plan.reset).toBe(reset);

@@ -52,6 +52,7 @@ export interface PlanPace {
   weekly: number | null;
   weekStart: number | null;
   weekReset: number | null;
+  budgetStop: number | null;
   elapsed: number | null;
   pace: number | null;
   burnPerHour: number | null;
@@ -137,12 +138,16 @@ export function planPace(input: {
   fiveHour?: UsageWindow | null;
   sevenDay?: UsageWindow | null;
   samples?: UsageSample[];
+  bankedResets?: { availableCount: number; earliestExpiresAt: number | null } | null;
   now: number;
 }): PlanPace {
   const fiveHour = Number.isFinite(input.fiveHour?.usedPercentage) ? round1(input.fiveHour!.usedPercentage) : null;
   const weekly = Number.isFinite(input.sevenDay?.usedPercentage) ? round1(input.sevenDay!.usedPercentage) : null;
   const weekReset = toMs(input.sevenDay?.resetAt);
   const weekStart = weekReset === null ? null : weekReset - WEEK_MS;
+  const expiry = input.bankedResets?.earliestExpiresAt;
+  const budgetStop = weekReset === null ? null : input.bankedResets?.availableCount && typeof expiry === 'number' && Number.isFinite(expiry) && expiry > input.now
+    ? Math.min(weekReset, expiry) : weekReset;
   const elapsed = weekStart === null ? null : round1(clamp(((input.now - weekStart) / WEEK_MS) * 100, 0, 100));
   const pace = weekly === null || elapsed === null ? null : round1(weekly - elapsed);
   const burnPerHour = burnRate(input.samples ?? [], input.now, weekStart, weekReset);
@@ -153,7 +158,7 @@ export function planPace(input: {
   let hoursToReset: number | null = null;
   let sustainablePctPerHour: number | null = null;
   if (weekly !== null && weekReset !== null && weekStart !== null) {
-    const hoursLeft = Math.max(0, (weekReset - input.now) / 3600000);
+    const hoursLeft = Math.max(0, (budgetStop! - input.now) / 3600000);
     const hoursIn = Math.max(0, (input.now - weekStart) / 3600000);
     const rate = burnPerHour ?? (hoursIn >= MIN_AVERAGE_HOURS ? weekly / hoursIn : null);
     burnBasis = burnPerHour !== null ? 'recent' : rate !== null ? 'average' : null;
@@ -170,6 +175,7 @@ export function planPace(input: {
     weekly,
     weekStart,
     weekReset,
+    budgetStop,
     elapsed,
     pace,
     burnPerHour,

@@ -7,6 +7,7 @@ import { CompanyService } from '../../src/company-service.js';
 import { CompanyStore } from '../../src/company-store.js';
 import { registerCompanyHireRoutes } from '../../src/web/routes/company-hire-routes.js';
 import { installRouteErrorHandler } from '../../src/web/route-error-handler.js';
+import * as registry from '../../src/config/cli-registry/registry.js';
 
 describe('fresh permanent expert hire', () => {
   let directory: string;
@@ -60,8 +61,10 @@ describe('fresh permanent expert hire', () => {
       verifiedOwner: (req) => req.headers['x-unverified'] === undefined,
       profiles: async () => [
         { id: 'work', label: 'Work plan', provider: 'openai', configDir: directory, openCodeDataDir: directory },
+        { id: 'claude-plan', label: 'Claude plan', provider: 'anthropic', configDir: directory, openCodeDataDir: directory },
       ],
       endpoints: async () => [endpoint],
+      captureRuntime: () => ({ mode: String(start.mock.calls.at(-1)?.[1].mode), workingDir: '/workspace/expert', configs: {} }),
       start,
       stop,
       forget,
@@ -70,6 +73,7 @@ describe('fresh permanent expert hire', () => {
     await app.ready();
   });
   afterEach(async () => {
+    vi.restoreAllMocks();
     await app.close();
     await rm(directory, { recursive: true, force: true });
   });
@@ -86,6 +90,7 @@ describe('fresh permanent expert hire', () => {
     expect(employee.desiredRunning).toBe(true);
     expect(start.mock.calls[0][1]).toMatchObject({
       mode: 'codex',
+      pinned: true,
       subscriptionProfileId: 'work',
       sessionName: 'Reviewer',
       codexConfig: { model: 'model-main', reasoningEffort: 'high' },
@@ -95,6 +100,7 @@ describe('fresh permanent expert hire', () => {
     const restarted = new CompanyStore(store.file);
     await restarted.init();
     expect(restarted.snapshot().employees[0].id).toBe(employee.id);
+    expect(restarted.snapshot().employees[0].runtimeRecipe).toMatchObject({ mode: 'codex', workingDir: '/workspace/expert' });
   });
   it('uses the same configured local model with OpenCode without copying credentials or account selection', async () => {
     const response = await hire({
@@ -172,5 +178,17 @@ describe('fresh permanent expert hire', () => {
     expect(sources.find((s) => s.kind === 'local').modes).toContain('opencode');
     expect(sources.find((s) => s.kind === 'subscription').modes).toContain('codex');
     expect(sources.find((s) => s.kind === 'subscription').modes).not.toContain('claude');
+    expect(sources.find((s) => s.id === 'work')).toMatchObject({ defaultMode: 'codex', modes: ['codex', 'opencode'] });
+    expect(sources.find((s) => s.id === 'claude-plan')).toMatchObject({ defaultMode: 'claude', modes: ['claude'] });
+    expect(sources.find((s) => s.kind === 'local').defaultMode).toBe('opencode');
+  });
+  it('local sources prefer an enabled saved custom harness when OpenCode is unavailable', async () => {
+    const custom = { ...registry.getCli('opencode')!, id: registry.asCliId('custom-local'), stock: false };
+    vi.spyOn(registry, 'listClis').mockReturnValue([registry.getCli('codex')!, { ...registry.getCli('opencode')!, enabled: false }, custom]);
+    const response = await app.inject('/api/company/hire-options');
+    const local = response.json().data.sources.find((s) => s.kind === 'local');
+    expect(local.defaultMode).toBe('custom-local');
+    expect(local.modes).not.toContain('opencode');
+    expect(start).not.toHaveBeenCalled();
   });
 });

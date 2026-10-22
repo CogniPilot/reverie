@@ -1,3 +1,4 @@
+import { RuntimeRecipeSchema, type RuntimeRecipe } from './expert-runtime-recipe.js';
 import { randomInt, randomUUID } from 'node:crypto';
 import type { ChatroomService } from './chatroom-service.js';
 import { CompanyStore } from './company-store.js';
@@ -112,6 +113,14 @@ export class CompanyService {
   ) {}
   private now(): number {
     return (this.deps.now ?? Date.now)();
+  }
+
+  async saveRuntimeRecipe(sessionId: string, recipe: RuntimeRecipe): Promise<void> {
+    const safe = RuntimeRecipeSchema.parse(recipe);
+    await this.store.update((state) => {
+      const employee = state.employees.find((e) => e.sessionId === sessionId);
+      if (employee) employee.runtimeRecipe = safe;
+    });
   }
 
   registeredEmployees() {

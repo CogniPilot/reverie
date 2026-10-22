@@ -1,3 +1,4 @@
+import { expertRuntimeRecipe } from '../expert-runtime-recipe.js';
 import { AvatarStore } from '../agent-avatars.js';
 import { CompanyStore } from '../company-store.js';
 import { BoardStore } from '../board-store.js';
@@ -210,6 +211,7 @@ import { OwnerAuthStore } from '../owner-auth/store.js';
 import { registerOwnerPolicy } from '../owner-auth/policy.js';
 import { relations, runtimeLineage } from '../owner-auth/relations.js';
 import { registerCompanyHireRoutes } from './routes/company-hire-routes.js';
+import { registerSessionRuntimeRoutes } from './routes/session-runtime-routes.js';
 import { registerOwnerRoutes } from '../owner-auth/routes.js';
 import { isMultiUserMode } from '../config/multiuser.js';
 import { bootstrapInitialAdmin, hasUsers, resolveClaudeModeForUsername } from '../user-store.js';
@@ -1544,9 +1546,32 @@ export class WebServer extends EventEmitter {
       new AvatarStore(dataPath('owner-avatars')),
       (id) => this.companyWake.wakeOne(id)
     );
+    registerSessionRuntimeRoutes(this.app, ctx, verifiedOwner, (id, req) => {
+      const employee = this.companyService.registeredEmployees().find((e) => e.sessionId === id);
+      const recipe = employee?.runtimeRecipe;
+      const saved = this.store.getSession(id) ?? (recipe ? { ...recipe, ...recipe.configs, id, owner: employee?.owner, name: employee?.name } : undefined);
+      if (!saved || !employee || employee.onVacation || saved.owner !== ownerFor(req)) return undefined;
+      const session = new Session({ ...saved, useMux: true, mux: this.mux,
+        envOverrides: (saved as { __envOverrides?: Record<string, string> }).__envOverrides });
+      const custom = (saved as { __customModel?: ReturnType<Session['getCustomModelForPersist']> }).__customModel;
+      if (custom) session.setCustomModel(custom);
+      if (!custom && recipe?.customModel) session.setCustomModel({ ...recipe.customModel, label: 'Local model', envKeys: [] });
+      return session;
+    }, this.companyService, async (session) => {
+      await this.companyService.saveRuntimeRecipe(session.id, expertRuntimeRecipe(session));
+      await this.companyService.setDesiredRunning(session.id, true);
+    });
     registerCompanyHireRoutes(this.app, {
       company: this.companyService,
       verifiedOwner,
+      captureRuntime: (id) => {
+        const saved = this.store.getSession(id);
+        const session = this.sessions.get(id) ?? (saved ? new Session({ ...saved }) : undefined);
+        if (!session) throw new CompanyError('Expert launch stopped before durable registration', 409);
+        session.setPinned(true);
+        this._persistSessionStateNow(session);
+        return expertRuntimeRecipe(session);
+      },
       profiles: readSubscriptionProfiles,
       endpoints: () => readCustomModelHosts(getDataDir()),
       start: async (req, body) => {
@@ -4422,6 +4447,7 @@ export class WebServer extends EventEmitter {
               ompConfig: muxSession.mode === 'omp' ? savedState?.ompConfig : undefined,
               envOverrides: savedEnvOverrides,
               subscriptionProfile: savedState?.subscriptionProfile,
+              runtimeThreads: savedState?.runtimeThreads,
               effort: savedState?.effort,
               model: savedState?.model,
               advisorModel: savedState?.advisorModel,
