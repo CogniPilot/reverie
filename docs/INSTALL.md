@@ -71,4 +71,4 @@ docker run --detach --name reverie --restart unless-stopped \
 ```
 
 Then open http://127.0.0.1:3000 as above. To upgrade later, run
-`./setup.sh --version` with the new version number; it backs up console state and keeps both volumes.
+`./setup.sh --engine docker --version` with the new version number; it backs up console state and keeps both volumes.
