@@ -5330,6 +5330,42 @@ class ReverieChatApp {
     this.refreshProfiles();
   }
 
+  profilePortrait(avatar, name) {
+    avatar.classList.add('ca-profile-avatar');
+    const image = avatar.querySelector('img');
+    if (!image) return avatar;
+    const button = this.button('ca-profile-picture', `View ${name}'s picture`, () => this.openProfilePicture(image, name, button));
+    button.append(avatar);
+    image.addEventListener('error', () => button.replaceWith(avatar));
+    return button;
+  }
+
+  openProfilePicture(image, name, anchor) {
+    const src = image.getAttribute('src'); // Already validated by fillAvatar; preserve base-path URLs.
+    if (!src) return;
+    this.doc.querySelector('.ca-profile-image-view')?.close();
+    const dialog = this.el('dialog', 'ca-dialog ca-profile-image-view');
+    dialog.setAttribute('aria-label', `${name}'s picture`);
+    const full = this.el('img', 'ca-profile-full-image');
+    full.src = src; full.alt = `${name}'s picture`; full.referrerPolicy = 'no-referrer';
+    const close = this.button('ca-btn', 'Close picture', () => dialog.close(), { text: 'Close' });
+    dialog.append(full, close);
+    // The profile card's document-level focus trap must not pull focus out of this modal.
+    const profile = this.els.profile, key = this._profileKey, dismiss = this._profileDismiss;
+    if (key) this.doc.removeEventListener('keydown', key, true);
+    if (dismiss) this.doc.removeEventListener('pointerdown', dismiss, true);
+    dialog.addEventListener('cancel', event => { event.preventDefault(); dialog.close(); });
+    dialog.addEventListener('close', () => {
+      dialog.remove();
+      if (profile?.isConnected && this.els.profile === profile) {
+        if (key) this.doc.addEventListener('keydown', key, true);
+        if (dismiss) this.doc.addEventListener('pointerdown', dismiss, true);
+      }
+      if (anchor?.isConnected) anchor.focus();
+    }, { once: true });
+    this.doc.body.append(dialog); dialog.showModal(); close.focus();
+  }
+
   openProfile(m, anchor) {
     this.closeMenus();
     this.closeProfile();
@@ -5338,7 +5374,8 @@ class ReverieChatApp {
     card.setAttribute('aria-label', `${m.name} profile`);
     card.style.setProperty('--chat-hue', String(this.app._chatAccent(m.sessionId)));
     const top = this.el('div', 'ca-profile-top');
-    top.append(this.app._chatAvatar(m.sessionId, m.name, { size: 'md', state: this.presenceOf(m) }));
+    top.classList.add('ca-profile-top--portrait');
+    top.append(this.profilePortrait(this.app._chatAvatar(m.sessionId, m.name, { size: 'md', state: this.presenceOf(m) }), m.name));
     const names = this.el('div', 'ca-profile-names');
     names.append(this.literalText('strong', '', m.name));
     const tags = [m.role === 'coordinator' ? 'Admin' : 'Member', CA_STATE_LABEL[this.presenceOf(m)]].filter(Boolean).join(' · ');
@@ -5586,7 +5623,8 @@ class ReverieChatApp {
     card.style.setProperty('--chat-hue', String(p.hue ?? this.app._chatHue(name)));
     card.append(this.el('div', 'ca-me-banner'));
     const top = this.el('div', 'ca-profile-top');
-    top.append(this.userAvatar('md', 'online'));
+    top.classList.add('ca-profile-top--portrait');
+    top.append(this.profilePortrait(this.userAvatar('md', 'online'), name));
     const names = this.el('div', 'ca-profile-names');
     names.append(this.el('strong', '', name));
     const account = this.doc.defaultView?.__reverieUser?.username;
@@ -5696,9 +5734,9 @@ class ReverieChatApp {
   }
 
   /** Pictures are optional; initials provide a quiet fallback. */
-  expertAppearanceFields(form, currentPhoto = '', { name, random = false, avoidPhotos = [] } = {}) {
+  expertAppearanceFields(form, currentPhoto = '', { name, random = false, avoidPhotos = [], onPictureChange } = {}) {
     let intent = 0, converting = null;
-    const picture = this.pictureField('Profile picture', currentPhoto, () => {}, {
+    const picture = this.pictureField('Profile picture', currentPhoto, value => onPictureChange?.(value), {
       fallback: () => this.expertInitial(name?.value), alwaysRemove: true,
       onIntent: () => { intent++; converting = null; },
     });
@@ -5718,6 +5756,7 @@ class ReverieChatApp {
         const image = await this.imageToIcon(blob);
         if (ticket !== intent || !form.isConnected) return false;
         picture.set(image);
+        onPictureChange?.(image);
         return true;
       } catch {
         if (!automatic && ticket === intent) this.toast('The avatar could not be loaded. Try again or upload a picture.', 'error');
@@ -6112,8 +6151,22 @@ class ReverieChatApp {
     const pronouns = field('Pronouns', p.pronouns, 24, 'e.g. they/them');
     const status = field('Status', p.status, 60, 'What are you up to?');
     const pictureBefore = this.ownerAvatar || p.image;
+    const portrait = this.el('div', 'ca-owner-portrait');
+    let portraitPhoto = pictureBefore;
+    const paintPortrait = (photo) => {
+      portraitPhoto = photo;
+      const label = name.input.value || this.userName();
+      const avatar = this.app._chatAvatar(undefined, label, { size: 'md' });
+      avatar.style.setProperty('--chat-hue', String(p.hue ?? 200));
+      if (photo) this.fillAvatar(avatar, photo);
+      portrait.replaceChildren(this.profilePortrait(avatar, label));
+    };
+    if (!firstRun) {
+      paintPortrait(pictureBefore); dlg.append(portrait);
+      name.input.addEventListener('input', () => paintPortrait(portraitPhoto));
+    }
     if (!firstRun) form.append(name.wrap, instance, pronouns.wrap, status.wrap);
-    const appearance = !firstRun ? this.expertAppearanceFields(form, pictureBefore, { name: name.input }) : null;
+    const appearance = !firstRun ? this.expertAppearanceFields(form, pictureBefore, { name: name.input, onPictureChange: paintPortrait }) : null;
     const pic = appearance?.picture;
     const swatches = this.el('div', 'ca-swatches');
     swatches.setAttribute('role', 'radiogroup');

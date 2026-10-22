@@ -1143,7 +1143,7 @@ describe('your profile', () => {
     const h = await createHarness({ sessions, rooms: rooms(), stored });
     expect(h.document.querySelector('.ca-user-name')?.textContent).toBe('Sam');
     (h.document.querySelector('.ca-user-btn') as HTMLElement).click();
-    (h.document.querySelector('.ca-me-card button') as HTMLElement).click();
+    (h.document.querySelector('.ca-me-card .ca-profile-actions button') as HTMLElement).click();
     const reset = [...h.document.querySelectorAll('.ca-profile-edit .ca-btn')].find(
       (b) => b.textContent === 'Reset'
     ) as HTMLElement;
@@ -1663,7 +1663,7 @@ describe('the owner name', () => {
     });
     await settle(60);
     (h.document.querySelector('.ca-user-btn') as HTMLElement).click();
-    (h.document.querySelector('.ca-me-card button') as HTMLElement).click();
+    (h.document.querySelector('.ca-me-card .ca-profile-actions button') as HTMLElement).click();
     const dlg = h.document.querySelector('.ca-profile-edit') as HTMLDialogElement;
     (dlg.querySelector('input') as HTMLInputElement).value = 'Pat';
     (dlg.querySelector('input[type=checkbox]') as HTMLInputElement).checked = true;
@@ -1688,7 +1688,7 @@ describe('the owner name', () => {
     const h = await createHarness({ sessions, rooms: rs(), company: { employees: [], settings } });
     await settle(60);
     (h.document.querySelector('.ca-user-btn') as HTMLElement).click();
-    (h.document.querySelector('.ca-me-card button') as HTMLElement).click();
+    (h.document.querySelector('.ca-me-card .ca-profile-actions button') as HTMLElement).click();
     const dlg = h.document.querySelector('.ca-profile-edit') as HTMLDialogElement;
     (dlg.querySelector('input') as HTMLInputElement).value = 'Jim';
     (dlg.querySelector('form') as HTMLFormElement).requestSubmit();
@@ -2337,7 +2337,7 @@ describe('the owner name write-back', () => {
     // someone changes the company settings after the page loaded
     h.server.company = { employees: [], settings: { ...start, nightHour: 3, enabled: true } };
     (h.document.querySelector('.ca-user-btn') as HTMLElement).click();
-    (h.document.querySelector('.ca-me-card button') as HTMLElement).click();
+    (h.document.querySelector('.ca-me-card .ca-profile-actions button') as HTMLElement).click();
     const dlg = h.document.querySelector('.ca-profile-edit') as HTMLDialogElement;
     (dlg.querySelector('input') as HTMLInputElement).value = 'Pat';
     (dlg.querySelector('input[type=checkbox]') as HTMLInputElement).checked = true;
@@ -2561,7 +2561,7 @@ describe('picture icons', () => {
     const h = await createHarness({ sessions, rooms: rs() });
     h.shell.imageToIcon = async () => PNG;
     (h.document.querySelector('.ca-user-btn') as HTMLElement).click();
-    (h.document.querySelector('.ca-me-card button') as HTMLElement).click();
+    (h.document.querySelector('.ca-me-card .ca-profile-actions button') as HTMLElement).click();
     const dlg = h.document.querySelector('.ca-profile-edit') as HTMLDialogElement;
     const file = dlg.querySelector('input[type=file]') as HTMLInputElement;
     Object.defineProperty(file, 'files', { value: [new h.window.File(['x'], 'a.png', { type: 'image/png' })] });
@@ -2617,7 +2617,7 @@ describe('picture icons', () => {
   it('refuses a file that is not a picture, and tells you', async () => {
     const h = await createHarness({ sessions, rooms: rs() });
     (h.document.querySelector('.ca-user-btn') as HTMLElement).click();
-    (h.document.querySelector('.ca-me-card button') as HTMLElement).click();
+    (h.document.querySelector('.ca-me-card .ca-profile-actions button') as HTMLElement).click();
     const dlg = h.document.querySelector('.ca-profile-edit') as HTMLDialogElement;
     const file = dlg.querySelector('input[type=file]') as HTMLInputElement;
     Object.defineProperty(file, 'files', {
@@ -3286,7 +3286,7 @@ describe('the owner\u2019s picture on the server', () => {
   ];
   const openEditor = (h: Awaited<ReturnType<typeof createHarness>>) => {
     (h.document.querySelector('.ca-user-btn') as HTMLElement).click();
-    (h.document.querySelector('.ca-me-card button') as HTMLElement).click();
+    (h.document.querySelector('.ca-me-card .ca-profile-actions button') as HTMLElement).click();
     return h.document.querySelector('.ca-profile-edit') as HTMLDialogElement;
   };
 
