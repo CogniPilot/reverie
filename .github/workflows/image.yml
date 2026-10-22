@@ -3,7 +3,7 @@ name: image
 # Every pull request and every push to main builds the image, checks its contents and boots it once;
 # nothing is published.
 # A published GitHub release builds its tagged commit the same way, pushes it to
-# ghcr.io/<owner>/reverie as X.Y.Z, X.Y and latest, and attaches scripts/setup.sh to the release.
+# ghcr.io/<owner>/reverie as X.Y.Z, X.Y and latest, and attaches the Debian-tested offline bundle and setup.sh to the release.
 # The release notes must name the reviewed commit on a line "Reviewed commit: <40-hex sha>";
 # a release whose tag points elsewhere is refused.
 
@@ -37,6 +37,14 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
 
+      - name: Free unused hosted-runner toolchains
+        run: |
+          # This dedicated job builds with Nix; the preinstalled mobile, .NET
+          # and Haskell SDKs consume space needed for image layers and scans.
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup
+          docker image prune --all --force
+          df -h /
+
       - name: Match the release to the reviewed commit
         if: github.event_name == 'release'
         env:
@@ -51,30 +59,88 @@ jobs:
           echo "tag $TAG is $actual; release notes name ${reviewed:-nothing}"
           test -n "$reviewed" && test "$reviewed" = "$actual"
 
-      - name: Build
-        env:
-          VERSION: ${{ github.event.release.tag_name || github.sha }}
+      - uses: cachix/install-nix-action@448cde739abec1eaf0646249e3d25bb8d9bc7702 # v31
+
+      - name: Check and build the flake on vanilla Ubuntu
         run: |
-          docker build --file docker/Containerfile --tag "reverie:$GITHUB_SHA" \
-            --build-arg "REVERIE_VERSION=${VERSION#v}" \
-            --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" \
-            --label "org.opencontainers.image.revision=$GITHUB_SHA" .
+          mkdir -p "$HOME/scratch/reverie/build" "$HOME/scratch/reverie/tmp"
+          export TMPDIR="$HOME/scratch/reverie/tmp"
+          nix flake check --print-build-logs
+          nix develop --command node --test tests/*.mjs
+          nix build .#default --out-link "$HOME/scratch/reverie/build/app"
+          "$HOME/scratch/reverie/build/app/bin/reverie" --version
+          nix build .#memory --out-link "$HOME/scratch/reverie/build/memory"
+          "$HOME/scratch/reverie/build/memory/bin/python3" -I -c 'import reverie, experts; from reverie.memory import MemoryStore; MemoryStore(":memory:").close()'
+          nix build .#dockerImage --out-link "$HOME/scratch/reverie/build/docker-image"
+          docker load --input "$HOME/scratch/reverie/build/docker-image"
+          docker tag reverie:latest "reverie:$GITHUB_SHA"
           docker image inspect --format '{{.Id}}' "reverie:$GITHUB_SHA" | tee image-id.txt
+
+      - name: Start the native application with an empty instance
+        run: |
+          app="$HOME/scratch/reverie/build/app/bin/reverie"
+          native_home=$(mktemp -d "$HOME/scratch/reverie/tmp/native-home.XXXXXX")
+          HOME="$native_home" REVERIE_DATA_DIR="$native_home/data" REVERIE_PASSWORD=ci-local-password REVERIE_INSTALL_CLIS=none \
+            "$app" web --host 127.0.0.1 --port 3100 > "$native_home/console.log" 2>&1 &
+          native_pid=$!
+          trap 'kill "$native_pid" 2>/dev/null || true; wait "$native_pid" 2>/dev/null || true' EXIT
+          code=000
+          for _ in $(seq 1 60); do
+            code=$(curl --silent --output /dev/null --write-out '%{http_code}' http://127.0.0.1:3100/api/status || true)
+            [ "$code" = 401 ] && break
+            kill -0 "$native_pid" || { cat "$native_home/console.log"; exit 1; }
+            sleep 1
+          done
+          [ "$code" = 401 ] || { cat "$native_home/console.log"; exit 1; }
+
+      - name: Smoke-test the pinned Codex runtime against generated launch commands
+        timeout-minutes: 6
+        run: |
+          # Install only in this disposable container; published image layers stay unchanged.
+          trap 'docker rm --force codex-runtime-ci 2>/dev/null || true' EXIT
+          docker run --detach --name codex-runtime-ci --entrypoint sleep "reverie:$GITHUB_SHA" infinity
+          docker exec --env REVERIE_INSTALL_CLIS=codex codex-runtime-ci timeout --kill-after=5s 240s reverie-install-clis
+          # Parsing/startup must work without credentials or any possibility of a model request.
+          docker network disconnect bridge codex-runtime-ci
+          docker exec -i codex-runtime-ci node --input-type=module < .github/ci/codex-runtime-smoke.mjs
 
       - name: Check the image contents
         run: |
-          docker save "reverie:$GITHUB_SHA" --output image.tar
-          python3 -m cto.image_check image.tar --allow docker/image-check-allow.tsv --json image-check.json
+          image_archive="$HOME/scratch/reverie/build/image.tar"
+          docker save "reverie:$GITHUB_SHA" --output "$image_archive"
+          "$HOME/scratch/reverie/build/memory/bin/python3" -I -m reverie.image_check "$image_archive" --allow docker/image-check-allow.tsv --json image-check.json
           unpacked=$(docker image inspect --format '{{.Size}}' "reverie:$GITHUB_SHA")
-          compressed=$(gzip -1 --stdout image.tar | wc -c)
+          compressed=$(gzip -1 --stdout "$image_archive" | wc -c)
           echo "image size: $((unpacked / 1000000)) MB unpacked, about $((compressed / 1000000)) MB compressed" \
             | tee -a "$GITHUB_STEP_SUMMARY"
-          rm image.tar
+          # Preserve these checked bytes, with both offline install tags.
+          version=0.0.0-ci
+          if [ "${{ github.event_name }}" = release ]; then version="${{ github.event.release.tag_name }}"; version=${version#v}; fi
+          docker tag "reverie:$GITHUB_SHA" "ghcr.io/jgoppert/reverie:$version"
+          docker tag "reverie:$GITHUB_SHA" ghcr.io/jgoppert/reverie:latest
+          docker save ghcr.io/jgoppert/reverie:latest "ghcr.io/jgoppert/reverie:$version" --output "$image_archive"
+          "$HOME/scratch/reverie/build/memory/bin/python3" -I -m reverie.image_check "$image_archive" --allow docker/image-check-allow.tsv --json image-check.json
+          mkdir -p offline-bundle
+          mv "$image_archive" offline-bundle/reverie-image.tar
+          cp scripts/setup.sh offline-bundle/setup.sh
+          cp docs/INSTALL.md offline-bundle/INSTALL.md
+          printf 'Version: %s\nCommit: %s\nImage-ID: %s\nTags: ghcr.io/jgoppert/reverie:latest ghcr.io/jgoppert/reverie:%s\n' "$version" "$GITHUB_SHA" "$(cat image-id.txt)" "$version" > offline-bundle/IMAGE-REF.txt
+          (cd offline-bundle && sha256sum reverie-image.tar setup.sh INSTALL.md IMAGE-REF.txt > SHA256SUMS)
+          tar -C offline-bundle -czf "reverie-$version.tar.gz" .
 
-      - name: Boot with an empty instance and no mounts
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: offline-bundle
+          path: reverie-*.tar.gz
+          compression-level: 0
+          retention-days: 3
+          if-no-files-found: error
+
+      - name: Boot an empty instance and preserve it across recreation
         run: |
           # The image's own start script and default command, as a user would run it.
-          docker run --detach --name boot --network none "reverie:$GITHUB_SHA"
+          trap 'docker rm --force boot 2>/dev/null || true; docker volume rm reverie-ci-instance reverie-ci-home 2>/dev/null || true' EXIT
+          docker run --detach --restart unless-stopped --name boot --network none --env REVERIE_INSTALL_CLIS=none --volume reverie-ci-instance:/instances --volume reverie-ci-home:/home/agent "reverie:$GITHUB_SHA"
           status() { docker exec boot curl -sS -o /dev/null -w '%{http_code}' "$@" http://127.0.0.1:3000/api/status || true; }
           for _ in $(seq 1 60); do
             code=$(status)
@@ -96,10 +162,56 @@ jobs:
           # change, owner route 200, and the refusals. The one-time password stays in 0600 files.
           docker exec -i boot bash -s < .github/ci/boot-owner.sh || ok=
           test "$(docker exec boot stat -c %a /instances/default/owner-password)" = 600 || ok=
-          docker exec boot /opt/fleet/python/bin/python3 -I -c 'import cto, experts' || ok=
+          docker exec boot env REVERIE_INSTALL_CLIS=none reverie-install-clis || ok=
+          docker exec boot /opt/reverie/python/bin/python3 -I -c 'import reverie, experts' || ok=
           docker inspect --format 'state {{.State.Status}}, exit code {{.State.ExitCode}}' boot
           docker logs boot 2>&1 | tail -n 40
+          docker exec boot bash -c 'mkdir -p "$HOME/.config/reverie-ci"; printf preserved > "$HOME/.config/reverie-ci/home-marker"'
+          before=$(docker exec boot sha256sum /instances/default/owner-password /instances/default/console/owner-auth.json /instances/default/console/owner-auth.policy /home/agent/.config/reverie-ci/home-marker)
           docker rm --force boot
+          docker run --detach --restart unless-stopped --name boot --network none --env REVERIE_INSTALL_CLIS=none --volume reverie-ci-instance:/instances --volume reverie-ci-home:/home/agent "reverie:$GITHUB_SHA"
+          code=000
+          for _ in $(seq 1 60); do
+            code=$(status)
+            [ "$code" = 401 ] && break
+            sleep 1
+          done
+          [ "$code" = 401 ] || ok=
+          after=$(docker exec boot sha256sum /instances/default/owner-password /instances/default/console/owner-auth.json /instances/default/console/owner-auth.policy /home/agent/.config/reverie-ci/home-marker)
+          [ "$before" = "$after" ] || ok=
+          # Let Docker consider startup successful before testing its restart policy.
+          sleep 10
+          restart_before=$(docker inspect --format '{{.RestartCount}}' boot)
+          pid=$(docker inspect --format '{{.State.Pid}}' boot)
+          test "$(docker inspect --format '{{.Name}} {{.State.Running}}' boot)" = '/boot true'
+          [[ "$pid" =~ ^[0-9]+$ ]] || exit 1
+          [ "$pid" -gt 1 ] || exit 1
+          # docker kill marks the container manually stopped and suppresses this policy.
+          # Kill only this fresh test container's inspected host PID1 as an unexpected crash.
+          sudo kill -KILL -- "$pid"
+          restarted=0
+          for _ in $(seq 1 60); do
+            restart_after=$(docker inspect --format '{{.RestartCount}}' boot)
+            running=$(docker inspect --format '{{.State.Running}}' boot)
+            if [ "$restart_after" -gt "$restart_before" ] && [ "$running" = true ]; then restarted=1; break; fi
+            sleep 1
+          done
+          [ "$restarted" = 1 ] || { docker logs boot; exit 1; }
+          # Readiness is checked only after a confirmed new process starts.
+          code=000
+          for _ in $(seq 1 60); do
+            code=$(status)
+            [ "$code" = 401 ] && break
+            sleep 1
+          done
+          [ "$code" = 401 ] || ok=
+          recovered=$(docker exec boot sha256sum /instances/default/owner-password /instances/default/console/owner-auth.json /instances/default/console/owner-auth.policy /home/agent/.config/reverie-ci/home-marker)
+          [ "$before" = "$recovered" ] || ok=
+          docker stop --time 5 boot
+          stopped_restarts=$(docker inspect --format '{{.RestartCount}}' boot)
+          sleep 2
+          test "$(docker inspect --format '{{.State.Running}}' boot)" = false
+          test "$(docker inspect --format '{{.RestartCount}}' boot)" = "$stopped_restarts"
           test "${ok:-}" = 1
 
       - name: Publish the release
@@ -125,8 +237,34 @@ jobs:
           docker logout ghcr.io
           docker image inspect --format '{{index .RepoDigests 0}}' "$IMAGE:$version" | tee -a "$GITHUB_STEP_SUMMARY"
 
-  release-assets:
+  debian-install:
     needs: image
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: offline-bundle
+          path: bundle
+      - name: Free runner space and prepare Debian Docker storage
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup
+          docker image prune --all --force
+          sudo mkdir -p /mnt/debian-docker
+          df -h / /mnt/debian-docker
+      - name: Install the bundle on Debian 12 with its own Docker daemon
+        run: |
+          docker run --rm --privileged \
+            --volume /mnt/debian-docker:/var/lib/docker \
+            --volume "$PWD/bundle:/input:ro" \
+            --volume "$PWD/.github/ci:/ci:ro" \
+            debian:12 bash /ci/debian-install.sh
+
+  release-assets:
+    needs: [image, debian-install]
     if: github.event_name == 'release' && !github.event.release.prerelease
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -136,9 +274,12 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-
-      - name: Attach the setup script
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: offline-bundle
+          path: bundle
+      - name: Attach the Debian-tested offline bundle and setup script
         env:
           TAG: ${{ github.event.release.tag_name }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release upload "$TAG" scripts/setup.sh --clobber --repo "$GITHUB_REPOSITORY"
+        run: gh release upload "$TAG" "bundle/reverie-${TAG#v}.tar.gz" scripts/setup.sh --clobber --repo "$GITHUB_REPOSITORY"

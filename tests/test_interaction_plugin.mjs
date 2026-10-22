@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createInteractionController, CONTINUATION } from '../cto/plugins/interaction.mjs';
+import { createInteractionController, CONTINUATION } from '../python/reverie/plugins/interaction.mjs';
 
 async function setup(t, options = {}) {
   const directory = await mkdtemp(join(tmpdir(), 'interaction-test-'));
@@ -33,7 +33,7 @@ test('conversation is the default and cannot auto-continue', async (t) => {
   const f = await setup(t); assert.equal((await f.controller.status('session_a')).mode, 'chat');
   await f.controller.onIdle('session_a'); assert.equal(f.scheduled.size, 0); assert.equal(f.prompts.length, 0);
   await assert.rejects(f.controller.beforeTool('session_a', 'bash'), /Conversation mode/);
-  await f.controller.beforeTool('session_a', 'cto_room');
+  await f.controller.beforeTool('session_a', 'reverie_room');
   await f.controller.beforeTool('session_a', 'agent_profile');
 });
 test('the agent may choose bounded coding and return to conversation', async (t) => {
@@ -137,9 +137,9 @@ async function wrapper(t, child = false, policy = {}) {
   const schema = { max() { return this; }, optional() { return this; } };
   const tool = Object.assign((definition) => definition, { schema: { enum: () => schema, string: () => schema } });
   globalThis.__interactionTestTool = tool;
-  const source = (await readFile(new URL('../cto/plugins/interaction-plugin.mjs', import.meta.url), 'utf8'))
+  const source = (await readFile(new URL('../python/reverie/plugins/interaction-plugin.mjs', import.meta.url), 'utf8'))
     .replace("import { tool } from '@opencode-ai/plugin';", 'const tool = globalThis.__interactionTestTool;')
-    .replace("'./interaction.mjs'", JSON.stringify(new URL('../cto/plugins/interaction.mjs', import.meta.url).href));
+    .replace("'./interaction.mjs'", JSON.stringify(new URL('../python/reverie/plugins/interaction.mjs', import.meta.url).href));
   const factory = (await import('data:text/javascript;base64,' + Buffer.from(source).toString('base64'))).default;
   const hooks = await factory({ directory: f.directory, client: {
     session: { ...f.args.client.session, get: async () => ({ data: child ? { parentID: 'parent' } : {} }) },
@@ -193,11 +193,11 @@ test('unavailable state permits a conversational answer but blocks coding tools'
 
 test('profile editing stays conversational, passes literal arguments, and is primary-only', async (t) => {
   const f = await wrapper(t);
-  const oldPath = process.env.PATH, oldSession = process.env.CODEMAN_SESSION_ID;
+  const oldPath = process.env.PATH, oldSession = process.env.REVERIE_SESSION_ID;
   const bin = join(f.directory, 'bin'); await mkdir(bin);
   await writeFile(join(bin, 'reverie'), '#!/usr/bin/env node\nprocess.stdout.write(JSON.stringify(process.argv.slice(2)))', { mode: 0o700 });
-  process.env.PATH = bin + ':' + oldPath; process.env.CODEMAN_SESSION_ID = 'profile-session';
-  t.after(() => { process.env.PATH = oldPath; if (oldSession === undefined) delete process.env.CODEMAN_SESSION_ID; else process.env.CODEMAN_SESSION_ID = oldSession; });
+  process.env.PATH = bin + ':' + oldPath; process.env.REVERIE_SESSION_ID = 'profile-session';
+  t.after(() => { process.env.PATH = oldPath; if (oldSession === undefined) delete process.env.REVERIE_SESSION_ID; else process.env.REVERIE_SESSION_ID = oldSession; });
   await f.hooks['tool.execute.before']({ sessionID: 'session_a', tool: 'agent_profile' });
   const result = await f.hooks.tool.agent_profile.execute({ name: 'Helper $(literal)', icon: '🦊' }, { sessionID: 'session_a' });
   assert.deepEqual(JSON.parse(result), ['agent', 'profile', '--name', 'Helper $(literal)', '--icon', '🦊']);

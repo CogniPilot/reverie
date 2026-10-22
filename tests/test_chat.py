@@ -1,13 +1,13 @@
-import tests  # noqa: F401  isolates CODEMAN_*/FLEET_* before cto is imported
+import tests  # noqa: F401  isolates REVERIE_* before reverie is imported
 import json
 import unittest
 
-from cto.chat import Brain, ChatDaemon, IDLE_USER_TEXT
-from cto.embeddings import HashedEmbedder
-from cto.memory import MemoryStore
-from cto.migrate import migrate_history
-from cto.room import Room, is_for_me
-from tests.helpers import FakeRoom, fake_client, temp_config, safety_floor_terms, synthetic_safety_lexicon
+from reverie.chat import Brain, ChatDaemon, IDLE_USER_TEXT
+from reverie.embeddings import HashedEmbedder
+from reverie.memory import MemoryStore
+from reverie.migrate import migrate_history
+from reverie.room import Room, is_for_me
+from tests.helpers import FakeRoom, fake_client, temp_config, output_policy_terms, synthetic_output_policy
 
 
 class ForMeTest(unittest.TestCase):
@@ -44,7 +44,7 @@ class RoomTest(unittest.TestCase):
         r.legacy_hold_path = legacy
         self.assertFalse(r.held())
         legacy.write_text("")
-        with self.assertLogs("fleet", level="WARNING") as cm:
+        with self.assertLogs("reverie", level="WARNING") as cm:
             self.assertTrue(r.held())
             self.assertTrue(r.held())
         self.assertEqual(len(cm.output), 1)
@@ -108,10 +108,10 @@ class BrainTest(unittest.TestCase):
         brain4.reply("hi", max_tokens=600)
         self.assertEqual(t4.calls[0]["max_tokens"], 600)
 
-    @synthetic_safety_lexicon()
+    @synthetic_output_policy()
     def test_reply_floor_retry_then_drop(self):
-        age_term, explicit_term = safety_floor_terms()
-        bad = f"Picture {age_term} {explicit_term}."
+        first_marker, second_marker = output_policy_terms()
+        bad = f"Picture {first_marker} {second_marker}."
         answers = iter([bad, "\x44amn, compilers, bless their cold little hearts."])
         brain, t, room = make_brain(lambda msgs: next(answers))
         self.assertEqual(brain.reply("hi"), "\x44amn, compilers, bless their cold little hearts.")   # profanity is not screened
@@ -149,7 +149,7 @@ class BrainTest(unittest.TestCase):
 
     def test_rate_pending(self):
         brain, t, _ = make_brain("9")
-        a = brain.store.add_episode("I love you CTO", "Oh my.", 3, "default")
+        a = brain.store.add_episode("I prefer concise reports", "Understood.", 3, "default")
         j = brain.store.add_episode(IDLE_USER_TEXT, "ha", 2, "default", meta={"idle": True})
         self.assertEqual(brain.rate_pending(10), 1)
         self.assertEqual(brain.store.get(a.id).importance, 9.0)

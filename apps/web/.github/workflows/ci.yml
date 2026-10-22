@@ -1,0 +1,132 @@
+name: CI
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+
+jobs:
+  ci:
+    name: Typecheck & Lint
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Check package-lock.json version sync
+        run: npm run check:lockfile
+
+      - name: Type check
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Frontend JS syntax check
+        run: npm run check:frontend-syntax
+
+      # Asks `vitest list` what CI would actually collect, rather than matching
+      # filenames: a browser-driven test missing from BROWSER_TEST_GLOBS
+      # (config/test-suites.ts) passes locally and dies in the test job with
+      # "browserType.launch: Executable doesn't exist".
+      - name: Browser-test exclusion check
+        run: npm run check:browser-excludes
+
+      - name: Format check
+        run: npm run format:check
+
+      # install.sh reaches users through `curl | bash` with nothing between it and
+      # them, and until now nothing in this repo checked it at all: no shellcheck,
+      # no bats, and the vitest gate is Node-only.
+      - name: install.sh syntax
+        run: bash -n install.sh
+
+      - name: Nix installer help
+        run: bash install.sh --help
+
+      - name: CLI catalogue artifacts are in sync with stock.ts
+        run: npm run generate:cli-catalog -- --check
+
+      - name: Server boot smoke test
+        run: |
+          set -u
+          if ! command -v tmux >/dev/null; then
+            sudo apt-get update -qq
+            sudo apt-get install -y tmux
+          fi
+          npx tsx src/index.ts web --port 3151 > /tmp/boot.log 2>&1 &
+          SERVER_PID=$!
+          trap "kill $SERVER_PID 2>/dev/null || true" EXIT
+          for i in $(seq 1 30); do
+            if curl -fsS http://localhost:3151/api/status -o /dev/null; then
+              echo "Server booted in ${i}s"
+              exit 0
+            fi
+            if ! kill -0 $SERVER_PID 2>/dev/null; then
+              echo "Server exited before becoming ready. Logs:"
+              cat /tmp/boot.log
+              exit 1
+            fi
+            sleep 1
+          done
+          echo "Server did not respond on /api/status within 30s. Logs:"
+          cat /tmp/boot.log
+          exit 1
+
+  test:
+    name: Unit & integration tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install tmux
+        run: |
+          if ! command -v tmux >/dev/null; then
+            sudo apt-get update -qq
+            sudo apt-get install -y tmux
+          fi
+
+      - name: Run unit & integration tests
+        # Excludes the suites that need chromium, per-machine PNG baselines or a
+        # quiet machine — see config/test-suites.ts for the list and the reason
+        # behind each entry. Identical to what `npm test` runs locally.
+        # Safe in CI: TmuxManager no-ops all shell commands under VITEST (test/setup.ts).
+        run: npm run test:ci
+
+      - name: Run xterm-zerolag-input package tests
+        # Layers 1-3 of the predictive-echo suites (unit laws, fixture replay,
+        # seeded fuzz): deterministic, no browser, no live server. Depends on
+        # the ROOT `npm ci` above — workspaces hoist the package's vitest into
+        # the root node_modules; do not add a separate install here.
+        run: npx vitest run
+        working-directory: packages/xterm-zerolag-input
+
+# The browser suite also runs nightly (and on demand) in .github/workflows/browser-suite.yml;
+# that job is informational and never gates a push or a PR.
+# Note: three suites are excluded from CI, each with its own local runner:
+#   npm run test:browser  Playwright + chromium (+ a live server, and a real
+#                         codex binary for codex-predictive-echo)
+#   npm run test:mobile   the above plus environment-specific PNG baselines
+#   npm run test:perf     wall-clock benchmarks; need an otherwise idle machine
+# config/test-suites.ts holds the globs; the configs derive from it so the
+# exclusions here and those runners cannot drift apart. Everything else runs in
+# the `test` job above, which is the same thing `npm test` runs.

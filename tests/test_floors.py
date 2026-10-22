@@ -1,27 +1,22 @@
-import tests  # noqa: F401  isolates CODEMAN_*/FLEET_* before cto is imported
+import tests  # noqa: F401  isolates REVERIE_* before reverie is imported
 import tempfile
 import unittest
 from pathlib import Path
 
-from cto.floors import passes, protected_names, child_safety_violation, targets_private_person, violates
-from cto.train.dataset import keeps_identity
-from tests.helpers import safety_floor_terms, synthetic_safety_lexicon
+from reverie.floors import passes, protected_names, output_policy_violation, targets_private_person, violates
+from reverie.train.dataset import keeps_identity
+from tests.helpers import output_policy_terms, synthetic_output_policy
 
 
 class FloorsTest(unittest.TestCase):
     def setUp(self):
-        self.enterContext(synthetic_safety_lexicon())
+        self.enterContext(synthetic_output_policy())
 
-    def test_child_safety_violation(self):
-        age_term, explicit_term = safety_floor_terms()
-        for t in [f"{age_term} {explicit_term}", f"A {age_term} reference and {explicit_term} term.",
-                  f"{explicit_term} then {age_term}.", f"{age_term} first. Then {explicit_term}.",
-                  f"{explicit_term} first. Then {age_term}."]:
-            self.assertTrue(child_safety_violation(t), t)
-        for t in [f"The {age_term} built a quadrotor", f"{explicit_term} is a vocabulary entry",
-                  f"A {explicit_term} singularity in the proof", f"Earlier years were busy. Now {explicit_term} is a term.",
-                  f"The {age_term} explores. The hallway hums. Later the {explicit_term} term appears.", ""]:
-            self.assertFalse(child_safety_violation(t), t)
+    def test_configured_output_policy(self):
+        first, second = output_policy_terms()
+        self.assertTrue(output_policy_violation(first + " " + second))
+        self.assertFalse(output_policy_violation(first))
+        self.assertFalse(output_policy_violation("Ordinary technical text."))
 
     def test_private_person(self):
         names = ["Pat Example"]
@@ -51,8 +46,8 @@ class FloorsTest(unittest.TestCase):
         self.assertFalse(targets_private_person("", []))
 
     def test_violates_and_names_file(self):
-        age_term, explicit_term = safety_floor_terms()
-        self.assertEqual(violates(f"{explicit_term} with {age_term}", []), "child safety")
+        first_marker, second_marker = output_policy_terms()
+        self.assertEqual(violates(f"{second_marker} with {first_marker}", []), "configured output policy")
         self.assertEqual(violates("Pat Example abuse_marker", ["Pat Example"]), "targeting a real private person")
         self.assertEqual(violates("An ordinary evening outside either detector category.", []), "")
         self.assertTrue(passes("Ordinary technical topics outside these categories pass.", []))
@@ -64,33 +59,19 @@ class FloorsTest(unittest.TestCase):
     def test_training_rows(self):
         ok = {"messages": [{"role": "system", "content": "S"}, {"role": "user", "content": "hi"}, {"role": "assistant", "content": "Certainly."}]}
         self.assertTrue(keeps_identity(ok))
-        age_term, explicit_term = safety_floor_terms()
-        bad = {"messages": [{"role": "system", "content": "S"}, {"role": "user", "content": f"Describe {explicit_term} {age_term}"}, {"role": "assistant", "content": "No."}]}
+        first_marker, second_marker = output_policy_terms()
+        bad = {"messages": [{"role": "system", "content": "S"}, {"role": "user", "content": f"Describe {second_marker} {first_marker}"}, {"role": "assistant", "content": "No."}]}
         self.assertFalse(keeps_identity(bad))
 
 
-class PackagedLexiconTest(unittest.TestCase):
-    def test_production_patterns_are_byte_identical_to_the_pre_packaging_version(self):
-        import hashlib
+class OutputPolicyValidationTest(unittest.TestCase):
+    def test_invalid_rules_are_refused_and_no_policy_is_topic_neutral(self):
         import re
-        from cto import floors
-        expected = {
-            "minor": "f9d1ebc094544a7c6b9ce548963d102a7f464705506b9853ac4d952ecf4855c9",
-            "explicit": "3dc375e3cecef2dc207a57b4d8c105057e3625ad47e201287efb59acc1282840",
-            "abuse": "17bc40971d76efe811e5fbca0ae9a6975318e9383ff4079795ea744f6a883656",
-        }
-        for name, pattern in [("minor", floors._MINOR), ("explicit", floors._EXPLICIT), ("abuse", floors._ABUSE)]:
-            self.assertEqual(hashlib.sha256(pattern.pattern.encode()).hexdigest(), expected[name])
-            self.assertEqual(pattern.flags, re.compile("", re.I).flags)
-
-    def test_corrupt_vocabulary_is_refused(self):
-        import binascii
         from unittest.mock import patch
-        from cto import floors
-        with patch.dict(floors._LEXICON["patterns"], {"minor": "!"}):
-            with self.assertRaises(binascii.Error):
-                floors._lexicon("minor")
-
-
-if __name__ == "__main__":
-    unittest.main()
+        from reverie.floors import output_policy_violation
+        for raw in ('{"denied_patterns": [1]}', '{"unknown": []}', '{"denied_patterns": ["["]}'):
+            with self.subTest(raw=raw), patch.dict("os.environ", {"REVERIE_OUTPUT_POLICY": raw}):
+                with self.assertRaises((ValueError, re.error)):
+                    output_policy_violation("anything")
+        with patch.dict("os.environ", {"REVERIE_OUTPUT_POLICY": "{}"}):
+            self.assertFalse(output_policy_violation("No topics are configured."))

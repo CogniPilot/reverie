@@ -1,4 +1,5 @@
-import tests  # noqa: F401  isolates CODEMAN_*/FLEET_* before cto is imported
+from tests import executable_script
+import tests  # noqa: F401  isolates REVERIE_* before reverie is imported
 import io
 import json
 import os
@@ -8,7 +9,7 @@ import time
 import unittest
 from unittest import mock
 
-from cto import gpu_publisher as gp
+from reverie import gpu_publisher as gp
 
 GOOD = "NVIDIA GeForce RTX 4090, 12, 4096, 24576"
 
@@ -27,7 +28,9 @@ class GpuPublisherTests(unittest.TestCase):
     def smi(self, lines=GOOD, exit_code=0, sleep=0):
         self.fakes = getattr(self, "fakes", 0) + 1
         path = self.root / ("nvidia-smi-%d" % self.fakes)
-        body = "#!/bin/sh\n" + ("sleep %d\n" % sleep if sleep else "") + "cat <<'EOF'\n%s\nEOF\nexit %d\n" % (lines, exit_code)
+        body = executable_script("#!/usr/bin/env python3\n") + (
+            "import sys, time\ntime.sleep(%r)\nsys.stdout.write(%r)\nsys.exit(%r)\n"
+            % (sleep, lines + "\n", exit_code))
         path.write_text(body); path.chmod(0o755)
         return str(path)
 
@@ -101,7 +104,9 @@ class GpuPublisherTests(unittest.TestCase):
                 gp.write(self.base, bad, b"{}")
 
     def test_the_base_must_be_the_host_state_dir(self):
-        self.assertEqual(gp.state_base("/home/x"), Path("/home/x/.local/state/reverie"))
+        self.assertEqual(gp.state_base("/home/x"), Path("/home/x/reverie/runtime"))
+        with mock.patch.dict(os.environ, {"REVERIE_ROOT": str(self.root / "selected-root")}):
+            self.assertEqual(gp.state_base(), self.root / "selected-root" / "runtime")
         os.chmod(self.base, 0o770)
         with self.assertRaises(gp.Refused):
             self.publish()

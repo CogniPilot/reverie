@@ -1,0 +1,128 @@
+#!/usr/bin/env bash
+# Host-only fixed rebuild and replacement. Request files contain no instructions.
+set -euo pipefail
+umask 077
+: "${REVERIE_REPO:?Set the owner-authorized source checkout}"
+name=${REVERIE_CONTAINER_NAME:-reverie}
+port=${REVERIE_PORT:-3000}
+root=${REVERIE_ROOT:-$HOME/reverie}
+control=${REVERIE_CONTROL_DIR:-$root/runtime/control}
+build=${REVERIE_UPDATE_BUILD_DIR:-$root/scratch/update}
+state=${REVERIE_UPDATE_STATE_DIR:-$root/runtime/update-state}
+mkdir -p "$build" "$state"
+exec 9>"$state/update.lock"
+flock 9
+running() { [[ "$(docker inspect --format '{{.State.Running}}' "$name" 2>/dev/null)" == true ]]; }
+running || { echo 'Reverie is stopped; refusing an update that would restart it.' >&2; exit 1; }
+[[ -f "$REVERIE_REPO/flake.nix" ]] || { echo 'Configured checkout has no flake.nix.' >&2; exit 1; }
+if [[ ! "$port" =~ ^[0-9]+$ ]]; then echo 'Invalid REVERIE_PORT.' >&2; exit 1; fi
+if ((port < 1 || port > 65535)); then echo 'Invalid REVERIE_PORT.' >&2; exit 1; fi
+rm -f -- "$control/update.request"
+# Extract argv with NUL delimiters; no request or container text is evaluated as shell.
+# Reuse existing named volumes and bind mounts, including all owner-selected scratch disks.
+metadata=$(docker inspect "$name")
+image_id=$(printf '%s' "$metadata" | jq -r '.[0].Image')
+image_env=$(docker image inspect --format '{{json .Config.Env}}' "$image_id")
+user=$(printf '%s' "$metadata" | jq -er '.[0].Config.User | select(type == "string" and length > 0)')
+[[ "$user" =~ ^[a-zA-Z0-9_][a-zA-Z0-9_.-]*(:[a-zA-Z0-9_][a-zA-Z0-9_.-]*)?$ ]] || { echo 'Existing container has an invalid user identity.' >&2; exit 1; }
+process_args=(--user "$user")
+deployment_override=${REVERIE_DEPLOYMENT_SIGNATURE:-}
+[[ -z "$deployment_override" || "$deployment_override" =~ ^[a-f0-9]{64}$ ]] || { echo 'Invalid owner deployment signature.' >&2; exit 1; }
+deployment=$(printf '%s' "$metadata" | jq -r '.[0].Config.Labels["reverie.deployment"] // ""')
+if [[ -z "$deployment" ]]; then deployment=$deployment_override; fi
+if [[ -n "$deployment" ]]; then
+  [[ "$deployment" =~ ^[a-f0-9]{64}$ ]] || { echo 'Invalid existing deployment signature.' >&2; exit 1; }
+  process_args+=(--label "reverie.deployment=$deployment")
+fi
+working_dir=$(printf '%s' "$metadata" | jq -r '.[0].Config.WorkingDir // ""')
+if [[ -n "$working_dir" ]]; then
+  [[ "$working_dir" == /* ]] || { echo 'Existing working directory is not absolute.' >&2; exit 1; }
+  process_args+=(--workdir "$working_dir")
+fi
+memory=$(printf '%s' "$metadata" | jq -r '.[0].HostConfig.Memory // 0')
+swap=$(printf '%s' "$metadata" | jq -r '.[0].HostConfig.MemorySwap // 0')
+pids=$(printf '%s' "$metadata" | jq -r '.[0].HostConfig.PidsLimit // 0')
+[[ "$memory" =~ ^[0-9]+$ && "$swap" =~ ^-?[0-9]+$ && "$pids" =~ ^-?[0-9]+$ ]] || { echo 'Invalid existing resource limits.' >&2; exit 1; }
+((swap >= -1 && pids >= -1)) || { echo 'Invalid existing resource limits.' >&2; exit 1; }
+if ((memory > 0)); then process_args+=(--memory "$memory"); fi
+if ((memory > 0 || swap != 0)); then process_args+=(--memory-swap "$swap"); fi
+process_args+=(--pids-limit "$pids")
+mount_file="$build/mounts-$$"
+env_file="$build/env-$$"
+trap 'rm -f -- "$mount_file" "$env_file"' EXIT
+printf '%s' "$metadata" | jq -j '
+  .[0].Mounts[] |
+  if (.Type != "volume" and .Type != "bind") then error("unsupported mount type") else . end |
+  (.Name // .Source) as $source |
+  if (($source | contains(",")) or (.Destination | contains(","))) then error("mount paths containing commas need owner configuration") else . end |
+  "--mount\u0000type=\(.Type),src=\($source),dst=\(.Destination)\(if .RW then "" else ",readonly" end)\u0000"
+' > "$mount_file"
+printf '%s' "$metadata" | jq -j --argjson base "${image_env:-[]}" '.[0].Config.Env[]? | select(. as $entry | $base | index($entry) | not) | "--env\u0000\(.)\u0000"' > "$env_file"
+mapfile -d '' -t mounts < "$mount_file"
+mapfile -d '' -t environment < "$env_file"
+# Optional owner-selected telemetry exposes only this directory, read-only.
+gpu=${REVERIE_GPU_PUBLISHED_DIR:-}
+if [[ -n "$gpu" ]]; then
+  [[ "$gpu" == /* && -d "$gpu" && "$gpu" != *,* && "$gpu" != *$'\n'* ]] || { echo 'Invalid GPU telemetry directory.' >&2; exit 1; }
+  existing_gpu=$(printf '%s' "$metadata" | jq -r '.[0].Mounts[] | select(.Destination == "/host-published") | .Source')
+  if [[ -n "$existing_gpu" ]]; then
+    printf '%s' "$metadata" | jq -e --arg source "$gpu" '.[0].Mounts | any(.Destination == "/host-published" and .Type == "bind" and .Source == $source and .RW == false)' >/dev/null || { echo 'Existing GPU mount differs; refusing replacement.' >&2; exit 1; }
+  else
+    mounts+=(--mount "type=bind,src=$gpu,dst=/host-published,readonly")
+  fi
+fi
+rm -f -- "$mount_file" "$env_file"
+# Source edits are built in Nix; the host never executes a checkout shell script.
+# Build users must traverse this separate scratch directory. Keep mount/env records
+# and host locks private; do not relax the update metadata directory.
+nix_build=${REVERIE_NIX_BUILD_DIR:-$HOME/scratch/reverie/nix-build}
+(umask 022; mkdir -p "$nix_build")
+nix_build=$(realpath "$nix_build")
+ancestor=$nix_build
+while :; do
+  mode=$(stat -c %a "$ancestor")
+  (( (8#$mode & 1) != 0 )) || { echo "Nix build directory is not traversable by build users: $ancestor. Select an accessible scratch path with REVERIE_NIX_BUILD_DIR." >&2; exit 1; }
+  [[ "$ancestor" != / ]] || break
+  ancestor=$(dirname "$ancestor")
+done
+nix build "path:$REVERIE_REPO#dockerImage" --out-link "$build/image" \
+  --option build-dir "$nix_build"
+docker load --input "$build/image" >/dev/null
+candidate="reverie:update-$(date -u +%Y%m%dT%H%M%S)-$$"
+docker tag reverie:latest "$candidate"
+# A stop during a slow build is authoritative.
+running || { echo 'Reverie was stopped during the build; leaving it stopped.' >&2; exit 1; }
+backup="$name-rollback-$$"
+stopped=0
+renamed=0
+success=0
+rollback() {
+  local result=$?
+  trap - EXIT
+  rm -f -- "$mount_file" "$env_file"
+  if [[ "$success" == 0 && "$stopped" == 1 ]]; then
+    echo 'Update failed; restoring the previous container.' >&2
+    if [[ "$renamed" == 1 ]]; then
+      docker rm --force "$name" >/dev/null 2>&1 || true
+      docker rename "$backup" "$name"
+    fi
+    docker start "$name" >/dev/null || echo 'Rollback could not start; inspect the retained container.' >&2
+  fi
+  exit "$result"
+}
+trap rollback EXIT
+docker stop --time 30 "$name" >/dev/null
+stopped=1
+docker rename "$name" "$backup"
+renamed=1
+docker run --detach --name "$name" --restart unless-stopped \
+  --publish "127.0.0.1:$port:3000" "${process_args[@]}" "${mounts[@]}" "${environment[@]}" "$candidate" >/dev/null
+ready=0
+for _ in $(seq 1 60); do
+  if running && [[ "$(curl --silent --output /dev/null --write-out '%{http_code}' "http://127.0.0.1:$port/api/status" || true)" == 401 ]]; then ready=1; break; fi
+  sleep 1
+done
+[[ "$ready" == 1 ]] || { echo 'Replacement did not become ready.' >&2; exit 1; }
+success=1
+docker rm "$backup" >/dev/null || echo 'Previous stopped rollback container was retained.' >&2
+echo 'Reverie updated; persistent instance and home mounts were retained.'

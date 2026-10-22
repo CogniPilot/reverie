@@ -11,7 +11,7 @@
 #
 # Environment:
 #   NVIDIA_SMI                 nvidia-smi to run (default: the NixOS system path, then /usr/bin)
-#   GPU_HOLD_FILE              a file whose presence means "the GPU is taken" (default ~/.config/reverie/gpu.hold)
+#   GPU_HOLD_FILE              a file whose presence means "the GPU is taken" (default ~/reverie/runtime/gpu.hold)
 #   GPU_IDLE_MAX_UTIL          highest utilisation % that still counts as idle (default 5)
 #   GPU_IDLE_SAMPLES           samples, one second apart (default 3)
 #   GPU_IDLE_ALLOWED_PROCESS   the router's process name (default llama-server)
@@ -20,7 +20,7 @@
 #                              unnamed process blocks, with a message saying how to allow it.
 set -euo pipefail
 
-hold="${GPU_HOLD_FILE:-$HOME/.config/reverie/gpu.hold}"
+hold="${GPU_HOLD_FILE:-${REVERIE_ROOT:-$HOME/reverie}/runtime/gpu.hold}"
 max="${GPU_IDLE_MAX_UTIL:-5}"
 samples="${GPU_IDLE_SAMPLES:-3}"
 allowed="${GPU_IDLE_ALLOWED_PROCESS:-llama-server}"

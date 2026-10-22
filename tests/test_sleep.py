@@ -1,4 +1,4 @@
-import tests  # noqa: F401  isolates CODEMAN_*/FLEET_* before cto is imported
+import tests  # noqa: F401  isolates REVERIE_* before reverie is imported
 import io
 import datetime
 import json
@@ -8,7 +8,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
 
-from cto import sleep
+from reverie import sleep
 
 NIGHT = 1_800_000_000.0 - (1_800_000_000 % 86400) + 2 * 3600       # 02:00 UTC
 DAY = NIGHT + 10 * 3600                                              # 12:00 UTC
@@ -430,7 +430,7 @@ class TickTest(unittest.TestCase):
         self.assertLessEqual(note_len, sleep.NOTE_CHARS)
         store = f.stores["/x/expert.json"]
         self.assertEqual(sorted(store.episodes), ["room:b1", "room:m3"])
-        self.assertEqual(float(store.state["fleet_last_activity"]), NIGHT - 840)
+        self.assertEqual(float(store.state["reverie_last_activity"]), NIGHT - 840)
         note = (f.tmp / "morning-note.md").read_text()
         self.assertTrue(note.startswith("Dream ("))
         self.assertIn("corridor of servers", note)

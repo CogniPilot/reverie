@@ -26,10 +26,12 @@ transport does not authenticate owner text cryptographically; its sender labels
 must not be treated as a security boundary. Underlying transport authentication
 requires a separate fix.
 
-Owner-configured instances may use `kind: "agent"` with any organizational role.
+Owner-configured instances use `kind: "agent"` with any organizational role,
+including CTO and COO. The console owns explicit role permissions; Python instance files do not define
+a `permissions` object.
 This installs neutral `chat` and `coding` OpenCode profiles on the same model and
-with the same permission policy. The role does not grant or revoke tools. Legacy
-CTO instances retain their existing profile. A runtime policy `session_name` keeps
+with the same permission policy. The role does not grant or revoke tools. All agents use the shared profile model; CTO and COO titles do not select a
+privileged agent type. A runtime policy `session_name` keeps
 the configured display identity on recovery instead of generating a CTO label.
 
 The `agent_profile` tool changes the current agent's display name or icon directly

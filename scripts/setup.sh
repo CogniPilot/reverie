@@ -4,12 +4,12 @@
 #   setup.sh                    install or start the latest release
 #   setup.sh --version 0.1.0    install or switch to that release (an upgrade backs up console state first)
 #   setup.sh --rollback         go back to the release that ran before the last switch, with its backed-up state
-#   setup.sh --password         print the owner login
-#   setup.sh --owner            create the owner account; prints a one-time password for /owner/login
+#   setup.sh --password         print the internal runtime credential (advanced)
+#   setup.sh --owner            manual host provisioning; prints a temporary password
 #   setup.sh --offline [PATH]   load a local image archive (default ./reverie-image.tar); never pull
 #   setup.sh --dry-run ...      print every command, change nothing
 #
-# Options: --port N (default 3000), --name NAME (default reverie; also the data volume NAME-data),
+# Options: --port N (default 3000), --name NAME (default reverie; also the volumes NAME-data and NAME-home),
 #          --image REF (default ghcr.io/jgoppert/reverie), --with-claude-code (installs that CLI at start,
 #          under your own account and its license), --engine docker|podman.
 # The server listens on 127.0.0.1 only. Expose it further only behind your own authenticated proxy or tunnel.
@@ -28,7 +28,7 @@ while [ $# -gt 0 ]; do
       offline=1
       if [ "$#" -gt 1 ] && [[ "$2" != --* ]]; then archive=$2; shift; fi
       ;;
-    --with-claude-code) clis="claude-code" ;;
+    --with-claude-code) clis="claude" ;;
     --rollback) mode=rollback ;;
     --password) mode=password ;;
     --owner) mode=owner ;;
@@ -54,8 +54,14 @@ if [ -z "$engine" ]; then
     exit 1
   fi
 fi
+if [ "$dry" = 0 ] && [ "$mode" != password ] && ! "$engine" info >/dev/null 2>&1; then
+  echo "$engine is installed but not usable by $(id -un)." >&2
+  [ "$engine" = docker ] && echo "Start it (sudo systemctl enable --now docker) and add yourself to the docker group (sudo usermod -aG docker $(id -un), then log in again)." >&2
+  exit 1
+fi
 volume="$name-data"
-state_dir=${XDG_CONFIG_HOME:-$HOME/.config}/reverie
+home_volume="$name-home"
+state_dir=${REVERIE_ROOT:-$HOME/reverie}/runtime/setup
 state="$state_dir/$name.versions"   # one image reference per line, newest last
 
 run() { if [ "$dry" = 1 ]; then printf '+ %s\n' "$*"; else "$@"; fi; }
@@ -78,7 +84,7 @@ pull() {
   fi
 }
 
-start() {  # start IMAGE_REF: replace the container, keep the volume
+start() {  # start IMAGE_REF: replace the container, keep both volumes
   if exists; then run "$engine" stop --time 30 "$name"; run "$engine" rm "$name"; fi
   local restart=(--restart unless-stopped)
   [ "$engine" = podman ] && restart=(--restart always)
@@ -87,6 +93,7 @@ start() {  # start IMAGE_REF: replace the container, keep the volume
   run "$engine" run "${pull_policy[@]}" --detach --name "$name" "${restart[@]}" \
     --publish "127.0.0.1:$port:3000" \
     --mount "type=volume,src=$volume,dst=/instances" \
+    --mount "type=volume,src=$home_volume,dst=/home/agent" \
     --env "REVERIE_INSTALL_CLIS=$clis" \
     "$1"
 }
@@ -138,19 +145,39 @@ if [ "$engine" = podman ] && command -v systemctl >/dev/null 2>&1; then
     echo "note: enable podman-restart.service (systemctl --user) so Reverie starts at boot" >&2
 fi
 
-if [ "$dry" = 0 ] && command -v curl >/dev/null 2>&1; then
-  for _ in $(seq 1 60); do
-    if curl -fsS -o /dev/null "http://127.0.0.1:$port/api/status" 2>/dev/null || [ "$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$port/api/status")" = 401 ]; then
-      break
+if [ "$dry" = 0 ]; then
+  # Wait for the console; never report success for a server that did not come up.
+  # Without curl, speak HTTP over bash's /dev/tcp: a bare TCP connect is not enough, because
+  # the engine's port proxy accepts connections before the server inside is listening.
+  http_code() {
+    if command -v curl >/dev/null 2>&1; then
+      curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$port/api/status" || true
+    else
+      ( exec 3<>"/dev/tcp/127.0.0.1/$port" || exit
+        printf 'GET /api/status HTTP/1.0\r\nHost: 127.0.0.1\r\n\r\n' >&3
+        IFS=' ' read -r -t 5 proto status _ <&3 || exit
+        case "$proto" in HTTP/1.[01]) ;; *) exit ;; esac
+        case "$status" in [0-9][0-9][0-9]) printf '%s' "$status" ;; esac ) 2>/dev/null || true
     fi
+  }
+  up=0
+  for _ in $(seq 1 90); do
+    case "$(http_code)" in 2[0-9][0-9]|401) up=1; break ;; esac
+    [ "$("$engine" container inspect --format '{{.State.Running}}' "$name" 2>/dev/null)" = true ] || break
     sleep 2
   done
+  if [ "$up" = 0 ]; then
+    echo "Reverie did not answer on 127.0.0.1:$port. Last container log lines:" >&2
+    "$engine" logs --tail 50 "$name" >&2 || true
+    exit 1
+  fi
 fi
 cat <<EOF
 
 Reverie is running: http://127.0.0.1:$port
-Owner login: user "owner", password from:  $0 --password${name:+ --name $name}
-Owner sign-in: on first install run  $0 --owner${name:+ --name $name}  and sign in at /owner/login
+Open the address above to create your owner account or sign in.
+Manual host provisioning (advanced): $0 --owner${name:+ --name $name}
 Data volume: $volume (kept across upgrades; console backups inside it)
+Home volume: $home_volume (agent tools, provider logins and conversation history)
 Upgrade:     $0 --version X.Y.Z      Roll back: $0 --rollback
 EOF

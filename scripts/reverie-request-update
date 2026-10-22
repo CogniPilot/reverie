@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# Inside Reverie: request the single owner-configured host rebuild action.
+set -euo pipefail
+control=${REVERIE_CONTROL_DIR:-/run/reverie-control}
+[[ $# == 0 ]] || { echo 'Usage: reverie-request-update' >&2; exit 2; }
+[[ -d "$control" && -w "$control" ]] || { echo 'The owner has not enabled host updates for this runtime.' >&2; exit 1; }
+touch -- "$control/update.request"
+echo 'Host rebuild requested.'

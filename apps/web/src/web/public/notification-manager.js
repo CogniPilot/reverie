@@ -1,0 +1,557 @@
+/**
+ * @fileoverview Five-layer notification system for session events and alerts.
+ *
+ * The NotificationManager class implements five notification layers:
+ *   1. In-app notification drawer (slide-out panel with grouped notifications)
+ *   2. Tab title flash (alternating "⚠️ (N) reverie:<host>" / "reverie:<host>" when tab is hidden; uses this.originalTitle so it tracks any per-host title)
+ *   3. Browser Notification API (desktop push; auto-closes after 8s by default, configurable per device in Settings → Notifications)
+ *   4. Web Push via service worker (OS-level notifications when tab is closed)
+ *   5. Audio alerts (Web Audio API beep, user-opt-in)
+ *
+ * Features:
+ * - Per-event-type preferences (enabled, browser, audio, push) with v1→v5 migration
+ * - Device-specific defaults (notifications disabled on mobile by default)
+ * - 5s notification grouping window to batch rapid-fire events
+ * - 100-notification cap with oldest eviction
+ * - Rate limiting: 3s between browser notifications
+ * - Visibility tracking (pauses title flash when tab becomes visible)
+ * - iOS Safari bfcache support via pageshow event
+ *
+ * @class NotificationManager
+ * @param {ReverieApp} app - Reference to the main app instance
+ *
+ * @dependency constants.js (STUCK_THRESHOLD_DEFAULT_MS, timing constants)
+ * @dependency mobile-handlers.js (MobileDetection stable handheld identity/device type)
+ * @loadorder 4 of 15 — loaded after voice-input.js, before keyboard-accessory.js
+ */
+
+// Reverie — Multi-layer notification system
+// Loaded after mobile-handlers.js, before app.js
+
+// Notification Manager - Multi-layer browser notification system
+class NotificationManager {
+  constructor(app) {
+    this.app = app;
+    this.notifications = [];
+    this.unreadCount = 0;
+    this.isTabVisible = !document.hidden;
+    this.isDrawerOpen = false;
+    this.originalTitle = document.title;
+    this.titleFlashInterval = null;
+    this.titleFlashState = false;
+    this.lastBrowserNotifTime = 0;
+    this.audioCtx = null;
+    this.renderScheduled = false;
+
+    // Debounce grouping: Map<key, {notification, timeout}>
+    this.groupingMap = new Map();
+
+    // Load preferences
+    this.preferences = this.loadPreferences();
+
+    // Visibility tracking
+    document.addEventListener('visibilitychange', () => {
+      this.isTabVisible = !document.hidden;
+      if (this.isTabVisible) {
+        this.onTabVisible();
+      }
+    });
+    // iOS Safari: pageshow fires on back-forward cache restore (bfcache)
+    window.addEventListener('pageshow', (e) => {
+      if (e.persisted) {
+        this.isTabVisible = true;
+        this.onTabVisible();
+      }
+    });
+  }
+
+  _usesMobilePreferences() {
+    return (
+      MobileDetection.isHandheldDevice?.() ??
+      MobileDetection.getDeviceType() === 'mobile'
+    );
+  }
+
+  getDefaultPreferences() {
+    const defaultEventTypes = {
+      permission_prompt: { enabled: true, browser: true, audio: true, push: false },
+      elicitation_dialog: { enabled: true, browser: true, audio: true, push: false },
+      idle_prompt: { enabled: true, browser: false, audio: false, push: false },
+      stop: { enabled: false, browser: false, audio: false, push: false },
+      session_error: { enabled: true, browser: true, audio: false, push: false },
+      respawn_cycle: { enabled: true, browser: false, audio: false, push: false },
+      token_milestone: { enabled: true, browser: false, audio: false, push: false },
+      ralph_complete: { enabled: true, browser: true, audio: true, push: false },
+      subagent_spawn: { enabled: false, browser: false, audio: false, push: false },
+      subagent_complete: { enabled: false, browser: false, audio: false, push: false },
+    };
+
+    // Device-specific defaults: mobile has notifications disabled by default
+    const isMobile = this._usesMobilePreferences();
+    return {
+      enabled: !isMobile, // Disabled on mobile by default
+      browserNotifications: !isMobile,
+      audioAlerts: false,
+      stuckThresholdMs: STUCK_THRESHOLD_DEFAULT_MS,
+      // How long a corner toast stays on screen, and how long a browser notification
+      // stays up before Reverie closes it (ms; per-device like the rest of these)
+      toastDurationMs: DEFAULT_TOAST_DURATION_MS,
+      browserAutoCloseMs: AUTO_CLOSE_NOTIFICATION_MS,
+      // Legacy urgency muting (keep for backwards compat)
+      muteCritical: false,
+      muteWarning: false,
+      muteInfo: false,
+      // Per-event-type preferences
+      eventTypes: defaultEventTypes,
+      _version: 6,
+    };
+  }
+
+  /**
+   * Apply the complete v1→v5 migration to either local or server-hydrated
+   * preferences. Keeping one normalization path prevents fresh browsers from
+   * reviving retired drawer-only hook defaults.
+   */
+  normalizePreferences(rawPreferences) {
+    const defaults = this.getDefaultPreferences();
+    if (
+      !rawPreferences ||
+      typeof rawPreferences !== 'object' ||
+      Array.isArray(rawPreferences)
+    ) {
+      return defaults;
+    }
+
+    const prefs = {
+      ...rawPreferences,
+      eventTypes:
+        rawPreferences.eventTypes &&
+        typeof rawPreferences.eventTypes === 'object' &&
+        !Array.isArray(rawPreferences.eventTypes)
+          ? Object.fromEntries(
+              Object.entries(rawPreferences.eventTypes).map(([key, value]) => [
+                key,
+                value && typeof value === 'object' ? { ...value } : value,
+              ])
+            )
+          : undefined,
+    };
+    const version = Number.isInteger(prefs._version) ? prefs._version : 0;
+
+    // Migrate: v1 had browserNotifications defaulting to false
+    if (version < 2) {
+      prefs.browserNotifications = true;
+    }
+    // Migrate: v2 -> v3 adds eventTypes
+    if (version < 3) {
+      prefs.eventTypes = { ...defaults.eventTypes };
+    }
+    // Migrate: v3 -> v4 adds push field to all eventTypes
+    if (version < 4 && prefs.eventTypes) {
+      for (const key of Object.keys(prefs.eventTypes)) {
+        if (prefs.eventTypes[key] && prefs.eventTypes[key].push === undefined) {
+          prefs.eventTypes[key].push = false;
+        }
+      }
+    }
+    // Migrate: v4 -> v5 removes the drawer-only Response Complete default.
+    // Preserve users who opted into any external delivery channel.
+    if (version < 5) {
+      const stopPref = prefs.eventTypes?.stop;
+      if (
+        stopPref?.enabled === true &&
+        !stopPref.browser &&
+        !stopPref.audio &&
+        !stopPref.push
+      ) {
+        stopPref.enabled = false;
+      }
+    }
+
+    // Migrate: v5 -> v6 turns the browser alert for an idle session off (it fires for every agent terminal that waits for a
+    // prompt). Anyone who also chose sound or push for it, or turned the event off, keeps their choice.
+    if (version < 6) {
+      const idlePref = prefs.eventTypes?.idle_prompt;
+      if (idlePref?.enabled !== false && idlePref?.browser === true && !idlePref.audio && !idlePref.push) {
+        idlePref.browser = false;
+      }
+    }
+
+    return {
+      ...defaults,
+      ...prefs,
+      toastDurationMs: this.clampDuration(prefs.toastDurationMs, defaults.toastDurationMs),
+      browserAutoCloseMs: this.clampDuration(prefs.browserAutoCloseMs, defaults.browserAutoCloseMs),
+      eventTypes: { ...defaults.eventTypes, ...prefs.eventTypes },
+      _version: 6,
+    };
+  }
+
+  /** A display time in ms kept within [1s, 5min]; anything unusable falls back to the default. */
+  clampDuration(value, fallback) {
+    if (typeof value !== 'number' || !Number.isFinite(value)) return fallback;
+    return Math.min(MAX_NOTIFICATION_DURATION_MS, Math.max(MIN_NOTIFICATION_DURATION_MS, Math.round(value)));
+  }
+
+  /** Display time for corner toasts that do not set their own `duration`. */
+  getToastDurationMs() {
+    return this.clampDuration(this.preferences?.toastDurationMs, DEFAULT_TOAST_DURATION_MS);
+  }
+
+  loadPreferences() {
+    try {
+      const storageKey = this.getStorageKey();
+      const saved = localStorage.getItem(storageKey);
+      if (saved) {
+        const normalized = this.normalizePreferences(JSON.parse(saved));
+        localStorage.setItem(storageKey, JSON.stringify(normalized));
+        return normalized;
+      }
+    } catch (_e) { /* ignore */ }
+    return this.getDefaultPreferences();
+  }
+
+  // Get storage key for notification prefs (device-specific)
+  getStorageKey() {
+    return this._usesMobilePreferences()
+      ? 'reverie-notification-prefs-mobile'
+      : 'reverie-notification-prefs';
+  }
+
+  savePreferences() {
+    localStorage.setItem(this.getStorageKey(), JSON.stringify(this.preferences));
+  }
+
+  notify({ urgency, category, sessionId, sessionName, title, message }) {
+    if (!this.preferences.enabled) return;
+
+    // Map notification categories to eventType preference keys
+    const categoryToEventType = {
+      'hook-permission': 'permission_prompt',
+      'hook-elicitation': 'elicitation_dialog',
+      'hook-idle': 'idle_prompt',
+      'hook-stop': 'stop',
+      'session-error': 'session_error',
+      'session-crash': 'session_error',
+      'session-stuck': 'idle_prompt',
+      'respawn-blocked': 'respawn_cycle',
+      'auto-accept': 'respawn_cycle',
+      'auto-clear': 'respawn_cycle',
+      'ralph-complete': 'ralph_complete',
+      'circuit-breaker': 'respawn_cycle',
+      'exit-gate': 'ralph_complete',
+      'subagent-spawn': 'subagent_spawn',
+      'subagent-complete': 'subagent_complete',
+      // Team lifecycle hooks are agent activity, not session-idle/stop alerts.
+      // Reuse the existing opt-in agent categories instead of making them noisy.
+      'hook-teammate-idle': 'subagent_spawn',
+      'hook-task-completed': 'subagent_complete',
+    };
+    const eventTypeKey = categoryToEventType[category] || category;
+
+    // Check per-event-type preferences first
+    const eventPref = this.preferences.eventTypes?.[eventTypeKey];
+    let shouldBrowserNotify = false;
+    let shouldAudioAlert = false;
+
+    if (eventPref) {
+      // Event type found - use its specific preferences
+      if (!eventPref.enabled) return;
+      shouldBrowserNotify = eventPref.browser && this.preferences.browserNotifications;
+      shouldAudioAlert = eventPref.audio && this.preferences.audioAlerts;
+    } else {
+      // Fall back to urgency-based muting for unknown categories
+      if (urgency === 'critical' && this.preferences.muteCritical) return;
+      if (urgency === 'warning' && this.preferences.muteWarning) return;
+      if (urgency === 'info' && this.preferences.muteInfo) return;
+      // Default browser/audio behavior based on urgency
+      shouldBrowserNotify = this.preferences.browserNotifications &&
+        (urgency === 'critical' || urgency === 'warning' || !this.isTabVisible);
+      shouldAudioAlert = urgency === 'critical' && this.preferences.audioAlerts;
+    }
+
+    // Grouping: same category+session within 5s updates count instead of new entry
+    const groupKey = `${category}:${sessionId || 'global'}`;
+    const existing = this.groupingMap.get(groupKey);
+    if (existing) {
+      existing.notification.count = (existing.notification.count || 1) + 1;
+      existing.notification.message = message;
+      existing.notification.timestamp = Date.now();
+      clearTimeout(existing.timeout);
+      existing.timeout = setTimeout(() => this.groupingMap.delete(groupKey), GROUPING_TIMEOUT_MS);
+      this.scheduleRender();
+      return;
+    }
+
+    const notification = {
+      id: Date.now() + '-' + Math.random().toString(36).slice(2, 7),
+      urgency,
+      category,
+      sessionId,
+      sessionName,
+      title,
+      message,
+      timestamp: Date.now(),
+      read: false,
+      count: 1,
+    };
+
+    // Add to log (cap at NOTIFICATION_LIST_CAP)
+    this.notifications.unshift(notification);
+    if (this.notifications.length > NOTIFICATION_LIST_CAP) this.notifications.pop();
+
+    // Track for grouping
+    const timeout = setTimeout(() => this.groupingMap.delete(groupKey), GROUPING_TIMEOUT_MS);
+    this.groupingMap.set(groupKey, { notification, timeout });
+
+    // Update unread
+    this.unreadCount++;
+    this.updateBadge();
+    this.scheduleRender();
+
+    // Layer 2: Tab title (when tab unfocused)
+    if (!this.isTabVisible) {
+      this.updateTabTitle();
+    }
+
+    // Layer 3: Browser notification
+    if (shouldBrowserNotify) {
+      this.sendBrowserNotif(title, message, category, sessionId);
+    }
+
+    // Layer 4: Audio alert
+    if (shouldAudioAlert) {
+      this.playAudioAlert();
+    }
+  }
+
+  // Layer 1: Drawer rendering
+  scheduleRender() {
+    if (this.renderScheduled) return;
+    this.renderScheduled = true;
+    requestAnimationFrame(() => {
+      this.renderScheduled = false;
+      this.renderDrawer();
+    });
+  }
+
+  renderDrawer() {
+    const list = document.getElementById('notifList');
+    const empty = document.getElementById('notifEmpty');
+    if (!list || !empty) return;
+
+    if (this.notifications.length === 0) {
+      list.style.display = 'none';
+      empty.style.display = 'flex';
+      return;
+    }
+
+    list.style.display = 'block';
+    empty.style.display = 'none';
+
+    list.innerHTML = this.notifications.map(n => {
+      const urgencyClass = `notif-item-${n.urgency}`;
+      const readClass = n.read ? '' : ' unread';
+      const countLabel = n.count > 1 ? `<span class="notif-item-count">&times;${n.count}</span>` : '';
+      const sessionChip = n.sessionName ? `<span class="notif-item-session">${escapeHtml(n.sessionName)}</span>` : '';
+      return `<div class="notif-item ${urgencyClass}${readClass}" data-notif-id="${n.id}" data-session-id="${n.sessionId || ''}" onclick="app.notificationManager.clickNotification(${escapeHtml(JSON.stringify(n.id))})">
+        <div class="notif-item-header">
+          <span class="notif-item-title">${escapeHtml(n.title)}${countLabel}</span>
+          <span class="notif-item-time">${this.relativeTime(n.timestamp)}</span>
+        </div>
+        <div class="notif-item-message">${escapeHtml(n.message)}</div>
+        ${sessionChip}
+      </div>`;
+    }).join('');
+  }
+
+  // Layer 2: Tab title with unread count
+  updateTabTitle() {
+    if (this.unreadCount > 0 && !this.isTabVisible) {
+      if (!this.titleFlashInterval) {
+        this.titleFlashInterval = setInterval(() => {
+          this.titleFlashState = !this.titleFlashState;
+          document.title = this.titleFlashState
+            ? `\u26A0\uFE0F (${this.unreadCount}) ${this.originalTitle}`
+            : this.originalTitle;
+        }, TITLE_FLASH_INTERVAL_MS);
+        // Set immediately
+        document.title = `\u26A0\uFE0F (${this.unreadCount}) ${this.originalTitle}`;
+      }
+    }
+  }
+
+  stopTitleFlash() {
+    if (this.titleFlashInterval) {
+      clearInterval(this.titleFlashInterval);
+      this.titleFlashInterval = null;
+      this.titleFlashState = false;
+      document.title = this.originalTitle;
+    }
+  }
+
+  // Layer 3: Web Notification API
+  sendBrowserNotif(title, body, tag, sessionId) {
+    if (!this.preferences.browserNotifications) return;
+    if (typeof Notification === 'undefined') return;
+    if (Notification.permission === 'default') {
+      // Auto-request on first notification attempt
+      Notification.requestPermission().then(result => {
+        if (result === 'granted') {
+          // Re-send this notification now that we have permission
+          this.sendBrowserNotif(title, body, tag, sessionId);
+        }
+      });
+      return;
+    }
+    if (Notification.permission !== 'granted') return;
+
+    // Rate limit
+    const now = Date.now();
+    if (now - this.lastBrowserNotifTime < BROWSER_NOTIF_RATE_LIMIT_MS) return;
+    this.lastBrowserNotifTime = now;
+
+    const localizedTitle = window.reverieT?.(title) || title;
+    const localizedBody = window.reverieT?.(body) || body;
+    const notif = new Notification(`${this.originalTitle}: ${localizedTitle}`, {
+      body: localizedBody,
+      tag, // Groups same-tag notifications
+      icon: (window.ReverieBase?.url || ((p) => p))('/favicon.ico'),
+      silent: true, // We handle audio ourselves
+    });
+
+    notif.onclick = () => {
+      window.focus();
+      if (sessionId && this.app.sessions.has(sessionId)) {
+        this.app.selectSession(sessionId);
+      }
+      notif.close();
+    };
+
+    // Auto-close
+    setTimeout(() => notif.close(), this.clampDuration(this.preferences.browserAutoCloseMs, AUTO_CLOSE_NOTIFICATION_MS));
+  }
+
+  async requestPermission() {
+    if (typeof Notification === 'undefined') {
+      this.app.showToast('Browser notifications not supported', 'warning');
+      return;
+    }
+    const result = await Notification.requestPermission();
+    const statusEl = document.getElementById('notifPermissionStatus');
+    if (statusEl) statusEl.textContent = `Status: ${result}`;
+    if (result === 'granted') {
+      this.preferences.browserNotifications = true;
+      this.savePreferences();
+      this.app.showToast('Notifications enabled', 'success');
+    } else {
+      this.app.showToast(`Permission ${result}`, 'warning');
+    }
+  }
+
+  // Layer 4: Audio alert via Web Audio API
+  playAudioAlert() {
+    try {
+      if (!this.audioCtx) {
+        this.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      }
+      if (this.audioCtx.state === 'suspended') {
+        this.audioCtx.resume();
+      }
+      const ctx = this.audioCtx;
+      const oscillator = ctx.createOscillator();
+      const gain = ctx.createGain();
+      oscillator.connect(gain);
+      gain.connect(ctx.destination);
+      oscillator.type = 'sine';
+      oscillator.frequency.setValueAtTime(660, ctx.currentTime);
+      gain.gain.setValueAtTime(0.15, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.15);
+      oscillator.start(ctx.currentTime);
+      oscillator.stop(ctx.currentTime + 0.15);
+    } catch (_e) { /* Audio not available */ }
+  }
+
+  // UI interactions
+  toggleDrawer() {
+    const drawer = document.getElementById('notifDrawer');
+    if (!drawer) return;
+    this.isDrawerOpen = !this.isDrawerOpen;
+    drawer.classList.toggle('open', this.isDrawerOpen);
+    if (this.isDrawerOpen) {
+      this.renderDrawer();
+    }
+  }
+
+  clickNotification(notifId) {
+    const notif = this.notifications.find(n => n.id === notifId);
+    if (!notif) return;
+
+    // Mark as read
+    if (!notif.read) {
+      notif.read = true;
+      this.unreadCount = Math.max(0, this.unreadCount - 1);
+      this.updateBadge();
+    }
+
+    // Switch to session if available
+    if (notif.sessionId && this.app.sessions.has(notif.sessionId)) {
+      this.app.selectSession(notif.sessionId);
+      this.toggleDrawer();
+    }
+
+    this.scheduleRender();
+  }
+
+  markAllRead() {
+    this.notifications.forEach(n => { n.read = true; });
+    this.unreadCount = 0;
+    this.updateBadge();
+    this.stopTitleFlash();
+    this.scheduleRender();
+  }
+
+  clearAll() {
+    this.notifications = [];
+    this.unreadCount = 0;
+    this.updateBadge();
+    this.stopTitleFlash();
+    this.scheduleRender();
+  }
+
+  updateBadge() {
+    const badge = document.getElementById('notifBadge');
+    if (!badge) return;
+    if (this.unreadCount > 0) {
+      badge.style.display = 'flex';
+      badge.textContent = this.unreadCount > 99 ? '99+' : String(this.unreadCount);
+    } else {
+      badge.style.display = 'none';
+    }
+  }
+
+  onTabVisible() {
+    this.stopTitleFlash();
+    // If drawer is open, mark all as read
+    if (this.isDrawerOpen) {
+      this.markAllRead();
+    }
+    // Re-fit terminal and send resize to PTY so this client's dimensions win.
+    // Fixes broken layout when switching between desktop and mobile on the same session.
+    // sendResize fits (floored) as its first synchronous step, so the bare
+    // fit that used to precede it was both redundant and a chance to leave
+    // xterm at the unfloored proposal (#464).
+    if (this.app?.activeSessionId) {
+      this.app.sendResize(this.app.activeSessionId);
+    }
+  }
+
+  // Utilities
+  relativeTime(ts) {
+    const diff = Math.floor((Date.now() - ts) / 1000);
+    if (diff < 60) return 'now';
+    if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+    if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+    return `${Math.floor(diff / 86400)}d ago`;
+  }
+}

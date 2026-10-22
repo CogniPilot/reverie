@@ -1,14 +1,14 @@
-import tests  # noqa: F401  isolates CODEMAN_*/FLEET_* before cto is imported
+import tests  # noqa: F401  isolates REVERIE_* before reverie is imported
 import json
 import tempfile
 import unittest
 from pathlib import Path
 
-from cto.train.config import TrainConfig
-from cto.train.serve import ServeConfig, Server, dump_serve_config, load_serve_config
-from cto.train.smoke import requirements
-from cto.train.swap import CheckResult
-from cto.train.train_qlora import latest_checkpoint, plan
+from reverie.train.config import TrainConfig
+from reverie.train.serve import ServeConfig, Server, dump_serve_config, load_serve_config
+from reverie.train.smoke import requirements
+from reverie.train.swap import CheckResult
+from reverie.train.train_qlora import latest_checkpoint, plan
 
 
 class FakeProc:
@@ -149,7 +149,7 @@ class TrainHelpersTest(unittest.TestCase):
         self.assertEqual(plan(cfg)["optim"], "paged_adamw_8bit")
 
     def test_snapshot_markers(self):
-        from cto.train.train_qlora import snapshot_base, snapshot_ready
+        from reverie.train.train_qlora import snapshot_base, snapshot_ready
 
         d = Path(tempfile.mkdtemp())
         self.assertFalse(snapshot_ready(d))
@@ -165,12 +165,17 @@ class TrainHelpersTest(unittest.TestCase):
     def test_smoke_requirements(self):
         from unittest import mock
 
-        from cto.train.smoke import hf_home
+        from reverie.train.smoke import hf_home
 
         with mock.patch.dict("os.environ", {}, clear=True):
             self.assertEqual(hf_home(), Path.home() / ".cache" / "huggingface")
         with mock.patch.dict("os.environ", {"HF_HOME": "/x/hf"}):
             self.assertEqual(hf_home(), Path("/x/hf"))
+        cache = tempfile.TemporaryDirectory()
+        self.addCleanup(cache.cleanup)
+        environment = mock.patch.dict("os.environ", {"HF_HOME": cache.name})
+        environment.start()
+        self.addCleanup(environment.stop)
         req = requirements(TrainConfig(base_model="Qwen/Qwen3.8-27B"))
         self.assertEqual(req["download_gb_estimate"], 54.0)
         self.assertEqual(req["steps"], 20)

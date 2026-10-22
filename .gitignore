@@ -1,5 +1,11 @@
 __pycache__/
 *.pyc
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
 .venv/
 *.gguf
 *.safetensors
@@ -17,6 +23,8 @@ opencode.json
 .opencode/
 node_modules/
 result
+result-*
+.direnv/
 .claude/
 
 *.egg-info/
@@ -26,4 +34,4 @@ dist/
 /local
 
 # Public compatibility template; runtime .env files remain private.
-!apps/console/docker/.env.example
+!apps/web/docker/.env.example

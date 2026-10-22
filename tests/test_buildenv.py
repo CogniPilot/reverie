@@ -1,4 +1,4 @@
-import tests  # noqa: F401  isolates CODEMAN_*/FLEET_* before cto is imported
+import tests  # noqa: F401  isolates REVERIE_* before reverie is imported
 import fcntl
 import io
 import json
@@ -12,8 +12,8 @@ from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest import mock
 
-import cto.buildenv
-from cto.buildenv import (EX_FEWER_FILES, EX_TEMPFAIL, admit_pids, build_env, count_test_files, group_rss, ledger_estimate,
+import reverie.buildenv
+from reverie.buildenv import (EX_FEWER_FILES, EX_TEMPFAIL, admit_pids, build_env, count_test_files, group_rss, ledger_estimate,
                           main, pids_needed, pids_usage, pinned_toolchain, preflight, run, vitest_file_count)
 
 MiB = 1 << 20
@@ -256,7 +256,7 @@ class BuildEnvTests(unittest.TestCase):
         isolated = lambda *a, **kw: real(*a, **dict(kw, scratch=self.scratch, rust_cache=self.cache, cgroup=self.cgroup,
                                                     disk_reserve=0))
         out, err = io.TextIOWrapper(io.BytesIO()), io.TextIOWrapper(io.BytesIO())
-        with mock.patch.object(cto.buildenv, "run", isolated), redirect_stdout(out), redirect_stderr(err):
+        with mock.patch.object(reverie.buildenv, "run", isolated), redirect_stdout(out), redirect_stderr(err):
             code = main(["--project", "demo", "--repo", str(self.repo), "--expect", "100M", "--disk", "1M",
                          "--ledger", str(ledger)] + list(argv))
         out.flush(); err.flush()
@@ -323,10 +323,10 @@ class BuildEnvTests(unittest.TestCase):
     def test_tee_keeps_only_a_bounded_tail(self):
         read, write = os.pipe()
         sink = io.TextIOWrapper(io.BytesIO())
-        tee = cto.buildenv.Tee(os.fdopen(read, "rb"), sink); tee.start()
+        tee = reverie.buildenv.Tee(os.fdopen(read, "rb"), sink); tee.start()
         with os.fdopen(write, "wb") as pipe: pipe.write(b"y" * (200 << 10) + b"\n Test Files  2 passed (2)\n")
         tee.join(5)
-        self.assertEqual(len(tee.tail), cto.buildenv.TAIL_BYTES)
+        self.assertEqual(len(tee.tail), reverie.buildenv.TAIL_BYTES)
         self.assertEqual(len(sink.buffer.getvalue()), (200 << 10) + 27)               # everything passed through
         self.assertEqual(vitest_file_count(tee.tail), 2)
 
@@ -347,8 +347,10 @@ class BuildEnvTests(unittest.TestCase):
 
     def test_cli_requires_estimates_and_exits_tempfail_when_refused(self):
         with self.assertRaises(SystemExit): main(["--project", "demo", "--", "true"])        # no --expect/--disk
-        code = main(["--project", "demo", "--repo", str(self.repo), "--expect", "1G", "--disk", "1000000G",
-                     "--ledger", str(self.scratch / "l.jsonl"), "--", "true"])
+        isolated = lambda *a, **kw: run(*a, **dict(kw, scratch=self.scratch, rust_cache=self.cache, cgroup=self.cgroup))
+        with mock.patch("reverie.buildenv.run", side_effect=isolated):
+            code = main(["--project", "demo", "--repo", str(self.repo), "--expect", "1G", "--disk", "1000000G",
+                         "--ledger", str(self.scratch / "l.jsonl"), "--", "true"])
         self.assertEqual(code, EX_TEMPFAIL)
 
 

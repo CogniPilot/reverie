@@ -1,0 +1,538 @@
+{
+  "version": 1,
+  "style": "Quiet Ink",
+  "avatars": [
+    {
+      "id": "pack-01",
+      "name": "Deadpan Rocket",
+      "tags": [
+        "engineering",
+        "space"
+      ],
+      "mood": "deadpan",
+      "src": "/assets/avatars/pack-01.png"
+    },
+    {
+      "id": "pack-02",
+      "name": "Binary Rain",
+      "tags": [
+        "software",
+        "computing"
+      ],
+      "mood": "thoughtful",
+      "src": "/assets/avatars/pack-02.png"
+    },
+    {
+      "id": "pack-03",
+      "name": "Gear Thinker",
+      "tags": [
+        "engineering",
+        "mechanics"
+      ],
+      "mood": "puzzled",
+      "src": "/assets/avatars/pack-03.png"
+    },
+    {
+      "id": "pack-04",
+      "name": "Stargazer",
+      "tags": [
+        "astronomy",
+        "research"
+      ],
+      "mood": "curious",
+      "src": "/assets/avatars/pack-04.png"
+    },
+    {
+      "id": "pack-05",
+      "name": "Circuit Snail",
+      "tags": [
+        "electronics",
+        "patience"
+      ],
+      "mood": "calm",
+      "src": "/assets/avatars/pack-05.png"
+    },
+    {
+      "id": "pack-06",
+      "name": "Office Robot",
+      "tags": [
+        "administration",
+        "assistance"
+      ],
+      "mood": "unimpressed",
+      "src": "/assets/avatars/pack-06.png"
+    },
+    {
+      "id": "pack-07",
+      "name": "Quiet Sprout",
+      "tags": [
+        "gardening",
+        "growth"
+      ],
+      "mood": "gentle",
+      "src": "/assets/avatars/pack-07.png"
+    },
+    {
+      "id": "pack-08",
+      "name": "Bass Listener",
+      "tags": [
+        "music",
+        "audio"
+      ],
+      "mood": "relaxed",
+      "src": "/assets/avatars/pack-08.png"
+    },
+    {
+      "id": "pack-09",
+      "name": "Book Keeper",
+      "tags": [
+        "writing",
+        "research"
+      ],
+      "mood": "serious",
+      "src": "/assets/avatars/pack-09.png"
+    },
+    {
+      "id": "pack-10",
+      "name": "Camera Scout",
+      "tags": [
+        "photography",
+        "observation"
+      ],
+      "mood": "alert",
+      "src": "/assets/avatars/pack-10.png"
+    },
+    {
+      "id": "pack-11",
+      "name": "Night Fox",
+      "tags": [
+        "strategy",
+        "animals"
+      ],
+      "mood": "wry",
+      "src": "/assets/avatars/pack-11.png"
+    },
+    {
+      "id": "pack-12",
+      "name": "Library Owl",
+      "tags": [
+        "knowledge",
+        "animals"
+      ],
+      "mood": "dry",
+      "src": "/assets/avatars/pack-12.png"
+    },
+    {
+      "id": "pack-13",
+      "name": "Moon Moth",
+      "tags": [
+        "nature",
+        "exploration"
+      ],
+      "mood": "quiet",
+      "src": "/assets/avatars/pack-13.png"
+    },
+    {
+      "id": "pack-14",
+      "name": "Shy Ghost",
+      "tags": [
+        "creature",
+        "mystery"
+      ],
+      "mood": "shy",
+      "src": "/assets/avatars/pack-14.png"
+    },
+    {
+      "id": "pack-15",
+      "name": "Floating Blob",
+      "tags": [
+        "creature",
+        "ideas"
+      ],
+      "mood": "bemused",
+      "src": "/assets/avatars/pack-15.png"
+    },
+    {
+      "id": "pack-16",
+      "name": "Coffee Break",
+      "tags": [
+        "coffee",
+        "work"
+      ],
+      "mood": "tired",
+      "src": "/assets/avatars/pack-16.png"
+    },
+    {
+      "id": "pack-17",
+      "name": "Ringed Planet",
+      "tags": [
+        "space",
+        "science"
+      ],
+      "mood": "serene",
+      "src": "/assets/avatars/pack-17.png"
+    },
+    {
+      "id": "pack-18",
+      "name": "Lost Compass",
+      "tags": [
+        "travel",
+        "navigation"
+      ],
+      "mood": "determined",
+      "src": "/assets/avatars/pack-18.png"
+    },
+    {
+      "id": "pack-19",
+      "name": "Binary Rain",
+      "tags": [
+        "coding",
+        "binary",
+        "rain"
+      ],
+      "mood": "focused",
+      "src": "/assets/avatars/pack-19.png"
+    },
+    {
+      "id": "pack-20",
+      "name": "Bug Detective",
+      "tags": [
+        "debugging",
+        "magnifier",
+        "bug"
+      ],
+      "mood": "skeptical",
+      "src": "/assets/avatars/pack-20.png"
+    },
+    {
+      "id": "pack-21",
+      "name": "Terminal Pal",
+      "tags": [
+        "terminal",
+        "coding",
+        "computer"
+      ],
+      "mood": "sleepy",
+      "src": "/assets/avatars/pack-21.png"
+    },
+    {
+      "id": "pack-22",
+      "name": "Patch Robot",
+      "tags": [
+        "robot",
+        "technology",
+        "maker"
+      ],
+      "mood": "curious",
+      "src": "/assets/avatars/pack-22.png"
+    },
+    {
+      "id": "pack-23",
+      "name": "Circuit Sprout",
+      "tags": [
+        "circuits",
+        "plant",
+        "growth"
+      ],
+      "mood": "peaceful",
+      "src": "/assets/avatars/pack-23.png"
+    },
+    {
+      "id": "pack-24",
+      "name": "Gear Thinker",
+      "tags": [
+        "gear",
+        "engineering",
+        "mechanics"
+      ],
+      "mood": "unimpressed",
+      "src": "/assets/avatars/pack-24.png"
+    },
+    {
+      "id": "pack-25",
+      "name": "Wrench Buddy",
+      "tags": [
+        "wrench",
+        "tools",
+        "repair"
+      ],
+      "mood": "determined",
+      "src": "/assets/avatars/pack-25.png"
+    },
+    {
+      "id": "pack-26",
+      "name": "Blueprint Fold",
+      "tags": [
+        "blueprint",
+        "design",
+        "paper"
+      ],
+      "mood": "bemused",
+      "src": "/assets/avatars/pack-26.png"
+    },
+    {
+      "id": "pack-27",
+      "name": "Little Bridge",
+      "tags": [
+        "bridge",
+        "architecture",
+        "engineering"
+      ],
+      "mood": "steadfast",
+      "src": "/assets/avatars/pack-27.png"
+    },
+    {
+      "id": "pack-28",
+      "name": "Camera Scout",
+      "tags": [
+        "camera",
+        "photography",
+        "observer"
+      ],
+      "mood": "observant",
+      "src": "/assets/avatars/pack-28.png"
+    },
+    {
+      "id": "pack-29",
+      "name": "Sound Listener",
+      "tags": [
+        "headphones",
+        "music",
+        "listening"
+      ],
+      "mood": "absorbed",
+      "src": "/assets/avatars/pack-29.png"
+    },
+    {
+      "id": "pack-30",
+      "name": "Vinyl Moon",
+      "tags": [
+        "vinyl",
+        "moon",
+        "music"
+      ],
+      "mood": "dreamy",
+      "src": "/assets/avatars/pack-30.png"
+    },
+    {
+      "id": "pack-31",
+      "name": "Pencil Squid",
+      "tags": [
+        "pencil",
+        "drawing",
+        "squid"
+      ],
+      "mood": "curious",
+      "src": "/assets/avatars/pack-31.png"
+    },
+    {
+      "id": "pack-32",
+      "name": "Origami Finch",
+      "tags": [
+        "origami",
+        "bird",
+        "paper"
+      ],
+      "mood": "alert",
+      "src": "/assets/avatars/pack-32.png"
+    },
+    {
+      "id": "pack-33",
+      "name": "Palette Chameleon",
+      "tags": [
+        "art",
+        "palette",
+        "chameleon"
+      ],
+      "mood": "thoughtful",
+      "src": "/assets/avatars/pack-33.png"
+    },
+    {
+      "id": "pack-34",
+      "name": "Coffee Bean",
+      "tags": [
+        "coffee",
+        "bean",
+        "morning"
+      ],
+      "mood": "wry",
+      "src": "/assets/avatars/pack-34.png"
+    },
+    {
+      "id": "pack-35",
+      "name": "Quiet Listener",
+      "tags": [
+        "listening",
+        "calm",
+        "companion"
+      ],
+      "mood": "attentive",
+      "src": "/assets/avatars/pack-35.png"
+    },
+    {
+      "id": "pack-36",
+      "name": "Steady Note",
+      "tags": [
+        "assistant",
+        "reassurance",
+        "stationery"
+      ],
+      "mood": "reassuring",
+      "src": "/assets/avatars/pack-36.png"
+    },
+    {
+      "id": "pack-37",
+      "name": "Thoughtful Cloud",
+      "tags": [
+        "reflection",
+        "weather",
+        "thoughtful"
+      ],
+      "mood": "thoughtful",
+      "src": "/assets/avatars/pack-37.png"
+    },
+    {
+      "id": "pack-38",
+      "name": "Focused Cat",
+      "tags": [
+        "focus",
+        "cat",
+        "quirky"
+      ],
+      "mood": "focused",
+      "src": "/assets/avatars/pack-38.png"
+    },
+    {
+      "id": "pack-39",
+      "name": "Drowsy Owl",
+      "tags": [
+        "owl",
+        "rest",
+        "calm"
+      ],
+      "mood": "sleepy",
+      "src": "/assets/avatars/pack-39.png"
+    },
+    {
+      "id": "pack-40",
+      "name": "Odd Ghost",
+      "tags": [
+        "ghost",
+        "quirky",
+        "quiet"
+      ],
+      "mood": "deadpan",
+      "src": "/assets/avatars/pack-40.png"
+    },
+    {
+      "id": "pack-41",
+      "name": "Axolotl Aside",
+      "tags": [
+        "axolotl",
+        "curiosity",
+        "quirky"
+      ],
+      "mood": "curious",
+      "src": "/assets/avatars/pack-41.png"
+    },
+    {
+      "id": "pack-42",
+      "name": "Patient Crocodile",
+      "tags": [
+        "crocodile",
+        "patience",
+        "deadpan"
+      ],
+      "mood": "patient",
+      "src": "/assets/avatars/pack-42.png"
+    },
+    {
+      "id": "pack-43",
+      "name": "Calm Capybara",
+      "tags": [
+        "capybara",
+        "calm",
+        "companion"
+      ],
+      "mood": "calm",
+      "src": "/assets/avatars/pack-43.png"
+    },
+    {
+      "id": "pack-44",
+      "name": "Octopus Pen Pal",
+      "tags": [
+        "octopus",
+        "writing",
+        "helper"
+      ],
+      "mood": "friendly",
+      "src": "/assets/avatars/pack-44.png"
+    },
+    {
+      "id": "pack-45",
+      "name": "Gentle Submarine",
+      "tags": [
+        "submarine",
+        "exploration",
+        "curiosity"
+      ],
+      "mood": "curious",
+      "src": "/assets/avatars/pack-45.png"
+    },
+    {
+      "id": "pack-46",
+      "name": "Bicycle Buddy",
+      "tags": [
+        "bicycle",
+        "movement",
+        "hobby"
+      ],
+      "mood": "optimistic",
+      "src": "/assets/avatars/pack-46.png"
+    },
+    {
+      "id": "pack-47",
+      "name": "Considered Knight",
+      "tags": [
+        "chess",
+        "strategy",
+        "thoughtful"
+      ],
+      "mood": "thoughtful",
+      "src": "/assets/avatars/pack-47.png"
+    },
+    {
+      "id": "pack-48",
+      "name": "Crystal Thinker",
+      "tags": [
+        "geology",
+        "crystal",
+        "curiosity"
+      ],
+      "mood": "curious",
+      "src": "/assets/avatars/pack-48.png"
+    },
+    {
+      "id": "pack-49",
+      "name": "Paper Navigator",
+      "tags": [
+        "paper-plane",
+        "navigation",
+        "adventure"
+      ],
+      "mood": "curious",
+      "src": "/assets/avatars/pack-49.png"
+    },
+    {
+      "id": "pack-50",
+      "name": "Shelter Friend",
+      "tags": [
+        "umbrella",
+        "support",
+        "reassurance"
+      ],
+      "mood": "supportive",
+      "src": "/assets/avatars/pack-50.png"
+    }
+  ]
+}

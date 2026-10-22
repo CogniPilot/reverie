@@ -1,10 +1,11 @@
+from tests import executable_script
 import tests  # noqa: F401
 import os
 from pathlib import Path
 import tempfile
 import unittest
 from unittest.mock import patch
-from cto.cli import main
+from reverie.cli import main
 
 
 class ConsoleBrandingTests(unittest.TestCase):
@@ -15,9 +16,9 @@ class ConsoleBrandingTests(unittest.TestCase):
             console = root / "console/reverie"
             for path in (wrapper, console):
                 path.parent.mkdir()
-                path.write_text("#!/bin/sh\nexit 0\n")
+                path.write_text(executable_script("#!/bin/sh\nexit 0\n"))
                 path.chmod(0o700)
-            with patch.dict(os.environ, {"PATH": str(wrapper.parent) + ":" + str(console.parent)}, clear=True), patch("sys.argv", [str(wrapper)]), patch("cto.cli.os.execv") as execute:
+            with patch.dict(os.environ, {"PATH": str(wrapper.parent) + ":" + str(console.parent)}, clear=True), patch("sys.argv", [str(wrapper)]), patch("reverie.cli.os.execv") as execute:
                 main(["agent", "who"])
                 execute.assert_called_once_with(str(console), ["reverie", "agent", "who"])
 

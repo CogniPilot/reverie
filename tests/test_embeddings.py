@@ -1,7 +1,7 @@
-import tests  # noqa: F401  isolates CODEMAN_*/FLEET_* before cto is imported
+import tests  # noqa: F401  isolates REVERIE_* before reverie is imported
 import unittest
 
-from cto.embeddings import HashedEmbedder, cosine, make_embedder, pack, unpack
+from reverie.embeddings import HashedEmbedder, cosine, make_embedder, pack, unpack
 
 
 class HashedEmbedderTest(unittest.TestCase):

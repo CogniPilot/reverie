@@ -1,0 +1,1129 @@
+# HTTP API Reference
+
+Reverie's HTTP API is a **stable contract** as of 1.0 — see
+[`versioning-policy.md`](versioning-policy.md) for the SemVer guarantee. This page
+defines the response envelope, status codes, error codes, versioning, and the SSE
+event channel.
+
+## Versioning
+
+- The stable, public surface is served under **`/api/v1/...`**. Pin external
+  clients to this prefix.
+- The unversioned **`/api/...`** paths are a permanent alias of the current
+  version (what the bundled web UI uses). They are kept working, but new external
+  integrations should use `/api/v1`.
+- Breaking changes to the contract ship under a new prefix (`/api/v2`); `/api/v1`
+  keeps its semantics. Additive changes (new endpoints, new optional fields, new
+  error codes) are non-breaking and may appear in a minor release.
+- The implementation rewrites `/api/v1/*` → `/api/*` at the server level
+  (`rewriteApiV1Url` in `src/web/server.ts`).
+
+## Response envelope
+
+Every JSON response uses one uniform envelope, applied centrally by a
+`preSerialization` hook (`src/web/server.ts`) — handlers return bare data and the
+hook wraps it:
+
+**Success** — HTTP `2xx`:
+
+```json
+{ "success": true, "data": <payload> }
+```
+
+`data` is the endpoint's payload (object, array, or value). Endpoints with no
+payload return `{ "success": true, "data": {} }`.
+
+**Error** — HTTP `4xx`/`5xx`:
+
+```json
+{ "success": false, "error": "human-readable message", "errorCode": "NOT_FOUND" }
+```
+
+`ApiResponse<T>` in `src/types/api.ts` is the canonical type.
+
+> Non-JSON endpoints are exempt from the envelope: `GET /api/sessions/:id/file-raw`,
+> `GET /api/sessions/:id/tail-file` (SSE), `GET /api/download`,
+> `GET /api/screenshots/:name`, `GET /q/:code` (QR redirect),
+> `GET /html-view/:cap/*` (a [rendered HTML file](#rendered-html-files) and its
+> assets), and the `GET /ws/sessions/:id/terminal` WebSocket upgrade.
+>
+> **Deprecated:** `POST /api/screenshots`, `GET /api/screenshots` and
+> `GET /api/screenshots/:name` keep working but log a one-time warning on first
+> use. They are removed in a later MAJOR, after at least one MINOR release that
+> carries this warning (see `docs/versioning-policy.md`). To hand
+> a file to an agent, use `POST /api/sessions/:id/paste-image`, which saves it into
+> that session's workspace.
+
+> The [agent wait endpoints](#long-polling-agent-wait) use the normal envelope but
+> are the only JSON endpoints that deliberately **hold the connection open**, for up
+> to 600 s. Proxy operators and HTTP clients with a global read timeout need to know
+> that before pointing them at Reverie.
+
+⚠️ **A `401` is the one status that is not an envelope.** Authentication is rejected
+in a request hook, before any handler runs, and it replies with the bare string
+`Unauthorized` (`Unauthorized: hook secret required` on the hook path) plus
+`WWW-Authenticate: Basic realm="Reverie"`. There is no `success`, no `error`, and no
+`errorCode`, because the wrapping hook only wraps object payloads. So a client that
+pipes every response straight into a JSON parser dies with a parse error rather than
+reporting an auth failure, which is a confusing way to discover that a password is
+set. Branch on the HTTP status **before** parsing.
+
+## Error codes → HTTP status
+
+The single source of truth is `ErrorStatus` / `httpStatusForErrorCode()` in
+`src/types/api.ts`. Clients should branch on `errorCode` (stable) and may rely on
+the HTTP status.
+
+| `errorCode` | HTTP | Meaning |
+|-------------|------|---------|
+| `INVALID_INPUT` | 400 | Malformed request / failed validation |
+| `UNAUTHORIZED` | 401 | Authentication required or failed |
+| `NOT_FOUND` | 404 | Resource does not exist |
+| `SESSION_BUSY` | 409 | Session is busy |
+| `CONFLICT` | 409 | Conflicts with current state (e.g. already running) |
+| `ALREADY_EXISTS` | 409 | Resource already exists |
+| `OPERATION_FAILED` | 422 | Well-formed but could not be completed |
+| `RATE_LIMITED` | 429 | Too many requests |
+| `INTERNAL_ERROR` | 500 | Unexpected server error |
+
+Adding a new error code is non-breaking; removing or renaming one is a major change.
+
+## Cron jobs
+
+Saved jobs and their launch history are separate from the legacy `/api/scheduled`
+duration-bounded loops. Use `/api/v1/cron/...` in external clients; `/api/cron/...`
+is the unversioned alias. These routes use the response envelope above; the table
+lists the value inside `data` on success.
+
+| Method | Path | Request body | Response `data` |
+| --- | --- | --- | --- |
+| GET | `/api/v1/cron/jobs` | None | `CronJob[]` |
+| POST | `/api/v1/cron/jobs` | Full job definition below | `{ job: CronJob }` |
+| GET | `/api/v1/cron/jobs/:id` | None | `CronJob` |
+| PUT | `/api/v1/cron/jobs/:id` | Partial job definition | `{ job: CronJob }` |
+| DELETE | `/api/v1/cron/jobs/:id` | None | `{}` |
+| PUT | `/api/v1/cron/jobs/:id/enabled` | `{ enabled: boolean }` | `{ job: CronJob }` |
+| POST | `/api/v1/cron/jobs/:id/run` | None | `{ run: CronJobRun, activeAgents: number }` |
+| GET | `/api/v1/cron/jobs/:id/runs` | None | `CronJobRun[]` |
+| GET | `/api/v1/cron/runs` | None | `CronJobRun[]` |
+| GET | `/api/v1/routines-grants` | None | `{ roles: string[], employees: Record<employeeId, boolean> }` |
+| PUT | `/api/v1/routines-grants` | `{ roles?: string[], employees?: Record<employeeId, boolean> }` (owner only) | the stored grants |
+
+### Job request fields
+
+The create body requires `name`, `scheduleType` and `enabled`. A `launch` job also
+requires `agentType`, `workingDir`, `promptMode`, `inputMode` and `concurrencyPolicy`;
+a `post` job requires `botId` (or, for an employee's own routine, no bot: the server
+sets `postAs: "author"`), `roomId` and `postText`. The owner (a call without an agent's
+`X-Reverie-Parent-Session` header) creates, edits, enables, deletes or runs any `post`
+job; a hired employee with the owner's routines grant does so for its own routines only (see "Post jobs" in the cron
+guide), and a job cannot change its `action`. Additional fields
+are required according to the selected prompt and schedule:
+
+| Field | Type / validation |
+| --- | --- |
+| `name` | String, 1–200 characters |
+| `action` | Optional, `launch` (default) or `post`. A `post` job posts a message as a bot or its employee author instead of starting a session; it needs `roomId`, `postText` and (for a bot) `botId`, and takes none of the session fields below |
+| `postAs` | `bot` (default) or `author`. Set by the server, never by an agent: `author` makes the post speak as the employee in `createdBy`, with a `⏰ routine:` label the server adds. The owner does not set it |
+| `botId` | Required for `post` unless `postAs` is `author`; a bot in the chat-bot registry (`GET /api/chat-bots`) |
+| `roomId` | Required for `post`; a room on that bot's allowlist, or for an author routine a current, non-archived member room (checked on create, edit and every run) |
+| `postText` | Required for `post`; single-line string, 1–4000 characters (2000 for an employee routine), `@name` mentions as typed in a room |
+| `dryRun` | Optional boolean for `post`; record the would-be post in run history and post nothing |
+| `postSource` | Optional for `post`: `plans-pace` (fields `accounts maxWeekly maxProjected minHoursToRunOut bankedAvailable bankedSoonestExpiryHours worst summary`) `host-load` (`load1 load5 load15 cpus load15PerCpu`) or `burn-watch` (`alerts message lines`: plans projected to run out before their weekly reset, and Codex banked resets; with `postChangeOnly` it posts when the alert set changes, once more when it clears, and appends a line per plan to `burn-hourly.log` in the data dir on every read). `postText` is then a template with `{field}` placeholders. Fixed after create |
+| `postWhen` | Optional `{field, op, value}` (op `gt gte lt lte eq ne`, field numeric) or `null` to clear: a scheduled fire that fails it posts nothing and records no run |
+| `postSourceArgs` | `{owner, repo, kinds?}`, required for the `github` source (fields `items message lines`: new or changed pull requests and issues of a public repository, unauthenticated, outside text sanitised), refused for any other source |
+| `postChangeOnly` | Optional boolean: skip a scheduled fire whose rendered text equals the last post |
+| `timeZone` | Optional IANA zone (for example `America/New_York`) that `dailyTime` and `weeklyTime` are read in; empty or absent means server-local time |
+| `agentType` | Required for `launch`; a supported session mode (including `shell`) |
+| `workingDir` | Required for `launch`; existing, allowed working-directory path |
+| `launchCommand` | Optional single-line string, at most 2000 characters; for shell jobs |
+| `promptMode` | Required for `launch`: `inline_text` or `prompt_file_path` |
+| `promptText` | Required for `inline_text`; nonempty single-line string, at most 100000 characters |
+| `promptFilePath` | Required for `prompt_file_path`; absolute path inside `workingDir` to a regular file, at most 1 MiB, read when the job fires |
+| `inputMode` | Required for `launch`: `paste` or `typed` |
+| `scheduleType` | `once`, `interval`, `daily`, or `weekly` |
+| `runAt` | Required for `once`; positive integer Unix timestamp in milliseconds |
+| `intervalMinutes` | Required for `interval`; integer from 1 to 525600 |
+| `dailyTime` | Required for `daily`; `HH:MM` in `timeZone`, else server-local time |
+| `weeklyDays` | Required for `weekly`; 1–7 weekday integers, 0 (Sunday) through 6 (Saturday) |
+| `weeklyTime` | Required for `weekly`; `HH:MM` in `timeZone`, else server-local time |
+| `enabled` | Boolean |
+| `concurrencyPolicy` | Required for `launch`: `warn_only` or `skip_if_same_agent_running`; scheduled runs only |
+| `autoClosePreviousSession` | Optional boolean, default `true`; ignored for `once` |
+| `notes` | Optional string, at most 2000 characters |
+
+`PUT /jobs/:id` accepts any subset of these fields, then validates the merged job.
+When changing `promptMode` or `scheduleType`, supply the fields the new mode needs.
+`Run Now` works even when the job is disabled, bypasses the scheduled concurrency
+policy, and does not change the schedule. `activeAgents` counts live sessions of
+the same agent type, excluding sessions created by this job.
+For recurring jobs with `autoClosePreviousSession` enabled (the default), `Run Now`
+also closes the previous run's session before launching, even if it is still working.
+
+### Job and run response fields
+
+`CronJob` contains the request fields plus server-maintained `id`, optional
+`owner` (multi-user mode), `createdAt`, `updatedAt`, `lastRunAt`, `nextRunAt`,
+`lastStatus`, `lastDueKey`, and optional `completedOnce`. Times are Unix
+milliseconds; `lastRunAt`, `nextRunAt`, `lastStatus`, and `lastDueKey` can be `null`.
+`lastDueKey` is an opaque internal duplicate-launch guard, not a stable API format.
+
+`CronJobRun` contains `id`, `cronJobId`, nullable `sessionId` and `sessionName`,
+`startedAt`, nullable `finishedAt`, `status`, optional `errorMessage`,
+`triggerType` (`scheduled` or `manual_run_now`), and nullable `createdSessionUrl`.
+Run times are also Unix milliseconds. Status is one of `created`,
+`session_started`, `prompt_sent`, `posted`, `failed`, or `skipped`. `posted` means
+a `post` job's message is in the room; a dry run, or a post missed by more than five
+minutes (the server was down), is recorded as `skipped` with the reason in `errorMessage`.
+
+Prompt delivery continues asynchronously after session launch, so `Run Now` can
+return `session_started` before the prompt is sent. Read run history for subsequent
+updates, but do not assume a terminal status will follow: if the session is closed
+during the readiness wait or the server restarts before delivery, the run can remain
+`session_started` indefinitely with `finishedAt: null`.
+`finishedAt` refers to the launch/prompt-delivery attempt, **not completion
+of the agent's task**; `prompt_sent` does not prove that the task succeeded.
+
+In multi-user mode, list/history endpoints filter to accessible jobs. An unknown
+or inaccessible job returns `NOT_FOUND`. Job creation and updates can return
+`403 FORBIDDEN` for a working directory outside the owner's workspace or a shell /
+launch-command job without the required privilege grant. Invalid definitions or
+working directories return `INVALID_INPUT`; launch/delivery failures are recorded
+on the run, so inspect its `status` and `errorMessage` even after an HTTP success.
+
+See [Cron Jobs](wiki/Cron-Jobs.md) for the UI, scheduling, and prompt-file rules.
+See the [complete cron guide](cron-guide.md) for the `cron:runCreated` and
+`cron:runUpdated` SSE events.
+
+## Long-polling (agent wait)
+
+Three calls block until something happens instead of answering immediately. They
+exist because SSE is Reverie's only other "tell me when" channel, and an agent
+driving the API from a shell tool cannot practically hold a stream and parse
+events inline.
+
+| Call | Blocks until |
+|------|--------------|
+| `GET /api/v1/sessions/:id/wait` | one of a set of lifecycle signals fires |
+| `GET /api/v1/sessions/:id/wait-output` | a literal string appears in the session's output |
+| `POST /api/v1/sessions/:id/input` with `wait` | the input is delivered **and then** a signal fires |
+
+`POST .../input` with `wait` is not the same as a `POST` followed by a separate
+`GET .../wait`. It registers the waiter **before** writing, which closes the window
+in which a separate wait sees the session still idle from the previous turn and
+answers instantly with the wrong turn's result. Use it whenever you send a prompt
+and want to know when that prompt is done.
+
+### Three semantics that break callers who assume otherwise
+
+**1. A timeout is HTTP `200`, not an error.** A wait that ends without its signal
+returns `{"success":true, ...,"wait":{"timedOut":true,"signal":null}}`. The
+intended pattern is a client-side loop over short waits, because `tailscale serve`
+and cloudflared can both cut an idle connection, and turning every poll boundary
+into a `4xx` would make that loop indistinguishable from a real failure. `408` is
+auto-retried by several clients (silently doubling the polling load), `504` is what
+a genuine tunnel failure looks like, and `204` cannot carry `waitedMs` / `status` /
+`limitPaused`. Reserve error handling for the four codes in the table below.
+
+**2. `stop` and `blocked` fire only for `claude` sessions.** Both come from Claude
+Code hooks, and no other mode installs them: `shell` runs no agent, and the external
+CLIs (`opencode`, `codex`, `gemini`, `antigravity`, `pi`) render their own TUIs and post
+no hooks. For every non-`claude` mode only `idle`, `working` and `exit` are
+accepted, and of those only `exit` is dependable: see the caveats under
+[Signals](#signals) before building on `idle`. Requesting `stop` or `blocked`
+**explicitly** on such a session is a
+`400`; omitting `until` never fails, the server just drops them from the default set
+and echoes the narrowed set back as `wait.until`. Three more places hooks can go
+missing even in `claude` mode: a **Docker case** needs
+`REVERIE_DOCKER_BRIDGE_HOOKS=1`, since a container cannot reach a loopback-bound
+Reverie (without it, only `idle` / `working` / `exit` work); a **remote-SSH
+case** runs the agent on another host, whose hooks may never reach this server at
+all; and a case whose hook config was written by **Reverie < 1.13.0 against an
+`--https` install** carries hook curls without `-k`, which TLS-fail silently (the
+hook line ends in `|| true`). Reverie now writes `curl -sk` and repairs a stale
+case config the next time a session starts in that case. When in doubt, ask for
+`stop,idle,exit` so a session without hooks still resolves on the heuristic
+signal.
+
+**3. `from=now` does not mean "printed after you asked".** tmux repaints the visible
+screen on attach, on resize, and on any TUI redraw, and a repaint arrives as
+ordinary output, so text that was already on screen can satisfy a fresh wait. This
+was observed live: a marker echoed a minute earlier matched instantly on a new
+`from=now` wait. It is inherent to running the agent under a multiplexer, so the
+contract is a **marker unique to each call** (`MARK="DONE_$RANDOM"`, send
+`echo $MARK`, then wait on `$MARK`), never a generic string like `BUILD OK`.
+
+### Signals
+
+| Signal | Source | Actually fires for |
+|--------|--------|--------------------|
+| `idle` | the session's own `idle` event | `claude`: yes, on ❯-prompt detection after activity. `shell`: **once only**, ~500 ms after start, and never again. External CLIs: not guaranteed (they render their own TUIs and readiness is output stabilization) |
+| `working` | the session's own `working` event | `claude` only in practice (spinner and work-keyword detection are Claude output formats) |
+| `stop` | the Claude Code `stop` hook, the definitive end-of-turn signal | `claude` only |
+| `blocked` | a `permission_prompt` or `elicitation_dialog` hook | `claude` only, and rarer than it looks: see below |
+| `exit` | no process is behind the session | every mode |
+
+`stop` is the signal to orchestrate on where it exists; `idle` is a heuristic
+fallback that can flap mid-turn when a spinner pauses. The default set when `until`
+is omitted is `stop,idle,exit` (`exit` is in there so a worker that crashes resolves
+the wait promptly instead of burning the caller's whole timeout on something that
+can no longer happen). On a `claude` worker, prefer an explicit `until=stop,exit`
+once the session is up: the default set's `idle` also resolves on a spinner pause,
+and on a fresh session the **startup** `idle` (emitted when the CLI first comes up)
+can land inside your first wait window and report a turn that never ran. Measured:
+a session parked on the trust dialog emits no *further* `idle`, so it is the
+startup transition, not the dialog, that produces the false success below.
+
+⚠️ **`exit` means "nothing is running", which includes "not started yet".** The
+server answers from `pid === null` plus a mux-layer pane-death probe, and that
+covers a session that exited — including a worker that died *inside* its tmux pane
+while the local attach client (and therefore `pid`) lives on — one that was
+detached, and one that was **created but never started**. So the first wait
+after `POST /api/v1/sessions` returns `{"signal":"exit","immediate":true}` in
+milliseconds, and reading that as "the worker died" is wrong: it means start it, or
+wait for it to come up. `status` is carried alongside so nothing is hidden. The
+alternative (trusting `status`) is worse, because a dead PTY parks the session at
+`status: "idle"`, which would answer the default wait with `immediate: true` for a
+worker that has crashed. A worker dying while a wait is parked resolves it within
+a few seconds (a background death-watcher), not at the timeout.
+
+⚠️ **`blocked` is reachable less often than the table suggests.** It fires on two
+hooks, and the default configuration suppresses one of them: Reverie spawns claude
+with `--dangerously-skip-permissions`, so permission prompts do not happen unless the
+instance is switched to the `auto` Claude mode (App Settings), or the caller is a
+multi-user account without the bypass grant, which is forced to `--permission-mode
+auto`. What does still fire under the default is `elicitation_dialog`, the agent
+asking the user a question. So `until=stop,blocked,exit` is a reasonable belt on a
+long turn, but a worker that never comes back is far more likely to be working than
+blocked, and polling `blocked` alone will sit at its timeout.
+
+⚠️ **On a `shell` session, only `exit` and marker-matching are dependable.** A shell
+session emits its one `idle` at startup and then stays `status: "idle"` forever,
+whatever the pane is doing, so it never emits a *transition*. Since send-and-wait
+requires a transition (and so does `fresh=1`), both can only time out there:
+a documented default `wait` on a shell worker running `sleep 4` times out at the
+full 25 s. Synchronize hook-less sessions with `wait-output` and a unique marker
+instead. The same caution applies to the external CLIs.
+
+### Readiness is not a signal
+
+Nothing here reports "the agent is ready for a prompt", and no combination of
+`until`/`fresh` synthesizes one. A freshly created session reads as `exit` (above),
+and a `claude` worker in a brand-new case comes up on the CLI's **trust dialog**,
+which contains a ❯ prompt of its own. Send-and-wait posted at that moment types the
+prompt into the dialog, where the `\r` never gets past it, while the session's
+startup `idle` lands inside the wait window: the wait resolves on `idle` in a
+couple of seconds with `timedOut: false`, which looks exactly like a completed
+turn.
+
+The reliable sequence is: poll `GET /api/v1/sessions/:id` until `.data.pid` is
+non-null, then `wait-output` for the composer's own marker (`bypass`, the status
+bar of a CLI spawned in bypass mode) with a short timeout, handling the trust
+dialog only as the bounded fallback.
+
+⚠️ **The fallback is not a bare `\r`.** Claude Code 2.1.252 unnumbered the dialog's
+options, reversed them and highlights `No, exit`, so an Enter sent blind quits the
+CLI and the pane dies seconds after the spawn. Read the `❯` marker off the current
+frame (`GET /api/v1/sessions/:id/terminal?full=1`), send `ESC [ B` while it is on
+`No, exit`, re-read, and confirm only once it is on `Yes, I trust this folder`.
+Reading the current frame is also what keeps this correct on later runs: the dialog
+text stays in the terminal buffer for the life of the session, so a `trust` probe
+with `from=buffer` keeps matching long after the dialog is gone. A worked version is in
+[`extending-reverie.md`](extending-reverie.md#seam-3-http-api-and-cli).
+
+### `GET /api/v1/sessions/:id/wait`
+
+| Param | Type | Default | Notes |
+|-------|------|---------|-------|
+| `until` | comma-separated list of `idle,working,stop,blocked,exit` | `stop,idle,exit` | resolves on the first to fire. An unknown token is a `400` naming it, never a silent fallback |
+| `timeout` | positive integer ms | `60000` | **validated first, clamped second.** `0`, a negative value and a fractional value are all `400`s, not clamps; a valid value outside `[1000, 600000]` is clamped and echoed as `wait.timeoutMs` |
+| `fresh` | `0` \| `1` \| `false` \| `true` | `0` | `1` requires an actual transition, ignoring the state at call time |
+
+```bash
+curl -s "$API/api/v1/sessions/$SID/wait?until=stop,exit&timeout=60000"
+```
+
+Both GET wait routes answer with `Cache-Control: no-store`, because the documented
+pattern polls one identical URL in a loop and a cached `{"timedOut":true}` would
+turn that loop into a busy spin. `POST .../input` sends no cache header (it is a
+POST, which is not heuristically cacheable).
+
+⚠️ **Unknown query parameters are ignored, not rejected**, with one exception
+(`regex`, below). In particular `match=` on `/wait` is silently dropped and you get
+a plain signal wait, so check the endpoint path before blaming the parameters.
+
+### `GET /api/v1/sessions/:id/wait-output`
+
+| Param | Type | Default | Notes |
+|-------|------|---------|-------|
+| `match` | literal string, 1 to 200 chars | required | substring match against the PTY stream with ANSI escapes stripped. A match spanning two PTY chunks is found |
+| `nocase` | `0` \| `1` \| `false` \| `true` | `0` | case-insensitive compare. The returned snippet keeps the terminal's original casing |
+| `from` | `now` \| `buffer` | `now` | `buffer` scans the tail of the existing terminal buffer (bounded, 256 KB by default) before blocking |
+| `timeout` | positive integer ms | `60000` | same validation and clamp as `/wait` |
+
+**Matching is literal, never a pattern.** A `regex` parameter is rejected with a
+`400` rather than ignored, so a caller that assumed otherwise finds out immediately
+instead of waiting on the wrong thing. The reasoning is in
+[`architecture-invariants.md`](architecture-invariants.md#agent-wait-primitives).
+
+#### What the matcher actually sees
+
+The matcher scans the raw PTY stream, **normalized**: ANSI escape sequences are
+stripped — CSI, OSC, and the charset-designation escapes a stock bash prompt emits
+on every line (`ESC ( B`), so `match=tnode:` matches a prompt that renders
+`…@tnode:` — a partial escape arriving at a chunk boundary is held back until its
+tail arrives, and a match may straddle PTY chunks: `printf STRAD; sleep 1; printf
+DLEQQ` is matchable as `STRADDLEQQ` (all measured live). Three caveats remain:
+
+⚠️ **It is still the byte stream, not the rendered pane.** `GET .../terminal`
+answers from a tmux screen capture (`data.source: "mux-visible"`), the finished
+picture; the matcher sees the stream that painted it. For linear output the two
+agree once escapes are stripped, but a full-screen TUI composes its picture with
+cursor positioning, so what the pane shows and what the stream carries can differ.
+Seeing your string in `terminal?tail=` makes a match likely, not guaranteed.
+
+⚠️ **A TUI's text can arrive without its spaces.** Claude Code positions words
+with cursor moves rather than printing spaces, so screen text can reach the
+matcher as `Quicksafetycheck:Isthisaprojectyoucreated...`. Whether a given phrase
+keeps its spaces depends on how the TUI happened to draw it (measured: `I trust
+this folder` matched, `Quick safety check` did not), so a multi-word `match`
+against a TUI pane is unreliable rather than impossible. Match a **single
+space-free token**, ideally one you printed yourself. Plain command output (a
+shell worker, an `echo`) keeps its spaces.
+
+⚠️ **The returned `snippet` is a rendering of the matched text, not a quotation of
+it.** It is cut from the same normalized stream the match ran against, then
+cleaned for display: remaining raw control bytes are removed (an agent pipes the
+snippet into its own terminal, so a worker's bytes must not be able to reset that
+display) and blank runs are collapsed. A printable needle that matched will appear
+in it; a needle containing control bytes or a blank run may not survive verbatim.
+
+```bash
+MARK="DONE_$RANDOM"
+curl -sG "$API/api/v1/sessions/$SID/wait-output" \
+  --data-urlencode "match=$MARK" --data-urlencode 'timeout=120000'
+```
+
+Build the query with `-G --data-urlencode` rather than by hand: a `+` in a
+hand-written query string decodes to a space.
+
+### `POST /api/v1/sessions/:id/input` with `wait`
+
+Two optional fields on the existing endpoint:
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `wait` | `true` or the same comma grammar as `until` | `true` means the default signal set. Omitted keeps the historical fire-and-forget behavior, unchanged. `null`, `false` and an empty string are all read as **absent**, not as an error and not as "wait for the default" |
+| `waitTimeout` | positive integer ms | same validation **and** clamp as `timeout`: `0`, a negative and a fractional value are `400`s, anything valid is clamped into `[1000, 600000]` and echoed as `wait.timeoutMs` |
+
+Both are `nullish`, so an explicit `null` from `JSON.stringify` is accepted as
+"absent" rather than failing validation. That is deliberate: `.optional()` would
+reject it, which has shipped as a real bug twice.
+
+The input must end with `\r` (a real carriage return in the JSON string): Enter is
+sent only when the input contains one, so text without it is typed onto the
+worker's prompt but never submitted, and the wait then runs its full timeout on a
+turn that never started. Verified live; this is the most common silent failure on
+this endpoint.
+
+A **plain prompt** (printable text followed by exactly one `\r`, nothing else) is
+delivered through tmux even without `useMux`: the text is typed, Enter is pressed as
+a separate key, and the server re-presses Enter while the prompt is still visibly
+sitting on the composer. Written straight into the pane in one piece, a prompt of
+about a hundred characters or more is taken as a paste by Claude Code, its `\r`
+becomes a newline, and the prompt stays unsent (measured on 2.1.283). Any other
+input (escape sequences, a bracketed-paste frame, a line feed, a bare `\r`) keeps
+the raw write, and an explicit `"useMux": false` forces it.
+
+```bash
+curl -s -X POST "$API/api/v1/sessions/$SID/input" \
+  -H 'Content-Type: application/json' \
+  -d '{"input":"run the tests\r","useMux":true,"clientId":"agent-1","seq":1,
+       "wait":"stop","waitTimeout":600000}'
+```
+
+A **tagged duplicate** (a `clientId` + `seq` pair the server has already applied)
+still honors `wait`, because the caller's question is unanswered, but it answers
+from the session's current state rather than requiring a new transition: the
+original turn may be long over. It comes back as
+`"delivered": false, "duplicate": true`.
+
+**Wake-on-LAN hosts** (`docs/remote-sessions.md` §Wake-on-LAN): when the session's
+remote host has a wake target and is asleep, the non-wait form answers `200` with
+`{"buffered": true}` — the bytes are held and flushed after the host is back — or
+`{"buffered": true, "dropped": true}` for a chunk over the 4 KB wake buffer, which
+is gone (never delivered as a fragment). Both fields are additive to the historical
+bare `{}`. With `wait`, the route blocks on the wake instead and answers
+`422 OPERATION_FAILED` ("did not come back after a wake-on-LAN request — nothing was
+sent") when the host never returns, rather than writing into the stalled pane and
+reporting `delivered:true` plus a timeout.
+
+Two endpoints back that flow directly, both scoped to one session's remote host and
+both refusing a session that is not remote (`400 INVALID_INPUT`):
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `GET` | `/api/sessions/:id/reachability` | Whether the session's remote host answers SSH right now, plus whether a wake target is configured. Read-only: it never wakes. `{"reachable": true\|false\|null, "wakeConfigured": "mac"\|"command"\|"none"}`, where `null` means the answer is unknown (a proxied host, where a TCP probe proves nothing). |
+| `POST` | `/api/sessions/:id/wake` | Wake the host and wait for it to accept SSH again, bounded by the request budget. `422 OPERATION_FAILED` when it does not come back; `400 INVALID_INPUT` with "No wake-on-LAN target configured for this host" when nothing is set. |
+
+⚠️ Waking is deliberately reachable only from an explicit user action (this route, a
+session create/attach, or typing into a sleeping session). No watcher, dropped-session
+handler or boot-recovery path may wake a host, or a suspended machine would be woken
+again seconds after every suspend; `test/remote-wake.test.ts` pins that as an import
+fence around `src/remote-wake.ts`.
+
+### Response
+
+All three nest the wait result under `data.wait`, so one client helper works against
+any of them:
+
+```json
+{ "success": true, "data": {
+  "sessionId": "0000000d-0011-4000-8000-000000000017",
+  "status": "idle",
+  "limitPaused": false,
+  "wait": {
+    "signal": "stop", "until": ["stop", "idle", "exit"],
+    "timedOut": false, "immediate": false, "ended": false, "aborted": false,
+    "waitedMs": 8421, "timeoutMs": 60000
+  }
+}}
+```
+
+`POST .../input` returns the same `wait` object alongside `delivered`, `duplicate`,
+`status` and `limitPaused`. `POST .../input` **without** `wait` is unchanged and
+still returns `{"success": true, "data": {}}`.
+
+⚠️ `delivered: false` has **two** meanings, and they must be told apart by
+`duplicate`: with `duplicate: true` the input was suppressed as an already-applied
+redelivery (harmless, the turn it refers to may be long over), while with
+`duplicate: false` the **write failed** (typically no PTY behind the session). A
+client that reads `delivered === false` as "duplicate" silently treats a failed send
+as a success.
+
+| Field | Type | Meaning |
+|-------|------|---------|
+| `wait.signal` | signal \| `null` | the signal that fired (`/wait` and `/input` only) |
+| `wait.until` | array of signals | what the server actually waited on, after narrowing the default set for the session's mode (`/wait` and `/input` only) |
+| `wait.matched` | boolean | the string appeared (`/wait-output` only) |
+| `wait.match` | string | the literal that was searched for (`/wait-output` only) |
+| `wait.snippet` | string \| `null` | bounded window of output around the match, blank runs collapsed for readability (`/wait-output` only) |
+| `wait.timedOut` | boolean | the wait hit its timeout. Still a `200` |
+| `wait.immediate` | boolean | the condition already held at call time, so nothing was waited for (`waitedMs` is 0) |
+| `wait.ended` | boolean | the session went away (deleted or torn down) before the condition was met |
+| `wait.aborted` | boolean | the client hung up, so the waiter was released without resolving — and by that definition a client never reads `true`. When the **server** abandons a wait itself (send-and-wait against a session with no PTY), it answers in about a millisecond with `ended: true`, `delivered: false`, `duplicate: false` and `aborted: false`: `delivered`/`ended` carry that story, and `aborted` stays the transport flag. Present for completeness; treat a `true` as "this wait answered nothing", never as an outcome |
+| `wait.waitedMs` | number | wall-clock ms actually spent waiting |
+| `wait.timeoutMs` | number | the timeout **after clamping**, which is what was applied |
+| `status` | `SessionStatus` | the session's status after the wait, so a caller that timed out still learns where things stand |
+| `limitPaused` | boolean | the session is paused on a usage limit and will emit nothing until its reset, so a timeout here is expected rather than a stall worth retrying hard |
+
+Read the outcome by discriminator, in this order:
+
+1. `wait.signal !== null` (or `wait.matched === true`): the thing happened.
+2. `wait.timedOut`: a poll boundary. Loop again.
+3. `wait.ended` or `wait.aborted`: the wait answered nothing, because the session is
+   gone or was never running. Re-check the session instead of looping.
+
+`wait.immediate` is not a fourth outcome: it rides along with the first one and
+means the condition already held at call time, so nothing was actually waited for.
+If that is not what you meant, you wanted `fresh=1` or the send-and-wait form. Note
+that `{"signal":"exit","immediate":true}` on a session you just created is the
+not-started-yet case, not a crash.
+
+**The timeout is clamped, so read it back.** A request for 1800000 ms is silently
+reduced to the server's ceiling (600000 ms by default, operator-tunable), and a
+request for 1 ms is raised to 1000 ms. `wait.timeoutMs` is the value that was
+applied. Without checking it, a caller that asked for 30 minutes and got 10 will
+read the timeout as "the worker is wedged" and kill a session that was working fine.
+
+### Errors
+
+| `errorCode` | HTTP | When |
+|-------------|------|------|
+| `INVALID_INPUT` | 400 | unknown `until` / `wait` token; `stop` or `blocked` requested explicitly on a mode that installs no hooks (the message names the mode); `regex=` on `/wait-output`; `match` outside 1 to 200 chars; a non-numeric `timeout` |
+| `NOT_FOUND` | 404 | no such session, or one this caller does not own |
+| `SESSION_BUSY` | 409 | this session's waiter cap is full |
+| `RATE_LIMITED` | 429 | a per-owner or process-wide waiter cap is full. Retry later; the session you named is not the problem |
+
+The two capacity codes are deliberately different. A process-wide cap reported as
+`SESSION_BUSY` would tell the caller to switch sessions, which cannot help. The
+error message names the cap that was hit.
+
+⚠️ A `401` is **not** in this table and is not an envelope at all (see
+[Response envelope](#response-envelope)). It matters most here: a polling loop that
+pipes each wait straight into `jq` fails with a parse error on every iteration
+against a password-protected server, which reads as "the wait endpoints are broken".
+Check the status first.
+
+The per-session cap is a **combined** budget: signal waiters and output waiters
+count against the same 16, not 16 of each. An abandoned request no longer holds its
+slot, because the routes release the waiter when the client disconnects, but a
+client that opens many concurrent waits against one session will still hit the cap.
+
+## Terminal capture (`GET /api/v1/sessions/:id/terminal`)
+
+What a session's terminal shows, for a client to replay: `data.terminalBuffer`,
+with `source` (`mux-visible`, `mux-full-history` or `history`), `truncated`,
+`truncationReason`, `fullSize`, `historyLinesCut` (a `lines=` bound left older
+lines in tmux, so the remainder is more than `fullSize - retainedBytes`), and
+`captureCols`/`captureRows` when the pane's geometry was read. `paneHistoryLines`
+(present when the body is a pane capture whose geometry was read, like
+`captureCols`/`captureRows`, and absent for a remote SSH session, whose local pane
+cannot see the remote history) is the number of scrollback rows tmux holds above the
+visible frame, which is the most a `full=1` request can add. `truncated` describes
+the byte stream instead: for a pane with `paneHistoryLines: 0` (a fullscreen CLI in
+the alternate screen) the bytes a `tail` cut dropped are earlier repaints that no
+request returns. The capture runs synchronous tmux calls on the server; the
+`Server-Timing` header reports `capture`, `prepare` and `total`.
+
+| Query | Meaning |
+|---|---|
+| `full=1` | tmux's scrollback, not only the visible frame (`source: 'mux-full-history'`), ending with a relative cursor move back to the pane's caret. |
+| `tail=<bytes>` | Keep the newest `<bytes>` of the result (`truncationReason: 'tail'` when it cut). |
+| `lines=<n>` | With `full=1` only: read at most `<n>` lines of tmux history above the visible frame. An integer of at least 1, clamped to the configured history limit; absent or malformed, the whole limit (100,000 lines by default), as before. When a bound below the configured limit left older lines in tmux (its `history_size` is deeper), `truncated` is true with `truncationReason: 'tail'`; a byte cap still reports `'capped'`. Without it a full capture reads all of that history before `tail` cuts it, so a client that keeps a fixed number of lines (the tile grid sends its xterm's scrollback plus its rows) should send it. |
+| `alt=recording` | With `full=1` only: if the pane is in the alternate screen (a nested tmux, where tmux keeps no history, or any full-screen app such as vim or less while it is open), answer with the visible frame over the byte recording instead (`source: 'mux-visible'`, `tail` applied as without `full=1`). Shells' automatic loads send it. |
+
+## The `reverie agent` CLI (client over these endpoints)
+
+`reverie agent ls|spawn|send|wait|read|interrupt|rm` (`src/cli-agent.ts`) is the command-line client for the endpoints above, for agents the skill does not reach (a pi or shell session, a machine without `jq`). It adds no route: `spawn` is `POST /api/v1/quick-start` (+ `wait-output` on the mode's `capabilities.composerReadyMark` from the CLI registry, where it declares one), `send` is `POST …/input` with `clientId`+`seq` (and `wait`/`waitTimeout` for `--wait` / `--until <signals>`; `delivered:false` without `duplicate` and `wait.ended` both exit 3 — the CLI never reports a dead worker as done), `wait` is `GET …/wait` (`--until`) or `GET …/wait-output` (`--match`, `from=buffer` by default), `read` is `GET …/last-response` or `GET …/terminal?tail=`, `interrupt` is `POST …/input` with a bare `\u001b`, `rm` is `DELETE …/sessions/:id`. A fire-and-forget `send` to a sleeping wake-on-LAN host reads the route's `buffered` (own line, exit 0) and `dropped` (exit 1: the chunk is gone). An id may be the 8-character form `ls` prints, resolved through `GET /api/v1/sessions`; anything shorter refuses before any request, the same floor as `PARENT_SESSION_ID_MIN_PREFIX`. Every call carries `X-Reverie-Parent-Session`; only `spawn`'s quick-start carries `X-Reverie-Agent-Origin: reverie-agent-cli` (the agent-scratch label must never reach a request that cannot create the case directory). Basic auth comes from `REVERIE_PASSWORD` or the data dir's `.env`. Server-side error codes are shown verbatim (`INVALID_INPUT: until=stop …` on a hook-less mode is not hidden); exit codes are `0` ok, `1` error, `2` timeout, `3` the session exited, `4` refused by a client-side guard. See the README section "`reverie agent`" for the guards and `test/cli-agent.test.ts` for the pinned behaviour.
+
+`reverie mcp` (`src/mcp-server.ts`) is a Model Context Protocol server on stdio over the same endpoints, for MCP clients: `list_sessions` (`GET /api/v1/sessions`), `start_session` (`POST /api/v1/quick-start` with `X-Reverie-Agent-Origin: reverie-mcp`, then `wait-output` on the mode's ready mark), `send_prompt` (`POST …/input` with `wait`/`waitTimeout`), `wait_for_session` (`GET …/wait` or `…/wait-output`), `read_output` (`GET …/last-response` or `…/terminal?tail=`), `interrupt_session` and `delete_session`. It adds no route. The URL comes from `REVERIE_API_URL` or `--url`, never a guess; prompting, interrupting and deleting are limited to sessions the process started (or the calling session's own children) unless it runs with `--allow-any-session`. See the README section "MCP server" and `test/mcp-server.test.ts`.
+
+## Prompt uploads (`POST /api/v1/sessions/:id/paste-image`)
+
+A `multipart/form-data` body with one `image` part. The file is written into the
+session's workspace as `<workingDir>/.reverie-uploads/paste-<ms>-<hex>.<ext>`, and
+`data` carries `path` and `filename` for the client to type the path into the
+prompt. The folder is Reverie's own: hidden, created on first use with a
+`.gitignore` containing `*` (written once, never over a file already there), and
+cleaned up the way pasted images always were: `paste-*` files older than 7 days
+go in an hourly sweep, and the folder goes when the last session of that
+workspace is killed. Uploads made before this release sit in `.claude-images/`;
+that folder receives nothing new, and is swept and removed the same way for one
+release. A remote (SSH) session answers 400, since the file would land on the
+Reverie host under a path the remote agent cannot read. A Docker session of an
+owned case is fine, its workspace is bind-mounted at the same absolute path; an
+adopted container (`owned: false`) mounts nothing, so its agent can open the file
+only if the container itself exposes that host path.
+
+The optional query flag `?kind=video` selects a second path for a camera-roll
+video: the file streams to disk instead of being buffered, under a far larger
+per-file cap (`MAX_PASTE_VIDEO_BYTES`, 1 GB by default, env
+`REVERIE_MAX_PASTE_VIDEO_BYTES`), and only video container types are accepted
+(mp4, webm, mov, m4v, ogv, single-sourced from the file viewer's playable set).
+The container is checked from the first bytes as
+the body arrives; a file whose bytes do not match its declared type is unlinked
+and answered 415, one over the cap is unlinked and answered 413, and a transfer
+that dies midway leaves nothing behind. Because one video can be 1 GB,
+`?kind=video` draws on its own rate limit, 3 uploads per minute per (IP, session),
+beside the 30 per minute the image path keeps; without the flag the route is
+byte-identical to the image-only version, same 50 MB image cap and same 30/min
+bucket. The response shape is unchanged (`path`, `filename`).
+
+## Rendered HTML files
+
+An `.html`/`.htm` file renders as a page in a sandbox, in two steps
+(`src/web/routes/html-view-routes.ts`).
+
+**`POST /api/v1/sessions/:id/html-view`** with `{ "path": "<file>" }` (absolute,
+relative to the session's workspace, or `~/` for this host's home, which a Docker
+case refuses with `400` since its `~` is the container's; a non-empty string of at most 4096 characters
+without NUL or line breaks, and no other keys) answers `data: { url }`, a
+`/html-view/<cap>/<file>` URL. The capability grants GET access to the files under
+that file's own folder, so a page's relative CSS, scripts, images and data files
+resolve. It is held in memory only (a restart invalidates it), has a rolling TTL
+(`REVERIE_WEBVIEW_CAPABILITY_TTL_MS`, default 12 h), is reused for the same folder,
+and is revoked on logout, admin logout and user deletion. Refusals:
+
+- `400`: an invalid body, a remote (SSH) session, or a file that is not HTML (the
+  symlink-resolved name counts too);
+- `404`: no such file;
+- `403`: a file outside the workspace that the attachment guard blocks (a blocked
+  tree, or `attachmentConfineToWorkspace` on), a file in a hidden directory (inside
+  the workspace, one below the workspace root), or a file directly in a folder too
+  broad to serve recursively: `/`, the home folder, `/tmp`, `/var/tmp`, `$TMPDIR`,
+  the cases and user-space roots, a drive's mount point (`/mnt/d`), or any folder
+  above one of those (`/home`, `/Users`).
+
+**`GET /html-view/:cap/*`** serves the page and its assets. It needs no cookie: the
+capability in the path is the credential, because the page runs in an opaque origin
+that never sends one. It is not under `/api`, so it has no `/api/v1` alias and no
+envelope. `GET` and `HEAD` only; a CORS preflight on a live capability is answered
+with `Access-Control-Allow-Methods: GET, HEAD`. What it serves: files under the
+capability's folder whose path (requested and symlink-resolved) has no dot segment
+and whose extension is on an asset allowlist (html, css, js/mjs, json, map, txt,
+csv, md, svg and common image, font, wasm, audio, video and PDF types), never
+outside the folder, never a blocked tree, and, for a folder outside the workspace,
+not while `attachmentConfineToWorkspace` is on. Every response carries
+`Content-Security-Policy: sandbox allow-scripts allow-forms allow-popups allow-modals allow-downloads`
+as its whole policy (never `allow-same-origin`, so the page cannot read Reverie's
+document, cookies or API, even opened as a top-level tab; and no fetch directive, so
+by the owner's decision the page may load from and send requests to any host), `Cache-Control: no-store`,
+`Referrer-Policy: no-referrer` and `Access-Control-Allow-Origin: *`. A `Range`
+request is answered with `206` + `Content-Range` (`416` past the end), like
+`file-raw`. Every refusal is a plain-text `404 Not found`; with a password set, an
+unknown or revoked capability is the auth hook's `401` instead.
+
+## Session lineage (`parentSessionId`)
+
+A create request may name the session that spawned it, which the web UI draws as a
+line between the two tabs. Accepted on `POST /api/v1/sessions` and
+`POST /api/v1/quick-start`, either way:
+
+```bash
+# as a body field
+-d '{"caseName":"worker-1","mode":"claude","parentSessionId":"'"$REVERIE_SESSION_ID"'"}'
+
+# or as a header, which is what an agent driving many spawns should use: set it once
+# on the curl invocation and every spawn call carries it
+-H "X-Reverie-Parent-Session: $REVERIE_SESSION_ID"
+```
+
+The body field wins if both are present. The value is resolved against live sessions
+(exact id, or a unique prefix of at least 8 characters) and must belong to the same
+owner as the session being created.
+
+**It cannot fail your spawn.** An unknown, stale, foreign or malformed value is
+silently dropped and the session is created without lineage — never a `400`. It is
+also pure decoration: it confers no permission, and a child is unaffected by its
+parent exiting. It appears on session state as `parentSessionId` (absent when
+unresolved) and survives a server restart.
+
+## Session model (`displayModel`)
+
+Session state (`GET /api/v1/sessions`, the `session:updated` event) carries the model a
+session runs as far as the server knows it, for the web UI's session headers:
+
+```json
+"displayModel": { "model": "qwen3.8-27b", "source": "screen" }
+```
+
+`source` is where it came from, strongest first:
+
+| `source`          | Meaning                                                                                               |
+| ----------------- | ----------------------------------------------------------------------------------------------------- |
+| `custom-endpoint` | The session is pointed at a Custom Model Endpoint Profile; its `modelId` answers, whatever the CLI prints. |
+| `statusline`      | Claude's statusLine exporter reported it (`model.display_name`); follows an in-session `/model`.          |
+| `screen`          | Read off the CLI's own footer (`capabilities.modelDetect`, today dsh and codex); follows a switch.      |
+| `config`          | What the CLI's own config pins for the session (`capabilities.modelDetect.configResolver`, today dsh-TUI's route), while its screen names none. |
+| `launch`          | What the session was launched with (`--model`, the app-wide default, `<cli>Config.model`); nothing has reported since. |
+
+Between `statusline` and `screen` the newest report wins. The field is absent when no
+model is known (a shell, a CLI that reports none and was launched without one). `model`
+is display text from a pane or a CLI report: control characters are stripped and it is at
+most 64 characters, but treat it as untrusted text. A `statusline` or `screen` value is
+persisted and restored after a server restart until the next report replaces it; a
+`config` value is read again at every pane start, attach and relaunch instead.
+
+## Prompt cache (`promptCache`)
+
+Claude-mode session state (`GET /api/v1/sessions`) carries the main conversation's
+prompt-cache state as Claude Code last reported it on the statusline (v2.1.251+), with a
+change-only `session:promptCache` event (`{ sessionId, ...promptCache }`):
+
+```json
+"promptCache": { "warm": true, "ttl": "1h", "expiresAt": 1791653039000, "recacheTokensIfCold": 45000, "misses": 2, "expectedRebuilds": 1, "hitRatio": 0.91, "lastMissCauses": ["ttl_expired_1h"], "compactedAt": 1791649439872 }
+```
+
+| Field                 | Meaning                                                                                                   |
+| --------------------- | --------------------------------------------------------------------------------------------------------- |
+| `warm`                | Whether the cached prefix is still within its TTL. The only field always present.                         |
+| `ttl`                 | `5m` or `1h`; absent when Claude reported neither.                                                         |
+| `expiresAt`           | Epoch MILLISECONDS when the prefix goes cold (the statusline reports seconds). Absent once cold.           |
+| `recacheTokensIfCold` | Tokens the next request re-writes if the cache has gone cold. Absent right after a compaction.             |
+| `misses`              | Requests that re-processed content the cache already held.                                                |
+| `expectedRebuilds`    | Cache rebuilds that followed a compaction or a clearing of old tool results.                               |
+| `hitRatio`            | Cache read tokens as a fraction of all input tokens this session, 0 to 1.                                  |
+| `lastMissCauses`      | Claude Code's diagnosis of the last miss (e.g. `ttl_expired_1h`, `tools_changed`); untrusted text.         |
+| `compactedAt`         | Epoch MILLISECONDS when the context was compacted or its old tool results cleared: the first warm report without `recacheTokensIfCold` after one that had it. Derived, not reported; dropped at the next request. |
+
+The whole object is absent until the first report, and restored after a server restart
+(so the readout is not blank until the pane's next render) rather than recomputed; a value
+whose `expiresAt` has passed reads as cold. The statusline re-runs when a warm cache hits
+`expiresAt`, so the cold flip arrives on its own. A post-`/clear` conversation switch drops
+it. Shown in Session Options → Respawn and, for sessions without a statusline of their own,
+as a `cache:until HH:MM` / `cache:cold` group in the terminal footer.
+
+Beside it, `statusLineExporter` says whether this launch carries the statusline exporter
+that sends the report, decided when the pane starts: `injected` (it does), `collection-off`
+(Plan Usage was off at launch), `workspace-statusline` (the workspace's
+`.claude/settings.local.json` sets its own `statusLine`, which Reverie never replaces) or
+`remote` (remote and Docker sessions). Absent when unknown.
+
+## Placing a new session in a tab group (`tabGroupId`)
+
+`POST /api/v1/sessions` and `POST /api/v1/quick-start` accept an optional
+`tabGroupId` (1 to 100 characters): the id of a group in the caller's tab layout
+(`GET /api/v1/tab-layout`). The session is created as usual and placed at the end
+of that group in the same layout write; the response then also carries the
+committed layout as `tabLayout`. An id the caller's layout does not contain (a
+deleted group, another user's group) is ignored and the session lands where it
+otherwise would, never a `400`. A malformed value (`null`, an empty string, a
+non-string) is a `400 INVALID_INPUT`. Requests without the field are unchanged.
+
+## Approvals Inbox
+
+Cross-session queue of prompts waiting on a human (permission dialogs,
+AskUserQuestion questions, idle prompts). Claude-mode sessions only; items are
+in-memory (a server restart drops them; the next prompt re-fires the hook).
+Design: [`approvals-inbox-plan.md`](approvals-inbox-plan.md).
+
+- `GET /api/v1/approvals` → `{ approvals: ApprovalItem[] }`, oldest first,
+  ownership-scoped in multi-user mode. `ApprovalItem`: `{ id, sessionId,
+  sessionName, kind: 'permission'|'question'|'idle', createdAt, toolName?,
+  toolSummary?, message?, cwd?, context?, options?: {n, label}[],
+  acknowledgedAt? }`. `context` is the ANSI-stripped visible pane frame;
+  `options` is present only when the dialog's numbered choices parsed
+  confidently; `acknowledgedAt` marks an item a human has already looked at
+  (see `/viewed` below) and tells clients not to re-arm its tab alert. Listing
+  also runs a staleness sweep over the caller's own items: the pane is
+  re-captured, and an item whose dialog no longer parses is resolved as
+  `resolved_in_terminal` instead of being returned (only items whose original
+  frame parsed `options` can be dropped this way, so an unreadable capture
+  keeps the item).
+- `POST /api/v1/approvals/:id/answer` with `{ action: 'approve' }` (sends the
+  digit `1`), `{ action: 'deny' }` (sends Esc), `{ action: 'option', option: n }`
+  (sends the digit; accepted only when `n` is among the item's parsed
+  `options`), or `{ action: 'text', text }` (idle prompts only; submits the
+  line as a prompt). `404 NOT_FOUND` when the item is no longer pending,
+  `409 CONFLICT` when the dialog left the screen or another actor answered
+  first, `422 OPERATION_FAILED` when the session refused input.
+- `POST /api/v1/approvals/:id/dismiss` removes the item without keystrokes.
+- `POST /api/v1/approvals/session/:sessionId/viewed` → `{ sessionId,
+  acknowledged: itemId | null }`. Marks the session's pending **idle** item as
+  seen by a human (the web UI calls it when you open the session's tab): the
+  item stays pending and answerable, but stops arming the yellow tab alert on
+  every client, including after a reload. Permission/question items are never
+  acknowledged this way, since looking at a dialog does not answer it. `404`
+  for an unknown or inaccessible session; acknowledging twice is a no-op
+  (`acknowledged: null`).
+
+SSE events: `approval:pending` (full item), `approval:updated` (context/options
+re-captured, or the item acknowledged), `approval:resolved` (`{ id, sessionId, kind, resolution }` with
+`resolution` one of `answered | resolved_in_terminal | superseded |
+session_ended | dismissed | expired`).
+
+## Reboot restore
+
+A host reboot takes the tmux server down with it, so every pane dies and the
+board comes up empty. At boot Reverie works out which sessions the reboot
+destroyed and holds that plan in memory, and these endpoints let a client offer
+it to the user. Nothing creates a pane until the user asks: the boot-time reboot
+heuristic decides whether to ASK, never whether to act.
+
+Claude-mode sessions only (others carry their conversation id in their own
+config object); remote and docker sessions are never offered, because both need
+another host or container to be up. The plan is in-memory, so a server restart
+drops it and the offer is gone; the conversations themselves are unaffected,
+since they live in the CLI's own transcript store and stay reachable from the
+Resume list. A plan nobody spends expires after 24 hours.
+
+- `GET /api/v1/reboot-restore` → `{ sessions: RestorableSession[],
+  scrollbackRestored: false }`, ownership-scoped in multi-user mode.
+  `RestorableSession`: `{ id, name?, workingDir, mode, owner? }`. The persisted
+  record itself is never sent. `scrollbackRestored` is always `false` and exists
+  so a client states it: a restored session is a NEW pane, so the conversation
+  continues and the terminal history does not.
+- `POST /api/v1/reboot-restore/restore` with `{ sessionIds?: string[] }` (omit
+  to restore everything the caller can see) → `{ restored: RestorableSession[],
+  skipped: { sessionId, reason }[] }`. `reason` is one of `workspace-missing`
+  (the directory is gone), `workspace-forbidden` (in multi-user mode it is
+  outside the workspace of the user the session belongs to, re-checked against
+  that owner's current grant rather than the caller's), `already-live` (the conversation is already
+  open, typically resumed by hand from the Resume list), `capacity-reached`
+  (the global or per-user session cap), or `rebuild-failed` (the agent would not
+  start, most often a CLI binary missing from the server's PATH).
+  `409 CONFLICT` when that caller already has a restore running. Entries are
+  removed from the plan before any pane is built, so a double-click cannot put
+  two panes on one conversation; anything that never became a pane goes back on
+  offer, except `already-live`, which cannot stop being true. A restored session
+  comes back attached, idle and disarmed: respawn controllers and Ralph loops
+  are never re-armed automatically.
+- `POST /api/v1/reboot-restore/dismiss` → `{ dismissed: n }`. Drops the offer
+  for everything the caller can see.
+
+Each rebuilt session also emits the ordinary `session:created` SSE event, so
+clients other than the one that clicked pick it up without refetching.
+
+## Read My Mind intent profiles
+
+Per-case profiles of what the user is trying to accomplish: user/agent-stated
+goals plus the user's recently submitted prompts, captured from the Claude
+session transcript while the opt-in `readMyMindEnabled` setting is on (default
+OFF). Keyed by owner + workingDir, so the profile survives `/clear`, respawns,
+and session churn. Stored in `~/.reverie/intents.json` (mode 0600); never fed
+into `/api/v1/search`. Design: [`readmymind-plan.md`](readmymind-plan.md);
+user guide: [`readmymind.md`](readmymind.md).
+
+- `GET /api/v1/sessions/:id/intent` -> `{ intent: IntentProfile }` for the
+  session's case. `IntentProfile`: `{ key, workingDir, updatedAt, goals,
+  recentPrompts: { ts, sessionId, text }[] }` (prompts oldest first, FIFO cap
+  50, each <= 500 chars). A case with nothing recorded answers an empty
+  profile with `updatedAt: 0`; nothing is persisted by reads.
+- `PUT /api/v1/sessions/:id/intent` with `{ goals }` (<= 8192 chars, strict
+  schema) replaces the goals text and answers the updated profile.
+  `400 INVALID_INPUT` on over-long or unknown fields.
+- `DELETE /api/v1/sessions/:id/intent` -> `{ deleted: boolean }` forgets the
+  case's profile entirely.
+- `POST /api/v1/sessions/:id/readmymind` predicts the user's next prompt:
+  a one-shot model call over the intent profile plus live session signals
+  (pending approval dialog, transcript tail, git state, run-summary events,
+  sibling sessions). Body is optional; the rethink flow passes
+  `{ steer?, rejected? }` (strict schema: `steer` <= 2000 chars, `rejected`
+  up to 10 strings <= 1000 chars). Answers
+  `{ suggestions: { prompt, why, kind }[], durationMs }` with 1-3 suggestions
+  (`kind`: `continue` | `verify` | `redirect`; prompts are single-line).
+  Claude-mode sessions only (`400 INVALID_INPUT` otherwise); one prediction in
+  flight per session (`409 CONFLICT`); predictor failures answer
+  `502 OPERATION_FAILED`. Takes 5-90 s and costs real tokens. Suggestions are
+  only ever returned, never sent: submitting one is the caller's explicit act.
+
+All four enforce session ownership in multi-user mode; a foreign session id
+answers `404 NOT_FOUND` (no existence leak), and profiles of two owners of the
+same directory are distinct by construction.
+
+## Custom Model Endpoints
+
+Points a session's harness at a user-configured OpenAI-compatible endpoint —
+local (llama.cpp, vLLM, DGX Spark) or cloud (Azure AI Foundry, OpenRouter) —
+instead of its native cloud backend, gated by the opt-in
+`customModelEndpointsEnabled` setting (default OFF). Endpoints are
+machine-level infra, like remote/docker hosts: writes are admin-only in
+multi-user mode. Design: [`custom-model-endpoints-plan.md`](custom-model-endpoints-plan.md);
+user guide: [`custom-model-endpoints.md`](custom-model-endpoints.md).
+
+- `GET /api/v1/model-endpoints` -> `CustomModelHost[]`, an unwrapped bare
+  array like every other list route (still riding the standard `{success,
+data}` envelope on the wire — unwrap it the same way). Answers `[]` for a
+  non-admin in multi-user mode. `apiKey` is never returned; `apiKeySet:
+boolean` reports whether one is stored, so a client can render "unchanged
+  if left blank" without ever holding the real value.
+- `POST /api/v1/model-endpoints` with `{ id, label, baseUrl, apiKey?,
+authStyle?, defaultModelId? }` creates one. `id` must match
+  `^[a-zA-Z0-9_-]+$`; `authStyle` is `bearer` (default) or `api-key`, never
+  both (a real server hung indefinitely when sent both headers on one
+  request); `baseUrl` must be `http(s)`, carry no embedded credentials, and
+  is refused if it points at (or resolves to) a link-local or
+  cloud-metadata address. `409 ALREADY_EXISTS` on a duplicate id.
+- `PUT /api/v1/model-endpoints/:id` updates one. An **absent** `apiKey`
+  keeps the stored one rather than clearing it — the client never receives
+  the real value to resend deliberately unchanged, so omission is the only
+  way to say "leave it alone"; there is no way to clear a key back to unset
+  this way. `defaultModelId`, when set, must be one of that endpoint's own
+  `models` (`400 INVALID_INPUT` otherwise).
+- `DELETE /api/v1/model-endpoints/:id` removes one.
+- `POST /api/v1/model-endpoints/:id/discover-models` fetches the endpoint's
+  own `GET /v1/models` and stores the result as `models`, updating
+  `lastDiscoveredAt`, plus (best-effort, only for a model llama-swap's own
+  response already reports loaded) `modelContextLengths` and `modelSizesGB`.
+  A `defaultModelId` that no longer appears in the fresh list is dropped
+  rather than carried forward invalid. Failures answer `422 OPERATION_FAILED`
+  with the underlying connection error, or a named egress refusal if the
+  resolved address turned out to be blocked. The same refresh also runs
+  automatically for every saved endpoint every 5 minutes in the background
+  (`refreshAllCustomModelHosts()`, `custom-model-routes.ts`, started from
+  `server.ts`), so there is no route for triggering "refresh all" — one
+  endpoint being unreachable on a cycle never blocks the others.
+- `GET /api/v1/model-endpoints/:id/running-status` -> `{ isLlamaSwap,
+running: [{model, state}], logLine? }`, read-only, no admin gate
+  (any session owner who could already point a session at this endpoint can
+  equally ask what it currently has loaded). `isLlamaSwap` is
+  feature-detected via the endpoint's own `GET /running` — a plain
+  llama.cpp/OpenAI-compatible server has none and always answers `false`.
+  `logLine`, present only when `isLlamaSwap` is true, is the most recent
+  REAL backend `llama-server` process log line (`load_model: ...`,
+  `llama_server: model loaded`, etc.), sourced from the endpoint's own
+  `GET /api/events` SSE stream and filtered to `source: "upstream"` frames
+  only (never llama-swap's own `source: "proxy"` request-access log) — one
+  connection is held open per endpoint and reused across every poller,
+  idle-closed after 30s of nobody asking. This is what the Run-menu
+  picker's loading banner polls once a second while a model is loading.
+- `POST /api/v1/sessions/:id/custom-model` with `{ endpointId, modelId,
+confirmed? } | { clear: true }` applies (or clears) the session's
+  selection and **restarts the session's CLI process in place** — every
+  supported harness reads its endpoint config at process start, never per
+  turn, so there is no live hot-swap. (`POST /api/v1/quick-start`'s own
+  `customModel: { endpointId, modelId, confirmed? }` field is the
+  no-restart equivalent for a session that doesn't exist yet — see below.)
+  A Claude session resumes its existing conversation across the restart;
+  pi/omp/grok additionally get a forced `--model`/`-m` value, since for
+  those three the config file alone does not select it. `400 INVALID_INPUT`
+  for a remote (SSH) or Docker session — both restart their agent
+  differently under the hood, and applying to one would report success
+  while changing nothing. Two more responses replace the normal
+  `{customModel, restarted}` shape, neither an error, and neither restarts
+  or creates anything on the first ask. ⚠️ **Each is answered by its OWN
+  flag on the retry, and answering one is not authorization to the other**: they
+  are questions about different people, and while they shared a single flag
+  a caller who confirmed the context warning silently agreed to evict
+  another session's model as well. Send `confirmedContext: true` to proceed
+  past the context warning, `confirmedSwap: true` past the swap conflict,
+  and both when both were asked (they accumulate, so the second retry still
+  carries the first answer). The original `confirmed: true` still means
+  BOTH and is still accepted, because it shipped in this feature's
+  HTTP-API-only cut; new callers should send the specific one:
+  - `{requiresConfirmation: true, currentlyLoadedModel, affectedSessions}` —
+    llama.cpp/llama-swap only runs one model at a time, and switching would
+    unload a model another **live session's own selection** is actively
+    using. Never returned for a plain (non-llama-swap) server, and never
+    just because a swap is needed at all — only when it would disrupt
+    someone else.
+  - `{requiresContextWarning: true, modelId, contextLength,
+minSafeContextTokens}` — Claude Code's own fixed per-turn overhead
+    (system prompt + tool schemas) can exceed a small model's entire
+    discovered context on its own, before any conversation history exists
+    to compact, guaranteeing the very first message fails regardless of
+    `CLAUDE_CODE_MAX_CONTEXT_TOKENS`. Gated on the CLI registry declaring a
+    `contextLengthVar` (claude only today), so it never fires for another
+    harness.
+- `POST /api/v1/quick-start`'s `customModel: { endpointId, modelId,
+confirmed?, confirmedContext?, confirmedSwap? }` field (alongside its
+normal `caseName`/`mode`/etc. body)
+  computes the same injection **before** the session exists and launches
+  directly on the endpoint — no restart, because there was never a
+  native-backend boot to restart away from. Runs the identical checks as
+  the dedicated route above (`requiresConfirmation`/`requiresContextWarning`,
+  same shapes, same per-question `confirmedContext`/`confirmedSwap` retry),
+  and is refused the same way
+  for a remote or Docker case. This is what the Run-menu picker uses for
+  opencode, Codex, Gemini, Pi, Grok, DeepSeek and OMP; Claude still uses the
+  dedicated restart route above (its `--resume`-based restart is far less
+  jarring than a full relaunch, and folding it into the one-shot path is
+  separate work — see `docs/custom-model-endpoints-plan.md`).
+
+## Creating a case in a custom folder
+
+`POST /api/cases` takes `{ name, description?, path? }`. Without `path` it creates `<cases dir>/<name>` as always. With `path` (absolute, or starting with `~`) the case folder is created at that exact path instead, scaffolded the same way (`CLAUDE.md`, `src/`, `.claude/settings.local.json`), and registered in the linked-cases registry, so it lists, resolves and deletes like a linked case (deleting unlinks; it never removes files). Response: `{ case: { name, path } }`, where `path` is the symlink-resolved folder.
+
+The target is judged before anything is written:
+
+- It must be absolute with no `..` and none of the shell metacharacters a session working directory is rejected for (spaces are fine). `400 INVALID_INPUT` otherwise.
+- It must not be a system directory (`/etc`, `/usr`, `/proc`, ...), the home folder itself, Reverie's own data folder, or a credential/config tree (`~/.ssh`, `~/.aws`, `~/.claude`, ...). Judged on the path as typed and on its symlink-resolved form, against both the given and the symlink-resolved roots. `400`.
+- It must not be, or be inside, the cases directory (the caller's own and the shared one): a case there is a plain create without `path`. `400`.
+- Its parent must already exist (one folder is created, never a chain): `404 NOT_FOUND`. A parent that does not answer (an unreachable network mount) or cannot be read is `422 OPERATION_FAILED`, checked through the bounded path probe before anything else touches it.
+- The folder must not exist, or must be an **empty** directory; a folder with contents is Link Existing's job: `409 ALREADY_EXISTS`. A symlink or a plain file at the target is `400`.
+- `409 ALREADY_EXISTS` also for a case name already in use (in the cases dir or the registry) and for a folder that is already a case.
+
+Admin only in multi-user mode (`403`), like `POST /api/cases/link`: it writes outside the cases directory and into the shared, ownerless registry. If anything fails after the first write, what this call created is removed (the whole folder if it created it, otherwise only the scaffold inside the empty folder you picked) and the response is `500`.
+
+## Agent profile
+
+`GET /api/agents/:id/profile` is what an agent's profile panel reads: the session's backend, model, effort (the spawn-time default, plus the level its newest Claude Code transcript turn used), the console's token and message counters, the company employee and chat rooms it is bound to, whether the reverie runtime supervises it (with that runtime's configured backends), and the owner-selected persona from its instance config. **Read-only:** the reverie runtime builds it (`reverie-runtime --policy POLICY profile ID`) from GET calls and local reads, and reports backend switching as unavailable (`runtime.switch.available: false`), because switching is an owner action that waits for owner authentication.
+
+- The session resolves like every session route (ownership via `findSessionOrFail`; another user's session is `404`).
+- **Who may read it:** the owner (no `X-Reverie-Parent-Session` header) reads any agent's profile. An agent reads only its **own**, and direct-message rooms are left out of it. Any other header, resolvable or not, gets `403`.
+- `503` until the server's environment names the runtime policy (`REVERIE_RUNTIME_POLICY`; `REVERIE_RUNTIME_BIN` overrides `reverie-runtime` on `PATH`). The command comes only from the environment, so no API call can choose what this route runs.
+- `501` in multi-user mode: the report reads the console as its owner.
+- `502` when the runtime fails or prints no JSON object, with its `error` when it reported one; `404` when the session disappeared before the report ran.
+- Concurrent requests for one session share a single report. A finished report is reused for 15 s. At most two reports run at once server-wide; more requests wait their turn.
+
+## Git status
+
+`GET /api/sessions/:id/git-status` is what the bottom-bar Git indicator and its panel read (Settings → Header & Panels → Bottom bar, per-device, default off). It reports what the session's workspace has not committed or pushed. **Read-only and offline:** it never fetches, pulls, commits or writes (it runs `git status` with `--no-optional-locks`, so it does not even refresh the index), which is why `behind` is as of the last `git fetch`. The session is resolved like every session route (ownership via `findSessionOrFail`; another user's session is `404`). A repository whose root is, or is inside, a Docker case workspace is dropped (from the walk-up, the scan below a folder, and the diff route): a container can write there, and a repository's own clean filter or signature program would run on the host. When a branch's upstream does not exist on the remote (deleted and pruned, or never pushed, as after cloning an empty repository and committing), `upstreamGone` is `true` and the unpushed list falls back to commits on no remote-tracking ref at all.
+
+`GET /api/sessions/:id/git-diff?repo=<repoRoot>&path=<path>&kind=staged|unstaged|untracked|conflicted` returns the unified diff of one file the panel lists (`{ diff, truncated, binary }`; staged is index vs HEAD, unstaged is working tree vs index, untracked is the whole file as additions). It is what opens when you click a file in the Git panel. `repo` and `path` are matched against the current status rather than trusted, so anything the status does not list is `404`. Read-only: it passes `--no-ext-diff --no-textconv` (no external diff or textconv driver runs), but a repository's clean filters still run, as they do for any `git diff`, which is why a repository a container can write to is never inspected (below). Capped at 400 KB, and refused (`400`) for remote and Docker sessions; a repository at or inside a Docker case workspace is not in the status, so it is `404` here.
+
+**Which repositories.** git finds a repository by walking *up* from the session's working directory, so:
+
+- Inside a repository (or at its root): that one repository, whole (a subfolder reports its enclosing repo, `path` says where it is, e.g. `../..`). A nested repo below it is just an untracked folder to the outer one and is not scanned; start the session inside it to see it.
+- **Not** inside one (a folder that holds several projects): every repository found up to **two levels down**, nearest and alphabetical first, at most `maxRepos` of them (default 12, 1 to 50; `reposTruncated` says when there were more and `repoLimit` is the limit that was applied). Dot-folders, `node_modules`, `dist`, `build`, `target`, `vendor`, `venv` and `__pycache__` are skipped, symlinks are never followed, and a repository's own contents are not searched. The list of repositories is re-scanned at most every 30 s; each repository's status is cached for 4 s.
+- A repository that merely sits **above** the workspace and is the home folder or higher (a dotfiles repo in `$HOME`, or `/`) is ignored: its dirty files are not this session's work. A workspace that *is* that repository's root is not ignored.
+- A worktree (whose `.git` is a file) counts as a repository. A submodule's own uncommitted files are not reported, only a changed submodule pointer.
+
+Both routes accept two optional query parameters, which the UI sends from its per-device settings and the server clamps again: `maxRepos` (1 to 50, default 12) and `timeout` (seconds one git command may run, 5 to 120, default 30). An empty or non-numeric value means the default. A repository whose `git status` fails (typically a timeout on a slow network share) is **kept in `repos[]`** with `status.state: 'error'` and the reason in `status.error`, not dropped, so it is visible that something is not being reported.
+
+`data` is `{ state, repos, reposTruncated, repoLimit, checkedAt }` (`repoLimit` in the folder-of-projects case only):
+
+- `state: 'ok'`: `repos[]`, each `{ name, path, status }` where `name` is the repository folder's name, `path` its root relative to the working directory, and `status` is:
+  `branch` (null when `detached`), `upstream`, `ahead`, `behind`, `hasRemote`, `counts` (`staged`, `unstaged`, `untracked`, `conflicted`, `uncommitted` = distinct paths, `stashes`), `files[]` (`path` relative to `repoRoot`, `origPath` for a rename, `index` and `worktree` status letters, `kind`: `staged` \| `unstaged` \| `untracked` \| `conflicted`; a file that is staged *and* modified again appears once per kind), `filesTruncated`, `unpushedCount` (exact) and `unpushed[]` (newest first: `hash`, `author`, `time` in epoch seconds, `subject`), `repoRoot`, `checkedAt`.
+- `state: 'not-a-repo'`: no repository here, above (that counts) or within two levels below.
+- `state: 'unsupported'` with `reason: 'remote' | 'docker'`: those sessions are never inspected (a Docker workspace is writable from inside its sandbox, and git here would run on the host).
+- `state: 'error'` with a short `error` (git missing, timed out, or git's first stderr line with any `user:token@` credentials redacted).
+
+Lists are capped (300 files and 50 commits per repository) while the counts stay exact. A branch with no upstream reports the commits no remote has (`HEAD --not --remotes`); a repository with no remote reports `unpushedCount: 0`, since there is nothing to push to. Concurrent polls of one folder share a single git invocation; `?fresh=1` (what the panel's Refresh button and opening the panel send) skips the short-lived caches, though it still joins a computation already running.
+
+## CLI management
+
+Read and write the CLI registry (`docs/cli-registry.md`). Every **write** route answers `403 FORBIDDEN` while `cliManagementEnabled` is off (the default), and for a non-admin in multi-user mode. A write that would overwrite a `clis.json` which does not parse, or which has group/world permission bits, is refused with `409 CONFLICT` and a message naming the fix; the file is left untouched.
+
+| Method   | Path                          | Body                                                    | Notes                                                                                                   |
+| -------- | ----------------------------- | ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| `GET`    | `/api/clis`                   | none                                                    | Every entry, disabled ones included: `id`, `label`, `shortBadge`, `order`, `kind`, `enabled`, `stock`, `installed`, and `installCommand` for a stock entry. Not gated; a non-admin in multi-user mode gets `[]`. |
+| `PUT`    | `/api/clis/:id`               | `{ enabled }`                                           | Toggle an existing entry, stock or custom. `404` for an unknown id; `400 INVALID_INPUT` when disabling a `kind: 'shell'` entry. |
+| `POST`   | `/api/clis/:id/install`       | none                                                    | Run a **stock** entry's install command (never a custom one: `400`). `409 CONFLICT` while an install for the same id is running; `422 OPERATION_FAILED` with the output tail when it fails. Never enables the entry. |
+| `POST`   | `/api/clis`                   | `{ id, label, shortBadge, binaries, argv, enabled? }`   | Create a custom entry. `409 ALREADY_EXISTS` for a stock id or an existing custom id. `enabled` defaults to `true`. |
+| `PUT`    | `/api/clis/custom/:id`        | `{ label, shortBadge, binaries, argv, enabled? }`       | Replace an existing custom entry. An absent `enabled` keeps the entry's current state. `400` for a stock id, `404` for an unknown one. |
+| `DELETE` | `/api/clis/:id`               | none                                                    | Delete a custom entry. `400` for a stock id, `404` for an unknown one.                                  |
+
+## MCP server sync
+
+Copies MCP servers between the agent CLIs' own user-level config files (`docs/cli-registry.md`, "MCP server sync"). **Opt-in:** both routes answer `403 FORBIDDEN` while the synced `mcpSyncEnabled` setting is off (the default), and for a non-admin in multi-user mode, because the routes write files in the server user's home. A second `POST` while one is running answers `409 CONFLICT`.
+
+| Method | Path            | Body | Notes                                                                                                                   |
+| ------ | --------------- | ---- | ----------------------------------------------------------------------------------------------------------------------- |
+| `GET`  | `/api/mcp-sync` | none | Dry run. Same result shape as `POST`, with `applied: false`; nothing is written.                                        |
+| `POST` | `/api/mcp-sync` | none | Adds each server a CLI is missing to that CLI's config file. Never edits or removes a server. `500` on an unexpected error. |
+
+Result (`data`):
+
+- `applied` — `false` for the dry run.
+- `targets[]` — one per enabled CLI that declares an MCP config, plus GitHub Copilot CLI (`id: "copilot"`, a sync-only target that is not a run mode): `id`, `label`, `file`, `status`, `error?`, `servers` (names it already has), `added` (names added, or that would be), `skipped` (names its dialect cannot express, e.g. SSE for Codex and Antigravity).
+  - `status`: `ok`; `absent` (not installed and no config file, so not read or created); `skipped` (the CLI's relocation env var, e.g. `CODEX_HOME`, is set to a relative path in the server's environment, so its file cannot be located safely and is neither read nor written); `unreadable` (the file exists but cannot be parsed safely, so it is not written); `failed` (a read or write error, the file may be unchanged).
+  - `error` says why a target is not `ok`. A parse failure is reported by position only (`not valid TOML (line 3, column 21)`, `not valid JSON`), never with text from the file.
+  - `file` honours each CLI's own relocation env var as the server process sees it (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `XDG_CONFIG_HOME`, `GEMINI_CLI_HOME`, and `COPILOT_HOME` for the sync-only Copilot CLI); see `docs/cli-registry.md`.
+- `conflicts[]` — names defined differently by different CLIs. Existing definitions are kept; the first CLI's is copied where the name is missing.
+- `disabled[]` — names left out because every definition is switched off in its own CLI (codex `enabled = false`, opencode `enabled: false`, antigravity `disabled: true`).
+- `unsupported[]` — labels of enabled agent CLIs with no known MCP config file (nothing is guessed).
+  - Only installed CLIs are listed: one that is not installed is left out, as a supported CLI that is not installed reads `absent`.
+
+The result carries server **names** only, never `env` values, `headers` or file content. Each changed file keeps its previous content as `<file>.reverie-bak` (overwritten by each sync); a file that receives servers carrying `env` or `headers` is left mode `0600`.
+
+## Diagnostics
+
+`GET /api/doctor[?category=core|office|other]` returns the `reverie doctor --json` report (`platform`, `summary`, `tools[]` with `status` `ok` \| `missing` \| `outdated` \| `skipped` \| `error`, `version`, `path`, `installHint`). The probe engine is synchronous, so it runs in a child process of the same entry script, never on the server's event loop (30 s timeout). It names install paths and versions, so it is admin only in multi-user mode (`403`). `400` for an unknown category, `500` if the child produces no report.
+
+## Authentication
+
+Optional HTTP Basic (`REVERIE_USERNAME`/`REVERIE_PASSWORD`) → opaque
+`reverie_session` cookie. When enabled, unauthenticated requests get
+`401 UNAUTHORIZED`; rate-limited requests get `429 RATE_LIMITED`. See
+[`security-architecture.md`](security-architecture.md).
+
+## SSE event channel
+
+`GET /api/events` is a Server-Sent Events stream (`text/event-stream`); each
+message is `event: <name>` + `data: <json>`. The event-name registry
+(`src/web/sse-events.ts`, mirrored in `src/web/public/constants.js`) is part of
+the stable contract — event names are not renamed without a major bump. An
+optional `?sessions=<id,...>` filter suppresses only the high-volume terminal
+stream; lifecycle/metadata events are delivered to all clients regardless.
+
+### `sse:heartbeat` (liveness)
+
+Every 15s the server writes a `sse:heartbeat` frame to every connected client:
+
+```
+event: sse:heartbeat
+data: {"t":1755100000000}
+```
+
+`t` is the server's epoch-ms timestamp at write time. The frame carries no
+application state and can be ignored for correctness. It exists so a client can
+tell a live stream from a dead one: an `EventSource` whose connection has been
+idle-closed by a proxy (or that resumed from sleep on a stale socket) keeps
+delivering nothing without ever firing `onerror`. Clients that care should treat
+silence longer than about three intervals as a dead stream and reconnect, which
+is what the bundled frontend does.
+
+This replaced a `:keepalive` SSE **comment**, which served the same
+proxy-flushing purpose but is invisible to `EventSource` by spec and so could
+never be observed by a client. Consumers written against the old behavior are
+unaffected: `EventSource` dispatches only events that have a registered
+listener, so an unknown event name is dropped.
+
+## Consuming from JavaScript
+
+The bundled frontend reads responses through `_apiJson()`
+(`src/web/public/api-client.js`), which unwraps `{success:true,data}` → `data` and
+returns `null` on a non-2xx / `{success:false}` response. External clients should
+do the same: check the HTTP status (or `body.success`), then read `body.data`.

@@ -1,0 +1,147 @@
+/**
+ * @fileoverview Global test setup for Reverie tests
+ *
+ * SAFETY: The suite gets a temporary HOME and explicitly enables runtime test
+ * mode before application modules load. Tests therefore cannot touch the real
+ * Reverie state/cases tree or launch external tmux-backed agent sessions.
+ *
+ * This setup file strips shell-level configuration that can leak from a running
+ * Reverie instance — auth (`REVERIE_PASSWORD`/`REVERIE_USERNAME`), the gesture
+ * flag, and the three INSTANCE-selection vars that would otherwise point the
+ * suite at a real data dir or tmux socket — then handles mock/timer cleanup
+ * between tests.
+ */
+
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterAll, afterEach, vi } from 'vitest';
+
+const originalHome = process.env.HOME;
+const originalUserProfile = process.env.USERPROFILE;
+const originalVitest = process.env.VITEST;
+const originalPlaywrightBrowsersPath = process.env.PLAYWRIGHT_BROWSERS_PATH;
+// Refuse to run against a live instance. A data dir holding `state.json` belongs
+// to a running Reverie, so this run shares that instance's memory limit and can
+// reach live state through anything the env strip below misses. On 2026-10-15
+// a run in the live container OOM-killed the CTO pane and wrote fixtures into
+// live state. Run the suite in a development container instead.
+const liveDataDir = [process.env.REVERIE_DATA_DIR].find(
+  (dir) => !!dir && existsSync(join(dir, 'state.json'))
+);
+if (liveDataDir) {
+  throw new Error(
+    `Refusing to run tests inside a live Reverie instance (data dir ${liveDataDir}). ` +
+      'Use a development container without REVERIE_DATA_DIR.'
+  );
+}
+
+const testHome = mkdtempSync(join(tmpdir(), 'reverie-vitest-'));
+
+if (originalPlaywrightBrowsersPath === undefined && originalHome) {
+  process.env.PLAYWRIGHT_BROWSERS_PATH =
+    process.platform === 'darwin'
+      ? join(originalHome, 'Library', 'Caches', 'ms-playwright')
+      : process.platform === 'win32'
+        ? join(process.env.LOCALAPPDATA || join(originalHome, 'AppData', 'Local'), 'ms-playwright')
+        : join(originalHome, '.cache', 'ms-playwright');
+}
+process.env.HOME = testHome;
+process.env.USERPROFILE = testHome;
+process.env.VITEST = 'true';
+
+for (const key of Object.keys(process.env)) {
+  if (key.startsWith('REVERIE_')) delete process.env[key];
+}
+
+// Explicitly document the most consequential inherited settings below. The
+// loop above intentionally also catches future container/deployment variables.
+delete process.env.REVERIE_PASSWORD;
+delete process.env.REVERIE_USERNAME;
+// Gesture availability changes renderIndexHtml output (injects the
+// __reverieGestureAvailable flag), breaking byte-identity assertions
+// (test/server-index-title.test.ts) when the shell exports REVERIE_GESTURE=1.
+delete process.env.REVERIE_GESTURE;
+// REVERIE_BASE_URL (#381) is read by the WebServer constructor as a fallback; an
+// operator who exports it (exactly who the feature is for) would otherwise see the
+// root-install byte-identity assertions fail.
+delete process.env.REVERIE_BASE_URL;
+// CLAUDE_CONFIG_DIR (#255) relocates Claude's whole tree, transcripts included, and
+// `claudeProjectsDir()` reads it before it ever looks at `homedir()`. A developer who runs
+// Reverie against a separate Claude account exports exactly this, and every test that writes
+// a transcript fixture under the temp HOME's `~/.claude/projects` then reads "no transcript"
+// (found at merge of #467: test/session-custom-model-restart.test.ts went red).
+delete process.env.CLAUDE_CONFIG_DIR;
+
+// Instance selection is PROCESS-WIDE and is what `src/config/instance.ts` derives
+// both the data dir and the tmux socket from, so a shell that exports any of these
+// three reaches straight past the temp HOME above and undoes the isolation this
+// file exists to provide:
+//
+//   - REVERIE_DATA_DIR is the dangerous one. It is an ABSOLUTE override read in
+//     `getDataDir()`, so it bypasses HOME entirely: a developer who exports it
+//     (or a shell left over from `reverie web -d`) has the suite reading and
+//     WRITING their real `state.json`, `users.json`, `intents.json` and
+//     `hook-secret` instead of a throwaway tree. Found live 2026-08-29 (#356):
+//     `session-routes-workspace-hooks.test.ts` overwrote a production
+//     `remote-hosts.json` with its `h1/box/10.0.0.5` fixture. `os.homedir()`
+//     itself DOES follow `$HOME`, so with this var gone `getDataDir()` lands
+//     under the temp HOME like everything else. (#356 first answered this by
+//     pointing the var at a second throwaway dir; deleting it is the same
+//     protection with one tree to clean up.)
+//   - REVERIE_INSTANCE moves the data dir to `~/.reverie-<name>` and the socket to
+//     `reverie-<name>`. Inside the temp HOME that is not a data-loss risk, but it
+//     silently changes the paths tests assert on — and `scripts/run-beta.sh`
+//     exports it, so any shell that has run a beta carries it.
+//   - REVERIE_TMUX_SOCKET renames the socket `resolveTmuxSocketName()` returns.
+//     `TmuxManager` no-ops its shell commands under vitest, so this is assertion
+//     drift rather than a stray `tmux -L` against prod — but it is the same class
+//     of leak and the same one-line fix.
+//
+// ⚠️ These must be deleted HERE rather than in a test, because `REVERIE_INSTANCE`
+// is captured into a module-level const the first time `config/instance.ts` is
+// imported. A setup file runs before any application module loads; a beforeEach
+// would already be too late.
+delete process.env.REVERIE_INSTANCE;
+delete process.env.REVERIE_DATA_DIR;
+delete process.env.REVERIE_TMUX_SOCKET;
+// Docker Compose binds cases outside HOME. Leaving this set makes route tests
+// write into the deployment's real case root instead of their temp HOME.
+delete process.env.REVERIE_CASES_PATH;
+
+afterEach(() => {
+  vi.clearAllMocks();
+  vi.useRealTimers();
+});
+
+afterAll(async () => {
+  // Let in-flight console-log rpc forwards drain before the worker environment
+  // tears down. On loaded CI runners the channel otherwise closes while the last
+  // "onUserConsoleLog" call is still pending, and that single unhandled
+  // EnvironmentTeardownError fails the run after every test has passed
+  // (observed twice on the PR #175/#176 merge commit; never locally).
+  const { promise: drained, resolve: drainDone } = Promise.withResolvers<void>();
+  setTimeout(drainDone, 50);
+  await drained;
+
+  if (originalHome === undefined) delete process.env.HOME;
+  else process.env.HOME = originalHome;
+
+  if (originalUserProfile === undefined) delete process.env.USERPROFILE;
+  else process.env.USERPROFILE = originalUserProfile;
+
+  if (originalVitest === undefined) delete process.env.VITEST;
+  else process.env.VITEST = originalVitest;
+
+  if (originalPlaywrightBrowsersPath === undefined) delete process.env.PLAYWRIGHT_BROWSERS_PATH;
+  else process.env.PLAYWRIGHT_BROWSERS_PATH = originalPlaywrightBrowsersPath;
+
+  rmSync(testHome, { recursive: true, force: true });
+});
+
+// afterAll never fires for a fully-skipped test file (no tests execute), which
+// would leak the temp home created above. The exit hook is the backstop; rmSync
+// with force is a no-op when afterAll already removed it.
+process.on('exit', () => {
+  rmSync(testHome, { recursive: true, force: true });
+});

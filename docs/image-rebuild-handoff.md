@@ -1,8 +1,11 @@
 # Image rebuild checklist for review
 
+
+Here, coordinator means an owner-appointed agent with explicit orchestration
+permission. CTO or COO titles alone grant no approval or host authority.
 Status, 2026-10-17: **write-up only; no build or cutover authorized tonight**.
-The CTO requested this review before any host action. A previous GO does not
-override a later hold. Re-read the originating channel and verify the current CTO
+The coordinator requested this review before any host action. A previous GO does not
+override a later hold. Re-read the originating channel and verify the current coordinator
 binding and recorded approval immediately before each delegated host operation.
 
 The private `reports/image-build-checklist.md` in the persistent instance handoff
@@ -12,12 +15,12 @@ revision, source hashes, test evidence and resulting image digest in the handoff
 
 ## 1. Establish the actual source of truth
 
-- The runtime engineer inventories the CURRENT `/opt/fleet/apps/console`, installed
-  `cto` package, `/workspace/cto`, supervisor and relevant dependency versions.
+- The runtime engineer inventories the CURRENT `/opt/reverie/apps/web`, installed
+  `reverie` package, `/workspace/python/reverie`, supervisor and relevant dependency versions.
   Capture the deploy log and a new relative-path/SHA256 manifest. Preserve files
   needed for source, tests, build, skills and plugins; never stage private instance
   data, agent homes, credentials or raw conversations into an image context.
-- Reconcile the deployed console with canonical `apps/console` in an isolated
+- Reconcile the deployed console with canonical `apps/web` in an isolated
   worktree. Preserve both versions and obtain independent review of every delta.
   Historical drift counts are not a current measurement.
 - Checklist item 11 requires a fresh carry snapshot from the CURRENT deployment.
@@ -100,7 +103,7 @@ alone do not prove the installed package is current. Retain results and failures
 
 ## 4. Request cutover only after candidate acceptance
 
-The CTO reviews the manifest, code/test receipts, immutable image digest, create
+The coordinator reviews the manifest, code/test receipts, immutable image digest, create
 settings diff, identity/history preservation plan, rollback and quiet window.
 Host toolkit activation remains an ordinary owner-authenticated operation.
 Nothing here grants new container access, network exposure or host permissions.

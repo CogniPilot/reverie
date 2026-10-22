@@ -1,6 +1,6 @@
-import tests  # noqa: F401  isolates CODEMAN_*/FLEET_* before cto is imported
+import tests  # noqa: F401  isolates REVERIE_* before reverie is imported
 import unittest
-from cto.secret_scan import find, leaks
+from reverie.secret_scan import find, leaks
 
 
 class SecretScanTests(unittest.TestCase):

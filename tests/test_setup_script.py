@@ -1,10 +1,15 @@
-"""scripts/setup.sh runs one server from the published image; checked with a fake engine, nothing is started."""
 from __future__ import annotations
+import os
+import shutil
+from tests import executable_script
+"""scripts/setup.sh runs one server from the published image; checked with a fake engine, nothing is started."""
 
 import hashlib
 import json
 import re
 import subprocess
+import socket
+import threading
 import tempfile
 import unittest
 from pathlib import Path
@@ -19,17 +24,17 @@ class SetupScriptTest(unittest.TestCase):
         self.bin = self.root / "bin"
         self.bin.mkdir()
         podman = self.bin / "podman"
-        podman.write_text('#!/bin/sh\ncase "$1" in\n  image) echo "example.test/reverie@sha256:0123";;\n'
-                          '  container) exit 1;;\nesac\n')
+        podman.write_text(executable_script('#!/bin/sh\ncase "$1" in\n  image) echo "example.test/reverie@sha256:0123";;\n'
+                          '  container) exit 1;;\nesac\n'))
         podman.chmod(0o755)
 
     def tearDown(self):
         self.tmp.cleanup()
 
     def run_setup(self, *args, engine=True):
-        path = f"{self.bin}:/usr/bin:/bin" if engine else "/usr/bin:/bin"
+        path = str(self.bin) + os.pathsep + os.environ["PATH"] if engine else str(self.root / "empty-path")
         env = {"PATH": path, "HOME": str(self.root), "XDG_CONFIG_HOME": str(self.root / "cfg")}
-        return subprocess.run(["bash", str(SETUP), "--dry-run", *args], env=env, capture_output=True, text=True, timeout=60)
+        return subprocess.run([shutil.which("bash"), str(SETUP), "--dry-run", *args], env=env, capture_output=True, text=True, timeout=60)
 
     def test_missing_engine_explains_and_stops(self):
         result = self.run_setup(engine=False)
@@ -43,7 +48,8 @@ class SetupScriptTest(unittest.TestCase):
         run_line = next(line for line in result.stdout.splitlines() if line.startswith("+ podman run"))
         self.assertIn("--publish 127.0.0.1:3100:3000", run_line)
         self.assertIn("type=volume,src=second-data,dst=/instances", run_line)
-        self.assertIn("REVERIE_INSTALL_CLIS=claude-code", run_line)
+        self.assertIn("type=volume,src=second-home,dst=/home/agent", run_line)
+        self.assertIn("REVERIE_INSTALL_CLIS=claude", run_line)
         self.assertTrue(run_line.endswith("example.test/reverie@sha256:0123"))
         self.assertNotIn("0.0.0.0", run_line)
         self.assertIn("http://127.0.0.1:3100", result.stdout)
@@ -54,10 +60,10 @@ class SetupScriptTest(unittest.TestCase):
         self.assertEqual(result.stdout.strip(), "+ podman exec -e REVERIE_DATA_DIR=/instances/default/console second "
                                                 "reverie owner bootstrap --username owner --enforce")
 
-    def test_summary_names_the_owner_sign_in(self):
+    def test_summary_directs_browser_account_setup(self):
         result = self.run_setup()
         self.assertIn("--owner", result.stdout)
-        self.assertIn("/owner/login", result.stdout)
+        self.assertIn("create your owner account or sign in", result.stdout)
 
     def test_help_is_the_header_only(self):
         result = subprocess.run(["bash", str(SETUP), "--help"], capture_output=True, text=True, timeout=60)
@@ -87,11 +93,13 @@ class OfflineSetupScriptTest(unittest.TestCase):
         self.log = self.root / "engine.jsonl"
         self.archive = self.root / "reverie-image.tar"
         self.archive.write_bytes(b"test archive")
-        engine_script = '''#!/usr/bin/python3
+        engine_script = executable_script('''#!/usr/bin/python3
 import json, os, sys
 args = sys.argv[1:]
 with open(os.environ["ENGINE_LOG"], "a") as stream:
     stream.write(json.dumps(args) + "\\n")
+if args[0] == "info":
+    sys.exit(int(os.environ.get("INFO_FAIL", "0")))
 if args[0] == "load":
     loaded_ref = os.environ.get("LOADED_REF", "example.test/app:latest")
     print("Loaded image: " + loaded_ref, file=sys.stdout if os.environ.get("LOAD_STDOUT") else sys.stderr)
@@ -104,31 +112,31 @@ if args[0] == "pull":
     sys.exit(99)
 if args[0] == "container" and os.environ.get("MISSING_CONTAINER"):
     sys.exit(1)
-'''
+''')
         for name in ("docker", "podman"):
             executable = self.bin / name
             executable.write_text(engine_script)
             executable.chmod(0o755)
         curl = self.bin / "curl"
-        curl.write_text("#!/bin/sh\nexit 0\n")
+        curl.write_text(executable_script('#!/bin/sh\nprintf "%s" "${HEALTH_CODE:-401}"\n'))
         curl.chmod(0o755)
 
     def tearDown(self):
         self.tmp.cleanup()
 
     def run_setup(self, *args, values=None, base_tools=True):
-        env = {"PATH": f"{self.bin}:/usr/bin:/bin" if base_tools else str(self.bin),
+        env = {"PATH": str(self.bin) + os.pathsep + os.environ["PATH"] if base_tools else str(self.bin),
                "HOME": str(self.root), "XDG_CONFIG_HOME": str(self.root / "cfg"),
                "ENGINE_LOG": str(self.log), **(values or {})}
-        return subprocess.run(["/bin/bash", str(SETUP), "--engine", "docker", "--image", "example.test/app", *args],
+        return subprocess.run([shutil.which("bash"), str(SETUP), "--engine", "docker", "--image", "example.test/app", *args],
                               cwd=self.root, env=env, capture_output=True, text=True, timeout=10)
 
     def calls(self):
-        return [json.loads(line) for line in self.log.read_text().splitlines()] if self.log.exists() else []
+        return [json.loads(line) for line in self.log.read_text().splitlines() if json.loads(line) != ["info"]] if self.log.exists() else []
 
     def assert_not_replaced(self):
         self.assertFalse(any(call[0] in ("stop", "rm", "run", "pull") for call in self.calls()))
-        self.assertFalse((self.root / "cfg" / "reverie" / "reverie.versions").exists())
+        self.assertFalse((self.root / "reverie" / "runtime" / "setup" / "reverie.versions").exists())
 
     def test_offline_checks_local_id_before_replacing_and_never_pulls(self):
         result = self.run_setup("--offline", "--image", "example.test/app", "--version", "1.2.3",
@@ -143,8 +151,9 @@ if args[0] == "container" and os.environ.get("MISSING_CONTAINER"):
         self.assertEqual(run_call[-1], self.image_id)
         self.assertIn("127.0.0.1:3000:3000", run_call)
         self.assertIn("type=volume,src=reverie-data,dst=/instances", run_call)
+        self.assertIn("type=volume,src=reverie-home,dst=/home/agent", run_call)
         self.assertFalse(any(call[0] == "pull" for call in calls))
-        self.assertEqual((self.root / "cfg" / "reverie" / "reverie.versions").read_text(), self.image_id + "\n")
+        self.assertEqual((self.root / "reverie" / "runtime" / "setup" / "reverie.versions").read_text(), self.image_id + "\n")
 
     def test_offline_accepts_explicit_archive_with_spaces_and_podman(self):
         archive = self.root / "image payload.tar.gz"
@@ -221,13 +230,62 @@ if args[0] == "container" and os.environ.get("MISSING_CONTAINER"):
                 self.assertEqual(result.returncode, 2)
                 self.assertEqual(self.calls(), [])
 
-    def test_offline_has_no_host_curl_or_nix_requirement(self):
+    def run_without_curl(self, respond):
         (self.bin / "curl").unlink()
-        for name in ("mkdir", "tail", "cat", "grep"):
-            (self.bin / name).symlink_to(Path("/usr/bin") / name)
-        result = self.run_setup("--offline", base_tools=False)
+        for name in ("mkdir", "tail", "cat", "grep", "id", "seq"):
+            (self.bin / name).symlink_to(Path(shutil.which(name)))
+        with socket.socket() as listener:
+            listener.bind(("127.0.0.1", 0))
+            listener.listen()
+            listener.settimeout(10)
+            thread = threading.Thread(target=lambda: respond(listener.accept()[0]))
+            thread.start()
+            result = self.run_setup("--offline", "--port", str(listener.getsockname()[1]), base_tools=False)
+            thread.join(timeout=10)
+        return result
+
+    def test_offline_has_no_host_curl_or_nix_requirement(self):
+        def answer(conn):
+            with conn:
+                conn.recv(1024)
+                conn.sendall(b"HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\n\r\n")
+        result = self.run_without_curl(answer)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("--pull=never", next(call for call in self.calls() if call[0] == "run"))
+
+    def assert_status_line_refused(self, line):
+        def answer(conn):
+            with conn:
+                conn.recv(1024)
+                conn.sendall(line)
+        result = self.run_without_curl(answer)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertNotIn("Reverie is running:", result.stdout)
+
+    def test_non_http_protocol_is_not_success(self):
+        self.assert_status_line_refused(b"garbage 200 whatever\r\n\r\n")
+
+    def test_non_numeric_status_is_not_success(self):
+        self.assert_status_line_refused(b"HTTP/1.1 2xx Nope\r\n\r\n")
+
+    def test_open_port_without_http_answer_is_not_success(self):
+        # The engine's port proxy accepts connections before the server inside is listening.
+        result = self.run_without_curl(lambda conn: conn.close())
+        self.assertNotEqual(result.returncode, 0)
+        self.assertNotIn("Reverie is running:", result.stdout)
+
+    def test_unusable_engine_reports_debian_remediation(self):
+        result = self.run_setup("--offline", values={"INFO_FAIL": "1"})
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("usermod -aG docker", result.stderr)
+        self.assert_not_replaced()
+
+    def test_unhealthy_container_never_reports_success(self):
+        result = self.run_setup("--offline", values={"HEALTH_CODE": "503"})
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("did not answer", result.stderr)
+        self.assertNotIn("Reverie is running:", result.stdout)
+        self.assertIn(["logs", "--tail", "50", "reverie"], self.calls())
 
     def test_documented_local_install_commands_run_against_the_engine_stub(self):
         guide = SETUP.parent.parent / "docs" / "offline-install.md"
@@ -238,10 +296,10 @@ if args[0] == "container" and os.environ.get("MISSING_CONTAINER"):
         for name in ("setup.sh", "reverie-image.tar", "IMAGE-REF.txt"):
             checksums.append(hashlib.sha256((self.root / name).read_bytes()).hexdigest() + "  " + name)
         (self.root / "SHA256SUMS").write_text("\n".join(checksums) + "\n")
-        env = {"PATH": f"{self.bin}:/usr/bin:/bin", "HOME": str(self.root),
+        env = {"PATH": str(self.bin) + os.pathsep + os.environ["PATH"], "HOME": str(self.root),
                "XDG_CONFIG_HOME": str(self.root / "cfg"), "ENGINE_LOG": str(self.log),
                "LOADED_REF": "example.test/app:1.2.3"}
-        result = subprocess.run(["/bin/bash", "-eu", "-c", commands], cwd=self.root,
+        result = subprocess.run([shutil.which("bash"), "-eu", "-c", commands], cwd=self.root,
                                 env=env, capture_output=True, text=True, timeout=10)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("reverie-image.tar: OK", result.stdout)

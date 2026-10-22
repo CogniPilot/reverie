@@ -1,9 +1,0 @@
-{
-  "version": 1,
-  "encoding": "base64",
-  "patterns": {
-    "minor": "XGIoPzpjaGlsZCg/OnJlbik/fGtpZHM/fG1pbm9ycz98dW5kZXJhZ2V8dW5kZXItYWdlfHRlZW4oPzphZ2VyfHMpP3xwcmV0ZWVucz98dG9kZGxlcnM/fHNjaG9vbGdpcmxzP3xzY2hvb2xib3lzP3xsb2xpcz98c2hvdGFzP3xsaXR0bGUgKD86Z2lybHM/fGJveXM/KXwoPzoxWzAtN118WzEtOV0pWy0gXT8oPzp5ZWFycz98eXJzPylbLSBdb2xkKVxi",
-    "explicit": "XGIoPzpzZXgoPzp1YWx8eXx1YWxseSk/fG51ZGV8bmFrZWR8ZXJvdGljfGFyb3VzZWQ/fGhvcm55fG9yZ2FzbVx3KnxmdWNrXHcqfGNvY2t8cHVzc3l8YnJlYXN0cz98Z2VuaXRhbFx3Knxtb2xlc3Rcdyp8Z3JvcFx3KnxzZWR1Y1x3Knx1bmRyZXNzXHcqfHN0cmlwXHcqfGxld2R8cG9yblx3KnxraXNzKD86ZWR8aW5nKT8gKD86aGltfGhlcnx0aGVtKSBkZWVwbHl8aW4gYmVkIHdpdGgpXGI=",
-    "abuse": "XGIoPzpoYXJhc3Ncdyp8c3RhbGtcdyp8ZG94K1x3KnxleHBvc2Vcdyp8aHVtaWxpYXRcdyp8dGhyZWF0XHcqfGh1cnR8a2lsbHxiZWF0XHcqfGF0dGFja1x3KnxydWluXHcqfHVnbHl8c3R1cGlkfHdvcnRobGVzc3xwYXRoZXRpY3xzbHV0XHcqfHdob3JlXHcqfGxvc2VyfGFkZHJlc3N8cGhvbmV8aG9tZXxsaXZlcyBhdHx3b3JrcyBhdClcYg=="
-  }
-}

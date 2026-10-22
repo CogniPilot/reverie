@@ -1,0 +1,90 @@
+import { constants, promises as fs } from 'node:fs';
+import type { AgentDeps } from './cli-agent.js';
+import { randomUUID } from 'node:crypto';
+import { PlanRequestCapabilities, PlanRequestId } from './plan-request-capability.js';
+
+/** Request a move through the scoped company API; session creation remains private to the executor. */
+export async function agentRequestPlanMove(deps: AgentDeps, input: { toAccount: string; employeeId?: string; id?: string }): Promise<number> {
+  try {
+    const response = await deps.request(deps.ctx, { method: 'GET', path: '/api/company' });
+    const company = response.json as { success?: boolean; data?: { employees?: { id: string; sessionId: string }[] } };
+    const employee = company?.data?.employees?.find(item => input.employeeId ? item.id === input.employeeId : item.sessionId === deps.ctx.selfId);
+    if (response.status >= 400 || !company.success || !employee) throw new Error('Unknown company expert');
+    const id = PlanRequestId.parse(input.id ?? randomUUID());
+    const result = await deps.request(deps.ctx, { method: 'POST', path: '/api/plans/agent-requests', body: {
+      id, employeeId: employee.id, sessionId: employee.sessionId, toAccount: PlanRequestId.parse(input.toAccount),
+    } });
+    const body = result.json as { success?: boolean; data?: { phase: string }; error?: string };
+    if (result.status >= 400 || !body?.success) { deps.io.err('Plan move request refused. Check the destination ID and owner-granted plan permissions.'); return 1; }
+    deps.io.out(deps.json ? JSON.stringify({ success: true, id, phase: body.data?.phase }) : `Plan request ${id}: ${body.data?.phase}. The affected expert must prepare a handoff and approve.`);
+    return 0;
+  } catch { deps.io.err('Could not confirm the plan request. Check its status before retrying with the same request ID.'); return 1; }
+}
+
+export async function agentPlanMoveAction(deps: AgentDeps, id: string, action: 'status' | 'cancel' | 'reauthorize'): Promise<number> {
+  try {
+    const result = await deps.request(deps.ctx, { method: 'POST', path: `/api/plans/agent-requests/${PlanRequestId.parse(id)}/${action}` });
+    const body = result.json as { success?: boolean; data?: { phase: string; newSession?: string } };
+    if (result.status >= 400 || !body?.success) throw new Error('Refused');
+    deps.io.out(deps.json ? JSON.stringify({ success: true, id, ...body.data }) : `Plan request ${id}: ${body.data?.phase}${body.data?.newSession ? ` (${body.data.newSession})` : ''}.`);
+    return 0;
+  } catch { deps.io.err('Plan request action refused or unavailable. Check the request ID and current plan permissions.'); return 1; }
+}
+
+/** The credential is read privately and sent only in the authenticated request body. */
+export async function agentPlanRequest(
+  deps: AgentDeps,
+  input: { id: string; decision: 'approve' | 'reject'; handoffFile?: string },
+  capabilities = new PlanRequestCapabilities()
+): Promise<number> {
+  let nonce: string, handoff: string | undefined;
+  try {
+    PlanRequestId.parse(input.id);
+    nonce = (await capabilities.read(deps.ctx.selfId, input.id)).nonce;
+    if (input.decision === 'approve') {
+      if (!input.handoffFile) throw new Error('A handoff file is required');
+      const handle = await fs.open(input.handoffFile, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+      try {
+        const info = await handle.stat();
+        if (!info.isFile() || info.size > 48000) throw new Error('Invalid handoff file');
+        const bytes = Buffer.alloc(48001),
+          read = await handle.read(bytes, 0, bytes.length, 0);
+        if (read.bytesRead > 48000) throw new Error('Invalid handoff file');
+        handoff = bytes.subarray(0, read.bytesRead).toString('utf8').trim();
+        if (!handoff || handoff.length > 12000 || /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/.test(handoff))
+          throw new Error('Invalid handoff text');
+      } finally {
+        await handle.close();
+      }
+    }
+  } catch {
+    deps.io.err(
+      'Cannot read a private approval credential for this session and request, or a bounded regular handoff file. Ask the owner to reauthorize if needed.'
+    );
+    return 1;
+  }
+  try {
+    const response = await deps.request(deps.ctx, {
+      method: 'POST',
+      path: `/api/plans/requests/${input.id}/${input.decision}`,
+      body: { nonce, ...(handoff === undefined ? {} : { handoff }) },
+    });
+    const result = response.json as { success?: boolean; data?: { phase?: string }; error?: string } | undefined;
+    if (response.status >= 400 || !result?.success) {
+      // Never echo transport bodies: neither approval credentials nor handoffs belong in terminal history.
+      deps.io.err(
+        'Plan request was refused. Inspect its status with the owner; it may be expired, cancelled, or require reauthorization.'
+      );
+      return 1;
+    }
+    deps.io.out(
+      deps.json
+        ? JSON.stringify({ success: true, phase: result.data?.phase })
+        : `Plan request ${input.decision === 'approve' ? 'approved' : 'rejected'} (${result.data?.phase || 'recorded'}).`
+    );
+    return 0;
+  } catch {
+    deps.io.err('Plan request status is uncertain. Check it with the owner before retrying.');
+    return 1;
+  }
+}

@@ -1,0 +1,154 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Memory limit for a NEW container: REVERIE_MEMORY (e.g. 16g) when set, otherwise half of
+# the host's MemTotal rounded down to whole GiB and clamped to 4..32 GiB. Swap = memory.
+# An existing container keeps the limit stored with it (`container-memory` changes it live).
+reverie_memory_size() {
+  if [[ -n "${REVERIE_MEMORY:-}" ]]; then
+    [[ "$REVERIE_MEMORY" =~ ^[0-9]+[gGmM]$ ]] || { echo "REVERIE_MEMORY must look like 16g or 8192m, got '$REVERIE_MEMORY'" >&2; return 1; }
+    echo "$REVERIE_MEMORY"
+    return
+  fi
+  local total_kb gib
+  total_kb=$(awk '/^MemTotal:/ {print $2}' "${REVERIE_MEMINFO:-/proc/meminfo}")
+  [[ "$total_kb" =~ ^[0-9]+$ ]] || { echo 'cannot read MemTotal' >&2; return 1; }
+  gib=$(( total_kb / 2 / 1048576 ))
+  (( gib >= 4 )) || gib=4
+  (( gib <= 32 )) || gib=32
+  echo "${gib}g"
+}
+
+
+reverie_repo="${REVERIE_REPO:-$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)}"
+reverie_repo="$(realpath -m -- "$reverie_repo")"
+# Engine storage (image layers, container overlays, engine config). It must not live under a
+# scratch/cleanup area: on 2026-10-15 a cleanup of ~/scratch/reverie deleted the live
+# container's root filesystem. REVERIE_SCRATCH overrides it.
+reverie_root="${REVERIE_ROOT:-$HOME/reverie}"
+reverie_storage="${REVERIE_SCRATCH:-$reverie_root/runtime/engine}"
+reverie_engine="${REVERIE_PODMAN:-podman}"
+if ! command -v "$reverie_engine" >/dev/null 2>&1 && [[ -x "$reverie_storage/podman/bin/podman" ]]; then
+  reverie_engine="$reverie_storage/podman/bin/podman"
+fi
+reverie_name="${REVERIE_CONTAINER_NAME:-reverie-dev}"
+reverie_image="${REVERIE_IMAGE:-localhost/reverie:dev}"
+reverie_network=pasta
+if [[ "${REVERIE_ALLOW_HOST_LOOPBACK:-0}" == 1 ]]; then
+  reverie_network=pasta:--map-host-loopback,169.254.1.2
+fi
+reverie_environment=()
+[[ -z "${REVERIE_API_URL:-}" ]] || reverie_environment+=(--env "REVERIE_API_URL=$REVERIE_API_URL")
+[[ -z "${REVERIE_MODEL_API_BASE:-}" ]] || reverie_environment+=(--env "REVERIE_API_BASE=$REVERIE_MODEL_API_BASE")
+reverie_instance_data="${REVERIE_INSTANCE_DATA:-$reverie_root/companies/development/data/console}"
+reverie_instance_data="$(realpath -m -- "$reverie_instance_data")"
+reverie_workspace="$(realpath -m -- "${REVERIE_WORKSPACE:-$reverie_root/scratch/workspaces/development}")"
+# Additional already-mounted scratch directories are passed before the action.
+reverie_extra_mounts=()
+reverie_extra_sources=()
+reverie_extra_destinations=()
+while [[ "${1:-}" == --scratch-mount ]]; do
+  [[ $# -ge 3 ]] || { echo '--scratch-mount requires SOURCE DESTINATION.' >&2; exit 2; }
+  [[ -d "$2" ]] || { echo 'Scratch mount source must name an existing directory.' >&2; exit 2; }
+  [[ "$3" =~ ^/scratch([2-9]|[1-9][0-9]+)$ ]] || { echo 'Scratch mount destination must be /scratch2, /scratch3, ...' >&2; exit 2; }
+  for reverie_destination in "${reverie_extra_destinations[@]}"; do
+    [[ "$reverie_destination" != "$3" ]] || { echo 'Duplicate scratch mount destination.' >&2; exit 2; }
+  done
+  reverie_source="$(realpath -e -- "$2")"
+  reverie_extra_sources+=("$reverie_source")
+  reverie_extra_destinations+=("$3")
+  reverie_extra_mounts+=(--mount "type=bind,src=$reverie_source,dst=$3")
+  shift 3
+done
+reverie_expected_binds=$((3 + ${#reverie_extra_sources[@]}))
+if [[ "${1:-}" == memory-default ]]; then reverie_memory_size; exit; fi
+reverie_tmp="${REVERIE_TMPDIR:-$reverie_root/scratch/tmp}"
+reverie_runtime="${REVERIE_RUNROOT:-${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/reverie}"
+mkdir -p "$reverie_tmp" "$reverie_workspace/tmp"
+export TMPDIR="$reverie_tmp"
+export XDG_CONFIG_HOME="$reverie_storage/engine-config"
+mkdir -p "$XDG_CONFIG_HOME/containers"
+cp "$reverie_repo/docker/policy.json" "$XDG_CONFIG_HOME/containers/policy.json"
+# NixOS exposes its setuid user-namespace helpers in this directory.
+[[ ! -d /run/wrappers/bin ]] || export PATH="/run/wrappers/bin:$PATH"
+reverie_podman=("$reverie_engine" --root "${REVERIE_ENGINE_ROOT:-$reverie_storage/containers-overlay}" --runroot "$reverie_runtime" --storage-driver overlay)
+reverie_rootless=$("${reverie_podman[@]}" info --format '{{.Host.Security.Rootless}}')
+[[ "$reverie_rootless" == true ]] || { echo 'Reverie requires a rootless container engine.' >&2; exit 1; }
+
+case "${1:-status}" in
+  build)
+    echo "Engine storage: $reverie_storage" >&2
+    reverie_build="${REVERIE_BUILD_DIR:-$HOME/scratch/reverie/build}"
+    mkdir -p "$reverie_build"
+    nix build "$reverie_repo#dockerImage" --out-link "$reverie_build/docker-image"
+    "${reverie_podman[@]}" load --input "$reverie_build/docker-image"
+    "${reverie_podman[@]}" tag reverie:latest "$reverie_image"
+    ;;
+  up)
+    echo "Engine storage: $reverie_storage" >&2
+    if "${reverie_podman[@]}" container exists "$reverie_name"; then
+      reverie_reuse_error() {
+        echo "Refusing to reuse $reverie_name: its image or bind mounts differ from the requested configuration." >&2
+        echo 'Choose a fresh REVERIE_CONTAINER_NAME to preserve the existing container and its sessions.' >&2
+        exit 1
+      }
+      reverie_expected_image="$("${reverie_podman[@]}" image inspect --format '{{.Id}}' "$reverie_image")" || reverie_reuse_error
+      reverie_actual_image="$("${reverie_podman[@]}" inspect --format '{{.Image}}' "$reverie_name")" || reverie_reuse_error
+      [[ -n "$reverie_expected_image" && "${reverie_expected_image#sha256:}" == "${reverie_actual_image#sha256:}" ]] || reverie_reuse_error
+      reverie_mounts="$("${reverie_podman[@]}" inspect --format '{{range .Mounts}}{{if eq .Type "bind"}}{{.Destination}}{{"\t"}}{{.Source}}{{"\n"}}{{end}}{{end}}' "$reverie_name")" || reverie_reuse_error
+      reverie_bind_count=0
+      reverie_source_seen=0
+      reverie_scratch_seen=0
+      reverie_state_seen=0
+      reverie_extra_seen=0
+      reverie_extra_seen_indices=()
+      while IFS=$'\t' read -r reverie_destination reverie_source; do
+        [[ -n "$reverie_destination" && -n "$reverie_source" ]] || reverie_reuse_error
+        reverie_source="$(realpath -m -- "$reverie_source")" || reverie_reuse_error
+        case "$reverie_destination" in
+          /workspace) [[ "$reverie_source" == "$reverie_repo" ]] || reverie_reuse_error; reverie_source_seen=1 ;;
+          /scratch) [[ "$reverie_source" == "$reverie_workspace" ]] || reverie_reuse_error; reverie_scratch_seen=1 ;;
+          /home/agent/.reverie) [[ "$reverie_source" == "$reverie_instance_data" ]] || reverie_reuse_error; reverie_state_seen=1 ;;
+          *)
+            reverie_match=0
+            for reverie_index in "${!reverie_extra_sources[@]}"; do
+              if [[ "$reverie_destination" == "${reverie_extra_destinations[$reverie_index]}" && "$reverie_source" == "${reverie_extra_sources[$reverie_index]}" ]]; then
+                [[ -z "${reverie_extra_seen_indices[$reverie_index]:-}" ]] || reverie_reuse_error
+                reverie_extra_seen_indices[$reverie_index]=1
+                reverie_match=1
+                reverie_extra_seen=$((reverie_extra_seen + 1))
+                break
+              fi
+            done
+            [[ "$reverie_match" == 1 ]] || reverie_reuse_error
+            ;;
+        esac
+        reverie_bind_count=$((reverie_bind_count + 1))
+      done <<< "$reverie_mounts"
+      [[ "$reverie_bind_count" == "$reverie_expected_binds" && "$reverie_source_seen$reverie_scratch_seen$reverie_state_seen" == 111 && "$reverie_extra_seen" == "${#reverie_extra_sources[@]}" ]] || reverie_reuse_error
+      "${reverie_podman[@]}" start "$reverie_name"
+    else
+      install -d -m 0700 "$reverie_instance_data"
+      reverie_memory=$(reverie_memory_size)
+      echo "Creating $reverie_name with a $reverie_memory memory limit (swap = memory; set REVERIE_MEMORY to override)."
+      "${reverie_podman[@]}" run --pull=never --init --detach --name "$reverie_name" --label reverie.managed=true \
+        --userns=keep-id:uid=2000,gid=2000 --user 2000:2000 \
+        --cap-drop=all --cap-add=chown,dac_override,fowner,fsetid,kill,setgid,setuid,setpcap,net_bind_service,sys_chroot,setfcap \
+        --memory="$reverie_memory" --memory-swap="$reverie_memory" --pids-limit=512 \
+        --network="$reverie_network" "${reverie_environment[@]}" --log-driver=k8s-file --log-opt=max-size=10mb \
+        --mount "type=bind,src=$reverie_instance_data,dst=/home/agent/.reverie" \
+        --mount "type=bind,src=$reverie_repo,dst=/workspace" \
+        --mount "type=bind,src=$reverie_workspace,dst=/scratch" \
+        "${reverie_extra_mounts[@]}" --entrypoint /usr/bin/env "$reverie_image" sleep infinity
+    fi
+    ;;
+  exec)
+    shift
+    "${reverie_podman[@]}" exec --interactive --user agent --workdir /workspace "$reverie_name" "$@"
+    ;;
+  status) "${reverie_podman[@]}" ps --all --filter "name=^$reverie_name$" ;;
+  inspect) "${reverie_podman[@]}" inspect "$reverie_name" ;;
+  stop) "${reverie_podman[@]}" stop "$reverie_name" ;;
+  engine) shift; "${reverie_podman[@]}" "$@" ;;
+  *) echo 'Usage: reverie-container [--scratch-mount SOURCE /scratchN]... {build|up|exec COMMAND...|status|inspect|stop|engine ARGS...|memory-default}' >&2; exit 2 ;;
+esac

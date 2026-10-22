@@ -1,14 +1,17 @@
 # Host cutover handoff
 
+
+Here, coordinator means an owner-appointed agent with explicit orchestration
+permission. CTO or COO titles alone grant no approval or host authority.
 Status: review procedure, not an instruction to restart now. The container runtime
-engineer prepares the complete candidate and acceptance package; the CTO schedules
+engineer prepares the complete candidate and acceptance package; the coordinator schedules
 and approves it. The external host operator performs only the approved engine and
 user-service cutover. An engine socket is not mounted into agent containers.
 
 ## Before stopping anything
 
 1. Complete [image-rebuild-handoff.md](image-rebuild-handoff.md). Re-read the latest
-   originating channel, verify the active CTO binding and approval, and confirm no
+   originating channel, verify the active coordinator binding and approval, and confirm no
    crossed hold. Obtain the instance's current protected research/sleep/deploy
    windows from its private handoff and agree a quiet window; do not assume an
    old schedule still applies.
@@ -62,7 +65,7 @@ Acceptance requires independent review and isolated fake-engine tests proving:
   recovery instructions; neither production nor rollback data is deleted.
 - The replacement uses the accepted image digest and reviewed create settings.
 
-The CTO records closure with those receipts before authorizing the next recreate.
+The coordinator records closure with those receipts before authorizing the next recreate.
 This tracked item does not authorize running a cutover or deleting rollback data.
 
 ## Cut over once

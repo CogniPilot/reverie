@@ -1,0 +1,384 @@
+/**
+ * @fileoverview Regression tests for the buffer-load flush path: what becomes of
+ * the live terminal events queued while a buffer load runs, once the load ends.
+ *
+ * Two rules, each from a real bug.
+ *
+ * COD-144: newly launched Shell sessions rendered BLANK until a tab-switch. The
+ * load path (`selectSession` → `_beginBufferLoad`/`_finishBufferLoad`) queues
+ * live events while `_isLoadingBuffer` is true and used to DISCARD the queue on
+ * completion. Right for a buffer built from the server's byte history (the
+ * queued output is already in it, so replaying it duplicates Ink redraws),
+ * wrong for a brand-new shell whose fetch resolves BEFORE the PTY emits its
+ * prompt: the prompt arrived only as a queued event and was thrown away. A
+ * caller that knows the load painted nothing passes `{ flushQueued: true }`
+ * and the queue is REPLAYED through `batchTerminalWrite()` after
+ * `_isLoadingBuffer` is cleared, so the events write through normally.
+ *
+ * #436: a tmux pane capture is current only as of the instant `capture-pane`
+ * ran, so everything the CLI printed between the capture and the end of the
+ * chunked write was queued and dropped, and its next partial redraw landed on
+ * a frame the terminal never received. Queue entries now carry their arrival
+ * time and `_finishBufferLoad` takes a `since` cutoff, so a capture load
+ * replays exactly the tail that arrived after the response headers. All four
+ * fetch-and-write paths take that policy from one helper,
+ * `_bufferLoadFinishOpts`, and a static scan below pins each of them to it,
+ * because the same fix had already been written into one path out of four,
+ * twice. A path that replays and then restores a scroll position re-takes the
+ * sticky-scroll baseline (`_syncStickyScrollBaseline`), pinned the same way.
+ *
+ * Loaded via `vm` with a stubbed context (no jsdom — jsdom is broken on this
+ * box; see connection-indicator.test.ts). We extract the REAL
+ * `_beginBufferLoad`/`_finishBufferLoad` mixin methods from terminal-ui.js by
+ * running it against a fake `ReverieApp` and capturing `ReverieApp.prototype`,
+ * then copy them onto a minimal stub whose `batchTerminalWrite` is a spy. This
+ * exercises the real flush/discard logic without a full xterm fake.
+ */
+import { readFileSync } from 'node:fs';
+import { performance } from 'node:perf_hooks';
+import { resolve } from 'node:path';
+import vm from 'node:vm';
+import { describe, expect, it, vi } from 'vitest';
+
+/** Run terminal-ui.js in a vm against a fake ReverieApp and return the captured prototype mixin. */
+function loadTerminalMixin(): Record<string, unknown> {
+  const source = readFileSync(resolve(import.meta.dirname, '../src/web/public/terminal-ui.js'), 'utf8');
+  const FakeReverieApp = function () {} as unknown as { prototype: Record<string, unknown> };
+  const context = vm.createContext({
+    console,
+    performance,
+    setTimeout,
+    clearTimeout,
+    setInterval: vi.fn(),
+    clearInterval: vi.fn(),
+    requestAnimationFrame: vi.fn(),
+    ReverieApp: FakeReverieApp,
+    // terminal-ui.js IIFE is invoked with `window`; it reads/writes a few globals.
+    window: { addEventListener: vi.fn(), removeEventListener: vi.fn() },
+    document: { addEventListener: vi.fn() },
+  });
+  vm.runInContext(source, context);
+  return FakeReverieApp.prototype;
+}
+
+const mixin = loadTerminalMixin();
+
+type BufferLoadApp = {
+  _bufferLoadSeq: number;
+  _bufferLoadOwner: string | null;
+  _isLoadingBuffer: boolean;
+  _loadBufferQueue: { at: number; data: string }[] | null;
+  batchTerminalWrite: (data: string) => void;
+  _beginBufferLoad: (owner?: string) => string;
+  _finishBufferLoad: (owner?: string, opts?: { flushQueued?: boolean; since?: number }) => boolean;
+};
+
+/**
+ * Minimal stub carrying the buffer-load state plus the REAL begin/finish methods.
+ * `batchTerminalWrite` is a spy so flushed events are observable without a real
+ * xterm terminal. The real `batchTerminalWrite` would queue while loading, but
+ * the flush runs AFTER `_isLoadingBuffer` is cleared, so a spy is faithful here.
+ */
+function makeApp() {
+  const writes: string[] = [];
+  const app: BufferLoadApp = {
+    _bufferLoadSeq: 0,
+    _bufferLoadOwner: null,
+    _isLoadingBuffer: false,
+    _loadBufferQueue: null,
+    batchTerminalWrite: vi.fn((data: string) => {
+      writes.push(data);
+    }),
+    _beginBufferLoad: mixin._beginBufferLoad as BufferLoadApp['_beginBufferLoad'],
+    _finishBufferLoad: mixin._finishBufferLoad as BufferLoadApp['_finishBufferLoad'],
+  };
+  return { app, writes };
+}
+
+/**
+ * A stub carrying the REAL `batchTerminalWrite` on top of the real begin/finish
+ * methods, so a replay samples the sticky-scroll baseline exactly as it does in
+ * the browser. The terminal is a fake whose `buffer.active` the test moves by
+ * hand, which is what a caller's `scrollToLine` does to a real one.
+ */
+function makeScrollApp() {
+  const buffer = { viewportY: 0, baseY: 100 };
+  const app = {
+    buffer,
+    terminal: { buffer: { active: buffer } },
+    sessions: new Map(),
+    activeSessionId: null,
+    pendingWrites: [] as string[],
+    writeFrameScheduled: false,
+    _wasAtBottomBeforeWrite: false,
+    _bufferLoadSeq: 0,
+    _bufferLoadOwner: null as string | null,
+    _isLoadingBuffer: false,
+    _loadBufferQueue: null as { at: number; data: string }[] | null,
+    _scheduleTerminalWriteFlush: vi.fn(),
+    batchTerminalWrite: mixin.batchTerminalWrite as (data: string) => void,
+    isTerminalAtBottom: mixin.isTerminalAtBottom as () => boolean,
+    _syncStickyScrollBaseline: mixin._syncStickyScrollBaseline as () => void,
+    _beginBufferLoad: mixin._beginBufferLoad as BufferLoadApp['_beginBufferLoad'],
+    _finishBufferLoad: mixin._finishBufferLoad as BufferLoadApp['_finishBufferLoad'],
+  };
+  return app;
+}
+
+/**
+ * Slice one class method out of app.js, from its header to the next method's.
+ *
+ * Bounding the slice matters: the two methods checked below are not followed by
+ * a JSDoc block, so a scan for the next comment would run on into unrelated
+ * code and match its scroll calls instead of theirs.
+ */
+function methodBody(source: string, method: string): string {
+  const start = source.search(new RegExp(`^ {2}(?:async )?${method}\\(`, 'm'));
+  expect(start, `${method} not found in app.js`).toBeGreaterThan(-1);
+  const next = /^ {2}(?:async )?[A-Za-z_$][\w$]*\(/m.exec(source.slice(start + 1));
+  return next ? source.slice(start, start + 1 + next.index) : source.slice(start);
+}
+
+/**
+ * Simulate a live SSE event arriving while a buffer load is in progress.
+ * Mirrors batchTerminalWrite's queue branch, which stamps each entry with its
+ * arrival time so a flush can replay only the tail (see the `since` tests).
+ */
+function pushWhileLoading(app: BufferLoadApp, data: string, at = performance.now()) {
+  if (app._isLoadingBuffer && app._loadBufferQueue) app._loadBufferQueue.push({ at, data });
+}
+
+describe('buffer-load flush (COD-144)', () => {
+  it('finish WITHOUT flushQueued discards the queue (de-dup preserved for established sessions)', () => {
+    const { app, writes } = makeApp();
+    const owner = app._beginBufferLoad('load-1');
+    pushWhileLoading(app, 'chunk-a');
+    pushWhileLoading(app, 'chunk-b');
+
+    const ok = app._finishBufferLoad(owner); // default: discard
+    expect(ok).toBe(true);
+    expect(app._isLoadingBuffer).toBe(false);
+    expect(app._loadBufferQueue).toBeNull();
+    // Queued events were NOT replayed.
+    expect(app.batchTerminalWrite).not.toHaveBeenCalled();
+    expect(writes).toEqual([]);
+  });
+
+  it('finish WITH { flushQueued: true } replays queued events in order, exactly once each', () => {
+    const { app, writes } = makeApp();
+    const owner = app._beginBufferLoad('load-2');
+    pushWhileLoading(app, 'prompt-1');
+    pushWhileLoading(app, 'prompt-2');
+
+    const ok = app._finishBufferLoad(owner, { flushQueued: true });
+    expect(ok).toBe(true);
+    expect(app._isLoadingBuffer).toBe(false);
+    expect(app._loadBufferQueue).toBeNull();
+    // Both chunks replayed, IN ORDER, exactly once each.
+    expect(writes).toEqual(['prompt-1', 'prompt-2']);
+    expect(app.batchTerminalWrite).toHaveBeenCalledTimes(2);
+    expect(app.batchTerminalWrite).toHaveBeenNthCalledWith(1, 'prompt-1');
+    expect(app.batchTerminalWrite).toHaveBeenNthCalledWith(2, 'prompt-2');
+  });
+
+  it('flushed events are not re-queued (the queue is null when batchTerminalWrite runs)', () => {
+    const { app } = makeApp();
+    const owner = app._beginBufferLoad('load-3');
+    pushWhileLoading(app, 'only');
+
+    // Spy that, like the real method, would re-queue if loading were still active.
+    let reQueued = false;
+    app.batchTerminalWrite = vi.fn((data: string) => {
+      if (app._isLoadingBuffer && app._loadBufferQueue) {
+        app._loadBufferQueue.push(data);
+        reQueued = true;
+      }
+    });
+
+    app._finishBufferLoad(owner, { flushQueued: true });
+    expect(reQueued).toBe(false);
+    expect(app._isLoadingBuffer).toBe(false);
+    expect(app._loadBufferQueue).toBeNull();
+  });
+
+  it('owner mismatch returns false and does NOT flush or clear state', () => {
+    const { app, writes } = makeApp();
+    app._beginBufferLoad('real-owner');
+    pushWhileLoading(app, 'queued');
+
+    const ok = app._finishBufferLoad('wrong-owner', { flushQueued: true });
+    expect(ok).toBe(false);
+    // State untouched — still loading, queue intact, nothing replayed.
+    expect(app._isLoadingBuffer).toBe(true);
+    expect(app._bufferLoadOwner).toBe('real-owner');
+    expect(app._loadBufferQueue).toEqual([{ at: expect.any(Number), data: 'queued' }]);
+    expect(app.batchTerminalWrite).not.toHaveBeenCalled();
+    expect(writes).toEqual([]);
+  });
+
+  // ── The tmux-capture tail: `since` ──
+  //
+  // A pane capture is a point-in-time frame taken part-way through the fetch, so
+  // it holds what arrived BEFORE the capture and nothing after. selectSession
+  // passes the response's arrival time as `since`, which splits the queue at
+  // exactly that line: pre-capture events are already painted and must stay
+  // dropped, post-capture events exist nowhere else and must be replayed.
+
+  it('flushes only the entries at or after `since`', () => {
+    const { app, writes } = makeApp();
+    const owner = app._beginBufferLoad('load-since');
+    pushWhileLoading(app, 'already-in-the-capture', 100);
+    pushWhileLoading(app, 'arrived-at-the-headers', 200);
+    pushWhileLoading(app, 'arrived-after-the-headers', 300);
+
+    app._finishBufferLoad(owner, { flushQueued: true, since: 200 });
+
+    // The pre-capture event stays dropped; the boundary entry counts as after.
+    expect(writes).toEqual(['arrived-at-the-headers', 'arrived-after-the-headers']);
+  });
+
+  it('flushQueued without `since` still replays the whole queue', () => {
+    // The COD-144 path: a brand-new session's first prompt predates the
+    // response, so cutting the queue would drop the only content it has.
+    const { app, writes } = makeApp();
+    const owner = app._beginBufferLoad('load-no-since');
+    pushWhileLoading(app, 'prompt', 10);
+    pushWhileLoading(app, 'more', 20);
+
+    app._finishBufferLoad(owner, { flushQueued: true });
+
+    expect(writes).toEqual(['prompt', 'more']);
+  });
+
+  it('a `since` past every entry flushes nothing', () => {
+    const { app, writes } = makeApp();
+    const owner = app._beginBufferLoad('load-since-late');
+    pushWhileLoading(app, 'old', 10);
+
+    app._finishBufferLoad(owner, { flushQueued: true, since: 999 });
+
+    expect(writes).toEqual([]);
+    expect(app.batchTerminalWrite).not.toHaveBeenCalled();
+  });
+
+  // ── Re-entering one load ──
+  //
+  // `selectSession` opens the load before its fetch, and `chunkedTerminalWrite`
+  // opens it again under the SAME owner when it starts writing. A reset on that
+  // second call would silently throw away everything queued during the fetch,
+  // which on the capture path is output no buffer holds.
+
+  it('re-entering the same load keeps what the queue already holds', () => {
+    const { app, writes } = makeApp();
+    const owner = app._beginBufferLoad('load-reenter');
+    pushWhileLoading(app, 'arrived-during-the-fetch', 100);
+
+    // chunkedTerminalWrite re-opens the load it was handed.
+    app._beginBufferLoad(owner);
+    pushWhileLoading(app, 'arrived-during-the-write', 200);
+
+    app._finishBufferLoad(owner, { flushQueued: true, since: 50 });
+
+    expect(writes).toEqual(['arrived-during-the-fetch', 'arrived-during-the-write']);
+  });
+
+  it('a genuinely different load still starts with an empty queue', () => {
+    const { app, writes } = makeApp();
+    app._beginBufferLoad('load-first');
+    pushWhileLoading(app, 'belongs-to-the-abandoned-load', 100);
+
+    // A tab switch starts a new load under a new owner. Its events are not ours.
+    const second = app._beginBufferLoad('load-second');
+    pushWhileLoading(app, 'belongs-to-this-load', 200);
+
+    app._finishBufferLoad(second, { flushQueued: true, since: 0 });
+
+    expect(writes).toEqual(['belongs-to-this-load']);
+  });
+
+  // ── The sticky-scroll baseline across a replay ──
+  //
+  // `batchTerminalWrite` samples `_wasAtBottomBeforeWrite` before queueing, and
+  // `flushPendingWrites` scrolls to the bottom off that sample. The replay runs
+  // inside `chunkedTerminalWrite` before its promise resolves, with the terminal
+  // freshly reset and rewritten, so the sample is always true. A caller that
+  // then restores the reader's position would have that restore undone.
+
+  it('the replay latches the baseline true, and the viewport restore re-takes it', () => {
+    const app = makeScrollApp();
+    const owner = app._beginBufferLoad('load-scroll');
+    pushWhileLoading(app as unknown as BufferLoadApp, 'output-after-the-capture', 100);
+
+    // The load ends with the terminal reset and rewritten, so it reads as bottom.
+    app.buffer.viewportY = app.buffer.baseY;
+    app._finishBufferLoad(owner, { flushQueued: true, since: 0 });
+    expect(app._wasAtBottomBeforeWrite).toBe(true);
+
+    // The caller now puts the reader back where they were reading.
+    app.buffer.viewportY = 40;
+    app._syncStickyScrollBaseline();
+
+    // The next flush must leave them there.
+    expect(app._wasAtBottomBeforeWrite).toBe(false);
+  });
+
+  it('a restore that lands back at the bottom keeps sticky scroll armed', () => {
+    const app = makeScrollApp();
+    const owner = app._beginBufferLoad('load-scroll-bottom');
+    pushWhileLoading(app as unknown as BufferLoadApp, 'output-after-the-capture', 100);
+
+    app.buffer.viewportY = app.buffer.baseY;
+    app._finishBufferLoad(owner, { flushQueued: true, since: 0 });
+    app._syncStickyScrollBaseline();
+
+    // A reader who was already at the bottom still wants to be carried along.
+    expect(app._wasAtBottomBeforeWrite).toBe(true);
+  });
+
+  it('both callers that restore a scroll position re-take the baseline', () => {
+    // The wiring lives in app.js, outside this file's vm harness. Without it the
+    // two methods below restore the viewport and the next flush undoes it.
+    const source = readFileSync(resolve(import.meta.dirname, '../src/web/public/app.js'), 'utf8');
+
+    for (const method of ['_onSessionNeedsRefresh', '_maybeRefetchFullHistory']) {
+      const body = methodBody(source, method);
+      const restoreAt = body.lastIndexOf('scrollToLine(');
+      const syncAt = body.indexOf('this._syncStickyScrollBaseline()');
+      expect(restoreAt, `${method} no longer restores a scroll position`).toBeGreaterThan(-1);
+      expect(syncAt, `${method} never re-takes the baseline`).toBeGreaterThan(-1);
+      expect(syncAt, `${method} re-takes the baseline before its restore`).toBeGreaterThan(restoreAt);
+    }
+  });
+
+  it('every path that fetches a terminal buffer and writes it asks the shared helper', () => {
+    // Drift guard. The first version of this fix covered one of the four paths,
+    // and a later pass found it still covering one of four. Nothing else in the
+    // gate stops a fifth path, or an inlined `{ flushQueued: true }`, from
+    // splitting the policy up again; the browser suite that would notice does
+    // not run in CI.
+    const source = readFileSync(resolve(import.meta.dirname, '../src/web/public/app.js'), 'utf8');
+
+    for (const method of [
+      'selectSession',
+      '_onSessionNeedsRefresh',
+      '_onSessionClearTerminal',
+      '_maybeRefetchFullHistory',
+    ]) {
+      expect(methodBody(source, method), `${method} decides the flush policy itself`).toContain(
+        'this._bufferLoadFinishOpts('
+      );
+    }
+  });
+
+  it('empty queue + flushQueued is a no-op (no throw, no writes)', () => {
+    const { app, writes } = makeApp();
+    const owner = app._beginBufferLoad('load-empty');
+    // No events queued.
+
+    expect(() => app._finishBufferLoad(owner, { flushQueued: true })).not.toThrow();
+    expect(app._isLoadingBuffer).toBe(false);
+    expect(app._loadBufferQueue).toBeNull();
+    expect(app.batchTerminalWrite).not.toHaveBeenCalled();
+    expect(writes).toEqual([]);
+  });
+});

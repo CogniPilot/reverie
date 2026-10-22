@@ -1,0 +1,28 @@
+{
+  "name": "reverie-gesture-control",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Jarvis-style hand-tracking input layer for the Reverie dashboard. Vendored into the Reverie repo; the Reverie bundle (src/reverie/entry.ts) is built into src/web/public/gesture/gesture-reverie.js by `npm run build:gesture` at the repo root.",
+  "scripts": {
+    "dev": "vite",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "build:demo": "tsc && vite build",
+    "build:reverie": "esbuild src/reverie/entry.ts --bundle --format=esm --target=es2020 --outfile=dist-reverie/gesture-reverie.js"
+  },
+  "dependencies": {
+    "@mediapipe/tasks-vision": "0.10.21"
+  },
+  "devDependencies": {
+    "esbuild": "^0.27.3",
+    "typescript": "^5.5.4",
+    "vite": "^7.3.5"
+  },
+  "homepage": "https://github.com/jgoppert/reverie/tree/main/apps/web/packages/gesture-control#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jgoppert/reverie.git",
+    "directory": "packages/gesture-control"
+  }
+}

@@ -2,10 +2,10 @@
 
 The live container has a 4 GiB memory limit and no swap. On 2026-10-15 the OOM killer
 took the CTO pane during an unbounded test run. Every compile or heavy test goes
-through `cto.buildenv`. Only start one after the coordinator has granted a slot.
+through `reverie.buildenv`. Only start one after the coordinator has granted a slot.
 
 ```sh
-python3 -m cto.buildenv --project rumoca --repo /scratch/repos/rumoca \
+python3 -m reverie.buildenv --project rumoca --repo /scratch/repos/rumoca \
     --expect 2.5G --disk 6G [--jobs 2] -- cargo build -p rumoca
 ```
 
@@ -15,7 +15,7 @@ python3 -m cto.buildenv --project rumoca --repo /scratch/repos/rumoca \
   checkout's `rust-toolchain.toml`. Nothing is added to PATH or shell profiles. The
   wrapper sets `RUSTUP_AUTO_INSTALL=0`, so a different pin is refused rather than
   silently downloaded. Install a new pin deliberately (and gated, see below).
-- **Before start:** memory admission (`cto.admission`; used memory excludes reclaimable
+- **Before start:** memory admission (`reverie.admission`; used memory excludes reclaimable
   page cache, with a 512 MiB reserve), task headroom (`pids.max - pids.current` must cover
   ~32 + 16 x `--jobs` threads plus 64 reserved for other sessions; rustc otherwise dies with
   `failed to spawn work thread: EAGAIN`), free disk minus `--disk` must stay above 20 GiB,
@@ -51,7 +51,7 @@ python3 -m cto.buildenv --project rumoca --repo /scratch/repos/rumoca \
 
   It refuses when there is no such run yet. Never lower an estimate to get past the gate.
 - **Heavy non-cargo steps** (installs, test runners) use
-  `python3 -m cto.admission --expect SIZE -- CMD`. IO-heavy steps also fill the page cache.
+  `python3 -m reverie.admission --expect SIZE -- CMD`. IO-heavy steps also fill the page cache.
   The toolchain install hit the cgroup limit for 11 s (reclaim only, no kill) at a
   measured 522 MiB peak.
 - **OOM timeline:** `/scratch/profiles/oom-watch/oom-watch.sh` logs every

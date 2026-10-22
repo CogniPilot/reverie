@@ -1,0 +1,232 @@
+#!/usr/bin/env node
+/**
+ * Build script for Reverie.
+ * Extracted from the package.json one-liner for readability and debuggability.
+ *
+ * Steps:
+ *   0. Preflight: the build-time packages resolve (nothing is touched before it)
+ *   1. TypeScript compilation
+ *   2. Copy static assets (web/public, templates)
+ *   3. Build vendor xterm bundles
+ *   4. Minify frontend assets (app.js, styles.css, mobile.css)
+ *   5. Content-hash cache busting (rename assets, rewrite index.html)
+ *   6. Compress with gzip + brotli
+ */
+
+import { execSync } from 'child_process';
+import { createRequire } from 'module';
+import { appendFileSync, readFileSync, writeFileSync, renameSync } from 'fs';
+import { createHash } from 'crypto';
+import { fileURLToPath } from 'url';
+import { join, extname, basename, dirname } from 'path';
+
+const ROOT = join(fileURLToPath(import.meta.url), '..', '..');
+
+function run(label, cmd) {
+  console.log(`\n[build] ${label}`);
+  execSync(cmd, { stdio: 'inherit', cwd: ROOT, shell: true });
+}
+
+// 0. Preflight: resolve the build-time packages the asset stage reads only AFTER it has
+// deleted dist/web/public (step 2), before anything is touched. A tree whose node_modules
+// predate them (a deploy that pulled but never ran `npm install`) used to fail mid-build
+// with dist/web/public already wiped, so the running server kept serving an index.html
+// whose hashed assets were gone. Keep the list in step with every require.resolve in
+// scripts/prepare-spreadsheet-assets.mjs (test/spreadsheet-assets.test.ts checks it).
+// Only specifiers that resolve without an exports map in the way: a subpath of a package
+// that has one (@xterm/*) can throw ERR_PACKAGE_PATH_NOT_EXPORTED while installed.
+// A hand-run of the asset stage alone (past a blocked tsc) skips this check.
+const BUILD_TIME_MODULES = ['exceljs/dist/exceljs.min.js', 'fflate'];
+const requireFromBuild = createRequire(import.meta.url);
+const missingModules = BUILD_TIME_MODULES.filter((specifier) => {
+  try {
+    requireFromBuild.resolve(specifier);
+    return false;
+  } catch {
+    return true;
+  }
+});
+if (missingModules.length > 0) {
+  console.error(`[build] missing build dependency: ${missingModules.join(', ')}`);
+  console.error('[build] run `npm install` first, then `npm run build` again. Nothing was built or deleted.');
+  process.exit(1);
+}
+
+// 1. TypeScript compilation
+run('tsc', 'tsc');
+run('chmod dist/index.js', 'chmod +x dist/index.js');
+
+// 2. Copy static assets (clean first to remove stale hashed files from previous builds)
+run('clean public', 'rm -rf dist/web/public');
+run('prepare dirs', 'mkdir -p dist/web dist/templates dist/web/public/vendor');
+// Fetch the opt-in gesture overlay's MediaPipe wasm + model into src/ (idempotent,
+// non-fatal, kept out of git) so the copy below carries them into dist/.
+run('gesture assets', 'node scripts/fetch-gesture-assets.mjs');
+// Rebuild the gesture overlay bundle from its vendored source (packages/gesture-control)
+// into src/web/public/gesture/gesture-reverie.js, so prod always reflects current source.
+run('gesture bundle', 'node scripts/build-gesture-bundle.mjs');
+run('copy web assets', 'cp -r src/web/public dist/web/');
+run('copy template', 'cp src/templates/case-template.md dist/templates/');
+
+// 3. Vendor xterm bundles (xterm.js 6.x — @xterm scoped packages)
+run('xterm css', 'cp node_modules/@xterm/xterm/css/xterm.css dist/web/public/vendor/');
+run('xterm js', 'npx esbuild node_modules/@xterm/xterm/lib/xterm.js --minify --outfile=dist/web/public/vendor/xterm.min.js');
+run('xterm-addon-fit', 'npx esbuild node_modules/@xterm/addon-fit/lib/addon-fit.js --minify --outfile=dist/web/public/vendor/xterm-addon-fit.min.js');
+run('xterm-addon-serialize', 'npx esbuild node_modules/@xterm/addon-serialize/lib/addon-serialize.js --minify --outfile=dist/web/public/vendor/xterm-addon-serialize.min.js');
+run('xterm-addon-webgl', 'cp node_modules/@xterm/addon-webgl/lib/addon-webgl.js dist/web/public/vendor/xterm-addon-webgl.min.js');
+run('xterm-addon-unicode11', 'npx esbuild node_modules/@xterm/addon-unicode11/lib/addon-unicode11.js --minify --outfile=dist/web/public/vendor/xterm-addon-unicode11.min.js');
+run('xterm-zerolag-input', 'npx esbuild packages/xterm-zerolag-input/src/zerolag-input-addon.ts --bundle --minify --format=iife --global-name=XtermZerolagInput --outfile=dist/web/public/vendor/xterm-zerolag-input.js');
+// XLSX preview parser bundles: loaded only inside spreadsheet-preview-worker.js,
+// never by the page (see scripts/prepare-spreadsheet-assets.mjs).
+run('spreadsheet preview vendors', 'node scripts/prepare-spreadsheet-assets.mjs dist/web/public/vendor');
+
+// Append global aliases so app.js can use `new LocalEchoOverlay(terminal)`
+appendFileSync(
+  join(ROOT, 'dist/web/public/vendor/xterm-zerolag-input.js'),
+  '\n// Global aliases for browser usage\n' +
+  'if(typeof window!=="undefined"){' +
+    'window.ZerolagInputAddon=XtermZerolagInput.ZerolagInputAddon;' +
+    'window.LocalEchoOverlay=class extends XtermZerolagInput.ZerolagInputAddon{' +
+      'constructor(terminal){' +
+        'super({prompt:{type:"character",char:"\\u276f",offset:2}});' +
+        'this.activate(terminal);' +
+      '}' +
+    '};' +
+  '}\n'
+);
+
+// Predictive echo (codex): separate bundle so the zerolag bundle stays byte-identical
+run('xterm-predictive-echo', 'npx esbuild packages/xterm-zerolag-input/src/predictive-echo-addon.ts --bundle --minify --format=iife --global-name=XtermPredictiveEcho --outfile=dist/web/public/vendor/xterm-predictive-echo.js');
+appendFileSync(
+  join(ROOT, 'dist/web/public/vendor/xterm-predictive-echo.js'),
+  '\n// Global aliases for browser usage\n' +
+  'if(typeof window!=="undefined"){' +
+    'window.PredictiveEchoAddon=XtermPredictiveEcho.PredictiveEchoAddon;' +
+    'window.PredictiveEchoOverlay=class extends XtermPredictiveEcho.PredictiveEchoAddon{' +
+      'constructor(terminal){' +
+        'super({});' +
+        'this.activate(terminal);' +
+      '}' +
+    '};' +
+  '}\n'
+);
+
+// 4. Minify frontend assets
+run('minify input-cjk.js', 'npx esbuild dist/web/public/input-cjk.js --minify --outfile=dist/web/public/input-cjk.js --allow-overwrite');
+run('minify mobile-ime-preview.js', 'npx esbuild dist/web/public/mobile-ime-preview.js --minify --outfile=dist/web/public/mobile-ime-preview.js --allow-overwrite');
+run('minify terminal-keycode229-recovery.js', 'npx esbuild dist/web/public/terminal-keycode229-recovery.js --minify --outfile=dist/web/public/terminal-keycode229-recovery.js --allow-overwrite');
+run('minify i18n.js', 'npx esbuild dist/web/public/i18n.js --minify --outfile=dist/web/public/i18n.js --allow-overwrite');
+run('minify sanitize-html.js', 'npx esbuild dist/web/public/sanitize-html.js --minify --outfile=dist/web/public/sanitize-html.js --allow-overwrite');
+run('minify tab-layout-browser.js', 'npx esbuild dist/web/public/tab-layout-browser.js --minify --outfile=dist/web/public/tab-layout-browser.js --allow-overwrite');
+run('minify app.js', 'npx esbuild dist/web/public/app.js --minify --outfile=dist/web/public/app.js --allow-overwrite');
+run('minify tab-rail-resize.js', 'npx esbuild dist/web/public/tab-rail-resize.js --minify --outfile=dist/web/public/tab-rail-resize.js --allow-overwrite');
+run('minify terminal-ui.js', 'npx esbuild dist/web/public/terminal-ui.js --minify --outfile=dist/web/public/terminal-ui.js --allow-overwrite');
+run('minify respawn-ui.js', 'npx esbuild dist/web/public/respawn-ui.js --minify --outfile=dist/web/public/respawn-ui.js --allow-overwrite');
+run('minify ralph-panel.js', 'npx esbuild dist/web/public/ralph-panel.js --minify --outfile=dist/web/public/ralph-panel.js --allow-overwrite');
+run('minify settings-ui.js', 'npx esbuild dist/web/public/settings-ui.js --minify --outfile=dist/web/public/settings-ui.js --allow-overwrite');
+run('minify panels-ui.js', 'npx esbuild dist/web/public/panels-ui.js --minify --outfile=dist/web/public/panels-ui.js --allow-overwrite');
+run('minify session-ui.js', 'npx esbuild dist/web/public/session-ui.js --minify --outfile=dist/web/public/session-ui.js --allow-overwrite');
+run('minify styles.css', 'npx esbuild dist/web/public/styles.css --minify --outfile=dist/web/public/styles.css --allow-overwrite');
+run('minify mobile.css', 'npx esbuild dist/web/public/mobile.css --minify --outfile=dist/web/public/mobile.css --allow-overwrite');
+
+// 5. Content-hash cache busting
+console.log('\n[build] content-hash cache busting');
+{
+  const distPublic = join(ROOT, 'dist/web/public');
+  const HASHABLE = [
+    'styles.css',
+    'mobile.css',
+    'owner-login-guard.js',
+    'constants.js',
+    'i18n.js',
+    'mobile-handlers.js',
+    'voice-input.js',
+    'notification-manager.js',
+    'keyboard-accessory.js',
+    'input-cjk.js',
+    'mobile-ime-preview.js',
+    'terminal-keycode229-recovery.js',
+    'sanitize-html.js',
+    'tab-layout-browser.js',
+    'app.js',
+    'tab-rail-resize.js',
+    'terminal-ui.js',
+    'respawn-ui.js',
+    'ralph-panel.js',
+    'settings-ui.js',
+    'panels-ui.js',
+    'session-ui.js',
+    'ralph-wizard.js',
+    'api-client.js',
+    'subagent-windows.js',
+    'image-input.js',
+    'spreadsheet-preview.js',
+    'vendor/xterm-zerolag-input.js',
+    'vendor/xterm-predictive-echo.js',
+  ];
+  const manifest = {};
+  for (const file of HASHABLE) {
+    const filePath = join(distPublic, file);
+    const content = readFileSync(filePath);
+    const hash = createHash('md5').update(content).digest('hex').slice(0, 8);
+    const ext = extname(file);
+    const base = basename(file, ext);
+    const dir = dirname(file);
+    const hashed = dir === '.' ? `${base}.${hash}${ext}` : `${dir}/${base}.${hash}${ext}`;
+    renameSync(filePath, join(distPublic, hashed));
+    manifest[file] = hashed;
+  }
+  // Rewrite index.html to reference hashed filenames
+  let html = readFileSync(join(distPublic, 'index.html'), 'utf8');
+  for (const [original, hashed] of Object.entries(manifest)) {
+    html = html.replaceAll(`"${original}"`, `"${hashed}"`);
+  }
+  writeFileSync(join(distPublic, 'index.html'), html);
+
+  // Rewrite sw.js from the SAME manifest that just renamed the files.
+  //
+  // The service worker's precache list used to be maintained by hand with the
+  // pre-hash names, so after this step every entry in it pointed at a file that
+  // no longer existed and `cache.add(...).catch(() => {})` hid it. Deriving it
+  // here is the only way the two cannot drift.
+  //
+  // The cache key gets the build hash for the same reason: `activate` deletes
+  // every cache that is not the current one, so a constant key meant that
+  // cleanup never ran and hashed assets from every past release piled up.
+  const swPath = join(distPublic, 'sw.js');
+  let sw = readFileSync(swPath, 'utf8');
+  const hashedAssets = Object.values(manifest);
+  const buildId = createHash('md5').update(hashedAssets.join('|')).digest('hex').slice(0, 12);
+  // Rewrite the two declarations. Anchored on the full `const … = …;` text so
+  // each pattern occurs exactly once and cannot collide with prose in sw.js's
+  // own comments — an earlier cut used bare `__BUILD_ID__` sentinels and the
+  // first match landed in the comment that documented them, leaving the real
+  // constant untouched and still producing a plausible-looking cache key.
+  const swEdits = [
+    ["const BUILD_ID = 'dev';", `const BUILD_ID = '${buildId}';`],
+    ['const HASHED_ASSETS = [];', `const HASHED_ASSETS = [${hashedAssets.map((p) => JSON.stringify(p)).join(', ')}];`],
+  ];
+  for (const [from, to] of swEdits) {
+    const hits = sw.split(from).length - 1;
+    if (hits !== 1) {
+      throw new Error(`sw.js: expected exactly one \`${from}\`, found ${hits} — precache would ship stale`);
+    }
+    sw = sw.replace(from, to);
+  }
+  writeFileSync(swPath, sw);
+
+  console.log('  Hashed files:');
+  for (const [orig, hashed] of Object.entries(manifest)) {
+    console.log(`    ${orig} -> ${hashed}`);
+  }
+  console.log(`  sw.js: cache bucket reverie-${buildId}, ${hashedAssets.length} precached assets`);
+}
+
+// 6. Compress with gzip + brotli
+run(
+  'compress',
+  `for f in dist/web/public/*.js dist/web/public/*.css dist/web/public/*.html dist/web/public/vendor/*.js dist/web/public/vendor/*.css; do` +
+    ` [ -f "$f" ] && gzip -9 -k -f "$f" && { brotli -9 -k -f "$f" 2>/dev/null || true; }; done`
+);
+
+console.log('\n✓ Build complete');

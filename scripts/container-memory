@@ -6,35 +6,32 @@
 #   container-memory auto            size it like a new install: half of host MemTotal,
 #                                    whole GiB, clamped to 4..32 GiB (REVERIE_MEMORY overrides)
 #   container-memory 16g --persist   also update the launcher (and the source copy of
-#                                    scripts/fleet-container) so a recreated container
+#                                    scripts/reverie-container) so a recreated container
 #                                    gets the same limit
 #
 # Run on the HOST as the user that owns the container (the one that runs
 # `systemctl --user ... reverie.service`). Swap stays disabled (swap = memory).
 # It talks to Reverie's private podman through the installed launcher
-# (~/.local/libexec/reverie/fleet-container engine ...), so podman does not
+# (~/reverie/runtime/bin/reverie-container engine ...), so podman does not
 # need to be on PATH.
 # Environment: REVERIE_CONTAINER_NAME (default reverie-live),
-#              REVERIE_LAUNCHER (default ~/.local/libexec/reverie/fleet-container),
-#              REVERIE_CONTAINER_SCRIPT (extra copy to persist, default ~/git/reverie/scripts/fleet-container).
+#              REVERIE_LAUNCHER (default ~/reverie/runtime/bin/reverie-container),
+#              REVERIE_CONTAINER_SCRIPT (extra copy to persist, default ~/git/reverie/scripts/reverie-container).
 set -euo pipefail
-# REVERIE_* is the name; the older FLEET_* spelling is still read for one release (the new name wins).
-while IFS= read -r _old; do _new="REVERIE_${_old#FLEET_}"; [[ -n "${!_new:-}" ]] || export "$_new=${!_old}"; done < <(compgen -e | grep '^FLEET_' || true)
 
 name="${REVERIE_CONTAINER_NAME:-reverie-live}"
-script="${REVERIE_CONTAINER_SCRIPT:-$HOME/git/reverie/scripts/fleet-container}"
+script="${REVERIE_CONTAINER_SCRIPT:-$HOME/git/reverie/scripts/reverie-container}"
 # The installed launcher finds its policy files via REVERIE_REPO, as the systemd units set it
-# (an older installed launcher reads FLEET_REPO, so both are exported).
-export REVERIE_REPO="${REVERIE_REPO:-$HOME/git/reverie}" FLEET_REPO="${REVERIE_REPO:-$HOME/git/reverie}"
-launcher="${REVERIE_LAUNCHER:-$HOME/.local/libexec/reverie/fleet-container}"
+export REVERIE_REPO="${REVERIE_REPO:-$HOME/git/reverie}"
+launcher="${REVERIE_LAUNCHER:-${REVERIE_ROOT:-$HOME/reverie}/runtime/bin/reverie-container}"
 size="${1:-}"
 persist="${2:-}"
 
 die() { echo "container-memory: $*" >&2; exit 1; }
 
-# Same rule as scripts/fleet-container's fleet_memory_size (a test keeps them identical):
+# Same rule as scripts/reverie-container's reverie_memory_size (a test keeps them identical):
 # the installed launcher may be older and lack `memory-default`, so this cannot call it.
-fleet_memory_size() {
+reverie_memory_size() {
   if [[ -n "${REVERIE_MEMORY:-}" ]]; then
     [[ "$REVERIE_MEMORY" =~ ^[0-9]+[gGmM]$ ]] || { echo "REVERIE_MEMORY must look like 16g or 8192m, got '$REVERIE_MEMORY'" >&2; return 1; }
     echo "$REVERIE_MEMORY"
@@ -52,7 +49,7 @@ gib() { awk -v b="$1" 'BEGIN { printf "%.1f GiB", b / 1073741824 }'; }
 
 # Validate every argument before touching anything.
 [ -z "$size" ] || [ "$size" = auto ] || [[ "$size" =~ ^[0-9]+[gGmM]$ ]] || die "size must look like 16g, 8192m or auto, got '$size'"
-auto_size=$(fleet_memory_size) || die "cannot compute the automatic size"
+auto_size=$(reverie_memory_size) || die "cannot compute the automatic size"
 [ "$size" != auto ] || size="$auto_size"
 case "$persist" in "" | --persist) ;; *) die "unknown option '$persist' (only --persist)" ;; esac
 [ "$#" -le 2 ] || die "too many arguments; usage: container-memory [SIZE|auto [--persist]]"

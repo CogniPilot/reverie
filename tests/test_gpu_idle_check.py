@@ -1,4 +1,5 @@
-import tests  # noqa: F401  isolates CODEMAN_*/FLEET_* before cto is imported
+from tests import executable_script
+import tests  # noqa: F401  isolates REVERIE_* before reverie is imported
 import os
 from pathlib import Path
 import subprocess
@@ -18,14 +19,14 @@ class GpuIdleCheckTests(unittest.TestCase):
     def fake_smi(self, util="0", apps="", exit_code=0):
         self.fakes = getattr(self, "fakes", 0) + 1
         path = self.root / ("nvidia-smi-%d" % self.fakes)
-        path.write_text("#!/bin/sh\n"
+        path.write_text(executable_script("#!/bin/sh\n"
                         "case \"$1\" in --query-gpu=*) printf '%s\\n' \"$UTIL\";; *) printf '%s' \"$APPS\";; esac\n"
-                        "exit " + str(exit_code) + "\n")
+                        "exit ") + str(exit_code) + "\n")
         path.chmod(0o755)
         return {"NVIDIA_SMI": str(path), "UTIL": util, "APPS": apps}
 
     def run_check(self, **env):
-        base = {"PATH": "/usr/bin:/bin", "HOME": str(self.root), "GPU_IDLE_SAMPLES": "1"}
+        base = {"PATH": os.environ["PATH"], "HOME": str(self.root), "GPU_IDLE_SAMPLES": "1"}
         return subprocess.run(["bash", str(SCRIPT)], env={**base, **env}, capture_output=True, text=True).returncode
 
     def test_idle_gpu_with_only_the_router_passes(self):
@@ -49,14 +50,14 @@ class GpuIdleCheckTests(unittest.TestCase):
     def test_driver_wordings_for_no_or_unnamed_processes(self):
         self.assertEqual(self.run_check(**self.fake_smi(apps="No running processes found\n")), 0)
         unnamed = self.fake_smi(apps="4242, [Not Found], 18000\n")
-        result = subprocess.run(["bash", str(SCRIPT)], env={"PATH": "/usr/bin:/bin", "HOME": str(self.root),
+        result = subprocess.run(["bash", str(SCRIPT)], env={"PATH": os.environ["PATH"], "HOME": str(self.root),
                                 "GPU_IDLE_SAMPLES": "1", **unnamed}, capture_output=True, text=True)
         self.assertEqual(result.returncode, 1)
         self.assertIn("GPU_IDLE_ALLOW_UNNAMED=1", result.stderr)          # says how to allow it, not silent
         self.assertEqual(self.run_check(GPU_IDLE_ALLOW_UNNAMED="1", **unnamed), 0)
 
     def test_hold_file_blocks(self):
-        hold = self.root / ".config" / "reverie" / "gpu.hold"; hold.parent.mkdir(parents=True); hold.touch()
+        hold = self.root / "reverie" / "runtime" / "gpu.hold"; hold.parent.mkdir(parents=True); hold.touch()
         self.assertEqual(self.run_check(**self.fake_smi()), 1)
         os.unlink(hold)
         self.assertEqual(self.run_check(**self.fake_smi()), 0)

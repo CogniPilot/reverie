@@ -1,6 +1,6 @@
-# CTO runtime watcher: keep-alive and binding restore
+# Agent runtime watcher: keep-alive and binding restore
 
-`fleet-runtime --policy POLICY watch` supervises the one persistent CTO runtime named
+`reverie-runtime --policy POLICY watch` supervises the one persistent agent runtime named
 by the external policy. It never manages other agents, so intentionally stopped
 workers stay stopped. Each tick re-reads the controller state under a file lock.
 
@@ -30,20 +30,20 @@ recorded current name or `CTO · <backend>`, the recorded working dir (or a dir 
 after `case_name` for older state), and not the dead runtime, the `previous` runtime
 or any earlier candidate. A sole match is adopted only if it runs the dead runtime's adapter, was created after
 `last_seen_at`, maps to a policy backend, and is not the watcher's own session. A shared
-working dir is not identity: the coordinator also runs in the CTO dir. A match that
+working dir is not identity: the coordinator may share the supervised agent's directory. A match that
 fails these checks stops with `needs_owner`, because creating another session would
 duplicate the identity. More than one match
 stops with `needs_owner`. A candidate that dies before activation gives
 `candidate_failed`. If a planned switch's candidate dies while `current` is still live, the watcher
 alerts and keeps supervising `current`. These stops raise an alert. Reverie posts as the
 user when a parent session does not resolve. So before posting to `alert_room`, the
-watcher checks that its own `CODEMAN_SESSION_ID` is live, is a member of that room, and
+watcher checks that its own `REVERIE_SESSION_ID` is live, is a member of that room, and
 is not a supervised runtime. It sends `requireAgent: true` (a patched console refuses;
 today's strict schema rejects the unknown field) and checks that the returned sender is
 itself. Undelivered or misattributed alerts are kept in `undelivered_alerts`.
-`fleet-runtime reset` (owner) leaves a stopped phase. It refuses while a creation is
+`reverie-runtime reset` (owner) leaves a stopped phase. It refuses while a creation is
 uncertain unless `--creation-inspected` is passed. It also refuses while a candidate
-is still live, so it can never orphan one and leave two CTOs, and it keeps the
+is still live, so it can never orphan one and leave two runtimes for the same agent, and it keeps the
 recovery-attempt history, so a reset cannot buy extra respawns inside the 15-minute
 window. The persisted-before-create
 `creation_uncertain` guard is unchanged. The recovery handoff tells the replacement
@@ -72,15 +72,15 @@ A watcher started manually in a shell session is lost when the container restart
 Use the reviewed user-service templates to supervise it independently of that session:
 
 1. **Start with the container.** A host user unit, `reverie-watcher.service`, runs
-   `fleet-container engine exec --user cto reverie-live fleet-runtime --policy ... watch`. It is
+   `reverie-container engine exec --user agent reverie-live reverie-runtime --policy ... watch`. It is
    `BindsTo=`/`WantedBy=reverie.service`, so it stops and starts with the console and
    needs no image or entrypoint change. `Restart=on-failure` handles a crash, and
    `systemctl --user stop reverie-watcher` is the intentional stop. Stopping the unit only
-   kills the podman client, so `ExecStopPost` runs `fleet-runtime stop-watcher`. That
-   sends SIGTERM, then SIGKILL after 5 s, to every `fleet-runtime ... watch` process for
+   kills the podman client, so `ExecStopPost` runs `reverie-runtime stop-watcher`. That
+   sends SIGTERM, then SIGKILL after 5 s, to every `reverie-runtime ... watch` process for
    this policy (the active one and any standby), so watchers never pile up under the
-   memory cap. The watcher runs explicitly as `cto`, with the container env (no
-   `CODEMAN_SESSION_ID`).
+   memory cap. The watcher runs explicitly as `agent`, with the container env (no
+   `REVERIE_SESSION_ID`).
 2. **Never two active watchers.** `watch` holds an exclusive `state.watch.lock` for its
    whole lifetime. A second instance prints `standby` and blocks until the lock frees,
    then takes over (hot standby). Per-tick state changes still use `state.lock`.
@@ -99,15 +99,15 @@ Use the reviewed user-service templates to supervise it independently of that se
    `undelivered_alerts` and the host journal (`journalctl --user -u reverie-watcher`).
    They are never posted as the user. Optional: once the console post-only patch is
    deployed, the user adds a dedicated shell session as a **post-only** member of
-   `alert_room`, and the unit passes its id (`--env CODEMAN_SESSION_ID=...`). That
+   `alert_room`, and the unit passes its id (`--env REVERIE_SESSION_ID=...`). That
    identity is gone after a container restart until it is recreated, and alerts fall
    back to the state.
 
 Migration order (owner): deploy the reviewed code, identify and stop any existing
 manual watcher that does not take `watch.lock`, install and enable the units, then confirm
-`fleet-runtime status` shows `watcher.alive: true`.
+`reverie-runtime status` shows `watcher.alive: true`.
 
-## Shell members never receive room text (console patch, `apps/console`)
+## Shell members never receive room text (console patch, `apps/web`)
 
 Reverie delivers room messages by typing them plus Enter into each member's pane, so a
 shell member would run them as commands. `ChatroomDelivery.flush()`, the only writer,
@@ -141,7 +141,7 @@ model maintenance and morning notes.
 
 ## Memory-aware admission
 
-`cto/admission.py` refuses new work when `used + expected > limit - reserve`. Here
+`python/reverie/admission.py` refuses new work when `used + expected > limit - reserve`. Here
 `used` is the cgroup's `memory.current` minus reclaimable `inactive_file`, and the
 default reserve is 512 MiB. An unlimited or unreadable cgroup is admitted. `start()`
 (switch, reboot, recovery) checks the backend's session cost first. A refused
@@ -150,16 +150,16 @@ runtime is not replaced straight into the same OOM. Conservative default session
 costs are budgeted as claude/codex 400 MiB and opencode 1100 MiB. Measure the
 intended deployment before choosing overrides. The policy may override them with
 `memory_admission.{reserve_bytes,session_cost_bytes}`. Heavy commands use the same
-gate: `python3 -m cto.admission --expect 1.5G -- npm test` exits 75 when refused.
+gate: `python3 -m reverie.admission --expect 1.5G -- npm test` exits 75 when refused.
 
-Console tests: a root `apps/console/vitest.config.ts` makes a bare `npx vitest run`
+Console tests: a root `apps/web/vitest.config.ts` makes a bare `npx vitest run`
 use the CI config (and therefore `test/setup.ts`). `test/setup.ts` throws when
-`CODEMAN_DATA_DIR`/`REVERIE_DATA_DIR` holds a live `state.json`.
+`REVERIE_DATA_DIR` holds a live `state.json`.
 
 ## Agent profile (read-only)
 
-`fleet-runtime --policy POLICY profile SESSION_ID` prints one agent session's profile as JSON for
-the console's profile panel (`GET /api/agents/:id/profile`, `apps/console`):
+`reverie-runtime --policy POLICY profile SESSION_ID` prints one agent session's profile as JSON for
+the console's profile panel (`GET /api/agents/:id/profile`, `apps/web`):
 - backend, model, and effort: the console's spawn default, plus the level the newest Claude Code
   transcript turn used
 - the console's usage counters
@@ -167,7 +167,7 @@ the console's profile panel (`GET /api/agents/:id/profile`, `apps/console`):
 - whether this controller supervises it, with the configured backends
 - the owner-selected persona
 
-The persona comes from the supervised runtime's own `.fleet-instance`, or else from the policy's
+The persona comes from the supervised runtime's own `.reverie-instance`, or else from the policy's
 optional `agent_instances` map (session id to instance config). A shared working dir is not
 identity, so the marker counts only for the tracked session. Every agent runs as the same user that
 owns the marker and the policy, so neither is trusted: the config a marker or a map entry names is

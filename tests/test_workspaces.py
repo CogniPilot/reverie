@@ -1,8 +1,8 @@
-import tests  # noqa: F401  isolates CODEMAN_*/FLEET_* before cto is imported
+import tests  # noqa: F401  isolates REVERIE_* before reverie is imported
 from pathlib import Path
 import tempfile
 import unittest
-from cto.workspaces import Workspaces
+from reverie.workspaces import Workspaces
 
 class WorkspaceTests(unittest.TestCase):
     def setUp(self):

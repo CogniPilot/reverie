@@ -1,4 +1,6 @@
-import tests  # noqa: F401  isolates CODEMAN_*/FLEET_* before cto is imported
+import os
+from tests import executable_script
+import tests  # noqa: F401  isolates REVERIE_* before reverie is imported
 import base64
 import json
 from pathlib import Path
@@ -10,7 +12,7 @@ SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "stall-watch-host"
 TOKEN = "svc-token-abc123"
 NOW = 1_800_000_000
 
-FAKE_CURL = r'''#!/usr/bin/env python3
+FAKE_CURL = executable_script(r'''#!/usr/bin/env python3
 """Records each call (argv, headers from @files, body) and answers like the console."""
 import json, os, sys
 args = sys.argv[1:]
@@ -31,13 +33,13 @@ if os.environ.get("CURL_FAIL") and os.environ["CURL_FAIL"] in (url or ""): sys.e
 if url.endswith("/api/v1/sessions"): print(json.dumps({"success": True, "data": [{"id": "s1"}]}))
 elif url.endswith("/api/chatrooms"): print(json.dumps({"success": True, "data": {"rooms": []}}))
 else: print(json.dumps({"success": True, "data": {"message": {"id": "m1"}}}))
-'''
+''')
 
-FAKE_TICK = r'''#!/usr/bin/env bash
+FAKE_TICK = executable_script(r'''#!/usr/bin/env bash
 cat > "$FED"
 printf '%s\n' "$TICK_OUTPUT"
 exit "${TICK_EXIT:-0}"
-'''
+''')
 
 
 def report(kind="shell_mode", n=0, started=NOW - 60, tried=4, quiet=0):
@@ -54,7 +56,7 @@ class StallWatchHostTests(unittest.TestCase):
             path = self.root / name; path.write_text(text); path.chmod(0o755)
 
     def run_host(self, output, token=TOKEN, reports="room-1=coordinator room-2=Lead,coordinator", flags=(), **env):
-        base = {"PATH": "/usr/bin:/bin", "HOME": str(self.root), "CURL": str(self.root / "curl"),
+        base = {"PATH": os.environ["PATH"], "HOME": str(self.root), "CURL": str(self.root / "curl"),
                 "CALLS": str(self.root / "calls.jsonl"), "FED": str(self.root / "fed.json"),
                 "TICK_OUTPUT": "\n".join(output), "STALL_WATCH_REPORTS": reports, "NOW": str(NOW),
                 "STALL_WATCH_TARGET_NAME": "Agent One", "STALL_WATCH_STATE_DIR": str(self.root / "state"),
@@ -184,8 +186,8 @@ class StallWatchHostTests(unittest.TestCase):
 
     def test_the_unit_runs_the_installed_package_only(self):
         unit = (SCRIPT.parent.parent / "systemd" / "reverie-stall-watch.service").read_text()
-        self.assertIn("engine exec -i --workdir / --user cto", unit)
-        self.assertIn("/opt/fleet/python/bin/python3 -I -m cto.stall_watch", unit)
+        self.assertIn("engine exec -i --workdir / --user agent", unit)
+        self.assertIn("/opt/reverie/python/bin/python3 -I -m reverie.stall_watch", unit)
         self.assertNotIn("--env", unit)
 
 

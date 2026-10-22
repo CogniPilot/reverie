@@ -20,7 +20,7 @@
 #   STALL_WATCH_TARGET_NAME   the watched agent's name in notices (letters, digits, space . _ -)
 #   STALL_WATCH_MIN_INTERVAL  seconds between notices to one room (default 1800)
 #   STALL_WATCH_DAILY_CAP     notices per room per 24 h at most (default 8)
-#   STALL_WATCH_STATE_DIR     rate-limit state (default ${XDG_STATE_HOME:-~/.local/state}/reverie)
+#   STALL_WATCH_STATE_DIR     rate-limit state (default ~/reverie/runtime)
 #   REVERIE_CONSOLE_URL       the console's published loopback URL (default http://127.0.0.1:3001)
 #   CURL, NOW                 curl binary and current time (tests)
 set -uo pipefail
@@ -32,7 +32,7 @@ curl_bin="${CURL:-curl}"
 now="${NOW:-$(date +%s)}"
 interval="${STALL_WATCH_MIN_INTERVAL:-1800}"
 daily_cap="${STALL_WATCH_DAILY_CAP:-8}"
-state_dir="${STALL_WATCH_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/reverie}"
+state_dir="${STALL_WATCH_STATE_DIR:-${REVERIE_ROOT:-$HOME/reverie}/runtime}"
 [ "$#" -gt 0 ] || { echo "usage: stall-watch-host <in-container tick command...>" >&2; exit 2; }
 [[ "$interval" =~ ^[0-9]{1,7}$ ]] || { echo "stall-watch-host: STALL_WATCH_MIN_INTERVAL must be seconds" >&2; exit 2; }
 [[ "$daily_cap" =~ ^[0-9]{1,3}$ ]] || { echo "stall-watch-host: STALL_WATCH_DAILY_CAP must be a count" >&2; exit 2; }

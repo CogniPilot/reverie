@@ -1,5 +1,6 @@
+from tests import executable_script
 """scripts/container-memory against a fake launcher: no podman, no host changes."""
-import tests  # noqa: F401  isolates CODEMAN_*/FLEET_* before cto is imported
+import tests  # noqa: F401  isolates REVERIE_* before reverie is imported
 import os
 import subprocess
 import tempfile
@@ -9,9 +10,9 @@ from pathlib import Path
 SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "container-memory"
 GiB = 1 << 30
 
-# Emulates `fleet-container engine ...` for one container whose limit lives in a file.
+# Emulates `reverie-container engine ...` for one container whose limit lives in a file.
 # The --memory flags below are what --persist must rewrite.
-LAUNCHER = r'''#!/usr/bin/env bash
+LAUNCHER = executable_script(r'''#!/usr/bin/env bash
 # podman run ... --memory=4g --memory-swap=4g ...
 state="$(dirname "$0")/limit"; log="$(dirname "$0")/calls"
 [ "$1" = engine ] || exit 2; shift; echo "$*" >> "$log"
@@ -28,22 +29,22 @@ case "$1 $2" in
        *) exit 3 ;;
      esac ;;
 esac
-'''
+''')
 
 
 class ContainerMemoryTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(); self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
-        self.launcher = self.root / "fleet-container"
+        self.launcher = self.root / "reverie-container"
         self.launcher.write_text(LAUNCHER); self.launcher.chmod(0o755)
         (self.root / "limit").write_text(str(4 * GiB))
-        self.source = self.root / "src-fleet-container"
+        self.source = self.root / "src-reverie-container"
         self.source.write_text('podman run --memory=4g --memory-swap=4g "$image"\n')
 
     def run_tool(self, *args):
-        env = {"PATH": os.environ["PATH"], "HOME": str(self.root), "FLEET_LAUNCHER": str(self.launcher),
-               "FLEET_CONTAINER_SCRIPT": str(self.source)}
+        env = {"PATH": os.environ["PATH"], "HOME": str(self.root), "REVERIE_LAUNCHER": str(self.launcher),
+               "REVERIE_CONTAINER_SCRIPT": str(self.source)}
         return subprocess.run(["bash", str(SCRIPT), *args], env=env, capture_output=True, text=True, timeout=30)
 
     def calls(self):
@@ -77,7 +78,7 @@ class ContainerMemoryTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0, args)
             self.assertIn(message, result.stderr)
         env_result = subprocess.run(["bash", str(SCRIPT)], env={"PATH": os.environ["PATH"], "HOME": str(self.root),
-                                    "FLEET_LAUNCHER": str(self.launcher), "FLEET_CONTAINER_NAME": "other"},
+                                    "REVERIE_LAUNCHER": str(self.launcher), "REVERIE_CONTAINER_NAME": "other"},
                                     capture_output=True, text=True)
         self.assertIn("no container named 'other'", env_result.stderr)
         self.assertIn("found: reverie-live", env_result.stderr)
@@ -92,7 +93,10 @@ class ContainerMemoryTests(unittest.TestCase):
     def test_flake_strips_the_shebang_writeShellApplication_adds_its_own(self):
         flake = (SCRIPT.parent.parent / "flake.nix").read_text()
         self.assertIn('removePrefix "#!/usr/bin/env bash\\n" (builtins.readFile ./scripts/container-memory)', flake)
-        self.assertTrue(SCRIPT.read_text().startswith("#!/usr/bin/env bash\n"))
+        # Nix patches the source interpreter before running the same suite.
+        interpreter = SCRIPT.read_text().splitlines()[0]
+        self.assertTrue(interpreter.startswith("#!"), interpreter)
+        self.assertEqual(Path(interpreter.split()[-1]).name, "bash")
         self.assertEqual(SCRIPT.read_text().count("#!"), 1)
 
 
@@ -111,48 +115,39 @@ class AutoSizeTests(unittest.TestCase):
 
     def size_from(self, script, gib, **env):
         full = {"PATH": os.environ["PATH"], "HOME": str(self.root), "REVERIE_MEMINFO": str(self.meminfo(gib)), **env}
-        if script == "fleet-container":
-            command = ["bash", str(SCRIPT.parent / "fleet-container"), "memory-default"]
+        if script == "reverie-container":
+            command = ["bash", str(SCRIPT.parent / "reverie-container"), "memory-default"]
         else:   # the identical function inside container-memory
             body = SCRIPT.read_text()
-            function = body[body.index("fleet_memory_size() {"):body.index("\n}\n", body.index("fleet_memory_size() {")) + 3]
-            command = ["bash", "-c", "set -euo pipefail\n" + function + "fleet_memory_size"]
+            function = body[body.index("reverie_memory_size() {"):body.index("\n}\n", body.index("reverie_memory_size() {")) + 3]
+            command = ["bash", "-c", "set -euo pipefail\n" + function + "reverie_memory_size"]
         return subprocess.run(command, env=full, capture_output=True, text=True)
 
     def test_both_scripts_compute_the_same_clamped_size(self):
         for gib, expected in self.CASES.items():
-            for script in ("fleet-container", "container-memory"):
+            for script in ("reverie-container", "container-memory"):
                 result = self.size_from(script, gib)
                 self.assertEqual((result.returncode, result.stdout.strip()), (0, expected), (script, gib, result.stderr))
 
     def test_override_and_bad_values(self):
-        for script in ("fleet-container", "container-memory"):
+        for script in ("reverie-container", "container-memory"):
             self.assertEqual(self.size_from(script, 62.7, REVERIE_MEMORY="16g").stdout.strip(), "16g")
             bad = self.size_from(script, 62.7, REVERIE_MEMORY="16GB")
             self.assertNotEqual(bad.returncode, 0); self.assertIn("REVERIE_MEMORY must look like", bad.stderr)
 
-    def test_the_older_fleet_spelling_is_still_read_and_the_new_name_wins(self):
-        def run(**env):
-            full = {"PATH": os.environ["PATH"], "HOME": str(self.root), **env}
-            return subprocess.run(["bash", str(SCRIPT.parent / "fleet-container"), "memory-default"],
-                                  env=full, capture_output=True, text=True).stdout.strip()
-        self.assertEqual(run(FLEET_MEMINFO=str(self.meminfo(12)), FLEET_MEMORY="16g"), "16g")
-        self.assertEqual(run(FLEET_MEMINFO=str(self.meminfo(12))), "6g")
-        self.assertEqual(run(REVERIE_MEMORY="8g", FLEET_MEMORY="16g"), "8g")
-
     def test_new_container_is_created_with_the_printed_auto_size(self):
         repo = SCRIPT.parent.parent
         fake = self.root / "podman"
-        fake.write_text("#!/usr/bin/env bash\n"
+        fake.write_text(executable_script("#!/usr/bin/env bash\n"
                         "args=\"$*\"; echo \"$args\" >> \"$(dirname \"$0\")/podman.log\"\n"
-                        "case \"$args\" in *'info --format'*) echo true ;; *'container exists'*) exit 1 ;; esac\n")
+                        "case \"$args\" in *'info --format'*) echo true ;; *'container exists'*) exit 1 ;; esac\n"))
         fake.chmod(0o755)
-        for env, expected in (({}, "31g"), ({"FLEET_MEMORY": "12g"}, "12g")):
+        for env, expected in (({}, "31g"), ({"REVERIE_MEMORY": "12g"}, "12g")):
             (self.root / "podman.log").unlink(missing_ok=True)
-            result = subprocess.run(["bash", str(repo / "scripts" / "fleet-container"), "up"], capture_output=True, text=True,
-                                    env={"PATH": os.environ["PATH"], "HOME": str(self.root), "FLEET_PODMAN": str(fake),
-                                         "FLEET_SCRATCH": str(self.root / "scratch"), "XDG_RUNTIME_DIR": str(self.root / "run"),
-                                         "FLEET_REPO": str(repo), "FLEET_MEMINFO": str(self.meminfo(62.7)), **env})
+            result = subprocess.run(["bash", str(repo / "scripts" / "reverie-container"), "up"], capture_output=True, text=True,
+                                    env={"PATH": os.environ["PATH"], "HOME": str(self.root), "REVERIE_PODMAN": str(fake),
+                                         "REVERIE_SCRATCH": str(self.root / "scratch"), "XDG_RUNTIME_DIR": str(self.root / "run"),
+                                         "REVERIE_REPO": str(repo), "REVERIE_MEMINFO": str(self.meminfo(62.7)), **env})
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIn("with a %s memory limit" % expected, result.stdout)
             run = [line for line in (self.root / "podman.log").read_text().splitlines() if " run " in " " + line + " "]
@@ -162,8 +157,8 @@ class AutoSizeTests(unittest.TestCase):
     def test_container_memory_auto_applies_the_rule_live(self):
         test = ContainerMemoryTests("test_shows_limit_without_changing_anything"); test.setUp()
         try:
-            env = {"PATH": os.environ["PATH"], "HOME": str(test.root), "FLEET_LAUNCHER": str(test.launcher),
-                   "FLEET_CONTAINER_SCRIPT": str(test.source), "FLEET_MEMINFO": str(self.meminfo(12))}
+            env = {"PATH": os.environ["PATH"], "HOME": str(test.root), "REVERIE_LAUNCHER": str(test.launcher),
+                   "REVERIE_CONTAINER_SCRIPT": str(test.source), "REVERIE_MEMINFO": str(self.meminfo(12))}
             shown = subprocess.run(["bash", str(SCRIPT)], env=env, capture_output=True, text=True)
             self.assertIn("Auto size:     6g", shown.stdout)
             applied = subprocess.run(["bash", str(SCRIPT), "auto"], env=env, capture_output=True, text=True)

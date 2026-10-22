@@ -1,5 +1,5 @@
 from __future__ import annotations
-import tests  # noqa: F401  isolates CODEMAN_*/FLEET_* before cto is imported
+import tests  # noqa: F401  isolates REVERIE_* before reverie is imported
 import json
 import os
 from pathlib import Path
@@ -8,11 +8,11 @@ import sys
 import tempfile
 import unittest
 from unittest.mock import patch
-from cto.config import Config
-from cto.chat import ChatDaemon
-from cto.context_budget import memory_byte_budget, recent_exchanges
-from cto.fleet import Fleet
-from cto.opencode import dispatch, install
+from reverie.config import Config
+from reverie.chat import ChatDaemon
+from reverie.context_budget import memory_byte_budget, recent_exchanges
+from reverie.reverie import Reverie
+from reverie.opencode import dispatch, install
 
 class InstanceTests(unittest.TestCase):
     def setUp(self):
@@ -34,7 +34,7 @@ class InstanceTests(unittest.TestCase):
         return daemon
 
     def test_shared_room_tone_defaults_to_professional_and_is_validated(self):
-        from cto.instance import load_instance
+        from reverie.instance import load_instance
         self.assertEqual(load_instance(self.instance("plain")).shared_room_tone, "professional")
         for tone, ok in (("social", True), ("professional", True), ("personal", False), ("spicy", False), (3, False)):
             path = self.instance("tone")
@@ -55,7 +55,7 @@ class InstanceTests(unittest.TestCase):
         for path in (shared.cfg.persona_path, shared.cfg.profile_path,
                      shared.cfg.legacy_history, shared.cfg.log_path):
             self.assertTrue(path.is_relative_to(shared.cfg.data_dir))
-        self.assertEqual(Fleet(shared.brain.store).self_model()["body"]["consciousness"],
+        self.assertEqual(Reverie(shared.brain.store).self_model()["body"]["consciousness"],
                          "Consciousness is an open question.")
         self.assertEqual(shared.brain.store.beliefs(), [])
 
@@ -63,24 +63,24 @@ class InstanceTests(unittest.TestCase):
         config = self.instance("personal")
         daemon = self.daemon(config)
         daemon.brain.store.add_episode("My ongoing task", "Validate the compiler.")
-        fleet = Fleet(daemon.brain.store)
-        fleet.write("plan", "Continue the experiment", 0)
-        fleet.vote("publication", {"proposal":"A reviewed public package"}, "Deliberate first vote")
-        before = (fleet.self_model(), fleet.plan(), fleet.ballot_history())
+        reverie = Reverie(daemon.brain.store)
+        reverie.write("plan", "Continue the experiment", 0)
+        reverie.vote("publication", {"proposal":"A reviewed public package"}, "Deliberate first vote")
+        before = (reverie.self_model(), reverie.plan(), reverie.ballot_history())
         workspace = self.root / "runtime"
         install(workspace, "local/small", config)
         install(workspace, "cloud/large", config)
         reopened = self.daemon(config)
-        after = Fleet(reopened.brain.store)
+        after = Reverie(reopened.brain.store)
         self.assertEqual(before, (after.self_model(), after.plan(), after.ballot_history()))
         self.assertEqual(reopened.brain.store.count("episode"), 1)
-        self.assertEqual(json.loads((workspace/".fleet-instance").read_text())["instance"], str(config.resolve()))
+        self.assertEqual(json.loads((workspace/".reverie-instance").read_text())["instance"], str(config.resolve()))
         self.assertEqual(json.loads((workspace/"opencode.json").read_text())["model"], "cloud/large")
-        self.assertTrue((workspace/".agents/skills/fleet-memory/SKILL.md").is_file())
-        self.assertTrue((workspace/".claude/skills/fleet-runtime/SKILL.md").is_file())
+        self.assertTrue((workspace/".agents/skills/reverie-memory/SKILL.md").is_file())
+        self.assertTrue((workspace/".claude/skills/reverie-runtime/SKILL.md").is_file())
         instructions = (workspace/"AGENTS.md").read_text()
-        self.assertIn("cto.context_cli", instructions)
-        self.assertEqual(instructions.count("<!-- agent-fleet:begin -->"), 1)
+        self.assertIn("reverie.context_cli", instructions)
+        self.assertEqual(instructions.count("<!-- reverie:begin -->"), 1)
 
     def test_invalid_or_missing_config_never_falls_back_to_personal_data(self):
         with self.assertRaises(FileNotFoundError):
@@ -89,8 +89,8 @@ class InstanceTests(unittest.TestCase):
         value = json.loads(path.read_text()); value["credentials"] = "unexpected"; path.write_text(json.dumps(value))
         with self.assertRaises(ValueError):
             Config(instance_config=path)
-        with patch.dict(os.environ, {}, clear=True):
-            result = subprocess.run([sys.executable, "-m", "cto.memory_cli"], input="{}",
+        with patch.dict(os.environ, {"PYTHONPATH": str(Path(__file__).resolve().parents[1] / "python")}, clear=True):
+            result = subprocess.run([sys.executable, "-m", "reverie.memory_cli"], input="{}",
                                     text=True, capture_output=True)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("select an instance", result.stderr)
@@ -119,7 +119,7 @@ class InstanceTests(unittest.TestCase):
         self.assertEqual(provider["options"]["apiKey"], "{env:LOCAL_MODEL_KEY}")
         self.assertEqual(provider["options"]["baseURL"], "http://gpu:8080/v1")
         self.assertEqual(provider["models"]["qwen"]["limit"], {"context":32768,"output":4096})
-        self.assertTrue((workspace/".agents/skills/fleet-context/SKILL.md").exists())
+        self.assertTrue((workspace/".agents/skills/reverie-context/SKILL.md").exists())
         before=(workspace/"opencode.json").read_text()
         with self.assertRaises(ValueError):
             install(workspace,"local_agent/qwen",api_base="http://user:secret@gpu/v1")

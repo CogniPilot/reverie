@@ -1,10 +1,10 @@
-import tests  # noqa: F401  isolates CODEMAN_*/FLEET_* before cto is imported
+import tests  # noqa: F401  isolates REVERIE_* before reverie is imported
 import unittest
-from cto.backend import argv_for, resolve_session
+from reverie.backend import argv_for, resolve_session
 
 class BackendTests(unittest.TestCase):
     def test_model_arguments_are_preserved_without_shell_interpolation(self):
-        self.assertEqual(argv_for("opencode","local/qwen"), ["opencode","--agent","cto","--model","local/qwen"])
+        self.assertEqual(argv_for("opencode","local/qwen"), ["opencode","--agent","chat","--model","local/qwen"])
         self.assertEqual(argv_for("codex","configured-model"), ["codex","--model","configured-model"])
         self.assertEqual(argv_for("claude","configured-model"), ["claude","--model","configured-model"])
         with self.assertRaises(ValueError): argv_for("codex","")

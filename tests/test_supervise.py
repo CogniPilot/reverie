@@ -1,4 +1,4 @@
-import tests  # noqa: F401  isolates CODEMAN_*/FLEET_* before cto is imported
+import tests  # noqa: F401  isolates REVERIE_* before reverie is imported
 import contextlib
 import io
 import json
@@ -12,7 +12,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-SUPERVISE = Path(__file__).resolve().parent.parent / "cto" / "supervise.py"
+SUPERVISE = Path(__file__).resolve().parent.parent / "python" / "reverie" / "supervise.py"
 
 
 def wait_for(predicate, timeout=15.0):
@@ -43,7 +43,7 @@ class SupervisorTest(unittest.TestCase):
         return path
 
     def supervise(self, child: Path, *extra):
-        env = {k: v for k, v in os.environ.items() if k != "FLEET_RUNTIME_POLICY"}
+        env = {k: v for k, v in os.environ.items() if k != "REVERIE_RUNTIME_POLICY"}
         proc = subprocess.Popen([sys.executable, str(SUPERVISE), "run", "--state", str(self.state), "--fast-seconds", "2",
                                  "--max-backoff", "0.5", "--grace", "2", *extra, "--", sys.executable, str(child)],
                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=env)
@@ -201,7 +201,7 @@ class SupervisorTest(unittest.TestCase):
     # ---- console environment file --------------------------------------------------------------------
     REPORTS_ENV = ("import os, signal, sys, time, pathlib\n"
                    "out = pathlib.Path(sys.argv[1]) / f'env-{os.getpid()}'\n"
-                   "out.write_text(os.environ.get('FLEET_RUNTIME_POLICY', '<unset>'))\n"
+                   "out.write_text(os.environ.get('REVERIE_RUNTIME_POLICY', '<unset>'))\n"
                    "signal.signal(signal.SIGTERM, lambda *a: sys.exit(0))\n"
                    "time.sleep(600)\n")
 
@@ -216,7 +216,7 @@ class SupervisorTest(unittest.TestCase):
                 str(self.seen)]
 
     def run_env(self, argv):
-        env = {k: v for k, v in os.environ.items() if k != "FLEET_RUNTIME_POLICY"}
+        env = {k: v for k, v in os.environ.items() if k != "REVERIE_RUNTIME_POLICY"}
         proc = subprocess.Popen(argv, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=env)
         self.procs.append(proc)
         return proc
@@ -226,7 +226,7 @@ class SupervisorTest(unittest.TestCase):
 
     def test_env_file_reaches_the_console_and_persists_across_restarts(self):
         argv = self.env_setup()
-        (self.state / "child.env").write_text(f"# set by the owner\n\nFLEET_RUNTIME_POLICY={self.policy}\n")
+        (self.state / "child.env").write_text(f"# set by the owner\n\nREVERIE_RUNTIME_POLICY={self.policy}\n")
         sup = self.run_env(argv)
         first = wait_for(lambda: self.child() and self.child()["pid"])
         self.assertEqual(self.seen_by(first), str(self.policy))
@@ -238,13 +238,13 @@ class SupervisorTest(unittest.TestCase):
         (self.state / "child.env").unlink()
         self.assertEqual(restart().returncode, 0)
         self.assertEqual(self.seen_by(self.child()["pid"]), "<unset>")             # read again at every start
-        self.assertIn("env_file keys=FLEET_RUNTIME_POLICY", self.log())
+        self.assertIn("env_file keys=REVERIE_RUNTIME_POLICY", self.log())
         self.assertNotIn(str(self.policy), self.log())                              # values are never logged
         self.assertIsNone(sup.poll())
 
     def test_a_bad_env_file_is_ignored_whole_and_never_stops_the_console(self):
         argv = self.env_setup()
-        (self.state / "child.env").write_text(f"FLEET_RUNTIME_POLICY={self.policy}\nNODE_OPTIONS=--require=/tmp/x.js\n")
+        (self.state / "child.env").write_text(f"REVERIE_RUNTIME_POLICY={self.policy}\nNODE_OPTIONS=--require=/tmp/x.js\n")
         sup = self.run_env(argv)
         pid = wait_for(lambda: self.child() and self.child()["pid"])
         self.assertEqual(self.seen_by(pid), "<unset>")                              # all or nothing
@@ -255,7 +255,7 @@ class SupervisorTest(unittest.TestCase):
     def test_without_an_env_root_the_env_file_is_not_read(self):
         argv = self.env_setup()
         cut = argv.index("--env-root"); del argv[cut:cut + 2]
-        (self.state / "child.env").write_text(f"FLEET_RUNTIME_POLICY={self.policy}\n")
+        (self.state / "child.env").write_text(f"REVERIE_RUNTIME_POLICY={self.policy}\n")
         sup = self.run_env(argv)
         pid = wait_for(lambda: self.child() and self.child()["pid"])
         self.assertEqual(self.seen_by(pid), "<unset>")
@@ -291,17 +291,17 @@ class EnvFileRulesTest(unittest.TestCase):
             self.read(text)
 
     def test_valid_and_missing(self):
-        self.assertEqual(self.read(f"FLEET_RUNTIME_POLICY={self.policy}\n"), {"FLEET_RUNTIME_POLICY": str(self.policy)})
+        self.assertEqual(self.read(f"REVERIE_RUNTIME_POLICY={self.policy}\n"), {"REVERIE_RUNTIME_POLICY": str(self.policy)})
         self.assertEqual(self.read("# nothing\n\n"), {})
         self.file.unlink()
         self.assertEqual(self.read(), {})                                            # no file: nothing changes
 
     def test_names_and_syntax(self):
         self.refused("ANTHROPIC_API_KEY=x\n", "not an allowed name")
-        self.refused("fleet_runtime_policy=x\n", "not KEY=VALUE")
-        self.refused(f"export FLEET_RUNTIME_POLICY={self.policy}\n", "not KEY=VALUE")
-        self.refused(f"FLEET_RUNTIME_POLICY={self.policy}\nFLEET_RUNTIME_POLICY={self.policy}\n", "repeated")
-        self.refused(f" FLEET_RUNTIME_POLICY={self.policy}\n", "not KEY=VALUE")
+        self.refused("reverie_runtime_policy=x\n", "not KEY=VALUE")
+        self.refused(f"export REVERIE_RUNTIME_POLICY={self.policy}\n", "not KEY=VALUE")
+        self.refused(f"REVERIE_RUNTIME_POLICY={self.policy}\nREVERIE_RUNTIME_POLICY={self.policy}\n", "repeated")
+        self.refused(f" REVERIE_RUNTIME_POLICY={self.policy}\n", "not KEY=VALUE")
 
     def test_runtime_policy_values(self):
         outside = self.tmp / "elsewhere.json"; outside.write_text("{}")
@@ -318,16 +318,16 @@ class EnvFileRulesTest(unittest.TestCase):
                       str(self.root / "missing.json"),                                 # missing
                       f"{self.policy} ",                                               # trailing space
                       ""]:
-            self.refused(f"FLEET_RUNTIME_POLICY={value}\n", "invalid value")
+            self.refused(f"REVERIE_RUNTIME_POLICY={value}\n", "invalid value")
         before = os.getcwd(); os.chdir(self.tmp)                                       # where it WOULD resolve inside
-        try: self.refused("FLEET_RUNTIME_POLICY=runtime/runtime-policy.json\n", "invalid value")
+        try: self.refused("REVERIE_RUNTIME_POLICY=runtime/runtime-policy.json\n", "invalid value")
         finally: os.chdir(before)
 
     def test_the_file_itself(self):
-        self.refused("FLEET_RUNTIME_POLICY=" + "x" * 5000 + "\n", "larger than 4096")
-        self.file.write_bytes(b"FLEET_RUNTIME_POLICY=\xff\n")
+        self.refused("REVERIE_RUNTIME_POLICY=" + "x" * 5000 + "\n", "larger than 4096")
+        self.file.write_bytes(b"REVERIE_RUNTIME_POLICY=\xff\n")
         self.refused(None, "not UTF-8")
-        real = self.tmp / "real.env"; real.write_text(f"FLEET_RUNTIME_POLICY={self.policy}\n")
+        real = self.tmp / "real.env"; real.write_text(f"REVERIE_RUNTIME_POLICY={self.policy}\n")
         self.file.unlink(); self.file.symlink_to(real)
         self.refused(None, "unreadable")                                             # never follows a link
         self.file.unlink(); os.mkfifo(self.file)

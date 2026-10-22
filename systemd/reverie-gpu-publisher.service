@@ -1,7 +1,7 @@
 # Template, not installed. Publishes the host GPUs' numbers for the console's GPU chip (display only).
-# Contract: apps/console/docs/host-gpu.md (heartbeat 30 s; the reader treats >60 s as stale).
-# It writes ONLY ~/.local/state/reverie/published/gpu.json (never bind-mounted read-write; the container
-# sees the directory read-only at /host-published). See cto/gpu_publisher.py.
+# Contract: apps/web/docs/host-gpu.md (heartbeat 30 s; the reader treats >60 s as stale).
+# It writes ONLY ~/reverie/runtime/published/gpu.json (never bind-mounted read-write; the container
+# sees the directory read-only at /host-published). See python/reverie/gpu_publisher.py.
 [Unit]
 Description=Reverie GPU readout for the console (one nvidia-smi call every 30 s)
 
@@ -9,7 +9,7 @@ Description=Reverie GPU readout for the console (one nvidia-smi call every 30 s)
 Type=simple
 Environment=PATH=/run/current-system/sw/bin:/usr/bin:/bin
 # The host's own verified build (see docs/routines.md "Install"), never the container copy.
-ExecStart=%h/.local/libexec/reverie/fleet-pkg/bin/fleet-gpu-publisher --loop 30
+ExecStart=%h/reverie/runtime/bin/reverie-pkg/bin/reverie-gpu-publisher --loop 30
 Restart=on-failure
 RestartSec=10
 TimeoutStopSec=5
@@ -19,7 +19,7 @@ UMask=0022
 NoNewPrivileges=yes
 ProtectSystem=strict
 ProtectHome=read-only
-ReadWritePaths=%h/.local/state/reverie/published
+ReadWritePaths=%h/reverie/runtime/published
 PrivateTmp=yes
 ProtectKernelTunables=yes
 ProtectKernelModules=yes

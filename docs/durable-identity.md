@@ -54,8 +54,8 @@ the fix used here.
 ## Blocked on the owner
 
 **Owner authentication.** Today the console treats a request without
-`X-Codeman-Parent-Session` as the owner (`ownerOnly`, `caller()`). An agent can unset
-`CODEMAN_SESSION_ID`, or use curl, and act as the owner: rebind employees, take the
+`X-Reverie-Parent-Session` as the owner (`ownerOnly`, `caller()`). An agent can unset
+`REVERIE_SESSION_ID`, or use curl, and act as the owner: rebind employees, take the
 coordinator role. Until owner-only routes require a credential agent panes do not have:
 - No `--apply`.
 - No member-replace route.

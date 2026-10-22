@@ -3,16 +3,16 @@
 # Every step is idempotent, so a restart or an upgrade on the same volume runs the same path.
 #   REVERIE_VERSION       image build id, set at build time; a change means an upgrade
 #   REVERIE_DATA          instance directory on the mounted volume (default /instances/default)
-#   REVERIE_INSTALL_CLIS  opt-in agent CLIs to install at start, space-separated: claude-code
-#   CODEMAN_PASSWORD      owner password; when unset, one is generated on first start and kept on the volume
+#   REVERIE_INSTALL_CLIS  defaults to claude codex opencode; set none to skip installation
+#   REVERIE_PASSWORD      internal runtime credential; generated privately when unset
 set -euo pipefail
 umask 077
 log() { printf 'reverie-start: %s\n' "$*" >&2; }
 
 DATA=${REVERIE_DATA:-/instances/default}
 mkdir -p "$DATA/console" "$DATA/backups" "$DATA/tools" "${TMPDIR:-/tmp}"
-# REVERIE_DATA_DIR is the name; the older FLEET_DATA_DIR spelling is still read, and both are exported for one release.
-REVERIE_DATA_DIR=${REVERIE_DATA_DIR:-${FLEET_DATA_DIR:-$DATA/console}}; export REVERIE_DATA_DIR FLEET_DATA_DIR="$REVERIE_DATA_DIR"
+REVERIE_DATA_DIR=${REVERIE_DATA_DIR:-$DATA/console}; export REVERIE_DATA_DIR
+mkdir -p -- "$REVERIE_DATA_DIR"
 
 # Upgrade: the first start of a new image build backs up the console state before the console reads it
 # (the console migrates its own files on start).
@@ -25,50 +25,49 @@ if [ -n "$previous" ] && [ "$previous" != "$version" ]; then
 fi
 printf '%s\n' "$version" > "$DATA/.image-version"
 
-# Owner authorization: a volume without an owner account or a policy marker starts in enforce, so every
-# owner route (plans, settings, the CLI registry, the mode switch) needs the signed-in owner, never only
-# the shared CODEMAN_PASSWORD that every process in the container inherits. Agents keep their own routes.
-# A volume that has an account or a marker keeps its policy. The owner creates the account from a host
-# shell (setup.sh --owner) and signs in at /owner/login.
-owner_marker="$REVERIE_DATA_DIR/owner-auth.policy"
-if [ ! -e "$REVERIE_DATA_DIR/owner-auth.json" ] && [ ! -e "$owner_marker" ] && [ ! -L "$owner_marker" ]; then
-  mkdir -p "$REVERIE_DATA_DIR"
-  printf 'enforce\n' > "$owner_marker.tmp" && mv "$owner_marker.tmp" "$owner_marker"
-  log "owner authorization: enforce; create the owner account from the host with: setup.sh --owner"
-fi
+# The backend permits browser account creation only when both owner account and
+# durable policy marker are absent. It enforces owner authorization before claim.
+# Never manufacture a marker here: that would make a fresh instance look claimed.
+# Existing accounts, markers, symlinks and unreadable state stay backend-managed
+# and fail closed; host bootstrap/reset tools remain available for recovery.
+export REVERIE_OWNER_SETUP=1
 
-# Owner login: the console listens on every container interface (port publishing needs that), so it never
+# Internal runtime authentication: the console listens on every container interface (port publishing needs that), so it never
 # starts without a password. The password stays on the volume and is never printed.
-if [ -z "${CODEMAN_PASSWORD:-}" ]; then
+if [ -z "${REVERIE_PASSWORD:-}" ]; then
   secret="$DATA/owner-password"
   if [ ! -s "$secret" ]; then
     python3 -I -c 'import secrets; print(secrets.token_urlsafe(18))' > "$secret.tmp" && mv "$secret.tmp" "$secret"
-    log "first start: owner password created; read it with: docker exec <container> cat $secret"
+    log "first start: internal runtime credential created; create your owner account in the browser"
   fi
-  CODEMAN_PASSWORD=$(cat "$secret")
-  export CODEMAN_PASSWORD
+  REVERIE_PASSWORD=$(cat "$secret")
+  export REVERIE_PASSWORD
 fi
-export CODEMAN_USERNAME=${CODEMAN_USERNAME:-owner}
+export REVERIE_USERNAME=${REVERIE_USERNAME:-owner}
+printf 'REVERIE_USERNAME=%s\nREVERIE_PASSWORD=%s\n' "$REVERIE_USERNAME" "$REVERIE_PASSWORD" > "$REVERIE_DATA_DIR/.env.tmp"
+mv "$REVERIE_DATA_DIR/.env.tmp" "$REVERIE_DATA_DIR/.env"
 
 # The default Claude and Codex profiles keep their sign-in under these directories; on the volume they survive a recreate.
 mkdir -p "$DATA/accounts/claude" "$DATA/accounts/codex"
 export CLAUDE_CONFIG_DIR=${CLAUDE_CONFIG_DIR:-$DATA/accounts/claude} CODEX_HOME=${CODEX_HOME:-$DATA/accounts/codex}
 
-# Opt-in agent CLIs that the image does not ship. They install on the volume, so a recreated container keeps them.
-# No network or a failed install is a warning, never a failed start.
-export PATH="$DATA/tools/bin:$PATH"
-for cli in ${REVERIE_INSTALL_CLIS:-}; do
-  case "$cli" in
-    claude-code) package=@anthropic-ai/claude-code; command=claude ;;
-    *) log "unknown CLI '$cli' in REVERIE_INSTALL_CLIS, skipped"; continue ;;
-  esac
-  if command -v "$command" >/dev/null 2>&1; then continue; fi
-  if timeout 300 npm install --global --prefix "$DATA/tools" --no-fund --no-audit "$package" >"$DATA/tools/install-$cli.log" 2>&1; then
-    log "installed $cli"
-  else
-    log "could not install $cli (offline?); continuing without it, see $DATA/tools/install-$cli.log"
-  fi
-done
+# Provider programs are installed into the user's persistent volume on first start.
+# The web server starts immediately; offline installation failures remain retryable.
+# Keep the immutable runtime's guarded provider launchers ahead of mutable npm bins.
+# They wait for this background installer before running a provider; the web server can still start immediately.
+export PATH="$PATH:$DATA/tools/bin"
+export REVERIE_DATA="$DATA"
+if command -v reverie-install-clis >/dev/null 2>&1; then
+  reverie-install-clis </dev/null &
+else
+  log 'provider installer unavailable; account sign-in requires provider tools'
+fi
 
-[ "$#" -gt 0 ] || set -- reverie web --host 0.0.0.0 --port "${CODEMAN_PORT:-3000}"
+[ "$#" -gt 0 ] || set -- reverie web --host 0.0.0.0 --port "${REVERIE_PORT:-3000}"
+# Speech is local to this instance. Start independently so first-use model downloads
+# never delay the web server; an operator-provided service URL takes precedence.
+if [ "${REVERIE_KOKORO_ENABLED:-1}" = 1 ] && [ -z "${REVERIE_KOKORO_URL:-}" ] &&
+   [ "${1##*/}" = reverie ] && [ "${2:-}" = web ] && command -v reverie-kokoro >/dev/null 2>&1; then
+  reverie-kokoro </dev/null &
+fi
 exec "$@"

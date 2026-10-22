@@ -1,5 +1,5 @@
 from __future__ import annotations
-import tests  # noqa: F401  isolates CODEMAN_*/FLEET_* before cto is imported
+import tests  # noqa: F401  isolates REVERIE_* before reverie is imported
 from datetime import datetime, timezone
 import json
 from pathlib import Path
@@ -7,12 +7,12 @@ import subprocess
 import tempfile
 import unittest
 from unittest.mock import patch
-from cto.config import Config
-from cto.cycle import Cycle
-from cto.cycle_budget import Ledger, BudgetExhausted, MeteredClient
-from cto.cycle_runner import run_process
-from cto.memory import MemoryStore
-from cto.plan_usage import capacity
+from reverie.config import Config
+from reverie.cycle import Cycle
+from reverie.cycle_budget import Ledger, BudgetExhausted, MeteredClient
+from reverie.cycle_runner import run_process
+from reverie.memory import MemoryStore
+from reverie.plan_usage import capacity
 
 
 class FakeRunner:
@@ -64,7 +64,7 @@ class CycleTests(unittest.TestCase):
 
     def transport(self,url,body,timeout):
         value=json.loads(body); self.calls.append(value); system=value['messages'][0]['content']
-        if 'allocating a fleet schedule' in system:
+        if 'allocating a reverie schedule' in system:
             content=json.dumps({'assignments':[{'agent':'math','model':'local','task_ids':['answer'],
                 'allow_subagents':True,'children':[{'task_id':'answer','model':'local','role':'implementer'}]}],
                 'roadmap':[{'date':'2026-10-15','goal':'Verify the answer','dependencies':[],
@@ -83,7 +83,7 @@ class CycleTests(unittest.TestCase):
         with self.cycle.agent('math') as (_,store,_):
             store.add_episode('PRIVATE_INTERACTION_SENTINEL: please check small examples.','I will remember.')
         now=datetime(2026,10,15,12,tzinfo=timezone.utc)
-        with patch('cto.cycle.Config',side_effect=lambda **kw:Config(dreams_per_sleep=1,**kw)):
+        with patch('reverie.cycle.Config',side_effect=lambda **kw:Config(dreams_per_sleep=1,**kw)):
             result=self.cycle.run(now,force=True,available=self.cycle.models)
         self.assertEqual(result['errors'],{})
         self.assertEqual(len(self.runner.calls),1)
@@ -110,7 +110,7 @@ class CycleTests(unittest.TestCase):
             with self.subTest(dreaming=flag):
                 day=f'2026-01-{index+1:02d}'
                 if flag is not None: self.cycle.agents['math']['dreaming']=flag
-                with patch('cto.cycle.Dreamer') as dreamer:
+                with patch('reverie.cycle.Dreamer') as dreamer:
                     self.cycle.night('math','local',day)
                 dreamer.assert_not_called()
                 self.assertEqual(self.calls,[])
@@ -120,7 +120,7 @@ class CycleTests(unittest.TestCase):
 
     def test_night_opt_in_makes_one_dream_call(self):
         self.cycle.agents['math']['dreaming']=True
-        with patch('cto.cycle.Config',side_effect=lambda **kw:Config(dreams_per_sleep=1,**kw)):
+        with patch('reverie.cycle.Config',side_effect=lambda **kw:Config(dreams_per_sleep=1,**kw)):
             self.cycle.night('math','local','2026-01-01')
             self.cycle.night('math','local','2026-01-01')  # the recorded phase is idempotent
         self.assertEqual(len(self.calls),1)
@@ -129,7 +129,7 @@ class CycleTests(unittest.TestCase):
 
     def test_night_profile_false_vetoes_global_opt_in(self):
         self.cycle.agents['math']['dreaming']=False
-        with patch('cto.cycle.Config',side_effect=lambda **kw:Config(dreams_per_sleep=1,**kw)):
+        with patch('reverie.cycle.Config',side_effect=lambda **kw:Config(dreams_per_sleep=1,**kw)):
             self.cycle.night('math','local','2026-01-01')
         self.assertEqual(self.calls,[])
         phase=next(p for p in self.cycle.ledger.phases('2026-01-01','math') if p['phase']=='dreaming')
@@ -145,12 +145,20 @@ class CycleTests(unittest.TestCase):
         assignment['allow_subagents']=True; assignment['children'][0]['model']='unavailable'
         with self.assertRaises(ValueError): self.cycle.validate_schedule({'assignments':[assignment]},self.cycle.models)
 
+    def test_implementation_permission_does_not_come_from_kind_or_title(self):
+        for name in ("cto", "math"):
+            assignment = {"agent": name, "model": "local", "task_ids": ["answer"], "children": []}
+            with self.assertRaises(ValueError):
+                self.cycle.validate_schedule({"assignments": [assignment]}, self.cycle.models)
+            self.cycle.agents[name]["allow_implementation"] = True
+            self.assertEqual(self.cycle.validate_schedule({"assignments": [assignment]}, self.cycle.models), [assignment])
+
     def test_attribute_governance_and_weekly_votes(self):
         self.cycle.set_attribute('math','tags',['symmetry'],'A new interest')
         self.assertEqual(self.cycle.attributes('math')['tags']['value'],['symmetry'])
         with self.assertRaises(ValueError): self.cycle.set_attribute('math','stats.focus',.5,'Change a frozen trait')
         for week in range(3):
-            with patch('cto.fleet.time.time',return_value=345600+(2500+week)*604800+10):
+            with patch('reverie.reverie.time.time',return_value=345600+(2500+week)*604800+10):
                 result=self.cycle.set_attribute('math','stats.curiosity',.9,'Considered change')
         self.assertEqual(result['value'],.9)
 

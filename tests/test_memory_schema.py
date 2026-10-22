@@ -6,8 +6,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from cto.embeddings import HashedEmbedder
-from cto.memory import LEGACY_ASSISTANT_COLUMN, SCHEMA, SCHEMA_VERSION, MemoryStore
+from reverie.embeddings import HashedEmbedder
+from reverie.memory import LEGACY_ASSISTANT_COLUMN, SCHEMA, SCHEMA_VERSION, MemoryStore
 
 
 class MemorySchemaTest(unittest.TestCase):
@@ -75,7 +75,7 @@ class MemorySchemaTest(unittest.TestCase):
         connection.set_authorizer(lambda action, name, value, *_: sqlite3.SQLITE_DENY
                                   if action == sqlite3.SQLITE_PRAGMA and name == "user_version" and value is not None
                                   else sqlite3.SQLITE_OK)
-        with patch("cto.memory.sqlite3.connect", return_value=connection):
+        with patch("reverie.memory.sqlite3.connect", return_value=connection):
             with self.assertRaises(sqlite3.DatabaseError):
                 MemoryStore(self.path)
         with sqlite3.connect(self.path) as original:

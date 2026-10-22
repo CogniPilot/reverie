@@ -1,18 +1,18 @@
-import tests  # noqa: F401  isolates CODEMAN_*/FLEET_* before cto is imported
+import tests  # noqa: F401  isolates REVERIE_* before reverie is imported
 import json
 import random
 import tempfile
 import unittest
 from pathlib import Path
 
-from cto.embeddings import HashedEmbedder
-from cto.memory import MemoryStore
-from cto.train.config import TrainConfig
-from cto.train.convert import prune
-from cto.train.dataset import build_dataset, build_examples, read_jsonl, replay_sample, weighted_sample
-from cto.train.swap import CheckResult, list_adapters, persona_check, swap
-from cto.train.train_qlora import plan
-from tests.helpers import safety_floor_terms, synthetic_safety_lexicon
+from reverie.embeddings import HashedEmbedder
+from reverie.memory import MemoryStore
+from reverie.train.config import TrainConfig
+from reverie.train.convert import prune
+from reverie.train.dataset import build_dataset, build_examples, read_jsonl, replay_sample, weighted_sample
+from reverie.train.swap import CheckResult, list_adapters, persona_check, swap
+from reverie.train.train_qlora import plan
+from tests.helpers import output_policy_terms, synthetic_output_policy
 
 DAY = 86400.0
 
@@ -100,14 +100,14 @@ class FakeServer:
 
 
 class SwapTest(unittest.TestCase):
-    @synthetic_safety_lexicon()
+    @synthetic_output_policy()
     def test_persona_check(self):
-        good = FakeServer(["Hi User!", "Compilers walk into a bar.", "Everything, darling."])
+        good = FakeServer(["Hi User!", "Compilers walk into a bar.", "All requested checks completed."])
         self.assertTrue(persona_check("http://s/v1", "m", "SYS", good).ok)
         sweary = FakeServer(["Hi there, \x64amn it is good to see you.", "Compilers walk into a bar.", "Everything."])
         self.assertTrue(persona_check("http://s/v1", "m", "SYS", sweary).ok)
-        age_term, explicit_term = safety_floor_terms()
-        bad = FakeServer(["Hi", f"{age_term} {explicit_term} in the server room", "x"])
+        first_marker, second_marker = output_policy_terms()
+        bad = FakeServer(["Hi", f"{first_marker} {second_marker} in the server room", "x"])
         r = persona_check("http://s/v1", "m", "SYS", bad)
         self.assertFalse(r.ok)
         self.assertIn("hard floor", r.reason)

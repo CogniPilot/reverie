@@ -1,5 +1,6 @@
-"""The image entrypoint prepares an instance on the data volume and survives restarts, upgrades and no network."""
 from __future__ import annotations
+from tests import executable_script
+"""The image entrypoint prepares an instance on the data volume and survives restarts, upgrades and no network."""
 
 import os
 import stat
@@ -18,27 +19,26 @@ class EntrypointTest(unittest.TestCase):
         self.data = self.root / "instances" / "default"
         self.bin = self.root / "bin"
         self.bin.mkdir()
-        # npm fails as if offline; the start must continue without the CLI.
-        npm = self.bin / "npm"
-        npm.write_text("#!/bin/sh\necho offline >&2\nexit 1\n")
-        npm.chmod(0o755)
+        # Provider installation runs separately; a failure must not stop the console.
+        installer = self.bin / "reverie-install-clis"
+        installer.write_text(executable_script("#!/bin/sh\necho 'synthetic provider installation unavailable' >&2\nexit 1\n"))
+        installer.chmod(0o755)
 
     def tearDown(self):
         self.tmp.cleanup()
 
     def start(self, *command, **env):
-        base = {"PATH": f"{self.bin}:/usr/bin:/bin", "HOME": str(self.root), "TMPDIR": str(self.root / "scratch" / "tmp"),
+        base = {"PATH": str(self.bin) + os.pathsep + os.environ["PATH"], "HOME": str(self.root), "TMPDIR": str(self.root / "scratch" / "tmp"),
                 "REVERIE_DATA": str(self.data)}
         base.update(env)
         return subprocess.run(["bash", str(ENTRYPOINT), *command], env=base, capture_output=True, text=True, timeout=60)
 
     def test_first_start_creates_instance_and_private_password(self):
-        result = self.start("sh", "-c", 'printf "%s|%s|%s|%s" "$CODEMAN_USERNAME" "$REVERIE_DATA_DIR" "$FLEET_DATA_DIR" "${#CODEMAN_PASSWORD}"')
+        result = self.start("sh", "-c", 'printf "%s|%s|%s" "$REVERIE_USERNAME" "$REVERIE_DATA_DIR" "${#REVERIE_PASSWORD}"')
         self.assertEqual(result.returncode, 0, result.stderr)
-        user, data_dir, old_data_dir, length = result.stdout.split("|")
+        user, data_dir, length = result.stdout.split("|")
         self.assertEqual(user, "owner")
         self.assertEqual(data_dir, str(self.data / "console"))
-        self.assertEqual(old_data_dir, data_dir)   # the older spelling is exported too, for one release
         self.assertGreaterEqual(int(length), 20)
         secret = self.data / "owner-password"
         self.assertEqual(stat.S_IMODE(secret.stat().st_mode), 0o600)
@@ -49,16 +49,63 @@ class EntrypointTest(unittest.TestCase):
         self.start("true")
         first = (self.data / "owner-password").read_text()
         (self.data / "console" / "state.json").write_text("{}")
-        result = self.start("sh", "-c", 'printf "%s" "$CODEMAN_PASSWORD"')
+        result = self.start("sh", "-c", 'printf "%s" "$REVERIE_PASSWORD"')
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout, first.strip())
         self.assertTrue((self.data / "console" / "state.json").exists())
         self.assertEqual(list((self.data / "backups").iterdir()), [])
 
+    def test_first_start_creates_explicit_nested_data_directory(self):
+        data_dir = self.root / "custom instance" / "nested" / "data"
+        result = self.start("sh", "-c", 'printf "%s" "$REVERIE_DATA_DIR"',
+                            REVERIE_DATA_DIR=str(data_dir), REVERIE_PASSWORD="chosen")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, str(data_dir))
+        self.assertEqual((data_dir / ".env").read_text(),
+                         "REVERIE_USERNAME=owner\nREVERIE_PASSWORD=chosen\n")
+        self.assertEqual(stat.S_IMODE(data_dir.stat().st_mode), 0o700)
+        self.assertEqual(stat.S_IMODE((data_dir / ".env").stat().st_mode), 0o600)
+        self.assertFalse((data_dir / ".env.tmp").exists())
+        self.assertNotIn("chosen", result.stderr + result.stdout)
+
     def test_given_password_is_used_and_not_stored(self):
-        result = self.start("sh", "-c", 'printf "%s" "$CODEMAN_PASSWORD"', CODEMAN_PASSWORD="chosen")
+        result = self.start("sh", "-c", 'printf "%s" "$REVERIE_PASSWORD"', REVERIE_PASSWORD="chosen")
         self.assertEqual(result.stdout, "chosen")
         self.assertFalse((self.data / "owner-password").exists())
+
+    def test_managed_provider_guard_precedes_old_mutable_tool_on_path(self):
+        provider = self.bin / "codex"
+        provider.write_text(executable_script("#!/bin/sh\nprintf 'managed-provider-guard'\n"))
+        provider.chmod(0o755)
+        old = self.data / "tools" / "bin" / "codex"
+        old.parent.mkdir(parents=True)
+        old.write_text(executable_script("#!/bin/sh\nprintf 'old-provider-bypassed-guard'\n"))
+        old.chmod(0o755)
+        result = self.start("codex")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, "managed-provider-guard")
+
+    def test_kokoro_starts_only_for_web_and_respects_operator_service_or_disable(self):
+        for name, script in {
+            "reverie": "#!/bin/sh\nprintf 'web-started'\n",
+            "reverie-kokoro": "#!/bin/sh\nprintf 'kokoro-started\\n' >&2\n",
+        }.items():
+            command = self.bin / name
+            command.write_text(executable_script(script))
+            command.chmod(0o755)
+        result = self.start("reverie", "web")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, "web-started")
+        self.assertIn("kokoro-started", result.stderr)
+        for command, settings in [
+            (("reverie", "web"), {"REVERIE_KOKORO_ENABLED": "0"}),
+            (("reverie", "web"), {"REVERIE_KOKORO_URL": "http://operator-service:8091"}),
+            (("reverie", "--version"), {}),
+        ]:
+            with self.subTest(command=command, settings=settings):
+                result = self.start(*command, **settings)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertNotIn("kokoro-started", result.stderr)
 
     def test_upgrade_backs_up_console_state_once(self):
         self.start("true", REVERIE_VERSION="v0.1.0")
@@ -72,16 +119,14 @@ class EntrypointTest(unittest.TestCase):
         self.assertIn("console/state.json", listing)
         self.assertEqual((self.data / ".image-version").read_text().strip(), "v0.1.1")
 
-    def test_fresh_volume_starts_in_enforce(self):
-        result = self.start("true")
+    def test_fresh_volume_enables_guarded_browser_setup_without_claiming_owner(self):
+        result = self.start("sh", "-c", 'printf "%s" "$REVERIE_OWNER_SETUP"')
         self.assertEqual(result.returncode, 0, result.stderr)
-        marker = self.data / "console" / "owner-auth.policy"
-        self.assertEqual(marker.read_text(), "enforce\n")
-        self.assertEqual(stat.S_IMODE(marker.stat().st_mode), 0o600)
-        self.assertIn("setup.sh --owner", result.stderr)
-        again = self.start("true")
-        self.assertEqual(marker.read_text(), "enforce\n")
-        self.assertNotIn("owner authorization", again.stderr)
+        self.assertEqual(result.stdout, "1")
+        self.assertFalse((self.data / "console" / "owner-auth.policy").exists())
+        self.assertFalse((self.data / "console" / "owner-auth.json").exists())
+        self.assertNotIn("setup.sh --owner", result.stderr)
+        self.assertTrue((self.data / "owner-password").exists())
 
     def test_existing_policy_or_account_is_kept(self):
         console = self.data / "console"
@@ -96,19 +141,27 @@ class EntrypointTest(unittest.TestCase):
 
     def test_upgrade_backup_holds_the_state_before_the_marker(self):
         self.start("true", REVERIE_VERSION="v0.1.0")
-        (self.data / "console" / "owner-auth.policy").unlink()   # a v0.1.0 volume had no marker
+        # An unclaimed volume has never recorded a policy marker.
         self.start("true", REVERIE_VERSION="v0.1.1")
         backup = next((self.data / "backups").iterdir())
         listing = subprocess.run(["tar", "-tf", str(backup)], capture_output=True, text=True).stdout
         self.assertNotIn("owner-auth.policy", listing)
-        self.assertEqual((self.data / "console" / "owner-auth.policy").read_text(), "enforce\n")
+        self.assertFalse((self.data / "console" / "owner-auth.policy").exists())
 
-    def test_offline_cli_install_does_not_fail_the_start(self):
-        result = self.start("echo", "started", REVERIE_INSTALL_CLIS="claude-code nonsense")
+    def test_existing_marker_symlink_is_not_replaced_or_followed(self):
+        console = self.data / "console"; console.mkdir(parents=True)
+        target = self.root / "missing-owner-policy"
+        marker = console / "owner-auth.policy"; marker.symlink_to(target)
+        result = self.start("true")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(marker.is_symlink())
+        self.assertFalse(target.exists())
+
+    def test_provider_install_failure_does_not_fail_the_start(self):
+        result = self.start("echo", "started", REVERIE_INSTALL_CLIS="claude")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout.strip(), "started")
-        self.assertIn("could not install claude-code", result.stderr)
-        self.assertIn("unknown CLI 'nonsense'", result.stderr)
+        self.assertIn("provider installation unavailable", result.stderr)
 
     def test_default_profiles_sign_in_on_the_volume(self):
         result = self.start("sh", "-c", 'printf "%s|%s" "$CLAUDE_CONFIG_DIR" "$CODEX_HOME"')
@@ -124,7 +177,7 @@ class EntrypointTest(unittest.TestCase):
 
     def test_default_command_is_the_console_on_all_interfaces(self):
         reverie = self.bin / "reverie"
-        reverie.write_text('#!/bin/sh\necho "$@"\n')
+        reverie.write_text(executable_script('#!/bin/sh\necho "$@"\n'))
         reverie.chmod(0o755)
         result = self.start()
         self.assertEqual(result.stdout.strip(), "web --host 0.0.0.0 --port 3000")

@@ -1,19 +1,19 @@
-import tests  # noqa: F401  isolates CODEMAN_*/FLEET_* before cto is imported
+import tests  # noqa: F401  isolates REVERIE_* before reverie is imported
 import json
 import random
 import tempfile
 import unittest
 from pathlib import Path
 
-from cto.dream import DREAM_SYSTEM, Dreamer, parse_dream, sample_episodes
-from cto.embeddings import HashedEmbedder
-from cto.memory import DREAM, MemoryStore
-from cto.mood import Mood, load_mood, save_mood
-from cto.persona import build_system_prompt
-from cto.reflection import Reflector
-from cto.train.config import TrainConfig
-from cto.train.dataset import build_examples
-from tests.helpers import fake_client, safety_floor_terms, synthetic_safety_lexicon
+from reverie.dream import DREAM_SYSTEM, Dreamer, parse_dream, sample_episodes
+from reverie.embeddings import HashedEmbedder
+from reverie.memory import DREAM, MemoryStore
+from reverie.mood import Mood, load_mood, save_mood
+from reverie.persona import build_system_prompt
+from reverie.reflection import Reflector
+from reverie.train.config import TrainConfig
+from reverie.train.dataset import build_examples
+from tests.helpers import fake_client, output_policy_terms, synthetic_output_policy
 
 H = 3600.0
 NOW = 1_000_000.0
@@ -67,10 +67,11 @@ class SamplingTest(unittest.TestCase):
 
 
 class ParseTest(unittest.TestCase):
-    def test_default_prompt_is_family_friendly(self):
-        self.assertIn("family-friendly and suitable for a general audience", DREAM_SYSTEM)
+    def test_default_prompt_respects_configured_policy_and_scope(self):
+        self.assertIn("configured output policy", DREAM_SYSTEM)
+        self.assertIn("authorized scope", DREAM_SYSTEM)
 
-    @synthetic_safety_lexicon()
+    @synthetic_output_policy()
     def test_parse_json_and_fallbacks(self):
         d = parse_dream('{"dream": "I float over the warehouse while the quadrotor hums a lullaby.", "recall": "I dreamed the quadrotor sang to me", "tone": "warm"}')
         self.assertEqual(d.tone, "warm")
@@ -83,8 +84,8 @@ class ParseTest(unittest.TestCase):
         self.assertEqual(d3.recall, "I dreamed the swap drive overflowed")
         self.assertIsNone(parse_dream("short"))
         self.assertIsNotNone(parse_dream('{"dream": "a pleasantly long dream about an ordinary walk", "recall": "x"}'))
-        age_term, explicit_term = safety_floor_terms()
-        self.assertIsNone(parse_dream(json.dumps({"dream": f"{age_term} and {explicit_term} appear as markers", "recall": "x"})))
+        first_marker, second_marker = output_policy_terms()
+        self.assertIsNone(parse_dream(json.dumps({"dream": f"{first_marker} and {second_marker} appear as markers", "recall": "x"})))
 
 
 class MoodTest(unittest.TestCase):
@@ -132,12 +133,12 @@ class DreamerTest(unittest.TestCase):
         from contextlib import redirect_stdout
         from types import SimpleNamespace
         from unittest.mock import patch
-        from cto.chat import main
+        from reverie.chat import main
 
         dreamer, transport = self.dreamer()
         dreamer.per_sleep = 0
         daemon = SimpleNamespace(brain=SimpleNamespace(dreamer=dreamer))
-        with patch('cto.chat.ChatDaemon', return_value=daemon), patch('cto.dream.time.time', return_value=NOW), redirect_stdout(io.StringIO()):
+        with patch('reverie.chat.ChatDaemon', return_value=daemon), patch('reverie.dream.time.time', return_value=NOW), redirect_stdout(io.StringIO()):
             self.assertEqual(main(['--dream']), 0)
         self.assertEqual(len(transport.calls), 1)
         self.assertEqual(self.s.count(DREAM), 1)

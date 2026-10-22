@@ -1,0 +1,7120 @@
+/**
+ * @fileoverview Terminal setup (xterm.js config, input, resize, link provider), rendering pipeline
+ * (batch writes, flicker filter, chunked writes, local echo), terminal controls (clear, font, resize),
+ * and directory input.
+ *
+ * @mixin Extends ReverieApp.prototype via Object.assign
+ * @dependency app.js (ReverieApp class, this.terminal, this.fitAddon, this.sessions)
+ * @dependency constants.js (DEC_SYNC_STRIP_RE, OSC52_STRIP_RE, OSC52_DEDUPE_MS, TIMING constants)
+ * @dependency mobile-handlers.js (MobileDetection)
+ * @dependency vendor/xterm.js, vendor/xterm-addon-fit.js, vendor/xterm-addon-webgl.js
+ * @dependency vendor/xterm-zerolag-input.js (LocalEchoOverlay)
+ * @loadorder 7 of 15 — loaded after app.js, before respawn-ui.js
+ */
+
+(function (global) {
+  const TERMINAL_QUERY_RESPONSE_PATTERN = /^\x1b\[[\?>=]?[\d;]*[cnR]$/;
+  const TERMINAL_OSC_RESPONSE_PATTERN = /^\x1b\][\d;]*[^\x07\x1b]*(?:\x07|\x1b\\)$/;
+  // Pointer and focus reports xterm emits through onData on the terminal's OWN
+  // initiative, with no key pressed: SGR mouse (DECSET 1006, also 1016), legacy
+  // X10 mouse (DECSET 1000 — three raw bytes after CSI M) and focus in/out
+  // (DECSET 1004). They are not query REPLIES, so the query-response filter
+  // above does not match them, and they must keep reaching the PTY. What they
+  // must NOT do is stand in for a keystroke: see isTerminalFocusOrMouseReport.
+  const MOUSE_SGR_REPORT_PATTERN = /^\x1b\[<\d+;\d+;\d+[Mm]$/;
+  const MOUSE_X10_REPORT_PATTERN = /^\x1b\[M[\s\S]{3}$/;
+  const FOCUS_REPORT_PATTERN = /^\x1b\[[IO]$/;
+  // Grace window after a manual scroll-up gesture during which sticky-scroll is
+  // suppressed, so high-frequency Codex status redraws don't snap the viewport
+  // back to the bottom while the user is inspecting earlier output.
+  const USER_SCROLL_STICKY_SUPPRESS_MS = 1500;
+  // Mobile browsers synthesize trusted mouse events after touchend. During this
+  // short window, only the app's synthetic tap-to-position mouse event should
+  // reach xterm.
+  const TOUCH_COMPAT_MOUSE_SUPPRESS_MS = 450;
+  // Finger travel (px) still counted as a tap rather than a scroll. Shared by
+  // the terminal's own touch handling (TAP_THRESHOLD, initTerminal) and the
+  // keyboard-dismiss handler (_installMobileKeyboardDismiss), which MUST agree:
+  // a gesture the terminal treats as a scroll but the dismiss handler treats as
+  // a tap would close the keyboard mid-scroll and drop the composer.
+  const MOBILE_KEYBOARD_DISMISS_TAP_SLOP = 8;
+  // Hold this long, finger still, before a press becomes a text selection.
+  //
+  // ⚠️ It must fire well BEFORE the platform's own long-press threshold (~500ms on
+  // Android), not just under it: the guards this gesture installs are armed when it
+  // fires, and at 450ms they were still being armed as Chrome ran its own handling
+  // — which focuses the nearest editable element, so the keyboard shot up over the
+  // selection the moment it appeared. 350ms is still far above a tap (~100-150ms).
+  const TOUCH_SELECT_LONG_PRESS_MS = 350;
+  // How long after a selection gesture the terminal input stays un-focusable. Long
+  // enough to cover the platform's long-press handling and the compatibility events
+  // that trail a touchend; short and self-expiring, so a stuck flag can never leave
+  // the keyboard unreachable.
+  const TOUCH_SELECT_FOCUS_GUARD_MS = 800;
+  // Regions where a tap must NOT dismiss the on-screen keyboard
+  // (_installMobileKeyboardDismiss). Two groups: anything that is about to take
+  // focus itself, and the accessory bar, which is built to be used while the
+  // keyboard is open.
+  // ⚠️ A roving-tabindex widget parks every item but one at tabindex=-1, so the
+  // `[tabindex]` arm cannot see its items: the grouped tab rail's rows and
+  // headers are listed by role instead, or tapping one would drop the keyboard.
+  const MOBILE_KEYBOARD_DISMISS_EXEMPT_SELECTOR = [
+    'input',
+    'textarea',
+    'select',
+    'button',
+    'a[href]',
+    '[contenteditable=""]',
+    '[contenteditable="true"]',
+    '[tabindex]:not([tabindex="-1"])',
+    '[role="treeitem"]',
+    '.keyboard-accessory-bar',
+    '.path-picker-overlay',
+  ].join(',');
+  // Escape sequences occupy no terminal cells, so they must come out before a
+  // captured line's WIDTH can be measured (_estimateReplayRows). Covers OSC,
+  // CSI, charset designators and the short escapes tmux emits; deliberately
+  // approximate — this feeds a size comparison, not a renderer.
+  // eslint-disable-next-line no-control-regex
+  const REPLAY_ESCAPE_RE =
+    /\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b\[[0-9;?<>=!]*[ -/]*[@-~]|\x1b[()#][0-9A-Za-z]|\x1b[=>78M]/g;
+  // PageUp / PageDown as xterm.js encodes them. Used as the LAST-RESORT scroll
+  // gesture for a CLI whose local buffer holds no scrollback
+  // (_maybePageCliTranscript).
+  const KEY_PAGE_UP = '\x1b[5~';
+  const KEY_PAGE_DOWN = '\x1b[6~';
+  // Wheel/touch travel (in lines) that adds up to one PageUp/PageDown. Half a
+  // screen rather than a full one: the page key always jumps a whole screen, so
+  // a 1:1 mapping made the fallback feel unreachably slow with a discrete mouse
+  // wheel (Firefox reports 3 lines a notch → 12 notches per page). Overshooting
+  // the finger is the right trade against a gesture that otherwise does nothing.
+  const PAGE_KEY_SCREEN_FRACTION = 0.5;
+  // Bound on page keys emitted from one gesture batch, mirroring the SGR tick
+  // cap: a fling must not build a backlog that keeps paging after it stops.
+  const PAGE_KEY_MAX_PER_BATCH = 3;
+  // A page-key scroll event after this much quiet, or in the opposite direction,
+  // starts a NEW gesture, and the first event of a gesture pages at once rather
+  // than waiting for half a screen of travel (a trackpad flick never got there).
+  const PAGE_KEY_GESTURE_GAP_MS = 150;
+  // ...but not for sub-row jitter (0.1 row, ~2px)...
+  const PAGE_KEY_MIN_START_ROWS = 0.1;
+  // ...and only for a trackpad-sized opening event. A mouse-wheel notch (100px,
+  // 4 rows) accumulates toward half a screen as before; paging at once on it made
+  // slow notches, each its own gesture past the gap, page a full screen apiece.
+  const PAGE_KEY_IMMEDIATE_MAX_ROWS = 2;
+  // A pre-paid page's debt outlives the gesture gap for this long when the next
+  // event goes the SAME way, so slow small wheel ticks (40 px every 250 ms, a
+  // Firefox 1-line notch) pay it back instead of each pre-paying a page of its own.
+  const PAGE_KEY_DEBT_MS = 1000;
+
+  // Wheel delta → scroll lines (fractional), for a terminal `rows` tall. The
+  // body of the primary pane's _wheelScrollLinesFloat (see its comment for the
+  // Shift-axis trap and the deltaMode units), pure so a TerminalTile pages with
+  // the same math against its own row count.
+  function wheelDeltaLines(ev, rows) {
+    const delta = ev.shiftKey && Math.abs(ev.deltaX) > Math.abs(ev.deltaY) ? ev.deltaX : ev.deltaY;
+    if (!delta) return 0;
+    return ev.deltaMode === 1 // DOM_DELTA_LINE (Firefox mouse wheel)
+      ? delta
+      : ev.deltaMode === 2 // DOM_DELTA_PAGE
+        ? delta * (rows || 24)
+        : delta / 25; // DOM_DELTA_PIXEL (Chrome/WebKit, and every trackpad)
+  }
+
+  // The same travel rounded to whole lines for the SGR wheel reports: a pure
+  // horizontal swipe is 0 (nothing to send), and anything else moves at least
+  // one line, so the small pixel deltas of a precision touchpad still scroll.
+  // The body of the primary pane's _wheelScrollLines.
+  function wheelDeltaWholeLines(ev, rows) {
+    const lines = wheelDeltaLines(ev, rows);
+    if (!lines) return 0;
+    return Math.round(lines) || (lines > 0 ? 1 : -1);
+  }
+
+  // Ticks one gesture batch may report: Claude applies its own scroll-speed
+  // multiplier and acceleration on top, so a bigger batch only overshoots.
+  const SGR_WHEEL_MAX_TICKS = 5;
+
+  // Whole wheel lines → SGR wheel reports at a 1-based cell `pos` ({ col, row },
+  // live-screen relative): button 64 per line up, 65 per line down, capped at
+  // SGR_WHEEL_MAX_TICKS. '' when there is nothing to send. The encoding of the
+  // primary pane's _sendSyntheticSgrWheel, pure so a TerminalTile forwards
+  // byte-identical reports to its own session.
+  function sgrWheelReports(lines, pos) {
+    if (!lines || !pos) return '';
+    const btn = lines < 0 ? 64 : 65;
+    const ticks = Math.min(Math.abs(lines), SGR_WHEEL_MAX_TICKS);
+    return `\x1b[<${btn};${pos.col};${pos.row}M`.repeat(ticks);
+  }
+
+  // Rows of travel per page key for a terminal `rows` tall (half a screen).
+  function pageKeyRows(rows) {
+    return Math.max(2, Math.round((rows || 24) * PAGE_KEY_SCREEN_FRACTION));
+  }
+
+  // Gesture travel → PageUp/PageDown keys for a terminal `rows` tall: adds
+  // `lines` to the sub-page travel already `pending`, and returns the travel
+  // left over plus the keys to send ('' below one page). The plain accumulation
+  // step of pageKeysForGesture below.
+  function pageKeysForTravel(pending, lines, rows) {
+    const perPage = pageKeyRows(rows);
+    const total = (pending || 0) + lines;
+    const pages = Math.trunc(total / perPage);
+    const keys = pages
+      ? (pages < 0 ? KEY_PAGE_UP : KEY_PAGE_DOWN).repeat(Math.min(Math.abs(pages), PAGE_KEY_MAX_PER_BATCH))
+      : '';
+    return { pending: total - pages * perPage, keys };
+  }
+
+  // One wheel or touch event of a hollow-pane gesture → the PageUp/PageDown keys
+  // to send, for a terminal `rows` tall, at time `now` (ms). Pure: `state` is
+  // the previous call's returned state (null or {} for a fresh pane), and the
+  // caller keeps it, so the primary pane and every TerminalTile page with the
+  // same gesture rules through their own state:
+  //  - a pinch (`ctrlKey`, Chrome's trackpad-pinch wheel) and a mostly
+  //    horizontal swipe (both deltas present, |deltaX| > |deltaY|) send nothing
+  //    and leave the state alone (the caller still consumes them);
+  //  - a NEW gesture starts on the first event, on a different touch contact
+  //    (`ev.touchId`, set by the touch paths per touchstart and carried by that
+  //    contact's momentum; a wheel event has none, so wheel and touch never
+  //    share a gesture), or, for events outside any contact, after quiet:
+  //    PAGE_KEY_GESTURE_GAP_MS, stretched to PAGE_KEY_DEBT_MS while a pre-paid
+  //    page is still owed in the same direction. One contact is never split by
+  //    time, so a slow drag (one line per 170 ms) is one gesture;
+  //  - a new gesture's trackpad-sized opening event (at least
+  //    PAGE_KEY_MIN_START_ROWS, under PAGE_KEY_IMMEDIATE_MAX_ROWS) pages AT ONCE,
+  //    pre-paid: the half screen it skipped is owed back by the rest of the
+  //    gesture, so the rate stays one page per half screen. A debt left by a
+  //    pre-paid page dies with its gesture;
+  //  - a direction change inside a gesture (a reversal within the gap, or
+  //    within the same contact) drops a pre-paid debt and accumulates, never
+  //    pre-paying, so a +/-3 px trackpad wobble cannot page back and forth;
+  //  - everything else, a wheel notch included, accumulates through
+  //    pageKeysForTravel, carried across notches.
+  // Returns { state, keys } with keys '' when nothing is due.
+  function pageKeysForGesture(state, ev, lines, rows, now) {
+    const prev = state || {};
+    if (ev?.ctrlKey) return { state: prev, keys: '' };
+    const dx = Math.abs(ev?.deltaX || 0);
+    const dy = Math.abs(ev?.deltaY || 0);
+    if (dx && dy && dx > dy) return { state: prev, keys: '' };
+    const perPage = pageKeyRows(rows);
+    const dir = lines < 0 ? -1 : 1;
+    const touchId = typeof ev?.touchId === 'number' ? ev.touchId : null;
+    const prevTouchId = typeof prev.touchId === 'number' ? prev.touchId : null;
+    let pending = prev.pending || 0;
+    let prepaid = !!prev.prepaid;
+    const reversed = dir !== prev.dir;
+    let gestureStart;
+    if (typeof prev.lastAt !== 'number' || touchId !== prevTouchId) {
+      gestureStart = true;
+    } else if (touchId !== null) {
+      gestureStart = false; // the same contact, however long it has been
+    } else {
+      const quiet = now - prev.lastAt;
+      gestureStart = quiet > (prepaid && !reversed ? PAGE_KEY_DEBT_MS : PAGE_KEY_GESTURE_GAP_MS);
+    }
+    if (gestureStart || reversed) {
+      // A pre-paid debt belongs to its gesture and its direction.
+      if (prepaid) pending = 0;
+      prepaid = false;
+    }
+    if (gestureStart) {
+      const size = Math.abs(lines);
+      if (size >= PAGE_KEY_MIN_START_ROWS && size < Math.min(perPage, PAGE_KEY_IMMEDIATE_MAX_ROWS)) {
+        // Pre-pay one page; the skipped travel is owed back (pending carries the opposite sign).
+        return {
+          state: { pending: lines - dir * perPage, lastAt: now, dir, prepaid: true, touchId },
+          keys: dir < 0 ? KEY_PAGE_UP : KEY_PAGE_DOWN,
+        };
+      }
+    }
+    const step = pageKeysForTravel(pending, lines, rows);
+    // A debt carries the sign opposite to its direction; once the travel reaches
+    // or crosses zero it is repaid, and what is left is plain travel (so the
+    // one-second debt lifetime no longer applies).
+    if (prepaid && step.pending * dir >= 0) prepaid = false;
+    return { state: { pending: step.pending, lastAt: now, dir, prepaid, touchId }, keys: step.keys };
+  }
+
+  const TUI_PROMPT_DEFAULT_ROWS_FROM_BOTTOM = 4;
+  // Composer navigation keys as xterm.js encodes user keystrokes: plain and
+  // modified arrows (CSI A-D, CSI 1;mA-D, SS3 A-D), Home/End (CSI H/F, SS3
+  // H/F, CSI 1~/4~), Insert/Delete/PgUp/PgDn (CSI 2~/3~/5~/6~, optional
+  // modifier). Deliberately EXCLUDES terminal query responses that also
+  // arrive via onData (DA `\x1b[?1;2c`, CPR `\x1b[12;34R`) and function
+  // keys, so only genuine cursor/editing keys trigger the local-echo flush.
+  // eslint-disable-next-line no-control-regex
+  const COMPOSER_NAV_KEY_PATTERN = /^\x1b(?:\[(?:[ABCDHF]|1;[2-8][ABCDHF]|[1-8](?:;[2-8])?~)|O[ABCDHF])$/;
+  // Prefix xterm.js puts on terminal.paste() payloads while the application
+  // has bracketed-paste mode (DECSET 2004) enabled. Codex, Claude Code and
+  // tmux all enable it, so browser pastes arrive as one onData chunk of
+  // `\x1b[200~<text>\x1b[201~`.
+  const BRACKETED_PASTE_START = '\x1b[200~';
+
+  function isComposerNavKey(data) {
+    return COMPOSER_NAV_KEY_PATTERN.test(data);
+  }
+
+  // Codex composer-row signature, measured against codex-cli 0.147.0
+  // (docs/predictive-echo-plan.md): the composer's cursor row starts with
+  // "› " (U+203A + space) when empty (placeholder text), while typing, and
+  // while the slash picker filters. Modal rows ("Press enter to continue")
+  // and wrapped continuation rows (2-space indent) do NOT match — that is
+  // the ghost eliminator: no prediction is ever painted there.
+  const CODEX_COMPOSER_ROW_RE = /^› /;
+
+  // Classify onData for the predictive echo hook. Terminal query responses
+  // never reach this (suppressed earlier in onData); bracketed pastes, nav
+  // keys and mouse reports all start with ESC => 'clear'.
+  function classifyPredictInput(data) {
+    const cps = Array.from(data); // astral-safe
+    if (cps.length === 1) {
+      const cp = cps[0].codePointAt(0);
+      if (cp === 0x7f) return 'backspace';
+      if (cp >= 0x20) return 'char'; // incl. a single astral emoji
+      return 'clear'; // \r \n \t \x03, bare ESC, ...
+    }
+    if (data.charCodeAt(0) === 0x1b) return 'clear'; // ESC seq: nav, paste, mouse SGR
+    if (data.charCodeAt(0) >= 0x20) return 'text'; // multi-char printable (plain paste,
+    return 'clear'; //   ZWJ emoji cluster): wire only, no visual
+  }
+
+  // Predictive-echo gate: predict only while the cursor sits on the codex
+  // composer row. cursorY is baseY-relative (xterm API), hence baseY + cursorY.
+  function isCodexComposerRow(terminal) {
+    try {
+      const buf = terminal.buffer.active;
+      const line = buf.getLine(buf.baseY + buf.cursorY);
+      return !!line && CODEX_COMPOSER_ROW_RE.test(line.translateToString(true));
+    } catch {
+      return false;
+    }
+  }
+
+  // Screen row of the cursor, for the local-echo prompt finders: xterm's cursorY is
+  // baseY-relative, so a viewport parked above the bottom shifts it. Null when off screen.
+  function cursorViewportRow(terminal) {
+    try {
+      const buf = terminal.buffer.active;
+      const row = buf.baseY + (buf.cursorY || 0) - buf.viewportY;
+      return row >= 0 && row < terminal.rows ? row : null;
+    } catch {
+      return null;
+    }
+  }
+
+  function isTerminalQueryResponse(data) {
+    return TERMINAL_QUERY_RESPONSE_PATTERN.test(data) || TERMINAL_OSC_RESPONSE_PATTERN.test(data);
+  }
+
+  function shouldSuppressTerminalQueryResponse(data) {
+    return isTerminalQueryResponse(data);
+  }
+
+  /**
+   * Did the terminal generate this chunk itself, rather than a human pressing a
+   * key? True for mouse and focus reports (issue #262).
+   *
+   * Consumers that treat one onData chunk as "the next keystroke" must skip
+   * these. The one-shot Ctrl modifier is why this exists, and the MOUSE half is
+   * the live one: a shell session keeps the narrow scrollback strip, so mouse
+   * DECSETs reach the browser and anything the user runs that enables tracking
+   * (vim, htop, less) turns a tap into `\x1b[<0;31;23M`. Measured in a real
+   * shell session: with Ctrl armed, one tap on the terminal spent it silently.
+   *
+   * Focus reports are the same class and cost nothing to cover, but they cannot
+   * reach xterm today: `FOCUS_ESCAPE_FILTER` in session.ts strips `\x1b[?1004h`
+   * (and the reports themselves) from every PTY read, so `sendFocusMode` never
+   * turns on. Were that filter to go, the Ctrl button would spend the modifier
+   * on its OWN refocus — the bar refocuses the terminal after every key so the
+   * keyboard stays open, and that refocus emits `\x1b[I`.
+   */
+  function isTerminalFocusOrMouseReport(data) {
+    return (
+      FOCUS_REPORT_PATTERN.test(data) || MOUSE_SGR_REPORT_PATTERN.test(data) || MOUSE_X10_REPORT_PATTERN.test(data)
+    );
+  }
+
+  // Per-skin xterm.js palettes. The 'daylight-blue' object equals the legacy hardcoded
+  // theme, so default behavior is unchanged. Shared at module scope and exported on the
+  // global so both terminal-ui.js (main terminal) and panels-ui.js (teammate terminals,
+  // a separate IIFE) can read the current skin's palette.
+  //
+  // ⚠️ The selection key is `selectionBackground`, xterm's name for it since v5 (#360).
+  // An ITheme is a plain object handed straight to xterm, so an unknown key is not an
+  // error, it is silently dropped: every palette here carried `selection`, so every skin
+  // drew xterm's built-in default instead, rgba(255,255,255,0.3). On the four light skins
+  // that is white at 30% over a near-white background, a delta of about 3/255 — the
+  // highlight was effectively invisible, which is what a long-press selection that
+  // "did nothing" actually looked like. A key only works here if xterm knows its name;
+  // test/skin-themes.test.ts pins the name AND that the blend stays visible.
+  const REVERIE_XTERM_THEMES = {
+    og: { background: '#0d0d0d', foreground: '#e0e0e0', cursor: '#e0e0e0', cursorAccent: '#0d0d0d', selectionBackground: 'rgba(255,255,255,0.3)', black: '#0d0d0d', red: '#ff6b6b', green: '#51cf66', yellow: '#ffd43b', blue: '#339af0', magenta: '#cc5de8', cyan: '#22b8cf', white: '#e0e0e0', brightBlack: '#495057', brightRed: '#ff8787', brightGreen: '#69db7c', brightYellow: '#ffe066', brightBlue: '#5c7cfa', brightMagenta: '#da77f2', brightCyan: '#66d9e8', brightWhite: '#ffffff' },
+    'daylight-green': { background: '#161b23', foreground: '#dfe6ef', cursor: '#2fd3aa', cursorAccent: '#161b23', selectionBackground: 'rgba(47,211,170,0.22)', black: '#161b23', red: '#ff8585', green: '#34d8a0', yellow: '#f0c25a', blue: '#5cc6e8', magenta: '#c79af2', cyan: '#2bcbbb', white: '#dfe6ef', brightBlack: '#5b6675', brightRed: '#ffa0a0', brightGreen: '#5fe6b8', brightYellow: '#ffd884', brightBlue: '#82d4ee', brightMagenta: '#d6b3f7', brightCyan: '#5ee0d4', brightWhite: '#f3f6fa' },
+    'daylight-blue': { background: '#161b23', foreground: '#dfe6ef', cursor: '#38b6f0', cursorAccent: '#161b23', selectionBackground: 'rgba(56,182,240,0.22)', black: '#161b23', red: '#ff8585', green: '#34d8a0', yellow: '#f0c25a', blue: '#5cc6e8', magenta: '#c79af2', cyan: '#2bcbbb', white: '#dfe6ef', brightBlack: '#5b6675', brightRed: '#ffa0a0', brightGreen: '#5fe6b8', brightYellow: '#ffd884', brightBlue: '#82d4ee', brightMagenta: '#d6b3f7', brightCyan: '#5ee0d4', brightWhite: '#f3f6fa' },
+    'paper-gray': { background: '#f6f8fa', foreground: '#1f2328', cursor: '#0969da', cursorAccent: '#ffffff', selectionBackground: 'rgba(9,105,218,0.2)', black: '#24292f', red: '#cf222e', green: '#1a7f37', yellow: '#9a6700', blue: '#0969da', magenta: '#8250df', cyan: '#1b7c83', white: '#59636e', brightBlack: '#6e7781', brightRed: '#a40e26', brightGreen: '#116329', brightYellow: '#7d4e00', brightBlue: '#0550ae', brightMagenta: '#6639ba', brightCyan: '#116b75', brightWhite: '#1f2328' },
+    'solarized-light': { background: '#fdf6e3', foreground: '#586e75', cursor: '#147ba3', cursorAccent: '#fdf6e3', selectionBackground: 'rgba(38,139,210,0.2)', black: '#eee8d5', red: '#dc322f', green: '#758600', yellow: '#9b7800', blue: '#147ba3', magenta: '#d33682', cyan: '#2a9189', white: '#073642', brightBlack: '#93a1a1', brightRed: '#cb4b16', brightGreen: '#657b83', brightYellow: '#586e75', brightBlue: '#268bd2', brightMagenta: '#6c71c4', brightCyan: '#2aa198', brightWhite: '#002b36' },
+    'catppuccin-latte': { background: '#eff1f5', foreground: '#4c4f69', cursor: '#1e66f5', cursorAccent: '#ffffff', selectionBackground: 'rgba(30,102,245,0.18)', black: '#5c5f77', red: '#d20f39', green: '#3b8f2b', yellow: '#a86605', blue: '#1e66f5', magenta: '#8839ef', cyan: '#177f86', white: '#6c6f85', brightBlack: '#7c7f93', brightRed: '#b50930', brightGreen: '#2f7622', brightYellow: '#8b5604', brightBlue: '#174fbf', brightMagenta: '#6f2bc5', brightCyan: '#116b71', brightWhite: '#4c4f69' },
+    'rose-pine-dawn': { background: '#faf4ed', foreground: '#575279', cursor: '#286983', cursorAccent: '#fffaf3', selectionBackground: 'rgba(40,105,131,0.2)', black: '#575279', red: '#b4637a', green: '#286983', yellow: '#96681f', blue: '#477f91', magenta: '#907aa9', cyan: '#3f7f8b', white: '#6e6a86', brightBlack: '#797593', brightRed: '#984d66', brightGreen: '#1f5266', brightYellow: '#7d5417', brightBlue: '#386b7c', brightMagenta: '#765f90', brightCyan: '#326b76', brightWhite: '#575279' },
+  };
+  const REVERIE_LIGHT_SKINS = new Set(['paper-gray', 'solarized-light', 'catppuccin-latte', 'rose-pine-dawn']);
+  function currentSkin() {
+    return (typeof document !== 'undefined' && document.documentElement.dataset.skin) || 'daylight-blue';
+  }
+  function currentXtermTheme() {
+    const skin = currentSkin();
+    return REVERIE_XTERM_THEMES[skin] || REVERIE_XTERM_THEMES['daylight-blue'];
+  }
+  function currentSkinIsLight(skin = currentSkin()) {
+    return REVERIE_LIGHT_SKINS.has(skin);
+  }
+
+  global.ReverieTerminalInput = {
+    isTerminalQueryResponse,
+    shouldSuppressTerminalQueryResponse,
+    isTerminalFocusOrMouseReport,
+    isComposerNavKey,
+    classifyPredictInput,
+    isCodexComposerRow,
+    cursorViewportRow,
+    CODEX_COMPOSER_ROW_RE,
+    BRACKETED_PASTE_START,
+    USER_SCROLL_STICKY_SUPPRESS_MS,
+    TOUCH_COMPAT_MOUSE_SUPPRESS_MS,
+    REPLAY_ESCAPE_RE,
+    KEY_PAGE_UP,
+    KEY_PAGE_DOWN,
+    PAGE_KEY_SCREEN_FRACTION,
+    PAGE_KEY_MAX_PER_BATCH,
+    wheelDeltaLines,
+    wheelDeltaWholeLines,
+    SGR_WHEEL_MAX_TICKS,
+    sgrWheelReports,
+    pageKeysForTravel,
+    pageKeysForGesture,
+    PAGE_KEY_GESTURE_GAP_MS,
+    PAGE_KEY_MIN_START_ROWS,
+    PAGE_KEY_IMMEDIATE_MAX_ROWS,
+    PAGE_KEY_DEBT_MS,
+    TUI_PROMPT_DEFAULT_ROWS_FROM_BOTTOM,
+    MOBILE_KEYBOARD_DISMISS_EXEMPT_SELECTOR,
+    MOBILE_KEYBOARD_DISMISS_TAP_SLOP,
+    TOUCH_SELECT_LONG_PRESS_MS,
+    TOUCH_SELECT_FOCUS_GUARD_MS,
+  };
+  global.REVERIE_XTERM_THEMES = REVERIE_XTERM_THEMES;
+  global.reverieCurrentXtermTheme = currentXtermTheme;
+  global.reverieCurrentSkinIsLight = currentSkinIsLight;
+})(window);
+
+Object.assign(ReverieApp.prototype, {
+  // ═══════════════════════════════════════════════════════════════
+  // Terminal Setup — xterm.js config and input handling
+  // ═══════════════════════════════════════════════════════════════
+
+  _destroyKeyCode229Recovery() {
+    try {
+      this._keyCode229Recovery?.destroy?.();
+    } catch {
+      // Recovery is optional; terminal replacement must continue.
+    }
+    this._keyCode229Recovery = null;
+  },
+
+  _destroyMobileImePreview() {
+    try {
+      this._mobileImePreview?.destroy?.();
+    } catch {
+      // The preview is visual-only; terminal replacement must continue.
+    }
+    this._mobileImePreview = null;
+    this._mobileImePreviewSessionId = null;
+    this._mobileImeCommitOutputSeq = null;
+    try {
+      this._mobileImePreviewNode?.remove?.();
+    } catch {
+      // Best-effort node cleanup only.
+    }
+    try {
+      this._mobileImePreviewHelpers?.classList?.remove('reverie-ime-preview-owned');
+    } catch {
+      // Best-effort ownership cleanup only.
+    }
+    this._mobileImePreviewNode = null;
+    this._mobileImePreviewHelpers = null;
+    try {
+      if (this._mobileImePreviewOfflineHandler) {
+        window.removeEventListener('offline', this._mobileImePreviewOfflineHandler);
+      }
+      if (this._mobileImePreviewPagehideHandler) {
+        window.removeEventListener('pagehide', this._mobileImePreviewPagehideHandler);
+      }
+    } catch {
+      // Best-effort listener cleanup only.
+    }
+    this._mobileImePreviewOfflineHandler = null;
+    this._mobileImePreviewPagehideHandler = null;
+  },
+
+  /**
+   * iOS Safari IME preview (mobile-ime-preview.js). WebKit does not show the
+   * text an IME is composing inside the terminal, so the user types blind.
+   *
+   * Two homes, chosen per render:
+   * - Local echo on: typed text sits in the LocalEchoOverlay and the PTY
+   *   cursor stays at the prompt start, under the overlay's opaque text (z 7,
+   *   `.xterm-screen`). So the overlay draws the composition itself, as an
+   *   underlined tail after its pending text (`setComposition`).
+   * - Otherwise (a shell, or the overlay could not place it): a span inside
+   *   `.xterm-helpers`, positioned by the same --xterm-helper-left/top vars as
+   *   the helper textarea, which follow the PTY cursor.
+   *
+   * Visual only: nothing here touches the input path, and every failure
+   * leaves no DOM behind.
+   */
+  _initMobileImePreview() {
+    this._destroyMobileImePreview();
+    let preview = null;
+    let helpers = null;
+    try {
+      if (typeof MobileImePreview === 'undefined' || !MobileImePreview?.isIosWebKitTouch?.()) return;
+      const textarea = this.terminal?.textarea;
+      helpers = this.terminal?.element?.querySelector?.('.xterm-helpers');
+      if (!textarea || !helpers) return;
+
+      preview = document.createElement('span');
+      this._mobileImePreviewNode = preview;
+      this._mobileImePreviewHelpers = helpers;
+      preview.className = 'reverie-ime-preview';
+      preview.setAttribute('aria-hidden', 'true');
+      preview.hidden = true;
+      helpers.appendChild(preview);
+      const syncPreviewTypography = () => {
+        try {
+          const compositionView =
+            helpers.querySelector?.('.composition-view') || this.terminal?.element?.querySelector?.('.composition-view');
+          if (!compositionView || !preview.style) return;
+          const style = typeof getComputedStyle === 'function' ? getComputedStyle(compositionView) : compositionView.style;
+          for (const property of ['fontFamily', 'fontSize', 'fontWeight', 'fontStyle', 'lineHeight', 'height']) {
+            const value = style?.[property] || compositionView.style?.[property];
+            if (value) preview.style[property] = value;
+          }
+          const theme = this.terminal?.options?.theme;
+          let foreground = theme?.foreground;
+          let background = theme?.background;
+          if (!foreground || !background) {
+            try {
+              const current = window.reverieCurrentXtermTheme?.();
+              foreground = foreground || current?.foreground;
+              background = background || current?.background;
+            } catch {
+              // Theme lookup is best-effort; retain the safe terminal fallback.
+            }
+          }
+          preview.style.color = foreground || '#e0e0e0';
+          // Opaque, like xterm's own composition view, so the preview does not
+          // overprint whatever sits at the cursor (a dim composer placeholder).
+          preview.style.backgroundColor = background || '#0d0d0d';
+        } catch {
+          // Typography matching is visual-only and must not block input.
+        }
+      };
+      // The overlay only when it is what shows typed text right now (local echo
+      // on, and not handed back to plain PTY echo by a composer nav key).
+      const localEchoOverlay = () =>
+        this._localEchoEnabled && !this._echoPassthroughSessions?.has(this.activeSessionId)
+          ? this._localEchoOverlay || null
+          : null;
+      const clearOverlayComposition = () => {
+        try {
+          if (this._localEchoOverlay?.composition) this._localEchoOverlay.setComposition('');
+        } catch {}
+      };
+      const hideSpan = () => {
+        try {
+          preview.hidden = true;
+        } catch {}
+        try {
+          preview.textContent = '';
+        } catch {}
+        try {
+          delete preview.dataset.phase;
+        } catch {}
+        try {
+          helpers.classList.remove('reverie-ime-preview-owned');
+        } catch {}
+      };
+      const clearPreview = () => {
+        clearOverlayComposition();
+        hideSpan();
+      };
+      const controller = MobileImePreview.create({
+        textarea,
+        // An ancestor of the textarea: its capture-phase keydown listener runs
+        // before xterm's capture listener on the textarea, which finalizes the
+        // composition and emits the commit synchronously.
+        keydownTarget: this.terminal.element,
+        render: ({ text, phase }) => {
+          try {
+            const overlay = localEchoOverlay();
+            if (overlay && typeof overlay.setComposition === 'function') {
+              overlay.setComposition(text);
+              // No prompt found = nothing drawn: fall back to the span.
+              if (!text || overlay.state?.visible) {
+                hideSpan();
+                helpers.classList.toggle('reverie-ime-preview-owned', !!text);
+                return;
+              }
+              overlay.setComposition('');
+            } else {
+              clearOverlayComposition();
+            }
+            syncPreviewTypography();
+            preview.textContent = text;
+            preview.dataset.phase = phase;
+            preview.hidden = !text;
+            helpers.classList.toggle('reverie-ime-preview-owned', !!text);
+          } catch {
+            clearPreview();
+          }
+        },
+        clear: clearPreview,
+      });
+      this._mobileImePreview = controller;
+      this._mobileImePreviewSessionId = this.activeSessionId;
+
+      // Offline and pagehide only reset: initTerminal() runs once per page
+      // load, so destroying on pagehide would leave the preview off for good
+      // after a back-forward cache restore (iOS Safari keeps pages there).
+      this._mobileImePreviewOfflineHandler = () => {
+        try {
+          this._mobileImePreview?.reset?.();
+        } catch {
+          // Disconnect cleanup is visual-only.
+        }
+      };
+      this._mobileImePreviewPagehideHandler = this._mobileImePreviewOfflineHandler;
+      window.addEventListener('offline', this._mobileImePreviewOfflineHandler);
+      window.addEventListener('pagehide', this._mobileImePreviewPagehideHandler);
+    } catch {
+      this._destroyMobileImePreview();
+    }
+  },
+
+  /**
+   * Tell the IME preview about a chunk xterm emitted through onData. Returns
+   * true when the chunk is the IME's committed text, in which case the preview
+   * holds it (phase 'committed') until something else shows it. Never throws.
+   */
+  _consumeMobileImeTerminalData(data) {
+    let isImeCommit = false;
+    try {
+      isImeCommit = this._mobileImePreview?.consumeTerminalData?.(data) === true;
+    } catch {
+      // The preview is visual-only; normal terminal input must continue.
+    }
+    // Output accepted from here on can carry the echo of this commit.
+    if (isImeCommit) this._mobileImeCommitOutputSeq = this._terminalOutputSeq || 0;
+    return isImeCommit;
+  },
+
+  /**
+   * Clear a committed IME preview once terminal output accepted AFTER the
+   * commit has been parsed. `flushedOutputSeq` is the output sequence a fully
+   * written flush covered (null when part of it was deferred), so output that
+   * was already queued before the commit can never clear it early.
+   */
+  _noteMobileImeAuthoritativeOutput(flushedOutputSeq, sessionId) {
+    try {
+      const commitSeq = this._mobileImeCommitOutputSeq;
+      if (commitSeq === null || commitSeq === undefined || flushedOutputSeq === null) return;
+      if (sessionId !== this.activeSessionId || !(flushedOutputSeq > commitSeq)) return;
+      this._mobileImeCommitOutputSeq = null;
+      this._mobileImePreview?.noteAuthoritativeOutput?.();
+    } catch {
+      // Authoritative output is never delayed or consumed by the preview.
+    }
+  },
+
+  /**
+   * The local echo overlay has just taken a committed IME chunk through the
+   * ordinary printable/paste branch, so it now shows the text: release the
+   * preview instead of waiting for terminal output.
+   */
+  _transferMobileImeCommitToLocalEcho() {
+    this._mobileImeCommitOutputSeq = null;
+    try {
+      this._mobileImePreview?.completeCommit?.({ predicted: true });
+    } catch {
+      // Ownership transfer is visual-only.
+    }
+  },
+
+  initTerminal() {
+    // Load scrollback setting from localStorage, treating DEFAULT_SCROLLBACK as a floor
+    // so users who picked up the previous (smaller) default get the new minimum on upgrade.
+    const stored = parseInt(localStorage.getItem('reverie-scrollback'));
+    const scrollback = Number.isFinite(stored) && stored > 0 ? Math.max(stored, DEFAULT_SCROLLBACK) : DEFAULT_SCROLLBACK;
+
+    this._destroyKeyCode229Recovery();
+    const fontSettings = this.loadAppSettingsFromStorage?.() || {};
+    this.terminal = new Terminal({
+      theme: { ...window.reverieCurrentXtermTheme() },
+      fontFamily: window.ReverieTerminalFont.resolve(fontSettings.terminalFontFamily),
+      // Both weight slots, each falling back to xterm's own default for that
+      // slot, so an untouched install renders exactly as it always has.
+      ...window.ReverieTerminalFont.resolveWeights(fontSettings),
+      // Use smaller font on mobile to fit more columns (prevents wrapping of Claude's status line)
+      fontSize: MobileDetection.getDeviceType() === 'mobile' ? 10 : 14,
+      lineHeight: 1.2,
+      cursorBlink: false,
+      cursorStyle: 'block',
+      minimumContrastRatio: window.reverieCurrentSkinIsLight() ? 4.5 : 1,
+      scrollback: scrollback,
+      allowTransparency: true,
+      allowProposedApi: true,
+    });
+
+    this.fitAddon = new FitAddon.FitAddon();
+    this.terminal.loadAddon(this.fitAddon);
+
+    // SerializeAddon: lets us snapshot the xterm rendered state (viewport +
+    // scrollback + colors/attrs) when switching away from a tab and restore
+    // it on switch-back. Needed primarily for codex tabs — codex's TUI drops
+    // earlier conversation from its current frame, so replaying the server
+    // byte buffer on tab-switch shows only the latest (idle) frame. The
+    // snapshot captures what the user was actually looking at.
+    this._xtermSnapshots = new Map(); // Map<sessionId, serialized-string>
+    if (typeof SerializeAddon !== 'undefined') {
+      try {
+        this._serializeAddon = new SerializeAddon.SerializeAddon();
+        this.terminal.loadAddon(this._serializeAddon);
+      } catch (_e) {
+        /* SerializeAddon failed — snapshot/restore disabled, fallback to buffer-fetch */
+        this._serializeAddon = null;
+      }
+    }
+
+    if (typeof Unicode11Addon !== 'undefined') {
+      try {
+        const unicode11Addon = new Unicode11Addon.Unicode11Addon();
+        this.terminal.loadAddon(unicode11Addon);
+        this.terminal.unicode.activeVersion = '11';
+      } catch (_e) {
+        /* Unicode11 addon failed — default Unicode handling used */
+      }
+    }
+
+    this._installOsc52Clipboard(this.terminal);
+
+    const container = document.getElementById('terminalContainer');
+    this.terminal.open(container);
+    this._initMobileImePreview();
+    this._installMobileTapMouseGuard();
+    this._installShiftDragSelection();
+    this._installTouchSelectionFocusGuard();
+    // Focus coming back to the primary terminal ends a second pane's claim on
+    // the keyboard (see _focusedPane).
+    this.terminal.textarea?.addEventListener('focus', () => this._noteFocusedTile(null));
+
+    // Let xterm's CompositionHelper own IME key events. In particular, a
+    // non-composing keyCode 229 is how an active IME commits numbers and
+    // punctuation; returning false here would stop xterm before it can diff
+    // the helper textarea and emit the committed Unicode text.
+    this.terminal.attachCustomKeyEventHandler((ev) => {
+      try {
+        // Deliberately runs for EVERY keydown, not just keyCode 229: the
+        // controller snapshots a counter and reads nothing off the event, and
+        // the devices this exists for report `key: 'Unidentified'` with no
+        // reliable identity to gate on. Gating it would make recovery inert
+        // exactly where it is needed. Cost is one assignment.
+        this._keyCode229Recovery?.handleKeyEvent?.(ev);
+      } catch {
+        // The fallback must never interfere with xterm's canonical handler.
+      }
+      if (ev.isComposing || ev.key === 'Process' || ev.keyCode === 229) return true;
+
+      // Let the app's Alt/Option session-nav and Command Palette shortcuts reach the document keydown handler
+      // (app.js switches tabs by PHYSICAL e.code) instead of xterm injecting ESC<char> into
+      // the PTY. Mirror app.js's gate exactly — same physical codes + modifier guard — so
+      // macOS Option layouts (Option+1 -> "¡", Option+[ -> "“", Option+K -> "˚") are suppressed here too and
+      // don't leak an escape sequence into the focused terminal on every tab switch.
+      if (
+        ev.altKey &&
+        !ev.ctrlKey &&
+        !ev.shiftKey &&
+        /^(Digit[1-9]|BracketLeft|BracketRight|KeyK)$/.test(ev.code || '')
+      ) {
+        return false;
+      }
+
+      // Command palette chord (COD-153): keep it out of the PTY. The document
+      // CAPTURE handler has already opened the palette by the time xterm sees
+      // this keydown, but its preventDefault() does NOT stop xterm — without
+      // this gate Ctrl+K would ALSO write 0x0b (readline kill-line) into the
+      // live session behind the palette, truncating whatever the user had
+      // typed. Route through the registry-aware checker so a rebound or
+      // disabled palette shortcut restores normal terminal Ctrl+K.
+      if (ev.type === 'keydown' && this.shouldOpenCommandPaletteFromShortcut?.(ev)) {
+        return false;
+      }
+
+      // Tile grid chords (Ctrl+Shift+G, Alt+Shift+Arrows): the capture handler
+      // has already acted on one that applies, and its preventDefault() does not
+      // stop xterm. Every event type, and BEFORE the Shift+Enter branch below.
+      if (this.tileShortcutFor?.(ev)) return false;
+
+      // Smart copy (#211): with a selection, Ctrl+C copies it instead of sending
+      // ^C. With NO selection the branch must fall through (return true, and no
+      // preventDefault) or the interrupt key is lost, which is the whole reason
+      // the selection check runs before any registry dispatch. Ctrl+Shift+C is
+      // the explicit copy chord and never falls through: an "explicit copy" that
+      // interrupts a running agent because the selection happened to be empty is
+      // a footgun with no upside.
+      // NOTE: returning false does NOT cancel the event (xterm's _keyDown calls
+      // this handler before its own cancel()), so preventDefault is explicit:
+      // without it the browser runs its native copy on top of ours.
+      if (this.shouldCopyTerminalSelectionFromShortcut?.(ev)) {
+        // The CLEANED selection decides, not the raw one. A drag across the blank
+        // part of a row selects real padding spaces, which are truthy, so testing
+        // the raw text would spend this press on a copy of nothing and make the
+        // user press again to interrupt.
+        //
+        // ⚠️ The gate cleans, and the copy is handed the RAW selection, because
+        // copyTerminalSelection cleans again on its own. The margin strip is not
+        // idempotent: a second pass takes up to `margin` more columns off what
+        // the first pass left, so passing the cleaned string through dedented a
+        // Claude or Codex copy twice. Every other copy path already hands over
+        // the raw selection or reads it live.
+        const raw = this.terminal?.hasSelection?.() ? this.terminal.getSelection() : '';
+        const selection = this.cleanedTerminalSelection(raw);
+        if (selection.trim()) {
+          ev.preventDefault();
+          void this.copyTerminalSelection(raw);
+          return false;
+        }
+        // Nothing worth copying. The clear is for feedback, not for the
+        // interrupt: the gate above tests the CLEANED selection, so a
+        // padding-only selection left set cleans to '' on every later press and
+        // falls through to the PTY anyway. What it buys is that a highlight
+        // which copies nothing does not linger with no explanation, which is
+        // also what the toast is for. Falls through exactly as an empty
+        // selection does, so this press still reaches the PTY as 0x03.
+        if (this.terminal?.hasSelection?.()) {
+          this.terminal.clearSelection?.();
+          this.showToast('Nothing to copy', 'warning');
+        }
+        if (ev.shiftKey) {
+          ev.preventDefault();
+          return false;
+        }
+        return true;
+      }
+
+      // Session-sidebar toggle chord (default Alt+B): same trap as above —
+      // preventDefault() in the capture handler does not stop xterm, so without
+      // this gate every toggle would ALSO send ESC b (readline backward-word)
+      // into the live session and walk the cursor back through the user's
+      // half-typed prompt. Registry-aware and only while the sidebar layout is
+      // active, so a rebind/disable and the default header layout keep plain
+      // Meta-b working in the terminal.
+      if (ev.type === 'keydown' && this.shouldToggleSessionSidebarFromShortcut?.(ev)) {
+        return false;
+      }
+
+      // Ctrl+V / Cmd+V: intercept before xterm sends ^V to PTY.
+      // Route through our paste trap which handles both images and text.
+      if ((ev.ctrlKey || ev.metaKey) && ev.key === 'v' && ev.type === 'keydown') {
+        if (this.activeSessionId && this._handleImagePaste) {
+          this._handleImagePaste();
+        }
+        return false;
+      }
+
+      // Ctrl+Z (SIGTSTP/job-control suspend): in a plain shell session this is the
+      // user's own job-control tool (suspend a foreground command, `fg` it back) —
+      // leave it alone. In every other mode (claude/omp/pi/codex/... — Ink/TUI apps
+      // that normally run in raw mode with ISIG off, so ^Z is usually inert there
+      // already) suspending the CLI stops an unattended agent loop dead with no
+      // visible output — the same failure shape as an XOFF freeze. Swallow it
+      // before xterm can send \x1a into the PTY rather than relying on every CLI's
+      // raw-mode state holding at every instant (startup, raw-mode toggles, etc).
+      if (
+        ev.type === 'keydown' &&
+        ev.key.toLowerCase() === 'z' &&
+        ev.ctrlKey &&
+        !ev.altKey &&
+        !ev.metaKey &&
+        !ev.shiftKey
+      ) {
+        const activeCtrlZSession = this.activeSessionId ? this.sessions.get(this.activeSessionId) : null;
+        if (activeCtrlZSession && activeCtrlZSession.mode !== 'shell') {
+          ev.preventDefault();
+          return false;
+        }
+      }
+
+      // Shift+Enter / Ctrl+Enter: insert newline for multi-line input.
+      // xterm.js sends plain \r for all Enter variants, so Claude Code (Ink) can't
+      // distinguish them. We use tmux send-keys -H to send a line feed byte (0x0a)
+      // which the inner application recognizes as "insert newline" vs carriage return.
+      // This handler also runs for keypress/keyup: xterm drops a keypress carrying Ctrl/Alt
+      // but NOT one carrying only Shift, so unless every event type is swallowed here,
+      // Shift+Enter's keypress sends a bare \r (submit) after the newline. Only keydown sends.
+      if (ev.key === 'Enter' && (ev.shiftKey || ev.ctrlKey)) {
+        if (ev.type === 'keydown' && this.activeSessionId) {
+          if (this._localEchoEnabled) {
+            const text = this._localEchoOverlay?.pendingText || '';
+            this._localEchoOverlay?.clear();
+            this._localEchoOverlay?.suppressBufferDetection();
+            this._flushedOffsets?.delete(this.activeSessionId);
+            this._flushedTexts?.delete(this.activeSessionId);
+            if (text) {
+              this._pendingInput += text;
+              flushInput();
+            }
+            setTimeout(() => {
+              fetch(`/api/sessions/${this.activeSessionId}/send-key`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ key: ev.ctrlKey ? 'C-Enter' : 'S-Enter' }),
+              });
+            }, text ? 80 : 0);
+          } else {
+            fetch(`/api/sessions/${this.activeSessionId}/send-key`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ key: ev.ctrlKey ? 'C-Enter' : 'S-Enter' }),
+            });
+          }
+        }
+        return false;
+      }
+
+      return true;
+    });
+
+    // WebGL renderer for GPU-accelerated terminal rendering.
+    // Previously caused "page unresponsive" crashes from synchronous GPU stalls,
+    // but the mode-aware 32/64KB frame cap in flushPendingWrites() now prevents
+    // oversized terminal.write() calls that triggered the stalls.
+    // Disable with ?nowebgl URL param if GPU issues return.
+    // Auto-fallback: _initWebGL installs a long-task watchdog that disables
+    // WebGL sticky in localStorage after repeated GPU stalls (see app.js).
+    // Force re-enable after sticky disable with ?webgl=force.
+    // Lazy-loaded: script downloaded only on desktop (saves 244KB on mobile).
+    this._webglAddon = null;
+    const _params = new URLSearchParams(location.search);
+    const _stickyDisabled = (() => {
+      try {
+        const raw = localStorage.getItem('reverie-webgl-disabled');
+        if (!raw) return false;
+        const { at } = JSON.parse(raw);
+        // Auto-expire after WEBGL_FALLBACK.STICKY_EXPIRY_MS so we retry
+        // (driver/Chrome may have been updated).
+        if (Date.now() - at > WEBGL_FALLBACK.STICKY_EXPIRY_MS) {
+          localStorage.removeItem('reverie-webgl-disabled');
+          return false;
+        }
+        return true;
+      } catch { return false; }
+    })();
+    // User's "WebGL Renderer" toggle (Settings > Appearance). undefined = untouched
+    // (desktop default on); false = explicit opt-out; true = explicit opt-in.
+    const _webglSettings = this.loadAppSettingsFromStorage();
+    const _webglDefaults = this.getDefaultSettings();
+    const _webglPref = _webglSettings.webglRendererEnabled ?? _webglDefaults.webglRendererEnabled;
+    const { skip: skipWebGL, clearSticky: _clearWebglSticky } = shouldSkipWebGL({
+      deviceType: MobileDetection.getDeviceType(),
+      noWebglParam: _params.has('nowebgl'),
+      forceParam: _params.get('webgl') === 'force',
+      stickyDisabled: _stickyDisabled,
+      userPrefEnabled: _webglPref,
+    });
+    // Only ?webgl=force retires the auto-fallback marker at init — a stored
+    // toggle ON is incidental (checkbox defaults checked) and must not defeat
+    // the sticky safety net. An OFF→ON flip clears it in saveAppSettings().
+    if (_clearWebglSticky) {
+      try { localStorage.removeItem('reverie-webgl-disabled'); } catch {}
+    }
+    if (skipWebGL && _stickyDisabled) {
+      console.log('[CRASH-DIAG] WebGL sticky-disabled from prior stalls — DOM renderer in use. Re-enable: ?webgl=force');
+    }
+    if (!skipWebGL) {
+      if (typeof WebglAddon !== 'undefined') {
+        this._initWebGL();
+      } else {
+        // Lazy-load WebGL addon — not bundled in <head> to avoid blocking mobile
+        const wglScript = document.createElement('script');
+        wglScript.src = 'vendor/xterm-addon-webgl.min.js';
+        wglScript.onload = () => this._initWebGL();
+        wglScript.onerror = () => console.warn('[CRASH-DIAG] Failed to load WebGL addon — using canvas renderer');
+        document.head.appendChild(wglScript);
+      }
+    }
+
+    this._localEchoOverlay = new LocalEchoOverlay(this.terminal);
+    // Predictive write-through echo (codex): separate opt-in bundle
+    // (vendor/xterm-predictive-echo.js); when it is missing or failed to
+    // load, codex falls back to plain PTY echo exactly like 1.12.2.
+    this._predictiveEcho =
+      typeof PredictiveEchoOverlay !== 'undefined' ? new PredictiveEchoOverlay(this.terminal) : null;
+    this._predictiveEcho?.setPredictWhen((terminal) => window.ReverieTerminalInput.isCodexComposerRow(terminal));
+    if (MobileDetection.isTouchDevice()) {
+      this.terminal.onCursorMove(() => this._syncMobileHelperTextareaToCursor());
+      this.terminal.onRender(() => this._syncMobileHelperTextareaToCursor());
+    }
+
+    // Renderer liveness — see _startRenderLivenessWatchdog. Registered for every
+    // device, not just touch: the rAF-discard behaviour is worst on an iOS PWA
+    // but a stale handle wedges the debouncer identically anywhere it happens.
+    this.terminal.onRender(() => {
+      this._lastRenderAt = Date.now();
+    });
+    this._startRenderLivenessWatchdog();
+
+    // CJK IME input — textarea in index.html, just wire up send
+    this._cjkInput = null;
+    if (typeof CjkInput !== 'undefined') {
+      this._cjkInput = CjkInput.init({
+        send: (text) => {
+          this._handleCjkInput(text);
+        },
+      });
+    }
+
+    // ── Focus router ──
+    // While the CJK field is visible, EVERY terminal.focus() call must land on
+    // the CJK field instead. Focusing xterm's hidden textarea in CJK mode sends
+    // the IME's output into a black hole: the keyboard composes normally, but
+    // onData is gated by cjkActive, so nothing reaches the field OR the PTY.
+    // Session select / SSE-reconnect restore paths call terminal.focus() and
+    // were silently stealing focus after every app switch on mobile (the
+    // intermittent "Chinese input goes nowhere" bug). One chokepoint here
+    // covers all ~15 call sites plus any future ones.
+    const _xtermFocus = this.terminal.focus.bind(this.terminal);
+    this.terminal.focus = () => {
+      const cjkEl = document.getElementById('cjkInput');
+      if (cjkEl?.classList.contains('cjk-input-visible')) {
+        cjkEl.focus();
+      } else {
+        _xtermFocus();
+      }
+    };
+
+    // On mobile Safari, delay initial fit() to allow layout to settle
+    // This prevents 0-column terminals caused by fit() running before container is sized
+    const isMobileSafari =
+      MobileDetection.getDeviceType() === 'mobile' && document.body.classList.contains('safari-browser');
+    if (isMobileSafari) {
+      // Wait for layout, then fit multiple times to ensure proper sizing
+      requestAnimationFrame(() => {
+        this.syncTerminalGeometry();
+        // Double-check after another frame
+        requestAnimationFrame(() => this.syncTerminalGeometry());
+      });
+    } else {
+      this.syncTerminalGeometry();
+    }
+    // Whenever that first fit runs — on this line, or a frame or two later on
+    // the mobile-Safari branch above — it measures whatever font the browser has
+    // painted with so far, which is not necessarily the terminal font. Start the
+    // wait now so the buffer load can hold for it.
+    this._terminalFontReady = this._awaitTerminalFont();
+
+    // Register link provider for clickable file paths in Bash tool output
+    this.registerFilePathLinkProvider();
+
+    // Bar visible ⟺ a selection exists. xterm drops the selection on any keypress,
+    // on reset and on a tab switch, and a Copy button floating over nothing is a
+    // trap — one that would copy the PREVIOUS session's text if it still worked.
+    this.terminal.onSelectionChange?.(() => {
+      if (!this.terminal?.hasSelection?.()) {
+        this._touchSelecting = false;
+        this._touchSelectionActive = false;
+        this._touchSelectionAnchor = null;
+        this._hideTouchSelectionBar();
+        // Nothing highlighted, nothing for Auto Copy to flush. xterm drops the
+        // selection on any keypress, so without this a keystroke would leave a
+        // stale flush armed for the next unrelated mouseup.
+        this._autoCopyPending = false;
+        return;
+      }
+      // Auto Copy arms here and fires at the END of the gesture (below). This
+      // callback runs on EVERY cell the drag crosses, so copying here would be
+      // one clipboard write per mouse move.
+      this._autoCopyPending = true;
+    });
+
+    // Auto Copy (copy-on-select, per-device `autoCopySelection`, default OFF).
+    //
+    // ⚠️ The flush is SYNCHRONOUS inside the mouseup handler, deliberately: both
+    // clipboard paths need user activation (Firefox gates navigator.clipboard
+    // .writeText on it, and Safari requires document.execCommand('copy'), the
+    // plain-HTTP fallback install.sh's LAN option lands on, to run inside the
+    // gesture's own task). Deferring to a timer or to onSelectionChange loses it.
+    //
+    // ⚠️ document-level, because a drag that ends outside the terminal (the user
+    // sweeps up past the header) delivers its mouseup to the document, not to
+    // the container. Unrelated mouseups elsewhere on the page are filtered by
+    // decideAutoCopy, not by the listener's target.
+    if (!this._autoCopyListenerInstalled) {
+      this._autoCopyListenerInstalled = true;
+      document.addEventListener('mouseup', () => this._flushAutoCopySelection());
+    }
+
+    // Mouse wheel: forward to the TUI only for sessions verified to handle SGR
+    // wheel reports (claude 2.1.187+ while it tracks the mouse, which only its
+    // fullscreen renderer does; see _shouldForwardWheelToApp), local scrollback
+    // otherwise. Claude Code 2.1.187+ scrolls its own
+    // transcript on SGR wheel reports — scrolled-away tool blocks re-render
+    // live and stay clickable — and its select menus no longer capture wheel
+    // as option navigation (verified against 2.1.202: /model menu highlight
+    // ignores wheel reports); older versions DO capture wheel as option
+    // navigation, so they keep the local wheel.
+    // Shift+wheel always scrolls xterm's local scrollback (Reverie's restored
+    // history lives there); the plain wheel stays on the CLI's transcript for
+    // those modes regardless of scroll position, so the CLI's input box never
+    // slides off the screen (see _shouldForwardWheelToApp).
+    //
+    // CAPTURE phase, deliberately, and Reverie owns the scroll. xterm's
+    // viewport is a vscode-style ScrollableElement that consumes wheel events
+    // itself (preventDefault + stopPropagation) whenever it believes a
+    // scrollbar exists, does NOT consult attachCustomWheelEventHandler, and —
+    // measured on the live instance — goes DEAF after terminal.reset(): a tab
+    // switch or full-history replay leaves its scroll dimensions stale, after
+    // which wheel events neither scroll nor propagate reliably. A bubble-phase
+    // listener here therefore never fired once local scrollback existed
+    // (measured: _shouldForwardWheelToApp call count stayed 0 while xterm
+    // scrolled), and after a tab switch NOTHING scrolled at all — the "input
+    // box scrolls up then it fights", "works at first, breaks after a tab
+    // switch" reports on #205.
+    //
+    // So: capture runs ancestors-first; this handler sees every wheel first
+    // and stops propagation, keeping xterm's scroller out of it entirely.
+    // Local scrolling goes through terminal.scrollLines() — buffer-level, so
+    // it keeps working after resets — with our own deltaMode normalization
+    // (_wheelScrollLines) covering Firefox's line-unit wheels. Two cases still
+    // belong to xterm and are passed through untouched:
+    //  - mouseTrackingMode active: xterm's own encoder forwards the wheel to
+    //    the PTY (htop/vim with mouse on in a shell pane);
+    //  - alternate buffer (direct-PTY fallback running vim/less): xterm's
+    //    alt-scroll handling converts the wheel to cursor keys, which is what
+    //    those apps expect.
+    container.addEventListener(
+      'wheel',
+      (ev) => {
+        const trackingMode = this.terminal?.modes?.mouseTrackingMode;
+        if (trackingMode && trackingMode !== 'none') return;
+        if (this.terminal?.buffer?.active?.type === 'alternate') return;
+        ev.preventDefault();
+        ev.stopPropagation();
+        if (this._shouldForwardWheelToApp(ev)) {
+          this._logScrollRouting('forward-sgr');
+          this._forwardScrollToApp(ev.clientX, ev.clientY, this._wheelScrollLines(ev));
+          return;
+        }
+        // Local scrolling accumulates FRACTIONAL lines: a macOS trackpad emits
+        // a stream of tiny pixel deltas, and rounding each one to a whole line
+        // (the ±1 fallback) made slow drags scroll faster than the finger.
+        const lines = this._wheelScrollLinesFloat(ev);
+        // …unless there is no local scrollback to scroll, in which case page the
+        // CLI's own transcript instead of doing nothing (_maybePageCliTranscript).
+        if (this._maybePageCliTranscript(ev, lines)) return;
+        this._logScrollRouting('local-scrollback');
+        this._noteTerminalUserScroll(lines);
+        this._smoothScrollBy(lines);
+      },
+      { passive: false, capture: true }
+    );
+
+    // Touch scrolling — use terminal.scrollLines() for all devices.
+    // xterm.js DOM renderer doesn't populate xterm-viewport's scroll area,
+    // so native CSS scrolling (overflow-y: scroll + touch-action: pan-y)
+    // has nothing to scroll. Instead, convert touch deltas into scrollLines()
+    // calls, matching the wheel handler above, including the forwarding
+    // branch: for the sessions whose wheel goes to the CLI's own transcript
+    // (_shouldForwardWheelToApp), a touch drag must go there too, or every
+    // phone/tablet swipe scrolls the local buffer of stale repaint frames and
+    // drags the CLI's pinned input box off the screen (issue #205's mobile
+    // half). Same gate, so Shift has no touch analog but the local-scrollback
+    // opt-out setting and the version/tracking gate apply to touch exactly as they
+    // do to the wheel — including the PageUp/PageDown fallback the wheel uses
+    // when that gate is false and there is no local scrollback to scroll
+    // (_maybePageCliTranscript), which is what keeps a swipe from being a
+    // complete no-op on a phone.
+    {
+      const cellHeight = () => this.terminal._core?._renderService?.dimensions?.css?.cell?.height || 13;
+      let touchLastX = 0;
+      let touchLastY = 0;
+      let velocity = 0;
+      let lastTime = 0;
+      let scrollFrame = null;
+      let isTouching = false;
+      // One id per touch contact (touchstart), carried by its touchmoves AND its
+      // momentum frames, so the page-key fallback treats a whole contact as one
+      // gesture however slowly the finger moves (pageKeysForGesture).
+      let touchContactId = 0;
+
+      const scrollLoop = (timestamp) => {
+        const dt = lastTime ? (timestamp - lastTime) / 16.67 : 1;
+        lastTime = timestamp;
+
+        if (!isTouching && Math.abs(velocity) > 0.3) {
+          // Momentum phase — convert pixel velocity to lines
+          const lines = Math.round(velocity / cellHeight());
+          if (lines !== 0) {
+            if (this._shouldForwardWheelToApp({ shiftKey: false })) {
+              // Flick momentum keeps feeding the CLI's transcript from the last
+              // touch point; the 40ms coalescer batches the per-frame reports.
+              this._forwardScrollToApp(touchLastX, touchLastY, lines);
+            } else if (!this._maybePageCliTranscript({ shiftKey: false, touchId: touchContactId }, lines)) {
+              this.terminal.scrollLines(lines);
+              this._maybeLoadMoreHistoryOnScroll(lines);
+            }
+          }
+          velocity *= 0.92;
+          scrollFrame = requestAnimationFrame(scrollLoop);
+        } else if (!isTouching) {
+          scrollFrame = null;
+          velocity = 0;
+        } else {
+          scrollFrame = requestAnimationFrame(scrollLoop);
+        }
+      };
+
+      // Accumulate sub-line pixel deltas so slow swipes still scroll
+      let pixelAccum = 0;
+
+      let didScroll = false; // track whether touchmove fired (tap vs scroll)
+      let longPressTimer = null; // armed on touchstart, becomes a text selection
+      let longPressStartX = 0;
+      let longPressStartY = 0;
+      let touchStartY = 0;
+      let touchStartX = 0;
+      // 'x' | 'y' | null — locked on the first travel past the tap slop, so a
+      // diagonal drag cannot pan and scroll at the same time.
+      let panAxis = null;
+      /**
+       * Can this gesture pan sideways? Only while the terminal is wider than
+       * the box showing it (`.term-overflows-x`, set by
+       * `_syncTerminalOverflowAffordance`).
+       *
+       * ⚠️ This has to be done in JS. `touch-action: pan-x` alone does nothing
+       * for the sessions the affordance targets: `touchstart` calls
+       * preventDefault() for every 'content' tap — the normal case for a
+       * mouse-tracking TUI sitting at the bottom of its buffer — which cancels
+       * the browser's pan before it starts. Measured under touch emulation, a
+       * 140px horizontal swipe reached scrollLeft 141 without that
+       * preventDefault and 0 with it. It only ever worked for shell sessions,
+       * while scrolled up, or with a mouse.
+       */
+      const canPanHorizontally = () =>
+        // Both halves. The class is what makes the container a scroller at all
+        // (`overflow-x: auto`); without it `scrollLeft` silently stays 0, and a
+        // gesture locked to 'x' on that basis would do nothing AND suppress the
+        // vertical scroll it should have been. The measurement is the second
+        // half because sub-pixel cell widths can leave a stray pixel of
+        // scrollWidth on a terminal that fits perfectly well.
+        container.classList.contains('term-overflows-x') && container.scrollWidth - container.clientWidth > 1;
+      let tapStartedWithTerminalFocus = false;
+      let tapStartIntentCache = null;
+      // px — ignore micro-drift to distinguish tap from scroll. Shared with the
+      // keyboard-dismiss handler so both classify the same gesture the same way.
+      const TAP_THRESHOLD = window.ReverieTerminalInput.MOBILE_KEYBOARD_DISMISS_TAP_SLOP;
+      container.addEventListener(
+        'touchstart',
+        (ev) => {
+          // The selection bar is a child of this container: its buttons own their
+          // own taps and must not arm a gesture on the terminal underneath.
+          if (ev.target?.closest?.('.term-select-bar')) return;
+          if (ev.touches.length !== 1) {
+            clearTimeout(longPressTimer);
+            longPressTimer = null;
+          }
+          if (ev.touches.length === 1) {
+            touchLastX = ev.touches[0].clientX;
+            touchLastY = ev.touches[0].clientY;
+            touchStartY = touchLastY;
+            touchStartX = touchLastX;
+            panAxis = null;
+            velocity = 0;
+            pixelAccum = 0;
+            isTouching = true;
+            touchContactId++;
+            didScroll = false;
+            tapStartedWithTerminalFocus = this._isMobileTerminalInputFocused();
+            // Classifying scans the whole viewport with translateToString, and
+            // this runs at the start of EVERY gesture including scroll drags.
+            // Cache the result for the touchend of this same gesture rather than
+            // recomputing it; the cache is keyed on the exact start coordinates
+            // so a finger that moved re-classifies at its real position.
+            const touchStartIntent = this._classifyMobileTerminalTap(touchLastX, touchLastY);
+            tapStartIntentCache = { x: touchLastX, y: touchLastY, intent: touchStartIntent };
+            if (touchStartIntent === 'content') {
+              // Cancel xterm/browser focus before the compatibility click can
+              // open the OS keyboard. Content taps are re-emitted as SGR on
+              // touchend.
+              //
+              // 'history' is deliberately NOT included. A scrolled-up viewport
+              // sends nothing, so there is no compatibility click worth
+              // cancelling — and preventDefault() here, paired with touchend's
+              // early return, closes both routes to focus at once. Since
+              // selectSession() ends with scrollToLastNonEmptyLine(), that made
+              // the keyboard unreachable after every tab switch.
+              ev.preventDefault();
+              this._blurMobileTerminalInput();
+            }
+            // Hold still and this press becomes a text selection. Cancelled by any
+            // travel past the shared tap slop below, so a scroll can never become one.
+            longPressStartX = touchLastX;
+            longPressStartY = touchLastY;
+            clearTimeout(longPressTimer);
+            longPressTimer = setTimeout(() => {
+              longPressTimer = null;
+              this._beginTouchSelection(longPressStartX, longPressStartY);
+            }, window.ReverieTerminalInput.TOUCH_SELECT_LONG_PRESS_MS);
+            lastTime = 0;
+            if (scrollFrame) {
+              cancelAnimationFrame(scrollFrame);
+              scrollFrame = null;
+            }
+          }
+        },
+        { passive: false }
+      );
+
+      container.addEventListener(
+        'touchmove',
+        (ev) => {
+          // A drag that follows the long press grows the selection instead of
+          // scrolling; preventDefault keeps the page from taking the gesture back.
+          if (this._touchSelecting) {
+            ev.preventDefault();
+            const selTouch = ev.touches[0];
+            if (selTouch) this._extendTouchSelection(selTouch.clientX, selTouch.clientY);
+            return;
+          }
+          if (longPressTimer && ev.touches.length === 1) {
+            const t = ev.touches[0];
+            if (
+              Math.abs(t.clientX - longPressStartX) > TAP_THRESHOLD ||
+              Math.abs(t.clientY - longPressStartY) > TAP_THRESHOLD
+            ) {
+              clearTimeout(longPressTimer);
+              longPressTimer = null;
+            }
+          }
+          if (ev.touches.length === 1 && isTouching) {
+            const touchY = ev.touches[0].clientY;
+            const touchX = ev.touches[0].clientX;
+            if (!didScroll) {
+              const travelY = Math.abs(touchY - touchStartY);
+              const travelX = Math.abs(touchX - touchStartX);
+              const sideways = canPanHorizontally() && travelX >= TAP_THRESHOLD;
+              if (travelY >= TAP_THRESHOLD || sideways) {
+                didScroll = true;
+                panAxis = sideways && travelX > travelY ? 'x' : 'y';
+              }
+            }
+            // Below the tap threshold, treat the gesture as a potential tap:
+            // don't preventDefault (iOS needs click synthesis to show the
+            // keyboard) and don't accumulate scroll distance or velocity. Without
+            // this guard, sub-threshold micro-drift still scrolls a line and
+            // leaves a non-zero velocity that touchend turns into a momentum
+            // fling, so a jittery tap would both position the cursor AND scroll.
+            if (!didScroll) return;
+            ev.preventDefault();
+            if (panAxis === 'x') {
+              // Pan the container, and touch nothing the vertical path owns —
+              // no pixelAccum, no velocity, so touchend cannot turn a sideways
+              // swipe into a momentum fling down the scrollback.
+              container.scrollLeft -= touchX - touchLastX;
+              touchLastX = touchX;
+              touchLastY = touchY;
+              return;
+            }
+            const delta = touchLastY - touchY; // positive = scroll down
+            pixelAccum += delta;
+            velocity = delta * 1.2;
+            touchLastX = ev.touches[0].clientX;
+            touchLastY = touchY;
+            // Convert accumulated pixels to whole lines
+            const ch = cellHeight();
+            const lines = Math.trunc(pixelAccum / ch);
+            if (lines !== 0) {
+              if (this._shouldForwardWheelToApp({ shiftKey: false })) {
+                this._logScrollRouting('forward-sgr');
+                this._forwardScrollToApp(touchLastX, touchLastY, lines);
+              } else if (!this._maybePageCliTranscript({ shiftKey: false, touchId: touchContactId }, lines)) {
+                this._logScrollRouting('local-scrollback');
+                this._noteTerminalUserScroll(lines);
+                this.terminal.scrollLines(lines);
+                this._maybeLoadMoreHistoryOnScroll(lines);
+              }
+              pixelAccum -= lines * ch;
+            }
+          }
+        },
+        { passive: false }
+      );
+
+      container.addEventListener(
+        'touchend',
+        (ev) => {
+          if (ev.target?.closest?.('.term-select-bar')) return;
+          clearTimeout(longPressTimer);
+          longPressTimer = null;
+          isTouching = false;
+          if (this._touchSelecting) {
+            // Lifting ends the DRAG, not the selection: the bar stays up so the
+            // range can still be extended by tapping, or copied. preventDefault
+            // cancels the compatibility mouse events this touchend would otherwise
+            // synthesize — see _endTouchSelectionGesture.
+            ev.preventDefault();
+            velocity = 0;
+            this._endTouchSelectionGesture();
+            tapStartedWithTerminalFocus = false;
+            return;
+          }
+          if (!scrollFrame && Math.abs(velocity) > 0.3) {
+            scrollFrame = requestAnimationFrame(scrollLoop);
+          }
+          if (!didScroll && this.terminal) {
+            const touch = ev.changedTouches && ev.changedTouches[0];
+            if (touch) {
+              this._suppressTrustedTapMouseEvents();
+              const cached =
+                tapStartIntentCache &&
+                tapStartIntentCache.x === touch.clientX &&
+                tapStartIntentCache.y === touch.clientY
+                  ? tapStartIntentCache.intent
+                  : null;
+              this._handleMobileTerminalTap(touch, tapStartedWithTerminalFocus, cached);
+            }
+          }
+          tapStartedWithTerminalFocus = false;
+        },
+        // NOT passive: the selection branch above must be able to preventDefault
+        // the compatibility mouse events. Every other path leaves the event alone.
+        { passive: false }
+      );
+
+      // Android Chrome fires `contextmenu` at its long-press threshold and then runs
+      // its default long-press behaviour. Suppressed ONLY while a selection gesture
+      // is in flight — a desktop right-click keeps its menu, since the timer is null
+      // and no gesture is active there.
+      container.addEventListener('contextmenu', (ev) => {
+        if (longPressTimer !== null || this._touchSelecting || this._touchSelectionActive) {
+          ev.preventDefault();
+          return;
+        }
+        // Right-click COPIES the selection, the mintty/PuTTY convention, because
+        // the browser's own menu structurally cannot offer it here: xterm paints
+        // glyphs into a canvas, so a terminal selection is not a DOM selection
+        // and the native "Copy" item has nothing to act on (it is absent or
+        // inert). This is the second half of the habit users bring from a native
+        // terminal running a mouse-tracking TUI — Shift+drag to select (see
+        // _installShiftDragSelection), right-click to copy — and without it that
+        // gesture dead-ends after the selection is made.
+        //
+        // With NOTHING selected the native menu is left alone: it still carries
+        // the browser-level items (reload, inspect) and suppressing it there
+        // would take them away to offer nothing in return.
+        if (!this.terminal?.hasSelection?.()) return;
+        const selection = this.terminal.getSelection();
+        if (!selection) return;
+        ev.preventDefault();
+        void this.copyTerminalSelection(selection);
+      });
+
+      container.addEventListener(
+        'touchcancel',
+        () => {
+          clearTimeout(longPressTimer);
+          longPressTimer = null;
+          isTouching = false;
+          this._touchSelecting = false;
+          velocity = 0;
+          pixelAccum = 0;
+          tapStartedWithTerminalFocus = false;
+        },
+        { passive: true }
+      );
+    }
+
+    // ── Desktop click-to-position cursor ──────────────────────────────
+    // A real mouse click normally reaches the PTY through xterm's own mouse
+    // encoder, but that encoder only runs while mouseTrackingMode is ON — and
+    // the server strips the enabling DECSETs from claude/codex/gemini output
+    // (isAltScreenStripMode, session.ts) and from opencode's (isMuxMouseStripMode,
+    // so a drag selects text) so the wheel keeps scrolling
+    // scrollback. Desktop clicks therefore stopped reporting entirely (the
+    // same breakage the mobile touchend tap branch above works around).
+    // Hand-encode the SGR report for plain left-clicks on those sessions.
+    container.addEventListener('click', (ev) => this._handleDesktopTerminalClick(ev));
+
+    this._installMobileKeyboardDismiss();
+
+    // Welcome message
+    this.showWelcome();
+
+    // Image paste and drag-and-drop support
+    this.initImageInput();
+
+    // Generation counter for chunkedTerminalWrite — aborts stale writes on tab switch
+    this._chunkedWriteGen = 0;
+    this._bufferLoadSeq = 0;
+    this._bufferLoadOwner = null;
+    this._lastUserScrollUpAt = null;
+
+    // Handle resize with throttling for performance
+    this._resizeTimeout = null;
+    this._lastResizeDims = null;
+
+    const throttledResize = () => {
+      if (this._tabRailResizeOwnsObserver) return;
+      // Trailing-edge debounce: ALL resize work (fit + clear + SIGWINCH) happens
+      // once after the user stops resizing. During active resize, the terminal
+      // stays at its old dimensions for up to 300ms.
+      //
+      // Why not fit() immediately? Each fitAddon.fit() reflows content at the
+      // new width — lines that were 7 rows become 10, and the overflow gets
+      // pushed into scrollback. With continuous resize events, this creates
+      // dozens of intermediate reflow states in scrollback, appearing as
+      // duplicate/garbled content when the user scrolls up.
+      //
+      // By deferring fit() to the trailing edge, there's exactly ONE reflow
+      // at the final dimensions, ONE viewport clear, and ONE Ink redraw.
+      if (this._resizeTimeout) {
+        clearTimeout(this._resizeTimeout);
+      }
+      this._resizeTimeout = setTimeout(() => {
+        this._resizeTimeout = null;
+        // Flush any stale flicker buffer before clearing viewport
+        if (this.flickerFilterBuffer) {
+          if (this.flickerFilterTimeout) {
+            clearTimeout(this.flickerFilterTimeout);
+            this.flickerFilterTimeout = null;
+          }
+          this.flushFlickerBuffer();
+        }
+        // Hold the PTY's shape while the virtual keyboard is up: a SIGWINCH per
+        // step of the OS animation makes Ink re-render at a row count that is
+        // about to change again, and shifts the accessory toolbar mid-typing.
+        // KeyboardHandler's settle timer sends ONE resize once the animation
+        // stops (`_sendTerminalResize`), so the PTY is not left stale.
+        const keyboardUp = typeof KeyboardHandler !== 'undefined' && KeyboardHandler.keyboardVisible;
+        // Same yield as sendResize: never resize a PTY whose session is showing
+        // in its own window. Dragging the dashboard's border must not reshape it.
+        const detachedElsewhere = !this.isSoloWindow && this.detachedSessions?.has(this.activeSessionId);
+        // The tile grid parks the main terminal: its session is sized by its
+        // tile, which this same timer refits below (_forEachTile).
+        const tilesOwnTerminal = this._tilesOwnTerminal?.();
+        // ⚠️ Whether to fit is the SAME question as whether to send (issue #464).
+        // This block used to fit unconditionally and skip only the SIGWINCH,
+        // which is the one combination that cannot be right: it moves xterm to
+        // a shape the PTY is never told about, and Claude Code computes its
+        // repaints from the shape it was told. Withhold both, or neither —
+        // a reflow nothing is rendering for buys nothing and costs correctness.
+        const dims =
+          this.activeSessionId && !keyboardUp && !detachedElsewhere && !tilesOwnTerminal
+            ? this._geometryForResizeRequest()
+            : null;
+        // ⚠️ A null measurement is NOT a reason to report the floor. It used to
+        // fall back to a bare 40x10, which tells the PTY a shape nothing measured
+        // and xterm does not hold — the write-only guess this whole change exists
+        // to remove. An unmeasurable terminal has nothing to say; the next
+        // resize event says it.
+        if (dims) {
+          const { cols, rows } = dims;
+          // Only send resize if dimensions actually changed
+          if (!this._lastResizeDims || cols !== this._lastResizeDims.cols || rows !== this._lastResizeDims.rows) {
+            // Clear viewport + scrollback ONLY when dimensions actually change.
+            // syncTerminalGeometry() reflowed content: lines at old width may wrap to
+            // more rows, pushing overflow into scrollback. Ink's cursor-up count is
+            // based on the pre-reflow line count, so ghost renders accumulate there.
+            // Fix: \x1b[3J (Erase Saved Lines) clears scrollback reflow debris,
+            // then \x1b[H\x1b[2J clears the viewport for a clean Ink redraw.
+            // IMPORTANT: Only clear when we're actually sending SIGWINCH (dims changed).
+            // Clearing without a subsequent Ink redraw leaves the terminal blank.
+            const activeResizeSession = this.activeSessionId ? this.sessions.get(this.activeSessionId) : null;
+            // Not while another device holds the width: the columns were not
+            // reflowed here, and a refused resize brings no redraw after it.
+            if (
+              activeResizeSession &&
+              activeResizeSession.mode !== 'shell' &&
+              !this._paneWidthRefused &&
+              this.terminal &&
+              this.isTerminalAtBottom()
+            ) {
+              this.terminal.write('\x1b[3J\x1b[H\x1b[2J');
+            }
+            this._lastResizeDims = { cols, rows };
+            // Typed + WS-first like sendResize: the viewport type feeds resize
+            // arbitration (a phone rotating must not bypass a desktop claim),
+            // and a desktop window narrowing past the tablet breakpoint must
+            // send a typed WS frame so its stale desktop claim is released.
+            const viewportType =
+              typeof MobileDetection !== 'undefined' && MobileDetection.getDeviceType
+                ? MobileDetection.getDeviceType()
+                : 'desktop';
+            let sentViaWs = false;
+            if (this._wsReady && this._wsSessionId === this.activeSessionId) {
+              try {
+                this._ws.send(JSON.stringify({ t: 'z', c: cols, r: rows, v: viewportType }));
+                sentViaWs = true;
+              } catch {
+                // Fall through to HTTP POST
+              }
+            }
+            if (!sentViaWs) {
+              // ⚠️ The reply carries the geometry that actually took, and this
+              // is the path where a declined resize is LEAST likely to be
+              // noticed: no socket means no `{"t":"zc"}` frame either, so
+              // discarding it here left the one transport that cannot hear the
+              // answer also not asking for it.
+              const resizedSessionId = this.activeSessionId;
+              fetch(`/api/sessions/${this.activeSessionId}/resize`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ cols, rows, viewportType }),
+              })
+                .then(async (res) => {
+                  const applied = (await res.json())?.data ?? {};
+                  this._onPtyGeometryReport(resizedSessionId, applied.cols, applied.rows);
+                })
+                .catch(() => {
+                  /* a resize that never landed tells us nothing about the PTY */
+                });
+            }
+          }
+        }
+        // Update subagent connection lines and local echo at new dimensions.
+        // Lineage lines are desktop-only, so a resize across the 1024px boundary
+        // has to re-resolve their gate before the redraw, not just move them.
+        this.applyLineageLineSettings?.();
+        this.updateConnectionLines();
+        // Unguarded on purpose: hasPending excludes an IME composition, so a
+        // composition-only overlay would stay on the old prompt row. rerender()
+        // is a no-op when the overlay has nothing to draw.
+        this._localEchoOverlay?.rerender();
+        // Pane B (split view) has its own container and its own fit()/resize
+        // frame — this observer only ever measured Pane A's container, so
+        // without this call Pane B never learned about a window resize, an
+        // Alt+B sidebar toggle, or a tab-rail drag, and its PTY silently
+        // stayed at whatever size it was last dragged to. Grid tiles are left
+        // out: the grid's own observer (tile-grid.js _scheduleTileGridRefit)
+        // refits every one of them on the same resize, and a second fit here
+        // only re-measured six panes to send nothing.
+        this._forEachTile?.((tile) => tile.fit(), { grid: false });
+      }, 300); // Trailing-edge: only fire after 300ms of no resize events
+    };
+
+    window.addEventListener('resize', throttledResize);
+    // Store resize observer for cleanup (prevents memory leak on terminal re-init)
+    if (this.terminalResizeObserver) {
+      this.terminalResizeObserver.disconnect();
+    }
+    this.terminalResizeObserver = new ResizeObserver(throttledResize);
+    this.terminalResizeObserver.observe(container);
+
+    // Handle keyboard input — send to PTY immediately, no local echo.
+    // PTY/Ink handles all character echoing to avoid desync ("typing visible below" bug).
+    this._pendingInput = '';
+    this._inputFlushTimeout = null;
+    this._lastKeystrokeTime = 0;
+
+    const flushInput = () => {
+      this._inputFlushTimeout = null;
+      if (this._pendingInput && this.activeSessionId) {
+        const input = this._pendingInput;
+        const sessionId = this.activeSessionId;
+        this._pendingInput = '';
+        this._sendInputAsync(sessionId, input);
+      }
+    };
+
+    // Local echo mode: buffer keystrokes locally (shown in overlay) and only
+    // send to PTY on Enter.  Avoids out-of-order delivery on high-latency
+    // mobile connections.  The overlay + localStorage persistence ensure input
+    // survives tab switches and reconnects.
+
+    const handleTerminalData = (data) => {
+      // Before anything can rewrite `data`: is this chunk the IME's commit?
+      const isImeCommit = this._consumeMobileImeTerminalData(data);
+      // Mouse SGR reports (tap-to-position) are NOT IME input — they must reach
+      // the PTY even while the CJK input field owns focus. Without this exception
+      // tapping to move the cursor silently does nothing whenever Chinese input
+      // is on, because cjkActive stays true the whole time the field is visible.
+      const isMouseReport = /^\x1b\[<\d+;\d+;\d+[Mm]$/.test(data);
+      // CJK input has focus — block xterm from sending keystrokes to PTY
+      if (!isMouseReport && (window.cjkActive || document.activeElement?.id === 'cjkInput')) {
+        // Self-heal: if the CJK field is visible but focus drifted to xterm's
+        // hidden textarea (e.g. something called terminal.focus()), everything
+        // typed lands HERE and is swallowed — keyboard shows the IME composing
+        // while both the CJK field and the terminal stay empty. Route focus
+        // back so the very next keystroke lands in the CJK field again.
+        // Only GENUINE typed input qualifies: onData also fires for xterm's
+        // self-generated query replies (DA/DSR/CPR/OSC during Ink redraws),
+        // which arrive no matter what has focus — so require focus to be on
+        // xterm's own textarea and bail on query replies, or this would steal
+        // focus from the rename/search/settings inputs while output streams.
+        const cjkEl = document.getElementById('cjkInput');
+        if (
+          cjkEl?.classList.contains('cjk-input-visible') &&
+          document.activeElement === this.terminal.textarea &&
+          !window.ReverieTerminalInput?.shouldSuppressTerminalQueryResponse(data)
+        ) {
+          _crashDiag.log('CJK regain-focus (onData swallowed input)');
+          cjkEl.focus();
+        }
+        return;
+      }
+      if (this.activeSessionId) {
+        // Filter terminal query replies generated by xterm.js itself.
+        // Forwarding them through the WebSocket injects DA/DSR/CPR replies
+        // into the foreground process as typed input (for example "0;276;0c").
+        if (
+          window.ReverieTerminalInput?.shouldSuppressTerminalQueryResponse(data)
+        ) {
+          return;
+        }
+
+        // ── One-shot Ctrl (mobile shell bar, issue #262) ──
+        // A virtual keyboard reports no usable key events, so a keydown hook
+        // would never see the character the modifier applies to: it arrives
+        // here as onData text. Sits AFTER the query-response filter so xterm's
+        // own DA/CPR replies can never spend the modifier, and BEFORE every
+        // send path so the control byte follows the normal control-char route
+        // (immediate flush, local-echo state cleared).
+        //
+        // Mouse and focus reports are skipped rather than suppressed: they are
+        // real bytes the PTY still needs, they just were not typed by anyone.
+        // A shell session passes mouse DECSETs through, so with vim or htop
+        // running, one tap on the terminal used to spend the modifier silently
+        // (measured against a real shell). See isTerminalFocusOrMouseReport.
+        if (
+          typeof KeyboardAccessoryBar !== 'undefined' &&
+          KeyboardAccessoryBar.isCtrlArmed?.() &&
+          !window.ReverieTerminalInput?.isTerminalFocusOrMouseReport(data)
+        ) {
+          data = KeyboardAccessoryBar.consumeCtrl(data);
+        }
+
+        this._lastTerminalData = { data, time: performance.now() };
+
+        // ── Local Echo Pass-through ──
+        // After a composer nav key (arrow/Home/End/Delete) the real cursor may
+        // sit mid-text, where the overlay's append-only buffering would corrupt
+        // both the preview and the submitted text. Such sessions are handed
+        // back to plain PTY echo until Enter or Ctrl+C submits/cancels the
+        // composer line (see the nav-key branch below).
+        const echoPassthrough =
+          this._localEchoEnabled && this._echoPassthroughSessions?.has(this.activeSessionId);
+        if (echoPassthrough && (data === '\r' || data === '\x03')) {
+          this._echoPassthroughSessions.delete(this.activeSessionId);
+        }
+
+        // ── Local Echo Mode ──
+        // When enabled, keystrokes are buffered locally in the overlay for
+        // instant visual feedback.  Nothing is sent to the PTY until Enter
+        // (or a control char) is pressed — avoids out-of-order char delivery.
+        // An IME commit takes the same printable/paste branch as typed text,
+        // and the overlay then shows it in place of the preview.
+        if (this._localEchoEnabled && !echoPassthrough) {
+          if (data === '\x7f') {
+            const source = this._localEchoOverlay?.removeChar();
+            if (source === 'flushed') {
+              // Sync app-level flushed Maps (per-session state for tab switching)
+              const { count, text } = this._localEchoOverlay.getFlushed();
+              if (this._flushedOffsets?.has(this.activeSessionId)) {
+                if (count === 0) {
+                  this._flushedOffsets.delete(this.activeSessionId);
+                  this._flushedTexts?.delete(this.activeSessionId);
+                } else {
+                  this._flushedOffsets.set(this.activeSessionId, count);
+                  this._flushedTexts?.set(this.activeSessionId, text);
+                }
+              }
+              this._pendingInput += data;
+              flushInput();
+            } else if (source === false) {
+              // Nothing pending, nothing flushed, nothing detected. The
+              // composer may still hold text the overlay cannot see (buffer
+              // detection is suppressed after a control-char flush), so
+              // forward the backspace instead of swallowing it (issue #218);
+              // an empty composer ignores it.
+              this._pendingInput += data;
+              flushInput();
+            }
+            // 'pending' = removed unsent text (no PTY backspace needed)
+            return;
+          }
+          if (/^[\r\n]+$/.test(data)) {
+            // Enter: send full buffered text + \r to PTY in one shot
+            const text = this._localEchoOverlay?.pendingText || '';
+            this._localEchoOverlay?.clear();
+            // Suppress detection so PTY-echoed text isn't re-detected as user input
+            this._localEchoOverlay?.suppressBufferDetection();
+            // Clear flushed offset and text — Enter commits all text
+            this._flushedOffsets?.delete(this.activeSessionId);
+            this._flushedTexts?.delete(this.activeSessionId);
+            if (this._inputFlushTimeout) {
+              clearTimeout(this._inputFlushTimeout);
+              this._inputFlushTimeout = null;
+            }
+            if (text) {
+              this._pendingInput += text;
+              flushInput();
+            }
+            // Send \r after a short delay so text arrives first
+            setTimeout(() => {
+              this._pendingInput += '\r';
+              flushInput();
+            }, 80);
+            return;
+          }
+          if (data.length > 1 && data.charCodeAt(0) >= 32) {
+            // Paste: append to overlay only (sent on Enter)
+            this._localEchoOverlay?.appendText(data);
+            if (isImeCommit && this._localEchoOverlay) this._transferMobileImeCommitToLocalEcho();
+            return;
+          }
+          if (data.charCodeAt(0) < 32) {
+            // Skip xterm-generated terminal responses.
+            // These arrive via triggerDataEvent when the terminal processes
+            // buffer data (DA responses, OSC color queries, mode reports, etc.).
+            // They are NOT user input and must not clear flushed text state.
+            // Covers: CSI (\x1b[), OSC (\x1b]), DCS (\x1bP), APC (\x1b_),
+            // PM (\x1b^), SOS (\x1bX), and any other multi-byte ESC sequence.
+            // Single-byte ESC (user pressing Escape) still falls through to
+            // the control char handler below.
+            if (data.length > 1 && data.charCodeAt(0) === 27) {
+              // Bracketed paste (terminal.paste() while DECSET 2004 is on):
+              // flush typed-but-unsent overlay text FIRST so the pasted block
+              // lands after it in the composer, not before it (issue #219).
+              // The paste sequence gets its own delayed write: Codex's
+              // paste-burst handling drops keystrokes that arrive in the SAME
+              // PTY read as a bracketed paste (verified against codex 0.147),
+              // mirroring the delayed \r in the Enter branch above.
+              if (data.startsWith(window.ReverieTerminalInput.BRACKETED_PASTE_START)) {
+                const hadPending = !!this._localEchoOverlay?.pendingText;
+                this._flushLocalEchoPending();
+                if (hadPending) {
+                  flushInput();
+                  setTimeout(() => {
+                    this._pendingInput += data;
+                    flushInput();
+                  }, 80);
+                } else {
+                  this._pendingInput += data;
+                  flushInput();
+                }
+                return;
+              }
+              // Composer nav keys (arrows, Home/End, Delete, PgUp/PgDn):
+              // flush unsent text so the key edits the real composer state,
+              // then hand the session to plain PTY echo until Enter/Ctrl+C.
+              // The cursor may now sit mid-text, where append-only buffering
+              // cannot track edits (issue #218).
+              if (window.ReverieTerminalInput.isComposerNavKey(data)) {
+                this._flushLocalEchoPending();
+                if (!this._echoPassthroughSessions) this._echoPassthroughSessions = new Set();
+                this._echoPassthroughSessions.add(this.activeSessionId);
+                this._pendingInput += data;
+                flushInput();
+                return;
+              }
+              // Multi-byte escape sequence — forward to PTY without clearing
+              // overlay/flushed state (terminal response, not user input)
+              this._pendingInput += data;
+              flushInput();
+              return;
+            }
+            // During buffer load (tab switch), stray control chars from
+            // terminal response processing must not wipe the flushed state
+            // that selectSession() is actively restoring.
+            if (this._restoringFlushedState) {
+              this._pendingInput += data;
+              flushInput();
+              return;
+            }
+            // Tab key: send pending text + Tab to PTY for tab completion.
+            // Set a flag so flushPendingWrites() re-detects buffer text when
+            // the PTY response arrives (event-driven, no fixed timer).
+            if (data === '\t') {
+              const text = this._localEchoOverlay?.pendingText || '';
+              this._localEchoOverlay?.clear();
+              this._flushedOffsets?.delete(this.activeSessionId);
+              this._flushedTexts?.delete(this.activeSessionId);
+              if (text) {
+                this._pendingInput += text;
+              }
+              this._pendingInput += data;
+              if (this._inputFlushTimeout) {
+                clearTimeout(this._inputFlushTimeout);
+                this._inputFlushTimeout = null;
+              }
+              // Snapshot prompt line text BEFORE flushing — used to distinguish
+              // real Tab completions from pre-existing Claude UI text.
+              let baseText = '';
+              try {
+                const p = this._localEchoOverlay?.findPrompt?.();
+                if (p) {
+                  const buf = this.terminal.buffer.active;
+                  const line = buf.getLine(buf.viewportY + p.row);
+                  if (line)
+                    baseText = line
+                      .translateToString(true)
+                      .slice(p.col + 2)
+                      .trimEnd();
+                }
+              } catch {}
+              this._tabCompletionBaseText = baseText;
+              flushInput();
+              this._tabCompletionSessionId = this.activeSessionId;
+              this._tabCompletionRetries = 0;
+              // Fallback: if flushPendingWrites() detection misses the completion
+              // (e.g., flicker filter delays data, or xterm hasn't processed writes
+              // by the time the callback fires), retry detection after a delay.
+              // This ensures the overlay renders even without further terminal data.
+              if (this._tabCompletionFallback) clearTimeout(this._tabCompletionFallback);
+              const selfTab = this;
+              this._tabCompletionFallback = setTimeout(() => {
+                selfTab._tabCompletionFallback = null;
+                if (!selfTab._tabCompletionSessionId || selfTab._tabCompletionSessionId !== selfTab.activeSessionId)
+                  return;
+                const ov = selfTab._localEchoOverlay;
+                if (!ov || ov.pendingText) return;
+                selfTab.terminal.write('', () => {
+                  if (!selfTab._tabCompletionSessionId) return;
+                  ov.resetBufferDetection();
+                  const detected = ov.detectBufferText();
+                  if (detected && detected !== selfTab._tabCompletionBaseText) {
+                    selfTab._tabCompletionSessionId = null;
+                    selfTab._tabCompletionRetries = 0;
+                    selfTab._tabCompletionBaseText = null;
+                    ov.rerender();
+                  }
+                });
+              }, 300);
+              return;
+            }
+            // Control chars (Ctrl+C, single ESC): send buffered text + control char immediately
+            const text = this._localEchoOverlay?.pendingText || '';
+            this._localEchoOverlay?.clear();
+            // Suppress detection so PTY-echoed text isn't re-detected as user input
+            this._localEchoOverlay?.suppressBufferDetection();
+            // Clear flushed offset and text — control chars (Ctrl+C, Escape) change
+            // cursor position or abort readline, making flushed text tracking invalid.
+            this._flushedOffsets?.delete(this.activeSessionId);
+            this._flushedTexts?.delete(this.activeSessionId);
+            if (text) {
+              this._pendingInput += text;
+            }
+            this._pendingInput += data;
+            if (this._inputFlushTimeout) {
+              clearTimeout(this._inputFlushTimeout);
+              this._inputFlushTimeout = null;
+            }
+            flushInput();
+            return;
+          }
+          if (data.length === 1 && data.charCodeAt(0) >= 32) {
+            // Printable char: add to overlay only (sent on Enter)
+            this._localEchoOverlay?.addChar(data);
+            if (isImeCommit && this._localEchoOverlay) this._transferMobileImeCommitToLocalEcho();
+            return;
+          }
+        }
+
+        // ── Predictive Echo (codex): visual only. A plain statement, never a
+        // `return`: control ALWAYS falls through into the send path below,
+        // which is the byte-identity guarantee for #218/#219/#220/#222 —
+        // with the predictor active, absent or throwing, the wire sees the
+        // same bytes. Body in _predictHookOnData (vm-testable).
+        this._predictHookOnData(data);
+
+        // ── Normal Mode (echo disabled) ──
+        this._pendingInput += data;
+
+        // Control chars (Enter, Ctrl+C, escape sequences) — flush immediately
+        if (data.charCodeAt(0) < 32 || data.length > 1) {
+          if (this._inputFlushTimeout) {
+            clearTimeout(this._inputFlushTimeout);
+            this._inputFlushTimeout = null;
+          }
+          flushInput();
+          return;
+        }
+
+        // Regular chars — flush immediately if typed after a gap (>50ms),
+        // otherwise batch via microtask to coalesce rapid keystrokes (paste).
+        const now = performance.now();
+        if (now - this._lastKeystrokeTime > 50) {
+          // Single char after a gap — send immediately, no setTimeout latency
+          if (this._inputFlushTimeout) {
+            clearTimeout(this._inputFlushTimeout);
+            this._inputFlushTimeout = null;
+          }
+          this._lastKeystrokeTime = now;
+          flushInput();
+        } else {
+          // Rapid sequence (paste or fast typing) — coalesce via microtask
+          this._lastKeystrokeTime = now;
+          if (!this._inputFlushTimeout) {
+            this._inputFlushTimeout = setTimeout(flushInput, 0);
+          }
+        }
+      }
+    };
+
+    // Chrome on Android delivers a `composed: true` input event preceded by a
+    // keydown, which is exactly the shape xterm's _inputEvent refuses to
+    // forward, so the committed character is silently dropped. The controller
+    // forwards the input event's own `data` when xterm produced nothing for
+    // that keystroke. Created AFTER terminal.open() on purpose: for an event
+    // targeting the textarea, at-target listeners run in registration order,
+    // so xterm's listener (added in open()) still runs first. The controller
+    // registers its own listener with `capture: true`; on bubble xterm's
+    // `cancel()` (stopPropagation) would swallow exactly the handled events —
+    // see the measured table in terminal-keycode229-recovery.js.
+    // Twin: TerminalTile (terminal-tile.js _createKeyCode229Recovery and its
+    // connect() key handler and onData) wires its own controller the same way
+    // for every grid tile and the split's Pane B; keep the two in step.
+    try {
+      this._keyCode229Recovery = window.ReverieKeyCode229Recovery?.create?.({
+        textarea: this.terminal.textarea,
+        emitRecovered: (data) => handleTerminalData(data),
+        getCompositionHelper: () => this.terminal?._core?._compositionHelper,
+        isScreenReaderMode: () => this.terminal?.options?.screenReaderMode === true,
+      });
+    } catch {
+      this._keyCode229Recovery = null;
+    }
+    this.terminal.onData((data) => {
+      // Canonical xterm data. Telling the controller is what lets it know a
+      // keystroke was already delivered and needs no recovery.
+      //
+      // ⚠️ onData ALSO fires for output xterm produces on its own initiative:
+      // the DA/DSR/CPR/OSC replies it answers during Ink redraws, and the SGR
+      // mouse and focus reports (see the two predicates above, used for exactly
+      // this question at the send sites). Any one of those landing between the
+      // keydown and the candidate's zero-delay resolution would be read as
+      // "xterm spoke for this keystroke", standing the recovery down and
+      // leaving the character dropped, worst on a busy agent pane, which is
+      // the case this exists for. Narrowing the counter cannot cause a
+      // duplicate: it only ever makes the controller less sure it can stand down.
+      try {
+        const input = window.ReverieTerminalInput;
+        if (!input?.shouldSuppressTerminalQueryResponse(data) && !input?.isTerminalFocusOrMouseReport(data)) {
+          this._keyCode229Recovery?.notifyCanonicalData?.();
+        }
+      } catch {
+        // Bookkeeping must never block real input.
+      }
+      handleTerminalData(data);
+    });
+  },
+
+  /**
+   * A clicked path as the preview needs it: relative paths resolved against the
+   * session's working directory, absolute and `~/` paths unchanged
+   * (`resolveLinkedFilePath`, constants.js). Shared by the terminal link
+   * provider and the response viewer, so one path opens the same file in both.
+   */
+  _resolveLinkedFilePath(filePath, sessionId) {
+    if (typeof resolveLinkedFilePath !== 'function') return filePath;
+    return resolveLinkedFilePath(filePath, this.sessions?.get?.(sessionId)?.workingDir);
+  },
+
+  /**
+   * Register a custom link provider for xterm.js that detects file paths
+   * in terminal output and makes them clickable.
+   * When clicked, opens a floating log viewer window with live streaming.
+   *
+   * `target` defaults to the primary terminal and the active session. A second
+   * terminal (the split pane) passes its own `{ terminal, getSessionId,
+   * setHovered }`, so a path printed there opens against THAT pane's session and
+   * hovering it never flips the primary pane's `_linkHovered`. Only the primary
+   * registration is kept on `_terminalLinkProvider`, which the touch path reads.
+   * Returns the provider.
+   */
+  registerFilePathLinkProvider(target = {}) {
+    const self = this;
+    const terminal = target.terminal || this.terminal;
+    const getSessionId = target.getSessionId || (() => this.activeSessionId);
+    const setHovered =
+      target.setHovered ||
+      ((hovered) => {
+        this._linkHovered = hovered;
+      });
+    const isPrimary = terminal === this.terminal;
+
+    // Debug: Track if provider is being invoked
+    let lastInvokedLine = -1;
+
+    const provider = {
+      provideLinks(bufferLineNumber, callback) {
+        // Debug logging - only log if line changed to avoid spam
+        if (bufferLineNumber !== lastInvokedLine) {
+          lastInvokedLine = bufferLineNumber;
+          console.debug('[LinkProvider] Checking line:', bufferLineNumber);
+        }
+
+        const buffer = terminal.buffer.active;
+        // provideLinks passes 1-based line number, getLine expects 0-based
+        const line = buffer.getLine(bufferLineNumber - 1);
+
+        if (!line) {
+          callback(undefined);
+          return;
+        }
+
+        // Stitch the LOGICAL line back together.
+        //
+        // xterm invokes this provider per visible ROW and translateToString returns
+        // that row alone, so a URL or path longer than the terminal is wide matched
+        // only as far as the row boundary and the link opened a PREFIX of the real
+        // target. `terminalLogicalLine` (constants.js) owns the reconstruction —
+        // both continuation kinds, the indent a hard wrap leaves on its
+        // continuation, and the offset↔cell mapping — because touch selection
+        // measures the SAME lines and the two must not disagree.
+        // `terminalPathLine` adds one thing on top, for links only: a path the
+        // program broke over lines itself (Claude Code wraps tool output short of
+        // the edge) is glued back together, so `…/captures/2` + `026-10-10/x.png`
+        // links as the one file it is.
+        // Bounded so a screenful of full-width output (wide tables, box drawing)
+        // cannot make every hover stitch and re-scan the entire viewport.
+        const MAX_STITCHED_ROWS = 12;
+        const logical = window.ReverieTerminalLines?.terminalPathLine(
+          buffer,
+          bufferLineNumber - 1,
+          terminal.cols,
+          MAX_STITCHED_ROWS
+        );
+        if (!logical) {
+          callback(undefined);
+          return;
+        }
+        const lineText = logical.text;
+
+        /** Map an offset in the stitched text back to a 1-based terminal cell. */
+        const coordAt = (index) => {
+          const cell = logical.offsetToCell(index);
+          return { x: cell.col + 1, y: cell.row + 1 };
+        };
+
+        // A path needs a `/` or an extension's `.`; a line with neither has no link.
+        if (!lineText || (!lineText.includes('/') && !lineText.includes('.'))) {
+          callback(undefined);
+          return;
+        }
+
+        const links = [];
+        // Text offsets of every link so far: a later pattern must not cut a
+        // second, overlapping link out of one already found (a relative `b.png`
+        // inside a URL's `?img=b.png`).
+        const taken = [];
+        const isTaken = (start, length) => taken.some((t) => start < t.end && t.start < start + length);
+
+        // Pattern 0: URLs (https://, http://) — matched first so they take priority
+        //
+        // A single `&` is PART of the URL: it separates query parameters, so excluding
+        // it truncated every real query string (`?post=1479&action=edit` linked only
+        // through `1479`, landing on the wrong page). `&&` is still a boundary, since
+        // that is the shell operator and never appears inside a URL. A lone trailing
+        // `&` is trimmed below with the other trailing punctuation.
+        const urlPattern = /https?:\/\/(?:[^\s"'<>|;&)\]\x00-\x1f]|&(?!&))+/g;
+
+        const addUrlLink = (url, matchIndex) => {
+          // Strip trailing punctuation that's likely not part of the URL
+          const cleaned = url.replace(/[.,;:!?)&]+$/, '');
+          const startCol = lineText.indexOf(cleaned, matchIndex);
+          if (startCol === -1) return;
+
+          const start = coordAt(startCol);
+          const end = coordAt(startCol + cleaned.length);
+          if (links.some((l) => l.range.start.x === start.x && l.range.start.y === start.y)) return;
+          taken.push({ start: startCol, end: startCol + cleaned.length });
+
+          links.push({
+            text: cleaned,
+            range: { start, end },
+            decorations: { pointerCursor: true, underline: true },
+            activate(_event, text) {
+              // A `localhost` link tapped from another device can only work
+              // through the server: route it into a proxied web tab
+              // (webview-tabs.js). Anything else opens as before.
+              if (self.openLinkThroughWebTabIfLoopback?.(text)) return;
+              window.open(text, '_blank', 'noopener,noreferrer');
+            },
+            hover() {
+              setHovered(true);
+            },
+            leave() {
+              setHovered(false);
+            },
+          });
+        };
+
+        // Pattern 1: Commands with file paths (tail -f, cat, head, grep pattern, etc.)
+        // Handles: tail -f /path, grep pattern /path, cat -n /path
+        // ⚠ The arg group must stay linear-time: `(?:[^\s\/]*\s+)*` (empty-matchable
+        // token, unbounded) backtracks exponentially on lines with a trigger word
+        // followed by multi-space runs (e.g. wrapped heredoc/table output) — froze
+        // the whole tab on hover. Non-empty token + bounded reps is O(n).
+        const cmdPattern = /\b(tail|cat|head|less|grep|watch|vim|nano)\s+(?:[^\s\/]+\s+){0,4}(\/[^\s"'<>|;&\n\x00-\x1f]+)/g;
+
+        // Pattern 2: Paths with common extensions — absolute, `~/` and relative
+        // (`findFilePathLinks`, constants.js). Image/PDF/media extensions are
+        // included so pasted-attachment paths (`.reverie-uploads/paste-*.png`) and
+        // screenshots an agent just wrote are clickable; those open the file
+        // preview rather than the log viewer (see addLink).
+        //
+        // The patterns live in constants.js because the response viewer linkifies
+        // the SAME paths out of markdown — one definition, two consumers.
+
+        // Pattern 3: Bash() tool output
+        const bashPattern = /Bash\([^)]*?(\/(?:home|tmp|var|etc|opt)[^\s"'<>|;&\)\n\x00-\x1f]+)/g;
+
+        const addLink = (filePath, matchIndex, folder = false) => {
+          const startCol = lineText.indexOf(filePath, matchIndex);
+          if (startCol === -1) return;
+
+          const start = coordAt(startCol);
+          const end = coordAt(startCol + filePath.length);
+          // Skip if already have link at this position, or one overlapping it
+          if (links.some((l) => l.range.start.x === start.x && l.range.start.y === start.y)) return;
+          if (isTaken(startCol, filePath.length)) return;
+          taken.push({ start: startCol, end: startCol + filePath.length });
+
+          links.push({
+            text: filePath,
+            range: { start, end }, // 1-based, may span wrapped rows
+            decorations: {
+              pointerCursor: true,
+              underline: true,
+            },
+            activate(event, text) {
+              // Tailing a PNG in the log viewer shows binary noise; the file preview
+              // already renders images, PDFs, documents and media inline — and it
+              // now reaches files outside the workspace too, which is where an
+              // agent's screenshots and scratchpad captures actually land.
+              //
+              // Text goes to the log viewer, which follows a file that is still
+              // being written — but ONLY where it can actually read: it spawns
+              // `tail -f` and allows the workspace, /var/log and ~/logs, so an
+              // out-of-workspace path there answered "Path must be within
+              // working directory or allowed log directories" while the SAME
+              // path clicked in the response viewer previewed fine. The preview
+              // reads those through the guarded attachment routes, so external
+              // paths route there and the two surfaces agree.
+              //
+              // A relative path is resolved against the session's working
+              // directory first, and a `~/` path always previews (only the
+              // server knows that host's home, and the log viewer cannot ask).
+              const sessionId = getSessionId();
+              const target = self._resolveLinkedFilePath(text, sessionId);
+              // A folder path opens the folder grid (which falls back to the
+              // preview if the server finds a file there after all).
+              if (folder) {
+                self.openFolderGrid(target, sessionId);
+                return;
+              }
+              // An HTML file renders as a page in the preview, never as source
+              // in the log viewer (markdown is in FILE_PREVIEW_EXTENSIONS).
+              if (
+                previewsInFileViewer(target) ||
+                rendersAsPage(target) ||
+                self._isExternalPreviewPath(target, sessionId)
+              ) {
+                self.openFilePreview(target, sessionId);
+                return;
+              }
+              self.openLogViewerWindow(target, sessionId);
+            },
+            hover() {
+              setHovered(true);
+            },
+            leave() {
+              setHovered(false);
+            },
+          });
+        };
+
+        // Match all patterns — URLs first so they take priority
+        let match;
+
+        urlPattern.lastIndex = 0;
+        while ((match = urlPattern.exec(lineText)) !== null) {
+          addUrlLink(match[0], match.index);
+        }
+
+        cmdPattern.lastIndex = 0;
+        while ((match = cmdPattern.exec(lineText)) !== null) {
+          addLink(match[2], match.index);
+        }
+
+        for (const found of findFilePathLinks(lineText)) {
+          addLink(found.path, found.index, !!found.folder);
+        }
+
+        bashPattern.lastIndex = 0;
+        while ((match = bashPattern.exec(lineText)) !== null) {
+          addLink(match[1], match.index);
+        }
+
+        if (links.length > 0) {
+          console.debug(
+            '[LinkProvider] Found links:',
+            links.map((l) => l.text)
+          );
+        }
+        callback(links.length > 0 ? links : undefined);
+      },
+    };
+
+    // Keep the provider reachable: on touch devices xterm's linkifier never
+    // resolves a link (it is driven by mousemove/mouseup, which a tap does not
+    // produce), so the tap path asks this SAME provider what is under the finger
+    // rather than growing a second, driftable copy of the patterns.
+    // See _terminalLinkAtPoint.
+    if (isPrimary) this._terminalLinkProvider = provider;
+    terminal.registerLinkProvider(provider);
+
+    console.log('[LinkProvider] File path link provider registered');
+    return provider;
+  },
+
+  /**
+   * The terminal link under a viewport point, or null.
+   *
+   * Resolved through the provider registered above, so a tap and a desktop click
+   * can never disagree about what is a link or where it ends. Containment
+   * mirrors xterm's own `_linkAtPosition` — flattened `y * cols + x`, inclusive
+   * at both ends — for the same reason.
+   *
+   * ⚠️ The provider answers its callback SYNCHRONOUSLY (every path in
+   * `registerFilePathLinkProvider` does, including the empty ones). xterm's
+   * ILinkProvider contract permits an async reply, so this reads whatever
+   * arrived by the time the call returns and answers null otherwise: a tap then
+   * keeps its normal meaning instead of opening a link late, after the gesture
+   * that made `window.open` permissible is gone.
+   */
+  _terminalLinkAtPoint(clientX, clientY) {
+    const provider = this._terminalLinkProvider;
+    const buffer = this.terminal?.buffer?.active;
+    if (!provider || !buffer) return null;
+    const pos = this._clientPointToCell(clientX, clientY);
+    if (!pos) return null;
+    // Link ranges are 1-based ABSOLUTE buffer lines (xterm adds ydisp to the
+    // viewport row before asking), which is what the provider's coordAt() emits.
+    const y = (buffer.viewportY || 0) + pos.row;
+    let links = null;
+    try {
+      provider.provideLinks(y, (result) => {
+        links = result || [];
+      });
+    } catch {
+      return null;
+    }
+    if (!links || links.length === 0) return null;
+    const cols = Math.max(1, this.terminal.cols || 1);
+    const current = y * cols + pos.col;
+    return (
+      links.find((link) => {
+        const start = link?.range?.start;
+        const end = link?.range?.end;
+        if (!start || !end) return false;
+        return start.y * cols + start.x <= current && current <= end.y * cols + end.x;
+      }) || null
+    );
+  },
+
+  /**
+   * Is this point on the caret's logical line — the editable composer?
+   *
+   * There a tap means "put the cursor here", so a URL the USER typed or pasted
+   * into a prompt must stay editable rather than opening itself. The caret is the
+   * signal that works for every CLI: claude's composer row carries it, and in a
+   * plain shell it sits on the prompt line while output scrolls above, so the
+   * same test covers both without asking what mode is running (tap
+   * classification cannot answer this — a shell session classifies EVERY tap as
+   * 'input', which would leave every URL in shell output inert).
+   *
+   * The caret's line is walked out through soft wraps, since a long prompt spans
+   * rows.
+   */
+  _tapIsOnCaretLine(clientX, clientY) {
+    const buffer = this.terminal?.buffer?.active;
+    if (!buffer?.getLine) return false;
+    const pos = this._clientPointToCell(clientX, clientY);
+    if (!pos) return false;
+    const rows = Math.max(1, this.terminal.rows || 1);
+    const cursorRow = Math.max(0, Math.min(rows - 1, buffer.cursorY || 0));
+    const tappedRow = pos.row - 1;
+    if (tappedRow === cursorRow) return true;
+    let start = cursorRow;
+    while (start > 0 && buffer.getLine(buffer.viewportY + start)?.isWrapped) start--;
+    let end = cursorRow;
+    while (end + 1 < rows && buffer.getLine(buffer.viewportY + end + 1)?.isWrapped) end++;
+    return tappedRow >= start && tappedRow <= end;
+  },
+
+  /**
+   * Activate the terminal link under a touch point. Returns true when one was.
+   *
+   * xterm activates a link from a `mousemove` that resolves what is under the
+   * pointer, followed by a `mouseup` on its SCREEN element — and on a touch
+   * device it receives neither: `touch-action: none` plus touchstart's
+   * preventDefault suppress the browser's compatibility mouse events,
+   * _installMobileTapMouseGuard drops the ones that still arrive, and the
+   * synthetic pair dispatched for mouse REPORTING goes to the `.xterm` root,
+   * an ANCESTOR of the node the linkifier listens on (so it cannot reach it) and
+   * carries no mousemove either way. Every URL and file path in the terminal was
+   * therefore inert on phones and tablets — Claude Code's own `/login` URL
+   * included, which is unfinishable from a phone without this.
+   *
+   * Activating here, synchronously inside the touchend handler, is what keeps
+   * the user gesture that lets the URL branch's `window.open` through the popup
+   * blocker; a later activation (a timer, a promise) is silently swallowed.
+   */
+  _activateTerminalLinkAtPoint(clientX, clientY) {
+    const link = this._terminalLinkAtPoint(clientX, clientY);
+    if (!link || typeof link.activate !== 'function') return false;
+    try {
+      link.activate(null, link.text);
+    } catch (err) {
+      console.warn('[LinkProvider] tap activation failed:', err);
+      return false;
+    }
+    return true;
+  },
+
+  // ═══════════════════════════════════════════════════════════════
+  // Touch text selection — long-press to select, tap to extend, Copy
+  // ═══════════════════════════════════════════════════════════════
+  //
+  // There was no way to copy terminal text from a phone at all. Three layers
+  // ruled it out at once: `user-select: none` on the whole terminal subtree
+  // (taps are cursor gestures there, so the OS callout had to go), the WebGL
+  // renderer drawing glyphs as pixels with only the accessibility tree behind
+  // them, and xterm's own selection being a mouse DRAG — while the tap path
+  // dispatches a zero-movement mousedown/mouseup pair, i.e. a click.
+  //
+  // So the gesture drives xterm's selection API directly (`select`, public and
+  // renderer-independent, and the highlight is drawn by xterm itself). Long-press
+  // is free real estate: tap and swipe are taken, long-press and double-tap are
+  // used by nothing.
+
+  /**
+   * While a selection gesture is in flight, the terminal input must not hold focus.
+   *
+   * ⚠️ This is the guard that actually fixes "the keyboard pops up the moment the
+   * selection appears". The mouse-event guard cannot: the focus does not arrive
+   * through a mouse event at all. Android Chrome runs its own long-press handling
+   * at ~500ms and focuses the nearest editable element — xterm's helper textarea,
+   * a real <textarea> parked at the cursor — and nothing in the touch path can
+   * preventDefault an event it never sees. Blurring on focus is the one move that
+   * works regardless of which path did the focusing.
+   *
+   * Bounded by a self-expiring deadline rather than by the bar's visibility, so a
+   * flag left set can never make the keyboard permanently unreachable.
+   */
+  _installTouchSelectionFocusGuard() {
+    const textarea = this.terminal?.textarea;
+    if (!textarea || textarea._reverieSelectionFocusGuard) return;
+    textarea._reverieSelectionFocusGuard = true;
+    textarea.addEventListener('focus', () => {
+      if (!this._touchSelectionFocusGuarded()) return;
+      // Same task as the focus: a keyboard that opens and closes still shoves the
+      // viewport, and the selection with it.
+      this._blurMobileTerminalInput();
+    });
+  },
+
+  _touchSelectionFocusGuarded() {
+    if (this._touchSelecting) return true;
+    return performance.now() < (this._touchSelectionFocusGuardUntil || 0);
+  },
+
+  /** Re-arm the focus guard; called at every step of the gesture. */
+  _armTouchSelectionFocusGuard() {
+    this._touchSelectionFocusGuardUntil =
+      performance.now() + (window.ReverieTerminalInput?.TOUCH_SELECT_FOCUS_GUARD_MS || 800);
+  },
+
+  /** The absolute 0-based buffer cell under a viewport point, or null. */
+  _touchSelectionCellAt(clientX, clientY) {
+    const pos = this._clientPointToCell(clientX, clientY);
+    const buffer = this.terminal?.buffer?.active;
+    if (!pos || !buffer) return null;
+    return { col: pos.col - 1, row: (buffer.viewportY || 0) + pos.row - 1 };
+  },
+
+  /**
+   * The logical line a buffer row belongs to — the SAME reconstruction the link
+   * provider matches against (`terminalLogicalLine`, constants.js).
+   *
+   * ⚠️ Walking only `isWrapped` was not enough: Claude Code and every other Ink CLI
+   * wrap their own output and emit real newlines, so nothing is flagged and "Line"
+   * grabbed the one row on screen instead of the whole wrapped line. The shared
+   * helper treats a row that fills the last column as continuing, and drops the
+   * indent such a continuation carries.
+   */
+  _touchSelectionLogicalLine(row) {
+    const buffer = this.terminal?.buffer?.active;
+    const cols = Math.max(1, this.terminal?.cols || 1);
+    if (!buffer || typeof window.ReverieTerminalLines?.terminalLogicalLine !== 'function') return null;
+    return window.ReverieTerminalLines.terminalLogicalLine(buffer, row, cols);
+  },
+
+  /**
+   * The run of NON-WHITESPACE around a cell, as {index, length} in absolute cells.
+   *
+   * Whitespace is the only delimiter on purpose: in a terminal the thing worth
+   * grabbing is a path, a URL, a container id or a hash, and every punctuation-
+   * aware word rule cuts those in half.
+   *
+   * ⚠️ Bounds are found in the reconstructed TEXT (so a token is not cut at a wrap)
+   * and then converted to CELLS, because an xterm selection is one contiguous run of
+   * cells. A token spanning a hard wrap therefore also covers the indent cells
+   * between its halves — the alternative, a selection that skips them, cannot be
+   * expressed and would not match what is highlighted.
+   */
+  _touchSelectionWordAt(cell) {
+    const cols = Math.max(1, this.terminal?.cols || 1);
+    const line = this._touchSelectionLogicalLine(cell.row);
+    if (!line) return null;
+    const offset = line.cellToOffset(cell.row, cell.col);
+    if (offset < 0) return null;
+    const ch = line.text[offset];
+    if (!ch || !ch.trim()) return null; // pressed on blank space: nothing to select
+    let from = offset;
+    while (from > 0 && line.text[from - 1] && line.text[from - 1].trim()) from--;
+    let to = offset;
+    while (to + 1 < line.text.length && line.text[to + 1] && line.text[to + 1].trim()) to++;
+    const startCell = line.offsetToCell(from);
+    const endCell = line.offsetToCell(to);
+    const index = startCell.row * cols + startCell.col;
+    const length = endCell.row * cols + endCell.col - index + 1;
+    return length > 0 ? { index, length } : null;
+  },
+
+  /** Apply a selection given absolute cell indices; `select()` wraps a length across rows. */
+  _applyTouchSelection(index, length) {
+    const cols = Math.max(1, this.terminal?.cols || 1);
+    if (length <= 0) return;
+    this.terminal?.select?.(index % cols, Math.floor(index / cols), length);
+  },
+
+  /** Long-press fired: swallow the platform gesture, then select a word if one exists. */
+  _beginTouchSelection(clientX, clientY) {
+    // Reaching the 350ms threshold makes this a long press even when the finger
+    // landed on blank space. Arm every guard before looking for a word so Chrome
+    // cannot focus xterm's hidden textarea, and leave _touchSelecting set so the
+    // touchend branch preventDefaults the compatibility mouse sequence.
+    this._blurMobileTerminalInput();
+    this._suppressTrustedTapMouseEvents();
+    this._armTouchSelectionFocusGuard();
+    this._touchSelecting = true;
+    const cell = this._touchSelectionCellAt(clientX, clientY);
+    if (!cell) return false;
+    const word = this._touchSelectionWordAt(cell);
+    if (!word) return false;
+    this._touchSelectionAnchor = word;
+    this._touchSelectionActive = true;
+    this._applyTouchSelection(word.index, word.length);
+    // Android answers; iOS ignores it silently. Both are fine.
+    try {
+      navigator.vibrate?.(15);
+    } catch {
+      /* vibration is a nicety, never a requirement */
+    }
+    this._showTouchSelectionBar();
+    return true;
+  },
+
+  /**
+   * Extend the selection to a point, from the anchor word.
+   *
+   * Used by BOTH the drag that follows the long-press and a tap while the bar is
+   * up. The tap form is the one that makes this usable on a phone: picking up a
+   * 4px handle with a fingertip is a coin flip, tapping the other end is not.
+   */
+  _extendTouchSelection(clientX, clientY) {
+    const anchor = this._touchSelectionAnchor;
+    const cell = this._touchSelectionCellAt(clientX, clientY);
+    if (!anchor || !cell) return;
+    const cols = Math.max(1, this.terminal?.cols || 1);
+    const point = cell.row * cols + cell.col;
+    // Grow from whichever END of the anchor word is further away, so the word the
+    // press landed on always stays inside the selection.
+    const from = Math.min(anchor.index, point);
+    const to = Math.max(anchor.index + anchor.length, point + 1);
+    this._applyTouchSelection(from, to - from);
+    this._armTouchSelectionFocusGuard();
+    this._positionTouchSelectionBar();
+  },
+
+  /**
+   * Finger up: end the DRAG, keep the selection and the bar.
+   *
+   * ⚠️ The browser synthesizes a trusted `mousedown`/`mouseup` pair after this
+   * touchend, and xterm acts on BOTH: `CoreBrowserTerminal` calls `focus()` from
+   * its screen-element mousedown — so the on-screen keyboard springs up over the
+   * text you just selected — and `SelectionService` resets the model there, so the
+   * selection, and with it the Copy bar (hidden when `hasSelection()` goes false),
+   * vanishes the instant you lift your finger. That is exactly what long-press-to-
+   * copy did before this: keyboard up, selection gone, nothing to copy.
+   *
+   * The tap path already owns a guard for those events; it simply never armed it
+   * here. Arming it is the fix, and the caller additionally `preventDefault()`s the
+   * touchend so the synthesis is stopped at the source rather than swatted after.
+   */
+  _endTouchSelectionGesture() {
+    this._touchSelecting = false;
+    this._suppressTrustedTapMouseEvents();
+    this._armTouchSelectionFocusGuard();
+    this._positionTouchSelectionBar();
+    // Auto Copy's other entry point. The touchend that ends this gesture is
+    // preventDefault()ed (that is what stops the compat mouse pair from
+    // stealing the selection back), so the document mouseup listener never sees
+    // this surface at all, so a phone would have a dead toggle without this call.
+    this._flushAutoCopySelection();
+  },
+
+  /** Whole logical line under the anchor — the common case a word selection just missed. */
+  _selectTouchSelectionLine() {
+    const anchor = this._touchSelectionAnchor;
+    const cols = Math.max(1, this.terminal?.cols || 1);
+    if (!anchor) return;
+    const line = this._touchSelectionLogicalLine(Math.floor(anchor.index / cols));
+    if (!line) return;
+    // Every row of the logical line, wraps included — that is the whole point of
+    // the button. The end is the last row's last non-blank cell: trailing cells are
+    // padding, and copying them would put a wall of spaces on the clipboard.
+    const buffer = this.terminal?.buffer?.active;
+    const lastRow = (buffer?.getLine(line.endRow)?.translateToString(true) || '').length;
+    const index = line.startRow * cols;
+    const length = line.endRow * cols + Math.max(0, lastRow - 1) - index + 1;
+    if (length <= 0) return;
+    this._touchSelectionAnchor = { index, length };
+    this._applyTouchSelection(index, length);
+    this._positionTouchSelectionBar();
+    // Widening to the whole line is a new selection the user asked for, and the
+    // button's click carries the activation both clipboard paths need.
+    this._flushAutoCopySelection();
+  },
+
+  /** Copy through the shared path: Clipboard API, else execCommand (plain-HTTP installs). */
+  async _copyTouchSelection() {
+    const ok = await this.copyTerminalSelection();
+    this._clearTouchSelection();
+    // copyTerminalSelection hands focus back to the terminal, which is right on a
+    // desktop and wrong on a phone: it opens the on-screen keyboard over whatever
+    // was just copied, with nothing waiting to be typed. The execCommand fallback
+    // focuses its own temp textarea on the way through, so this runs after both.
+    if (typeof MobileDetection !== 'undefined' && MobileDetection.isTouchDevice?.()) {
+      this._blurMobileTerminalInput();
+    }
+    return ok;
+  },
+
+  _clearTouchSelection() {
+    this._touchSelecting = false;
+    this._touchSelectionActive = false;
+    this._touchSelectionAnchor = null;
+    this.terminal?.clearSelection?.();
+    this._hideTouchSelectionBar();
+  },
+
+  /** The Copy/Line/dismiss bar. Built in JS — index.html is read once at server start. */
+  _ensureTouchSelectionBar() {
+    if (this._touchSelectionBar?.isConnected) return this._touchSelectionBar;
+    const container = document.getElementById('terminalContainer');
+    if (!container) return null;
+    const bar = document.createElement('div');
+    bar.className = 'term-select-bar';
+    bar.setAttribute('role', 'toolbar');
+    bar.innerHTML =
+      '<button type="button" class="term-select-btn" data-act="copy">Copy</button>' +
+      '<button type="button" class="term-select-btn" data-act="line">Line</button>' +
+      '<button type="button" class="term-select-btn term-select-btn--close" data-act="close" aria-label="Clear selection">✕</button>';
+    // Pointer events only: the container's touch handlers are what own gestures in
+    // this subtree, and they skip anything inside the bar (see initTerminal).
+    bar.addEventListener('click', (ev) => {
+      const act = ev.target?.closest?.('[data-act]')?.dataset?.act;
+      if (!act) return;
+      ev.preventDefault();
+      ev.stopPropagation();
+      if (act === 'copy') void this._copyTouchSelection();
+      else if (act === 'line') this._selectTouchSelectionLine();
+      else this._clearTouchSelection();
+    });
+    container.appendChild(bar);
+    this._touchSelectionBar = bar;
+    return bar;
+  },
+
+  _showTouchSelectionBar() {
+    const bar = this._ensureTouchSelectionBar();
+    if (!bar) return;
+    bar.classList.add('visible');
+    this._positionTouchSelectionBar();
+  },
+
+  _hideTouchSelectionBar() {
+    this._touchSelectionBar?.classList.remove('visible');
+  },
+
+  /**
+   * Park the bar just above the selection, or below it when the selection starts
+   * at the top of the screen. Clamped to the container so it can never sit
+   * off-screen with the only Copy button on it.
+   */
+  _positionTouchSelectionBar() {
+    const bar = this._touchSelectionBar;
+    const container = document.getElementById('terminalContainer');
+    const screen = this.terminal?.element?.querySelector('.xterm-screen');
+    const cell = this.terminal?._core?._renderService?.dimensions?.css?.cell;
+    const range = this.terminal?.getSelectionPosition?.();
+    const buffer = this.terminal?.buffer?.active;
+    if (!bar || !container || !screen || !cell?.height || !range || !buffer) return;
+    const screenRect = screen.getBoundingClientRect();
+    const containerRect = container.getBoundingClientRect();
+    const viewportRow = (row) => row - (buffer.viewportY || 0);
+    const topPx = screenRect.top - containerRect.top + viewportRow(range.start.y) * cell.height;
+    const bottomPx = screenRect.top - containerRect.top + (viewportRow(range.end.y) + 1) * cell.height;
+    const barHeight = bar.offsetHeight || 36;
+    const gap = 6;
+    let top = topPx - barHeight - gap;
+    if (top < 0) top = bottomPx + gap;
+    top = Math.max(0, Math.min(top, containerRect.height - barHeight));
+    const left = screenRect.left - containerRect.left + range.start.x * (cell.width || 8);
+    const barWidth = bar.offsetWidth || 150;
+    bar.style.top = `${Math.round(top)}px`;
+    bar.style.left = `${Math.round(Math.max(0, Math.min(left, containerRect.width - barWidth)))}px`;
+  },
+
+  showWelcome() {
+    // Phones get the session overview instead of the welcome screen: on a small
+    // screen "which session is blocked on me" beats "how do I start one". The
+    // gate lives in mobile-overview.js; every other device falls through
+    // unchanged. Both surfaces are toggled here so a breakpoint change (rotate,
+    // unfold) swaps cleanly instead of showing both.
+    if (this.shouldUseMobileOverview?.()) {
+      const overlay = document.getElementById('welcomeOverlay');
+      if (overlay) overlay.classList.remove('visible');
+      this.hideHomeSessions?.();
+      this.showMobileOverview();
+      this._updateCjkInputState?.();
+      return;
+    }
+    this.hideMobileOverview?.();
+    const overlay = document.getElementById('welcomeOverlay');
+    if (overlay) {
+      overlay.classList.add('visible');
+      this.loadTunnelStatus();
+      this.applyWelcomeCliVisibility();
+      this.loadHistorySessions();
+      this.initSearchPanel();
+      // Open tabs down the left gutter. Self-gating: a window too narrow to hold
+      // the column without overlapping the content leaves it hidden.
+      this.showHomeSessions?.();
+    }
+    // Home screen has no input target — hide the CJK textarea (activeSessionId
+    // is null by the time we get here). Guarded: defined on the app object.
+    this._updateCjkInputState?.();
+  },
+
+  hideWelcome() {
+    this.hideMobileOverview?.();
+    this.hideHomeSessions?.();
+    const overlay = document.getElementById('welcomeOverlay');
+    if (overlay) {
+      overlay.classList.remove('visible');
+    }
+    // Collapse expanded QR when leaving welcome screen
+    const qrWrap = document.getElementById('welcomeQr');
+    if (qrWrap) {
+      clearTimeout(this._welcomeQrShrinkTimer);
+      qrWrap.classList.remove('expanded');
+    }
+    // Entering a session — restore CJK textarea if the user has it enabled
+    // (activeSessionId is already set by selectSession before this call).
+    this._updateCjkInputState?.();
+  },
+
+  /**
+   * Fetch and deduplicate history sessions (up to 3 per project, sorted by date).
+   * Uses projectKey for grouping because workingDir decoding is lossy.
+   * @returns {Promise<Array>} deduplicated session list, most recent first
+   */
+  async _fetchHistorySessions() {
+    const res = await fetch('/api/history/sessions');
+    const data = await res.json();
+    const sessions = data.data?.sessions || [];
+    if (sessions.length === 0) return [];
+
+    const byProject = new Map();
+    for (const s of sessions) {
+      const key = s.projectKey || s.workingDir;
+      if (!byProject.has(key)) byProject.set(key, []);
+      byProject.get(key).push(s);
+    }
+    const items = [];
+    for (const [, group] of byProject) {
+      items.push(...group.slice(0, 3));
+    }
+    items.sort((a, b) => new Date(b.lastModified) - new Date(a.lastModified));
+    return items;
+  },
+
+  /**
+   * Fetch the unified session list (live + persisted + non-Claude + closed
+   * history), already de-duplicated and sorted newest-first by the backend
+   * (`GET /api/sessions/unified`, COD-121). No client-side grouping needed.
+   * @param {number} [limit=60] max sessions to request
+   * @returns {Promise<Array>} unified session items, most recent first
+   */
+  async _fetchUnifiedSessions(limit = 60) {
+    const res = await fetch('/api/sessions/unified?limit=' + limit);
+    // ApiResponse envelope: { success, data: { sessions } }. Throw on failure so
+    // callers (loadHistorySessions) hit their catch instead of rendering a 5xx as
+    // an empty history.
+    const data = await res.json().catch(() => null);
+    if (!res.ok || !data || data.success === false || !data.data) {
+      throw new Error(data?.error || `unified sessions request failed (HTTP ${res.status})`);
+    }
+    return data.data.sessions || [];
+  },
+
+  /**
+   * Resolve workingDir to a case-aware short label.
+   * - Exact case path match → "#caseName"
+   * - workingDir under a case dir → "#caseName/subdir"
+   * - Otherwise → basename (e.g. "Claudeman")
+   */
+  /**
+   * Badge text for a session's git worktree, or '' when it isn't on one.
+   * `⑂ <name> · <branch>`, either half alone if that's all we know.
+   * Branch is truncated: the badge row is a single nowrap line.
+   */
+  _worktreeLabel(s) {
+    // Worktree name is REQUIRED. gitBranch alone is not worktree information —
+    // every ordinary repo session has one, and badging all of them with `⑂ master`
+    // is noise that buries the rows this badge exists to distinguish.
+    const name = s && s.worktreeName;
+    if (!name) return '';
+    let branch = s.gitBranch || '';
+    // A worktree's branch often just restates its name; don't print it twice.
+    if (branch === name || branch === `worktree-${name}`) branch = '';
+    if (branch.length > 24) branch = branch.slice(0, 23) + '\u2026';
+    return '⑂ ' + [name, branch].filter(Boolean).join(' · ');
+  },
+
+  _resolveCaseLabel(workingDir, cases) {
+    if (!workingDir) return '';
+    let best = null;
+    for (const c of cases || []) {
+      if (!c || !c.path) continue;
+      if (workingDir === c.path) {
+        return `#${c.name}`;
+      }
+      if (workingDir.startsWith(c.path + '/')) {
+        const len = c.path.length;
+        if (!best || len > best.len) {
+          best = { name: c.name, suffix: workingDir.slice(len), len };
+        }
+      }
+    }
+    if (best) return `#${best.name}${best.suffix}`;
+    return workingDir.split('/').pop() || workingDir;
+  },
+
+  /**
+   * Normalize a home prefix to "~" on both Linux (`/home/<user>`) and macOS
+   * (`/Users/<user>`). The lookahead lets the home directory ITSELF match, so a
+   * path that is exactly `$HOME` renders "~" instead of being left raw.
+   *
+   * This is the only place that pattern belongs. Two hand-rolled copies had
+   * drifted, each broken on the platform its author was not using: the Run
+   * menu's matched `/home/` only, so on macOS nothing was stripped and every
+   * Recent Sessions row spent its first ~19 characters on an identical
+   * `/Users/<user>/` prefix (#273); the case-manage list's matched `/Users/`
+   * only, so no Linux path was ever abbreviated there. Route new path labels
+   * through here rather than writing a third copy.
+   */
+  _shortenHomePath(p) {
+    return (p || '').replace(/^\/(?:home|Users)\/[^/]+(?=\/|$)/, '~');
+  },
+
+  /**
+   * Build a single history item DOM element.
+   * @param {object} s session record
+   * @param {Array} cases linked cases (for #caseName label)
+   * @param {object} [options]
+   * @param {boolean} [options.showViewAll=true] show "View all in folder" button in detail panel
+   * @param {Function} [options.onActivate] main-row click handler override (default: resume the conversation)
+   */
+  _buildHistoryItem(s, cases, options) {
+    const showViewAll = options?.showViewAll !== false;
+
+    // Size: only render when a numeric byte count is present (unified items
+    // backed solely by a live/persisted source may omit it).
+    const hasSize = typeof s.sizeBytes === 'number';
+    const size = !hasSize
+      ? ''
+      : s.sizeBytes < 1024
+        ? `${s.sizeBytes}B`
+        : s.sizeBytes < 1048576
+          ? `${(s.sizeBytes / 1024).toFixed(0)}K`
+          : `${(s.sizeBytes / 1048576).toFixed(1)}M`;
+
+    // Timestamp: unified shape carries lastActivityAt (ms epoch); the older
+    // folder-modal/history shape carries an ISO lastModified string. Prefer ms,
+    // fall back to parsing the string, and omit entirely when neither is valid.
+    const tsMs =
+      typeof s.lastActivityAt === 'number'
+        ? s.lastActivityAt
+        : s.lastModified
+          ? Date.parse(s.lastModified)
+          : NaN;
+    let timeStr = '';
+    if (!Number.isNaN(tsMs)) {
+      const date = new Date(tsMs);
+      timeStr =
+        date.toLocaleDateString('en', { month: 'short', day: 'numeric' }) +
+        ' ' +
+        date.toLocaleTimeString('en', { hour: '2-digit', minute: '2-digit', hour12: false });
+    }
+
+    const shortDir = this._shortenHomePath(s.workingDir);
+    const caseLabel = this._resolveCaseLabel(s.workingDir, cases);
+
+    const isLive = Array.isArray(s.sources) && s.sources.includes('live');
+
+    const isPinned = s.pinned === true;
+
+    const item = document.createElement('div');
+    item.className = 'history-item' + (isPinned ? ' is-pinned' : '');
+    item.title = s.workingDir || '';
+
+    // Main row: clickable surface. A caller-supplied onActivate wins (the
+    // Session Manager routes live rows to selectSession and history rows to
+    // resume). Otherwise the default focuses the live tab when the row is a
+    // still-running session, else resumes the conversation — keyed by the Claude
+    // conversation UUID (claudeSessionId) when present, since resumed sessions
+    // carry theirs separately from their Reverie id.
+    const mainRow = document.createElement('div');
+    mainRow.className = 'history-item-main';
+    mainRow.addEventListener(
+      'click',
+      options?.onActivate ||
+        (() => {
+          if (isLive && this.sessions.has(s.sessionId)) {
+            this.selectSession(s.sessionId);
+          } else {
+            this.resumeHistorySession(s.claudeSessionId || s.sessionId, s.workingDir || '', s.name, s.mode, s.resumeId);
+          }
+        })
+    );
+
+    const textCol = document.createElement('div');
+    textCol.className = 'history-item-text';
+
+    const titleSpan = document.createElement('span');
+    titleSpan.className = 'history-item-title';
+    if (isPinned) {
+      // Filled pin glyph indicating the session is pinned to the top (COD-139).
+      const pin = document.createElement('span');
+      pin.className = 'history-item-pin';
+      pin.textContent = '📌';
+      pin.setAttribute('aria-label', 'Pinned');
+      pin.title = 'Pinned';
+      titleSpan.appendChild(pin);
+    }
+    titleSpan.appendChild(document.createTextNode(this._historyRowLabel(s, shortDir)));
+
+    // Badge row: mode (claude/codex/opencode/gemini/antigravity/pi/grok/deepseek/shell) + a LIVE pill.
+    const badgeRow = document.createElement('div');
+    badgeRow.className = 'history-item-badges';
+    if (s.mode) {
+      const modeBadge = document.createElement('span');
+      modeBadge.className = 'history-item-badge history-item-badge-mode';
+      modeBadge.textContent = s.mode;
+      badgeRow.appendChild(modeBadge);
+    }
+    // Worktree pill (#266): distinguishes sessions from different worktrees of the
+    // same repo, which are otherwise identical in this list. Name AND branch when
+    // both are known; a hand-made `git worktree add` yields no recoverable name,
+    // so it degrades to branch-only rather than guessing one.
+    const wtLabel = this._worktreeLabel(s);
+    if (wtLabel) {
+      const wtBadge = document.createElement('span');
+      wtBadge.className = 'history-item-badge history-item-badge-worktree';
+      wtBadge.textContent = wtLabel;
+      wtBadge.title = s.worktreeRepo ? `worktree of ${s.worktreeRepo}` : wtLabel;
+      badgeRow.appendChild(wtBadge);
+    }
+    if (isLive) {
+      const liveBadge = document.createElement('span');
+      liveBadge.className = 'history-item-badge history-item-badge-live';
+      liveBadge.textContent = 'LIVE';
+      badgeRow.appendChild(liveBadge);
+    }
+
+    const subtitleSpan = document.createElement('span');
+    subtitleSpan.className = 'history-item-subtitle';
+    if (caseLabel.startsWith('#')) subtitleSpan.classList.add('is-case');
+    subtitleSpan.textContent = caseLabel;
+
+    textCol.append(titleSpan);
+    if (badgeRow.childElementCount > 0) textCol.append(badgeRow);
+    textCol.append(subtitleSpan);
+
+    const metaSpan = document.createElement('span');
+    metaSpan.className = 'history-item-meta';
+    metaSpan.textContent = timeStr;
+
+    const expandBtn = document.createElement('button');
+    expandBtn.className = 'history-item-expand';
+    expandBtn.type = 'button';
+    // COD-130: the ⋯ button now opens a context (kebab) menu rather than
+    // toggling the inline detail panel directly. aria-expanded still tracks
+    // the detail panel (toggled via the menu's "Show details" item).
+    expandBtn.setAttribute('aria-haspopup', 'menu');
+    expandBtn.setAttribute('aria-label', 'Session actions');
+    expandBtn.setAttribute('aria-expanded', 'false');
+    expandBtn.textContent = '⋯'; // ⋯
+
+    mainRow.append(textCol, metaSpan, expandBtn);
+
+    // Detail panel: full prompt + full path, hidden by default
+    const detail = document.createElement('div');
+    detail.className = 'history-item-detail';
+    detail.hidden = true;
+
+    const promptRow = document.createElement('div');
+    promptRow.className = 'history-detail-row';
+    const promptLabel = document.createElement('span');
+    promptLabel.className = 'history-detail-label';
+    promptLabel.textContent = 'Prompt';
+    const promptText = document.createElement('span');
+    promptText.className = 'history-detail-value history-detail-prompt';
+    promptText.textContent = s.firstPrompt || '(no prompt captured)';
+    promptRow.append(promptLabel, promptText);
+
+    // COD-145: show the most recent user prompt too, but collapse single-prompt
+    // sessions (omit when there's no last prompt or it duplicates the first).
+    let lastPromptRow = null;
+    if (s.lastPrompt && s.lastPrompt !== s.firstPrompt) {
+      lastPromptRow = document.createElement('div');
+      lastPromptRow.className = 'history-detail-row';
+      const lastPromptLabel = document.createElement('span');
+      lastPromptLabel.className = 'history-detail-label';
+      lastPromptLabel.textContent = 'Last prompt';
+      const lastPromptText = document.createElement('span');
+      lastPromptText.className = 'history-detail-value history-detail-prompt';
+      lastPromptText.textContent = s.lastPrompt;
+      lastPromptRow.append(lastPromptLabel, lastPromptText);
+    }
+
+    const pathRow = document.createElement('div');
+    pathRow.className = 'history-detail-row';
+    const pathLabel = document.createElement('span');
+    pathLabel.className = 'history-detail-label';
+    pathLabel.textContent = 'Path';
+    const pathText = document.createElement('span');
+    pathText.className = 'history-detail-value history-detail-path';
+    pathText.textContent = shortDir;
+    pathRow.append(pathLabel, pathText);
+
+    const metaRow = document.createElement('div');
+    metaRow.className = 'history-detail-row history-detail-meta';
+    const metaParts = [];
+    if (timeStr) metaParts.push(timeStr);
+    if (hasSize) metaParts.push(size);
+    metaParts.push(s.sessionId.slice(0, 8));
+    metaRow.textContent = metaParts.join(' · ');
+
+    detail.append(promptRow);
+    if (lastPromptRow) detail.append(lastPromptRow);
+    detail.append(pathRow, metaRow);
+
+    if (showViewAll && s.projectKey) {
+      const actionRow = document.createElement('div');
+      actionRow.className = 'history-detail-row history-detail-actions';
+      const viewAllBtn = document.createElement('button');
+      viewAllBtn.type = 'button';
+      viewAllBtn.className = 'history-view-all-btn';
+      viewAllBtn.textContent = 'View all in this folder';
+      viewAllBtn.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        this.openFolderHistoryModal(s.projectKey, s.workingDir, cases);
+      });
+      actionRow.appendChild(viewAllBtn);
+      detail.appendChild(actionRow);
+    }
+
+    expandBtn.addEventListener('click', (ev) => {
+      // COD-130: stop both the row resume handler and the Session Manager
+      // modal's main-row close listener from firing, then open the kebab menu.
+      ev.stopPropagation();
+      ev.preventDefault();
+      this._openSessionRowMenu(ev.currentTarget, s, cases, item, detail);
+    });
+
+    item.append(mainRow, detail);
+    return item;
+  },
+
+  /**
+   * COD-130: Open a context (kebab) menu anchored to a history item's ⋯
+   * button. Replaces the old inline detail-toggle so the same control works
+   * both in the history list and inside the Session Manager modal (where a
+   * capture-phase close listener previously swallowed the click).
+   *
+   * The menu is appended to <body> with fixed positioning so it escapes the
+   * modal's overflow/stacking context, and flips above the anchor when it
+   * would overflow the viewport bottom.
+   *
+   * @param {HTMLElement} anchorEl the ⋯ button the menu anchors to
+   * @param {object} s session record
+   * @param {Array} cases linked cases (unused but kept for parity/future)
+   * @param {HTMLElement} item the .history-item element (for detail toggle)
+   * @param {HTMLElement} detail the inline detail panel element
+   */
+  _openSessionRowMenu(anchorEl, s, cases, item, detail) {
+    // Close any already-open row menu first — call its own close fn so the
+    // previous menu's document/window listeners are detached (a raw .remove()
+    // would leave them dangling until the next event self-cleans).
+    if (this._openRowMenuClose) {
+      try {
+        this._openRowMenuClose();
+      } catch {
+        /* noop */
+      }
+    }
+
+    const isLiveOpen =
+      Array.isArray(s.sources) && s.sources.includes('live') && this.sessions.has(s.sessionId);
+
+    const menu = document.createElement('div');
+    menu.className = 'session-row-menu';
+    menu.setAttribute('role', 'menu');
+
+    // closeMenu tears down the menu and all transient listeners.
+    let onDocMouseDown = null;
+    let onKeyDown = null;
+    let onScrollResize = null;
+    const closeMenu = () => {
+      document.removeEventListener('mousedown', onDocMouseDown, true);
+      document.removeEventListener('keydown', onKeyDown, true);
+      window.removeEventListener('scroll', onScrollResize, true);
+      window.removeEventListener('resize', onScrollResize, true);
+      try {
+        menu.remove();
+      } catch {
+        /* noop */
+      }
+      if (this._openRowMenuEl === menu) {
+        this._openRowMenuEl = null;
+        this._openRowMenuClose = null;
+      }
+    };
+
+    // Helper: build one menu item button.
+    const addItem = (label, onActivate, opts) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'session-row-menu-item';
+      btn.setAttribute('role', 'menuitem');
+      const text = document.createElement('span');
+      text.className = 'session-row-menu-label';
+      text.textContent = label;
+      btn.appendChild(text);
+      if (opts && opts.sublabel) {
+        const sub = document.createElement('span');
+        sub.className = 'session-row-menu-sublabel';
+        sub.textContent = opts.sublabel;
+        btn.appendChild(sub);
+      }
+      btn.addEventListener('click', async (ev) => {
+        // Never let the click bubble to the row resume / modal close handlers.
+        ev.stopPropagation();
+        ev.preventDefault();
+        await onActivate();
+      });
+      menu.appendChild(btn);
+    };
+
+    // Resume / Switch to session (always).
+    addItem(
+      isLiveOpen ? 'Switch to session' : 'Resume session',
+      () => {
+        if (isLiveOpen) {
+          this.selectSession(s.sessionId);
+        } else {
+          // Resume by the Claude conversation UUID when present (resumed sessions
+          // carry theirs separately from their Reverie id).
+          this.resumeHistorySession(s.claudeSessionId || s.sessionId, s.workingDir || '', s.name, s.mode, s.resumeId);
+        }
+        this.closeSessionManager?.();
+        closeMenu();
+      }
+    );
+
+    // Pin / Unpin (COD-139) — floats the session to the top of the list.
+    const isPinned = s.pinned === true;
+    addItem(isPinned ? 'Unpin session' : 'Pin to top', async () => {
+      const ok = await this._setSessionPinned(s.sessionId, !isPinned);
+      if (ok) {
+        // Optimistic local flip so a re-render before the SSE event is consistent.
+        s.pinned = !isPinned;
+        this.showToast(!isPinned ? 'Pinned to top' : 'Unpinned', 'success');
+      } else {
+        this.showToast('Pin failed', 'error');
+      }
+      closeMenu();
+    });
+
+    // Open folder (only for a live+open session — file browser is session-scoped).
+    if (isLiveOpen) {
+      addItem('Open folder', () => {
+        this.selectSession(s.sessionId);
+        this.loadFileBrowser?.(s.sessionId);
+        this.closeSessionManager?.();
+        closeMenu();
+      });
+    }
+
+    // Copy path (only when a workingDir is known).
+    if (s.workingDir) {
+      addItem('Copy path', async () => {
+        const ok = await this._copyText(s.workingDir);
+        this.showToast(ok ? 'Path copied' : 'Copy failed', ok ? 'success' : 'error');
+        closeMenu();
+      });
+    }
+
+    // Show details (always) — toggles the inline detail panel; keeps modal open.
+    addItem('Show details', () => {
+      const expanded = item.classList.toggle('expanded');
+      detail.hidden = !expanded;
+      anchorEl.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+      closeMenu();
+    });
+
+    // Position: fixed, anchored under/over the button; flip up on overflow.
+    document.body.appendChild(menu);
+    const rect = anchorEl.getBoundingClientRect();
+    const menuRect = menu.getBoundingClientRect();
+    const gap = 4;
+    let top = rect.bottom + gap;
+    if (top + menuRect.height > window.innerHeight && rect.top - gap - menuRect.height >= 0) {
+      top = rect.top - gap - menuRect.height; // flip above the anchor
+    }
+    // Right-align the menu to the button, clamped into the viewport.
+    let left = rect.right - menuRect.width;
+    if (left < gap) left = gap;
+    if (left + menuRect.width > window.innerWidth - gap) {
+      left = Math.max(gap, window.innerWidth - gap - menuRect.width);
+    }
+    menu.style.top = `${Math.max(gap, top)}px`;
+    menu.style.left = `${left}px`;
+
+    // Dismissal listeners.
+    onDocMouseDown = (ev) => {
+      if (menu.contains(ev.target) || anchorEl.contains(ev.target)) return;
+      closeMenu();
+    };
+    onKeyDown = (ev) => {
+      if (ev.key === 'Escape') {
+        ev.stopPropagation();
+        closeMenu();
+      }
+    };
+    onScrollResize = () => closeMenu();
+    document.addEventListener('mousedown', onDocMouseDown, true);
+    document.addEventListener('keydown', onKeyDown, true);
+    window.addEventListener('scroll', onScrollResize, true);
+    window.addEventListener('resize', onScrollResize, true);
+
+    this._openRowMenuEl = menu;
+    this._openRowMenuClose = closeMenu;
+  },
+
+  /**
+   * COD-139: Toggle a session's pin via POST /api/sessions/:id/pin.
+   * Pinned sessions float to the top of the session manager list. Returns true
+   * on success. The live re-sort happens when the session:pinned SSE event
+   * fires (handled in app.js), so callers don't need to re-render themselves.
+   * @param {string} sessionId
+   * @param {boolean} pinned explicit desired pin state (idempotent)
+   * @returns {Promise<boolean>}
+   */
+  async _setSessionPinned(sessionId, pinned) {
+    try {
+      const res = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/pin`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ pinned }),
+      });
+      if (!res.ok) return false;
+      const data = await res.json();
+      return data?.success === true;
+    } catch (err) {
+      console.error('[_setSessionPinned]', err);
+      return false;
+    }
+  },
+
+  /** Number of history items shown before "Show More" */
+  _HISTORY_INITIAL_COUNT: 10,
+
+  /**
+   * How many past sessions the home screen loads (also the filter/sort corpus).
+   * 200, not the old 60, so the filter can reach a real backlog, an install with
+   * 35+ conversations would otherwise hit the ceiling before the filter is useful
+   * (raised in @jordan8037310's #263; the endpoint clamps at 500).
+   */
+  _HISTORY_FETCH_LIMIT: 200,
+
+  /** localStorage key for the per-device sort choice (#263). */
+  _HISTORY_SORT_KEY: 'reverie:historySort',
+
+  async loadHistorySessions() {
+    const container = document.getElementById('historySessions');
+    const list = document.getElementById('historyList');
+    if (!container || !list) return;
+
+    try {
+      // Load cases in parallel so subtitle can show "#caseName" labels.
+      // Prefer already-loaded this.cases to avoid an extra request.
+      const casesPromise = Array.isArray(this.cases) && this.cases.length > 0
+        ? Promise.resolve(this.cases)
+        : fetch('/api/cases').then((r) => (r.ok ? r.json() : null)).then((d) => d?.data || []).catch(() => []);
+      const [allSessions, cases] = await Promise.all([
+        this._fetchUnifiedSessions(this._HISTORY_FETCH_LIMIT),
+        casesPromise,
+      ]);
+      if (allSessions.length === 0) {
+        container.style.display = 'none';
+        return;
+      }
+
+      // Keep the corpus around: filtering and sorting (issue #260) work on this
+      // array, so a re-render costs no request. Expansion survives the periodic
+      // refresh in panels-ui.js, collapsing the list under the user's cursor
+      // every few seconds would be worse than the original 4-item cap.
+      this._historyAll = allSessions;
+      this._historyCases = cases;
+      this._wireHistoryControls();
+      this._renderHistoryList();
+
+      container.style.display = '';
+    } catch (err) {
+      console.error('[loadHistorySessions]', err);
+      container.style.display = 'none';
+    }
+  },
+
+  /**
+   * Wire the filter box and sort select once; both re-render from the cached
+   * corpus. The sort choice is restored from (and saved to) localStorage, it is
+   * a per-device display preference, so it stays out of the synced settings
+   * schema, same as `reverie:skin`.
+   */
+  _wireHistoryControls() {
+    if (this._historyControlsWired) return;
+    const filter = document.getElementById('historyFilter');
+    const sort = document.getElementById('historySort');
+    if (!filter && !sort) return;
+    this._historyControlsWired = true;
+
+    if (sort) {
+      try {
+        const saved = localStorage.getItem(this._HISTORY_SORT_KEY);
+        if (saved && Array.from(sort.options).some((o) => o.value === saved)) sort.value = saved;
+      } catch {
+        /* private mode, the order just won't persist */
+      }
+    }
+
+    if (filter) {
+      filter.addEventListener('input', () => this._renderHistoryList());
+      filter.addEventListener('keydown', (ev) => {
+        if (ev.key === 'Escape' && filter.value) {
+          // Swallow it: Escape at the welcome screen otherwise closes overlays.
+          ev.stopPropagation();
+          filter.value = '';
+          this._renderHistoryList();
+        }
+      });
+    }
+    if (sort) {
+      sort.addEventListener('change', () => {
+        try {
+          localStorage.setItem(this._HISTORY_SORT_KEY, sort.value);
+        } catch {
+          /* private mode, the order just won't persist */
+        }
+        this._renderHistoryList();
+      });
+    }
+  },
+
+  /** True when a past-session row matches the filter text (name, folder, case, prompt). */
+  _historyRowMatches(s, needle, cases) {
+    const fields = [
+      s.name,
+      s.workingDir,
+      this._resolveCaseLabel(s.workingDir, cases),
+      s.firstPrompt,
+      s.lastPrompt,
+      s.sessionId,
+    ];
+    return fields.some((f) => typeof f === 'string' && f.toLowerCase().includes(needle));
+  },
+
+  /**
+   * The text a history row shows as its title. Most transcript-backed rows have
+   * no session name at all, so this falls through to the first prompt and then
+   * to the path, and the A–Z sort keys off the SAME string, or "sort by name"
+   * would silently do nothing for exactly the rows the list is mostly made of.
+   */
+  _historyRowLabel(s, fallback) {
+    return s.name || s.firstPrompt || fallback || '';
+  },
+
+  /**
+   * Sort past-session rows. 'recent' keeps the backend order (newest first);
+   * the alphabetical modes sort by the visible title or by folder basename.
+   * Pinned rows stay on top in every mode, pinning is an explicit override and
+   * a sort that buried it would read as the pin having been lost.
+   */
+  _sortHistoryRows(rows, mode) {
+    const label = (s) => this._historyRowLabel(s, this._shortenHomePath(s.workingDir)).toLowerCase();
+    const folder = (s) => ((s.workingDir || '').split('/').pop() || '').toLowerCase();
+    const key = mode === 'name' ? label : folder;
+    // numeric collation so w2-… sorts before w10-…, and base sensitivity so case
+    // does not split a project's rows apart (from @jordan8037310's #263).
+    const sorted =
+      mode === 'recent'
+        ? rows.slice()
+        : rows
+            .slice()
+            .sort((a, b) => key(a).localeCompare(key(b), undefined, { sensitivity: 'base', numeric: true }));
+    const pinned = sorted.filter((s) => s.pinned);
+    return pinned.length === 0 ? sorted : pinned.concat(sorted.filter((s) => !s.pinned));
+  },
+
+  /**
+   * Render the "Resume Conversation" list from the cached corpus, applying the
+   * current filter and sort. Collapsed by default to _HISTORY_INITIAL_COUNT;
+   * "Show more" expands the list AND the box (the CSS cap is class-driven, since
+   * a fixed 240px box made expansion pointless, issue #260).
+   */
+  _renderHistoryList() {
+    const list = document.getElementById('historyList');
+    if (!list) return;
+    const all = this._historyAll || [];
+    const cases = this._historyCases || [];
+    const countEl = document.getElementById('historyCount');
+    const needle = (document.getElementById('historyFilter')?.value || '').trim().toLowerCase();
+    const mode = document.getElementById('historySort')?.value || 'recent';
+
+    const matched = needle ? all.filter((s) => this._historyRowMatches(s, needle, cases)) : all;
+    const rows = this._sortHistoryRows(matched, mode);
+    // Filtering is itself an expansion request: hiding matches behind "Show more"
+    // would defeat the point of typing a filter.
+    const expanded = !!this._historyExpanded || needle.length > 0;
+    const visible = expanded ? rows : rows.slice(0, this._HISTORY_INITIAL_COUNT);
+
+    list.replaceChildren();
+    list.classList.toggle('expanded', expanded);
+
+    if (rows.length === 0) {
+      const empty = document.createElement('div');
+      empty.className = 'history-empty';
+      empty.textContent = `No conversations match "${needle}"`;
+      list.appendChild(empty);
+    }
+
+    for (const s of visible) list.appendChild(this._buildHistoryItem(s, cases));
+
+    const hidden = rows.length - visible.length;
+    if (hidden > 0) {
+      const moreBtn = document.createElement('button');
+      moreBtn.className = 'history-show-more';
+      moreBtn.textContent = `Show ${hidden} more`;
+      moreBtn.addEventListener('click', () => {
+        this._historyExpanded = true;
+        this._renderHistoryList();
+      });
+      list.appendChild(moreBtn);
+    } else if (expanded && !needle && rows.length > this._HISTORY_INITIAL_COUNT) {
+      const lessBtn = document.createElement('button');
+      lessBtn.className = 'history-show-more';
+      lessBtn.textContent = 'Show less';
+      lessBtn.addEventListener('click', () => {
+        this._historyExpanded = false;
+        this._renderHistoryList();
+        list.scrollTop = 0;
+      });
+      list.appendChild(lessBtn);
+    }
+
+    if (countEl) {
+      countEl.textContent = needle
+        ? `${rows.length} of ${all.length}`
+        : rows.length > visible.length
+          ? `${visible.length} of ${rows.length}`
+          : String(rows.length);
+    }
+  },
+
+  /** Page size for the folder history modal */
+  _FOLDER_HISTORY_PAGE_SIZE: 20,
+
+  /**
+   * Open a modal showing all history sessions in a single folder.
+   * Paginated by FOLDER_HISTORY_PAGE_SIZE; "Show more" loads next page.
+   */
+  openFolderHistoryModal(projectKey, workingDir, cases) {
+    // Close any existing instance first
+    this._closeFolderHistoryModal();
+
+    const modal = document.createElement('div');
+    modal.className = 'modal active folder-history-modal';
+    modal.id = 'folderHistoryModal';
+
+    const backdrop = document.createElement('div');
+    backdrop.className = 'modal-backdrop';
+    backdrop.addEventListener('click', () => this._closeFolderHistoryModal());
+
+    const content = document.createElement('div');
+    content.className = 'modal-content modal-lg';
+
+    const header = document.createElement('div');
+    header.className = 'modal-header';
+    const title = document.createElement('h3');
+    title.textContent = 'Folder History';
+    const subtitle = document.createElement('div');
+    subtitle.className = 'folder-history-subtitle';
+    subtitle.textContent = this._shortenHomePath(workingDir);
+    const closeBtn = document.createElement('button');
+    closeBtn.className = 'modal-close';
+    closeBtn.setAttribute('aria-label', 'Close');
+    closeBtn.innerHTML = '&times;';
+    closeBtn.addEventListener('click', () => this._closeFolderHistoryModal());
+    header.append(title, closeBtn);
+
+    const body = document.createElement('div');
+    body.className = 'modal-body';
+    const list = document.createElement('div');
+    list.className = 'folder-history-list';
+    list.setAttribute('data-loading', 'true');
+    list.textContent = 'Loading...';
+    body.append(subtitle, list);
+
+    content.append(header, body);
+    modal.append(backdrop, content);
+    document.body.appendChild(modal);
+
+    // Track state for pagination
+    this._folderHistoryState = {
+      projectKey,
+      workingDir,
+      cases: cases || [],
+      offset: 0,
+      total: null,
+      list,
+    };
+
+    // ESC to close
+    this._folderHistoryEscHandler = (ev) => {
+      if (ev.key === 'Escape') this._closeFolderHistoryModal();
+    };
+    document.addEventListener('keydown', this._folderHistoryEscHandler);
+
+    this._loadFolderHistoryPage();
+  },
+
+  async _loadFolderHistoryPage() {
+    const state = this._folderHistoryState;
+    if (!state) return;
+    const { projectKey, cases, list } = state;
+    const limit = this._FOLDER_HISTORY_PAGE_SIZE;
+    const offset = state.offset;
+
+    // Remove existing "Show more" button while loading
+    const existingMore = list.querySelector('.folder-history-more');
+    if (existingMore) existingMore.remove();
+
+    // First page: clear loading placeholder
+    if (offset === 0) {
+      list.replaceChildren();
+      list.removeAttribute('data-loading');
+    }
+
+    try {
+      const url = `/api/history/sessions?projectKey=${encodeURIComponent(projectKey)}&offset=${offset}&limit=${limit}`;
+      const res = await fetch(url);
+      const data = await res.json();
+      const sessions = data.data?.sessions || [];
+      state.total = typeof data.data?.total === 'number' ? data.data.total : sessions.length + offset;
+
+      if (offset === 0 && sessions.length === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'folder-history-empty';
+        empty.textContent = 'No conversations found in this folder.';
+        list.appendChild(empty);
+        return;
+      }
+
+      for (const s of sessions) {
+        list.appendChild(this._buildHistoryItem(s, cases, { showViewAll: false }));
+      }
+
+      state.offset = offset + sessions.length;
+
+      // Add "Show more" if there are more sessions
+      if (state.offset < state.total) {
+        const remaining = state.total - state.offset;
+        const moreBtn = document.createElement('button');
+        moreBtn.className = 'history-show-more folder-history-more';
+        moreBtn.textContent = `Show ${Math.min(limit, remaining)} more (${remaining} remaining)`;
+        moreBtn.addEventListener('click', () => this._loadFolderHistoryPage());
+        list.appendChild(moreBtn);
+      }
+    } catch (err) {
+      console.error('[loadFolderHistoryPage]', err);
+      const errorEl = document.createElement('div');
+      errorEl.className = 'folder-history-empty';
+      errorEl.textContent = 'Failed to load folder history.';
+      list.appendChild(errorEl);
+    }
+  },
+
+  _closeFolderHistoryModal() {
+    const modal = document.getElementById('folderHistoryModal');
+    if (modal) modal.remove();
+    if (this._folderHistoryEscHandler) {
+      document.removeEventListener('keydown', this._folderHistoryEscHandler);
+      this._folderHistoryEscHandler = null;
+    }
+    this._folderHistoryState = null;
+  },
+
+  // Choose the name for a resumed session: keep the session's own name when it
+  // has one, otherwise synthesize a fresh w<N>-<dir> name (next free w-number
+  // across open sessions). COD-143 — resume used to always generate a new name.
+  _resolveResumeName(existingName, workingDir) {
+    if (typeof existingName === 'string' && existingName.trim()) return existingName;
+    const dirName = (workingDir || '').split('/').pop() || 'session';
+    let startNumber = 1;
+    for (const [, session] of this.sessions) {
+      const match = session.name && session.name.match(/^w(\d+)-/);
+      if (match) {
+        const num = parseInt(match[1]);
+        if (num >= startNumber) startNumber = num + 1;
+      }
+    }
+    return `w${startNumber}-${dirName}`;
+  },
+
+  async resumeHistorySession(sessionId, workingDir, existingName, mode, resumeId) {
+    // Close the run mode menu if open
+    document.getElementById('runModeMenu')?.classList.remove('active');
+    // Close folder history modal if open
+    this._closeFolderHistoryModal();
+    try {
+      this.terminal.clear();
+      this.terminal.writeln(`\x1b[1;32m Resuming conversation ${sessionId.slice(0, 8)}...\x1b[0m`);
+
+      // Keep the session's own name when resuming; only synthesize a w<N>-<dir>
+      // name when the source row had none (COD-143).
+      const name = this._resolveResumeName(existingName, workingDir);
+
+      // Create session with resumeSessionId — include envOverrides so resumed
+      // conversations inherit current UI settings (effort, agent teams, etc.).
+      // Match by path (not basename) so linked/renamed cases still resolve correctly.
+      const matchingCase = (this.cases || []).find((c) => c.path === workingDir);
+      const caseName = matchingCase?.name || workingDir.split('/').pop() || '';
+      const globalSettings = this.loadAppSettingsFromStorage();
+      const envOverrides = this.buildEnvOverrides(this.getCaseSettings(caseName), globalSettings);
+      const effort = this.getEffortSetting(globalSettings);
+      const advisorModel = this.getAdvisorSetting(globalSettings);
+      // `resumeSessionId` is a Claude conversation UUID (server reads it from
+      // ~/.claude/projects); an external-CLI row has no such thing, so sending
+      // it there gets silently ignored while the OMITTED `mode` field defaults
+      // the create to plain claude — reproducing whatever conversation THAT
+      // uuid happens to collide with instead of the row's own backend. Row mode
+      // wins here. Reverie has no cross-restart PTY-reattach outside server
+      // boot, so "resume" for a non-claude row means relaunching the CLI's own
+      // continue-most-recent flag (opencode/pi/grok/omp --continue, deepseek
+      // resumeSession) in the same directory — real conversation continuity,
+      // just not the literal old process.
+      const effectiveMode = mode || 'claude';
+      const modeConfigKey = {
+        opencode: 'openCodeConfig',
+        pi: 'piConfig',
+        grok: 'grokConfig',
+        omp: 'ompConfig',
+      }[effectiveMode];
+      // codex names a thread by an id of its own, not by Reverie's session id,
+      // so it continues only when the row carried that id: `resumeId` is set by
+      // the rollout scanner (codex-transcript.ts) and by nothing else, which is
+      // what stops a LIVE codex row — whose sessionId is Reverie's uuid — from
+      // asking codex for a thread that does not exist.
+      //
+      // gemini/antigravity still have no wired continuation here (same reason
+      // codex used to have none: an exact conversation id nothing supplies) —
+      // `continuesSomething` below is what keeps their row from being retired
+      // for a resume that didn't actually continue anything.
+      const codexResumeId = effectiveMode === 'codex' ? resumeId : undefined;
+      const modeConfig =
+        modeConfigKey
+          ? { [modeConfigKey]: { continueSession: true } }
+          : effectiveMode === 'deepseek'
+            ? { deepSeekConfig: { resumeSession: true } }
+            : codexResumeId
+              ? { codexConfig: { resumeSessionId: codexResumeId } }
+              : {};
+      const continuesSomething =
+        Boolean(modeConfigKey) || effectiveMode === 'deepseek' || Boolean(codexResumeId);
+      const createRes = await fetch('/api/sessions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          workingDir,
+          name,
+          mode: effectiveMode,
+          ...(effectiveMode === 'claude' ? { resumeSessionId: sessionId } : {}),
+          ...modeConfig,
+          ...(Object.keys(envOverrides).length > 0 ? { envOverrides } : {}),
+          ...(effort ? { effort } : {}),
+          // The advisor is a claude-only feature; other CLIs would carry it inertly.
+          ...(advisorModel && effectiveMode === 'claude' ? { advisorModel } : {}),
+        }),
+      });
+      const createData = await createRes.json();
+      if (!createData.success) throw new Error(createData.error);
+
+      const newSessionId = createData.data.session.id;
+
+      // Start interactive
+      await fetch(`/api/sessions/${newSessionId}/interactive`, { method: 'POST' });
+
+      // Retire the row being resumed: a non-claude "resume" is really a brand
+      // new Reverie session pointed at the same directory (there is no id to
+      // reattach to), so without this every resume leaves the old row behind
+      // as a duplicate — click it 3 times, see the same name 3 times. Claude
+      // rows are left alone: `sessionId` there is a claudeSessionId, which
+      // usually has no live/persisted Reverie session of its own to delete.
+      // Gated on `continuesSomething`: for gemini/antigravity, and for a codex
+      // row carrying no `resumeId`, this is really a FRESH session with no
+      // relation to the old row's conversation, so retiring it would discard
+      // the old conversation with no recovery — worse than the duplicate row
+      // this guard exists to prevent for the modes that DO continue.
+      //
+      // A codex row that DOES continue passes this gate, but the DELETE is a
+      // no-op for it: `sessionId` there is codex's thread id and no Reverie
+      // session carries that id. Its duplicate is cleared from the other side
+      // instead, by the alias fold in gatherUnifiedInputs()/Session.
+      if (effectiveMode !== 'claude' && continuesSomething && sessionId !== newSessionId) {
+        fetch(`/api/sessions/${sessionId}?killMux=true`, { method: 'DELETE' }).catch(() => {});
+      }
+
+      this.terminal.writeln(`\x1b[90m Session ${name} ready\x1b[0m`);
+      await this.selectSession(newSessionId);
+      this.terminal.focus();
+    } catch (err) {
+      this.terminal.writeln(`\x1b[1;31m Error: ${err.message}\x1b[0m`);
+    }
+  },
+
+  // ═══════════════════════════════════════════════════════════════
+  // Terminal Rendering
+  // ═══════════════════════════════════════════════════════════════
+
+  /**
+   * Check if terminal viewport is at or near the bottom.
+   * Used to implement "sticky scroll" behavior - keep user at bottom if they were there.
+   */
+  isTerminalAtBottom() {
+    if (!this.terminal) return true;
+    const buffer = this.terminal.buffer.active;
+    // viewportY is the top line of the viewport, baseY is where scrollback starts
+    // If viewportY >= baseY, we're showing the latest content (at bottom)
+    // Allow 2 lines tolerance for edge cases
+    return buffer.viewportY >= buffer.baseY - 2;
+  },
+
+  /**
+   * Re-take the sticky-scroll baseline from where the viewport now sits.
+   *
+   * `batchTerminalWrite` samples `_wasAtBottomBeforeWrite` before it queues
+   * data, and `flushPendingWrites` scrolls to the bottom off that sample. A
+   * buffer load that replays its queue samples at the worst possible moment:
+   * `_finishBufferLoad` runs inside `chunkedTerminalWrite`, before its promise
+   * resolves, with the terminal freshly reset and rewritten, so the sample is
+   * always true. A caller that then restores the reader's position would have
+   * that restore undone by the next flush.
+   *
+   * `_onSessionNeedsRefresh` and `_maybeRefetchFullHistory` restore a position
+   * and both call this, so their baseline describes the position they chose.
+   *
+   * The other two load paths do not call it, for different reasons.
+   * `_onSessionClearTerminal` resets and rewrites with no scroll afterwards,
+   * so the sampled true is already the truth there. `selectSession` does NOT
+   * end at the bottom, whatever its `scrollToBottom()` after the write
+   * suggests: it ends at `scrollToLastNonEmptyLine()`, which targets
+   * `lastNonEmptyLine - rows + 2` and therefore parks ABOVE `baseY` whenever
+   * the replayed frame keeps trailing blank rows, which a full capture does on
+   * purpose. Its baseline is a stale true. What decides whether that matters
+   * is the sticky snap in `flushPendingWrites`, and since de864e7d that snap
+   * fires only when the flush found the viewport already at the bottom
+   * (`preserveViewportY === null`), which a parked selectSession viewport is
+   * not. Do not read the absent call here as a claim that selectSession lands
+   * at the bottom.
+   */
+  _syncStickyScrollBaseline() {
+    this._wasAtBottomBeforeWrite = this.isTerminalAtBottom();
+  },
+
+  // Record manual scroll gestures so sticky-scroll can give an upward scroll a
+  // short grace window (see _hasRecentUserScrollUp). A downward scroll that
+  // lands back at the bottom clears the suppression immediately.
+  _noteTerminalUserScroll(lines) {
+    if (lines < 0) {
+      this._lastUserScrollUpAt = performance.now();
+    } else if (this.isTerminalAtBottom()) {
+      this._lastUserScrollUpAt = null;
+    }
+  },
+
+  /**
+   * Post-scroll companion to _noteTerminalUserScroll: hitting the TOP of the
+   * buffer while scrolling up gives the app a chance to pull the rest of tmux's
+   * scrollback (issue #205, see _maybeRefetchFullHistory). Shell sessions pull a
+   * bounded window because their captures can be large; their banner button is
+   * the unbounded path. Must be called AFTER scrollLines(), since the check is on
+   * the resulting position, and it is deliberately not folded into
+   * _noteTerminalUserScroll for exactly that reason.
+   *
+   * It is also what brings up the partial-history notice, and what retires it
+   * once a downward scroll is back at live output (_setHistoryNoticeRevealed).
+   * The reveal waits for the pull this gesture started, so the notice describes
+   * what the pull left rather than flashing the state it is about to replace.
+   */
+  _maybeLoadMoreHistoryOnScroll(lines) {
+    if (lines > 0) {
+      if (this.isTerminalAtBottom()) this._setHistoryNoticeRevealed?.(null);
+      return;
+    }
+    if (lines === 0 || this.terminal?.buffer?.active?.viewportY !== 0) return;
+    // An earlier frame of this gesture already started the pull; its own
+    // completion reveals the notice, so do not flash the pre-pull state now.
+    if (this._fullHistoryRepullInFlight || this._isLoadingBuffer) return;
+    const sessionId = this.activeSessionId;
+    Promise.resolve(this._maybeRefetchFullHistory?.())
+      .catch(() => {})
+      .then(() => {
+        if (sessionId && this.activeSessionId === sessionId) this._setHistoryNoticeRevealed?.(sessionId);
+      });
+  },
+
+  /**
+   * Rows a `?full=1` capture will occupy once written into xterm.
+   *
+   * tmux joins wrapped rows in that capture (`capture-pane -J`), so a long
+   * logical line re-wraps into several xterm rows on write and a bare newline
+   * count would undershoot; escape sequences occupy no cells and come out
+   * first. Approximate by construction (it ignores double-width glyphs), which
+   * is fine: the only consumer is a coarse size comparison
+   * (_replayWouldShrinkBuffer), and it runs once per cooldown-guarded re-pull.
+   */
+  _estimateReplayRows(text, cols) {
+    if (typeof text !== 'string' || !text) return 0;
+    const width = cols > 0 ? cols : 80;
+    const plain = text.replace(window.ReverieTerminalInput.REPLAY_ESCAPE_RE, '');
+    let rows = 0;
+    for (const line of plain.split('\n')) {
+      const cells = line.endsWith('\r') ? line.length - 1 : line.length;
+      rows += cells > width ? Math.ceil(cells / width) : 1;
+    }
+    return rows;
+  },
+
+  /**
+   * DOWNGRADE GUARD for the scroll-to-top re-pull (issue #205, round 2).
+   *
+   * `_maybeRefetchFullHistory` resets the terminal and rewrites it from the
+   * capture, which is a straight win when tmux holds more than the browser —
+   * the burst-repaint and tab-switch losses it was built for. But a repaint-mode
+   * CLI pane keeps NO tmux history of its own (`history_size≈0` measured for a
+   * Claude pane), so there the capture is roughly ONE frame while xterm may hold
+   * hundreds of rows of replayed frames. Rewriting then DESTROYS history
+   * mid-scroll: exactly the "goes back a limited amount, repeats blocks, gets
+   * worse when I reach the top" report from the 1.12.0 retest.
+   *
+   * So refuse when the capture is smaller, with a one-screen tolerance because
+   * both sides are estimates: `buffer.active.length` includes the blank rows
+   * below the last line, and _estimateReplayRows can only approximate wrapping.
+   * Only a capture that is worse by more than a full screen counts as a
+   * downgrade, which leaves every genuine recovery case untouched.
+   *
+   * A caller that already estimated the capture's rows passes them as
+   * `estimatedRows`, so a megabyte capture is not scanned twice.
+   */
+  _replayWouldShrinkBuffer(capture, estimatedRows) {
+    const term = this.terminal;
+    const rowsNow = term?.buffer?.active?.length || 0;
+    if (!rowsNow) return false;
+    const screen = term?.rows || 24;
+    const rows = estimatedRows ?? this._estimateReplayRows(capture, term?.cols);
+    return rows + screen < rowsNow;
+  },
+
+  /**
+   * Ease-out smooth scrolling for the local wheel path. The capture-phase
+   * wheel handler owns local scrolling (xterm's own smooth scroller is
+   * bypassed, see the listener comment), so without this every notch was an
+   * instant multi-line jump. Wheel deltas accumulate into a pending line
+   * count (fractional — see _wheelScrollLinesFloat) and drain ~22% per
+   * animation frame with a one-line floor, so a single notch starts with a
+   * gentle step and glides to an exact landing; more notches mid-glide deepen
+   * the pending count, which reads as natural acceleration. A sub-line
+   * residual stays pending until further input pushes it past a whole line
+   * (that is what makes slow trackpad drags track the finger). Direction
+   * reversals cancel arithmetically. The pending amount is dropped when the
+   * active session changes mid-glide — leftover momentum must never scroll
+   * the tab the user just switched to.
+   */
+  _smoothScrollBy(lines) {
+    if (!lines) return;
+    this._smoothScrollPending = (this._smoothScrollPending || 0) + lines;
+    this._smoothScrollSession = this.activeSessionId;
+    if (this._smoothScrollFrame) return;
+    const step = () => {
+      this._smoothScrollFrame = null;
+      const pending = this._smoothScrollPending || 0;
+      if (!pending) return;
+      if (this.activeSessionId !== this._smoothScrollSession) {
+        this._smoothScrollPending = 0;
+        return;
+      }
+      if (Math.abs(pending) < 1) return; // sub-line residual: wait for more input
+      const eased = pending * 0.22;
+      const move = pending > 0 ? Math.max(1, Math.floor(eased)) : Math.min(-1, Math.ceil(eased));
+      this._smoothScrollPending = pending - move;
+      this.terminal.scrollLines(move);
+      this._maybeLoadMoreHistoryOnScroll(move);
+      if (Math.abs(this._smoothScrollPending) >= 1) this._smoothScrollFrame = requestAnimationFrame(step);
+    };
+    this._smoothScrollFrame = requestAnimationFrame(step);
+  },
+
+  /**
+   * Hand a scroll gesture (wheel tick or touch drag, already converted to
+   * lines) to the CLI as synthetic SGR wheel reports. SGR coordinates address
+   * the LIVE screen (the bottom `rows` of the buffer), so a report computed
+   * from a scrolled-up viewport would hit-test a different row entirely, and
+   * forwarding while the user stares at stale scrollback looks like the
+   * gesture is dead. Snap back first: the gesture then always acts on what the
+   * CLI is drawing now.
+   */
+  _forwardScrollToApp(clientX, clientY, lines) {
+    if (!this._terminalViewportAtBottom()) this.terminal.scrollToBottom();
+    this._sendSyntheticSgrWheel(clientX, clientY, lines);
+  },
+
+  _hasRecentUserScrollUp() {
+    if (typeof this._lastUserScrollUpAt !== 'number') return false;
+    return performance.now() - this._lastUserScrollUpAt < window.ReverieTerminalInput.USER_SCROLL_STICKY_SUPPRESS_MS;
+  },
+
+  /**
+   * Watchdog for a frozen renderer.
+   *
+   * iOS DISCARDS scheduled requestAnimationFrame callbacks when a PWA goes to
+   * the background — not deferred, never delivered. xterm's RenderDebouncer
+   * only clears its `_animationFrame` handle from INSIDE that callback, so once
+   * one is dropped the handle stays permanently non-undefined and every later
+   * `refresh()` returns on its first line. Parsing is decoupled from rendering,
+   * so bytes keep filling the buffer correctly and nothing throws: the terminal
+   * is simply frozen until the page is reloaded.
+   *
+   * Reverie is more exposed than an app that mounts a terminal per session —
+   * there is exactly ONE xterm instance for the whole page load, so a single
+   * backgrounding can wedge it for the rest of the session.
+   *
+   * The heal is what `_innerRefresh` would have done: cancel the stale handle,
+   * clear the field, and request a full repaint (which schedules a fresh rAF).
+   * Cancelling a genuinely pending handle is harmless — the full repaint that
+   * follows covers whatever it was going to draw.
+   *
+   * Discipline for reaching into xterm privates, and it is not optional: every
+   * access is optional-chained and the whole body is wrapped, so a shape change
+   * upstream degrades to a no-op. A self-heal that can break the terminal it is
+   * healing is worse than no self-heal.
+   *
+   * ⚠️ The field path (`_core._renderService._renderDebouncer._animationFrame`)
+   * is validated against xterm 6.x and CANNOT be covered by the CI gate:
+   * `_renderService` is only constructed by `Terminal.open()`, which needs a
+   * real DOM, and the gate runs in node. `test/xterm-private-api.test.ts` pins
+   * the RESOLVED lockfile version instead, so ANY bump fails there — not only a
+   * major — and sends someone to re-check this by hand; the declared `^6.0.0`
+   * range was the wrong assertion in both directions, since 6.4.0 could rename a
+   * private field while resolving inside it. `test/terminal-resilience.test.ts`
+   * covers the decision half. If the path ever goes stale the watchdog silently
+   * stops healing — that is the failure mode to watch for, and why the version
+   * guard exists at all.
+   */
+  _startRenderLivenessWatchdog() {
+    this._stopRenderLivenessWatchdog();
+    this._lastRenderAt = Date.now();
+    this._lastTerminalWriteAt = 0;
+    this._renderLivenessTimer = setInterval(() => {
+      try {
+        if (typeof ReverieRenderLiveness === 'undefined') return;
+        const kick = ReverieRenderLiveness.shouldKickRenderer({
+          wroteAt: this._lastTerminalWriteAt || 0,
+          renderedAt: this._lastRenderAt || 0,
+          now: Date.now(),
+          // A hidden terminal legitimately stops rendering (xterm pauses it),
+          // so only a VISIBLE one that owes us a frame counts as frozen.
+          visible: document.visibilityState === 'visible' && !!this.terminal?.element?.isConnected,
+        });
+        if (!kick) return;
+        const kicked = this._kickRenderer();
+        _crashDiag.log(`RENDER STALL: kick=${kicked}`);
+        // Treat the kick as the render for accounting purposes either way, so a
+        // terminal we cannot heal logs once per stall rather than every tick.
+        this._lastRenderAt = Date.now();
+      } catch {
+        /* a watchdog must never throw into the interval */
+      }
+    }, RENDER_LIVENESS_POLL_MS);
+  },
+
+  _stopRenderLivenessWatchdog() {
+    if (this._renderLivenessTimer) {
+      clearInterval(this._renderLivenessTimer);
+      this._renderLivenessTimer = null;
+    }
+  },
+
+  /**
+   * Do what xterm's dropped `_innerRefresh` would have done. Never throws.
+   * @returns {boolean} true if a stale handle was found and cleared.
+   */
+  _kickRenderer() {
+    try {
+      const renderService = this.terminal?._core?._renderService;
+      const debouncer = renderService?._renderDebouncer;
+      if (!debouncer || typeof renderService.refreshRows !== 'function') return false;
+      const handle = debouncer._animationFrame;
+      if (handle === undefined) return false; // not wedged — nothing to clear
+      try {
+        cancelAnimationFrame(handle);
+      } catch {
+        /* a stale handle may no longer be cancellable; clearing it is the point */
+      }
+      debouncer._animationFrame = undefined;
+      renderService.refreshRows(0, Math.max(0, (this.terminal.rows || 1) - 1));
+      return true;
+    } catch {
+      return false;
+    }
+  },
+
+  batchTerminalWrite(data) {
+    // Arrival order of output, so the IME preview can tell output that
+    // followed a commit from output that was already queued before it.
+    this._terminalOutputSeq = (this._terminalOutputSeq || 0) + 1;
+    // Feed the renderer watchdog. Recorded before the buffer-load early return
+    // below: a write that is queued rather than written still means the pipeline
+    // owes us a frame once it drains.
+    this._lastTerminalWriteAt = Date.now();
+
+    // If a buffer load (chunkedTerminalWrite) is in progress, queue live events
+    // to prevent interleaving historical buffer data with live SSE data.
+    // This is critical: interleaving causes cursor position chaos with Ink redraws.
+    if (this._isLoadingBuffer) {
+      // Each entry records when it arrived. A flush of a tmux-capture load
+      // replays only what arrived after the capture; without the timestamp it
+      // would have to replay the whole queue, duplicating the events the
+      // capture already contains. See _finishBufferLoad's `since`.
+      if (this._loadBufferQueue) this._loadBufferQueue.push({ at: performance.now(), data });
+      return;
+    }
+
+    // Check if at bottom BEFORE adding data (captures user's scroll position)
+    // Only update if not already scheduled (preserve the first check's result)
+    if (!this.writeFrameScheduled) {
+      this._wasAtBottomBeforeWrite = this.isTerminalAtBottom();
+    }
+
+    // Check if flicker filter is enabled for current session
+    const session = this.activeSessionId ? this.sessions.get(this.activeSessionId) : null;
+    const flickerFilterEnabled = session?.flickerFilterEnabled ?? false;
+
+    // xterm.js 6.0 handles DEC 2026 synchronized output natively — Ink's cursor-up
+    // redraws are wrapped in 2026h/2026l markers and rendered atomically by xterm.js.
+    // No client-side cursor-up detection/buffering needed. The old 50ms flicker filter
+    // was actively harmful: it accumulated multiple resize redraws and flushed them
+    // together, causing stacked ghost renders due to reflow line-count mismatches.
+
+    // Opt-in flicker filter: buffer screen clear patterns (for sessions that enable it)
+    if (flickerFilterEnabled) {
+      const hasScreenClear =
+        data.includes('\x1b[2J') ||
+        data.includes('\x1b[H\x1b[J') ||
+        (data.includes('\x1b[H') && data.includes('\x1b[?25l'));
+
+      if (hasScreenClear) {
+        this.flickerFilterActive = true;
+        this.flickerFilterBuffer += data;
+
+        if (this.flickerFilterTimeout) {
+          clearTimeout(this.flickerFilterTimeout);
+        }
+        this.flickerFilterTimeout = setTimeout(() => {
+          this.flickerFilterTimeout = null;
+          this.flushFlickerBuffer();
+        }, SYNC_WAIT_TIMEOUT_MS); // 50ms buffer window
+
+        return;
+      }
+
+      if (this.flickerFilterActive) {
+        this.flickerFilterBuffer += data;
+        return;
+      }
+    }
+
+    // Accumulate raw data (may contain DEC 2026 markers)
+    this.pendingWrites.push(data);
+    this._pendingWritesOutputSeq = this._terminalOutputSeq;
+    this._scheduleTerminalWriteFlush();
+  },
+
+  /**
+   * Schedule one render-budgeted terminal flush.
+   *
+   * Clear the scheduled flag before flushing so flushPendingWrites() can queue
+   * another yield when a large final batch leaves bytes behind. Keeping the
+   * flag set through the flush stranded that remainder until unrelated output
+   * arrived, which looked like truncated responses and idle shell commands.
+   */
+  _scheduleTerminalWriteFlush() {
+    if (this._terminalWriteInFlight || this.writeFrameScheduled || this.pendingWrites.length === 0) return;
+    this.writeFrameScheduled = true;
+    this._safeYield(() => {
+      this.writeFrameScheduled = false;
+      // xterm.js 6.0 handles DEC 2026 sync markers natively — it buffers
+      // content between 2026h/2026l and renders atomically.
+      this.flushPendingWrites();
+    });
+  },
+
+  /**
+   * Flush the flicker filter buffer to the terminal.
+   * Called after the buffer window expires.
+   */
+  flushFlickerBuffer() {
+    if (!this.flickerFilterBuffer) return;
+
+    // Transfer buffered data to normal pending writes
+    this.pendingWrites.push(this.flickerFilterBuffer);
+    this._pendingWritesOutputSeq = this._terminalOutputSeq;
+    this.flickerFilterBuffer = '';
+    this.flickerFilterActive = false;
+
+    // Trigger a normal flush
+    this._scheduleTerminalWriteFlush();
+  },
+
+  /**
+   * Flush the local-echo overlay's unsent text into `_pendingInput` (no
+   * trailing Enter) and reset overlay + flushed-state tracking. Used before
+   * forwarding sequences that must arrive AFTER the typed text (bracketed
+   * paste, composer nav keys). The caller forwards its own sequence: nav keys
+   * ride the same write, pastes get a delayed second write because codex
+   * drops keys that share a PTY read with a bracketed paste.
+   */
+  _flushLocalEchoPending() {
+    const text = this._localEchoOverlay?.pendingText || '';
+    this._localEchoOverlay?.clear();
+    this._localEchoOverlay?.suppressBufferDetection();
+    this._flushedOffsets?.delete(this.activeSessionId);
+    this._flushedTexts?.delete(this.activeSessionId);
+    if (text) this._pendingInput += text;
+  },
+
+  /**
+   * Update local echo overlay state based on settings.
+   * Enabled whenever the setting is on — works during idle AND busy.
+   * Position is tracked dynamically by _findPrompt() on every render.
+   */
+  _updateLocalEchoState() {
+    if (this._mobileImePreviewSessionId !== this.activeSessionId) {
+      this._mobileImePreviewSessionId = this.activeSessionId;
+      this._mobileImeCommitOutputSeq = null;
+      try {
+        this._mobileImePreview?.reset?.();
+      } catch {
+        // The preview is visual-only; session switching must continue.
+      }
+    }
+    const settings = this.loadAppSettingsFromStorage();
+    const session = this.activeSessionId ? this.sessions.get(this.activeSessionId) : null;
+    const echoEnabled = settings.localEchoEnabled ?? MobileDetection.isTouchDevice();
+    const shouldEnable = !!(echoEnabled && session);
+    if (this._localEchoEnabled && !shouldEnable) {
+      this._localEchoOverlay?.clear();
+    }
+    this._localEchoEnabled = shouldEnable;
+
+    // Swap prompt finder based on session mode
+    if (this._localEchoOverlay && session) {
+      if (session.mode === 'opencode') {
+        // OpenCode (Bubble Tea TUI): find the ┃ border on the cursor's row.
+        // The input area is "┃  <text>" — the ┃ is the anchor, offset 3 skips "┃  ".
+        // We use the cursor's screen row to find the right line, then scan for ┃.
+        this._localEchoOverlay.setPrompt({
+          type: 'custom',
+          offset: 3,
+          find: (terminal) => {
+            try {
+              const buf = terminal.buffer.active;
+              const row = window.ReverieTerminalInput.cursorViewportRow(terminal);
+              if (row === null) return null;
+              const line = buf.getLine(buf.viewportY + row);
+              if (!line) return null;
+              const text = line.translateToString(true);
+              const idx = text.indexOf('\u2503'); // ┃ (BOX DRAWINGS HEAVY VERTICAL)
+              if (idx >= 0) return { row, col: idx };
+              return null;
+            } catch {
+              return null;
+            }
+          },
+        });
+      } else if (session.mode === 'shell' || session.mode === 'codex') {
+        // Shell mode: the shell provides its own PTY echo so the overlay isn't needed.
+        // Codex mode: the composer is fully interactive per keystroke. Typing
+        // "/" pops a live-filtering command picker (issue #222), the composer
+        // grows and rewraps as it fills (#220), pastes are bracketed (#219)
+        // and arrows/history edit server-side state (#218). Buffering
+        // keystrokes until Enter starves all of that, so codex sessions use
+        // plain PTY echo like shell — visually augmented by the predictive
+        // write-through echo (see _localEchoPolicy below and the onData hook).
+        // Disable the buffer overlay by clearing any pending text.
+        this._localEchoOverlay.clear();
+        this._localEchoEnabled = false;
+      } else {
+        // Codex/Claude-style TUIs usually expose a ❯ prompt. During active
+        // redraws or compact mobile layouts that marker may not be present in
+        // the viewport, while xterm's cursor still marks the editable input
+        // position. Fall back to cursor coordinates so phone typing appears at
+        // the terminal cursor instead of disappearing into pending state.
+        // The glyph is looked for from the cursor's screen row up to the top of the
+        // live screen only: rows above that are parked scrollback with old composer glyphs.
+        this._localEchoOverlay.setPrompt({
+          type: 'custom',
+          offset: 0,
+          find: (terminal) => {
+            try {
+              const buf = terminal.buffer.active;
+              const cursorRow = window.ReverieTerminalInput.cursorViewportRow(terminal);
+              if (cursorRow === null) return null;
+              const lowest = Math.max(0, buf.baseY - buf.viewportY);
+              for (let row = cursorRow; row >= lowest; row--) {
+                const line = buf.getLine(buf.viewportY + row);
+                if (!line) continue;
+                const text = line.translateToString(true);
+                const idx = text.lastIndexOf('\u276f');
+                if (idx >= 0) return { row, col: idx + 2 };
+              }
+              return { row: cursorRow, col: Math.max(0, Math.min(terminal.cols - 1, buf.cursorX)) };
+            } catch {
+              return null;
+            }
+          },
+        });
+      }
+    }
+
+    // Per-session echo policy: 'buffer' (overlay), 'predict' (codex
+    // write-through, see the onData predict hook), 'off'. _localEchoEnabled
+    // keeps its exact historical values above (false for codex/shell), so
+    // every existing consumer is unchanged; this field is purely additive.
+    let policy = 'off';
+    if (session && echoEnabled) {
+      if (session.mode === 'codex') policy = 'predict';
+      else if (session.mode !== 'shell') policy = 'buffer';
+    }
+    this._localEchoPolicy = policy;
+    if (policy !== 'predict') this._predictiveEcho?.clearPredictions();
+  },
+
+  /**
+   * Predictive-echo onData hook (codex write-through). VISUAL ONLY: paints,
+   * pops or clears prediction spans and never touches _pendingInput, never
+   * sends, never throws into the caller. The onData wire path behaves
+   * byte-identically with this active, absent or broken.
+   */
+  _predictHookOnData(data) {
+    if (this._localEchoPolicy !== 'predict' || !this._predictiveEcho) return;
+    try {
+      const kind = window.ReverieTerminalInput.classifyPredictInput(data);
+      if (kind === 'char') this._predictiveEcho.predictChar(data);
+      else if (kind === 'backspace') this._predictiveEcho.predictBackspace();
+      // 'clear' AND 'text' (plain paste, IME word commits) both change the
+      // composer in ways the display has not shown yet: clear the run and let
+      // the addon's anchor hold suppress prediction until the echo catches up
+      else this._predictiveEcho.clearPredictions();
+    } catch {
+      /* predictions must never block the wire */
+    }
+  },
+
+  // CJK textarea already provides visual feedback — bypass local echo
+  // buffering so each composed word reaches the PTY immediately.
+  _handleCjkInput(text) {
+    if (!this.activeSessionId) {
+      _crashDiag.log(`CJK send DROP no-session len=${text.length}`);
+      return;
+    }
+    // ── One-shot Ctrl (mobile shell bar, issue #262) ──
+    // While the CJK field is visible it OWNS the keyboard: onData returns early
+    // for everything it swallows, and the focus router even redirects
+    // terminal.focus() into it — which is where the accessory bar sends focus
+    // after every key. So the onData hook never sees these keystrokes, and an
+    // armed modifier could neither fire NOR be spent: it survived until a
+    // session switch and then turned an innocent keystroke into a control byte.
+    // This is the module's single choke point to the PTY, so applying it here
+    // covers typed characters, IME flushes, Enter, backspace and arrows at once.
+    // Same policy as the onData hook: the next single character is modified,
+    // anything longer merely spends the modifier.
+    if (typeof KeyboardAccessoryBar !== 'undefined' && KeyboardAccessoryBar.isCtrlArmed?.()) {
+      text = KeyboardAccessoryBar.consumeCtrl(text);
+    }
+    // Bypasses onData (like insertTerminalText): predictions cannot see this
+    if (this._localEchoPolicy === 'predict') this._predictiveEcho?.clearPredictions();
+    _crashDiag.log(`CJK send→${this.activeSessionId.slice(0, 8)} len=${text.length}`);
+    this._sendInputAsync(this.activeSessionId, text);
+  },
+
+  /**
+   * Re-assert a history anchor captured before a terminal write (#358).
+   *
+   * Called from xterm's write callback, never synchronously after write():
+   * xterm parses on its own schedule, so the buffer only carries the redraw's
+   * effect once that callback fires. A null anchor means the user was following
+   * live output and nothing needs restoring.
+   */
+  _restoreTerminalViewport(preserveViewportY, sessionId) {
+    if (preserveViewportY === null || preserveViewportY === undefined) return;
+    // The anchor is a row index into the buffer it was captured from. Now that
+    // this runs a parse later instead of synchronously, a session switch can land
+    // in between: selectSession() resets the terminal and chunk-loads the new
+    // session's scrollback, and scrolling THAT buffer to a row that meant
+    // something in the previous one is not a restore, it is a jump to an
+    // arbitrary place. Both checks cover one half of that window.
+    if (sessionId !== undefined && sessionId !== this.activeSessionId) return;
+    if (this._isLoadingBuffer) return;
+    if (typeof this.terminal?.scrollToLine !== 'function') return;
+    if (this.terminal.buffer?.active?.viewportY === preserveViewportY) return;
+    this.terminal.scrollToLine(preserveViewportY);
+  },
+
+  /**
+   * Flush pending writes to terminal, processing DEC 2026 sync markers.
+   * Strips markers and writes content atomically within a single frame.
+   */
+  flushPendingWrites() {
+    if (this._terminalWriteInFlight || this.pendingWrites.length === 0 || !this.terminal) return;
+
+    const _t0 = performance.now();
+    // xterm.js 6.0+ natively handles DEC 2026 synchronized output markers.
+    // Pass raw data through — xterm.js buffers content between markers and
+    // renders atomically, eliminating split-frame Ink redraws.
+    const joined = this.pendingWrites.join('');
+    this.pendingWrites = [];
+    const _joinedLen = joined.length;
+    if (_joinedLen > 16384) _crashDiag.log(`FLUSH: ${(_joinedLen / 1024).toFixed(0)}KB`);
+
+    // Per-frame byte budget to prevent main thread blocking.
+    // Large writes (141KB+) can freeze Chrome for 2+ minutes.
+    // Codex's TUI emits dense synchronized redraws during thinking/high-effort
+    // phases, so it gets a smaller first frame to keep per-frame xterm/WebGL
+    // stalls short; other modes keep the larger 64KB budget.
+    const activeSession = this.activeSessionId && this.sessions ? this.sessions.get(this.activeSessionId) : null;
+    const MAX_FRAME_BYTES = activeSession?.mode === 'codex' ? 32768 : 65536;
+    let deferred = false;
+    // If the user is reading history, remember the viewport so we can restore it
+    // after the write — Codex status redraws would otherwise jump it.
+    //
+    // Position, not recency (#259). This was gated on _hasRecentUserScrollUp(),
+    // a 1500ms decay window, so a user who scrolled up and then actually READ
+    // for longer than that lost the protection mid-read and got dragged along by
+    // the next repaint. Being scrolled up IS the intent, however long ago it was
+    // expressed; the recency window remains as an extra guard on the sticky
+    // scroll-to-bottom below, where it protects against a mid-flush race.
+    const preserveViewportY =
+      this.terminal.buffer?.active && !this.isTerminalAtBottom() ? this.terminal.buffer.active.viewportY : null;
+    // Which buffer the anchor belongs to, checked again when the write parses.
+    const flushSessionId = this.activeSessionId;
+
+    const writeChunk = joined.slice(0, MAX_FRAME_BYTES);
+    if (_joinedLen > MAX_FRAME_BYTES) {
+      // Keep the remainder app-side where the 128KB cap can see it. The next
+      // chunk is scheduled only after xterm confirms this one was parsed.
+      this.pendingWrites.push(joined.slice(MAX_FRAME_BYTES));
+      deferred = true;
+    }
+    // Newest output this chunk fully contains, for the IME preview. A split
+    // chunk may not hold that output yet, so it reports nothing.
+    const flushedOutputSeq = deferred ? null : (this._pendingWritesOutputSeq ?? null);
+    this._terminalWriteInFlight = true;
+    this._terminalWriteInFlightBytes = writeChunk.length;
+    try {
+      this.terminal.write(writeChunk, () => {
+        this._terminalWriteInFlight = false;
+        this._terminalWriteInFlightBytes = 0;
+        // Restore INSIDE the callback (#358). xterm parses asynchronously, so
+        // the moment write() returns the buffer has not moved yet: the old
+        // restore ran here, found viewportY still equal to the anchor, and did
+        // nothing at all — then the parse landed and a cursor-addressed Codex
+        // redraw dragged the viewport to the live bottom with nothing left to
+        // pull it back. The callback is xterm's own "this chunk is parsed"
+        // signal, which is the earliest point the anchor can actually be
+        // reasserted. (The synchronous version passed its regression test only
+        // because the test's write mock moved the viewport synchronously.)
+        this._restoreTerminalViewport(preserveViewportY, flushSessionId);
+        this._scheduleTerminalWriteFlush();
+        this._noteMobileImeAuthoritativeOutput(flushedOutputSeq, flushSessionId);
+      });
+    } catch (err) {
+      this._terminalWriteInFlight = false;
+      this._terminalWriteInFlightBytes = 0;
+      throw err;
+    }
+    const bytesThisFrame = deferred ? MAX_FRAME_BYTES : _joinedLen;
+    const _dt = performance.now() - _t0;
+    if (_dt > 100 || deferred)
+      console.warn(
+        `[CRASH-DIAG] flushPendingWrites: ${_dt.toFixed(0)}ms, ${(bytesThisFrame / 1024).toFixed(0)}KB written${deferred ? ', rest deferred' : ''} (total ${(_joinedLen / 1024).toFixed(0)}KB)`
+      );
+
+    // Sticky scroll: if user was at bottom, keep them there after new output.
+    // Give manual scroll-up gestures a short grace window so high-frequency
+    // Codex status ticks do not snap the viewport back while the user is
+    // trying to inspect earlier output.
+    //
+    // A live anchor wins outright. The two flags are captured at different
+    // moments (_wasAtBottomBeforeWrite at the frame's first batchTerminalWrite,
+    // the anchor at flush time), so a scroll-up in between leaves both set; now
+    // that the anchor is reasserted after the parse, running both would jump to
+    // the bottom and then back one frame later instead of simply staying put.
+    if (preserveViewportY === null && this._wasAtBottomBeforeWrite && !this._hasRecentUserScrollUp()) {
+      this.terminal.scrollToBottom();
+    }
+
+    // Re-position local echo overlay after terminal writes — Ink redraws can
+    // move the ❯ prompt to a different row, making the overlay invisible.
+    // Unguarded on purpose: hasPending excludes an IME composition, so a
+    // composition-only overlay (the first word of a prompt) would otherwise
+    // stay on the old row. rerender() is a no-op when there is nothing to draw.
+    this._localEchoOverlay?.rerender();
+
+    // After Tab completion: detect the completed text in the overlay.
+    // Use terminal.write('', callback) to defer detection until xterm.js
+    // finishes processing ALL queued writes — direct buffer reads after
+    // terminal.write(data) can miss text if xterm processes asynchronously.
+    if (
+      this._tabCompletionSessionId &&
+      this._tabCompletionSessionId === this.activeSessionId &&
+      this._localEchoOverlay &&
+      !this._localEchoOverlay.pendingText
+    ) {
+      const overlay = this._localEchoOverlay;
+      const self = this;
+      this.terminal.write('', () => {
+        if (!self._tabCompletionSessionId) return; // already resolved
+        overlay.resetBufferDetection();
+        const detected = overlay.detectBufferText();
+        if (detected) {
+          if (detected === self._tabCompletionBaseText) {
+            // Same text as before Tab — no completion yet. Undo and retry.
+            overlay.undoDetection();
+            self._tabCompletionRetries = (self._tabCompletionRetries || 0) + 1;
+            if (self._tabCompletionRetries > 60) {
+              self._tabCompletionSessionId = null;
+              self._tabCompletionRetries = 0;
+            }
+          } else {
+            // Text changed — real completion happened
+            self._tabCompletionSessionId = null;
+            self._tabCompletionRetries = 0;
+            self._tabCompletionBaseText = null;
+            if (self._tabCompletionFallback) {
+              clearTimeout(self._tabCompletionFallback);
+              self._tabCompletionFallback = null;
+            }
+            overlay.rerender();
+          }
+        } else {
+          // No text found yet — retry on next flush.
+          self._tabCompletionRetries = (self._tabCompletionRetries || 0) + 1;
+          if (self._tabCompletionRetries > 60) {
+            self._tabCompletionSessionId = null;
+            self._tabCompletionRetries = 0;
+          }
+        }
+      });
+    }
+  },
+
+  /**
+   * Schedule cb via THREE racing primitives so data-pacing makes progress
+   * regardless of which scheduling primitive Chrome is throttling:
+   *   1. requestAnimationFrame — primary, fires at compositor rate
+   *      (may be 0Hz when window is occluded / on backgrounded monitor).
+   *   2. setTimeout(50) — fallback for occluded-but-visible windows
+   *      (clamped to 1Hz by Chrome's intensive wake-up throttling
+   *      after ~5 min of no user interaction).
+   *   3. Worker postMessage — bypasses intensive throttling entirely;
+   *      Workers are not subject to background-tab / idle-tab throttling
+   *      (the React Scheduler trick).
+   * Whichever fires first wins; the others are no-ops thanks to the
+   * `done` guard. Without all three, chunkedTerminalWrite and the deferred
+   * path of flushPendingWrites stall indefinitely when the substrate is
+   * degraded (visible-but-occluded window, OR idle-throttled tab, OR
+   * background tab on a different monitor).
+   */
+  _safeYield(cb) {
+    let done = false;
+    const wrapped = () => {
+      if (done) return;
+      done = true;
+      cb();
+    };
+    requestAnimationFrame(wrapped);
+    setTimeout(wrapped, 50);
+    this._workerYield(wrapped);
+  },
+
+  /**
+   * Lazy-init a tiny "tick" worker whose only job is to postMessage back to
+   * us as fast as possible, escaping main-thread throttling. The worker's
+   * setTimeout(0) is not subject to Chrome's intensive wake-up throttling
+   * even when the parent tab is idle.
+   */
+  _workerYield(cb) {
+    try {
+      if (this._yieldWorker === undefined) {
+        // First call: build the worker (or mark unavailable). Each
+        // postMessage in produces exactly one postMessage out — we count on
+        // FIFO 1:1 to drain queue entries.
+        const src = "onmessage=()=>setTimeout(()=>postMessage(0),0);";
+        const blob = new Blob([src], { type: 'application/javascript' });
+        const url = URL.createObjectURL(blob);
+        this._yieldWorker = new Worker(url);
+        URL.revokeObjectURL(url);
+        this._yieldQueue = [];
+        this._yieldWorker.onmessage = () => {
+          const fn = this._yieldQueue.shift();
+          if (fn) fn();
+        };
+      }
+      if (!this._yieldWorker) return;
+      this._yieldQueue.push(cb);
+      this._yieldWorker.postMessage(0);
+    } catch {
+      this._yieldWorker = null; // mark unavailable, future calls skip
+    }
+  },
+
+  scrollToLastNonEmptyLine() {
+    if (!this.terminal?.buffer?.active) {
+      this.terminal?.scrollToBottom?.();
+      return;
+    }
+
+    const buffer = this.terminal.buffer.active;
+    // `length` already includes scrollback + viewport rows. Adding baseY scans
+    // every scrollback row twice, starting with thousands of out-of-range calls.
+    const totalLines = buffer.length;
+    let lastNonEmptyLine = -1;
+
+    for (let lineIndex = totalLines - 1; lineIndex >= 0; lineIndex--) {
+      const line = buffer.getLine(lineIndex);
+      if (line?.translateToString(true).trim()) {
+        lastNonEmptyLine = lineIndex;
+        break;
+      }
+    }
+
+    if (lastNonEmptyLine >= 0 && typeof this.terminal.scrollToLine === 'function') {
+      let targetLine = Math.max(0, lastNonEmptyLine - this.terminal.rows + 2);
+      const maxTargetLine = Math.max(0, lastNonEmptyLine);
+      while (targetLine < maxTargetLine) {
+        const line = buffer.getLine(targetLine);
+        if (line?.translateToString(true).trim()) break;
+        targetLine++;
+      }
+      this.terminal.scrollToLine(targetLine);
+    } else {
+      this.terminal.scrollToBottom();
+    }
+  },
+
+  /**
+   * Write large buffer to terminal in chunks to avoid UI jank.
+   * Uses _safeYield to spread work across frames; falls back to setTimeout
+   * and a tick-Worker so progress continues on occluded / idle-throttled tabs.
+   * @param {string} buffer - The full terminal buffer to write
+   * @param {number} chunkSize - Size of each chunk (default 32KB)
+   * @param {string} [loadOwner] - Load token to finish under
+   * @param {{ flushQueued?: boolean, since?: number }} [finishOpts] - Passed to
+   *   `_finishBufferLoad`. This method ends the load for every non-empty buffer,
+   *   so a caller that wants the queue replayed has to say so HERE; the call in
+   *   `selectSession` only runs when the write was skipped entirely.
+   * @returns {Promise<{parsedAt: number, bufferLength: number, completed: boolean}>} Parse marker snapshot
+   */
+  chunkedTerminalWrite(buffer, chunkSize = TERMINAL_CHUNK_SIZE, loadOwner, finishOpts) {
+    // Generation counter: if a newer chunkedTerminalWrite starts (tab switch),
+    // older writes abort instead of continuing to push stale data into the terminal.
+    const writeGen = ++this._chunkedWriteGen;
+    const bufferLoadOwner = this._beginBufferLoad(loadOwner);
+
+    return new Promise((resolve) => {
+      const parseSnapshot = (completed = this._chunkedWriteGen === writeGen) => ({
+        parsedAt: performance.now(),
+        bufferLength: this.terminal?.buffer?.active?.length ?? 0,
+        completed,
+      });
+      if (!buffer || buffer.length === 0) {
+        this._finishBufferLoad(bufferLoadOwner, finishOpts);
+        resolve(parseSnapshot());
+        return;
+      }
+
+      // Strip any DEC 2026 markers that might be in the buffer
+      // (from historical SSE data that was stored with markers), and every
+      // OSC 52 clipboard write: a replay must never copy (see OSC52_STRIP_RE).
+      const cleanBuffer = buffer.replace(DEC_SYNC_STRIP_RE, '').replace(OSC52_STRIP_RE, '');
+
+      // For small buffers, write directly — single-frame render is fast enough
+      if (cleanBuffer.length <= chunkSize) {
+        this.terminal.write(cleanBuffer, () => resolve(parseSnapshot()));
+        // The write is now ordered in xterm's queue. Release live output before
+        // parsing completes; subsequent writes stay behind it without being lost.
+        this._finishBufferLoad(bufferLoadOwner, finishOpts);
+        return;
+      }
+
+      // Large buffers: enqueue paced chunks, then append an empty marker whose
+      // callback fires after xterm parses every preceding chunk. The live-output
+      // gate is released as soon as that marker is ordered, not after parsing, so
+      // new output queues behind history instead of being held or dropped.
+      let offset = 0;
+      const _chunkStart = performance.now();
+      let _chunkCount = 0;
+      const writeChunk = () => {
+        // Abort if a newer chunked write started (user switched tabs)
+        if (this._chunkedWriteGen !== writeGen) {
+          resolve(parseSnapshot(false));
+          return;
+        }
+
+        const chunk = cleanBuffer.slice(offset, offset + chunkSize);
+        offset += chunk.length;
+        _chunkCount++;
+        this.terminal.write(chunk);
+        if (offset >= cleanBuffer.length) {
+          this.terminal.write('', () => {
+            const result = parseSnapshot();
+            const _totalMs = result.parsedAt - _chunkStart;
+            console.log(
+              `[CRASH-DIAG] chunkedTerminalWrite complete: ${cleanBuffer.length} bytes in ${_chunkCount} chunks, ${_totalMs.toFixed(0)}ms parsed`
+            );
+            resolve(result);
+          });
+          this._finishBufferLoad(bufferLoadOwner, finishOpts);
+          return;
+        }
+
+        // Schedule next chunk; rAF if possible, else setTimeout/Worker
+        // fallback so progress doesn't stall on occluded/unfocused windows.
+        this._safeYield(writeChunk);
+      };
+
+      // Start writing
+      this._safeYield(writeChunk);
+    });
+  },
+
+  /**
+   * Open a buffer load: live terminal events are queued from here until
+   * `_finishBufferLoad` decides what to do with them. Returns the load token the
+   * finish call must present; a stale token makes that call a no-op.
+   *
+   * @param {string} [owner] Reuse an existing token to re-enter the same load
+   *   (see below); omit it to start a new one.
+   * @returns {string} The load token.
+   */
+  _beginBufferLoad(owner) {
+    if (this._bufferLoadSeq === undefined) this._bufferLoadSeq = 0;
+    const loadOwner = owner === undefined ? `buffer-${++this._bufferLoadSeq}` : owner;
+    // `selectSession` opens the load before its fetch, and `chunkedTerminalWrite`
+    // opens it again under the SAME owner when it starts writing. Resetting the
+    // queue on that second call would throw away everything that arrived during
+    // the fetch, which on the capture path is output no buffer holds. Re-entering
+    // one load keeps its queue; a genuinely new load still starts empty.
+    const reentering = this._bufferLoadOwner === loadOwner && Array.isArray(this._loadBufferQueue);
+    this._bufferLoadOwner = loadOwner;
+    this._isLoadingBuffer = true;
+    if (!reentering) this._loadBufferQueue = [];
+    return loadOwner;
+  },
+
+  /**
+   * Complete a buffer load: unblock live SSE writes.
+   * Called when chunkedTerminalWrite finishes (or is skipped for empty buffers).
+   *
+   * By default queued SSE events are DISCARDED, not flushed. For an established
+   * session whose buffer came from the server's accumulated byte history, that
+   * history is the source of truth up to the response timestamp; SSE events
+   * queued during the fetch+write overlap already appear in it, so flushing
+   * them writes duplicate data (especially Ink cursor-up redraws), corrupting
+   * the terminal display.
+   *
+   * A tmux PANE CAPTURE is the exception, and the reason `since` exists. A
+   * capture is a point-in-time frame taken part-way through the fetch, so it is
+   * the source of truth only up to CAPTURE time — not up to the response. Every
+   * event that arrives between the capture and the end of the chunked write is
+   * queued and, under a plain discard, lost outright: nothing re-fetches, and
+   * the CLI's next partial redraw lands on a frame the terminal never received.
+   * The caller passes the response's own arrival time as `since` so exactly
+   * that tail is replayed and the pre-capture events stay dropped.
+   *
+   * COD-144: a brand-new session is the exception. Its terminal fetch can resolve
+   * BEFORE the PTY emits its first prompt, so the fetched buffer is empty and the
+   * prompt arrives only as a queued SSE event. Discarding it leaves the terminal
+   * blank until a tab-switch re-fetches a now-populated buffer. When the caller
+   * knows the load painted nothing (empty fetch + no cache), it passes
+   * `{ flushQueued: true }` so the queued events are REPLAYED through
+   * `batchTerminalWrite()` instead of dropped. Replay runs after `_isLoadingBuffer`
+   * is cleared, so the events write through normally and are not re-queued.
+   *
+   * After unblocking, new SSE/WS events deliver subsequent output normally.
+   *
+   * @param {string} [owner] Load token from `_beginBufferLoad`; a stale owner is a no-op.
+   * @param {{ flushQueued?: boolean, since?: number }} [opts] When `flushQueued`
+   *   is true, replay queued events whose arrival timestamp is at or after
+   *   `since` (default 0, meaning the whole queue).
+   */
+  _finishBufferLoad(owner, opts) {
+    if (owner !== undefined && this._bufferLoadOwner !== owner) {
+      return false;
+    }
+    const queued = this._loadBufferQueue;
+    this._isLoadingBuffer = false;
+    this._loadBufferQueue = null;
+    this._bufferLoadOwner = null;
+    // COD-144: replay (rather than discard) queued live events when the load
+    // painted nothing — the queued prompt is the only content a new session has.
+    // A tmux-capture load replays too, but only the tail: `since` cuts the queue
+    // at the moment the capture stopped being able to contain what arrived.
+    if (opts?.flushQueued && queued && queued.length) {
+      const since = typeof opts.since === 'number' ? opts.since : 0;
+      for (const entry of queued) {
+        if (entry.at < since) continue;
+        this.batchTerminalWrite(entry.data);
+      }
+    }
+    return true;
+  },
+
+  // ═══════════════════════════════════════════════════════════════
+  // Terminal Controls
+  // ═══════════════════════════════════════════════════════════════
+
+  /**
+   * The terminal the keyboard is in, as `{ terminal, sessionId, isPrimary, tile }`.
+   *
+   * The ONE place a shortcut, voice or paste should ask "which pane?", rather
+   * than reading `this.terminal` / `this.activeSessionId`, which always mean the
+   * primary pane. It answers with the pane whose terminal was focused LAST, not
+   * with `document.activeElement`: clicking the mic or a header button moves
+   * DOM focus to that button, and the dictation it starts still belongs to the
+   * pane the user was typing in. A second pane (the split pane's Pane B) claims
+   * it from its own terminal's focus; the primary terminal's focus gives it back.
+   */
+  _focusedPane() {
+    let tile = this._focusedTile;
+    // With the tile grid open the main terminal is parked, so the pane is the
+    // focused tile even when DOM focus sits on a button or a panel.
+    if ((!tile || tile._destroyed || !tile.terminal) && this._tilesOwnTerminal?.()) {
+      tile = this._tileFor(this.activeSessionId);
+    }
+    if (tile && !tile._destroyed && tile.terminal) {
+      return { terminal: tile.terminal, sessionId: tile.sessionId, isPrimary: false, tile };
+    }
+    return { terminal: this.terminal, sessionId: this.activeSessionId, isPrimary: true, tile: null };
+  },
+
+  /** Record which second pane holds the keyboard (null: the primary terminal). */
+  _noteFocusedTile(tile) {
+    this._focusedTile = tile || null;
+  },
+
+  /**
+   * Run `fn(tile)` for every secondary terminal pane on screen: the split
+   * pane's second terminal and every tile of the tile grid (never both: the two
+   * modes are not open together). Font, weight, family and skin changes go
+   * through here so they reach every pane without a special case per pane kind.
+   * `{ grid: false }` skips grid tiles (they keep their own font size).
+   * Agent Teams terminals size themselves and are not tiles.
+   */
+  _forEachTile(fn, { grid = true } = {}) {
+    if (this._splitPane?.terminal) fn(this._splitPane);
+    if (!grid || !this._tileGrid?.open) return;
+    for (const { tile } of this._tileGrid.tiles.values()) {
+      if (tile.terminal) fn(tile);
+    }
+  },
+
+  // Clears the pane the keyboard is in. The chord itself also reaches that
+  // pane's xterm (the capture handler only preventDefault()s), so the ^L lands
+  // in the same pane whose display is cleared, never a different one.
+  clearTerminal() {
+    this._focusedPane().terminal?.clear();
+  },
+
+  /** Insert editable text at the active prompt without pressing Enter. */
+  insertTerminalText(text) {
+    if (!this.activeSessionId || !text) return;
+    // A tile or the split's Pane B holds the keyboard: the text belongs to that
+    // pane's session. Those panes have no local-echo overlay, and the main
+    // overlay is parked behind the grid, so send it straight to the pane.
+    const pane = this._focusedPane?.();
+    if (pane && !pane.isPrimary) {
+      this._sendInputAsync(pane.sessionId, text);
+      pane.terminal?.focus();
+      return;
+    }
+    // Under predict the text goes out via sendInput (bypasses onData), so the
+    // hook never sees it: clear outstanding predictions here instead.
+    if (this._localEchoPolicy === 'predict') this._predictiveEcho?.clearPredictions();
+    if (
+      this._localEchoEnabled &&
+      this._localEchoOverlay &&
+      !this._echoPassthroughSessions?.has(this.activeSessionId)
+    ) {
+      this._localEchoOverlay.appendText(text);
+    } else {
+      this.sendInput(text).catch(() => {});
+    }
+    this.terminal?.focus();
+  },
+
+  /**
+   * Clear only the current editable prompt. This is intentionally distinct
+   * from Ctrl+L (clear display) and the agent's destructive `/clear` command.
+   */
+  clearTerminalInput() {
+    if (!this.activeSessionId) return;
+
+    if (typeof CjkInput !== 'undefined') CjkInput.clear();
+    // A tile or Pane B holds the keyboard: its TUI owns the editable buffer
+    // (no local-echo overlay there), so kill the line in that pane's session,
+    // never in the parked main pane's.
+    const pane = this._focusedPane?.();
+    if (pane && !pane.isPrimary) {
+      this._sendInputAsync(pane.sessionId, '\x15');
+      this.showToast?.('Input cleared', 'success');
+      pane.terminal?.focus();
+      return;
+    }
+    if (this._inputFlushTimeout) {
+      clearTimeout(this._inputFlushTimeout);
+      this._inputFlushTimeout = null;
+    }
+    this._pendingInput = '';
+    // Composer content is about to change out from under any predictions
+    if (this._localEchoPolicy === 'predict') this._predictiveEcho?.clearPredictions();
+
+    if (this._localEchoEnabled && this._localEchoOverlay) {
+      const flushed = this._localEchoOverlay.getFlushed?.() || { count: 0, text: '' };
+      this._localEchoOverlay.clear();
+      this._localEchoOverlay.suppressBufferDetection();
+      this._flushedOffsets?.delete(this.activeSessionId);
+      this._flushedTexts?.delete(this.activeSessionId);
+      const flushedLength = Array.from(flushed.text || '').length;
+      if (flushedLength > 0) {
+        this.sendInput('\x7f'.repeat(flushedLength)).catch(() => {});
+      }
+    } else {
+      // In non-local-echo mode the TUI already owns the editable buffer. Ctrl+U
+      // is the conventional kill-line key supported by shells and agent TUIs.
+      this.sendInput('\x15').catch(() => {});
+    }
+
+    this.showToast?.('Input cleared', 'success');
+    this.terminal?.focus();
+  },
+
+  /**
+   * Restore terminal size to match web UI dimensions.
+   * Use this after mobile screen attachment has squeezed the terminal.
+   * Sends only resize — SIGWINCH triggers Ink redraw on real dimension changes.
+   * Ctrl+L is NOT sent here (Claude Code 2.x treats it as "clear conversation").
+   */
+  async restoreTerminalSize() {
+    // A second pane owns its own geometry: refit it and force its PTY to the
+    // size it renders at (TerminalTile.fit sends the same forced `f` resize
+    // sendResize sends below), whatever another device set. fit() says whether
+    // the resize went out; when it did not, say why rather than report a size
+    // that was never sent, as the primary branch does below.
+    const pane = this._focusedPane();
+    if (!pane.isPrimary) {
+      const sent = pane.tile.fit({ force: true });
+      if (sent !== false) {
+        this.showToast(`Terminal restored to ${pane.terminal.cols}x${pane.terminal.rows}`, 'success');
+      } else if (this.detachedSessions?.has(pane.sessionId)) {
+        // Its own window owns the PTY's size (TerminalTile._sendResize yields).
+        this.showToast('This session is sized by its own window', 'warning');
+      } else if (!pane.tile._wsReady) {
+        // The tile announces its size again as soon as its socket reopens.
+        this.showToast('Terminal not connected: its size is sent when it reconnects', 'warning');
+      } else {
+        this.showToast('Could not determine terminal size', 'error');
+      }
+      return;
+    }
+    if (!this.activeSessionId) {
+      this.showToast('No active session', 'warning');
+      return;
+    }
+    // Backstop: _focusedPane() answers with the focused tile while the grid is
+    // open, so this is reached only if that tile is gone mid-call.
+    if (this._tilesOwnTerminal?.()) return;
+
+    // The pane belongs to the popup showing it, so this window has nothing to
+    // restore. Say so rather than reporting a size that was never sent — the
+    // same button in that window does the job.
+    if (!this.isSoloWindow && this.detachedSessions?.has(this.activeSessionId)) {
+      this.showToast('This session is sized by its own window', 'warning');
+      return;
+    }
+
+    const dims = this.getTerminalDimensions();
+    if (!dims) {
+      this.showToast('Could not determine terminal size', 'error');
+      return;
+    }
+
+    try {
+      // Force resize even when dimensions match the server's last known state —
+      // another device may have changed the PTY size since this client last sent,
+      // and force guarantees a SIGWINCH → Ink redraw at the current device's size.
+      await this.sendResize(this.activeSessionId, { force: true });
+
+      this.showToast(`Terminal restored to ${dims.cols}x${dims.rows}`, 'success');
+    } catch (err) {
+      console.error('Failed to restore terminal size:', err);
+      this.showToast('Failed to restore terminal size', 'error');
+    }
+  },
+
+  // Vestigial no-op: this method has no callers today. It's kept (not deleted)
+  // as a documented guard so the Ctrl+L behavior below isn't reintroduced.
+  //
+  // Originally this sent Ctrl+L (\x0c) when a flagged session first reached
+  // idle/working to scrub mux-init junk from the screen. Two problems:
+  //   1. `pendingCtrlL` was never actually populated anywhere (dead path).
+  //   2. Claude Code 2.x interprets Ctrl+L as a two-step "clear conversation"
+  //      command — sending it from background flows risked nuking the user's
+  //      conversation if it coincided with another Ctrl+L (e.g. from
+  //      selectSession on page reload).
+  // If a per-session display-fix is ever needed again, do it via sendResize
+  // or an Ink-safe control sequence, NOT \x0c.
+  sendPendingCtrlL(_sessionId) {
+    // intentionally empty
+  },
+
+  // Registry-aware gate for the smart-copy chord (#211). Mirrors
+  // shouldOpenCommandPaletteFromShortcut(): honors a rebound or disabled
+  // 'copy-selection' entry, and falls back to the default chord when the
+  // registry isn't available (isolated test harnesses).
+  // Returning true only means "this chord asked to copy", the CALLER decides
+  // what happens when there is no selection, so the interrupt stays intact.
+  shouldCopyTerminalSelectionFromShortcut(ev) {
+    // The custom key handler also runs for keypress/keyup; only keydown decides.
+    if (!ev || ev.type !== 'keydown') return false;
+    // Hot path: every dispatchable chord needs Ctrl/Cmd/Alt, so plain typing
+    // exits before any registry work.
+    if (!ev.ctrlKey && !ev.metaKey && !ev.altKey) return false;
+    const registryAvailable =
+      typeof this.getShortcutRegistry === 'function' && typeof this.matchesShortcutEvent === 'function';
+    const entry = registryAvailable ? this.getShortcutRegistry().find((s) => s.id === 'copy-selection') : null;
+    if (entry) return !entry.disabled && this.matchesShortcutEvent(ev, entry);
+    return !ev.altKey && (ev.key || '').toLowerCase() === 'c';
+  },
+
+  /**
+   * xterm's current selection, cleaned for the clipboard. The transform itself
+   * is ReverieCopySelection.clean in constants.js, beside decideAutoCopy; this
+   * is the half that needs the live terminal.
+   *
+   * `text` is for the callers that already read the selection to decide whether
+   * to copy at all (the Ctrl+C gate and the right-click handler), so the read is
+   * not repeated.
+   *
+   * ⚠️ **Pass the RAW selection, never an already-cleaned one.** The trailing
+   * trim alone is a fixed point, because a CR is consumed by the parser as a
+   * cursor move and never stored in a cell, so the only \r the selection can
+   * carry is the Windows line join. The MARGIN strip is not: it takes the
+   * narrower of the declared width and the run every line shares, so a second
+   * pass over an already-stripped block takes up to `margin` columns more. A
+   * caller that cleans to decide whether to copy must still hand the raw text
+   * to copyTerminalSelection, which cleans once on its own.
+   *
+   * A COLUMN selection comes back untouched. Alt+drag makes one (xterm's
+   * shouldColumnSelect keys on altKey alone, and Reverie sets neither of the
+   * terminals it creates with the one option that would disable it), and a
+   * rectangle's whole point is that its rows line up, which trimming each row
+   * to its own last glyph would destroy. xterm exposes the mode nowhere public,
+   * so this reads the private field the way this file already reads
+   * terminal._core for cell dimensions, and falls back to cleaning normally if
+   * a future xterm renames it. SelectionMode.COLUMN is 3.
+   */
+  cleanedTerminalSelection(text, target = {}) {
+    // `target` names a second terminal (the split pane) and its session; both
+    // default to the primary pane, whose `this.terminal` this file otherwise reads.
+    const terminal = target.terminal || this.terminal;
+    const raw = text ?? (terminal?.hasSelection?.() ? terminal.getSelection() : '');
+    if (!raw) return '';
+    if (terminal?._core?._selectionService?._activeSelectionMode === 3) return raw;
+    const clean = window.ReverieCopySelection?.clean;
+    if (!clean) return raw;
+    const range = this._normalisedSelectionRange(terminal);
+    return clean(raw, {
+      margin: this._cliGutterColumns(target.sessionId),
+      firstLinePartial: !!range && range.start.x > 0,
+    });
+  },
+
+  /**
+   * xterm's selection range with its two ends in reading order.
+   *
+   * `getSelectionPosition()` reports `start` and `end` as the two ends of the
+   * drag, and on xterm 6.0 it already hands back the earlier one first: it
+   * reads `_selectionService.selectionStart`, whose getter returns the model's
+   * `finalSelectionStart`, and that swaps the pair for a reversed selection.
+   * A real upward mouse drag through chromium confirms it. The ordering here
+   * is a guard rather than a fix. One layer down the same model exposes the
+   * UNNORMALISED fields under the same two names, and a reversed pair would
+   * make the row window below run backwards and collapse, which would report
+   * no margin at all for every upward drag in a deep buffer.
+   *
+   * `terminal` names which xterm to read, defaulting to the primary pane's.
+   * Pane B of a split owns a second terminal and passes it, because this file's
+   * `this` is always the primary pane.
+   */
+  _normalisedSelectionRange(terminal) {
+    const range = (terminal ?? this.terminal)?.getSelectionPosition?.();
+    if (!range?.start || !range?.end) return null;
+    const { start, end } = range;
+    const reversed = end.y < start.y || (end.y === start.y && end.x < start.x);
+    return reversed ? { start: end, end: start } : { start, end };
+  },
+
+  /**
+   * How many columns to take off a copy from one session's pane: the transcript
+   * gutter its CLI declares, or 0 when it declares none. `sessionId` defaults to
+   * the active session, and Pane B of a split passes its own, so both panes of a
+   * split strip the width their own CLI declares rather than Pane A's.
+   *
+   * ⚠️ Read from `window.__reverieTranscriptGutter`, the map the server derives
+   * from the `transcriptGutter` CAPABILITY at render time — never an id literal
+   * here, which is the registry's standing rule and is also what lets a CLI that
+   * declares a gutter later work with no change to this file.
+   *
+   * ⚠️ DECLARED rather than measured off the buffer, and two measured versions
+   * are why. Asking whether the pane painted spaces across the unused part of
+   * each row separates a TUI from a shell perfectly where it fires and never
+   * over-stripped, but it is a function of pane WIDTH, since that padding exists
+   * only while a rendered line stops short of the CLI's own layout width and
+   * Claude Code's prose wraps to fill it: the share of padded rows on one live
+   * transcript ran 44%, 6%, 6%, 7% and 87% at 123, 160, 198, 235 and 298
+   * columns, so the strip did nothing at any ordinary window size. Taking the
+   * narrowest indent on the rows around the selection instead fires at every
+   * width and over-strips on about 1% of them, because a file listing inside the
+   * transcript can be the narrowest thing on screen. A declared width does
+   * neither, and it reads no buffer rows at all on a path that runs on every
+   * Ctrl+C.
+   *
+   * A missing map means no session gets a strip, the same direction an
+   * unmeasured CLI takes by declaring nothing.
+   */
+  _cliGutterColumns(sessionId) {
+    if (!this._copyStripMarginEnabled()) return 0;
+    const byMode = window.__reverieTranscriptGutter;
+    if (!byMode || typeof byMode !== 'object') return 0;
+    const mode = this.sessions?.get(sessionId ?? this.activeSessionId)?.mode;
+    const columns = mode ? byMode[mode] : 0;
+    return Number.isInteger(columns) && columns > 0 ? columns : 0;
+  },
+
+  // OSC 52 (`ESC ] 52 ; <sel> ; <base64> BEL`) is how programs inside the PTY —
+  // Claude Code's /copy, tmux yanks, vim — set the clipboard. The server has no
+  // display, so this is the only route to the browser's clipboard. Writes only:
+  // a `?` query (clipboard read) is ignored. A replay must never copy: the main
+  // terminal's replays strip OSC 52 in chunkedTerminalWrite (xterm parses after
+  // _isLoadingBuffer is already cleared, so that flag alone cannot hold), and a
+  // TerminalTile passes `isReplaying`, its own load flag, which does hold there.
+  // Every tab watching the session gets the sequence, so only the focused one
+  // opens the manual-copy dialog when the browser refuses the write.
+  // One copy usually arrives several times: Claude Code writes OSC 52 itself and
+  // through `tmux load-buffer -w`, and tmux forwards it with set-clipboard on,
+  // so the same text lands up to three times within a few ms. Identical text
+  // inside OSC52_DEDUPE_MS is that one copy, not a new one.
+  _installOsc52Clipboard(terminal, isReplaying = () => this._isLoadingBuffer) {
+    terminal.parser?.registerOscHandler?.(52, (data) => {
+      const sep = data.indexOf(';');
+      const payload = sep >= 0 ? data.slice(sep + 1) : data;
+      if (!payload || payload === '?' || isReplaying()) return true;
+      let text;
+      try {
+        const bytes = Uint8Array.from(atob(payload), (c) => c.charCodeAt(0));
+        text = new TextDecoder().decode(bytes);
+      } catch {
+        return true;
+      }
+      if (!text) return true;
+      const now = Date.now();
+      if (this._lastOsc52?.text === text && now - this._lastOsc52.at < OSC52_DEDUPE_MS) return true;
+      this._lastOsc52 = { text, at: now };
+      // _copyText's execCommand fallback (plain HTTP, or a refused Clipboard API
+      // write) focuses a temporary textarea; hand focus back as Auto Copy does.
+      const focusedBefore = document.activeElement;
+      this._copyText(text).then((ok) => {
+        if (focusedBefore && focusedBefore !== document.activeElement && focusedBefore.isConnected) {
+          try {
+            focusedBefore.focus();
+          } catch {}
+        }
+        if (ok) this.showToast(`Copied to clipboard (${text.length} chars)`, 'success');
+        else if (document.hasFocus?.()) this._showClipboardFallback?.(text);
+      });
+      return true;
+    });
+  },
+
+  // Copy the current terminal selection. Goes through _copyText (Clipboard API,
+  // then a hidden-textarea + execCommand fallback) because install.sh's LAN
+  // option serves plain HTTP, where navigator.clipboard is undefined.
+  async copyTerminalSelection(text, target = {}) {
+    // Every terminal touched below is the TARGET one: clearing or refocusing the
+    // primary after copying from the split pane would hit the wrong pane.
+    const terminal = target.terminal || this.terminal;
+    const selection = this.cleanedTerminalSelection(text, target);
+    // trim(), not emptiness: a multi-row drag across padding cleans to newlines
+    // alone, which are truthy, and a bare newline pasted into a chat composer
+    // or a shell submits the line. decideAutoCopy applies the same rule.
+    if (!selection.trim()) {
+      // Clearing is feedback, not protection. The Ctrl+C gate tests the CLEANED
+      // selection, so a padding-only selection left set can no longer swallow a
+      // later interrupt; it cleans to '' and the press reaches the PTY. What the
+      // clear avoids is a highlight that sits there having copied nothing.
+      terminal?.clearSelection?.();
+      this.showToast('Nothing to copy', 'warning');
+      return false;
+    }
+    const ok = await this._copyText(selection);
+    if (ok) {
+      // Clearing is what makes a second Ctrl+C an interrupt (and xterm already
+      // drops the selection on any keypress, so this matches existing feel).
+      terminal.clearSelection?.();
+      this.showToast('Copied to clipboard', 'success');
+    } else {
+      this.showToast('Failed to copy', 'error');
+    }
+    // The execCommand fallback focuses a temp textarea, so hand focus back. This
+    // is the CJK-aware focus router, not xterm's raw focus().
+    terminal.focus();
+    return ok;
+  },
+
+  /**
+   * Whether this device wants the pane's left margin off the clipboard
+   * (`copyStripMargin`, per-device, default ON).
+   *
+   * Read here rather than mirrored into a field, for the same reason
+   * `_autoCopySelectionEnabled` is: there is then no apply-path a future
+   * settings save can forget to call, and the toggle takes effect on the next
+   * selection instead of the next reload. ⚠️ The test is `!== false`, not
+   * `=== true`: this one defaults ON, and the desktop branch of
+   * getDefaultSettings sets no copyStripMargin and leans on the read sites for
+   * defaults, so a device that has never opened App Settings has no stored
+   * value at all.
+   */
+  _copyStripMarginEnabled() {
+    try {
+      return this.loadAppSettingsFromStorage?.()?.copyStripMargin !== false;
+    } catch {
+      return true;
+    }
+  },
+
+  /**
+   * Auto Copy's ON/OFF, read at flush time from the CACHED settings object
+   * (loadAppSettingsFromStorage memoizes, so this is not a localStorage hit).
+   *
+   * Reading it here rather than mirroring it into a field is deliberate: there
+   * is then no apply-path a future settings save can forget to call, and the
+   * toggle takes effect on the very next selection instead of the next reload.
+   */
+  _autoCopySelectionEnabled() {
+    try {
+      return this.loadAppSettingsFromStorage?.()?.autoCopySelection === true;
+    } catch {
+      return false;
+    }
+  },
+
+  /**
+   * Copy the current terminal selection because the user finished highlighting
+   * it. Called at the end of a selection GESTURE: the document mouseup
+   * installed in initTerminal, and the touch-selection gesture end (a touchend
+   * the touch path preventDefaults, so no mouseup ever arrives there).
+   *
+   * ⚠️ This is NOT copyTerminalSelection(): that one clears the selection (so a
+   * second Ctrl+C is an interrupt) and hands focus back to the terminal. Both
+   * are wrong here: clearing would make the text vanish from under the cursor
+   * that just highlighted it, and focusing opens the on-screen keyboard over
+   * the text on a phone. Focus is instead RESTORED to whatever held it, which
+   * only matters for the execCommand fallback (it focuses a temp textarea on
+   * the way through); the Clipboard API path never moves focus at all.
+   */
+  async _flushAutoCopySelection() {
+    const decide = window.ReverieAutoCopy?.decide;
+    if (!decide || !this.terminal) return;
+    // The toggle is read FIRST because Auto Copy is off by default: reading and
+    // cleaning a selection that can run to the 50 000-row scrollback ceiling
+    // costs real time on a phone, and every mouseup would pay it for nothing.
+    // Cleaning before decide() then means its dedupe and size cap both measure
+    // the text that actually reaches the clipboard, not the padded rows behind.
+    const enabled = this._autoCopySelectionEnabled();
+    const text = enabled ? this.cleanedTerminalSelection() : '';
+    const verdict = decide({
+      enabled,
+      text,
+      lastCopied: this._autoCopyLastText,
+      pending: !!this._autoCopyPending,
+    });
+    this._autoCopyPending = false;
+    if (verdict === 'skip') return;
+    if (verdict === 'too-large') {
+      this._autoCopyNotify('Selection too large to copy automatically. Press Ctrl+C.', 'warning');
+      return;
+    }
+
+    this._autoCopyLastText = text;
+    const focusedBefore = document.activeElement;
+    const ok = await this._copyText(text);
+    if (
+      focusedBefore &&
+      focusedBefore !== document.activeElement &&
+      focusedBefore.isConnected &&
+      typeof focusedBefore.focus === 'function'
+    ) {
+      try {
+        focusedBefore.focus();
+      } catch {}
+    }
+    if (!ok) {
+      // Let the next gesture retry the same text rather than dedupe itself into
+      // silence after a transient clipboard refusal.
+      this._autoCopyLastText = '';
+      this._autoCopyNotify('Auto Copy failed: the browser blocked clipboard access', 'error');
+      return;
+    }
+    // Silent on success, like every terminal emulator's copy-on-select, except
+    // ONCE per page load: a feature that works by doing nothing visible needs to
+    // say so the first time, or the user cannot tell it from a dead toggle.
+    if (!this._autoCopyHintShown) {
+      this._autoCopyHintShown = true;
+      this.showToast('Auto Copy: selection copied', 'success');
+    }
+  },
+
+  /**
+   * Failure/refusal toast, throttled. Auto Copy fires per gesture, so an
+   * install where the clipboard is permanently blocked would otherwise paint a
+   * toast on every drag, which trains the user to ignore toasts everywhere.
+   */
+  _autoCopyNotify(message, type) {
+    const now = Date.now();
+    const last = this._autoCopyNotifiedAt;
+    // `last === undefined` is checked rather than falling back to 0: the first
+    // failure must always be reported, and a `now - 0 < throttle` comparison
+    // only happens to hold because the wall clock is a big number.
+    if (last !== undefined && now - last < 10_000) return;
+    this._autoCopyNotifiedAt = now;
+    this.showToast(message, type);
+  },
+
+  _syncMobileHelperTextareaToCursor() {
+    if (!MobileDetection.isTouchDevice() || !this.terminal?.element) return;
+    try {
+      const xtermEl = this.terminal.element;
+      const cursor = this.terminal.element.querySelector('.xterm-cursor');
+      const screen = this.terminal.element.querySelector('.xterm-screen');
+      if (!(xtermEl instanceof HTMLElement) || !(cursor instanceof HTMLElement) || !(screen instanceof HTMLElement)) return;
+      const cursorRect = cursor.getBoundingClientRect();
+      const screenRect = screen.getBoundingClientRect();
+      if (!cursorRect.width && !cursorRect.height) return;
+      const left = Math.max(0, Math.round(cursorRect.left - screenRect.left));
+      const top = Math.max(0, Math.round(cursorRect.top - screenRect.top));
+      xtermEl.style.setProperty('--xterm-helper-left', `${left}px`);
+      xtermEl.style.setProperty('--xterm-helper-top', `${top}px`);
+    } catch {}
+  },
+
+  _isMobileTerminalInputFocused() {
+    const active = document.activeElement;
+    return (
+      active === this.terminal?.textarea ||
+      active?.classList?.contains('xterm-helper-textarea') ||
+      active?.id === 'cjkInput'
+    );
+  },
+
+  /**
+   * Separate terminal input from TUI-owned content on touch devices. A hidden
+   * keyboard must not consume taps on expandable readbacks, tool results, or
+   * decision rows; those taps belong to the foreground CLI. The visible prompt
+   * row remains the deliberate keyboard target.
+   */
+  _classifyMobileTerminalTap(clientX, clientY) {
+    if (!this._terminalViewportAtBottom()) return 'history';
+
+    const pos = this._clientPointToCell(clientX, clientY);
+    if (!pos || !this.terminal) return 'input';
+
+    const mouseMode = this.terminal.modes?.mouseTrackingMode;
+    const mouseTrackingOn = !!mouseMode && mouseMode !== 'none';
+    if (!mouseTrackingOn && !this._shouldReportMouseToCli()) return 'input';
+
+    const buffer = this.terminal.buffer?.active;
+    if (!buffer?.getLine) return 'input';
+
+    const rows = Math.max(1, this.terminal.rows || 1);
+    const lines = [];
+    const wrappedRows = [];
+    let hasVisibleContent = false;
+    for (let row = 0; row < rows; row++) {
+      const line = buffer.getLine(buffer.viewportY + row);
+      const text = line?.translateToString?.(true) || '';
+      lines.push(text);
+      wrappedRows.push(Boolean(line?.isWrapped));
+      if (text.trim()) hasVisibleContent = true;
+    }
+    if (!hasVisibleContent) return 'input';
+
+    const cursorRow = Math.max(0, Math.min(rows - 1, buffer.cursorY || 0));
+    const mode = this.sessions?.get(this.activeSessionId)?.mode || 'claude';
+    let promptRow = -1;
+    let menuSelectionVisible = false;
+
+    if (mode === 'opencode') {
+      if (lines[cursorRow]?.includes('\u2503')) promptRow = cursorRow;
+    } else {
+      for (let row = rows - 1; row >= 0; row--) {
+        const promptMatch = lines[row].match(/^\s*[❯›]/);
+        if (!promptMatch) continue;
+        const tail = lines[row].slice(promptMatch[0].length).trim();
+        // A highlighted numbered choice is a menu row, not an editable prompt.
+        const hasSiblingChoice = lines.some(
+          (line, choiceRow) => choiceRow !== row && /^\s+\d+[.)]\s/.test(line)
+        );
+        if (/^\d+[.)]\s/.test(tail) && hasSiblingChoice) {
+          menuSelectionVisible = true;
+          break;
+        }
+        promptRow = row;
+        break;
+      }
+    }
+
+    const tappedRow = pos.row - 1;
+    let logicalLineStart = tappedRow;
+    while (logicalLineStart > 0 && wrappedRows[logicalLineStart]) logicalLineStart--;
+    let logicalLineEnd = tappedRow;
+    while (logicalLineEnd + 1 < rows && wrappedRows[logicalLineEnd + 1]) logicalLineEnd++;
+    const tappedLine = lines.slice(logicalLineStart, logicalLineEnd + 1).join('');
+    // Claude's status row is TUI-owned: tapping it opens the teammate view, so it
+    // must not be treated as a keyboard target. Match the AFFORDANCE, not the
+    // wording — the bullet and verb are both unstable (claude 2.1.226 prints
+    // "✻ Cooked for 2m 6s", "✻ Baked for 9m 47s"; earlier builds printed
+    // "• Working …"), while "esc to interrupt" / "background" are what make the
+    // row actionable in the first place.
+    if (mode === 'claude' && /\b(?:esc to interrupt|background)\b/i.test(tappedLine)) {
+      return 'content';
+    }
+    if (menuSelectionVisible) return 'content';
+    if (promptRow >= 0) {
+      const inputEnd = cursorRow >= promptRow ? cursorRow : promptRow;
+      if (tappedRow >= promptRow && tappedRow <= inputEnd) return 'input';
+    } else if (
+      tappedRow === cursorRow ||
+      tappedRow >=
+        Math.max(
+          0,
+          rows -
+            window.ReverieTerminalInput
+              .TUI_PROMPT_DEFAULT_ROWS_FROM_BOTTOM
+        )
+    ) {
+      // During redraws a CLI can temporarily omit its prompt marker or place
+      // the cursor above a status footer. Keep the live cursor and a stable
+      // lower-screen focus band usable without turning transcript rows above
+      // that band into keyboard targets.
+      return 'input';
+    }
+
+    return 'content';
+  },
+
+  _blurMobileTerminalInput() {
+    const active = document.activeElement;
+    if (
+      active === this.terminal?.textarea ||
+      active?.classList?.contains('xterm-helper-textarea') ||
+      active?.id === 'cjkInput'
+    ) {
+      active.blur?.();
+    }
+  },
+
+  /**
+   * Tapping outside the terminal closes the on-screen keyboard.
+   *
+   * The terminal keeps focus on a hidden textarea, and nothing ever released it:
+   * once the keyboard was up, every tap on the header, the tab strip or empty
+   * page chrome left it up, covering half a phone screen with no way to dismiss
+   * it but the OS back gesture.
+   *
+   * Deliberately narrow, because focus is not ours to steal:
+   *
+   * - only when the terminal input actually holds focus;
+   * - never for a tap inside the terminal — those are classified and routed by
+   *   `_handleMobileTerminalTap`, which owns that decision;
+   * - never for a tap on another control. Anything focusable or clickable is
+   *   about to take focus itself, and the accessory bar in particular exists to
+   *   be used WHILE the keyboard is open, so dismissing there would fight the
+   *   user. `closest()` covers taps landing on a child (an icon inside a button).
+   *
+   * Bound to `touchend` rather than `click`: a tap that dismisses the keyboard
+   * usually is not meant to activate whatever is underneath, and touchend fires
+   * before the synthesized click, so the blur lands first.
+   */
+  _installMobileKeyboardDismiss() {
+    if (this._mobileKeyboardDismissHandler) return;
+
+    // A SCROLL also ends in touchend, and dismissing there is wrong: scrolling
+    // to read something while composing must not close the keyboard and lose
+    // the composer. Track how far the finger travelled and only treat a
+    // near-stationary gesture as a tap — the same TAP_THRESHOLD the terminal's
+    // own touch handling uses, so both agree on what a tap is.
+    let startX = 0;
+    let startY = 0;
+    let moved = false;
+    this._mobileKeyboardDismissStart = (ev) => {
+      if (ev.touches.length !== 1) {
+        moved = true; // a multi-touch gesture is never a dismissing tap
+        return;
+      }
+      startX = ev.touches[0].clientX;
+      startY = ev.touches[0].clientY;
+      moved = false;
+    };
+    this._mobileKeyboardDismissMove = (ev) => {
+      if (moved || !ev.touches.length) return;
+      const dx = ev.touches[0].clientX - startX;
+      const dy = ev.touches[0].clientY - startY;
+      const slop = window.ReverieTerminalInput.MOBILE_KEYBOARD_DISMISS_TAP_SLOP;
+      if (Math.abs(dx) > slop || Math.abs(dy) > slop) {
+        moved = true;
+      }
+    };
+    this._mobileKeyboardDismissHandler = (ev) => {
+      if (moved) return;
+      if (!this._isMobileTerminalInputFocused()) return;
+      const target = ev.target;
+      if (!target || typeof target.closest !== 'function') return;
+      if (target.closest('#terminalContainer')) return;
+      if (target.closest(window.ReverieTerminalInput.MOBILE_KEYBOARD_DISMISS_EXEMPT_SELECTOR)) return;
+      this._blurMobileTerminalInput();
+    };
+    // Passive throughout: this never calls preventDefault, so it must not make
+    // the page feel less responsive to scrolling.
+    document.addEventListener('touchstart', this._mobileKeyboardDismissStart, { passive: true });
+    document.addEventListener('touchmove', this._mobileKeyboardDismissMove, { passive: true });
+    document.addEventListener('touchend', this._mobileKeyboardDismissHandler, { passive: true });
+  },
+
+  /**
+   * Which 'content' taps should DISMISS the mobile keyboard. Expandable
+   * readbacks, tool results and decision rows are TUI-owned: tapping them acts
+   * on the CLI, so popping the keyboard there is wrong. An inert transcript row
+   * still sends its mouse report, but must keep the keyboard reachable —
+   * touchstart's preventDefault cancels the compatibility click that would
+   * otherwise focus xterm, so focus has to be restored explicitly.
+   */
+  _isActionableMobileTerminalTap(clientX, clientY) {
+    const pos = this._clientPointToCell(clientX, clientY);
+    const buffer = this.terminal?.buffer?.active;
+    if (!pos || !buffer?.getLine) return false;
+
+    const rows = Math.max(1, this.terminal.rows || 1);
+    const lines = [];
+    const wrappedRows = [];
+    for (let row = 0; row < rows; row++) {
+      const line = buffer.getLine(buffer.viewportY + row);
+      lines.push(line?.translateToString?.(true) || '');
+      wrappedRows.push(Boolean(line?.isWrapped));
+    }
+
+    const tappedRow = pos.row - 1;
+    let logicalLineStart = tappedRow;
+    while (logicalLineStart > 0 && wrappedRows[logicalLineStart]) logicalLineStart--;
+    let logicalLineEnd = tappedRow;
+    while (logicalLineEnd + 1 < rows && wrappedRows[logicalLineEnd + 1]) logicalLineEnd++;
+    const tappedLine = lines.slice(logicalLineStart, logicalLineEnd + 1).join('');
+
+    // Match the AFFORDANCE a CLI prints, not the row's title text: an
+    // expandable readback, tool result or status row advertises how to act on
+    // it ("ctrl+r to expand", "tap to collapse", "esc to interrupt"). Keying on
+    // titles instead would only recognise the exact strings a fixture happens
+    // to use, and would let a real readback keep the keyboard open.
+    //
+    // The hint sits on its own row, so a readback's TITLE row — the one a
+    // finger actually lands on — carries no affordance text itself. Look at the
+    // adjacent row too, which is how these blocks are laid out in practice.
+    // Keyed on the ACTION VERB, and deliberately not on prose verbs. A CLI hint
+    // names a key or a gesture ("ctrl+r to expand", "tap to collapse",
+    // "esc to interrupt"); "click here to open the file" is transcript content
+    // and must keep the keyboard, so `click` and bare `here` are excluded.
+    // The hint may sit mid-line — Claude's status row is
+    // "✻ Cooked for 2m 6s · esc to interrupt" — so this is not anchored.
+    const affordance =
+      /\b(?:ctrl\+\w+|shift\+\w+|esc|enter|tab|tap)\s+to\s+(?:expand|collapse|view|open|interrupt|see)\b/i;
+    const blockStart = Math.max(0, logicalLineStart - 1);
+    const blockEnd = Math.min(rows - 1, logicalLineEnd + 1);
+    for (let row = blockStart; row <= blockEnd; row++) {
+      if (affordance.test(lines[row])) return true;
+    }
+    // A Claude status row ("✻ Cooked for 2m 6s · esc to interrupt") is caught by
+    // the affordance above; there is deliberately no verb literal here, because
+    // the verb is randomised per build.
+
+    // A visible selection dialog makes its OWN rows actionable, not the whole
+    // screen. Two viewport-wide `some()` tests used to be the entire answer, so
+    // while a Claude question or permission dialog was up EVERY tap in the
+    // terminal (inert transcript, the question title, blank rows) came back
+    // actionable, and the caller blurred on each one. The on-screen keyboard
+    // could then not be opened at all until the dialog was answered, which left
+    // tapping an option row as the only interaction available: the one that
+    // commits an answer. Requiring the TAPPED line to be a numbered row keeps
+    // the dialog's own rows behaving as before (report the tap, keep the
+    // keyboard down) while any other row can still summon the keyboard, which
+    // is how a digit gets typed at a dialog instead of aimed at it.
+    const hasMenuPrompt = lines.some((line) => /^\s*[❯›]\s+\d+[.)]\s/.test(line));
+    const hasMenuChoice = lines.some((line) => /^\s+\d+[.)]\s/.test(line));
+    return hasMenuPrompt && hasMenuChoice && /^\s*(?:[❯›]\s*)?\d+[.)]\s/.test(tappedLine);
+  },
+
+  _focusMobileTerminalInput() {
+    this._syncMobileHelperTextareaToCursor();
+    const cjkInput = document.getElementById('cjkInput');
+    if (cjkInput?.classList.contains('cjk-input-visible')) {
+      cjkInput.focus();
+    } else {
+      this.terminal?.focus();
+    }
+  },
+
+  _handleMobileTerminalTap(touch, startedWithTerminalFocus, cachedIntent = null) {
+    // A guard bail-out, not a classification: there is nothing to classify. It is
+    // deliberately NOT 'history', which would claim the viewport was scrolled up.
+    if (!touch || !this.terminal) return null;
+    // touchstart already classified this exact point; reuse it rather than paying
+    // a second full-viewport scan for the same gesture.
+    // While a selection is up, a tap EXTENDS it instead of doing its usual job —
+    // picking up a 4px handle with a fingertip is a coin flip, tapping the other
+    // end is not. Dismissal stays explicit (the bar's ✕, or Copy), so no tap is
+    // ever spent on getting out of a mode the user is still using.
+    if (this._touchSelectionActive) {
+      this._extendTouchSelection(touch.clientX, touch.clientY);
+      return 'select';
+    }
+
+    const intent = cachedIntent ?? this._classifyMobileTerminalTap(touch.clientX, touch.clientY);
+    // Computed once and reused by the keyboard decision at the tail of this
+    // method: both ask the same question, and the pane cannot change in between
+    // (a mouse report only reaches the PTY; its output lands on a later turn).
+    const actionable = this._isActionableMobileTerminalTap(touch.clientX, touch.clientY);
+
+    // A tap that lands ON a link activates it, at any scroll position and before
+    // any mouse report — exactly what a desktop click does, where the provider's
+    // activate() runs and _handleDesktopTerminalClick deliberately skips the SGR
+    // tap for a hovered link so the CLI never also sees a click there.
+    //
+    // Two kinds of row keep their existing meaning instead: the composer, where a
+    // tap places the caret in text the USER typed (_tapIsOnCaretLine), and
+    // TUI-owned rows, where a numbered choice or an expandable readback is
+    // answering a dialog and routinely carries the very path the tap would
+    // otherwise open — on a phone the dialog is the only interaction that
+    // matters, so it wins.
+    if (
+      !actionable &&
+      !this._tapIsOnCaretLine(touch.clientX, touch.clientY) &&
+      this._activateTerminalLinkAtPoint(touch.clientX, touch.clientY)
+    ) {
+      // No focus change: a 'content' tap was already blurred by touchstart, and
+      // popping the keyboard behind a tab that is about to take over is noise.
+      return 'link';
+    }
+
+    if (intent === 'history') {
+      // Scrolled up: send NO mouse report — a tap on old output must not be
+      // delivered to the CLI as a click on whatever row now occupies that cell.
+      // Focus is a separate question, and the answer is yes: the user tapped the
+      // terminal, so let them type. Blurring here stranded activeElement on
+      // <body> with no way back to the keyboard.
+      this._focusMobileTerminalInput();
+      return intent;
+    }
+
+    const mouseMode = this.terminal.modes?.mouseTrackingMode;
+    const mouseTrackingOn = !!mouseMode && mouseMode !== 'none';
+    const shouldActivate = intent === 'content' || startedWithTerminalFocus;
+    if (shouldActivate && mouseTrackingOn) {
+      // xterm's mouse encoder owns live DECSET modes. The synthetic DOM click
+      // follows the same path as a desktop click.
+      this._dispatchSyntheticTerminalClick(touch.clientX, touch.clientY);
+    } else if (shouldActivate && this._shouldReportMouseToCli()) {
+      // This session's mouse DECSETs are stripped from the browser stream
+      // (strip-full or strip-mux-and-mouse), so report directly to the PTY
+      // while retaining local touch scrollback, and only while the CLI
+      // actually has tracking on (see _shouldReportMouseToCli).
+      this._sendSyntheticSgrTap(touch.clientX, touch.clientY);
+    }
+
+    if (intent === 'content' && actionable) {
+      // A synthetic xterm click can focus its helper textarea. Blur after the
+      // report so collapsing a readback never opens or retains the keyboard.
+      this._blurMobileTerminalInput();
+    } else if (intent === 'content' && startedWithTerminalFocus) {
+      // Tapping INERT transcript with the keyboard already up closes it.
+      //
+      // Every terminal tap re-focuses, so once the keyboard is open the only way
+      // to close it is the accessory bar's dismiss chevron. Tapping the
+      // transcript to get the screen back is the obvious gesture, and nothing
+      // else claims it: an inert row has no action to trigger, so by this point
+      // the tap has already done its only other job (the mouse report above).
+      //
+      // Scoped to 'content' ON PURPOSE. The prompt row ('input') keeps
+      // focus-then-position, so a second tap there still places the caret —
+      // pinned by "keeps the first prompt tap focus-only so it cannot activate a
+      // CLI row". Toggling there would trade away real capability.
+      this._blurMobileTerminalInput();
+    } else {
+      this._focusMobileTerminalInput();
+    }
+    return intent;
+  },
+
+  // ═══════════════════════════════════════════════════════════════
+  // Synthetic tap → mouse report
+  // ═══════════════════════════════════════════════════════════════
+  // Dispatch a mousedown+mouseup pair at viewport coords (clientX/clientY) to
+  // xterm's root element. xterm's mouse-reporting handler reads the event's
+  // client coords, maps them to a terminal cell relative to .xterm-screen, and
+  // — when the foreground app has mouse tracking active (DECSET 1000/1002/1006,
+  // which Claude's input enables) — encodes an SGR mouse report to the PTY.
+  // That is the same path a real desktop click takes; on touch devices the
+  // browser's own compatibility-event synthesis is unreliable (and suppressed
+  // by touch-action:none), so we drive it explicitly. With mouse tracking off
+  // it degrades to a harmless zero-length click (no drag → no text selection).
+  _dispatchSyntheticTerminalClick(clientX, clientY) {
+    const el = this.terminal?.element;
+    if (!el || !Number.isFinite(clientX) || !Number.isFinite(clientY)) return;
+    // xterm registers its mouseup listener on document during mousedown, so a
+    // bubbling mouseup reaches it; dispatch both to the root element in order.
+    const base = {
+      bubbles: true,
+      cancelable: true,
+      view: window,
+      clientX,
+      clientY,
+      screenX: clientX,
+      screenY: clientY,
+      button: 0,
+      detail: 1,
+    };
+    try {
+      el.dispatchEvent(new MouseEvent('mousedown', { ...base, buttons: 1 }));
+      el.dispatchEvent(new MouseEvent('mouseup', { ...base, buttons: 0 }));
+    } catch {
+      /* MouseEvent constructor unavailable — tap-to-position simply no-ops */
+    }
+  },
+
+  /**
+   * True when the browser has to hand-encode a click report for the CLI: the
+   * server stripped this session's mouse-tracking DECSETs out of the stream (so
+   * xterm's own encoder is permanently idle here and something has to stand in
+   * for it) AND the CLI has a tracking mode on right now.
+   *
+   * One flag answers both. The server sets `cliMouseTracking` only as it strips a
+   * tracking DECSET (`_recordStrippedMouseMode` in session.ts, called from the
+   * mouse-strip branch of `_handleTerminalOutput` and nowhere else), so it can
+   * only ever be true for a mode whose DECSETs are stripped: whichever modes the
+   * registry decides to strip, the browser follows, with no mode list here to
+   * keep in step. For a `preserve` / `strip-mux-only` mode the flag stays false
+   * and xterm keeps encoding its own reports. That invariant is pinned server-side
+   * in test/claude-scrollback-strip.test.ts.
+   *
+   * Without the flag the browser reported EVERY click, so a CLI sitting at its
+   * composer with no dialog open, or a pane that has fallen back to a shell
+   * prompt, received mouse reports it never asked for. A shell prints those as
+   * literal text (`[<0;88;20M`) and they garble the next line typed.
+   *
+   * Fails toward silence: an unknown or stale flag reports nothing rather than
+   * injecting bytes. After a server restart the flag is false until the CLI
+   * re-emits its DECSET, which closing and reopening a dialog does.
+   *
+   * `sessionId` defaults to the primary pane's session; a TerminalTile passes
+   * its own (through _handleDesktopTerminalClick's target), never the active one.
+   */
+  _shouldReportMouseToCli(sessionId = this.activeSessionId) {
+    return this.sessions?.get(sessionId)?.cliMouseTracking === true;
+  },
+
+  // True when xterm's viewport shows the live PTY screen (not scrolled up into
+  // local scrollback). SGR coordinates are only meaningful then: the TUI's
+  // screen is the bottom `rows` of the buffer, so a report computed from a
+  // scrolled-up viewport would hit-test a completely different row.
+  // `terminal` defaults to the primary pane's (a TerminalTile passes its own).
+  _terminalViewportAtBottom(terminal = this.terminal) {
+    const buf = terminal?.buffer?.active;
+    return !buf || buf.viewportY >= buf.baseY;
+  },
+
+  // Map a viewport point to a 1-based terminal cell the same way xterm maps a
+  // click: offset inside .xterm-screen divided by the rendered cell size,
+  // clamped to the grid. Returns null when the terminal isn't measurable yet.
+  // `terminal` defaults to the primary pane's (a TerminalTile passes its own).
+  _clientPointToCell(clientX, clientY, terminal = this.terminal) {
+    if (!terminal || !Number.isFinite(clientX) || !Number.isFinite(clientY)) return null;
+    const screen = terminal.element?.querySelector('.xterm-screen');
+    const cell = terminal._core?._renderService?.dimensions?.css?.cell;
+    if (!screen || !cell?.width || !cell?.height) return null;
+    const rect = screen.getBoundingClientRect();
+    const col = Math.max(1, Math.min(terminal.cols, Math.floor((clientX - rect.left) / cell.width) + 1));
+    const row = Math.max(1, Math.min(terminal.rows, Math.floor((clientY - rect.top) / cell.height) + 1));
+    return { col, row };
+  },
+
+  // Encode a tap as an SGR mouse report (press + release at button 0) and send it
+  // to the PTY directly, bypassing xterm's mouse encoder. `target` ({ terminal,
+  // sessionId, ephemeral }) aims it at a TerminalTile instead of the primary
+  // pane; either of the first two left out means the primary pane's.
+  // `ephemeral: true` sends it through _sendInputEphemeral instead of the
+  // persisted exactly-once queue: a TerminalTile's mouse reports never enter
+  // that queue (CLAUDE.md, Split-pane sessions), or a reload would replay one
+  // onto a later screen. Left out, the report stays on _sendInputAsync, as the
+  // primary pane always sent it.
+  _sendSyntheticSgrTap(clientX, clientY, target = {}) {
+    const sessionId = target.sessionId || this.activeSessionId;
+    const terminal = target.terminal || this.terminal;
+    if (!sessionId) return;
+    if (!this._terminalViewportAtBottom(terminal)) return; // scrollback click → misfire, do nothing
+    const pos = this._clientPointToCell(clientX, clientY, terminal);
+    if (!pos) return;
+    const report = `\x1b[<0;${pos.col};${pos.row}M\x1b[<0;${pos.col};${pos.row}m`;
+    if (target.ephemeral) this._sendInputEphemeral(sessionId, report);
+    else this._sendInputAsync(sessionId, report);
+  },
+
+  // True when a parsed CLI version string ('2.1.187' — banner-parsed on the
+  // server, delivered via session:cliInfo / SessionState.cliVersion) is known
+  // AND >= the minimum. Unknown or unparseable versions return false so
+  // callers keep the conservative behavior.
+  _cliVersionAtLeast(version, minimum) {
+    if (typeof version !== 'string') return false;
+    const parts = version.trim().replace(/^v/, '').split('.').map(Number);
+    if (parts.length !== 3 || parts.some((n) => !Number.isFinite(n))) return false;
+    const min = minimum.split('.').map(Number);
+    for (let i = 0; i < 3; i++) {
+      if (parts[i] !== min[i]) return parts[i] > min[i];
+    }
+    return true;
+  },
+
+  // Wheel forwarding gate for the container wheel handler: no Shift override,
+  // xterm's own encoder dormant, viewport at the bottom, and a TUI VERIFIED to
+  // scroll its transcript on SGR wheel reports, which today is claude 2.1.187+
+  // with mouse tracking on (fullscreen) and nothing else (older Claude Code
+  // captures wheel as select-menu option navigation, an unknown version is
+  // treated as older, and inline Claude ignores it). Gemini and codex are
+  // strip modes too but keep the local wheel — taps/clicks are still forwarded
+  // for them (harmless no-ops at worst).
+  //
+  // Codex USED to forward here and was the #227 regression (DodgyBadger, Codex
+  // latest / Chrome / Win11: dead wheel in codex, working scrollbar drag).
+  // Measured on codex-cli 0.147.0 in a bare tmux: it never enables mouse
+  // tracking (`mouse_any_flag=0`) and SGR wheel reports fed to its PTY change
+  // NOTHING on screen — it runs an inline viewport (`alternate_on=0`) and pushes
+  // its transcript into the terminal's own scrollback (tmux `history_size`
+  // grows), so there is no in-app pager to drive and local scrollback IS the
+  // codex transcript. Forwarding therefore swallowed every tick.
+  // Wheel delta → whole scroll lines. macOS trackpads turn Shift+two-finger
+  // scroll into a HORIZONTAL wheel (deltaY≈0, deltaX carries the magnitude), and
+  // Shift routes the wheel to local scrollback (_shouldForwardWheelToApp returns
+  // false on Shift). So under Shift, read whichever axis dominates — otherwise
+  // deltaY≈0 collapses to a fixed ±1 line/tick and the gesture can't page through
+  // history on a trackpad (issue #154). Non-Shift and mouse-wheel paths are
+  // unchanged (they carry deltaY). The `|| ±1` keeps sub-25px deltas moving.
+  //
+  // `deltaMode` says what UNIT the delta is in, and ignoring it made every
+  // non-pixel browser scroll ~4x too slowly: Firefox reports DOM_DELTA_LINE (1)
+  // with deltaY≈3 per notch, so the pixel math rounded to 0 and fell through to
+  // the ±1 fallback — one line per notch, versus 4-5 for Chrome's ~110px. In
+  // Claude mode the same value also capped the forwarded SGR report at one tick.
+  _wheelScrollLines(ev) {
+    // Pure horizontal swipe: 0, never the ±1 fallback (wheelDeltaWholeLines).
+    return window.ReverieTerminalInput.wheelDeltaWholeLines(ev, this.terminal?.rows);
+  },
+
+  /** Unrounded variant for the smooth local-scroll path, which accumulates
+   *  sub-line fractions across events instead of forcing every tiny trackpad
+   *  delta to a whole ±1 line. Same unit handling and Shift-axis trap. The
+   *  math is the pure ReverieTerminalInput.wheelDeltaLines (top of this file),
+   *  which a TerminalTile calls with its own row count. */
+  _wheelScrollLinesFloat(ev) {
+    return window.ReverieTerminalInput.wheelDeltaLines(ev, this.terminal?.rows);
+  },
+
+  // `target` ({ terminal, sessionId }) asks the question for a TerminalTile:
+  // its own terminal's tracking mode and its own session, never the active one.
+  // Either field left out means the primary pane's.
+  _shouldForwardWheelToApp(ev, target = {}) {
+    if (ev.shiftKey) return false;
+    // Opt-out (App Settings → Input → "Wheel scrolls local history"): pin the
+    // plain wheel to xterm's own scrollback like pre-#144, for users who prefer
+    // it over forwarding the wheel to the CLI's transcript (issue #154). Cheap —
+    // loadAppSettingsFromStorage() is cache-backed.
+    //
+    // FOOTGUN, and why it is handled downstream rather than here: for a
+    // repaint-mode CLI that local scrollback is EMPTY (tmux keeps no history for
+    // the pane), so this setting can silently convert a working wheel into a
+    // dead one — a plausible reading of the #205 retest, where a user whose
+    // scrolling was broken on 1.11.x may well have flipped it while hunting for
+    // a fix. Scoping the setting away from those modes would be the other
+    // option, but it would override an explicit user choice; instead the caller
+    // falls through to _maybePageCliTranscript, so the gesture still pages the
+    // CLI's transcript and the setting keeps meaning exactly what it says.
+    if (this.loadAppSettingsFromStorage?.()?.terminalWheelLocalScrollback) return false;
+    const mode = (target.terminal || this.terminal)?.modes?.mouseTrackingMode;
+    if (mode && mode !== 'none') return false;
+    const session = this.sessions?.get(target.sessionId || this.activeSessionId);
+    const sessionMode = session?.mode || 'claude';
+    if (sessionMode !== 'claude') return false;
+    if (!this._cliVersionAtLeast(session?.cliVersion, '2.1.187')) return false;
+    // Only while Claude is actually listening for the mouse. In its default
+    // inline renderer (2.1.280 measured: alternate_on=0, mouse_any_flag=0) the
+    // transcript lives in real scrollback, like codex, and SGR wheel reports are
+    // ignored, so forwarding made every swipe and wheel tick dead. Fullscreen
+    // (CLAUDE_CODE_NO_FLICKER=1, or "tui": "fullscreen" in ~/.claude/settings.json)
+    // turns on alt-screen + mode 1003/1006, which the server records as
+    // cliMouseTracking. A stale-false flag after a server restart falls through
+    // to _maybePageCliTranscript, so it never goes dead.
+    if (session?.cliMouseTracking !== true) return false;
+    // Deliberately NOT gated on _terminalViewportAtBottom(). It used to be, so
+    // that leaving the bottom handed the wheel back to local scrollback and both
+    // histories stayed reachable without a mode switch. In practice that inverted
+    // the behavior users actually want: a repaint-mode CLI keeps NO terminal
+    // scrollback of its own (tmux reports history_size=0 for a Claude pane), so
+    // xterm's buffer holds only Reverie's REPLAYED repaint frames. Scrolling that
+    // locally drags the CLI's own pinned furniture (the prompt box, the status
+    // line) up the screen and shows stale frames underneath, which reads as "the
+    // window scrolled away" rather than "I am reading history".
+    //
+    // And it was easy to fall into: scrollToLastNonEmptyLine() parks the viewport
+    // `rows - 2` above the last non-empty row, so any tab switch onto a session
+    // with trailing blank rows left the viewport off-bottom and every later wheel
+    // went local. Forwarding unconditionally keeps the CLI's transcript as the
+    // plain wheel's target and its input box fixed in place; local scrollback is
+    // still on Shift+wheel and on the "Wheel scrolls local history" opt-out above.
+    return true;
+  },
+
+  // Encode wheel ticks as SGR reports (button 64 = up, 65 = down) at the pointer
+  // cell. Reports are coalesced into one fire-and-forget write per ~40ms: a
+  // trackpad emits dozens of wheel events per second and each send becomes a
+  // tmux send-keys on the server — unbatched, a single flick would spawn a
+  // process storm. Per-event tick count is capped (Claude applies its own
+  // scroll-speed multiplier and acceleration on top), and the queue is bounded
+  // so a wild scroll can't build a backlog that keeps scrolling after the finger
+  // stops. Flushed via _sendInputEphemeral — loss-tolerant, off the durable queue.
+  // The encoding is the pure ReverieTerminalInput.sgrWheelReports, which a
+  // TerminalTile calls with its own cell (TerminalTile._maybeForwardWheelToCli).
+  _sendSyntheticSgrWheel(clientX, clientY, lines) {
+    if (!this.activeSessionId || !lines) return;
+    const pos = this._clientPointToCell(clientX, clientY);
+    if (!pos) return;
+    this._queueScrollBytes(window.ReverieTerminalInput.sgrWheelReports(lines, pos));
+  },
+
+  /**
+   * Shared 40ms coalescer for every byte a scroll gesture sends to the PTY (SGR
+   * wheel reports and the PageUp/PageDown fallback alike). Each flush becomes a
+   * tmux send-keys server-side, so per-event writes would spawn a process storm
+   * on a single flick; the queue is bounded so a wild scroll can't build a
+   * backlog that keeps scrolling after the finger stops.
+   *
+   * A TerminalTile keeps its own narrow twin (TerminalTile._queueScrollBytes,
+   * terminal-tile.js: same 40ms window, same 512-byte bound) because this queue
+   * flushes to the active session only; keep the two in step.
+   */
+  _queueScrollBytes(data) {
+    if (!data || !this.activeSessionId) return;
+    const queued = this._wheelSgrQueue || '';
+    if (queued.length > 512) return;
+    this._wheelSgrQueue = queued + data;
+    if (this._wheelSgrFlushTimer) return;
+    this._wheelSgrFlushTimer = setTimeout(() => this._flushWheelSgrQueue(), 40);
+  },
+
+  /**
+   * True when this session's LOCAL scrollback is structurally empty and its CLI
+   * can page its own transcript: xterm's normal buffer never grows past one
+   * screen (`baseY === 0`), so scrolling it is a no-op no matter how the gesture
+   * is routed (the "wheel does nothing at all" half of the #205 retest).
+   *
+   * Shapes measured so far:
+   *  - `claude` in repaint mode (the original, #205 round 2): tmux reports
+   *    `history_size≈0` and every frame overwrites the last;
+   *  - `opencode`, whose TUI runs on the ALTERNATE SCREEN (opencode 1.18.31: tmux
+   *    `alternate_on=1`, `history_size=0`) and so pushes nothing into the
+   *    terminal's scrollback at all. It pages its own transcript with the same
+   *    PageUp/PageDown keys (`messages_page_up/down`) but IGNORES SGR wheel
+   *    reports — six `\x1b[<64;…M` reports against an idle pane left the capture
+   *    byte-identical — so paging is the only gesture that reaches it;
+   *  - `codex`, which draws on tmux's alternate screen too (0.157.1, 0.160), which
+   *    the full strip hides from xterm, and pages on PageUp/PageDown while SGR
+   *    wheel reports do nothing.
+   *
+   * ⚠️ Which modes page is read from `window.__reverieTranscriptPageKeys`, the
+   * list the server builds from the `transcriptPageKeys` CAPABILITY, never an id
+   * literal here. A missing list means no mode pages.
+   *
+   * `target` ({ terminal, sessionId, localRows }) asks for a TerminalTile, which
+   * calls this with its own session and terminal, so the mode rule stays here
+   * alone. `localRows` replaces `baseY` as the history row count: a tile
+   * discounts the stale rows its own load order leaves above the screen
+   * (TerminalTile._localRows). Every field left out means the primary pane's.
+   */
+  _localScrollbackIsHollow(target = {}) {
+    const mode = this.sessions?.get(target.sessionId || this.activeSessionId)?.mode || 'claude';
+    const pagingModes = window.__reverieTranscriptPageKeys;
+    if (!Array.isArray(pagingModes) || !pagingModes.includes(mode)) return false;
+    const buf = (target.terminal || this.terminal)?.buffer?.active;
+    if (!buf || buf.type === 'alternate') return false;
+    const rows = Number.isFinite(target.localRows) ? target.localRows : buf.baseY;
+    return (rows || 0) === 0;
+  },
+
+  /**
+   * LAST-RESORT scroll for a hollow local buffer: translate gesture lines into
+   * coalesced PageUp/PageDown key sends so the CLI pages its OWN transcript.
+   *
+   * The rescue path for every way `_shouldForwardWheelToApp` can come back false
+   * on a session that has no local history to fall back on: the CLI version probe
+   * failed or is genuinely older than 2.1.187, the CLI's mouse tracking flag is
+   * unset (the inline renderer, or fullscreen right after a server restart), the
+   * user turned on "Wheel scrolls local history" (which pins the wheel to a buffer
+   * that, for a repaint-mode CLI, is empty: the setting's footgun), or the CLI is
+   * one that never fills the buffer and never accepts the wheel (opencode, codex:
+   * both ignore SGR wheel reports, #227, and page on PageUp/PageDown). Before
+   * this, all of those produced a completely dead gesture; the #205 reporter
+   * proved the keyboard route works by paging back through intact text with Fn+Up.
+   * This is not wheel forwarding: it sends plain keys, and only over a hollow buffer.
+   *
+   * Guarded by `_localScrollbackIsHollow()` (the `transcriptPageKeys` capability +
+   * `baseY === 0`) plus a false forwarding gate, so a session with real local
+   * scrollback is never touched. Shift is excluded on purpose: it is the explicit
+   * "give me local scrollback" gesture and must keep that meaning.
+   *
+   * The FIRST event of a trackpad-sized gesture (opening under
+   * PAGE_KEY_IMMEDIATE_MAX_ROWS) pages at once. Waiting for half a screen of
+   * travel (19 rows, ~475px on a 38-row pane) meant an ordinary trackpad flick
+   * never sent a key at all. That page is pre-paid: the travel it skipped is
+   * owed back by the rest of the gesture, so the rate stays one page per
+   * `perPage` rows. A new touch contact (`ev.touchId`), a pause outside a contact
+   * (PAGE_KEY_GESTURE_GAP_MS, or PAGE_KEY_DEBT_MS while a same-direction page is
+   * still owed), a reversal after the gap or a tab switch starts a new gesture;
+   * one contact is never split by time, and a quick reversal never pre-pays. A
+   * larger opening event is a wheel notch and accumulates as before, so slow
+   * notches still page once per `perPage` rows.
+   *
+   * Consumed WITHOUT paging: a pinch (`ctrlKey`, how Chrome reports a trackpad
+   * pinch), a mostly horizontal swipe (both deltas present, |deltaX| > |deltaY|;
+   * the touch path locks its own axis before it gets here), and any gesture while
+   * the session has an open dialog (tab alert 'action', set by a pending
+   * permission_prompt or elicitation_dialog), so a page key never reaches its
+   * selector.
+   *
+   * @returns true when the gesture was consumed here (the caller must not also
+   *          scroll locally).
+   *
+   * The gesture rules above live in the pure ReverieTerminalInput.pageKeysForGesture
+   * (top of this file); this method adds the gates and keeps the state.
+   *
+   * Twin: TerminalTile._maybePageCliTranscript (terminal-tile.js) pages a tile
+   * through the same gates and the same pageKeysForGesture, with its own state
+   * and its OWN session's dialog check; keep the two in step. The tile adds one
+   * gate this pane cannot need, viewport at the bottom: hollow here means baseY 0,
+   * so this viewport is always there, while a tile is hollow with its own
+   * discounted rows still above the screen.
+   */
+  _maybePageCliTranscript(ev, lines) {
+    if (!lines || ev?.shiftKey || !this.activeSessionId) return false;
+    if (!this._localScrollbackIsHollow()) return false;
+    // An open dialog in THIS pane's session (the active one): a page key would
+    // move its selector. Consumed, so the buffer does not scroll under it either.
+    if (this.tabAlerts?.get(this.activeSessionId) === 'action') {
+      this._logScrollRouting('page-keys-dialog-open');
+      return true;
+    }
+    // Leftover travel and the gesture in progress belong to the tab they were made on.
+    if (this._pageKeySession !== this.activeSessionId) {
+      this._pageKeySession = this.activeSessionId;
+      this._pageKeyGesture = null;
+    }
+    const step = window.ReverieTerminalInput.pageKeysForGesture(
+      this._pageKeyGesture,
+      ev,
+      lines,
+      this.terminal?.rows,
+      performance.now()
+    );
+    this._pageKeyGesture = step.state;
+    if (step.keys) this._queueScrollBytes(step.keys);
+    this._logScrollRouting('page-keys');
+    return true;
+  },
+
+  /**
+   * One line in the console saying WHY a scroll gesture went where it went.
+   *
+   * Issue #205 ran two rounds of remote guesswork — is the CLI version probe
+   * empty, is the opt-out setting on, did a mouse DECSET leak past the strip? —
+   * that this single log answers directly. Logged once per session per distinct
+   * decision, so a steady gesture stays silent and a CHANGE (e.g. the version
+   * arriving late and flipping the route) still prints.
+   */
+  _logScrollRouting(decision) {
+    const sessionId = this.activeSessionId || '(none)';
+    const session = this.sessions?.get(sessionId);
+    const optOut = !!this.loadAppSettingsFromStorage?.()?.terminalWheelLocalScrollback;
+    const tracking = this.terminal?.modes?.mouseTrackingMode || 'none';
+    // xterm's own mode above stays 'none' for a strip mode (the server removes
+    // the DECSETs), so the CLI's real tracking state is reported separately.
+    const cliTracking = session?.cliMouseTracking === true;
+    const baseY = this.terminal?.buffer?.active?.baseY ?? -1;
+    const signature =
+      `${decision}|${session?.mode}|${session?.cliVersion}|${optOut}|${tracking}|${cliTracking}|${baseY > 0}`;
+    if (!this._scrollRoutingLogged) this._scrollRoutingLogged = new Map();
+    if (this._scrollRoutingLogged.get(sessionId) === signature) return;
+    this._scrollRoutingLogged.set(sessionId, signature);
+    console.log(
+      `[scroll] ${sessionId} → ${decision} (mode=${session?.mode || '?'}, cliVersion=${session?.cliVersion || 'unknown'}, ` +
+        `localScrollbackOptOut=${optOut}, mouseTracking=${tracking}, cliMouseTracking=${cliTracking}, ` +
+        `localScrollbackRows=${baseY})`
+    );
+  },
+
+  _flushWheelSgrQueue() {
+    this._wheelSgrFlushTimer = null;
+    const data = this._wheelSgrQueue;
+    this._wheelSgrQueue = '';
+    // Ephemeral (fire-and-forget): wheel reports are loss-tolerant, so they skip
+    // the durable seq/ACK queue — no localStorage churn, no "Nb queued" flicker
+    // in the connection indicator on every scroll tick.
+    if (data && this.activeSessionId) this._sendInputEphemeral(this.activeSessionId, data);
+  },
+
+  // Desktop counterpart of the touchend tap branch: hand-encode an SGR report
+  // for a plain left-click when the server strips mouse DECSETs (see
+  // _shouldReportMouseToCli). Every skip below is a click that already has
+  // a meaning elsewhere: synthetic/compat clicks after a touch tap (touchend
+  // reported already), modified clicks (shift keeps xterm's selection
+  // override), double/triple clicks (word/line selection), drag-selections,
+  // clicks on hovered links (activate() already handles the click — a second
+  // synthetic SGR press could e.g. dismiss a claude permission dialog),
+  // clicks outside the cell grid, and sessions where xterm's own encoder is
+  // live (it reported the click itself — a second report would double-move).
+  //
+  // `target` ({ terminal, sessionId, linkHovered, ephemeral }) runs the same
+  // skips for a TerminalTile's click: its own terminal, its own session's
+  // tracking flag and its own link hover (the primary pane's _linkHovered
+  // belongs to its terminal alone). `ephemeral` reaches _sendSyntheticSgrTap,
+  // so a TerminalTile's mouse report never enters the persisted input queue.
+  // Every field left out means the primary pane's.
+  _handleDesktopTerminalClick(ev, target = {}) {
+    const terminal = target.terminal || this.terminal;
+    if (!terminal || !ev?.isTrusted) return;
+    if (ev.button !== 0 || ev.detail !== 1) return;
+    if (ev.shiftKey || ev.altKey || ev.ctrlKey || ev.metaKey) return;
+    const mode = terminal.modes?.mouseTrackingMode;
+    if (mode && mode !== 'none') return;
+    if (!this._shouldReportMouseToCli(target.sessionId)) return;
+    if (terminal.hasSelection?.()) return;
+    if (target.linkHovered ?? this._linkHovered) return; // link provider hover/leave callbacks (registerFilePathLinkProvider)
+    if (performance.now() <= (this._trustedTapMouseSuppressUntil || 0)) return;
+    if (!ev.target?.closest?.('.xterm-screen')) return;
+    this._sendSyntheticSgrTap(ev.clientX, ev.clientY, target);
+  },
+
+  /**
+   * Make Shift+drag START a selection instead of trying to extend one.
+   *
+   * In a native terminal running a mouse-tracking TUI (claude, codex), Shift is
+   * the "let me select text" modifier: it bypasses the app's mouse reporting so
+   * the emulator selects locally. Users bring that habit here, and here it did
+   * NOTHING — Shift+drag selected no text at all (measured).
+   *
+   * The reason is that the habit and xterm's Shift mean different things once
+   * the DECSETs are stripped. xterm reads Shift as "force selection" ONLY while
+   * the app actually has mouse tracking on; the server strips those DECSETs for
+   * claude/codex/gemini (isAltScreenStripMode) and opencode (isMuxMouseStripMode),
+   * so xterm's mouseTrackingMode is
+   * permanently `none`, that branch is unreachable, and Shift instead falls into
+   * `_onIncrementalClick` — EXTEND an existing selection. Extending is a no-op
+   * when `selectionStart` is null, so the drag never anchors and no selection is
+   * ever built (this is why nothing gets cleared: there was nothing to clear).
+   *
+   * So plant the anchor xterm is missing. Runs in the CAPTURE phase on the
+   * `.xterm` root, an ancestor of the `.xterm-screen` element SelectionService
+   * binds to, so it lands before xterm's own mousedown; xterm's incremental
+   * handler then extends from our anchor and the drag behaves like a plain one.
+   * A Shift+drag with a selection ALREADY up is left alone — that is a genuine
+   * extend gesture and xterm already does it right.
+   */
+  _installShiftDragSelection() {
+    const el = this.terminal?.element;
+    if (!el || el._reverieShiftDragInstalled) return;
+    el._reverieShiftDragInstalled = true;
+    el.addEventListener(
+      'mousedown',
+      (ev) => {
+        if (!ev.isTrusted || ev.button !== 0 || !ev.shiftKey) return;
+        if (ev.altKey || ev.ctrlKey || ev.metaKey) return;
+        if (this.terminal?.hasSelection?.()) return;
+        const pos = this._clientPointToCell(ev.clientX, ev.clientY);
+        if (!pos) return;
+        // _clientPointToCell is 1-based and viewport-relative; select() takes a
+        // 0-based column and an ABSOLUTE buffer row.
+        const viewportY = this.terminal.buffer?.active?.viewportY ?? 0;
+        this.terminal.select(pos.col - 1, pos.row - 1 + viewportY, 0);
+      },
+      true
+    );
+  },
+
+  _installMobileTapMouseGuard() {
+    const el = this.terminal?.element;
+    if (!el || el._reverieTapMouseGuardInstalled) return;
+    if (typeof MobileDetection !== 'undefined' && MobileDetection.isTouchDevice && !MobileDetection.isTouchDevice()) return;
+    el._reverieTapMouseGuardInstalled = true;
+    const suppressTrustedCompatMouse = (ev) => {
+      const suppressUntil = this._trustedTapMouseSuppressUntil || 0;
+      if (!ev.isTrusted || performance.now() > suppressUntil) return;
+      ev.preventDefault();
+      ev.stopImmediatePropagation();
+    };
+    el.addEventListener('mousedown', suppressTrustedCompatMouse, true);
+    el.addEventListener('mouseup', suppressTrustedCompatMouse, true);
+  },
+
+  _suppressTrustedTapMouseEvents() {
+    const ms = window.ReverieTerminalInput?.TOUCH_COMPAT_MOUSE_SUPPRESS_MS || 450;
+    this._trustedTapMouseSuppressUntil = performance.now() + ms;
+  },
+
+  increaseFontSize() {
+    // With the tile grid open, Ctrl +/- sizes the tiles (their own font size).
+    if (this._tilesOwnTerminal?.()) {
+      this.setTileFontSize(Math.min(this._tileGridFontSize() + 2, 24));
+      return;
+    }
+    const current = this.terminal.options.fontSize || 14;
+    this.setFontSize(Math.min(current + 2, 24));
+  },
+
+  decreaseFontSize() {
+    if (this._tilesOwnTerminal?.()) {
+      this.setTileFontSize(Math.max(this._tileGridFontSize() - 2, 10));
+      return;
+    }
+    const current = this.terminal.options.fontSize || 14;
+    this.setFontSize(Math.max(current - 2, 10));
+  },
+
+  setFontSize(size) {
+    this.terminal.options.fontSize = size;
+    document.getElementById('fontSizeDisplay').textContent = size;
+    this._refitAfterCellSizeChange();
+    localStorage.setItem('reverie-font-size', size);
+    // Update overlay font cache and re-render at new cell dimensions
+    this._localEchoOverlay?.refreshFont();
+    this._predictiveEcho?.refreshFont();
+    this._forEachTile?.(
+      (tile) => {
+        tile.terminal.options.fontSize = size;
+        tile.fit(); // a font change is a size change: tell its PTY too (#464)
+      },
+      { grid: false }
+    );
+  },
+
+  /**
+   * Apply the per-device `terminalFontFamily` setting to the live terminal.
+   * The custom family is resolved against the built-in stack (constants.js),
+   * so passing '' / undefined restores the default. Mirrors setFontSize():
+   * refit for the new cell metrics, then refresh the echo overlays' cached
+   * font so predictions keep landing on the right cells.
+   */
+  applyTerminalFontFamily(custom) {
+    const resolved = window.ReverieTerminalFont.resolve(custom);
+    if (!this.terminal || this.terminal.options.fontFamily === resolved) return;
+    this.terminal.options.fontFamily = resolved;
+    // Changing the family at runtime is the same race as the boot-time one: the
+    // option write makes xterm re-measure immediately, against a family the
+    // browser may not have loaded. Re-arm the wait for the new stack and fit
+    // again once it settles, so the setting takes effect at the right size
+    // without needing a tab switch. The fit below still runs, so the terminal
+    // is never left unfitted if the wait is slow.
+    this._terminalFontReady = this._awaitTerminalFont().then(() => {
+      if (this.terminal?.options?.fontFamily === resolved) this._refitAfterCellSizeChange();
+    });
+    this._refitAfterCellSizeChange();
+    this._localEchoOverlay?.refreshFont();
+    this._predictiveEcho?.refreshFont();
+    this._forEachTile?.((tile) => {
+      tile.terminal.options.fontFamily = resolved;
+      tile.fit(); // a font change is a size change: tell its PTY too (#464)
+    });
+  },
+
+  /**
+   * Apply the per-device terminal font WEIGHTS to every live xterm.
+   *
+   * Both slots move together because they are resolved together: passing a
+   * settings blob with neither key restores xterm's own `normal`/`bold`.
+   *
+   * Three things follow the option write and none of them is optional:
+   *
+   *  - The echo overlays cache `terminal.options.fontWeight` and paint it into
+   *    their spans, so without `refreshFont()` the characters being typed keep
+   *    the old weight while the rest of the screen changes. Most visible on a
+   *    phone, where local echo is on by default.
+   *  - Agent Teams panes read these options at CONSTRUCTION, so a live save
+   *    would otherwise leave an open pane at the old weight beside a repainted
+   *    terminal. `applyTerminalSkin()` propagates for the same reason.
+   *  - The refit is insurance. `CharSizeService` measures through the CSS
+   *    `font` shorthand, which resets the weight, so the canvas path measures
+   *    the 400 face at every setting — but `DomRenderer` styles its measure
+   *    span with `span:not(.xterm-bold)`, where the normal weight really can
+   *    move the cell.
+   */
+  applyTerminalFontWeights(settings) {
+    const { fontWeight, fontWeightBold } = window.ReverieTerminalFont.resolveWeights(settings);
+    if (!this.terminal) return;
+    if (this.terminal.options.fontWeight === fontWeight && this.terminal.options.fontWeightBold === fontWeightBold) {
+      return;
+    }
+    this.terminal.options.fontWeight = fontWeight;
+    this.terminal.options.fontWeightBold = fontWeightBold;
+    // Same race as a live family change: the option write makes xterm
+    // re-measure immediately, against a face the browser may not have
+    // rasterized yet. Re-arm the wait and fit again once it settles; the fit
+    // below still runs, so the terminal is never left unfitted.
+    this._terminalFontReady = this._awaitTerminalFont().then(() => {
+      if (this.terminal?.options?.fontWeight === fontWeight) this._refitAfterCellSizeChange();
+    });
+    this._refitAfterCellSizeChange();
+    this._localEchoOverlay?.refreshFont();
+    this._predictiveEcho?.refreshFont();
+    for (const [, entry] of this.teammateTerminals || []) {
+      if (!entry?.terminal) continue;
+      entry.terminal.options.fontWeight = fontWeight;
+      entry.terminal.options.fontWeightBold = fontWeightBold;
+      try {
+        entry.fitAddon?.fit();
+      } catch {
+        /* pane not laid out yet — its own resize observer refits it */
+      }
+    }
+    this._forEachTile?.((tile) => {
+      tile.terminal.options.fontWeight = fontWeight;
+      tile.terminal.options.fontWeightBold = fontWeightBold;
+      tile.fit(); // a font change is a size change: tell its PTY too (#464)
+    });
+  },
+
+  loadFontSize() {
+    const saved = localStorage.getItem('reverie-font-size');
+    if (saved) {
+      const size = parseInt(saved, 10);
+      if (size >= 10 && size <= 24) {
+        this.terminal.options.fontSize = size;
+        document.getElementById('fontSizeDisplay').textContent = size;
+      }
+    }
+  },
+
+  /**
+   * Wait for the terminal's own font, then make xterm re-measure against it.
+   *
+   * A character cell measured against a fallback font has a different width and
+   * height from one measured against the terminal font, so a fit taken too early
+   * produces the wrong column and row count. The correction then arrives after
+   * the buffer has been replayed, and the CLI redraws a frame that no longer
+   * matches what the terminal is showing.
+   *
+   * ⚠️ Waiting is not sufficient on its own, which is what the re-measure at the
+   * end is for. `FitAddon.proposeDimensions()` divides the container by a CACHED
+   * cell size, and xterm refreshes that cache only from `open()`, from a resize
+   * that actually changed the grid, and on a device-pixel-ratio change — nothing
+   * in it listens for font loading. So a fit that runs after the font arrives can
+   * still divide by the fallback cell, propose the grid it already has, and
+   * short-circuit before anything re-measures.
+   *
+   * `document.fonts.load` for each family is what actually REQUESTS the faces:
+   * the WebGL renderer rasterises glyphs through a canvas texture atlas, and
+   * canvas text never triggers a CSS font fetch, so `document.fonts.ready` can
+   * resolve with a face never having been asked for at all.
+   *
+   * Every step is best-effort and the whole thing is bounded, because a font
+   * request that never settles must not hold up the terminal: `FontFaceSet.ready`
+   * has no deadline of its own, and the caller awaits this in front of the buffer
+   * replay. Past the deadline we fit against whatever is painted, which is the
+   * old behaviour rather than a new failure.
+   */
+  async _awaitTerminalFont() {
+    try {
+      if (typeof document === 'undefined' || !document.fonts?.load) return;
+      const size = this.terminal?.options?.fontSize || 14;
+      const families = String(this.terminal?.options?.fontFamily || '')
+        .split(',')
+        .map((family) => family.trim().replace(/^["']|["']$/g, ''))
+        .filter(Boolean)
+        // Only the faces that can supply the measured glyph are worth waiting on.
+        // The bundled symbols font is ~1.2MB and carries private-use-area glyphs
+        // only — xterm measures `W`, which it does not contain — so awaiting it
+        // puts a megabyte between the user and their first frame for nothing.
+        // Generic families match no FontFace at all.
+        .filter((family) => !TERMINAL_FONT_UNMEASURED.has(family.toLowerCase()));
+      const loaded = Promise.all(
+        families.map((family) => document.fonts.load(`${size}px "${family}"`).catch(() => {}))
+      ).then(() => document.fonts.ready);
+      await Promise.race([loaded, new Promise((resolve) => setTimeout(resolve, TERMINAL_FONT_WAIT_MS))]);
+    } catch {
+      /* font loading is unavailable or failed — fit against whatever is painted */
+    }
+    // Force the cache refresh xterm will not do for us. Without this the wait
+    // buys nothing on the common path (see the warning above). Private API, as
+    // FitAddon itself is; guarded because a terminal can be disposed mid-wait.
+    try {
+      this.terminal?._core?._charSizeService?.measure();
+    } catch {
+      /* renderer not ready or internals moved — the next real resize re-measures */
+    }
+  },
+
+  /**
+   * The geometry this terminal would report right now, floors applied.
+   * Reads only — `syncTerminalGeometry()` is what makes it true of xterm.
+   * @returns {{cols: number, rows: number}|null}
+   */
+  getTerminalDimensions() {
+    // Never throws. `proposeDimensions()` reads a rendered element and throws
+    // on a terminal that has been disposed or detached mid-resize, which is an
+    // ordinary outcome on a tab switch — and this is called from the settle
+    // timer and the resize observer, where an exception takes the rest of the
+    // callback (the padding fit, the scroll restore, the SIGWINCH) with it.
+    try {
+      return window.ReverieTerminalGeometry.clampTerminalDimensions(this.fitAddon?.proposeDimensions());
+    } catch {
+      return null;
+    }
+  },
+
+  /**
+   * Fit xterm to its container and return the geometry that was APPLIED.
+   *
+   * ⚠️ THE ONLY function that may change the terminal's size, and the only
+   * source of the numbers sent to the server. `fitAddon.fit()` on its own is
+   * not enough and the gap is issue #464: fit() resizes xterm to
+   * `proposeDimensions()` RAW, while every server-facing path reported those
+   * dimensions floored at 40x10. Whenever the floor bit — a phone with the
+   * keyboard up routinely proposes under ten rows — the PTY was told one shape
+   * and xterm held another, and Claude Code then computed every repaint for a
+   * screen that did not exist. See the note in constants.js for what that
+   * renders as, and why the floor is not negotiable at either end.
+   *
+   * Three call sites each used to do their own fit-then-clamp
+   * (`throttledResize`, `sendResize`, KeyboardHandler's one-shot), which is
+   * three chances to disagree; two of them also re-read `proposeDimensions()`
+   * after the fit, so a container that moved in between — `_shrinkPaddingToFit`
+   * runs exactly there — changed the answer without touching xterm.
+   *
+   * The second resize only happens when the floor actually bites, so the
+   * ordinary path still reflows once, as before.
+   *
+   * @returns {{cols: number, rows: number}|null} null when the terminal cannot be measured
+   */
+  syncTerminalGeometry() {
+    if (!this.fitAddon || !this.terminal) return null;
+    try {
+      this.fitAddon.fit();
+    } catch {
+      /* a disposed or unattached terminal cannot be fitted; fall through to the read */
+    }
+    const dims = this.getTerminalDimensions();
+    if (!dims) return null;
+    if (!this._resizeTerminalTo(dims)) return null;
+    // The floor can leave this terminal wider than the box that shows it, and
+    // that clips columns with no gesture to reach them (issue #464, item 4).
+    this._scheduleOverflowAffordanceSync();
+    return dims;
+  },
+
+  /**
+   * The geometry to ASK the server for, applied locally only as far as the PTY
+   * can follow it.
+   *
+   * Ordinarily that is all of it: `syncTerminalGeometry()`. While another
+   * device holds the width (`_paneWidthRefused`, set by `_onPtyGeometryReport`)
+   * it is not. Fitting then re-wraps xterm to the container's columns, the
+   * request is refused, the report puts the PTY's columns back, and the whole
+   * buffer re-wraps twice per ask, with the viewport pointing at a different
+   * part of the scrollback in between. The mobile retry asks every 30 seconds,
+   * so that happened on a timer for as long as the refusal lasted. So the
+   * columns stay at the PTY's (the #464 invariant: the browser never draws at
+   * a width the PTY does not have), the rows follow the container (they are
+   * never adopted, see reconcilePtyGeometry), and the container's columns go
+   * out as the request. An accepted request is adopted by the report.
+   *
+   * @returns {{cols: number, rows: number}|null} the geometry to request
+   */
+  _geometryForResizeRequest() {
+    if (!this._paneWidthRefused) return this.syncTerminalGeometry();
+    const wanted = this.getTerminalDimensions();
+    if (!wanted || !this.terminal) return null;
+    if (!this._resizeTerminalTo({ cols: this.terminal.cols, rows: wanted.rows })) return null;
+    this._scheduleOverflowAffordanceSync();
+    return wanted;
+  },
+
+  /**
+   * Re-measure after something changed the CELL size, and tell the server.
+   *
+   * ⚠️ A font change is a geometry change. Bigger glyphs mean fewer columns in
+   * the same box, and the PTY is drawing for a column count nobody updated:
+   * `setFontSize`, `setFontFamily` and `setFontWeight` all refitted the terminal
+   * and sent NOTHING, so raising the font on a phone could drop the browser
+   * below the columns the CLI was still wrapping at until some unrelated resize
+   * event happened along. That is issue #464 reached through the font menu.
+   *
+   * With no session there is no PTY to tell, and a session detached into its own
+   * window is not this terminal's to resize — `sendResize` makes that call, and
+   * fits as its first synchronous step, so this never fits twice.
+   */
+  _refitAfterCellSizeChange() {
+    if (this.activeSessionId) {
+      this.sendResize(this.activeSessionId)?.catch?.(() => {});
+      return;
+    }
+    this.syncTerminalGeometry();
+  },
+
+  /**
+   * Make xterm exactly `dims`. Idempotent, and never throws at a caller — a
+   * terminal disposed mid-resize is an ordinary outcome on a tab switch.
+   * @returns {{cols: number, rows: number}|null} the applied geometry
+   */
+  _resizeTerminalTo(dims) {
+    if (!this.terminal || !dims) return null;
+    if (this.terminal.cols === dims.cols && this.terminal.rows === dims.rows) return dims;
+    try {
+      this.terminal.resize(dims.cols, dims.rows);
+      return dims;
+    } catch {
+      return null;
+    }
+  },
+
+  /**
+   * Send resize to a session with minimum dimension enforcement.
+   * @param {string} sessionId
+   * @param {{ forceHttp?: boolean, force?: boolean }} [options]
+   * @returns {Promise<boolean>} Whether dimensions changed from the last send
+   */
+  async sendResize(sessionId, options = {}) {
+    // One PTY cannot hold two sizes. A detached session is owned by its own
+    // window, and the dashboard's terminal is narrower than that window because
+    // the session rail takes width the popup does not have — so both sizing it
+    // makes the CLI draw frames that fit neither, which garbles the popup. The
+    // dashboard yields; the solo window sizes what it alone displays.
+    // (_maybeRefetchFullHistory already stands aside for the same reason.)
+    // ⚠️ BEFORE the fit, never after. This used to fit first and withhold only
+    // the server write, on the reasoning that the local reflow keeps the
+    // dashboard's own xterm right. It does not: it leaves this xterm at a shape
+    // the PTY was never told about, which is the #464 divergence exactly — and
+    // the popup that DOES own the PTY is drawing for its own width, so the
+    // dashboard's reflow is to a size nothing is rendering for. Withholding the
+    // resize means withholding all of it. tab-rail-resize performs its one
+    // settle-time refit through this call and has no fallback, which is correct:
+    // a pane it does not own is not its to refit either.
+    if (!this.isSoloWindow && this.detachedSessions?.has(sessionId)) return false;
+    // Backstop: while the tile grid owns the terminal, a tile sizes this PTY and
+    // the parked main terminal measures nothing worth sending.
+    if (this._tilesOwnTerminal?.()) return false;
+    // Fit, floor, and apply in one step so the numbers below are the numbers
+    // xterm is actually holding (or, while another device holds the width,
+    // the numbers this container would hold if the PTY followed).
+    const dims = this._geometryForResizeRequest();
+    if (!dims) return false;
+    // Did the dimensions actually change since the last resize we sent? Callers
+    // use this to skip work (e.g. the post-resize TUI-redraw settle) when no
+    // real SIGWINCH was triggered — switching tabs at the same browser size is
+    // a no-op on the server and needs no redraw grace.
+    const prev = this._lastResizeDims;
+    const changed = !prev || prev.cols !== dims.cols || prev.rows !== dims.rows;
+    // Update _lastResizeDims so the throttledResize handler won't redundantly
+    // clear the terminal for the same dimensions (which would blank the screen
+    // without a subsequent Ink redraw to repaint it).
+    this._lastResizeDims = { cols: dims.cols, rows: dims.rows };
+    const viewportType =
+      typeof MobileDetection !== 'undefined' && MobileDetection.getDeviceType
+        ? MobileDetection.getDeviceType()
+        : window.innerWidth < 600
+          ? 'mobile'
+          : window.innerWidth < 768
+            ? 'tablet'
+            : 'desktop';
+    // Fast path: WebSocket resize
+    if (!options.forceHttp && this._wsReady && this._wsSessionId === sessionId) {
+      try {
+        const msg = { t: 'z', c: dims.cols, r: dims.rows, v: viewportType };
+        if (options.force) msg.f = true;
+        this._ws.send(JSON.stringify(msg));
+        return changed;
+      } catch {
+        // Fall through to HTTP POST
+      }
+    }
+    const body = { ...dims, viewportType };
+    if (options.force) body.force = true;
+    const res = await fetch(`/api/sessions/${sessionId}/resize`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    // Same report the WS path gets as a {"t":"zc"} frame. An older server
+    // answers `{}`, which reconciles to a no-op rather than throwing.
+    try {
+      const applied = (await res.json())?.data ?? {};
+      this._onPtyGeometryReport(sessionId, applied.cols, applied.rows);
+    } catch {
+      /* a body that is not JSON tells us nothing about the PTY; keep our own geometry */
+    }
+    return changed;
+  },
+
+  /**
+   * Adopt the geometry the server says the PTY actually has.
+   *
+   * ⚠️ The server is the authority and this client is not always obeyed.
+   * `Session.resize` declines a small-viewport request outright while a desktop
+   * connection holds an active sizing claim, and says nothing — resize was
+   * write-only until #464. A terminal that keeps its own shape after such a
+   * refusal does not render "too narrow", it renders GARBLED: Claude Code wraps
+   * its frame at the width it was told and walks the cursor up that many rows,
+   * so a mismatch makes its erase count come out short and each repaint paints
+   * over rows it never cleared. Measured against a real xterm — a PTY believing
+   * 120 columns against a 62-column terminal draws every wrapped line twice.
+   *
+   * Adopting can leave the pane wider than the viewport, and the container is
+   * `overflow: hidden`, so `.term-overflows-x` grants horizontal reach for exactly
+   * as long as the mismatch lasts. Correct-and-reachable beats correct-and-
+   * clipped beats garbled; nothing here is worth trapping content behind.
+   *
+   * Self-resolving: `_startMobileResizeRetry` re-sends this device's dimensions
+   * on a timer, so the pane comes back to this screen once the desktop goes
+   * idle, and the next report clears the class and the notice with it.
+   */
+  _onPtyGeometryReport(sessionId, cols, rows) {
+    if (!this.terminal || sessionId !== this.activeSessionId) return;
+    const local = { cols: this.terminal.cols, rows: this.terminal.rows };
+    const { adopt } = window.ReverieTerminalGeometry.reconcilePtyGeometry(local, { cols, rows });
+    // Columns only, and the local row count is kept — see reconcilePtyGeometry
+    // for why adopting rows put the CLI's input line below the container with
+    // nothing able to scroll to it.
+    if (adopt && this._resizeTerminalTo({ cols, rows: local.rows })) {
+      // The numbers we would report next are now the PTY's, not the container's:
+      // without this the dedupe in throttledResize/sendResize compares against a
+      // request that was refused and suppresses the retry that recovers the pane.
+      this._lastResizeDims = { cols, rows: local.rows };
+    }
+    // Is the PTY at a width this container did not ask for? Compared against
+    // what we WOULD request, not against what the terminal currently holds:
+    // once adopted those two are equal, so the second question answers itself
+    // false and the condition would look resolved while it is still true.
+    // The floor widens this terminal too, and that is the reader's own font
+    // setting rather than another device — hence the comparison, not `>`.
+    const wanted = this.getTerminalDimensions();
+    this._paneWidthRefused = !!wanted && Number.isFinite(cols) && cols !== wanted.cols;
+    this._scheduleOverflowAffordanceSync();
+  },
+
+  /**
+   * Measure on the NEXT frame, coalesced.
+   *
+   * `terminal.resize()` updates the buffer synchronously but the screen element
+   * takes its new width with the render, so measuring in the same tick reads
+   * the size the terminal just left. Coalesced because a settling container
+   * fires several resizes and only the last one's measurement is the truth.
+   */
+  _scheduleOverflowAffordanceSync() {
+    if (typeof requestAnimationFrame !== 'function') {
+      this._syncTerminalOverflowAffordance();
+      return;
+    }
+    if (this._overflowAffordanceFrame) return;
+    this._overflowAffordanceFrame = requestAnimationFrame(() => {
+      this._overflowAffordanceFrame = null;
+      this._syncTerminalOverflowAffordance();
+    });
+  },
+
+  /**
+   * Let the reader reach a pane wider than the box that shows it.
+   *
+   * ⚠️ Keyed on what actually does not FIT, not on a PTY mismatch. Two
+   * different causes put the terminal wider than its container and both leave
+   * columns unreachable behind `.terminal-container`'s clip:
+   *
+   *  - another device holds the sizing claim, so this terminal adopts a width
+   *    it did not ask for; and
+   *  - the 40-column floor. On a 360px phone, font 18 applies 40 columns and
+   *    paints 433px, and font 24 paints 578px — 218px, 38% of the pane, with no
+   *    gesture that could reach it. `increaseFontSize` goes to 24 and applies
+   *    immediately, so that is two taps away, and the PTY agrees with the
+   *    terminal throughout: a mismatch test would never fire.
+   *
+   * Measured rather than derived from cell arithmetic, because the cell width
+   * is fractional and the container's padding is not ours to assume. One pixel
+   * of slack keeps sub-pixel rounding from flapping the class.
+   */
+  _syncTerminalOverflowAffordance() {
+    // ⚠️ Nothing in here may throw. It runs off every geometry change, which is
+    // the resize path, and the affordance is cosmetic: a terminal that cannot
+    // be measured — disposed mid-resize, or a harness with no real DOM — must
+    // lose the scroll affordance, never the resize.
+    let container = null;
+    let overflows = false;
+    try {
+      container = document.getElementById('terminalContainer');
+      const screen = container?.querySelector('.xterm-screen');
+      if (container && screen) {
+        overflows = screen.getBoundingClientRect().width - container.clientWidth > 1;
+      }
+    } catch {
+      /* unmeasurable; fall through with the affordance off */
+    }
+    container?.classList.toggle('term-overflows-x', overflows);
+    // The notice tells the reader to scroll sideways, so it is only true advice
+    // once there is something to scroll. A wide PTY on a screen wide enough to
+    // show it needs no explanation and gets none.
+    if (!overflows || !this._paneWidthRefused) {
+      this._paneOwnedElsewhere = false;
+      return;
+    }
+    this._notePaneOwnedElsewhere();
+  },
+
+  /**
+   * Say, once, that this pane's width belongs to another device.
+   *
+   * Once per transition, not per report: reports arrive on every resize, and a
+   * toast that repeats is noise about a situation already on screen. Silent
+   * when it resolves — the pane simply reflows back to this screen.
+   */
+  _notePaneOwnedElsewhere() {
+    if (this._paneOwnedElsewhere) return;
+    this._paneOwnedElsewhere = true;
+    // 53 characters: measured at one line on a 430px phone. The longer
+    // wording wrapped to two, which is a lot of the terminal to cover for a
+    // notice about a condition that resolves itself.
+    this.showToast('Another device is setting the width — scroll sideways', 'info');
+  },
+
+  /**
+   * Send input to the active session.
+   * @param {string} input - Text to send (include \r for Enter)
+   * @returns {Promise<void>}
+   */
+  async sendInput(input) {
+    if (!this.activeSessionId || !input) return;
+    // Route through the durable, exactly-once delivery layer (useMux for the
+    // POST fallback) so voice / keyboard-accessory / paste input also survives a
+    // dropped link instead of being lost in a single best-effort fetch.
+    this._sendInputAsync(this.activeSessionId, input, { useMux: true });
+  },
+
+  // ═══════════════════════════════════════════════════════════════
+  // Directory Input
+  // ═══════════════════════════════════════════════════════════════
+
+  toggleDirInput() {
+    const btn = document.querySelector('#dirDisplay').parentElement;
+    const input = document.getElementById('dirInput');
+
+    if (input.classList.contains('hidden')) {
+      input.classList.remove('hidden');
+      btn.style.display = 'none';
+      input.focus();
+    }
+  },
+
+  hideDirInput() {
+    const btn = document.querySelector('#dirDisplay').parentElement;
+    const input = document.getElementById('dirInput');
+
+    setTimeout(() => {
+      input.classList.add('hidden');
+      btn.style.display = '';
+
+      const value = input.value.trim();
+      document.getElementById('dirDisplay').textContent = value || 'No directory';
+    }, 100);
+  },
+
+  // Re-theme all live xterm terminals (main + teammate) to the given skin's palette.
+  // Uses the xterm v5+ live setter (full object assignment triggers a repaint for both
+  // DOM and WebGL renderers) plus a belt-and-suspenders refresh().
+  applyTerminalSkin(skin) {
+    const theme = { ...(window.REVERIE_XTERM_THEMES[skin] || window.REVERIE_XTERM_THEMES['daylight-blue']) };
+    const minimumContrastRatio = window.reverieCurrentSkinIsLight(skin) ? 4.5 : 1;
+    if (this.terminal) {
+      this.terminal.options.minimumContrastRatio = minimumContrastRatio;
+      this.terminal.options.theme = theme;
+      // The zero-lag typing overlay caches the xterm foreground/background.
+      // Refresh it on live skin changes so typed text never keeps the prior
+      // theme's dark backing surface or foreground color.
+      this._localEchoOverlay?.refreshFont();
+      this._predictiveEcho?.refreshFont();
+      try {
+        this.terminal.refresh(0, this.terminal.rows - 1);
+      } catch {}
+    }
+    if (this.teammateTerminals) {
+      for (const [, entry] of this.teammateTerminals) {
+        if (entry && entry.terminal) {
+          entry.terminal.options.minimumContrastRatio = minimumContrastRatio;
+          entry.terminal.options.theme = { ...theme };
+          try {
+            entry.terminal.refresh(0, entry.terminal.rows - 1);
+          } catch {}
+        }
+      }
+    }
+    this._forEachTile?.((tile) => {
+      tile.terminal.options.minimumContrastRatio = minimumContrastRatio;
+      tile.terminal.options.theme = { ...theme };
+      try {
+        tile.terminal.refresh(0, tile.terminal.rows - 1);
+      } catch {}
+    });
+  },
+});
+
+// ═══════════════════════════════════════════════════════════════
+// COD-9 — Cross-session search (folded into the welcome history panel)
+// Consumes GET /api/search; renders grouped result cards with jump-to actions.
+// ═══════════════════════════════════════════════════════════════
+
+(function (global) {
+  const SEARCH_DEBOUNCE_MS = 250;
+  const SEARCH_LIMIT = 60;
+  const SOURCE_LABELS = { session: 'Sessions', event: 'Events', file: 'Files' };
+
+  /** Human-friendly relative-ish timestamp matching the history panel's style. */
+  function formatSearchTime(ts) {
+    if (!Number.isFinite(ts)) return '';
+    const d = new Date(ts);
+    return (
+      d.toLocaleDateString('en', { month: 'short', day: 'numeric' }) +
+      ' ' +
+      d.toLocaleTimeString('en', { hour: '2-digit', minute: '2-digit', hour12: false })
+    );
+  }
+
+  global.ReverieSearch = { SEARCH_DEBOUNCE_MS, SEARCH_LIMIT, SOURCE_LABELS, formatSearchTime };
+})(window);
+
+Object.assign(ReverieApp.prototype, {
+  /**
+   * Wire up the search box, filter chips, and selects inside the welcome
+   * history panel. Idempotent — safe to call every time the overlay opens.
+   */
+  initSearchPanel() {
+    const input = document.getElementById('searchInput');
+    if (!input || this._searchPanelWired) {
+      // Even when already wired, refresh the case dropdown (cases may have loaded since).
+      if (this._searchPanelWired) this._populateSearchCaseFilter();
+      return;
+    }
+    this._searchPanelWired = true;
+
+    // Active source-type filter set (mirrors the chip .active state → types= param).
+    this._searchTypes = new Set(['session', 'event', 'file']);
+    this._searchSecondary = { caseLabel: '', status: '', days: '' };
+    this._searchDebounceTimer = null;
+    this._searchSeq = 0;
+    this._searchLastData = null;
+
+    const clearBtn = document.getElementById('searchClearBtn');
+    const results = document.getElementById('searchResults');
+
+    input.addEventListener('input', () => {
+      if (clearBtn) clearBtn.hidden = input.value.length === 0;
+      this._scheduleSearch();
+    });
+    input.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Escape' && input.value) {
+        ev.stopPropagation();
+        this._clearSearch();
+      }
+    });
+
+    if (clearBtn) {
+      clearBtn.addEventListener('click', () => this._clearSearch());
+    }
+
+    document.querySelectorAll('#searchFilters .search-filter-chip').forEach((chip) => {
+      chip.addEventListener('click', () => {
+        const t = chip.dataset.typeFilter;
+        // Keep at least one type selected.
+        if (this._searchTypes.has(t) && this._searchTypes.size === 1) return;
+        if (this._searchTypes.has(t)) {
+          this._searchTypes.delete(t);
+          chip.classList.remove('active');
+        } else {
+          this._searchTypes.add(t);
+          chip.classList.add('active');
+        }
+        this._runSearch();
+      });
+    });
+
+    const caseSel = document.getElementById('searchCaseFilter');
+    const statusSel = document.getElementById('searchStatusFilter');
+    const dateSel = document.getElementById('searchDateFilter');
+    if (caseSel) {
+      caseSel.addEventListener('change', () => {
+        this._searchSecondary.caseLabel = caseSel.value;
+        this._renderSearch(this._searchLastData);
+      });
+    }
+    if (statusSel) {
+      statusSel.addEventListener('change', () => {
+        this._searchSecondary.status = statusSel.value;
+        this._renderSearch(this._searchLastData);
+      });
+    }
+    if (dateSel) {
+      dateSel.addEventListener('change', () => {
+        this._searchSecondary.days = dateSel.value;
+        this._renderSearch(this._searchLastData);
+      });
+    }
+
+    this._populateSearchCaseFilter();
+    if (results) results.hidden = true;
+  },
+
+  /** Fill the case <select> from loaded cases (#caseName values). */
+  _populateSearchCaseFilter() {
+    const sel = document.getElementById('searchCaseFilter');
+    if (!sel) return;
+    const cases = Array.isArray(this.cases) ? this.cases : [];
+    const names = Array.from(new Set(cases.map((c) => c && c.name).filter(Boolean))).sort();
+    const current = sel.value;
+    // Rebuild options (keep the "All cases" placeholder).
+    sel.innerHTML = '';
+    const all = document.createElement('option');
+    all.value = '';
+    all.textContent = 'All cases';
+    sel.appendChild(all);
+    for (const name of names) {
+      const opt = document.createElement('option');
+      opt.value = name;
+      opt.textContent = '#' + name;
+      sel.appendChild(opt);
+    }
+    if (current && names.includes(current)) sel.value = current;
+  },
+
+  /** Debounced trigger from the input event. */
+  _scheduleSearch() {
+    clearTimeout(this._searchDebounceTimer);
+    this._searchDebounceTimer = setTimeout(() => this._runSearch(), window.ReverieSearch.SEARCH_DEBOUNCE_MS);
+  },
+
+  _clearSearch() {
+    const input = document.getElementById('searchInput');
+    const clearBtn = document.getElementById('searchClearBtn');
+    if (input) input.value = '';
+    if (clearBtn) clearBtn.hidden = true;
+    this._searchLastData = null;
+    this._renderSearch(null);
+  },
+
+  /** Execute the federated search request and render the result. */
+  async _runSearch() {
+    const input = document.getElementById('searchInput');
+    if (!input) return;
+    const q = input.value.trim();
+    if (q.length === 0) {
+      this._searchLastData = null;
+      this._renderSearch(null);
+      return;
+    }
+
+    const types = Array.from(this._searchTypes);
+    const params = new URLSearchParams();
+    params.set('q', q.slice(0, 200));
+    if (types.length > 0 && types.length < 3) params.set('types', types.join(','));
+    params.set('limit', String(window.ReverieSearch.SEARCH_LIMIT));
+
+    const seq = ++this._searchSeq;
+    const data = await this._apiJson('/api/search?' + params.toString());
+    // Drop stale responses (a newer query already fired).
+    if (seq !== this._searchSeq) return;
+
+    if (!data) {
+      // null = request error or 400 (bad input). Show an empty/error state.
+      this._searchLastData = { query: q, groups: [], totalResults: 0, truncated: false, _error: true };
+    } else {
+      this._searchLastData = data;
+    }
+    this._renderSearch(this._searchLastData);
+  },
+
+  /**
+   * Apply client-side secondary filters (case / status / date) to a group's
+   * results. Type filtering already happened server-side via types=.
+   */
+  _applySecondaryFilters(results) {
+    const { caseLabel, status, days } = this._searchSecondary;
+    let out = results;
+    if (caseLabel) {
+      const want = '#' + caseLabel;
+      out = out.filter((r) => (r.sessionName || '').includes(want) || r.sessionName === caseLabel);
+    }
+    if (status) {
+      const activeIds = new Set((this.sessionOrder || []).concat(Object.keys(this.sessions || {})));
+      out = out.filter((r) => {
+        const isActive = activeIds.has(r.sessionId);
+        return status === 'active' ? isActive : !isActive;
+      });
+    }
+    if (days) {
+      const cutoff = Date.now() - Number(days) * 24 * 60 * 60 * 1000;
+      out = out.filter((r) => Number.isFinite(r.timestamp) && r.timestamp >= cutoff);
+    }
+    return out;
+  },
+
+  /** Render the grouped result cards (or empty/loading states). */
+  _renderSearch(data) {
+    const results = document.getElementById('searchResults');
+    // The header carries the title plus the filter/sort controls (issue #260),
+    // hide the whole row, not just the title, or the controls float above the
+    // search results and act on a list that is not on screen.
+    const historyHeader = document.getElementById('historyHeader') || document.getElementById('historyTitle');
+    const historyList = document.getElementById('historyList');
+    if (!results) return;
+
+    const searching = !!data;
+    // Hide the plain "Resume Conversation" history list while a search is active.
+    if (historyHeader) historyHeader.style.display = searching ? 'none' : '';
+    if (historyList) historyList.style.display = searching ? 'none' : '';
+
+    results.innerHTML = '';
+    if (!data) {
+      results.hidden = true;
+      return;
+    }
+    results.hidden = false;
+
+    if (data._error) {
+      const empty = document.createElement('div');
+      empty.className = 'search-empty';
+      empty.textContent = 'Search unavailable — check the query and try again.';
+      results.appendChild(empty);
+      return;
+    }
+
+    // Apply secondary (client-side) filters and recompute shown total.
+    const groups = (data.groups || [])
+      .map((g) => ({ type: g.type, results: this._applySecondaryFilters(g.results || []) }))
+      .filter((g) => g.results.length > 0);
+
+    const shownTotal = groups.reduce((n, g) => n + g.results.length, 0);
+
+    if (shownTotal === 0) {
+      const empty = document.createElement('div');
+      empty.className = 'search-empty';
+      empty.textContent = 'No results for "' + (data.query || '') + '"';
+      results.appendChild(empty);
+      return;
+    }
+
+    for (const group of groups) {
+      const header = document.createElement('div');
+      header.className = 'search-group-header';
+      const label = document.createElement('span');
+      label.className = 'search-group-label';
+      label.textContent = window.ReverieSearch.SOURCE_LABELS[group.type] || group.type;
+      const count = document.createElement('span');
+      count.className = 'search-group-count';
+      count.textContent = String(group.results.length);
+      header.append(label, count);
+      results.appendChild(header);
+
+      for (const r of group.results) {
+        results.appendChild(this._buildSearchResultCard(r));
+      }
+    }
+
+    if (data.truncated) {
+      const trunc = document.createElement('div');
+      trunc.className = 'search-truncated';
+      trunc.textContent = 'Showing the top matches — refine your search to narrow results.';
+      results.appendChild(trunc);
+    }
+  },
+
+  /** Build a single result card DOM node wired to its jump-to action. */
+  _buildSearchResultCard(r) {
+    const card = document.createElement('div');
+    card.className = 'search-result-card';
+    card.dataset.type = r.type;
+    card.tabIndex = 0;
+    card.setAttribute('role', 'button');
+
+    const topRow = document.createElement('div');
+    topRow.className = 'search-result-top';
+
+    // A past session resumes rather than switches tabs, so it says so on the badge.
+    const isPast = r.jumpTo && r.jumpTo.kind === 'resume-session';
+    const badge = document.createElement('span');
+    badge.className = 'search-result-badge search-badge-' + r.type + (isPast ? ' search-badge-past' : '');
+    badge.textContent = isPast ? 'Resume' : (window.ReverieSearch.SOURCE_LABELS[r.type] || r.type).replace(/s$/, '');
+
+    const name = document.createElement('span');
+    name.className = 'search-result-name';
+    name.textContent = r.sessionName || r.sessionId || '(session)';
+
+    const time = document.createElement('span');
+    time.className = 'search-result-time';
+    time.textContent = window.ReverieSearch.formatSearchTime(r.timestamp);
+
+    topRow.append(badge, name, time);
+
+    const snippet = document.createElement('div');
+    snippet.className = 'search-result-snippet';
+    snippet.textContent = r.snippet || '';
+
+    card.append(topRow, snippet);
+
+    const jump = () => this._jumpToSearchResult(r);
+    card.addEventListener('click', jump);
+    card.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter' || ev.key === ' ') {
+        ev.preventDefault();
+        jump();
+      }
+    });
+
+    return card;
+  },
+
+  /**
+   * Navigate to a search result by jumpTo.kind, reusing the existing app methods:
+   *   session       → selectSession(sessionId)      (open/switch to the session)
+   *   resume-session→ resumeHistorySession(...)     (past session, no tab to switch to)
+   *   run-summary   → openRunSummary(sessionId)     (session options → summary tab)
+   *   file-preview  → openFilePreview(path, sessionId, attachmentId)
+   */
+  _jumpToSearchResult(r) {
+    const jt = r && r.jumpTo;
+    if (!jt) return;
+    // A past session has to be replayed, not switched to. Do it BEFORE hiding the
+    // welcome overlay: resumeHistorySession() owns that transition itself.
+    if (jt.kind === 'resume-session') {
+      this.resumeHistorySession(jt.claudeSessionId || jt.sessionId, jt.workingDir || '', r.sessionName);
+      return;
+    }
+    // Leaving the welcome overlay so the target surface is visible.
+    if (typeof this.hideWelcome === 'function') this.hideWelcome();
+
+    try {
+      if (jt.kind === 'run-summary') {
+        this.openRunSummary(jt.sessionId);
+      } else if (jt.kind === 'file-preview') {
+        this.openFilePreview(jt.relativePath || '', jt.sessionId, jt.targetId || null);
+      } else {
+        // 'session' (default)
+        this.selectSession(jt.sessionId);
+      }
+    } catch (err) {
+      console.error('[search] jump failed', err);
+    }
+  },
+});
