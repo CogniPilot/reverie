@@ -60,6 +60,14 @@ jobs:
 
       - uses: cachix/install-nix-action@448cde739abec1eaf0646249e3d25bb8d9bc7702 # v31
 
+      - name: Restore and save the Nix store
+        uses: nix-community/cache-nix-action@7df957e333c1e5da7721f60227dbba6d06080569 # v7
+        with:
+          primary-key: nix-image-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('flake.lock', '**/*.nix') }}-${{ github.sha }}
+          restore-prefixes-first-match: |
+            nix-image-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('flake.lock', '**/*.nix') }}-
+            nix-image-${{ runner.os }}-${{ runner.arch }}-
+
       - name: Check and build the flake on vanilla Ubuntu
         run: |
           mkdir -p "$HOME/scratch/reverie/build" "$HOME/scratch/reverie/tmp"
@@ -106,13 +114,9 @@ jobs:
       - name: Check the image contents
         run: |
           image_archive="$HOME/scratch/reverie/build/image.tar"
-          docker save "reverie:$GITHUB_SHA" --output "$image_archive"
-          "$HOME/scratch/reverie/build/memory/bin/python3" -I -m reverie.image_check "$image_archive" --allow docker/image-check-allow.tsv --json image-check.json
           unpacked=$(docker image inspect --format '{{.Size}}' "reverie:$GITHUB_SHA")
-          compressed=$(gzip -1 --stdout "$image_archive" | wc -c)
-          echo "image size: $((unpacked / 1000000)) MB unpacked, about $((compressed / 1000000)) MB compressed" \
-            | tee -a "$GITHUB_STEP_SUMMARY"
-          # Preserve these checked bytes, with both offline install tags.
+          echo "image size: $((unpacked / 1000000)) MB unpacked" | tee -a "$GITHUB_STEP_SUMMARY"
+          # Save both offline install tags, then scan the exact archive that will ship.
           version=0.0.0-ci
           if [ "${{ github.event_name }}" = release ]; then version="${{ github.event.release.tag_name }}"; version=${version#v}; fi
           docker tag "reverie:$GITHUB_SHA" "ghcr.io/jgoppert/reverie:$version"
