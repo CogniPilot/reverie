@@ -2,6 +2,7 @@
 let
   lib = pkgs.lib;
   manifest = builtins.fromJSON (builtins.readFile (src + "/apps/console/package.json"));
+  consoleSkill = lib.cleanSource (src + "/skills/reverie");
   console = pkgs.buildNpmPackage {
     pname = "reverie-console";
     version = manifest.version;
@@ -17,7 +18,7 @@ let
     PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD = "1";
     postPatch = ''
       mkdir -p skills
-      cp -r ${src}/skills/reverie skills/reverie
+      cp -r ${consoleSkill} skills/reverie
     '';
     preBuild = "npm rebuild node-pty esbuild --offline --ignore-scripts=false";
     doCheck = true;
@@ -31,7 +32,9 @@ let
         test/owner-auth-lock-portability.test.ts test/company-full-page.test.ts \
         test/service-installer.test.ts test/company-wake.test.ts \
         test/company-recovery-prompt.test.ts test/company-wake-server.test.ts \
-        test/owner-auth-fresh-enforce.test.ts test/owner-name-onboarding.test.ts \
+        test/owner-auth-fresh-enforce.test.ts test/owner-first-setup.test.ts \
+        test/owner-auth.test.ts test/owner-setup-ui.test.ts \
+        test/owner-name-onboarding.test.ts \
         test/account-login.test.ts test/chat-workspace-delete.test.ts \
         test/routes/company-hire-routes.test.ts test/company-native-ui.test.ts \
         test/local-model-profile.test.ts test/routes/quick-start-custom-model.test.ts \
@@ -100,6 +103,7 @@ let
     export PATH=${installClis}/bin:${runtime}/bin:$PATH
     export REVERIE_MCP_MEMORY_PYTHON=${memory}/bin/python3
     export REVERIE_MANAGED_INSTALL=nix
+    export REVERIE_OWNER_SETUP=1
     export REVERIE_NIX_LAUNCHER="$0"
     export REVERIE_ROOT="''${REVERIE_ROOT:-$HOME/reverie}"
     export REVERIE_VERSION=${manifest.version}

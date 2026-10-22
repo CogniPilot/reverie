@@ -17,7 +17,7 @@
  */
 import { randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
-import { constants as fsConstants, promises as fs, statSync, readFileSync } from 'node:fs';
+import { constants as fsConstants, promises as fs, statSync, lstatSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type { PasswordHash } from '../types.js';
 
@@ -28,17 +28,39 @@ const LOCK_BUSY = 75;
 function takeLock(fd: number, lockFile: string, waitSeconds: number): Promise<void> {
   const flock = process.env.REVERIE_FLOCK_BIN || 'flock';
   return new Promise((resolve, reject) => {
-    const child = spawn(flock, ['--exclusive', '--wait', String(waitSeconds), '--conflict-exit-code', String(LOCK_BUSY), '3'], {
-      stdio: ['ignore', 'ignore', 'pipe', fd],
-      env: { PATH: process.env.PATH },
-    });
+    const child = spawn(
+      flock,
+      ['--exclusive', '--wait', String(waitSeconds), '--conflict-exit-code', String(LOCK_BUSY), '3'],
+      {
+        stdio: ['ignore', 'ignore', 'pipe', fd],
+        env: { PATH: process.env.PATH },
+      }
+    );
     let stderr = '';
-    child.stderr?.on('data', (chunk) => { stderr += String(chunk); });
-    child.on('error', (error) => reject(new Error(`Cannot lock the owner account (${flock}: ${(error as NodeJS.ErrnoException).code ?? error.message}); nothing was written`)));
+    child.stderr?.on('data', (chunk) => {
+      stderr += String(chunk);
+    });
+    child.on('error', (error) =>
+      reject(
+        new Error(
+          `Cannot lock the owner account (${flock}: ${(error as NodeJS.ErrnoException).code ?? error.message}); nothing was written`
+        )
+      )
+    );
     child.on('close', (code) => {
       if (code === 0) resolve();
-      else if (code === LOCK_BUSY) reject(new Error(`The owner account is busy: another writer has held ${lockFile} for ${waitSeconds} s; nothing was written, try again`));
-      else reject(new Error(`Cannot lock the owner account (flock exit ${code}: ${stderr.trim().slice(0, 200)}); nothing was written`));
+      else if (code === LOCK_BUSY)
+        reject(
+          new Error(
+            `The owner account is busy: another writer has held ${lockFile} for ${waitSeconds} s; nothing was written, try again`
+          )
+        );
+      else
+        reject(
+          new Error(
+            `Cannot lock the owner account (flock exit ${code}: ${stderr.trim().slice(0, 200)}); nothing was written`
+          )
+        );
     });
   });
 }
@@ -101,7 +123,10 @@ export class OwnerAuthStore {
   private chain: Promise<unknown> = Promise.resolve();
 
   /** `lockWaitSeconds`: how long a writer waits for the account lock before failing closed. */
-  constructor(readonly file: string, private readonly lockWaitSeconds = LOCK_WAIT_SECONDS) {}
+  constructor(
+    readonly file: string,
+    private readonly lockWaitSeconds = LOCK_WAIT_SECONDS
+  ) {}
 
   get markerFile(): string {
     return join(dirname(this.file), 'owner-auth.policy');
@@ -120,10 +145,27 @@ export class OwnerAuthStore {
   }
 
   async writeMarker(policy: OwnerPolicy): Promise<void> {
-    await fs.mkdir(dirname(this.markerFile), { recursive: true, mode: 0o700 });
+    const directory = dirname(this.markerFile);
+    await fs.mkdir(directory, { recursive: true, mode: 0o700 });
     const temporary = `${this.markerFile}.${randomUUID()}.tmp`;
-    await fs.writeFile(temporary, policy + '\n', { mode: 0o600 });
-    await fs.rename(temporary, this.markerFile);
+    try {
+      const handle = await fs.open(temporary, 'wx', 0o600);
+      try {
+        await handle.writeFile(policy + '\n');
+        await handle.sync();
+      } finally {
+        await handle.close();
+      }
+      await fs.rename(temporary, this.markerFile);
+      const parent = await fs.open(directory, 'r');
+      try {
+        await parent.sync();
+      } finally {
+        await parent.close();
+      }
+    } finally {
+      await fs.rm(temporary, { force: true });
+    }
   }
 
   /** The account, or undefined before the host has bootstrapped one. Cheap: re-reads only on change. */
@@ -155,7 +197,11 @@ export class OwnerAuthStore {
    */
   private async locked<T>(body: () => Promise<T>): Promise<T> {
     await fs.mkdir(dirname(this.file), { recursive: true, mode: 0o700 });
-    const handle = await fs.open(this.lockFile, fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_APPEND | fsConstants.O_NOFOLLOW, 0o600);
+    const handle = await fs.open(
+      this.lockFile,
+      fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_APPEND | fsConstants.O_NOFOLLOW,
+      0o600
+    );
     try {
       await takeLock(handle.fd, this.lockFile, this.lockWaitSeconds);
       return await body();
@@ -178,6 +224,33 @@ export class OwnerAuthStore {
         const result = change(account);
         await this.write(account);
         return result;
+      })
+    );
+    this.chain = run.catch(() => undefined);
+    return run;
+  }
+
+  /** Only genuine absence is unclaimed: unreadable paths, symlinks and old policy markers fail closed. */
+  isUnclaimed(): boolean {
+    return [this.file, this.markerFile].every((file) => {
+      try {
+        lstatSync(file);
+        return false;
+      } catch (error) {
+        return (error as NodeJS.ErrnoException).code === 'ENOENT';
+      }
+    });
+  }
+
+  /** First browser registration competes under the same cross-process lock as every account writer. */
+  claim(account: OwnerAccount): Promise<boolean> {
+    const run = this.chain.then(() =>
+      this.locked(async () => {
+        if (!this.isUnclaimed()) return false;
+        // Persist the closed-registration marker FIRST: interruption can require host recovery, never reopen setup.
+        await this.writeMarker('enforce');
+        await this.write(account);
+        return true;
       })
     );
     this.chain = run.catch(() => undefined);

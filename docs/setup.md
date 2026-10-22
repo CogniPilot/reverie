@@ -89,30 +89,23 @@ nor restores private backups.
 
 ## First login
 
-Open http://127.0.0.1:3000 and use the single owner sign-in form. There is no
-browser Basic-auth dialog before it.
+Open http://127.0.0.1:3000. On a new installation, choose **Create account**, enter
+your username and a new password, and confirm the password. No temporary password
+or host command is needed. Your display name is separate from your login username.
 
-For a fresh Docker deployment, create the owner account once from the host:
+On later visits, sign in with the username and password you chose. If two-factor
+authentication is enabled, complete its authenticator or recovery-code step.
+The generated internal console credential is for runtime communication; you do not
+need it to create your account or sign in.
 
-~~~bash
-docker exec -it reverie reverie owner bootstrap --username owner --enforce
-~~~
+### Advanced host recovery
 
-For a fresh native Nix deployment:
-
-~~~bash
-reverie owner bootstrap --username owner --enforce
-~~~
-
-Sign in at /owner/login with username owner and the one-time password printed by
-bootstrap, then choose your permanent owner password. The one-time password expires
-after 30 minutes. Your display name is separate from the login username: changing
-the displayed name does not change owner to a different username.
-
-On later visits, use the permanent owner password you chose. The generated
-owner-password file is a separate legacy console credential; it is not the owner
-account password and does not unlock the owner form. If two-factor authentication
-is enabled, complete its existing authenticator or recovery-code step.
+An installation that has already recorded an owner never reopens public account
+creation, even if its account file is missing. Restore the account from a backup
+or use the host administration tools. Manual initial provisioning remains available
+with `reverie owner bootstrap --username owner --enforce` (for Docker, prefix it
+with `docker exec -it reverie`). Its temporary password is for this manual recovery
+path only.
 
 For a lost owner password, run the following from the host, then use the newly
 printed one-time password and choose a new permanent password:

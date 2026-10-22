@@ -8,9 +8,9 @@
  * and is sent only to `/api/owner` (it skips the second factor at sign-in, nothing else).
  */
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import { DEVICE_COOKIE, OWNER_COOKIE } from './policy.js';
+import { DEVICE_COOKIE, OWNER_COOKIE, sameOrigin } from './policy.js';
 import { DEVICE_TTL_MS, OwnerAuthError, SESSION_MAX_MS, type OwnerAuthService } from './service.js';
-import { LOGIN_PAGE, ACCOUNT_PAGE, OWNER_SCRIPT } from './pages.js';
+import { LOGIN_PAGE, SETUP_PAGE, ACCOUNT_PAGE, OWNER_SCRIPT } from './pages.js';
 
 type Body = Record<string, unknown>;
 
@@ -75,6 +75,26 @@ export function registerOwnerRoutes(app: FastifyInstance, service: OwnerAuthServ
   app.get('/api/owner/status', async (req) => ({ success: true, data: service.status(req.cookies?.[OWNER_COOKIE]) }));
 
   app.post(
+    '/api/owner/setup',
+    handle(async (req, reply, body) => {
+      if (
+        !sameOrigin(req) ||
+        req.headers['x-reverie-parent-session'] !== undefined ||
+        req.headers['x-reverie-service-token'] !== undefined
+      )
+        throw new OwnerAuthError('Setup must come from this console in your browser', 403);
+      const token = await service.setup(
+        body.username as string,
+        body.password as string,
+        body.confirmation as string,
+        req.ip
+      );
+      setSession(req, reply, token);
+      return { created: true };
+    })
+  );
+
+  app.post(
     '/api/owner/login',
     handle(async (req, reply, body) => {
       const result = await service.login(
@@ -115,6 +135,7 @@ export function registerOwnerRoutes(app: FastifyInstance, service: OwnerAuthServ
         {
           current: text(body.current),
           next: text(body.next, 2048),
+          username: body.username as string | undefined,
           code: body.code === undefined ? undefined : text(body.code, 16),
           deviceCookie: req.cookies?.[DEVICE_COOKIE],
         },
@@ -206,7 +227,14 @@ export function registerOwnerRoutes(app: FastifyInstance, service: OwnerAuthServ
 
   const page = (html: string) => async (_req: FastifyRequest, reply: FastifyReply) =>
     reply.header('Cache-Control', 'no-store').type('text/html; charset=utf-8').send(html);
-  app.get('/owner/login', page(LOGIN_PAGE));
+  app.get('/owner/setup', async (req, reply) => {
+    if (!service.setupAvailable()) return reply.redirect('/owner/login');
+    return page(SETUP_PAGE)(req, reply);
+  });
+  app.get('/owner/login', async (req, reply) => {
+    if (service.setupAvailable()) return reply.redirect('/owner/setup');
+    return page(LOGIN_PAGE)(req, reply);
+  });
   app.get('/owner/account', page(ACCOUNT_PAGE));
   app.get('/owner/owner.js', async (_req, reply) =>
     reply.header('Cache-Control', 'no-store').type('text/javascript; charset=utf-8').send(OWNER_SCRIPT)

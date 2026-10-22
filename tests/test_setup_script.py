@@ -30,9 +30,9 @@ class SetupScriptTest(unittest.TestCase):
         self.tmp.cleanup()
 
     def run_setup(self, *args, engine=True):
-        path = str(self.bin) + os.pathsep + os.environ["PATH"] if engine else os.environ["PATH"]
+        path = str(self.bin) + os.pathsep + os.environ["PATH"] if engine else str(self.root / "empty-path")
         env = {"PATH": path, "HOME": str(self.root), "XDG_CONFIG_HOME": str(self.root / "cfg")}
-        return subprocess.run(["bash", str(SETUP), "--dry-run", *args], env=env, capture_output=True, text=True, timeout=60)
+        return subprocess.run([shutil.which("bash"), str(SETUP), "--dry-run", *args], env=env, capture_output=True, text=True, timeout=60)
 
     def test_missing_engine_explains_and_stops(self):
         result = self.run_setup(engine=False)
@@ -47,7 +47,7 @@ class SetupScriptTest(unittest.TestCase):
         self.assertIn("--publish 127.0.0.1:3100:3000", run_line)
         self.assertIn("type=volume,src=second-data,dst=/instances", run_line)
         self.assertIn("type=volume,src=second-home,dst=/home/agent", run_line)
-        self.assertIn("REVERIE_INSTALL_CLIS=claude-code", run_line)
+        self.assertIn("REVERIE_INSTALL_CLIS=claude", run_line)
         self.assertTrue(run_line.endswith("example.test/reverie@sha256:0123"))
         self.assertNotIn("0.0.0.0", run_line)
         self.assertIn("http://127.0.0.1:3100", result.stdout)
@@ -58,10 +58,10 @@ class SetupScriptTest(unittest.TestCase):
         self.assertEqual(result.stdout.strip(), "+ podman exec -e REVERIE_DATA_DIR=/instances/default/console second "
                                                 "reverie owner bootstrap --username owner --enforce")
 
-    def test_summary_names_the_owner_sign_in(self):
+    def test_summary_directs_browser_account_setup(self):
         result = self.run_setup()
         self.assertIn("--owner", result.stdout)
-        self.assertIn("/owner/login", result.stdout)
+        self.assertIn("create your owner account or sign in", result.stdout)
 
     def test_help_is_the_header_only(self):
         result = subprocess.run(["bash", str(SETUP), "--help"], capture_output=True, text=True, timeout=60)

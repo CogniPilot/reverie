@@ -105,6 +105,7 @@ const PARENT_BODY_ROUTES = new Set(['POST /api/quick-start', 'POST /api/sessions
 const SERVICE_ROUTES = new Set(['PUT /api/company/employees/:id/session', 'GET /api/subscription-profiles/usage']);
 const PUBLIC_ROUTES = new Set([
   'GET /api/owner/status',
+  'POST /api/owner/setup',
   'POST /api/owner/login',
   'POST /api/owner/login/second-factor',
   'POST /api/owner/logout',
@@ -303,7 +304,9 @@ export function registerOwnerPolicy(app: FastifyInstance, deps: PolicyDeps): voi
     if (isAppPage(req, route) && caller.kind !== 'owner') {
       if (policy === 'enforce') {
         const next = encodeURIComponent(rawUrl.startsWith('/') && !rawUrl.startsWith('//') ? rawUrl : '/');
-        return reply.redirect(`${deps.basePath ?? ''}/owner/login?next=${next}`);
+        return reply.redirect(
+          `${deps.basePath ?? ''}/owner/${deps.service.setupAvailable() ? 'setup' : 'login'}?next=${next}`
+        );
       }
       return;
     }

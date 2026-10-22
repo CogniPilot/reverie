@@ -110,6 +110,6 @@ function main() {
   run('docker', command);
   console.log('Reverie: http://127.0.0.1:' + config.port);
   console.log('Deployment settings: ' + configPath);
-  console.log('Owner password: docker exec ' + config.containerName + ' cat /instances/default/owner-password');
+  console.log('Open the address above to create your owner account or sign in.');
 }
 try { main(); } catch (error) { console.error('reverie-start: ' + error.message); process.exitCode = 1; }

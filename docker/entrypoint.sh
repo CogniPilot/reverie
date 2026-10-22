@@ -4,7 +4,7 @@
 #   REVERIE_VERSION       image build id, set at build time; a change means an upgrade
 #   REVERIE_DATA          instance directory on the mounted volume (default /instances/default)
 #   REVERIE_INSTALL_CLIS  defaults to claude codex opencode; set none to skip installation
-#   REVERIE_PASSWORD      owner password; when unset, one is generated on first start and kept on the volume
+#   REVERIE_PASSWORD      internal runtime credential; generated privately when unset
 set -euo pipefail
 umask 077
 log() { printf 'reverie-start: %s\n' "$*" >&2; }
@@ -24,25 +24,20 @@ if [ -n "$previous" ] && [ "$previous" != "$version" ]; then
 fi
 printf '%s\n' "$version" > "$DATA/.image-version"
 
-# Owner authorization: a volume without an owner account or a policy marker starts in enforce, so every
-# owner route (plans, settings, the CLI registry, the mode switch) needs the signed-in owner, never only
-# the shared REVERIE_PASSWORD that every process in the container inherits. Agents keep their own routes.
-# A volume that has an account or a marker keeps its policy. The owner creates the account from a host
-# shell (setup.sh --owner) and signs in at /owner/login.
-owner_marker="$REVERIE_DATA_DIR/owner-auth.policy"
-if [ ! -e "$REVERIE_DATA_DIR/owner-auth.json" ] && [ ! -e "$owner_marker" ] && [ ! -L "$owner_marker" ]; then
-  mkdir -p "$REVERIE_DATA_DIR"
-  printf 'enforce\n' > "$owner_marker.tmp" && mv "$owner_marker.tmp" "$owner_marker"
-  log "owner authorization: enforce; create the owner account from the host with: setup.sh --owner"
-fi
+# The backend permits browser account creation only when both owner account and
+# durable policy marker are absent. It enforces owner authorization before claim.
+# Never manufacture a marker here: that would make a fresh instance look claimed.
+# Existing accounts, markers, symlinks and unreadable state stay backend-managed
+# and fail closed; host bootstrap/reset tools remain available for recovery.
+export REVERIE_OWNER_SETUP=1
 
-# Owner login: the console listens on every container interface (port publishing needs that), so it never
+# Internal runtime authentication: the console listens on every container interface (port publishing needs that), so it never
 # starts without a password. The password stays on the volume and is never printed.
 if [ -z "${REVERIE_PASSWORD:-}" ]; then
   secret="$DATA/owner-password"
   if [ ! -s "$secret" ]; then
     python3 -I -c 'import secrets; print(secrets.token_urlsafe(18))' > "$secret.tmp" && mv "$secret.tmp" "$secret"
-    log "first start: owner password created; read it with: docker exec <container> cat $secret"
+    log "first start: internal runtime credential created; create your owner account in the browser"
   fi
   REVERIE_PASSWORD=$(cat "$secret")
   export REVERIE_PASSWORD

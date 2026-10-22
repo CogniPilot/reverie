@@ -57,7 +57,7 @@ const patchOwnedElfs = () => {
       try { info = lstatSync(path); } catch { continue; }
       if (info.isSymbolicLink() || (process.getuid && info.uid !== process.getuid())) continue;
       // Bun standalone executables contain appended payloads: ELF rewriting can corrupt them.
-      if (info.isDirectory()) { if (name !== 'opencode-ai' && !name.startsWith('opencode-linux-')) walk(path); continue; }
+      if (info.isDirectory()) { if (name !== 'opencode-ai' && !name.startsWith('opencode-linux-') && name !== 'claude-code' && !name.startsWith('claude-code-linux-')) walk(path); continue; }
       if (!info.isFile() || info.nlink > 1 || Date.now() > deadline) continue;
       const magic = Buffer.alloc(4);
       let descriptor;
@@ -76,6 +76,23 @@ const patchOwnedElfs = () => {
   const base = join(prefix, 'lib/node_modules');
   try { if (realpathSync(base) !== join(realpathSync(prefix), 'lib/node_modules')) return; } catch { return; }
   walk(base);
+};
+const prepareClaude = () => {
+  if (process.platform !== 'linux' || !process.env.REVERIE_ELF_INTERPRETER) return false;
+  const binary = join(prefix, 'lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe');
+  try {
+    const info = lstatSync(binary);
+    if (!info.isFile() || info.isSymbolicLink() || info.uid !== process.getuid()) return false;
+    const magic = Buffer.alloc(4);
+    const descriptor = openSync(binary, 'r');
+    try { readSync(descriptor, magic, 0, 4, 0); } finally { closeSync(descriptor); }
+    if (!magic.equals(Buffer.from([0x7f, 0x45, 0x4c, 0x46]))) return false;
+  } catch { return false; }
+  const launcher = join(prefix, 'bin/.reverie-claude.mjs');
+  writeFileSync(launcher, `#!${process.execPath}\nimport { spawnSync } from 'node:child_process';\nconst r=spawnSync(${JSON.stringify(process.env.REVERIE_ELF_INTERPRETER)},['--library-path',${JSON.stringify(process.env.REVERIE_ELF_LIBRARY_PATH || '')},${JSON.stringify(binary)},...process.argv.slice(2)],{stdio:'inherit',env:process.env});process.exit(r.status ?? 1);\n`, { mode: 0o700 });
+  try { unlinkSync(join(prefix, 'bin/claude')); } catch (error) { if (error.code !== 'ENOENT') throw error; }
+  symlinkSync('.reverie-claude.mjs', join(prefix, 'bin/claude'));
+  return true;
 };
 const prepareOpenCode = () => {
   if (process.platform !== 'linux' || !process.env.REVERIE_ELF_INTERPRETER) return false;
@@ -108,6 +125,7 @@ const status = (provider, state) => {
 for (const provider of providers.filter(provider => requested.includes(provider.id))) {
   let installed;
   try { installed = JSON.parse(readFileSync(join(prefix, 'lib/node_modules', provider.package, 'package.json'), 'utf8')).version; } catch {}
+  if (provider.id === 'claude' && installed === provider.version) prepareClaude();
   if (provider.id === 'opencode' && installed === provider.version) prepareOpenCode();
   if (installed === provider.version && runnable(provider)) {
     status(provider, 'ready');
@@ -119,7 +137,7 @@ for (const provider of providers.filter(provider => requested.includes(provider.
   // Subprocess output is deliberately not relayed: no account/token data enters logs.
   const result = spawnSync('timeout', ['--kill-after=5s', `${timeoutSeconds}s`, 'npm', 'install', '--global', '--prefix', prefix,
     '--registry=https://registry.npmjs.org', '--no-audit', '--no-fund', '--fetch-retries=0', '--fetch-timeout=30000', ...(provider.id === 'opencode' ? ['--ignore-scripts'] : []), `${provider.package}@${provider.version}`], { env, stdio: 'ignore' });
-  if (result.status === 0) patchOwnedElfs();
+  if (result.status === 0) { patchOwnedElfs(); if (provider.id === 'claude') prepareClaude(); }
   // OpenCode's postinstall probes an ELF before Nix loader compatibility exists.
   // Use a loader wrapper on Nix; run the official platform setup elsewhere.
   const setup = result.status === 0 && provider.id === 'opencode'

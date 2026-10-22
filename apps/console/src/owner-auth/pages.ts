@@ -44,10 +44,25 @@ export const LOGIN_PAGE = shell(
   <button type="button" id="use-recovery">Use a recovery code instead</button><div class="error" id="factor-error"></div>
 </form>
 <form class="card" id="change-form" hidden>
-  <p class="muted">Choose your own password to replace the one-time password (at least 12 characters).</p>
+  <p class="muted">Choose your login username and a password to replace the one-time password (at least 12 characters). Your display name is set separately.</p>
+  <label for="setup-username">Login username</label><input type="text" id="setup-username" name="username" autocomplete="username" autocapitalize="none" minlength="2" maxlength="32" pattern="[A-Za-z0-9][A-Za-z0-9_-]{1,31}" value="owner" required>
   <label for="new-password">New password</label><input type="password" id="new-password" autocomplete="new-password" required>
   <label for="new-password-2">Repeat it</label><input type="password" id="new-password-2" autocomplete="new-password" required>
   <button class="primary" type="submit">Save and continue</button><div class="error" id="change-error"></div>
+</form>`
+);
+
+export const SETUP_PAGE = shell(
+  'Welcome to Reverie',
+  `<h1>Welcome to Reverie</h1>
+<p class="muted">Create your account to connect a plan and hire your first expert.</p>
+<form class="card" id="setup-form" data-page="setup">
+  <label for="setup-user">Username</label><input type="text" id="setup-user" name="username" autocomplete="username" autocapitalize="none" minlength="2" maxlength="32" pattern="[A-Za-z0-9][A-Za-z0-9_-]{1,31}" required>
+  <p class="muted">2–32 letters, numbers, underscores or hyphens. Your display name can be different.</p>
+  <label for="setup-password">Password</label><input type="password" id="setup-password" name="password" autocomplete="new-password" minlength="12" required>
+  <label for="setup-confirm">Confirm password</label><input type="password" id="setup-confirm" name="confirmation" autocomplete="new-password" minlength="12" required>
+  <p class="muted">Use at least 12 characters. A few unrelated words work well.</p>
+  <button class="primary" type="submit">Create account</button><div class="error" id="setup-error" role="alert"></div>
 </form>`
 );
 
@@ -69,7 +84,8 @@ export const ACCOUNT_PAGE = shell(
    <button class="danger" id="tf-disable">Turn two-step off</button></div>
   <div class="error" id="tf-error"></div></section>
  <section class="card"><h2>Remembered devices</h2><div id="devices"></div><p class="muted" id="no-devices">None.</p></section>
- <section class="card"><h2>Password</h2>
+ <section class="card"><h2>Login username and password</h2>
+  <label for="pw-username">Login username</label><input type="text" id="pw-username" autocomplete="username" autocapitalize="none" minlength="2" maxlength="32">
   <label for="pw-current">Current password</label><input type="password" id="pw-current" autocomplete="current-password">
   <label for="pw-next">New password</label><input type="password" id="pw-next" autocomplete="new-password">
   <div id="pw-code-row" hidden><label for="pw-code">Authenticator code</label><input type="text" id="pw-code" inputmode="numeric" autocomplete="one-time-code"></div>
@@ -116,6 +132,22 @@ const safeNext = ${safeNext.toString()};
 const nextUrl = () => safeNext(new URLSearchParams(location.search).get('next'), location.origin);
 const say = (el, text) => { el.textContent = text || ''; };
 
+function setupAccount() {
+  const form = $('setup-form');
+  form.addEventListener('submit', async (event) => {
+    event.preventDefault(); say($('setup-error'));
+    const button = form.querySelector('button');
+    if (button.disabled) return;
+    if ($('setup-password').value !== $('setup-confirm').value) return say($('setup-error'), 'The two passwords differ.');
+    button.disabled = true;
+    try {
+      await api('POST', '/api/owner/setup', { username: $('setup-user').value, password: $('setup-password').value, confirmation: $('setup-confirm').value });
+      location.href = nextUrl();
+    } catch (error) { say($('setup-error'), error.message); }
+    finally { button.disabled = false; }
+  });
+}
+
 function login() {
   let challenge = ''; let typedPassword = ''; let recovery = false;
   $('password-form').addEventListener('submit', async (e) => {
@@ -124,7 +156,7 @@ function login() {
     try {
       const r = await api('POST', '/api/owner/login', { username: $('username').value, password: typedPassword });
       if (r.next === 'second-factor') { challenge = r.challenge; show($('password-form'), false); show($('factor-form'), true); $('code').focus(); }
-      else if (r.next === 'change-password') { show($('password-form'), false); show($('change-form'), true); }
+      else if (r.next === 'change-password') { show($('password-form'), false); show($('change-form'), true); $('setup-username').value = $('username').value; }
       else location.href = nextUrl();
     } catch (err) { say($('password-error'), err.message); }
   });
@@ -142,13 +174,13 @@ function login() {
     body.remember = $('remember').checked; body.label = (navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || 'Device';
     try {
       const r = await api('POST', '/api/owner/login/second-factor', body);
-      if (r.next === 'change-password') { show($('factor-form'), false); show($('change-form'), true); } else location.href = nextUrl();
+      if (r.next === 'change-password') { show($('factor-form'), false); show($('change-form'), true); $('setup-username').value = $('username').value; } else location.href = nextUrl();
     } catch (err) { say($('factor-error'), err.message); }
   });
   $('change-form').addEventListener('submit', async (e) => {
     e.preventDefault(); say($('change-error'));
     if ($('new-password').value !== $('new-password-2').value) return say($('change-error'), 'The two passwords differ.');
-    try { await api('POST', '/api/owner/password', { current: typedPassword, next: $('new-password').value }); typedPassword = ''; location.href = '/owner/account'; }
+    try { await api('POST', '/api/owner/password', { current: typedPassword, next: $('new-password').value, username: $('setup-username').value }); typedPassword = ''; location.href = '/owner/account'; }
     catch (err) { say($('change-error'), err.message); }
   });
 }
@@ -158,6 +190,7 @@ async function account() {
   try { status = await api('GET', '/api/owner/status'); } catch (err) { status = {}; }
   if (!status.signedIn) return show($('signed-out'), true);
   show($('account'), true);
+  $('pw-username').value = status.username || '';
   const render = (s) => {
     say($('tf-status'), s.twoFactor ? 'On. Recovery codes left: ' + s.recoveryCodesLeft + '.' : 'Off. Turn it on so a password alone cannot sign in.');
     show($('tf-start'), !s.twoFactor); show($('tf-manage'), !!s.twoFactor);
@@ -197,7 +230,7 @@ async function account() {
   });
   $('pw-change').addEventListener('click', async () => {
     say($('pw-error'));
-    try { await api('POST', '/api/owner/password', { current: $('pw-current').value, next: $('pw-next').value, code: $('pw-code').value.trim() || undefined }); $('pw-current').value = ''; $('pw-next').value = ''; $('pw-code').value = ''; say($('pw-error'), 'Changed. Other browsers and remembered devices are signed out.'); }
+    try { await api('POST', '/api/owner/password', { current: $('pw-current').value, next: $('pw-next').value, username: $('pw-username').value, code: $('pw-code').value.trim() || undefined }); $('pw-current').value = ''; $('pw-next').value = ''; $('pw-code').value = ''; say($('pw-error'), 'Changed. Other browsers and remembered devices are signed out.'); }
     catch (err) { say($('pw-error'), err.message); }
   });
   $('logout').addEventListener('click', async () => { await api('POST', '/api/owner/logout').catch(() => {}); location.href = '/owner/login'; });
@@ -207,6 +240,7 @@ async function account() {
   });
 }
 
+if (document.querySelector('[data-page="setup"]')) setupAccount();
 if (document.querySelector('[data-page="login"]')) login();
 if (document.querySelector('[data-page="account"]')) account();
 `;

@@ -4,8 +4,8 @@
 #   setup.sh                    install or start the latest release
 #   setup.sh --version 0.1.0    install or switch to that release (an upgrade backs up console state first)
 #   setup.sh --rollback         go back to the release that ran before the last switch, with its backed-up state
-#   setup.sh --password         print the owner login
-#   setup.sh --owner            create the owner account; prints a one-time password for /owner/login
+#   setup.sh --password         print the internal runtime credential (advanced)
+#   setup.sh --owner            manual host provisioning; prints a temporary password
 #   setup.sh --offline [PATH]   load a local image archive (default ./reverie-image.tar); never pull
 #   setup.sh --dry-run ...      print every command, change nothing
 #
@@ -28,7 +28,7 @@ while [ $# -gt 0 ]; do
       offline=1
       if [ "$#" -gt 1 ] && [[ "$2" != --* ]]; then archive=$2; shift; fi
       ;;
-    --with-claude-code) clis="claude-code" ;;
+    --with-claude-code) clis="claude" ;;
     --rollback) mode=rollback ;;
     --password) mode=password ;;
     --owner) mode=owner ;;
@@ -151,8 +151,8 @@ fi
 cat <<EOF
 
 Reverie is running: http://127.0.0.1:$port
-Owner login: user "owner", password from:  $0 --password${name:+ --name $name}
-Owner sign-in: on first install run  $0 --owner${name:+ --name $name}  and sign in at /owner/login
+Open the address above to create your owner account or sign in.
+Manual host provisioning (advanced): $0 --owner${name:+ --name $name}
 Data volume: $volume (kept across upgrades; console backups inside it)
 Home volume: $home_volume (agent tools, provider logins and conversation history)
 Upgrade:     $0 --version X.Y.Z      Roll back: $0 --rollback

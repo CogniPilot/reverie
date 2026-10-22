@@ -2,8 +2,8 @@
  * @fileoverview Host-side administration of the owner account (`reverie owner ...`), run on the
  * machine (or in the container as the console's user), never over HTTP.
  *
- * Bootstrap is deliberately CLI-only: every agent shares the console's loopback, so a "first run
- * from localhost" web setup would let whichever process asked first claim the owner account.
+ * Administrative bootstrap and recovery remain CLI-only. Browser account creation is limited
+ * to a truly unclaimed installation; existing or damaged accounts never reopen registration.
  * One-time passwords are random, printed once to the operator, never logged, and force a change at
  * the first sign-in.
  */

@@ -22,7 +22,7 @@
 import { promises as fs } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import type { Socket } from 'node:net';
-import { hashPassword, verifyPasswordHash, normalizeUsername } from '../user-store.js';
+import { hashPassword, verifyPasswordHash, normalizeUsername, isValidUsername } from '../user-store.js';
 import type { PasswordHash } from '../types.js';
 import {
   matchTotp,
@@ -145,6 +145,7 @@ export interface LoginResult {
 }
 
 export interface OwnerAuthDeps {
+  setupEnabled?: boolean;
   store: OwnerAuthStore;
   auditFile: string;
   now?: () => number;
@@ -155,6 +156,8 @@ export class OwnerAuthService {
   private readonly challenges = new Map<string, { expiresAt: number; epoch: number; bucket: string }>();
   private readonly busy = new Set<string>();
   private verifying = 0;
+  private setupBusy = false;
+  private readonly setupSources = new Map<string, { at: number; count: number }>();
   private readonly connections = new Map<string, Set<Socket>>();
   /** The last account read successfully: kept when the file later goes missing or corrupt. */
   private lastGood: OwnerAccount | undefined;
@@ -164,6 +167,59 @@ export class OwnerAuthService {
   private dummyHash: Promise<PasswordHash> | undefined;
 
   constructor(private readonly deps: OwnerAuthDeps) {}
+
+  setupAvailable(): boolean {
+    return (
+      (this.deps.setupEnabled ?? process.env.REVERIE_OWNER_SETUP === '1') &&
+      !this.lastGood &&
+      this.deps.store.isUnclaimed()
+    );
+  }
+
+  /** Claim only a pristine installation, with a permanent password and enforce policy from its first write. */
+  async setup(username: string, password: string, confirmation: string, ip: string): Promise<string> {
+    if (!this.setupAvailable())
+      throw new OwnerAuthError('Account setup is unavailable; sign in or use host recovery', 409);
+    const now = this.now();
+    for (const [source, state] of this.setupSources) if (now - state.at >= 60_000) this.setupSources.delete(source);
+    const attempt = this.setupSources.get(ip) ?? { at: now, count: 0 };
+    if (this.setupBusy || attempt.count >= 5 || (!this.setupSources.has(ip) && this.setupSources.size >= 500))
+      throw new OwnerAuthError('Too many setup attempts; try again shortly', 429, 60);
+    attempt.count++;
+    this.setupSources.set(ip, attempt);
+    if (typeof username !== 'string' || !isValidUsername(username))
+      throw new OwnerAuthError('Usernames are 2-32 of a-z 0-9 _ - and start alphanumeric', 400);
+    const name = normalizeUsername(username);
+    if (typeof password !== 'string' || typeof confirmation !== 'string' || password !== confirmation)
+      throw new OwnerAuthError('The two passwords must match', 400);
+    const problem = passwordProblem(password, name);
+    if (problem) throw new OwnerAuthError(problem, 400);
+    this.setupBusy = true;
+    try {
+      const account: OwnerAccount = {
+        version: 1,
+        username: name,
+        password: await hashPassword(password, OWNER_SCRYPT_PARAMS),
+        mustChange: false,
+        passwordChangedAt: now,
+        recovery: [],
+        devices: [],
+        services: [],
+        throttles: {},
+        keepers: [],
+        admins: [],
+        epoch: 1,
+        policy: 'enforce',
+      };
+      if (!(await this.deps.store.claim(account)))
+        throw new OwnerAuthError('This installation has already been claimed', 409);
+      this.lastGood = account;
+      await this.audit('owner_setup', { ip });
+      return this.newSession(account);
+    } finally {
+      this.setupBusy = false;
+    }
+  }
 
   private now(): number {
     return (this.deps.now ?? Date.now)();
@@ -196,7 +252,8 @@ export class OwnerAuthService {
         // An account written before the marker existed: record its policy once.
         if (this.markerSynced !== account.policy) {
           this.markerSynced = account.policy;
-          if (this.deps.store.readMarker() !== account.policy) void this.deps.store.writeMarker(account.policy).catch(() => {});
+          if (this.deps.store.readMarker() !== account.policy)
+            void this.deps.store.writeMarker(account.policy).catch(() => {});
         }
       }
       return account;
@@ -212,7 +269,7 @@ export class OwnerAuthService {
   /**
    * The enforcement policy. It FAILS CLOSED: once an account has been seen, a vanished or corrupt
    * file keeps the last known policy (owner sign-in is impossible until the host repairs it; agent
-   * routes keep working). Before any account exists, the policy is off.
+   * routes keep working). A managed first run enforces owner authorization before account creation.
    */
   policy(): OwnerPolicy {
     const account = this.account();
@@ -234,11 +291,14 @@ export class OwnerAuthService {
     // After a restart the last good copy is gone; the policy marker remembers that sign-in was set
     // up, so a deleted account file cannot switch the policy off.
     const marker = this.deps.store.readMarker();
-    if (marker === undefined) return 'off';
+    if (marker === undefined)
+      return (this.deps.setupEnabled ?? process.env.REVERIE_OWNER_SETUP === '1') ? 'enforce' : 'off';
     const policy = marker === 'unreadable' ? 'enforce' : marker;
     if (!this.warned.missing) {
       this.warned.missing = true;
-      console.error(`[owner-auth] owner-auth.json is missing but the policy marker says ${marker}: keeping ${policy}; owner sign-in is unavailable until the host restores the account (or, on a fresh volume, runs \`reverie owner bootstrap\`)`);
+      console.error(
+        `[owner-auth] owner-auth.json is missing but the policy marker says ${marker}: keeping ${policy}; owner sign-in is unavailable until the host restores the account (or, on a fresh volume, runs \`reverie owner bootstrap\`)`
+      );
       void this.audit('account_file_missing', { policy, source: 'marker' });
     }
     return policy;
@@ -509,7 +569,7 @@ export class OwnerAuthService {
    */
   async changePassword(
     token: string | undefined,
-    input: { current: string; next: string; code?: string; deviceCookie?: string },
+    input: { current: string; next: string; username?: string; code?: string; deviceCookie?: string },
     ip: string
   ): Promise<string> {
     const session = this.session(token);
@@ -520,10 +580,15 @@ export class OwnerAuthService {
       if (!(await verifyPasswordHash(currentPassword, account.password))) {
         return this.fail(bucket, 'password_change_failed', 'bad_current_password', ip);
       }
-      // Validate the new password before a code is used up, so a rejected choice costs no code.
+      // Username and password commit together; invalid choices consume no authenticator code.
+      if (input.username !== undefined && typeof input.username !== 'string')
+        throw new OwnerAuthError('Usernames are 2-32 of a-z 0-9 _ - and start alphanumeric', 400);
+      const username = input.username === undefined ? account.username : normalizeUsername(input.username);
+      if (!isValidUsername(username))
+        throw new OwnerAuthError('Usernames are 2-32 of a-z 0-9 _ - and start alphanumeric', 400);
       const text = String(input.next ?? '');
       if (text === currentPassword) throw new OwnerAuthError('Choose a password different from the current one', 400);
-      const problem = passwordProblem(text, account.username);
+      const problem = passwordProblem(text, username);
       if (problem) throw new OwnerAuthError(problem, 400);
       if (account.totp && !session.restricted) {
         if (!input.code) throw new OwnerAuthError('Enter a code from your authenticator app', 400);
@@ -532,6 +597,7 @@ export class OwnerAuthService {
       const hash = await hashPassword(text, OWNER_SCRYPT_PARAMS);
       const keepDevice = this.deviceId(input.deviceCookie);
       const updated = await this.deps.store.update((a) => {
+        a.username = username;
         a.password = hash;
         a.mustChange = false;
         delete a.oneTimeExpiresAt;
@@ -714,6 +780,7 @@ export class OwnerAuthService {
     const session = this.session(token);
     return {
       configured: !!account,
+      setupAvailable: this.setupAvailable(),
       policy: this.policy(),
       signedIn: !!session,
       ...(session && account

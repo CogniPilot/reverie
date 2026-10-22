@@ -312,7 +312,7 @@ export function registerAuthMiddleware(
   app: FastifyInstance,
   https: boolean,
   basePath = '',
-  ownerAuth?: Pick<OwnerAuthService, 'policy' | 'session'>
+  ownerAuth?: Pick<OwnerAuthService, 'policy' | 'session' | 'setupAvailable'>
 ): AuthState {
   const state: AuthState = {
     authSessions: null,
@@ -419,11 +419,17 @@ export function registerAuthMiddleware(
       const path = route?.startsWith(basePath + '/') ? route.slice(basePath.length) : route;
       const publicOwnerRoute =
         (req.method === 'GET' &&
-          ['/owner/login', '/owner/account', '/owner/owner.js', '/api/owner/status'].includes(path ?? '')) ||
-        (req.method === 'POST' &&
-          ['/api/owner/login', '/api/owner/login/second-factor', '/api/owner/password', '/api/owner/logout'].includes(
+          ['/owner/setup', '/owner/login', '/owner/account', '/owner/owner.js', '/api/owner/status'].includes(
             path ?? ''
-          ));
+          )) ||
+        (req.method === 'POST' &&
+          [
+            '/api/owner/setup',
+            '/api/owner/login',
+            '/api/owner/login/second-factor',
+            '/api/owner/password',
+            '/api/owner/logout',
+          ].includes(path ?? ''));
       // These handlers validate passwords/challenges/cookies themselves. The
       // owner policy still enforces one-time-password and same-origin limits.
       if (publicOwnerRoute || ownerAuth.session(req.cookies?.[OWNER_COOKIE])) {
@@ -432,7 +438,7 @@ export function registerAuthMiddleware(
       }
       if (String(req.headers.accept ?? '').includes('text/html') && isAppPage(req, path)) {
         const next = encodeURIComponent(req.url.startsWith('/') && !req.url.startsWith('//') ? req.url : '/');
-        reply.redirect(basePath + '/owner/login?next=' + next);
+        reply.redirect(basePath + '/owner/' + (ownerAuth.setupAvailable() ? 'setup' : 'login') + '?next=' + next);
         return;
       }
     }

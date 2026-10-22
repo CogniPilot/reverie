@@ -19,6 +19,7 @@ if (process.env.FAIL_PACKAGE === pkg) process.exit(1);
 const name = pkg === '@anthropic-ai/claude-code' ? 'claude' : pkg === '@openai/codex' ? 'codex' : 'opencode';
 const dir = path.join(prefix,'lib/node_modules',pkg); fs.mkdirSync(dir,{recursive:true});
 fs.writeFileSync(path.join(dir,'package.json'),JSON.stringify({version}));
+if(name==='claude' && process.env.CREATE_CLAUDE_NATIVE) { fs.mkdirSync(path.join(dir,'bin'),{recursive:true}); fs.writeFileSync(path.join(dir,'bin/claude.exe'),Buffer.from([127,69,76,70,0])); }
 if(name==='opencode' && process.env.CREATE_NATIVE) { const native=path.join(dir,'node_modules/opencode-linux-'+process.arch+(process.arch==='x64'?'-baseline':''),'bin'); fs.mkdirSync(native,{recursive:true}); fs.writeFileSync(path.join(native,'opencode'),Buffer.from([127,69,76,70,0])); }
 if(name==='opencode') fs.writeFileSync(path.join(dir,'postinstall.mjs'), "if(process.env.FAIL_POSTINSTALL) process.exit(1);");
 fs.mkdirSync(path.join(prefix,'bin'),{recursive:true});
@@ -122,5 +123,18 @@ test('Nix OpenCode launches untouched baseline ELF through its loader before any
     const launcher = readFileSync(join(f.root,'data/tools/bin/.reverie-opencode.mjs'), 'utf8');
     assert.ok(launcher.includes('--library-path'));
     assert.ok(launcher.includes(process.arch === 'x64' ? 'opencode-linux-x64-baseline' : 'opencode-linux-arm64'));
+  } finally { f.clean(); }
+});
+
+test('Nix Claude native hardlink layout gets a nonmutating loader launcher', () => {
+  const f = fixture();
+  try {
+    const loader = join(f.root, 'loader');
+    writeFileSync(loader, `#!${process.execPath}\nconsole.log('2.1.284');\n`, { mode: 0o700 });
+    const result = f.run({ REVERIE_INSTALL_CLIS: 'claude', CREATE_CLAUDE_NATIVE: '1', REVERIE_ELF_INTERPRETER: loader, REVERIE_ELF_LIBRARY_PATH: '/nix/test/lib' });
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(JSON.parse(readFileSync(join(f.root,'data/tools/.install-claude.json'))).state, 'ready');
+    assert.ok(readFileSync(join(f.root,'data/tools/bin/.reverie-claude.mjs'), 'utf8').includes('--library-path'));
+    assert.deepEqual(readFileSync(join(f.root,'data/tools/lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe')), Buffer.from([127,69,76,70,0]));
   } finally { f.clean(); }
 });

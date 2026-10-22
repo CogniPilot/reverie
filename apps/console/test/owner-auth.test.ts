@@ -102,7 +102,13 @@ describe('owner sign-in', () => {
       service,
       ctx: { sessions } as unknown as SessionPort,
       isCapabilityRequest: (req) => (req.url ?? '').startsWith('/q/'),
-      relations: { known: () => true, related: (caller, target) => caller === target, upward: () => false, keeper: () => false, admin: () => false },
+      relations: {
+        known: () => true,
+        related: (caller, target) => caller === target,
+        upward: () => false,
+        keeper: () => false,
+        admin: () => false,
+      },
       now: () => clock,
     });
     registerOwnerRoutes(app, service, false);
@@ -199,6 +205,62 @@ describe('owner sign-in', () => {
     ).toBe(200);
     expect((await login(oneTime)).statusCode).toBe(401);
     expect((await login(NEW_PASSWORD)).json().data.next).toBe('done');
+  });
+
+  it('chooses a normalized login username atomically with the first permanent password', async () => {
+    const first = cookie(await login(oneTime))!;
+    const changed = await app.inject({
+      method: 'POST',
+      url: '/api/owner/password',
+      cookies: as(first),
+      payload: { current: oneTime, next: NEW_PASSWORD, username: '  New_Login-7  ' },
+    });
+    expect(changed.statusCode).toBe(200);
+    expect(store.read()!.username).toBe('new_login-7');
+    expect(store.read()!.mustChange).toBe(false);
+    expect(service.session(first)).toBeUndefined();
+    expect((await app.inject({ url: '/api/owner/status', cookies: as(cookie(changed)) })).json().data.username).toBe(
+      'new_login-7'
+    );
+    expect((await login(NEW_PASSWORD, {}, USER)).statusCode).toBe(401);
+    expect((await login(NEW_PASSWORD, {}, 'new_login-7')).json().data.next).toBe('done');
+  });
+
+  it('rejects invalid login usernames without changing any account data or password', async () => {
+    const restricted = cookie(await login(oneTime))!;
+    const before = structuredClone(store.read());
+    for (const username of ['', 'a', '_leading', 'has space', 'bad/name', 'x'.repeat(33), null, 123]) {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/owner/password',
+        cookies: as(restricted),
+        payload: { current: oneTime, next: NEW_PASSWORD, username },
+      });
+      expect(response.statusCode, String(username)).toBe(400);
+      expect(store.read()).toEqual(before);
+    }
+    expect((await login(oneTime)).json().data.next).toBe('change-password');
+  });
+
+  it('username changes still require current password and configured two-factor proof', async () => {
+    const session = await signedIn();
+    const { secret } = await enrol(session);
+    const before = structuredClone(store.read());
+    const payload = { current: NEW_PASSWORD, next: 'another-strong-synthetic-72', username: 'new-account' };
+    const noCode = await app.inject({ method: 'POST', url: '/api/owner/password', cookies: as(session), payload });
+    expect(noCode.statusCode).toBe(400);
+    expect(store.read()).toEqual(before);
+    const ok = await app.inject({
+      method: 'POST',
+      url: '/api/owner/password',
+      cookies: as(session),
+      payload: { ...payload, code: code(secret) },
+    });
+    expect(ok.statusCode).toBe(200);
+    expect(store.read()!.username).toBe('new-account');
+    expect(store.read()!.totp).toEqual(expect.objectContaining({ secret: before!.totp!.secret }));
+    expect(service.session(session)).toBeUndefined();
+    expect((await login(payload.next, {}, 'new-account')).json().data.next).toBe('second-factor');
   });
 
   it('rejects weak new passwords with a reason', async () => {

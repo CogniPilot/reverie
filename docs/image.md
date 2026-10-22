@@ -85,8 +85,9 @@ bytes that ran before.
 2. on the first start after an image change (`REVERIE_VERSION` differs from the volume's
    record), writes a tar backup of `console/` under `backups/` before the console migrates
    its files;
-3. retains a separate legacy console credential in owner-password (mode 0600); browser
-   access uses the owner account sign-in described above;
+3. retains a private internal console credential in owner-password (mode 0600); on
+   a fresh installation the browser offers **Create account**, where you choose your
+   username and permanent password. Existing installations use ordinary owner sign-in;
 4. starts the installer for Claude Code, Codex and OpenCode in the background, writing
    private persistent tools storage; offline failures leave the console available.
    REVERIE_INSTALL_CLIS can select providers or none. Retry with reverie-install-clis.
