@@ -7,6 +7,7 @@ export const PlanRequestSchema = z
   .object({
     id: PlanRequestId,
     owner: z.string().optional(),
+    requestedBy: PlanRequestId.optional(),
     employeeId: PlanRequestId,
     sessionId: PlanRequestId,
     name: z.string().max(100),
@@ -43,6 +44,7 @@ export type PlanRequestView = Omit<PlanRequestRecord, 'nonceHash'>;
 export interface PlanRequestExecution {
   executor: PlanMoveExecutor;
   authorized(): boolean;
+  requestedBy?: string;
 }
 export interface PlanRequestPort {
   load(): Promise<PlanRequestRecord[]>;
@@ -158,7 +160,7 @@ export class PlanMoveRequests {
       actor:
         event === 'plan_request_approved' || event === 'plan_request_rejected'
           ? record.sessionId
-          : (record.owner ?? 'owner'),
+          : (record.requestedBy ?? record.owner ?? 'owner'),
       requestId: record.id,
       employeeId: record.employeeId,
       sessionId: record.sessionId,
@@ -253,6 +255,7 @@ export class PlanMoveRequests {
       const record: PlanRequestRecord = {
         ...input,
         owner,
+        ...(execution.requestedBy ? { requestedBy: execution.requestedBy } : {}),
         name: snapshot.name,
         fromAccount: snapshot.account,
         mode: snapshot.mode || '',

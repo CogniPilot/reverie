@@ -139,7 +139,7 @@ Object.assign(ReverieApp.prototype, {
             recoveryLabel,
             button('Save permissions', async () => {
               await this._companyApi(`/employees/${employee.id}`, 'PUT', {
-                permissions: { recoverEmployees: recovery.checked },
+                permissions: { ...employee.permissions, recoverEmployees: recovery.checked },
               });
               status.textContent = 'Employee permissions saved.';
             })

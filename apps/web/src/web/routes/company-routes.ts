@@ -36,7 +36,7 @@ const UpdateSchema = EmployeeSchema.pick({ position: true, expertise: true, resp
     sleepEnabled: EmployeeSchema.shape.sleepEnabled.removeDefault(),
     dreamEnabled: EmployeeSchema.shape.dreamEnabled.removeDefault(),
     voice: EmployeeVoiceSchema.nullable(),
-    permissions: EmployeePermissionsSchema,
+    permissions: EmployeePermissionsSchema.partial(),
   })
   .partial()
   .strict()

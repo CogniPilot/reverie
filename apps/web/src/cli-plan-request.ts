@@ -1,6 +1,35 @@
 import { constants, promises as fs } from 'node:fs';
 import type { AgentDeps } from './cli-agent.js';
+import { randomUUID } from 'node:crypto';
 import { PlanRequestCapabilities, PlanRequestId } from './plan-request-capability.js';
+
+/** Request a move through the scoped company API; session creation remains private to the executor. */
+export async function agentRequestPlanMove(deps: AgentDeps, input: { toAccount: string; employeeId?: string; id?: string }): Promise<number> {
+  try {
+    const response = await deps.request(deps.ctx, { method: 'GET', path: '/api/company' });
+    const company = response.json as { success?: boolean; data?: { employees?: { id: string; sessionId: string }[] } };
+    const employee = company?.data?.employees?.find(item => input.employeeId ? item.id === input.employeeId : item.sessionId === deps.ctx.selfId);
+    if (response.status >= 400 || !company.success || !employee) throw new Error('Unknown company expert');
+    const id = PlanRequestId.parse(input.id ?? randomUUID());
+    const result = await deps.request(deps.ctx, { method: 'POST', path: '/api/plans/agent-requests', body: {
+      id, employeeId: employee.id, sessionId: employee.sessionId, toAccount: PlanRequestId.parse(input.toAccount),
+    } });
+    const body = result.json as { success?: boolean; data?: { phase: string }; error?: string };
+    if (result.status >= 400 || !body?.success) { deps.io.err('Plan move request refused. Check the destination ID and owner-granted plan permissions.'); return 1; }
+    deps.io.out(deps.json ? JSON.stringify({ success: true, id, phase: body.data?.phase }) : `Plan request ${id}: ${body.data?.phase}. The affected expert must prepare a handoff and approve.`);
+    return 0;
+  } catch { deps.io.err('Could not confirm the plan request. Check its status before retrying with the same request ID.'); return 1; }
+}
+
+export async function agentPlanMoveAction(deps: AgentDeps, id: string, action: 'status' | 'cancel' | 'reauthorize'): Promise<number> {
+  try {
+    const result = await deps.request(deps.ctx, { method: 'POST', path: `/api/plans/agent-requests/${PlanRequestId.parse(id)}/${action}` });
+    const body = result.json as { success?: boolean; data?: { phase: string; newSession?: string } };
+    if (result.status >= 400 || !body?.success) throw new Error('Refused');
+    deps.io.out(deps.json ? JSON.stringify({ success: true, id, ...body.data }) : `Plan request ${id}: ${body.data?.phase}${body.data?.newSession ? ` (${body.data.newSession})` : ''}.`);
+    return 0;
+  } catch { deps.io.err('Plan request action refused or unavailable. Check the request ID and current plan permissions.'); return 1; }
+}
 
 /** The credential is read privately and sent only in the authenticated request body. */
 export async function agentPlanRequest(

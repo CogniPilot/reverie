@@ -503,7 +503,7 @@ export class CompanyService {
       reportsTo?: string;
       pronouns?: string | null;
       voice?: EmployeeVoice | null;
-      permissions?: CompanyEmployee['permissions'];
+      permissions?: Partial<CompanyEmployee['permissions']>;
       sleepEnabled?: boolean;
       dreamEnabled?: boolean;
     },
@@ -516,7 +516,7 @@ export class CompanyService {
         sleepEnabled: EmployeeSchema.shape.sleepEnabled.removeDefault(),
         dreamEnabled: EmployeeSchema.shape.dreamEnabled.removeDefault(),
         voice: EmployeeVoiceSchema.nullable(),
-        permissions: EmployeePermissionsSchema,
+        permissions: EmployeePermissionsSchema.partial(),
       })
       .partial()
       .strict()
@@ -526,7 +526,7 @@ export class CompanyService {
       if (!employee) throw new CompanyError('Unknown employee', 404);
       const before = structuredClone(employee);
       if (parsed.position !== undefined) employee.position = parsed.position;
-      if (parsed.permissions !== undefined) employee.permissions = parsed.permissions;
+      if (parsed.permissions !== undefined) employee.permissions = { ...employee.permissions, ...parsed.permissions };
       if (parsed.sleepEnabled !== undefined) employee.sleepEnabled = parsed.sleepEnabled;
       if (parsed.dreamEnabled !== undefined) employee.dreamEnabled = parsed.dreamEnabled;
       if (parsed.expertise !== undefined) employee.expertise = parsed.expertise;

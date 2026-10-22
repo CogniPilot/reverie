@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { PlanRequestCapabilities, planRequestCapabilityFile } from '../src/plan-request-capability.js';
 import { PlanRequestStore } from '../src/plan-request-store.js';
-import { agentPlanRequest } from '../src/cli-plan-request.js';
+import { agentPlanRequest, agentRequestPlanMove } from '../src/cli-plan-request.js';
 import type { AgentDeps } from '../src/cli-agent.js';
 
 const directories: string[] = [];
@@ -20,6 +20,19 @@ afterEach(async () => {
 });
 
 describe('private plan approval files and CLI', () => {
+  it('requests a selected company employee through the scoped API without creating a session or approving it', async () => {
+    const deps: AgentDeps = { ctx: { selfId: 'manager', apiUrl: 'http://fixture' }, json: true,
+      io: { out: vi.fn(), err: vi.fn() },
+      request: vi.fn(async (_ctx, request) => request.method === 'GET'
+        ? { status: 200, text: '', json: { success: true, data: { employees: [{ id: 'expert', sessionId: 'source' }] } } }
+        : { status: 202, text: '', json: { success: true, data: { phase: 'pending' } } }),
+    };
+    expect(await agentRequestPlanMove(deps, { id: 'request', employeeId: 'expert', toAccount: 'target' })).toBe(0);
+    expect(deps.request).toHaveBeenLastCalledWith(deps.ctx, { method: 'POST', path: '/api/plans/agent-requests',
+      body: { id: 'request', employeeId: 'expert', sessionId: 'source', toAccount: 'target' } });
+    expect(deps.request).toHaveBeenCalledTimes(2);
+    expect(JSON.parse(vi.mocked(deps.io.out).mock.calls[0][0])).toEqual({ success: true, id: 'request', phase: 'pending' });
+  });
   it('uses private directories, exclusive files, exact identity, no traversal, and revocation', async () => {
     const h = await fixture();
     await h.capabilities.write(h.value);

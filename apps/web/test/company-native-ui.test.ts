@@ -129,7 +129,7 @@ it('chooses a plan and harness with backend runtime defaults for a fresh expert;
       expertise: ['Code review', 'Flight systems'],
       responsibilities: [],
       personality: '',
-      permissions: { recoverEmployees: false },
+      permissions: { recoverEmployees: false, moveOwnPlan: false, managePlans: false },
       sleepEnabled: false,
       dreamEnabled: false,
       reportsTo: 'lead',

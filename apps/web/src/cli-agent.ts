@@ -44,7 +44,7 @@ import { CODEX_REASONING_EFFORTS } from './types/session.js';
 import { stripAnsi as stripAnsiSequences } from './utils/regex-patterns.js';
 import { quoteForPane } from './pane-quote.js';
 import { pronounsProblem, pronounsProposal } from './pronouns.js';
-import { agentPlanRequest } from './cli-plan-request.js';
+import { agentPlanRequest, agentRequestPlanMove, agentPlanMoveAction } from './cli-plan-request.js';
 
 /** A chat message id, as the server stores it. */
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -2119,7 +2119,13 @@ export function registerAgentCommands(program: Command): Command {
 
   const run = runAgentVerb;
   registerRoutineCommands(program, run);
-  const planMove = agent.command('plan-move').description('Decide an owner-requested plan move for this exact expert');
+  const planMove = agent.command('plan-move').description('Request a permitted plan move or approve a handoff for this exact expert');
+  planMove.command('request <account-id>')
+    .option('--employee <id>', 'Team expert ID (requires Manage team plans)')
+    .option('--id <id>', 'Stable request ID for safe retries')
+    .option('--json', 'Machine-readable result')
+    .action((toAccount: string, options: { employee?: string; id?: string; json?: boolean }) =>
+      run(Boolean(options.json), deps => agentRequestPlanMove(deps, { toAccount, employeeId: options.employee, id: options.id })));
   planMove.command('approve <id>')
     .requiredOption('--handoff-file <path>', 'Work-safe handoff for the fresh destination session')
     .option('--json', 'Machine-readable result')
@@ -2128,6 +2134,10 @@ export function registerAgentCommands(program: Command): Command {
   planMove.command('reject <id>').option('--json', 'Machine-readable result')
     .action((id: string, options: { json?: boolean }) =>
       run(Boolean(options.json), deps => agentPlanRequest(deps, { id, decision: 'reject' })));
+  for (const action of ['status', 'cancel', 'reauthorize'] as const)
+    planMove.command(`${action} <id>`).option('--json', 'Machine-readable result')
+      .action((id: string, options: { json?: boolean }) =>
+        run(Boolean(options.json), deps => agentPlanMoveAction(deps, id, action)));
 
   const plans = program
     .command('plans')

@@ -178,6 +178,16 @@ provider's model and effort defaults. The expert prepares a handoff and approves
 the request before the replacement starts; its source stops only after the
 replacement is ready.
 
+Grant **Move own plan** or **Manage team plans** on an employee's Company card
+or during hiring. A CTO with Manage team plans can read team plan usage and request
+moves for other experts; a title alone grants no permission. From an authenticated
+expert session, use `reverie plans --json` for account IDs, then
+`reverie agent plan-move request <account-id> [--employee <employee-id>]`.
+The affected expert still supplies its own handoff and runs the approval command.
+These permissions grant no account login, account deletion or general session creation.
+They default off and currently apply to single-company deployments; multi-user
+account delegation remains disabled.
+
 Kokoro speech runs locally with Nix-managed Python, ONNX Runtime and espeak-ng.
 The web launcher starts it in the background; its pinned, checksum-verified models
 are downloaded on first start into the instance's `data/voice/kokoro` directory.

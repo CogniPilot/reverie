@@ -1,4 +1,4 @@
-/** Private, one-use authority for a validated template hire's in-process request. */
+/** Private, one-use authority for a validated hire or approved plan migration. */
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { isDeepStrictEqual } from 'node:util';
 import type { FastifyRequest } from 'fastify';
@@ -8,6 +8,7 @@ interface Grant {
   sessionId: string;
   owner: string | undefined;
   payload: unknown;
+  targetSessionId?: string;
   authorized(): boolean;
   claimed?: FastifyRequest;
   consumed: boolean;
@@ -16,9 +17,17 @@ interface Grant {
 const grants = new AsyncLocalStorage<Grant>();
 export const hasDelegatedSessionCreate = (): boolean => !!grants.getStore();
 
-/** Not an HTTP capability: only the validated hire callback creates this scope. */
+/** Only the migration executor may start its exact freshly-created candidate. */
+export function withDelegatedSessionStart<T>(
+  input: Pick<Grant, 'sessionId' | 'owner' | 'authorized'> & { targetSessionId: string },
+  start: () => Promise<T>
+): Promise<T> {
+  return withDelegatedSessionCreate({ ...input, payload: undefined }, start);
+}
+
+/** Not an HTTP capability: only a validated hire or migration callback creates this scope. */
 export async function withDelegatedSessionCreate<T>(
-  input: Pick<Grant, 'sessionId' | 'owner' | 'payload' | 'authorized'>,
+  input: Pick<Grant, 'sessionId' | 'owner' | 'payload' | 'authorized' | 'targetSessionId'>,
   create: () => Promise<T>
 ): Promise<T> {
   const grant: Grant = { ...input, payload: structuredClone(input.payload), consumed: false, closed: false };
@@ -31,7 +40,9 @@ export async function withDelegatedSessionCreate<T>(
 /** Claim before parsing; one request only, even when two injections overlap. */
 export function claimDelegatedSessionCreate(req: FastifyRequest, caller: string | undefined): boolean {
   const grant = grants.getStore();
-  if (!grant || grant.closed || grant.consumed || grant.claimed || req.method !== 'POST' || req.url !== '/api/sessions' || req.routeOptions.url !== '/api/sessions') return false;
+  const url = grant?.targetSessionId ? `/api/sessions/${encodeURIComponent(grant.targetSessionId)}/interactive` : '/api/sessions';
+  const route = grant?.targetSessionId ? '/api/sessions/:id/interactive' : '/api/sessions';
+  if (!grant || grant.closed || grant.consumed || grant.claimed || req.method !== 'POST' || req.url !== url || req.routeOptions.url !== route) return false;
   if (caller !== grant.sessionId || ownerFor(req) !== grant.owner || req.headers['x-reverie-parent-session'] !== grant.sessionId || !grant.authorized()) return false;
   grant.claimed = req;
   return true;

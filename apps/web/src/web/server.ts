@@ -1,8 +1,9 @@
 import { isEmbassyProtocolRoute } from '../embassy-public-routes.js';
 import { withDelegatedSessionCreate } from '../owner-auth/delegated-session-create.js';
+import { agentPlanRequestExecution } from '../agent-plan-request.js';
 import { BuiltinEmbassy } from '../embassy-builtin.js';
 import { registerBuiltinEmbassyRoutes } from './routes/embassy-builtin-routes.js';
-import { employeeRestContext, employeeProfileContext } from '../company-types.js';
+import { employeeRestContext, employeeProfileContext, employeePlanContext } from '../company-types.js';
 import { expertRuntimeRecipe } from '../expert-runtime-recipe.js';
 import { AvatarStore } from '../agent-avatars.js';
 import { CompanyStore } from '../company-store.js';
@@ -1374,7 +1375,7 @@ export class WebServer extends EventEmitter {
       },
       restContextOf: (sessionId) => {
         const employee = this.companyService?.registeredEmployees().find(e => e.sessionId === sessionId);
-        return employee ? employeeProfileContext(employee) + ' ' + employeeRestContext(employee) : undefined;
+        return employee ? employeeProfileContext(employee) + ' ' + employeeRestContext(employee) + ' ' + employeePlanContext(employee) : undefined;
       },
       // Rooms and messages live in SQLite; chatrooms.json is imported once, when chat.db does not exist yet.
       database: dataPath('chat.db'),
@@ -1925,7 +1926,7 @@ export class WebServer extends EventEmitter {
           avatar,
         })),
       canViewAll: (id) =>
-        roles.can(
+        this.companyService.view().employees.some(employee => employee.sessionId === id && (employee.permissions.managePlans || employee.permissions.moveOwnPlan)) || roles.can(
           {
             employeeId: this.companyService?.view().employees.find((e) => e.sessionId === id)?.id,
             leadOfAny: leadsALiveRoom(id),
@@ -2005,6 +2006,17 @@ export class WebServer extends EventEmitter {
     registerPlanRequestRoutes(this.app, planRequests, ctx, ownerAuth, request => ({
       executor: capturePlanMove(request),
       authorized: () => authenticatedPlanMover(request, ctx.authSessions, ownerAuth),
+    }), (request, input) => agentPlanRequestExecution(request, input, planMoveRuntime, async (method, url, payload) => {
+      const result = await this.app.inject({ method, url, headers: {
+        ...(request.headers.authorization ? { authorization: request.headers.authorization } : {}),
+        ...(request.headers.cookie ? { cookie: request.headers.cookie } : {}),
+        'x-reverie-parent-session': input.sessionId,
+        ...(payload === undefined ? {} : { 'content-type': 'application/json' }),
+      }, ...(payload === undefined ? {} : { payload: JSON.stringify(payload) }) });
+      const body = result.json();
+      if (result.statusCode >= 400 || body?.success === false)
+        throw new PlanMoveError(body?.error ?? 'The migration session request was refused', result.statusCode >= 400 ? result.statusCode : 409);
+      return body;
     }));
 
     registerWsRoutes(this.app, ctx, () => this.getHostPolicy());

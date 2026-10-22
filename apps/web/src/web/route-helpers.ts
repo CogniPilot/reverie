@@ -377,7 +377,7 @@ const PARENT_SESSION_ID_MIN_PREFIX = 8;
  * Returns the parent's FULL id, which is what the frontend matches tabs on.
  */
 export function resolveParentSessionId(
-  ctx: SessionPort,
+  ctx: Pick<SessionPort, 'sessions'>,
   req: FastifyRequest,
   bodyValue: string | undefined,
   owner: string | undefined

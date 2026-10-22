@@ -18,6 +18,8 @@ export const PronounsSchema = z
 export const EmployeePermissionsSchema = z
   .object({
     recoverEmployees: z.boolean().default(false),
+    moveOwnPlan: z.boolean().default(false),
+    managePlans: z.boolean().default(false),
   })
   .strict();
 export const EmployeeSchema = z
@@ -29,7 +31,7 @@ export const EmployeeSchema = z
     /** Profile image (`/api/avatars/<id>?v=<ms>`), set through the avatar routes only. */
     avatar: z.string().regex(AVATAR_URL).optional(),
     position: text,
-    permissions: EmployeePermissionsSchema.default({ recoverEmployees: false }),
+    permissions: EmployeePermissionsSchema.default({ recoverEmployees: false, moveOwnPlan: false, managePlans: false }),
     /** How to refer to this person ("she/her", "they/them"); the owner sets it (PUT /api/company/employees/:id), never the agent. */
     pronouns: PronounsSchema.optional(),
     voice: EmployeeVoiceSchema.optional(),
@@ -162,6 +164,12 @@ export type CompanyState = z.infer<typeof CompanyStateSchema>;
 /** Eligibility only: the organization scheduler must explicitly schedule a Gantt task. */
 export function employeeRestContext(employee: Pick<CompanyEmployee, 'sleepEnabled' | 'dreamEnabled'>): string {
   return `Owner preferences: Sleep (memory consolidation) ${employee.sleepEnabled ? 'permitted' : 'not permitted'}; Dream (creative exploration) ${employee.dreamEnabled ? 'permitted' : 'not permitted'}. These are eligibility settings, not instructions to sleep or dream now. Only the owner or an explicitly authorized organization scheduler may arrange a Gantt task around existing work; a CTO/COO title grants no scheduling authority. Dream outputs are ideas, not facts or verified evidence. No independent nightly timer is authorized by these preferences.`;
+}
+
+export function employeePlanContext(employee: Pick<CompanyEmployee, 'permissions'>): string {
+  if (!employee.permissions.managePlans && !employee.permissions.moveOwnPlan)
+    return 'Plan moves require an explicit owner-granted Move own plan or Manage team plans permission.';
+  return `Owner-granted plan permission: ${employee.permissions.managePlans ? 'Manage team plans: inspect usage and request moves for this company’s experts' : 'Move own plan: request a move only for yourself'}. Use reverie plans --json to inspect usage and account IDs, then reverie agent plan-move request <account-id>${employee.permissions.managePlans ? ' --employee <employee-id>' : ''}. A request does not move a session immediately. The affected expert must finish a safe handoff and approve using reverie agent plan-move approve <request-id> --handoff-file <path>. Never self-replace through POST /api/sessions or claim success without verifying the new account. The owner may revoke these permissions.`;
 }
 
 export function employeeProfileContext(employee: Pick<CompanyEmployee, 'name' | 'position' | 'expertise' | 'responsibilities' | 'personality'>): string {

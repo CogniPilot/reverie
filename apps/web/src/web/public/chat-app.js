@@ -2350,17 +2350,26 @@ class ReverieChatApp {
           recovery.disabled = employee.onVacation === true;
           recovery.setAttribute('aria-label', `Recovery permission for ${employee.name}`);
           label.prepend(recovery);
+          const planPermissions = {};
+          const planLabels = [];
+          for (const [key, text] of [['moveOwnPlan', 'Move own plan'], ['managePlans', 'Manage team plans']]) {
+            const wrap = this.el('label', 'ca-hint', ` ${text}`);
+            const input = this.el('input'); input.type = 'checkbox'; input.checked = employee.permissions?.[key] === true;
+            input.setAttribute('aria-label', `${text} for ${employee.name}`);
+            wrap.title = 'Requests still require the affected expert’s handoff and approval. No account sign-in or plan administration access.';
+            wrap.prepend(input); planPermissions[key] = input; planLabels.push(wrap);
+          }
           const rest = this.expertRestFields(card, employee);
           const save = this.button('ca-btn', 'Save preferences', async () => {
             const result = await this.app._chatApi(`/api/company/employees/${encodeURIComponent(employee.id)}`, {
-              method: 'PUT', body: { sleepEnabled: rest.sleep.checked, dreamEnabled: rest.dream.checked, ...(!employee.onVacation ? { permissions: { recoverEmployees: recovery.checked } } : {}) },
+              method: 'PUT', body: { sleepEnabled: rest.sleep.checked, dreamEnabled: rest.dream.checked, ...(!employee.onVacation ? { permissions: { ...employee.permissions, recoverEmployees: recovery.checked, moveOwnPlan: planPermissions.moveOwnPlan.checked, managePlans: planPermissions.managePlans.checked } } : {}) },
             });
             status.textContent = result.ok ? 'Employee preferences saved.' : `Could not save preferences: ${result.error || 'request failed'}`;
           });
           save.setAttribute('aria-label', `Save preferences for ${employee.name}`);
           save.textContent = 'Save preferences';
           const controls = this.el('div', 'ca-company-person-controls');
-          controls.append(label, save, this.button('ca-btn', `Edit profile for ${employee.name}`, () => this.openEmployeeProfile(employee, paint), { text: 'Edit profile' }));
+          controls.append(label, ...planLabels, save, this.button('ca-btn', `Edit profile for ${employee.name}`, () => this.openEmployeeProfile(employee, paint), { text: 'Edit profile' }));
           const restart = this.button('ca-btn', `Restart session for ${employee.name}`, () => this.openEmployeeRestart(employee, paint), { text: 'Restart session' });
           restart.disabled = employee.onVacation === true;
           if (restart.disabled) restart.title = 'Return this expert from vacation before restarting.';
@@ -2596,6 +2605,13 @@ class ReverieChatApp {
       const rest = this.expertRestFields(pages[2]);
       const recoveryWrap = this.el('label', 'ca-label');
       const recover = this.el('input'); recover.type = 'checkbox'; recover.name = 'recoverEmployees'; recoveryWrap.append(recover, this.el('span', '', 'May wake reporting experts after a crash')); pages[2].append(recoveryWrap, this.el('p', 'ca-hint', 'An explicit recovery permission only. It grants no ability to hire, manage plans or schedule work.'));
+      const planPermissions = {};
+      for (const [key, text] of [['moveOwnPlan', 'Move own plan'], ['managePlans', 'Manage team plans']]) {
+        const wrap = this.el('label', 'ca-label');
+        const input = this.el('input'); input.type = 'checkbox'; input.name = key;
+        wrap.append(input, this.el('span', '', text)); pages[2].append(wrap); planPermissions[key] = input;
+      }
+      pages[2].append(this.el('p', 'ca-hint', 'Plan moves require the affected expert’s handoff and approval. A title alone grants no permission.'));
       const parent = field('reportsTo', 'Reports to', 'select', pages[2]);
       const owner = this.el('option', '', data.settings?.ownerName || 'Owner'); owner.value = 'owner'; parent.append(owner);
       for (const e of employees) { const option = this.el('option', '', e.name); option.value = e.id; parent.append(option); }
@@ -2621,7 +2637,7 @@ class ReverieChatApp {
         pages[3].replaceChildren(this.el('legend', '', 'Ready to welcome them?'));
         const photo = appearance.picture.value(); if (photo) { const image = this.el('img', 'ca-hire-review-photo'); image.src = photo; image.alt = ''; pages[3].append(image); }
         const list = this.el('dl', 'ca-hire-review');
-        for (const [label, value] of [['Name', name.value.trim()], ['Role', position.value.trim()], ['Skills', expertise.value], ['Responsibilities', lines().join('\n') || 'None specified'], ['Personality', personality.value || 'None specified'], ['Pronouns', pronouns.value || 'Unspecified'], ['Voice', voice.value()?.id || 'Automatic'], ['Plan', selectedSource()?.label || 'Choose a plan'], ['Harness', harness.selectedOptions[0]?.textContent || 'Choose a harness'], ['Reports to', parent.selectedOptions[0]?.textContent || 'Owner'], ['Recovery permission', recover.checked ? 'May wake reporting experts' : 'Not granted'], ['Sleep / Dream', `${rest.sleep.checked ? 'Sleep allowed' : 'Sleep off'} · ${rest.dream.checked ? 'Dream allowed' : 'Dream off'}`]]) list.append(this.el('dt', '', label), this.literalText('dd', '', value));
+        for (const [label, value] of [['Name', name.value.trim()], ['Role', position.value.trim()], ['Skills', expertise.value], ['Responsibilities', lines().join('\n') || 'None specified'], ['Personality', personality.value || 'None specified'], ['Pronouns', pronouns.value || 'Unspecified'], ['Voice', voice.value()?.id || 'Automatic'], ['Plan', selectedSource()?.label || 'Choose a plan'], ['Harness', harness.selectedOptions[0]?.textContent || 'Choose a harness'], ['Reports to', parent.selectedOptions[0]?.textContent || 'Owner'], ['Recovery permission', recover.checked ? 'May wake reporting experts' : 'Not granted'], ['Plan permissions', planPermissions.managePlans.checked ? 'Manage team plans' : planPermissions.moveOwnPlan.checked ? 'Move own plan' : 'Not granted'], ['Sleep / Dream', `${rest.sleep.checked ? 'Sleep allowed' : 'Sleep off'} · ${rest.dream.checked ? 'Dream allowed' : 'Dream off'}`]]) list.append(this.el('dt', '', label), this.literalText('dd', '', value));
         pages[3].append(list, this.el('p', 'ca-hint', 'Hiring creates this person and starts their runtime. Plans and harnesses supply the runtime defaults. Sleep and Dream are preferences, not schedules.'));
       };
       const showStep = index => {
@@ -2669,7 +2685,7 @@ class ReverieChatApp {
         saving = true; submit.disabled = true; error.textContent = '';
         const source = selectedSource();
         if (!source || !harness.value) { saving = false; submit.disabled = false; error.textContent = 'Choose a plan and a compatible harness.'; return; }
-        const payload = { responsibilities: lines(), personality: personality.value.trim(), permissions: { recoverEmployees: recover.checked }, sleepEnabled: rest.sleep.checked, dreamEnabled: rest.dream.checked, source: source.kind === 'local' ? { kind: 'local', endpointId: source.id } : { kind: 'subscription', profileId: source.id }, mode: harness.value, name: name.value.trim(), icon: this.expertInitial(name.value), ...(pronouns.value.trim() ? { pronouns: pronouns.value.trim() } : {}), ...(voice.value() ? { voice: voice.value() } : {}), position: position.value.trim(), expertise: skills, reportsTo: parent.value };
+        const payload = { responsibilities: lines(), personality: personality.value.trim(), permissions: { recoverEmployees: recover.checked, moveOwnPlan: planPermissions.moveOwnPlan.checked, managePlans: planPermissions.managePlans.checked }, sleepEnabled: rest.sleep.checked, dreamEnabled: rest.dream.checked, source: source.kind === 'local' ? { kind: 'local', endpointId: source.id } : { kind: 'subscription', profileId: source.id }, mode: harness.value, name: name.value.trim(), icon: this.expertInitial(name.value), ...(pronouns.value.trim() ? { pronouns: pronouns.value.trim() } : {}), ...(voice.value() ? { voice: voice.value() } : {}), position: position.value.trim(), expertise: skills, reportsTo: parent.value };
         try {
           const result = await this.app._chatApi('/api/company/hire', { method: 'POST', body: payload });
           if (!result.ok) { error.textContent = result.error || 'Could not hire this agent.'; return; }

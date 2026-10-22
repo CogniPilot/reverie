@@ -18,6 +18,7 @@ export interface PlanMoveRuntime {
   mux: Pick<TerminalMultiplexer, 'getSession' | 'isPaneDead'>;
   cleanup: SessionPort['cleanupSession'];
   authorized(): boolean;
+  actor?: string;
   request(method: 'GET' | 'POST', url: string, payload?: unknown): Promise<unknown>;
   capture?: typeof capturePlanProcesses;
   survivors?: typeof survivingPlanProcesses;
@@ -186,7 +187,7 @@ export function planMoveExecutor(runtime: PlanMoveRuntime, owner?: string): Plan
       if (record.owner !== owner) throw new PlanMoveError('The move belongs to another owner', 403);
       // This private append is mandatory before stopping the source. Owner-scoped move history is also persisted by PlanMoves.
       await runtime.chat.auditEntry({
-        event: 'plan_move', owner, actor: owner ?? 'owner', moveId: record.id, employeeId: record.employeeId,
+        event: 'plan_move', owner, actor: runtime.actor ?? owner ?? 'owner', moveId: record.id, employeeId: record.employeeId,
         name: record.name, oldSession: record.oldSession, newSession: record.newSession,
         fromAccount: record.fromAccount, toAccount: record.toAccount, phase: record.phase, error: record.error,
       });
@@ -199,7 +200,7 @@ export function planMoveExecutor(runtime: PlanMoveRuntime, owner?: string): Plan
         runtime.chat.post(
           room.id,
           { kind: 'system', name: 'Plans' },
-          `AUDIT plan move ${record.phase}: ${owner ?? 'Owner'} moved ${record.name} from ${from?.label ?? record.fromAccount} to ${to?.label ?? record.toAccount}${record.error ? `; ${record.error}` : ''}`
+          `AUDIT plan move ${record.phase}: ${runtime.actor ?? owner ?? 'Owner'} moved ${record.name} from ${from?.label ?? record.fromAccount} to ${to?.label ?? record.toAccount}${record.error ? `; ${record.error}` : ''}`
         );
       } catch { console.warn(`[plans] move ${record.id} was audited privately; its optional channel mirror was unavailable`); }
     },

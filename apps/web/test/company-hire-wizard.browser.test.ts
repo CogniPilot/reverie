@@ -49,7 +49,7 @@ it('uses the real Chromium wizard through editable role, identity, work, review,
       expect(await wizard.locator('.ca-hire-progress').textContent()).toContain(`Step ${step + 1}`);
       if (step === 0) { await wizard.locator('[name=roleTemplate]').selectOption('software'); await wizard.locator('[name=position]').fill('Flight software engineer'); await wizard.locator('[name=responsibilities]').fill('Review recorded flight data'); }
       if (step === 1) { await wizard.locator('[name=name]').fill('Rowan'); await wizard.locator('[name=personality]').fill('Patient and precise'); }
-      if (step === 2) await wizard.locator('[name=plan]').selectOption('subscription:fixture');
+      if (step === 2) { await wizard.locator('[name=plan]').selectOption('subscription:fixture'); await wizard.locator('[name=managePlans]').check(); await wizard.locator('[name=moveOwnPlan]').check(); }
       if (step < 3) await wizard.getByRole('button', { name: 'Next', exact: true }).click();
     }
     expect(await wizard.locator('.ca-hire-review').textContent()).toContain('Flight software engineer');
@@ -64,7 +64,7 @@ it('uses the real Chromium wizard through editable role, identity, work, review,
     await page.locator('.ca-company-chart').getByText('Rowan', { exact: true }).waitFor();
     const bodies = await page.evaluate(() => (window as any).__hires);
     expect(bodies).toHaveLength(1);
-    expect(bodies[0]).toMatchObject({ name: 'Rowan', position: 'Flight software engineer', responsibilities: ['Review recorded flight data'], personality: 'Patient and precise', mode: 'codex', source: { kind: 'subscription', profileId: 'fixture' }, permissions: { recoverEmployees: false } });
+    expect(bodies[0]).toMatchObject({ name: 'Rowan', position: 'Flight software engineer', responsibilities: ['Review recorded flight data'], personality: 'Patient and precise', mode: 'codex', source: { kind: 'subscription', profileId: 'fixture' }, permissions: { recoverEmployees: false, moveOwnPlan: true, managePlans: true } });
     expect(bodies[0]).not.toHaveProperty('model'); expect(bodies[0]).not.toHaveProperty('effort');
   } finally { await browser.close(); }
 });

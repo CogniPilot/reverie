@@ -382,7 +382,7 @@ describe('experts api', () => {
       expect(launches).toHaveLength(0);
       const ok = await hire('alpha', DELEGATE);
       expect(ok.statusCode).toBe(200);
-      expect(company.view().employees[0].permissions).toEqual({ recoverEmployees: false });
+      expect(company.view().employees[0].permissions).toEqual({ recoverEmployees: false, moveOwnPlan: false, managePlans: false });
     });
 
     it('refuses the third hire in 24 hours with 409 and creates nothing', async () => {

@@ -239,7 +239,7 @@ describe('Company is one page for plans and people', () => {
     await handle.flush();
     expect(writes).toEqual([{
       path: '/api/company/employees/' + employee.id,
-      options: { method: 'PUT', body: { sleepEnabled: false, dreamEnabled: false, permissions: { recoverEmployees: true } } },
+      options: { method: 'PUT', body: { sleepEnabled: false, dreamEnabled: false, permissions: { recoverEmployees: true, moveOwnPlan: false, managePlans: false } } },
     }]);
     owner = false;
     handle.shell.closePage();

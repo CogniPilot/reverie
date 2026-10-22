@@ -368,7 +368,7 @@ describe('company HTTP ownership and expert invites', () => {
 
   it('only the owner grants or revokes employee recovery; an agent cannot grant itself permissions', async () => {
     const employee = await service.hire({ ...hireBody, position: 'CTO' });
-    expect(employee.permissions).toEqual({ recoverEmployees: false });
+    expect(employee.permissions).toEqual({ recoverEmployees: false, moveOwnPlan: false, managePlans: false });
     const url = `/api/company/employees/${employee.id}`;
     const payload = { permissions: { recoverEmployees: true } };
     for (const sessionId of ['expert-session', 'parent-session', 'stale-agent', '']) {
@@ -395,7 +395,7 @@ describe('company HTTP ownership and expert invites', () => {
       expect.objectContaining({
         action: 'employee_update',
         detail: expect.objectContaining({
-          permissions: { from: { recoverEmployees: false }, to: { recoverEmployees: true } },
+          permissions: { from: { recoverEmployees: false, moveOwnPlan: false, managePlans: false }, to: { recoverEmployees: true, moveOwnPlan: false, managePlans: false } },
         }),
       })
     );

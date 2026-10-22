@@ -65,6 +65,10 @@ const AGENT_ROUTES = new Set([
   // Private one-time approval credentials plus the exact current employee binding are checked by these handlers.
   'POST /api/plans/requests/:id/approve',
   'POST /api/plans/requests/:id/reject',
+  'POST /api/plans/agent-requests', // handler checks exact employee and explicit plan permission
+  'POST /api/plans/agent-requests/:id/status',
+  'POST /api/plans/agent-requests/:id/cancel',
+  'POST /api/plans/agent-requests/:id/reauthorize',
   'POST /api/company/self',
   'POST /api/company/self/avatar',
   'DELETE /api/company/self/avatar',
@@ -243,7 +247,7 @@ export function registerOwnerPolicy(app: FastifyInstance, deps: PolicyDeps): voi
   // dropped (the caller's own header then names the parent), not an error.
   app.addHook('preHandler', async (req: FastifyRequest, reply: FastifyReply) => {
     if (consumeDelegatedSessionCreate(req) === false)
-      return reply.code(403).send(createErrorResponse(ApiErrorCode.FORBIDDEN, 'The delegated hire authorization changed or the session request did not match'));
+      return reply.code(403).send(createErrorResponse(ApiErrorCode.FORBIDDEN, 'The delegated session authorization changed or the session request did not match'));
     const policy = deps.service.policy();
     const caller = callers.get(req);
     if (policy === 'off' || caller?.kind !== 'agent') return;

@@ -14,7 +14,8 @@ export function registerPlanRequestRoutes(
   requests: PlanMoveRequests,
   ctx: Pick<AuthPort, 'authSessions'> & Pick<SessionPort, 'sessions'>,
   ownerAuth: Pick<OwnerAuthService, 'session'> | undefined,
-  capture: (request: FastifyRequest) => PlanRequestExecution
+  capture: (request: FastifyRequest) => PlanRequestExecution,
+  agentCapture?: (request: FastifyRequest, input: { employeeId: string; sessionId: string }) => PlanRequestExecution | undefined
 ): void {
   const failure = (reply: FastifyReply, error: unknown) => {
     if (!(error instanceof PlanMoveError)) throw error;
@@ -31,6 +32,32 @@ export function registerPlanRequestRoutes(
         )
       );
   };
+  const agentInput = z.object({ id: PlanRequestId, employeeId: PlanRequestId, sessionId: PlanRequestId, toAccount: PlanRequestId }).strict();
+  const agentExecution = (request: FastifyRequest, input: { employeeId: string; sessionId: string }) => {
+    const execution = agentCapture?.(request, input);
+    if (!execution?.authorized()) throw new PlanMoveError('This expert needs Move own plan or Manage team plans permission from the owner', 403);
+    return execution;
+  };
+  app.post('/api/plans/agent-requests', async (request, reply) => {
+    reply.header('Cache-Control', 'no-store');
+    const input = parseBody(agentInput, request.body);
+    try {
+      const execution = agentExecution(request, input);
+      return reply.code(202).send({ success: true, data: await requests.create(input, ownerFor(request), execution) });
+    } catch (error) { return failure(reply, error); }
+  });
+  for (const action of ['status', 'cancel', 'reauthorize'] as const)
+    app.post<{ Params: { id: string } }>(`/api/plans/agent-requests/:id/${action}`, async (request, reply) => {
+      reply.header('Cache-Control', 'no-store');
+      try {
+        const id = PlanRequestId.parse(request.params.id), owner = ownerFor(request);
+        const record = await requests.get(id, owner);
+        const execution = agentExecution(request, { employeeId: record.employeeId, sessionId: record.newSession ?? record.sessionId });
+        const data = action === 'cancel' ? await requests.cancel(id, owner)
+          : action === 'reauthorize' ? await requests.reauthorize(id, owner, execution) : record;
+        return { success: true, data };
+      } catch (error) { return failure(reply, error); }
+    });
   app.register(async (routes) => {
     routes.addHook('preHandler', async (request, reply) => {
       reply.header('Cache-Control', 'no-store');
