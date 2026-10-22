@@ -28,9 +28,9 @@ IMAGE-REF.txt records the commit, version and Docker image ID. The archive loads
 both ghcr.io/jgoppert/reverie:latest and ghcr.io/jgoppert/reverie:X.Y.Z.
 Docker volumes reverie-data and reverie-home retain state across restarts.
 Do not remove these volumes to upgrade. On first start with network access the
-container installs the Claude Code, Codex and opencode CLIs in the background
-(without network it skips them; a provider is prepared again when first used).
-Each needs your own provider login and license.
+container installs its supported provider CLIs in the background (without
+network it skips them; a provider is prepared again when first used). Each
+needs your own provider login and license.
 
 ## Alternative: run the image from GHCR
 
