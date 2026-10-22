@@ -60,6 +60,15 @@ class UpdateScriptTests(unittest.TestCase):
             script = self.bin/command
             script.write_text('#!'+sys.executable+'\n'+FAKE)
             script.chmod(0o700)
+        if os.environ.get('NIX_BUILD_TOP'):
+            # A Nix sandbox may also make / private to its build group. Model
+            # the host root as traversable; retain real permission checks on
+            # every fixture directory, including the deliberately private one.
+            stat = self.bin/'stat'
+            stat.write_text('#!'+sys.executable+'\nimport os, sys\n'
+                'if sys.argv[1:] == ["-c", "%a", "/"]: print("755")\n'
+                f'else: os.execv({shutil.which("stat")!r}, [{shutil.which("stat")!r}, *sys.argv[1:]])\n')
+            stat.chmod(0o700)
         self.env = {**os.environ, 'PATH': str(self.bin)+os.pathsep+os.environ['PATH'],
             'UPDATE_TEST_ROOT': str(self.root), 'REVERIE_REPO': str(self.repo),
             'REVERIE_CONTROL_DIR': str(self.root/'control'), 'REVERIE_UPDATE_BUILD_DIR': str(self.root/'build'),
