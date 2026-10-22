@@ -72,8 +72,11 @@ def other(now): return session("Other", "o1", now)
 class RoutinesTests(unittest.TestCase):
     def setUp(self):
         # A per-test alarm: a hang fails that test fast instead of stalling the run (review: M5 was caught only by timeout).
-        def hung(signum, frame): raise TimeoutError("test took over 30 s")
-        previous = signal.signal(signal.SIGALRM, hung); signal.alarm(30)
+        # The 864-tick cap test performs thousands of durable SQLite commits. Its
+        # assertions check delivery limits, not disk throughput on a busy builder.
+        timeout = 120 if self._testMethodName == "test_flood_of_ticks_never_types_more_than_the_call_caps" else 30
+        def hung(signum, frame): raise TimeoutError(f"test took over {timeout} s")
+        previous = signal.signal(signal.SIGALRM, hung); signal.alarm(timeout)
         self.addCleanup(lambda: (signal.alarm(0), signal.signal(signal.SIGALRM, previous)))
         self.temp = tempfile.TemporaryDirectory(); self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
