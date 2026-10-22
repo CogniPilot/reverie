@@ -147,14 +147,20 @@ fi
 
 if [ "$dry" = 0 ]; then
   # Wait for the console; never report success for a server that did not come up.
+  # Without curl, speak HTTP over bash's /dev/tcp: a bare TCP connect is not enough, because
+  # the engine's port proxy accepts connections before the server inside is listening.
+  http_code() {
+    if command -v curl >/dev/null 2>&1; then
+      curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$port/api/status" || true
+    else
+      ( exec 3<>"/dev/tcp/127.0.0.1/$port" || exit
+        printf 'GET /api/status HTTP/1.0\r\nHost: 127.0.0.1\r\n\r\n' >&3
+        IFS=' ' read -r -t 5 _ status _ <&3 && printf '%s' "$status" ) 2>/dev/null || true
+    fi
+  }
   up=0
   for _ in $(seq 1 90); do
-    if command -v curl >/dev/null 2>&1; then
-      code=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$port/api/status" || true)
-      case "$code" in 2??|401) up=1; break ;; esac
-    elif (exec 3<>"/dev/tcp/127.0.0.1/$port") 2>/dev/null; then
-      up=1; break
-    fi
+    case "$(http_code)" in 2??|401) up=1; break ;; esac
     [ "$("$engine" container inspect --format '{{.State.Running}}' "$name" 2>/dev/null)" = true ] || break
     sleep 2
   done

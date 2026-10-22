@@ -230,7 +230,7 @@ if args[0] == "container" and os.environ.get("MISSING_CONTAINER"):
                 self.assertEqual(result.returncode, 2)
                 self.assertEqual(self.calls(), [])
 
-    def test_offline_has_no_host_curl_or_nix_requirement(self):
+    def run_without_curl(self, respond):
         (self.bin / "curl").unlink()
         for name in ("mkdir", "tail", "cat", "grep", "id", "seq"):
             (self.bin / name).symlink_to(Path(shutil.which(name)))
@@ -238,12 +238,26 @@ if args[0] == "container" and os.environ.get("MISSING_CONTAINER"):
             listener.bind(("127.0.0.1", 0))
             listener.listen()
             listener.settimeout(10)
-            thread = threading.Thread(target=lambda: listener.accept()[0].close())
+            thread = threading.Thread(target=lambda: respond(listener.accept()[0]))
             thread.start()
             result = self.run_setup("--offline", "--port", str(listener.getsockname()[1]), base_tools=False)
             thread.join(timeout=10)
+        return result
+
+    def test_offline_has_no_host_curl_or_nix_requirement(self):
+        def answer(conn):
+            with conn:
+                conn.recv(1024)
+                conn.sendall(b"HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\n\r\n")
+        result = self.run_without_curl(answer)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("--pull=never", next(call for call in self.calls() if call[0] == "run"))
+
+    def test_open_port_without_http_answer_is_not_success(self):
+        # The engine's port proxy accepts connections before the server inside is listening.
+        result = self.run_without_curl(lambda conn: conn.close())
+        self.assertNotEqual(result.returncode, 0)
+        self.assertNotIn("Reverie is running:", result.stdout)
 
     def test_unusable_engine_reports_debian_remediation(self):
         result = self.run_setup("--offline", values={"INFO_FAIL": "1"})
