@@ -46,7 +46,10 @@ elif args[0] not in ['load', 'tag']: sys.exit('unexpected '+repr(args))
 @unittest.skipUnless(shutil.which('jq') and shutil.which('flock'), 'host updater requires jq and flock')
 class UpdateScriptTests(unittest.TestCase):
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
+        # The updater checks that host Nix build users can traverse every
+        # ancestor. Nix's own /build is private, so these host-path fixtures
+        # belong in the sandbox's public temporary directory instead.
+        self.tmp = tempfile.TemporaryDirectory(dir='/tmp' if os.environ.get('NIX_BUILD_TOP') else None)
         self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name)
         self.root.chmod(0o755)
