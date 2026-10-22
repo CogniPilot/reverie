@@ -5,6 +5,7 @@ import { mkdtemp, mkdir, writeFile, readFile, rm, stat } from "node:fs/promises"
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { execFileSync } from "node:child_process";
+const NODE_SHEBANG = '#!' + process.execPath + '\n';
 process.env.PYTHONPATH = join(resolve(import.meta.dirname, ".."), "python");
 
 // Never read a live instance: a shell inside an agent container exports its memory paths.
@@ -96,7 +97,7 @@ test("Research cycles mark activity without registering a primary runtime, recor
     const root = resolve(import.meta.dirname, "..");
     const requests = join(dir, "requests.jsonl");
     const bridge = join(dir, "bridge");
-    await writeFile(bridge, '#!/usr/bin/env node\n' +
+    await writeFile(bridge, NODE_SHEBANG +
       'const fs = require("node:fs"); let input = ""; process.stdin.on("data", part => input += part);\n' +
       'process.stdin.on("end", () => { fs.appendFileSync(process.env.REVERIE_TEST_REQUESTS, input + "\\n"); process.stdout.write("{}"); });\n', {mode: 0o700});
     Object.assign(process.env, { REVERIE_RESEARCH_CYCLE_ID: "research-cycle", REVERIE_TEST_REQUESTS: requests });
@@ -138,7 +139,7 @@ test("A refused turn is logged and skipped, later turns still record, and each i
     const root = resolve(import.meta.dirname, "..");
     const requests = join(dir, "requests.jsonl");
     const bridge = join(dir, "bridge");
-    await writeFile(bridge, '#!/usr/bin/env node\n' +
+    await writeFile(bridge, NODE_SHEBANG +
       'const fs = require("node:fs"); let input = ""; process.stdin.on("data", part => input += part);\n' +
       'process.stdin.on("end", () => { const r = JSON.parse(input); fs.appendFileSync(process.env.REVERIE_TEST_REQUESTS, input + "\\n");\n' +
       '  if (r.action === "record" && r.reply.includes("REFUSE")) { process.stderr.write("reply crossed a hard floor"); process.exit(1); }\n' +
@@ -187,7 +188,7 @@ test("reverie_room targets the room a message came from, takes an explicit room,
     const calls = join(dir, "calls.jsonl");
     const bin = join(dir, "bin"); await mkdir(bin);
     // A fake `reverie` CLI that records its arguments: the tool must pass --room, never run a shell.
-    await writeFile(join(bin, "reverie"), '#!/usr/bin/env node\n' +
+    await writeFile(join(bin, "reverie"), NODE_SHEBANG +
       'require("node:fs").appendFileSync(process.env.REVERIE_TEST_CALLS, JSON.stringify(process.argv.slice(2)) + "\\n"); process.stdout.write("ok");\n', {mode: 0o700});
     Object.assign(process.env, { PATH: bin + ":" + process.env.PATH, REVERIE_TEST_CALLS: calls, REVERIE_CYCLE_MANAGED: "1" });
     await writeFile(join(dir, ".reverie-instance"), JSON.stringify({ python: "python3", source: join(root, "python") }));
@@ -256,11 +257,11 @@ test("The reply guard relays an unposted reply only to rooms the delivery named,
     const root = resolve(import.meta.dirname, "..");
     const calls = join(dir, "calls.jsonl");
     const bin = join(dir, "bin"); await mkdir(bin);
-    await writeFile(join(bin, "reverie"), '#!/usr/bin/env node\n' +
+    await writeFile(join(bin, "reverie"), NODE_SHEBANG +
       'const args = process.argv.slice(2); require("node:fs").appendFileSync(process.env.REVERIE_TEST_CALLS, JSON.stringify(args) + "\\n");\n' +
       'if (args.includes("broken room")) { process.stderr.write("room unavailable"); process.exit(1); } process.stdout.write("ok");\n', {mode: 0o700});
     const bridge = join(dir, "bridge");
-    await writeFile(bridge, '#!/usr/bin/env node\nprocess.stdin.resume(); process.stdin.on("end", () => process.stdout.write("{}"));\n', {mode: 0o700});
+    await writeFile(bridge, NODE_SHEBANG + 'process.stdin.resume(); process.stdin.on("end", () => process.stdout.write("{}"));\n', {mode: 0o700});
     Object.assign(process.env, { PATH: bin + ":" + process.env.PATH, REVERIE_TEST_CALLS: calls });
     await writeFile(join(dir, ".reverie-instance"), JSON.stringify({ python: bridge, source: join(root, "python"), cycle_managed: true, reply_guard: "post", reply_guard_grace_ms: 40, reply_guard_coding_ms: 400 }));
     const source = (await readFile(join(root, "python/reverie/plugins/reverie.mjs"), "utf8")).replace(
@@ -402,10 +403,10 @@ test("Delivery-format contract, DM privacy, the turn clock and the web taint", a
     const root = resolve(import.meta.dirname, "..");
     const calls = join(dir, "calls.jsonl");
     const bin = join(dir, "bin"); await mkdir(bin);
-    await writeFile(join(bin, "reverie"), '#!/usr/bin/env node\n' +
+    await writeFile(join(bin, "reverie"), NODE_SHEBANG +
       'require("node:fs").appendFileSync(process.env.REVERIE_TEST_CALLS, JSON.stringify(process.argv.slice(2)) + "\\n"); process.stdout.write("ok");\n', {mode: 0o700});
     const bridge = join(dir, "bridge");
-    await writeFile(bridge, '#!/usr/bin/env node\nprocess.stdin.resume(); process.stdin.on("end", () => process.stdout.write("\\"context\\""));\n', {mode: 0o700});
+    await writeFile(bridge, NODE_SHEBANG + 'process.stdin.resume(); process.stdin.on("end", () => process.stdout.write("\\"context\\""));\n', {mode: 0o700});
     Object.assign(process.env, { PATH: bin + ":" + process.env.PATH, REVERIE_TEST_CALLS: calls });
     await writeFile(join(dir, ".reverie-instance"), JSON.stringify({ python: bridge, source: join(root, "python"), cycle_managed: true,
       reply_guard: "post", reply_guard_grace_ms: 40, reply_guard_coding_ms: 400, timezone: "America/New_York" }));
@@ -510,10 +511,10 @@ test("By default the reply guard logs an unposted final text instead of posting 
     const root = resolve(import.meta.dirname, "..");
     const calls = join(dir, "calls.jsonl");
     const bin = join(dir, "bin"); await mkdir(bin);
-    await writeFile(join(bin, "reverie"), '#!/usr/bin/env node\n' +
+    await writeFile(join(bin, "reverie"), NODE_SHEBANG +
       'require("node:fs").appendFileSync(process.env.REVERIE_TEST_CALLS, JSON.stringify(process.argv.slice(2)) + "\\n"); process.stdout.write("ok");\n', {mode: 0o700});
     const bridge = join(dir, "bridge");
-    await writeFile(bridge, '#!/usr/bin/env node\nprocess.stdin.resume(); process.stdin.on("end", () => process.stdout.write("{}"));\n', {mode: 0o700});
+    await writeFile(bridge, NODE_SHEBANG + 'process.stdin.resume(); process.stdin.on("end", () => process.stdout.write("{}"));\n', {mode: 0o700});
     Object.assign(process.env, { PATH: bin + ":" + process.env.PATH, REVERIE_TEST_CALLS: calls });
     await writeFile(join(dir, ".reverie-instance"), JSON.stringify({ python: bridge, source: join(root, "python"), cycle_managed: true, reply_guard_grace_ms: 40, reply_guard_coding_ms: 400 }));
     const source = (await readFile(join(root, "python/reverie/plugins/reverie.mjs"), "utf8")).replace(

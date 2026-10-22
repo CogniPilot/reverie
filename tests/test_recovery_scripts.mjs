@@ -10,9 +10,11 @@ for (const key of Object.keys(process.env)) {
   if (key.startsWith("REVERIE_")) delete process.env[key];
 }
 const scripts = resolve(import.meta.dirname, "..", "scripts");
+const BASH = spawnSync("bash", ["-c", "command -v bash"], { encoding: "utf8" }).stdout.trim();
+assert.ok(BASH.startsWith("/"), "The recovery fixtures require an available Bash interpreter");
 
 // A launcher stand-in: logs every call; the build snapshot records what the context held.
-const FAKE_LAUNCHER = `#!/usr/bin/env bash
+const FAKE_LAUNCHER = `#!${BASH}
 log="$(dirname "$0")/calls"
 case "$1" in
   memory-default) echo 8g ;;
@@ -218,7 +220,7 @@ test("restore: never replaces the OpenCode DB under a running OpenCode; applies 
 test("engine storage defaults outside scratch, is printed, and REVERIE_SCRATCH still overrides", () => {
   const root = mkdtempSync(join(tmpdir(), "reverie-storage-"));
   const fake = join(root, "podman");
-  writeFileSync(fake, `#!/usr/bin/env bash
+  writeFileSync(fake, `#!${BASH}
 echo "$*" >> "$(dirname "$0")/podman.log"
 case "$*" in *"info --format"*) echo true ;; *"container exists"*) exit 1 ;; esac
 `);

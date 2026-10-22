@@ -137,7 +137,10 @@ try {
               assert.match(text, /YOLO mode/, 'Managed Codex did not retain full access');
               assert.match(text, /^›\s+\S/m, 'Managed Codex has no composer');
             } else assert.equal(trustDialog, true, 'Trust regression fixture failed to reproduce the startup dialog');
-            assert.equal(readFileSync(join(fixtureHome, '.codex/config.toml'), 'utf8'), trustConfig, 'Startup changed saved trust');
+            const savedConfig = readFileSync(join(fixtureHome, '.codex/config.toml'), 'utf8');
+            // Codex may persist unrelated TUI detection preferences. Only this project's saved trust must remain unchanged.
+            assert.ok(savedConfig.includes(trustConfig.trim()), 'Startup changed the project trust setting');
+            assert.doesNotMatch(savedConfig, /trust_level\s*=\s*"trusted"/, 'Startup persisted managed trust into the user profile');
             resolve();
           } catch (error) { reject(error); }
           finally { screen.dispose(); }

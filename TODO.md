@@ -19,6 +19,7 @@ Updated as work is tested and deployed. Existing backups must remain intact.
 - [x] Prompt for the owner's display name on first use; preserve the existing profile editor.
 - [x] Install pinned Claude and Codex CLIs into persistent user storage at startup; both verified signed in after replacement.
 - [x] Finish OpenCode CLI installation compatibility; all three provider commands verified runnable, with no provider CLIs distributed in the image.
+- [x] Update installed Codex to 0.163.0 and Claude Code to 2.1.308; verify native startup, updater suppression, project trust and preservation of existing account configuration.
 - [x] Replace the existing-session hiring picker with plan, model, effort and harness selection; deployed for owner testing.
 - [x] Surface local model endpoint selection with compatible owner-configured harnesses.
 - [x] Add a way to delete a workspace/channel grouping while preserving channels and messages.
