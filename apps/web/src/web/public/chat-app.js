@@ -923,8 +923,15 @@ function caIconImage(icon, urlFn) {
   return '';
 }
 
+function caDiskBytes(value) {
+  const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB', 'PiB'];
+  let size = Number(value), unit = 0;
+  while (size >= 1024 && unit < units.length - 1) { size /= 1024; unit++; }
+  return `${size.toFixed(unit ? 1 : 0)} ${units[unit]}`;
+}
+
 /**
- * The numbers for the CPU / memory / GPU readout from GET /api/system/stats and GET /api/system/gpu: a list of
+ * The numbers for the CPU / memory / GPU / disk readout from GET /api/system/stats and GET /api/system/gpu: a list of
  * { key, label, value (a percentage), title, level } where level is ok, warn (>= 70) or high (>= 90). The GPU is
  * left out when the host publishes no fresh reading.
  */
@@ -946,6 +953,14 @@ function caStatsView(stats) {
   if (gpu !== null) {
     const vram = Number(s.gpu.memoryTotalMb) > 0 ? `, memory ${gb(s.gpu.memoryUsedMb)} of ${gb(s.gpu.memoryTotalMb)}` : '';
     out.push({ key: 'gpu', label: 'GPU', value: gpu, title: `GPU ${gpu}%${vram}`, level: level(gpu) });
+  }
+  const filesystems = s.disks?.available === true && Array.isArray(s.disks.filesystems) ? s.disks.filesystems.slice(0, 8).filter(fs =>
+    fs && Number.isFinite(fs.totalBytes) && fs.totalBytes > 0 && Number.isFinite(fs.availableBytes) && fs.availableBytes >= 0 && fs.availableBytes <= fs.totalBytes && Array.isArray(fs.labels) && fs.labels.some(label => typeof label === 'string' && label.trim())
+  ).map(fs => ({ ...fs, labels: fs.labels.filter(label => typeof label === 'string' && label.trim()).map(label => label.slice(0, 60)), usedBytes: fs.totalBytes - fs.availableBytes, percentUsed: Math.round(100 * (fs.totalBytes - fs.availableBytes) / fs.totalBytes) })) : [];
+  if (filesystems.length) {
+    const value = Math.max(...filesystems.map(fs => fs.percentUsed));
+    const details = filesystems.map(fs => `${fs.labels.join(' · ')}: ${caDiskBytes(fs.usedBytes)} used, ${caDiskBytes(fs.availableBytes)} available, ${caDiskBytes(fs.totalBytes)} capacity`).join('\n');
+    out.push({ key: 'disk', label: 'DISK', value, title: `Disk ${value}% · highest filesystem usage\n${details}`, level: level(value), filesystems });
   }
   return out;
 }
@@ -1210,7 +1225,7 @@ class ReverieChatApp {
     this.toast('Press and hold a message for reactions, reply and more', 'info');
   }
 
-  /* ── CPU / memory / GPU readout ── */
+  /* ── CPU / memory / GPU / disk readout ── */
 
   /** Start polling the machine's load and the host's GPU reading (every 5 s while the page is visible). */
   startStats() {
@@ -1219,7 +1234,7 @@ class ReverieChatApp {
     const tick = async () => {
       if (this.doc.visibilityState === 'hidden') return;
       const res = await this.app._chatApi('/api/system/stats');
-      if (res.ok) this.stats = { ...this.stats, cpu: res.data?.cpu, memory: res.data?.memory };
+      if (res.ok) this.stats = { ...this.stats, cpu: res.data?.cpu, memory: res.data?.memory, disks: res.data?.disks };
       // A small file read on the server; an older server without the route simply shows no GPU.
       const gpu = await this.app._chatApi('/api/system/gpu');
       this.stats = { ...this.stats, gpu: gpu.ok ? gpu.data : undefined };
@@ -1243,9 +1258,12 @@ class ReverieChatApp {
       box.replaceChildren();
       box.hidden = !view.length;
       for (const item of view) {
-        const chip = this.el('span', `ca-stat is-${item.level}`);
+        const chip = this.el(item.key === 'disk' ? 'button' : 'span', `ca-stat is-${item.level}`);
         chip.title = item.title;
-        chip.setAttribute('role', 'img');
+        if (item.key === 'disk') {
+          chip.type = 'button'; chip.dataset.stat = 'disk';
+          chip.addEventListener('click', () => this.openDiskDetails(item.filesystems));
+        } else chip.setAttribute('role', 'img');
         chip.setAttribute('aria-label', item.title);
         const bar = this.el('span', 'ca-stat-bar');
         bar.style.setProperty('--v', `${item.value}%`);
@@ -1253,6 +1271,26 @@ class ReverieChatApp {
         box.append(chip);
       }
     }
+  }
+
+  openDiskDetails(filesystems) {
+    this.doc.querySelector('.ca-disk-dialog')?.close();
+    const dialog = this.el('dialog', 'ca-dialog ca-disk-dialog'); dialog.setAttribute('aria-label', 'Disk usage');
+    dialog.append(this.el('h2', '', 'Disk usage'), this.el('p', 'ca-dialog-note', 'Whole filesystem capacity for the locations Reverie uses. Locations sharing a filesystem appear together. Used includes reserved space.'));
+    const list = this.el('dl', 'ca-disk-filesystems');
+    for (const fs of filesystems) {
+      const row = this.el('div');
+      row.append(this.literalText('dt', '', fs.labels.join(' · ')));
+      const detail = this.el('dd');
+      const meter = this.el('progress'); meter.max = 100; meter.value = fs.percentUsed; meter.setAttribute('aria-label', `${fs.labels.join(', ')} ${fs.percentUsed}% used`);
+      detail.append(this.el('strong', '', `${fs.percentUsed}% used`), meter, this.el('span', '', `${caDiskBytes(fs.usedBytes)} used · ${caDiskBytes(fs.availableBytes)} available · ${caDiskBytes(fs.totalBytes)} capacity`));
+      row.append(detail); list.append(row);
+    }
+    const close = this.button('ca-btn', 'Close disk usage', () => dialog.close(), { text: 'Close' });
+    dialog.append(list, close);
+    dialog.addEventListener('cancel', event => { event.preventDefault(); dialog.close(); });
+    dialog.addEventListener('close', () => { dialog.remove(); this.els.stats?.querySelector('[data-stat="disk"]')?.focus(); });
+    this.doc.body.append(dialog); dialog.showModal(); close.focus();
   }
 
   /** The instance's configured owner name (company settings), the default for how you are called. */
@@ -5816,29 +5854,32 @@ class ReverieChatApp {
     let loading = false;
     const load = async () => {
       try {
-        const response = await this.doc.defaultView.fetch('/assets/company-logos/pack-manifest.json');
+        const response = await this.doc.defaultView.fetch('/assets/company-logos/pack-manifest.json', { cache: 'no-cache' });
         if (!response.ok) return;
         const manifest = await response.json();
         if (manifest.version !== 1 || !Array.isArray(manifest.logos)) return;
+        const revision = manifest.revision === undefined ? '1' : manifest.revision;
+        if (typeof revision !== 'string' || !/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,79}$/.test(revision)) return;
         const seen = new Set();
         for (const logo of manifest.logos.slice(0, 100)) {
           if (!logo || !/^company-(?:0[1-9]|1[0-2])$/.test(logo.id) ||
               logo.src !== `/assets/company-logos/${logo.id}.png` ||
               typeof logo.name !== 'string' || !logo.name.trim() || logo.name.length > 80 || seen.has(logo.id)) continue;
           seen.add(logo.id);
+          const src = `${logo.src}?rev=${encodeURIComponent(revision)}`;
           const button = this.el('button', 'ca-btn');
           button.type = 'button';
           button.setAttribute('aria-label', `Use ${logo.name} logo`);
           button.title = logo.name;
           const image = this.el('img');
-          image.src = logo.src; image.alt = ''; image.loading = 'lazy';
+          image.src = src; image.alt = ''; image.loading = 'lazy';
           image.width = image.height = 56;
           button.append(image);
           button.addEventListener('click', async () => {
             if (loading || picture.pending()) return;
             loading = true; button.disabled = true;
             try {
-              const selected = await this.doc.defaultView.fetch(logo.src);
+              const selected = await this.doc.defaultView.fetch(src);
               if (!selected.ok) throw new Error('Logo unavailable');
               const value = await this.imageToIcon(await selected.blob());
               picture.set(value);

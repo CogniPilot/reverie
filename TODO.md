@@ -37,10 +37,12 @@ Updated as work is tested and deployed. Existing backups must remain intact.
 - [ ] Refine medium-sized plan cards, remove plot labels, and replace the legacy research/settings panel.
 - [ ] Left-click an expert to edit runtime Plan, Harness (including registered custom harnesses), Model and Effort; validate compatibility and preserve identity, memories, photos and room membership.
 - [ ] Recover Alex's runtime after upgrading OpenCode and checking that the selected subscription model is actually used.
+- [ ] Add a compact disk gauge with capacity details for company data, workspace and scratch mounts.
+- [ ] Verify a complete Claude conversation through the managed harness, independently of provider sign-in and usage retrieval.
 - [ ] Let additional humans register and appear alongside agents in company people, with explicit roles and permissions.
 - [x] Deploy the consolidated root skills and removal of legacy console Docker/plugin packaging.
 - [ ] Finish first-run bootstrap checks: editable deployment defaults, source/config access off by default, multiple mounts supported.
-- [x] Actual Ubuntu CI passed Nix builds, login, persistence and crash restart for `6bff236`; rerun browser-first signup checks for the next commit.
+- [x] Actual Ubuntu CI passed Nix builds, login, persistence and crash restart for `394dc27`; repeat for subsequent runtime changes.
 - [x] Verify no generated caches, credentials or private instance data are committed.
 
 ## Machine cleanup requiring ordinary host activation

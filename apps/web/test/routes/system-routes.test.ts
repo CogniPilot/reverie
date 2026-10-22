@@ -14,6 +14,12 @@ import { registerSystemRoutes } from '../../src/web/routes/system-routes.js';
 
 // ── Mocks ──────────────────────────────────────────────────────────
 
+vi.mock('../../src/disk-stats.js', () => ({
+  getDiskStats: vi.fn(async () => ({ available: true, filesystems: [
+    { labels: ['Company data', 'Workspace'], totalBytes: 1000, usedBytes: 800, availableBytes: 200, percentUsed: 80 },
+  ] })),
+}));
+
 vi.mock('node:fs/promises', () => ({
   default: {
     readFile: vi.fn(async () => '{}'),
@@ -325,6 +331,7 @@ describe('system-routes', () => {
       const body = JSON.parse(res.body);
       expect(body).toHaveProperty('cpu');
       expect(body).toHaveProperty('memory');
+      expect(body.disks).toMatchObject({ available: expect.any(Boolean), filesystems: expect.any(Array) });
     });
   });
 

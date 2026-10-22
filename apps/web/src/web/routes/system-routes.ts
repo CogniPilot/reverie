@@ -14,6 +14,7 @@ import { execSync, spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { dataPath } from '../../config/instance.js';
 import { gpuStatusFiles, readHostGpuFrom } from '../../host-gpu.js';
+import { getDiskStats } from '../../disk-stats.js';
 import { ApiErrorCode, createErrorResponse, getErrorMessage, type NiceConfig } from '../../types.js';
 import { isUnauthenticatedNetworkAcknowledged } from '../network-auth-policy.js';
 import { isMultiUserMode } from '../../config/multiuser.js';
@@ -931,7 +932,7 @@ export function registerSystemRoutes(
   // ========== System Stats ==========
 
   app.get('/api/system/stats', async () => {
-    return getSystemStats();
+    return { ...getSystemStats(), disks: await getDiskStats() };
   });
 
   // GPU load as published by the host (src/host-gpu.ts); `available: false` when nothing fresh is published.

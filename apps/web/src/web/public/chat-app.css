@@ -1021,6 +1021,14 @@ button.ca-org-node:hover, button.ca-org-node:focus-visible { background: var(--c
 .ca-stat-bar::after { content: ''; position: absolute; inset: 0 auto 0 0; width: var(--v, 0%); background: var(--green, #3ba55d); }
 .ca-stat.is-warn .ca-stat-bar::after { background: var(--yellow, #e6b800); }
 .ca-stat.is-high .ca-stat-bar::after { background: var(--red, #e5484d); }
+button.ca-stat { border:0; font:inherit; cursor:pointer; text-align:left; }
+button.ca-stat:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+.ca-disk-dialog { margin:auto; width:min(560px,calc(100vw - 32px)); max-width:none; max-height:85dvh; overflow:auto; box-sizing:border-box; }
+.ca-disk-dialog h2 { margin:0 0 8px; font-size:20px; }
+.ca-disk-filesystems { display:grid; gap:16px; margin:20px 0; }
+.ca-disk-filesystems dt { margin-bottom:6px; font-size:13px; font-weight:600; }
+.ca-disk-filesystems dd { margin:0; display:grid; gap:6px; font-size:12px; color:var(--text-dim); }
+.ca-disk-filesystems progress { width:100%; height:8px; accent-color:var(--accent); }
 
 /* ── org chart: former workers ── */
 .ca-root .ca-org-former > summary { cursor: pointer; color: var(--text-dim); }
