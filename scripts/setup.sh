@@ -155,12 +155,14 @@ if [ "$dry" = 0 ]; then
     else
       ( exec 3<>"/dev/tcp/127.0.0.1/$port" || exit
         printf 'GET /api/status HTTP/1.0\r\nHost: 127.0.0.1\r\n\r\n' >&3
-        IFS=' ' read -r -t 5 _ status _ <&3 && printf '%s' "$status" ) 2>/dev/null || true
+        IFS=' ' read -r -t 5 proto status _ <&3 || exit
+        case "$proto" in HTTP/1.[01]) ;; *) exit ;; esac
+        case "$status" in [0-9][0-9][0-9]) printf '%s' "$status" ;; esac ) 2>/dev/null || true
     fi
   }
   up=0
   for _ in $(seq 1 90); do
-    case "$(http_code)" in 2??|401) up=1; break ;; esac
+    case "$(http_code)" in 2[0-9][0-9]|401) up=1; break ;; esac
     [ "$("$engine" container inspect --format '{{.State.Running}}' "$name" 2>/dev/null)" = true ] || break
     sleep 2
   done

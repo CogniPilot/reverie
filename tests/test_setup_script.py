@@ -253,6 +253,21 @@ if args[0] == "container" and os.environ.get("MISSING_CONTAINER"):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("--pull=never", next(call for call in self.calls() if call[0] == "run"))
 
+    def assert_status_line_refused(self, line):
+        def answer(conn):
+            with conn:
+                conn.recv(1024)
+                conn.sendall(line)
+        result = self.run_without_curl(answer)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertNotIn("Reverie is running:", result.stdout)
+
+    def test_non_http_protocol_is_not_success(self):
+        self.assert_status_line_refused(b"garbage 200 whatever\r\n\r\n")
+
+    def test_non_numeric_status_is_not_success(self):
+        self.assert_status_line_refused(b"HTTP/1.1 2xx Nope\r\n\r\n")
+
     def test_open_port_without_http_answer_is_not_success(self):
         # The engine's port proxy accepts connections before the server inside is listening.
         result = self.run_without_curl(lambda conn: conn.close())
