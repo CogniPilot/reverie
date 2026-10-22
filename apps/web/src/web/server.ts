@@ -1,3 +1,4 @@
+import { isEmbassyProtocolRoute } from '../embassy-public-routes.js';
 import { BuiltinEmbassy } from '../embassy-builtin.js';
 import { registerBuiltinEmbassyRoutes } from './routes/embassy-builtin-routes.js';
 import { employeeRestContext, employeeProfileContext } from '../company-types.js';
@@ -966,6 +967,12 @@ export class WebServer extends EventEmitter {
     // error envelopes to a conventional HTTP status (instead of 200). Skips
     // non-JSON responses (buffers/streams) and non-/api routes.
     this.app.addHook('preSerialization', (req, reply, payload: unknown, done) => {
+      // Federation speaks its own bare wire contract, including non-2xx errors.
+      // Exempt exact registered protocol routes only; owner APIs retain the console envelope.
+      const route = req.routeOptions?.url;
+      const canonicalRoute = this.basePath && route?.startsWith(this.basePath + '/')
+        ? route.slice(this.basePath.length) : route;
+      if (isEmbassyProtocolRoute(req.method, canonicalRoute)) return done(null, payload);
       if (!req.url.startsWith('/api')) return done(null, payload);
       if (payload === null || typeof payload !== 'object') return done(null, payload);
       if (Buffer.isBuffer(payload) || typeof (payload as { pipe?: unknown }).pipe === 'function') {

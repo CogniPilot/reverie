@@ -43,8 +43,8 @@ try {
   assert.notEqual(run('exec codex --reverie-ci-unknown-option --help').status, 0, 'CLI help ignored an unknown option');
   const variants = [
     {},
-    { dangerouslyBypassApprovals: false, animations: false, model: 'gpt-5.3-codex', reasoningEffort: 'high' },
-    { dangerouslyBypassApprovals: true, animations: true, model: 'gpt-5.3-codex', reasoningEffort: 'medium' },
+    { dangerouslyBypassApprovals: false, animations: false, model: 'gpt-6.1-sol', reasoningEffort: 'high' },
+    { dangerouslyBypassApprovals: true, animations: true, model: 'gpt-6.1-sol', reasoningEffort: 'medium' },
     { resumeSessionId: '00000000-0000-4000-8000-000000000001', reasoningEffort: 'low' },
   ];
   const commands = variants.map((codexConfig, index) => buildSpawnCommandFromRegistry(entry, {
@@ -95,12 +95,18 @@ try {
     const cwd = join(root, 'work');
     mkdirSync(join(fixtureHome, '.codex'), { recursive: true });
     mkdirSync(cwd, { recursive: true });
+    assert.equal(spawnSync('git', ['init', '--quiet', cwd], { env }).status, 0, 'Trust fixture is not a Git project');
+    // An empty new directory can open without a trust gate in current Codex.
+    // Explicit saved distrust exercises the gate; the managed override must bypass it without changing this file.
+    const trustConfig = `[projects.${JSON.stringify(cwd)}]\ntrust_level = "untrusted"\n`;
+    writeFileSync(join(fixtureHome, '.codex/config.toml'), trustConfig);
     writeFileSync(join(fixtureHome, '.codex/auth.json'), JSON.stringify({
       auth_mode: 'apikey', OPENAI_API_KEY: 'ci-synthetic-not-a-real-api-key',
     }), { mode: 0o600 });
     const command = buildSpawnCommandFromRegistry(entry, {
       mode: 'codex', sessionId: '00000000-0000-4000-8000-000000000002',
-      codexConfig: { dangerouslyBypassApprovals: true },
+      // Keep the negative control in ordinary approval mode; the managed launch must retain full access.
+      codexConfig: { dangerouslyBypassApprovals: trusted },
       ...(trusted ? { codexTrustWorkspace: cwd } : {}),
     });
     await new Promise((resolve, reject) => {
@@ -124,13 +130,14 @@ try {
             const lines = [];
             for (let i = 0; i < screen.buffer.active.length; i++) lines.push(screen.buffer.active.getLine(i).translateToString(true));
             const text = lines.join('\n');
-            const trustDialog = /Do you trust the contents of this directory/i.test(text);
+            const trustDialog = /Do you trust the contents of this directory|Folder access[\s\S]*Open restricted/i.test(text);
             if (trusted) {
               assert.equal(trustDialog, false, 'Managed Codex still asks for workspace trust');
               assert.match(text, /OpenAI Codex/, 'Managed Codex did not reach its composer');
               assert.match(text, /YOLO mode/, 'Managed Codex did not retain full access');
               assert.match(text, /^›\s+\S/m, 'Managed Codex has no composer');
             } else assert.equal(trustDialog, true, 'Trust regression fixture failed to reproduce the startup dialog');
+            assert.equal(readFileSync(join(fixtureHome, '.codex/config.toml'), 'utf8'), trustConfig, 'Startup changed saved trust');
             resolve();
           } catch (error) { reject(error); }
           finally { screen.dispose(); }

@@ -57,7 +57,7 @@ let
         test/company-plans-navigation.test.ts test/company-plans-width.test.ts \
         test/plan-move-runtime.test.ts test/plan-move-routes.test.ts test/plan-move-company.test.ts test/plan-move-launch.test.ts \
         test/plan-request.test.ts test/plan-request-capability.test.ts test/plan-request-routes.test.ts test/plan-request-ui.test.ts test/plan-request-prompt.test.ts \
-        test/embassy-builtin.test.ts test/embassy-pairing-ui.test.ts \
+        test/embassy-builtin.test.ts test/embassy-protocol-server.test.ts test/embassy-pairing-ui.test.ts \
         test/disk-stats.test.ts test/disk-stats-ui.test.ts test/routes/system-routes.test.ts
       runHook postCheck
     '';
@@ -82,10 +82,11 @@ let
     pyproject = true;
     postUnpack = ''sourceRoot="$sourceRoot/python"'';
     build-system = [ pkgs.python3Packages.setuptools ];
-    nativeCheckInputs = [ pkgs.bash pkgs.coreutils pkgs.git pkgs.nodejs_22 pkgs.tmux pkgs.jq pkgs.python3Packages.pillow ];
+    nativeCheckInputs = [ pkgs.bash pkgs.coreutils pkgs.git pkgs.nodejs_22 pkgs.tmux pkgs.jq (lib.getBin pkgs.util-linux) pkgs.python3Packages.pillow ];
     postPatch = "patchShebangs ../scripts ../docker ../.github/ci";
     checkPhase = ''
       (cd ..; PYTHONPATH="$PWD/python" PYTHONWARNINGS=ignore::ResourceWarning python -m unittest discover -s tests -t .)
+      (cd ..; node --test tests/test_cli_installer.mjs tests/test_reverie_start.mjs tests/test_recovery_scripts.mjs tests/test_opencode_plugin.mjs)
     '';
   };
   memory = pkgs.python3.withPackages (ps: [ memoryPackage ps.pillow ]);

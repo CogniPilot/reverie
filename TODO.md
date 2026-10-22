@@ -38,12 +38,17 @@ Updated as work is tested and deployed. Existing backups must remain intact.
 - [x] Left-click an expert to edit runtime Plan, Harness (including registered custom harnesses), Model and Effort; validate compatibility and preserve identity, memories, photos and room membership.
 - [x] Restore Alex's exact saved Codex runtime as stopped and pinned, ready for an explicit owner restart; preserve retired experts.
 - [x] Add a compact disk gauge with capacity details for company data, workspace and scratch mounts.
+- [x] Improve disk-bar contrast with a dark track and capacity warning colors.
+- [x] Save the default workspace name from its profile using the canonical server setting.
+- [x] Request plan moves through expert handoff and approval, with a pending destination avatar and durable private audit; retain the source until the replacement is ready.
+- [x] Initialize built-in embassy hosting and provide inline setup for a reachable HTTPS address; preserve legacy external hosting.
+- [x] Document private Tailscale Serve access on HTTPS 443 and cleanup of stale routes in the README.
 - [x] Verify a complete Claude conversation through the managed harness in an isolated selected-plan fixture, independently of provider sign-in and usage retrieval.
 - [x] Prepare selected Claude profiles for first launch without changing their chosen permission mode; verify credentials-only hiring, an owner mention and a stored assistant reply without manual terminal setup.
 - [ ] Let additional humans register and appear alongside agents in company people, with explicit roles and permissions.
 - [x] Deploy the consolidated root skills and removal of legacy console Docker/plugin packaging.
 - [x] Verify editable deployment defaults, source/config access off by default, and explicit project mounts with workspace links. Launcher and legacy recovery checks pass.
-- [x] Actual Ubuntu CI passed Nix builds, login, persistence and crash restart for `394dc27`; repeat for subsequent runtime changes.
+- [x] Ubuntu CI passed Nix builds, login, persistence and crash restart for `0221059`; local `51be1e3` image passed 1,289 web and 552 Python tests and a 99-layer scan with no findings. Repeat CI for the current runtime.
 - [x] Verify no generated caches, credentials or private instance data are committed.
 
 ## Machine cleanup requiring ordinary host activation
@@ -59,14 +64,14 @@ Updated as work is tested and deployed. Existing backups must remain intact.
 
 ## Next hiring experience
 
-- [ ] Hire always opens a wizard: select a role template, modify the profile, review and hire; reuse the editor for existing experts. Do not prompt for model or effort during hiring; use the selected plan's defaults and allow authorized runtime changes later without changing identity.
+- [x] Hire opens a four-step role, person, work and review wizard from the People + button, with Cancel on every step. Profiles retain editable role, duties and personality; model and effort stay in the later runtime editor.
 - [ ] Detailed generic role briefs and skill profiles, including CTO/COO templates with editable explicit authority presets; emphasize evidence, responsibilities and uncertainty rather than omniscience.
 - [ ] Share templates and validation with an agent-callable hiring API enforcing Can hire, allowed plans and grant limits.
 - [ ] One canonical employee profile page with permission-based editing, shared by hiring and later edits.
 - [ ] Owner/admin/moderator/member defaults; plan Use and Manage grants remain separate from server roles and are editable during hiring.
 - [ ] Curated editable name/avatar/Kokoro voice tags as soft randomization preferences; avoid duplicate names and preset photos within a company.
-- [ ] Randomizable, editable personality, communication style and interests; preserve evidence-based role standards independently of personality.
-- [ ] Dream and Sleep opt-in checkboxes, off by default, with short explanatory tooltips. Sleep permits memory consolidation; it does not enable an independent nightly timer.
+- [x] Randomizable, editable personality and working style; detailed role duties reach ordinary agent conversations as profile context. Further interest/tag curation remains below.
+- [x] Dream and Sleep opt-in checkboxes on employee cards, hiring and profile editing, off by default, with explanatory tooltips. These permit scheduled work without starting an independent nightly timer.
 - [ ] Agents can request Sleep as a Gantt task. A coordinator with explicit scheduling permission (such as the appointed COO/CTO) fits it around company work; record requests, approval and the scheduled window.
 - [ ] Package and run the optional Kokoro-ONNX service with contained model storage; keep voice choice and preview independent from pronouns.
 

@@ -9,8 +9,8 @@ import { isAbsolute, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const providers = [
-  { id: 'claude', package: '@anthropic-ai/claude-code', version: '2.1.284', integrity: 'sha512-IuENsoLa+Y5fx5VaP0Md3n5UO7aYxjbFE/iydSDw6tMo2171oaxaaBa9oIepPG9NILd1owSx74ozsqAkTbEOjw==' },
-  { id: 'codex', package: '@openai/codex', version: '0.146.0', integrity: 'sha512-yG3sPWNda/2YAIQIDq9MrrjoCTIQ7rxYM5IasrG3VBcuhCLTkgeg/JzqmJq1V98RE4MJ5jCxDXXQlOjrditFRw==' },
+  { id: 'claude', package: '@anthropic-ai/claude-code', version: '2.1.308', integrity: 'sha512-b2HnszgyN73wRTFP+IYPDJNn9ADXnG6jr26ibL+w03HSKqfb6GqE8Jnfr4mz37Zv4AT/NP+B5/3c1F89WTdWSA==' },
+  { id: 'codex', package: '@openai/codex', version: '0.163.0', integrity: 'sha512-HNd7vR9oTK6M2ikxFnvNDCdYUgAsyo9VVnd5KnEd2ON0GYI++7MiX9XNPUkhtdgGKFPsWS+CEppQ1UU63uVhUw==' },
   { id: 'opencode', package: 'opencode-ai', version: '1.19.3', integrity: 'sha512-wDRcUlMDibaLzecIGvVGUA9naghXVqzCWcUE7N3qagpGiLSUlU4VbixI+bpsErwJp+AAuSO2lhSr/XxJl7XbrQ==' },
 ];
 process.umask(0o077);

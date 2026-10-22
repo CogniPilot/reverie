@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 
 function fixture() {
   const root = mkdtempSync(join(tmpdir(), 'reverie-clis-'));
@@ -25,7 +25,8 @@ if(name==='opencode') fs.writeFileSync(path.join(dir,'postinstall.mjs'), "if(pro
 fs.mkdirSync(path.join(prefix,'bin'),{recursive:true});
 fs.writeFileSync(path.join(prefix,'bin',name),'#!${process.execPath}\\nconsole.log('+JSON.stringify(version)+');\\n',{mode:0o700});
 `, { mode: 0o700 });
-  const env = { ...process.env, PATH: bin+':'+process.env.PATH, REVERIE_DATA: join(root, 'data'), TMPDIR: join(root, 'tmp'), INSTALL_LOG: log };
+  mkdirSync(join(root, 'home'));
+  const env = { ...process.env, HOME: join(root, 'home'), PATH: bin+':'+process.env.PATH, REVERIE_DATA: join(root, 'data'), TMPDIR: join(root, 'tmp'), INSTALL_LOG: log };
   delete env.REVERIE_CLI_INSTALL_LOCKED;
   const run = extra => spawnSync(process.execPath, [resolve('scripts/reverie-install-clis.mjs')], { env: { ...env, ...extra }, encoding: 'utf8' });
   const calls = () => existsSync(log) ? readFileSync(log, 'utf8').trim().split('\n').map(line => JSON.parse(line)) : [];
@@ -37,7 +38,7 @@ test('first start installs exact pins on persistent storage and matching version
   try {
     const first = f.run();
     assert.equal(first.status, 0, first.stderr);
-    assert.deepEqual(f.calls().map(args => args.at(-1)), ['@anthropic-ai/claude-code@2.1.284', '@openai/codex@0.146.0', 'opencode-ai@1.19.3']);
+    assert.deepEqual(f.calls().map(args => args.at(-1)), ['@anthropic-ai/claude-code@2.1.308', '@openai/codex@0.163.0', 'opencode-ai@1.19.3']);
     assert.ok(f.calls().every(args => args.includes(join(f.root,'data/tools'))));
     assert.ok(!first.stdout.includes('synthetic private diagnostic'));
     assert.equal(f.run().status, 0);
@@ -54,7 +55,7 @@ test('offline install failure is nonfatal and retries only the missing provider 
     assert.equal(JSON.parse(readFileSync(join(f.root,'data/tools/.install-codex.json'))).state, 'ready');
     assert.equal(f.run().status, 0);
     assert.equal(f.calls().length, 4);
-    assert.equal(f.calls().at(-1).at(-1), '@anthropic-ai/claude-code@2.1.284');
+    assert.equal(f.calls().at(-1).at(-1), '@anthropic-ai/claude-code@2.1.308');
   } finally { f.clean(); }
 });
 
@@ -64,8 +65,37 @@ test('none disables downloads and explicit selection installs only the requested
     assert.equal(f.run({ REVERIE_INSTALL_CLIS: 'none' }).status, 0);
     assert.equal(f.calls().length, 0);
     assert.equal(f.run({ REVERIE_INSTALL_CLIS: 'codex' }).status, 0);
-    assert.deepEqual(f.calls().map(args => args.at(-1)), ['@openai/codex@0.146.0']);
+    assert.deepEqual(f.calls().map(args => args.at(-1)), ['@openai/codex@0.163.0']);
   } finally { f.clean(); }
+});
+
+test('reviewed Codex and Claude upgrades preserve accounts, workspace state, and already-running processes', () => {
+  const f = fixture();
+  const active = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });
+  try {
+    assert.equal(f.run().status, 0);
+    const tools = join(f.root, 'data/tools');
+    for (const [pkg, version] of [['@openai/codex', '0.146.0'], ['@anthropic-ai/claude-code', '2.1.284']])
+      writeFileSync(join(tools, 'lib/node_modules', pkg, 'package.json'), JSON.stringify({ version }));
+    const preserved = [join(f.env.HOME, '.codex/auth.json'), join(f.env.HOME, '.claude/.credentials.json'), join(f.root, 'data/subscription-profiles.json'), join(f.root, 'data/company.json')];
+    for (const file of preserved) {
+      mkdirSync(resolve(file, '..'), { recursive: true });
+      writeFileSync(file, 'synthetic private fixture: retain unchanged\n', { mode: 0o600 });
+    }
+    assert.equal(f.run({ REVERIE_INSTALL_CLIS: 'codex claude' }).status, 0);
+    assert.deepEqual(f.calls().slice(3).map(args => args.at(-1)), ['@anthropic-ai/claude-code@2.1.308', '@openai/codex@0.163.0']);
+    for (const [id, version, integrity] of [
+      ['codex', '0.163.0', 'sha512-HNd7vR9oTK6M2ikxFnvNDCdYUgAsyo9VVnd5KnEd2ON0GYI++7MiX9XNPUkhtdgGKFPsWS+CEppQ1UU63uVhUw=='],
+      ['claude', '2.1.308', 'sha512-b2HnszgyN73wRTFP+IYPDJNn9ADXnG6jr26ibL+w03HSKqfb6GqE8Jnfr4mz37Zv4AT/NP+B5/3c1F89WTdWSA=='],
+    ]) {
+      const status = JSON.parse(readFileSync(join(tools, `.install-${id}.json`), 'utf8'));
+      assert.equal(status.version, version); assert.equal(status.registryIntegrity, integrity); assert.equal(status.state, 'ready');
+    }
+    for (const file of preserved) assert.equal(readFileSync(file, 'utf8'), 'synthetic private fixture: retain unchanged\n');
+    assert.ok(active.pid); assert.doesNotThrow(() => process.kill(active.pid, 0));
+    assert.equal(f.run({ REVERIE_INSTALL_CLIS: 'codex claude' }).status, 0);
+    assert.equal(f.calls().length, 5, 'Matching reviewed pins should not reinstall');
+  } finally { active.kill('SIGTERM'); f.clean(); }
 });
 
 test('optional ELF compatibility patches owned dynamic binaries and ignores static files or symlink escapes', () => {
@@ -130,7 +160,7 @@ test('Nix Claude native hardlink layout gets a nonmutating loader launcher', () 
   const f = fixture();
   try {
     const loader = join(f.root, 'loader');
-    writeFileSync(loader, `#!${process.execPath}\nconsole.log('2.1.284');\n`, { mode: 0o700 });
+    writeFileSync(loader, `#!${process.execPath}\nconsole.log('2.1.308');\n`, { mode: 0o700 });
     const result = f.run({ REVERIE_INSTALL_CLIS: 'claude', CREATE_CLAUDE_NATIVE: '1', REVERIE_ELF_INTERPRETER: loader, REVERIE_ELF_LIBRARY_PATH: '/nix/test/lib' });
     assert.equal(result.status, 0, result.stderr);
     assert.equal(JSON.parse(readFileSync(join(f.root,'data/tools/.install-claude.json'))).state, 'ready');
