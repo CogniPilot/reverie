@@ -139,6 +139,14 @@ describe('codex', () => {
     }
   });
 
+  it('carries exact workspace trust on new and resumed managed Codex launches only', () => {
+    const codexTrustWorkspace = '/workspace/project.with spaces';
+    for (const codexConfig of [undefined, { resumeSessionId: 'roll_42' }]) {
+      expect(render({ mode: 'codex', sessionId: SID, codexConfig, codexTrustWorkspace })).toContain(`--config 'projects={"${codexTrustWorkspace}"={trust_level="trusted"}}'`);
+    }
+    expect(render({ mode: 'claude', sessionId: SID, codexTrustWorkspace })).not.toContain('trust_level');
+  });
+
   it('emits the bypass flag only when asked', () => {
     expect(cx({ dangerouslyBypassApprovals: true })).toBe('codex --config check_for_update_on_startup=false --dangerously-bypass-approvals-and-sandbox');
     expect(cx({ dangerouslyBypassApprovals: false })).toBe('codex --config check_for_update_on_startup=false');

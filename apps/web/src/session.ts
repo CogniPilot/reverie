@@ -1,5 +1,6 @@
 import { cliConfigContent } from './cli-config-content.js';
 import { prepareSelectedClaudeProfile } from './selected-claude-profile.js';
+import { managedCodexTrust } from './managed-codex-trust.js';
 /**
  * @fileoverview Core PTY session wrapper for Claude CLI interactions.
  *
@@ -730,6 +731,7 @@ export class Session extends EventEmitter {
 
   // Claude CLI startup permission mode
   private _claudeMode: ClaudeMode = 'dangerously-skip-permissions';
+  private _codexTrustWorkspace?: string;
   private _allowedTools: string | undefined;
 
   // OpenCode configuration (only for mode === 'opencode')
@@ -1681,6 +1683,7 @@ export class Session extends EventEmitter {
       piConfig: [() => this._piConfig, (v) => (this._piConfig = v as PiConfig)],
       grokConfig: [() => this._grokConfig, (v) => (this._grokConfig = v as GrokConfig)],
       openCodeConfig: [() => this._openCodeConfig, (v) => (this._openCodeConfig = v as OpenCodeConfig)],
+      deepSeekConfig: [() => this._deepSeekConfig, (v) => (this._deepSeekConfig = v as DeepSeekConfig)],
     };
     return field ? slots[field] : undefined;
   }
@@ -2539,6 +2542,7 @@ export class Session extends EventEmitter {
     this._pinOmpRespawnId();
     await this.applyFullAccessDefault();
     await this._prepareSelectedClaudeProfile();
+    await this._prepareManagedCodexTrust();
     const options = await this._buildRespawnPaneOptionsWithResumePin();
     if (onlyIfDead && (this._closing || this._respawnBlocked)) return false;
     const newPid = await mux.respawnPane(onlyIfDead ? { ...options, onlyIfDead: true } : options);
@@ -2564,6 +2568,7 @@ export class Session extends EventEmitter {
    */
   private _buildRespawnPaneOptions(): import('./mux-interface.js').RespawnPaneOptions {
     const options: import('./mux-interface.js').RespawnPaneOptions = {
+      codexTrustWorkspace: this._codexTrustWorkspace,
       sessionId: this.id,
       workingDir: this.workingDir,
       mode: this.mode,
@@ -2719,6 +2724,15 @@ export class Session extends EventEmitter {
       remote: this._remote,
       docker: this._docker,
       customModel: this._customModel,
+    });
+  }
+
+  private async _prepareManagedCodexTrust(): Promise<void> {
+    this._codexTrustWorkspace = await managedCodexTrust({
+      mode: this.mode, fullAccess: this._codexConfig?.dangerouslyBypassApprovals,
+      workingDir: this.workingDir, owner: this._owner,
+      remote: this._remote, docker: this._docker, customModel: this._customModel,
+      discovered: this._muxSession?.discovered,
     });
   }
 
@@ -2976,6 +2990,7 @@ export class Session extends EventEmitter {
     this._ensurePaneDialogScan();
     await this.applyFullAccessDefault();
     await this._prepareSelectedClaudeProfile();
+    await this._prepareManagedCodexTrust();
 
     // Bounds the workspace-trust scan (see _maybeAcceptTrustDialog). Stamped here
     // rather than at PTY spawn so a slow mux attach still counts as startup.
@@ -3078,6 +3093,7 @@ export class Session extends EventEmitter {
           // Single source of truth shared with reattachRemote() (COD-108).
           respawnPaneOptions: this._buildRespawnPaneOptions(),
           createSessionOptions: {
+            codexTrustWorkspace: this._codexTrustWorkspace,
             sessionId: this.id,
             workingDir: this.workingDir,
             mode: this.mode,

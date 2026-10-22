@@ -25,6 +25,7 @@ import { compareVersions } from './utils/dependency-checker.js';
 import { getClaudeCliVersion } from './utils/claude-cli-resolver.js';
 import { launcherDefaultTarget } from './utils/cli-launcher.js';
 import { getCli } from './config/cli-registry/registry.js';
+import { codexTrustArgument } from './managed-codex-trust.js';
 import type {
   AntigravityConfig,
   ClaudeMode,
@@ -40,6 +41,8 @@ import type {
 
 export interface SpawnBridgeOptions {
   mode: string;
+  /** Internal, launch-only workspace trust resolved by Session for an authorized container Codex runtime. */
+  codexTrustWorkspace?: string;
   sessionId: string;
   model?: string;
   claudeMode?: ClaudeMode;
@@ -229,5 +232,8 @@ export function buildSpawnCommandFromRegistry(entry: CliEntry, options: SpawnBri
     options.claudeCliVersion !== undefined ? options.claudeCliVersion : getClaudeCliVersion()
   );
 
-  return renderLaunch(entry.launch, params, engineValues, gatesPassed);
+  const command = renderLaunch(entry.launch, params, engineValues, gatesPassed);
+  return entry.id === 'codex' && options.codexTrustWorkspace
+    ? `${command} --config ${codexTrustArgument(options.codexTrustWorkspace)}`
+    : command;
 }

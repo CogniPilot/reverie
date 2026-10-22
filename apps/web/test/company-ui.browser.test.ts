@@ -118,11 +118,11 @@ describe('company roster and research reports in Chromium', () => {
     const grant = page.getByRole('checkbox', { name: /^Recovery permission for / });
     expect(await grant.isChecked()).toBe(false);
     await grant.check();
-    await page.getByRole('button', { name: 'Save permissions', exact: true }).click();
+    await page.getByRole('button', { name: 'Save preferences', exact: true }).click();
     expect(await page.evaluate(() => (window as any).calls.find((c: any) => c.path === '/api/company/employees/ada'))).toEqual({
       path: '/api/company/employees/ada',
       method: 'PUT',
-      body: { permissions: { recoverEmployees: true } },
+      body: { sleepEnabled: false, dreamEnabled: false, permissions: { recoverEmployees: true } },
     });
     await page.getByRole('button', { name: 'Assign briefing coordinator', exact: true }).click();
     expect(await page.evaluate(() => (window as any).calls.find((c: any) => c.path === '/api/company/settings').body.coordinatorEmployeeId)).toBe('ada');
@@ -132,7 +132,7 @@ describe('company roster and research reports in Chromium', () => {
       await w.app._renderCompany();
     });
     expect(await page.getByRole('checkbox', { name: /^Recovery permission for / }).count()).toBe(0);
-    expect(await page.getByRole('button', { name: 'Save permissions', exact: true }).count()).toBe(0);
+    expect(await page.getByRole('button', { name: 'Save preferences', exact: true }).count()).toBe(0);
   });
 
 });

@@ -46,12 +46,18 @@ let
         test/reboot-restore.test.ts test/reboot-restore-persistent.test.ts \
         test/routes/reboot-restore-routes.test.ts test/codex-transcript.test.ts test/routes/company-avatar.test.ts \
         test/company-avatar-picker-ui.test.ts test/company-hire-plan-refresh.test.ts \
-        test/company-settings-ui.test.ts test/cli-config-content.test.ts \
+        test/company-hire-wizard.test.ts test/company-role-context.test.ts test/company-rest-context.test.ts \
+        test/company-settings-ui.test.ts test/chat-app-dom.test.ts test/cli-config-content.test.ts \
         test/session-runtime.test.ts test/company-runtime-ui.test.ts test/opencode-subscription-auth.test.ts \
         test/selected-claude-profile.test.ts \
+        test/managed-codex-trust.test.ts test/full-access-default.test.ts \
         test/expert-runtime-recipe.test.ts test/company-employee-restart.test.ts test/company-restart-ui.test.ts test/routes/session-mode-switch.test.ts \
         test/claude-plan-usage.test.ts test/claude-usage-display.test.ts test/subscription-usage.test.ts test/plan-usage-compliance.test.ts test/plan-pace.test.ts \
         test/member-menu.test.ts test/render-index-html.test.ts test/asset-content-version.test.ts \
+        test/company-plans-navigation.test.ts test/company-plans-width.test.ts \
+        test/plan-move-runtime.test.ts test/plan-move-routes.test.ts test/plan-move-company.test.ts test/plan-move-launch.test.ts \
+        test/plan-request.test.ts test/plan-request-capability.test.ts test/plan-request-routes.test.ts test/plan-request-ui.test.ts test/plan-request-prompt.test.ts \
+        test/embassy-builtin.test.ts test/embassy-pairing-ui.test.ts \
         test/disk-stats.test.ts test/disk-stats-ui.test.ts test/routes/system-routes.test.ts
       runHook postCheck
     '';

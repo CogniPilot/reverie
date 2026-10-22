@@ -30,9 +30,11 @@ const HireSchema = EmployeeSchema.omit({
 const SettingsSchema = CompanySettingsSchema.omit({ owner: true, ownerAvatar: true });
 const InviteSchema = z.object({ roomId: z.string().min(1).max(100) });
 // Pronouns: a value sets them, null clears them (owner only, like every field here; an agent only proposes, in chat).
-const UpdateSchema = EmployeeSchema.pick({ position: true, expertise: true, icon: true, reportsTo: true })
+const UpdateSchema = EmployeeSchema.pick({ position: true, expertise: true, responsibilities: true, personality: true, icon: true, reportsTo: true })
   .extend({
     pronouns: PronounsSchema.nullable(),
+    sleepEnabled: EmployeeSchema.shape.sleepEnabled.removeDefault(),
+    dreamEnabled: EmployeeSchema.shape.dreamEnabled.removeDefault(),
     voice: EmployeeVoiceSchema.nullable(),
     permissions: EmployeePermissionsSchema,
   })

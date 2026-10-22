@@ -70,6 +70,14 @@ describe('withFullAccessDefault', () => {
     expect(await withFullAccessDefault('claude', undefined, undefined, CONTAINER)).toBeUndefined();
   });
 
+  it('defaults DeepSeek permission mode only for a granted container owner and preserves explicit restrictions', async () => {
+    expect(await withFullAccessDefault('deepseek', undefined, undefined, CONTAINER)).toEqual({ permissionMode: 'danger-full-access' });
+    expect(await withFullAccessDefault('deepseek', { permissionMode: 'read-only' }, undefined, CONTAINER)).toBeUndefined();
+    expect(await withFullAccessDefault('deepseek', { permissionMode: 'workspace-write' }, undefined, CONTAINER)).toBeUndefined();
+    expect(await withFullAccessDefault('deepseek', undefined, 'bob', CONTAINER)).toBeUndefined();
+    expect(await withFullAccessDefault('deepseek', undefined, undefined, {})).toBeUndefined();
+  });
+
   it('turns on opencode autoAllowTools, but keeps an explicit false and an owner permission policy', async () => {
     expect(await withFullAccessDefault('opencode', undefined, undefined, CONTAINER)).toEqual({ autoAllowTools: true });
     expect(await withFullAccessDefault('opencode', { autoAllowTools: false }, undefined, CONTAINER)).toBeUndefined();
@@ -370,6 +378,15 @@ describe('codex sessions launch with full access in the container', () => {
     await session.startInteractive();
     expect(created.at(-1)?.openCodeConfig?.autoAllowTools).toBe(true);
     expect(session.toState().openCodeConfig?.autoAllowTools).toBe(true);
+  });
+
+  it('a DeepSeek session applies and persists its permission default through the declared config slot', async () => {
+    const session = make({ mode: 'deepseek' });
+    expect(await session.applyFullAccessDefault()).toBe(true);
+    expect(session.toState().deepSeekConfig?.permissionMode).toBe('danger-full-access');
+    const restricted = make({ mode: 'deepseek', deepSeekConfig: { permissionMode: 'workspace-write' } });
+    expect(await restricted.applyFullAccessDefault()).toBe(false);
+    expect(restricted.toState().deepSeekConfig?.permissionMode).toBe('workspace-write');
   });
 
   it('outside the container nothing is added', async () => {

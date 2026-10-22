@@ -1,3 +1,4 @@
+import { isEmbassyProtocolRoute } from '../../embassy-public-routes.js';
 /**
  * @fileoverview Authentication and security middleware.
  *
@@ -407,6 +408,13 @@ export function registerAuthMiddleware(
     }
     // A web-tab frame that lost its prefix: hand it back to its tab, no credentials involved.
     if (serveLostWebviewFrame(req, reply)) return;
+
+    // Federation endpoints validate one-time invite/proof/guest capabilities in their own handlers.
+    // Match registered route patterns, never raw URL prefixes that could expose owner APIs.
+    const embassyRoute = req.routeOptions?.url;
+    if (isEmbassyProtocolRoute(req.method, embassyRoute?.startsWith(basePath + '/') ? embassyRoute.slice(basePath.length) : embassyRoute)) {
+      done(); return;
+    }
 
     // The owner form is the browser's single login in enforce mode. Agent and
     // service callers retain their independent Basic/API boundary.

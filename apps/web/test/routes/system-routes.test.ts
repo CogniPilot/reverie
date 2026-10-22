@@ -460,6 +460,30 @@ describe('system-routes', () => {
   // ========== PUT /api/settings ==========
 
   describe('PUT /api/settings', () => {
+    it('persists the canonical workspace name and reads it back without replacing unrelated settings', async () => {
+      let persisted = JSON.stringify({ language: 'fr', showCost: true, displayName: 'Reverie' });
+      mockedReadFile.mockImplementation(async () => persisted as never);
+      mockedWriteFile.mockImplementation(async (_path, content) => { persisted = String(content); });
+      const saved = await harness.app.inject({ method: 'PUT', url: '/api/settings', payload: { displayName: '  Flight Lab  ' } });
+      expect(saved.statusCode).toBe(200);
+      const loaded = await harness.app.inject({ method: 'GET', url: '/api/settings' });
+      expect(loaded.json()).toEqual({ language: 'fr', showCost: true, displayName: 'Flight Lab' });
+    });
+
+    it('rejects an agent renaming the server-wide workspace before writing settings', async () => {
+      const res = await harness.app.inject({ method: 'PUT', url: '/api/settings', headers: { 'x-reverie-parent-session': 'agent' }, payload: { displayName: 'Changed' } });
+      expect(res.statusCode).toBe(403); expect(mockedWriteFile).not.toHaveBeenCalled();
+    });
+
+    it('rejects a regular multi-user account renaming the server-wide workspace', async () => {
+      vi.stubEnv('REVERIE_MULTIUSER', '1');
+      const ordinary = await createRouteTestHarness(registerSystemRoutes, { authUser: { username: 'ordinary', role: 'user' } });
+      try {
+        const res = await ordinary.app.inject({ method: 'PUT', url: '/api/settings', payload: { displayName: 'Changed' } });
+        expect(res.statusCode).toBe(403); expect(mockedWriteFile).not.toHaveBeenCalled();
+      } finally { await ordinary.app.close(); vi.unstubAllEnvs(); }
+    });
+
     it('saves valid settings', async () => {
       mockedReadFile.mockRejectedValue(Object.assign(new Error('ENOENT'), { code: 'ENOENT' }));
 

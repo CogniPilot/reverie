@@ -13,7 +13,7 @@ import { capturePlanProcesses, survivingPlanProcesses } from './plan-move-proces
 export interface PlanMoveRuntime {
   company: Pick<CompanyService, 'view' | 'rebind'>;
   plans: Pick<PlanService, 'allocations' | 'account'>;
-  chat: Pick<ChatroomService, 'rooms' | 'post'>;
+  chat: Pick<ChatroomService, 'rooms' | 'post' | 'auditEntry'>;
   sessions: SessionPort['sessions'];
   mux: Pick<TerminalMultiplexer, 'getSession' | 'isPaneDead'>;
   cleanup: SessionPort['cleanupSession'];
@@ -25,6 +25,7 @@ export interface PlanMoveRuntime {
 
 export function planMoveExecutor(runtime: PlanMoveRuntime, owner?: string): PlanMoveExecutor {
   const candidates = new Map<string, string>();
+  const createdCandidates = new Set<string>();
   const session = (id: string) => {
     const current = runtime.sessions.get(id);
     if (!current || current.owner !== owner) throw new PlanMoveError('The owned session is no longer available');
@@ -62,8 +63,6 @@ export function planMoveExecutor(runtime: PlanMoveRuntime, owner?: string): Plan
       const allocations = await runtime.plans.allocations();
       const account = allocations.accounts.find((row) => row.sessionIds.includes(id));
       if (!account) throw new PlanMoveError('The current plan allocation is unknown');
-      const auditRoom = fullAccessAlertRoom(runtime.chat.rooms(), owner);
-      if (!auditRoom || auditRoom.archivedAt) throw new PlanMoveError('The owner audit channel is unavailable');
       return {
         sessionId: id,
         name: current.name,
@@ -92,6 +91,7 @@ export function planMoveExecutor(runtime: PlanMoveRuntime, owner?: string): Plan
       const id = response?.session?.id;
       if (typeof id !== 'string') throw new PlanMoveError('The replacement response has no session identifier');
       candidates.set(id, input.handoff);
+      createdCandidates.add(id);
       return id;
     },
     start: async (id) => {
@@ -99,6 +99,7 @@ export function planMoveExecutor(runtime: PlanMoveRuntime, owner?: string): Plan
       await runtime.request('POST', `/api/sessions/${encodeURIComponent(id)}/interactive`);
     },
     ready: async (id) => {
+      assertAuthorized();
       const current = session(id);
       const mark = composerReadyMark(current.mode);
       if (!mark) throw new PlanMoveError('This CLI has no verified readiness marker');
@@ -108,11 +109,13 @@ export function planMoveExecutor(runtime: PlanMoveRuntime, owner?: string): Plan
       )) as { data?: { wait?: { matched?: boolean } } };
       if (!result.data?.wait?.matched)
         throw new PlanMoveError('The replacement did not reach its composer before the deadline');
+      assertAuthorized();
       assertAlive(id);
       await delay(500);
       assertAlive(id);
       const handoff = candidates.get(id);
       if (!handoff) throw new PlanMoveError('The replacement has no handoff');
+      assertAuthorized();
       await new Promise<void>((resolve, reject) => {
         const timer = setTimeout(
           () => reject(new PlanMoveError('The replacement handoff was not acknowledged')),
@@ -164,25 +167,39 @@ export function planMoveExecutor(runtime: PlanMoveRuntime, owner?: string): Plan
       await runtime.company.rebind(employeeId, owner, id, owner ?? 'owner');
     },
     stop: async (id) => {
+      // Rollback may still clean our candidate after logout; stopping the original always needs live owner authority.
+      if (!createdCandidates.has(id)) assertAuthorized();
       const current = session(id);
       const roots = [...new Set([current.pid, runtime.mux.getSession(id)?.pid].filter((pid): pid is number => !!pid))];
       const identities = roots.length ? await (runtime.capture ?? capturePlanProcesses)(roots) : [];
       if (!identities.length && !candidates.has(id))
         throw new PlanMoveError('Cannot verify the old process before cleanup');
+      if (!createdCandidates.has(id)) assertAuthorized();
       await runtime.cleanup(id, true, 'plan_move');
       candidates.delete(id);
+      createdCandidates.delete(id);
       return (runtime.survivors ?? survivingPlanProcesses)(identities);
     },
     audit: async (record) => {
-      const room = fullAccessAlertRoom(runtime.chat.rooms(), owner);
-      if (!room || room.archivedAt) throw new PlanMoveError('The owner audit channel is unavailable');
-      const from = await runtime.plans.account(record.fromAccount);
-      const to = await runtime.plans.account(record.toAccount);
-      runtime.chat.post(
-        room.id,
-        { kind: 'system', name: 'Plans' },
-        `AUDIT plan move ${record.phase}: ${owner ?? 'Owner'} moved ${record.name} from ${from?.label ?? record.fromAccount} to ${to?.label ?? record.toAccount}${record.error ? `; ${record.error}` : ''}`
-      );
+      if (record.owner !== owner) throw new PlanMoveError('The move belongs to another owner', 403);
+      // This private append is mandatory before stopping the source. Owner-scoped move history is also persisted by PlanMoves.
+      await runtime.chat.auditEntry({
+        event: 'plan_move', owner, actor: owner ?? 'owner', moveId: record.id, employeeId: record.employeeId,
+        name: record.name, oldSession: record.oldSession, newSession: record.newSession,
+        fromAccount: record.fromAccount, toAccount: record.toAccount, phase: record.phase, error: record.error,
+      });
+      // A channel mirror is optional. Never pick another channel, another owner or a DM when the conventional room is absent.
+      try {
+        const room = fullAccessAlertRoom(runtime.chat.rooms(), owner);
+        if (!room || room.archivedAt) return;
+        const from = await runtime.plans.account(record.fromAccount);
+        const to = await runtime.plans.account(record.toAccount);
+        runtime.chat.post(
+          room.id,
+          { kind: 'system', name: 'Plans' },
+          `AUDIT plan move ${record.phase}: ${owner ?? 'Owner'} moved ${record.name} from ${from?.label ?? record.fromAccount} to ${to?.label ?? record.toAccount}${record.error ? `; ${record.error}` : ''}`
+        );
+      } catch { console.warn(`[plans] move ${record.id} was audited privately; its optional channel mirror was unavailable`); }
     },
   };
 }

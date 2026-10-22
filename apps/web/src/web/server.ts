@@ -1,3 +1,6 @@
+import { BuiltinEmbassy } from '../embassy-builtin.js';
+import { registerBuiltinEmbassyRoutes } from './routes/embassy-builtin-routes.js';
+import { employeeRestContext, employeeProfileContext } from '../company-types.js';
 import { expertRuntimeRecipe } from '../expert-runtime-recipe.js';
 import { AvatarStore } from '../agent-avatars.js';
 import { CompanyStore } from '../company-store.js';
@@ -44,7 +47,7 @@ import { WorkspaceIconStore } from '../workspace-icons.js';
  */
 
 import { createHash } from 'node:crypto';
-import Fastify, { FastifyInstance } from 'fastify';
+import Fastify, { FastifyInstance, type FastifyRequest } from 'fastify';
 import fastifyCompress from '@fastify/compress';
 import fastifyCookie from '@fastify/cookie';
 import fastifyStatic from '@fastify/static';
@@ -283,6 +286,11 @@ import { registerPlanMoveRoutes } from './routes/plan-move-routes.js';
 import { authenticatedPlanMover } from './plan-move-auth.js';
 import { PlanMoves, PlanMoveError } from '../plan-move.js';
 import { PlanMoveStore } from '../plan-move-store.js';
+import { PlanMoveRequests } from '../plan-request.js';
+import { PlanRequestStore } from '../plan-request-store.js';
+import { PlanRequestCapabilities } from '../plan-request-capability.js';
+import { deliverPlanRequest } from '../plan-request-prompt.js';
+import { registerPlanRequestRoutes } from './routes/plan-request-routes.js';
 import { planMoveExecutor, type PlanMoveRuntime } from '../plan-move-runtime.js';
 import { PlanService } from '../plan-accounts.js';
 import { githubData, type GithubArgs } from '../cron/github-source.js';
@@ -1355,6 +1363,10 @@ export class WebServer extends EventEmitter {
             .employees.filter((e) => e.sessionId === sessionId) ?? [];
         return employees.length === 1 ? employees[0].pronouns : undefined;
       },
+      restContextOf: (sessionId) => {
+        const employee = this.companyService?.registeredEmployees().find(e => e.sessionId === sessionId);
+        return employee ? employeeProfileContext(employee) + ' ' + employeeRestContext(employee) : undefined;
+      },
       // Rooms and messages live in SQLite; chatrooms.json is imported once, when chat.db does not exist yet.
       database: dataPath('chat.db'),
       deferDeliveryRecovery: true,
@@ -1415,6 +1427,10 @@ export class WebServer extends EventEmitter {
     await research.init();
     this.companyService = new CompanyService(companyStore, {
       getSession: (id) => this.sessions.get(id),
+      runtimeRecipeOf: (id) => {
+        const session = this.sessions.get(id);
+        return session ? expertRuntimeRecipe(session) : undefined;
+      },
       stopSession: async (id) => {
         const controller = this.respawnControllers.get(id);
         controller?.stop();
@@ -1510,6 +1526,9 @@ export class WebServer extends EventEmitter {
             role: e.position,
             reportsTo: e.reportsTo ?? 'owner',
             desiredRunning: e.desiredRunning !== false,
+            sleepEnabled: e.sleepEnabled,
+            dreamEnabled: e.dreamEnabled,
+            restPreferences: employeeRestContext(e),
           }));
         await deliverRecoveryPrompt(
           session,
@@ -1638,14 +1657,29 @@ export class WebServer extends EventEmitter {
     await this.embassyGuestClient.init();
     registerEmbassyGuestRoutes(this.app, this.embassyGuestClient, verifiedOwner);
     // Two-scan pairing (contract r2): hosting through the loopback embassy channel, and pairing as a guest. The
-    // channel secret stays in this backend; without the host step's channel.json hosting reports unconfigured.
+    // channel secret stays in this backend. Fresh installations initialize a private built-in room.
+    // Preserve explicitly configured external channels. Fresh installations host on this existing service.
+    const builtinFile = dataPath('embassy-host', 'builtin.json');
+    const externalChannel = existsSync(dataPath('embassy-channel', 'channel.json')) && !existsSync(builtinFile);
+    const builtinEmbassy = externalChannel ? undefined : new BuiltinEmbassy({
+      file: builtinFile, channelFile: dataPath('embassy-channel', 'channel.json'),
+      secretFile: dataPath('embassy-channel', 'secret'), origin: process.env.REVERIE_EMBASSY_ORIGIN,
+    });
     this.embassyHost = new EmbassyHost({
-      dir: dataPath('embassy-channel'),
-      opsFile: dataPath('embassy-host', 'ops.json'),
+      dir: dataPath('embassy-channel'), opsFile: dataPath('embassy-host', 'ops.json'),
+      transport: builtinEmbassy?.channelTransport,
+      localStatus: builtinEmbassy ? async () => {
+        const { builtin, needsAdvertisedOrigin } = await builtinEmbassy.settings();
+        return { builtin, needsAdvertisedOrigin };
+      } : undefined,
     });
     await this.embassyHost
       .init()
       .catch(() => console.warn('[embassy] channel secret unavailable; hosting stays unconfigured'));
+    if (builtinEmbassy) {
+      await builtinEmbassy.init();
+      registerBuiltinEmbassyRoutes(this.app, builtinEmbassy, verifiedOwner, () => this.getHostPolicy());
+    }
     this.embassyPairing = new EmbassyPairing({ dir: dataPath('embassy-pairings'), guest: this.embassyGuestClient });
     await this.embassyPairing.init();
     registerEmbassyPairingRoutes(this.app, this.embassyHost, this.embassyPairing, verifiedOwner, () =>
@@ -1900,7 +1934,7 @@ export class WebServer extends EventEmitter {
       load: () => planMoveStore.load(),
       save: (records) => planMoveStore.save(records),
     });
-    registerPlanMoveRoutes(this.app, planMoves, ctx, ownerAuth, (request) =>
+    const capturePlanMove = (request: FastifyRequest) =>
       planMoveExecutor(
         {
           ...planMoveRuntime,
@@ -1929,8 +1963,27 @@ export class WebServer extends EventEmitter {
           },
         },
         ownerFor(request)
-      )
-    );
+      );
+    registerPlanMoveRoutes(this.app, planMoves, ctx, ownerAuth, capturePlanMove);
+    const planRequestStore = new PlanRequestStore(dataPath('plan-requests.json'));
+    const planRequests = new PlanMoveRequests({
+      load: () => planRequestStore.load(),
+      save: records => planRequestStore.save(records),
+      moves: planMoves,
+      binding: (employeeId, owner) => this.companyService.view(owner).employees.find(employee => employee.id === employeeId)?.sessionId,
+      validateTarget: async (snapshot, target) => {
+        const account = await this.planService.account(target);
+        if (!account || account.provider !== (snapshot.mode === 'codex' ? 'openai' : snapshot.mode === 'claude' ? 'anthropic' : null))
+          throw new PlanMoveError('Choose an available plan for the same provider');
+      },
+      capability: new PlanRequestCapabilities(),
+      notify: (record, _file, allowed) => deliverPlanRequest(record, () => this.sessions.get(record.sessionId), allowed),
+      audit: entry => this.chatroomService.auditEntry(entry),
+    });
+    registerPlanRequestRoutes(this.app, planRequests, ctx, ownerAuth, request => ({
+      executor: capturePlanMove(request),
+      authorized: () => authenticatedPlanMover(request, ctx.authSessions, ownerAuth),
+    }));
 
     registerWsRoutes(this.app, ctx, () => this.getHostPolicy());
   }

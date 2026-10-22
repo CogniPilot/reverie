@@ -89,6 +89,8 @@ export interface MuxSessionWithStats extends MuxSession {
 
 /** Options for creating a new multiplexer session. */
 export interface CreateSessionOptions {
+  /** Internal, launch-only exact workspace trust for managed Codex. */
+  codexTrustWorkspace?: string;
   sessionId: string;
   workingDir: string;
   mode: SessionMode;
@@ -132,6 +134,8 @@ export interface CreateSessionOptions {
 
 /** Options for respawning a dead pane. */
 export interface RespawnPaneOptions {
+  /** Internal, launch-only exact workspace trust for managed Codex. */
+  codexTrustWorkspace?: string;
   sessionId: string;
   workingDir: string;
   mode: SessionMode;

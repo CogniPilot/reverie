@@ -4,6 +4,7 @@ import cookie from '@fastify/cookie';
 import { registerPlanMoveRoutes } from '../src/web/routes/plan-move-routes.js';
 import { PlanMoveError, type PlanMoves } from '../src/plan-move.js';
 import type { AuthPort, AuthSessionRecord } from '../src/web/ports/auth-port.js';
+import { planMoveExecutor, type PlanMoveRuntime } from '../src/plan-move-runtime.js';
 
 describe('owner browser plan move API', () => {
   let app: FastifyInstance;
@@ -60,12 +61,13 @@ describe('owner browser plan move API', () => {
     expect(moves.list).toHaveBeenCalledWith(undefined);
   });
 
-  it('starts only a validated owner request and never responds with handoff text', async () => {
+  it('refuses the legacy immediate move endpoint and directs owners to expert-approved requests', async () => {
     moves.begin.mockResolvedValue({ id: 'move', phase: 'waiting' });
     const response = await app.inject({ method: 'POST', url: '/api/plans/moves', headers, payload: input });
-    expect(response.statusCode).toBe(202);
+    expect(response.statusCode).toBe(409);
     expect(response.headers['cache-control']).toBe('no-store');
-    expect(moves.begin).toHaveBeenCalledWith({ ...input, forceBusy: false }, undefined);
+    expect(moves.begin).not.toHaveBeenCalled();
+    expect(response.json().error).toContain('expert');
     expect(response.body).not.toContain(input.handoff);
   });
 
@@ -103,5 +105,22 @@ describe('owner browser plan move API', () => {
       success: true,
     });
     expect(moves.cancel).toHaveBeenCalledWith('move', undefined);
+  });
+
+  it('previews a valid owned move when General is the only channel, without auditing or launching', async () => {
+    await app.close(); app = Fastify(); await app.register(cookie);
+    const runtime: PlanMoveRuntime = {
+      company: { view: () => ({ employees: [{ id: 'casey', sessionId: 'old' }] }) as never, rebind: vi.fn() },
+      plans: { allocations: async () => ({ generatedAt: 1, accounts: [{ id: 'first', sessionIds: ['old'] }] }), account: vi.fn() },
+      chat: { rooms: () => [{ id: 'general', name: 'general', members: [] }] as never, post: vi.fn(), auditEntry: vi.fn() },
+      sessions: new Map([['old', { name: 'Casey', pid: 1, muxName: 'old', isWorking: false, toState: () => ({ mode: 'codex', codexConfig: { model: 'chosen-model' } }) } as never]]),
+      mux: { getSession: vi.fn(), isPaneDead: () => false }, cleanup: vi.fn(), authorized: () => true, request: vi.fn(),
+    };
+    registerPlanMoveRoutes(app, moves as unknown as PlanMoves, {
+      authSessions: new Map([['owner', { ip: '127.0.0.1', ua: 'test', createdAt: 1, method: 'basic' }]]) as unknown as AuthPort['authSessions'],
+    }, undefined, () => planMoveExecutor(runtime));
+    const response = await app.inject({ method: 'POST', url: '/api/plans/moves/preview', headers, payload: { employeeId: 'casey', sessionId: 'old' } });
+    expect(response.statusCode).toBe(200); expect(response.json().data).toMatchObject({ sessionId: 'old', account: 'first' });
+    expect(runtime.chat.auditEntry).not.toHaveBeenCalled(); expect(runtime.chat.post).not.toHaveBeenCalled(); expect(runtime.request).not.toHaveBeenCalled();
   });
 });

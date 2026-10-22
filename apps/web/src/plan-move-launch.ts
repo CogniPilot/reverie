@@ -15,8 +15,6 @@ export function planMoveLaunch(saved: SessionState, account: PlanAccount, input:
   const provider = saved.mode === 'codex' ? 'openai' : 'anthropic';
   if (account.provider !== provider) throw new PlanMoveError('Choose a plan for the same provider');
   if (!input.handoff.trim()) throw new PlanMoveError('A fresh cross-account session requires a handoff');
-  if (saved.mode === 'codex' && !input.model)
-    throw new PlanMoveError('Explicitly confirm a model supported by the destination account');
   const launch = launchFor(account);
   const config = saved.codexConfig ? { ...saved.codexConfig } : {};
   delete config.resumeSessionId;
@@ -29,7 +27,7 @@ export function planMoveLaunch(saved: SessionState, account: PlanAccount, input:
       ? { subscriptionProfileId: launch.subscriptionProfileId }
       : { envOverrides: launch.envOverrides }),
     ...(saved.mode === 'codex'
-      ? { codexConfig: { ...config, model: input.model } }
+      ? { codexConfig: { ...config, ...(input.model ? { model: input.model } : {}) } }
       : { model: input.model ?? saved.model, effort: saved.effort, advisorModel: saved.advisorModel }),
   });
 }

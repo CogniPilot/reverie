@@ -1283,6 +1283,7 @@ class ReverieChatApp {
       row.append(this.literalText('dt', '', fs.labels.join(' · ')));
       const detail = this.el('dd');
       const meter = this.el('progress'); meter.max = 100; meter.value = fs.percentUsed; meter.setAttribute('aria-label', `${fs.labels.join(', ')} ${fs.percentUsed}% used`);
+      meter.dataset.level = fs.percentUsed >= 90 ? 'high' : fs.percentUsed >= 70 ? 'warn' : 'ok';
       detail.append(this.el('strong', '', `${fs.percentUsed}% used`), meter, this.el('span', '', `${caDiskBytes(fs.usedBytes)} used · ${caDiskBytes(fs.availableBytes)} available · ${caDiskBytes(fs.totalBytes)} capacity`));
       row.append(detail); list.append(row);
     }
@@ -1596,13 +1597,11 @@ class ReverieChatApp {
     const name = this.el('input', 'ca-field');
     name.maxLength = 40;
     name.value = draft.name;
-    name.disabled = isDefault;
     name.addEventListener('input', () => {
       draft.name = name.value;
       sync();
     });
     nameWrap.append(name);
-    if (isDefault) nameWrap.append(this.el('span', 'ca-hint', 'The default workspace is named by the instance (Settings, display name).'));
     const iconWrap = this.el('label', 'ca-label');
     iconWrap.append(this.el('span', 'ca-label-text', 'Icon (an emoji or up to two characters)'));
     const icon = this.el('input', 'ca-field');
@@ -1664,6 +1663,27 @@ class ReverieChatApp {
     save.addEventListener('click', async () => {
       if (pic.pending()) return;
       const next = draft.name.trim();
+      if (isDefault && next !== state.name) {
+        const clash = next.toLowerCase() === 'home' || this.rooms.some(r => !caIsDm(r) && r.workspace && r.workspace.toLowerCase() === next.toLowerCase());
+        if (!next || next.length > 40 || /[\u0000-\u001f\u007f]/.test(next) || clash) return this.toast('Pick a name of up to 40 characters that is not Home or another workspace.', 'error');
+        save.disabled = true;
+        try {
+          // The default workspace keeps its empty placement key. Its one canonical
+          // name is the instance display name, shared with Settings and all devices.
+          const saved = await this.app._chatApi('/api/settings', { method: 'PUT', body: { displayName: next } });
+          if (!saved.ok) return this.toast(`Workspace name could not be saved: ${saved.error || 'Owner sign-in is required.'}`, 'error');
+          const settings = this.app.loadAppSettingsFromStorage?.() || {};
+          this.app.saveAppSettingsToStorage?.({ ...settings, displayName: next });
+          this.doc.defaultView?.ReverieI18n?.configure({ displayName: next });
+          const settingsName = this.doc.getElementById('appSettingsDisplayName');
+          if (settingsName) settingsName.value = next;
+          nav.querySelector('.ca-settings-title').textContent = next;
+          root.setAttribute('aria-label', `Workspace settings: ${next}`);
+          this.renderAll();
+        } catch {
+          return this.toast('Workspace name could not be saved. Try again.', 'error');
+        } finally { save.disabled = false; }
+      }
       if (!isDefault && next !== state.name) {
         const clash = next.toLowerCase() === 'home' || next.toLowerCase() === this.defaultWorkspaceName().toLowerCase() || this.rooms.some((r) => !caIsDm(r) && r.workspace && r.workspace !== key && r.workspace.toLowerCase() === next.toLowerCase());
         if (!next || clash) return this.toast('Pick a name that is not Home, the default workspace or another workspace.', 'error');
@@ -1738,7 +1758,7 @@ class ReverieChatApp {
       }
     };
     this.doc.addEventListener('keydown', onKey, true);
-    (isDefault ? icon : name).focus();
+    name.focus();
   }
 
   /**
@@ -2330,15 +2350,15 @@ class ReverieChatApp {
           recovery.disabled = employee.onVacation === true;
           recovery.setAttribute('aria-label', `Recovery permission for ${employee.name}`);
           label.prepend(recovery);
-          const save = this.button('ca-btn', 'Save permissions', async () => {
+          const rest = this.expertRestFields(card, employee);
+          const save = this.button('ca-btn', 'Save preferences', async () => {
             const result = await this.app._chatApi(`/api/company/employees/${encodeURIComponent(employee.id)}`, {
-              method: 'PUT', body: { permissions: { recoverEmployees: recovery.checked } },
+              method: 'PUT', body: { sleepEnabled: rest.sleep.checked, dreamEnabled: rest.dream.checked, ...(!employee.onVacation ? { permissions: { recoverEmployees: recovery.checked } } : {}) },
             });
-            status.textContent = result.ok ? 'Employee permissions saved.' : `Could not save permissions: ${result.error || 'request failed'}`;
+            status.textContent = result.ok ? 'Employee preferences saved.' : `Could not save preferences: ${result.error || 'request failed'}`;
           });
-          save.setAttribute('aria-label', `Save permissions for ${employee.name}`);
-          save.disabled = employee.onVacation === true;
-          save.textContent = 'Save permissions';
+          save.setAttribute('aria-label', `Save preferences for ${employee.name}`);
+          save.textContent = 'Save preferences';
           const controls = this.el('div', 'ca-company-person-controls');
           controls.append(label, save, this.button('ca-btn', `Edit profile for ${employee.name}`, () => this.openEmployeeProfile(employee, paint), { text: 'Edit profile' }));
           const restart = this.button('ca-btn', `Restart session for ${employee.name}`, () => this.openEmployeeRestart(employee, paint), { text: 'Restart session' });
@@ -2427,7 +2447,9 @@ class ReverieChatApp {
       chart.append(tree);
       if (!employees.length) chart.append(this.el('p', 'ca-hint', 'No permanent team members yet.'));
       const people = this.el('section', 'ca-company-people');
-      people.append(this.el('h3', '', `People · ${employees.length}`), chart);
+      const peopleHeading = this.el('div', 'ca-company-people-heading');
+      peopleHeading.append(this.el('h3', '', `People · ${employees.length}`));
+      people.append(peopleHeading, chart);
       if (manage) {
         const recovery = this.el('form', 'ca-company-form ca-company-recovery');
         recovery.append(this.el('h3', '', 'Crash recovery'));
@@ -2502,19 +2524,34 @@ class ReverieChatApp {
       }
       const section = this.el('section', 'ca-company-hire');
       section.hidden = true; section.id = 'ca-company-hire';
-      const hire = this.button('ca-btn is-primary', 'Hire', () => { section.hidden = !section.hidden; hire.setAttribute('aria-expanded', String(!section.hidden)); if (!section.hidden) { section.scrollIntoView({ block: 'nearest' }); plan.focus(); } }, { text: '+ Hire' });
-      hire.setAttribute('aria-expanded', 'false'); hire.setAttribute('aria-controls', section.id); head.insertBefore(hire, head.lastElementChild);
-      section.append(this.el('h3', '', 'Hire an agent'), this.el('p', 'ca-hint', 'Create a permanent expert with its own memory. Choose a plan and harness. Model and effort use the defaults and can be changed later in Runtime settings.'));
+      const hire = this.button('ca-btn ca-company-add', 'Hire', () => { section.hidden = !section.hidden; hire.setAttribute('aria-expanded', String(!section.hidden)); if (!section.hidden) { section.scrollIntoView({ block: 'nearest' }); pages[step].querySelector('input, select, textarea, button')?.focus(); } }, { text: '+' });
+      hire.title = 'Hire a person'; hire.setAttribute('aria-expanded', 'false'); hire.setAttribute('aria-controls', section.id); peopleHeading.append(hire);
+      section.append(this.el('h3', '', 'Hire a person'), this.el('p', 'ca-hint', 'A few questions about their role, personality and work. Review everything before hiring.'));
       const form = this.el('form', 'ca-company-form');
-      const field = (name, label, tag = 'input') => {
+      form.noValidate = true;
+      const progress = this.el('p', 'ca-hire-progress'); progress.setAttribute('role', 'status'); progress.setAttribute('aria-live', 'polite');
+      const pages = ['What should they help with?', 'Who are they?', 'How will they work?', 'Ready to welcome them?'].map((title, index) => {
+        const page = this.el('fieldset', 'ca-hire-step'); page.dataset.step = String(index); page.append(this.el('legend', '', title)); form.append(page); return page;
+      });
+      let step = 0;
+      form.prepend(progress);
+      const field = (name, label, tag = 'input', container = pages[0]) => {
         const wrap = this.el('label', 'ca-label'); wrap.append(this.el('span', 'ca-label-text', label));
-        const input = this.el(tag, 'ca-field'); input.name = name; input.setAttribute('aria-label', label); wrap.append(input); form.append(wrap); return input;
+        const input = this.el(tag, 'ca-field'); input.name = name; input.setAttribute('aria-label', label); wrap.append(input); container.append(wrap); return input;
       };
       const options = await this.app._chatApi('/api/company/hire-options');
       if (this.companyPage !== dlg || !dlg.isConnected) return;
       let sources = options.ok && Array.isArray(options.data?.sources) ? options.data.sources : [];
       let harnesses = options.ok && Array.isArray(options.data?.harnesses) ? options.data.harnesses : [];
-      const plan = field('plan', 'Plan or local model', 'select');
+      const templates = Array.isArray(options.data?.roles) && options.data.roles.length ? options.data.roles : [{ id: 'custom', label: 'Custom role', position: 'Specialist', expertise: [], responsibilities: [], personality: '' }];
+      const role = field('roleTemplate', 'Role starting point', 'select'); role.required = true;
+      const rolePlaceholder = this.el('option', '', 'Choose a role'); rolePlaceholder.value = ''; role.append(rolePlaceholder);
+      for (const template of templates) { const option = this.el('option', '', template.label); option.value = template.id; role.append(option); }
+      const position = field('position', 'Role title'); position.required = true; position.maxLength = 100;
+      const expertise = field('expertise', 'Skills and expertise'); expertise.required = true; expertise.placeholder = 'Code review, Security, Flight systems';
+      const responsibilities = field('responsibilities', 'Responsibilities (one per line)', 'textarea'); responsibilities.rows = 4; responsibilities.maxLength = 10000;
+      pages[0].append(this.el('p', 'ca-hint', 'These are editable starting points. Titles grant no hiring, scheduling or account permissions. Claims and completed work must be supported by evidence.'));
+      const plan = field('plan', 'Plan or local model', 'select', pages[2]);
       const placeholder = this.el('option', '', 'Choose a plan or local model'); placeholder.value = ''; plan.append(placeholder); plan.required = true;
       for (const source of sources) {
         const option = this.el('option', '', `${source.label}${source.kind === 'local' ? ' · Local model' : ''}`);
@@ -2522,7 +2559,7 @@ class ReverieChatApp {
         plan.append(option);
       }
       plan.disabled = !sources.some(source => source.modes?.length);
-      const harness = field('mode', 'Harness', 'select'); harness.required = true;
+      const harness = field('mode', 'Harness', 'select', pages[2]); harness.required = true;
       const selectedSource = () => sources.find((source) => `${source.kind}:${source.id}` === plan.value);
       const updatePlan = (preserve = false) => {
         const source = selectedSource();
@@ -2541,22 +2578,62 @@ class ReverieChatApp {
         harness.disabled = !harness.options.length;
       };
       plan.addEventListener('change', () => updatePlan(false)); updatePlan();
-      const name = field('name', 'Name'); name.required = true; name.maxLength = 100;
-      const pronouns = field('pronouns', 'Pronouns (optional)'); pronouns.maxLength = 24; pronouns.placeholder = 'e.g. they/them';
-      const voice = this.expertVoiceFields(form, pronouns, name);
-      const appearance = this.expertAppearanceFields(form, '', { name, random: true });
-      const position = field('position', 'Role'); position.required = true; position.maxLength = 100;
-      const expertise = field('expertise', 'Expertise'); expertise.required = true; expertise.placeholder = 'Code review, Security, Flight systems';
-      const parent = field('reportsTo', 'Reports to', 'select');
+      const name = field('name', 'Name', 'input', pages[1]); name.required = true; name.maxLength = 100;
+      const suggestName = () => {
+        const names = ['Alex', 'Mira', 'Ellis', 'Rowan', 'Morgan', 'Sage', 'Quinn', 'Casey', 'Avery', 'Jordan', 'Robin', 'Remy'];
+        const base = names[Math.floor(Math.random() * names.length)];
+        const taken = new Set(employees.map(e => e.name.normalize('NFKC').toLowerCase()));
+        let candidate = base, suffix = 2; while (taken.has(candidate.toLowerCase())) candidate = `${base} ${suffix++}`;
+        name.value = candidate; name.dispatchEvent(new this.doc.defaultView.Event('input'));
+      };
+      suggestName(); pages[1].append(this.button('ca-btn', 'Suggest another name', suggestName, { text: 'Another name' }));
+      const personality = field('personality', 'Personality and working style', 'textarea', pages[1]); personality.rows = 3; personality.maxLength = 1000;
+      const suggestStyle = () => { const styles = ['Curious and practical. Ask clear questions, explain tradeoffs, and verify claims.', 'Calm and methodical. Keep commitments visible, check assumptions, and report uncertainty.', 'Warm and direct. Make complex work understandable and support conclusions with evidence.']; personality.value = styles[Math.floor(Math.random() * styles.length)]; };
+      pages[1].append(this.button('ca-btn', 'Suggest another personality', suggestStyle, { text: 'Another personality' }));
+      const pronouns = field('pronouns', 'Pronouns (optional)', 'input', pages[1]); pronouns.maxLength = 24; pronouns.placeholder = 'e.g. they/them';
+      const voice = this.expertVoiceFields(pages[1], pronouns, name);
+      const appearance = this.expertAppearanceFields(pages[1], '', { name, random: true, avoidPhotos: employees.map(e => e.avatar).filter(Boolean) });
+      const rest = this.expertRestFields(pages[2]);
+      const recoveryWrap = this.el('label', 'ca-label');
+      const recover = this.el('input'); recover.type = 'checkbox'; recover.name = 'recoverEmployees'; recoveryWrap.append(recover, this.el('span', '', 'May wake reporting experts after a crash')); pages[2].append(recoveryWrap, this.el('p', 'ca-hint', 'An explicit recovery permission only. It grants no ability to hire, manage plans or schedule work.'));
+      const parent = field('reportsTo', 'Reports to', 'select', pages[2]);
       const owner = this.el('option', '', data.settings?.ownerName || 'Owner'); owner.value = 'owner'; parent.append(owner);
       for (const e of employees) { const option = this.el('option', '', e.name); option.value = e.id; parent.append(option); }
       const error = this.el('p', 'ca-company-error'); error.setAttribute('role', 'alert');
       const submit = this.el('button', 'ca-btn is-primary', 'Hire agent'); submit.type = 'submit';
       submit.disabled = plan.disabled;
-      const actions = this.el('div', 'ca-company-actions'); actions.append(submit);
+      const back = this.button('ca-btn', 'Back', () => showStep(step - 1), { text: 'Back' });
+      const next = this.button('ca-btn is-primary', 'Next', () => { if (validateStep()) showStep(step + 1); }, { text: 'Next' });
+      const cancel = this.button('ca-btn', 'Cancel hire', () => { section.hidden = true; hire.setAttribute('aria-expanded', 'false'); hire.focus(); }, { text: 'Cancel' });
+      const actions = this.el('div', 'ca-company-actions'); actions.append(back, next, submit, cancel);
       const sourceHint = this.el('p', 'ca-hint', options.error || 'Add a subscription plan or local model profile in Settings first.');
       sourceHint.hidden = sources.some(source => source.modes?.length); actions.append(sourceHint);
       form.append(error, actions);
+      const lines = () => responsibilities.value.split('\n').map(s => s.trim()).filter(Boolean);
+      const validateStep = () => {
+        error.textContent = '';
+        for (const input of pages[step].querySelectorAll('input, select, textarea')) if (!input.reportValidity()) return false;
+        if (step === 0 && (expertise.value.split(',').filter(s => s.trim()).length > 20 || expertise.value.split(',').some(s => s.trim().length > 100) || lines().length > 20 || lines().some(s => s.length > 500))) { error.textContent = 'Use up to 20 skills (100 characters each) and 20 responsibilities (500 characters each).'; return false; }
+        if (step === 1 && employees.some(e => e.name.normalize('NFKC').toLowerCase() === name.value.trim().normalize('NFKC').toLowerCase())) { error.textContent = 'That name is already used in this company. Choose a distinct name.'; name.focus(); return false; }
+        return true;
+      };
+      const review = () => {
+        pages[3].replaceChildren(this.el('legend', '', 'Ready to welcome them?'));
+        const photo = appearance.picture.value(); if (photo) { const image = this.el('img', 'ca-hire-review-photo'); image.src = photo; image.alt = ''; pages[3].append(image); }
+        const list = this.el('dl', 'ca-hire-review');
+        for (const [label, value] of [['Name', name.value.trim()], ['Role', position.value.trim()], ['Skills', expertise.value], ['Responsibilities', lines().join('\n') || 'None specified'], ['Personality', personality.value || 'None specified'], ['Pronouns', pronouns.value || 'Unspecified'], ['Voice', voice.value()?.id || 'Automatic'], ['Plan', selectedSource()?.label || 'Choose a plan'], ['Harness', harness.selectedOptions[0]?.textContent || 'Choose a harness'], ['Reports to', parent.selectedOptions[0]?.textContent || 'Owner'], ['Recovery permission', recover.checked ? 'May wake reporting experts' : 'Not granted'], ['Sleep / Dream', `${rest.sleep.checked ? 'Sleep allowed' : 'Sleep off'} · ${rest.dream.checked ? 'Dream allowed' : 'Dream off'}`]]) list.append(this.el('dt', '', label), this.literalText('dd', '', value));
+        pages[3].append(list, this.el('p', 'ca-hint', 'Hiring creates this person and starts their runtime. Plans and harnesses supply the runtime defaults. Sleep and Dream are preferences, not schedules.'));
+      };
+      const showStep = index => {
+        step = Math.max(0, Math.min(3, index));
+        pages.forEach((page, i) => { page.hidden = i !== step; });
+        progress.textContent = `Step ${step + 1} of 4 · ${['Role', 'Person', 'Plan and work', 'Review'][step]}`;
+        back.hidden = step === 0; next.hidden = step === 3; submit.hidden = step !== 3;
+        if (step === 3) review();
+        if (!section.hidden) pages[step].querySelector('input, select, textarea')?.focus();
+      };
+      role.addEventListener('change', () => { const template = templates.find(t => t.id === role.value); if (!template) return; position.value = template.position || ''; expertise.value = (template.expertise || []).join(', '); responsibilities.value = (template.responsibilities || []).join('\n'); const tones = ['Quietly curious', 'Calm and collaborative', 'Warm and concise', 'Direct and reflective']; personality.value = template.personality ? `${tones[Math.floor(Math.random() * tones.length)]}. ${template.personality}` : ''; });
+      showStep(0);
       let saving = false;
       let optionsGeneration = 0;
       refreshHireOptions = async () => {
@@ -2582,14 +2659,17 @@ class ReverieChatApp {
       };
       plan.addEventListener('focus', () => { void refreshHireOptions(); });
       form.addEventListener('submit', async ev => {
-        ev.preventDefault(); if (saving || !form.reportValidity()) return;
+        ev.preventDefault(); if (saving) return;
+        if (step !== 3) { if (validateStep()) showStep(step + 1); return; }
+        for (const page of pages.slice(0, 3)) { const invalid = [...page.querySelectorAll('input, select, textarea')].find(input => !input.checkValidity()); if (invalid) { showStep(pages.indexOf(page)); invalid.reportValidity(); return; } }
+        if (employees.some(e => e.name.normalize('NFKC').toLowerCase() === name.value.trim().normalize('NFKC').toLowerCase())) { showStep(1); error.textContent = 'That name is already used in this company. Choose a distinct name.'; return; }
         if (appearance.pending()) { error.textContent = 'Wait for the photo to finish loading.'; return; }
         const skills = expertise.value.split(',').map(s => s.trim()).filter(Boolean);
         if (!skills.length) { error.textContent = 'Add at least one area of expertise.'; return; }
         saving = true; submit.disabled = true; error.textContent = '';
         const source = selectedSource();
         if (!source || !harness.value) { saving = false; submit.disabled = false; error.textContent = 'Choose a plan and a compatible harness.'; return; }
-        const payload = { source: source.kind === 'local' ? { kind: 'local', endpointId: source.id } : { kind: 'subscription', profileId: source.id }, mode: harness.value, name: name.value.trim(), icon: this.expertInitial(name.value), ...(pronouns.value.trim() ? { pronouns: pronouns.value.trim() } : {}), ...(voice.value() ? { voice: voice.value() } : {}), position: position.value.trim(), expertise: skills, reportsTo: parent.value };
+        const payload = { responsibilities: lines(), personality: personality.value.trim(), permissions: { recoverEmployees: recover.checked }, sleepEnabled: rest.sleep.checked, dreamEnabled: rest.dream.checked, source: source.kind === 'local' ? { kind: 'local', endpointId: source.id } : { kind: 'subscription', profileId: source.id }, mode: harness.value, name: name.value.trim(), icon: this.expertInitial(name.value), ...(pronouns.value.trim() ? { pronouns: pronouns.value.trim() } : {}), ...(voice.value() ? { voice: voice.value() } : {}), position: position.value.trim(), expertise: skills, reportsTo: parent.value };
         try {
           const result = await this.app._chatApi('/api/company/hire', { method: 'POST', body: payload });
           if (!result.ok) { error.textContent = result.error || 'Could not hire this agent.'; return; }
@@ -5602,7 +5682,7 @@ class ReverieChatApp {
   }
 
   /** Pictures are optional; initials provide a quiet fallback. */
-  expertAppearanceFields(form, currentPhoto = '', { name, random = false } = {}) {
+  expertAppearanceFields(form, currentPhoto = '', { name, random = false, avoidPhotos = [] } = {}) {
     let intent = 0, converting = null;
     const picture = this.pictureField('Profile picture', currentPhoto, () => {}, {
       fallback: () => this.expertInitial(name?.value), alwaysRemove: true,
@@ -5637,7 +5717,8 @@ class ReverieChatApp {
         if (!response.ok) return [];
         const manifest = await response.json();
         const avatars = (Array.isArray(manifest.avatars) ? manifest.avatars : []).filter(avatar => avatar && /^pack-(?:0[1-9]|[1-4][0-9]|50)$/.test(avatar.id) && avatar.src === `/assets/avatars/${avatar.id}.png`);
-        if (random && avatars.length && intent === initialIntent && !picture.value()) void select(avatars[Math.floor(Math.random() * avatars.length)], true);
+        const unused = avatars.filter(avatar => !avoidPhotos.includes(avatar.src));
+        if (random && unused.length && intent === initialIntent && !picture.value()) void select(unused[Math.floor(Math.random() * unused.length)], true);
         return avatars;
       } catch { return []; }
     })();
@@ -5811,6 +5892,20 @@ class ReverieChatApp {
     } catch (failure) { if (dialog.isConnected) { status.textContent = ''; error.textContent = failure.message || 'Runtime settings are unavailable.'; } }
   }
 
+  expertRestFields(container, employee = {}) {
+    const create = (key, label, help) => {
+      const wrap = this.el('label', 'ca-hint', ' ' + label);
+      wrap.title = help;
+      const input = this.el('input', ''); input.type = 'checkbox'; input.name = key;
+      input.checked = employee[key] === true; input.title = help; input.setAttribute('aria-label', label);
+      wrap.prepend(input); container.append(wrap); return input;
+    };
+    return {
+      sleep: create('sleepEnabled', 'Sleep', 'Allow memory consolidation only in a Gantt task scheduled around work by the owner or an explicitly authorized scheduler. Scheduling is not connected yet; this preference does not start a timer.'),
+      dream: create('dreamEnabled', 'Dream', 'Allow scheduled creative exploration. Dream outputs are ideas, not facts. Scheduling is not connected yet; this preference does not start background work.'),
+    };
+  }
+
   openEmployeeProfile(employee, onSaved) {
     this.doc.querySelector('.ca-expert-profile')?.remove();
     const dialog = this.el('dialog', 'ca-dialog ca-expert-profile');
@@ -5819,8 +5914,17 @@ class ReverieChatApp {
     dialog.append(this.button('ca-btn', 'Runtime settings', () => this.openRuntimeSettings(employee, onSaved), { text: 'Runtime settings' }));
     const form = this.el('form');
     const pronounLabel = this.el('label', 'ca-label'); pronounLabel.append(this.el('span', 'ca-label-text', 'Pronouns (optional)'));
+    const profileField = (key, label, value, multiline = false) => {
+      const wrap = this.el('label', 'ca-label'); wrap.append(this.el('span', 'ca-label-text', label));
+      const input = this.el(multiline ? 'textarea' : 'input', 'ca-field'); input.name = key; input.value = value; wrap.append(input); form.append(wrap); return input;
+    };
+    const position = profileField('position', 'Role title', employee.position || ''); position.maxLength = 100;
+    const expertise = profileField('expertise', 'Skills and expertise', (employee.expertise || []).join(', '));
+    const responsibilities = profileField('responsibilities', 'Responsibilities (one per line)', (employee.responsibilities || []).join('\n'), true); responsibilities.maxLength = 10000;
+    const personality = profileField('personality', 'Personality and working style', employee.personality || '', true); personality.maxLength = 1000;
     const pronouns = this.el('input', 'ca-field'); pronouns.name = 'pronouns'; pronouns.maxLength = 24; pronouns.value = employee.pronouns || ''; pronouns.placeholder = 'e.g. they/them'; pronounLabel.append(pronouns); form.append(pronounLabel);
     const voice = this.expertVoiceFields(form, pronouns, { value: employee.name }, employee.voice);
+    const rest = this.expertRestFields(form, employee);
     const appearance = this.expertAppearanceFields(form, employee.avatar || '', { name: { value: employee.name } });
     const error = this.el('p', 'ca-company-error'); error.setAttribute('role', 'alert');
     const save = this.el('button', 'ca-btn is-primary', 'Save profile'); save.type = 'submit';
@@ -5831,7 +5935,14 @@ class ReverieChatApp {
       if (save.disabled || appearance.pending()) return;
       save.disabled = true;
       try {
-        const changed = await this.app._chatApi(`/api/company/employees/${encodeURIComponent(employee.id)}`, { method: 'PUT', body: { icon: this.expertInitial(employee.name), pronouns: pronouns.value.trim() || null, voice: voice.value() || null } });
+        const roleChanges = {};
+        if (position.value.trim() !== (employee.position || '')) roleChanges.position = position.value.trim();
+        const skills = expertise.value.split(',').map(s => s.trim()).filter(Boolean);
+        const duties = responsibilities.value.split('\n').map(s => s.trim()).filter(Boolean);
+        if (JSON.stringify(skills) !== JSON.stringify(employee.expertise || [])) roleChanges.expertise = skills;
+        if (JSON.stringify(duties) !== JSON.stringify(employee.responsibilities || [])) roleChanges.responsibilities = duties;
+        if (personality.value.trim() !== (employee.personality || '')) roleChanges.personality = personality.value.trim();
+        const changed = await this.app._chatApi(`/api/company/employees/${encodeURIComponent(employee.id)}`, { method: 'PUT', body: { ...roleChanges, sleepEnabled: rest.sleep.checked, dreamEnabled: rest.dream.checked, icon: this.expertInitial(employee.name), pronouns: pronouns.value.trim() || null, voice: voice.value() || null } });
         if (!changed.ok) { error.textContent = changed.error || 'Profile could not be saved.'; return; }
         if (appearance.picture.value() !== (employee.avatar || '') && !await this.saveEmployeePicture(employee.sessionId, appearance.picture.value())) {
           error.textContent = 'The profile picture could not be saved. Try again.'; return;
@@ -8153,10 +8264,11 @@ class ReverieEmbassyPairingView {
       this.owner = !!(host.ok || pending.ok);
       if (host.ok && host.data?.status === 'ready') {
         try {
-          const origin = caEmbassyInvite(`embassy-v1|${host.data.origin}|${'A'.repeat(43)}`).origin;
+          const needsAdvertisedOrigin = host.data.builtin === true && host.data.needsAdvertisedOrigin === true;
+          const origin = needsAdvertisedOrigin ? '' : caEmbassyInvite(`embassy-v1|${host.data.origin}|${'A'.repeat(43)}`).origin;
           const room = host.data.room;
           if (!room || typeof room.id !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(room.id) || typeof room.name !== 'string') throw Error();
-          this.host = { status: 'ready', origin, room: { id: room.id, name: room.name.slice(0, 200) },
+          this.host = { status: 'ready', origin, builtin: host.data.builtin === true, needsAdvertisedOrigin, room: { id: room.id, name: room.name.slice(0, 200) },
             ...(typeof host.data.bindingId === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(host.data.bindingId) ? { bindingId: host.data.bindingId } : {}) };
         } catch { this.host = { status: 'unreachable' }; }
       } else this.host = { status: host.ok && host.data?.status === 'unconfigured' ? 'unconfigured' : 'unreachable' };
@@ -8203,8 +8315,9 @@ class ReverieEmbassyPairingView {
     join.disabled = this.handles.some(item => item.state === 'cancelling');
     if (join.disabled) this.body.append(this.el('p', 'ca-hint', 'Recover the cancelling request below before starting another connection.'));
     const choices = this.el('div', 'eg-pair-choices'); choices.append(invite, join); this.body.append(choices);
-    this.body.append(this.el('p', 'ca-hint', this.host.status === 'ready' ? `${this.host.room.name} · ${this.host.origin}` : this.host.status === 'unconfigured' ? 'Hosting not set up. You can still join another company.' : 'Hosting is unavailable. You can still join another company.'));
+    this.body.append(this.el('p', 'ca-hint', this.host.status === 'ready' ? (this.host.needsAdvertisedOrigin ? 'Embassy is ready locally. Set a shareable HTTPS address to invite another company.' : `${this.host.room.name} · ${this.host.origin}`) : this.host.status === 'unconfigured' ? 'Hosting not set up. You can still join another company.' : 'Hosting is unavailable. You can still join another company.'));
     if (this.host.status === 'ready') this.body.append(this.button('Manage invitations', () => this.invites()));
+    if (this.host.builtin) this.body.append(this.button('Embassy address', () => this.hostAddress()));
     if (this.handles.length) {
       const list = this.el('section', 'eg-pair-recent'); list.append(this.el('h3', '', 'Connections in progress'));
       for (const item of this.handles) {
@@ -8217,8 +8330,26 @@ class ReverieEmbassyPairingView {
     fallback.append(this.button('Use an existing guest key', () => { this.close(); this.view.joinDialog(); })); this.body.append(fallback);
     this.actions.append(this.button('Cancel', this.cleanup)); invite.disabled ? join.focus() : invite.focus();
   }
+  hostAddress() {
+    if (this.busy || !this.owner || !this.host.builtin) return;
+    this.clearBody(); this.title.textContent = 'Embassy address'; const epoch = this.epoch;
+    this.body.append(this.el('p', 'ca-hint', 'Embassy is ready on this app. Enter the HTTPS address other companies can reach. This setting does not configure networking. Changing an existing address revokes outstanding invitations and guest access.'));
+    const label = this.el('label', '', 'Shareable HTTPS address'), input = this.el('input');
+    input.type = 'url'; input.autocomplete = 'off'; input.placeholder = 'https://embassy.example.com'; input.value = this.host.origin || ''; label.append(input); this.body.append(label);
+    const note = this.el('p', 'eg-pair-status'); note.setAttribute('role', 'status'); this.body.append(note);
+    const save = this.button('Save address and invite', async () => {
+      if (this.busy || !this.owner || !this.isCurrent(epoch)) return;
+      this.busy = true; save.disabled = true;
+      const result = await this.api('/api/embassy-host/settings', { method: 'POST', body: { origin: input.value.trim() } });
+      this.busy = false; if (!this.isCurrent(epoch)) return; save.disabled = false;
+      if (!result.ok) { note.textContent = this.error(result); return; }
+      await this.refresh(); if (this.isCurrent(epoch)) await this.createInvite();
+    }, true);
+    this.actions.append(this.button('Back', () => this.home()), save); input.focus();
+  }
   async createInvite() {
     if (this.busy || !this.owner || this.host.status !== 'ready') return;
+    if (this.host.needsAdvertisedOrigin) { this.hostAddress(); return; }
     this.clearBody(); this.record = null; this.title.textContent = 'Invite a company'; const epoch = this.epoch;
     this.body.append(this.el('p', 'eg-pair-status', 'Creating your invitation…')); this.actions.append(this.button('Cancel', this.cleanup));
     if (!this.inviteOperation) this.inviteOperation = this.win.crypto.randomUUID();

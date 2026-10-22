@@ -5,6 +5,7 @@ import { z } from 'zod';
 import { randomUUID } from 'node:crypto';
 import { CompanyError, type CompanyService } from '../../company-service.js';
 import { EmployeeSchema } from '../../company-types.js';
+import { COMPANY_ROLE_TEMPLATES } from '../../company-role-templates.js';
 import { getCli, listClis } from '../../config/cli-registry/registry.js';
 import { EFFORT_LEVELS } from '../../types/session.js';
 import { ModelIdSchema, sessionCreateBody } from '../../experts.js';
@@ -19,6 +20,11 @@ const HireSchema = EmployeeSchema.pick({
   icon: true,
   position: true,
   expertise: true,
+  responsibilities: true,
+  personality: true,
+  permissions: true,
+  sleepEnabled: true,
+  dreamEnabled: true,
   reportsTo: true,
   pronouns: true,
   voice: true,
@@ -79,6 +85,7 @@ export function registerCompanyHireRoutes(app: FastifyInstance, deps: CompanyHir
       const localHarnesses = harnesses.filter((c) => c.capabilities.customModelInjection.kind !== 'unsupported');
       const localDefault = localHarnesses.find((c) => c.id === 'opencode') ?? localHarnesses.find((c) => !c.stock) ?? localHarnesses[0];
       return {
+        roles: COMPANY_ROLE_TEMPLATES,
         harnesses: harnesses.map((c) => ({ id: c.id, label: c.label, efforts: hireEffort(c.id).values })),
         sources: [
           ...profiles.map((p) => {
@@ -121,6 +128,8 @@ export function registerCompanyHireRoutes(app: FastifyInstance, deps: CompanyHir
       if (body.effort && !effort.values.includes(body.effort))
         throw new CompanyError('Choose an effort supported by this harness');
       const owner = ownerFor(req);
+      if (deps.company.view(owner).employees.some(e => e.name.normalize('NFKC').toLowerCase() === body.name.trim().normalize('NFKC').toLowerCase()))
+        throw new CompanyError('That name is already used in this company. Choose a distinct name.', 409);
       const profile =
         source.kind === 'subscription' ? (await deps.profiles()).find((p) => p.id === source.profileId) : undefined;
       if (source.kind === 'subscription' && (!profile || !subscriptionBinding(body.mode, profile.provider)))
@@ -168,6 +177,9 @@ export function registerCompanyHireRoutes(app: FastifyInstance, deps: CompanyHir
           icon: body.icon,
           position: body.position,
           expertise: body.expertise,
+          responsibilities: body.responsibilities,
+          personality: body.personality,
+          permissions: body.permissions,
           reportsTo: body.reportsTo,
           pronouns: body.pronouns,
           voice: body.voice,
@@ -175,6 +187,8 @@ export function registerCompanyHireRoutes(app: FastifyInstance, deps: CompanyHir
           runtimeRecipe: deps.captureRuntime?.(sessionId),
           owner,
           researchEnabled: false,
+          sleepEnabled: body.sleepEnabled,
+          dreamEnabled: body.dreamEnabled,
           desiredRunning: true,
         });
         return { employee, sessionId };

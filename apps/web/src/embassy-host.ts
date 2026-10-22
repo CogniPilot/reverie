@@ -158,6 +158,7 @@ export interface EmbassyHostDeps {
   opsFile: string;
   transport?: EmbassyChannelTransport;
   now?: () => number;
+  localStatus?: () => Promise<{ builtin: boolean; needsAdvertisedOrigin: boolean }>;
 }
 
 export class EmbassyHost {
@@ -273,6 +274,8 @@ export class EmbassyHost {
     origin?: string;
     room?: { id: string; name: string };
     bindingId?: string;
+    builtin?: boolean;
+    needsAdvertisedOrigin?: boolean;
   }> {
     try {
       const res = await this.call('GET', '');
@@ -283,7 +286,7 @@ export class EmbassyHost {
         .update(`reverie-embassy-binding-v1\n${this.digest}\n${origin}\n${room.id}`)
         .digest('hex')
         .slice(0, 32);
-      return { status: 'ready', origin, room: { id: room.id, name: room.name }, bindingId };
+      return { status: 'ready', origin, room: { id: room.id, name: room.name }, bindingId, ...(await this.deps.localStatus?.()) };
     } catch (error) {
       if (error instanceof EmbassyPairError && error.code === 'HOSTING_UNCONFIGURED') return { status: 'unconfigured' };
       return { status: 'unreachable' };

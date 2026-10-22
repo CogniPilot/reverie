@@ -229,12 +229,17 @@ describe('Company is one page for plans and people', () => {
     const checkbox = handle.document.querySelector<HTMLInputElement>('[aria-label="Recovery permission for Reviewer"]')!;
     expect(checkbox).not.toBeNull();
     expect(checkbox.checked).toBe(false);
+    const sleep = handle.document.querySelector<HTMLInputElement>('[aria-label="Sleep"]')!;
+    const dream = handle.document.querySelector<HTMLInputElement>('[aria-label="Dream"]')!;
+    expect(sleep.checked).toBe(false); expect(dream.checked).toBe(false);
+    expect(sleep.title).toContain('Gantt'); expect(sleep.title).toContain('not connected');
+    expect(dream.title).toContain('ideas, not facts');
     checkbox.checked = true;
-    handle.document.querySelector<HTMLButtonElement>('[aria-label="Save permissions for Reviewer"]')!.click();
+    handle.document.querySelector<HTMLButtonElement>('[aria-label="Save preferences for Reviewer"]')!.click();
     await handle.flush();
     expect(writes).toEqual([{
       path: '/api/company/employees/' + employee.id,
-      options: { method: 'PUT', body: { permissions: { recoverEmployees: true } } },
+      options: { method: 'PUT', body: { sleepEnabled: false, dreamEnabled: false, permissions: { recoverEmployees: true } } },
     }]);
     owner = false;
     handle.shell.closePage();
@@ -318,4 +323,27 @@ describe('owner chooses one crash recovery expert', () => {
     expect(select.selectedOptions[0].textContent).toBe('Unavailable expert');
     expect(select.disabled).toBe(true);
   });
+});
+
+it('shows saved Sleep/Dream preferences and lets the owner change them during vacation without changing recovery grants', async () => {
+  const { handle, employee, company } = await fixture();
+  company.canManage = true;
+  Object.assign(employee, { onVacation: true, sleepEnabled: true, dreamEnabled: false });
+  const original = handle.app._chatApi.bind(handle.app);
+  const writes: unknown[] = [];
+  handle.app._chatApi = async (path: string, options: any) => {
+    if (path === '/api/company') return { ok: true, data: company };
+    if (path === '/api/chatrooms/phone-status') return { ok: true, data: { self: 'owner', canSetOwn: true } };
+    if (path === '/api/company/employees/' + employee.id) { writes.push(options.body); return { ok: true, data: {} }; }
+    return original(path, options);
+  };
+  await handle.shell.openCompany('people'); await handle.flush();
+  const sleep = handle.document.querySelector<HTMLInputElement>('[aria-label="Sleep"]')!;
+  const dream = handle.document.querySelector<HTMLInputElement>('[aria-label="Dream"]')!;
+  const save = handle.document.querySelector<HTMLButtonElement>('[aria-label="Save preferences for Reviewer"]')!;
+  expect(sleep.checked).toBe(true); expect(dream.checked).toBe(false);
+  expect(handle.document.querySelector<HTMLInputElement>('[aria-label="Recovery permission for Reviewer"]')!.disabled).toBe(true);
+  expect(save.disabled).toBe(false);
+  sleep.checked = false; dream.checked = true; save.click(); await handle.flush();
+  expect(writes).toEqual([{ sleepEnabled: false, dreamEnabled: true }]);
 });

@@ -84,6 +84,7 @@ h2{margin:0;font-size:13px;text-transform:uppercase;letter-spacing:.08em;color:v
 .plan-members{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:9px 0;min-height:34px}
 .plan-member{position:relative;display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;padding:0;border:1px solid var(--line);border-radius:50%;background:var(--panel);color:var(--fg);font:600 13px var(--sans);cursor:pointer}
 .plan-member:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.plan-member-pending{filter:grayscale(1);opacity:.55;border-style:dashed;cursor:pointer}
 .plan-member-face{display:flex;align-items:center;justify-content:center;width:100%;height:100%;overflow:hidden;border-radius:50%;font-size:19px}
 .plan-member img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;border-radius:50%}
 .plan-member-name{display:none;position:absolute;z-index:3;top:calc(100% + 4px);left:50%;transform:translateX(-50%);padding:4px 7px;border:1px solid var(--line);border-radius:6px;background:var(--panel);color:var(--fg);font:12px var(--sans);white-space:nowrap;box-shadow:0 3px 10px rgba(0,0,0,.12)}
@@ -159,6 +160,9 @@ dialog .qr svg{width:160px;height:160px;background:#fff;padding:6px;border-radiu
 :root[data-board-embedded="true"] .wrap > header > div:first-child,
 :root[data-company-plans-embedded="true"] .wrap > header > div:first-child,
 :root[data-board-embedded="true"] #company-link { display:none; }
+:root[data-company-plans-embedded="true"] .wrap > header { display:none; }
+:root[data-company-plans-embedded="true"] #sec-burn > .phead { justify-content:flex-start; }
+:root[data-company-plans-embedded="true"] .plan-header-actions { margin-left:auto; min-width:0; justify-content:flex-end; }
 
 :root[data-company-plans-embedded="true"] #plans { grid-template-columns:repeat(auto-fill,minmax(min(100%,360px),420px)); }
 .plan[data-has-usage="false"] .stats,.plan[data-has-usage="false"] > svg { display:none; }

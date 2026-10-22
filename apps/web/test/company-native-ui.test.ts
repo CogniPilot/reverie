@@ -75,6 +75,8 @@ async function setup(verified = true) {
 function fill(h: any) {
   const doc = h.document;
   const field = (name: string) => doc.querySelector(`.ca-company [name="${name}"]`) as HTMLInputElement;
+  field('roleTemplate').value = 'custom';
+  field('roleTemplate').dispatchEvent(new h.window.Event('change'));
   field('plan').value = 'subscription:plan-one';
   field('plan').dispatchEvent(new h.window.Event('change', { bubbles: true }));
   field('name').value = 'Writer';
@@ -84,6 +86,8 @@ function fill(h: any) {
   return field;
 }
 function submit(h: any) {
+  const next = h.document.querySelector('.ca-company-hire [aria-label="Next"]');
+  for (let i = 0; i < 3 && !next.hidden; i++) next.click();
   h.document
     .querySelector('.ca-company-hire form')
     .dispatchEvent(new h.window.Event('submit', { bubbles: true, cancelable: true }));
@@ -123,6 +127,11 @@ it('chooses a plan and harness with backend runtime defaults for a fresh expert;
       icon: 'W',
       position: 'Flight-stack reviewer',
       expertise: ['Code review', 'Flight systems'],
+      responsibilities: [],
+      personality: '',
+      permissions: { recoverEmployees: false },
+      sleepEnabled: false,
+      dreamEnabled: false,
       reportsTo: 'lead',
     },
   });

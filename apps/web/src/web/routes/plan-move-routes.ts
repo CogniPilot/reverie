@@ -12,23 +12,6 @@ const Identifier = z
   .min(1)
   .max(100)
   .regex(/^[a-zA-Z0-9_-]+$/);
-const MoveSchema = z
-  .object({
-    id: Identifier,
-    employeeId: Identifier,
-    sessionId: Identifier,
-    fromAccount: Identifier,
-    toAccount: Identifier,
-    forceBusy: z.boolean().default(false),
-    handoff: z.string().trim().min(1).max(12000),
-    model: z
-      .string()
-      .min(1)
-      .max(100)
-      .regex(/^[a-zA-Z0-9][a-zA-Z0-9._\-[\]]*$/)
-      .optional(),
-  })
-  .strict();
 
 export function registerPlanMoveRoutes(
   app: FastifyInstance,
@@ -57,17 +40,8 @@ export function registerPlanMoveRoutes(
           .send(createErrorResponse(ApiErrorCode.FORBIDDEN, 'Plan moves require the signed-in owner browser'));
     });
 
-    routes.post('/api/plans/moves', async (request, reply) => {
-      const input = parseBody(MoveSchema, request.body);
-      try {
-        const data = execution
-          ? await moves.begin(input, ownerFor(request), execution(request))
-          : await moves.begin(input, ownerFor(request));
-        return reply.code(202).send({ success: true, data });
-      } catch (error) {
-        return failure(reply, error);
-      }
-    });
+    // Older tabs must not bypass the expert's approval by using the retired immediate-move endpoint.
+    routes.post('/api/plans/moves', async (_request, reply) => reply.code(409).send(createErrorResponse(ApiErrorCode.CONFLICT, 'Create a plan request and let the expert prepare its handoff and approve the switch.')));
 
     routes.post('/api/plans/moves/recent', async (request) => ({
       success: true,

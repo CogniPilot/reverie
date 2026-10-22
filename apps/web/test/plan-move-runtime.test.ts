@@ -14,11 +14,11 @@ const input: PlanMoveInput = {
   handoff: 'Read the work handoff.',
   model: 'chosen-model',
 };
-function harness() {
+function harness(owner?: string) {
   const pane = (id: string) =>
     ({
       id,
-      owner: undefined,
+      owner,
       name: 'Casey',
       mode: 'codex',
       pid: 123,
@@ -46,7 +46,7 @@ function harness() {
       allocations: vi.fn(async () => ({ generatedAt: 1, accounts: [{ id: 'first', sessionIds: ['old'] }] })),
       account: vi.fn(async (id) => ({ id, provider: 'openai', label: id, profileId: id }) as PlanAccount),
     },
-    chat: { rooms: () => [{ id: 'audit', name: 'reverie', members: [] } as never], post: vi.fn() },
+    chat: { rooms: () => [{ id: 'audit', name: 'reverie', owner, members: [] } as never], post: vi.fn(), auditEntry: vi.fn(async () => {}) },
     sessions,
     mux: { getSession: vi.fn(() => ({ pid: 123 }) as never), isPaneDead: vi.fn(() => false) },
     cleanup: vi.fn(async () => {}),
@@ -57,7 +57,7 @@ function harness() {
     capture: vi.fn(async () => [{ pid: 123, start: '456' }]),
     survivors: vi.fn(async () => []),
   };
-  return { runtime, sessions, executor: planMoveExecutor(runtime) };
+  return { runtime, sessions, executor: planMoveExecutor(runtime, owner) };
 }
 
 describe('runtime adapter uses normal creation and interactive paths, never changes live account env', () => {
@@ -120,6 +120,21 @@ describe('runtime adapter uses normal creation and interactive paths, never chan
     expect(test.runtime.cleanup).not.toHaveBeenCalled();
   });
 
+  it('rechecks owner authority after readiness and before stopping source, but permits safe candidate rollback', async () => {
+    const test = harness();
+    await test.executor.create(input, undefined);
+    test.runtime.request = vi.fn(async () => {
+      test.runtime.authorized = () => false;
+      return { data: { wait: { matched: true } } };
+    });
+    await expect(test.executor.ready('new')).rejects.toThrow('sign-in expired');
+    expect(test.sessions.get('new')?.writeViaMux).not.toHaveBeenCalled();
+    await expect(test.executor.stop('old')).rejects.toThrow('sign-in expired');
+    expect(test.runtime.cleanup).not.toHaveBeenCalled();
+    await test.executor.stop('new');
+    expect(test.runtime.cleanup).toHaveBeenCalledWith('new', true, 'plan_move');
+  });
+
   it('checks captured old process identities after normal cleanup and reports remaining orphans', async () => {
     const test = harness();
     test.runtime.survivors = vi.fn(async () => [123]);
@@ -155,5 +170,41 @@ describe('runtime adapter uses normal creation and interactive paths, never chan
       { kind: 'system', name: 'Plans' },
       'AUDIT plan move completed: Owner moved Casey from first to second'
     );
+    expect(test.runtime.chat.auditEntry).toHaveBeenCalledWith(expect.objectContaining({ event: 'plan_move', actor: 'owner', employeeId: 'casey', fromAccount: 'first', toAccount: 'second', phase: 'completed' }));
+  });
+
+  it('previews and audits privately when only General exists, without posting or creating a channel', async () => {
+    const test = harness('alice');
+    test.runtime.chat.rooms = () => [{ id: 'general', name: 'general', owner: 'alice', members: [] } as never];
+    await expect(test.executor.snapshot('casey')).resolves.toMatchObject({ account: 'first' });
+    await test.executor.audit({ ...input, owner: 'alice', name: 'Casey', oldSession: 'old', phase: 'stopping', at: 1 });
+    expect(test.runtime.chat.auditEntry).toHaveBeenCalledWith(expect.objectContaining({ owner: 'alice', actor: 'alice', moveId: 'move' }));
+    expect(test.runtime.chat.post).not.toHaveBeenCalled(); expect(test.runtime.cleanup).not.toHaveBeenCalled();
+  });
+
+  it('never mirrors into another owner’s channel, a DM, or an archived room', async () => {
+    const test = harness('alice');
+    test.runtime.chat.rooms = () => [
+      { id: 'foreign', name: 'reverie', owner: 'bob', members: [] },
+      { id: 'dm', name: 'reverie', owner: 'alice', kind: 'dm', members: [] },
+      { id: 'archived', name: 'reverie', owner: 'alice', archivedAt: 1, members: [] },
+    ] as never;
+    await expect(test.executor.snapshot('casey')).resolves.toMatchObject({ sessionId: 'old' });
+    await test.executor.audit({ ...input, owner: 'alice', name: 'Casey', oldSession: 'old', phase: 'completed', at: 1 });
+    expect(test.runtime.chat.auditEntry).toHaveBeenCalledTimes(1); expect(test.runtime.chat.post).not.toHaveBeenCalled();
+    await expect(test.executor.audit({ ...input, owner: 'bob', name: 'Foreign', oldSession: 'old', phase: 'completed', at: 1 })).rejects.toThrow('another owner');
+    expect(test.runtime.chat.auditEntry).toHaveBeenCalledTimes(1);
+  });
+
+  it('requires the private durable audit but tolerates a failed optional room mirror', async () => {
+    const test = harness();
+    const record = { ...input, name: 'Casey', oldSession: 'old', phase: 'stopping' as const, at: 1 };
+    vi.mocked(test.runtime.chat.auditEntry).mockRejectedValueOnce(new Error('Audit storage unavailable'));
+    await expect(test.executor.audit(record)).rejects.toThrow('Audit storage unavailable');
+    expect(test.runtime.chat.post).not.toHaveBeenCalled();
+    vi.mocked(test.runtime.chat.post).mockImplementationOnce(() => { throw new Error('Channel read-only'); });
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    await expect(test.executor.audit(record)).resolves.toBeUndefined();
+    expect(test.runtime.chat.auditEntry).toHaveBeenCalledTimes(2); warning.mockRestore();
   });
 });

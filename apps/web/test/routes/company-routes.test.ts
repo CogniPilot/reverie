@@ -71,6 +71,21 @@ describe('company HTTP ownership and expert invites', () => {
     expect(service.view().employees[0].runtimeRecipe).toBeUndefined();
   });
 
+  it('defaults sleep and dream off and lets only the owner persist preferences, including on vacation', async () => {
+    const employee = await service.hire(hireBody);
+    expect(employee.sleepEnabled).toBe(false);
+    expect(employee.dreamEnabled).toBe(false);
+    expect(employee.researchEnabled).toBe(true);
+    const url = '/api/company/employees/' + employee.id;
+    const payload = { sleepEnabled: true, dreamEnabled: true };
+    expect((await app.inject({ method: 'PUT', url, payload, headers: { 'x-reverie-parent-session': 'parent-session' } })).statusCode).toBe(403);
+    await service.store.update(state => { state.employees[0].onVacation = true; });
+    expect((await app.inject({ method: 'PUT', url, payload })).statusCode).toBe(200);
+    expect((await app.inject({ method: 'PUT', url, payload: { icon: 'E' } })).statusCode).toBe(200);
+    const reloaded = new CompanyStore(service.store.file); await reloaded.init();
+    expect(reloaded.snapshot().employees[0]).toMatchObject({ sleepEnabled: true, dreamEnabled: true, onVacation: true, researchEnabled: true });
+  });
+
   it('requires an explicit recovery grant, never a title, to wake a colleague', async () => {
     const target = await service.hire(hireBody);
     const lead = await service.hire({ ...hireBody, name: 'Lead', sessionId: 'parent-session', position: 'COO' });

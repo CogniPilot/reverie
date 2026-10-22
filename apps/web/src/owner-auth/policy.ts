@@ -1,3 +1,4 @@
+import { isEmbassyProtocolRoute } from '../embassy-public-routes.js';
 /**
  * @fileoverview Who may call what, once an owner account exists.
  *
@@ -60,6 +61,9 @@ const AGENT_ROUTES = new Set([
   'GET /api/company',
   'POST /api/company/employees/:id/wake', // route checks the explicit owner-granted recovery capability
   'GET /api/plans', // read-only; the route scopes by role (coordinators all accounts, other agents their own)
+  // Private one-time approval credentials plus the exact current employee binding are checked by these handlers.
+  'POST /api/plans/requests/:id/approve',
+  'POST /api/plans/requests/:id/reject',
   'POST /api/company/self',
   'POST /api/company/self/avatar',
   'DELETE /api/company/self/avatar',
@@ -134,6 +138,7 @@ const isPrivatePath = (path: string) => {
 export function classify(method: string, route: string | undefined, rawUrl: string): RouteClass {
   if (route !== undefined) {
     const key = `${method} ${route}`;
+    if (isEmbassyProtocolRoute(method, route)) return 'public';
     if (PUBLIC_ROUTES.has(key)) return 'public';
     if (route === '/owner' || route.startsWith('/owner/')) return 'public';
     if (route.startsWith('/api/chatrooms')) return 'agent'; // those routes make their own owner/agent decisions

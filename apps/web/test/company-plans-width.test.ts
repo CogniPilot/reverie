@@ -43,7 +43,7 @@ it.each([
   ['company-plans.html', 'unrelated-frame', '1400px'],
 ])('uses the intended content-width cap on %s inside %s', (page, frameClass, width) => {
   const html = readFileSync(new URL(page, publicDirectory), 'utf8');
-  const dom = new JSDOM(html, { runScripts: 'outside-only' });
+  const dom = new JSDOM(html, { url: 'http://localhost/company/plans', runScripts: 'outside-only' });
   try {
     if (frameClass) {
       const frame = dom.window.document.createElement('iframe');
@@ -58,7 +58,7 @@ it.each([
     style.textContent = styles;
     dom.window.document.head.append(style);
     expect(dom.window.getComputedStyle(dom.window.document.querySelector('.wrap')!).maxWidth).toBe(width);
-    expect(dom.window.getComputedStyle(dom.window.document.querySelector('.grid2')!).gridTemplateColumns).toContain(frameClass === 'ca-company-plans-frame' ? '280px' : '300px');
+    expect(dom.window.getComputedStyle(dom.window.document.querySelector('.grid2')!).gridTemplateColumns).toContain(frameClass === 'ca-company-plans-frame' ? '360px' : '300px');
     expect(dom.window.document.documentElement.dataset.companyPlansEmbedded).toBe(frameClass === 'ca-company-plans-frame' ? 'true' : undefined);
   } finally { dom.window.close(); }
 });

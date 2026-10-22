@@ -13,12 +13,10 @@
       <h1><span id="co"></span> Plans <span>· Company burn rate</span></h1>
       <div class="meta"><span class="clock" id="clock"></span><span id="built"></span></div>
     </div>
-    <div class="tools"><button class="btn" id="refresh">Refresh</button><button class="btn" id="theme">Theme</button></div>
   </header>
   <div class="banner" id="banner" hidden></div>
   <section class="panel" id="sec-burn">
-    <div class="phead"><h2>Burn rate · this week per plan</h2><details class="plan-help"><summary>How usage is projected</summary><p class="hint">Grey edges = week start and stop point. The stop is the earlier of the next banked-reset expiry and weekly reset; a later weekly reset stays as a thin reference. Dashed grey line = even pace to the stop point (above it = burning faster). Dotted line = current-rate projection, ending at 100% if the budget runs out before the stop point.</p></details><button type="button" class="btn" id="addAcct" hidden>Add account</button></div>
-    <div class="tools"><button type="button" class="btn" id="planMoveHistory" hidden>Recent plan moves</button></div>
+    <div class="phead"><h2>Burn rate · this week per plan</h2><details class="plan-help"><summary>How usage is projected</summary><p class="hint">Grey edges = week start and stop point. The stop is the earlier of the next banked-reset expiry and weekly reset; a later weekly reset stays as a thin reference. Dashed grey line = even pace to the stop point (above it = burning faster). Dotted line = current-rate projection, ending at 100% if the budget runs out before the stop point.</p></details><div class="tools plan-header-actions" aria-label="Plan controls"><button type="button" class="btn" id="refresh">Refresh</button><button type="button" class="btn" id="theme">Theme</button><button type="button" class="btn" id="planMoveHistory" hidden>Recent plan moves</button><button type="button" class="btn" id="addAcct" hidden>Add account</button></div></div>
     <div class="grid2" id="plans"></div>
   </section>
 
@@ -40,6 +38,7 @@ const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).
 const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 let B = null, TZ = 'America/New_York';
 let planAllocations = null, planMembersBusy = false, planMembersError = false;
+let pendingPlanRequests = [];
 
 /* ---------- time in the company zone ---------- */
 const fmt = (t, o) => new Intl.DateTimeFormat('en-US', Object.assign({timeZone: TZ}, o)).format(new Date(t));
@@ -172,7 +171,12 @@ function planMemberHtml(plan) {
     const fallback = member.icon || Array.from(member.name || '?')[0];
     return `<button type="button" class="plan-member" draggable="true" data-member="${esc(member.id)}" title="${esc(member.name)}" aria-label="${esc(member.name)}"><span class="plan-member-face" aria-hidden="true">${esc(fallback)}</span>${avatar ? `<img src="${esc(avatar)}" alt="" loading="lazy">` : ''}<span class="plan-member-name" aria-hidden="true">${esc(member.name)}</span></button>`;
   }).join('');
-  return (icons || '<span class="plan-member-state">No employees allocated</span>') + (planMembersError ? '<span class="plan-member-state">Updates paused</span>' : '');
+  const ghosts = pendingPlanRequests.filter(request => request.toAccount === plan.id && ['pending', 'reauthorize-required', 'executing', 'recovery-required'].includes(request.phase) && !members.some(member => member.id === request.employeeId)).map(request => {
+    const member = planAllocations.employees.find(employee => employee.id === request.employeeId);
+    const avatar = typeof member?.avatar === 'string' && /^\/api\/avatars\/[a-zA-Z0-9-]+(?:\?v=\d+)?$/.test(member.avatar) ? member.avatar : null;
+    return `<button type="button" class="plan-member plan-member-pending" data-plan-request="${esc(request.id)}" title="${esc(request.name)}: move requested" aria-label="${esc(request.name)}: pending move request"><span class="plan-member-face" aria-hidden="true">${esc(Array.from(request.name || '?')[0])}</span>${avatar ? `<img src="${esc(avatar)}" alt="" loading="lazy">` : ''}<span class="plan-member-name" aria-hidden="true">${esc(request.name)} · requested</span></button>`;
+  }).join('');
+  return (icons + ghosts || '<span class="plan-member-state">No employees allocated</span>') + (planMembersError ? '<span class="plan-member-state">Updates paused</span>' : '');
 }
 
 function renderPlanMembers() {
@@ -197,11 +201,15 @@ async function refreshPlanMembers() {
   const controller = new AbortController(), timeout = setTimeout(() => controller.abort(), 8e3);
   try {
     const response = await fetch('/api/plans/allocations', {cache: 'no-store', credentials: 'same-origin', headers: {accept: 'application/json'}, signal: controller.signal});
-    if (response.status === 401 || response.status === 403) planAllocations = null;
+    if (response.status === 401 || response.status === 403) { planAllocations = null; pendingPlanRequests = []; }
     if (!response.ok) throw new Error('Members unavailable');
     const reply = await response.json();
     if (!reply.success || !Array.isArray(reply.data?.accounts) || !Array.isArray(reply.data?.employees)) throw new Error('Invalid membership data');
     planAllocations = reply.data; planMembersError = false;
+    try {
+      const requests = await planMoveRequest('/api/plans/requests/recent');
+      pendingPlanRequests = Array.isArray(requests) ? requests : [];
+    } catch { pendingPlanRequests = []; }
   } catch {
     planMembersError = true;
   } finally {
@@ -234,7 +242,14 @@ function wirePlanMoves(row) {
       event.preventDefault(); void openPlanMove(id, row.dataset.planMembers);
     });
   }
-  row.querySelectorAll('.plan-member').forEach(button => {
+  row.querySelectorAll('[data-plan-request]').forEach(button => {
+    button.onclick = () => {
+      const request = pendingPlanRequests.find(record => record.id === button.dataset.planRequest);
+      const dialog = document.getElementById('moveDlg');
+      if (request && dialog && !dialog.open) { dialog.showModal(); showPlanRequestProgress(dialog, request); }
+    };
+  });
+  row.querySelectorAll('.plan-member[data-member]').forEach(button => {
     button.addEventListener('dragstart', event => {
       event.dataTransfer.setData('application/x-reverie-plan-member', button.dataset.member);
       event.dataTransfer.effectAllowed = 'move';
@@ -259,27 +274,26 @@ async function openPlanMove(employeeId, destination) {
     if (!targets.length) throw new Error('No other plan for this provider is available.');
     if (destination === preview.account) { dialog.close(); return; }
     if (destination && !targets.some(account => account.id === destination)) throw new Error('Choose another plan for the same provider.');
-    dialog.innerHTML = `<h3>Move ${esc(employee.name)}</h3><p class="status">From ${esc(source?.name || preview.account)}. This starts a fresh session, transfers room seats, then stops the old session only after the replacement is ready.</p><form>
+    dialog.innerHTML = `<h3>Request move: ${esc(employee.name)}</h3><p class="status">From ${esc(source?.name || preview.account)}. The expert keeps working here until it prepares a handoff and approves the request. A grey avatar marks the requested destination. The old session stops only after its replacement is ready.</p><form>
       <label>Destination plan<select name="target">${targets.map(account => `<option value="${esc(account.id)}"${account.id === destination ? ' selected' : ''}>${esc(account.name)}</option>`).join('')}</select></label>
-      <label>Handoff for the fresh session<textarea name="handoff" maxlength="12000" required placeholder="Paste the work-safe handoff or its exact path and next action"></textarea></label>
-      <label>Launch model${preview.mode === 'codex' ? ' (confirm destination compatibility)' : ''}<input name="model" maxlength="100" value="${esc(preview.model || '')}"${preview.mode === 'codex' ? ' required' : ''}></label>
-      ${preview.working ? '<p class="status">This person is working. By default, the move waits up to five minutes for idle.</p><label><input type="checkbox" name="force" style="width:auto"> Move even while working (second confirmation required)</label>' : ''}
-      <p class="err" role="alert"></p><div><button type="submit" class="btn">Confirm move</button> <button type="button" class="btn" data-close>Cancel</button></div></form>`;
+      <p class="err" role="alert"></p><div><button type="submit" class="btn">Request move</button> <button type="button" class="btn" data-close>Cancel</button></div></form>`;
     dialog.querySelector('[data-close]').onclick = () => dialog.close();
+    let submitting = false;
     dialog.querySelector('form').onsubmit = async event => {
       event.preventDefault();
-      const form = event.currentTarget, target = form.elements.target.value, forceBusy = !!form.elements.force?.checked;
-      const targetName = targets.find(account => account.id === target)?.name || target;
-      if (forceBusy && !window.confirm(`${employee.name} is working. Interrupt and move to ${targetName} anyway?`)) return;
-      const submit = form.querySelector('[type=submit]'); submit.disabled = true;
+      if (submitting) return;
+      submitting = true;
+      const form = event.currentTarget, submit = form.querySelector('[type=submit]'); submit.disabled = true;
       form.querySelector('.err').textContent = '';
       const id = Array.from(crypto.getRandomValues(new Uint8Array(16)), byte => byte.toString(16).padStart(2, '0')).join('');
       try {
-        const record = await planMoveRequest('/api/plans/moves', {id, employeeId, sessionId: preview.sessionId, fromAccount: preview.account, toAccount: target, forceBusy, handoff: form.elements.handoff.value, ...(form.elements.model.value.trim() ? {model: form.elements.model.value.trim()} : {})});
-        showPlanMoveProgress(dialog, record, employee.name);
+        const record = await planMoveRequest('/api/plans/requests', {id, employeeId, sessionId: preview.sessionId, toAccount: form.elements.target.value});
+        pendingPlanRequests = [record, ...pendingPlanRequests.filter(previous => previous.id !== record.id)];
+        renderPlanMembers();
+        if (dialog.open) showPlanRequestProgress(dialog, record);
       } catch (error) {
-        form.querySelector('.err').textContent = `${error.message} Check move status before retrying if the request timed out.`;
-        submit.disabled = false;
+        form.querySelector('.err').textContent = `${error.message} Check Recent plan moves before retrying if the request timed out.`;
+        submitting = false; submit.disabled = false;
       }
     };
   } catch (error) { dialog.querySelector('.status').textContent = error.message; }
@@ -309,6 +323,39 @@ function showPlanMoveProgress(dialog, initial, name) {
   };
   void poll();
 }
+function showPlanRequestProgress(dialog, initial) {
+  const marker = {};
+  dialog._planRequest = marker;
+  dialog.innerHTML = `<h3>Move request: ${esc(initial.name)}</h3><p class="status" role="status"></p><p class="hint">The expert prepares its handoff and decides this request. No switch occurs before approval.</p><p class="err" role="alert"></p><button type="button" class="btn" data-reauthorize>Reauthorize request</button> <button type="button" class="btn" data-cancel>Cancel request</button> <button type="button" class="btn" data-close>Close</button>`;
+  const cancel = dialog.querySelector('[data-cancel]'), reauthorize = dialog.querySelector('[data-reauthorize]');
+  dialog.querySelector('[data-close]').onclick = () => dialog.close();
+  let record = initial, busy = false;
+  const paint = () => {
+    dialog.querySelector('.status').textContent = `${record.phase === 'pending' ? (record.notified ? 'Awaiting the expert’s handoff and approval' : 'Queued until the expert is safely ready') : record.phase}${record.movePhase ? ' · ' + record.movePhase : ''}${record.error ? ': ' + record.error : ''}`;
+    cancel.hidden = !(['pending', 'reauthorize-required'].includes(record.phase) || record.phase === 'executing' && record.movePhase === 'waiting');
+    reauthorize.hidden = record.phase !== 'reauthorize-required';
+    cancel.disabled = reauthorize.disabled = busy;
+  };
+  const act = async action => {
+    if (busy) return; busy = true; paint();
+    try {
+      record = await planMoveRequest(`/api/plans/requests/${encodeURIComponent(record.id)}/${action}`);
+      pendingPlanRequests = [record, ...pendingPlanRequests.filter(previous => previous.id !== record.id)]; renderPlanMembers();
+    } catch (error) { dialog.querySelector('.err').textContent = error.message; }
+    finally { busy = false; paint(); }
+  };
+  cancel.onclick = () => { void act('cancel'); };
+  reauthorize.onclick = () => { void act('reauthorize'); };
+  const poll = async () => {
+    if (!dialog.open || dialog._planRequest !== marker) return;
+    paint();
+    if (!['pending', 'reauthorize-required', 'executing'].includes(record.phase)) { void refreshPlanMembers(); return; }
+    try { record = await planMoveRequest(`/api/plans/requests/${encodeURIComponent(record.id)}/status`); }
+    catch (error) { if (dialog.open && dialog._planRequest === marker) dialog.querySelector('.err').textContent = `Status unavailable: ${error.message}`; }
+    if (dialog.open && dialog._planRequest === marker) setTimeout(poll, 1500);
+  };
+  void poll();
+}
 document.getElementById('planMoveHistory')?.addEventListener('click', async () => {
   const dialog = document.getElementById('moveDlg');
   if (dialog.open) return;
@@ -316,14 +363,17 @@ document.getElementById('planMoveHistory')?.addEventListener('click', async () =
   dialog.querySelector('[data-close]').onclick = () => dialog.close();
   dialog.showModal();
   try {
-    const records = await planMoveRequest('/api/plans/moves/recent');
+    const requests = await planMoveRequest('/api/plans/requests/recent');
+    const moves = await planMoveRequest('/api/plans/moves/recent');
     if (!dialog.open) return;
-    dialog.querySelector('.status').textContent = records.length ? 'Select a move to inspect its status. Recovery holds never restart or stop anyone automatically.' : 'No recorded moves.';
+    const requestIds = new Set(requests.map(record => record.id));
+    const records = [...requests, ...moves.filter(record => !requestIds.has(record.id))];
+    dialog.querySelector('.status').textContent = records.length ? 'Select a request or move to inspect its status.' : 'No recorded requests or moves.';
     const list = dialog.querySelector('[data-moves]');
     records.forEach(record => {
       const button = document.createElement('button'); button.type = 'button'; button.className = 'btn';
       button.textContent = `${record.name}: ${record.phase}`;
-      button.onclick = () => showPlanMoveProgress(dialog, record, record.name);
+      button.onclick = () => requestIds.has(record.id) ? showPlanRequestProgress(dialog, record) : showPlanMoveProgress(dialog, record, record.name);
       list.appendChild(button);
     });
   } catch (error) { dialog.querySelector('.status').textContent = error.message; }

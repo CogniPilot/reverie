@@ -77,6 +77,7 @@ export interface ChatroomServiceDeps {
   employeeOf?: (sessionId: string) => string | undefined;
   /** The pronouns on a member's employee record (owner-set), shown with the member in every room view. */
   pronounsOf?: (sessionId: string) => string | undefined;
+  restContextOf?: (sessionId: string) => string | undefined;
   getSession(id: string): ChatSessionLike | undefined;
   broadcast(event: string, data: unknown): void;
   now?: () => number;
@@ -1733,7 +1734,7 @@ export class ChatroomService {
       () => {
         const live = this.store.get(room.id);
         const current = live?.members.find((m) => m.sessionId === member.sessionId);
-        return live && current ? buildBriefing(live, current, this.nameOf) : `You were removed from ${quoteForPane(roomLabel(room), 80)}.`;
+        return live && current ? buildBriefing(live, current, this.nameOf) + ' ' + (this.deps.restContextOf?.(member.sessionId) ?? '') : `You were removed from ${quoteForPane(roomLabel(room), 80)}.`;
       },
       { brief: true }
     );

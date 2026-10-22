@@ -2248,7 +2248,54 @@ describe('workspace menu and settings', () => {
     expect(btn.classList.contains('has-hue')).toBe(true);
   });
 
-  it('refuses a name that is Home, the default workspace or another workspace, and cannot rename the default', async () => {
+  it('saves the default workspace through the canonical instance name without moving channels', async () => {
+    const h = await createHarness({ sessions, rooms: [room('default-room', 'General', [], {}), ...rs()] });
+    let displayName = 'Reverie';
+    let settings = { displayName, language: 'fr', showCost: true };
+    (h.window as any).ReverieI18n = { get displayName() { return displayName; }, configure(options: any) { displayName = options.displayName; } };
+    (h.app as any).loadAppSettingsFromStorage = () => settings;
+    (h.app as any).saveAppSettingsToStorage = (next: typeof settings) => { settings = next; };
+    const api = h.app._chatApi.bind(h.app);
+    const writes: any[] = [];
+    h.app._chatApi = async (path: string, options: any) => {
+      if (path === '/api/settings') { writes.push(options); return { ok: true, data: {} }; }
+      return api(path, options);
+    };
+    h.shell.openWorkspaceSettings('');
+    const root = h.document.querySelector('.ca-ws-settings') as HTMLElement;
+    expect(root.textContent).not.toContain('Settings, display name');
+    const name = root.querySelector('input') as HTMLInputElement;
+    expect(name.disabled).toBe(false); name.value = 'Flight Lab';
+    name.dispatchEvent(new h.window.Event('input', { bubbles: true }));
+    ([...root.querySelectorAll('button')].find(button => button.textContent === 'Save changes') as HTMLButtonElement).click();
+    await settle(80);
+    expect(writes).toEqual([{ method: 'PUT', body: { displayName: 'Flight Lab' } }]);
+    expect(settings).toEqual({ displayName: 'Flight Lab', language: 'fr', showCost: true });
+    expect(h.shell.defaultWorkspaceName()).toBe('Flight Lab');
+    expect(h.document.querySelector('.ca-rail [data-key="ws:"]')?.getAttribute('aria-label')).toContain('Flight Lab');
+    expect(h.server.calls.some((call: any) => call.path.endsWith('/placement'))).toBe(false);
+    expect(h.server.rooms.find((r: any) => r.id === 'default-room')?.workspace).toBeUndefined();
+    h.shell.openWorkspaceSettings('');
+    expect((h.document.querySelector('.ca-ws-settings input') as HTMLInputElement).value).toBe('Flight Lab');
+  });
+
+  it('keeps a failed default workspace rename unsaved instead of applying a device-only name', async () => {
+    const h = await createHarness({ sessions, rooms: [room('default-room', 'General', [], {})] });
+    h.app._chatApi = async () => ({ ok: false, error: 'Only the owner may rename the instance' });
+    h.shell.openWorkspaceSettings('');
+    const root = h.document.querySelector('.ca-ws-settings') as HTMLElement;
+    const name = root.querySelector('input') as HTMLInputElement; name.value = 'Flight Lab';
+    name.dispatchEvent(new h.window.Event('input', { bubbles: true }));
+    const save = [...root.querySelectorAll('button')].find(button => button.textContent === 'Save changes') as HTMLButtonElement;
+    save.click(); await settle(60);
+    expect(h.shell.defaultWorkspaceName()).toBe('Reverie');
+    expect((root.querySelector('.ca-savebar') as HTMLElement).hidden).toBe(false);
+    expect(root.querySelector('.ca-settings-title')?.textContent).toBe('Reverie');
+    expect(save.disabled).toBe(false);
+    expect(h.app.toasts.at(-1)?.text).toContain('Only the owner');
+  });
+
+  it('refuses a name that is Home, the default workspace or another workspace', async () => {
     const h = await createHarness({
       sessions,
       rooms: [...rs(), room('r4', 'Other', [member(A, 'alpha')], { workspace: 'Zed' })],
@@ -2266,7 +2313,7 @@ describe('workspace menu and settings', () => {
     expect(h.server.calls.some((c: { method: string }) => c.method === 'PUT')).toBe(false);
     root.remove();
     (h.app as unknown as { _chatApp: { openWorkspaceSettings(k: string): void } })._chatApp.openWorkspaceSettings('');
-    expect((h.document.querySelector('.ca-ws-settings input') as HTMLInputElement).disabled).toBe(true);
+    expect((h.document.querySelector('.ca-ws-settings input') as HTMLInputElement).disabled).toBe(false);
   });
 });
 

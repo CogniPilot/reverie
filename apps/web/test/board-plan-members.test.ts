@@ -12,7 +12,7 @@ function harness() {
   const context = {
     document: dom.window.document, window: dom.window, fetch, AbortController, setTimeout, clearTimeout,
     B: { planBurn: [{ id: 'work', who: 'Stale Person' }, { id: 'cogni', who: 'Another Stale Person' }] },
-    planAllocations: null, planMembersBusy: false, planMembersError: false,
+    planAllocations: null, pendingPlanRequests: [], planMembersBusy: false, planMembersError: false,
     esc: (value: unknown) => String(value ?? '').replace(/[&<>"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]!),
   };
   const methods = vm.runInNewContext(`${source}\n({renderPlanMembers, refreshPlanMembers})`, context) as { renderPlanMembers(): void; refreshPlanMembers(): Promise<void> };
@@ -39,7 +39,7 @@ describe('live plan-member avatars', () => {
       expect(test.row('cogni').querySelector('button')?.getAttribute('aria-label')).toBe('Casey');
       expect(test.row('cogni').querySelector('img')?.getAttribute('src')).toBe('/api/avatars/new-session-casey?v=2');
       expect(test.dom.window.document.body.textContent).not.toMatch(/Stale Person/);
-      expect(test.fetch.mock.calls.every(([path]) => path === '/api/plans/allocations')).toBe(true);
+      expect(test.fetch.mock.calls.every(([path]) => ['/api/plans/allocations', '/api/plans/requests/recent'].includes(path))).toBe(true);
     } finally { test.dom.window.close(); }
   });
 

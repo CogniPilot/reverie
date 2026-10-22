@@ -38,6 +38,7 @@ async function setup(initial = [source('default', 'Default Codex')]) {
   await h.shell.openCompany();
   const form = h.document.querySelector('.ca-company-hire form') as HTMLFormElement;
   const field = (name: string) => form.querySelector(`[name="${name}"]`) as HTMLInputElement;
+  field('roleTemplate').value = 'custom'; field('roleTemplate').dispatchEvent(new h.window.Event('change'));
   const frame = h.document.querySelector('.ca-company-plans-frame') as HTMLIFrameElement;
   const changed = (origin = h.window.location.origin, from = frame.contentWindow) =>
     h.window.dispatchEvent(
@@ -87,6 +88,7 @@ it('updates added, renamed and removed plans while preserving the entire open hi
   field('plan').value = 'subscription:gmail';
   field('plan').dispatchEvent(new h.window.Event('change'));
   expect(field('mode').value).toBe('codex');
+  for (let i = 0; i < 3; i++) (form.querySelector('[aria-label="Next"]') as HTMLButtonElement).click();
   form.dispatchEvent(new h.window.Event('submit', { cancelable: true }));
   await settle();
   expect(state.hired.source).toEqual({ kind: 'subscription', profileId: 'gmail' });

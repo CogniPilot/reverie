@@ -102,6 +102,12 @@ describe('fresh permanent expert hire', () => {
     expect(restarted.snapshot().employees[0].id).toBe(employee.id);
     expect(restarted.snapshot().employees[0].runtimeRecipe).toMatchObject({ mode: 'codex', workingDir: '/workspace/expert' });
   });
+  it('persists explicit sleep and dream opt-ins at hire without enabling research', async () => {
+    const response = await hire({ ...body, sleepEnabled: true, dreamEnabled: true } as never);
+    expect(response.statusCode).toBe(200);
+    expect(response.json().data.employee).toMatchObject({ sleepEnabled: true, dreamEnabled: true, researchEnabled: false });
+  });
+
   it('uses the same configured local model with OpenCode without copying credentials or account selection', async () => {
     const response = await hire({
       ...body,
@@ -157,7 +163,7 @@ describe('fresh permanent expert hire', () => {
   it('agents and unverified callers cannot hire or grant themselves permissions', async () => {
     expect((await hire(body, { 'x-reverie-parent-session': 'agent' })).statusCode).toBe(403);
     expect((await hire(body, { 'x-unverified': '1' })).statusCode).toBe(403);
-    expect((await hire({ ...body, permissions: { recoverEmployees: true } } as never)).statusCode).toBe(400);
+    expect((await hire({ ...body, permissions: { hireEmployees: true } } as never)).statusCode).toBe(400);
     expect(start).not.toHaveBeenCalled();
   });
   it('rolls back the new runtime when durable identity registration fails', async () => {
@@ -181,6 +187,29 @@ describe('fresh permanent expert hire', () => {
     expect(sources.find((s) => s.id === 'work')).toMatchObject({ defaultMode: 'codex', modes: ['codex', 'opencode'] });
     expect(sources.find((s) => s.id === 'claude-plan')).toMatchObject({ defaultMode: 'claude', modes: ['claude'] });
     expect(sources.find((s) => s.kind === 'local').defaultMode).toBe('opencode');
+    expect(response.json().data.roles.map((r: { id: string }) => r.id)).toEqual(['cto', 'coo', 'software', 'systems', 'assistant', 'custom']);
+  });
+  it('persists owner-edited role details and only the explicitly selected recovery permission', async () => {
+    const result = await hire({ ...body, responsibilities: ['Review architecture with evidence'], personality: 'Calm and precise', permissions: { recoverEmployees: true } } as never);
+    expect(result.statusCode).toBe(200);
+    const employee = result.json().data.employee;
+    expect(employee).toMatchObject({ responsibilities: ['Review architecture with evidence'], personality: 'Calm and precise', permissions: { recoverEmployees: true } });
+    await company.update(employee.id, undefined, { icon: 'X' });
+    const reopened = new CompanyStore(store.file); await reopened.init();
+    expect(reopened.snapshot().employees[0]).toMatchObject({ responsibilities: ['Review architecture with evidence'], personality: 'Calm and precise' });
+    await company.update(employee.id, undefined, { responsibilities: [], personality: '' });
+    expect(company.view().employees[0]).toMatchObject({ responsibilities: [], personality: '' });
+  });
+  it('rejects a case-insensitive duplicate name before starting another runtime', async () => {
+    expect((await hire()).statusCode).toBe(200); start.mockClear();
+    const result = await hire({ ...body, name: ' reviewer ' });
+    expect(result.statusCode).toBe(409); expect(result.body).toContain('distinct name');
+    expect(start).not.toHaveBeenCalled();
+  });
+  it('rejects oversized role/personality details', async () => {
+    expect((await hire({ ...body, personality: 'x'.repeat(1001) } as never)).statusCode).toBe(400);
+    expect((await hire({ ...body, responsibilities: ['x'.repeat(501)] } as never)).statusCode).toBe(400);
+    expect(start).not.toHaveBeenCalled();
   });
   it('local sources prefer an enabled saved custom harness when OpenCode is unavailable', async () => {
     const custom = { ...registry.getCli('opencode')!, id: registry.asCliId('custom-local'), stock: false };

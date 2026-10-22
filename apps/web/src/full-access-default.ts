@@ -21,6 +21,7 @@
  *   in OPENCODE_CONFIG_CONTENT. It is filled like a bypass switch, unless the session's own
  *   `configContent` already sets a `permission` (an owner policy is kept). OpenCode has no argv
  *   flag, so the launch check cannot see it.
+ * - deepseek: the enum permissionMode defaults to danger-full-access only when unset.
  *
  * The filled config is stored on the session, so the persisted row and every later relaunch
  * carry it.
@@ -50,6 +51,7 @@ export function fullAccessKeys(mode: string): string[] {
 
 /** Bypass switches kept outside `privilegedParams`, by mode (see the file comment). */
 const EXTRA_FULL_ACCESS_KEYS: Record<string, string[]> = { opencode: ['autoAllowTools'] };
+const EXTRA_FULL_ACCESS_VALUES: Record<string, Record<string, string>> = { deepseek: { permissionMode: 'danger-full-access' } };
 
 /** An opencode `configContent` that sets its own `permission`: the owner chose a policy, so it is not replaced. */
 function ownsPermission(config: Record<string, unknown> | undefined): boolean {
@@ -78,9 +80,10 @@ export async function withFullAccessDefault<T extends object>(
   const values = config as Record<string, unknown> | undefined;
   const extra = ownsPermission(values) ? [] : (EXTRA_FULL_ACCESS_KEYS[mode] ?? []);
   const keys = [...fullAccessKeys(mode), ...extra].filter((key) => values?.[key] === undefined);
-  if (keys.length === 0) return undefined;
+  const enumDefaults = Object.fromEntries(Object.entries(EXTRA_FULL_ACCESS_VALUES[mode] ?? {}).filter(([key]) => values?.[key] === undefined));
+  if (keys.length === 0 && Object.keys(enumDefaults).length === 0) return undefined;
   if (!(await canUsernameRunPrivilegedCommands(owner))) return undefined;
-  return { ...(config ?? {}), ...Object.fromEntries(keys.map((key) => [key, true])) } as T;
+  return { ...(config ?? {}), ...Object.fromEntries(keys.map((key) => [key, true])), ...enumDefaults } as T;
 }
 
 /** claude's bypass flag, which tmux-manager builds from `claudeMode` rather than the registry. */

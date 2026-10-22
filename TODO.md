@@ -8,7 +8,7 @@ Updated as work is tested and deployed. Existing backups must remain intact.
 - [x] Owner authorization enforced; the welcome screen lets a new owner choose their username and permanent password directly.
 - [x] Persistent company data and tool home under `~/reverie/companies/default/`.
 - [x] Work under `~/reverie/workspace/`; scratch links to the large build disk.
-- [x] Explicit writable source mount at `/workspace`; no Docker socket exposed.
+- [x] Dedicated container working directory at `/reverie_workspace`; an explicit `reverie` symlink grants access to the chosen checkout at `/projects/reverie`. No default checkout mount or Docker socket.
 - [x] Configurable crash-recovery expert identified by persistent agent ID, with a recovery prompt and explicit permissions.
 
 ## Finish and deploy
@@ -42,7 +42,7 @@ Updated as work is tested and deployed. Existing backups must remain intact.
 - [x] Prepare selected Claude profiles for first launch without changing their chosen permission mode; verify credentials-only hiring, an owner mention and a stored assistant reply without manual terminal setup.
 - [ ] Let additional humans register and appear alongside agents in company people, with explicit roles and permissions.
 - [x] Deploy the consolidated root skills and removal of legacy console Docker/plugin packaging.
-- [ ] Finish first-run bootstrap checks: editable deployment defaults, source/config access off by default, multiple mounts supported.
+- [x] Verify editable deployment defaults, source/config access off by default, and explicit project mounts with workspace links. Launcher and legacy recovery checks pass.
 - [x] Actual Ubuntu CI passed Nix builds, login, persistence and crash restart for `394dc27`; repeat for subsequent runtime changes.
 - [x] Verify no generated caches, credentials or private instance data are committed.
 

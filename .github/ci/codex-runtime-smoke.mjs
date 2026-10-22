@@ -13,6 +13,7 @@ const { STOCK_CLIS } = await import(pathToFileURL(join(consoleRoot, 'dist/config
 const { buildSpawnCommandFromRegistry } = await import(pathToFileURL(join(consoleRoot, 'dist/session-cli-registry-bridge.js')));
 const require = createRequire(join(consoleRoot, 'package.json'));
 const pty = require('node-pty');
+const { Terminal } = require('@xterm/headless');
 const data = process.env.REVERIE_DATA || '/instances/default';
 const tools = join(data, 'tools');
 const installed = JSON.parse(readFileSync(join(tools, '.install-codex.json'), 'utf8'));
@@ -46,8 +47,9 @@ try {
     { dangerouslyBypassApprovals: true, animations: true, model: 'gpt-5.3-codex', reasoningEffort: 'medium' },
     { resumeSessionId: '00000000-0000-4000-8000-000000000001', reasoningEffort: 'low' },
   ];
-  const commands = variants.map((codexConfig) => buildSpawnCommandFromRegistry(entry, {
+  const commands = variants.map((codexConfig, index) => buildSpawnCommandFromRegistry(entry, {
     mode: 'codex', sessionId: '00000000-0000-4000-8000-000000000001', codexConfig,
+    ...(index === 3 ? { codexTrustWorkspace: scratch } : {}),
   }));
   for (const [index, command] of commands.entries()) {
     assert.ok(command?.startsWith('codex'), 'Application failed to render a Codex launch');
@@ -84,6 +86,64 @@ try {
       reject(new Error('Codex exited before interactive startup completed'));
     });
   });
+  // No real credentials: a fake local key gets past login so this fixture can
+  // distinguish directory trust from authentication. Network remains disconnected;
+  // no application input or inference is sent. The baseline must show the dialog.
+  const trustStartup = async (trusted) => {
+    const root = join(scratch, trusted ? 'trusted' : 'untrusted');
+    const fixtureHome = join(root, 'home');
+    const cwd = join(root, 'work');
+    mkdirSync(join(fixtureHome, '.codex'), { recursive: true });
+    mkdirSync(cwd, { recursive: true });
+    writeFileSync(join(fixtureHome, '.codex/auth.json'), JSON.stringify({
+      auth_mode: 'apikey', OPENAI_API_KEY: 'ci-synthetic-not-a-real-api-key',
+    }), { mode: 0o600 });
+    const command = buildSpawnCommandFromRegistry(entry, {
+      mode: 'codex', sessionId: '00000000-0000-4000-8000-000000000002',
+      codexConfig: { dangerouslyBypassApprovals: true },
+      ...(trusted ? { codexTrustWorkspace: cwd } : {}),
+    });
+    await new Promise((resolve, reject) => {
+      const screen = new Terminal({ cols: 100, rows: 30, allowProposedApi: true });
+      let stopping = false;
+      const terminal = pty.spawn('bash', ['--noprofile', '--norc', '-c', `exec ${command}`], {
+        name: 'xterm-256color', cols: 100, rows: 30, cwd,
+        env: { ...env, HOME: fixtureHome, CODEX_HOME: join(fixtureHome, '.codex'), COLORTERM: 'truecolor' },
+      });
+      terminal.onData((text) => {
+        screen.write(text);
+        if (text.includes('\x1b[6n')) terminal.write('\x1b[1;1R');
+        if (text.includes('\x1b[c')) terminal.write('\x1b[?1;2c');
+        if (text.includes('\x1b]11;?')) terminal.write('\x1b]11;rgb:0000/0000/0000\x07');
+      });
+      const timer = setTimeout(() => {
+        stopping = true;
+        terminal.kill('SIGKILL');
+        screen.write('', () => {
+          try {
+            const lines = [];
+            for (let i = 0; i < screen.buffer.active.length; i++) lines.push(screen.buffer.active.getLine(i).translateToString(true));
+            const text = lines.join('\n');
+            const trustDialog = /Do you trust the contents of this directory/i.test(text);
+            if (trusted) {
+              assert.equal(trustDialog, false, 'Managed Codex still asks for workspace trust');
+              assert.match(text, /OpenAI Codex/, 'Managed Codex did not reach its composer');
+              assert.match(text, /YOLO mode/, 'Managed Codex did not retain full access');
+              assert.match(text, /^›\s+\S/m, 'Managed Codex has no composer');
+            } else assert.equal(trustDialog, true, 'Trust regression fixture failed to reproduce the startup dialog');
+            resolve();
+          } catch (error) { reject(error); }
+          finally { screen.dispose(); }
+        });
+      }, 20_000);
+      terminal.onExit(() => {
+        if (stopping) return;
+        clearTimeout(timer); screen.dispose();
+        reject(new Error('Codex exited before workspace-trust startup completed'));
+      });
+    });
+  };
+  await Promise.all([trustStartup(false), trustStartup(true)]);
   console.log(`Pinned Codex ${installed.version}: generated launch arguments and isolated interactive startup passed.`);
 } finally {
   rmSync(scratch, { recursive: true, force: true });

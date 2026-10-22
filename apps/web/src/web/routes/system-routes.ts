@@ -955,7 +955,7 @@ export function registerSystemRoutes(
     return readJsonConfig(SETTINGS_PATH, 'settings', {});
   });
 
-  app.put('/api/settings', async (req) => {
+  app.put('/api/settings', async (req, reply) => {
     // `claudeVoiceEnabled` is a retired key (Claude voice dictation was removed). A tab
     // left open from before the removal still sends it in its full-payload PUT, and the
     // strict schema would 400 the whole save, so drop it before parsing. Never persisted.
@@ -965,6 +965,14 @@ export function registerSystemRoutes(
       body = rest;
     }
     const settings = parseBody(SettingsUpdateSchema, body, 'Invalid settings') as Record<string, unknown>;
+    // Owner-auth policy protects this route. Also keep the server-wide instance
+    // name out of agent requests and ordinary multi-user accounts, including
+    // installations still using the legacy authentication mode.
+    if (settings.displayName !== undefined) {
+      if (req.headers['x-reverie-parent-session'] !== undefined)
+        return reply.code(403).send(createErrorResponse(ApiErrorCode.FORBIDDEN, 'Only the owner may rename the instance'));
+      if (!requireAdmin(req, reply)) return;
+    }
 
     // COD-55: enabling the Cloudflare tunnel publishes the whole app (full terminal
     // control = effectively RCE) to a public *.trycloudflare.com URL. Because the

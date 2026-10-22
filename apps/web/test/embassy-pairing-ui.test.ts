@@ -20,7 +20,8 @@ async function setup(emptyLocal=false){
    if(options.method==='POST'){const post={ackId:'00000036-0041-4000-8000-00000000005d',sequence:state.hostPosts.length+1,at:Date.now(),text:options.body.text,author:{company:'Host company',identity:'Owner'}};state.hostPosts.push(post);data={post};}
    else data={posts:state.hostPosts,next:state.hostPosts.length};
   }
-  else if(path==='/api/embassy-host')data={status:state.host,origin,room:{id:roomId,name:'Shared room'}};
+  else if(path==='/api/embassy-host')data={status:state.host,origin:state.needsOrigin?'':origin,builtin:!!state.builtin,needsAdvertisedOrigin:!!state.needsOrigin,room:{id:roomId,name:'Shared room'}};
+  else if(path==='/api/embassy-host/settings'){state.needsOrigin=false;data={builtin:true,origin,needsAdvertisedOrigin:false};}
   else if(path==='/api/embassy-host/invites'&&options.method==='POST'){
    if(state.delayed)return state.delayed();
    if(state.createFailure)return {ok:false,status:502,json:async()=>({error:{code:'EMBASSY_UNREACHABLE'}})};
@@ -270,4 +271,13 @@ it.each(['host','guest'])('opens a visible %s embassy feed/composer with zero or
  expect(h.calls.filter(c=>c.method==='POST')).toHaveLength(0);
  h.view.close();
  expect(els.composer.hidden).toBe(true);expect(els.feed.hidden).toBe(true);expect(els.empty.hidden).toBe(false);
+});
+
+it('built-in hosting is ready locally and asks for a shareable address before creating an invitation',async()=>{
+ const h=await setup();h.state.builtin=true;h.state.needsOrigin=true;await h.pair.open();
+ expect(h.button('Invite a company').disabled).toBe(false);expect(h.document.body.textContent).toContain('Embassy is ready locally');
+ await h.pair.createInvite();expect(h.calls.some(c=>c.path.endsWith('/invites')&&c.method==='POST')).toBe(false);
+ const input=h.document.querySelector('input[type="url"]') as HTMLInputElement;expect(input.value).toBe('');input.value=origin;
+ h.button('Save address and invite').click();await h.flush(30);
+ expect(h.calls.find(c=>c.path==='/api/embassy-host/settings').body).toEqual({origin});expect(h.drawn).toEqual([qr]);
 });

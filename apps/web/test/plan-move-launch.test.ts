@@ -61,8 +61,9 @@ describe('fresh account launch selection', () => {
     );
   });
 
-  it('requires an explicit Codex model and a real handoff rather than copying a stale picker model', () => {
-    expect(() => planMoveLaunch(saved, account, { ...input, model: undefined })).toThrow('Explicitly confirm');
+  it('preserves an actual saved model, otherwise leaves destination launch defaults alone, and requires a handoff', () => {
+    expect(planMoveLaunch(saved, account, { ...input, model: undefined }).codexConfig?.model).toBe('old-model');
+    expect(planMoveLaunch({ ...saved, codexConfig: undefined }, account, { ...input, model: undefined }).codexConfig?.model).toBeUndefined();
     expect(() => planMoveLaunch(saved, account, { ...input, handoff: '  ' })).toThrow('handoff');
     expect(() => planMoveLaunch(saved, { ...account, provider: 'anthropic' }, input)).toThrow('same provider');
   });

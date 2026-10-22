@@ -89,7 +89,7 @@ describe('Company owns plans and burn rate', () => {
     expect(boardHtml).toContain("location.hash === '#sec-burn'");
     expect(companyHtml).toContain('id="sec-burn"');
     expect(companyHtml).toContain('setInterval(refreshPlanMembers, 5e3)');
-    expect(companyHtml).toContain("'/api/plans/moves'");
+    expect(companyHtml).toContain("'/api/plans/requests'");
   });
 
   it('keeps one Company entry and displays plans and people together beside the sidebar', async () => {
@@ -203,7 +203,10 @@ describe('Company owns plans and burn rate', () => {
     handle.app._chatApi = async (path: string, options: unknown) => {
       if (path === '/api/company') return { ok: true, data: { canManage: true, employees: [], settings: {} } };
       if (path === '/api/chatrooms/phone-status') return { ok: true, data: { self: 'owner', canSetOwn: true } };
-      if (path === '/api/company/hire-options') return { ok: true, data: { sources: [], harnesses: [] } };
+      if (path === '/api/company/hire-options') return { ok: true, data: {
+        sources: [{ kind: 'subscription', id: 'work', label: 'Work', modes: ['codex'], defaultMode: 'codex' }],
+        harnesses: [{ id: 'codex', label: 'Codex', efforts: [] }],
+      } };
       return previous(path, options);
     };
     await handle.shell.openCompany();
@@ -211,7 +214,7 @@ describe('Company owns plans and burn rate', () => {
     expect(hire.hidden).toBe(false);
     hire.click();
     expect((handle.document.querySelector('.ca-company-hire') as HTMLElement).hidden).toBe(false);
-    expect(handle.document.activeElement).toBe(handle.document.querySelector('.ca-company-hire [name="plan"]'));
+    expect(handle.document.activeElement).toBe(handle.document.querySelector('.ca-company-hire [name="roleTemplate"]'));
     expect((handle.document.querySelector('#ca-company-plans') as HTMLElement).hidden).toBe(false);
   });
 

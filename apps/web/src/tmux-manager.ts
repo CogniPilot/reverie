@@ -997,6 +997,7 @@ export function buildCodexCommand(config?: CodexConfig): string {
 }
 
 export function buildSpawnCommand(options: {
+  codexTrustWorkspace?: string;
   mode: SessionMode;
   sessionId: string;
   model?: string;
@@ -2328,6 +2329,7 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
     const userStatusLineCommand = statusLineCommand ? await findEffectiveUserStatusLineCommand(workingDir) : undefined;
 
     const baseCmd = buildSpawnCommand({
+      codexTrustWorkspace: options.codexTrustWorkspace,
       mode,
       sessionId,
       model,
@@ -2629,6 +2631,7 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
     const userStatusLineCommand = statusLineCommand ? await findEffectiveUserStatusLineCommand(workingDir) : undefined;
 
     const baseCmd = buildSpawnCommand({
+      codexTrustWorkspace: options.codexTrustWorkspace,
       mode,
       sessionId,
       model,

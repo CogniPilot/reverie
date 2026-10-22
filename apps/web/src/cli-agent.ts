@@ -44,6 +44,7 @@ import { CODEX_REASONING_EFFORTS } from './types/session.js';
 import { stripAnsi as stripAnsiSequences } from './utils/regex-patterns.js';
 import { quoteForPane } from './pane-quote.js';
 import { pronounsProblem, pronounsProposal } from './pronouns.js';
+import { agentPlanRequest } from './cli-plan-request.js';
 
 /** A chat message id, as the server stores it. */
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -2118,6 +2119,15 @@ export function registerAgentCommands(program: Command): Command {
 
   const run = runAgentVerb;
   registerRoutineCommands(program, run);
+  const planMove = agent.command('plan-move').description('Decide an owner-requested plan move for this exact expert');
+  planMove.command('approve <id>')
+    .requiredOption('--handoff-file <path>', 'Work-safe handoff for the fresh destination session')
+    .option('--json', 'Machine-readable result')
+    .action((id: string, options: { handoffFile: string; json?: boolean }) =>
+      run(Boolean(options.json), deps => agentPlanRequest(deps, { id, decision: 'approve', handoffFile: options.handoffFile })));
+  planMove.command('reject <id>').option('--json', 'Machine-readable result')
+    .action((id: string, options: { json?: boolean }) =>
+      run(Boolean(options.json), deps => agentPlanRequest(deps, { id, decision: 'reject' })));
 
   const plans = program
     .command('plans')
