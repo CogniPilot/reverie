@@ -17,7 +17,7 @@ system Docker starts automatically; if needed run
 
 ```bash
 sha256sum -c SHA256SUMS
-./setup.sh --offline reverie-image.tar
+./setup.sh --engine docker --offline reverie-image.tar
 ```
 
 Open http://127.0.0.1:3000 on this machine and create your owner account.
@@ -27,5 +27,48 @@ The service binds only to loopback. Save the owner password securely.
 IMAGE-REF.txt records the commit, version and Docker image ID. The archive loads
 both ghcr.io/jgoppert/reverie:latest and ghcr.io/jgoppert/reverie:X.Y.Z.
 Docker volumes reverie-data and reverie-home retain state across restarts.
-Do not remove these volumes to upgrade. Optional provider CLIs require a network
-connection and your own provider login; they are not installed by this command.
+Do not remove these volumes to upgrade. On first start with network access the
+container installs its supported provider CLIs in the background (without
+network it skips them; a provider is prepared again when first used). Each
+needs your own provider login and license.
+
+## Alternative: run the image from GHCR
+
+The same image is published as ghcr.io/jgoppert/reverie:X.Y.Z (and :latest).
+Nix is not required; you need Docker (installed and the docker group set up as
+above), network access, and a GitHub account that has read access to the package.
+Create a GitHub personal access token (classic) with the read:packages scope;
+GHCR does not accept fine-grained tokens for this. Run the
+commands below in Bash (the default Debian login shell), from the extracted
+bundle directory. First log in once; the token is read without echoing it to
+the terminal or saving it in shell history:
+
+```shell
+read -rsp 'GitHub token (read:packages): ' GHCR_TOKEN; echo
+printf '%s' "$GHCR_TOKEN" | docker login ghcr.io --username YOUR_GITHUB_USER --password-stdin
+unset GHCR_TOKEN
+```
+
+Take the version from this bundle (or set it yourself, for example VERSION=0.2.0),
+then install with setup.sh, which pulls the image, records its digest for
+rollback and waits until the server answers:
+
+```shell
+VERSION=$(sed -n 's/^Version: //p' IMAGE-REF.txt)
+./setup.sh --engine docker --version "$VERSION"
+```
+
+Or run it directly with Docker, with the same port, volumes and restart policy:
+
+```shell
+VERSION=$(sed -n 's/^Version: //p' IMAGE-REF.txt)   # or VERSION=0.2.0
+docker pull "ghcr.io/jgoppert/reverie:$VERSION"
+docker run --detach --name reverie --restart unless-stopped \
+  --publish 127.0.0.1:3000:3000 \
+  --mount type=volume,src=reverie-data,dst=/instances \
+  --mount type=volume,src=reverie-home,dst=/home/agent \
+  "ghcr.io/jgoppert/reverie:$VERSION"
+```
+
+Then open http://127.0.0.1:3000 as above. To upgrade later, run
+`./setup.sh --engine docker --version` with the new version number; it backs up console state and keeps both volumes.
