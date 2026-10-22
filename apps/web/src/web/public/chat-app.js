@@ -1479,12 +1479,11 @@ class ReverieChatApp {
       this.app._setSpeakReplies?.(this.roomId, this.app._speakRepliesIn?.(this.roomId) ? 'off' : 'mine');
       this.renderHeader();
     }, { text: '🔊' });
-    const carBtn = this.button('ca-icon-btn ca-head-car', 'Car mode', () => this.app.openCarMode?.(), { text: '🚗' });
     const moreBtn = this.button('ca-icon-btn ca-head-more', 'More actions', () => this.openHeaderMenu(moreBtn), { text: '⋯' });
     moreBtn.title = 'More actions';
     moreBtn.setAttribute('aria-haspopup', 'menu');
-    speakBtn.hidden = carBtn.hidden = true;
-    head.append(navBtn, headTitle, inviteBtn, headTopic, spacer, speakBtn, carBtn, pinsBtn, phoneBtn, bellBtn, membersBtn, moreBtn);
+    speakBtn.hidden = true;
+    head.append(navBtn, headTitle, inviteBtn, headTopic, spacer, speakBtn, pinsBtn, phoneBtn, bellBtn, membersBtn, moreBtn);
 
     const body = this.el('div', 'ca-body');
     const chat = this.el('section', 'ca-chat');
@@ -1502,7 +1501,7 @@ class ReverieChatApp {
 
     Object.assign(this.els, {
       rail, side, sideHead, sideTitle, sideScroll, user, main, head, headTitle, headTopic,
-      membersBtn, membersDot, membersCount, bellBtn, navBtn, inviteBtn, pinsBtn, phoneBtn, speakBtn, carBtn, moreBtn, chat, members, scrim, stats, body,
+      membersBtn, membersDot, membersCount, bellBtn, navBtn, inviteBtn, pinsBtn, phoneBtn, speakBtn, moreBtn, chat, members, scrim, stats, body,
     });
 
     // Reuse the chat panel's feed, composer, mic, attachments and create form: it becomes the
@@ -5033,7 +5032,6 @@ class ReverieChatApp {
       this.els.speakBtn.setAttribute('aria-label', label);
       this.els.speakBtn.title = label;
     }
-    if (this.els.carBtn) this.els.carBtn.hidden = !voiceControls || !this.app.openCarMode;
     headTitle.replaceChildren();
     headTopic.textContent = '';
     if (this.embassy?.selected) {
@@ -7338,7 +7336,7 @@ function caInstall(proto) {
       }
       return el;
     },
-    // Voice belongs to voice channels: the voice member is the room's, and the mic shows nowhere else.
+    // The room voice is the target for spoken turns; dictation remains available in any local room.
     _chatVoiceTarget() {
       if (this._chatApp?.embassy?.selected) return null;
       if (!this._chatApp?.built) return original._chatVoiceTarget.call(this);
@@ -7346,7 +7344,7 @@ function caInstall(proto) {
     },
     _syncChatMic() {
       original._syncChatMic.call(this);
-      if (this._chatApp?.built && !caIsVoice(this._chatRoom)) this._chatEls.mic.hidden = true;
+      if (this._chatApp?.embassy?.selected) this._chatEls.mic.hidden = true;
     },
     _renderChatTo() {
       original._renderChatTo.call(this);

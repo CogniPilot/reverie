@@ -2448,7 +2448,8 @@ export const ChatroomMessageSchema = z
     requireAgent: z.boolean().optional(),
   })
   .strict()
-  .refine((v) => v.text.trim() !== '' || (v.attachments?.length ?? 0) > 0, 'Write something or attach a file');
+  .refine((v) => v.text.trim() !== '' || (v.attachments?.length ?? 0) > 0, 'Write something or attach a file')
+  .refine((v) => !v.spoken || v.text.trim() !== '', 'A spoken message needs a nonempty transcript');
 
 export const ChatroomPollSchema = z
   .object({

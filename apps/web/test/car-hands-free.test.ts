@@ -45,6 +45,9 @@ type Rec = { id: number; state: string; stop: () => void; ondataavailable: (e: u
 
 function setup({ route = 'turn' as string | null, micHidden = false, refuse = false, ctxState = 'running' } = {}) {
   hidden = false;
+  delete context.SpeechRecognition;
+  delete context.webkitSpeechRecognition;
+  Object.defineProperty(dom.window.navigator, 'maxTouchPoints', { configurable: true, value: 0 });
   dom.window.localStorage.clear();
   const recs: Rec[] = [];
   const tracks = { stopped: 0 };
@@ -112,6 +115,10 @@ function setup({ route = 'turn' as string | null, micHidden = false, refuse = fa
   const input = doc.createElement('textarea');
   a._chatEls = { mic, input, voiceStatus: doc.createElement('div'), to: { value: 'worker-id' } };
   a._chatRoom = { members: [WORKER] };
+  a._chatApi = async () => ({
+    ok: true,
+    data: { available: true, message: 'Whisper/Piper speech service at 127.0.0.1:8090 is ready' },
+  });
   a._chatMicRoute = () => route;
   a._chatToLabel = () => 'everyone';
   a._diag = () => {};
@@ -146,6 +153,14 @@ function setup({ route = 'turn' as string | null, micHidden = false, refuse = fa
     ctx,
     sent,
     btn,
+    choose: (value: string) => {
+      btn().value = value;
+      btn().dispatchEvent(new dom.window.Event('change'));
+    },
+    toggle: () => {
+      btn().value = a._roomVoiceMode() === 'off' ? 'panel' : 'off';
+      btn().dispatchEvent(new dom.window.Event('change'));
+    },
     run,
     start,
     asked: () => asked,
@@ -156,12 +171,16 @@ function setup({ route = 'turn' as string | null, micHidden = false, refuse = fa
 const settle = () => new Promise((r) => setTimeout(r, 0));
 
 /** The car screen over the panel: phone (mic hidden), server engine, Worker as the voice. */
-function car(opts: Parameters<typeof setup>[0] = {}, member: { sessionId: string; name: string; voice?: boolean } = WORKER) {
+function car(
+  opts: Parameters<typeof setup>[0] = {},
+  member: { sessionId: string; name: string; voice?: boolean } = WORKER
+) {
   const h = setup({ micHidden: true, ...opts });
   const screen = doc.createElement('div');
   for (const c of ['car-status', 'car-detail', 'car-hint']) screen.appendChild(doc.createElement('div')).className = c;
   h.a._carScreen = screen;
   h.a._carEngine = 'server';
+  h.a._setRoomVoiceMode('car');
   h.a._carVoiceMember = () => member;
   h.a._chatEls.to.value = '';
   const view = () => ({

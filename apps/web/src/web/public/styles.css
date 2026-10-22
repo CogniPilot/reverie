@@ -23231,3 +23231,6 @@ html.car-mode-open { overflow: hidden; }
 .message-agent-bar input { flex: 1; min-width: 0; padding: 8px 10px; font-size: 16px; border-radius: 8px; border: 1px solid var(--border, #2b3441); background: var(--bg-primary, #161b23); color: inherit; }
 .message-agent-bar button { padding: 8px 14px; border-radius: 8px; border: 0; background: var(--accent, #4f8cff); color: #fff; font-weight: 600; }
 body.message-box-focus .keyboard-accessory-bar { display: none !important; }
+
+/* One room voice selector, including the phone composer. */
+.chatroom-voice-control { min-width: 0; max-width: min(12rem, 32vw); flex: 0 1 auto; text-overflow: ellipsis; }

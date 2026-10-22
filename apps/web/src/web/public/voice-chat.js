@@ -419,7 +419,7 @@ Object.assign(ReverieApp.prototype, {
       });
     } catch {
       this._chatVoiceStatus('Network error: the recording was not sent', 'error');
-      return;
+      return false;
     }
     let body = null;
     try {
@@ -429,9 +429,10 @@ Object.assign(ReverieApp.prototype, {
     }
     if (!res.ok || body?.success === false) {
       this._chatVoiceStatus(body?.error || `Transcription failed (HTTP ${res.status})`, 'error');
-      return;
+      return false;
     }
     this._dictationDone(body?.data?.transcript || '');
+    return true;
   },
 
   /** The words are in: preview them for 2 s (or send at once, per the setting). */

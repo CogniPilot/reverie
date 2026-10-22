@@ -265,6 +265,8 @@ Object.assign(ReverieApp.prototype, {
   },
 
   async sendChatDiagnostics() {
+    const engine = this._voiceEngineInfo?.();
+    if (engine) this.showToast?.(`Voice engine: ${engine.engine}. ${engine.reason}`, 'info');
     const vv = window.visualViewport;
     const meta = {
       buildId: this._pageBuildId || null,
@@ -273,6 +275,7 @@ Object.assign(ReverieApp.prototype, {
       visualViewport: vv ? { height: vv.height, width: vv.width, offsetTop: vv.offsetTop, scale: vv.scale } : null,
       standalone: window.matchMedia?.('(display-mode: standalone)').matches || false,
       carEngine: this._carEngine || null,
+      voiceEngine: this._voiceEngineInfo?.() || null,
       carState: this._car?.state || null,
       speechRecognition: !!(window.SpeechRecognition || window.webkitSpeechRecognition),
       voices: (window.speechSynthesis?.getVoices?.() || []).length,
@@ -286,7 +289,8 @@ Object.assign(ReverieApp.prototype, {
       method: 'POST',
       body: { meta, lines: this._diagLines || [] },
     });
-    const text = res.ok ? `Diagnostics saved: ${res.data.file}` : `Diagnostics failed: ${res.error}`;
+    const result = res.ok ? `Diagnostics saved: ${res.data.file}` : `Diagnostics failed: ${res.error}`;
+    const text = engine ? `Engine: ${engine.engine}. ${engine.reason}. ${result}` : result;
     this.showToast?.(text, res.ok ? 'success' : 'error');
     this._chatVoiceStatus(text, res.ok ? '' : 'error');
     if (this._carScreen && !this._carScreen.hidden) this._renderCarState?.(this._car?.state || 'paused', text);
@@ -381,13 +385,7 @@ Object.assign(ReverieApp.prototype, {
     };
     const dock = layoutBtn('dock', '\u21E5', 'Dock beside the terminals (they shrink to fit)');
     const full = layoutBtn('full', '\u26F6', 'Full screen');
-    const car = this._chatEl('button', 'chatroom-icon-btn chatroom-car-btn', '\u{1F697}');
-    car.type = 'button';
-    car.hidden = true;
-    car.title = 'Car mode: hands-free, full screen, with the voice member';
-    car.setAttribute('aria-label', 'Car mode');
-    car.onclick = () => this.openCarMode?.();
-    head.append(title, select, car, dock, full, menuBtn, close);
+    head.append(title, select, dock, full, menuBtn, close);
 
     const members = this._chatEl('section', 'chatroom-members');
     members.setAttribute('aria-label', 'Members');
@@ -1107,21 +1105,14 @@ Object.assign(ReverieApp.prototype, {
 
   _syncChatMic() {
     const { mic } = this._chatEls;
-    const car = this._chatroomPanel?.querySelector('.chatroom-car-btn');
-    if (car) {
-      // chatVoiceMember is voice-chat.js's (loaded after this file); without it, a marked voice member only.
-      car.hidden =
-        typeof chatVoiceMember === 'function'
-          ? !chatVoiceMember(this._chatRoom)
-          : !this._chatRoom?.members.some((m) => m.voice === true);
-    }
     const target = this._chatVoiceTarget();
     const route = this._chatMicRoute ? this._chatMicRoute() : target ? 'turn' : null;
-    mic.hidden = !route || chatPhoneComposer(navigator);
+    mic.hidden = !route;
     mic.title =
       route === 'turn'
         ? `Talk to ${target.name}: hold, or tap to start and tap again to send`
         : `Dictate to ${this._chatToLabel?.() || 'everyone'}: hold, or tap to start and tap again`;
+    mic.dataset.voiceBaseTitle = mic.title;
     this._hfTick?.();
   },
 
@@ -1267,7 +1258,7 @@ Object.assign(ReverieApp.prototype, {
     // The turn plays this member's answer itself: voice-chat.js leaves it out of read-aloud meanwhile.
     this._chatVoiceTurnFor = target.sessionId;
     try {
-      await this._sendChatVoiceTurn(blob, target);
+      return await this._sendChatVoiceTurn(blob, target);
     } finally {
       if (this._chatVoiceTurnFor === target.sessionId) this._chatVoiceTurnFor = null;
     }
@@ -1303,18 +1294,18 @@ Object.assign(ReverieApp.prototype, {
         this._chatVoiceStatus('');
         if (car()) this._renderCarState?.('paused', `Stopped waiting; ${target.name}'s answer will show in the room`);
       } else this._chatVoiceStatus('Network error: the recording was not sent', 'error');
-      return;
+      return false;
     } finally {
       if (this._chatVoiceTurnStop === stop) this._chatVoiceTurnStop = null;
     }
     if (!res.ok || body?.success === false) {
       this._chatVoiceStatus(body?.error || `Voice failed (HTTP ${res.status})`, 'error');
-      return;
+      return false;
     }
     const data = body?.data || {};
     if (!data.heard) {
       this._chatVoiceStatus("Didn't catch that. Try again, a little closer to the mic.", 'error');
-      return;
+      return false;
     }
     this._chatVoiceStatus('');
     if (data.audioUrl) this._playChatAudio(data.audioUrl, target.sessionId);
@@ -1322,6 +1313,7 @@ Object.assign(ReverieApp.prototype, {
     else if (data.reply)
       this._chatVoiceStatus(`Couldn't make audio for ${target.name}'s answer; its text is in the room`, 'error');
     if (this._carScreen && !this._carScreen.hidden) this._renderCarState('paused', data.reply);
+    return true;
   },
 
   /**

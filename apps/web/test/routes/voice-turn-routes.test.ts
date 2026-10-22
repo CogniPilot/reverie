@@ -443,7 +443,7 @@ describe('voice turn routes', () => {
     base = 'http://127.0.0.1:1';
     res = await turn();
     expect(res.statusCode).toBe(502);
-    expect(res.json().error).toContain('not running');
+    expect(res.json().error).toContain('Whisper/Piper speech service at 127.0.0.1:1 could not be reached');
     expect(userMessages()).toHaveLength(0);
     expect(listeners()).toBe(0);
   });

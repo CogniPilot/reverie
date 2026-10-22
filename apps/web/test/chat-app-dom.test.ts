@@ -4221,10 +4221,8 @@ describe('visible mobile voice controls', () => {
     });
     h.shell.renderHeader();
     const speak = h.document.querySelector('.ca-head-speak') as HTMLButtonElement;
-    const car = h.document.querySelector('.ca-head-car') as HTMLButtonElement;
+    expect(h.document.querySelector('.ca-head-car')).toBeNull();
     expect(speak.hidden).toBe(false);
-    expect(car.hidden).toBe(false);
-    expect(car.getAttribute('aria-label')).toBe('Car mode');
     expect(speak.title).toBe('Enable spoken replies in this room');
     speak.click();
     expect([...modes]).toEqual([[rooms[0].id, 'mine']]); // only this room, starting at "Replies to me"
@@ -4237,8 +4235,7 @@ describe('visible mobile voice controls', () => {
     speak.click();
     expect(modes.size).toBe(0);
     expect(speak.title).toBe('Enable spoken replies in this room');
-    car.click();
-    expect(cars).toBe(1);
+    expect(cars).toBe(0); // Voice replaces the competing Car header button.
     // The channel menu chooses who is read: Off, Replies to me, Everyone.
     const menu = h.shell.channelEntries(rooms[0]).find((e: { label?: string }) => e.label === 'Read aloud');
     expect(menu.sub.map((e: { label: string; checked: boolean }) => [e.label, e.checked])).toEqual([
@@ -4253,6 +4250,47 @@ describe('visible mobile voice controls', () => {
     // Read aloud is any room's choice; car mode needs a voice member.
     await h.shell.selectRoom('r3');
     expect(speak.hidden).toBe(false);
-    expect(car.hidden).toBe(true);
+    expect(h.document.querySelector('.ca-head-car')).toBeNull();
+  });
+});
+
+describe('consolidated Voice on phones', () => {
+  it('offers real browser dictation without a voice member or reachable server, with one Voice control', async () => {
+    const h = await createHarness({ sessions, rooms: fixtureRooms() });
+    Object.defineProperty(h.window.navigator, 'maxTouchPoints', { configurable: true, value: 2 });
+    Object.defineProperty(h.window.navigator, 'userAgent', {
+      configurable: true,
+      value: 'Mozilla/5.0 Android Mobile Chrome',
+    });
+    let started = 0;
+    h.window.SpeechRecognition = class {
+      start() {
+        started++;
+      }
+    };
+    for (const file of ['voice-chat.js', 'car-mode.js', 'hands-free.js'])
+      h.window.eval(readFileSync(resolve(import.meta.dirname, `../src/web/public/${file}`), 'utf8'));
+    const api = h.app._chatApi.bind(h.app);
+    h.app._chatApi = async (path: string, opts: unknown) =>
+      path === '/api/voice/status'
+        ? { ok: true, data: { available: false, message: 'Whisper/Piper at 127.0.0.1:8090 unavailable' } }
+        : api(path, opts);
+    h.app._buildHandsFree(h.app._chatEls.mic);
+    h.window.clearInterval(h.app._hfTimer);
+    h.app._syncChatMic();
+    await h.flush();
+    const control = h.document.querySelector('.chatroom-voice-control') as HTMLSelectElement;
+    expect(control).not.toBeNull();
+    expect(control.hidden).toBe(false);
+    expect(control.value).toBe('off');
+    expect(h.app._chatEls.mic.hidden).toBe(false);
+    expect(h.app._chatEls.mic.title).toContain('127.0.0.1:8090');
+    expect(h.document.querySelector('.ca-head-car')).toBeNull();
+    expect(h.document.querySelector('.chatroom-car-btn')).toBeNull();
+    expect(control.textContent).not.toContain('Car screen');
+    control.value = 'dictate';
+    control.dispatchEvent(new h.window.Event('change'));
+    expect(started).toBe(1);
+    expect(h.app._voiceEngineInfo().engine).toBe('speech');
   });
 });

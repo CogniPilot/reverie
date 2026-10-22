@@ -779,6 +779,7 @@ Object.assign(ReverieApp.prototype, {
   },
 
   async openCarMode() {
+    if (this._chatApp?.embassy?.selected || document.hidden) return;
     // Idempotent: a second open (a double tap, the restore after a reload racing a
     // click) must never leave two recognizers listening and sending the same words.
     if (this._carOpening || (this._car && this._carScreen && !this._carScreen.hidden)) return;
@@ -795,19 +796,34 @@ Object.assign(ReverieApp.prototype, {
   },
 
   async _openCarMode() {
+    const roomId = this._chatRoomId, generation = this._carOpenGeneration;
     if (!this.isChatroomOpen?.()) await this.openChatroom?.();
+    if (roomId !== this._chatRoomId || generation !== this._carOpenGeneration || this._chatApp?.embassy?.selected || document.hidden) return;
     const member = this._carVoiceMember();
     if (!member) {
       this.showToast?.('Mark a member as Voice in the chat panel first', 'info');
       return;
     }
-    try {
-      localStorage.setItem('reverie:carMode', '1');
-    } catch {
-      /* per-device convenience only */
+    this._setRoomVoiceMode?.('car');
+    const revision = this._voiceModeRevision;
+    const engine = carModeEngine(window);
+    if (engine === 'server' && this._hfProbeService) {
+      if (!this._hfService || this._hfService.state === 'checking') await this._hfProbeService();
+      if (this._hfService?.state !== 'ready') {
+        this._hfRender?.('unavailable');
+        this.showToast?.(this._hfService?.message || 'Whisper/Piper speech service is unavailable', 'error');
+        return;
+      }
     }
+    // A probe may resolve after Off, a room switch or an external view was selected.
+    if (generation !== this._carOpenGeneration || revision !== this._voiceModeRevision || roomId !== this._chatRoomId || this._roomVoiceMode?.() !== 'car' || !this.isChatroomOpen?.() || this._chatApp?.embassy?.selected || document.hidden) return;
+    this._carRoomId = roomId;
     this._buildCarMode(member);
-    this._carEngine = carModeEngine(window);
+    this._carEngine = engine;
+    const diagButton = this._carScreen?.querySelector('.car-diag');
+    const engineInfo = this._voiceEngineInfo?.();
+    if (diagButton) diagButton.title = `Engine: ${engine}. ${engineInfo?.reason || ''}`;
+    this._diag?.('voice:engine', this._voiceEngineInfo?.() || { engine, reason: engine === 'speech' ? 'Browser SpeechRecognition and synthesis are available' : 'Browser speech API unavailable; server selected' });
     this._carScreen.hidden = false;
     document.documentElement.classList.add('car-mode-open');
     clearInterval(this._carSpeakerTimer);
@@ -883,8 +899,11 @@ Object.assign(ReverieApp.prototype, {
     }
   },
 
-  closeCarMode() {
+  closeCarMode({ preserveMode = false } = {}) {
+    this._carOpenGeneration = (this._carOpenGeneration || 0) + 1;
     if (!this._carScreen || this._carScreen.hidden) return;
+    if (!preserveMode) this._setRoomVoiceMode?.('off');
+    if (this._hfStream) this._hfClose?.('car-closed');
     this._car?.stop();
     this._car = null;
     this._stopChatRecording?.();
@@ -903,15 +922,7 @@ Object.assign(ReverieApp.prototype, {
 
   /** Reopen car mode after a reload if it was on when the page went away. */
   _restoreCarMode() {
-    if (this._carRestored) return;
-    this._carRestored = true;
-    let on = false;
-    try {
-      on = localStorage.getItem('reverie:carMode') === '1';
-    } catch {
-      on = false;
-    }
-    if (on) setTimeout(() => this.openCarMode(), 500);
+    this._hfTick?.();
   },
 
   _keepCarScreenAwake() {
@@ -937,6 +948,7 @@ Object.assign(ReverieApp.prototype, {
   },
 
   async _carSend(text) {
+    if (typeof text !== 'string' || !text.trim()) throw new Error('No speech was recognized; nothing was posted');
     const member = this._carVoiceMember();
     if (!member) throw new Error('no voice member');
     const res = await this._chatApi(`/api/chatrooms/${encodeURIComponent(this._chatRoomId)}/messages`, {

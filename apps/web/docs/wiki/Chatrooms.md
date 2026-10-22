@@ -59,7 +59,7 @@ dashed border.
 A message reaches a member as a prompt in its terminal starting with
 `[Reverie chat "<room>"]`. Reverie waits until the session is not in the middle of a
 turn, then sends everything pending as one line. Line breaks in a message become
-` / ` in the terminal; the panel keeps the original.
+`/` in the terminal; the panel keeps the original.
 
 ## How agents talk
 
@@ -139,30 +139,45 @@ the panel reuses for every reply, so replies play by themselves afterwards. If a
 still refuses (a stricter setting, or the page reloaded since your last tap), a large
 **▶ Tap to hear the reply** button appears, and your next tap anywhere plays it.
 
-Spoken turns are shown in the room but never typed into the agent's terminal (the voice
-service already answered). The dashboard relays the recording to a local voice service,
-`http://127.0.0.1:8090` by default (`REVERIE_VOICE_TURN_URL` to change it): `POST /turn`
-with the raw recording, answering `{transcript, reply, audio_url}`, and
-`GET /audio/<id>` for the spoken reply. The browser only ever talks to the dashboard.
+The dashboard sends a recorded take to the separate Whisper/Piper speech service for
+transcription, posts the transcript to the voice member, waits for that member's linked
+answer, then asks the service to make reply audio. The service does not answer in the
+agent's place. The default service address is `127.0.0.1:8090`, configured by
+`REVERIE_VOICE_TURN_URL`. The browser talks only to the dashboard. This speech service
+must be deployed separately; enabling Voice does not install or start it.
 
 Browsers allow the microphone only on a secure page: `https://` (for example through
 `tailscale serve`) or `localhost`. Over plain `http://` on a LAN address the button
 reports that HTTPS is needed.
 
-## Car mode
+## Voice on phones and desktops
 
-For hands-free use (for example while driving), tap the 🚗 button in the chat panel's
-header; it shows when the room has a member marked as **voice**. Car mode fills the
-screen with one huge button and a large status: **Listening**, **Thinking**,
-**Speaking** or **Paused**. It keeps the screen awake and stays on across reloads until
-you press **Exit**.
+Use the **Voice** selector beside the composer mic. It replaces the separate Hands-free
+and Car buttons. Its modes are **Off**, **Hands-free in panel**, and **Car screen**.
+The selection is remembered per room on this device. Car screen is offered in this
+selector by default on touch devices when the room has a voice member; desktop users
+can also open it from the room menu.
 
-On browsers with speech recognition (Chrome on Android and desktop) you never press
-anything: it listens, notices when you stop talking, and sends what you said to the voice
-member as an ordinary message (marked 🎤 in the room). The reply is read out with the
-phone's own voice (pick one in the top bar), and listening pauses while she speaks so
-she is never transcribed, then resumes. Tap anywhere to pause or resume; tap while she
-speaks to cut her off and talk.
+Panel hands-free records speech and sends it when you pause. Before it opens the mic,
+the dashboard checks the configured Whisper/Piper service. Desktop listening defaults
+on only when the service reports ready; phones start off. If the service is unavailable
+or a take fails, automatic capture stops. The selector stays Off, the mic tooltip names
+the service and address, and **Retry speech service** checks again. A failed or empty
+transcription never becomes a blank spoken message. Image-only messages remain valid.
 
-Without speech recognition (Firefox, older Safari), the whole screen is the push-to-talk
-button instead: tap to talk, tap again to send, and the reply is played as audio.
+Where the browser provides SpeechRecognition, **Browser dictation** is available even
+without a voice member or a reachable server speech service. Choose it explicitly;
+your words are transcribed by the browser and previewed in the composer. Microphone
+permission and the browser's recognition service must be available. Phones have the
+same Voice entry point as desktops.
+
+## Car screen
+
+Car screen fills the display with **Listening**, **Thinking**, **Speaking**, or
+**Paused**, and keeps the screen awake where supported. With browser recognition and
+speech synthesis, it listens for a pause and sends what you said to the room's voice
+member. Otherwise it uses the recorded-audio server path, which must pass the readiness
+check first. Tap to pause or resume; **Exit** turns that room's Voice mode off.
+
+**Diag** shows the chosen engine (`speech` or `server`) and the reason, and includes the
+same information, service-probe state and capabilities in the uploaded diagnostics.

@@ -79,6 +79,38 @@ export function voiceServiceUrl(env: NodeJS.ProcessEnv = process.env): string {
   return (env.REVERIE_VOICE_TURN_URL?.trim() || 'http://127.0.0.1:8090').replace(/\/+$/, '');
 }
 
+/** Diagnostic address only: never expose endpoint credentials, paths or query strings. */
+export function voiceServiceLabel(base: string): string {
+  try {
+    const url = new URL(base);
+    return `Whisper/Piper speech service at ${url.hostname}:${url.port || (url.protocol === 'https:' ? '443' : '80')}`;
+  } catch {
+    return 'Whisper/Piper speech service at the configured endpoint';
+  }
+}
+
+/** Health is small and bounded; this must never download models or transcribe a take. */
+async function voiceHealth(response: Response): Promise<{ status?: unknown; stt?: unknown; tts?: unknown }> {
+  if (!response.ok || !response.body) throw new Error('health unavailable');
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  try {
+    while (true) {
+      const chunk = await reader.read();
+      if (chunk.done) break;
+      size += chunk.value.byteLength;
+      if (size > 4096) throw new Error('health too large');
+      chunks.push(chunk.value);
+    }
+    const body: unknown = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+    if (!body || typeof body !== 'object') throw new Error('invalid health');
+    return body;
+  } finally {
+    await reader.cancel().catch(() => undefined);
+  }
+}
+
 export interface VoiceTurnDeps {
   /** Base URL of the voice service; a function so tests can point it at a fake. */
   serviceUrl?: () => string;
@@ -104,6 +136,33 @@ export function registerVoiceTurnRoutes(
   const replyWaitMs = deps.replyWaitMs ?? VOICE_REPLY_WAIT_MS;
   /** Members with a spoken turn in flight (any room). */
   const waiting = new Set<string>();
+  app.get('/api/voice/status', async (_req, reply) => {
+    reply.header('Cache-Control', 'no-store');
+    const service = voiceServiceLabel(base());
+    try {
+      const health = await voiceHealth(
+        await fetch(`${base()}/health`, { signal: AbortSignal.timeout(2000), redirect: 'error' })
+      );
+      const available = health.status === 'ok' && health.stt === 'ready' && health.tts === 'ready';
+      return {
+        success: true,
+        data: {
+          available,
+          service,
+          message: `${service} ${available ? 'is ready' : 'is not ready (Whisper and Piper must both be ready)'}`,
+        },
+      };
+    } catch {
+      return {
+        success: true,
+        data: {
+          available: false,
+          service,
+          message: `${service} is unavailable. Start the service or use browser dictation where available.`,
+        },
+      };
+    }
+  });
   /** The user sender of a transcript: marked `owner_spoken` only for a verified owner. */
   const speaker = (req: FastifyRequest) => {
     const name = isMultiUserMode() ? getAuthUser(req).username : 'user';
@@ -141,7 +200,9 @@ export function registerVoiceTurnRoutes(
           reply,
           timedOut ? 504 : 502,
           ApiErrorCode.OPERATION_FAILED,
-          timedOut ? 'Speech to text did not answer in time' : 'The voice service is not running'
+          timedOut
+            ? `${voiceServiceLabel(base())}: speech to text did not answer in time`
+            : `${voiceServiceLabel(base())} could not be reached`
         );
       }
       let data: { transcript?: unknown; error?: unknown } = {};
@@ -198,7 +259,9 @@ export function registerVoiceTurnRoutes(
             reply,
             timedOut ? 504 : 502,
             ApiErrorCode.OPERATION_FAILED,
-            timedOut ? 'Speech to text did not answer in time' : 'The voice service is not running'
+            timedOut
+              ? `${voiceServiceLabel(base())}: speech to text did not answer in time`
+              : `${voiceServiceLabel(base())} could not be reached`
           );
         }
         let stt: { transcript?: unknown; error?: unknown } = {};
@@ -324,7 +387,7 @@ export function registerVoiceTurnRoutes(
       try {
         upstream = await fetch(`${base()}/audio/${id}`, { signal: AbortSignal.timeout(VOICE_AUDIO_TIMEOUT_MS) });
       } catch {
-        return fail(reply, 502, ApiErrorCode.OPERATION_FAILED, 'The voice service is not running');
+        return fail(reply, 502, ApiErrorCode.OPERATION_FAILED, `${voiceServiceLabel(base())} could not be reached`);
       }
       if (!upstream.ok) return fail(reply, 404, ApiErrorCode.NOT_FOUND, 'No such audio');
       const type = upstream.headers.get('content-type') || '';
