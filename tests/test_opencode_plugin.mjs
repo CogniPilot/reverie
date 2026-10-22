@@ -190,7 +190,8 @@ test("reverie_room targets the room a message came from, takes an explicit room,
     // A fake `reverie` CLI that records its arguments: the tool must pass --room, never run a shell.
     await writeFile(join(bin, "reverie"), NODE_SHEBANG +
       'require("node:fs").appendFileSync(process.env.REVERIE_TEST_CALLS, JSON.stringify(process.argv.slice(2)) + "\\n"); process.stdout.write("ok");\n', {mode: 0o700});
-    Object.assign(process.env, { PATH: bin + ":" + process.env.PATH, REVERIE_TEST_CALLS: calls, REVERIE_CYCLE_MANAGED: "1" });
+    Object.assign(process.env, { PATH: bin + ":" + process.env.PATH, REVERIE_TEST_CALLS: calls, REVERIE_CYCLE_MANAGED: "1",
+      REVERIE_HOME: dir, REVERIE_DATA_DIR: join(dir, "data"), REVERIE_EMBED_URL: "" });
     await writeFile(join(dir, ".reverie-instance"), JSON.stringify({ python: "python3", source: join(root, "python") }));
     const source = (await readFile(join(root, "python/reverie/plugins/reverie.mjs"), "utf8")).replace(
       'import { tool } from "@opencode-ai/plugin";',
