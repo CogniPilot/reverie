@@ -58,6 +58,7 @@ VERSION=$(sed -n 's/^Version: //p' IMAGE-REF.txt)
 Or run it directly with Docker, with the same port, volumes and restart policy:
 
 ```shell
+VERSION=$(sed -n 's/^Version: //p' IMAGE-REF.txt)   # or VERSION=0.2.0
 docker pull "ghcr.io/jgoppert/reverie:$VERSION"
 docker run --detach --name reverie --restart unless-stopped \
   --publish 127.0.0.1:3000:3000 \
