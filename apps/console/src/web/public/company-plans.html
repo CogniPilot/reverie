@@ -121,6 +121,10 @@ function planRisk(p) {
   if (p.proj != null && p.proj >= 85) return 'warn';
   return 'good';
 }
+function planAuthLabel(p) {
+  if (typeof sign !== 'undefined' && sign && sign.accountId === p.id && sign.view && !SETTLED.includes(sign.view.state)) return 'Sign-in pending';
+  return ({'signed-in': 'Signed in', 'signed-out': 'Signed out', unavailable: 'Installing or unavailable', error: 'Sign-in status error'})[p.authState] || (p.signedIn ? 'Signed in' : 'Signed out');
+}
 function plans() {
   const sec = document.getElementById('sec-burn'), el = document.getElementById('plans');
   document.getElementById('addAcct').hidden = !B.planBurn;
@@ -139,6 +143,7 @@ function plans() {
     const landing = planLanding(p);
     const badge = risk === 'bad' ? `runs out ${dayLbl(p.runsOut).split(',')[0]} ${hm(p.runsOut)}` : risk === 'warn' ? 'tight' : p.used == null ? 'no data' : 'on track';
     return `<div class="plan"><h3>${esc(p.name)}<span class="badge ${p.used == null ? 'mute' : risk}">${esc(badge)}</span></h3>
+      <div class="who" data-auth-state="${esc(p.authState || '')}">${esc(planAuthLabel(p))}</div>
       <div class="who">${p.reset ? 'Resets ' + dayLbl(p.reset) + ' ' + hm(p.reset) + ' ' + esc(zoneShort()) : ''}</div>
       <div class="plan-members" data-plan-members="${esc(p.id)}" role="group" aria-label="${esc('People allocated to ' + p.name)}" aria-live="polite"></div>
       <div class="stats"><div class="plan-projection"><b style="color:${css('--' + risk)}">${p.proj == null ? '–' : Math.round(p.proj) + '%'}</b>at reset</div><div class="plan-runout"><b>${p.runsOut ? esc(hm(p.runsOut)) : '–'}</b>${p.runsOut ? 'runs out ' + esc(dayLbl(p.runsOut)) + ' ' + esc(zoneShort()) : 'no run-out projected'}</div><div class="plan-landing" title="${esc(landing.multipleTooltip)}"><b style="color:${css('--' + landing.tone)}">${esc(landing.multipleLabel)}</b>landing pace</div><div class="plan-rate" title="${esc(landing.rateTooltip)}"><b>${esc(landing.rateLabel)}</b>burn now</div><div><b>${esc(num(p.used))}${p.used == null ? '' : '%'}</b>used</div>${bankedStat(p)}</div>
@@ -355,7 +360,7 @@ function planActions(p) {
       <div data-rename-err class="err" role="alert">${esc(planErr[p.profileId] || '')}</div>`;
   const why = p.profileId ? '' : `<div class="hint">No rename or remove: this account is only a login folder, with no account entry to change.</div>`;
   return `<div class="pact">${p.profileId ? `<button type="button" class="btn" data-rename="${esc(p.profileId)}">Rename</button>` : ''}
-    <button type="button" class="btn" data-signin="${esc(p.id)}">Sign in again</button>
+    <button type="button" class="btn" data-signin="${esc(p.id)}">${p.signedIn ? 'Sign in again' : 'Sign in'}</button>
     ${p.profileId && !p.isDefault ? `<button type="button" class="btn" data-remove="${esc(p.profileId)}">Remove</button>` : ''}</div>
     ${why}${p.profileId && planErr[p.profileId] ? `<div class="err" role="alert">${esc(planErr[p.profileId])}</div>` : ''}`;
 }
@@ -459,6 +464,7 @@ function signRender(v) {
   s.status.textContent = v.message || '';
   s.status.className = 'status ' + v.state;
   const settled = SETTLED.includes(v.state);
+  if (B?.planBurn) plans();
   if (settled && s.timer) { clearInterval(s.timer); s.timer = null; if (v.state === 'signed_in') load(); }
   const key = JSON.stringify([v.state, v.url, v.code, v.needsCode]);
   if (key === s.rendered) return; // a half-typed code survives each poll

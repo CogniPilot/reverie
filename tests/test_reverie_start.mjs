@@ -23,7 +23,7 @@ function fixture(t) {
   }
   const deploy = join(home, 'reverie');
   const run = (args = [], env = {}) => spawnSync(process.execPath, [script, ...args], {
-    encoding: 'utf8', env: { ...process.env, HOME: home, PATH: bin + ':' + process.env.PATH, CALLS: log, ...env },
+    encoding: 'utf8', env: { ...process.env, HOME: home, REVERIE_ROOT: '', PATH: bin + ':' + process.env.PATH, CALLS: log, ...env },
   });
   const calls = () => existsSync(log) ? readFileSync(log, 'utf8').trim().split('\n').filter(Boolean).map(JSON.parse) : [];
   return { root, home, deploy, run, calls };

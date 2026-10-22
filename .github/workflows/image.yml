@@ -37,6 +37,14 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
 
+      - name: Free unused hosted-runner toolchains
+        run: |
+          # This dedicated job builds with Nix; the preinstalled mobile, .NET
+          # and Haskell SDKs consume space needed for image layers and scans.
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup
+          docker image prune --all --force
+          df -h /
+
       - name: Match the release to the reviewed commit
         if: github.event_name == 'release'
         env:
@@ -72,7 +80,7 @@ jobs:
         run: |
           app="$HOME/scratch/reverie/build/app/bin/reverie"
           native_home=$(mktemp -d "$HOME/scratch/reverie/tmp/native-home.XXXXXX")
-          HOME="$native_home" REVERIE_DATA_DIR="$native_home/data" REVERIE_PASSWORD=ci-local-password \
+          HOME="$native_home" REVERIE_DATA_DIR="$native_home/data" REVERIE_PASSWORD=ci-local-password REVERIE_INSTALL_CLIS=none \
             "$app" web --host 127.0.0.1 --port 3100 > "$native_home/console.log" 2>&1 &
           native_pid=$!
           trap 'kill "$native_pid" 2>/dev/null || true; wait "$native_pid" 2>/dev/null || true' EXIT
@@ -100,7 +108,7 @@ jobs:
         run: |
           # The image's own start script and default command, as a user would run it.
           trap 'docker rm --force boot 2>/dev/null || true; docker volume rm reverie-ci-instance reverie-ci-home 2>/dev/null || true' EXIT
-          docker run --detach --restart unless-stopped --name boot --network none --volume reverie-ci-instance:/instances --volume reverie-ci-home:/home/agent "reverie:$GITHUB_SHA"
+          docker run --detach --restart unless-stopped --name boot --network none --env REVERIE_INSTALL_CLIS=none --volume reverie-ci-instance:/instances --volume reverie-ci-home:/home/agent "reverie:$GITHUB_SHA"
           status() { docker exec boot curl -sS -o /dev/null -w '%{http_code}' "$@" http://127.0.0.1:3000/api/status || true; }
           for _ in $(seq 1 60); do
             code=$(status)
@@ -122,13 +130,14 @@ jobs:
           # change, owner route 200, and the refusals. The one-time password stays in 0600 files.
           docker exec -i boot bash -s < .github/ci/boot-owner.sh || ok=
           test "$(docker exec boot stat -c %a /instances/default/owner-password)" = 600 || ok=
+          docker exec boot env REVERIE_INSTALL_CLIS=none reverie-install-clis || ok=
           docker exec boot /opt/reverie/python/bin/python3 -I -c 'import reverie, experts' || ok=
           docker inspect --format 'state {{.State.Status}}, exit code {{.State.ExitCode}}' boot
           docker logs boot 2>&1 | tail -n 40
           docker exec boot bash -c 'mkdir -p "$HOME/.config/reverie-ci"; printf preserved > "$HOME/.config/reverie-ci/home-marker"'
           before=$(docker exec boot sha256sum /instances/default/owner-password /instances/default/console/owner-auth.json /instances/default/console/owner-auth.policy /home/agent/.config/reverie-ci/home-marker)
           docker rm --force boot
-          docker run --detach --restart unless-stopped --name boot --network none --volume reverie-ci-instance:/instances --volume reverie-ci-home:/home/agent "reverie:$GITHUB_SHA"
+          docker run --detach --restart unless-stopped --name boot --network none --env REVERIE_INSTALL_CLIS=none --volume reverie-ci-instance:/instances --volume reverie-ci-home:/home/agent "reverie:$GITHUB_SHA"
           code=000
           for _ in $(seq 1 60); do
             code=$(status)

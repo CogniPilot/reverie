@@ -115,6 +115,9 @@ export function nextLoginState(prev: LoginSnapshot, input: LoginInputs): LoginSn
   if (status?.loggedIn && (input.credentialsChanged || screen.exitCode === 0)) {
     return keep('signed_in', status.who ? `Signed in as ${status.who}` : 'Signed in');
   }
+  if (screen.exitCode === 126 || screen.exitCode === 127) {
+    return keep('failed', 'Sign-in could not start: the provider CLI is missing or not executable in this runtime. Try again after first-start installation, or run reverie-install-clis.');
+  }
   if (screen.exitCode !== null) {
     if (screen.exitCode === 0 && status === null) return keep('verifying', 'Checking the sign-in…');
     if (screen.error && prev.codeSubmitted) {
@@ -166,6 +169,8 @@ export interface LoginView {
 }
 
 export interface LoginDeps {
+  /** Verify the provider executable before creating a sign-in pane. */
+  checkCommand?(provider: SubscriptionProvider): Promise<void>;
   /** Run `tmux -L <socket> ...args`, resolving stdout. */
   tmux(args: string[]): Promise<string>;
   /** The login command line for a provider (binary plus arguments). */
@@ -216,6 +221,7 @@ export class AccountLoginService {
 
   /** Start (or restart) the sign-in for an account. */
   async start(account: LoginAccount): Promise<LoginView> {
+    await this.deps.checkCommand?.(account.provider);
     for (const r of this.logins.values()) {
       if (r.account.id === account.id && !isTerminalLoginState(r.snapshot.state)) await this.cancel(r.view.id);
     }
@@ -384,6 +390,16 @@ export function defaultLoginDeps(opts: {
 }): LoginDeps {
   const env = { ...process.env, PATH: opts.path };
   return {
+    checkCommand: async (provider) => {
+      const label = provider === 'anthropic' ? 'Claude' : 'Codex';
+      const binary = provider === 'anthropic' ? opts.claudeBinary : opts.codexBinary || 'codex';
+      try {
+        await run(binary, ['--version'], { timeout: 10_000, env });
+      } catch {
+        // Never surface arbitrary CLI output: it can contain account or authorization data.
+        throw new LoginError(`${label} sign-in could not start: its CLI is missing or unavailable in this runtime. First-start installation may still be running. Try again shortly, or run reverie-install-clis.`, 503);
+      }
+    },
     tmux: async (args) => (await run('tmux', ['-L', opts.socket, ...args], { timeout: 10_000, env })).stdout,
     command: (provider) =>
       provider === 'anthropic'

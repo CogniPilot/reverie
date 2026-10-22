@@ -22,7 +22,7 @@ in {
     };
     virtualisation.podman = { enable = true; dockerCompat = false; dockerSocket.enable = false; };
     systemd.tmpfiles.rules = [
-      "d ${cfg.home}/.local/share/reverie 0700 ${cfg.userName} ${cfg.userName} -"
+      "d ${cfg.home}/reverie 0700 ${cfg.userName} ${cfg.userName} -"
       "d ${cfg.home}/projects 0700 ${cfg.userName} ${cfg.userName} -"
     ];
   };

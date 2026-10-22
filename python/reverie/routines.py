@@ -638,8 +638,8 @@ class Tick:
 
 def default_paths():
     home = Path.home()
-    state = Path(os.environ.get("XDG_STATE_HOME", home / ".local" / "state")) / "reverie"
-    return home / ".config" / "reverie" / "routines.json", state
+    root = Path(os.environ.get("REVERIE_ROOT", home / "reverie"))
+    return root / "runtime" / "config" / "routines.json", root / "runtime"
 
 
 def main(argv=None, now=None, opener=None, out=sys.stdout):

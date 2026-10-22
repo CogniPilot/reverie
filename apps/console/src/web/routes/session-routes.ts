@@ -950,7 +950,11 @@ export function registerSessionRoutes(
   } = {}
 ): RemoteWakeRegistry {
   /** A launch failed after the claim stopped the session it replaces: the employee is left without a running session. Never silent. */
-  const replacementFailed = (identity: { employeeId?: string } | undefined, claim: ThreadClaim, error: unknown): void => {
+  const replacementFailed = (
+    identity: { employeeId?: string } | undefined,
+    claim: ThreadClaim,
+    error: unknown
+  ): void => {
     if (!claim.stopped.length || claim.released) return;
     const info = { employeeId: identity?.employeeId, replacedSessionIds: claim.stopped, error: getErrorMessage(error) };
     console.error('[replacement_failed]', JSON.stringify(info));
@@ -961,9 +965,7 @@ export function registerSessionRoutes(
   // The coordinator role counts only when the caller's header and the resolved parent are the same session: a body
   // `parentSessionId` naming someone else cannot borrow their role.
   const takeoverFor = (callerId: string, header: unknown) =>
-    options.resumeTakeover && header === callerId
-      ? (id: string) => takeoverGrant(callerId, id) !== null
-      : undefined;
+    options.resumeTakeover && header === callerId ? (id: string) => takeoverGrant(callerId, id) !== null : undefined;
   const takeoverGrant = (callerId: string, id: string) =>
     options.resumeTakeover
       ? resumeTakeoverRoom({
@@ -988,7 +990,11 @@ export function registerSessionRoutes(
   ): Promise<{ status: number; message: string } | null> => {
     const auditFailed = { status: 500, message: 'Could not write the audit line for this launch; nothing was started' };
     // An agent caller launching Codex without approvals is audited the same way (the agent runs unattended).
-    if (options.resumeTakeover && (body as { codexConfig?: { dangerouslyBypassApprovals?: boolean } }).codexConfig?.dangerouslyBypassApprovals === true) {
+    if (
+      options.resumeTakeover &&
+      (body as { codexConfig?: { dangerouslyBypassApprovals?: boolean } }).codexConfig?.dangerouslyBypassApprovals ===
+        true
+    ) {
       try {
         await options.resumeTakeover.audit({ action: 'agent-bypass-approvals', by: callerId, mode: 'codex' });
       } catch {
@@ -1116,11 +1122,17 @@ export function registerSessionRoutes(
     // "resuming" another agent's thread would pass for that agent's successor, so it is refused at the source.
     if (req.headers['x-reverie-parent-session'] !== undefined && parentSessionId) {
       const owns = (id: string) => agentOwnsConversation(ctx.sessions.get(parentSessionId), id);
-      const refusal = resumeRefusalForAgent(body, owns, takeoverFor(parentSessionId, req.headers['x-reverie-parent-session']));
+      const refusal = resumeRefusalForAgent(
+        body,
+        owns,
+        takeoverFor(parentSessionId, req.headers['x-reverie-parent-session'])
+      );
       if (refusal) return reply.code(403).send(createErrorResponse(ApiErrorCode.FORBIDDEN, refusal));
       const auditRefusal = await auditTakeovers(body, parentSessionId, owns);
       if (auditRefusal) {
-        return reply.code(auditRefusal.status).send(createErrorResponse(ApiErrorCode.OPERATION_FAILED, auditRefusal.message));
+        return reply
+          .code(auditRefusal.status)
+          .send(createErrorResponse(ApiErrorCode.OPERATION_FAILED, auditRefusal.message));
       }
     }
     if (body.icon !== undefined && normalizeIcon(body.icon) === undefined) {
@@ -1327,7 +1339,10 @@ export function registerSessionRoutes(
     const validatedResumeId = body.resumeSessionId;
     const resumeWarnings: string[] = [];
     if (validatedResumeId && getCli(body.mode ?? 'claude')?.capabilities.transcript === 'claude-jsonl' && !remote) {
-      const launchEnv = { ...(await clampEnvOverridesForOwner(owner, body.envOverrides)), ...subscriptionLaunch(req).env };
+      const launchEnv = {
+        ...(await clampEnvOverridesForOwner(owner, body.envOverrides)),
+        ...subscriptionLaunch(req).env,
+      };
       const home = join(process.env.HOME || '/tmp', '.claude');
       const targetDir = launchEnv.CLAUDE_CONFIG_DIR || process.env.CLAUDE_CONFIG_DIR || home;
       const accounts = join(getDataDir(), 'accounts');
@@ -1339,14 +1354,21 @@ export function registerSessionRoutes(
       }
       const check = await checkClaudeResume(validatedResumeId, targetDir, known, body.refreshResumeFromNewest === true);
       if (!check.ok) {
-        const code = { 404: ApiErrorCode.NOT_FOUND, 409: ApiErrorCode.CONFLICT, 422: ApiErrorCode.INVALID_INPUT }[check.status];
+        const code = { 404: ApiErrorCode.NOT_FOUND, 409: ApiErrorCode.CONFLICT, 422: ApiErrorCode.INVALID_INPUT }[
+          check.status
+        ];
         return reply.code(check.status).send(createErrorResponse(code, check.error));
       }
-      if (check.refreshed) console.log(`[Session] Resume ${validatedResumeId}: refreshed ${check.refreshed} from the newest copy`);
+      if (check.refreshed)
+        console.log(`[Session] Resume ${validatedResumeId}: refreshed ${check.refreshed} from the newest copy`);
       if (check.setAside) console.log(`[Session] Resume ${validatedResumeId}: set aside ${check.setAside.join(', ')}`);
       if (check.olderElsewhere) {
-        console.log(`[Session] Resume ${validatedResumeId}: older differing copies left in other accounts: ${check.olderElsewhere.join('; ')}`);
-        resumeWarnings.push(`Resumed the copy in ${targetDir}; older, different copies of this conversation are in other accounts and were not used: ${check.olderElsewhere.join('; ')}`);
+        console.log(
+          `[Session] Resume ${validatedResumeId}: older differing copies left in other accounts: ${check.olderElsewhere.join('; ')}`
+        );
+        resumeWarnings.push(
+          `Resumed the copy in ${targetDir}; older, different copies of this conversation are in other accounts and were not used: ${check.olderElsewhere.join('; ')}`
+        );
       }
     }
 
@@ -1405,7 +1427,12 @@ export function registerSessionRoutes(
           ? launchBody.openCodeConfig.continueSession
           : employeeThread(ctx, spawnIdentity)
         : undefined;
-    const claim = await claimEmployeeThread(ctx, spawnIdentity, launchThread, req.headers['x-reverie-parent-session'] !== undefined);
+    const claim = await claimEmployeeThread(
+      ctx,
+      spawnIdentity,
+      launchThread,
+      req.headers['x-reverie-parent-session'] !== undefined
+    );
     if (claim.refusal) return createErrorResponse(ApiErrorCode.CONFLICT, claim.refusal);
     try {
       const session = new Session({
@@ -1418,8 +1445,7 @@ export function registerSessionRoutes(
         model,
         claudeMode: effectiveClaudeMode,
         allowedTools: claudeModeConfig.allowedTools,
-        openCodeConfig:
-          mode === 'opencode' ? withEmployeeThread(launchBody.openCodeConfig, launchThread) : undefined,
+        openCodeConfig: mode === 'opencode' ? withEmployeeThread(launchBody.openCodeConfig, launchThread) : undefined,
         codexConfig: mode === 'codex' ? gatedCodexConfig : undefined,
         geminiConfig: mode === 'gemini' ? gatedGeminiConfig : undefined,
         antigravityConfig: mode === 'antigravity' ? gatedAntigravityConfig : undefined,
@@ -1428,7 +1454,10 @@ export function registerSessionRoutes(
         deepSeekConfig: mode === 'deepseek' ? gatedDeepSeekConfig : undefined,
         ompConfig: resolveOmpConfigForCreate(mode, workingDir, launchBody.ompConfig),
         resumeSessionId: validatedResumeId,
-        envOverrides: { ...(await clampEnvOverridesForOwner(owner, body.envOverrides)), ...subscriptionLaunch(req).env },
+        envOverrides: {
+          ...(await clampEnvOverridesForOwner(owner, body.envOverrides)),
+          ...subscriptionLaunch(req).env,
+        },
         subscriptionProfile: subscriptionLaunch(req).selection,
         effort: body.effort,
         advisorModel: body.advisorModel,
@@ -2175,7 +2204,8 @@ export function registerSessionRoutes(
     const autoMux = useMux === undefined && isPlainPromptInput(inputStr);
     // An agent's `send` (the request names its calling session) must not trip OpenCode's "!" shell-mode key;
     // a person's own typing, which names no session, is left exactly as typed.
-    const agentCaller = typeof req.headers['x-reverie-parent-session'] === 'string' && req.headers['x-reverie-parent-session'] !== '';
+    const agentCaller =
+      typeof req.headers['x-reverie-parent-session'] === 'string' && req.headers['x-reverie-parent-session'] !== '';
     const muxOptions = agentCaller ? { fromUser: true, opencodeGuard: true } : { fromUser: true };
     // The direct PTY writes (a mux failure's fallback, an explicit raw write) carry the same text: an agent's goes in without "!".
     const rawInput = agentCaller && session.mode === 'opencode' ? guardShellKey(inputStr) : inputStr;
@@ -3674,19 +3704,25 @@ export function registerSessionRoutes(
   app.put('/api/sessions/:id/opencode-thread', async (req, reply) => {
     const { id } = req.params as { id: string };
     if (req.headers['x-reverie-parent-session'] !== undefined) {
-      return reply.code(403).send(createErrorResponse(ApiErrorCode.FORBIDDEN, 'Only the owner may change a session thread'));
+      return reply
+        .code(403)
+        .send(createErrorResponse(ApiErrorCode.FORBIDDEN, 'Only the owner may change a session thread'));
     }
     const { thread } = parseBody(OpenCodeThreadSchema, req.body, 'Invalid request body');
     const session = findSessionOrFail(ctx, id, req);
     if (session.mode !== 'opencode') {
-      return reply.code(400).send(createErrorResponse(ApiErrorCode.INVALID_INPUT, 'Only an OpenCode session has a thread'));
+      return reply
+        .code(400)
+        .send(createErrorResponse(ApiErrorCode.INVALID_INPUT, 'Only an OpenCode session has a thread'));
     }
     // Two processes on one thread write over each other, the same rule the launch guard applies.
     const holder = [...ctx.sessions.values()].find(
       (s) => s.id !== id && ctx.store.getSession(s.id)?.openCodeConfig?.continueSession === thread
     );
     if (holder) {
-      return reply.code(409).send(createErrorResponse(ApiErrorCode.CONFLICT, `${holder.name} (${holder.id}) already resumes that thread`));
+      return reply
+        .code(409)
+        .send(createErrorResponse(ApiErrorCode.CONFLICT, `${holder.name} (${holder.id}) already resumes that thread`));
     }
     const previous = session.openCodeThread ?? null;
     try {
@@ -3716,12 +3752,15 @@ export function registerSessionRoutes(
   app.post('/api/sessions/:id/mode', async (req, reply) => {
     const { id } = req.params as { id: string };
     if (req.headers['x-reverie-parent-session'] !== undefined) {
-      return reply.code(403).send(createErrorResponse(ApiErrorCode.FORBIDDEN, 'Only the owner may switch a session CLI'));
+      return reply
+        .code(403)
+        .send(createErrorResponse(ApiErrorCode.FORBIDDEN, 'Only the owner may switch a session CLI'));
     }
     // A registry id; custom CLI ids are SessionModes by registration (docker-hosts.ts does the same cast).
     const mode = parseBody(SessionModeSwitchSchema, req.body, 'Invalid request body').mode as SessionMode;
     const session = findSessionOrFail(ctx, id, req);
-    const refuse = (code: number, err: ApiErrorCode, msg: string) => reply.code(code).send(createErrorResponse(err, msg));
+    const refuse = (code: number, err: ApiErrorCode, msg: string) =>
+      reply.code(code).send(createErrorResponse(err, msg));
     if (session.remote || session.docker) {
       return refuse(400, ApiErrorCode.INVALID_INPUT, 'A remote or Docker session cannot switch CLI');
     }
@@ -3739,8 +3778,14 @@ export function registerSessionRoutes(
       const from = session.mode;
       const oldPid = muxRecord.pid ?? null;
       const oldTree = snapshotPaneTree(oldPid);
-      getLifecycleLog().log({ event: 'mode_set', sessionId: id, name: session.name, mode: from,
-        reason: 'requested', extra: { from, to: mode, by: 'owner', oldPid } });
+      getLifecycleLog().log({
+        event: 'mode_set',
+        sessionId: id,
+        name: session.name,
+        mode: from,
+        reason: 'requested',
+        extra: { from, to: mode, by: 'owner', oldPid },
+      });
       session.setMode(mode);
       ctx.mux.updateSessionMode(id, mode);
       let restarted = false;
@@ -3753,16 +3798,27 @@ export function registerSessionRoutes(
         session.setMode(from);
         ctx.mux.updateSessionMode(id, from);
         persistAndBroadcastSession(ctx, session);
-        getLifecycleLog().log({ event: 'mode_set', sessionId: id, name: session.name, mode: from,
-          reason: 'restart_failed', extra: { from, to: mode, by: 'owner', oldPid } });
+        getLifecycleLog().log({
+          event: 'mode_set',
+          sessionId: id,
+          name: session.name,
+          mode: from,
+          reason: 'restart_failed',
+          extra: { from, to: mode, by: 'owner', oldPid },
+        });
         return refuse(500, ApiErrorCode.OPERATION_FAILED, 'The pane did not restart; the session keeps its CLI');
       }
       persistAndBroadcastSession(ctx, session);
       const newPid = ctx.mux.getSession(id)?.pid ?? null;
       const leftover = survivors(oldTree).map((p) => p.pid);
-      getLifecycleLog().log({ event: 'mode_set', sessionId: id, name: session.name, mode,
+      getLifecycleLog().log({
+        event: 'mode_set',
+        sessionId: id,
+        name: session.name,
+        mode,
         reason: leftover.length ? 'switched_with_survivors' : 'switched',
-        extra: { from, to: mode, by: 'owner', oldPid, newPid, survivors: leftover } });
+        extra: { from, to: mode, by: 'owner', oldPid, newPid, survivors: leftover },
+      });
       return { success: true, data: { from, to: mode, oldPid, newPid, survivors: leftover } };
     } finally {
       modeSwitches.delete(id);
@@ -3927,9 +3983,22 @@ export function registerSessionRoutes(
     const qsParentSessionId = resolveParentSessionId(ctx, req, parentSessionId, owner);
     // Same source guard as POST /api/sessions: an agent resumes only a conversation of its own, and never "the latest".
     if (req.headers['x-reverie-parent-session'] !== undefined && qsParentSessionId) {
-      const resumes = { openCodeConfig, codexConfig, geminiConfig, antigravityConfig, piConfig, grokConfig, ompConfig, deepSeekConfig };
+      const resumes = {
+        openCodeConfig,
+        codexConfig,
+        geminiConfig,
+        antigravityConfig,
+        piConfig,
+        grokConfig,
+        ompConfig,
+        deepSeekConfig,
+      };
       const owns = (id: string) => agentOwnsConversation(ctx.sessions.get(qsParentSessionId), id);
-      const refusal = resumeRefusalForAgent(resumes, owns, takeoverFor(qsParentSessionId, req.headers['x-reverie-parent-session']));
+      const refusal = resumeRefusalForAgent(
+        resumes,
+        owns,
+        takeoverFor(qsParentSessionId, req.headers['x-reverie-parent-session'])
+      );
       if (refusal) return createErrorResponse(ApiErrorCode.FORBIDDEN, refusal);
       const auditRefusal = await auditTakeovers(resumes, qsParentSessionId, owns);
       if (auditRefusal) return createErrorResponse(ApiErrorCode.OPERATION_FAILED, auditRefusal.message);
@@ -4347,8 +4416,12 @@ export function registerSessionRoutes(
     // check that can still refuse the request.
     let qsThread: string | undefined;
     if (mode === 'opencode') {
-      qsThread = typeof openCodeConfig?.continueSession === 'string' ? openCodeConfig.continueSession : employeeThread(ctx, qsSpawnIdentity);
-      if (qsThread && !openCodeConfig?.continueSession) openCodeConfig = { ...openCodeConfig, continueSession: qsThread };
+      qsThread =
+        typeof openCodeConfig?.continueSession === 'string'
+          ? openCodeConfig.continueSession
+          : employeeThread(ctx, qsSpawnIdentity);
+      if (qsThread && !openCodeConfig?.continueSession)
+        openCodeConfig = { ...openCodeConfig, continueSession: qsThread };
     }
     const niceConfig = await ctx.getGlobalNiceConfig();
     const qsModelConfig = await ctx.getModelConfig();
@@ -4378,7 +4451,7 @@ export function registerSessionRoutes(
             qsModelSource.param ?? 'model'
           ] as string | undefined)
         : qsModelSource?.source === 'claude-settings-file'
-          ? qsModelConfig?.defaultModel || undefined
+          ? modelOverride || qsModelConfig?.defaultModel || undefined
           : undefined;
     const qsClaudeModeConfig = await ctx.getClaudeModeConfig();
     const qsEffectiveClaudeMode = await resolveClaudeModeForUsername(qsClaudeModeConfig.claudeMode, owner);
@@ -4593,7 +4666,12 @@ export function registerSessionRoutes(
         qsSessionOptions.model = qsCustomModelLaunchModel;
       }
     }
-    const qsClaim = await claimEmployeeThread(ctx, qsSpawnIdentity, qsThread, req.headers['x-reverie-parent-session'] !== undefined);
+    const qsClaim = await claimEmployeeThread(
+      ctx,
+      qsSpawnIdentity,
+      qsThread,
+      req.headers['x-reverie-parent-session'] !== undefined
+    );
     if (qsClaim.refusal) return createErrorResponse(ApiErrorCode.CONFLICT, qsClaim.refusal);
     const session = new Session(qsSessionOptions);
 
@@ -4658,7 +4736,8 @@ export function registerSessionRoutes(
         });
         ctx.broadcast(SseEvent.SessionInteractive, { id: session.id, mode });
       }
-      if (qsSpawnIdentity) await options.company!.completeSpawn(session.id, qsSpawnIdentity, auditActor(ctx, req, owner));
+      if (qsSpawnIdentity)
+        await options.company!.completeSpawn(session.id, qsSpawnIdentity, auditActor(ctx, req, owner));
       ctx.broadcast(SseEvent.SessionUpdated, { session: ctx.getSessionStateWithRespawn(session) });
 
       // Docker + claude: the pane command pins the conversation id (--session-id /
@@ -4710,7 +4789,10 @@ export function registerSessionRoutes(
       // Clean up session on error to prevent orphaned resources
       await ctx.cleanupSession(session.id, true, 'quick_start_error');
       replacementFailed(qsSpawnIdentity, qsClaim, err);
-      return createErrorResponse(err instanceof CompanyError ? spawnRefusalCode(err) : ApiErrorCode.OPERATION_FAILED, getErrorMessage(err));
+      return createErrorResponse(
+        err instanceof CompanyError ? spawnRefusalCode(err) : ApiErrorCode.OPERATION_FAILED,
+        getErrorMessage(err)
+      );
     } finally {
       qsClaim.release();
     }
@@ -5945,7 +6027,9 @@ function employeeThread(
 ): string | undefined {
   if (!identity) return undefined;
   if (identity.threadId) return identity.threadId;
-  const old = identity.replacesSessionId ? ctx.store.getSession(identity.replacesSessionId)?.openCodeConfig?.continueSession : undefined;
+  const old = identity.replacesSessionId
+    ? ctx.store.getSession(identity.replacesSessionId)?.openCodeConfig?.continueSession
+    : undefined;
   return typeof old === 'string' ? old : undefined;
 }
 
@@ -5979,15 +6063,28 @@ async function claimEmployeeThread(
   const employeeId = identity?.employeeId;
   if (employeeId) {
     const until = replacementsInFlight.get(employeeId);
-    if (until !== undefined && until > Date.now()) return { refusal: 'This employee is already being replaced; wait for that launch to finish', release: noop, stopped, released: true };
+    if (until !== undefined && until > Date.now())
+      return {
+        refusal: 'This employee is already being replaced; wait for that launch to finish',
+        release: noop,
+        stopped,
+        released: true,
+      };
   }
   const holders = () =>
     [...ctx.sessions.values()].filter(
-      (s) => ctx.store.getSession(s.id)?.openCodeConfig?.continueSession === thread || (s.id === identity?.replacesSessionId && !!thread)
+      (s) =>
+        ctx.store.getSession(s.id)?.openCodeConfig?.continueSession === thread ||
+        (s.id === identity?.replacesSessionId && !!thread)
     );
   const threadUntil = thread ? threadsInFlight.get(thread) : undefined;
   if (thread && threadUntil !== undefined && threadUntil > Date.now()) {
-    return { refusal: 'Another launch is starting on this conversation thread; wait for it to finish', release: noop, stopped, released: true };
+    return {
+      refusal: 'Another launch is starting on this conversation thread; wait for it to finish',
+      release: noop,
+      stopped,
+      released: true,
+    };
   }
   const lease = Date.now() + REPLACEMENT_LEASE_MS;
   if (employeeId) replacementsInFlight.set(employeeId, lease);
@@ -6003,7 +6100,8 @@ async function claimEmployeeThread(
   };
   const release = claim.release;
   if (!thread) return claim;
-  const busy = (s: { id: string; name: string }) => `Stop ${s.name} (${s.id}) first: it is still running this conversation thread`;
+  const busy = (s: { id: string; name: string }) =>
+    `Stop ${s.name} (${s.id}) first: it is still running this conversation thread`;
   let blocking = holders();
   if (blocking.length && !agentCaller && blocking.every((s) => s.id === identity?.replacesSessionId)) {
     for (const old of blocking) {
@@ -6017,7 +6115,14 @@ async function claimEmployeeThread(
     release();
     // An agent never replaces a running employee session, its own included: that is the owner's call.
     const own = agentCaller && blocking.every((s) => s.id === identity?.replacesSessionId);
-    return { refusal: own ? `${busy(blocking[0])}. Only the owner can replace a running session; ask the owner` : busy(blocking[0]), release: noop, stopped, released: true };
+    return {
+      refusal: own
+        ? `${busy(blocking[0])}. Only the owner can replace a running session; ask the owner`
+        : busy(blocking[0]),
+      release: noop,
+      stopped,
+      released: true,
+    };
   }
   return claim;
 }
@@ -6032,7 +6137,10 @@ interface ThreadClaim {
 }
 
 /** A caller's own `continueSession` wins; otherwise the employee's thread is resumed. */
-function withEmployeeThread<T extends { continueSession?: unknown } | undefined>(config: T, thread: string | undefined): T {
+function withEmployeeThread<T extends { continueSession?: unknown } | undefined>(
+  config: T,
+  thread: string | undefined
+): T {
   if (!thread || config?.continueSession) return config;
   return { ...config, continueSession: thread } as T;
 }

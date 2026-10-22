@@ -45,12 +45,16 @@ FIRST_PARTY = ("usr/local/bin/",)
 # Reviewed image-package boundary from nix/package.nix and nix/image.nix. Nix
 # closures otherwise contain external dependencies, just as usr/ does in apt images.
 # Owned outputs: reverie-console-VERSION (excluding lib/reverie/node_modules),
-# python3.MINOR-reverie-memory-0.1.0, reverie-VERSION, reverie-runtime, reverie-start.
+# python3.MINOR-reverie-memory-0.1.0, reverie-VERSION, plus the exact helper identities below.
 # Changing these identities requires review here; other closures are external.
 NIX_STORE = re.compile(r"^nix/store/[0-9abcdfghijklmnpqrsvwxyz]{32}-([^/]+)(?:/(.*))?$")
 NIX_CONSOLE = re.compile(r"reverie-console-[0-9]+(?:\.[0-9]+)+")
 NIX_WRAPPER = re.compile(r"reverie-[0-9]+(?:\.[0-9]+)+")
 NIX_MEMORY = re.compile(r"python3\.[0-9]+-reverie-memory-0\.1\.0")
+NIX_OWNED_HELPERS = frozenset({
+    "reverie-start", "reverie-runtime", "reverie-launcher", "reverie-lock-tools",
+    "reverie-install-clis", "reverie-install-clis.mjs", "reverie-request-update",
+})
 CHUNK = 1024 * 1024
 OVERLAP = 16 * 1024  # longer than any detector match, so a match across a chunk boundary is still seen
 CREDENTIAL_DETECTORS = ("openai_or_anthropic_key", "stripe_key", "github_token", "slack_token", "aws_access_key",
@@ -65,7 +69,7 @@ def _third_party(path: str) -> str | None:
     store = NIX_STORE.fullmatch(path)
     if store:
         package, relative = store.group(1), store.group(2) or ""
-        if package in {"reverie-start", "reverie-runtime", "reverie-launcher", "reverie-lock-tools"} or NIX_MEMORY.fullmatch(package) or NIX_WRAPPER.fullmatch(package):
+        if package in NIX_OWNED_HELPERS or NIX_MEMORY.fullmatch(package) or NIX_WRAPPER.fullmatch(package):
             return None
         if NIX_CONSOLE.fullmatch(package):
             if relative == "lib/reverie/node_modules" or relative.startswith("lib/reverie/node_modules/"):

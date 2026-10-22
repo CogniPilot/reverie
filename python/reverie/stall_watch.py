@@ -78,7 +78,7 @@ DEFAULTS = {
     "cycle_policy": None,
     "night": None,
     "gpu_lock": "~/.cache/gpu.lock",
-    "hold_files": ["~/.config/reverie/gpu.hold", "~/.cache/reverie.hold"],
+    "hold_files": ["~/reverie/runtime/gpu.hold", "~/.cache/reverie.hold"],
     "log_max_bytes": 1024 * 1024,
     "tick_seconds": 60,
 }

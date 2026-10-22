@@ -318,6 +318,7 @@ export function registerBoardRoutes(app: FastifyInstance, ctx: SessionPort & Par
         provider: row.provider,
         isDefault: row.isDefault,
         signedIn: row.signedIn,
+        authState: row.authState,
         label: row.label,
         name: row.label,
         who,

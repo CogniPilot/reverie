@@ -132,7 +132,7 @@ if args[0] == "container" and os.environ.get("MISSING_CONTAINER"):
 
     def assert_not_replaced(self):
         self.assertFalse(any(call[0] in ("stop", "rm", "run", "pull") for call in self.calls()))
-        self.assertFalse((self.root / "cfg" / "reverie" / "reverie.versions").exists())
+        self.assertFalse((self.root / "reverie" / "runtime" / "setup" / "reverie.versions").exists())
 
     def test_offline_checks_local_id_before_replacing_and_never_pulls(self):
         result = self.run_setup("--offline", "--image", "example.test/app", "--version", "1.2.3",
@@ -149,7 +149,7 @@ if args[0] == "container" and os.environ.get("MISSING_CONTAINER"):
         self.assertIn("type=volume,src=reverie-data,dst=/instances", run_call)
         self.assertIn("type=volume,src=reverie-home,dst=/home/agent", run_call)
         self.assertFalse(any(call[0] == "pull" for call in calls))
-        self.assertEqual((self.root / "cfg" / "reverie" / "reverie.versions").read_text(), self.image_id + "\n")
+        self.assertEqual((self.root / "reverie" / "runtime" / "setup" / "reverie.versions").read_text(), self.image_id + "\n")
 
     def test_offline_accepts_explicit_archive_with_spaces_and_podman(self):
         archive = self.root / "image payload.tar.gz"

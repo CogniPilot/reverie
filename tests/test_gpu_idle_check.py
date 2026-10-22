@@ -57,7 +57,7 @@ class GpuIdleCheckTests(unittest.TestCase):
         self.assertEqual(self.run_check(GPU_IDLE_ALLOW_UNNAMED="1", **unnamed), 0)
 
     def test_hold_file_blocks(self):
-        hold = self.root / ".config" / "reverie" / "gpu.hold"; hold.parent.mkdir(parents=True); hold.touch()
+        hold = self.root / "reverie" / "runtime" / "gpu.hold"; hold.parent.mkdir(parents=True); hold.touch()
         self.assertEqual(self.run_check(**self.fake_smi()), 1)
         os.unlink(hold)
         self.assertEqual(self.run_check(**self.fake_smi()), 0)

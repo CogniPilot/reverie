@@ -8,6 +8,8 @@
  * - CORS (localhost only)
  */
 
+import type { OwnerAuthService } from '../../owner-auth/service.js';
+import { OWNER_COOKIE, isAppPage } from '../../owner-auth/policy.js';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { StaleExpirationMap } from '../../utils/index.js';
@@ -306,7 +308,12 @@ function matchesRegisteredRoute(req: FastifyRequest, url: string): boolean {
  *
  * @returns AuthState for lifecycle management (dispose on server stop)
  */
-export function registerAuthMiddleware(app: FastifyInstance, https: boolean, basePath = ''): AuthState {
+export function registerAuthMiddleware(
+  app: FastifyInstance,
+  https: boolean,
+  basePath = '',
+  ownerAuth?: Pick<OwnerAuthService, 'policy' | 'session'>
+): AuthState {
   const state: AuthState = {
     authSessions: null,
     authFailures: null,
@@ -400,6 +407,35 @@ export function registerAuthMiddleware(app: FastifyInstance, https: boolean, bas
     }
     // A web-tab frame that lost its prefix: hand it back to its tab, no credentials involved.
     if (serveLostWebviewFrame(req, reply)) return;
+
+    // The owner form is the browser's single login in enforce mode. Agent and
+    // service callers retain their independent Basic/API boundary.
+    if (
+      ownerAuth?.policy() === 'enforce' &&
+      req.headers['x-reverie-parent-session'] === undefined &&
+      req.headers['x-reverie-service-token'] === undefined
+    ) {
+      const route = req.routeOptions?.url;
+      const path = route?.startsWith(basePath + '/') ? route.slice(basePath.length) : route;
+      const publicOwnerRoute =
+        (req.method === 'GET' &&
+          ['/owner/login', '/owner/account', '/owner/owner.js', '/api/owner/status'].includes(path ?? '')) ||
+        (req.method === 'POST' &&
+          ['/api/owner/login', '/api/owner/login/second-factor', '/api/owner/password', '/api/owner/logout'].includes(
+            path ?? ''
+          ));
+      // These handlers validate passwords/challenges/cookies themselves. The
+      // owner policy still enforces one-time-password and same-origin limits.
+      if (publicOwnerRoute || ownerAuth.session(req.cookies?.[OWNER_COOKIE])) {
+        done();
+        return;
+      }
+      if (String(req.headers.accept ?? '').includes('text/html') && isAppPage(req, path)) {
+        const next = encodeURIComponent(req.url.startsWith('/') && !req.url.startsWith('//') ? req.url : '/');
+        reply.redirect(basePath + '/owner/login?next=' + next);
+        return;
+      }
+    }
 
     const clientIp = req.ip;
 

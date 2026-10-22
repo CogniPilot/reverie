@@ -62,6 +62,7 @@ export interface PlanRow {
   profileId: string | null;
   acctName: string | null;
   isDefault: boolean;
+  authState?: SubscriptionUsage['authState'];
   signedIn: boolean;
   status: SubscriptionUsage['status'];
   updatedAt: number;
@@ -420,14 +421,15 @@ export class PlanService {
         profileId: a.profileId ?? null,
         acctName: a.acctName ?? null,
         isDefault: a.isDefault,
-        signedIn: reading.status !== 'signed-out',
+        signedIn: reading.authState ? reading.authState === 'signed-in' : reading.status === 'ready',
         status: reading.status,
+        authState: reading.authState,
         updatedAt: reading.updatedAt,
         usageSource,
         usageAsOf,
         usageStale: usageAsOf !== null && usageSource !== 'provider' && now - usageAsOf > USAGE_STALE_MS,
         pace: planPace({
-          signedIn: reading.status !== 'signed-out',
+          signedIn: reading.authState ? reading.authState === 'signed-in' : reading.status === 'ready',
           fiveHour: reading.usage?.fiveHour ?? null,
           sevenDay: reading.usage?.sevenDay ?? null,
           samples: history[a.id] ?? [],

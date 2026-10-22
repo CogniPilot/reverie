@@ -7,7 +7,7 @@ The container has no GPU device and no nvidia-smi, so the console reads what thi
 (apps/console/docs/host-gpu.md): {"updatedAt": <epoch ms>, "gpus": [{"name", "utilization",
 "memoryUsedMb", "memoryTotalMb"}]}, atomic, heartbeat 30 s, the reader treats more than 60 s as stale.
 
-Where it writes, and why only there: ONLY under ~/.local/state/reverie/ (default published/gpu.json),
+Where it writes, and why only there: ONLY under ~/reverie/runtime/ (default published/gpu.json),
 a host directory that is never bind-mounted into the container read-write; the container sees it
 read-only at /host-published. An ownership check cannot tell a safe directory from an agent-writable
 one: the container runs with --userns=keep-id, so files agents create in bind mounts are owned by this
@@ -32,6 +32,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from reverie import env_names
 
 DEFAULT_RELATIVE = "published/gpu.json"
 PART = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
@@ -45,7 +46,7 @@ class Refused(Exception):
 
 
 def state_base(home=None):
-    return Path(home or os.path.expanduser("~")) / ".local" / "state" / "reverie"
+    return (Path(home) / "reverie" if home is not None else Path(env_names.lookup("REVERIE_ROOT", Path.home() / "reverie"))) / "runtime"
 
 
 def parse(output):
@@ -165,7 +166,7 @@ def main(argv=None, out=sys.stderr):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--loop", type=int, metavar="SECONDS", help="write every SECONDS (1-30) until stopped")
     parser.add_argument("--relative", default=os.environ.get("GPU_STATS_RELATIVE", DEFAULT_RELATIVE),
-                        help="path under ~/.local/state/reverie/ (default %(default)s)")
+                        help="path under ~/reverie/runtime/ (default %(default)s)")
     args = parser.parse_args(argv)
     if args.loop is not None and not 1 <= args.loop <= 30: parser.error("--loop takes 1 to 30 seconds")
     base = state_base()

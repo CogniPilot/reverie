@@ -27,7 +27,7 @@ from reverie import env_names
 @dataclass
 class ServeConfig:
     llama_server: str = os.environ.get("LLAMA_SERVER", shutil.which("llama-server") or "llama-server")
-    model_path: str = env_names.lookup("REVERIE_GGUF", str(Path.home() / ".local/share/reverie/models/model.gguf"))
+    model_path: str = env_names.lookup("REVERIE_GGUF", str(Path(env_names.lookup("REVERIE_ROOT", Path.home() / "reverie")) / "runtime/models/model.gguf"))
     alias: str = env_names.lookup("REVERIE_MODEL", "MODEL_ID")
     host: str = "127.0.0.1"
     port: int = int(env_names.lookup("REVERIE_SERVE_PORT", "8081"))
@@ -37,7 +37,7 @@ class ServeConfig:
         "--parallel", "1", "--threads", "8", "--n-predict", "4096", "--reasoning-effort", "low",
         "--temperature", "0.7", "--top-k", "20", "--top-p", "0.8", "--min-p", "0.0",
     ])
-    state_path: Path = field(default_factory=lambda: Path.home() / ".local/share/reverie/serve.json")
+    state_path: Path = field(default_factory=lambda: Path(env_names.lookup("REVERIE_ROOT", Path.home() / "reverie")) / "runtime/serve.json")
     health_timeout: int = 300
 
     @property

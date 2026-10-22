@@ -8,7 +8,7 @@
 #
 # Run on the HOST as the user that owns the container. Engine access goes through the
 # launcher (scripts/reverie-container next to this file, or REVERIE_LAUNCHER), so engine storage
-# follows its default (${XDG_DATA_HOME:-~/.local/share}/reverie/engine) or REVERIE_SCRATCH.
+# follows its default (${REVERIE_ROOT:-~/reverie}/runtime/engine) or REVERIE_SCRATCH.
 # Mounted data (repo, scratch, instance) is never deleted or rewritten: --replace removes
 # only the container itself, never volumes or images.
 #
@@ -17,7 +17,7 @@
 #   --image IMAGE            image tag to build and run [localhost/reverie:live]
 #   --repo DIR               host repo mounted at /workspace [~/git/reverie]
 #   --scratch DIR            host scratch mounted at /scratch [~/scratch/reverie/runtime]
-#   --instance DIR           private instance directory [~/.local/share/reverie/default]
+#   --instance DIR           private instance directory [~/reverie/companies/default/data]
 #   --instance-name NAME     it is mounted at /instances/NAME [default]
 #   --console-source DIR     console tree baked into the image, e.g. a rescued copy [repo: apps/console]
 #   --reverie-source DIR         reverie package baked into the image, e.g. a rescued copy [repo: python/reverie/]
@@ -29,7 +29,7 @@
 #                            [unset: the instance config and runtime defaults apply]
 #   --no-build               reuse an existing IMAGE
 #   --install-launcher       also install this reverie-container as
-#                            ~/.local/libexec/reverie/reverie-container (backup kept), so
+#                            ~/reverie/runtime/bin/reverie-container (backup kept), so
 #                            reverie.service finds the container in the new engine storage
 #   --dry-run                print, do not change anything
 # REVERIE_MEMORY overrides the automatic memory size (half of host RAM, 4..32 GiB).
@@ -42,7 +42,7 @@ name=reverie-live
 image="${REVERIE_IMAGE:-localhost/reverie:live}"
 repo="$HOME/git/reverie"
 scratch="$HOME/scratch/reverie/runtime"
-instance="$HOME/.local/share/reverie/default"
+instance="${REVERIE_ROOT:-$HOME/reverie}/companies/default/data"
 instance_name=default
 console_source=""
 reverie_source=""
@@ -56,7 +56,7 @@ dry=0
 replace=0
 build=1
 install_launcher=0
-installed_launcher="$HOME/.local/libexec/reverie/reverie-container"
+installed_launcher="${REVERIE_ROOT:-$HOME/reverie}/runtime/bin/reverie-container"
 
 die() { echo "reverie-recreate: $*" >&2; exit 1; }
 need() { [ "$#" -ge 2 ] && [ -n "$2" ] || die "$1 needs a value"; }

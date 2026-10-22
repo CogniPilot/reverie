@@ -11,6 +11,8 @@ in pkgs.dockerTools.buildLayeredImage {
     mkdir -p etc bin usr/local/bin opt/reverie home/agent workspace scratch/tmp instances tmp
     unlink bin/reverie
     ln -s ${reverie}/bin/reverie bin/reverie
+    ln -s ${reverie}/bin/reverie-request-update bin/reverie-request-update
+    ln -s ${reverie}/bin/reverie-install-clis bin/reverie-install-clis
     printf 'root:x:0:0:root:/root:/bin/bash\nagent:x:2000:2000:Reverie:/home/agent:/bin/bash\n' > etc/passwd
     printf 'root:x:0:\nreverie:x:2000:\n' > etc/group
     printf 'root:!:1::::::\nagent:!:1::::::\n' > etc/shadow

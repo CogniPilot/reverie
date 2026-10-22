@@ -5,7 +5,7 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=%h/.local/lib/reverie/host/node %h/.local/lib/reverie/host/host-bridge.mjs --config %h/.local/share/reverie/host/profile.json
+ExecStart=%h/reverie/runtime/host/node %h/reverie/runtime/host/host-bridge.mjs --config %h/reverie/runtime/host/profile.json
 Restart=on-failure
 RestartSec=10
 TimeoutStopSec=25

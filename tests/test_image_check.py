@@ -78,6 +78,17 @@ class ImageCheckTests(unittest.TestCase):
                          {"layer 0: /" + path for path in owned})
         self.assertEqual(result["unread_third_party"]["nix/store/"]["files"], 2)
 
+    def test_installer_source_and_helper_wrappers_are_first_party(self):
+        store = "nix/store/" + "a" * 32 + "-"
+        owned = [store + "reverie-install-clis.mjs",
+                 store + "reverie-install-clis/bin/reverie-install-clis",
+                 store + "reverie-request-update/bin/reverie-request-update"]
+        dependency = store + "reverie-install-clis-dependency/test.js"
+        result = self.run_check([[(path, TOKEN.encode()) for path in owned + [dependency]]])
+        self.assertEqual({finding["where"] for finding in result["findings"]},
+                         {"layer 0: /" + path for path in owned})
+        self.assertEqual(result["unread_third_party"]["nix/store/"]["files"], 1)
+
     def test_nix_dependencies_still_refuse_instance_filenames_and_links(self):
         store = "nix/store/" + "a" * 32 + "-dependency-1.0/"
         result = self.run_check([[(store + "auth.json", b"{}"),

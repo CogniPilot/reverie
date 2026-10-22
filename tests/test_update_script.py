@@ -25,7 +25,7 @@ if args[0] == 'inspect':
     target = args[-1]
     if '--format' in args: print(str(state.get(target, {}).get('running', False)).lower())
     else:
-        print(json.dumps([{'Image': 'old-image', 'Config': {'User': '1001:100', 'WorkingDir': '/workspace/task', 'Labels': {'reverie.deployment': 'a'*64}, 'Env': ['REVERIE_VERSION=old', 'CUSTOM_INSTANCE=kept']}, 'HostConfig': {'Memory': 8589934592, 'MemorySwap': 8589934592, 'PidsLimit': 512}, 'Mounts': [
+        print(json.dumps([{'Image': 'old-image', 'Config': {'User': '1001:100', 'WorkingDir': '/workspace/task', 'Labels': ({} if os.environ.get('NO_SIGNATURE') else {'reverie.deployment': 'a'*64}), 'Env': ['REVERIE_VERSION=old', 'CUSTOM_INSTANCE=kept']}, 'HostConfig': {'Memory': 8589934592, 'MemorySwap': 8589934592, 'PidsLimit': 512}, 'Mounts': [
             {'Type':'volume','Name':'instance-data','Destination':'/instances','RW':True},
             {'Type':'volume','Name':'private-home','Destination':'/home/agent','RW':True},
             {'Type':'bind','Source':str(root/'source'),'Destination':'/workspace','RW':True},
@@ -49,6 +49,7 @@ class UpdateScriptTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name)
+        self.root.chmod(0o755)
         self.bin = self.root/'bin'; self.bin.mkdir()
         self.repo = self.root/'source'; self.repo.mkdir(); (self.repo/'flake.nix').touch()
         (self.root/'state').write_text(json.dumps({'reverie': {'running': True, 'image': 'old'}}))
@@ -59,7 +60,8 @@ class UpdateScriptTests(unittest.TestCase):
         self.env = {**os.environ, 'PATH': str(self.bin)+os.pathsep+os.environ['PATH'],
             'UPDATE_TEST_ROOT': str(self.root), 'REVERIE_REPO': str(self.repo),
             'REVERIE_CONTROL_DIR': str(self.root/'control'), 'REVERIE_UPDATE_BUILD_DIR': str(self.root/'build'),
-            'REVERIE_UPDATE_STATE_DIR': str(self.root/'host-state')}
+            'REVERIE_UPDATE_STATE_DIR': str(self.root/'host-state'),
+            'REVERIE_NIX_BUILD_DIR': str(self.root/'nix-build')}
 
     def run_update(self, **extra):
         return subprocess.run(['bash', str(ROOT/'scripts/reverie-update')], env={**self.env, **extra}, capture_output=True, text=True)
@@ -84,6 +86,29 @@ class UpdateScriptTests(unittest.TestCase):
         self.assertIn(f'type=bind,src={self.root}/passwd,dst=/etc/passwd,readonly', run)
         self.assertFalse(any('--volumes' in call for call in self.calls()))
         self.assertEqual(json.loads((self.root/'state').read_text()), {'reverie': {'running': True, 'image': 'new'}})
+
+    def test_owner_adopts_unlabelled_deployment_and_adds_readonly_gpu_directory(self):
+        gpu = self.root/'gpu'; gpu.mkdir()
+        result = self.run_update(NO_SIGNATURE='1', REVERIE_DEPLOYMENT_SIGNATURE='b'*64, REVERIE_GPU_PUBLISHED_DIR=str(gpu))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        run = next(call for call in self.calls() if call[:2] == ['docker', 'run'])
+        self.assertIn('reverie.deployment='+'b'*64, run)
+        self.assertIn(f'type=bind,src={gpu},dst=/host-published,readonly', run)
+
+    def test_build_scratch_is_traversable_but_metadata_remains_private(self):
+        result = self.run_update()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual((self.root/'nix-build').stat().st_mode & 0o777, 0o755)
+        self.assertEqual((self.root/'build').stat().st_mode & 0o777, 0o700)
+        call = next(call for call in self.calls() if call[0] == 'nix')
+        self.assertEqual(call[call.index('build-dir')+1], str((self.root/'nix-build').resolve()))
+
+    def test_inaccessible_build_scratch_fails_before_stopping_live_container(self):
+        private = self.root/'private'; private.mkdir(mode=0o700)
+        result = self.run_update(REVERIE_NIX_BUILD_DIR=str(private/'nix-build'))
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('not traversable', result.stderr)
+        self.assertFalse(any(call[:2] == ['docker', 'stop'] for call in self.calls()))
 
     def test_failed_build_never_stops_current_container(self):
         self.assertNotEqual(self.run_update(BUILD_FAIL='9').returncode, 0)

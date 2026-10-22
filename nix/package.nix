@@ -30,7 +30,12 @@ let
         test/experts-api.test.ts test/self-update.test.ts \
         test/owner-auth-lock-portability.test.ts test/company-full-page.test.ts \
         test/service-installer.test.ts test/company-wake.test.ts \
-        test/company-recovery-prompt.test.ts test/company-wake-server.test.ts
+        test/company-recovery-prompt.test.ts test/company-wake-server.test.ts \
+        test/owner-auth-fresh-enforce.test.ts test/owner-name-onboarding.test.ts \
+        test/account-login.test.ts test/chat-workspace-delete.test.ts \
+        test/routes/company-hire-routes.test.ts test/company-native-ui.test.ts \
+        test/local-model-profile.test.ts test/routes/quick-start-custom-model.test.ts \
+        test/plan-auth-status.test.ts
       runHook postCheck
     '';
     installPhase = ''
@@ -70,7 +75,7 @@ let
     paths = [ console memory pkgs.nodejs_22 pkgs.tmux pkgs.git pkgs.ripgrep
       pkgs.curl pkgs.coreutils pkgs.bashInteractive pkgs.gnugrep pkgs.gnused
       pkgs.gawk pkgs.findutils pkgs.gnutar pkgs.gzip pkgs.procps pkgs.which pkgs.gnumake pkgs.gcc
-      pkgs.codex pkgs.opencode pkgs.cacert lockTools ];
+      pkgs.cacert lockTools ];
     pathsToLink = [ "/bin" "/share" ];
   };
   entrypoint = pkgs.writeShellScript "reverie-start" (builtins.readFile (src + "/docker/entrypoint.sh"));
@@ -79,18 +84,31 @@ let
     runtimeInputs = [ pkgs.coreutils ];
     text = lib.removePrefix "#!/usr/bin/env bash\n" (builtins.readFile (src + "/scripts/reverie-request-update"));
   };
+  cliInstallerSource = pkgs.writeText "reverie-install-clis.mjs"
+    (builtins.readFile (src + "/scripts/reverie-install-clis.mjs"));
+  installClis = pkgs.writeShellApplication {
+    name = "reverie-install-clis";
+    runtimeInputs = [ pkgs.nodejs_22 pkgs.coreutils lockTools pkgs.patchelf ];
+    text = ''
+      export REVERIE_ELF_PATCHER=${pkgs.patchelf}/bin/patchelf
+      export REVERIE_ELF_INTERPRETER=${pkgs.stdenv.cc.bintools.dynamicLinker}
+      export REVERIE_ELF_LIBRARY_PATH=${lib.makeLibraryPath [ pkgs.glibc pkgs.stdenv.cc.cc.lib pkgs.zlib pkgs.openssl ]}
+      exec node ${cliInstallerSource} "$@"
+    '';
+  };
   launcher = pkgs.writeShellScript "reverie-launcher" ''
-    export PATH=${runtime}/bin:$PATH
+    export PATH=${installClis}/bin:${runtime}/bin:$PATH
     export REVERIE_MCP_MEMORY_PYTHON=${memory}/bin/python3
     export REVERIE_MANAGED_INSTALL=nix
     export REVERIE_NIX_LAUNCHER="$0"
+    export REVERIE_ROOT="''${REVERIE_ROOT:-$HOME/reverie}"
     export REVERIE_VERSION=${manifest.version}
     export REVERIE_FLOCK_BIN=${lib.getBin pkgs.util-linux}/bin/flock
     if [ "''${REVERIE_CONTAINER:-0}" = 1 ]; then
       export REVERIE_DATA="''${REVERIE_DATA:-/instances/default}"
     else
-      export REVERIE_DATA="''${REVERIE_DATA:-''${XDG_DATA_HOME:-$HOME/.local/share}/reverie/default}"
-      export TMPDIR="''${TMPDIR:-$HOME/scratch/reverie/tmp}"
+      export REVERIE_DATA="''${REVERIE_DATA:-$REVERIE_ROOT/companies/default/data}"
+      export TMPDIR="''${TMPDIR:-$REVERIE_ROOT/scratch/tmp}"
       mkdir -p "$TMPDIR"
     fi
     export REVERIE_DATA_DIR="''${REVERIE_DATA_DIR:-$REVERIE_DATA/console}"
@@ -111,6 +129,7 @@ let
     mkdir -p "$out/bin"
     ln -s ${launcher} "$out/bin/reverie"
     ln -s ${requestUpdate}/bin/reverie-request-update "$out/bin/reverie-request-update"
+    ln -s ${installClis}/bin/reverie-install-clis "$out/bin/reverie-install-clis"
     for command in ${memory}/bin/reverie-*; do
       makeWrapper "$command" "$out/bin/$(basename "$command")" \
         --prefix PATH : ${runtime}/bin \

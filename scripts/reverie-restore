@@ -8,7 +8,7 @@
 #                                          the repo instead of the rescue; NOT durable)
 #
 # Run as the container user, e.g. on the host:
-#   REVERIE_CONTAINER_NAME=reverie-live ~/.local/libexec/reverie/reverie-container \
+#   REVERIE_CONTAINER_NAME=reverie-live ~/reverie/runtime/bin/reverie-container \
 #     exec bash /scratch/repos/reverie/scripts/reverie-restore --dry-run
 # Never deletes anything: an existing, different destination is kept as NAME.pre-restore-TIMESTAMP.
 # Options: --rescue DIR [REVERIE_RESCUE_DIR, required if unset]  --home DIR [$HOME]

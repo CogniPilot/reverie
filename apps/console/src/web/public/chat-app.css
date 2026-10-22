@@ -1333,3 +1333,6 @@ button.ca-org-node:hover, button.ca-org-node:focus-visible { background: var(--c
 .ca-company-columns { display:grid; grid-template-columns:minmax(120px,.8fr) minmax(160px,1.5fr) minmax(90px,.6fr) 100px; gap:12px; padding:9px 14px; border-bottom:1px solid var(--ca-line); color:var(--text-dim); font-size:11px; background:var(--ca-side-bg,var(--bg-card)); }
 @media(max-width:1000px) { .ca-company-columns { display:none; } }
 @media(max-width:700px) { .ca-company .ca-company-person { grid-template-columns:minmax(0,1fr) auto; } .ca-company-tree ul { padding-left:10px; margin-left:0; } }
+
+.ca-expert-portraits { display: flex; gap: 8px; flex-wrap: wrap; }
+.ca-expert-portraits img { display: block; border-radius: 50%; object-fit: cover; }

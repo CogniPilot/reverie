@@ -6,9 +6,9 @@ After=reverie-watcher.service
 [Service]
 Environment=REVERIE_REPO=%h/git/reverie
 # Required: REVERIE_RUNTIME_POLICY is the container-visible owner-selected policy.
-EnvironmentFile=%h/.config/reverie/runtime.env
+EnvironmentFile=%h/reverie/runtime/config/runtime.env
 Type=oneshot
 # Restart only a watcher that is not ticking (a hang the per-tick alarm did not end). A ticking
 # watcher whose ticks fail is reported by `status`, not restarted. try-restart never starts a
 # watcher the owner stopped, and never pulls the console up through BindsTo.
-ExecStart=/bin/sh -c '%h/.local/libexec/reverie/reverie-container engine exec --user agent reverie-live /opt/reverie/python/bin/reverie-runtime --policy "$${REVERIE_RUNTIME_POLICY}" watcher-health || { echo "watcher heartbeat stale; restarting" >&2; systemctl --user try-restart reverie-watcher.service; }'
+ExecStart=/bin/sh -c '%h/reverie/runtime/bin/reverie-container engine exec --user agent reverie-live /opt/reverie/python/bin/reverie-runtime --policy "$${REVERIE_RUNTIME_POLICY}" watcher-health || { echo "watcher heartbeat stale; restarting" >&2; systemctl --user try-restart reverie-watcher.service; }'

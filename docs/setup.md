@@ -89,30 +89,60 @@ nor restores private backups.
 
 ## First login
 
-For the Docker command in the README, read the generated console password and
-create the owner account from the host:
+Open http://127.0.0.1:3000 and use the single owner sign-in form. There is no
+browser Basic-auth dialog before it.
 
-```bash
-docker exec reverie cat /instances/default/owner-password
-docker exec --user agent reverie reverie owner bootstrap --username owner --enforce
-```
+For a fresh Docker deployment, create the owner account once from the host:
 
-For the native command in the README, read its generated console password and
-create the owner account in another host terminal:
+~~~bash
+docker exec -it reverie reverie owner bootstrap --username owner --enforce
+~~~
 
-```bash
-cat "${XDG_DATA_HOME:-$HOME/.local/share}/reverie/default/owner-password"
+For a fresh native Nix deployment:
+
+~~~bash
 reverie owner bootstrap --username owner --enforce
-```
+~~~
 
-Open `http://127.0.0.1:3000`. Enter the console password with username `owner`,
-then sign in as `owner` using the one-time password printed by owner bootstrap.
-Choose a new owner password when prompted. The one-time password expires after
-30 minutes; `reverie owner reset-password` from the host creates another.
+Sign in at /owner/login with username owner and the one-time password printed by
+bootstrap, then choose your permanent owner password. The one-time password expires
+after 30 minutes. Your display name is separate from the login username: changing
+the displayed name does not change owner to a different username.
 
-Add a provider plan from the account menu with **Add account**, then **Sign in**.
-See [image operations](image.md) for registry access, offline installation and
-[hiring the first employee](image.md#hiring-the-first-employee-interim-until-hire-by-model-lands).
+On later visits, use the permanent owner password you chose. The generated
+owner-password file is a separate legacy console credential; it is not the owner
+account password and does not unlock the owner form. If two-factor authentication
+is enabled, complete its existing authenticator or recovery-code step.
+
+For a lost owner password, run the following from the host, then use the newly
+printed one-time password and choose a new permanent password:
+
+~~~bash
+docker exec -it reverie reverie owner reset-password
+# Native installation: reverie owner reset-password
+~~~
+
+Password reset preserves the account and its two-factor settings. It ends existing
+owner sessions. Do not replace an existing account just to sign in.
+
+## Provider plans and hiring
+
+Claude Code, Codex and OpenCode are installed automatically on first start into
+private persistent tools storage, rather than bundled in the image. The console
+opens while installation runs. If installation is interrupted or offline, retry
+reverie-install-clis once the network is available.
+
+In **Plans**, add an account and choose **Sign in** to authorize the provider.
+The provider account is separate from your Reverie owner login.
+
+Then open **Company → People → Hire**. Enter the expert's name and role, select a
+plan or configured local endpoint, model, harness, and supported effort level.
+Hiring creates a fresh session and registers the expert; no pre-existing terminal
+session or legacy screen is required. Provider/model choices are independent of
+the harness. Only effort choices supported by that harness are offered.
+
+See [image operations](image.md) for registry access and offline installation, and
+[hiring an expert](image.md#hiring-an-expert) for the image workflow.
 
 ## Multiple scratch drives
 
@@ -133,17 +163,19 @@ mount change. The launcher does not mount physical drives or pool their storage.
 
 ## Code and instance data
 
-Keep the clone shareable and put private configuration outside it:
+Keep the clone shareable. REVERIE_ROOT defaults to ~/reverie; setting it selects another
+contained deployment root. The default layout is:
 
-```text
-~/git/reverie/                         code, container definition, skills, tests
-local/                                    ignored link to machine-local instance data
-local/<agent>/                            agent identity, config and memories
-~/.local/share/reverie/instances/shared/          separately configured shared instance
-~/.local/share/reverie/engine/             persistent images and container layers
-~/.local/share/reverie/home/               persistent agent home and native histories
-~/scratch/reverie/                     disposable clones, worktrees, builds and caches
-```
+~~~text
+~/git/reverie/                         source checkout
+~/reverie/deployment.json              editable deployment settings
+~/reverie/companies/default/data/      console, identity and memory state
+~/reverie/companies/default/home/      agent tool settings and provider logins
+~/reverie/workspace/                   working projects and cases
+~/reverie/runtime/                     host helpers, controls and engine state
+~/reverie/scratch/                     symlink to ~/scratch/reverie by default
+~~~
+
 
 Copy `examples/shared-instance.json` to the chosen instance's `config/instance.json`,
 then set its identity, initial commitments, persona and data directory. Relative
@@ -178,7 +210,7 @@ scripts/reverie-container exec python3 -m unittest discover -s tests
 and `REVERIE_IMAGE` can override local engine/path choices. After an image or mount change, choose a fresh
 `REVERIE_CONTAINER_NAME`: `up` refuses to reuse mismatched containers and preserves
 their sessions. The launcher requires a rootless engine. Image layers live under
-`~/.local/share/reverie/engine`; builds, caches and temporary downloads go under
+`~/reverie/runtime/engine`; builds, caches and temporary downloads go under
 `$HOME/scratch/reverie`. `REVERIE_TMPDIR` and `REVERIE_WORKSPACE` override the
 temporary directory and development workspace. The development container mounts this source
 checkout and its own scratch workspace, not a personal data directory or host engine
@@ -205,7 +237,7 @@ license and copyright are retained in `apps/console/LICENSE`, with source
 provenance in `apps/console/UPSTREAM.md`.
 
 For a recovered personal deployment, `scripts/reverie-recreate --dry-run` shows
-the mounts before creation. The personal launcher mounts `~/.local/share/reverie/home`
+the mounts before creation. The personal launcher mounts `~/reverie/companies/default/home`
 at `/home/agent`, so native conversations and login configuration survive recreation.
 Persistent instance handoffs belong under `/instances/example/runtime/handoffs`;
 only disposable working copies belong under `/scratch`.
@@ -214,7 +246,7 @@ Inside the container, `reverie web --host 0.0.0.0 --port 3000` starts the consol
 The default development launcher does not publish dashboard ports or start a
 server. Choose the network exposure and authentication for the intended deployment;
 existing host services and live sessions are untouched by an image build.
-Console state persists by default at `~/.local/share/reverie/development/console`,
+Console state persists by default at `~/reverie/companies/development/data/console`,
 mounted privately at `/home/agent/.reverie`. Override `REVERIE_INSTANCE_DATA` for a separate
 instance before creating a new container. `REVERIE_DATA_DIR` configures other launches.
 The monorepo contains `apps/console` (TypeScript/JavaScript), `python/reverie` (the shared Python

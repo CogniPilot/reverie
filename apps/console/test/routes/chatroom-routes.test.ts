@@ -76,6 +76,25 @@ describe('chatroom routes', () => {
     return room.id;
   }
 
+  it('moving a workspace grouping is owner-only and preserves channel history and members', async () => {
+    const id = await createRoom();
+    service.placeRoom(id, { workspace: 'Project', category: 'Build' });
+    service.post(id, { kind: 'user', name: 'Owner' }, 'Keep this history', 'all', { deliver: false });
+    const before = structuredClone(service.room(id));
+    const placement = {
+      method: 'PUT' as const,
+      url: '/api/chatrooms/' + id + '/placement',
+      payload: { workspace: '', category: 'Build' },
+    };
+    expect((await app.inject({ ...placement, headers: { 'x-reverie-parent-session': A } })).statusCode).toBe(403);
+    expect(service.room(id)?.workspace).toBe('Project');
+    expect((await app.inject(placement)).statusCode).toBe(200);
+    expect(service.room(id)?.workspace).toBeUndefined();
+    expect(service.room(id)?.messages).toEqual(before?.messages);
+    expect(service.room(id)?.members).toEqual(before?.members);
+    expect(service.room(id)?.category).toBe('Build');
+  });
+
   it('briefs every member, the coordinator with its role, as one line each', async () => {
     await createRoom();
     await service.delivery.flushAll();
@@ -142,7 +161,11 @@ describe('chatroom routes', () => {
 
     // The owner cannot address one member either: a `to` is ignored and the post goes to everyone (@mention who it is for).
     clock += 10_000;
-    const owner = await app.inject({ method: 'POST', url: `/api/chatrooms/${id}/messages`, payload: { text: 'only for the lead', to: ['coordinator'] } });
+    const owner = await app.inject({
+      method: 'POST',
+      url: `/api/chatrooms/${id}/messages`,
+      payload: { text: 'only for the lead', to: ['coordinator'] },
+    });
     expect(owner.statusCode).toBe(200);
     expect(owner.json().data.message.to).toBe('all');
     expect(owner.json().data.toIgnored).toBe(true);
@@ -280,7 +303,10 @@ describe('chatroom routes', () => {
       await createRoom();
       const id = (await asAgent(C, { name: 'Mine' })).json().data.id;
       const h = { 'x-reverie-parent-session': C };
-      expect((await app.inject({ method: 'PUT', url: `/api/chatrooms/${id}`, headers: h, payload: { name: 'Z' } })).statusCode).toBe(403);
+      expect(
+        (await app.inject({ method: 'PUT', url: `/api/chatrooms/${id}`, headers: h, payload: { name: 'Z' } }))
+          .statusCode
+      ).toBe(403);
       expect((await app.inject({ method: 'DELETE', url: `/api/chatrooms/${id}`, headers: h })).statusCode).toBe(403);
       const appoint = await app.inject({
         method: 'POST',
@@ -345,7 +371,11 @@ describe('chatroom routes', () => {
     expect(ok.json().data.member.postOnly).toBe(true);
 
     clock += 10_000;
-    await app.inject({ method: 'POST', url: `/api/chatrooms/${id}/messages`, payload: { text: '@alpha rm -rf / # to all' } });
+    await app.inject({
+      method: 'POST',
+      url: `/api/chatrooms/${id}/messages`,
+      payload: { text: '@alpha rm -rf / # to all' },
+    });
     await app.inject({
       method: 'POST',
       url: `/api/chatrooms/${id}/messages`,
@@ -371,9 +401,17 @@ describe('chatroom routes', () => {
     const id = await createRoom();
     const D = '00000043-0053-4000-8000-00000000007d';
     const listener = createMockSession(D);
-    listener.name = 'listener';                                    // an agent pane, added as post-only
+    listener.name = 'listener'; // an agent pane, added as post-only
     ctx.sessions.set(D, listener as never);
-    expect((await app.inject({ method: 'POST', url: `/api/chatrooms/${id}/members`, payload: { sessionId: D, postOnly: true } })).statusCode).toBe(200);
+    expect(
+      (
+        await app.inject({
+          method: 'POST',
+          url: `/api/chatrooms/${id}/members`,
+          payload: { sessionId: D, postOnly: true },
+        })
+      ).statusCode
+    ).toBe(200);
     const appoint = (sessionId: string) =>
       app.inject({ method: 'POST', url: `/api/chatrooms/${id}/coordinator`, payload: { sessionId } });
     const voice = (sessionId: string) =>
@@ -389,7 +427,7 @@ describe('chatroom routes', () => {
     clock += 10_000;
     await service.delivery.flushAll();
     panes(D).length = 0;
-    expect((await appoint(A)).statusCode).toBe(200);              // announcement goes to every other member
+    expect((await appoint(A)).statusCode).toBe(200); // announcement goes to every other member
     service.rebrief(id);
     clock += 10_000;
     await service.delivery.flushAll();
@@ -765,7 +803,7 @@ describe('chatroom creation by a coordinator in multi-user mode', () => {
   const asLead = (payload: unknown) =>
     app.inject({ method: 'POST', url: '/api/chatrooms', headers: { 'x-reverie-parent-session': ALICE_LEAD }, payload });
 
-  it('stamps the new room with the creator\'s owner', async () => {
+  it("stamps the new room with the creator's owner", async () => {
     const res = await asLead({ name: 'Alice side room', members: [{ sessionId: ALICE_WORKER }] });
     expect(res.statusCode).toBe(200);
     expect(res.json().data.owner).toBe('alice');

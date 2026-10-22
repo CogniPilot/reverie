@@ -53,7 +53,7 @@ explicitly rather than sharing their defaults.
   training JSON; its neutral default is `MODEL_ID`. The public candidate list is
   informational; the owner selects the expert's model.
 - [Adapter serving](../python/reverie/train/serve.py): `REVERIE_GGUF` defaults to
-  `~/.local/share/reverie/models/model.gguf`, `REVERIE_MODEL` to `MODEL_ID`, and
+  `~/reverie/runtime/models/model.gguf`, `REVERIE_MODEL` to `MODEL_ID`, and
   `REVERIE_SERVE_PORT` to 8081. Set them for the selected expert's server and model
   file. Use a separate serving JSON with its own `state_path`, and distinct ports
   when running multiple servers.
@@ -63,14 +63,14 @@ explicitly rather than sharing their defaults.
 ## User service templates
 
 `reverie-watcher.service` and `reverie-watcher-check.service` require
-`%h/.config/reverie/runtime.env` containing `REVERIE_RUNTIME_POLICY`, an absolute
+`%h/reverie/runtime/config/runtime.env` containing `REVERIE_RUNTIME_POLICY`, an absolute
 container-visible policy path. No private policy path is compiled into the unit.
 
-`reverie-stall-watch.service` requires `%h/.config/reverie/stall-watch.env`
+`reverie-stall-watch.service` requires `%h/reverie/runtime/config/stall-watch.env`
 containing `REVERIE_STALL_WATCH_CONFIG`, the container-visible watchdog JSON path.
 Its existing host-only token/reporting settings stay in that file. Dry-run remains
 on by default; the config existence check runs inside the container.
 
-`reverie-sleep.service` requires `%h/.config/reverie/sleep.env` containing
+`reverie-sleep.service` requires `%h/reverie/runtime/config/sleep.env` containing
 `REVERIE_SLEEP_POLICY`. These templates must be reviewed and configured by the owner;
 synchronizing the source never activates a service.

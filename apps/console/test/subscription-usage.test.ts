@@ -33,8 +33,8 @@ describe('per-subscription usage', () => {
     const fetcher = vi.fn();
     vi.stubGlobal('fetch', fetcher);
     try {
-      const reading = await new SubscriptionUsageReader('test').read(p);
-      expect(reading).toMatchObject({ status: 'ready', usage: null });
+      const reading = await new SubscriptionUsageReader('test', async () => 'signed-in').read(p);
+      expect(reading).toMatchObject({ status: 'ready', authState: 'signed-in', usage: null });
       expect(JSON.stringify(reading)).not.toContain('secret-token');
       expect(fetcher).not.toHaveBeenCalled();
     } finally {
@@ -43,10 +43,19 @@ describe('per-subscription usage', () => {
   });
   it('detects a login immediately even if a signed-out reading was cached', async () => {
     const a = await profile('new');
-    const reader = new SubscriptionUsageReader('test');
+    const reader = new SubscriptionUsageReader('test', async () => 'signed-in');
     expect((await reader.read(a)).status).toBe('signed-out');
     await credential(a, 'new-token');
     expect((await reader.read(a)).status).toBe('ready');
+  });
+  it('keeps authentication errors and signed-out state separate from absent usage', async () => {
+    const p = await profile('expired');
+    await credential(p, 'not-a-working-login');
+    for (const state of ['signed-out', 'unavailable', 'error'] as const) {
+      const reading = await new SubscriptionUsageReader('test', async () => state).read(p);
+      expect(reading.authState).toBe(state);
+      expect(reading.usage).toBeNull();
+    }
   });
   it('keeps other accounts and a newer successful reading when a stale polling failure arrives', () => {
     const base = {

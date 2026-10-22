@@ -5,9 +5,10 @@ umask 077
 : "${REVERIE_REPO:?Set the owner-authorized source checkout}"
 name=${REVERIE_CONTAINER_NAME:-reverie}
 port=${REVERIE_PORT:-3000}
-control=${REVERIE_CONTROL_DIR:-$HOME/.local/share/reverie/control}
-build=${REVERIE_UPDATE_BUILD_DIR:-$HOME/scratch/reverie/update}
-state=${REVERIE_UPDATE_STATE_DIR:-$HOME/.local/state/reverie}
+root=${REVERIE_ROOT:-$HOME/reverie}
+control=${REVERIE_CONTROL_DIR:-$root/runtime/control}
+build=${REVERIE_UPDATE_BUILD_DIR:-$root/scratch/update}
+state=${REVERIE_UPDATE_STATE_DIR:-$root/runtime/update-state}
 mkdir -p "$build" "$state"
 exec 9>"$state/update.lock"
 flock 9
@@ -25,7 +26,10 @@ image_env=$(docker image inspect --format '{{json .Config.Env}}' "$image_id")
 user=$(printf '%s' "$metadata" | jq -er '.[0].Config.User | select(type == "string" and length > 0)')
 [[ "$user" =~ ^[a-zA-Z0-9_][a-zA-Z0-9_.-]*(:[a-zA-Z0-9_][a-zA-Z0-9_.-]*)?$ ]] || { echo 'Existing container has an invalid user identity.' >&2; exit 1; }
 process_args=(--user "$user")
+deployment_override=${REVERIE_DEPLOYMENT_SIGNATURE:-}
+[[ -z "$deployment_override" || "$deployment_override" =~ ^[a-f0-9]{64}$ ]] || { echo 'Invalid owner deployment signature.' >&2; exit 1; }
 deployment=$(printf '%s' "$metadata" | jq -r '.[0].Config.Labels["reverie.deployment"] // ""')
+if [[ -z "$deployment" ]]; then deployment=$deployment_override; fi
 if [[ -n "$deployment" ]]; then
   [[ "$deployment" =~ ^[a-f0-9]{64}$ ]] || { echo 'Invalid existing deployment signature.' >&2; exit 1; }
   process_args+=(--label "reverie.deployment=$deployment")
@@ -56,9 +60,33 @@ printf '%s' "$metadata" | jq -j '
 printf '%s' "$metadata" | jq -j --argjson base "${image_env:-[]}" '.[0].Config.Env[]? | select(. as $entry | $base | index($entry) | not) | "--env\u0000\(.)\u0000"' > "$env_file"
 mapfile -d '' -t mounts < "$mount_file"
 mapfile -d '' -t environment < "$env_file"
+# Optional owner-selected telemetry exposes only this directory, read-only.
+gpu=${REVERIE_GPU_PUBLISHED_DIR:-}
+if [[ -n "$gpu" ]]; then
+  [[ "$gpu" == /* && -d "$gpu" && "$gpu" != *,* && "$gpu" != *$'\n'* ]] || { echo 'Invalid GPU telemetry directory.' >&2; exit 1; }
+  existing_gpu=$(printf '%s' "$metadata" | jq -r '.[0].Mounts[] | select(.Destination == "/host-published") | .Source')
+  if [[ -n "$existing_gpu" ]]; then
+    printf '%s' "$metadata" | jq -e --arg source "$gpu" '.[0].Mounts | any(.Destination == "/host-published" and .Type == "bind" and .Source == $source and .RW == false)' >/dev/null || { echo 'Existing GPU mount differs; refusing replacement.' >&2; exit 1; }
+  else
+    mounts+=(--mount "type=bind,src=$gpu,dst=/host-published,readonly")
+  fi
+fi
 rm -f -- "$mount_file" "$env_file"
 # Source edits are built in Nix; the host never executes a checkout shell script.
-nix build "path:$REVERIE_REPO#dockerImage" --out-link "$build/image"
+# Build users must traverse this separate scratch directory. Keep mount/env records
+# and host locks private; do not relax the update metadata directory.
+nix_build=${REVERIE_NIX_BUILD_DIR:-$HOME/scratch/reverie/nix-build}
+(umask 022; mkdir -p "$nix_build")
+nix_build=$(realpath "$nix_build")
+ancestor=$nix_build
+while :; do
+  mode=$(stat -c %a "$ancestor")
+  (( (8#$mode & 1) != 0 )) || { echo "Nix build directory is not traversable by build users: $ancestor. Select an accessible scratch path with REVERIE_NIX_BUILD_DIR." >&2; exit 1; }
+  [[ "$ancestor" != / ]] || break
+  ancestor=$(dirname "$ancestor")
+done
+nix build "path:$REVERIE_REPO#dockerImage" --out-link "$build/image" \
+  --option build-dir "$nix_build"
 docker load --input "$build/image" >/dev/null
 candidate="reverie:update-$(date -u +%Y%m%dT%H%M%S)-$$"
 docker tag reverie:latest "$candidate"

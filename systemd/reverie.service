@@ -9,8 +9,8 @@ StartLimitBurst=10
 [Service]
 Type=exec
 Environment=REVERIE_REPO=%h/git/reverie
-ExecStart=%h/.local/libexec/reverie/reverie-container engine start --attach --sig-proxy=false reverie-live
-ExecStop=%h/.local/libexec/reverie/reverie-container engine stop --time=30 reverie-live
+ExecStart=%h/reverie/runtime/bin/reverie-container engine start --attach --sig-proxy=false reverie-live
+ExecStop=%h/reverie/runtime/bin/reverie-container engine stop --time=30 reverie-live
 Restart=always
 RestartSec=5
 TimeoutStopSec=45

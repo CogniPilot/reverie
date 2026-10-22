@@ -56,7 +56,7 @@ if [ -z "$engine" ]; then
 fi
 volume="$name-data"
 home_volume="$name-home"
-state_dir=${XDG_CONFIG_HOME:-$HOME/.config}/reverie
+state_dir=${REVERIE_ROOT:-$HOME/reverie}/runtime/setup
 state="$state_dir/$name.versions"   # one image reference per line, newest last
 
 run() { if [ "$dry" = 1 ]; then printf '+ %s\n' "$*"; else "$@"; fi; }

@@ -56,12 +56,18 @@ describe('fresh volume: enforce by default', () => {
     const service = new OwnerAuthService({ store, auditFile: join(dir, 'audit.jsonl'), now: () => clock });
     app = Fastify();
     await app.register(fastifyCookie);
-    registerAuthMiddleware(app, false);
+    registerAuthMiddleware(app, false, '', service);
     registerOwnerPolicy(app, {
       service,
       ctx: { sessions } as unknown as SessionPort,
       isCapabilityRequest: (req) => (req.url ?? '').startsWith('/q/'),
-      relations: { known: () => true, related: (caller, target) => caller === target, upward: () => false, keeper: () => false, admin: () => false },
+      relations: {
+        known: () => true,
+        related: (caller, target) => caller === target,
+        upward: () => false,
+        keeper: () => false,
+        admin: () => false,
+      },
       now: () => clock,
     });
     registerOwnerRoutes(app, service, false);
@@ -83,7 +89,11 @@ describe('fresh volume: enforce by default', () => {
       method,
       url,
       cookies: opts.cookies,
-      headers: { origin: 'http://localhost:80', ...(opts.basic === false ? {} : { authorization: BASIC }), ...(opts.headers ?? {}) },
+      headers: {
+        origin: 'http://localhost:80',
+        ...(opts.basic === false ? {} : { authorization: BASIC }),
+        ...(opts.headers ?? {}),
+      },
       ...(method === 'GET' ? {} : { payload: {} }),
     });
   const ownerCookie = (res: { cookies: Array<{ name: string; value: string }> }) =>
@@ -93,7 +103,7 @@ describe('fresh volume: enforce by default', () => {
       method: 'POST',
       url: '/api/owner/login',
       payload: { username: USER, password },
-      headers: { origin: 'http://localhost:80', authorization: BASIC },
+      headers: { origin: 'http://localhost:80' },
     });
     expect(res.statusCode).toBe(200);
     return ownerCookie(res)!;
@@ -114,6 +124,60 @@ describe('fresh volume: enforce by default', () => {
     await rm(dir, { recursive: true, force: true });
   });
 
+  it('opens only the owner sign-in surface without a Basic challenge, redirects browser navigation, and protects APIs', async () => {
+    await start();
+    const root = await app.inject({ method: 'GET', url: '/', headers: { accept: 'text/html' } });
+    expect(root.statusCode).toBe(302);
+    expect(root.headers.location).toBe('/owner/login?next=%2F');
+    expect(root.headers['www-authenticate']).toBeUndefined();
+    const forgedNavigation = await app.inject({
+      url: '/',
+      cookies: { [OWNER_COOKIE]: 'forged' },
+      headers: { accept: 'text/html' },
+    });
+    expect(forgedNavigation.statusCode).toBe(302);
+    expect(forgedNavigation.headers['www-authenticate']).toBeUndefined();
+    for (const url of ['/owner/login', '/owner/owner.js', '/api/owner/status']) {
+      const response = await app.inject(url);
+      expect(response.statusCode).toBe(200);
+      expect(response.headers['www-authenticate']).toBeUndefined();
+      if (url === '/owner/login') expect(response.body).toContain('href="data:,"');
+    }
+    const protectedApi = await app.inject('/api/settings');
+    expect(protectedApi.statusCode).toBe(401);
+    expect(protectedApi.headers['www-authenticate']).toContain('Basic');
+    const invalid = await app.inject({ url: '/api/settings', cookies: { [OWNER_COOKIE]: 'forged-cookie' } });
+    expect(invalid.statusCode).toBe(401);
+    const agent = await app.inject({ url: '/api/sessions', headers: { 'x-reverie-parent-session': AGENT } });
+    expect(agent.statusCode).toBe(401);
+    expect((await call('GET', '/api/sessions', { headers: { 'x-reverie-parent-session': AGENT } })).statusCode).toBe(
+      200
+    );
+  });
+
+  it('restricted, revoked and expired owner cookies never bypass the owner policy or agent Basic boundary', async () => {
+    const { oneTimePassword } = await admin.bootstrap(store, USER, { now: clock });
+    const service = await start();
+    const restricted = await signIn(oneTimePassword);
+    const restrictedApi = await call('GET', '/api/settings', { basic: false, cookies: { [OWNER_COOKIE]: restricted } });
+    expect(restrictedApi.statusCode).toBe(403);
+    const agentWithCookie = await call('GET', '/api/sessions', {
+      basic: false,
+      cookies: { [OWNER_COOKIE]: restricted },
+      headers: { 'x-reverie-parent-session': AGENT },
+    });
+    expect(agentWithCookie.statusCode).toBe(401);
+    await service.logoutEverywhere('127.0.0.1');
+    expect(
+      (await call('GET', '/api/settings', { basic: false, cookies: { [OWNER_COOKIE]: restricted } })).statusCode
+    ).toBe(401);
+    const again = await signIn(oneTimePassword);
+    clock += 25 * 60 * 60 * 1000;
+    expect((await call('GET', '/api/settings', { basic: false, cookies: { [OWNER_COOKIE]: again } })).statusCode).toBe(
+      401
+    );
+  });
+
   it('before any account: enforce; Basic alone and Basic plus an agent header never reach an owner route', async () => {
     const service = await start();
     expect(store.read()).toBeUndefined();
@@ -124,7 +188,9 @@ describe('fresh volume: enforce by default', () => {
       const agent = await call(method, url, { headers: { 'x-reverie-parent-session': AGENT } });
       expect(agent.statusCode, `${method} ${url} Basic + agent`).toBe(403);
     }
-    expect((await call('GET', '/api/sessions', { headers: { 'x-reverie-parent-session': AGENT } })).statusCode).toBe(200);
+    expect((await call('GET', '/api/sessions', { headers: { 'x-reverie-parent-session': AGENT } })).statusCode).toBe(
+      200
+    );
     const page = await call('GET', '/');
     expect(page.statusCode).toBe(302);
     expect(page.headers.location).toBe('/owner/login?next=%2F');
@@ -142,13 +208,24 @@ describe('fresh volume: enforce by default', () => {
       url: '/api/owner/password',
       payload: { current: oneTimePassword, next: NEW_PASSWORD },
       cookies: { [OWNER_COOKIE]: restricted },
-      headers: { origin: 'http://localhost:80', authorization: BASIC },
+      headers: { origin: 'http://localhost:80' },
     });
     expect(changed.statusCode).toBe(200);
     const owner = ownerCookie(changed)!;
+    expect(
+      (await call('GET', '/', { basic: false, cookies: { [OWNER_COOKIE]: owner }, headers: { accept: 'text/html' } }))
+        .statusCode
+    ).toBe(200);
     for (const [method, url] of OWNER_ROUTES) {
       const expected = url === '/api/not-a-route' ? 404 : 200;
-      expect((await call(method, url, { cookies: { [OWNER_COOKIE]: owner } })).statusCode, `${method} ${url} owner`).toBe(expected);
+      expect(
+        (await call(method, url, { basic: false, cookies: { [OWNER_COOKIE]: owner } })).statusCode,
+        method + ' ' + url + ' owner without Basic'
+      ).toBe(expected);
+      expect(
+        (await call(method, url, { cookies: { [OWNER_COOKIE]: owner } })).statusCode,
+        `${method} ${url} owner`
+      ).toBe(expected);
     }
     for (const [method, url] of OWNER_ROUTES) {
       const agent = await call(method, url, { headers: { 'x-reverie-parent-session': AGENT } });

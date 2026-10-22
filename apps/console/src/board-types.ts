@@ -188,6 +188,7 @@ export interface PlanBurn {
   profileId: string | null;
   provider: string;
   isDefault: boolean;
+  authState?: 'signed-in' | 'signed-out' | 'unavailable' | 'error';
   signedIn: boolean;
   label: string;
   name: string;

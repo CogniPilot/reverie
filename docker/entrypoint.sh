@@ -3,7 +3,7 @@
 # Every step is idempotent, so a restart or an upgrade on the same volume runs the same path.
 #   REVERIE_VERSION       image build id, set at build time; a change means an upgrade
 #   REVERIE_DATA          instance directory on the mounted volume (default /instances/default)
-#   REVERIE_INSTALL_CLIS  opt-in agent CLIs to install at start, space-separated: claude-code
+#   REVERIE_INSTALL_CLIS  defaults to claude codex opencode; set none to skip installation
 #   REVERIE_PASSWORD      owner password; when unset, one is generated on first start and kept on the volume
 set -euo pipefail
 umask 077
@@ -55,21 +55,15 @@ mv "$REVERIE_DATA_DIR/.env.tmp" "$REVERIE_DATA_DIR/.env"
 mkdir -p "$DATA/accounts/claude" "$DATA/accounts/codex"
 export CLAUDE_CONFIG_DIR=${CLAUDE_CONFIG_DIR:-$DATA/accounts/claude} CODEX_HOME=${CODEX_HOME:-$DATA/accounts/codex}
 
-# Opt-in agent CLIs that the image does not ship. They install on the volume, so a recreated container keeps them.
-# No network or a failed install is a warning, never a failed start.
+# Provider programs are installed into the user's persistent volume on first start.
+# The web server starts immediately; offline installation failures remain retryable.
 export PATH="$DATA/tools/bin:$PATH"
-for cli in ${REVERIE_INSTALL_CLIS:-}; do
-  case "$cli" in
-    claude-code) package=@anthropic-ai/claude-code; command=claude ;;
-    *) log "unknown CLI '$cli' in REVERIE_INSTALL_CLIS, skipped"; continue ;;
-  esac
-  if command -v "$command" >/dev/null 2>&1; then continue; fi
-  if timeout 300 npm install --global --prefix "$DATA/tools" --no-fund --no-audit "$package" >"$DATA/tools/install-$cli.log" 2>&1; then
-    log "installed $cli"
-  else
-    log "could not install $cli (offline?); continuing without it, see $DATA/tools/install-$cli.log"
-  fi
-done
+export REVERIE_DATA="$DATA"
+if command -v reverie-install-clis >/dev/null 2>&1; then
+  reverie-install-clis </dev/null &
+else
+  log 'provider installer unavailable; account sign-in requires provider tools'
+fi
 
 [ "$#" -gt 0 ] || set -- reverie web --host 0.0.0.0 --port "${REVERIE_PORT:-3000}"
 exec "$@"

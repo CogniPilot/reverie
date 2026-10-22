@@ -2,7 +2,7 @@ import { AvatarStore } from '../agent-avatars.js';
 import { CompanyStore } from '../company-store.js';
 import { BoardStore } from '../board-store.js';
 import { fullAccessAlertRoom } from '../full-access-default.js';
-import { CompanyService } from '../company-service.js';
+import { CompanyService, CompanyError } from '../company-service.js';
 import { DurableCompanyResearchBackend } from '../company-research-backend.js';
 import { companySessionRuntime } from '../company-session-runtime.js';
 import { registerCompanyRoutes } from './routes/company-routes.js';
@@ -208,6 +208,7 @@ import { ownerVerifier } from '../owner-auth/marks.js';
 import { OwnerAuthStore } from '../owner-auth/store.js';
 import { registerOwnerPolicy } from '../owner-auth/policy.js';
 import { relations, runtimeLineage } from '../owner-auth/relations.js';
+import { registerCompanyHireRoutes } from './routes/company-hire-routes.js';
 import { registerOwnerRoutes } from '../owner-auth/routes.js';
 import { isMultiUserMode } from '../config/multiuser.js';
 import { bootstrapInitialAdmin, hasUsers, resolveClaudeModeForUsername } from '../user-store.js';
@@ -976,7 +977,11 @@ export class WebServer extends EventEmitter {
     registerHostGuard(this.app, () => this.getHostPolicy(), this.basePath);
 
     // Auth middleware (Basic Auth + session cookies + rate limiting)
-    const authState = registerAuthMiddleware(this.app, this.https, this.basePath);
+    const ownerAuth = new OwnerAuthService({
+      store: new OwnerAuthStore(dataPath('owner-auth.json')),
+      auditFile: dataPath('owner-auth-audit.jsonl'),
+    });
+    const authState = registerAuthMiddleware(this.app, this.https, this.basePath, ownerAuth);
     if (authState) {
       this.authSessions = authState.authSessions;
       this.authFailures = authState.authFailures;
@@ -988,10 +993,6 @@ export class WebServer extends EventEmitter {
     // Owner sign-in (password, two-step, remembered devices) and the owner/agent route policy.
     // Inactive until the host bootstraps an account (`reverie owner bootstrap`); then `log` or
     // `enforce` per the account's policy. Runs after the Basic-auth layer above.
-    const ownerAuth = new OwnerAuthService({
-      store: new OwnerAuthStore(dataPath('owner-auth.json')),
-      auditFile: dataPath('owner-auth-audit.jsonl'),
-    });
     registerOwnerPolicy(this.app, {
       service: ownerAuth,
       // Only the session map is read (to resolve an agent's parent-session header).
@@ -1518,6 +1519,35 @@ export class WebServer extends EventEmitter {
       new AvatarStore(dataPath('owner-avatars')),
       (id) => this.companyWake.wakeOne(id)
     );
+    registerCompanyHireRoutes(this.app, {
+      company: this.companyService,
+      verifiedOwner,
+      profiles: readSubscriptionProfiles,
+      endpoints: () => readCustomModelHosts(getDataDir()),
+      start: async (req, body) => {
+        const headers: Record<string, string> = { 'content-type': 'application/json' };
+        for (const name of ['cookie', 'authorization', 'origin', 'host']) {
+          const value = req.headers[name];
+          if (typeof value === 'string') headers[name] = value;
+        }
+        const response = await this.app.inject({ method: 'POST', url: '/api/quick-start', headers, payload: body });
+        const json = response.json() as {
+          success?: boolean;
+          error?: string;
+          data?: { sessionId?: unknown };
+          sessionId?: unknown;
+        };
+        const sessionId = json.data?.sessionId ?? json.sessionId;
+        if (response.statusCode >= 400 || json.success === false || typeof sessionId !== 'string')
+          throw new CompanyError(
+            json.error || 'Could not start this expert; check the harness installation and local model configuration.',
+            response.statusCode >= 400 ? response.statusCode : 409
+          );
+        return sessionId;
+      },
+      stop: (id) => this.cleanupSession(id, true, 'hire_rollback'),
+      forget: (owner, id) => this.companyService.removeTemporaryAgent(owner, id).catch(() => undefined),
+    });
     // The server's board (one per console): issues, milestones, wins, blockers, decisions, focus. Audited writes.
     const boardStore = new BoardStore(dataPath('board.json'));
     await boardStore.init();

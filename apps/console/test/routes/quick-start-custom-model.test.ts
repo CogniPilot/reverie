@@ -92,6 +92,14 @@ describe('POST /api/quick-start: customModel (one-shot custom-model launch)', ()
     safeRmHomeTree(CASES_DIR);
   });
 
+  it('uses the explicitly selected Claude hire model ahead of the app-wide launch default', async () => {
+    ctx.getModelConfig.mockResolvedValue({ defaultModel: 'sonnet' });
+    const response = await quickStart({ caseName: 'explicit-hire-model', mode: 'claude', modelOverride: 'opus' });
+    expect(response.statusCode).toBe(200);
+    const session = ctx.sessions.get(response.json().sessionId) as unknown as Session;
+    expect(session.displayModel).toEqual({ model: 'opus', source: 'launch' });
+  });
+
   it('launches a claude session already pointed at the endpoint — no restart at all', async () => {
     const res = await quickStart({
       caseName: 'cm-claude',

@@ -2,7 +2,8 @@
 
 Each release publishes a container image to `ghcr.io/jgoppert/reverie`, tagged with its
 version (`0.1.0`, `0.1`, `latest`). It holds the console, the memory runtime, the generic
-expert templates and the open-source agent CLIs (OpenCode, Codex). It holds no instance:
+expert templates and a provider-tool installer. Provider CLIs are installed in private
+persistent storage on first start, not bundled in the image. It holds no instance:
 no identities, memories, rooms, credentials or model weights. The first start creates an
 empty instance on a volume.
 
@@ -21,24 +22,30 @@ works as well, without signing in.
 `setup.sh` pulls the release, starts one container named `reverie` with a data volume
 `reverie-data` mounted at `/instances` and a home volume `reverie-home` mounted at
 `/home/agent`, and prints the address. The console listens on
-`127.0.0.1:3000` only. Sign in as `owner` with the password the first start generated:
+127.0.0.1:3000 only. Create the owner account once from this host shell:
 
-```bash
-bash setup.sh --password
-```
-
-A new server also requires the owner sign-in for owner pages and settings (plan accounts,
-CLIs, settings): every process in the container shares that first password, so it alone is
-not enough. Create the owner account once from this host shell, then sign in at `/owner/login`
-with the one-time password it prints (valid 30 minutes; the first sign-in sets your own):
-
-```bash
+~~~bash
 bash setup.sh --owner
-```
+~~~
+
+Open /owner/login in the browser and use its single sign-in form: username owner
+and the one-time password printed by that command. Choose a permanent owner
+password when prompted. There is no separate browser Basic-auth dialog.
+Later sign-ins use your permanent owner password, not the generated legacy
+console password returned by setup.sh --password. A display name is not a login
+username. Existing two-factor authentication remains in effect.
+
+For an existing account, keep its credentials. If needed, issue a new one-time
+password from the host:
+
+~~~bash
+docker exec -it reverie reverie owner reset-password
+~~~
+
+This preserves two-factor settings and ends existing owner sessions.
 
 Options: `--version X.Y.Z`, `--port N`, `--name NAME` (a second server on the same machine),
-`--with-claude-code` (installs that CLI at start, on the volume, under your own account and
-its license; the image does not ship it), `--dry-run`.
+`--dry-run`.
 
 The home volume preserves agent tool configuration, provider authorization and conversation
 history that use their normal home or XDG paths. The data volume preserves console state,
@@ -66,7 +73,7 @@ bash setup.sh --rollback        # back to the previous release, with the state i
 ```
 
 The container is replaced; both named volumes are kept. `setup.sh` records each release it started
-in `~/.config/reverie/<name>.versions` by image digest, so a rollback returns to the exact
+in `~/reverie/runtime/setup/<name>.versions` by image digest, so a rollback returns to the exact
 bytes that ran before.
 
 ## What the image does at start
@@ -78,10 +85,12 @@ bytes that ran before.
 2. on the first start after an image change (`REVERIE_VERSION` differs from the volume's
    record), writes a tar backup of `console/` under `backups/` before the console migrates
    its files;
-3. sets the owner login: `REVERIE_PASSWORD` from the environment, or a generated password
-   kept at `owner-password` (mode 0600) on the volume. The console never starts without one;
-4. installs the opt-in CLIs named in `REVERIE_INSTALL_CLIS` onto the volume, skipping
-   cleanly when offline, and points the default Claude and Codex profiles at
+3. retains a separate legacy console credential in owner-password (mode 0600); browser
+   access uses the owner account sign-in described above;
+4. starts the installer for Claude Code, Codex and OpenCode in the background, writing
+   private persistent tools storage; offline failures leave the console available.
+   REVERIE_INSTALL_CLIS can select providers or none. Retry with reverie-install-clis.
+   It points the default Claude and Codex profiles at
    `accounts/claude` and `accounts/codex` on the volume so a recreate keeps a sign-in;
 5. runs the given command, by default `reverie web --host 0.0.0.0 --port 3000`.
 
@@ -89,14 +98,18 @@ Any other command runs after the same preparation. The development and personal
 launchers (`scripts/reverie-container`, `scripts/reverie-recreate`) bypass it with
 `--entrypoint /usr/bin/env`, because they mount their own instance and workspace.
 
-## Hiring the first employee (interim, until hire-by-model lands)
+## Hiring an expert
 
-The Company page's Hire form adopts an existing agent session; with no session yet it stays
-disabled. Until hiring by model, plan and effort ships, start the first session from the
-legacy screen: open `http://127.0.0.1:3000/?legacy=1`, choose the plan account and model in
-its Run controls and start a session, then return to Company and hire it. Sign-ins for plan
-accounts live on the Plans page. This route is temporary and is listed as a known rough
-edge of this release.
+In **Plans**, add a provider account and select **Sign in**. Provider authorization
+is independent of the Reverie owner account. First-start installation makes Claude
+Code, Codex and OpenCode available from private tools storage; the image itself
+contains no provider CLI or provider credentials.
+
+Open **Company → People → Hire**, enter the expert details, then choose the plan
+or configured local endpoint, model, harness and supported effort. Hire creates a
+fresh agent session and adds the expert to the company. An existing session is not
+required. A local endpoint can use OpenCode or an owner-configured compatible
+harness; the endpoint and model do not define the expert's identity or memories.
 
 ## Exposure
 

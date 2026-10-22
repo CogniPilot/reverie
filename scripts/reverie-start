@@ -19,7 +19,7 @@ function directory(path) {
 }
 function main() {
   const args = process.argv.slice(2);
-  let root = join(homedir(), 'reverie'), source = null, updates = false;
+  let root = process.env.REVERIE_ROOT || join(homedir(), 'reverie'), source = null, updates = false;
   while (args.length) {
     const flag = args.shift();
     if (flag === '--help') { console.log('reverie-start [--root DIR] [--source PATH] [--allow-updates]'); return; }
@@ -92,6 +92,12 @@ function main() {
     command.push('--mount', 'type=bind,src=' + src + ',dst=' + dst + (readonly ? ',readonly' : ''));
   }
   mount(data, '/instances/default'); mount(home, '/home/agent'); mount(config.workspace, '/reverie_workspace'); mount(config.scratch, '/scratch');
+  const gpu = process.env.REVERIE_GPU_PUBLISHED_DIR;
+  if (gpu) {
+    directory(gpu);
+    if (!statSync(gpu).isDirectory()) fail('GPU telemetry path must be a directory.');
+    mount(gpu, '/host-published', true);
+  }
   mount(join(identity, 'passwd'), '/etc/passwd', true); mount(join(identity, 'group'), '/etc/group', true);
   command.push('--env', 'REVERIE_CASES_PATH=/reverie_workspace/cases', '--env', 'REVERIE_RESEARCH_ROOT=/reverie_workspace/research');
   if (source) mount(source, '/workspace');

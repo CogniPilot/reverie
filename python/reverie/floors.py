@@ -51,7 +51,7 @@ def _contact_token(sentence: str, match: re.Match) -> str:
     return sentence[start:end].strip(_TOKEN_EDGE).rstrip(".:")
 _SENTENCE = re.compile(r"(?<=[.!?])\s+")
 
-PROTECTED_PEOPLE = Path(env_names.lookup("REVERIE_PROTECTED_PEOPLE", Path.home() / ".reverie" / "default" / "protected-people.txt"))
+PROTECTED_PEOPLE = Path(env_names.lookup("REVERIE_PROTECTED_PEOPLE", Path(env_names.lookup("REVERIE_ROOT", Path.home() / "reverie")) / "companies" / "default" / "data" / "protected-people.txt"))
 
 
 def protected_names(path: Path | None = None) -> list[str]:

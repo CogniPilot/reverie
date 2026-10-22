@@ -25,7 +25,8 @@ reverie_repo="$(realpath -m -- "$reverie_repo")"
 # Engine storage (image layers, container overlays, engine config). It must not live under a
 # scratch/cleanup area: on 2026-10-15 a cleanup of ~/scratch/reverie deleted the live
 # container's root filesystem. REVERIE_SCRATCH overrides it.
-reverie_storage="${REVERIE_SCRATCH:-${XDG_DATA_HOME:-$HOME/.local/share}/reverie/engine}"
+reverie_root="${REVERIE_ROOT:-$HOME/reverie}"
+reverie_storage="${REVERIE_SCRATCH:-$reverie_root/runtime/engine}"
 reverie_engine="${REVERIE_PODMAN:-podman}"
 if ! command -v "$reverie_engine" >/dev/null 2>&1 && [[ -x "$reverie_storage/podman/bin/podman" ]]; then
   reverie_engine="$reverie_storage/podman/bin/podman"
@@ -39,9 +40,9 @@ fi
 reverie_environment=()
 [[ -z "${REVERIE_API_URL:-}" ]] || reverie_environment+=(--env "REVERIE_API_URL=$REVERIE_API_URL")
 [[ -z "${REVERIE_MODEL_API_BASE:-}" ]] || reverie_environment+=(--env "REVERIE_API_BASE=$REVERIE_MODEL_API_BASE")
-reverie_instance_data="${REVERIE_INSTANCE_DATA:-$HOME/.local/share/reverie/development/console}"
+reverie_instance_data="${REVERIE_INSTANCE_DATA:-$reverie_root/companies/development/data/console}"
 reverie_instance_data="$(realpath -m -- "$reverie_instance_data")"
-reverie_workspace="$(realpath -m -- "${REVERIE_WORKSPACE:-$HOME/scratch/reverie/workspaces/development}")"
+reverie_workspace="$(realpath -m -- "${REVERIE_WORKSPACE:-$reverie_root/scratch/workspaces/development}")"
 # Additional already-mounted scratch directories are passed before the action.
 reverie_extra_mounts=()
 reverie_extra_sources=()
@@ -61,7 +62,7 @@ while [[ "${1:-}" == --scratch-mount ]]; do
 done
 reverie_expected_binds=$((3 + ${#reverie_extra_sources[@]}))
 if [[ "${1:-}" == memory-default ]]; then reverie_memory_size; exit; fi
-reverie_tmp="${REVERIE_TMPDIR:-$HOME/scratch/reverie/tmp}"
+reverie_tmp="${REVERIE_TMPDIR:-$reverie_root/scratch/tmp}"
 reverie_runtime="${REVERIE_RUNROOT:-${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/reverie}"
 mkdir -p "$reverie_tmp" "$reverie_workspace/tmp"
 export TMPDIR="$reverie_tmp"

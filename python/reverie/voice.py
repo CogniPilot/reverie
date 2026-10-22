@@ -13,7 +13,7 @@
 Speech to text is whisper.cpp (``whisper-cli``, model ggml-base.en by default, 4 CPU threads;
 ``REVERIE_WHISPER_GPU=1`` takes the ``chat`` GPU lock around each call). Text to speech is
 piper (voice en_US-amy-medium by default). Models are downloaded once into
-``~/.local/share/reverie/voice`` and warmed at start.
+``~/reverie/companies/default/data/voice`` and warmed at start.
 
 The service does not post to the room: the Reverie dashboard posts the transcript (as the
 user) and the reply itself, both tagged ``voice: true``, which the chat daemon skips. As a

@@ -10,10 +10,10 @@ Requisite=reverie.service
 Type=oneshot
 Environment=REVERIE_REPO=%h/git/reverie
 # Required: sets REVERIE_CYCLE_POLICY (the external night-cycle policy inside the container).
-EnvironmentFile=%h/.config/reverie/cycle.env
+EnvironmentFile=%h/reverie/runtime/config/cycle.env
 # Host-only check (the container cannot see host GPU users). Non-zero skips this tick, fails closed.
-ExecCondition=%h/.local/libexec/reverie/gpu-idle-check
-ExecStart=/bin/sh -c 'exec %h/.local/libexec/reverie/reverie-container engine exec --user agent reverie-live /opt/reverie/python/bin/reverie-cycle --policy "$${REVERIE_CYCLE_POLICY}" tick --max-model-phases 1'
+ExecCondition=%h/reverie/runtime/bin/gpu-idle-check
+ExecStart=/bin/sh -c 'exec %h/reverie/runtime/bin/reverie-container engine exec --user agent reverie-live /opt/reverie/python/bin/reverie-cycle --policy "$${REVERIE_CYCLE_POLICY}" tick --max-model-phases 1'
 # One model phase is bounded by its policy caps; stopping this unit ends only the podman client.
 # The owner's stop is `reverie-cycle --policy ... pause`.
 TimeoutStartSec=20min

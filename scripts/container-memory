@@ -12,10 +12,10 @@
 # Run on the HOST as the user that owns the container (the one that runs
 # `systemctl --user ... reverie.service`). Swap stays disabled (swap = memory).
 # It talks to Reverie's private podman through the installed launcher
-# (~/.local/libexec/reverie/reverie-container engine ...), so podman does not
+# (~/reverie/runtime/bin/reverie-container engine ...), so podman does not
 # need to be on PATH.
 # Environment: REVERIE_CONTAINER_NAME (default reverie-live),
-#              REVERIE_LAUNCHER (default ~/.local/libexec/reverie/reverie-container),
+#              REVERIE_LAUNCHER (default ~/reverie/runtime/bin/reverie-container),
 #              REVERIE_CONTAINER_SCRIPT (extra copy to persist, default ~/git/reverie/scripts/reverie-container).
 set -euo pipefail
 
@@ -23,7 +23,7 @@ name="${REVERIE_CONTAINER_NAME:-reverie-live}"
 script="${REVERIE_CONTAINER_SCRIPT:-$HOME/git/reverie/scripts/reverie-container}"
 # The installed launcher finds its policy files via REVERIE_REPO, as the systemd units set it
 export REVERIE_REPO="${REVERIE_REPO:-$HOME/git/reverie}"
-launcher="${REVERIE_LAUNCHER:-$HOME/.local/libexec/reverie/reverie-container}"
+launcher="${REVERIE_LAUNCHER:-${REVERIE_ROOT:-$HOME/reverie}/runtime/bin/reverie-container}"
 size="${1:-}"
 persist="${2:-}"
 

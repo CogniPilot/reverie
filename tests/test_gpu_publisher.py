@@ -104,7 +104,9 @@ class GpuPublisherTests(unittest.TestCase):
                 gp.write(self.base, bad, b"{}")
 
     def test_the_base_must_be_the_host_state_dir(self):
-        self.assertEqual(gp.state_base("/home/x"), Path("/home/x/.local/state/reverie"))
+        self.assertEqual(gp.state_base("/home/x"), Path("/home/x/reverie/runtime"))
+        with mock.patch.dict(os.environ, {"REVERIE_ROOT": str(self.root / "selected-root")}):
+            self.assertEqual(gp.state_base(), self.root / "selected-root" / "runtime")
         os.chmod(self.base, 0o770)
         with self.assertRaises(gp.Refused):
             self.publish()

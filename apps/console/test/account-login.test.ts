@@ -10,6 +10,7 @@ import { join } from 'node:path';
 import {
   AccountLoginService,
   LOGIN_TIMEOUT_MS,
+  defaultLoginDeps,
   nextLoginState,
   parseLoginScreen,
   type LoginDeps,
@@ -295,5 +296,22 @@ describe('sign-in routes', () => {
     );
     expect((await app.inject({ method: 'GET', url: '/api/plans/logins/missing' })).statusCode).toBe(404);
     await app.close();
+  });
+});
+
+describe('unavailable provider CLI', () => {
+  it.each([126, 127])('reports startup failure rather than a declined sign-in for exit %i', exitCode => {
+    const result = nextLoginState({ state: 'starting', message: '', codeSubmitted: false }, {
+      screen: { url: null, code: null, needsCode: false, exitCode, error: null },
+      credentialsChanged: false, status: null, now: 0, deadline: 1000,
+    });
+    expect(result.state).toBe('failed');
+    expect(result.message).toContain('CLI is missing or not executable');
+    expect(result.message).not.toContain('declined');
+  });
+  it('detects a missing Claude executable before a pane or credential directory is created', async () => {
+    const deps = defaultLoginDeps({ socket: 'unused-login-test', claudeBinary: '/nonexistent/reverie-test-claude', codexBinary: null, path: process.env.PATH || '' });
+    const service = new AccountLoginService(deps);
+    await expect(service.start({ id: 'missing', label: 'Missing CLI', provider: 'anthropic', configDir: '/nonexistent/reverie-test-account' })).rejects.toMatchObject({ status: 503, message: expect.stringContaining('Claude sign-in could not start') });
   });
 });

@@ -19,10 +19,10 @@ class EntrypointTest(unittest.TestCase):
         self.data = self.root / "instances" / "default"
         self.bin = self.root / "bin"
         self.bin.mkdir()
-        # npm fails as if offline; the start must continue without the CLI.
-        npm = self.bin / "npm"
-        npm.write_text(executable_script("#!/bin/sh\necho offline >&2\nexit 1\n"))
-        npm.chmod(0o755)
+        # Provider installation runs separately; a failure must not stop the console.
+        installer = self.bin / "reverie-install-clis"
+        installer.write_text(executable_script("#!/bin/sh\necho 'synthetic provider installation unavailable' >&2\nexit 1\n"))
+        installer.chmod(0o755)
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -103,12 +103,11 @@ class EntrypointTest(unittest.TestCase):
         self.assertNotIn("owner-auth.policy", listing)
         self.assertEqual((self.data / "console" / "owner-auth.policy").read_text(), "enforce\n")
 
-    def test_offline_cli_install_does_not_fail_the_start(self):
-        result = self.start("echo", "started", REVERIE_INSTALL_CLIS="claude-code nonsense")
+    def test_provider_install_failure_does_not_fail_the_start(self):
+        result = self.start("echo", "started", REVERIE_INSTALL_CLIS="claude")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout.strip(), "started")
-        self.assertIn("could not install claude-code", result.stderr)
-        self.assertIn("unknown CLI 'nonsense'", result.stderr)
+        self.assertIn("provider installation unavailable", result.stderr)
 
     def test_default_profiles_sign_in_on_the_volume(self):
         result = self.start("sh", "-c", 'printf "%s|%s" "$CLAUDE_CONFIG_DIR" "$CODEX_HOME"')

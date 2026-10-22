@@ -74,36 +74,27 @@ nix profile install .#default
 reverie service install --host 127.0.0.1 --port 3000
 ```
 
-**Docker:** build the same application as an image, load it, and start it with
-persistent instance data:
-
-```bash
-mkdir -p "$HOME/scratch/reverie"
-nix build .#dockerImage --out-link "$HOME/scratch/reverie/image"
-docker load --input "$HOME/scratch/reverie/image"
-docker run --detach --restart unless-stopped --name reverie --publish 127.0.0.1:3000:3000 --volume reverie-data:/instances --volume reverie-home:/home/agent reverie:latest
-```
-
-Open `http://127.0.0.1:3000`. Follow [first login](docs/setup.md#first-login) for
-the console password, owner account and provider sign-in. Published Docker images
-can also be pulled without Nix; see [image installation](docs/image.md).
-Keep both named volumes across container recreation: the data volume holds console and
-configured instance state; the home volume holds agent tool settings, provider logins
-and conversation history. Neither mounts or restores host configuration.
+Open `http://127.0.0.1:3000` and follow [first login](docs/setup.md#first-login)
+to create the owner account and sign in to your provider plans. The default
+container deployment requires a running Docker engine. Its image is built by Nix;
+there is no separate Dockerfile build. For manual image loading or published
+images, see [image installation](docs/image.md).
 
 ## Code and instance data
 
-Keep the clone shareable and put private configuration outside it:
+Keep the clone shareable. REVERIE_ROOT defaults to ~/reverie; setting it selects another
+contained deployment root. The default layout is:
 
-```text
-~/git/reverie/                         code, container definition, skills, tests
-local/                                    ignored link to machine-local instance data
-local/assistant/                               personal identity, config and memories
-~/.local/share/reverie/instances/shared/       separately configured shared instance
-~/.local/share/reverie/engine/             persistent images and container layers
-~/.local/share/reverie/home/               persistent agent home and native histories
-~/scratch/reverie/                     disposable clones, worktrees, builds and caches
-```
+~~~text
+~/git/reverie/                         source checkout
+~/reverie/deployment.json              editable deployment settings
+~/reverie/companies/default/data/      console, identity and memory state
+~/reverie/companies/default/home/      agent tool settings and provider logins
+~/reverie/workspace/                   working projects and cases
+~/reverie/runtime/                     host helpers, controls and engine state
+~/reverie/scratch/                     symlink to ~/scratch/reverie by default
+~~~
+
 
 Copy `examples/shared.json` to the chosen instance's `config/instance.json`,
 then set its identity, initial commitments, persona and data directory. Relative
@@ -125,66 +116,15 @@ provider tokenizers and the harness still enforce the final context window.
 
 ## Reverie container
 
-Install rootless Podman and its user-namespace prerequisites, then:
+The Nix-built image contains the console and memory runtime. Provider CLIs are
+installed on first start into persistent private tool storage; they are not
+distributed in the image. Native and container installations use the same pinned
+installer. Provider sign-in and company state survive container replacement.
 
-```bash
-scripts/reverie-container build
-scripts/reverie-container up
-scripts/reverie-container exec bash
-scripts/reverie-container exec python3 -m unittest discover -s tests
-```
-
-`REVERIE_PODMAN`, `REVERIE_SCRATCH`, `REVERIE_INSTANCE_DATA`, `REVERIE_CONTAINER_NAME`
-and `REVERIE_IMAGE` can override local engine/path choices. After an image or mount change, choose a fresh
-`REVERIE_CONTAINER_NAME`: `up` refuses to reuse mismatched containers and preserves
-their sessions. The launcher requires a rootless engine. Image layers live under
-`~/.local/share/reverie/engine`; builds, caches and temporary downloads go under
-`~/scratch/reverie` (which may link to a larger disk). The development container mounts this source
-checkout and its own scratch workspace, not a personal data directory or host engine
-socket. Its Linux runtime account has passwordless container sudo, with a bounded capability set and
-no privileged mode, host PID namespace or host root filesystem mount. The source,
-scratch and selected private console-state binds are writable from the container.
-No provider ports are exposed. Host-loopback access is off by default. For a trusted
-personal development container, explicitly select
-`REVERIE_ALLOW_HOST_LOOPBACK=1`, `REVERIE_API_URL` and `REVERIE_MODEL_API_BASE`.
-A shared deployment needs a separate authenticated Reverie instance and scoped
-service connections. Do not give shared containers a route to the personal
-instance's API. The development setup is not that shared access-control layer.
-
-Agents share the same tool gates. The console owns explicit role permissions;
-CTO and COO titles do not grant broader command, edit or delegation access.
-Owner-controlled lifecycle decisions retain their own confirmation rules. Personal
-self-revision cannot grant new host permissions. Containers share the host kernel;
-use a VM for workloads requiring a stronger boundary.
-
-The modified dashboard lives in `apps/console` and is built into the same image
-as the memory runtime. The image uses this checkout's source; no upstream
-package is downloaded. `reverie` is the product and CLI name. The original MIT
-license and copyright are retained in `apps/console/LICENSE`, with source
-provenance in `apps/console/UPSTREAM.md`.
-
-For a recovered deployment, `scripts/reverie-recreate --dry-run` shows
-the mounts before creation. The personal launcher mounts `~/.local/share/reverie/home`
-at `/home/agent`, so native conversations and login configuration survive recreation.
-Persistent instance handoffs belong under `/instances/example/runtime/handoffs`;
-only disposable working copies belong under `/scratch`.
-
-Inside the container, `reverie web --host 0.0.0.0 --port 3000` starts the console.
-The default development launcher does not publish dashboard ports or start a
-server. Choose the network exposure and authentication for the intended deployment;
-existing host services and live sessions are untouched by an image build.
-Console state persists by default at `~/.local/share/reverie/development/console`,
-mounted privately at `/home/agent/.reverie`. Override `REVERIE_INSTANCE_DATA` for a separate
-instance before creating a new container. `REVERIE_DATA_DIR` configures other launches.
-The monorepo contains `apps/console` (TypeScript/JavaScript), `python/reverie` (the shared Python
-memory runtime), `python/experts` (specialist templates), `docker`, `scripts`, shared skills
-and their tests.
-
-Open **Company** to register permanent employees with names, icons, positions and
-expertise, invite experts into a room, and configure nightly research. Temporary
-workers get random human names and icons and inherit their parent's single room;
-explicit names and channel choices are preserved. Permanent employee identities
-and curated research survive terminal session replacement through explicit rebind.
+Open **Company → People → Hire** to create an expert from a provider plan or local
+model profile, then choose its harness, model and effort. Each expert has a persistent
+identity and memory. Unicode profile icons are available, with optional photo overrides.
+Explicit permissions control orchestration independently of organizational titles.
 
 Nightly research is owner-configured, normally 60 minutes per employee, with an
 IANA timezone and morning coordinator briefing. Each cycle runs real tools in a separate
@@ -193,11 +133,8 @@ Restart recovery never blindly repeats uncertain work. Reports and failures appe
 in Company; imagination and unverified findings remain hypotheses. Existing private
 memory and personal reflection retain their separate storage and lifecycle.
 
-`nix/host.nix` provides an optional separate host account with rootless Podman,
-private home and lingering. Import it and set `services.reverie.enable = true`.
-Its default account is `reverie`; configure a personal deployment's name/home outside
-this repository. It grants no host sudo, wheel membership or rootful Docker access.
-Account activation and runtime cutover are separate from creating the container.
+See [setup and operations](docs/setup.md) for recovery, source mounts, reproducible
+image updates and optional development-container workflows.
 
 ## Native adapter and memory skill
 

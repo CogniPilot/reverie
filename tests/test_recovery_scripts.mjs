@@ -120,8 +120,8 @@ test("publish options and launcher installation", () => {
   const two = recreate(t, "--dry-run", "--publish", "127.0.0.1:3000:3000", "--publish", "192.0.2.5:3000:3000");
   assert.match(two.stdout, /--publish 127.0.0.1:3000:3000 --publish 192.0.2.5:3000:3000/);
   assert.doesNotMatch(recreate(t, "--dry-run", "--no-publish").stdout, /--publish/);
-  const installed = join(t.home, ".local", "libexec", "reverie", "reverie-container");
-  mkdirSync(join(t.home, ".local", "libexec", "reverie"), { recursive: true }); writeFileSync(installed, "old");
+  const installed = join(t.home, "reverie", "runtime", "bin", "reverie-container");
+  mkdirSync(join(t.home, "reverie", "runtime", "bin"), { recursive: true }); writeFileSync(installed, "old");
   const r = recreate(t, "--no-build", "--install-launcher");
   assert.equal(r.status, 0, r.stderr);
   assert.equal(readFileSync(installed + ".bak", "utf8"), "old");
@@ -230,9 +230,11 @@ case "$*" in *"info --format"*) echo true ;; *"container exists"*) exit 1 ;; esa
   });
   const plain = run({});
   assert.equal(plain.status, 0, plain.stderr);
-  assert.match(plain.stderr, new RegExp(`Engine storage: ${join(root, "data", "reverie", "engine")}`));
-  assert.match(readFileSync(join(root, "podman.log"), "utf8"), new RegExp(`--root ${join(root, "data", "reverie", "engine", "containers-overlay")}`));
+  assert.match(plain.stderr, new RegExp(`Engine storage: ${join(root, "home", "reverie", "runtime", "engine")}`));
+  assert.match(readFileSync(join(root, "podman.log"), "utf8"), new RegExp(`--root ${join(root, "home", "reverie", "runtime", "engine", "containers-overlay")}`));
   assert.equal(existsSync(join(root, "home", "scratch", "reverie", "engine")), false);
+  const rooted = run({ REVERIE_ROOT: join(root, "selected-root") });
+  assert.match(rooted.stderr, new RegExp("Engine storage: " + join(root, "selected-root", "runtime", "engine")));
   const custom = run({ REVERIE_SCRATCH: join(root, "custom") });
   assert.match(custom.stderr, new RegExp(`Engine storage: ${join(root, "custom")}`));
 });

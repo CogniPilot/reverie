@@ -189,7 +189,7 @@ Object.assign(ReverieApp.prototype, {
   _accountStatusEl(account) {
     const status = document.createElement('span');
     status.className = 'pu-label';
-    status.textContent = account.status === 'signed-out' ? 'sign in' : account.provider === 'anthropic' ? 'unknown' : 'unavailable';
+    status.textContent = ({ 'signed-in': 'Signed in · No usage data', 'signed-out': 'Signed out', unavailable: 'Installing or unavailable', error: 'Sign-in status error' })[account.authState] || (account.status === 'signed-out' ? 'Signed out' : 'No usage data');
     return status;
   },
 

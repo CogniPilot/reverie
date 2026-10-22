@@ -5,9 +5,12 @@
     let
       systems = [ "x86_64-linux" "aarch64-linux" ];
       forAllSystems = nixpkgs.lib.genAttrs systems;
+      pkgsFor = system: import nixpkgs {
+        inherit system;
+      };
       packagesFor = system:
         let
-          pkgs = nixpkgs.legacyPackages.${system};
+          pkgs = pkgsFor system;
           packages = import ./nix/package.nix { inherit pkgs; src = self; };
           container-memory = pkgs.writeShellApplication {
             name = "container-memory";
@@ -27,9 +30,14 @@
             runtimeInputs = [ pkgs.nix pkgs.docker-client pkgs.jq pkgs.curl pkgs.coreutils (pkgs.lib.getBin pkgs.util-linux) ];
             text = pkgs.lib.removePrefix "#!/usr/bin/env bash\n" (builtins.readFile ./scripts/reverie-update);
           };
+          gpuPublisher = pkgs.writeShellApplication {
+            name = "reverie-gpu-publisher";
+            runtimeInputs = [ pkgs.nodejs_22 ];
+            text = ''exec node --experimental-strip-types ${self}/apps/host/gpu-publisher.ts "$@"'';
+          };
         in packages // {
           default = packages.reverie;
-          inherit container-memory start update;
+          inherit container-memory start update gpuPublisher;
           dockerImage = import ./nix/image.nix {
             inherit pkgs;
             src = self;
@@ -46,12 +54,13 @@
       });
       checks = forAllSystems (system:
         let
-          pkgs = nixpkgs.legacyPackages.${system};
+          pkgs = pkgsFor system;
           packages = self.packages.${system};
         in {
-          inherit (packages) reverie memoryPackage start update;
+          inherit (packages) reverie memoryPackage start update gpuPublisher;
           nativeSmoke = pkgs.runCommand "reverie-native-smoke" { } ''
             export HOME="$TMPDIR/home"
+            export REVERIE_INSTALL_CLIS=none
             mkdir -p "$HOME"
             ${packages.reverie}/bin/reverie --version
             ${pkgs.nodejs_22}/bin/node <<'JAVASCRIPT'
@@ -78,7 +87,7 @@
               sleep 1
             done
             test "$ready" = 1 || { cat console.log; exit 1; }
-            test -s "$HOME/.local/share/reverie/default/owner-password"
+            test -s "$HOME/reverie/companies/default/data/owner-password"
             ${packages.reverie}/bin/reverie owner bootstrap --username owner --enforce > owner-first-login.txt
             ${packages.reverie}/bin/reverie owner status | ${pkgs.jq}/bin/jq -e '.configured and .username == "owner" and .mustChange'
             touch "$out"
@@ -97,7 +106,7 @@
           '';
         });
       devShells = forAllSystems (system:
-        let pkgs = nixpkgs.legacyPackages.${system}; in {
+        let pkgs = pkgsFor system; in {
           default = pkgs.mkShell {
             packages = [ (pkgs.python3.withPackages (ps: [ ps.pillow ps.setuptools ])) pkgs.nodejs_22 pkgs.git pkgs.tmux pkgs.gcc pkgs.gnumake ];
             shellHook = ''

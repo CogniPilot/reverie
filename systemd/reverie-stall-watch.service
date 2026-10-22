@@ -17,14 +17,14 @@ Environment=STALL_WATCH_FLAGS=--dry-run
 # (stall-watch-host); nothing is passed into the container. stall-watch-host fetches the console reads
 # with the token, feeds them to the tick on stdin, and writes and posts the notice itself from the
 # tick's coded report (it trusts no text from the container). In --dry-run it never posts.
-EnvironmentFile=%h/.config/reverie/stall-watch.env
+EnvironmentFile=%h/reverie/runtime/config/stall-watch.env
 # No config, no tick (instead of a traceback every minute). The path is inside the container (the
 # instance is a bind mount there), so it is checked there; a Condition= would look on the host.
-ExecCondition=/bin/sh -c 'exec %h/.local/libexec/reverie/reverie-container engine exec --user agent reverie-live test -f "$${REVERIE_STALL_WATCH_CONFIG}"'
+ExecCondition=/bin/sh -c 'exec %h/reverie/runtime/bin/reverie-container engine exec --user agent reverie-live test -f "$${REVERIE_STALL_WATCH_CONFIG}"'
 # The config is instance data (target, rooms, reporting identity); it never lives in the repo.
 # --workdir / and -I: the container's default working directory is the agent-editable work tree, and
 # `python -m` would import `reverie` from there; this way only the installed package runs.
-ExecStart=/bin/sh -c 'exec %h/.local/libexec/reverie/stall-watch-host %h/.local/libexec/reverie/reverie-container engine exec -i --workdir / --user agent reverie-live /opt/reverie/python/bin/python3 -I -m reverie.stall_watch --config "$${REVERIE_STALL_WATCH_CONFIG}" --console-json - $${STALL_WATCH_FLAGS}'
+ExecStart=/bin/sh -c 'exec %h/reverie/runtime/bin/stall-watch-host %h/reverie/runtime/bin/reverie-container engine exec -i --workdir / --user agent reverie-live /opt/reverie/python/bin/python3 -I -m reverie.stall_watch --config "$${REVERIE_STALL_WATCH_CONFIG}" --console-json - $${STALL_WATCH_FLAGS}'
 # The tick also ends itself before its minute is up (`tick_seconds`), since stopping this unit ends
 # only the podman client, not the tick inside the container.
 TimeoutStartSec=90

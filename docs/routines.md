@@ -16,8 +16,8 @@ It never nudges, never restarts anything, and never reads or posts to a chat roo
 
 ## Trust rules
 
-- **Host-held.** The policy (`~/.config/reverie/routines.json`, owner-written), the ledger
-  (`~/.local/state/reverie/routines.sqlite`) and the token (`~/.config/reverie/routines.env`,
+- **Host-held.** The policy (`~/reverie/runtime/config/routines.json`, owner-written), the ledger
+  (`~/reverie/runtime/routines.sqlite`) and the token (`~/reverie/runtime/config/routines.env`,
   mode 0600) are all host files.
 - **No container commands.** The tick runs no container command. Its only agent-writable input
   is the optional night-cycle policy, and that input is report-only (see below).
@@ -40,7 +40,7 @@ It never nudges, never restarts anything, and never reads or posts to a chat roo
     that says the input was buffered or dropped counts as failed.
 - **No room reads.** The room list carries each room's last message.
 - **No room posts.** Reports are coded lines in the journal and
-  `~/.local/state/reverie/routines-reports.log`:
+  `~/reverie/runtime/routines-reports.log`:
   `routines-report v1 <time> <code> <agent> <number> [dry-run]`. Nothing is posted as the user.
 - **Fixed templates.** Every text sent is a fixed template: one printable ASCII line, no `!`
   (typed delivery would flip OpenCode into shell mode).
@@ -126,7 +126,7 @@ before the ledger's first tick are recorded without a report.
     ticks inside its window, ending `missed` if the gate never opens.
   - Nothing is ever sent while the gate is closed or unreadable. Calls are not quota-gated.
 
-**Pause.** `touch ~/.local/state/reverie/routines.paused` stops all sends; reports continue.
+**Pause.** `touch ~/reverie/runtime/routines.paused` stops all sends; reports continue.
 
 ## Caps (what is enforced)
 
@@ -169,7 +169,7 @@ revoked on its own:
 
 ```sh
 reverie owner service-token issue routines        # on the host (owner-auth v5)
-install -m 0600 /dev/null ~/.config/reverie/routines.env
+install -m 0600 /dev/null ~/reverie/runtime/config/routines.env
 # REVERIE_SERVICE_TOKEN=<token>   (it never enters the container)
 ```
 
@@ -206,14 +206,14 @@ Build from a **verified clone**, never from `~/git/reverie`: agents can write th
 ```sh
 git clone --no-local ~/git/reverie /tmp/reverie-verify && cd /tmp/reverie-verify
 git checkout <reviewed commit> && git rev-parse HEAD          # compare with the reviewed hash
-nix build .#default -o ~/.local/libexec/reverie/reverie-pkg
-ln -sf reverie-pkg/bin/reverie-routines ~/.local/libexec/reverie/reverie-routines
-cp examples/routines.json ~/.config/reverie/routines.json     # then edit: ids, windows
-~/.local/libexec/reverie/reverie-routines check-policy
+nix build .#default -o ~/reverie/runtime/bin/reverie-pkg
+ln -sf reverie-pkg/bin/reverie-routines ~/reverie/runtime/bin/reverie-routines
+cp examples/routines.json ~/reverie/runtime/config/routines.json     # then edit: ids, windows
+~/reverie/runtime/bin/reverie-routines check-policy
 cp systemd/reverie-routines.{service,timer} ~/.config/systemd/user/
 systemctl --user daemon-reload && systemctl --user enable --now reverie-routines.timer
 journalctl --user -u reverie-routines.service      # dry run: "..._would_send" lines
-~/.local/libexec/reverie/reverie-routines status      # the dry ledger; add --live for the live one
+~/reverie/runtime/bin/reverie-routines status      # the dry ledger; add --live for the live one
 ```
 
 **Without Nix.** The module is standard-library only, so a host `python3` (3.11 or later) can

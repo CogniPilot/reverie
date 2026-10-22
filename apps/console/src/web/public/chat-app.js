@@ -1278,6 +1278,18 @@ class ReverieChatApp {
       // Every room event (a vote, a status) reloads the profiles: the feed is redrawn for a changed name or picture, but never moved.
       this.renderFeed({ keepScroll: true });
     }
+    this.maybePromptOwnerName();
+  }
+
+  /** Offer a display name once per tab session, only after verified owner sign-in. */
+  maybePromptOwnerName() {
+    if (this.ownerName || this.company?.canManage !== true || this.phoneStatus?.self !== 'owner' || this.phoneStatus?.canSetOwn !== true) return;
+    const key = `reverie:owner-name-prompted:${this.company.settings?.owner || 'owner'}`;
+    this._ownerNamePrompts ||= new Set();
+    if (this._ownerNamePrompts.has(key) || caRead('session', key, '') || this.doc.querySelector('dialog[open]')) return;
+    this._ownerNamePrompts.add(key);
+    caWrite('session', key, '1');
+    this.openProfileEditor({ firstRun: true });
   }
 
   /** The workspaces' pictures kept on the server (name -> URL); a server without them leaves the browser's own. */
@@ -2290,7 +2302,10 @@ class ReverieChatApp {
         const card = this.el('article', 'ca-company-person');
         card.dataset.employeeId = employee.id;
         const title = this.el('div', 'ca-company-person-title');
-        title.append(this.el('span', 'ca-company-icon', employee.icon || '👤'), this.literalText('strong', '', employee.name));
+        const avatar = this.el('span', 'chatroom-avatar chatroom-avatar--md ca-company-icon');
+        avatar.append(this.el('span', 'chatroom-avatar-glyph', employee.icon || '👤'));
+        if (employee.avatar) this.fillAvatar(avatar, employee.avatar);
+        title.append(avatar, this.literalText('strong', '', employee.name));
         const parent = employee.reportsTo && employee.reportsTo !== 'owner' ? employees.find(e => e.id === employee.reportsTo)?.name : data.settings?.ownerName || 'Owner';
         card.append(title, this.literalText('span', 'ca-company-role', employee.position || ''), parent ? this.literalText('span', 'ca-company-parent', parent) : this.el('span', 'ca-company-parent', 'Unassigned'), this.el('span', `ca-company-state${employee.available ? ' is-connected' : ''}`, employee.available ? 'Connected' : 'Disconnected'));
         if (manage) {
@@ -2307,7 +2322,7 @@ class ReverieChatApp {
             status.textContent = result.ok ? 'Employee permissions saved.' : `Could not save permissions: ${result.error || 'request failed'}`;
           });
           save.setAttribute('aria-label', `Save permissions for ${employee.name}`);
-          card.append(label, save);
+          card.append(label, save, this.button('ca-btn', `Edit profile for ${employee.name}`, () => this.openEmployeeProfile(employee, paint), { text: 'Edit profile' }));
         }
         const work = this.el('div', 'ca-company-work');
         work.dataset.employeeId = employee.id;
@@ -2420,47 +2435,88 @@ class ReverieChatApp {
       }
       const section = this.el('section', 'ca-company-hire');
       section.hidden = true; section.id = 'ca-company-hire';
-      const hire = this.button('ca-btn is-primary', 'Hire', () => { section.hidden = !section.hidden; hire.setAttribute('aria-expanded', String(!section.hidden)); if (!section.hidden) session.focus(); }, { text: '+ Hire' });
+      const hire = this.button('ca-btn is-primary', 'Hire', () => { section.hidden = !section.hidden; hire.setAttribute('aria-expanded', String(!section.hidden)); if (!section.hidden) plan.focus(); }, { text: '+ Hire' });
       hire.setAttribute('aria-expanded', 'false'); hire.setAttribute('aria-controls', section.id); head.insertBefore(hire, head.lastElementChild);
       hire.hidden = selectedSection === 'plans';
-      section.append(this.el('h3', '', 'Hire an agent'), this.el('p', 'ca-hint', 'Choose an open agent, then give it a permanent place on your team.'));
+      section.append(this.el('h3', '', 'Hire an agent'), this.el('p', 'ca-hint', 'Create a permanent expert with its own memory. Choose a plan or local model profile, then its harness, model and effort.'));
       const form = this.el('form', 'ca-company-form');
       const field = (name, label, tag = 'input') => {
         const wrap = this.el('label', 'ca-label'); wrap.append(this.el('span', 'ca-label-text', label));
         const input = this.el(tag, 'ca-field'); input.name = name; input.setAttribute('aria-label', label); wrap.append(input); form.append(wrap); return input;
       };
-      const session = field('sessionId', 'Agent', 'select');
-      const placeholder = this.el('option', '', 'Choose an agent'); placeholder.value = ''; session.append(placeholder); session.required = true;
-      const bound = new Set(employees.map(e => e.sessionId));
-      const candidates = [...(this.app.sessions?.values() || [])].filter(s => !bound.has(s.id) && s.mode !== 'shell');
-      for (const s of candidates) { const option = this.el('option', '', `${s.name || 'Unnamed agent'} · ${s.mode || 'agent'}`); option.value = s.id; session.append(option); }
+      const options = await this.app._chatApi('/api/company/hire-options');
+      if (this.companyPage !== dlg || !dlg.isConnected) return;
+      const sources = options.ok && Array.isArray(options.data?.sources) ? options.data.sources : [];
+      const harnesses = options.ok && Array.isArray(options.data?.harnesses) ? options.data.harnesses : [];
+      const plan = field('plan', 'Plan or local model', 'select');
+      const placeholder = this.el('option', '', 'Choose a plan or local model'); placeholder.value = ''; plan.append(placeholder); plan.required = true;
+      for (const source of sources) {
+        const option = this.el('option', '', `${source.label}${source.kind === 'local' ? ' · Local model' : ''}`);
+        option.value = `${source.kind}:${source.id}`; option.disabled = !source.modes?.length;
+        plan.append(option);
+      }
+      const harness = field('mode', 'Harness', 'select'); harness.required = true;
+      const model = field('model', 'Model'); model.maxLength = 100;
+      const models = this.el('datalist'); models.id = 'ca-hire-models'; model.setAttribute('list', models.id); form.append(models);
+      const effort = field('effort', 'Effort', 'select');
+      const selectedSource = () => sources.find((source) => `${source.kind}:${source.id}` === plan.value);
+      const updateEffort = () => {
+        effort.replaceChildren();
+        const fallback = this.el('option', '', 'Harness default'); fallback.value = ''; effort.append(fallback);
+        const values = harnesses.find((h) => h.id === harness.value)?.efforts || [];
+        for (const value of values) { const option = this.el('option', '', value); option.value = value; effort.append(option); }
+        effort.disabled = !values.length;
+      };
+      const updatePlan = () => {
+        const source = selectedSource();
+        const previous = harness.value;
+        harness.replaceChildren(); models.replaceChildren();
+        for (const id of source?.modes || []) {
+          const entry = harnesses.find((h) => h.id === id);
+          if (!entry) continue;
+          const option = this.el('option', '', entry.label); option.value = id; harness.append(option);
+        }
+        if ([...harness.options].some((option) => option.value === previous)) harness.value = previous;
+        model.value = source?.defaultModel || '';
+        model.required = source?.kind === 'local';
+        model.placeholder = source?.kind === 'local' ? 'Choose a saved model' : 'Leave empty for the harness default';
+        for (const id of source?.models || []) { const option = this.el('option'); option.value = id; models.append(option); }
+        updateEffort();
+      };
+      plan.addEventListener('change', updatePlan); harness.addEventListener('change', updateEffort); updatePlan();
       const name = field('name', 'Name'); name.required = true; name.maxLength = 100;
-      const icon = field('icon', 'Icon'); icon.required = true; icon.value = '👤'; icon.maxLength = 32;
+      const appearance = this.expertAppearanceFields(form);
+      const icon = appearance.icon;
       const position = field('position', 'Role'); position.required = true; position.maxLength = 100;
       const expertise = field('expertise', 'Expertise'); expertise.required = true; expertise.placeholder = 'Code review, Security, Flight systems';
       const parent = field('reportsTo', 'Reports to', 'select');
       const owner = this.el('option', '', data.settings?.ownerName || 'Owner'); owner.value = 'owner'; parent.append(owner);
       for (const e of employees) { const option = this.el('option', '', e.name); option.value = e.id; parent.append(option); }
-      session.addEventListener('change', () => { const s = candidates.find(s => s.id === session.value); if (s) name.value = s.name || ''; });
       const error = this.el('p', 'ca-company-error'); error.setAttribute('role', 'alert');
       const submit = this.el('button', 'ca-btn is-primary', 'Hire agent'); submit.type = 'submit';
-      submit.disabled = !candidates.length;
+      submit.disabled = !sources.length;
       const actions = this.el('div', 'ca-company-actions'); actions.append(submit);
-      if (!candidates.length) actions.append(this.el('p', 'ca-hint', 'No unregistered agent is available. Open an agent session first.'));
+      if (!sources.length) actions.append(this.el('p', 'ca-hint', options.error || 'Add a subscription plan or local model profile in Settings first.'));
       form.append(error, actions);
       let saving = false;
       form.addEventListener('submit', async ev => {
         ev.preventDefault(); if (saving || !form.reportValidity()) return;
+        if (appearance.pending()) { error.textContent = 'Wait for the photo to finish loading.'; return; }
         const skills = expertise.value.split(',').map(s => s.trim()).filter(Boolean);
         if (!skills.length) { error.textContent = 'Add at least one area of expertise.'; return; }
         saving = true; submit.disabled = true; error.textContent = '';
-        const payload = { sessionId: session.value, name: name.value.trim(), icon: icon.value.trim(), position: position.value.trim(), expertise: skills, reportsTo: parent.value, researchEnabled: false };
+        const source = selectedSource();
+        if (!source || !harness.value) { saving = false; submit.disabled = false; error.textContent = 'Choose a plan and a compatible harness.'; return; }
+        const payload = { source: source.kind === 'local' ? { kind: 'local', endpointId: source.id } : { kind: 'subscription', profileId: source.id }, mode: harness.value, ...(model.value.trim() ? { model: model.value.trim() } : {}), ...(effort.value ? { effort: effort.value } : {}), name: name.value.trim(), icon: icon.value.trim(), position: position.value.trim(), expertise: skills, reportsTo: parent.value };
         try {
-          const result = await this.app._chatApi('/api/company/employees', { method: 'POST', body: payload });
+          const result = await this.app._chatApi('/api/company/hire', { method: 'POST', body: payload });
           if (!result.ok) { error.textContent = result.error || 'Could not hire this agent.'; return; }
+          const sessionId = result.data?.sessionId || result.data?.employee?.sessionId;
+          const photo = appearance.picture.value();
+          const photoSaved = !photo || (typeof sessionId === 'string' && await this.saveEmployeePicture(sessionId, photo));
           await this.loadOwner();
           await paint();
-          status.textContent = `Hired ${payload.name}.`;
+          status.textContent = `Hired ${payload.name}.${photoSaved ? '' : ' The photo could not be saved. Use Edit profile to try again; the expert is already hired.'}`;
         } catch { error.textContent = 'Could not save. Check the company roster before trying again.'; }
         finally { saving = false; submit.disabled = false; }
       });
@@ -5305,28 +5361,105 @@ class ReverieChatApp {
    * Store the name as the company's owner name. The settings are replaced as a whole by the server, so the
    * current ones are sent back with only the name changed.
    */
-  async saveOwnerName(ownerName) {
+  async saveOwnerName(ownerName, { quiet = false } = {}) {
     // Read the settings again now: the server replaces them as a whole, so the copy from startup could be stale.
     const fresh = await this.app._chatApi('/api/company');
     const current = fresh.ok ? fresh.data?.settings : null;
-    if (!current) return this.toast('Could not read the instance settings, so only this browser has the name', 'error');
+    if (!current) { if (!quiet) this.toast('Could not read the instance settings, so only this browser has the name', 'error'); return false; }
     this.company = fresh.data;
     const { owner: _owner, ...rest } = current;
     const res = await this.app._chatApi('/api/company/settings', { method: 'PUT', body: { ...rest, ownerName } });
-    if (!res.ok) return this.toast(`Chat: ${res.error} (the name is saved in this browser only)`, 'error');
+    if (!res.ok) { if (!quiet) this.toast(`Chat: ${res.error} (the name is saved in this browser only)`, 'error'); return false; }
     this.company = { ...this.company, settings: { ...current, ownerName } };
     this.ownerName = ownerName;
     this.renderUser();
+    return true;
   }
 
   /**
    * A "choose a picture" row: a preview, Choose and Remove. `value()` is the data URL (or '' for none); `onChange` runs after a pick or removal.
    */
+  /** Unicode is the baseline; an optional picture overrides it without changing identity. */
+  expertAppearanceFields(form, currentIcon = '👤', currentPhoto = '') {
+    const label = this.el('label', 'ca-label');
+    label.append(this.el('span', 'ca-label-text', 'Icon'));
+    const icon = this.el('select', 'ca-field'); icon.name = 'icon'; icon.setAttribute('aria-label', 'Icon');
+    const choices = [['👤', 'Person'], ['💻', 'Developer'], ['🔬', 'Researcher'], ['📊', 'Analyst'], ['🧭', 'Coordinator'], ['🎨', 'Designer'], ['📜', 'Writer']];
+    if (currentIcon && !choices.some(([value]) => value === currentIcon)) choices.push([currentIcon, 'Current icon']);
+    for (const [value, text] of choices) { const option = this.el('option', '', `${value} ${text}`); option.value = value; icon.append(option); }
+    icon.value = currentIcon || '👤'; label.append(icon); form.append(label);
+    const picture = this.pictureField('Profile photo (optional)', currentPhoto, () => {});
+    picture.wrap.querySelectorAll('button')[1].textContent = 'Use icon instead';
+    picture.wrap.append(this.el('p', 'ca-hint', 'A photo overrides the icon. Remove it to show your chosen icon again.'));
+    form.append(picture.wrap);
+    const presets = this.el('div', 'ca-expert-portraits'); presets.setAttribute('aria-label', 'Optional portrait presets');
+    let loading = false;
+    for (let index = 1; index <= 4; index++) {
+      const path = `/assets/avatars/expert-0${index}.png`;
+      const button = this.el('button', 'ca-btn'); button.type = 'button'; button.setAttribute('aria-label', `Use portrait ${index}`);
+      const image = this.el('img'); image.src = path; image.alt = ''; image.loading = 'lazy'; image.width = image.height = 48; button.append(image);
+      button.addEventListener('click', async () => {
+        if (loading) return;
+        loading = true; button.disabled = true;
+        try {
+          const response = await this.doc.defaultView.fetch(path);
+          if (!response.ok) throw new Error('Portrait unavailable');
+          picture.set(await this.imageToIcon(await response.blob()));
+        } catch { this.toast('The portrait could not be loaded. Choose a photo or use an icon.', 'error'); }
+        finally { loading = false; button.disabled = false; }
+      });
+      presets.append(button);
+    }
+    form.append(presets);
+    return { icon, picture, pending: () => loading || picture.pending() };
+  }
+
+  async saveEmployeePicture(sessionId, image) {
+    try {
+      const url = `/api/company/agents/${encodeURIComponent(sessionId)}/avatar`;
+      if (!image) return (await this.doc.defaultView.fetch(url, { method: 'DELETE' })).ok;
+      const match = /^data:(image\/(?:png|jpeg|webp|gif));base64,([A-Za-z0-9+/=]+)$/.exec(image);
+      if (!match) return false;
+      const binary = this.doc.defaultView.atob(match[2]);
+      const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
+      return (await this.doc.defaultView.fetch(url, { method: 'POST', headers: { 'Content-Type': match[1] }, body: bytes })).ok;
+    } catch { return false; }
+  }
+
+  openEmployeeProfile(employee, onSaved) {
+    this.doc.querySelector('.ca-expert-profile')?.remove();
+    const dialog = this.el('dialog', 'ca-dialog ca-expert-profile');
+    dialog.setAttribute('aria-label', `Edit profile: ${employee.name}`);
+    dialog.append(this.literalText('h2', '', employee.name));
+    const form = this.el('form');
+    const appearance = this.expertAppearanceFields(form, employee.icon, employee.avatar || '');
+    const error = this.el('p', 'ca-company-error'); error.setAttribute('role', 'alert');
+    const save = this.el('button', 'ca-btn is-primary', 'Save profile'); save.type = 'submit';
+    const cancel = this.el('button', 'ca-btn', 'Cancel'); cancel.type = 'button'; cancel.addEventListener('click', () => dialog.close());
+    form.append(error, save, cancel);
+    form.addEventListener('submit', async event => {
+      event.preventDefault();
+      if (save.disabled || appearance.pending()) return;
+      save.disabled = true;
+      try {
+        const changed = await this.app._chatApi(`/api/company/employees/${encodeURIComponent(employee.id)}`, { method: 'PUT', body: { icon: appearance.icon.value } });
+        if (!changed.ok) { error.textContent = changed.error || 'Profile could not be saved.'; return; }
+        if (appearance.picture.value() !== (employee.avatar || '') && !await this.saveEmployeePicture(employee.sessionId, appearance.picture.value())) {
+          error.textContent = 'Icon saved; the photo could not be saved. Try again.'; return;
+        }
+        await this.loadOwner(); await onSaved?.(); dialog.close();
+      } catch { error.textContent = 'Profile could not be saved. Try again.'; }
+      finally { save.disabled = false; }
+    });
+    dialog.append(form); dialog.addEventListener('close', () => dialog.remove()); this.doc.body.append(dialog); dialog.showModal();
+  }
+
   pictureField(label, current, onChange) {
     const wrap = this.el('div', 'ca-label ca-picture');
     wrap.append(this.el('span', 'ca-label-text', label));
     const row = this.el('div', 'ca-picture-row');
     let image = current || '';
+    let loading = false;
     const preview = this.el('span', 'ca-picture-preview');
     const input = this.el('input');
     input.type = 'file';
@@ -5354,6 +5487,7 @@ class ReverieChatApp {
       const file = input.files?.[0];
       input.value = '';
       if (!file) return;
+      loading = true;
       try {
         image = await this.imageToIcon(file);
         note.textContent = '';
@@ -5361,7 +5495,7 @@ class ReverieChatApp {
         onChange(image);
       } catch (e) {
         note.textContent = e?.message || 'That picture could not be used';
-      }
+      } finally { loading = false; }
     });
     remove.addEventListener('click', () => {
       image = '';
@@ -5371,16 +5505,16 @@ class ReverieChatApp {
     paint();
     row.append(preview, choose, remove, input);
     wrap.append(row, note);
-    return { wrap, value: () => image, set: (v) => { image = v || ''; paint(); } };
+    return { wrap, value: () => image, pending: () => loading, set: (v) => { image = v || ''; paint(); } };
   }
 
-  openProfileEditor() {
+  openProfileEditor({ firstRun = false } = {}) {
     this.doc.querySelector('.ca-dialog.ca-profile-edit')?.remove();
     const p = this.profile;
     const dlg = this.el('dialog', 'ca-dialog ca-profile-edit');
-    dlg.setAttribute('aria-label', 'Edit profile');
-    dlg.append(this.el('h2', '', 'Edit profile'));
-    dlg.append(this.el('p', 'ca-dialog-note', 'Shown on your messages and replies. Saved in this browser; agents still see you as the user.'));
+    dlg.setAttribute('aria-label', firstRun ? 'Your name' : 'Edit profile');
+    dlg.append(this.el('h2', '', firstRun ? 'What should we call you?' : 'Edit profile'));
+    dlg.append(this.el('p', 'ca-dialog-note', firstRun ? 'Your name appears in chat and your organization. You can change it later in your profile.' : 'Shown on your messages and replies. Saved in this browser; agents still see you as the user.'));
     const form = this.el('form', 'ca-form');
     const field = (label, value, max, placeholder = '') => {
       const wrap = this.el('label', 'ca-label');
@@ -5393,7 +5527,8 @@ class ReverieChatApp {
       return { wrap, input };
     };
     const fallback = this.ownerName || this.doc.defaultView?.__reverieUser?.username || 'You';
-    const name = field('Display name', p.name, 32, fallback);
+    const name = field(firstRun ? 'Your name' : 'Display name', p.name, firstRun ? 100 : 32, firstRun ? '' : fallback);
+    if (firstRun) { name.input.required = true; name.input.setAttribute('aria-label', 'Your name'); }
     // Optionally make the name the instance's owner name: it follows you to other browsers and the org chart.
     const instance = this.el('label', 'ca-check');
     const instanceBox = this.el('input');
@@ -5439,10 +5574,24 @@ class ReverieChatApp {
     cancel.addEventListener('click', () => dlg.close());
     const save = this.el('button', 'ca-btn is-primary', 'Save');
     save.type = 'submit';
-    row.append(reset, this.el('span', 'ca-spacer'), cancel, save);
-    form.append(name.wrap, instance, pronouns.wrap, status.wrap, icon.wrap, pic.wrap, colourWrap, row);
+    if (!firstRun) row.append(reset);
+    row.append(this.el('span', 'ca-spacer'), cancel, save);
+    const nameError = this.el('p', 'ca-company-error'); nameError.setAttribute('role', 'alert');
+    if (firstRun) form.append(name.wrap, nameError, row);
+    else form.append(name.wrap, instance, pronouns.wrap, status.wrap, icon.wrap, pic.wrap, colourWrap, row);
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
+      if (firstRun) {
+        const ownerName = name.input.value.trim();
+        if (!ownerName) { nameError.textContent = 'Enter your name, or choose Cancel.'; return; }
+        save.disabled = true;
+        try {
+          if (await this.saveOwnerName(ownerName, { quiet: true })) dlg.close();
+          else nameError.textContent = 'Your name could not be saved. Try again.';
+        } catch { nameError.textContent = 'Your name could not be saved. Try again.'; }
+        finally { save.disabled = false; }
+        return;
+      }
       // The picture goes to the server (owner only), so it shows on your messages for everyone; if that is refused it stays in this
       // browser. A server link is never kept locally.
       let image = pic.value();
@@ -5834,6 +5983,46 @@ class ReverieChatApp {
     this.openMenu(this.channelEntries(room), { at, focus, label: `${caRoomLabel(room)} channel` });
   }
 
+  /** A workspace is a grouping label. Removing it moves channels; it never deletes their history. */
+  async deleteWorkspace(key) {
+    const owner = this.company?.canManage === true && this.phoneStatus?.self === 'owner' && this.phoneStatus?.canSetOwn === true;
+    if (!owner || !key || key === 'home' || !this.serverFeatures.placement) return false;
+    const rooms = this.rooms.filter((r) => !caIsDm(r) && r.workspace === key);
+    const destination = this.defaultWorkspaceName();
+    const question = rooms.length
+      ? `Delete workspace "${key}"? Move its ${rooms.length} channel${rooms.length === 1 ? '' : 's'} to "${destination}". All messages, members and channel categories will be kept.`
+      : `Delete empty workspace "${key}"? No channels or messages will be deleted.`;
+    if (!this.doc.defaultView?.confirm(question)) return false;
+    let moved = 0;
+    try {
+      for (const room of rooms) {
+        const res = await this.app._chatApi(`/api/chatrooms/${encodeURIComponent(room.id)}/placement`, {
+          method: 'PUT', body: { workspace: '', category: room.category || '' },
+        });
+        if (!res.ok) throw new Error(res.error || 'Channel move refused');
+        moved++;
+      }
+    } catch (error) {
+      await this.app._loadChatRooms(this.roomId);
+      this.toast(`Workspace not removed: ${error.message}. ${moved} channel${moved === 1 ? '' : 's'} moved to "${destination}"; move the remaining channels and try again.`, 'error');
+      return false;
+    }
+    const meta = this.wsMetaLocal;
+    delete meta[key];
+    caWrite('local', 'reverie:chat:wsmeta', JSON.stringify(meta));
+    const notify = this.notifyPrefs;
+    delete notify[`ws:${key}`];
+    caWrite('local', 'reverie:chat:notify', JSON.stringify(notify));
+    if (this.workspace === key) this.workspace = '';
+    if (Object.keys(this.wsIcons || {}).some((name) => name.toLowerCase() === key.toLowerCase())) {
+      if (!await this.saveWsPicture(key, '')) this.toast('Channels moved, but the old workspace picture could not be removed.', 'error');
+    }
+    await this.app._loadChatRooms(this.roomId);
+    this.renderAll();
+    this.toast(`Workspace removed. Channels and messages are kept in "${destination}".`, 'info');
+    return true;
+  }
+
   /** What the workspace menus offer; `key` is a workspace key or "home". `full` adds the page-wide tools. */
   workspaceEntries(key, { full = false } = {}) {
     const home = key === 'home';
@@ -5850,6 +6039,9 @@ class ReverieChatApp {
       out.push({ sep: true });
       out.push({ label: 'Workspace settings', run: () => this.openWorkspaceSettings(key || '') });
       out.push({ label: 'Create channel', run: () => this.newRoom({ workspace: key || '' }) });
+      if (key && this.serverFeatures.placement && this.company?.canManage === true && this.phoneStatus?.self === 'owner' && this.phoneStatus?.canSetOwn === true) {
+        out.push({ sep: true }, { label: 'Delete workspace', danger: true, run: () => this.deleteWorkspace(key) });
+      }
     } else if (this.serverFeatures.dms) {
       out.push({ sep: true }, { label: 'Start a direct message', run: () => this.openSwitcher({ agents: true }) });
     }

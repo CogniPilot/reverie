@@ -25,7 +25,7 @@ button.danger{color:var(--danger)}
 
 const shell = (title: string, body: string) => `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="referrer" content="no-referrer"><title>${title}</title><style>${STYLE}</style></head>
+<meta name="referrer" content="no-referrer"><link rel="icon" href="data:,"><title>${title}</title><style>${STYLE}</style></head>
 <body><main>${body}</main><script src="/owner/owner.js"></script></body></html>`;
 
 export const LOGIN_PAGE = shell(

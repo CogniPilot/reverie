@@ -8,8 +8,9 @@ from .instance import Instance, load_instance
 from reverie import env_names
 
 HOME = Path(env_names.lookup("REVERIE_HOME", Path.home()))
-CACHE = HOME / ".cache"
-DATA_DIR = Path(env_names.lookup("REVERIE_DATA_DIR", HOME / ".reverie" / "default"))
+ROOT = Path(env_names.lookup("REVERIE_ROOT", HOME / "reverie"))
+CACHE = ROOT / "scratch" / "cache"
+DATA_DIR = Path(env_names.lookup("REVERIE_DATA_DIR", ROOT / "companies" / "default" / "data"))
 
 
 DEPRECATIONS: list[str] = []
