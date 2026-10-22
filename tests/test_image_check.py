@@ -83,7 +83,9 @@ class ImageCheckTests(unittest.TestCase):
         owned = [store + "reverie-install-clis.mjs",
                  store + "reverie-install-clis/bin/reverie-install-clis",
                  store + "reverie-request-update/bin/reverie-request-update",
-                 store + "reverie-kokoro/bin/reverie-kokoro"]
+                 store + "reverie-kokoro/bin/reverie-kokoro",
+                 store + "reverie-model-relay/bin/reverie-model-relay",
+                 store + "reverie-hands/bin/reverie-hands"]
         dependency = store + "reverie-install-clis-dependency/test.js"
         result = self.run_check([[(path, TOKEN.encode()) for path in owned + [dependency]]])
         self.assertEqual({finding["where"] for finding in result["findings"]},

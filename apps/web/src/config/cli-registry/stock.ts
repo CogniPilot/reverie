@@ -1616,5 +1616,20 @@ const OMP: CliEntry = {
   },
 };
 
+const HANDS_ENV = ['REVERIE_HANDS_BASE_URL', 'REVERIE_HANDS_API_KEY', 'REVERIE_HANDS_MODEL'];
+/** Recovered generic loop. Coding remains disabled until its separate runner integration is validated. */
+const HANDS: CliEntry = {
+  id: 'hands' as CliEntry['id'], label: 'Hands (experimental chat)', shortBadge: 'H',
+  accent: '#6b7280', enabled: true, stock: true, order: 110, kind: 'agent',
+  discovery: { binaries: ['reverie-hands'], searchDirs: [], install: { command: {} } },
+  launch: { params: {}, variants: [{ id: 'default', args: [{ lit: 'reverie-hands' }] }] },
+  env: { exports: [], unset: [], tmuxSetenvKeys: HANDS_ENV, dockerExecEnvNames: HANDS_ENV, allowedPrefixes: [], allowedKeys: HANDS_ENV },
+  capabilities: {
+    ...agentDefaults(), chatDelivery: 'poll', stripInkBloat: false,
+    model: { source: 'none' }, echo: { policy: 'buffer', anchor: { kind: 'none' } },
+    customModelInjection: { kind: 'env', baseUrlVar: 'REVERIE_HANDS_BASE_URL', apiKeyVar: 'REVERIE_HANDS_API_KEY', modelVars: ['REVERIE_HANDS_MODEL'], appendV1Suffix: true },
+  }, overlays: {},
+};
+
 /** The full stock catalog, in the order the run menu shows by default. */
-export const STOCK_CLIS: CliEntry[] = [CLAUDE, SHELL, OPENCODE, CODEX, GEMINI, ANTIGRAVITY, PI, GROK, DEEPSEEK, OMP];
+export const STOCK_CLIS: CliEntry[] = [CLAUDE, SHELL, OPENCODE, CODEX, GEMINI, ANTIGRAVITY, PI, GROK, DEEPSEEK, OMP, HANDS];

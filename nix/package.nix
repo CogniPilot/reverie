@@ -86,18 +86,29 @@ let
     postPatch = "patchShebangs ../scripts ../docker ../.github/ci";
     checkPhase = ''
       (cd ..; PYTHONPATH="$PWD/python" PYTHONWARNINGS=ignore::ResourceWarning python -m unittest discover -s tests -t .)
-      (cd ..; node --test tests/test_cli_installer.mjs tests/test_reverie_start.mjs tests/test_recovery_scripts.mjs tests/test_opencode_plugin.mjs)
+      (cd ..; node --test tests/test_cli_installer.mjs tests/test_reverie_start.mjs tests/test_recovery_scripts.mjs tests/test_opencode_plugin.mjs tests/test_model_relay.mjs)
     '';
   };
   memory = pkgs.python3.withPackages (ps: [ memoryPackage ps.pillow ]);
   kokoro = import ./kokoro.nix { inherit pkgs memoryPackage; };
+  hands = pkgs.writeShellApplication {
+    name = "reverie-hands";
+    runtimeInputs = [ memory ];
+    text = ''exec python3 -I -B ${memoryPackage}/${pkgs.python3.sitePackages}/reverie/hands/launcher.py "$@"'';
+  };
+  modelRelaySource = pkgs.writeText "reverie-model-relay.mjs" (builtins.readFile (src + "/apps/host/model-relay.mjs"));
+  modelRelay = pkgs.writeShellApplication {
+    name = "reverie-model-relay";
+    runtimeInputs = [ pkgs.nodejs_22 ];
+    text = ''exec node ${modelRelaySource} "$@"'';
+  };
   lockTools = pkgs.runCommand "reverie-lock-tools" { } ''
     mkdir -p "$out/bin"
     ln -s ${lib.getBin pkgs.util-linux}/bin/flock "$out/bin/flock"
   '';
   runtime = pkgs.buildEnv {
     name = "reverie-runtime";
-    paths = [ console memory kokoro pkgs.nodejs_22 pkgs.tmux pkgs.git pkgs.ripgrep
+    paths = [ console memory kokoro modelRelay hands pkgs.nodejs_22 pkgs.tmux pkgs.git pkgs.ripgrep
       pkgs.curl pkgs.coreutils pkgs.bashInteractive pkgs.gnugrep pkgs.gnused
       pkgs.gawk pkgs.findutils pkgs.gnutar pkgs.gzip pkgs.procps pkgs.which pkgs.gnumake pkgs.gcc
       pkgs.cacert lockTools ] ++ providerLaunchers;
@@ -163,6 +174,7 @@ let
     ln -s ${requestUpdate}/bin/reverie-request-update "$out/bin/reverie-request-update"
     ln -s ${installClis}/bin/reverie-install-clis "$out/bin/reverie-install-clis"
     ln -s ${kokoro}/bin/reverie-kokoro "$out/bin/reverie-kokoro"
+    ln -s ${hands}/bin/reverie-hands "$out/bin/reverie-hands"
     for command in ${memory}/bin/reverie-*; do
       makeWrapper "$command" "$out/bin/$(basename "$command")" \
         --prefix PATH : ${runtime}/bin \

@@ -1,7 +1,8 @@
 {
   description = "Reverie: persistent agents, console and reproducible runtime image";
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-26.05";
-  outputs = { self, nixpkgs }:
+  inputs.llama-nixpkgs.url = "github:NixOS/nixpkgs/02f5696b0e6097e589076d886b317b83ff0437d7";
+  outputs = { self, nixpkgs, llama-nixpkgs }:
     let
       systems = [ "x86_64-linux" "aarch64-linux" ];
       forAllSystems = nixpkgs.lib.genAttrs systems;
@@ -35,9 +36,20 @@
             runtimeInputs = [ pkgs.nodejs_22 ];
             text = ''exec node --experimental-strip-types ${self}/apps/host/gpu-publisher.ts "$@"'';
           };
+          localModel = pkgs.writeShellApplication {
+            name = "reverie-local-model";
+            runtimeInputs = [ pkgs.python3 pkgs.nix pkgs.coreutils pkgs.docker-client pkgs.systemd ];
+            text = ''
+              export REVERIE_MODEL_NIXPKGS=${llama-nixpkgs}
+              export REVERIE_MODEL_BUILD_EXPR=${self}/nix/local-model-runtime.nix
+              export REVERIE_MODEL_SYSTEM=${system}
+              export REVERIE_MODEL_LAUNCHER="$(readlink -f "$0")"
+              exec python3 ${self}/apps/host/local-model.py "$@"
+            '';
+          };
         in packages // {
           default = packages.reverie;
-          inherit container-memory start update gpuPublisher;
+          inherit container-memory start update gpuPublisher localModel;
           dockerImage = import ./nix/image.nix {
             inherit pkgs;
             src = self;
@@ -52,6 +64,7 @@
         start = { type = "app"; program = "${self.packages.${system}.start}/bin/reverie-start"; meta.description = "Start the Nix-built Docker image with a contained first-run layout"; };
         update = { type = "app"; program = "${self.packages.${system}.update}/bin/reverie-update"; meta.description = "Rebuild and replace an existing Docker deployment"; };
         kokoro = { type = "app"; program = "${self.packages.${system}.kokoro}/bin/reverie-kokoro"; meta.description = "Local Kokoro speech service with persistent models"; };
+        local-model = { type = "app"; program = "${self.packages.${system}.localModel}/bin/reverie-local-model"; meta.description = "Run GGUF models on a host NVIDIA GPU or CPU"; };
       });
       checks = forAllSystems (system:
         let
