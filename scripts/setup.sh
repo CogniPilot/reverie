@@ -54,6 +54,11 @@ if [ -z "$engine" ]; then
     exit 1
   fi
 fi
+if [ "$dry" = 0 ] && [ "$mode" != password ] && ! "$engine" info >/dev/null 2>&1; then
+  echo "$engine is installed but not usable by $(id -un)." >&2
+  [ "$engine" = docker ] && echo "Start it (sudo systemctl enable --now docker) and add yourself to the docker group (sudo usermod -aG docker $(id -un), then log in again)." >&2
+  exit 1
+fi
 volume="$name-data"
 home_volume="$name-home"
 state_dir=${REVERIE_ROOT:-$HOME/reverie}/runtime/setup
@@ -140,13 +145,24 @@ if [ "$engine" = podman ] && command -v systemctl >/dev/null 2>&1; then
     echo "note: enable podman-restart.service (systemctl --user) so Reverie starts at boot" >&2
 fi
 
-if [ "$dry" = 0 ] && command -v curl >/dev/null 2>&1; then
-  for _ in $(seq 1 60); do
-    if curl -fsS -o /dev/null "http://127.0.0.1:$port/api/status" 2>/dev/null || [ "$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$port/api/status")" = 401 ]; then
-      break
+if [ "$dry" = 0 ]; then
+  # Wait for the console; never report success for a server that did not come up.
+  up=0
+  for _ in $(seq 1 90); do
+    if command -v curl >/dev/null 2>&1; then
+      code=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$port/api/status" || true)
+      case "$code" in 2??|401) up=1; break ;; esac
+    elif (exec 3<>"/dev/tcp/127.0.0.1/$port") 2>/dev/null; then
+      up=1; break
     fi
+    [ "$("$engine" container inspect --format '{{.State.Running}}' "$name" 2>/dev/null)" = true ] || break
     sleep 2
   done
+  if [ "$up" = 0 ]; then
+    echo "Reverie did not answer on 127.0.0.1:$port. Last container log lines:" >&2
+    "$engine" logs --tail 50 "$name" >&2 || true
+    exit 1
+  fi
 fi
 cat <<EOF
 

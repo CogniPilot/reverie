@@ -3,7 +3,7 @@ name: image
 # Every pull request and every push to main builds the image, checks its contents and boots it once;
 # nothing is published.
 # A published GitHub release builds its tagged commit the same way, pushes it to
-# ghcr.io/<owner>/reverie as X.Y.Z, X.Y and latest, and attaches scripts/setup.sh to the release.
+# ghcr.io/<owner>/reverie as X.Y.Z, X.Y and latest, and attaches the Debian-tested offline bundle and setup.sh to the release.
 # The release notes must name the reviewed commit on a line "Reviewed commit: <40-hex sha>";
 # a release whose tag points elsewhere is refused.
 
@@ -113,7 +113,28 @@ jobs:
           compressed=$(gzip -1 --stdout "$image_archive" | wc -c)
           echo "image size: $((unpacked / 1000000)) MB unpacked, about $((compressed / 1000000)) MB compressed" \
             | tee -a "$GITHUB_STEP_SUMMARY"
-          rm "$image_archive"
+          # Preserve these checked bytes, with both offline install tags.
+          version=0.0.0-ci
+          if [ "${{ github.event_name }}" = release ]; then version="${{ github.event.release.tag_name }}"; version=${version#v}; fi
+          docker tag "reverie:$GITHUB_SHA" "ghcr.io/jgoppert/reverie:$version"
+          docker tag "reverie:$GITHUB_SHA" ghcr.io/jgoppert/reverie:latest
+          docker save ghcr.io/jgoppert/reverie:latest "ghcr.io/jgoppert/reverie:$version" --output "$image_archive"
+          "$HOME/scratch/reverie/build/memory/bin/python3" -I -m reverie.image_check "$image_archive" --allow docker/image-check-allow.tsv --json image-check.json
+          mkdir -p offline-bundle
+          mv "$image_archive" offline-bundle/reverie-image.tar
+          cp scripts/setup.sh offline-bundle/setup.sh
+          cp docs/INSTALL.md offline-bundle/INSTALL.md
+          printf 'Version: %s\nCommit: %s\nImage-ID: %s\nTags: ghcr.io/jgoppert/reverie:latest ghcr.io/jgoppert/reverie:%s\n' "$version" "$GITHUB_SHA" "$(cat image-id.txt)" "$version" > offline-bundle/IMAGE-REF.txt
+          (cd offline-bundle && sha256sum reverie-image.tar setup.sh INSTALL.md IMAGE-REF.txt > SHA256SUMS)
+          tar -C offline-bundle -czf "reverie-$version.tar.gz" .
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: offline-bundle
+          path: reverie-*.tar.gz
+          compression-level: 0
+          retention-days: 3
+          if-no-files-found: error
 
       - name: Boot an empty instance and preserve it across recreation
         run: |
@@ -216,8 +237,24 @@ jobs:
           docker logout ghcr.io
           docker image inspect --format '{{index .RepoDigests 0}}' "$IMAGE:$version" | tee -a "$GITHUB_STEP_SUMMARY"
 
-  release-assets:
+  debian-install:
     needs: image
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: offline-bundle
+          path: bundle
+      - name: Install the bundle on Debian 12 with its own Docker daemon
+        run: |
+          docker run --rm --privileged --volume "$PWD/bundle:/input:ro" --volume "$PWD/.github/ci:/ci:ro" debian:12 bash /ci/debian-install.sh
+
+  release-assets:
+    needs: [image, debian-install]
     if: github.event_name == 'release' && !github.event.release.prerelease
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -227,9 +264,12 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-
-      - name: Attach the setup script
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: offline-bundle
+          path: bundle
+      - name: Attach the Debian-tested offline bundle and setup script
         env:
           TAG: ${{ github.event.release.tag_name }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release upload "$TAG" scripts/setup.sh --clobber --repo "$GITHUB_REPOSITORY"
+        run: gh release upload "$TAG" "bundle/reverie-${TAG#v}.tar.gz" scripts/setup.sh --clobber --repo "$GITHUB_REPOSITORY"

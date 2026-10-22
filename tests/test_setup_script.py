@@ -8,6 +8,8 @@ import hashlib
 import json
 import re
 import subprocess
+import socket
+import threading
 import tempfile
 import unittest
 from pathlib import Path
@@ -96,6 +98,8 @@ import json, os, sys
 args = sys.argv[1:]
 with open(os.environ["ENGINE_LOG"], "a") as stream:
     stream.write(json.dumps(args) + "\\n")
+if args[0] == "info":
+    sys.exit(int(os.environ.get("INFO_FAIL", "0")))
 if args[0] == "load":
     loaded_ref = os.environ.get("LOADED_REF", "example.test/app:latest")
     print("Loaded image: " + loaded_ref, file=sys.stdout if os.environ.get("LOAD_STDOUT") else sys.stderr)
@@ -114,7 +118,7 @@ if args[0] == "container" and os.environ.get("MISSING_CONTAINER"):
             executable.write_text(engine_script)
             executable.chmod(0o755)
         curl = self.bin / "curl"
-        curl.write_text(executable_script("#!/bin/sh\nexit 0\n"))
+        curl.write_text(executable_script('#!/bin/sh\nprintf "%s" "${HEALTH_CODE:-401}"\n'))
         curl.chmod(0o755)
 
     def tearDown(self):
@@ -128,7 +132,7 @@ if args[0] == "container" and os.environ.get("MISSING_CONTAINER"):
                               cwd=self.root, env=env, capture_output=True, text=True, timeout=10)
 
     def calls(self):
-        return [json.loads(line) for line in self.log.read_text().splitlines()] if self.log.exists() else []
+        return [json.loads(line) for line in self.log.read_text().splitlines() if json.loads(line) != ["info"]] if self.log.exists() else []
 
     def assert_not_replaced(self):
         self.assertFalse(any(call[0] in ("stop", "rm", "run", "pull") for call in self.calls()))
@@ -228,11 +232,31 @@ if args[0] == "container" and os.environ.get("MISSING_CONTAINER"):
 
     def test_offline_has_no_host_curl_or_nix_requirement(self):
         (self.bin / "curl").unlink()
-        for name in ("mkdir", "tail", "cat", "grep"):
+        for name in ("mkdir", "tail", "cat", "grep", "id", "seq"):
             (self.bin / name).symlink_to(Path(shutil.which(name)))
-        result = self.run_setup("--offline", base_tools=False)
+        with socket.socket() as listener:
+            listener.bind(("127.0.0.1", 0))
+            listener.listen()
+            listener.settimeout(10)
+            thread = threading.Thread(target=lambda: listener.accept()[0].close())
+            thread.start()
+            result = self.run_setup("--offline", "--port", str(listener.getsockname()[1]), base_tools=False)
+            thread.join(timeout=10)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("--pull=never", next(call for call in self.calls() if call[0] == "run"))
+
+    def test_unusable_engine_reports_debian_remediation(self):
+        result = self.run_setup("--offline", values={"INFO_FAIL": "1"})
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("usermod -aG docker", result.stderr)
+        self.assert_not_replaced()
+
+    def test_unhealthy_container_never_reports_success(self):
+        result = self.run_setup("--offline", values={"HEALTH_CODE": "503"})
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("did not answer", result.stderr)
+        self.assertNotIn("Reverie is running:", result.stdout)
+        self.assertIn(["logs", "--tail", "50", "reverie"], self.calls())
 
     def test_documented_local_install_commands_run_against_the_engine_stub(self):
         guide = SETUP.parent.parent / "docs" / "offline-install.md"
