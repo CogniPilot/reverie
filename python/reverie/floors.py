@@ -86,4 +86,3 @@ def violates(text: str, names: list[str] | None = None) -> str:
 
 def passes(text: str, names: list[str] | None = None) -> bool:
     return not violates(text, names)
-

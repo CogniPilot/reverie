@@ -14,7 +14,8 @@ flock 9
 running() { [[ "$(docker inspect --format '{{.State.Running}}' "$name" 2>/dev/null)" == true ]]; }
 running || { echo 'Reverie is stopped; refusing an update that would restart it.' >&2; exit 1; }
 [[ -f "$REVERIE_REPO/flake.nix" ]] || { echo 'Configured checkout has no flake.nix.' >&2; exit 1; }
-[[ "$port" =~ ^[0-9]+$ ]] && ((port >= 1 && port <= 65535)) || { echo 'Invalid REVERIE_PORT.' >&2; exit 1; }
+if [[ ! "$port" =~ ^[0-9]+$ ]]; then echo 'Invalid REVERIE_PORT.' >&2; exit 1; fi
+if ((port < 1 || port > 65535)); then echo 'Invalid REVERIE_PORT.' >&2; exit 1; fi
 rm -f -- "$control/update.request"
 # Extract argv with NUL delimiters; no request or container text is evaluated as shell.
 # Reuse existing named volumes and bind mounts, including all owner-selected scratch disks.

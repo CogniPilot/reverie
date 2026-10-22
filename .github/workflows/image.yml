@@ -58,6 +58,7 @@ jobs:
           mkdir -p "$HOME/scratch/reverie/build" "$HOME/scratch/reverie/tmp"
           export TMPDIR="$HOME/scratch/reverie/tmp"
           nix flake check --print-build-logs
+          nix develop --command node --test tests/*.mjs
           nix build .#default --out-link "$HOME/scratch/reverie/build/app"
           "$HOME/scratch/reverie/build/app/bin/reverie" --version
           nix build .#memory --out-link "$HOME/scratch/reverie/build/memory"

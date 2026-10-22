@@ -49,7 +49,7 @@
           pkgs = nixpkgs.legacyPackages.${system};
           packages = self.packages.${system};
         in {
-          inherit (packages) reverie memoryPackage;
+          inherit (packages) reverie memoryPackage start update;
           nativeSmoke = pkgs.runCommand "reverie-native-smoke" { } ''
             export HOME="$TMPDIR/home"
             mkdir -p "$HOME"
