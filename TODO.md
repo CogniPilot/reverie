@@ -38,7 +38,8 @@ Updated as work is tested and deployed. Existing backups must remain intact.
 - [ ] Left-click an expert to edit runtime Plan, Harness (including registered custom harnesses), Model and Effort; validate compatibility and preserve identity, memories, photos and room membership.
 - [ ] Recover Alex's runtime after upgrading OpenCode and checking that the selected subscription model is actually used.
 - [ ] Add a compact disk gauge with capacity details for company data, workspace and scratch mounts.
-- [ ] Verify a complete Claude conversation through the managed harness, independently of provider sign-in and usage retrieval.
+- [x] Verify a complete Claude conversation through the managed harness in an isolated selected-plan fixture, independently of provider sign-in and usage retrieval.
+- [ ] Prepare selected Claude profiles for first launch without changing their chosen permission mode; verify credentials-only startup without manual setup.
 - [ ] Let additional humans register and appear alongside agents in company people, with explicit roles and permissions.
 - [x] Deploy the consolidated root skills and removal of legacy console Docker/plugin packaging.
 - [ ] Finish first-run bootstrap checks: editable deployment defaults, source/config access off by default, multiple mounts supported.

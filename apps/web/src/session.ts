@@ -1,4 +1,5 @@
 import { cliConfigContent } from './cli-config-content.js';
+import { prepareSelectedClaudeProfile } from './selected-claude-profile.js';
 /**
  * @fileoverview Core PTY session wrapper for Claude CLI interactions.
  *
@@ -2537,6 +2538,7 @@ export class Session extends EventEmitter {
 
     this._pinOmpRespawnId();
     await this.applyFullAccessDefault();
+    await this._prepareSelectedClaudeProfile();
     const options = await this._buildRespawnPaneOptionsWithResumePin();
     if (onlyIfDead && (this._closing || this._respawnBlocked)) return false;
     const newPid = await mux.respawnPane(onlyIfDead ? { ...options, onlyIfDead: true } : options);
@@ -2705,6 +2707,19 @@ export class Session extends EventEmitter {
     // envOverrides schema validates keys only, and a whitespace-only value would
     // otherwise resolve to a relative path and read "no transcript" for everything.
     return this._envOverrides?.CLAUDE_CONFIG_DIR?.trim() || undefined;
+  }
+
+  private async _prepareSelectedClaudeProfile(): Promise<void> {
+    await prepareSelectedClaudeProfile({
+      selection: this.subscriptionProfile,
+      mode: this.mode,
+      configDir: this._claudeConfigDir(),
+      workingDir: this.workingDir,
+      claudeMode: this._claudeMode,
+      remote: this._remote,
+      docker: this._docker,
+      customModel: this._customModel,
+    });
   }
 
   /**
@@ -2960,6 +2975,7 @@ export class Session extends EventEmitter {
     }
     this._ensurePaneDialogScan();
     await this.applyFullAccessDefault();
+    await this._prepareSelectedClaudeProfile();
 
     // Bounds the workspace-trust scan (see _maybeAcceptTrustDialog). Stamped here
     // rather than at PTY spawn so a slow mux attach still counts as startup.
