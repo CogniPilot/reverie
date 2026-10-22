@@ -13,8 +13,15 @@ import { findSessionOrFail, parseBody, ownerFor } from '../route-helpers.js';
 import { hireEffort } from './company-hire-routes.js';
 import { ModelIdSchema } from '../../experts.js';
 import type { SessionMode } from '../../types.js';
+import { restartEligibility } from '../../session-restart-policy.js';
+
+const Recovery = z.object({
+  forceRestart: z.boolean().optional(),
+  confirmSessionId: z.string().min(1).max(100).optional(),
+}).strict();
 
 const Input = z.object({
+  ...Recovery.shape,
   mode: z.string().min(1).max(100),
   source: z.discriminatedUnion('kind', [
     z.object({ kind: z.literal('subscription'), profileId: z.string().min(1).max(100) }).strict(),
@@ -44,7 +51,7 @@ export function registerSessionRuntimeRoutes(app: FastifyInstance, ctx: SessionP
   const authorize = (req: FastifyRequest) => req.headers['x-reverie-parent-session'] === undefined && verifiedOwner(req);
   app.post('/api/company/employees/:id/restart', async (req, reply) => {
     if (!authorize(req)) return reply.code(403).send({ success: false, error: 'Only the verified owner may restart an expert' });
-    parseBody(z.object({}).strict(), req.body ?? {});
+    const recovery = parseBody(Recovery, req.body ?? {});
     const employee = company?.view(ownerFor(req)).employees.find((e) => e.id === (req.params as { id: string }).id);
     if (!employee) return reply.code(404).send({ success: false, error: 'Unknown active company expert' });
     if (employee.onVacation) return reply.code(409).send({ success: false, error: 'Return this expert from vacation before restarting' });
@@ -56,7 +63,7 @@ export function registerSessionRuntimeRoutes(app: FastifyInstance, ctx: SessionP
     for (const name of ['cookie', 'authorization', 'origin', 'host']) {
       const value = req.headers[name]; if (typeof value === 'string') headers[name] = value;
     }
-    const response = await app.inject({ method: 'POST', url: '/api/sessions/' + encodeURIComponent(employee.sessionId) + '/runtime', headers, payload: runtime });
+    const response = await app.inject({ method: 'POST', url: '/api/sessions/' + encodeURIComponent(employee.sessionId) + '/runtime', headers, payload: { ...runtime, ...recovery } });
     if (response.statusCode >= 400) return reply.code(response.statusCode).send(response.json());
     return { success: true, data: { employee: company?.view(ownerFor(req)).employees.find((e) => e.id === employee.id), sessionId: employee.sessionId } };
   });
@@ -74,9 +81,14 @@ export function registerSessionRuntimeRoutes(app: FastifyInstance, ctx: SessionP
     const session = detached ? loadSession?.(id, req) : findSessionOrFail(ctx, id, req);
     if (!session) return reply.code(404).send({ success: false, error: 'Unknown expert runtime' });
     const fail = (status: number, error: string) => reply.code(status).send({ success: false, error });
-    if (switching.has(id) || session.isBusy()) return fail(409, 'Wait for this expert to finish before changing runtime');
-    if (session.remote || session.docker) return fail(400, 'Remote and nested-container runtimes cannot be changed here');
     const body = parseBody(Input, req.body);
+    const workBlocked = () => {
+      const state = restartEligibility(session);
+      if (body.forceRestart) return body.confirmSessionId !== id || !state.recoverable;
+      return state.blocked;
+    };
+    if (switching.has(id) || workBlocked()) return fail(409, 'Wait for current work to finish. Recovery requires a confirmed stalled session with no running tasks or recent activity.');
+    if (session.remote || session.docker) return fail(400, 'Remote and nested-container runtimes cannot be changed here');
     const entry = getCli(body.mode);
     if (!entry?.enabled || entry.kind !== 'agent') return fail(400, 'Choose an enabled agent harness');
     const effort = hireEffort(body.mode);
@@ -107,7 +119,7 @@ export function registerSessionRuntimeRoutes(app: FastifyInstance, ctx: SessionP
         custom = { ...resolved.customModel, label: host.label, envKeys: applied.envKeys, configDir, launchModel: applied.launchModel };
         model = applied.launchModel;
       }
-      if (session.isBusy() || (!detached && ctx.sessions.get(id) !== session) || (detached && loadSession && !loadSession(id, req)))
+      if (workBlocked() || (!detached && ctx.sessions.get(id) !== session) || (detached && loadSession && !loadSession(id, req)))
         return fail(409, 'This expert changed or stopped while runtime settings were being validated');
       const sourceKey = body.source.kind === 'subscription' ? 'subscription:' + body.source.profileId : 'local:' + body.source.endpointId;
       rollback = session.configureRuntime({ mode: body.mode as SessionMode, selection, env, sourceKey, model, effort: body.effort, effortField: effort.field });

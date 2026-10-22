@@ -36,9 +36,11 @@ it('uses the employee identity to restart a missing runtime and suppresses paral
   resolve({ ok: true, data: { sessionId: sid } }); await h.flush(); expect(h.document.querySelector('.ca-employee-restart')).toBeNull();
   expect(h.app.toasts.some((toast: any) => toast.text === 'Session restarted for Alex.')).toBe(true);
 });
-it('shows actionable backend refusal in the dialog and permits a deliberate retry', async () => {
-  const { h, calls, open, accept, reply } = await setup(); reply({ ok: false, error: 'Choose runtime settings first, then retry the restart.' });
-  await open(); accept(); await h.flush();
+it.each([false, true])('permits a deliberate retry after HTTP refusal (recovery=%s)', async (recovery) => {
+  const { h, calls, open, accept, reply } = await setup(); reply({ ok: false, status: 400, error: 'Choose runtime settings first, then retry the restart.' });
+  await open();
+  if (recovery) h.document.querySelector('.ca-employee-restart input[type="checkbox"]').click();
+  accept(); await h.flush();
   expect(h.document.querySelector('.ca-employee-restart [role="alert"]').textContent).toContain('Choose runtime settings first');
   expect(h.document.querySelector('.ca-employee-restart .is-primary').disabled).toBe(false);
   reply({ ok: true }); accept(); await h.flush(); expect(calls).toHaveLength(2); expect(h.document.querySelector('.ca-employee-restart')).toBeNull();
@@ -55,4 +57,40 @@ it('offers restart on Company cards and expert popovers without changing identit
   h.shell.closePage(); h.document.querySelector('.ca-member').click();
   const restart = [...h.document.querySelectorAll('.ca-profile-actions button')].find(button => button.textContent === 'Restart session')!;
   expect(restart).not.toBeUndefined(); restart.click(); await h.flush(); expect(h.document.querySelector('.ca-employee-restart')).not.toBeNull();
+});
+
+it('requires a separate owner choice before sending stalled-session recovery confirmation', async () => {
+  const { h, calls, open, accept } = await setup(); await open();
+  const recovery = h.document.querySelector('.ca-employee-restart input[type="checkbox"]');
+  expect(recovery.checked).toBe(false); recovery.click();
+  expect(h.document.querySelector('.ca-employee-restart .is-primary').textContent).toBe('Recover and restart');
+  accept(); await h.flush();
+  expect(calls).toEqual([{ path: '/api/company/employees/expert/restart', method: 'POST', body: { forceRestart: true, confirmSessionId: sid } }]);
+});
+
+it.each([['missing response', false], ['thrown transport error', false], ['missing response', true], ['thrown transport error', true]])('reports an unconfirmed restart after %s (recovery=%s) without another POST', async (failure, recovery) => {
+  const { h, open, accept } = await setup();
+  await open();
+  if (recovery) h.document.querySelector('.ca-employee-restart input[type="checkbox"]').click();
+  // Exercise the real _chatApi envelope handling instead of stubbing its Network error result.
+  delete h.app._chatApi;
+  const transport = vi.spyOn(h.app, '_api').mockImplementation(async () => {
+    if (failure === 'thrown transport error') throw new Error('Connection closed');
+    return null;
+  });
+  accept(); await h.flush();
+  const dialog = h.document.querySelector('.ca-employee-restart');
+  expect(dialog.querySelector('[role="alert"]').textContent).toBe('');
+  expect(dialog.querySelector('[role="status"]').textContent).toContain('Restart could not be confirmed');
+  expect(dialog.querySelector('[role="status"]').textContent).toContain('may already be restarting');
+  expect(dialog.querySelector('[role="status"]').textContent).toContain('Check their status before trying again');
+  expect(dialog.querySelector('.is-primary').disabled).toBe(true);
+  expect(dialog.querySelector('button').textContent).toBe('Close');
+  expect(dialog.querySelector('button').getAttribute('aria-label')).toBe('Close');
+  expect(h.app.toasts.some((toast: any) => toast.text === 'Session restarted for Alex.')).toBe(false);
+  accept(); await h.flush();
+  expect(transport).toHaveBeenCalledTimes(1);
+  expect(transport).toHaveBeenCalledWith('/api/company/employees/expert/restart', { method: 'POST', body: recovery ? { forceRestart: true, confirmSessionId: sid } : {} });
+  dialog.querySelector('button').click(); await h.flush();
+  expect(h.document.querySelector('.ca-employee-restart')).toBeNull();
 });

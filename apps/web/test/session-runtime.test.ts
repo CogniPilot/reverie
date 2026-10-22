@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import Fastify from 'fastify';
 import { Session } from '../src/session.js';
+import { selectedSubscription } from '../src/subscription-profiles.js';
+import { restartEligibility } from '../src/session-restart-policy.js';
 import { registerSessionRuntimeRoutes, runtimeView } from '../src/web/routes/session-runtime-routes.js';
 import type { SessionPort } from '../src/web/ports/session-port.js';
 
@@ -56,9 +58,70 @@ describe('owner runtime transaction', () => {
       const current = await app.inject({ url: '/api/sessions/expert-id/runtime', headers });
       expect(current.json().data.source.profileId).toBe('first');
       expect(restart).not.toHaveBeenCalled();
-      vi.spyOn(session, 'isBusy').mockReturnValue(true);
+      vi.spyOn(session, 'isWorking', 'get').mockReturnValue(true);
       expect((await app.inject({ method: 'POST', url: '/api/sessions/expert-id/runtime', headers, payload })).statusCode).toBe(409);
       expect(restart).not.toHaveBeenCalled();
+    } finally { await app.close(); }
+  });
+
+  it('restarts a stale busy label without clearing or replacing the expert identity', async () => {
+    const { app, session } = await harness();
+    try {
+      vi.spyOn(session, 'isBusy').mockReturnValue(true);
+      vi.spyOn(session, 'lastActivityAt', 'get').mockReturnValue(Date.now() - 300_000);
+      const restart = vi.spyOn(session, 'restartCli').mockResolvedValue(true);
+      const result = await app.inject({ method: 'POST', url: '/api/sessions/expert-id/runtime', headers, payload });
+      expect(result.statusCode).toBe(200);
+      expect(restart).toHaveBeenCalledOnce();
+      expect(session.id).toBe('expert-id');
+    } finally { await app.close(); }
+  });
+
+  it('requires explicit matching confirmation for stale work detection and rejects agent recovery', async () => {
+    const { app, session } = await harness();
+    try {
+      vi.spyOn(session, 'isBusy').mockReturnValue(true);
+      vi.spyOn(session, 'isWorking', 'get').mockReturnValue(true);
+      vi.spyOn(session, 'lastActivityAt', 'get').mockReturnValue(Date.now() - 300_000);
+      const restart = vi.spyOn(session, 'restartCli').mockResolvedValue(true);
+      for (const extra of [{}, { forceRestart: true }, { forceRestart: true, confirmSessionId: 'another' }]) {
+        expect((await app.inject({ method: 'POST', url: '/api/sessions/expert-id/runtime', headers, payload: { ...payload, ...extra } })).statusCode).toBe(409);
+      }
+      const force = { ...payload, forceRestart: true, confirmSessionId: session.id };
+      expect((await app.inject({ method: 'POST', url: '/api/sessions/expert-id/runtime', headers: { ...headers, 'x-reverie-parent-session': 'agent' }, payload: force })).statusCode).toBe(403);
+      expect(restart).not.toHaveBeenCalled();
+      expect((await app.inject({ method: 'POST', url: '/api/sessions/expert-id/runtime', headers, payload: force })).statusCode).toBe(200);
+    } finally { await app.close(); }
+  });
+
+  it.each(['task', 'submit', 'output', 'dialog'])('refuses owner recovery over current %s evidence', async (kind) => {
+    const { app, session } = await harness();
+    try {
+      vi.spyOn(session, 'isBusy').mockReturnValue(true);
+      vi.spyOn(session, 'lastActivityAt', 'get').mockReturnValue(kind === 'output' ? Date.now() : Date.now() - 300_000);
+      if (kind === 'dialog') vi.spyOn(session, 'paneDialog', 'get').mockReturnValue('permission');
+      if (kind === 'task') vi.spyOn(session, 'runningTaskCount', 'get').mockReturnValue(1);
+      if (kind === 'submit') vi.spyOn(session, 'lastSubmitAt', 'get').mockReturnValue(Date.now());
+      const restart = vi.spyOn(session, 'restartCli').mockResolvedValue(true);
+      for (const extra of [{}, { forceRestart: true, confirmSessionId: session.id }]) {
+        const result = await app.inject({ method: 'POST', url: '/api/sessions/expert-id/runtime', headers, payload: { ...payload, ...extra } });
+        expect(result.statusCode).toBe(409);
+      }
+      expect(restart).not.toHaveBeenCalled();
+    } finally { await app.close(); }
+  });
+
+  it('rechecks for newly submitted work after asynchronous account validation', async () => {
+    const { app, session } = await harness();
+    try {
+      const restart = vi.spyOn(session, 'restartCli').mockResolvedValue(true);
+      vi.mocked(selectedSubscription).mockImplementationOnce(async () => {
+        vi.spyOn(session, 'lastSubmitAt', 'get').mockReturnValue(Date.now());
+        return { selection: { id: 'second', label: 'second', provider: 'openai' }, env: {} };
+      });
+      expect((await app.inject({ method: 'POST', url: '/api/sessions/expert-id/runtime', headers, payload })).statusCode).toBe(409);
+      expect(restart).not.toHaveBeenCalled();
+      expect(session.mode).toBe('opencode');
     } finally { await app.close(); }
   });
 
@@ -110,6 +173,39 @@ describe('explicit company restart', () => {
       expect((await app.inject({ method: 'POST', url: '/api/company/employees/retired/restart', payload: {} })).statusCode).toBe(404);
     } finally { await app.close(); }
   });
+  it('forwards only the owner-confirmed recovery for the same employee session', async () => {
+    const app = Fastify(); const session = makeSession();
+    vi.spyOn(session, 'isBusy').mockReturnValue(true);
+    vi.spyOn(session, 'isWorking', 'get').mockReturnValue(true);
+    vi.spyOn(session, 'lastActivityAt', 'get').mockReturnValue(Date.now() - 300_000);
+    const restart = vi.spyOn(session, 'restartCli').mockResolvedValue(true);
+    const company = { view: () => ({ employees: [{ id: 'person', sessionId: session.id }] }) };
+    const ctx = { sessions: new Map([[session.id, session]]), persistSessionStateNow: vi.fn() };
+    registerSessionRuntimeRoutes(app, ctx as never, () => true, undefined, company as never);
+    try {
+      expect((await app.inject({ method: 'POST', url: '/api/company/employees/person/restart', payload: {} })).statusCode).toBe(409);
+      expect((await app.inject({ method: 'POST', url: '/api/company/employees/person/restart',
+        payload: { forceRestart: true, confirmSessionId: session.id } })).statusCode).toBe(200);
+      expect(restart).toHaveBeenCalledOnce();
+      expect(session.id).toBe('expert-id');
+    } finally { await app.close(); }
+  });
+  it('protects an open dialog on both ordinary and confirmed company restart', async () => {
+    const app = Fastify(); const session = makeSession();
+    vi.spyOn(session, 'isBusy').mockReturnValue(true);
+    vi.spyOn(session, 'lastActivityAt', 'get').mockReturnValue(Date.now() - 300_000);
+    vi.spyOn(session, 'paneDialog', 'get').mockReturnValue('permission');
+    const restart = vi.spyOn(session, 'restartCli').mockResolvedValue(true);
+    const company = { view: () => ({ employees: [{ id: 'person', sessionId: session.id }] }) };
+    const ctx = { sessions: new Map([[session.id, session]]), persistSessionStateNow: vi.fn() };
+    registerSessionRuntimeRoutes(app, ctx as never, () => true, undefined, company as never);
+    try {
+      for (const payload of [{}, { forceRestart: true, confirmSessionId: session.id }]) {
+        expect((await app.inject({ method: 'POST', url: '/api/company/employees/person/restart', payload })).statusCode).toBe(409);
+      }
+      expect(restart).not.toHaveBeenCalled();
+    } finally { await app.close(); }
+  });
   it('restarts from a persisted recipe under the same expert/session identity', async () => {
     const app = Fastify();
     const session = makeSession();
@@ -127,5 +223,20 @@ describe('explicit company restart', () => {
       expect(session.toState().openCodeConfig?.continueSession).toBe('ses_exact');
       expect(start).toHaveBeenCalledOnce();
     } finally { await app.close(); }
+  });
+});
+
+describe('restart work evidence', () => {
+  const stale = { isBusy: () => true, isWorking: false, runningTaskCount: 0,
+    lastSubmitAt: 1, lastActivityAt: 1, paneDialog: null };
+  it('ignores a stale status label, but keeps live tasks, recent activity and submissions protected', () => {
+    expect(restartEligibility(stale, 300_000)).toEqual({ blocked: false, recoverable: true });
+    for (const evidence of [{ runningTaskCount: 1 }, { lastSubmitAt: 299_999 }, { lastActivityAt: 299_999 },
+      { lastActivityAt: Number.NaN }, { lastSubmitAt: 400_000 }]) {
+      expect(restartEligibility({ ...stale, ...evidence }, 300_000)).toEqual({ blocked: true, recoverable: false });
+    }
+    expect(restartEligibility({ ...stale, isWorking: true }, 300_000)).toEqual({ blocked: true, recoverable: true });
+    expect(restartEligibility({ ...stale, paneDialog: 'permission' }, 300_000)).toEqual({ blocked: true, recoverable: false });
+    expect(restartEligibility({ ...stale, isBusy: () => false, isWorking: true }, 300_000)).toEqual({ blocked: true, recoverable: false });
   });
 });
