@@ -28,7 +28,6 @@ jobs:
     timeout-minutes: 60
     permissions:
       contents: read
-      packages: write
     env:
       IMAGE: ghcr.io/${{ github.repository_owner }}/reverie
     steps:
@@ -214,28 +213,6 @@ jobs:
           test "$(docker inspect --format '{{.RestartCount}}' boot)" = "$stopped_restarts"
           test "${ok:-}" = 1
 
-      - name: Publish the release
-        if: github.event_name == 'release' && !github.event.release.prerelease
-        env:
-          TAG: ${{ github.event.release.tag_name }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          version=${TAG#v}
-          line=${version%.*}
-          tags=$version
-          # A patch on an older line must not move that line's newest tag or latest backward.
-          newest_in_line=$(git tag --list "v$line.*" --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n 1)
-          newest=$(git tag --list 'v*' --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n 1)
-          test "$newest_in_line" = "$TAG" && tags="$tags $line"
-          test "$newest" = "$TAG" && tags="$tags latest"
-          echo "publishing: $tags"
-          printf '%s\n' "$GH_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
-          for tag in $tags; do
-            docker tag "reverie:$GITHUB_SHA" "$IMAGE:$tag"
-            docker push "$IMAGE:$tag"
-          done
-          docker logout ghcr.io
-          docker image inspect --format '{{index .RepoDigests 0}}' "$IMAGE:$version" | tee -a "$GITHUB_STEP_SUMMARY"
 
   debian-install:
     needs: image
@@ -262,6 +239,74 @@ jobs:
             --volume "$PWD/bundle:/input:ro" \
             --volume "$PWD/.github/ci:/ci:ro" \
             debian:12 bash /ci/debian-install.sh
+
+  publish-image:
+    needs: [image, debian-install]
+    if: github.event_name == 'release' && !github.event.release.prerelease
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: write
+    env:
+      IMAGE: ghcr.io/${{ github.repository_owner }}/reverie
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Free runner space for the tested image
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup
+          docker image prune --all --force
+          df -h /
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: offline-bundle
+          path: bundle
+      - name: Load the Debian-tested image without rebuilding
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          version=${TAG#v}
+          mkdir tested-image
+          tar -xzf "bundle/reverie-$version.tar.gz" -C tested-image
+          (cd tested-image && sha256sum -c SHA256SUMS)
+          test "$(sed -n 's/^Version: //p' tested-image/IMAGE-REF.txt)" = "$version"
+          test "$(sed -n 's/^Commit: //p' tested-image/IMAGE-REF.txt)" = "$GITHUB_SHA"
+          expected=$(sed -n 's/^Image-ID: //p' tested-image/IMAGE-REF.txt)
+          [[ "$expected" =~ ^sha256:[0-9a-f]{64}$ ]]
+          docker load --input tested-image/reverie-image.tar
+          actual=$(docker image inspect --format '{{.Id}}' "$IMAGE:$version")
+          test "$actual" = "$expected"
+          docker tag "$actual" "reverie:$GITHUB_SHA"
+      - name: Publish the release
+        if: github.event_name == 'release' && !github.event.release.prerelease
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          version=${TAG#v}
+          line=${version%.*}
+          tags=$version
+          # A patch on an older line must not move that line's newest tag or latest backward.
+          newest_in_line=$(git tag --list "v$line.*" --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n 1)
+          newest=$(git tag --list 'v*' --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n 1)
+          test "$newest_in_line" = "$TAG" && tags="$tags $line"
+          test "$newest" = "$TAG" && tags="$tags latest"
+          echo "publishing: $tags"
+          printf '%s\n' "$GH_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          trap 'docker logout ghcr.io >/dev/null 2>&1 || true' EXIT
+          for tag in $tags; do
+            docker tag "reverie:$GITHUB_SHA" "$IMAGE:$tag"
+            docker push "$IMAGE:$tag"
+          done
+          digest=$(docker image inspect --format '{{index .RepoDigests 0}}' "$IMAGE:$version")
+          [[ "$digest" =~ ^"$IMAGE"@sha256:[0-9a-f]{64}$ ]]
+          docker pull "$digest"
+          test "$(docker image inspect --format '{{.Id}}' "$digest")" = \
+            "$(docker image inspect --format '{{.Id}}' "reverie:$GITHUB_SHA")"
+          printf '%s\n' "$digest" | tee -a "$GITHUB_STEP_SUMMARY"
 
   release-assets:
     needs: [image, debian-install]
