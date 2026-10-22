@@ -29,3 +29,38 @@ both ghcr.io/jgoppert/reverie:latest and ghcr.io/jgoppert/reverie:X.Y.Z.
 Docker volumes reverie-data and reverie-home retain state across restarts.
 Do not remove these volumes to upgrade. Optional provider CLIs require a network
 connection and your own provider login; they are not installed by this command.
+
+## Alternative: run the image from GHCR
+
+The same image is published as ghcr.io/jgoppert/reverie:X.Y.Z (and :latest).
+Nix is not required; you need Docker (installed and the docker group set up as
+above), network access, and a GitHub account that has read access to the package.
+Create a GitHub personal access token with the read:packages scope, then log in
+once. The token is read without echoing it to the terminal or shell history:
+
+```sh
+read -rsp 'GitHub token (read:packages): ' GHCR_TOKEN; echo
+printf '%s' "$GHCR_TOKEN" | docker login ghcr.io --username YOUR_GITHUB_USER --password-stdin
+unset GHCR_TOKEN
+```
+
+Then install with setup.sh from this bundle (or from the release page), which
+pulls the image, records its digest for rollback and waits until the server answers:
+
+```sh
+./setup.sh --version X.Y.Z
+```
+
+Or run it directly with Docker, with the same port, volumes and restart policy:
+
+```sh
+docker pull ghcr.io/jgoppert/reverie:X.Y.Z
+docker run --detach --name reverie --restart unless-stopped \
+  --publish 127.0.0.1:3000:3000 \
+  --mount type=volume,src=reverie-data,dst=/instances \
+  --mount type=volume,src=reverie-home,dst=/home/agent \
+  ghcr.io/jgoppert/reverie:X.Y.Z
+```
+
+Then open http://127.0.0.1:3000 as above. To upgrade later, run
+`./setup.sh --version NEW.X.Y`; it backs up console state and keeps both volumes.
