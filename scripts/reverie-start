@@ -84,11 +84,7 @@ function main() {
     if (!lstatSync(link, { throwIfNoEntry: false })) symlinkSync('/projects/' + project.name, link);
   }
   const scratchRoot = join(root, 'scratch');
-  if (!existsSync(scratchRoot)) {
-    const target = join(homedir(), 'scratch', 'reverie');
-    mkdirSync(target, { recursive: true, mode: 0o700 });
-    symlinkSync(target, scratchRoot);
-  }
+  mkdirSync(scratchRoot, { recursive: true, mode: 0o700 });
   mkdirSync(config.scratch, { recursive: true, mode: 0o700 });
   const buildTmp = join(scratchRoot, 'build', 'tmp');
   mkdirSync(buildTmp, { recursive: true, mode: 0o700 });
@@ -103,7 +99,7 @@ function main() {
   const image = run('nix', ['build', 'path:' + repo + '#dockerImage', '--no-link', '--print-out-paths']).stdout.trim().split('\n').at(-1);
   if (!isAbsolute(image)) fail('Nix did not return an image archive path.');
   run('docker', ['load', '--input', image]);
-  const command = ['run', '--detach', '--name', config.containerName, '--restart', 'unless-stopped',
+  const command = ['run', '--detach', '--init', '--name', config.containerName, '--restart', 'unless-stopped',
     '--workdir', '/reverie_workspace',
     '--user', uid + ':' + gid, '--memory', config.memoryMiB + 'm', '--memory-swap', config.memoryMiB + 'm',
     '--pids-limit', String(config.pidsLimit), '--publish', '127.0.0.1:' + config.port + ':3000',

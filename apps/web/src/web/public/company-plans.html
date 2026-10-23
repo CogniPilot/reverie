@@ -39,6 +39,43 @@ const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp
 let B = null, TZ = 'America/New_York';
 let planAllocations = null, planMembersBusy = false, planMembersError = false;
 let pendingPlanRequests = [];
+let localPlans = [], localGpu = null, localSessions = [], localEmployees = [];
+async function refreshLocalPlans() {
+  if (!B?.planBurn) return;
+  const controller = new AbortController(), timer = setTimeout(() => controller.abort(), 8000);
+  const read = async path => {
+    const response = await fetch(path, {credentials: 'same-origin', cache: 'no-store', signal: controller.signal});
+    if (!response.ok) throw new Error('HTTP ' + response.status);
+    const body = await response.json();
+    if (body?.success === false) throw new Error(body.error || 'Refused');
+    return body?.data ?? body;
+  };
+  try {
+    const results = await Promise.allSettled(['/api/model-endpoints', '/api/system/gpu', '/api/sessions', '/api/company'].map(read));
+    if (results[0].status === 'fulfilled') localPlans = Array.isArray(results[0].value) ? results[0].value : [];
+    localGpu = results[1].status === 'fulfilled' ? results[1].value : null;
+    if (results[2].status === 'fulfilled') localSessions = Array.isArray(results[2].value) ? results[2].value : [];
+    if (results[3].status === 'fulfilled') localEmployees = results[3].value.employees || [];
+  } finally { clearTimeout(timer); }
+}
+
+function localPlanCards() {
+  return localPlans.map(plan => {
+    const ids = new Set(localSessions.filter(session => session.customModel?.endpointId === plan.id).map(session => session.id));
+    const people = localEmployees.filter(person => ids.has(person.sessionId));
+    const local = /^https?:\/\/(?:127\.0\.0\.1|localhost|\[::1\])(?::|\/|$)/i.test(plan.baseUrl || '');
+    const gpu = local && localGpu?.available ? localGpu : null;
+    const number = value => Number.isFinite(value) ? value : null;
+    const utilization = number(gpu?.utilization);
+    const used = number(gpu?.memoryUsedMb), total = number(gpu?.memoryTotalMb);
+    return `<div class="plan plan-local" data-local-plan="${esc(plan.id)}"><h3>${esc(plan.label)}<span class="badge mute">${local ? 'Local model' : 'Model endpoint'}</span></h3>
+      <div class="who">${esc(plan.defaultModelId || plan.models?.[0] || 'No model selected')}</div>
+      <div class="plan-members" aria-label="${esc('People allocated to ' + plan.label)}">${people.length ? people.map(person => `<span class="plan-member" title="${esc(person.name)}" aria-label="${esc(person.name)}"><span class="plan-member-face">${esc(person.icon || Array.from(person.name || '?')[0])}</span></span>`).join('') : '<span class="plan-member-state">No employees allocated</span>'}</div>
+      <div class="stats"><div><b>${utilization == null ? '–' : Math.round(utilization) + '%'}</b>GPU utilization</div><div><b>${used == null || total == null ? '–' : (used / 1024).toFixed(1) + ' / ' + (total / 1024).toFixed(1) + ' GiB'}</b>shared GPU memory</div></div>
+      <p class="hint">${local ? 'Runs on your hardware. No subscription quota or weekly reset. GPU capacity is shared.' : 'Uses your configured model endpoint.'}</p>
+      <p class="hint">Choose this plan in an expert’s Runtime settings.</p></div>`;
+  }).join('');
+}
 
 /* ---------- time in the company zone ---------- */
 const fmt = (t, o) => new Intl.DateTimeFormat('en-US', Object.assign({timeZone: TZ}, o)).format(new Date(t));
@@ -82,6 +119,7 @@ async function load() {
     const next = j && j.data ? j.data : j;
     if (!next || !Array.isArray(next.issues)) throw new Error('unexpected reply');
     B = next; TZ = B.timeZone || TZ; failures = 0; banner.hidden = true;
+    await refreshLocalPlans();
     renderPlansPage();
     void refreshPlanMembers();
   } catch (e) {
@@ -132,7 +170,7 @@ function plans() {
   document.getElementById('addAcct').hidden = !B.planBurn;
   document.getElementById('planMoveHistory').hidden = !B.planBurn;
   if (!B.planBurn) { el.innerHTML = '<div class="empty">Plan burn is shown to the console owner only.</div>'; return; }
-  if (!B.planBurn.length) { el.innerHTML = '<div class="empty">No accounts yet. Add an account to choose a provider and sign in.</div>'; return; }
+  if (!B.planBurn.length && !localPlans.length) { el.innerHTML = '<div class="empty">No accounts yet. Add an account to choose a provider and sign in.</div>'; return; }
   // Leave an open rename alone on the minute refresh, so a half-typed name survives.
   if (planEdit && el.querySelector('[data-rename-form]') && B.planBurn.some(p => p.profileId === planEdit)) return;
   if (planEdit && !B.planBurn.some(p => p.profileId === planEdit)) planEdit = null;
@@ -152,7 +190,7 @@ function plans() {
       <div class="stats"><div class="plan-projection"><b style="color:${css('--' + risk)}">${p.proj == null ? '–' : Math.round(p.proj) + '%'}</b>at reset</div><div class="plan-runout"><b>${p.runsOut ? esc(hm(p.runsOut)) : '–'}</b>${p.runsOut ? 'runs out ' + esc(dayLbl(p.runsOut)) + ' ' + esc(zoneShort()) : 'no run-out projected'}</div><div class="plan-landing" title="${esc(landing.multipleTooltip)}"><b style="color:${css('--' + landing.tone)}">${esc(landing.multipleLabel)}</b>landing pace</div><div class="plan-rate" title="${esc(landing.rateTooltip)}"><b>${esc(landing.rateLabel)}</b>burn now</div><div><b>${esc(num(p.used))}${p.used == null ? '' : '%'}</b>used</div>${bankedStat(p)}</div>
       ${p.weekStart && p.reset ? `<svg id="burn${i}" role="img" viewBox="0 0 320 120"></svg>` : ''}
       ${planActions(p)}</div>`;
-  }).join('');
+  }).join('') + localPlanCards();
   B.planBurn.forEach((p, i) => { const svg = document.getElementById('burn' + i); if (svg) burnChart(svg, p); });
   wirePlanActions(el);
   renderPlanMembers();

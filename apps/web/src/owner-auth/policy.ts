@@ -49,6 +49,7 @@ export interface Caller {
 }
 
 const AGENT_ROUTES = new Set([
+  'POST /api/system/restart-website', // the host broker checks the explicit maintenance session grant
   'GET /api/sessions',
   'GET /api/sessions/:id',
   'DELETE /api/sessions/:id',

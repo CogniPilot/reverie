@@ -2340,7 +2340,7 @@ class ReverieChatApp {
         if (employee.avatar) this.fillAvatar(avatar, employee.avatar);
         title.append(avatar, this.literalText('strong', '', employee.name));
         const parent = employee.reportsTo && employee.reportsTo !== 'owner' ? employees.find(e => e.id === employee.reportsTo)?.name : data.settings?.ownerName || 'Owner';
-        card.append(title, this.literalText('span', 'ca-company-role', employee.position || ''), parent ? this.literalText('span', 'ca-company-parent', parent) : this.el('span', 'ca-company-parent', 'Unassigned'), this.el('span', `ca-company-state${employee.available && !employee.onVacation ? ' is-connected' : ''}`, employee.onVacation ? 'On vacation' : employee.available ? 'Connected' : 'Disconnected'));
+        card.append(title, this.literalText('span', 'ca-company-role', employee.position || ''), parent ? this.literalText('span', 'ca-company-parent', parent) : this.el('span', 'ca-company-parent', 'Unassigned'), this.el('span', `ca-company-state${employee.available && !employee.onVacation ? ' is-connected' : ''}`, employee.onVacation ? 'Out of office' : employee.available ? 'Connected' : 'Disconnected'));
         if (manage) {
           const label = this.el('label', 'ca-hint', ' May recover disconnected employee sessions');
           const recovery = this.el('input', '');
@@ -2359,6 +2359,30 @@ class ReverieChatApp {
             wrap.prepend(input); planPermissions[key] = input; planLabels.push(wrap);
           }
           const rest = this.expertRestFields(card, employee);
+          const restStatus = this.el('p', 'ca-hint');
+          restStatus.setAttribute('role', 'status');
+          card.append(restStatus);
+          const saveRest = async () => {
+            rest.sleep.disabled = rest.dream.disabled = true;
+            restStatus.textContent = 'Saving Sleep/Dream…';
+            try {
+              const result = await this.app._chatApi(`/api/company/employees/${encodeURIComponent(employee.id)}`, {
+                method: 'PUT', body: { sleepEnabled: rest.sleep.checked, dreamEnabled: rest.dream.checked },
+              });
+              if (!result.ok) throw new Error(result.error || 'Request failed');
+              employee.sleepEnabled = rest.sleep.checked;
+              employee.dreamEnabled = rest.dream.checked;
+              restStatus.textContent = 'Sleep/Dream saved.';
+            } catch (error) {
+              rest.sleep.checked = employee.sleepEnabled === true;
+              rest.dream.checked = employee.dreamEnabled === true;
+              restStatus.textContent = `Could not save Sleep/Dream: ${error.message}`;
+            } finally {
+              rest.sleep.disabled = rest.dream.disabled = false;
+            }
+          };
+          rest.sleep.addEventListener('change', saveRest);
+          rest.dream.addEventListener('change', saveRest);
           const save = this.button('ca-btn', 'Save preferences', async () => {
             const result = await this.app._chatApi(`/api/company/employees/${encodeURIComponent(employee.id)}`, {
               method: 'PUT', body: { sleepEnabled: rest.sleep.checked, dreamEnabled: rest.dream.checked, ...(!employee.onVacation ? { permissions: { ...employee.permissions, recoverEmployees: recovery.checked, moveOwnPlan: planPermissions.moveOwnPlan.checked, managePlans: planPermissions.managePlans.checked } } : {}) },
@@ -2371,7 +2395,7 @@ class ReverieChatApp {
           controls.append(label, ...planLabels, save, this.button('ca-btn', `Edit profile for ${employee.name}`, () => this.openEmployeeProfile(employee, paint), { text: 'Edit profile' }));
           const restart = this.button('ca-btn', `Restart session for ${employee.name}`, () => this.openEmployeeRestart(employee, paint), { text: 'Restart session' });
           restart.disabled = employee.onVacation === true;
-          if (restart.disabled) restart.title = 'Return this expert from vacation before restarting.';
+          if (restart.disabled) restart.title = 'Bring this expert into the office before restarting.';
           controls.append(restart);
           card.append(controls);
           const lifecycle = this.el('div', 'ca-company-actions');
@@ -2381,17 +2405,17 @@ class ReverieChatApp {
           const changeLifecycle = async (action) => {
             if (changingLifecycle) return;
             changingLifecycle = true;
-            for (const button of lifecycle.querySelectorAll('button')) button.disabled = true;
+            for (const control of lifecycle.querySelectorAll('button, input')) control.disabled = true;
             const returning = employee.onVacation === true;
-            const confirmLabel = action === 'retire' ? 'Retire' : returning ? 'Return from vacation' : 'Send on vacation';
+            const confirmLabel = action === 'retire' ? 'Retire' : returning ? 'Enter office' : 'Leave office';
             const question = action === 'retire'
               ? `Retire ${employee.name}? This removes this expert from the company and its rooms, while keeping their identity in chat history.`
               : returning
-                ? `Return ${employee.name} from vacation? This restores active status and makes this expert eligible for recovery again.`
-                : `Send ${employee.name} on vacation? This pauses their session and excludes this expert from automatic recovery until you return them.`;
+                ? `Bring ${employee.name} into the office? This restores active status and makes this expert eligible for recovery again.`
+                : `Have ${employee.name} leave the office? This stops their session and keeps this expert off until you switch them back on. Their identity, memory and room membership are kept.`;
             lifecycleError.textContent = '';
             let applied = false;
-            const success = action === 'retire' ? `Retired ${employee.name}.` : returning ? `${employee.name} returned from vacation.` : `${employee.name} is on vacation.`;
+            const success = action === 'retire' ? `Retired ${employee.name}.` : returning ? `${employee.name} is in the office.` : `${employee.name} is out of office.`;
             try {
               if (!await this.confirmCompanyAction(employee.name, question, confirmLabel) || this.companyPage !== dlg || !card.isConnected) return;
               const result = await this.app._chatApi(`/api/company/employees/${encodeURIComponent(employee.id)}/${action}`, {
@@ -2408,14 +2432,23 @@ class ReverieChatApp {
             } finally {
               if (!applied) {
                 changingLifecycle = false;
-                for (const button of lifecycle.querySelectorAll('button')) button.disabled = false;
+                for (const control of lifecycle.querySelectorAll('button, input')) control.disabled = false;
+                officeToggle.checked = !employee.onVacation;
               }
             }
           };
-          lifecycle.append(
-            this.button('ca-btn', `${employee.onVacation ? 'Return from vacation' : 'Send on vacation'}: ${employee.name}`, () => changeLifecycle('vacation'), { text: employee.onVacation ? 'Return from vacation' : 'Send on vacation' }),
-            this.button('ca-btn', `Retire ${employee.name}`, () => changeLifecycle('retire'), { text: 'Retire' })
-          );
+          const officeLabel = this.el('label', 'ca-hint', ' In office');
+          const officeToggle = this.el('input');
+          officeToggle.type = 'checkbox';
+          officeToggle.setAttribute('role', 'switch');
+          officeToggle.checked = !employee.onVacation;
+          officeToggle.setAttribute('aria-label', `${employee.onVacation ? 'Enter office' : 'Leave office'}: ${employee.name}`);
+          officeToggle.addEventListener('click', () => { void changeLifecycle('vacation'); });
+          officeLabel.prepend(officeToggle);
+          const retirement = this.el('details', 'ca-company-retirement');
+          retirement.append(this.el('summary', 'ca-hint', 'Remove from company'),
+            this.button('ca-btn', `Retire ${employee.name}`, () => changeLifecycle('retire'), { text: 'Retire' }));
+          lifecycle.append(officeLabel, this.el('span', 'ca-hint', 'Off stays off until you switch it on.'), retirement);
           card.append(lifecycle, lifecycleError);
         }
         const work = this.el('div', 'ca-company-work');
@@ -5192,7 +5225,7 @@ class ReverieChatApp {
     }
     const employee = this.company?.employees?.find(entry => entry.sessionId === m.sessionId);
     if (!this.app._chatSelf && employee && this.company?.canManage === true && this.phoneStatus?.self === 'owner' && this.phoneStatus?.canSetOwn === true) {
-      entries.push({ label: 'Restart session', disabled: employee.onVacation === true, reason: employee.onVacation ? 'Return this expert from vacation before restarting' : '', run: () => this.openEmployeeRestart(employee) });
+      entries.push({ label: 'Restart session', disabled: employee.onVacation === true, reason: employee.onVacation ? 'Bring this expert into the office before restarting' : '', run: () => this.openEmployeeRestart(employee) });
     }
     if (!caIsDm(this.room)) {
       entries.push(
@@ -5449,7 +5482,7 @@ class ReverieChatApp {
         this._profilesAt = 0;
         this.refreshProfiles();
       }), false, 'Edit this expert’s picture and optional profile details');
-      act('Restart session', () => this.openEmployeeRestart(employee), false, 'Restart this expert’s session while keeping their identity and channels', employee.onVacation ? 'Return this expert from vacation before restarting' : '');
+      act('Restart session', () => this.openEmployeeRestart(employee), false, 'Restart this expert’s session while keeping their identity and channels', employee.onVacation ? 'Bring this expert into the office before restarting' : '');
     }
     const secondary = this.el('div', 'ca-profile-secondary'); actions.append(secondary); actionHost = secondary;
     if (this.app.sessions?.has?.(m.sessionId)) act('Debug terminal', () => this.showDebug(m.sessionId), false, "Open this agent's live terminal");
@@ -5865,7 +5898,7 @@ class ReverieChatApp {
       if (!dialog.isConnected) return;
       status.textContent = '';
       if (this.app._chatSelf || this.company?.canManage !== true || !auth.ok || auth.data?.self !== 'owner' || auth.data?.canSetOwn !== true) error.textContent = 'Sign in as the owner to restart this session.';
-      else if (employee.onVacation) error.textContent = 'Return this expert from vacation before restarting.';
+      else if (employee.onVacation) error.textContent = 'Bring this expert into the office before restarting.';
       else { restart.disabled = false; recover.disabled = false; }
     } catch { if (dialog.isConnected) { status.textContent = ''; error.textContent = 'Owner access could not be checked. Close this dialog and try again.'; } }
   }

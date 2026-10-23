@@ -113,7 +113,6 @@ const prepareOpenCode = () => {
   symlinkSync('.reverie-opencode.mjs', link);
   return true;
 };
-patchOwnedElfs();
 const runnable = provider => {
   const binary = join(prefix, 'bin', provider.id);
   try { accessSync(binary, constants.X_OK); } catch { return false; }
@@ -132,7 +131,13 @@ for (const provider of providers.filter(provider => requested.includes(provider.
   try { installed = JSON.parse(readFileSync(join(prefix, 'lib/node_modules', provider.package, 'package.json'), 'utf8')).version; } catch {}
   if (provider.id === 'claude' && installed === provider.version) prepareClaude();
   if (provider.id === 'opencode' && installed === provider.version) prepareOpenCode();
-  if (installed === provider.version && runnable(provider)) {
+  let installedReady = installed === provider.version && runnable(provider);
+  // Healthy tools never need a scan of the shared npm tree on every invocation.
+  if (installed === provider.version && !installedReady) {
+    patchOwnedElfs();
+    installedReady = runnable(provider);
+  }
+  if (installedReady) {
     status(provider, 'ready');
     console.log(`reverie-install-clis: ${provider.id} ${provider.version} ready.`);
     continue;

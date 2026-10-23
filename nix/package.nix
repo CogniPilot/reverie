@@ -54,7 +54,7 @@ let
         test/company-settings-ui.test.ts test/chat-app-dom.test.ts test/profile-avatar-preview.test.ts test/cli-config-content.test.ts \
         test/session-runtime.test.ts test/company-runtime-ui.test.ts test/opencode-subscription-auth.test.ts \
         test/selected-claude-profile.test.ts \
-        test/managed-codex-trust.test.ts test/full-access-default.test.ts \
+        test/managed-codex-trust.test.ts test/full-access-default.test.ts test/worker-execution.test.ts test/laptop-power.test.ts \
         test/expert-runtime-recipe.test.ts test/company-employee-restart.test.ts test/company-restart-ui.test.ts test/routes/session-mode-switch.test.ts \
         test/claude-plan-usage.test.ts test/claude-usage-display.test.ts test/subscription-usage.test.ts test/plan-usage-compliance.test.ts test/plan-pace.test.ts \
         test/member-menu.test.ts test/render-index-html.test.ts test/asset-content-version.test.ts \
@@ -90,18 +90,42 @@ let
     postPatch = "patchShebangs ../scripts ../docker ../.github/ci";
     checkPhase = ''
       (cd ..; PYTHONPATH="$PWD/python" PYTHONWARNINGS=ignore::ResourceWarning python -m unittest discover -s tests -t .)
-      (cd ..; node --test tests/test_cli_installer.mjs tests/test_reverie_start.mjs tests/test_recovery_scripts.mjs tests/test_opencode_plugin.mjs)
+      (cd ..; node --test tests/test_cli_installer.mjs tests/test_reverie_start.mjs tests/test_recovery_scripts.mjs tests/test_opencode_plugin.mjs tests/test_model_relay.mjs)
     '';
   };
   memory = pkgs.python3.withPackages (ps: [ memoryPackage ps.pillow ]);
   kokoro = import ./kokoro.nix { inherit pkgs memoryPackage; };
+  hands = pkgs.writeShellApplication {
+    name = "reverie-hands";
+    runtimeInputs = [ memory ];
+    text = ''exec python3 -I -B ${memoryPackage}/${pkgs.python3.sitePackages}/reverie/hands/launcher.py "$@"'';
+  };
+  modelRelaySource = pkgs.writeText "reverie-model-relay.mjs" (builtins.readFile (src + "/apps/host/model-relay.mjs"));
+  modelRelay = pkgs.writeShellApplication {
+    name = "reverie-model-relay";
+    runtimeInputs = [ pkgs.nodejs_22 ];
+    text = ''exec node ${modelRelaySource} "$@"'';
+  };
+  officeRelay = pkgs.writeShellApplication {
+    name = "reverie-office-relay";
+    runtimeInputs = [ pkgs.nodejs_22 ];
+    text = ''
+      exec node --input-type=module -e 'import {modelRelay} from "${modelRelaySource}"; const server=modelRelay("/run/reverie-office/office.sock",8093,"Reverie office connection is unavailable."); server.on("error",()=>process.exit(1));'
+    '';
+  };
   lockTools = pkgs.runCommand "reverie-lock-tools" { } ''
     mkdir -p "$out/bin"
     ln -s ${lib.getBin pkgs.util-linux}/bin/flock "$out/bin/flock"
   '';
+  workerExec = pkgs.writeShellScriptBin "reverie-worker-exec" ''
+    exec ${memory}/bin/python3 -m reverie.worker client "$@"
+  '';
+  workerChild = pkgs.writeShellScriptBin "reverie-worker-child" ''
+    exec ${memory}/bin/python3 -m reverie.worker child "$@"
+  '';
   runtime = pkgs.buildEnv {
     name = "reverie-runtime";
-    paths = [ console memory kokoro pkgs.nodejs_22 pkgs.tmux pkgs.git pkgs.ripgrep
+    paths = [ console memory kokoro modelRelay officeRelay hands workerExec workerChild pkgs.nodejs_22 pkgs.tmux pkgs.git pkgs.ripgrep
       pkgs.curl pkgs.coreutils pkgs.bashInteractive pkgs.gnugrep pkgs.gnused
       pkgs.gawk pkgs.findutils pkgs.gnutar pkgs.gzip pkgs.procps pkgs.which pkgs.gnumake pkgs.gcc
       pkgs.cacert lockTools ] ++ providerLaunchers;
@@ -167,6 +191,7 @@ let
     ln -s ${requestUpdate}/bin/reverie-request-update "$out/bin/reverie-request-update"
     ln -s ${installClis}/bin/reverie-install-clis "$out/bin/reverie-install-clis"
     ln -s ${kokoro}/bin/reverie-kokoro "$out/bin/reverie-kokoro"
+    ln -s ${hands}/bin/reverie-hands "$out/bin/reverie-hands"
     for command in ${memory}/bin/reverie-*; do
       makeWrapper "$command" "$out/bin/$(basename "$command")" \
         --prefix PATH : ${runtime}/bin \

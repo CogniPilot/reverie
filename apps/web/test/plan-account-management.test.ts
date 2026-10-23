@@ -12,7 +12,7 @@ describe('plan account management', () => {
   it('retains Add account when the account list is empty', () => {
     const source = html.slice(html.indexOf('function plans()'), html.indexOf('function planMemberHtml('));
     const target = { innerHTML: '' }, add = { hidden: true };
-    vm.runInNewContext(`${source}; plans()`, { B: { planBurn: [] }, document: { getElementById: (id: string) => id === 'plans' ? target : id === 'addAcct' ? add : {} } });
+    vm.runInNewContext(`${source}; plans()`, { B: { planBurn: [] }, localPlans: [], document: { getElementById: (id: string) => id === 'plans' ? target : id === 'addAcct' ? add : {} } });
     expect(add.hidden).toBe(false);
     expect(target.innerHTML).toContain('Add an account');
   });

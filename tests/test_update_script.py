@@ -85,6 +85,7 @@ class UpdateScriptTests(unittest.TestCase):
         result = self.run_update()
         self.assertEqual(result.returncode, 0, result.stderr)
         run = next(call for call in self.calls() if call[:2] == ['docker', 'run'])
+        self.assertIn('--init', run)
         self.assertIn('type=volume,src=instance-data,dst=/instances', run)
         self.assertIn('type=volume,src=private-home,dst=/home/agent', run)
         self.assertIn(f'type=bind,src={self.root}/second disk,dst=/scratch2', run)

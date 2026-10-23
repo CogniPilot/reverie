@@ -1,7 +1,8 @@
 {
   description = "Reverie: persistent agents, console and reproducible runtime image";
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-26.05";
-  outputs = { self, nixpkgs }:
+  inputs.llama-nixpkgs.url = "github:NixOS/nixpkgs/02f5696b0e6097e589076d886b317b83ff0437d7";
+  outputs = { self, nixpkgs, llama-nixpkgs }:
     let
       systems = [ "x86_64-linux" "aarch64-linux" ];
       forAllSystems = nixpkgs.lib.genAttrs systems;
@@ -35,16 +36,76 @@
             runtimeInputs = [ pkgs.nodejs_22 ];
             text = ''exec node --experimental-strip-types ${self}/apps/host/gpu-publisher.ts "$@"'';
           };
+          localModel = pkgs.writeShellApplication {
+            name = "reverie-local-model";
+            runtimeInputs = [ pkgs.python3 pkgs.nix pkgs.coreutils pkgs.docker-client pkgs.systemd ];
+            text = ''
+              export REVERIE_MODEL_NIXPKGS=${llama-nixpkgs}
+              export REVERIE_MODEL_BUILD_EXPR=${self}/nix/local-model-runtime.nix
+              export REVERIE_MODEL_SYSTEM=${system}
+              REVERIE_MODEL_LAUNCHER="$(readlink -f "$0")"
+              export REVERIE_MODEL_LAUNCHER
+              exec python3 ${self}/apps/host/local-model.py "$@"
+            '';
+          };
         in packages // {
           default = packages.reverie;
-          inherit container-memory start update gpuPublisher;
+          inherit container-memory start update gpuPublisher localModel;
           dockerImage = import ./nix/image.nix {
             inherit pkgs;
             src = self;
             inherit (packages) reverie console memory runtime;
           };
+          workerImage = import ./nix/image.nix {
+            inherit pkgs;
+            src = self;
+            inherit (packages) reverie console memory runtime;
+            worker = true;
+          };
+          browserRuntime = import ./nix/browser-runtime.nix { inherit pkgs; src = self; };
+          workerBrowserImage = import ./nix/image.nix {
+            inherit pkgs;
+            src = self;
+            inherit (packages) reverie console memory runtime;
+            worker = true;
+            browserRuntime = self.packages.${system}.browserRuntime;
+          };
+          workerBroker = pkgs.writeShellApplication {
+            name = "reverie-worker-broker";
+            runtimeInputs = [ pkgs.python3 pkgs.docker-client ];
+            text = ''exec python3 ${self}/python/reverie/worker.py broker "$@"'';
+          };
+          workerService = pkgs.writeTextDir "share/systemd/user/reverie-worker-broker.service" ''
+            [Unit]
+            Description=Reverie laptop broker and office watchdog
+            [Service]
+            EnvironmentFile=%h/.config/reverie/worker-broker.env
+            ExecStart=${self.packages.${system}.workerBroker}/bin/reverie-worker-broker --config ''${REVERIE_WORKER_CONFIG}
+            Restart=on-failure
+            RestartSec=3
+            TimeoutStopSec=35
+            KillMode=mixed
+            UMask=0077
+            NoNewPrivileges=true
+            MemoryMax=512M
+            TasksMax=256
+            [Install]
+            WantedBy=default.target
+          '';
+          isolate = pkgs.writeShellApplication {
+            name = "reverie-isolate";
+            runtimeInputs = [ pkgs.python3 pkgs.nix pkgs.docker-client pkgs.systemd pkgs.gnutar ];
+            text = ''
+              export REVERIE_REPO="''${REVERIE_REPO:-${self}}"
+              exec python3 ${self}/apps/host/isolate.py "$@"
+            '';
+          };
         };
     in {
+      nixosModules.workerIsolation = { config, lib, pkgs, ... }: import ./nix/worker-isolation.nix {
+        inherit config lib pkgs;
+        brokerPackage = self.packages.${pkgs.stdenv.hostPlatform.system}.workerBroker;
+      };
       packages = forAllSystems packagesFor;
       apps = forAllSystems (system: {
         default = { type = "app"; program = "${self.packages.${system}.reverie}/bin/reverie"; meta.description = "Reverie agent console"; };
@@ -52,6 +113,8 @@
         start = { type = "app"; program = "${self.packages.${system}.start}/bin/reverie-start"; meta.description = "Start the Nix-built Docker image with a contained first-run layout"; };
         update = { type = "app"; program = "${self.packages.${system}.update}/bin/reverie-update"; meta.description = "Rebuild and replace an existing Docker deployment"; };
         kokoro = { type = "app"; program = "${self.packages.${system}.kokoro}/bin/reverie-kokoro"; meta.description = "Local Kokoro speech service with persistent models"; };
+        local-model = { type = "app"; program = "${self.packages.${system}.localModel}/bin/reverie-local-model"; meta.description = "Run GGUF models on a host NVIDIA GPU or CPU"; };
+        isolate = { type = "app"; program = "${self.packages.${system}.isolate}/bin/reverie-isolate"; meta.description = "Prepare and activate host-managed agent containers"; };
       });
       checks = forAllSystems (system:
         let

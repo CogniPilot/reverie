@@ -1,12 +1,12 @@
-{ pkgs, src, reverie, console, memory, runtime }:
+{ pkgs, src, reverie, console, memory, runtime, worker ? false, browserRuntime ? null }:
 let
   entrypoint = pkgs.writeShellScript "reverie-start" (builtins.readFile (src + "/docker/entrypoint.sh"));
 in pkgs.dockerTools.buildLayeredImage {
-  name = "reverie";
+  name = if browserRuntime != null then "reverie-worker-browser" else if worker then "reverie-worker" else "reverie";
   tag = "latest";
   created = "1970-01-01T00:00:01Z";
   contents = [ runtime pkgs.dockerTools.binSh pkgs.dockerTools.usrBinEnv
-    pkgs.dockerTools.caCertificates pkgs.sudo ];
+    pkgs.dockerTools.caCertificates pkgs.sudo pkgs.tini ] ++ pkgs.lib.optional (browserRuntime != null) browserRuntime;
   extraCommands = ''
     mkdir -p etc bin usr/local/bin opt/reverie home/agent workspace reverie_workspace scratch/tmp instances tmp
     unlink bin/reverie
@@ -44,8 +44,8 @@ in pkgs.dockerTools.buildLayeredImage {
   config = {
     User = "2000:2000";
     WorkingDir = "/reverie_workspace";
-    Entrypoint = [ "/usr/local/bin/reverie-start" ];
-    Cmd = [ "reverie" "web" "--host" "0.0.0.0" "--port" "3000" ];
+    Entrypoint = if worker then [ "/bin/sleep" ] else [ "/bin/tini" "-g" "-s" "--" "/usr/local/bin/reverie-start" ];
+    Cmd = if worker then [ "infinity" ] else [ "reverie" "web" "--host" "0.0.0.0" "--port" "3000" ];
     Env = [ "PATH=/bin" "HOME=/home/agent" "REVERIE_CONTAINER=1" "REVERIE_MANAGED_INSTALL=nix"
       "REVERIE_VERSION=${console.version}" "REVERIE_CASES_PATH=/scratch/cases"
       "REVERIE_RESEARCH_ROOT=/scratch/research" "TMPDIR=/scratch/tmp"

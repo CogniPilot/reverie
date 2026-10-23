@@ -21,6 +21,10 @@ rm -f -- "$control/update.request"
 # Extract argv with NUL delimiters; no request or container text is evaluated as shell.
 # Reuse existing named volumes and bind mounts, including all owner-selected scratch disks.
 metadata=$(docker inspect "$name")
+if printf '%s' "$metadata" | jq -e '.[0].Config.Env | any(startswith("REVERIE_WORKER_SOCKET="))' >/dev/null; then
+  echo 'This deployment uses isolated workers. Use reverie-isolate prepare and activate to keep the server and worker images paired.' >&2
+  exit 1
+fi
 image_id=$(printf '%s' "$metadata" | jq -r '.[0].Image')
 image_env=$(docker image inspect --format '{{json .Config.Env}}' "$image_id")
 user=$(printf '%s' "$metadata" | jq -er '.[0].Config.User | select(type == "string" and length > 0)')
@@ -115,7 +119,7 @@ docker stop --time 30 "$name" >/dev/null
 stopped=1
 docker rename "$name" "$backup"
 renamed=1
-docker run --detach --name "$name" --restart unless-stopped \
+docker run --detach --init --name "$name" --restart unless-stopped \
   --publish "127.0.0.1:$port:3000" "${process_args[@]}" "${mounts[@]}" "${environment[@]}" "$candidate" >/dev/null
 ready=0
 for _ in $(seq 1 60); do

@@ -1,0 +1,181 @@
+{
+ "args_cap": 24000,
+ "result_cap": 24000,
+ "tools": [
+  {
+   "function": {
+    "description": "Read a text file in the workspace as numbered lines (at most 2000 lines).",
+    "name": "read_file",
+    "parameters": {
+     "additionalProperties": false,
+     "properties": {
+      "limit": {
+       "type": "integer"
+      },
+      "offset": {
+       "description": "first line, from 1",
+       "type": "integer"
+      },
+      "path": {
+       "type": "string"
+      }
+     },
+     "required": [
+      "path"
+     ],
+     "type": "object"
+    }
+   },
+   "type": "function"
+  },
+  {
+   "function": {
+    "description": "List files under a workspace directory (depth 1 to 3, default 2).",
+    "name": "list_files",
+    "parameters": {
+     "additionalProperties": false,
+     "properties": {
+      "depth": {
+       "type": "integer"
+      },
+      "path": {
+       "type": "string"
+      }
+     },
+     "required": [],
+     "type": "object"
+    }
+   },
+   "type": "function"
+  },
+  {
+   "function": {
+    "description": "Search text files for a regular expression (fixed=true for a literal string); results are path:line:text.",
+    "name": "search_files",
+    "parameters": {
+     "additionalProperties": false,
+     "properties": {
+      "fixed": {
+       "type": "boolean"
+      },
+      "glob": {
+       "description": "e.g. *.py",
+       "type": "string"
+      },
+      "path": {
+       "type": "string"
+      },
+      "pattern": {
+       "type": "string"
+      }
+     },
+     "required": [
+      "pattern"
+     ],
+     "type": "object"
+    }
+   },
+   "type": "function"
+  },
+  {
+   "function": {
+    "description": "Replace exact text in a file. old must occur exactly count times (default 1).",
+    "name": "edit_file",
+    "parameters": {
+     "additionalProperties": false,
+     "properties": {
+      "count": {
+       "type": "integer"
+      },
+      "new": {
+       "type": "string"
+      },
+      "old": {
+       "type": "string"
+      },
+      "path": {
+       "type": "string"
+      }
+     },
+     "required": [
+      "path",
+      "old",
+      "new"
+     ],
+     "type": "object"
+    }
+   },
+   "type": "function"
+  },
+  {
+   "function": {
+    "description": "Create or replace a file with content (at most 20000 chars).",
+    "name": "write_file",
+    "parameters": {
+     "additionalProperties": false,
+     "properties": {
+      "content": {
+       "type": "string"
+      },
+      "path": {
+       "type": "string"
+      }
+     },
+     "required": [
+      "path",
+      "content"
+     ],
+     "type": "object"
+    }
+   },
+   "type": "function"
+  },
+  {
+   "function": {
+    "description": "Run a command in the workspace without a shell; argv is the program and its arguments. No network.",
+    "name": "run_command",
+    "parameters": {
+     "additionalProperties": false,
+     "properties": {
+      "argv": {
+       "items": {
+        "type": "string"
+       },
+       "type": "array"
+      },
+      "timeout_s": {
+       "description": "1 to 300, default 30",
+       "type": "integer"
+      }
+     },
+     "required": [
+      "argv"
+     ],
+     "type": "object"
+    }
+   },
+   "type": "function"
+  },
+  {
+   "function": {
+    "description": "Run the task's test command; select optionally names test files or ids to run.",
+    "name": "run_tests",
+    "parameters": {
+     "additionalProperties": false,
+     "properties": {
+      "select": {
+       "items": {
+        "type": "string"
+       },
+       "type": "array"
+      }
+     },
+     "required": [],
+     "type": "object"
+    }
+   },
+   "type": "function"
+  }
+ ],
+ "version": 1
+}

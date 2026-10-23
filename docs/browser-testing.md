@@ -6,6 +6,12 @@ runtime with its matching system libraries; Debian apt dependency lists do not
 apply to this Nix image. `docker/playwright-system-packages.txt` records the earlier
 Debian image setup as reference, and is not installed by the current image build.
 
+For a Nix-pinned Chromium runtime, build `.#browserRuntime`; the optional
+`.#workerBrowserImage` also bundles it for isolated laptops. See
+[opt-in worker GPU/browser capability](worker-gpu.md) for explicit device grants,
+the bounded hardware probe and pending container acceptance. WebKit still needs
+its separately prepared runtime.
+
 Inside the container, use a versioned, user-owned cache:
 
 ```sh

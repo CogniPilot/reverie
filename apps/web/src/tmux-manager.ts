@@ -30,6 +30,7 @@ import { collectDescendants } from './proc-tree.js';
 import { isSameProcess, PANE_LIVENESS_FORMAT, readProcStat, resolveLivePaneTarget, signalDescendants } from './signal-target.js';
 import { execSync, exec, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { workerLaunchCommand } from './worker-execution.js';
 
 const execAsync = promisify(exec);
 import { existsSync, readFileSync, mkdirSync } from 'node:fs';
@@ -2041,7 +2042,7 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
       // set in WebServer.start()). A hardcoded fallback here exported the wrong
       // scheme on HTTPS installs; leaving the variable unset makes in-session
       // guards fail closed instead of curling a URL that was never right.
-      ...(process.env.REVERIE_API_URL ? [`export REVERIE_API_URL=${process.env.REVERIE_API_URL}`] : []),
+      ...(process.env.REVERIE_API_URL && !process.env.REVERIE_WORKER_SOCKET ? [`export REVERIE_API_URL=${process.env.REVERIE_API_URL}`] : []),
       // Path only (not the secret value): hook curl commands cat the file at
       // execution time, so the COD-54 hook secret stays off the command line.
       `export REVERIE_HOOK_SECRET_FILE="${dataPath('hook-secret')}"`,
@@ -2360,7 +2361,7 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
         ? buildDockerLaunchCommand(resolveDockerLaunchOptions(mode, docker, sessionId, resumeSessionId))
         : remote
           ? buildRemoteSessionCommand({ mode, remote, sessionId, claudeMode, allowedTools, ompConfig, resumeSessionId })
-          : localFullCmd;
+          : workerLaunchCommand(localFullCmd, workingDir, sessionId);
 
       // Create tmux session in three steps to handle cold-start (no server running)
       // and avoid the race where the command exits before remain-on-exit is set:
@@ -2658,7 +2659,7 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
       ? buildDockerLaunchCommand(resolveDockerLaunchOptions(mode, docker, sessionId, resumeSessionId))
       : remote
         ? buildRemoteSessionCommand({ mode, remote, sessionId, claudeMode, allowedTools, ompConfig, resumeSessionId })
-        : localFullCmd;
+        : workerLaunchCommand(localFullCmd, workingDir, sessionId);
 
     try {
       // Same per-CLI env setup as createSession, re-applied so the respawned pane inherits it.

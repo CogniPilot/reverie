@@ -68,8 +68,8 @@ nix run .#start
 This builds the current flake image and creates an editable ~/reverie/deployment.json
 only on first run. Company state and provider logins live under
 ~/reverie/companies/default; working projects live in ~/reverie/workspace.
-~/reverie/scratch links to ~/scratch/reverie by default, so large builds and agent
-scratch use the large disk. You can edit the validated paths, port, container name,
+~/reverie/scratch is the default scratch drive. To use a second disk, point that
+directory at an owner-selected mount or symlink before starting. You can edit the validated paths, port, container name,
 memory limit and process limit in deployment.json. Existing containers are retained;
 a changed deployment requires a new container name rather than silent replacement.
 
@@ -109,6 +109,75 @@ to create the owner account and sign in to your provider plans. The default
 container deployment requires a running Docker engine. Its image is built by Nix;
 there is no separate Dockerfile build. For manual image loading or published
 images, see [image installation](docs/image.md).
+
+## Agent workstations
+
+For a deployment running autonomous agents, use a separate worker container for
+each session. Think of these as the experts' office laptops: each has its own
+running tools, private home and restart boundary. Explicit project mounts are
+shared drives; the console is separate office infrastructure.
+
+Nix builds both images and the host broker. CPU is uncapped by default: an idle
+laptop lends its capacity to a busy one. The default MVP admits laptops against
+an owner-sized memory budget, with a 4 GiB hard ceiling per laptop and no swap.
+The console has its own 8 GiB ceiling; the host retains additional headroom.
+Use `prepare --budget-mode pool` with the NixOS module for a shared memory pool
+with reclaim pressure and a hard aggregate ceiling, allowing idle laptops to lend memory too. Each workstation has an init process and a hard task limit
+(threads count), so orphaned or runaway tools cannot fill the console's process
+table. Optional per-worker CPU and memory caps remain available.
+
+Prepare a migration of the current bind-mounted Docker deployment with:
+
+```bash
+nix run .#isolate -- prepare
+```
+
+This builds and scans matching server and worker images and writes an owner-only
+configuration at `~/reverie/runtime/worker-isolation/broker.json`. The default
+admission mode starts an ordinary owner user service without administrator activation.
+Pooled mode also writes `nixos.nix`: include it in the host configuration and activate
+it normally first. Then run:
+
+```bash
+nix run .#isolate -- activate
+```
+
+Activation verifies the enforced host budget and broker before stopping anything,
+backs up private state, preserves mounts, accounts and vacation choices, and
+retains the previous stopped container for rollback. Only experts already marked
+as desired-running and not on vacation are eligible to resume. An absent broker
+or host resource budget fails closed; agents never fall back into the console.
+Later image changes use this paired preparation/activation workflow too.
+
+Laptops keep their terminal programs running through website restarts. Reconnecting
+attaches to the same terminal; it does not launch the command again. A host-side
+watchdog stops all laptop containers after **10 minutes without a reachable office
+API**. Its outage timestamp survives broker restarts. Once the API returns, the
+normal desired-running and vacation rules apply again.
+
+Settings → System → Office power distinguishes three actions:
+
+- **Stop Reverie** stops all agents and laptops before stopping the website.
+- **Stop all agents** stops laptops and keeps the website open.
+- **Restart website** keeps laptop programs running; chat briefly goes offline.
+
+Stop actions record intentional employee stops before executing them. Maintenance
+restarts leave running intent alone. Only the owner may stop everyone. An owner
+may explicitly grant a maintainer session with `prepare --maintainer-session UUID`;
+that agent may call `POST /api/system/restart-website` with `{ "confirmed": true }`.
+The host checks the fixed caller identity, permits only website restart, and limits
+restarts to one per minute. A title grants no restart or shutdown permission.
+
+The host broker grants fixed mounts and accepts only worker execution requests;
+neither the console nor workers receive the engine socket. Workers cannot reach
+the broker socket. The console's private company state is not mounted into laptops. Only selected provider
+accounts and explicit project drives are mounted. Each laptop has its own internet
+bridge, private home and labelled scratch directory; there is no peer laptop LAN.
+The office HTTP connection fixes caller identity and retains existing API permissions.
+Automatic scratch pruning is deferred; use leased workspaces and save a handoff
+before releasing disposable task data. Project mounts retain their current trust model: sharing a writable directory still permits edits to its files. Use
+separate Git worktrees for concurrent source changes. Resource isolation is not a
+promise that shared writable files are protected from another expert.
 
 ## Access over Tailscale
 
@@ -152,7 +221,7 @@ contained deployment root. The default layout is:
 ~/reverie/companies/default/home/      agent tool settings and provider logins
 ~/reverie/workspace/                   working projects and cases
 ~/reverie/runtime/                     host helpers, controls and engine state
-~/reverie/scratch/                     symlink to ~/scratch/reverie by default
+~/reverie/scratch/                     scratch drive (directory or owner-selected mount)
 ~~~
 
 

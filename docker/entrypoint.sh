@@ -64,6 +64,11 @@ else
 fi
 
 [ "$#" -gt 0 ] || set -- reverie web --host 0.0.0.0 --port "${REVERIE_PORT:-3000}"
+# Optional host inference uses a private socket, with no GPU device or firewall change in the agent container.
+if [ "${1##*/}" = reverie ] && [ "${2:-}" = web ] && [ -d /run/reverie-control ] &&
+   command -v reverie-model-relay >/dev/null 2>&1; then
+  reverie-model-relay </dev/null &
+fi
 # Speech is local to this instance. Start independently so first-use model downloads
 # never delay the web server; an operator-provided service URL takes precedence.
 if [ "${REVERIE_KOKORO_ENABLED:-1}" = 1 ] && [ -z "${REVERIE_KOKORO_URL:-}" ] &&

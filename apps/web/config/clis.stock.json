@@ -277,5 +277,22 @@
         "docsUrl": "https://omp.sh"
       }
     }
+  },
+  {
+    "id": "hands",
+    "label": "Hands (experimental chat)",
+    "shortBadge": "H",
+    "enabled": true,
+    "order": 110,
+    "kind": "agent",
+    "discovery": {
+      "binaries": [
+        "reverie-hands"
+      ],
+      "searchDirs": [],
+      "install": {
+        "command": {}
+      }
+    }
   }
 ]
