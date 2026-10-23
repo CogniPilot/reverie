@@ -235,7 +235,7 @@ jobs:
       - name: Prepare disposable runner storage and browser namespaces
         run: |
           set -euo pipefail
-          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache /usr/local/share/boost /usr/share/swift
           sudo mkdir -p /scratch/tmp
           sudo chown "$(id -u):$(id -g)" /scratch /scratch/tmp
           # Only this ephemeral runner VM; Chromium retains its own sandbox.
@@ -253,6 +253,7 @@ jobs:
           printf '%s\n' "$image" | grep -Eq '^sha256:[0-9a-f]{64}$'
           docker load --input bundle/extracted/reverie-image.tar
           test "$(docker image inspect ghcr.io/jgoppert/reverie:latest --format '{{.Id}}')" = "$image"
+          rm -rf bundle
           printf '%s\n' "$image" > "$RUNNER_TEMP/tested-image-id"
       - name: Exercise real isolated workers using the tested image
         run: |
@@ -269,6 +270,7 @@ jobs:
           nix develop --command npm ci --prefix apps/web --ignore-scripts
           export REVERIE_BROWSER_EXECUTABLE="$RUNNER_TEMP/browser-runtime/bin/chromium"
           export REVERIE_BROWSER_ARTIFACTS="$PWD/acceptance/browser"
+          df -h /
           nix develop --command python3 -m reverie.buildenv \
             --project integration-browser --repo "$PWD" --expect 2G --disk 1G --jobs 1 \
             -- bash -euo pipefail -c 'node .github/ci/company-office-browser.mjs; node .github/ci/laptop-power-browser.mjs' \
