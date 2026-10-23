@@ -52,6 +52,7 @@ export interface DeliverySession {
   readonly id: string;
   readonly name: string;
   readonly isWorking: boolean;
+  readonly paneDialog?: string | null;
   readonly pid: number | null;
   readonly mode: string;
   writeViaMux(
@@ -746,7 +747,7 @@ export class ChatroomDelivery {
       this.queues.delete(sessionId);
       return false;
     }
-    if (session.pid === null || session.isWorking) return false;
+    if (session.pid === null || session.isWorking || session.paneDialog) return false;
     const now = (this.deps.now ?? Date.now)();
     const last = this.lastDelivered.get(sessionId) ?? 0;
     if (now - last < DELIVERY_SPACING_MS) return false;

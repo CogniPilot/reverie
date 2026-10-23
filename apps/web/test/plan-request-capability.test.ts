@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { PlanRequestCapabilities, planRequestCapabilityFile } from '../src/plan-request-capability.js';
 import { PlanRequestStore } from '../src/plan-request-store.js';
-import { agentPlanRequest, agentRequestPlanMove } from '../src/cli-plan-request.js';
+import { agentPlanRequest, agentRequestPlanMove, agentPendingPlanMoves } from '../src/cli-plan-request.js';
 import type { AgentDeps } from '../src/cli-agent.js';
 
 const directories: string[] = [];
@@ -114,4 +114,17 @@ describe('private plan approval files and CLI', () => {
     await expect(store.save([record, record])).rejects.toThrow();
     expect(await store.load()).toEqual([record]);
   });
+});
+
+it('lists own pending requests using no target override and strips credential-like response extras', async () => {
+  const deps: AgentDeps = { ctx: { selfId: 'source', apiUrl: 'http://fixture' }, json: true,
+    io: { out: vi.fn(), err: vi.fn() }, request: vi.fn(async () => ({ status: 200, text: '', json: { success: true, data: [{
+      id: 'request', phase: 'pending', toAccount: 'second', expiresAt: 1_800_000, notified: false, nonceHash: 'private',
+    }] } })) };
+  expect(await agentPendingPlanMoves(deps)).toBe(0);
+  expect(deps.request).toHaveBeenCalledWith(deps.ctx, { method: 'POST', path: '/api/plans/agent-requests/pending', body: {} });
+  expect(String(vi.mocked(deps.io.out).mock.calls[0][0])).not.toContain('private');
+  vi.mocked(deps.request).mockRejectedValue(new Error('private'));
+  expect(await agentPendingPlanMoves(deps)).toBe(1);
+  expect(JSON.stringify(vi.mocked(deps.io.err).mock.calls)).not.toContain('private');
 });

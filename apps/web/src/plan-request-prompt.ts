@@ -1,27 +1,33 @@
 import { setTimeout as delay } from 'node:timers/promises';
-import { getCli } from './config/cli-registry/registry.js';
-import { deliverRecoveryPrompt, type RecoveryPromptSession } from './company-recovery-prompt.js';
+import type { ChatroomService } from './chatroom-service.js';
 import type { PlanRequestView } from './plan-request.js';
 
-/** Queue a nonce-free instruction after current work; never interrupt an active composer. */
+export type PlanRequestMessages = Pick<ChatroomService, 'openDm' | 'post' | 'lastSeen' | 'deleteMessage'>;
+
+/** A nonce-free DM is readable immediately; the existing chat queue handles busy panes. */
 export async function deliverPlanRequest(
   record: PlanRequestView,
-  current: () => RecoveryPromptSession | undefined,
+  messages: PlanRequestMessages,
   allowed: () => boolean,
   sleep: (ms: number) => Promise<void> = (ms) => delay(ms, undefined, { ref: false })
 ): Promise<void> {
+  if (!allowed()) throw new Error('The plan request is no longer authorized');
+  const harness = record.targetMode ? ` The destination uses the ${record.targetMode === 'codex' ? 'Codex' : 'Claude'} harness${record.targetMode !== record.mode ? ' with that provider’s model and effort defaults' : ''}.` : '';
+  const text = `${record.requestedBy ? 'An owner-authorized expert' : 'The owner'} requested plan move ${record.id} for this expert, from ${JSON.stringify(record.fromAccount)} to ${JSON.stringify(record.toAccount)}.${harness} This is a request, not an immediate switch. Finish a safe handoff for your current work, then run reverie agent plan-move approve ${record.id} --handoff-file <your-handoff-file>. The CLI reads your private one-time approval credential itself; never print or copy it. If the move is unsuitable, run reverie agent plan-move reject ${record.id}. Approval starts a fresh destination session with your handoff and stops this source only after the replacement is ready. Use this approval command rather than calling the owner-only session creation API directly. Do not interrupt unfinished work or approve a different expert's request.`;
+
+  const room = messages.openDm(record.sessionId, record.owner);
+  const message = messages.post(room.id, { kind: 'system', name: 'Plans' },
+    text + ` This request expires at ${new Date(record.expiresAt).toISOString()}. Use reverie agent plan-move list to inspect your pending requests.`,
+    [record.sessionId]);
+  const received = () => {
+    const seen = messages.lastSeen(record.sessionId, room.id);
+    return !!seen && (seen.messageId === message.id || seen.at > message.at);
+  };
   while (allowed()) {
-    const session = current();
-    if (!session || session.pid === null) throw new Error('The source session is unavailable');
-    const mark = getCli(session.mode)?.capabilities.composerReadyMark;
-    if (!mark) throw new Error('The source has no safe composer marker');
-    if (!session.isWorking && !session.paneDialog && session.terminalBuffer.includes(mark)) {
-      const harness = record.targetMode ? ` The destination uses the ${record.targetMode === 'codex' ? 'Codex' : 'Claude'} harness${record.targetMode !== record.mode ? ' with that provider’s model and effort defaults' : ''}.` : '';
-      const text = `${record.requestedBy ? 'An owner-authorized expert' : 'The owner'} requested plan move ${record.id} for this expert, from ${JSON.stringify(record.fromAccount)} to ${JSON.stringify(record.toAccount)}.${harness} This is a request, not an immediate switch. Finish a safe handoff for your current work, then run reverie agent plan-move approve ${record.id} --handoff-file <your-handoff-file>. The CLI reads your private one-time approval credential itself; never print or copy it. If the move is unsuitable, run reverie agent plan-move reject ${record.id}. Approval starts a fresh destination session with your handoff and stops this source only after the replacement is ready. Use this approval command rather than calling the owner-only session creation API directly. Do not interrupt unfinished work or approve a different expert's request.`;
-      await deliverRecoveryPrompt(session, text, () => allowed() && current() === session, sleep);
-      return;
-    }
+    if (received()) return;
     await sleep(1000);
   }
+  // Drop only this notice; its expired/revoked credential already prevents any move.
+  if (!received()) await messages.deleteMessage(room.id, message.id, 'Plans').catch(() => {});
   throw new Error('The plan request is no longer authorized');
 }

@@ -10,4 +10,6 @@ OpenCode can use an OpenAI-compatible endpoint through its environment configura
 
 Agents with plan-move grants must follow the existing handoff and approval flow. Model choice does not grant provider sign-in or account administration. Never paste an endpoint API key into chat or a public handbook page.
 
+Owner plan-move requests are queued as a private message immediately. The expert can run `reverie agent plan-move list` to find its own pending requests while working. Plans shows whether delivery is waiting for idle or the expert's handoff, with time left on the 30-minute request. A request never changes the plan by itself. Prepare a handoff, then use `reverie agent plan-move approve <id> --handoff-file <path>` or `reverie agent plan-move reject <id>`. The CLI reads the private credential; do not copy it into chat. Cancelled, expired or replaced-session requests cannot authorize a move.
+
 See [Permissions](/handbook/permissions).
