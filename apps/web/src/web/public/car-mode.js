@@ -364,13 +364,17 @@ class CarServerSynth {
   speakReply(utterances) {
     const phoneVoice = this.deps.phoneVoice ? this.deps.phoneVoice() : utterances[0]?.voice;
     const gen = this.gen, requestOwner = {};
-    const items = utterances.map(u => ({
-      u,
-      audio: this.requests.run(
-        remaining => this.deps.fetchAudio(u.text, u, remaining), requestOwner,
-        () => gen === this.gen, info => this.deps.onSynthesis?.(info)
-      ),
-    }));
+    const items = utterances.map((u, utteranceIndex) => {
+      const link = { turnId: u.turnId, messageId: u.replyMessageId, utteranceIndex };
+      return {
+        u,
+        link,
+        audio: this.requests.run(
+          remaining => this.deps.fetchAudio(u.text, u, remaining), requestOwner,
+          () => gen === this.gen, info => this.deps.onSynthesis?.({ ...info, ...link })
+        ),
+      };
+    });
     if (!items.length) return;
     this.requestOwners.add(requestOwner);
     this.queue.push({ items, phoneVoice, requestOwner, index: 0 });
@@ -411,7 +415,7 @@ class CarServerSynth {
       voiceKey = key;
       try {
         attempted = true;
-        await this._within(Promise.resolve(this.deps.play(url)), CAR_TEAM_PLAY_MS, new Error('playback stalled'));
+        await this._within(Promise.resolve(this.deps.play(url, batch.items[batch.index].link)), CAR_TEAM_PLAY_MS, new Error('playback stalled'));
       } catch {
         reason = 'playback-interrupted';
       }
@@ -1222,9 +1226,11 @@ Object.assign(ReverieApp.prototype, {
         if (res.ok && res.data?.voice?.provider === 'browser' && utterance) utterance.employeeVoice = res.data.voice;
         return res.ok && typeof res.data?.audioUrl === 'string' ? { url: res.data.audioUrl, engine: res.data.engine, voice: res.data.voice } : null;
       },
-      play: (url) =>
+      play: (url, link = {}) =>
         new Promise((resolve, reject) => {
           const audio = this._chatAudioEl();
+          const started = globalThis.performance?.now?.() ?? Date.now();
+          let playingSeen = false;
           // A stream that stops arriving fires 'stalled' or 'waiting', then nothing: give it
           // CAR_TEAM_STALL_MS of no progress before the phone voice takes the line.
           let stallTimer = null, finished = false;
@@ -1251,22 +1257,30 @@ Object.assign(ReverieApp.prototype, {
             audio.removeEventListener('stalled', onStall);
             audio.removeEventListener('waiting', onStall);
             audio.removeEventListener('timeupdate', clearStall);
-            audio.removeEventListener('playing', clearStall);
+            audio.removeEventListener('playing', onPlaying);
             settle = null;
             if (err) reject(err);
             else resolve();
           };
           const onEnd = () => done(Number.isFinite(audio.duration) && audio.duration - audio.currentTime > 0.5 ? new Error('audio ended early') : null);
           const onError = () => done(new Error('audio error'));
+          const onPlaying = () => {
+            clearStall();
+            if (playingSeen) return;
+            playingSeen = true;
+            diag('team:playing', { ...link,
+              elapsedMs: Math.max(0, (globalThis.performance?.now?.() ?? Date.now()) - started) });
+          };
           settle = () => done(null);
           audio.addEventListener('ended', onEnd);
           audio.addEventListener('error', onError);
           audio.addEventListener('stalled', onStall);
           audio.addEventListener('waiting', onStall);
           audio.addEventListener('timeupdate', clearStall);
-          audio.addEventListener('playing', clearStall);
+          audio.addEventListener('playing', onPlaying);
           // A line from the car or read aloud: not a spoken turn's answer (_carSpeakerId).
           this._chatAudioFrom = null;
+          diag('team:play-request', link);
           audio.src = this._chatUrl(url);
           audio.play().then(
             () => (this._chatAudioUnlocked = true),
