@@ -211,3 +211,25 @@ it('ignores a stale play rejection after stop, so it cannot detach the next play
   expect(stopped).toBe(true);
   await second;
 });
+
+it('drains the cancelled car request before a replacement screen can contact the same engine', async () => {
+  const h = setup();
+  const posts: Array<(response: unknown) => void> = [];
+  h.a._chatApi = () => new Promise((resolve) => posts.push(resolve));
+  h.team.speakReply([{ text: 'Old reply.' }]);
+  await flush();
+  expect(posts).toHaveLength(1);
+  h.team.cancel();
+  const replacement = h.a._carTeamSynth({ getVoices: () => h.voices, speaking: false, pending: false }, () => {});
+  replacement.speakReply([{ text: 'Fresh reply.' }]);
+  await flush();
+  expect(posts).toHaveLength(1);
+  posts[0]({ ok: true, data: { audioUrl: '/stale', engine: 'kokoro', voice: { id: 'am_michael' } } });
+  await flush();
+  expect(posts).toHaveLength(2);
+  expect(h.audio.src).not.toContain('/stale');
+  posts[1]({ ok: true, data: { audioUrl: '/fresh', engine: 'kokoro', voice: { id: 'am_michael' } } });
+  await flush();
+  expect(h.audio.src).toContain('/fresh');
+  replacement.cancel();
+});
