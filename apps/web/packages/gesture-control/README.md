@@ -37,7 +37,7 @@ Also: **fullscreen mode** (toggle button — the board fills the display, so gra
 targets get big).
 
 **Phase 5 is live** in the real Reverie dashboard. The Reverie-side detach +
-instance isolation + base gesture overlay are committed on `jgoppert/reverie`
+instance isolation + base gesture overlay are committed on `CogniPilot/reverie`
 branch `beta/session-detach` (open as **PR #103**) — including this session's
 gesture *improvements* (direct-detach, Run/Run Shell taps, self-hosted MediaPipe,
 cache-bust), ported onto the PR in commit `eea84db` (CI green). See

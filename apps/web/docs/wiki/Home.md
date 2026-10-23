@@ -11,14 +11,14 @@ working while you are away from the keyboard: it re-prompts idle agents, resumes
 subscription limit resets, runs jobs on a schedule, and shows every background subagent
 live.
 
-This wiki is the manual. The [README](https://github.com/jgoppert/reverie) is the overview,
+This wiki is the manual. The [README](https://github.com/CogniPilot/reverie) is the overview,
 and the deep internals live in
-[`docs/`](https://github.com/jgoppert/reverie/tree/main/apps/web/docs).
+[`docs/`](https://github.com/CogniPilot/reverie/tree/main/apps/web/docs).
 
 ```bash
 # upstream Reverie installer (historical provenance: installs upstream, not this checkout)
 # this checkout: npm ci && npm run build && reverie web
-curl -fsSL https://github.com/jgoppert/reverie/install | bash
+curl -fsSL https://github.com/CogniPilot/reverie/install | bash
 reverie web    # then open http://localhost:3000
 ```
 
@@ -135,7 +135,7 @@ machine.
 
 ## Getting help
 
-- **Questions and setup help**: [Discussions](https://github.com/jgoppert/reverie/discussions), especially [Q&A](https://github.com/jgoppert/reverie/discussions/categories/q-a).
-- **Bugs**: [Issues](https://github.com/jgoppert/reverie/issues). Include your OS, install method, browser, and which CLI the session was running.
-- **Ideas and roadmap**: [Ideas](https://github.com/jgoppert/reverie/discussions/categories/ideas).
-- **Security**: never a public issue. See [SECURITY.md](https://github.com/jgoppert/reverie/blob/main/apps/web/.github/SECURITY.md).
+- **Questions and setup help**: [Discussions](https://github.com/CogniPilot/reverie/discussions), especially [Q&A](https://github.com/CogniPilot/reverie/discussions/categories/q-a).
+- **Bugs**: [Issues](https://github.com/CogniPilot/reverie/issues). Include your OS, install method, browser, and which CLI the session was running.
+- **Ideas and roadmap**: [Ideas](https://github.com/CogniPilot/reverie/discussions/categories/ideas).
+- **Security**: never a public issue. See [SECURITY.md](https://github.com/CogniPilot/reverie/blob/main/apps/web/.github/SECURITY.md).

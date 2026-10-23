@@ -2,10 +2,10 @@
 
 > Generated: 2026-02-17
 > Source files analyzed:
-> - `/home/arkon/default/reverie/src/web/public/app.js` (main frontend, ~15k lines)
-> - `/home/arkon/default/reverie/src/web/public/index.html`
-> - `/home/arkon/default/reverie/src/web/public/styles.css`
-> - `/home/arkon/default/reverie/src/web/public/mobile.css`
+> - `/home/user/default/reverie/src/web/public/app.js` (main frontend, ~15k lines)
+> - `/home/user/default/reverie/src/web/public/index.html`
+> - `/home/user/default/reverie/src/web/public/styles.css`
+> - `/home/user/default/reverie/src/web/public/mobile.css`
 
 ---
 

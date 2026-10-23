@@ -76,7 +76,7 @@ On this box, with grok 1.0.5 really installed and an isolated
 
 1. `npm test` (the CI gate): green, 5900+ tests. `typecheck`, `lint`, `format:check`,
    `check:frontend-syntax`, `check:public-assets`, `check:lockfile`: green.
-2. `GET /api/grok/status` -> `{available: true, path: "/home/arkon/.local/bin", version: "1.0.5"}`
+2. `GET /api/grok/status` -> `{available: true, path: "/home/user/.local/bin", version: "1.0.5"}`
    through the real resolver and probe.
 3. `POST /api/quick-start {mode: "grok", grokConfig: {alwaysApprove: true}}` -> session
    created, tmux pane spawned, real spawn line verified to end in `grok --always-approve`,

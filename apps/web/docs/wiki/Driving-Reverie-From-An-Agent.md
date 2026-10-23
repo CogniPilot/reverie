@@ -18,7 +18,7 @@ English instead of pasting endpoint documentation into prompts.
 
 | How          | Command                                                     | Scope                                                       |
 | ------------ | ----------------------------------------------------------- | ----------------------------------------------------------- |
-| Skills CLI (upstream repository) | `npx skills add jgoppert/reverie --skill reverie -g`            | Global, any skills-aware agent. The way to give it to pi.    |
+| Skills CLI (upstream repository) | `npx skills add CogniPilot/reverie --skill reverie -g`            | Global, any skills-aware agent. The way to give it to pi.    |
 | Bundled CLI  | `reverie skill install`                                      | Global, at `~/.claude/skills/reverie`.                       |
 | Bundled CLI  | `reverie skill install --case <name> [--mode <mode>]`        | One case. `--mode codex` (or any other run mode) writes it where that CLI looks for skills. |
 | Web UI       | **App Settings → Agents & CLIs → All agent CLIs → Reverie Agent Skill** | Injects into each case when a session is created, where that session's CLI looks: `.claude/skills/` for Claude Code, `.agents/skills/` for Codex, Gemini CLI, OpenCode, Antigravity, Grok, DeepSeek and OMP. Not pi: a project skill makes pi ask to trust the folder at startup. Off by default. |
@@ -283,4 +283,4 @@ failing the spawn, because a cosmetic field must never break a worker.
 - [HTTP API](HTTP-API) - the endpoint map and the envelope.
 - [Hooks And Integrations](Hooks-And-Integrations) - events flowing the other way.
 - [Watching Agents Work](Watching-Agents-Work) - seeing the fan-out in the UI.
-- [`skills/reverie/SKILL.md`](https://github.com/jgoppert/reverie/blob/main/apps/web/skills/reverie/SKILL.md) - the skill itself.
+- [`skills/reverie/SKILL.md`](https://github.com/CogniPilot/reverie/blob/main/apps/web/skills/reverie/SKILL.md) - the skill itself.

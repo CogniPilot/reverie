@@ -2,7 +2,7 @@
 
 > **Supersedes**: This document merges two previous plan drafts into a single authoritative reference:
 > - `docs/background-keystroke-forwarding-plan.md` (detailed design doc)
-> - `.claude/plans/jazzy-bubbling-salamander.md` (Claude-generated implementation plan)
+> - `.claude/plans/jazzy-bubbling-salamander.md` (implementation plan)
 >
 > The docs plan was used as the base. The Claude plan was a correct but simplified subset; its Context paragraph is incorporated below as a lead-in.
 

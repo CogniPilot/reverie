@@ -35,7 +35,7 @@ extracted offline bundle. Wait for release CI to finish publishing the assets
 and GHCR tag before installing. With the optional GitHub CLI:
 
 ```bash
-gh release download v0.2.0 --repo jgoppert/reverie --pattern setup.sh
+gh release download v0.2.0 --repo CogniPilot/reverie --pattern setup.sh
 ```
 
 Private release downloads require signing in with `gh auth login` using an

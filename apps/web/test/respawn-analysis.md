@@ -2,10 +2,10 @@
 
 **Date**: 2026-01-25
 **Analyzed Files**:
-- `/home/arkon/default/reverie/src/respawn-controller.ts`
-- `/home/arkon/default/reverie/src/ai-idle-checker.ts`
-- `/home/arkon/default/reverie/src/ai-plan-checker.ts`
-- `/home/arkon/default/reverie/test/respawn-controller.test.ts`
+- `/home/user/default/reverie/src/respawn-controller.ts`
+- `/home/user/default/reverie/src/ai-idle-checker.ts`
+- `/home/user/default/reverie/src/ai-plan-checker.ts`
+- `/home/user/default/reverie/test/respawn-controller.test.ts`
 
 ---
 
@@ -55,7 +55,7 @@ The following areas lack test coverage:
 
 ### Issue 1: E2BIG Error in ai-plan-checker.ts (HIGH)
 
-**File**: `/home/arkon/default/reverie/src/ai-plan-checker.ts`
+**File**: `/home/user/default/reverie/src/ai-plan-checker.ts`
 **Lines**: 341-346
 **Severity**: HIGH
 
@@ -84,7 +84,7 @@ const claudeCmd = `cat "${this.checkPromptFile}" | claude -p ${modelArg} --outpu
 
 ### Issue 2: Missing Prompt File Cleanup on Timeout (MEDIUM)
 
-**File**: `/home/arkon/default/reverie/src/ai-idle-checker.ts`
+**File**: `/home/user/default/reverie/src/ai-idle-checker.ts`
 **Lines**: 392-398
 **Severity**: MEDIUM
 
@@ -98,7 +98,7 @@ const claudeCmd = `cat "${this.checkPromptFile}" | claude -p ${modelArg} --outpu
 
 ### Issue 3: Race Condition in cancel() with Promise Resolution (MEDIUM)
 
-**File**: `/home/arkon/default/reverie/src/ai-idle-checker.ts`
+**File**: `/home/user/default/reverie/src/ai-idle-checker.ts`
 **Lines**: 265-279
 **Severity**: MEDIUM
 
@@ -127,7 +127,7 @@ cancel(): void {
 
 ### Issue 4: Stale Screen Name Collision (LOW)
 
-**File**: `/home/arkon/default/reverie/src/ai-idle-checker.ts`, `ai-plan-checker.ts`
+**File**: `/home/user/default/reverie/src/ai-idle-checker.ts`, `ai-plan-checker.ts`
 **Lines**: 326-329 (idle), 333-336 (plan)
 **Severity**: LOW
 
@@ -149,7 +149,7 @@ this.checkScreenName = `reverie-aicheck-${shortId}-${timestamp}`;
 
 ### Issue 5: DetectionStatus Calculation During ai_checking State (LOW)
 
-**File**: `/home/arkon/default/reverie/src/respawn-controller.ts`
+**File**: `/home/user/default/reverie/src/respawn-controller.ts`
 **Lines**: 759-762
 **Severity**: LOW
 

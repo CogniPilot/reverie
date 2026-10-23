@@ -221,4 +221,4 @@ this does not widen your network exposure. Add it to the service unit and restar
 - [Core Concepts](Core-Concepts) - why this is an overlay rather than a run mode.
 - [Security](Security) - where containers fit in the model.
 - [Remote SSH Sessions](Remote-SSH-Sessions) - the other overlay.
-- [`docs/docker-cases.md`](https://github.com/jgoppert/reverie/blob/main/apps/web/docs/docker-cases.md) - the full reference.
+- [`docs/docker-cases.md`](https://github.com/CogniPilot/reverie/blob/main/apps/web/docs/docker-cases.md) - the full reference.

@@ -94,4 +94,4 @@ at any time, and existing browser sessions can be revoked.
 
 - [Security](Security) - where this fits in the model, and what it does not cover.
 - [Docker Cases](Docker-Cases) - the isolation story that actually isolates.
-- [`docs/multi-user-plan.md`](https://github.com/jgoppert/reverie/blob/main/apps/web/docs/multi-user-plan.md) - the design.
+- [`docs/multi-user-plan.md`](https://github.com/CogniPilot/reverie/blob/main/apps/web/docs/multi-user-plan.md) - the design.

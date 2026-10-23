@@ -190,4 +190,4 @@ See [Hooks And Integrations](Hooks-And-Integrations).
 - [The Dashboard](The-Dashboard) - what the UI is showing you.
 - [Agent CLIs](Agent-CLIs) - the ten run modes in detail.
 - [Keeping Agents Running](Keeping-Agents-Running) - respawn, idle detection, usage limits.
-- [`docs/architecture-invariants.md`](https://github.com/jgoppert/reverie/blob/main/apps/web/docs/architecture-invariants.md) - the mechanisms behind all of this, for contributors.
+- [`docs/architecture-invariants.md`](https://github.com/CogniPilot/reverie/blob/main/apps/web/docs/architecture-invariants.md) - the mechanisms behind all of this, for contributors.

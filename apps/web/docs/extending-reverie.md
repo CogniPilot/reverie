@@ -162,7 +162,7 @@ respawn, Ralph, the orchestrator, search, and admin. Each route module carries a
 
 If the caller is an agent running _inside_ a Reverie session, install the packaged
 agent skill instead of teaching it these calls by hand: `skills/reverie` in the repo
-(from the upstream repository: `npx skills add jgoppert/reverie --skill reverie -g`, or `reverie skill install
+(from the upstream repository: `npx skills add CogniPilot/reverie --skill reverie -g`, or `reverie skill install
 [--case <name>] [--mode <mode>]`, or the synced `agentSkillEnabled` App Setting for
 automatic per-case injection on session create, into the directory each CLI scans for
 skills). The skill carries the guard, the safety rules, and verified

@@ -109,7 +109,7 @@ point of shipping a skill.
 
 Install paths, in order of how a user gets it:
 
-1. `npx skills add jgoppert/reverie --skill reverie -g` (global, any agent, matches the herdr flow).
+1. `npx skills add CogniPilot/reverie --skill reverie -g` (global, any agent, matches the herdr flow).
 2. `reverie skill install [--global | --case <name>]`, a new CLI subcommand writing the same
    file. This is the path for users who installed via npm and never cloned the repo.
 3. **Automatic per-case injection**, modeled exactly on `applyStatusLineConfig(casePath, enabled)`

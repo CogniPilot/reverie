@@ -195,7 +195,7 @@ right now.
 
     Manage   systemctl --user restart reverie-web  ·  journalctl --user -u reverie-web -f
     Update   re-run the install line, or App Settings → System → Updates
-    Docs     https://github.com/jgoppert/reverie/tree/main/apps/web/docs/wiki
+    Docs     https://github.com/CogniPilot/reverie/tree/main/apps/web/docs/wiki
 
   Security: Reverie binds 127.0.0.1. Tailscale authenticates every device before a
   packet reaches it. Details: docs/security-architecture.md
@@ -214,10 +214,10 @@ Env vars stay (`REVERIE_TAILSCALE=1`, `REVERIE_HOST`, `REVERIE_PASSWORD`,
 discoverable from the one-liner and pipe through `bash -s --`:
 
 ```bash
-curl -fsSL https://github.com/jgoppert/reverie/install | bash -s -- --tailscale --service
-curl -fsSL https://github.com/jgoppert/reverie/install | bash -s -- --lan --password 'x' --service
-curl -fsSL https://github.com/jgoppert/reverie/install | bash -s -- --local --run
-curl -fsSL https://github.com/jgoppert/reverie/install | bash -s -- --tailscale --name reverie-build --yes
+curl -fsSL https://github.com/CogniPilot/reverie/install | bash -s -- --tailscale --service
+curl -fsSL https://github.com/CogniPilot/reverie/install | bash -s -- --lan --password 'x' --service
+curl -fsSL https://github.com/CogniPilot/reverie/install | bash -s -- --local --run
+curl -fsSL https://github.com/CogniPilot/reverie/install | bash -s -- --tailscale --name reverie-build --yes
 ```
 
 | Flag | Meaning |
@@ -327,7 +327,7 @@ The rename records the previous name locally and offers the reversal at uninstal
 | `test/install-sh-invariants.test.ts` | Extend: flags documented in the header, no `serve reset`, no `funnel`, no `--service` advertise, every serve mutation goes through `ts_cmd_serve`, rename happens before serve in `main` (static order check) |
 | `.github/workflows/ci.yml` | The bash 3.2 step additionally sources the script with stubbed `ts_cmd`/`ts_cmd_serve`/`read_reply` and drives `ask_everything` through all three answers and the 443-occupied menu |
 | `test/tailscale-status.test.ts`, `test/routes/system-routes-remote-access.test.ts` | Parser + route |
-| Docs | README install + remote-access sections, `docs/wiki/Installation.md`, `Remote-Access.md` (naming options table, Services caveat, path/port variants), `Mobile-Guide.md`, `Running-As-A-Service.md` (macOS login caveat), `FAQ.md`, `docs/security-architecture.md` §A, CLAUDE.md Scripts & Tunnel paragraph, `docs/tailscale-installer-plan.md` gets a pointer here. github.com/jgoppert/reverie copy lives outside the repo (maintainer handbook). |
+| Docs | README install + remote-access sections, `docs/wiki/Installation.md`, `Remote-Access.md` (naming options table, Services caveat, path/port variants), `Mobile-Guide.md`, `Running-As-A-Service.md` (macOS login caveat), `FAQ.md`, `docs/security-architecture.md` §A, CLAUDE.md Scripts & Tunnel paragraph, `docs/tailscale-installer-plan.md` gets a pointer here. github.com/CogniPilot/reverie copy lives outside the repo (maintainer handbook). |
 
 Changeset: `minor` (new flags, new subcommands, new API route).
 

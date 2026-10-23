@@ -1,6 +1,6 @@
 ### [Reverie Wiki](Home)
 
-[README](https://github.com/jgoppert/reverie)
+[README](https://github.com/CogniPilot/reverie)
 
 **Getting started**
 

@@ -3,7 +3,7 @@
 Install Nix, clone the Reverie monorepo, and run from its root:
 
 ```sh
-git clone https://github.com/jgoppert/reverie.git
+git clone https://github.com/CogniPilot/reverie.git
 cd reverie
 nix profile add .#default
 reverie web

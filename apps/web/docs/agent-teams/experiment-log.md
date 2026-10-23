@@ -56,7 +56,7 @@ Name the team research-watchers.
 
 Subagent transcripts also appear in the standard subagent directory:
 ```
-~/.claude/projects/-home-arkon-reverie-cases-agent-teams-test/
+~/.claude/projects/-home-user-reverie-cases-agent-teams-test/
 └── 00000014.../
     ├── 00000014...jsonl                 # Lead session transcript
     └── subagents/
@@ -156,7 +156,7 @@ Agent: a29de32  Status: active  Tools: 7   Model: claude-opus-4-6
             "model": "claude-opus-4-6",
             "joinedAt": 1770875105373,
             "tmuxPaneId": "",
-            "cwd": "/home/arkon/reverie-cases/agent-teams-test",
+            "cwd": "/home/user/reverie-cases/agent-teams-test",
             "subscriptions": []
         },
         {
@@ -169,7 +169,7 @@ Agent: a29de32  Status: active  Tools: 7   Model: claude-opus-4-6
             "planModeRequired": false,
             "joinedAt": 1770875126680,
             "tmuxPaneId": "in-process",
-            "cwd": "/home/arkon/reverie-cases/agent-teams-test",
+            "cwd": "/home/user/reverie-cases/agent-teams-test",
             "subscriptions": [],
             "backendType": "in-process"
         },
@@ -183,7 +183,7 @@ Agent: a29de32  Status: active  Tools: 7   Model: claude-opus-4-6
             "planModeRequired": false,
             "joinedAt": 1770875130344,
             "tmuxPaneId": "in-process",
-            "cwd": "/home/arkon/reverie-cases/agent-teams-test",
+            "cwd": "/home/user/reverie-cases/agent-teams-test",
             "subscriptions": [],
             "backendType": "in-process"
         },
@@ -197,7 +197,7 @@ Agent: a29de32  Status: active  Tools: 7   Model: claude-opus-4-6
             "planModeRequired": false,
             "joinedAt": 1770875134997,
             "tmuxPaneId": "in-process",
-            "cwd": "/home/arkon/reverie-cases/agent-teams-test",
+            "cwd": "/home/user/reverie-cases/agent-teams-test",
             "subscriptions": [],
             "backendType": "in-process"
         }

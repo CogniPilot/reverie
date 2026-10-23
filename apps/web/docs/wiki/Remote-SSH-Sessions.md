@@ -109,4 +109,4 @@ Reverie does not store SSH passwords. Use keys, as you would for any other autom
 - [Core Concepts](Core-Concepts) - overlays versus run modes.
 - [Docker Cases](Docker-Cases) - the other overlay.
 - [Security](Security) - the wider model.
-- [`docs/remote-sessions.md`](https://github.com/jgoppert/reverie/blob/main/apps/web/docs/remote-sessions.md) - the full design.
+- [`docs/remote-sessions.md`](https://github.com/CogniPilot/reverie/blob/main/apps/web/docs/remote-sessions.md) - the full design.

@@ -55,7 +55,7 @@ Teammates are in-process threads rather than separate CLI processes, so they sho
 windows, not tabs.
 
 Notes and the experiment log:
-[`docs/agent-teams/`](https://github.com/jgoppert/reverie/tree/main/apps/web/docs/agent-teams).
+[`docs/agent-teams/`](https://github.com/CogniPilot/reverie/tree/main/apps/web/docs/agent-teams).
 
 ## Ultracode and workflow runs
 

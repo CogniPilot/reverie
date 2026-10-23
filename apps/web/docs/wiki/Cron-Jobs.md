@@ -167,4 +167,4 @@ on an HTTPS install.
 
 - [Keeping Agents Running](Keeping-Agents-Running) - continuing work rather than starting it.
 - [Notifications And Approvals](Notifications-And-Approvals) - hearing about a job that got stuck.
-- [`docs/cron-guide.md`](https://github.com/jgoppert/reverie/blob/main/apps/web/docs/cron-guide.md) - the complete reference, including the API and SSE events.
+- [`docs/cron-guide.md`](https://github.com/CogniPilot/reverie/blob/main/apps/web/docs/cron-guide.md) - the complete reference, including the API and SSE events.

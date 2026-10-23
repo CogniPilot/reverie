@@ -22,65 +22,18 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | Build       | `npm run build` (esbuild via `scripts/build.mjs`, NOT tsc — `tsc --noEmit` is type-check only)                                                                      |
 | Production  | `npm run build && systemctl --user restart reverie-web`                                                                                                             |
 
-## CRITICAL: Session Safety
+## Session and contribution safety
 
-**You may be running inside a Reverie-managed tmux session.** Before killing ANY tmux or Claude process:
+Do not stop managed sessions or services without explicit owner authorization.
+Use an isolated worktree for changes and stage only explicit paths. Never commit
+credentials, private runtime state, conversations or local operational receipts.
+Run the checks appropriate to the change before proposing it for review. A release
+or deployment requires separate authorization and acceptance on the exact source.
+The root README and flake define the supported packaging and installation flow.
 
-1. Check: `echo $REVERIE_MUX` - if `1`, you're in a managed session
-2. **NEVER** run `tmux kill-session`, `pkill tmux`, or `pkill claude` without confirming
-3. Use the web UI or `./scripts/tmux-manager.sh` instead of direct kill commands
-
-**The working tree is shared with other agent sessions.** Several Reverie sessions run against THIS one checkout, so another session can `git checkout` a different branch, or leave half-finished untracked files, while you are mid-task.
-
-- **Always `git branch --show-current` immediately before committing.** Observed 2026-07-27: another session ran `git checkout -b feat/web-tabs`, a commit silently landed there instead of master, and the follow-up `git push origin master` cheerfully reported "Everything up-to-date".
-- To land a commit on master **without** switching branches (which would yank the tree out from under the other session): `git push origin HEAD:master` then `git branch -f master HEAD`. Never `git checkout master` to "fix" it.
-- **Never `git add -A`/`git add .`** — stage explicit paths. A sweep will pick up another session's WIP.
-- Another session's broken WIP can block `npm run build`, since `tsc` is the first step and the build gates on it. That is not your bug to fix. ⚠️ `tsc` still EMITS on type errors, so a failed `npm run build` leaves a rebuilt `dist/index.js` compiled from their tree; check what it pulled in before restarting the service. To deploy frontend-only changes past a blocked `tsc`, run the asset stage of `scripts/build.mjs` (everything after the `tsc`/`chmod` lines is independent of it).
-- **A pre-push failure in a file you did not touch is another session's WIP.** Push with `REVERIE_SKIP_PREPUSH=1 git push` and leave it alone. (The hook already skips itself when the tree has uncommitted changes in a path it checks, so this mostly happens once the other session has committed.)
-
-## CRITICAL: Always Test Before Deploying
-
-**NEVER COM without verifying your changes actually work.** For every fix:
-
-1. **Backend changes**: Hit the API endpoint with `curl` and verify the response
-2. **Frontend changes**: Use Playwright to load the page and assert the UI renders correctly. Use `waitUntil: 'domcontentloaded'` (not `networkidle` — SSE keeps the connection open). Wait 3-4s for polling/async data to populate, then check element visibility, text content, and CSS values
-3. **Only after verification passes**, proceed with COM
+## Static assets and development reloads
 
 The production server caches static files for 1 year, `immutable` (`maxAge: '1y'` in `server.ts`). To avoid stale frontend after a deploy, `renderIndexHtml` runs `cacheBustAssets(html)` — it appends `?v=<mtime>` to **every same-origin `.js`/`.css`** reference (mtime memoized ~1s so a burst of renders is cheap; external/already-versioned/missing refs untouched). Because `index.html` is served `no-cache`, a **normal reload now picks up edited modules/styles — no hard refresh needed** (the gesture bundle is injected separately with its own `?v=`). If you add an asset referenced by an _absolute_ URL or from JS rather than a `<script>/<link>` tag, it won't be auto-busted. ⚠️ **`index.html` itself is the exception: it is read ONCE into `indexHtmlTemplate` in the `WebServer` constructor**, so editing markup in dev needs a server restart (edited `.js`/`.css` do not) — otherwise you debug a "CSS class that doesn't apply" that is really an element still missing from the served HTML.
-
-## COM Shorthand (Deployment)
-
-Uses [Semantic Versioning](https://semver.org/) (`MAJOR.MINOR.PATCH`) via `@changesets/cli`. What SemVer actually covers (the CLI, documented env vars, **and the HTTP/SSE API under `/api/v1`**: endpoint paths, response envelope, `errorCode` values and SSE event names are public/stable; on-disk state, internal TS modules, and experimental features are internal/unstable) is defined in `docs/versioning-policy.md`. Third-party integration surfaces are documented in `docs/extending-reverie.md`. Security reporting + known limitations live in `.github/SECURITY.md`.
-
-When user says "COM":
-
-1. **Determine bump type**: `COM` = patch (default), `COM minor` = minor, `COM major` = major
-2. **Create a changeset file** (no interactive prompts). Write a `.md` file in `.changeset/` with a random filename:
-
-   ```bash
-   cat > .changeset/$(openssl rand -hex 4).md << 'CHANGESET'
-   ---
-   "aireverie": patch
-   ---
-
-   Detailed description of ALL changes since last release (not just the most recent commit — review full git log since last version tag)
-   CHANGESET
-   ```
-
-   Replace `patch` with `minor` or `major` as needed. Include `"xterm-zerolag-input": patch` on a separate line if that package changed too.
-
-3. **Consume the changeset**: `npm run version-packages` (auto-bumps `package.json` files, updates `CHANGELOG.md`, runs `npm install --package-lock-only`, and verifies lockfile sync via `scripts/check-lockfile-sync.mjs` — all in one command; never hand-edit `CHANGELOG.md` or `package-lock.json` versions)
-4. **Sync CLAUDE.md version**: Update the `**Version**` line below to match the new version from `package.json`
-5. **Commit and deploy**: verify the branch first (`git branch --show-current`), then stage EXPLICIT paths — never `git add -A`, which has swept another session's WIP into a release. `git status --short` and account for every line before committing:
-   `git add <paths> && git commit -m "chore: version packages" && git push && npm run build && systemctl --user restart reverie-web`
-6. **Refresh the github.com/jgoppert/reverie version badge**: the landing page's status bar carries the release version (`v<x.y.z> · github.com/jgoppert/reverie · MIT`), so it goes stale on every release if nobody bumps it. The site source and its deploy script are maintained outside this repository, on the maintainer's machine only; follow the local site handbook there, which also covers the numbers strip and `sitemap.xml` refresh that belong in the same pass. Poll production (`curl -s https://github.com/jgoppert/reverie/ | grep v<x.y.z>`) before calling it done, since the edge lags a deploy by up to a minute. Not applicable to contributor clones — skip it and say so.
-7. **Wait for CI**: after `git push`, TWO workflows fire per master push — `CI` and `Release` (the npm publish + GitHub release). List both runs for the pushed commit with `gh run list --commit $(git rev-parse HEAD) --json databaseId,workflowName` and watch EACH with `gh run watch <id> --exit-status`. Confirm both pass before considering the release done (`gh run list -L 1` returns only one of the two).
-
-8. **Announce it in Discussions**: every release gets a post in the [Announcements](https://github.com/jgoppert/reverie/discussions/categories/announcements) category, shaped like #418 and #302: the short version first (one bold lead-in per theme, features before fixes, what it does for the user rather than how it works), contributor @-mentions inline where their work is described (a mention notifies them, and a contributor reposting is the cheapest reach this project has), a link to the release, and the Thanks names at the end. Casual first-person voice, no em-dashes, humanizer pass when the skill is available. A same-day follow-on patch (1.28.1 after 1.28.0) is folded into the previous post as an edit, never a second thread. Post it with `gh api graphql -F body=@<file> -f title='Reverie <x.y.z>: <hook>' -f repo=R_kgDOQ-SMDg -f cat=DIC_kwDOQ-SMDs4DCHZE -f query='mutation($repo:ID!,$cat:ID!,$title:String!,$body:String!){createDiscussion(input:{repositoryId:$repo,categoryId:$cat,title:$title,body:$body}){discussion{number url}}}'` (the repo's node id and its Announcements category id; `pinDiscussion` does not exist in the API, so pinning stays a click in the UI). This step exists because announcements stopped at 1.18 (#302) while ten releases shipped with nobody notified; #418 is the backfill covering 1.19.0 to 1.28.1, and release notes only count as content once they reach a surface people are subscribed to.
-
-CI runs `npm run check:lockfile` on every push/PR, so lockfile drift fails the build even if the `version-packages` script is bypassed.
-
-**Version**: 1.41.1 (must match `package.json`)
 
 ## Project Overview
 

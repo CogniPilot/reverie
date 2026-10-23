@@ -117,7 +117,7 @@ Where the data lives: the profile is keyed by owner and the resolved working dir
 it survives `/clear` and respawns. Prompts can contain secrets, so the store is written
 0600 and is deliberately excluded from cross-session search.
 
-Guide: [`docs/readmymind.md`](https://github.com/jgoppert/reverie/blob/main/apps/web/docs/readmymind.md).
+Guide: [`docs/readmymind.md`](https://github.com/CogniPilot/reverie/blob/main/apps/web/docs/readmymind.md).
 
 ## Programmatic input
 

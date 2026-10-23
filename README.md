@@ -32,27 +32,28 @@ Existing SQLite history columns are read compatibly during migration.
 
 ### Run the published image (no Nix installation)
 
-Use the prebuilt image at `ghcr.io/jgoppert/reverie:0.2.0` with Docker or Podman.
+Use the prebuilt release image with Docker or Podman.
 The host needs no Nix installation, source checkout, Node or Python. Download
-`setup.sh` from the matching GitHub release, then run:
+`setup.sh` from the matching
+[release](https://github.com/CogniPilot/reverie/releases), then run:
 
 ```bash
 bash setup.sh --engine docker --version 0.2.0
 ```
 
-Follow [the image guide](docs/image.md#quick-start) for prerequisites, private
-registry login, direct container commands and browser owner-account setup.
+Follow [the image guide](docs/image.md#quick-start) for prerequisites, registry
+access, direct container commands and browser owner-account setup.
 For a machine without registry access, use the release's
 [offline bundle](docs/INSTALL.md), which also needs no Nix installation.
 Release assets and image tags become available after release CI completes.
 
 ### Build from source with Nix
 
-[Install Nix](https://nixos.org/download/) if needed, then clone Reverie
-(collaborator access is required while the repository is private):
+[Install Nix](https://nixos.org/download/) if needed, then clone the public
+[CogniPilot/reverie](https://github.com/CogniPilot/reverie) repository:
 
 ```bash
-gh repo clone jgoppert/reverie
+git clone https://github.com/CogniPilot/reverie.git
 cd reverie
 export NIX_CONFIG="experimental-features = nix-command flakes"
 ```

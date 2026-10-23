@@ -5,7 +5,7 @@ through it, so anything the dashboard can do, a script can do.
 
 This page is the orientation. The complete specification, including every wait semantic and
 the SSE catalogue, is
-[`docs/api-reference.md`](https://github.com/jgoppert/reverie/blob/main/apps/web/docs/api-reference.md).
+[`docs/api-reference.md`](https://github.com/CogniPilot/reverie/blob/main/apps/web/docs/api-reference.md).
 
 ## What is stable
 
@@ -116,7 +116,7 @@ single-job GET has the job itself, create/update/enable have `{ job }`, delete h
 `{}`, and Run Now has `{ run, activeAgents }`. Prompt delivery is asynchronous;
 `session_started` and `prompt_sent` describe launch/delivery, not task success.
 
-The [cron API reference](https://github.com/jgoppert/reverie/blob/main/apps/web/docs/api-reference.md#cron-jobs)
+The [cron API reference](https://github.com/CogniPilot/reverie/blob/main/apps/web/docs/api-reference.md#cron-jobs)
 lists all request and response fields, validation, and ownership restrictions.
 [Creating a job](Cron-Jobs) covers the UI and schedule semantics.
 
@@ -200,4 +200,4 @@ Most are environment-overridable. See `src/config/`.
 - [Driving Reverie From An Agent](Driving-Reverie-From-An-Agent) - the practical version, with recipes.
 - [Hooks And Integrations](Hooks-And-Integrations) - events flowing back into Reverie.
 - [Versioning](Versioning) - what the version number promises.
-- [`docs/api-reference.md`](https://github.com/jgoppert/reverie/blob/main/apps/web/docs/api-reference.md) - the full specification.
+- [`docs/api-reference.md`](https://github.com/CogniPilot/reverie/blob/main/apps/web/docs/api-reference.md) - the full specification.
