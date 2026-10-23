@@ -46,7 +46,7 @@ let
         test/employee-pronouns.test.ts test/routes/voice-speak-routes.test.ts \
         test/hands-free.test.ts test/car-hands-free.test.ts test/voice-chat.test.ts test/car-mode.test.ts \
         test/car-mode-team-voice.test.ts test/car-mode-member-voice.test.ts test/car-reply-voice.test.ts \
-        test/routes/voice-turn-routes.test.ts test/routes/voice-service-status.test.ts test/chat-app-dm-voice.test.ts \
+        test/routes/voice-turn-routes.test.ts test/routes/voice-service-status.test.ts test/voice-member-dispatch.test.ts test/chat-app-dm-voice.test.ts \
         test/read-aloud-team-voice.test.ts test/session-cli-builder.test.ts test/board-page-routes.test.ts test/company-logos.test.ts \
         test/reboot-restore.test.ts test/reboot-restore-persistent.test.ts \
         test/routes/reboot-restore-routes.test.ts test/codex-transcript.test.ts test/routes/company-avatar.test.ts \

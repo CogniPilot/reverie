@@ -45,7 +45,7 @@ import { LastSeenStore, type SeenMark } from './chatroom-last-seen.js';
 import { PendingDeliveryStore } from './chatroom-pending-delivery.js';
 import { ChatArchive, zoneWeek } from './chat-archive.js';
 import { ChatDb, ChatDbSyncError, importLegacy, readArchive, standingLines, type JournalLine, type SyncChanges } from './chat-db.js';
-import { ChatroomDelivery, buildBriefing, paneAcceptsChat, modePollsChat, roomLabel, senderLabel, wakeRecipients, renderForRecipient, type DeliverySession } from './chatroom-delivery.js';
+import { ChatroomDelivery, buildBriefing, paneAcceptsChat, modePollsChat, roomLabel, senderLabel, wakeRecipients, isAddressedVoiceTurn, renderForRecipient, type DeliverySession } from './chatroom-delivery.js';
 import { quoteForPane } from './pane-quote.js';
 import { messageWithEmployeeIdentity, stampEmployeeSender, type ChatIdentityLookup } from './chat-message-identity.js';
 
@@ -358,8 +358,20 @@ export class ChatroomService {
 
   /** Reading a page covers its returned identities, not earlier gaps hidden by the newest seen mark. */
   acknowledgeAgentRead(sessionId: string, roomId: string, messages: ChatMessage[]): void {
-    if (!this.store.get(roomId)?.members.some((m) => m.sessionId === sessionId)) return;
-    this.delivery.acknowledgeRead(sessionId, roomId, messages.map((m) => m.id));
+    const room = this.store.get(roomId);
+    if (!room?.members.some((m) => m.sessionId === sessionId)) return;
+    // Seeing history while working is not a new runtime turn. Preserve only
+    // unattempted, addressed voice prompts until they submit or receive an answer.
+    // Already-attempted/uncertain writes keep the existing inspection/receipt path;
+    // never recreate or repaste an identity that might have reached the runtime.
+    const promptDelivery = paneAcceptsChat(this.deps.getSession(sessionId)?.mode);
+    const acknowledged = messages.filter(message => {
+      const queued = this.delivery.queuedFor(roomId, message.id).includes(sessionId);
+      const answered = room.messages.some(item => item.from.kind === 'agent' &&
+        item.from.sessionId === sessionId && item.replyTo === message.id);
+      return !promptDelivery || !queued || answered || !isAddressedVoiceTurn(room, message, sessionId, this.nameOf);
+    });
+    this.delivery.acknowledgeRead(sessionId, roomId, acknowledged.map((m) => m.id));
     for (const message of messages) this.markSeen(sessionId, roomId, message.id);
   }
 
@@ -506,6 +518,14 @@ export class ChatroomService {
       // Membership and owner scope are checked again, never inferred from persisted recipients.
       if (!room || !member || !session || member.postOnly || session.owner !== room.owner || message?.deleted
         || (message && !messageRecipients(room, message).includes(entry.sessionId))) {
+        pending.remove([entry.id]);
+        continue;
+      }
+      // A linked answer may have committed just before a crash interrupted
+      // pending-store cleanup. Reconcile it before restoring another prompt.
+      if (message && isAddressedVoiceTurn(room, message, entry.sessionId, this.nameOf) &&
+          room.messages.some(answer => answer.from.kind === 'agent' &&
+            answer.from.sessionId === entry.sessionId && answer.replyTo === entry.messageId)) {
         pending.remove([entry.id]);
         continue;
       }
@@ -1193,6 +1213,13 @@ export class ChatroomService {
     if (from.kind === 'agent' && cleanName(from.name)) this.knownNames.set(from.sessionId, cleanName(from.name));
     // Persisted before it is shown or delivered: with the database, committed before anyone sees it.
     this.schedulePersist(room.id);
+    if (message.from.kind === 'agent' && message.replyTo) {
+      const asked = room.messages.find(item => item.id === message.replyTo);
+      if (asked && isAddressedVoiceTurn(room, asked, message.from.sessionId, this.nameOf)) {
+        // The member answered during its current turn: no redundant wake remains.
+        this.delivery.acknowledgeRead(message.from.sessionId, roomId, [asked.id]);
+      }
+    }
     this.deps.broadcast(ChatroomMessage, { owner: room.owner ?? '@single', roomId: room.id, message });
     // A spoken turn was already answered by the voice service: show it, never type it into a pane.
     if (deliver) {
@@ -1206,6 +1233,15 @@ export class ChatroomService {
     }
     this.trackOwedReplies(room, message, deliver);
     for (const listener of this.messageListeners) listener(room, message);
+    if (deliver) {
+      // An addressed voice turn should not wait for the next delivery poll.
+      // Use the same durable queue and flush gates: busy/offline/uncertain
+      // sessions stay held, and concurrent triggers cannot submit it twice.
+      for (const member of room.members) {
+        if (isAddressedVoiceTurn(room, message, member.sessionId, this.nameOf))
+          void this.delivery.flush(member.sessionId).catch(() => {});
+      }
+    }
     return message;
   }
 

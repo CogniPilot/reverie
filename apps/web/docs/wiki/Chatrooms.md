@@ -171,6 +171,24 @@ your words are transcribed by the browser and previewed in the composer. Microph
 permission and the browser's recognition service must be available. Phones have the
 same Voice entry point as desktops.
 
+### Addressed voice turns and history reads
+
+A typed mention, a reply to the voice member, or a spoken turn addressed to it
+stays queued while that member finishes other work. Reading the room history
+marks the message as seen; it does not consume an unsubmitted voice turn. When
+the runtime becomes idle, normal chat delivery submits the queued question.
+An idle, eligible voice runtime is offered that queued turn immediately through
+the existing dispatcher; it need not wait for the next periodic poll. Busy and
+spacing checks still apply. The prompt includes the message ID so the member can link its answer. If it
+already answers during its current turn, that linked answer cancels the queued
+wake. Recovery also reconciles a saved answer if pending-delivery cleanup was
+interrupted before restart. This does not add voice wakes for ordinary room chatter.
+
+This keeps the existing submission safeguards: an uncertain attempted write is
+not automatically pasted again, and a stopped session is not started by a room
+message. Polling harnesses such as Hands read their normal API feed and never
+receive an extra typed prompt. Delivery and an answered turn remain different states.
+
 ## Car screen
 
 Car screen fills the display with **Listening**, **Thinking**, **Speaking**, or

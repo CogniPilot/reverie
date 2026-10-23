@@ -287,8 +287,13 @@ export function registerVoiceTurnRoutes(
         const asked = chatrooms.post(room.id, speaker(req), transcript, [target.sessionId], { spoken: true });
 
         // 3. Its answer: the member's post in this room whose replyTo is this transcript (say --reply-to <id>).
-        // Listening starts in the same tick as the post, so nothing can arrive in between.
-        const answer = await new Promise<ChatMessage | null>((resolve) => {
+        // post() invokes room listeners synchronously. An answer can already be saved
+        // before it returns, so reconcile history before subscribing for future posts.
+        // The lookup and subscription have no await between them.
+        const isAnswer = (message: ChatMessage) => !message.deleted && message.from.kind === 'agent' &&
+          message.from.sessionId === target.sessionId && message.replyTo === asked.id;
+        const savedAnswer = chatrooms.room(room.id)?.messages.find(isAnswer);
+        const answer = savedAnswer ?? await new Promise<ChatMessage | null>((resolve) => {
           let stop = () => {};
           const done = (m: ChatMessage | null) => {
             stop();
@@ -296,9 +301,7 @@ export function registerVoiceTurnRoutes(
           };
           const unsubscribe = chatrooms.onMessage((r, m) => {
             // Only the member's own post that names this transcript as the message it answers: nothing is guessed.
-            if (r.id !== room.id || m.from.kind !== 'agent' || m.from.sessionId !== target.sessionId) return;
-            if (m.replyTo !== asked.id) return;
-            done(m);
+            if (r.id === room.id && isAnswer(m)) done(m);
           });
           const timer = setTimeout(() => done(null), replyWaitMs);
           // A phone that hangs up stops the wait; the answer still lands in the room.
