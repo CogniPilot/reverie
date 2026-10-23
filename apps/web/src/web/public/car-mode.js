@@ -27,6 +27,7 @@
 
 /** How long to wait for the member's answer before listening again. */
 const CAR_REPLY_TIMEOUT_MS = 180_000;
+const CAR_POST_CONFIRM_MS = 25_000;
 /** Join final recognition segments across a short natural pause. */
 const CAR_FINAL_GRACE_MS = 1500;
 /** Chrome stops long utterances; speaking sentence by sentence avoids it. */
@@ -613,6 +614,7 @@ class CarModeController {
   }
 
   async _final(text) {
+    const generation = ++this.speakGen;
     // Stop listening while she thinks and speaks, so she is never transcribed.
     this._clearListenTimer();
     this.interim = '';
@@ -621,11 +623,13 @@ class CarModeController {
     this._set('thinking', text);
     this.sentAt = Date.now();
     try {
-      await this.deps.send(text);
+      if (await this.deps.send(text) === false) return;
     } catch (err) {
-      this._set('paused', `Not sent: ${err?.message || err}`);
+      if (generation !== this.speakGen || this.state !== 'thinking') return;
+      this._set('paused', `${err?.unconfirmed ? 'Not confirmed' : 'Not sent'}: ${err?.message || err}`);
       return;
     }
+    if (generation !== this.speakGen || this.state !== 'thinking') return;
     this._clearReplyTimer();
     this.replyTimer = this.deps.setTimeout(() => {
       this.replyTimer = null;
@@ -634,7 +638,7 @@ class CarModeController {
   }
 
   /** The voice member answered: speak it, then listen again. */
-  reply(text) {
+  reply(text, link = {}) {
     if (this.state === 'off' || this.state === 'paused') return false;
     this._clearReplyTimer();
     this._stopRecognition();
@@ -668,6 +672,8 @@ class CarModeController {
     const voice = this.deps.voice();
     const batch = parts.map((part, i) => {
       const u = this.deps.createUtterance(part);
+      if (link.turnId) u.turnId = link.turnId;
+      if (link.messageId) u.replyMessageId = link.messageId;
       if (voice) {
         u.voice = voice;
         u.lang = voice.lang;
@@ -874,6 +880,7 @@ Object.assign(ReverieApp.prototype, {
     this._carSpeakerTimer = setInterval(() => this._renderCarSpeaker(), CAR_SPEAKER_MS);
     this._keepCarScreenAwake();
     this._car?.stop();
+    this._carTurn = null;
     if (this._carEngine === 'speech') {
       const synth = window.speechSynthesis;
       const diag = (kind, data) => this._diag?.(kind, data);
@@ -946,6 +953,7 @@ Object.assign(ReverieApp.prototype, {
 
   closeCarMode({ preserveMode = false } = {}) {
     this._carOpenGeneration = (this._carOpenGeneration || 0) + 1;
+    this._carTurn = null;
     if (!this._carScreen || this._carScreen.hidden) return;
     if (!preserveMode) this._setRoomVoiceMode?.('off');
     if (this._hfStream) this._hfClose?.('car-closed');
@@ -992,35 +1000,94 @@ Object.assign(ReverieApp.prototype, {
     return this._carAwake.start();
   },
 
+  _carTurnCurrent(turn) {
+    const mode = this._roomVoiceMode?.();
+    return !!turn && this._carTurn === turn && this._car === turn.controller &&
+      this._car?.state === 'thinking' && this._car.speakGen === turn.generation &&
+      this._chatRoomId === turn.roomId && this._carVoiceMember()?.sessionId === turn.memberId &&
+      this._carOpenGeneration === turn.openGeneration && !this._carScreen?.hidden &&
+      !this._chatApp?.embassy?.selected && (mode === undefined || mode === 'car');
+  },
+
   async _carSend(text) {
     if (typeof text !== 'string' || !text.trim()) throw new Error('No speech was recognized; nothing was posted');
     const member = this._carVoiceMember();
     if (!member) throw new Error('no voice member');
-    const res = await this._chatApi(`/api/chatrooms/${encodeURIComponent(this._chatRoomId)}/messages`, {
-      method: 'POST',
-      body: { text, to: [member.sessionId], spoken: true },
-    });
-    if (!res.ok) throw new Error(res.error);
+    const turn = { roomId: this._chatRoomId, memberId: member.sessionId,
+      controller: this._car, generation: this._car?.speakGen, openGeneration: this._carOpenGeneration,
+      started: globalThis.performance?.now?.() ?? Date.now(), id: null, early: [], overflow: false, answered: false };
+    this._carTurn = turn;
+    if (!this._carTurnCurrent(turn)) { this._carTurn = null; throw new Error('Car conversation is no longer active'); }
+    this._diag?.('voice:post-start', { roomId: turn.roomId, memberId: turn.memberId, generation: turn.generation, openGeneration: turn.openGeneration, chars: text.length });
+    const unconfirmed = (message) => Object.assign(new Error(message), { unconfirmed: true });
+    const abort = typeof AbortController === 'function' ? new AbortController() : null;
+    let res, confirmationTimer;
+    try {
+      res = await Promise.race([
+        this._chatApi(`/api/chatrooms/${encodeURIComponent(turn.roomId)}/messages`, {
+          method: 'POST', body: { text, to: [turn.memberId], spoken: true }, signal: abort?.signal,
+        }),
+        new Promise((_, reject) => {
+          confirmationTimer = setTimeout(() => {
+            abort?.abort();
+            reject(new Error('Message confirmation timed out'));
+          }, CAR_POST_CONFIRM_MS);
+        }),
+      ]);
+    } catch {
+      if (this._carTurn === turn) this._carTurn = null;
+      throw unconfirmed('Message confirmation was lost. Check the room before trying again.');
+    } finally {
+      clearTimeout(confirmationTimer);
+    }
+    if (!this._carTurnCurrent(turn)) {
+      if (this._carTurn === turn) this._carTurn = null;
+      return false;
+    }
+    if (!res?.ok) {
+      this._carTurn = null;
+      if (res?.status >= 400 && res.status < 500) throw new Error(res.error || 'Voice message was refused');
+      throw unconfirmed('Message confirmation was lost. Check the room before trying again.');
+    }
+    const posted = res.data?.message;
+    if (typeof posted?.id !== 'string' || !posted.id || posted.roomId !== turn.roomId ||
+        posted.from?.kind !== 'user' || posted.spoken !== true || !Array.isArray(posted.to) || !posted.to.includes(turn.memberId)) {
+      this._carTurn = null;
+      throw unconfirmed('No matching message confirmation. Check the room before trying again.');
+    }
+    turn.id = posted.id;
+    this._diag?.('voice:post-confirmed', { roomId: turn.roomId, memberId: turn.memberId, messageId: turn.id, generation: turn.generation, openGeneration: turn.openGeneration,
+      elapsedMs: Math.max(0, (globalThis.performance?.now?.() ?? Date.now()) - turn.started) });
+    const early = turn.early.find(message => message.replyTo === turn.id);
+    turn.early = [];
+    if (early) this._carModeOnMessage({ roomId: turn.roomId, message: early });
+    else if (turn.overflow) {
+      this._carTurn = null;
+      throw unconfirmed('Too many early replies to confirm the answer. Check the room.');
+    }
   },
 
-  /** Called for every room message (chatroom-ui.js): speak the voice member's answers. */
+  /** Car conversations read only an exact answer to their acknowledged spoken turn. */
   _carModeOnMessage(data) {
     if (!this._car || this._carScreen?.hidden) return;
-    const m = data?.message;
-    const member = this._carVoiceMember();
-    if (!m || !member || data.roomId !== this._chatRoomId) return;
-    if (m.from.kind !== 'agent' || m.from.sessionId !== member.sessionId) return;
-    if (m.voice) return; // a /turn reply already carries its own audio
-    if (m.to !== 'all' && !m.to.includes('user')) return;
-    // The same answer posted twice in a row (seen in the room) is spoken once.
-    const now = Date.now();
-    if (m.text === this._carLastReply && now - (this._carLastReplyAt || 0) < 30_000) return;
+    const m = data?.message, turn = this._carTurn;
+    if (!m || typeof m.id !== 'string' || !m.id || !this._carTurnCurrent(turn) || turn.answered || m.deleted || data.roomId !== turn.roomId) return;
+    if (m.from?.kind !== 'agent' || m.from.sessionId !== turn.memberId || m.voice) return;
+    if (m.to !== 'all' && (!Array.isArray(m.to) || !m.to.includes('user'))) return;
+    if (typeof m.replyTo !== 'string' || !m.replyTo) return;
+    if (!turn.id) {
+      if (turn.early.some(message => message.id === m.id)) return;
+      if (turn.early.length < 32) turn.early.push(m);
+      else turn.overflow = true;
+      return;
+    }
+    if (m.replyTo !== turn.id) return;
     const phrase = typeof chatAttachmentPhrase === 'function' ? chatAttachmentPhrase(m.attachments) : '';
     const spokenText = [m.text, phrase ? `${m.from.name.split(': ').pop()} ${phrase}.` : ''].filter(Boolean).join(' ');
-    if (this._car.reply(spokenText)) {
-      this._carLastReply = m.text;
-      this._carLastReplyAt = now;
-    }
+    turn.answered = true;
+    this._diag?.('voice:linked-reply', { roomId: turn.roomId, memberId: turn.memberId, messageId: m.id, replyTo: turn.id,
+      elapsedMs: Math.max(0, (globalThis.performance?.now?.() ?? Date.now()) - turn.started) });
+    this._car.reply(spokenText, { turnId: turn.id, messageId: m.id });
   },
 
   /** The member's own server voice is chosen in the menu (the default). */
@@ -1042,12 +1109,17 @@ Object.assign(ReverieApp.prototype, {
       fetchAudio: async (text, utterance) => {
         const member = this._carVoiceMember();
         if (!member) return null;
+        const started = globalThis.performance?.now?.() ?? Date.now();
+        const link = { turnId: utterance?.turnId, messageId: utterance?.replyMessageId };
+        diag('team:request', { ...link, chars: text.length });
         const res = await this._chatApi('/api/voice/speak', {
           method: 'POST',
           body: { room: this._chatRoomId, member: member.sessionId, text },
           signal: AbortSignal.timeout?.(CAR_TEAM_FETCH_MS),
         });
-        diag('team:speak', { ok: res.ok, engine: res.data?.engine, voice: res.data?.voice?.id, chars: text.length });
+        diag('team:speak', { ...link, ok: res.ok, engine: res.data?.engine, voice: res.data?.voice?.id,
+          chars: text.length, audioUrl: res.data?.audioUrl,
+          elapsedMs: Math.max(0, (globalThis.performance?.now?.() ?? Date.now()) - started) });
         if (res.ok && res.data?.voice?.provider === 'browser' && utterance) utterance.employeeVoice = res.data.voice;
         return res.ok && typeof res.data?.audioUrl === 'string' ? { url: res.data.audioUrl, engine: res.data.engine, voice: res.data.voice } : null;
       },

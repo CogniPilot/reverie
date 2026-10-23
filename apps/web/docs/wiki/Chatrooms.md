@@ -197,6 +197,21 @@ speech synthesis, it listens for a pause and sends what you said to the room's v
 member. Otherwise it uses the recorded-audio server path, which must pass the readiness
 check first. Tap to pause or resume; **Exit** turns that room's Voice mode off.
 
+The browser car conversation reads one answer linked to its acknowledged spoken
+question. Other posts stay in the room and do not interrupt that answer. Answers
+that arrive before the message confirmation are held until their question ID is
+known. Identical wording on a different question is still read; duplicate events
+for the same turn are not. Pausing, closing or changing the room cancels that wait.
+An unknown message outcome is shown as **Not confirmed**: check the room before
+trying again, because the question may already have been posted.
+Message confirmation waits at most 25 seconds; that deadline does not limit
+the answering runtime or audio playback and never automatically reposts a question.
+
+Diagnostics link message confirmation, the answer and each synthesis request by
+turn ID, with elapsed times and audio IDs. Those timing events contain character
+counts rather than transcript text. Browser audio events record actual playback
+progress; request completion alone is not audible-playback proof.
+
 **Diag** shows the chosen engine (`speech` or `server`) and the reason, and includes the
 same information, service-probe state and capabilities in the uploaded diagnostics.
 

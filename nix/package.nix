@@ -45,7 +45,7 @@ let
         test/cli-registry-spawn-golden.test.ts test/company-lifecycle-ui.test.ts test/company-voice-ui.test.ts \
         test/employee-pronouns.test.ts test/routes/voice-speak-routes.test.ts \
         test/hands-free.test.ts test/car-hands-free.test.ts test/voice-chat.test.ts test/car-mode.test.ts \
-        test/car-mode-team-voice.test.ts test/car-mode-member-voice.test.ts test/car-reply-voice.test.ts \
+        test/car-mode-team-voice.test.ts test/car-mode-member-voice.test.ts test/car-reply-voice.test.ts test/car-turn-link.test.ts \
         test/routes/voice-turn-routes.test.ts test/routes/voice-service-status.test.ts test/voice-member-dispatch.test.ts test/chat-app-dm-voice.test.ts \
         test/read-aloud-team-voice.test.ts test/session-cli-builder.test.ts test/board-page-routes.test.ts test/company-logos.test.ts \
         test/reboot-restore.test.ts test/reboot-restore-persistent.test.ts \
