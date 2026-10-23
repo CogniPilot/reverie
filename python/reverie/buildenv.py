@@ -320,13 +320,15 @@ def ledger_estimate(ledger, project, command, jobs, margin=1.25, floor=ESTIMATE_
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--project", required=True, help="names /scratch/build/<project>/cargo")
+    parser.add_argument("--project", required=True, help="names <scratch>/build/<project>/cargo")
     parser.add_argument("--repo", type=Path, default=Path.cwd())
+    parser.add_argument("--scratch", type=Path, default=SCRATCH,
+                        help="writable build/cache/temp root (default: /scratch); use a task directory under RUNNER_TEMP in CI")
     parser.add_argument("--expect", required=True,
                         help="expected peak memory (e.g. 2.5G), or 'auto': the ledger's largest whole-tree peak of this command, + 25%%, at least 256M")
     parser.add_argument("--disk", required=True, type=parse_size, help="expected new disk use")
     parser.add_argument("--jobs", type=int, default=DEFAULT_JOBS)
-    parser.add_argument("--ledger", type=Path, default=SCRATCH / "profiles" / "build-ledger.jsonl")
+    parser.add_argument("--ledger", type=Path, help="measurement ledger (default: <scratch>/profiles/build-ledger.jsonl)")
     parser.add_argument("--wait", type=int, default=0, metavar="SECONDS",
                         help="queue: retry a refused preflight (memory, pids, disk) every 10 s for up to SECONDS")
     parser.add_argument("--expect-files", metavar="N|auto",
@@ -337,6 +339,8 @@ def main(argv=None):
     command = args.command[1:] if args.command[:1] == ["--"] else args.command
     if not command: parser.error("give the build command after --")
     if not 1 <= args.jobs <= 8: parser.error("--jobs must be between 1 and 8")
+    args.scratch = args.scratch.resolve()
+    args.ledger = args.ledger or args.scratch / "profiles" / "build-ledger.jsonl"
     if args.expect == "auto":
         args.expect = ledger_estimate(args.ledger, args.project, command, args.jobs)
         if args.expect is None:
@@ -351,8 +355,14 @@ def main(argv=None):
         else: parser.error("--expect-files takes a count or 'auto'")
         if files < 1: parser.error("--expect-files needs at least one test file (auto found none: give N)")
         run_kw["expect_files"] = files
+    # disk_usage must inspect the selected filesystem, which need not have a
+    # pre-existing /scratch mount (e.g. a disposable hosted runner).
+    try:
+        (args.scratch / "tmp").mkdir(parents=True, exist_ok=True)
+    except OSError as error:
+        parser.error("cannot prepare scratch directory: %s" % error)
     record = run(args.project, args.repo.resolve(), command, args.expect, args.disk, args.jobs, ledger=args.ledger,
-                 wait=args.wait, **run_kw)
+                 wait=args.wait, scratch=args.scratch, **run_kw)
     if record["status"] == "fewer-files":
         ran = record["ran_files"]
         print("buildenv: expected %d test files, vitest ran %s" % (record["expected_files"],

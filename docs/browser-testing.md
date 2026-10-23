@@ -37,3 +37,79 @@ When updating Playwright, prepare matching browser libraries and verify both eng
 with no upgrades or removals. Package versions remain supplied by Debian's
 configured repositories; the package list is tied to Playwright 1.60.0, not a
 frozen Debian snapshot.
+
+## Voice audio acceptance
+
+The root `Voice audio acceptance` workflow runs sandboxed Chromium against a
+loopback fixture containing the production voice routes and car playback code.
+Its agent replies are fixed synthetic text; its Kokoro synthesis and Whisper
+recognition are real. The CI-only adapter uses Kokoro for both route protocols;
+it does not qualify an operator's Piper service or deploy any speech service.
+Dependencies come from `flake.lock`. `nix/voice-ci.nix` pins each speech model by
+SHA256, including the upstream [Whisper tiny.en checkpoint](https://github.com/openai/whisper/blob/main/whisper/__init__.py).
+Kokoro uses the same model hashes and package as `reverie-kokoro`. Whisper is MIT
+licensed; Kokoro packaging retains its Apache-2.0 license metadata. These test
+models are separate from the production image.
+
+From a clean checkout, install the locked JavaScript dependencies without browser
+downloads, then run the guarded harness with a **new** artifact directory:
+
+```bash
+nix develop .#voice-ci --command npm ci --prefix apps/web --ignore-scripts
+export REVERIE_VOICE_CI_ARTIFACTS=/scratch/build/voice-ci-run-001
+nix develop .#voice-ci --command python3 -m reverie.buildenv \
+  --project voice-ci --repo "$PWD" --expect 4G --disk 2G --jobs 1 \
+  -- bash scripts/test-voice-ci.sh
+```
+
+The script clears inherited instance settings, uses a private fixture home and
+ephemeral loopback ports, and tears down only its own service processes. Those
+services remain in the resource guard's process group.
+The guard defaults to `/scratch` on laptops. Hosted CI explicitly uses
+`--scratch "$RUNNER_TEMP/voice-ci-build"`; it creates that task root and its temp
+directory before checking disk space. Memory/PID admission, disk reserve,
+process-group watchdog and measurement ledger remain enabled. Cache, build and
+default ledger paths all stay under the selected root.
+
+Validator/launcher checks and real audio acceptance are separate workflow steps.
+A zero-failure validator summary does not mean the browser or speech engines ran.
+Only a completed browser run followed by every real Whisper comparison and the
+ten-second negative control writes `acceptance.json`; partial reports are retained
+for diagnosis and cannot satisfy that final success check.
+It requires an explicit `CHROMIUM_PATH`, keeps Chromium's sandbox enabled and
+fails if the browser, model or service is unavailable. Ubuntu CI enables
+unprivileged user namespaces on its disposable runner to support that sandbox.
+No owner endpoints, accounts, recordings, external LLM or GPU are required.
+
+Both `/api/voice/speak` and `/api/voice/turn` return JSON with an audio URL. The
+harness follows those URLs and keeps every successful utterance's WAV. It checks
+RIFF lengths, PCM frame counts, non-silent samples, decoded duration and actual
+Whisper transcripts. Transcript comparison normalizes case and punctuation,
+allows a fixture-specific word error rate, and requires the long reply's final
+words. An independently shortened, valid ten-second WAV must fail both duration
+and real recognition checks. Timing artifacts distinguish request start, headers,
+body completion, playback and service synthesis spans; a five-second heartbeat
+shows that a quiet stage is still being observed.
+
+`scripts/voice-ci/fixtures.json` defines the synthetic reply, duration bounds and
+latency budgets. Its initial 18–40 second duration interval and generous latency
+ceilings require qualification on the pinned CI environment before calling this
+an accepted performance baseline. Bounds must be reviewed against measured audio,
+never automatically rewritten to fit a failing run. The long-clip playback test
+injects transient `waiting`/`playing` events while real audio continues: a stale
+ten-second watchdog must not interrupt resumed playback.
+
+For selected member voices, `/voice/speak` must request and report `am_michael`
+on every utterance. `/voice/turn` currently leaves voice choice to its upstream
+service; this adapter records its configured effective `am_michael` default
+separately, so it does not pretend that the turn route forwards a member voice.
+The harness injects a later voice-ID mismatch and a later unavailable clip and
+requires whole-reply replay with a visible fallback notice.
+
+Phone `speechSynthesis` audio cannot be captured here. That branch is checked
+with synthetic native-voice objects at the **selection, batch consistency and
+indicator** level only; there is no claim of audible accent or speaker identity.
+Likewise, Whisper establishes spoken content, not acoustic speaker identity.
+The artifacts contain synthetic WAVs, transcripts, per-utterance voice metadata,
+timings and a Playwright trace; model files and fixture-home state are excluded.
+Real phone autoplay, interruption and hardware behavior remain device checks.

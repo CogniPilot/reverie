@@ -171,6 +171,7 @@
         });
       devShells = forAllSystems (system:
         let pkgs = pkgsFor system; in {
+          voice-ci = import ./nix/voice-ci.nix { inherit pkgs; kokoro = self.packages.${system}.kokoro; };
           default = pkgs.mkShell {
             packages = [ (pkgs.python3.withPackages (ps: [ ps.pillow ps.setuptools ])) pkgs.nodejs_22 pkgs.git pkgs.tmux pkgs.gcc pkgs.gnumake ];
             shellHook = ''

@@ -345,6 +345,48 @@ class BuildEnvTests(unittest.TestCase):
         self.assertEqual((code, entry["status"], set(entry)), (5, "failed", LEDGER_FIELDS))
         self.assertEqual(err, b"")
 
+    def runner_cli(self, scratch, command):
+        # Exercise real preflight, child process, watchdog and ledger; only the
+        # cgroup/filesystem reserve are isolated from the developer's laptop.
+        def isolated(*args, **kw):
+            return run(*args, **dict(kw, cgroup=self.cgroup, disk_reserve=0))
+        with mock.patch.object(reverie.buildenv, "run", isolated), redirect_stdout(io.StringIO()):
+            return main(["--project", "runner", "--repo", str(self.repo),
+                         "--scratch", str(scratch), "--expect", "100M", "--disk", "1M",
+                         "--jobs", "1", "--", *command])
+
+    def test_cli_runner_scratch_executes_child_and_keeps_all_paths_in_selected_root(self):
+        (self.repo / "rust-toolchain.toml").unlink()
+        scratch = Path(self.temp.name) / "runner-temp" / "fresh-build"
+        self.assertFalse(scratch.exists())
+        probe = "import json,os,tempfile; f=tempfile.NamedTemporaryFile(); open('env.json','w').write(json.dumps(dict(os.environ), sort_keys=True)); open('temp-path','w').write(f.name)"
+        with mock.patch.object(reverie.buildenv, "SCRATCH", Path("/missing-laptop-only-scratch")):
+            code = self.runner_cli(scratch, [sys.executable, "-c", probe])
+        self.assertEqual(code, 0)
+        env = json.loads((self.repo / "env.json").read_text())
+        for name in ("CARGO_TARGET_DIR", "CARGO_HOME", "RUSTUP_HOME", "TMPDIR"):
+            self.assertTrue(Path(env[name]).is_relative_to(scratch), (name, env[name]))
+        self.assertTrue(Path((self.repo / "temp-path").read_text()).is_relative_to(scratch / "tmp"))
+        ledger = json.loads((scratch / "profiles" / "build-ledger.jsonl").read_text())
+        self.assertEqual((ledger["status"], ledger["exit"]), ("ok", 0))
+        self.assertTrue((scratch / "build" / "runner" / ".build.lock").exists())
+
+    def test_cli_runner_scratch_does_not_bypass_memory_admission(self):
+        (self.repo / "rust-toolchain.toml").unlink()
+        self.memory(used=3500 * MiB)
+        scratch = Path(self.temp.name) / "runner-refused"
+        code = self.runner_cli(scratch, [sys.executable, "-c", "open('ran','w')"])
+        self.assertEqual(code, EX_TEMPFAIL)
+        self.assertFalse((self.repo / "ran").exists())
+
+    def test_cli_bad_scratch_refuses_before_starting_child(self):
+        scratch = Path(self.temp.name) / "not-a-directory"
+        scratch.write_text("file")
+        with self.assertRaises(SystemExit) as caught, redirect_stderr(io.StringIO()):
+            self.runner_cli(scratch, [sys.executable, "-c", "open('ran','w')"])
+        self.assertEqual(caught.exception.code, 2)
+        self.assertFalse((self.repo / "ran").exists())
+
     def test_cli_requires_estimates_and_exits_tempfail_when_refused(self):
         with self.assertRaises(SystemExit): main(["--project", "demo", "--", "true"])        # no --expect/--disk
         isolated = lambda *a, **kw: run(*a, **dict(kw, scratch=self.scratch, rust_cache=self.cache, cgroup=self.cgroup))
