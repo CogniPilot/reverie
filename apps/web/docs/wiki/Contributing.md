@@ -1,19 +1,19 @@
 # Contributing
 
 The full guide lives in
-[CONTRIBUTING.md](https://github.com/jgoppert/reverie/blob/main/apps/web/.github/CONTRIBUTING.md).
+[CONTRIBUTING.md](https://github.com/CogniPilot/reverie/blob/main/apps/web/.github/CONTRIBUTING.md).
 This page is the short orientation, plus how to fix a page in this wiki.
 
 ## Where things go
 
 | You have                    | Send it to                                                                                   |
 | --------------------------- | ---------------------------------------------------------------------------------------------- |
-| A bug                       | An [issue](https://github.com/jgoppert/reverie/issues), with OS, install method, browser, and which CLI the session was running. |
-| A question or setup problem | [Discussions](https://github.com/jgoppert/reverie/discussions).                                    |
-| An idea                     | [Ideas](https://github.com/jgoppert/reverie/discussions/categories/ideas), where it gets voted on.  |
+| A bug                       | An [issue](https://github.com/CogniPilot/reverie/issues), with OS, install method, browser, and which CLI the session was running. |
+| A question or setup problem | [Discussions](https://github.com/CogniPilot/reverie/discussions).                                    |
+| An idea                     | [Ideas](https://github.com/CogniPilot/reverie/discussions/categories/ideas), where it gets voted on.  |
 | A small fix                 | Straight to a PR.                                                                                |
 | A bigger feature            | An issue or Discussion first, then build once the design has a nod.                              |
-| A security problem          | Never a public issue. See [SECURITY.md](https://github.com/jgoppert/reverie/blob/main/apps/web/.github/SECURITY.md). |
+| A security problem          | Never a public issue. See [SECURITY.md](https://github.com/CogniPilot/reverie/blob/main/apps/web/.github/SECURITY.md). |
 
 Issues usually get a response within a day, and every release credits its contributors and
 bug reporters by name.
@@ -22,7 +22,7 @@ bug reporters by name.
 
 ```bash
 # upstream repository (historical provenance); this fork is developed in the Reverie monorepo
-git clone https://github.com/jgoppert/reverie.git
+git clone https://github.com/CogniPilot/reverie.git
 cd Reverie
 npm install        # postinstall builds the vendored xterm addon bundles
 npm run dev        # http://localhost:3000
@@ -71,11 +71,11 @@ read `server.boundPort`. Never 3000.
 
 - Every source file opens with a `@fileoverview` block. Read it before the file; it is the
   map.
-- [`CLAUDE.md`](https://github.com/jgoppert/reverie/blob/main/apps/web/CLAUDE.md) at the repo root is
+- [`CLAUDE.md`](https://github.com/CogniPilot/reverie/blob/main/apps/web/CLAUDE.md) at the repo root is
   the densest architecture primer there is. It is written for AI coding agents, but its
   invariants apply identically to humans, and most review feedback traces back to something
   already written there.
-- [`docs/architecture-invariants.md`](https://github.com/jgoppert/reverie/blob/main/apps/web/docs/architecture-invariants.md)
+- [`docs/architecture-invariants.md`](https://github.com/CogniPilot/reverie/blob/main/apps/web/docs/architecture-invariants.md)
   holds the deep mechanisms and the history behind each rule.
 
 ## Good first contributions
@@ -87,7 +87,7 @@ read `server.boundPort`. Never 3000.
 - **Docs.** If you got stuck and then figured it out, the sentence that would have unstuck
   you is a pull request.
 - Anything labelled
-  [good first issue](https://github.com/jgoppert/reverie/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22).
+  [good first issue](https://github.com/CogniPilot/reverie/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22).
 
 Worth discussing first: new CLI backends, and real-device testing reports, especially
 mobile, which always find things emulation cannot.
@@ -106,7 +106,7 @@ mobile, which always find things emulation cannot.
 ## Fixing this wiki
 
 These pages are generated from
-[`docs/wiki/`](https://github.com/jgoppert/reverie/tree/main/apps/web/docs/wiki) in the main
+[`docs/wiki/`](https://github.com/CogniPilot/reverie/tree/main/apps/web/docs/wiki) in the main
 repository, and pushed here automatically when master changes.
 
 **Editing a page in the browser will be overwritten by the next sync.** Send a pull request
@@ -116,7 +116,7 @@ useful contribution.
 Conventions for wiki pages:
 
 - Links between pages use the wiki form: `[Remote Access](Remote-Access)`, no `.md`.
-- Links into the repository are absolute `https://github.com/jgoppert/reverie/blob/main/apps/web/...`
+- Links into the repository are absolute `https://github.com/CogniPilot/reverie/blob/main/apps/web/...`
   URLs.
 - Images are referenced from the main repository over raw URLs rather than being copied into
   the wiki.
@@ -128,4 +128,4 @@ Conventions for wiki pages:
 
 Be kind, be direct, assume good faith. Report unacceptable behaviour privately via the
 contact in
-[SECURITY.md](https://github.com/jgoppert/reverie/blob/main/apps/web/.github/SECURITY.md).
+[SECURITY.md](https://github.com/CogniPilot/reverie/blob/main/apps/web/.github/SECURITY.md).

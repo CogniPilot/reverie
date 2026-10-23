@@ -126,7 +126,7 @@ the start of its footer (`⬝■■■■■■⬝  esc interrupt`), and Reverie
 session from an idle one. A pending permission prompt shows as idle, since it is waiting on
 you. Before 1.40.0 an OpenCode session that had run a tool showed as working for good.
 
-Integration detail: [`docs/opencode-integration.md`](https://github.com/jgoppert/reverie/blob/main/apps/web/docs/opencode-integration.md).
+Integration detail: [`docs/opencode-integration.md`](https://github.com/CogniPilot/reverie/blob/main/apps/web/docs/opencode-integration.md).
 
 ### Codex
 
@@ -193,7 +193,7 @@ Pi needs the opposite instincts from every other CLI here.
   that to tell working from idle. Before 1.40.0 a Pi session that had started a turn showed
   as working for good.
 
-Guide: [`docs/pi-integration.md`](https://github.com/jgoppert/reverie/blob/main/apps/web/docs/pi-integration.md).
+Guide: [`docs/pi-integration.md`](https://github.com/CogniPilot/reverie/blob/main/apps/web/docs/pi-integration.md).
 
 ### Grok Build
 
@@ -208,7 +208,7 @@ xAI's `grok`, installed with `curl -fsSL https://x.ai/cli/install.sh | bash` int
   per-session environment override.
 - It renders a full-screen TUI, so scrolling is local scrollback.
 
-Guide: [`docs/grok-integration.md`](https://github.com/jgoppert/reverie/blob/main/apps/web/docs/grok-integration.md).
+Guide: [`docs/grok-integration.md`](https://github.com/CogniPilot/reverie/blob/main/apps/web/docs/grok-integration.md).
 
 ### DeepSeek Harness
 
@@ -233,7 +233,7 @@ session gets precise idle detection, the `stop` and `blocked` wait signals, and 
 Inbox items. Answers are read from the harness's own transcript on disk rather than
 scraped off the pane. The model is not a session setting; it is part of the profile.
 
-Guide: [`docs/deepseek-integration.md`](https://github.com/jgoppert/reverie/blob/main/apps/web/docs/deepseek-integration.md).
+Guide: [`docs/deepseek-integration.md`](https://github.com/CogniPilot/reverie/blob/main/apps/web/docs/deepseek-integration.md).
 
 ### OMP
 
@@ -249,7 +249,7 @@ same conversation with `--continue`. Reverie tells working from idle by reading 
 bar, where a spinner and the elapsed time replace the `π` while a turn runs. Before 1.40.0
 an OMP session that had started a turn showed as working for good.
 
-Guide: [`docs/omp-integration.md`](https://github.com/jgoppert/reverie/blob/main/apps/web/docs/omp-integration.md).
+Guide: [`docs/omp-integration.md`](https://github.com/CogniPilot/reverie/blob/main/apps/web/docs/omp-integration.md).
 
 ### Terminal / Shell
 

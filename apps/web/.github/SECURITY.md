@@ -23,7 +23,7 @@ Updates for git-clone installs, or `npm i -g aireverie@latest`).
 
 Report privately via **GitHub's private vulnerability reporting**:
 the repository's **Security** tab → **Report a vulnerability**
-(<https://github.com/jgoppert/reverie/security/advisories/new>). This opens a private
+(<https://github.com/CogniPilot/reverie/security/advisories/new>). This opens a private
 advisory thread with the maintainer.
 
 > Maintainer note: enable *Settings → Code security and analysis → Private

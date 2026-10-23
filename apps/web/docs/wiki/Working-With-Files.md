@@ -221,7 +221,7 @@ It is read-only and offline: Reverie never fetches, commits or changes the repos
 workspace is skipped even from a local session (a container can write there, and git would run
 that repository's own configuration on the host). The
 data comes from `GET /api/sessions/:id/git-status` and `GET /api/sessions/:id/git-diff`
-(see the [API reference](https://github.com/jgoppert/reverie/blob/main/apps/web/docs/api-reference.md)).
+(see the [API reference](https://github.com/CogniPilot/reverie/blob/main/apps/web/docs/api-reference.md)).
 
 ## Gotchas
 
@@ -240,4 +240,4 @@ data comes from `GET /api/sessions/:id/git-status` and `GET /api/sessions/:id/gi
 - [The Dashboard](The-Dashboard) - where the panels live.
 - [Input And Voice](Input-And-Voice) - other ways to get content into a session.
 - [Security](Security) - how the file surfaces are confined.
-- [`docs/file-viewer-edit-plan.md`](https://github.com/jgoppert/reverie/blob/main/apps/web/docs/file-viewer-edit-plan.md) - the edit-mode design.
+- [`docs/file-viewer-edit-plan.md`](https://github.com/CogniPilot/reverie/blob/main/apps/web/docs/file-viewer-edit-plan.md) - the edit-mode design.

@@ -49,7 +49,7 @@ predates the respawn presets, which cover most of what people originally used it
 less ceremony. Treat it as a specialised tool rather than the headline feature.
 
 Full background, including the upstream pattern it is based on:
-[`docs/ralph-wiggum-guide.md`](https://github.com/jgoppert/reverie/blob/main/apps/web/docs/ralph-wiggum-guide.md).
+[`docs/ralph-wiggum-guide.md`](https://github.com/CogniPilot/reverie/blob/main/apps/web/docs/ralph-wiggum-guide.md).
 
 ## The Orchestrator
 
@@ -73,7 +73,7 @@ coordinates phases and agents with verification between them. It suits work that
 natural shape ("migrate this, then update callers, then update the tests") rather than a
 flat backlog.
 
-Architecture: [`docs/orchestrator-loop-architecture.md`](https://github.com/jgoppert/reverie/blob/main/apps/web/docs/orchestrator-loop-architecture.md).
+Architecture: [`docs/orchestrator-loop-architecture.md`](https://github.com/CogniPilot/reverie/blob/main/apps/web/docs/orchestrator-loop-architecture.md).
 
 ## Running any of this safely
 

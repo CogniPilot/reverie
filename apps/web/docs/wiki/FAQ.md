@@ -1,7 +1,7 @@
 # FAQ
 
 The questions that keep arriving in
-[Discussions](https://github.com/jgoppert/reverie/discussions) and issues. For "why is it
+[Discussions](https://github.com/CogniPilot/reverie/discussions) and issues. For "why is it
 doing that", go to [Troubleshooting](Troubleshooting) instead.
 
 ## The basics
@@ -240,12 +240,12 @@ defaults.
 
 ### How do I request a feature?
 
-Open an [Idea](https://github.com/jgoppert/reverie/discussions/categories/ideas) and it gets
+Open an [Idea](https://github.com/CogniPilot/reverie/discussions/categories/ideas) and it gets
 voted on. Roadmap decisions happen there.
 
 ### How do I contribute code?
 
-[CONTRIBUTING.md](https://github.com/jgoppert/reverie/blob/main/apps/web/.github/CONTRIBUTING.md) has
+[CONTRIBUTING.md](https://github.com/CogniPilot/reverie/blob/main/apps/web/.github/CONTRIBUTING.md) has
 the full map. Small fixes can go straight to a PR; anything larger starts as an issue or
 Discussion so the design gets a nod first. Skins, translations, and docs are good first
 contributions.
@@ -253,6 +253,6 @@ contributions.
 ### How do I fix a mistake in this wiki?
 
 These pages are generated from
-[`docs/wiki/`](https://github.com/jgoppert/reverie/tree/main/apps/web/docs/wiki) in the main
+[`docs/wiki/`](https://github.com/CogniPilot/reverie/tree/main/apps/web/docs/wiki) in the main
 repository. Editing a page in the browser gets overwritten on the next sync, so send a PR
 against that directory instead.

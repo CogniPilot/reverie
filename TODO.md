@@ -78,7 +78,7 @@ Updated as work is tested and deployed. Existing backups must remain intact.
 - [ ] Agents can request Sleep as a Gantt task. A coordinator with explicit scheduling permission (such as the appointed COO/CTO) fits it around company work; record requests, approval and the scheduled window.
 - [x] Nix-managed Kokoro-ONNX service with contained, checksum-verified model storage; expert profiles list installed voices, retain selections independently of pronouns and play real sample previews. Startup does not delay the web server.
 - [x] Native Codex/Claude plan moves work between providers, infer the destination harness and use destination model defaults, while retaining handoff approval, identity, memories and channel memberships. Custom harness migration adapters remain separate work.
-- [ ] After cross-provider moves: restore the saved local Qwen setup for Jinx using Nix. Check existing GGUF weights and the model service first, then repair container connectivity or explicitly selected GPU compute access; retain her identity and recovered memories.
+- [ ] After cross-provider moves: restore an owner-selected local model setup using Nix. Check existing GGUF weights and the model service first, then repair container connectivity or explicitly selected GPU compute access; retain the selected agent’s identity and recovered memories.
 
 ## Deferred
 

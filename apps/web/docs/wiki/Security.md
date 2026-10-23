@@ -110,7 +110,7 @@ dictation through your Claude login, and the Read My Mind prediction call.
 ## Reporting a vulnerability
 
 **Never in a public issue.**
-[SECURITY.md](https://github.com/jgoppert/reverie/blob/main/apps/web/.github/SECURITY.md) has the
+[SECURITY.md](https://github.com/CogniPilot/reverie/blob/main/apps/web/.github/SECURITY.md) has the
 private disclosure process and the current list of known limitations.
 
 ## Read next
@@ -118,4 +118,4 @@ private disclosure process and the current list of known limitations.
 - [Remote Access](Remote-Access) - the safe ways to expose it.
 - [Multi-User Mode](Multi-User-Mode) - what it does and does not separate.
 - [Docker Cases](Docker-Cases) - real isolation for untrusted work.
-- [`docs/security-architecture.md`](https://github.com/jgoppert/reverie/blob/main/apps/web/docs/security-architecture.md) - the complete model.
+- [`docs/security-architecture.md`](https://github.com/CogniPilot/reverie/blob/main/apps/web/docs/security-architecture.md) - the complete model.

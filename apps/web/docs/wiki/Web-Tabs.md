@@ -121,4 +121,4 @@ same-host requests being CORS-checked with a null origin. Both present as the da
 
 - [The Dashboard](The-Dashboard) - the tab strip these share.
 - [Security](Security) - why the sandbox default is what it is.
-- [`docs/web-tabs.md`](https://github.com/jgoppert/reverie/blob/main/apps/web/docs/web-tabs.md) - the full reference.
+- [`docs/web-tabs.md`](https://github.com/CogniPilot/reverie/blob/main/apps/web/docs/web-tabs.md) - the full reference.

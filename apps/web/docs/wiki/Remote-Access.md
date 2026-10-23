@@ -166,7 +166,7 @@ Someone holding only the tunnel URL still meets the normal password prompt. The 
 fast path, not a bypass.
 
 Design detail and the threat analysis it is built against:
-[`docs/qr-auth-plan.md`](https://github.com/jgoppert/reverie/blob/main/apps/web/docs/qr-auth-plan.md).
+[`docs/qr-auth-plan.md`](https://github.com/CogniPilot/reverie/blob/main/apps/web/docs/qr-auth-plan.md).
 
 ## Behind a reverse proxy
 
@@ -252,7 +252,7 @@ reverie tui --list    # numbered list, then exit
 
 `Enter` attaches into the pane and `F1` comes back. Under 72 columns it drops the preview
 and becomes a single-column list, so it stays usable on a phone. The sessions are the same
-ones the dashboard shows. See [docs/tui.md](https://github.com/jgoppert/reverie/blob/main/apps/web/docs/tui.md)
+ones the dashboard shows. See [docs/tui.md](https://github.com/CogniPilot/reverie/blob/main/apps/web/docs/tui.md)
 for the full guide.
 
 ## Common problems
@@ -272,4 +272,4 @@ for the full guide.
 - [Security](Security) - the whole model, and the hardening checklist.
 - [Mobile Guide](Mobile-Guide) - once you can reach it from the phone.
 - [Running As A Service](Running-As-A-Service) - keeping server and tunnel up across reboots.
-- [`docs/security-architecture.md`](https://github.com/jgoppert/reverie/blob/main/apps/web/docs/security-architecture.md) - the full model.
+- [`docs/security-architecture.md`](https://github.com/CogniPilot/reverie/blob/main/apps/web/docs/security-architecture.md) - the full model.

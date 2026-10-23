@@ -305,7 +305,7 @@ On an HTTPS install, add `-k` to the curl commands and use the `https://` URL.
 
 ## Filing a good bug report
 
-Open an [issue](https://github.com/jgoppert/reverie/issues) with:
+Open an [issue](https://github.com/CogniPilot/reverie/issues) with:
 
 - OS and version.
 - Install method: installer, npm, or git clone.
@@ -318,6 +318,6 @@ Reports usually get a response within a day, and every release credits its repor
 name.
 
 Questions and setup help fit better in
-[Discussions](https://github.com/jgoppert/reverie/discussions). Security problems never go in a
+[Discussions](https://github.com/CogniPilot/reverie/discussions). Security problems never go in a
 public issue; see
-[SECURITY.md](https://github.com/jgoppert/reverie/blob/main/apps/web/.github/SECURITY.md).
+[SECURITY.md](https://github.com/CogniPilot/reverie/blob/main/apps/web/.github/SECURITY.md).

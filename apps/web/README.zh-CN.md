@@ -18,9 +18,9 @@
   <a href="https://www.typescriptlang.org/"><img src="https://img.shields.io/badge/TypeScript-5.9-3b82f6?style=flat-square&logo=typescript&logoColor=white" alt="TypeScript 5.9"></a>
   <a href="https://fastify.dev/"><img src="https://img.shields.io/badge/Fastify-5.x-1e3a5f?style=flat-square&logo=fastify&logoColor=white" alt="Fastify"></a>
   <a href="https://www.npmjs.com/package/aireverie"><img src="https://img.shields.io/npm/v/aireverie?style=flat-square&label=npm&color=22c55e" alt="npm version"></a>
-  <a href="https://github.com/jgoppert/reverie/stargazers"><img src="https://img.shields.io/github/stars/jgoppert/reverie?style=flat-square&color=eab308" alt="GitHub stars"></a>
-  <a href="https://github.com/jgoppert/reverie/graphs/contributors"><img src="https://img.shields.io/github/contributors/jgoppert/reverie?style=flat-square&color=3b82f6" alt="Contributors"></a>
-  <a href="https://github.com/jgoppert/reverie/commits/master"><img src="https://img.shields.io/github/commit-activity/t/jgoppert/reverie?style=flat-square&color=1e3a5f" alt="Total commits"></a>
+  <a href="https://github.com/CogniPilot/reverie/stargazers"><img src="https://img.shields.io/github/stars/CogniPilot/reverie?style=flat-square&color=eab308" alt="GitHub stars"></a>
+  <a href="https://github.com/CogniPilot/reverie/graphs/contributors"><img src="https://img.shields.io/github/contributors/CogniPilot/reverie?style=flat-square&color=3b82f6" alt="Contributors"></a>
+  <a href="https://github.com/CogniPilot/reverie/commits/master"><img src="https://img.shields.io/github/commit-activity/t/CogniPilot/reverie?style=flat-square&color=1e3a5f" alt="Total commits"></a>
 </p>
 
 <p align="center">
@@ -33,10 +33,10 @@
 
 一行命令即可安装（macOS 和 Linux，Windows 通过 WSL）：
 
-> **来源说明 / Provenance.** 下面的 `curl ... github.com/jgoppert/reverie/install` 与 `npm ... aireverie` 命令安装的是上游 Reverie 项目，而不是本仓库，仅作历史记录保留。从本仓库运行：`npm ci && npm run build`，然后 `reverie web`；容器方式见 根目录的 `README.md`（Nix 构建镜像）。
+> **来源说明 / Provenance.** 下面的 `curl ... github.com/CogniPilot/reverie/install` 与 `npm ... aireverie` 命令安装的是上游 Reverie 项目，而不是本仓库，仅作历史记录保留。从本仓库运行：`npm ci && npm run build`，然后 `reverie web`；容器方式见 根目录的 `README.md`（Nix 构建镜像）。
 
 ```bash
-curl -fsSL https://github.com/jgoppert/reverie/install | bash
+curl -fsSL https://github.com/CogniPilot/reverie/install | bash
 ```
 
 ```bash
@@ -62,7 +62,7 @@ reverie web
 ## 快速开始 — 安装
 
 ```bash
-curl -fsSL https://github.com/jgoppert/reverie/install | bash
+curl -fsSL https://github.com/CogniPilot/reverie/install | bash
 ```
 
 该脚本会在缺失时自动安装 Node.js、tmux 和一套构建工具链（node-pty 没有 Linux 预编译包，需要从源码编译），把 Reverie 克隆到 `~/.reverie/app` 并完成构建。几点须知：
@@ -174,7 +174,7 @@ launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.reverie.web.plist
 <summary><strong>Windows（WSL）</strong></summary>
 
 ```powershell
-wsl bash -c "curl -fsSL https://github.com/jgoppert/reverie/install | bash"
+wsl bash -c "curl -fsSL https://github.com/CogniPilot/reverie/install | bash"
 ```
 
 Reverie 依赖 tmux，因此 Windows 用户需要 [WSL](https://learn.microsoft.com/en-us/windows/wsl/install)。如果还没装 WSL：在管理员 PowerShell 中运行 `wsl --install`，重启，打开 Ubuntu，然后在 WSL 内安装你偏好的 AI 编程 CLI（[Claude Code](https://docs.anthropic.com/en/docs/claude-code)、[OpenCode](https://opencode.ai)、[Codex](https://developers.openai.com/codex/cli)、[Antigravity](https://antigravity.google)、[Gemini CLI](https://github.com/google-gemini/gemini-cli)、[Pi](https://pi.dev)、[Grok Build](https://github.com/xai-org/grok-build)、[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 或 [OMP](https://github.com/can1357/oh-my-pi)）。安装完成后，即可从 Windows 浏览器访问 `http://localhost:3000`。
@@ -739,7 +739,7 @@ Web UI 仍是主要界面；完整指南见 **[docs/tui.md](docs/tui.md)**（英
 
 | 方式             | 命令                                                       | 范围                                                                                       |
 | ---------------- | ---------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
-| Skills CLI       | `npx skills add jgoppert/reverie --skill reverie -g`          | 全局，任何支持技能的智能体都能用                                                           |
+| Skills CLI       | `npx skills add CogniPilot/reverie --skill reverie -g`          | 全局，任何支持技能的智能体都能用                                                           |
 | 内置 CLI         | `reverie skill install`                                    | 全局（`~/.claude/skills/reverie`），给那些从 npm 安装、从未克隆过仓库的用户                |
 | 内置 CLI         | `reverie skill install --case <name>`                      | 仅一个 case                                                                                |
 | Web UI           | App Settings → Agents & CLIs → Claude → **Agent Skill**    | 每次在某个 case 创建 Claude 会话时自动注入（`agentSkillEnabled`，跨设备同步，默认关闭）    |
@@ -1087,7 +1087,7 @@ npm test                    # 运行测试（与 CI 相同；浏览器/移动端
 
 ## 社区
 
-提问、安装求助和想法都在 [GitHub Discussions](https://github.com/jgoppert/reverie/discussions)：[Q&A 板块](https://github.com/jgoppert/reverie/discussions/categories/q-a)回答了最常见的那些（手机访问、通宵运行、更新），路线图则在 [Ideas](https://github.com/jgoppert/reverie/discussions/categories/ideas) 里决定。Bug 请提到 [issues](https://github.com/jgoppert/reverie/issues)；报告通常一天内会得到回复，每个发行版都会点名感谢报告者和贡献者。想参与贡献？[CONTRIBUTING.md](.github/CONTRIBUTING.md) 是地图：皮肤、翻译和文档都是很好的第一个 PR，更大的特性先从一个 Discussion 开始。如果你对自己的配置很自豪，发到 [Show and tell](https://github.com/Ark0N/Codeman/discussions/300) 来。
+提问、安装求助和想法都在 [GitHub Discussions](https://github.com/CogniPilot/reverie/discussions)：[Q&A 板块](https://github.com/CogniPilot/reverie/discussions/categories/q-a)回答了最常见的那些（手机访问、通宵运行、更新），路线图则在 [Ideas](https://github.com/CogniPilot/reverie/discussions/categories/ideas) 里决定。Bug 请提到 [issues](https://github.com/CogniPilot/reverie/issues)；报告通常一天内会得到回复，每个发行版都会点名感谢报告者和贡献者。想参与贡献？[CONTRIBUTING.md](.github/CONTRIBUTING.md) 是地图：皮肤、翻译和文档都是很好的第一个 PR，更大的特性先从一个 Discussion 开始。如果你对自己的配置很自豪，发到 [Show and tell](https://github.com/Ark0N/Codeman/discussions/300) 来。
 
 ---
 
@@ -1139,6 +1139,6 @@ MIT —— 见 [LICENSE](LICENSE)
 </p>
 
 <p align="center">
-  如果 Reverie 帮你省了时间，<a href="https://github.com/jgoppert/reverie/stargazers">点个 star</a> 能让更多人找到它。<br>
-  欢迎到 <a href="https://github.com/jgoppert/reverie/issues">Issues</a> 报告 bug 和提出特性想法。
+  如果 Reverie 帮你省了时间，<a href="https://github.com/CogniPilot/reverie/stargazers">点个 star</a> 能让更多人找到它。<br>
+  欢迎到 <a href="https://github.com/CogniPilot/reverie/issues">Issues</a> 报告 bug 和提出特性想法。
 </p>

@@ -1,7 +1,7 @@
 # Feature brief: Session tab detach / undock (for Reverie)
 
 > ✅ **SHIPPED — on GitHub as PR #103 (open).** Branch `beta/session-detach` on
-> `jgoppert/reverie` (base `master`): "feat(web): session detach/undock + beta
+> `CogniPilot/reverie` (base `master`): "feat(web): session detach/undock + beta
 > instance isolation (port 5000)", containing detach/undock + instance isolation
 > + the base gesture overlay (commit `afea6d6`). `app.detachSession(id)` in
 > `app.js` opens `/session/:id` as a solo window (another live client of the same
@@ -69,7 +69,7 @@ the UI work.
 
 - Implement on a **beta branch**, not `main`.
 - The gesture-control side keeps a **read-only** copy of Reverie (its `.git`
-  removed); the live `jgoppert/reverie` repo is **not** touched from here. Reverie
+  removed); the live `CogniPilot/reverie` repo is **not** touched from here. Reverie
   implements this itself.
 
 ## Why this is sequenced before gesture wiring

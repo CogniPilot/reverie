@@ -231,10 +231,10 @@ docker create \
   --label reverie.confighash=<hash> \
   --pull=never --init --restart no \
   --user 1000:0 \
-  --workdir '/home/arkon/cases/myproj' \
-  --mount type=bind,src='/home/arkon/cases/myproj',dst='/home/arkon/cases/myproj' \
-  --mount type=bind,src='/home/arkon/.claude',dst='/home/agent/.claude' \
-  --mount type=bind,src='/home/arkon/.reverie/hook-secret',dst='/home/agent/.reverie/hook-secret',readonly \
+  --workdir '/home/user/cases/myproj' \
+  --mount type=bind,src='/home/user/cases/myproj',dst='/home/user/cases/myproj' \
+  --mount type=bind,src='/home/user/.claude',dst='/home/agent/.claude' \
+  --mount type=bind,src='/home/user/.reverie/hook-secret',dst='/home/agent/.reverie/hook-secret',readonly \
   --add-host host.docker.internal:host-gateway \
   --memory 4g --memory-swap 4g --cpus 2 --pids-limit 512 --ulimit nofile=4096:8192 \
   --cap-drop ALL --security-opt no-new-privileges \
@@ -259,12 +259,12 @@ docker image inspect reverie/agent:base >/dev/null 2>&1 || { echo 'Reverie: base
 docker inspect reverie-case-myproj >/dev/null 2>&1 || docker create <all create args above> ; \
 docker start reverie-case-myproj >/dev/null 2>&1 || { echo 'Reverie: container reverie-case-myproj failed to start (daemon down?)'; exit 1; } ; \
 exec docker exec -it \
-  --workdir '/home/arkon/cases/myproj' \
+  --workdir '/home/user/cases/myproj' \
   --env TERM=xterm-256color --env COLORTERM=truecolor \
   --env REVERIE_SESSION_ID=1a2b3c4d --env REVERIE_MUX=1 \
   --env OPENAI_API_KEY --env GEMINI_API_KEY \
   reverie-case-myproj \
-  sh -lc 'tmux -L reverie-docker setenv -g REVERIE_SESSION_ID 1a2b3c4d \; setenv -g REVERIE_MUX 1 \; new-session -A -s reverie-dkr-1a2b3c4d -c '\''/home/arkon/cases/myproj'\'' '\''cd /home/arkon/cases/myproj && exec claude --dangerously-skip-permissions --resume <claudeSessionId>'\'' \; set -t reverie-dkr-1a2b3c4d status off \; set -t reverie-dkr-1a2b3c4d mouse off \; set -t reverie-dkr-1a2b3c4d prefix C-q \; set -s escape-time 0'
+  sh -lc 'tmux -L reverie-docker setenv -g REVERIE_SESSION_ID 1a2b3c4d \; setenv -g REVERIE_MUX 1 \; new-session -A -s reverie-dkr-1a2b3c4d -c '\''/home/user/cases/myproj'\'' '\''cd /home/user/cases/myproj && exec claude --dangerously-skip-permissions --resume <claudeSessionId>'\'' \; set -t reverie-dkr-1a2b3c4d status off \; set -t reverie-dkr-1a2b3c4d mouse off \; set -t reverie-dkr-1a2b3c4d prefix C-q \; set -s escape-time 0'
 ```
 
 - `docker exec -it`: `-t` allocates a PTY and forwards SIGWINCH into the container so the Ink TUI re-lays-out on pane resize; `TERM`/`COLORTERM` prevent degraded rendering. `--env OPENAI_API_KEY` (name only) is present only for codex/gemini and is exec-time (never committed). `REVERIE_SESSION_ID`/`REVERIE_MUX` are exec-time values plus a `tmux setenv -g` prime so reattaches and new panes inherit them (Key decision 5).

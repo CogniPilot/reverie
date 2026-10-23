@@ -5,7 +5,7 @@ Thanks for wanting to help! Reverie is a small project with a fast loop: issues 
 ## The short version
 
 1. **Bugs**: open an issue with your OS, install method (installer / npm / git clone), browser, and which CLI + version the session was running.
-2. **Questions and ideas**: use [Discussions](https://github.com/jgoppert/reverie/discussions), not issues.
+2. **Questions and ideas**: use [Discussions](https://github.com/CogniPilot/reverie/discussions), not issues.
 3. **Small fixes** (docs, typos, a new skin, a translation): just send the PR.
 4. **Anything bigger**: open an issue or Discussion first and get a nod before building. Reverie has strong architectural invariants, and a design chat up front is what turns a big idea into a merged PR instead of a stalled one. This flow works: features like Clone Repo (#236) went idea, then design discussion, then review, then shipped.
 5. **Security issues**: never a public issue. See [SECURITY.md](SECURITY.md).
@@ -15,7 +15,7 @@ Thanks for wanting to help! Reverie is a small project with a fast loop: issues 
 Requirements: Node.js 22+ (see `.nvmrc`), tmux, and at least one supported agent CLI on your PATH (Claude Code is the primary one).
 
 ```bash
-git clone https://github.com/jgoppert/reverie.git
+git clone https://github.com/CogniPilot/reverie.git
 cd Reverie
 npm install        # postinstall builds the vendored xterm addon bundles
 npm run dev        # dev server on http://localhost:3000
@@ -75,7 +75,7 @@ These are well-fenced areas where a first PR is genuinely easy to get right:
 - **A new theme skin.** A skin is four things kept in sync: the `html[data-skin="…"]` token block in `styles.css`, the xterm ANSI palette in `terminal-ui.js`, the pre-paint allowlist and the settings picker (both in `index.html`). `test/skin-themes.test.ts` statically checks the sync, so if the test passes, your skin works.
 - **A new language.** `src/web/public/i18n.js` is dependency-free, English is the canonical source, and `zh-CN` is a complete example to copy. Add your language's entries and register it in `SUPPORTED_LANGUAGES`.
 - **Docs.** If you got stuck on something and then figured it out, the sentence that would have unstuck you is a PR.
-- Anything labeled [`good first issue`](https://github.com/jgoppert/reverie/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22).
+- Anything labeled [`good first issue`](https://github.com/CogniPilot/reverie/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22).
 
 Bigger extension points worth discussing first: new CLI backends (the pluggable resolver pattern has absorbed six CLIs so far; `docs/extending-reverie.md` and `docs/opencode-integration.md` show the shape), and real-device testing reports, especially mobile, which always find things emulation cannot.
 

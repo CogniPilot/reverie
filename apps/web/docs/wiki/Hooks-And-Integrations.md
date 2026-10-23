@@ -95,5 +95,5 @@ in Reverie to work properly, open an issue or a Discussion first.
 
 - [HTTP API](HTTP-API) - the endpoint map and envelope.
 - [Driving Reverie From An Agent](Driving-Reverie-From-An-Agent) - the agent-facing path.
-- [`docs/extending-reverie.md`](https://github.com/jgoppert/reverie/blob/main/apps/web/docs/extending-reverie.md) - the seams in full, with examples.
-- [`docs/claude-code-hooks-reference.md`](https://github.com/jgoppert/reverie/blob/main/apps/web/docs/claude-code-hooks-reference.md) - upstream hook semantics.
+- [`docs/extending-reverie.md`](https://github.com/CogniPilot/reverie/blob/main/apps/web/docs/extending-reverie.md) - the seams in full, with examples.
+- [`docs/claude-code-hooks-reference.md`](https://github.com/CogniPilot/reverie/blob/main/apps/web/docs/claude-code-hooks-reference.md) - upstream hook semantics.

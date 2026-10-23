@@ -243,7 +243,7 @@ Option 1 alone does not fix #205's "print a bunch of lines then scroll" complain
 ## Reproduction assets
 
 Scripts used, in the session scratchpad
-(`/tmp/claude-1000/-home-arkon-default-claudeman/597ffc9f-.../scratchpad/`):
+(`/tmp/claude-1000/-home-user-default-claudeman/597ffc9f-.../scratchpad/`):
 
 - `ptycap.py` / `ptycap2.py`: PTY-level capture of the tmux client stream, per phase counts of
   alternate-screen and mouse-tracking sequences.

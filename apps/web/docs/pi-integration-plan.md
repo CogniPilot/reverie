@@ -595,7 +595,7 @@ step 1 is a real step). Before shipping:
 server on :5055 with its own tmux socket and data dir): steps 1-8 pass. Highlights:
 `/api/pi/status` resolved through the **search-dir fallback** (pi installed to `~/.npm-global/bin`,
 deliberately not on PATH) and reported
-`{available:true, path:'/home/arkon/.npm-global/bin', version:'0.84.1'}`; the real spawn line came
+`{available:true, path:'/home/user/.npm-global/bin', version:'0.84.1'}`; the real spawn line came
 out as `… COLORTERM=truecolor … && pi --approve --provider anthropic --thinking high`; `piConfig`
 round-tripped through `state.json` across a **full server restart**; the trust prompt appeared for a
 case containing `.pi/extensions` + `.pi/settings.json`, and `--no-approve` suppressed it

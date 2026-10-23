@@ -12,7 +12,7 @@ The backend is **already production-grade** — SSE broadcasting, state persiste
 
 Node.js re-parses and compiles all JS on every cold start. `NODE_COMPILE_CACHE` caches V8 compiled bytecode to disk, reusing it on subsequent starts.
 
-- Added `Environment=NODE_COMPILE_CACHE=/home/arkon/.reverie/compile-cache` to systemd service
+- Added `Environment=NODE_COMPILE_CACHE=/home/user/.reverie/compile-cache` to systemd service
 - Added to `npm start` script for non-systemd usage
 - Zero code changes, immediate win on every restart
 

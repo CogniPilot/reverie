@@ -183,7 +183,7 @@ An endpoint's base URL can't point at a link-local or cloud-metadata address (bo
 time and against the address it actually resolves to), the same guard Web Tabs uses for
 saved dashboards. Endpoint records and any per-session config files a harness needs are
 written with owner-only permissions. See
-[custom-model-endpoints-plan.md](https://github.com/jgoppert/reverie/blob/main/apps/web/docs/custom-model-endpoints-plan.md)
+[custom-model-endpoints-plan.md](https://github.com/CogniPilot/reverie/blob/main/apps/web/docs/custom-model-endpoints-plan.md)
 in the repository for the full design reasoning, including why this feature closed a
 pre-existing gap in how session environment overrides were guarded rather than opening a new
 one.
