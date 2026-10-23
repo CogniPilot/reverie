@@ -95,6 +95,17 @@ function harness(advanceFinal = true) {
 }
 
 describe('car mode loop', () => {
+  it('submits every sentence of a reply as ONE synthesis batch when supported', () => {
+    const h = harness();
+    const batches: Array<Array<{ text: string }>> = [];
+    Object.assign(h.synth, { speakReply: (batch: Array<{ text: string }>) => batches.push(batch) });
+    h.ctl.start();
+    h.ctl.reply('First sentence. Second sentence.');
+    expect(batches.map((batch) => batch.map((u) => u.text))).toEqual([['First sentence.', 'Second sentence.']]);
+    expect(h.spoken).toEqual([]);
+    h.ctl.stop();
+  });
+
   it('listens continuously in en-US, sends a final transcript, pauses while she speaks, then listens again', async () => {
     const { ctl, spoken, sent, rec } = harness();
     ctl.start();
@@ -402,7 +413,6 @@ describe('car mode helpers', () => {
   });
 });
 
-
 describe('Android utterance grace', () => {
   it('waits, joins cumulative finals and refuses stale timer callbacks', async () => {
     const { ctl, rec, sent, timers, delays } = harness(false);
@@ -426,7 +436,10 @@ describe('Android utterance grace', () => {
     const { ctl, rec, sent, timers } = harness(false);
     ctl.start();
     rec().say('can you', true);
-    rec().onresult?.({ resultIndex: 1, results: ['can you', 'hear me'].map((transcript) => Object.assign([{ transcript }], { isFinal: true })) });
+    rec().onresult?.({
+      resultIndex: 1,
+      results: ['can you', 'hear me'].map((transcript) => Object.assign([{ transcript }], { isFinal: true })),
+    });
     timers.at(-1)!();
     expect(sent).toEqual(['can you hear me']);
     ctl.stop();
@@ -455,7 +468,6 @@ describe('Android utterance grace', () => {
   });
 });
 
-
 it('does not duplicate prior finals on repeated full snapshots during the grace window', () => {
   const { ctl, rec, timers, sent } = harness(false);
   ctl.start();
@@ -466,7 +478,6 @@ it('does not duplicate prior finals on repeated full snapshots during the grace 
   timers.at(-1)!();
   expect(sent).toEqual(['yes yes']);
 });
-
 
 it('ignores callbacks from the recognizer replaced during the grace window', () => {
   const { ctl, rec, timers, sent } = harness(false);

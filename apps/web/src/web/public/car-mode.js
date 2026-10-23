@@ -202,6 +202,26 @@ function carModePickVoice(voices, savedName, memberId, pronouns) {
   return usuk.find((v) => female.test(v.name)) || usuk[0] || null;
 }
 
+/** Qualified device fallback: saved choice, exact locale/default, then a stable matching-language alternative. */
+function carModeFallbackVoice(voices, savedName, language = 'en-US') {
+  const norm = (value) =>
+    String(value || '')
+      .replace(/_/g, '-')
+      .toLowerCase();
+  const primary = norm(language).split('-')[0];
+  const qualified = (voices || []).filter((voice) => norm(voice.lang).split('-')[0] === primary);
+  const order = (a, b) => {
+    const key = (voice) => `${voice.name}:${voice.voiceURI || ''}:${norm(voice.lang)}`;
+    return Number(!!b.default) - Number(!!a.default) || (key(a) < key(b) ? -1 : key(a) > key(b) ? 1 : 0);
+  };
+  const savedId = savedName ? qualified.find((voice) => voice.voiceURI === savedName) : null;
+  if (savedId) return savedId;
+  const named = savedName ? qualified.filter((voice) => voice.name === savedName) : [];
+  const available = named.length ? named : qualified;
+  const exact = available.filter((voice) => norm(voice.lang) === norm(language));
+  return (exact.length ? exact : available).slice().sort(order)[0] || null;
+}
+
 /** The per-device storage key for one member's car-mode voice. */
 function carModeVoiceKey(memberId) {
   return `reverie:carVoice:${memberId}`;
@@ -216,42 +236,24 @@ const CAR_TEAM_PLAY_MS = 60_000;
 /** No playback progress this long after the stream stalls: give the line to the phone. */
 const CAR_TEAM_STALL_MS = 10_000;
 
-/**
- * Speaks utterances in a server voice, one at a time, with the same surface the controller
- * uses on `speechSynthesis`: `speaking`, `pending`, `speak(u)`, `cancel()`; the utterance's
- * `onend` (or `onerror`) is called when it is done. Every line is requested as soon as it is
- * queued, so the next one is usually ready when the last ends. A line the server cannot
- * make, or that will not play, is spoken by `fallback(u)` (the phone's voice) instead.
- * A request or a playback that never settles (a dropped connection on the road stalls rather
- * than failing) is given up on after CAR_TEAM_FETCH_MS / CAR_TEAM_PLAY_MS and goes to the
- * phone voice too, so the loop always gets back to listening.
- * deps: { fetchAudio(text) -> Promise<url|null>, play(url) -> Promise (settles when it ends),
- *         stop(), fallback(u) -> Promise, setTimeout?, clearTimeout? }
- */
+/** Reply batches use one server voice, or replay in full on one fixed device voice. */
 class CarServerSynth {
   constructor(deps) {
     this.deps = deps;
     this.queue = [];
     this.current = null;
-    /** Bumped by cancel(): a line from before it never reports or plays on. */
     this.gen = 0;
   }
-
   get speaking() {
     return this.current !== null;
   }
-
   get pending() {
-    return this.queue.length > 0;
+    return this.queue.length > 0 || (!!this.current && this.current.index < this.current.items.length - 1);
   }
 
-  /**
-   * `promise`, or (once `ms` pass without it settling) `timedOut`: rejected with it if it is
-   * an Error, resolved with it otherwise. `after` runs once the timeout has decided.
-   */
   _within(promise, ms, timedOut, after) {
-    const set = this.deps.setTimeout || setTimeout;
-    const clear = this.deps.clearTimeout || clearTimeout;
+    const set = this.deps.setTimeout || setTimeout,
+      clear = this.deps.clearTimeout || clearTimeout;
     let timer;
     const timeout = new Promise((resolve, reject) => {
       timer = set(() => {
@@ -264,17 +266,23 @@ class CarServerSynth {
   }
 
   speak(u) {
-    let audio;
-    try {
-      audio = Promise.resolve(this.deps.fetchAudio(u.text, u)).catch(() => null);
-    } catch {
-      audio = Promise.resolve(null);
-    }
-    audio = this._within(audio, CAR_TEAM_FETCH_MS, null);
-    this.queue.push({ u, audio });
+    this.speakReply([u]);
+  }
+  speakReply(utterances) {
+    const phoneVoice = this.deps.phoneVoice ? this.deps.phoneVoice() : utterances[0]?.voice;
+    const items = utterances.map((u) => {
+      let audio;
+      try {
+        audio = Promise.resolve(this.deps.fetchAudio(u.text, u)).catch(() => null);
+      } catch {
+        audio = Promise.resolve(null);
+      }
+      return { u, audio: this._within(audio, CAR_TEAM_FETCH_MS, null) };
+    });
+    if (!items.length) return;
+    this.queue.push({ items, phoneVoice, index: 0 });
     if (!this.current) void this._next();
   }
-
   cancel() {
     this.gen++;
     this.queue = [];
@@ -283,38 +291,73 @@ class CarServerSynth {
   }
 
   async _next() {
-    const item = this.queue.shift();
-    if (!item) return;
-    this.current = item;
+    const batch = this.queue.shift();
+    if (!batch) return;
+    this.current = batch;
     const gen = this.gen;
-    let ok = false;
-    const url = await item.audio;
-    if (gen !== this.gen) return;
-    if (url) {
+    let reason = '',
+      voiceKey = null,
+      attempted = false,
+      ok = true;
+    this.deps.onVoice?.({ engine: 'server' });
+    for (batch.index = 0; batch.index < batch.items.length; batch.index++) {
+      const audio = await batch.items[batch.index].audio;
+      if (gen !== this.gen) return;
+      const url = typeof audio === 'string' ? audio : audio?.url;
+      const key = typeof audio === 'object' && audio ? `${audio.engine}:${audio.voice?.id || ''}` : 'server';
+      if (!url) {
+        reason = 'audio-unavailable';
+        break;
+      }
+      if (voiceKey !== null && key !== voiceKey) {
+        reason = 'server-voice-changed';
+        break;
+      }
+      voiceKey = key;
       try {
-        // A stalled line is silenced once given up on, so it cannot resume over the phone voice.
-        await this._within(Promise.resolve(this.deps.play(url)), CAR_TEAM_PLAY_MS, new Error('playback stalled'), () =>
-          this.deps.stop()
-        );
-        ok = true;
+        attempted = true;
+        await this._within(Promise.resolve(this.deps.play(url)), CAR_TEAM_PLAY_MS, new Error('playback stalled'));
       } catch {
-        ok = false;
+        reason = 'playback-interrupted';
       }
       if (gen !== this.gen) return;
+      if (reason) break;
     }
-    if (!ok) {
-      try {
-        await this.deps.fallback(item.u);
-        ok = true;
-      } catch {
-        ok = false;
-      }
+    if (reason) {
+      // Never splice a different voice into the remaining sentences. Start the reply over.
+      this.deps.stop();
       if (gen !== this.gen) return;
+      const choice = {
+        voice: batch.phoneVoice,
+        employeeVoice: batch.items.map((item) => item.u.employeeVoice).find((voice) => voice?.provider === 'browser'),
+      };
+      if (this.deps.resolvePhoneVoice) choice.voice = this.deps.resolvePhoneVoice(choice.employeeVoice, choice.voice);
+      this.deps.onVoice?.({
+        engine: 'device',
+        reason: choice.employeeVoice?.provider === 'browser' && !attempted ? 'selected' : reason,
+        restarted: attempted,
+        voice: choice.voice?.name,
+        language: choice.voice?.lang,
+      });
+      for (batch.index = 0; batch.index < batch.items.length; batch.index++) {
+        try {
+          await this.deps.fallback(batch.items[batch.index].u, choice);
+        } catch {
+          ok = false;
+        }
+        if (gen !== this.gen) return;
+        if (!ok) {
+          this.deps.onVoice?.({ engine: 'interrupted', reason: 'device-playback-failed' });
+          break;
+        }
+      }
     }
     this.current = null;
     try {
-      if (ok) item.u.onend?.();
-      else item.u.onerror?.();
+      for (const { u } of batch.items) {
+        if (ok) u.onend?.();
+        else u.onerror?.();
+      }
     } finally {
       if (gen === this.gen && !this.current) void this._next();
     }
@@ -596,7 +639,8 @@ class CarModeController {
     this._clearReplyTimer();
     this._stopRecognition();
     const parts = carModeUtterances(carModeSpeakable(text));
-    if (!parts.length || !this.deps.synth) {
+    const synth = this.deps.synth;
+    if (!parts.length || !synth) {
       this._listen();
       return true;
     }
@@ -611,7 +655,6 @@ class CarModeController {
     // moment later.
     let delay = 0;
     if (!queueing) {
-      const synth = this.deps.synth;
       if (synth.speaking || synth.pending) {
         synth.cancel();
         delay = 300;
@@ -622,9 +665,9 @@ class CarModeController {
     const done = () => {
       if (this.speakGen === gen && this.state === 'speaking') this._listenWhenQuiet(gen);
     };
+    const voice = this.deps.voice();
     const batch = parts.map((part, i) => {
       const u = this.deps.createUtterance(part);
-      const voice = this.deps.voice();
       if (voice) {
         u.voice = voice;
         u.lang = voice.lang;
@@ -638,7 +681,8 @@ class CarModeController {
     this.utterances = this.utterances.concat(batch);
     const speakAll = () => {
       if (this.speakGen !== gen || this.state !== 'speaking') return;
-      for (const u of batch) this.deps.synth.speak(u);
+      if (synth.speakReply) synth.speakReply(batch);
+      else for (const u of batch) synth.speak(u);
     };
     if (delay) this.deps.setTimeout(speakAll, delay);
     else speakAll();
@@ -844,6 +888,7 @@ Object.assign(ReverieApp.prototype, {
         },
         speak: (u) => {
           diag('tts:speak', { chars: u.text?.length, ...flags() });
+          this._carVoiceNotice({ engine: 'device', reason: 'selected', voice: u.voice?.name, language: u.voice?.lang });
           synth.speak(u);
         },
         cancel: () => {
@@ -991,6 +1036,9 @@ Object.assign(ReverieApp.prototype, {
       if (synth.speaking || synth.pending) synth.cancel();
     };
     return new CarServerSynth({
+      phoneVoice: () => carModeFallbackVoice(synth.getVoices?.() || [], this._carSavedVoice(this._carVoiceMember()?.sessionId)),
+      resolvePhoneVoice: (choice, fallback) => (choice?.provider === 'browser' ? synth.getVoices?.().find(voice => voice.voiceURI === choice.id || voice.name === choice.id) : null) || fallback,
+      onVoice: info => { diag('team:voice', info); this._carVoiceNotice(info); },
       fetchAudio: async (text, utterance) => {
         const member = this._carVoiceMember();
         if (!member) return null;
@@ -999,40 +1047,45 @@ Object.assign(ReverieApp.prototype, {
           body: { room: this._chatRoomId, member: member.sessionId, text },
           signal: AbortSignal.timeout?.(CAR_TEAM_FETCH_MS),
         });
-        diag('team:speak', { ok: res.ok, engine: res.data?.engine, chars: text.length });
+        diag('team:speak', { ok: res.ok, engine: res.data?.engine, voice: res.data?.voice?.id, chars: text.length });
         if (res.ok && res.data?.voice?.provider === 'browser' && utterance) utterance.employeeVoice = res.data.voice;
-        return res.ok && typeof res.data?.audioUrl === 'string' ? res.data.audioUrl : null;
+        return res.ok && typeof res.data?.audioUrl === 'string' ? { url: res.data.audioUrl, engine: res.data.engine, voice: res.data.voice } : null;
       },
       play: (url) =>
         new Promise((resolve, reject) => {
           const audio = this._chatAudioEl();
           // A stream that stops arriving fires 'stalled' or 'waiting', then nothing: give it
           // CAR_TEAM_STALL_MS of no progress before the phone voice takes the line.
-          let stallTimer = null;
+          let stallTimer = null, finished = false;
           const clearStall = () => {
             if (stallTimer) clearTimeout(stallTimer);
             stallTimer = null;
           };
           const onStall = () => {
             clearStall();
+            const position = audio.currentTime;
             stallTimer = setTimeout(() => {
+              if (audio.currentTime > position) { onStall(); return; }
               diag('team:stalled', {});
               audio.pause();
               done(new Error('audio stalled'));
             }, CAR_TEAM_STALL_MS);
           };
           const done = (err) => {
+            if (finished) return;
+            finished = true;
             clearStall();
             audio.removeEventListener('ended', onEnd);
             audio.removeEventListener('error', onError);
             audio.removeEventListener('stalled', onStall);
             audio.removeEventListener('waiting', onStall);
             audio.removeEventListener('timeupdate', clearStall);
+            audio.removeEventListener('playing', clearStall);
             settle = null;
             if (err) reject(err);
             else resolve();
           };
-          const onEnd = () => done(null);
+          const onEnd = () => done(Number.isFinite(audio.duration) && audio.duration - audio.currentTime > 0.5 ? new Error('audio ended early') : null);
           const onError = () => done(new Error('audio error'));
           settle = () => done(null);
           audio.addEventListener('ended', onEnd);
@@ -1040,6 +1093,7 @@ Object.assign(ReverieApp.prototype, {
           audio.addEventListener('stalled', onStall);
           audio.addEventListener('waiting', onStall);
           audio.addEventListener('timeupdate', clearStall);
+          audio.addEventListener('playing', clearStall);
           // A line from the car or read aloud: not a spoken turn's answer (_carSpeakerId).
           this._chatAudioFrom = null;
           audio.src = this._chatUrl(url);
@@ -1057,13 +1111,11 @@ Object.assign(ReverieApp.prototype, {
         settle?.();
         stopPhone();
       },
-      fallback: (u) =>
+      fallback: (u, fixed) =>
         new Promise((resolve, reject) => {
           const p = new SpeechSynthesisUtterance(u.text);
-          const choice = u.employeeVoice;
-          const voice = (choice?.provider === 'browser'
-            ? synth.getVoices?.().find((v) => v.voiceURI === choice.id || v.name === choice.id)
-            : null) || u.voice || this._carVoice();
+          const voice = fixed.voice;
+          if (!voice) { reject(new Error('No matching device voice is available')); return; }
           if (voice) {
             p.voice = voice;
             p.lang = voice.lang;
@@ -1076,6 +1128,16 @@ Object.assign(ReverieApp.prototype, {
           synth.speak(p);
         }),
     });
+  },
+
+  _carVoiceNotice(info) {
+    const notice = this._carScreen?.querySelector?.('.car-voice-notice');
+    if (!notice) return;
+    const voice = info.voice ? ` (${info.voice}${info.language ? `, ${info.language}` : ''})` : '';
+    const text = info.engine === 'server' ? 'Team voice' : info.engine === 'interrupted' ? 'Reply interrupted: device audio could not finish. The reply remains in chat.' :
+      info.reason === 'selected' ? `Device voice${voice}` : info.restarted ? `Team audio interrupted. Replaying this reply from the start in device voice${voice}.` : `Using device voice${voice}: team audio unavailable.`;
+    notice.hidden = false; notice.dataset.engine = info.engine;
+    if (notice.textContent !== text) notice.textContent = text;
   },
 
   /** The phone voice (the team voice's backup): one chosen for this member on this device, else the member's default. */
@@ -1175,7 +1237,11 @@ Object.assign(ReverieApp.prototype, {
         void this._carAwake?.retry();
       };
       awake.append(awakeText, retryAwake);
-      screen.append(bar, awake, pad);
+      const voiceNotice = document.createElement('div');
+      voiceNotice.className = 'car-voice-notice'; voiceNotice.hidden = true;
+      voiceNotice.setAttribute('role', 'status'); voiceNotice.setAttribute('aria-live', 'polite');
+      voiceNotice.style.cssText = 'padding:4px 14px;color:#ddd;font-size:14px;';
+      screen.append(bar, awake, voiceNotice, pad);
       document.body.append(screen);
       this._carScreen = screen;
       const fillVoices = () => this._fillCarVoices();
@@ -1183,6 +1249,8 @@ Object.assign(ReverieApp.prototype, {
     }
     this._carScreen.querySelector('.car-who').textContent = `${member.icon ? `${member.icon} ` : ''}${member.name}`;
     this._carScreen.querySelector('.car-build').textContent = (this._pageBuildId || '').slice(0, 8);
+    const voiceNotice = this._carScreen.querySelector('.car-voice-notice');
+    if (voiceNotice) { voiceNotice.hidden = true; voiceNotice.textContent = ''; }
     this._fillCarVoices();
   },
 

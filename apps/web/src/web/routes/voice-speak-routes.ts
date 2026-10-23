@@ -142,12 +142,12 @@ export function registerVoiceSpeakRoutes(
     while (kept.size > MAX_SPEECH_KEPT) kept.delete(kept.keys().next().value as string);
   };
 
-  const audio = (user: string, body: Buffer, engine: 'kokoro' | 'piper') => {
+  const audio = (user: string, body: Buffer, engine: 'kokoro' | 'piper', voice?: EmployeeVoice) => {
     sweep();
     const id = randomBytes(16).toString('hex');
     kept.set(id, { user, body, at: now() });
     sweep();
-    return { success: true, data: { audioUrl: `/api/voice/speech/${id}`, engine } };
+    return { success: true, data: { audioUrl: `/api/voice/speech/${id}`, engine, ...(voice ? { voice } : {}) } };
   };
   const browser = (voice: EmployeeVoice) => ({
     success: true,
@@ -185,7 +185,7 @@ export function registerVoiceSpeakRoutes(
     if (selected) {
       const body = await selectedAudio(selected, spoken);
       if (!body) return fail(reply, 502, ApiErrorCode.OPERATION_FAILED, 'The selected voice is not available');
-      return audio(user.username, body, selected.provider as 'kokoro' | 'piper');
+      return audio(user.username, body, selected.provider as 'kokoro' | 'piper', selected);
     }
     let engine: 'kokoro' | 'piper' = 'kokoro';
     let body = await fetchWav(`${kokoro()}/tts`, { text: spoken, speaker: castName(chatrooms.nameOf(member)) });

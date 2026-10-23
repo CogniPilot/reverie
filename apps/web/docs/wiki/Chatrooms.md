@@ -181,3 +181,12 @@ check first. Tap to pause or resume; **Exit** turns that room's Voice mode off.
 
 **Diag** shows the chosen engine (`speech` or `server`) and the reason, and includes the
 same information, service-probe state and capabilities in the uploaded diagnostics.
+
+The car screen labels team audio and device audio. If a server sentence cannot be made
+or playback fails or stalls, the complete reply restarts from its beginning in one
+fixed device voice; it does not splice a new voice into the remaining sentences. The
+notice names the device voice and says when playback is restarting or has been
+interrupted. Automatic device fallback prefers a matching locale and its named
+default, rather than the first voice the browser lists (car recognition currently uses
+English, US). A saved matching-language choice takes precedence. No matching device
+voice, or a failed device replay, leaves an interruption notice; the text stays in chat.

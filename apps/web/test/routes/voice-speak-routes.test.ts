@@ -65,17 +65,19 @@ describe('voice speak routes', () => {
   let piperAnswer: { status: number; type: string; body: Buffer | string };
   let clock = 1_000_000;
   let selectedVoice: EmployeeVoice | undefined;
+  let kokoroVoices: string[];
 
   beforeEach(async () => {
     kokoroSeen.length = 0;
     piperSeen.length = 0;
     clock = 1_000_000;
     selectedVoice = undefined;
+    kokoroVoices = ['af_heart'];
     kokoroAnswer = { status: 200, type: 'audio/wav', body: WAV };
     piperAnswer = { status: 200, type: 'audio/wav', body: Buffer.from('RIFFpiper') };
     kokoro = fakeUpstream(kokoroSeen, (url) =>
       url === '/voices'
-        ? { status: 200, type: 'application/json', body: JSON.stringify({ voices: ['af_heart'] }) }
+        ? { status: 200, type: 'application/json', body: JSON.stringify({ voices: kokoroVoices }) }
         : kokoroAnswer
     );
     piper = fakeUpstream(piperSeen, (url) =>
@@ -143,6 +145,24 @@ describe('voice speak routes', () => {
     selectedVoice = { provider: 'piper', id: 'not-installed' };
     expect((await speak({ room: roomId, member: WORKER, text: 'Hi.' })).statusCode).toBe(502);
     expect(piperSeen.filter((r) => r.url?.startsWith('/tts'))).toHaveLength(1);
+  });
+
+  it('passes the selected am_michael voice on EVERY utterance and does not silently switch to Piper', async () => {
+    kokoroVoices.push('am_michael');
+    selectedVoice = { provider: 'kokoro', id: 'am_michael' };
+    for (const text of ['First sentence.', 'Second sentence.']) {
+      const response = await speak({ room: roomId, member: WORKER, text });
+      expect(response.statusCode).toBe(200);
+      expect(response.json().data.voice).toEqual(selectedVoice);
+    }
+    kokoroAnswer = { status: 503, type: 'text/plain', body: 'unavailable' };
+    expect((await speak({ room: roomId, member: WORKER, text: 'Third sentence.' })).statusCode).toBe(502);
+    expect(kokoroSeen.filter((item) => item.url === '/tts').map((item) => item.body)).toEqual([
+      { text: 'First sentence.', voice: 'am_michael' },
+      { text: 'Second sentence.', voice: 'am_michael' },
+      { text: 'Third sentence.', voice: 'am_michael' },
+    ]);
+    expect(piperSeen).toEqual([]);
   });
 
   it('returns an exact browser voice choice without contacting a server', async () => {

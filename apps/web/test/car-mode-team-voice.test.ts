@@ -1,6 +1,6 @@
 /**
  * Car mode's team voice: CarServerSynth speaks server audio one line at a time behind the
- * same surface as speechSynthesis, falls back to the phone voice per line, and a cancel
+ * same surface as speechSynthesis, restarts failed reply batches in one fixed device voice, and a cancel
  * silences everything queued before it.
  */
 import { describe, expect, it } from 'vitest';
@@ -18,7 +18,13 @@ interface Utt {
   onend: (() => void) | null;
   onerror: (() => void) | null;
 }
-type Synth = { speaking: boolean; pending: boolean; speak(u: Utt): void; cancel(): void };
+type Synth = {
+  speaking: boolean;
+  pending: boolean;
+  speak(u: Utt): void;
+  speakReply(batch: Utt[]): void;
+  cancel(): void;
+};
 const CarServerSynth = get('CarServerSynth') as new (deps: unknown) => Synth;
 const CAR_TEAM_VOICE = get('CAR_TEAM_VOICE') as string;
 const CAR_TEAM_FETCH_MS = get('CAR_TEAM_FETCH_MS') as number;
@@ -79,7 +85,9 @@ function harness(
   const plays: { url: string; end: () => void; fail: () => void }[] = [];
   const phones: { text: string; end: () => void; fail: () => void }[] = [];
   let stops = 0;
+  const notices: { engine: string; reason?: string; restarted?: boolean }[] = [];
   const synth = new CarServerSynth({
+    onVoice: (info: { engine: string }) => notices.push(info),
     fetchAudio: (text: string) => {
       log.push(`fetch:${text}`);
       return opts.audio ? opts.audio(text) : `/a/${text}`;
@@ -103,7 +111,7 @@ function harness(
     const u: Utt = { text, onend: () => log.push(`end:${text}`), onerror: () => log.push(`error:${text}`) };
     return u;
   };
-  return { synth, log, plays, phones, utt, stops: () => stops };
+  return { synth, log, plays, phones, utt, notices, stops: () => stops };
 }
 
 describe('CarServerSynth', () => {
@@ -278,6 +286,94 @@ describe('CarServerSynth', () => {
     await flush();
     expect(h.log.at(-1)).toBe('end:ok');
     expect(t.count()).toBe(0);
+  });
+
+  it('restarts the whole reply after the first server sentence succeeds and the next fetch fails', async () => {
+    const h = harness({ audio: (text) => (text === 'two' ? null : `/a/${text}`) });
+    h.synth.speakReply(['one', 'two', 'three'].map(h.utt));
+    await flush();
+    h.plays[0].end();
+    await flush();
+    expect(h.phones[0].text).toBe('one');
+    expect(h.notices.at(-1)).toMatchObject({ engine: 'device', reason: 'audio-unavailable', restarted: true });
+    for (let i = 0; i < 3; i++) {
+      expect(h.phones[i].text).toBe(['one', 'two', 'three'][i]);
+      h.phones[i].end();
+      await flush();
+    }
+    expect(h.plays).toHaveLength(1);
+    expect(h.log.filter((line) => line.startsWith('end:'))).toEqual(['end:one', 'end:two', 'end:three']);
+    expect(h.synth.speaking).toBe(false);
+  });
+
+  it('replays from the start after later playback stalls, and late completion cannot resume server lines', async () => {
+    const timers = manualTimers(),
+      h = harness({ timers });
+    h.synth.speakReply(['one', 'two', 'three'].map(h.utt));
+    await flush();
+    h.plays[0].end();
+    await flush();
+    timers.fire(CAR_TEAM_PLAY_MS);
+    await flush();
+    expect(h.phones[0].text).toBe('one');
+    h.plays[1].end();
+    await flush();
+    for (let i = 0; i < 3; i++) {
+      h.phones[i].end();
+      await flush();
+    }
+    expect(h.plays).toHaveLength(2);
+    expect(h.notices.at(-1)).toMatchObject({ engine: 'device', reason: 'playback-interrupted' });
+    expect(h.log.filter((line) => line.startsWith('end:'))).toHaveLength(3);
+  });
+
+  it('starts a queued reply only after the complete fallback replay finishes', async () => {
+    const h = harness({ audio: (text) => (text === 'bad' ? null : `/a/${text}`) });
+    h.synth.speakReply(['one', 'bad'].map(h.utt));
+    h.synth.speakReply([h.utt('next')]);
+    await flush();
+    h.plays[0].end();
+    await flush();
+    expect(h.plays).toHaveLength(1);
+    h.phones[0].end();
+    await flush();
+    expect(h.phones[1].text).toBe('bad');
+    h.phones[1].end();
+    await flush();
+    expect(h.plays[1].url).toBe('/a/next');
+    expect(h.notices.at(-1)).toMatchObject({ engine: 'server' });
+  });
+
+  it('cancels a fallback batch without playing its remaining sentences or notifying stale callbacks', async () => {
+    const h = harness({ audio: () => null });
+    h.synth.speakReply(['one', 'two'].map(h.utt));
+    await flush();
+    h.synth.cancel();
+    h.phones[0].end();
+    await flush();
+    expect(h.phones).toHaveLength(1);
+    expect(h.log.some((line) => line.startsWith('end:'))).toBe(false);
+    expect(h.synth.pending).toBe(false);
+  });
+
+  it('does not splice a different server provider into a reply', async () => {
+    const plays: string[] = [],
+      phones: string[] = [];
+    const synth = new CarServerSynth({
+      fetchAudio: (text: string) => ({ url: text, engine: text === 'one' ? 'kokoro' : 'piper' }),
+      play: async (url: string) => {
+        plays.push(url);
+      },
+      stop: () => {},
+      fallback: async (u: Utt) => {
+        phones.push(u.text);
+      },
+      ...manualTimers(),
+    });
+    synth.speakReply(['one', 'two'].map((text) => ({ text, onend: null, onerror: null })));
+    for (let i = 0; i < 4; i++) await flush();
+    expect(plays).toEqual(['one']);
+    expect(phones).toEqual(['one', 'two']);
   });
 
   it('the team voice menu value picks the member default phone voice for the fallback', () => {

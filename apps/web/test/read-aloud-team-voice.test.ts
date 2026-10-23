@@ -21,7 +21,10 @@ const phone = {
   speaking: false,
   pending: false,
   cancels: 0,
-  getVoices: () => [{ voiceURI: 'voice://chosen', name: 'Chosen voice', lang: 'fr-FR' }],
+  getVoices: () => [
+    { voiceURI: 'voice://chosen', name: 'Chosen voice', lang: 'fr-FR' },
+    { voiceURI: 'voice://english', name: 'English default', lang: 'en-US', default: true },
+  ],
   speak(u: Utt) {
     phoneSaid.push(u);
   },
