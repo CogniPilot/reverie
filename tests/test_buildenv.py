@@ -166,7 +166,7 @@ class BuildEnvTests(unittest.TestCase):
         self.assertEqual(ledger_estimate(ledger, "tiny", build, 1), 256 * MiB)        # a peak of 0 never admits 0
         with self.assertRaises(SystemExit):
             main(["--project", "fresh", "--repo", str(self.repo), "--expect", "auto", "--disk", "1M",
-                  "--ledger", str(ledger), "--", "true"])
+                  "--scratch", str(self.scratch), "--ledger", str(ledger), "--", "true"])
 
     def test_unreadable_cgroup_baseline_records_null_delta(self):
         for name in ("memory.max", "memory.current", "memory.stat"): (self.cgroup / name).unlink()
@@ -258,7 +258,7 @@ class BuildEnvTests(unittest.TestCase):
         out, err = io.TextIOWrapper(io.BytesIO()), io.TextIOWrapper(io.BytesIO())
         with mock.patch.object(reverie.buildenv, "run", isolated), redirect_stdout(out), redirect_stderr(err):
             code = main(["--project", "demo", "--repo", str(self.repo), "--expect", "100M", "--disk", "1M",
-                         "--ledger", str(ledger)] + list(argv))
+                         "--scratch", str(self.scratch), "--ledger", str(ledger)] + list(argv))
         out.flush(); err.flush()
         return code, out.buffer.getvalue(), err.buffer.getvalue(), json.loads(ledger.read_text().splitlines()[-1])
 
@@ -272,6 +272,14 @@ class BuildEnvTests(unittest.TestCase):
         self.assertEqual(json.loads(out.decode().splitlines()[-1]), entry)          # the JSON line stays last
         self.assertIn(b"Test Files", out); self.assertIn(b"vitest stderr line", err)  # child output still streams
         self.assertEqual(out.count(b"x" * 99 + b"\n"), 1024)                        # all of it, not just the tail
+
+    def test_cli_helper_uses_its_scratch_when_the_host_default_is_unavailable(self):
+        unavailable = Path(self.temp.name) / "unavailable-host-scratch"
+        unavailable.write_text("not a directory")
+        with mock.patch.object(reverie.buildenv, "SCRATCH", unavailable):
+            code, _, err, entry = self.cli("--", sys.executable, "-c", "print('fixture')")
+        self.assertEqual((code, entry["status"]), (0, "ok"))
+        self.assertEqual(err, b"")
 
     def test_expect_files_met_keeps_the_childs_result(self):
         vitest = self.vitest_repo()
@@ -388,11 +396,11 @@ class BuildEnvTests(unittest.TestCase):
         self.assertFalse((self.repo / "ran").exists())
 
     def test_cli_requires_estimates_and_exits_tempfail_when_refused(self):
-        with self.assertRaises(SystemExit): main(["--project", "demo", "--", "true"])        # no --expect/--disk
+        with self.assertRaises(SystemExit): main(["--project", "demo", "--scratch", str(self.scratch), "--", "true"])  # no --expect/--disk
         isolated = lambda *a, **kw: run(*a, **dict(kw, scratch=self.scratch, rust_cache=self.cache, cgroup=self.cgroup))
         with mock.patch("reverie.buildenv.run", side_effect=isolated):
             code = main(["--project", "demo", "--repo", str(self.repo), "--expect", "1G", "--disk", "1000000G",
-                         "--ledger", str(self.scratch / "l.jsonl"), "--", "true"])
+                         "--scratch", str(self.scratch), "--ledger", str(self.scratch / "l.jsonl"), "--", "true"])
         self.assertEqual(code, EX_TEMPFAIL)
 
 
