@@ -220,8 +220,9 @@ export function renderForRecipient(
   // Only a turn the server found the verified owner speaking (owner_spoken, owner-auth/marks.ts) gets this turn's voice
   // context, outside the quote. A body's own `spoken` is a request, never evidence: an unsigned post gets no hint.
   const voice = message.from.kind === 'user' && message.from.mark === 'owner_spoken' ? ` ${SPOKEN_TURN_HINT}` : '';
-  // A spoken user message waits for an answer linked to it by id (voice-turn-routes.ts): say which id, outside the quote.
-  const link = message.from.kind === 'user' && message.spoken ? ` ${answerLinkHint(message.id)}` : '';
+  // Spoken turns and addressed voice questions need an answer linked to their identity, outside the quote.
+  const link = (message.from.kind === 'user' && message.spoken) || isAddressedVoiceTurn(room, message, recipientId, nameOf)
+    ? ` ${answerLinkHint(message.id)}` : '';
   return `${from}${role}${to === undefined ? '' : ` -> ${to}`}${quoted}: ${text}${files}${voice}${link}`;
 }
 
@@ -380,6 +381,26 @@ export function wakeRecipients(
   deliverable: (id: string) => boolean = () => true
 ): Set<string> {
   return applyMemberNotify(room, message, wakeByRoom(room, message, recipients, nameOf, env, deliverable), nameOf);
+}
+
+/** An explicit turn for the voice member; a voice flag or room chatter alone is not a turn. */
+export function isAddressedVoiceTurn(
+  room: ChatRoom,
+  message: ChatMessage,
+  sessionId: string,
+  nameOf: (id: string) => string
+): boolean {
+  if (
+    message.deleted || message.from.kind === 'system' ||
+    (message.from.kind === 'agent' && message.from.sessionId === sessionId) ||
+    !room.members.some(member => member.sessionId === sessionId && member.voice)
+  ) return false;
+  if (message.to !== 'all' && message.to.includes(sessionId)) return true;
+  const name = nameOf(sessionId);
+  const unique = room.members.filter(member => nameOf(member.sessionId).toLowerCase() === name.toLowerCase()).length === 1;
+  if (unique && textMentions(message.text, name)) return true;
+  const original = message.replyTo ? room.messages.find(item => item.id === message.replyTo && !item.deleted) : undefined;
+  return original?.from.kind === 'agent' && original.from.sessionId === sessionId;
 }
 
 /**
