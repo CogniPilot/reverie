@@ -8,6 +8,10 @@ const root=resolve(import.meta.dirname,'../..');
 const modules=process.env.REVERIE_BROWSER_NODE_MODULES || join(root,'apps/web/node_modules');
 const {chromium}=await import(pathToFileURL(join(modules,'playwright/index.mjs')).href);
 const pub=join(root,'apps/web/src/web/public');
+const {tsImport}=await import(pathToFileURL(join(modules,'tsx/dist/esm/api/index.mjs')).href);
+const {registerHandbookRoutes}=await tsImport(pathToFileURL(join(root,'apps/web/src/web/routes/handbook-routes.ts')).href,import.meta.url);
+const {default:Fastify}=await import(pathToFileURL(join(modules,'fastify/fastify.js')).href);
+const handbook=Fastify();registerHandbookRoutes(handbook,join(pub,'handbook'));
 const harness=await readFile(join(root,'apps/web/test/helpers/chat-app-harness.mjs'),'utf8');
 const stub=harness.match(/window\.eval\(`([\s\S]*?class ReverieApp[\s\S]*?)`\);/)[1];
 const employee=(id,name)=>({id,sessionId:id,name,icon:name[0],reportsTo:'owner',available:true,onVacation:false,permissions:{},sleepEnabled:false,dreamEnabled:false});
@@ -18,13 +22,16 @@ const fixture=`<!doctype html><html><head><link rel="stylesheet" href="/styles.c
 const server=createServer(async(req,res)=>{
  try{
   const path=new URL(req.url,'http://localhost').pathname;
+  if(path==='/handbook'||path.startsWith('/handbook/')||path.startsWith('/api/handbook')){
+   const result=await handbook.inject({method:req.method,url:req.url});res.writeHead(result.statusCode,result.headers);res.end(result.body);return;
+  }
   if(path.startsWith('/api/')){
    let body='';for await(const part of req)body+=part;
    const target=company.employees.find(e=>path==='/api/company/employees/'+e.id);
-   if(target && req.method==='PUT')Object.assign(target,JSON.parse(body));
+   if(target && req.method==='PUT'){const {permissions,...rest}=JSON.parse(body);Object.assign(target,rest);if(permissions)target.permissions={...target.permissions,...permissions};}
    const leaving=company.employees.find(e=>path==='/api/company/employees/'+e.id+'/vacation');
    if(leaving && req.method==='POST'){leaving.onVacation=JSON.parse(body).enabled;leaving.desiredRunning=!leaving.onVacation;}
-   const data=path==='/api/company'?company:path==='/api/board'?board:path==='/api/chatrooms'?{self:null,rooms:[],features:{}}:path==='/api/chatrooms/phone-status'?{self:'owner',canSetOwn:true}:path==='/api/model-endpoints'?[endpoint]:path==='/api/system/gpu'?{available:true,utilization:18,memoryUsedMb:18000,memoryTotalMb:24576}:path==='/api/sessions'?[{id:'first',customModel:{endpointId:endpoint.id}}]:path==='/api/company/hire-options'?{sources:[{...endpoint,kind:'local',modes:['opencode'],defaultMode:'opencode'}],harnesses:[{id:'opencode',label:'OpenCode',efforts:[]}]}:path==='/api/plans/allocations'?{accounts:[],employees:company.employees}:path==='/api/voice/options'?{voices:[]}:{};
+   const data=target && req.method==='PUT'?{employee:target}:path==='/api/company'?company:path==='/api/board'?board:path==='/api/chatrooms'?{self:null,rooms:[],features:{}}:path==='/api/chatrooms/phone-status'?{self:'owner',canSetOwn:true}:path==='/api/model-endpoints'?[endpoint]:path==='/api/system/gpu'?{available:true,utilization:18,memoryUsedMb:18000,memoryTotalMb:24576}:path==='/api/sessions'?[{id:'first',customModel:{endpointId:endpoint.id}}]:path==='/api/company/hire-options'?{sources:[{...endpoint,kind:'local',modes:['opencode'],defaultMode:'opencode'}],harnesses:[{id:'opencode',label:'OpenCode',efforts:[]}]}:path==='/api/plans/allocations'?{accounts:[],employees:company.employees}:path==='/api/voice/options'?{voices:[]}:{};
    res.setHeader('content-type','application/json');res.end(JSON.stringify(['/api/model-endpoints','/api/system/gpu','/api/sessions'].includes(path)?data:{success:true,data}));return;
   }
   const file=path==='/'?null:path==='/company/plans'?'company-plans.html':path.slice(1);
@@ -43,9 +50,11 @@ try{
  for(const name of ['River','Lake']){
   const card=page.locator('.ca-company-person').filter({has:page.getByText(name,{exact:true})});
   await card.getByRole('checkbox',{name:'Sleep',exact:true}).check();
-  await card.getByText('Sleep/Dream saved.',{exact:true}).waitFor();
+  await card.getByText('Preferences saved.',{exact:true}).waitFor();
   await card.getByRole('checkbox',{name:'Dream',exact:true}).check();
-  await card.getByText('Sleep/Dream saved.',{exact:true}).waitFor();
+  await card.getByText('Preferences saved.',{exact:true}).waitFor();
+  for(const label of ['Recovery permission for '+name,'Move own plan for '+name,'Manage team plans for '+name]){await card.getByRole('checkbox',{name:label,exact:true}).check();await card.getByText('Preferences saved.',{exact:true}).waitFor();}
+  assert.equal(await card.getByRole('button',{name:'Save preferences',exact:true}).count(),0);
   assert.equal(await card.getByRole('button',{name:'Retire '+name,exact:true}).isVisible(),false);
  }
  await page.reload({waitUntil:'domcontentloaded'});await page.waitForFunction(()=>window.reverieChat?.built);await page.evaluate(()=>window.reverieChat.openCompany());
@@ -53,6 +62,7 @@ try{
   const card=page.locator('.ca-company-person').filter({has:page.getByText(name,{exact:true})});
   assert.equal(await card.getByRole('checkbox',{name:'Sleep',exact:true}).isChecked(),true);
   assert.equal(await card.getByRole('checkbox',{name:'Dream',exact:true}).isChecked(),true);
+  for(const label of ['Recovery permission for '+name,'Move own plan for '+name,'Manage team plans for '+name])assert.equal(await card.getByRole('checkbox',{name:label,exact:true}).isChecked(),true);
  }
  await page.getByRole('switch',{name:'Leave office: Lake',exact:true}).uncheck();
  await page.getByRole('button',{name:'Leave office',exact:true}).click();
@@ -69,5 +79,14 @@ try{
  if(out){await mkdir(out,{recursive:true});await page.screenshot({path:join(out,'company-local-plan-desktop.png'),fullPage:true});}
  await page.setViewportSize({width:390,height:844});assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
  if(out)await page.screenshot({path:join(out,'company-local-plan-mobile.png'),fullPage:true});
- console.log('PASS multi-expert Sleep/Dream persist across reload; persistent office toggle; retirement hidden; distinct local card in shared stack, GPU numbers, members, responsive layout.');
-}finally{await browser.close();await new Promise(r=>server.close(r));}
+ await page.goto(origin+'/handbook',{waitUntil:'domcontentloaded'});
+ await page.getByRole('link',{name:'Recover a stuck expert',exact:true}).last().click();
+ assert.ok((await page.locator('article').textContent()).includes('recoverEmployees'));
+ const docs=await (await page.request.get(origin+'/api/handbook/recovery')).json();assert.ok(docs.data.markdown.includes('recovery.skipped'));
+ await page.getByLabel('Search handbook',{exact:true}).fill('scratch');
+ await page.getByRole('button',{name:'Search',exact:true}).click();assert.ok((await page.locator('article').textContent()).includes('Work and scratch'));
+ if(out)await page.screenshot({path:join(out,'handbook-mobile.png'),fullPage:true});
+ assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+ await page.setViewportSize({width:1200,height:950});if(out)await page.screenshot({path:join(out,'handbook-desktop.png'),fullPage:true});
+ console.log('PASS handbook human navigation/search and agent Markdown, preference permissions autosave with reload; multi-expert Sleep/Dream persist across reload; persistent office toggle; retirement hidden; distinct local card in shared stack, GPU numbers, members, responsive layout.');
+}finally{await handbook.close();await browser.close();await new Promise(r=>server.close(r));}

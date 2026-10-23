@@ -51,7 +51,7 @@ let
         test/reboot-restore.test.ts test/reboot-restore-persistent.test.ts \
         test/routes/reboot-restore-routes.test.ts test/codex-transcript.test.ts test/routes/company-avatar.test.ts \
         test/company-avatar-picker-ui.test.ts test/company-hire-plan-refresh.test.ts \
-        test/company-hire-wizard.test.ts test/company-role-context.test.ts test/company-rest-context.test.ts \
+        test/company-hire-wizard.test.ts test/company-role-context.test.ts test/company-rest-context.test.ts test/handbook.test.ts test/company-preferences-autosave.test.ts \
         test/company-settings-ui.test.ts test/chat-app-dom.test.ts test/profile-avatar-preview.test.ts test/cli-config-content.test.ts \
         test/session-runtime.test.ts test/company-runtime-ui.test.ts test/opencode-subscription-auth.test.ts \
         test/selected-claude-profile.test.ts \

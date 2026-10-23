@@ -220,7 +220,7 @@ describe('Company is one page for plans and people', () => {
       if (path === '/api/chatrooms/phone-status') return { ok: true, data: { self: owner ? 'owner' : employee.sessionId, canSetOwn: owner } };
       if (path === '/api/company/employees/' + employee.id) {
         writes.push({ path, options });
-        return { ok: true, data: {} };
+        return { ok: true, data: { employee: { ...employee, ...options.body, permissions: { ...(employee as any).permissions, ...options.body.permissions } } } };
       }
       return previous(path, options);
     };
@@ -234,12 +234,11 @@ describe('Company is one page for plans and people', () => {
     expect(sleep.checked).toBe(false); expect(dream.checked).toBe(false);
     expect(sleep.title).toContain('Gantt'); expect(sleep.title).toContain('not connected');
     expect(dream.title).toContain('ideas, not facts');
-    checkbox.checked = true;
-    handle.document.querySelector<HTMLButtonElement>('[aria-label="Save preferences for Reviewer"]')!.click();
+    checkbox.click();
     await handle.flush();
     expect(writes).toEqual([{
       path: '/api/company/employees/' + employee.id,
-      options: { method: 'PUT', body: { sleepEnabled: false, dreamEnabled: false, permissions: { recoverEmployees: true, moveOwnPlan: false, managePlans: false } } },
+      options: { method: 'PUT', body: { permissions: { recoverEmployees: true } }, signal: expect.anything() },
     }]);
     owner = false;
     handle.shell.closePage();
@@ -334,18 +333,16 @@ it('shows saved Sleep/Dream preferences and lets the owner change them during va
   handle.app._chatApi = async (path: string, options: any) => {
     if (path === '/api/company') return { ok: true, data: company };
     if (path === '/api/chatrooms/phone-status') return { ok: true, data: { self: 'owner', canSetOwn: true } };
-    if (path === '/api/company/employees/' + employee.id) { writes.push(options.body); return { ok: true, data: {} }; }
+    if (path === '/api/company/employees/' + employee.id) { writes.push(options.body); Object.assign(employee, options.body); return { ok: true, data: { employee } }; }
     return original(path, options);
   };
   await handle.shell.openCompany('people'); await handle.flush();
   const sleep = handle.document.querySelector<HTMLInputElement>('[aria-label="Sleep"]')!;
   const dream = handle.document.querySelector<HTMLInputElement>('[aria-label="Dream"]')!;
-  const save = handle.document.querySelector<HTMLButtonElement>('[aria-label="Save preferences for Reviewer"]')!;
   expect(sleep.checked).toBe(true); expect(dream.checked).toBe(false);
-  expect(handle.document.querySelector<HTMLInputElement>('[aria-label="Recovery permission for Reviewer"]')!.disabled).toBe(true);
-  expect(save.disabled).toBe(false);
-  sleep.checked = false; dream.checked = true; save.click(); await handle.flush();
-  expect(writes).toEqual([{ sleepEnabled: false, dreamEnabled: true }]);
+  expect(handle.document.querySelector<HTMLInputElement>('[aria-label="Recovery permission for Reviewer"]')!.disabled).toBe(false);
+  sleep.click(); await handle.flush(); dream.click(); await handle.flush();
+  expect(writes).toEqual([{ sleepEnabled: false }, { dreamEnabled: true }]);
 });
 
 it('autosaves Sleep/Dream separately for every expert and restores saved values when Company is reopened', async () => {
@@ -366,10 +363,10 @@ it('autosaves Sleep/Dream separately for every expert and restores saved values 
       (card.querySelector(`[name="${key}"]`) as HTMLInputElement).click();
       await handle.flush();
     }
-    expect(card.textContent).toContain('Sleep/Dream saved.');
+    expect(card.textContent).toContain('Preferences saved.');
   }
   expect(writes).toHaveLength(4);
-  expect(writes.every(body => Object.keys(body).sort().join() === 'dreamEnabled,sleepEnabled')).toBe(true);
+  expect(writes.every(body => Object.keys(body).length === 1)).toBe(true);
   handle.shell.closePage(); await handle.shell.openCompany();
   expect([...handle.document.querySelectorAll<HTMLInputElement>('.ca-company-person [name="sleepEnabled"], .ca-company-person [name="dreamEnabled"]')].every(input => input.checked)).toBe(true);
 });
@@ -379,11 +376,11 @@ it('restores Sleep/Dream after a refused autosave and shows the error on the aff
   handle.app._chatApi = async (path: string, options: any) => {
     if (path === '/api/company') return { ok: true, data: company };
     if (path === '/api/chatrooms/phone-status') return { ok: true, data: { self: 'owner', canSetOwn: true } };
-    return options?.method === 'PUT' ? { ok: false, error: 'Save refused' } : { ok: true, data: {} };
+    return options?.method === 'PUT' ? { ok: false, status: 403, error: 'Save refused' } : { ok: true, data: {} };
   };
   await handle.shell.openCompany();
   const sleep = handle.document.querySelector<HTMLInputElement>('.ca-company-person [name="sleepEnabled"]')!;
   sleep.click(); await handle.flush();
   expect(sleep.checked).toBe(false); expect(sleep.disabled).toBe(false);
-  expect(handle.document.querySelector('.ca-company-person')!.textContent).toContain('Could not save Sleep/Dream: Save refused');
+  expect(handle.document.querySelector('.ca-company-person')!.textContent).toContain('Could not save preferences: Save refused');
 });

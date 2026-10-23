@@ -18,6 +18,8 @@ describe('employee role context in ordinary room briefings', () => {
       chat.addMember(room.id, session.id, { goal: 'Help the team' });
       await chat.delivery.flushAll();
       const delivered = writes.join('\n');
+      expect(delivered).toContain('GET /api/handbook');
+      expect(delivered).toContain('/api/handbook/recovery');
       expect(delivered).toContain('CoffeeMonger');
       expect(delivered).toContain('verify available ingredients');
       expect(delivered).toContain('Patient and practical');

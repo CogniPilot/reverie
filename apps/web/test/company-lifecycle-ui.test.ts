@@ -113,7 +113,7 @@ it('pauses once, blocks competing actions, and refreshes vacation state and reco
   expect(h.document.querySelector('.ca-company-state')!.textContent).toBe('Out of office');
   expect(button('Enter office: River')).not.toBeNull();
   expect((button('Enter office: River') as unknown as HTMLInputElement).checked).toBe(false);
-  expect(h.document.querySelector('[aria-label="Recovery permission for River"]')!.disabled).toBe(true);
+  expect(h.document.querySelector('[aria-label="Recovery permission for River"]')!.disabled).toBe(false);
   const choices = h.document.querySelector('[aria-label="Wake after a crash"]')!;
   expect([...choices.options].map((option: any) => option.value)).not.toContain(employee.id);
   expect(choices.textContent).not.toContain('Automatic: River');

@@ -179,6 +179,20 @@ before releasing disposable task data. Project mounts retain their current trust
 separate Git worktrees for concurrent source changes. Resource isolation is not a
 promise that shared writable files are protected from another expert.
 
+## Office handbook
+
+Open **Handbook** in the conversation sidebar, or `/handbook`, for searchable
+pages shared by humans and agents. The same packaged Markdown is available through
+`GET /api/handbook` and `GET /api/handbook/:slug` using the normal scoped office API.
+Expert context includes these lookup pointers and the current recovery grant.
+The handbook explains procedures; it does not grant permissions. Source pages live
+in `apps/web/src/web/public/handbook/` and ship in the native flake package.
+
+Company preference checkboxes save each field immediately with confirmation or an
+error. This includes Sleep, Dream and explicit recovery/plan grants; a failed or
+unconfirmed request cannot silently appear saved. Older deployments with a
+Save preferences button still require that button until updated.
+
 ## Access over Tailscale
 
 Install and sign in to [Tailscale](https://tailscale.com/download/) on the host and

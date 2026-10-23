@@ -1030,6 +1030,7 @@ const CA_ICONS = {
   back: '<path d="m15 18-6-6 6-6"/>',
   phone: '<rect x="7" y="2" width="10" height="20" rx="2"/><path d="M11 18h2"/>',
   bell: '<path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9M13.7 21a2 2 0 0 1-3.4 0"/>',
+  book: '<path d="M12 6v15M3 3h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5v16h-5a4 4 0 0 0-4 2 4 4 0 0 0-4-2H3z"/>',
   org: '<rect x="9" y="2" width="6" height="5" rx="1"/><rect x="2" y="17" width="6" height="5" rx="1"/><rect x="16" y="17" width="6" height="5" rx="1"/><path d="M12 7v5M5 17v-5h14v5"/>',
   invite: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M19 8v6M22 11h-6"/>',
   gearsmall: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h0a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h0a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>',
@@ -1042,6 +1043,7 @@ const CA_ICONS = {
 /** The Board is pinned above the channel list, shown in the main pane. */
 const CA_PAGES = {
   board: { label: 'Board', icon: 'calendar', path: '/board' },
+  handbook: { label: 'Handbook', icon: 'book', path: '/handbook' },
   company: { label: 'Company', icon: 'org', path: null, nav: false },
   'company-plans': { label: 'Company plans', icon: 'gauge', path: null, nav: false },
   'company-people': { label: 'Company people', icon: 'members', path: null, nav: false },
@@ -2346,7 +2348,6 @@ class ReverieChatApp {
           const recovery = this.el('input', '');
           recovery.type = 'checkbox';
           recovery.checked = employee.permissions?.recoverEmployees === true;
-          recovery.disabled = employee.onVacation === true;
           recovery.setAttribute('aria-label', `Recovery permission for ${employee.name}`);
           label.prepend(recovery);
           const planPermissions = {};
@@ -2359,40 +2360,49 @@ class ReverieChatApp {
             wrap.prepend(input); planPermissions[key] = input; planLabels.push(wrap);
           }
           const rest = this.expertRestFields(card, employee);
-          const restStatus = this.el('p', 'ca-hint');
-          restStatus.setAttribute('role', 'status');
-          card.append(restStatus);
-          const saveRest = async () => {
-            rest.sleep.disabled = rest.dream.disabled = true;
-            restStatus.textContent = 'Saving Sleep/Dream…';
+          const preferenceStatus = this.el('p', 'ca-hint');
+          preferenceStatus.setAttribute('role', 'status');
+          card.append(preferenceStatus);
+          let preferenceSaves = 0;
+          let preferenceError = '';
+          const savePreference = async (input, key, permission = false) => {
+            if (input.disabled) return;
+            const value = input.checked;
+            const previous = permission ? employee.permissions?.[key] === true : employee[key] === true;
+            input.disabled = true;
+            if (preferenceSaves === 0) preferenceError = '';
+            preferenceSaves++;
+            preferenceStatus.textContent = 'Saving preferences…';
+            const controller = new AbortController();
+            const timeout = setTimeout(() => controller.abort(), 8000);
             try {
               const result = await this.app._chatApi(`/api/company/employees/${encodeURIComponent(employee.id)}`, {
-                method: 'PUT', body: { sleepEnabled: rest.sleep.checked, dreamEnabled: rest.dream.checked },
+                method: 'PUT', body: permission ? { permissions: { [key]: value } } : { [key]: value }, signal: controller.signal,
               });
-              if (!result.ok) throw new Error(result.error || 'Request failed');
-              employee.sleepEnabled = rest.sleep.checked;
-              employee.dreamEnabled = rest.dream.checked;
-              restStatus.textContent = 'Sleep/Dream saved.';
+              const saved = result.data?.employee;
+              if (!result.ok && result.status >= 400 && result.status < 500) throw new Error(result.error || 'Request refused');
+              if (!result.ok || saved?.id !== employee.id || (permission ? saved.permissions?.[key] : saved[key]) !== value)
+                throw new Error('Save not confirmed. Reopen Company to check the current value.');
+              if (permission) employee.permissions = { ...employee.permissions, [key]: value };
+              else employee[key] = value;
             } catch (error) {
-              rest.sleep.checked = employee.sleepEnabled === true;
-              rest.dream.checked = employee.dreamEnabled === true;
-              restStatus.textContent = `Could not save Sleep/Dream: ${error.message}`;
+              input.checked = previous;
+              preferenceError = `Could not save preferences: ${error.message}`;
+              preferenceStatus.textContent = preferenceError;
             } finally {
-              rest.sleep.disabled = rest.dream.disabled = false;
+              clearTimeout(timeout);
+              input.disabled = false;
+              preferenceSaves--;
+              if (preferenceSaves === 0) preferenceStatus.textContent = preferenceError || 'Preferences saved.';
             }
           };
-          rest.sleep.addEventListener('change', saveRest);
-          rest.dream.addEventListener('change', saveRest);
-          const save = this.button('ca-btn', 'Save preferences', async () => {
-            const result = await this.app._chatApi(`/api/company/employees/${encodeURIComponent(employee.id)}`, {
-              method: 'PUT', body: { sleepEnabled: rest.sleep.checked, dreamEnabled: rest.dream.checked, ...(!employee.onVacation ? { permissions: { ...employee.permissions, recoverEmployees: recovery.checked, moveOwnPlan: planPermissions.moveOwnPlan.checked, managePlans: planPermissions.managePlans.checked } } : {}) },
-            });
-            status.textContent = result.ok ? 'Employee preferences saved.' : `Could not save preferences: ${result.error || 'request failed'}`;
-          });
-          save.setAttribute('aria-label', `Save preferences for ${employee.name}`);
-          save.textContent = 'Save preferences';
+          rest.sleep.addEventListener('change', () => { void savePreference(rest.sleep, 'sleepEnabled'); });
+          rest.dream.addEventListener('change', () => { void savePreference(rest.dream, 'dreamEnabled'); });
+          recovery.addEventListener('change', () => { void savePreference(recovery, 'recoverEmployees', true); });
+          for (const [key, input] of Object.entries(planPermissions))
+            input.addEventListener('change', () => { void savePreference(input, key, true); });
           const controls = this.el('div', 'ca-company-person-controls');
-          controls.append(label, ...planLabels, save, this.button('ca-btn', `Edit profile for ${employee.name}`, () => this.openEmployeeProfile(employee, paint), { text: 'Edit profile' }));
+          controls.append(label, ...planLabels, this.button('ca-btn', `Edit profile for ${employee.name}`, () => this.openEmployeeProfile(employee, paint), { text: 'Edit profile' }));
           const restart = this.button('ca-btn', `Restart session for ${employee.name}`, () => this.openEmployeeRestart(employee, paint), { text: 'Restart session' });
           restart.disabled = employee.onVacation === true;
           if (restart.disabled) restart.title = 'Bring this expert into the office before restarting.';

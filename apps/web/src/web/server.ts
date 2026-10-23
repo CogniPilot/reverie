@@ -247,6 +247,7 @@ import {
   registerRalphRoutes,
   registerPlanRoutes,
   registerClipboardRoutes,
+  registerHandbookRoutes,
   registerBoardPageRoutes,
   registerPlansPageRoutes,
   registerSearchRoutes,
@@ -1339,6 +1340,7 @@ export class WebServer extends EventEmitter {
     registerRalphRoutes(this.app, ctx);
     registerPlanRoutes(this.app, ctx);
     registerClipboardRoutes(this.app, ctx);
+    registerHandbookRoutes(this.app);
     registerBoardPageRoutes(this.app);
     registerPlansPageRoutes(this.app);
     registerSearchRoutes(this.app, ctx);
