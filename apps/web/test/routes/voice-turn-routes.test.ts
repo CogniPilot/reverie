@@ -170,6 +170,42 @@ describe('voice turn routes', () => {
   };
   const listeners = () => (service as unknown as { messageListeners: Set<unknown> }).messageListeners.size;
 
+  it('uses an exact linked answer committed synchronously during transcript publication', async () => {
+    const earlier = service.post(roomId, { kind: 'user', name: 'user' }, 'earlier question', [VOICE], {
+      deliver: false,
+    });
+    const off = service.onMessage((room, asked) => {
+      if (room.id !== roomId || asked.from.kind !== 'user' || !asked.spoken) return;
+      off();
+      service.post(roomId, agent(VOICE), 'Unlinked aside.', ['user']);
+      answer(asked, OTHER, 'Wrong author.');
+      answer(earlier, VOICE, 'An older answer.');
+      answer(asked, VOICE, 'Immediate linked answer.');
+      service.post(roomId, agent(VOICE), 'A later aside.', ['user']);
+    });
+    const res = await turn();
+    expect(res.statusCode, res.body).toBe(200);
+    expect(res.json().data.reply).toBe('Immediate linked answer.');
+    expect(res.json().data.messages[1].replyTo).toBe(res.json().data.messages[0].id);
+    expect(seen.filter((call) => call.url === '/tts').map((call) => call.json)).toEqual([
+      { text: 'Immediate linked answer.' },
+    ]);
+    expect(listeners()).toBe(0);
+  });
+
+  it('does not use synchronous unlinked or wrong-author posts to satisfy the answer wait', async () => {
+    const off = service.onMessage((room, asked) => {
+      if (room.id !== roomId || asked.from.kind !== 'user' || !asked.spoken) return;
+      off();
+      service.post(roomId, agent(VOICE), 'Unlinked voice aside.', ['user']);
+      answer(asked, OTHER, 'Linked but from another member.');
+    });
+    const res = await turn();
+    expect(res.statusCode).toBe(504);
+    expect(seen.map((call) => call.url)).toEqual(['/stt']);
+    expect(listeners()).toBe(0);
+  });
+
   it('transcribes, delivers the transcript to the member, and reads its own answer aloud', async () => {
     let pane = '';
     let askedId = '';
