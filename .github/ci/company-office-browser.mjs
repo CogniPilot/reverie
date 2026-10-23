@@ -34,7 +34,7 @@ const server=createServer(async(req,res)=>{
 });
 await new Promise(r=>server.listen(0,'127.0.0.1',r));
 const origin=`http://127.0.0.1:${server.address().port}`;
-const browser=await chromium.launch({executablePath:process.env.REVERIE_BROWSER_EXECUTABLE||'/run/current-system/sw/bin/microsoft-edge',headless:true});
+const browser=await chromium.launch({executablePath:process.env.REVERIE_BROWSER_EXECUTABLE||'/run/current-system/sw/bin/microsoft-edge',headless:true,chromiumSandbox:true});
 try{
  const page=await browser.newPage({viewport:{width:1200,height:950}});
  await page.goto(origin,{waitUntil:'domcontentloaded'});

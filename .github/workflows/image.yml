@@ -218,6 +218,69 @@ jobs:
           test "${ok:-}" = 1
 
 
+  worker-browser:
+    needs: image
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: offline-bundle
+          path: bundle
+      - name: Prepare disposable runner storage and browser namespaces
+        run: |
+          set -euo pipefail
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup
+          sudo mkdir -p /scratch/tmp
+          sudo chown "$(id -u):$(id -g)" /scratch /scratch/tmp
+          # Only this ephemeral runner VM; Chromium retains its own sandbox.
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          df -h / /scratch
+      - uses: cachix/install-nix-action@448cde739abec1eaf0646249e3d25bb8d9bc7702 # v31
+      - name: Load and identify the tested image
+        run: |
+          set -euo pipefail
+          mkdir bundle/extracted
+          tar -xzf bundle/reverie-*.tar.gz -C bundle/extracted
+          (cd bundle/extracted && sha256sum --check SHA256SUMS)
+          test "$(sed -n 's/^Commit: //p' bundle/extracted/IMAGE-REF.txt)" = "$(git rev-parse HEAD)"
+          image=$(sed -n 's/^Image-ID: //p' bundle/extracted/IMAGE-REF.txt)
+          printf '%s\n' "$image" | grep -Eq '^sha256:[0-9a-f]{64}$'
+          docker load --input bundle/extracted/reverie-image.tar
+          test "$(docker image inspect ghcr.io/jgoppert/reverie:latest --format '{{.Id}}')" = "$image"
+          printf '%s\n' "$image" > "$RUNNER_TEMP/tested-image-id"
+      - name: Exercise real isolated workers using the tested image
+        run: |
+          set -euo pipefail
+          mkdir -p acceptance
+          nix develop --command python3 -m reverie.buildenv \
+            --project integration-workers --repo "$PWD" --expect 2G --disk 1G --jobs 1 \
+            -- python3 .github/ci/worker-isolation-smoke.py --image "$(cat "$RUNNER_TEMP/tested-image-id")" \
+            2>&1 | tee acceptance/worker-smoke.log
+      - name: Build the sandboxed browser and exercise synthetic office controls
+        run: |
+          set -euo pipefail
+          nix build .#browserRuntime --out-link "$RUNNER_TEMP/browser-runtime" --print-build-logs
+          nix develop --command npm ci --prefix apps/web --ignore-scripts
+          export REVERIE_BROWSER_EXECUTABLE="$RUNNER_TEMP/browser-runtime/bin/chromium"
+          export REVERIE_BROWSER_ARTIFACTS="$PWD/acceptance/browser"
+          nix develop --command python3 -m reverie.buildenv \
+            --project integration-browser --repo "$PWD" --expect 2G --disk 1G --jobs 1 \
+            -- bash -euo pipefail -c 'node .github/ci/company-office-browser.mjs; node .github/ci/laptop-power-browser.mjs' \
+            2>&1 | tee acceptance/browser.log
+          printf 'Worker and browser acceptance completed for %s\n' "$(cat "$RUNNER_TEMP/tested-image-id")" > acceptance/PASS.txt
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: worker-browser-acceptance
+          path: acceptance/
+          if-no-files-found: error
+
   debian-install:
     needs: image
     runs-on: ubuntu-24.04
@@ -245,7 +308,7 @@ jobs:
             debian:12 bash /ci/debian-install.sh
 
   publish-image:
-    needs: [image, debian-install]
+    needs: [image, debian-install, worker-browser]
     if: github.event_name == 'release' && !github.event.release.prerelease
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -313,7 +376,7 @@ jobs:
           printf '%s\n' "$digest" | tee -a "$GITHUB_STEP_SUMMARY"
 
   release-assets:
-    needs: [image, debian-install]
+    needs: [image, debian-install, worker-browser]
     if: github.event_name == 'release' && !github.event.release.prerelease
     runs-on: ubuntu-24.04
     timeout-minutes: 10

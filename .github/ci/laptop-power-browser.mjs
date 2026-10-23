@@ -22,7 +22,7 @@ const server = createServer(async (req, res) => {
   } catch { res.statusCode=500;res.end(); }
 });
 await new Promise(resolve => server.listen(0,'127.0.0.1',resolve));
-const browser = await chromium.launch({ executablePath: process.env.REVERIE_BROWSER_EXECUTABLE || '/run/current-system/sw/bin/microsoft-edge', headless:true });
+const browser = await chromium.launch({ executablePath: process.env.REVERIE_BROWSER_EXECUTABLE || '/run/current-system/sw/bin/microsoft-edge', headless:true,chromiumSandbox:true });
 try {
   const page = await browser.newPage({viewport:{width:1100,height:850}});
   const dialogs=[];
