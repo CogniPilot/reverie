@@ -3,6 +3,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { chromium } from 'playwright';
 import { chromiumLaunchOptions } from './voice-ci-launch.mjs';
+import { settleVoiceRequests } from './voice-ci-requests.mjs';
 
 const root = resolve(process.env.REVERIE_VOICE_CI_ARTIFACTS);
 await mkdir(root, { recursive: true });
@@ -129,6 +130,18 @@ try {
   await page.goto(base, { waitUntil: 'domcontentloaded' });
   record('navigation-complete');
   const fixture = await page.evaluate(async () => (await fetch('/fixture')).json());
+  const requestBudget = (item) =>
+    item.method === 'POST'
+      ? item.url.includes('/turn')
+        ? fixture.budgetsMs.turn
+        : fixture.budgetsMs.speak
+      : fixture.budgetsMs.audioFetch;
+  const drainRequests = async (phase) => {
+    record('request-drain-start', { phase });
+    await settleVoiceRequests(timings, requestBudget);
+    await Promise.all(captures);
+    record('request-drain-complete', { phase });
+  };
   // A full, long route response is validated separately from sentence-batched car playback.
   record('speak-start');
   const speak = await page.evaluate(async (f) => {
@@ -285,6 +298,7 @@ try {
     assert.equal(event.info.voice, fixture.voice);
   playback.push({ name: 'batch', ...healthy });
   record('batch-complete');
+  await drainRequests('batch');
   for (const failure of ['voice', 'fetch']) {
     record('fallback-start', { failure });
     const replay = await page.evaluate(({ text, failure }) => window.runBatch(text, failure), {
@@ -308,6 +322,7 @@ try {
     );
     playback.push({ name: `fallback-${failure}`, ...replay });
     record('fallback-complete', { failure });
+    await drainRequests(`fallback-${failure}`);
   }
   for (const item of timings) {
     assert.ok(Number.isFinite(item.endMs), 'Missing request completion timestamp');
