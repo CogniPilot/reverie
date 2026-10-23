@@ -102,7 +102,7 @@ import {
 } from '../schemas.js';
 import { isMultiUserMode } from '../../config/multiuser.js';
 import { isSensitivePath } from '../sensitive-path.js';
-import { NO_OWNER, ownerMark, type OwnerVerifier } from '../../owner-auth/marks.js';
+import { NO_OWNER, ownerMark, type OwnerVerifier, type ServiceVerifier } from '../../owner-auth/marks.js';
 import { OWNER_RANK, RolesStore, type Actor, type Permission } from '../../roles.js';
 
 class PhoneStatusForbidden extends Error {}
@@ -136,25 +136,25 @@ export function registerChatroomRoutes(
   /** Roles and their permissions (src/roles.ts). The default has no assignments: every session is a Member, a coordinator is its room's Lead. */
   roles: RolesStore = new RolesStore(''),
   /** A session id to its company employee id, if it has one. */
-  employeeOf: (sessionId: string) => string | undefined = () => undefined
+  employeeOf: (sessionId: string) => string | undefined = () => undefined,
+  host: { pendingStatus?: ServiceVerifier } = {}
 ): void {
   /** The session this request speaks as, or undefined for the user. */
   const caller = (req: FastifyRequest): string | undefined =>
     resolveParentSessionId(ctx, req, undefined, ownerFor(req));
 
-  // Stopgap until owner authentication: every owner-only rule below reads "caller() is undefined"
-  // as the user, and caller() is also undefined for a header that is PRESENT but does not resolve
-  // (unknown id, ambiguous prefix, over-long, another owner's session). Refuse those requests on
-  // every chatroom route, so only an ABSENT header still means the user, the rule company-routes'
-  // ownerOnly already uses. An absent header is still trusted; owner authentication closes that.
+  // Every room route needs an actual owner or an agent session. Services cannot borrow
+  // owner identity by omitting a header, or impersonate an agent by adding one.
   const refuseUnresolvedParent = async (req: FastifyRequest, reply: FastifyReply) => {
-    if (req.headers['x-reverie-parent-session'] === undefined || caller(req)) return;
+    if (verifiedOwner(req)) return;
+    if (req.method === 'GET' && req.routeOptions.url === '/api/chatrooms' && host.pendingStatus?.(req)) return;
+    if (req.headers['x-reverie-service-token'] === undefined && req.headers['x-reverie-parent-session'] !== undefined && caller(req)) return;
     return reply
       .code(403)
       .send(
         createErrorResponse(
           ApiErrorCode.FORBIDDEN,
-          'X-Reverie-Parent-Session does not name a live session you may speak as'
+          'Verified owner or live agent session required'
         )
       );
   };
@@ -267,13 +267,14 @@ export function registerChatroomRoutes(
     reply.code(403).send(createErrorResponse(ApiErrorCode.FORBIDDEN, message));
 
   /**
-   * Who the request is for the roles resolver. No parent-session header is still read as the owner (as every owner-only
-   * rule here always did; roles-contract 1a covers closing that with owner-auth). A session is its employee's role, plus
+   * Who the request is for the roles resolver. Owner authority requires the verified cookie.
+   * A session is its employee's role, plus
    * Lead where it holds this room's coordinator seat.
    */
   const actorFor = (req: FastifyRequest, room: ChatRoom): Actor => {
     const self = caller(req);
-    if (!self) return { owner: true };
+    if (verifiedOwner(req)) return { owner: true };
+    if (!self) throw new ChatroomError('Verified owner or agent required', 'INVALID_INPUT');
     return {
       employeeId: employeeOf(self),
       lead: room.members.some((m) => m.sessionId === self && m.role === 'coordinator'),
@@ -311,6 +312,12 @@ export function registerChatroomRoutes(
   };
 
   app.get('/api/chatrooms', async (req) => {
+    // The stall watcher needs only aggregate pending counts. Never return room names,
+    // room identities, content, attachments or owner/role capabilities through this grant.
+    if (host.pendingStatus?.(req) && !verifiedOwner(req)) {
+      const sessions = new Set(service.rooms().flatMap(room => room.members.map(member => member.sessionId)));
+      return { success: true, data: { serviceView: 'pending-deliveries', rooms: [{ members: [...sessions].map(sessionId => ({ sessionId, pendingDeliveries: service.deliveryStatus(sessionId).pending })) }] } };
+    }
     const { member } = req.query as { member?: string };
     const self = caller(req);
     const memberId = member === 'self' ? self : member;
@@ -344,7 +351,7 @@ export function registerChatroomRoutes(
   // The user's direct message with one agent. Only the user opens one here; agents already in a
   // DM post to it like any room, and one that is not a participant cannot see it.
   app.post('/api/chatrooms/dms', async (req, reply) => {
-    if (caller(req)) return forbid(reply, 'Only the user starts a direct message');
+    if (!verifiedOwner(req)) return forbid(reply, 'Only the user starts a direct message');
     const body = parseBody(ChatroomDmSchema, req.body);
     try {
       const sessionId = joinableSession(req, { owner: ownerFor(req) }, body.sessionId);
@@ -356,7 +363,7 @@ export function registerChatroomRoutes(
 
   app.put('/api/chatrooms/:id/placement', async (req, reply) => {
     const { id } = req.params as { id: string };
-    if (caller(req)) return forbid(reply, 'Only the user arranges chatrooms');
+    if (!verifiedOwner(req)) return forbid(reply, 'Only the user arranges chatrooms');
     const body = parseBody(ChatroomPlacementSchema, req.body);
     try {
       roomOrFail(req, id);
@@ -368,7 +375,7 @@ export function registerChatroomRoutes(
 
   app.put('/api/chatrooms/:id/archive', async (req, reply) => {
     const { id } = req.params as { id: string };
-    if (caller(req)) return forbid(reply, 'Only the user archives chatrooms');
+    if (!verifiedOwner(req)) return forbid(reply, 'Only the user archives chatrooms');
     const body = parseBody(ChatroomArchiveSchema, req.body);
     try {
       roomOrFail(req, id);
@@ -411,7 +418,7 @@ export function registerChatroomRoutes(
   // The retired sessions (the old rows left by plan switches): only the owner lists them, restores one (the places move back and the
   // successor retires in its stead) or forgets one.
   app.get('/api/chatrooms/retired', async (req, reply) => {
-    if (caller(req)) return forbid(reply, 'Only the user sees retired sessions');
+    if (!verifiedOwner(req)) return forbid(reply, 'Only the user sees retired sessions');
     const user = getAuthUser(req);
     return {
       success: true,
@@ -429,7 +436,7 @@ export function registerChatroomRoutes(
   });
 
   app.post('/api/chatrooms/retired/:sessionId/restore', async (req, reply) => {
-    if (caller(req)) return forbid(reply, 'Only the user restores a retired session');
+    if (!verifiedOwner(req)) return forbid(reply, 'Only the user restores a retired session');
     const { sessionId } = req.params as { sessionId: string };
     const user = getAuthUser(req);
     const entry = service.retiredSessions((owner) => canAccessOwned(user, owner)).find((r) => r.sessionId === sessionId);
@@ -444,7 +451,7 @@ export function registerChatroomRoutes(
   });
 
   app.delete('/api/chatrooms/retired/:sessionId', async (req, reply) => {
-    if (caller(req)) return forbid(reply, 'Only the user forgets a retired session');
+    if (!verifiedOwner(req)) return forbid(reply, 'Only the user forgets a retired session');
     const { sessionId } = req.params as { sessionId: string };
     const user = getAuthUser(req);
     const entry = service.retiredSessions((owner) => canAccessOwned(user, owner)).find((r) => r.sessionId === sessionId);
@@ -464,7 +471,7 @@ export function registerChatroomRoutes(
   // The owner's order of channels in their sidebar. Only the owner sets it, and only for rooms they own; it is a view setting and does
   // not change what any agent sees.
   app.put('/api/chatrooms/order', async (req, reply) => {
-    if (caller(req)) return forbid(reply, 'Only the user arranges chatrooms');
+    if (!verifiedOwner(req)) return forbid(reply, 'Only the user arranges chatrooms');
     const body = parseBody(ChatroomOrderSchema, req.body);
     const user = getAuthUser(req);
     const mine = body.ids.filter((id) => {
@@ -525,7 +532,7 @@ export function registerChatroomRoutes(
   // The owner sets, per room, whether a post to the whole room wakes every member or only those it is for.
   app.put('/api/chatrooms/:id/wake', async (req, reply) => {
     const { id } = req.params as { id: string };
-    if (caller(req)) return forbid(reply, 'Only the user sets how a chatroom wakes its members');
+    if (!verifiedOwner(req)) return forbid(reply, 'Only the user sets how a chatroom wakes its members');
     const body = parseBody(ChatroomWakeSchema, req.body);
     try {
       roomOrFail(req, id);
@@ -614,7 +621,7 @@ export function registerChatroomRoutes(
   // (an admin looking at someone else's room must not mark it read for them).
   app.post('/api/chatrooms/:id/read', async (req, reply) => {
     const { id } = req.params as { id: string };
-    if (caller(req)) return forbid(reply, 'Only the user marks a chatroom read');
+    if (!verifiedOwner(req)) return forbid(reply, 'Only the user marks a chatroom read');
     const body = parseBody(ChatroomReadSchema, req.body ?? {});
     try {
       const room = roomOrFail(req, id);
@@ -629,7 +636,7 @@ export function registerChatroomRoutes(
 
   app.put('/api/chatrooms/:id', async (req, reply) => {
     const { id } = req.params as { id: string };
-    if (caller(req)) return forbid(reply, 'Only the user can rename a chatroom');
+    if (!verifiedOwner(req)) return forbid(reply, 'Only the user can rename a chatroom');
     const body = parseBody(ChatroomUpdateSchema, req.body);
     try {
       roomOrFail(req, id);
@@ -641,7 +648,7 @@ export function registerChatroomRoutes(
 
   app.delete('/api/chatrooms/:id', async (req, reply) => {
     const { id } = req.params as { id: string };
-    if (caller(req)) return forbid(reply, 'Only the user can delete a chatroom');
+    if (!verifiedOwner(req)) return forbid(reply, 'Only the user can delete a chatroom');
     try {
       roomOrFail(req, id);
       await service.deleteRoom(id, userName(req));
@@ -710,7 +717,7 @@ export function registerChatroomRoutes(
 
   app.post('/api/chatrooms/:id/coordinator', async (req, reply) => {
     const { id } = req.params as { id: string };
-    if (caller(req)) return forbid(reply, 'Only the user appoints the coordinator');
+    if (!verifiedOwner(req)) return forbid(reply, 'Only the user appoints the coordinator');
     const body = parseBody(ChatroomCoordinatorSchema, req.body);
     try {
       const room = roomOrFail(req, id);
@@ -788,7 +795,7 @@ export function registerChatroomRoutes(
   /** Who a request is, for reactions and uploads: a member session, or the user. */
   const actor = (req: FastifyRequest, room: ChatRoom): string | undefined => {
     const self = caller(req);
-    if (!self) return 'user';
+    if (!self) return verifiedOwner(req) ? 'user' : undefined;
     return room.members.some((m) => m.sessionId === self) ? self : undefined;
   };
 
@@ -812,7 +819,7 @@ export function registerChatroomRoutes(
   // Edit: only the user, only their own text messages. Quiet: nothing is sent to the members; they read the new text next time.
   app.put('/api/chatrooms/:id/messages/:messageId', async (req, reply) => {
     const { id, messageId } = req.params as { id: string; messageId: string };
-    if (caller(req)) return forbid(reply, 'Only the user edits messages');
+    if (!verifiedOwner(req)) return forbid(reply, 'Only the user edits messages');
     const body = parseBody(ChatroomEditSchema, req.body);
     try {
       roomOrFail(req, id);
@@ -826,7 +833,7 @@ export function registerChatroomRoutes(
   /** Who may pin: the user, or the room's coordinator (an agent that coordinates THIS room). Returns who to record, or null. */
   const pinner = (req: FastifyRequest, room: ChatRoom): { name: string; kind: 'user' | 'agent' } | null => {
     const self = caller(req);
-    if (!self) return { name: userName(req), kind: 'user' };
+    if (!self) return verifiedOwner(req) ? { name: userName(req), kind: 'user' } : null;
     return allowed(req, room, 'pins.manage') ? { name: service.nameOf(self), kind: 'agent' } : null;
   };
 
@@ -1051,7 +1058,7 @@ export function registerChatroomRoutes(
       const q = req.query as { name?: string; type?: string; scope?: string };
       try {
         roomOrFail(req, id);
-        if (caller(req)) return forbid(reply, 'Only the user adds emotes');
+        if (!verifiedOwner(req)) return forbid(reply, 'Only the user adds emotes');
         if (!Buffer.isBuffer(req.body))
           throw new ChatroomError('Send the image as application/octet-stream', 'INVALID_INPUT');
         const emote = await files.addEmote({
@@ -1162,7 +1169,7 @@ export function registerChatroomRoutes(
     try {
       const room = roomOrFail(req, id);
       // A global emote is every room's: that stays the user's. A room's own emote needs emotes.remove there.
-      if (q.scope === 'global' ? caller(req) : !allowed(req, room, 'emotes.remove')) return forbid(reply, 'You cannot remove emotes here (emotes.remove)');
+      if (q.scope === 'global' ? !verifiedOwner(req) : !allowed(req, room, 'emotes.remove')) return forbid(reply, 'You cannot remove emotes here (emotes.remove)');
       if (!(await files.removeEmote(name, q.scope === 'global' ? 'global' : id))) {
         throw new ChatroomError('No such emote', 'NOT_FOUND');
       }

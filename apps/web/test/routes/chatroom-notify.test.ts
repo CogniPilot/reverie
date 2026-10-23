@@ -1,3 +1,4 @@
+import { trustedFixtureOwner } from '../helpers/trusted-owner-fixture.js';
 /**
  * Each agent chooses, per room, what wakes it: everything the room says (`all`) or only what is meant for it (`mentions`). A choice never
  * loses a message: what does not wake the member rides along with its next prompt. The owner always wakes it and can set anyone's.
@@ -33,7 +34,7 @@ describe('an agent chooses what wakes it', () => {
     const file = join(mkdtempSync(join(tmpdir(), 'chatroom-')), 'chatrooms.json');
     const harness = await createRouteTestHarness((fastify, c) => {
       service = new ChatroomService({ file, getSession: (id) => c.sessions.get(id), broadcast: () => {}, now: () => clock });
-      registerChatroomRoutes(fastify, c, service, new ChatFileStore(mkdtempSync(join(tmpdir(), 'chatfiles-'))));
+      registerChatroomRoutes(fastify, c, service, new ChatFileStore(mkdtempSync(join(tmpdir(), 'chatfiles-'))), trustedFixtureOwner);
     });
     app = harness.app;
     ctx = harness.ctx;

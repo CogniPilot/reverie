@@ -1,3 +1,4 @@
+import { trustedFixtureOwner } from '../helpers/trusted-owner-fixture.js';
 /**
  * @fileoverview Route tests for wake-on-LAN on `POST /api/sessions/:id/input`.
  *
@@ -117,7 +118,7 @@ async function harness(
   };
   const registry = new RemoteWakeRegistry(deps);
 
-  registerSessionRoutes(app, ctx as never, { remoteWake: registry });
+  registerSessionRoutes(app, ctx as never, { ...({ remoteWake: registry }), verifiedOwner: trustedFixtureOwner });
   installEnvelope(app);
   installRouteErrorHandler(app);
   await app.ready();
@@ -382,7 +383,7 @@ async function harnessWithFailingWake(): Promise<Harness> {
     broadcast: (event) => events.push(event),
     log: () => {},
   });
-  registerSessionRoutes(app, ctx as never, { remoteWake: registry });
+  registerSessionRoutes(app, ctx as never, { ...({ remoteWake: registry }), verifiedOwner: trustedFixtureOwner });
   installEnvelope(app);
   installRouteErrorHandler(app);
   await app.ready();

@@ -1,3 +1,4 @@
+import { trustedFixtureOwner } from '../helpers/trusted-owner-fixture.js';
 /**
  * @fileoverview COD-55 — tunnel password guard.
  *
@@ -54,7 +55,7 @@ describe('COD-55 tunnel password guard (PUT /api/settings tunnelEnabled)', () =>
   const savedOptIn = process.env.REVERIE_ALLOW_UNAUTHENTICATED_NETWORK;
 
   beforeEach(async () => {
-    harness = await createRouteTestHarness(registerSystemRoutes);
+    harness = await createRouteTestHarness((app, ctx) => registerSystemRoutes(app, ctx, trustedFixtureOwner));
     vi.clearAllMocks();
     mockedWriteFile.mockResolvedValue(undefined);
     tunnel = makeTunnelManager(false);

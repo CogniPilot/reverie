@@ -1,3 +1,4 @@
+import { trustedFixtureOwner } from '../helpers/trusted-owner-fixture.js';
 /**
  * @fileoverview Route tests for `GET /api/sessions/:id/wait`.
  *
@@ -93,7 +94,7 @@ async function harness(options?: { authUser?: { username: string; role: 'admin' 
     if (authUser) (req as unknown as { authUser: typeof authUser }).authUser = authUser;
   });
 
-  registerSessionRoutes(app, ctx as never);
+  registerSessionRoutes(app, ctx as never, { ...({}), verifiedOwner: trustedFixtureOwner });
 
   app.addHook('preSerialization', (req, reply, payload: unknown, done) => {
     const p = payload as { success?: unknown; errorCode?: unknown } | null;

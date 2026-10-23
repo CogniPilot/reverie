@@ -1,3 +1,4 @@
+import { trustedFixtureOwner } from '../helpers/trusted-owner-fixture.js';
 /**
  * @fileoverview Org chart clean-up: the temporary-worker profiles of sessions that are gone (they piled up as agents were recreated)
  * can be removed, owner only. A running agent's record is never touched, and another owner's records are left alone.
@@ -44,7 +45,7 @@ describe('removing the profiles of agents that are gone', () => {
     });
     avatars = new AvatarStore(join(directory, 'agent-avatars'));
     app = Fastify();
-    registerCompanyRoutes(app, { sessions } as unknown as SessionPort, service, avatars);
+    registerCompanyRoutes(app, { sessions } as unknown as SessionPort, service, avatars, undefined, undefined, { verifiedOwner: trustedFixtureOwner });
     installRouteErrorHandler(app);
     await app.ready();
     await store.update((state) => {

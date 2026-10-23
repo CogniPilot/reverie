@@ -1,3 +1,4 @@
+import { trustedFixtureOwner } from './helpers/trusted-owner-fixture.js';
 /**
  * Experts API: templates seeded from a seed directory, owner-only template and settings changes,
  * credential refusal, delegate-gated hiring with caps, notice-or-rollback, audit lines, and
@@ -85,7 +86,7 @@ describe('experts api', () => {
     expertStore = store;
     app = Fastify();
     installRouteErrorHandler(app);
-    routes = registerExpertRoutes(app, {
+    routes = registerExpertRoutes(app, { ...({
       store,
       callerSession: (req) => {
         const raw = req.headers[HEADER];
@@ -140,7 +141,7 @@ describe('experts api', () => {
           },
       budgetCheckEveryMs: 0,
       now: () => clock,
-    });
+    }), verifiedOwner: trustedFixtureOwner });
     await app.ready();
   };
 

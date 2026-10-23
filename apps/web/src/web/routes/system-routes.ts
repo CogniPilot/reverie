@@ -1,3 +1,4 @@
+import { NO_OWNER, type OwnerVerifier } from '../../owner-auth/marks.js';
 /**
  * @fileoverview System, config, settings, subagent, and debug routes.
  * Covers status, stats, config CRUD, settings, subagent monitoring,
@@ -148,7 +149,8 @@ export function resolveSpanUrl(hostHeader: string | undefined, fallbackPort = '3
 
 export function registerSystemRoutes(
   app: FastifyInstance,
-  ctx: SessionPort & EventPort & ConfigPort & InfraPort & AuthPort & TabLayoutPort
+  ctx: SessionPort & EventPort & ConfigPort & InfraPort & AuthPort & TabLayoutPort,
+  verifiedOwner: OwnerVerifier = NO_OWNER
 ): void {
   const windowStatesPath = dataPath('subagent-window-states.json');
   const parentMapPath = dataPath('subagent-parents.json');
@@ -969,7 +971,7 @@ export function registerSystemRoutes(
     // name out of agent requests and ordinary multi-user accounts, including
     // installations still using the legacy authentication mode.
     if (settings.displayName !== undefined) {
-      if (req.headers['x-reverie-parent-session'] !== undefined)
+      if (!verifiedOwner(req))
         return reply.code(403).send(createErrorResponse(ApiErrorCode.FORBIDDEN, 'Only the owner may rename the instance'));
       if (!requireAdmin(req, reply)) return;
     }

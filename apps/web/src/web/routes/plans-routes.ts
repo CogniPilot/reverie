@@ -1,3 +1,4 @@
+import { NO_OWNER, type OwnerVerifier } from '../../owner-auth/marks.js';
 /**
  * @fileoverview Plans: subscription accounts paced against their weekly windows.
  *
@@ -45,14 +46,15 @@ export function registerPlansRoutes(
   app: FastifyInstance,
   plans: PlanService,
   logins?: AccountLoginService,
-  scope?: PlansScope
+  scope?: PlansScope,
+  verifiedOwner: OwnerVerifier = NO_OWNER
 ): void {
   const forbid = (reply: FastifyReply) =>
     reply.code(403).send(createErrorResponse(ApiErrorCode.FORBIDDEN, 'Plans are admin-only'));
 
   app.get('/api/plans/allocations', async (req, reply) => {
     reply.header('Cache-Control', 'no-store');
-    if (req.headers['x-reverie-parent-session'] !== undefined || !isAdmin(req)) return forbid(reply);
+    if (!verifiedOwner(req) || !isAdmin(req)) return forbid(reply);
     return {
       success: true,
       data: { ...(await plans.allocations()), employees: scope?.employees?.(ownerFor(req)) ?? [] },
@@ -60,16 +62,17 @@ export function registerPlansRoutes(
   });
 
   // Read-only and role-scoped, server-side, for the page, `reverie plans` and the MCP tools alike:
-  // - no X-Reverie-Parent-Session header: the owner (admin) sees everything;
+  // - a verified full owner cookie (and admin in multi-user mode) sees everything;
   // - an agent holding plans.view_all (an Admin, or the Lead of a live room) sees every account;
   // - any other agent sees only the account its own session runs on (and no GPU line).
   // A header that does not resolve to a live session the caller may speak as is refused.
   // Add, remove and sign-in stay admin-only below; no token is ever part of a plan row.
   app.get('/api/plans', async (req, reply) => {
-    if (req.headers['x-reverie-parent-session'] === undefined) {
+    if (verifiedOwner(req)) {
       if (!isAdmin(req)) return forbid(reply);
       return { success: true, data: await plans.plans() };
     }
+    if (req.headers['x-reverie-service-token'] !== undefined) return forbid(reply);
     const self = scope?.callerSession(req);
     if (!self) {
       return reply
@@ -83,7 +86,7 @@ export function registerPlansRoutes(
   });
 
   app.post('/api/plans/suggest', async (req, reply) => {
-    if (!isAdmin(req)) return forbid(reply);
+    if (!verifiedOwner(req) || !isAdmin(req)) return forbid(reply);
     const body = parseBody(SuggestSchema, req.body ?? {});
     const suggestion = await plans.suggest(body.provider ?? 'anthropic');
     if (!suggestion) {
@@ -98,7 +101,7 @@ export function registerPlansRoutes(
   // Sign-in is the owner's alone: an agent caller (the parent-session header is present) never starts, reads or ends one.
   app.addHook('preHandler', async (req, reply) => {
     if (req.url.startsWith('/api/plans/accounts/') || req.url.startsWith('/api/plans/login') ) {
-      if (req.headers['x-reverie-parent-session'] !== undefined) {
+      if (!verifiedOwner(req)) {
         return reply.code(403).send(createErrorResponse(ApiErrorCode.FORBIDDEN, 'Signing in an account is the owner\'s alone'));
       }
     }

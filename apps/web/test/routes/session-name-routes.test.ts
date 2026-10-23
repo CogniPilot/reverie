@@ -1,3 +1,4 @@
+import { trustedFixtureOwner } from '../helpers/trusted-owner-fixture.js';
 /**
  * @fileoverview PUT /api/sessions/:id/name hands the name to the user (#376).
  *
@@ -34,7 +35,7 @@ describe('PUT /api/sessions/:id/name', () => {
 
   beforeAll(async () => {
     writeFileSync(transcriptPath, `${JSON.stringify({ type: 'user', message: { role: 'user', content: 'hi' } })}\n`);
-    harness = await createRouteTestHarness(registerSessionRoutes);
+    harness = await createRouteTestHarness((app, ctx) => registerSessionRoutes(app, ctx, { verifiedOwner: trustedFixtureOwner }));
     // A REAL session, since the ownership flag lives on the class, not the mock.
     session = new Session({ id: 'name-route-test', workingDir: '/tmp', name: 'w1-demo' });
     harness.ctx.sessions.set(session.id, session as never);

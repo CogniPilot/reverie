@@ -1,3 +1,4 @@
+import { trustedFixtureOwner } from '../helpers/trusted-owner-fixture.js';
 /**
  * @fileoverview Claude transcript normalization tests for the response viewer.
  *
@@ -25,7 +26,7 @@ async function createEnvelopeHarness(): Promise<LocalHarness> {
   const app = Fastify({ logger: false });
   await app.register(fastifyCookie);
   const ctx = createMockRouteContext();
-  registerSessionRoutes(app, ctx);
+  registerSessionRoutes(app, ctx, { ...({}), verifiedOwner: trustedFixtureOwner });
 
   app.addHook('preSerialization', (req, reply, payload: unknown, done) => {
     if (!req.url.startsWith('/api') || payload === null || typeof payload !== 'object') {

@@ -1,3 +1,4 @@
+import { trustedFixtureOwner } from './helpers/trusted-owner-fixture.js';
 /**
  * The server half of the conversation shell: the user's read cursor and unread counts (kept with the
  * room, so per owner and across devices), direct messages, placement and archive, and who may see
@@ -50,7 +51,7 @@ describe('server counts and read cursor', () => {
         now: () => clock,
         ownerNames: (owner) => (owner === undefined ? ['Pat'] : []),
       });
-      registerChatroomRoutes(fastify, c, service, new ChatFileStore(mkdtempSync(join(tmpdir(), 'chatfiles-'))));
+      registerChatroomRoutes(fastify, c, service, new ChatFileStore(mkdtempSync(join(tmpdir(), 'chatfiles-'))), trustedFixtureOwner);
     });
     app = harness.app;
     for (const [id, name] of [
@@ -278,7 +279,7 @@ describe('read cursor per owner in multi-user mode', () => {
           broadcast: () => {},
           now: () => 5_000,
         });
-        registerChatroomRoutes(fastify, c, service, new ChatFileStore(mkdtempSync(join(tmpdir(), 'chatfiles-'))));
+        registerChatroomRoutes(fastify, c, service, new ChatFileStore(mkdtempSync(join(tmpdir(), 'chatfiles-'))), trustedFixtureOwner);
       },
       { authUser }
     );

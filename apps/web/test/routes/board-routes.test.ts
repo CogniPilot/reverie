@@ -1,3 +1,4 @@
+import { trustedFixtureOwner } from '../helpers/trusted-owner-fixture.js';
 /**
  * The server board: audited writes (audit before save, fail closed), who may write, nothing deleted, the import of the
  * pre-console board files, and the derived parts of GET /api/board (roster, polls, pins, pace).
@@ -53,7 +54,7 @@ describe('board routes', () => {
       [COORD, BUILDER, STRANGER].map((id) => [id, { id, owner: undefined, pid: 1, isWorking: id === BUILDER }] as const)
     );
     app = Fastify();
-    registerBoardRoutes(app, { sessions, broadcast: (e: string, d: unknown) => events.push([e, d]) } as never, {
+    registerBoardRoutes(app, { sessions, broadcast: (e: string, d: unknown) => events.push([e, d]) } as never, { ...({
       store,
       company: () => ({
         employees: [
@@ -68,7 +69,7 @@ describe('board routes', () => {
         audit.push(entry);
       },
       now: () => NOW,
-    });
+    }), verifiedOwner: trustedFixtureOwner });
     await app.ready();
   });
   afterEach(async () => {
@@ -434,14 +435,14 @@ describe('board logic', () => {
       { id: 'acct-openai-spare', label: 'spare', provider: 'openai', profileId: null, acctName: 'spare', isDefault: false, signedIn: false, updatedAt: NOW, pace, bankedResets: { availableCount: 2, earliestExpiresAt: NOW + 5 } },
     ];
     const own = Fastify();
-    registerBoardRoutes(own, { sessions: new Map(), broadcast: () => {} } as never, {
+    registerBoardRoutes(own, { sessions: new Map(), broadcast: () => {} } as never, { ...({
       store,
       company: () => ({ employees: [], settings: { timeZone: 'America/New_York', ownerName: 'Owner' } }),
       rooms: () => [],
       audit: async () => {},
       plans: async () => rows as never,
       now: () => NOW,
-    });
+    }), verifiedOwner: trustedFixtureOwner });
     await own.ready();
     try {
       const burn = (await own.inject({ method: 'GET', url: '/api/board' })).json().data.planBurn;

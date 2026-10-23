@@ -1,3 +1,4 @@
+import { trustedFixtureOwner } from '../helpers/trusted-owner-fixture.js';
 /**
  * @fileoverview Tests for POST /api/sessions/:id/custom-model (docs/custom-model-endpoints-plan.md
  * chunk 5 — applying/clearing a session's custom model endpoint + CLI restart).
@@ -35,7 +36,7 @@ const CLAUDE_ENDPOINT: CustomModelHost = {
 
 async function setup(ctxOptions?: Parameters<typeof createRouteTestHarness>[1]) {
   await writeCustomModelHosts(getDataDir(), [CLAUDE_ENDPOINT]);
-  return createRouteTestHarness(registerSessionRoutes, ctxOptions);
+  return createRouteTestHarness((app, ctx) => registerSessionRoutes(app, ctx, { verifiedOwner: trustedFixtureOwner }), ctxOptions);
 }
 
 describe('POST /api/sessions/:id/custom-model', () => {

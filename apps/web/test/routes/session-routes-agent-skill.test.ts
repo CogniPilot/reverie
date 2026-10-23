@@ -1,3 +1,4 @@
+import { trustedFixtureOwner } from '../helpers/trusted-owner-fixture.js';
 /**
  * @fileoverview Agent-skill injection on POST /api/sessions (docs/agent-control-plan.md §2).
  *
@@ -41,7 +42,7 @@ async function createHarness(agentSkillEnabled: boolean): Promise<Harness> {
   const app = Fastify({ logger: false });
   await app.register(fastifyCookie);
   const ctx = createMockRouteContext({ agentSkillEnabled });
-  registerSessionRoutes(app, ctx);
+  registerSessionRoutes(app, ctx, { ...({}), verifiedOwner: trustedFixtureOwner });
   installRouteErrorHandler(app);
   await app.ready();
   return { app, ctx };

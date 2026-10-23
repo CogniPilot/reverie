@@ -1,3 +1,4 @@
+import { NO_OWNER, type OwnerVerifier, type ServiceVerifier } from '../../owner-auth/marks.js';
 /** Account profile selection and read-only quota lookup. Admin-owned in multi-user mode. */
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
@@ -35,9 +36,11 @@ export type SessionsOnProfile = (profileId: string) => Promise<string[]>;
 export function registerSubscriptionProfileRoutes(
   app: FastifyInstance,
   reader: SubscriptionUsageReader,
-  sessionsOn: SessionsOnProfile
+  sessionsOn: SessionsOnProfile,
+  verifiedOwner: OwnerVerifier = NO_OWNER,
+  usageService: ServiceVerifier = NO_OWNER
 ): void {
-  const authorize = (req: FastifyRequest): boolean => !isMultiUserMode() || isAdmin(req);
+  const authorize = (req: FastifyRequest): boolean => verifiedOwner(req) && (!isMultiUserMode() || isAdmin(req));
   app.addHook('preHandler', async (req, reply) => {
     if (req.method !== 'POST' || !['/api/sessions', '/api/quick-start'].includes(req.routeOptions.url ?? '')) return;
     const body = req.body as
@@ -104,7 +107,7 @@ export function registerSubscriptionProfileRoutes(
   // (admin in multi-user mode) and takes a label and nothing else. An agent caller is refused: the
   // parent-session header counts as present with any value, so a malformed id cannot fall back to the owner.
   app.patch<{ Params: { id: string } }>('/api/subscription-profiles/:id', async (req, reply) => {
-    if (req.headers['x-reverie-parent-session'] !== undefined)
+    if (!verifiedOwner(req))
       return reply.code(403).send(createErrorResponse(ApiErrorCode.FORBIDDEN, 'Only the owner renames accounts'));
     if (!authorize(req))
       return reply.code(403).send(createErrorResponse(ApiErrorCode.FORBIDDEN, 'Account profiles are owner-only'));
@@ -130,7 +133,7 @@ export function registerSubscriptionProfileRoutes(
   // Owner-only like rename. Unlists the account (its login directory is never touched) and is refused while
   // a session runs on it, so no running agent loses its account underneath it.
   app.delete<{ Params: { id: string } }>('/api/subscription-profiles/:id', async (req, reply) => {
-    if (req.headers['x-reverie-parent-session'] !== undefined)
+    if (!verifiedOwner(req))
       return reply.code(403).send(createErrorResponse(ApiErrorCode.FORBIDDEN, 'Only the owner removes accounts'));
     if (!authorize(req))
       return reply.code(403).send(createErrorResponse(ApiErrorCode.FORBIDDEN, 'Account profiles are owner-only'));
@@ -162,7 +165,7 @@ export function registerSubscriptionProfileRoutes(
     return { success: true, data: { removed: { id: removed.id, label: removed.label, provider: removed.provider } } };
   });
   app.get('/api/subscription-profiles/usage', async (req, reply) => {
-    if (!authorize(req))
+    if (!authorize(req) && !usageService(req))
       return reply.code(403).send(createErrorResponse(ApiErrorCode.FORBIDDEN, 'Subscription usage is admin-only'));
     const profiles = await readSubscriptionProfiles();
     const accounts = [];

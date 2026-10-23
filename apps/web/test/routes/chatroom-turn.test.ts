@@ -1,9 +1,10 @@
+import { trustedFixtureOwner } from '../helpers/trusted-owner-fixture.js';
 /**
  * The page's "is thinking" line is driven by one small event: `chatroom:turn`, sent when a message line is really typed into a
  * member's pane. It names the room, the member and the time, never any text, and is not sent for a briefing, a held (read-later)
  * message, or a line that was not written.
  */
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -37,7 +38,7 @@ describe('chatroom:turn', () => {
         broadcast: (event, data) => events.push({ event, data: data as Record<string, unknown> }),
         now: () => clock,
       });
-      registerChatroomRoutes(fastify, c, service, new ChatFileStore(mkdtempSync(join(tmpdir(), 'chatfiles-'))));
+      registerChatroomRoutes(fastify, c, service, new ChatFileStore(mkdtempSync(join(tmpdir(), 'chatfiles-'))), trustedFixtureOwner);
     });
     app = harness.app;
     ctx = harness.ctx;
@@ -118,3 +119,11 @@ describe('chatroom:turn', () => {
     expect(turns().map((t) => t.sessionId)).toEqual([C]);
   });
 });
+
+// These delivery fixtures exercise historical unmarked user traffic. Authentication
+// uses an explicit trusted-browser seam; real owner marks and refusals are covered
+// by owner-route-principals and chatroom-owner-marks without this metadata stub.
+vi.mock('../../src/owner-auth/marks.js', async original => ({
+  ...await original<typeof import('../../src/owner-auth/marks.js')>(),
+  ownerMark: () => undefined,
+}));

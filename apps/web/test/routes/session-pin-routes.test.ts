@@ -1,3 +1,4 @@
+import { trustedFixtureOwner } from '../helpers/trusted-owner-fixture.js';
 /**
  * @fileoverview Route tests for POST /api/sessions/:id/pin (COD-139).
  *
@@ -23,7 +24,7 @@ async function createEnvelopeHarness(): Promise<LocalHarness> {
   const app = Fastify({ logger: false });
   await app.register(fastifyCookie);
   const ctx = createMockRouteContext();
-  registerSessionRoutes(app, ctx as never);
+  registerSessionRoutes(app, ctx as never, { ...({}), verifiedOwner: trustedFixtureOwner });
 
   app.addHook('preSerialization', (req, reply, payload: unknown, done) => {
     if (!req.url.startsWith('/api')) return done(null, payload);

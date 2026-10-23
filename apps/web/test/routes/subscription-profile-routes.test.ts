@@ -1,3 +1,4 @@
+import { trustedFixtureOwner } from '../helpers/trusted-owner-fixture.js';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import fs from 'node:fs/promises';
 import { join } from 'node:path';
@@ -20,7 +21,7 @@ afterEach(async () => {
 async function app() {
   const instance = Fastify();
   apps.push(instance);
-  registerSubscriptionProfileRoutes(instance, new SubscriptionUsageReader('test'), async () => []);
+  registerSubscriptionProfileRoutes(instance, new SubscriptionUsageReader('test'), async () => [], trustedFixtureOwner);
   instance.post('/api/sessions', (req) => ({ success: true, data: subscriptionLaunch(req) }));
   installRouteErrorHandler(instance);
   await instance.ready();

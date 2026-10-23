@@ -1,3 +1,4 @@
+import { trustedFixtureOwner } from '../helpers/trusted-owner-fixture.js';
 /**
  * An agent may only create a session that resumes a conversation of its own: a row created "resuming" another agent's thread would pass
  * for that agent's successor (the chat's place-handover rule), so POST /api/sessions refuses it at the source. The owner is unaffected.
@@ -29,7 +30,7 @@ describe('an agent resumes only its own conversations', () => {
   });
 
   const setup = async () => {
-    const h = await createRouteTestHarness(registerSessionRoutes);
+    const h = await createRouteTestHarness((app, ctx) => registerSessionRoutes(app, ctx, { verifiedOwner: trustedFixtureOwner }));
     for (const [id, name] of [[P, 'alpha'], [Q, 'bravo']] as const) {
       const s = createMockSession(id);
       s.name = name;
@@ -66,7 +67,7 @@ describe('an agent resumes only its own conversations', () => {
 describe('82d: every resume field, both creating routes, and no silent fresh or stale resume', () => {
   afterEach(() => vi.unstubAllEnvs());
   const setup = async () => {
-    const h = await createRouteTestHarness(registerSessionRoutes);
+    const h = await createRouteTestHarness((app, ctx) => registerSessionRoutes(app, ctx, { verifiedOwner: trustedFixtureOwner }));
     for (const [id, name] of [[P, 'alpha'], [Q, 'bravo']] as const) {
       const s = createMockSession(id);
       s.name = name;
@@ -196,7 +197,7 @@ describe('a coordinator continues a gone agent (resume takeover)', () => {
       { id: 'r1', name: 'reverie', members: [{ sessionId: COORD, role: 'coordinator' }, { sessionId: PEER, role: 'member' }, { sessionId: VERIFIER, role: 'member' }] },
     ]) as never;
     const h = await createRouteTestHarness((app, ctx) =>
-      registerSessionRoutes(app, ctx, {
+      registerSessionRoutes(app, ctx, { ...({
         resumeTakeover: {
           rooms: () => rooms,
           audit: async (e) => {
@@ -204,7 +205,7 @@ describe('a coordinator continues a gone agent (resume takeover)', () => {
             audit.push(e);
           },
         },
-      })
+      }), verifiedOwner: trustedFixtureOwner })
     );
     for (const [id, name] of [[COORD, 'reviewer'], [PEER, 'coordinator'], [VERIFIER, 'verifier']] as const) {
       const s = createMockSession(id);
@@ -289,9 +290,9 @@ describe('a coordinator continues a gone agent (resume takeover)', () => {
     const { h, audit } = await setup({ rooms: [] });
     // rooms() answers the coordinator room once (the check) and nothing after (the audit).
     const reg = await createRouteTestHarness((app, ctx) =>
-      registerSessionRoutes(app, ctx, {
+      registerSessionRoutes(app, ctx, { ...({
         resumeTakeover: { rooms: () => (calls.n++ === 0 ? ([room] as never) : []), audit: async (e) => void audit.push(e) },
-      })
+      }), verifiedOwner: trustedFixtureOwner })
     );
     for (const [id, name] of [[COORD, 'reviewer'], [VERIFIER, 'verifier']] as const) {
       const s = createMockSession(id);

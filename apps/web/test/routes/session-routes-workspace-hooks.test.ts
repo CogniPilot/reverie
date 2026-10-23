@@ -1,3 +1,4 @@
+import { trustedFixtureOwner } from '../helpers/trusted-owner-fixture.js';
 /**
  * @fileoverview Hooks are installed into the workspace a claude session starts in.
  *
@@ -81,7 +82,7 @@ describe('POST /api/sessions workspace hooks', () => {
     await app?.close();
     app = Fastify({ logger: false });
     await app.register(fastifyCookie);
-    registerSessionRoutes(app, createMockRouteContext({ workspaceHooksEnabled }));
+    registerSessionRoutes(app, createMockRouteContext({ workspaceHooksEnabled }), { ...({}), verifiedOwner: trustedFixtureOwner });
     installRouteErrorHandler(app);
     await app.ready();
   };
@@ -90,7 +91,7 @@ describe('POST /api/sessions workspace hooks', () => {
     workingDir = await mkdtemp(join(tmpdir(), 'reverie-workspace-hooks-'));
     app = Fastify({ logger: false });
     await app.register(fastifyCookie);
-    registerSessionRoutes(app, createMockRouteContext());
+    registerSessionRoutes(app, createMockRouteContext(), { ...({}), verifiedOwner: trustedFixtureOwner });
     installRouteErrorHandler(app);
     await app.ready();
   });
@@ -248,7 +249,7 @@ describe('POST /api/quick-start workspace hooks', () => {
     app = Fastify({ logger: false });
     await app.register(fastifyCookie);
     ctx = createMockRouteContext();
-    registerSessionRoutes(app, ctx);
+    registerSessionRoutes(app, ctx, { ...({}), verifiedOwner: trustedFixtureOwner });
     installRouteErrorHandler(app);
     await app.ready();
   });

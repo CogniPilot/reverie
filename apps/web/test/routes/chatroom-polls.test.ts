@@ -1,3 +1,4 @@
+import { trustedFixtureOwner } from '../helpers/trusted-owner-fixture.js';
 /**
  * Polls: a message with a question and options. Members (and the user) vote, a vote can change or be withdrawn, the user or the
  * poll's author closes it, and the author agent is told about votes on one quoted line.
@@ -38,7 +39,7 @@ describe('chatroom polls', () => {
         now: () => clock,
         voteCoalesceMs: 25,
       });
-      registerChatroomRoutes(fastify, c, service, new ChatFileStore(mkdtempSync(join(tmpdir(), 'chatfiles-'))));
+      registerChatroomRoutes(fastify, c, service, new ChatFileStore(mkdtempSync(join(tmpdir(), 'chatfiles-'))), trustedFixtureOwner);
     });
     app = harness.app;
     ctx = harness.ctx;

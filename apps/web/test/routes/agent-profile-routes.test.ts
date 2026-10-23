@@ -1,3 +1,4 @@
+import { trustedFixtureOwner } from '../helpers/trusted-owner-fixture.js';
 /**
  * @fileoverview GET /api/agents/:id/profile: the read-only agent profile, built by the reverie
  * runtime's `profile` report. An injected runner stands in for the runtime, except in the
@@ -21,7 +22,7 @@ const PROFILE = { session: { id: 'test-session-1', name: 'alpha' }, runtime: { s
 
 let clock = 1_000_000;
 async function setup(runner: ProfileRunner | null, authUser?: { username: string; role: 'admin' | 'user' }) {
-  const h = await createRouteTestHarness((app, ctx) => registerAgentProfileRoutes(app, ctx, runner, () => clock), {
+  const h = await createRouteTestHarness((app, ctx) => registerAgentProfileRoutes(app, ctx, runner, () => clock, trustedFixtureOwner), {
     authUser,
   });
   for (const id of ['other-session-2', 'other-session-3']) h.ctx.sessions.set(id, createMockSession(id) as never);

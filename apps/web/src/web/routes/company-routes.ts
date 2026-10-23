@@ -1,3 +1,4 @@
+import { NO_OWNER, type OwnerVerifier, type ServiceVerifier } from '../../owner-auth/marks.js';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { CompanyError, CompanyService } from '../../company-service.js';
@@ -58,12 +59,14 @@ export function registerCompanyRoutes(
   service: CompanyService,
   avatars?: AvatarStore,
   ownerAvatars?: AvatarStore,
-  wakeEmployee?: (id: string) => Promise<unknown>
+  wakeEmployee?: (id: string) => Promise<unknown>,
+  authority: { verifiedOwner?: OwnerVerifier; serviceRebind?: ServiceVerifier } = {}
 ): void {
+  const verifiedOwner = authority.verifiedOwner ?? NO_OWNER;
   const caller = (req: FastifyRequest): string | undefined =>
-    resolveParentSessionId(ctx, req, undefined, ownerFor(req));
+    req.headers['x-reverie-service-token'] !== undefined ? undefined : resolveParentSessionId(ctx, req, undefined, ownerFor(req));
   const ownerOnly = (req: FastifyRequest): void => {
-    if (req.headers['x-reverie-parent-session'] !== undefined)
+    if (!verifiedOwner(req))
       throw new CompanyError('Only the company owner may configure employees or research', 403);
   };
   // The owner, or an owner-set admin agent the policy let through (owner-auth/policy.ts ADMIN_ROUTES).
@@ -105,7 +108,7 @@ export function registerCompanyRoutes(
 
   app.get('/api/company', async (req) => ({
     success: true,
-    data: { ...service.view(ownerFor(req)), canManage: req.headers['x-reverie-parent-session'] === undefined },
+    data: { ...service.view(ownerFor(req)), canManage: verifiedOwner(req) },
   }));
   app.post('/api/company/employees', async (req, reply) =>
     run(reply, async () => {
@@ -125,7 +128,7 @@ export function registerCompanyRoutes(
       const view = service.view(owner);
       const self = caller(req);
       if (
-        req.headers['x-reverie-parent-session'] !== undefined &&
+        !verifiedOwner(req) &&
         (!self || !view.employees.some((e) => e.sessionId === self && e.permissions.recoverEmployees))
       )
         throw new CompanyError('Only the owner or an employee granted recovery permission may wake an employee', 403);
@@ -149,8 +152,10 @@ export function registerCompanyRoutes(
     run(reply, async () => {
       const { id } = req.params as { id: string };
       const { sessionId } = parseBody(RebindSchema, req.body);
-      if (req.headers['x-reverie-parent-session'] === undefined)
+      if (verifiedOwner(req) || authority.serviceRebind?.(req)) {
+        await appendAdminAudit({ admin: verifiedOwner(req) ? 'owner' : 'service:watcher', action: 'employee_rebind_requested', target: id, ip: req.ip, detail: { id, sessionId } });
         return { employee: await service.rebind(id, ownerFor(req), sessionId) };
+      }
       // An agent needs the owner's explicit recovery grant, checked by the service and audited.
       const self = caller(req);
       if (!self)
@@ -258,7 +263,7 @@ export function registerCompanyRoutes(
   app.post('/api/company/employees/:id/invite', async (req, reply) =>
     run(reply, () => {
       const self = caller(req);
-      if (req.headers['x-reverie-parent-session'] !== undefined && !self)
+      if (!verifiedOwner(req) && !self)
         throw new CompanyError('Unknown agent session', 403);
       const { id } = req.params as { id: string };
       return { employee: service.invite(id, parseBody(InviteSchema, req.body).roomId, ownerFor(req), self) };
@@ -337,7 +342,7 @@ export function registerCompanyRoutes(
 
   if (!avatars) return;
   // Profile images. An agent sets or clears its OWN (the caller rule of /api/company/self); the
-  // owner (no parent-session header, which is a hint the agent tooling sets, not authentication)
+  // verified owner
   // may set any agent's. The image is checked by its bytes before anything is recorded or stored.
   // The file is written BEFORE its URL is recorded, so a failed write never leaves a link to nothing;
   // if recording then fails (unknown session, profile cap), the previous image is put back.
@@ -346,7 +351,7 @@ export function registerCompanyRoutes(
     const previous = await avatars.get(sessionId);
     await avatars.put(sessionId, data as Buffer);
     try {
-      return { profile: await service.setAvatar(sessionId, ownerFor(req), avatarUrl(sessionId, Date.now()), req.headers['x-reverie-parent-session'] === undefined) };
+      return { profile: await service.setAvatar(sessionId, ownerFor(req), avatarUrl(sessionId, Date.now()), verifiedOwner(req)) };
     } catch (error) {
       if (previous) await avatars.put(sessionId, previous.data);
       else await avatars.remove(sessionId);
@@ -354,7 +359,7 @@ export function registerCompanyRoutes(
     }
   };
   const clearAvatar = async (req: FastifyRequest, sessionId: string) => {
-    const result = await service.setAvatar(sessionId, ownerFor(req), null, req.headers['x-reverie-parent-session'] === undefined);
+    const result = await service.setAvatar(sessionId, ownerFor(req), null, verifiedOwner(req));
     await avatars.remove(sessionId);
     return { profile: result };
   };

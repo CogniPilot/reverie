@@ -1,3 +1,4 @@
+import { trustedFixtureOwner } from '../helpers/trusted-owner-fixture.js';
 /**
  * @fileoverview Request paths that touch a session's workspace must not freeze the
  * server when its network mount has gone away: `POST /api/sessions` with a
@@ -96,7 +97,7 @@ describe('session creation on an unreachable mount', () => {
     await app.register(fastifyCookie);
     await app.register(fastifyMultipart, { limits: { fileSize: 10 * 1024 * 1024, files: 1 } });
     ctx = createMockRouteContext();
-    registerSessionRoutes(app, ctx as never);
+    registerSessionRoutes(app, ctx as never, { ...({}), verifiedOwner: trustedFixtureOwner });
     installRouteErrorHandler(app);
     await app.ready();
   });

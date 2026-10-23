@@ -1,3 +1,4 @@
+import { trustedFixtureOwner } from '../helpers/trusted-owner-fixture.js';
 /**
  * @fileoverview `model` on POST /api/sessions — a Claude model for one session only.
  *
@@ -29,7 +30,7 @@ async function createHarness(): Promise<Harness> {
   const app = Fastify({ logger: false });
   await app.register(fastifyCookie);
   const ctx = createMockRouteContext();
-  registerSessionRoutes(app, ctx);
+  registerSessionRoutes(app, ctx, { ...({}), verifiedOwner: trustedFixtureOwner });
   installRouteErrorHandler(app);
   await app.ready();
   return { app, ctx };

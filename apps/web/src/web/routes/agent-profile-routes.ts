@@ -1,3 +1,4 @@
+import { NO_OWNER, type OwnerVerifier } from '../../owner-auth/marks.js';
 /**
  * @fileoverview `GET /api/agents/:id/profile`: one agent session's read-only profile for the
  * profile panel: backend, model, effort, usage counters, company and room bindings, runtime
@@ -90,7 +91,8 @@ export function registerAgentProfileRoutes(
   app: FastifyInstance,
   ctx: SessionPort,
   runner: ProfileRunner | null = profileRunnerFromEnv(),
-  now: () => number = Date.now
+  now: () => number = Date.now,
+  verifiedOwner: OwnerVerifier = NO_OWNER
 ): void {
   // A panel opened twice, or polled, shares one report; finished reports are reused briefly; and at
   // most MAX_CONCURRENT_REPORTS processes run at once, so a burst over many sessions queues.
@@ -121,8 +123,8 @@ export function registerAgentProfileRoutes(
     }
     // The owner (no parent-session header) reads any profile. An agent reads only its own, without
     // its direct-message rooms; any other header, resolvable or not, is refused.
-    const owner = req.headers['x-reverie-parent-session'] === undefined;
-    if (!owner && resolveParentSessionId(ctx, req, undefined, ownerFor(req)) !== session.id) {
+    const owner = verifiedOwner(req);
+    if (!owner && (req.headers['x-reverie-service-token'] !== undefined || resolveParentSessionId(ctx, req, undefined, ownerFor(req)) !== session.id)) {
       return reply
         .code(403)
         .send(createErrorResponse(ApiErrorCode.FORBIDDEN, 'An agent may read only its own profile'));

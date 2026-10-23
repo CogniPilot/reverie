@@ -1,3 +1,4 @@
+import { trustedFixtureOwner } from '../helpers/trusted-owner-fixture.js';
 /**
  * @fileoverview Tests for the external-CLI branch of GET /api/sessions/:id/last-response.
  *
@@ -90,7 +91,7 @@ describe('GET /api/sessions/:id/last-response — external CLI panes', () => {
   let session: ReturnType<typeof createMockSession>;
 
   beforeEach(async () => {
-    harness = await createEnvelopeHarness(registerSessionRoutes);
+    harness = await createEnvelopeHarness((app, ctx) => registerSessionRoutes(app, ctx, { verifiedOwner: trustedFixtureOwner }));
     session = harness.ctx._session;
   });
 

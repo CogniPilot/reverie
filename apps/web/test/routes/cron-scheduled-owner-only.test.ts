@@ -1,3 +1,4 @@
+import { trustedFixtureOwner } from '../helpers/trusted-owner-fixture.js';
 /**
  * @fileoverview Cron and scheduled-run WRITE routes are owner-only (stopgap until owner
  * authentication). They create or start unattended sessions (shell mode, a launchCommand, or full
@@ -52,8 +53,8 @@ describe('cron and scheduled-run writes are owner-only', () => {
       startScheduledRun: vi.fn(async () => ({ id: 'run-2' })),
       stopScheduledRun: vi.fn(async () => {}),
     };
-    registerCronRoutes(app, { cron } as never);
-    registerScheduledRoutes(app, scheduled as never);
+    registerCronRoutes(app, { cron } as never, trustedFixtureOwner);
+    registerScheduledRoutes(app, scheduled as never, trustedFixtureOwner);
     await app.ready();
   });
 
@@ -103,7 +104,7 @@ describe('cron and scheduled-run writes are owner-only', () => {
   it('a write route added later under the prefix is covered too', async () => {
     const late = Fastify();
     installRouteErrorHandler(late);
-    registerCronRoutes(late, { cron } as never);
+    registerCronRoutes(late, { cron } as never, trustedFixtureOwner);
     late.post('/api/cron/jobs/:id/clone', async () => ({ success: true }));
     late.post('/api/elsewhere', async () => ({ success: true }));
     await late.ready();

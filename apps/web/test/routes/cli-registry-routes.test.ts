@@ -1,3 +1,4 @@
+import { trustedFixtureOwner } from '../helpers/trusted-owner-fixture.js';
 /**
  * @fileoverview Route tests for /api/clis (docs/cli-enable-disable-plan.md, Phases 2-5).
  * Mirrors the admin-gating test shape used for other admin/settings surfaces (see
@@ -106,7 +107,7 @@ describe('GET /api/clis', () => {
   });
 
   it('single-user mode: returns every registry entry, disabled stock CLIs included', async () => {
-    const { app } = await createRouteTestHarness(registerCliRegistryRoutes);
+    const { app } = await createRouteTestHarness((app) => registerCliRegistryRoutes(app, trustedFixtureOwner));
     const res = await app.inject({ method: 'GET', url: '/api/clis' });
     expect(res.statusCode).toBe(200);
     const body = res.json() as { success: true; data: CliListItem[] };
@@ -118,7 +119,7 @@ describe('GET /api/clis', () => {
   });
 
   it('every item has the expected shape and excludes spawn-time fields', async () => {
-    const { app } = await createRouteTestHarness(registerCliRegistryRoutes);
+    const { app } = await createRouteTestHarness((app) => registerCliRegistryRoutes(app, trustedFixtureOwner));
     const res = await app.inject({ method: 'GET', url: '/api/clis' });
     const body = res.json() as { success: true; data: CliListItem[] };
     for (const cli of body.data) {
@@ -139,7 +140,7 @@ describe('GET /api/clis', () => {
   });
 
   it('every entry is stock: true (no custom entries exist before Phase 5)', async () => {
-    const { app } = await createRouteTestHarness(registerCliRegistryRoutes);
+    const { app } = await createRouteTestHarness((app) => registerCliRegistryRoutes(app, trustedFixtureOwner));
     const res = await app.inject({ method: 'GET', url: '/api/clis' });
     const body = res.json() as { success: true; data: CliListItem[] };
     expect(body.data.every((c) => c.stock === true)).toBe(true);
@@ -147,7 +148,7 @@ describe('GET /api/clis', () => {
 
   it('multi-user mode: an admin sees the full list', async () => {
     process.env.REVERIE_MULTIUSER = '1';
-    const { app } = await createRouteTestHarness(registerCliRegistryRoutes, {
+    const { app } = await createRouteTestHarness((app) => registerCliRegistryRoutes(app, trustedFixtureOwner), {
       authUser: { username: 'root', role: 'admin' },
     });
     const res = await app.inject({ method: 'GET', url: '/api/clis' });
@@ -157,7 +158,7 @@ describe('GET /api/clis', () => {
 
   it('multi-user mode: a non-admin sees an empty list, not a 403', async () => {
     process.env.REVERIE_MULTIUSER = '1';
-    const { app } = await createRouteTestHarness(registerCliRegistryRoutes, {
+    const { app } = await createRouteTestHarness((app) => registerCliRegistryRoutes(app, trustedFixtureOwner), {
       authUser: { username: 'bob', role: 'user' },
     });
     const res = await app.inject({ method: 'GET', url: '/api/clis' });
@@ -173,7 +174,7 @@ describe('PUT /api/clis/:id (Phase 3: enable/disable)', () => {
   });
 
   it('rejects when cliManagementEnabled is off — no settings.json write at all', async () => {
-    const { app } = await createRouteTestHarness(registerCliRegistryRoutes);
+    const { app } = await createRouteTestHarness((app) => registerCliRegistryRoutes(app, trustedFixtureOwner));
     const res = await app.inject({ method: 'PUT', url: '/api/clis/grok', payload: { enabled: false } });
     expect(res.statusCode).toBe(403);
     const body = res.json() as { errorCode: string };
@@ -182,7 +183,7 @@ describe('PUT /api/clis/:id (Phase 3: enable/disable)', () => {
 
   it('toggles a stock CLI off then back on, visible with no reload needed', async () => {
     enableCliManagement();
-    const { app } = await createRouteTestHarness(registerCliRegistryRoutes);
+    const { app } = await createRouteTestHarness((app) => registerCliRegistryRoutes(app, trustedFixtureOwner));
     const off = await app.inject({ method: 'PUT', url: '/api/clis/grok', payload: { enabled: false } });
     expect(off.statusCode).toBe(200);
     const afterOff = await app.inject({ method: 'GET', url: '/api/clis' });
@@ -198,7 +199,7 @@ describe('PUT /api/clis/:id (Phase 3: enable/disable)', () => {
 
   it('rejects disabling shell, changes nothing', async () => {
     enableCliManagement();
-    const { app } = await createRouteTestHarness(registerCliRegistryRoutes);
+    const { app } = await createRouteTestHarness((app) => registerCliRegistryRoutes(app, trustedFixtureOwner));
     const res = await app.inject({ method: 'PUT', url: '/api/clis/shell', payload: { enabled: false } });
     // errorCode, not statusCode: this branch returns bare createErrorResponse()
     // and relies on server.ts's global preSerialization hook to map it to 400,
@@ -212,7 +213,7 @@ describe('PUT /api/clis/:id (Phase 3: enable/disable)', () => {
 
   it('allows disabling claude — only shell keeps the hard guarantee (revised 2026-09-23)', async () => {
     enableCliManagement();
-    const { app } = await createRouteTestHarness(registerCliRegistryRoutes);
+    const { app } = await createRouteTestHarness((app) => registerCliRegistryRoutes(app, trustedFixtureOwner));
     const off = await app.inject({ method: 'PUT', url: '/api/clis/claude', payload: { enabled: false } });
     expect(off.statusCode).toBe(200);
     const list = await app.inject({ method: 'GET', url: '/api/clis' });
@@ -224,7 +225,7 @@ describe('PUT /api/clis/:id (Phase 3: enable/disable)', () => {
 
   it('404s an id that does not exist, never creating one', async () => {
     enableCliManagement();
-    const { app } = await createRouteTestHarness(registerCliRegistryRoutes);
+    const { app } = await createRouteTestHarness((app) => registerCliRegistryRoutes(app, trustedFixtureOwner));
     const res = await app.inject({ method: 'PUT', url: '/api/clis/nonexistent-id', payload: { enabled: true } });
     expect(res.json().errorCode).toBe('NOT_FOUND');
     const list = await app.inject({ method: 'GET', url: '/api/clis' });
@@ -234,7 +235,7 @@ describe('PUT /api/clis/:id (Phase 3: enable/disable)', () => {
   it('multi-user: non-admin is rejected before the write', async () => {
     enableCliManagement();
     process.env.REVERIE_MULTIUSER = '1';
-    const { app } = await createRouteTestHarness(registerCliRegistryRoutes, {
+    const { app } = await createRouteTestHarness((app) => registerCliRegistryRoutes(app, trustedFixtureOwner), {
       authUser: { username: 'bob', role: 'user' },
     });
     const res = await app.inject({ method: 'PUT', url: '/api/clis/grok', payload: { enabled: false } });
@@ -249,7 +250,7 @@ describe('PUT /api/clis/:id (Phase 3: enable/disable)', () => {
     writeFileSync(registryFilePath(), JSON.stringify({ schemaVersion: 1, clis: { grok: { accent: '#123456' } } }), {
       mode: 0o600,
     });
-    const { app } = await createRouteTestHarness(registerCliRegistryRoutes);
+    const { app } = await createRouteTestHarness((app) => registerCliRegistryRoutes(app, trustedFixtureOwner));
     const res = await app.inject({ method: 'PUT', url: '/api/clis/grok', payload: { enabled: false } });
     expect(res.statusCode).toBe(200);
     // GET /api/clis deliberately excludes `accent` (Phase 2's own response
@@ -263,7 +264,7 @@ describe('PUT /api/clis/:id (Phase 3: enable/disable)', () => {
 
   it('writes clis.json mode 0600 on POSIX', async () => {
     enableCliManagement();
-    const { app } = await createRouteTestHarness(registerCliRegistryRoutes);
+    const { app } = await createRouteTestHarness((app) => registerCliRegistryRoutes(app, trustedFixtureOwner));
     await app.inject({ method: 'PUT', url: '/api/clis/grok', payload: { enabled: true } });
     if (process.platform !== 'win32') {
       const mode = statSync(registryFilePath()).mode & 0o777;
@@ -279,14 +280,14 @@ describe('POST /api/clis/:id/install (Phase 4)', () => {
 
   it('rejects when cliManagementEnabled is off', async () => {
     disableCliManagement();
-    const { app } = await createRouteTestHarness(registerCliRegistryRoutes);
+    const { app } = await createRouteTestHarness((app) => registerCliRegistryRoutes(app, trustedFixtureOwner));
     const res = await app.inject({ method: 'POST', url: '/api/clis/grok/install' });
     expect(res.statusCode).toBe(403);
   });
 
   it('rejects a custom entry id — Decision 3: a custom install command is never executed', async () => {
     enableCliManagement();
-    const { app } = await createRouteTestHarness(registerCliRegistryRoutes);
+    const { app } = await createRouteTestHarness((app) => registerCliRegistryRoutes(app, trustedFixtureOwner));
     await app.inject({
       method: 'POST',
       url: '/api/clis',
@@ -300,7 +301,7 @@ describe('POST /api/clis/:id/install (Phase 4)', () => {
   it('multi-user: non-admin is rejected before any spawn', async () => {
     enableCliManagement();
     process.env.REVERIE_MULTIUSER = '1';
-    const { app } = await createRouteTestHarness(registerCliRegistryRoutes, {
+    const { app } = await createRouteTestHarness((app) => registerCliRegistryRoutes(app, trustedFixtureOwner), {
       authUser: { username: 'bob', role: 'user' },
     });
     const res = await app.inject({ method: 'POST', url: '/api/clis/grok/install' });
@@ -315,7 +316,7 @@ describe('Custom CLI entries (Phase 5)', () => {
 
   it('rejects create when cliManagementEnabled is off', async () => {
     disableCliManagement();
-    const { app } = await createRouteTestHarness(registerCliRegistryRoutes);
+    const { app } = await createRouteTestHarness((app) => registerCliRegistryRoutes(app, trustedFixtureOwner));
     const res = await app.inject({
       method: 'POST',
       url: '/api/clis',
@@ -326,7 +327,7 @@ describe('Custom CLI entries (Phase 5)', () => {
 
   it('creates a custom entry, it appears in GET /api/clis with stock:false', async () => {
     enableCliManagement();
-    const { app } = await createRouteTestHarness(registerCliRegistryRoutes);
+    const { app } = await createRouteTestHarness((app) => registerCliRegistryRoutes(app, trustedFixtureOwner));
     const create = await app.inject({
       method: 'POST',
       url: '/api/clis',
@@ -348,7 +349,7 @@ describe('Custom CLI entries (Phase 5)', () => {
 
   it('refuses CLI writes from agent sessions and types room text only into custom CLIs the user marked', async () => {
     enableCliManagement();
-    const { app } = await createRouteTestHarness(registerCliRegistryRoutes);
+    const { app } = await createRouteTestHarness((app) => registerCliRegistryRoutes(app, trustedFixtureOwner));
     const payload = { id: 'test-chat', label: 'T', shortBadge: 'T', binaries: ['bash'], argv: ['bash'] };
     const byAgent = await app.inject({
       method: 'POST',
@@ -373,7 +374,7 @@ describe('Custom CLI entries (Phase 5)', () => {
 
   it('persists an explicit polling declaration without enabling pane input or permitting agent registry writes', async () => {
     enableCliManagement();
-    const { app } = await createRouteTestHarness(registerCliRegistryRoutes);
+    const { app } = await createRouteTestHarness((app) => registerCliRegistryRoutes(app, trustedFixtureOwner));
     const payload = { id: 'test-poll', label: 'Poller', shortBadge: 'P', binaries: ['poll-bin'], argv: ['poll-bin'], chatDelivery: 'poll' };
     expect((await app.inject({ method: 'POST', url: '/api/clis', payload,
       headers: { 'x-reverie-parent-session': '0000002d-0035-4000-8000-000000000047' } })).statusCode).toBe(403);
@@ -389,7 +390,7 @@ describe('Custom CLI entries (Phase 5)', () => {
 
   it('rejects a create whose id collides with a stock id', async () => {
     enableCliManagement();
-    const { app } = await createRouteTestHarness(registerCliRegistryRoutes);
+    const { app } = await createRouteTestHarness((app) => registerCliRegistryRoutes(app, trustedFixtureOwner));
     const res = await app.inject({
       method: 'POST',
       url: '/api/clis',
@@ -400,7 +401,7 @@ describe('Custom CLI entries (Phase 5)', () => {
 
   it('rejects creating the same custom id twice', async () => {
     enableCliManagement();
-    const { app } = await createRouteTestHarness(registerCliRegistryRoutes);
+    const { app } = await createRouteTestHarness((app) => registerCliRegistryRoutes(app, trustedFixtureOwner));
     const payload = { id: 'test-dup', label: 'X', shortBadge: 'X', binaries: ['x'], argv: ['x'] };
     const first = await app.inject({ method: 'POST', url: '/api/clis', payload });
     expect(first.statusCode).toBe(200);
@@ -411,7 +412,7 @@ describe('Custom CLI entries (Phase 5)', () => {
 
   it('rejects a literal with shell metacharacters (the schema, not a new bypass)', async () => {
     enableCliManagement();
-    const { app } = await createRouteTestHarness(registerCliRegistryRoutes);
+    const { app } = await createRouteTestHarness((app) => registerCliRegistryRoutes(app, trustedFixtureOwner));
     const res = await app.inject({
       method: 'POST',
       url: '/api/clis',
@@ -424,7 +425,7 @@ describe('Custom CLI entries (Phase 5)', () => {
 
   it('updates an existing custom entry via PUT /api/clis/custom/:id', async () => {
     enableCliManagement();
-    const { app } = await createRouteTestHarness(registerCliRegistryRoutes);
+    const { app } = await createRouteTestHarness((app) => registerCliRegistryRoutes(app, trustedFixtureOwner));
     await app.inject({
       method: 'POST',
       url: '/api/clis',
@@ -444,7 +445,7 @@ describe('Custom CLI entries (Phase 5)', () => {
 
   it('rejects PUT /api/clis/custom/:id against a stock id', async () => {
     enableCliManagement();
-    const { app } = await createRouteTestHarness(registerCliRegistryRoutes);
+    const { app } = await createRouteTestHarness((app) => registerCliRegistryRoutes(app, trustedFixtureOwner));
     const res = await app.inject({
       method: 'PUT',
       url: '/api/clis/custom/claude',
@@ -457,7 +458,7 @@ describe('Custom CLI entries (Phase 5)', () => {
 
   it('404s an update against a custom id that does not exist', async () => {
     enableCliManagement();
-    const { app } = await createRouteTestHarness(registerCliRegistryRoutes);
+    const { app } = await createRouteTestHarness((app) => registerCliRegistryRoutes(app, trustedFixtureOwner));
     const res = await app.inject({
       method: 'PUT',
       url: '/api/clis/custom/nonexistent-custom',
@@ -468,7 +469,7 @@ describe('Custom CLI entries (Phase 5)', () => {
 
   it('deletes a custom entry; a second delete 404s', async () => {
     enableCliManagement();
-    const { app } = await createRouteTestHarness(registerCliRegistryRoutes);
+    const { app } = await createRouteTestHarness((app) => registerCliRegistryRoutes(app, trustedFixtureOwner));
     await app.inject({
       method: 'POST',
       url: '/api/clis',
@@ -484,7 +485,7 @@ describe('Custom CLI entries (Phase 5)', () => {
 
   it('refuses to delete a stock CLI', async () => {
     enableCliManagement();
-    const { app } = await createRouteTestHarness(registerCliRegistryRoutes);
+    const { app } = await createRouteTestHarness((app) => registerCliRegistryRoutes(app, trustedFixtureOwner));
     const res = await app.inject({ method: 'DELETE', url: '/api/clis/claude' });
     expect(res.json().errorCode).toBe('INVALID_INPUT');
     const list = await app.inject({ method: 'GET', url: '/api/clis' });
@@ -494,7 +495,7 @@ describe('Custom CLI entries (Phase 5)', () => {
   it('multi-user: non-admin is rejected on create/update/delete', async () => {
     enableCliManagement();
     process.env.REVERIE_MULTIUSER = '1';
-    const { app } = await createRouteTestHarness(registerCliRegistryRoutes, {
+    const { app } = await createRouteTestHarness((app) => registerCliRegistryRoutes(app, trustedFixtureOwner), {
       authUser: { username: 'bob', role: 'user' },
     });
     const create = await app.inject({
@@ -515,7 +516,7 @@ describe('Custom CLI entries (Phase 5)', () => {
 
   it('a custom entry can also be toggled via the simple Phase 3 endpoint', async () => {
     enableCliManagement();
-    const { app } = await createRouteTestHarness(registerCliRegistryRoutes);
+    const { app } = await createRouteTestHarness((app) => registerCliRegistryRoutes(app, trustedFixtureOwner));
     await app.inject({
       method: 'POST',
       url: '/api/clis',
@@ -549,7 +550,7 @@ describe('resolver caches are forgotten when what a CLI resolves to changes', ()
 
   it('GET /api/clis names the install command for a stock entry only (for the confirm dialog)', async () => {
     enableCliManagement();
-    const { app } = await createRouteTestHarness(registerCliRegistryRoutes);
+    const { app } = await createRouteTestHarness((app) => registerCliRegistryRoutes(app, trustedFixtureOwner));
     await app.inject({
       method: 'POST',
       url: '/api/clis',
@@ -565,7 +566,7 @@ describe('resolver caches are forgotten when what a CLI resolves to changes', ()
   it('a successful install runs the stock command and forgets that CLI’s cached lookups', async () => {
     enableCliManagement();
     spawnMock.mockImplementation(() => fakeInstallChild(0));
-    const { app } = await createRouteTestHarness(registerCliRegistryRoutes);
+    const { app } = await createRouteTestHarness((app) => registerCliRegistryRoutes(app, trustedFixtureOwner));
     const res = await app.inject({ method: 'POST', url: '/api/clis/grok/install' });
     expect(res.statusCode).toBe(200);
     const grok = getCli('grok')!;
@@ -581,7 +582,7 @@ describe('resolver caches are forgotten when what a CLI resolves to changes', ()
   it('a failed install still forgets the cached lookups (it may have left a binary behind)', async () => {
     enableCliManagement();
     spawnMock.mockImplementation(() => fakeInstallChild(1));
-    const { app } = await createRouteTestHarness(registerCliRegistryRoutes);
+    const { app } = await createRouteTestHarness((app) => registerCliRegistryRoutes(app, trustedFixtureOwner));
     const res = await app.inject({ method: 'POST', url: '/api/clis/grok/install' });
     expect(res.json().errorCode).toBe('OPERATION_FAILED');
     expect(invalidateIdSpy).toHaveBeenCalledWith('grok');
@@ -589,7 +590,7 @@ describe('resolver caches are forgotten when what a CLI resolves to changes', ()
 
   it('never spawns anything for a custom entry, even though the route exists', async () => {
     enableCliManagement();
-    const { app } = await createRouteTestHarness(registerCliRegistryRoutes);
+    const { app } = await createRouteTestHarness((app) => registerCliRegistryRoutes(app, trustedFixtureOwner));
     await app.inject({
       method: 'POST',
       url: '/api/clis',
@@ -602,7 +603,7 @@ describe('resolver caches are forgotten when what a CLI resolves to changes', ()
 
   it('editing a custom entry forgets BOTH its old and new binaries, and its id', async () => {
     enableCliManagement();
-    const { app } = await createRouteTestHarness(registerCliRegistryRoutes);
+    const { app } = await createRouteTestHarness((app) => registerCliRegistryRoutes(app, trustedFixtureOwner));
     await app.inject({
       method: 'POST',
       url: '/api/clis',
@@ -623,7 +624,7 @@ describe('resolver caches are forgotten when what a CLI resolves to changes', ()
 
   it('deleting a custom entry forgets its binaries and id, so a same-named re-create starts clean', async () => {
     enableCliManagement();
-    const { app } = await createRouteTestHarness(registerCliRegistryRoutes);
+    const { app } = await createRouteTestHarness((app) => registerCliRegistryRoutes(app, trustedFixtureOwner));
     await app.inject({
       method: 'POST',
       url: '/api/clis',
@@ -658,7 +659,7 @@ describe('registry writes are serialized and never clobber a file the reader wou
     mkdirSync(dirname(registryFilePath()), { recursive: true });
     const handEdit = '{ "schemaVersion": 1, "clis": { "grok": { "accent": "#123456" }, }';
     writeFileSync(registryFilePath(), handEdit, { mode: 0o600 });
-    const { app } = await createRouteTestHarness(registerCliRegistryRoutes);
+    const { app } = await createRouteTestHarness((app) => registerCliRegistryRoutes(app, trustedFixtureOwner));
     const res = await app.inject({ method: 'PUT', url: '/api/clis/pi', payload: { enabled: false } });
     expect(res.json().errorCode).toBe('CONFLICT');
     expect(res.json().error).toContain('not valid JSON');
@@ -673,7 +674,7 @@ describe('registry writes are serialized and never clobber a file the reader wou
       mkdirSync(dirname(registryFilePath()), { recursive: true });
       writeFileSync(registryFilePath(), JSON.stringify({ schemaVersion: 1, clis: {} }));
       chmodSync(registryFilePath(), 0o644);
-      const { app } = await createRouteTestHarness(registerCliRegistryRoutes);
+      const { app } = await createRouteTestHarness((app) => registerCliRegistryRoutes(app, trustedFixtureOwner));
       const res = await app.inject({ method: 'PUT', url: '/api/clis/pi', payload: { enabled: false } });
       expect(res.json().errorCode).toBe('CONFLICT');
       expect(res.json().error).toContain('chmod 600');
@@ -686,7 +687,7 @@ describe('registry writes are serialized and never clobber a file the reader wou
   it('keeps every one of several parallel toggles, with no failures', async () => {
     enableCliManagement();
     clearRegistryFile();
-    const { app } = await createRouteTestHarness(registerCliRegistryRoutes);
+    const { app } = await createRouteTestHarness((app) => registerCliRegistryRoutes(app, trustedFixtureOwner));
     const ids = ['grok', 'pi', 'omp', 'gemini'];
     const results = await Promise.all(
       ids.map((id) => app.inject({ method: 'PUT', url: `/api/clis/${id}`, payload: { enabled: false } }))
@@ -704,7 +705,7 @@ describe('registry writes are serialized and never clobber a file the reader wou
 
   it('editing a disabled custom entry keeps it disabled when the body omits enabled', async () => {
     enableCliManagement();
-    const { app } = await createRouteTestHarness(registerCliRegistryRoutes);
+    const { app } = await createRouteTestHarness((app) => registerCliRegistryRoutes(app, trustedFixtureOwner));
     await app.inject({
       method: 'POST',
       url: '/api/clis',
@@ -732,7 +733,7 @@ describe('registry writes are serialized and never clobber a file the reader wou
       finish = (code) => child.emit('close', code);
       return child;
     });
-    const { app } = await createRouteTestHarness(registerCliRegistryRoutes);
+    const { app } = await createRouteTestHarness((app) => registerCliRegistryRoutes(app, trustedFixtureOwner));
     const first = app.inject({ method: 'POST', url: '/api/clis/grok/install' });
     await vi.waitFor(() => expect(spawnMock).toHaveBeenCalledTimes(1));
     const second = await app.inject({ method: 'POST', url: '/api/clis/grok/install' });
@@ -751,7 +752,7 @@ describe('registry writes are serialized and never clobber a file the reader wou
     process.env.REVERIE_TEST_SECRET = 'do-not-leak';
     try {
       spawnMock.mockImplementation(() => fakeInstallChild(0));
-      const { app } = await createRouteTestHarness(registerCliRegistryRoutes);
+      const { app } = await createRouteTestHarness((app) => registerCliRegistryRoutes(app, trustedFixtureOwner));
       await app.inject({ method: 'POST', url: '/api/clis/grok/install' });
       const env = spawnMock.mock.calls[0][1].env as NodeJS.ProcessEnv;
       expect(Object.keys(env).filter((k) => k.startsWith('REVERIE_'))).toEqual([]);
@@ -862,7 +863,7 @@ describe('registry writes are serialized and never clobber a file the reader wou
 describe('a toggle or new custom CLI reaches session-create validation with no restart', () => {
   it('disabling grok rejects mode grok at once, and re-enabling accepts it again', async () => {
     enableCliManagement();
-    const { app } = await createRouteTestHarness(registerCliRegistryRoutes);
+    const { app } = await createRouteTestHarness((app) => registerCliRegistryRoutes(app, trustedFixtureOwner));
     expect(CreateSessionSchema.safeParse({ mode: 'grok' }).success).toBe(true);
     await app.inject({ method: 'PUT', url: '/api/clis/grok', payload: { enabled: false } });
     expect(CreateSessionSchema.safeParse({ mode: 'grok' }).success).toBe(false);
@@ -872,7 +873,7 @@ describe('a toggle or new custom CLI reaches session-create validation with no r
 
   it('a newly created custom CLI is a valid mode immediately, and stops being one when deleted', async () => {
     enableCliManagement();
-    const { app } = await createRouteTestHarness(registerCliRegistryRoutes);
+    const { app } = await createRouteTestHarness((app) => registerCliRegistryRoutes(app, trustedFixtureOwner));
     expect(CreateSessionSchema.safeParse({ mode: 'test-live-mode' }).success).toBe(false);
     await app.inject({
       method: 'POST',
@@ -893,7 +894,7 @@ describe('a toggle or new custom CLI reaches session-create validation with no r
 describe('a custom CLI created through the API launches locally, over ssh and in docker', () => {
   it('renders its argv locally and its binary for the remote/docker overlays', async () => {
     enableCliManagement();
-    const { app } = await createRouteTestHarness(registerCliRegistryRoutes);
+    const { app } = await createRouteTestHarness((app) => registerCliRegistryRoutes(app, trustedFixtureOwner));
     await app.inject({
       method: 'POST',
       url: '/api/clis',

@@ -1,3 +1,4 @@
+import { trustedFixtureOwner } from '../helpers/trusted-owner-fixture.js';
 /**
  * Plans: accounts merged from Reverie profiles and acct directories, sessions mapped
  * to their accounts, pace and recommendation per row, and the suggestion.
@@ -95,7 +96,7 @@ describe('plans routes', () => {
       }),
     });
     app = Fastify({ logger: false });
-    registerPlansRoutes(app, service);
+    registerPlansRoutes(app, service, undefined, undefined, trustedFixtureOwner);
     installRouteErrorHandler(app);
     await app.ready();
   });

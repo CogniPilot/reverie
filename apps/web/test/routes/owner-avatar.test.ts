@@ -1,3 +1,4 @@
+import { trustedFixtureOwner } from '../helpers/trusted-owner-fixture.js';
 /**
  * @fileoverview The owner's profile picture on the server: owner only to set or clear, kept as a link in the company settings the
  * page already loads, and served privately with a versioned immutable cache and an ETag. Port: N/A (app.inject()).
@@ -41,12 +42,7 @@ describe('the owner profile picture', () => {
       ownerProfileChanged: changed,
     });
     app = Fastify();
-    registerCompanyRoutes(
-      app,
-      { sessions: new Map() } as unknown as SessionPort,
-      service,
-      new AvatarStore(join(directory, 'agent-avatars')),
-      new AvatarStore(join(directory, 'owner-avatars'))
+    registerCompanyRoutes(app, { sessions: new Map() } as unknown as SessionPort, service, new AvatarStore(join(directory, 'agent-avatars')), new AvatarStore(join(directory, 'owner-avatars')), undefined, { verifiedOwner: trustedFixtureOwner }
     );
     installRouteErrorHandler(app);
     await app.ready();

@@ -1,3 +1,4 @@
+import { trustedFixtureOwner } from '../helpers/trusted-owner-fixture.js';
 /**
  * @fileoverview Route tests for GET /api/sessions/unified (COD-121).
  *
@@ -54,7 +55,7 @@ interface LocalHarness {
 async function createEnvelopeHarness(ctx: MockRouteContext): Promise<LocalHarness> {
   const app = Fastify({ logger: false });
   await app.register(fastifyCookie);
-  registerSessionRoutes(app, ctx as never);
+  registerSessionRoutes(app, ctx as never, { ...({}), verifiedOwner: trustedFixtureOwner });
 
   app.addHook('preSerialization', (req, reply, payload: unknown, done) => {
     if (!req.url.startsWith('/api')) return done(null, payload);

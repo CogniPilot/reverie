@@ -1,3 +1,4 @@
+import { NO_OWNER, type OwnerVerifier } from '../../owner-auth/marks.js';
 /**
  * @fileoverview Push notification routes.
  * Manages VAPID keys, push subscriptions, and preference updates.
@@ -12,8 +13,8 @@ import { PushSubscribeSchema, PushPreferencesUpdateSchema } from '../schemas.js'
 import { parseBody } from '../route-helpers.js';
 import type { InfraPort } from '../ports/index.js';
 
-export function registerPushRoutes(app: FastifyInstance, ctx: InfraPort): void {
-  const isHuman = (req: FastifyRequest): boolean => !req.headers['x-reverie-parent-session'];
+export function registerPushRoutes(app: FastifyInstance, ctx: InfraPort, verifiedOwner: OwnerVerifier = NO_OWNER): void {
+  const isHuman = verifiedOwner;
   const ownsDevice = (req: FastifyRequest, id: string): boolean => {
     const sub = ctx.pushStore.get(id);
     return !!sub && isHuman(req) && (!isMultiUserMode() || (!!req.authUser && sub.username === req.authUser.username));

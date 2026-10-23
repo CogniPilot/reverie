@@ -1,3 +1,4 @@
+import { trustedFixtureOwner } from './helpers/trusted-owner-fixture.js';
 /** owner-setup.py --go-live sends a partial PUT {dryRun:false}: it must change only that and keep everything else. */
 import { describe, it, expect, vi } from 'vitest';
 import Fastify from 'fastify';
@@ -19,7 +20,7 @@ describe('go-live is a partial edit', () => {
     const cron = new CronService({ store, broadcast: vi.fn(), sessions: new Map() } as unknown as CronDeps);
     cron.setBotPoster({ getBot: () => ({ id: 'routines', name: 'Routines', rooms: ['room-1'], maxPerHour: 5 }), check: () => {}, post: () => {} } as BotPoster);
     const app = Fastify({ logger: false });
-    registerCronRoutes(app, { cron } as never);
+    registerCronRoutes(app, { cron } as never, trustedFixtureOwner);
     installRouteErrorHandler(app);
     await app.ready();
     const created = await app.inject({ method: 'POST', url: '/api/cron/jobs', payload: {

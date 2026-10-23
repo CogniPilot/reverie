@@ -1,3 +1,4 @@
+import { trustedFixtureOwner } from '../helpers/trusted-owner-fixture.js';
 /**
  * @fileoverview GET /api/settings is a plain read and must NEVER write
  * settings.json.
@@ -52,7 +53,7 @@ describe('GET /api/settings never writes settings.json', () => {
     state.raw = '{}';
     state.failWith = null;
     writeFile.mockClear();
-    harness = await createRouteTestHarness(registerSystemRoutes);
+    harness = await createRouteTestHarness((app, ctx) => registerSystemRoutes(app, ctx, trustedFixtureOwner));
   });
 
   afterEach(async () => {

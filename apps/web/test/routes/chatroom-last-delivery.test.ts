@@ -1,3 +1,4 @@
+import { trustedFixtureOwner } from '../helpers/trusted-owner-fixture.js';
 /**
  * An agent listing its own rooms (GET /api/chatrooms?member=self) is told where its last prompt came from; no one else is.
  */
@@ -26,7 +27,7 @@ describe('last delivery in the room list', () => {
     const file = join(mkdtempSync(join(tmpdir(), 'chatroom-')), 'chatrooms.json');
     const harness = await createRouteTestHarness((fastify, c) => {
       service = new ChatroomService({ file, getSession: (id) => c.sessions.get(id), broadcast: () => {}, now: () => clock });
-      registerChatroomRoutes(fastify, c, service, new ChatFileStore(mkdtempSync(join(tmpdir(), 'chatfiles-'))));
+      registerChatroomRoutes(fastify, c, service, new ChatFileStore(mkdtempSync(join(tmpdir(), 'chatfiles-'))), trustedFixtureOwner);
     });
     app = harness.app;
     ctx = harness.ctx;

@@ -1,3 +1,4 @@
+import { trustedFixtureOwner } from '../helpers/trusted-owner-fixture.js';
 /**
  * POST /api/sessions/:id/mode: the owner switches a pinned session's CLI and the pane restarts IN PLACE.
  * Owner only, pinned only, local only, an enabled registry CLI only, never while busy or mid-switch.
@@ -42,7 +43,7 @@ describe('POST /api/sessions/:id/mode', () => {
     tree.snapshot.mockReset().mockReturnValue([{ pid: 100, startTime: 7 }, { pid: 101, startTime: 8 }]);
     tree.left.mockReset().mockReturnValue([]);
     disabled.clear();
-    h = await createRouteTestHarness(registerSessionRoutes);
+    h = await createRouteTestHarness((app, ctx) => registerSessionRoutes(app, ctx, { verifiedOwner: trustedFixtureOwner }));
     h.ctx._session.mode = 'opencode';
     h.ctx._session.pinned = true;
     muxPid = 100;

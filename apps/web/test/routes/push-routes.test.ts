@@ -1,3 +1,4 @@
+import { trustedFixtureOwner } from '../helpers/trusted-owner-fixture.js';
 /**
  * @fileoverview Tests for push-routes route handlers.
  *
@@ -13,7 +14,7 @@ describe('push-routes', () => {
   let harness: RouteTestHarness;
 
   beforeEach(async () => {
-    harness = await createRouteTestHarness(registerPushRoutes);
+    harness = await createRouteTestHarness((app, ctx) => registerPushRoutes(app, ctx, trustedFixtureOwner));
     // Push routes expect ctx.pushStore to be a real object (not null)
     harness.ctx.pushStore = {
       getPublicKey: vi.fn(() => 'test-vapid-public-key-base64'),

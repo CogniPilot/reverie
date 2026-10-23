@@ -1,3 +1,4 @@
+import { NO_OWNER, type OwnerVerifier } from '../../owner-auth/marks.js';
 /**
  * @fileoverview CLI management (docs/cli-enable-disable-plan.md) — "PR C" from the
  * original #343 review, done in phases with the trust-model scope decided up front
@@ -121,10 +122,10 @@ function refusedWriteResponse(err: unknown): ApiResponse<never> {
  * per-route, per docs/cli-enable-disable-plan.md Phase 1's own checklist item ("decide
  * exact behavior... before Phase 3 starts, so all three write endpoints answer the same way").
  */
-async function requireCliManagementGate(req: FastifyRequest): Promise<ApiResponse<never> | null> {
+async function requireCliManagementGate(req: FastifyRequest, verifiedOwner: OwnerVerifier): Promise<ApiResponse<never> | null> {
   // Registering a CLI decides what runs in panes and what room text is typed into; the
   // user does that, never an agent session calling the API.
-  if (req.headers['x-reverie-parent-session'] !== undefined) {
+  if (!verifiedOwner(req)) {
     return createErrorResponse(ApiErrorCode.FORBIDDEN, 'Only the user manages CLIs');
   }
   if (isMultiUserMode() && !isAdmin(req)) {
@@ -407,7 +408,7 @@ async function runInstallCommand(command: string): Promise<InstallResult> {
   });
 }
 
-export function registerCliRegistryRoutes(app: FastifyInstance): void {
+export function registerCliRegistryRoutes(app: FastifyInstance, verifiedOwner: OwnerVerifier = NO_OWNER): void {
   // ---- Phase 2: read ----------------------------------------------------
   // GET /api/clis — every registry entry, disabled ones included (this is an
   // admin/settings surface; every SPAWN-time caller elsewhere uses
@@ -449,7 +450,7 @@ export function registerCliRegistryRoutes(app: FastifyInstance): void {
   // without first knowing the rest of a custom entry's shape (its binaries,
   // its argv), which the Settings UI list row never carries.
   app.put('/api/clis/:id', async (req, reply): Promise<ApiResponse<{ id: string; enabled: boolean }>> => {
-    const denied = await requireCliManagementGate(req);
+    const denied = await requireCliManagementGate(req, verifiedOwner);
     if (denied) {
       reply.code(403);
       return denied;
@@ -484,7 +485,7 @@ export function registerCliRegistryRoutes(app: FastifyInstance): void {
   app.post(
     '/api/clis/:id/install',
     async (req, reply): Promise<ApiResponse<{ id: string; code: number | null; output: string }>> => {
-      const denied = await requireCliManagementGate(req);
+      const denied = await requireCliManagementGate(req, verifiedOwner);
       if (denied) {
         reply.code(403);
         return denied;
@@ -543,7 +544,7 @@ export function registerCliRegistryRoutes(app: FastifyInstance): void {
   // one can only ever create a NEW custom one, so the two write surfaces
   // cannot be confused for each other by a caller.
   app.post('/api/clis', async (req, reply): Promise<ApiResponse<{ id: string }>> => {
-    const denied = await requireCliManagementGate(req);
+    const denied = await requireCliManagementGate(req, verifiedOwner);
     if (denied) {
       reply.code(403);
       return denied;
@@ -590,7 +591,7 @@ export function registerCliRegistryRoutes(app: FastifyInstance): void {
   // there is no shared route where "which fields this id may change" depends
   // on a runtime check a caller could get wrong.
   app.put('/api/clis/custom/:id', async (req, reply): Promise<ApiResponse<{ id: string }>> => {
-    const denied = await requireCliManagementGate(req);
+    const denied = await requireCliManagementGate(req, verifiedOwner);
     if (denied) {
       reply.code(403);
       return denied;
@@ -634,7 +635,7 @@ export function registerCliRegistryRoutes(app: FastifyInstance): void {
   // DELETE /api/clis/:id — refuses any STOCK id outright; deleting only ever
   // removes a CUSTOM entry's override.
   app.delete('/api/clis/:id', async (req, reply): Promise<ApiResponse<{ id: string }>> => {
-    const denied = await requireCliManagementGate(req);
+    const denied = await requireCliManagementGate(req, verifiedOwner);
     if (denied) {
       reply.code(403);
       return denied;

@@ -1,3 +1,4 @@
+import { NO_OWNER, type OwnerVerifier } from '../../owner-auth/marks.js';
 /**
  * @fileoverview Scheduled run routes.
  * CRUD operations for scheduled autonomous runs with session lifecycle management.
@@ -18,21 +19,19 @@ import {
 import { isMultiUserMode } from '../../config/multiuser.js';
 import type { SessionPort, EventPort, InfraPort, ScheduledRun } from '../ports/index.js';
 
-// Stopgap until owner authentication, as in cron-routes: a scheduled run is an unattended session with
-// full permissions, so starting or stopping one is owner-only. A request carrying
-// X-Reverie-Parent-Session (any value) is an agent and is refused; an ABSENT header still means the owner.
-const refuseAgentCaller = async (req: FastifyRequest, reply: FastifyReply) => {
-  if (req.headers['x-reverie-parent-session'] === undefined) return;
+// Scheduled sessions run unattended: only the verified owner may start or stop them.
+const refuseAgentCaller = async (req: FastifyRequest, reply: FastifyReply, verifiedOwner: OwnerVerifier) => {
+  if (verifiedOwner(req)) return;
   return reply.code(403).send(createErrorResponse(ApiErrorCode.FORBIDDEN, 'Only the owner may start or stop scheduled runs'));
 };
 
-export function registerScheduledRoutes(app: FastifyInstance, ctx: SessionPort & EventPort & InfraPort): void {
+export function registerScheduledRoutes(app: FastifyInstance, ctx: SessionPort & EventPort & InfraPort, verifiedOwner: OwnerVerifier = NO_OWNER): void {
   app.addHook('onRoute', (options) => {
     if (!options.url.startsWith('/api/scheduled')) return;
     const methods = [options.method].flat();
     if (methods.every((m) => m === 'GET' || m === 'HEAD')) return;
     const existing = options.preHandler ? [options.preHandler].flat() : [];
-    options.preHandler = [refuseAgentCaller, ...existing];
+    options.preHandler = [(req, reply) => refuseAgentCaller(req, reply, verifiedOwner), ...existing];
   });
 
   app.get('/api/scheduled', async (req) => {

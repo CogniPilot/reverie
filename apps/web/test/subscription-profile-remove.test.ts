@@ -1,3 +1,4 @@
+import { trustedFixtureOwner } from './helpers/trusted-owner-fixture.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
 import fs from 'node:fs/promises';
@@ -54,7 +55,7 @@ describe('DELETE /api/subscription-profiles/:id', () => {
   beforeEach(async () => {
     running = {};
     app = Fastify();
-    registerSubscriptionProfileRoutes(app, {} as SubscriptionUsageReader, async (id) => running[id] ?? []);
+    registerSubscriptionProfileRoutes(app, {} as SubscriptionUsageReader, async (id) => running[id] ?? [], trustedFixtureOwner);
     await app.ready();
   });
   afterEach(async () => {

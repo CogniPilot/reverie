@@ -1,5 +1,6 @@
+import { NO_OWNER, type OwnerVerifier } from '../../owner-auth/marks.js';
 /**
- * Workspace pictures. Anyone signed in reads them; only the owner (a request that does not name an agent session) sets, clears or
+ * Workspace pictures. Anyone signed in reads them; only the verified owner sets, clears or
  * renames one. The body is the raw image, checked by its bytes before anything is stored.
  */
 import { createHash } from 'node:crypto';
@@ -11,11 +12,11 @@ import { ownerFor, parseBody } from '../route-helpers.js';
 
 const RenameSchema = z.object({ from: z.string().max(200), to: z.string().max(200) }).strict();
 
-export function registerWorkspaceIconRoutes(app: FastifyInstance, store: WorkspaceIconStore): void {
+export function registerWorkspaceIconRoutes(app: FastifyInstance, store: WorkspaceIconStore, verifiedOwner: OwnerVerifier = NO_OWNER): void {
   const owner = (req: FastifyRequest): string | undefined => ownerFor(req);
-  /** The parent-session header is a hint agent tooling sets, not authentication (same rule as the company routes). */
+  /** Only the full owner cookie authorizes a workspace change. */
   const ownerOnly = (req: FastifyRequest, reply: FastifyReply): boolean => {
-    if (req.headers['x-reverie-parent-session'] === undefined) return true;
+    if (verifiedOwner(req)) return true;
     void reply.code(403).send({ success: false, error: 'Only the owner sets workspace pictures' });
     return false;
   };

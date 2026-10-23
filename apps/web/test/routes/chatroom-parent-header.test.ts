@@ -1,3 +1,4 @@
+import { trustedFixtureOwner } from '../helpers/trusted-owner-fixture.js';
 /**
  * @fileoverview Chatroom routes refuse a parent-session header that is present but does not
  * resolve. The owner-only rules read "no resolvable caller" as the user, so a bogus header must not
@@ -28,7 +29,7 @@ describe('chatroom routes: unresolved parent-session header', () => {
     const file = join(mkdtempSync(join(tmpdir(), 'chatroom-')), 'chatrooms.json');
     const harness = await createRouteTestHarness((fastify, c) => {
       service = new ChatroomService({ file, getSession: (id) => c.sessions.get(id), broadcast: () => {} });
-      registerChatroomRoutes(fastify, c, service, new ChatFileStore(mkdtempSync(join(tmpdir(), 'chatfiles-'))));
+      registerChatroomRoutes(fastify, c, service, new ChatFileStore(mkdtempSync(join(tmpdir(), 'chatfiles-'))), trustedFixtureOwner);
       // A route registered after, outside the chatroom prefix, keeps its own rules.
       fastify.get('/api/elsewhere', async () => ({ success: true }));
     });

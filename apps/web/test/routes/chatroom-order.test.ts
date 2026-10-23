@@ -1,3 +1,4 @@
+import { trustedFixtureOwner } from '../helpers/trusted-owner-fixture.js';
 /**
  * The owner's channel order: `PUT /api/chatrooms/order` gives the listed channels positions 1..n; it is saved with the rooms (a restart keeps
  * it), only the owner sets it, and it changes nothing an agent sees.
@@ -31,7 +32,7 @@ describe('channel order', () => {
         getSession: (id) => c.sessions.get(id),
         broadcast: (event) => events.push(event),
       });
-      registerChatroomRoutes(fastify, c, service, new ChatFileStore(mkdtempSync(join(tmpdir(), 'chatfiles-'))));
+      registerChatroomRoutes(fastify, c, service, new ChatFileStore(mkdtempSync(join(tmpdir(), 'chatfiles-'))), trustedFixtureOwner);
     });
     app = harness.app;
     ctx = harness.ctx;

@@ -1,3 +1,4 @@
+import { trustedFixtureOwner } from './helpers/trusted-owner-fixture.js';
 /**
  * Routine bot authorization: a bot posts only in its allowlisted rooms (checked by the real chat service),
  * and only the owner (no agent header) creates, edits, deletes, enables or runs a post job or changes a bot.
@@ -82,8 +83,8 @@ describe('post jobs and bots are owner-only', () => {
     const registry = new ChatBotRegistry(join(tmp(), 'chat-bots.json'));
     await registry.set('routines', { name: 'Routines', rooms: ['room-1'], maxPerHour: 5 });
     const app = Fastify({ logger: false });
-    registerCronRoutes(app, { cron } as never);
-    registerChatBotRoutes(app, registry);
+    registerCronRoutes(app, { cron } as never, trustedFixtureOwner);
+    registerChatBotRoutes(app, registry, trustedFixtureOwner);
     installRouteErrorHandler(app);
     await app.ready();
     return { app, cron, registry };

@@ -1,3 +1,4 @@
+import { trustedFixtureOwner } from '../helpers/trusted-owner-fixture.js';
 /**
  * Chatroom routes + service: room lifecycle, who-is-speaking resolution, role
  * permissions, and delivery of messages into member panes as single lines.
@@ -39,7 +40,7 @@ describe('chatroom routes', () => {
         broadcast: (event, data) => events.push({ event, data }),
         now: () => clock,
       });
-      registerChatroomRoutes(fastify, c, service, new ChatFileStore(mkdtempSync(join(tmpdir(), 'chatfiles-'))));
+      registerChatroomRoutes(fastify, c, service, new ChatFileStore(mkdtempSync(join(tmpdir(), 'chatfiles-'))), trustedFixtureOwner);
     });
     app = harness.app;
     ctx = harness.ctx;
@@ -774,7 +775,7 @@ describe('chatroom creation by a coordinator in multi-user mode', () => {
           broadcast: () => {},
           now: () => 1_000_000,
         });
-        registerChatroomRoutes(fastify, c, service, new ChatFileStore(mkdtempSync(join(tmpdir(), 'chatfiles-'))));
+        registerChatroomRoutes(fastify, c, service, new ChatFileStore(mkdtempSync(join(tmpdir(), 'chatfiles-'))), trustedFixtureOwner);
       },
       { authUser: { username: 'alice', role: 'user' } }
     );

@@ -1,3 +1,4 @@
+import { trustedFixtureOwner } from '../helpers/trusted-owner-fixture.js';
 /**
  * A post that names someone who is not in the room still goes out, and the response carries a heads-up (`warnings`) every front end
  * shows the same way: the CLI, MCP and the page all read this one list.
@@ -33,7 +34,7 @@ describe('post warnings', () => {
     const file = join(mkdtempSync(join(tmpdir(), 'chatroom-')), 'chatrooms.json');
     const harness = await createRouteTestHarness((fastify, c) => {
       service = new ChatroomService({ file, getSession: (id) => c.sessions.get(id), broadcast: () => {}, now: () => clock });
-      registerChatroomRoutes(fastify, c, service, new ChatFileStore(mkdtempSync(join(tmpdir(), 'chatfiles-'))));
+      registerChatroomRoutes(fastify, c, service, new ChatFileStore(mkdtempSync(join(tmpdir(), 'chatfiles-'))), trustedFixtureOwner);
     });
     app = harness.app;
     ctx = harness.ctx;

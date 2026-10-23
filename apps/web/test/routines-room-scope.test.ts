@@ -1,3 +1,4 @@
+import { trustedFixtureOwner } from './helpers/trusted-owner-fixture.js';
 /** Routine authorization through real routes and the exact production poster/membership callbacks. */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import Fastify from 'fastify';
@@ -79,7 +80,7 @@ async function fixture() {
   registerCronRoutes(app, { cron, routines: {
     grants, isMember, findEmployee: (id) => people.find((p) => p.sessionId === id),
     notificationRoomId: () => room.id, notify,
-  } });
+  } }, trustedFixtureOwner);
   installRouteErrorHandler(app);
   await app.ready();
   cleanup.push(async () => { await app.close(); await chat.stop(); rmSync(dir, { recursive: true, force: true }); });

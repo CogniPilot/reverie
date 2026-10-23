@@ -1,3 +1,4 @@
+import { trustedFixtureOwner } from '../helpers/trusted-owner-fixture.js';
 import { afterEach, it, expect } from 'vitest';
 import { mkdirSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -35,7 +36,7 @@ it.each(['poll-agent', 'hands'])('normal owner/coordinator Add chooses polling t
   for(const id of [A,B,C])c.sessions.set(id,createMockSession(id));
   c.sessions.get(B).mode=pollMode;c.sessions.get(C).mode='plain-agent';
   service=new ChatroomService({file,getSession:id=>c.sessions.get(id),broadcast:()=>{}});
-  registerChatroomRoutes(f,c,service,new ChatFileStore(dir));
+  registerChatroomRoutes(f, c, service, new ChatFileStore(dir), trustedFixtureOwner);
  });await service.init();
  const headers={'x-reverie-parent-session':B};
  try {

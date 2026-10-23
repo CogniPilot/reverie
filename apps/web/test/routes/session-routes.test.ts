@@ -1,3 +1,4 @@
+import { trustedFixtureOwner } from '../helpers/trusted-owner-fixture.js';
 /**
  * @fileoverview Tests for session route handlers.
  *
@@ -159,7 +160,7 @@ describe('session-routes', () => {
       delay: async () => {},
       log: () => {},
     });
-    harness = await createEnvelopeHarness((app, ctx) => registerSessionRoutes(app, ctx, { remoteWake: wakeRegistry }));
+    harness = await createEnvelopeHarness((app, ctx) => registerSessionRoutes(app, ctx, { ...({ remoteWake: wakeRegistry }), verifiedOwner: trustedFixtureOwner }));
     // Reset remote store so tests start with empty hosts/cases and a passing tmux probe
     remoteStore.hosts = [];
     remoteStore.cases = [];

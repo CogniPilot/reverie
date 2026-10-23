@@ -1,3 +1,4 @@
+import { trustedFixtureOwner } from './helpers/trusted-owner-fixture.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Session } from '../src/session.js';
 import type { MuxSession, TerminalMultiplexer } from '../src/mux-interface.js';
@@ -128,7 +129,7 @@ describe('interactive recovery with a retained attach client', () => {
         if (body.success === false && body.errorCode) reply.code(httpStatusForErrorCode(body.errorCode));
         done(null, body.success === undefined ? { success: true, data: body } : body);
       });
-      registerSessionRoutes(app, ctx);
+      registerSessionRoutes(app, ctx, { ...({}), verifiedOwner: trustedFixtureOwner });
     });
     ctx.sessions.set(session.id, session as never);
     try {

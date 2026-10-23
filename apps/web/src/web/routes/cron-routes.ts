@@ -1,3 +1,4 @@
+import { NO_OWNER, type OwnerVerifier } from '../../owner-auth/marks.js';
 /**
  * @fileoverview Cron Jobs routes.
  *
@@ -26,20 +27,13 @@ export const ROUTINE_MAX_TEXT = 2000;
 /** Fields only the owner sets: who speaks, what data a post reads, and whether it only pretends. */
 const OWNER_ONLY_FIELDS = ['postAs', 'botId', 'postSource', 'postSourceArgs', 'postWhen', 'postChangeOnly', 'dryRun'] as const;
 
-export function registerCronRoutes(app: FastifyInstance, ctx: CronPort): void {
-  // Stopgap until owner authentication: writes here create or start sessions that run unattended
-  // (shell mode, a launchCommand, or full permissions), so they are owner-only. In single-user mode
-  // canAccessOwned and the privileged-command grant are always true, so without this ANY caller,
-  // including any agent, could schedule them. Same rule as company-routes' ownerOnly: a request that
-  // carries X-Reverie-Parent-Session (any value) is an agent and is refused; an ABSENT header still
-  // means the owner until owner authentication closes that. Reads are unchanged.
-  //
-  // Post jobs are the one exception: they only make a bot say a line, never start a session, so an agent's request
-  // about a post job passes this stopgap and meets the delegate rules in gatePost. A create must say action 'post';
-  // a request naming a job needs the STORED job to be a post job, and an edit may not change its action. Launch
-  // jobs stay refused for every agent header.
+export function registerCronRoutes(app: FastifyInstance, ctx: CronPort, verifiedOwner: OwnerVerifier = NO_OWNER): void {
+  // Unattended session jobs require the verified owner. Delegated post-only jobs
+  // retain their employee grant, room membership, authorship and rate boundaries below.
   const refuseAgentCaller = async (req: FastifyRequest, reply: FastifyReply) => {
-    if (req.headers['x-reverie-parent-session'] === undefined) return;
+    if (verifiedOwner(req)) return;
+    if (req.headers['x-reverie-parent-session'] === undefined || req.headers['x-reverie-service-token'] !== undefined)
+      return reply.code(403).send(createErrorResponse(ApiErrorCode.FORBIDDEN, 'Verified owner or routine delegate required'));
     const body = (req.body ?? {}) as { action?: unknown };
     const id = (req.params as { id?: string } | undefined)?.id;
     const postTraffic = id
@@ -64,10 +58,8 @@ export function registerCronRoutes(app: FastifyInstance, ctx: CronPort): void {
 
   // ── Jobs ────────────────────────────────────────────────────────────────
 
-  // Post jobs speak through a bot into rooms. The owner (no agent header) authors them; so may an employee the owner
-  // delegated to (a role or a per-employee grant), as the agent header names them. Until service tokens exist that header
-  // is forgeable, so every delegate change is announced in the general and audited BEFORE it happens, and a change the
-  // general cannot be told about is refused. Bots, allowlists and caps stay owner-only (chat-bot-routes.ts).
+  // The verified owner or an explicitly delegated employee may author post jobs.
+  // Delegate changes are announced and audited before they happen; bot policy stays owner-only.
   const header = (req: FastifyRequest, name: string): string | undefined => {
     const v = req.headers[name];
     return Array.isArray(v) ? v[0] : v;
@@ -81,13 +73,14 @@ export function registerCronRoutes(app: FastifyInstance, ctx: CronPort): void {
     const caller = header(req, 'x-reverie-parent-session');
     const name = body?.name ?? job?.name ?? 'post job';
     const detail = { job: job?.id, verb, fields: body ? Object.keys(body) : [] };
-    if (caller === undefined) {
+    if (verifiedOwner(req)) {
       void appendAdminAudit({ admin: 'owner', action: `post_job_${verb}`, target: name, ip: req.ip, detail });
       return undefined;
     }
     const refuse = (why: string): never => {
       throw Object.assign(new Error(why), { statusCode: 403, body: createErrorResponse(ApiErrorCode.FORBIDDEN, why) });
     };
+    if (!caller || req.headers['x-reverie-service-token'] !== undefined) return refuse('Verified owner or routine delegate required');
     const policy = ctx.routines;
     if (!policy) return refuse('Only the owner creates or edits a post job');
     // A tainted caller (web content in its context) never schedules posts, whoever it is.
@@ -122,9 +115,9 @@ export function registerCronRoutes(app: FastifyInstance, ctx: CronPort): void {
   };
 
   app.get('/api/routines-grants', async () => ({ success: true, data: ctx.routines?.grants.snapshot() ?? null }));
-  app.put('/api/routines-grants', async (req) => {
-    if (header(req, 'x-reverie-parent-session') !== undefined || !ctx.routines) {
-      return createErrorResponse(ApiErrorCode.FORBIDDEN, 'Only the owner grants the routines permission');
+  app.put('/api/routines-grants', async (req, reply) => {
+    if (!verifiedOwner(req) || !ctx.routines) {
+      return reply.code(403).send(createErrorResponse(ApiErrorCode.FORBIDDEN, 'Only the owner grants the routines permission'));
     }
     try {
       const data = await ctx.routines.grants.set(req.body);

@@ -1,3 +1,4 @@
+import { trustedFixtureOwner } from '../helpers/trusted-owner-fixture.js';
 /**
  * @fileoverview Tests for system route handlers.
  *
@@ -137,7 +138,7 @@ describe('system-routes', () => {
   let harness: RouteTestHarness;
 
   beforeEach(async () => {
-    harness = await createRouteTestHarness(registerSystemRoutes);
+    harness = await createRouteTestHarness((app, ctx) => registerSystemRoutes(app, ctx, trustedFixtureOwner));
     vi.clearAllMocks();
 
     // Re-apply defaults after clearAllMocks
@@ -477,7 +478,7 @@ describe('system-routes', () => {
 
     it('rejects a regular multi-user account renaming the server-wide workspace', async () => {
       vi.stubEnv('REVERIE_MULTIUSER', '1');
-      const ordinary = await createRouteTestHarness(registerSystemRoutes, { authUser: { username: 'ordinary', role: 'user' } });
+      const ordinary = await createRouteTestHarness((app, ctx) => registerSystemRoutes(app, ctx, trustedFixtureOwner), { authUser: { username: 'ordinary', role: 'user' } });
       try {
         const res = await ordinary.app.inject({ method: 'PUT', url: '/api/settings', payload: { displayName: 'Changed' } });
         expect(res.statusCode).toBe(403); expect(mockedWriteFile).not.toHaveBeenCalled();
@@ -1274,7 +1275,7 @@ describe('system-routes', () => {
 
       // Re-create the harness since tunnelManager was null originally
       await harness.app.close();
-      harness = await createRouteTestHarness(registerSystemRoutes);
+      harness = await createRouteTestHarness((app, ctx) => registerSystemRoutes(app, ctx, trustedFixtureOwner));
       harness.ctx.tunnelManager = {
         regenerateQrToken: vi.fn(),
         getStatus: vi.fn(() => ({ running: false })),

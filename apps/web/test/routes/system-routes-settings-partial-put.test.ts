@@ -1,3 +1,4 @@
+import { trustedFixtureOwner } from '../helpers/trusted-owner-fixture.js';
 /**
  * @fileoverview PUT /api/settings must not reset service state on a PARTIAL body.
  *
@@ -75,7 +76,7 @@ describe('PUT /api/settings — partial body must not reset service toggles', ()
   let harness: RouteTestHarness;
 
   beforeEach(async () => {
-    harness = await createRouteTestHarness(registerSystemRoutes);
+    harness = await createRouteTestHarness((app, ctx) => registerSystemRoutes(app, ctx, trustedFixtureOwner));
     for (const w of [subagentWatcher, imageWatcher, workflowRunWatcher]) {
       w.start.mockClear();
       w.stop.mockClear();

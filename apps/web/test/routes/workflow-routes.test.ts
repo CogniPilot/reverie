@@ -1,3 +1,4 @@
+import { trustedFixtureOwner } from '../helpers/trusted-owner-fixture.js';
 /**
  * Route tests for the ultracode workflow endpoints:
  *   GET /api/workflows            → run summaries (no agents[])
@@ -93,7 +94,7 @@ describe('workflow routes', () => {
   let harness: RouteTestHarness;
 
   beforeEach(async () => {
-    harness = await createRouteTestHarness(registerSystemRoutes);
+    harness = await createRouteTestHarness((app, ctx) => registerSystemRoutes(app, ctx, trustedFixtureOwner));
   });
   afterEach(async () => {
     await harness.app.close();

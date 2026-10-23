@@ -214,7 +214,7 @@ import {
 } from './middleware/auth.js';
 import type { SessionPort as OwnerPolicySessions } from './ports/session-port.js';
 import { OwnerAuthService } from '../owner-auth/service.js';
-import { ownerVerifier } from '../owner-auth/marks.js';
+import { serviceVerifier, ownerVerifier } from '../owner-auth/marks.js';
 import { OwnerAuthStore } from '../owner-auth/store.js';
 import { registerOwnerPolicy } from '../owner-auth/policy.js';
 import { relations, runtimeLineage } from '../owner-auth/relations.js';
@@ -1301,18 +1301,18 @@ export class WebServer extends EventEmitter {
 
     // Register all route modules
     const ctx = this.createRouteContext();
-    registerPushRoutes(this.app, ctx);
+    registerPushRoutes(this.app, ctx, verifiedOwner);
     registerTeamRoutes(this.app, ctx);
     registerMuxRoutes(this.app, ctx);
     registerFileRoutes(this.app, ctx);
     registerHtmlViewRoutes(this.app, ctx);
-    registerScheduledRoutes(this.app, ctx);
+    registerScheduledRoutes(this.app, ctx, verifiedOwner);
     registerHookEventRoutes(this.app, ctx);
     registerApprovalRoutes(this.app, ctx);
     registerRebootRestoreRoutes(this.app, ctx);
     registerReadMyMindRoutes(this.app, ctx);
     registerGitStatusRoutes(this.app, ctx);
-    registerAgentProfileRoutes(this.app, ctx);
+    registerAgentProfileRoutes(this.app, ctx, undefined, undefined, verifiedOwner);
     registerStatusTelemetryRoutes(this.app, ctx);
     registerSubscriptionProfileRoutes(this.app, this.subscriptionUsageReader, async (profileId) => {
       const running = (await this.planService.rows()).accounts
@@ -1323,9 +1323,10 @@ export class WebServer extends EventEmitter {
         this.store.getSession(employee.sessionId)?.subscriptionProfile?.id === profileId
       ).map(employee => employee.name);
       return [...new Set([...running, ...assigned])];
-    });
-    registerSystemRoutes(this.app, ctx);
+    }, verifiedOwner, (req) => !isMultiUserMode() && ['plan-usage', 'routines'].some(name => serviceVerifier({ service: ownerAuth, ctx }, name)(req)));
+    registerSystemRoutes(this.app, ctx, verifiedOwner);
     registerLaptopPowerRoutes(this.app, {
+      verifiedOwner,
       stopIntent: async () => {
         for (const employee of this.companyService?.registeredEmployees() ?? []) {
           await this.companyService!.setDesiredRunning(employee.sessionId, false);
@@ -1352,7 +1353,7 @@ export class WebServer extends EventEmitter {
     registerMcpSyncRoutes(this.app);
     registerDoctorRoutes(this.app);
     registerCustomModelRoutes(this.app);
-    registerCliRegistryRoutes(this.app);
+    registerCliRegistryRoutes(this.app, verifiedOwner);
 
     // Cron: build the service from the same context, recompute
     // due times for any persisted jobs, then expose it to its routes.
@@ -1362,7 +1363,7 @@ export class WebServer extends EventEmitter {
     // Only what CronPort declares: a spread of ctx would copy `port` by value (the
     // pre-listen 0 of an ephemeral bind) into an object nothing keeps in sync.
     this.cronPort = { cron: this.cronService };
-    registerCronRoutes(this.app, this.cronPort);
+    registerCronRoutes(this.app, this.cronPort, verifiedOwner);
 
     // Chatrooms: the user, an appointed coordinator session and worker sessions
     // in one room; messages reach member panes as single-line prompts.
@@ -1559,6 +1560,7 @@ export class WebServer extends EventEmitter {
       },
     });
     this.remoteWake = registerSessionRoutes(this.app, ctx, {
+      verifiedOwner,
       company: this.companyService,
       resumeTakeover: {
         rooms: () => this.chatroomService.rooms(),
@@ -1583,7 +1585,8 @@ export class WebServer extends EventEmitter {
       this.companyService,
       new AvatarStore(dataPath('agent-avatars')),
       new AvatarStore(dataPath('owner-avatars')),
-      (id) => this.companyWake.wakeOne(id)
+      (id) => this.companyWake.wakeOne(id),
+      { verifiedOwner, serviceRebind: (req) => !isMultiUserMode() && serviceVerifier({ service: ownerAuth, ctx }, 'watcher')(req) }
     );
     registerSessionRuntimeRoutes(this.app, ctx, verifiedOwner, (id, req) => {
       const employee = this.companyService.registeredEmployees().find((e) => e.sessionId === id);
@@ -1641,6 +1644,7 @@ export class WebServer extends EventEmitter {
     const boardStore = new BoardStore(dataPath('board.json'));
     await boardStore.init();
     registerBoardRoutes(this.app, ctx, {
+      verifiedOwner,
       store: boardStore,
       company: (owner) => this.companyService.view(owner),
       rooms: () => this.chatroomService.rooms(),
@@ -1662,7 +1666,7 @@ export class WebServer extends EventEmitter {
     void decisionAlerts.check().catch(() => undefined);
     this.decisionAlertTimer = setInterval(() => void decisionAlerts.check().catch(() => undefined), 60_000);
     this.decisionAlertTimer.unref();
-    registerWorkspaceIconRoutes(this.app, new WorkspaceIconStore(dataPath('workspace-icons')));
+    registerWorkspaceIconRoutes(this.app, new WorkspaceIconStore(dataPath('workspace-icons')), verifiedOwner);
 
     // Roles (src/roles.ts): who holds Admin or Moderator is instance data in roles.json; the first holders come from
     // REVERIE_ROLES_SEED, a JSON array of {employeeId, roleId}, read only while the file does not exist.
@@ -1714,11 +1718,12 @@ export class WebServer extends EventEmitter {
       roles,
       (sessionId) =>
         this.companyService?.view(this.sessions.get(sessionId)?.owner).employees.find((e) => e.sessionId === sessionId)
-          ?.id
+          ?.id,
+      { pendingStatus: (req) => !isMultiUserMode() && serviceVerifier({ service: ownerAuth, ctx }, 'stall-watch')(req) }
     );
     // Chat bots: the sender a scheduled 'post' job speaks as (see chat-bots.ts). The registry is instance data.
     const chatBots = new ChatBotRegistry(dataPath('chat-bots.json'));
-    registerChatBotRoutes(this.app, chatBots);
+    registerChatBotRoutes(this.app, chatBots, verifiedOwner);
     this.inputWatch = createInputWatch({
       ledgerFile: dataPath('input-watch-ledger.json'),
       bot: () => (isMultiUserMode() ? undefined : chatBots.get('input-watch')),
@@ -1804,6 +1809,7 @@ export class WebServer extends EventEmitter {
     // gets private one-use authority for this exact template payload, never an owner cookie.
     const company = this.companyService;
     registerExpertRoutes(this.app, {
+      verifiedOwner,
       store: new ExpertStore(dataPath('experts.json'), envValue(process.env, 'EXPERTS_SEED_DIR') || undefined),
       callerSession: (req) => resolveParentSessionId(ctx, req, undefined, ownerFor(req)),
       createSession: async (req, launch, delegate) => {
@@ -1944,7 +1950,7 @@ export class WebServer extends EventEmitter {
           },
           'plans.view_all'
         ),
-    });
+    }, verifiedOwner);
 
     const planMoveStore = new PlanMoveStore(dataPath('plan-moves.json'));
     const planMoveRuntime: Omit<PlanMoveRuntime, 'authorized' | 'request'> = {

@@ -1,3 +1,4 @@
+import { trustedFixtureOwner } from '../helpers/trusted-owner-fixture.js';
 /**
  * Message editing and pins. The user edits their own text messages (the original goes to the audit log; members that received it are
  * sent a one-line note with the new text, the others read the new text) and pins messages as room rules; the room's coordinator may pin
@@ -43,7 +44,7 @@ describe('chatroom message editing and pins', () => {
         broadcast: () => undefined,
         now: () => clock,
       });
-      registerChatroomRoutes(fastify, c, service, new ChatFileStore(mkdtempSync(join(tmpdir(), 'chatfiles-'))));
+      registerChatroomRoutes(fastify, c, service, new ChatFileStore(mkdtempSync(join(tmpdir(), 'chatfiles-'))), trustedFixtureOwner);
     });
     app = harness.app;
     ctx = harness.ctx;

@@ -1,3 +1,4 @@
+import { trustedFixtureOwner } from '../helpers/trusted-owner-fixture.js';
 /**
  * @fileoverview POST /api/quick-start's `customModel` field (docs/custom-model-endpoints-plan.md):
  * the ONE-SHOT launch path that computes a custom-model endpoint's injection BEFORE the
@@ -78,7 +79,7 @@ describe('POST /api/quick-start: customModel (one-shot custom-model launch)', ()
     app = Fastify({ logger: false });
     await app.register(fastifyCookie);
     ctx = createMockRouteContext();
-    registerSessionRoutes(app, ctx);
+    registerSessionRoutes(app, ctx, { ...({}), verifiedOwner: trustedFixtureOwner });
     installRouteErrorHandler(app);
     await app.ready();
     await writeCustomModelHosts(getDataDir(), [ENDPOINT]);

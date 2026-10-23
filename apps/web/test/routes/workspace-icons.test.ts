@@ -1,3 +1,4 @@
+import { trustedFixtureOwner } from '../helpers/trusted-owner-fixture.js';
 /**
  * Workspace pictures: stored on the server (not per browser), owner-only to change, sniffed by their bytes like profile images, and
  * private to the owner they belong to.
@@ -23,7 +24,7 @@ describe('workspace pictures', () => {
   beforeEach(async () => {
     root = join(mkdtempSync(join(tmpdir(), 'wsicons-')), 'workspace-icons');
     store = new WorkspaceIconStore(root);
-    const harness = await createRouteTestHarness((fastify) => registerWorkspaceIconRoutes(fastify, store));
+    const harness = await createRouteTestHarness((fastify) => registerWorkspaceIconRoutes(fastify, store, trustedFixtureOwner));
     app = harness.app;
   });
   afterEach(async () => {

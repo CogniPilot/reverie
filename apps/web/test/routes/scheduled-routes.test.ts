@@ -1,3 +1,4 @@
+import { trustedFixtureOwner } from '../helpers/trusted-owner-fixture.js';
 /**
  * @fileoverview Tests for scheduled-routes route handlers.
  *
@@ -13,7 +14,7 @@ describe('scheduled-routes', () => {
   let harness: RouteTestHarness;
 
   beforeEach(async () => {
-    harness = await createRouteTestHarness(registerScheduledRoutes);
+    harness = await createRouteTestHarness((app, ctx) => registerScheduledRoutes(app, ctx, trustedFixtureOwner));
   });
 
   afterEach(async () => {

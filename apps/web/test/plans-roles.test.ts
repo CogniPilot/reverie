@@ -1,3 +1,4 @@
+import { trustedFixtureOwner } from './helpers/trusted-owner-fixture.js';
 /**
  * @fileoverview Role scoping of GET /api/plans: the owner and a coordinator see every account, any other agent only the account
  * its own session runs on; sign-in stays the owner's. The same API serves the page, `reverie plans` and the MCP tools.
@@ -38,7 +39,7 @@ async function build() {
       return [COORD, WORKER, IDLE].includes(h as string) ? (h as string) : undefined;
     },
     canViewAll: (id) => id === COORD,
-  });
+  }, trustedFixtureOwner);
   await app.ready();
   return started;
 }

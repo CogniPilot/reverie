@@ -1,3 +1,4 @@
+import { trustedFixtureOwner } from '../helpers/trusted-owner-fixture.js';
 /**
  * @fileoverview Route tests for the `wait` field on `POST /api/sessions/:id/input`.
  *
@@ -48,7 +49,7 @@ async function harness(): Promise<{ app: FastifyInstance; ctx: MockRouteContext;
     rawRequests.push(req.raw);
   });
 
-  registerSessionRoutes(app, ctx as never);
+  registerSessionRoutes(app, ctx as never, { ...({}), verifiedOwner: trustedFixtureOwner });
 
   app.addHook('preSerialization', (req, reply, payload: unknown, done) => {
     const p = payload as { success?: unknown; errorCode?: unknown } | null;

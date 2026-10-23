@@ -1,3 +1,4 @@
+import { NO_OWNER, type OwnerVerifier } from '../../owner-auth/marks.js';
 import { runtimeSwitches } from './session-runtime-routes.js';
 import { clampExternalCliBypassForOwner } from '../../session-config-clamp.js';
 /**
@@ -942,6 +943,7 @@ export function registerSessionRoutes(
   ctx: SessionPort & EventPort & ConfigPort & InfraPort & AuthPort & TabLayoutPort,
   /** Test seam: inject a registry with fake IO instead of the real TCP/WoL probes. */
   options: {
+    verifiedOwner?: OwnerVerifier;
     remoteWake?: RemoteWakeRegistry;
     company?: CompanyService;
     /** Rooms and the audit log, for a coordinator continuing a gone agent's conversation (resume-guard.ts). */
@@ -3704,7 +3706,7 @@ export function registerSessionRoutes(
   // it (identity, policies, pin, rooms) stay; nothing is restarted here. Owner only: an agent never moves a session's thread.
   app.put('/api/sessions/:id/opencode-thread', async (req, reply) => {
     const { id } = req.params as { id: string };
-    if (req.headers['x-reverie-parent-session'] !== undefined) {
+    if (!(options.verifiedOwner ?? NO_OWNER)(req)) {
       return reply
         .code(403)
         .send(createErrorResponse(ApiErrorCode.FORBIDDEN, 'Only the owner may change a session thread'));
@@ -3752,7 +3754,7 @@ export function registerSessionRoutes(
   const modeSwitches = runtimeSwitches;
   app.post('/api/sessions/:id/mode', async (req, reply) => {
     const { id } = req.params as { id: string };
-    if (req.headers['x-reverie-parent-session'] !== undefined) {
+    if (!(options.verifiedOwner ?? NO_OWNER)(req)) {
       return reply
         .code(403)
         .send(createErrorResponse(ApiErrorCode.FORBIDDEN, 'Only the owner may switch a session CLI'));
@@ -3947,7 +3949,7 @@ export function registerSessionRoutes(
 
   // ========== Quick Start ==========
 
-  app.post('/api/quick-start', async (req) => {
+  app.post('/api/quick-start', async (req, reply) => {
     const owner = ownerFor(req);
     const capMsg = sessionCapacityMessage(ctx.sessions, owner);
     if (capMsg) return createErrorResponse(ApiErrorCode.SESSION_BUSY, capMsg);
@@ -3978,7 +3980,7 @@ export function registerSessionRoutes(
       customModel,
       tabGroupId,
     } = parseBody(QuickStartSchema, req.body);
-    if (pinned && req.headers['x-reverie-parent-session'] !== undefined) return createErrorResponse(ApiErrorCode.FORBIDDEN, 'Only the owner may pin an expert runtime');
+    if (pinned && !(options.verifiedOwner ?? NO_OWNER)(req)) return reply.code(403).send(createErrorResponse(ApiErrorCode.FORBIDDEN, 'Only the verified owner may pin an expert runtime'));
     let openCodeConfig = requestedOpenCodeConfig;
 
     // Resolved ONCE here: the same value labels a case directory this request creates

@@ -1,3 +1,4 @@
+import { trustedFixtureOwner } from '../helpers/trusted-owner-fixture.js';
 import { afterEach, describe, expect, it } from 'vitest';
 import { mkdtempSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -25,7 +26,7 @@ describe('employee identity on the chat HTTP representations', () => {
     let service: ChatroomService;
     const harness = await createRouteTestHarness((app, context) => {
       service = new ChatroomService({ file: join(directory, 'rooms.json'), getSession: (sessionId) => context.sessions.get(sessionId), employeeOf: (sessionId) => bindings.get(sessionId), broadcast: () => {} });
-      registerChatroomRoutes(app, context, service, new ChatFileStore(join(directory, 'files')));
+      registerChatroomRoutes(app, context, service, new ChatFileStore(join(directory, 'files')), trustedFixtureOwner);
     });
     cleanup.push(async () => {
       await service.stop();

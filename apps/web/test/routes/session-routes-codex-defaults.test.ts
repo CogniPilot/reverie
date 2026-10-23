@@ -1,3 +1,4 @@
+import { trustedFixtureOwner } from '../helpers/trusted-owner-fixture.js';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { mkdir, writeFile, rm } from 'node:fs/promises';
@@ -38,7 +39,7 @@ describe('Codex launch defaults', () => {
     await mkdir(workingDir, { recursive: true });
     await mkdir(dirname(SETTINGS_PATH), { recursive: true });
     await writeFile(SETTINGS_PATH, JSON.stringify({ codexModel: 'gpt-6.1', codexReasoningEffort: 'high' }));
-    harness = await createRouteTestHarness(registerSessionRoutes);
+    harness = await createRouteTestHarness((app, ctx) => registerSessionRoutes(app, ctx, { verifiedOwner: trustedFixtureOwner }));
     vi.spyOn(Session.prototype, 'startInteractive').mockResolvedValue(undefined);
   });
 
@@ -180,7 +181,7 @@ describe('Codex launch defaults', () => {
   });
 
   it('accepts, persists, clears and validates synced settings via HTTP', async () => {
-    const system = await createRouteTestHarness(registerSystemRoutes);
+    const system = await createRouteTestHarness((app, ctx) => registerSystemRoutes(app, ctx, trustedFixtureOwner));
     try {
       const put = (payload: unknown) => system.app.inject({ method: 'PUT', url: '/api/settings', payload });
       expect((await put({ codexModel: 'gpt-6.1', codexReasoningEffort: 'xhigh' })).statusCode).toBe(200);

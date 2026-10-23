@@ -1,3 +1,4 @@
+import { trustedFixtureOwner } from '../helpers/trusted-owner-fixture.js';
 /**
  * PUT /api/sessions/:id/opencode-thread: the owner points an OpenCode session at another thread for its next start.
  * The session keeps its id (identity, policies and pin are keyed to it); nothing restarts; an audit line is written.
@@ -27,7 +28,7 @@ describe('PUT /api/sessions/:id/opencode-thread', () => {
 
   beforeEach(async () => {
     log.mockClear();
-    h = await createRouteTestHarness(registerSessionRoutes);
+    h = await createRouteTestHarness((app, ctx) => registerSessionRoutes(app, ctx, { verifiedOwner: trustedFixtureOwner }));
     h.ctx._session.mode = 'opencode';
     h.ctx._session.openCodeConfig = { continueSession: OLD };
   });

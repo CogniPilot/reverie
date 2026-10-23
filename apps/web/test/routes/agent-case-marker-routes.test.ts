@@ -1,3 +1,4 @@
+import { trustedFixtureOwner } from '../helpers/trusted-owner-fixture.js';
 /**
  * @fileoverview End-to-end wiring of the agent-case label: quick-start writes the
  * marker, the case list publishes it, and `GET /api/cases/agent-created` reports it
@@ -40,7 +41,7 @@ async function createHarness(): Promise<Harness> {
   const app = Fastify({ logger: false });
   await app.register(fastifyCookie);
   const ctx = createMockRouteContext();
-  registerSessionRoutes(app, ctx);
+  registerSessionRoutes(app, ctx, { ...({}), verifiedOwner: trustedFixtureOwner });
   registerCaseRoutes(app, ctx);
   installRouteErrorHandler(app);
   await app.ready();

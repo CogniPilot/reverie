@@ -1,3 +1,4 @@
+import { trustedFixtureOwner } from './helpers/trusted-owner-fixture.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import Fastify from 'fastify';
 import { registerLaptopPowerRoutes } from '../src/web/routes/laptop-power-routes.js';
@@ -14,7 +15,7 @@ describe('office power controls', () => {
       if (fail) throw new Error('private engine diagnostic');
       return { success: true };
     });
-    registerLaptopPowerRoutes(app, { stopIntent: async () => { events.push('stop-intent'); }, power });
+    registerLaptopPowerRoutes(app, { ...({ stopIntent: async () => { events.push('stop-intent'); }, power }), verifiedOwner: trustedFixtureOwner });
     await app.ready();
     return { app, events, power };
   }

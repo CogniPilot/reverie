@@ -1,3 +1,4 @@
+import { trustedFixtureOwner } from './helpers/trusted-owner-fixture.js';
 /**
  * @fileoverview Chatroom members record which agent added them (`addedBy`), so owner sign-in can
  * tell owner-made seats from agent-made ones. Synthetic fixtures only.
@@ -26,7 +27,7 @@ describe('chatroom members record who added them', () => {
     const file = join(mkdtempSync(join(tmpdir(), 'chatroom-added-by-')), 'chatrooms.json');
     const harness = await createRouteTestHarness((fastify, c) => {
       service = new ChatroomService({ file, getSession: (id) => c.sessions.get(id), broadcast: () => {}, now: () => 1_000_000 });
-      registerChatroomRoutes(fastify, c, service, new ChatFileStore(mkdtempSync(join(tmpdir(), 'chatfiles-'))));
+      registerChatroomRoutes(fastify, c, service, new ChatFileStore(mkdtempSync(join(tmpdir(), 'chatfiles-'))), trustedFixtureOwner);
     });
     app = harness.app;
     ctx = harness.ctx;

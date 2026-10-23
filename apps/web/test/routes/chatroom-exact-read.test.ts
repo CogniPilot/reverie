@@ -1,3 +1,4 @@
+import { trustedFixtureOwner } from '../helpers/trusted-owner-fixture.js';
 import { it, expect } from 'vitest';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -17,7 +18,7 @@ it('exact-read routes preserve membership scope, require an agent and never ackn
     c.sessions.set(a, createMockSession(a));
     c.sessions.set(b, createMockSession(b));
     service = new ChatroomService({ file: join(dir, 'rooms.json'), getSession: (id) => c.sessions.get(id), broadcast: () => {} });
-    registerChatroomRoutes(fastify, c, service, new ChatFileStore(dir));
+    registerChatroomRoutes(fastify, c, service, new ChatFileStore(dir), trustedFixtureOwner);
   });
   await service.init();
   try {

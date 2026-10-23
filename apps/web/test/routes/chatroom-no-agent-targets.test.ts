@@ -1,3 +1,4 @@
+import { trustedFixtureOwner } from '../helpers/trusted-owner-fixture.js';
 /**
  * In a channel everyone in it reads every message: nothing an agent posts (a message or a poll) is addressed to anyone. A `to` it
  * still sends, one agent, the coordinator or the user, is ignored (not an error) and reported as `toIgnored`. The owner's own
@@ -30,7 +31,7 @@ describe('no private messages between agents in a channel', () => {
     const file = join(mkdtempSync(join(tmpdir(), 'chatroom-')), 'chatrooms.json');
     const harness = await createRouteTestHarness((fastify, c) => {
       service = new ChatroomService({ file, getSession: (id) => c.sessions.get(id), broadcast: () => {}, now: () => clock });
-      registerChatroomRoutes(fastify, c, service, new ChatFileStore(mkdtempSync(join(tmpdir(), 'chatfiles-'))));
+      registerChatroomRoutes(fastify, c, service, new ChatFileStore(mkdtempSync(join(tmpdir(), 'chatfiles-'))), trustedFixtureOwner);
     });
     app = harness.app;
     ctx = harness.ctx;

@@ -1,3 +1,4 @@
+import { trustedFixtureOwner } from './helpers/trusted-owner-fixture.js';
 /**
  * Delegated post-job authoring (F.3): the owner grants the permission to roles or employees; a delegate authors post jobs,
  * and every such change is announced in the general and audited first. Bots, allowlists and caps stay owner-only.
@@ -72,8 +73,8 @@ async function setup() {
     },
   };
   const app = Fastify({ logger: false });
-  registerCronRoutes(app, port as never);
-  registerChatBotRoutes(app, registry);
+  registerCronRoutes(app, port as never, trustedFixtureOwner);
+  registerChatBotRoutes(app, registry, trustedFixtureOwner);
   installRouteErrorHandler(app);
   await app.ready();
   return { app, cron, registry, grants, file };

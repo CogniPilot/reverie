@@ -1,9 +1,10 @@
+import { trustedFixtureOwner } from '../helpers/trusted-owner-fixture.js';
 /**
  * A post to the whole room wakes only the members it is for: the @mentioned, the author of the message it replies to, and the
  * coordinator. Everyone else still gets it, in order, with the next prompt that does wake them (read later, not lost); it never
  * wakes a pane by itself. Addressed messages, direct messages and rooms with no coordinator behave as before.
  */
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -36,7 +37,7 @@ describe('mention-only delivery', () => {
     const file = join(mkdtempSync(join(tmpdir(), 'chatroom-')), 'chatrooms.json');
     const harness = await createRouteTestHarness((fastify, c) => {
       service = new ChatroomService({ file, getSession: (id) => c.sessions.get(id), broadcast: () => {}, now: () => clock });
-      registerChatroomRoutes(fastify, c, service, new ChatFileStore(mkdtempSync(join(tmpdir(), 'chatfiles-'))));
+      registerChatroomRoutes(fastify, c, service, new ChatFileStore(mkdtempSync(join(tmpdir(), 'chatfiles-'))), trustedFixtureOwner);
     });
     app = harness.app;
     ctx = harness.ctx;
@@ -373,7 +374,7 @@ describe('the wake setting of a room', () => {
     file = join(mkdtempSync(join(tmpdir(), 'chatroom-')), 'chatrooms.json');
     const harness = await createRouteTestHarness((fastify, c) => {
       service = new ChatroomService({ file, getSession: (id) => c.sessions.get(id), broadcast: () => {}, now: () => clock });
-      registerChatroomRoutes(fastify, c, service, new ChatFileStore(mkdtempSync(join(tmpdir(), 'chatfiles-'))));
+      registerChatroomRoutes(fastify, c, service, new ChatFileStore(mkdtempSync(join(tmpdir(), 'chatfiles-'))), trustedFixtureOwner);
     });
     app = harness.app;
     ctx = harness.ctx;
@@ -501,3 +502,11 @@ describe('what a full queue keeps', () => {
   });
 });
 
+
+// These delivery fixtures exercise historical unmarked user traffic. Authentication
+// uses an explicit trusted-browser seam; real owner marks and refusals are covered
+// by owner-route-principals and chatroom-owner-marks without this metadata stub.
+vi.mock('../../src/owner-auth/marks.js', async original => ({
+  ...await original<typeof import('../../src/owner-auth/marks.js')>(),
+  ownerMark: () => undefined,
+}));

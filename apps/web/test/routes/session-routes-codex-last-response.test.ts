@@ -1,3 +1,4 @@
+import { trustedFixtureOwner } from '../helpers/trusted-owner-fixture.js';
 /**
  * @fileoverview Tests for the Codex branch of GET /api/sessions/:id/last-response (PR #152).
  *
@@ -137,7 +138,7 @@ describe('GET /api/sessions/:id/last-response (codex)', () => {
     prevCodexHome = process.env.CODEX_HOME;
     process.env.CODEX_HOME = codexHome;
 
-    harness = await createEnvelopeHarness(registerSessionRoutes);
+    harness = await createEnvelopeHarness((app, ctx) => registerSessionRoutes(app, ctx, { verifiedOwner: trustedFixtureOwner }));
     session = harness.ctx._session;
     session.mode = 'codex';
     workdir = join(codexHome, 'workdir');

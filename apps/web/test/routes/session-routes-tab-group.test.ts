@@ -1,3 +1,4 @@
+import { trustedFixtureOwner } from '../helpers/trusted-owner-fixture.js';
 /**
  * @fileoverview `tabGroupId` on the create routes: a session created from a
  * group's "New session" action asks to be placed in that group.
@@ -54,7 +55,7 @@ describe('create routes: tabGroupId', () => {
         ? { ...LAYOUT, version: 5, groups: [{ ...LAYOUT.groups[0], refs }] }
         : { ...LAYOUT, version: 5, ungrouped: refs };
     });
-    registerSessionRoutes(app, ctx);
+    registerSessionRoutes(app, ctx, { ...({}), verifiedOwner: trustedFixtureOwner });
     installRouteErrorHandler(app);
     await app.ready();
   });
@@ -177,7 +178,7 @@ describe('create routes: tabGroupId through the real layout service', () => {
         return () => ctx.sessions.delete(session.id);
       })
     );
-    registerSessionRoutes(app, ctx);
+    registerSessionRoutes(app, ctx, { ...({}), verifiedOwner: trustedFixtureOwner });
     installRouteErrorHandler(app);
     await app.ready();
   });

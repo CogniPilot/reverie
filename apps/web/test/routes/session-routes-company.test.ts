@@ -1,3 +1,4 @@
+import { trustedFixtureOwner } from '../helpers/trusted-owner-fixture.js';
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
 import fastifyCookie from '@fastify/cookie';
@@ -47,7 +48,7 @@ describe('temporary worker creation with company identity and channel inheritanc
     failures.length = 0;
     app = Fastify();
     await app.register(fastifyCookie);
-    registerSessionRoutes(app, ctx, { company, onReplacementFailed: (info) => failures.push(info) });
+    registerSessionRoutes(app, ctx, { ...({ company, onReplacementFailed: (info) => failures.push(info) }), verifiedOwner: trustedFixtureOwner });
     installRouteErrorHandler(app);
     await app.ready();
   });

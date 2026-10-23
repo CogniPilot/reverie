@@ -12,8 +12,9 @@
  * agent and external messages never carry one (the chatroom store drops it). Host-side memory
  * reflection reads the mark from chatrooms.json to decide which episodes the owner vouched for.
  */
+import { isMultiUserMode } from '../config/multiuser.js';
 import type { FastifyRequest } from 'fastify';
-import { callerOf, type PolicyDeps } from './policy.js';
+import { callerOf, SERVICE_HEADER, type PolicyDeps } from './policy.js';
 
 export type OwnerMark = 'owner_typed' | 'owner_spoken';
 export const OWNER_MARKS: readonly OwnerMark[] = ['owner_typed', 'owner_spoken'];
@@ -36,4 +37,14 @@ export function ownerMark(req: FastifyRequest, verify: OwnerVerifier, spoken: bo
 
 export function isOwnerMark(value: unknown): value is OwnerMark {
   return typeof value === 'string' && (OWNER_MARKS as readonly string[]).includes(value);
+}
+
+/** A named host service grant, never an owner principal or an agent-header impersonation.
+ * The receiving route must still restrict the operation and validate its target.
+ */
+export type ServiceVerifier = (req: FastifyRequest) => boolean;
+export function serviceVerifier(deps: Pick<PolicyDeps, 'service' | 'ctx'>, name: string): ServiceVerifier {
+  return (req) => !isMultiUserMode() && req.headers['x-reverie-parent-session'] === undefined &&
+    callerOf(req, deps).kind === 'service' &&
+    deps.service.service(typeof req.headers[SERVICE_HEADER] === 'string' ? req.headers[SERVICE_HEADER] : undefined) === name;
 }

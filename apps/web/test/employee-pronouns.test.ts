@@ -1,3 +1,4 @@
+import { trustedFixtureOwner } from './helpers/trusted-owner-fixture.js';
 /**
  * Employee pronouns (card i-f5b288f8): an optional one-line field on the employee record that only the owner sets
  * (PUT /api/company/employees/:id, null clears it). An agent can neither set them on itself (/api/company/self stays
@@ -122,7 +123,7 @@ describe('who may set pronouns', () => {
       research: { start: vi.fn(), inspect: vi.fn(), stop: vi.fn() },
     });
     app = Fastify();
-    registerCompanyRoutes(app, { sessions } as unknown as SessionPort, service);
+    registerCompanyRoutes(app, { sessions } as unknown as SessionPort, service, undefined, undefined, undefined, { verifiedOwner: trustedFixtureOwner });
     installRouteErrorHandler(app);
     await app.ready();
     const { id: _id, createdAt: _at, ...hire } = record;

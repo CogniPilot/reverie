@@ -1,3 +1,4 @@
+import { trustedFixtureOwner } from './helpers/trusted-owner-fixture.js';
 /**
  * GPU load as the host publishes it: a small JSON file the console only reads. Anything missing, stale, from the future or
  * malformed is "no reading", so the page hides the GPU chip instead of showing a number nobody updates.
@@ -120,7 +121,7 @@ describe('GET /api/system/gpu', () => {
   beforeEach(async () => {
     file = join(mkdtempSync(join(tmpdir(), 'hostgpu-')), 'gpu.json');
     process.env.REVERIE_GPU_STATUS_FILE = file;
-    h = await createRouteTestHarness(registerSystemRoutes);
+    h = await createRouteTestHarness((app, ctx) => registerSystemRoutes(app, ctx, trustedFixtureOwner));
   });
   afterEach(async () => {
     delete process.env.REVERIE_GPU_STATUS_FILE;

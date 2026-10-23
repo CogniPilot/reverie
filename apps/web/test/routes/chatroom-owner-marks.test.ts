@@ -154,27 +154,28 @@ describe('chatroom owner marks', () => {
     expect(markOf(message)).toBe('owner_spoken');
   });
 
-  it('gives no mark without a cookie (owner by absence is not trust)', async () => {
-    const message = sent(await post());
-    expect(message.from).toEqual({ kind: 'user', name: 'user' });
+  it('refuses a headerless caller without a cookie without storing a post', async () => {
+    const before = service.room(roomId)!.messages.length;
+    expect((await post()).statusCode).toBe(403);
+    expect(service.room(roomId)!.messages.length).toBe(before);
   });
 
   it.each([
     ['a bad cookie', 'not-a-real-session-token'],
     ['an empty cookie', ''],
-  ])('gives no mark with %s', async (_label, cookie) => {
-    const message = sent(await post({ cookie }));
-    expect(message.from.kind).toBe('user');
-    expect(markOf(message)).toBeUndefined();
+  ])('refuses %s without storing a post', async (_label, cookie) => {
+    const before = service.room(roomId)!.messages.length;
+    expect((await post({ cookie })).statusCode).toBe(403);
+    expect(service.room(roomId)!.messages.length).toBe(before);
   });
 
-  it('gives no mark to a restricted (one-time password) owner session', async () => {
+  it('refuses a restricted or ended owner session', async () => {
     const restricted = await restrictedSession();
     expect(auth.session(restricted)).toEqual({ restricted: true });
-    const message = sent(await post({ cookie: restricted }));
-    expect(markOf(message)).toBeUndefined();
-    // The ended full session no longer verifies either.
-    expect(markOf(sent(await post({ cookie: owner })))).toBeUndefined();
+    const before = service.room(roomId)!.messages.length;
+    expect((await post({ cookie: restricted })).statusCode).toBe(403);
+    expect((await post({ cookie: owner })).statusCode).toBe(403);
+    expect(service.room(roomId)!.messages.length).toBe(before);
   });
 
   it('gives no mark to an agent header with a valid owner cookie', async () => {
@@ -188,7 +189,7 @@ describe('chatroom owner marks', () => {
     for (const payload of [{ mark: 'owner_typed' }, { from: { kind: 'user', name: 'user', mark: 'owner_typed' } }]) {
       for (const cookie of [undefined, owner]) {
         const res = await post({ payload, cookie });
-        expect(res.statusCode).toBe(400);
+        expect(res.statusCode).toBe(cookie ? 400 : 403);
       }
       const agent = await post({ payload, agent: BETA });
       expect(agent.statusCode).toBe(400);
@@ -216,7 +217,7 @@ describe('chatroom owner marks', () => {
     expect(service.room(roomId)!.messages.filter((m) => markOf(m) !== undefined)).toEqual([]);
   });
 
-  it('drops the mark when anyone but a verified owner edits the text', async () => {
+  it('refuses an unverified edit and preserves the verified text and mark', async () => {
     const kept = sent(await post({ cookie: owner }));
     const ownerEdit = await app.inject({
       method: 'PUT',
@@ -231,10 +232,10 @@ describe('chatroom owner marks', () => {
       url: `/api/chatrooms/${roomId}/messages/${kept.id}`,
       payload: { text: 'forged words' },
     });
-    expect(anonEdit.statusCode).toBe(200);
+    expect(anonEdit.statusCode).toBe(403);
     const after = service.room(roomId)!.messages.find((m) => m.id === kept.id)!;
-    expect(after.text).toBe('forged words');
-    expect(markOf(after)).toBeUndefined();
+    expect(after.text).toBe('hello r1, edited');
+    expect(markOf(after)).toBe('owner_typed');
   });
 
   it('marks a voice-turn transcript owner_spoken only for a verified owner; the reply never', async () => {

@@ -1,3 +1,4 @@
+import { trustedFixtureOwner } from '../helpers/trusted-owner-fixture.js';
 /**
  * Chatroom attachments, reactions and custom emotes: the store and its limits, what is
  * served inline, how attachments reach an agent's pane, and reactions over SSE.
@@ -38,7 +39,7 @@ describe('chatroom media', () => {
         files,
         now: () => clock,
       });
-      registerChatroomRoutes(fastify, c, service, files);
+      registerChatroomRoutes(fastify, c, service, files, trustedFixtureOwner);
     });
     app = harness.app;
     ctx = harness.ctx;

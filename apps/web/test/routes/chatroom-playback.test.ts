@@ -1,3 +1,4 @@
+import { trustedFixtureOwner } from '../helpers/trusted-owner-fixture.js';
 /**
  * Car mode on the owner's page reports a message addressed to the user that it did not play aloud, or cut short: the author
  * gets one private SYSTEM line (what the app did, with the reason), once per message. Only the user's page may report.
@@ -39,7 +40,7 @@ describe('chatroom playback notices', () => {
         now: () => clock,
         voteCoalesceMs: 25,
       });
-      registerChatroomRoutes(fastify, c, service, new ChatFileStore(mkdtempSync(join(tmpdir(), 'chatfiles-'))));
+      registerChatroomRoutes(fastify, c, service, new ChatFileStore(mkdtempSync(join(tmpdir(), 'chatfiles-'))), trustedFixtureOwner);
     });
     app = harness.app;
     ctx = harness.ctx;

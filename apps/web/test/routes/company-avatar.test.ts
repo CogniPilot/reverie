@@ -1,3 +1,4 @@
+import { trustedFixtureOwner } from '../helpers/trusted-owner-fixture.js';
 /**
  * @fileoverview Profile images: an agent sets or clears its OWN image, the owner may set any agent's,
  * and the image shows on the agent's membership in every room it is in. Only real PNG/JPEG/GIF/WebP
@@ -62,11 +63,7 @@ describe('profile images', () => {
       showSelfProfile,
     });
     app = Fastify();
-    registerCompanyRoutes(
-      app,
-      { sessions } as unknown as SessionPort,
-      service,
-      new AvatarStore(join(directory, 'agent-avatars'))
+    registerCompanyRoutes(app, { sessions } as unknown as SessionPort, service, new AvatarStore(join(directory, 'agent-avatars')), undefined, undefined, { verifiedOwner: trustedFixtureOwner }
     );
     installRouteErrorHandler(app);
     await app.ready();

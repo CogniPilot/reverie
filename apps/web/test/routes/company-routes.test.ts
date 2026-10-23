@@ -1,3 +1,4 @@
+import { trustedFixtureOwner } from '../helpers/trusted-owner-fixture.js';
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import { appendAdminAudit } from '../../src/web/admin-audit.js';
 
@@ -51,7 +52,7 @@ describe('company HTTP ownership and expert invites', () => {
       research: { start: vi.fn(), inspect: vi.fn(), stop: vi.fn() },
     });
     app = Fastify();
-    registerCompanyRoutes(app, { sessions } as unknown as SessionPort, service, undefined, undefined, wake);
+    registerCompanyRoutes(app, { sessions } as unknown as SessionPort, service, undefined, undefined, wake, { verifiedOwner: trustedFixtureOwner });
     installRouteErrorHandler(app);
     await app.ready();
   });

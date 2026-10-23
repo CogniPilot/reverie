@@ -1,3 +1,4 @@
+import { trustedFixtureOwner } from './helpers/trusted-owner-fixture.js';
 /**
  * Agent routines: a post job an employee owns and speaks through as themselves. Covers the server rules (membership, cap,
  * interval, ownership, no forged author), the fire path (prefix, identity by employee id, auto-disable) and what a reader sees.
@@ -79,7 +80,7 @@ async function setup() {
     const user = req.headers['x-test-user'];
     if (typeof user === 'string') (req as unknown as { authUser: unknown }).authUser = { username: user, role: 'user' };
   });
-  registerCronRoutes(app, port as never);
+  registerCronRoutes(app, port as never, trustedFixtureOwner);
   installRouteErrorHandler(app);
   await app.ready();
   const create = (who: Person | { session: string }, extra: object = {}) =>

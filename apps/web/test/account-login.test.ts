@@ -1,3 +1,4 @@
+import { trustedFixtureOwner } from './helpers/trusted-owner-fixture.js';
 /**
  * One-click account sign-in: the login-pane scrape (from captured Claude and Codex
  * screens), the state machine, the service against a fake tmux, and the routes.
@@ -275,7 +276,7 @@ describe('sign-in routes', () => {
     const app = Fastify();
     installRouteErrorHandler(app);
     const plans = { account: async (id: string) => (id === h.account.id ? h.account : undefined) };
-    registerPlansRoutes(app, plans as unknown as PlanService, h.svc);
+    registerPlansRoutes(app, plans as unknown as PlanService, h.svc, undefined, trustedFixtureOwner);
     await app.ready();
 
     expect((await app.inject({ method: 'POST', url: '/api/plans/accounts/nope/login' })).statusCode).toBe(404);

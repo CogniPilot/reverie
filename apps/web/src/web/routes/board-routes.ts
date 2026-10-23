@@ -1,3 +1,4 @@
+import { NO_OWNER, type OwnerVerifier } from '../../owner-auth/marks.js';
 /**
  * @fileoverview The server's board (board-types.ts): GET /api/board and its audited writes.
  *
@@ -49,6 +50,7 @@ interface Employee {
 }
 
 export interface BoardDeps {
+  verifiedOwner?: OwnerVerifier;
   store: BoardStore;
   /** Company employees and settings for the caller's owner (CompanyService.view). */
   company: (owner: string | undefined) => { employees: Employee[]; settings: { timeZone: string; ownerName: string } };
@@ -131,7 +133,8 @@ export function registerBoardRoutes(app: FastifyInstance, ctx: SessionPort & Par
   const caller = (req: FastifyRequest): Caller => {
     const owner = ownerFor(req);
     const header = req.headers['x-reverie-parent-session'];
-    if (header === undefined) return { kind: 'owner', by: 'owner', owner };
+    if ((deps.verifiedOwner ?? NO_OWNER)(req)) return { kind: 'owner', by: 'owner', owner };
+    if (header === undefined || req.headers['x-reverie-service-token'] !== undefined) throw new BoardError('Verified owner or agent session required', 403);
     const sessionId = resolveParentSessionId(ctx, req, undefined, owner);
     // The header must name exactly this session: no prefix, no body field standing in for it.
     if (!sessionId || header !== sessionId) throw new BoardError('Unknown caller session', 403);

@@ -1,3 +1,4 @@
+import { trustedFixtureOwner } from '../helpers/trusted-owner-fixture.js';
 /**
  * A plan switch gives an agent a new session. The owner (or the successor itself, proven by one shared conversation) moves the old
  * session's place in every room to it: role, goal, settings, direct messages; the new member is briefed; a different agent never can.
@@ -37,7 +38,7 @@ describe('a plan switch: the old session\'s place moves to its successor', () =>
     file = join(mkdtempSync(join(tmpdir(), 'chatroom-')), 'chatrooms.json');
     const harness = await createRouteTestHarness((fastify, c) => {
       service = new ChatroomService({ file, getSession: (id) => c.sessions.get(id), broadcast: () => {}, now: () => clock, retiredChanged: (ids) => retiredChanged.push(ids) });
-      registerChatroomRoutes(fastify, c, service, new ChatFileStore(mkdtempSync(join(tmpdir(), 'chatfiles-'))));
+      registerChatroomRoutes(fastify, c, service, new ChatFileStore(mkdtempSync(join(tmpdir(), 'chatfiles-'))), trustedFixtureOwner);
     });
     app = harness.app;
     ctx = harness.ctx;

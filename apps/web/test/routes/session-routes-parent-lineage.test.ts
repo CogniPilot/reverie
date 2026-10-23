@@ -1,3 +1,4 @@
+import { trustedFixtureOwner } from '../helpers/trusted-owner-fixture.js';
 /**
  * @fileoverview `parentSessionId` on the create routes — the "who spawned me" hint
  * that draws the tab lineage lines.
@@ -31,7 +32,7 @@ async function createHarness(): Promise<Harness> {
   const app = Fastify({ logger: false });
   await app.register(fastifyCookie);
   const ctx = createMockRouteContext();
-  registerSessionRoutes(app, ctx);
+  registerSessionRoutes(app, ctx, { ...({}), verifiedOwner: trustedFixtureOwner });
   installRouteErrorHandler(app);
   await app.ready();
   return { app, ctx };

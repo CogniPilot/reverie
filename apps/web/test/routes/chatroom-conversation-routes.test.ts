@@ -1,3 +1,4 @@
+import { trustedFixtureOwner } from '../helpers/trusted-owner-fixture.js';
 /**
  * Routes behind the conversation shell: direct messages (opened by the user, visible only to their
  * participants), placement (workspace / category), archive, and the feature flags the page reads.
@@ -36,7 +37,7 @@ describe('conversation routes', () => {
         broadcast: () => {},
         now: () => clock,
       });
-      registerChatroomRoutes(fastify, c, service, new ChatFileStore(mkdtempSync(join(tmpdir(), 'chatfiles-'))));
+      registerChatroomRoutes(fastify, c, service, new ChatFileStore(mkdtempSync(join(tmpdir(), 'chatfiles-'))), trustedFixtureOwner);
     });
     app = harness.app;
     ctx = harness.ctx;

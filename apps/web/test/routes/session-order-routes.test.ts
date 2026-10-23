@@ -1,3 +1,4 @@
+import { trustedFixtureOwner } from '../helpers/trusted-owner-fixture.js';
 /**
  * @fileoverview Tests for the synchronized legacy PUT /api/session-order endpoint.
  *
@@ -46,7 +47,7 @@ async function buildHarness(authUser = { username: 'alice', role: 'user' as cons
       globalChanged: true,
     })),
   });
-  registerSessionRoutes(app, ctx as unknown as Parameters<typeof registerSessionRoutes>[1]);
+  registerSessionRoutes(app, ctx as unknown as Parameters<typeof registerSessionRoutes>[1], { ...({}), verifiedOwner: trustedFixtureOwner });
 
   // Mirror production's uniform-envelope preSerialization hook (server.ts).
   app.addHook('preSerialization', (req, reply, payload: unknown, done) => {

@@ -1,3 +1,4 @@
+import { trustedFixtureOwner } from './helpers/trusted-owner-fixture.js';
 /**
  * The chat database: rooms and messages in SQLite, committed before the call returns, copied to the
  * archive files (the second record), imported once from chatrooms.json and the archive, refused when
@@ -422,7 +423,7 @@ describe('chat database', () => {
   it('a post whose commit fails answers 503', async () => {
     const harness = await createRouteTestHarness((fastify, c) => {
       routed = new ChatroomService({ file, database: dbFile, archiveDir, getSession: (id) => c.sessions.get(id), broadcast: () => {}, now: () => clock++ });
-      registerChatroomRoutes(fastify, c, routed, new ChatFileStore(mkdtempSync(join(tmpdir(), 'chatfiles-'))));
+      registerChatroomRoutes(fastify, c, routed, new ChatFileStore(mkdtempSync(join(tmpdir(), 'chatfiles-'))), trustedFixtureOwner);
     });
     await routed.init();
     const room = routed.createRoom('r', undefined);

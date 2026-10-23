@@ -1,3 +1,4 @@
+import { trustedFixtureOwner } from './helpers/trusted-owner-fixture.js';
 /**
  * Web-tab proxy capabilities must die with the login that minted them.
  *
@@ -70,7 +71,7 @@ describe('POST /api/logout', () => {
   let harness: RouteTestHarness;
 
   beforeAll(async () => {
-    harness = await createRouteTestHarness(registerSessionRoutes);
+    harness = await createRouteTestHarness((app, ctx) => registerSessionRoutes(app, ctx, { verifiedOwner: trustedFixtureOwner }));
   });
 
   afterAll(async () => {
@@ -97,7 +98,7 @@ describe('POST /api/logout in multi-user mode', () => {
   beforeAll(async () => {
     savedMode = process.env.REVERIE_MULTIUSER;
     process.env.REVERIE_MULTIUSER = '1';
-    harness = await createRouteTestHarness(registerSessionRoutes, { authUser: { username: 'peon', role: 'user' } });
+    harness = await createRouteTestHarness((app, ctx) => registerSessionRoutes(app, ctx, { verifiedOwner: trustedFixtureOwner }), { authUser: { username: 'peon', role: 'user' } });
   });
 
   afterAll(async () => {

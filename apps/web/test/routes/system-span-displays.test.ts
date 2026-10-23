@@ -1,3 +1,4 @@
+import { trustedFixtureOwner } from '../helpers/trusted-owner-fixture.js';
 /**
  * POST /api/system/span-displays (multi-monitor launcher) + resolveSpanUrl.
  *
@@ -47,7 +48,7 @@ describe('resolveSpanUrl', () => {
 describe('POST /api/system/span-displays', () => {
   it('returns 400 (macOS-only) on non-darwin and never spawns', async () => {
     setPlatform('linux');
-    const { app } = await createRouteTestHarness(registerSystemRoutes);
+    const { app } = await createRouteTestHarness((app, ctx) => registerSystemRoutes(app, ctx, trustedFixtureOwner));
     const res = await app.inject({ method: 'POST', url: '/api/system/span-displays' });
     expect(res.statusCode).toBe(400);
     expect(res.json().success).toBe(false);
@@ -58,7 +59,7 @@ describe('POST /api/system/span-displays', () => {
 
   it('spawns the launcher with the sanitized localhost URL on darwin', async () => {
     setPlatform('darwin');
-    const { app } = await createRouteTestHarness(registerSystemRoutes);
+    const { app } = await createRouteTestHarness((app, ctx) => registerSystemRoutes(app, ctx, trustedFixtureOwner));
     const res = await app.inject({
       method: 'POST',
       url: '/api/system/span-displays',

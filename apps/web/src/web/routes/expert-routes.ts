@@ -1,3 +1,4 @@
+import { NO_OWNER, type OwnerVerifier } from '../../owner-auth/marks.js';
 /**
  * @fileoverview Experts API: templates the owner keeps, and hiring/retiring them as employees.
  *
@@ -82,6 +83,7 @@ export const HOUR_MS = 60 * 60 * 1000;
 export const BUDGET_READING_STALE_MS = 2 * HOUR_MS;
 
 export interface ExpertRouteDeps {
+  verifiedOwner?: OwnerVerifier;
   store: ExpertStore;
   /** The agent session an `X-Reverie-Parent-Session` header resolves to, if any. */
   callerSession(req: FastifyRequest): string | undefined;
@@ -174,11 +176,17 @@ export function registerExpertRoutes(app: FastifyInstance, deps: ExpertRouteDeps
   const realpath = deps.realpath ?? ((p: string) => fs.realpath(p));
   const agentCall = (req: FastifyRequest): boolean => req.headers['x-reverie-parent-session'] !== undefined;
   const ownerOnly = (req: FastifyRequest, what: string): void => {
-    if (agentCall(req)) throw new ExpertError(`Only the owner ${what}`, 403);
+    if (!(deps.verifiedOwner ?? NO_OWNER)(req)) throw new ExpertError(`Only the owner ${what}`, 403);
+  };
+  const requireHiringPrincipal = (req: FastifyRequest): void => {
+    if ((deps.verifiedOwner ?? NO_OWNER)(req)) return;
+    if (!agentCall(req) || req.headers['x-reverie-service-token'] !== undefined || !deps.callerSession(req))
+      throw new ExpertError('Verified owner or listed agent delegate required', 403);
   };
   /** The owner, or a listed delegate session. An unresolved or unlisted agent is refused. */
   const hiringActor = (req: FastifyRequest): Actor => {
-    if (!agentCall(req)) return { kind: 'owner', label: getAuthUser(req).username || 'owner' };
+    if ((deps.verifiedOwner ?? NO_OWNER)(req)) return { kind: 'owner', label: getAuthUser(req).username || 'owner' };
+    if (!agentCall(req) || req.headers['x-reverie-service-token'] !== undefined) throw new ExpertError('Verified owner or listed agent delegate required', 403);
     const session = deps.callerSession(req);
     if (!session) throw new ExpertError('Unknown agent session', 403);
     if (!deps.store.snapshot().settings.hireDelegates.includes(session))
@@ -300,6 +308,7 @@ export function registerExpertRoutes(app: FastifyInstance, deps: ExpertRouteDeps
 
   app.post('/api/experts/:id/hire', async (req, reply) =>
     run(reply, async () => {
+      requireHiringPrincipal(req);
       await deps.store.load();
       return serial(async () => {
       const actor = hiringActor(req);
@@ -515,6 +524,7 @@ export function registerExpertRoutes(app: FastifyInstance, deps: ExpertRouteDeps
 
   app.post('/api/experts/:id/retire', async (req, reply) =>
     run(reply, async () => {
+      requireHiringPrincipal(req);
       await deps.store.load();
       const actor = hiringActor(req);
       const body = parseBody(RetireBodySchema, req.body);
