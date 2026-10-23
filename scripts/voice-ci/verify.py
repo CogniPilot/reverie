@@ -11,6 +11,21 @@ import wave
 
 from audio import check_duration, check_transcript, inspect_wav
 
+def check_synthesis_timing(event):
+    """The engine reports actual inference separately from client queue/request time."""
+    timing = event.get("timing", {})
+    if event.get("status") != "completed" or timing.get("status") != "completed":
+        raise ValueError("Synthesis did not complete normally")
+    keys = ["lockAttemptNs", "acquiredNs", "inferenceStartNs", "inferenceEndNs", "finishedNs"]
+    values = [timing.get(key) for key in keys]
+    if any(type(value) is not int or value < 0 for value in values):
+        raise ValueError("Missing synthesis queue/inference timing")
+    if values != sorted(values) or timing["inferenceEndNs"] <= timing["inferenceStartNs"]:
+        raise ValueError("Invalid synthesis queue/inference timing")
+    if not event["requestNs"] <= values[0] <= values[-1] <= event["responseNs"]:
+        raise ValueError("Synthesis timing is outside its request")
+
+
 
 def recognize(base, wav):
     request = urllib.request.Request(base + "/stt", data=wav, headers={"Content-Type": "audio/wav"})
@@ -60,6 +75,8 @@ def main():
             raise ValueError("Synth requests changed effective voice/provider")
         if any(e["responseNs"] <= e["requestNs"] for e in events):
             raise ValueError("Missing synth request/response timing")
+        for event in events:
+            check_synthesis_timing(event)
         # A self-consistent, valid WAV that ends at 10 seconds must fail duration
         # AND actual ASR content acceptance, rather than just a corrupt header test.
         with wave.open(str(root / "speak.wav"), "rb") as source:

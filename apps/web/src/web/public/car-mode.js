@@ -237,6 +237,96 @@ const CAR_TEAM_PLAY_MS = 60_000;
 /** No playback progress this long after the stream stalls: give the line to the phone. */
 const CAR_TEAM_STALL_MS = 10_000;
 
+/** One bounded request lane per chat app; cancelled work cannot overlap its replacement. */
+class CarSynthesisQueue {
+  constructor(deps = {}) {
+    this.now = deps.now || (() => globalThis.performance?.now() ?? Date.now());
+    this.set = deps.setTimeout || ((callback, ms) => globalThis.setTimeout(callback, ms));
+    this.clear = deps.clearTimeout || ((timer) => globalThis.clearTimeout(timer));
+    this.queue = [];
+    this.active = null;
+  }
+  run(work, owner, valid, report) {
+    if (this.queue.length >= 32) {
+      report?.({ status: 'refused', queueMs: 0, requestMs: 0, requestStartMs: null, requestEndMs: null });
+      return Promise.resolve(null);
+    }
+    return new Promise((resolve) => {
+      const item = { work, owner, valid, report, resolve, queued: this.now(), started: null, settled: false };
+      item.timer = this.set(() => {
+        this.queue = this.queue.filter((value) => value !== item);
+        this._settle(item, null, 'deadline');
+        // An HTTP timeout/cancel is not proof the model stopped. Keep the lane
+        // until the actual request settles; never start overlapping replacement work.
+      }, CAR_TEAM_FETCH_MS);
+      this.queue.push(item);
+      this._pump();
+    });
+  }
+  _settle(item, result, status) {
+    if (item.settled) return;
+    const end = this.now();
+    // Timers may be delayed behind promise callbacks; completion must obey the
+    // original queue-plus-request deadline regardless of callback delivery order.
+    if (status === 'completed' && end - item.queued >= CAR_TEAM_FETCH_MS) {
+      status = 'deadline';
+      result = null;
+    }
+    item.settled = true;
+    this.clear(item.timer);
+    item.report?.({
+      status,
+      queueMs: (item.started ?? end) - item.queued,
+      requestMs: item.started === null ? 0 : end - item.started,
+      requestStartMs: item.started,
+      requestEndMs: item.started === null ? null : end,
+    });
+    item.resolve(result);
+  }
+  cancel(owner) {
+    this.queue = this.queue.filter((item) => {
+      if (item.owner !== owner) return true;
+      this._settle(item, null, 'cancelled');
+      return false;
+    });
+    if (this.active?.owner === owner) this._settle(this.active, null, 'cancelled');
+  }
+  _pump() {
+    if (this.active) return;
+    const item = this.queue.shift();
+    if (!item) return;
+    if (!item.valid() || this.now() - item.queued >= CAR_TEAM_FETCH_MS) {
+      this._settle(item, null, item.valid() ? 'deadline' : 'cancelled');
+      this._pump();
+      return;
+    }
+    this.active = item;
+    Promise.resolve()
+      .then(() => {
+        const remaining = CAR_TEAM_FETCH_MS - (this.now() - item.queued);
+        if (!item.valid() || item.settled || remaining <= 0) {
+          this._settle(item, null, item.valid() ? 'deadline' : 'cancelled');
+          return null;
+        }
+        item.started = this.now();
+        return item.work(remaining);
+      })
+      .then(
+        (result) =>
+          this._settle(
+            item,
+            item.valid() ? result : null,
+            item.valid() ? (result ? 'completed' : 'unavailable') : 'cancelled'
+          ),
+        () => this._settle(item, null, 'unavailable')
+      )
+      .finally(() => {
+        this.active = null;
+        this._pump();
+      });
+  }
+}
+
 /** Reply batches use one server voice, or replay in full on one fixed device voice. */
 class CarServerSynth {
   constructor(deps) {
@@ -244,6 +334,8 @@ class CarServerSynth {
     this.queue = [];
     this.current = null;
     this.gen = 0;
+    this.requests = deps.requests || new CarSynthesisQueue(deps);
+    this.requestOwners = new Set();
   }
   get speaking() {
     return this.current !== null;
@@ -271,21 +363,23 @@ class CarServerSynth {
   }
   speakReply(utterances) {
     const phoneVoice = this.deps.phoneVoice ? this.deps.phoneVoice() : utterances[0]?.voice;
-    const items = utterances.map((u) => {
-      let audio;
-      try {
-        audio = Promise.resolve(this.deps.fetchAudio(u.text, u)).catch(() => null);
-      } catch {
-        audio = Promise.resolve(null);
-      }
-      return { u, audio: this._within(audio, CAR_TEAM_FETCH_MS, null) };
-    });
+    const gen = this.gen, requestOwner = {};
+    const items = utterances.map(u => ({
+      u,
+      audio: this.requests.run(
+        remaining => this.deps.fetchAudio(u.text, u, remaining), requestOwner,
+        () => gen === this.gen, info => this.deps.onSynthesis?.(info)
+      ),
+    }));
     if (!items.length) return;
-    this.queue.push({ items, phoneVoice, index: 0 });
+    this.requestOwners.add(requestOwner);
+    this.queue.push({ items, phoneVoice, requestOwner, index: 0 });
     if (!this.current) void this._next();
   }
   cancel() {
     this.gen++;
+    for (const owner of this.requestOwners) this.requests.cancel(owner);
+    this.requestOwners.clear();
     this.queue = [];
     this.current = null;
     this.deps.stop();
@@ -326,6 +420,7 @@ class CarServerSynth {
     }
     if (reason) {
       // Never splice a different voice into the remaining sentences. Start the reply over.
+      this.requests.cancel(batch.requestOwner);
       this.deps.stop();
       if (gen !== this.gen) return;
       const choice = {
@@ -353,6 +448,7 @@ class CarServerSynth {
         }
       }
     }
+    this.requestOwners.delete(batch.requestOwner);
     this.current = null;
     try {
       for (const { u } of batch.items) {
@@ -1102,11 +1198,14 @@ Object.assign(ReverieApp.prototype, {
     const stopPhone = () => {
       if (synth.speaking || synth.pending) synth.cancel();
     };
+    this._carSynthesisQueue ||= new CarSynthesisQueue();
     return new CarServerSynth({
+      requests: this._carSynthesisQueue,
+      onSynthesis: info => diag('team:synthesis', info),
       phoneVoice: () => carModeFallbackVoice(synth.getVoices?.() || [], this._carSavedVoice(this._carVoiceMember()?.sessionId)),
       resolvePhoneVoice: (choice, fallback) => (choice?.provider === 'browser' ? synth.getVoices?.().find(voice => voice.voiceURI === choice.id || voice.name === choice.id) : null) || fallback,
       onVoice: info => { diag('team:voice', info); this._carVoiceNotice(info); },
-      fetchAudio: async (text, utterance) => {
+      fetchAudio: async (text, utterance, remaining = CAR_TEAM_FETCH_MS) => {
         const member = this._carVoiceMember();
         if (!member) return null;
         const started = globalThis.performance?.now?.() ?? Date.now();
@@ -1115,7 +1214,7 @@ Object.assign(ReverieApp.prototype, {
         const res = await this._chatApi('/api/voice/speak', {
           method: 'POST',
           body: { room: this._chatRoomId, member: member.sessionId, text },
-          signal: AbortSignal.timeout?.(CAR_TEAM_FETCH_MS),
+          signal: AbortSignal.timeout?.(Math.max(1, Math.ceil(remaining))),
         });
         diag('team:speak', { ...link, ok: res.ok, engine: res.data?.engine, voice: res.data?.voice?.id,
           chars: text.length, audioUrl: res.data?.audioUrl,
