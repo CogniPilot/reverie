@@ -166,7 +166,7 @@ class BuildEnvTests(unittest.TestCase):
         self.assertEqual(ledger_estimate(ledger, "tiny", build, 1), 256 * MiB)        # a peak of 0 never admits 0
         with self.assertRaises(SystemExit):
             main(["--project", "fresh", "--repo", str(self.repo), "--expect", "auto", "--disk", "1M",
-                  "--ledger", str(ledger), "--", "true"])
+                  "--scratch", str(self.scratch), "--ledger", str(ledger), "--", "true"])
 
     def test_unreadable_cgroup_baseline_records_null_delta(self):
         for name in ("memory.max", "memory.current", "memory.stat"): (self.cgroup / name).unlink()
@@ -258,7 +258,7 @@ class BuildEnvTests(unittest.TestCase):
         out, err = io.TextIOWrapper(io.BytesIO()), io.TextIOWrapper(io.BytesIO())
         with mock.patch.object(reverie.buildenv, "run", isolated), redirect_stdout(out), redirect_stderr(err):
             code = main(["--project", "demo", "--repo", str(self.repo), "--expect", "100M", "--disk", "1M",
-                         "--ledger", str(ledger)] + list(argv))
+                         "--scratch", str(self.scratch), "--ledger", str(ledger)] + list(argv))
         out.flush(); err.flush()
         return code, out.buffer.getvalue(), err.buffer.getvalue(), json.loads(ledger.read_text().splitlines()[-1])
 
@@ -272,6 +272,14 @@ class BuildEnvTests(unittest.TestCase):
         self.assertEqual(json.loads(out.decode().splitlines()[-1]), entry)          # the JSON line stays last
         self.assertIn(b"Test Files", out); self.assertIn(b"vitest stderr line", err)  # child output still streams
         self.assertEqual(out.count(b"x" * 99 + b"\n"), 1024)                        # all of it, not just the tail
+
+    def test_cli_helper_uses_its_scratch_when_the_host_default_is_unavailable(self):
+        unavailable = Path(self.temp.name) / "unavailable-host-scratch"
+        unavailable.write_text("not a directory")
+        with mock.patch.object(reverie.buildenv, "SCRATCH", unavailable):
+            code, _, err, entry = self.cli("--", sys.executable, "-c", "print('fixture')")
+        self.assertEqual((code, entry["status"]), (0, "ok"))
+        self.assertEqual(err, b"")
 
     def test_expect_files_met_keeps_the_childs_result(self):
         vitest = self.vitest_repo()
@@ -345,12 +353,54 @@ class BuildEnvTests(unittest.TestCase):
         self.assertEqual((code, entry["status"], set(entry)), (5, "failed", LEDGER_FIELDS))
         self.assertEqual(err, b"")
 
+    def runner_cli(self, scratch, command):
+        # Exercise real preflight, child process, watchdog and ledger; only the
+        # cgroup/filesystem reserve are isolated from the developer's laptop.
+        def isolated(*args, **kw):
+            return run(*args, **dict(kw, cgroup=self.cgroup, disk_reserve=0))
+        with mock.patch.object(reverie.buildenv, "run", isolated), redirect_stdout(io.StringIO()):
+            return main(["--project", "runner", "--repo", str(self.repo),
+                         "--scratch", str(scratch), "--expect", "100M", "--disk", "1M",
+                         "--jobs", "1", "--", *command])
+
+    def test_cli_runner_scratch_executes_child_and_keeps_all_paths_in_selected_root(self):
+        (self.repo / "rust-toolchain.toml").unlink()
+        scratch = Path(self.temp.name) / "runner-temp" / "fresh-build"
+        self.assertFalse(scratch.exists())
+        probe = "import json,os,tempfile; f=tempfile.NamedTemporaryFile(); open('env.json','w').write(json.dumps(dict(os.environ), sort_keys=True)); open('temp-path','w').write(f.name)"
+        with mock.patch.object(reverie.buildenv, "SCRATCH", Path("/missing-laptop-only-scratch")):
+            code = self.runner_cli(scratch, [sys.executable, "-c", probe])
+        self.assertEqual(code, 0)
+        env = json.loads((self.repo / "env.json").read_text())
+        for name in ("CARGO_TARGET_DIR", "CARGO_HOME", "RUSTUP_HOME", "TMPDIR"):
+            self.assertTrue(Path(env[name]).is_relative_to(scratch), (name, env[name]))
+        self.assertTrue(Path((self.repo / "temp-path").read_text()).is_relative_to(scratch / "tmp"))
+        ledger = json.loads((scratch / "profiles" / "build-ledger.jsonl").read_text())
+        self.assertEqual((ledger["status"], ledger["exit"]), ("ok", 0))
+        self.assertTrue((scratch / "build" / "runner" / ".build.lock").exists())
+
+    def test_cli_runner_scratch_does_not_bypass_memory_admission(self):
+        (self.repo / "rust-toolchain.toml").unlink()
+        self.memory(used=3500 * MiB)
+        scratch = Path(self.temp.name) / "runner-refused"
+        code = self.runner_cli(scratch, [sys.executable, "-c", "open('ran','w')"])
+        self.assertEqual(code, EX_TEMPFAIL)
+        self.assertFalse((self.repo / "ran").exists())
+
+    def test_cli_bad_scratch_refuses_before_starting_child(self):
+        scratch = Path(self.temp.name) / "not-a-directory"
+        scratch.write_text("file")
+        with self.assertRaises(SystemExit) as caught, redirect_stderr(io.StringIO()):
+            self.runner_cli(scratch, [sys.executable, "-c", "open('ran','w')"])
+        self.assertEqual(caught.exception.code, 2)
+        self.assertFalse((self.repo / "ran").exists())
+
     def test_cli_requires_estimates_and_exits_tempfail_when_refused(self):
-        with self.assertRaises(SystemExit): main(["--project", "demo", "--", "true"])        # no --expect/--disk
+        with self.assertRaises(SystemExit): main(["--project", "demo", "--scratch", str(self.scratch), "--", "true"])  # no --expect/--disk
         isolated = lambda *a, **kw: run(*a, **dict(kw, scratch=self.scratch, rust_cache=self.cache, cgroup=self.cgroup))
         with mock.patch("reverie.buildenv.run", side_effect=isolated):
             code = main(["--project", "demo", "--repo", str(self.repo), "--expect", "1G", "--disk", "1000000G",
-                         "--ledger", str(self.scratch / "l.jsonl"), "--", "true"])
+                         "--scratch", str(self.scratch), "--ledger", str(self.scratch / "l.jsonl"), "--", "true"])
         self.assertEqual(code, EX_TEMPFAIL)
 
 

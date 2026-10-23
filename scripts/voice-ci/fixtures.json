@@ -1,0 +1,14 @@
+{
+  "voice": "am_michael",
+  "input": "Please read the complete travel checklist.",
+  "reply": "Before we leave, check that the windows are closed and the lights are off. The route follows the river, crosses the old bridge, and continues past the station. We have enough time to drive slowly, listen carefully, and hear this complete reply without any interruption. The final words of this recording are silver meadow lantern.",
+  "durationSeconds": { "min": 18, "max": 40 },
+  "requiredEnding": "silver meadow lantern",
+  "maxWordErrorRate": 0.18,
+  "budgetsMs": {
+    "speak": 20000,
+    "turn": 90000,
+    "audioFetch": 15000,
+    "playbackOverhead": 10000
+  }
+}
