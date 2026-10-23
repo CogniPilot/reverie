@@ -207,6 +207,75 @@ def account_mounts(config, environment):
     return [arg for destination, source in mounts.items() for arg in ['--mount', f'type=bind,src={source},dst={destination}']]
 
 
+PLAN_DECISION = re.compile(r"^/api/plans/requests/([a-zA-Z0-9][a-zA-Z0-9_-]{0,99})/(approve|reject)$")
+
+
+def office_plan_approval(company_root, session_id, path, method, query, body):
+    """Attach only this office's one-time credential; never deliver it to a guest.
+
+    The console remains authoritative for binding, expiry, authorization and replay.
+    All path components are opened no-follow; refusals contain no path or credential.
+    """
+    match = PLAN_DECISION.fullmatch(path)
+    if match is None:
+        return None
+    if method != 'POST' or query or not SESSION.fullmatch(session_id) or len(body) > 64*1024:
+        raise ValueError('Plan approval refused')
+
+    def unique(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError('Plan approval refused')
+            result[key] = value
+        return result
+
+    payload = json.loads(body.decode('utf-8'), object_pairs_hook=unique)
+    request_id, decision = match.groups()
+    if not isinstance(payload, dict) or set(payload) != ({'handoff'} if decision == 'approve' else set()):
+        raise ValueError('Plan approval refused')
+    if decision == 'approve':
+        handoff = payload['handoff']
+        if not isinstance(handoff, str) or not 1 <= len(handoff.strip()) <= 12000 or re.search(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', handoff):
+            raise ValueError('Plan approval refused')
+    root = Path(company_root)
+    if not root.is_absolute() or '..' in root.parts:
+        raise ValueError('Plan approval refused')
+    directory_flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+    directory = os.open('/', directory_flags)
+    handle = None
+    try:
+        # The host configuration chooses company_root, never the request or guest.
+        for component in root.parts[1:]:
+            child = os.open(component, directory_flags, dir_fd=directory)
+            os.close(directory)
+            directory = child
+        for component in ['console', 'plan-request-capabilities', session_id]:
+            child = os.open(component, directory_flags, dir_fd=directory)
+            os.close(directory)
+            directory = child
+            info = os.fstat(directory)
+            if info.st_uid != os.getuid() or info.st_mode & 0o077:
+                raise ValueError('Plan approval refused')
+        handle = os.open(request_id+'.json', os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory)
+        info = os.fstat(handle)
+        if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or info.st_uid != os.getuid() or info.st_mode & 0o077 or info.st_size > 4096:
+            raise ValueError('Plan approval refused')
+        raw = os.read(handle, 4097)
+        after = os.fstat(handle)
+        if len(raw) > 4096 or (info.st_size, info.st_mtime_ns, info.st_ctime_ns) != (after.st_size, after.st_mtime_ns, after.st_ctime_ns):
+            raise ValueError('Plan approval refused')
+        value = json.loads(raw.decode('utf-8'), object_pairs_hook=unique)
+        if not isinstance(value, dict) or set(value) != {'requestId', 'sessionId', 'nonce'} or value['requestId'] != request_id or value['sessionId'] != session_id or not isinstance(value['nonce'], str) or not re.fullmatch(r'[a-f0-9]{64}', value['nonce']):
+            raise ValueError('Plan approval refused')
+        payload['nonce'] = value['nonce']
+        return json.dumps(payload, separators=(',', ':'), ensure_ascii=False).encode('utf-8')
+    finally:
+        if handle is not None:
+            os.close(handle)
+        os.close(directory)
+
+
 class OfficeAPI:
     """A laptop's office phone: fixed identity and upstream, bounded HTTP only."""
     slots = threading.BoundedSemaphore(32)
@@ -240,7 +309,15 @@ class OfficeAPI:
                     host_path = parsed.path == '/api/host-actions' or parsed.path.startswith('/api/host-actions/')
                     if host_path and (length > 16*1024 or parsed.query or len(self.headers.get_all('Content-Length',[]))>1):
                         self.send_error(400); return
+                    if PLAN_DECISION.fullmatch(parsed.path) and length > 64*1024:
+                        self.send_error(413); return
                     body = self.rfile.read(length)
+                    try:
+                        approval = office_plan_approval(company_root, session_id, parsed.path, self.command, parsed.query, body)
+                    except (OSError, ValueError, UnicodeError):
+                        self.send_error(403, 'Plan approval unavailable; check request and owner authorization'); return
+                    if approval is not None:
+                        body = approval
                     if host_path:
                         if host_actions is None:
                             self.send_error(503); return
