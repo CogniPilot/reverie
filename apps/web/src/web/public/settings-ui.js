@@ -12,6 +12,31 @@
  */
 
 Object.assign(ReverieApp.prototype, {
+  async officePower(action) {
+    if (this._officePowerPending) return;
+    this._officePowerPending = true;
+    const output = document.getElementById('officePowerResult');
+    const say = text => { if (output) { output.textContent = text; output.style.display = 'block'; } };
+    try {
+      const statusResponse = await this._api('/api/system/laptops');
+      const status = await statusResponse.json();
+      if (!statusResponse.ok || !status.data?.available) { say('Laptop power controls are unavailable.'); return; }
+      const count = status.data.runningLaptops;
+      const message = action === 'restart-website'
+        ? `Restart the website? ${count} laptop(s) will keep working and may continue using their plans. Chat will briefly go offline. Laptops stop after 10 minutes if the office API does not return.`
+        : action === 'shutdown'
+          ? `Stop Reverie? All ${count} laptop(s) and agent CLIs will stop before the website shuts down. Files will be preserved. Restart Reverie from the host when you are ready.`
+          : `Stop all ${count} laptop(s) and agent CLIs? The website will stay open. Files will be preserved.`;
+      if (!window.confirm(message)) return;
+      say('Applying office power action…');
+      const response = await this._api('/api/system/' + action, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ confirmed: true }) });
+      const result = await response.json();
+      if (!response.ok || !result.success) { say(result.error || 'The power action failed.'); return; }
+      say(action === 'shutdown' ? 'All laptops stopped. Reverie is shutting down.' : action === 'stop-laptops' ? 'All laptops stopped. The website is still open.' : 'Website restarting. Your agents are continuing on their laptops.');
+    } catch { say('Could not confirm the power action. Check the host before assuming agents have stopped.'); }
+    finally { this._officePowerPending = false; }
+  },
+
   // Hooks (Claude Code hook events)
   _onHookIdlePrompt(data) {
     // A prompt the server opened ALREADY acknowledged raises no alert here. Today that
@@ -1226,6 +1251,8 @@ Object.assign(ReverieApp.prototype, {
     if (!group) return;
     const me = window.__reverieUser || {};
     group.style.display = me.multiUser && me.role !== 'admin' ? 'none' : '';
+    const power = document.getElementById('laptopPowerGroup');
+    if (power) power.style.display = group.style.display;
   },
 
   /**

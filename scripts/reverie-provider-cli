@@ -22,12 +22,17 @@ if [ "$provider" = codex ] && [ "${1:-}" = update ]; then
   exit 2
 fi
 
+provider_binary=$provider_prefix/bin/$provider
+# Discovery polls must not enqueue installers behind a long preparation. Report
+# the installed binary's actual version; real launches still verify the pin.
+if [ "${1:-}" = --version ] && [ "$#" = 1 ] && [ -x "$provider_binary" ]; then
+  exec "$provider_binary" "$@"
+fi
 if [ "${REVERIE_INSTALL_CLIS:-}" != none ]; then
   # Ignore stdin while waiting/installing: bootstrap input belongs to the eventual CLI composer.
   REVERIE_INSTALL_CLIS="$provider" REVERIE_CLI_INSTALL_WAIT=1 REVERIE_CLI_INSTALL_REQUIRED=1 \
     "$installer" </dev/null >&2
 fi
-provider_binary=$provider_prefix/bin/$provider
 if [ ! -x "$provider_binary" ]; then
   printf 'Reverie: %s is unavailable. Run reverie-install-clis, then retry.\n' "$provider" >&2
   exit 127

@@ -347,3 +347,43 @@ it('shows saved Sleep/Dream preferences and lets the owner change them during va
   sleep.checked = false; dream.checked = true; save.click(); await handle.flush();
   expect(writes).toEqual([{ sleepEnabled: false, dreamEnabled: true }]);
 });
+
+it('autosaves Sleep/Dream separately for every expert and restores saved values when Company is reopened', async () => {
+  const { handle, company } = await fixture([{ id: 'second', sessionId: 'second-session', name: 'Second', reportsTo: 'owner' }]);
+  company.canManage = true;
+  const writes: any[] = [];
+  handle.app._chatApi = async (path: string, options: any) => {
+    if (path === '/api/company') return { ok: true, data: structuredClone(company) };
+    if (path === '/api/chatrooms/phone-status') return { ok: true, data: { self: 'owner', canSetOwn: true } };
+    const target = company.employees.find(e => path === '/api/company/employees/' + e.id);
+    if (target && options?.method === 'PUT') { writes.push(options.body); Object.assign(target, options.body); return { ok: true, data: { employee: target } }; }
+    return { ok: true, data: {} };
+  };
+  await handle.shell.openCompany();
+  for (const employee of company.employees) {
+    const card = handle.document.querySelector(`[data-employee-id="${employee.id}"].ca-company-person`)!;
+    for (const key of ['sleepEnabled', 'dreamEnabled']) {
+      (card.querySelector(`[name="${key}"]`) as HTMLInputElement).click();
+      await handle.flush();
+    }
+    expect(card.textContent).toContain('Sleep/Dream saved.');
+  }
+  expect(writes).toHaveLength(4);
+  expect(writes.every(body => Object.keys(body).sort().join() === 'dreamEnabled,sleepEnabled')).toBe(true);
+  handle.shell.closePage(); await handle.shell.openCompany();
+  expect([...handle.document.querySelectorAll<HTMLInputElement>('.ca-company-person [name="sleepEnabled"], .ca-company-person [name="dreamEnabled"]')].every(input => input.checked)).toBe(true);
+});
+
+it('restores Sleep/Dream after a refused autosave and shows the error on the affected card', async () => {
+  const { handle, company } = await fixture(); company.canManage = true;
+  handle.app._chatApi = async (path: string, options: any) => {
+    if (path === '/api/company') return { ok: true, data: company };
+    if (path === '/api/chatrooms/phone-status') return { ok: true, data: { self: 'owner', canSetOwn: true } };
+    return options?.method === 'PUT' ? { ok: false, error: 'Save refused' } : { ok: true, data: {} };
+  };
+  await handle.shell.openCompany();
+  const sleep = handle.document.querySelector<HTMLInputElement>('.ca-company-person [name="sleepEnabled"]')!;
+  sleep.click(); await handle.flush();
+  expect(sleep.checked).toBe(false); expect(sleep.disabled).toBe(false);
+  expect(handle.document.querySelector('.ca-company-person')!.textContent).toContain('Could not save Sleep/Dream: Save refused');
+});

@@ -1,4 +1,9 @@
-# Proposed GPU access at the next scheduled recreation
+# Historical GPU proposal
+
+Superseded by [the opt-in Nix worker browser capability](worker-gpu.md). The
+proposal below records earlier review constraints; its Podman and Debian package
+assumptions do not describe the current Docker/Nix worker image. Follow the new
+document for implementation and pending acceptance.
 
 Status: design for review. No GPU devices, host driver configuration, container
 flags, model-server settings, or GPU admission policy have been changed.

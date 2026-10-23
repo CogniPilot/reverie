@@ -77,7 +77,7 @@ test('provider launch waits behind a blocked real installer and executes only th
     writeFileSync(join(tools, 'bin/codex'), `#!${process.execPath}\nrequire('node:fs').writeFileSync(${JSON.stringify(oldStarted)},'wrong old version executed');process.exit(43);\n`, { mode: 0o700 });
     installing = spawn(process.execPath, [resolve('scripts/reverie-install-clis.mjs')], { env: { ...f.env, REVERIE_INSTALL_CLIS: 'codex', INSTALL_BARRIER: barrier }, stdio: ['ignore', 'pipe', 'pipe'] });
     const installed = completion(installing); await until(() => existsSync(barrier + '.started'));
-    launching = guarded(f, ['--version']); const launched = completion(launching);
+    launching = guarded(f, ['--model', 'reviewed-model', '--version']); const launched = completion(launching);
     await pause(150); assert.equal(launching.exitCode, null); assert.equal(existsSync(oldStarted), false);
     writeFileSync(barrier + '.release', 'continue');
     assert.equal((await installed).status, 0);
@@ -94,6 +94,20 @@ test('a busy installer timeout is an error for required launches, never permissi
     const installed = completion(installing); await until(() => existsSync(barrier + '.started'));
     const result = await completion(guarded(f, [], { REVERIE_CLI_INSTALL_WAIT_SECONDS: '0.05' }));
     assert.equal(result.status, 75); assert.match(result.stderr, /timed out/);
+    writeFileSync(barrier + '.release', 'continue'); await installed;
+  } finally { writeFileSync(barrier + '.release', 'continue'); installing?.kill(); f.clean(); }
+});
+
+test('version discovery never queues preparation behind an installer lock', async () => {
+  const f = fixture(); let installing;
+  const barrier = join(f.root, 'barrier');
+  try {
+    assert.equal(f.run({ REVERIE_INSTALL_CLIS: 'codex' }).status, 0);
+    installing = spawn(process.execPath, [resolve('scripts/reverie-install-clis.mjs')], { env: { ...f.env, REVERIE_INSTALL_CLIS: 'claude', INSTALL_BARRIER: barrier }, stdio: ['ignore', 'pipe', 'pipe'] });
+    const installed = completion(installing); await until(() => existsSync(barrier + '.started'));
+    const result = await completion(guarded(f, ['--version'], { REVERIE_CLI_INSTALL_WAIT_SECONDS: '0.05' }));
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.stdout.trim(), '0.163.0');
     writeFileSync(barrier + '.release', 'continue'); await installed;
   } finally { writeFileSync(barrier + '.release', 'continue'); installing?.kill(); f.clean(); }
 });

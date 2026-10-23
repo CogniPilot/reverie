@@ -85,7 +85,10 @@ class ImageCheckTests(unittest.TestCase):
                  store + "reverie-request-update/bin/reverie-request-update",
                  store + "reverie-kokoro/bin/reverie-kokoro",
                  store + "reverie-model-relay/bin/reverie-model-relay",
-                 store + "reverie-hands/bin/reverie-hands"]
+                 store + "reverie-hands/bin/reverie-hands",
+                 store + "reverie-browser-runtime/bin/chromium",
+                 store + "reverie-browser-gpu-probe/bin/reverie-browser-gpu-probe",
+                 store + "reverie-browser-gpu-probe.mjs"]
         dependency = store + "reverie-install-clis-dependency/test.js"
         result = self.run_check([[(path, TOKEN.encode()) for path in owned + [dependency]]])
         self.assertEqual({finding["where"] for finding in result["findings"]},

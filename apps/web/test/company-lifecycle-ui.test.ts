@@ -55,7 +55,7 @@ async function setup({ verified = true, canManage = true, onVacation = false, ac
   if (!actualDialog) confirm.mockResolvedValue(true);
   await h.shell.openCompany('people');
   const button = (label: string) =>
-    h.document.querySelector(`.ca-company-person button[aria-label="${label}"]`) as HTMLButtonElement;
+    h.document.querySelector(`.ca-company-person [aria-label="${label}"]`) as HTMLButtonElement;
   const error = () => h.document.querySelector('.ca-company-person [role="alert"]')!.textContent;
   return {
     h,
@@ -80,8 +80,8 @@ it.each([{ verified: false }, { canManage: false }])(
 );
 
 it.each([
-  { onVacation: false, label: 'Send on vacation: River', meaning: 'pauses their session' },
-  { onVacation: true, label: 'Return from vacation: River', meaning: 'eligible for recovery again' },
+  { onVacation: false, label: 'Leave office: River', meaning: 'stops their session' },
+  { onVacation: true, label: 'Enter office: River', meaning: 'eligible for recovery again' },
   { onVacation: false, label: 'Retire River', meaning: 'keeping their identity in chat history' },
 ])('names the expert and explains $label before any change', async ({ onVacation, label, meaning }) => {
   const { h, button, confirm, calls } = await setup({ onVacation });
@@ -95,7 +95,7 @@ it.each([
 
 it('pauses once, blocks competing actions, and refreshes vacation state and recovery controls', async () => {
   const { h, employee, button, calls, resolve } = await setup();
-  const pause = button('Send on vacation: River');
+  const pause = button('Leave office: River');
   const retire = button('Retire River');
   pause.click();
   await h.flush();
@@ -110,29 +110,31 @@ it('pauses once, blocks competing actions, and refreshes vacation state and reco
   employee.available = false;
   resolve({ ok: true, data: { employee } });
   await h.flush();
-  expect(h.document.querySelector('.ca-company-state')!.textContent).toBe('On vacation');
-  expect(button('Return from vacation: River')).not.toBeNull();
+  expect(h.document.querySelector('.ca-company-state')!.textContent).toBe('Out of office');
+  expect(button('Enter office: River')).not.toBeNull();
+  expect((button('Enter office: River') as unknown as HTMLInputElement).checked).toBe(false);
   expect(h.document.querySelector('[aria-label="Recovery permission for River"]')!.disabled).toBe(true);
   const choices = h.document.querySelector('[aria-label="Wake after a crash"]')!;
   expect([...choices.options].map((option: any) => option.value)).not.toContain(employee.id);
   expect(choices.textContent).not.toContain('Automatic: River');
-  expect(h.document.querySelector('.ca-company > [role="status"]')!.textContent).toBe('River is on vacation.');
+  expect(h.document.querySelector('.ca-company > [role="status"]')!.textContent).toBe('River is out of office.');
 });
 
 it('returns the same expert to active status and recovery eligibility', async () => {
   const { h, employee, button, calls, resolve } = await setup({ onVacation: true });
-  button('Return from vacation: River').click();
+  button('Enter office: River').click();
   await h.flush();
   expect(calls[0]).toMatchObject({ path: '/api/company/employees/expert%2Fone/vacation', body: { enabled: false } });
   employee.onVacation = false;
   resolve({ ok: true, data: { employee } });
   await h.flush();
-  expect(button('Send on vacation: River')).not.toBeNull();
+  expect(button('Leave office: River')).not.toBeNull();
+  expect((button('Leave office: River') as unknown as HTMLInputElement).checked).toBe(true);
   expect(h.document.querySelector('[aria-label="Recovery permission for River"]')!.disabled).toBe(false);
   expect(
     [...h.document.querySelector('[aria-label="Wake after a crash"]')!.options].map((option: any) => option.value)
   ).toContain(employee.id);
-  expect(h.document.querySelector('.ca-company > [role="status"]')!.textContent).toBe('River returned from vacation.');
+  expect(h.document.querySelector('.ca-company > [role="status"]')!.textContent).toBe('River is in the office.');
 });
 
 it('retirement reuses the endpoint and removes the expert only after server success', async () => {
@@ -166,25 +168,26 @@ it('surfaces server refusal and permits retry without changing the roster', asyn
 
 it('reports a network failure and restores controls for another attempt', async () => {
   const { h, button, error, reject } = await setup();
-  button('Send on vacation: River').click();
+  button('Leave office: River').click();
   await h.flush();
   reject();
   await h.flush();
   expect(error()).toBe('Could not update River. Try again.');
-  expect(button('Send on vacation: River').disabled).toBe(false);
+  expect(button('Leave office: River').disabled).toBe(false);
+  expect((button('Leave office: River') as unknown as HTMLInputElement).checked).toBe(true);
   expect(h.document.querySelector('.ca-company-state')!.textContent).toBe('Connected');
 });
 
 it('does not offer to repeat a saved change when the subsequent refresh fails', async () => {
   const { h, button, calls, resolve } = await setup();
   vi.spyOn(h.shell, 'loadOwner').mockRejectedValueOnce(new Error('Refresh failed'));
-  const pause = button('Send on vacation: River');
+  const pause = button('Leave office: River');
   pause.click();
   await h.flush();
   resolve({ ok: true, data: {} });
   await h.flush();
   expect(h.document.querySelector('.ca-company > [role="status"]')!.textContent).toBe(
-    'River is on vacation. The view could not refresh. Reopen Company to see the updated roster.'
+    'River is out of office. The view could not refresh. Reopen Company to see the updated roster.'
   );
   expect(pause.disabled).toBe(true);
   pause.dispatchEvent(new h.window.Event('click'));
@@ -204,8 +207,8 @@ it('surfaces incomplete room cleanup after successful retirement', async () => {
 });
 
 it.each([
-  { onVacation: false, action: 'Send on vacation: River', confirmLabel: 'Send on vacation' },
-  { onVacation: true, action: 'Return from vacation: River', confirmLabel: 'Return from vacation' },
+  { onVacation: false, action: 'Leave office: River', confirmLabel: 'Leave office' },
+  { onVacation: true, action: 'Enter office: River', confirmLabel: 'Enter office' },
   { onVacation: false, action: 'Retire River', confirmLabel: 'Retire' },
 ])(
   'uses an in-app dialog for $confirmLabel with Cancel focused and no native prompt',
@@ -234,13 +237,13 @@ it.each([
 
 it('guards competing actions before awaiting confirmation and sends only after one explicit acceptance', async () => {
   const { h, button, calls, resolve, nativeConfirm } = await setup({ actualDialog: true });
-  const pause = button('Send on vacation: River');
+  const pause = button('Leave office: River');
   pause.click();
   pause.dispatchEvent(new h.window.Event('click'));
   button('Retire River').dispatchEvent(new h.window.Event('click'));
   expect(h.document.querySelectorAll('.ca-company-confirm')).toHaveLength(1);
   expect(calls).toHaveLength(0);
-  const accept = h.document.querySelector('.ca-company-confirm [aria-label="Send on vacation"]')!;
+  const accept = h.document.querySelector('.ca-company-confirm [aria-label="Leave office"]')!;
   accept.click();
   accept.dispatchEvent(new h.window.Event('click'));
   await h.flush();

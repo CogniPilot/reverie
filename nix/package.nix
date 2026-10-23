@@ -50,7 +50,7 @@ let
         test/company-settings-ui.test.ts test/chat-app-dom.test.ts test/cli-config-content.test.ts \
         test/session-runtime.test.ts test/company-runtime-ui.test.ts test/opencode-subscription-auth.test.ts \
         test/selected-claude-profile.test.ts \
-        test/managed-codex-trust.test.ts test/full-access-default.test.ts \
+        test/managed-codex-trust.test.ts test/full-access-default.test.ts test/worker-execution.test.ts test/laptop-power.test.ts \
         test/expert-runtime-recipe.test.ts test/company-employee-restart.test.ts test/company-restart-ui.test.ts test/routes/session-mode-switch.test.ts \
         test/claude-plan-usage.test.ts test/claude-usage-display.test.ts test/subscription-usage.test.ts test/plan-usage-compliance.test.ts test/plan-pace.test.ts \
         test/member-menu.test.ts test/render-index-html.test.ts test/asset-content-version.test.ts \
@@ -102,13 +102,26 @@ let
     runtimeInputs = [ pkgs.nodejs_22 ];
     text = ''exec node ${modelRelaySource} "$@"'';
   };
+  officeRelay = pkgs.writeShellApplication {
+    name = "reverie-office-relay";
+    runtimeInputs = [ pkgs.nodejs_22 ];
+    text = ''
+      exec node --input-type=module -e 'import {modelRelay} from "${modelRelaySource}"; const server=modelRelay("/run/reverie-office/office.sock",8093,"Reverie office connection is unavailable."); server.on("error",()=>process.exit(1));'
+    '';
+  };
   lockTools = pkgs.runCommand "reverie-lock-tools" { } ''
     mkdir -p "$out/bin"
     ln -s ${lib.getBin pkgs.util-linux}/bin/flock "$out/bin/flock"
   '';
+  workerExec = pkgs.writeShellScriptBin "reverie-worker-exec" ''
+    exec ${memory}/bin/python3 -m reverie.worker client "$@"
+  '';
+  workerChild = pkgs.writeShellScriptBin "reverie-worker-child" ''
+    exec ${memory}/bin/python3 -m reverie.worker child "$@"
+  '';
   runtime = pkgs.buildEnv {
     name = "reverie-runtime";
-    paths = [ console memory kokoro modelRelay hands pkgs.nodejs_22 pkgs.tmux pkgs.git pkgs.ripgrep
+    paths = [ console memory kokoro modelRelay officeRelay hands workerExec workerChild pkgs.nodejs_22 pkgs.tmux pkgs.git pkgs.ripgrep
       pkgs.curl pkgs.coreutils pkgs.bashInteractive pkgs.gnugrep pkgs.gnused
       pkgs.gawk pkgs.findutils pkgs.gnutar pkgs.gzip pkgs.procps pkgs.which pkgs.gnumake pkgs.gcc
       pkgs.cacert lockTools ] ++ providerLaunchers;

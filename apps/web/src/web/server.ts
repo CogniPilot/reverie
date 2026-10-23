@@ -3,6 +3,7 @@ import { withDelegatedSessionCreate } from '../owner-auth/delegated-session-crea
 import { agentPlanRequestExecution } from '../agent-plan-request.js';
 import { BuiltinEmbassy } from '../embassy-builtin.js';
 import { registerBuiltinEmbassyRoutes } from './routes/embassy-builtin-routes.js';
+import { registerLaptopPowerRoutes } from './routes/laptop-power-routes.js';
 import { employeeRestContext, employeeProfileContext, employeePlanContext } from '../company-types.js';
 import { expertRuntimeRecipe } from '../expert-runtime-recipe.js';
 import { AvatarStore } from '../agent-avatars.js';
@@ -1323,6 +1324,13 @@ export class WebServer extends EventEmitter {
       return [...new Set([...running, ...assigned])];
     });
     registerSystemRoutes(this.app, ctx);
+    registerLaptopPowerRoutes(this.app, {
+      stopIntent: async () => {
+        for (const employee of this.companyService?.registeredEmployees() ?? []) {
+          await this.companyService!.setDesiredRunning(employee.sessionId, false);
+        }
+      },
+    });
     registerCaseRoutes(this.app, ctx);
     // The registry's lifetime is the server's: it drops per-session wake state on every
     // cleanup path and resolves in-flight wakes on shutdown.

@@ -34,8 +34,9 @@ test('first start with an existing image contains company state, workspace and s
   const config = JSON.parse(readFileSync(join(f.deploy, 'deployment.json'), 'utf8'));
   assert.equal(config.companyRoot, join(f.deploy, 'companies/default'));
   assert.equal(config.scratch, join(f.deploy, 'scratch/agents'));
-  assert.ok(lstatSync(join(f.deploy, 'scratch')).isSymbolicLink());
+  assert.ok(lstatSync(join(f.deploy, 'scratch')).isDirectory());
   const command = f.calls().find(([tool, args]) => tool === 'docker' && args[0] === 'run')[1];
+  assert.ok(command.includes('--init'));
   for (const mount of [
     'type=bind,src=' + join(config.companyRoot, 'data') + ',dst=/instances/default',
     'type=bind,src=' + join(config.companyRoot, 'home') + ',dst=/home/agent',

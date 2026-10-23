@@ -2,14 +2,14 @@
 import http from 'node:http';
 import { lstat } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
-export function modelRelay(socketPath, port = 8092) {
+export function modelRelay(socketPath, port = 8092, unavailableMessage = 'Local model service is unavailable. Start reverie-local-model on the host.') {
   const server = http.createServer(async (request, response) => {
     try {
       const info = await lstat(socketPath);
       if (!info.isSocket() || info.isSymbolicLink() || (info.mode & 0o077)) throw new Error('Unavailable');
     } catch {
       response.writeHead(503, { 'Content-Type': 'application/json' });
-      response.end(JSON.stringify({ error: { message: 'Local model service is unavailable. Start reverie-local-model on the host.' } }));
+      response.end(JSON.stringify({ error: { message: unavailableMessage } }));
       return;
     }
     const headers = { ...request.headers, host: 'localhost' };
@@ -23,7 +23,7 @@ export function modelRelay(socketPath, port = 8092) {
     upstream.setTimeout(300000, () => upstream.destroy(new Error('Model request timed out')));
     upstream.on('error', () => {
       if (response.headersSent) response.destroy();
-      else { response.writeHead(503, { 'Content-Type': 'application/json' }); response.end('{"error":{"message":"Local model service is unavailable"}}'); }
+      else { response.writeHead(503, { 'Content-Type': 'application/json' }); response.end(JSON.stringify({ error: { message: unavailableMessage } })); }
     });
     request.on('aborted', () => upstream.destroy());
     request.on('error', () => upstream.destroy());

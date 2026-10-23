@@ -37,6 +37,7 @@ import { basename } from 'node:path';
 import { execSync, execFileSync } from 'node:child_process';
 import { v4 as uuidv4 } from 'uuid';
 import * as pty from 'node-pty';
+import { workerPtyCommand } from './worker-execution.js';
 import {
   SessionState,
   SessionStatus,
@@ -1699,7 +1700,8 @@ export class Session extends EventEmitter {
    * the check has run.
    */
   private _scheduleFullAccessCheck(pid: number | null | undefined, delayMs = Session.fullAccessCheckDelayMs): Promise<string[]> {
-    if (!pid || this._remote || this._docker || !fullAccessByDefault()) return Promise.resolve([]);
+    // Worker argv lives in a separate PID namespace, like remote/Docker sessions.
+    if (!pid || this._remote || this._docker || process.env.REVERIE_WORKER_SOCKET || !fullAccessByDefault()) return Promise.resolve([]);
     return new Promise((resolve) => {
       let retries = Session.fullAccessCheckRetries;
       const run = () => {
@@ -3211,6 +3213,9 @@ export class Session extends EventEmitter {
 
     // Fallback to direct PTY if mux is not used
     if (!this.ptyProcess) {
+      if (process.env.REVERIE_WORKER_SOCKET) {
+        throw new Error('Isolated sessions require the worker transport through tmux. Local fallback is disabled.');
+      }
       // Every external CLI requires tmux and has NO direct-PTY fallback, because its
       // secrets are injected with socket-scoped `tmux setenv` and so must never touch a
       // spawn command line. DeepSeek additionally needs it for the HERDR_* status-bridge
@@ -4122,6 +4127,9 @@ export class Session extends EventEmitter {
 
     // Fallback to direct PTY if mux is not used
     if (!this.ptyProcess) {
+      if (process.env.REVERIE_WORKER_SOCKET) {
+        throw new Error('Isolated sessions require the worker transport through tmux. Local fallback is disabled.');
+      }
       try {
         this.ptyProcess = spawnPtyWithHelperRepair(() =>
           pty.spawn(shell, [], {
@@ -4230,10 +4238,11 @@ export class Session extends EventEmitter {
         );
 
         const args = buildPromptArgs(prompt, model, this._claudeMode, this._allowedTools);
+        const launch = workerPtyCommand(getClaudeBinaryPath(), args, this.workingDir, this.id);
 
         try {
           this.ptyProcess = spawnPtyWithHelperRepair(() =>
-            pty.spawn(getClaudeBinaryPath(), args, {
+            pty.spawn(launch.binary, launch.args, {
               name: 'xterm-256color',
               cols: 120,
               rows: 40,

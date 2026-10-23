@@ -222,6 +222,7 @@ describe('WebServer.renderIndexHtml', () => {
       antigravity: false,
       pi: true,
       grok: false,
+      hands: false,
       deepseek: false,
       deepseekBinary: false,
       omp: true,
