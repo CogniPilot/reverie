@@ -11,6 +11,7 @@ import logging
 import os
 from pathlib import Path
 import threading
+import time
 import urllib.request
 import wave
 
@@ -100,7 +101,7 @@ class Engine:
             self.error = True
             LOG.exception("Kokoro could not start")
 
-    def synthesize(self, payload: dict) -> bytes:
+    def synthesize(self, payload: dict, *, timing: dict | None = None) -> bytes:
         import numpy as np
         if self.model is None:
             raise RuntimeError("Kokoro is unavailable" if self.error else "Kokoro is loading")
@@ -118,10 +119,16 @@ class Engine:
         if selected is None:
             raise ValueError("Unknown or unsupported voice")
         # A busy model returns immediately; do not accumulate speech after clients time out.
+        timing = timing if timing is not None else {}
+        timing["lockAttemptNs"] = time.monotonic_ns()
         if not self.lock.acquire(blocking=False):
+            timing.update(status="busy", finishedNs=time.monotonic_ns())
             raise RuntimeError("Kokoro is busy; try again")
+        timing.update(status="failed", acquiredNs=time.monotonic_ns())
         try:
+            timing["inferenceStartNs"] = time.monotonic_ns()
             samples, rate = self.model.create(text.strip(), voice=voice, speed=1.0, lang=selected["language"])
+            timing["inferenceEndNs"] = time.monotonic_ns()
             pcm = (np.clip(samples, -1, 1) * 32767).astype("<i2").tobytes()
             output = io.BytesIO()
             with wave.open(output, "wb") as audio:
@@ -129,8 +136,10 @@ class Engine:
                 audio.setsampwidth(2)
                 audio.setframerate(rate)
                 audio.writeframes(pcm)
+            timing["status"] = "completed"
             return output.getvalue()
         finally:
+            timing["finishedNs"] = time.monotonic_ns()
             self.lock.release()
 
 

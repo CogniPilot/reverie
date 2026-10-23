@@ -113,3 +113,22 @@ Likewise, Whisper establishes spoken content, not acoustic speaker identity.
 The artifacts contain synthetic WAVs, transcripts, per-utterance voice metadata,
 timings and a Playwright trace; model files and fixture-home state are excluded.
 Real phone autoplay, interruption and hardware behavior remain device checks.
+
+The car client shares one synthesis request lane per chat application, including
+replacement car screens. It permits at most 32 waiting requests and retains the
+existing 25-second queue-plus-request deadline; the production route still has
+its 20-second limit. A cancelled or expired queued operation never starts. An
+active operation drains before the lane is reused; cancellation is not a claim
+that remote inference stopped. There is no automatic retry on busy or deadline
+failure. Reply playback remains ordered, with complete-reply fallback and its
+visible notice.
+
+The CI speech adapter calls the production Engine directly for TTS, preserving
+its nonblocking busy refusal instead of adding a hidden serialization lock.
+Only ASR is serialized separately. Browser diagnostics record per-utterance
+queue and request times; `synth-events.jsonl` records engine lock-attempt,
+acquisition, inference start/end and completion times. All timestamps are
+monotonic within their own process, never subtracted across clock origins.
+Healthy-batch acceptance requires non-overlapping requests and complete timing;
+actual WAV, ASR, duration, voice and latency bounds remain unchanged. Portable
+busy/cancel/deadline controls do not establish real model performance.

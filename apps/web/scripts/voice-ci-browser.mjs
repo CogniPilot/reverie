@@ -296,6 +296,16 @@ try {
   assert.equal(healthy.selections.length, 0, 'Healthy server audio must not silently use device fallback');
   for (const event of healthy.diagnostics.filter((event) => event.event === 'team:speak'))
     assert.equal(event.info.voice, fixture.voice);
+  const synthesis = healthy.diagnostics.filter((event) => event.event === 'team:synthesis').map((event) => event.info);
+  assert.equal(synthesis.length, healthy.pieces.length, 'Every healthy utterance needs scheduling telemetry');
+  for (let i = 0; i < synthesis.length; i++) {
+    const item = synthesis[i];
+    assert.equal(item.status, 'completed');
+    for (const key of ['queueMs', 'requestMs', 'requestStartMs', 'requestEndMs'])
+      assert.ok(Number.isFinite(item[key]) && item[key] >= 0, `Missing synthesis ${key}`);
+    assert.ok(item.queueMs + item.requestMs <= 25_000, 'Synthesis exceeded its existing client deadline');
+    if (i) assert.ok(item.requestStartMs >= synthesis[i - 1].requestEndMs, 'Overlapping synthesis requests');
+  }
   playback.push({ name: 'batch', ...healthy });
   record('batch-complete');
   await drainRequests('batch');
