@@ -16,6 +16,7 @@ async function fixture() {
   return { root, capabilities, value, file: planRequestCapabilityFile('source', 'request', capabilities.root) };
 }
 afterEach(async () => {
+  vi.unstubAllEnvs();
   await Promise.all(directories.splice(0).map((path) => fs.rm(path, { recursive: true, force: true })));
 });
 
@@ -87,6 +88,62 @@ describe('private plan approval files and CLI', () => {
     deps.ctx.selfId = 'other';
     vi.mocked(deps.request).mockClear();
     expect(await agentPlanRequest(deps, { id: 'request', decision: 'reject' }, h.capabilities)).toBe(1);
+    expect(deps.request).not.toHaveBeenCalled();
+  });
+  it('uses the fixed office proxy with a handoff and no local credential or target override', async () => {
+    const h = await fixture();
+    const handoffFile = join(h.root, 'handoff');
+    await fs.writeFile(handoffFile, 'Checkpointed work.');
+    vi.stubEnv('REVERIE_WORKER', '1');
+    vi.stubEnv('REVERIE_DATA_DIR', join(h.root, 'separate-empty-laptop-store'));
+    const deps: AgentDeps = {
+      ctx: { selfId: 'source', apiUrl: 'http://fixture' },
+      json: true,
+      request: vi.fn(async () => ({ status: 202, json: { success: true, data: { phase: 'executing' } }, text: '' })),
+      io: { out: vi.fn(), err: vi.fn() },
+    };
+    expect(await agentPlanRequest(deps, { id: 'request', decision: 'approve', handoffFile })).toBe(0);
+    expect(deps.request).toHaveBeenCalledExactlyOnceWith(deps.ctx, {
+      method: 'POST',
+      path: '/api/plans/requests/request/approve',
+      body: { handoff: 'Checkpointed work.' },
+    });
+    expect(await agentPlanRequest(deps, { id: 'request', decision: 'reject' })).toBe(0);
+    expect(deps.request).toHaveBeenLastCalledWith(deps.ctx, {
+      method: 'POST',
+      path: '/api/plans/requests/request/reject',
+      body: {},
+    });
+    await expect(fs.stat(join(h.root, 'separate-empty-laptop-store'))).rejects.toThrow();
+  });
+  it('keeps office failures sanitized and never retries a rejected or uncertain decision', async () => {
+    const h = await fixture();
+    vi.stubEnv('REVERIE_WORKER', '1');
+    const deps: AgentDeps = {
+      ctx: { selfId: 'source', apiUrl: 'http://fixture' },
+      json: true,
+      request: vi.fn(async () => ({ status: 403, json: { error: 'private response' }, text: 'private response' })),
+      io: { out: vi.fn(), err: vi.fn() },
+    };
+    expect(await agentPlanRequest(deps, { id: 'request', decision: 'reject' })).toBe(1);
+    expect(deps.request).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(vi.mocked(deps.io.err).mock.calls)).not.toContain('private response');
+    vi.mocked(deps.request).mockClear().mockRejectedValue(new Error('private response'));
+    expect(await agentPlanRequest(deps, { id: 'request', decision: 'reject' })).toBe(1);
+    expect(deps.request).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(vi.mocked(deps.io.err).mock.calls)).not.toContain('private response');
+  });
+  it('refuses an unsafe office handoff before any request', async () => {
+    const h = await fixture();
+    vi.stubEnv('REVERIE_WORKER', '1');
+    const handoffFile = join(h.root, 'handoff');
+    await fs.writeFile(handoffFile, 'bad\x00handoff');
+    const deps: AgentDeps = {
+      ctx: { selfId: 'source', apiUrl: 'http://fixture' },
+      request: vi.fn(),
+      io: { out: vi.fn(), err: vi.fn() },
+    };
+    expect(await agentPlanRequest(deps, { id: 'request', decision: 'approve', handoffFile })).toBe(1);
     expect(deps.request).not.toHaveBeenCalled();
   });
   it('durably saves a bounded private request journal with no raw approval secret', async () => {
