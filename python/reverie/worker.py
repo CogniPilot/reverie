@@ -33,6 +33,7 @@ from urllib.parse import urlsplit
 
 if __package__:
     from .worker_gpu import gpu_create_args, validate_gpu_grants
+    from .worker_resources import effective_config, policy_digest, validate_session_resources, validate_resource_reload
 else:
     # Host migration tools also load this file with spec_from_file_location;
     # their sys.path need not contain the sibling module's directory.
@@ -42,6 +43,13 @@ else:
     _gpu_spec.loader.exec_module(_gpu_module)
     gpu_create_args = _gpu_module.gpu_create_args
     validate_gpu_grants = _gpu_module.validate_gpu_grants
+    _resource_spec = importlib.util.spec_from_file_location('reverie_worker_resources', Path(__file__).with_name('worker_resources.py'))
+    _resource_module = importlib.util.module_from_spec(_resource_spec)
+    _resource_spec.loader.exec_module(_resource_module)
+    effective_config = _resource_module.effective_config
+    policy_digest = _resource_module.policy_digest
+    validate_session_resources = _resource_module.validate_session_resources
+    validate_resource_reload = _resource_module.validate_resource_reload
 
 MAX_FRAME = 256 * 1024
 OFFLINE_GRACE_SECONDS = 600
@@ -99,9 +107,10 @@ def load_config(path):
         raise ValueError("Worker configuration must be an owner-only regular file")
     config = json.loads(path.read_text())
     required = {'version', 'deployment', 'image', 'serverContainer', 'socket', 'stateRoot', 'companyFile', 'companyRoot', 'scratchRoot', 'apiSocketRoot', 'budgetMode', 'uid', 'gid', 'memoryMiB', 'poolMemoryMiB', 'poolTasksMax', 'cgroupParent', 'pidsLimit', 'cpus', 'maxWorkers', 'mounts', 'maintenanceSessions'}
-    if not isinstance(config, dict) or set(config) - {'gpuGrants'} != required or config['version'] != 1:
+    if not isinstance(config, dict) or set(config) - {'gpuGrants','sessionResources'} != required or config['version'] != 1:
         raise ValueError("Unsupported worker configuration")
     validate_gpu_grants(config.get('gpuGrants', {}))
+    validate_session_resources(config)
     if not re.fullmatch(r'[a-z0-9][a-z0-9-]{0,39}', config['deployment']) or not re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9_.-]{0,62}', config['serverContainer']):
         raise ValueError("Invalid deployment identity")
     if not re.fullmatch(r'sha256:[a-f0-9]{64}', config['image']):
@@ -143,6 +152,7 @@ def load_config(path):
 
 
 def create_args(config, session_id, home):
+    config = effective_config(config, session_id)
     name = config['deployment'] + '-agent-' + session_id
     digest = hashlib.sha256(json.dumps(config, sort_keys=True).encode()).hexdigest()
     policy = hashlib.sha256(json.dumps({k: v for k, v in config.items() if k not in ['image', 'maintenanceSessions']}, sort_keys=True).encode()).hexdigest()
@@ -310,20 +320,21 @@ class Broker:
             raise RuntimeError('Worker engine operation failed: ' + args[0])
         return result
 
-    def check_pool(self, root=Path('/sys/fs/cgroup/reverie.slice/reverie-workers.slice')):
-        if self.config['budgetMode'] == 'admission':
-            if self.config['memoryMiB'] < 512:
+    def check_pool(self, root=Path('/sys/fs/cgroup/reverie.slice/reverie-workers.slice'), config=None, require_headroom=True):
+        config = self.config if config is None else config
+        if config['budgetMode'] == 'admission':
+            if config['memoryMiB'] < 512:
                 raise RuntimeError('An individual memory ceiling is required before admitting workers')
             return
         try:
             memory = (root / 'memory.max').read_text().strip()
             tasks = (root / 'pids.max').read_text().strip()
             current = int((root / 'pids.current').read_text())
-            if memory == 'max' or int(memory) > self.config['poolMemoryMiB'] * 1024 * 1024 or tasks == 'max' or int(tasks) > self.config['poolTasksMax']:
+            if memory == 'max' or int(memory) > config['poolMemoryMiB'] * 1024 * 1024 or tasks == 'max' or int(tasks) > config['poolTasksMax']:
                 raise ValueError
         except (OSError, ValueError):
-            raise RuntimeError('Activate the NixOS worker slice with its memory and task ceilings before starting isolated agents')
-        if int(tasks) - current < 64:
+            raise RuntimeError('Activate the owner-managed worker slice with its memory and task ceilings before starting isolated agents')
+        if require_headroom and int(tasks) - current < 64:
             raise RuntimeError('Worker pool has insufficient task headroom')
 
     def allowed(self, session_id):
@@ -373,7 +384,7 @@ class Broker:
             if SESSION.fullmatch(sid):
                 self.laptops[sid] = name
                 self.office(sid)
-        if len(self.laptops) > self.config['maxWorkers'] or (self.config['budgetMode'] == 'admission' and len(self.laptops)*self.config['memoryMiB'] > self.config['poolMemoryMiB']):
+        if len(self.laptops) > self.config['maxWorkers'] or (self.config['budgetMode'] == 'admission' and sum(effective_config(self.config,s)['memoryMiB'] for s in self.laptops if effective_config(self.config,s)['budgetMode']=='admission') > self.config['poolMemoryMiB']):
             raise RuntimeError('Running laptops exceed the configured admission budget')
 
     def stop_laptops(self):
@@ -401,9 +412,95 @@ class Broker:
         finally:
             self.draining.clear()
 
+    def check_creation_budget(self, session_id, resources, pool_root=Path('/sys/fs/cgroup/reverie.slice/reverie-workers.slice'), proc_root=Path('/proc')):
+        # Every create/recreate replaces only this target's reservation. Actual
+        # running peer ceilings, not requested configs or tracking membership,
+        # determine how much of the owner budget is already reserved.
+        listed=set(self.run_engine(['ps','--filter','label=reverie.worker='+self.config['deployment'],'--format','{{.Names}}']).stdout.splitlines())
+        names=listed|set(self.laptops.values())
+        peers=0
+        outside=0
+        has_pool=resources['budgetMode']=='pool'
+        for name in names:
+            sid=name.removeprefix(self.config['deployment']+'-agent-')
+            if not SESSION.fullmatch(sid):
+                raise RuntimeError('Unknown laptop in resource admission')
+            if sid==session_id:
+                continue
+            result=self.run_engine(['inspect',name],optional=True)
+            if result.returncode:
+                if name in listed:
+                    raise RuntimeError('Cannot inspect a running peer for resource admission')
+                continue
+            records=json.loads(result.stdout)
+            if not isinstance(records,list) or len(records)!=1:
+                raise RuntimeError('Cannot identify a peer for resource admission')
+            item=records[0]
+            labels=item['Config']['Labels'] or {}
+            if (type(item['State']['Running']) is not bool or labels.get('reverie.worker')!=self.config['deployment'] or
+                labels.get('reverie.session')!=sid):
+                raise RuntimeError('Laptop resource ownership mismatch')
+            if item['State']['Running'] is False:
+                continue
+            peers+=1
+            pid=item['State']['Pid']
+            if type(pid) is not int or pid<=0:
+                raise RuntimeError('Unknown peer process during resource admission')
+            groups=(proc_root/str(pid)/'cgroup').read_text().splitlines()
+            if len(groups)!=1 or not groups[0].startswith('0::/'):
+                raise RuntimeError('Unified peer cgroup identity required')
+            if groups[0][3:].startswith('/reverie.slice/reverie-workers.slice/'):
+                has_pool=True
+                continue
+            memory=item['HostConfig']['Memory']
+            swap=item['HostConfig']['MemorySwap']
+            if type(memory) is not int or memory<=0 or swap!=memory:
+                raise RuntimeError('Outside-pool peer requires finite RAM and zero swap')
+            outside+=memory
+        if peers+1>self.config['maxWorkers']:
+            raise RuntimeError('Worker capacity is full')
+        if resources['budgetMode']=='admission':
+            outside+=resources['memoryMiB']*1024*1024
+            if outside>self.config['poolMemoryMiB']*1024*1024:
+                raise RuntimeError('Worker memory admission is full; actual peer ceilings reserve the budget')
+        if not has_pool:
+            return
+        pool=0
+        if has_pool:
+            pool=int((pool_root/'memory.max').read_text())
+            tasks=int((pool_root/'pids.max').read_text())
+            if pool<=0 or tasks<=0:
+                raise RuntimeError('Finite positive shared pool limits required')
+        total_kib=int(next(line.split()[1] for line in (proc_root/'meminfo').read_text().splitlines() if line.startswith('MemTotal:')))
+        if pool+outside+8192*1024*1024>total_kib*1024*.9:
+            raise RuntimeError('Pool plus actual peer ceilings exceed host headroom')
+
+    def reload_resources(self):
+        if not self.config_file:
+            raise ValueError('Resource reload requires an owner configuration file')
+        with self.lock:
+            updated = load_config(self.config_file)
+            validate_resource_reload(self.config,updated)
+            # Serialize with launch, and refuse a new policy for any live program.
+            for sid,name in self.laptops.items():
+                previous=self.run_engine(['inspect',name],optional=True)
+                if previous.returncode:
+                    raise ValueError('Cannot verify an existing laptop during resource reload')
+                item=json.loads(previous.stdout)[0]
+                if item['State']['Running']:
+                    labels=item['Config']['Labels'] or {}
+                    if (labels.get('reverie.worker')!=self.config['deployment'] or
+                        labels.get('reverie.session')!=sid or
+                        labels.get('reverie.worker-policy')!=policy_digest(updated,sid)):
+                        raise ValueError('Stop only the selected idle laptop before changing its resource policy')
+            self.config=updated
+        return {'action':'reload-resources','success':True}
+
     def control(self, action, caller=None):
         if caller is not None and (action != 'restart-website' or caller not in self.config['maintenanceSessions']):
             raise ValueError('This laptop has no owner-granted website maintenance permission')
+        if action == 'reload-resources':
+            return self.reload_resources()
         if action == 'status':
             with self.lock:
                 return {'runningLaptops': len(self.laptops), 'offlineGraceSeconds': OFFLINE_GRACE_SECONDS}
@@ -485,6 +582,7 @@ class Broker:
         session_id = None
         claimed = False
         owned = False
+        admitted = False
         started = False
         existing_running = False
         exit_file = None
@@ -510,16 +608,11 @@ class Broker:
                     if {**self.config, 'image': updated['image']} != updated:
                         raise RuntimeError('Restart the host broker after changing worker policy')
                     self.config = updated
-            self.check_pool()
             session_id = request['sessionId']
             generation = self.generation
             with self.lock:
                 if generation != self.generation or self.stopping.is_set() or self.draining.is_set() or session_id in self.active:
                     raise ValueError('A worker for this session is already attached')
-                if session_id not in self.laptops and len(self.laptops) >= self.config['maxWorkers']:
-                    raise ValueError('Worker capacity is full; stop a worker or adjust the owner budget')
-                if session_id not in self.laptops and self.config['budgetMode'] == 'admission' and (len(self.laptops)+1)*self.config['memoryMiB'] > self.config['poolMemoryMiB']:
-                    raise ValueError('Worker memory admission is full; the server and host budget is reserved')
                 if not self.allowed(session_id):
                     raise ValueError('This expert is stopped or on vacation')
                 self.active[session_id] = connection
@@ -548,9 +641,20 @@ class Broker:
                         exit_file = home/'.reverie-launch'/metadata['exit']
                         if not exit_file.exists():
                             reuse = True
-                    if not reuse:
-                        self.stop(name)
-                        self.run_engine(['rm', name])
+                resources=effective_config(self.config,session_id)
+                if reuse and resources['budgetMode']=='pool':
+                    self.check_pool(config=resources,require_headroom=False)
+                if not reuse:
+                    resources=effective_config(self.config,session_id)
+                    if 'sessionResources' in self.config:
+                        self.check_pool(config=resources)
+                    else:
+                        self.check_pool()
+                    self.check_creation_budget(session_id,resources)
+                admitted = True
+                if previous.returncode==0 and not reuse:
+                    self.stop(name)
+                    self.run_engine(['rm',name])
                 self.office(session_id)
                 if not reuse:
                     network = name+'-lan'
@@ -657,7 +761,7 @@ class Broker:
                 pass
         finally:
             completed = exit_file is not None and exit_file.is_file()
-            if name and owned and ((not started and not existing_running) or completed):
+            if admitted and name and owned and ((not started and not existing_running) or completed):
                 try:
                     self.stop(name)
                 except (OSError, RuntimeError, subprocess.TimeoutExpired):
@@ -830,7 +934,7 @@ def main():
     serve = commands.add_parser('broker')
     serve.add_argument('--config', required=True)
     execute = commands.add_parser('client')
-    execute.add_argument('--control', choices=['status', 'stop-laptops', 'shutdown', 'restart-website'])
+    execute.add_argument('--control', choices=['status', 'stop-laptops', 'shutdown', 'restart-website', 'reload-resources'])
     execute.add_argument('--caller-session')
     execute.add_argument('--session-id')
     execute.add_argument('--cwd')
