@@ -3,7 +3,7 @@
  * a shell would execute it. The guard sits in flush(), the one place that writes.
  */
 import { describe, expect, it } from 'vitest';
-import { ChatroomDelivery, paneAcceptsChat, type DeliverySession } from '../src/chatroom-delivery.js';
+import { ChatroomDelivery, modePollsChat, paneAcceptsChat, type DeliverySession } from '../src/chatroom-delivery.js';
 import { STOCK_CLIS } from '../src/config/cli-registry/stock.js';
 
 function pane(id: string, mode: string): DeliverySession & { writes: string[] } {
@@ -45,7 +45,21 @@ describe('chatroom delivery by session mode', () => {
     expect(paneAcceptsChat(undefined)).toBe(false);
     expect(paneAcceptsChat('toString')).toBe(false);
     expect(paneAcceptsChat('claude')).toBe(true);
-    for (const cli of STOCK_CLIS) expect(paneAcceptsChat(cli.id as string)).toBe(cli.kind === 'agent');
+    for (const cli of STOCK_CLIS) {
+      expect(modePollsChat(cli.id as string)).toBe(cli.kind === 'agent' && cli.capabilities.chatDelivery === 'poll');
+      expect(paneAcceptsChat(cli.id as string)).toBe(cli.kind === 'agent' && cli.capabilities.chatDelivery !== 'poll');
+    }
+  });
+
+  it('never injects room text into a stock polling harness pane', async () => {
+    const hands = pane('hands-member', 'hands');
+    const delivery = new ChatroomDelivery({ getSession: () => hands, now: () => 1_000_000 });
+    delivery.enqueue(hands.id, { id: 'r', name: 'Room' }, 'USER: room turn');
+    await delivery.flushAll();
+    expect(modePollsChat('hands')).toBe(true);
+    expect(paneAcceptsChat('hands')).toBe(false);
+    expect(hands.writes).toEqual([]);
+    expect(delivery.pendingFor(hands.id)).toBe(0);
   });
 
   it('types no control character: a stray DEL in any builder\'s text is turned into a space on the final line, and what does not fit waits', async () => {

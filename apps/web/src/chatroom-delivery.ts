@@ -32,7 +32,10 @@ import { STOCK_CLIS } from './config/cli-registry/stock.js';
  */
 /** Only an explicit registry capability grants API/polling membership. Shells never qualify. */
 export function modePollsChat(mode: string | undefined): boolean {
-  if (!mode || STOCK_CLIS.some(entry => (entry.id as string) === mode)) return false;
+  if (!mode) return false;
+  const stock = STOCK_CLIS.find(entry => (entry.id as string) === mode);
+  // Stock transport, like stock kind, is a shipped boundary rather than an override.
+  if (stock) return stock.kind === 'agent' && stock.capabilities.chatDelivery === 'poll';
   const entry = getCli(mode);
   return entry?.kind === 'agent' && entry.capabilities.chatDelivery === 'poll' && entry.acceptsChat !== true;
 }

@@ -26,14 +26,14 @@ it('requires explicit polling capability, rejects conflicting typed/shell capabi
  expect(CliEntrySchema.safeParse({...polling,capabilities:{...polling.capabilities,chatDelivery:'anything'}}).success).toBe(false);
  expect(modePollsChat('shell')).toBe(false);expect(modePollsChat('worker-loop-not-declared')).toBe(false);
 });
-it('normal owner/coordinator Add chooses polling transport; no pane delivery; restart keeps membership and removal revokes access',async()=>{
+it.each(['poll-agent', 'hands'])('normal owner/coordinator Add chooses polling transport (%s); no pane delivery; restart keeps membership and removal revokes access',async(pollMode)=>{
  mkdirSync(dirname(registryFilePath()),{recursive:true});
  writeFileSync(registryFilePath(),JSON.stringify({schemaVersion:1,clis:{'poll-agent':entry('poll-agent',true),'plain-agent':entry('plain-agent')}}),{mode:0o600});reloadCliRegistry();
  expect(modePollsChat('poll-agent')).toBe(true);expect(modePollsChat('plain-agent')).toBe(false);expect(paneAcceptsChat('poll-agent')).toBe(false);
  const dir=mkdtempSync(join(tmpdir(),'poll-member-'));const file=join(dir,'rooms.json');let service!:ChatroomService;
  const {app,ctx}=await createRouteTestHarness((f,c)=>{
   for(const id of [A,B,C])c.sessions.set(id,createMockSession(id));
-  c.sessions.get(B).mode='poll-agent';c.sessions.get(C).mode='plain-agent';
+  c.sessions.get(B).mode=pollMode;c.sessions.get(C).mode='plain-agent';
   service=new ChatroomService({file,getSession:id=>c.sessions.get(id),broadcast:()=>{}});
   registerChatroomRoutes(f,c,service,new ChatFileStore(dir));
  });await service.init();
@@ -58,7 +58,12 @@ it('normal owner/coordinator Add chooses polling transport; no pane delivery; re
   expect(list.json().data.rooms.map((r:any)=>r.id)).toContain(id);expect(Number.isFinite(list.json().data.rooms.find((r:any)=>r.id===id).lastMessageAt)).toBe(true);expect(list.json().data.features.pollingModes).toContain('poll-agent');expect(list.json().data.features.pollingModes).not.toContain('plain-agent');
   expect((await app.inject({method:'GET',url:`/api/chatrooms/${id}`,headers})).statusCode).toBe(200);
   expect((await app.inject({method:'POST',url:`/api/chatrooms/${id}/messages`,headers,payload:{text:'Polling answer',requireAgent:true}})).statusCode).toBe(200);
-  await app.inject({method:'POST',url:`/api/chatrooms/${id}/messages`,payload:{text:'@agent room text must never enter a shell'}});
+  const posted=await app.inject({method:'POST',url:`/api/chatrooms/${id}/messages`,payload:{text:'@agent room text must never enter a shell'}});
+  expect(posted.statusCode).toBe(200);const originalId=posted.json().data.message.id;
+  const feed=await app.inject({method:'GET',url:`/api/chatrooms/${id}/messages`,headers});
+  expect(feed.statusCode).toBe(200);expect(feed.json().data.messages.some((m:any)=>m.id===originalId)).toBe(true);
+  const answer=await app.inject({method:'POST',url:`/api/chatrooms/${id}/messages`,headers,payload:{text:'API polling reply',replyTo:originalId,requireAgent:true}});
+  expect(answer.statusCode).toBe(200);expect(answer.json().data.message).toMatchObject({replyTo:originalId,from:{kind:'agent',sessionId:B}});
   await service.delivery.flushAll();expect((ctx.sessions.get(B) as any).writeBuffer).toEqual([]);
   const normalCreate=await app.inject({method:'POST',url:'/api/chatrooms',payload:{name:'Polling create',members:[{sessionId:B}]}});
   expect(normalCreate.statusCode).toBe(200);expect(normalCreate.json().data.members.find((m:any)=>m.sessionId===B).postOnly).toBe(true);
