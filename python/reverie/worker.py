@@ -201,7 +201,7 @@ class OfficeAPI:
     """A laptop's office phone: fixed identity and upstream, bounded HTTP only."""
     slots = threading.BoundedSemaphore(32)
 
-    def __init__(self, directory, session_id, address, company_root):
+    def __init__(self, directory, session_id, address, company_root, host_actions=None):
         directory.mkdir(mode=0o700, parents=True, exist_ok=True)
         if directory.is_symlink():
             raise ValueError('Invalid office connection directory')
@@ -227,7 +227,43 @@ class OfficeAPI:
                     length = int(self.headers.get('Content-Length', '0'))
                     if not 0 <= length <= 8*1024*1024 or self.headers.get('Transfer-Encoding'):
                         self.send_error(413); return
+                    host_path = parsed.path == '/api/host-actions' or parsed.path.startswith('/api/host-actions/')
+                    if host_path and (length > 16*1024 or parsed.query or len(self.headers.get_all('Content-Length',[]))>1):
+                        self.send_error(400); return
                     body = self.rfile.read(length)
+                    if host_path:
+                        if host_actions is None:
+                            self.send_error(503); return
+                        if parsed.path == '/api/host-actions' and self.command == 'GET' and not body:
+                            method,params='list',{}
+                        elif parsed.path == '/api/host-actions' and self.command == 'POST':
+                            payload=json.loads(body)
+                            if not isinstance(payload,dict) or set(payload)!={'operation'}:
+                                self.send_error(400); return
+                            method,params='request',payload
+                        elif self.command == 'GET' and SESSION.fullmatch(parsed.path.removeprefix('/api/host-actions/')) and not body:
+                            method,params='get',{'id':parsed.path.removeprefix('/api/host-actions/')}
+                        else:
+                            self.send_error(403); return
+                        # Session comes from this host-owned office socket, never
+                        # headers, JSON identity claims or laptop credentials.
+                        from .host_action_http import HostActionRefused, HostActionUnconfirmed
+                        try:
+                            data=host_actions(session_id,method,params)
+                        except (HostActionRefused, HostActionUnconfirmed) as error:
+                            status=error.status if isinstance(error,HostActionRefused) else 502
+                            raw=json.dumps({'success':False,'error':
+                                'Host request refused; refresh its status' if isinstance(error,HostActionRefused)
+                                else 'Host response unconfirmed; refresh its status before another request'}).encode()
+                            self.send_response(status);self.send_header('Content-Type','application/json')
+                            self.send_header('Content-Length',str(len(raw)));self.end_headers();self.wfile.write(raw)
+                            return
+                        raw=json.dumps({'success':True,'data':data}).encode()
+                        if len(raw)>64*1024:
+                            self.send_error(413); return
+                        self.send_response(200); self.send_header('Content-Type','application/json')
+                        self.send_header('Content-Length',str(len(raw))); self.end_headers(); self.wfile.write(raw)
+                        return
                     hooks = parsed.path in ['/api/hook-event', '/api/status-telemetry']
                     if hooks and json.loads(body).get('sessionId') != session_id:
                         self.send_error(403); return
@@ -286,8 +322,9 @@ class OfficeAPI:
 
 
 class Broker:
-    def __init__(self, config, engine='docker', config_file=None):
+    def __init__(self, config, engine='docker', config_file=None, host_actions=None):
         self.config, self.engine = config, engine
+        self.host_actions = host_actions
         self.config_file = config_file
         self.lock = threading.RLock()
         self.active = {}
@@ -363,7 +400,7 @@ class Broker:
 
     def office(self, session_id):
         if session_id not in self.offices:
-            self.offices[session_id] = OfficeAPI(Path(self.config['apiSocketRoot'])/session_id, session_id, self.address, Path(self.config['companyRoot']))
+            self.offices[session_id] = OfficeAPI(Path(self.config['apiSocketRoot'])/session_id, session_id, self.address, Path(self.config['companyRoot']),host_actions=self.host_actions)
         return self.offices[session_id]
 
     def recover(self):

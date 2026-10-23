@@ -158,6 +158,25 @@ class ActionQueue:
             raise PermissionError('Host action unavailable')
         return dict(row)
 
+    def list(self, principal):
+        # Return only bounded receipt data; no arbitrary query/filter interface.
+        with self.connect() as db:
+            where='' if principal.owner else 'WHERE requester=?'
+            args=() if principal.owner else (principal.subject,)
+            rows=db.execute('SELECT * FROM actions '+where+
+                " ORDER BY CASE WHEN state='pending' AND expires>? THEN 0 ELSE 1 END, expires DESC LIMIT 50",
+                (*args,self.clock())).fetchall()
+        result=[]
+        size=2
+        for row in rows:
+            item=dict(row)
+            encoded=len(canonical(item).encode())+1
+            if size+encoded>48*1024:
+                break
+            result.append(item)
+            size+=encoded
+        return result
+
     def decide(self, principal, identity, digest, approve):
         if not principal.owner:
             raise PermissionError('Owner approval required')
