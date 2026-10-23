@@ -91,7 +91,8 @@ function fakeAudio() {
   return el;
 }
 
-function app(opts: { speak?: (body: Record<string, string>) => { ok: boolean; data?: unknown } } = {}) {
+type VoiceResult = { ok: boolean; data?: unknown };
+function app(opts: { speak?: (body: Record<string, string>) => VoiceResult | Promise<VoiceResult> } = {}) {
   phoneSaid.length = 0;
   phone.cancels = 0;
   const asked: Record<string, string>[] = [];
@@ -265,4 +266,96 @@ describe('read aloud in the team voices', () => {
     expect(phoneSaid).toEqual([]);
     queue.clear();
   });
+});
+
+type TeamSynth = { speak(u: Utt): void; cancel(): void };
+const carSynth = (a: Record<string, unknown>) =>
+  (a._carTeamSynth as (native: typeof phone, diag: () => void) => TeamSynth)(phone, () => {});
+
+it('retains the queued utterance source while a cancelled car request drains and room state changes', async () => {
+  let release!: (value: VoiceResult) => void;
+  const old = new Promise<VoiceResult>((resolve) => {
+    release = resolve;
+  });
+  const { a, asked, audio } = app({
+    speak: (body) =>
+      body.text === 'Old request.' ? old : { ok: true, data: { audioUrl: '/origin', engine: 'kokoro' } },
+  });
+  const car = carSynth(a);
+  car.speak({ text: 'Old request.', onend: null, onerror: null });
+  await flush();
+  car.cancel();
+  const q = (a._readAloudQueue as () => { push(t: string, meta: unknown): void; clear(): void })();
+  const source = { room: 'origin-room', member: 'origin-member', text: 'Original content.' };
+  q.push('Speaker says: Original content.', source);
+  source.room = 'changed-room';
+  source.member = 'changed-member';
+  source.text = 'Changed content.';
+  a._chatRoomId = 'unrelated-room';
+  await flush();
+  expect(asked).toHaveLength(1);
+  release({ ok: true, data: { audioUrl: '/stale-car', engine: 'kokoro' } });
+  await flush();
+  expect(asked[1]).toEqual({ room: 'origin-room', member: 'origin-member', text: 'Original content.' });
+  expect(audio.played).toEqual(['/origin']);
+  expect(phoneSaid).toEqual([]);
+  q.clear();
+});
+
+it('clears a read-aloud request waiting behind the car lane without posting or speaking it later', async () => {
+  let release!: (value: VoiceResult) => void;
+  const old = new Promise<VoiceResult>((resolve) => {
+    release = resolve;
+  });
+  const { a, asked, audio } = app({ speak: () => old });
+  const car = carSynth(a);
+  car.speak({ text: 'Old request.', onend: null, onerror: null });
+  await flush();
+  car.cancel();
+  const q = (a._readAloudQueue as () => { push(t: string, meta: unknown): void; clear(): void })();
+  q.push('Never speak.', { room: 'room', member: 'member' });
+  q.clear();
+  release({ ok: true, data: { audioUrl: '/stale', engine: 'kokoro' } });
+  await flush();
+  expect(asked).toHaveLength(1);
+  expect(audio.played).toEqual([]);
+  expect(phoneSaid).toEqual([]);
+});
+
+it('passes only the remaining shared-lane budget to deferred read-aloud', async () => {
+  let now = 0,
+    release!: (value: null) => void;
+  const Queue = vm.runInContext('CarSynthesisQueue', context);
+  const lane = new Queue({ now: () => now, setTimeout, clearTimeout });
+  const active = lane.run(
+    () =>
+      new Promise((resolve) => {
+        release = resolve;
+      }),
+    {},
+    () => true
+  );
+  await flush();
+  const { a, asked } = app();
+  a._carSynthesisQueue = lane;
+  const timeouts: number[] = [];
+  context.AbortSignal = {
+    timeout: (ms: number) => {
+      timeouts.push(ms);
+      return new AbortController().signal;
+    },
+  };
+  const q = (a._readAloudQueue as () => { push(t: string, meta: unknown): void; clear(): void })();
+  try {
+    q.push('Queued line.', { room: 'source-room', member: 'source-member' });
+    now = 10_000;
+    release(null);
+    await active;
+    await flush();
+    expect(asked).toEqual([{ room: 'source-room', member: 'source-member', text: 'Queued line.' }]);
+    expect(timeouts).toEqual([15_000]);
+  } finally {
+    q.clear();
+    context.AbortSignal = AbortSignal;
+  }
 });

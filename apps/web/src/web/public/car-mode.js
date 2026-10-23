@@ -241,8 +241,8 @@ const CAR_TEAM_STALL_MS = 10_000;
 class CarSynthesisQueue {
   constructor(deps = {}) {
     this.now = deps.now || (() => globalThis.performance?.now() ?? Date.now());
-    this.set = deps.setTimeout || globalThis.setTimeout;
-    this.clear = deps.clearTimeout || globalThis.clearTimeout;
+    this.set = deps.setTimeout || ((callback, ms) => globalThis.setTimeout(callback, ms));
+    this.clear = deps.clearTimeout || ((timer) => globalThis.clearTimeout(timer));
     this.queue = [];
     this.active = null;
   }

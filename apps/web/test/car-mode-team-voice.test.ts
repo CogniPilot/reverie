@@ -780,3 +780,30 @@ it('completion deadline preserves cancelled status while the late active request
   expect(reports).toMatchObject([{ status: 'cancelled' }]);
   expect(reports).toHaveLength(1);
 });
+
+it.each(['setTimeout', 'clearTimeout'])('keeps the browser receiver for default %s', (method) => {
+  const browser = vm.createContext({ ReverieApp: class {} });
+  vm.runInContext(
+    `
+    globalThis.calls = [];
+    globalThis.setTimeout = function(callback, ms) {
+      if (${JSON.stringify(method)} === 'setTimeout' && this !== globalThis) throw new TypeError('Illegal invocation: setTimeout');
+      calls.push(['set', ms]); return 17;
+    };
+    globalThis.clearTimeout = function(id) {
+      if (${JSON.stringify(method)} === 'clearTimeout' && this !== globalThis) throw new TypeError('Illegal invocation: clearTimeout');
+      calls.push(['clear', id]);
+    };
+  `,
+    browser
+  );
+  for (const file of ['voice-chat.js', 'car-mode.js'])
+    vm.runInContext(readFileSync(resolve(import.meta.dirname, '../src/web/public', file), 'utf8'), browser);
+  const queue = vm.runInContext('new CarSynthesisQueue()', browser);
+  const timer = queue.set(() => {}, 25_000);
+  queue.clear(timer);
+  expect(vm.runInContext('calls', browser)).toEqual([
+    ['set', 25_000],
+    ['clear', 17],
+  ]);
+});

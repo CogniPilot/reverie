@@ -520,19 +520,19 @@ Object.assign(ReverieApp.prototype, {
     if (typeof this._carTeamSynth !== 'function') return null;
     const diag = (kind, data) => this._diag?.(kind, data);
     const team = this._carTeamSynth(phone, diag);
-    // CarServerSynth calls fetchAudio(text) synchronously inside speak(); `asking` is the
-    // line being queued there.
-    let asking = null;
+    // Synthesis may start later in the shared lane. Capture each utterance's
+    // source now, rather than relying on transient synchronous caller state.
+    const sources = new WeakMap();
     team.deps = {
       ...team.deps,
-      fetchAudio: async (text, utterance) => {
-        const who = asking;
+      fetchAudio: async (text, utterance, remaining = CAR_TEAM_FETCH_MS) => {
+        const who = sources.get(utterance);
         if (!who?.room || !who?.member) return null;
         if (this._carScreen && !this._carScreen.hidden) return null;
         const res = await this._chatApi('/api/voice/speak', {
           method: 'POST',
           body: { room: who.room, member: who.member, text: who.text || text },
-          signal: AbortSignal.timeout?.(CAR_TEAM_FETCH_MS),
+          signal: AbortSignal.timeout?.(Math.max(1, Math.ceil(remaining))),
         });
         diag('readaloud:speak', { ok: res.ok, engine: res.data?.engine, chars: text.length });
         if (res.ok && res.data?.voice?.provider === 'browser' && utterance) utterance.employeeVoice = res.data.voice;
@@ -547,12 +547,8 @@ Object.assign(ReverieApp.prototype, {
         return team.pending;
       },
       speak(u) {
-        asking = u.readAloud || null;
-        try {
-          team.speak(u);
-        } finally {
-          asking = null;
-        }
+        sources.set(u, u.readAloud ? { ...u.readAloud } : null);
+        team.speak(u);
       },
       cancel() {
         team.cancel();
