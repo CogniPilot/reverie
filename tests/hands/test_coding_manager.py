@@ -1,4 +1,8 @@
 import json
+import os
+import signal
+import subprocess
+import sys
 import tempfile
 import time
 import unittest
@@ -167,14 +171,50 @@ class ManagerTests(unittest.TestCase):
         self.assertNotIn('PRIVATE_DIAGNOSTIC_CANARY', json.dumps(self.chat.rooms))
 
     def test_voice_answer_preempts_coding_without_waiting_for_model(self):
+        # Isolate a genuine wait/deadlock without treating disk or scheduling
+        # latency in the durable chat tick as a preemption failure.
+        probe = '''
+from tests.hands.test_coding_manager import ManagerTests
+case = ManagerTests()
+case.setUp()
+try:
+    case.assert_voice_answer_preempts_pending_model()
+finally:
+    case.doCleanups()
+'''
+        root = Path(__file__).resolve().parents[2]
+        process = subprocess.Popen([sys.executable, '-c', probe], cwd=root,
+                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                   start_new_session=True)
+        try:
+            stdout, stderr = process.communicate(timeout=15)
+        except subprocess.TimeoutExpired:
+            # Only the process group created above, including its fixture worker.
+            os.killpg(process.pid, signal.SIGKILL)
+            process.communicate()
+            self.fail('Voice preemption probe did not complete while the coding model was pending')
+        self.assertEqual(process.returncode, 0, (stdout + stderr).decode(errors='replace'))
+
+    def assert_voice_answer_preempts_pending_model(self):
         FakeArbiter.ready = False
         self.start()
         self.pump_until(lambda: self.manager.active['pending'] is not None)
         voice = self.chat.add('room', {**OWNER, 'mark': 'owner_spoken'}, 'Quick room question')
-        started = time.monotonic()
-        loop.tick(self.cfg, self.chat, self.state, model=lambda *args: {'content': 'Voice reply first.'})
-        self.assertLess(time.monotonic() - started, 0.1)
+        arbiter = FakeArbiter.instances[0]
+        pending = arbiter.pending
+        def voice_model(*args):
+            # The chat model must be reached after preemption, while the coding
+            # model still has no answer; no coding result is released by the test.
+            self.assertFalse(FakeArbiter.ready)
+            self.assertIs(arbiter.pending, pending)
+            self.assertTrue(arbiter.paused)
+            self.assertEqual(arbiter.preemptions, 1)
+            self.assertEqual(FakeRunner.requests, [])
+            return {'content': 'Voice reply first.'}
+        loop.tick(self.cfg, self.chat, self.state, model=voice_model)
+        self.assertFalse(FakeArbiter.ready)
         self.assertEqual(FakeArbiter.instances[0].preemptions, 1)
+        self.assertEqual(self.chat.ours('room')[-1]['text'], 'Voice reply first.')
         self.assertEqual(self.chat.ours('room')[-1]['replyTo'], voice['id'])
         self.assertEqual(FakeRunner.requests, [])
         FakeArbiter.ready = True
