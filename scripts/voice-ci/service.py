@@ -1,0 +1,136 @@
+"""Loopback-only CI adapter: real Kokoro TTS and Whisper ASR, no agent/LLM.
+
+The /tts protocol differences are intentional: /voice/speak asks for a raw WAV
+with an explicit voice; /voice/turn asks its configured service for an audio URL.
+The latter uses this fixture service's fixed am_michael default, not a claim that
+the production turn route forwards employee voice settings.
+"""
+from __future__ import annotations
+
+import argparse
+import hashlib
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import json
+import os
+from pathlib import Path
+import tempfile
+import threading
+import time
+import uuid
+
+from audio import inspect_wav
+from reverie.kokoro import Engine, MODELS
+
+
+WHISPER_SHA256 = "d3dd57d32accea0b295c96e26691aa14d8822fac7d9d27d5dc00b4ca2826dd03"
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--artifacts", type=Path, required=True)
+    args = parser.parse_args()
+    root = args.artifacts.resolve()
+    root.mkdir(parents=True, exist_ok=True)
+    models = root / "models"
+    models.mkdir(exist_ok=True)
+    for name, expected in MODELS.items():
+        source = Path(os.environ["REVERIE_VOICE_CI_KOKORO_MODEL" if name.endswith(".onnx")
+                                 else "REVERIE_VOICE_CI_KOKORO_VOICES"])
+        with source.open("rb") as stream:
+            if hashlib.file_digest(stream, "sha256").hexdigest() != expected:
+                raise ValueError(f"Pinned Kokoro checksum mismatch: {name}")
+        if not (models / name).exists():
+            (models / name).symlink_to(source)
+    checkpoint = Path(os.environ["REVERIE_VOICE_CI_WHISPER_MODEL"])
+    with checkpoint.open("rb") as stream:
+        if hashlib.file_digest(stream, "sha256").hexdigest() != WHISPER_SHA256:
+            raise ValueError("Pinned Whisper checkpoint checksum mismatch")
+    # Import/load inside the CI service only; dependency-free validators stay lightweight.
+    import torch
+    import whisper
+    torch.set_num_threads(2)
+    torch.set_num_interop_threads(1)
+    print("voice-ci whisper load start", flush=True)
+    recognizer = whisper.load_model(str(checkpoint), device="cpu")
+    print("voice-ci whisper load complete; Kokoro warm start", flush=True)
+    engine = Engine(models)
+    engine.warm()
+    if engine.model is None:
+        raise RuntimeError("Real Kokoro model failed to load")
+    print("voice-ci Kokoro warm complete", flush=True)
+    fixture = json.loads(Path(__file__).with_name("fixtures.json").read_text())
+    audio: dict[str, bytes] = {}
+    lock = threading.Lock()
+
+    def record(event):
+        with (root / "synth-events.jsonl").open("a") as stream:
+            stream.write(json.dumps(event) + "\n")
+
+    class Handler(BaseHTTPRequestHandler):
+        def setup(self):
+            super().setup()
+            self.connection.settimeout(120)
+
+        def send(self, code, body, kind="application/json"):
+            data = body if isinstance(body, bytes) else json.dumps(body).encode()
+            self.send_response(code)
+            self.send_header("Content-Type", kind)
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
+        def do_GET(self):
+            if self.path == "/health":
+                return self.send(200, {"status": "ok", "stt": "ready", "tts": "ready"})
+            if self.path == "/voices":
+                return self.send(200, {"voices": engine.voices})
+            if self.path.startswith("/audio/") and self.path[7:] in audio:
+                return self.send(200, audio[self.path[7:]], "audio/wav")
+            return self.send(404, {"error": "No fixture resource"})
+
+        def do_POST(self):
+            started = time.monotonic_ns()
+            try:
+                length = int(self.headers.get("Content-Length", "0"))
+                if not 0 < length <= 10 * 1024 * 1024:
+                    return self.send(413, {"error": "Fixture request too large or empty"})
+                body = self.rfile.read(length)
+                if self.path == "/stt":
+                    with lock, tempfile.NamedTemporaryFile(suffix=".wav", dir=root) as clip:
+                        clip.write(body)
+                        clip.flush()
+                        result = recognizer.transcribe(clip.name, language="en", fp16=False,
+                                                       temperature=0, condition_on_previous_text=False)
+                    return self.send(200, {"transcript": result["text"].strip()})
+                if self.path != "/tts":
+                    return self.send(404, {"error": "No fixture operation"})
+                payload = json.loads(body)
+                requested = payload.get("voice")
+                selected = requested or fixture["voice"]
+                with lock:
+                    wav = engine.synthesize({"text": payload["text"], "voice": selected})
+                info = inspect_wav(wav)
+                record({"requestNs": started, "responseNs": time.monotonic_ns(), "text": payload["text"],
+                        "requestedVoice": requested, "effectiveVoice": selected, "provider": "kokoro",
+                        "bytes": len(wav), **info})
+                if requested:
+                    return self.send(200, wav, "audio/wav")
+                key = uuid.uuid4().hex
+                audio[key] = wav
+                return self.send(200, {"audio_url": f"/audio/{key}"})
+            except Exception as error:
+                self.send(500, {"error": str(error)})
+
+        def log_message(self, *_):
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    (root / "speech-url.txt").write_text(f"http://127.0.0.1:{server.server_port}")
+    try:
+        server.serve_forever()
+    finally:
+        server.server_close()
+
+
+if __name__ == "__main__":
+    main()

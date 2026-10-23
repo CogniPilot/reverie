@@ -1,0 +1,58 @@
+name: Voice audio acceptance
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: voice-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  voice-audio:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: cachix/install-nix-action@448cde739abec1eaf0646249e3d25bb8d9bc7702 # v31
+      - uses: nix-community/cache-nix-action@7df957e333c1e5da7721f60227dbba6d06080569 # v7
+        with:
+          primary-key: nix-voice-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('flake.lock', '**/*.nix') }}-${{ github.sha }}
+          restore-prefixes-first-match: |
+            nix-voice-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('flake.lock', '**/*.nix') }}-
+      - name: Allow sandboxed Chromium user namespaces on this ephemeral runner
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - name: Install locked browser-test dependencies without browser downloads
+        env:
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+        run: nix develop .#voice-ci --command npm ci --prefix apps/web --ignore-scripts
+      - name: Check validators and real browser audio
+        env:
+          REVERIE_VOICE_CI_ARTIFACTS: ${{ runner.temp }}/voice-ci-artifacts
+        run: |
+          nix develop .#voice-ci --command node apps/web/node_modules/typescript/bin/tsc --project apps/web/config/tsconfig.voice-ci.json
+          nix develop .#voice-ci --command python3 -m unittest tests.test_voice_ci_audio
+          nix develop .#voice-ci --command node --test tests/test_voice_ci_launch.mjs
+          nix develop .#voice-ci --command node --test apps/web/scripts/voice-ci-launch.test.mjs
+          nix develop .#voice-ci --command python3 -m reverie.buildenv --project voice-ci --repo "$PWD" --expect 4G --disk 2G --jobs 1 -- bash scripts/test-voice-ci.sh
+      - name: Keep synthetic audio, recognition, latency and browser evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: voice-audio-${{ github.sha }}
+          if-no-files-found: warn
+          retention-days: 7
+          path: |
+            ${{ runner.temp }}/voice-ci-artifacts/*.wav
+            ${{ runner.temp }}/voice-ci-artifacts/*.txt
+            ${{ runner.temp }}/voice-ci-artifacts/*.json
+            ${{ runner.temp }}/voice-ci-artifacts/*.jsonl
+            ${{ runner.temp }}/voice-ci-artifacts/*.log
+            ${{ runner.temp }}/voice-ci-artifacts/trace.zip

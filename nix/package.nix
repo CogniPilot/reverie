@@ -90,7 +90,7 @@ let
     postPatch = "patchShebangs ../scripts ../docker ../.github/ci";
     checkPhase = ''
       (cd ..; PYTHONPATH="$PWD/python" PYTHONWARNINGS=ignore::ResourceWarning python -m unittest discover -s tests -t .)
-      (cd ..; node --test tests/test_cli_installer.mjs tests/test_reverie_start.mjs tests/test_recovery_scripts.mjs tests/test_opencode_plugin.mjs)
+      (cd ..; node --test tests/test_cli_installer.mjs tests/test_reverie_start.mjs tests/test_recovery_scripts.mjs tests/test_opencode_plugin.mjs tests/test_voice_ci_launch.mjs)
     '';
   };
   memory = pkgs.python3.withPackages (ps: [ memoryPackage ps.pillow ]);
