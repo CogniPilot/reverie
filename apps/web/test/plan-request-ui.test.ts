@@ -67,7 +67,7 @@ function harness() {
         (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]!
       ),
   };
-  const methods = runInNewContext(`${source}; ({openPlanMove, renderPlanMembers})`, context);
+  const methods = runInNewContext(`${source}; ({openPlanMove, renderPlanMembers, planRequestStatus})`, context);
   const dialog = dom.window.document.querySelector('dialog')!;
   return { dom, context, methods, fetch, dialog };
 }
@@ -89,7 +89,7 @@ describe('owner plan request presentation', () => {
     await vi.waitFor(() => expect(h.fetch.mock.calls.some(([path]) => path === '/api/plans/requests')).toBe(true));
     const request = h.fetch.mock.calls.find(([path]) => path === '/api/plans/requests')!;
     expect(JSON.parse(request[1]!.body)).toMatchObject({ employeeId: 'alex', sessionId: 'source', toAccount: 'claude' });
-    await vi.waitFor(() => expect(h.dialog.textContent).toContain('Queued until'));
+    await vi.waitFor(() => expect(h.dialog.textContent).toContain('Waiting for idle'));
     expect(h.dom.window.document.querySelector('[data-plan-members=first] [data-member=alex]')).not.toBeNull();
   });
   it('requests only immutable destination intent, leaves source avatar, and displays a grey destination ghost until resolution', async () => {
@@ -100,7 +100,7 @@ describe('owner plan request presentation', () => {
     const form = h.dialog.querySelector('form')!;
     form.dispatchEvent(new h.dom.window.Event('submit', { bubbles: true, cancelable: true }));
     form.dispatchEvent(new h.dom.window.Event('submit', { bubbles: true, cancelable: true }));
-    await vi.waitFor(() => expect(h.dialog.textContent).toContain('Queued until'));
+    await vi.waitFor(() => expect(h.dialog.textContent).toContain('Waiting for idle'));
     const request = h.fetch.mock.calls.find(([path]) => path === '/api/plans/requests')!;
     expect(JSON.parse(request[1]!.body)).toEqual({
       id: expect.any(String),
@@ -112,7 +112,7 @@ describe('owner plan request presentation', () => {
     expect(h.fetch.mock.calls.some(([path]) => path === '/api/plans/moves')).toBe(false);
     expect(h.dom.window.document.querySelector('[data-plan-members=first] [data-member=alex]')).not.toBeNull();
     const ghost = h.dom.window.document.querySelector('[data-plan-members=second] .plan-member-pending');
-    expect(ghost?.getAttribute('aria-label')).toBe('Alex: pending move request');
+    expect(ghost?.getAttribute('aria-label')).toContain('Alex: Waiting for idle');
     expect(ghost?.hasAttribute('draggable')).toBe(false);
     h.dialog.querySelector<HTMLButtonElement>('[data-cancel]')!.click();
     await vi.waitFor(() => expect(h.dom.window.document.querySelector('.plan-member-pending')).toBeNull());
@@ -134,5 +134,16 @@ describe('owner plan request presentation', () => {
     h.methods.renderPlanMembers();
     expect(h.dom.window.document.querySelector('.plan-member-pending')).toBeNull();
     expect(h.dom.window.document.querySelectorAll('[data-member=alex]')).toHaveLength(1);
+  });
+});
+
+describe('plan request deadline display', () => {
+  it('shows waiting-for-idle and a decreasing deadline without extending the request', () => {
+    const h = harness(), r = { phase: 'pending', notified: false, expiresAt: 1_800_000 };
+    expect(h.methods.planRequestStatus(r, 0)).toBe('Waiting for idle · queued message · 30:00 left');
+    expect(h.methods.planRequestStatus(r, 65_000)).toContain('28:55 left');
+    expect(h.methods.planRequestStatus({ ...r, notified: true }, 65_000)).toContain('Awaiting the expert');
+    expect(h.methods.planRequestStatus(r, 1_800_000)).toContain('Expired');
+    expect(r.expiresAt).toBe(1_800_000);
   });
 });

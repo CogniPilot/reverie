@@ -44,7 +44,7 @@ import { CODEX_REASONING_EFFORTS } from './types/session.js';
 import { stripAnsi as stripAnsiSequences } from './utils/regex-patterns.js';
 import { quoteForPane } from './pane-quote.js';
 import { pronounsProblem, pronounsProposal } from './pronouns.js';
-import { agentPlanRequest, agentRequestPlanMove, agentPlanMoveAction } from './cli-plan-request.js';
+import { agentPlanRequest, agentRequestPlanMove, agentPlanMoveAction, agentPendingPlanMoves } from './cli-plan-request.js';
 
 /** A chat message id, as the server stores it. */
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -2120,6 +2120,8 @@ export function registerAgentCommands(program: Command): Command {
   const run = runAgentVerb;
   registerRoutineCommands(program, run);
   const planMove = agent.command('plan-move').description('Request a permitted plan move or approve a handoff for this exact expert');
+  planMove.command('list').description('List this expert’s pending plan requests').option('--json', 'Machine-readable result')
+    .action((options: { json?: boolean }) => run(Boolean(options.json), agentPendingPlanMoves));
   planMove.command('request <account-id>')
     .option('--employee <id>', 'Team expert ID (requires Manage team plans)')
     .option('--id <id>', 'Stable request ID for safe retries')

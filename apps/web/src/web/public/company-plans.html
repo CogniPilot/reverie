@@ -212,9 +212,21 @@ function planMemberHtml(plan) {
   const ghosts = pendingPlanRequests.filter(request => request.toAccount === plan.id && ['pending', 'reauthorize-required', 'executing', 'recovery-required'].includes(request.phase) && !members.some(member => member.id === request.employeeId)).map(request => {
     const member = planAllocations.employees.find(employee => employee.id === request.employeeId);
     const avatar = typeof member?.avatar === 'string' && /^\/api\/avatars\/[a-zA-Z0-9-]+(?:\?v=\d+)?$/.test(member.avatar) ? member.avatar : null;
-    return `<button type="button" class="plan-member plan-member-pending" data-plan-request="${esc(request.id)}" title="${esc(request.name)}: move requested" aria-label="${esc(request.name)}: pending move request"><span class="plan-member-face" aria-hidden="true">${esc(Array.from(request.name || '?')[0])}</span>${avatar ? `<img src="${esc(avatar)}" alt="" loading="lazy">` : ''}<span class="plan-member-name" aria-hidden="true">${esc(request.name)} · requested</span></button>`;
+    return `<button type="button" class="plan-member plan-member-pending" data-plan-request="${esc(request.id)}" title="${esc(request.name)}: ${esc(planRequestStatus(request))}" aria-label="${esc(request.name)}: ${esc(planRequestStatus(request))}"><span class="plan-member-face" aria-hidden="true">${esc(Array.from(request.name || '?')[0])}</span>${avatar ? `<img src="${esc(avatar)}" alt="" loading="lazy">` : ''}<span class="plan-member-name" aria-hidden="true">${esc(request.name)} · ${esc(planRequestStatus(request))}</span></button>`;
   }).join('');
   return (icons + ghosts || '<span class="plan-member-state">No employees allocated</span>') + (planMembersError ? '<span class="plan-member-state">Updates paused</span>' : '');
+}
+
+function planRequestStatus(record, now = Date.now()) {
+  const waiting = record.phase === 'pending' || record.phase === 'reauthorize-required';
+  const seconds = Number.isFinite(record.expiresAt) ? Math.max(0, Math.ceil((record.expiresAt - now) / 1000)) : null;
+  const phase = record.phase === 'pending'
+    ? (record.notified ? 'Awaiting the expert’s handoff and approval' : 'Waiting for idle · queued message')
+    : record.phase;
+  if (!waiting) return phase;
+  if (seconds === null) return phase + ' · expiry unavailable';
+  if (!seconds) return 'Expired · waiting for server confirmation';
+  return phase + ` · ${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')} left`;
 }
 
 function renderPlanMembers() {
@@ -378,7 +390,7 @@ function showPlanRequestProgress(dialog, initial) {
   dialog.querySelector('[data-close]').onclick = () => dialog.close();
   let record = initial, busy = false;
   const paint = () => {
-    dialog.querySelector('.status').textContent = `${record.phase === 'pending' ? (record.notified ? 'Awaiting the expert’s handoff and approval' : 'Queued until the expert is safely ready') : record.phase}${record.movePhase ? ' · ' + record.movePhase : ''}${record.error ? ': ' + record.error : ''}`;
+    dialog.querySelector('.status').textContent = `${planRequestStatus(record)}${record.movePhase ? ' · ' + record.movePhase : ''}${record.error ? ': ' + record.error : ''}`;
     cancel.hidden = !(['pending', 'reauthorize-required'].includes(record.phase) || record.phase === 'executing' && record.movePhase === 'waiting');
     reauthorize.hidden = record.phase !== 'reauthorize-required';
     cancel.disabled = reauthorize.disabled = busy;
