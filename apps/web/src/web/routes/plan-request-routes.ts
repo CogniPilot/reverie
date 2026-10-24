@@ -15,7 +15,8 @@ export function registerPlanRequestRoutes(
   ctx: Pick<AuthPort, 'authSessions'> & Pick<SessionPort, 'sessions'>,
   ownerAuth: Pick<OwnerAuthService, 'session'> | undefined,
   capture: (request: FastifyRequest) => PlanRequestExecution,
-  agentCapture?: (request: FastifyRequest, input: { employeeId: string; sessionId: string }) => PlanRequestExecution | undefined
+  agentCapture?: (request: FastifyRequest, input: { employeeId: string; sessionId: string }) => PlanRequestExecution | undefined,
+  selfCaller?: (request: FastifyRequest) => { sessionId: string; owner?: string } | undefined
 ): void {
   const failure = (reply: FastifyReply, error: unknown) => {
     if (!(error instanceof PlanMoveError)) throw error;
@@ -38,6 +39,13 @@ export function registerPlanRequestRoutes(
     if (!execution?.authorized()) throw new PlanMoveError('This expert needs Move own plan or Manage team plans permission from the owner', 403);
     return execution;
   };
+  app.post('/api/plans/agent-requests/pending', async (request, reply) => {
+    reply.header('Cache-Control', 'no-store');
+    parseBody(z.object({}).strict(), request.body ?? {});
+    const caller = selfCaller?.(request);
+    if (!caller) return reply.code(403).send(createErrorResponse(ApiErrorCode.FORBIDDEN, 'Only the exact agent may list its own pending requests'));
+    return { success: true, data: await requests.pendingForSession(caller.sessionId, caller.owner) };
+  });
   app.post('/api/plans/agent-requests', async (request, reply) => {
     reply.header('Cache-Control', 'no-store');
     const input = parseBody(agentInput, request.body);

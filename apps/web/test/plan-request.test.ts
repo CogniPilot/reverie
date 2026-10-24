@@ -237,3 +237,35 @@ describe('expert-approved plan requests', () => {
     expect(await h.service.get('request', 'owner')).toMatchObject({ phase: 'completed', newSession: 'candidate' });
   });
 });
+
+describe('self-service pending discovery', () => {
+  it('lists the exact current session without credentials and drops expired requests', async () => {
+    const h = requestHarness(); await h.service.create(h.input, 'owner', h.execution);
+    const own = await h.service.pendingForSession('source', 'owner');
+    expect(own).toHaveLength(1); expect(own[0]).not.toHaveProperty('nonceHash');
+    expect(await h.service.pendingForSession('other', 'owner')).toEqual([]);
+    expect(await h.service.pendingForSession('source', 'other-owner')).toEqual([]);
+    h.clock(1_800_100);
+    expect(await h.service.pendingForSession('source', 'owner')).toEqual([]);
+    expect((await h.service.get('request', 'owner')).phase).toBe('expired');
+    await expect(h.service.decide('request', 'source', h.nonce(), 'approve', 'handoff', 'owner')).rejects.toThrow();
+    expect(h.port.moves.begin).not.toHaveBeenCalled();
+  });
+});
+
+it('expires a queued notification when its authorization predicate reaches the deadline', async () => {
+  const h = requestHarness(); let fail: (error: Error) => void;
+  h.port.notify = vi.fn(() => new Promise<void>((_resolve, reject) => { fail = reject; }));
+  const r = await h.service.create(h.input, 'owner', h.execution);
+  h.clock(r.expiresAt); fail!(new Error('expired delivery'));
+  await vi.waitFor(() => expect(h.records()[0].phase).toBe('expired'));
+  expect(h.port.moves.begin).not.toHaveBeenCalled();
+});
+it('rechecks expiry after asynchronous approval preparation, before consuming the credential', async () => {
+  const h = requestHarness(); let checks = 0;
+  h.port.validateTarget = vi.fn(async () => { if (++checks === 2) h.clock(1_800_100); });
+  await h.service.create(h.input, 'owner', h.execution);
+  await expect(h.service.decide('request', 'source', h.nonce(), 'approve', 'handoff', 'owner')).rejects.toThrow('expired');
+  expect(h.port.moves.begin).not.toHaveBeenCalled();
+  expect((await h.service.get('request', 'owner')).phase).toBe('expired');
+});

@@ -90,3 +90,17 @@ export async function agentPlanRequest(
     return 1;
   }
 }
+
+/** List only this session's pending owner-authorized requests, never credentials. */
+export async function agentPendingPlanMoves(deps: AgentDeps): Promise<number> {
+  try {
+    const response = await deps.request(deps.ctx, { method: 'POST', path: '/api/plans/agent-requests/pending', body: {} });
+    const body = response.json as { success?: boolean; data?: Array<{ id: string; phase: string; toAccount: string; expiresAt: number; notified: boolean }> };
+    if (response.status >= 400 || !body?.success || !Array.isArray(body.data)) throw new Error('Refused');
+    const requests = body.data.map(({ id, phase, toAccount, expiresAt, notified }) => ({ id, phase, toAccount, expiresAt, notified }));
+    if (deps.json) deps.io.out(JSON.stringify({ success: true, requests }));
+    else if (!requests.length) deps.io.out('No pending plan requests for this session.');
+    else for (const r of requests) deps.io.out(`${r.id}: ${r.phase}, destination ${r.toAccount}, expires ${new Date(r.expiresAt).toISOString()}. Prepare a handoff, then use plan-move approve or reject.`);
+    return 0;
+  } catch { deps.io.err('Could not read this session’s pending plan requests.'); return 1; }
+}
