@@ -38,6 +38,7 @@ export type Fetcher = (url: string, init: { headers: Record<string, string>; sig
 /** One line of untrusted text made safe to post: single line, no @ mentions, no markup, capped. */
 export function cleanUntrusted(text: unknown, max: number): string {
   const s = String(text ?? '')
+    // eslint-disable-next-line no-control-regex -- Intentionally strip controls from external titles and names.
     .replace(/[\u0000-\u001f\u007f]+/g, ' ')
     .replace(/[@`*_<>[\]|{}\\]/g, '')
     .replace(/\s+/g, ' ')
@@ -93,7 +94,7 @@ function etStamp(iso: string): string {
 
 async function read(args: GithubArgs, last: string | undefined, fetcher: Fetcher): Promise<PostSourceData> {
   const kinds = new Set(args.kinds?.length ? args.kinds : ['pulls', 'issues']);
-  const url = `https://api.github.com/repos/${encodeURIComponent(args.owner)}/${encodeURIComponent(args.repo)}/issues?state=all&sort=updatedemoirection=desc&per_page=${PAGE}`;
+  const url = `https://api.github.com/repos/${encodeURIComponent(args.owner)}/${encodeURIComponent(args.repo)}/issues?state=all&sort=updated&direction=desc&per_page=${PAGE}`;
   const res = await fetcher(url, {
     headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'reverie-console', 'X-GitHub-Api-Version': '2022-11-28' },
     signal: AbortSignal.timeout(10_000),

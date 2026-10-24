@@ -29,6 +29,12 @@ describe('githubData', () => {
     expect(d.message).not.toContain('#2');
     expect(d._key).toBe('2026-03-01T00:00:00Z');
     expect(f.urls[0]).toContain('/repos/org/proj/issues');
+    // This must distinguish the historical `sort=updatedemoirection=desc` typo.
+    const query = new URL(f.urls[0]!).searchParams;
+    expect(query.get('sort')).toBe('updated');
+    expect(query.get('direction')).toBe('desc');
+    expect(query.get('state')).toBe('all');
+    expect(query.get('per_page')).toBe('30');
   });
   it('is quiet when nothing changed: key stays at the cursor', async () => {
     const d = await githubData(args, '2026-03-01T00:00:00Z', fetcher([item(3, '2026-03-01T00:00:00Z')]));

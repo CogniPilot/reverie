@@ -20,7 +20,7 @@ export function modelRelay(socketPath, port = 8092, unavailableMessage = 'Local 
       result.pipe(response);
       result.on('error', () => response.destroy());
     });
-    upstream.setTimeout(300000, () => upstream.destroy(new Error('Model request timed out')));
+    upstream.setTimeout(900000, () => upstream.destroy(new Error('Model request timed out')));
     upstream.on('error', () => {
       if (response.headersSent) response.destroy();
       else { response.writeHead(503, { 'Content-Type': 'application/json' }); response.end(JSON.stringify({ error: { message: unavailableMessage } })); }

@@ -13,6 +13,8 @@ export function authenticatedPlanMover(
 ): boolean {
   if (request.headers['x-reverie-parent-session'] !== undefined || !sameOrigin(request)) return false;
   const ownerSession = ownerAuth?.session(request.cookies?.[OWNER_COOKIE]);
+  // A human channel login cannot inherit a stale Basic-auth admin cookie.
+  if (ownerSession?.role === 'limited') return false;
   if (ownerSession && !ownerSession.restricted && !isMultiUserMode()) return true;
   const token = request.cookies?.[AUTH_COOKIE_NAME];
   const record = token ? sessions?.get(token) : undefined;

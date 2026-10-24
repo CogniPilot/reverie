@@ -155,6 +155,8 @@ class ResourcePolicyTests(unittest.TestCase):
         calls=[]
         def engine(argv,optional=False):
             calls.append(argv)
+            if argv[:2]==['image','inspect']:
+                return subprocess.CompletedProcess(argv,0,json.dumps([{'Config':{'Labels':{}}}]))
             if argv[0]=='ps':return subprocess.CompletedProcess(argv,0,'test-agent-'+OTHER)
             if argv[0]=='inspect':
                 sid=SID if argv[1].endswith(SID) else OTHER

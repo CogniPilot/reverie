@@ -52,6 +52,7 @@ NIX_CONSOLE = re.compile(r"reverie-console-[0-9]+(?:\.[0-9]+)+")
 NIX_WRAPPER = re.compile(r"reverie-[0-9]+(?:\.[0-9]+)+")
 NIX_MEMORY = re.compile(r"python3\.[0-9]+-reverie-memory-0\.1\.0")
 NIX_OWNED_HELPERS = frozenset({
+    "reverie-nix-store-prepare", "reverie-laptop-base",
     "reverie-start", "reverie-runtime", "reverie-launcher", "reverie-lock-tools",
     "reverie-install-clis", "reverie-install-clis.mjs", "reverie-request-update", "reverie-kokoro", "reverie-model-relay", "reverie-model-relay.mjs", "reverie-hands",
     "reverie-worker-exec", "reverie-worker-child", "reverie-office-relay",

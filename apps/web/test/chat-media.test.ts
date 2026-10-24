@@ -147,10 +147,10 @@ const codeSegs = get('chatCodeSegments') as (t: string) => Array<{ text?: string
 const plain = (v: unknown) => JSON.parse(JSON.stringify(v));
 
 describe('chatCodeSegments', () => {
-  it('splits fenced blocks from the text around them and drops the language line', () => {
+  it('splits fenced blocks from surrounding text and retains the language separately', () => {
     expect(plain(codeSegs('run this:\n```sh\nsudo nixos-rebuild build\n```\nthen tell me'))).toEqual([
       { text: 'run this:\n' },
-      { code: 'sudo nixos-rebuild build' },
+      { code: 'sudo nixos-rebuild build', language: 'sh' },
       { text: '\nthen tell me' },
     ]);
   });

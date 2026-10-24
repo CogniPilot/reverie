@@ -67,8 +67,8 @@ export const SETUP_PAGE = shell(
 );
 
 export const ACCOUNT_PAGE = shell(
-  'Reverie: owner account',
-  `<h1>Owner account</h1><div data-page="account"></div>
+  'Reverie: your account',
+  `<h1>Your sign-in account</h1><div data-page="account"></div>
 <p id="signed-out" hidden>You are not signed in. <a href="/owner/login">Sign in</a></p>
 <div id="account" hidden>
  <section class="card"><h2>Two-step sign-in</h2><p class="muted" id="tf-status"></p>

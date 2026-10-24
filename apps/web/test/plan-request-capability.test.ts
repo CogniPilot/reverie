@@ -90,6 +90,17 @@ describe('private plan approval files and CLI', () => {
     expect(await agentPlanRequest(deps, { id: 'request', decision: 'reject' }, h.capabilities)).toBe(1);
     expect(deps.request).not.toHaveBeenCalled();
   });
+  it('never fetches an approval credential after an unavailable explicit local capability', async () => {
+    const h = await fixture();
+    const deps: AgentDeps = {
+      ctx: { selfId: 'source', apiUrl: 'http://fixture' }, json: true,
+      request: vi.fn(async () => ({ status: 200, text: '', json: { success: true, data: h.value } })),
+      io: { out: vi.fn(), err: vi.fn() },
+    };
+    expect(await agentPlanRequest(deps, { id: 'request', decision: 'reject' }, h.capabilities)).toBe(1);
+    expect(deps.request).not.toHaveBeenCalled();
+    expect(JSON.stringify([vi.mocked(deps.io.out).mock.calls, vi.mocked(deps.io.err).mock.calls])).not.toContain(h.value.nonce);
+  });
   it('uses the fixed office proxy with a handoff and no local credential or target override', async () => {
     const h = await fixture();
     const handoffFile = join(h.root, 'handoff');

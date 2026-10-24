@@ -13,10 +13,10 @@ export interface RoutinesPolicy {
   findEmployee(sessionId: string): { id: string; name: string; position: string } | undefined;
   /** True when this session sits in the room (the employee's seat, not a name). */
   isMember(roomId: string, sessionId: string): boolean;
-  /** The general channel, or undefined when there is none. */
-  notificationRoomId(): string | undefined;
+  /** The configured active ordinary announcement room in this exact owner scope, or undefined. */
+  notificationRoomId(owner?: string): string | undefined;
   /** Post a one-line system notice in a room; false when it could not be posted. */
-  notify(roomId: string, text: string): boolean;
+  notify(roomId: string, text: string, owner?: string): boolean;
 }
 
 export interface CronPort {

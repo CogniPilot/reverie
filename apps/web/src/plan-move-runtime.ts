@@ -9,13 +9,14 @@ import { planMoveLaunch } from './plan-move-launch.js';
 import { composerReadyMark } from './cli-agent.js';
 import { fullAccessAlertRoom } from './full-access-default.js';
 import { capturePlanProcesses, survivingPlanProcesses } from './plan-move-processes.js';
+import { submitRecoveryPrompt } from './company-recovery-prompt.js';
 
 export interface PlanMoveRuntime {
   company: Pick<CompanyService, 'view' | 'rebind'>;
   plans: Pick<PlanService, 'allocations' | 'account'>;
-  chat: Pick<ChatroomService, 'rooms' | 'post' | 'auditEntry'>;
+  chat: Pick<ChatroomService, 'rooms' | 'post' | 'auditEntry'> & {delivery?: Pick<ChatroomService['delivery'], 'pauseForMigration'>};
   sessions: SessionPort['sessions'];
-  mux: Pick<TerminalMultiplexer, 'getSession' | 'isPaneDead'>;
+  mux: Pick<TerminalMultiplexer, 'getSession' | 'isPaneDead'> & Partial<Pick<TerminalMultiplexer, 'capturePaneText'>>;
   cleanup: SessionPort['cleanupSession'];
   authorized(): boolean;
   actor?: string;
@@ -27,6 +28,8 @@ export interface PlanMoveRuntime {
 export function planMoveExecutor(runtime: PlanMoveRuntime, owner?: string): PlanMoveExecutor {
   const candidates = new Map<string, string>();
   const createdCandidates = new Set<string>();
+  const releases: Array<() => void> = [];
+  const releaseDelivery = () => { releases.splice(0).forEach(release => release()); };
   const session = (id: string) => {
     const current = runtime.sessions.get(id);
     if (!current || current.owner !== owner) throw new PlanMoveError('The owned session is no longer available');
@@ -88,6 +91,9 @@ export function planMoveExecutor(runtime: PlanMoveRuntime, owner?: string): Plan
       const account = await runtime.plans.account(input.toAccount);
       if (!account) throw new PlanMoveError('The destination plan no longer exists', 404);
       const payload = planMoveLaunch(session(input.sessionId).toState(), account, input);
+      const pauseSource = runtime.chat.delivery?.pauseForMigration(input.sessionId);
+      if (pauseSource) releases.push(pauseSource);
+      try {
       const response = (await runtime.request('POST', '/api/sessions', payload)) as {
         session?: { id?: unknown }; data?: { session?: { id?: unknown } };
       };
@@ -95,7 +101,10 @@ export function planMoveExecutor(runtime: PlanMoveRuntime, owner?: string): Plan
       if (typeof id !== 'string') throw new PlanMoveError('The replacement response has no session identifier');
       candidates.set(id, input.handoff);
       createdCandidates.add(id);
+      const pauseCandidate = runtime.chat.delivery?.pauseForMigration(id);
+      if (pauseCandidate) releases.push(pauseCandidate);
       return id;
+      } catch (error) { releaseDelivery(); throw error; }
     },
     start: async (id) => {
       assertAuthorized();
@@ -106,12 +115,24 @@ export function planMoveExecutor(runtime: PlanMoveRuntime, owner?: string): Plan
       const current = session(id);
       const mark = composerReadyMark(current.mode);
       if (!mark) throw new PlanMoveError('This CLI has no verified readiness marker');
+      if (runtime.mux.capturePaneText && current.muxName) {
+        const deadline = Date.now() + 90000;
+        while (true) {
+          assertAuthorized();
+          assertAlive(id);
+          const text = runtime.mux.capturePaneText(current.muxName);
+          if (!current.isWorking && !current.paneDialog && text?.includes(mark)) break;
+          if (Date.now() >= deadline) throw new PlanMoveError('The replacement did not reach its composer before the deadline');
+          await delay(500);
+        }
+      } else {
       const result = (await runtime.request(
         'GET',
         `/api/sessions/${encodeURIComponent(id)}/wait-output?from=buffer&timeout=90000&match=${encodeURIComponent(mark)}`
       )) as { data?: { wait?: { matched?: boolean } } };
       if (!result.data?.wait?.matched)
         throw new PlanMoveError('The replacement did not reach its composer before the deadline');
+      }
       assertAuthorized();
       assertAlive(id);
       await delay(500);
@@ -119,33 +140,8 @@ export function planMoveExecutor(runtime: PlanMoveRuntime, owner?: string): Plan
       const handoff = candidates.get(id);
       if (!handoff) throw new PlanMoveError('The replacement has no handoff');
       assertAuthorized();
-      await new Promise<void>((resolve, reject) => {
-        const timer = setTimeout(
-          () => reject(new PlanMoveError('The replacement handoff was not acknowledged')),
-          12_000
-        );
-        void current
-          .writeViaMux(`${handoff}\r`, {
-            fromUser: true,
-            onOutcome: (outcome) => {
-              clearTimeout(timer);
-              if (outcome === 'submitted') resolve();
-              else reject(new PlanMoveError('The replacement handoff was not submitted'));
-            },
-          })
-          .then(
-            (sent) => {
-              if (!sent) {
-                clearTimeout(timer);
-                reject(new PlanMoveError('The replacement refused its handoff'));
-              }
-            },
-            (error) => {
-              clearTimeout(timer);
-              reject(error);
-            }
-          );
-      });
+      await submitRecoveryPrompt(current, handoff, () => runtime.authorized() && runtime.sessions.get(id) === current,
+        undefined, {fromUser: true});
       assertAlive(id);
       candidates.delete(id);
     },
@@ -178,7 +174,8 @@ export function planMoveExecutor(runtime: PlanMoveRuntime, owner?: string): Plan
       if (!identities.length && !candidates.has(id))
         throw new PlanMoveError('Cannot verify the old process before cleanup');
       if (!createdCandidates.has(id)) assertAuthorized();
-      await runtime.cleanup(id, true, 'plan_move');
+      try { await runtime.cleanup(id, true, 'plan_move'); }
+      finally { releaseDelivery(); }
       candidates.delete(id);
       createdCandidates.delete(id);
       return (runtime.survivors ?? survivingPlanProcesses)(identities);

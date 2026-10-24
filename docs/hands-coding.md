@@ -1,0 +1,34 @@
+# Hands coding on an agent laptop
+
+The `handsTools` flake package provides `reverie-hands-tools`. Its seven tools
+read, list, search, edit and write workspace files, run commands and run a task's
+configured tests. The dispatcher comes from the pre-integration Hands tools r1
+implementation (SHA256 aec37a11815390dc7372d9e371838429ad1516dfe8cd37b9b05de3794c3d08cb).
+
+The existing laptop container is the execution boundary. Commands have that
+laptop's ordinary filesystem grants and network access. File-tool path checks
+prevent accidental workspace escapes; they are not a second security sandbox.
+Commands receive a clean environment without office or model tokens. Each tool
+call has a time and output budget; commands remain in the controller's process
+group so cancellation kills their descendants. The laptop's existing host
+resource pool and task limit remain in force.
+
+Configure `coding` in the employee's private Hands `runtime-settings.json`:
+an absolute `root`, a `tool_schema_file` matching the version-one Hands export,
+fixed `runner_argv`, named `profiles` and a `tasks` map. The runner argv includes
+`--root ROOT`; the controller supplies the exact task directory and budgets.
+Each task is a direct child of ROOT and has `manifest.json` with `version: 1`,
+its `task_id`, and a `test_argv` array. Editable files live in its `work` directory.
+
+Only the authenticated owner or explicitly configured delegate sessions may
+start a task, and only from that task's configured rooms. Start with
+`/code TASK_ID instructions @EMPLOYEE`; cancel with `/code-cancel TASK_ID`.
+An external operator may retain the `[external agent] ` chat prefix; the same
+delegate checks still apply. Chat takes priority over coding. A restart marks
+interrupted jobs stopped rather than replaying them.
+
+The default 60,000-character chat budget is too small for the coding controller's
+tool reserves. Set private `prompt_cap_chars` to 120000 for coding. This is an
+outer character ceiling, not a promise of a larger model context: configure the
+native token meter in both chat and coding, with the actual model context limit,
+so every model request reserves output tokens and fails closed if it will not fit.

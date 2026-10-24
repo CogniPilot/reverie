@@ -112,9 +112,14 @@ describe('the default view', () => {
     const h = await createHarness({ sessions, rooms: fixtureRooms() });
     const side = labels(h.document.querySelectorAll('.ca-side-scroll button:not(.ca-item-act)'));
     expect(side).toEqual([
+      'Office',
       'Company',
       'Board',
       'Handbook',
+      'Workspace',
+      'Bots',
+      'People',
+      'Laptop previews',
       'Build category, 1 mention',
       'Channel General',
       'Channel Ops, 1 mention',
@@ -4145,7 +4150,7 @@ describe('the Board entry', () => {
     const h = await createHarness({ sessions, rooms: fixtureRooms() });
     const scroll = h.document.querySelector('.ca-side-scroll')!;
     expect(scroll.firstElementChild!.classList.contains('ca-pages')).toBe(true);
-    expect([...scroll.querySelectorAll('.ca-pages .ca-item')].map((b) => b.textContent)).toEqual(['Company', 'Board', 'Handbook']);
+    expect([...scroll.querySelectorAll('.ca-pages .ca-item')].map((b) => b.textContent)).toEqual(['Company', 'Board', 'Handbook', 'Workspace', 'Bots', 'People', 'Laptop previews']);
     expect(entry(h, 'board').draggable).toBe(false);
     expect(h.document.querySelector('.ca-page')).toBeNull();
   });
@@ -4294,4 +4299,56 @@ describe('consolidated Voice on phones', () => {
     expect(started).toBe(1);
     expect(h.app._voiceEngineInfo().engine).toBe('speech');
   });
+});
+
+it('updates offline members immediately when their session restarts, and updates them again on exit', async () => {
+  const h = await createHarness({ sessions: [{ id: B, name: 'bravo', status: 'stopped', pid: null }], rooms: [room('r1', 'Office', [member(B, 'bravo', { alive: false })])] });
+  const label = () => h.document.querySelector('.ca-member')!.getAttribute('aria-label');
+  expect(label()).toContain('offline');
+  h.app._onSessionUpdated({ session: { id: B, name: 'bravo', status: 'idle', pid: 42 } });
+  await settle(60);
+  expect(label()).toContain('idle');
+  expect(h.document.querySelector('.ca-members-head')!.textContent).toBe('Online — 1');
+  h.app._onSessionUpdated({ session: { id: B, status: 'stopped', pid: null } });
+  await settle(60);
+  expect(label()).toContain('offline');
+  h.dom.window.close();
+});
+
+
+it('revalidates channel changes missed in the terminal when Back to chat is pressed, preserving the draft', async () => {
+  const h = await createHarness({ sessions, rooms: fixtureRooms() });
+  h.app._chatEls.input.value = 'unfinished message';
+  h.shell.showDebug(A);
+  h.server.rooms.push(room('new-room', 'New team channel', [member(A, 'alpha')]));
+  h.document.querySelector('.ca-back').click();
+  await settle(100);
+  expect(h.shell.rooms.some(room => room.id === 'new-room')).toBe(true);
+  expect(h.document.querySelector('.ca-side').textContent).toContain('New team channel');
+  expect(h.app._chatEls.input.value).toBe('unfinished message');
+  expect(h.shell.view).toBe('chat');
+  h.dom.window.close();
+});
+
+it('browser Back returns from a debug session to the full conversation shell', async () => {
+  const h = await createHarness({ sessions, rooms: fixtureRooms() });
+  h.shell.showDebug(A);
+  h.window.history.replaceState({}, '', '/');
+  h.window.dispatchEvent(new h.window.PopStateEvent('popstate'));
+  await settle(100);
+  expect(h.shell.view).toBe('chat');
+  expect(h.document.querySelector('#chatApp').hidden).toBe(false);
+  expect(h.document.querySelector('.ca-side').textContent).toContain('General');
+  h.dom.window.close();
+});
+
+it('turns shared workspace artifact paths into browser downloads, including inline code but excluding fenced code', async () => {
+  const path = '/reverie_workspace/projects/example/demo.mp4';
+  const h = await createHarness({ sessions, rooms: [room('r1', 'Office', [member(A, 'alpha')], { messages: [message('video', 'r1', agent(A, 'alpha'), 'Video: `' + path + '`\n```\n' + path + '\n```', 1000)] })] });
+  const links = [...h.document.querySelectorAll('.ca-workspace-download')];
+  expect(links).toHaveLength(1);
+  expect(links[0].getAttribute('href')).toBe('/api/filesystem/download?path=' + encodeURIComponent(path));
+  expect(links[0].getAttribute('download')).toBe('demo.mp4');
+  expect(h.document.querySelector('pre .ca-workspace-download')).toBeNull();
+  h.dom.window.close();
 });

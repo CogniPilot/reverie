@@ -1,4 +1,6 @@
 import json
+import os
+import re
 import urllib.parse
 import urllib.request
 
@@ -9,22 +11,33 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
 
 
 class TokenMeter:
-    def __init__(self, base_url, *, context_ceiling, margin=512, timeout_s=3, max_bytes=1048576):
+    def __init__(self, base_url, *, context_ceiling, margin=512, timeout_s=3, max_bytes=1048576, key_env=None, image_tokens_per_image=0):
         parsed = urllib.parse.urlsplit(base_url)
         if (parsed.scheme not in ('http', 'https') or not parsed.hostname or parsed.username or parsed.password or
                 parsed.query or parsed.fragment):
             raise ValueError('invalid tokenizer endpoint')
         if type(context_ceiling) is not int or context_ceiling <= 0 or type(margin) is not int or margin < 0:
             raise ValueError('invalid token budget')
+        if type(image_tokens_per_image) is not int or not 0 <= image_tokens_per_image <= 8192:
+            raise ValueError('invalid image token budget')
+        self.image_tokens_per_image = image_tokens_per_image
         self.base_url = base_url.rstrip('/')
+        if key_env is not None and (not isinstance(key_env, str) or not re.fullmatch(r'[A-Z_][A-Z0-9_]*', key_env)):
+            raise ValueError('invalid tokenizer API key environment variable')
+        self.key_env = key_env
         self.context_ceiling, self.margin = context_ceiling, margin
         self.timeout_s, self.max_bytes = timeout_s, max_bytes
         self.opener = urllib.request.build_opener(NoRedirect())
 
     def request(self, path, payload=None):
         data = None if payload is None else json.dumps(payload, ensure_ascii=False).encode('utf-8')
-        request = urllib.request.Request(self.base_url + path, data=data,
-                                         headers={'Content-Type': 'application/json'})
+        headers = {'Content-Type': 'application/json'}
+        if self.key_env:
+            key = os.environ.get(self.key_env)
+            if not key:
+                raise ValueError('configured tokenizer API key is unavailable')
+            headers['Authorization'] = 'Bearer ' + key
+        request = urllib.request.Request(self.base_url + path, data=data, headers=headers)
         with self.opener.open(request, timeout=self.timeout_s) as stream:
             raw = stream.read(self.max_bytes + 1)
         if len(raw) > self.max_bytes:
@@ -50,7 +63,21 @@ class TokenMeter:
                                            'parse_special': True, 'with_pieces': False}).get('tokens')
         if not isinstance(tokens, list) or any(type(token) is not int for token in tokens):
             raise ValueError('invalid tokenizer result')
+        images = 0
+        for message in payload.get('messages', []):
+            if not isinstance(message, dict):
+                raise ValueError('invalid prompt message')
+            content = message.get('content')
+            if isinstance(content, list):
+                for part in content:
+                    if not isinstance(part, dict):
+                        raise ValueError('invalid multimodal prompt part')
+                    images += part.get('type') == 'image_url'
+        if images and not self.image_tokens_per_image:
+            raise ValueError('vision requires an explicit image encoder token budget')
+        encoder_tokens = images * self.image_tokens_per_image
         context = min(actual, self.context_ceiling)
         return {'prompt_tokens': len(tokens), 'context_tokens': context, 'output_tokens': completion,
                 'margin': self.margin, 'slots': slots,
-                'admitted': len(tokens) + completion + self.margin <= context}
+                'image_tokens': encoder_tokens,
+                'admitted': len(tokens) + encoder_tokens + completion + self.margin <= context}

@@ -58,6 +58,24 @@ class TokenTests(unittest.TestCase):
         result = client({'model': 'configured-model', 'max_tokens': 1024}, 1)
         self.assertTrue(result['_context_overflow'])
 
+    def test_vision_reserves_the_configured_encoder_limit_for_every_image(self):
+        payload = {'max_tokens': 1800, 'messages': [{'role': 'user', 'content': [
+            {'type': 'text', 'text': 'Look'}, {'type': 'image_url', 'image_url': {'url': 'data:image/png;base64,fixture'}}]}]}
+        meter, _ = self.meter(context=4096, count=600)
+        with self.assertRaises(ValueError): meter.measure(payload)
+        meter.image_tokens_per_image = 2048
+        result = meter.measure(payload)
+        self.assertEqual(result['image_tokens'], 2048)
+        self.assertFalse(result['admitted'])  # Text alone would have fit.
+        payload['max_tokens'] = 100
+        self.assertTrue(meter.measure(payload)['admitted'])
+        payload['messages'][0]['content'].append({'type': 'image_url', 'image_url': {'url': 'data:image/png;base64,fixture'}})
+        result = meter.measure(payload)
+        self.assertEqual(result['image_tokens'], 4096)
+        self.assertFalse(result['admitted'])
+        for value in (True, -1, 8193):
+            with self.assertRaises(ValueError): TokenMeter('http://local', context_ceiling=32768, image_tokens_per_image=value)
+
 
 if __name__ == '__main__':
     unittest.main()

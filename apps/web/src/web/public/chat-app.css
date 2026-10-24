@@ -1177,6 +1177,15 @@ button.ca-stat:focus-visible { outline:2px solid var(--accent); outline-offset:2
 
 /* Board and Plans: pinned above the list, shown in the main pane over the conversation. */
 .ca-pages { display: flex; flex-direction: column; margin-bottom: 6px; padding-bottom: 6px; border-bottom: 1px solid var(--ca-line); }
+.ca-office-links { display:flex; flex-direction:column; }
+.ca-office-links[hidden], .ca-office-current[hidden] { display:none; }
+.ca-pages-toggle { display:flex; align-items:center; gap:6px; width:100%; min-height:30px; padding:4px 8px; border:0; border-radius:4px; color:var(--text-muted, #a0a4ae); background:transparent; font:inherit; font-size:12px; text-align:left; cursor:pointer; }
+.ca-pages-toggle:hover { color:var(--text); background:var(--ca-hover); }
+.ca-pages-toggle:focus-visible { outline:2px solid var(--accent, #91a4ff); outline-offset:2px; }
+.ca-pages-toggle svg { width:14px; height:14px; flex:none; }
+.ca-pages-toggle .is-folded { transform:rotate(-90deg); }
+.ca-office-current { margin-left:auto; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:11px; }
+@media(max-width:767px) { .ca-pages-toggle, .ca-office-links .ca-item { min-height:44px; } }
 .ca-body { position: relative; }
 /* z-index 2 keeps the page and org panels under the phone drawers (3); the scrim (2) comes later in the DOM so it still covers them. */
 .ca-page { position: absolute; inset: 0; z-index: 2; display: flex; background: var(--ca-main-bg); }

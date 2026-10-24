@@ -1,9 +1,9 @@
 /** An unavailable worker broker must never turn into execution in the server. */
 const quote = (value: string) => "'" + value.replaceAll("'", "'\\''") + "'";
 
-export function workerLaunchCommand(command: string, cwd: string, sessionId: string): string {
+export function workerLaunchCommand(command: string, cwd: string, sessionId: string, attachOnly = false): string {
   if (!process.env.REVERIE_WORKER_SOCKET) return command;
-  return `exec reverie-worker-exec --session-id ${quote(sessionId)} --cwd ${quote(cwd)} --command ${quote(command)}`;
+  return `exec reverie-worker-exec${attachOnly ? ' --attach-only' : ''} --session-id ${quote(sessionId)} --cwd ${quote(cwd)} --command ${quote(command)}`;
 }
 
 export function workerPtyCommand(binary: string, args: string[], cwd: string, sessionId: string): { binary: string; args: string[] } {

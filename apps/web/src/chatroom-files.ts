@@ -16,7 +16,8 @@
 
 import { randomUUID } from 'node:crypto';
 import fs from 'node:fs/promises';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
+import { sharedAttachmentsRoot } from './shared-attachments.js';
 
 export const MAX_FILE_BYTES = 25 * 1024 * 1024;
 export const MAX_ROOM_BYTES = 2 * 1024 * 1024 * 1024;
@@ -103,6 +104,52 @@ export class ChatFileStore {
     this.maxRoom = limits.maxRoom ?? MAX_ROOM_BYTES;
   }
 
+  /** Import legacy uploads once before serving, preserving originals for rollback. */
+  async initializeShared(): Promise<void> {
+    const shared = sharedAttachmentsRoot();
+    if (!shared) return;
+    await fs.mkdir(shared, { recursive: true, mode: 0o700 });
+    if ((await fs.lstat(shared)).isSymbolicLink()) throw new Error('Shared attachment root may not be a symlink');
+    const marker = join(shared, '.reverie-upload-imported');
+    try { await fs.access(marker); return; } catch { /* first boot or resumable import */ }
+    const legacy = join(this.root, 'chatroom-files');
+    let rooms: import('node:fs').Dirent[];
+    try { rooms = await fs.readdir(legacy, { withFileTypes: true }); } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      rooms = [];
+    }
+    for (const entry of rooms) {
+      if (!entry.isDirectory() || !/^[A-Za-z0-9-]{1,64}$/.test(entry.name)) continue;
+      const source = join(legacy, entry.name), target = this.roomDir(entry.name);
+      await fs.mkdir(target, { recursive: true, mode: 0o700 });
+      if ((await fs.lstat(target)).isSymbolicLink()) throw new Error('Shared attachment room may not be a symlink');
+      let index: ChatFile[];
+      try { index = JSON.parse(await fs.readFile(join(source, 'index.json'), 'utf8')); } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue;
+        throw error;
+      }
+      if (!Array.isArray(index)) throw new Error('Invalid legacy upload index');
+      for (const file of index) {
+        if (basename(file.stored) !== file.stored || !file.stored.startsWith(file.id + '-')) throw new Error('Invalid legacy upload filename');
+        const destination = join(target, file.stored);
+        try {
+          const present = await fs.lstat(destination);
+          if (!present.isFile() || present.size !== file.size) throw new Error('Conflicting shared upload');
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+          const original = await fs.lstat(join(source, file.stored));
+          if (!original.isFile() || original.size !== file.size) throw new Error('Invalid legacy upload');
+          const temporary = destination + '.' + randomUUID() + '.tmp';
+          await fs.copyFile(join(source, file.stored), temporary);
+          await fs.rename(temporary, destination);
+          await fs.chmod(destination, 0o444);
+        }
+      }
+      await writeAtomic(join(target, 'index.json'), JSON.stringify(index));
+    }
+    await writeAtomic(marker, 'Legacy uploads imported; originals retained for rollback.\n');
+  }
+
   private serial<T>(fn: () => Promise<T>): Promise<T> {
     const next = this.chain.then(fn, fn);
     this.chain = next.catch(() => {});
@@ -111,7 +158,7 @@ export class ChatFileStore {
 
   roomDir(roomId: string): string {
     if (!/^[A-Za-z0-9-]{1,64}$/.test(roomId)) throw new ChatFileError('Bad room id', 400);
-    return join(this.root, 'chatroom-files', roomId);
+    return join(sharedAttachmentsRoot() ?? join(this.root, 'chatroom-files'), roomId);
   }
 
   async list(roomId: string): Promise<ChatFile[]> {
@@ -149,6 +196,7 @@ export class ChatFileStore {
       const name = safeFileName(input.name);
       const stored = `${id}-${name}`;
       await writeAtomic(join(dir, stored), input.data);
+      if (sharedAttachmentsRoot()) await fs.chmod(join(dir, stored), 0o444);
       const file: ChatFile = {
         id,
         name,
@@ -176,7 +224,12 @@ export class ChatFileStore {
       const dir = this.roomDir(roomId);
       try {
         await fs.mkdir(join(this.root, 'chatroom-files-deleted'), { recursive: true });
-        await fs.rename(dir, join(this.root, 'chatroom-files-deleted', `${roomId}-${Date.now()}`));
+        const archive = join(this.root, 'chatroom-files-deleted', `${roomId}-${Date.now()}`);
+        try { await fs.rename(dir, archive); } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== 'EXDEV') throw error;
+          await fs.cp(dir, archive, { recursive: true, errorOnExist: true, force: false });
+          await fs.rm(dir, { recursive: true });
+        }
       } catch {
         /* no files for this room */
       }

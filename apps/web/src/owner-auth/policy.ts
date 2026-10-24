@@ -1,3 +1,4 @@
+import { LIMITED_ROUTES, limitedAsset } from './limited-access.js';
 import { isEmbassyProtocolRoute } from '../embassy-public-routes.js';
 /**
  * @fileoverview Who may call what, once an owner account exists.
@@ -41,14 +42,33 @@ export const DEVICE_COOKIE = 'reverie_owner_device';
 export const SERVICE_HEADER = 'x-reverie-service-token';
 
 export type RouteClass = 'public' | 'agent' | 'service' | 'owner';
-export type CallerKind = 'owner' | 'restricted-owner' | 'service' | 'agent' | 'invalid' | 'anonymous';
+export type CallerKind = 'owner' | 'restricted-owner' | 'limited' | 'service' | 'agent' | 'invalid' | 'anonymous';
 export interface Caller {
   kind: CallerKind;
   /** The agent's own session id, for an agent caller. */
   session?: string;
 }
 
+/** These handlers require an owner-made coordinator seat; services must never become headerless owners. */
+const BOARD_DECISION_ROUTES = new Set(['POST /api/board/decisions', 'POST /api/board/decisions/:id/clear']);
+
+// Exact routine routes only. Handlers retain explicit grants, author/room checks and
+// post-only mutations; bot/grant management stays owner-only. Service tokens must
+// not enter a handler's no-agent-header owner branch.
+const ROUTINE_ROUTES = new Set([
+  'GET /api/cron/jobs',
+  'GET /api/cron/jobs/:id',
+  'GET /api/cron/jobs/:id/runs',
+  'GET /api/cron/runs',
+  'POST /api/cron/jobs',
+  'PUT /api/cron/jobs/:id',
+  'DELETE /api/cron/jobs/:id',
+  'PUT /api/cron/jobs/:id/enabled',
+  'POST /api/cron/jobs/:id/run',
+]);
+
 const AGENT_ROUTES = new Set([
+  ...ROUTINE_ROUTES,
   'POST /api/system/restart-website', // the host broker checks the explicit maintenance session grant
   'GET /api/sessions',
   'GET /api/sessions/:id',
@@ -85,6 +105,7 @@ const AGENT_ROUTES = new Set([
   'GET /api/board',
   'POST /api/board/issues',
   'PATCH /api/board/issues/:id',
+  ...BOARD_DECISION_ROUTES,
 ]);
 /**
  * What an owner-set admin agent may call besides the agent routes. A whitelist: anything that sets
@@ -206,7 +227,7 @@ export interface PolicyDeps {
 
 export function callerOf(req: FastifyRequest, deps: Pick<PolicyDeps, 'service' | 'ctx'>): Caller {
   const session = deps.service.session(req.cookies?.[OWNER_COOKIE]);
-  if (session) return { kind: session.restricted ? 'restricted-owner' : 'owner' };
+  if (session) return { kind: session.role === 'limited' ? 'limited' : session.restricted ? 'restricted-owner' : 'owner' };
   const token = req.headers[SERVICE_HEADER];
   if (typeof token === 'string' && deps.service.service(token)) return { kind: 'service' };
   if (req.headers['x-reverie-parent-session'] !== undefined) {
@@ -279,6 +300,21 @@ export function registerOwnerPolicy(app: FastifyInstance, deps: PolicyDeps): voi
     reply.code(status).send(createErrorResponse(status === 401 ? ApiErrorCode.UNAUTHORIZED : code, message));
 
   app.addHook('onRequest', async (req: FastifyRequest, reply: FastifyReply) => {
+    // Limited accounts remain limited even when an operator changes the owner policy to off/log.
+    const signedIn = deps.service.session(req.cookies?.[OWNER_COOKIE]);
+    if (signedIn?.role === 'limited') {
+      const route = req.routeOptions?.url, path = decodedPath(req.url ?? '');
+      const key = `${req.method} ${route}`;
+      if (req.headers['x-reverie-parent-session'] !== undefined || req.headers[SERVICE_HEADER] !== undefined)
+        return refuse(reply, 403, 'A human login cannot act as an agent or service');
+      if ((!SAFE_METHODS.has(req.method) || req.headers.upgrade) && !sameOrigin(req))
+        return refuse(reply, 403, 'Requests must come from this console');
+      if (path === '/' || path === '/index.html') return reply.redirect(`${deps.basePath ?? ''}${signedIn.restricted ? '/owner/account' : '/office'}`);
+      if (signedIn.restricted && !RESTRICTED_ROUTES.has(key) && !['/owner/account', '/owner/owner.js'].includes(path ?? ''))
+        return refuse(reply, 403, 'Change the one-time password first', ApiErrorCode.PASSWORD_CHANGE_REQUIRED);
+      if (LIMITED_ROUTES.has(key) || (path && limitedAsset(req.method, path))) return;
+      return refuse(reply, 403, 'This login has limited channel access');
+    }
     const policy = deps.service.policy();
     if (policy === 'off' && !hasDelegatedSessionCreate()) return;
     const route = req.routeOptions?.url;
@@ -328,10 +364,16 @@ export function registerOwnerPolicy(app: FastifyInstance, deps: PolicyDeps): voi
       }
       return;
     }
+    if (caller.kind === 'service' && BOARD_DECISION_ROUTES.has(key)) {
+      return deny(403, 'Only the owner or a coordinator may update board decisions', 'decision_service');
+    }
     const admin = caller.kind === 'agent' && ADMIN_ROUTES.has(key) && deps.relations.admin(caller.session!);
     if (admin) {
       adminGrants.set(req, caller.session!);
       auditHourly('admin_action', `${caller.session} ${key}`, { caller: caller.session, route: key });
+    }
+    if (ROUTINE_ROUTES.has(key) && caller.kind === 'service') {
+      return deny(403, 'Service tokens cannot act as routine authors', 'routine_service');
     }
     if (!admin && !delegatedHire && !allowed(routeClass, caller.kind)) {
       if (caller.kind === 'anonymous') return deny(401, 'Sign in as the owner', 'anonymous');

@@ -12,7 +12,7 @@ Move own plan allows an expert to request its own plan move. Manage team plans p
 
 ## Sleep and Dream
 
-Sleep allows memory consolidation; Dream allows creative exploration. They are eligibility preferences, not instructions to start background work or a nightly timer. Scheduling requires an explicit owner or authorized scheduler decision. Dream output is an idea, not verified evidence.
+Sleep allows memory consolidation; Dream allows creative exploration. They are eligibility preferences, not instructions to start background work or a nightly timer. Scheduling requires an explicit owner or authorized scheduler decision; the Sleep and Dream scheduling connection is not implemented yet. Dream output is an idea, not verified evidence.
 
 ## Saving
 

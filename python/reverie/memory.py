@@ -20,6 +20,7 @@ import json
 import sqlite3
 import threading
 import time
+import weakref
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -162,6 +163,9 @@ class MemoryStore:
         self._lock = threading.RLock()
         self._atomic_depth = 0  # > 0 inside atomic(): writes join that one transaction
         self._db = sqlite3.connect(str(self.path), check_same_thread=False, timeout=30)
+        # Close abandoned stores before SQLite's connection finalizer runs. The
+        # callback retains the connection, not the store, and is safe at shutdown.
+        self._finalize = weakref.finalize(self, self._db.close)
         self._db.row_factory = sqlite3.Row
         with self._lock:
             if str(self.path) != ":memory:":
@@ -536,4 +540,4 @@ class MemoryStore:
 
     def close(self) -> None:
         with self._lock:
-            self._db.close()
+            self._finalize()

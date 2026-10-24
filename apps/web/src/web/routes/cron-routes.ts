@@ -58,6 +58,12 @@ export function registerCronRoutes(app: FastifyInstance, ctx: CronPort, verified
 
   // ── Jobs ────────────────────────────────────────────────────────────────
 
+  app.get('/api/cron/active', async (req, reply) => {
+    if (!verifiedOwner(req)) return reply.code(403).send(createErrorResponse(ApiErrorCode.FORBIDDEN, 'Owner sign-in required'));
+    const jobs = ctx.cron.listRunningJobs().filter((job) => canAccessOwned(getAuthUser(req), job.owner));
+    return { jobs: jobs.map(({ id, name }) => ({ id, name })) };
+  });
+
   // The verified owner or an explicitly delegated employee may author post jobs.
   // Delegate changes are announced and audited before they happen; bot policy stays owner-only.
   const header = (req: FastifyRequest, name: string): string | undefined => {
@@ -107,9 +113,11 @@ export function registerCronRoutes(app: FastifyInstance, ctx: CronPort, verified
     if (verb === 'created' && ctx.cron.listJobs().filter((j) => j.createdBy?.employeeId === employee.id).length >= ROUTINES_PER_AUTHOR) {
       return refuse(`You already have ${ROUTINES_PER_AUTHOR} routines; remove one first`);
     }
-    const general = policy.notificationRoomId();
+    const scope = ownerFor(req);
+    const announcement = policy.notificationRoomId(scope);
     const text = `${employee.name} (${employee.position}) ${verb} post job "${name}"${detail.fields.length ? ` (${detail.fields.join(', ')})` : ''}`;
-    if (!general || !policy.notify(general, text)) return refuse('The general could not be told, so the change was not made');
+    if (!announcement || !policy.notify(announcement, text, scope))
+      return refuse('The routine announcement room could not be told, so the change was not made');
     void appendAdminAudit({ admin: `${employee.name} (${employee.id})`, action: `post_job_${verb}`, target: name, ip: req.ip, detail });
     return undefined;
   };
@@ -149,7 +157,7 @@ export function registerCronRoutes(app: FastifyInstance, ctx: CronPort, verified
   // What an agent may read of a job or run that is not its own: when, where and by whom, never what it says. An allowlist,
   // so a field added to the job later (rendered text, notes, commands, errors that quote the text) stays hidden by default.
   const PUBLIC_JOB_FIELDS = [
-    'id', 'name', 'action', 'postAs', 'createdBy', 'roomId', 'enabled', 'scheduleType', 'runAt', 'intervalMinutes', 'timeZone',
+    'id', 'name', 'action', 'postAs', 'createdBy', 'createdByOwner', 'roomId', 'enabled', 'scheduleType', 'runAt', 'intervalMinutes', 'timeZone',
     'dailyTime', 'weeklyDays', 'weeklyTime', 'createdAt', 'updatedAt', 'lastRunAt', 'nextRunAt', 'lastStatus',
   ] as const;
   const PUBLIC_RUN_FIELDS = ['id', 'cronJobId', 'startedAt', 'finishedAt', 'status', 'triggerType'] as const;
@@ -178,7 +186,7 @@ export function registerCronRoutes(app: FastifyInstance, ctx: CronPort, verified
       if (caller === undefined && body.postAs === 'author') {
         return createErrorResponse(ApiErrorCode.INVALID_INPUT, 'postAs author is only for an employee\'s own routine');
       }
-      return { job: ctx.cron.createJob(body, ownerFor(req), author && { employeeId: author.id }) };
+      return { job: ctx.cron.createJob(body, ownerFor(req), author && { employeeId: author.id }, verifiedOwner(req)) };
     }
     // Section 6.2: confine the job's workingDir to the owner's case space (mirrors
     // POST /api/sessions). No-op allow-all for admins/single-user. workingDir is
@@ -198,7 +206,7 @@ export function registerCronRoutes(app: FastifyInstance, ctx: CronPort, verified
         'Shell/launchCommand cron jobs require the can-bypass-permissions grant'
       );
     }
-    return { job: ctx.cron.createJob(body, ownerFor(req)) };
+    return { job: ctx.cron.createJob(body, ownerFor(req), undefined, verifiedOwner(req)) };
   });
 
   app.get('/api/cron/jobs/:id', async (req) => {
@@ -296,7 +304,7 @@ export function registerCronRoutes(app: FastifyInstance, ctx: CronPort, verified
   });
 
   app.get('/api/cron/runs', async (req) => {
-    let runs = ctx.cron.listRuns();
+    const runs = ctx.cron.listRuns();
     const caller = header(req, 'x-reverie-parent-session');
     if (caller !== undefined) {
       // Owner scope below still applies; then an agent keeps its own runs whole and sees only times and outcomes of the rest.

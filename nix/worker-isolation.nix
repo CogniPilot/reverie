@@ -45,7 +45,9 @@ in {
         ProtectHome = "read-only";
         ReadWritePaths = [ cfg.stateRoot cfg.socketDirectory cfg.scratchRoot cfg.apiSocketRoot ];
         MemoryMax = "512M";
-        TasksMax = 256;
+        # Docker attach clients and Python HTTP handlers all count as tasks.
+        # Retain the effective deployed limit; capacity expansion needs measurement.
+        TasksMax = 512;
       };
     };
   };

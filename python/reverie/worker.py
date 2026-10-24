@@ -29,11 +29,12 @@ import threading
 import time
 import tty
 import uuid
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlsplit
 
 if __package__:
     from .worker_gpu import gpu_create_args, validate_gpu_grants
     from .worker_resources import effective_config, policy_digest, validate_session_resources, validate_resource_reload
+    from .worker_nix import prepare_store
 else:
     # Host migration tools also load this file with spec_from_file_location;
     # their sys.path need not contain the sibling module's directory.
@@ -50,6 +51,10 @@ else:
     policy_digest = _resource_module.policy_digest
     validate_session_resources = _resource_module.validate_session_resources
     validate_resource_reload = _resource_module.validate_resource_reload
+    _nix_spec = importlib.util.spec_from_file_location('reverie_worker_nix', Path(__file__).with_name('worker_nix.py'))
+    _nix_module = importlib.util.module_from_spec(_nix_spec)
+    _nix_spec.loader.exec_module(_nix_module)
+    prepare_store = _nix_module.prepare_store
 
 MAX_FRAME = 256 * 1024
 OFFLINE_GRACE_SECONDS = 600
@@ -80,10 +85,12 @@ def receive_frame(connection):
 
 
 def validate_request(request, config):
-    if not isinstance(request, dict) or set(request) != {"sessionId", "cwd", "command", "env", "cols", "rows"}:
+    if not isinstance(request, dict) or set(request) - {"attachOnly"} != {"sessionId", "cwd", "command", "env", "cols", "rows"}:
         raise ValueError("Invalid worker request")
     if not isinstance(request['sessionId'], str) or not SESSION.fullmatch(request['sessionId']):
         raise ValueError("Invalid session identifier")
+    if "attachOnly" in request and type(request["attachOnly"]) is not bool:
+        raise ValueError("Invalid attach-only request")
     cwd = request['cwd']
     if not isinstance(cwd, str) or not cwd.startswith('/') or '\0' in cwd or '..' in Path(cwd).parts:
         raise ValueError("Invalid worker directory")
@@ -207,6 +214,7 @@ def account_mounts(config, environment):
     return [arg for destination, source in mounts.items() for arg in ['--mount', f'type=bind,src={source},dst={destination}']]
 
 
+PLAN_CREDENTIAL_EXPORT = re.compile(r"^/api/plans/requests/[^/]+/credential/?$")
 PLAN_DECISION = re.compile(r"^/api/plans/requests/([a-zA-Z0-9][a-zA-Z0-9_-]{0,99})/(approve|reject)$")
 
 
@@ -216,6 +224,9 @@ def office_plan_approval(company_root, session_id, path, method, query, body):
     The console remains authoritative for binding, expiry, authorization and replay.
     All path components are opened no-follow; refusals contain no path or credential.
     """
+    # Retired credential export never reaches upstream or a private lookup.
+    if PLAN_CREDENTIAL_EXPORT.fullmatch(unquote(path)):
+        raise ValueError('Plan approval credential export is unavailable')
     match = PLAN_DECISION.fullmatch(path)
     if match is None:
         return None
@@ -374,7 +385,7 @@ class OfficeAPI:
                         chunk = response.read1(min(65536, remaining))
                         if not chunk: break
                         self.wfile.write(chunk); self.wfile.flush(); remaining -= len(chunk)
-                except (OSError, ValueError, KeyError, http.client.HTTPException):
+                except (OSError, ValueError, KeyError, RuntimeError, http.client.HTTPException):
                     self.close_connection = True
                 finally:
                     if upstream: upstream.close()
@@ -425,6 +436,7 @@ class Broker:
         self.maintenance_lock = threading.Lock()
         self.last_maintenance = 0.
         self.stopping = threading.Event()
+        self.nix_prepare_lock = threading.Lock()
         self.connections = threading.BoundedSemaphore(config['maxWorkers'] + 4)
 
     def run_engine(self, args, optional=False):
@@ -457,7 +469,25 @@ class Broker:
         except (OSError, ValueError, KeyError):
             raise RuntimeError('Company state is unavailable; refusing worker execution')
         employee = next((e for e in employees if e.get('sessionId') == session_id), None)
-        return employee is None or (not employee.get('onVacation') and employee.get('desiredRunning') is not False)
+        if employee is not None:
+            return not employee.get('onVacation') and employee.get('desiredRunning') is not False
+        # Detaching a terminal intentionally leaves its laptop running through
+        # website restarts. A finished/rolled-back plan move is different: its
+        # durable transaction identifies exactly which detached laptop to stop.
+        journal = Path(self.config['companyFile']).with_name('plan-moves.json')
+        try:
+            moves = json.loads(journal.read_text())
+            if not isinstance(moves, list):
+                raise ValueError('invalid plan journal')
+            for move in moves:
+                if (move.get('oldSession') == session_id and move.get('phase') in ('stopping', 'completed') or
+                        move.get('newSession') == session_id and move.get('phase') == 'failed'):
+                    return False
+        except FileNotFoundError:
+            pass
+        except (OSError, ValueError, AttributeError):
+            raise RuntimeError('Plan move state is unavailable; refusing detached worker execution')
+        return True
 
     def stop(self, name):
         self.run_engine(['stop', '--time', '2', name], optional=True)
@@ -610,6 +640,30 @@ class Broker:
             self.config=updated
         return {'action':'reload-resources','success':True}
 
+    def running_sessions(self):
+        # Owner-only broker inventory, never inferred from website tmux metadata.
+        running = []
+        for sid, name in list(self.laptops.items()):
+            result = self.run_engine(['inspect', name], optional=True)
+            if result.returncode:
+                continue
+            item = json.loads(result.stdout)[0]
+            labels = item['Config']['Labels'] or {}
+            if (not item['State']['Running'] or labels.get('reverie.worker') != self.config['deployment'] or
+                    labels.get('reverie.session') != sid or not self.allowed(sid)):
+                continue
+            home = Path(self.config['stateRoot']) / sid / 'home'
+            try:
+                metadata = json.loads((home.parent / 'runtime.json').read_text())
+                if (home / '.reverie-launch' / metadata['exit']).exists():
+                    continue
+            except (OSError, ValueError, KeyError):
+                continue
+            pane = self.run_engine(tmux_exec_args(name, 'display-message', '-p', '-t', 'office', '#{pane_dead}'), optional=True)
+            if pane.returncode == 0 and pane.stdout.strip() == '0':
+                running.append(sid)
+        return sorted(running)
+
     def control(self, action, caller=None):
         if caller is not None and (action != 'restart-website' or caller not in self.config['maintenanceSessions']):
             raise ValueError('This laptop has no owner-granted website maintenance permission')
@@ -617,7 +671,7 @@ class Broker:
             return self.reload_resources()
         if action == 'status':
             with self.lock:
-                return {'runningLaptops': len(self.laptops), 'offlineGraceSeconds': OFFLINE_GRACE_SECONDS}
+                return {'runningLaptops': len(self.laptops), 'runningSessionIds': self.running_sessions(), 'offlineGraceSeconds': OFFLINE_GRACE_SECONDS}
         if action not in ['stop-laptops', 'shutdown', 'restart-website']:
             raise ValueError('Unknown office power action')
         if action in ['stop-laptops', 'shutdown']:
@@ -755,6 +809,12 @@ class Broker:
                         exit_file = home/'.reverie-launch'/metadata['exit']
                         if not exit_file.exists():
                             reuse = True
+                if request.get('attachOnly') and not reuse:
+                    raise ValueError('The existing laptop is unavailable; reconnect never starts a replacement')
+                if request.get('attachOnly'):
+                    pane = self.run_engine(tmux_exec_args(name, 'display-message', '-p', '-t', 'office', '#{pane_dead}'), optional=True)
+                    if pane.returncode or pane.stdout.strip() != '0':
+                        raise ValueError('The existing laptop process has exited')
                 resources=effective_config(self.config,session_id)
                 if reuse and resources['budgetMode']=='pool':
                     self.check_pool(config=resources,require_headroom=False)
@@ -768,7 +828,26 @@ class Broker:
                 admitted = True
                 if previous.returncode==0 and not reuse:
                     self.stop(name)
-                    self.run_engine(['rm',name])
+                if not reuse:
+                    # Store copies may take time. Keep existing office phones,
+                    # control actions and terminal attachments responsive.
+                    prepared_config = effective_config(self.config, session_id)
+                    self.lock.release()
+                    try:
+                        nix_store = prepare_store(self, prepared_config, session_id)
+                    finally:
+                        self.lock.acquire()
+                    if generation != self.generation or self.stopping.is_set() or self.draining.is_set() or not self.allowed(session_id):
+                        raise RuntimeError('Laptop launch cancelled during Nix preparation')
+                    if effective_config(self.config, session_id) != prepared_config:
+                        raise RuntimeError('Laptop policy changed during Nix preparation; retry with the current policy')
+                    self.check_creation_budget(session_id, prepared_config)
+                    if nix_store is not None:
+                        # This is an alias of the laptop's existing private scratch
+                        # grant, never a host store or another laptop's files.
+                        args[-4:-4] = ['--mount', f'type=bind,src={nix_store},dst=/nix']
+                    if previous.returncode == 0:
+                        self.run_engine(['rm', name])
                 self.office(session_id)
                 if not reuse:
                     network = name+'-lan'
@@ -791,7 +870,10 @@ class Broker:
                     args[-4:-4] = account_mounts(self.config, request['env'])
                     self.run_engine(args)
                     owned = True
-                    request['env'].update(REVERIE_SESSION_ID=session_id, REVERIE_API_URL='http://127.0.0.1:8093')
+                    request['env'].update(
+                        REVERIE_SESSION_ID=session_id, REVERIE_API_URL='http://127.0.0.1:8093',
+                        PATH='/home/agent/.nix-profile/bin:/home/agent/.local/bin:/home/agent/.local/state/nix/profiles/profile/bin:/bin:' + request['env'].get('PATH', '/bin'),
+                        NIX_REMOTE='local', NIX_PATH='nixpkgs=flake:nixpkgs')
                     launch_dir = home / '.reverie-launch'
                     launch_dir.mkdir(mode=0o700, exist_ok=True)
                     if launch_dir.is_symlink():
@@ -985,6 +1067,8 @@ def client(args):
     cols, rows = terminal_size()
     env = {k: v for k, v in os.environ.items() if ENV_KEY.fullmatch(k)}
     request = dict(sessionId=args.session_id, cwd=args.cwd, command=args.command, env=env, cols=cols, rows=rows)
+    if args.attach_only:
+        request['attachOnly'] = True
     previous = termios.tcgetattr(0) if os.isatty(0) else None
     resized = threading.Event()
     signal.signal(signal.SIGWINCH, lambda *_: resized.set())
@@ -1050,6 +1134,7 @@ def main():
     execute = commands.add_parser('client')
     execute.add_argument('--control', choices=['status', 'stop-laptops', 'shutdown', 'restart-website', 'reload-resources'])
     execute.add_argument('--caller-session')
+    execute.add_argument('--attach-only', action='store_true')
     execute.add_argument('--session-id')
     execute.add_argument('--cwd')
     execute.add_argument('--command')

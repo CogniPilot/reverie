@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Bots · Reverie</title>
+    <link rel="stylesheet" href="bots.css" />
+    <script defer src="bots.js"></script>
+  </head>
+  <body>
+    <header>
+      <div>
+        <h1>Bots</h1>
+        <p>Scheduled helpers and their latest activity.</p>
+      </div>
+      <a href="./" target="_top">Back to chat</a>
+    </header>
+    <main>
+      <div class="toolbar">
+        <label class="search"
+          >Find a bot or routine<input id="search" type="search" placeholder="Search by name or channel" /></label
+        ><label
+          >Show<select id="filter" aria-label="Show">
+            <option value="all">All routines</option>
+            <option value="running">Running now</option>
+            <option value="enabled">Enabled</option>
+            <option value="disabled">Disabled</option>
+          </select></label
+        ><button id="refresh" type="button">Refresh</button
+        ><button id="new-routine" class="primary" type="button">New routine</button
+        ><button id="new-bot" type="button">Set up a bot</button>
+      </div>
+      <p id="status" role="status">Loading bots…</p>
+      <div id="summary" class="summary" aria-label="Bot activity summary"></div>
+      <section aria-labelledby="routines-title">
+        <h2 id="routines-title">Routines</h2>
+        <p class="hint">Enabled routines run on their schedule. Execution status updates every 10 seconds.</p>
+        <div id="routines" class="cards"></div>
+      </section>
+      <section aria-labelledby="bots-title">
+        <h2 id="bots-title">Bot identities</h2>
+        <p class="hint">Named senders and the channels they may post to.</p>
+        <div id="bots" class="cards"></div>
+      </section>
+      <section aria-labelledby="history-title">
+        <h2 id="history-title">Recent runs</h2>
+        <div id="history" class="cards"></div>
+      </section>
+    </main>
+    <dialog id="bot-dialog" aria-labelledby="bot-title">
+      <form id="bot-form">
+        <h2 id="bot-title">Set up a bot</h2>
+        <label
+          >Identifier<input
+            name="id"
+            required
+            maxlength="40"
+            pattern="[a-z0-9][a-z0-9_-]{0,39}"
+            placeholder="build-watch" /></label
+        ><label>Name<input name="name" required maxlength="40" placeholder="Build Watch" /></label
+        ><label>Emoji (optional)<input name="icon" maxlength="20" placeholder="🔎" /></label>
+        <div class="bot-icon-row">
+          <span id="bot-icon-preview" aria-label="Bot icon preview"></span
+          ><button type="button" id="choose-bot-avatar">Choose avatar</button
+          ><button type="button" id="clear-bot-avatar">Use emoji or initials</button>
+        </div>
+        <fieldset>
+          <legend>Allowed channels</legend>
+          <div id="bot-rooms" class="choices"></div>
+        </fieldset>
+        <label
+          >Maximum posts per hour<input name="maxPerHour" type="number" min="1" max="120" value="30" required
+        /></label>
+        <p id="bot-error" class="error" role="alert"></p>
+        <div class="actions">
+          <button type="button" data-close="bot-dialog">Cancel</button
+          ><button class="primary" type="submit">Save bot</button>
+        </div>
+      </form>
+    </dialog>
+    <dialog id="bot-avatar-dialog" aria-labelledby="bot-avatar-title">
+      <h2 id="bot-avatar-title">Choose an avatar</h2>
+      <p id="bot-avatar-status" role="status"></p>
+      <div id="bot-avatar-list" class="bot-avatar-list"></div>
+      <div class="actions"><button type="button" data-close="bot-avatar-dialog">Cancel</button></div>
+    </dialog>
+    <dialog id="routine-dialog" aria-labelledby="routine-title">
+      <form id="routine-form">
+        <h2 id="routine-title">New routine</h2>
+        <p class="hint">
+          Post a fixed message on a schedule. For data sources or session jobs, use Advanced schedules.
+        </p>
+        <label>Name<input name="name" required maxlength="100" /></label
+        ><label>Bot<select name="botId" aria-label="Bot" required></select></label
+        ><label>Channel<select name="roomId" aria-label="Channel" required></select></label
+        ><label>Message<textarea name="postText" required maxlength="2000" rows="4"></textarea></label
+        ><label
+          >Repeat every (minutes)<input
+            name="intervalMinutes"
+            type="number"
+            min="5"
+            max="525600"
+            value="60"
+            required /></label
+        ><label class="check"><input type="checkbox" name="enabled" />Enable schedule immediately</label>
+        <p class="hint">Saved disabled by default. Saving does not post a message immediately.</p>
+        <p id="routine-error" class="error" role="alert"></p>
+        <div class="actions">
+          <button type="button" data-close="routine-dialog">Cancel</button
+          ><button class="primary" type="submit">Save routine</button>
+        </div>
+      </form>
+    </dialog>
+    <dialog id="content-dialog" aria-labelledby="content-title">
+      <form id="content-form">
+        <h2 id="content-title">Edit routine content</h2>
+        <p class="hint">Changes apply to future runs. The schedule and permissions stay as configured.</p>
+        <label id="content-label"
+          >Content<textarea name="content" rows="12" required spellcheck="false"></textarea>
+        </label>
+        <p id="content-error" class="error" role="alert"></p>
+        <div class="actions">
+          <button type="button" data-close="content-dialog">Cancel</button
+          ><button class="primary" type="submit">Save content</button>
+        </div>
+      </form>
+    </dialog>
+    <footer>
+      <button id="advanced" type="button">Advanced schedules</button><span id="advanced-hint" class="hint"></span>
+    </footer>
+  </body>
+</html>

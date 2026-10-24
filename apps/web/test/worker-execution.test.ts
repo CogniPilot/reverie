@@ -19,3 +19,8 @@ describe('isolated worker execution', () => {
     expect(wrapped).not.toContain('||');
   });
 });
+it('makes website reconnection attach-only without persisting that policy in normal launches', () => {
+  vi.stubEnv('REVERIE_WORKER_SOCKET', '/run/private.sock');
+  expect(workerLaunchCommand('hands', '/workspace', 'id', true)).toContain('--attach-only');
+  expect(workerLaunchCommand('hands', '/workspace', 'id')).not.toContain('--attach-only');
+});

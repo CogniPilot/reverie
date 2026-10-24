@@ -849,6 +849,7 @@ interface ChatMessageRow {
   from: { kind: string; name: string; sessionId?: string };
   to: 'all' | string[];
   text: string;
+  attachments?: Array<{ id: string; name: string; path: string; type: string; size: number }>;
   /** Set when the user deleted the message (its text is then empty). */
   deleted?: { at: number };
   /** A poll: `text` is its question. */
@@ -972,12 +973,13 @@ export function formatChatMessage(m: ChatMessageRow, members: ChatMemberRow[]): 
     ? '(deleted)'
     : m.poll
       ? `${quoteForPane(m.text)} [poll ${m.id.slice(0, 8)}: ${pollTotals(m.poll)}]`
-      : quoteForPane(m.text);
+      : !m.text && m.attachments?.length ? '(attachment only)' : quoteForPane(m.text);
   // An edited message reads as its new text, marked; a pinned one is a room rule or announcement.
+  const attached = m.deleted ? '' : (m.attachments ?? []).map(file => ` [attached: ${quoteForPane(file.path, 400)}]`).join('');
   const marks = `${m.edited && !m.deleted ? ' (edited)' : ''}${m.pinned && !m.deleted ? ' [pinned]' : ''}`;
   return m.from.kind === 'system'
     ? `${time} * ${iconOf(m.from.sessionId)}${body}`
-    : `${time} ${iconOf(m.from.sessionId)}${from}${to}: ${body}${marks}`;
+    : `${time} ${iconOf(m.from.sessionId)}${from}${to}: ${body || (attached ? '(attachment only)' : '')}${attached}${marks}`;
 }
 
 const pollOpen = (poll: ChatPollRow, now = Date.now()): boolean =>
@@ -1273,7 +1275,7 @@ export async function agentChatSay(
   return EXIT.ok;
 }
 
-/** `agent chat emote` — post an action line ("* Ada dances") in your own name. */
+/** `agent chat emote` — post an action line ("* A member dances") in your own name. */
 export async function agentChatEmote(deps: AgentDeps, options: { room?: string; action: string }): Promise<number> {
   const action = options.action.trim();
   if (!action) return fail(deps, 'refusing: empty emote', EXIT.refused);

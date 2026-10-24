@@ -533,6 +533,556 @@
       ],
       "mood": "supportive",
       "src": "/assets/avatars/pack-50.png"
+    },
+    {
+      "id": "pack-102",
+      "name": "Patient Turtle",
+      "tags": [
+        "quiet-ink",
+        "nonhuman",
+        "original-style"
+      ],
+      "mood": "patient",
+      "src": "/assets/avatars/pack-102.png"
+    },
+    {
+      "id": "pack-103",
+      "name": "Curious Firefly",
+      "tags": [
+        "quiet-ink",
+        "nonhuman",
+        "original-style"
+      ],
+      "mood": "curious",
+      "src": "/assets/avatars/pack-103.png"
+    },
+    {
+      "id": "pack-104",
+      "name": "Wry Raccoon",
+      "tags": [
+        "quiet-ink",
+        "nonhuman",
+        "original-style"
+      ],
+      "mood": "wry",
+      "src": "/assets/avatars/pack-104.png"
+    },
+    {
+      "id": "pack-105",
+      "name": "Sleepy Bat",
+      "tags": [
+        "quiet-ink",
+        "nonhuman",
+        "original-style"
+      ],
+      "mood": "sleepy",
+      "src": "/assets/avatars/pack-105.png"
+    },
+    {
+      "id": "pack-106",
+      "name": "Methodical Beaver",
+      "tags": [
+        "quiet-ink",
+        "nonhuman",
+        "original-style"
+      ],
+      "mood": "focused",
+      "src": "/assets/avatars/pack-106.png"
+    },
+    {
+      "id": "pack-107",
+      "name": "Gentle Ray",
+      "tags": [
+        "quiet-ink",
+        "nonhuman",
+        "original-style"
+      ],
+      "mood": "gentle",
+      "src": "/assets/avatars/pack-107.png"
+    },
+    {
+      "id": "pack-108",
+      "name": "Curious Seahorse",
+      "tags": [
+        "quiet-ink",
+        "nonhuman",
+        "original-style"
+      ],
+      "mood": "curious",
+      "src": "/assets/avatars/pack-108.png"
+    },
+    {
+      "id": "pack-109",
+      "name": "Pensive Hedgehog",
+      "tags": [
+        "quiet-ink",
+        "nonhuman",
+        "original-style"
+      ],
+      "mood": "pensive",
+      "src": "/assets/avatars/pack-109.png"
+    },
+    {
+      "id": "pack-110",
+      "name": "Cheeky Crab",
+      "tags": [
+        "quiet-ink",
+        "nonhuman",
+        "original-style"
+      ],
+      "mood": "cheeky",
+      "src": "/assets/avatars/pack-110.png"
+    },
+    {
+      "id": "pack-111",
+      "name": "Balanced Penguin",
+      "tags": [
+        "quiet-ink",
+        "nonhuman",
+        "original-style"
+      ],
+      "mood": "careful",
+      "src": "/assets/avatars/pack-111.png"
+    },
+    {
+      "id": "pack-112",
+      "name": "Calm Armadillo",
+      "tags": [
+        "quiet-ink",
+        "nonhuman",
+        "original-style"
+      ],
+      "mood": "calm",
+      "src": "/assets/avatars/pack-112.png"
+    },
+    {
+      "id": "pack-113",
+      "name": "Watchful Mantis",
+      "tags": [
+        "quiet-ink",
+        "nonhuman",
+        "original-style"
+      ],
+      "mood": "watchful",
+      "src": "/assets/avatars/pack-113.png"
+    },
+    {
+      "id": "pack-114",
+      "name": "Hushed Whale",
+      "tags": [
+        "quiet-ink",
+        "nonhuman",
+        "original-style"
+      ],
+      "mood": "peaceful",
+      "src": "/assets/avatars/pack-114.png"
+    },
+    {
+      "id": "pack-115",
+      "name": "Alert Gecko",
+      "tags": [
+        "quiet-ink",
+        "nonhuman",
+        "original-style"
+      ],
+      "mood": "alert",
+      "src": "/assets/avatars/pack-115.png"
+    },
+    {
+      "id": "pack-116",
+      "name": "Patient Badger",
+      "tags": [
+        "quiet-ink",
+        "nonhuman",
+        "original-style"
+      ],
+      "mood": "patient",
+      "src": "/assets/avatars/pack-116.png"
+    },
+    {
+      "id": "pack-117",
+      "name": "Moonlit Hare",
+      "tags": [
+        "quiet-ink",
+        "nonhuman",
+        "original-style"
+      ],
+      "mood": "dreamy",
+      "src": "/assets/avatars/pack-117.png"
+    },
+    {
+      "id": "pack-118",
+      "name": "Dapper Puffin",
+      "tags": [
+        "quiet-ink",
+        "nonhuman",
+        "original-style"
+      ],
+      "mood": "composed",
+      "src": "/assets/avatars/pack-118.png"
+    },
+    {
+      "id": "pack-119",
+      "name": "Puzzled Otter",
+      "tags": [
+        "quiet-ink",
+        "nonhuman",
+        "original-style"
+      ],
+      "mood": "puzzled",
+      "src": "/assets/avatars/pack-119.png"
+    },
+    {
+      "id": "pack-120",
+      "name": "Sly Ferret",
+      "tags": [
+        "quiet-ink",
+        "nonhuman",
+        "original-style"
+      ],
+      "mood": "sly",
+      "src": "/assets/avatars/pack-120.png"
+    },
+    {
+      "id": "pack-121",
+      "name": "Dreamy Jellyfish",
+      "tags": [
+        "quiet-ink",
+        "nonhuman",
+        "original-style"
+      ],
+      "mood": "dreamy",
+      "src": "/assets/avatars/pack-121.png"
+    },
+    {
+      "id": "pack-122",
+      "name": "Lonely Satellite",
+      "tags": [
+        "quiet-ink",
+        "nonhuman",
+        "original-style"
+      ],
+      "mood": "quiet",
+      "src": "/assets/avatars/pack-122.png"
+    },
+    {
+      "id": "pack-123",
+      "name": "Pocket Observatory",
+      "tags": [
+        "quiet-ink",
+        "nonhuman",
+        "original-style"
+      ],
+      "mood": "thoughtful",
+      "src": "/assets/avatars/pack-123.png"
+    },
+    {
+      "id": "pack-124",
+      "name": "Shy Lighthouse",
+      "tags": [
+        "quiet-ink",
+        "nonhuman",
+        "original-style"
+      ],
+      "mood": "shy",
+      "src": "/assets/avatars/pack-124.png"
+    },
+    {
+      "id": "pack-125",
+      "name": "Clockwork Beetle",
+      "tags": [
+        "quiet-ink",
+        "nonhuman",
+        "original-style"
+      ],
+      "mood": "methodical",
+      "src": "/assets/avatars/pack-125.png"
+    },
+    {
+      "id": "pack-126",
+      "name": "Steady Hourglass",
+      "tags": [
+        "quiet-ink",
+        "nonhuman",
+        "original-style"
+      ],
+      "mood": "steady",
+      "src": "/assets/avatars/pack-126.png"
+    },
+    {
+      "id": "pack-127",
+      "name": "Pensive Teapot",
+      "tags": [
+        "quiet-ink",
+        "nonhuman",
+        "original-style"
+      ],
+      "mood": "pensive",
+      "src": "/assets/avatars/pack-127.png"
+    },
+    {
+      "id": "pack-128",
+      "name": "Cozy Lantern",
+      "tags": [
+        "quiet-ink",
+        "nonhuman",
+        "original-style"
+      ],
+      "mood": "contented",
+      "src": "/assets/avatars/pack-128.png"
+    },
+    {
+      "id": "pack-129",
+      "name": "Windup Radio",
+      "tags": [
+        "quiet-ink",
+        "nonhuman",
+        "original-style"
+      ],
+      "mood": "relaxed",
+      "src": "/assets/avatars/pack-129.png"
+    },
+    {
+      "id": "pack-130",
+      "name": "Sleepy Typewriter",
+      "tags": [
+        "quiet-ink",
+        "nonhuman",
+        "original-style"
+      ],
+      "mood": "tired",
+      "src": "/assets/avatars/pack-130.png"
+    },
+    {
+      "id": "pack-131",
+      "name": "Pocket Calculator",
+      "tags": [
+        "quiet-ink",
+        "nonhuman",
+        "original-style"
+      ],
+      "mood": "deadpan",
+      "src": "/assets/avatars/pack-131.png"
+    },
+    {
+      "id": "pack-132",
+      "name": "Quiet Acorn",
+      "tags": [
+        "quiet-ink",
+        "nonhuman",
+        "original-style"
+      ],
+      "mood": "quiet",
+      "src": "/assets/avatars/pack-132.png"
+    },
+    {
+      "id": "pack-133",
+      "name": "Thoughtful Pear",
+      "tags": [
+        "quiet-ink",
+        "nonhuman",
+        "original-style"
+      ],
+      "mood": "thoughtful",
+      "src": "/assets/avatars/pack-133.png"
+    },
+    {
+      "id": "pack-134",
+      "name": "Determined Cactus",
+      "tags": [
+        "quiet-ink",
+        "nonhuman",
+        "original-style"
+      ],
+      "mood": "determined",
+      "src": "/assets/avatars/pack-134.png"
+    },
+    {
+      "id": "pack-135",
+      "name": "Dancing Fern",
+      "tags": [
+        "quiet-ink",
+        "nonhuman",
+        "original-style"
+      ],
+      "mood": "cheerful",
+      "src": "/assets/avatars/pack-135.png"
+    },
+    {
+      "id": "pack-136",
+      "name": "Tiny Terrarium",
+      "tags": [
+        "quiet-ink",
+        "nonhuman",
+        "original-style"
+      ],
+      "mood": "curious",
+      "src": "/assets/avatars/pack-136.png"
+    },
+    {
+      "id": "pack-137",
+      "name": "Sleepy Volcano",
+      "tags": [
+        "quiet-ink",
+        "nonhuman",
+        "original-style"
+      ],
+      "mood": "sleepy",
+      "src": "/assets/avatars/pack-137.png"
+    },
+    {
+      "id": "pack-138",
+      "name": "Daydreaming Mountain",
+      "tags": [
+        "quiet-ink",
+        "nonhuman",
+        "original-style"
+      ],
+      "mood": "dreamy",
+      "src": "/assets/avatars/pack-138.png"
+    },
+    {
+      "id": "pack-139",
+      "name": "Curious Comet",
+      "tags": [
+        "quiet-ink",
+        "nonhuman",
+        "original-style"
+      ],
+      "mood": "curious",
+      "src": "/assets/avatars/pack-139.png"
+    },
+    {
+      "id": "pack-140",
+      "name": "Moonlit Sailboat",
+      "tags": [
+        "quiet-ink",
+        "nonhuman",
+        "original-style"
+      ],
+      "mood": "calm",
+      "src": "/assets/avatars/pack-140.png"
+    },
+    {
+      "id": "pack-141",
+      "name": "Magnetic Buddy",
+      "tags": [
+        "quiet-ink",
+        "nonhuman",
+        "original-style"
+      ],
+      "mood": "hesitant",
+      "src": "/assets/avatars/pack-141.png"
+    },
+    {
+      "id": "pack-142",
+      "name": "Stitching Spool",
+      "tags": [
+        "quiet-ink",
+        "nonhuman",
+        "original-style"
+      ],
+      "mood": "focused",
+      "src": "/assets/avatars/pack-142.png"
+    },
+    {
+      "id": "pack-143",
+      "name": "Measuring Tape",
+      "tags": [
+        "quiet-ink",
+        "nonhuman",
+        "original-style"
+      ],
+      "mood": "puzzled",
+      "src": "/assets/avatars/pack-143.png"
+    },
+    {
+      "id": "pack-144",
+      "name": "Mellow Toaster",
+      "tags": [
+        "quiet-ink",
+        "nonhuman",
+        "original-style"
+      ],
+      "mood": "mellow",
+      "src": "/assets/avatars/pack-144.png"
+    },
+    {
+      "id": "pack-145",
+      "name": "Tin Train",
+      "tags": [
+        "quiet-ink",
+        "nonhuman",
+        "original-style"
+      ],
+      "mood": "curious",
+      "src": "/assets/avatars/pack-145.png"
+    },
+    {
+      "id": "pack-146",
+      "name": "Curious Airship",
+      "tags": [
+        "quiet-ink",
+        "nonhuman",
+        "original-style"
+      ],
+      "mood": "amused",
+      "src": "/assets/avatars/pack-146.png"
+    },
+    {
+      "id": "pack-147",
+      "name": "Steady Helicopter",
+      "tags": [
+        "quiet-ink",
+        "nonhuman",
+        "original-style"
+      ],
+      "mood": "focused",
+      "src": "/assets/avatars/pack-147.png"
+    },
+    {
+      "id": "pack-148",
+      "name": "Thoughtful Dinosaur",
+      "tags": [
+        "quiet-ink",
+        "nonhuman",
+        "original-style"
+      ],
+      "mood": "thoughtful",
+      "src": "/assets/avatars/pack-148.png"
+    },
+    {
+      "id": "pack-149",
+      "name": "Sleepy Sloth",
+      "tags": [
+        "quiet-ink",
+        "nonhuman",
+        "original-style"
+      ],
+      "mood": "sleepy",
+      "src": "/assets/avatars/pack-149.png"
+    },
+    {
+      "id": "pack-150",
+      "name": "Disciplined Ant",
+      "tags": [
+        "quiet-ink",
+        "nonhuman",
+        "original-style"
+      ],
+      "mood": "diligent",
+      "src": "/assets/avatars/pack-150.png"
+    },
+    {
+      "id": "pack-151",
+      "name": "Merry Dragon",
+      "tags": [
+        "quiet-ink",
+        "nonhuman",
+        "original-style"
+      ],
+      "mood": "merry",
+      "src": "/assets/avatars/pack-151.png"
     }
   ]
 }

@@ -87,6 +87,27 @@ describe('company HTTP ownership and expert invites', () => {
     expect(reloaded.snapshot().employees[0]).toMatchObject({ sleepEnabled: true, dreamEnabled: true, onVacation: true, researchEnabled: true });
   });
 
+  it('saves validated owner avatar backgrounds across reloads and session changes, with an automatic reset', async () => {
+    const employee = await service.hire(hireBody);
+    const url = '/api/company/employees/' + employee.id;
+    const payload = { avatarBackground: '#12abcd' };
+    for (const headers of [{ 'x-reverie-parent-session': 'parent-session' }, { 'x-reverie-service-token': 'service' }])
+      expect((await app.inject({ method: 'PUT', url, payload, headers })).statusCode).toBe(403);
+    expect((await app.inject({ method: 'POST', url: '/api/company/self', payload, headers: { 'x-reverie-parent-session': 'expert-session' } })).statusCode).toBe(400);
+    expect((await app.inject({ method: 'PUT', url, payload })).statusCode).toBe(200);
+    await service.update(employee.id, undefined, { position: 'Researcher' });
+    await service.rebind(employee.id, undefined, 'parent-session');
+    const reloaded = new CompanyStore(service.store.file); await reloaded.init();
+    expect(reloaded.snapshot().employees[0]).toMatchObject({ avatarBackground: '#12abcd', sessionId: 'parent-session', position: 'Researcher' });
+    expect(vi.mocked(appendAdminAudit)).toHaveBeenCalledWith(expect.objectContaining({ detail: expect.objectContaining({ avatarBackground: { from: null, to: '#12abcd' } }) }));
+    expect((await app.inject({ method: 'PUT', url, payload: { avatarBackground: 'transparent' } })).statusCode).toBe(200);
+    expect(service.view().employees[0].avatarBackground).toBe('transparent');
+    for (const value of ['red', '#fff', '#ffffff00', 'url(https://outside.test/image)', 'var(--color)', 5])
+      expect((await app.inject({ method: 'PUT', url, payload: { avatarBackground: value } })).statusCode).toBe(400);
+    expect((await app.inject({ method: 'PUT', url, payload: { avatarBackground: null } })).statusCode).toBe(200);
+    expect(service.view().employees[0]).not.toHaveProperty('avatarBackground');
+  });
+
   it('requires an explicit recovery grant, never a title, to wake a colleague', async () => {
     const target = await service.hire(hireBody);
     const lead = await service.hire({ ...hireBody, name: 'Lead', sessionId: 'parent-session', position: 'COO' });

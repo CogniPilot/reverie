@@ -1,0 +1,189 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Phase 0 launch guard receipt v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "code",
+    "createdAtMs",
+    "data",
+    "decisionGeneration",
+    "decisionId",
+    "employeeId",
+    "goalGeneration",
+    "goalId",
+    "idempotencyKey",
+    "level",
+    "receiptId",
+    "receiptType",
+    "schema_version",
+    "sessionGeneration",
+    "sessionId",
+    "transitionId"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "receiptType": {
+      "const": "LAUNCH_GUARD"
+    },
+    "receiptId": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "maxLength": 64
+    },
+    "goalId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,95}$",
+      "maxLength": 96
+    },
+    "goalGeneration": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    },
+    "decisionId": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,95}$",
+          "maxLength": 96
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "decisionGeneration": {
+      "anyOf": [
+        {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "sessionId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,95}$",
+      "maxLength": 96
+    },
+    "sessionGeneration": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    },
+    "employeeId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,95}$",
+      "maxLength": 96
+    },
+    "transitionId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,95}$",
+      "maxLength": 96
+    },
+    "idempotencyKey": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,95}$",
+      "maxLength": 96
+    },
+    "createdAtMs": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "level": {
+      "const": "SYNTHETIC"
+    },
+    "code": {
+      "type": "string",
+      "enum": [
+        "ADAPTER_UNAVAILABLE",
+        "GUARD_API_UNAVAILABLE",
+        "GUARD_GEN_CHANGED",
+        "GUARD_INPUT_INVALID",
+        "GUARD_PASS",
+        "GUARD_RECEIPT_INVALID",
+        "GUARD_STATE_NOT_ACTIVE",
+        "GUARD_UNREAD_INSTRUCTION",
+        "IDEMPOTENCY_CONFLICT"
+      ]
+    },
+    "data": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "goId",
+        "rooms",
+        "cursor_checked",
+        "newest_seen",
+        "result",
+        "snapshotSha256"
+      ],
+      "properties": {
+        "goId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,95}$",
+          "maxLength": 96
+        },
+        "rooms": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,95}$",
+            "maxLength": 96
+          },
+          "minItems": 1,
+          "maxItems": 16,
+          "uniqueItems": true
+        },
+        "cursor_checked": {
+          "type": "object",
+          "minProperties": 1,
+          "maxProperties": 16,
+          "propertyNames": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,95}$",
+            "maxLength": 96
+          },
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "newest_seen": {
+          "type": "object",
+          "minProperties": 1,
+          "maxProperties": 16,
+          "propertyNames": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,95}$",
+            "maxLength": 96
+          },
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "result": {
+          "enum": [
+            "PASS",
+            "REFUSE"
+          ]
+        },
+        "snapshotSha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$",
+          "maxLength": 64
+        }
+      }
+    }
+  }
+}

@@ -45,6 +45,7 @@ import { LastSeenStore, type SeenMark } from './chatroom-last-seen.js';
 import { PendingDeliveryStore } from './chatroom-pending-delivery.js';
 import { ChatArchive, zoneWeek } from './chat-archive.js';
 import { ChatDb, ChatDbSyncError, importLegacy, readArchive, standingLines, type JournalLine, type SyncChanges } from './chat-db.js';
+import { sharedAttachmentPath } from './shared-attachments.js';
 import { ChatroomDelivery, buildBriefing, paneAcceptsChat, modePollsChat, roomLabel, senderLabel, wakeRecipients, isAddressedVoiceTurn, renderForRecipient, type DeliverySession } from './chatroom-delivery.js';
 import { quoteForPane } from './pane-quote.js';
 import { messageWithEmployeeIdentity, stampEmployeeSender, type ChatIdentityLookup } from './chat-message-identity.js';
@@ -382,7 +383,8 @@ export class ChatroomService {
   }
 
   private messageIdentity(room: ChatRoom, message: ChatMessage): ChatMessage {
-    return messageWithEmployeeIdentity(message, room.owner, this.depsWithIdentity());
+    const view = messageWithEmployeeIdentity(message, room.owner, this.depsWithIdentity());
+    return view.attachments?.length ? { ...view, attachments: view.attachments.map(file => ({ ...file, path: sharedAttachmentPath(room.id, file) })) } : view;
   }
 
   private get retiredFile(): string {

@@ -18,7 +18,8 @@ export function registerPlanMoveRoutes(
   moves: PlanMoves,
   auth: Pick<AuthPort, 'authSessions'>,
   ownerAuth?: Pick<OwnerAuthService, 'session'>,
-  execution?: (request: FastifyRequest) => PlanMoveExecutor
+  execution?: (request: FastifyRequest) => PlanMoveExecutor,
+  targetMode?: (accountId: string) => Promise<'codex' | 'claude'>
 ): void {
   const failure = (reply: FastifyReply, error: unknown) => {
     if (!(error instanceof PlanMoveError)) throw error;
@@ -42,6 +43,22 @@ export function registerPlanMoveRoutes(
 
     // Older tabs must not bypass the expert's approval by using the retired immediate-move endpoint.
     routes.post('/api/plans/moves', async (_request, reply) => reply.code(409).send(createErrorResponse(ApiErrorCode.CONFLICT, 'Create a plan request and let the expert prepare its handoff and approve the switch.')));
+
+    routes.post('/api/plans/moves/force', async (request, reply) => {
+      const input = parseBody(z.object({ id: Identifier, employeeId: Identifier, sessionId: Identifier,
+        toAccount: Identifier, handoff: z.string().trim().min(1).max(12000) }).strict(), request.body);
+      if (!execution || !targetMode) return reply.code(503).send(createErrorResponse(ApiErrorCode.OPERATION_FAILED, 'Owner force move is unavailable'));
+      try {
+        const executor = execution(request), owner = ownerFor(request);
+        const snapshot = await executor.snapshot(input.employeeId, owner);
+        if (snapshot.sessionId !== input.sessionId) throw new PlanMoveError('The expert changed; refresh before forcing a move');
+        const mode = await targetMode(input.toAccount);
+        if (/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/.test(input.handoff)) throw new PlanMoveError('Use plain handoff text');
+        const data = await moves.begin({ ...input, handoff: input.handoff.replace(/[\r\n]+/g, ' '), fromAccount: snapshot.account, forceBusy: true,
+          targetMode: mode, ...(snapshot.model ? { model: snapshot.model } : {}) }, owner, executor);
+        return reply.code(202).send({ success: true, data });
+      } catch (error) { return failure(reply, error); }
+    });
 
     routes.post('/api/plans/moves/recent', async (request) => ({
       success: true,

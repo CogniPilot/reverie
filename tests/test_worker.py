@@ -111,6 +111,25 @@ class WorkerTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             broker.allowed(SID)
 
+    def test_plan_move_journal_stops_only_the_retired_or_failed_laptop(self):
+        broker = Broker(self.config)
+        other = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
+        company = self.root/'company.json'
+        journal = self.root/'plan-moves.json'
+        company.write_text(json.dumps({'employees': [{'sessionId': other, 'desiredRunning': True}]}))
+        for phase, allowed in [('waiting', True), ('creating', True), ('starting', True), ('checking', True),
+                               ('stopping', False), ('completed', False), ('failed', True), ('recovery-required', True)]:
+            with self.subTest(phase=phase):
+                journal.write_text(json.dumps([{'oldSession': SID, 'newSession': other, 'phase': phase}]))
+                self.assertEqual(broker.allowed(SID), allowed)
+                self.assertTrue(broker.allowed(other))
+        journal.write_text(json.dumps([{'oldSession': other, 'newSession': SID, 'phase': 'failed'}]))
+        self.assertFalse(broker.allowed(SID))
+        # An explicit owner rebind is newer authority than an old failed record.
+        company.write_text(json.dumps({'employees': [{'sessionId': SID, 'desiredRunning': True}]}))
+        self.assertTrue(broker.allowed(SID))
+        self.assertTrue(broker.allowed('ffffffff-1111-2222-3333-444444444444'))
+
     def test_protocol_preserves_terminal_bytes_and_bounds_allocations(self):
         left, right = socket.socketpair()
         self.addCleanup(left.close); self.addCleanup(right.close)
@@ -172,6 +191,56 @@ class WorkerTests(unittest.TestCase):
                 broker.control(action, caller)
         self.assertEqual(OFFLINE_GRACE_SECONDS, 600)
         self.assertEqual(broker.control('status')['offlineGraceSeconds'], 600)
+
+    def test_attach_only_validates_protocol_and_never_creates_a_missing_laptop(self):
+        self.assertTrue(validate_request(dict(self.request, attachOnly=True), self.config)['attachOnly'])
+        with self.assertRaises(ValueError):
+            validate_request(dict(self.request, attachOnly='yes'), self.config)
+        broker = Broker({**self.config, 'uid': os.getuid()})
+        broker.check_pool = lambda: None
+        calls = []
+        def engine(args, optional=False):
+            calls.append(args)
+            return subprocess.CompletedProcess(args, 1, '', '')
+        broker.run_engine = engine
+        server, client = socket.socketpair()
+        self.addCleanup(client.close)
+        broker.connections.acquire()
+        thread = threading.Thread(target=broker.handle, args=(server,))
+        thread.start()
+        send_frame(client, b'J', json.dumps(dict(self.request, attachOnly=True)).encode())
+        kind, result = receive_frame(client)
+        self.assertEqual(kind, b'E')
+        self.assertIn(b'never starts a replacement', result)
+        thread.join(2)
+        self.assertFalse(thread.is_alive())
+        self.assertEqual([call[0] for call in calls], ['inspect'])
+        self.assertFalse(broker.active)
+
+    def test_reconnect_inventory_requires_live_owned_laptop_and_current_running_intent(self):
+        broker = Broker(self.config)
+        broker.laptops[SID] = 'test-agent-' + SID
+        home = Path(self.config['stateRoot']) / SID / 'home'
+        home.mkdir(parents=True)
+        (home / '.reverie-launch').mkdir()
+        (home.parent / 'runtime.json').write_text(json.dumps({'exit': 'current.exit'}))
+        item = {'Config': {'Labels': {'reverie.worker': 'test', 'reverie.session': SID}}, 'State': {'Running': True}}
+        dead = False
+        def engine(args, optional=False):
+            return subprocess.CompletedProcess(args, 0, json.dumps([item]) if args[0] == 'inspect' else ('1' if dead else '0'), '')
+        broker.run_engine = engine
+        self.assertEqual(broker.control('status')['runningSessionIds'], [SID])
+        dead = True
+        self.assertEqual(broker.control('status')['runningSessionIds'], [])
+        dead = False
+        item['Config']['Labels']['reverie.session'] = 'foreign'
+        self.assertEqual(broker.control('status')['runningSessionIds'], [])
+        item['Config']['Labels']['reverie.session'] = SID
+        (self.root / 'company.json').write_text(json.dumps({'employees': [{'sessionId': SID, 'desiredRunning': False}]}))
+        self.assertEqual(broker.control('status')['runningSessionIds'], [])
+        (self.root / 'company.json').write_text(json.dumps({'employees': [{'sessionId': SID, 'desiredRunning': True}]}))
+        (home / '.reverie-launch/current.exit').write_text('0')
+        self.assertEqual(broker.control('status')['runningSessionIds'], [])
 
     def test_foreign_container_is_never_stopped_or_removed(self):
         config = {**self.config, 'uid': os.getuid()}

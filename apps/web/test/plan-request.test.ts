@@ -82,6 +82,15 @@ export function requestHarness(seed: PlanRequestRecord[] = []) {
 }
 
 describe('expert-approved plan requests', () => {
+  it('exposes no capability reader and cancellation still revokes privately', async () => {
+    const h = requestHarness();
+    const record = await h.service.create(h.input, 'owner', h.execution);
+    expect(h.service).not.toHaveProperty('credential');
+    expect(record).not.toHaveProperty('nonce');
+    expect(record).not.toHaveProperty('nonceHash');
+    await h.service.cancel('request', 'owner');
+    expect(h.port.capability.remove).toHaveBeenCalledWith('source', 'request');
+  });
   it('binds cross-provider approval to the destination harness and refuses a changed target', async () => {
     const h = requestHarness();
     h.port.validateTarget = vi.fn(async () => ({ mode: 'claude' as const }));

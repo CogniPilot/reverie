@@ -151,6 +151,20 @@ export interface OwnerAuthDeps {
   now?: () => number;
 }
 
+export interface HumanIdentity {
+  id: string;
+  username: string;
+  name: string;
+  role: 'owner' | 'limited';
+  primary: boolean;
+  avatar?: string;
+}
+
+export interface OwnerSession {
+  restricted: boolean;
+  role?: 'owner' | 'limited';
+}
+
 export class OwnerAuthService {
   private readonly sessions = new Map<string, Session>();
   private readonly challenges = new Map<string, { expiresAt: number; epoch: number; bucket: string }>();
@@ -167,6 +181,15 @@ export class OwnerAuthService {
   private dummyHash: Promise<PasswordHash> | undefined;
 
   constructor(private readonly deps: OwnerAuthDeps) {}
+
+  /** Account-local authentication operations; shared-office accounts override this resolver. */
+  forSession(_token: string | undefined): OwnerAuthService { return this; }
+
+  identity(token: string | undefined): HumanIdentity | undefined {
+    if (!this.session(token)) return undefined;
+    const account = this.account();
+    return account ? { id: 'owner', username: account.username, name: account.username, role: 'owner', primary: true } : undefined;
+  }
 
   setupAvailable(): boolean {
     return (
@@ -419,6 +442,8 @@ export class OwnerAuthService {
       }
       // A host-issued one-time password does not skip 2FA: only `reverie owner reset-2fa` removes it.
       if (account.totp && !device) {
+        for (const [key, value] of this.challenges) if (value.expiresAt <= this.now()) this.challenges.delete(key);
+        if (this.challenges.size >= 256) throw new OwnerAuthError('Too many pending sign-ins; try again later', 429);
         const challenge = randomToken();
         this.challenges.set(sha256(challenge), {
           expiresAt: this.now() + CHALLENGE_TTL_MS,
@@ -483,6 +508,8 @@ export class OwnerAuthService {
   // ── sessions ────────────────────────────────────────────────────────────────
 
   private newSession(account: OwnerAccount): string {
+    for (const key of this.sessions.keys()) this.sessionByHash(key, false);
+    if (this.sessions.size >= 128) throw new OwnerAuthError('Too many active sign-ins; sign out another browser or sign out everywhere', 429);
     const token = randomToken();
     const now = this.now();
     this.sessions.set(sha256(token), {
@@ -495,7 +522,7 @@ export class OwnerAuthService {
   }
 
   /** The session behind a cookie, refreshed, or undefined (expired, logged out, older epoch). */
-  session(token: string | undefined): { restricted: boolean } | undefined {
+  session(token: string | undefined): OwnerSession | undefined {
     return token ? this.sessionByHash(sha256(token), true) : undefined;
   }
 

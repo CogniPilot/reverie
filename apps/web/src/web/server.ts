@@ -1,9 +1,13 @@
+import { OWNER_COOKIE } from '../owner-auth/policy.js';
+import { OfficeAuthService } from '../owner-auth/office.js';
+import { registerOfficeRoutes } from './routes/office-routes.js';
 import { isEmbassyProtocolRoute } from '../embassy-public-routes.js';
 import { withDelegatedSessionCreate } from '../owner-auth/delegated-session-create.js';
 import { agentPlanRequestExecution } from '../agent-plan-request.js';
 import { BuiltinEmbassy } from '../embassy-builtin.js';
 import { registerBuiltinEmbassyRoutes } from './routes/embassy-builtin-routes.js';
-import { registerLaptopPowerRoutes } from './routes/laptop-power-routes.js';
+import { reattachLaptops } from '../laptop-reconnect.js';
+import { laptopPower, registerLaptopPowerRoutes } from './routes/laptop-power-routes.js';
 import { employeeRestContext, employeeProfileContext, employeePlanContext } from '../company-types.js';
 import { expertRuntimeRecipe } from '../expert-runtime-recipe.js';
 import { AvatarStore } from '../agent-avatars.js';
@@ -19,7 +23,11 @@ import { registerEmbassyGuestRoutes } from './routes/embassy-guest-routes.js';
 import { registerEmbassyPairingRoutes } from './routes/embassy-pairing-routes.js';
 import { EmbassyHost } from '../embassy-host.js';
 import { EmbassyPairing } from '../embassy-pairing.js';
+import { registerWorkspaceFileRoutes } from './routes/workspace-file-routes.js';
+import { registerBotsPageRoutes } from './routes/bots-page-routes.js';
+import { registerPreviewRoutes } from './routes/preview-routes.js';
 import { registerWorkspaceIconRoutes } from './routes/workspace-icon-routes.js';
+import { registerChatPluginRoutes } from './routes/chat-plugin-routes.js';
 import { WorkspaceIconStore } from '../workspace-icons.js';
 /**
  * @fileoverview Reverie web server — central hub coordinating all subsystems.
@@ -91,6 +99,7 @@ import type { TerminalMultiplexer } from '../mux-interface.js';
 import { createMultiplexer } from '../mux-factory.js';
 import { getStore } from '../state-store.js';
 import { envValue } from '../config/reverie-env.js';
+import { routineAnnouncementRoomId } from '../config/routine-announcement-room.js';
 import { TabLayoutService, type SessionPlacementHint } from '../tab-layout-service.js';
 import type { TabLayout } from '../tab-layout.js';
 import { ownerLayoutKey } from '../tab-layout-persistence.js';
@@ -213,7 +222,6 @@ import {
   sendLostWebviewFramePage,
 } from './middleware/auth.js';
 import type { SessionPort as OwnerPolicySessions } from './ports/session-port.js';
-import { OwnerAuthService } from '../owner-auth/service.js';
 import { serviceVerifier, ownerVerifier } from '../owner-auth/marks.js';
 import { OwnerAuthStore } from '../owner-auth/store.js';
 import { callerOf, registerOwnerPolicy } from '../owner-auth/policy.js';
@@ -1000,10 +1008,10 @@ export class WebServer extends EventEmitter {
     registerHostGuard(this.app, () => this.getHostPolicy(), this.basePath);
 
     // Auth middleware (Basic Auth + session cookies + rate limiting)
-    const ownerAuth = new OwnerAuthService({
+    const ownerAuth = new OfficeAuthService({
       store: new OwnerAuthStore(dataPath('owner-auth.json')),
       auditFile: dataPath('owner-auth-audit.jsonl'),
-    });
+    }, () => ({ name: this.companyService?.view().settings.ownerName, avatar: this.companyService?.view().settings.ownerAvatar }));
     const authState = registerAuthMiddleware(this.app, this.https, this.basePath, ownerAuth);
     if (authState) {
       this.authSessions = authState.authSessions;
@@ -1368,6 +1376,7 @@ export class WebServer extends EventEmitter {
     // Chatrooms: the user, an appointed coordinator session and worker sessions
     // in one room; messages reach member panes as single-line prompts.
     const chatroomFiles = new ChatFileStore(getDataDir());
+    await chatroomFiles.initializeShared();
     this.chatroomService = new ChatroomService({
       file: dataPath('chatrooms.json'),
       employeeOf: (sessionId) => {
@@ -1666,7 +1675,11 @@ export class WebServer extends EventEmitter {
     void decisionAlerts.check().catch(() => undefined);
     this.decisionAlertTimer = setInterval(() => void decisionAlerts.check().catch(() => undefined), 60_000);
     this.decisionAlertTimer.unref();
+    registerWorkspaceFileRoutes(this.app, verifiedOwner);
+    registerBotsPageRoutes(this.app, verifiedOwner);
+    registerPreviewRoutes(this.app, verifiedOwner);
     registerWorkspaceIconRoutes(this.app, new WorkspaceIconStore(dataPath('workspace-icons')), verifiedOwner);
+    registerChatPluginRoutes(this.app, verifiedOwner);
 
     // Roles (src/roles.ts): who holds Admin or Moderator is instance data in roles.json; the first holders come from
     // REVERIE_ROLES_SEED, a JSON array of {employeeId, roleId}, read only while the file does not exist.
@@ -1709,6 +1722,7 @@ export class WebServer extends EventEmitter {
     registerEmbassyPairingRoutes(this.app, this.embassyHost, this.embassyPairing, verifiedOwner, () =>
       this.getHostPolicy()
     );
+    registerOfficeRoutes(this.app, ownerAuth, this.chatroomService);
     registerChatroomRoutes(
       this.app,
       ctx,
@@ -1719,11 +1733,11 @@ export class WebServer extends EventEmitter {
       (sessionId) =>
         this.companyService?.view(this.sessions.get(sessionId)?.owner).employees.find((e) => e.sessionId === sessionId)
           ?.id,
-      { pendingStatus: (req) => !isMultiUserMode() && serviceVerifier({ service: ownerAuth, ctx }, 'stall-watch')(req) }
+      { pendingStatus: (req) => !isMultiUserMode() && serviceVerifier({ service: ownerAuth, ctx }, 'stall-watch')(req), human: req => ownerAuth.identity(req.cookies?.[OWNER_COOKIE]), readAt: (id, roomId) => ownerAuth.cursor(id, roomId), markRead: (id, roomId, at) => ownerAuth.markRead(id, roomId, at) }
     );
     // Chat bots: the sender a scheduled 'post' job speaks as (see chat-bots.ts). The registry is instance data.
     const chatBots = new ChatBotRegistry(dataPath('chat-bots.json'));
-    registerChatBotRoutes(this.app, chatBots, verifiedOwner);
+    registerChatBotRoutes(this.app, chatBots, verifiedOwner, id => this.cronService.listJobs().some(job => job.action === 'post' && job.botId === id));
     this.inputWatch = createInputWatch({
       ledgerFile: dataPath('input-watch-ledger.json'),
       bot: () => (isMultiUserMode() ? undefined : chatBots.get('input-watch')),
@@ -1793,10 +1807,17 @@ export class WebServer extends EventEmitter {
         const room = this.chatroomService.room(roomId);
         return !!room && !room.archivedAt && room.members.some((m) => m.sessionId === sessionId);
       },
-      notificationRoomId: () =>
-        this.chatroomService.rooms().find((r) => r.kind !== 'dm' && r.name.trim().toLowerCase() === 'general')?.id,
-      notify: (roomId, text) => {
+      notificationRoomId: (owner) =>
+        routineAnnouncementRoomId(this.chatroomService.rooms(), owner, process.env.REVERIE_ROUTINE_ANNOUNCEMENT_ROOM_ID),
+      notify: (roomId, text, owner) => {
         try {
+          // Revalidate audience immediately before the notice. Explicit bad configuration
+          // must never silently fall back or post into a DM/archived/other-owner room.
+          if (
+            roomId !==
+            routineAnnouncementRoomId(this.chatroomService.rooms(), owner, process.env.REVERIE_ROUTINE_ANNOUNCEMENT_ROOM_ID)
+          )
+            return false;
           this.chatroomService.post(roomId, { kind: 'system', name: 'system' }, text, 'all', { deliver: false });
           return true;
         } catch {
@@ -2003,19 +2024,26 @@ export class WebServer extends EventEmitter {
         },
         ownerFor(request)
       );
-    registerPlanMoveRoutes(this.app, planMoves, ctx, ownerAuth, capturePlanMove);
+    const availablePlanTarget = async (target: string) => {
+      const account = await this.planService.account(target);
+      if (!account) throw new PlanMoveError('Choose an available destination plan');
+      const row = (await this.planService.rows()).accounts.find(item => item.id === target);
+      if (!row?.signedIn) throw new PlanMoveError('Sign in to the destination plan before moving an expert');
+      return { mode: planMoveHarness(account) };
+    };
+    registerPlanMoveRoutes(this.app, planMoves, ctx, ownerAuth, capturePlanMove, async target => (await availablePlanTarget(target)).mode);
     const planRequestStore = new PlanRequestStore(dataPath('plan-requests.json'));
+    const planRequestCapabilities = new PlanRequestCapabilities();
     const planRequests = new PlanMoveRequests({
       load: () => planRequestStore.load(),
       save: records => planRequestStore.save(records),
       moves: planMoves,
       binding: (employeeId, owner) => this.companyService.view(owner).employees.find(employee => employee.id === employeeId)?.sessionId,
-      validateTarget: async (_snapshot, target) => {
-        const account = await this.planService.account(target);
-        if (!account) throw new PlanMoveError('Choose an available destination plan');
-        return { mode: planMoveHarness(account) };
+      validateTarget: async (_snapshot, target) => availablePlanTarget(target),
+      capability: {
+        write: value => planRequestCapabilities.write(value),
+        remove: (sessionId, requestId) => planRequestCapabilities.remove(sessionId, requestId),
       },
-      capability: new PlanRequestCapabilities(),
       notify: (record, _file, allowed) => deliverPlanRequest(record, this.chatroomService, allowed),
       audit: entry => this.chatroomService.auditEntry(entry),
     });
@@ -3806,6 +3834,25 @@ export class WebServer extends EventEmitter {
     // CRITICAL: Skip in test mode to prevent tests from picking up user sessions
     if (!this.testMode) {
       const restored = await this.restoreMuxSessions();
+      if (restored && process.env.REVERIE_WORKER_SOCKET) {
+        try {
+          const result = await reattachLaptops({
+            inventory: () => laptopPower('status'),
+            employees: () => this.companyService.registeredEmployees(),
+            saved: (id) => this.store.getSession(id),
+            live: (id) => this.sessions.has(id),
+            restore: async (entry, allowed) => {
+              const result = await spendRebootRestore(this.createRouteContext(), [entry], new Set(), allowed, { attachOnly: true });
+              const attached = result.restored.some((item) => item.id === entry.sessionId);
+              if (attached) rebootRestoreRegistry.take(owner => owner === entry.owner, [entry.sessionId], entry.owner);
+              return attached;
+            },
+          });
+          console.log(`[Server] Reconnected ${result.connected.length} running laptop(s); ${result.failed.length} need attention`);
+        } catch {
+          console.error('[Server] Laptop reconnection unavailable; existing laptops have been left running');
+        }
+      }
       await this.finalizeRestoredState(restored);
       this.companyWakeReady = restored;
       await this.autoRestorePinnedAfterRestart();

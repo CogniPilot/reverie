@@ -8,7 +8,7 @@ import type { FastifyInstance } from 'fastify';
 import { ApiErrorCode, createErrorResponse } from '../../types.js';
 import { ChatBotError, type ChatBotRegistry } from '../../chat-bots.js';
 
-export function registerChatBotRoutes(app: FastifyInstance, bots: ChatBotRegistry, verifiedOwner: OwnerVerifier = NO_OWNER): void {
+export function registerChatBotRoutes(app: FastifyInstance, bots: ChatBotRegistry, verifiedOwner: OwnerVerifier = NO_OWNER, hasRoutines: (id: string) => boolean = () => false): void {
 
   const fail = (err: unknown) => {
     if (err instanceof ChatBotError) {
@@ -30,9 +30,10 @@ export function registerChatBotRoutes(app: FastifyInstance, bots: ChatBotRegistr
     }
   });
 
-  app.delete('/api/chat-bots/:id', async (req) => {
+  app.delete('/api/chat-bots/:id', async (req, reply) => {
     if (!verifiedOwner(req)) return createErrorResponse(ApiErrorCode.FORBIDDEN, 'Only the owner removes a bot');
     const { id } = req.params as { id: string };
+    if (hasRoutines(id)) return reply.code(409).send(createErrorResponse(ApiErrorCode.OPERATION_FAILED, "Delete this bot's routines first"));
     if (!(await bots.remove(id))) return createErrorResponse(ApiErrorCode.NOT_FOUND, 'No such bot');
     return { success: true, data: {} };
   });

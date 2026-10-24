@@ -6,8 +6,42 @@ import os
 from pathlib import Path
 import re
 import secrets
+import socket
+import stat
 import subprocess
 import sys
+
+
+def sampling_args(profile):
+    if profile == 'server-default':
+        return []
+    if profile != 'qwen3.8-thinking':
+        raise ValueError('Unknown model sampling profile')
+    # https://huggingface.co/Qwen/Qwen3.8-27B#best-practices
+    return ['--jinja', '--reasoning', 'on', '--temp', '1.0', '--top-p', '0.95', '--top-k', '20',
+            '--min-p', '0.0', '--presence-penalty', '0.0', '--repeat-penalty', '1.0',
+            '--chat-template-kwargs', json.dumps({'reasoning_effort': 'xhigh', 'preserve_thinking': True})]
+
+
+def prepare_socket(path):
+    """Recover an owned abandoned socket without replacing a listener or file."""
+    try:
+        previous = path.lstat()
+    except FileNotFoundError:
+        return
+    if not stat.S_ISSOCK(previous.st_mode) or previous.st_uid != os.getuid() or previous.st_mode & 0o077:
+        raise ValueError('Model socket must be an owned private socket')
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as probe:
+        probe.settimeout(1)
+        try:
+            probe.connect(str(path))
+        except ConnectionRefusedError:
+            current = path.lstat()
+            if (previous.st_dev, previous.st_ino) != (current.st_dev, current.st_ino):
+                raise ValueError('Model socket changed during startup')
+            path.unlink()
+        else:
+            raise ValueError('The local model socket already has a listener')
 
 
 def run(argv, **kwargs):
@@ -78,8 +112,12 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--model', help='Existing GGUF weights; never rewritten or downloaded implicitly')
     parser.add_argument('--alias', default='local-model')
+    parser.add_argument('--mmproj', help='Existing matching vision projector GGUF; never downloaded implicitly')
+    parser.add_argument('--image-max-tokens', type=int, default=2048, help='Bound dynamic-resolution image tokens')
     parser.add_argument('--gpu', default='0', help='NVIDIA device index, or cpu')
     parser.add_argument('--context', type=int, default=32768)
+    parser.add_argument('--sampling-profile', choices=['server-default', 'qwen3.8-thinking'],
+                        default='server-default', help='Explicit model-vendor sampling defaults')
     parser.add_argument('--container', help='Reverie container; inference is reachable through its private control mount')
     parser.add_argument('--port', type=int, default=8080, help='Native-only loopback port')
     parser.add_argument('--install-service', action='store_true')
@@ -95,6 +133,11 @@ def main(argv=None):
         raise ValueError('Choose a regular GGUF model and a simple model alias')
     if not 512 <= args.context <= 262144 or not 1 <= args.port <= 65535:
         raise ValueError('Invalid context size or port')
+    projector = Path(args.mmproj).expanduser().resolve(strict=True) if args.mmproj else None
+    if projector is not None and not projector.is_file():
+        raise ValueError('Choose a regular vision projector GGUF')
+    if not 128 <= args.image_max_tokens <= 8192:
+        raise ValueError('Invalid image token budget')
     capability = gpu_capability(args.gpu)
     scratch = Path(os.environ.get('REVERIE_MODEL_SCRATCH', str(Path.home() / 'scratch/reverie/models'))).resolve()
     scratch.mkdir(parents=True, exist_ok=True)
@@ -134,15 +177,21 @@ def main(argv=None):
         print(f'Native endpoint: http://127.0.0.1:{args.port}; API key file: {key}', flush=True)
     if args.install_service:
         config = {'model': str(model), 'alias': args.alias, 'gpu': args.gpu, 'context': args.context, 'port': args.port}
+        if projector is not None:
+            config.update(mmproj=str(projector), **{'image-max-tokens': args.image_max_tokens})
+        if args.sampling_profile != 'server-default':
+            config['sampling-profile'] = args.sampling_profile
         if args.container:
             config['container'] = args.container
         install_service(config)
         return 0
     os.umask(0o077)
+    if args.container:
+        prepare_socket(Path(address))
     os.execv(str(runtime / 'bin/llama-server'), ['llama-server', '--model', str(model), '--alias', args.alias,
         '--host', address, '--port', str(args.port), '--ctx-size', str(args.context), '--parallel', '1',
         '--threads', '8', '--gpu-layers', 'all' if capability else '0', '--flash-attn', 'on',
-        '--cache-type-k', 'q8_0', '--cache-type-v', 'q8_0', '--api-key-file', str(key)])
+        '--cache-type-k', 'q8_0', '--cache-type-v', 'q8_0', '--api-key-file', str(key)] + sampling_args(args.sampling_profile) + (['--mmproj', str(projector), '--image-max-tokens', str(args.image_max_tokens)] if projector else []))
 
 
 if __name__ == '__main__':

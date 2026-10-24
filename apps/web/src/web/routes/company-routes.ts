@@ -33,6 +33,7 @@ const InviteSchema = z.object({ roomId: z.string().min(1).max(100) });
 // Pronouns: a value sets them, null clears them (owner only, like every field here; an agent only proposes, in chat).
 const UpdateSchema = EmployeeSchema.pick({ position: true, expertise: true, responsibilities: true, personality: true, icon: true, reportsTo: true })
   .extend({
+    avatarBackground: EmployeeSchema.shape.avatarBackground.nullable(),
     pronouns: PronounsSchema.nullable(),
     sleepEnabled: EmployeeSchema.shape.sleepEnabled.removeDefault(),
     dreamEnabled: EmployeeSchema.shape.dreamEnabled.removeDefault(),
@@ -43,7 +44,7 @@ const UpdateSchema = EmployeeSchema.pick({ position: true, expertise: true, resp
   .strict()
   .refine(
     (v) => Object.keys(v).length > 0,
-    'Give a position, expertise, icon, reporting parent, pronouns, voice or permissions'
+    'Give a position, expertise, icon, avatar background, reporting parent, pronouns, voice or permissions'
   );
 const RebindSchema = z.object({ sessionId: z.string().min(1).max(100) });
 const ThreadSchema = z.object({ threadId: z.string().trim().min(1).max(200).nullable() });
@@ -198,6 +199,9 @@ export function registerCompanyRoutes(
             position: { from: before.position, to: after.position },
             permissions: { from: before.permissions, to: after.permissions },
             reportsTo: { from: before.reportsTo ?? null, to: after.reportsTo ?? null },
+            ...(before.avatarBackground !== after.avatarBackground
+              ? { avatarBackground: { from: before.avatarBackground ?? null, to: after.avatarBackground ?? null } }
+              : {}),
             ...(before.pronouns !== after.pronouns
               ? { pronouns: { from: before.pronouns ?? null, to: after.pronouns ?? null } }
               : {}),

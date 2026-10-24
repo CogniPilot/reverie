@@ -1,5 +1,11 @@
 # Upstream credit
 
+The optional chat math plugin includes KaTeX 0.19.0 (MIT), with its license at
+`apps/web/src/web/public/vendor/katex-0.19.0/LICENSE`. Its local JavaScript,
+WOFF2 fonts and CSS come from the reviewed Reverie chat rendering packet;
+`vendor/chat-math.json` records the upstream package integrity and asset hashes.
+KaTeX renders math in the browser. It does not run a TeX compiler.
+
 Reverie is a fork of Codeman by Ark0N and the Codeman contributors:
 https://github.com/Ark0N/Codeman
 

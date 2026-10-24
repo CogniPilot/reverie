@@ -97,6 +97,34 @@ describe('CronService', () => {
   });
 
   describe('createJob', () => {
+    it('tracks live overlapping executions and releases them on completion or failure, without reviving old run records', async () => {
+      const job = svc.service.createJob({ name: 'Live fixture', action: 'post', botId: 'fixture', roomId: 'room', postText: '{load1}', postSource: 'host-load', scheduleType: 'interval', intervalMinutes: 10, enabled: false });
+      svc.store.setCronJobRun('old', { id: 'old', cronJobId: job.id, finishedAt: null, status: 'created' } as CronJobRun);
+      expect(svc.service.listRunningJobs()).toEqual([]);
+      const releases: Array<(value: { load1: number }) => void> = [];
+      svc.service.setPostSources({ 'host-load': () => new Promise((resolve) => releases.push(resolve)) });
+      svc.service.setBotPoster({ getBot: () => ({ id: 'fixture', name: 'Fixture', rooms: ['room'], maxPerHour: 30 }), check() {}, post() {} });
+      const first = svc.service.runNow(job.id), second = svc.service.runNow(job.id);
+      expect(svc.service.listRunningJobs()).toEqual([{ id: job.id, name: job.name, owner: undefined }]);
+      releases[0]({ load1: 1 }); await first;
+      expect(svc.service.listRunningJobs()).toHaveLength(1);
+      releases[1]({ load1: 2 }); await second;
+      expect(svc.service.listRunningJobs()).toEqual([]);
+      svc.service.setPostSources({ 'host-load': async () => ({ load1: 3 }) });
+      vi.spyOn(svc.store, 'setCronJobRun').mockImplementationOnce(() => { throw new Error('fixture storage failure'); });
+      await expect(svc.service.runNow(job.id)).rejects.toThrow('fixture storage failure');
+      expect(svc.service.listRunningJobs()).toEqual([]);
+    });
+    it('records only explicit trusted owner provenance, preserves authors and leaves unknown creators unknown', () => {
+      const unknown = svc.service.createJob(mkInput());
+      expect(unknown.createdByOwner).toBeUndefined();
+      const owned = svc.service.createJob(mkInput(), undefined, undefined, true);
+      expect(owned.createdByOwner).toBe(true);
+      expect(svc.service.updateJob(owned.id, { name: 'Updated' })!.createdByOwner).toBe(true);
+      const author = svc.service.createJob({ name: 'Authored', action: 'post', postText: 'Hello', roomId: 'room', scheduleType: 'interval', intervalMinutes: 10, enabled: false }, undefined, { employeeId: 'expert' }, true);
+      expect(author.createdBy).toEqual({ employeeId: 'expert' });
+      expect(author.createdByOwner).toBeUndefined();
+    });
     it('computes nextRunAt for an enabled interval job', () => {
       const before = Date.now();
       const job = svc.service.createJob(mkInput({ intervalMinutes: 10 }));

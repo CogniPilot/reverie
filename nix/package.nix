@@ -34,7 +34,9 @@ let
         test/owner-auth-lock-portability.test.ts test/company-full-page.test.ts \
         test/service-installer.test.ts test/company-wake.test.ts \
         test/company-recovery-prompt.test.ts test/company-wake-server.test.ts \
-        test/owner-auth-fresh-enforce.test.ts test/owner-first-setup.test.ts \
+        test/owner-auth-fresh-enforce.test.ts test/routines-owner-middleware.test.ts \
+        test/routine-announcement-room.test.ts test/routine-announcement-server.test.ts \
+        test/owner-auth-board-decisions.test.ts test/github-source.test.ts test/owner-first-setup.test.ts \
         test/owner-auth.test.ts test/owner-route-principals.test.ts test/routines-grants-owner.test.ts test/owner-setup-ui.test.ts \
         test/owner-name-onboarding.test.ts \
         test/account-login.test.ts test/chat-workspace-delete.test.ts \
@@ -50,20 +52,22 @@ let
         test/read-aloud-team-voice.test.ts test/session-cli-builder.test.ts test/board-page-routes.test.ts test/company-logos.test.ts \
         test/reboot-restore.test.ts test/reboot-restore-persistent.test.ts \
         test/routes/reboot-restore-routes.test.ts test/codex-transcript.test.ts test/routes/company-avatar.test.ts \
-        test/company-avatar-picker-ui.test.ts test/company-hire-plan-refresh.test.ts \
+        test/company-avatar-picker-ui.test.ts test/agent-avatar-background.test.ts test/company-hire-plan-refresh.test.ts \
         test/company-hire-wizard.test.ts test/company-role-context.test.ts test/company-rest-context.test.ts test/handbook.test.ts test/company-preferences-autosave.test.ts \
         test/company-settings-ui.test.ts test/chat-app-dom.test.ts test/profile-avatar-preview.test.ts test/cli-config-content.test.ts \
         test/session-runtime.test.ts test/company-runtime-ui.test.ts test/opencode-subscription-auth.test.ts \
         test/selected-claude-profile.test.ts \
-        test/managed-codex-trust.test.ts test/full-access-default.test.ts test/worker-execution.test.ts test/laptop-power.test.ts \
+        test/managed-codex-trust.test.ts test/full-access-default.test.ts test/worker-execution.test.ts test/laptop-power.test.ts test/laptop-reconnect.test.ts \
         test/expert-runtime-recipe.test.ts test/company-employee-restart.test.ts test/company-restart-ui.test.ts test/routes/session-mode-switch.test.ts \
         test/claude-plan-usage.test.ts test/claude-usage-display.test.ts test/subscription-usage.test.ts test/plan-usage-compliance.test.ts test/plan-pace.test.ts \
         test/member-menu.test.ts test/render-index-html.test.ts test/asset-content-version.test.ts \
         test/company-plans-navigation.test.ts test/company-plans-width.test.ts \
         test/plan-move-runtime.test.ts test/plan-move-routes.test.ts test/plan-move-company.test.ts test/plan-move-launch.test.ts \
-        test/agent-plan-server.test.ts test/agent-plan-request.test.ts test/plan-request.test.ts test/plan-request-capability.test.ts test/plan-request-routes.test.ts test/plan-request-ui.test.ts test/plan-request-prompt.test.ts \
+        test/agent-plan-server.test.ts test/agent-plan-request.test.ts test/plan-request.test.ts test/plan-request-capability.test.ts test/plan-request-routes.test.ts test/plan-credential-boundary.test.ts test/plan-request-ui.test.ts test/plan-request-prompt.test.ts \
         test/embassy-builtin.test.ts test/embassy-protocol-server.test.ts test/embassy-pairing-ui.test.ts \
-        test/disk-stats.test.ts test/disk-stats-ui.test.ts test/routes/system-routes.test.ts
+        test/disk-stats.test.ts test/disk-stats-ui.test.ts test/routes/system-routes.test.ts test/shared-attachments.test.ts test/routes/file-routes.test.ts \
+        test/chat-language-service.test.ts test/chat-plugins.test.ts test/chat-math-plugin.test.ts test/workspace-files.test.ts test/workspace-files-safety.test.ts test/workspace-publisher.test.ts \
+        test/office-accounts.test.ts test/human-presence-ui.test.ts test/bots-page.test.ts test/bots-ui.test.ts test/bot-avatar.test.ts test/cron-service.test.ts test/office-navigation-ui.test.ts test/workspace-files-ui.test.ts test/preview-routes.test.ts
       runHook postCheck
     '';
     installPhase = ''
@@ -87,10 +91,10 @@ let
     pyproject = true;
     postUnpack = ''sourceRoot="$sourceRoot/python"'';
     build-system = [ pkgs.python3Packages.setuptools ];
-    nativeCheckInputs = [ pkgs.bash pkgs.coreutils pkgs.git pkgs.nodejs_22 pkgs.tmux pkgs.jq (lib.getBin pkgs.util-linux) pkgs.python3Packages.pillow ];
+    nativeCheckInputs = [ pkgs.bash pkgs.coreutils pkgs.git pkgs.nodejs_22 pkgs.tmux pkgs.jq (lib.getBin pkgs.util-linux) pkgs.python3Packages.pillow pkgs.python3Packages.aiohttp ];
     postPatch = "patchShebangs ../scripts ../docker ../.github/ci";
     checkPhase = ''
-      (cd ..; PYTHONPATH="$PWD/python" PYTHONWARNINGS=ignore::ResourceWarning python -m unittest discover -s tests -t .)
+      (cd ..; PYTHONPATH="$PWD/python" PYTHONWARNINGS=ignore::ResourceWarning ${pkgs.python3.withPackages (ps: [ ps.pillow ps.aiohttp ])}/bin/python3 -m unittest discover -s tests -t .)
       (cd ..; node --test tests/test_cli_installer.mjs tests/test_reverie_start.mjs tests/test_recovery_scripts.mjs tests/test_opencode_plugin.mjs tests/test_model_relay.mjs tests/test_voice_ci_launch.mjs)
     '';
   };
@@ -100,6 +104,22 @@ let
     name = "reverie-hands";
     runtimeInputs = [ memory ];
     text = ''exec python3 -I -B ${memoryPackage}/${pkgs.python3.sitePackages}/reverie/hands/launcher.py "$@"'';
+  };
+  handsToolchain = pkgs.buildEnv {
+    name = "reverie-hands-toolchain";
+    paths = [ pkgs.python3 pkgs.nodejs_22 pkgs.bashInteractive pkgs.coreutils
+      pkgs.git pkgs.ripgrep pkgs.findutils pkgs.gnused pkgs.gnugrep pkgs.gnumake ];
+    pathsToLink = [ "/bin" ];
+  };
+  handsToolsSource = pkgs.runCommand "reverie-hands-workspace-tools" { } ''
+    mkdir -p "$out"
+    cp ${src}/python/reverie/hands/laptop_tools.py "$out/laptop_tools.py"
+    cp ${src}/python/reverie/hands/workspace_dispatch.py "$out/workspace_dispatch.py"
+  '';
+  handsTools = pkgs.writeShellApplication {
+    name = "reverie-hands-tools";
+    runtimeInputs = [ pkgs.python3 ];
+    text = ''exec python3 -I -B ${handsToolsSource}/laptop_tools.py --tool-path ${handsToolchain}/bin "$@"'';
   };
   modelRelaySource = pkgs.writeText "reverie-model-relay.mjs" (builtins.readFile (src + "/apps/host/model-relay.mjs"));
   modelRelay = pkgs.writeShellApplication {
@@ -126,7 +146,7 @@ let
   '';
   runtime = pkgs.buildEnv {
     name = "reverie-runtime";
-    paths = [ console memory kokoro modelRelay officeRelay hands workerExec workerChild pkgs.nodejs_22 pkgs.tmux pkgs.git pkgs.ripgrep
+    paths = [ console memory kokoro modelRelay officeRelay hands handsTools workerExec workerChild pkgs.nodejs_22 pkgs.tmux pkgs.git pkgs.ripgrep
       pkgs.curl pkgs.coreutils pkgs.bashInteractive pkgs.gnugrep pkgs.gnused
       pkgs.gawk pkgs.findutils pkgs.gnutar pkgs.gzip pkgs.procps pkgs.which pkgs.gnumake pkgs.gcc
       pkgs.cacert lockTools ] ++ providerLaunchers;
@@ -200,4 +220,4 @@ let
     done
   '';
 
-in { inherit reverie console memory memoryPackage runtime entrypoint kokoro; }
+in { inherit reverie console memory memoryPackage runtime entrypoint kokoro hands handsTools; }

@@ -136,7 +136,8 @@ export async function spendRebootRestore(
   ctx: RebootRestoreCtx,
   taken: readonly RebootRestoreEntry[],
   unspent: Set<RebootRestoreEntry>,
-  shouldRestore: () => boolean = () => true
+  shouldRestore: () => boolean = () => true,
+  options: { attachOnly?: boolean } = {}
 ): Promise<{ restored: ReturnType<typeof toBannerItem>[]; skipped: RebootRestoreRejection[] }> {
   // The plan was built at boot and the board has moved on since. A conversation
   // the user resumed by hand from the Resume list is already on screen, and a
@@ -215,6 +216,7 @@ export async function spendRebootRestore(
         // window states and the lifecycle log all key off it, and the unpinned
         // record is gone, so there is nothing to collide with.
         id: saved.id,
+        workerAttachOnly: options.attachOnly,
         workingDir: saved.workingDir,
         mode: saved.mode,
         name: saved.name,

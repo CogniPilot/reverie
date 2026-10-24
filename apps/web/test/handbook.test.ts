@@ -36,6 +36,31 @@ describe('shared office handbook', () => {
       expect(html.headers['cache-control']).toBe('no-store');
     }
   });
+  it('publishes a bounded linked workflow guide for every registered page', async () => {
+    const app = setup();
+    const expected = [
+      'getting-started',
+      'profiles',
+      'models',
+      'work',
+      'laptops',
+      'recovery',
+      'power',
+      'permissions',
+      'plugins',
+      'previews',
+    ];
+    expect(HANDBOOK_PAGES.map((p) => p.slug).sort()).toEqual(expected.sort());
+    for (const p of HANDBOOK_PAGES) {
+      const raw = (await app.inject('/handbook/' + p.slug + '.md')).body;
+      expect(raw.split(/\s+/).length).toBeLessThan(650);
+      expect(raw).toMatch(/\[[^\]]+\]\(\/handbook\/[a-z-]+\)/);
+      for (const match of raw.matchAll(/\[[^\]]+\]\(([^)]+)\)/g)) {
+        expect(match[1]).toMatch(/^\/handbook\/[a-z-]+$/);
+        expect((await app.inject(match[1])).statusCode).toBe(200);
+      }
+    }
+  });
   it('searches page text and safely renders queries with no script dependencies', async () => {
     const app = setup();
     const result = await app.inject('/handbook?q=retry');

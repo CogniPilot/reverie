@@ -1,6 +1,13 @@
 # Reverie setup and operations
 
 Detailed setup, runtime and operations notes. The [README](../README.md) has the overview.
+For everyday website workflows, open Handbook in the sidebar or start with
+[Getting started](../apps/web/src/web/public/handbook/getting-started.md).
+[Profiles](../apps/web/src/web/public/handbook/profiles.md),
+[plans](../apps/web/src/web/public/handbook/models.md),
+[files and scratch](../apps/web/src/web/public/handbook/work.md) and
+[optional plugins](../apps/web/src/web/public/handbook/plugins.md) are short guides;
+this document covers operator setup.
 
 A shareable agent workspace with persistent identities, private and project memory,
 reflection, dreams and provider-independent handoffs. Every expert is a generic AI
@@ -27,8 +34,8 @@ nix run .#start
 This builds the current flake image and creates an editable ~/reverie/deployment.json
 only on first run. Company state and provider logins live under
 ~/reverie/companies/default; working projects live in ~/reverie/workspace.
-~/reverie/scratch links to ~/scratch/reverie by default, so large builds and agent
-scratch use the large disk. You can edit the validated paths, port, container name,
+~/reverie/scratch is the default scratch drive. To use a second disk, point that
+directory at an owner-selected mount or symlink before starting. You can edit the validated paths, port, container name,
 memory limit and process limit in deployment.json. Existing containers are retained;
 a changed deployment requires a new container name rather than silent replacement.
 
@@ -182,7 +189,7 @@ contained deployment root. The default layout is:
 ~/reverie/companies/default/home/      agent tool settings and provider logins
 ~/reverie/workspace/                   working projects and cases
 ~/reverie/runtime/                     host helpers, controls and engine state
-~/reverie/scratch/                     symlink to ~/scratch/reverie by default
+~/reverie/scratch/                     scratch drive (directory or owner-selected mount)
 ~~~
 
 
