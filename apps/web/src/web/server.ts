@@ -216,7 +216,7 @@ import type { SessionPort as OwnerPolicySessions } from './ports/session-port.js
 import { OwnerAuthService } from '../owner-auth/service.js';
 import { serviceVerifier, ownerVerifier } from '../owner-auth/marks.js';
 import { OwnerAuthStore } from '../owner-auth/store.js';
-import { registerOwnerPolicy } from '../owner-auth/policy.js';
+import { callerOf, registerOwnerPolicy } from '../owner-auth/policy.js';
 import { relations, runtimeLineage } from '../owner-auth/relations.js';
 import { registerCompanyHireRoutes } from './routes/company-hire-routes.js';
 import { registerSessionRuntimeRoutes } from './routes/session-runtime-routes.js';
@@ -2016,7 +2016,7 @@ export class WebServer extends EventEmitter {
         return { mode: planMoveHarness(account) };
       },
       capability: new PlanRequestCapabilities(),
-      notify: (record, _file, allowed) => deliverPlanRequest(record, () => this.sessions.get(record.sessionId), allowed),
+      notify: (record, _file, allowed) => deliverPlanRequest(record, this.chatroomService, allowed),
       audit: entry => this.chatroomService.auditEntry(entry),
     });
     registerPlanRequestRoutes(this.app, planRequests, ctx, ownerAuth, request => ({
@@ -2033,7 +2033,12 @@ export class WebServer extends EventEmitter {
       if (result.statusCode >= 400 || body?.success === false)
         throw new PlanMoveError(body?.error ?? 'The migration session request was refused', result.statusCode >= 400 ? result.statusCode : 409);
       return body;
-    }));
+    }), request => {
+      const caller = callerOf(request, { service: ownerAuth, ctx });
+      if (caller.kind !== 'agent' || !caller.session || request.headers['x-reverie-parent-session'] !== caller.session) return undefined;
+      const current = this.sessions.get(caller.session);
+      return current ? { sessionId: caller.session, owner: current.owner } : undefined;
+    });
 
     registerWsRoutes(this.app, ctx, () => this.getHostPolicy());
   }

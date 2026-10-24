@@ -201,6 +201,7 @@ export class PlanMoveRequests {
             }),
           () =>
             this.serial(async () => {
+              await this.current(record);
               if (record.phase === 'pending' && this.executions.get(record.id) === execution) {
                 record.phase = 'reauthorize-required';
                 record.error =
@@ -280,6 +281,18 @@ export class PlanMoveRequests {
           await this.current(record);
           result.unshift(view(record));
         }
+      return result;
+    });
+  }
+  async pendingForSession(sessionId: string, owner?: string): Promise<PlanRequestView[]> {
+    return this.serial(async () => {
+      const result: PlanRequestView[] = [];
+      for (const record of this.records.values()) {
+        if (record.owner !== owner || record.sessionId !== sessionId) continue;
+        await this.current(record);
+        if (['pending', 'reauthorize-required'].includes(record.phase) &&
+            this.port.binding(record.employeeId, owner) === sessionId) result.push(view(record));
+      }
       return result;
     });
   }
@@ -372,6 +385,8 @@ export class PlanMoveRequests {
       const target = await this.port.validateTarget(snapshot, record.toAccount, record.owner);
       if (record.targetMode && record.targetMode !== target?.mode)
         throw new PlanMoveError('The destination harness changed; ask the owner for a new request');
+      await this.current(record);
+      if (record.phase !== 'pending') throw new PlanMoveError('Approval expired or authorization ended', 403);
       record.phase = 'executing';
       await this.revoke(record);
       await this.save();

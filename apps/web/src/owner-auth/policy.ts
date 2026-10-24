@@ -68,6 +68,7 @@ const AGENT_ROUTES = new Set([
   // Private one-time approval credentials plus the exact current employee binding are checked by these handlers.
   'POST /api/plans/requests/:id/approve',
   'POST /api/plans/requests/:id/reject',
+  'POST /api/plans/agent-requests/pending', // exact resolved agent session, self-only records
   'POST /api/plans/agent-requests', // handler checks exact employee and explicit plan permission
   'POST /api/plans/agent-requests/:id/status',
   'POST /api/plans/agent-requests/:id/cancel',
