@@ -4348,7 +4348,7 @@ it('turns shared workspace artifact paths into browser downloads, including inli
   const links = [...h.document.querySelectorAll('.ca-workspace-download')];
   expect(links).toHaveLength(1);
   expect(links[0].getAttribute('href')).toBe('/api/filesystem/download?path=' + encodeURIComponent(path));
-  expect(links[0].getAttribute('download')).toBe('EP010.mp4');
+  expect(links[0].getAttribute('download')).toBe('demo.mp4');
   expect(h.document.querySelector('pre .ca-workspace-download')).toBeNull();
   h.dom.window.close();
 });

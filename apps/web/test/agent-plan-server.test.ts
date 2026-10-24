@@ -155,9 +155,9 @@ describe('agent-requested cross-provider migration in enforce mode', () => {
     const { nonce } = await new PlanRequestCapabilities().read(source, input.id);
     expect((await agent(manager, `/api/plans/requests/${input.id}/credential`)).statusCode).toBe(403);
     const privateCredential = await agent(source, `/api/plans/requests/${input.id}/credential`);
-    expect(privateCredential.statusCode).toBe(200);
-    expect(privateCredential.headers['cache-control']).toBe('no-store');
-    expect(privateCredential.json().data).toEqual({requestId: input.id, sessionId: source, nonce});
+    expect(privateCredential.statusCode).toBe(403);
+    expect(privateCredential.body).not.toContain(nonce);
+    expect(privateCredential.json().data).toBeUndefined();
     expect(
       (await agent(manager, `/api/plans/requests/${input.id}/approve`, { nonce, handoff: 'Continue fixture review.' }))
         .statusCode
