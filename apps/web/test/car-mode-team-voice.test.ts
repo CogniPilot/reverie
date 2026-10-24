@@ -37,6 +37,119 @@ const pickVoice = get('carModePickVoice') as (
 const voiceMember = get('chatVoiceMember') as (room: unknown) => { sessionId: string } | null;
 const isUserDm = get('chatIsUserDm') as (room: unknown) => boolean;
 
+function playbackTimingHarness() {
+  let now = 100;
+  const timingContext = vm.createContext({ ReverieApp: class {}, performance: { now: () => now } });
+  vm.runInContext(readFileSync(resolve(import.meta.dirname, '../src/web/public/car-mode.js'), 'utf8'), timingContext);
+  const events: Array<{ event: string; info: Record<string, unknown> }> = [];
+  const listeners = new Map<string, Set<() => void>>();
+  const audio = {
+    duration: 3,
+    currentTime: 0,
+    paused: false,
+    src: '',
+    play: () => Promise.resolve(),
+    pause: () => {
+      audio.paused = true;
+    },
+    addEventListener: (name: string, fn: () => void) => {
+      if (!listeners.has(name)) listeners.set(name, new Set());
+      listeners.get(name)!.add(fn);
+    },
+    removeEventListener: (name: string, fn: () => void) => {
+      listeners.get(name)?.delete(fn);
+    },
+  };
+  const build = vm.runInContext('ReverieApp.prototype._carTeamSynth', timingContext) as (
+    this: unknown,
+    phone: unknown,
+    diag: (event: string, info: Record<string, unknown>) => void
+  ) => { deps: { play(url: string, link: Record<string, unknown>): Promise<void>; stop(): void } };
+  const app = {
+    _carSynthesisQueue: {},
+    _chatAudio: audio,
+    _chatAudioEl: () => audio,
+    _chatUrl: (url: string) => url,
+  };
+  const team = build.call(app, { speaking: false, pending: false }, (event, info) => events.push({ event, info }));
+  return {
+    team,
+    audio,
+    events,
+    advance: (ms: number) => {
+      now += ms;
+    },
+    emit: (name: string) => {
+      for (const fn of listeners.get(name) || []) fn();
+    },
+  };
+}
+
+describe('linked first-playback timing', () => {
+  it('waits for actual playing, records it once, and keeps the exact reply identity', async () => {
+    const h = playbackTimingHarness();
+    const link = { turnId: 'turn-a', messageId: 'message-a', utteranceIndex: 1 };
+    const played = h.team.deps.play('/audio/a', link);
+    await Promise.resolve();
+    expect(h.events).toEqual([{ event: 'team:play-request', info: link }]);
+    h.advance(37);
+    h.emit('playing');
+    h.advance(99);
+    h.emit('playing'); // A resume must not replace the first onset.
+    const starts = h.events.filter((e) => e.event === 'team:playing');
+    expect(starts).toHaveLength(1);
+    expect(starts[0].info).toMatchObject(link);
+    expect(starts[0].info.elapsedMs).toBe(37);
+    expect(Object.keys(starts[0].info).sort()).toEqual(['elapsedMs', 'messageId', 'turnId', 'utteranceIndex']);
+    h.audio.currentTime = h.audio.duration;
+    h.emit('ended');
+    await played;
+  });
+
+  it('removes the onset listener on stop so a late event cannot claim playback', async () => {
+    const h = playbackTimingHarness();
+    const played = h.team.deps.play('/audio/a', { turnId: 'cancelled-turn' });
+    h.team.deps.stop();
+    await played;
+    h.emit('playing');
+    expect(h.events.map((e) => e.event)).toEqual(['team:play-request']);
+  });
+
+  it('carries each utterance identity through deferred synthesis and ordered playback', async () => {
+    const samples: Array<Record<string, unknown>> = [];
+    const links: Array<Record<string, unknown>> = [];
+    const synth = new CarServerSynth({
+      ...manualTimers(),
+      fetchAudio: () => '/audio/a',
+      play: (_url: string, link: Record<string, unknown>) => {
+        links.push(link);
+        return Promise.resolve();
+      },
+      onSynthesis: (info: Record<string, unknown>) => samples.push(info),
+    });
+    synth.speakReply(
+      ['first', 'second'].map((text) => ({
+        text,
+        turnId: 'turn-a',
+        replyMessageId: 'message-a',
+        onend: null,
+        onerror: null,
+      }))
+    );
+    await flush();
+    await flush();
+    expect(links).toEqual(
+      [0, 1].map((utteranceIndex) => ({ turnId: 'turn-a', messageId: 'message-a', utteranceIndex }))
+    );
+    expect(samples).toHaveLength(2);
+    for (const [utteranceIndex, sample] of samples.entries()) {
+      expect(sample).toMatchObject({ turnId: 'turn-a', messageId: 'message-a', utteranceIndex, status: 'completed' });
+      expect(sample.queueMs).toBeGreaterThanOrEqual(0);
+      expect(sample.requestMs).toBeGreaterThanOrEqual(0);
+    }
+  });
+});
+
 /** Timers the test fires by hand: fire(ms) runs every timer set for exactly that delay. */
 function manualTimers() {
   let next = 1;
