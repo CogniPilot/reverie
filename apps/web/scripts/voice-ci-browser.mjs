@@ -192,10 +192,11 @@ try {
       app._chatAudioEl = () => audio;
       app._chatUrl = (value) => value;
       const events = [];
+      const link = { turnId: crypto.randomUUID(), messageId: crypto.randomUUID(), utteranceIndex: 0 };
       for (const name of ['playing', 'waiting', 'pause', 'timeupdate', 'ended', 'error'])
         audio.addEventListener(name, () => events.push({ name, atMs: performance.now(), position: audio.currentTime }));
       const synth = app._carTeamSynth({ speaking: false, pending: false }, (event, info) =>
-        events.push({ event, info })
+        events.push({ event, info, atMs: performance.now() })
       );
       audio.addEventListener(
         'playing',
@@ -206,13 +207,24 @@ try {
         { once: true }
       );
       const start = performance.now();
-      await synth.deps.play(url);
+      await synth.deps.play(url, link);
       if (audio.currentTime < expected - 0.5) throw new Error('Long reply stopped early');
-      return { duration: audio.duration, played: audio.currentTime, elapsedMs: performance.now() - start, events };
+      return { duration: audio.duration, played: audio.currentTime, elapsedMs: performance.now() - start, events, link };
     },
     { url: input.data.audioUrl, expected: full.duration }
   );
   assert.ok(longPlayback.elapsedMs <= full.duration * 1000 + fixture.budgetsMs.playbackOverhead);
+  const longRequests = longPlayback.events.filter((event) => event.event === 'team:play-request');
+  const longOnsets = longPlayback.events.filter((event) => event.event === 'team:playing');
+  assert.equal(longRequests.length, 1, 'Long reply needs one playback request');
+  assert.equal(longOnsets.length, 1, 'Resume must not duplicate the first playback onset');
+  assert.ok(longPlayback.events.filter((event) => event.name === 'playing').length >= 2,
+    'The long-reply fixture must exercise its waiting/playing resume cycle');
+  for (const event of [...longRequests, ...longOnsets])
+    for (const key of ['turnId', 'messageId', 'utteranceIndex'])
+      assert.equal(event.info[key], longPlayback.link[key], `Long reply lost ${key}`);
+  assert.ok(Number.isFinite(longOnsets[0].info.elapsedMs) && longOnsets[0].info.elapsedMs >= 0);
+  assert.ok(longOnsets[0].atMs >= longRequests[0].atMs, 'Playback onset precedes its request');
   playback.push({ name: 'long-reply', ...longPlayback });
   record('long-playback-complete', { phaseDurationMs: longPlayback.elapsedMs });
 
@@ -260,6 +272,7 @@ try {
       return { ok: response.ok, data: body.data };
     };
     window.runBatch = async (text, failure = '') => {
+      const link = { turnId: crypto.randomUUID(), messageId: crypto.randomUUID() };
       const start = performance.now(),
         diagnostics = [],
         completed = [];
@@ -277,12 +290,15 @@ try {
       };
       const pieces = carModeUtterances(text);
       const tasks = pieces.map(
-        (text) => new Promise((resolve, reject) => completed.push({ text, onend: resolve, onerror: reject }))
+        (text) => new Promise((resolve, reject) => completed.push({
+          text, turnId: link.turnId, replyMessageId: link.messageId, onend: resolve, onerror: reject,
+        }))
       );
       synth.speakReply(completed);
       await Promise.all(tasks);
       return {
         pieces,
+        link,
         diagnostics,
         elapsedMs: performance.now() - start,
         selections: window.nativeSelections.splice(0),
@@ -297,10 +313,21 @@ try {
   for (const event of healthy.diagnostics.filter((event) => event.event === 'team:speak'))
     assert.equal(event.info.voice, fixture.voice);
   const synthesis = healthy.diagnostics.filter((event) => event.event === 'team:synthesis').map((event) => event.info);
+  const playRequests = healthy.diagnostics.filter((event) => event.event === 'team:play-request');
+  const firstOnsets = healthy.diagnostics.filter((event) => event.event === 'team:playing');
   assert.equal(synthesis.length, healthy.pieces.length, 'Every healthy utterance needs scheduling telemetry');
+  assert.equal(playRequests.length, healthy.pieces.length, 'Every healthy utterance needs a playback request');
+  assert.equal(firstOnsets.length, healthy.pieces.length, 'Every healthy utterance needs exactly one playback onset');
   for (let i = 0; i < synthesis.length; i++) {
     const item = synthesis[i];
     assert.equal(item.status, 'completed');
+    for (const entry of [item, playRequests[i].info, firstOnsets[i].info]) {
+      assert.equal(entry.turnId, healthy.link.turnId, 'Wrong turn in timing evidence');
+      assert.equal(entry.messageId, healthy.link.messageId, 'Wrong reply in timing evidence');
+      assert.equal(entry.utteranceIndex, i, 'Wrong utterance in timing evidence');
+    }
+    assert.ok(Number.isFinite(firstOnsets[i].info.elapsedMs) && firstOnsets[i].info.elapsedMs >= 0);
+    assert.ok(firstOnsets[i].atMs >= playRequests[i].atMs, 'Playback onset precedes its request');
     for (const key of ['queueMs', 'requestMs', 'requestStartMs', 'requestEndMs'])
       assert.ok(Number.isFinite(item[key]) && item[key] >= 0, `Missing synthesis ${key}`);
     assert.ok(item.queueMs + item.requestMs <= 25_000, 'Synthesis exceeded its existing client deadline');
