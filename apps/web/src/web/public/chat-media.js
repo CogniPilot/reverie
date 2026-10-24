@@ -180,18 +180,19 @@ function chatEmojiMatches(query, emotes = [], limit = 8) {
 }
 
 /**
- * Pure: split text into plain runs and ``` fenced code blocks (`{code}`, with the optional language line dropped).
+ * Pure: split text into plain runs and ``` fenced code blocks, retaining an explicit language label.
  * An opening fence with no closing one stays plain text, so a stray ``` never swallows the rest of a message.
  */
 function chatCodeSegments(text) {
   const out = [];
   const src = String(text ?? '');
-  const re = /```[^\n`]*\n?([\s\S]*?)```/g;
+  const re = /```([^\n`]*)\n?([\s\S]*?)```/g;
   let last = 0;
   let m;
   while ((m = re.exec(src))) {
     if (m.index > last) out.push({ text: src.slice(last, m.index) });
-    out.push({ code: m[1].replace(/\n$/, '') });
+    const language = m[1].trim().split(/\s+/, 1)[0].toLowerCase();
+    out.push({ code: m[2].replace(/\n$/, ''), ...(language ? { language } : {}) });
     last = m.index + m[0].length;
   }
   if (last < src.length) out.push({ text: src.slice(last) });
@@ -577,10 +578,12 @@ Object.assign(ReverieApp.prototype, {
   /** Message text with this room's :emotes: drawn inline (text stays text). */
   _chatTextEl(text) {
     const el = this._chatEl('div', 'chatroom-msg-text');
+    // Preserve original message source for optional display/editor plugins.
+    el._reverieSource = String(text ?? '');
     const names = new Set((this._chatEmotes || []).map((e) => e.name));
     for (const block of chatCodeSegments(text)) {
       if (block.code !== undefined) {
-        el.append(this._chatCodeBlock(block.code));
+        el.append(this._chatCodeBlock(block.code, block.language));
         continue;
       }
       this._chatAppendText(el, block.text, names);
@@ -589,7 +592,7 @@ Object.assign(ReverieApp.prototype, {
   },
 
   /** A fenced code block with a Copy button (a long press cannot select part of a message on a phone). */
-  _chatCodeBlock(code) {
+  _chatCodeBlock(code, language) {
     const wrap = this._chatEl('div', 'chatroom-codeblock');
     const copy = this._chatEl('button', 'chatroom-code-copy', 'Copy');
     copy.type = 'button';
@@ -604,7 +607,9 @@ Object.assign(ReverieApp.prototype, {
       setTimeout(() => (copy.textContent = 'Copy'), 1500);
     };
     const pre = this._chatEl('pre', 'chatroom-code');
-    pre.append(this._chatEl('code', '', code));
+    const source = this._chatEl('code', '', code);
+    if (typeof language === 'string' && /^[a-z0-9_+-]{1,40}$/.test(language)) source.classList.add(`language-${language}`);
+    pre.append(source);
     wrap.append(copy, pre);
     return wrap;
   },

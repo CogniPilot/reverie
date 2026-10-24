@@ -30,6 +30,8 @@ export const EmployeeSchema = z
     icon: z.string().refine((s) => !!normalizeIcon(s), 'Choose a valid icon'),
     /** Profile image (`/api/avatars/<id>?v=<ms>`), set through the avatar routes only. */
     avatar: z.string().regex(AVATAR_URL).optional(),
+    /** Owner-selected avatar background; absent retains the automatic identity color. */
+    avatarBackground: z.union([z.string().regex(/^#[0-9a-fA-F]{6}$/), z.literal('transparent')]).optional(),
     position: text,
     permissions: EmployeePermissionsSchema.default({ recoverEmployees: false, moveOwnPlan: false, managePlans: false }),
     /** How to refer to this person ("she/her", "they/them"); the owner sets it (PUT /api/company/employees/:id), never the agent. */

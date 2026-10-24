@@ -1,0 +1,82 @@
+.chat-plugin-dialog {
+  color: var(--text-primary, #eee);
+  background: var(--bg-secondary, #202127);
+  border: 1px solid #777;
+  border-radius: 10px;
+  width: min(760px, 92vw);
+  max-height: 85vh;
+  overflow: auto;
+  padding: 20px;
+}
+.chat-plugin-dialog::backdrop {
+  background: #0009;
+}
+.chat-plugin-choice {
+  display: flex;
+  align-items: start;
+  gap: 10px;
+  margin: 16px 0;
+}
+.chat-plugin-dialog button,
+.chat-plugin-actions button {
+  color: inherit;
+  background: var(--bg-tertiary, #343640);
+  border: 1px solid #777;
+  border-radius: 5px;
+  padding: 7px 10px;
+  cursor: pointer;
+}
+.chat-plugin-dialog button:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+.chat-plugin-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 8px 0;
+}
+.chat-language-editor textarea {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 220px;
+  resize: vertical;
+  color: inherit;
+  background: var(--bg-primary, #15161b);
+  border: 1px solid #777;
+  padding: 10px;
+  font: 14px/1.5 monospace;
+  tab-size: 4;
+}
+.chat-plugin-output {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 260px;
+  overflow: auto;
+}
+.ca-root .ca-head .ca-plugins-open {
+  flex: none;
+  width: auto;
+  min-width: 68px;
+  padding: 0 10px;
+  white-space: nowrap;
+}
+.ca-head .ca-head-title {
+  min-width: 0;
+  flex-shrink: 1;
+  overflow: hidden;
+}
+.ca-head .ca-head-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+@media (max-width: 600px) {
+  .chat-plugin-dialog {
+    padding: 12px;
+  }
+  .ca-plugins-open {
+    font-size: 11px;
+    padding: 5px;
+  }
+}

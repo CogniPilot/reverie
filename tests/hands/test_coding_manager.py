@@ -120,6 +120,7 @@ class ManagerTests(unittest.TestCase):
         row = self.state['_coding']['room:' + source['id']]
         self.assertEqual(row['status'], 'completed')
         self.assertEqual(row['tests_run'], 1)
+        self.assertEqual(row['tool_history'], [{'tool': 'run_tests', 'ok': True, 'exit_code': 0}])
         self.assertEqual(row['runner_reports'], 1)
         self.assertEqual(row['runner_wall_ms'], 10)
         self.assertEqual(row['runner_peak_rss_bytes'], 1000)
@@ -143,6 +144,19 @@ class ManagerTests(unittest.TestCase):
         self.assertEqual(set(request), {'version', 'name', 'args', 'max_output_chars'})
         self.assertGreaterEqual(request['max_output_chars'], 500)
         self.assertLessEqual(request['max_output_chars'], 20000)
+
+    def test_model_format_repair_is_recorded_without_dispatching_parallel_calls(self):
+        parallel = call(name='edit_file', path='protected.py')
+        parallel['tool_calls'].append(call('another', name='edit_file', path='other.py')['tool_calls'][0])
+        FakeArbiter.replies = [parallel, call('valid', name='run_tests'), {'content': 'Finished.'}]
+        source = self.start()
+        self.pump_until(lambda: self.manager.active is None)
+        row = self.state['_coding']['room:' + source['id']]
+        self.assertEqual(row['status'], 'completed')
+        self.assertEqual(row['call_retries'], 1)
+        self.assertEqual(row['steps'], 2)
+        self.assertEqual(row['tool_history'], [{'tool': 'run_tests', 'ok': True, 'exit_code': 0}])
+        self.assertEqual([request['name'] for request in FakeRunner.requests], ['run_tests'])
 
     def test_less_than_one_second_never_rounds_up_or_starts_runner(self):
         self.cfg['coding']['profiles']['drill']['seconds'] = 0.5

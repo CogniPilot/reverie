@@ -35,6 +35,7 @@ describe('owner browser plan move API', () => {
   });
 
   it.each([
+    '/api/plans/moves/force',
     '/api/plans/moves',
     '/api/plans/moves/preview',
     '/api/plans/moves/recent',
@@ -69,6 +70,24 @@ describe('owner browser plan move API', () => {
     expect(moves.begin).not.toHaveBeenCalled();
     expect(response.json().error).toContain('expert');
     expect(response.body).not.toContain(input.handoff);
+  });
+  it('allows only the owner to force a move through the normal replacement transaction', async () => {
+    await app.close(); app = Fastify(); await app.register(cookie);
+    const executor = {snapshot: vi.fn(async () => ({sessionId: 'old', name: 'Casey', account: 'first', mode: 'codex', working: true}))} as never;
+    const target = vi.fn(async () => 'claude' as const);
+    registerPlanMoveRoutes(app, moves as unknown as PlanMoves, {
+      authSessions: new Map([['owner', {ip: '127.0.0.1', ua: 'fixture', createdAt: 1, method: 'basic'}]]) as never,
+    }, undefined, () => executor, target);
+    moves.begin.mockResolvedValue({id: 'move', phase: 'creating'});
+    const payload = {id: 'move', employeeId: 'casey', sessionId: 'old', toAccount: 'second', handoff: 'Owner checkpoint.'};
+    const result = await app.inject({method: 'POST', url: '/api/plans/moves/force', headers, payload});
+    expect(result.statusCode).toBe(202);
+    expect(moves.begin).toHaveBeenCalledWith({...payload, fromAccount: 'first', forceBusy: true, targetMode: 'claude'}, undefined, executor);
+    moves.begin.mockClear();
+    for (const extra of [{'x-reverie-parent-session': 'source'}, {origin: 'https://other.test'}, {cookie: ''}]) {
+      expect((await app.inject({method: 'POST', url: '/api/plans/moves/force', headers: {...headers,...extra}, payload})).statusCode).toBe(403);
+    }
+    expect(moves.begin).not.toHaveBeenCalled();
   });
 
   it('refuses spoofed agents and cross-site requests before transaction code', async () => {

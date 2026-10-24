@@ -171,6 +171,7 @@ const HOUR_MS = 3_600_000;
 export class CronService {
   private poster: BotPoster | undefined;
   private postSources: PostSources = {};
+  private executingJobs = new Map<string, { job: Pick<CronJob, 'id' | 'name' | 'owner'>; count: number }>();
 
   constructor(private readonly deps: CronDeps) {}
 
@@ -190,6 +191,11 @@ export class CronService {
 
   listJobs(): CronJob[] {
     return Object.values(this.store.getCronJobs());
+  }
+
+  /** Actual executions in this scheduler process, never inferred from persisted run history. */
+  listRunningJobs(): Array<Pick<CronJob, 'id' | 'name' | 'owner'>> {
+    return [...this.executingJobs.values()].map(({ job }) => ({ ...job }));
   }
 
   getJob(id: string): CronJob | null {
@@ -231,7 +237,7 @@ export class CronService {
 
   // ──────────────────────────── Mutations ───────────────────────────
 
-  createJob(input: CronJobInput, owner?: string, createdBy?: CronJob['createdBy']): CronJob {
+  createJob(input: CronJobInput, owner?: string, createdBy?: CronJob['createdBy'], createdByOwner = false): CronJob {
     if (Object.keys(this.store.getCronJobs()).length >= MAX_CRON_JOBS) {
       throw this.badRequest(`Maximum number of cron jobs (${MAX_CRON_JOBS}) reached`);
     }
@@ -242,6 +248,7 @@ export class CronService {
       id: uuidv4(),
       name: input.name,
       owner,
+      ...(!createdBy && createdByOwner ? { createdByOwner: true as const } : {}),
       ...(action === 'post'
         ? {
             action,
@@ -484,6 +491,19 @@ export class CronService {
   }
 
   private async launch(job: CronJob, trigger: TriggerType): Promise<CronJobRun | null> {
+    const current = this.executingJobs.get(job.id);
+    this.executingJobs.set(job.id, {
+      job: { id: job.id, name: job.name, owner: job.owner }, count: (current?.count ?? 0) + 1,
+    });
+    try { return await this.executeLaunch(job, trigger); }
+    finally {
+      const active = this.executingJobs.get(job.id);
+      if (active && active.count > 1) active.count--;
+      else this.executingJobs.delete(job.id);
+    }
+  }
+
+  private async executeLaunch(job: CronJob, trigger: TriggerType): Promise<CronJobRun | null> {
     // A scheduled source post with nothing to say leaves no run behind (a 15-minute check would otherwise
     // flood the 500-run history); Run Now always records what the source says.
     let sourced: { text: string | null; reason: string; key?: string } | undefined;

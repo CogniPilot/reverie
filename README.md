@@ -66,6 +66,10 @@ From a clone, start the default Docker deployment with:
 nix run .#start
 ~~~
 
+Optional [HTTPS laptop previews](docs/laptop-previews.md) run as a separate
+Nix-built host service with a dedicated wildcard domain. The owner opens selected
+laptop ports from **Office → Laptop previews**; no ports are exposed by default.
+
 This builds the current flake image and creates an editable ~/reverie/deployment.json
 only on first run. Company state and provider logins live under
 ~/reverie/companies/default; working projects live in ~/reverie/workspace.
@@ -117,6 +121,18 @@ For a deployment running autonomous agents, use a separate worker container for
 each session. Think of these as the experts' office laptops: each has its own
 running tools, private home and restart boundary. Explicit project mounts are
 shared drives; the console is separate office infrastructure.
+
+Worker images include Nix with an independent writable store and database for
+each laptop. For example, `nix profile install nixpkgs#openssh` installs an SSH
+client, and `nix develop` works in a mounted project. The `nixpkgs` registry follows
+the release's flake lock. Profiles are on the laptop's private home drive; its
+store is under its owned scratch directory and survives container replacement.
+An unprivileged, networkless helper seeds and updates the store from the immutable
+image before starting the laptop. It preserves installed packages and roots the
+image's runtime so ordinary garbage collection cannot remove it. The host's Nix
+daemon, database and store are never mounted into the laptop. Nix builds use the
+laptop container as their isolation boundary, with one build job and four cores
+by default; the host's Nix sandbox configuration is unchanged.
 
 Nix builds both images and the host broker. CPU is uncapped by default: an idle
 laptop lends its capacity to a busy one. The default MVP admits laptops against
@@ -183,7 +199,13 @@ promise that shared writable files are protected from another expert.
 ## Office handbook
 
 Open **Handbook** in the conversation sidebar, or `/handbook`, for searchable
-pages shared by humans and agents. The same packaged Markdown is available through
+pages shared by humans and agents. Start with [Getting started](apps/web/src/web/public/handbook/getting-started.md),
+then use the short guides for [profiles](apps/web/src/web/public/handbook/profiles.md),
+[plans](apps/web/src/web/public/handbook/models.md),
+[files and scratch](apps/web/src/web/public/handbook/work.md),
+[recovery](apps/web/src/web/public/handbook/recovery.md) and
+[optional plugins](apps/web/src/web/public/handbook/plugins.md).
+The same packaged Markdown is available through
 `GET /api/handbook` and `GET /api/handbook/:slug` using the normal scoped office API.
 Expert context includes these lookup pointers and the current recovery grant.
 The handbook explains procedures; it does not grant permissions. Source pages live
@@ -309,6 +331,10 @@ memory and personal reflection retain their separate storage and lifecycle.
 
 See [setup and operations](docs/setup.md) for recovery, source mounts, reproducible
 image updates and optional development-container workflows.
+
+[Optional chat plugins](docs/chat-plugins.md) add browser-selected LaTeX tools and
+explicit local Python/Pyright and Modelica/Rumoca snippet assistance. They default
+off; language servers are separate optional packages and never run user code.
 
 ## Native adapter and memory skill
 

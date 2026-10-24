@@ -240,7 +240,7 @@ export function planRebootRestore(
     // OpenCode keeps its native thread in `openCodeConfig.continueSession` (the CLI's
     // `--session`), so a record that names one can be resumed without the transcript reader.
     const nativeThread = nativeOpenCodeThread(state) ?? nativeCodexThread(state);
-    if (!nativeThread && state.mode !== 'codex' && getCli(state.mode ?? 'claude')?.capabilities.transcript !== 'claude-jsonl') {
+    if (!nativeThread && state.mode !== 'codex' && (state.mode as string) !== 'hands' && getCli(state.mode ?? 'claude')?.capabilities.transcript !== 'claude-jsonl') {
       skipped.push({ sessionId, reason: 'unsupported-mode' });
       continue;
     }

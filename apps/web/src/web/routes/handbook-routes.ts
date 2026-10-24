@@ -6,6 +6,16 @@ import { fileURLToPath } from 'node:url';
 
 export const HANDBOOK_PAGES = [
   {
+    slug: 'getting-started',
+    title: 'Getting started',
+    summary: 'Sign in, connect a plan, hire an expert and begin a conversation.',
+  },
+  {
+    slug: 'profiles',
+    title: 'Profiles and reporting lines',
+    summary: 'Edit roles, working style, appearance and reporting relationships.',
+  },
+  {
     slug: 'recovery',
     title: 'Recover a stuck expert',
     summary: 'Diagnose a dead session, check permission, recover and verify readiness.',
@@ -17,6 +27,11 @@ export const HANDBOOK_PAGES = [
   },
   { slug: 'laptops', title: 'Office laptops', summary: 'Where tools run, resource protection and host boundaries.' },
   {
+    slug: 'previews',
+    title: 'Laptop previews',
+    summary: 'Open agent web pages over HTTPS on separate secure addresses.',
+  },
+  {
     slug: 'power',
     title: 'Power and restarts',
     summary: 'Stop the office, stop agents, restart the website and the offline safeguard.',
@@ -25,6 +40,11 @@ export const HANDBOOK_PAGES = [
     slug: 'work',
     title: 'Work and scratch',
     summary: 'Shared projects, private scratch ownership, leases and cleanup.',
+  },
+  {
+    slug: 'plugins',
+    title: 'Optional chat plugins',
+    summary: 'Enable math previews and local Python or Modelica snippet assistance.',
   },
   {
     slug: 'models',
@@ -104,12 +124,56 @@ export function renderHandbookMarkdown(markdown: string): string {
 }
 
 function page(title: string, body: string, active = '', query = ''): string {
+  const activeGuide = HANDBOOK_PAGES.find((p) => p.slug === active)?.title || 'All guides';
   const nav = HANDBOOK_PAGES.map(
     (p) => `<a href="/handbook/${p.slug}"${p.slug === active ? ' aria-current="page"' : ''}>${escapeHtml(p.title)}</a>`
   ).join('');
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(title)} · Reverie handbook</title><style>
-:root{color-scheme:light dark;font:16px/1.6 system-ui,sans-serif}*{box-sizing:border-box}body{margin:0;color:light-dark(#20232a,#e6e9ef);background:light-dark(#fafafa,#11151b)}a{color:light-dark(#1459a3,#78c9ff)}header{padding:16px 24px;border-bottom:1px solid #8885;display:flex;gap:24px;flex-wrap:wrap}header strong{flex:1}form{padding:20px 24px;display:flex;gap:8px}input{min-width:0;max-width:460px;flex:1;padding:10px}button{padding:10px 16px}section{display:grid;grid-template-columns:240px minmax(0,780px);gap:32px;max-width:1120px;padding:0 24px 40px;margin:auto}nav{display:flex;flex-direction:column;gap:8px}nav a{padding:8px;border-radius:6px;text-decoration:none}nav a[aria-current]{background:#4499cc25;font-weight:600}article{min-width:0;overflow-wrap:anywhere}article h1{margin-top:0;font-size:1.8rem}article h2{margin-top:1.8em;font-size:1.25rem}li{margin:8px 0}pre{overflow:auto;padding:16px;background:#8882}code{font-size:.9em}.cards{display:grid;gap:16px}.card{border:1px solid #8885;border-radius:10px;padding:16px}.card h2{margin:0}.muted{opacity:.75}footer{margin-top:28px;border-top:1px solid #8885;padding-top:16px}@media(max-width:700px){section{display:block;padding:0 16px 28px}nav{flex-direction:row;flex-wrap:wrap;margin-bottom:24px;gap:4px}nav a{font-size:14px}header,form{padding:16px}article h1{font-size:1.5rem}}
-</style></head><body><header><strong><a href="/handbook">Reverie handbook</a></strong><a href="/" target="_top">Back to chat</a></header><form action="/handbook" method="get" role="search"><input name="q" aria-label="Search handbook" placeholder="Search the handbook" value="${escapeHtml(query)}" maxlength="200"><button type="submit">Search</button></form><section><nav aria-label="Handbook pages">${nav}</nav><article>${body}<footer class="muted">Shared operational guidance. Your current permissions and owner choices still apply. <a href="/api/handbook">Agent API index</a></footer></article></section></body></html>`;
+:root{color-scheme:light dark;font:16px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+*{box-sizing:border-box}
+body{margin:0;color:light-dark(#20232a,#e6e9ef);background:light-dark(#fafafa,#11151b)}
+a{color:light-dark(#1459a3,#78c9ff)}
+header{border-bottom:1px solid #8885}
+.masthead{max-width:1120px;padding:16px 24px;display:flex;gap:24px;flex-wrap:wrap}
+.masthead strong{flex:1}
+.handbook-layout{display:grid;grid-template-columns:224px minmax(0,780px);gap:32px;max-width:1120px;padding:24px 24px 40px}
+nav{display:flex;flex-direction:column;gap:4px;min-width:0;align-self:start}
+nav a{padding:8px 12px;border-radius:6px;text-decoration:none}
+nav a[aria-current]{background:#4499cc25;font-weight:600}
+aside,main,article{min-width:0}
+.guide-picker{display:none}
+.guide-picker summary{cursor:pointer;padding:12px 14px;border:1px solid #8885;border-radius:8px;list-style:none}
+.guide-picker summary::-webkit-details-marker{display:none}
+.guide-picker summary::after{content:'';float:right;width:8px;height:8px;border-right:1.5px solid;border-bottom:1.5px solid;transform:rotate(45deg);margin:-20px 2px 0 0}
+.guide-picker[open] summary::after{transform:rotate(225deg)}
+.guide-picker summary span{display:block;font-size:12px;opacity:.7}
+.guide-picker summary strong{font-size:15px;font-weight:600}
+.guide-picker nav{padding:8px 0;margin-top:4px;border:1px solid #8885;border-radius:8px}
+form{display:flex;gap:8px;margin:0 0 24px}
+input{min-width:0;flex:1;padding:10px;font:inherit}
+button{padding:10px 16px;font:inherit}
+article{overflow-wrap:anywhere}
+article h1{margin-top:0;font-size:1.8rem;line-height:1.3}
+article h2{margin-top:1.8em;font-size:1.25rem}
+li{margin:8px 0}
+pre{overflow:auto;padding:16px;background:#8882}
+code{font-size:.9em}
+.cards{display:grid;gap:16px}
+.card{border:1px solid #8885;border-radius:10px;padding:16px}
+.card h2{margin:0}
+.muted{opacity:.75}
+footer{margin-top:28px;border-top:1px solid #8885;padding-top:16px}
+a:focus-visible,button:focus-visible,input:focus-visible,summary:focus-visible{outline:2px solid currentColor;outline-offset:3px}
+@media(max-width:900px){
+.masthead{padding:16px;gap:16px}
+.masthead a{display:inline-flex;align-items:center;min-height:44px}
+.handbook-layout{display:block;padding:16px 16px 28px;max-width:812px}
+.desktop-guides{display:none}
+.guide-picker{display:block;margin-bottom:20px}
+nav a{white-space:normal;overflow-wrap:anywhere;font-size:14px;min-height:44px}
+article h1{font-size:1.5rem}
+}
+</style></head><body><header><div class="masthead"><strong><a href="/handbook">Reverie handbook</a></strong><a href="/" target="_top">Back to chat</a></div></header><div class="handbook-layout"><aside><nav class="desktop-guides" aria-label="Handbook pages">${nav}</nav><details class="guide-picker"><summary aria-label="Choose handbook guide"><span>Guide</span><strong>${escapeHtml(activeGuide)}</strong></summary><nav aria-label="Choose a guide">${nav}</nav></details></aside><main><form action="/handbook" method="get" role="search"><input name="q" aria-label="Search handbook" placeholder="Search the handbook" value="${escapeHtml(query)}" maxlength="200"><button type="submit">Search</button></form><article>${body}<footer class="muted">Shared operational guidance. Your current permissions and owner choices still apply. <a href="/api/handbook">Agent API index</a></footer></article></main></div></body></html>`;
 }
 
 export function registerHandbookRoutes(

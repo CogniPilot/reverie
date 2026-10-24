@@ -36,6 +36,7 @@ let wakeCalls = 0,
   rebindCalls = 0,
   powerCalls = 0,
   placementCalls = 0;
+let routineCalls = 0;
 const observations: any[] = [];
 const ctx = createMockRouteContext();
 ctx.sessions.clear();
@@ -161,6 +162,10 @@ beforeAll(async () => {
   app.get('/api/chatrooms/_verify-owner', async (req: any, reply: any) =>
     verify(req) ? { owner: true } : reply.code(403).send({ owner: false })
   );
+  app.post('/api/cron/jobs', async () => {
+    routineCalls++;
+    return { success: true };
+  });
   await app.ready();
 }, 30000);
 afterAll(async () => {
@@ -260,7 +265,6 @@ it('separates middleware-contained idioms from reachable service paths', () => {
     ['PUT', '/api/workspace-icons/image'],
     ['PUT', '/api/chat-bots/:id'],
     ['GET', '/api/agents/:id/profile'],
-    ['POST', '/api/cron/jobs'],
     ['POST', '/api/system/shutdown'],
   ])
     expect(allowed(classify(method, route, route), 'service'), route).toBe(false);
@@ -279,6 +283,24 @@ it('separates middleware-contained idioms from reachable service paths', () => {
 
 const ownerHeaders = () => ({ origin: 'http://localhost', host: 'localhost' });
 const ownerCookies = () => ({ [OWNER_COOKIE]: ownerToken });
+it('refuses services at the exact routine middleware gate before any handler runs', async () => {
+  expect(classify('POST', '/api/cron/jobs', '/api/cron/jobs')).toBe('agent');
+  const prior = routineCalls;
+  const owner = await app.inject({
+    method: 'POST',
+    url: '/api/cron/jobs',
+    headers: ownerHeaders(),
+    cookies: ownerCookies(),
+    payload: {},
+  });
+  expect(owner.statusCode).toBe(200);
+  expect(routineCalls).toBe(prior + 1);
+  for (const requestHeaders of [headers(), { ...headers(), 'x-reverie-parent-session': 'unresolved' }]) {
+    const denied = await app.inject({ method: 'POST', url: '/api/cron/jobs', headers: requestHeaders, payload: {} });
+    expect(denied.statusCode, denied.body).toBe(403);
+  }
+  expect(routineCalls).toBe(prior + 1);
+});
 it('full owner retains the six operations with real same-origin owner authentication', async () => {
   const view = await app.inject({ url: '/api/company', cookies: ownerCookies() });
   expect(view.statusCode).toBe(200);

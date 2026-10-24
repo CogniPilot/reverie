@@ -44,7 +44,7 @@ const OWNER_ONLY: Array<[string, string]> = [
   ['PUT', '/api/clis/:id'],
   ['POST', '/api/subscription-profiles'],
   ['POST', '/api/plans/login-all'],
-  ['POST', '/api/cron/jobs'],
+  ['PUT', '/api/routines-grants'],
   ['POST', '/api/tunnel/qr/regenerate'],
   ['POST', '/api/owner/password'],
 ];

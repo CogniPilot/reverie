@@ -50,7 +50,20 @@
           };
         in packages // {
           default = packages.reverie;
+          # Optional tools: excluded from the runtime/image and never fetched by a chat toggle.
+          chatPythonLsp = pkgs.pyright;
+          chatModelicaLsp = import ./nix/chat-modelica-lsp.nix { inherit pkgs; };
+          dockerImageWithChatLanguages = import ./nix/image.nix {
+            inherit pkgs;
+            src = self;
+            inherit (packages) reverie console memory runtime;
+            chatLanguageTools = {
+              python = pkgs.pyright;
+              modelica = import ./nix/chat-modelica-lsp.nix { inherit pkgs; };
+            };
+          };
           inherit container-memory start update gpuPublisher localModel;
+          launchGuard = import ./nix/launch-guard.nix { inherit pkgs; src = self; };
           dockerImage = import ./nix/image.nix {
             inherit pkgs;
             src = self;
@@ -75,6 +88,29 @@
             runtimeInputs = [ pkgs.python3 pkgs.docker-client ];
             text = ''exec python3 ${self}/python/reverie/worker.py broker "$@"'';
           };
+          previewProxy = pkgs.writeShellApplication {
+            name = "reverie-preview-proxy";
+            runtimeInputs = [ (pkgs.python3.withPackages (ps: [ ps.aiohttp ])) pkgs.docker-client ];
+            text = ''exec python3 ${self}/python/reverie/preview.py "$@"'';
+          };
+          previewService = pkgs.writeTextDir "share/systemd/user/reverie-preview-proxy.service" ''
+            [Unit]
+            Description=Reverie isolated HTTPS laptop previews
+            [Service]
+            EnvironmentFile=%h/.config/reverie/preview-proxy.env
+            ExecStart=${self.packages.${system}.previewProxy}/bin/reverie-preview-proxy --config ''${REVERIE_PREVIEW_CONFIG}
+            Restart=on-failure
+            RestartSec=5
+            UMask=0077
+            NoNewPrivileges=true
+            MemoryMax=256M
+            TasksMax=32
+            LimitNOFILE=256
+            CPUWeight=50
+            TimeoutStopSec=10
+            [Install]
+            WantedBy=default.target
+          '';
           workerService = pkgs.writeTextDir "share/systemd/user/reverie-worker-broker.service" ''
             [Unit]
             Description=Reverie laptop broker and office watchdog
@@ -88,7 +124,7 @@
             UMask=0077
             NoNewPrivileges=true
             MemoryMax=512M
-            TasksMax=256
+            TasksMax=512
             [Install]
             WantedBy=default.target
           '';
@@ -108,6 +144,7 @@
       };
       packages = forAllSystems packagesFor;
       apps = forAllSystems (system: {
+        launch-guard = { type = "app"; program = "${self.packages.${system}.launchGuard}/bin/reverie-launch-guard"; meta.description = "Evaluate metadata-only launch guard fixtures without live effects"; };
         default = { type = "app"; program = "${self.packages.${system}.reverie}/bin/reverie"; meta.description = "Reverie agent console"; };
         container-memory = { type = "app"; program = "${self.packages.${system}.container-memory}/bin/container-memory"; meta.description = "Manage Reverie container memory"; };
         start = { type = "app"; program = "${self.packages.${system}.start}/bin/reverie-start"; meta.description = "Start the Nix-built Docker image with a contained first-run layout"; };
@@ -115,13 +152,14 @@
         kokoro = { type = "app"; program = "${self.packages.${system}.kokoro}/bin/reverie-kokoro"; meta.description = "Local Kokoro speech service with persistent models"; };
         local-model = { type = "app"; program = "${self.packages.${system}.localModel}/bin/reverie-local-model"; meta.description = "Run GGUF models on a host NVIDIA GPU or CPU"; };
         isolate = { type = "app"; program = "${self.packages.${system}.isolate}/bin/reverie-isolate"; meta.description = "Prepare and activate host-managed agent containers"; };
+        preview-proxy = { type = "app"; program = "${self.packages.${system}.previewProxy}/bin/reverie-preview-proxy"; meta.description = "Serve isolated HTTPS previews of opted-in laptop ports"; };
       });
       checks = forAllSystems (system:
         let
           pkgs = pkgsFor system;
           packages = self.packages.${system};
         in {
-          inherit (packages) reverie memoryPackage start update gpuPublisher;
+          inherit (packages) reverie memoryPackage start update gpuPublisher previewProxy previewService;
           nativeSmoke = pkgs.runCommand "reverie-native-smoke" { } ''
             export HOME="$TMPDIR/home"
             export REVERIE_INSTALL_CLIS=none
@@ -173,7 +211,7 @@
         let pkgs = pkgsFor system; in {
           voice-ci = import ./nix/voice-ci.nix { inherit pkgs; kokoro = self.packages.${system}.kokoro; };
           default = pkgs.mkShell {
-            packages = [ (pkgs.python3.withPackages (ps: [ ps.pillow ps.setuptools ])) pkgs.nodejs_22 pkgs.git pkgs.tmux pkgs.gcc pkgs.gnumake ];
+            packages = [ (pkgs.python3.withPackages (ps: [ ps.pillow ps.setuptools ps.aiohttp ])) pkgs.nodejs_22 pkgs.git pkgs.tmux pkgs.gcc pkgs.gnumake pkgs.openssl ];
             shellHook = ''
               export PYTHONPATH="$PWD/python''${PYTHONPATH:+:$PYTHONPATH}"
               export TMPDIR="''${TMPDIR:-$HOME/scratch/reverie/tmp}"

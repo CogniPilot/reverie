@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Workspace · Reverie</title>
+    <link rel="stylesheet" href="workspace-files.css" />
+    <script defer src="workspace-files.js"></script>
+  </head>
+  <body>
+    <header class="page-title">
+      <h1>Workspace</h1>
+      <p>Shared files for your team</p>
+    </header>
+    <main>
+      <div class="toolbar">
+        <div class="path-bar">
+          <button id="up" class="icon-button" type="button" aria-label="Up a folder" title="Up a folder" disabled>
+            ↑
+          </button>
+          <nav id="breadcrumbs" aria-label="Workspace folders"></nav>
+        </div>
+        <div class="actions">
+          <button id="refresh" class="icon-button" type="button" aria-label="Refresh" title="Refresh">↻</button>
+          <label class="upload" aria-disabled="true"
+            >Upload file<input id="upload" type="file" aria-label="Upload to Workspace root" disabled
+          /></label>
+        </div>
+      </div>
+      <div class="list-tools">
+        <label class="search"
+          ><span aria-hidden="true">⌕</span><span class="sr-only">Search this folder</span
+          ><input id="search" type="search" placeholder="Search this folder…" autocomplete="off"
+        /></label>
+        <div class="list-summary">
+          <label class="sr-only" for="sort">Sort files</label
+          ><select id="sort">
+            <option value="name:1">Name A–Z</option>
+            <option value="name:-1">Name Z–A</option>
+            <option value="modified:-1">Newest first</option>
+            <option value="modified:1">Oldest first</option>
+            <option value="size:-1">Largest first</option>
+            <option value="size:1">Smallest first</option>
+          </select>
+          <p id="status" role="status" aria-live="polite">Loading workspace…</p>
+        </div>
+      </div>
+      <div class="layout" id="layout">
+        <section class="file-list" aria-label="Workspace files">
+          <div class="columns" role="group" aria-label="Sort files">
+            <button type="button" data-sort="name" aria-label="Sort by name">Name</button
+            ><button type="button" data-sort="modified" aria-label="Sort by modified date">Modified</button
+            ><button type="button" data-sort="size" aria-label="Sort by size">Size</button
+            ><span class="download-heading" title="Download">↓</span>
+          </div>
+          <ul id="files"></ul>
+          <div id="empty-state" class="empty-state"><p>Loading files…</p></div>
+        </section>
+        <section id="preview" aria-label="File preview" hidden></section>
+      </div>
+      <footer>
+        <div class="footer-notes">
+          <span>Shared drive</span><span class="divider" aria-hidden="true">·</span>
+          <span id="uploadHint">Uploads up to 32 MiB</span>
+          <details class="help">
+            <summary>Help</summary>
+            <div class="help-content">
+              <h2>Working with files</h2>
+              <p>Browse folders, select a file to preview it, or download a copy.</p>
+              <p>
+                Uploads go to the Workspace root, up to 32 MiB per file. Existing files are kept; rename duplicates
+                before uploading.
+              </p>
+              <p id="uploadReason">Checking upload availability…</p>
+              <p>
+                Private files, hidden items and linked folders are unavailable. Search filters the files loaded in this
+                folder.
+              </p>
+            </div>
+          </details>
+        </div>
+        <a id="back" href="./" target="_top">Back to chat</a>
+      </footer>
+    </main>
+  </body>
+</html>

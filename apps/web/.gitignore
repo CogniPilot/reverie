@@ -18,6 +18,9 @@ dist/
 src/web/public/vendor/*
 !src/web/public/vendor/dompurify.min.js
 !src/web/public/vendor/marked.min.js
+!src/web/public/vendor/katex-0.19.0/
+!src/web/public/vendor/katex-0.19.0/**
+!src/web/public/vendor/chat-math.json
 
 # Test coverage
 coverage/

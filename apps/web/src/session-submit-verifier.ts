@@ -55,10 +55,12 @@ const FINAL_LOOK_MS = 2_000;
 /** Whether `composer` (one line, glyph removed) holds a paste placeholder the size of `prompt`. */
 export function placeholderHoldsPrompt(composer: string, prompt: string): boolean {
   const length = prompt.length;
+  let total = 0, count = 0;
   for (const m of composer.matchAll(PASTE_PLACEHOLDER)) {
+    total += Number(m[1]); count++;
     if (Math.abs(Number(m[1]) - length) <= PASTE_SLACK_CHARS) return true;
   }
-  return false;
+  return count > 1 && Math.abs(total - length) <= PASTE_SLACK_CHARS;
 }
 
 const compact = (s: string): string => s.replace(/\s+/g, '');

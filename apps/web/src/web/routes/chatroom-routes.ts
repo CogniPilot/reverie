@@ -40,6 +40,7 @@ import {
   isDm,
   isPublicRoom,
   normalizeIcon,
+  unreadFor,
   type ChatAttachment,
   type ChatRecipient,
   type ChatRoom,
@@ -137,7 +138,7 @@ export function registerChatroomRoutes(
   roles: RolesStore = new RolesStore(''),
   /** A session id to its company employee id, if it has one. */
   employeeOf: (sessionId: string) => string | undefined = () => undefined,
-  host: { pendingStatus?: ServiceVerifier } = {}
+  host: { pendingStatus?: ServiceVerifier; human?: (req: FastifyRequest) => import('../../owner-auth/service.js').HumanIdentity | undefined; readAt?: (id: string, roomId: string) => number | undefined; markRead?: (id: string, roomId: string, at?: number) => Promise<number> } = {}
 ): void {
   /** The session this request speaks as, or undefined for the user. */
   const caller = (req: FastifyRequest): string | undefined =>
@@ -223,7 +224,7 @@ export function registerChatroomRoutes(
     } catch (error) { return sendError(reply, error); }
   });
 
-  const userName = (req: FastifyRequest): string => (isMultiUserMode() ? getAuthUser(req).username : 'user');
+  const userName = (req: FastifyRequest): string => host.human?.(req)?.name || (isMultiUserMode() ? getAuthUser(req).username : 'user');
 
   const roomOrFail = (req: FastifyRequest, id: string): ChatRoom => {
     const room = service.room(id);
@@ -259,6 +260,8 @@ export function registerChatroomRoutes(
    */
   const ownedView = (req: FastifyRequest, room: ChatRoom, options: { since?: number; limit?: number }) => {
     const view = service.view(room, options);
+    const human = host.human?.(req), cursor = human && host.readAt?.(human.id, room.id);
+    if (human && cursor !== undefined) return { ...view, userReadAt: cursor, ...unreadFor({ ...room, userReadAt: cursor }, [human.name], human.id) };
     if (isMultiUserMode() && room.owner !== getAuthUser(req).username) return { ...view, unread: 0, mentions: 0 };
     return view;
   };
@@ -628,6 +631,11 @@ export function registerChatroomRoutes(
       if (isMultiUserMode() && room.owner !== getAuthUser(req).username) {
         return { success: true, data: { userReadAt: room.userReadAt ?? 0, unread: 0, mentions: 0 } };
       }
+      const human = host.human?.(req);
+      if (human && !human.primary && host.markRead) {
+        const at = await host.markRead(human.id, id, body.at);
+        return { success: true, data: { userReadAt: at, ...unreadFor({ ...room, userReadAt: at }, [human.name], human.id) } };
+      }
       return { success: true, data: service.markRead(id, body.at) };
     } catch (err) {
       return sendError(reply, err);
@@ -892,7 +900,7 @@ export function registerChatroomRoutes(
       // An agent reports as itself, and only from a room it belongs to; the user reports as before.
       if (self && !room.members.some((m) => m.sessionId === self)) return forbid(reply, 'Only a member of this room reports its messages');
       if (!allowed(req, room, 'messages.report')) return forbid(reply, 'You cannot report messages in this room');
-      const from: ChatSender = self ? { kind: 'agent', sessionId: self, name: service.nameOf(self) } : { kind: 'user', name: userName(req) };
+      const from: ChatSender = self ? { kind: 'agent', sessionId: self, name: service.nameOf(self) } : { kind: 'user', name: userName(req), ...(host.human?.(req) ? { humanId: host.human(req)!.id } : {}) };
       const { message, dmId } = await service.reportMessage(id, messageId, body.reason ?? '', from);
       return { success: true, data: { message, dmId } };
     } catch (err) {
@@ -955,7 +963,7 @@ export function registerChatroomRoutes(
         from = { kind: 'agent', sessionId: self, name: service.nameOf(self) };
       } else {
         const mark = ownerMark(req, verifiedOwner, false);
-        from = { kind: 'user', name: userName(req), ...(mark ? { mark } : {}) };
+        from = { kind: 'user', name: userName(req), ...(host.human?.(req) ? { humanId: host.human(req)!.id } : {}), ...(mark ? { mark } : {}) };
       }
       const recipients = recipientsFor(room, body.to, false);
       const message = service.createPoll(
@@ -1242,7 +1250,7 @@ export function registerChatroomRoutes(
         if (body.requireAgent) return forbid(reply, 'Caller is not a known agent session');
         // The owner mark is the server's finding, never the client's: the body schema is strict.
         const mark = ownerMark(req, verifiedOwner, body.spoken === true);
-        from = { kind: 'user', name: userName(req), ...(mark ? { mark } : {}) };
+        from = { kind: 'user', name: userName(req), ...(host.human?.(req) ? { humanId: host.human(req)!.id } : {}), ...(mark ? { mark } : {}) };
       }
       const spokenTurn = body.spoken === true && !self;
       const { to, toIgnored } = recipientsFor(room, body.to, spokenTurn);

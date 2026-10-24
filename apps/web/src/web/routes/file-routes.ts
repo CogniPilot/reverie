@@ -1,3 +1,4 @@
+import { sharedAttachmentsRoot, sharedWorkspaceRoot } from '../../shared-attachments.js';
 /**
  * @fileoverview File browser and streaming routes.
  * Provides directory listing, file content preview, raw file serving, tail
@@ -895,6 +896,8 @@ function configuredFilesystemPickerRoots(req: FastifyRequest): Array<{ label: st
     { label: 'Home', path: homedir() },
     { label: 'Reverie Cases', path: CASES_DIR },
     { label: 'WSL D:', path: '/mnt/d' },
+    ...(sharedWorkspaceRoot() ? [{ label: 'Company Shared Drive', path: sharedWorkspaceRoot()! }] : []),
+    ...(sharedAttachmentsRoot() ? [{ label: 'Shared Attachments', path: sharedAttachmentsRoot()! }] : []),
     ...extraConfiguredPickerRoots(),
   ];
 }
@@ -1459,6 +1462,20 @@ export function registerFileRoutes(app: FastifyInstance, ctx: SessionPort & Even
         truncated,
       },
     };
+  });
+
+  // Browser downloads of shared workspace artifacts survive an agent changing plans/sessions.
+  app.get('/api/filesystem/download', { compress: false }, async (req, reply): Promise<void> => {
+    const { path: requestedPath, sessionId } = parseBody(FilesystemPreviewQuerySchema, req.query);
+    const { candidatePath, resolvedPath, blockedTrees } = await resolveFilesystemPickerPath(ctx, req, requestedPath, sessionId, false);
+    if (isBlockedPickerPath(resolvedPath, blockedTrees)) throwFilesystemPickerError(403, ApiErrorCode.INVALID_INPUT, 'Access to this file is blocked');
+    let info;
+    try { info = await fs.stat(resolvedPath); } catch {
+      throwFilesystemPickerError(404, ApiErrorCode.NOT_FOUND, 'File not found');
+    }
+    if (!info.isFile()) throwFilesystemPickerError(400, ApiErrorCode.INVALID_INPUT, 'The download path must be a file');
+    const name = pathBasename(candidatePath);
+    await serveRawFile(reply, { kind: 'local', resolvedPath, relativePath: '' }, info.size, name, extname(name).slice(1).toLowerCase(), true, req.headers.range);
   });
 
   // Inline preview for files selected through the root-confined filesystem picker.

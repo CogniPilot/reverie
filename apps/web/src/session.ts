@@ -757,6 +757,7 @@ export class Session extends EventEmitter {
   // Ephemeral env overrides (e.g., CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS). Exported by tmux
   // at spawn, preserved across respawns via persisted state. Not written to .claude/settings.local.json.
   private _envOverrides: Record<string, string> | undefined;
+  private readonly _workerAttachOnly: boolean;
 
   // Claude CLI effort level — injected as a `--settings` soft default at spawn so the
   // user can still switch in-session via /effort (incl. ultracode). Never carried as
@@ -882,6 +883,7 @@ export class Session extends EventEmitter {
       resumeSessionId?: string;
       /** Extra env vars exported to the CLI at spawn time (no disk persistence) */
       envOverrides?: Record<string, string>;
+      workerAttachOnly?: boolean;
       subscriptionProfile?: SessionState['subscriptionProfile'];
       runtimeThreads?: Record<string, string>;
       /** Claude CLI effort level (soft default via --settings, switchable in-session via /effort) */
@@ -926,6 +928,7 @@ export class Session extends EventEmitter {
     });
 
     this.id = config.id || uuidv4();
+    this._workerAttachOnly = config.workerAttachOnly === true;
     this.workingDir = config.workingDir;
     this.createdAt = config.createdAt || Date.now();
     this._mode = config.mode || 'claude';
@@ -3096,6 +3099,7 @@ export class Session extends EventEmitter {
           respawnPaneOptions: this._buildRespawnPaneOptions(),
           createSessionOptions: {
             codexTrustWorkspace: this._codexTrustWorkspace,
+            workerAttachOnly: this._workerAttachOnly,
             sessionId: this.id,
             workingDir: this.workingDir,
             mode: this.mode,

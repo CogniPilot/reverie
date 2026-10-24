@@ -14,9 +14,13 @@ export function resolveTmuxSocketName(): string {
   return raw !== undefined && SAFE_TMUX_SOCKET_PATTERN.test(raw) ? raw : DEFAULT_TMUX_SOCKET;
 }
 
+export function configuredDataDir(): string {
+  return envValue(process.env, 'DATA_DIR') || join(homedir(), `.reverie${INSTANCE_SUFFIX}`);
+}
+
 let ensuredDir: string | undefined;
 export function getDataDir(): string {
-  const dir = envValue(process.env, 'DATA_DIR') || join(homedir(), `.reverie${INSTANCE_SUFFIX}`);
+  const dir = configuredDataDir();
   if (ensuredDir !== dir) {
     try {
       mkdirSync(dir, { recursive: true, mode: 0o700 });

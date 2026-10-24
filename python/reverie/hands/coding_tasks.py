@@ -17,6 +17,14 @@ THINK = re.compile(r'<think>.*?</think>', re.S)
 ARGUMENT_CHARS = 24000
 STEP_CHARS = 1000
 CALL_ID_CHARS = 64
+CALL_REPAIR_LIMIT = 2
+CALL_REPAIR_NOTES = {
+    'parallel_calls_refused': ('Your previous response requested multiple tools. None of those calls ran. '
+        'Return exactly one tool call in your next response, then wait for its result before requesting another.'),
+    'invalid_call': ('Your previous tool call was invalid and did not run. '
+        'Use exactly one offered tool, a valid call ID and a JSON object matching its arguments. '
+        'Wait for its result before requesting another tool.'),
+}
 
 
 def encoded(value):
@@ -67,6 +75,7 @@ class TaskResult:
     context_overflows: int = 0
     model_responses: int = 0
     usage_measured_responses: int = 0
+    call_retries: int = 0
 
 
 def reserve_chars(limits):
@@ -78,6 +87,8 @@ def control_request(message):
     text = message.get('text')
     if not isinstance(text, str):
         return None
+    if (message.get('from') or {}).get('kind') == 'agent' and text.startswith('[external agent] '):
+        text = text[len('[external agent] '):]
     matched = re.match(r'\A/code(?P<cancel>-cancel)? (?P<task>[a-z0-9][a-z0-9_-]{0,63})(?:\s|\Z)', text)
     if matched is None:
         return None
@@ -180,6 +191,7 @@ def run_task(messages, tools, model, invoke, authorize, *, limits=None,
     options = copy.deepcopy(request_options or {})
     if set(options) & {'messages', 'tools'}:
         raise ValueError('invalid request options')
+    options['parallel_tool_calls'] = False
     permitted = set()
     for schema in schemas:
         if (not isinstance(schema, dict) or schema.get('type') != 'function' or
@@ -194,6 +206,7 @@ def run_task(messages, tools, model, invoke, authorize, *, limits=None,
     result = TaskResult('stopped', 'not_started')
     pairs = []
     used_ids = set()
+    repair_note = None
     deadline = clock() + limits.seconds
 
     def stop(reason):
@@ -213,6 +226,8 @@ def run_task(messages, tools, model, invoke, authorize, *, limits=None,
         content = base + ([{'role': 'system', 'content': OMITTED}] if result.omitted_rounds else [])
         for pair in pairs:
             content.extend(pair)
+        if repair_note is not None:
+            content.append({'role': 'system', 'content': repair_note})
         return dict(options, messages=content, tools=schemas)
 
     initial = len(encoded(payload()))
@@ -282,12 +297,23 @@ def run_task(messages, tools, model, invoke, authorize, *, limits=None,
         if remaining_bytes <= 0:
             return stop('total_output_limit')
         result.steps += 1
+        rejected = None
         if not isinstance(calls, list) or len(calls) != 1:
-            return stop('parallel_calls_refused')
-        try:
-            canonical, tool_request = parse_call(calls[0], permitted, limits)
-        except (ValueError, TypeError, OverflowError):
-            return stop('invalid_call')
+            rejected = 'parallel_calls_refused'
+        else:
+            try:
+                canonical, tool_request = parse_call(calls[0], permitted, limits)
+            except (ValueError, TypeError, OverflowError):
+                rejected = 'invalid_call'
+        if rejected:
+            if result.call_retries >= CALL_REPAIR_LIMIT:
+                return stop(rejected)
+            result.call_retries += 1
+            # Keep only a fixed correction, never the malformed calls or their text.
+            # Every attempt still consumes the task's step, time and context budget.
+            repair_note = CALL_REPAIR_NOTES[rejected]
+            continue
+        repair_note = None
         if canonical['id'] in used_ids:
             return stop('duplicate_call')
         used_ids.add(canonical['id'])

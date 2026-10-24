@@ -80,7 +80,8 @@ export interface ChatMember {
 export type ChatOwnerMark = 'owner_typed' | 'owner_spoken';
 
 export type ChatSender =
-  | { kind: 'user'; name: string; mark?: ChatOwnerMark }
+  | { kind: 'user'; name: string; mark?: ChatOwnerMark; humanId?: string }
+  | { kind: 'human'; name: string; humanId: string; access: 'limited' }
   | {
       kind: 'external';
       name: string;
@@ -944,7 +945,7 @@ export function mentionsOwner(text: string | undefined, ownerNames: readonly str
  * that name the user (`@user`, `@owner`, their own name) or the whole room (`@everyone`), or were
  * addressed to them in an older room, which is every one of them in a DM with the user.
  */
-export function unreadFor(room: ChatRoom, ownerNames: readonly string[] = []): { unread: number; mentions: number } {
+export function unreadFor(room: ChatRoom, ownerNames: readonly string[] = [], humanId = 'owner'): { unread: number; mentions: number } {
   const since = room.userReadAt ?? 0;
   const withUser = isDm(room) && room.dm.includes(USER_RECIPIENT);
   let unread = 0;
@@ -952,7 +953,8 @@ export function unreadFor(room: ChatRoom, ownerNames: readonly string[] = []): {
   for (let i = room.messages.length - 1; i >= 0; i--) {
     const m = room.messages[i];
     if (m.at <= since) break;
-    if (m.from.kind !== 'agent' || m.deleted) continue;
+    const otherHuman = (m.from.kind === 'user' || m.from.kind === 'human') && (m.from.humanId || 'owner') !== humanId;
+    if ((m.from.kind !== 'agent' && !otherHuman) || m.deleted) continue;
     unread++;
     // A mention of the owner: a message addressed to them (older rooms), or one that @names them or everyone.
     if (withUser || (m.to !== 'all' && m.to.includes(USER_RECIPIENT)) || (m.to === 'all' && mentionsOwner(m.text, ownerNames))) mentions++;

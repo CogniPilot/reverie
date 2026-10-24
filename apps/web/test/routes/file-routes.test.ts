@@ -539,6 +539,35 @@ describe('file-routes', () => {
     });
   });
 
+  describe('GET /api/filesystem/download', () => {
+    it('streams an owner workspace artifact without depending on its agent session lifetime', async () => {
+      const path = CASES_DIR + '/expert-quill/EP010.mp4';
+      mockedStat.mockImplementation(async (path) => ({ size: 15, isFile: () => String(path).endsWith('.mp4'), isDirectory: () => !String(path).endsWith('.mp4') }) as never);
+      const response = await harness.app.inject({ method: 'GET', url: '/api/filesystem/download?path=' + encodeURIComponent(path) });
+      expect(response.statusCode).toBe(200);
+      expect(response.headers['content-disposition']).toContain('attachment');
+      expect(response.headers['content-disposition']).toContain('EP010.mp4');
+      expect(response.body).toBe('fake file bytes');
+    });
+    it('downloads shared-drive artifacts even when cases are configured at another mount', async () => {
+      vi.stubEnv('REVERIE_SHARED_WORKSPACE_PATH', '/reverie_workspace');
+      try {
+        const path = '/reverie_workspace/projects/example/demo.mp4';
+        mockedStat.mockImplementation(async (path) => ({ size: 15, isFile: () => String(path).endsWith('.mp4'), isDirectory: () => !String(path).endsWith('.mp4') }) as never);
+        const response = await harness.app.inject({ method: 'GET', url: '/api/filesystem/download?path=' + encodeURIComponent(path) });
+        expect(response.statusCode).toBe(200);
+        expect(response.body).toBe('fake file bytes');
+      } finally { vi.unstubAllEnvs(); }
+    });
+    it('refuses traversal, hidden credentials and escaping symlinks', async () => {
+      for (const path of ['/etc/passwd', CASES_DIR + '/.env']) {
+        expect((await harness.app.inject({ method: 'GET', url: '/api/filesystem/download?path=' + encodeURIComponent(path) })).statusCode).toBe(403);
+      }
+      mockedRealpathSync.mockImplementation(path => (String(path).endsWith('/link.mp4') ? '/outside-workspace/private.mp4' : path) as never);
+      expect((await harness.app.inject({ method: 'GET', url: '/api/filesystem/download?path=' + encodeURIComponent(CASES_DIR + '/link.mp4') })).statusCode).toBe(403);
+    });
+  });
+
   // ========== GET /api/filesystem/preview ==========
 
   describe('GET /api/filesystem/preview', () => {

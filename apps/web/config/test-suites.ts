@@ -19,6 +19,13 @@
  * why these are a runnable suite (`npm run test:browser`) rather than skipped.
  */
 export const BROWSER_TEST_GLOBS = [
+  'test/bots.browser.test.ts',
+  'test/bots-http.browser.test.ts',
+  'test/previews.browser.test.ts',
+  'test/handbook.browser.test.ts',
+  'test/workspace-files.browser.test.ts',
+  'test/chat-plugins.browser.test.ts',
+  'test/chat-math-plugin.browser.test.ts',
   'test/embassy-guest-ui.browser.test.ts',
   'test/embassy-qr.browser.test.ts',
   'test/embassy-pairing.browser.test.ts',

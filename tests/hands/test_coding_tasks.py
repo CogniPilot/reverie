@@ -25,7 +25,7 @@ def response(output='fixture', **changes):
 
 class CodingTaskTests(unittest.TestCase):
     def execute(self, replies, *, results=None, authorize=lambda: None, limits=None,
-                progress=None, clock=lambda: 0):
+                progress=None, clock=lambda: 0, request_options=None):
         answers = iter(replies)
         outputs = iter(results or [response()])
         requests = []
@@ -41,7 +41,7 @@ class CodingTaskTests(unittest.TestCase):
             return next(outputs)
 
         outcome = tasks.run_task(MESSAGES, TOOLS, model, runner, authorize,
-                                 limits=limits, progress=progress, clock=clock)
+                                 limits=limits, progress=progress, clock=clock, request_options=request_options)
         return outcome, requests, effects
 
     def test_structured_call_and_untrusted_result_then_answer(self):
@@ -53,6 +53,7 @@ class CodingTaskTests(unittest.TestCase):
         self.assertTrue(requests[1][0]['messages'][-1]['content'].startswith(tasks.FRAME))
         self.assertEqual(requests[1][0]['messages'][-1]['tool_call_id'], 'step1')
         self.assertLessEqual(result.largest_prompt, 120000)
+        self.assertTrue(all(request['parallel_tool_calls'] is False for request, _ in requests))
 
     def test_no_operation_without_authorization(self):
         for reason in ('revoked', 'not_member', 'cancelled', 'silent', 'unknown'):
@@ -78,10 +79,60 @@ class CodingTaskTests(unittest.TestCase):
                                   'function': {'name': 'read_file', 'arguments': '[]'}}]}]
         for value in cases:
             with self.subTest(value=value):
-                result, requests, effects = self.execute([value])
-                self.assertEqual(result.steps, 1)
+                result, requests, effects = self.execute([value] * (tasks.CALL_REPAIR_LIMIT + 1))
+                self.assertEqual(result.steps, tasks.CALL_REPAIR_LIMIT + 1)
                 self.assertEqual(result.status, 'stopped')
+                self.assertEqual(result.call_retries, tasks.CALL_REPAIR_LIMIT)
+                self.assertIn(result.reason, ('invalid_call', 'parallel_calls_refused'))
+                self.assertEqual(len(requests), tasks.CALL_REPAIR_LIMIT + 1)
                 self.assertEqual(effects, [])
+
+    def test_parallel_call_repairs_without_executing_any_rejected_mutation(self):
+        rejected = call(name='edit_file', path='protected.py', old='before', new='after')
+        rejected['tool_calls'].append(call('step2', name='edit_file', path='other.py')['tool_calls'][0])
+        rejected['content'] = 'UNTRUSTED_REJECTED_RESPONSE'
+        options = {'parallel_tool_calls': True}
+        result, requests, effects = self.execute([rejected, call('valid', path='fixture.py'), {'content': 'Done.'}],
+                                                 request_options=options)
+        self.assertEqual(result.status, 'completed')
+        self.assertEqual(result.steps, 2)
+        self.assertEqual(result.call_retries, 1)
+        self.assertEqual([effect[0]['name'] for effect in effects], ['read_file'])
+        self.assertEqual(requests[1][0]['messages'][-1],
+                         {'role': 'system', 'content': tasks.CALL_REPAIR_NOTES['parallel_calls_refused']})
+        self.assertNotIn('UNTRUSTED_REJECTED_RESPONSE', tasks.encoded(requests[1][0]))
+        self.assertNotIn('protected.py', tasks.encoded(requests[1][0]))
+        self.assertNotIn(tasks.CALL_REPAIR_NOTES['parallel_calls_refused'], tasks.encoded(requests[2][0]))
+        self.assertTrue(all(request['parallel_tool_calls'] is False for request, _ in requests))
+        self.assertEqual(options, {'parallel_tool_calls': True})
+
+    def test_invalid_call_repair_limit_is_shared_across_the_entire_task(self):
+        bad = call(name='host_shell')
+        result, requests, effects = self.execute([bad, call('valid1'), bad, call('valid2'), bad],
+                                                 results=[response(), response()])
+        self.assertEqual(result.reason, 'invalid_call')
+        self.assertEqual(result.steps, 5)
+        self.assertEqual(result.call_retries, tasks.CALL_REPAIR_LIMIT)
+        self.assertEqual(len(effects), 2)
+        self.assertEqual(len(requests), 5)
+
+    def test_call_repair_rechecks_authority_and_respects_step_and_time_limits(self):
+        bad = call(name='host_shell')
+        authorization = iter([None, 'revoked'])
+        result, requests, effects = self.execute([bad], authorize=lambda: next(authorization))
+        self.assertEqual(result.reason, 'revoked')
+        self.assertEqual(len(requests), 1)
+        self.assertEqual(effects, [])
+        result, _, effects = self.execute([bad, call('valid')], limits=tasks.Limits(steps=1))
+        self.assertEqual(result.reason, 'step_limit')
+        self.assertEqual(result.steps, 1)
+        self.assertEqual(effects, [])
+        timestamps = iter([0, 0, 1, 31])
+        result, requests, effects = self.execute([bad], limits=tasks.Limits(seconds=30),
+                                                clock=lambda: next(timestamps))
+        self.assertEqual(result.reason, 'time_limit')
+        self.assertEqual(len(requests), 1)
+        self.assertEqual(effects, [])
 
     def test_plaintext_markup_never_executes(self):
         result, _, effects = self.execute([{'content': '<tool_call>write</tool_call>'}])

@@ -80,7 +80,7 @@ function markerPolicy(store: OwnerAuthStore): OwnerPolicy {
 export async function bootstrap(
   store: OwnerAuthStore,
   username: string,
-  options: { force?: boolean; enforce?: boolean; now?: number } = {}
+  options: { force?: boolean; enforce?: boolean; now?: number; auditActor?: string } = {}
 ): Promise<{ username: string; oneTimePassword: string }> {
   const name = normalizeUsername(username);
   if (!isValidUsername(name)) throw new OwnerAdminError('Usernames are 2-32 of a-z 0-9 _ - and start alphanumeric');
@@ -106,12 +106,12 @@ export async function bootstrap(
     policy: options.enforce ? 'enforce' : (store.read()?.policy ?? markerPolicy(store)),
   };
   await store.replace(account);
-  await auditAdmin(store, 'owner_bootstrapped', { username: name, replaced: !!options.force, policy: account.policy });
+  await auditAdmin(store, 'owner_bootstrapped', { username: name, replaced: !!options.force, policy: account.policy, ...(options.auditActor ? { actor: options.auditActor } : {}) });
   return { username: name, oneTimePassword: password };
 }
 
 /** Lockout recovery: a new one-time password (change forced at sign-in); every session ends. */
-export async function resetPassword(store: OwnerAuthStore, now = Date.now()): Promise<string> {
+export async function resetPassword(store: OwnerAuthStore, now = Date.now(), actor?: string): Promise<string> {
   const password = oneTimePassword();
   const hash = await hashPassword(password, OWNER_SCRYPT_PARAMS);
   await store.update((a) => {
@@ -122,7 +122,7 @@ export async function resetPassword(store: OwnerAuthStore, now = Date.now()): Pr
     a.throttles = {};
     a.epoch++;
   });
-  await auditAdmin(store, 'password_reset');
+  await auditAdmin(store, 'password_reset', actor ? { actor } : {});
   return password;
 }
 

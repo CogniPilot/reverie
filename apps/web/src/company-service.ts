@@ -501,6 +501,7 @@ export class CompanyService {
       personality?: string;
       icon?: string;
       reportsTo?: string;
+      avatarBackground?: string | null;
       pronouns?: string | null;
       voice?: EmployeeVoice | null;
       permissions?: Partial<CompanyEmployee['permissions']>;
@@ -512,6 +513,7 @@ export class CompanyService {
     // Pronouns: a value sets them, null removes the field.
     const parsed = EmployeeSchema.pick({ position: true, expertise: true, responsibilities: true, personality: true, icon: true, reportsTo: true })
       .extend({
+        avatarBackground: EmployeeSchema.shape.avatarBackground.nullable(),
         pronouns: PronounsSchema.nullable(),
         sleepEnabled: EmployeeSchema.shape.sleepEnabled.removeDefault(),
         dreamEnabled: EmployeeSchema.shape.dreamEnabled.removeDefault(),
@@ -533,6 +535,8 @@ export class CompanyService {
       if (parsed.responsibilities !== undefined) employee.responsibilities = parsed.responsibilities;
       if (parsed.personality !== undefined) employee.personality = parsed.personality;
       if (parsed.icon !== undefined) employee.icon = parsed.icon;
+      if (parsed.avatarBackground === null) delete employee.avatarBackground;
+      else if (parsed.avatarBackground !== undefined) employee.avatarBackground = parsed.avatarBackground;
       if (parsed.reportsTo !== undefined) employee.reportsTo = parsed.reportsTo;
       if (parsed.pronouns === null) delete employee.pronouns;
       else if (parsed.pronouns !== undefined) employee.pronouns = parsed.pronouns;

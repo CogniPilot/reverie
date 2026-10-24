@@ -8,6 +8,7 @@ import { classify } from '../src/owner-auth/policy.js';
 
 describe('plan request route authority', () => {
   let app: FastifyInstance;
+  let sessions: Map<string, {id: string; owner: string | undefined}>;
   const requests = {
     create: vi.fn(),
     list: vi.fn(),
@@ -15,6 +16,7 @@ describe('plan request route authority', () => {
     cancel: vi.fn(),
     reauthorize: vi.fn(),
     decide: vi.fn(),
+    credential: vi.fn(),
   };
   const headers = { host: 'console.test', origin: 'https://console.test', cookie: 'reverie_session=owner' };
   const input = { id: 'request', employeeId: 'alex', sessionId: 'source', toAccount: 'second' };
@@ -23,12 +25,13 @@ describe('plan request route authority', () => {
     vi.resetAllMocks();
     app = Fastify();
     await app.register(cookie);
+    sessions = new Map([['source', {id: 'source', owner: 'owner-a'}]]);
     registerPlanRequestRoutes(
       app,
       requests as unknown as PlanMoveRequests,
       {
         authSessions: new Map([['owner', { ip: '127.0.0.1', ua: 'fixture', createdAt: 1, method: 'basic' }]]) as never,
-        sessions: new Map([['source', { owner: 'owner-a' }]]) as never,
+        sessions: sessions as never,
       },
       undefined,
       () => execution
@@ -36,6 +39,18 @@ describe('plan request route authority', () => {
   });
   afterEach(async () => {
     await app.close();
+  });
+  it('does not register the retired credential export even for the current source', async () => {
+    sessions.set('source', { id: 'source', owner: undefined });
+    const value = { requestId: 'request', sessionId: 'source', nonce: 'a'.repeat(64) };
+    requests.credential.mockResolvedValue(value); // a legacy tripwire; production has no export method
+    const url = '/api/plans/requests/request/credential';
+    for (const extra of [{}, { 'x-reverie-parent-session': 'another' }, { 'x-reverie-parent-session': 'source' }]) {
+      const result = await app.inject({ method: 'POST', url, headers: extra });
+      expect(result.statusCode).toBe(404);
+      expect(result.body).not.toContain(value.nonce);
+    }
+    expect(requests.credential).not.toHaveBeenCalled();
   });
   it('creates only from signed-in same-origin owner and accepts no handoff, nonce or force controls', async () => {
     requests.create.mockResolvedValue({ ...input, phase: 'pending' });

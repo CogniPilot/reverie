@@ -1,0 +1,421 @@
+[
+  {
+    "name": "a-coordinator-after-go",
+    "request": {
+      "schema_version": 1,
+      "goId": "go-1",
+      "transitionId": "go-1",
+      "idempotencyKey": "attempt-1",
+      "goalId": "goal-1",
+      "goalGeneration": 1,
+      "currentGoalGeneration": 1,
+      "goalState": "ACTIVE",
+      "decisionId": null,
+      "decisionGeneration": null,
+      "sessionId": "session-1",
+      "sessionGeneration": 1,
+      "currentSessionGeneration": 1,
+      "employeeId": "employee-1",
+      "rooms": [
+        "room-1"
+      ],
+      "cursor": {
+        "room-1": 10
+      },
+      "source": {
+        "available": true,
+        "complete": true,
+        "observedAtMs": 100000,
+        "messages": [
+          {
+            "id": "message-11",
+            "roomId": "room-1",
+            "sequence": 11,
+            "atMs": 99000,
+            "authorRole": "COORDINATOR",
+            "mentionsLauncher": false,
+            "goId": null
+          }
+        ]
+      }
+    },
+    "now_ms": 100000,
+    "expected_result": "REFUSE",
+    "expected_code": "GUARD_UNREAD_INSTRUCTION"
+  },
+  {
+    "name": "b-user-after-go",
+    "request": {
+      "schema_version": 1,
+      "goId": "go-1",
+      "transitionId": "go-1",
+      "idempotencyKey": "attempt-1",
+      "goalId": "goal-1",
+      "goalGeneration": 1,
+      "currentGoalGeneration": 1,
+      "goalState": "ACTIVE",
+      "decisionId": null,
+      "decisionGeneration": null,
+      "sessionId": "session-1",
+      "sessionGeneration": 1,
+      "currentSessionGeneration": 1,
+      "employeeId": "employee-1",
+      "rooms": [
+        "room-1"
+      ],
+      "cursor": {
+        "room-1": 10
+      },
+      "source": {
+        "available": true,
+        "complete": true,
+        "observedAtMs": 100000,
+        "messages": [
+          {
+            "id": "message-11",
+            "roomId": "room-1",
+            "sequence": 11,
+            "atMs": 99000,
+            "authorRole": "USER",
+            "mentionsLauncher": false,
+            "goId": null
+          }
+        ]
+      }
+    },
+    "now_ms": 100000,
+    "expected_result": "REFUSE",
+    "expected_code": "GUARD_UNREAD_INSTRUCTION"
+  },
+  {
+    "name": "c-launcher-mentioned",
+    "request": {
+      "schema_version": 1,
+      "goId": "go-1",
+      "transitionId": "go-1",
+      "idempotencyKey": "attempt-1",
+      "goalId": "goal-1",
+      "goalGeneration": 1,
+      "currentGoalGeneration": 1,
+      "goalState": "ACTIVE",
+      "decisionId": null,
+      "decisionGeneration": null,
+      "sessionId": "session-1",
+      "sessionGeneration": 1,
+      "currentSessionGeneration": 1,
+      "employeeId": "employee-1",
+      "rooms": [
+        "room-1"
+      ],
+      "cursor": {
+        "room-1": 10
+      },
+      "source": {
+        "available": true,
+        "complete": true,
+        "observedAtMs": 100000,
+        "messages": [
+          {
+            "id": "message-11",
+            "roomId": "room-1",
+            "sequence": 11,
+            "atMs": 99000,
+            "authorRole": "AGENT",
+            "mentionsLauncher": true,
+            "goId": null
+          }
+        ]
+      }
+    },
+    "now_ms": 100000,
+    "expected_result": "REFUSE",
+    "expected_code": "GUARD_UNREAD_INSTRUCTION"
+  },
+  {
+    "name": "d-unbound-room",
+    "request": {
+      "schema_version": 1,
+      "goId": "go-1",
+      "transitionId": "go-1",
+      "idempotencyKey": "attempt-1",
+      "goalId": "goal-1",
+      "goalGeneration": 1,
+      "currentGoalGeneration": 1,
+      "goalState": "ACTIVE",
+      "decisionId": null,
+      "decisionGeneration": null,
+      "sessionId": "session-1",
+      "sessionGeneration": 1,
+      "currentSessionGeneration": 1,
+      "employeeId": "employee-1",
+      "rooms": [
+        "room-1"
+      ],
+      "cursor": {
+        "room-1": 10
+      },
+      "source": {
+        "available": true,
+        "complete": true,
+        "observedAtMs": 100000,
+        "messages": [
+          {
+            "id": "message-11",
+            "roomId": "unbound",
+            "sequence": 11,
+            "atMs": 99000,
+            "authorRole": "USER",
+            "mentionsLauncher": false,
+            "goId": null
+          }
+        ]
+      }
+    },
+    "now_ms": 100000,
+    "expected_result": "PASS",
+    "expected_code": "GUARD_PASS"
+  },
+  {
+    "name": "e-unrelated-bound-chatter",
+    "request": {
+      "schema_version": 1,
+      "goId": "go-1",
+      "transitionId": "go-1",
+      "idempotencyKey": "attempt-1",
+      "goalId": "goal-1",
+      "goalGeneration": 1,
+      "currentGoalGeneration": 1,
+      "goalState": "ACTIVE",
+      "decisionId": null,
+      "decisionGeneration": null,
+      "sessionId": "session-1",
+      "sessionGeneration": 1,
+      "currentSessionGeneration": 1,
+      "employeeId": "employee-1",
+      "rooms": [
+        "room-1"
+      ],
+      "cursor": {
+        "room-1": 10
+      },
+      "source": {
+        "available": true,
+        "complete": true,
+        "observedAtMs": 100000,
+        "messages": [
+          {
+            "id": "message-11",
+            "roomId": "room-1",
+            "sequence": 11,
+            "atMs": 99000,
+            "authorRole": "AGENT",
+            "mentionsLauncher": false,
+            "goId": null
+          }
+        ]
+      }
+    },
+    "now_ms": 100000,
+    "expected_result": "PASS",
+    "expected_code": "GUARD_PASS"
+  },
+  {
+    "name": "f-goal-generation-bumped",
+    "request": {
+      "schema_version": 1,
+      "goId": "go-1",
+      "transitionId": "go-1",
+      "idempotencyKey": "attempt-1",
+      "goalId": "goal-1",
+      "goalGeneration": 1,
+      "currentGoalGeneration": 2,
+      "goalState": "ACTIVE",
+      "decisionId": null,
+      "decisionGeneration": null,
+      "sessionId": "session-1",
+      "sessionGeneration": 1,
+      "currentSessionGeneration": 1,
+      "employeeId": "employee-1",
+      "rooms": [
+        "room-1"
+      ],
+      "cursor": {
+        "room-1": 10
+      },
+      "source": {
+        "available": true,
+        "complete": true,
+        "observedAtMs": 100000,
+        "messages": []
+      }
+    },
+    "now_ms": 100000,
+    "expected_result": "REFUSE",
+    "expected_code": "GUARD_GEN_CHANGED"
+  },
+  {
+    "name": "g-goal-not-active",
+    "request": {
+      "schema_version": 1,
+      "goId": "go-1",
+      "transitionId": "go-1",
+      "idempotencyKey": "attempt-1",
+      "goalId": "goal-1",
+      "goalGeneration": 1,
+      "currentGoalGeneration": 1,
+      "goalState": "HOLD",
+      "decisionId": null,
+      "decisionGeneration": null,
+      "sessionId": "session-1",
+      "sessionGeneration": 1,
+      "currentSessionGeneration": 1,
+      "employeeId": "employee-1",
+      "rooms": [
+        "room-1"
+      ],
+      "cursor": {
+        "room-1": 10
+      },
+      "source": {
+        "available": true,
+        "complete": true,
+        "observedAtMs": 100000,
+        "messages": []
+      }
+    },
+    "now_ms": 100000,
+    "expected_result": "REFUSE",
+    "expected_code": "GUARD_STATE_NOT_ACTIVE"
+  },
+  {
+    "name": "h-stale-cursor-source-incomplete",
+    "request": {
+      "schema_version": 1,
+      "goId": "go-1",
+      "transitionId": "go-1",
+      "idempotencyKey": "attempt-1",
+      "goalId": "goal-1",
+      "goalGeneration": 1,
+      "currentGoalGeneration": 1,
+      "goalState": "ACTIVE",
+      "decisionId": null,
+      "decisionGeneration": null,
+      "sessionId": "session-1",
+      "sessionGeneration": 1,
+      "currentSessionGeneration": 1,
+      "employeeId": "employee-1",
+      "rooms": [
+        "room-1"
+      ],
+      "cursor": {
+        "room-1": 10
+      },
+      "source": {
+        "available": true,
+        "complete": false,
+        "observedAtMs": 100000,
+        "messages": []
+      }
+    },
+    "now_ms": 100000,
+    "expected_result": "REFUSE",
+    "expected_code": "GUARD_API_UNAVAILABLE"
+  },
+  {
+    "name": "i-go-reference-before-cursor",
+    "request": {
+      "schema_version": 1,
+      "goId": "go-1",
+      "transitionId": "go-1",
+      "idempotencyKey": "attempt-1",
+      "goalId": "goal-1",
+      "goalGeneration": 1,
+      "currentGoalGeneration": 1,
+      "goalState": "ACTIVE",
+      "decisionId": null,
+      "decisionGeneration": null,
+      "sessionId": "session-1",
+      "sessionGeneration": 1,
+      "currentSessionGeneration": 1,
+      "employeeId": "employee-1",
+      "rooms": [
+        "room-1"
+      ],
+      "cursor": {
+        "room-1": 10
+      },
+      "source": {
+        "available": true,
+        "complete": true,
+        "observedAtMs": 100000,
+        "messages": [
+          {
+            "id": "message-11",
+            "roomId": "room-1",
+            "sequence": 9,
+            "atMs": 99000,
+            "authorRole": "AGENT",
+            "mentionsLauncher": false,
+            "goId": "go-1"
+          }
+        ]
+      }
+    },
+    "now_ms": 100000,
+    "expected_result": "PASS",
+    "expected_code": "GUARD_PASS"
+  },
+  {
+    "name": "j-mp4-suspended-go-replay",
+    "request": {
+      "schema_version": 1,
+      "goId": "mp4-go",
+      "transitionId": "mp4-go",
+      "idempotencyKey": "attempt-1",
+      "goalId": "goal-1",
+      "goalGeneration": 1,
+      "currentGoalGeneration": 1,
+      "goalState": "ACTIVE",
+      "decisionId": null,
+      "decisionGeneration": null,
+      "sessionId": "session-1",
+      "sessionGeneration": 1,
+      "currentSessionGeneration": 1,
+      "employeeId": "employee-1",
+      "rooms": [
+        "room-1"
+      ],
+      "cursor": {
+        "room-1": 10
+      },
+      "source": {
+        "available": true,
+        "complete": true,
+        "observedAtMs": 1792799636000,
+        "messages": [
+          {
+            "id": "mp4-go-message",
+            "roomId": "room-1",
+            "sequence": 10,
+            "atMs": 1792799509000,
+            "authorRole": "USER",
+            "mentionsLauncher": false,
+            "goId": "mp4-go"
+          },
+          {
+            "id": "mp4-suspension",
+            "roomId": "room-1",
+            "sequence": 11,
+            "atMs": 1792799574000,
+            "authorRole": "COORDINATOR",
+            "mentionsLauncher": false,
+            "goId": "mp4-go"
+          }
+        ]
+      }
+    },
+    "now_ms": 1792799636000,
+    "expected_result": "REFUSE",
+    "expected_code": "GUARD_UNREAD_INSTRUCTION"
+  }
+]

@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { afterEach, expect, it, vi } from 'vitest';
 import { createHarness } from './helpers/chat-app-harness.mjs';
 
@@ -11,6 +12,31 @@ const avatars = Array.from({ length: 50 }, (_, index) => {
   return { id, name: `Avatar ${index + 1}`, src: `/assets/avatars/${id}.png` };
 });
 const photo = 'data:image/png;base64,iVBORw0KGgo=';
+it('offers the original 50 and 50 new default avatars, excluding the retired people set while refusing out-of-pack IDs and mismatched sources', async () => {
+  const { h, fetch, mount, button } = await fixture({ random: false });
+  const expanded = JSON.parse(readFileSync(new URL('../src/web/public/assets/avatars/pack-manifest.json', import.meta.url), 'utf8')).avatars;
+  expect(expanded).toHaveLength(100);
+  fetch.mockImplementation(async (url: string) => url === '/assets/avatars/pack-manifest.json'
+    ? { ok: true, json: async () => ({ avatars: [...expanded,
+      { id: 'pack-101', name: 'Sly Jester', src: '/assets/avatars/pack-101.png' },
+      { id: 'pack-152', name: 'Outside pack', src: '/assets/avatars/pack-152.png' },
+      { id: 'pack-51', name: 'Wrong source', src: 'https://outside.test/private.png' },
+      { id: '../private', name: 'Traversal', src: '/assets/avatars/../private.png' },
+    ] }) }
+    : { ok: true, blob: async () => new h.window.Blob(['avatar'], { type: 'image/png' }) });
+  mount(); await h.flush(); button('Choose avatar').click(); await h.flush();
+  expect(fetch.mock.calls[0]).toEqual(['/assets/avatars/pack-manifest.json', { cache: 'no-cache' }]);
+  const dialog = h.document.querySelector('.ca-avatar-dialog')!;
+  expect(dialog.querySelectorAll('.ca-expert-portraits button')).toHaveLength(100);
+  expect(dialog.textContent).not.toContain('Outside pack');
+  expect(dialog.textContent).not.toContain('Wrong source');
+  expect(dialog.querySelector('[aria-label="Use Sly Jester"]')).toBeNull();
+  expect(expanded.some((avatar: any) => Number(avatar.id.slice(5)) >= 51 && Number(avatar.id.slice(5)) <= 101)).toBe(false);
+  const last = dialog.querySelector('[aria-label="Use Merry Dragon"]') as HTMLButtonElement;
+  last.click(); await h.flush();
+  expect(fetch.mock.calls.some(call => call[0] === '/assets/avatars/pack-151.png')).toBe(true);
+  expect(fetch.mock.calls.some(call => String(call[0]).startsWith('https://'))).toBe(false);
+});
 it('uses the shared compact picker for human profiles without overriding a saved picture', async () => {
   const h = await createHarness({ stored: { 'reverie:chat:profile': JSON.stringify({ name: 'Alex', image: photo }) } });
   opened.push(h);

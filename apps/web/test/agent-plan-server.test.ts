@@ -61,6 +61,7 @@ describe('agent-requested cross-provider migration in enforce mode', () => {
     await server.start();
     app = server.app;
     server.mux.isPaneDead = () => false;
+    vi.spyOn(server.mux, 'capturePaneText').mockReturnValue('? for shortcuts shift+tab');
     vi.spyOn(server, 'cleanupSession').mockImplementation(async (id: any) => {
       server.sessions.delete(id);
     });
@@ -85,6 +86,11 @@ describe('agent-requested cross-provider migration in enforce mode', () => {
         configDir: join(directory, 'second'),
       })
     ).id;
+    // These profiles use fake CLIs and temporary empty directories. Model the
+    // authenticated destination explicitly; no real provider login is involved.
+    vi.spyOn(server.planService, 'rows').mockResolvedValue({
+      accounts: [{id: first.id, signedIn: true}, {id: destination, signedIn: true}], catalogue: [],
+    });
     const create = async (name: string) => {
       const response = await owner('POST', '/api/sessions', {
         workingDir: directory,
@@ -147,6 +153,11 @@ describe('agent-requested cross-provider migration in enforce mode', () => {
     });
     expect(server.sessions.size).toBe(2);
     const { nonce } = await new PlanRequestCapabilities().read(source, input.id);
+    expect((await agent(manager, `/api/plans/requests/${input.id}/credential`)).statusCode).toBe(403);
+    const privateCredential = await agent(source, `/api/plans/requests/${input.id}/credential`);
+    expect(privateCredential.statusCode).toBe(200);
+    expect(privateCredential.headers['cache-control']).toBe('no-store');
+    expect(privateCredential.json().data).toEqual({requestId: input.id, sessionId: source, nonce});
     expect(
       (await agent(manager, `/api/plans/requests/${input.id}/approve`, { nonce, handoff: 'Continue fixture review.' }))
         .statusCode

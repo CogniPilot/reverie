@@ -75,9 +75,9 @@ class TaskManager:
         except Exception:
             self.finish({'status': 'stopped', 'reason': 'task_preparation_failed'}, post=False)
             return f'Task {task_id} stopped: task_preparation_failed. No tool ran.'
-        return (f'Task {task_id} queued in /work; profile {profile}: {limits.steps} operations, '
+        return (f'Task {task_id} queued in its configured workspace; profile {profile}: {limits.steps} operations, '
                 f'{limits.seconds:g} seconds, {limits.total_bytes} returned bytes. '
-                'Chat takes priority. Workspace tools have no network.')
+                'Chat takes priority. Tools use the configured runner and its execution permissions.')
 
     def authorization(self, *, check_cancel=True):
         job = self.active
@@ -110,7 +110,7 @@ class TaskManager:
         for name in ('peak_prompt_tokens', 'context_tokens', 'model_prompt_tokens', 'model_output_tokens'):
             if name in result:
                 row[name] = result[name]
-        for name in ('tests_current', 'context_overflows', 'model_responses', 'usage_measured_responses'):
+        for name in ('tests_current', 'context_overflows', 'model_responses', 'usage_measured_responses', 'call_retries'):
             if name in result:
                 row[name] = result[name]
         if job['arbiter']:
@@ -123,7 +123,7 @@ class TaskManager:
             if result.get('tests_run') and not result.get('tests_current'):
                 tests += ' (no current completion, or later operations not rechecked)'
             paths = ', '.join(repr(path) for path in result.get('edited_paths', [])) or 'none recorded'
-            text = (f'Task {job["task_id"]} in /work: {row["status"]}: {row["reason"]}.\n'
+            text = (f'Task {job["task_id"]}: {row["status"]}: {row["reason"]}.\n'
                     f'Confirmed edit tools: {paths}. Tests: {tests}. '
                     'Full diff not independently collected.' +
                     ('\nAgent report: ' + result['text'] if result.get('text') else ''))[:2400]
@@ -147,12 +147,18 @@ class TaskManager:
         if remaining <= 0:
             self.finish({'status': 'stopped', 'reason': 'time_limit'})
             return False
+        meter = copy.deepcopy(job['settings'].get('token_meter'))
+        if meter is not None and self.cfg.get('vision'):
+            meter['image_tokens_per_image'] = self.cfg.get('image_tokens_per_image', 2048)
         job['arbiter'] = self.arbiter_factory(self.cfg['api_base'], key_env=self.cfg.get('model_key_env'),
                                              timeout_s=min(self.cfg['model_timeout_s'], 300),
-                                             token_meter=job['settings'].get('token_meter'))
+                                             token_meter=meter,
+                                             events_file=self.cfg.get('model_events_file'))
+        options = {'model': self.cfg['model'], 'max_tokens': self.cfg['reply_max_tokens'], 'stream': False}
+        if 'temperature' in self.cfg:
+            options['temperature'] = self.cfg['temperature']
         job['worker'] = self.worker_factory(job['messages'], job['tools'], replace(job['limits'], seconds=remaining),
-            {'model': self.cfg['model'], 'max_tokens': self.cfg['reply_max_tokens'],
-             'temperature': self.cfg.get('temperature', 0.7), 'stream': False}, epoch=job['epoch'])
+            options, epoch=job['epoch'])
         return True
 
     def pump(self):
@@ -212,6 +218,15 @@ class TaskManager:
                     except Exception:
                         result = {'version': 1, 'ok': False, 'output': '', 'error': 'invalid_output',
                                   'truncated': False, 'exit_code': None}
+                request = event['payload']['request']
+                entry = {'tool': request['name'], 'ok': result['ok'], 'exit_code': result['exit_code']}
+                path = request.get('args', {}).get('path')
+                if isinstance(path, str):
+                    entry['path'] = path[:200]
+                row = job['journal'][job['key']]
+                row['tool_history'] = (row.get('tool_history', []) + [entry])[-128:]
+                self.save()
+                self.loop.log('coding result', job['task_id'], encoded(entry))
                 job['worker'].reply(event['sequence'], result)
                 job['runner'] = None
             job['pending'] = None

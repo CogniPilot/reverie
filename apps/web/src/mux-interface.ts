@@ -91,6 +91,8 @@ export interface MuxSessionWithStats extends MuxSession {
 export interface CreateSessionOptions {
   /** Internal, launch-only exact workspace trust for managed Codex. */
   codexTrustWorkspace?: string;
+  /** Internal reconnect: the broker must never launch a new provider. */
+  workerAttachOnly?: boolean;
   sessionId: string;
   workingDir: string;
   mode: SessionMode;

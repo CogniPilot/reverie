@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Laptop previews · Reverie</title>
+    <link rel="stylesheet" href="bots.css" />
+    <script defer src="previews.js"></script>
+  </head>
+  <body>
+    <header>
+      <div>
+        <h1>Laptop previews</h1>
+        <p>Open an agent’s web page on its own secure address.</p>
+      </div>
+      <a href="./" target="_top">Back to chat</a>
+    </header>
+    <main>
+      <p>
+        Only the laptop ports you select are exposed. Previews expire after 30 minutes. Pages open in a separate tab.
+      </p>
+      <p><a href="handbook/previews">Preview help and host setup</a></p>
+      <p id="status" role="status">Loading previews…</p>
+      <form id="expose" class="toolbar">
+        <label>Laptop<select name="sessionId" required aria-label="Laptop"></select></label>
+        <label>Port<input name="port" type="number" min="1024" max="65535" value="8734" required /></label>
+        <label>Page path<input name="path" value="/" maxlength="4096" required /></label>
+        <button type="submit" class="primary">Expose and open</button>
+        <button type="button" id="refresh">Refresh</button>
+      </form>
+      <p class="hint">
+        Ask the agent for its port and page path. GET and HEAD only; live reload and form submissions are unavailable.
+      </p>
+      <section aria-label="Exposed laptop ports"><div id="previews" class="cards"></div></section>
+    </main>
+  </body>
+</html>

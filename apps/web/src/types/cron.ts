@@ -51,6 +51,8 @@ export interface CronJob {
   postAs?: 'bot' | 'author';
   /** post, postAs 'author': the hired employee who owns the routine. The id is stable; the session is resolved at fire time. */
   createdBy?: { employeeId: string };
+  /** Server-recorded owner creation. Absent on legacy jobs whose creator was not recorded. */
+  createdByOwner?: true;
   /** Server-kept: consecutive failed fires of an author routine; 3 disables it. */
   failStreak?: number;
   /** post: the chat bot that speaks (an id in the bot registry). */

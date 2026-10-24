@@ -8,12 +8,13 @@ from coding_process import BoundedProcess
 
 class ModelArbiter:
     def __init__(self, api_base, *, key_env=None, timeout_s=300, max_response_bytes=262144,
-                 token_meter=None, process_factory=BoundedProcess, clock=time.monotonic):
+                 token_meter=None, events_file=None, process_factory=BoundedProcess, clock=time.monotonic):
         self.api_base = api_base
         self.key_env = key_env
         self.timeout_s = timeout_s
         self.max_response_bytes = max_response_bytes
         self.token_meter = token_meter
+        self.events_file = events_file
         self.factory = process_factory
         self.clock = clock
         self.job = None
@@ -40,7 +41,8 @@ class ModelArbiter:
         self.epoch += 1
         config = {'api_base': self.api_base, 'key_env': self.key_env,
                   'timeout_s': min(self.timeout_s, remaining), 'max_response_bytes': self.max_response_bytes,
-                  'payload': self.pending, 'token_meter': self.token_meter, 'epoch': self.epoch}
+                  'payload': self.pending, 'token_meter': self.token_meter, 'epoch': self.epoch,
+                  'events_file': self.events_file}
         environment = {'PATH': os.defpath, 'LANG': 'C.UTF-8'}
         if self.key_env is not None and self.key_env in os.environ:
             environment[self.key_env] = os.environ[self.key_env]

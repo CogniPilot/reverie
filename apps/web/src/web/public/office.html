@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Office · Reverie</title>
+    <link rel="stylesheet" href="office.css" />
+  </head>
+  <body>
+    <main class="office">
+      <aside class="channels">
+        <h1>Reverie</h1>
+        <p id="self-name"></p>
+        <a href="owner/account">Password and sign-in</a>
+        <details>
+          <summary>Your profile</summary>
+          <form id="profile-form">
+            <label>Display name<input name="name" required maxlength="80" /></label
+            ><label
+              >Avatar<select name="avatar" aria-label="Avatar">
+                <option value="">Initials</option>
+              </select></label
+            ><button>Save profile</button>
+          </form>
+        </details>
+        <nav id="channels" aria-label="Allowed channels"></nav>
+        <button id="logout">Sign out</button>
+      </aside>
+      <section class="conversation">
+        <header>
+          <h2 id="room-title">Choose a channel</h2>
+          <span>Limited access</span>
+        </header>
+        <p class="note" id="topic"></p>
+        <p class="note" id="status" role="status"></p>
+        <div id="messages" role="log" aria-label="Channel messages"></div>
+        <div id="people" class="people-line" aria-label="People in this channel"></div>
+        <form id="composer" class="composer">
+          <textarea name="text" aria-label="Message" maxlength="8000" required disabled></textarea
+          ><button disabled>Send</button>
+        </form>
+      </section>
+    </main>
+    <script src="office.js" defer></script>
+  </body>
+</html>

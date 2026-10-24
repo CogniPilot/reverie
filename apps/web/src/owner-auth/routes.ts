@@ -24,6 +24,7 @@ export function isLoopbackHost(host: string): boolean {
 }
 
 export function registerOwnerRoutes(app: FastifyInstance, service: OwnerAuthService, https: boolean): void {
+  const accountFor = (req: FastifyRequest) => service.forSession(req.cookies?.[OWNER_COOKIE]);
   // Secure everywhere except a loopback Host (browsers accept Secure cookies on http://localhost),
   // so the flag does not depend on a proxy's X-Forwarded-Proto.
   const secure = (req: FastifyRequest): boolean => https || !isLoopbackHost(String(req.headers.host ?? ''));
@@ -72,7 +73,7 @@ export function registerOwnerRoutes(app: FastifyInstance, service: OwnerAuthServ
     };
   const text = (value: unknown, max = 1024): string => String(value ?? '').slice(0, max);
 
-  app.get('/api/owner/status', async (req) => ({ success: true, data: service.status(req.cookies?.[OWNER_COOKIE]) }));
+  app.get('/api/owner/status', async (req) => ({ success: true, data: { ...service.status(req.cookies?.[OWNER_COOKIE]), identity: service.identity(req.cookies?.[OWNER_COOKIE]) } }));
 
   app.post(
     '/api/owner/setup',
@@ -130,7 +131,8 @@ export function registerOwnerRoutes(app: FastifyInstance, service: OwnerAuthServ
   app.post(
     '/api/owner/password',
     handle(async (req, reply, body) => {
-      const session = await service.changePassword(
+      if (body.username !== undefined && 'usernameAvailable' in service && !(service as import('./office.js').OfficeAuthService).usernameAvailable(String(body.username), req.cookies?.[OWNER_COOKIE])) throw new OwnerAuthError('That login username is already in use', 409);
+      const session = await accountFor(req).changePassword(
         req.cookies?.[OWNER_COOKIE],
         {
           current: text(body.current),
@@ -159,7 +161,7 @@ export function registerOwnerRoutes(app: FastifyInstance, service: OwnerAuthServ
     '/api/owner/logout-everywhere',
     handle(async (req, reply) => {
       owner(req);
-      await service.logoutEverywhere(req.ip);
+      await accountFor(req).logoutEverywhere(req.ip);
       clear(reply, true);
       return { signedOut: true };
     })
@@ -169,7 +171,7 @@ export function registerOwnerRoutes(app: FastifyInstance, service: OwnerAuthServ
     '/api/owner/2fa/start',
     handle(async (req, _reply, body) => {
       owner(req);
-      const { secret, url } = await service.startTotp(
+      const { secret, url } = await accountFor(req).startTotp(
         req.cookies?.[OWNER_COOKIE],
         body.code === undefined ? undefined : text(body.code, 16),
         req.ip
@@ -184,7 +186,7 @@ export function registerOwnerRoutes(app: FastifyInstance, service: OwnerAuthServ
     '/api/owner/2fa/confirm',
     handle(async (req, _reply, body) => {
       owner(req);
-      return { recoveryCodes: await service.confirmTotp(req.cookies?.[OWNER_COOKIE], text(body.code, 16), req.ip) };
+      return { recoveryCodes: await accountFor(req).confirmTotp(req.cookies?.[OWNER_COOKIE], text(body.code, 16), req.ip) };
     })
   );
 
@@ -192,7 +194,7 @@ export function registerOwnerRoutes(app: FastifyInstance, service: OwnerAuthServ
     '/api/owner/2fa/disable',
     handle(async (req, _reply, body) => {
       owner(req);
-      await service.disableTotp(req.cookies?.[OWNER_COOKIE], text(body.password), text(body.code, 16), req.ip);
+      await accountFor(req).disableTotp(req.cookies?.[OWNER_COOKIE], text(body.password), text(body.code, 16), req.ip);
       return { twoFactor: false };
     })
   );
@@ -202,7 +204,7 @@ export function registerOwnerRoutes(app: FastifyInstance, service: OwnerAuthServ
     handle(async (req, _reply, body) => {
       owner(req);
       return {
-        recoveryCodes: await service.newRecoveryCodes(req.cookies?.[OWNER_COOKIE], text(body.code, 16), req.ip),
+        recoveryCodes: await accountFor(req).newRecoveryCodes(req.cookies?.[OWNER_COOKIE], text(body.code, 16), req.ip),
       };
     })
   );
@@ -211,7 +213,7 @@ export function registerOwnerRoutes(app: FastifyInstance, service: OwnerAuthServ
     '/api/owner/devices',
     handle(async (req) => {
       owner(req);
-      return { devices: service.devices() };
+      return { devices: accountFor(req).devices() };
     })
   );
 
@@ -219,7 +221,7 @@ export function registerOwnerRoutes(app: FastifyInstance, service: OwnerAuthServ
     '/api/owner/devices/:id',
     handle(async (req) => {
       owner(req);
-      const revoked = await service.revokeDevice(text((req.params as { id: string }).id, 64), req.ip);
+      const revoked = await accountFor(req).revokeDevice(text((req.params as { id: string }).id, 64), req.ip);
       if (!revoked) throw new OwnerAuthError('No such device', 404);
       return { revoked: true };
     })

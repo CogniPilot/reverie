@@ -1,12 +1,26 @@
-{ pkgs, src, reverie, console, memory, runtime, worker ? false, browserRuntime ? null }:
+{ pkgs, src, reverie, console, memory, runtime, worker ? false, browserRuntime ? null, chatLanguageTools ? null }:
 let
   entrypoint = pkgs.writeShellScript "reverie-start" (builtins.readFile (src + "/docker/entrypoint.sh"));
+  nixPrepare = pkgs.writeShellApplication {
+    name = "reverie-nix-store-prepare";
+    runtimeInputs = [ pkgs.nix pkgs.coreutils ];
+    text = pkgs.lib.removePrefix "#!/usr/bin/env bash\n" (builtins.readFile (src + "/scripts/reverie-nix-store-prepare"));
+  };
+  baseContents = [ runtime pkgs.dockerTools.binSh pkgs.dockerTools.usrBinEnv
+    pkgs.dockerTools.caCertificates pkgs.sudo pkgs.tini ]
+    ++ pkgs.lib.optionals worker [ pkgs.nix nixPrepare ]
+    ++ pkgs.lib.optional (browserRuntime != null) browserRuntime
+    ++ pkgs.lib.optionals (chatLanguageTools != null) [ chatLanguageTools.python chatLanguageTools.modelica ];
+  nixBase = pkgs.linkFarm "reverie-laptop-base" (pkgs.lib.imap0 (i: path: {
+    name = "share/reverie/base/${toString i}"; inherit path;
+  }) (baseContents ++ [ reverie console memory entrypoint ]));
+  nixClosure = pkgs.closureInfo { rootPaths = [ nixBase ]; };
+  nixpkgsPin = (builtins.fromJSON (builtins.readFile (src + "/flake.lock"))).nodes.nixpkgs.locked;
 in pkgs.dockerTools.buildLayeredImage {
   name = if browserRuntime != null then "reverie-worker-browser" else if worker then "reverie-worker" else "reverie";
   tag = "latest";
   created = "1970-01-01T00:00:01Z";
-  contents = [ runtime pkgs.dockerTools.binSh pkgs.dockerTools.usrBinEnv
-    pkgs.dockerTools.caCertificates pkgs.sudo pkgs.tini ] ++ pkgs.lib.optional (browserRuntime != null) browserRuntime;
+  contents = baseContents ++ pkgs.lib.optional worker nixBase;
   extraCommands = ''
     mkdir -p etc bin usr/local/bin opt/reverie home/agent workspace reverie_workspace scratch/tmp instances tmp
     unlink bin/reverie
@@ -27,6 +41,21 @@ in pkgs.dockerTools.buildLayeredImage {
     ln -s ${memory} opt/reverie/python
     ln -s ${entrypoint} usr/local/bin/reverie-start
     chmod 1777 tmp
+  '' + pkgs.lib.optionalString worker ''
+    mkdir -p etc/nix nix/store/.links target/nix
+    cp ${nixClosure}/registration etc/reverie-nix-registration
+    ln -s ${nixBase} etc/reverie-nix-base
+    cat > etc/nix/nix.conf <<'NIXCONF'
+    experimental-features = nix-command flakes
+    build-users-group =
+    sandbox = false
+    max-jobs = 1
+    cores = 4
+    flake-registry = /etc/nix/registry.json
+    NIXCONF
+    cat > etc/nix/registry.json <<'REGISTRY'
+    ${builtins.toJSON { version = 2; flakes = [{ from = { type = "indirect"; id = "nixpkgs"; }; to = nixpkgsPin; }]; }}
+    REGISTRY
   '';
   fakeRootCommands = ''
     chown -R 2000:2000 home/agent workspace reverie_workspace scratch instances
@@ -46,12 +75,21 @@ in pkgs.dockerTools.buildLayeredImage {
     WorkingDir = "/reverie_workspace";
     Entrypoint = if worker then [ "/bin/sleep" ] else [ "/bin/tini" "-g" "-s" "--" "/usr/local/bin/reverie-start" ];
     Cmd = if worker then [ "infinity" ] else [ "reverie" "web" "--host" "0.0.0.0" "--port" "3000" ];
-    Env = [ "PATH=/bin" "HOME=/home/agent" "REVERIE_CONTAINER=1" "REVERIE_MANAGED_INSTALL=nix"
+    Env = [ (if worker then "PATH=/home/agent/.nix-profile/bin:/home/agent/.local/bin:/home/agent/.local/state/nix/profiles/profile/bin:/bin" else "PATH=/bin")
+      "HOME=/home/agent" "REVERIE_CONTAINER=1" "REVERIE_MANAGED_INSTALL=nix"
       "REVERIE_VERSION=${console.version}" "REVERIE_CASES_PATH=/scratch/cases"
+      "REVERIE_SHARED_WORKSPACE_PATH=/reverie_workspace"
+      "REVERIE_SHARED_ATTACHMENTS_PATH=/reverie_workspace/attachments"
       "REVERIE_RESEARCH_ROOT=/scratch/research" "TMPDIR=/scratch/tmp"
       "SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt"
-      "NIX_SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt" ];
+      "NIX_SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt" ]
+      ++ pkgs.lib.optionals worker [ "NIX_REMOTE=local" "NIX_PATH=nixpkgs=flake:nixpkgs" ]
+      ++ pkgs.lib.optionals (chatLanguageTools != null) [
+        "REVERIE_CHAT_PYTHON_LSP_BINARY=${chatLanguageTools.python}/bin/pyright-langserver"
+        "REVERIE_CHAT_MODELICA_LSP_BINARY=${chatLanguageTools.modelica}/bin/rumoca-lsp"
+      ];
     ExposedPorts."3000/tcp" = { };
     Labels."org.opencontainers.image.source" = "https://github.com/jgoppert/reverie";
+    Labels."reverie.worker.nix-store" = if worker then "1" else "0";
   };
 }

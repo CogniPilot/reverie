@@ -422,10 +422,11 @@ function caMentionsOwner(text, ownerNames) {
  * messages count (the user's own and system lines never do), and a message is a mention when it
  * is addressed to the user (every message, in a direct message with them).
  */
-function chatCountsAfterMessage(room, message, ownerNames) {
+function chatCountsAfterMessage(room, message, ownerNames, humanId = 'owner') {
   const unread = Number(room?.unread) || 0;
   const mentions = Number(room?.mentions) || 0;
-  if (!room || room.archivedAt || message?.from?.kind !== 'agent') return { unread, mentions };
+  const otherHuman = (message?.from?.kind === 'user' || message?.from?.kind === 'human') && (message.from.humanId || 'owner') !== humanId;
+  if (!room || room.archivedAt || (message?.from?.kind !== 'agent' && !otherHuman)) return { unread, mentions };
   if (room.kind === 'dm') {
     return room.dm?.includes('user') ? { unread: unread + 1, mentions: mentions + 1 } : { unread, mentions };
   }
@@ -465,7 +466,9 @@ function caContinues(prev, m) {
   if (!prev || !m) return false;
   if (prev.from.kind === 'system' || m.from.kind === 'system') return false;
   if (prev.from.kind !== m.from.kind) return false;
-  if ((prev.from.employeeId || prev.from.sessionId || prev.from.name) !== (m.from.employeeId || m.from.sessionId || m.from.name)) return false;
+  if (m.from.kind === 'user' || m.from.kind === 'human') {
+    if ((prev.from.humanId || 'owner') !== (m.from.humanId || 'owner') || prev.from.access !== m.from.access) return false;
+  } else if ((prev.from.employeeId || prev.from.sessionId || prev.from.name) !== (m.from.employeeId || m.from.sessionId || m.from.name)) return false;
   if (m.replyTo) return false;
   if (JSON.stringify(prev.to) !== JSON.stringify(m.to)) return false;
   if (caDayKey(prev.at) !== caDayKey(m.at)) return false;
@@ -903,11 +906,12 @@ function caAgentProfile(data) {
 const CA_IMAGE_DATA = /^data:image\/(?:png|jpeg|webp|gif);base64,[A-Za-z0-9+/]+={0,2}$/;
 
 /**
- * The src to draw for an icon that is an image, else ''. Only two forms count: a raster data URL (png, jpeg, webp, gif; at most
- * ~120 KB), or `img:` plus a path under /api/ on this server. Anything else (http, svg, javascript:, a long data URL) is not an image.
+ * Safe icon images: bounded raster data, an official catalog PNG, or this server's image APIs.
+ * Remote URLs, SVG, script URLs and oversized data are refused.
  */
 function caIconImage(icon, urlFn) {
   const s = typeof icon === 'string' ? icon.trim() : '';
+  if (/^\/assets\/avatars\/pack-(?:0[1-9]|[1-9][0-9]|1[0-4][0-9]|15[01])\.png$/.test(s)) return typeof urlFn === 'function' ? urlFn(s) : s;
   if (!s) return '';
   if (s.length <= 160000 && CA_IMAGE_DATA.test(s)) return s;
   // An avatar the server stores for an agent: /api/avatars/<id> with an optional version, so a new picture is fetched afresh.
@@ -966,6 +970,7 @@ function caStatsView(stats) {
 }
 
 const CA_PROFILE_HUES = [200, 160, 120, 45, 15, 335, 285, 245];
+const caAvatarBackground = value => typeof value === 'string' && (value === 'transparent' || /^#[0-9a-f]{6}$/i.test(value)) ? value : '';
 
 /** A stored profile, cleaned: every field optional, trimmed and capped. */
 function caProfile(raw) {
@@ -1030,6 +1035,7 @@ const CA_ICONS = {
   back: '<path d="m15 18-6-6 6-6"/>',
   phone: '<rect x="7" y="2" width="10" height="20" rx="2"/><path d="M11 18h2"/>',
   bell: '<path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9M13.7 21a2 2 0 0 1-3.4 0"/>',
+  folder: '<path d="M3 7V5a2 2 0 0 1 2-2h5l2 3h7a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z"/>',
   book: '<path d="M12 6v15M3 3h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5v16h-5a4 4 0 0 0-4 2 4 4 0 0 0-4-2H3z"/>',
   org: '<rect x="9" y="2" width="6" height="5" rx="1"/><rect x="2" y="17" width="6" height="5" rx="1"/><rect x="16" y="17" width="6" height="5" rx="1"/><path d="M12 7v5M5 17v-5h14v5"/>',
   invite: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M19 8v6M22 11h-6"/>',
@@ -1044,6 +1050,10 @@ const CA_ICONS = {
 const CA_PAGES = {
   board: { label: 'Board', icon: 'calendar', path: '/board' },
   handbook: { label: 'Handbook', icon: 'book', path: '/handbook' },
+  workspace: { label: 'Workspace', icon: 'folder', path: '/workspace' },
+  bots: { label: 'Bots', icon: 'gear', path: '/bots' },
+  people: { label: 'People', icon: 'members', path: '/people' },
+  previews: { label: 'Laptop previews', icon: 'folder', path: '/previews' },
   company: { label: 'Company', icon: 'org', path: null, nav: false },
   'company-plans': { label: 'Company plans', icon: 'gauge', path: null, nav: false },
   'company-people': { label: 'Company people', icon: 'members', path: null, nav: false },
@@ -1078,6 +1088,7 @@ class ReverieChatApp {
       this.collapsed = {};
     }
     this.membersOpen = caRead('local', 'reverie:chat:members', '1') !== '0';
+    this.officeCollapsed = caRead('local', 'reverie:chat:office-collapsed', '0') === '1';
     this.drawer = null;
     this.seenAt = {};
     this.features = {};
@@ -1307,11 +1318,12 @@ class ReverieChatApp {
     const before = this.profileSig;
     this.profileIcons = caProfileIcons(res.data);
     this.profileAvatars = caProfileAvatars(res.data);
+    this.profileBackgrounds = new Map((res.data?.employees || []).filter(employee => caAvatarBackground(employee.avatarBackground)).map(employee => [employee.sessionId, employee.avatarBackground]));
     this.profilePronouns = caProfilePronouns(res.data);
     await this.loadWsIcons();
     const ownerAvatar = typeof res.data?.settings?.ownerAvatar === 'string' ? res.data.settings.ownerAvatar : '';
     this.ownerAvatar = caIconImage(ownerAvatar) ? ownerAvatar : '';
-    this.profileSig = JSON.stringify([[...this.profileIcons], [...this.profileAvatars], [...this.profilePronouns], (res.data?.employees || []).map((employee) => [employee.id, employee.name, employee.icon, employee.avatar]), this.wsIcons, this.ownerAvatar]);
+    this.profileSig = JSON.stringify([[...this.profileIcons], [...this.profileAvatars], [...this.profilePronouns], (res.data?.employees || []).map((employee) => [employee.id, employee.name, employee.icon, employee.avatar, employee.avatarBackground]), this.wsIcons, this.ownerAvatar]);
     this.renderUser();
     if (this.view === 'chat') {
       // Avatars are drawn into the sidebar, the member list and the feed: redraw all of them when an icon changed.
@@ -1320,6 +1332,48 @@ class ReverieChatApp {
       this.renderFeed({ keepScroll: true });
     }
     this.maybePromptOwnerName();
+    if (!this._humanStarted && this.built) { this._humanStarted = true; void this.startHumanPresence(); }
+  }
+
+  async startHumanPresence() {
+    const me = await this.app._chatApi('/api/office/me').catch(() => null);
+    if (!me?.ok || !me.data?.person) return;
+    this.humanSelf = me.data.person;
+    const pulse = async () => {
+      if (this.doc.hidden || this._humanPending) return;
+      this._humanPending = true;
+      try {
+        const fresh = await this.app._chatApi('/api/office/me');
+        if (!fresh.ok || !fresh.data?.person) return;
+        this.humanSelf = fresh.data.person;
+        await this.app._chatApi('/api/office/presence', { method: 'POST', body: {} });
+        const id = this.roomId;
+        if (id && !caIsDm(this.room)) {
+          const result = await this.app._chatApi('/api/office/presence?roomId=' + encodeURIComponent(id));
+          if (result.ok && this.roomId === id) { this.humans = result.data.people || []; this.humanRoomId = id; }
+        } else { this.humans = []; this.humanRoomId = null; }
+        this.renderUser();
+        if (this.view === 'chat') { this.renderHeader(); this.renderMembers(); this.renderFeed({ keepScroll: true }); }
+      } catch { /* Ordinary reconnect refreshes presence; never infer online from a failed request. */ }
+      finally { this._humanPending = false; }
+    };
+    this._humanPulse = pulse;
+    await pulse();
+    this._humanTimer = this.doc.defaultView.setInterval(() => { void pulse(); }, 15_000);
+    this.doc.addEventListener('visibilitychange', () => { if (!this.doc.hidden) void pulse(); });
+  }
+
+  channelHumans() { return this.humanRoomId === this.roomId && !caIsDm(this.room) ? this.humans || [] : []; }
+
+  isHumanMessageMine(from) { return (from.kind === 'user' || from.kind === 'human') && (from.humanId || 'owner') === (this.humanSelf?.id || 'owner'); }
+
+  humanAvatar(person, size = 'md', state) {
+    const el = this.el('span', `chatroom-avatar chatroom-avatar--${size}`);
+    el.style.setProperty('--chat-hue', String(this.app._chatHue(person.id || person.name)));
+    el.append(this.el('span', 'chatroom-avatar-glyph', this.app._chatInitial(person.name)));
+    if (person.avatar) this.fillAvatar(el, person.avatar);
+    if (state) el.append(this.el('span', `chatroom-dot chatroom-dot--${state}`));
+    return el;
   }
 
   /** Offer a display name once per tab session, only after verified owner sign-in. */
@@ -1416,6 +1470,17 @@ class ReverieChatApp {
     this.app._chatUnread = 0;
     this.setView('chat');
     this.els.composerInput()?.focus?.();
+    this.refreshAfterReturn();
+  }
+
+  /** Revalidate missed channel changes on return while keeping the visible conversation and draft. */
+  refreshAfterReturn() {
+    if (this._returnRefresh) return this._returnRefresh;
+    const flight = this.refreshRooms({ keepRoom: true }).catch(() => {}).finally(() => {
+      if (this._returnRefresh === flight) this._returnRefresh = null;
+    });
+    this._returnRefresh = flight;
+    return flight;
   }
 
   ensureBackButton() {
@@ -1528,11 +1593,23 @@ class ReverieChatApp {
     this.app._chatEls.feed.addEventListener('scroll', () => this.markReadSoon(), { passive: true });
     this.renderAll();
     this.renderUser();
+    this.doc.defaultView?.addEventListener('message', event => {
+      if (!((this.embed === 'workspace' && event.data?.type === 'workspace-back-to-chat') || (this.embed === 'people' && event.data?.type === 'office-back-to-chat')) || event.origin !== this.doc.defaultView.location.origin || event.source !== this.els.page?.querySelector('iframe')?.contentWindow) return;
+      this.closePage(); this.els.composerInput()?.focus();
+    });
     // Back and forward move between the conversation and Board; a #board link opens it.
     this.doc.defaultView?.addEventListener('popstate', () => {
       const kind = caPageFromHash(this.doc.defaultView.location.hash);
       if (kind) this.openPage(kind, { push: false });
-      else this.closePage({ history: false });
+      else {
+        this.closePage({ history: false });
+        const target = this.doc.defaultView.ReverieUrlSession?.sessionIdFromFragment?.(this.doc.defaultView.location.hash);
+        if (target) this.showDebug(target);
+        else this.showChat();
+      }
+    });
+    this.doc.defaultView?.addEventListener('pageshow', event => {
+      if (event.persisted && this.active) { this.renderAll(); this.refreshAfterReturn(); }
     });
     const first = caPageFromHash(this.doc.defaultView?.location.hash);
     if (first) this.openPage(first, { push: false });
@@ -2315,6 +2392,12 @@ class ReverieChatApp {
       const frame = plans.querySelector('iframe');
       if (this.companyPage !== dlg || !dlg.isConnected || event.origin !== this.doc.defaultView.location.origin || !frame || event.source !== frame.contentWindow) return;
       if (event.data?.type === 'company-plans-changed') void refreshHireOptions();
+      else if (event.data?.type === 'company-open-runtime' && typeof event.data.employeeId === 'string') {
+        void this.app._chatApi('/api/company').then(result => {
+          const employee = result.ok && result.data?.employees?.find(item => item.id === event.data.employeeId);
+          if (employee) void this.openRuntimeSettings(employee);
+        });
+      }
       else if (event.data?.type === 'company-plans-height' && Number.isFinite(event.data.height))
         plans.style.height = `${Math.max(120, Math.min(10000, event.data.height))}px`;
     };
@@ -2338,6 +2421,7 @@ class ReverieChatApp {
         card.dataset.employeeId = employee.id;
         const title = this.el('div', 'ca-company-person-title');
         const avatar = this.el('span', 'chatroom-avatar chatroom-avatar--md ca-company-icon');
+        if (caAvatarBackground(employee.avatarBackground)) avatar.style.backgroundColor = employee.avatarBackground;
         avatar.append(this.el('span', 'chatroom-avatar-glyph', employee.icon || '👤'));
         if (employee.avatar) this.fillAvatar(avatar, employee.avatar);
         title.append(avatar, this.literalText('strong', '', employee.name));
@@ -2988,12 +3072,35 @@ class ReverieChatApp {
   /** The Board and Plans entries pinned above the list: pages, not rooms, so they take no part in the sort or the reordering. */
   pagesEl() {
     const box = this.el('div', 'ca-pages');
+    const links = this.el('div', 'ca-office-links');
+    links.id = 'ca-office-links';
+    links.hidden = this.officeCollapsed;
+    const toggle = this.el('button', 'ca-pages-toggle');
+    toggle.type = 'button';
+    toggle.setAttribute('aria-label', 'Office');
+    toggle.setAttribute('aria-expanded', String(!this.officeCollapsed));
+    toggle.setAttribute('aria-controls', links.id);
+    const caret = this.icon('chevron');
+    caret.classList.toggle('is-folded', this.officeCollapsed);
+    toggle.append(caret, this.el('span', '', 'Office'));
+    const current = this.el('span', 'ca-office-current', CA_PAGES[this.embed]?.label || '');
+    current.hidden = !this.officeCollapsed;
+    toggle.append(current);
+    toggle.addEventListener('click', () => {
+      this.officeCollapsed = !this.officeCollapsed;
+      links.hidden = this.officeCollapsed;
+      current.hidden = !this.officeCollapsed;
+      caret.classList.toggle('is-folded', this.officeCollapsed);
+      toggle.setAttribute('aria-expanded', String(!this.officeCollapsed));
+      caWrite('local', 'reverie:chat:office-collapsed', this.officeCollapsed ? '1' : '0');
+    });
+    box.append(toggle, links);
     const company = this.el('button', 'ca-item ca-item--page ca-company-nav');
     if (this.embed?.startsWith('company')) { company.classList.add('is-active'); company.setAttribute('aria-current', 'page'); }
     company.type = 'button'; company.setAttribute('aria-label', 'Company');
     const mark = this.el('span', 'ca-hash is-drawn'); mark.setAttribute('aria-hidden', 'true'); mark.append(this.icon('org'));
     company.append(mark, this.el('span', 'ca-name', 'Company'));
-    company.addEventListener('click', () => this.openCompany()); box.append(company);
+    company.addEventListener('click', () => this.openCompany()); links.append(company);
     for (const [kind, page] of Object.entries(CA_PAGES)) {
       if (page.nav === false) continue; // Embassies has one home: its sidebar section.
       const on = this.embed === kind;
@@ -3007,7 +3114,7 @@ class ReverieChatApp {
       mark.append(this.icon(page.icon));
       b.append(mark, this.el('span', 'ca-name', page.label));
       b.addEventListener('click', () => this.openPage(kind));
-      box.append(b);
+      links.append(b);
     }
     return box;
   }
@@ -3043,7 +3150,7 @@ class ReverieChatApp {
     frame.title = page.label;
     if (panel.dataset.kind !== kind) {
       panel.dataset.kind = kind;
-      frame.src = page.path;
+      frame.src = ['workspace', 'bots', 'previews'].includes(kind) ? (this.doc.defaultView.__REVERIE_BASE__ || '') + page.path : page.path;
     } else if (again) {
       try {
         frame.contentWindow.location.reload();
@@ -3235,7 +3342,7 @@ class ReverieChatApp {
       // A touch screen turns selection off on messages (a long press opens this sheet): this turns it on for one.
       out.push({ label: 'Select text', run: () => this.startSelectMode(m.id) });
     }
-    if (this.serverFeatures.edits && m.from.kind === 'user' && m.text && !m.poll && !m.deleted) {
+    if (this.serverFeatures.edits && this.isHumanMessageMine(m.from) && m.text && !m.poll && !m.deleted) {
       out.push({ label: 'Edit message', run: () => this.startEdit(m) });
     }
     if (this.serverFeatures.pins && room && !caIsDm(room) && m.from.kind !== 'system' && !m.deleted) {
@@ -3574,6 +3681,7 @@ class ReverieChatApp {
   }
 
   authorOf(from) {
+    if ((from.kind === 'user' || from.kind === 'human') && (from.humanId || this.humanSelf)) return this.channelHumans().find(p => p.id === (from.humanId || 'owner'))?.name || (from.humanId && from.humanId !== 'owner' ? from.name : this.company?.settings?.ownerName || from.name);
     return from.kind === 'user' ? this.userName() : caEmployeeForSender(this.company, from)?.name || from.name;
   }
 
@@ -3635,11 +3743,13 @@ class ReverieChatApp {
   }
 
   userName() {
+    if (this.humanSelf && !this.humanSelf.primary) return this.humanSelf.name;
     return this.profile.name || this.ownerName || this.doc.defaultView?.__reverieUser?.username || 'You';
   }
 
   /** Your avatar: the chosen emoji (or initial) on the chosen colour. */
   userAvatar(size = 'md', state) {
+    if (this.humanSelf && !this.humanSelf.primary) return this.humanAvatar(this.humanSelf, size, state);
     const p = this.profile;
     // Your picture comes from the server (everyone sees it); this browser's own copy is the fallback.
     const image = this.ownerAvatar || p.image;
@@ -3659,6 +3769,7 @@ class ReverieChatApp {
     if (employee) {
       const el = this.app._chatAvatar(undefined, name, opts);
       el.style.setProperty('--chat-hue', String(this.app._chatHue(employee.id)));
+      if (caAvatarBackground(employee.avatarBackground)) el.style.backgroundColor = employee.avatarBackground;
       const member = employee.sessionId ? this.app._chatMember?.(employee.sessionId) : undefined;
       const profileIcon = typeof employee.icon === 'string' ? employee.icon.trim() : '';
       const icon = profileIcon && (caIconImage(profileIcon) || Array.from(profileIcon).length <= 4) ? profileIcon : member?.icon || '';
@@ -3674,14 +3785,18 @@ class ReverieChatApp {
     if (from.kind === 'bot') {
       const el = this.app._chatAvatar(undefined, name, opts);
       // A bot has no session to look an icon up by: its own icon, when it has one, stands in for the initial.
-      if (from.icon) el.querySelector('.chatroom-avatar-glyph')?.replaceChildren(from.icon);
+      if (from.icon && !this.fillAvatar(el, from.icon)) el.querySelector('.chatroom-avatar-glyph')?.replaceChildren(from.icon);
       return el;
+    }
+    if ((from.kind === 'user' || from.kind === 'human') && (from.humanId || this.humanSelf)) {
+      const id = from.humanId || 'owner';
+      return this.humanAvatar(this.channelHumans().find(p => p.id === id) || { id, name, avatar: id === 'owner' ? this.ownerAvatar : undefined }, opts?.size);
     }
     return from.kind === 'user' ? this.userAvatar(opts?.size, opts?.state) : this.app._chatAvatar(from.sessionId, name, opts);
   }
 
   authorHue(from, name) {
-    if (from.kind === 'user') return this.profile.hue ?? this.app._chatHue(name);
+    if (from.kind === 'user' || from.kind === 'human') return from.humanId ? this.app._chatHue(from.humanId) : this.profile.hue ?? this.app._chatHue(name);
     const employee = caEmployeeForSender(this.company, from);
     if (employee) return this.app._chatHue(employee.id);
     return from.sessionId ? this.app._chatAccent(from.sessionId) : this.app._chatHue(name);
@@ -3912,7 +4027,7 @@ class ReverieChatApp {
     el.dataset.msgId = m.id;
     el.append(this.el('div', 'ca-msg-gutter'));
     const body = this.el('div', 'ca-msg-body');
-    const who = m.from.kind === 'user' ? 'a message from you' : `a message from ${this.authorOf(m.from)}`;
+    const who = this.isHumanMessageMine(m.from) ? 'a message from you' : `a message from ${this.authorOf(m.from)}`;
     body.append(this.el('span', 'ca-deleted-text', `This ${who} was deleted.`));
     if (this.serverFeatures.deletes) {
       const restore = this.button('ca-btn ca-restore', `Restore the deleted message at ${new Date(m.at).toLocaleTimeString()} (agents are not sent it again)`, () => this.restoreMessage(m), { text: 'Restore' });
@@ -4087,6 +4202,34 @@ class ReverieChatApp {
       e.preventDefault();
       e.stopPropagation();
       this.closeMentions();
+    }
+  }
+
+  /** Files on the company drive stay ordinary paths for agents and become downloads for humans. */
+  decorateWorkspaceFiles(root) {
+    const walker = this.doc.createTreeWalker(root, 4);
+    const nodes = [];
+    while (walker.nextNode()) if (!walker.currentNode.parentElement?.closest('a,pre,button,script,style')) nodes.push(walker.currentNode);
+    for (const node of nodes) {
+      const text = node.nodeValue;
+      if (node.parentElement?.tagName === 'CODE' && text.startsWith('/reverie_workspace/') && !/[\r\n]/.test(text) && /\.[a-zA-Z0-9]{1,12}$/.test(text)) {
+        const link = this.el('a', 'chatroom-link ca-workspace-download', text);
+        link.href = '/api/filesystem/download?path=' + encodeURIComponent(text);
+        link.download = text.split('/').pop(); link.title = 'Download ' + link.download;
+        node.replaceWith(link); continue;
+      }
+      const pattern = /\/reverie_workspace\/[^\s<>"'`]+/g;
+      const parts = []; let cursor = 0;
+      for (const match of text.matchAll(pattern)) {
+        const path = match[0].replace(/[.,;:)\]]+$/, '');
+        if (!path || path.endsWith('/') || !/\.[a-zA-Z0-9]{1,12}$/.test(path)) continue;
+        parts.push(this.doc.createTextNode(text.slice(cursor, match.index)));
+        const link = this.el('a', 'chatroom-link ca-workspace-download', path);
+        link.href = '/api/filesystem/download?path=' + encodeURIComponent(path);
+        link.download = path.split('/').pop(); link.title = 'Download ' + link.download;
+        parts.push(link); cursor = match.index + path.length;
+      }
+      if (parts.length) { parts.push(this.doc.createTextNode(text.slice(cursor))); node.replaceWith(...parts); }
     }
   }
 
@@ -4596,6 +4739,19 @@ class ReverieChatApp {
     return people.map((m) => `${m.sessionId}:${this.presenceOf(m)}`).join('|');
   }
 
+  syncSessionPresence(id, deleted = false) {
+    const session = this.app.sessions?.get?.(id);
+    if (!id || (!deleted && !session)) return;
+    const members = [this.room, ...(this.viewRooms || [])].flatMap(room => room?.members || []);
+    for (const member of members) {
+      if (member.sessionId !== id) continue;
+      if (deleted || session?.status === 'stopped' || session?.paneExit || session?.pid === null) member.alive = false;
+      else if (session?.pid !== undefined) member.alive = true;
+      if (session?.status) member.working = session.status === 'busy' || session.isWorking === true;
+    }
+    this.schedulePresence();
+  }
+
   /** Redraw what shows a member's state (the member list and the direct-message dots), at most once a frame. */
   schedulePresence() {
     if (!this.built || this._presenceQueued) return;
@@ -5052,6 +5208,8 @@ class ReverieChatApp {
         label: button.getAttribute('aria-label') || button.title,
         run: () => button === bellBtn ? this.openNotifyMenu(anchor) : button.click(),
       }));
+    const plugins = this.doc.defaultView?.ReverieChatPlugins;
+    if (plugins) entries.push({ label: 'Chat plugins', run: () => plugins.openSettings() });
     this.openMenu(entries, { at: anchor, focus: anchor, right: true, label: 'More actions', className: 'ca-head-menu' });
   }
 
@@ -5127,7 +5285,8 @@ class ReverieChatApp {
       headTopic.textContent = peer ? `${peer.alive ? (peer.working ? 'Working' : 'Online') : 'Offline'}${peer.goal ? ` · ${peer.goal}` : ''}` : '';
     } else {
       const coord = room.members.find((m) => m.role === 'coordinator');
-      headTopic.textContent = room.topic ? room.topic : `${room.members.length} member${room.members.length === 1 ? '' : 's'}${coord ? ` · admin ${coord.name}` : ''}`;
+      const memberCount = room.members.length + this.channelHumans().length;
+      headTopic.textContent = room.topic ? room.topic : `${memberCount} member${memberCount === 1 ? '' : 's'}${coord ? ` · admin ${coord.name}` : ''}`;
     }
   }
 
@@ -5136,8 +5295,9 @@ class ReverieChatApp {
   renderMemberChip() {
     const button = this.els.membersBtn;
     if (!button) return;
-    const members = this.room?.members || [];
-    const online = members.filter(member => this.presenceOf(member) !== 'gone').length;
+    const humans = this.channelHumans();
+    const members = [...(this.room?.members || []), ...humans];
+    const online = (this.room?.members || []).filter(member => this.presenceOf(member) !== 'gone').length + humans.filter(p => p.online).length;
     const compact = !!this.doc.defaultView?.matchMedia?.('(max-width: 899px)')?.matches;
     const expanded = compact ? this.drawer === 'members' : this.membersOpen;
     button.hidden = !this.room || !!this.embed || !!this.embassy?.selected || !!this.app._chatCreating;
@@ -5151,6 +5311,7 @@ class ReverieChatApp {
   }
 
   renderMembers() {
+    if (this._humanPulse && !caIsDm(this.room) && this.humanRoomId !== this.roomId && !this._humanPending) void this._humanPulse();
     this.renderMemberChip();
     this.refreshSettings?.();
     const box = this.els.members;
@@ -5162,6 +5323,19 @@ class ReverieChatApp {
       }
       const room = this.room;
       if (!room || this.app._chatCreating) return;
+      const humans = this.channelHumans();
+      if (humans.length) {
+        box.append(this.el('h3', 'ca-members-head', `People — ${humans.length}`));
+        for (const person of humans) {
+          const row = this.el('div', `ca-member is-${person.online ? 'online' : 'offline'}`);
+          row.dataset.humanId = person.id;
+          row.setAttribute('aria-label', `${person.name}, ${person.role === 'owner' ? 'Owner' : 'Limited'}, ${person.online ? 'online' : 'offline'}`);
+          row.append(this.humanAvatar(person, 'md', person.online ? 'idle' : 'gone'));
+          const text = this.el('span', 'ca-member-text');
+          text.append(this.literalText('span', 'ca-member-name', person.name), this.el('span', 'ca-member-sub', (person.id === this.humanSelf?.id ? 'You · ' : '') + (person.role === 'owner' ? 'Owner' : 'Limited')));
+          row.append(text); box.append(row);
+        }
+      }
       for (const section of caMemberSections(room.members)) {
         const h = this.el('h3', 'ca-members-head', `${section.label} — ${section.members.length}`);
         box.append(h);
@@ -5658,7 +5832,7 @@ class ReverieChatApp {
   /** The card over your name: how you look, with a way to edit it. */
   openMyProfile(anchor) {
     this.closeProfile();
-    const p = this.profile;
+    const p = this.humanSelf && !this.humanSelf.primary ? { hue: this.app._chatHue(this.humanSelf.id) } : this.profile;
     const name = this.userName();
     const card = this.el('div', 'ca-profile ca-me-card');
     card.setAttribute('role', 'dialog');
@@ -5670,7 +5844,7 @@ class ReverieChatApp {
     top.append(this.profilePortrait(this.userAvatar('md', 'online'), name));
     const names = this.el('div', 'ca-profile-names');
     names.append(this.el('strong', '', name));
-    const account = this.doc.defaultView?.__reverieUser?.username;
+    const account = this.humanSelf?.username || this.doc.defaultView?.__reverieUser?.username;
     const sub = [account && account !== name ? account : '', p.pronouns].filter(Boolean).join(' \u2022 ');
     if (sub) names.append(this.el('span', 'ca-profile-sub', sub));
     top.append(names);
@@ -5809,10 +5983,10 @@ class ReverieChatApp {
     const initialIntent = intent;
     const pack = (async () => {
       try {
-        const response = await this.doc.defaultView.fetch('/assets/avatars/pack-manifest.json');
+        const response = await this.doc.defaultView.fetch('/assets/avatars/pack-manifest.json', { cache: 'no-cache' });
         if (!response.ok) return [];
         const manifest = await response.json();
-        const avatars = (Array.isArray(manifest.avatars) ? manifest.avatars : []).filter(avatar => avatar && /^pack-(?:0[1-9]|[1-4][0-9]|50)$/.test(avatar.id) && avatar.src === `/assets/avatars/${avatar.id}.png`);
+        const avatars = (Array.isArray(manifest.avatars) ? manifest.avatars : []).filter(avatar => avatar && /^pack-(?:0[1-9]|[1-4][0-9]|50|10[2-9]|1[1-4][0-9]|15[01])$/.test(avatar.id) && avatar.src === `/assets/avatars/${avatar.id}.png`);
         const unused = avatars.filter(avatar => !avoidPhotos.includes(avatar.src));
         if (random && unused.length && intent === initialIntent && !picture.value()) void select(unused[Math.floor(Math.random() * unused.length)], true);
         return avatars;
@@ -6020,6 +6194,33 @@ class ReverieChatApp {
     };
   }
 
+  employeeAvatarBackgroundFields(form, employee) {
+    const wrap = this.el('label', 'ca-label');
+    wrap.append(this.el('span', 'ca-label-text', 'Avatar background'));
+    const mode = this.el('select', 'ca-field'); mode.name = 'avatarBackgroundMode'; mode.setAttribute('aria-label', 'Avatar background');
+    for (const [value, label] of [['auto', 'Automatic'], ['custom', 'Custom color'], ['transparent', 'Transparent']]) {
+      const option = this.el('option', '', label); option.value = value; mode.append(option);
+    }
+    const saved = caAvatarBackground(employee.avatarBackground);
+    mode.value = saved === 'transparent' ? 'transparent' : saved ? 'custom' : 'auto';
+    wrap.append(mode); form.append(wrap);
+    const colorLabel = this.el('label', 'ca-label');
+    colorLabel.append(this.el('span', 'ca-label-text', 'Background color'));
+    const color = this.el('input', 'ca-field'); color.type = 'color'; color.name = 'avatarBackground';
+    color.value = saved && saved !== 'transparent' ? saved : '#286b7a';
+    colorLabel.append(color); form.append(colorLabel);
+    const value = () => mode.value === 'auto' ? null : mode.value === 'transparent' ? 'transparent' : color.value;
+    const paint = () => {
+      const preview = form.querySelector('.ca-picture-preview');
+      if (preview) preview.style.backgroundColor = value() || `hsl(${this.app._chatHue(employee.id)} 45% 28%)`;
+    };
+    mode.addEventListener('change', paint);
+    color.addEventListener('input', () => { mode.value = 'custom'; paint(); });
+    color.addEventListener('change', () => { mode.value = 'custom'; paint(); });
+    paint();
+    return { value };
+  }
+
   openEmployeeProfile(employee, onSaved) {
     this.doc.querySelector('.ca-expert-profile')?.remove();
     const dialog = this.el('dialog', 'ca-dialog ca-expert-profile');
@@ -6038,8 +6239,23 @@ class ReverieChatApp {
     const personality = profileField('personality', 'Personality and working style', employee.personality || '', true); personality.maxLength = 1000;
     const pronouns = this.el('input', 'ca-field'); pronouns.name = 'pronouns'; pronouns.maxLength = 24; pronouns.value = employee.pronouns || ''; pronouns.placeholder = 'e.g. they/them'; pronounLabel.append(pronouns); form.append(pronounLabel);
     const voice = this.expertVoiceFields(form, pronouns, { value: employee.name }, employee.voice);
+    const parentLabel = this.el('label', 'ca-label');
+    parentLabel.append(this.el('span', 'ca-label-text', 'Reports to'));
+    const parent = this.el('select', 'ca-field'); parent.name = 'reportsTo'; parent.disabled = true;
+    parent.setAttribute('aria-label', 'Reports to'); parentLabel.append(parent); form.append(parentLabel);
+    const addParent = (value, label) => { const option = this.el('option', '', label); option.value = value; parent.append(option); };
+    let reportingReady = false;
+    void this.app._chatApi('/api/company').then(response => {
+      if (!dialog.isConnected || !response.ok) return;
+      addParent('owner', response.data?.settings?.ownerName || 'Owner');
+      for (const candidate of response.data?.employees || []) if (candidate.id !== employee.id) addParent(candidate.id, candidate.name);
+      // Preserve implicit coordinator reporting rather than silently changing it on unrelated saves.
+      addParent('', 'Company default'); parent.lastElementChild.disabled = true; parent.value = employee.reportsTo || '';
+      reportingReady = true; parent.disabled = false;
+    }).catch(() => {});
     const rest = this.expertRestFields(form, employee);
     const appearance = this.expertAppearanceFields(form, employee.avatar || '', { name: { value: employee.name } });
+    const background = this.employeeAvatarBackgroundFields(form, employee);
     const error = this.el('p', 'ca-company-error'); error.setAttribute('role', 'alert');
     const save = this.el('button', 'ca-btn is-primary', 'Save profile'); save.type = 'submit';
     const cancel = this.el('button', 'ca-btn', 'Cancel'); cancel.type = 'button'; cancel.addEventListener('click', () => dialog.close());
@@ -6050,13 +6266,14 @@ class ReverieChatApp {
       save.disabled = true;
       try {
         const roleChanges = {};
+        if (reportingReady && parent.value && parent.value !== (employee.reportsTo || '')) roleChanges.reportsTo = parent.value;
         if (position.value.trim() !== (employee.position || '')) roleChanges.position = position.value.trim();
         const skills = expertise.value.split(',').map(s => s.trim()).filter(Boolean);
         const duties = responsibilities.value.split('\n').map(s => s.trim()).filter(Boolean);
         if (JSON.stringify(skills) !== JSON.stringify(employee.expertise || [])) roleChanges.expertise = skills;
         if (JSON.stringify(duties) !== JSON.stringify(employee.responsibilities || [])) roleChanges.responsibilities = duties;
         if (personality.value.trim() !== (employee.personality || '')) roleChanges.personality = personality.value.trim();
-        const changed = await this.app._chatApi(`/api/company/employees/${encodeURIComponent(employee.id)}`, { method: 'PUT', body: { ...roleChanges, sleepEnabled: rest.sleep.checked, dreamEnabled: rest.dream.checked, icon: this.expertInitial(employee.name), pronouns: pronouns.value.trim() || null, voice: voice.value() || null } });
+        const changed = await this.app._chatApi(`/api/company/employees/${encodeURIComponent(employee.id)}`, { method: 'PUT', body: { ...roleChanges, avatarBackground: background.value(), sleepEnabled: rest.sleep.checked, dreamEnabled: rest.dream.checked, icon: employee.avatar && !appearance.picture.value() ? this.expertInitial(employee.name) : employee.icon || this.expertInitial(employee.name), pronouns: pronouns.value.trim() || null, voice: voice.value() || null } });
         if (!changed.ok) { error.textContent = changed.error || 'Profile could not be saved.'; return; }
         if (appearance.picture.value() !== (employee.avatar || '') && !await this.saveEmployeePicture(employee.sessionId, appearance.picture.value())) {
           error.textContent = 'The profile picture could not be saved. Try again.'; return;
@@ -6184,6 +6401,7 @@ class ReverieChatApp {
   }
 
   openProfileEditor({ firstRun = false } = {}) {
+    if (this.humanSelf && !this.humanSelf.primary) { this.openPage('people'); return; }
     this.doc.querySelector('.ca-dialog.ca-profile-edit')?.remove();
     const p = this.profile;
     const dlg = this.el('dialog', 'ca-dialog ca-profile-edit');
@@ -7104,7 +7322,7 @@ class ReverieChatApp {
       return el;
     }
     if (m.deleted) return this.tombstoneEl(m);
-    const mine = m.from.kind === 'user';
+    const mine = this.isHumanMessageMine(m.from);
     const direct = m.to !== 'all';
     const el = this.el('div', `ca-msg${m.pinned ? ' is-pinned' : ''}${head ? ' is-head' : ' is-cont'}${mine ? ' is-mine' : ''}${direct ? ' is-direct' : ''}${this.replyTarget()?.id === m.id ? ' is-replying' : ''}`);
     el.dataset.msgId = m.id;
@@ -7131,6 +7349,7 @@ class ReverieChatApp {
       from.style.setProperty('--chat-hue', String(this.authorHue(m.from, name)));
       if (m.from.sessionId && m.from.sessionId === this.room?.coordinatorId) from.append(this.el('span', 'ca-tag', 'Admin'));
       if (m.from.kind === 'bot') from.append(this.el('span', 'ca-tag ca-tag--bot', 'Bot'));
+      if ((m.from.kind === 'user' || m.from.kind === 'human') && m.from.humanId) from.append(this.el('span', 'ca-tag', m.from.kind === 'human' ? 'Limited' : 'Owner'));
       const time = this.el('time', 'ca-time', new Date(m.at).toLocaleString([], { month: 'numeric', day: 'numeric', year: '2-digit', hour: 'numeric', minute: '2-digit' }));
       time.dateTime = new Date(m.at).toISOString();
       meta.append(from, time);
@@ -7145,6 +7364,7 @@ class ReverieChatApp {
       const text = this.app._chatTextEl ? this.app._chatTextEl(m.text) : this.el('div', 'chatroom-msg-text', m.text);
       if (m.external) text.classList.add('eg-text');
       this.decorateMentions(text);
+      if (!m.external) this.decorateWorkspaceFiles(text);
       if (m.edited) {
         const mark = this.el('span', 'ca-edited', '(edited)');
         mark.title = `Edited ${new Date(m.edited.at).toLocaleString()}`;
@@ -7245,7 +7465,7 @@ class ReverieChatApp {
       const atBottom = feed.scrollHeight - feed.scrollTop - feed.clientHeight < 60;
       this.appendMessage(data.message);
       this.app._chatPendingDraw?.();
-      if (atBottom || data.message.from.kind === 'user') feed.scrollTop = feed.scrollHeight;
+      if (atBottom || this.isHumanMessageMine(data.message.from)) feed.scrollTop = feed.scrollHeight;
       if (atBottom && this.doc.visibilityState !== 'hidden') this.markReadSoon();
       else this.countMessage(data, room);
       return true;
@@ -7262,7 +7482,7 @@ class ReverieChatApp {
       this._listTimer = setTimeout(() => this.refreshRooms(), 150);
       return;
     }
-    Object.assign(room, chatCountsAfterMessage(room, data.message, this.app._chatOwnerNames));
+    Object.assign(room, chatCountsAfterMessage(room, data.message, this.humanSelf ? [this.humanSelf.name] : this.app._chatOwnerNames, this.humanSelf?.id || 'owner'));
     room.lastMessageAt = data.message.at;
     // An older server sends no counts: keep the terminal UI's own running total, as it always did.
     if (!this.serverFeatures.unread && data.message.from?.kind === 'agent') {
@@ -7368,7 +7588,10 @@ function caInstall(proto) {
     _chatApi: proto._chatApi,
     setPendingHook: proto.setPendingHook,
     clearPendingHooks: proto.clearPendingHooks,
+    _onInit: proto._onInit,
     _onSessionUpdated: proto._onSessionUpdated,
+    _onSessionCreated: proto._onSessionCreated,
+    _onSessionDeleted: proto._onSessionDeleted,
     _chatAvatar: proto._chatAvatar,
     _chatVoiceTarget: proto._chatVoiceTarget,
     _syncChatMic: proto._syncChatMic,
@@ -7436,6 +7659,8 @@ function caInstall(proto) {
     _chatAvatar(sessionId, name, opts) {
       const el = original._chatAvatar.call(this, sessionId, name, opts);
       const app = this._chatApp?.built ? this._chatApp : null;
+      const background = caAvatarBackground(app?.profileBackgrounds?.get(sessionId));
+      if (background) el.style.backgroundColor = background;
       // A picture the agent set for itself wins; the emoji icon (profile, then room) is the fallback.
       const avatar = app ? app.profileAvatar(sessionId, this._chatMember?.(sessionId)) : '';
       if (avatar && app.fillAvatar(el, avatar)) return el;
@@ -7504,9 +7729,26 @@ function caInstall(proto) {
     },
     // This WRAPS the app's own SSE handler (it calls it first). The name is quoted so the one-definition guard in
     // sse-dispatch-table.test.ts, which looks for a second copy of a handler that would shadow the app's, does not read it as one.
+    '_onInit'(data) {
+      const result = original._onInit?.call(this, data);
+      const shell = this._chatApp;
+      const ids = new Set([shell?.room, ...(shell?.viewRooms || [])].flatMap(room => (room?.members || []).map(member => member.sessionId)));
+      for (const id of ids) shell?.syncSessionPresence?.(id, !this.sessions?.has?.(id));
+      return result;
+    },
+    '_onSessionCreated'(data) {
+      const result = original._onSessionCreated?.call(this, data);
+      this._chatApp?.syncSessionPresence?.(data.id);
+      return result;
+    },
+    '_onSessionDeleted'(data) {
+      const result = original._onSessionDeleted?.call(this, data);
+      this._chatApp?.syncSessionPresence?.(data.id, true);
+      return result;
+    },
     '_onSessionUpdated'(data) {
       const result = original._onSessionUpdated?.call(this, data);
-      this._chatApp?.schedulePresence?.();
+      this._chatApp?.syncSessionPresence?.((data.session || data).id);
       return result;
     },
     async _sendChatMessage(options) {

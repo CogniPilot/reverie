@@ -12,7 +12,7 @@ import { normalizeIcon } from './chatroom-store.js';
 export interface ChatBot {
   id: string;
   name: string;
-  /** One emoji (or at most two characters), shown instead of an initial. */
+  /** A catalog avatar path, one emoji, or at most two characters. */
   icon?: string;
   /** Ids of the rooms it may post in; any other room is refused. */
   rooms: string[];
@@ -21,6 +21,7 @@ export interface ChatBot {
 }
 
 export const BOT_ID_PATTERN = /^[a-z0-9][a-z0-9_-]{0,39}$/;
+export const BOT_AVATAR_PATTERN = /^\/assets\/avatars\/pack-(?:0[1-9]|[1-9][0-9]|1[0-4][0-9]|15[01])\.png$/;
 export const MAX_BOTS = 20;
 export const MAX_BOT_ROOMS = 100;
 export const DEFAULT_BOT_POSTS_PER_HOUR = 30;
@@ -46,8 +47,8 @@ export function parseBot(raw: unknown, id: string): ChatBot {
   }
   let icon: string | undefined;
   if (o.icon !== undefined && o.icon !== '') {
-    icon = typeof o.icon === 'string' ? normalizeIcon(o.icon) : undefined;
-    if (icon === undefined) throw new ChatBotError('An icon is one emoji or at most two characters', 'INVALID_INPUT');
+    icon = typeof o.icon === 'string' ? BOT_AVATAR_PATTERN.test(o.icon) ? o.icon : normalizeIcon(o.icon) : undefined;
+    if (icon === undefined) throw new ChatBotError('Choose a catalog avatar, one emoji or at most two characters', 'INVALID_INPUT');
   }
   if (!Array.isArray(o.rooms) || o.rooms.length > MAX_BOT_ROOMS || o.rooms.some((r) => typeof r !== 'string' || !r || r.length > 100)) {
     throw new ChatBotError(`rooms is a list of at most ${MAX_BOT_ROOMS} room ids`, 'INVALID_INPUT');

@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Run as the laptop's unprivileged uid in a networkless, read-only image.
+# Only its private store is mounted, at /target/nix. Never use a host daemon.
+test -d /target/nix
+export HOME=/tmp/nix-bootstrap-home
+export TMPDIR=/tmp
+export NIX_REMOTE='local?real=/tmp/nix-bootstrap-empty&state=/tmp/nix-bootstrap-state&log=/tmp/nix-bootstrap-log'
+export NIX_STATE_DIR=/tmp/nix-bootstrap-state
+export NIX_LOG_DIR=/tmp/nix-bootstrap-log
+mkdir -p "$HOME" "$NIX_STATE_DIR"
+
+# Reconstruct the immutable image's database privately, then copy only its
+# registered closure into the laptop store. Nix merges registrations atomically;
+# packages/profiles from earlier images remain in the destination.
+nix-store --load-db < /etc/reverie-nix-registration
+# The image itself is read-only, including its .links directory. Open its
+# registered paths through a read-only source store, after the import process
+# has closed the temporary database. The helper is its only possible writer.
+chmod a-w "$NIX_STATE_DIR/db/db.sqlite"
+nix --extra-experimental-features read-only-local-store --offline copy --all \
+  --from 'local?real=/nix/store&state=/tmp/nix-bootstrap-state&log=/tmp/nix-bootstrap-log&read-only=true' \
+  --to 'local?root=/target&require-sigs=false'
+mkdir -p /target/nix/var/nix/gcroots
+ln -sfn "$(readlink /etc/reverie-nix-base)" /target/nix/var/nix/gcroots/reverie-image

@@ -46,6 +46,15 @@ class ArbiterTests(unittest.TestCase):
         self.assertEqual(self.arbiter.preemptions, 1)
         self.assertEqual(self.arbiter.requests_started, 2)
 
+    def test_optional_trace_path_reaches_only_private_worker_configuration(self):
+        self.arbiter.events_file = '/private/events.jsonl'
+        request = {'model': 'model', 'messages': []}
+        self.arbiter.submit(request, 60)
+        job = FakeProcess.instances[0]
+        self.assertEqual(job.body['events_file'], '/private/events.jsonl')
+        self.assertNotIn('events_file', job.body['payload'])
+        self.assertNotIn('/private/events.jsonl', job.output.decode())
+
     def test_only_one_coding_request_can_occupy_the_slot(self):
         self.arbiter.submit({}, 60)
         with self.assertRaises(RuntimeError):

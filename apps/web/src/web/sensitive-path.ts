@@ -41,7 +41,8 @@ const PRIVATE_RUNTIME_FILE =
 // The append-only audit logs hold deleted message text and reports.
 const PRIVATE_RUNTIME_LOG = /^(?:chatrooms\.json\.audit|admin-audit)\.jsonl(?:\.(?:bak|[^/]*tmp))?$/;
 // chatroom-files-deleted holds the files of deleted channels (kept for the audit log, never cleaned up automatically).
-const PRIVATE_RUNTIME_TREE = /^(?:certs|accounts|embassy-guest|docker-seeds|cred-seeds|custom-model-configs|chatroom-files-deleted)(?:\/|$)/;
+const PRIVATE_RUNTIME_TREE =
+  /^(?:certs|accounts|embassy-guest|docker-seeds|cred-seeds|custom-model-configs|chatroom-files-deleted)(?:\/|$)/;
 
 function isPrivateRuntimeMember(member: string): boolean {
   return PRIVATE_RUNTIME_FILE.test(member) || PRIVATE_RUNTIME_LOG.test(member) || PRIVATE_RUNTIME_TREE.test(member);
@@ -116,6 +117,19 @@ const HOME_SENSITIVE_MEMBERS = ['.claude.json', '.claude/settings.json', '.claud
  * sensitive-file blocklist and must not be served to the browser.
  */
 export function isSensitivePath(absPath: string): boolean {
+  if (isSensitivePathAt(absPath, [])) return true;
+  const dataDir = resolve(getDataDir());
+  let resolvedDataDir = dataDir;
+  try {
+    resolvedDataDir = realpathSync(dataDir);
+  } catch {
+    /* A not-yet-created store still has a protected lexical path. */
+  }
+  return isSensitivePathAt(absPath, [dataDir, resolvedDataDir]);
+}
+
+/** Pure counterpart for bounded async callers; roots must already be resolved by the caller. */
+export function isSensitivePathAt(absPath: string, dataRoots: readonly string[]): boolean {
   if (SENSITIVE_PATTERNS.some((pattern) => pattern.test(absPath))) return true;
   // Keep legacy/default/named-instance protections even when those stores are
   // not the currently selected instance (also applies to remote file paths).
@@ -124,14 +138,7 @@ export function isSensitivePath(absPath: string): boolean {
   }
   // A configured data directory need not have a recognizable name. Compare its
   // resolved location too, since callers resolve the requested file first.
-  const dataDir = resolve(getDataDir());
-  let resolvedDataDir = dataDir;
-  try {
-    resolvedDataDir = realpathSync(dataDir);
-  } catch {
-    /* A not-yet-created store still has a protected lexical path. */
-  }
-  if ([dataDir, resolvedDataDir].some((root) => isPrivateRuntimeMember(relative(root, absPath)))) return true;
+  if (dataRoots.some((root) => isPrivateRuntimeMember(relative(root, absPath)))) return true;
   const home = homedir();
   return HOME_SENSITIVE_MEMBERS.some((member) => absPath === join(home, member));
 }

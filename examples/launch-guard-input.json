@@ -1,0 +1,41 @@
+{
+  "request": {
+    "schema_version": 1,
+    "goId": "go-1",
+    "transitionId": "go-1",
+    "idempotencyKey": "attempt-1",
+    "goalId": "goal-1",
+    "goalGeneration": 1,
+    "currentGoalGeneration": 1,
+    "goalState": "ACTIVE",
+    "decisionId": null,
+    "decisionGeneration": null,
+    "sessionId": "session-1",
+    "sessionGeneration": 1,
+    "currentSessionGeneration": 1,
+    "employeeId": "employee-1",
+    "rooms": [
+      "room-1"
+    ],
+    "cursor": {
+      "room-1": 10
+    },
+    "source": {
+      "available": true,
+      "complete": true,
+      "observedAtMs": 100000,
+      "messages": [
+        {
+          "id": "message-11",
+          "roomId": "room-1",
+          "sequence": 11,
+          "atMs": 99000,
+          "authorRole": "AGENT",
+          "mentionsLauncher": false,
+          "goId": null
+        }
+      ]
+    }
+  },
+  "now_ms": 100000
+}

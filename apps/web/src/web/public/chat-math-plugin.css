@@ -1,0 +1,62 @@
+.chat-math-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  flex-basis: 100%;
+  gap: 0.35rem;
+  margin: 0.3rem 0;
+  font:
+    12px system-ui,
+    sans-serif;
+}
+.chat-math-button {
+  background: var(--bg-tertiary, #242733);
+  color: inherit;
+  border: 1px solid var(--border-color, #596070);
+  border-radius: 5px;
+  padding: 0.3rem 0.55rem;
+  cursor: pointer;
+}
+.chat-math-button:focus-visible {
+  outline: 2px solid var(--accent, #8ab4ff);
+  outline-offset: 2px;
+}
+.chat-math-button[aria-pressed='true'] {
+  border-color: var(--accent, #8ab4ff);
+}
+.chat-math-preview,
+.chat-math-message-source {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-width: 100%;
+}
+.chat-math-composer-preview {
+  min-height: 3rem;
+  max-height: 35vh;
+  overflow: auto;
+  padding: 0.6rem;
+  flex: 1 1 100%;
+}
+.chat-math-message-source {
+  user-select: text;
+  margin: 0.3rem 0;
+  font:
+    13px ui-monospace,
+    monospace;
+}
+.chatroom-math--display {
+  display: block;
+  overflow-x: auto;
+  max-width: 100%;
+  padding: 0.3rem 0;
+}
+.chat-math-run .katex {
+  font-size: 1.08em;
+}
+.chat-math-toolbar[hidden],
+.chat-math-preview[hidden],
+.chat-math-message-preview[hidden],
+.chat-math-message-source[hidden],
+textarea.chatroom-input[hidden],
+textarea.ca-edit-input[hidden] {
+  display: none !important;
+}

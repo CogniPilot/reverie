@@ -23,6 +23,18 @@ function pane(id: string, mode: string): DeliverySession & { writes: string[] } 
 }
 
 describe('chatroom delivery by session mode', () => {
+  it('retains queued chat until a migration releases its composer', async () => {
+    const session = pane('agent', 'codex');
+    const delivery = new ChatroomDelivery({getSession: () => session, now: () => 1_000_000});
+    const release = delivery.pauseForMigration('agent');
+    delivery.enqueue('agent', {id: 'room', name: 'Room'}, 'USER: after migration');
+    expect(await delivery.flush('agent')).toBe(false);
+    expect(session.writes).toEqual([]);
+    expect(delivery.pendingFor('agent')).toBe(1);
+    release(); release();
+    await delivery.flush('agent');
+    expect(session.writes).toHaveLength(1);
+  });
   it('types into agent panes but never into shell or unknown panes, and drops their queue', async () => {
     const sessions = new Map([
       ['agent', pane('agent', 'opencode')],

@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>People · Reverie</title>
+    <link rel="stylesheet" href="office.css" />
+  </head>
+  <body>
+    <main class="settings">
+      <header>
+        <h1>People and logins</h1>
+        <a id="back-to-chat" href="./">Back to chat</a>
+      </header>
+      <p>
+        Each person signs in separately. Owners can administer the entire office. Limited accounts can read and post
+        only in the channels you select.
+      </p>
+      <p id="status" role="status"></p>
+      <section id="my-profile" hidden>
+        <h2>Your profile</h2>
+        <form id="profile-form">
+          <label>Display name<input name="name" maxlength="80" required /></label
+          ><label
+            >Avatar<select name="avatar" aria-label="Avatar">
+              <option value="">Initials</option>
+            </select></label
+          ><img id="profile-preview" alt="Selected avatar" width="64" height="64" hidden /><button>Save profile</button>
+        </form>
+      </section>
+      <section>
+        <h2>Add a person</h2>
+        <form id="create-form">
+          <label
+            >Login username<input
+              name="username"
+              autocomplete="off"
+              minlength="2"
+              maxlength="32"
+              pattern="[A-Za-z0-9][A-Za-z0-9_-]{1,31}"
+              required /></label
+          ><label>Display name<input name="name" maxlength="80" required /></label
+          ><label
+            >Access<select name="role" aria-label="Access">
+              <option value="limited">Limited — selected channels</option>
+              <option value="owner">Owner — full administration</option>
+            </select></label
+          >
+          <fieldset id="create-rooms"><legend>Allowed channels</legend></fieldset>
+          <button>Add person</button>
+        </form>
+      </section>
+      <section id="password-result" hidden>
+        <h2>One-time password</h2>
+        <p>
+          Share this privately with the person. It expires in 30 minutes and must be replaced at first sign-in. It is
+          shown only now.
+        </p>
+        <input id="one-time-password" type="password" readonly aria-label="One-time password" /><button
+          id="copy-password"
+        >
+          Copy password</button
+        ><label class="check"><input id="reveal-password" type="checkbox" />Show password</label
+        ><button id="dismiss-password">Done</button>
+      </section>
+      <section>
+        <h2>Human accounts</h2>
+        <p>
+          The original owner account remains available for recovery. Disable an account to end its access; chat history
+          is retained.
+        </p>
+        <div id="accounts"></div>
+      </section>
+      <p><a href="owner/account">Your password and two-step sign-in</a></p>
+    </main>
+    <dialog id="edit-person">
+      <h2>Edit access</h2>
+      <form id="edit-form">
+        <label>Display name<input name="name" required maxlength="80" /></label
+        ><label
+          >Access<select name="role" aria-label="Access">
+            <option value="limited">Limited — selected channels</option>
+            <option value="owner">Owner — full administration</option>
+          </select></label
+        >
+        <fieldset id="edit-rooms"><legend>Allowed channels</legend></fieldset>
+        <label class="check"><input name="disabled" type="checkbox" />Disabled</label>
+        <p>Changing access ends this person’s sessions immediately.</p>
+        <p id="edit-error" role="alert"></p>
+        <button>Save access</button><button type="button" id="cancel-edit">Cancel</button>
+      </form>
+    </dialog>
+    <script src="people.js" defer></script>
+  </body>
+</html>

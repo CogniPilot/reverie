@@ -1,0 +1,9 @@
+# Routine announcement audience
+
+Delegated routine changes still require a successful system notice before the job is changed and the existing audit path runs. The notice records routine authoring metadata, not permission to run a command or to change another employee's routines. No grants or bots policy change.
+
+The owner/operator may set `REVERIE_ROUTINE_ANNOUNCEMENT_ROOM_ID` in the existing trusted website service environment to the canonical ID of the chosen announcement room, then use the ordinary reviewed website configuration/reload process. This is server configuration, not a worker request field or a grant. No UI/API, new configuration store, auto-created room or live setting is added here. Preserve existing service settings and credentials; the implementation does not read them during development.
+
+If the variable is absent, the backward-compatible default is the unique ordinary active room named `General` (case-insensitive, trimmed), in the request's exact owner scope. An explicit blank, malformed, missing, ambiguous, archived, DM or other-owner selection refuses; it never falls back to General or another room. Selection is validated again immediately before the actual notice. Failed notice posting still refuses the mutation. Room membership, explicit own-post grant, author identity, caps, intervals, owner-only fields and audit rules remain unchanged.
+
+For a deployment without General, the owner must select the intended existing audience and the operator must verify its current canonical ID, owner, ordinary/nonarchived state before provisioning. A visible room name alone is not proof of the whole company room list or permission to select it. This portable source deliberately contains no company-specific room ID. Source/test acceptance is not deployment or authorization to create or enable a live routine.

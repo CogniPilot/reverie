@@ -25,6 +25,7 @@ function harness() {
     let data: unknown;
     if (path === '/api/plans/moves/preview')
       data = { account: 'first', mode: 'codex', sessionId: 'source', working: true };
+    else if (path === '/api/plans/moves/force') data = {id: 'forced', phase: 'completed'};
     else if (path === '/api/plans/allocations') data = context.planAllocations;
     else if (path === '/api/plans/requests') {
       const input = JSON.parse(options!.body);
@@ -73,6 +74,36 @@ function harness() {
 }
 afterEach(() => pages.splice(0).forEach((page) => page.window.close()));
 describe('owner plan request presentation', () => {
+  it('renders the same avatar and clickable profile control for a local-model employee', () => {
+    const h = harness();
+    const employee = h.context.planAllocations.employees[0];
+    h.dom.window.document.body.insertAdjacentHTML('afterbegin', '<div data-local-members="local"></div>');
+    Object.assign(h.context, {localSessions: [{id: 'source', customModel: {endpointId: 'local'}}], localEmployees: [employee]});
+    h.methods.renderPlanMembers();
+    const row = h.dom.window.document.querySelector('[data-local-members]')!;
+    expect(row.querySelector('img')?.getAttribute('src')).toBe(employee.avatar);
+    expect(row.querySelector('button[data-member="alex"]')).not.toBeNull();
+    expect(row.querySelector('button')?.getAttribute('aria-label')).toBe('Alex');
+  });
+  it('opens runtime selection from the local card using the same-origin parent bridge', async () => {
+    const h = harness();
+    Object.assign(h.context, {localSessions: [{id: 'source', customModel: {endpointId: 'local'}}]});
+    const postMessage = vi.fn();
+    h.context.window = {parent: {postMessage}, location: {origin: 'https://console.test'}} as never;
+    await h.methods.openPlanMove('alex');
+    expect(postMessage).toHaveBeenCalledWith({type: 'company-open-runtime', employeeId: 'alex'}, 'https://console.test');
+    expect(h.fetch).not.toHaveBeenCalled();
+  });
+  it('offers an explicit owner force action without requiring expert approval', async () => {
+    const h = harness();
+    vi.spyOn(h.dom.window, 'confirm').mockReturnValue(true);
+    await h.methods.openPlanMove('alex', 'second');
+    h.dialog.querySelector<HTMLButtonElement>('[data-force]')!.click();
+    await vi.waitFor(() => expect(h.fetch.mock.calls.some(([path]) => path === '/api/plans/moves/force')).toBe(true));
+    const sent = h.fetch.mock.calls.find(([path]) => path === '/api/plans/moves/force')!;
+    expect(JSON.parse(sent[1]!.body)).toMatchObject({employeeId: 'alex', sessionId: 'source', toAccount: 'second'});
+    expect(h.fetch.mock.calls.some(([path]) => path === '/api/plans/requests')).toBe(false);
+  });
   it('accepts a drop across providers and explains the automatically selected destination harness', async () => {
     const h = harness();
     h.context.B.planBurn.push({ id: 'claude', name: 'Claude Work', provider: 'anthropic' });

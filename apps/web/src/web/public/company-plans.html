@@ -70,7 +70,7 @@ function localPlanCards() {
     const used = number(gpu?.memoryUsedMb), total = number(gpu?.memoryTotalMb);
     return `<div class="plan plan-local" data-local-plan="${esc(plan.id)}"><h3>${esc(plan.label)}<span class="badge mute">${local ? 'Local model' : 'Model endpoint'}</span></h3>
       <div class="who">${esc(plan.defaultModelId || plan.models?.[0] || 'No model selected')}</div>
-      <div class="plan-members" aria-label="${esc('People allocated to ' + plan.label)}">${people.length ? people.map(person => `<span class="plan-member" title="${esc(person.name)}" aria-label="${esc(person.name)}"><span class="plan-member-face">${esc(person.icon || Array.from(person.name || '?')[0])}</span></span>`).join('') : '<span class="plan-member-state">No employees allocated</span>'}</div>
+      <div class="plan-members" data-local-members="${esc(plan.id)}" aria-label="${esc('People allocated to ' + plan.label)}">${people.length ? people.map(planAvatarHtml).join('') : '<span class="plan-member-state">No employees allocated</span>'}</div>
       <div class="stats"><div><b>${utilization == null ? '–' : Math.round(utilization) + '%'}</b>GPU utilization</div><div><b>${used == null || total == null ? '–' : (used / 1024).toFixed(1) + ' / ' + (total / 1024).toFixed(1) + ' GiB'}</b>shared GPU memory</div></div>
       <p class="hint">${local ? 'Runs on your hardware. No subscription quota or weekly reset. GPU capacity is shared.' : 'Uses your configured model endpoint.'}</p>
       <p class="hint">Choose this plan in an expert’s Runtime settings.</p></div>`;
@@ -204,11 +204,7 @@ function planMemberHtml(plan) {
     if (!sessions.has(member.sessionId) || seen.has(member.id)) return false;
     seen.add(member.id); return true;
   });
-  const icons = members.map(member => {
-    const avatar = typeof member.avatar === 'string' && /^\/api\/avatars\/[a-zA-Z0-9-]+(?:\?v=\d+)?$/.test(member.avatar) ? member.avatar : null;
-    const fallback = member.icon || Array.from(member.name || '?')[0];
-    return `<button type="button" class="plan-member" draggable="true" data-member="${esc(member.id)}" title="${esc(member.name)}" aria-label="${esc(member.name)}"><span class="plan-member-face" aria-hidden="true">${esc(fallback)}</span>${avatar ? `<img src="${esc(avatar)}" alt="" loading="lazy">` : ''}<span class="plan-member-name" aria-hidden="true">${esc(member.name)}</span></button>`;
-  }).join('');
+  const icons = members.map(planAvatarHtml).join('');
   const ghosts = pendingPlanRequests.filter(request => request.toAccount === plan.id && ['pending', 'reauthorize-required', 'executing', 'recovery-required'].includes(request.phase) && !members.some(member => member.id === request.employeeId)).map(request => {
     const member = planAllocations.employees.find(employee => employee.id === request.employeeId);
     const avatar = typeof member?.avatar === 'string' && /^\/api\/avatars\/[a-zA-Z0-9-]+(?:\?v=\d+)?$/.test(member.avatar) ? member.avatar : null;
@@ -242,6 +238,22 @@ function renderPlanMembers() {
     wirePlanMoves(row);
     if (focused) [...row.querySelectorAll('[data-member]')].find(member => member.dataset.member === focused)?.focus();
   });
+  document.querySelectorAll('[data-local-members]').forEach(row => {
+    if (typeof localSessions === 'undefined' || typeof localEmployees === 'undefined') return;
+    const ids = new Set(localSessions.filter(session => session.customModel?.endpointId === row.dataset.localMembers).map(session => session.id));
+    const html = localEmployees.filter(person => ids.has(person.sessionId)).map(planAvatarHtml).join('') || '<span class="plan-member-state">No employees allocated</span>';
+    if (row.dataset.snapshot === html) return;
+    row.innerHTML = html; row.dataset.snapshot = html;
+    row.querySelectorAll('img').forEach(image => image.addEventListener('error', () => image.remove(), {once: true}));
+    wirePlanMoves(row);
+  });
+}
+
+function planAvatarHtml(person) {
+  const member = planAllocations?.employees.find(item => item.id === person.id) || person;
+  const avatar = typeof member.avatar === 'string' && /^\/api\/avatars\/[a-zA-Z0-9-]+(?:\?v=\d+)?$/.test(member.avatar)
+    ? member.avatar : member.avatar && /^[a-zA-Z0-9-]+$/.test(member.id) ? '/api/avatars/' + member.id : null;
+  return `<button type="button" class="plan-member" draggable="true" data-member="${esc(member.id)}" title="${esc(member.name)}" aria-label="${esc(member.name)}"><span class="plan-member-face" aria-hidden="true">${esc(member.icon || Array.from(member.name || '?')[0])}</span>${avatar ? `<img src="${esc(avatar)}" alt="" loading="lazy">` : ''}<span class="plan-member-name" aria-hidden="true">${esc(member.name)}</span></button>`;
 }
 
 async function refreshPlanMembers() {
@@ -313,6 +325,11 @@ async function openPlanMove(employeeId, destination) {
   if (!dialog || dialog.open) return;
   const employee = planAllocations?.employees.find(member => member.id === employeeId);
   if (!employee) return;
+  if (typeof localSessions !== 'undefined' && localSessions.some(session => session.id === employee.sessionId && session.customModel)) {
+    if (window.parent !== window) window.parent.postMessage({type: 'company-open-runtime', employeeId}, window.location.origin);
+    else window.location.assign('/#company');
+    return;
+  }
   dialog.innerHTML = `<h3>${esc(employee.name)}</h3><p class="status">Checking the current session…</p><button type="button" class="btn" data-close>Close</button>`;
   dialog.querySelector('[data-close]').onclick = () => dialog.close();
   dialog.showModal();
@@ -327,7 +344,7 @@ async function openPlanMove(employeeId, destination) {
     dialog.innerHTML = `<h3>Request move: ${esc(employee.name)}</h3><p class="status">From ${esc(source?.name || preview.account)}. The expert keeps working here until it prepares a handoff and approves the request. A grey avatar marks the requested destination. The old session stops only after its replacement is ready.</p><form>
       <label>Destination plan<select name="target">${targets.map(account => `<option value="${esc(account.id)}"${account.id === destination ? ' selected' : ''}>${esc(account.name)}</option>`).join('')}</select></label>
       <p class="hint" data-target-harness role="status"></p>
-      <p class="err" role="alert"></p><div><button type="submit" class="btn">Request move</button> <button type="button" class="btn" data-close>Cancel</button></div></form>`;
+      <p class="err" role="alert"></p><div><button type="submit" class="btn">Request move</button> <button type="button" class="btn" data-force>Force move now</button> <button type="button" class="btn" data-close>Cancel</button></div></form>`;
     dialog.querySelector('[data-close]').onclick = () => dialog.close();
     const target = dialog.querySelector('[name=target]');
     const explainHarness = () => {
@@ -337,6 +354,7 @@ async function openPlanMove(employeeId, destination) {
     };
     target.onchange = explainHarness;
     explainHarness();
+    dialog.querySelector('[data-force]').onclick = () => { void forcePlanMove(dialog, employee, target.value); };
     let submitting = false;
     dialog.querySelector('form').onsubmit = async event => {
       event.preventDefault();
@@ -385,14 +403,17 @@ function showPlanMoveProgress(dialog, initial, name) {
 function showPlanRequestProgress(dialog, initial) {
   const marker = {};
   dialog._planRequest = marker;
-  dialog.innerHTML = `<h3>Move request: ${esc(initial.name)}</h3><p class="status" role="status"></p><p class="hint">The expert prepares its handoff and decides this request. No switch occurs before approval.</p><p class="err" role="alert"></p><button type="button" class="btn" data-reauthorize>Reauthorize request</button> <button type="button" class="btn" data-cancel>Cancel request</button> <button type="button" class="btn" data-close>Close</button>`;
+  dialog.innerHTML = `<h3>Move request: ${esc(initial.name)}</h3><p class="status" role="status"></p><p class="hint">The expert prepares its handoff and decides this request. An owner can force a move without waiting for the expert.</p><p class="err" role="alert"></p><button type="button" class="btn" data-reauthorize>Reauthorize request</button> <button type="button" class="btn" data-force>Force move now</button> <button type="button" class="btn" data-cancel>Cancel request</button> <button type="button" class="btn" data-close>Close</button>`;
   const cancel = dialog.querySelector('[data-cancel]'), reauthorize = dialog.querySelector('[data-reauthorize]');
+  const force = dialog.querySelector('[data-force]');
   dialog.querySelector('[data-close]').onclick = () => dialog.close();
   let record = initial, busy = false;
   const paint = () => {
     dialog.querySelector('.status').textContent = `${planRequestStatus(record)}${record.movePhase ? ' · ' + record.movePhase : ''}${record.error ? ': ' + record.error : ''}`;
     cancel.hidden = !(['pending', 'reauthorize-required'].includes(record.phase) || record.phase === 'executing' && record.movePhase === 'waiting');
     reauthorize.hidden = record.phase !== 'reauthorize-required';
+    force.hidden = !['pending', 'reauthorize-required'].includes(record.phase);
+    force.disabled = busy;
     cancel.disabled = reauthorize.disabled = busy;
   };
   const act = async action => {
@@ -405,6 +426,10 @@ function showPlanRequestProgress(dialog, initial) {
   };
   cancel.onclick = () => { void act('cancel'); };
   reauthorize.onclick = () => { void act('reauthorize'); };
+  force.onclick = () => {
+    const employee = planAllocations?.employees.find(item => item.id === record.employeeId);
+    if (employee) void forcePlanMove(dialog, employee, record.toAccount, record.id);
+  };
   const poll = async () => {
     if (!dialog.open || dialog._planRequest !== marker) return;
     paint();
@@ -414,6 +439,24 @@ function showPlanRequestProgress(dialog, initial) {
     if (dialog.open && dialog._planRequest === marker) setTimeout(poll, 1500);
   };
   void poll();
+}
+async function forcePlanMove(dialog, employee, target, requestId) {
+  if (!window.confirm(`Force ${employee.name} to move now? This skips their handoff approval. Unfinished work may be interrupted after the replacement is ready.`)) return;
+  dialog._planRequest = null;
+  dialog.querySelectorAll('button').forEach(button => { button.disabled = true; });
+  try {
+    const id = 'force-' + Array.from(crypto.getRandomValues(new Uint8Array(16)), byte => byte.toString(16).padStart(2, '0')).join('');
+    const record = await planMoveRequest('/api/plans/moves/force', {id, employeeId: employee.id, sessionId: employee.sessionId, toAccount: target,
+      handoff: 'The owner forced this plan move without waiting for a fresh handoff. Continue as the same employee using your existing identity, workspace and memory. Inspect saved checkpoints and recent owner messages before resuming; do not repeat uncertain side effects.'});
+    if (requestId) {
+      try { await planMoveRequest(`/api/plans/requests/${encodeURIComponent(requestId)}/cancel`); }
+      catch { /* A completed binding change already invalidates the old approval. */ }
+    }
+    showPlanMoveProgress(dialog, record, employee.name);
+  } catch (error) {
+    dialog.querySelector('.err').textContent = error.message;
+    dialog.querySelectorAll('button').forEach(button => { button.disabled = false; });
+  }
 }
 document.getElementById('planMoveHistory')?.addEventListener('click', async () => {
   const dialog = document.getElementById('moveDlg');
