@@ -24,6 +24,20 @@ unqualified custody leave the capability unavailable. Titles and old maintenance
 session lists do not grant OPS authority. Keep keys, private configuration and
 receipts outside source, shared drives and laptop mounts.
 
+The public `apps/web/config/service-auth.shipped.json` is an OPS-only input
+template, not an operational private configuration. Its employee references are
+generic placeholders. Rendering must select the website's actual non-root UID,
+an installation epoch, a private key location and owner-approved current employee
+IDs. Loading the template does not create keys or issue grants; unresolved or
+ambiguous employee references must be refused rather than silently omitted.
+
+Keep the source-template hash as input provenance and record a distinct hash for
+the exact rendered private bytes. Installation requires real schema and custody
+validation, installed-byte readback, the same runtime registry/config digest, and
+resolved setup rows before the owner issues any grant. A reviewed deterministic
+renderer and its receipt checks are not packaged yet; this installation step
+remains unavailable. Normal startup continues without service authentication.
+
 ## Expert use
 
 Use the laptop's existing phone connection; never select a host address or another

@@ -210,3 +210,61 @@ it('AUTH-S1: service authority is budgeted at commit; over-budget issuance leave
   ).rejects.toThrow(/service grant storage budget/);
   expect(f.store.snapshot().serviceGrants).toHaveLength(filled.serviceGrants.length);
 }, 30_000);
+
+it('Rex OREC ADA-3: expired grants past retention are pruned with their revocations, so 1000 issue/revoke cycles never jam', async () => {
+  const { SERVICE_GRANT_RETENTION_MS } = await import('../src/goal-lifecycle.js');
+  const lease = (expiresIn: number) => ({
+    purpose: 'LEASE_SERVICE',
+    principal: 'lease-svc',
+    epoch: 'e1',
+    resources: ['disposable-b'],
+    expiresAt: f.clock.now + expiresIn,
+  });
+  for (let i = 0; i < 1000; i++) {
+    const grant = await f.goals.issueServiceGrant(lease(3600_000), 'owner');
+    await f.goals.revokeServiceGrant(grant.id, 'owner');
+    f.clock.now += 3600_000 + SERVICE_GRANT_RETENTION_MS + 1;
+  }
+  const state = f.store.snapshot();
+  expect(state.serviceGrants.length).toBeLessThanOrEqual(1);
+  expect(state.serviceGrantRevocations.every((r) => state.serviceGrants.some((g) => g.id === r.grantId))).toBe(true);
+}, 120_000);
+
+it('Rex OREC ADA-3: retention keeps revocation evidence; 256 live grants refuse clearly with the file unchanged', async () => {
+  const { SERVICE_GRANT_RETENTION_MS } = await import('../src/goal-lifecycle.js');
+  const lease = (expiresIn: number) => ({
+    purpose: 'LEASE_SERVICE',
+    principal: 'lease-svc',
+    epoch: 'e1',
+    resources: ['disposable-b'],
+    expiresAt: f.clock.now + expiresIn,
+  });
+  const early = await f.goals.issueServiceGrant(lease(1000), 'owner');
+  await f.goals.revokeServiceGrant(early.id, 'owner');
+  f.clock.now += 2000; // expired, but inside retention
+  await f.goals.issueServiceGrant(lease(60_000), 'owner');
+  let state = f.store.snapshot();
+  expect(state.serviceGrants.map((g) => g.id)).toContain(early.id);
+  expect(state.serviceGrantRevocations.map((r) => r.grantId)).toEqual([early.id]);
+  f.clock.now += SERVICE_GRANT_RETENTION_MS; // now past retention: pruned by the next issuance
+  await f.store.update((s) => {
+    while (s.serviceGrants.length < 256)
+      s.serviceGrants.push({
+        ...s.serviceGrants[s.serviceGrants.length - 1]!,
+        id: `live-${s.serviceGrants.length}`,
+        expiresAt: f.clock.now + 60_000,
+      });
+  });
+  const before = await readFile(f.file);
+  // 256 records, one of which is prunable: the issuance prunes it and succeeds.
+  await f.goals.issueServiceGrant(lease(60_000), 'owner');
+  state = f.store.snapshot();
+  expect(state.serviceGrants.map((g) => g.id)).not.toContain(early.id);
+  expect(state.serviceGrantRevocations).toEqual([]);
+  expect(state.serviceGrants).toHaveLength(256);
+  // Now every record is live: the next issuance is refused with a clear reason and nothing changes.
+  const full = await readFile(f.file);
+  await expect(f.goals.issueServiceGrant(lease(60_000), 'owner')).rejects.toThrow(/limit reached/);
+  expect((await readFile(f.file)).equals(full)).toBe(true);
+  expect(before.equals(full)).toBe(false);
+});

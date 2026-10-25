@@ -88,6 +88,9 @@ const GrantSchema = z
   })
   .strict();
 const SERVICE_GRANT_MAX_MS = 90 * 24 * 3600_000;
+/** Expired grants (and their revocations) are kept this long for audit, then pruned by the next issuance (Rex OREC ADA-3). */
+export const SERVICE_GRANT_RETENTION_MS = 7 * 24 * 3600_000;
+const SERVICE_GRANT_LIMIT = 256;
 const ServiceGrantInputSchema = z
   .object({
     purpose: z.string().regex(SERVICE_PURPOSE_NAME),
@@ -609,6 +612,15 @@ export class GoalLifecycle {
           sessionGeneration: employee.sessionGeneration,
         };
       });
+      // Rex OREC ADA-3: in this same transaction, prune grants expired for longer than the retention period together with
+      // their revocations, so 256 is a cap on live-or-retained grants, never a lifetime limit. A grant still inside
+      // retention, revoked or not, keeps its record and its revocation evidence.
+      const retained = state.serviceGrants.filter((g) => g.expiresAt + SERVICE_GRANT_RETENTION_MS > at);
+      const retainedIds = new Set(retained.map((g) => g.id));
+      state.serviceGrants = retained;
+      state.serviceGrantRevocations = state.serviceGrantRevocations.filter((r) => retainedIds.has(r.grantId));
+      if (state.serviceGrants.length >= SERVICE_GRANT_LIMIT)
+        refuse('Service grant limit reached; revoke unused grants or let them expire');
       const grant: ServiceGrant = {
         id: randomUUID(),
         purpose: input.purpose,

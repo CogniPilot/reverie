@@ -1,0 +1,70 @@
+{
+  "version": 1,
+  "serviceUid": "<website uid>",
+  "purposes": {
+    "OPS_STATUS": {
+      "scope": "employees+resources",
+      "action": "reverie.ops.status"
+    },
+    "OPS_INSPECT": {
+      "scope": "employees+resources",
+      "action": "reverie.ops.inspect"
+    },
+    "OPS_SELFTEST_RUN": {
+      "scope": "employees+resources",
+      "action": "reverie.ops.selftest.run"
+    },
+    "OPS_WEBSITE_RESTART": {
+      "scope": "employees+resources",
+      "action": "reverie.ops.website.restart"
+    },
+    "OPS_PRUNE_OBSERVE": {
+      "scope": "employees+resources",
+      "action": "reverie.ops.prune.observe"
+    }
+  },
+  "principals": [
+    {
+      "principal": "ops",
+      "epoch": "<install-time epoch id>",
+      "key": "<private key directory>/ops.key"
+    }
+  ],
+  "setupGrants": [
+    {
+      "purpose": "OPS_STATUS",
+      "principal": "ops",
+      "employees": ["<employee-1>", "<employee-2>", "<employee-3>", "<employee-4>"],
+      "resources": ["website", "prune"],
+      "expiresInHours": 720
+    },
+    {
+      "purpose": "OPS_INSPECT",
+      "principal": "ops",
+      "employees": ["<employee-1>", "<employee-2>", "<employee-3>", "<employee-4>"],
+      "resources": ["website", "prune"],
+      "expiresInHours": 720
+    },
+    {
+      "purpose": "OPS_SELFTEST_RUN",
+      "principal": "ops",
+      "employees": ["<employee-4>", "<employee-1>", "<employee-2>", "<employee-3>"],
+      "resources": ["prune", "website"],
+      "expiresInHours": 720
+    },
+    {
+      "purpose": "OPS_PRUNE_OBSERVE",
+      "principal": "ops",
+      "employees": ["<employee-4>", "<employee-3>", "<employee-2>"],
+      "resources": ["prune"],
+      "expiresInHours": 720
+    },
+    {
+      "purpose": "OPS_WEBSITE_RESTART",
+      "principal": "ops",
+      "employees": ["<employee-1>", "<employee-3>"],
+      "resources": ["website"],
+      "expiresInHours": 24
+    }
+  ]
+}
