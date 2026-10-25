@@ -19,6 +19,10 @@ Company permission checkboxes save immediately with confirmation. Edit profile u
 
 Keep personal profiles and memories in instance storage. Shared project handoffs should contain verified findings, source locations, checks, blockers and the next action, without private conversation history.
 
+## Enter and leave the office
+
+In Company → People, switch **In office** off to stop an expert and keep them off. Switch it on and confirm **Enter office** to start their laptop and resume their agent on the current plan. Their identity, conversation, files and installed packages stay with them. Starts queue when another expert is starting. A failed start shows a reason; use **Restart session** to retry. Automatic crash recovery is separate and does not bring back experts who have left the office.
+
 ## Human logins and presence
 
 Open **People** in the Office sidebar to add a human login. Choose **Owner** for full administration of this shared office, or **Limited** for text chat in selected ordinary channels. Limited logins cannot open private DMs, terminals, workspace files, credentials, global event streams or agent controls. Channel access is checked again on every request. Limited human messages are distinct from verified owner instructions. Additional accounts keep sign-in enforced. The existing separate-workspace multi-user mode is a different feature.

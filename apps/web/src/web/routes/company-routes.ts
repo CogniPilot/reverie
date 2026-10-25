@@ -17,6 +17,7 @@ import { appendAdminAudit } from '../admin-audit.js';
 import { adminGrant } from '../../owner-auth/policy.js';
 import { ownerAvatarKey, ownerAvatarUrl } from '../../owner-avatar.js';
 import { EmployeeVoiceSchema } from '../../employee-voice.js';
+import type { CompanyWakeReport } from '../../company-wake.js';
 
 const HireSchema = EmployeeSchema.omit({
   id: true,
@@ -60,7 +61,7 @@ export function registerCompanyRoutes(
   service: CompanyService,
   avatars?: AvatarStore,
   ownerAvatars?: AvatarStore,
-  wakeEmployee?: (id: string) => Promise<unknown>,
+  wakeEmployee?: (id: string, options?: { explicitStart?: boolean }) => Promise<CompanyWakeReport>,
   authority: { verifiedOwner?: OwnerVerifier; serviceRebind?: ServiceVerifier } = {}
 ): void {
   const verifiedOwner = authority.verifiedOwner ?? NO_OWNER;
@@ -220,7 +221,24 @@ export function registerCompanyRoutes(
       ownerOnly(req);
       const { id } = req.params as { id: string };
       const { enabled } = parseBody(z.object({ enabled: z.boolean() }).strict(), req.body);
-      return { employee: await service.setVacation(id, ownerFor(req), enabled) };
+      if (!enabled && !wakeEmployee) throw new CompanyError('Employee startup is not ready', 503);
+      const employee = await service.setVacation(id, ownerFor(req), enabled);
+      if (enabled) return { employee };
+      let recovery: CompanyWakeReport;
+      try {
+        recovery = await wakeEmployee!(id, { explicitStart: true });
+      } catch {
+        return { employee, startup: { state: 'blocked' as const, reason: 'wake-failed' } };
+      }
+      // Persisted intent and an actual successful start are distinct. Return a
+      // launch refusal so the UI cannot claim that a disconnected expert started.
+      const reason = recovery.skipped.find((entry) => entry.employeeId === id)?.reason;
+      const startup = recovery.awakened.includes(id)
+        ? { state: 'started' as const }
+        : reason
+          ? { state: 'blocked' as const, reason }
+          : { state: 'already-running' as const };
+      return { employee, startup };
     })
   );
   app.post('/api/company/employees/:id/retire', async (req, reply) =>

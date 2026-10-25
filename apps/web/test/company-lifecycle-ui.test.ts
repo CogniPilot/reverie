@@ -81,7 +81,7 @@ it.each([{ verified: false }, { canManage: false }])(
 
 it.each([
   { onVacation: false, label: 'Leave office: River', meaning: 'stops their session' },
-  { onVacation: true, label: 'Enter office: River', meaning: 'eligible for recovery again' },
+  { onVacation: true, label: 'Enter office: River', meaning: 'starts their laptop and resumes their agent' },
   { onVacation: false, label: 'Retire River', meaning: 'keeping their identity in chat history' },
 ])('names the expert and explains $label before any change', async ({ onVacation, label, meaning }) => {
   const { h, button, confirm, calls } = await setup({ onVacation });
@@ -120,13 +120,13 @@ it('pauses once, blocks competing actions, and refreshes vacation state and reco
   expect(h.document.querySelector('.ca-company > [role="status"]')!.textContent).toBe('River is out of office.');
 });
 
-it('returns the same expert to active status and recovery eligibility', async () => {
+it('returns the same expert and confirms the agent started', async () => {
   const { h, employee, button, calls, resolve } = await setup({ onVacation: true });
   button('Enter office: River').click();
   await h.flush();
   expect(calls[0]).toMatchObject({ path: '/api/company/employees/expert%2Fone/vacation', body: { enabled: false } });
   employee.onVacation = false;
-  resolve({ ok: true, data: { employee } });
+  resolve({ ok: true, data: { employee, startup: { state: 'started' } } });
   await h.flush();
   expect(button('Leave office: River')).not.toBeNull();
   expect((button('Leave office: River') as unknown as HTMLInputElement).checked).toBe(true);
@@ -134,7 +134,18 @@ it('returns the same expert to active status and recovery eligibility', async ()
   expect(
     [...h.document.querySelector('[aria-label="Wake after a crash"]')!.options].map((option: any) => option.value)
   ).toContain(employee.id);
-  expect(h.document.querySelector('.ca-company > [role="status"]')!.textContent).toBe('River is in the office.');
+  expect(h.document.querySelector('.ca-company > [role="status"]')!.textContent).toBe('River is in the office. Agent started.');
+});
+
+it('shows a startup failure with a retry action after the office state is saved', async () => {
+  const { h, employee, button, resolve } = await setup({ onVacation: true });
+  button('Enter office: River').click();
+  await h.flush();
+  employee.onVacation = false;
+  resolve({ ok: true, data: { employee, startup: { state: 'blocked', reason: 'wake-failed' } } });
+  await h.flush();
+  expect(h.document.querySelector('.ca-company > [role="status"]')!.textContent).toBe('River is in the office. Could not start: wake-failed. Use Restart session to retry.');
+  expect(button('Restart session for River').disabled).toBe(false);
 });
 
 it('retirement reuses the endpoint and removes the expert only after server success', async () => {

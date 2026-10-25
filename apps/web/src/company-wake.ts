@@ -74,9 +74,14 @@ export class CompanyWake {
     return roots.length === 1 && roots[0].id === id;
   }
 
-  async wakeOne(employeeId: string): Promise<CompanyWakeReport> {
+  async wakeOne(employeeId: string, options: { explicitStart?: boolean } = {}): Promise<CompanyWakeReport> {
+    // Owner starts queue behind an existing launch instead of dropping a click.
+    // Eligibility is read again after the wait, so leaving/stopping still wins.
+    if (options.explicitStart) {
+      while (this.flight) await this.flight.catch(() => {});
+    }
     if (this.flight) return { awakened: [], skipped: [{ employeeId, reason: 'recovery-in-progress' }] };
-    const flight = this.run(employeeId);
+    const flight = this.run(employeeId, options.explicitStart === true);
     this.flight = flight;
     try {
       return await flight;
@@ -85,7 +90,7 @@ export class CompanyWake {
     }
   }
 
-  private async run(manualId?: string): Promise<CompanyWakeReport> {
+  private async run(manualId?: string, explicitStart = false): Promise<CompanyWakeReport> {
     const report: CompanyWakeReport = { awakened: [], skipped: [] };
     const snapshot = this.deps.company();
     const order = companyWakeOrder(snapshot);
@@ -105,6 +110,7 @@ export class CompanyWake {
     const targets = snapshot.employees
       .filter((e) => (manualId ? e.id === manualId : selected.has(e.id)))
       .sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id));
+    if (manualId && targets.length === 0) report.skipped.push({ employeeId: manualId, reason: 'changed-or-stopping' });
     for (const planned of targets) {
       const current = () =>
         this.deps
@@ -154,7 +160,13 @@ export class CompanyWake {
         skip('not-previously-running');
         continue;
       }
-      const plan = planRebootRestore([employee.sessionId], { [employee.sessionId]: saved }, () => true, {
+      // Returning to the office is a fresh owner start, not crash recovery. The
+      // old leave-office stop marker must not veto it. Keep the stored recipe
+      // untouched and retain every ownership, capacity and in-flight stop check.
+      const startState = manualId && explicitStart
+        ? { ...saved, status: 'idle' as const, paneExit: undefined, respawnBlocked: false }
+        : saved;
+      const plan = planRebootRestore([employee.sessionId], { [employee.sessionId]: startState }, () => true, {
         allowMissingPid: employee.desiredRunning === true,
       });
       const entry = plan.restore[0];

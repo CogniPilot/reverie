@@ -13,9 +13,10 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import type { SessionPort } from '../../src/web/ports/session-port.js';
 import { installRouteErrorHandler } from '../../src/web/route-error-handler.js';
+import type { CompanyWakeReport } from '../../src/company-wake.js';
 
 describe('company HTTP ownership and expert invites', () => {
-  const wake = vi.fn(async () => ({ awakened: [], skipped: [] }));
+  const wake = vi.fn<(id: string, options?: { explicitStart?: boolean }) => Promise<CompanyWakeReport>>(async () => ({ awakened: [], skipped: [] }));
   let app: FastifyInstance;
   let directory: string;
   let service: CompanyService;
@@ -32,7 +33,8 @@ describe('company HTTP ownership and expert invites', () => {
 
   beforeEach(async () => {
     vi.mocked(appendAdminAudit).mockClear();
-    wake.mockClear();
+    wake.mockReset();
+    wake.mockResolvedValue({ awakened: [], skipped: [] });
     directory = await mkdtemp(join(tmpdir(), 'reverie-company-routes-'));
     const store = new CompanyStore(join(directory, 'company.json'));
     await store.init();
@@ -70,6 +72,51 @@ describe('company HTTP ownership and expert invites', () => {
     const update = await app.inject({ method: 'PUT', url: '/api/company/employees/' + employee.id, payload: { runtimeRecipe } });
     expect(update.statusCode).toBe(400);
     expect(service.view().employees[0].runtimeRecipe).toBeUndefined();
+  });
+
+  it('enter office persists running intent then starts that employee, even when automatic recovery is disabled', async () => {
+    const employee = await service.hire(hireBody);
+    await service.store.update(state => {
+      state.employees[0].onVacation = true;
+      state.employees[0].desiredRunning = false;
+    });
+    await service.configure(undefined, { autoWakeEnabled: false });
+    wake.mockImplementationOnce(async (id) => {
+      expect(service.view().employees[0]).toMatchObject({ id, onVacation: false, desiredRunning: true });
+      return { awakened: [id], skipped: [] };
+    });
+    const response = await app.inject({ method: 'POST', url: `/api/company/employees/${employee.id}/vacation`, payload: { enabled: false } });
+    expect(response.statusCode).toBe(200);
+    expect(wake).toHaveBeenCalledExactlyOnceWith(employee.id, { explicitStart: true });
+    expect(response.json().data.startup).toEqual({ state: 'started' });
+  });
+
+  it('reports refused startup instead of claiming a disconnected expert started', async () => {
+    const employee = await service.hire(hireBody);
+    wake.mockResolvedValueOnce({ awakened: [], skipped: [{ employeeId: employee.id, reason: 'wake-failed' }] });
+    const response = await app.inject({ method: 'POST', url: `/api/company/employees/${employee.id}/vacation`, payload: { enabled: false } });
+    expect(response.json().data.startup).toEqual({ state: 'blocked', reason: 'wake-failed' });
+  });
+
+  it('reports startup exceptions as blocked after the office state was saved', async () => {
+    const employee = await service.hire(hireBody);
+    wake.mockRejectedValueOnce(new Error('Synthetic private failure'));
+    const response = await app.inject({ method: 'POST', url: `/api/company/employees/${employee.id}/vacation`, payload: { enabled: false } });
+    expect(response.statusCode).toBe(200);
+    expect(response.json().data).toMatchObject({ employee: { onVacation: false, desiredRunning: true }, startup: { state: 'blocked', reason: 'wake-failed' } });
+    expect(response.body).not.toContain('Synthetic private failure');
+  });
+
+  it('leaving the office and unauthorized entry never invoke a start', async () => {
+    const employee = await service.hire(hireBody);
+    const url = `/api/company/employees/${employee.id}/vacation`;
+    for (const headers of [{ 'x-reverie-parent-session': 'parent-session' }, { 'x-reverie-service-token': 'service' }]) {
+      expect((await app.inject({ method: 'POST', url, payload: { enabled: false }, headers })).statusCode).toBe(403);
+    }
+    sessions.delete(employee.sessionId);
+    expect((await app.inject({ method: 'POST', url, payload: { enabled: true } })).statusCode).toBe(200);
+    expect(wake).not.toHaveBeenCalled();
+    expect(service.view().employees[0]).toMatchObject({ onVacation: true, desiredRunning: false });
   });
 
   it('defaults sleep and dream off and lets only the owner persist preferences, including on vacation', async () => {

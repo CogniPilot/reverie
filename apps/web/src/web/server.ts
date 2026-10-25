@@ -1595,7 +1595,7 @@ export class WebServer extends EventEmitter {
       this.companyService,
       new AvatarStore(dataPath('agent-avatars')),
       new AvatarStore(dataPath('owner-avatars')),
-      (id) => this.companyWake.wakeOne(id),
+      (id, options) => this.companyWake.wakeOne(id, options),
       { verifiedOwner, serviceRebind: (req) => !isMultiUserMode() && serviceVerifier({ service: ownerAuth, ctx }, 'watcher')(req) }
     );
     registerSessionRuntimeRoutes(this.app, ctx, verifiedOwner, (id, req) => {

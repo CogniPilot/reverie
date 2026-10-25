@@ -72,6 +72,48 @@ function fixture() {
 }
 
 describe('company crash recovery selection', () => {
+  it.each(['hands', 'codex', 'claude'])('an explicit office entry starts a stopped %s report without changing its saved recipe', async (mode) => {
+    const f = fixture();
+    const saved = f.saved.get(f.report.sessionId)!;
+    Object.assign(saved, { mode, status: 'stopped', pid: null, paneExit: { status: 0 }, respawnBlocked: true });
+    const original = structuredClone(saved);
+    const recovery = new CompanyWake(f.deps);
+    expect((await recovery.wakeOne(f.report.id)).awakened).toEqual([]);
+    expect((await recovery.wakeOne(f.report.id, { explicitStart: true })).awakened).toEqual([f.report.id]);
+    expect(f.deps.claim).toHaveBeenCalledWith(f.report.id, f.report.sessionId, expect.any(Number), false);
+    expect(f.deps.wake).toHaveBeenCalledWith(expect.objectContaining({
+      sessionId: f.report.sessionId, mode,
+      state: expect.objectContaining({ status: 'idle', respawnBlocked: false }),
+    }), expect.any(Function));
+    expect(saved).toEqual(original);
+    expect(f.deps.kickoff).not.toHaveBeenCalled();
+  });
+
+  it('an office entry still respects a stop received while the start is being claimed', async () => {
+    const f = fixture();
+    f.saved.get(f.report.sessionId)!.status = 'stopped';
+    f.deps.claim.mockImplementation(async () => { f.report.desiredRunning = false; return true; });
+    const result = await new CompanyWake(f.deps).wakeOne(f.report.id, { explicitStart: true });
+    expect(result.awakened).toEqual([]);
+    expect(f.deps.wake).not.toHaveBeenCalled();
+    expect(result.skipped).toContainEqual({ employeeId: f.report.id, reason: 'changed-or-stopping' });
+  });
+
+  it.each([false, true])('queues an owner office entry behind recovery and rechecks stopped intent (%s)', async (stop) => {
+    const f = fixture();
+    let release!: () => void;
+    const held = new Promise<void>(resolve => { release = resolve; });
+    f.deps.wake.mockImplementationOnce(async () => { await held; return true; });
+    const recovery = new CompanyWake(f.deps);
+    const first = recovery.wakeOne(f.root.id);
+    const queued = recovery.wakeOne(f.report.id, { explicitStart: true });
+    if (stop) f.report.desiredRunning = false;
+    release();
+    await first;
+    expect((await queued).awakened).toEqual(stop ? [] : [f.report.id]);
+    expect(f.deps.wake).toHaveBeenCalledTimes(stop ? 1 : 2);
+  });
+
   it('never wakes vacationed employees even with stale running intent or a manual request', async () => {
     const f = fixture(); f.root.onVacation = true;
     const recovery = new CompanyWake(f.deps);

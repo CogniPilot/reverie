@@ -2507,13 +2507,14 @@ class ReverieChatApp {
             const question = action === 'retire'
               ? `Retire ${employee.name}? This removes this expert from the company and its rooms, while keeping their identity in chat history.`
               : returning
-                ? `Bring ${employee.name} into the office? This restores active status and makes this expert eligible for recovery again.`
+                ? `Bring ${employee.name} into the office? This starts their laptop and resumes their agent using the current plan.`
                 : `Have ${employee.name} leave the office? This stops their session and keeps this expert off until you switch them back on. Their identity, memory and room membership are kept.`;
             lifecycleError.textContent = '';
             let applied = false;
             const success = action === 'retire' ? `Retired ${employee.name}.` : returning ? `${employee.name} is in the office.` : `${employee.name} is out of office.`;
             try {
               if (!await this.confirmCompanyAction(employee.name, question, confirmLabel) || this.companyPage !== dlg || !card.isConnected) return;
+              if (returning && action === 'vacation') lifecycleError.textContent = `Starting ${employee.name}…`;
               const result = await this.app._chatApi(`/api/company/employees/${encodeURIComponent(employee.id)}/${action}`, {
                 method: 'POST', body: action === 'vacation' ? { enabled: !returning } : {},
               });
@@ -2521,7 +2522,11 @@ class ReverieChatApp {
               applied = true;
               await this.loadOwner();
               await paint();
-              status.textContent = `${success}${result.data?.failed?.length ? ' Some room removals failed; this expert may still appear in those rooms.' : ''}`;
+              const startup = result.data?.startup;
+              const startupMessage = startup?.state === 'blocked'
+                ? ` Could not start: ${startup.reason}. Use Restart session to retry.`
+                : startup?.state === 'started' ? ' Agent started.' : '';
+              status.textContent = `${success}${startupMessage}${result.data?.failed?.length ? ' Some room removals failed; this expert may still appear in those rooms.' : ''}`;
             } catch {
               lifecycleError.textContent = applied ? `${success} The view could not refresh. Reopen Company to see the updated roster.` : `Could not update ${employee.name}. Try again.`;
               if (applied) status.textContent = lifecycleError.textContent;
