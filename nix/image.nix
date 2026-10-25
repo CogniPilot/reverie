@@ -53,6 +53,12 @@ pkgs.dockerTools.buildLayeredImage {
       for directory in home nix opt scratch scratch/tmp; do
         test -d "$directory" && test ! -L "$directory"
       done
+      # sudo supplies this conventional relative link. Give the container init
+      # its own directory while retaining the normal tools under /bin.
+      if [ -L sbin ]; then
+        test "$(readlink sbin)" = bin
+        unlink sbin
+      fi
       for directory in projects host-published workspace reverie_workspace instances run tmp sbin home/agent; do
         if [ -e "$directory" ] || [ -L "$directory" ]; then
           test -d "$directory" && test ! -L "$directory"
