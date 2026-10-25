@@ -16,7 +16,9 @@ describe('employee role context in ordinary room briefings', () => {
       expect(text).toContain('/tmp is disk-backed and disposable');
       expect(text).toContain('TMPDIR, TMP and TEMP');
       expect(text).toContain('retained results');
-      expect(text).toContain('role titles grant no permissions');
+      expect(text).toContain('grant no permissions or mission/flight GO');
+      expect(text).toContain('Use the project pin first');
+      expect(text).toContain('never paste secret bytes into chat');
       expect(text).not.toContain('builds and downloads under /scratch');
     } finally {
       if (previous === undefined) delete process.env.REVERIE_WORKER_SOCKET;

@@ -22,11 +22,24 @@ the default tool directories are separated by working-directory identity.
 Neither location is a durable home for source, unfinished work or retained results.
 
 Keep installed tools and profiles in your private `/nix` and `/home/agent`.
-Keep repositories and retained results in explicitly granted durable project or
-workspace paths, or private home storage. A project name or symlink does not
+Use the project's pinned `nix develop`, `nix build` or `nix run` first. Use
+`nix shell` for temporary tools and `nix profile install` only for tools you need
+persistently. Domain simulators and large project stacks belong in project
+flakes, not the base laptop. These are ordinary Linux paths; there is no apt
+compatibility shim. Docker needs an actually approved usable engine, not just a
+client binary. QEMU software TCG can come from a project flake; KVM requires an
+explicit optional capability and never implies access to all host devices.
+
+Keep repositories and retained results in explicitly granted durable `/workspace`
+or project paths, or private home storage. `/reverie_workspace` remains compatible;
+`~/workspace` may point there when that shared drive is granted. Existing project
+mounts and occupied paths are preserved. A project name or symlink does not
 prove durability; check its actual granted backing storage. Before cleanup,
 save handoffs and preserve source, results and work still in progress. Do not
 delete another task's data or move an active cache.
+
+Credentials need explicit named grants outside disposable storage. Never paste
+credential bytes into chat. A laptop/tool upgrade grants no mission or flight GO.
 '''
 
 
@@ -40,6 +53,21 @@ def temporary_environment(cwd=None):
                 npm_config_cache=root + '/cache/npm', CCACHE_DIR=root + '/cache/ccache',
                 GOCACHE=root + '/cache/go-build', GOMODCACHE=root + '/cache/go-mod',
                 XDG_DOWNLOAD_DIR=root + '/downloads')
+
+
+def workspace_alias(config):
+    """Alias an already granted shared drive; never cover an explicit project."""
+    shared = [m for m in config['mounts'] if m['destination'] == '/reverie_workspace']
+    occupied = any(m['destination'] == '/workspace' or m['destination'].startswith('/workspace/')
+                   for m in config['mounts'])
+    return shared[0] if len(shared) == 1 and not occupied else None
+
+
+def home_workspace_alias(config, home):
+    if not any(m['destination'] == '/reverie_workspace' for m in config['mounts']): return
+    path = Path(home) / 'workspace'
+    try: os.symlink('/reverie_workspace', path)
+    except FileExistsError: pass  # Owner content and custom aliases always win.
 
 
 def prepare_temporary(config, scratch):

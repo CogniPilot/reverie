@@ -35,7 +35,7 @@ if __package__:
     from .worker_gpu import gpu_create_args, validate_gpu_grants
     from .worker_resources import effective_config, policy_digest, validate_session_resources, validate_resource_reload
     from .worker_nix import prepare_store, store_guard
-    from .worker_tmp import prepare_temporary, temporary_environment, write_storage_instructions
+    from .worker_tmp import prepare_temporary, temporary_environment, write_storage_instructions, workspace_alias, home_workspace_alias
 else:
     # Host migration tools also load this file with spec_from_file_location;
     # their sys.path need not contain the sibling module's directory.
@@ -63,6 +63,8 @@ else:
     prepare_temporary = _tmp_module.prepare_temporary
     temporary_environment = _tmp_module.temporary_environment
     write_storage_instructions = _tmp_module.write_storage_instructions
+    workspace_alias = _tmp_module.workspace_alias
+    home_workspace_alias = _tmp_module.home_workspace_alias
 
 MAX_FRAME = 256 * 1024
 SHARED_WORKSPACE = Path('/reverie_workspace')
@@ -228,12 +230,17 @@ def create_args(config, session_id, home, *, scratch=None):
         args += ['--cpus', str(config['cpus'])]
     for mount in config['mounts']:
         args += ['--mount', 'type=bind,src=' + mount['source'] + ',dst=' + mount['destination'] + (',readonly' if mount['readOnly'] else '')]
+    alias = workspace_alias(config)
+    if alias is not None:
+        args += ['--mount', 'type=bind,src=' + alias['source'] + ',dst=/workspace' + (',readonly' if alias['readOnly'] else '')]
     # The console keeps the complete shared drive so its membership-checked API
     # can serve room files. Laptop containers keep the rest of that drive, but a
     # final read-only tmpfs overlays the attachment subtree so host-UID sharing
     # cannot bypass the API's room-membership check.
     if any(Path(mount['destination']) == SHARED_WORKSPACE for mount in config['mounts']):
         args += ['--mount', 'type=tmpfs,dst=/reverie_workspace/attachments,tmpfs-mode=0555,tmpfs-size=1048576,readonly']
+        if alias is not None:
+            args += ['--mount', 'type=tmpfs,dst=/workspace/attachments,tmpfs-mode=0555,tmpfs-size=1048576,readonly']
     args += gpu_create_args(config, session_id)
     args += ['--entrypoint', '/bin/sleep', config['image'], 'infinity']
     return name, digest, args
@@ -923,6 +930,7 @@ class Broker:
                     prepare_temporary(self.config, scratch)
                     for directory in ['build', 'cache', 'downloads', 'tasks']:
                         (scratch/directory).mkdir(mode=0o700, exist_ok=True)
+                    home_workspace_alias(self.config, home)
                     write_storage_instructions(home)
                     label = scratch/'.reverie-drive.json'
                     if not label.exists():

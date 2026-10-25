@@ -8,7 +8,7 @@ import unittest
 from unittest.mock import patch
 
 from reverie.worker import create_args, child
-from reverie.worker_tmp import prepare_temporary, temporary_environment, write_storage_instructions, START
+from reverie.worker_tmp import prepare_temporary, temporary_environment, write_storage_instructions, home_workspace_alias, START
 from tests import test_worker as fixture
 
 SID = fixture.SID
@@ -55,6 +55,7 @@ class WorkerTemporaryTests(unittest.TestCase):
             with self.subTest(path=scratch), self.assertRaises(ValueError): prepare_temporary(self.config, scratch)
         scratch = root / SID; scratch.mkdir(mode=0o700)
         (scratch / 'tmp').mkdir(mode=0o755)
+        (scratch / 'tmp').chmod(0o755)  # Keep the negative valid under a private process umask too.
         with self.assertRaises(ValueError): prepare_temporary(self.config, scratch)
         self.assertEqual((scratch / 'tmp').stat().st_mode & 0o777, 0o755)
 
@@ -75,6 +76,31 @@ class WorkerTemporaryTests(unittest.TestCase):
         self.assertEqual({a[k] for k in ('TMPDIR', 'TMP', 'TEMP')}, {'/tmp'})
         self.assertNotEqual(a['CARGO_TARGET_DIR'], b['CARGO_TARGET_DIR'])
         self.assertTrue(all(value.startswith('/tmp/') for key, value in a.items() if key not in ('TMPDIR', 'TMP', 'TEMP')))
+
+    def test_workspace_alias_preserves_grants_and_masks_attachments_at_both_paths(self):
+        f = fixture.WorkerTests(); f.setUp(); self.addCleanup(f.doCleanups)
+        shared = dict(source=str(f.root / 'shared'), destination='/reverie_workspace', readOnly=False)
+        config = dict(f.config, mounts=[shared])
+        _, _, args = create_args(config, SID, f.root / 'home')
+        self.assertIn(f'type=bind,src={shared["source"]},dst=/workspace', args)
+        for prefix in ('/workspace', '/reverie_workspace'):
+            self.assertIn(f'type=tmpfs,dst={prefix}/attachments,tmpfs-mode=0555,tmpfs-size=1048576,readonly', args)
+        occupied = dict(config, mounts=[shared, dict(source=str(f.root / 'project'), destination='/workspace', readOnly=True)])
+        _, _, args = create_args(occupied, SID, f.root / 'home')
+        self.assertNotIn(f'type=bind,src={shared["source"]},dst=/workspace', args)
+        self.assertIn(f'type=bind,src={f.root / "project"},dst=/workspace,readonly', args)
+
+    def test_home_workspace_alias_is_grant_bound_and_never_overwrites_owner_data(self):
+        home = self.root / 'home'; home.mkdir(mode=0o700)
+        config = dict(mounts=[])
+        home_workspace_alias(config, home); self.assertFalse((home / 'workspace').exists())
+        config['mounts'].append(dict(destination='/reverie_workspace'))
+        home_workspace_alias(config, home)
+        self.assertEqual(os.readlink(home / 'workspace'), '/reverie_workspace')
+        (home / 'workspace').unlink(); (home / 'workspace').mkdir()
+        (home / 'workspace/retained.txt').write_text('keep')
+        home_workspace_alias(config, home)
+        self.assertEqual((home / 'workspace/retained.txt').read_text(), 'keep')
 
     def test_real_child_overrides_caller_temp_and_does_not_inherit_host_broker(self):
         launch = self.root / 'launch'; launch.mkdir(mode=0o700)

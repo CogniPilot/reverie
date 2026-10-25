@@ -11,6 +11,8 @@ Use a project's pinned environment when it has a flake:
 ```bash
 nix develop
 nix develop --command python3 -m unittest discover -s tests
+nix build
+nix run
 ```
 
 Use a temporary tool environment for a single command, or install a tool in your private profile for later shells:
@@ -24,9 +26,25 @@ jq --version
 
 The laptop's `nixpkgs` registry follows the release lock. Profiles live in your private home, including `~/.nix-profile` and `~/.local/state/nix/profiles`. Each laptop has its own writable `/nix/store` and `/nix/var/nix` database. New and migrated laptops bind these from the private durable `stateRoot/<sessionId>/nix` directory on the host. Installed profiles and their registered packages survive laptop recreation; a running process still ends when its laptop stops. Temporary shell packages can be collected when no profile or other garbage-collection root retains them.
 
+Prefer the project's flake before installing globally. The base laptop stays lean;
+domain simulators and large build stacks belong in project environments. QEMU
+software TCG can be supplied by the project flake. KVM and devices require explicit
+optional capabilities. A Docker client alone does not prove a usable engine:
+the approved backend needs actual build/run acceptance. None of these tool checks
+grants mission or flight approval. Credentials use named grants outside scratch;
+never paste secret bytes into chat.
+
 Older laptops may still bind `/nix` from their private scratch drive until an owner coordinates migration. Keep the existing store and profile links intact, save a handoff, and report the exact laptop/session before maintenance. A broker restart can also interrupt terminal and provider transports; do not restart it to install a package. The host daemon and another laptop's store are never needed for ordinary laptop Nix commands.
 
 `/tmp` mounts only this laptop's private directory on the owner's scratch disk; it is not a small RAM tmpfs or the whole shared scratch root. `TMPDIR`, `TMP` and `TEMP` point to `/tmp`. Put disposable builds, caches and downloads under `/tmp/<project>/...`; default tool paths separate working directories. `/scratch` remains a compatibility drive for existing paths and is disposable too. Keep repositories, unfinished work, scientific results and retained evidence in verified durable project/workspace or private home storage. Existing work must be preserved before scratch cleanup; neither a directory name nor stopping jobs proves its contents are disposable.
+
+Use familiar Linux paths: `/home/agent` for private home/settings/SSH, `/nix` for
+installed tools, `/workspace` for persistent projects when granted, and `/tmp`
+for disposable work. `/reverie_workspace` remains compatible. An alias at
+`/workspace` is added only when that path is free of explicit grants; an existing
+project mount always wins. `~/workspace` can point to the granted shared drive
+without replacing existing owner content. Attachment isolation applies to aliases
+too. Check backing storage rather than assuming a path name guarantees durability.
 
 The portable Linux/local-engine default uses individual memory/no-swap and task ceilings plus aggregate admission; CPU is uncapped. It needs no personal NixOS configuration. The shared-pool backend is optional and requires separately available, verified protection. An absent pool never permits unlimited fallback. A broker user service can start at login (or through an owner's existing linger policy); laptop containers deliberately do not blindly restart provider commands. Follow coordinated normal same-conversation recovery after reboot.
 

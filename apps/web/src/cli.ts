@@ -38,7 +38,7 @@ import { getStore } from './state-store.js';
 import { getErrorMessage } from './types.js';
 import { DOCUMENT_ATTACHMENT_EXTENSIONS, isSupportedAttachmentExtension } from './attachment-registry.js';
 import { daemonStatus, startDaemon, stopDaemon, type WebLaunchOptions } from './daemon-control.js';
-import { installService, serviceStatus, uninstallService } from './service-installer.js';
+import { installService, serviceStatus, uninstallService, controlService, serviceLogs } from './service-installer.js';
 import { isLoopbackBindHost, isUnauthenticatedNetworkAcknowledged } from './web/network-auth-policy.js';
 import { confirm, heading, isInteractive, kv, palette, rule, tint, withSpinner, type Tone } from './cli-style.js';
 import type { ToolResult } from './utils/dependency-checker.js';
@@ -1144,6 +1144,20 @@ export async function startWebOrExit<T>(start: () => Promise<T>, exit: (code: nu
 const serviceCmd = program
   .command('service')
   .description('Manage the background service (systemd user unit on Linux, LaunchAgent on macOS)');
+
+for (const action of ['start', 'stop'] as const) {
+  serviceCmd.command(action).description(`${action} the installed native website service; preserve employee intent`).action(() => {
+    const result = controlService(action);
+    console.log(result.message);
+    if (!result.ok) process.exitCode = 1;
+  });
+}
+serviceCmd.command('logs').description('Read bounded native website service logs')
+  .option('--lines <count>', 'Log lines, 1..1000', '100').action((options) => {
+    const result = serviceLogs(Number(options.lines));
+    console.log(result.message);
+    if (!result.ok) process.exitCode = 1;
+  });
 
 addWebLaunchOptions(
   serviceCmd.command('install').description('Install and start the service, then verify it answers')

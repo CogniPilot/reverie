@@ -121,11 +121,20 @@
               exec python3 -m reverie.worker_nix_migrate "$@"
             '';
           };
+          workerServiceCheck = pkgs.writeShellApplication {
+            name = "reverie-worker-service-check";
+            runtimeInputs = [ pkgs.python3 pkgs.docker-client ];
+            text = ''
+              export PYTHONPATH=${self}/python
+              exec python3 -m reverie.worker_service "$@" check-backend
+            '';
+          };
           workerService = pkgs.writeTextDir "share/systemd/user/reverie-worker-broker.service" ''
             [Unit]
             Description=Reverie laptop broker and office watchdog
             [Service]
             EnvironmentFile=%h/.config/reverie/worker-broker.env
+            ExecStartPre=${self.packages.${system}.workerServiceCheck}/bin/reverie-worker-service-check --config ''${REVERIE_WORKER_CONFIG}
             ExecStart=${self.packages.${system}.workerBroker}/bin/reverie-worker-broker --config ''${REVERIE_WORKER_CONFIG}
             Restart=on-failure
             RestartSec=3
@@ -138,6 +147,15 @@
             [Install]
             WantedBy=default.target
           '';
+          workerServiceSetup = pkgs.writeShellApplication {
+            name = "reverie-worker-service";
+            runtimeInputs = [ pkgs.python3 pkgs.docker-client pkgs.systemd pkgs.nix ];
+            text = ''
+              export PYTHONPATH=${self}/python
+              export REVERIE_WORKER_SERVICE_UNIT=${self.packages.${system}.workerService}/share/systemd/user/reverie-worker-broker.service
+              exec python3 -m reverie.worker_service "$@"
+            '';
+          };
           isolate = pkgs.writeShellApplication {
             name = "reverie-isolate";
             runtimeInputs = [ pkgs.python3 pkgs.nix pkgs.docker-client pkgs.systemd pkgs.gnutar ];
@@ -154,6 +172,7 @@
       };
       packages = forAllSystems packagesFor;
       apps = forAllSystems (system: {
+        worker-service = { type = "app"; program = "${self.packages.${system}.workerServiceSetup}/bin/reverie-worker-service"; meta.description = "Install/control the existing owner user laptop broker without host OS configuration"; };
         launch-guard = { type = "app"; program = "${self.packages.${system}.launchGuard}/bin/reverie-launch-guard"; meta.description = "Evaluate metadata-only launch guard fixtures without live effects"; };
         default = { type = "app"; program = "${self.packages.${system}.reverie}/bin/reverie"; meta.description = "Reverie agent console"; };
         container-memory = { type = "app"; program = "${self.packages.${system}.container-memory}/bin/container-memory"; meta.description = "Manage Reverie container memory"; };

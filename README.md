@@ -115,6 +115,28 @@ container deployment requires a running Docker engine. Its image is built by Nix
 there is no separate Dockerfile build. For manual image loading or published
 images, see [image installation](docs/image.md).
 
+Choose one website deployment. For a native installation, `reverie service`
+supports `start`, `stop`, `status`, `logs --lines 100` and `uninstall`.
+Keep the container deployment and its service controls separate; do not install
+a second native website beside an existing container website.
+
+The isolated laptop broker has a separate owner-only service installer. Select
+the private configuration prepared by `nix run .#isolate -- prepare`, then run:
+
+```bash
+broker_config="$HOME/reverie/runtime/worker-isolation/broker.json"
+nix run .#worker-service -- --config "$broker_config" check
+nix run .#worker-service -- --config "$broker_config" install
+nix run .#worker-service -- --config "$broker_config" start
+```
+
+The installer requires a supported local Linux engine with bounded admission
+policies, pins its Nix closure, and installs without starting the broker or
+waking employees. The explicit `start` command starts the broker; employee stop
+and vacation choices still apply. See [service setup](docs/services.md) for boot
+and login behavior, container controls and platform limits. This setup does not
+require a personal NixOS repository or host rebuild.
+
 ## Agent workstations
 
 For a deployment running autonomous agents, use a separate worker container for
