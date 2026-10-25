@@ -11,7 +11,7 @@ async function setup({ verified = true, missing = false } = {}) {
   h.app._chatApi = async (path: string, options?: any) => {
     if (path === '/api/chatrooms/phone-status') return { ok: true, data: { self: verified ? 'owner' : 'agent', canSetOwn: verified } };
     if (path === '/api/company') return { ok: true, data: company };
-    if (path.endsWith('/restart')) { calls.push({ path, ...options }); return reply ?? new Promise(resolve => { finish = resolve; }); }
+    if (path.endsWith('/restart') || path.endsWith('/vacation')) { calls.push({ path, ...options }); return reply ?? new Promise(resolve => { finish = resolve; }); }
     return original(path, options);
   };
   h.shell.company = company;
@@ -57,6 +57,71 @@ it('offers restart on Company cards and expert popovers without changing identit
   h.shell.closePage(); h.document.querySelector('.ca-member').click();
   const restart = [...h.document.querySelectorAll('.ca-profile-actions button')].find(button => button.textContent === 'Restart session')!;
   expect(restart).not.toBeUndefined(); restart.click(); await h.flush(); expect(h.document.querySelector('.ca-employee-restart')).not.toBeNull();
+});
+
+it('marks restart and leave office as danger actions on cards, profiles and member menus', async () => {
+  const { h } = await setup(); await h.shell.openCompany();
+  expect(h.document.querySelector('[aria-label="Restart session for Alex"]').classList.contains('is-danger')).toBe(true);
+  expect(h.document.querySelector('[aria-label="Leave office for Alex"]').classList.contains('is-danger')).toBe(true);
+  h.shell.closePage(); const anchor = h.document.querySelector('.ca-member'); anchor.click();
+  for (const name of ['Restart session', 'Leave office']) {
+    const action = [...h.document.querySelectorAll('.ca-profile-actions button')].find(button => button.textContent === name)!;
+    expect(action.classList.contains('is-danger')).toBe(true);
+  }
+  h.shell.openMemberMenu(member(sid, 'Alex'), anchor);
+  for (const name of ['Restart session', 'Leave office']) {
+    const action = [...h.document.querySelectorAll('.ca-popmenu button')].find(button => button.textContent === name)!;
+    expect(action.classList.contains('is-danger')).toBe(true);
+  }
+});
+
+it('warns that restart interrupts work without a fresh handoff, while retaining saved context', async () => {
+  const { h, open } = await setup(); await open();
+  expect(h.document.querySelector('.ca-employee-restart').textContent).toContain('Active work is interrupted without a fresh handoff');
+  expect(h.document.querySelector('.ca-employee-restart').textContent).toContain('saved conversation, memory, files');
+  expect(h.document.querySelector('.ca-employee-restart .is-primary').classList.contains('is-danger')).toBe(true);
+});
+
+it('quick leave requires explicit confirmation, stops the named employee once, and retains its identity', async () => {
+  const { h, employee, calls, reply } = await setup();
+  reply({ ok: true, data: { employee: { ...employee, onVacation: true, desiredRunning: false } } });
+  const flight = h.shell.leaveEmployeeOffice(employee);
+  void h.shell.leaveEmployeeOffice(employee);
+  await h.flush();
+  const dialog = h.document.querySelector('.ca-company-confirm');
+  expect(dialog.textContent).toContain('Active work is interrupted without a fresh handoff');
+  expect(h.document.activeElement?.textContent).toBe('Cancel'); expect(calls).toHaveLength(0);
+  const accept = dialog.querySelector('[aria-label="Leave office"]');
+  expect(accept.classList.contains('is-danger')).toBe(true); accept.click(); await flight;
+  expect(calls).toEqual([{ path: '/api/company/employees/expert/vacation', method: 'POST', body: { enabled: true } }]);
+  expect(employee).toMatchObject({ id: 'expert', sessionId: sid, onVacation: true, desiredRunning: false });
+});
+
+it.each([false, true])('quick leave sends no stop after cancellation or an unverified owner (%s)', async verified => {
+  const { h, employee, calls } = await setup({ verified });
+  const flight = h.shell.leaveEmployeeOffice(employee); await h.flush();
+  if (verified) h.document.querySelector('.ca-company-confirm [aria-label="Cancel"]').click();
+  await flight; expect(calls).toHaveLength(0);
+});
+
+it('adds discoverable Company power controls which use the existing office-power workflow', async () => {
+  const { h } = await setup(); h.app.officePower = vi.fn(async (_action, output) => { output.textContent = 'Shutdown confirmed by laptop manager'; });
+  await h.shell.openCompany();
+  const power = h.document.querySelector('.ca-company-power-button');
+  expect(power.textContent).toBe('Office power'); power.click();
+  const actions = [...h.document.querySelectorAll('[aria-label="Office power"] button')];
+  expect(actions.map(button => button.textContent)).toEqual(['Stop all agents', 'Restart website', 'Shut down Reverie']);
+  expect(actions[0].classList.contains('is-danger')).toBe(true);
+  expect(actions[1].classList.contains('is-danger')).toBe(false);
+  expect(actions[2].classList.contains('is-danger')).toBe(true);
+  actions[2].click(); await h.flush();
+  expect(h.app.officePower).toHaveBeenCalledExactlyOnceWith('shutdown', h.document.querySelector('.ca-company > [role="status"]'));
+  expect(h.document.querySelector('.ca-company > [role="status"]').textContent).toBe('Shutdown confirmed by laptop manager');
+});
+
+it('never offers the Company shutdown shortcut to an unverified owner', async () => {
+  const { h } = await setup({ verified: false }); await h.shell.openCompany();
+  expect(h.document.querySelector('.ca-company-power-button')).toBeNull();
 });
 
 it('requires a separate owner choice before sending stalled-session recovery confirmation', async () => {

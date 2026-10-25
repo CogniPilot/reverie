@@ -12,10 +12,9 @@
  */
 
 Object.assign(ReverieApp.prototype, {
-  async officePower(action) {
+  async officePower(action, output = document.getElementById('officePowerResult')) {
     if (this._officePowerPending) return;
     this._officePowerPending = true;
-    const output = document.getElementById('officePowerResult');
     const say = text => { if (output) { output.textContent = text; output.style.display = 'block'; } };
     try {
       const statusResponse = await this._api('/api/system/laptops');
@@ -25,8 +24,8 @@ Object.assign(ReverieApp.prototype, {
       const message = action === 'restart-website'
         ? `Restart the website? ${count} laptop(s) will keep working and may continue using their plans. Chat will briefly go offline. Laptops stop after 10 minutes if the office API does not return.`
         : action === 'shutdown'
-          ? `Stop Reverie? All ${count} laptop(s) and agent CLIs will stop before the website shuts down. Files will be preserved. Restart Reverie from the host when you are ready.`
-          : `Stop all ${count} laptop(s) and agent CLIs? The website will stay open. Files will be preserved.`;
+          ? `Stop Reverie? All ${count} laptop(s) and agent CLIs will stop before the website shuts down. Active work is interrupted without a fresh handoff. Saved conversations, memory and files will be preserved. Restart Reverie from the host when you are ready.`
+          : `Stop all ${count} laptop(s) and agent CLIs? Active work is interrupted without a fresh handoff. The website will stay open. Saved conversations, memory and files will be preserved.`;
       if (!window.confirm(message)) return;
       say('Applying office power action…');
       const response = await this._api('/api/system/' + action, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ confirmed: true }) });
