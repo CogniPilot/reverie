@@ -24,7 +24,7 @@ Use the room ID and a real file path, and check that sharing the file is authori
 
 ## Scratch ownership
 
-Use /scratch inside a laptop for disposable builds, downloads, compiler caches and task artifacts. Scratch belongs to that laptop's labelled owner. On the host, derive local paths from HOME and use the configured scratch drive; never hard-code a personal username into project sources.
+Use `/tmp/<project>/...` inside a laptop for disposable builds, downloads, compiler caches and task artifacts. `/tmp` is this employee laptop's private scratch-backed directory; `TMPDIR`, `TMP` and `TEMP` point there. `/scratch` remains a disposable compatibility drive. Keep repositories, unfinished work and retained results in verified durable home/project/workspace storage. On the host, derive local paths from HOME and use the configured scratch drive; never hard-code a personal username into project sources.
 
 See [Office laptops](/handbook/laptops) for Nix tools, durable storage and coordinated legacy migration.
 
@@ -33,10 +33,10 @@ The deployment defaults to a scratch location under the Reverie folder. Owners m
 Use the leased task-workspace helper for a disposable task:
 
 ```bash
-reverie-workspaces --root /scratch/tasks create compiler-check
-reverie-workspaces --root /scratch/tasks run compiler-check -- command-for-this-task
-reverie-workspaces --root /scratch/tasks finish compiler-check --handoff 'Saved handoff location and verified results'
-reverie-workspaces --root /scratch/tasks clean compiler-check
+reverie-workspaces --root /tmp/compiler-project/tasks create compiler-check
+reverie-workspaces --root /tmp/compiler-project/tasks run compiler-check -- command-for-this-task
+reverie-workspaces --root /tmp/compiler-project/tasks finish compiler-check --handoff 'Saved handoff location and verified results'
+reverie-workspaces --root /tmp/compiler-project/tasks clean compiler-check
 ```
 
 Replace the task name and command with your own. On a native host, use `"$HOME/scratch/reverie/tasks"` as the root. The run command holds a lease and sets TMPDIR and CARGO_TARGET_DIR inside that task. Put durable source in its repository; run changes directory to disposable task scratch.

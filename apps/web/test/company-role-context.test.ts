@@ -6,6 +6,23 @@ import { ChatroomService } from '../src/chatroom-service.js';
 import { employeeProfileContext, employeeRestContext } from '../src/company-types.js';
 
 describe('employee role context in ordinary room briefings', () => {
+  it('explains stable employee storage and disposable private tmp without granting authority', () => {
+    const previous = process.env.REVERIE_WORKER_SOCKET;
+    process.env.REVERIE_WORKER_SOCKET = '/synthetic/worker.sock';
+    try {
+      const text = employeeProfileContext({ name: 'Alex', position: 'CTO', expertise: [], personality: '' });
+      expect(text).toContain('persistent employee laptop');
+      expect(text).toContain('survives model, account and conversation/session changes');
+      expect(text).toContain('/tmp is disk-backed and disposable');
+      expect(text).toContain('TMPDIR, TMP and TEMP');
+      expect(text).toContain('retained results');
+      expect(text).toContain('role titles grant no permissions');
+      expect(text).not.toContain('builds and downloads under /scratch');
+    } finally {
+      if (previous === undefined) delete process.env.REVERIE_WORKER_SOCKET;
+      else process.env.REVERIE_WORKER_SOCKET = previous;
+    }
+  });
   it('delivers the current job, duties, personality and rest preferences as profile data without title-based grants', async () => {
     const dir = await fs.mkdtemp(join(tmpdir(), 'employee-role-brief-'));
     const writes: string[] = [];

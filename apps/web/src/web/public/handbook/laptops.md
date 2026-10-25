@@ -1,6 +1,6 @@
 # Office laptops
 
-An expert's tools run on its work laptop: a separate container with a private home, terminal and persistent scratch. The remote model supplies reasoning; the CLI inside the laptop connects that model to its tools.
+An expert's tools run on its persistent employee laptop: a separate container with a private home, terminal and disposable temporary drive. The laptop belongs to the stable employee identity and survives model, account and conversation/session changes. A human-friendly folder name is an alias, not an identity or permission. The remote model supplies reasoning; the CLI inside the laptop connects that model to its tools.
 
 The website is the office communication and management service. Restarting the website can leave laptop programs running. Restarting the laptop itself ends processes inside it; preserving the same CLI across that restart needs a separately supervised backend and is not guaranteed by the website/laptop split.
 
@@ -26,7 +26,9 @@ The laptop's `nixpkgs` registry follows the release lock. Profiles live in your 
 
 Older laptops may still bind `/nix` from their private scratch drive until an owner coordinates migration. Keep the existing store and profile links intact, save a handoff, and report the exact laptop/session before maintenance. A broker restart can also interrupt terminal and provider transports; do not restart it to install a package. The host daemon and another laptop's store are never needed for ordinary laptop Nix commands.
 
-Build outputs, compiler caches, downloads and temporary files stay under `/scratch`. Moving the Nix store does not move those caches. Scratch persistence at reboot depends on the owner's filesystem and cleanup policy; its name alone does not mean reboot erases it.
+`/tmp` mounts only this laptop's private directory on the owner's scratch disk; it is not a small RAM tmpfs or the whole shared scratch root. `TMPDIR`, `TMP` and `TEMP` point to `/tmp`. Put disposable builds, caches and downloads under `/tmp/<project>/...`; default tool paths separate working directories. `/scratch` remains a compatibility drive for existing paths and is disposable too. Keep repositories, unfinished work, scientific results and retained evidence in verified durable project/workspace or private home storage. Existing work must be preserved before scratch cleanup; neither a directory name nor stopping jobs proves its contents are disposable.
+
+The portable Linux/local-engine default uses individual memory/no-swap and task ceilings plus aggregate admission; CPU is uncapped. It needs no personal NixOS configuration. The shared-pool backend is optional and requires separately available, verified protection. An absent pool never permits unlimited fallback. A broker user service can start at login (or through an owner's existing linger policy); laptop containers deliberately do not blindly restart provider commands. Follow coordinated normal same-conversation recovery after reboot.
 
 ## Protection
 

@@ -16,8 +16,9 @@ here and still commits on the server after the retry gives two replies.
 Errors in one message or room are logged and skipped; the loop carries on. supervise.sh restarts the process on a crash.
 
 r3 adds two optional steps, both off by default:
-- vision: image attachments on the waking message go to the model as image_url parts (base64 data URIs). Only files
-  under attachments_root/<room id>/ are read, with a type, magic-byte and size check, and a cap on the count.
+- vision: image attachments on the waking message go to the model as image_url parts (base64 data URIs). Laptops
+  download by room/file ID through the normal scoped chat CLI. Native legacy configurations read only files under
+  attachments_root/<room id>/. Type, magic-byte, size and count limits apply to both paths.
 - search: the model may call one tool, web_search, at most search_max_calls times per answer. Results are capped and
   framed as untrusted data. A reply that used results carries the [web] marker, and every query is logged.
 
@@ -53,6 +54,7 @@ from coding_manager import TaskManager
 from coding_model_client import ModelClient
 from debug_terminal import DebugTerminal
 from attention_wake import AttentionWake, wait_for_scan
+import scoped_images
 
 _terminal = None
 
@@ -335,30 +337,36 @@ def load_images(cfg, room, msg):
     # The room directory is joined, NOT resolved: a room dir swapped for a link resolves elsewhere, so no file can be
     # strictly inside it and everything is refused. Resolving it would make another room's files look like this room's.
     # The attachments_root setting itself is trusted configuration.
-    root = os.path.join(os.path.realpath(cfg['attachments_root']), room_dir(room, msg)) if cfg.get('attachments_root') else None
+    scoped = os.environ.get('REVERIE_WORKER') == '1'
+    root = (os.path.join(os.path.realpath(cfg['attachments_root']), room_dir(room, msg))
+            if not scoped and cfg.get('attachments_root') else None)
     for a in (msg.get('attachments') or [])[:20]:
         if not isinstance(a, dict):
             continue
         name, kind = str(a.get('name') or 'file')[:80], a.get('type')
         if kind not in IMAGE_MAGIC:
             continue
-        if not cfg.get('vision') or not root:
+        if not cfg.get('vision') or (not scoped and not root):
             notes.append(f'[image {name}: you cannot see images yet]')
             continue
         if len(parts) >= cfg['max_images']:
             notes.append(f'[image {name}: skipped, more than {cfg["max_images"]} images]')
             continue
         try:
-            path = os.path.realpath(str(a.get('path') or ''))
-            if os.path.commonpath([path, root]) != root or path == root:
-                raise ValueError('outside the room attachments directory')
-            with open(path, 'rb') as f:
-                data = f.read(cfg['max_image_bytes'] + 1)
+            if scoped:
+                data = scoped_images.fetch(cfg['cli'], cfg['self_session_id'], room_dir(room, msg),
+                    a.get('id'), cfg['max_image_bytes'], cfg['cli_timeout_s'])
+            else:
+                path = os.path.realpath(str(a.get('path') or ''))
+                if os.path.commonpath([path, root]) != root or path == root:
+                    raise ValueError('outside the room attachments directory')
+                with open(path, 'rb') as f:
+                    data = f.read(cfg['max_image_bytes'] + 1)
             if len(data) > cfg['max_image_bytes']:
                 raise ValueError('too large')
             if not data.startswith(IMAGE_MAGIC[kind]) or (kind == 'image/webp' and data[8:12] != b'WEBP'):
                 raise ValueError('content does not match ' + kind)
-        except (OSError, ValueError) as e:
+        except (OSError, ValueError, subprocess.SubprocessError) as e:
             log('image skipped', room, msg.get('id'), name, repr(e)[:200])
             notes.append(f'[image {name}: could not be read]')
             continue

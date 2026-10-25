@@ -35,6 +35,7 @@ if __package__:
     from .worker_gpu import gpu_create_args, validate_gpu_grants
     from .worker_resources import effective_config, policy_digest, validate_session_resources, validate_resource_reload
     from .worker_nix import prepare_store, store_guard
+    from .worker_tmp import prepare_temporary, temporary_environment, write_storage_instructions
 else:
     # Host migration tools also load this file with spec_from_file_location;
     # their sys.path need not contain the sibling module's directory.
@@ -56,6 +57,12 @@ else:
     _nix_spec.loader.exec_module(_nix_module)
     prepare_store = _nix_module.prepare_store
     store_guard = _nix_module.store_guard
+    _tmp_spec = importlib.util.spec_from_file_location('reverie_worker_tmp', Path(__file__).with_name('worker_tmp.py'))
+    _tmp_module = importlib.util.module_from_spec(_tmp_spec)
+    _tmp_spec.loader.exec_module(_tmp_module)
+    prepare_temporary = _tmp_module.prepare_temporary
+    temporary_environment = _tmp_module.temporary_environment
+    write_storage_instructions = _tmp_module.write_storage_instructions
 
 MAX_FRAME = 256 * 1024
 SHARED_WORKSPACE = Path('/reverie_workspace')
@@ -194,7 +201,7 @@ def load_config(path):
     return config
 
 
-def create_args(config, session_id, home):
+def create_args(config, session_id, home, *, scratch=None):
     config = effective_config(config, session_id)
     name = config['deployment'] + '-agent-' + session_id
     digest = hashlib.sha256(json.dumps(config, sort_keys=True).encode()).hexdigest()
@@ -203,10 +210,16 @@ def create_args(config, session_id, home):
             '--label', 'reverie.worker=' + config['deployment'], '--label', 'reverie.session=' + session_id, '--label', 'reverie.worker-config=' + digest, '--label', 'reverie.worker-policy=' + policy,
             '--user', f"{config['uid']}:{config['gid']}", '--cpu-shares', '1024',
             '--pids-limit', str(config['pidsLimit']), '--network', name + '-lan',
-            '--tmpfs', '/tmp:rw,nosuid,nodev,size=134217728,mode=1777', '--tmpfs', '/run:rw,nosuid,nodev,size=16777216',
+            '--tmpfs', '/run:rw,nosuid,nodev,size=16777216',
             '--mount', f'type=bind,src={home},dst=/home/agent', '--env', 'HOME=/home/agent', '--env', 'REVERIE_WORKER=1', '--env', 'REVERIE_INSTALL_CLIS=none']
-    args += ['--mount', 'type=bind,src=' + str(Path(config['scratchRoot']) / session_id) + ',dst=/scratch',
+    # The canonical storage resolver supplies the employee's stable scratch path.
+    # Legacy SID fallback exists only for composition with the older caller.
+    scratch = Path(config['scratchRoot']) / session_id if scratch is None else Path(scratch)
+    args += ['--mount', f'type=bind,src={scratch / "tmp"},dst=/tmp',
+             '--mount', f'type=bind,src={scratch},dst=/scratch',
              '--mount', 'type=bind,src=' + str(Path(config['apiSocketRoot']) / session_id) + ',dst=/run/reverie-office,readonly']
+    for key, value in temporary_environment().items():
+        args += ['--env', key + '=' + value]
     if config['budgetMode'] == 'pool':
         args += ['--cgroup-parent', config['cgroupParent']]
     if config['memoryMiB']:
@@ -834,7 +847,10 @@ class Broker:
                 home.mkdir(mode=0o700, parents=True, exist_ok=True)
                 if home.is_symlink() or home.resolve() != home:
                     raise ValueError('Invalid worker home')
-                name, digest, args = create_args(self.config, session_id, home)
+                # Canonical integration replaces this compatibility selection
+                # with storage_paths(self.config, session_id).scratch.
+                scratch = Path(self.config['scratchRoot']) / session_id
+                name, digest, args = create_args(self.config, session_id, home, scratch=scratch)
                 previous = self.run_engine(['inspect', name], optional=True)
                 reuse = False
                 metadata_path = home.parent/'runtime.json'
@@ -904,12 +920,10 @@ class Broker:
                         labels = json.loads(network_state.stdout)[0].get('Labels', {}) or {}
                         if labels.get('reverie.session') != session_id or labels.get('reverie.worker') != self.config['deployment']:
                             raise ValueError('The worker network is not owned by this session')
-                    scratch = Path(self.config['scratchRoot']) / session_id
-                    scratch.mkdir(mode=0o700, parents=True, exist_ok=True)
-                    if scratch.is_symlink() or scratch.resolve() != scratch:
-                        raise ValueError('Invalid laptop scratch directory')
-                    for directory in ['tmp', 'build', 'cache', 'downloads', 'tasks']:
-                        (scratch/directory).mkdir(exist_ok=True)
+                    prepare_temporary(self.config, scratch)
+                    for directory in ['build', 'cache', 'downloads', 'tasks']:
+                        (scratch/directory).mkdir(mode=0o700, exist_ok=True)
+                    write_storage_instructions(home)
                     label = scratch/'.reverie-drive.json'
                     if not label.exists():
                         label.write_text(json.dumps({'ownerSessionId': session_id, 'purpose': 'Laptop scratch; release leased tasks with a handoff before pruning', 'createdAt': time.time()}))
@@ -1167,7 +1181,8 @@ def child(path):
     request = json.loads(path.read_text())
     path.unlink()
     # Never pass the host broker endpoint or installer authority into a worker.
-    env = {**os.environ, **request['env'], 'REVERIE_WORKER': '1', 'REVERIE_INSTALL_CLIS': 'none', 'TMPDIR': '/scratch/tmp', 'CARGO_TARGET_DIR': '/scratch/build/cargo', 'XDG_CACHE_HOME': '/scratch/cache'}
+    env = {**os.environ, **request['env'], 'REVERIE_WORKER': '1', 'REVERIE_INSTALL_CLIS': 'none',
+           **temporary_environment(request['cwd'])}
     env.pop('REVERIE_WORKER_SOCKET', None)
     if Path('/run/reverie-model/default.sock').is_socket():
         subprocess.Popen(['/bin/reverie-model-relay'], env={**env, 'REVERIE_MODEL_SOCKET': '/run/reverie-model/default.sock'}, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)

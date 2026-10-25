@@ -63,7 +63,7 @@ def main(argv=None):
             office = {key: os.environ[key] for key in ('REVERIE_MUX', 'REVERIE_SESSION_ID', 'REVERIE_API_URL', 'REVERIE_AGENT_HOME', 'REVERIE_DATA_DIR') if key in os.environ}
         os.environ.clear()
         os.environ.update(PATH=args.tool_path + ':/home/agent/.nix-profile/bin:/home/agent/.local/bin:/bin',
-                          HOME=str(workspace), TMPDIR='/scratch/tmp', LANG='C.UTF-8',
+                          HOME=str(workspace), TMPDIR='/tmp', TMP='/tmp', TEMP='/tmp', LANG='C.UTF-8',
                           PYTHONDONTWRITEBYTECODE='1', GIT_CONFIG_NOSYSTEM='1',
                           GIT_CONFIG_GLOBAL='/dev/null')
         os.environ.update(office)
