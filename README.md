@@ -60,6 +60,13 @@ export NIX_CONFIG="experimental-features = nix-command flakes"
 
 ## Default local deployment
 
+Reverie does not require NixOS or changes to a personal host configuration.
+The flake provides the application, tools and launchers. The native service runs
+as your user; container mode uses an existing container engine. Privileged host
+cleanup and its service adapters are separate, opt-in features, never prerequisites
+for starting the website or agents. Unsupported optional host features stay
+unavailable rather than adding host configuration during ordinary startup.
+
 From a clone, start the default Docker deployment with:
 
 ~~~bash
