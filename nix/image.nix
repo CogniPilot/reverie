@@ -71,8 +71,6 @@ pkgs.dockerTools.buildLayeredImage {
       for directory in instances/default instances/default/accounts instances/default/console instances/default/console/accounts instances/default/tools; do
         test -d "$directory" && test ! -L "$directory"
       done
-      : > instances/default/console/statusline-exporter.sh
-      chmod 0444 instances/default/console/statusline-exporter.sh
       printf 'agent:${toString rootlessDocker.subuidStart}:${toString rootlessDocker.subidCount}\n' > etc/subuid
       printf 'agent:${toString rootlessDocker.subgidStart}:${toString rootlessDocker.subidCount}\n' > etc/subgid
       rm -rf opt/reverie-idmap
