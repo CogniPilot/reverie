@@ -112,7 +112,6 @@ describe('the default view', () => {
     const h = await createHarness({ sessions, rooms: fixtureRooms() });
     const side = labels(h.document.querySelectorAll('.ca-side-scroll button:not(.ca-item-act)'));
     expect(side).toEqual([
-      'Office',
       'Build category, 1 mention',
       'Channel General',
       'Channel Ops, 1 mention',
@@ -457,7 +456,9 @@ describe('members and presence', () => {
     h.app.setConnectionStatus('reconnecting');
     expect(h.document.querySelector('.ca-user-status')!.textContent).toBe('Reconnecting…');
     (h.document.querySelector('.ca-user [aria-label="Office settings"]') as HTMLButtonElement).click();
-    expect(h.shell.embed).toBe('office');
+    await settle(40);
+    expect(h.shell.embed).toBeNull();
+    expect(h.document.querySelector('.ca-office-menu')).not.toBeNull();
     expect(h.app.settingsOpened).toBeUndefined();
     expect(h.document.querySelector('[aria-label="Debug terminals"]')).toBeNull();
   });
@@ -638,11 +639,12 @@ describe('never a blank page', () => {
     expect(view(h.document.getElementById('appSettingsModal')!).display).toBe('block');
   });
 
-  it('the gear opens Office with the terminal dialog nested beneath it', async () => {
+  it('the gear opens a local menu with terminal settings', async () => {
     const h = await createHarness({ rooms: fixtureRooms() });
     (h.document.querySelector('.ca-user [aria-label="Office settings"]') as HTMLButtonElement).click();
+    await settle(40);
     expect(h.app.settingsOpened).toBeUndefined();
-    (h.document.querySelector('[aria-label="Open terminal settings"]') as HTMLButtonElement).click();
+    ([...h.document.querySelectorAll('.ca-office-menu button')].find(button => button.textContent === 'Terminal settings') as HTMLButtonElement).click();
     expect(h.app.settingsOpened).toBe(1);
     expect(h.shell.view).toBe('chat');
   });
@@ -1350,7 +1352,7 @@ describe('org chart', () => {
       .querySelector('.ca-org')
       ?.dispatchEvent(new h.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
     expect((h.document.querySelector('.ca-org') as HTMLElement).hidden).toBe(true);
-    expect(h.document.activeElement?.getAttribute('aria-label')).toBe('Office');
+    expect(h.document.activeElement?.getAttribute('aria-label')).toBe('Office settings');
     await h.shell.openOrg();
     await settle(40);
     (h.document.querySelector('button.ca-org-node') as HTMLElement).click();
@@ -1942,9 +1944,6 @@ describe('Discord-style menus', () => {
       'Hide muted channels',
       'Workspace settings',
       'Create channel',
-      'Custom emotes',
-      'Org chart',
-      'Send diagnostics',
     ]);
     click(h, 'Create channel');
     expect(h.document.querySelector('.ca-create')).not.toBeNull();
@@ -2184,7 +2183,7 @@ describe('phone: message sheet and member-only terminal access', () => {
     expect(h.document.querySelector('.ca-rail [aria-label="Org chart"]')).toBeNull();
     expect(h.document.querySelector('.ca-rail [aria-label="Debug terminals"]')).toBeNull();
     expect(h.document.querySelector('.ca-user-org')).toBeNull();
-    expect(h.document.querySelectorAll('.ca-office-nav')).toHaveLength(1);
+    expect(h.document.querySelectorAll('.ca-office-nav')).toHaveLength(0);
   });
 });
 
@@ -4122,12 +4121,12 @@ describe('moving an agent to its new session, and retired sessions', () => {
     expect([...old.document.querySelectorAll('.ca-profile button')].some((b) => b.textContent === 'Move to new session')).toBe(false);
   });
 
-  it('retired sessions are hidden from the pickers, listed in a dialog from the workspace menu, and can be restored or deleted', async () => {
+  it('retired sessions are hidden from the pickers, listed in the Office tools, and can be restored or deleted', async () => {
     const h = await createHarness({ sessions: [...sessions, { id: OLD, name: 'Pat', mode: 'claude' }], rooms: rooms(), stored: { 'reverie:chatroom': 'r1' } });
     h.server.retired = [{ sessionId: OLD, name: 'Pat', successorId: B, at: 5000, rooms: [{ id: 'r1', name: 'General' }], restorable: true }];
     await h.app._loadChatRooms('r1');
     expect(h.app._chatCandidateSessions(new Set()).some((s: { id: string }) => s.id === OLD)).toBe(false);
-    const entries = h.app._chatApp.workspaceEntries('', { full: true }) as Array<{ label?: string; run?: () => void }>;
+    const entries = h.app._chatApp.officeToolEntries() as Array<{ label?: string; run?: () => void }>;
     const retiredEntry = entries.find((e) => e.label === 'Retired sessions')!;
     expect(retiredEntry).toBeTruthy();
     retiredEntry.run!();
@@ -4144,7 +4143,7 @@ describe('moving an agent to its new session, and retired sessions', () => {
 
   it('Delete asks first, and the menu entry is absent when nothing is retired', async () => {
     const h = await createHarness({ sessions, rooms: rooms(), stored: { 'reverie:chatroom': 'r1' } });
-    expect((h.app._chatApp.workspaceEntries('', { full: true }) as Array<{ label?: string }>).some((e) => e.label === 'Retired sessions')).toBe(false);
+    expect((h.app._chatApp.officeToolEntries() as Array<{ label?: string }>).some((e) => e.label === 'Retired sessions')).toBe(false);
     h.server.retired = [{ sessionId: OLD, name: 'Pat', successorId: B, at: 5000, rooms: [], restorable: false }];
     await h.app._chatApp.openRetiredDialog();
     const buttons = [...h.document.querySelectorAll('.ca-retired .ca-invite-row button')] as HTMLButtonElement[];
@@ -4163,12 +4162,12 @@ describe('moving an agent to its new session, and retired sessions', () => {
 describe('the Board entry', () => {
   const entry = (h: { document: Document }, kind: string) => h.document.querySelector<HTMLButtonElement>(`.ca-item[data-key="page:${kind}"]`)!;
 
-  it('are pinned at the top of the channel list, above every channel, with no sorting or dragging', async () => {
+  it('leaves channel navigation free of duplicate management entries', async () => {
     const h = await createHarness({ sessions, rooms: fixtureRooms() });
     const scroll = h.document.querySelector('.ca-side-scroll')!;
-    expect(scroll.firstElementChild!.classList.contains('ca-pages')).toBe(true);
-    expect([...scroll.querySelectorAll('.ca-pages .ca-item')].map((b) => b.textContent)).toEqual(['Office']);
-    expect(entry(h, 'office').draggable).toBe(false);
+    expect(scroll.querySelector('.ca-pages')).toBeNull();
+    expect(scroll.querySelector('.ca-item--room')).not.toBeNull();
+    expect(h.document.querySelector('.ca-office-gear')).not.toBeNull();
     expect(h.document.querySelector('.ca-page')).toBeNull();
   });
 
@@ -4179,7 +4178,7 @@ describe('the Board entry', () => {
     expect(frame.getAttribute('src')).toBe('/board');
     expect(h.document.querySelector<HTMLElement>('.ca-page')!.hidden).toBe(false);
     expect(h.document.querySelector('.ca-head-title')!.textContent).toBe('Board');
-    expect(entry(h, 'office').getAttribute('aria-current')).toBe('page');
+    expect(h.document.querySelector('.ca-office-gear')!.getAttribute('aria-current')).toBe('page');
     expect(h.document.querySelector('.ca-item--room.is-active')).toBeNull();
     expect((h.document.querySelector('.ca-chat') as HTMLElement & { inert: boolean }).inert).toBe(true);
     expect(h.window.location.hash).toBe('#board');
@@ -4210,7 +4209,7 @@ describe('the Board entry', () => {
     expect(h.document.querySelector('.ca-head-title')!.textContent).toBe('#Side');
     expect(h.window.location.hash).toBe('');
     expect((h.document.querySelector('.ca-chat') as HTMLElement & { inert: boolean }).inert).toBe(false);
-    expect(entry(h, 'office').classList.contains('is-active')).toBe(false);
+    expect(h.document.querySelector('.ca-office-gear')!.classList.contains('is-active')).toBe(false);
   });
 
   it('a #board link opens the page when the app loads', async () => {
@@ -4218,7 +4217,7 @@ describe('the Board entry', () => {
     await settle(60);
     expect(h.document.querySelector<HTMLElement>('.ca-page')!.hidden).toBe(false);
     expect(h.document.querySelector('.ca-page-frame')!.getAttribute('src')).toBe('/board');
-    expect(entry(h, 'office').classList.contains('is-active')).toBe(true);
+    expect(h.document.querySelector('.ca-office-gear')!.classList.contains('is-active')).toBe(true);
   });
 });
 

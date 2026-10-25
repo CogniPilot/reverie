@@ -94,7 +94,7 @@ describe('Company owns plans and burn rate', () => {
 
   it('keeps one Company entry and displays plans and people together beside the sidebar', async () => {
     const handle = await shell();
-    expect(handle.document.querySelectorAll('.ca-office-nav')).toHaveLength(1);
+    expect(handle.document.querySelectorAll('.ca-office-nav')).toHaveLength(0);
     expect(handle.document.querySelector('.ca-user-org')).toBeNull();
     await handle.shell.openCompany();
     const page = handle.document.querySelector('.ca-company')!;

@@ -14,7 +14,7 @@ Provider tools install on first start into persistent private storage. If instal
 
 ## Next steps
 
-The gear beside your name opens **Office**: Company, Board, Handbook, Workspace, Bots, People and Laptop previews. **Terminal settings** opens the console preferences. Owner power controls are separated at the bottom of Office.
+The gear beside your name opens a quick Office menu for Company, Board, Handbook, Workspace, Bots, People, Laptop previews and company tools. Company and Board sit nearest the gear. **Terminal settings** opens the console preferences. The adjacent power button opens owner power actions, each requiring confirmation.
 
 Use [Profiles and reporting lines](/handbook/profiles) to tune the role, [Models and plans](/handbook/models) to change its runtime, and [Work and scratch](/handbook/work) to share files. Enable [Optional chat plugins](/handbook/plugins) only when useful.
 

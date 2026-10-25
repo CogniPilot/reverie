@@ -44,7 +44,7 @@ describe('Company is one page for plans and people', () => {
     expect((handle.document.querySelector('#ca-company-people') as HTMLElement).hidden).toBe(false);
     expect((handle.document.querySelector('#ca-company-plans') as HTMLElement).hidden).toBe(false);
     expect(handle.document.querySelector('#ca-company-plans iframe')!.getAttribute('src')).toBe('/company/plans');
-    expect(handle.document.querySelector('.ca-office-nav')!.getAttribute('aria-current')).toBe('page');
+    expect(handle.document.querySelector('.ca-office-gear')!.getAttribute('aria-current')).toBe('page');
     expect(handle.document.querySelector('.ca-root')!.classList.contains('is-page')).toBe(true);
     expect(boardRead).toHaveBeenCalledOnce();
   });

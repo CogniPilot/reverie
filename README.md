@@ -201,7 +201,7 @@ watchdog stops all laptop containers after **10 minutes without a reachable offi
 API**. Its outage timestamp survives broker restarts. Once the API returns, the
 normal desired-running and vacation rules apply again.
 
-The gear beside your name opens **Office**, where the owner-only **Power** section distinguishes three actions. The inherited console preferences are nested under **Terminal settings**:
+The gear beside your name opens quick Office navigation. Its adjacent owner-only power button offers three actions, each requiring confirmation. The inherited console preferences are under **Terminal settings**:
 
 - **Stop Reverie** stops all agents and laptops before stopping the website.
 - **Stop all agents** stops laptops and keeps the website open.

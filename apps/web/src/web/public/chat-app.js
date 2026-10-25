@@ -1030,6 +1030,7 @@ const CA_ICONS = {
   menu: '<path d="M3 6h18M3 12h18M3 18h18"/>',
   more: '<circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/>',
   terminal: '<path d="m4 17 6-6-6-6M12 19h8"/>',
+  power: '<path d="M12 2v10"/><path d="M6.3 5.3a9 9 0 1 0 11.4 0"/>',
   gear: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>',
   search: '<circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/>',
   back: '<path d="m15 18-6-6 6-6"/>',
@@ -1089,7 +1090,6 @@ class ReverieChatApp {
       this.collapsed = {};
     }
     this.membersOpen = caRead('local', 'reverie:chat:members', '1') !== '0';
-    this.officeCollapsed = caRead('local', 'reverie:chat:office-collapsed', '0') === '1';
     this.drawer = null;
     this.seenAt = {};
     this.features = {};
@@ -2361,7 +2361,7 @@ class ReverieChatApp {
     this.els.chat.inert = true;
     this.els.members.inert = true;
     const head = this.el('header', 'ca-company-head');
-    head.append(this.el('span', 'ca-spacer'), this.button('ca-btn', 'Back to chat', () => { this.closePage(); this.els.sideScroll.querySelector('.ca-office-nav')?.focus(); }, { text: 'Back to chat' }));
+    head.append(this.el('span', 'ca-spacer'), this.button('ca-btn', 'Back to chat', () => { this.closePage(); this.els.user.querySelector('.ca-office-gear')?.focus(); }, { text: 'Back to chat' }));
     const content = this.el('div', 'ca-company-content');
     content.id = 'ca-company-people';
     content.setAttribute('aria-label', 'Company people');
@@ -3110,6 +3110,7 @@ class ReverieChatApp {
       this.els.org = panel;
     }
     panel.hidden = false;
+    this.els.main.append(panel);
     const body = panel.querySelector('.ca-org-body');
     body.replaceChildren(this.el('p', 'ca-org-note', 'Loading\u2026'));
     this.els.orgBtn?.setAttribute('aria-pressed', 'true');
@@ -3139,23 +3140,74 @@ class ReverieChatApp {
     this.orgOpen = false;
     if (this.els.org) this.els.org.hidden = true;
     this.els.orgBtn?.setAttribute('aria-pressed', 'false');
-    this.doc.querySelector('.ca-office-nav')?.focus();
+    this.doc.querySelector('.ca-office-gear')?.focus();
   }
 
   /* ── Board and Plans pages ── */
 
-  /** One office entry keeps management pages out of the channel list. */
-  pagesEl() {
-    const box = this.el('div', 'ca-pages');
-    const button = this.button('ca-item ca-item--page ca-office-nav', 'Office', () => this.openPage('office'));
-    button.dataset.key = 'page:office';
-    const mark = this.el('span', 'ca-hash is-drawn'); mark.setAttribute('aria-hidden', 'true'); mark.append(this.icon('gear'));
-    button.append(mark, this.el('span', 'ca-name', 'Office'));
-    if (this.embed && this.embed !== 'embassies') { button.classList.add('is-active'); button.setAttribute('aria-current', 'page'); }
-    const current = this.el('span', 'ca-office-current', CA_PAGES[this.embed]?.label || '');
-    current.hidden = !this.embed || this.embed === 'office' || this.embed === 'embassies';
-    button.append(current); box.append(button);
-    return box;
+  canManageOffice(company = this.company, auth = this.phoneStatus) {
+    return !this.app._chatSelf && company?.canManage === true && auth?.self === 'owner' && auth?.canSetOwn === true;
+  }
+
+  async verifyOfficeOwner() {
+    const [company, auth] = await Promise.all([this.app._chatApi('/api/company'), this.app._chatApi('/api/chatrooms/phone-status')]);
+    return company.ok && auth.ok && this.canManageOffice(company.data, auth.data);
+  }
+
+  officeToolEntries() {
+    return [
+      { label: 'Org chart', run: () => this.openOrg() },
+      ...(this.serverFeatures.replace && (this.app._chatRetired || []).length ? [{ label: 'Retired sessions', run: () => this.openRetiredDialog() }] : []),
+      { label: 'Custom emotes', run: () => this.app._openEmoteManager?.() },
+      { label: 'Send diagnostics', run: () => this.app.sendChatDiagnostics?.() },
+    ];
+  }
+
+  async openOfficeMenu(anchor) {
+    let owner = false;
+    try { owner = await this.verifyOfficeOwner(); } catch { /* Personal terminal preferences remain available offline. */ }
+    const target = anchor.isConnected ? anchor : this.els.user?.querySelector('.ca-office-gear');
+    if (!target) return;
+    const entries = owner ? ['handbook', 'workspace', 'bots', 'people', 'previews'].map(kind => ({ label: CA_PAGES[kind].label, run: () => this.openPage(kind) })) : [];
+    if (owner) entries.push({ sep: true }, ...this.officeToolEntries(), { sep: true });
+    entries.push({ label: 'Terminal settings', run: () => this.app.openAppSettings?.() });
+    if (owner) entries.push({ label: 'Office overview', run: () => this.openPage('office') }, { sep: true },
+      ...['company', 'board'].map(kind => ({ label: CA_PAGES[kind].label, run: () => this.openPage(kind) })));
+    const menu = this.openMenu(entries, { at: target, focus: target, above: true, label: 'Office', className: 'ca-office-menu' });
+    // The most-used pages sit next to the footer anchor, including on a short
+    // screen where the rest of the menu scrolls above them.
+    if (owner) [...menu.querySelectorAll('button')].find(button => button.textContent === 'Company')?.focus();
+  }
+
+  async runOfficePower(action) {
+    if (this.app._officePowerPending) return;
+    if (typeof this.app.officePower !== 'function') return this.toast('Office power controls are unavailable.', 'error');
+    const output = this.el('p');
+    await this.app.officePower(action, output);
+    if (output.textContent) this.toast(output.textContent, 'info');
+  }
+
+  async openOfficePowerMenu(anchor) {
+    try {
+      if (!await this.verifyOfficeOwner()) return this.toast('Sign in as the owner to use office power controls.', 'error');
+    } catch { return this.toast('Could not verify office power access.', 'error'); }
+    const target = anchor.isConnected ? anchor : this.els.user?.querySelector('.ca-office-power-button');
+    if (!target) return;
+    this.openMenu([
+      { label: 'Stop all agents', danger: true, run: () => this.runOfficePower('stop-laptops') },
+      { label: 'Restart website', run: () => this.runOfficePower('restart-website') },
+      { sep: true },
+      { label: 'Shut down Reverie', danger: true, run: () => this.runOfficePower('shutdown') },
+    ], { at: target, focus: target, above: true, label: 'Office power', className: 'ca-power-menu' });
+  }
+
+  updateOfficeNavigation() {
+    const gear = this.els.user?.querySelector('.ca-office-gear');
+    if (!gear) return;
+    const active = !!this.embed && this.embed !== 'embassies';
+    gear.classList.toggle('is-active', active);
+    if (active) gear.setAttribute('aria-current', 'page');
+    else gear.removeAttribute('aria-current');
   }
 
   officePageEl() {
@@ -3178,6 +3230,10 @@ class ReverieChatApp {
         link.dataset.key = `page:${kind}`;
         link.append(this.icon(page.icon), this.el('span', '', page.label)); nav.append(link);
       }
+      const tools = this.el('section', 'ca-office-tools'); tools.append(this.el('h2', '', 'Company tools'));
+      const toolButtons = this.el('div', 'ca-office-power-actions');
+      for (const entry of this.officeToolEntries()) toolButtons.append(this.button('ca-btn', entry.label, entry.run, { text: entry.label }));
+      tools.append(toolButtons); root.insertBefore(tools, terminal);
       const power = this.el('section', 'ca-office-power'); power.setAttribute('aria-label', 'Office power');
       power.append(this.el('h2', '', 'Power'), this.el('p', 'ca-hint', 'Stopping agents interrupts current work without a fresh handoff. Saved conversations, memory and files remain.'));
       const actions = this.el('div', 'ca-office-power-actions');
@@ -4674,10 +4730,10 @@ class ReverieChatApp {
     }
     this.keepFocus(sideScroll, () => {
       sideScroll.replaceChildren();
-      sideScroll.append(this.pagesEl());
       if (home) this.renderDmList(sideScroll);
       else this.renderChannelList(sideScroll);
     });
+    this.updateOfficeNavigation();
     this.embassy?.renderSidebar();
   }
 
@@ -5236,7 +5292,13 @@ class ReverieChatApp {
     approvals.append(this.el('span', 'ca-count ca-approvals-count', '0'));
     this.els.approvals = approvals;
     user.append(approvals);
-    user.append(this.button('ca-icon-btn ca-office-gear', 'Office settings', () => this.openPage('office'), { icon: 'gear' }));
+    const gear = this.button('ca-icon-btn ca-office-gear', 'Office settings', () => this.openOfficeMenu(gear), { icon: 'gear' });
+    gear.setAttribute('aria-haspopup', 'menu'); user.append(gear);
+    if (this.canManageOffice()) {
+      const power = this.button('ca-icon-btn ca-office-power-button', 'Office power', () => this.openOfficePowerMenu(power), { icon: 'power' });
+      power.setAttribute('aria-haspopup', 'menu'); user.append(power);
+    }
+    this.updateOfficeNavigation();
     this.renderConnection();
     this.renderApprovals();
   }
@@ -5584,6 +5646,7 @@ class ReverieChatApp {
   }
 
   fitMemberMenu(menu) {
+    if (menu.classList.contains('ca-popmenu') && this._openMenuRefit) { this._openMenuRefit(); return; }
     const w = this.doc.defaultView?.innerWidth || 1024;
     const h = this.doc.defaultView?.innerHeight || 768;
     const r = menu.getBoundingClientRect();
@@ -6698,27 +6761,71 @@ class ReverieChatApp {
     this.closeMenus();
     const restore = focus || this.doc.activeElement;
     const open = [];
+    const positions = new Map();
+    const win = this.doc.defaultView;
+    const viewport = win?.visualViewport;
+    const keepVisible = item => {
+      const menu = item?.closest?.('.ca-popmenu');
+      if (!menu) return;
+      const box = menu.getBoundingClientRect();
+      const row = item.getBoundingClientRect();
+      const top = box.top + menu.clientTop;
+      const bottom = box.bottom - menu.clientTop;
+      if (row.top < top) menu.scrollTop = Math.max(0, menu.scrollTop - (top - row.top));
+      else if (row.bottom > bottom) menu.scrollTop += row.bottom - bottom;
+    };
+    const focusItem = item => { item?.focus({ preventScroll: true }); keepVisible(item); };
     const place = (menu, anchor, side) => {
-      const w = this.doc.defaultView?.innerWidth || 1024;
-      const h = this.doc.defaultView?.innerHeight || 768;
+      const w = viewport?.width > 0 ? viewport.width : win?.innerWidth || 1024;
+      const h = viewport?.height > 0 ? viewport.height : win?.innerHeight || 768;
+      const left = (viewport?.offsetLeft || 0) + Math.min(8, w / 2);
+      const top = (viewport?.offsetTop || 0) + Math.min(8, h / 2);
+      const rightEdge = left + Math.max(0, w - 16);
+      const bottom = top + Math.max(0, h - 16);
+      menu.style.setProperty('--ca-menu-max-width', `${Math.max(0, w - 16)}px`);
+      menu.style.setProperty('--ca-menu-max-height', `${Math.max(0, h - 16)}px`);
+      menu.style.bottom = ''; menu.style.right = '';
+      const measured = menu.getBoundingClientRect();
+      const width = Math.min(measured.width, Math.max(0, w - 16));
+      const height = Math.min(measured.height, Math.max(0, h - 16));
+      const clamp = (value, min, max) => Math.max(min, Math.min(value, Math.max(min, max)));
+      let x = left, y = top;
       if (anchor && typeof anchor.getBoundingClientRect === 'function') {
         const r = anchor.getBoundingClientRect();
-        // From the message box the menu opens upward, like Discord's "+".
-        if (above) menu.style.bottom = `${Math.max(8, h - r.top + 6)}px`;
-        else menu.style.top = `${Math.min(r.bottom + 6, h - 40)}px`;
-        if (right) menu.style.right = `${Math.max(8, w - r.right)}px`;
-        else menu.style.left = `${Math.max(8, Math.min(r.left, w - 240))}px`;
+        const below = r.bottom + 6, upward = r.top - height - 6;
+        const fitsAbove = upward >= top, fitsBelow = below + height <= bottom;
+        y = above ? (fitsAbove || !fitsBelow ? upward : below) : (fitsBelow || !fitsAbove ? below : upward);
+        x = right ? r.right - width : r.left;
       } else if (anchor) {
-        menu.style.top = `${Math.max(8, Math.min(anchor.y, h - 40))}px`;
-        menu.style.left = `${Math.max(8, Math.min(anchor.x, w - 240))}px`;
+        x = anchor.x;
+        y = anchor.y + height <= bottom ? anchor.y : anchor.y - height;
       }
       if (side) {
         const r = side.getBoundingClientRect();
-        menu.style.top = `${r.top}px`;
-        menu.style.left = `${Math.min(r.right + 4, w - 236)}px`;
-        menu.style.right = '';
+        const parent = side.closest('.ca-popmenu')?.getBoundingClientRect() || r;
+        const beside = parent.right + 4, flipped = parent.left - width - 4;
+        x = beside + width <= rightEdge ? beside : flipped;
+        y = r.top;
       }
+      // Touch menus retain their bottom-sheet presentation, bounded by the
+      // visible viewport (including a keyboard or a zoomed/offset viewport).
+      if (win?.matchMedia?.('(max-width: 767px)')?.matches) {
+        x = left; y = bottom - height;
+        menu.style.setProperty('--ca-menu-sheet-left', `${x}px`);
+        menu.style.setProperty('--ca-menu-sheet-top', `${y}px`);
+      }
+      menu.style.top = `${clamp(y, top, bottom - height)}px`;
+      menu.style.left = `${clamp(x, left, rightEdge - width)}px`;
+      positions.set(menu, { anchor, side });
     };
+    const refit = (maintainFocus = true) => {
+      for (const menu of open) {
+        const position = positions.get(menu);
+        if (position) place(menu, position.anchor, position.side);
+      }
+      if (maintainFocus) keepVisible(this.doc.activeElement);
+    };
+    const observer = win?.ResizeObserver ? new win.ResizeObserver(refit) : null;
     const build = (list, anchor, side) => {
       const menu = this.el('div', `ca-menu ca-popmenu${className ? ` ${className}` : ''}`);
       menu.setAttribute('role', 'menu');
@@ -6779,20 +6886,35 @@ class ReverieChatApp {
       }
       this.doc.body.append(menu);
       place(menu, anchor, side);
-      if (className === 'ca-member-menu' || className === 'ca-member-picker') this.fitMemberMenu(menu);
       open.push(menu);
+      menu.addEventListener('focusin', event => keepVisible(event.target));
+      menu.addEventListener('scroll', () => refit(false), { passive: true });
+      observer?.observe(menu);
       return menu;
     };
+    const closeSub = () => {
+      const sub = open.pop();
+      const trigger = positions.get(sub)?.side;
+      observer?.unobserve(sub); positions.delete(sub); sub.remove();
+      focusItem(trigger);
+    };
     const openSub = (parent, trigger, list) => {
-      while (open.length > open.indexOf(parent) + 1) open.pop().remove();
+      while (open.length > open.indexOf(parent) + 1) {
+        const sub = open.pop(); observer?.unobserve(sub); positions.delete(sub); sub.remove();
+      }
       const m = build(list, null, trigger);
-      m.querySelector('button')?.focus();
+      focusItem(m.querySelector('button:not(:disabled)'));
     };
     const closeAll = (refocus) => {
       for (const m of open.splice(0)) m.remove();
       this.doc.removeEventListener('pointerdown', onPointer, true);
       this.doc.removeEventListener('keydown', onKey, true);
+      win?.removeEventListener('resize', refit);
+      viewport?.removeEventListener('resize', refit);
+      viewport?.removeEventListener('scroll', refit);
+      observer?.disconnect(); positions.clear();
       this._openMenuClose = null;
+      this._openMenuRefit = null;
       if (refocus || restoreFocus) restore?.focus?.();
     };
     const onPointer = (ev) => {
@@ -6810,26 +6932,23 @@ class ReverieChatApp {
         ev.preventDefault();
         ev.stopPropagation();
         if (open.length > 1) {
-          const sub = open.pop();
-          sub.remove();
-          open.at(-1).querySelector('[aria-haspopup]:focus, [aria-haspopup]')?.focus();
+          closeSub();
         } else closeAll(true);
       } else if (ev.key === 'ArrowDown' || ev.key === 'ArrowUp') {
         ev.preventDefault();
         const next = at < 0 ? (ev.key === 'ArrowDown' ? 0 : items.length - 1)
           : (at + (ev.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length;
-        items[next]?.focus();
+        focusItem(items[next]);
       } else if (ev.key === 'Home' || ev.key === 'End') {
         ev.preventDefault();
-        items[ev.key === 'Home' ? 0 : items.length - 1]?.focus();
+        focusItem(items[ev.key === 'Home' ? 0 : items.length - 1]);
       } else if (ev.key === 'ArrowRight' && this.doc.activeElement?.getAttribute('aria-haspopup')) {
         ev.preventDefault();
         this.doc.activeElement.click();
       } else if (ev.key === 'ArrowLeft' && open.length > 1) {
         ev.preventDefault();
         ev.stopPropagation();
-        open.pop().remove();
-        open.at(-1).querySelector('[aria-haspopup]')?.focus();
+        closeSub();
       } else if (ev.key === 'Enter' || (ev.key === ' ' && !this.doc.activeElement?.matches('input'))) {
         ev.preventDefault();
         items[at < 0 ? 0 : at]?.click();
@@ -6838,10 +6957,14 @@ class ReverieChatApp {
       }
     };
     this._openMenuClose = closeAll;
+    this._openMenuRefit = refit;
     const root = build(entries, at, null);
-    root.querySelector('button:not(:disabled)')?.focus();
+    focusItem(root.querySelector('button:not(:disabled)'));
     this.doc.addEventListener('pointerdown', onPointer, true);
     this.doc.addEventListener('keydown', onKey, true);
+    win?.addEventListener('resize', refit);
+    viewport?.addEventListener('resize', refit);
+    viewport?.addEventListener('scroll', refit);
     return root;
   }
 
@@ -7081,8 +7204,8 @@ class ReverieChatApp {
     return true;
   }
 
-  /** What the workspace menus offer; `key` is a workspace key or "home". `full` adds the page-wide tools. */
-  workspaceEntries(key, { full = false } = {}) {
+  /** Workspace menus contain only workspace and channel actions. */
+  workspaceEntries(key) {
     const home = key === 'home';
     const rooms = this.rooms.filter((r) => (home ? caIsDm(r) : !caIsDm(r) && (r.workspace || '') === (key || '')));
     const name = home ? 'Direct Messages' : key || this.defaultWorkspaceName();
@@ -7102,13 +7225,6 @@ class ReverieChatApp {
       }
     } else if (this.serverFeatures.dms) {
       out.push({ sep: true }, { label: 'Start a direct message', run: () => this.openSwitcher({ agents: true }) });
-    }
-    if (full) {
-      out.push({ sep: true });
-      out.push({ label: 'Custom emotes', run: () => this.app._openEmoteManager?.() });
-      out.push({ label: 'Org chart', run: () => this.openOrg() });
-      if (this.serverFeatures.replace && (this.app._chatRetired || []).length) out.push({ label: 'Retired sessions', run: () => this.openRetiredDialog() });
-      out.push({ label: 'Send diagnostics', run: () => this.app.sendChatDiagnostics?.() });
     }
     this._lastWsName = name;
     return out;

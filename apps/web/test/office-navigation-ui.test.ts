@@ -12,30 +12,85 @@ async function fixture({ owner = false, verified = owner, hash = '', narrow = fa
     if (path === '/api/chatrooms/phone-status') return { ok: true, data: { self: verified ? 'owner' : 'agent', canSetOwn: verified } };
     return previous(path, options);
   };
+  await h.shell.loadOwner();
   return h;
 }
 
-it('keeps just one Office entry above channels instead of seven management rows', async () => {
+it('keeps Office navigation only at the footer gear and leaves the sidebar for channels', async () => {
   const h = await fixture();
-  expect([...h.document.querySelectorAll('.ca-pages .ca-name')].map(n => n.textContent)).toEqual(['Office']);
+  expect(h.document.querySelector('.ca-pages')).toBeNull();
   expect(h.document.querySelector('.ca-item--room')).not.toBeNull();
   expect(h.document.querySelector('.ca-office-links')).toBeNull();
   h.shell.renderSidebar();
-  expect(h.document.querySelectorAll('.ca-office-nav')).toHaveLength(1);
+  expect(h.document.querySelectorAll('.ca-office-nav')).toHaveLength(0);
+  expect(h.document.querySelectorAll('.ca-office-gear')).toHaveLength(1);
 });
 
-it.each([false, true])('the nameplate gear opens a full Office page with nested terminal settings (narrow=%s)', async narrow => {
+it.each([false, true])('the nameplate gear opens Office choices beside the button without opening a page (narrow=%s)', async narrow => {
   const h = await fixture({ narrow, owner: true });
   h.document.querySelector<HTMLButtonElement>('.ca-user [aria-label="Office settings"]')!.click(); await h.flush();
-  expect(h.window.location.hash).toBe('#office');
-  expect(h.document.querySelector('.ca-office-page')).not.toBeNull();
-  expect(h.document.querySelector('.ca-office-page iframe')).toBeNull();
+  expect(h.window.location.hash).toBe('');
+  expect(h.document.querySelector('.ca-office-page')).toBeNull();
+  const menu = h.document.querySelector('.ca-office-menu')!;
+  expect(menu.getAttribute('role')).toBe('menu');
   expect(h.app.settingsOpened).toBeUndefined();
-  expect([...h.document.querySelectorAll('.ca-office-sections button')].map(n => n.textContent)).toEqual(['Company', 'Board', 'Handbook', 'Workspace', 'Bots', 'People', 'Laptop previews']);
-  h.document.querySelector<HTMLButtonElement>('[aria-label="Open terminal settings"]')!.click();
+  const entries = [...menu.querySelectorAll<HTMLButtonElement>('button')];
+  expect(entries.slice(0, 5).map(n => n.textContent)).toEqual(['Handbook', 'Workspace', 'Bots', 'People', 'Laptop previews']);
+  expect(entries.slice(-2).map(n => n.textContent)).toEqual(['Company', 'Board']);
+  entries.find(button => button.textContent === 'Terminal settings')!.click();
   expect(h.app.settingsOpened).toBe(1);
-  expect(h.shell.embed).toBe('office');
+  expect(h.shell.embed).toBeNull();
   expect(h.document.querySelector('.ca-user [aria-label="Shut down Reverie"]')).toBeNull();
+});
+
+it('opens a separate footer power menu without executing an action until selected', async () => {
+  const h = await fixture({ owner: true });
+  h.app.officePower = vi.fn(async (_action, output) => { output.textContent = 'Host acknowledgement'; });
+  const gear = h.document.querySelector('.ca-office-gear')!;
+  const power = h.document.querySelector<HTMLButtonElement>('.ca-office-power-button')!;
+  expect(gear.nextElementSibling).toBe(power);
+  power.click(); await h.flush();
+  const buttons = [...h.document.querySelectorAll<HTMLButtonElement>('.ca-power-menu button')];
+  expect(buttons.map(button => button.textContent)).toEqual(['Stop all agents', 'Restart website', 'Shut down Reverie']);
+  expect(h.app.officePower).not.toHaveBeenCalled();
+  expect(buttons[0].classList.contains('is-danger')).toBe(true);
+  expect(buttons[1].classList.contains('is-danger')).toBe(false);
+  buttons[2].click(); await h.flush();
+  expect(h.app.officePower).toHaveBeenCalledExactlyOnceWith('shutdown', expect.anything());
+});
+
+it('rechecks revoked owner access before offering footer power actions', async () => {
+  const h = await fixture({ owner: true }); h.app.officePower = vi.fn();
+  const power = h.document.querySelector<HTMLButtonElement>('.ca-office-power-button')!;
+  h.app._chatApi = async () => ({ ok: false });
+  power.click(); await h.flush();
+  expect(h.document.querySelector('.ca-power-menu')).toBeNull();
+  expect(h.app.officePower).not.toHaveBeenCalled();
+});
+
+it('keeps the requested quick menu when a presence refresh replaces the footer during access checks', async () => {
+  const h = await fixture({ owner: true });
+  let release!: (allowed: boolean) => void;
+  vi.spyOn(h.shell, 'verifyOfficeOwner').mockReturnValue(new Promise(resolve => { release = resolve; }));
+  const previous = h.document.querySelector<HTMLButtonElement>('.ca-office-gear')!;
+  previous.click(); h.shell.renderUser();
+  expect(previous.isConnected).toBe(false);
+  release(true); await h.flush();
+  expect(h.document.querySelector('.ca-office-menu')).not.toBeNull();
+  expect(h.shell.embed).toBeNull();
+});
+
+it('keeps company tools out of the workspace dropdown and accessible at the gear', async () => {
+  const h = await fixture({ owner: true });
+  h.app._chatRetired = [{ sessionId: 'old' }];
+  const workspaceLabels = h.shell.workspaceEntries('', { full: true }).map(entry => entry.label);
+  for (const label of ['Org chart', 'Retired sessions', 'Send diagnostics', 'Custom emotes']) expect(workspaceLabels).not.toContain(label);
+  h.document.querySelector<HTMLButtonElement>('.ca-office-gear')!.click(); await h.flush();
+  const buttons = [...h.document.querySelectorAll<HTMLButtonElement>('.ca-office-menu button')];
+  expect(buttons.map(button => button.textContent)).toContain('Retired sessions');
+  buttons.find(button => button.textContent === 'Org chart')!.click(); await h.flush();
+  expect(h.document.querySelector('.ca-org[role="dialog"]')).not.toBeNull();
+  h.shell.closeOrg(); expect(h.document.activeElement).toBe(h.document.querySelector('.ca-office-gear'));
 });
 
 it('reveals power controls only after owner verification and never executes them on opening Office', async () => {
@@ -57,11 +112,12 @@ it.each([{ owner: false }, { owner: true, verified: false }])('does not expose p
   expect(h.document.querySelector('.ca-office-power')).toBeNull();
   expect(h.document.querySelectorAll('.ca-office-link')).toHaveLength(0);
   expect(h.document.querySelector('[aria-label="Open terminal settings"]')).not.toBeNull();
+  expect(h.document.querySelector('.ca-office-power-button')).toBeNull();
 });
 
 it('preserves hub links, browser Back/Forward and the selected channel', async () => {
   const h = await fixture({ owner: true });
-  h.document.querySelector<HTMLButtonElement>('.ca-office-nav')!.click();
+  h.shell.openPage('office');
   await h.flush();
   h.document.querySelector<HTMLButtonElement>('.ca-office-sections [data-key="page:board"]')!.click();
   expect(h.document.querySelector('iframe[title="Board"]')!.getAttribute('src')).toBe('/board');
@@ -77,6 +133,6 @@ it('preserves hub links, browser Back/Forward and the selected channel', async (
 it.each(['office', 'board', 'handbook', 'workspace', 'bots', 'people', 'previews', 'company', 'company-people'])('keeps #%s deep links and reload navigation working', async kind => {
   const h = await fixture({ hash: '#' + kind }); await h.flush();
   expect(h.shell.embed).toBe(kind.startsWith('company') ? 'company' : kind);
-  expect(h.document.querySelector('.ca-office-nav')!.getAttribute('aria-current')).toBe('page');
+  expect(h.document.querySelector('.ca-office-gear')!.getAttribute('aria-current')).toBe('page');
   expect(h.document.querySelector('.ca-page')!.hidden).toBe(false);
 });
