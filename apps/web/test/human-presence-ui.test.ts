@@ -30,7 +30,7 @@ it('shows humans with roles, avatars and live presence without adding agent seat
   expect(h.document.querySelector('[data-human-id="second-human"] img').getAttribute('src')).toBe(
     '/assets/avatars/pack-151.png'
   );
-  expect(h.document.querySelector('[data-human-id="second-human"]').tagName).toBe('DIV');
+  expect(h.document.querySelector('[data-human-id="second-human"]').tagName).toBe('BUTTON');
   expect(h.shell.room.members).toHaveLength(1);
   expect(h.shell.els.membersBtn.getAttribute('aria-label')).toContain('3 members');
 });

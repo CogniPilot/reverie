@@ -53,6 +53,8 @@
           # Optional tools: excluded from the runtime/image and never fetched by a chat toggle.
           chatPythonLsp = pkgs.pyright;
           capabilitiesAddon = import ./nix/capabilities-addon.nix { inherit pkgs; src = self; };
+          prune = import ./nix/prune.nix { inherit pkgs; src = self; };
+          pruneHost = import ./nix/prune-host.nix { inherit pkgs; src = self; };
           adminHarnessAddon = import ./nix/admin-harness-addon.nix { inherit pkgs; src = self; };
           workerIdmap = import ./nix/worker-idmap.nix { inherit pkgs; };
           workerDocker = import ./nix/worker-docker-tools.nix { inherit pkgs; src = self; };
@@ -191,6 +193,9 @@
           rootlessDocker = { inherit uid gid subuidStart subgidStart subidCount; };
         };
       apps = forAllSystems (system: {
+        prune = { type = "app"; program = "${self.packages.${system}.prune}/bin/reverie-prune"; meta.description = "Report eligible rebuildable output without deleting it"; };
+        prune-host = { type = "app"; program = "${self.packages.${system}.pruneHost}/bin/reverie-prune-host"; meta.description = "Prepare an explicit dry-run cleanup host installation"; };
+        lease = { type = "app"; program = "${self.packages.${system}.prune}/bin/lease"; meta.description = "Lease disposable work directories during active jobs"; };
         worker-service = { type = "app"; program = "${self.packages.${system}.workerServiceSetup}/bin/reverie-worker-service"; meta.description = "Install/control the existing owner user laptop broker without host OS configuration"; };
         launch-guard = { type = "app"; program = "${self.packages.${system}.launchGuard}/bin/reverie-launch-guard"; meta.description = "Evaluate metadata-only launch guard fixtures without live effects"; };
         default = { type = "app"; program = "${self.packages.${system}.reverie}/bin/reverie"; meta.description = "Reverie agent console"; };
@@ -209,7 +214,7 @@
           pkgs = pkgsFor system;
           packages = self.packages.${system};
         in {
-          inherit (packages) reverie memoryPackage start update gpuPublisher previewProxy previewService;
+          inherit (packages) reverie memoryPackage start update gpuPublisher previewProxy previewService prune;
           nativeSmoke = pkgs.runCommand "reverie-native-smoke" { } ''
             export HOME="$TMPDIR/home"
             export REVERIE_INSTALL_CLIS=none

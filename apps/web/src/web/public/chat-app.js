@@ -652,16 +652,24 @@ function caMentionQuery(value, caret) {
   return m ? { start: before.length - m[1].length - 1, query: m[1] } : null;
 }
 
-/** Members whose name starts with (then contains) the query, then `@everyone`. */
-function caMentionCandidates(members, query, limit = 8) {
+/** Authorized people and agents whose names match, then the reserved `@everyone`. */
+function caMentionCandidates(members, query, limit = 8, humans = []) {
   const q = String(query ?? '').toLowerCase();
   const rank = (name) => {
     const n = String(name).toLowerCase();
     return n.startsWith(q) ? 0 : n.includes(q) ? 1 : 2;
   };
-  const items = (Array.isArray(members) ? members : [])
-    .filter((m) => m && m.name && rank(m.name) < 2)
-    .map((member, i) => ({ kind: 'member', member, insert: member.name, rank: rank(member.name), i }));
+  const seen = new Set();
+  const people = (Array.isArray(humans) ? humans : []).filter(person => {
+    if (!person?.id || !person.name || seen.has(person.id)) return false;
+    seen.add(person.id); return String(person.name).trim().toLowerCase() !== 'everyone';
+  });
+  const hasOwner = people.some(person => person.id === 'owner' || person.primary === true);
+  const items = people.filter(person => rank(person.name) < 2)
+    .map((human, i) => ({ kind: 'human', human, insert: human.name, rank: rank(human.name), i }));
+  items.push(...(Array.isArray(members) ? members : [])
+    .filter(m => m && m.name && !(hasOwner && m.sessionId === 'user') && String(m.name).trim().toLowerCase() !== 'everyone' && rank(m.name) < 2)
+    .map((member, i) => ({ kind: 'member', member, insert: member.name, rank: rank(member.name), i: people.length + i })));
   const everyone = { kind: 'everyone', insert: 'everyone', rank: q ? ('everyone'.startsWith(q) ? 0 : 2) : 3, i: -1 };
   if (everyone.rank < 2 || !q) items.push(everyone);
   items.sort((a, b) => a.rank - b.rank || a.i - b.i);
@@ -1354,7 +1362,7 @@ class ReverieChatApp {
           if (result.ok && this.roomId === id) { this.humans = result.data.people || []; this.humanRoomId = id; }
         } else { this.humans = []; this.humanRoomId = null; }
         this.renderUser();
-        if (this.view === 'chat') { this.renderHeader(); this.renderMembers(); this.renderFeed({ keepScroll: true }); }
+        if (this.view === 'chat') { this.renderHeader(); this.renderMembers(); this.renderFeed({ keepScroll: true }); this.updateMentions(); }
       } catch { /* Ordinary reconnect refreshes presence; never infer online from a failed request. */ }
       finally { this._humanPending = false; }
     };
@@ -4209,7 +4217,7 @@ class ReverieChatApp {
     this.doc.defaultView?.setTimeout(() => el.classList.remove('is-flash'), 1600);
   }
 
-  /** `@` autocomplete in the message box: members of this room plus @everyone. */
+  /** `@` autocomplete: agents and authorized humans of this room, plus @everyone. */
   installMentions() {
     const input = this.app._chatEls.input;
     const list = this.el('div', 'chatroom-suggest ca-mention');
@@ -4239,7 +4247,7 @@ class ReverieChatApp {
     const input = this.app._chatEls?.input;
     const q = input && !this.app._chatCreating ? caMentionQuery(input.value, input.selectionStart) : null;
     const members = this.room ? this.room.members : [];
-    const items = q ? caMentionCandidates(members, q.query) : [];
+    const items = q && this.room ? caMentionCandidates(members, q.query, 8, this.channelHumans()) : [];
     if (!items.length) {
       this.closeMentions();
       return;
@@ -4257,7 +4265,7 @@ class ReverieChatApp {
     list.hidden = false;
     const nodes = [];
     s.items.forEach((it, i) => {
-      if (i === 0 && it.kind === 'member') nodes.push(this.el('div', 'ca-mention-head', 'Members'));
+      if (i === 0 && it.kind !== 'everyone') nodes.push(this.el('div', 'ca-mention-head', 'Members'));
       if (it.kind === 'everyone') nodes.push(i > 0 ? this.el('hr', 'ca-mention-sep') : this.el('div', 'ca-mention-head', 'Notify'));
       nodes.push(
         (() => {
@@ -4269,6 +4277,10 @@ class ReverieChatApp {
         b.setAttribute('aria-selected', String(i === s.index));
         if (it.kind === 'everyone') {
           b.append(this.el('span', 'ca-mention-name', '@everyone'), this.el('span', 'ca-mention-sub', 'Everyone in this channel'));
+        } else if (it.kind === 'human') {
+          b.append(this.humanAvatar(it.human, 'sm', it.human.online ? 'idle' : 'gone'),
+            this.literalText('span', 'ca-mention-name', it.human.name),
+            this.el('span', 'ca-mention-sub', it.human.role === 'owner' ? 'Person · Owner' : 'Person · Limited'));
         } else {
           b.append(
             this.app._chatAvatar(it.member.sessionId, it.member.name, { size: 'sm' }),
@@ -4371,7 +4383,7 @@ class ReverieChatApp {
 
   /** Mark `@name` / `@everyone` in a rendered message (text nodes only, never code or links; an address like a@b is left alone). */
   decorateMentions(el) {
-    const names = ['everyone', ...(this.room?.members || []).map((m) => m.name).filter(Boolean)];
+    const names = [...new Set(['everyone', ...(this.room?.members || []).map(m => m.name), ...this.channelHumans().map(p => p.name)].filter(Boolean))];
     names.sort((a, b) => b.length - a.length);
     const escaped = names.map((n) => n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
     const re = new RegExp(`(^|[^\\w@])(@(?:${escaped.join('|')}))(?![\\w-])`, 'gi');
@@ -5430,6 +5442,18 @@ class ReverieChatApp {
 
   /* ── members ── */
 
+  mentionHuman(id) {
+    const person = this.channelHumans().find(p => p.id === id);
+    const input = this.app._chatEls?.input;
+    if (!person?.name || String(person.name).trim().toLowerCase() === 'everyone' || !input || input.disabled || input.readOnly || this.app._chatCreating) return;
+    // Preserve all draft text, including a selected range; this is an insertion,
+    // never a recipient change or an invitation to another room.
+    input.value += `${input.value && !/\s$/.test(input.value) ? ' ' : ''}@${person.name} `;
+    input.focus();
+    input.setSelectionRange(input.value.length, input.value.length);
+    input.dispatchEvent(new this.doc.defaultView.Event('input', { bubbles: true }));
+  }
+
   renderMemberChip() {
     const button = this.els.membersBtn;
     if (!button) return;
@@ -5465,8 +5489,13 @@ class ReverieChatApp {
       if (humans.length) {
         box.append(this.el('h3', 'ca-members-head', `People — ${humans.length}`));
         for (const person of humans) {
-          const row = this.el('div', `ca-member is-${person.online ? 'online' : 'offline'}`);
+          const row = this.el('button', `ca-member is-${person.online ? 'online' : 'offline'}`);
+          row.type = 'button';
           row.dataset.humanId = person.id;
+          row.dataset.key = `human:${person.id}`;
+          row.disabled = String(person.name).trim().toLowerCase() === 'everyone';
+          row.title = `Mention ${person.name}`;
+          row.addEventListener('click', () => this.mentionHuman(person.id));
           row.setAttribute('aria-label', `${person.name}, ${person.role === 'owner' ? 'Owner' : 'Limited'}, ${person.online ? 'online' : 'offline'}`);
           row.append(this.humanAvatar(person, 'md', person.online ? 'idle' : 'gone'));
           const text = this.el('span', 'ca-member-text');
