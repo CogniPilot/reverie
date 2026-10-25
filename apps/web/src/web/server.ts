@@ -3304,8 +3304,8 @@ export class WebServer extends EventEmitter {
   private async cleanupStaleSessions(): Promise<number> {
     const activeSessionIds = new Set(this.sessions.keys());
     for (const employee of this.companyService?.registeredEmployees() ?? []) {
-      if (employee.desiredRunning !== false && this.store.getSession(employee.sessionId))
-        activeSessionIds.add(employee.sessionId);
+      // Stopped employees still own their saved native launch settings.
+      activeSessionIds.add(employee.sessionId);
     }
     const result = await this.tabLayouts.runStaleSessionCleanup(activeSessionIds, (ids) =>
       this.store.cleanupSessionsByIds(ids)
