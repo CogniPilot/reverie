@@ -9,7 +9,7 @@ import unittest
 from unittest.mock import patch
 
 from reverie.cleanup import declarative as D
-import test_prune_host_install as fixtures
+from tests import test_prune_host_install as fixtures
 
 
 class DeclaredTests(unittest.TestCase):
