@@ -2,7 +2,7 @@
 import hashlib
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import pwd
 import re
 import stat
@@ -10,6 +10,22 @@ import stat
 FEATURE_LABEL = 'org.reverie.worker.rootless-docker'
 UID_LABEL = 'org.reverie.worker.uid'
 GID_LABEL = 'org.reverie.worker.gid'
+
+
+def require_immutable_mounts(config):
+    protected = [PurePosixPath(value) for value in (
+        '/opt/reverie-idmap', '/opt/idmap', '/bin/newuidmap', '/bin/newgidmap',
+        '/etc/passwd', '/etc/group', '/etc/subuid', '/etc/subgid',
+        '/etc/nsswitch.conf', '/etc/ld.so.preload', '/etc/ld.so.cache')]
+    for mount in config.get('mounts', []):
+        value = mount.get('destination')
+        if not isinstance(value, str):
+            raise ValueError('Explicit canonical worker mount destination required')
+        target = PurePosixPath(value)
+        if target.anchor != '/' or str(target) != value or '..' in target.parts:
+            raise ValueError('Canonical worker mount destination required')
+        if any(target.is_relative_to(path) or path.is_relative_to(target) for path in protected):
+            raise ValueError('Worker mount masks immutable Docker identity or helper files')
 
 
 def enabled(config):
@@ -22,6 +38,7 @@ def enabled(config):
         return False
     if any(type(config.get(key)) is not int or not 0 < config[key] < 2147483648 for key in ('uid', 'gid')):
         raise ValueError('Non-root numeric laptop identity required')
+    require_immutable_mounts(config)
     if not isinstance(value['seccompProfile'], str):
         raise ValueError('Nix seccomp profile path required')
     path = Path(value['seccompProfile'])

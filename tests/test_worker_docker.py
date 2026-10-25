@@ -9,6 +9,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 from reverie import worker_docker as docker
+from tests import test_worker as fixture
 
 ROOT=Path(__file__).resolve().parents[1]
 
@@ -35,6 +36,19 @@ class WorkerDockerTests(unittest.TestCase):
     def test_default_is_exact_existing_no_capability_grant(self):
         self.assertFalse(docker.enabled({}));self.assertEqual(docker.runtime_args({}),[])
         self.assertEqual(docker.security_args({}),['--cap-drop','ALL','--security-opt','no-new-privileges'])
+
+    def test_broker_config_and_create_args_apply_the_explicit_docker_policy(self):
+        f=fixture.WorkerTests();f.setUp();self.addCleanup(f.doCleanups)
+        config=dict(f.config,rootlessDocker=self.cfg['rootlessDocker'])
+        with patch.object(docker,'Path',self.location):
+            self.assertEqual(f.load(config),config)
+            _,_,args=fixture.create_args(config,fixture.SID,f.root/'home')
+        self.assertNotIn('no-new-privileges',args)
+        self.assertEqual([args[i+1] for i,value in enumerate(args[:-1]) if value=='--cap-add'],['SETUID','SETGID'])
+        self.assertIn('DOCKER_HOST=unix:///run/reverie-docker/docker.sock',args)
+        self.assertIn('seccomp=/nix/store/fixture-profile',args)
+        config['rootlessDocker']=True
+        with self.assertRaises(ValueError):f.load(config)
 
     def test_invalid_toggle_and_non_nix_path_refuse(self):
         for value in (True,'yes',{'enabled':1},{'enabled':True,'seccompProfile':str(self.file),'seccompSha256':'0'*64}):
@@ -81,6 +95,17 @@ class WorkerDockerTests(unittest.TestCase):
         self.assertFalse(docker.granted([(100000,65536)],99999,65536))
         self.assertFalse(docker.granted([(100000,65536)],100001,65536))
         self.assertTrue(docker.granted([(100000,131072)],100001,65536))
+
+    def test_even_readonly_mounts_cannot_replace_identity_helpers_or_plugin_fallback(self):
+        for destination in ('/', '/etc', '/etc/passwd', '/etc/group', '/etc/subuid', '/etc/subgid',
+                '/etc/nsswitch.conf', '/etc/ld.so.preload', '/opt', '/opt/reverie-idmap',
+                '/opt/reverie-idmap/lib/libc.so.6', '/opt/idmap/fake/lib/gconv', '/bin', '/bin/newuidmap',
+                '//etc/passwd', '/etc/../etc/passwd'):
+            self.cfg['mounts']=[{'source':'/owner/selected', 'destination':destination, 'readOnly':True}]
+            with self.subTest(destination=destination),patch.object(docker,'Path',self.location):
+                self.assertRaises(ValueError,docker.enabled,self.cfg)
+        self.cfg['mounts']=[{'source':'/owner/selected','destination':'/projects/example','readOnly':False}]
+        with patch.object(docker,'Path',self.location):self.assertTrue(docker.enabled,self.cfg)
 
     def test_runc_wrapper_changes_only_create_run_not_argument_values(self):
         capture=self.root/'argv.json'

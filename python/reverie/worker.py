@@ -37,6 +37,7 @@ if __package__:
     from .worker_nix import prepare_store, store_guard
     from .worker_tmp import prepare_temporary, temporary_environment, write_storage_instructions, workspace_alias, home_workspace_alias
     from .worker_storage import storage_paths, storage_guard, prepare_storage, private_directory, storage_start_allowed, record_storage_binding, validate_storage
+    from .worker_docker import enabled as rootless_docker_enabled, require_image as require_docker_image, security_args as docker_security_args, runtime_args as docker_runtime_args
 else:
     # Host migration tools also load this file with spec_from_file_location;
     # their sys.path need not contain the sibling module's directory.
@@ -45,6 +46,7 @@ else:
     if _package_root not in sys.path:
         sys.path.insert(0, _package_root)
     from reverie.worker_storage import storage_paths, storage_guard, prepare_storage, private_directory, storage_start_allowed, record_storage_binding, validate_storage
+    from reverie.worker_docker import enabled as rootless_docker_enabled, require_image as require_docker_image, security_args as docker_security_args, runtime_args as docker_runtime_args
     _gpu_spec = importlib.util.spec_from_file_location('reverie_worker_gpu', Path(__file__).with_name('worker_gpu.py'))
     _gpu_module = importlib.util.module_from_spec(_gpu_spec)
     _gpu_spec.loader.exec_module(_gpu_module)
@@ -135,10 +137,11 @@ def load_config(path):
         raise ValueError("Worker configuration must be an owner-only regular file")
     config = json.loads(path.read_text())
     required = {'version', 'deployment', 'image', 'serverContainer', 'socket', 'stateRoot', 'companyFile', 'companyRoot', 'scratchRoot', 'apiSocketRoot', 'budgetMode', 'uid', 'gid', 'memoryMiB', 'poolMemoryMiB', 'poolTasksMax', 'cgroupParent', 'pidsLimit', 'cpus', 'maxWorkers', 'mounts', 'maintenanceSessions'}
-    if not isinstance(config, dict) or set(config) - {'gpuGrants','sessionResources'} != required or config['version'] != 1:
+    if not isinstance(config, dict) or set(config) - {'gpuGrants','sessionResources','rootlessDocker'} != required or config['version'] != 1:
         raise ValueError("Unsupported worker configuration")
     validate_gpu_grants(config.get('gpuGrants', {}))
     validate_session_resources(config)
+    rootless_docker_enabled(config)
     if not re.fullmatch(r'[a-z0-9][a-z0-9-]{0,39}', config['deployment']) or not re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9_.-]{0,62}', config['serverContainer']):
         raise ValueError("Invalid deployment identity")
     if not re.fullmatch(r'sha256:[a-f0-9]{64}', config['image']):
@@ -217,12 +220,13 @@ def create_args(config, session_id, home, *, scratch=None, storage=None):
     name = config['deployment'] + '-agent-' + session_id
     digest = hashlib.sha256(json.dumps(config, sort_keys=True).encode()).hexdigest()
     policy = hashlib.sha256(json.dumps({k: v for k, v in config.items() if k not in ['image', 'maintenanceSessions']}, sort_keys=True).encode()).hexdigest()
-    args = ['create', '--name', name, '--init', '--restart', 'no', '--read-only', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges',
+    args = ['create', '--name', name, '--init', '--restart', 'no', '--read-only', *docker_security_args(config),
             '--label', 'reverie.worker=' + config['deployment'], '--label', 'reverie.session=' + session_id, '--label', 'reverie.worker-config=' + digest, '--label', 'reverie.worker-policy=' + policy,
             '--user', f"{config['uid']}:{config['gid']}", '--cpu-shares', '1024',
             '--pids-limit', str(config['pidsLimit']), '--network', name + '-lan',
             '--tmpfs', '/run:rw,nosuid,nodev,size=16777216',
             '--mount', f'type=bind,src={home},dst=/home/agent', '--env', 'HOME=/home/agent', '--env', 'REVERIE_WORKER=1', '--env', 'REVERIE_INSTALL_CLIS=none']
+    args += docker_runtime_args(config)
     # The canonical storage resolver supplies the employee's stable scratch path.
     # Legacy SID fallback exists only for composition with the older caller.
     scratch = Path(config['scratchRoot']) / session_id if scratch is None else Path(scratch)
@@ -1005,6 +1009,11 @@ class Broker:
                     # Store copies may take time. Keep existing office phones,
                     # control actions and terminal attachments responsive.
                     prepared_config = effective_config(self.config, session_id)
+                    if rootless_docker_enabled(prepared_config):
+                        image = json.loads(self.run_engine(['image', 'inspect', prepared_config['image']]).stdout)
+                        if not isinstance(image, list) or len(image) != 1 or image[0].get('Id') != prepared_config['image']:
+                            raise RuntimeError('Rootless Docker image identity is unconfirmed')
+                        require_docker_image(prepared_config, image[0])
                     self.lock.release()
                     try:
                         nix_store = prepare_store(self, prepared_config, session_id)
