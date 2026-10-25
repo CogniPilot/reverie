@@ -40,21 +40,27 @@ def session_directory(config, session_id):
 
 def check_storage_fences(config,session_id,directory):
     """Shared by startup locking and actual store selection; no empty fallback."""
-    paths=storage_paths(config,session_id)
     fence=directory/'nix-migration.json'
     if fence.exists() or fence.is_symlink():
         marker=read_metadata(fence,config['uid'],limit=65536)
-        allowed=(paths.kind=='employee' and isinstance(marker,dict) and
-                 set(marker)=={'version','token','employeeId','sessionId','state'} and
-                 type(marker['version']) is int and marker['version']==2 and
-                 marker['employeeId']==paths.identity and marker['sessionId']==session_id and
+        candidate=(isinstance(marker,dict) and set(marker)=={'version','token','employeeId','sessionId','state'} and
+                 type(marker['version']) is int and marker['version']==2 and marker['sessionId']==session_id and
                  marker['state']=='employee-canonical' and isinstance(marker['token'],str) and
                  re.fullmatch('[0-9a-f]{32}',marker['token']))
-        if not allowed:raise RuntimeError('Laptop Nix migration is fenced; owner must finish or roll it back')
+        if not candidate:raise RuntimeError('Laptop Nix migration is fenced; owner must finish or roll it back')
+        paths=storage_paths(config,session_id)
+        if paths.kind!='employee' or marker['employeeId']!=paths.identity:
+            raise RuntimeError('Laptop Nix migration is fenced; employee binding differs')
         validate_storage(config,paths)
+    else:paths=storage_paths(config,session_id)
     if paths.kind=='employee':
-        _stable,employee_fence=lock_paths(config,paths)
+        try:_stable,employee_fence=lock_paths(config,paths)
+        except FileNotFoundError:
+            raise RuntimeError('Employee home and Nix require paired offline migration before startup') from None
         if employee_fence.exists() or employee_fence.is_symlink():raise RuntimeError('Employee laptop data is fenced')
+        try:validate_storage(config,paths)
+        except FileNotFoundError:
+            raise RuntimeError('Employee home and Nix require paired offline migration before startup') from None
     return paths
 
 

@@ -15,6 +15,7 @@ from reverie.worker_nix import private_store, store_guard, store_path
 from reverie.worker_nix_migrate import Migration, digest, private_json, read_private, registration, tree_digest
 
 SID=fixture.SID
+EMPLOYEE='11111111-2222-4333-8444-555555555556'
 SENTINEL='/nix/store/'+'b'*32+'-migration-sentinel'
 
 
@@ -58,13 +59,23 @@ class OfflineNixMigrationTests(unittest.TestCase):
         (package/'sentinel-link').symlink_to('sentinel')
         os.link(package/'sentinel',package/'hardlink')
         gc=self.source/'var/nix/gcroots';gc.mkdir();(gc/'profile').symlink_to('/home/agent/.nix-profile')
-        (self.root/'company.json').write_text(json.dumps({'employees':[dict(id='employee-1',sessionId=SID,desiredRunning=True,onVacation=False,runtimeRecipe={'model':'synthetic-model','subscriptionProfile':{'id':'selected'}})]}))
+        (self.root/'company.json').write_text(json.dumps({'employees':[dict(id=EMPLOYEE,sessionId=SID,desiredRunning=True,onVacation=False,runtimeRecipe={'model':'synthetic-model','subscriptionProfile':{'id':'selected'}})]}))
         self.target=dict(Id='a'*64,Image=self.config['image'],State=dict(Running=True,Pid=123),Config={'Labels':{'reverie.worker':'test','reverie.session':SID}},HostConfig={'Memory':4096},Mounts=[dict(Type='bind',Source=str(p),Destination=d,RW=True) for p,d in [(self.source,'/nix'),(self.home,'/home/agent'),(self.source.parent,'/scratch')]])
         self.migration=SyntheticMigration(self.config,{SID:self.target})
         self.plan=self.migration.plan(SID,sentinel=SENTINEL)
         self.saved=[]
 
     def phase(self,action): self.migration.phase(action,self.plan,lambda v:self.saved.append(copy.deepcopy(v)))
+
+    def assert_employee_requires_paired_storage(self):
+        # These tests qualify the legacy Nix-only DATA executor. Its published
+        # SID directory/rollback selector never authorizes a new employee-aware
+        # broker to seed an empty home or reopen a stale SID copy.
+        canonical=self.root/'workers/employees'/EMPLOYEE/'nix'
+        with self.assertRaisesRegex(RuntimeError,'paired offline migration'):
+            private_store(self.config,SID)
+        self.assertEqual(store_path(self.config,SID),canonical)
+        self.assertFalse(canonical.exists())
 
     def test_offline_copy_preserves_db_objects_profiles_permissions_and_hardlinks(self):
         before=registration(self.source)
@@ -78,7 +89,7 @@ class OfflineNixMigrationTests(unittest.TestCase):
         self.assertEqual(os.readlink(self.home/'.nix-profile'),SENTINEL)
         self.assertEqual(durable.stat().st_mode&0o777,0o700)
         self.assertTrue(self.source.exists()); self.assertFalse(self.migration.fence(self.plan).exists())
-        self.assertEqual(private_store(self.config,SID),durable)
+        self.assert_employee_requires_paired_storage()
         self.assertEqual([c[0] for c in self.migration.calls],['exec','stop'])
 
     def test_rollback_copies_latest_writes_and_keeps_both_originals(self):
@@ -91,7 +102,7 @@ class OfflineNixMigrationTests(unittest.TestCase):
         self.assertEqual((self.source/'store/new-after-migration').read_text(),'keep latest installation')
         self.assertTrue(Path(self.plan['retained']).exists())
         self.assertTrue((durable/'store/new-after-migration').exists())
-        self.assertEqual(private_store(self.config,SID),self.source)
+        self.assert_employee_requires_paired_storage()
 
     def test_no_copy_before_fence_and_stopped_exact_target(self):
         with self.assertRaises(FileNotFoundError): self.phase('stage')
@@ -131,7 +142,7 @@ class OfflineNixMigrationTests(unittest.TestCase):
             self.migration.phase('publish',self.plan,lambda value:private_json(receipt,value))
         self.assertEqual(observations,[(False,True,'staged'),(False,False,'published')])
         self.assertEqual(read_private(receipt)['phase'],'published')
-        self.assertEqual(private_store(self.config,SID),self.state/'nix')
+        self.assert_employee_requires_paired_storage()
 
     def test_selector_flush_failure_retains_fence_and_staged_receipt_for_retry(self):
         rollback=self.state/'nix-rollback.json'
@@ -152,7 +163,7 @@ class OfflineNixMigrationTests(unittest.TestCase):
         recovered=read_private(receipt)
         self.migration.phase('publish',recovered,lambda value:private_json(receipt,value))
         self.assertEqual(read_private(receipt)['phase'],'published')
-        self.assertEqual(private_store(self.config,SID),self.state/'nix')
+        self.assert_employee_requires_paired_storage()
 
     def test_reverse_publication_flushes_legacy_selector_before_unfencing(self):
         self.phase('quiesce');self.phase('stage');self.phase('publish')
@@ -167,7 +178,7 @@ class OfflineNixMigrationTests(unittest.TestCase):
             sync(path)
         with patch.object(migration_module,'sync_directory',side_effect=record):self.phase('publish')
         self.assertEqual(observations,[(True,True,'staged'),(True,False,'published')])
-        self.assertEqual(private_store(self.config,SID),self.source)
+        self.assert_employee_requires_paired_storage()
 
     def test_retry_flushes_absent_selector_before_publishing_the_receipt(self):
         rollback=self.state/'nix-rollback.json'
@@ -196,7 +207,7 @@ class OfflineNixMigrationTests(unittest.TestCase):
             sync(path)
         with patch.object(migration_module,'sync_directory',side_effect=record):self.phase('abort')
         self.assertEqual(observations,[(True,True,'staged'),(True,False,'aborted')])
-        self.assertEqual(private_store(self.config,SID),self.source)
+        self.assert_employee_requires_paired_storage()
 
     def test_reverse_abort_flushes_selector_removal_before_unfencing(self):
         self.phase('quiesce');self.phase('stage');self.phase('publish')
@@ -215,7 +226,7 @@ class OfflineNixMigrationTests(unittest.TestCase):
             sync(path)
         with patch.object(migration_module,'sync_directory',side_effect=record):self.phase('abort')
         self.assertEqual(observations,[(False,True,'staged'),(False,False,'aborted')])
-        self.assertEqual(private_store(self.config,SID),self.state/'nix')
+        self.assert_employee_requires_paired_storage()
 
     def test_new_activity_after_plan_requires_fresh_checkpoint_before_stop(self):
         self.target['State']['Pid']=456
@@ -223,13 +234,21 @@ class OfflineNixMigrationTests(unittest.TestCase):
         self.assertFalse(self.migration.fence(self.plan).exists())
         self.assertFalse(any(c[0]=='stop' for c in self.migration.calls))
 
-    def test_fence_blocks_new_creation_and_lock_covers_inflight_creation(self):
-        with store_guard(self.config,SID):
+    def test_fence_and_sid_lock_cover_overlapping_legacy_data_operations(self):
+        with store_guard(self.config,SID,migration=True):
             with self.assertRaises(BlockingIOError): self.phase('quiesce')
         self.phase('quiesce')
         with self.assertRaises(RuntimeError):
             with store_guard(self.config,SID): pass
         with self.assertRaises(RuntimeError): private_store(self.config,SID)
+
+    def test_existing_legacy_fence_refuses_before_employee_binding_lookup(self):
+        self.phase('quiesce')
+        (self.root/'company.json').write_text(json.dumps({'employees':[{'id':'malformed','sessionId':SID}]}))
+        with self.assertRaisesRegex(RuntimeError,'fenced'):private_store(self.config,SID)
+        with self.assertRaisesRegex(RuntimeError,'fenced'):
+            with store_guard(self.config,SID):pass
+        self.assertTrue(self.source.exists())
 
     def test_other_container_with_write_access_blocks_copy(self):
         self.phase('quiesce')
@@ -270,7 +289,7 @@ class OfflineNixMigrationTests(unittest.TestCase):
 
     def test_abort_restores_explicit_legacy_selection_without_deleting_stage(self):
         self.phase('quiesce');self.phase('stage');self.phase('abort')
-        self.assertEqual(private_store(self.config,SID),self.source)
+        self.assert_employee_requires_paired_storage()
         self.assertTrue(Path(self.plan['stage']).exists())
         self.assertFalse(self.migration.fence(self.plan).exists())
 
