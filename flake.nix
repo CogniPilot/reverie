@@ -54,6 +54,9 @@
           chatPythonLsp = pkgs.pyright;
           capabilitiesAddon = import ./nix/capabilities-addon.nix { inherit pkgs; src = self; };
           adminHarnessAddon = import ./nix/admin-harness-addon.nix { inherit pkgs; src = self; };
+          workerIdmap = import ./nix/worker-idmap.nix { inherit pkgs; };
+          workerDocker = import ./nix/worker-docker-tools.nix { inherit pkgs; src = self; };
+          workerDockerSeccomp = import ./nix/worker-docker-profile.nix { inherit pkgs; };
           chatModelicaLsp = import ./nix/chat-modelica-lsp.nix { inherit pkgs; };
           dockerImageWithChatLanguages = import ./nix/image.nix {
             inherit pkgs;
@@ -179,6 +182,14 @@
         brokerPackage = self.packages.${pkgs.stdenv.hostPlatform.system}.workerBroker;
       };
       packages = forAllSystems packagesFor;
+      lib.workerDockerImage = { system, uid, gid, subuidStart ? 100000, subgidStart ? 100000, subidCount ? 65536 }:
+        let pkgs = pkgsFor system; packages = packagesFor system;
+        in import ./nix/image.nix {
+          inherit pkgs; src = self;
+          inherit (packages) reverie console memory runtime;
+          worker = true;
+          rootlessDocker = { inherit uid gid subuidStart subgidStart subidCount; };
+        };
       apps = forAllSystems (system: {
         worker-service = { type = "app"; program = "${self.packages.${system}.workerServiceSetup}/bin/reverie-worker-service"; meta.description = "Install/control the existing owner user laptop broker without host OS configuration"; };
         launch-guard = { type = "app"; program = "${self.packages.${system}.launchGuard}/bin/reverie-launch-guard"; meta.description = "Evaluate metadata-only launch guard fixtures without live effects"; };

@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+set -euo pipefail
+# Do not grant keyctl to a laptop: kernel keyrings are not a per-container API.
+# Docker and BuildKit both resolve this fixed wrapper before the bundled runtime.
+args=()
+skip_value=false
+command_seen=false
+for value in "$@"; do
+  args+=("$value")
+  if "$skip_value"; then skip_value=false; continue; fi
+  if ! "$command_seen"; then
+    case "$value" in
+      --root|--log|--log-format|--rootless|--criu) skip_value=true ;;
+      -*) ;;
+      *)
+        command_seen=true
+        case "$value" in run|create) args+=(--no-new-keyring) ;; esac
+        ;;
+    esac
+  fi
+done
+exec @RUNC@ "${args[@]}"
