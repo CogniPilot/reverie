@@ -25,6 +25,14 @@ passwd/group bind mounts: identity, subordinate-ID metadata and mapping helpers
 come from the immutable image and cannot be replaced by grants, even read-only
 ones. Normal project mounts remain explicit.
 
+Enabled laptops accept static drives at `/workspace`, `/reverie_workspace`,
+`/projects` or `/projects/NAME`. The fixed publication, tool, statusline and model
+slots must be read-only. Other destinations and overlapping bind targets refuse,
+including nested selected-account binds. The matching factory verifies empty,
+plain mount namespaces before producing its layout label. This prevents a
+symlink inside a writable drive, or an image alias into writable Nix, from
+redirecting a later bind over privileged helper code or identity metadata.
+
 With the capability enabled, install the optional tools from a Reverie checkout:
 
 ```bash

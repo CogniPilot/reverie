@@ -37,7 +37,7 @@ if __package__:
     from .worker_nix import prepare_store, store_guard
     from .worker_tmp import prepare_temporary, temporary_environment, write_storage_instructions, workspace_alias, home_workspace_alias
     from .worker_storage import storage_paths, storage_guard, prepare_storage, private_directory, storage_start_allowed, record_storage_binding, validate_storage, read_metadata
-    from .worker_docker import enabled as rootless_docker_enabled, require_image as require_docker_image, security_args as docker_security_args, runtime_args as docker_runtime_args
+    from .worker_docker import enabled as rootless_docker_enabled, require_image as require_docker_image, security_args as docker_security_args, runtime_args as docker_runtime_args, require_account_mounts as require_docker_account_mounts
     from .worker_storage_labels import hostname as employee_hostname
 else:
     # Host migration tools also load this file with spec_from_file_location;
@@ -47,7 +47,7 @@ else:
     if _package_root not in sys.path:
         sys.path.insert(0, _package_root)
     from reverie.worker_storage import storage_paths, storage_guard, prepare_storage, private_directory, storage_start_allowed, record_storage_binding, validate_storage, read_metadata
-    from reverie.worker_docker import enabled as rootless_docker_enabled, require_image as require_docker_image, security_args as docker_security_args, runtime_args as docker_runtime_args
+    from reverie.worker_docker import enabled as rootless_docker_enabled, require_image as require_docker_image, security_args as docker_security_args, runtime_args as docker_runtime_args, require_account_mounts as require_docker_account_mounts
     from reverie.worker_storage_labels import hostname as employee_hostname
     _gpu_spec = importlib.util.spec_from_file_location('reverie_worker_gpu', Path(__file__).with_name('worker_gpu.py'))
     _gpu_module = importlib.util.module_from_spec(_gpu_spec)
@@ -292,6 +292,7 @@ def account_mounts(config, environment):
         if not source.is_relative_to(root) or not source.is_dir():
             raise ValueError('Selected tool account is unavailable')
         mounts[value] = str(source)
+    require_docker_account_mounts(config,list(mounts))
     return [arg for destination, source in mounts.items() for arg in ['--mount', f'type=bind,src={source},dst={destination}']]
 
 

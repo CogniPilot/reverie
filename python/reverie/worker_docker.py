@@ -10,6 +10,36 @@ import stat
 FEATURE_LABEL = 'org.reverie.worker.rootless-docker'
 UID_LABEL = 'org.reverie.worker.uid'
 GID_LABEL = 'org.reverie.worker.gid'
+LAYOUT_LABEL = 'org.reverie.worker.rootless-docker.mount-layout'
+
+
+def canonical_target(value):
+    if not isinstance(value, str):
+        raise ValueError('Explicit canonical worker mount destination required')
+    target = PurePosixPath(value)
+    if target.anchor != '/' or str(target) != value or '..' in target.parts:
+        raise ValueError('Canonical worker mount destination required')
+    return target
+
+
+def require_disjoint(targets):
+    for index, target in enumerate(targets):
+        if any(target.is_relative_to(other) or other.is_relative_to(target) for other in targets[:index]):
+            raise ValueError('Rootless Docker bind destinations must not overlap')
+
+
+def require_account_mounts(config, destinations):
+    """Call on the final selected account destination keys before engine create."""
+    if not enabled(config):
+        return
+    targets = [canonical_target(mount['destination']) for mount in config.get('mounts', [])]
+    roots = (PurePosixPath('/instances/default/accounts'), PurePosixPath('/instances/default/console/accounts'))
+    for value in destinations:
+        target = canonical_target(value)
+        if not any(target != root and target.is_relative_to(root) for root in roots):
+            raise ValueError('Rootless Docker account destination is outside the plain account namespace')
+        targets.append(target)
+    require_disjoint(targets)
 
 
 def require_immutable_mounts(config):
@@ -17,15 +47,25 @@ def require_immutable_mounts(config):
         '/opt/reverie-idmap', '/opt/idmap', '/bin/newuidmap', '/bin/newgidmap',
         '/etc/passwd', '/etc/group', '/etc/subuid', '/etc/subgid',
         '/etc/nsswitch.conf', '/etc/ld.so.preload', '/etc/ld.so.cache')]
+    readonly = {'/host-published', '/instances/default/tools',
+                '/instances/default/console/statusline-exporter.sh', '/run/reverie-model'}
+    drives = {'/workspace', '/reverie_workspace', '/projects'}
+    targets = []
     for mount in config.get('mounts', []):
-        value = mount.get('destination')
-        if not isinstance(value, str):
-            raise ValueError('Explicit canonical worker mount destination required')
-        target = PurePosixPath(value)
-        if target.anchor != '/' or str(target) != value or '..' in target.parts:
-            raise ValueError('Canonical worker mount destination required')
+        target = canonical_target(mount.get('destination'))
         if any(target.is_relative_to(path) or path.is_relative_to(target) for path in protected):
             raise ValueError('Worker mount masks immutable Docker identity or helper files')
+        # Lexical exclusions alone do not contain symlinks inside an earlier
+        # mount or image symlinks leading into writable /nix. Only image-factory
+        # namespaces verified plain/empty before mounting are eligible.
+        value = str(target)
+        project = target.parent == PurePosixPath('/projects') and re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,99}', target.name)
+        if value not in drives and value not in readonly and not project:
+            raise ValueError('Rootless Docker requires a plain approved mount destination')
+        if value in readonly and mount.get('readOnly') is not True:
+            raise ValueError('Rootless Docker tool, publication and model mounts must be read-only')
+        targets.append(target)
+    require_disjoint(targets)
 
 
 def enabled(config):
@@ -70,7 +110,8 @@ def require_image(config, image):
     selected = image['Config']
     labels = selected.get('Labels') or {}
     if (selected.get('User') != f"{config['uid']}:{config['gid']}" or labels.get(FEATURE_LABEL) != '1'
-            or labels.get(UID_LABEL) != str(config['uid']) or labels.get(GID_LABEL) != str(config['gid'])):
+            or labels.get(UID_LABEL) != str(config['uid']) or labels.get(GID_LABEL) != str(config['gid'])
+            or labels.get(LAYOUT_LABEL) != '1'):
         raise ValueError('Rootless Docker requires the reviewed capability image for this UID/GID')
     if config['uid'] != os.getuid():
         raise ValueError('Rootless Docker must use the normal broker owner identity')

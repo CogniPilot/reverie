@@ -33,7 +33,7 @@ import type { Socket } from 'node:net';
 import { ApiErrorCode, createErrorResponse } from '../types.js';
 import type { SessionPort } from '../web/ports/session-port.js';
 import { ownerFor, resolveParentSessionId } from '../web/route-helpers.js';
-import { claimDelegatedSessionCreate, consumeDelegatedSessionCreate, hasDelegatedSessionCreate } from './delegated-session-create.js';
+import { claimDelegatedSessionCreate, consumeDelegatedSessionCreate, hasDelegatedSessionCreate, delegatedSessionStartCaller } from './delegated-session-create.js';
 import type { OwnerAuthService } from './service.js';
 import type { Relations } from './relations.js';
 
@@ -232,7 +232,7 @@ export function callerOf(req: FastifyRequest, deps: Pick<PolicyDeps, 'service' |
   const token = req.headers[SERVICE_HEADER];
   if (typeof token === 'string' && deps.service.service(token)) return { kind: 'service' };
   if (req.headers['x-reverie-parent-session'] !== undefined) {
-    const id = resolveParentSessionId(deps.ctx, req, undefined, ownerFor(req));
+    const id = resolveParentSessionId(deps.ctx, req, undefined, ownerFor(req)) ?? delegatedSessionStartCaller(req);
     return id ? { kind: 'agent', session: id } : { kind: 'invalid' };
   }
   return { kind: 'anonymous' };

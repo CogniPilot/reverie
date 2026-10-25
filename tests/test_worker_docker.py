@@ -10,6 +10,7 @@ import unittest
 from unittest.mock import patch
 from reverie import worker_docker as docker
 from tests import test_worker as fixture
+from reverie.worker import account_mounts
 
 ROOT=Path(__file__).resolve().parents[1]
 
@@ -54,6 +55,18 @@ class WorkerDockerTests(unittest.TestCase):
         for value in (True,'yes',{'enabled':1},{'enabled':True,'seccompProfile':str(self.file),'seccompSha256':'0'*64}):
             with self.subTest(value=value):self.assertRaises(ValueError,docker.enabled,{'uid':os.getuid(),'gid':os.getgid(),'rootlessDocker':value})
 
+    def test_actual_account_arg_builder_refuses_nested_alias_targets_before_engine_use(self):
+        f=fixture.WorkerTests();f.setUp();self.addCleanup(f.doCleanups)
+        config=dict(f.config,rootlessDocker=self.cfg['rootlessDocker'])
+        account=Path(config['companyRoot'])/'console/accounts/selected'
+        (account/'nested').mkdir(parents=True)
+        environment={'CODEX_HOME':'/instances/default/console/accounts/selected'}
+        with patch.object(docker,'Path',self.location):
+            args=account_mounts(config,environment)
+            self.assertIn('type=bind,src='+str(account)+',dst='+environment['CODEX_HOME'],args)
+            with self.assertRaises(ValueError):
+                account_mounts(config,dict(environment,XDG_DATA_HOME=environment['CODEX_HOME']+'/nested'))
+
     def test_single_user_nix_owner_readonly_profile_accepted_but_write_or_hash_change_refuses(self):
         # Only the store-location mapping is synthetic; actual file ownership,
         # permission changes and bytes/hash are real. No global Nix writes.
@@ -80,6 +93,7 @@ class WorkerDockerTests(unittest.TestCase):
 
     def test_image_identity_and_actual_host_subordinate_grants_are_mandatory(self):
         labels={docker.FEATURE_LABEL:'1',docker.UID_LABEL:str(os.getuid()),docker.GID_LABEL:str(os.getgid()),
+            docker.LAYOUT_LABEL:'1',
             'org.reverie.worker.subuid-start':'100000','org.reverie.worker.subgid-start':'100000','org.reverie.worker.subid-count':'65536'}
         image={'Config':{'User':f'{os.getuid()}:{os.getgid()}','Labels':labels}}
         with patch.object(docker,'enabled',return_value=True),patch.object(docker,'host_grants',return_value=[(100000,65536)]):
@@ -111,7 +125,46 @@ class WorkerDockerTests(unittest.TestCase):
             with self.subTest(destination=destination),patch.object(docker,'Path',self.location):
                 self.assertRaises(ValueError,docker.enabled,self.cfg)
         self.cfg['mounts']=[{'source':'/owner/selected','destination':'/projects/example','readOnly':False}]
-        with patch.object(docker,'Path',self.location):self.assertTrue(docker.enabled,self.cfg)
+        with patch.object(docker,'Path',self.location):self.assertTrue(docker.enabled(self.cfg))
+
+    def test_aliasing_bind_views_and_image_symlink_targets_refuse(self):
+        project=self.root/'project';project.mkdir();(project/'alias').symlink_to('/etc',target_is_directory=True)
+        marker=project/'passwd';marker.write_text('synthetic override')
+        self.cfg['mounts']=[{'source':str(project),'destination':'/projects','readOnly':False},
+            {'source':str(marker),'destination':'/projects/alias/passwd','readOnly':True}]
+        with patch.object(docker,'Path',self.location):self.assertRaises(ValueError,docker.enabled,self.cfg)
+        # Both slots are individually supported; together the child can follow
+        # attacker-controlled aliases in the first mounted view.
+        self.cfg['mounts'][1]['destination']='/projects/child'
+        with patch.object(docker,'Path',self.location):self.assertRaisesRegex(ValueError,'overlap',docker.enabled,self.cfg)
+        for target in ('/etc/ssl/certs/alias','/home/agent/alias','/nix/store/alias','/scratch/alias',
+                '/tmp/alias','/opt/reverie-source','/instances/default/accounts/alias'):
+            self.cfg['mounts']=[{'source':str(project),'destination':target,'readOnly':True}]
+            with self.subTest(target=target),patch.object(docker,'Path',self.location):self.assertRaises(ValueError,docker.enabled,self.cfg)
+
+    def test_current_plain_slots_and_readonly_rules(self):
+        readonly=('/host-published','/instances/default/tools','/instances/default/console/statusline-exporter.sh','/run/reverie-model')
+        self.cfg['mounts']=[{'source':'/owner/selected','destination':value,'readOnly':True} for value in readonly]
+        self.cfg['mounts'] += [{'source':'/owner/project','destination':'/projects/example','readOnly':False},
+            {'source':'/owner/shared','destination':'/reverie_workspace','readOnly':False}]
+        with patch.object(docker,'Path',self.location):self.assertTrue(docker.enabled(self.cfg))
+        for target in readonly:
+            self.cfg['mounts']=[{'source':'/owner/selected','destination':target,'readOnly':False}]
+            with self.subTest(target=target),patch.object(docker,'Path',self.location):self.assertRaises(ValueError,docker.enabled,self.cfg)
+
+    def test_dynamic_accounts_are_disjoint_plain_slots_not_parent_views(self):
+        self.cfg['mounts']=[{'source':'/owner/tools','destination':'/instances/default/tools','readOnly':True}]
+        values=['/instances/default/accounts/claude','/instances/default/console/accounts/openai-fixture']
+        with patch.object(docker,'Path',self.location):docker.require_account_mounts(self.cfg,values)
+        for values in (['/instances/default/accounts'],['/home/agent/.codex'],['//instances/default/accounts/a'],
+                ['/instances/default/accounts/a','/instances/default/accounts/a/child'],
+                ['/instances/default/accounts/a','/instances/default/accounts/a']):
+            with self.subTest(values=values),patch.object(docker,'Path',self.location):self.assertRaises(ValueError,docker.require_account_mounts,self.cfg,values)
+
+    def test_old_capability_image_without_plain_namespace_guarantee_refuses(self):
+        labels={docker.FEATURE_LABEL:'1',docker.UID_LABEL:str(os.getuid()),docker.GID_LABEL:str(os.getgid())}
+        with patch.object(docker,'enabled',return_value=True):
+            self.assertRaises(ValueError,docker.require_image,self.cfg,{'Config':{'User':f'{os.getuid()}:{os.getgid()}','Labels':labels}})
 
     def test_runc_wrapper_changes_only_create_run_not_argument_values(self):
         capture=self.root/'argv.json'

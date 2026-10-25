@@ -47,6 +47,26 @@ pkgs.dockerTools.buildLayeredImage {
     printf 'root ALL=(ALL:ALL) ALL\nagent ALL=(ALL) NOPASSWD: ALL\n' > etc/sudoers
     printf 'hosts: files dns\npasswd: files\ngroup: files\n' > etc/nsswitch.conf
     ${pkgs.lib.optionalString (rootlessDocker != null) ''
+      # Static mount slots and account parents must never alias writable Nix or
+      # user data. Fail the image build if any future contents populate them.
+      mkdir -p nix
+      for directory in home nix opt scratch scratch/tmp; do
+        test -d "$directory" && test ! -L "$directory"
+      done
+      for directory in projects host-published workspace reverie_workspace instances run tmp sbin home/agent; do
+        if [ -e "$directory" ] || [ -L "$directory" ]; then
+          test -d "$directory" && test ! -L "$directory"
+          test -z "$(find "$directory" -mindepth 1 -print -quit)"
+        else
+          mkdir "$directory"
+        fi
+      done
+      mkdir -p instances/default/accounts instances/default/console/accounts instances/default/tools
+      for directory in instances/default instances/default/accounts instances/default/console instances/default/console/accounts instances/default/tools; do
+        test -d "$directory" && test ! -L "$directory"
+      done
+      : > instances/default/console/statusline-exporter.sh
+      chmod 0444 instances/default/console/statusline-exporter.sh
       printf 'agent:${toString rootlessDocker.subuidStart}:${toString rootlessDocker.subidCount}\n' > etc/subuid
       printf 'agent:${toString rootlessDocker.subgidStart}:${toString rootlessDocker.subidCount}\n' > etc/subgid
       rm -rf opt/reverie-idmap
@@ -132,6 +152,7 @@ pkgs.dockerTools.buildLayeredImage {
       "org.reverie.worker.subuid-start" = toString rootlessDocker.subuidStart;
       "org.reverie.worker.subgid-start" = toString rootlessDocker.subgidStart;
       "org.reverie.worker.subid-count" = toString rootlessDocker.subidCount;
+      "org.reverie.worker.rootless-docker.mount-layout" = "1";
     };
   };
 }

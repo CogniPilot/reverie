@@ -31,7 +31,9 @@ describe('agent-requested cross-provider migration in enforce mode', () => {
     manager: string,
     employee: any,
     managerEmployee: any,
-    destination: string;
+    destination: string,
+    originAccount: string;
+  let afterSourceCleanup: ((id: string) => Promise<void>) | undefined;
   const headers = { host: 'localhost', origin: 'http://localhost' },
     password = 'fixture-violet-saturn-kettle-82-Z';
   const owner = (method: string, url: string, payload?: any) =>
@@ -52,7 +54,9 @@ describe('agent-requested cross-provider migration in enforce mode', () => {
       return getCli(this.mode)!.capabilities.composerReadyMark!;
     });
     vi.spyOn(Session.prototype, 'isWorking', 'get').mockReturnValue(false);
-    vi.spyOn(Session.prototype, 'startInteractive').mockResolvedValue(undefined);
+    vi.spyOn(Session.prototype, 'startInteractive').mockImplementation(async function (this: Session) {
+      if (this.parentSessionId === source) expect(server.sessions.has(source)).toBe(false);
+    });
     vi.spyOn(Session.prototype, 'writeViaMux').mockImplementation(async (_text, options) => {
       options?.onOutcome?.('submitted');
       return true;
@@ -63,7 +67,9 @@ describe('agent-requested cross-provider migration in enforce mode', () => {
     server.mux.isPaneDead = () => false;
     vi.spyOn(server.mux, 'capturePaneText').mockReturnValue('? for shortcuts shift+tab');
     vi.spyOn(server, 'cleanupSession').mockImplementation(async (id: any) => {
+      await server.companyService.setDesiredRunning(id, false);
       server.sessions.delete(id);
+      await afterSourceCleanup?.(id);
     });
     const login = await app.inject({
       method: 'POST',
@@ -79,6 +85,7 @@ describe('agent-requested cross-provider migration in enforce mode', () => {
       provider: 'openai',
       configDir: join(directory, 'first'),
     });
+    originAccount = first.id;
     destination = (
       await addSubscriptionProfile({
         label: 'Fixture Claude',
@@ -198,5 +205,50 @@ describe('agent-requested cross-provider migration in enforce mode', () => {
     ).toBe(403);
     expect(server.sessions.size).toBe(2);
     await owner('POST', `/api/plans/requests/${second.id}/cancel`);
+  });
+
+  it.each(['grant', 'owner-stop', 'vacation'] as const)('refuses fresh %s after intentional source deletion before any target start', async change => {
+    const created = await owner('POST', '/api/sessions', { workingDir: directory, mode: 'codex', name: 'Boundary ' + change, subscriptionProfileId: originAccount });
+    expect(created.statusCode).toBe(200);
+    const id = created.json().data.session.id;
+    const hired = await owner('POST', '/api/company/employees', { sessionId: id, name: 'Boundary ' + change, position: 'Developer', icon: 'T', expertise: ['testing'] });
+    expect(hired.statusCode).toBe(200);
+    const subject = hired.json().data.employee;
+    const input = { id: 'revoked-after-stop-' + change, employeeId: subject.id, sessionId: id, toAccount: destination };
+    expect((await owner('PUT', `/api/company/employees/${subject.id}`, { permissions: { moveOwnPlan: true } })).statusCode).toBe(200);
+    expect((await agent(id, '/api/plans/agent-requests', input)).statusCode).toBe(202);
+    const { nonce } = await new PlanRequestCapabilities().read(id, input.id);
+    const starts = vi.mocked(Session.prototype.startInteractive).mock.calls.length;
+    let revoked = false;
+    afterSourceCleanup = async removed => {
+      if (removed !== id) return;
+      expect(server.sessions.has(id)).toBe(false);
+      if (change === 'owner-stop') {
+        // Exercise the same durable service write used by owner cleanup/Stop All,
+        // while leaving the candidate object present to isolate the intent gate.
+        for (const row of server.companyService.view().employees)
+          await server.companyService.setDesiredRunning(row.sessionId, false);
+      } else expect((await owner(change === 'grant' ? 'PUT' : 'POST', `/api/company/employees/${subject.id}` + (change === 'vacation' ? '/vacation' : ''), change === 'grant'
+        ? { permissions: { moveOwnPlan: false } } : { enabled: true })).statusCode).toBe(200);
+      revoked = true;
+    };
+    try {
+      expect((await agent(id, `/api/plans/requests/${input.id}/approve`, { nonce, handoff: 'This must not launch after revocation.' })).statusCode).toBe(202);
+      let record: any;
+      for (let attempt = 0; attempt < 100; attempt++) {
+        record = (await owner('POST', `/api/plans/requests/${input.id}/status`)).json().data;
+        if (['completed', 'failed', 'recovery-required'].includes(record.phase)) break;
+        await new Promise(resolve => setTimeout(resolve, 20));
+      }
+      expect(revoked).toBe(true);
+      expect(record).toMatchObject({ phase: 'recovery-required', newSession: expect.any(String) });
+      expect(server.sessions.has(id)).toBe(false);
+      expect(server.sessions.has(record.newSession)).toBe(false);
+      expect(vi.mocked(Session.prototype.startInteractive).mock.calls.length).toBe(starts);
+      expect(server.companyService.view().employees.find((item: any) => item.id === subject.id)).toMatchObject({
+        sessionId: record.newSession, desiredRunning: false,
+        ...(change === 'grant' ? { permissions: { moveOwnPlan: false } } : change === 'vacation' ? { onVacation: true } : {}),
+      });
+    } finally { afterSourceCleanup = undefined; }
   });
 });
