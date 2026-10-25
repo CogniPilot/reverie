@@ -11,6 +11,8 @@ Each expert is a generic AI agent with its own identity and memory. A role templ
 
 Reporting relationships cannot refer to the expert itself or form a cycle. Company default means the existing implicit reporting relationship is preserved: normally the briefing coordinator, with the coordinator reporting to the owner. Changing a reporting parent does not appoint that person as briefing coordinator or grant recovery authority.
 
+For quick changes, use **Reports to** directly on each Company card. Choose yourself or another expert; the change saves immediately and moves the card into the reporting tree. For example, have your coordinator report to you, project leads report to the coordinator, and specialists report to their lead. Reporting lines do not grant tool permissions.
+
 ## Identity and authority
 
 Profile changes update the role context; they do not replace the expert's memory. Use [Runtime settings](/handbook/models) for plan, harness, model or effort changes.

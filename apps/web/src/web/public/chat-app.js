@@ -2415,6 +2415,8 @@ class ReverieChatApp {
       if (!res.ok) { status.textContent = `Could not load company: ${res.error}`; return; }
       const data = res.data || {};
       const employees = data.employees || [];
+      const reportingParent = employee => employee.reportsTo ??
+        (employee.id === data.settings?.coordinatorEmployeeId ? 'owner' : data.settings?.coordinatorEmployeeId || 'owner');
       const manage = data.canManage === true && auth.ok && auth.data?.self === 'owner' && auth.data?.canSetOwn === true;
       status.textContent = '';
       const cards = new Map();
@@ -2427,9 +2429,63 @@ class ReverieChatApp {
         avatar.append(this.el('span', 'chatroom-avatar-glyph', employee.icon || '👤'));
         if (employee.avatar) this.fillAvatar(avatar, employee.avatar);
         title.append(avatar, this.literalText('strong', '', employee.name));
-        const parent = employee.reportsTo && employee.reportsTo !== 'owner' ? employees.find(e => e.id === employee.reportsTo)?.name : data.settings?.ownerName || 'Owner';
+        const parentId = reportingParent(employee);
+        const parent = parentId !== 'owner' ? employees.find(e => e.id === parentId)?.name : data.settings?.ownerName || 'Owner';
         card.append(title, this.literalText('span', 'ca-company-role', employee.position || ''), parent ? this.literalText('span', 'ca-company-parent', parent) : this.el('span', 'ca-company-parent', 'Unassigned'), this.el('span', `ca-company-state${employee.available && !employee.onVacation ? ' is-connected' : ''}`, employee.onVacation ? 'Out of office' : employee.available ? 'Connected' : 'Disconnected'));
         if (manage) {
+          const reporting = this.el('label', 'ca-company-reporting');
+          reporting.append(this.el('span', 'ca-hint', 'Reports to'));
+          const manager = this.el('select', 'ca-field');
+          manager.setAttribute('aria-label', `Reports to for ${employee.name}`);
+          const addManager = (id, name) => {
+            const option = this.literalText('option', '', name); option.value = id; manager.append(option);
+          };
+          if (!employee.reportsTo) addManager('', `Company default (${parent || 'Unassigned'})`);
+          addManager('owner', data.settings?.ownerName || 'Owner');
+          for (const candidate of employees) {
+            // Do not offer self or descendants; the server rechecks the current
+            // hierarchy atomically, including edits made in another browser.
+            let next = candidate.id;
+            const seen = new Set();
+            while (next && next !== 'owner' && next !== employee.id && !seen.has(next)) {
+              seen.add(next);
+              const node = employees.find(e => e.id === next);
+              next = node ? reportingParent(node) : undefined;
+            }
+            if (next !== employee.id) addManager(candidate.id, candidate.name);
+          }
+          manager.value = employee.reportsTo || '';
+          if (!employee.reportsTo) manager.options[0].disabled = true;
+          const reportingStatus = this.el('span', 'ca-company-error');
+          reportingStatus.setAttribute('role', 'status');
+          manager.addEventListener('change', async () => {
+            if (manager.disabled || !manager.value) return;
+            const previous = employee.reportsTo || '';
+            const selected = manager.value;
+            manager.disabled = true;
+            reportingStatus.textContent = 'Saving…';
+            const controller = new AbortController();
+            const timeout = setTimeout(() => controller.abort(), 8000);
+            try {
+              const result = await this.app._chatApi(`/api/company/employees/${encodeURIComponent(employee.id)}`, {
+                method: 'PUT', body: { reportsTo: selected }, signal: controller.signal,
+              });
+              if (!result.ok) throw new Error(result.error || 'Request refused');
+              if (result.data?.employee?.id !== employee.id || result.data.employee.reportsTo !== selected)
+                throw new Error('Save not confirmed. Reopen Company to check the reporting line.');
+              employee.reportsTo = selected;
+              await paint();
+              status.textContent = 'Reporting line saved.';
+            } catch (error) {
+              manager.value = previous;
+              reportingStatus.textContent = `Could not save reporting line: ${error.message}`;
+            } finally {
+              clearTimeout(timeout);
+              manager.disabled = false;
+            }
+          });
+          reporting.append(manager, reportingStatus);
+          card.querySelector('.ca-company-parent').replaceWith(reporting);
           const label = this.el('label', 'ca-hint', ' May recover disconnected employee sessions');
           const recovery = this.el('input', '');
           recovery.type = 'checkbox';
@@ -2564,7 +2620,7 @@ class ReverieChatApp {
       const visited = new Set();
       const branch = (parentId, ancestors = new Set()) => {
         const list = this.el('ul', '');
-        for (const e of employees.filter(e => (e.reportsTo || 'owner') === parentId)) {
+        for (const e of employees.filter(e => reportingParent(e) === parentId)) {
           if (ancestors.has(e.id) || visited.has(e.id)) continue;
           visited.add(e.id);
           const item = this.el('li', '');

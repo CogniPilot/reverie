@@ -324,6 +324,61 @@ describe('owner chooses one crash recovery expert', () => {
   });
 });
 
+describe('reporting lines directly on company cards', () => {
+  it('saves only the chosen manager, redraws the hierarchy and keeps it after reopening', async () => {
+    const { handle, company, employee } = await recoveryFixture({}, [
+      { id: 'lead', name: 'Project lead', reportsTo: 'owner' },
+      { id: 'report', name: 'Specialist', reportsTo: 'employee-one' },
+    ]);
+    const previous = handle.app._chatApi.bind(handle.app);
+    const writes: any[] = [];
+    handle.app._chatApi = async (path: string, options: any) => {
+      if (path === '/api/company/employees/' + employee.id && options?.method === 'PUT') {
+        writes.push(options.body); Object.assign(employee, options.body);
+        return { ok: true, data: { employee } };
+      }
+      return previous(path, options);
+    };
+    const select = handle.document.querySelector<HTMLSelectElement>('[aria-label="Reports to for Reviewer"]')!;
+    expect([...select.options].map(option => option.value)).toEqual(['owner', 'lead']);
+    select.value = 'lead'; select.dispatchEvent(new handle.window.Event('change'));
+    await handle.flush();
+    expect(writes).toEqual([{ reportsTo: 'lead' }]);
+    expect(handle.document.querySelector('.ca-company > [role="status"]')!.textContent).toBe('Reporting line saved.');
+    const lead = handle.document.querySelector('[data-employee-id="lead"].ca-company-person')!;
+    expect(lead.closest('li')!.querySelector(':scope > ul > li > [data-employee-id="employee-one"]')).not.toBeNull();
+    handle.shell.closePage(); await handle.shell.openCompany();
+    expect(handle.document.querySelector<HTMLSelectElement>('[aria-label="Reports to for Reviewer"]')!.value).toBe('lead');
+    expect(company.employees).toHaveLength(3);
+  });
+
+  it('restores the previous manager on a refused save and explains the failure', async () => {
+    const { handle } = await recoveryFixture({}, [{ id: 'lead', name: 'Lead', reportsTo: 'owner' }]);
+    const previous = handle.app._chatApi.bind(handle.app);
+    handle.app._chatApi = async (path: string, options: any) => options?.method === 'PUT'
+      ? { ok: false, error: 'Reporting hierarchy cannot contain a cycle' }
+      : previous(path, options);
+    const select = handle.document.querySelector<HTMLSelectElement>('[aria-label="Reports to for Reviewer"]')!;
+    select.value = 'lead'; select.dispatchEvent(new handle.window.Event('change')); await handle.flush();
+    expect(select.value).toBe('owner'); expect(select.disabled).toBe(false);
+    expect(select.closest('.ca-company-reporting')!.textContent).toContain('Could not save reporting line: Reporting hierarchy cannot contain a cycle');
+  });
+
+  it('shows inherited reporting lines under the actual coordinator', async () => {
+    const { handle } = await recoveryFixture({ coordinatorEmployeeId: 'employee-one' }, [{ id: 'legacy', name: 'Legacy' }]);
+    const select = handle.document.querySelector<HTMLSelectElement>('[aria-label="Reports to for Legacy"]')!;
+    expect(select.selectedOptions[0].textContent).toBe('Company default (Reviewer)');
+    const lead = handle.document.querySelector('[data-employee-id="employee-one"].ca-company-person')!;
+    expect(lead.closest('li')!.querySelector(':scope > ul > li > [data-employee-id="legacy"]')).not.toBeNull();
+  });
+
+  it('keeps reporting controls owner-only', async () => {
+    const { handle } = await fixture(); await handle.shell.openCompany();
+    expect(handle.document.querySelector('[aria-label="Reports to for Reviewer"]')).toBeNull();
+    expect(handle.document.querySelector('.ca-company-parent')!.textContent).toBe('Owner name');
+  });
+});
+
 it('shows saved Sleep/Dream preferences and lets the owner change them during vacation without changing recovery grants', async () => {
   const { handle, employee, company } = await fixture();
   company.canManage = true;

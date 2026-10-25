@@ -1427,6 +1427,9 @@ button.ca-stat:focus-visible { outline:2px solid var(--accent); outline-offset:2
 .ca-company-person-title { grid-column:1; }
 .ca-company .ca-company-state { grid-column:2; grid-row:1; align-self:center; }
 .ca-company .ca-company-role,.ca-company .ca-company-parent { grid-column:1/-1; font-size:12px; }
+.ca-company-reporting { grid-column:1/-1; display:flex; flex-wrap:wrap; gap:6px; align-items:center; }
+.ca-company-reporting select { flex:1; min-width:0; max-width:100%; }
+.ca-company-reporting [role="status"] { flex-basis:100%; }
 .ca-company-person-controls > label { flex-basis:100%; font-size:11px; }
 .ca-company .ca-company-actions { flex-wrap:wrap; gap:8px; }
 .ca-company .ca-company-work { padding-top:6px; font-size:12px; }
