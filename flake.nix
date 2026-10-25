@@ -60,6 +60,7 @@
             inherit pkgs; src = self;
             prune = self.packages.${system}.pruneR12;
           };
+          cleanupObservations = import ./nix/cleanup-observations.nix { inherit pkgs; src = self; };
           adminHarnessAddon = import ./nix/admin-harness-addon.nix { inherit pkgs; src = self; };
           workerIdmap = import ./nix/worker-idmap.nix { inherit pkgs; };
           workerDocker = import ./nix/worker-docker-tools.nix { inherit pkgs; src = self; };
@@ -193,6 +194,10 @@
         pruneHostPackage = self.packages.${pkgs.stdenv.hostPlatform.system}.pruneDeclared;
         prunePackage = self.packages.${pkgs.stdenv.hostPlatform.system}.pruneR12;
       };
+      nixosModules.reverieCollect = { config, lib, pkgs, ... }: import ./nix/collect-service.nix {
+        inherit config lib pkgs;
+        observationsPackage = self.packages.${pkgs.stdenv.hostPlatform.system}.cleanupObservations;
+      };
       packages = forAllSystems packagesFor;
       lib.workerDockerImage = { system, uid, gid, subuidStart ? 100000, subgidStart ? 100000, subidCount ? 65536 }:
         let pkgs = pkgsFor system; packages = packagesFor system;
@@ -224,7 +229,16 @@
           pkgs = pkgsFor system;
           packages = self.packages.${system};
         in {
-          inherit (packages) reverie memoryPackage start update gpuPublisher previewProxy previewService prune pruneR12;
+          inherit (packages) reverie memoryPackage start update gpuPublisher previewProxy previewService prune pruneR12 cleanupObservations;
+          collectService = pkgs.runCommand "reverie-collect-service-evaluation" {
+            checks = builtins.toJSON (import ./tests/collect_service_eval.nix {
+              inherit nixpkgs system;
+              observationsPackage = packages.cleanupObservations;
+            });
+          } ''
+            mkdir -p "$out"
+            printf '%s\n' "$checks" > "$out/checks.json"
+          '';
           pruneService = let
             evaluated = import ./tests/prune_service_eval.nix {
               inherit nixpkgs system;
