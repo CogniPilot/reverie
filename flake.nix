@@ -54,6 +54,7 @@
           chatPythonLsp = pkgs.pyright;
           capabilitiesAddon = import ./nix/capabilities-addon.nix { inherit pkgs; src = self; };
           prune = import ./nix/prune.nix { inherit pkgs; src = self; };
+          pruneR12 = import ./nix/prune-r12.nix { inherit pkgs; src = self; };
           pruneHost = import ./nix/prune-host.nix { inherit pkgs; src = self; };
           adminHarnessAddon = import ./nix/admin-harness-addon.nix { inherit pkgs; src = self; };
           workerIdmap = import ./nix/worker-idmap.nix { inherit pkgs; };
@@ -183,6 +184,11 @@
         inherit config lib pkgs;
         brokerPackage = self.packages.${pkgs.stdenv.hostPlatform.system}.workerBroker;
       };
+      nixosModules.reveriePrune = { config, lib, pkgs, ... }: import ./nix/prune-service.nix {
+        inherit config lib pkgs;
+        pruneHostPackage = self.packages.${pkgs.stdenv.hostPlatform.system}.pruneHost;
+        prunePackage = self.packages.${pkgs.stdenv.hostPlatform.system}.prune;
+      };
       packages = forAllSystems packagesFor;
       lib.workerDockerImage = { system, uid, gid, subuidStart ? 100000, subgidStart ? 100000, subidCount ? 65536 }:
         let pkgs = pkgsFor system; packages = packagesFor system;
@@ -214,7 +220,19 @@
           pkgs = pkgsFor system;
           packages = self.packages.${system};
         in {
-          inherit (packages) reverie memoryPackage start update gpuPublisher previewProxy previewService prune;
+          inherit (packages) reverie memoryPackage start update gpuPublisher previewProxy previewService prune pruneR12;
+          pruneService = let
+            evaluated = import ./tests/prune_service_eval.nix {
+              inherit nixpkgs system;
+              pruneHostPackage = packages.pruneHost;
+              prunePackage = packages.prune;
+            };
+          in pkgs.runCommand "reverie-prune-service-evaluation" {
+            checks = builtins.toJSON evaluated.checks;
+          } ''
+            mkdir -p "$out"
+            printf '%s\n' "$checks" > "$out/checks.json"
+          '';
           nativeSmoke = pkgs.runCommand "reverie-native-smoke" { } ''
             export HOME="$TMPDIR/home"
             export REVERIE_INSTALL_CLIS=none

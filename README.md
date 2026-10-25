@@ -499,6 +499,11 @@ is removed without following it. Failed/unfinished work, project repositories,
 memories and shared caches are not part of this cleanup. This is a task-level tool;
 it does not perform global Docker/Podman pruning or run a nightly scheduler.
 
+For separate root-controlled dry-run cleanup observations, see
+[disk cleanup](docs/disk-cleanup.md) and the opt-in, reboot-persistent
+[NixOS module](docs/disk-cleanup-nixos.md). Production live cleanup remains
+unqualified.
+
 ## Validation
 
 ```bash

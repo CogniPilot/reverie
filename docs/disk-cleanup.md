@@ -5,10 +5,21 @@ wrapper always supplies `--dry-run`; combining it with `--live` is refused.
 There is no automatic installation, deletion, Nix garbage collection, laptop
 restart or change to a personal NixOS repository.
 
+For opt-in, reboot-persistent NixOS units, use the tracked
+[`nixosModules.reveriePrune` module](disk-cleanup-nixos.md). Its service and
+observation timer default off; this portable bootstrap remains runtime-only.
+
 Production live cleanup is **not qualified**. Root/filesystem identity admission,
 owner-approved registry provenance, real host/laptop lease visibility, same-device
 bind preservation and phase-3 acceptance remain separate gates. Dry-run reports
 are observations, not permission to delete their candidates.
+
+The separate `pruneR12` flake package contains the hash-pinned r12 candidate and
+lease r7 for operator acceptance. Build it with `nix build .#pruneR12`. Its public
+wrapper also refuses live mode. Building it does not upgrade the r8 installer
+or declared service; the r8 installer rejects the different source pins.
+The raw immutable source supports separately reviewed synthetic host fixtures,
+with host lock, mount-preservation and report acceptance still required.
 
 ## Prepare without changing the host
 
