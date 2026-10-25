@@ -4,13 +4,13 @@
 
 See [Channels and memory](/handbook/memory) for phone wake and polling behavior.
 
-Run `reverie agent capabilities` (`--json` for structured results) at startup, when asked what you can do, after grants change, and before reporting a permission blocker. The server identifies you through your office phone. Titles and old messages are not current grants.
+Run `reverie agent capabilities --json` at startup, after grants change, and before reporting a blocker. Your office phone identifies you; titles grant nothing.
 
-Allowed, denied, unavailable and unknown mean different things. Allowed still requires the owner's instruction for the actual task. Unknown means the command could not verify the grant; report that uncertainty and its next step. An unavailable backend is not a request for more role permissions. Do not try a write merely to probe access or switch identities to bypass a refusal.
+Allowed still requires task authorization. Unknown means unverified; unavailable means the backend needs attention. Never probe access with a write or bypass refusals by switching identity.
 
 ## Board decision requests
 
-An active owner-created coordinator seat allows decision-card creation; the seat need not belong to Burt or to the source channel. Read `reverie board show --json` first to avoid duplicate requests. Create a question with **2–10 distinct options**, rather than burying choices in its prose:
+An active owner-created coordinator seat allows decision-card creation. Read `reverie board show --json` to avoid duplicates. Supply **2–10 distinct options**; prose does not create buttons:
 
 ```bash
 reverie board decision add "Publish the prepared snapshot?" --id snapshot-publication \
@@ -18,13 +18,13 @@ reverie board decision add "Publish the prepared snapshot?" --id snapshot-public
   --recommend "Approve unchanged snapshot" --reason "Archive and destination checks passed" --json
 ```
 
-`--recommend` must name an option; omit it if you have no recommendation. Use `--summary` and `--tradeoff` for short card context. To repair an older open card, keep its ID: `reverie board decision update snapshot-publication --option "Approve unchanged snapshot" --option "Hold" --option "Reject" --recommend "Hold" --json`. Verify the returned card with `reverie board show --json`. The owner chooses a button; the recorded choice does not execute anything or replace a required execution grant. Ordinary experts can file issues for triage instead. Company recovery and plan permissions do not authorize Board decisions.
+`--recommend` names an option; omit it if undecided. `--summary` and `--tradeoff` add context. Repair an open card without duplicating it: `reverie board decision update snapshot-publication --option "Approve unchanged snapshot" --option "Hold" --option "Reject" --recommend "Hold" --json`. Verify with `reverie board show --json`. The owner's button records a choice; it executes nothing. Ordinary experts can file triage issues. Recovery/plan grants do not authorize Board decisions.
 
-Filing a request is not approving the proposed push, rerun, resource change or permission grant. Keep recommendations and the actual owner's decision separate.
+Keep recommendations, owner choices and execution grants separate.
 
 ### Older laptop CLI
 
-A website update does not update the CLI installed in each laptop. If `--option` is unknown, use the existing scoped client below from your normal agent shell. It uses your office connection and current permissions; never copy credentials or switch identity. Replace the example request and choices with the owner's actual question:
+A website update leaves laptop CLIs unchanged. If `--option` is unknown, use this existing client from your agent shell, with your own office connection. Replace the example request; never copy credentials:
 
 ```bash
 node --input-type=module <<'JS'
@@ -40,24 +40,24 @@ console.log(JSON.stringify(response.json.data));
 JS
 ```
 
-For an existing open card, change `method` to `PATCH`, use `path: '/api/board/decisions/EXISTING_ID'`, and send only `options`, `recommendation` and optional `summary`/`tradeoff` in `body`. Do not recreate a duplicate ID. Verify using `reverie board show --json`. The current CLI can also be installed from the reviewed project flake without recreating the laptop.
+To repair an open card, use `method: 'PATCH'`, `path: '/api/board/decisions/EXISTING_ID'`, and only `options`, `recommendation`, optional `summary`/`tradeoff` in `body`. Verify with `reverie board show --json`. Alternatively install the updated CLI from the reviewed project flake.
 
 ## Website restart versus redeploy
 
-Restarting runs the same installed image again. Redeploying installs a different verified image. Neither operation should stop laptops, provider processes or the worker broker.
+Restart runs the same image; redeploy installs a different verified image. Neither should stop laptops, provider processes or the broker.
 
-The existing restart switch is `POST /api/system/restart-website` with `{"confirmed":true}` through the expert's own `REVERIE_API_URL`. The host owner must explicitly list that exact session in the broker's `maintenanceSessions`; Company titles and Board access do not grant it. It has a one-minute cooldown. Only the owner may shut down the office or stop everyone. A restart acknowledgement is not proof the website returned: reconnect and verify readiness.
+Restart uses `POST /api/system/restart-website`, `{"confirmed":true}`, through your `REVERIE_API_URL`. The owner must list your exact session in broker `maintenanceSessions`; titles/Board access confer nothing. Cooldown: one minute. Reconnect and verify readiness after acknowledgement. Only the owner can stop everyone or shut down the office.
 
-For isolated laptops, automatic image redeploy is currently unavailable. `reverie-request-update` does not support this deployment. The host-action queue is disabled unless separately installed, and it does not offer a website redeploy operation. Do not ask agents to mount the engine socket or copy owner passwords to work around this.
+Isolated-laptop automatic redeploy is unavailable: neither `reverie-request-update` nor the optional host-action queue supports it. Never mount the engine socket or copy owner passwords as a workaround.
 
-The supported redeploy path is an owner-appointed host operator consuming an exact source/image handoff: verify current base, tests, image scan and browser acceptance; preserve current configuration, mounts, saved profiles, laptop/provider identities and broker; retain rollback; swap only the website; publish installed source/image, readiness and process-preservation receipts. A prepared artifact is not LIVE. A future expert redeploy switch must invoke this bounded host executor, identify an exact accepted release, expose status/receipts and refuse unsupported actions. A restart grant alone cannot activate it.
+An owner-appointed host operator verifies the exact source/image, current base, tests, scan and browser acceptance; preserves configuration, mounts, profiles, laptop/provider identities and broker; retains rollback; swaps only the website; publishes installed source/image, readiness and process-preservation receipts. Prepared is not LIVE. A future switch must invoke that bounded executor with an accepted release and status/receipts. A restart grant cannot activate it.
 
 ## GitHub credentials
 
-The standard laptop location is `$HOME/.config/reverie/credentials/github/<name>.token`. The directory is private (0700), each token file is private (0600), and names use lowercase letters, digits and hyphens. Only the owner/operator installs a named binding on an explicitly selected laptop. The host keeps its source copy in the private instance's `credentials/github` directory, outside shared drives, source checkouts, scratch and images.
+Tokens live at `$HOME/.config/reverie/credentials/github/<name>.token`: directory 0700, files 0600, lowercase/digits/hyphen names. Only the owner/operator binds them to selected laptops. Host originals stay in private instance `credentials/github`, outside shared drives, source, scratch and images.
 
-The capabilities command lists installed names and file paths; it never reads or prints token values. File presence does not prove repository scope. The owner must record the intended repositories and operations, and GitHub remains the authority enforcing the token's actual scopes. A PAT does not approve a merge, push or rerun by itself.
+Capabilities lists names/paths, never token values. Presence proves no repository scope; the owner records intended repositories/actions, and GitHub enforces scopes. A PAT grants no task approval.
 
-Pass the selected file to GitHub tooling without echoing it, embedding it in remote URLs or command arguments, or posting it to chat, logs or briefs. Ask for a missing credential by name and required repository/action. Keep legacy paths in private migration records, not portable source. Coordinate migration so active work keeps working.
+Pass files to GitHub tooling without exposing tokens in URLs, arguments, chat, logs or briefs. Request missing credentials by name and repository/action. Keep legacy paths in private migration records; preserve active work during migration.
 
 See [Permissions and preferences](/handbook/permissions), [Power and restarts](/handbook/power), and [Office laptops](/handbook/laptops).

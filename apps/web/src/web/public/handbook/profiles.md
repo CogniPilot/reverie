@@ -11,7 +11,7 @@ Each expert is a generic AI agent with its own identity and memory. A role templ
 
 Reporting relationships cannot refer to the expert itself or form a cycle. Company default means the existing implicit reporting relationship is preserved: normally the briefing coordinator, with the coordinator reporting to the owner. Changing a reporting parent does not appoint that person as briefing coordinator or grant recovery authority.
 
-For quick changes, use **Reports to** directly on each Company card. Choose yourself or another expert; the change saves immediately and moves the card into the reporting tree. For example, have your coordinator report to you, project leads report to the coordinator, and specialists report to their lead. Reporting lines do not grant tool permissions.
+Use **Reports to** on a Company card to choose a manager. It saves immediately and redraws the tree. Example: coordinator reports to you; project leads to the coordinator; specialists to their lead. This grants no tool permissions.
 
 ## Identity and authority
 
@@ -23,7 +23,7 @@ Keep personal profiles and memories in instance storage. Shared project handoffs
 
 ## Enter and leave the office
 
-In Company → People, switch **In office** off to stop an expert and keep them off. Switch it on and confirm **Enter office** to start their laptop and resume their agent on the current plan. Their identity, conversation, files and installed packages stay with them. Starts queue when another expert is starting. A failed start shows a reason; use **Restart session** to retry. Automatic crash recovery is separate and does not bring back experts who have left the office.
+Switch **In office** off to stop an expert and keep them off. Confirm **Enter office** to resume their laptop and agent on the current plan. Identity, conversation, files and packages persist. Starts queue; failures show a reason. Use **Restart session** to retry. Automatic recovery never returns experts who left.
 
 ## Human logins and presence
 
