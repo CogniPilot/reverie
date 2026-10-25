@@ -52,3 +52,24 @@ class IsolatePhoneConfigTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, 'prepare a fresh plan'):
                     isolate.activate(SimpleNamespace(name='reverie'), root, state)
                 run.assert_not_called()
+
+
+    def test_prepare_uses_native_flake_reference_for_all_four_build_targets(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory); repo = root/'source'; repo.mkdir()
+            state = root/'state'; state.mkdir()
+            old = {'State': {'Running': True}, 'HostConfig': {'NetworkMode': 'bridge'}}
+            calls = []
+            def fake_run(args, **kwargs):
+                calls.append(args)
+                if args[0] == 'docker':
+                    return json.dumps([old])
+                raise RuntimeError('stop before any build or mutation')
+            with patch.object(Path, 'home', return_value=root), patch.object(isolate, 'run', side_effect=fake_run):
+                with self.assertRaisesRegex(RuntimeError, 'stop before'):
+                    isolate.prepare(SimpleNamespace(name='reverie', repo=str(repo)), root, state)
+            build = calls[-1]
+            self.assertEqual(build[:2], ['nix', 'build'])
+            self.assertEqual(build[-4:], [str(repo.resolve())+'#'+name for name in
+                ['dockerImage', 'workerImage', 'workerBroker', 'workerService']])
+            self.assertFalse(any(value.startswith('path:') for value in build))

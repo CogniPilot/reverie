@@ -78,8 +78,9 @@ def prepare(args, root, state):
         link.unlink()  # The cache itself stays in its leased scratch workspace.
     try:
         print('Building the server image, worker image and host broker with Nix.', flush=True)
+        # Native flake references preserve Git filtering and archive fallback.
         results = json.loads(run(['nix', 'build', '--out-link', str(state/'build'), '--json', '--option', 'build-dir', str(build.resolve()),
-            'path:' + str(repo) + '#dockerImage', 'path:' + str(repo) + '#workerImage', 'path:' + str(repo) + '#workerBroker', 'path:' + str(repo) + '#workerService']))
+            str(repo) + '#dockerImage', str(repo) + '#workerImage', str(repo) + '#workerBroker', str(repo) + '#workerService']))
     finally:
         if previous_link is not None and not link.exists() and not link.is_symlink():
             link.symlink_to(previous_link)
@@ -101,7 +102,7 @@ def prepare(args, root, state):
             with gzip.open(archive, 'rb') as source, unpacked.open('wb') as destination:
                 shutil.copyfileobj(source, destination, length=1024*1024)
             print('Scanning uncompressed image on the scratch drive.', flush=True)
-            report = run(['nix', 'develop', 'path:' + str(repo), '--command', 'python3', '-m', 'reverie.image_check', str(unpacked), '--allow', str(repo/'docker/image-check-allow.tsv')], cwd=repo)
+            report = run(['nix', 'develop', str(repo), '--command', 'python3', '-m', 'reverie.image_check', str(unpacked), '--allow', str(repo/'docker/image-check-allow.tsv')], cwd=repo)
             (state/(Path(archive).name+'.scan.json')).write_text(report+'\n')
         scans.finish(task, 'Image validation passed; durable report saved in worker-isolation state.')
         scans.clean(task, apply=True)

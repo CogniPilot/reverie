@@ -58,6 +58,10 @@ cd reverie
 export NIX_CONFIG="experimental-features = nix-command flakes"
 ```
 
+When building from a Git checkout, Nix includes tracked changes and staged new
+files. Add new source files to Git before building; untracked files and Git
+metadata stay outside the build source. Unpacked source archives remain supported.
+
 ## Default local deployment
 
 Reverie does not require NixOS or changes to a personal host configuration.

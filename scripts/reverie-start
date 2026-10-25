@@ -104,7 +104,8 @@ function main() {
   writeFileSync(join(identity, 'passwd'), 'root:x:0:0:root:/root:/bin/bash\nagent:x:' + uid + ':' + gid + ':Reverie agent:/home/agent:/bin/bash\n', { mode: 0o600 });
   writeFileSync(join(identity, 'group'), 'root:x:0:\nagent:x:' + gid + ':\n', { mode: 0o600 });
   const repo = realpathSync(process.env.REVERIE_REPO || resolve(dirname(fileURLToPath(import.meta.url)), '..'));
-  const image = run('nix', ['build', 'path:' + repo + '#dockerImage', '--no-link', '--print-out-paths']).stdout.trim().split('\n').at(-1);
+  // Let Nix select Git for a checkout and path for an unpacked source archive.
+  const image = run('nix', ['build', repo + '#dockerImage', '--no-link', '--print-out-paths']).stdout.trim().split('\n').at(-1);
   if (!isAbsolute(image)) fail('Nix did not return an image archive path.');
   run('docker', ['load', '--input', image]);
   const command = ['run', '--detach', '--init', '--name', config.containerName, '--restart', 'unless-stopped',

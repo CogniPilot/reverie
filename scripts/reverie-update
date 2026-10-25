@@ -100,7 +100,8 @@ while :; do
   [[ "$ancestor" != / ]] || break
   ancestor=$(dirname "$ancestor")
 done
-nix build "path:$REVERIE_REPO#dockerImage" --out-link "$build/image" \
+# Nix auto-selects Git checkouts (excluding .git) and unpacked source archives.
+nix build "$REVERIE_REPO#dockerImage" --out-link "$build/image" \
   --option build-dir "$nix_build"
 docker load --input "$build/image" >/dev/null
 candidate="reverie:update-$(date -u +%Y%m%dT%H%M%S)-$$"
