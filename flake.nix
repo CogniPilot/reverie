@@ -90,6 +90,14 @@
             runtimeInputs = [ pkgs.python3 pkgs.docker-client ];
             text = ''exec python3 ${self}/python/reverie/worker.py broker "$@"'';
           };
+          employeeLaptopMigrate = pkgs.writeShellApplication {
+            name = "reverie-employee-laptop-migrate";
+            runtimeInputs = [ pkgs.python3 pkgs.docker-client pkgs.coreutils ];
+            text = ''
+              export PYTHONPATH=${self}/python
+              exec python3 -m reverie.employee_laptop_migrate "$@"
+            '';
+          };
           previewProxy = pkgs.writeShellApplication {
             name = "reverie-preview-proxy";
             runtimeInputs = [ (pkgs.python3.withPackages (ps: [ ps.aiohttp ])) pkgs.docker-client ];
@@ -183,6 +191,7 @@
         isolate = { type = "app"; program = "${self.packages.${system}.isolate}/bin/reverie-isolate"; meta.description = "Prepare and activate host-managed agent containers"; };
         preview-proxy = { type = "app"; program = "${self.packages.${system}.previewProxy}/bin/reverie-preview-proxy"; meta.description = "Serve isolated HTTPS previews of opted-in laptop ports"; };
         worker-nix-migrate = { type = "app"; program = "${self.packages.${system}.workerNixMigrate}/bin/reverie-nix-store-migrate"; meta.description = "Inventory and explicitly migrate one stopped laptop Nix store"; };
+        employee-laptop-migrate = { type = "app"; program = "${self.packages.${system}.employeeLaptopMigrate}/bin/reverie-employee-laptop-migrate"; meta.description = "Publish stopped paired home and Nix data by permanent employee identity"; };
       });
       checks = forAllSystems (system:
         let

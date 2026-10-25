@@ -102,6 +102,20 @@ class WorkerTemporaryTests(unittest.TestCase):
         home_workspace_alias(config, home)
         self.assertEqual((home / 'workspace/retained.txt').read_text(), 'keep')
 
+    def test_workspace_cwd_alias_uses_only_the_existing_writable_grant(self):
+        f = fixture.WorkerTests(); f.setUp(); self.addCleanup(f.doCleanups)
+        shared = dict(source=str(f.root/'shared'), destination='/reverie_workspace', readOnly=False)
+        config = dict(f.config, mounts=[shared])
+        request = dict(f.request, cwd='/workspace/project')
+        self.assertEqual(fixture.validate_request(request, config), request)
+        for mounts in ([dict(shared, readOnly=True)],
+                       [shared, dict(source=str(f.root/'other'), destination='/workspace', readOnly=True)],
+                       [shared, dict(source=str(f.root/'other'), destination='/workspace/private', readOnly=True)]):
+            with self.subTest(mounts=mounts), self.assertRaises(ValueError):
+                fixture.validate_request(request, dict(config, mounts=mounts))
+        with self.assertRaises(ValueError):
+            fixture.validate_request(dict(request, cwd='/workspace/../etc'), config)
+
     def test_real_child_overrides_caller_temp_and_does_not_inherit_host_broker(self):
         launch = self.root / 'launch'; launch.mkdir(mode=0o700)
         record = launch / 'request.json'

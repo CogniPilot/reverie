@@ -111,7 +111,11 @@ def validate_request(request, config):
     cwd = request['cwd']
     if not isinstance(cwd, str) or not cwd.startswith('/') or '\0' in cwd or '..' in Path(cwd).parts:
         raise ValueError("Invalid worker directory")
-    if not any(Path(cwd).is_relative_to(m['destination']) for m in config['mounts'] if not m.get('readOnly')):
+    writable = [m['destination'] for m in config['mounts'] if not m.get('readOnly')]
+    alias = workspace_alias(config)
+    if alias is not None and not alias.get('readOnly'):
+        writable.append('/workspace')
+    if not any(Path(cwd).is_relative_to(destination) for destination in writable):
         raise ValueError("Worker directory is outside the owner grants")
     if not isinstance(request['command'], str) or not request['command'] or len(request['command']) > 128 * 1024 or '\0' in request['command']:
         raise ValueError("Invalid worker command")

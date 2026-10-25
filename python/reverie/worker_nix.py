@@ -8,12 +8,12 @@ import re
 import stat
 import time
 try:
-    from .worker_storage import storage_paths, lock_paths
+    from .worker_storage import storage_paths, lock_paths, read_metadata, validate_storage
 except ImportError:
     import sys
     package_root=str(Path(__file__).resolve().parents[1])
     if package_root not in sys.path:sys.path.insert(0,package_root)
-    from reverie.worker_storage import storage_paths, lock_paths
+    from reverie.worker_storage import storage_paths, lock_paths, read_metadata, validate_storage
 
 SESSION = re.compile(r'^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$')
 
@@ -38,6 +38,26 @@ def session_directory(config, session_id):
     return directory
 
 
+def check_storage_fences(config,session_id,directory):
+    """Shared by startup locking and actual store selection; no empty fallback."""
+    paths=storage_paths(config,session_id)
+    fence=directory/'nix-migration.json'
+    if fence.exists() or fence.is_symlink():
+        marker=read_metadata(fence,config['uid'],limit=65536)
+        allowed=(paths.kind=='employee' and isinstance(marker,dict) and
+                 set(marker)=={'version','token','employeeId','sessionId','state'} and
+                 type(marker['version']) is int and marker['version']==2 and
+                 marker['employeeId']==paths.identity and marker['sessionId']==session_id and
+                 marker['state']=='employee-canonical' and isinstance(marker['token'],str) and
+                 re.fullmatch('[0-9a-f]{32}',marker['token']))
+        if not allowed:raise RuntimeError('Laptop Nix migration is fenced; owner must finish or roll it back')
+        validate_storage(config,paths)
+    if paths.kind=='employee':
+        _stable,employee_fence=lock_paths(config,paths)
+        if employee_fence.exists() or employee_fence.is_symlink():raise RuntimeError('Employee laptop data is fenced')
+    return paths
+
+
 @contextmanager
 def store_guard(config, session_id, *, migration=False):
     """Serialize container creation with owner migration, including helper startup."""
@@ -48,9 +68,7 @@ def store_guard(config, session_id, *, migration=False):
         if not stat.S_ISREG(info.st_mode) or info.st_uid != config['uid'] or info.st_mode & 0o077:
             raise ValueError('Invalid laptop Nix lock')
         fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        fence = directory / 'nix-migration.json'
-        if not migration and (fence.exists() or fence.is_symlink()):
-            raise RuntimeError('Laptop Nix migration is fenced; owner must finish or roll it back')
+        if not migration:check_storage_fences(config,session_id,directory)
         yield directory
     finally:
         os.close(fd)
@@ -79,17 +97,10 @@ def store_path(config, session_id):
 
 def private_store(config, session_id):
     directory = session_directory(config, session_id)
-    fence = directory / 'nix-migration.json'
-    if fence.exists() or fence.is_symlink():
-        raise RuntimeError('Laptop Nix migration is fenced; owner must finish or roll it back')
+    paths=check_storage_fences(config,session_id,directory)
     path = store_path(config, session_id)
-    paths=storage_paths(config,session_id)
     if paths.kind=='employee':
-        _lock,fence=lock_paths(config,paths)
-        if fence.exists() or fence.is_symlink():
-            raise RuntimeError('Employee laptop data migration is fenced')
-        if not (paths.root/'storage.json').is_file():
-            raise RuntimeError('Employee home and Nix have not been initialized or migrated together')
+        validate_storage(config,paths)
     legacy = Path(config['scratchRoot']) / session_id / 'nix'
     if path == legacy and not path.exists():
         raise RuntimeError('Selected laptop rollback store is unavailable; refusing an empty replacement')
