@@ -8,7 +8,7 @@ import { clampExternalCliBypassForOwner } from '../../session-config-clamp.js';
  */
 
 import { guardShellKey } from '../../opencode-input.js';
-import { FastifyInstance, type FastifyReply } from 'fastify';
+import { FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { join, dirname, extname, basename } from 'node:path';
 import { homedir } from 'node:os';
@@ -952,6 +952,27 @@ export function registerSessionRoutes(
     onReplacementFailed?: (info: { employeeId?: string; replacedSessionIds: string[]; error: string }) => void;
   } = {}
 ): RemoteWakeRegistry {
+  /** Bug 11: an explicit restart by the VERIFIED OWNER records running intent through the same guarded transaction as the
+   * runtime route (CompanyService.prepareRuntimeRestart): intent is claimed BEFORE the launch, an owner Stop or vacation
+   * that lands mid-start cancels it and wins, a failed start rolls it back. Non-owner callers and every automatic path
+   * (UI re-attach, respawn, cron, ralph, wake, observation) get no transaction and only fill missing intent. */
+  const ownerRestart = async (req: FastifyRequest, session: Session, start: () => Promise<boolean>): Promise<boolean> => {
+    const intent =
+      options.company && (options.verifiedOwner ?? NO_OWNER)(req)
+        ? options.company.prepareRuntimeRestart(session.id, ownerFor(req))
+        : undefined;
+    try {
+      await intent?.claim();
+      const restarted = await start();
+      if (!restarted) await intent?.rollback();
+      return restarted;
+    } catch (error) {
+      await intent?.rollback().catch(() => {});
+      throw error;
+    } finally {
+      intent?.finish();
+    }
+  };
   /** A launch failed after the claim stopped the session it replaces: the employee is left without a running session. Never silent. */
   const replacementFailed = (
     identity: { employeeId?: string } | undefined,
@@ -1588,7 +1609,7 @@ export function registerSessionRoutes(
     if ('clear' in body) {
       const { previousConfigDir } = session.setCustomModel(undefined);
       removeConfigDir(previousConfigDir);
-      const restarted = await session.restartCli();
+      const restarted = await ownerRestart(req, session, () => session.restartCli()); // Bug 11: guarded owner intent
       persistAndBroadcastSession(ctx, session);
       return { customModel: session.customModel, restarted };
     }
@@ -1723,7 +1744,7 @@ export function registerSessionRoutes(
       triggerLlamaSwapLoad(endpoint, body.modelId);
     }
 
-    const restarted = await session.restartCli();
+    const restarted = await ownerRestart(req, session, () => session.restartCli()); // Bug 11: guarded owner intent
     persistAndBroadcastSession(ctx, session);
     return { customModel: session.customModel, restarted, modelSwapInProgress: swapStatus.isLlamaSwap && !targetReady };
   });
@@ -3793,7 +3814,7 @@ export function registerSessionRoutes(
       ctx.mux.updateSessionMode(id, mode);
       let restarted = false;
       try {
-        restarted = await session.restartCli();
+        restarted = await ownerRestart(req, session, () => session.restartCli()); // Bug 11: guarded owner intent
       } catch (err) {
         console.error('[mode] restart failed:', getErrorMessage(err));
       }
