@@ -60,6 +60,10 @@
             inherit pkgs; src = self;
             prune = self.packages.${system}.pruneR12;
           };
+          pruneSelftest = import ./nix/prune-selftest.nix {
+            inherit pkgs; src = self;
+            prune = self.packages.${system}.pruneR12;
+          };
           cleanupObservations = import ./nix/cleanup-observations.nix { inherit pkgs; src = self; };
           adminHarnessAddon = import ./nix/admin-harness-addon.nix { inherit pkgs; src = self; };
           workerIdmap = import ./nix/worker-idmap.nix { inherit pkgs; };
@@ -189,10 +193,19 @@
         inherit config lib pkgs;
         brokerPackage = self.packages.${pkgs.stdenv.hostPlatform.system}.workerBroker;
       };
-      nixosModules.reveriePrune = { config, lib, pkgs, ... }: import ./nix/prune-service.nix {
-        inherit config lib pkgs;
-        pruneHostPackage = self.packages.${pkgs.stdenv.hostPlatform.system}.pruneDeclared;
-        prunePackage = self.packages.${pkgs.stdenv.hostPlatform.system}.pruneR12;
+      nixosModules.reveriePrune = { config, lib, pkgs, ... }: {
+        imports = [
+          (import ./nix/prune-service.nix {
+            inherit config lib pkgs;
+            pruneHostPackage = self.packages.${pkgs.stdenv.hostPlatform.system}.pruneDeclared;
+            prunePackage = self.packages.${pkgs.stdenv.hostPlatform.system}.pruneR12;
+          })
+          (import ./nix/prune-selftest-service.nix {
+            inherit config lib pkgs;
+            selftestPackage = self.packages.${pkgs.stdenv.hostPlatform.system}.pruneSelftest;
+            prunePackage = self.packages.${pkgs.stdenv.hostPlatform.system}.pruneR12;
+          })
+        ];
       };
       nixosModules.reverieCollect = { config, lib, pkgs, ... }: import ./nix/collect-service.nix {
         inherit config lib pkgs;
@@ -246,6 +259,20 @@
               prunePackage = packages.pruneR12;
             };
           in pkgs.runCommand "reverie-prune-service-evaluation" {
+            checks = builtins.toJSON evaluated.checks;
+          } ''
+            mkdir -p "$out"
+            printf '%s\n' "$checks" > "$out/checks.json"
+          '';
+          pruneSelftestService = let
+            evaluated = import ./tests/prune_selftest_eval.nix {
+              inherit nixpkgs system;
+              selftestPackage = packages.pruneSelftest;
+              prunePackage = packages.pruneR12;
+              pruneHostPackage = packages.pruneDeclared;
+              pruneModule = self.nixosModules.reveriePrune;
+            };
+          in pkgs.runCommand "reverie-prune-selftest-evaluation" {
             checks = builtins.toJSON evaluated.checks;
           } ''
             mkdir -p "$out"
