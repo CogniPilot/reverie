@@ -4,6 +4,7 @@
   inputs.llama-nixpkgs.url = "github:NixOS/nixpkgs/02f5696b0e6097e589076d886b317b83ff0437d7";
   outputs = { self, nixpkgs, llama-nixpkgs }:
     let
+      source = import ./nix/source-filter.nix { lib = nixpkgs.lib; src = ./.; };
       systems = [ "x86_64-linux" "aarch64-linux" ];
       forAllSystems = nixpkgs.lib.genAttrs systems;
       pkgsFor = system: import nixpkgs {
@@ -12,7 +13,7 @@
       packagesFor = system:
         let
           pkgs = pkgsFor system;
-          packages = import ./nix/package.nix { inherit pkgs; src = self; };
+          packages = import ./nix/package.nix { inherit pkgs; src = source; };
           container-memory = pkgs.writeShellApplication {
             name = "container-memory";
             runtimeInputs = [ pkgs.coreutils pkgs.gawk pkgs.gnused pkgs.gnugrep ];
@@ -22,8 +23,8 @@
             name = "reverie-start";
             runtimeInputs = [ pkgs.nodejs_22 pkgs.nix pkgs.docker-client ];
             text = ''
-              export REVERIE_REPO="''${REVERIE_REPO:-${self}}"
-              exec node ${self}/scripts/reverie-start "$@"
+              export REVERIE_REPO="''${REVERIE_REPO:-${source}}"
+              exec node ${source}/scripts/reverie-start "$@"
             '';
           };
           update = pkgs.writeShellApplication {
@@ -34,52 +35,52 @@
           gpuPublisher = pkgs.writeShellApplication {
             name = "reverie-gpu-publisher";
             runtimeInputs = [ pkgs.nodejs_22 ];
-            text = ''exec node --experimental-strip-types ${self}/apps/host/gpu-publisher.ts "$@"'';
+            text = ''exec node --experimental-strip-types ${source}/apps/host/gpu-publisher.ts "$@"'';
           };
           localModel = pkgs.writeShellApplication {
             name = "reverie-local-model";
             runtimeInputs = [ pkgs.python3 pkgs.nix pkgs.coreutils pkgs.docker-client pkgs.systemd ];
             text = ''
               export REVERIE_MODEL_NIXPKGS=${llama-nixpkgs}
-              export REVERIE_MODEL_BUILD_EXPR=${self}/nix/local-model-runtime.nix
+              export REVERIE_MODEL_BUILD_EXPR=${source}/nix/local-model-runtime.nix
               export REVERIE_MODEL_SYSTEM=${system}
               REVERIE_MODEL_LAUNCHER="$(readlink -f "$0")"
               export REVERIE_MODEL_LAUNCHER
-              exec python3 ${self}/apps/host/local-model.py "$@"
+              exec python3 ${source}/apps/host/local-model.py "$@"
             '';
           };
         in packages // {
           default = packages.reverie;
           # Optional tools: excluded from the runtime/image and never fetched by a chat toggle.
           chatPythonLsp = pkgs.pyright;
-          capabilitiesAddon = import ./nix/capabilities-addon.nix { inherit pkgs; src = self; };
-          prune = import ./nix/prune.nix { inherit pkgs; src = self; };
-          pruneR12 = import ./nix/prune-r12.nix { inherit pkgs; src = self; };
-          pruneHost = import ./nix/prune-host.nix { inherit pkgs; src = self; };
+          capabilitiesAddon = import ./nix/capabilities-addon.nix { inherit pkgs; src = source; };
+          prune = import ./nix/prune.nix { inherit pkgs; src = source; };
+          pruneR12 = import ./nix/prune-r12.nix { inherit pkgs; src = source; };
+          pruneHost = import ./nix/prune-host.nix { inherit pkgs; src = source; };
           pruneDeclared = import ./nix/prune-declared.nix {
-            inherit pkgs; src = self;
+            inherit pkgs; src = source;
             prune = self.packages.${system}.pruneR12;
           };
           pruneSelftest = import ./nix/prune-selftest.nix {
-            inherit pkgs; src = self;
+            inherit pkgs; src = source;
             prune = self.packages.${system}.pruneR12;
           };
-          leasePeer = import ./nix/lease-peer-static.nix { inherit pkgs; src = self; };
+          leasePeer = import ./nix/lease-peer-static.nix { inherit pkgs; src = source; };
           leaseAcceptance = import ./nix/lease-acceptance.nix {
-            inherit pkgs; src = self;
+            inherit pkgs; src = source;
             initializer = self.packages.${system}.pruneDeclared;
             peerArtifact = self.packages.${system}.leasePeer;
           };
-          cleanupObservations = import ./nix/cleanup-observations.nix { inherit pkgs; src = self; };
-          opsCore = import ./nix/ops-core.nix { inherit pkgs; src = self; };
-          adminHarnessAddon = import ./nix/admin-harness-addon.nix { inherit pkgs; src = self; };
+          cleanupObservations = import ./nix/cleanup-observations.nix { inherit pkgs; src = source; };
+          opsCore = import ./nix/ops-core.nix { inherit pkgs; src = source; };
+          adminHarnessAddon = import ./nix/admin-harness-addon.nix { inherit pkgs; src = source; };
           workerIdmap = import ./nix/worker-idmap.nix { inherit pkgs; };
-          workerDocker = import ./nix/worker-docker-tools.nix { inherit pkgs; src = self; };
+          workerDocker = import ./nix/worker-docker-tools.nix { inherit pkgs; src = source; };
           workerDockerSeccomp = import ./nix/worker-docker-profile.nix { inherit pkgs; };
           chatModelicaLsp = import ./nix/chat-modelica-lsp.nix { inherit pkgs; };
           dockerImageWithChatLanguages = import ./nix/image.nix {
             inherit pkgs;
-            src = self;
+            src = source;
             inherit (packages) reverie console memory runtime;
             chatLanguageTools = {
               python = pkgs.pyright;
@@ -87,22 +88,22 @@
             };
           };
           inherit container-memory start update gpuPublisher localModel;
-          launchGuard = import ./nix/launch-guard.nix { inherit pkgs; src = self; };
+          launchGuard = import ./nix/launch-guard.nix { inherit pkgs; src = source; };
           dockerImage = import ./nix/image.nix {
             inherit pkgs;
-            src = self;
+            src = source;
             inherit (packages) reverie console memory runtime;
           };
           workerImage = import ./nix/image.nix {
             inherit pkgs;
-            src = self;
+            src = source;
             inherit (packages) reverie console memory runtime;
             worker = true;
           };
-          browserRuntime = import ./nix/browser-runtime.nix { inherit pkgs; src = self; };
+          browserRuntime = import ./nix/browser-runtime.nix { inherit pkgs; src = source; };
           workerBrowserImage = import ./nix/image.nix {
             inherit pkgs;
-            src = self;
+            src = source;
             inherit (packages) reverie console memory runtime;
             worker = true;
             browserRuntime = self.packages.${system}.browserRuntime;
@@ -110,20 +111,20 @@
           workerBroker = pkgs.writeShellApplication {
             name = "reverie-worker-broker";
             runtimeInputs = [ pkgs.python3 pkgs.docker-client ];
-            text = ''exec python3 ${self}/python/reverie/worker.py broker "$@"'';
+            text = ''exec python3 ${source}/python/reverie/worker.py broker "$@"'';
           };
           employeeLaptopMigrate = pkgs.writeShellApplication {
             name = "reverie-employee-laptop-migrate";
             runtimeInputs = [ pkgs.python3 pkgs.docker-client pkgs.coreutils ];
             text = ''
-              export PYTHONPATH=${self}/python
+              export PYTHONPATH=${source}/python
               exec python3 -m reverie.employee_laptop_migrate "$@"
             '';
           };
           previewProxy = pkgs.writeShellApplication {
             name = "reverie-preview-proxy";
             runtimeInputs = [ (pkgs.python3.withPackages (ps: [ ps.aiohttp ])) pkgs.docker-client ];
-            text = ''exec python3 ${self}/python/reverie/preview.py "$@"'';
+            text = ''exec python3 ${source}/python/reverie/preview.py "$@"'';
           };
           previewService = pkgs.writeTextDir "share/systemd/user/reverie-preview-proxy.service" ''
             [Unit]
@@ -147,7 +148,7 @@
             name = "reverie-nix-store-migrate";
             runtimeInputs = [ pkgs.python3 pkgs.docker-client pkgs.coreutils ];
             text = ''
-              export PYTHONPATH=${self}/python
+              export PYTHONPATH=${source}/python
               exec python3 -m reverie.worker_nix_migrate "$@"
             '';
           };
@@ -155,7 +156,7 @@
             name = "reverie-worker-service-check";
             runtimeInputs = [ pkgs.python3 pkgs.docker-client ];
             text = ''
-              export PYTHONPATH=${self}/python
+              export PYTHONPATH=${source}/python
               exec python3 -m reverie.worker_service "$@" check-backend
             '';
           };
@@ -181,7 +182,7 @@
             name = "reverie-worker-service";
             runtimeInputs = [ pkgs.python3 pkgs.docker-client pkgs.systemd pkgs.nix ];
             text = ''
-              export PYTHONPATH=${self}/python
+              export PYTHONPATH=${source}/python
               export REVERIE_WORKER_SERVICE_UNIT=${self.packages.${system}.workerService}/share/systemd/user/reverie-worker-broker.service
               exec python3 -m reverie.worker_service "$@"
             '';
@@ -190,8 +191,8 @@
             name = "reverie-isolate";
             runtimeInputs = [ pkgs.python3 pkgs.nix pkgs.docker-client pkgs.systemd pkgs.gnutar ];
             text = ''
-              export REVERIE_REPO="''${REVERIE_REPO:-${self}}"
-              exec python3 ${self}/apps/host/isolate.py "$@"
+              export REVERIE_REPO="''${REVERIE_REPO:-${source}}"
+              exec python3 ${source}/apps/host/isolate.py "$@"
             '';
           };
         };
@@ -222,7 +223,7 @@
       lib.workerDockerImage = { system, uid, gid, subuidStart ? 100000, subgidStart ? 100000, subidCount ? 65536 }:
         let pkgs = pkgsFor system; packages = packagesFor system;
         in import ./nix/image.nix {
-          inherit pkgs; src = self;
+          inherit pkgs; src = source;
           inherit (packages) reverie console memory runtime;
           worker = true;
           rootlessDocker = { inherit uid gid subuidStart subgidStart subidCount; };
@@ -282,6 +283,12 @@
             };
           in pkgs.runCommand "reverie-prune-selftest-evaluation" {
             checks = builtins.toJSON evaluated.checks;
+          } ''
+            mkdir -p "$out"
+            printf '%s\n' "$checks" > "$out/checks.json"
+          '';
+          sourceFilter = pkgs.runCommand "reverie-source-filter-policy" {
+            checks = builtins.toJSON (import ./tests/source_filter_eval.nix { lib = nixpkgs.lib; });
           } ''
             mkdir -p "$out"
             printf '%s\n' "$checks" > "$out/checks.json"

@@ -48,7 +48,9 @@ test('first start with an existing image contains company state, workspace and s
   assert.ok(command.includes('REVERIE_CASES_PATH=/reverie_workspace/cases'));
   assert.equal(command[command.indexOf('--workdir') + 1], '/reverie_workspace');
   assert.ok(!command.some(value => /dst=\/workspace(?:,|$)|reverie-control/.test(value)));
-  assert.ok(f.calls().find(([tool, args]) => tool === 'nix' && args.includes(resolve(import.meta.dirname, '..') + '#dockerImage')));
+  const nix = f.calls().find(([tool]) => tool === 'nix')[1];
+  assert.deepEqual(nix, ['build', realpathSync(resolve(import.meta.dirname, '..')) + '#dockerImage', '--no-link', '--print-out-paths']);
+  assert.ok(!nix.some(value => value.startsWith('path:')));
 });
 test('project access requires an explicit grant and links only the selected checkout into the workspace', t => {
   const f = fixture(t), repo = join(f.root, 'chosen-repo'); mkdirSync(repo);

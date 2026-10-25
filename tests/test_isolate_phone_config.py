@@ -1,4 +1,6 @@
 import importlib.util
+from contextlib import nullcontext
+import gzip
 import json
 from pathlib import Path
 import tempfile
@@ -12,6 +14,57 @@ SPEC.loader.exec_module(isolate)
 
 
 class IsolatePhoneConfigTests(unittest.TestCase):
+    def test_scanner_develop_uses_the_same_ordinary_local_reference(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory); repo = root/'exported source'; repo.mkdir()
+            state = root/'state'; state.mkdir()
+            folder = root/'scan'; folder.mkdir()
+            archive = root/'image.tar.gz'
+            with gzip.open(archive, 'wb') as output:
+                output.write(b'owned synthetic image')
+            broker = root/'broker'; (broker/'bin').mkdir(parents=True)
+            (broker/'bin/reverie-worker-broker').touch()
+            unit = root/'unit'; (unit/'share/systemd/user').mkdir(parents=True)
+            (unit/'share/systemd/user/reverie-worker-broker.service').touch()
+            class LeaseDouble:
+                def __call__(self, *args):
+                    return nullcontext()
+                def hold(self, *args):
+                    return nullcontext()
+            scans = SimpleNamespace(create=lambda task: folder, operation=lambda task: nullcontext(), lease=LeaseDouble())
+            old = {'State': {'Running': True}, 'HostConfig': {'NetworkMode': 'bridge'}}
+            def fake_run(command, **kwargs):
+                if command[:2] == ['docker', 'inspect']:
+                    return json.dumps([old])
+                if command[:2] == ['nix', 'build']:
+                    return json.dumps([{'outputs': {'out': str(path)}} for path in (archive, broker, unit)])
+                self.assertEqual(command, ['nix', 'develop', str(repo.resolve()), '--command', 'python3', '-m',
+                    'reverie.image_check', str(folder/'image.tar'), '--allow', str(repo/'docker/image-check-allow.tsv')])
+                self.assertEqual(kwargs, {'cwd': repo.resolve()})
+                self.assertFalse(any(value.startswith('path:') for value in command))
+                raise RuntimeError('synthetic stop before scanner')
+            with patch.object(isolate.Path, 'home', return_value=root/'home'), patch.object(isolate, 'run', side_effect=fake_run), \
+                    patch.dict('sys.modules', {'reverie.workspaces': SimpleNamespace(Workspaces=lambda path: scans)}):
+                with self.assertRaisesRegex(RuntimeError, 'synthetic stop before scanner'):
+                    isolate.prepare(SimpleNamespace(name='reverie', repo=str(repo)), root, state)
+
+    def test_prepare_uses_ordinary_absolute_local_flake_references(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory); repo = root/'exported source'; repo.mkdir()
+            state = root/'state'; state.mkdir()
+            old = {'State': {'Running': True}, 'HostConfig': {'NetworkMode': 'bridge'}}
+            def fake_run(command, **kwargs):
+                if command[:2] == ['docker', 'inspect']:
+                    return json.dumps([old])
+                self.assertEqual(command[:2], ['nix', 'build'])
+                self.assertEqual(command[-4:], [str(repo.resolve())+'#'+name for name in
+                    ('dockerImage', 'workerImage', 'workerBroker', 'workerService')])
+                self.assertFalse(any(value.startswith('path:') for value in command))
+                raise RuntimeError('synthetic stop before build')
+            with patch.object(isolate.Path, 'home', return_value=root/'home'), patch.object(isolate, 'run', side_effect=fake_run):
+                with self.assertRaisesRegex(RuntimeError, 'synthetic stop before build'):
+                    isolate.prepare(SimpleNamespace(name='reverie', repo=str(repo)), root, state)
+
     def test_durable_selection_defaults_off_and_requires_a_boolean_for_the_selected_console(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

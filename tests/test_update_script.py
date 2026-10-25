@@ -78,8 +78,8 @@ class UpdateScriptTests(unittest.TestCase):
             'REVERIE_UPDATE_STATE_DIR': str(self.root/'host-state'),
             'REVERIE_NIX_BUILD_DIR': str(self.root/'nix-build')}
 
-    def run_update(self, **extra):
-        return subprocess.run(['bash', str(ROOT/'scripts/reverie-update')], env={**self.env, **extra}, capture_output=True, text=True)
+    def run_update(self, cwd=None, **extra):
+        return subprocess.run(['bash', str(ROOT/'scripts/reverie-update')], env={**self.env, **extra}, cwd=cwd, capture_output=True, text=True)
 
     def calls(self):
         return [json.loads(line) for line in (self.root/'calls').read_text().splitlines()]
@@ -115,12 +115,14 @@ class UpdateScriptTests(unittest.TestCase):
         self.assertIn(f'type=bind,src={gpu},dst=/host-published,readonly', run)
 
     def test_build_scratch_is_traversable_but_metadata_remains_private(self):
-        result = self.run_update()
+        result = self.run_update(REVERIE_REPO=os.path.relpath(self.repo))
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual((self.root/'nix-build').stat().st_mode & 0o777, 0o755)
         self.assertEqual((self.root/'build').stat().st_mode & 0o777, 0o700)
         call = next(call for call in self.calls() if call[0] == 'nix')
         self.assertEqual(call[call.index('build-dir')+1], str((self.root/'nix-build').resolve()))
+        self.assertEqual(call[:3], ['nix', 'build', str(self.repo.resolve())+'#dockerImage'])
+        self.assertFalse(any(value.startswith('path:') for value in call))
 
     def test_inaccessible_build_scratch_fails_before_stopping_live_container(self):
         private = self.root/'private'; private.mkdir(mode=0o700)
@@ -128,6 +130,29 @@ class UpdateScriptTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn('not traversable', result.stderr)
         self.assertFalse(any(call[:2] == ['docker', 'stop'] for call in self.calls()))
+
+    def test_leading_dash_relative_source_selects_the_configured_checkout(self):
+        repo = self.root/'-source'
+        repo.mkdir()
+        (repo/'flake.nix').touch()
+        result = self.run_update(cwd=self.root, REVERIE_REPO='-source')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        build = next(call for call in self.calls() if call[0] == 'nix')
+        self.assertEqual(build[:3], ['nix', 'build', str(repo.resolve())+'#dockerImage'])
+
+    def test_source_normalization_failure_never_builds_or_changes_container(self):
+        real_realpath = shutil.which('realpath')
+        normalizer = self.bin/'realpath'
+        normalizer.write_text('#!'+sys.executable+'\nimport os,sys\n'
+            f'if sys.argv[-1] == {str(self.repo)!r}: sys.exit(17)\n'
+            f'os.execv({real_realpath!r}, [{real_realpath!r}, *sys.argv[1:]])\n')
+        normalizer.chmod(0o700)
+        result = self.run_update()
+        self.assertEqual(result.returncode, 17, result.stderr)
+        calls = self.calls()
+        self.assertFalse(any(call[0] == 'nix' for call in calls))
+        self.assertFalse(any(call[0] == 'docker' and call[1] != 'inspect' and call[1:3] != ['image', 'inspect'] for call in calls))
+        self.assertEqual(json.loads((self.root/'state').read_text()), {'reverie': {'running': True, 'image': 'old'}})
 
     def test_failed_build_never_stops_current_container(self):
         self.assertNotEqual(self.run_update(BUILD_FAIL='9').returncode, 0)
