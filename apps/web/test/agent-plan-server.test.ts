@@ -228,6 +228,10 @@ describe('agent-requested cross-provider migration in enforce mode', () => {
         // while leaving the candidate object present to isolate the intent gate.
         for (const row of server.companyService.view().employees)
           await server.companyService.setDesiredRunning(row.sessionId, false);
+        // A late state-persistence observation must never undo the owner's stop.
+        const candidateId = server.companyService.view().employees.find((row: any) => row.id === subject.id).sessionId;
+        server._persistSessionStateNow(server.sessions.get(candidateId));
+        await server.companyService.store.update(() => {});
       } else expect((await owner(change === 'grant' ? 'PUT' : 'POST', `/api/company/employees/${subject.id}` + (change === 'vacation' ? '/vacation' : ''), change === 'grant'
         ? { permissions: { moveOwnPlan: false } } : { enabled: true })).statusCode).toBe(200);
       revoked = true;

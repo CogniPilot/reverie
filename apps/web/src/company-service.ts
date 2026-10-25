@@ -248,6 +248,17 @@ export class CompanyService {
     });
   }
 
+  /** A live observation may fill missing intent, never reverse an owner stop or binding migration. */
+  async recordObservedRunning(sessionId: string, stillCurrent: () => boolean = () => true): Promise<void> {
+    const observed = this.store.snapshot().employees.find((employee) => employee.sessionId === sessionId);
+    if (!observed || observed.desiredRunning !== undefined || observed.onVacation || observed.bindingMigration) return;
+    await this.store.update((state) => {
+      const employee = state.employees.find((entry) => entry.sessionId === sessionId);
+      if (!employee || employee.desiredRunning === false || employee.onVacation || employee.bindingMigration || !stillCurrent()) return;
+      employee.desiredRunning = true;
+    });
+  }
+
   /** A durable, bounded automatic-start claim. No identity or title confers a grant. */
   async claimWake(employeeId: string, sessionId: string, now: number, automatic = true): Promise<boolean> {
     return this.store.update((state) => {

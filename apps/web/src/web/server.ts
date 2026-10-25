@@ -1556,7 +1556,7 @@ export class WebServer extends EventEmitter {
         return !!session && session.pid !== null && !session.paneExit && session.status !== 'stopped';
       },
       closing: (id) => !this.companyWakeReady || this.cleaningUp.has(id),
-      noteRunning: (id) => this.companyService.setDesiredRunning(id, true, () => !this.cleaningUp.has(id)),
+      noteRunning: (id) => this.companyService.recordObservedRunning(id, () => !this.cleaningUp.has(id)),
       begin: (employeeId, sessionId) => this.companyService.prepareWake(employeeId, sessionId),
       claim: (employeeId, sessionId, now, automatic) =>
         this.companyService.claimWake(employeeId, sessionId, now, automatic),
@@ -2327,9 +2327,8 @@ export class WebServer extends EventEmitter {
     this.store.setSession(session.id, state);
     if (session.pid !== null && !session.paneExit && !this.cleaningUp.has(session.id)) {
       void this.companyService
-        ?.setDesiredRunning(
+        ?.recordObservedRunning(
           session.id,
-          true,
           () =>
             this.sessions.get(session.id) === session &&
             !this.cleaningUp.has(session.id) &&

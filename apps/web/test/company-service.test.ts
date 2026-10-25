@@ -138,6 +138,22 @@ describe('company identities and genuine research lifecycle', () => {
     expect(restored.snapshot().employees[0].id).toBe(employee.id);
   });
 
+  it('serializes late running observations behind owner stops and keeps explicit starts available', async () => {
+    const employee = await hire();
+    await store.update((state) => { delete state.employees[0].desiredRunning; });
+    const stopped = service.setDesiredRunning(employee.sessionId, false);
+    const observed = service.recordObservedRunning(employee.sessionId);
+    await Promise.all([stopped, observed]);
+    expect(store.snapshot().employees[0].desiredRunning).toBe(false);
+    await service.recordObservedRunning(employee.sessionId);
+    expect(store.snapshot().employees[0].desiredRunning).toBe(false);
+    await service.setDesiredRunning(employee.sessionId, true);
+    expect(store.snapshot().employees[0].desiredRunning).toBe(true);
+    await store.update((state) => { delete state.employees[0].desiredRunning; });
+    await service.recordObservedRunning(employee.sessionId);
+    expect(store.snapshot().employees[0].desiredRunning).toBe(true);
+  });
+
   it('validates owner crash selection and allows explicit recovery when automatic wake is disabled', async () => {
     const employee = await hire();
     await expect(service.configure(undefined, { crashWakeEmployeeId: 'missing' } as never)).rejects.toThrow(
