@@ -50,7 +50,7 @@ export interface Caller {
 }
 
 /** These handlers require an owner-made coordinator seat; services must never become headerless owners. */
-const BOARD_DECISION_ROUTES = new Set(['POST /api/board/decisions', 'POST /api/board/decisions/:id/clear']);
+const BOARD_DECISION_ROUTES = new Set(['POST /api/board/decisions', 'PATCH /api/board/decisions/:id', 'POST /api/board/decisions/:id/clear']);
 
 // Exact routine routes only. Handlers retain explicit grants, author/room checks and
 // post-only mutations; bot/grant management stays owner-only. Service tokens must

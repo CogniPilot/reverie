@@ -192,7 +192,7 @@ export interface ContentFile {
   agents?: { who: string; focus?: string; receipts?: string[] }[];
   wins?: { at: string; who: string; text: string }[];
   blockers?: { since: string; who: string; owner: string; sev: string; text: string }[];
-  decisions?: { id: string; text: string; where?: string }[];
+  decisions?: { id: string; text: string; where?: string; options?: string[] }[];
 }
 
 /** content.json -> the stored parts of the board it carries. */
@@ -225,7 +225,7 @@ export function importContent(
       const since = zonedStamp(b.since, timeZone);
       return { id: importId('b', since, b.who, b.text), since, who: b.who, owner: b.owner, sev: sev(b.sev), text: b.text };
     }),
-    decisions: (file.decisions ?? []).map((d) => ({ id: d.id, text: d.text, where: d.where ?? '', at: now })),
+    decisions: (file.decisions ?? []).map((d) => ({ id: d.id, text: d.text, where: d.where ?? '', ...(d.options ? { options: d.options } : {}), at: now })),
     unmatched,
   };
 }

@@ -12,7 +12,7 @@ import type { Command } from 'commander';
 import { EXIT, describeFailure, resolveChatRoom, runAgentVerb, type AgentDeps, type RequestOptions } from './cli-agent.js';
 import { GLYPH, palette } from './cli-style.js';
 import { zonedMs, zonedStamp } from './board-logic.js';
-import { ISSUE_STATUSES, type BoardView, type Issue } from './board-types.js';
+import { DecisionOptionsSchema, ISSUE_STATUSES, type BoardView, type Issue } from './board-types.js';
 
 type Result = { ok: true; data: unknown } | { ok: false; code: number };
 
@@ -181,6 +181,21 @@ export async function boardScheduleSet(deps: AgentDeps, options: { file: string;
 
 const collect = (value: string, previous: string[] = []) => [...previous, value];
 
+export async function boardDecisionWrite(deps: AgentDeps, input: { text?: string; id?: string; where?: string; option?: string[]; recommend?: string; reason?: string; summary?: string; tradeoff?: string }, update = false): Promise<number> {
+  const parsed = DecisionOptionsSchema.safeParse(input.option);
+  if (!parsed.success) return fail(deps, 'Give 2–10 distinct choices by repeating --option "Choice". Question text does not create buttons.');
+  const recommended = input.recommend && parsed.data.find(option => option.toLowerCase() === input.recommend!.trim().toLowerCase());
+  if (input.recommend && !recommended) return fail(deps, '--recommend must name one of the --option choices');
+  if (input.reason && !recommended) return fail(deps, '--reason needs --recommend');
+  const body = { options: parsed.data,
+    ...(!update ? { text: input.text, ...(input.id ? { id: input.id } : {}), ...(input.where ? { where: input.where } : {}) } : {}),
+    ...(input.summary ? { summary: input.summary } : {}),
+    ...(input.tradeoff ? { tradeoff: input.tradeoff } : {}),
+    ...(recommended ? { recommendation: { option: recommended, reason: input.reason ?? '' } } : {}),
+  };
+  return done(deps, await call(deps, { method: update ? 'PATCH' : 'POST', path: '/api/board/decisions' + (update ? '/' + encodeURIComponent(input.id!) : ''), body }), item => `decision ${item.id}${update ? ' updated' : ''}`);
+}
+
 /** Register `reverie board …` on the program. */
 export function registerBoardCommands(program: Command): Command {
   const board = program.command('board').description("The server board: issues (timeline + kanban), milestones, wins, blockers, decisions");
@@ -259,11 +274,26 @@ export function registerBoardCommands(program: Command): Command {
         .requiredOption('--owner <name>', 'Who can unblock it')
         .option('--who <name>', 'Who is blocked', 'All')
         .option('--sev <sev>', 'low|med|high', 'med');
-    } else add.option('--where <text>', 'Where it is decided', '').option('--id <id>', 'A stable id');
-    add.action((words: string[], o: Record<string, string | boolean | undefined>) => {
+    } else add.option('--where <text>', 'Where it is decided', '').option('--id <id>', 'A stable id')
+      .option('--option <choice>', 'Selectable choice; repeat for 2–10 distinct choices', collect)
+      .option('--recommend <choice>', 'Recommend one of those choices')
+      .option('--reason <text>', 'Why you recommend it')
+      .option('--summary <text>', 'Short card question')
+      .option('--tradeoff <text>', 'Cost of choosing differently');
+    add.action((words: string[], o: Record<string, string | boolean | string[] | undefined>) => {
       const { json: asJson, ...rest } = o;
+      if (kind === 'decision') return runAgentVerb(Boolean(asJson), d => boardDecisionWrite(d, { text: words.join(' '), ...rest }));
       return runAgentVerb(Boolean(asJson), (d) => post(`/api/board/${kind}s`, (x) => `${kind} ${x.id}`)(d, { text: words.join(' '), ...rest }));
     });
+    if (kind === 'decision') group.command('update <id>')
+      .description('Add or repair choices on an existing open decision; keep its id')
+      .option('--option <choice>', 'Selectable choice; repeat for 2–10 distinct choices', collect)
+      .option('--recommend <choice>', 'Recommend one of those choices')
+      .option('--reason <text>', 'Why you recommend it')
+      .option('--summary <text>', 'Short card question')
+      .option('--tradeoff <text>', 'Cost of choosing differently')
+      .option('--json', 'Machine-readable output')
+      .action((id: string, options) => runAgentVerb(Boolean(options.json), d => boardDecisionWrite(d, { id, ...options }, true)));
     group
       .command('clear <id>')
       .description(`Clear a ${kind}`)

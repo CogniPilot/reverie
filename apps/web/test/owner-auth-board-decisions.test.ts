@@ -137,11 +137,12 @@ describe('owner middleware: exact board decision add and clear', () => {
   const post = (url: string, headers: Record<string, string>, payload: object = {}) =>
     app.inject({ method: 'POST', url, headers, payload });
 
-  it('opens precisely add and clear, leaving annotation, blockers, import and execution owner-only', () => {
+  it('opens decision creation, annotation and dismissal while keeping choice and execution owner-only', () => {
     for (const route of ['/api/board/decisions', '/api/board/decisions/:id/clear'])
       expect(classify('POST', route, route)).toBe('agent');
+    expect(classify('PATCH', '/api/board/decisions/:id', '/api/board/decisions/:id')).toBe('agent');
     for (const [method, route] of [
-      ['PATCH', '/api/board/decisions/:id'],
+      ['POST', '/api/board/decisions/:id/choose'],
       ['DELETE', '/api/board/decisions/:id'],
       ['POST', '/api/board/decisions/:id/execute'],
       ['POST', '/api/board/decisions/:id/delegate'],
@@ -156,6 +157,7 @@ describe('owner middleware: exact board decision add and clear', () => {
     const added = await post('/api/board/decisions', asAgent(COORD), {
       id: 'd-coord',
       text: 'Synthetic owner question',
+      options: ['Approve', 'Hold'],
     });
     expect(added.statusCode).toBe(200);
     expect((await post('/api/board/decisions/d-coord/clear', asAgent(COORD))).statusCode).toBe(200);
@@ -168,7 +170,7 @@ describe('owner middleware: exact board decision add and clear', () => {
 
   it('ordinary agents, agent-made coordinator seats and session prefixes cannot add or clear', async () => {
     expect(
-      (await post('/api/board/decisions', asAgent(COORD), { id: 'd-held', text: 'Synthetic held question' })).statusCode
+      (await post('/api/board/decisions', asAgent(COORD), { id: 'd-held', text: 'Synthetic held question', options: ['Approve', 'Hold'] })).statusCode
     ).toBe(200);
     for (const id of [ORDINARY, FORGED, COORD.slice(0, 8)]) {
       expect((await post('/api/board/decisions', asAgent(id), { text: 'Refused synthetic question' })).statusCode).toBe(
@@ -179,6 +181,20 @@ describe('owner middleware: exact board decision add and clear', () => {
     expect(board.snapshot().decisions).toHaveLength(1);
     expect(board.snapshot().decisions[0].clearedAt).toBeUndefined();
     expect(audit).toHaveLength(1);
+  });
+
+  it('a coordinator can repair choices but cannot choose for the owner through middleware', async () => {
+    expect((await post('/api/board/decisions', asAgent(COORD), { id: 'options', text: 'Question?', options: ['Proceed', 'Hold'] })).statusCode).toBe(200);
+    const repaired = await app.inject({ method: 'PATCH', url: '/api/board/decisions/options', headers: asAgent(COORD), payload: { options: ['Approve', 'Hold', 'Reject'], recommendation: { option: 'Hold' } } });
+    expect(repaired.statusCode).toBe(200);
+    expect((await post('/api/board/decisions/options/choose', asAgent(COORD), { option: 'Approve' })).statusCode).toBe(403);
+    expect(board.snapshot().decisions[0].chosen).toBeUndefined();
+    expect(board.snapshot().decisions[0].recommendation).toMatchObject({ option: 'Hold', by: 'Coordinator' });
+    const chosen = await app.inject({ method: 'POST', url: '/api/board/decisions/options/choose', cookies: { [OWNER_COOKIE]: ownerToken }, headers: { origin: 'http://localhost' }, payload: { option: 'Hold' } });
+    expect(chosen.statusCode).toBe(200);
+    expect(board.snapshot().decisions[0]).toMatchObject({ chosen: 'Hold', clearedBy: 'owner' });
+    expect((await app.inject({ method: 'PATCH', url: '/api/board/decisions/options', headers: asAgent(COORD), payload: { chosen: 'Approve' } })).statusCode).toBe(400);
+    expect(board.snapshot().decisions[0].chosen).toBe('Hold');
   });
 
   it('a coordinator seat in an archived room grants no write authority', async () => {
@@ -192,7 +208,7 @@ describe('owner middleware: exact board decision add and clear', () => {
 
   it('an authenticated service cannot become a headerless owner or borrow a coordinator header', async () => {
     expect(
-      (await post('/api/board/decisions', asAgent(COORD), { id: 'd-held', text: 'Synthetic held question' })).statusCode
+      (await post('/api/board/decisions', asAgent(COORD), { id: 'd-held', text: 'Synthetic held question', options: ['Approve', 'Hold'] })).statusCode
     ).toBe(200);
     for (const headers of [{ [SERVICE_HEADER]: serviceToken }, { [SERVICE_HEADER]: serviceToken, ...asAgent(COORD) }]) {
       expect((await post('/api/board/decisions', headers, { text: 'Refused service question' })).statusCode).toBe(403);
@@ -214,7 +230,7 @@ describe('owner middleware: exact board decision add and clear', () => {
           ...request,
           method: 'POST',
           url: '/api/board/decisions',
-          payload: { id: 'd-owner', text: 'Synthetic owner decision' },
+          payload: { id: 'd-owner', text: 'Synthetic owner decision', options: ['Approve', 'Hold'] },
         })
       ).statusCode
     ).toBe(200);

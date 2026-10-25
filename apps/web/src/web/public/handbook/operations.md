@@ -10,9 +10,37 @@ Allowed, denied, unavailable and unknown mean different things. Allowed still re
 
 ## Board decision requests
 
-An active owner-created coordinator seat allows decision-card creation; the seat need not belong to Burt or to the source channel. Read `reverie board show --json` first to avoid duplicate requests. Then use `reverie board decision add "<request>" --id <stable-id> --where "<source channel>" --json`. Verify the returned card. Ordinary experts can file issues for triage instead. Company recovery and plan permissions do not authorize Board decisions.
+An active owner-created coordinator seat allows decision-card creation; the seat need not belong to Burt or to the source channel. Read `reverie board show --json` first to avoid duplicate requests. Create a question with **2–10 distinct options**, rather than burying choices in its prose:
+
+```bash
+reverie board decision add "Publish the prepared snapshot?" --id snapshot-publication \
+  --where boardroom --option "Approve unchanged snapshot" --option "Hold" --option "Reject" \
+  --recommend "Approve unchanged snapshot" --reason "Archive and destination checks passed" --json
+```
+
+`--recommend` must name an option; omit it if you have no recommendation. Use `--summary` and `--tradeoff` for short card context. To repair an older open card, keep its ID: `reverie board decision update snapshot-publication --option "Approve unchanged snapshot" --option "Hold" --option "Reject" --recommend "Hold" --json`. Verify the returned card with `reverie board show --json`. The owner chooses a button; the recorded choice does not execute anything or replace a required execution grant. Ordinary experts can file issues for triage instead. Company recovery and plan permissions do not authorize Board decisions.
 
 Filing a request is not approving the proposed push, rerun, resource change or permission grant. Keep recommendations and the actual owner's decision separate.
+
+### Older laptop CLI
+
+A website update does not update the CLI installed in each laptop. If `--option` is unknown, use the existing scoped client below from your normal agent shell. It uses your office connection and current permissions; never copy credentials or switch identity. Replace the example request and choices with the owner's actual question:
+
+```bash
+node --input-type=module <<'JS'
+import { httpRequest, resolveAgentContext } from '/opt/reverie/console/dist/cli-agent.js';
+const response = await httpRequest(resolveAgentContext(), {
+  method: 'POST', path: '/api/board/decisions',
+  body: { id: 'snapshot-publication', text: 'Publish the prepared snapshot?', where: 'boardroom',
+    options: ['Approve unchanged snapshot', 'Hold', 'Reject'],
+    recommendation: { option: 'Hold', reason: 'Await final checks' } }
+});
+if (!response.json?.success) throw new Error(response.json?.error || `HTTP ${response.status}`);
+console.log(JSON.stringify(response.json.data));
+JS
+```
+
+For an existing open card, change `method` to `PATCH`, use `path: '/api/board/decisions/EXISTING_ID'`, and send only `options`, `recommendation` and optional `summary`/`tradeoff` in `body`. Do not recreate a duplicate ID. Verify using `reverie board show --json`. The current CLI can also be installed from the reviewed project flake without recreating the laptop.
 
 ## Website restart versus redeploy
 

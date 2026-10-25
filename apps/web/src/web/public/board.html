@@ -510,7 +510,8 @@ function decisionCard(d) {
     <h3>${esc(d.summary || d.text)}</h3>
     ${recLine(d.recommendation)}
     ${d.tradeoff ? `<div class="trade"><b>Trade-off:</b> ${esc(d.tradeoff)}</div>` : ''}
-    <div class="opts"><button type="button" class="btn" data-clear="${esc(d.id)}">Mark decided</button></div>
+    ${d.options?.length ? `<div class="opts">${d.options.map(option => `<button type="button" class="btn${option === d.recommendation?.option ? ' recd' : ''}" data-decide="${esc(d.id)}" data-opt="${esc(option)}">${esc(option)}${option === d.recommendation?.option ? ' ★' : ''}</button>`).join('')}</div><div class="hint">Records your choice; does not execute the proposed action.</div>` : '<div class="hint">This older card has no choices. Ask its author to add options with <code>reverie board decision update</code>.</div>'}
+    <div class="opts"><button type="button" class="btn" data-clear="${esc(d.id)}">${d.options?.length ? 'Dismiss without choosing' : 'Mark decided'}</button></div>
     ${cardErr[key] ? `<div class="err">${esc(cardErr[key])}</div>` : ''}
     ${d.summary ? `<details><summary>Full text</summary><div class="sum">${esc(d.text)}</div></details>` : ''}
   </article>`;
@@ -536,9 +537,16 @@ function cards() {
   document.getElementById('decidedSum').textContent = `Decided (${voted.length + cleared.length})`;
   document.getElementById('decided').innerHTML = [
     ...voted.map(p => `<li>🗳️ ${esc(p.summary || p.question)} — you chose <b>${esc(p.options.filter(o => p.ownerVote.includes(o.id)).map(o => o.label).join(', '))}</b> <button type="button" class="btn" data-undo="${esc(p.roomId + ':' + p.messageId)}">Change</button></li>`),
-    ...cleared.map(d => `<li>✅ ${esc(d.summary || d.text)} <span class="hint">${when(d.clearedAt)}</span></li>`),
+    ...cleared.map(d => `<li>✅ ${esc(d.summary || d.text)}${d.chosen ? ` — you chose <b>${esc(d.chosen)}</b>` : ' — closed without a recorded choice'} <span class="hint">${when(d.clearedAt)}</span></li>`),
   ].join('');
   const root = document.getElementById('sec-decisions');
+  root.querySelectorAll('[data-decide]').forEach(b => b.onclick = async () => {
+    const key = 'd:' + b.dataset.decide;
+    root.querySelectorAll(`[data-key="${CSS.escape(key)}"] button`).forEach(button => button.disabled = true);
+    try { await post(`/api/board/decisions/${encodeURIComponent(b.dataset.decide)}/choose`, {option: b.dataset.opt, ifRev: B.rev}); delete cardErr[key]; }
+    catch (e) { cardErr[key] = 'Choice not saved: ' + e.message; }
+    await load();
+  });
   root.querySelectorAll('[data-vote]').forEach(b => b.onclick = async () => {
     const k = b.dataset.vote, roomId = k.slice(0, k.indexOf(':')), messageId = k.slice(k.indexOf(':') + 1);
     root.querySelectorAll(`[data-vote="${CSS.escape(b.dataset.vote)}"]`).forEach(x => x.disabled = true);

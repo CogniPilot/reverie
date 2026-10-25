@@ -93,12 +93,18 @@ export const CardNoteFields = {
 export const PollNoteSchema = z.object({ ...CardNoteFields, updatedAt: ms, updatedBy: z.string().max(100) }).strict();
 export type PollNote = z.infer<typeof PollNoteSchema>;
 
+export const DecisionOptionsSchema = z.array(text(200)).min(2, 'Give at least two decision options (CLI: repeat --option)').max(10)
+  .refine(options => new Set(options.map(option => option.toLowerCase())).size === options.length, 'Decision options must be distinct');
+
 export const DecisionSchema = z
   .object({
     id,
     text: text(500),
     where: z.string().trim().max(200).default(''),
     ...CardNoteFields,
+    // Optional only for legacy stored/imported cards. New requests require choices.
+    options: DecisionOptionsSchema.optional(),
+    chosen: text(200).optional(),
     at: ms,
     clearedAt: ms.optional(),
     clearedBy: z.string().max(100).optional(),

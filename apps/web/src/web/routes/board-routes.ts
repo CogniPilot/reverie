@@ -16,6 +16,7 @@ import { boardOwnerIds, boardPace, importContent, importSchedule, upsertById, ty
 import {
   BlockerSchema,
   DecisionSchema,
+  DecisionOptionsSchema,
   IssueSchema,
   LinkSchema,
   MarkSchema,
@@ -107,10 +108,11 @@ const CardNote = z.object({
 });
 const CardNoteInput = CardNote.merge(IfRev).strict();
 const DecisionInput = DecisionSchema.pick({ text: true, where: true })
-  .extend({ id: z.string().regex(/^[A-Za-z0-9_.:-]{1,64}$/).optional() })
+  .extend({ id: z.string().regex(/^[A-Za-z0-9_.:-]{1,64}$/).optional(), options: DecisionOptionsSchema })
   .merge(CardNote)
   .merge(IfRev)
   .strict();
+const DecisionNoteInput = CardNoteInput.extend({ options: DecisionOptionsSchema.optional() }).strict();
 const AgentInput = z
   .object({ focus: z.string().trim().max(500).optional(), receipts: z.array(z.string().trim().min(1).max(300)).max(20).optional() })
   .merge(IfRev)
@@ -162,6 +164,12 @@ export function registerBoardRoutes(app: FastifyInstance, ctx: SessionPort & Par
   };
   const requireLead = (c: Caller, what: string) => {
     if (!lead(c)) throw new BoardError(`Only the owner or a coordinator may ${what}`, 403);
+  };
+  const normalizeDecisionRecommendation = (decision: BoardState['decisions'][number]) => {
+    if (!decision.options || !decision.recommendation) return;
+    const option = decision.options.find(o => o.toLowerCase() === decision.recommendation!.option.toLowerCase());
+    if (!option) throw new BoardError('Recommendation must name one of the decision options', 400);
+    decision.recommendation.option = option;
   };
 
   const run = async <T>(reply: FastifyReply, work: () => Promise<T>) => {
@@ -480,12 +488,15 @@ export function registerBoardRoutes(app: FastifyInstance, ctx: SessionPort & Par
     run(reply, async () => {
       const c = caller(req);
       requireLead(c, 'add a decision');
+      if (!req.body || typeof req.body !== 'object' || !('options' in req.body))
+        throw new BoardError('Decision options are required: --option "Approve" --option "Hold" (optional --recommend "Approve"). Prose does not create buttons. An older laptop CLI may lack these flags; use its existing scoped API client in /handbook/operations (Older laptop CLI), or update the CLI from the project flake.', 400);
       const body = parse(DecisionInput, req.body);
       const id = body.id ?? newId('d');
       return write(c, 'decision-add', body.ifRev, { id, text: body.text }, (s) => {
         if (s.decisions.some((d) => d.id === id)) throw new BoardError(`Decision ${id} exists`, 409);
-        const decision: BoardState['decisions'][number] = { id, text: body.text, where: body.where ?? '', at: now() };
+        const decision: BoardState['decisions'][number] = { id, text: body.text, where: body.where ?? '', options: body.options, at: now() };
         applyNote(c, decision, body);
+        normalizeDecisionRecommendation(decision);
         s.decisions.push(decision);
         return decision;
       });
@@ -495,13 +506,36 @@ export function registerBoardRoutes(app: FastifyInstance, ctx: SessionPort & Par
     run(reply, async () => {
       const c = caller(req);
       requireLead(c, 'annotate a decision');
-      const { ifRev, ...note } = parse(CardNoteInput, req.body);
+      const { ifRev, ...note } = parse(DecisionNoteInput, req.body);
       if (Object.keys(note).length === 0) throw new BoardError('Nothing to change', 400);
       return write(c, 'decision-note', ifRev, { id: req.params.id, ...note }, (s) => {
         const d = s.decisions.find((x) => x.id === req.params.id);
         if (!d) throw new BoardError(`No decision ${req.params.id}`, 404);
+        if (note.options) {
+          if (d.clearedAt) throw new BoardError('A decided or dismissed card cannot change its options', 409);
+          d.options = note.options;
+        }
         applyNote(c, d, note);
+        normalizeDecisionRecommendation(d);
         return d;
+      });
+    })
+  );
+  app.post<{ Params: { id: string } }>('/api/board/decisions/:id/choose', async (req, reply) =>
+    run(reply, async () => {
+      const c = caller(req);
+      if (c.kind !== 'owner') throw new BoardError('Only the verified owner may choose a decision option', 403);
+      const body = parse(z.object({ option: z.string().trim().min(1).max(200) }).merge(IfRev).strict(), req.body);
+      return write(c, 'decision-choose', body.ifRev, { id: req.params.id, option: body.option }, s => {
+        const decision = s.decisions.find(d => d.id === req.params.id);
+        if (!decision) throw new BoardError(`No decision ${req.params.id}`, 404);
+        if (decision.clearedAt) throw new BoardError('This decision is already decided or dismissed', 409);
+        const option = decision.options?.find(o => o === body.option);
+        if (!option) throw new BoardError('Choose one of the options provided by the author', 400);
+        decision.chosen = option;
+        decision.clearedAt = now();
+        decision.clearedBy = c.by;
+        return decision;
       });
     })
   );
@@ -600,6 +634,15 @@ export function registerBoardRoutes(app: FastifyInstance, ctx: SessionPort & Par
       } catch (error) {
         throw new BoardError(`Import failed: ${(error as Error).message}`, 400);
       }
+      for (const decision of content?.decisions ?? []) {
+        if (decision.options) decision.options = parse(DecisionOptionsSchema, decision.options);
+      }
+      const requireImportedChoices = (state: BoardState) => {
+        for (const decision of content?.decisions ?? [])
+          if (!decision.options && !state.decisions.some(existing => existing.id === decision.id))
+            throw new BoardError(`New imported decision ${decision.id} needs 2–10 options. Preserve legacy cards in place; add choices with decision update.`, 400);
+      };
+      requireImportedChoices(deps.store.snapshot());
       const summary = {
         issues: schedule?.issues.length ?? 0,
         marks: schedule?.marks.length ?? 0,
@@ -612,6 +655,7 @@ export function registerBoardRoutes(app: FastifyInstance, ctx: SessionPort & Par
       };
       if (body.dryRun) return { rev: deps.store.snapshot().rev, item: summary, dryRun: true };
       return write(c, 'import', body.ifRev, summary, (s) => {
+        requireImportedChoices(s);
         if (schedule) {
           // A re-import updates an issue in place (the file is the truth for status) but keeps createdAt and the first doneAt.
           s.issues = upsertById(s.issues, schedule.issues, (old, next) => ({ ...next, createdAt: old.createdAt, ...(next.status === 'done' ? { doneAt: old.doneAt ?? next.doneAt } : { doneAt: undefined }) }));
@@ -620,7 +664,7 @@ export function registerBoardRoutes(app: FastifyInstance, ctx: SessionPort & Par
         if (content) {
           s.wins = upsertById(s.wins, content.wins);
           s.blockers = upsertById(s.blockers, content.blockers, (old, next) => ({ ...next, clearedAt: old.clearedAt, clearedBy: old.clearedBy }));
-          s.decisions = upsertById(s.decisions, content.decisions, (old, next) => ({ ...next, at: old.at, clearedAt: old.clearedAt, clearedBy: old.clearedBy }));
+          s.decisions = upsertById(s.decisions, content.decisions, (old, next) => ({ ...old, ...next, ...(old.chosen ? { options: old.options, chosen: old.chosen } : {}), at: old.at, clearedAt: old.clearedAt, clearedBy: old.clearedBy }));
           s.agents = { ...s.agents, ...content.agents };
           s.plans = { ...s.plans, ...content.plans };
         }

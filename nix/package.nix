@@ -37,7 +37,8 @@ let
         test/company-recovery-prompt.test.ts test/company-wake-server.test.ts \
         test/owner-auth-fresh-enforce.test.ts test/routines-owner-middleware.test.ts \
         test/routine-announcement-room.test.ts test/routine-announcement-server.test.ts \
-        test/owner-auth-board-decisions.test.ts test/github-source.test.ts test/owner-first-setup.test.ts \
+        test/owner-auth-board-decisions.test.ts test/board-decision-options.test.ts test/cli-board.test.ts test/routes/board-routes.test.ts \
+        test/office-power-ui.test.ts test/company-lifecycle-fence.test.ts test/github-source.test.ts test/owner-first-setup.test.ts \
         test/owner-auth.test.ts test/owner-route-principals.test.ts test/routines-grants-owner.test.ts test/owner-setup-ui.test.ts \
         test/owner-name-onboarding.test.ts \
         test/account-login.test.ts test/chat-workspace-delete.test.ts \

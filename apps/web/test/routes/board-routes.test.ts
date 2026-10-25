@@ -81,6 +81,54 @@ describe('board routes', () => {
   const post = (url: string, payload: unknown, session?: string) => app.inject({ method: 'POST', url, payload: payload as object, headers: as(session) });
   const patch = (url: string, payload: unknown, session?: string) => app.inject({ method: 'PATCH', url, payload: payload as object, headers: as(session) });
 
+  it('requires explicit distinct choices and validates named recommendations', async () => {
+    for (const options of [undefined, [], ['Yes'], ['Yes', 'yes'], ['', 'No']]) {
+      const res = await post('/api/board/decisions', { text: 'Publish?', ...(options ? { options } : {}) }, COORD);
+      expect(res.statusCode).toBe(400);
+    }
+    expect((await post('/api/board/decisions', { text: 'Publish?', options: ['Yes', 'No'], recommendation: { option: 'Maybe' } }, COORD)).statusCode).toBe(400);
+    expect(store.snapshot().decisions).toHaveLength(0);
+    expect(audit).toEqual([]);
+    const response = await post('/api/board/decisions', { id: 'publish', text: 'Publish?', options: ['Approve', 'Hold', 'Reject'], recommendation: { option: 'approve', reason: 'Checks passed', by: 'Forged' } }, COORD);
+    expect(response.statusCode).toBe(200);
+    expect(response.json().data.item).toMatchObject({ options: ['Approve', 'Hold', 'Reject'], recommendation: { option: 'Approve', by: 'Reviewer' } });
+  });
+
+  it('only an owner records a valid choice, persisted and audited exactly once', async () => {
+    await post('/api/board/decisions', { id: 'publish', text: 'Publish?', options: ['Approve', 'Hold'] }, COORD);
+    for (const session of [COORD, BUILDER]) expect((await post('/api/board/decisions/publish/choose', { option: 'Approve' }, session)).statusCode).toBe(403);
+    expect((await post('/api/board/decisions/publish/choose', { option: 'Not provided' })).statusCode).toBe(400);
+    expect((await post('/api/board/decisions/publish/choose', { option: 'Hold', ifRev: 0 })).statusCode).toBe(409);
+    const result = await post('/api/board/decisions/publish/choose', { option: 'Hold', ifRev: store.snapshot().rev });
+    expect(result.statusCode).toBe(200);
+    expect(result.json().data.item).toMatchObject({ chosen: 'Hold', clearedAt: NOW, clearedBy: 'owner' });
+    expect((await post('/api/board/decisions/publish/choose', { option: 'Approve' })).statusCode).toBe(409);
+    const reloaded = new BoardStore(join(dir, 'board.json')); await reloaded.init();
+    expect(reloaded.snapshot().decisions[0].chosen).toBe('Hold');
+    expect(audit.filter(row => row.action === 'board-decision-choose')).toEqual([expect.objectContaining({ by: 'owner', option: 'Hold' })]);
+  });
+
+  it('repairs a legacy card without replacing its identity or inventing a decision', async () => {
+    await store.update({}, state => { state.decisions.push({ id: 'legacy', text: 'Old prose-only question', where: 'office', at: 1 }); });
+    const result = await patch('/api/board/decisions/legacy', { options: ['Approve', 'Hold'], recommendation: { option: 'Hold' } }, COORD);
+    expect(result.statusCode).toBe(200);
+    expect(store.snapshot().decisions[0]).toMatchObject({ id: 'legacy', at: 1, options: ['Approve', 'Hold'] });
+    expect(store.snapshot().decisions[0].chosen).toBeUndefined();
+    await post('/api/board/decisions/legacy/choose', { option: 'Hold' });
+    expect((await patch('/api/board/decisions/legacy', { options: ['Other', 'Choices'] }, COORD)).statusCode).toBe(409);
+    for (const payload of [{ chosen: 'Approve' }, { clearedBy: 'Forged owner' }, { clearedAt: 1 }])
+      expect((await patch('/api/board/decisions/legacy', payload, COORD)).statusCode).toBe(400);
+    await post('/api/board/import', { content: { decisions: [{ id: 'legacy', text: 'Imported updated prose' }] } });
+    expect(store.snapshot().decisions[0]).toMatchObject({ chosen: 'Hold', options: ['Approve', 'Hold'], clearedBy: 'owner' });
+  });
+
+  it('cannot bypass required choices by importing a new prose-only decision', async () => {
+    const response = await post('/api/board/import', { content: { decisions: [{ id: 'bad', text: 'Approve or Hold?' }] } });
+    expect(response.statusCode).toBe(400);
+    expect(response.json().error).toContain('needs 2–10 options');
+    expect(store.snapshot().decisions).toEqual([]);
+  });
+
   it('a member files into triage; the audit line is written before the save', async () => {
     const res = await post('/api/board/issues', { title: 'Mesa ICD noise', status: 'doing' }, BUILDER);
     expect(res.statusCode).toBe(200);
@@ -250,7 +298,7 @@ describe('board routes', () => {
         ],
       } as Partial<ChatRoom>),
     ];
-    await post('/api/board/decisions', { id: 'd-one', text: 'ship it?' }, COORD);
+    await post('/api/board/decisions', { id: 'd-one', text: 'ship it?', options: ['Ship', 'Hold'] }, COORD);
     const res = await app.inject({ method: 'GET', url: '/api/board/waiting' });
     expect(res.statusCode).toBe(200);
     const body = res.json().data;
@@ -277,7 +325,7 @@ describe('board routes', () => {
           s.pollNotes[`${id}:m1`] = { summary: `Note in ${id}`, updatedAt: 1, updatedBy: 'owner' };
         }
       });
-      await post('/api/board/decisions', { id: 'd-shared', text: 'Shared decision' });
+      await post('/api/board/decisions', { id: 'd-shared', text: 'Shared decision', options: ['Proceed', 'Hold'] });
     });
 
     it.each([
@@ -382,7 +430,7 @@ describe('board routes', () => {
       agents: [{ who: 'Reviewer', focus: 'Board', receipts: ['a'] }],
       wins: [{ at: '2026-10-17T14:02', who: 'Owner', text: 'Board' }, { at: '2026-10-16', who: 'Builder', text: 'Date only' }],
       blockers: [{ since: '2026-10-17T13:18', who: 'All', owner: 'Owner', sev: 'med', text: 'bot' }],
-      decisions: [{ id: 'resume', text: 'Resume Verifier', where: 'console' }],
+      decisions: [{ id: 'resume', text: 'Resume Verifier', where: 'console', options: ['Resume', 'Hold'] }],
     };
     expect((await post('/api/board/import', { schedule }, BUILDER)).statusCode).toBe(403);
     const dry = (await post('/api/board/import', { schedule, content, dryRun: true }, COORD)).json().data;
