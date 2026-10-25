@@ -155,7 +155,11 @@ def load_config(path):
     info = path.lstat()
     if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077:
         raise ValueError("Worker configuration must be an owner-only regular file")
-    config = json.loads(path.read_text())
+    return validate_config(json.loads(path.read_text()))
+
+
+def validate_config(config):
+    """Validate a captured policy without reopening its configuration path."""
     required = {'version', 'deployment', 'image', 'serverContainer', 'socket', 'stateRoot', 'companyFile', 'companyRoot', 'scratchRoot', 'apiSocketRoot', 'budgetMode', 'uid', 'gid', 'memoryMiB', 'poolMemoryMiB', 'poolTasksMax', 'cgroupParent', 'pidsLimit', 'cpus', 'maxWorkers', 'mounts', 'maintenanceSessions'}
     if not isinstance(config, dict) or set(config) - {'gpuGrants','sessionResources','rootlessDocker','goalPrivateConfig','opsConfig','leaseAcceptance','commandTelemetry'} != required or config['version'] != 1:
         raise ValueError("Unsupported worker configuration")
