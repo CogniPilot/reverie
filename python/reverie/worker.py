@@ -1345,6 +1345,17 @@ def child(path):
     env = {**os.environ, **request['env'], 'REVERIE_WORKER': '1', 'REVERIE_INSTALL_CLIS': 'none',
            **temporary_environment(request['cwd'])}
     env.pop('REVERIE_WORKER_SOCKET', None)
+    # Older brokers put this default in the container environment. Remove only
+    # that inherited default; explicit launch and owner-selected targets survive.
+    if ('CARGO_TARGET_DIR' not in request['env'] and
+            env.get('CARGO_TARGET_DIR') == '/tmp/reverie/build/cargo'):
+        env.pop('CARGO_TARGET_DIR')
+    # The broker's launch PATH predates image-installed shims. Restore only our
+    # packaged tool directory, keeping provider and owner PATH entries in order.
+    autoenv = '/opt/reverie/autoenv/bin'
+    if Path(autoenv).is_dir():
+        paths = [entry for entry in env.get('PATH', '/bin').split(':') if entry != autoenv]
+        env['PATH'] = ':'.join([autoenv, *paths])
     if Path('/run/reverie-model/default.sock').is_socket():
         subprocess.Popen(['/bin/reverie-model-relay'], env={**env, 'REVERIE_MODEL_SOCKET': '/run/reverie-model/default.sock'}, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     subprocess.Popen(['/bin/reverie-office-relay'], env=env, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
