@@ -35,20 +35,22 @@ Check sharing permission and use a real file path. The message gets a download c
 
 ## Scratch ownership
 
-Use `/tmp/<project>` inside a laptop for disposable builds, caches, downloads and task artifacts. It uses the employee's private scratch-backed directory; `TMPDIR`, `TMP` and `TEMP` point there. `/scratch` remains disposable compatibility storage. Keep repositories, unfinished work and retained results on verified durable home, project or workspace storage.
+Use task-specific `/tmp/<task>` for temporary builds, disposable checkouts, caches and regenerable downloads. Check shared disk capacity before heavy work. Temporary storage may be wiped: recreate and verify source revisions, input hashes and tools each run. Use normal project commands and provided defaults. See [Laptop storage](/handbook/laptops) for the full rule.
 
-The default scratch location is under the Reverie folder. Owners may select another drive through deployment configuration or a mount. On the host, derive paths from HOME. Never move a cache while a process uses it.
+Keep unique data, unpushed or uncommitted work, cited evidence, results and one-attempt latches durable. Configuration, credentials and installed tools stay outside disposable roots. Save and verify a handoff before cleanup; remove task-owned registered outputs after sealing. Registration, names and gitignore alone do not prove disposability. Respect live leases; protect sockets and runtime state. Never move a cache in use or a live socket by hand.
+
+Owners may select another drive through deployment configuration or a mount. On the host, derive paths from HOME.
 
 Use leased task workspaces:
 
 ```bash
-reverie-workspaces --root /tmp/compiler-project/tasks create compiler-check
-reverie-workspaces --root /tmp/compiler-project/tasks run compiler-check -- your-command
-reverie-workspaces --root /tmp/compiler-project/tasks finish compiler-check --handoff 'Saved results and handoff location'
-reverie-workspaces --root /tmp/compiler-project/tasks clean compiler-check
+reverie-workspaces --root "/tmp/<task>/tasks" create check
+reverie-workspaces --root "/tmp/<task>/tasks" run check -- your-command
+reverie-workspaces --root "/tmp/<task>/tasks" finish check --handoff 'Saved results and handoff location'
+reverie-workspaces --root "/tmp/<task>/tasks" clean check
 ```
 
-Replace the task name and command. On a native host, use `"$HOME/scratch/reverie/tasks"` as the root. `run` holds a lease, sets temporary build paths and changes into task scratch; keep durable source in its repository.
+Replace `<task>` with a task-specific name and replace `your-command`. Use the same task-specific `/tmp` root on a native host. `run` holds a lease, sets temporary build paths and changes into task scratch; keep durable source in its repository.
 
 `clean` previews first. An authorized administrator may add `--apply` after reviewing it. A live lease or source checkout blocks cleanup. Preserve unfinished work, save a handoff and leave other tasks' data alone. Automatic global pruning is not implemented.
 

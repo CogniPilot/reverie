@@ -79,7 +79,14 @@ export function registerCronRoutes(app: FastifyInstance, ctx: CronPort, verified
     const caller = header(req, 'x-reverie-parent-session');
     const name = body?.name ?? job?.name ?? 'post job';
     const detail = { job: job?.id, verb, fields: body ? Object.keys(body) : [] };
+    const refuseRecoveryReplay = () => {
+      if (job?.recoveryUncertain && verb !== 'disabled') throw Object.assign(
+        new Error('RECOVERY_UNCERTAIN: retained backup job requires unavailable owner reconciliation'),
+        { statusCode: 400, body: createErrorResponse(ApiErrorCode.INVALID_INPUT, 'RECOVERY_UNCERTAIN: retain the disabled job and its evidence; no replay or reset') }
+      );
+    };
     if (verifiedOwner(req)) {
+      refuseRecoveryReplay();
       void appendAdminAudit({ admin: 'owner', action: `post_job_${verb}`, target: name, ip: req.ip, detail });
       return undefined;
     }
@@ -98,6 +105,8 @@ export function registerCronRoutes(app: FastifyInstance, ctx: CronPort, verified
     if (!policy.grants.allows(employee)) return refuse('Only the owner or a delegate creates or edits a post job');
     // A routine belongs to the employee who made it. Bot jobs and the owner's jobs have no author, so no agent changes them.
     if (job && job.createdBy?.employeeId !== employee.id) return refuse('You can only change your own routines');
+    // Refuse before the mandatory announcement: a blocked replay must not post a false mutation notice.
+    refuseRecoveryReplay();
     const asked = body ? OWNER_ONLY_FIELDS.filter((f) => (verb !== 'created' || f !== 'postAs') && (body as Record<string, unknown>)[f] !== undefined) : [];
     if (asked.length) return refuse(`${asked.join(', ')} can only be set by the owner`);
     const room = body?.roomId ?? job?.roomId;

@@ -4,6 +4,8 @@ import type { ChatroomService } from './chatroom-service.js';
 import { CompanyStore } from './company-store.js';
 import { ChatroomError } from './chatroom-store.js';
 import { EmployeeVoiceSchema, type EmployeeVoice } from './employee-voice.js';
+import { GoalLifecycle } from './goal-lifecycle.js';
+import type { GoalAuthentication } from './goal-access.js';
 import {
   CompanySettingsSchema,
   EmployeeSchema,
@@ -67,6 +69,8 @@ interface CompanySession {
   name: string;
 }
 export interface CompanyServiceDeps {
+  /** Trusted server composition only. Absent identity/custody remains inaccessible. */
+  goalAuthentication?: GoalAuthentication;
   getSession(id: string): CompanySession | undefined;
   /** The console keeps this session's record although it is not running (pinned, paused): its profile is never cleaned up. */
   keepsRecord?(id: string): boolean;
@@ -121,10 +125,14 @@ export class CompanyService {
   private ticking = false;
   private wakeFlights = new Map<string, { cancelled: boolean }>();
   private runtimeRestarts = new Map<string, { cancelled: boolean; closed: boolean }>();
+  /** Canonical Goal records shared by routines, dispatch and status projections. */
+  readonly goals: GoalLifecycle;
   constructor(
     readonly store: CompanyStore,
     private readonly deps: CompanyServiceDeps
-  ) {}
+  ) {
+    this.goals = new GoalLifecycle(store, () => this.now(), deps.goalAuthentication);
+  }
   private now(): number {
     return (this.deps.now ?? Date.now)();
   }
@@ -367,7 +375,13 @@ export class CompanyService {
     if (!session || !sameOwner(session.owner, employee.owner))
       throw new CompanyError('Bind an existing session owned by this company');
     const hired = await this.store.update((state) => {
-      if (state.employees.some(e => sameOwner(e.owner, employee.owner) && e.name.normalize('NFKC').toLowerCase() === employee.name.normalize('NFKC').toLowerCase()))
+      if (
+        state.employees.some(
+          (e) =>
+            sameOwner(e.owner, employee.owner) &&
+            e.name.normalize('NFKC').toLowerCase() === employee.name.normalize('NFKC').toLowerCase()
+        )
+      )
         throw new CompanyError('That name is already used in this company. Choose a distinct name.', 409);
       if (state.employees.some((e) => e.sessionId === employee.sessionId))
         throw new CompanyError('This session already has a permanent identity', 409);
@@ -486,9 +500,12 @@ export class CompanyService {
     let previous: string | undefined;
     let previousThread: string | undefined;
     let previousRecipe: RuntimeRecipe | undefined;
+    const migrationId = randomUUID();
     const bound = await this.store.update((state) => {
       const employee = state.employees.find((e) => e.id === employeeId && sameOwner(e.owner, owner));
       if (!employee) throw new CompanyError('Unknown employee', 404);
+      if (employee.bindingMigration)
+        throw new CompanyError('Binding migration requires reconciliation before another rebind', 409);
       if (state.employees.some((e) => e.id !== employeeId && e.sessionId === sessionId))
         throw new CompanyError('Session already bound', 409);
       previous = employee.sessionId;
@@ -497,7 +514,10 @@ export class CompanyService {
       const wake = this.wakeFlights.get(previous); if (wake) wake.cancelled = true;
       previousThread = employee.threadId;
       previousRecipe = employee.runtimeRecipe;
-      employee.sessionId = sessionId;
+      if (employee.sessionId !== sessionId) {
+        employee.sessionGeneration += 1;
+        employee.bindingMigration = { id: migrationId, from: employee.sessionId, to: sessionId };
+      }
       if (nextRecipe) employee.runtimeRecipe = nextRecipe;
       // A session that runs a known thread brings it to the person; one that has none (hand-started, never resumed) leaves theirs alone.
       const thread = this.deps.threadOf?.(sessionId);
@@ -510,22 +530,44 @@ export class CompanyService {
       try {
         await this.deps.chatrooms.replaceSession?.(previous, sessionId, by, (room) => sameOwner(room.owner, owner));
       } catch (error) {
-        // All or nothing: a failed move leaves the employee on the session it had, never half-moved.
+        // A reserved generation is never reused, even after a failed room migration.
         const back = previous;
         await this.store.update((state) => {
           const employee = state.employees.find((e) => e.id === employeeId && sameOwner(e.owner, owner));
           // Only undo our own bind: a concurrent rebind may already have moved the person on.
-          if (employee && employee.sessionId === sessionId) {
+          if (
+            employee &&
+            employee.bindingMigration?.id === migrationId &&
+            employee.sessionId === bound.sessionId &&
+            employee.sessionGeneration === bound.sessionGeneration
+          ) {
             employee.sessionId = back;
             employee.threadId = previousThread;
             employee.runtimeRecipe = previousRecipe;
+            employee.sessionGeneration += 1;
+            delete employee.bindingMigration;
           }
         });
         throw error;
       }
     }
-    this.deps.bindIdentity?.(bound);
-    return bound;
+    const committed = bound.bindingMigration
+      ? await this.store.update((state) => {
+          const employee = state.employees.find((e) => e.id === employeeId && sameOwner(e.owner, owner));
+          if (
+            !employee ||
+            employee.bindingMigration?.id !== migrationId ||
+            employee.sessionId !== bound.sessionId ||
+            employee.sessionGeneration !== bound.sessionGeneration
+          )
+            throw new CompanyError('Binding migration ownership changed', 409);
+          employee.sessionId = sessionId;
+          delete employee.bindingMigration;
+          return employee;
+        })
+      : bound;
+    this.deps.bindIdentity?.(committed);
+    return committed;
   }
 
   /**
@@ -597,7 +639,14 @@ export class CompanyService {
     audit?: (before: CompanyEmployee, after: CompanyEmployee) => Promise<void>
   ): Promise<CompanyEmployee> {
     // Pronouns: a value sets them, null removes the field.
-    const parsed = EmployeeSchema.pick({ position: true, expertise: true, responsibilities: true, personality: true, icon: true, reportsTo: true })
+    const parsed = EmployeeSchema.pick({
+      position: true,
+      expertise: true,
+      responsibilities: true,
+      personality: true,
+      icon: true,
+      reportsTo: true,
+    })
       .extend({
         avatarBackground: EmployeeSchema.shape.avatarBackground.nullable(),
         pronouns: PronounsSchema.nullable(),

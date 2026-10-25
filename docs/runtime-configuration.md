@@ -22,6 +22,31 @@ no new private phone receipts are written, and automatic Admin Harness room effe
 fail closed. Normal native delivery, joined-channel history and manual reads remain
 available. The same new image can run OFF after activation: it preserves existing
 receipts privately while ignoring them for actions and stripping them from public data.
+For the host-managed Docker deployment, select `"adminPhoneWake": true` in the
+owner's `deployment.json` under the selected deployment root (normally `~/reverie`).
+The field is optional and defaults to `false`; strings and numbers are rejected.
+`reverie-start` passes the exact activation value only from this validated field;
+setting a similarly named variable in the calling host shell does not opt in.
+Changing this startup setting does not mutate a running container. For an existing
+isolated deployment, select it before the paired `reverie-isolate prepare` and
+`activate` workflow. The prepared plan records the choice and activation refuses a
+changed choice before stopping the console. The non-isolated `reverie-update`
+workflow also refreshes activation from the same durable setting and refuses a
+selection changed during its build. Both replace stale phone activation overrides
+while preserving the other instance settings. A missing deployment file or field
+selects OFF, including when the old container had an enabled override.
+The bootstrap retains its existing refusal to silently replace a changed deployment;
+use the applicable reviewed update workflow for a running installation. Existing
+update tools retain the original opaque deployment label; after changing this field,
+bootstrap may continue to refuse label reuse even after a successful reviewed update.
+Subsequent reviewed updates still read and preserve the selected setting.
+Native services need the same exact variable in owner-managed persistent service
+configuration; the Docker deployment file is not read by the native service installer.
+While the office explicitly reports the setting OFF, the harness status says that
+all automatic room replies are blocked. Manual reads and terminal prompts remain
+available. Repeated disabled responses produce one notice per status change rather
+than a log entry on every retry.
+
 After any receipt has been written, roll back only to a schema-aware image; an older
 website may expose unfamiliar stored fields. Enabling the instance setting allows
 one metadata-only long poll through its own office phone to wake the existing serial

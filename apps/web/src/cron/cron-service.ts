@@ -35,6 +35,7 @@ import type { ChatBot } from '../chat-bots.js';
 import { conditionHolds, renderTemplate, type PostSources } from './post-sources.js';
 import type { GeminiConfig, PiConfig, SessionMode } from '../types/session.js';
 import type { CronJobInput } from './cron-input.js';
+import { fixedTarget, fixedTargetId, parseWatchCursor, FIXED_WATCH_LIMITS, type WatchSnapshot } from './fixed-github-watch.js';
 
 /** The subset of the route context the cron depends on. */
 export type CronDeps = SessionPort & EventPort & ConfigPort & InfraPort;
@@ -151,6 +152,7 @@ export interface BotPoster {
   /** Throws when the bot may not post in the room now (allowlist, hourly cap, archived room, unknown room). */
   check(bot: ChatBot, roomId: string, recentPosts: number): void;
   post(bot: ChatBot, roomId: string, text: string, recentPosts: number): void;
+  postWatchNotice?(bot: ChatBot, roomId: string, text: string, recentPosts: number, owner?: string): { messageId: string };
   /**
    * Post as the employee who owns an author routine, with the server's "routine" prefix. Throws with a plain message when the
    * employee is gone, no longer sits in the room, or the room is archived. Optional: without it author routines fail their run.
@@ -238,6 +240,11 @@ export class CronService {
   // ──────────────────────────── Mutations ───────────────────────────
 
   createJob(input: CronJobInput, owner?: string, createdBy?: CronJob['createdBy'], createdByOwner = false): CronJob {
+    if (input.postSourceArgs?.pull !== undefined) {
+      if (!createdByOwner || createdBy) throw this.badRequest('Only the verified owner can configure a fixed watcher');
+      this.assertFixedWatchInput(input);
+      if (this.listJobs().some(j => j.postSourceArgs?.pull !== undefined)) throw this.badRequest('Only one fixed watcher job is supported per console, including disabled jobs');
+    }
     if (Object.keys(this.store.getCronJobs()).length >= MAX_CRON_JOBS) {
       throw this.badRequest(`Maximum number of cron jobs (${MAX_CRON_JOBS}) reached`);
     }
@@ -246,6 +253,7 @@ export class CronService {
     const now = Date.now();
     const job: CronJob = {
       id: uuidv4(),
+      ...(input.postSourceArgs?.pull !== undefined ? { watchGeneration: uuidv4() } : {}),
       name: input.name,
       owner,
       ...(!createdBy && createdByOwner ? { createdByOwner: true as const } : {}),
@@ -303,6 +311,16 @@ export class CronService {
   updateJob(id: string, patch: Partial<CronJobInput>): CronJob | null {
     const existing = this.getJob(id);
     if (!existing) return null;
+    this.assertRecoveryCertain(existing);
+    if (existing.postSourceArgs?.pull !== undefined && (!existing.watchGeneration || existing.watchState?.pending || this.executingJobs.has(id))) {
+      throw this.badRequest('WATCH_DELIVERY_UNCERTAIN or running: disable and retain this job for owner reconciliation; edits cannot reset its delivery fence');
+    }
+    const fixed = patch.postSourceArgs?.pull !== undefined || (patch.postSourceArgs === undefined && existing.postSourceArgs?.pull !== undefined);
+    if (fixed) {
+      if (!existing.createdByOwner || existing.createdBy) throw this.badRequest('Only an owner-created job can be a fixed watcher');
+      this.assertFixedWatchInput({ ...existing, ...patch });
+      if (this.listJobs().some(j => j.id !== id && j.postSourceArgs?.pull !== undefined)) throw this.badRequest('Only one fixed watcher job is supported per console');
+    }
     const now = Date.now();
 
     // A completed one-time job is only re-armed when the SCHEDULE actually
@@ -333,12 +351,15 @@ export class CronService {
       updatedAt: now,
       completedOnce: reArm ? false : existing.completedOnce,
       lastDueKey: null,
+      ...(fixed ? { watchGeneration: uuidv4(), watchState: undefined } : {}),
     };
 
     if (updated.postWhen === undefined) delete updated.postWhen;
     if (!updated.postChangeOnly) delete updated.postLastText;
     // A cursor belongs to one repository: pointing the job elsewhere starts over from a baseline.
-    if (JSON.stringify(updated.postSourceArgs) !== JSON.stringify(existing.postSourceArgs)) delete updated.postLastText;
+    const sameFixedTarget = updated.postSourceArgs?.pull !== undefined && existing.postSourceArgs?.pull !== undefined &&
+      fixedTargetId(fixedTarget(updated.postSourceArgs)) === fixedTargetId(fixedTarget(existing.postSourceArgs));
+    if (!sameFixedTarget && JSON.stringify(updated.postSourceArgs) !== JSON.stringify(existing.postSourceArgs)) delete updated.postLastText;
 
     // The PUT schema is `.partial()`, so its cross-field rules don't run on a
     // partial body. Re-validate the MERGED job against the full schema so a
@@ -359,8 +380,11 @@ export class CronService {
   setEnabled(id: string, enabled: boolean): CronJob | null {
     const existing = this.getJob(id);
     if (!existing) return null;
+    if (enabled) this.assertRecoveryCertain(existing);
     const now = Date.now();
+    if (existing.postSourceArgs?.pull !== undefined && enabled && !existing.watchGeneration) throw this.badRequest('Recovered watcher has no current generation; owner reconciliation required');
     existing.enabled = enabled;
+    if (existing.postSourceArgs?.pull !== undefined && existing.watchGeneration) existing.watchGeneration = uuidv4();
     if (enabled) delete existing.failStreak;
     existing.updatedAt = now;
     existing.nextRunAt = enabled ? computeNextRunAt(existing, now) : null;
@@ -370,7 +394,10 @@ export class CronService {
   }
 
   deleteJob(id: string): boolean {
-    if (!this.getJob(id)) return false;
+    const existing = this.getJob(id);
+    if (!existing) return false;
+    this.assertRecoveryCertain(existing);
+    if (existing.postSourceArgs?.pull !== undefined && (!existing.watchGeneration || existing.watchState?.pending || this.executingJobs.has(id))) throw this.badRequest('Retain uncertain/running watcher receipts for owner reconciliation');
     this.store.removeCronJob(id);
     for (const run of this.listRuns(id)) this.store.removeCronJobRun(run.id);
     this.deps.broadcast(SseEvent.CronJobDeleted, { id });
@@ -393,7 +420,7 @@ export class CronService {
    */
   async tickDueJobs(now: number = Date.now()): Promise<void> {
     for (const job of this.listJobs()) {
-      if (!job.enabled || job.nextRunAt == null || job.nextRunAt > now) continue;
+      if (job.recoveryUncertain || !job.enabled || job.nextRunAt == null || job.nextRunAt > now) continue;
 
       const key = dueKeyFor(job.id, job.nextRunAt);
       if (job.lastDueKey === key) {
@@ -491,15 +518,109 @@ export class CronService {
   }
 
   private async launch(job: CronJob, trigger: TriggerType): Promise<CronJobRun | null> {
+    this.assertRecoveryCertain(job);
     const current = this.executingJobs.get(job.id);
+    if (job.postSourceArgs?.pull !== undefined && current) return null;
     this.executingJobs.set(job.id, {
       job: { id: job.id, name: job.name, owner: job.owner }, count: (current?.count ?? 0) + 1,
     });
-    try { return await this.executeLaunch(job, trigger); }
+    try { return job.postSourceArgs?.pull !== undefined ? await this.executeFixedWatch(job, trigger) : await this.executeLaunch(job, trigger); }
     finally {
       const active = this.executingJobs.get(job.id);
       if (active && active.count > 1) active.count--;
       else this.executingJobs.delete(job.id);
+    }
+  }
+
+  private assertRecoveryCertain(job: CronJob): void {
+    const current = this.getJob(job.id);
+    if (!current || job.recoveryUncertain || current.recoveryUncertain) throw this.badRequest('RECOVERY_UNCERTAIN: backup-restored or unavailable job is held; owner reconciliation is unavailable. Disable and retain its evidence; no edit, re-enable, delete or replay.');
+  }
+
+  private assertFixedWatchInput(input: Partial<CronJobInput>): void {
+    fixedTarget(input.postSourceArgs);
+    if (input.action !== 'post' || input.postSource !== 'github' || input.postAs === 'author' || input.postText !== '{message}' ||
+      !input.postChangeOnly || input.postWhen || input.scheduleType !== 'interval' || (input.intervalMinutes ?? 0) < 15) throw this.badRequest('Invalid fixed watcher configuration');
+  }
+
+  /** One job / one console writer only. Pending survives crashes; uncertainty never automatically resends. */
+  private async executeFixedWatch(job: CronJob, trigger: TriggerType): Promise<CronJobRun> {
+    const run: CronJobRun = { id: uuidv4(), cronJobId: job.id, sessionId: null, sessionName: null, startedAt: Date.now(), finishedAt: null, status: 'created', triggerType: trigger, createdSessionUrl: null };
+    const generation = job.watchGeneration;
+    const current = (): CronJob => {
+      const j = this.getJob(job.id);
+      if (!j || !generation || j.watchGeneration !== generation || !j.createdByOwner || j.createdBy ||
+        this.listJobs().filter(x => x.postSourceArgs?.pull !== undefined).length !== 1) throw new Error('WATCH_GENERATION_STALE or duplicate configuration');
+      this.assertFixedWatchInput(j);
+      return j;
+    };
+    let posting = false;
+    try {
+      const fresh = current();
+      if (fresh.watchState?.pending) throw new Error('WATCH_DELIVERY_UNCERTAIN: owner must disable and reconcile retained receipt; no automatic resend or cursor advance');
+      if ((fresh.watchState?.failures ?? 0) >= 3) throw new Error('WATCH_RETRY_LIMIT: owner review required');
+      const read = this.postSources.github;
+      if (!read) throw new Error('WATCH_QUERY_INVALID: source unavailable');
+      const data = await read({ args: fresh.postSourceArgs, last: fresh.postLastText });
+      current();
+      if (data._hold || typeof data._watchSnapshot !== 'string' || data._watchSnapshot.length > FIXED_WATCH_LIMITS.snapshotChars) throw new Error('WATCH_QUERY_INVALID: incomplete snapshot');
+      const snapshot = JSON.parse(data._watchSnapshot) as WatchSnapshot;
+      const target = fixedTargetId(fixedTarget(fresh.postSourceArgs));
+      const cursor = JSON.stringify(snapshot.cursor);
+      parseWatchCursor(cursor, target);
+      if (!Array.isArray(snapshot.events) || snapshot.events.length > FIXED_WATCH_LIMITS.eventsPerPoll || snapshot.events.some(e => e.target_id !== target || e.event_id !== e.dedupe_key || !snapshot.cursor.events.includes(e.event_id)) || typeof snapshot.message !== 'string' || snapshot.message.length > 2000 || /[@\r\n]/.test(snapshot.message)) throw new Error('WATCH_QUERY_INVALID: invalid event projection');
+      if (!snapshot.events.length || fresh.dryRun) {
+        run.status = 'skipped';
+        run.errorMessage = fresh.dryRun ? 'Dry run: bounded metadata observed; no delivery/cursor change' : 'No new metadata events';
+        run.finishedAt = Date.now();
+        this.store.setCronJobRun(run.id, run);
+        return run;
+      }
+      const bot = this.poster?.getBot(fresh.botId as string);
+      if (!bot || !this.poster?.postWatchNotice) throw new Error('DELIVERY_UNAVAILABLE');
+      const recent = this.recentBotPosts(bot.id, Date.now());
+      this.poster.check(bot, fresh.roomId as string, recent);
+      const pending = { receipt: run.id, utc: Date.now(), events: snapshot.events };
+      await this.store.commitCronWatch(() => {
+        const j = current();
+        if (j.watchState?.pending) throw new Error('WATCH_DELIVERY_UNCERTAIN');
+        j.watchState = { generation: generation as string, failures: j.watchState?.failures ?? 0, pending };
+        this.store.setCronJob(j.id, j);
+        this.store.setCronJobRun(run.id, run);
+      });
+      const active = current();
+      // No await between this last fence, the checked DB commit, and capturing its acknowledgement.
+      posting = true;
+      const receipt = this.poster.postWatchNotice(bot, active.roomId as string, `${snapshot.message} Receipt ${run.id}.`, recent, active.owner);
+      if (!receipt.messageId || receipt.messageId.length > 100) throw new Error('DELIVERY_UNCONFIRMED');
+      await this.store.commitCronWatch(() => {
+        const j = current();
+        if (j.watchState?.pending?.receipt !== run.id) throw new Error('WATCH_DELIVERY_UNCERTAIN');
+        j.postLastText = cursor;
+        j.watchState = { generation: generation as string, failures: 0, delivery: { ...pending, room: j.roomId as string, result: 'DELIVERED', messageId: receipt.messageId } };
+        run.status = 'posted'; run.finishedAt = Date.now();
+        j.lastRunAt = run.startedAt; j.lastStatus = run.status;
+        this.store.setCronJob(j.id, j); this.store.setCronJobRun(run.id, run);
+      });
+      return run;
+    } catch {
+      run.status = 'failed'; run.finishedAt = Date.now();
+      run.errorMessage = posting || this.getJob(job.id)?.watchState?.pending
+        ? 'WATCH_DELIVERY_UNCERTAIN: disable watcher; owner reconciliation of retained receipt required. Cursor held; no automatic resend.'
+        : 'WATCH_QUERY_INVALID / DELIVERY_FAILED: bounded retry (maximum 3); cursor held. No all-clear.';
+      // No upstream titles, response bodies or exception strings enter receipts/logs.
+      try { await this.store.commitCronWatch(() => {
+        const j = current();
+        j.watchState ??= { generation: generation as string, failures: 0 };
+        j.watchState.failures = Math.min(3, j.watchState.failures + 1);
+        j.lastStatus = 'failed';
+        this.store.setCronJob(j.id, j); this.store.setCronJobRun(run.id, run);
+      }); } catch { /* unavailable state is not a successful delivery */ }
+      return run;
+    } finally {
+      this.pruneRunHistory();
+      this.deps.broadcast(SseEvent.CronRunUpdated, run);
+      this.broadcastListChanged();
     }
   }
 
@@ -523,6 +644,7 @@ export class CronService {
         return null;
       }
     }
+    this.assertRecoveryCertain(job);
     const run: CronJobRun = {
       id: uuidv4(),
       cronJobId: job.id,
@@ -549,6 +671,7 @@ export class CronService {
     }
 
     // Validate working directory.
+    this.assertRecoveryCertain(job);
     try {
       if (!statSync(job.workingDir).isDirectory()) {
         return this.failRun(job, run, 'workingDir is not a directory');
@@ -568,6 +691,7 @@ export class CronService {
     // autoClosePreviousSession:false) — otherwise an unattended interval/daily
     // job accumulates a new tab per fire until the global session cap.
     if (job.scheduleType !== 'once' && job.autoClosePreviousSession !== false) {
+      this.assertRecoveryCertain(job);
       await this.closePreviousRunSessions(job, run.id);
     }
 
@@ -590,6 +714,7 @@ export class CronService {
     // Create + start the session (mirrors the quick-start route flow).
     let session: Session;
     try {
+      this.assertRecoveryCertain(job);
       const mode = job.agentType;
       // A LAUNCHER CLI's binary is not its agent, so "installed" is not "runnable": without
       // this, a job on a box carrying only dsh's stock web/headless profiles spawns a bare
@@ -633,8 +758,10 @@ export class CronService {
       // completion detection, no tab alert on a blocking dialog. Claude mode only
       // (nothing else reads `.claude` hooks); best-effort inside the helper.
       if (mode === 'claude') {
+        this.assertRecoveryCertain(job);
         await applyWorkspaceHooks(job.workingDir);
       }
+      this.assertRecoveryCertain(job);
       session = new Session({
         workingDir: job.workingDir,
         mode,
@@ -650,15 +777,21 @@ export class CronService {
         owner: job.owner,
       });
       await this.deps.addSession(session);
+      this.assertRecoveryCertain(job);
       this.store.incrementSessionsCreated();
+      this.assertRecoveryCertain(job);
       this.deps.persistSessionState(session);
+      this.assertRecoveryCertain(job);
       await this.deps.setupSessionListeners(session);
+      this.assertRecoveryCertain(job);
       this.deps.broadcast(SseEvent.SessionCreated, this.deps.getSessionStateWithRespawn(session));
+      this.assertRecoveryCertain(job);
       if (mode === 'shell') {
         await session.startShell();
       } else {
         await session.startInteractive();
       }
+      this.assertRecoveryCertain(job);
       this.deps.broadcast(SseEvent.SessionInteractive, { id: session.id, mode });
     } catch (err) {
       return this.failRun(job, run, `Session launch failed: ${getErrorMessage(err)}`);
@@ -787,6 +920,7 @@ export class CronService {
           // first input line (single-line, schema-enforced), then give it a
           // moment to start before the prompt follows.
           if (job.launchCommand) {
+            this.assertRecoveryCertain(job);
             const shell = this.deps.sessions.get(sessionId);
             if (!shell) return;
             const sent = await shell.writeViaMux(`${job.launchCommand}\r`);
@@ -800,7 +934,12 @@ export class CronService {
         const s = this.deps.sessions.get(sessionId);
         if (!s) return;
         try {
-          const delivered = await deliverCronPrompt(s, prompt, job.inputMode);
+          this.assertRecoveryCertain(job);
+          const delivered = await deliverCronPrompt(s, prompt, job.inputMode, async ms => {
+            await delay(ms);
+            this.assertRecoveryCertain(job);
+          });
+          this.assertRecoveryCertain(job);
           if (!delivered) {
             this.failRun(job, run, 'Failed to send prompt: the session could not be written to');
             return;
@@ -850,6 +989,8 @@ export class CronService {
     for (const prev of this.listRuns(job.id)) {
       if (prev.id === currentRunId || !prev.sessionId) continue;
       if (!this.deps.sessions.has(prev.sessionId)) continue;
+      // Keep refusal outside the cleanup-error catch: recovery during an earlier await stops the loop.
+      this.assertRecoveryCertain(job);
       try {
         await this.deps.cleanupSession(prev.sessionId, true, 'cron: superseded by the next run of this job');
       } catch (err) {

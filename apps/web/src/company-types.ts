@@ -43,6 +43,10 @@ export const EmployeeSchema = z
     responsibilities: z.array(z.string().trim().min(1).max(500)).max(20).optional(),
     personality: z.string().trim().max(1000).optional(),
     sessionId: text,
+    /** Monotonic binding generation; incremented whenever this employee moves to another runtime session. */
+    sessionGeneration: z.number().int().positive().default(1),
+    /** In-flight room migration fences Goal authority until a matching commit/reconciliation. */
+    bindingMigration: z.object({ id: text, from: text, to: text }).strict().optional(),
     runtimeRecipe: RuntimeRecipeSchema.optional(),
     /** The CLI conversation thread this person resumes whenever its session is replaced (an OpenCode `ses_...` id). It belongs to the employee, not to any one session. */
     threadId: z.string().trim().min(1).max(200).optional(),
@@ -59,6 +63,157 @@ export const EmployeeSchema = z
   .strict();
 export type CompanyEmployee = z.infer<typeof EmployeeSchema>;
 export type CompanyEmployeeInput = z.input<typeof EmployeeSchema>;
+
+export const GoalStateSchema = z.enum(['READY', 'ASSIGNED', 'ACTIVE', 'HOLD', 'REVIEW', 'DONE', 'NO_GO', 'CANCELLED']);
+export type GoalState = z.infer<typeof GoalStateSchema>;
+
+/** Closed operational categories. Automation may inspect this enum, never blocker prose. */
+export const GoalBlockerCategorySchema = z.enum([
+  'INPUT',
+  'OWNER_DECISION',
+  'OWNER_ACTION',
+  'REVIEW',
+  'DEPENDENCY',
+  'POLICY',
+]);
+export type GoalBlockerCategory = z.infer<typeof GoalBlockerCategorySchema>;
+
+export const GoalBlockerSchema = z
+  .object({
+    category: GoalBlockerCategorySchema,
+    summary: z.string().trim().min(1).max(500),
+    /** Typed evidence identity, never an assertion that a condition is already satisfied. */
+    unblocker: z
+      .object({
+        kind: z.enum(['INPUT', 'OWNER_DECISION', 'OWNER_ACTION', 'REVIEW', 'DEPENDENCY', 'POLICY']),
+        id: z.string().regex(/^[A-Za-z0-9_.:-]{1,100}$/),
+      })
+      .strict(),
+  })
+  .strict();
+export type GoalBlocker = z.infer<typeof GoalBlockerSchema>;
+
+const goalId = z.string().regex(/^[A-Za-z0-9_.:-]{1,100}$/);
+const positive = z.number().int().positive();
+const instant = z.number().int().nonnegative();
+const digest = z.string().regex(/^[a-f0-9]{64}$/);
+/** Opaque content-addressed references; local paths, URLs and evidence bodies cannot enter these fields. */
+export const GoalEvidenceRefSchema = z.string().regex(/^evidence:sha256:[a-f0-9]{64}$/);
+export const GoalSnapshotSchema = z
+  .object({
+    sessionId: goalId,
+    sessionGeneration: positive,
+    generation: positive,
+    state: GoalStateSchema,
+    blocker: GoalBlockerSchema.optional(),
+    nextAction: z.string().trim().min(1).max(2000),
+    deadlineAt: instant.optional(),
+    semanticProgressAt: instant,
+    updatedAt: instant,
+    transitionSequence: z.number().int().nonnegative(),
+    evidenceCount: z.number().int().nonnegative().max(200),
+  })
+  .strict();
+
+export const GoalTransitionReceiptSchema = z
+  .object({
+    transitionId: goalId,
+    requestDigest: z.string().regex(/^[a-f0-9]{64}$/),
+    sequence: z.number().int().positive(),
+    generation: z.number().int().positive(),
+    from: GoalStateSchema,
+    to: GoalStateSchema,
+    actorKind: z.enum(['worker', 'verifier', 'owner']),
+    actorEmployeeId: text.optional(),
+    actorSessionId: text.optional(),
+    actorSessionGeneration: z.number().int().positive().optional(),
+    authorityId: goalId.optional(),
+    unblockProofId: goalId.optional(),
+    operation: z.enum(['TRANSITION', 'ADOPT']),
+    after: GoalSnapshotSchema,
+    at: z.number().int().nonnegative(),
+  })
+  .strict();
+export type GoalTransitionReceipt = z.infer<typeof GoalTransitionReceiptSchema>;
+
+export const GoalRecordSchema = z
+  .object({
+    id: text,
+    createId: goalId,
+    createRequestDigest: z.string().regex(/^[a-f0-9]{64}$/),
+    /** Multi-user company partition, distinct from the employee assigned to the goal. */
+    owner: z.string().optional(),
+    employeeId: text,
+    sessionId: text,
+    sessionGeneration: z.number().int().positive(),
+    generation: z.number().int().positive(),
+    objective: z.string().trim().min(1).max(8000),
+    state: GoalStateSchema,
+    blocker: GoalBlockerSchema.optional(),
+    nextAction: z.string().trim().min(1).max(2000),
+    deadlineAt: z.number().int().nonnegative().optional(),
+    semanticProgressAt: z.number().int().nonnegative(),
+    inputDigests: z
+      .array(z.string().regex(/^[a-f0-9]{64}$/))
+      .max(100)
+      .default([]),
+    evidenceRefs: z.array(GoalEvidenceRefSchema).max(200).default([]),
+    createdAt: z.number().int().nonnegative(),
+    updatedAt: z.number().int().nonnegative(),
+    transitionSequence: z.number().int().nonnegative(),
+    transitions: z.array(GoalTransitionReceiptSchema).max(256),
+    creation: GoalSnapshotSchema,
+  })
+  .strict()
+  .superRefine((goal, ctx) => {
+    if (goal.state === 'HOLD' && !goal.blocker) {
+      ctx.addIssue({ code: 'custom', path: ['blocker'], message: 'HOLD requires a blocker' });
+    }
+    if (goal.state !== 'HOLD' && goal.blocker) {
+      ctx.addIssue({ code: 'custom', path: ['blocker'], message: 'Only HOLD may carry a blocker' });
+    }
+  });
+export type GoalRecord = z.infer<typeof GoalRecordSchema>;
+
+/** Owner-issued authority records live in the same private canonical transaction as Goals. */
+export const GoalGrantSchema = z
+  .object({
+    id: goalId,
+    kind: z.enum(['VERIFY', 'METADATA_READ']),
+    owner: z.string().optional(),
+    employeeId: goalId,
+    sessionId: goalId,
+    sessionGeneration: positive,
+    targetEmployeeId: goalId,
+    targetSessionId: goalId,
+    targetSessionGeneration: positive,
+    goalId: goalId.optional(),
+    goalGeneration: positive.optional(),
+    goalSequence: z.number().int().nonnegative().optional(),
+    issuedAt: instant,
+    expiresAt: instant,
+  })
+  .strict();
+export const GoalGrantRevocationSchema = z
+  .object({ grantId: goalId, owner: z.string().optional(), at: instant })
+  .strict();
+export const GoalUnblockProofSchema = z
+  .object({
+    id: goalId,
+    owner: z.string().optional(),
+    goalId,
+    generation: positive,
+    sessionId: goalId,
+    sessionGeneration: positive,
+    holdSequence: positive,
+    blockerDigest: digest,
+    evidenceRef: GoalEvidenceRefSchema,
+    issuedAt: instant,
+    expiresAt: instant,
+  })
+  .strict();
+export type GoalGrant = z.infer<typeof GoalGrantSchema>;
+export type GoalUnblockProof = z.infer<typeof GoalUnblockProofSchema>;
 
 /**
  * What an agent may change about itself: its display name and icon, nothing else. Unknown keys
@@ -145,6 +300,15 @@ export const CompanyStateSchema = z.object({
   settings: z.array(CompanySettingsSchema),
   cycles: z.array(CompanyCycleSchema),
   memories: z.array(CompanyMemorySchema),
+  /** Canonical durable Goal records consumed by routines, dispatch and status projections. */
+  goals: z.array(GoalRecordSchema).max(128).default([]),
+  goalGrants: z.array(GoalGrantSchema).max(256).default([]),
+  goalGrantRevocations: z.array(GoalGrantRevocationSchema).max(256).default([]),
+  goalUnblockProofs: z.array(GoalUnblockProofSchema).max(512).default([]),
+  goalProofRevocations: z
+    .array(z.object({ proofId: goalId, owner: z.string().optional(), at: instant }).strict())
+    .max(512)
+    .default([]),
   temporaryAgents: z
     .array(
       z.object({
@@ -186,7 +350,7 @@ export function employeeProfileContext(
         : 'disabled; request an explicit owner grant before recovering colleagues. '
       : 'check your current company record. ');
   const laptop = process.env.REVERIE_WORKER_SOCKET
-    ? ' Your tools run on your persistent employee laptop (an isolated container), which survives model, account and conversation/session changes. Call tool or environment failures laptop problems; provider or model outages are separate. Read /home/agent/AGENTS.md for the current laptop setup. Use the project pin first: nix develop, nix build or nix run; nix shell is temporary and nix profile install is for persistent tools. Large domain stacks belong in project flakes. Read GET /api/handbook/laptops. Your private /tmp is disk-backed and disposable: keep project builds, caches and downloads there; TMPDIR, TMP and TEMP point to /tmp. /scratch is a disposable compatibility drive. /home/agent and /nix hold private settings/tools; use verified durable /workspace or granted project paths for source and retained results. Existing /reverie_workspace remains compatible. Preserve unfinished work and handoffs before cleanup. Credentials require named grants outside scratch; never paste secret bytes into chat. Docker needs a usable approved engine; QEMU TCG can come from the project flake, while KVM needs an explicit optional grant. Storage names, role titles and laptop upgrades grant no permissions or mission/flight GO. Report a broken laptop through company chat.'
+    ? ' Your tools run on your persistent employee laptop (an isolated container), which survives model, account and conversation/session changes. Call tool or environment failures laptop problems; provider or model outages are separate. Read /home/agent/AGENTS.md for the current laptop setup. Use the project pin first: nix develop, nix build or nix run; nix shell is temporary and nix profile install is for persistent tools. Large domain stacks belong in project flakes. Read GET /api/handbook/laptops. Your private /tmp is disk-backed and disposable: use a task-specific /tmp directory for builds, caches and downloads, keep unique work and evidence durable, and follow /api/handbook/laptops for cleanup; TMPDIR, TMP and TEMP point to /tmp. /scratch is a disposable compatibility drive. /home/agent and /nix hold private settings/tools; /workspace or granted project paths can hold durable source and retained results after verifying their backing storage. Existing /reverie_workspace remains compatible. Credentials require named grants outside scratch; never paste secret bytes into chat. Docker needs a usable approved engine; QEMU TCG can come from the project flake, while KVM needs an explicit optional grant. Storage names, role titles and laptop upgrades grant no permissions or mission/flight GO. Report a broken laptop through company chat.'
     : '';
   const capabilities =
     ' Run `reverie agent capabilities` when asked what you can do or before claiming a blocker. Read channels: `reverie agent chat rooms --json`, then `reverie agent chat read --room "<name or ID>" -n 20 --json`. Memory scopes and lookup commands: /api/handbook/memory; grants and GitHub references: /api/handbook/operations. ';

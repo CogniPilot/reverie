@@ -29,7 +29,7 @@ class WorkerSupervisionTests(unittest.TestCase):
                  'NetworkSettings': {'Networks': {'bridge': {'IPAddress': '172.17.0.2'}}}}]
 
     def ticks(self, count):
-        self.broker.stopping = Mock()
+        self.broker.stopping = Mock(deadline=None)
         self.broker.stopping.wait.side_effect = [False] * count + [True]
 
     def test_malformed_console_inspect_is_unavailable_and_can_retry(self):
@@ -67,7 +67,7 @@ class WorkerSupervisionTests(unittest.TestCase):
         def tick(_seconds):
             seen.append(offline.exists())
             return len(seen) > 2
-        self.broker.stopping = Mock()
+        self.broker.stopping = Mock(deadline=None)
         self.broker.stopping.wait.side_effect = tick
         with patch('reverie.worker.http.client.HTTPConnection') as connection:
             connection.return_value.getresponse.return_value.status = 200
@@ -107,7 +107,7 @@ class WorkerSupervisionTests(unittest.TestCase):
         def tick(_seconds):
             seen.append(old in self.broker.storage_leases)
             return len(seen) > 4
-        self.broker.stopping = Mock()
+        self.broker.stopping = Mock(deadline=None)
         self.broker.stopping.wait.side_effect = tick
         with patch('reverie.worker.http.client.HTTPConnection') as connection:
             connection.return_value.getresponse.return_value.status = 200
@@ -115,6 +115,69 @@ class WorkerSupervisionTests(unittest.TestCase):
         self.assertEqual(seen, [True, True, True, True, False])
         self.assertNotIn(old, self.broker.laptops)
         office.close.assert_called_once_with()
+
+    def test_confirmed_gone_container_releases_real_lease_and_phone(self):
+        old = fixtures.OLD
+        name = 'test-agent-' + old
+        self.broker.claim_storage(old)
+        self.broker.laptops[old] = name
+        office = self.broker.offices[old] = Mock()
+        # Exercise the real run_engine boundary: missing inspect exits nonzero.
+        del self.broker.run_engine
+        def engine(command, **kwargs):
+            self.assertEqual(command[0], 'docker')
+            args = command[1:]
+            if args == ['inspect', 'test-console']:
+                return self.result(self.console())
+            if args == ['inspect', name]:
+                return subprocess.CompletedProcess(command, 1, '[]\n', 'Error: No such object: ' + name + '\n')
+            self.assertEqual(args, ['ps', '--all', '--format', '{{.Names}}'])
+            return subprocess.CompletedProcess(command, 0, 'test-console\n', '')
+        self.ticks(1)
+        # GOAL's bounded engine transport now uses run_client; keep exercising
+        # the real run_engine classifier without contacting a real daemon.
+        with patch('reverie.worker.run_client', side_effect=engine), \
+                patch('reverie.worker.http.client.HTTPConnection') as connection:
+            connection.return_value.getresponse.return_value.status = 200
+            self.broker.supervise()
+        self.assertNotIn(old, self.broker.storage_leases)
+        self.assertNotIn(old, self.broker.laptops)
+        office.close.assert_called_once_with()
+        # The FD lease actually closed; another session may acquire the data.
+        self.move()
+        with fixtures.storage_guard(self.config, fixtures.NEW):
+            pass
+
+    def test_missing_diagnostic_requires_matching_name_and_valid_absence_inventory(self):
+        name = 'test-agent-' + fixtures.OLD
+        missing = subprocess.CompletedProcess([], 1, '[]', 'Error: No such object: ' + name)
+        malformed = [
+            (subprocess.CompletedProcess([], 1, '', 'Cannot connect to the Docker daemon'), None),
+            (subprocess.CompletedProcess([], 1, '[]', 'Error: No such object: another-container'), None),
+            (subprocess.CompletedProcess([], 1, '[]', missing.stderr + '\nconnection reset'), None),
+            (subprocess.CompletedProcess([], 1, '[{}]', missing.stderr), None),
+            (subprocess.CompletedProcess([], -9, '[]', missing.stderr), None),
+            (self.result([]), None),
+            (missing, subprocess.CompletedProcess([], 1, '', 'Daemon unavailable')),
+            (missing, subprocess.CompletedProcess([], 0, '[not names]\n', '')),
+            (missing, subprocess.CompletedProcess([], 0, name + '\n', '')),
+            (missing, subprocess.CompletedProcess([], 0, 'duplicate\nduplicate\n', '')),
+        ]
+        self.broker.claim_storage(fixtures.OLD)
+        for reply, inventory in malformed:
+            with self.subTest(reply=reply, inventory=inventory):
+                self.broker.run_engine = Mock(side_effect=[reply] + ([inventory] if inventory else []))
+                with self.assertRaises(RuntimeError):
+                    self.broker.inspect_container(name)
+                self.assertIn(fixtures.OLD, self.broker.storage_leases)
+        for diagnostic in ('Error: no such object: "' + name + '"',
+                           'Error: inspecting object: no such object: "' + name + '"'):
+            self.broker.run_engine = Mock(side_effect=[
+                subprocess.CompletedProcess([], 125, '[]\n', diagnostic),
+                subprocess.CompletedProcess([], 0, '', ''),
+            ])
+            self.assertFalse(self.broker.inspect_container(name)['State']['Running'])
+            self.assertEqual(self.broker.run_engine.call_args_list[0].kwargs, {'optional': True})
 
     def test_binding_move_sweeps_old_laptop_despite_health_and_bookkeeping_errors(self):
         old, new = fixtures.OLD, fixtures.NEW

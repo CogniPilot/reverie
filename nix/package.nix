@@ -3,6 +3,7 @@ let
   lib = pkgs.lib;
   manifest = builtins.fromJSON (builtins.readFile (src + "/apps/web/package.json"));
   consoleSkill = lib.cleanSource (src + "/skills/reverie");
+  goalPythonFixture = lib.cleanSource (src + "/python/reverie");
   console = pkgs.buildNpmPackage {
     pname = "reverie-console";
     version = manifest.version;
@@ -19,13 +20,23 @@ let
     postPatch = ''
       mkdir -p skills
       cp -r ${consoleSkill} skills/reverie
+      mkdir -p test/fixtures/recovery-ledger/reverie
+      cp ${src}/python/reverie/{__init__,resume_ledger,resume_ledger_rpc}.py test/fixtures/recovery-ledger/reverie/
+      # The web derivation is flattened to apps/web. Supply explicit trusted
+      # offline test sources; tests must not escape /build/source to find them.
+      mkdir -p test/fixtures/goal-source/python test/fixtures/goal-source/tests
+      cp -r ${goalPythonFixture} test/fixtures/goal-source/python/reverie
+      cp ${src}/tests/__init__.py ${src}/tests/goal_private_fixture.py ${src}/tests/goal_broker_fixture.py test/fixtures/goal-source/tests/
     '';
     preBuild = "npm rebuild node-pty esbuild --offline --ignore-scripts=false";
     doCheck = true;
     nativeCheckInputs = [ pkgs.git pkgs.tmux pkgs.curl pkgs.which (lib.getBin pkgs.util-linux) ];
     checkPhase = ''
       runHook preCheck
-      npm test -- test/company-recover.test.ts test/routes/company-routes.test.ts \
+      npm test -- test/fixed-resume-message.test.ts test/recovery-authority.test.ts \
+        test/recovery-transaction.test.ts test/recovery-operation-clock.test.ts test/recovery-ledger-client.test.ts \
+        test/rest-canonical-metadata.test.ts \
+        test/company-recover.test.ts test/routes/company-routes.test.ts \
         test/cli-agent-chat-fetch.test.ts test/cli-agent-chat-stdin.test.ts test/cli-agent-chat-file.test.ts \
         test/chat-bot-presets.test.ts test/cron-post-bot.test.ts test/cron-post-security.test.ts \
         test/chatroom-delivery-modes.test.ts test/routes/polling-membership.test.ts \
@@ -35,10 +46,21 @@ let
         test/owner-auth-lock-portability.test.ts test/company-full-page.test.ts \
         test/service-installer.test.ts test/company-wake.test.ts \
         test/company-recovery-prompt.test.ts test/company-wake-server.test.ts \
+        test/goal-lifecycle.test.ts test/goal-lifecycle-transactions.test.ts test/goal-api-auth.test.ts \
+        test/goal-response-privacy.test.ts test/goal-successor-independent.test.ts \
+        test/goal-server-integration.test.ts test/goal-server-unavailable.test.ts test/goal-server-policy.test.ts \
+        test/goal-canonical-authority.test.ts \
+        test/goal-broker-auth.test.ts test/goal-nonce-store.test.ts test/goal-nonce-independent.test.ts test/goal-nonce-successor.test.ts \
+        test/cli-goal.test.ts test/goal-canonical-transport.test.ts test/goal-combined-server.test.ts test/goal-server-assembly.test.ts \
+        test/goal-private-launch.test.ts test/goal-owner-only-launch.test.ts test/goal-human-policy-integration.test.ts test/goal-custody-channel.test.ts test/goal-bootstrap-order.test.ts test/goal-source-fixture.test.ts \
         test/owner-auth-fresh-enforce.test.ts test/routines-owner-middleware.test.ts \
+        test/routes/status-page-auth.test.ts test/routes/status-page-routes.test.ts test/routes/html-view-routes.test.ts \
         test/routine-announcement-room.test.ts test/routine-announcement-server.test.ts \
         test/owner-auth-board-decisions.test.ts test/board-decision-options.test.ts test/cli-board.test.ts test/routes/board-routes.test.ts \
         test/office-power-ui.test.ts test/company-lifecycle-fence.test.ts test/github-source.test.ts test/owner-first-setup.test.ts \
+        test/fixed-github-watch.test.ts test/fixed-watch-delivery.test.ts test/fixed-watch-server.test.ts \
+        test/routine-backup-recovery.test.ts test/routine-recovery-controls.test.ts \
+        test/cron-recovery-inflight.test.ts \
         test/owner-auth.test.ts test/owner-route-principals.test.ts test/routines-grants-owner.test.ts test/owner-setup-ui.test.ts \
         test/owner-name-onboarding.test.ts \
         test/account-login.test.ts test/chat-workspace-delete.test.ts \
@@ -57,6 +79,7 @@ let
         test/company-avatar-picker-ui.test.ts test/agent-avatar-background.test.ts test/company-hire-plan-refresh.test.ts \
         test/company-hire-wizard.test.ts test/company-role-context.test.ts test/company-rest-context.test.ts test/handbook.test.ts test/company-preferences-autosave.test.ts \
         test/company-settings-ui.test.ts test/chat-app-dom.test.ts test/profile-avatar-preview.test.ts test/cli-config-content.test.ts \
+        test/session-health-provider.test.ts test/session-health-provider-routes.test.ts test/health-canonical-reader.test.ts \
         test/session-runtime.test.ts test/company-runtime-ui.test.ts test/opencode-subscription-auth.test.ts \
         test/selected-claude-profile.test.ts \
         test/managed-codex-trust.test.ts test/full-access-default.test.ts test/worker-execution.test.ts test/laptop-power.test.ts test/laptop-reconnect.test.ts \

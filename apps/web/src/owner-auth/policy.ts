@@ -36,6 +36,7 @@ import { ownerFor, resolveParentSessionId } from '../web/route-helpers.js';
 import { claimDelegatedSessionCreate, consumeDelegatedSessionCreate, hasDelegatedSessionCreate, delegatedSessionStartCaller } from './delegated-session-create.js';
 import type { OwnerAuthService } from './service.js';
 import type { Relations } from './relations.js';
+import { goalRouteAction, type GoalAction } from '../goal-route-policy.js';
 
 export const OWNER_COOKIE = 'reverie_owner';
 export const DEVICE_COOKIE = 'reverie_owner_device';
@@ -166,6 +167,9 @@ const isPrivatePath = (path: string) => {
 };
 
 /** The class of a request: by its matched route pattern, or (unmatched) by its decoded path. */
+/** The stable status-page route (status-page-routes.ts registers it). */
+export const STATUS_PAGE_ROUTE = '/status/:name';
+
 export function classify(method: string, route: string | undefined, rawUrl: string): RouteClass {
   if (route !== undefined) {
     const key = `${method} ${route}`;
@@ -176,6 +180,8 @@ export function classify(method: string, route: string | undefined, rawUrl: stri
     if (AGENT_ROUTES.has(key)) return 'agent';
     if (SERVICE_ROUTES.has(key)) return 'service';
     if (isPrivatePath(route)) return 'owner';
+    // A status page mints an html-view capability (status-page-routes.ts): owner-only, like the APIs.
+    if (route === STATUS_PAGE_ROUTE) return 'owner';
     return 'public'; // the app shell, static assets, capability and QR paths
   }
   const path = decodedPath(rawUrl);
@@ -194,7 +200,8 @@ export function allowed(routeClass: RouteClass, caller: CallerKind): boolean {
 /** A browser loading the app: without an owner session in enforce mode it is sent to sign in. */
 export function isAppPage(req: FastifyRequest, route: string | undefined): boolean {
   if (req.method !== 'GET') return false;
-  if (route === '/' || route === '/index.html') return true;
+  // A status page is a bookmark (status-page-routes.ts): a signed-out browser goes to login and back, not a 401.
+  if (route === '/' || route === '/index.html' || route === STATUS_PAGE_ROUTE) return true;
   if (route !== undefined) return false;
   const path = decodedPath(req.url ?? '') ?? '';
   const accept = String(req.headers.accept ?? '');
@@ -216,6 +223,9 @@ export function sameOrigin(req: FastifyRequest): boolean {
 }
 
 export interface PolicyDeps {
+  /** Only exact registered Goal routes defer to this purpose-auth/custody/action gate after raw-body verification.
+   * Absence denies them even when ordinary owner policy is off/log. Never a generic agent allowlist. */
+  goalRequest?: (request: FastifyRequest, action: GoalAction) => Promise<void>;
   service: OwnerAuthService;
   ctx: SessionPort;
   /** Capability-authenticated paths the existing auth middleware lets through (webview, html-view, QR). */
@@ -272,6 +282,18 @@ export function registerOwnerPolicy(app: FastifyInstance, deps: PolicyDeps): voi
   // body is parsed only after onRequest, so this check runs as a preHandler; a refused value is
   // dropped (the caller's own header then names the parent), not an error.
   app.addHook('preHandler', async (req: FastifyRequest, reply: FastifyReply) => {
+    const goalAction = goalRouteAction(req);
+    if (goalAction) {
+      try {
+        if (!deps.goalRequest) throw new Error('Goal integration unavailable');
+        await deps.goalRequest(req, goalAction);
+      } catch {
+        return reply
+          .code(403)
+          .send(createErrorResponse(ApiErrorCode.FORBIDDEN, 'Goal integration is unavailable or refused'));
+      }
+      return;
+    }
     if (consumeDelegatedSessionCreate(req) === false)
       return reply.code(403).send(createErrorResponse(ApiErrorCode.FORBIDDEN, 'The delegated session authorization changed or the session request did not match'));
     const policy = deps.service.policy();
@@ -316,6 +338,9 @@ export function registerOwnerPolicy(app: FastifyInstance, deps: PolicyDeps): voi
       if (LIMITED_ROUTES.has(key) || (path && limitedAsset(req.method, path))) return;
       return refuse(reply, 403, 'This login has limited channel access');
     }
+    // Keep the current Limited-account boundary ahead of Goal's purpose-specific gate.
+    // Exact Goal routes still require raw-body/provenance verification and the preHandler below.
+    if (goalRouteAction(req)) return;
     const policy = deps.service.policy();
     if (policy === 'off' && !hasDelegatedSessionCreate()) return;
     const route = req.routeOptions?.url;

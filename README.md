@@ -78,6 +78,12 @@ directory at an owner-selected mount or symlink before starting. You can edit th
 memory limit and process limit in deployment.json. Existing containers are retained;
 a changed deployment requires a new container name rather than silent replacement.
 
+The optional `adminPhoneWake` boolean in `deployment.json` defaults to `false`.
+Set it to `true` to enable automatic Admin Harness channel replies under the existing
+phone and membership policies. Existing deployments apply the selected startup setting
+through their normal reviewed update workflow; a Docker restart alone does not change
+container environment. See [runtime configuration](docs/runtime-configuration.md).
+
 Source code, host configuration and host update requests are not exposed by default.
 To explicitly expose a chosen project on the first launch:
 

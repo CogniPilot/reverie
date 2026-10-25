@@ -17,6 +17,8 @@ root = Path(os.environ['UPDATE_TEST_ROOT'])
 with (root/'calls').open('a') as out: out.write(json.dumps([name, *args])+'\n')
 state = json.loads((root/'state').read_text())
 if name == 'nix':
+    if os.environ.get('PHONE_CHANGE_DURING_BUILD'):
+        (root/'deployment/deployment.json').write_text(json.dumps({'containerName':'reverie','adminPhoneWake':False}))
     if os.environ.get('STOP_DURING_BUILD'): state['reverie']['running'] = False
     (root/'state').write_text(json.dumps(state))
     sys.exit(int(os.environ.get('BUILD_FAIL', '0')))
@@ -25,7 +27,7 @@ if args[0] == 'inspect':
     target = args[-1]
     if '--format' in args: print(str(state.get(target, {}).get('running', False)).lower())
     else:
-        print(json.dumps([{'Image': 'old-image', 'Config': {'User': '1001:100', 'WorkingDir': '/workspace/task', 'Labels': ({} if os.environ.get('NO_SIGNATURE') else {'reverie.deployment': 'a'*64}), 'Env': ['REVERIE_VERSION=old', 'CUSTOM_INSTANCE=kept']}, 'HostConfig': {'Memory': 8589934592, 'MemorySwap': 8589934592, 'PidsLimit': 512}, 'Mounts': [
+        print(json.dumps([{'Image': 'old-image', 'Config': {'User': '1001:100', 'WorkingDir': '/workspace/task', 'Labels': ({} if os.environ.get('NO_SIGNATURE') else {'reverie.deployment': 'a'*64}), 'Env': ['REVERIE_VERSION=old', 'CUSTOM_INSTANCE=kept'] + (['REVERIE_ADMIN_PHONE_WAKE='+os.environ['OLD_PHONE']] if os.environ.get('OLD_PHONE') else [])}, 'HostConfig': {'Memory': 8589934592, 'MemorySwap': 8589934592, 'PidsLimit': 512}, 'Mounts': [
             {'Type':'volume','Name':'instance-data','Destination':'/instances','RW':True},
             {'Type':'volume','Name':'private-home','Destination':'/home/agent','RW':True},
             {'Type':'bind','Source':str(root/'source'),'Destination':'/workspace','RW':True},
@@ -71,6 +73,7 @@ class UpdateScriptTests(unittest.TestCase):
             stat.chmod(0o700)
         self.env = {**os.environ, 'PATH': str(self.bin)+os.pathsep+os.environ['PATH'],
             'UPDATE_TEST_ROOT': str(self.root), 'REVERIE_REPO': str(self.repo),
+            'REVERIE_ROOT': str(self.root/'deployment'),
             'REVERIE_CONTROL_DIR': str(self.root/'control'), 'REVERIE_UPDATE_BUILD_DIR': str(self.root/'build'),
             'REVERIE_UPDATE_STATE_DIR': str(self.root/'host-state'),
             'REVERIE_NIX_BUILD_DIR': str(self.root/'nix-build')}
@@ -134,6 +137,36 @@ class UpdateScriptTests(unittest.TestCase):
     def test_stop_during_build_is_not_resurrected(self):
         self.assertNotEqual(self.run_update(STOP_DURING_BUILD='1').returncode, 0)
         self.assertFalse(any(call[:2] in (['docker', 'stop'], ['docker', 'run'], ['docker', 'start']) for call in self.calls()))
+
+    def test_phone_startup_selection_refreshes_old_environment_and_ignores_host_activation(self):
+        deployment = self.root/'deployment'; deployment.mkdir()
+        file = deployment/'deployment.json'
+        for value in (None, False, True):
+            with self.subTest(value=value):
+                config = {'containerName': 'reverie'}
+                if value is not None: config['adminPhoneWake'] = value
+                file.write_text(json.dumps(config))
+                result = self.run_update(OLD_PHONE='enabled', REVERIE_ADMIN_PHONE_WAKE='enabled')
+                self.assertEqual(result.returncode, 0, result.stderr)
+                run = [call for call in self.calls() if call[:2] == ['docker', 'run']][-1]
+                self.assertEqual([v for v in run if v.startswith('REVERIE_ADMIN_PHONE_WAKE=')],
+                                 ['REVERIE_ADMIN_PHONE_WAKE=enabled'] if value else [])
+
+    def test_invalid_phone_setting_fails_before_build_or_stop(self):
+        deployment = self.root/'deployment'; deployment.mkdir()
+        for value in ('enabled', 1, None, {}):
+            (deployment/'deployment.json').write_text(json.dumps({'containerName': 'reverie', 'adminPhoneWake': value}))
+            result = self.run_update()
+            self.assertNotEqual(result.returncode, 0)
+            self.assertFalse(any(call[0] == 'nix' or call[:2] == ['docker', 'stop'] for call in self.calls()))
+
+    def test_phone_selection_change_during_build_never_stops_console(self):
+        deployment = self.root/'deployment'; deployment.mkdir()
+        (deployment/'deployment.json').write_text(json.dumps({'containerName': 'reverie', 'adminPhoneWake': True}))
+        result = self.run_update(PHONE_CHANGE_DURING_BUILD='1')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('setting changed', result.stderr)
+        self.assertFalse(any(call[:2] == ['docker', 'stop'] for call in self.calls()))
 
     def test_request_helper_only_touches_the_fixed_request_file_and_rejects_payloads(self):
         control = self.root/'control'; control.mkdir()

@@ -6,6 +6,14 @@ socket, the engine socket, or the host control directory.
 """
 from __future__ import annotations
 
+import sys
+# Exact packaged helper operations only. Mixed/unknown flags still enter the
+# ordinary parser and refuse; this branch never loads broker configuration.
+if (__name__ == '__main__' and __package__ and sys.argv[1:] in
+        (['client', '--goal-custody'], ['client', '--goal-custody-stream'])):
+    from .goal_custody_client import main as _goal_custody_main
+    raise SystemExit(_goal_custody_main(stream=sys.argv[-1] == '--goal-custody-stream'))
+
 import argparse
 import fcntl
 import hashlib
@@ -40,6 +48,9 @@ if __package__:
     from .worker_storage import storage_paths, storage_guard, prepare_storage, private_directory, storage_start_allowed, record_storage_binding, validate_storage, read_metadata
     from .worker_docker import enabled as rootless_docker_enabled, require_image as require_docker_image, security_args as docker_security_args, runtime_args as docker_runtime_args, require_account_mounts as require_docker_account_mounts
     from .worker_storage_labels import hostname as employee_hostname
+    from .goal_assertion import goal_forward_headers
+    from .goal_bootstrap import GoalBrokerBootstrap
+    from .worker_cleanup import CleanupUnconfirmed, StopBudget, remaining, reap_viewer, run_client, wait_poll
 else:
     # Host migration tools also load this file with spec_from_file_location;
     # their sys.path need not contain the sibling module's directory.
@@ -75,6 +86,12 @@ else:
     write_storage_instructions = _tmp_module.write_storage_instructions
     workspace_alias = _tmp_module.workspace_alias
     home_workspace_alias = _tmp_module.home_workspace_alias
+    _package_root = str(Path(__file__).resolve().parents[1])
+    if _package_root not in sys.path:
+        sys.path.insert(0, _package_root)
+    from reverie.goal_assertion import goal_forward_headers
+    from reverie.goal_bootstrap import GoalBrokerBootstrap
+    from reverie.worker_cleanup import CleanupUnconfirmed, StopBudget, remaining, reap_viewer, run_client, wait_poll
 
 MAX_FRAME = 256 * 1024
 SHARED_WORKSPACE = Path('/reverie_workspace')
@@ -140,11 +157,14 @@ def load_config(path):
         raise ValueError("Worker configuration must be an owner-only regular file")
     config = json.loads(path.read_text())
     required = {'version', 'deployment', 'image', 'serverContainer', 'socket', 'stateRoot', 'companyFile', 'companyRoot', 'scratchRoot', 'apiSocketRoot', 'budgetMode', 'uid', 'gid', 'memoryMiB', 'poolMemoryMiB', 'poolTasksMax', 'cgroupParent', 'pidsLimit', 'cpus', 'maxWorkers', 'mounts', 'maintenanceSessions'}
-    if not isinstance(config, dict) or set(config) - {'gpuGrants','sessionResources','rootlessDocker'} != required or config['version'] != 1:
+    if not isinstance(config, dict) or set(config) - {'gpuGrants','sessionResources','rootlessDocker','goalPrivateConfig'} != required or config['version'] != 1:
         raise ValueError("Unsupported worker configuration")
     validate_gpu_grants(config.get('gpuGrants', {}))
     validate_session_resources(config)
     rootless_docker_enabled(config)
+    if 'goalPrivateConfig' in config:
+        from reverie.goal_private import absolute
+        absolute(config['goalPrivateConfig'])
     if not re.fullmatch(r'[a-z0-9][a-z0-9-]{0,39}', config['deployment']) or not re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9_.-]{0,62}', config['serverContainer']):
         raise ValueError("Invalid deployment identity")
     if not re.fullmatch(r'sha256:[a-f0-9]{64}', config['image']):
@@ -385,11 +405,17 @@ class OfficeAPI:
         api = self
         self.tokens, self.updated = 40., time.monotonic()
         self.rate_lock = threading.Lock()
+        self.closing = threading.Event()
+        self.requests = {}
+        self.upstreams = {}
+        self.request_threads = {}
         class Handler(http.server.BaseHTTPRequestHandler):
             def log_message(self, *_): pass
             def request(self):
                 upstream = None
                 try:
+                    if api.closing.is_set():
+                        self.close_connection = True; return
                     with api.rate_lock:
                         now = time.monotonic(); api.tokens = min(40., api.tokens+(now-api.updated)*10); api.updated = now
                         if api.tokens < 1: self.send_error(429); return
@@ -448,14 +474,25 @@ class OfficeAPI:
                     hooks = parsed.path in ['/api/hook-event', '/api/status-telemetry']
                     if hooks and json.loads(body).get('sessionId') != session_id:
                         self.send_error(403); return
+                    # This owner-only release NEVER obtains a worker signer.
+                    # Strip supplied proofs and refuse the reserved Goal purpose,
+                    # rather than forwarding Basic/parent headers as authority.
+                    try:
+                        forwarded = goal_forward_headers(session_id, self.command, self.path, body,
+                                                         dict(self.headers.items()), None)
+                    except ValueError:
+                        self.send_error(403); return
                     env = dict(line.split('=', 1) for line in (company_root/'console/.env').read_text().splitlines() if '=' in line)
                     import base64
                     credentials = base64.b64encode((env.get('REVERIE_USERNAME', 'admin')+':'+env['REVERIE_PASSWORD']).encode()).decode()
                     banned = {'authorization', 'cookie', 'x-reverie-service-token', 'x-reverie-parent-session', 'x-reverie-hook-secret', 'host', 'origin', 'connection', 'upgrade', 'transfer-encoding', 'content-length'}
-                    headers = {k: v for k, v in self.headers.items() if k.lower() not in banned}
+                    headers = {k: v for k, v in forwarded.items() if k.lower() not in banned}
                     headers.update(Host='localhost:3000', Authorization='Basic '+credentials, **{'X-Reverie-Parent-Session': session_id, 'Content-Length': str(len(body))})
                     if hooks: headers['X-Reverie-Hook-Secret'] = (company_root/'console/hook-secret').read_text().strip()
                     upstream = http.client.HTTPConnection(address() if callable(address) else address, 3000, timeout=310)
+                    api.upstreams[self.connection] = upstream
+                    if api.closing.is_set():
+                        self.close_connection = True; return
                     upstream.request(self.command, self.path, body=body, headers=headers)
                     response = upstream.getresponse()
                     self.send_response(response.status)
@@ -471,10 +508,12 @@ class OfficeAPI:
                 except (OSError, ValueError, KeyError, RuntimeError, http.client.HTTPException):
                     self.close_connection = True
                 finally:
+                    api.upstreams.pop(self.connection, None)
                     if upstream: upstream.close()
             do_GET = do_POST = do_PUT = do_PATCH = do_DELETE = do_HEAD = request
         class Server(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
             daemon_threads = True
+            block_on_close = False
             request_queue_size = 4
             local_slots = threading.BoundedSemaphore(4)
             def process_request(self, request, address):
@@ -487,25 +526,88 @@ class OfficeAPI:
                 except BaseException:
                     api.slots.release(); self.local_slots.release(); raise
             def process_request_thread(self, request, address):
+                api.request_threads[request] = threading.current_thread()
                 try:
                     super().process_request_thread(request, address)
                 finally:
                     api.slots.release(); self.local_slots.release()
+                    api.request_threads.pop(request, None)
             def get_request(self):
-                connection, address = super().get_request(); connection.settimeout(15); return connection, address
+                connection, address = super().get_request()
+                connection.settimeout(15)
+                api.requests[connection] = None
+                return connection, address
+            def shutdown_request(self, request):
+                try:
+                    super().shutdown_request(request)
+                finally:
+                    api.requests.pop(request, None)
         self.server = Server(str(path), Handler)
-        path.chmod(0o600)
-        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
-        self.thread.start()
+        self.socket_path = path
+        self.socket_identity = None
+        try:
+            info = path.lstat()
+            self.socket_identity = (info.st_dev, info.st_ino)
+            path.chmod(0o600)
+            self.server.timeout = .05
+            self.server.socket.settimeout(.05)
+            self.thread = threading.Thread(target=self._serve, daemon=True)
+            self.thread.start()
+        except BaseException:
+            # shutdown() waits for serve_forever: it deadlocks if start failed.
+            self.server.server_close()
+            self._unlink_socket()
+            raise
 
-    def close(self):
-        self.server.shutdown(); self.server.server_close(); self.thread.join(2)
+    def _unlink_socket(self):
+        try:
+            info = self.socket_path.lstat()
+            if stat.S_ISSOCK(info.st_mode) and (info.st_dev, info.st_ino) == self.socket_identity:
+                self.socket_path.unlink()
+        except FileNotFoundError:
+            pass
+
+    def _serve(self):
+        while not self.closing.is_set():
+            try:
+                self.server.handle_request()
+            except OSError:
+                if not self.closing.is_set():
+                    raise
+
+    def request_close(self):
+        self.closing.set()
+        # Interrupt only these Office sockets. A blocked callback/connection
+        # attempt may remain outstanding and is not declared completed.
+        for connection in tuple(self.requests):
+            try:
+                connection.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+        for upstream in tuple(self.upstreams.values()):
+            if upstream.sock is not None:
+                try:
+                    upstream.sock.shutdown(socket.SHUT_RDWR)
+                except OSError:
+                    pass
+
+    def close(self, deadline=None):
+        deadline = time.monotonic() + 2 if deadline is None else deadline
+        self.request_close()
+        # ThreadingMixIn must never implicitly join request handlers here.
+        self.server.server_close()
+        self.thread.join(min(2., remaining(deadline)))
+        self._unlink_socket()
+        return not self.thread.is_alive() and not self.requests and not self.upstreams and not self.request_threads
 
 
 class Broker:
     def __init__(self, config, engine='docker', config_file=None, host_actions=None):
         self.config, self.engine = config, engine
         self.host_actions = host_actions
+        # Custody-only host service. office/recover/new launch deliberately never
+        # call signer(), launch_binding() or any runtime-pin writer.
+        self.goals = GoalBrokerBootstrap(self)
         self.config_file = config_file
         self.lock = threading.RLock()
         self.active = {}
@@ -518,14 +620,21 @@ class Broker:
         self.generation = 0
         self.maintenance_lock = threading.Lock()
         self.last_maintenance = 0.
-        self.stopping = threading.Event()
+        self.stopping = StopBudget()
+        self.cleanup_uncertain = set()
+        self.owned_clients = {}
+        self.viewers = {}
+        self.handlers = {}
+        self.cleanup_offices = {}
         self.nix_prepare_lock = threading.Lock()
         self.storage_lease_lock = threading.RLock()
         self.storage_leases = {}
         self.connections = threading.BoundedSemaphore(config['maxWorkers'] + 4)
 
     def run_engine(self, args, optional=False):
-        result = subprocess.run([self.engine, *args], capture_output=True, text=True, timeout=20)
+        if self.stopping.is_set() and (args[0] in ('create', 'start', 'exec') or args[:2] == ['network', 'create']):
+            raise RuntimeError('Laptop launch cancelled while broker is stopping')
+        result = run_client([self.engine, *args], timeout=20, owner=self)
         if result.returncode and not optional:
             # Engine diagnostics can contain credentials or owner-selected paths.
             raise RuntimeError('Worker engine operation failed: ' + args[0])
@@ -643,13 +752,41 @@ class Broker:
             return paths,True
 
     def release_storage(self, session_id):
-        with self.storage_lease_lock:
+        """Release an exact session's employee data lease. While the broker is stopping, the lock wait is bounded by the
+        shared stop budget (Goal composition): not acquired in time -> the lease is retained, STORAGE_LOCK_UNAVAILABLE is
+        recorded and False is returned. True when released or when nothing was held."""
+        deadline=self.stopping.deadline
+        acquired=self.storage_lease_lock.acquire() if deadline is None else self.storage_lease_lock.acquire(timeout=remaining(deadline))
+        if not acquired:
+            self.cleanup_uncertain.add('STORAGE_LOCK_UNAVAILABLE');return False
+        try:
             previous=self.storage_leases.pop(session_id,None)
             if previous:previous[0].__exit__(None,None,None)
+            return True
+        finally:
+            self.storage_lease_lock.release()
 
     def inspect_container(self, name):
         """A transient or malformed engine reply is unknown, never stopped."""
-        result = self.run_engine(['inspect', name])
+        result = self.run_engine(['inspect', name], optional=True)
+        if result.returncode:
+            missing = {
+                'Error: No such object: ' + name,
+                'Error: no such object: "' + name + '"',
+                'Error: inspecting object: no such object: "' + name + '"',
+            }
+            if (result.returncode not in (1, 125) or result.stderr.strip() not in missing or
+                    result.stdout.strip() not in ('', '[]')):
+                raise RuntimeError('Worker container state is unavailable')
+            # Generic inspect can search several object types. Confirm absence
+            # with a successful container inventory, including stopped laptops.
+            inventory = self.run_engine(['ps', '--all', '--format', '{{.Names}}'])
+            names = inventory.stdout.splitlines()
+            if (inventory.returncode or len(names) != len(set(names)) or
+                    any(not re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9_.-]*', value) for value in names) or
+                    name in names):
+                raise RuntimeError('Worker container state is unavailable')
+            return {'State': {'Running': False}}
         try:
             items = json.loads(result.stdout)
             if not isinstance(items, list) or len(items) != 1 or not isinstance(items[0], dict):
@@ -677,9 +814,47 @@ class Broker:
             return address
 
     def office(self, session_id):
+        if self.stopping.is_set():
+            raise RuntimeError('Worker broker is stopping')
         if session_id not in self.offices:
             self.offices[session_id] = OfficeAPI(Path(self.config['apiSocketRoot'])/session_id, session_id, self.address, Path(self.config['companyRoot']),host_actions=self.host_actions)
+            self.cleanup_offices[id(self.offices[session_id])] = self.offices[session_id]
+        if self.stopping.is_set():
+            self._close_office(self.offices[session_id])
+            raise RuntimeError('Worker broker is stopping')
         return self.offices[session_id]
+
+    def _close_office(self, office):
+        deadline = self.stopping.deadline
+        try:
+            result = office.close() if deadline is None else office.close(deadline=deadline)
+        except (OSError, RuntimeError):
+            self.cleanup_uncertain.add('OFFICE_CLOSE_FAILED')
+            if deadline is None: raise
+            return False
+        if result is False:
+            self.cleanup_uncertain.add('OFFICE_HANDLER_ACTIVE')
+        else:
+            self.cleanup_offices.pop(id(office), None)
+        return result is not False
+
+    def _reap_viewer(self, token):
+        entry = self.viewers.get(token)
+        if entry is None:
+            return
+        child, guard = entry
+        if child is None:
+            self.cleanup_uncertain.add('VIEWER_START_PENDING')
+            return
+        deadline = self.stopping.deadline
+        deadline = time.monotonic() + 5.1 if deadline is None else deadline
+        if not guard.acquire(timeout=remaining(deadline)):
+            self.cleanup_uncertain.add('VIEWER_UNREAPED'); return
+        try:
+            if reap_viewer(child, self.stopping, self.cleanup_uncertain):
+                self.viewers.pop(token, None)
+        finally:
+            guard.release()
 
     def recover(self):
         result = self.run_engine(['ps', '--filter', 'label=reverie.worker=' + self.config['deployment'], '--format', '{{.Names}}'])
@@ -687,27 +862,38 @@ class Broker:
         if len(names)!=len(set(names)):raise RuntimeError('Duplicate laptop recovery inventory')
         selected={name.removeprefix(self.config['deployment']+'-agent-'):name for name in names
                   if SESSION.fullmatch(name.removeprefix(self.config['deployment']+'-agent-'))}
-        leases=[];offices=[]
+        # Goal: recovery extends the known set and commits nothing on failure.
+        recovered=dict(self.laptops);recovered.update(selected)
+        if len(recovered)>self.config['maxWorkers'] or (self.config['budgetMode']=='admission' and
+             sum(effective_config(self.config,s)['memoryMiB'] for s in recovered
+                 if effective_config(self.config,s)['budgetMode']=='admission')>self.config['poolMemoryMiB']):
+            raise RuntimeError('Running laptops exceed the configured admission budget')
+        leases=[];created={}
         try:
-            if len(selected)>self.config['maxWorkers'] or (self.config['budgetMode']=='admission' and
-                 sum(effective_config(self.config,s)['memoryMiB'] for s in selected
-                     if effective_config(self.config,s)['budgetMode']=='admission')>self.config['poolMemoryMiB']):
-                raise RuntimeError('Running laptops exceed the configured admission budget')
-            # Complete writer/lease validation before opening any public phone.
+            # 3be: complete writer/lease validation before opening any public phone.
             for sid in selected:
-                paths,created=self.claim_storage(sid)
-                if created:leases.append(sid)
+                paths,claimed=self.claim_storage(sid)
+                if claimed:leases.append(sid)
                 if paths.kind=='employee':validate_storage(self.config,paths)
-            for sid in selected:
-                existing=sid in self.offices;self.office(sid)
-                if not existing:offices.append(sid)
-            self.laptops.update(selected)
+            for sid in recovered:
+                if self.stopping.is_set():
+                    raise RuntimeError('Office recovery cancelled while broker is stopping')
+                if sid not in self.offices:
+                    created[sid]=OfficeAPI(Path(self.config['apiSocketRoot'])/sid, sid, self.address, Path(self.config['companyRoot']),host_actions=self.host_actions)
+                    self.cleanup_offices[id(created[sid])]=created[sid]
         except BaseException:
-            for sid in offices:
-                office=self.offices.pop(sid,None)
-                if office:office.close()
-            for sid in leases:self.release_storage(sid)
+            # Goal composition (Otto H2): every owned resource gets its own cleanup attempt; one failure records
+            # uncertainty and never prevents the remaining Office closes or lease releases. Recovered laptops are not stopped.
+            for office in created.values():
+                try:self._close_office(office)
+                except Exception:self.cleanup_uncertain.add('OFFICE_CLOSE_FAILED')
+            for sid in leases:
+                try:self.release_storage(sid)
+                except Exception:self.cleanup_uncertain.add('STORAGE_RELEASE_UNCONFIRMED')
             raise
+        # No engine stop/kill or partial population is committed on failure.
+        self.offices.update(created)
+        self.laptops=recovered
 
     def stop_laptops(self):
         with self.lock:
@@ -730,7 +916,7 @@ class Broker:
                 offices = list(self.offices.values())
                 self.offices.clear()
             for office in offices:
-                office.close()
+                self._close_office(office)
         finally:
             self.draining.clear()
 
@@ -860,6 +1046,7 @@ class Broker:
             if action == 'restart-website' and time.monotonic()-self.last_maintenance < 60:
                 self.maintenance_lock.release()
                 raise RuntimeError('Wait one minute between website restarts')
+            previous_maintenance = self.last_maintenance
             self.last_maintenance = time.monotonic()
             def website():
                 try:
@@ -867,7 +1054,12 @@ class Broker:
                     self.run_engine(['stop' if action == 'shutdown' else 'restart', '--time', '20', self.config['serverContainer']], optional=True)
                 finally:
                     self.maintenance_lock.release()
-            threading.Thread(target=website, daemon=True).start()
+            try:
+                threading.Thread(target=website, daemon=True).start()
+            except (RuntimeError, MemoryError, OSError):
+                self.last_maintenance = previous_maintenance
+                self.maintenance_lock.release()
+                raise
         return {'action': action, 'success': True}
 
     def supervise(self):
@@ -917,11 +1109,12 @@ class Broker:
                         with self.lock:
                             self.laptops.pop(sid, None)
                         office = self.offices.pop(sid, None)
-                        if office: office.close()
+                        if office: self._close_office(office)
                 except (OSError, ValueError, RuntimeError, KeyError, TypeError, IndexError, AttributeError, subprocess.SubprocessError):
                     pass
 
     def handle(self, connection):
+        self.handlers[connection] = threading.current_thread()
         name = None
         child = None
         master = slave = None
@@ -935,12 +1128,27 @@ class Broker:
         exit_file = None
         nix_guard = None
         storage_claimed = False
+        viewer_token = None
         try:
+            if self.stopping.is_set():
+                raise RuntimeError('Worker broker is stopping')
             connection.settimeout(10)
             peer = struct.unpack('3i', connection.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, 12))
             if peer[1] != self.config['uid']:
                 raise ValueError('Worker peer identity is not authorized')
             kind, raw = receive_frame(connection)
+            if kind == b'G':
+                projection = json.loads(raw)
+                if not isinstance(projection, dict) or projection != {'action': 'goal-custody'}:
+                    raise ValueError('Closed Goal custody operation refused')
+                # Shared schema recognizes both modes, but this restricted
+                # broker release supports ONLY owner-only custody. It never
+                # implicitly upgrades existing/new offices to employee signing.
+                if self.goals.config()[0]['mode'] != 'owner-only':
+                    raise ValueError('This broker supports owner-only Goal custody')
+                result = self.goals.project(projection, peer)
+                send_frame(connection, b'J', json.dumps(result).encode())
+                return
             if kind == b'C':
                 control = json.loads(raw)
                 if not isinstance(control, dict) or set(control) - {'action', 'caller'}:
@@ -1112,7 +1320,13 @@ class Broker:
             fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack('HHHH', request['rows'], request['cols'], 0, 0))
             # Docker exec clients can outlive a lost transport. Replace only the
             # old terminal viewer; the office program and tmux pane keep running.
+            if self.stopping.is_set():
+                raise RuntimeError('Worker broker is stopping')
+            viewer_token = object()
+            viewer_guard = threading.Lock()
+            self.viewers[viewer_token] = (None, viewer_guard)
             child = subprocess.Popen([self.engine, *tmux_exec_args(name, 'attach-session', '-d', '-t', 'office', attach=True)], stdin=slave, stdout=slave, stderr=slave, start_new_session=True, close_fds=True)
+            self.viewers[viewer_token] = (child, viewer_guard)
             os.close(slave)
             slave = None
             attached_at = time.monotonic()
@@ -1175,40 +1389,58 @@ class Broker:
         finally:
             if nix_guard is not None:
                 nix_guard.__exit__(None, None, None)
-            completed = exit_file is not None and exit_file.is_file()
-            if admitted and name and owned and ((not started and not existing_running) or completed):
+            try:
+                completed = exit_file is not None and exit_file.is_file()
+                if admitted and name and owned and ((not started and not existing_running) or completed):
+                    try:
+                        self.stop(name)
+                    except (OSError, RuntimeError, subprocess.TimeoutExpired):
+                        if self.stopping.is_set():
+                            self.cleanup_uncertain.add('PROVIDER_CLEANUP_UNCONFIRMED')
+                if child:
+                    self._reap_viewer(viewer_token)
+                elif viewer_token is not None:
+                    self.viewers.pop(viewer_token, None)
+            finally:
                 try:
-                    self.stop(name)
-                except (OSError, RuntimeError, subprocess.TimeoutExpired):
-                    pass
-            if child:
-                if child.poll() is None:
-                    child.terminate()
-                try:
-                    child.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    os.killpg(child.pid, signal.SIGKILL)
-                    child.wait()
-            for fd in [master, slave]:
-                if fd is not None:
-                    os.close(fd)
-            if launch and not started:
-                launch.unlink(missing_ok=True)
-            if claimed:
-                with self.lock:
-                    self.active.pop(session_id, None)
-                    if (not started and not existing_running) or completed:
-                        self.laptops.pop(session_id, None)
-                        office = self.offices.pop(session_id, None)
-                        if office: office.close()
-            if storage_claimed:
-                # Viewer EOF alone does not end a laptop's data lease. Release
-                # only after observing that exact named laptop is no longer live.
-                state=self.run_engine(['inspect',self.config['deployment']+'-agent-'+session_id],optional=True)
-                if state.returncode or json.loads(state.stdout)[0]['State']['Running'] is False:
-                    self.release_storage(session_id)
-            connection.close()
-            self.connections.release()
+                    for fd in [master, slave]:
+                        if fd is not None:
+                            try: os.close(fd)
+                            except OSError: pass
+                    if launch and not started:
+                        launch.unlink(missing_ok=True)
+                    if claimed:
+                        deadline = self.stopping.deadline
+                        acquired = self.lock.acquire() if deadline is None else self.lock.acquire(timeout=remaining(deadline))
+                        if not acquired:
+                            self.cleanup_uncertain.add('LOCK_UNAVAILABLE')
+                        else:
+                            try:
+                                self.active.pop(session_id, None)
+                                if (not started and not existing_running) or completed:
+                                    self.laptops.pop(session_id, None)
+                                    office = self.offices.pop(session_id, None)
+                                    if office: self._close_office(office)
+                            finally:
+                                self.lock.release()
+                    if storage_claimed:
+                        # 3be: viewer EOF alone does not end a laptop's data lease. Release only after observing that
+                        # exact named laptop is no longer live. Merge: bounded like the Goal's provider cleanup.
+                        try:
+                            state=self.run_engine(['inspect',self.config['deployment']+'-agent-'+session_id],optional=True)
+                            if state.returncode or json.loads(state.stdout)[0]['State']['Running'] is False:
+                                self.release_storage(session_id)
+                        except (OSError, RuntimeError, ValueError, KeyError, IndexError, subprocess.TimeoutExpired):
+                            if self.stopping.is_set():
+                                self.cleanup_uncertain.add('STORAGE_RELEASE_UNCONFIRMED')
+                            else:
+                                raise
+                finally:
+                    try:
+                        connection.close()
+                    finally:
+                        self.connections.release()
+                        self.handlers.pop(connection, None)
 
     def serve(self):
         self.check_pool()
@@ -1227,14 +1459,22 @@ class Broker:
                 else:
                     raise ValueError('Another worker broker is already listening')
         self.recover()
-        supervisor = threading.Thread(target=self.supervise, daemon=True)
-        supervisor.start()
-        with socket.socket(socket.AF_UNIX) as listener:
-            listener.bind(str(path))
-            path.chmod(0o600)
-            listener.listen(8)
-            listener.settimeout(0.5)
-            try:
+        supervisor = None
+        supervisor_started = False
+        socket_identity = None
+        try:
+            if self.stopping.is_set():
+                return
+            supervisor = threading.Thread(target=self.supervise, daemon=True)
+            supervisor.start()
+            supervisor_started = True
+            with socket.socket(socket.AF_UNIX) as listener:
+                listener.bind(str(path))
+                info = path.lstat()
+                socket_identity = (info.st_dev, info.st_ino)
+                path.chmod(0o600)
+                listener.listen(8)
+                listener.settimeout(0.5)
                 while not self.stopping.is_set():
                     try:
                         connection, _ = listener.accept()
@@ -1243,23 +1483,82 @@ class Broker:
                     if not self.connections.acquire(blocking=False):
                         connection.close()
                         continue
-                    threading.Thread(target=self.handle, args=(connection,), daemon=True).start()
-            finally:
-                self.stopping.set()
-                with self.lock:
-                    active = list(self.active.values())
-                for connection in active:
                     try:
-                        connection.shutdown(socket.SHUT_RDWR)
-                    except OSError:
-                        pass
-                deadline = time.monotonic() + 25
-                while self.active and time.monotonic() < deadline:
-                    time.sleep(0.1)
-                for office in list(self.offices.values()):
-                    office.close()
-                supervisor.join(5)
-                path.unlink(missing_ok=True)
+                        if self.stopping.is_set():
+                            connection.close(); self.connections.release(); continue
+                        handler = threading.Thread(target=self.handle, args=(connection,), daemon=True)
+                        if self.stopping.is_set():
+                            connection.close(); self.connections.release(); continue
+                        self.handlers[connection] = handler
+                        handler.start()
+                    except (RuntimeError, MemoryError, OSError):
+                        self.handlers.pop(connection, None)
+                        connection.close()
+                        self.connections.release()
+        finally:
+            # Covers supervisor/listener startup failures as well as normal exit.
+            self.stopping.set()
+            deadline = self.stopping.deadline
+            offices = dict(self.cleanup_offices)
+            offices.update((id(office), office) for office in tuple(self.offices.values()))
+            # Stop ALL listeners before sequential bounded joins; never spend
+            # one serve_forever shutdown polling interval per Office.
+            for office in offices.values():
+                try: office.request_close()
+                except (OSError, RuntimeError): self.cleanup_uncertain.add('OFFICE_CLOSE_FAILED')
+            if self.lock.acquire(timeout=remaining(deadline)):
+                try:
+                    active = list(self.active.values())
+                finally:
+                    self.lock.release()
+            else:
+                active = []
+                self.cleanup_uncertain.add('LOCK_UNAVAILABLE')
+            for connection in set(active) | set(self.handlers):
+                try:
+                    connection.shutdown(socket.SHUT_RDWR)
+                except OSError:
+                    pass
+            drain = min(deadline, time.monotonic() + 25)
+            while (self.active or self.handlers) and remaining(drain):
+                time.sleep(min(.1, remaining(drain)))
+            # A late in-progress constructor is still visible through its
+            # handler; sweep published Offices again, without a fresh budget.
+            offices.update(self.cleanup_offices)
+            for office in offices.values():
+                try: office.request_close()
+                except (OSError, RuntimeError): self.cleanup_uncertain.add('OFFICE_CLOSE_FAILED')
+            for office in offices.values():
+                if self._close_office(office):
+                    for sid, current in tuple(self.offices.items()):
+                        if current is office: self.offices.pop(sid, None)
+            for token in tuple(self.viewers):
+                self._reap_viewer(token)
+            for token, child in tuple(self.owned_clients.items()):
+                if child is not None and wait_poll(child, deadline, self.stopping):
+                    self.owned_clients.pop(token, None)
+                else:
+                    self.cleanup_uncertain.add('ENGINE_CLIENT_UNREAPED')
+            if supervisor_started:
+                supervisor.join(min(5., remaining(deadline)))
+                if supervisor.is_alive():
+                    self.cleanup_uncertain.add('SUPERVISOR_ACTIVE')
+            for handler in tuple(self.handlers.values()):
+                if handler is not threading.current_thread():
+                    handler.join(remaining(deadline))
+            if self.handlers or self.active:
+                self.cleanup_uncertain.add('HANDLER_ACTIVE')
+            if not remaining(deadline):
+                self.cleanup_uncertain.add('DEADLINE_EXHAUSTED')
+            if socket_identity is not None:
+                try:
+                    info = path.lstat()
+                    if stat.S_ISSOCK(info.st_mode) and (info.st_dev, info.st_ino) == socket_identity:
+                        path.unlink()
+                except FileNotFoundError:
+                    pass
+            if self.cleanup_uncertain:
+                raise CleanupUnconfirmed(self.cleanup_uncertain)
 
 
 def terminal_size():
@@ -1277,6 +1576,9 @@ def client(args):
     info = Path(path).lstat()
     if not stat.S_ISSOCK(info.st_mode) or info.st_mode & 0o077:
         raise ValueError('Worker socket is unavailable or not private')
+    if getattr(args, 'goal_custody', False):
+        from reverie.goal_custody_client import project
+        return project(args)
     if args.control:
         with socket.socket(socket.AF_UNIX) as connection:
             connection.settimeout(120)
@@ -1370,6 +1672,7 @@ def main():
     serve.add_argument('--config', required=True)
     execute = commands.add_parser('client')
     execute.add_argument('--control', choices=['status', 'stop-laptops', 'shutdown', 'restart-website', 'reload-resources'])
+    execute.add_argument('--goal-custody', action='store_true', help='Closed host/server-only custody projection')
     execute.add_argument('--caller-session')
     execute.add_argument('--attach-only', action='store_true')
     execute.add_argument('--session-id')
@@ -1390,6 +1693,9 @@ def main():
         else:
             child(args.record)
     except (OSError, ValueError, EOFError, RuntimeError) as error:
+        if isinstance(error, CleanupUnconfirmed):
+            error.report()
+            return 1
         print('Reverie worker unavailable: ' + (str(error) if isinstance(error, ValueError) else type(error).__name__), file=sys.stderr)
         return 1
     return 0

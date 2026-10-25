@@ -40,6 +40,7 @@ describe('routine access through actual owner middleware', () => {
   let jobs: Map<string, CronJob>;
   let writes: ReturnType<typeof vi.fn>;
   let notice: boolean;
+  let notices: ReturnType<typeof vi.fn>;
   const people = [
     { id: 'employee-own', name: 'Author', position: 'Engineer', session: SELF },
     { id: 'employee-other', name: 'Other', position: 'Engineer', session: OTHER },
@@ -72,6 +73,7 @@ describe('routine access through actual owner middleware', () => {
     ]);
     writes = vi.fn();
     notice = true;
+    notices = vi.fn(() => notice);
     const cron = {
       listJobs: () => [...jobs.values()],
       getJob: (id: string) => jobs.get(id),
@@ -124,7 +126,7 @@ describe('routine access through actual owner middleware', () => {
         findEmployee: (id: string) => people.find((p) => p.session === id),
         isMember: (room: string, sid: string) => room === 'room-own' && [SELF, OTHER].includes(sid),
         notificationRoomId: () => 'board',
-        notify: () => notice,
+        notify: notices,
       },
     } as never);
     registerChatBotRoutes(app, {
@@ -177,6 +179,19 @@ describe('routine access through actual owner middleware', () => {
     expect((await call('PUT', '/api/cron/jobs/mine', { postText: 'no' })).statusCode).toBe(403);
     expect(writes).not.toHaveBeenCalled();
   });
+  it('refuses recovery-held own mutations before notices/writes, preserves foreign denial, allows disable', async () => {
+    jobs.get('mine')!.recoveryUncertain = true;
+    jobs.get('foreign')!.recoveryUncertain = true;
+    for (const [method, suffix, payload] of [['PUT', '', { postText: 'replay' }], ['PUT', '/enabled', { enabled: true }], ['POST', '/run', undefined], ['DELETE', '', undefined]] as const) {
+      const held = await call(method, '/api/cron/jobs/mine' + suffix, payload);
+      expect(held.statusCode, held.body).toBe(400); expect(held.body).toContain('RECOVERY_UNCERTAIN');
+      expect((await call(method, '/api/cron/jobs/foreign' + suffix, payload)).statusCode).toBe(403);
+    }
+    expect(notices).not.toHaveBeenCalled(); expect(writes).not.toHaveBeenCalled();
+    expect((await call('PUT', '/api/cron/jobs/mine/enabled', { enabled: false })).statusCode).toBe(200);
+    expect(notices).toHaveBeenCalledOnce(); expect(writes).toHaveBeenCalledOnce();
+    expect(jobs.get('mine')?.recoveryUncertain).toBe(true);
+  });
   it('refuses foreign create/edit rooms and missing announcement', async () => {
     expect((await call('POST', '/api/cron/jobs', { ...body, roomId: 'private-room' })).statusCode).toBe(403);
     expect((await call('PUT', '/api/cron/jobs/mine', { roomId: 'private-room' })).statusCode).toBe(403);
@@ -210,6 +225,14 @@ describe('routine access through actual owner middleware', () => {
       expect((await call(method, url, payload)).statusCode, method + ' ' + url).toBe(403);
     expect(grants.snapshot()).toEqual({ roles: [], employees: { 'employee-own': true } });
     expect(writes).not.toHaveBeenCalled();
+  });
+  it('refuses fixed-target worker configuration and overrides without scheduler or grant changes', async () => {
+    const target = { owner: 'Example', repo: 'public', pull: 7 };
+    // The route forces worker creates to postAs:author; fixed watchers are schema-refused there.
+    expect((await call('POST', '/api/cron/jobs', { ...body, botId: 'watch', postSource: 'github', postSourceArgs: target, postChangeOnly: true, postText: '{message}', intervalMinutes: 60 })).statusCode).toBe(400);
+    expect((await call('PUT', '/api/cron/jobs/mine', { postSource: 'github', postSourceArgs: target })).statusCode).toBe(403);
+    expect(writes).not.toHaveBeenCalled();
+    expect(grants.snapshot()).toEqual({ roles: [], employees: { 'employee-own': true } });
   });
   it('redacts foreign job and run contents, including all-listing', async () => {
     const all = (await call('GET', '/api/cron/jobs?all=1')).json();

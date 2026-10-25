@@ -8,7 +8,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 
 import agent_loop as loop
-from attention_wake import AttentionWake, wait_for_scan
+from attention_wake import AttentionWake, OFFICE_DISABLED_STATUS, OfficePhoneDisabled, wait_for_scan
 from test_coding_support import FakeChat, SELF, cfg_for
 
 
@@ -38,6 +38,51 @@ class AttentionWakeTests(unittest.TestCase):
             'X-Reverie-Parent-Session': SELF['sessionId'], 'Accept': 'application/json'})
         self.assertNotIn('do-not-send', str(connection.mock_calls))
         connection.close.assert_called_once()
+
+    def test_explicit_office_disabled_response_reports_blocked_replies_and_recovers_without_spam(self):
+        disabled = Mock(status=503)
+        disabled.read.return_value = json.dumps({
+            'success': False, 'error': 'Admin phone wake is not enabled for this instance'}).encode()
+        active = Mock(status=200)
+        active.read.return_value = b'{"success":true,"data":{"event":null}}'
+        connections = [Mock(), Mock(), Mock()]
+        for connection, response in zip(connections, [disabled, disabled, active]):
+            connection.getresponse.return_value = response
+        reports = []
+        def report(text):
+            reports.append(text)
+            if wake.status == 'active':
+                wake.stopped.set()
+        wake = AttentionWake(cfg_for('/unused', phone_wake=True), report, env=self.env(),
+                             connection=Mock(side_effect=connections))
+        wake.stopped.wait = Mock(return_value=False)
+        wake._run()
+        self.assertEqual(len(reports), 2)
+        self.assertIn(OFFICE_DISABLED_STATUS, reports[0])
+        self.assertNotIn('normal scan', reports[0])
+        self.assertNotIn('polling fallback', reports[0])
+        self.assertIn('Manual reads and terminal prompts remain available', reports[0])
+        self.assertIn('active', reports[1])
+        self.assertEqual([call.args[0] for call in wake.stopped.wait.call_args_list], [1, 2, 0.1])
+        self.assertFalse(wake.signal.is_set())
+        for connection in connections:
+            connection.close.assert_called_once()
+
+    def test_other_503_responses_remain_generic_and_never_expose_response_bodies(self):
+        response = Mock(status=503)
+        connection = Mock()
+        connection.getresponse.return_value = response
+        wake = AttentionWake(cfg_for('/unused', phone_wake=True), env=self.env(),
+                             connection=lambda *a, **k: connection)
+        for raw in (b'private backend diagnostic', b'x' * 4097,
+                    b'{"success":false,"error":"private backend diagnostic"}',
+                    b'{"success":true,"error":"Admin phone wake is not enabled for this instance"}'):
+            response.read.return_value = raw
+            with self.assertRaises(ValueError) as caught:
+                wake._poll()
+            self.assertNotIsInstance(caught.exception, OfficePhoneDisabled)
+            self.assertNotIn('private backend diagnostic', str(caught.exception))
+        self.assertFalse(wake.signal.is_set())
 
     def test_metadata_is_bounded_validated_and_duplicate_signals_are_coalesced(self):
         response = Mock(status=200)

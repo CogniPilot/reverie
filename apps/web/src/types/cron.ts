@@ -69,7 +69,17 @@ export interface CronJob {
    */
   postSource?: 'plans-pace' | 'host-load' | 'burn-watch' | 'github';
   /** post with a source that takes arguments ('github': owner, repo, kinds). */
-  postSourceArgs?: { owner: string; repo: string; kinds?: Array<'pulls' | 'issues'> };
+  postSourceArgs?: { owner: string; repo: string; kinds?: Array<'pulls' | 'issues'>; pull?: number };
+  /** Server-only fixed-watch epoch and bounded metadata receipts. Never accepted from worker/config input. */
+  watchGeneration?: string;
+  /** Server-kept backup-recovery HOLD. No public reset/reconciliation authority exists. */
+  recoveryUncertain?: true;
+  watchState?: {
+    generation: string;
+    failures: number;
+    pending?: { receipt: string; utc: number; events: import('../cron/fixed-github-watch.js').WatchEvent[] };
+    delivery?: { receipt: string; room: string; utc: number; result: 'DELIVERED'; messageId: string; events: import('../cron/fixed-github-watch.js').WatchEvent[] };
+  };
   /** post with a source: post only when this holds; otherwise the scheduled fire is silent (no run recorded). */
   postWhen?: { field: string; op: 'gt' | 'gte' | 'lt' | 'lte' | 'eq' | 'ne'; value: number };
   /** post with a source: skip a scheduled fire whose rendered text equals the last text posted. */

@@ -36,9 +36,13 @@ Use these Linux paths:
 - `/home/agent`: private settings, SSH configuration and retained work.
 - `/nix`: installed tools, profiles and the package database.
 - `/workspace` or explicit project mounts: durable shared work when granted. `/reverie_workspace` remains compatible.
-- `/tmp/<project>`: disposable builds, caches and downloads. `TMPDIR`, `TMP` and `TEMP` point here.
+- `/tmp/<task>`: task-specific temporary builds, disposable source checkouts, dependency caches and regenerable downloads. `TMPDIR`, `TMP` and `TEMP` point to `/tmp`.
 
-`/tmp` uses this laptop's private directory on the scratch disk, rather than a small RAM filesystem. `/scratch` is also disposable and remains for compatibility. Check actual backing storage before assuming a path is durable. Existing project mounts and owner files take precedence over aliases. Preserve source, unfinished work and retained results before cleanup.
+`/tmp` uses this laptop's private directory on the scratch disk, rather than a small RAM filesystem. `/scratch` is also disposable and remains for compatibility. Temporary storage may be wiped periodically: recreate it and verify source revisions, input hashes and required tools at each run. Check shared disk capacity before heavy work. Use normal project commands and the provided environment defaults.
+
+Keep unique data, unpushed or uncommitted work, cited evidence, results, latches, configuration, credentials and installed tools in verified durable storage. Verify backing storage; project mounts and owner files take precedence over aliases.
+
+Save and verify a handoff before cleanup; after sealing remove only task-owned registered disposable outputs. Registration, names and gitignore do not prove disposability. Respect live leases, protect sockets and runtime state, never move active caches or sockets, and preserve other tasks' work and shared stores.
 
 Legacy laptops require coordinated offline migration of home and Nix together. Save a handoff and keep their existing stores and profile links intact. Do not restart the broker to install a package; ordinary Nix commands need neither the host daemon nor another laptop's store.
 

@@ -1878,6 +1878,7 @@ const CronJobBaseSchema = z.object({
       owner: z.string().regex(GITHUB_NAME, 'owner must be a GitHub user or organisation name'),
       repo: z.string().regex(GITHUB_NAME, 'repo must be a GitHub repository name'),
       kinds: z.array(z.enum(['pulls', 'issues'])).max(2).optional(),
+      pull: z.number().int().positive().max(Number.MAX_SAFE_INTEGER).optional(),
     })
     .strict()
     .optional(),
@@ -1928,6 +1929,11 @@ function refineCronJob(val: z.infer<typeof CronJobBaseSchema>, ctx: z.Refinement
     if (!val.botId && val.postAs !== 'author') add('botId is required for a post job', 'botId');
     if (!val.roomId) add('roomId is required for a post job', 'roomId');
     if (!val.postText) add('postText is required for a post job', 'postText');
+    if (val.postSourceArgs?.pull !== undefined && (
+      val.postSource !== 'github' || val.postSourceArgs.kinds !== undefined || val.postAs === 'author' ||
+      val.postText !== '{message}' || !val.postChangeOnly || val.postWhen ||
+      val.scheduleType !== 'interval' || (val.intervalMinutes ?? 0) < 15
+    )) add('A fixed PR watcher requires bot github {message}, change-only, no condition/kinds, interval >=15 minutes', 'postSourceArgs');
     if (val.postSource && val.postText) {
       const bad = validatePostSource(val.postSource, val.postText, val.postWhen ?? undefined);
       if (bad) add(bad, 'postSource');

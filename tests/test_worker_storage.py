@@ -6,7 +6,7 @@ from pathlib import Path
 import tempfile
 import unittest
 import subprocess
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from reverie.worker_storage import (storage_paths,prepare_storage,storage_guard,lock_paths,
                                    read_metadata,company_records,record_storage_binding,storage_start_allowed)
@@ -264,19 +264,22 @@ class BrokerEmployeeLeaseTests(unittest.TestCase):
         with storage_guard(self.config,OLD):prepare_storage(self.config,paths)
         old=self.broker([self.item()]);old.claim_storage(OLD)
         old.release_storage(OLD)  # An old process exit closes its FD; laptop survives.
-        replacement=self.broker([self.item()]);replacement.office=Mock()
-        replacement.recover()
+        replacement=self.broker([self.item()])
+        # Goal composition: recover() builds offices with OfficeAPI directly (commit only on success), so observe that.
+        with patch('reverie.worker.OfficeAPI') as office_api:
+            replacement.recover()
         self.assertIn(OLD,replacement.storage_leases)
         self.assertIn(OLD,replacement.laptops)
-        replacement.office.assert_called_once_with(OLD)
+        office_api.assert_called_once(); self.assertEqual(office_api.call_args.args[1],OLD)
         with self.assertRaises(BlockingIOError):
             with storage_guard(self.config,OLD,migration=True):pass
 
     def test_duplicate_writers_block_recovery_before_any_phone(self):
         duplicate=self.item(name='/test-agent-'+NEW);duplicate['Id']='b'*64
-        broker=self.broker([self.item(),duplicate]);broker.office=Mock()
-        with self.assertRaises(RuntimeError):broker.recover()
-        broker.office.assert_not_called();self.assertFalse(broker.storage_leases)
+        broker=self.broker([self.item(),duplicate])
+        with patch('reverie.worker.OfficeAPI') as office_api:  # Goal composition: offices are built with OfficeAPI directly
+            with self.assertRaises(RuntimeError):broker.recover()
+        office_api.assert_not_called();self.assertFalse(broker.storage_leases)
         self.assertFalse(broker.laptops)
 
     def test_historical_transport_request_cannot_start_or_create_employee_laptop(self):

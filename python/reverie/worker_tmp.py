@@ -15,11 +15,15 @@ This persistent laptop belongs to your employee identity and survives model,
 account and conversation/session changes. Those changes do not authorize a new
 identity or new tool grants.
 
-`/tmp` is your own disk-backed disposable temporary drive. `TMPDIR`, `TMP` and
-`TEMP` point there. Put builds, caches and downloads under `/tmp/<project>/...`;
-the default tool directories are separated by working-directory identity.
-`/scratch` remains a compatibility mount for existing paths and is disposable too.
-Neither location is a durable home for source, unfinished work or retained results.
+Put temporary builds, disposable source checkouts, dependency caches and
+regenerable downloads in a task-specific directory under `/tmp`. Check shared
+disk capacity before heavy work. Temporary storage may be wiped periodically;
+recreate it and verify source revisions, input hashes and required tools at each
+run. Use normal project commands and the provided environment defaults.
+
+`/tmp` is the laptop's own disk-backed disposable drive. `TMPDIR`, `TMP`
+and `TEMP` point to `/tmp`; `/scratch` remains disposable compatibility storage.
+Neither location is a durable home for unfinished source or retained results.
 
 Keep installed tools and profiles in your private `/nix` and `/home/agent`.
 Use the project's pinned `nix develop`, `nix build` or `nix run` first. Use
@@ -43,6 +47,18 @@ mounts and occupied paths are preserved. A project name or symlink does not
 prove durability; check its actual granted backing storage. Before cleanup,
 save handoffs and preserve source, results and work still in progress. Do not
 delete another task's data or move an active cache.
+
+Keep unique data, unpushed or uncommitted work, cited evidence, results and
+one-attempt latches in verified durable workspace, project or private home storage.
+Keep configuration, credentials and installed tools outside disposable roots.
+Preserve and verify durable source, evidence and results before cleanup, then
+remove the task's registered disposable outputs after sealing results. Registration,
+a path name or a Git ignore rule alone does not prove a file is disposable.
+
+Cleanup must respect live task leases and protect active sockets, runtime state
+and credentials. Do not move or delete a live socket by hand. Do not clean another
+task's files, shared caches or Nix store paths without specific preservation and
+ownership checks.
 
 Credentials need explicit named grants outside disposable storage. Never paste
 credential bytes into chat. A laptop/tool upgrade grants no mission or flight GO.

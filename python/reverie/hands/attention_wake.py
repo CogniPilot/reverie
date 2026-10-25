@@ -14,6 +14,13 @@ import time
 import urllib.parse
 
 
+OFFICE_DISABLED_STATUS = 'disabled by office configuration (all automatic room replies blocked)'
+
+
+class OfficePhoneDisabled(ValueError):
+    """The website explicitly disabled automatic Admin Harness room effects."""
+
+
 class AttentionWake:
     def __init__(self, cfg, report=lambda text: None, *, env=None, connection=http.client.HTTPConnection):
         self.signal = threading.Event()
@@ -55,7 +62,9 @@ class AttentionWake:
     def _status(self, status):
         if status != self.status:
             self.status = status
-            self.report('Phone wake: ' + status + '; general messages use the normal scan.')
+            detail = ('. Manual reads and terminal prompts remain available.' if status == OFFICE_DISABLED_STATUS
+                      else '; general messages use the normal scan.')
+            self.report('Phone wake: ' + status + detail)
 
     def _poll(self):
         connection = self.factory(self.host, self.port, timeout=32)
@@ -68,6 +77,13 @@ class AttentionWake:
             connection.request('GET', '/api/chatrooms/attention', headers={
                 'X-Reverie-Parent-Session': self.session, 'Accept': 'application/json'})
             response = connection.getresponse()
+            if response.status == 503:
+                raw = response.read(4097)
+                if len(raw) <= 4096:
+                    data = json.loads(raw)
+                    if (isinstance(data, dict) and data.get('success') is False and
+                            data.get('error') == 'Admin phone wake is not enabled for this instance'):
+                        raise OfficePhoneDisabled()
             if response.status != 200:
                 raise ValueError('attention unavailable')
             raw = response.read(4097)
@@ -103,6 +119,12 @@ class AttentionWake:
                 self._poll()
                 delay = 1
                 self.stopped.wait(0.1)  # Bound reconnect rate even during a burst of notifications.
+            except OfficePhoneDisabled:
+                if self.stopped.is_set():
+                    break
+                self._status(OFFICE_DISABLED_STATUS)
+                self.stopped.wait(delay)
+                delay = min(30, delay * 2)
             except (OSError, ValueError, http.client.HTTPException):
                 if self.stopped.is_set():
                     break

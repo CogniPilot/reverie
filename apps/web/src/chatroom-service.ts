@@ -1414,6 +1414,16 @@ export class ChatroomService {
     return this.post(roomId, from, text, 'all');
   }
 
+  /** Fixed watchers require the synchronous SQLite commit path; JSON debounce is not an acknowledgement. */
+  postWatchNotice(bot: ChatBot, roomId: string, text: string, recentPosts: number, owner?: string): { messageId: string } {
+    if (!this.db || this.writesClosed) throw new ChatroomError('Watcher requires available durable chat database', 'UNAVAILABLE');
+    const room = this.store.require(roomId);
+    if (room.owner !== owner || room.kind === 'dm') throw new ChatroomError('Watcher requires an ordinary room in this owner scope', 'INVALID_INPUT');
+    this.checkBotPost(bot, roomId, recentPosts);
+    const message = this.post(roomId, { kind: 'bot', botId: bot.id, name: bot.name, ...(bot.icon ? { icon: bot.icon } : {}) }, text, 'all', { deliver: false });
+    return { messageId: message.id };
+  }
+
   private get auditFile(): string {
     return this.deps.auditFile ?? `${this.deps.file}.audit.jsonl`;
   }

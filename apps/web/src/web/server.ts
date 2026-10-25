@@ -1,3 +1,4 @@
+import { restSessionMetadataFromRegistry } from '../rest-canonical-metadata.js';
 import { OWNER_COOKIE } from '../owner-auth/policy.js';
 import { OfficeAuthService } from '../owner-auth/office.js';
 import { registerOfficeRoutes } from './routes/office-routes.js';
@@ -15,6 +16,8 @@ import { CompanyStore } from '../company-store.js';
 import { BoardStore } from '../board-store.js';
 import { fullAccessAlertRoom } from '../full-access-default.js';
 import { CompanyService, CompanyError } from '../company-service.js';
+import { createGoalServerAssembly, type GoalServerInput } from '../goal-server-assembly.js';
+import { registerGoalServiceRoutes } from './routes/goal-routes.js';
 import { DurableCompanyResearchBackend } from '../company-research-backend.js';
 import { companySessionRuntime } from '../company-session-runtime.js';
 import { registerCompanyRoutes } from './routes/company-routes.js';
@@ -228,6 +231,8 @@ import { callerOf, registerOwnerPolicy } from '../owner-auth/policy.js';
 import { relations, runtimeLineage } from '../owner-auth/relations.js';
 import { registerCompanyHireRoutes } from './routes/company-hire-routes.js';
 import { registerSessionRuntimeRoutes } from './routes/session-runtime-routes.js';
+import { ServerHealthMetadataProvider } from '../session-health-provider.js';
+import { registerHealthMetadataProviderRoutes } from './routes/session-health-provider-routes.js';
 import { registerOwnerRoutes } from '../owner-auth/routes.js';
 import { isMultiUserMode } from '../config/multiuser.js';
 import { bootstrapInitialAdmin, hasUsers, resolveClaudeModeForUsername } from '../user-store.js';
@@ -239,6 +244,7 @@ import {
   registerMuxRoutes,
   registerFileRoutes,
   registerHtmlViewRoutes,
+  registerStatusPageRoutes,
   registerBoardRoutes,
   registerScheduledRoutes,
   registerHookEventRoutes,
@@ -308,6 +314,7 @@ import { registerPlanRequestRoutes } from './routes/plan-request-routes.js';
 import { planMoveExecutor, type PlanMoveRuntime } from '../plan-move-runtime.js';
 import { PlanService } from '../plan-accounts.js';
 import { githubData, type GithubArgs } from '../cron/github-source.js';
+import { readFixedPr } from '../cron/fixed-github-watch.js';
 import { appendBurnLog, burnLogLines, burnWatchData, hostLoadData, plansPaceData } from '../cron/post-sources.js';
 import { AccountLoginService, defaultLoginDeps } from '../account-login.js';
 import { computeFrontendBuildId } from './frontend-build-id.js';
@@ -532,7 +539,8 @@ export class WebServer extends EventEmitter {
     host: string = '127.0.0.1',
     titleHostname?: string,
     allowUnauthenticatedNetwork: boolean = false,
-    basePath: string = ''
+    basePath: string = '',
+    private readonly goalPorts?: GoalServerInput
   ) {
     super();
     this.setMaxListeners(0);
@@ -983,8 +991,8 @@ export class WebServer extends EventEmitter {
       // Federation speaks its own bare wire contract, including non-2xx errors.
       // Exempt exact registered protocol routes only; owner APIs retain the console envelope.
       const route = req.routeOptions?.url;
-      const canonicalRoute = this.basePath && route?.startsWith(this.basePath + '/')
-        ? route.slice(this.basePath.length) : route;
+      const canonicalRoute =
+        this.basePath && route?.startsWith(this.basePath + '/') ? route.slice(this.basePath.length) : route;
       if (isEmbassyProtocolRoute(req.method, canonicalRoute)) return done(null, payload);
       if (!req.url.startsWith('/api')) return done(null, payload);
       if (payload === null || typeof payload !== 'object') return done(null, payload);
@@ -1024,7 +1032,11 @@ export class WebServer extends EventEmitter {
     // Owner sign-in (password, two-step, remembered devices) and the owner/agent route policy.
     // Inactive until the host bootstraps an account (`reverie owner bootstrap`); then `log` or
     // `enforce` per the account's policy. Runs after the Basic-auth layer above.
+    const canonicalCompanyFile = dataPath('company.json');
+    const goalBoundary = createGoalServerAssembly(ownerAuth, canonicalCompanyFile, this.goalPorts);
+    goalBoundary.register(this.app);
     registerOwnerPolicy(this.app, {
+      goalRequest: goalBoundary.authorizeRequest,
       service: ownerAuth,
       // Only the session map is read (to resolve an agent's parent-session header).
       ctx: { sessions: this.sessions } as unknown as OwnerPolicySessions,
@@ -1314,6 +1326,7 @@ export class WebServer extends EventEmitter {
     registerMuxRoutes(this.app, ctx);
     registerFileRoutes(this.app, ctx);
     registerHtmlViewRoutes(this.app, ctx);
+    registerStatusPageRoutes(this.app);
     registerScheduledRoutes(this.app, ctx, verifiedOwner);
     registerHookEventRoutes(this.app, ctx);
     registerApprovalRoutes(this.app, ctx);
@@ -1322,16 +1335,24 @@ export class WebServer extends EventEmitter {
     registerGitStatusRoutes(this.app, ctx);
     registerAgentProfileRoutes(this.app, ctx, undefined, undefined, verifiedOwner);
     registerStatusTelemetryRoutes(this.app, ctx);
-    registerSubscriptionProfileRoutes(this.app, this.subscriptionUsageReader, async (profileId) => {
-      const running = (await this.planService.rows()).accounts
-        .filter((row) => row.profileId === profileId)
-        .flatMap((row) => row.sessions.map((s) => s.name));
-      // A sleeping employee retains its configured plan, even without a live process.
-      const assigned = (this.companyService?.view().employees ?? []).filter(employee =>
-        this.store.getSession(employee.sessionId)?.subscriptionProfile?.id === profileId
-      ).map(employee => employee.name);
-      return [...new Set([...running, ...assigned])];
-    }, verifiedOwner, (req) => !isMultiUserMode() && ['plan-usage', 'routines'].some(name => serviceVerifier({ service: ownerAuth, ctx }, name)(req)));
+    registerSubscriptionProfileRoutes(
+      this.app,
+      this.subscriptionUsageReader,
+      async (profileId) => {
+        const running = (await this.planService.rows()).accounts
+          .filter((row) => row.profileId === profileId)
+          .flatMap((row) => row.sessions.map((s) => s.name));
+        // A sleeping employee retains its configured plan, even without a live process.
+        const assigned = (this.companyService?.view().employees ?? [])
+          .filter((employee) => this.store.getSession(employee.sessionId)?.subscriptionProfile?.id === profileId)
+          .map((employee) => employee.name);
+        return [...new Set([...running, ...assigned])];
+      },
+      verifiedOwner,
+      (req) =>
+        !isMultiUserMode() &&
+        ['plan-usage', 'routines'].some((name) => serviceVerifier({ service: ownerAuth, ctx }, name)(req))
+    );
     registerSystemRoutes(this.app, ctx, verifiedOwner);
     registerLaptopPowerRoutes(this.app, {
       verifiedOwner,
@@ -1394,8 +1415,10 @@ export class WebServer extends EventEmitter {
         return employees.length === 1 ? employees[0].pronouns : undefined;
       },
       restContextOf: (sessionId) => {
-        const employee = this.companyService?.registeredEmployees().find(e => e.sessionId === sessionId);
-        return employee ? employeeProfileContext(employee) + ' ' + employeeRestContext(employee) + ' ' + employeePlanContext(employee) : undefined;
+        const employee = this.companyService?.registeredEmployees().find((e) => e.sessionId === sessionId);
+        return employee
+          ? employeeProfileContext(employee) + ' ' + employeeRestContext(employee) + ' ' + employeePlanContext(employee)
+          : undefined;
       },
       // Rooms and messages live in SQLite; chatrooms.json is imported once, when chat.db does not exist yet.
       database: dataPath('chat.db'),
@@ -1445,8 +1468,17 @@ export class WebServer extends EventEmitter {
       },
     });
     this.chatBackup.start();
-    const companyStore = new CompanyStore(dataPath('company.json'));
+    const companyStore = new CompanyStore(canonicalCompanyFile);
     await companyStore.init();
+    registerHealthMetadataProviderRoutes(this.app, {
+      authorized: (req, id) =>
+        verifiedOwner(req) && !!this.sessions.get(id) && this.sessions.get(id)!.owner === ownerFor(req),
+      provider: new ServerHealthMetadataProvider({
+        authority: goalBoundary.metadataReader,
+        canonical: () => companyStore.healthMetadataSnapshot(),
+        session: (id) => this.sessions.get(id),
+      }),
+    });
     const research = new DurableCompanyResearchBackend({
       file: dataPath('company-research.json'),
       workspaceRoot:
@@ -1456,6 +1488,7 @@ export class WebServer extends EventEmitter {
     });
     await research.init();
     this.companyService = new CompanyService(companyStore, {
+      goalAuthentication: goalBoundary.authentication,
       getSession: (id) => this.sessions.get(id),
       runtimeRecipeOf: (id) => {
         const session = this.sessions.get(id);
@@ -1510,6 +1543,11 @@ export class WebServer extends EventEmitter {
         this.broadcast(SseEvent.SessionUpdated, { session: this.getSessionStateWithRespawn(session) });
       },
     });
+    goalBoundary.attach(this.companyService, {
+      getSession: (id) => this.sessions.get(id),
+      restSessionMetadata: (id) => restSessionMetadataFromRegistry(this.sessions, id),
+    }, this.chatroomService);
+    registerGoalServiceRoutes(this.app, this.companyService.goals);
     this.companyWake = new CompanyWake({
       company: () => companyStore.snapshot(),
       saved: (id) => this.store.getSession(id) ?? undefined,
@@ -1699,17 +1737,24 @@ export class WebServer extends EventEmitter {
     // Preserve explicitly configured external channels. Fresh installations host on this existing service.
     const builtinFile = dataPath('embassy-host', 'builtin.json');
     const externalChannel = existsSync(dataPath('embassy-channel', 'channel.json')) && !existsSync(builtinFile);
-    const builtinEmbassy = externalChannel ? undefined : new BuiltinEmbassy({
-      file: builtinFile, channelFile: dataPath('embassy-channel', 'channel.json'),
-      secretFile: dataPath('embassy-channel', 'secret'), origin: process.env.REVERIE_EMBASSY_ORIGIN,
-    });
+    const builtinEmbassy = externalChannel
+      ? undefined
+      : new BuiltinEmbassy({
+          file: builtinFile,
+          channelFile: dataPath('embassy-channel', 'channel.json'),
+          secretFile: dataPath('embassy-channel', 'secret'),
+          origin: process.env.REVERIE_EMBASSY_ORIGIN,
+        });
     this.embassyHost = new EmbassyHost({
-      dir: dataPath('embassy-channel'), opsFile: dataPath('embassy-host', 'ops.json'),
+      dir: dataPath('embassy-channel'),
+      opsFile: dataPath('embassy-host', 'ops.json'),
       transport: builtinEmbassy?.channelTransport,
-      localStatus: builtinEmbassy ? async () => {
-        const { builtin, needsAdvertisedOrigin } = await builtinEmbassy.settings();
-        return { builtin, needsAdvertisedOrigin };
-      } : undefined,
+      localStatus: builtinEmbassy
+        ? async () => {
+            const { builtin, needsAdvertisedOrigin } = await builtinEmbassy.settings();
+            return { builtin, needsAdvertisedOrigin };
+          }
+        : undefined,
     });
     await this.embassyHost
       .init()
@@ -1738,7 +1783,9 @@ export class WebServer extends EventEmitter {
     );
     // Chat bots: the sender a scheduled 'post' job speaks as (see chat-bots.ts). The registry is instance data.
     const chatBots = new ChatBotRegistry(dataPath('chat-bots.json'));
-    registerChatBotRoutes(this.app, chatBots, verifiedOwner, id => this.cronService.listJobs().some(job => job.action === 'post' && job.botId === id));
+    registerChatBotRoutes(this.app, chatBots, verifiedOwner, (id) =>
+      this.cronService.listJobs().some((job) => job.action === 'post' && job.botId === id)
+    );
     this.inputWatch = createInputWatch({
       ledgerFile: dataPath('input-watch-ledger.json'),
       bot: () => (isMultiUserMode() ? undefined : chatBots.get('input-watch')),
@@ -1772,6 +1819,7 @@ export class WebServer extends EventEmitter {
       getBot: (id) => chatBots.get(id),
       check: (bot, roomId, recent) => this.chatroomService.checkBotPost(bot, roomId, recent),
       post: (bot, roomId, text, recent) => void this.chatroomService.postAsBot(bot, roomId, text, recent),
+      postWatchNotice: (bot, roomId, text, recent, owner) => this.chatroomService.postWatchNotice(bot, roomId, text, recent, owner),
       // An author routine speaks as the employee, found by employee id each time so a restart or rebind changes nothing.
       postAsAuthor: (employeeId, roomId, text) => {
         const employee = companyStore.snapshot().employees.find((x) => x.id === employeeId);
@@ -1849,14 +1897,22 @@ export class WebServer extends EventEmitter {
           headers['x-reverie-parent-session'] = delegate.sessionId;
           payload.parentSessionId = delegate.sessionId;
         }
-        const inject = () => this.app.inject({
-          method: 'POST',
-          url: '/api/sessions',
-          headers,
-          payload,
-        });
-        const res = delegate ? await withDelegatedSessionCreate({ sessionId: delegate.sessionId, owner: ownerFor(req), payload, authorized: delegate.authorized }, inject) : await inject();
-        let json: { success?: boolean; error?: string; session?: { id?: unknown }; data?: { session?: { id?: unknown } } } | undefined;
+        const inject = () =>
+          this.app.inject({
+            method: 'POST',
+            url: '/api/sessions',
+            headers,
+            payload,
+          });
+        const res = delegate
+          ? await withDelegatedSessionCreate(
+              { sessionId: delegate.sessionId, owner: ownerFor(req), payload, authorized: delegate.authorized },
+              inject
+            )
+          : await inject();
+        let json:
+          | { success?: boolean; error?: string; session?: { id?: unknown }; data?: { session?: { id?: unknown } } }
+          | undefined;
         try {
           json = res.json();
         } catch {
@@ -1882,7 +1938,7 @@ export class WebServer extends EventEmitter {
       },
       stopSession: (id) => this.cleanupSession(id, true, 'expert_retire'),
       sessionExists: (id) => this.sessions.has(id),
-      employeeNames: (owner) => company.view(owner).employees.map(employee => employee.name),
+      employeeNames: (owner) => company.view(owner).employees.map((employee) => employee.name),
       // Nightly research stays off: putting an expert on a schedule is a separate owner step.
       hireEmployee: (input) => company.hire({ ...input, researchEnabled: false }),
       inviteEmployee: (employeeId, roomId, owner) => void company.invite(employeeId, roomId, owner),
@@ -1918,6 +1974,10 @@ export class WebServer extends EventEmitter {
       },
       github: async ({ args, last }) => {
         if (!args) throw new Error('github source needs postSourceArgs');
+        if (args.pull !== undefined) {
+          const snapshot = await readFixedPr(args, last);
+          return { items: snapshot.events.length, lines: '', message: snapshot.message, _key: JSON.stringify(snapshot.cursor), _watchSnapshot: JSON.stringify(snapshot) };
+        }
         return githubData(args as unknown as GithubArgs, last);
       },
     });
@@ -1925,7 +1985,9 @@ export class WebServer extends EventEmitter {
     registerVoiceTurnRoutes(this.app, this.chatroomService, { verifiedOwner });
     registerVoiceSpeakRoutes(this.app, this.chatroomService, {
       employeeVoice: (sessionId) => {
-        const employees = this.companyService.store.snapshot().employees.filter((employee) => employee.sessionId === sessionId);
+        const employees = this.companyService.store
+          .snapshot()
+          .employees.filter((employee) => employee.sessionId === sessionId);
         return employees.length === 1 ? employees[0].voice : undefined;
       },
     });
@@ -1953,26 +2015,38 @@ export class WebServer extends EventEmitter {
       this.chatroomService
         .rooms()
         .some((r) => !r.archivedAt && r.members.some((m) => m.sessionId === id && m.role === 'coordinator'));
-    registerPlansRoutes(this.app, this.planService, this.accountLogins, {
-      callerSession: (req) => resolveParentSessionId(ctx, req, undefined, ownerFor(req)),
-      employees: (owner) =>
-        this.companyService.view(owner).employees.map(({ id, name, sessionId, icon, avatar }) => ({
-          id,
-          name,
-          sessionId,
-          icon,
-          avatar,
-        })),
-      canViewAll: (id) =>
-        this.companyService.view().employees.some(employee => employee.sessionId === id && (employee.permissions.managePlans || employee.permissions.moveOwnPlan)) || roles.can(
-          {
-            employeeId: this.companyService?.view().employees.find((e) => e.sessionId === id)?.id,
-            leadOfAny: leadsALiveRoom(id),
-            memberId: id,
-          },
-          'plans.view_all'
-        ),
-    }, verifiedOwner);
+    registerPlansRoutes(
+      this.app,
+      this.planService,
+      this.accountLogins,
+      {
+        callerSession: (req) => resolveParentSessionId(ctx, req, undefined, ownerFor(req)),
+        employees: (owner) =>
+          this.companyService.view(owner).employees.map(({ id, name, sessionId, icon, avatar }) => ({
+            id,
+            name,
+            sessionId,
+            icon,
+            avatar,
+          })),
+        canViewAll: (id) =>
+          this.companyService
+            .view()
+            .employees.some(
+              (employee) =>
+                employee.sessionId === id && (employee.permissions.managePlans || employee.permissions.moveOwnPlan)
+            ) ||
+          roles.can(
+            {
+              employeeId: this.companyService?.view().employees.find((e) => e.sessionId === id)?.id,
+              leadOfAny: leadsALiveRoom(id),
+              memberId: id,
+            },
+            'plans.view_all'
+          ),
+      },
+      verifiedOwner
+    );
 
     const planMoveStore = new PlanMoveStore(dataPath('plan-moves.json'));
     const planMoveRuntime: Omit<PlanMoveRuntime, 'authorized' | 'request'> = {
@@ -2028,18 +2102,26 @@ export class WebServer extends EventEmitter {
     const availablePlanTarget = async (target: string) => {
       const account = await this.planService.account(target);
       if (!account) throw new PlanMoveError('Choose an available destination plan');
-      const row = (await this.planService.rows()).accounts.find(item => item.id === target);
+      const row = (await this.planService.rows()).accounts.find((item) => item.id === target);
       if (!row?.signedIn) throw new PlanMoveError('Sign in to the destination plan before moving an expert');
       return { mode: planMoveHarness(account) };
     };
-    registerPlanMoveRoutes(this.app, planMoves, ctx, ownerAuth, capturePlanMove, async target => (await availablePlanTarget(target)).mode);
+    registerPlanMoveRoutes(
+      this.app,
+      planMoves,
+      ctx,
+      ownerAuth,
+      capturePlanMove,
+      async (target) => (await availablePlanTarget(target)).mode
+    );
     const planRequestStore = new PlanRequestStore(dataPath('plan-requests.json'));
     const planRequestCapabilities = new PlanRequestCapabilities();
     const planRequests = new PlanMoveRequests({
       load: () => planRequestStore.load(),
-      save: records => planRequestStore.save(records),
+      save: (records) => planRequestStore.save(records),
       moves: planMoves,
-      binding: (employeeId, owner) => this.companyService.view(owner).employees.find(employee => employee.id === employeeId)?.sessionId,
+      binding: (employeeId, owner) =>
+        this.companyService.view(owner).employees.find((employee) => employee.id === employeeId)?.sessionId,
       validateTarget: async (_snapshot, target) => availablePlanTarget(target),
       capability: {
         write: value => planRequestCapabilities.write(value),
@@ -2546,11 +2628,16 @@ export class WebServer extends EventEmitter {
     html = this.cacheBustAssets(html);
     // The conversation shell is injected dynamically rather than referenced in
     // index.html. Version those resources too; browser caches survive restarts.
-    const chatAssets = Object.fromEntries(['chat-app.css', 'chat-app.js'].map((name) => {
-      const version = this.assetVersion(join(__dirname, 'public', name));
-      return [name, version ? `${name}?v=${version}` : name];
-    }));
-    html = html.replace('</head>', () => `<script>window.__REVERIE_CHAT_ASSETS__=${JSON.stringify(chatAssets)};</script>\n</head>`);
+    const chatAssets = Object.fromEntries(
+      ['chat-app.css', 'chat-app.js'].map((name) => {
+        const version = this.assetVersion(join(__dirname, 'public', name));
+        return [name, version ? `${name}?v=${version}` : name];
+      })
+    );
+    html = html.replace(
+      '</head>',
+      () => `<script>window.__REVERIE_CHAT_ASSETS__=${JSON.stringify(chatAssets)};</script>\n</head>`
+    );
     // Per-user App-Settings flags, read server-side so the page renders in the
     // right initial state on every normal reload (the client apply* functions
     // only run on save). Read FRESH (bypass the 2s cache): a setting toggled
@@ -3843,13 +3930,18 @@ export class WebServer extends EventEmitter {
             saved: (id) => this.store.getSession(id),
             live: (id) => this.sessions.has(id),
             restore: async (entry, allowed) => {
-              const result = await spendRebootRestore(this.createRouteContext(), [entry], new Set(), allowed, { attachOnly: true });
+              const result = await spendRebootRestore(this.createRouteContext(), [entry], new Set(), allowed, {
+                attachOnly: true,
+              });
               const attached = result.restored.some((item) => item.id === entry.sessionId);
-              if (attached) rebootRestoreRegistry.take(owner => owner === entry.owner, [entry.sessionId], entry.owner);
+              if (attached)
+                rebootRestoreRegistry.take((owner) => owner === entry.owner, [entry.sessionId], entry.owner);
               return attached;
             },
           });
-          console.log(`[Server] Reconnected ${result.connected.length} running laptop(s); ${result.failed.length} need attention`);
+          console.log(
+            `[Server] Reconnected ${result.connected.length} running laptop(s); ${result.failed.length} need attention`
+          );
         } catch {
           console.error('[Server] Laptop reconnection unavailable; existing laptops have been left running');
         }
@@ -4294,7 +4386,12 @@ export class WebServer extends EventEmitter {
         if (!bindings.has(profile)) {
           const account = profiles.find((p) => p.id === profile && p.provider === 'openai');
           // Only the selected account's own rollout directory; never infer a thread from cwd.
-          bindings.set(profile, codexThreadBySessionId(await scanCodexSessionsHistory(account ? join(account.configDir, 'sessions') : undefined)));
+          bindings.set(
+            profile,
+            codexThreadBySessionId(
+              await scanCodexSessionsHistory(account ? join(account.configDir, 'sessions') : undefined)
+            )
+          );
         }
         const thread = bindings.get(profile)?.get(saved.id);
         if (thread) {
@@ -5024,6 +5121,7 @@ export class WebServer extends EventEmitter {
   }
 
   async stop(): Promise<void> {
+    if (this.goalPorts && 'kind' in this.goalPorts) this.goalPorts.close?.();
     getLifecycleLog().log({ event: 'server_stopped', sessionId: '*' });
     await this.accountLogins?.stopAll().catch(() => {});
     // Set stopping flag to prevent new timer creation during shutdown
@@ -5229,9 +5327,19 @@ export async function startWebServer(
   host: string = '127.0.0.1',
   titleHostname?: string,
   allowUnauthenticatedNetwork: boolean = false,
-  basePath: string = ''
+  basePath: string = '',
+  goalPorts?: GoalServerInput
 ): Promise<WebServer> {
-  const server = new WebServer(port, https, testMode, host, titleHostname, allowUnauthenticatedNetwork, basePath);
+  const server = new WebServer(
+    port,
+    https,
+    testMode,
+    host,
+    titleHostname,
+    allowUnauthenticatedNetwork,
+    basePath,
+    goalPorts
+  );
   await server.start();
   return server;
 }

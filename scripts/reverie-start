@@ -42,14 +42,15 @@ function main() {
   const configPath = join(root, 'deployment.json');
   if (!existsSync(configPath)) {
     const defaults = { version: 1, containerName: 'reverie', port: 3000,
-      companyRoot: join(root, 'companies', 'default'), workspace: join(root, 'workspace'),
+      adminPhoneWake: false, companyRoot: join(root, 'companies', 'default'), workspace: join(root, 'workspace'),
       scratch: join(root, 'scratch', 'agents'), memoryMiB: Math.max(2048, Math.min(16384, Math.floor(totalmem() / 2 / 1048576))), pidsLimit: 512 };
     writeFileSync(configPath, JSON.stringify(defaults, null, 2) + '\n', { mode: 0o600, flag: 'wx' });
   }
   const config = JSON.parse(readFileSync(configPath, 'utf8'));
   const keys = ['version', 'containerName', 'port', 'companyRoot', 'workspace', 'scratch', 'memoryMiB', 'pidsLimit'];
-  if (!config || Array.isArray(config) || Object.keys(config).some(k => !keys.includes(k)) ||
+  if (!config || Array.isArray(config) || Object.keys(config).some(k => ![...keys, 'adminPhoneWake'].includes(k)) ||
       keys.some(k => !(k in config)) || config.version !== 1) fail('Unsupported deployment.json fields or version.');
+  if ('adminPhoneWake' in config && typeof config.adminPhoneWake !== 'boolean') fail('adminPhoneWake must be a boolean.');
   if (typeof config.containerName !== 'string' || !/^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,62}$/.test(config.containerName)) fail('Invalid containerName.');
   for (const [key, min, max] of [['port', 1, 65535], ['memoryMiB', 512, 1048576], ['pidsLimit', 64, 65536]]) {
     if (!Number.isInteger(config[key]) || config[key] < min || config[key] > max) fail('Invalid ' + key + '.');
@@ -61,7 +62,9 @@ function main() {
   }
   const uid = process.getuid(), gid = process.getgid();
   if (uid === 0) fail('Run as the ordinary host owner, without sudo.');
-  const signature = createHash('sha256').update(JSON.stringify({ config, source, updates, uid, gid, ...(projects.length ? { projects } : {}) })).digest('hex');
+  const signatureConfig = { ...config };
+  if (signatureConfig.adminPhoneWake === false) delete signatureConfig.adminPhoneWake;
+  const signature = createHash('sha256').update(JSON.stringify({ config: signatureConfig, source, updates, uid, gid, ...(projects.length ? { projects } : {}) })).digest('hex');
   // Refuse to replace owner files, including dangling or differently targeted symlinks.
   for (const project of projects) {
     const link = join(config.workspace, project.name), target = '/projects/' + project.name;
@@ -72,6 +75,11 @@ function main() {
   if (inspected.status === 0) {
     const container = JSON.parse(inspected.stdout);
     if (container.Config?.Labels?.['reverie.deployment'] !== signature) fail('Existing container differs from this deployment. Preserve it and choose another containerName; nothing was replaced.');
+    const phoneValues = (container.Config?.Env || []).filter(value => value.startsWith('REVERIE_ADMIN_PHONE_WAKE='));
+    const phoneMatches = config.adminPhoneWake === true
+      ? phoneValues.length === 1 && phoneValues[0] === 'REVERIE_ADMIN_PHONE_WAKE=enabled'
+      : !phoneValues.includes('REVERIE_ADMIN_PHONE_WAKE=enabled');
+    if (!phoneMatches) fail('Existing console phone startup setting differs. Use the reviewed update workflow; nothing was replaced.');
     if (!container.State?.Running) run('docker', ['start', config.containerName]);
     console.log('Reverie: http://127.0.0.1:' + config.port + ' (existing container retained)');
     return;
@@ -116,6 +124,7 @@ function main() {
   }
   mount(join(identity, 'passwd'), '/etc/passwd', true); mount(join(identity, 'group'), '/etc/group', true);
   command.push('--env', 'REVERIE_CASES_PATH=/reverie_workspace/cases', '--env', 'REVERIE_RESEARCH_ROOT=/reverie_workspace/research');
+  if (config.adminPhoneWake === true) command.push('--env', 'REVERIE_ADMIN_PHONE_WAKE=enabled');
   if (source) mount(source, '/workspace');
   for (const project of projects) mount(project.path, '/projects/' + project.name);
   if (updates) {

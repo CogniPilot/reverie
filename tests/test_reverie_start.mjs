@@ -108,3 +108,67 @@ test('unknown config fields and mount syntax are rejected as data before build o
   before = f.calls().length; result = f.run();
   assert.equal(result.status, 1); assert.equal(f.calls().length, before);
 });
+
+test('only a validated durable boolean enables Admin Harness phone wake', t => {
+  for (const selection of [undefined, false, true]) {
+    const f = fixture(t);
+    assert.equal(f.run([], { REVERIE_ADMIN_PHONE_WAKE: 'enabled' }).status, 0);
+    const file = join(f.deploy, 'deployment.json'), config = JSON.parse(readFileSync(file));
+    assert.equal(config.adminPhoneWake, false);
+    if (selection === undefined) delete config.adminPhoneWake;
+    else config.adminPhoneWake = selection;
+    writeFileSync(file, JSON.stringify(config));
+    const result = f.run([], { REVERIE_ADMIN_PHONE_WAKE: 'enabled' });
+    assert.equal(result.status, 0, result.stderr);
+    const command = f.calls().filter(([tool, a]) => tool === 'docker' && a[0] === 'run').at(-1)[1];
+    assert.deepEqual(command.filter(value => value.startsWith('REVERIE_ADMIN_PHONE_WAKE=')),
+      selection === true ? ['REVERIE_ADMIN_PHONE_WAKE=enabled'] : []);
+  }
+});
+test('phone startup setting rejects string, number, null, object and unknown-field bypasses before engine calls', t => {
+  const f = fixture(t); assert.equal(f.run().status, 0);
+  const file = join(f.deploy, 'deployment.json'), config = JSON.parse(readFileSync(file));
+  for (const value of ['enabled', 'true', 1, null, {}, []]) {
+    config.adminPhoneWake = value; writeFileSync(file, JSON.stringify(config));
+    const before = f.calls().length, result = f.run();
+    assert.equal(result.status, 1); assert.match(result.stderr, /must be a boolean/);
+    assert.equal(f.calls().length, before);
+  }
+  delete config.adminPhoneWake; config.REVERIE_ADMIN_PHONE_WAKE = 'enabled';
+  writeFileSync(file, JSON.stringify(config));
+  const before = f.calls().length;
+  assert.equal(f.run().status, 1); assert.equal(f.calls().length, before);
+});
+test('changing the selected phone setting refuses reuse of an existing console without replacing it', t => {
+  const f = fixture(t); assert.equal(f.run().status, 0);
+  const command = f.calls().find(([tool, a]) => tool === 'docker' && a[0] === 'run')[1];
+  const signature = command[command.indexOf('--label') + 1].split('=')[1];
+  const file = join(f.deploy, 'deployment.json'), config = JSON.parse(readFileSync(file));
+  config.adminPhoneWake = true; writeFileSync(file, JSON.stringify(config));
+  const result = f.run([], { INSPECT: JSON.stringify({ Config: { Labels: { 'reverie.deployment': signature } }, State: { Running: true } }) });
+  assert.equal(result.status, 1); assert.match(result.stderr, /nothing was replaced/);
+  assert.ok(!f.calls().some(([, args]) => ['rm', 'stop'].includes(args[0])));
+});
+
+test('the optional false phone default keeps the existing deployment digest compatible', t => {
+  const f = fixture(t); assert.equal(f.run().status, 0);
+  const first = f.calls().find(([tool, a]) => tool === 'docker' && a[0] === 'run')[1];
+  const signature = first[first.indexOf('--label') + 1].split('=')[1];
+  const file = join(f.deploy, 'deployment.json'), config = JSON.parse(readFileSync(file));
+  delete config.adminPhoneWake; writeFileSync(file, JSON.stringify(config));
+  const matching = { Config: { Labels: { 'reverie.deployment': signature } }, State: { Running: true } };
+  const before = f.calls().length;
+  const result = f.run([], { INSPECT: JSON.stringify(matching) });
+  assert.equal(result.status, 0, result.stderr); assert.equal(f.calls().length, before + 1);
+});
+
+test('matching deployment labels cannot hide an activated phone override', t => {
+  const f = fixture(t); assert.equal(f.run().status, 0);
+  const command = f.calls().find(([tool, a]) => tool === 'docker' && a[0] === 'run')[1];
+  const signature = command[command.indexOf('--label') + 1].split('=')[1];
+  const matching = { Config: { Labels: { 'reverie.deployment': signature }, Env: ['REVERIE_ADMIN_PHONE_WAKE=enabled'] }, State: { Running: false } };
+  const before = f.calls().length;
+  const result = f.run([], { INSPECT: JSON.stringify(matching) });
+  assert.equal(result.status, 1); assert.match(result.stderr, /phone startup setting differs/);
+  assert.equal(f.calls().length, before + 1);
+});
