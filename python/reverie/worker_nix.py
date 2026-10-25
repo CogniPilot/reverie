@@ -7,6 +7,13 @@ from pathlib import Path
 import re
 import stat
 import time
+try:
+    from .worker_storage import storage_paths, lock_paths
+except ImportError:
+    import sys
+    package_root=str(Path(__file__).resolve().parents[1])
+    if package_root not in sys.path:sys.path.insert(0,package_root)
+    from reverie.worker_storage import storage_paths, lock_paths
 
 SESSION = re.compile(r'^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$')
 
@@ -53,6 +60,11 @@ def store_path(config, session_id):
     """Only the owner can opt one laptop back into its fixed legacy location."""
     if not isinstance(session_id, str) or not SESSION.fullmatch(session_id):
         raise ValueError('Invalid Nix store session identity')
+    paths=storage_paths(config,session_id)
+    if paths.kind=='employee':
+        # SID-era rollback markers can never redirect a permanent employee to
+        # a stale home/store after a later transport has written canonical data.
+        return paths.nix
     directory = Path(config['stateRoot']) / session_id
     rollback = directory / 'nix-rollback.json'
     if rollback.exists() or rollback.is_symlink():
@@ -71,6 +83,13 @@ def private_store(config, session_id):
     if fence.exists() or fence.is_symlink():
         raise RuntimeError('Laptop Nix migration is fenced; owner must finish or roll it back')
     path = store_path(config, session_id)
+    paths=storage_paths(config,session_id)
+    if paths.kind=='employee':
+        _lock,fence=lock_paths(config,paths)
+        if fence.exists() or fence.is_symlink():
+            raise RuntimeError('Employee laptop data migration is fenced')
+        if not (paths.root/'storage.json').is_file():
+            raise RuntimeError('Employee home and Nix have not been initialized or migrated together')
     legacy = Path(config['scratchRoot']) / session_id / 'nix'
     if path == legacy and not path.exists():
         raise RuntimeError('Selected laptop rollback store is unavailable; refusing an empty replacement')

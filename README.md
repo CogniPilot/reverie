@@ -140,7 +140,7 @@ require a personal NixOS repository or host rebuild.
 ## Agent workstations
 
 For a deployment running autonomous agents, use a separate worker container for
-each session. Think of these as the experts' office laptops: each has its own
+each employee. Think of these as the experts' office laptops: each has its own
 running tools, private home and restart boundary. Explicit project mounts are
 shared drives; the console is separate office infrastructure.
 
@@ -149,7 +149,9 @@ each laptop. For example, `nix profile install nixpkgs#openssh` installs an SSH
 client, and `nix develop` works in a mounted project. The `nixpkgs` registry follows
 the release's flake lock. Profiles are on the laptop's private home drive; its
 store and database are under its private durable state directory
-(`stateRoot/<sessionId>/nix`) and survive container replacement. Build caches,
+(`stateRoot/employees/<employeeId>/nix`) and survive container replacement and
+plan changes. Session IDs identify terminal connections; permanent employee IDs
+identify laptop data. Build caches,
 temporary files and downloads stay on scratch. Existing scratch-backed stores
 require an explicit offline copy; the broker refuses an empty replacement.
 See [the staged Nix storage migration](docs/worker-nix-migration.md) for inventory,

@@ -305,12 +305,15 @@ class WorkerTests(unittest.TestCase):
         self.assertFalse(broker.active)
 
     def test_reconnect_inventory_requires_live_owned_laptop_and_current_running_intent(self):
+        employee='aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee'
+        (self.root/'company.json').write_text(json.dumps({'employees':[{'id':employee,'sessionId':SID,'desiredRunning':True}]}))
         broker = Broker(self.config)
         broker.laptops[SID] = 'test-agent-' + SID
-        home = Path(self.config['stateRoot']) / SID / 'home'
+        home = Path(self.config['stateRoot']) / 'employees' / employee / 'home'
         home.mkdir(parents=True)
         (home / '.reverie-launch').mkdir()
-        (home.parent / 'runtime.json').write_text(json.dumps({'exit': 'current.exit'}))
+        runtime=Path(self.config['stateRoot'])/SID;runtime.mkdir(mode=0o700)
+        (runtime / 'runtime.json').write_text(json.dumps({'exit': 'current.exit'}))
         item = {'Config': {'Labels': {'reverie.worker': 'test', 'reverie.session': SID}}, 'State': {'Running': True}}
         dead = False
         def engine(args, optional=False):
@@ -323,9 +326,9 @@ class WorkerTests(unittest.TestCase):
         item['Config']['Labels']['reverie.session'] = 'foreign'
         self.assertEqual(broker.control('status')['runningSessionIds'], [])
         item['Config']['Labels']['reverie.session'] = SID
-        (self.root / 'company.json').write_text(json.dumps({'employees': [{'sessionId': SID, 'desiredRunning': False}]}))
+        (self.root / 'company.json').write_text(json.dumps({'employees': [{'id':employee,'sessionId': SID, 'desiredRunning': False}]}))
         self.assertEqual(broker.control('status')['runningSessionIds'], [])
-        (self.root / 'company.json').write_text(json.dumps({'employees': [{'sessionId': SID, 'desiredRunning': True}]}))
+        (self.root / 'company.json').write_text(json.dumps({'employees': [{'id':employee,'sessionId': SID, 'desiredRunning': True}]}))
         (home / '.reverie-launch/current.exit').write_text('0')
         self.assertEqual(broker.control('status')['runningSessionIds'], [])
 

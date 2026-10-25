@@ -36,10 +36,15 @@ if __package__:
     from .worker_resources import effective_config, policy_digest, validate_session_resources, validate_resource_reload
     from .worker_nix import prepare_store, store_guard
     from .worker_tmp import prepare_temporary, temporary_environment, write_storage_instructions, workspace_alias, home_workspace_alias
+    from .worker_storage import storage_paths, storage_guard, prepare_storage, private_directory, storage_start_allowed, record_storage_binding, validate_storage
 else:
     # Host migration tools also load this file with spec_from_file_location;
     # their sys.path need not contain the sibling module's directory.
     import importlib.util
+    _package_root = str(Path(__file__).resolve().parents[1])
+    if _package_root not in sys.path:
+        sys.path.insert(0, _package_root)
+    from reverie.worker_storage import storage_paths, storage_guard, prepare_storage, private_directory, storage_start_allowed, record_storage_binding, validate_storage
     _gpu_spec = importlib.util.spec_from_file_location('reverie_worker_gpu', Path(__file__).with_name('worker_gpu.py'))
     _gpu_module = importlib.util.module_from_spec(_gpu_spec)
     _gpu_spec.loader.exec_module(_gpu_module)
@@ -203,7 +208,7 @@ def load_config(path):
     return config
 
 
-def create_args(config, session_id, home, *, scratch=None):
+def create_args(config, session_id, home, *, scratch=None, storage=None):
     config = effective_config(config, session_id)
     name = config['deployment'] + '-agent-' + session_id
     digest = hashlib.sha256(json.dumps(config, sort_keys=True).encode()).hexdigest()
@@ -243,6 +248,9 @@ def create_args(config, session_id, home, *, scratch=None):
             args += ['--mount', 'type=tmpfs,dst=/workspace/attachments,tmpfs-mode=0555,tmpfs-size=1048576,readonly']
     args += gpu_create_args(config, session_id)
     args += ['--entrypoint', '/bin/sleep', config['image'], 'infinity']
+    if storage is not None and storage.kind == 'employee':
+        args[-4:-4] = ['--label', 'reverie.employee=' + storage.identity,
+                      '--label', 'reverie.storage=employee:' + storage.identity]
     return name, digest, args
 
 
@@ -499,6 +507,8 @@ class Broker:
         self.last_maintenance = 0.
         self.stopping = threading.Event()
         self.nix_prepare_lock = threading.Lock()
+        self.storage_lease_lock = threading.RLock()
+        self.storage_leases = {}
         self.connections = threading.BoundedSemaphore(config['maxWorkers'] + 4)
 
     def run_engine(self, args, optional=False):
@@ -551,7 +561,7 @@ class Broker:
             raise RuntimeError('Plan move state is unavailable; refusing detached worker execution')
         return True
 
-    def stop(self, name):
+    def stop(self, name, *, retain_storage=False):
         self.run_engine(['stop', '--time', '2', name], optional=True)
         state = self.run_engine(['inspect', name], optional=True)
         if state.returncode == 0 and json.loads(state.stdout)[0]['State']['Running']:
@@ -559,6 +569,9 @@ class Broker:
             state = self.run_engine(['inspect', name])
             if json.loads(state.stdout)[0]['State']['Running']:
                 raise RuntimeError('Laptop did not stop')
+        sid = name.removeprefix(self.config['deployment']+'-agent-')
+        if SESSION.fullmatch(sid) and not retain_storage:
+            self.release_storage(sid)
         network = name+'-lan'
         result = self.run_engine(['network', 'inspect', network], optional=True)
         if result.returncode == 0:
@@ -566,6 +579,59 @@ class Broker:
             if labels.get('reverie.worker') == self.config['deployment'] and labels.get('reverie.session') == name.removeprefix(self.config['deployment']+'-agent-'):
                 self.run_engine(['network', 'disconnect', '--force', network, name], optional=True)
                 self.run_engine(['network', 'rm', network], optional=True)
+
+    def check_storage_writers(self, paths, session_id):
+        """Actual engine mount inventory closes the broker-restart lock gap."""
+        listed=self.run_engine(['ps','--quiet','--no-trunc']).stdout.split()
+        if len(listed)>128 or len(listed)!=len(set(listed)) or any(not re.fullmatch('[0-9a-f]{64}', value) for value in listed):
+            raise RuntimeError('Cannot establish employee storage writer inventory')
+        if not listed:return
+        items=json.loads(self.run_engine(['inspect',*listed]).stdout)
+        if not isinstance(items,list) or {item.get('Id') for item in items}!=set(listed):
+            raise RuntimeError('Employee storage writer inventory changed')
+        for item in items:
+            if item.get('State',{}).get('Running') is not True:
+                raise RuntimeError('Employee storage writer state changed')
+            labels=item.get('Config',{}).get('Labels') or {}
+            named=item.get('Name')=='/'+self.config['deployment']+'-agent-'+session_id
+            own=(named and labels.get('reverie.worker')==self.config['deployment'] and
+                 labels.get('reverie.session')==session_id and labels.get('reverie.employee')==paths.identity)
+            required={(str(paths.home),'/home/agent'),(str(paths.nix),'/nix')}
+            found={(mount.get('Source'),mount.get('Destination')) for mount in item.get('Mounts',[])
+                   if mount.get('Type')=='bind' and mount.get('RW') is True}
+            if named and (not own or not required<=found):
+                raise RuntimeError('Employee laptop requires explicit canonical-storage recreation')
+            for mount in item.get('Mounts',[]):
+                if mount.get('Type')!='bind' or mount.get('RW') is not True:continue
+                source=Path(mount['Source']).resolve()
+                overlaps=any(source==root or source.is_relative_to(root) or root.is_relative_to(source)
+                             for root in (paths.home,paths.nix))
+                exact_own=own and (str(source),mount.get('Destination')) in required
+                if overlaps and not exact_own:
+                    raise RuntimeError('Another running container owns employee home or Nix data')
+
+    def claim_storage(self, session_id):
+        paths=storage_paths(self.config,session_id)
+        if paths.kind!='employee':return paths,False
+        with self.storage_lease_lock:
+            previous=self.storage_leases.get(session_id)
+            if previous:
+                if previous[1]!=paths:raise RuntimeError('Employee laptop binding changed')
+                self.check_storage_writers(paths,session_id)
+                return paths,False
+            if any(value[1].key==paths.key for value in self.storage_leases.values()):
+                raise BlockingIOError('The previous employee laptop still owns its data')
+            guard=storage_guard(self.config,session_id);paths=guard.__enter__()
+            try:self.check_storage_writers(paths,session_id)
+            except BaseException:
+                guard.__exit__(None,None,None);raise
+            self.storage_leases[session_id]=(guard,paths)
+            return paths,True
+
+    def release_storage(self, session_id):
+        with self.storage_lease_lock:
+            previous=self.storage_leases.pop(session_id,None)
+            if previous:previous[0].__exit__(None,None,None)
 
     def address(self):
         with self.address_lock:
@@ -585,13 +651,31 @@ class Broker:
 
     def recover(self):
         result = self.run_engine(['ps', '--filter', 'label=reverie.worker=' + self.config['deployment'], '--format', '{{.Names}}'])
-        for name in result.stdout.splitlines():
-            sid = name.removeprefix(self.config['deployment']+'-agent-')
-            if SESSION.fullmatch(sid):
-                self.laptops[sid] = name
-                self.office(sid)
-        if len(self.laptops) > self.config['maxWorkers'] or (self.config['budgetMode'] == 'admission' and sum(effective_config(self.config,s)['memoryMiB'] for s in self.laptops if effective_config(self.config,s)['budgetMode']=='admission') > self.config['poolMemoryMiB']):
-            raise RuntimeError('Running laptops exceed the configured admission budget')
+        names=result.stdout.splitlines()
+        if len(names)!=len(set(names)):raise RuntimeError('Duplicate laptop recovery inventory')
+        selected={name.removeprefix(self.config['deployment']+'-agent-'):name for name in names
+                  if SESSION.fullmatch(name.removeprefix(self.config['deployment']+'-agent-'))}
+        leases=[];offices=[]
+        try:
+            if len(selected)>self.config['maxWorkers'] or (self.config['budgetMode']=='admission' and
+                 sum(effective_config(self.config,s)['memoryMiB'] for s in selected
+                     if effective_config(self.config,s)['budgetMode']=='admission')>self.config['poolMemoryMiB']):
+                raise RuntimeError('Running laptops exceed the configured admission budget')
+            # Complete writer/lease validation before opening any public phone.
+            for sid in selected:
+                paths,created=self.claim_storage(sid)
+                if created:leases.append(sid)
+                if paths.kind=='employee':validate_storage(self.config,paths)
+            for sid in selected:
+                existing=sid in self.offices;self.office(sid)
+                if not existing:offices.append(sid)
+            self.laptops.update(selected)
+        except BaseException:
+            for sid in offices:
+                office=self.offices.pop(sid,None)
+                if office:office.close()
+            for sid in leases:self.release_storage(sid)
+            raise
 
     def stop_laptops(self):
         with self.lock:
@@ -714,9 +798,9 @@ class Broker:
             if (not item['State']['Running'] or labels.get('reverie.worker') != self.config['deployment'] or
                     labels.get('reverie.session') != sid or not self.allowed(sid)):
                 continue
-            home = Path(self.config['stateRoot']) / sid / 'home'
+            home = storage_paths(self.config,sid).home
             try:
-                metadata = json.loads((home.parent / 'runtime.json').read_text())
+                metadata = json.loads((Path(self.config['stateRoot'])/sid/'runtime.json').read_text())
                 if (home / '.reverie-launch' / metadata['exit']).exists():
                     continue
             except (OSError, ValueError, KeyError):
@@ -791,12 +875,13 @@ class Broker:
                     completed = False
                     if record.is_file():
                         metadata = json.loads(record.read_text())
-                        completed = (record.parent/'home/.reverie-launch'/metadata['exit']).is_file()
+                        completed = (storage_paths(self.config,sid).home/'.reverie-launch'/metadata['exit']).is_file()
                     if completed or not self.allowed(sid):
                         self.stop(name)
                     state = self.run_engine(['inspect', name], optional=True)
                     running = state.returncode == 0 and json.loads(state.stdout)[0]['State']['Running']
                     if not running:
+                        self.release_storage(sid)
                         with self.lock:
                             self.laptops.pop(sid, None)
                         office = self.offices.pop(sid, None)
@@ -817,6 +902,7 @@ class Broker:
         existing_running = False
         exit_file = None
         nix_guard = None
+        storage_claimed = False
         try:
             connection.settimeout(10)
             peer = struct.unpack('3i', connection.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, 12))
@@ -841,6 +927,17 @@ class Broker:
                     self.config = updated
             session_id = request['sessionId']
             generation = self.generation
+            # Wait outside the broker mutex: a source plan-move laptop must
+            # finish stopping before its successor can acquire the same home.
+            storage_deadline=time.monotonic()+10
+            while True:
+                if self.stopping.is_set() or not self.allowed(session_id):
+                    raise ValueError('This expert is stopped or on vacation')
+                try:
+                    paths,storage_claimed=self.claim_storage(session_id);break
+                except BlockingIOError:
+                    if time.monotonic()>=storage_deadline:raise RuntimeError('Previous employee laptop has not released its data')
+                    self.stopping.wait(.1)
             with self.lock:
                 if generation != self.generation or self.stopping.is_set() or self.draining.is_set() or session_id in self.active:
                     raise ValueError('A worker for this session is already attached')
@@ -849,18 +946,17 @@ class Broker:
                 self.active[session_id] = connection
                 self.laptops[session_id] = self.config['deployment']+'-agent-'+session_id
                 claimed = True
-                home = Path(self.config['stateRoot']) / session_id / 'home'
-                home.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-                home.mkdir(mode=0o700, parents=True, exist_ok=True)
+                prepare_storage(self.config,paths)
+                home=paths.home
+                runtime_directory=Path(self.config['stateRoot'])/session_id
+                private_directory(runtime_directory,self.config['uid'],create=True)
                 if home.is_symlink() or home.resolve() != home:
                     raise ValueError('Invalid worker home')
-                # Canonical integration replaces this compatibility selection
-                # with storage_paths(self.config, session_id).scratch.
-                scratch = Path(self.config['scratchRoot']) / session_id
-                name, digest, args = create_args(self.config, session_id, home, scratch=scratch)
+                scratch=paths.scratch
+                name, digest, args = create_args(self.config, session_id, home, scratch=scratch,storage=paths)
                 previous = self.run_engine(['inspect', name], optional=True)
                 reuse = False
-                metadata_path = home.parent/'runtime.json'
+                metadata_path = runtime_directory/'runtime.json'
                 if previous.returncode == 0:
                     old = json.loads(previous.stdout)[0]
                     labels = old['Config']['Labels']
@@ -886,6 +982,8 @@ class Broker:
                 if reuse and resources['budgetMode']=='pool':
                     self.check_pool(config=resources,require_headroom=False)
                 if not reuse:
+                    if not storage_start_allowed(self.config,paths):
+                        raise ValueError('Only the current employee session may start its laptop')
                     resources=effective_config(self.config,session_id)
                     if 'sessionResources' in self.config:
                         self.check_pool(config=resources)
@@ -894,8 +992,10 @@ class Broker:
                     self.check_creation_budget(session_id,resources)
                 admitted = True
                 if previous.returncode==0 and not reuse:
-                    self.stop(name)
+                    if paths.kind=='employee':self.stop(name,retain_storage=True)
+                    else:self.stop(name)
                 if not reuse:
+                    record_storage_binding(self.config,paths)
                     nix_guard = store_guard(self.config, session_id)
                     nix_guard.__enter__()
                     # Store copies may take time. Keep existing office phones,
@@ -910,6 +1010,11 @@ class Broker:
                         raise RuntimeError('Laptop launch cancelled during Nix preparation')
                     if effective_config(self.config, session_id) != prepared_config:
                         raise RuntimeError('Laptop policy changed during Nix preparation; retry with the current policy')
+                    if storage_paths(self.config,session_id)!=paths:
+                        raise RuntimeError('Employee storage binding changed during preparation')
+                    if not storage_start_allowed(self.config,paths):
+                        raise RuntimeError('Current employee running intent changed during preparation')
+                    if paths.kind=='employee':self.check_storage_writers(paths,session_id)
                     self.check_creation_budget(session_id, prepared_config)
                     if nix_store is not None:
                         # Private durable store and database; build caches retain
@@ -936,6 +1041,8 @@ class Broker:
                     if not label.exists():
                         label.write_text(json.dumps({'ownerSessionId': session_id, 'purpose': 'Laptop scratch; release leased tasks with a handoff before pruning', 'createdAt': time.time()}))
                     args[-4:-4] = account_mounts(self.config, request['env'])
+                    if not storage_start_allowed(self.config,paths):
+                        raise RuntimeError('Current employee running intent changed before creation')
                     self.run_engine(args)
                     owned = True
                     request['env'].update(
@@ -953,6 +1060,8 @@ class Broker:
                     with os.fdopen(fd, 'w') as out:
                         json.dump(request, out)
                     metadata_path.write_text(json.dumps({'exit': exit_file.name}))
+                    if not storage_start_allowed(self.config,paths):
+                        raise RuntimeError('Current employee running intent changed before startup')
                     self.run_engine(['start', name])
                     wrapper = '/bin/reverie-worker-child "$1"; result=$?; printf "%s" "$result" > "$2.tmp"; mv "$2.tmp" "$2"; exec /bin/sleep infinity'
                     self.run_engine(tmux_exec_args(name, '-f', '/dev/null', 'new-session', '-d', '-x', str(request['cols']), '-y', str(request['rows']), '-s', 'office', '/bin/bash', '-c', wrapper, 'laptop', '/home/agent/.reverie-launch/'+launch.name, '/home/agent/.reverie-launch/'+exit_file.name))
@@ -1054,6 +1163,12 @@ class Broker:
                         self.laptops.pop(session_id, None)
                         office = self.offices.pop(session_id, None)
                         if office: office.close()
+            if storage_claimed:
+                # Viewer EOF alone does not end a laptop's data lease. Release
+                # only after observing that exact named laptop is no longer live.
+                state=self.run_engine(['inspect',self.config['deployment']+'-agent-'+session_id],optional=True)
+                if state.returncode or json.loads(state.stdout)[0]['State']['Running'] is False:
+                    self.release_storage(session_id)
             connection.close()
             self.connections.release()
 

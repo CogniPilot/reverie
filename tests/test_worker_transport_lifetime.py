@@ -29,7 +29,9 @@ class BrokerTransportLifetimeTests(unittest.TestCase):
         subprocess.run([self.tmux,'-S',str(self.tmux_socket),'-f','/dev/null','new-session','-d','-s','office','sleep 120'],check=True,capture_output=True)
         self.pid=subprocess.check_output([self.tmux,'-S',str(self.tmux_socket),'display-message','-p','-t','office','#{pane_pid}'],text=True).strip()
         self.start=self.process_start()
-        home=Path(self.config['stateRoot'])/self.sid/'home';(home/'.reverie-launch').mkdir(parents=True)
+        home=Path(self.config['stateRoot'])/self.sid/'home'
+        for directory in (home.parent.parent, home.parent, home, home/'.reverie-launch'):
+            directory.mkdir(mode=0o700)
         (home.parent/'runtime.json').write_text(json.dumps({'exit':'synthetic.exit'}))
         self.engine=self.root/'synthetic-engine'
         self.engine.write_text('#!'+sys.executable+'\nimport os,sys\na=sys.argv[1:];i=a.index("/bin/tmux");tail=a[i+1:];assert tail[:3]==["-u","-L","reverie-laptop"];os.execv('+repr(self.tmux)+',["tmux","-u","-S",'+repr(str(self.tmux_socket))+']+tail[3:])\n')
