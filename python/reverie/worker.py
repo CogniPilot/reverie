@@ -11,6 +11,7 @@ import fcntl
 import hashlib
 import http.client
 import http.server
+import ipaddress
 import json
 import os
 from pathlib import Path
@@ -646,14 +647,32 @@ class Broker:
             previous=self.storage_leases.pop(session_id,None)
             if previous:previous[0].__exit__(None,None,None)
 
+    def inspect_container(self, name):
+        """A transient or malformed engine reply is unknown, never stopped."""
+        result = self.run_engine(['inspect', name])
+        try:
+            items = json.loads(result.stdout)
+            if not isinstance(items, list) or len(items) != 1 or not isinstance(items[0], dict):
+                raise ValueError
+            item = items[0]
+            if not isinstance(item.get('State'), dict) or type(item['State'].get('Running')) is not bool:
+                raise ValueError
+        except (ValueError, TypeError):
+            raise RuntimeError('Worker container state is unavailable') from None
+        return item
+
     def address(self):
         with self.address_lock:
             if self.address_cache and time.monotonic()-self.address_updated < 2:
                 return self.address_cache
-            server = json.loads(self.run_engine(['inspect', self.config['serverContainer']]).stdout)[0]
-            address = server['NetworkSettings']['Networks'].get('bridge', {}).get('IPAddress')
-            if not server['State']['Running'] or not address:
-                raise RuntimeError('Office API is unavailable')
+            server = self.inspect_container(self.config['serverContainer'])
+            try:
+                address = server['NetworkSettings']['Networks']['bridge']['IPAddress']
+                if not server['State']['Running'] or not isinstance(address, str):
+                    raise ValueError
+                ipaddress.ip_address(address)
+            except (KeyError, TypeError, ValueError):
+                raise RuntimeError('Office API is unavailable') from None
             self.address_cache, self.address_updated = address, time.monotonic()
             return address
 
@@ -862,21 +881,22 @@ class Broker:
                     healthy = upstream.getresponse().status in [200, 401, 403]
                 finally:
                     upstream.close()
-            except (OSError, ValueError, RuntimeError, http.client.HTTPException, subprocess.SubprocessError):
+            except (OSError, ValueError, RuntimeError, KeyError, TypeError, IndexError, AttributeError,
+                    http.client.HTTPException, subprocess.SubprocessError):
                 pass
-            if healthy:
-                if offline.exists():
-                    print('Office API recovered; laptop outage timer cleared.', file=sys.stderr, flush=True)
-                offline.unlink(missing_ok=True)
-            else:
-                if not offline.exists():
-                    offline.write_text(str(time.time()))
-                    print('Office API unavailable; laptops will stop after 10 minutes without recovery.', file=sys.stderr, flush=True)
-                try:
+            try:
+                if healthy:
+                    if offline.exists():
+                        print('Office API recovered; laptop outage timer cleared.', file=sys.stderr, flush=True)
+                    offline.unlink(missing_ok=True)
+                else:
+                    if not offline.exists():
+                        offline.write_text(str(time.time()))
+                        print('Office API unavailable; laptops will stop after 10 minutes without recovery.', file=sys.stderr, flush=True)
                     if time.time()-float(offline.read_text()) >= OFFLINE_GRACE_SECONDS:
                         self.stop_laptops()
-                except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
-                    pass  # Retry next tick, never declare a failed stop complete.
+            except (OSError, ValueError, RuntimeError, KeyError, TypeError, IndexError, AttributeError, subprocess.SubprocessError):
+                pass  # Retry next tick, but still sweep detached laptops below.
             with self.lock:
                 laptops = list(self.laptops.items())
                 attached = set(self.active)
@@ -891,15 +911,14 @@ class Broker:
                         completed = (storage_paths(self.config,sid).home/'.reverie-launch'/metadata['exit']).is_file()
                     if completed or not self.allowed(sid):
                         self.stop(name)
-                    state = self.run_engine(['inspect', name], optional=True)
-                    running = state.returncode == 0 and json.loads(state.stdout)[0]['State']['Running']
-                    if not running:
+                    state = self.inspect_container(name)
+                    if not state['State']['Running']:
                         self.release_storage(sid)
                         with self.lock:
                             self.laptops.pop(sid, None)
                         office = self.offices.pop(sid, None)
                         if office: office.close()
-                except (OSError, ValueError, RuntimeError, KeyError, subprocess.SubprocessError):
+                except (OSError, ValueError, RuntimeError, KeyError, TypeError, IndexError, AttributeError, subprocess.SubprocessError):
                     pass
 
     def handle(self, connection):
