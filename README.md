@@ -201,7 +201,7 @@ watchdog stops all laptop containers after **10 minutes without a reachable offi
 API**. Its outage timestamp survives broker restarts. Once the API returns, the
 normal desired-running and vacation rules apply again.
 
-Settings → System → Office power distinguishes three actions:
+The gear beside your name opens **Office**, where the owner-only **Power** section distinguishes three actions. The inherited console preferences are nested under **Terminal settings**:
 
 - **Stop Reverie** stops all agents and laptops before stopping the website.
 - **Stop all agents** stops laptops and keeps the website open.
@@ -227,7 +227,7 @@ promise that shared writable files are protected from another expert.
 
 ## Office handbook
 
-Open **Handbook** in the conversation sidebar, or `/handbook`, for searchable
+Open **Office → Handbook** from the nameplate gear, or `/handbook`, for searchable
 pages shared by humans and agents. Start with [Getting started](apps/web/src/web/public/handbook/getting-started.md),
 then use the short guides for [profiles](apps/web/src/web/public/handbook/profiles.md),
 [plans](apps/web/src/web/public/handbook/models.md),

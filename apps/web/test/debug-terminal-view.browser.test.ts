@@ -217,7 +217,7 @@ describe('minimal agent terminal in Chromium', () => {
 
   it('offers Board and its usage view, while #plans opens no page', async () => {
     await open(1280, '#plans');
-    expect(await page.locator('.ca-pages .ca-item').allTextContents()).toEqual(['Board']);
+    expect(await page.locator('.ca-pages .ca-item').allTextContents()).toEqual(['Office']);
     expect(await page.locator('.ca-page').count()).toBe(0);
     await page.getByRole('button', { name: 'Board', exact: true }).click();
     expect(await page.locator('.ca-page-frame').getAttribute('src')).toBe('/board');

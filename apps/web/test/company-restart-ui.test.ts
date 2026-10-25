@@ -104,24 +104,23 @@ it.each([false, true])('quick leave sends no stop after cancellation or an unver
   await flight; expect(calls).toHaveLength(0);
 });
 
-it('adds discoverable Company power controls which use the existing office-power workflow', async () => {
+it('places power on the Office page and uses the existing office-power workflow', async () => {
   const { h } = await setup(); h.app.officePower = vi.fn(async (_action, output) => { output.textContent = 'Shutdown confirmed by laptop manager'; });
-  await h.shell.openCompany();
-  const power = h.document.querySelector('.ca-company-power-button');
-  expect(power.textContent).toBe('Office power'); power.click();
-  const actions = [...h.document.querySelectorAll('[aria-label="Office power"] button')];
+  h.shell.openPage('office'); await h.flush();
+  const actions = [...h.document.querySelectorAll('.ca-office-power button')];
   expect(actions.map(button => button.textContent)).toEqual(['Stop all agents', 'Restart website', 'Shut down Reverie']);
   expect(actions[0].classList.contains('is-danger')).toBe(true);
   expect(actions[1].classList.contains('is-danger')).toBe(false);
   expect(actions[2].classList.contains('is-danger')).toBe(true);
   actions[2].click(); await h.flush();
-  expect(h.app.officePower).toHaveBeenCalledExactlyOnceWith('shutdown', h.document.querySelector('.ca-company > [role="status"]'));
-  expect(h.document.querySelector('.ca-company > [role="status"]').textContent).toBe('Shutdown confirmed by laptop manager');
+  expect(h.app.officePower).toHaveBeenCalledExactlyOnceWith('shutdown', h.document.querySelector('.ca-office-page > [role="status"]'));
+  expect(h.document.querySelector('.ca-office-page > [role="status"]').textContent).toBe('Shutdown confirmed by laptop manager');
+  await h.shell.openCompany(); expect(h.document.querySelector('.ca-company-power-button')).toBeNull();
 });
 
-it('never offers the Company shutdown shortcut to an unverified owner', async () => {
-  const { h } = await setup({ verified: false }); await h.shell.openCompany();
-  expect(h.document.querySelector('.ca-company-power-button')).toBeNull();
+it('never offers Office shutdown controls to an unverified owner', async () => {
+  const { h } = await setup({ verified: false }); h.shell.openPage('office'); await h.flush();
+  expect(h.document.querySelector('.ca-office-power')).toBeNull();
 });
 
 it('requires a separate owner choice before sending stalled-session recovery confirmation', async () => {

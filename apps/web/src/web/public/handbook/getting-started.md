@@ -14,13 +14,15 @@ Provider tools install on first start into persistent private storage. If instal
 
 ## Next steps
 
+The gear beside your name opens **Office**: Company, Board, Handbook, Workspace, Bots, People and Laptop previews. **Terminal settings** opens the console preferences. Owner power controls are separated at the bottom of Office.
+
 Use [Profiles and reporting lines](/handbook/profiles) to tune the role, [Models and plans](/handbook/models) to change its runtime, and [Work and scratch](/handbook/work) to share files. Enable [Optional chat plugins](/handbook/plugins) only when useful.
 
 If an existing expert stops responding, follow [Recover a stuck expert](/handbook/recovery) before restarting the website. Installation, host mounts and image rollout remain operator tasks; the repository README and `docs/setup.md` describe those procedures.
 
 ## Bots and routines
 
-Open **Bots** in the sidebar to see saved routines, enabled schedules, current scheduler executions, and recent outcomes. Running comes from the scheduler's live execution list. Unfinished history is shown separately, since an interrupted run may leave an old record. Filter by status or search by name or channel. The page refreshes every ten seconds while visible.
+Open **Office → Bots** to see saved routines, enabled schedules, current scheduler executions, and recent outcomes. Running comes from the scheduler's live execution list. Unfinished history is shown separately, since an interrupted run may leave an old record. Filter by status or search by name or channel. The page refreshes every ten seconds while visible.
 
 Choose **Set up a bot** to give a named sender its allowed channels and posting limit. **New routine** schedules a fixed message from that bot; new routines are saved disabled unless you enable them. **Advanced schedules** opens the existing editor for data sources and agent session jobs when you open Bots from chat.
 

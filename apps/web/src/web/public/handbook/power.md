@@ -1,6 +1,6 @@
 # Power and restarts
 
-Open **Company → Office power** for **Stop all agents**, **Restart website** or **Shut down Reverie**. The same controls are under Settings → System → Office power. Choose the action that matches the intended interruption and review its confirmation. Only the owner may stop everyone.
+Open the gear beside your name at the bottom left, then use **Office → Power** for **Stop all agents**, **Restart website** or **Shut down Reverie**. The Office page also holds Company, Board, Handbook, Workspace and the other office pages. The inherited console settings are nested under **Terminal settings**. Choose the action that matches the intended interruption and review its confirmation. Only the owner may stop everyone.
 
 - Stop Reverie stops agent CLIs and laptops before stopping the website.
 - Stop all agents stops laptop work while keeping the website available.

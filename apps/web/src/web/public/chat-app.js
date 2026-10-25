@@ -1048,6 +1048,7 @@ const CA_ICONS = {
 
 /** The Board is pinned above the channel list, shown in the main pane. */
 const CA_PAGES = {
+  office: { label: 'Office', icon: 'gear', path: null, nav: false },
   board: { label: 'Board', icon: 'calendar', path: '/board' },
   handbook: { label: 'Handbook', icon: 'book', path: '/handbook' },
   workspace: { label: 'Workspace', icon: 'folder', path: '/workspace' },
@@ -2360,7 +2361,7 @@ class ReverieChatApp {
     this.els.chat.inert = true;
     this.els.members.inert = true;
     const head = this.el('header', 'ca-company-head');
-    head.append(this.el('span', 'ca-spacer'), this.button('ca-btn', 'Back to chat', () => { this.closePage(); this.els.sideScroll.querySelector('.ca-company-nav')?.focus(); }, { text: 'Back to chat' }));
+    head.append(this.el('span', 'ca-spacer'), this.button('ca-btn', 'Back to chat', () => { this.closePage(); this.els.sideScroll.querySelector('.ca-office-nav')?.focus(); }, { text: 'Back to chat' }));
     const content = this.el('div', 'ca-company-content');
     content.id = 'ca-company-people';
     content.setAttribute('aria-label', 'Company people');
@@ -2412,7 +2413,6 @@ class ReverieChatApp {
       content.replaceChildren();
       head.querySelector('[aria-controls="ca-company-hire"]')?.remove();
       head.querySelector('.ca-company-settings-button')?.remove();
-      head.querySelector('.ca-company-power-button')?.remove();
       if (!res.ok) { status.textContent = `Could not load company: ${res.error}`; return; }
       const data = res.data || {};
       const employees = data.employees || [];
@@ -2420,25 +2420,6 @@ class ReverieChatApp {
         (employee.id === data.settings?.coordinatorEmployeeId ? 'owner' : data.settings?.coordinatorEmployeeId || 'owner');
       const manage = data.canManage === true && auth.ok && auth.data?.self === 'owner' && auth.data?.canSetOwn === true;
       status.textContent = '';
-      if (manage) {
-        const runPower = async action => {
-          if (power.disabled) return;
-          power.disabled = true;
-          try {
-            if (typeof this.app.officePower !== 'function') { status.textContent = 'Office power controls are unavailable. Open Settings → System → Office power.'; return; }
-            await this.app.officePower(action, status);
-          } finally { power.disabled = false; }
-        };
-        const power = this.button('ca-btn ca-company-power-button', 'Office power', () => this.openMenu([
-          { label: 'Stop all agents', danger: true, run: () => runPower('stop-laptops') },
-          { label: 'Restart website', run: () => runPower('restart-website') },
-          { sep: true },
-          { label: 'Shut down Reverie', danger: true, run: () => runPower('shutdown') },
-        ], { at: power, focus: power, label: 'Office power' }), { text: 'Office power' });
-        power.setAttribute('aria-haspopup', 'menu');
-        power.title = 'Stop agents, restart only the website, or shut down the whole office.';
-        head.prepend(power);
-      }
       const cards = new Map();
       for (const employee of employees) {
         const card = this.el('article', 'ca-company-person');
@@ -3158,59 +3139,61 @@ class ReverieChatApp {
     this.orgOpen = false;
     if (this.els.org) this.els.org.hidden = true;
     this.els.orgBtn?.setAttribute('aria-pressed', 'false');
-    this.doc.querySelector('.ca-company-nav')?.focus();
+    this.doc.querySelector('.ca-office-nav')?.focus();
   }
 
   /* ── Board and Plans pages ── */
 
-  /** The Board and Plans entries pinned above the list: pages, not rooms, so they take no part in the sort or the reordering. */
+  /** One office entry keeps management pages out of the channel list. */
   pagesEl() {
     const box = this.el('div', 'ca-pages');
-    const links = this.el('div', 'ca-office-links');
-    links.id = 'ca-office-links';
-    links.hidden = this.officeCollapsed;
-    const toggle = this.el('button', 'ca-pages-toggle');
-    toggle.type = 'button';
-    toggle.setAttribute('aria-label', 'Office');
-    toggle.setAttribute('aria-expanded', String(!this.officeCollapsed));
-    toggle.setAttribute('aria-controls', links.id);
-    const caret = this.icon('chevron');
-    caret.classList.toggle('is-folded', this.officeCollapsed);
-    toggle.append(caret, this.el('span', '', 'Office'));
+    const button = this.button('ca-item ca-item--page ca-office-nav', 'Office', () => this.openPage('office'));
+    button.dataset.key = 'page:office';
+    const mark = this.el('span', 'ca-hash is-drawn'); mark.setAttribute('aria-hidden', 'true'); mark.append(this.icon('gear'));
+    button.append(mark, this.el('span', 'ca-name', 'Office'));
+    if (this.embed && this.embed !== 'embassies') { button.classList.add('is-active'); button.setAttribute('aria-current', 'page'); }
     const current = this.el('span', 'ca-office-current', CA_PAGES[this.embed]?.label || '');
-    current.hidden = !this.officeCollapsed;
-    toggle.append(current);
-    toggle.addEventListener('click', () => {
-      this.officeCollapsed = !this.officeCollapsed;
-      links.hidden = this.officeCollapsed;
-      current.hidden = !this.officeCollapsed;
-      caret.classList.toggle('is-folded', this.officeCollapsed);
-      toggle.setAttribute('aria-expanded', String(!this.officeCollapsed));
-      caWrite('local', 'reverie:chat:office-collapsed', this.officeCollapsed ? '1' : '0');
-    });
-    box.append(toggle, links);
-    const company = this.el('button', 'ca-item ca-item--page ca-company-nav');
-    if (this.embed?.startsWith('company')) { company.classList.add('is-active'); company.setAttribute('aria-current', 'page'); }
-    company.type = 'button'; company.setAttribute('aria-label', 'Company');
-    const mark = this.el('span', 'ca-hash is-drawn'); mark.setAttribute('aria-hidden', 'true'); mark.append(this.icon('org'));
-    company.append(mark, this.el('span', 'ca-name', 'Company'));
-    company.addEventListener('click', () => this.openCompany()); links.append(company);
-    for (const [kind, page] of Object.entries(CA_PAGES)) {
-      if (page.nav === false) continue; // Embassies has one home: its sidebar section.
-      const on = this.embed === kind;
-      const b = this.el('button', `ca-item ca-item--page${on ? ' is-active' : ''}`);
-      b.type = 'button';
-      b.dataset.key = `page:${kind}`;
-      b.setAttribute('aria-label', page.label);
-      if (on) b.setAttribute('aria-current', 'page');
-      const mark = this.el('span', 'ca-hash is-drawn');
-      mark.setAttribute('aria-hidden', 'true');
-      mark.append(this.icon(page.icon));
-      b.append(mark, this.el('span', 'ca-name', page.label));
-      b.addEventListener('click', () => this.openPage(kind));
-      links.append(b);
-    }
+    current.hidden = !this.embed || this.embed === 'office' || this.embed === 'embassies';
+    button.append(current); box.append(button);
     return box;
+  }
+
+  officePageEl() {
+    const root = this.el('section', 'ca-office-page'); root.setAttribute('aria-label', 'Office settings');
+    const head = this.el('header', 'ca-office-head');
+    head.append(this.el('h1', '', 'Office'), this.button('ca-btn', 'Back to chat', () => this.closePage(), { text: 'Back to chat' }));
+    const nav = this.el('nav', 'ca-office-sections'); nav.setAttribute('aria-label', 'Office pages');
+    const terminal = this.el('section', 'ca-office-terminal');
+    terminal.append(this.el('h2', '', 'Terminal settings'), this.el('p', 'ca-hint', 'Terminal appearance, CLI preferences and advanced console settings.'),
+      this.button('ca-btn', 'Open terminal settings', () => this.app.openAppSettings?.(), { text: 'Open terminal settings' }));
+    const status = this.el('p', 'ca-hint'); status.setAttribute('role', 'status');
+    root.append(head, nav, terminal, status);
+    // Loading the page only reads access. Every power action still requires its
+    // own explicit confirmation and the existing authenticated host workflow.
+    void Promise.all([this.app._chatApi('/api/company'), this.app._chatApi('/api/chatrooms/phone-status')]).then(([company, auth]) => {
+      if (!root.isConnected || this.embed !== 'office' || this.app._chatSelf || !company.ok || company.data?.canManage !== true || !auth.ok || auth.data?.self !== 'owner' || auth.data?.canSetOwn !== true) return;
+      for (const kind of ['company', 'board', 'handbook', 'workspace', 'bots', 'people', 'previews']) {
+        const page = CA_PAGES[kind];
+        const link = this.button(`ca-btn ca-office-link${kind === 'company' ? ' ca-company-nav' : ''}`, page.label, () => this.openPage(kind));
+        link.dataset.key = `page:${kind}`;
+        link.append(this.icon(page.icon), this.el('span', '', page.label)); nav.append(link);
+      }
+      const power = this.el('section', 'ca-office-power'); power.setAttribute('aria-label', 'Office power');
+      power.append(this.el('h2', '', 'Power'), this.el('p', 'ca-hint', 'Stopping agents interrupts current work without a fresh handoff. Saved conversations, memory and files remain.'));
+      const actions = this.el('div', 'ca-office-power-actions');
+      for (const [action, label, danger] of [['stop-laptops', 'Stop all agents', true], ['restart-website', 'Restart website', false], ['shutdown', 'Shut down Reverie', true]]) {
+        actions.append(this.button(`ca-btn${danger ? ' is-danger' : ''}`, label, async () => {
+          if (this.app._officePowerPending) return;
+          for (const button of actions.querySelectorAll('button')) button.disabled = true;
+          try {
+            if (typeof this.app.officePower !== 'function') { status.textContent = 'Office power controls are unavailable.'; return; }
+            await this.app.officePower(action, status);
+          } finally { for (const button of actions.querySelectorAll('button')) button.disabled = false; }
+        }, { text: label }));
+      }
+      power.append(actions); root.insertBefore(power, status);
+    }).catch(() => { if (root.isConnected) status.textContent = 'Could not load office controls. Reopen Office to retry.'; });
+    return root;
   }
 
   /** Show the console's own Board page in place of the conversation (the same page, in a frame). */
@@ -3236,7 +3219,10 @@ class ReverieChatApp {
       this.els.page = panel;
     }
     let frame = panel.querySelector('iframe');
-    if (kind === 'embassies') {
+    if (kind === 'office') {
+      panel.replaceChildren(this.officePageEl());
+      panel.dataset.kind = kind;
+    } else if (kind === 'embassies') {
       panel.replaceChildren(this.embassy.directoryEl());
       panel.dataset.kind = kind;
     } else {
@@ -5250,7 +5236,7 @@ class ReverieChatApp {
     approvals.append(this.el('span', 'ca-count ca-approvals-count', '0'));
     this.els.approvals = approvals;
     user.append(approvals);
-    user.append(this.button('ca-icon-btn', 'App settings', () => this.app.openAppSettings?.(), { icon: 'gear' }));
+    user.append(this.button('ca-icon-btn ca-office-gear', 'Office settings', () => this.openPage('office'), { icon: 'gear' }));
     this.renderConnection();
     this.renderApprovals();
   }

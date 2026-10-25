@@ -1250,8 +1250,6 @@ Object.assign(ReverieApp.prototype, {
     if (!group) return;
     const me = window.__reverieUser || {};
     group.style.display = me.multiUser && me.role !== 'admin' ? 'none' : '';
-    const power = document.getElementById('laptopPowerGroup');
-    if (power) power.style.display = group.style.display;
   },
 
   /**

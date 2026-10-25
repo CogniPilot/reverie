@@ -1329,6 +1329,16 @@ button.ca-stat:focus-visible { outline:2px solid var(--accent); outline-offset:2
 .ca-company { width:100%; max-width:none; height:100%; max-height:none; min-width:0; margin:0; border:0; border-radius:0; background:var(--ca-main-bg,var(--bg-dark)); color:var(--text); display:flex; flex-direction:column; overflow:auto; }
 .ca-company-head { padding:6px 24px; gap:12px; flex-wrap:wrap; background:var(--ca-side-bg,var(--bg-card)); }
 .ca-company-head h2 { font-size:19px; letter-spacing:-.02em; }
+.ca-office-page { padding:24px; max-width:960px; margin:0 auto; box-sizing:border-box; width:100%; height:100%; overflow:auto; }
+.ca-office-head { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:12px; margin-bottom:24px; }
+.ca-office-head h1 { margin:0; }
+.ca-office-sections { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,200px),1fr)); gap:12px; }
+.ca-office-link { display:flex; align-items:center; gap:12px; padding:16px; text-align:left; min-width:0; }
+.ca-office-link svg { width:20px; height:20px; flex:none; }
+.ca-office-terminal,.ca-office-power { margin-top:28px; padding-top:20px; border-top:1px solid var(--ca-line); }
+.ca-office-terminal h2,.ca-office-power h2 { margin:0 0 8px; font-size:18px; }
+.ca-office-power-actions { display:flex; flex-wrap:wrap; gap:10px; }
+@media(max-width:600px) { .ca-office-page { padding:16px; } }
 .ca-company-tabs { display:flex; flex-wrap:wrap; gap:8px; padding:12px 24px; border-bottom:1px solid var(--ca-line); }
 .ca-company-tabs [aria-selected="true"] { background:var(--accent); color:var(--accent-ink,#06121f); border-color:var(--accent); }
 .ca-company-content[hidden],.ca-company-plans[hidden] { display:none; }

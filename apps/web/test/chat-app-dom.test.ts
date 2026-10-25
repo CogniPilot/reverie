@@ -113,13 +113,6 @@ describe('the default view', () => {
     const side = labels(h.document.querySelectorAll('.ca-side-scroll button:not(.ca-item-act)'));
     expect(side).toEqual([
       'Office',
-      'Company',
-      'Board',
-      'Handbook',
-      'Workspace',
-      'Bots',
-      'People',
-      'Laptop previews',
       'Build category, 1 mention',
       'Channel General',
       'Channel Ops, 1 mention',
@@ -463,8 +456,9 @@ describe('members and presence', () => {
     expect(h.document.querySelector('.ca-user-status')!.textContent).toBe('Online');
     h.app.setConnectionStatus('reconnecting');
     expect(h.document.querySelector('.ca-user-status')!.textContent).toBe('Reconnecting…');
-    (h.document.querySelector('.ca-user [aria-label="App settings"]') as HTMLButtonElement).click();
-    expect(h.app.settingsOpened).toBe(1);
+    (h.document.querySelector('.ca-user [aria-label="Office settings"]') as HTMLButtonElement).click();
+    expect(h.shell.embed).toBe('office');
+    expect(h.app.settingsOpened).toBeUndefined();
     expect(h.document.querySelector('[aria-label="Debug terminals"]')).toBeNull();
   });
 });
@@ -644,9 +638,11 @@ describe('never a blank page', () => {
     expect(view(h.document.getElementById('appSettingsModal')!).display).toBe('block');
   });
 
-  it('the gear opens settings without leaving the conversation', async () => {
+  it('the gear opens Office with the terminal dialog nested beneath it', async () => {
     const h = await createHarness({ rooms: fixtureRooms() });
-    (h.document.querySelector('.ca-user [aria-label="App settings"]') as HTMLButtonElement).click();
+    (h.document.querySelector('.ca-user [aria-label="Office settings"]') as HTMLButtonElement).click();
+    expect(h.app.settingsOpened).toBeUndefined();
+    (h.document.querySelector('[aria-label="Open terminal settings"]') as HTMLButtonElement).click();
     expect(h.app.settingsOpened).toBe(1);
     expect(h.shell.view).toBe('chat');
   });
@@ -1354,7 +1350,7 @@ describe('org chart', () => {
       .querySelector('.ca-org')
       ?.dispatchEvent(new h.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
     expect((h.document.querySelector('.ca-org') as HTMLElement).hidden).toBe(true);
-    expect(h.document.activeElement?.getAttribute('aria-label')).toBe('Company');
+    expect(h.document.activeElement?.getAttribute('aria-label')).toBe('Office');
     await h.shell.openOrg();
     await settle(40);
     (h.document.querySelector('button.ca-org-node') as HTMLElement).click();
@@ -2184,11 +2180,11 @@ describe('phone: message sheet and member-only terminal access', () => {
   it('removes the duplicate footer org shortcut while keeping settings and Company navigation', async () => {
     const h = await createHarness({ sessions, rooms: [room('r1', 'General', [member(A, 'alpha')], {})] });
     const bar = [...h.document.querySelectorAll('.ca-user > button')].map((b) => b.getAttribute('aria-label'));
-    expect(bar.at(-1)).toBe('App settings');
+    expect(bar.at(-1)).toBe('Office settings');
     expect(h.document.querySelector('.ca-rail [aria-label="Org chart"]')).toBeNull();
     expect(h.document.querySelector('.ca-rail [aria-label="Debug terminals"]')).toBeNull();
     expect(h.document.querySelector('.ca-user-org')).toBeNull();
-    expect(h.document.querySelectorAll('.ca-company-nav')).toHaveLength(1);
+    expect(h.document.querySelectorAll('.ca-office-nav')).toHaveLength(1);
   });
 });
 
@@ -4171,19 +4167,19 @@ describe('the Board entry', () => {
     const h = await createHarness({ sessions, rooms: fixtureRooms() });
     const scroll = h.document.querySelector('.ca-side-scroll')!;
     expect(scroll.firstElementChild!.classList.contains('ca-pages')).toBe(true);
-    expect([...scroll.querySelectorAll('.ca-pages .ca-item')].map((b) => b.textContent)).toEqual(['Company', 'Board', 'Handbook', 'Workspace', 'Bots', 'People', 'Laptop previews']);
-    expect(entry(h, 'board').draggable).toBe(false);
+    expect([...scroll.querySelectorAll('.ca-pages .ca-item')].map((b) => b.textContent)).toEqual(['Office']);
+    expect(entry(h, 'office').draggable).toBe(false);
     expect(h.document.querySelector('.ca-page')).toBeNull();
   });
 
   it('opens Board in place of chat, highlights it, and restores it through browser Back', async () => {
     const h = await createHarness({ sessions, rooms: fixtureRooms() });
-    entry(h, 'board').click();
+    h.shell.openPage('board');
     const frame = h.document.querySelector<HTMLIFrameElement>('.ca-page-frame')!;
     expect(frame.getAttribute('src')).toBe('/board');
     expect(h.document.querySelector<HTMLElement>('.ca-page')!.hidden).toBe(false);
     expect(h.document.querySelector('.ca-head-title')!.textContent).toBe('Board');
-    expect(entry(h, 'board').getAttribute('aria-current')).toBe('page');
+    expect(entry(h, 'office').getAttribute('aria-current')).toBe('page');
     expect(h.document.querySelector('.ca-item--room.is-active')).toBeNull();
     expect((h.document.querySelector('.ca-chat') as HTMLElement & { inert: boolean }).inert).toBe(true);
     expect(h.window.location.hash).toBe('#board');
@@ -4207,14 +4203,14 @@ describe('the Board entry', () => {
 
   it('a room click, or a link to another room, brings the conversation back', async () => {
     const h = await createHarness({ sessions, rooms: fixtureRooms() });
-    entry(h, 'board').click();
+    h.shell.openPage('board');
     [...h.document.querySelectorAll<HTMLButtonElement>('.ca-item--room')].find((b) => b.textContent!.includes('Side'))!.click();
     await settle(80);
     expect(h.document.querySelector<HTMLElement>('.ca-page')!.hidden).toBe(true);
     expect(h.document.querySelector('.ca-head-title')!.textContent).toBe('#Side');
     expect(h.window.location.hash).toBe('');
     expect((h.document.querySelector('.ca-chat') as HTMLElement & { inert: boolean }).inert).toBe(false);
-    expect(entry(h, 'board').classList.contains('is-active')).toBe(false);
+    expect(entry(h, 'office').classList.contains('is-active')).toBe(false);
   });
 
   it('a #board link opens the page when the app loads', async () => {
@@ -4222,7 +4218,7 @@ describe('the Board entry', () => {
     await settle(60);
     expect(h.document.querySelector<HTMLElement>('.ca-page')!.hidden).toBe(false);
     expect(h.document.querySelector('.ca-page-frame')!.getAttribute('src')).toBe('/board');
-    expect(entry(h, 'board').classList.contains('is-active')).toBe(true);
+    expect(entry(h, 'office').classList.contains('is-active')).toBe(true);
   });
 });
 

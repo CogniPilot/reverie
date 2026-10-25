@@ -92,8 +92,10 @@ function submit(h: any) {
     .querySelector('.ca-company-hire form')
     .dispatchEvent(new h.window.Event('submit', { bubbles: true, cancelable: true }));
 }
-it('opens Company directly from the sidebar without the legacy settings window', async () => {
+it('opens Company from Office without the legacy terminal settings window', async () => {
   const { h } = await setup();
+  h.shell.openPage('office');
+  await h.flush();
   const link = h.document.querySelector('.ca-company-nav');
   expect(link?.textContent).toBe('Company');
   link.click();
