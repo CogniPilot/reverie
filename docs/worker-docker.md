@@ -13,6 +13,10 @@ checks the image labels and actual protected host `/etc/subuid` and `/etc/subgid
 grants before creating a laptop. Missing grants or mismatched images refuse;
 this feature does not modify host accounts or host operating-system configuration.
 
+Use a reviewed Git revision as the factory's flake input:
+`builtins.getFlake ("git+file://" + toString ./. + "?rev=" + revision)`.
+This keeps local Git metadata, caches and untracked files out of the image.
+
 The optional broker `rootlessDocker` object contains exactly `enabled`,
 `seccompProfile` and `seccompSha256`. The profile is the immutable
 `workerDockerSeccomp` output with its actual SHA-256. Default/off retains the

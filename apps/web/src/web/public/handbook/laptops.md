@@ -1,12 +1,12 @@
 # Office laptops
 
-An expert's tools run on its persistent employee laptop: a separate container with a private home, terminal and disposable temporary drive. The laptop belongs to the stable employee identity and survives model, account and conversation/session changes. A human-friendly folder name is an alias, not an identity or permission. The remote model supplies reasoning; the CLI inside the laptop connects that model to its tools.
+An expert's tools run in a separate container with a private home and terminal. The laptop's durable data belongs to its permanent employee ID and survives model, plan and session changes. Human names label folders; they grant no permissions. The remote model supplies reasoning; its local CLI runs tools.
 
-The website is the office communication and management service. Restarting the website can leave laptop programs running. Restarting the laptop itself ends processes inside it; preserving the same CLI across that restart needs a separately supervised backend and is not guaranteed by the website/laptop split.
+The website provides office chat and management. A website restart can leave laptop programs running. Restarting a laptop ends its processes; durable files and conversation records do not themselves preserve a running CLI.
 
-## Installing tools with Nix
+## Install tools with Nix
 
-Use a project's pinned environment when it has a flake:
+Use the project's pinned flake first:
 
 ```bash
 nix develop
@@ -15,51 +15,37 @@ nix build
 nix run
 ```
 
-Use a temporary tool environment for a single command, or install a tool in your private profile for later shells:
+For temporary tools or persistent profile installs:
 
 ```bash
-nix shell nixpkgs#jq --command jq --version
+nix shell nixpkgs#openssh --command ssh -V
 nix profile install nixpkgs#jq
 nix profile list
-jq --version
 ```
 
-The laptop's `nixpkgs` registry follows the release lock. Profiles live in your private home, including `~/.nix-profile` and `~/.local/state/nix/profiles`. Each laptop has its own writable `/nix/store` and `/nix/var/nix` database. New and migrated laptops bind these from the private durable `stateRoot/<sessionId>/nix` directory on the host. Installed profiles and their registered packages survive laptop recreation; a running process still ends when its laptop stops. Temporary shell packages can be collected when no profile or other garbage-collection root retains them.
+The laptop's `nixpkgs` registry follows the release lock. Its writable `/nix/store`, database and private home live outside scratch at `stateRoot/employees/<employeeId>/{nix,home}`. Installed profiles and registered packages survive container replacement. Temporary shell packages can be collected unless a profile or another garbage-collection root retains them.
 
-Prefer the project's flake before installing globally. The base laptop stays lean;
-domain simulators and large build stacks belong in project environments. QEMU
-software TCG can be supplied by the project flake. KVM and devices require explicit
-optional capabilities. A Docker client alone does not prove a usable engine:
-the approved backend needs actual build/run acceptance. None of these tool checks
-grants mission or flight approval. Credentials use named grants outside scratch;
-never paste secret bytes into chat.
+Keep the base laptop lean. Use project flakes for simulators and large build stacks. QEMU software emulation needs no KVM device; accelerated KVM requires an explicit grant. Docker needs an owner-enabled engine, not just a client. When rootless Docker is enabled, install `.#workerDocker` from a Reverie checkout, run `dockerd-rootless` in another terminal, and verify `docker info` before building or running containers. Its images and volumes remain in `~/.local/share/docker`.
 
-Older laptops may still bind `/nix` from their private scratch drive until an owner coordinates migration. Keep the existing store and profile links intact, save a handoff, and report the exact laptop/session before maintenance. A broker restart can also interrupt terminal and provider transports; do not restart it to install a package. The host daemon and another laptop's store are never needed for ordinary laptop Nix commands.
+Read `/home/agent/AGENTS.md` for current laptop instructions. Installing tools grants no mission or flight approval. Credentials need named grants outside scratch; never paste secret bytes into chat.
 
-`/tmp` mounts only this laptop's private directory on the owner's scratch disk; it is not a small RAM tmpfs or the whole shared scratch root. `TMPDIR`, `TMP` and `TEMP` point to `/tmp`. Put disposable builds, caches and downloads under `/tmp/<project>/...`; default tool paths separate working directories. `/scratch` remains a compatibility drive for existing paths and is disposable too. Keep repositories, unfinished work, scientific results and retained evidence in verified durable project/workspace or private home storage. Existing work must be preserved before scratch cleanup; neither a directory name nor stopping jobs proves its contents are disposable.
+## Files and temporary work
 
-Use familiar Linux paths: `/home/agent` for private home/settings/SSH, `/nix` for
-installed tools, `/workspace` for persistent projects when granted, and `/tmp`
-for disposable work. `/reverie_workspace` remains compatible. An alias at
-`/workspace` is added only when that path is free of explicit grants; an existing
-project mount always wins. `~/workspace` can point to the granted shared drive
-without replacing existing owner content. Attachment isolation applies to aliases
-too. Check backing storage rather than assuming a path name guarantees durability.
+Use these Linux paths:
 
-The portable Linux/local-engine default uses individual memory/no-swap and task ceilings plus aggregate admission; CPU is uncapped. It needs no personal NixOS configuration. The shared-pool backend is optional and requires separately available, verified protection. An absent pool never permits unlimited fallback. A broker user service can start at login (or through an owner's existing linger policy); laptop containers deliberately do not blindly restart provider commands. Follow coordinated normal same-conversation recovery after reboot.
+- `/home/agent`: private settings, SSH configuration and retained work.
+- `/nix`: installed tools, profiles and the package database.
+- `/workspace` or explicit project mounts: durable shared work when granted. `/reverie_workspace` remains compatible.
+- `/tmp/<project>`: disposable builds, caches and downloads. `TMPDIR`, `TMP` and `TEMP` point here.
 
-## Protection
+`/tmp` uses this laptop's private directory on the scratch disk, rather than a small RAM filesystem. `/scratch` is also disposable and remains for compatibility. Check actual backing storage before assuming a path is durable. Existing project mounts and owner files take precedence over aliases. Preserve source, unfinished work and retained results before cleanup.
 
-CPU is uncapped by default and shared fairly. Memory and task ceilings prevent a runaway laptop from exhausting the whole host. Threads count toward the task limit. Limits and admission budgets are owner-selected host policy; check actual deployment settings before quoting numbers.
+Legacy laptops require coordinated offline migration of home and Nix together. Save a handoff and keep their existing stores and profile links intact. Do not restart the broker to install a package; ordinary Nix commands need neither the host daemon nor another laptop's store.
 
-Each laptop has an init process to reap orphaned children. An unavailable broker must fail closed rather than execute tools inside the website container.
+## Protection and access
 
-## Boundaries
+CPU is uncapped by default. Owner-selected memory, no-swap and task ceilings plus admission checks protect the host; threads count as tasks. The portable local Linux backend requires no personal NixOS configuration. Optional shared-pool protection must already be verified; missing protection never permits unlimited fallback.
 
-Laptops get explicitly shared project mounts, selected accounts and a scoped office API. They do not get the engine socket, host-control socket or console private state. Internet access does not imply access to colleagues' laptops. There is no peer SSH network by default.
+Laptops receive explicit project mounts, selected accounts and a scoped office API. They receive no host engine/control socket or console private state. There is no peer SSH network by default. Use `REVERIE_API_URL`; a title or folder name grants no authority. Browser/GPU access requires explicit grants and a validated runtime.
 
-Use the scoped API base in REVERIE_API_URL. Do not copy owner service tokens or passwords into a laptop to bypass missing permissions.
-
-Optional browser/GPU access needs explicit host grants and a validated image. Native graphics success alone does not prove container graphics, WebGPU or safe coexistence with model inference.
-
-See [Work and scratch](/handbook/work) and [Power and restarts](/handbook/power).
+See [Work and scratch](/handbook/work), [Power and restarts](/handbook/power) and [Recovery](/handbook/recovery).
