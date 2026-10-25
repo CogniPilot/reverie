@@ -209,5 +209,18 @@ class PairedEmployeeMigrationTests(unittest.TestCase):
             self.assertTrue(self.home.exists());self.assertTrue(self.nix.exists())
         self.assert_off()
 
+    def test_raw_legacy_recipe_auth_or_env_never_enters_receipt_but_changes_refuse(self):
+        self.employee['runtimeRecipe']={'mode':'codex','__envOverrides':{'TOKEN':'synthetic-recipe-secret'},
+                                        'legacyProviderConfig':{'auth':'synthetic-auth-secret'}}
+        self.write(self.file,self.company);plan=self.plan()
+        self.assertNotIn('runtimeRecipe',plan['employee'])
+        self.assertNotIn('synthetic-recipe-secret',json.dumps(plan))
+        self.assertNotIn('synthetic-auth-secret',json.dumps(plan))
+        self.assertEqual(plan['employee']['runtimeRecipeSha256'],digest(self.employee['runtimeRecipe']))
+        self.employee['runtimeRecipe']['__envOverrides']['TOKEN']='changed'
+        self.write(self.file,self.company)
+        with self.assertRaisesRegex(ValueError,'Employee/intent'):self.phase('stage',plan)
+        self.assertTrue(self.home.exists());self.assertTrue(self.nix.exists())
+
 
 if __name__=='__main__':unittest.main()

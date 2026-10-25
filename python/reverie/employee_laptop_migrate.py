@@ -74,7 +74,8 @@ class EmployeeMigration(Migration):
         employee=matches[0]
         # Offline migration is permitted for OFF/vacation employees and preserves
         # exact flags. It never enables a provider to obtain runtime proof.
-        selected={key:employee.get(key) for key in ('id','sessionId','owner','desiredRunning','onVacation','runtimeRecipe')}
+        selected={key:employee.get(key) for key in ('id','sessionId','owner','desiredRunning','onVacation')}
+        selected['runtimeRecipeSha256']=digest(employee.get('runtimeRecipe'))
         return paths,selected
 
     def no_writers(self,roots):
