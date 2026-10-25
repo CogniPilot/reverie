@@ -4,6 +4,7 @@ import os
 import re
 import signal
 import sys
+import urllib.error
 import urllib.parse
 import urllib.request
 from contextlib import contextmanager
@@ -13,13 +14,17 @@ from coding_tokens import NoRedirect, TokenMeter
 from model_events import TraceWriter
 
 
+class ModelDeadline(TimeoutError):
+    """Whole-request expiry is never an optional tokenizer failure."""
+
+
 @contextmanager
 def deadline(seconds):
     if signal.getitimer(signal.ITIMER_REAL) != (0.0, 0.0):
         raise RuntimeError('model client cannot replace an active process timer')
     previous = signal.getsignal(signal.SIGALRM)
     def expired(signum, frame):
-        raise TimeoutError('model deadline')
+        raise ModelDeadline('model deadline')
     signal.signal(signal.SIGALRM, expired)
     try:
         signal.setitimer(signal.ITIMER_REAL, seconds)
@@ -31,7 +36,7 @@ def deadline(seconds):
 
 class ModelClient:
     def __init__(self, api_base, *, key_env=None, timeout_s=300, max_response_bytes=262144, token_meter=None,
-                 events_file=None):
+                 events_file=None, token_meter_optional=False):
         parsed = urllib.parse.urlsplit(api_base)
         if (parsed.scheme not in ('http', 'https') or not parsed.hostname or
                 parsed.username is not None or parsed.password is not None or parsed.query or parsed.fragment):
@@ -47,6 +52,9 @@ class ModelClient:
         self.timeout_s = timeout_s
         self.max_response_bytes = max_response_bytes
         self.max_stream_bytes = min(8 * 1024 * 1024, 32 * max_response_bytes)
+        if type(token_meter_optional) is not bool:
+            raise ValueError('invalid tokenizer failure policy')
+        self.token_meter_optional = token_meter_optional
         self.events_file = events_file
         self.token_meter = TokenMeter(**token_meter) if token_meter is not None else None
         self.opener = urllib.request.build_opener(NoRedirect())
@@ -59,7 +67,20 @@ class ModelClient:
             return self.request(payload, timeout)
 
     def request(self, payload, timeout):
-        measured = self.token_meter.measure(payload) if self.token_meter is not None else None
+        measured = None
+        meter_unavailable = False
+        if self.token_meter is not None:
+            try:
+                measured = self.token_meter.measure(payload)
+            except (TimeoutError, urllib.error.URLError) as error:
+                timed_out = (isinstance(error, TimeoutError) or
+                           isinstance(getattr(error, 'reason', None), TimeoutError))
+                if not self.token_meter_optional or not timed_out or isinstance(error, ModelDeadline) or isinstance(getattr(error, 'reason', None), ModelDeadline):
+                    raise
+                # Plain chat can continue with unknown token statistics. The
+                # outer deadline and configured character/output limits remain;
+                # strict coding clients retain their required admission meter.
+                meter_unavailable = True
         if measured is not None and not measured['admitted']:
             return {'_context_overflow': True, '_context_stats': measured}
         headers = {'Content-Type': 'application/json'}
@@ -100,6 +121,8 @@ class ModelClient:
             result['_timings'] = response['timings']
         if measured is not None:
             result['_context_stats'] = measured
+        if meter_unavailable:
+            result['_token_meter_status'] = 'unavailable'
         if isinstance(response.get('usage'), dict):
             result['_usage'] = response['usage']
         if isinstance(response.get('model'), str):

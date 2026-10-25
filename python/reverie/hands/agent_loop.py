@@ -207,7 +207,8 @@ def chat_model(cfg, messages, tools=None):
     if meter is not None and cfg.get('vision'):
         meter['image_tokens_per_image'] = cfg.get('image_tokens_per_image', 2048)
     client = ModelClient(cfg['api_base'], key_env=cfg.get('model_key_env'), timeout_s=cfg['model_timeout_s'],
-                         token_meter=meter, events_file=cfg.get('model_events_file'))
+                         token_meter=meter, events_file=cfg.get('model_events_file'),
+                         token_meter_optional=True)
     return client(req_body, cfg['model_timeout_s'])
 
 
@@ -533,6 +534,8 @@ def answer(cfg, room, history, msg, model, search, timing=None, recalled=""):
         t0 = time.monotonic()
         out = model(cfg, messages, tools)
         out = {'content': out} if isinstance(out, str) else out
+        if out.get('_token_meter_status') == 'unavailable':
+            terminal_event(cfg, 'note', text='Token count unavailable: tokenizer timed out. Character, output and time limits still apply.')
         terminal_event(cfg, 'model_done', seconds=time.monotonic() - t0,
                        model=out.get('_model'), usage=out.get('_usage'))
         if timing is not None:
