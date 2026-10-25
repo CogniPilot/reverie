@@ -38,6 +38,7 @@ if __package__:
     from .worker_tmp import prepare_temporary, temporary_environment, write_storage_instructions, workspace_alias, home_workspace_alias
     from .worker_storage import storage_paths, storage_guard, prepare_storage, private_directory, storage_start_allowed, record_storage_binding, validate_storage
     from .worker_docker import enabled as rootless_docker_enabled, require_image as require_docker_image, security_args as docker_security_args, runtime_args as docker_runtime_args
+    from .worker_storage_labels import hostname as employee_hostname
 else:
     # Host migration tools also load this file with spec_from_file_location;
     # their sys.path need not contain the sibling module's directory.
@@ -47,6 +48,7 @@ else:
         sys.path.insert(0, _package_root)
     from reverie.worker_storage import storage_paths, storage_guard, prepare_storage, private_directory, storage_start_allowed, record_storage_binding, validate_storage
     from reverie.worker_docker import enabled as rootless_docker_enabled, require_image as require_docker_image, security_args as docker_security_args, runtime_args as docker_runtime_args
+    from reverie.worker_storage_labels import hostname as employee_hostname
     _gpu_spec = importlib.util.spec_from_file_location('reverie_worker_gpu', Path(__file__).with_name('worker_gpu.py'))
     _gpu_module = importlib.util.module_from_spec(_gpu_spec)
     _gpu_spec.loader.exec_module(_gpu_module)
@@ -258,7 +260,8 @@ def create_args(config, session_id, home, *, scratch=None, storage=None):
     args += ['--entrypoint', '/bin/sleep', config['image'], 'infinity']
     if storage is not None and storage.kind == 'employee':
         args[-4:-4] = ['--label', 'reverie.employee=' + storage.identity,
-                      '--label', 'reverie.storage=employee:' + storage.identity]
+                      '--label', 'reverie.storage=employee:' + storage.identity,
+                      '--hostname',employee_hostname(config,storage)]
     return name, digest, args
 
 
@@ -1052,7 +1055,8 @@ class Broker:
                     write_storage_instructions(home)
                     label = scratch/'.reverie-drive.json'
                     if not label.exists():
-                        label.write_text(json.dumps({'ownerSessionId': session_id, 'purpose': 'Laptop scratch; release leased tasks with a handoff before pruning', 'createdAt': time.time()}))
+                        descriptive=({'ownerEmployeeId':paths.identity} if paths.kind=='employee' else {'ownerSessionId':session_id})
+                        label.write_text(json.dumps({**descriptive, 'purpose': 'Laptop scratch; release leased tasks with a handoff before pruning', 'createdAt': time.time()}))
                     args[-4:-4] = account_mounts(self.config, request['env'])
                     if not storage_start_allowed(self.config,paths):
                         raise RuntimeError('Current employee running intent changed before creation')

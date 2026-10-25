@@ -264,11 +264,15 @@ def main(argv=None):
     parser.add_argument('--checkpoint')
     sub=parser.add_subparsers(dest='action',required=True)
     sub.add_parser('inventory')
+    labels=sub.add_parser('labels');labels.add_argument('--root',type=Path,default=Path.home()/'reverie/laptops')
     create=sub.add_parser('plan');create.add_argument('--session',required=True);create.add_argument('--nix-receipt',type=Path);create.add_argument('--receipt',type=Path,required=True)
     for name in ('stage','publish','verify-data','abort'):
         child=sub.add_parser(name);child.add_argument('--receipt',type=Path,required=True)
     args=parser.parse_args(argv);os.umask(0o077)
     migration=EmployeeMigration(load_config(args.config),args.engine)
+    if args.action=='labels':
+        from .worker_storage_labels import label_plan,apply_labels
+        print(json.dumps((apply_labels if args.apply else label_plan)(migration.config,args.root),indent=2));return
     if args.action=='inventory':
         print(json.dumps(migration.inventory(),indent=2));return
     if args.action=='plan':

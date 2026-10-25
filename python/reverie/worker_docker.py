@@ -89,11 +89,14 @@ def granted(ranges, start, count):
 
 
 def host_grants(path, uid):
-    target = Path(path).resolve(strict=True)
+    try:
+        target = Path(path).resolve(strict=True)
+        name = pwd.getpwuid(uid).pw_name
+    except (FileNotFoundError, KeyError):
+        raise ValueError('Docker capability unavailable: existing normal host subordinate-ID grants required') from None
     info = target.stat()
     if not stat.S_ISREG(info.st_mode) or info.st_uid != 0 or info.st_mode & 0o022 or info.st_size > 1048576:
         raise ValueError('Protected normal host ID grants required')
-    name = pwd.getpwuid(uid).pw_name
     ranges = []
     for line in target.read_text().splitlines():
         fields = line.split(':')

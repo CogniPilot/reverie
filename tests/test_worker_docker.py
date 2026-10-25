@@ -96,6 +96,12 @@ class WorkerDockerTests(unittest.TestCase):
         self.assertFalse(docker.granted([(100000,65536)],100001,65536))
         self.assertTrue(docker.granted([(100000,131072)],100001,65536))
 
+    def test_absent_host_grants_report_unavailable_without_creating_files(self):
+        target=self.root/'absent-subuid'
+        with self.assertRaisesRegex(ValueError,'capability unavailable'):
+            docker.host_grants(target,os.getuid())
+        self.assertFalse(target.exists())
+
     def test_even_readonly_mounts_cannot_replace_identity_helpers_or_plugin_fallback(self):
         for destination in ('/', '/etc', '/etc/passwd', '/etc/group', '/etc/subuid', '/etc/subgid',
                 '/etc/nsswitch.conf', '/etc/ld.so.preload', '/opt', '/opt/reverie-idmap',
