@@ -27,7 +27,13 @@ Use the project's pinned `nix develop`, `nix build` or `nix run` first. Use
 persistently. Domain simulators and large project stacks belong in project
 flakes, not the base laptop. These are ordinary Linux paths; there is no apt
 compatibility shim. Docker needs an actually approved usable engine, not just a
-client binary. QEMU software TCG can come from a project flake; KVM requires an
+client binary. If the owner enabled rootless Docker, use
+`nix profile install .#workerDocker` from a Reverie checkout (or temporary
+`nix shell .#workerDocker`), run `dockerd-rootless`, then verify `docker info`
+before building or running containers. Keep that launcher running in another
+terminal. Its images and volumes live in durable `~/.local/share/docker`;
+installing the tools does not grant a missing host capability.
+QEMU software TCG can come from a project flake; KVM requires an
 explicit optional capability and never implies access to all host devices.
 
 Keep repositories and retained results in explicitly granted durable `/workspace`
