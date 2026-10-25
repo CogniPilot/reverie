@@ -190,7 +190,7 @@ def prepare_store(broker, config, session_id, timeout=300):
                 # No credentials, accounts or projects are mounted into this helper.
                 try:
                     logs = broker.run_engine(['logs', '--tail', '100', created], optional=True)
-                    log = Path(config['stateRoot']) / session_id / 'home/.reverie-nix-prepare.log'
+                    log = storage_paths(config,session_id).home / '.reverie-nix-prepare.log'
                     fd = os.open(log, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
                     with os.fdopen(fd, 'w') as out:
                         out.write((logs.stdout + logs.stderr)[-16384:])

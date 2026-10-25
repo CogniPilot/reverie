@@ -6,6 +6,8 @@ import os
 from pathlib import Path
 import sqlite3
 import subprocess
+import threading
+from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock,patch
 
@@ -14,7 +16,7 @@ EMPLOYEE,OLD,NEW=storage_fixture.EMPLOYEE,storage_fixture.OLD,storage_fixture.NE
 from reverie.employee_laptop_migrate import EmployeeMigration,registered_paths
 from reverie.worker_nix_migrate import tree_digest,digest,private_json
 from reverie.worker_storage import storage_paths,lock_paths,read_metadata,storage_guard
-from reverie.worker_nix import store_guard,private_store
+from reverie.worker_nix import store_guard,private_store,prepare_store
 
 
 class PairedEmployeeMigrationTests(unittest.TestCase):
@@ -110,6 +112,27 @@ class PairedEmployeeMigrationTests(unittest.TestCase):
         self.assertEqual(published['phase'],'published')
         self.assertIn('dataVerifiedAt',published)
         self.assertFalse(self.home.exists());self.assertFalse(self.nix.exists())
+        self.assert_off()
+
+    def test_package_seed_diagnostics_use_the_published_home_after_sid_home_is_moved(self):
+        plan=self.plan();self.phase('stage',plan);self.phase('publish',plan)
+        paths=storage_paths(self.config,OLD)
+        helper='e'*64
+        def engine(args,optional=False):
+            if args[:2]==['image','inspect']:
+                return subprocess.CompletedProcess(args,0,json.dumps([{'Config':{'Labels':{'reverie.worker.nix-store':'1'}}}]),'')
+            if args==['inspect',helper]:
+                return subprocess.CompletedProcess(args,0,json.dumps([{'State':{'Running':False,'ExitCode':0}}]),'')
+            if args[0]=='inspect':return subprocess.CompletedProcess(args,1,'','')
+            if args[0]=='create':return subprocess.CompletedProcess(args,0,helper,'')
+            if args[0] in ('start','rm'):return subprocess.CompletedProcess(args,0,'','')
+            if args[0]=='logs':return subprocess.CompletedProcess(args,0,'synthetic seed completed\n','')
+            raise AssertionError(args)
+        broker=SimpleNamespace(run_engine=engine,stopping=threading.Event(),allowed=lambda sid:True,nix_prepare_lock=threading.Lock())
+        config=dict(self.config,gid=os.getgid(),budgetMode='admission')
+        self.assertEqual(prepare_store(broker,config,OLD),paths.nix)
+        self.assertEqual((paths.home/'.reverie-nix-prepare.log').read_text(),'synthetic seed completed\n')
+        self.assertFalse(self.home.exists())
         self.assert_off()
 
     def test_intent_native_recipe_and_config_changes_refuse_without_partial_move(self):
