@@ -36,7 +36,7 @@ if __package__:
     from .worker_resources import effective_config, policy_digest, validate_session_resources, validate_resource_reload
     from .worker_nix import prepare_store, store_guard
     from .worker_tmp import prepare_temporary, temporary_environment, write_storage_instructions, workspace_alias, home_workspace_alias
-    from .worker_storage import storage_paths, storage_guard, prepare_storage, private_directory, storage_start_allowed, record_storage_binding, validate_storage
+    from .worker_storage import storage_paths, storage_guard, prepare_storage, private_directory, storage_start_allowed, record_storage_binding, validate_storage, read_metadata
     from .worker_docker import enabled as rootless_docker_enabled, require_image as require_docker_image, security_args as docker_security_args, runtime_args as docker_runtime_args
     from .worker_storage_labels import hostname as employee_hostname
 else:
@@ -46,7 +46,7 @@ else:
     _package_root = str(Path(__file__).resolve().parents[1])
     if _package_root not in sys.path:
         sys.path.insert(0, _package_root)
-    from reverie.worker_storage import storage_paths, storage_guard, prepare_storage, private_directory, storage_start_allowed, record_storage_binding, validate_storage
+    from reverie.worker_storage import storage_paths, storage_guard, prepare_storage, private_directory, storage_start_allowed, record_storage_binding, validate_storage, read_metadata
     from reverie.worker_docker import enabled as rootless_docker_enabled, require_image as require_docker_image, security_args as docker_security_args, runtime_args as docker_runtime_args
     from reverie.worker_storage_labels import hostname as employee_hostname
     _gpu_spec = importlib.util.spec_from_file_location('reverie_worker_gpu', Path(__file__).with_name('worker_gpu.py'))
@@ -559,11 +559,12 @@ class Broker:
         # durable transaction identifies exactly which detached laptop to stop.
         journal = Path(self.config['companyFile']).with_name('plan-moves.json')
         try:
-            moves = json.loads(journal.read_text())
+            moves = read_metadata(journal, self.config['uid'], limit=1024*1024)
             if not isinstance(moves, list):
                 raise ValueError('invalid plan journal')
             for move in moves:
-                if (move.get('oldSession') == session_id and move.get('phase') in ('stopping', 'completed') or
+                if (move.get('oldSession') == session_id and
+                        (move.get('sourceStopRequested') is True or move.get('phase') in ('stopping', 'completed')) or
                         move.get('newSession') == session_id and move.get('phase') == 'failed'):
                     return False
         except FileNotFoundError:

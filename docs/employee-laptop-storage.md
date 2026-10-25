@@ -26,6 +26,15 @@ mounts before opening phones. Two sessions, duplicate labels or broader binds
 cannot share a writable home/store. Owner intent and vacation remain independent
 execution gates; migration never changes them.
 
+An account plan move reserves replacement session metadata first, then rechecks
+owner authority, idle state and the exact binding. It persists and audits the stop
+before stopping the old session; only then may the replacement CLI start and
+receive its handoff. The broker's employee lease and actual writer inspection
+also prevent a still-stopping container from sharing the home/store. A failure
+before the stop may restore the old binding. Once stopping begins, failure cleans
+only the candidate and holds the move for explicit owner recovery, using the
+latest canonical data. It never restarts an old SID or copies stale data back.
+
 New employees may initialize fresh data. Existing SID homes/stores require the
 paired offline workflow; they are never hidden behind empty replacement data.
 Source updates do not activate themselves. Ordinary owner source/host service

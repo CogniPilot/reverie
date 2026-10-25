@@ -34,10 +34,11 @@ function harness(initial: PlanMoveRecord[] = []) {
     }),
     start: vi.fn(async () => {
       events.push('start');
+      expect(sessions.has('old')).toBe(false);
     }),
     ready: vi.fn(async () => {
       events.push('ready');
-      expect(sessions.has('old')).toBe(true);
+      expect(sessions.has('old')).toBe(false);
     }),
     beforeStop: vi.fn(async () => {}),
     binding: () => binding,
@@ -60,30 +61,34 @@ function harness(initial: PlanMoveRecord[] = []) {
 }
 
 describe('plan move transaction', () => {
-  it('writes intent, creates, starts and checks readiness before stopping the old session', async () => {
+  it('reserves metadata, audits and stops the old laptop before starting its replacement', async () => {
     const test = harness();
     await test.moves.begin(input);
     await flush();
-    expect(test.events).toEqual(['create', 'start', 'ready', 'audit:stopping', 'stop:old', 'audit:completed']);
+    expect(test.events).toEqual(['create', 'audit:stopping', 'stop:old', 'start', 'ready', 'audit:completed']);
     expect(test.binding()).toBe('new');
     expect(test.sessions.has('old')).toBe(false);
     expect((await test.moves.get(input.id))?.phase).toBe('completed');
     expect(test.saved()[0].phase).toBe('completed');
+    expect(test.saved()[0].sourceStopRequested).toBe(true);
   });
 
-  it.each(['start', 'ready'] as const)('rolls back a failed %s and stops only the candidate', async (stage) => {
+  it.each(['start', 'ready'] as const)('holds a failed %s for recovery without reviving the old SID', async (stage) => {
     const test = harness();
     test.port[stage] = vi.fn(async () => {
       throw new Error('dead pane');
     });
     await test.moves.begin(input);
     await flush();
-    expect(test.events).toContain('rebind:old');
+    expect(test.events).not.toContain('rebind:old');
     expect(test.events).toContain('stop:new');
-    expect(test.events).not.toContain('stop:old');
-    expect(test.sessions.has('old')).toBe(true);
-    expect(test.binding()).toBe('old');
-    expect(await test.moves.get(input.id)).toMatchObject({ phase: 'failed', error: 'dead pane' });
+    expect(test.events).toContain('stop:old');
+    expect(test.sessions.has('old')).toBe(false);
+    expect(test.sessions.has('new')).toBe(false);
+    expect(test.binding()).toBe('new');
+    expect(await test.moves.get(input.id)).toMatchObject({ phase: 'recovery-required', error: 'dead pane' });
+    expect(test.saved()[0].sourceStopRequested).toBe(true);
+    await expect(test.moves.begin({ ...input, id: 'retry' })).rejects.toThrow('requiring recovery');
   });
 
   it('refuses stale bindings, stale plan allocation and same-plan drops before creating', async () => {
@@ -170,6 +175,7 @@ describe('plan move transaction', () => {
     expect(test.binding()).toBe('old');
     expect(test.events).not.toContain('stop:old');
     expect(test.events).toContain('stop:new');
+    expect(test.port.start).not.toHaveBeenCalled();
     expect((await test.moves.get(input.id))?.phase).toBe('failed');
   });
 
@@ -182,6 +188,8 @@ describe('plan move transaction', () => {
     await flush();
     expect(test.binding()).toBe('old');
     expect(test.events).not.toContain('stop:old');
+    expect(test.port.start).not.toHaveBeenCalled();
+    expect(test.saved()[0].sourceStopRequested).toBeUndefined();
     expect((await test.moves.get(input.id))?.phase).toBe('failed');
   });
 
@@ -195,19 +203,53 @@ describe('plan move transaction', () => {
     await flush();
     expect(test.binding()).toBe('new');
     expect(test.events).not.toContain('rebind:old');
+    expect(test.port.start).not.toHaveBeenCalled();
     expect((await test.moves.get(input.id))?.phase).toBe('recovery-required');
     await expect(test.moves.begin({ ...input, id: 'second' })).rejects.toThrow('requiring recovery');
   });
 
   it('does not overwrite a concurrently changed binding on rollback', async () => {
     const test = harness();
-    test.port.ready = vi.fn(async () => {
+    test.port.beforeStop = vi.fn(async () => {
       test.port.binding = () => 'some-other-session';
     });
     await test.moves.begin(input);
     await flush();
     expect(test.port.rebind).not.toHaveBeenCalled();
     expect(test.port.stop).not.toHaveBeenCalled();
+    expect((await test.moves.get(input.id))?.phase).toBe('recovery-required');
+  });
+
+  it('never starts a replacement if the source stop throws or its durable stop intent fails', async () => {
+    for (const failure of ['stop', 'save'] as const) {
+      const test = harness();
+      if (failure === 'stop') test.port.stop = vi.fn(async () => { throw new Error('stop refused'); });
+      else test.port.save = vi.fn(async (records) => {
+        if (records[0].phase === 'stopping') throw new Error('ENOSPC');
+      });
+      await test.moves.begin(input);
+      await flush();
+      expect(test.port.start).not.toHaveBeenCalled();
+      expect(test.port.ready).not.toHaveBeenCalled();
+      expect((await test.moves.get(input.id))?.phase).toBe('recovery-required');
+      expect(test.port.rebind).not.toHaveBeenCalled();
+    }
+  });
+
+  it('retains recovery and cleans only the candidate when binding changes after source stop', async () => {
+    const test = harness();
+    test.port.stop = vi.fn(async (id) => {
+      test.events.push('stop:' + id);
+      test.sessions.delete(id);
+      if (id === 'old') test.port.binding = () => 'another-session';
+      return [];
+    });
+    await test.moves.begin(input);
+    await flush();
+    expect(test.port.start).not.toHaveBeenCalled();
+    expect(test.port.rebind).not.toHaveBeenCalled();
+    expect(test.events).toContain('stop:new');
+    expect(test.events).not.toContain('stop:another-session');
     expect((await test.moves.get(input.id))?.phase).toBe('recovery-required');
   });
 

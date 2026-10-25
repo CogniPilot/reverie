@@ -42,6 +42,15 @@ describe('private bounded durable plan move journal', () => {
     expect((await store.load())[0].phase).toBe('completed');
   });
 
+  it('retains the exact boolean source stop request across durable phase transitions and reopen', async () => {
+    for (const phase of ['stopping', 'starting', 'checking', 'recovery-required', 'completed'] as const) {
+      await store.save([{ ...record, phase, sourceStopRequested: true }]);
+      expect(await new PlanMoveStore(store.file).load()).toEqual([{ ...record, phase, sourceStopRequested: true }]);
+    }
+    expect(() => store.save([{ ...record, sourceStopRequested: 'true' } as unknown as PlanMoveRecord])).toThrow();
+    expect((await store.load())[0].sourceStopRequested).toBe(true);
+  });
+
   it('fails closed on corruption, duplicate ids, unknown fields and oversized journals', async () => {
     await writeFile(store.file, '{broken');
     await expect(store.load()).rejects.toThrow();

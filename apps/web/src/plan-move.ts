@@ -35,6 +35,7 @@ export interface PlanMoveRecord {
   at: number;
   error?: string;
   requestDigest?: string;
+  sourceStopRequested?: boolean;
 }
 
 export interface PlanMoveSnapshot {
@@ -201,23 +202,38 @@ export class PlanMoves {
         throw new PlanMoveError('The employee changed or became busy before launch; nothing was moved');
       await this.phase(record, 'creating');
       record.newSession = await executor.create(input, record.owner);
+      // Creation reserves metadata and the employee binding; it must not launch a CLI.
+      // Both sessions use the employee's permanent home and Nix store, so release the
+      // old laptop before starting its replacement. The broker also fences actual writers.
+      await executor.beforeStop(input);
+      if (
+        executor.binding(record.employeeId, record.owner) !== record.newSession ||
+        !executor.exists(record.oldSession)
+      )
+        throw new PlanMoveError('The employee binding or source session changed before stopping');
+      await executor.audit({ ...record, phase: 'stopping' });
+      await executor.beforeStop(input);
+      if (executor.binding(record.employeeId, record.owner) !== record.newSession || !executor.exists(record.oldSession))
+        throw new PlanMoveError('The employee binding or source changed while recording the stop audit');
+      // Publishing stopping also authorizes the broker to stop the detached old
+      // laptop. Treat an uncertain save as past the rollback boundary.
+      stopping = true;
+      record.sourceStopRequested = true;
+      await this.phase(record, 'stopping');
+      const orphans = await executor.stop(record.oldSession);
+      if (orphans.length)
+        throw new PlanMoveError(`Old session cleanup left ${orphans.length} process(es); inspect before another move`);
+      if (executor.binding(record.employeeId, record.owner) !== record.newSession)
+        throw new PlanMoveError('The employee binding changed after stopping the source');
       await this.phase(record, 'starting');
       await executor.start(record.newSession);
       await this.phase(record, 'checking');
       await executor.ready(record.newSession);
-      await executor.beforeStop(input);
       if (
         executor.binding(record.employeeId, record.owner) !== record.newSession ||
-        !executor.exists(record.oldSession) ||
         !executor.exists(record.newSession)
       )
-        throw new PlanMoveError('The employee binding or one of its sessions changed before commit');
-      await this.phase(record, 'stopping');
-      await executor.audit({ ...record });
-      stopping = true;
-      const orphans = await executor.stop(record.oldSession);
-      if (orphans.length)
-        throw new PlanMoveError(`Old session cleanup left ${orphans.length} process(es); inspect before another move`);
+        throw new PlanMoveError('The employee binding or replacement changed before commit');
       await this.phase(record, 'completed');
       await executor.audit({ ...record });
     } catch (error) {
@@ -234,6 +250,17 @@ export class PlanMoves {
           recovered = (await executor.stop(record.newSession)).length === 0;
         } catch (rollbackError) {
           record.error += `; rollback requires inspection: ${rollbackError instanceof Error ? rollbackError.message : 'failed'}`;
+        }
+      }
+      if (stopping && record.newSession) {
+        // Once the old stop began, its process and transport may be gone. Clean only
+        // this move's candidate and retain recovery-required; never revive an old SID
+        // or restore a stale copy of the employee's persistent data.
+        try {
+          const orphans = await executor.stop(record.newSession);
+          if (orphans.length) record.error += `; candidate cleanup left ${orphans.length} process(es)`;
+        } catch (cleanupError) {
+          record.error += `; candidate cleanup requires inspection: ${cleanupError instanceof Error ? cleanupError.message : 'failed'}`;
         }
       }
       record.phase = recovered && !stopping ? 'failed' : 'recovery-required';

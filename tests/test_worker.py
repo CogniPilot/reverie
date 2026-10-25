@@ -210,12 +210,44 @@ class WorkerTests(unittest.TestCase):
                 journal.write_text(json.dumps([{'oldSession': SID, 'newSession': other, 'phase': phase}]))
                 self.assertEqual(broker.allowed(SID), allowed)
                 self.assertTrue(broker.allowed(other))
+        # A supervisor can miss the transient stopping phase. The durable stop
+        # request survives startup, readiness and recovery failures, but is not
+        # authority to stop the currently bound employee or an unrelated laptop.
+        for phase in ('starting', 'checking', 'recovery-required'):
+            journal.write_text(json.dumps([{'oldSession': SID, 'newSession': other,
+                                           'phase': phase, 'sourceStopRequested': True}]))
+            self.assertFalse(broker.allowed(SID))
+            self.assertTrue(broker.allowed(other))
+            self.assertTrue(broker.allowed('ffffffff-1111-2222-3333-444444444444'))
+        journal.write_text(json.dumps([{'oldSession': SID, 'newSession': other,
+                                       'phase': 'creating', 'sourceStopRequested': 'true'}]))
+        self.assertTrue(broker.allowed(SID))
         journal.write_text(json.dumps([{'oldSession': other, 'newSession': SID, 'phase': 'failed'}]))
         self.assertFalse(broker.allowed(SID))
         # An explicit owner rebind is newer authority than an old failed record.
         company.write_text(json.dumps({'employees': [{'sessionId': SID, 'desiredRunning': True}]}))
         self.assertTrue(broker.allowed(SID))
         self.assertTrue(broker.allowed('ffffffff-1111-2222-3333-444444444444'))
+
+    def test_plan_move_stop_request_requires_unaliased_owner_metadata(self):
+        broker = Broker(self.config)
+        (self.root/'company.json').write_text(json.dumps({'employees': []}))
+        journal = self.root/'plan-moves.json'
+        journal.write_text(json.dumps([{'oldSession': SID, 'phase': 'starting', 'sourceStopRequested': True}]))
+        journal.chmod(0o666)
+        with self.assertRaisesRegex(RuntimeError, 'Plan move state'):
+            broker.allowed(SID)
+        journal.chmod(0o600)
+        self.assertFalse(broker.allowed(SID))
+        alias = self.root/'journal-alias'
+        os.link(journal, alias)
+        with self.assertRaisesRegex(RuntimeError, 'Plan move state'):
+            broker.allowed(SID)
+        alias.unlink()
+        journal.rename(alias)
+        journal.symlink_to(alias)
+        with self.assertRaisesRegex(RuntimeError, 'Plan move state'):
+            broker.allowed(SID)
 
     def test_protocol_preserves_terminal_bytes_and_bounds_allocations(self):
         left, right = socket.socketpair()

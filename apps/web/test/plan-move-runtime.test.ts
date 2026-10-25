@@ -109,12 +109,13 @@ describe('runtime adapter uses normal creation and interactive paths, never chan
     expect(test.runtime.cleanup).not.toHaveBeenCalled();
   });
 
-  it('launches a cross-provider replacement through the normal wrapped session API before touching the source', async () => {
+  it('reserves cross-provider metadata through the normal API without starting its CLI', async () => {
     const test = harness();
     test.runtime.plans.account = vi.fn(async (id) => ({ id, provider: 'anthropic', label: id, profileId: id }) as PlanAccount);
     expect(await test.executor.create({ ...input, targetMode: 'claude' }, undefined)).toBe('new');
     expect(test.runtime.request).toHaveBeenCalledWith('POST', '/api/sessions', expect.objectContaining({ mode: 'claude', subscriptionProfileId: 'second', employeeId: 'casey' }));
     expect(test.runtime.cleanup).not.toHaveBeenCalled();
+    expect(test.runtime.request).toHaveBeenCalledTimes(1);
     const payload = (test.runtime.request as ReturnType<typeof vi.fn>).mock.calls[0][2];
     expect(payload.model).toBeUndefined();
     expect(payload.codexConfig).toBeUndefined();
@@ -165,12 +166,26 @@ describe('runtime adapter uses normal creation and interactive paths, never chan
     expect(test.runtime.cleanup).not.toHaveBeenCalled();
   });
 
-  it('rechecks busy state after readiness, refusing late work unless explicitly forced', async () => {
+  it('rechecks busy state before stopping, refusing late work unless explicitly forced', async () => {
     const test = harness();
     (test.sessions.get('old') as unknown as { isWorking: boolean }).isWorking = true;
     await expect(test.executor.beforeStop(input)).rejects.toThrow('became busy');
     await expect(test.executor.beforeStop({ ...input, forceBusy: true })).resolves.toBeUndefined();
     expect(test.runtime.cleanup).not.toHaveBeenCalled();
+  });
+
+  it('keeps phone delivery paused through the source stop until the replacement handoff is submitted', async () => {
+    const test = harness();
+    const release = vi.fn();
+    test.runtime.chat.delivery = { pauseForMigration: vi.fn(() => release) };
+    await test.executor.create(input, undefined);
+    await test.executor.beforeStop(input);
+    await test.executor.stop('old');
+    expect(release).not.toHaveBeenCalled();
+    await test.executor.start('new');
+    await test.executor.ready('new');
+    expect(release).toHaveBeenCalledTimes(2);
+    expect(test.sessions.get('new')?.writeViaMux).toHaveBeenCalledTimes(1);
   });
 
   it('posts actor, employee, source, destination and phase to the owned audit channel', async () => {

@@ -144,12 +144,13 @@ export function planMoveExecutor(runtime: PlanMoveRuntime, owner?: string): Plan
         undefined, {fromUser: true});
       assertAlive(id);
       candidates.delete(id);
+      releaseDelivery();
     },
     beforeStop: async (input) => {
       assertAuthorized();
       assertAlive(input.sessionId);
       if (!input.forceBusy && session(input.sessionId).isWorking)
-        throw new PlanMoveError('The old session became busy while the replacement started; move rolled back');
+        throw new PlanMoveError('The old session became busy before the replacement started; move rolled back');
     },
     binding: (employeeId) => binding(employeeId),
     exists: (id) => {
@@ -175,7 +176,7 @@ export function planMoveExecutor(runtime: PlanMoveRuntime, owner?: string): Plan
         throw new PlanMoveError('Cannot verify the old process before cleanup');
       if (!createdCandidates.has(id)) assertAuthorized();
       try { await runtime.cleanup(id, true, 'plan_move'); }
-      finally { releaseDelivery(); }
+      finally { if (createdCandidates.has(id)) releaseDelivery(); }
       candidates.delete(id);
       createdCandidates.delete(id);
       return (runtime.survivors ?? survivingPlanProcesses)(identities);

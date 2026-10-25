@@ -24,6 +24,7 @@ const RecordSchema = z
       'recovery-required',
     ]),
     at: z.number().finite().nonnegative(),
+    sourceStopRequested: z.boolean().optional(),
     error: z.string().max(4000).optional(),
     requestDigest: z
       .string()
