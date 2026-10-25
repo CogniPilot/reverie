@@ -249,6 +249,8 @@ export interface BoardPin {
 
 /** GET /api/board. */
 export interface BoardView extends BoardState {
+  /** Startup-only write availability; not persisted Board data or an authority grant. */
+  structuredDecisionWrites?: boolean;
   /** Current authenticated caller; derived by the Board's actual write gates. */
   capabilities?: import('./agent-capabilities.js').AgentCapabilities;
   built: number;

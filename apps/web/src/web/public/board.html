@@ -505,12 +505,14 @@ function pollCard(p) {
 }
 function decisionCard(d) {
   const key = 'd:' + d.id;
+  const writesEnabled = B.structuredDecisionWrites === true;
   return `<article class="dcard" data-key="${esc(key)}">
     <div class="who">Decision · ${esc(d.where || 'board')} · ${when(d.at)}</div>
     <h3>${esc(d.summary || d.text)}</h3>
     ${recLine(d.recommendation)}
     ${d.tradeoff ? `<div class="trade"><b>Trade-off:</b> ${esc(d.tradeoff)}</div>` : ''}
-    ${d.options?.length ? `<div class="opts">${d.options.map(option => `<button type="button" class="btn${option === d.recommendation?.option ? ' recd' : ''}" data-decide="${esc(d.id)}" data-opt="${esc(option)}">${esc(option)}${option === d.recommendation?.option ? ' ★' : ''}</button>`).join('')}</div><div class="hint">Records your choice; does not execute the proposed action.</div>` : '<div class="hint">This older card has no choices. Ask its author to add options with <code>reverie board decision update</code>.</div>'}
+    ${d.options?.length ? `<div class="opts">${d.options.map(option => `<button type="button" class="btn${option === d.recommendation?.option ? ' recd' : ''}" data-decide="${esc(d.id)}" data-opt="${esc(option)}"${writesEnabled ? '' : ' disabled'}>${esc(option)}${option === d.recommendation?.option ? ' ★' : ''}</button>`).join('')}</div><div class="hint">Records your choice; does not execute the proposed action.</div>` : writesEnabled ? '<div class="hint">This older card has no choices. Ask its author to add options with <code>reverie board decision update</code>.</div>' : ''}
+    ${!writesEnabled ? '<div class="hint">Recording choices is temporarily unavailable. Saved answers are preserved.</div>' : ''}
     <div class="opts"><button type="button" class="btn" data-clear="${esc(d.id)}">${d.options?.length ? 'Dismiss without choosing' : 'Mark decided'}</button></div>
     ${cardErr[key] ? `<div class="err">${esc(cardErr[key])}</div>` : ''}
     ${d.summary ? `<details><summary>Full text</summary><div class="sum">${esc(d.text)}</div></details>` : ''}
@@ -541,6 +543,7 @@ function cards() {
   ].join('');
   const root = document.getElementById('sec-decisions');
   root.querySelectorAll('[data-decide]').forEach(b => b.onclick = async () => {
+    if (B.structuredDecisionWrites !== true) return;
     const key = 'd:' + b.dataset.decide;
     root.querySelectorAll(`[data-key="${CSS.escape(key)}"] button`).forEach(button => button.disabled = true);
     try { await post(`/api/board/decisions/${encodeURIComponent(b.dataset.decide)}/choose`, {option: b.dataset.opt, ifRev: B.rev}); delete cardErr[key]; }

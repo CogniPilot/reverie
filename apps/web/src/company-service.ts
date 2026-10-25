@@ -20,6 +20,7 @@ import {
   type CompanyState,
   type ResearchResult,
   type SelfProfile,
+  type ServicePurposes,
 } from './company-types.js';
 
 export class CompanyError extends Error {
@@ -34,6 +35,8 @@ export class CompanyError extends Error {
 /** An owner runtime transaction, scoped to one unchanged employee/session binding. */
 export interface RuntimeRestartIntent {
   originallyStopped: boolean;
+  /** Identifies this transaction to rebind(): an owner replacement spawn keeps its own claim across the rebind (bug 19). */
+  readonly token: object;
   claim(): Promise<void>;
   current(): boolean;
   rollback(): Promise<void>;
@@ -71,6 +74,8 @@ interface CompanySession {
 export interface CompanyServiceDeps {
   /** Trusted server composition only. Absent identity/custody remains inaccessible. */
   goalAuthentication?: GoalAuthentication;
+  /** The ONE deployment-configured service purpose registry (service-auth.json); defaults to RESUME/LEASE only. */
+  servicePurposes?: ServicePurposes;
   getSession(id: string): CompanySession | undefined;
   /** The console keeps this session's record although it is not running (pinned, paused): its profile is never cleaned up. */
   keepsRecord?(id: string): boolean;
@@ -131,7 +136,7 @@ export class CompanyService {
     readonly store: CompanyStore,
     private readonly deps: CompanyServiceDeps
   ) {
-    this.goals = new GoalLifecycle(store, () => this.now(), deps.goalAuthentication);
+    this.goals = new GoalLifecycle(store, () => this.now(), deps.goalAuthentication, deps.servicePurposes);
   }
   private now(): number {
     return (this.deps.now ?? Date.now)();
@@ -164,6 +169,7 @@ export class CompanyService {
       this.runtimeRestarts.get(sessionId) === transaction;
     return {
       originallyStopped: original.desiredRunning === false,
+      token: transaction,
       current: () => {
         const employee = this.store.snapshot().employees.find((e) => e.id === original.id);
         return current() && matches(employee) && employee.desiredRunning === (claimed ? true : original.desiredRunning);
@@ -501,7 +507,10 @@ export class CompanyService {
     employeeId: string,
     owner: string | undefined,
     sessionId: string,
-    by = 'owner'
+    by = 'owner',
+    /** Bug 19: the owner replacement spawn's own restart transaction (RuntimeRestartIntent.token) survives the rebind;
+     * every other in-flight restart or wake of the previous session is still cancelled. */
+    keep?: object
   ): Promise<CompanyEmployee> {
     const session = this.deps.getSession(sessionId);
     if (!session || !sameOwner(session.owner, owner)) throw new CompanyError('Bind an existing owned session');
@@ -521,7 +530,7 @@ export class CompanyService {
         throw new CompanyError('Session already bound', 409);
       previous = employee.sessionId;
       const restart = this.runtimeRestarts.get(previous);
-      if (restart) restart.cancelled = true;
+      if (restart && restart !== keep) restart.cancelled = true;
       const wake = this.wakeFlights.get(previous); if (wake) wake.cancelled = true;
       previousThread = employee.threadId;
       previousRecipe = employee.runtimeRecipe;
@@ -890,11 +899,12 @@ export class CompanyService {
   async completeSpawn(
     sessionId: string,
     plan: { channelId?: string; name: string; icon: string; employeeId?: string; replacesSessionId?: string },
-    by = 'owner'
+    by = 'owner',
+    keep?: object
   ): Promise<void> {
     // A replacement session takes over the employee: record, room seats and deliveries move in one step, no temporary record.
     if (plan.employeeId) {
-      await this.rebind(plan.employeeId, this.deps.getSession(sessionId)?.owner, sessionId, by);
+      await this.rebind(plan.employeeId, this.deps.getSession(sessionId)?.owner, sessionId, by, keep);
       return;
     }
     // At the cap, refuse (never drop another agent's record to make room), and before the join, so a refusal

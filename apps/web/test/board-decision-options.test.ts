@@ -6,7 +6,7 @@ import { JSDOM } from 'jsdom';
 const windows: JSDOM[] = [];
 afterEach(() => { for (const dom of windows.splice(0)) dom.window.close(); });
 
-function fixture(decision: object) {
+function fixture(decision: object, writesEnabled: boolean | undefined = true) {
   const html = readFileSync(new URL('../src/web/public/board.html', import.meta.url), 'utf8');
   const script = /<script>([\s\S]*)<\/script>/.exec(html)![1];
   const dom = new JSDOM('<section id="sec-decisions"><div id="cards"></div><div id="waitingHint"></div><details id="decidedBox"><summary id="decidedSum"></summary><ul id="decided"></ul></details></section>');
@@ -14,7 +14,7 @@ function fixture(decision: object) {
   const fetch = vi.fn(async () => ({ ok: true, json: async () => ({ success: true }) }));
   const load = vi.fn(async () => {});
   const context = vm.createContext({ document: dom.window.document, CSS: { escape: (value: string) => value }, fetch, load,
-    B: { rev: 7, decisions: [decision], polls: [] }, when: () => 'Today' });
+    B: { rev: 7, decisions: [decision], polls: [], structuredDecisionWrites: writesEnabled }, when: () => 'Today' });
   new vm.Script(`${/const esc = .*/.exec(script)![0]}\n${script.slice(script.indexOf('const cardErr = {}'))}\ncards();`).runInContext(context);
   return { document: dom.window.document, fetch, load, context };
 }
@@ -52,4 +52,32 @@ it('shows a refused choice as unsaved and leaves the card available to retry', a
   new vm.Script('cards();').runInContext(f.context);
   expect(f.document.querySelector('.err')!.textContent).toBe('Choice not saved: Revision changed');
   expect((f.document.querySelector('[data-opt="Hold"]') as HTMLButtonElement).disabled).toBe(false);
+});
+
+it('fallback disables choices and dispatch while keeping dismissal and saved history visible', async () => {
+  const f = fixture({ id: 'waiting', text: 'Question?', at: 1, options: ['Approve', 'Hold'] }, false);
+  const button = f.document.querySelector('[data-opt="Hold"]') as HTMLButtonElement;
+  expect(button.disabled).toBe(true);
+  expect(f.document.querySelector('.dcard')!.textContent).toContain('Saved answers are preserved');
+  expect((f.document.querySelector('[data-clear]') as HTMLButtonElement).disabled).toBe(false);
+  button.disabled = false;
+  button.click();
+  await Promise.resolve();
+  expect(f.fetch).not.toHaveBeenCalled();
+  const saved = fixture({ id: 'saved', text: 'Previous?', at: 1, options: ['Approve', 'Hold'], chosen: 'Hold', clearedAt: 2 }, false);
+  expect(saved.document.querySelector('#decided b')!.textContent).toBe('Hold');
+});
+
+it('fallback does not tell legacy-card authors to repair options while writes are unavailable', () => {
+  const f = fixture({ id: 'legacy', text: 'Legacy prose', at: 1 }, false);
+  expect(f.document.querySelectorAll('[data-decide]')).toHaveLength(0);
+  expect(f.document.querySelector('.dcard')!.textContent).toContain('temporarily unavailable');
+  expect(f.document.querySelector('.dcard')!.textContent).not.toContain('reverie board decision update');
+});
+
+it('treats an absent availability projection as OFF in the UI', () => {
+  const f = fixture({ id: 'waiting', text: 'Question?', at: 1, options: ['Approve', 'Hold'] });
+  new vm.Script('delete B.structuredDecisionWrites; cards();').runInContext(f.context);
+  expect((f.document.querySelector('[data-opt="Hold"]') as HTMLButtonElement).disabled).toBe(true);
+  expect(f.fetch).not.toHaveBeenCalled();
 });

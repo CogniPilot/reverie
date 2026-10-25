@@ -131,16 +131,37 @@ describe('bug 11: explicit owner restarts record running intent; automatic paths
     }
   });
 
-  it('the interactive route is automatic: auto re-attach and breaker restart after an owner stop stay false', async () => {
+  it('bug 17: the interactive route never starts an owner-stopped expert (auto re-attach or breaker restart)', async () => {
     const { app, session, intent } = await compose(owner);
     try {
       await service.setDesiredRunning(session.id, false);
+      const respawn = vi.spyOn(session, 'startInteractive');
       for (const payload of [undefined, { clearBreaker: true }]) {
         const response = await app.inject({ method: 'POST', url: `/api/sessions/${session.id}/interactive`, payload });
-        expect(response.statusCode).toBe(200);
+        expect(response.statusCode).toBe(409);
+        expect(response.json().error).toContain('stopped by the owner');
         expect(intent()).toBe(false);
-        session.setPaneExit({ status: 137, at: 2000 }); // dead again for the next request
       }
+      expect(respawn).not.toHaveBeenCalled(); // the process was never started against the owner's Stop
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('bug 17: a running expert (intent true) and unknown intent still re-attach, recording nothing new', async () => {
+    const { app, session, intent } = await compose(owner);
+    try {
+      await service.setDesiredRunning(session.id, true); // as the hire flow records
+      expect(intent()).toBe(true);
+      const response = await app.inject({ method: 'POST', url: `/api/sessions/${session.id}/interactive` });
+      expect(response.statusCode).toBe(200);
+      expect(intent()).toBe(true);
+      await store.update((state) => {
+        delete state.employees.find((e) => e.sessionId === session.id)!.desiredRunning;
+      });
+      session.setPaneExit({ status: 137, at: 2000 });
+      const again = await app.inject({ method: 'POST', url: `/api/sessions/${session.id}/interactive` });
+      expect(again.statusCode).toBe(200);
     } finally {
       await app.close();
     }

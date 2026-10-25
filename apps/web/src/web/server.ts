@@ -14,10 +14,18 @@ import { expertRuntimeRecipe } from '../expert-runtime-recipe.js';
 import { AvatarStore } from '../agent-avatars.js';
 import { CompanyStore } from '../company-store.js';
 import { BoardStore } from '../board-store.js';
+import { decisionWritesEnabled } from './decision-config.js';
 import { fullAccessAlertRoom } from '../full-access-default.js';
 import { CompanyService, CompanyError } from '../company-service.js';
 import { createGoalServerAssembly, type GoalServerInput } from '../goal-server-assembly.js';
 import { registerGoalServiceRoutes } from './routes/goal-routes.js';
+import {
+  createServiceDecisions,
+  registerServiceDecisionRoute,
+  registerServiceGrantRoutes,
+  registerServiceGrantSetupPage,
+} from '../service-decision.js';
+import { loadServiceAuthConfig } from '../service-auth-config.js';
 import { DurableCompanyResearchBackend } from '../company-research-backend.js';
 import { companySessionRuntime } from '../company-session-runtime.js';
 import { registerCompanyRoutes } from './routes/company-routes.js';
@@ -540,7 +548,9 @@ export class WebServer extends EventEmitter {
     titleHostname?: string,
     allowUnauthenticatedNetwork: boolean = false,
     basePath: string = '',
-    private readonly goalPorts?: GoalServerInput
+    private readonly goalPorts?: GoalServerInput,
+    /** Explicit tracked service authentication config; absent means /api/service-decisions always answers 403. */
+    private readonly serviceAuthConfig?: string
   ) {
     super();
     this.setMaxListeners(0);
@@ -1487,8 +1497,12 @@ export class WebServer extends EventEmitter {
       runtime: companySessionRuntime(ctx),
     });
     await research.init();
+    // ONE service config load: its purpose registry goes to the canonical issuance facade AND to service authentication.
+    const serviceConfig =
+      this.serviceAuthConfig === undefined ? undefined : loadServiceAuthConfig(this.serviceAuthConfig);
     this.companyService = new CompanyService(companyStore, {
       goalAuthentication: goalBoundary.authentication,
+      servicePurposes: serviceConfig?.purposes,
       getSession: (id) => this.sessions.get(id),
       runtimeRecipeOf: (id) => {
         const session = this.sessions.get(id);
@@ -1548,6 +1562,27 @@ export class WebServer extends EventEmitter {
       restSessionMetadata: (id) => restSessionMetadataFromRegistry(this.sessions, id),
     }, this.chatroomService);
     registerGoalServiceRoutes(this.app, this.companyService.goals);
+    // Service decisions reuse the Goal private bootstrap's projected custody and nonce store (owner-only mode suffices);
+    // without that provisioning they stay unavailable. Grants and the setup page use the existing canonical facade.
+    const provisioning =
+      this.goalPorts && 'kind' in this.goalPorts && this.goalPorts.kind === 'canonical-goal-provisioning'
+        ? this.goalPorts
+        : undefined;
+    registerServiceDecisionRoute(
+      this.app,
+      serviceConfig && provisioning
+        ? createServiceDecisions(serviceConfig, {
+            company: this.companyService,
+            custody: goalBoundary.authentication,
+            nonce: provisioning.nonce,
+          })
+        : undefined
+    );
+    registerServiceGrantRoutes(this.app, serviceConfig ? this.companyService.goals : undefined);
+    registerServiceGrantSetupPage(
+      this.app,
+      serviceConfig && { loaded: serviceConfig, company: this.companyService, owner: goalBoundary.authentication }
+    );
     this.companyWake = new CompanyWake({
       company: () => companyStore.snapshot(),
       saved: (id) => this.store.getSession(id) ?? undefined,
@@ -1694,6 +1729,9 @@ export class WebServer extends EventEmitter {
     registerBoardRoutes(this.app, ctx, {
       verifiedOwner,
       store: boardStore,
+      // Persistent Reverie setting, captured once. Saving a change requires a website restart;
+      // Board GET exposes the effective value separately from the desired settings value.
+      structuredDecisionWrites: decisionWritesEnabled(await this.readSettings(true)),
       company: (owner) => this.companyService.view(owner),
       rooms: () => this.chatroomService.rooms(),
       audit: (entry) => this.chatroomService.auditEntry(entry),
@@ -5327,7 +5365,8 @@ export async function startWebServer(
   titleHostname?: string,
   allowUnauthenticatedNetwork: boolean = false,
   basePath: string = '',
-  goalPorts?: GoalServerInput
+  goalPorts?: GoalServerInput,
+  serviceAuthConfig?: string
 ): Promise<WebServer> {
   const server = new WebServer(
     port,
@@ -5337,7 +5376,8 @@ export async function startWebServer(
     titleHostname,
     allowUnauthenticatedNetwork,
     basePath,
-    goalPorts
+    goalPorts,
+    serviceAuthConfig
   );
   await server.start();
   return server;

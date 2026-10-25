@@ -37,6 +37,24 @@ export async function writeCompanyStateFile(
 }
 
 /** Cross-process lock covers reload, validation, CAS and durable rename. The kernel releases it on process death. */
+/** Canonical byte budget for service authority (serviceGrants plus serviceGrantRevocations), enforced at every commit. */
+export const SERVICE_AUTHORITY_BUDGET = 2 * 1024 * 1024;
+export function serviceAuthorityBytes(state: Pick<CompanyState, 'serviceGrants' | 'serviceGrantRevocations'>): number {
+  return Buffer.byteLength(JSON.stringify({ grants: state.serviceGrants, revocations: state.serviceGrantRevocations }));
+}
+/** Worst-case bytes one revocation adds for this owner (100-char grant id, largest timestamp). */
+export function serviceRevocationBytes(owner: string | undefined): number {
+  return Buffer.byteLength(JSON.stringify({ grantId: 'x'.repeat(100), owner, at: Number.MAX_SAFE_INTEGER })) + 1;
+}
+/** Issuance must leave room to revoke every grant not yet revoked, so a saturated store can always still revoke. */
+export function serviceAuthorityFits(state: Pick<CompanyState, 'serviceGrants' | 'serviceGrantRevocations'>): boolean {
+  const revoked = new Set(state.serviceGrantRevocations.map((r) => r.grantId));
+  const reserve = state.serviceGrants
+    .filter((g) => !revoked.has(g.id))
+    .reduce((sum, g) => sum + serviceRevocationBytes(g.owner), 0);
+  return serviceAuthorityBytes(state) + reserve <= SERVICE_AUTHORITY_BUDGET;
+}
+
 export class CompanyStore {
   private state: CompanyState = {
     version: 1,
@@ -47,6 +65,8 @@ export class CompanyStore {
     goals: [],
     goalGrants: [],
     goalGrantRevocations: [],
+    serviceGrants: [],
+    serviceGrantRevocations: [],
     goalUnblockProofs: [],
     goalProofRevocations: [],
     temporaryAgents: [],
@@ -274,6 +294,8 @@ export class CompanyStore {
             JSON.stringify({ goals: current.goals, grants: current.goalGrants, proofs: current.goalUnblockProofs })
           );
           if (goalBytes > 8 * 1024 * 1024) throw new Error('Canonical Goal storage budget exhausted');
+          if (serviceAuthorityBytes(current) > SERVICE_AUTHORITY_BUDGET)
+            throw new Error('Canonical service grant storage budget exhausted');
           await writeCompanyStateFile(this.file, JSON.stringify(current), validateAuthority);
           this.state = current;
           this.existed = true;

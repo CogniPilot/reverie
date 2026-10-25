@@ -97,7 +97,10 @@ def prepare(args, root, state):
         # drive to avoid repeatedly inflating gigabytes from a compressed tar.
         task = 'scan-'+str(time.time_ns())
         folder = scans.create(task)
-        with scans.lease(task):
+        # The workspace operation lock refuses concurrent operations on this task; the REAL lease (one lease contract,
+        # visible to the prune and the janitor) protects the unpacked image for the scan's whole lifetime. create()'s
+        # reservation stays until finish().
+        with scans.operation(task), scans.lease.hold([str(folder)], 'reverie-image-scan'):
             unpacked = folder/'image.tar'
             with gzip.open(archive, 'rb') as source, unpacked.open('wb') as destination:
                 shutil.copyfileobj(source, destination, length=1024*1024)

@@ -56,7 +56,8 @@ let
         test/owner-auth-fresh-enforce.test.ts test/routines-owner-middleware.test.ts \
         test/routes/status-page-auth.test.ts test/routes/status-page-routes.test.ts test/routes/html-view-routes.test.ts \
         test/routine-announcement-room.test.ts test/routine-announcement-server.test.ts \
-        test/owner-auth-board-decisions.test.ts test/board-decision-options.test.ts test/cli-board.test.ts test/routes/board-routes.test.ts \
+        test/owner-auth-board-decisions.test.ts test/board-decision-options.test.ts test/board-decision-fallback-current.test.ts test/cli-board.test.ts test/routes/board-routes.test.ts \
+        test/board-decision-config.test.ts test/routes/system-routes-settings-partial-put.test.ts \
         test/office-power-ui.test.ts test/company-lifecycle-fence.test.ts test/github-source.test.ts test/owner-first-setup.test.ts \
         test/fixed-github-watch.test.ts test/fixed-watch-delivery.test.ts test/fixed-watch-server.test.ts \
         test/routine-backup-recovery.test.ts test/routine-recovery-controls.test.ts \
@@ -147,6 +148,9 @@ let
     mkdir -p "$out"
     cp ${src}/python/reverie/hands/laptop_tools.py "$out/laptop_tools.py"
     cp ${src}/python/reverie/hands/workspace_dispatch.py "$out/workspace_dispatch.py"
+    cp ${src}/python/reverie/hands/coding_telemetry.py "$out/coding_telemetry.py"
+    cp ${src}/python/reverie/hands/command_telemetry.py "$out/command_telemetry.py"
+    cp ${src}/python/reverie/hands/command_catalog.py "$out/command_catalog.py"
   '';
   handsTools = pkgs.writeShellApplication {
     name = "reverie-hands-tools";

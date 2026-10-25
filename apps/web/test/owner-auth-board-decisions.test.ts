@@ -96,6 +96,7 @@ describe('owner middleware: exact board decision add and clear', () => {
     });
     registerOwnerRoutes(app, service, false);
     registerBoardRoutes(app, { sessions } as unknown as SessionPort, {
+      structuredDecisionWrites: true,
       verifiedOwner: ownerVerifier({ service, ctx: { sessions } as unknown as SessionPort }),
       store: board,
       rooms: () => rooms,

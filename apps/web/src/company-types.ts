@@ -213,6 +213,46 @@ export const GoalUnblockProofSchema = z
   })
   .strict();
 export type GoalGrant = z.infer<typeof GoalGrantSchema>;
+
+/** Service purposes are deployment configuration: each configured purpose name says whether its grants name exact
+ * employee bindings or configured resource names. Nothing outside the configured registry can be granted. */
+export type ServicePurposeScope = 'employees' | 'resources' | 'employees+resources';
+export type ServicePurposes = Readonly<Record<string, ServicePurposeScope>>;
+export const SERVICE_PURPOSE_NAME = /^[A-Z][A-Z0-9_]{2,63}$/;
+export const DEFAULT_SERVICE_PURPOSES: ServicePurposes = Object.freeze({
+  RESUME_SERVICE: 'employees',
+  LEASE_SERVICE: 'resources',
+});
+export function servicePurposeScope(purposes: ServicePurposes, purpose: unknown): ServicePurposeScope | undefined {
+  if (typeof purpose !== 'string' || !SERVICE_PURPOSE_NAME.test(purpose) || !Object.hasOwn(purposes, purpose))
+    return undefined;
+  const scope = purposes[purpose];
+  return scope === 'employees' || scope === 'resources' || scope === 'employees+resources' ? scope : undefined;
+}
+
+/** Owner-issued authority for a dedicated service principal, in the same canonical transaction as Goal grants.
+ * Employee-scoped purposes (e.g. RESUME_SERVICE) name exact employee bindings, so a session change invalidates them;
+ * resource-scoped purposes (e.g. LEASE_SERVICE) name configured resource names. Distinct from Goal grants. */
+export const ServiceGrantSchema = z
+  .object({
+    id: goalId,
+    purpose: z.string().regex(SERVICE_PURPOSE_NAME),
+    owner: z.string().optional(),
+    principal: goalId,
+    epoch: goalId,
+    employees: z
+      .array(z.object({ employeeId: goalId, sessionId: goalId, sessionGeneration: positive }).strict())
+      .max(256)
+      .default([]),
+    resources: z.array(goalId).max(256).default([]),
+    issuedAt: instant,
+    expiresAt: instant,
+  })
+  .strict();
+export const ServiceGrantRevocationSchema = z
+  .object({ grantId: goalId, owner: z.string().optional(), at: instant })
+  .strict();
+export type ServiceGrant = z.infer<typeof ServiceGrantSchema>;
 export type GoalUnblockProof = z.infer<typeof GoalUnblockProofSchema>;
 
 /**
@@ -304,6 +344,8 @@ export const CompanyStateSchema = z.object({
   goals: z.array(GoalRecordSchema).max(128).default([]),
   goalGrants: z.array(GoalGrantSchema).max(256).default([]),
   goalGrantRevocations: z.array(GoalGrantRevocationSchema).max(256).default([]),
+  serviceGrants: z.array(ServiceGrantSchema).max(256).default([]),
+  serviceGrantRevocations: z.array(ServiceGrantRevocationSchema).max(256).default([]),
   goalUnblockProofs: z.array(GoalUnblockProofSchema).max(512).default([]),
   goalProofRevocations: z
     .array(z.object({ proofId: goalId, owner: z.string().optional(), at: instant }).strict())

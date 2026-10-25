@@ -5,7 +5,7 @@ from .ops_common import *
 from .ops_core import Core,Ledger
 from .ops_adapter import Engine,DockerWebsite
 from .ops_classifier import WorkerClassifier
-from .ops_auth import UnavailableAuth,AdaServiceDecisions
+from .ops_auth import UnavailableAuth,ServiceDecisionsAuth
 from .ops_transport import Client,Server
 from .worker_storage import read_metadata
 
@@ -53,7 +53,7 @@ def make_service(path):
  key=private_read(cfg['requestKey'],32);require(len(key)==32,'custody-invalid')
  auth=UnavailableAuth()
  if cfg['authorization'] is not None:
-  auth=AdaServiceDecisions(cfg['authorization'],cfg['companyFile'],cfg['companyId'],os.getuid(),custody)
+  auth=ServiceDecisionsAuth(cfg['authorization'],cfg['companyFile'],cfg['companyId'],os.getuid(),custody)
  classifier=WorkerClassifier(strict_json((Path(__file__).parent/'ops-classifier-pin.json').read_bytes()),manifest['systemctlExecutable'],cfg['brokerConfig'])
  ledger=Ledger(cfg['stateDirectory']);resources={rid:DockerWebsite(value,engine,cfg['companyFile'],os.getuid(),custody=custody,classifier=classifier,service_binding=digest({'manifest':manifest,'configuration':cfg})) for rid,value in cfg['resources'].items()}
  core=Core(ledger,cfg['companyFile'],cfg['companyId'],resources,auth);core.recover()

@@ -258,6 +258,22 @@ export class GoalCanonicalAuthority {
           )
             refuse();
           break;
+        case 'ISSUE_SERVICE_GRANT':
+          if (principal.kind !== 'owner') refuse();
+          if (Array.isArray(body.employeeIds))
+            for (const employeeId of body.employeeIds) this.employee(state, employeeId, principal.owner);
+          break; // purpose registry, scope kind, expiry, budget and uniqueness are the core command's exact checks.
+        case 'REVOKE_SERVICE_GRANT':
+          if (
+            principal.kind !== 'owner' ||
+            !valid(ID, params.id) ||
+            !state.serviceGrants.some((grant) => grant.id === params.id && grant.owner === principal.owner)
+          )
+            refuse();
+          break;
+        case 'SERVICE_GRANT_SETUP':
+          if (principal.kind !== 'owner') refuse();
+          break;
         case 'REVOKE_PROOF':
           if (
             principal.kind !== 'owner' ||

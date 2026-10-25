@@ -1,4 +1,4 @@
-"""Ada canonical ServiceDecisions consumer. No grant issuer, alternate signing format or SID upgrade."""
+"""Canonical ServiceDecisions consumer. No grant issuer, alternate signing format or SID upgrade."""
 import base64,hashlib,hmac,http.client,re,time,uuid
 from .ops_common import *
 from .worker_storage import read_metadata
@@ -6,7 +6,7 @@ from .worker_storage import read_metadata
 class UnavailableAuth:
  def check(self,*args):return {'availability':'unavailable','reason':'adapter-unavailable','policyGeneration':ZERO}
 
-class AdaServiceDecisions:
+class ServiceDecisionsAuth:
  """Exact E-AUTH r2b POST /api/service-decisions and service-assertion-v1.
 
 The owner-selected binding references canonical grants; it creates none. Keys,

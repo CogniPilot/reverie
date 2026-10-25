@@ -155,7 +155,10 @@ describe('PUT /api/settings — partial body must not reset service toggles', ()
     });
 
     expect(res.statusCode).toBe(200);
-    const written = vi.mocked(fs.writeFile).mock.calls.map((c) => String(c[1])).join('\n');
+    const written = vi
+      .mocked(fs.writeFile)
+      .mock.calls.map((c) => String(c[1]))
+      .join('\n');
     expect(written).toContain('showPlanUsageLimits');
     expect(written).not.toContain('claudeVoiceEnabled');
   });
@@ -169,4 +172,54 @@ describe('PUT /api/settings — partial body must not reset service toggles', ()
 
     expect(res.statusCode).toBe(400);
   });
+
+  it.each([true, false])(
+    'lets the verified owner persist decision writes %s with existing settings preserved',
+    async (value) => {
+      const fs = (await import('node:fs/promises')).default;
+      vi.mocked(fs.writeFile).mockClear();
+      const res = await harness.app.inject({
+        method: 'PUT',
+        url: '/api/settings',
+        payload: { structuredDecisionWrites: value },
+      });
+      expect(res.statusCode).toBe(200);
+      expect(fs.writeFile).toHaveBeenCalledTimes(1);
+      const persisted = JSON.parse(String(vi.mocked(fs.writeFile).mock.calls[0][1]));
+      expect(persisted).toEqual({ ...EXISTING_SETTINGS, structuredDecisionWrites: value });
+    }
+  );
+
+  it.each([true, false])(
+    'refuses a non-owner setting decision writes %s before reading or writing settings',
+    async (value) => {
+      const fs = (await import('node:fs/promises')).default;
+      vi.mocked(fs.readFile).mockClear();
+      vi.mocked(fs.writeFile).mockClear();
+      const res = await harness.app.inject({
+        method: 'PUT',
+        url: '/api/settings',
+        headers: { 'x-reverie-parent-session': '00000038-0043-4000-8000-000000000060' },
+        payload: { structuredDecisionWrites: value },
+      });
+      expect(res.statusCode).toBe(403);
+      expect(fs.readFile).not.toHaveBeenCalled();
+      expect(fs.writeFile).not.toHaveBeenCalled();
+    }
+  );
+
+  it.each(['enabled', 'true', 1, null, [], {}])(
+    'refuses invalid decision setting %j before persistence',
+    async (value) => {
+      const fs = (await import('node:fs/promises')).default;
+      vi.mocked(fs.writeFile).mockClear();
+      const res = await harness.app.inject({
+        method: 'PUT',
+        url: '/api/settings',
+        payload: { structuredDecisionWrites: value },
+      });
+      expect(res.statusCode).toBe(400);
+      expect(fs.writeFile).not.toHaveBeenCalled();
+    }
+  );
 });

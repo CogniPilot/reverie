@@ -57,6 +57,8 @@ def validate_settings(settings):
     for key in ('root', 'tool_schema_file'):
         if not isinstance(settings.get(key), str) or not os.path.isabs(settings[key]):
             raise ValueError('coding needs an explicit ' + key)
+    if type(settings.get('failure_telemetry', False)) is not bool:
+        raise ValueError('invalid failure telemetry flag')
     argv = settings.get('runner_argv')
     if (not isinstance(argv, list) or not argv or not isinstance(argv[0], str) or not os.path.isabs(argv[0]) or
             any(not isinstance(part, str) or not part for part in argv)):

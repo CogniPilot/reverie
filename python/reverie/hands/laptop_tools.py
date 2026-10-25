@@ -30,13 +30,14 @@ def task_paths(root, task):
     return workspace, manifest
 
 
-def main(argv=None):
+def main(argv=None, *, command_observer=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--root', required=True)
     parser.add_argument('--task-dir', required=True)
     parser.add_argument('--timeout-s', type=int, required=True)
     parser.add_argument('--max-output-bytes', type=int, required=True)
     parser.add_argument('--tool-path', required=True)
+    parser.add_argument('--command-telemetry', action='store_true')
     args = parser.parse_args(argv)
     try:
         if not 1 <= args.timeout_s <= 300 or not 1024 <= args.max_output_bytes <= 131072:
@@ -75,7 +76,16 @@ def main(argv=None):
         workspace_dispatch.TIMEOUT_MAX_S = args.timeout_s
         workspace_dispatch.TIMEOUT_DEFAULT_S = min(args.timeout_s, 30)
         workspace_dispatch.RESULT_CAP = min(24000, args.max_output_bytes // 6)
-        return workspace_dispatch.main(['--root', str(workspace), '--manifest', str(manifest)])
+        if args.command_telemetry:
+            if command_observer is not None:
+                raise ValueError('TELEMETRY_CONFIG_REFUSED')
+            from coding_telemetry import ExecutionRelay
+            from command_telemetry import execution_observer
+            with execution_observer(ExecutionRelay()) as observer:
+                return workspace_dispatch.main(['--root', str(workspace), '--manifest', str(manifest)],
+                                               command_observer=observer)
+        return workspace_dispatch.main(['--root', str(workspace), '--manifest', str(manifest)],
+                                       command_observer=command_observer)
     except (ValueError, OSError, TypeError, KeyError) as error:
         print(json.dumps({'version': 1, 'ok': False, 'output': '',
                           'error': str(error)[:500], 'truncated': False, 'exit_code': None}))

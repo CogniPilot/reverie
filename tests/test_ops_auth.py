@@ -1,7 +1,7 @@
-"""Exact Ada r2b assertion/HTTP contract; synthetic canonical authority only, never owner grants."""
+"""Canonical assertion/HTTP contract; synthetic canonical authority only, never owner grants."""
 import base64,hashlib,hmac,http.server,json,os,tempfile,threading,time,unittest,uuid
 from pathlib import Path
-from reverie.ops_auth import AdaServiceDecisions
+from reverie.ops_auth import ServiceDecisionsAuth
 from reverie.ops_core import current_actor,Core,Ledger
 from reverie.ops_common import *
 SID='11111111-1111-4111-8111-111111111111';EID='22222222-2222-4222-8222-222222222222'
@@ -25,7 +25,7 @@ class Auth(unittest.TestCase):
      raw=canonical(value);self.send_response(200);self.send_header('Content-Length',str(len(raw)));self.end_headers();self.wfile.write(raw)
     except Exception:self.send_response(403);self.end_headers()
   self.server=http.server.ThreadingHTTPServer(('127.0.0.1',0),Handler);self.thread=threading.Thread(target=self.server.serve_forever,daemon=True);self.thread.start();self.addCleanup(self.close)
-  cfg={'host':'127.0.0.1','port':self.server.server_port,'config':str(self.config),'principal':'ops','ownerId':'owner-1','grants':self.grants};self.client=AdaServiceDecisions(cfg,self.company,'owned',os.getuid());self.actor=current_actor(self.company,'owned',SID,os.getuid())
+  cfg={'host':'127.0.0.1','port':self.server.server_port,'config':str(self.config),'principal':'ops','ownerId':'owner-1','grants':self.grants};self.client=ServiceDecisionsAuth(cfg,self.company,'owned',os.getuid());self.actor=current_actor(self.company,'owned',SID,os.getuid())
  def close(self):self.server.shutdown();self.server.server_close();self.thread.join(5)
  def call(self,grant=None):return self.client.check(self.actor,ACTIONS[3],'website',grant,None)
  def test_exact_assertion_and_strict_body_from_transport_identity(self):
@@ -40,7 +40,7 @@ class Auth(unittest.TestCase):
  def test_removed_key_does_not_fall_back_to_cached_or_legacy_permission(self):
   self.assertEqual(self.call()['availability'],'allowed');self.keyfile.unlink();self.assertEqual(self.call()['availability'],'unavailable')
  def test_single_owner_empty_owner_id_uses_exact_r2d_wire(self):
-  self.owner='';state=json.loads(self.company.read_bytes());state['employees'][0].pop('owner');self.company.write_bytes(canonical(state));actor=current_actor(self.company,'owned',SID,os.getuid());cfg=dict(self.client.config,ownerId='');client=AdaServiceDecisions(cfg,self.company,'owned',os.getuid());self.assertEqual(client.check(actor,ACTIONS[3],'website',None,None)['availability'],'allowed');self.assertEqual(self.seen[0][0][5],'')
+  self.owner='';state=json.loads(self.company.read_bytes());state['employees'][0].pop('owner');self.company.write_bytes(canonical(state));actor=current_actor(self.company,'owned',SID,os.getuid());cfg=dict(self.client.config,ownerId='');client=ServiceDecisionsAuth(cfg,self.company,'owned',os.getuid());self.assertEqual(client.check(actor,ACTIONS[3],'website',None,None)['availability'],'allowed');self.assertEqual(self.seen[0][0][5],'')
  def test_resource_only_scope_cannot_stand_in_for_employee_authority(self):
   value=json.loads(self.config.read_bytes());value['purposes'][self.purposes[ACTIONS[3]]]['scope']='resources';self.config.write_bytes(canonical(value));self.assertEqual(self.call()['availability'],'unavailable')
 if __name__=='__main__':unittest.main()

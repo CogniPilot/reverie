@@ -1382,6 +1382,8 @@ export const SettingsUpdateSchema = z
     defaultWorkingDir: z.string().max(500).optional(),
     lastUsedCase: z.string().max(200).optional(),
     // Feature toggles
+    /** Startup-only Board choice-write policy; absent is OFF, owner changes require website restart. */
+    structuredDecisionWrites: z.boolean().optional(),
     ralphTrackerEnabled: z.boolean().optional(),
     subagentTrackingEnabled: z.boolean().optional(),
     subagentActiveTabOnly: z.boolean().optional(),

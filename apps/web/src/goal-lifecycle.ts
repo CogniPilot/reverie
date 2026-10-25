@@ -1,7 +1,7 @@
 /** Authenticated, effect-free Goal commands over the private canonical company transaction. */
 import { createHash, randomUUID } from 'node:crypto';
 import { z } from 'zod';
-import type { CompanyStore } from './company-store.js';
+import { serviceAuthorityFits, type CompanyStore } from './company-store.js';
 import {
   GoalBlockerSchema,
   GoalEvidenceRefSchema,
@@ -11,6 +11,11 @@ import {
   type CompanyState,
   type GoalGrant,
   type GoalRecord,
+  type ServiceGrant,
+  type ServicePurposes,
+  DEFAULT_SERVICE_PURPOSES,
+  SERVICE_PURPOSE_NAME,
+  servicePurposeScope,
   type GoalState,
   type GoalTransitionReceipt,
 } from './company-types.js';
@@ -79,6 +84,17 @@ const GrantSchema = z
     goalId: id.optional(),
     generation: positive.optional(),
     expectedSequence: sequence.optional(),
+    expiresAt: instant,
+  })
+  .strict();
+const SERVICE_GRANT_MAX_MS = 90 * 24 * 3600_000;
+const ServiceGrantInputSchema = z
+  .object({
+    purpose: z.string().regex(SERVICE_PURPOSE_NAME),
+    principal: id,
+    epoch: id,
+    employeeIds: z.array(id).max(256).default([]),
+    resources: z.array(id).max(256).default([]),
     expiresAt: instant,
   })
   .strict();
@@ -319,7 +335,9 @@ export class GoalLifecycle {
   constructor(
     private readonly store: CompanyStore,
     private readonly now: () => number = Date.now,
-    private readonly auth: GoalAuthentication = INACCESSIBLE_GOAL_AUTH
+    private readonly auth: GoalAuthentication = INACCESSIBLE_GOAL_AUTH,
+    /** Deployment-configured service purposes; only these can be granted. */
+    private readonly servicePurposes: ServicePurposes = DEFAULT_SERVICE_PURPOSES
   ) {}
 
   private async authenticate(context: unknown): Promise<GoalPrincipal> {
@@ -559,6 +577,63 @@ export class GoalLifecycle {
       if (!state.goalGrants.some((g) => g.id === grantId && g.owner === principal.owner)) refuse('Unknown owned grant');
       if (!state.goalGrantRevocations.some((g) => g.grantId === grantId))
         state.goalGrantRevocations.push({ grantId, owner: principal.owner, at: this.now() });
+    });
+  }
+  /** Owner-only: authority for one dedicated service principal and epoch, bound to current exact employee bindings
+   * (employee-scoped purposes) or configured resource names (resource-scoped purposes). Only configured purposes;
+   * never issued automatically; expiry at most 90 days. */
+  async issueServiceGrant(raw: unknown, context?: unknown): Promise<ServiceGrant> {
+    const input = parse(ServiceGrantInputSchema, raw);
+    return this.update(context, (state, principal) => {
+      ownerOnly(principal);
+      const at = this.now();
+      if (input.expiresAt <= at || input.expiresAt > at + SERVICE_GRANT_MAX_MS)
+        invalid('Service grant expiry must be within 90 days');
+      const scope = servicePurposeScope(this.servicePurposes, input.purpose);
+      if (!scope) invalid('Unknown service purpose');
+      const wantEmployees = scope !== 'resources',
+        wantResources = scope !== 'employees';
+      if (!!input.employeeIds.length !== wantEmployees || !!input.resources.length !== wantResources)
+        invalid('A service grant names exactly the scope its purpose is configured for');
+      if (
+        new Set(input.employeeIds).size !== input.employeeIds.length ||
+        new Set(input.resources).size !== input.resources.length
+      )
+        invalid('Service grant scope entries must be unique');
+      const employees = input.employeeIds.map((employeeId) => {
+        const employee = employeeOf(state, employeeId, principal.owner);
+        active(employee);
+        return {
+          employeeId: employee.id,
+          sessionId: employee.sessionId,
+          sessionGeneration: employee.sessionGeneration,
+        };
+      });
+      const grant: ServiceGrant = {
+        id: randomUUID(),
+        purpose: input.purpose,
+        owner: principal.owner,
+        principal: input.principal,
+        epoch: input.epoch,
+        employees,
+        resources: [...input.resources],
+        issuedAt: at,
+        expiresAt: input.expiresAt,
+      };
+      state.serviceGrants.push(grant);
+      // Kit AUTH-S1: refuse inside the transaction (nothing is committed) unless every live grant stays revocable.
+      if (!serviceAuthorityFits(state)) refuse('Service grant storage budget exhausted');
+      return grant;
+    });
+  }
+  async revokeServiceGrant(grantId: string, context?: unknown): Promise<void> {
+    parse(id, grantId);
+    await this.update(context, (state, principal) => {
+      ownerOnly(principal);
+      if (!state.serviceGrants.some((g) => g.id === grantId && g.owner === principal.owner))
+        refuse('Unknown owned service grant');
+      if (!state.serviceGrantRevocations.some((g) => g.grantId === grantId))
+        state.serviceGrantRevocations.push({ grantId, owner: principal.owner, at: this.now() });
     });
   }
   async attestUnblocker(raw: unknown, context?: unknown) {

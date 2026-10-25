@@ -276,6 +276,8 @@ class TaskManager:
             argv = job['settings']['runner_argv'] + ['--task-dir',
                     os.path.join(job['settings']['root'], job['task_id']),
                     '--timeout-s', str(timeout), '--max-output-bytes', str(payload['cap'])]
+            if job['settings'].get('failure_telemetry') is True:
+                argv += ['--command-telemetry']
             from coding_chat import office_environment
             environment = {'PATH': os.defpath, 'LANG': 'C.UTF-8'}
             environment.update(office_environment(self.cfg, job['task_id']))

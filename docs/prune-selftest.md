@@ -1,6 +1,6 @@
 # Declared synthetic cleanup acceptance
 
-The phase-3 module packages Rex's exact selftest r2 bytes, SHA256SUMS prefix
+The phase-3 module packages the reviewed selftest r2 bytes, SHA256SUMS prefix
 `50a2e393`: selftest `280dd66b`, kit `cf4ca5a1`, suite `b94a3959`, runner
 `5e5f776f`. The package verifies all four complete hashes. The r12 prune and r7
 lease hashes are separately pinned. This integration is source for review;
@@ -48,8 +48,9 @@ expected code hashes, current binding and the declared receipt's SHA-256. Keepin
 this receipt outside fresh production state permits the guarded initializer to
 copy the approved evidence without depending on its own not-yet-created state.
 
-Rex reports r2 rehearsal PASS for r12 (13/13) and a discriminating r10 bind-mount
-FAIL, using unprivileged user/mount/PID namespaces on an agent laptop. Those are
+The reviewed kit's report records r2 rehearsal PASS for r12 (13/13) and a
+discriminating r10 bind-mount FAIL, using unprivileged user/mount/PID namespaces
+on an agent laptop. Those are
 attributed rehearsal results, not acceptance of the actual systemd sandbox or
 host. R2 adds exact result names, bounded nonblocking nofollow reads with ownership
 checks, and fail-closed timeout retention. Independent review of r2 and actual

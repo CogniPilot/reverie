@@ -147,6 +147,8 @@ const PUBLIC_ROUTES = new Set([
   'POST /api/owner/logout',
   'POST /api/hook-event',
   'POST /api/status-telemetry',
+  // Authenticated only by its service assertion header (service-decision.ts); a bare 403 without one.
+  'POST /api/service-decisions',
 ]);
 /** What a session signed in with a one-time password may still reach. */
 const RESTRICTED_ROUTES = new Set(['GET /api/owner/status', 'POST /api/owner/password', 'POST /api/owner/logout']);

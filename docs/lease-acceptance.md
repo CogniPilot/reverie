@@ -98,8 +98,8 @@ The module unit `reverie-prune-lease-acceptance.service` runs the pinned package
 prefix or no filesystem namespace), host PID visibility, and a bounded oneshot
 with control-group cleanup. Later observation preflight uses `--check` in the
 same actual host namespace before janitor sandboxing. Order is initialization ->
-real lease acceptance -> Rex confined phase-3 selftest -> guarded dry observation.
-Rex's separate selftest receipt is required independently. Existing bootstrap
+real lease acceptance -> confined phase-3 selftest -> guarded dry observation.
+The separate selftest receipt is required independently. Existing bootstrap
 runtime units require reviewed module/bootstrap migration or normal owner reboot;
 no silent overlay or old-state adoption occurs. Real canary/qualification and
 independent source review remain required before activation.

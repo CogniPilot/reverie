@@ -967,6 +967,10 @@ export function registerSystemRoutes(
       body = rest;
     }
     const settings = parseBody(SettingsUpdateSchema, body, 'Invalid settings') as Record<string, unknown>;
+    if (settings.structuredDecisionWrites !== undefined && !verifiedOwner(req))
+      return reply
+        .code(403)
+        .send(createErrorResponse(ApiErrorCode.FORBIDDEN, 'Only the owner may change Board decision-write policy'));
     // Owner-auth policy protects this route. Also keep the server-wide instance
     // name out of agent requests and ordinary multi-user accounts, including
     // installations still using the legacy authentication mode.

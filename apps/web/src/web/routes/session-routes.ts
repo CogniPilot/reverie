@@ -213,7 +213,7 @@ import {
 import { readDeepSeekLastResponse } from '../../deepseek-transcript.js';
 import { appendClaudeCustomTitle } from '../../claude-session-title.js';
 import { UPLOADS_DIR } from '../paste-image-gc.js';
-import { CompanyError, type CompanyService } from '../../company-service.js';
+import { CompanyError, type CompanyService, type RuntimeRestartIntent } from '../../company-service.js';
 import { normalizeIcon } from '../../chatroom-store.js';
 
 // Path to linked-cases registry (same file used by case-routes resolveCasePath)
@@ -973,6 +973,30 @@ export function registerSessionRoutes(
       intent?.finish();
     }
   };
+  /** Bug 17: the start routes the UI re-attach uses (/interactive, /shell) never start an employee the owner stopped
+   * (desiredRunning false, which vacation also sets). The owner restarts it through POST /api/company/employees/:id/restart,
+   * which records intent in the guarded transaction. Non-employee sessions and unknown intent are unaffected. */
+  const ownerStopped = (sessionId: string): boolean =>
+    !!options.company?.registeredEmployees().some((e) => e.sessionId === sessionId && e.desiredRunning === false);
+  const stoppedByOwner = () =>
+    createErrorResponse(ApiErrorCode.CONFLICT, 'This expert was stopped by the owner. Restart it from the Company page.');
+  /** Bug 19: a VERIFIED OWNER replacing an employee's session (employeeId: POST /api/sessions, quick-start) is an
+   * explicit start onto a NEW session id. It records running intent through the same guarded transaction as ownerRestart,
+   * claimed AFTER the thread claim has stopped the old session (that stop records false) and BEFORE the launch. rebind()
+   * keeps this one transaction; a Stop or vacation that lands mid-start still wins, a failed launch rolls back. The
+   * employee's own session replacing itself, every agent caller and a vacationing employee record nothing. */
+  const ownerReplacementIntent = (
+    req: FastifyRequest,
+    identity: { employeeId?: string; replacesSessionId?: string } | undefined
+  ): RuntimeRestartIntent | undefined => {
+    if (!options.company || !identity?.employeeId || !identity.replacesSessionId) return undefined;
+    if (req.headers['x-reverie-parent-session'] !== undefined || !(options.verifiedOwner ?? NO_OWNER)(req)) return undefined;
+    const employee = options.company
+      .registeredEmployees()
+      .find((e) => e.id === identity.employeeId && e.sessionId === identity.replacesSessionId);
+    if (!employee || employee.onVacation) return undefined;
+    return options.company.prepareRuntimeRestart(identity.replacesSessionId, ownerFor(req));
+  };
   /** A launch failed after the claim stopped the session it replaces: the employee is left without a running session. Never silent. */
   const replacementFailed = (
     identity: { employeeId?: string } | undefined,
@@ -1458,6 +1482,16 @@ export function registerSessionRoutes(
       req.headers['x-reverie-parent-session'] !== undefined
     );
     if (claim.refusal) return createErrorResponse(ApiErrorCode.CONFLICT, claim.refusal);
+    let replacementIntent: RuntimeRestartIntent | undefined;
+    try {
+      replacementIntent = ownerReplacementIntent(req, spawnIdentity);
+      await replacementIntent?.claim();
+    } catch (error) {
+      replacementIntent?.finish();
+      replacementFailed(spawnIdentity, claim, error);
+      claim.release();
+      return createErrorResponse(spawnRefusalCode(error), getErrorMessage(error));
+    }
     try {
       const session = new Session({
         workingDir,
@@ -1500,10 +1534,16 @@ export function registerSessionRoutes(
       if (spawnIdentity) {
         try {
           // The audit names the agent that asked (its header, not the body lineage); an owner's own request stays 'owner'.
-          await options.company!.completeSpawn(session.id, spawnIdentity, auditActor(ctx, req, owner));
+          await options.company!.completeSpawn(
+            session.id,
+            spawnIdentity,
+            auditActor(ctx, req, owner),
+            replacementIntent?.token
+          );
         } catch (error) {
           // The session is already running; without its rooms and record it would be an orphan under the employee's name.
           await ctx.cleanupSession(session.id, true, 'spawn_failed').catch(() => {});
+          await replacementIntent?.rollback().catch(() => {});
           replacementFailed(spawnIdentity, claim, error);
           claim.release();
           return createErrorResponse(spawnRefusalCode(error), getErrorMessage(error));
@@ -1533,9 +1573,12 @@ export function registerSessionRoutes(
         ...(resumeWarnings.length ? { warnings: resumeWarnings } : {}),
       };
     } catch (error) {
+      await replacementIntent?.rollback().catch(() => {});
       replacementFailed(spawnIdentity, claim, error);
       claim.release();
       throw error;
+    } finally {
+      replacementIntent?.finish();
     }
   });
 
@@ -1921,6 +1964,7 @@ export function registerSessionRoutes(
     }
     const { clearBreaker } = bodyResult.data;
     const session = findSessionOrFail(ctx, id, req);
+    if (ownerStopped(id)) return stoppedByOwner(); // Bug 17
 
     if (session.isBusy()) {
       return createErrorResponse(ApiErrorCode.SESSION_BUSY, 'Session is busy');
@@ -1992,6 +2036,7 @@ export function registerSessionRoutes(
   app.post('/api/sessions/:id/shell', async (req) => {
     const { id } = req.params as { id: string };
     const session = findSessionOrFail(ctx, id, req);
+    if (ownerStopped(id)) return stoppedByOwner(); // Bug 17
 
     if (session.isBusy()) {
       return createErrorResponse(ApiErrorCode.SESSION_BUSY, 'Session is busy');
@@ -4741,6 +4786,18 @@ export function registerSessionRoutes(
     });
     ctx.broadcast(SseEvent.SessionCreated, ctx.getSessionStateWithRespawn(session));
 
+    // Bug 19: claimed right before the launch (inside the guarded block's reach), never left open by an earlier failure.
+    let qsReplacementIntent: RuntimeRestartIntent | undefined;
+    try {
+      qsReplacementIntent = ownerReplacementIntent(req, qsSpawnIdentity);
+      await qsReplacementIntent?.claim();
+    } catch (error) {
+      qsReplacementIntent?.finish();
+      await ctx.cleanupSession(session.id, true, 'quick_start_error').catch(() => {});
+      replacementFailed(qsSpawnIdentity, qsClaim, error);
+      qsClaim.release();
+      return createErrorResponse(spawnRefusalCode(error), getErrorMessage(error));
+    }
     // Start in the appropriate mode
     try {
       if (getCli(mode)?.capabilities.startMode === 'shell') {
@@ -4764,7 +4821,12 @@ export function registerSessionRoutes(
         ctx.broadcast(SseEvent.SessionInteractive, { id: session.id, mode });
       }
       if (qsSpawnIdentity)
-        await options.company!.completeSpawn(session.id, qsSpawnIdentity, auditActor(ctx, req, owner));
+        await options.company!.completeSpawn(
+          session.id,
+          qsSpawnIdentity,
+          auditActor(ctx, req, owner),
+          qsReplacementIntent?.token
+        );
       ctx.broadcast(SseEvent.SessionUpdated, { session: ctx.getSessionStateWithRespawn(session) });
 
       // Docker + claude: the pane command pins the conversation id (--session-id /
@@ -4815,6 +4877,7 @@ export function registerSessionRoutes(
     } catch (err) {
       // Clean up session on error to prevent orphaned resources
       await ctx.cleanupSession(session.id, true, 'quick_start_error');
+      await qsReplacementIntent?.rollback().catch(() => {});
       replacementFailed(qsSpawnIdentity, qsClaim, err);
       return createErrorResponse(
         err instanceof CompanyError ? spawnRefusalCode(err) : ApiErrorCode.OPERATION_FAILED,
@@ -4822,6 +4885,7 @@ export function registerSessionRoutes(
       );
     } finally {
       qsClaim.release();
+      qsReplacementIntent?.finish();
     }
   });
 

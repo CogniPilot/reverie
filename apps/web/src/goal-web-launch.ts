@@ -15,7 +15,8 @@ export async function startConfiguredWebServer(launch: WebLaunchOptions) {
       launch.titleHostname,
       launch.allowUnauthenticatedNetwork ?? false,
       launch.basePath ?? '',
-      goals
+      goals,
+      launch.serviceAuthConfig
     );
   } catch (error) {
     goals?.close?.();

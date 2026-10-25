@@ -157,16 +157,18 @@ def load_config(path):
         raise ValueError("Worker configuration must be an owner-only regular file")
     config = json.loads(path.read_text())
     required = {'version', 'deployment', 'image', 'serverContainer', 'socket', 'stateRoot', 'companyFile', 'companyRoot', 'scratchRoot', 'apiSocketRoot', 'budgetMode', 'uid', 'gid', 'memoryMiB', 'poolMemoryMiB', 'poolTasksMax', 'cgroupParent', 'pidsLimit', 'cpus', 'maxWorkers', 'mounts', 'maintenanceSessions'}
-    if not isinstance(config, dict) or set(config) - {'gpuGrants','sessionResources','rootlessDocker','goalPrivateConfig','opsConfig','leaseAcceptance'} != required or config['version'] != 1:
+    if not isinstance(config, dict) or set(config) - {'gpuGrants','sessionResources','rootlessDocker','goalPrivateConfig','opsConfig','leaseAcceptance','commandTelemetry'} != required or config['version'] != 1:
         raise ValueError("Unsupported worker configuration")
     if 'opsConfig' in config:
         if not isinstance(config['opsConfig'], str) or not Path(config['opsConfig']).is_absolute() or Path(config['opsConfig']).anchor != '/' or str(Path(config['opsConfig'])) != config['opsConfig'] or any(ord(c)<32 or ord(c)==127 for c in config['opsConfig']):
             raise ValueError('Invalid private OPS binding')
         try:
-            from .ops_service import broker_binding_custody
+            from reverie.ops_service import broker_binding_custody
             broker_binding_custody(config)
         except Exception:
             raise ValueError('Invalid private OPS binding') from None
+    from reverie.worker_command_telemetry import configuration
+    configuration(config)
     validate_gpu_grants(config.get('gpuGrants', {}))
     validate_session_resources(config)
     rootless_docker_enabled(config)
@@ -415,7 +417,7 @@ class OfficeAPI:
     """A laptop's office phone: fixed identity and upstream, bounded HTTP only."""
     slots = threading.BoundedSemaphore(32)
 
-    def __init__(self, directory, session_id, address, company_root, host_actions=None, ops=None):
+    def __init__(self, directory, session_id, address, company_root, host_actions=None, ops=None, command_telemetry=None):
         directory.mkdir(mode=0o700, parents=True, exist_ok=True)
         if directory.is_symlink():
             raise ValueError('Invalid office connection directory')
@@ -454,7 +456,7 @@ class OfficeAPI:
                         if ops is None:
                             self.send_error(503); return
                         try:
-                            from .ops_common import command as ops_command, strict_json
+                            from reverie.ops_common import command as ops_command, strict_json
                             result = ops(session_id, ops_command(strict_json(self.rfile.read(length))))
                             raw = json.dumps(result, separators=(',', ':')).encode()
                             if len(raw) > 64*1024: self.send_error(502); return
@@ -463,12 +465,19 @@ class OfficeAPI:
                         self.send_response(200); self.send_header('Content-Type', 'application/json')
                         self.send_header('Content-Length', str(len(raw))); self.end_headers(); self.wfile.write(raw)
                         return
+                    telemetry_path = parsed.path == '/api/command-telemetry/hands'
+                    if telemetry_path and (self.command != 'POST' or parsed.query or length > 512 or len(self.headers.get_all('Content-Length', [])) != 1):
+                        self.send_error(400); return
                     host_path = parsed.path == '/api/host-actions' or parsed.path.startswith('/api/host-actions/')
                     if host_path and (length > 16*1024 or parsed.query or len(self.headers.get_all('Content-Length',[]))>1):
                         self.send_error(400); return
                     if PLAN_DECISION.fullmatch(parsed.path) and length > 64*1024:
                         self.send_error(413); return
                     body = self.rfile.read(length)
+                    if telemetry_path:
+                        accepted = command_telemetry is not None and command_telemetry.observe(session_id, body)
+                        self.send_response(204 if accepted else 503)
+                        self.send_header('Content-Length', '0'); self.end_headers(); return
                     try:
                         approval = office_plan_approval(company_root, session_id, parsed.path, self.command, parsed.query, body)
                     except (OSError, ValueError, UnicodeError):
@@ -647,7 +656,7 @@ class Broker:
         self.ops = None
         if config.get('opsConfig') is not None:
             def ops_call(session, command):
-                from .ops_service import phone_client
+                from reverie.ops_service import phone_client
                 return phone_client(config['opsConfig']).call(session, command)
             self.ops = ops_call
 
@@ -676,6 +685,8 @@ class Broker:
         self.storage_lease_lock = threading.RLock()
         self.storage_leases = {}
         self.connections = threading.BoundedSemaphore(config['maxWorkers'] + 4)
+        from reverie.worker_command_telemetry import CommandTelemetry
+        self.command_telemetry = CommandTelemetry(config, self.run_engine)
 
     def run_engine(self, args, optional=False):
         if self.stopping.is_set() and (args[0] in ('create', 'start', 'exec') or args[:2] == ['network', 'create']):
@@ -859,11 +870,21 @@ class Broker:
             self.address_cache, self.address_updated = address, time.monotonic()
             return address
 
+    def office_options(self):
+        """OfficeAPI keywords for a new or recovered Office. Command telemetry is passed only when enabled, so the default
+        keeps the legacy constructor contract."""
+        options = {'host_actions': self.host_actions}
+        if self.ops is not None:
+            options['ops'] = self.ops
+        if self.command_telemetry.enabled:
+            options['command_telemetry'] = self.command_telemetry
+        return options
+
     def office(self, session_id):
         if self.stopping.is_set():
             raise RuntimeError('Worker broker is stopping')
         if session_id not in self.offices:
-            self.offices[session_id] = OfficeAPI(Path(self.config['apiSocketRoot'])/session_id, session_id, self.address, Path(self.config['companyRoot']),host_actions=self.host_actions,**({'ops':self.ops} if self.ops is not None else {}))
+            self.offices[session_id] = OfficeAPI(Path(self.config['apiSocketRoot'])/session_id, session_id, self.address, Path(self.config['companyRoot']),**self.office_options())
             self.cleanup_offices[id(self.offices[session_id])] = self.offices[session_id]
         if self.stopping.is_set():
             self._close_office(self.offices[session_id])
@@ -925,7 +946,7 @@ class Broker:
                 if self.stopping.is_set():
                     raise RuntimeError('Office recovery cancelled while broker is stopping')
                 if sid not in self.offices:
-                    created[sid]=OfficeAPI(Path(self.config['apiSocketRoot'])/sid, sid, self.address, Path(self.config['companyRoot']),host_actions=self.host_actions,**({'ops':self.ops} if self.ops is not None else {}))
+                    created[sid]=OfficeAPI(Path(self.config['apiSocketRoot'])/sid, sid, self.address, Path(self.config['companyRoot']),**self.office_options())
                     self.cleanup_offices[id(created[sid])]=created[sid]
         except BaseException:
             # Goal composition (Otto H2): every owned resource gets its own cleanup attempt; one failure records
@@ -1337,6 +1358,7 @@ class Broker:
                     args[-4:-4] = account_mounts(self.config, request['env'])
                     if not storage_start_allowed(self.config,paths):
                         raise RuntimeError('Current employee running intent changed before creation')
+                    self.command_telemetry.check_create_args(args)
                     self.run_engine(args)
                     owned = True
                     request['env'].update(

@@ -10,6 +10,11 @@ const actions = {
   'POST /api/goals/:id/unblock-proofs': 'ATTEST_UNBLOCKER',
   'POST /api/goal-grants': 'ISSUE_GRANT',
   'POST /api/goal-grants/:id/revoke': 'REVOKE_GRANT',
+  // Owner-only service grant surface on the same canonical facade and boundary (never in EMPLOYEE_GOAL_ACTIONS and never
+  // on the employee broker route set). Grants authorize only their configured service purpose, never a Goal action.
+  'POST /api/service-grants': 'ISSUE_SERVICE_GRANT',
+  'POST /api/service-grants/:id/revoke': 'REVOKE_SERVICE_GRANT',
+  'GET /api/service-grants/setup': 'SERVICE_GRANT_SETUP',
   'POST /api/goal-unblock-proofs/:id/revoke': 'REVOKE_PROOF',
   'GET /api/goal-metadata/:employeeId': 'METADATA_READ',
 } as const;

@@ -14,7 +14,7 @@ def atomic_private(path,data):
  d=os.open(path.parent,os.O_RDONLY|os.O_DIRECTORY);os.fsync(d);os.close(d);return True
 
 def prepare_authority_state(cfg,allow_initialize=True):
- """Reference Ada r2d's existing canonical Goal projection; never manufacture a nonce/bootstrap stand-in."""
+ """Reference the existing canonical Goal projection; never manufacture a nonce/bootstrap stand-in."""
  if cfg['authorization'] is None:return {'configured':False,'grantsCreated':False}
  selected=cfg['authorization'];source=strict_json(private_read(selected['config'],65536));require(source.get('version')==1,'custody-invalid')
  goal_path=selected.get('goalPrivateConfig');require(goal_path,'adapter-unavailable');goal=strict_json(private_read(goal_path,65536));require(goal.get('version')==1 and goal.get('mode') in ('owner-only','owner-and-employee'),'custody-invalid')

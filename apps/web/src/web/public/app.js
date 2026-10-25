@@ -9689,13 +9689,15 @@ class ReverieApp {
         const label = session.name || 'Session';
         if (window.confirm(`${label} was stopped after crashing repeatedly. Restart it?`)) {
           try {
-            await fetch(`/api/sessions/${sessionId}/interactive`, {
+            const res = await fetch(`/api/sessions/${sessionId}/interactive`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ clearBreaker: true }),
             });
-            session.respawnBlocked = false;
-            session.status = 'busy';
+            if (res.ok) {
+              session.respawnBlocked = false;
+              session.status = 'busy';
+            }
           } catch (err) {
             console.error('Failed to restart crash-looped session:', err);
           }
@@ -9709,9 +9711,9 @@ class ReverieApp {
           const endpoint = session.mode === 'shell'
             ? `/api/sessions/${sessionId}/shell`
             : `/api/sessions/${sessionId}/interactive`;
-          await fetch(endpoint, { method: 'POST' });
-          // Update local session state
-          session.status = 'busy';
+          const res = await fetch(endpoint, { method: 'POST' });
+          // Update local session state only when the start happened (bug 17: an owner-stopped expert answers 409)
+          if (res.ok) session.status = 'busy';
         } catch (err) {
           console.error('Failed to attach to restored session:', err);
         }

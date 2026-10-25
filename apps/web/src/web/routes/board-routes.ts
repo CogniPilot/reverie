@@ -53,6 +53,8 @@ interface Employee {
 
 export interface BoardDeps {
   verifiedOwner?: OwnerVerifier;
+  /** Schema-compatible fallback: only explicit true enables new choice writes. */
+  structuredDecisionWrites?: boolean;
   store: BoardStore;
   /** Company employees and settings for the caller's owner (CompanyService.view). */
   company: (owner: string | undefined) => { employees: Employee[]; settings: { timeZone: string; ownerName: string } };
@@ -126,6 +128,12 @@ type Caller =
 
 export function registerBoardRoutes(app: FastifyInstance, ctx: SessionPort & Partial<EventPort>, deps: BoardDeps): void {
   const now = () => (deps.now ?? Date.now)();
+  // Capture once: request bodies, later env/dependency edits and stored data cannot enable writes.
+  const structuredDecisionWrites = deps.structuredDecisionWrites === true;
+  const requireDecisionWrites = () => {
+    if (!structuredDecisionWrites)
+      throw new BoardError('Structured decision writes are disabled; saved answers are preserved', 503);
+  };
   const isCoordinator = (sessionId: string) =>
     deps.rooms().some((r) => !r.archivedAt && r.members.some((m) => m.sessionId === sessionId && m.role === 'coordinator' && ownerMade(m)));
 
@@ -294,6 +302,7 @@ export function registerBoardRoutes(app: FastifyInstance, ctx: SessionPort & Par
       const ownerIds = boardOwnerIds(state.issues, company.employees);
       const view: BoardView = {
         ...state,
+        structuredDecisionWrites,
         pollNotes,
         built: at,
         timeZone: company.settings.timeZone,
@@ -302,7 +311,7 @@ export function registerBoardRoutes(app: FastifyInstance, ctx: SessionPort & Par
         capabilities: {
           checkedAt: at,
           identity: { kind: c.kind, name: nameOf(c), ...(c.kind === 'agent' ? { sessionId: c.sessionId, employeeId: c.memberId } : {}) },
-          board: { read: true, fileIssue: true, createDecision: lead(c), clearDecision: lead(c), manageBoard: c.kind === 'owner', reason: c.kind === 'owner' ? 'Verified owner.' : c.coordinator ? 'Active owner-made coordinator membership; the Board uses this same gate for decision creation.' : 'Decision creation requires an active owner-made coordinator membership. Company plan/recovery grants and titles do not grant it.' },
+          board: { read: true, fileIssue: true, createDecision: structuredDecisionWrites && lead(c), clearDecision: lead(c), manageBoard: c.kind === 'owner', reason: !structuredDecisionWrites ? 'Structured decision writes are disabled; saved answers are preserved. Existing role checks still apply.' : c.kind === 'owner' ? 'Verified owner.' : c.coordinator ? 'Active owner-made coordinator membership; the Board uses this same gate for decision creation.' : 'Decision creation requires an active owner-made coordinator membership. Company plan/recovery grants and titles do not grant it.' },
           company: {
             recoverEmployees: c.kind === 'owner' || company.employees.find(e => e.id === c.memberId)?.permissions?.recoverEmployees === true,
             moveOwnPlan: c.kind === 'owner' || !!company.employees.find(e => e.id === c.memberId && (e.permissions?.moveOwnPlan === true || e.permissions?.managePlans === true)),
@@ -488,6 +497,7 @@ export function registerBoardRoutes(app: FastifyInstance, ctx: SessionPort & Par
     run(reply, async () => {
       const c = caller(req);
       requireLead(c, 'add a decision');
+      requireDecisionWrites();
       if (!req.body || typeof req.body !== 'object' || !('options' in req.body))
         throw new BoardError('Decision options are required: --option "Approve" --option "Hold" (optional --recommend "Approve"). Prose does not create buttons. An older laptop CLI may lack these flags; use its existing scoped API client in /handbook/operations (Older laptop CLI), or update the CLI from the project flake.', 400);
       const body = parse(DecisionInput, req.body);
@@ -507,6 +517,7 @@ export function registerBoardRoutes(app: FastifyInstance, ctx: SessionPort & Par
       const c = caller(req);
       requireLead(c, 'annotate a decision');
       const { ifRev, ...note } = parse(DecisionNoteInput, req.body);
+      if (note.options !== undefined) requireDecisionWrites();
       if (Object.keys(note).length === 0) throw new BoardError('Nothing to change', 400);
       return write(c, 'decision-note', ifRev, { id: req.params.id, ...note }, (s) => {
         const d = s.decisions.find((x) => x.id === req.params.id);
@@ -525,6 +536,7 @@ export function registerBoardRoutes(app: FastifyInstance, ctx: SessionPort & Par
     run(reply, async () => {
       const c = caller(req);
       if (c.kind !== 'owner') throw new BoardError('Only the verified owner may choose a decision option', 403);
+      requireDecisionWrites();
       const body = parse(z.object({ option: z.string().trim().min(1).max(200) }).merge(IfRev).strict(), req.body);
       return write(c, 'decision-choose', body.ifRev, { id: req.params.id, option: body.option }, s => {
         const decision = s.decisions.find(d => d.id === req.params.id);
@@ -634,6 +646,8 @@ export function registerBoardRoutes(app: FastifyInstance, ctx: SessionPort & Par
       } catch (error) {
         throw new BoardError(`Import failed: ${(error as Error).message}`, 400);
       }
+      // Reject the whole import, including dry runs, rather than silently dropping choice writes.
+      if (content?.decisions.length) requireDecisionWrites();
       for (const decision of content?.decisions ?? []) {
         if (decision.options) decision.options = parse(DecisionOptionsSchema, decision.options);
       }

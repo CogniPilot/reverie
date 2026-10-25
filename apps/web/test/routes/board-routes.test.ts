@@ -55,6 +55,7 @@ describe('board routes', () => {
     );
     app = Fastify();
     registerBoardRoutes(app, { sessions, broadcast: (e: string, d: unknown) => events.push([e, d]) } as never, { ...({
+      structuredDecisionWrites: true,
       store,
       company: () => ({
         employees: [
