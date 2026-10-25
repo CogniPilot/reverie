@@ -3,7 +3,9 @@ import math
 import os
 import re
 import time
+import urllib.parse
 from types import SimpleNamespace
+from pathlib import Path
 
 from coding_tasks import ARGUMENT_CHARS, TOOL_NAMES, Limits, control_request, interrupt_requests, permitted_sender
 from coding_tokens import TokenMeter
@@ -79,12 +81,37 @@ def validate_settings(settings):
                 raise ValueError('invalid coding task scope')
         if type(task.get('enabled', True)) is not bool:
             raise ValueError('invalid task enabled flag')
+        if type(task.get('office_access', False)) is not bool:
+            raise ValueError('invalid task office access flag')
     if settings.get('web_search', False) is not False:
         raise ValueError('proxied coding web search adapter is not connected yet')
     if settings.get('token_meter') is not None:
         if not isinstance(settings['token_meter'], dict):
             raise ValueError('invalid token meter configuration')
         TokenMeter(**settings['token_meter'])
+
+def office_environment(cfg, task_id):
+    """Only an explicitly enabled task gets its own loopback phone identity, never API/model passwords."""
+    task = cfg['coding']['tasks'][task_id]
+    if not task.get('office_access', False):return {}
+    url = os.environ.get('REVERIE_API_URL', '')
+    try:
+        parsed = urllib.parse.urlparse(url)
+        if (parsed.scheme != 'http' or parsed.hostname != '127.0.0.1' or parsed.username or parsed.password or
+                parsed.path not in ('', '/') or parsed.query or parsed.fragment or not parsed.port or not 1 <= parsed.port <= 65535):
+            raise ValueError()
+    except ValueError:
+        raise ValueError('The configured local office relay is unavailable') from None
+    session = cfg['self_session_id']
+    if not re.fullmatch(r'[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}', session):
+        raise ValueError('Invalid scoped office identity')
+    from config_location import configuration_path
+    selected = configuration_path(os.environ, session)
+    if cfg.get('_config_path') and Path(cfg['_config_path']).resolve() != selected:
+        raise ValueError('The task configuration differs from the launcher selection')
+    return {'REVERIE_SCOPED_OFFICE': '1', 'REVERIE_MUX': '1', 'REVERIE_SESSION_ID': session,
+            'REVERIE_API_URL': url.rstrip('/'), 'REVERIE_AGENT_HOME': os.environ.get('REVERIE_AGENT_HOME') or os.path.expanduser('~'),
+            'REVERIE_DATA_DIR': str(selected.parents[2])}
 
 
 def authorize_task(loop, cfg, chat, room, message, settings, task_id, deadline,
@@ -118,6 +145,8 @@ def authorize_task(loop, cfg, chat, room, message, settings, task_id, deadline,
             return 'silent'
         if check_cancel:
             for candidate in chat.read(room, cfg['history_n']):
+                if candidate.get('phoneWake') is False:
+                    continue
                 if candidate.get('at', 0) <= message.get('at', 0):
                     continue
                 control = control_request(candidate)

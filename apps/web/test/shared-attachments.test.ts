@@ -27,11 +27,15 @@ describe('shared upload paths across laptops', () => {
     expect((await store.list('room-1')).map(file => file.id)).toEqual([file.id, added.id]);
     expect(await fs.readFile((await store.get('room-1', added.id)).path, 'utf8')).toBe('new-content');
   });
-  it('makes plain CLI history show the path instead of hiding attachments from the agent', () => {
+  it('makes plain CLI history show the scoped download link without a server filesystem path', () => {
+    const room = '11111111-1111-4111-8111-111111111111';
+    const file = '22222222-2222-4222-8222-222222222222';
     const text = formatChatMessage({ id: 'message', at: 1, from: { kind: 'user', name: 'Owner' }, to: 'all', text: '',
-      attachments: [{ id: 'image', name: 'test.png', type: 'image/png', size: 10, path: '/reverie_workspace/attachments/room/image-test.png' }] }, []);
+      attachments: [{ id: file, name: 'test.png', type: 'image/png', size: 10, path: '/reverie_workspace/attachments/room/image-test.png' }] }, [], room);
     expect(text).toContain('(attachment only)');
-    expect(text).toContain('/reverie_workspace/attachments/room/image-test.png');
+    expect(text).toContain('"test.png"');
+    expect(text).toContain(`/api/v1/chatrooms/${room}/files/${file}`);
+    expect(text).not.toContain('/reverie_workspace/attachments/room/image-test.png');
   });
   it('refuses a symlinked shared root instead of importing instance files into it', async () => {
     const root = await fs.mkdtemp(join(tmpdir(), 'reverie-shared-upload-')); owned.push(root);

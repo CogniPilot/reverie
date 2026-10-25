@@ -106,6 +106,8 @@ export type ChatWakeMode = 'all' | 'mentions';
 export type ChatVisibility = 'public' | 'private';
 
 export interface ChatMessage {
+  /** Server-only delivery eligibility at commit; stripped from public message views. */
+  phoneWakes?: string[];
   id: string;
   roomId: string;
   at: number;

@@ -58,6 +58,11 @@ class AuthorizationTests(unittest.TestCase):
         self.assertEqual(self.authorize(), 'cancelled')
         self.assertIsNone(self.authorize(check_cancel=False))
 
+    def test_muted_cancel_is_history_and_does_not_cancel_current_work(self):
+        cancel = self.chat.add('room', OWNER, '/code-cancel fixture')
+        cancel['phoneWake'] = False
+        self.assertIsNone(self.authorize())
+
     def test_current_config_change_revokes_authority(self):
         path = self.root / 'instance.json'
         path.write_text(json.dumps({'coding': self.settings}))

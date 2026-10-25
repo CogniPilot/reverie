@@ -1,9 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import Fastify from 'fastify';
 import { ChatLanguageRequest, ChatLanguageService } from '../src/chat-language-service.js';
+import { ChatPluginSettingsStore } from '../src/chat-plugin-settings.js';
 import { registerChatPluginRoutes } from '../src/web/routes/chat-plugin-routes.js';
 
 const request = {
@@ -57,12 +58,17 @@ process.stdin.on('data', data => { input = Buffer.concat([input,data]); while(tr
     binaries: { python: binary, modelica: binary },
     scratch: join(directory, 'snippets'),
     timeoutMs,
+    enabled: () => true,
   });
   services.push(service);
   return { service, receipt };
 }
 
 describe('explicit snippet assistance', () => {
+  it('fails closed for direct service calls unless enabled by its owner-controlled gate', async () => {
+    const service = new ChatLanguageService();
+    await expect(service.assist(request)).rejects.toThrow('disabled by the owner');
+  });
   it('rejects disabled, malformed, oversized and path/RPC inputs before any server starts', async () => {
     const { service, receipt } = await fixture();
     for (const input of [
@@ -81,6 +87,7 @@ describe('explicit snippet assistance', () => {
     const service = new ChatLanguageService({
       binaries: { python: 'relative-command' },
       scratch: join(directory, 'unused'),
+      enabled: () => true,
     });
     expect(await service.available()).toEqual({ python: false, modelica: false });
     await expect(service.assist(request)).rejects.toThrow('not configured');
@@ -95,7 +102,8 @@ describe('explicit snippet assistance', () => {
       expect(result.diagnostics.map((item) => item.message)).toEqual(['syntax λ <script>alert(1)</script>']);
       const audit = JSON.parse(await readFile(receipt, 'utf8'));
       expect(audit.env.REVERIE_TEST_PROVIDER_SECRET).toBeUndefined();
-      expect(audit.env.HOME).toBe(audit.cwd);
+      // The host scratch directory may be reached through a symlink.
+      expect(await realpath(join(audit.env.HOME, '..'))).toBe(join(audit.cwd, '..'));
       expect(audit.cwd).toContain('/snippets/snippet-');
       expect(await readFile(receipt + '.source', 'utf8')).toBe(request.source);
       await expect(readdir(audit.cwd)).rejects.toThrow();
@@ -169,11 +177,12 @@ describe('owner-only plugin routes', () => {
   it('keeps GET read-only and denies agents, disabled requests and raw RPC before starting a server', async () => {
     const { service, receipt } = await fixture();
     const app = Fastify();
-    registerChatPluginRoutes(app, (req) => req.headers.authorization === 'owner', service);
+    const settings = new ChatPluginSettingsStore(join(directory, 'settings.json'));
+    registerChatPluginRoutes(app, (req) => req.headers.authorization === 'owner', service, settings);
     try {
       expect(
         (await app.inject({ method: 'GET', url: '/api/chat-plugins', headers: { authorization: 'owner' } })).json().data
-          .python
+          .available.python
       ).toBe(true);
       const post = (payload: unknown, authorization?: string) =>
         app.inject({
@@ -186,6 +195,8 @@ describe('owner-only plugin routes', () => {
       expect((await post({ ...request, enabled: false }, 'owner')).statusCode).toBe(400);
       expect((await post({ ...request, command: 'python source.py' }, 'owner')).statusCode).toBe(400);
       await expect(readFile(receipt)).rejects.toThrow();
+      expect((await post(request, 'owner')).json().errorCode).toBe('PLUGIN_DISABLED');
+      await settings.save({ latex: false, python: true, modelica: false });
       const response = await post(request, 'owner');
       expect(response.statusCode).toBe(200);
       expect(response.headers['cache-control']).toBe('no-store');

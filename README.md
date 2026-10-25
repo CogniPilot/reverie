@@ -126,7 +126,12 @@ Worker images include Nix with an independent writable store and database for
 each laptop. For example, `nix profile install nixpkgs#openssh` installs an SSH
 client, and `nix develop` works in a mounted project. The `nixpkgs` registry follows
 the release's flake lock. Profiles are on the laptop's private home drive; its
-store is under its owned scratch directory and survives container replacement.
+store and database are under its private durable state directory
+(`stateRoot/<sessionId>/nix`) and survive container replacement. Build caches,
+temporary files and downloads stay on scratch. Existing scratch-backed stores
+require an explicit offline copy; the broker refuses an empty replacement.
+See [the staged Nix storage migration](docs/worker-nix-migration.md) for inventory,
+broker activation prerequisites, per-laptop checkpoints and rollback.
 An unprivileged, networkless helper seeds and updates the store from the immutable
 image before starting the laptop. It preserves installed packages and roots the
 image's runtime so ordinary garbage collection cannot remove it. The host's Nix
@@ -210,6 +215,12 @@ The same packaged Markdown is available through
 Expert context includes these lookup pointers and the current recovery grant.
 The handbook explains procedures; it does not grant permissions. Source pages live
 in `apps/web/src/web/public/handbook/` and ship in the native flake package.
+
+For room attachments, `reverie agent chat read --room ROOM` prints authenticated
+API links. Download with `reverie agent chat fetch ROOM FILE_ID --output NAME`;
+the output must be a new filename in the current directory. See the
+[bounded attachment CLI guide](apps/web/docs/chat-attachment-cli.md) for size/deadline
+options and refusal behavior. This does not grant room or filesystem access.
 
 Company preference checkboxes save each field immediately with confirmation or an
 error. This includes Sleep, Dream and explicit recovery/plan grants; a failed or
@@ -332,7 +343,7 @@ memory and personal reflection retain their separate storage and lifecycle.
 See [setup and operations](docs/setup.md) for recovery, source mounts, reproducible
 image updates and optional development-container workflows.
 
-[Optional chat plugins](docs/chat-plugins.md) add browser-selected LaTeX tools and
+[Optional chat plugins](docs/chat-plugins.md) add owner-enabled shared LaTeX tools and
 explicit local Python/Pyright and Modelica/Rumoca snippet assistance. They default
 off; language servers are separate optional packages and never run user code.
 

@@ -34,7 +34,7 @@ from urllib.parse import unquote, urlsplit
 if __package__:
     from .worker_gpu import gpu_create_args, validate_gpu_grants
     from .worker_resources import effective_config, policy_digest, validate_session_resources, validate_resource_reload
-    from .worker_nix import prepare_store
+    from .worker_nix import prepare_store, store_guard
 else:
     # Host migration tools also load this file with spec_from_file_location;
     # their sys.path need not contain the sibling module's directory.
@@ -55,8 +55,11 @@ else:
     _nix_module = importlib.util.module_from_spec(_nix_spec)
     _nix_spec.loader.exec_module(_nix_module)
     prepare_store = _nix_module.prepare_store
+    store_guard = _nix_module.store_guard
 
 MAX_FRAME = 256 * 1024
+SHARED_WORKSPACE = Path('/reverie_workspace')
+SHARED_ATTACHMENTS = SHARED_WORKSPACE / 'attachments'
 OFFLINE_GRACE_SECONDS = 600
 SESSION = re.compile(r"^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$")
 ENV_KEY = re.compile(r"^(?:LANG|LC_ALL|TERM|COLORTERM|XDG_(?:DATA|CONFIG|CACHE|STATE)_HOME|CLAUDE_[A-Z0-9_]+|CODEX_[A-Z0-9_]+|OPENCODE_[A-Z0-9_]+|OPENAI_[A-Z0-9_]+|ANTHROPIC_[A-Z0-9_]+|GEMINI_[A-Z0-9_]+|GOOGLE_[A-Z0-9_]+|REVERIE_(?:SESSION_ID|MUX|MUX_NAME|PARENT_SESSION_ID|API_URL|HOOK_SECRET_FILE|STATUSLINE_[A-Z0-9_]+|HANDS_[A-Z0-9_]+)|DISABLE_AUTOUPDATER|DISABLE_UPDATES)$")
@@ -141,6 +144,7 @@ def load_config(path):
     if not isinstance(config['mounts'], list) or not config['mounts']:
         raise ValueError('Worker mounts must be explicit')
     destinations = set()
+    resolved_mounts = []
     for mount in config['mounts']:
         if not isinstance(mount, dict) or set(mount) != {'source', 'destination', 'readOnly'} or type(mount['readOnly']) is not bool:
             raise ValueError('Invalid worker mount')
@@ -149,12 +153,44 @@ def load_config(path):
             if not isinstance(value, str) or not value.startswith('/') or any(c in value for c in ',\r\n\0') or '..' in Path(value).parts:
                 raise ValueError('Invalid worker mount path')
         destination = mount['destination']
+        destination_path = Path(destination)
+        # pathlib preserves exactly two leading slashes, while the Linux
+        # mount consumer treats them as the same absolute path as one slash.
+        # Reject every noncanonical spelling before policy comparisons so an
+        # alias cannot bypass the workspace or protected-subtree checks.
+        if destination.startswith('//') or destination_path.as_posix() != destination:
+            raise ValueError('Worker mount destination must be canonical')
+        if destination_path == SHARED_ATTACHMENTS or destination_path.is_relative_to(SHARED_ATTACHMENTS):
+            raise ValueError('Worker mounts cannot target shared attachment storage')
         if destination in destinations or destination in ['/', '/home/agent', '/nix', '/proc', '/sys', '/dev', '/run', '/var/run'] or (destination.startswith(('/run/', '/var/run/')) and destination != '/run/reverie-model'):
             raise ValueError('Worker mount overlaps a reserved location')
         source = Path(mount['source']).resolve(strict=True)
         if source == Path('/') or source.is_relative_to('/run') or source.is_relative_to('/var/run') or source.is_relative_to(Path(config['socket']).parent) or source.is_relative_to(config['stateRoot']):
             raise ValueError('Worker mount exposes host control state')
         destinations.add(destination)
+        resolved_mounts.append((source, destination_path, Path(mount['source'])))
+    workspace_sources = [(source, lexical) for source, destination, lexical in resolved_mounts if destination == SHARED_WORKSPACE]
+    for workspace_source, workspace_lexical in workspace_sources:
+        attachment_entry = workspace_source / 'attachments'
+        try:
+            attachment_info = attachment_entry.lstat()
+        except OSError as error:
+            raise ValueError('Shared attachment storage must be an existing directory before workers start') from error
+        if not stat.S_ISDIR(attachment_info.st_mode):
+            raise ValueError('Shared attachment storage must be a real directory, not a symlink')
+        attachment_source = attachment_entry.resolve(strict=True)
+        attachment_lexical = workspace_lexical / 'attachments'
+        for source, destination, lexical in resolved_mounts:
+            overlaps_attachment_store = (
+                source == attachment_source
+                or source.is_relative_to(attachment_source)
+                or attachment_source.is_relative_to(source)
+                or lexical == attachment_lexical
+                or lexical.is_relative_to(attachment_lexical)
+                or attachment_lexical.is_relative_to(lexical)
+            )
+            if overlaps_attachment_store and not (source == workspace_source and destination == SHARED_WORKSPACE):
+                raise ValueError('Worker mounts cannot expose shared attachment storage through an alias')
     return config
 
 
@@ -179,6 +215,12 @@ def create_args(config, session_id, home):
         args += ['--cpus', str(config['cpus'])]
     for mount in config['mounts']:
         args += ['--mount', 'type=bind,src=' + mount['source'] + ',dst=' + mount['destination'] + (',readonly' if mount['readOnly'] else '')]
+    # The console keeps the complete shared drive so its membership-checked API
+    # can serve room files. Laptop containers keep the rest of that drive, but a
+    # final read-only tmpfs overlays the attachment subtree so host-UID sharing
+    # cannot bypass the API's room-membership check.
+    if any(Path(mount['destination']) == SHARED_WORKSPACE for mount in config['mounts']):
+        args += ['--mount', 'type=tmpfs,dst=/reverie_workspace/attachments,tmpfs-mode=0555,tmpfs-size=1048576,readonly']
     args += gpu_create_args(config, session_id)
     args += ['--entrypoint', '/bin/sleep', config['image'], 'infinity']
     return name, digest, args
@@ -754,6 +796,7 @@ class Broker:
         started = False
         existing_running = False
         exit_file = None
+        nix_guard = None
         try:
             connection.settimeout(10)
             peer = struct.unpack('3i', connection.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, 12))
@@ -787,6 +830,7 @@ class Broker:
                 self.laptops[session_id] = self.config['deployment']+'-agent-'+session_id
                 claimed = True
                 home = Path(self.config['stateRoot']) / session_id / 'home'
+                home.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
                 home.mkdir(mode=0o700, parents=True, exist_ok=True)
                 if home.is_symlink() or home.resolve() != home:
                     raise ValueError('Invalid worker home')
@@ -829,6 +873,8 @@ class Broker:
                 if previous.returncode==0 and not reuse:
                     self.stop(name)
                 if not reuse:
+                    nix_guard = store_guard(self.config, session_id)
+                    nix_guard.__enter__()
                     # Store copies may take time. Keep existing office phones,
                     # control actions and terminal attachments responsive.
                     prepared_config = effective_config(self.config, session_id)
@@ -843,8 +889,8 @@ class Broker:
                         raise RuntimeError('Laptop policy changed during Nix preparation; retry with the current policy')
                     self.check_creation_budget(session_id, prepared_config)
                     if nix_store is not None:
-                        # This is an alias of the laptop's existing private scratch
-                        # grant, never a host store or another laptop's files.
+                        # Private durable store and database; build caches retain
+                        # the existing scratch grant.
                         args[-4:-4] = ['--mount', f'type=bind,src={nix_store},dst=/nix']
                     if previous.returncode == 0:
                         self.run_engine(['rm', name])
@@ -889,6 +935,8 @@ class Broker:
                     wrapper = '/bin/reverie-worker-child "$1"; result=$?; printf "%s" "$result" > "$2.tmp"; mv "$2.tmp" "$2"; exec /bin/sleep infinity'
                     self.run_engine(tmux_exec_args(name, '-f', '/dev/null', 'new-session', '-d', '-x', str(request['cols']), '-y', str(request['rows']), '-s', 'office', '/bin/bash', '-c', wrapper, 'laptop', '/home/agent/.reverie-launch/'+launch.name, '/home/agent/.reverie-launch/'+exit_file.name))
                     self.run_engine(tmux_exec_args(name, 'set-option', '-g', 'status', 'off'))
+                    nix_guard.__exit__(None, None, None)
+                    nix_guard = None
                 started = True
             master, slave = pty.openpty()
             tty.setraw(slave)
@@ -956,6 +1004,8 @@ class Broker:
             except OSError:
                 pass
         finally:
+            if nix_guard is not None:
+                nix_guard.__exit__(None, None, None)
             completed = exit_file is not None and exit_file.is_file()
             if admitted and name and owned and ((not started and not existing_running) or completed):
                 try:

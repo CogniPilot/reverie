@@ -26,6 +26,7 @@ let
     checkPhase = ''
       runHook preCheck
       npm test -- test/company-recover.test.ts test/routes/company-routes.test.ts \
+        test/cli-agent-chat-fetch.test.ts test/cli-agent-chat-stdin.test.ts test/cli-agent-chat-file.test.ts \
         test/chat-bot-presets.test.ts test/cron-post-bot.test.ts test/cron-post-security.test.ts \
         test/chatroom-delivery-modes.test.ts test/routes/polling-membership.test.ts \
         test/company-service.test.ts test/company-hierarchy.test.ts \
@@ -68,6 +69,8 @@ let
         test/disk-stats.test.ts test/disk-stats-ui.test.ts test/routes/system-routes.test.ts test/shared-attachments.test.ts test/routes/file-routes.test.ts \
         test/chat-language-service.test.ts test/chat-plugins.test.ts test/chat-math-plugin.test.ts test/workspace-files.test.ts test/workspace-files-safety.test.ts test/workspace-publisher.test.ts \
         test/office-accounts.test.ts test/human-presence-ui.test.ts test/bots-page.test.ts test/bots-ui.test.ts test/bot-avatar.test.ts test/cron-service.test.ts test/office-navigation-ui.test.ts test/workspace-files-ui.test.ts test/preview-routes.test.ts
+      npm test -- test/agent-capabilities.test.ts test/chat-plugin-settings.test.ts
+      npm test -- test/routes/chat-attention.test.ts test/url-session-fragment.test.ts test/company-lifecycle-fence.test.ts
       runHook postCheck
     '';
     installPhase = ''
@@ -95,15 +98,20 @@ let
     postPatch = "patchShebangs ../scripts ../docker ../.github/ci";
     checkPhase = ''
       (cd ..; PYTHONPATH="$PWD/python" PYTHONWARNINGS=ignore::ResourceWarning ${pkgs.python3.withPackages (ps: [ ps.pillow ps.aiohttp ])}/bin/python3 -m unittest discover -s tests -t .)
-      (cd ..; node --test tests/test_cli_installer.mjs tests/test_reverie_start.mjs tests/test_recovery_scripts.mjs tests/test_opencode_plugin.mjs tests/test_model_relay.mjs tests/test_voice_ci_launch.mjs)
+      (cd ..; node --test tests/test_web_install_manifest.mjs tests/test_cli_installer.mjs tests/test_reverie_start.mjs tests/test_recovery_scripts.mjs tests/test_opencode_plugin.mjs tests/test_model_relay.mjs tests/test_voice_ci_launch.mjs)
     '';
   };
-  memory = pkgs.python3.withPackages (ps: [ memoryPackage ps.pillow ]);
+  memory = pkgs.python3.withPackages (ps: [ memoryPackage ps.pillow ps.pytest ]);
   kokoro = import ./kokoro.nix { inherit pkgs memoryPackage; };
   hands = pkgs.writeShellApplication {
     name = "reverie-hands";
     runtimeInputs = [ memory ];
     text = ''exec python3 -I -B ${memoryPackage}/${pkgs.python3.sitePackages}/reverie/hands/launcher.py "$@"'';
+  };
+  adminMemory = pkgs.writeShellApplication {
+    name = "reverie-admin-memory";
+    runtimeInputs = [ memory ];
+    text = ''exec python3 -I -B ${memoryPackage}/${pkgs.python3.sitePackages}/reverie/hands/memory_access.py "$@"'';
   };
   handsToolchain = pkgs.buildEnv {
     name = "reverie-hands-toolchain";
@@ -146,9 +154,10 @@ let
   '';
   runtime = pkgs.buildEnv {
     name = "reverie-runtime";
-    paths = [ console memory kokoro modelRelay officeRelay hands handsTools workerExec workerChild pkgs.nodejs_22 pkgs.tmux pkgs.git pkgs.ripgrep
+    paths = [ console memory kokoro modelRelay officeRelay hands adminMemory handsTools workerExec workerChild pkgs.nodejs_22 pkgs.tmux pkgs.git pkgs.ripgrep
       pkgs.curl pkgs.coreutils pkgs.bashInteractive pkgs.gnugrep pkgs.gnused
       pkgs.gawk pkgs.findutils pkgs.gnutar pkgs.gzip pkgs.procps pkgs.which pkgs.gnumake pkgs.gcc
+      pkgs.rustc pkgs.cargo pkgs.gh pkgs.jq pkgs.diffutils pkgs.fd
       pkgs.cacert lockTools ] ++ providerLaunchers;
     pathsToLink = [ "/bin" "/share" ];
   };
@@ -213,6 +222,7 @@ let
     ln -s ${installClis}/bin/reverie-install-clis "$out/bin/reverie-install-clis"
     ln -s ${kokoro}/bin/reverie-kokoro "$out/bin/reverie-kokoro"
     ln -s ${hands}/bin/reverie-hands "$out/bin/reverie-hands"
+    ln -s ${adminMemory}/bin/reverie-admin-memory "$out/bin/reverie-admin-memory"
     for command in ${memory}/bin/reverie-*; do
       makeWrapper "$command" "$out/bin/$(basename "$command")" \
         --prefix PATH : ${runtime}/bin \

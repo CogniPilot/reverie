@@ -48,9 +48,11 @@ from zoneinfo import ZoneInfo
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import coding_chat
+import admin_task
 from coding_manager import TaskManager
 from coding_model_client import ModelClient
 from debug_terminal import DebugTerminal
+from attention_wake import AttentionWake, wait_for_scan
 
 _terminal = None
 
@@ -145,7 +147,17 @@ class Chat:
 
     def read(self, room, n):
         data = json.loads(self._run(['read', '--room', room, '-n', str(n), '--json']))
-        return [m for m in data.get('messages', []) if isinstance(m, dict) and m.get('id')]
+        messages = [m for m in data.get('messages', []) if isinstance(m, dict) and m.get('id')]
+        if any(type(message.get('phoneWake')) is not bool for message in messages):
+            raise ValueError('Server did not verify current phone delivery; no automatic replies')
+        return messages
+
+    def phone_allows(self, room, message_id):
+        data = json.loads(self._run(['read', '--room', room, '--message', message_id, '--json']))
+        message = data.get('message')
+        if not isinstance(message, dict) or message.get('id') != message_id or type(message.get('phoneWake')) is not bool:
+            raise ValueError('No exact current phone acceptance')
+        return message['phoneWake']
 
     def member_alert(self, room, session_id):
         data = json.loads(self._run(['read', '--room', room, '-n', '1', '--json']))
@@ -237,19 +249,38 @@ def log_web(cfg, room, mid, query):
                             'tool': 'web_search', 'query': query}) + '\n')
 
 
-def wakes(cfg, room, msg):
+def wakes(cfg, room, msg, history=()):
     """True if this message should get an answer from the configured employee."""
     frm = msg.get('from') or {}
     if frm.get('sessionId') == cfg['self_session_id']:
         return False
+    if type(msg.get('phoneWake')) is bool:
+        return msg['phoneWake']  # Canonical server phone policy, independent of the scheduling trigger.
     if frm.get('kind') == 'user':
         return True
     if room in cfg.get('dm_rooms', []) or room in cfg.get('_auto_dms', ()):
         return True
-    return re.search(r'(?<![\w@])@' + re.escape(cfg['self_name']) + r'\b', msg.get('text') or '', re.I) is not None
+    if isinstance(msg.get('to'), list) and cfg['self_session_id'] in msg['to']:
+        return True
+    original = next((item for item in history if item.get('id') == msg.get('replyTo') and not item.get('deleted')), {})
+    if (original.get('from') or {}).get('sessionId') == cfg['self_session_id']:
+        return True
+    return re.search(r'(?<![\w@])@(?:' + re.escape(cfg['self_name']) + r'|everyone)(?![\w-])', msg.get('text') or '', re.I) is not None
 
 
 def alert_allows(cfg, chat, room, msg):
+    # Production Chat rechecks the server's single phone policy before inference AND before posting.
+    # In-process fixture/legacy adapters below retain their old explicit member-alert interface.
+    accepted = getattr(chat, 'phone_allows', None)
+    if callable(accepted):
+        try:
+            value = accepted(room, msg['id'])
+            if type(value) is not bool:
+                raise ValueError('invalid phone acceptance')
+            return value
+        except Exception as error:
+            log('phone acceptance unavailable; no reply', room, type(error).__name__)
+            return False
     try:
         current = chat.member_alert(room, cfg['self_session_id'])
         lease = current['lease']
@@ -475,14 +506,18 @@ def answer(cfg, room, history, msg, model, search, timing=None, recalled=""):
     tool-call markup), the answer is finished without tools: FINAL_NOTE, then at most one retry with RETRY_NOTE in its
     place, then FAIL_LINE. So there are at most search_max_calls + 2 model calls and never a search past the cap.
     `timing`, if given, collects ('model'|'search', seconds, server timings) per step."""
-    messages, _ = build_prompt(cfg, history, msg, room, reserve=search_reserve(cfg), recalled=recalled)
+    start_task = cfg.get('_admin_start_task')
+    task_reserve = len(admin_task.RULE) + len(json.dumps(admin_task.TOOL)) if start_task is not None else 0
+    messages, _ = build_prompt(cfg, history, msg, room, reserve=search_reserve(cfg) + task_reserve, recalled=recalled)
+    if start_task is not None:
+        messages[0]['content'] += '\n' + admin_task.RULE
     searches = largest = 0
     finishing = 0  # finishing calls made (0, 1 or 2)
     searching = bool(cfg.get('search'))
 
     def ask(tools):
         nonlocal largest
-        size = request_chars(messages)
+        size = request_chars(messages) + (len(json.dumps(tools)) if start_task is not None and tools else 0)
         if size > cfg['prompt_cap_chars']:
             raise RuntimeError(f'request of {size} chars is over prompt_cap_chars, not sent')
         largest = max(largest, size)
@@ -498,11 +533,15 @@ def answer(cfg, room, history, msg, model, search, timing=None, recalled=""):
 
     while True:
         if not searching:
-            out = ask(None)
+            out = ask([admin_task.TOOL] if start_task is not None else None)
+            task_reply = admin_task.invoke(out, start_task)
+            if task_reply is not None:return task_reply, largest, searches
             break
         if searches >= cfg['search_max_calls']:
             break  # budget spent: finish without tools
-        out = ask([SEARCH_TOOL])
+        out = ask([SEARCH_TOOL] + ([admin_task.TOOL] if start_task is not None else []))
+        task_reply = admin_task.invoke(out, start_task)
+        if task_reply is not None:return task_reply, largest, searches
         calls = out.get('tool_calls') or []
         if not calls:
             if usable(out) is not None:
@@ -729,7 +768,7 @@ def tick(cfg, chat, state, model=chat_model, search=searxng_search):
             mid = msg['id']
             if mid in seen or msg.get('at', 0) < rs['since']:
                 continue
-            if not wakes(cfg, room, msg):
+            if not wakes(cfg, room, msg, history):
                 rs['seen'] = (rs['seen'] + [mid])[-SEEN_CAP:]
                 seen.add(mid)
                 save_json(cfg['state_file'], state)
@@ -760,8 +799,12 @@ def tick(cfg, chat, state, model=chat_model, search=searxng_search):
                     if cfg.get('_coding_manager'):
                         cfg['_coding_manager'].before_chat()
                     recalled = memory_op(cfg, room, 'recall', query=(msg.get('text') or '')[:cfg['message_cap_chars']])
-                    reply, size, searches = answer(cfg, room, history, msg, model, search, timing,
-                                                   recalled=(recalled or {}).get('text', ''))
+                    cfg['_admin_start_task'] = admin_task.callback(cfg, cfg.get('_coding_manager'), state, room, history, msg)
+                    try:
+                        reply, size, searches = answer(cfg, room, history, msg, model, search, timing,
+                                                       recalled=(recalled or {}).get('text', ''))
+                    finally:
+                        cfg.pop('_admin_start_task', None)
                 if not reply:
                     raise RuntimeError('empty reply')
                 member = still_member(cfg, chat, room)
@@ -847,7 +890,7 @@ def terminal_prompt(cfg, text, history, model=chat_model, search=searxng_search)
 
 DEFAULTS = {
     'memory_instance': None, 'recall_cap_chars': 3000, 'memory_timeout_s': 3,
-    'history_n': 30, 'poll_s': 10, 'prompt_cap_chars': 60000, 'identity_cap_chars': 6000,
+    'history_n': 30, 'poll_s': 15, 'phone_wake': False, 'prompt_cap_chars': 60000, 'identity_cap_chars': 6000,
     'memory_cap_chars': 12000, 'message_cap_chars': 4000, 'reply_max_tokens': 1024, 'reply_cap_chars': 6000,
     'model_timeout_s': 300, 'cli_timeout_s': 60, 'max_answers_per_tick': 3, 'dm_rooms': [],
     'timezone': 'America/New_York',
@@ -875,13 +918,16 @@ def load_config(path):
         ZoneInfo(str(cfg['timezone']))
     except Exception:
         raise SystemExit('config: timezone is not a known time zone') from None
-    if not isinstance(cfg['poll_s'], (int, float)) or isinstance(cfg['poll_s'], bool) or cfg['poll_s'] < 1:
-        raise SystemExit('config: poll_s must be a number of seconds, at least 1')
+    if type(cfg['poll_s']) not in (int, float) or not math.isfinite(cfg['poll_s']) or not 1 <= cfg['poll_s'] <= 300:
+        raise SystemExit('config: poll_s must be between 1 and 300 seconds')
+    if type(cfg['phone_wake']) is not bool:
+        raise SystemExit('config: phone_wake must be a boolean')
     if cfg['search'] and not cfg.get('search_url'):
         raise SystemExit('config: search is on but search_url is not set')
     if cfg['vision'] and (not isinstance(cfg['attachments_root'], str) or not os.path.isabs(cfg['attachments_root'])):
         raise SystemExit('config: vision needs an explicit attachments_root')
     coding_chat.validate_settings(cfg.get('coding'))
+    admin_task.validate(cfg)
     if cfg.get('token_meter') is not None:
         from coding_tokens import TokenMeter
         TokenMeter(**cfg['token_meter'])
@@ -913,12 +959,18 @@ def main(argv):
     view = DebugTerminal(cfg, interactive=False if '--no-tui' in argv or once else None).start()
     cfg['_terminal'] = view
     _terminal = view
+    attention = AttentionWake(cfg, lambda text: terminal_event(cfg, 'note', text=text))
+    cfg['_attention'] = attention
+    if not once:
+        attention.start()
     local_history = []
     try:
         log('start', 'rooms', 'auto' if cfg['rooms'] == 'auto' else len(cfg['rooms']),
             'model', cfg['model'], 'prompt_cap_chars', cfg['prompt_cap_chars'],
-            'vision', bool(cfg['vision']), 'search', bool(cfg['search']))
+            'vision', bool(cfg['vision']), 'search', bool(cfg['search']),
+            'general_scan_s', cfg['poll_s'], 'phone_wake', attention.status)
         while not view.quit_requested:
+            attention.signal.clear()  # Signals arriving during this serial pass cause the next pass immediately.
             prompt = view.pending()
             if prompt is not None:
                 try:
@@ -940,17 +992,11 @@ def main(argv):
                 log('tick failed', repr(e)[:300])
             if once:
                 break
-            delay = min(cfg['poll_s'], 1) if manager and manager.active else cfg['poll_s']
-            until = time.monotonic() + delay
-            while time.monotonic() < until and not view.quit_requested:
-                if not view.inputs.empty():
-                    break
-                if manager and manager.active:
-                    manager.pump()
-                time.sleep(min(0.05, max(0, until - time.monotonic())))
+            wait_for_scan(cfg['poll_s'], attention, view, manager)
     except KeyboardInterrupt:
         log('stopped by operator')
     finally:
+        attention.close()
         try:
             if manager and manager.active:
                 manager.finish({'status': 'stopped', 'reason': 'terminal_exit'}, post=False)

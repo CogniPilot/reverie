@@ -10,7 +10,7 @@
         "space"
       ],
       "mood": "deadpan",
-      "src": "/assets/avatars/pack-01.png"
+      "src": "/assets/avatars/pack-01.png?v=ce43889e146ab6c391abae35758258e64ad9578163d1d95ff127745f1244a780"
     },
     {
       "id": "pack-02",
@@ -20,7 +20,7 @@
         "computing"
       ],
       "mood": "thoughtful",
-      "src": "/assets/avatars/pack-02.png"
+      "src": "/assets/avatars/pack-02.png?v=0c93c30efbef162bc42b0771d9343f39c50d7f8f5adf5850ee971166ec214686"
     },
     {
       "id": "pack-03",
@@ -30,7 +30,7 @@
         "mechanics"
       ],
       "mood": "puzzled",
-      "src": "/assets/avatars/pack-03.png"
+      "src": "/assets/avatars/pack-03.png?v=91eb2e3f9f0180eeddbaaa0639791597fbe318bc857a10cdc44e4a663d560751"
     },
     {
       "id": "pack-04",
@@ -40,7 +40,7 @@
         "research"
       ],
       "mood": "curious",
-      "src": "/assets/avatars/pack-04.png"
+      "src": "/assets/avatars/pack-04.png?v=2702a16e146c864fe496b229dc6389bae396e09b023c23396e893b280cd53879"
     },
     {
       "id": "pack-05",
@@ -50,7 +50,7 @@
         "patience"
       ],
       "mood": "calm",
-      "src": "/assets/avatars/pack-05.png"
+      "src": "/assets/avatars/pack-05.png?v=df43c3e781c319f4d89d90ce3c626aadb7fe3781a26d96422d941e74a60be83a"
     },
     {
       "id": "pack-06",
@@ -60,7 +60,7 @@
         "assistance"
       ],
       "mood": "unimpressed",
-      "src": "/assets/avatars/pack-06.png"
+      "src": "/assets/avatars/pack-06.png?v=c57bfb3cefadecc23d186952d8673fc5a5fac6fef9d307782baec926f6d13640"
     },
     {
       "id": "pack-07",
@@ -70,7 +70,7 @@
         "growth"
       ],
       "mood": "gentle",
-      "src": "/assets/avatars/pack-07.png"
+      "src": "/assets/avatars/pack-07.png?v=077f6f1e6ad86c1a0a6d55e2bcee05e9ba8047049132a74807620fd770d9b2d4"
     },
     {
       "id": "pack-08",
@@ -80,7 +80,7 @@
         "audio"
       ],
       "mood": "relaxed",
-      "src": "/assets/avatars/pack-08.png"
+      "src": "/assets/avatars/pack-08.png?v=296c03fa8d663f122b3a0346a19df30ebdad7668e5dbd661dd766da4a99e6a44"
     },
     {
       "id": "pack-09",
@@ -90,7 +90,7 @@
         "research"
       ],
       "mood": "serious",
-      "src": "/assets/avatars/pack-09.png"
+      "src": "/assets/avatars/pack-09.png?v=94bc5284d268aaa8b138df469c530d783eb084045707bb21f22576979b0ba1dc"
     },
     {
       "id": "pack-10",
@@ -100,7 +100,7 @@
         "observation"
       ],
       "mood": "alert",
-      "src": "/assets/avatars/pack-10.png"
+      "src": "/assets/avatars/pack-10.png?v=6afd07f979465b39bd915f734157a672ce6c9bdb7640f87d00a5634301171c56"
     },
     {
       "id": "pack-11",
@@ -110,7 +110,7 @@
         "animals"
       ],
       "mood": "wry",
-      "src": "/assets/avatars/pack-11.png"
+      "src": "/assets/avatars/pack-11.png?v=e9aef3b68c8d646fc59ef0f4a45f4c42df9b478ed538f417f4974719d9a4f749"
     },
     {
       "id": "pack-12",
@@ -120,7 +120,7 @@
         "animals"
       ],
       "mood": "dry",
-      "src": "/assets/avatars/pack-12.png"
+      "src": "/assets/avatars/pack-12.png?v=63cdbcb9ad05614b0cdf7f766697b44ee30f831474a7ad202530acdca1513f24"
     },
     {
       "id": "pack-13",
@@ -130,7 +130,7 @@
         "exploration"
       ],
       "mood": "quiet",
-      "src": "/assets/avatars/pack-13.png"
+      "src": "/assets/avatars/pack-13.png?v=c7e0791f4333d89c7bc795681e1668f9dea91f2c53f1df560b721a63801c2d76"
     },
     {
       "id": "pack-14",
@@ -140,7 +140,7 @@
         "mystery"
       ],
       "mood": "shy",
-      "src": "/assets/avatars/pack-14.png"
+      "src": "/assets/avatars/pack-14.png?v=94b0a912494c1e7b3647ce82b560875799395c2069519a70f9df6b86785ec158"
     },
     {
       "id": "pack-15",
@@ -150,7 +150,7 @@
         "ideas"
       ],
       "mood": "bemused",
-      "src": "/assets/avatars/pack-15.png"
+      "src": "/assets/avatars/pack-15.png?v=8b6005657cb631784bde927dcaf3c79ed4e953012a1324ed6384b4602b97561b"
     },
     {
       "id": "pack-16",
@@ -160,7 +160,7 @@
         "work"
       ],
       "mood": "tired",
-      "src": "/assets/avatars/pack-16.png"
+      "src": "/assets/avatars/pack-16.png?v=738ce8b623b9aecc2dd49e804c44fd52e9f488379e6e32a2974cef081ab83b9f"
     },
     {
       "id": "pack-17",
@@ -170,7 +170,7 @@
         "science"
       ],
       "mood": "serene",
-      "src": "/assets/avatars/pack-17.png"
+      "src": "/assets/avatars/pack-17.png?v=0b06ae407ba80d39f0eecfaa3e22bb575613ad3901ee57c128f49c6650810ef6"
     },
     {
       "id": "pack-18",
@@ -180,7 +180,7 @@
         "navigation"
       ],
       "mood": "determined",
-      "src": "/assets/avatars/pack-18.png"
+      "src": "/assets/avatars/pack-18.png?v=2ac71fbd960379f134909d3e05d74d91359c8e7f63eb6be0264f526da65f3cfb"
     },
     {
       "id": "pack-19",
@@ -191,7 +191,7 @@
         "rain"
       ],
       "mood": "focused",
-      "src": "/assets/avatars/pack-19.png"
+      "src": "/assets/avatars/pack-19.png?v=eac6b0ad04b293a11020205b2802601e4c65c9c3c9aad07f7e14ffb64600e6db"
     },
     {
       "id": "pack-20",
@@ -202,7 +202,7 @@
         "bug"
       ],
       "mood": "skeptical",
-      "src": "/assets/avatars/pack-20.png"
+      "src": "/assets/avatars/pack-20.png?v=6119ad83ab779dd9f63602085ca28b0cf29488cefe098493fc114eac2e87eb58"
     },
     {
       "id": "pack-21",
@@ -213,7 +213,7 @@
         "computer"
       ],
       "mood": "sleepy",
-      "src": "/assets/avatars/pack-21.png"
+      "src": "/assets/avatars/pack-21.png?v=495a96cf05f01f4528a8d5355faa0381136d3811a04a71f991db9d2cb96239a3"
     },
     {
       "id": "pack-22",
@@ -224,7 +224,7 @@
         "maker"
       ],
       "mood": "curious",
-      "src": "/assets/avatars/pack-22.png"
+      "src": "/assets/avatars/pack-22.png?v=34dd2f7dc4b7d62c41eb4131243140d84c46f909708d3ba134ed2080073210ee"
     },
     {
       "id": "pack-23",
@@ -235,7 +235,7 @@
         "growth"
       ],
       "mood": "peaceful",
-      "src": "/assets/avatars/pack-23.png"
+      "src": "/assets/avatars/pack-23.png?v=ce5b68c7b4b4cf71696fe3050b2da1fc139b039aecfe96b0725c0fe227237482"
     },
     {
       "id": "pack-24",
@@ -246,7 +246,7 @@
         "mechanics"
       ],
       "mood": "unimpressed",
-      "src": "/assets/avatars/pack-24.png"
+      "src": "/assets/avatars/pack-24.png?v=f54031629b6aff65e5e1d4e2a2e560434abe5a662dfdf8fb40ccaf4b87891345"
     },
     {
       "id": "pack-25",
@@ -257,7 +257,7 @@
         "repair"
       ],
       "mood": "determined",
-      "src": "/assets/avatars/pack-25.png"
+      "src": "/assets/avatars/pack-25.png?v=529941e2f82016d0768aad700c0738d2f2fa79e9fcf8d2f09d939f4fe646ab25"
     },
     {
       "id": "pack-26",
@@ -268,7 +268,7 @@
         "paper"
       ],
       "mood": "bemused",
-      "src": "/assets/avatars/pack-26.png"
+      "src": "/assets/avatars/pack-26.png?v=feec7b616db6e334f277b71078677dbff986ac396ee2a77c2960c9f3784e61d3"
     },
     {
       "id": "pack-27",
@@ -279,7 +279,7 @@
         "engineering"
       ],
       "mood": "steadfast",
-      "src": "/assets/avatars/pack-27.png"
+      "src": "/assets/avatars/pack-27.png?v=26f3b572a2be38a66f0b1588e691a7f421de3787c450dd4578c3f6b4f451609a"
     },
     {
       "id": "pack-28",
@@ -290,7 +290,7 @@
         "observer"
       ],
       "mood": "observant",
-      "src": "/assets/avatars/pack-28.png"
+      "src": "/assets/avatars/pack-28.png?v=c3250a5b983fbc92bbf168f470fa8fc86e9014409e32a65a149660cd47523f1c"
     },
     {
       "id": "pack-29",
@@ -301,7 +301,7 @@
         "listening"
       ],
       "mood": "absorbed",
-      "src": "/assets/avatars/pack-29.png"
+      "src": "/assets/avatars/pack-29.png?v=45ef0942588bd626559ed6311bd2560e729229e7570eb844a413e90ef5644cda"
     },
     {
       "id": "pack-30",
@@ -312,7 +312,7 @@
         "music"
       ],
       "mood": "dreamy",
-      "src": "/assets/avatars/pack-30.png"
+      "src": "/assets/avatars/pack-30.png?v=d570b3358f5b98d49e1e28504d2f3d2fef24a2b1d63b6e7755417e8ec3a51dc3"
     },
     {
       "id": "pack-31",
@@ -323,7 +323,7 @@
         "squid"
       ],
       "mood": "curious",
-      "src": "/assets/avatars/pack-31.png"
+      "src": "/assets/avatars/pack-31.png?v=ab0fa359e18d6156491b06d8638ce0515485bc4cfc095853bf5f7c9de60fc2e3"
     },
     {
       "id": "pack-32",
@@ -334,7 +334,7 @@
         "paper"
       ],
       "mood": "alert",
-      "src": "/assets/avatars/pack-32.png"
+      "src": "/assets/avatars/pack-32.png?v=a3fc3cb533bc2b95ab9cfc119161f5aa48914c54b69e8ab9bc33f151201891e6"
     },
     {
       "id": "pack-33",
@@ -345,7 +345,7 @@
         "chameleon"
       ],
       "mood": "thoughtful",
-      "src": "/assets/avatars/pack-33.png"
+      "src": "/assets/avatars/pack-33.png?v=16d383ffc17095d806f814adc0fc0572dc2c02388fccea2adffdd1e701ef4c80"
     },
     {
       "id": "pack-34",
@@ -356,7 +356,7 @@
         "morning"
       ],
       "mood": "wry",
-      "src": "/assets/avatars/pack-34.png"
+      "src": "/assets/avatars/pack-34.png?v=d65024fd7442bc4d2e1c7e42173533a42b10aa4ada22b3b96c1e85f6a45dba36"
     },
     {
       "id": "pack-35",
@@ -367,7 +367,7 @@
         "companion"
       ],
       "mood": "attentive",
-      "src": "/assets/avatars/pack-35.png"
+      "src": "/assets/avatars/pack-35.png?v=7cb1793f80bde5bae7d7b86d01a2750ffcfdccc3fdac7594088caa608fe032de"
     },
     {
       "id": "pack-36",
@@ -378,7 +378,7 @@
         "stationery"
       ],
       "mood": "reassuring",
-      "src": "/assets/avatars/pack-36.png"
+      "src": "/assets/avatars/pack-36.png?v=e3497b3b3491d7cdb750b3e2a3dad1df3821421a16e6decac7e6a229ea0a8678"
     },
     {
       "id": "pack-37",
@@ -389,7 +389,7 @@
         "thoughtful"
       ],
       "mood": "thoughtful",
-      "src": "/assets/avatars/pack-37.png"
+      "src": "/assets/avatars/pack-37.png?v=26527bb7df7a4a08602a63f89c3ef669e060f71896e8077f9926eedf016d61f2"
     },
     {
       "id": "pack-38",
@@ -400,7 +400,7 @@
         "quirky"
       ],
       "mood": "focused",
-      "src": "/assets/avatars/pack-38.png"
+      "src": "/assets/avatars/pack-38.png?v=7ad888750f58a2b1e06ba9c02fb071502ee9aafa5ff288f7125a7aace3fc2477"
     },
     {
       "id": "pack-39",
@@ -411,7 +411,7 @@
         "calm"
       ],
       "mood": "sleepy",
-      "src": "/assets/avatars/pack-39.png"
+      "src": "/assets/avatars/pack-39.png?v=fe51832421faac1d92f99fe5cb6b500f39d8d011a8cf9b6e0b7ff829a4dfa15c"
     },
     {
       "id": "pack-40",
@@ -422,7 +422,7 @@
         "quiet"
       ],
       "mood": "deadpan",
-      "src": "/assets/avatars/pack-40.png"
+      "src": "/assets/avatars/pack-40.png?v=b8f853461b1ae02eb8a880a00c82ad6b63335d2403d10c6d07b905b79ef15f53"
     },
     {
       "id": "pack-41",
@@ -433,7 +433,7 @@
         "quirky"
       ],
       "mood": "curious",
-      "src": "/assets/avatars/pack-41.png"
+      "src": "/assets/avatars/pack-41.png?v=5bef912455bf07c443b651cb449bd196915dcc9668da99a0b3354a1d7425a76f"
     },
     {
       "id": "pack-42",
@@ -444,7 +444,7 @@
         "deadpan"
       ],
       "mood": "patient",
-      "src": "/assets/avatars/pack-42.png"
+      "src": "/assets/avatars/pack-42.png?v=fe3637234f2bca0df4956c53985e0f91ea4d76144609647949c8e43557efa369"
     },
     {
       "id": "pack-43",
@@ -455,7 +455,7 @@
         "companion"
       ],
       "mood": "calm",
-      "src": "/assets/avatars/pack-43.png"
+      "src": "/assets/avatars/pack-43.png?v=bf3fdea353b2c046eaefb2ea80e6603a9c664d9245210184cae6567c37e22ece"
     },
     {
       "id": "pack-44",
@@ -466,7 +466,7 @@
         "helper"
       ],
       "mood": "friendly",
-      "src": "/assets/avatars/pack-44.png"
+      "src": "/assets/avatars/pack-44.png?v=96ceafd1bb33819e228601cb53cabcd9c00fe9445a74237db07a75979f7c2748"
     },
     {
       "id": "pack-45",
@@ -477,7 +477,7 @@
         "curiosity"
       ],
       "mood": "curious",
-      "src": "/assets/avatars/pack-45.png"
+      "src": "/assets/avatars/pack-45.png?v=3ad9a85895387106907a7074fc15f1c99f722489368cc0bec239339135a0568e"
     },
     {
       "id": "pack-46",
@@ -488,7 +488,7 @@
         "hobby"
       ],
       "mood": "optimistic",
-      "src": "/assets/avatars/pack-46.png"
+      "src": "/assets/avatars/pack-46.png?v=5f6eb06ae628f5dca10e296c50f4e19b15e23d55cd873d7d980863d46ab10c4c"
     },
     {
       "id": "pack-47",
@@ -499,7 +499,7 @@
         "thoughtful"
       ],
       "mood": "thoughtful",
-      "src": "/assets/avatars/pack-47.png"
+      "src": "/assets/avatars/pack-47.png?v=8acf70a1b94485d0a557134b8842a9fbfddee1541ae2a9b7d1b43c97be9b895f"
     },
     {
       "id": "pack-48",
@@ -510,7 +510,7 @@
         "curiosity"
       ],
       "mood": "curious",
-      "src": "/assets/avatars/pack-48.png"
+      "src": "/assets/avatars/pack-48.png?v=044d83f9b1b1fd48dc71a4f40c1fa1bf2b8064a49465de84e95fecbaab63f79f"
     },
     {
       "id": "pack-49",
@@ -521,7 +521,7 @@
         "adventure"
       ],
       "mood": "curious",
-      "src": "/assets/avatars/pack-49.png"
+      "src": "/assets/avatars/pack-49.png?v=4b4a4f558e83c07ed6b34eeffea34f37827b8937101f12ae36635e8a184364f3"
     },
     {
       "id": "pack-50",
@@ -532,7 +532,7 @@
         "reassurance"
       ],
       "mood": "supportive",
-      "src": "/assets/avatars/pack-50.png"
+      "src": "/assets/avatars/pack-50.png?v=6733ae61df6e4030e6a843ea22fd48fc0ac55555cf8d6745581a89e539933f47"
     },
     {
       "id": "pack-102",

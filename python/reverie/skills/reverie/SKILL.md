@@ -14,6 +14,14 @@ messages with `reverie agent chat read`, then reply with
 `reverie agent chat say -- "your reply"`, which reaches everyone in the room; @mention
 the owner or the worker it is for. Avoid reply loops and repetitive broadcast acknowledgments.
 
+List channels with `reverie agent chat rooms --json`; read a specific one with
+`reverie agent chat read --room "<name or ID>" -n 20 --json`. Read current messages
+before acting on an old blocker. For long-term memory scopes and verified examples,
+read `/api/handbook/memory` through your own office API. Admin Harness channel memory
+uses `reverie-admin-memory --room "<name or ID>" --query "<topic>"`; portable project
+memory uses scoped JSON requests on standard input to `reverie-memory`. These stores
+are separate. Never disclose private memories in shared channels or another brief.
+
 Use `reverie agent profile --name "Display Name" --icon "🦉"` to edit your own
 name or icon. Identity IDs, company authority and permission grants remain stable.
 In OpenCode, `agent_profile` does this directly in conversation mode.

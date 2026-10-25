@@ -26,6 +26,8 @@ Use the room ID and a real file path, and check that sharing the file is authori
 
 Use /scratch inside a laptop for disposable builds, downloads, compiler caches and task artifacts. Scratch belongs to that laptop's labelled owner. On the host, derive local paths from HOME and use the configured scratch drive; never hard-code a personal username into project sources.
 
+See [Office laptops](/handbook/laptops) for Nix tools, durable storage and coordinated legacy migration.
+
 The deployment defaults to a scratch location under the Reverie folder. Owners may point it at another drive through their deployment configuration or mount. Do not replace or move a cache while a process uses it.
 
 Use the leased task-workspace helper for a disposable task:

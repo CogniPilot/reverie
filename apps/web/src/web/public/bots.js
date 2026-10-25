@@ -11,7 +11,7 @@
   let editingContent;
   let botAvatar = '';
   const avatarPath = (value) =>
-    typeof value === 'string' && /^\/assets\/avatars\/pack-(?:0[1-9]|[1-9][0-9]|1[0-4][0-9]|15[01])\.png$/.test(value) ? value : '';
+    typeof value === 'string' && /^\/assets\/avatars\/pack-(?:0[1-9]|[1-9][0-9]|1[0-4][0-9]|15[01])\.png(?:\?v=[a-f0-9]{64})?$/.test(value) ? value : '';
   const assetUrl = (path) => new URL('.' + path, location.href).href;
   let snapshot,
     busy = false,
@@ -380,7 +380,7 @@
       const manifest = await response.json();
       if (!dialog.open) return;
       const avatars = (Array.isArray(manifest.avatars) ? manifest.avatars : [])
-        .filter((avatar) => /^pack-(?:0[1-9]|[1-4][0-9]|50|10[2-9]|1[1-4][0-9]|15[01])$/.test(avatar?.id) && avatarPath(avatar?.src) && avatar.src === `/assets/avatars/${avatar.id}.png`)
+        .filter((avatar) => /^pack-(?:0[1-9]|[1-4][0-9]|50|10[2-9]|1[1-4][0-9]|15[01])$/.test(avatar?.id) && avatarPath(avatar?.src) && avatar.src.split('?')[0] === `/assets/avatars/${avatar.id}.png`)
         .slice(0, 100);
       byId('bot-avatar-status').textContent = avatars.length ? '' : 'No avatars available.';
       for (const avatar of avatars) {

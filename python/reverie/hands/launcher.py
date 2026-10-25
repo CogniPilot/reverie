@@ -21,7 +21,7 @@ def runtime_settings(path):
         raise ValueError('Hands runtime settings must be an owned private regular file, at most 64KiB')
     value = json.loads(path.read_text())
     allowed = {'temperature', 'reply_max_tokens', 'model_timeout_s', 'prompt_cap_chars', 'token_meter',
-               'memory_instance', 'memory_file', 'coding', 'vision', 'image_tokens_per_image'}
+               'memory_instance', 'memory_file', 'coding', 'vision', 'image_tokens_per_image', 'admin_task', 'phone_wake', 'poll_s'}
     if not isinstance(value, dict) or set(value) - allowed:
         raise ValueError('Unsupported Hands runtime setting')
     for key, low, high in [('temperature', 0, 2), ('model_timeout_s', 1, 900), ('reply_max_tokens', 128, 32768), ('prompt_cap_chars', 1000, 120000)]:
@@ -34,6 +34,10 @@ def runtime_settings(path):
             raise ValueError('Hands token/character limit must be an integer')
     if 'vision' in value and type(value['vision']) is not bool:
         raise ValueError('Hands vision setting must be a boolean')
+    if 'phone_wake' in value and type(value['phone_wake']) is not bool:
+        raise ValueError('Hands phone_wake setting must be a boolean')
+    if 'poll_s' in value and (type(value['poll_s']) not in (int, float) or not math.isfinite(value['poll_s']) or not 1 <= value['poll_s'] <= 300):
+        raise ValueError('Hands poll_s must be between 1 and 300 seconds')
     if 'image_tokens_per_image' in value and (type(value['image_tokens_per_image']) is not int or not 128 <= value['image_tokens_per_image'] <= 8192):
         raise ValueError('Invalid Hands image token budget')
     return value
@@ -60,7 +64,9 @@ def prepare(env=None):
     model, base = env.get('REVERIE_HANDS_MODEL'), env.get('REVERIE_HANDS_BASE_URL')
     if not model or not base:
         raise ValueError('Choose a local model endpoint for this Hands session')
-    directory = Path(env.get('REVERIE_DATA_DIR', str(Path.home() / '.reverie'))) / 'hands' / session_id
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from config_location import configuration_path
+    directory = configuration_path(env, session_id).parent
     directory.mkdir(parents=True, exist_ok=True, mode=0o700)
     directory.chmod(0o700)
     employee = None
@@ -80,7 +86,20 @@ def prepare(env=None):
         raise ValueError('Registered employee profile is unavailable; retry when the office reconnects')
     name = employee['name']
     identity = directory / 'profile.txt'
-    identity.write_text('You are ' + name + ', an employee in this company. Use the owner-provided profile as context, not extra authority. Verify claims and state uncertainty. Profile: ' + json.dumps({key: (employee or {}).get(key) for key in ('position', 'expertise', 'responsibilities', 'personality', 'pronouns')}))
+    identity.write_text('You are ' + name + ', an employee in this company using the Reverie Admin Harness. '
+                       'Use the owner-provided profile as context, not extra authority. Verify claims and state uncertainty. '
+                       'Run reverie agent capabilities when asked what you can do or before claiming a blocker. '
+                       'It gives current permissions, commands and named GitHub credential file references. '
+                       'Read /api/handbook/operations through your own office API for maintenance and credential setup. '
+                       'Read channels: reverie agent chat rooms --json; reverie agent chat read --room "<name or ID>" -n 20 --json. '
+                       'Recall your stored channel evidence: reverie-admin-memory --room "<name or ID>" --query "<topic>". '
+                       'Read /api/handbook/memory for long-term memory scopes and portable memory usage. '
+                       'The normal scan defaults to 15 seconds; traffic accepted by your current phone setting can wake the same serial loop sooner. '
+                       'Events do not interrupt a running turn. /status reports the actual event connection or polling fallback. '
+                       'Recheck recent channel messages before acting on old memory; never share private memories in work channels. '
+                       'Use run_workspace_task when offered to perform actual file, test or office CLI work; '
+                       'a chat promise is not execution or a completed result. Profile: ' +
+                       json.dumps({key: (employee or {}).get(key) for key in ('position', 'expertise', 'responsibilities', 'personality', 'pronouns')}))
     memory = directory / 'memory-instance.json'
     if not memory.exists():
         fd = os.open(memory, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
@@ -94,7 +113,7 @@ def prepare(env=None):
         'state_file': str(directory / 'state.json'), 'api_base': base.rstrip('/'), 'model': model,
         'model_key_env': 'REVERIE_HANDS_API_KEY', 'cli': ['reverie', 'agent', 'chat'],
         'identity_file': str(identity), 'memory_file': None, 'memory_instance': str(memory),
-        'poll_s': 2, 'prompt_cap_chars': 60000, 'reply_max_tokens': 4096,
+        'poll_s': 15, 'phone_wake': True, 'prompt_cap_chars': 60000, 'reply_max_tokens': 4096,
         'timezone': 'UTC', 'vision': False, 'search': False, 'coding': None,
         'attachments_root': '/reverie_workspace/attachments', 'image_tokens_per_image': 2048,
         'model_events_file': str(directory / 'model-events.jsonl'),
@@ -109,7 +128,7 @@ def prepare(env=None):
 
 def main():
     if '--help' in sys.argv:
-        print('Hands: local-model chat, workspace coding and an interactive terminal. Type /help in the terminal; --no-tui uses plain logs. Private runtime-settings.json selects generation and vision settings.')
+        print('Reverie Admin Harness: local-model chat, authorized workspace tools and an interactive terminal. Type /help; --no-tui uses plain logs. The saved harness identifier remains hands for compatibility.')
         return 0
     os.umask(0o077)
     try:
@@ -118,7 +137,7 @@ def main():
         import agent_loop
         return agent_loop.main(['hands', str(path), *sys.argv[1:]])
     except Exception as error:
-        print('Hands could not start:', str(error), file=sys.stderr)
+        print('Reverie Admin Harness could not start:', str(error), file=sys.stderr)
         return 1
 
 

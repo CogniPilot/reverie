@@ -21,7 +21,7 @@ export interface ChatBot {
 }
 
 export const BOT_ID_PATTERN = /^[a-z0-9][a-z0-9_-]{0,39}$/;
-export const BOT_AVATAR_PATTERN = /^\/assets\/avatars\/pack-(?:0[1-9]|[1-9][0-9]|1[0-4][0-9]|15[01])\.png$/;
+export const BOT_AVATAR_PATTERN = /^\/assets\/avatars\/pack-(?:0[1-9]|[1-9][0-9]|1[0-4][0-9]|15[01])\.png(?:\?v=[a-f0-9]{64})?$/;
 export const MAX_BOTS = 20;
 export const MAX_BOT_ROOMS = 100;
 export const DEFAULT_BOT_POSTS_PER_HOUR = 30;

@@ -29,6 +29,15 @@ export class CompanyError extends Error {
   }
 }
 
+/** An owner runtime transaction, scoped to one unchanged employee/session binding. */
+export interface RuntimeRestartIntent {
+  originallyStopped: boolean;
+  claim(): Promise<void>;
+  current(): boolean;
+  rollback(): Promise<void>;
+  finish(): void;
+}
+
 export interface ResearchHandle {
   cycleId: string;
   employeeId: string;
@@ -110,6 +119,8 @@ function validateReportingLine(state: CompanyState, employee: CompanyEmployee): 
 
 export class CompanyService {
   private ticking = false;
+  private wakeFlights = new Map<string, { cancelled: boolean }>();
+  private runtimeRestarts = new Map<string, { cancelled: boolean; closed: boolean }>();
   constructor(
     readonly store: CompanyStore,
     private readonly deps: CompanyServiceDeps
@@ -128,6 +139,68 @@ export class CompanyService {
 
   registeredEmployees() {
     return this.store.snapshot().employees;
+  }
+
+  /** Only the verified-owner runtime route calls this; ordinary wake never changes stopped intent. */
+  prepareRuntimeRestart(sessionId: string, owner: string | undefined): RuntimeRestartIntent | undefined {
+    const original = this.store.snapshot().employees.find((e) => e.sessionId === sessionId && sameOwner(e.owner, owner));
+    if (!original) return undefined;
+    if (original.onVacation || this.runtimeRestarts.has(sessionId) || this.wakeFlights.has(sessionId))
+      throw new CompanyError('This expert changed or is already restarting', 409);
+    const transaction = { cancelled: false, closed: false };
+    this.runtimeRestarts.set(sessionId, transaction);
+    let claimed = false;
+    const matches = (employee: CompanyEmployee | undefined): employee is CompanyEmployee => !!employee && employee.id === original.id &&
+      employee.sessionId === sessionId && sameOwner(employee.owner, owner) && !employee.onVacation;
+    const current = () => !transaction.cancelled && !transaction.closed &&
+      this.runtimeRestarts.get(sessionId) === transaction;
+    return {
+      originallyStopped: original.desiredRunning === false,
+      current: () => {
+        const employee = this.store.snapshot().employees.find((e) => e.id === original.id);
+        return current() && matches(employee) && employee.desiredRunning === (claimed ? true : original.desiredRunning);
+      },
+      claim: async () => {
+        await this.store.update((state) => {
+          const employee = state.employees.find((e) => e.id === original.id);
+          if (!current() || !matches(employee) || employee.desiredRunning !== original.desiredRunning)
+            throw new CompanyError('This expert changed or stopped while runtime settings were being validated', 409);
+          employee.desiredRunning = true;
+        });
+        claimed = true;
+      },
+      rollback: async () => {
+        if (!claimed) return;
+        await this.store.update((state) => {
+          const employee = state.employees.find((e) => e.id === original.id);
+          if (current() && matches(employee) && employee.desiredRunning === true)
+            employee.desiredRunning = original.desiredRunning;
+        });
+      },
+      finish: () => {
+        transaction.closed = true;
+        if (this.runtimeRestarts.get(sessionId) === transaction) this.runtimeRestarts.delete(sessionId);
+      },
+    };
+  }
+
+  /** Shared with owner restart: the lease covers recovery claim, launch and registration. */
+  prepareWake(employeeId: string, sessionId: string) {
+    const employee = this.store.snapshot().employees.find(e => e.id === employeeId && e.sessionId === sessionId);
+    if (!employee || employee.onVacation || employee.desiredRunning === false ||
+        this.runtimeRestarts.has(sessionId) || this.wakeFlights.has(sessionId)) return undefined;
+    const flight = { cancelled: false };
+    this.wakeFlights.set(sessionId, flight);
+    return {
+      current: () => {
+        const current = this.store.snapshot().employees.find(e => e.id === employeeId && e.sessionId === sessionId);
+        return this.wakeFlights.get(sessionId) === flight && !flight.cancelled && !!current &&
+          sameOwner(current.owner, employee.owner) && !current.onVacation && current.desiredRunning !== false;
+      },
+      finish: () => {
+        if (this.wakeFlights.get(sessionId) === flight) this.wakeFlights.delete(sessionId);
+      },
+    };
   }
 
   view(owner?: string) {
@@ -152,9 +225,16 @@ export class CompanyService {
     running: boolean,
     stillCurrent: () => boolean = () => true
   ): Promise<void> {
-    if (!this.store.snapshot().employees.some((e) => e.sessionId === sessionId && e.desiredRunning !== running)) return;
+    const restart = this.runtimeRestarts.get(sessionId);
+    const wake = this.wakeFlights.get(sessionId);
+    if (!restart && !wake && !this.store.snapshot().employees.some((e) => e.sessionId === sessionId && e.desiredRunning !== running)) return;
     await this.store.update((state) => {
-      if (!stillCurrent()) return;
+      // Persistence and onRuntimeSaved may finish after an owner stop. Neither may revive it.
+      if (!stillCurrent() || (running && restart && (restart.cancelled || restart.closed))) return;
+      if (!running) {
+        if (restart) restart.cancelled = true;
+        if (wake) wake.cancelled = true;
+      }
       const employee = state.employees.find((e) => e.sessionId === sessionId);
       if (employee) employee.desiredRunning = employee.onVacation ? false : running;
     });
@@ -164,7 +244,7 @@ export class CompanyService {
   async claimWake(employeeId: string, sessionId: string, now: number, automatic = true): Promise<boolean> {
     return this.store.update((state) => {
       const employee = state.employees.find((e) => e.id === employeeId && e.sessionId === sessionId);
-      if (!employee || employee.onVacation || employee.desiredRunning === false) return false;
+      if (!employee || employee.onVacation || employee.desiredRunning === false || this.runtimeRestarts.has(sessionId)) return false;
       const settings = state.settings.find((s) => s.owner === employee.owner);
       if (automatic && settings?.autoWakeEnabled === false) return false;
       const attempts = employee.wakeAttempts.filter((at) => at > now - 15 * 60_000);
@@ -181,6 +261,9 @@ export class CompanyService {
       if (!employee) throw new CompanyError('Unknown employee', 404);
       if (enabled && this.deps.getSession(employee.sessionId) && !this.deps.stopSession)
         throw new CompanyError('Session stopping is not ready', 503);
+      const restart = this.runtimeRestarts.get(employee.sessionId);
+      if (restart) restart.cancelled = true;
+      const wake = this.wakeFlights.get(employee.sessionId); if (wake) wake.cancelled = true;
       employee.onVacation = enabled;
       employee.desiredRunning = !enabled;
       if (!enabled) employee.wakeAttempts = [];
@@ -409,6 +492,9 @@ export class CompanyService {
       if (state.employees.some((e) => e.id !== employeeId && e.sessionId === sessionId))
         throw new CompanyError('Session already bound', 409);
       previous = employee.sessionId;
+      const restart = this.runtimeRestarts.get(previous);
+      if (restart) restart.cancelled = true;
+      const wake = this.wakeFlights.get(previous); if (wake) wake.cancelled = true;
       previousThread = employee.threadId;
       previousRecipe = employee.runtimeRecipe;
       employee.sessionId = sessionId;

@@ -206,6 +206,8 @@ function etTime(at: number): string {
 }
 
 export class ChatroomService {
+  /** Per-instance startup opt-in; configuration-OFF remains safe for stored receipts. */
+  readonly adminPhoneWakeEnabled = process.env.REVERIE_ADMIN_PHONE_WAKE === 'enabled';
   private store = new ChatroomStore();
   readonly delivery: ChatroomDelivery;
   private readonly alertModes: EmployeeAlertModes;
@@ -243,13 +245,7 @@ export class ChatroomService {
     this.seen = new LastSeenStore(deps.file ? join(dirname(deps.file), 'chat-last-seen.json') : undefined);
     this.delivery = new ChatroomDelivery({
       getSession: deps.getSession,
-      forceWake: (sessionId, roomId, messageId) => {
-        const message = this.store.get(roomId)?.messages.find((m) => m.id === messageId);
-        const mode = this.alertMode(sessionId)?.mode;
-        // The owner wakes a member on Ring or Vibrate; on Silent only by @mentioning it or @everyone (alertAllows).
-        if (message?.from.kind === 'user' && isOwnerMark(message.from.mark) && mode !== 'silent') return true;
-        return (mode === 'vibrate' || mode === 'silent') && this.alertAllows(sessionId, roomId, messageId);
-      },
+      forceWake: (sessionId, roomId, messageId) => this.phoneForcesWake(sessionId, roomId, messageId),
       allowFragment: (sessionId, roomId, messageId) => this.alertAllows(sessionId, roomId, messageId),
       now: deps.now,
       isReady: () => this.deliveryReady,
@@ -383,7 +379,9 @@ export class ChatroomService {
   }
 
   private messageIdentity(room: ChatRoom, message: ChatMessage): ChatMessage {
-    const view = messageWithEmployeeIdentity(message, room.owner, this.depsWithIdentity());
+    const visible = { ...message };
+    delete visible.phoneWakes;
+    const view = messageWithEmployeeIdentity(visible, room.owner, this.depsWithIdentity());
     return view.attachments?.length ? { ...view, attachments: view.attachments.map(file => ({ ...file, path: sharedAttachmentPath(room.id, file) })) } : view;
   }
 
@@ -835,6 +833,40 @@ export class ChatroomService {
     return result;
   }
 
+  private phoneForcesWake(sessionId: string, roomId: string, messageId?: string): boolean {
+    const message = this.store.get(roomId)?.messages.find((m) => m.id === messageId);
+    const mode = this.alertMode(sessionId)?.mode;
+    if (message?.from.kind === 'user' && isOwnerMark(message.from.mark) && mode !== 'silent') return true;
+    return (mode === 'vibrate' || mode === 'silent') && this.alertAllows(sessionId, roomId, messageId);
+  }
+
+  /** One canonical room/member selection for pane delivery and polling phones. */
+  private deliverySelection(room: ChatRoom, message: ChatMessage, pollingPhones = false) {
+    const recipients = messageRecipients(room, message).filter(id =>
+      room.members.some(member => member.sessionId === id && (!member.postOnly ||
+        (pollingPhones && modePollsChat(this.deps.getSession(id)?.mode)))));
+    const awake = wakeRecipients(room, message, recipients, this.nameOf, process.env, id => {
+      const session = this.deps.getSession(id);
+      return !!session && session.pid !== null && (paneAcceptsChat(session.mode) ||
+        (pollingPhones && modePollsChat(session.mode)));
+    });
+    return { recipients, awake };
+  }
+
+  /** Canonical wake/action eligibility; this never restricts ordinary room history reads. */
+  phoneAccepts(sessionId: string, roomId: string, messageId: string): boolean {
+    if (!this.adminPhoneWakeEnabled) return false;
+    const room = this.store.get(roomId);
+    if (!room || room.archivedAt || !room.members.some(member => member.sessionId === sessionId) ||
+      (isDm(room) && !room.dm.includes(sessionId))) return false;
+    const message = room.messages.find(item => item.id === messageId);
+    if (!message || message.deleted || message.voice ||
+      !Array.isArray(message.phoneWakes) || !message.phoneWakes.includes(sessionId)) return false;
+    const { recipients, awake } = this.deliverySelection(room, message, true);
+    return recipients.includes(sessionId) && this.alertAllows(sessionId, roomId, messageId) &&
+      (awake.has(sessionId) || this.phoneForcesWake(sessionId, roomId, messageId));
+  }
+
   private alertAllows(sessionId: string, roomId: string, messageId?: string): boolean {
     const lease = this.alertMode(sessionId);
     if (!lease || lease.mode === 'ring') return true;
@@ -1213,6 +1245,15 @@ export class ChatroomService {
     const message = this.store.post(roomId, from, text, to, this.now(), extra);
     // Only an agent's own signature names a session: a user, an external sender or the system never does.
     if (from.kind === 'agent' && cleanName(from.name)) this.knownNames.set(from.sessionId, cleanName(from.name));
+    const selection = this.deliverySelection(room, message);
+    // Polling seats are stored post-only to prevent pane typing; their phone still obeys normal filters.
+    if (this.adminPhoneWakeEnabled) {
+      const phoneSelection = this.deliverySelection(room, message, true);
+      // Muted/non-delivered traffic stays discarded even if the phone is unmuted before its next scan.
+      message.phoneWakes = deliver && !message.voice ? phoneSelection.recipients.filter(id =>
+        this.alertAllows(id, roomId, message.id) &&
+        (phoneSelection.awake.has(id) || this.phoneForcesWake(id, roomId, message.id))) : [];
+    } else delete message.phoneWakes;
     // Persisted before it is shown or delivered: with the database, committed before anyone sees it.
     this.schedulePersist(room.id);
     if (message.from.kind === 'agent' && message.replyTo) {
@@ -1222,16 +1263,10 @@ export class ChatroomService {
         this.delivery.acknowledgeRead(message.from.sessionId, roomId, [asked.id]);
       }
     }
-    this.deps.broadcast(ChatroomMessage, { owner: room.owner ?? '@single', roomId: room.id, message });
+    this.deps.broadcast(ChatroomMessage, { owner: room.owner ?? '@single', roomId: room.id, message: this.messageIdentity(room, message) });
     // A spoken turn was already answered by the voice service: show it, never type it into a pane.
     if (deliver) {
-      const postOnly = new Set(room.members.filter((m) => m.postOnly).map((m) => m.sessionId));
-      const recipients = messageRecipients(room, message).filter((id) => !postOnly.has(id));
-      // Only the members the message is for are woken; the rest read it with their next prompt (cheaper, and nothing is hidden).
-      this.delivery.deliverMessage(room, message, recipients, this.nameOf, wakeRecipients(room, message, recipients, this.nameOf, process.env, (id) => {
-        const session = this.deps.getSession(id);
-        return !!session && session.pid !== null && paneAcceptsChat(session.mode);
-      }));
+      this.delivery.deliverMessage(room, message, selection.recipients, this.nameOf, selection.awake);
     }
     this.trackOwedReplies(room, message, deliver);
     for (const listener of this.messageListeners) listener(room, message);
@@ -1244,7 +1279,7 @@ export class ChatroomService {
           void this.delivery.flush(member.sessionId).catch(() => {});
       }
     }
-    return message;
+    return this.messageIdentity(room, message);
   }
 
   private owedReplyMs(): number {
@@ -1448,7 +1483,7 @@ export class ChatroomService {
     if (original.from.kind !== 'user') throw new ChatroomError('Only your own messages can be edited', 'INVALID_INPUT');
     const next = text.trim();
     if (!next && !original.attachments?.length) throw new ChatroomError('Empty message', 'INVALID_INPUT');
-    if (next === original.text) return original;
+    if (next === original.text) return this.messageIdentity(room, original);
     await this.audit({ action: 'edit', roomId, by, messageId, before: original.text, after: next });
     this.store.editText(roomId, messageId, next, this.now(), options);
     const edited = this.store.findMessage(roomId, messageId);
@@ -1464,7 +1499,7 @@ export class ChatroomService {
       );
     }
     this.changed(room, 'updated', messageId);
-    return edited;
+    return this.messageIdentity(room, edited);
   }
 
   /**
@@ -1484,7 +1519,7 @@ export class ChatroomService {
       const line = `SYSTEM: ${on ? 'pinned' : 'unpinned'} by ${who}: ${quoteForPane(pinned.text, 120)} (reverie agent chat pins lists the room's pins)`;
       for (const m of room.members) if (!m.postOnly) this.delivery.enqueue(m.sessionId, room, line);
     }
-    return this.store.findMessage(roomId, messageId);
+    return this.messageIdentity(room, this.store.findMessage(roomId, messageId));
   }
 
   pinned(roomId: string): ChatMessage[] {

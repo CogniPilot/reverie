@@ -243,6 +243,8 @@ export interface BoardPin {
 
 /** GET /api/board. */
 export interface BoardView extends BoardState {
+  /** Current authenticated caller; derived by the Board's actual write gates. */
+  capabilities?: import('./agent-capabilities.js').AgentCapabilities;
   built: number;
   timeZone: string;
   ownerName: string;

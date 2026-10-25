@@ -1,0 +1,137 @@
+import { afterEach, describe, expect, it } from 'vitest';
+import { mkdtemp, mkdir, writeFile, symlink, rm, chmod } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { agentCapabilities, githubCredentialReferences } from '../src/cli-agent-capabilities.js';
+import type { AgentDeps, RequestOptions } from '../src/cli-agent.js';
+import type { AgentCapabilities } from '../src/agent-capabilities.js';
+
+const temporary: string[] = [];
+afterEach(async () => {
+  for (const path of temporary.splice(0)) await rm(path, { recursive: true, force: true });
+});
+const snapshot = (): AgentCapabilities => ({
+  checkedAt: 1,
+  identity: { kind: 'agent', sessionId: 'self-session', employeeId: 'employee-one', name: 'Jinx' },
+  board: {
+    read: true,
+    fileIssue: true,
+    createDecision: true,
+    manageBoard: false,
+    clearDecision: true,
+    reason: 'Owner-made coordinator membership.',
+  },
+  company: { recoverEmployees: true, moveOwnPlan: false, managePlans: false, planPreconditions: 'Grant only; target/runtime checks remain.' },
+});
+const refs = async () => ({
+  directory: '/home/agent/.config/reverie/credentials/github',
+  bindings: [],
+  note: 'No credentials installed.',
+});
+function fixture() {
+  let current = snapshot();
+  const calls: RequestOptions[] = [],
+    output: string[] = [];
+  const deps: AgentDeps = {
+    ctx: { selfId: 'self-session', apiUrl: 'http://synthetic.test' },
+    json: true,
+    io: { out: (text) => output.push(text), err: (text) => output.push(text) },
+    request: async (_context, request) => {
+      calls.push(request);
+      return {
+        status: 200,
+        text: '',
+        json: {
+          success: true,
+          data: { capabilities: current, roster: [{ sessionId: 'self-session', coordinator: true }] },
+        },
+      };
+    },
+  };
+  return {
+    deps,
+    calls,
+    output,
+    set: (value: AgentCapabilities) => {
+      current = value;
+    },
+  };
+}
+describe('current agent capability command', () => {
+  it('uses the authenticated server snapshot, performs only GET, and sees a revoked grant on the next call', async () => {
+    const f = fixture();
+    expect(await agentCapabilities(f.deps, refs)).toBe(0);
+    expect(JSON.parse(f.output[0]).board.createDecision).toBe(true);
+    const next = snapshot();
+    next.board.createDecision = next.board.manageBoard = false;
+    next.checkedAt = 2;
+    f.set(next);
+    expect(await agentCapabilities(f.deps, refs)).toBe(0);
+    expect(JSON.parse(f.output[1]).board.createDecision).toBe(false);
+    expect(f.calls).toEqual([
+      expect.objectContaining({ method: 'GET', path: '/api/board' }),
+      expect.objectContaining({ method: 'GET', path: '/api/board' }),
+    ]);
+    expect(f.calls.every((call) => call.body === undefined)).toBe(true);
+    expect(JSON.parse(f.output[0]).website.redeploy.status).toBe('unavailable');
+    expect(JSON.parse(f.output[0]).website.restart.status).toBe('unknown');
+  });
+  it('refuses to infer grants from roster, title or forged local session identity', async () => {
+    const f = fixture();
+    const next = snapshot();
+    next.identity.sessionId = 'other-agent';
+    f.set(next);
+    expect(await agentCapabilities(f.deps, refs)).toBe(4);
+    expect(f.output.join(' ')).toContain('Authenticated caller differs');
+    f.deps.request = async () => ({
+      status: 200,
+      text: '',
+      json: { success: true, data: { roster: [{ sessionId: 'self-session', coordinator: true }] } },
+    });
+    expect(await agentCapabilities(f.deps, refs)).toBe(1);
+    expect(f.output.join(' ')).toContain('no permissions were inferred');
+  });
+  it('does not relabel an older broad Board report as full owner authority', async () => {
+    const f=fixture(),old=snapshot();
+    delete (old.board as Partial<typeof old.board>).clearDecision;
+    f.set(old);
+    expect(await agentCapabilities(f.deps,refs)).toBe(1);
+    expect(f.output.join(' ')).toContain('no permissions were inferred');
+  });
+  it('reports a real API refusal without converting it into an empty deny-all report', async () => {
+    const f = fixture();
+    f.deps.request = async () => ({ status: 403, text: '', json: { success: false, error: 'Unknown caller session' } });
+    expect(await agentCapabilities(f.deps, refs)).toBe(4);
+    expect(JSON.parse(f.output[0])).toEqual({
+      success: false,
+      error: expect.stringContaining('Unknown caller session'),
+    });
+  });
+  it('lists only private regular named token references and never reads their bytes', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'capability-credentials-'));
+    temporary.push(home);
+    const folder = join(home, '.config/reverie/credentials/github');
+    await mkdir(folder, { recursive: true, mode: 0o700 });
+    await writeFile(join(folder, 'cognipilot.token'), 'SECRET-SENTINEL-DO-NOT-READ', { mode: 0o600 });
+    await writeFile(join(folder, 'public.token'), 'SECRET-UNSAFE', { mode: 0o644 });
+    await chmod(join(folder, 'public.token'), 0o644); // Exercise unsafe mode even under a private test umask.
+    await symlink(join(folder, 'cognipilot.token'), join(folder, 'linked.token'));
+    await writeFile(join(folder, 'bad name.token'), 'SECRET-BAD-NAME', { mode: 0o600 });
+    const result = await githubCredentialReferences(home);
+    expect(result.bindings).toEqual([{ name: 'cognipilot', path: join(folder, 'cognipilot.token') }]);
+    expect(JSON.stringify(result)).not.toContain('SECRET');
+    await chmod(folder, 0o755);
+    expect((await githubCredentialReferences(home)).bindings).toEqual([]);
+  });
+  it('gives useful plain-language commands and distinguishes filing from approval', async () => {
+    const f = fixture();
+    f.deps.json = false;
+    expect(await agentCapabilities(f.deps, refs)).toBe(0);
+    expect(f.output.join('\n')).toContain('Board decision cards: allowed');
+    expect(f.output.join('\n')).toContain('reverie board decision add');
+    expect(f.output.join('\n')).toContain('not approval');
+    expect(f.output.join('\n')).toContain('full owner Board operations: denied');
+    expect(f.output.join('\n')).toContain('Plan preconditions:');
+    expect(f.output.join('\n')).toContain('/handbook/operations');
+  });
+});

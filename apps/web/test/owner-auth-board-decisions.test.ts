@@ -31,9 +31,32 @@ describe('owner middleware: exact board decision add and clear', () => {
   let rooms: ChatRoom[];
   let serviceToken: string;
   let ownerToken: string;
+  let ownPlanPermissions: { moveOwnPlan: boolean; managePlans: boolean };
   let audit: Record<string, unknown>[];
 
+  it('reports current effective decision access through the same caller and coordinator gate, without a write', async () => {
+    const read = async (session: string) => (await app.inject({ url: '/api/board', headers: { 'x-reverie-parent-session': session } })).json().data.capabilities;
+    expect(await read(COORD)).toMatchObject({ identity: { sessionId: COORD, employeeId: 'e-coord' }, board: { createDecision: true } });
+    expect(await read(ORDINARY)).toMatchObject({ board: { createDecision: false } });
+    expect(await read(FORGED)).toMatchObject({ board: { createDecision: false } });
+    rooms[0]!.members.find(member => member.sessionId === COORD)!.role = 'agent';
+    expect(await read(COORD)).toMatchObject({ board: { createDecision: false } });
+    expect(audit).toEqual([]);expect(board.snapshot().decisions).toEqual([]);
+  });
+
+  it('reports manager-only own-plan admission and narrow Board operations through real gates', async () => {
+    ownPlanPermissions.managePlans=true;
+    const response=await app.inject({url:'/api/board',headers:{'x-reverie-parent-session':COORD}});
+    expect(response.json().data.capabilities).toMatchObject({board:{read:true,fileIssue:true,createDecision:true,clearDecision:true,manageBoard:false},
+      company:{moveOwnPlan:true,managePlans:true,planPreconditions:expect.stringContaining('Grant admission only')}});
+    ownPlanPermissions.managePlans=false;
+    expect((await app.inject({url:'/api/board',headers:{'x-reverie-parent-session':COORD}})).json().data.capabilities.company.moveOwnPlan).toBe(false);
+    for(const url of ['/api/board/import','/api/board/milestones','/api/board/blockers'])
+      expect((await app.inject({method:'POST',url,headers:{'x-reverie-parent-session':COORD},payload:{}})).statusCode).toBe(403);
+  });
+
   beforeEach(async () => {
+    ownPlanPermissions = { moveOwnPlan: false, managePlans: false };
     dir = await mkdtemp(join(tmpdir(), 'board-decision-access-'));
     const store = new OwnerAuthStore(join(dir, 'owner-auth.json'));
     const { oneTimePassword } = await bootstrap(store, 'synthetic-owner');
@@ -79,7 +102,7 @@ describe('owner middleware: exact board decision add and clear', () => {
       company: () => ({
         settings: { ownerName: 'Synthetic Owner', timeZone: 'UTC' },
         employees: [
-          { id: 'e-coord', name: 'Coordinator', sessionId: COORD },
+          { id: 'e-coord', name: 'Coordinator', sessionId: COORD, permissions: ownPlanPermissions },
           { id: 'e-ordinary', name: 'Ordinary CTO', position: 'CTO', sessionId: ORDINARY },
           { id: 'e-forged', name: 'Forged coordinator', sessionId: FORGED },
         ],

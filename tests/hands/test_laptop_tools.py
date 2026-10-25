@@ -43,7 +43,7 @@ class LaptopToolsTests(unittest.TestCase):
                 task_paths(root, task)
 
     def test_external_marker_does_not_grant_authority(self):
-        message = {'text': '[external agent] /code example Fix it. @Assistant',
+        message = {'text': '[external agent] /code example Fix it. @Jinx',
                    'from': {'kind': 'agent', 'sessionId': 'external'}}
         self.assertEqual(control_request(message)['task_id'], 'example')
         settings = {'tasks': {'example': {'rooms': ['room'], 'delegate_sessions': []}}}

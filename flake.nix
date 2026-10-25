@@ -52,6 +52,8 @@
           default = packages.reverie;
           # Optional tools: excluded from the runtime/image and never fetched by a chat toggle.
           chatPythonLsp = pkgs.pyright;
+          capabilitiesAddon = import ./nix/capabilities-addon.nix { inherit pkgs; src = self; };
+          adminHarnessAddon = import ./nix/admin-harness-addon.nix { inherit pkgs; src = self; };
           chatModelicaLsp = import ./nix/chat-modelica-lsp.nix { inherit pkgs; };
           dockerImageWithChatLanguages = import ./nix/image.nix {
             inherit pkgs;
@@ -111,6 +113,14 @@
             [Install]
             WantedBy=default.target
           '';
+          workerNixMigrate = pkgs.writeShellApplication {
+            name = "reverie-nix-store-migrate";
+            runtimeInputs = [ pkgs.python3 pkgs.docker-client pkgs.coreutils ];
+            text = ''
+              export PYTHONPATH=${self}/python
+              exec python3 -m reverie.worker_nix_migrate "$@"
+            '';
+          };
           workerService = pkgs.writeTextDir "share/systemd/user/reverie-worker-broker.service" ''
             [Unit]
             Description=Reverie laptop broker and office watchdog
@@ -153,6 +163,7 @@
         local-model = { type = "app"; program = "${self.packages.${system}.localModel}/bin/reverie-local-model"; meta.description = "Run GGUF models on a host NVIDIA GPU or CPU"; };
         isolate = { type = "app"; program = "${self.packages.${system}.isolate}/bin/reverie-isolate"; meta.description = "Prepare and activate host-managed agent containers"; };
         preview-proxy = { type = "app"; program = "${self.packages.${system}.previewProxy}/bin/reverie-preview-proxy"; meta.description = "Serve isolated HTTPS previews of opted-in laptop ports"; };
+        worker-nix-migrate = { type = "app"; program = "${self.packages.${system}.workerNixMigrate}/bin/reverie-nix-store-migrate"; meta.description = "Inventory and explicitly migrate one stopped laptop Nix store"; };
       });
       checks = forAllSystems (system:
         let

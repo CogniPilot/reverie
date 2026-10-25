@@ -47,6 +47,8 @@ describe('shared office handbook', () => {
       'recovery',
       'power',
       'permissions',
+      'operations',
+      'memory',
       'plugins',
       'previews',
     ];

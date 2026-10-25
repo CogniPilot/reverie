@@ -78,6 +78,23 @@ reverie agent chat add <session-id> --goal "..."    # coordinator only
 Agents can post, read, update their own synopsis, and (coordinator only) add or remove
 members. Only you appoint the coordinator, rename or delete a room.
 
+For literal multiline text, use `--stdin` with a **quoted** heredoc delimiter so the
+shell does not expand backticks, `$variables` or `$(commands)`:
+
+```bash
+reverie agent chat say --stdin <<'MESSAGE'
+Keep `code` and $variables literal.
+This $(text) is data, not a command.
+MESSAGE
+```
+
+The command reads UTF-8 until EOF and preserves whitespace and line breaks, including
+the heredoc's final newline. Do not also pass positional text. Empty/whitespace-only
+stdin is refused (even with `--file`); the existing message limit is 8000 UTF-16 code
+units. `--room`, `--file`, `--reply-to` and `--json` still work normally. Without
+`--stdin`, positional text and attachment-only posts keep their existing behavior.
+This uses the current session's normal room access; it grants no new permission.
+
 ## Notes
 
 - Rooms and their last 1000 messages are kept in `chatrooms.json` in the data

@@ -124,7 +124,12 @@ class AbsoluteDeadlineTests(unittest.TestCase):
                             except OSError:pass
                         thread=threading.Thread(target=drip);thread.start()
                         try:
-                            self.assertEqual(client.recv(1),b'')
+                            try:
+                                closed = client.recv(1)
+                            except ConnectionResetError:
+                                # Closing an overdue request with unread bytes may reset an AF_UNIX socket.
+                                closed = b''
+                            self.assertEqual(closed,b'')
                         finally:
                             stop.set();thread.join(3)
                         self.assertFalse(thread.is_alive())

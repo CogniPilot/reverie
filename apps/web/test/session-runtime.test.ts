@@ -1,6 +1,13 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import Fastify from 'fastify';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { Session } from '../src/session.js';
+import { CompanyStore } from '../src/company-store.js';
+import { CompanyService } from '../src/company-service.js';
+import { EmployeeSchema } from '../src/company-types.js';
+import { SseEvent } from '../src/web/sse-events.js';
 import { selectedSubscription } from '../src/subscription-profiles.js';
 import { restartEligibility } from '../src/session-restart-policy.js';
 import { registerSessionRuntimeRoutes, runtimeView } from '../src/web/routes/session-runtime-routes.js';
@@ -238,5 +245,219 @@ describe('restart work evidence', () => {
     expect(restartEligibility({ ...stale, isWorking: true }, 300_000)).toEqual({ blocked: true, recoverable: true });
     expect(restartEligibility({ ...stale, paneDialog: 'permission' }, 300_000)).toEqual({ blocked: true, recoverable: false });
     expect(restartEligibility({ ...stale, isBusy: () => false, isWorking: true }, 300_000)).toEqual({ blocked: true, recoverable: false });
+  });
+});
+
+describe('owner restart across the durable laptop boundary', () => {
+  const headers = { cookie: 'fixture-owner=yes' };
+  async function fixture(detached = true, initiallyRunning: boolean | undefined = false) {
+    const directory = await mkdtemp(join(tmpdir(), 'reverie-runtime-intent-'));
+    const store = new CompanyStore(join(directory, 'company.json'));
+    await store.init();
+    const session = makeSession();
+    const sessions = new Map(detached ? [] : [[session.id, session]]);
+    const employee = EmployeeSchema.parse({ id: 'person', name: 'Expert', icon: 'E', position: 'Developer',
+      expertise: ['systems'], sessionId: session.id, createdAt: 1, desiredRunning: initiallyRunning });
+    const other = EmployeeSchema.parse({ ...employee, id: 'other', name: 'Other', sessionId: 'other-session' });
+    await store.update((state) => { state.employees = [employee, other]; });
+    const service = new CompanyService(store, { getSession: (id) => sessions.get(id),
+      stopSession: vi.fn(async () => {}), chatrooms: {} as never, research: {} as never });
+    const timeline: string[] = [];
+    const state = { id: session.id, name: session.name, status: 'idle', pid: 123 };
+    const ctx = { sessions, addSession: vi.fn(async (s: Session) => {
+      timeline.push('add'); sessions.set(s.id, s);
+    }), setupSessionListeners: vi.fn(async () => { timeline.push('listeners'); }),
+    persistSessionStateNow: vi.fn(() => { timeline.push('persist'); }),
+    discardPartiallyBuiltSession: vi.fn(async (id: string) => { sessions.delete(id); await session.stop(); }),
+    getSessionStateWithRespawn: vi.fn(() => state),
+    broadcast: vi.fn(() => { timeline.push('broadcast'); }) };
+    const stop = vi.spyOn(session, 'stop').mockResolvedValue();
+    const app = Fastify();
+    const hooks = { saved: async () => {} };
+    const saved = vi.fn(async () => {
+      timeline.push('saved');
+      await hooks.saved();
+      await service.setDesiredRunning(session.id, true);
+    });
+    registerSessionRuntimeRoutes(app, ctx as never, (req) => req.headers.cookie === headers.cookie,
+      () => session, service, saved);
+    await app.ready();
+    const readEmployee = () => store.snapshot().employees.find((e) => e.id === employee.id)!;
+    const request = () => app.inject({ method: 'POST', url: '/api/company/employees/person/restart', headers, payload: {} });
+    const close = async () => { await app.close(); await rm(directory, { recursive: true, force: true }); };
+    return { app, session, sessions, store, service, employee, other, ctx, stop, timeline, state, hooks, saved,
+      readEmployee, request, close, directory };
+  }
+
+  it.each([true, false])('commits stopped intent before %s-detached launch and publishes its saved light state', async (detached) => {
+    const f = await fixture(detached);
+    try {
+      const launch = vi.fn(async () => {
+        // This is the actual broker's boundary: read durable company state before admission.
+        const disk = JSON.parse(await readFile(join(f.directory, 'company.json'), 'utf8'));
+        expect(disk.employees.find((e: { id: string }) => e.id === 'person').desiredRunning).toBe(true);
+        f.timeline.push('launch');
+        return true;
+      });
+      if (detached) vi.spyOn(f.session, 'startInteractive').mockImplementation(async () => { await launch(); });
+      else vi.spyOn(f.session, 'restartCli').mockImplementation(launch);
+      const response = await f.request();
+      expect(response.statusCode).toBe(200);
+      expect(f.readEmployee().desiredRunning).toBe(true);
+      expect(f.store.snapshot().employees.find((e) => e.id === 'other')).toEqual(f.other);
+      expect(f.ctx.broadcast).toHaveBeenCalledExactlyOnceWith(detached ? SseEvent.SessionCreated : SseEvent.SessionUpdated,
+        detached ? f.state : { session: f.state });
+      expect(f.timeline).toEqual(detached ? ['launch', 'add', 'listeners', 'persist', 'saved', 'broadcast'] :
+        ['launch', 'persist', 'saved', 'broadcast']);
+    } finally { await f.close(); }
+  });
+
+  it.each([true, false])('restores stopped intent after failed %s-detached launch without restarting the old CLI', async (detached) => {
+    const f = await fixture(detached);
+    try {
+      const launch = vi.fn(async () => { expect(f.readEmployee().desiredRunning).toBe(true); throw new Error('synthetic launch failure'); });
+      if (detached) vi.spyOn(f.session, 'startInteractive').mockImplementation(async () => { await launch(); });
+      const restart = vi.spyOn(f.session, 'restartCli').mockImplementation(launch);
+      expect((await f.request()).statusCode).toBe(400);
+      expect(f.readEmployee().desiredRunning).toBe(false);
+      expect(f.stop).toHaveBeenCalledOnce();
+      expect(restart).toHaveBeenCalledTimes(detached ? 0 : 1);
+      expect(f.saved).not.toHaveBeenCalled();
+      expect(f.ctx.broadcast).not.toHaveBeenCalled();
+      expect(f.store.snapshot().employees.find((e) => e.id === 'other')).toEqual(f.other);
+    } finally { await f.close(); }
+  });
+
+  it.each(['stop', 'vacation', 'rebind'])('a concurrent %s during startup wins before registration and publication', async (change) => {
+    const f = await fixture();
+    try {
+      vi.spyOn(f.session, 'startInteractive').mockImplementation(async () => {
+        if (change === 'stop') await f.service.setDesiredRunning(f.session.id, false);
+        else if (change === 'vacation') await f.service.setVacation(f.employee.id, undefined, true);
+        else {
+          const replacement = makeSession();
+          f.sessions.set('replacement', replacement);
+          await f.service.rebind(f.employee.id, undefined, 'replacement');
+        }
+      });
+      expect((await f.request()).statusCode).toBe(409);
+      if (change === 'rebind') expect(f.readEmployee().sessionId).toBe('replacement');
+      else expect(f.readEmployee()).toMatchObject({ desiredRunning: false, onVacation: change === 'vacation' });
+      expect(f.ctx.addSession).not.toHaveBeenCalled();
+      expect(f.ctx.broadcast).not.toHaveBeenCalled();
+      expect(f.saved).not.toHaveBeenCalled();
+      expect(f.stop).toHaveBeenCalledOnce();
+    } finally { await f.close(); }
+  });
+
+  it.each(['stop', 'vacation'])('a concurrent %s while saving cannot be undone by onRuntimeSaved', async (change) => {
+    const f = await fixture();
+    try {
+      vi.spyOn(f.session, 'startInteractive').mockResolvedValue();
+      f.hooks.saved = async () => {
+        if (change === 'stop') await f.service.setDesiredRunning(f.session.id, false);
+        else await f.service.setVacation(f.employee.id, undefined, true);
+      };
+      expect((await f.request()).statusCode).toBe(409);
+      expect(f.readEmployee()).toMatchObject({ desiredRunning: false, onVacation: change === 'vacation' });
+      expect(f.ctx.discardPartiallyBuiltSession).toHaveBeenCalledWith(f.session.id);
+      expect(f.ctx.broadcast).not.toHaveBeenCalled();
+      expect(f.stop).toHaveBeenCalledOnce();
+    } finally { await f.close(); }
+  });
+
+  it('stops a registered partial launch and restores stopped intent when saving fails', async () => {
+    const f = await fixture();
+    try {
+      vi.spyOn(f.session, 'startInteractive').mockResolvedValue();
+      f.hooks.saved = async () => { throw new Error('synthetic save failure'); };
+      expect((await f.request()).statusCode).toBe(400);
+      expect(f.ctx.persistSessionStateNow).toHaveBeenCalled();
+      expect(f.ctx.discardPartiallyBuiltSession).toHaveBeenCalledWith(f.session.id);
+      expect(f.stop).toHaveBeenCalledOnce();
+      expect(f.readEmployee().desiredRunning).toBe(false);
+      expect(f.ctx.broadcast).not.toHaveBeenCalled();
+    } finally { await f.close(); }
+  });
+
+  it('restores an absent legacy intent field after launch failure', async () => {
+    const f = await fixture(true, undefined);
+    try {
+      // The fixture's default is false; remove the field as in an older company record.
+      await f.store.update((state) => { delete state.employees.find((e) => e.id === 'person')!.desiredRunning; });
+      vi.spyOn(f.session, 'startInteractive').mockRejectedValue(new Error('synthetic launch failure'));
+      expect((await f.request()).statusCode).toBe(400);
+      expect(f.readEmployee().desiredRunning).toBeUndefined();
+      expect(JSON.parse(await readFile(join(f.directory, 'company.json'), 'utf8')).employees[0]).not.toHaveProperty('desiredRunning');
+      expect(f.stop).toHaveBeenCalledOnce();
+    } finally { await f.close(); }
+  });
+
+  it('preserves a stop arriving during asynchronous profile validation', async () => {
+    const f = await fixture(false, true);
+    try {
+      const restart = vi.spyOn(f.session, 'restartCli').mockResolvedValue(true);
+      vi.mocked(selectedSubscription).mockImplementationOnce(async () => {
+        await f.service.setDesiredRunning(f.session.id, false);
+        return { selection: { id: 'first', label: 'first', provider: 'openai' }, env: {} };
+      });
+      expect((await f.request()).statusCode).toBe(409);
+      expect(f.readEmployee().desiredRunning).toBe(false);
+      expect(restart).not.toHaveBeenCalled();
+      expect(f.ctx.broadcast).not.toHaveBeenCalled();
+    } finally { await f.close(); }
+  });
+
+  it('does not roll back a newer stop followed by a new running request', async () => {
+    const f = await fixture();
+    try {
+      vi.spyOn(f.session, 'startInteractive').mockImplementation(async () => {
+        await f.service.setDesiredRunning(f.session.id, false);
+        await f.service.setVacation(f.employee.id, undefined, false);
+        throw new Error('late failure');
+      });
+      expect((await f.request()).statusCode).toBe(400);
+      expect(f.readEmployee().desiredRunning).toBe(true);
+      expect(f.ctx.broadcast).not.toHaveBeenCalled();
+    } finally { await f.close(); }
+  });
+
+  it('ignores an old-session stop observation whose guard is false without cancelling restart', async () => {
+    const f = await fixture();
+    try {
+      vi.spyOn(f.session, 'startInteractive').mockImplementation(async () => {
+        await f.service.setDesiredRunning(f.session.id, false, () => false);
+        expect(f.readEmployee().desiredRunning).toBe(true);
+      });
+      expect((await f.request()).statusCode).toBe(200);
+      expect(f.readEmployee().desiredRunning).toBe(true);
+      expect(f.ctx.broadcast).toHaveBeenCalledExactlyOnceWith(SseEvent.SessionCreated, f.state);
+      expect(f.stop).not.toHaveBeenCalled();
+    } finally { await f.close(); }
+  });
+
+  it('a genuine stop cancels a pending restart claim even when the flag is already false', async () => {
+    const f = await fixture();
+    const intent = f.service.prepareRuntimeRestart(f.session.id, undefined)!;
+    try {
+      await f.service.setDesiredRunning(f.session.id, false);
+      await expect(intent.claim()).rejects.toMatchObject({ status: 409 });
+      expect(intent.current()).toBe(false);
+      expect(f.readEmployee().desiredRunning).toBe(false);
+    } finally { intent.finish(); await f.close(); }
+  });
+
+  it('rejects agent and service callers without creating intent or events', async () => {
+    const f = await fixture();
+    try {
+      const start = vi.spyOn(f.session, 'startInteractive').mockResolvedValue();
+      for (const callerHeaders of [{ ...headers, 'x-reverie-parent-session': 'agent' }, { 'x-reverie-service-token': 'synthetic-service' }]) {
+        const response = await f.app.inject({ method: 'POST', url: '/api/company/employees/person/restart', headers: callerHeaders, payload: {} });
+        expect(response.statusCode).toBe(403);
+      }
+      expect(start).not.toHaveBeenCalled();
+      expect(f.readEmployee().desiredRunning).toBe(false);
+      expect(f.ctx.broadcast).not.toHaveBeenCalled();
+    } finally { await f.close(); }
   });
 });

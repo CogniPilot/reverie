@@ -1,5 +1,6 @@
 import { listClis } from '../../config/cli-registry/registry.js';
 import { modePollsChat } from '../../chatroom-delivery.js';
+import { registerChatAttention } from './chat-attention.js';
 import { z } from 'zod';
 /**
  * @fileoverview Chatroom routes: a shared room where the user, an appointed
@@ -164,6 +165,8 @@ export function registerChatroomRoutes(
     const existing = options.preHandler ? [options.preHandler].flat() : [];
     options.preHandler = [refuseUnresolvedParent, ...existing];
   });
+
+  registerChatAttention(app, ctx, service);
 
   const phoneSchema = z.object({ mode: z.enum(['ring', 'vibrate', 'silent']) }).strict();
   const phoneActor = (req: FastifyRequest) => {
@@ -1200,7 +1203,8 @@ export function registerChatroomRoutes(
       roomOrFail(req, id);
       const self = caller(req);
       if (!self) return forbid(reply, 'An agent session is required');
-      return { success: true, data: service.exactAgentRead(self, id, messageId) };
+      const data = service.exactAgentRead(self, id, messageId);
+      return { success: true, data: { ...data, message: { ...data.message, phoneWake: service.phoneAccepts(self, id, messageId) } } };
     } catch (error) { return sendError(reply, error); }
   });
 
@@ -1226,7 +1230,8 @@ export function registerChatroomRoutes(
       // An agent that reads the room has seen what it was given: its seen-marker moves to the newest message returned.
       const self = caller(req);
       if (self && room.members.some((m) => m.sessionId === self)) service.acknowledgeAgentRead(self, room.id, view.messages);
-      return { success: true, data: { messages: view.messages, members: view.members } };
+      const messages = self ? view.messages.map(message => ({ ...message, phoneWake: service.phoneAccepts(self, id, message.id) })) : view.messages;
+      return { success: true, data: { messages, members: view.members } };
     } catch (err) {
       return sendError(reply, err);
     }

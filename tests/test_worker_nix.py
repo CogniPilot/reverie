@@ -16,9 +16,10 @@ class LaptopNixTests(unittest.TestCase):
         fixture.WorkerTests.setUp(self)
         self.config['uid'] = os.getuid()
 
-    def test_store_is_private_owned_scratch_and_rejects_symlink(self):
+    def test_store_is_private_durable_state_and_rejects_symlink(self):
         path = private_store(self.config, SID)
-        self.assertEqual(path, self.root / 'scratch' / SID / 'nix')
+        self.assertEqual(path, self.root / 'workers' / SID / 'nix')
+        self.assertFalse((self.root / 'scratch').exists())
         self.assertEqual(path.stat().st_mode & 0o777, 0o700)
         path.rmdir()
         path.symlink_to(self.root / 'work', target_is_directory=True)
@@ -45,3 +46,29 @@ class LaptopNixTests(unittest.TestCase):
         self.assertIsNone(prepare_store(broker, self.config, SID))
         self.assertEqual(broker.run_engine.call_count, 1)
         self.assertFalse((self.root / 'scratch').exists())
+
+    def test_legacy_store_requires_explicit_offline_migration(self):
+        legacy=self.root/'scratch'/SID/'nix';legacy.mkdir(mode=0o700,parents=True)
+        (legacy/'installed-package').write_text('preserve')
+        with self.assertRaisesRegex(RuntimeError,'offline migration'): private_store(self.config,SID)
+        self.assertFalse((self.root/'workers'/SID/'nix').exists())
+        self.assertEqual((legacy/'installed-package').read_text(),'preserve')
+
+    def test_public_scratch_or_unowned_permissions_are_refused(self):
+        for root in (self.root/'scratch'/'state',self.root/'work'/'state'):
+            with self.subTest(root=root),self.assertRaises(ValueError):
+                private_store(dict(self.config,stateRoot=str(root)),SID)
+        path=private_store(self.config,SID);path.chmod(0o755)
+        with self.assertRaises(ValueError):private_store(self.config,SID)
+        path.chmod(0o700)
+        with self.assertRaises(ValueError):private_store(dict(self.config,uid=os.getuid()+1),SID)
+
+    def test_rollback_marker_is_private_and_bound_to_fixed_session_path(self):
+        path=private_store(self.config,SID)
+        marker=path.parent/'nix-rollback.json'
+        marker.write_text(json.dumps({'version':1,'sessionId':SID,'legacy':True}));marker.chmod(0o644)
+        with self.assertRaises(ValueError):private_store(self.config,SID)
+        marker.chmod(0o600);marker.write_text(json.dumps({'version':1,'sessionId':SID,'legacy':True,'path':'/nix'}))
+        with self.assertRaises(ValueError):private_store(self.config,SID)
+        marker.write_text(json.dumps({'version':1,'sessionId':SID,'legacy':True}))
+        with self.assertRaisesRegex(RuntimeError,'rollback store is unavailable'):private_store(self.config,SID)

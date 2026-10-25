@@ -720,10 +720,6 @@ html[data-reverie-view='debug']:not([data-reverie-legacy]) .ca-back {
   position: relative; display: flex; align-items: center; gap: 6px; max-width: 100%; margin: 0 0 2px; padding: 0; border: 0;
   background: none; color: var(--text-dim); font: inherit; font-size: 12px; text-align: left; cursor: pointer;
 }
-.ca-root .ca-reply-ref::before {
-  content: ''; position: absolute; left: -36px; top: 50%; width: 30px; height: 12px;
-  border-left: 2px solid var(--ca-line); border-top: 2px solid var(--ca-line); border-top-left-radius: 6px;
-}
 .ca-root .ca-reply-ref .chatroom-avatar { width: 16px; height: 16px; font-size: 9px; flex: none; }
 .ca-root .ca-reply-ref:hover .ca-reply-snippet { color: var(--text); }
 .ca-root .ca-reply-ref.is-missing { font-style: italic; cursor: default; }

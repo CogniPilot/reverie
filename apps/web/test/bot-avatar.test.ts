@@ -29,6 +29,10 @@ it('round-trips catalog icons without accepting arbitrary URLs, paths or changin
   ])
     expect(() => parseBot({ ...bot, icon }, 'example')).toThrow();
   expect(parseBot({ ...bot, icon: '/assets/avatars/pack-101.png' }, 'example').icon).toBe('/assets/avatars/pack-101.png');
+  const revised = '/assets/avatars/pack-01.png?v=' + 'a'.repeat(64);
+  await registry.set('revised', { ...bot, icon: revised });
+  expect(new ChatBotRegistry(file).get('revised')?.icon).toBe(revised);
+  for (const icon of [revised + '&extra=1', revised.slice(0, -1), revised.replace('?v=', '?other=')]) expect(() => parseBot({ ...bot, icon }, 'example')).toThrow();
   expect(parseBot({ ...bot, icon: '🔔' }, 'example').icon).toBe('🔔');
 });
 it('keeps deletion owner-only and refuses bots still referenced by routines', async () => {
@@ -62,6 +66,9 @@ it('renders a bot catalog icon in chat without treating remote URLs as images', 
   expect(avatar.querySelector('img')!.getAttribute('src')).toBe('/assets/avatars/pack-151.png');
   const legacy = h.shell.avatarFor({ kind: 'bot', botId: 'saved', name: 'Saved', icon: '/assets/avatars/pack-101.png' }, 'Saved');
   expect(legacy.querySelector('img')!.getAttribute('src')).toBe('/assets/avatars/pack-101.png');
+  const revised = '/assets/avatars/pack-01.png?v=' + 'a'.repeat(64);
+  expect(h.shell.avatarFor({ kind: 'bot', botId: 'revised', name: 'Revised', icon: revised }, 'Revised').querySelector('img')!.getAttribute('src')).toBe(revised);
+  expect(h.shell.avatarFor({ kind: 'bot', botId: 'bad', name: 'Bad', icon: revised + '&extra=1' }, 'Bad').querySelector('img')).toBeNull();
   const refused = h.shell.avatarFor(
     { kind: 'bot', botId: 'example', name: 'Example', icon: 'https://outside.test/private.png' },
     'Example'

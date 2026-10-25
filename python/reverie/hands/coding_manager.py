@@ -67,9 +67,15 @@ class TaskManager:
         try:
             tools = read_tool_specs(settings['tool_schema_file'])
             prompt_cfg = dict(self.cfg, prompt_cap_chars=limits.prompt_chars)
+            reserved = reserve_chars(limits) + len(RULES) + len(encoded(tools)) + 1024
+            if reserved >= limits.prompt_chars:
+                self.finish({'status': 'stopped', 'reason': 'prompt_budget_too_small'}, post=False)
+                return (f'Task {task_id} stopped: prompt budget {limits.prompt_chars} cannot fit the '
+                        f'{reserved}-character tool reserve. Lower the profile frame_chars/argument_chars '
+                        'before retrying with a new request. No tool ran.')
             messages, _ = self.loop.build_prompt(prompt_cfg, history, message, room,
-                reserve=reserve_chars(limits) + len(RULES) + len(encoded(tools)) + 1024)
-            messages[0]['content'] += '\n' + RULES
+                reserve=reserved)
+            messages[0]['content'] += '\n' + RULES + f' Tool arguments must fit {limits.argument_chars} characters; split larger edits into smaller tool calls.'
             self.active.update(messages=messages, tools=tools)
             self.save()
         except Exception:
@@ -270,8 +276,11 @@ class TaskManager:
             argv = job['settings']['runner_argv'] + ['--task-dir',
                     os.path.join(job['settings']['root'], job['task_id']),
                     '--timeout-s', str(timeout), '--max-output-bytes', str(payload['cap'])]
+            from coding_chat import office_environment
+            environment = {'PATH': os.defpath, 'LANG': 'C.UTF-8'}
+            environment.update(office_environment(self.cfg, job['task_id']))
             job['runner'] = self.process_factory(argv, encoded(tool_request).encode('utf-8'),
-                timeout, payload['cap'], environment={'PATH': os.defpath, 'LANG': 'C.UTF-8'})
+                timeout, payload['cap'], environment=environment)
             job['pending'] = event
         elif kind == 'progress':
             step = event['payload']

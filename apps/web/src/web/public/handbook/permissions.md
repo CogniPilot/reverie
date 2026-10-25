@@ -2,6 +2,8 @@
 
 A job title describes responsibilities. Only explicit owner-selected grants authorize tools. This handbook explains available actions; it grants no authority itself.
 
+Run `reverie agent capabilities` for current authenticated grants, reasons, supported commands and named credential references. Run it when asked what you can do and before claiming you are blocked. See [Capabilities, deployments and credentials](/handbook/operations).
+
 ## Recovery
 
 The recoverEmployees permission allows the scoped employee wake API. Website-restart access is a separate host-maintainer grant and does not include employee recovery. Check the current company record rather than inferring access from a title or an old message.

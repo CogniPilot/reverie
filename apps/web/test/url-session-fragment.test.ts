@@ -63,6 +63,7 @@ function loadApp() {
       location.hash = url.includes('#') ? url.slice(url.indexOf('#')) : '';
     }),
   };
+  const debugStorage = new Map<string, string>();
   const context = vm.createContext({
     console: { ...console, log: vi.fn(), warn: vi.fn(), error: vi.fn() },
     performance,
@@ -79,7 +80,10 @@ function loadApp() {
     history,
     document: { addEventListener: vi.fn(), getElementById: () => null, querySelector: () => null },
     localStorage: { length: 0, key: vi.fn(), getItem: vi.fn(), setItem: vi.fn(), removeItem: vi.fn() },
-    window: { addEventListener: vi.fn(), removeEventListener: vi.fn() },
+    window: { addEventListener: vi.fn(), removeEventListener: vi.fn(), sessionStorage: {
+      getItem: (key: string) => debugStorage.get(key) ?? null,
+      setItem: (key: string, value: string) => debugStorage.set(key, value),
+    } },
     MobileDetection: { isTouchDevice: () => false },
   });
   vm.runInContext(
@@ -111,8 +115,64 @@ function loadApp() {
     }
     return inst;
   };
-  return { make, location, history, ReverieApp, waitMs };
+  return { make, location, history, ReverieApp, waitMs, debugStorage };
 }
+
+describe('refreshing an expert debug terminal', () => {
+  it.each([undefined, '', ' ', 'x'.repeat(101), '../mira', 'mira?other=true'])('keeps a legacy debug view with invalid pin %s empty instead of choosing another expert', pin => {
+    const { make, debugStorage } = loadApp();
+    debugStorage.set('reverie:view', 'debug');
+    if (pin !== undefined) debugStorage.set('reverie:debug-session', pin);
+    const app = make(['mira']);
+    app.activeSessionId = 'mira'; app._disconnectWs = vi.fn();
+    app.terminal = { clear: vi.fn(), write: vi.fn() };
+    expect(app._restorePinnedDebugSession()).toBe(true);
+    expect(app.activeSessionId).toBeNull();
+    expect(app._disconnectWs).toHaveBeenCalledOnce();
+    expect(app.terminal.clear).toHaveBeenCalledOnce();
+    expect(app.terminal.write).toHaveBeenCalledWith(expect.stringContaining('no saved expert'));
+    expect(app.selectSession).not.toHaveBeenCalled();
+  });
+  it('keeps an identified debug view empty if its saved target cannot be read', () => {
+    const { make, debugStorage } = loadApp();
+    debugStorage.set('reverie:view', 'debug');
+    const get = debugStorage.get.bind(debugStorage);
+    vi.spyOn(debugStorage, 'get').mockImplementation(key => {
+      if (key === 'reverie:debug-session') throw new Error('synthetic storage refusal');
+      return get(key);
+    });
+    const app = make(['mira']);
+    app.activeSessionId = 'mira'; app._disconnectWs = vi.fn();
+    app.terminal = { clear: vi.fn(), write: vi.fn() };
+    expect(app._restorePinnedDebugSession()).toBe(true);
+    expect(app.activeSessionId).toBeNull();
+    expect(app.selectSession).not.toHaveBeenCalled();
+  });
+  it('restores the tab-specific expert instead of another tab’s last active session', () => {
+    const { make, debugStorage } = loadApp();
+    debugStorage.set('reverie:view', 'debug');
+    debugStorage.set('reverie:debug-session', 'jinx');
+    const app = make(['mira', 'jinx']);
+    app.activeSessionId = 'mira';
+    expect(app._restorePinnedDebugSession()).toBe(true);
+    expect(app.selectSession).toHaveBeenCalledWith('jinx', { auto: true, leaveTiles: true });
+  });
+  it('disconnects and shows unavailable when the pinned expert is absent, without selecting someone else', () => {
+    const { make, debugStorage } = loadApp();
+    debugStorage.set('reverie:view', 'debug');
+    debugStorage.set('reverie:debug-session', 'jinx');
+    const app = make(['mira']);
+    app.activeSessionId = 'mira';app._disconnectWs = vi.fn();
+    app.terminal = { clear: vi.fn(), write: vi.fn() };
+    expect(app._restorePinnedDebugSession()).toBe(true);
+    expect(app.activeSessionId).toBeNull();
+    expect(app._disconnectWs).toHaveBeenCalledOnce();
+    expect(app.terminal.write).toHaveBeenCalledWith(expect.stringContaining('unavailable'));
+    expect(app.selectSession).not.toHaveBeenCalled();
+    debugStorage.delete('reverie:view');
+    expect(app._restorePinnedDebugSession()).toBe(false);
+  });
+});
 
 describe('dashboard handling of a #session=<id> link', () => {
   it('reads the link and removes the fragment, so the same link counts as a change next time', () => {

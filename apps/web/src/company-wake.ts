@@ -9,6 +9,7 @@ export interface CompanyWakeDeps {
   live(sessionId: string): boolean;
   closing(sessionId: string): boolean;
   noteRunning(sessionId: string): Promise<void>;
+  begin(employeeId: string, sessionId: string): { current(): boolean; finish(): void } | undefined;
   claim(employeeId: string, sessionId: string, now: number, automatic: boolean): Promise<boolean>;
   wake(entry: RebootRestoreEntry, allowed: () => boolean): Promise<boolean>;
   now?(): number;
@@ -109,7 +110,7 @@ export class CompanyWake {
         this.deps
           .company()
           .employees.find((e) => e.id === planned.id && e.sessionId === planned.sessionId && e.owner === planned.owner);
-      const allowed = () => {
+      const baseAllowed = () => {
         const employee = current();
         return (
           !!employee &&
@@ -140,7 +141,7 @@ export class CompanyWake {
         await this.deps.noteRunning(employee.sessionId);
         continue;
       }
-      if (!allowed()) {
+      if (!baseAllowed()) {
         skip('not-desired');
         continue;
       }
@@ -161,6 +162,9 @@ export class CompanyWake {
         skip(plan.skipped[0]?.reason ?? 'ineligible');
         continue;
       }
+      const lease = this.deps.begin(employee.id, employee.sessionId);
+      if (!lease) { skip('lifecycle-in-progress'); continue; }
+      const allowed = () => lease.current() && baseAllowed();
       try {
         if (!(await this.deps.claim(employee.id, employee.sessionId, (this.deps.now ?? Date.now)(), !manualId))) {
           skip('disabled-or-retry-limited');
@@ -174,7 +178,12 @@ export class CompanyWake {
           await this.deps.noteRunning(employee.sessionId);
           continue;
         }
-        if (await this.deps.wake(entry, allowed)) {
+        const woke = await this.deps.wake(entry, allowed);
+        if (!allowed()) {
+          skip('changed-or-stopping');
+          continue;
+        }
+        if (woke) {
           report.awakened.push(employee.id);
           if (!manualId && allowed()) {
             try {
@@ -186,6 +195,8 @@ export class CompanyWake {
         } else skip('wake-failed');
       } catch {
         skip('wake-failed');
+      } finally {
+        lease.finish();
       }
     }
     return report;

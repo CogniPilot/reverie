@@ -4,6 +4,30 @@ An expert's tools run on its work laptop: a separate container with a private ho
 
 The website is the office communication and management service. Restarting the website can leave laptop programs running. Restarting the laptop itself ends processes inside it; preserving the same CLI across that restart needs a separately supervised backend and is not guaranteed by the website/laptop split.
 
+## Installing tools with Nix
+
+Use a project's pinned environment when it has a flake:
+
+```bash
+nix develop
+nix develop --command python3 -m unittest discover -s tests
+```
+
+Use a temporary tool environment for a single command, or install a tool in your private profile for later shells:
+
+```bash
+nix shell nixpkgs#jq --command jq --version
+nix profile install nixpkgs#jq
+nix profile list
+jq --version
+```
+
+The laptop's `nixpkgs` registry follows the release lock. Profiles live in your private home, including `~/.nix-profile` and `~/.local/state/nix/profiles`. Each laptop has its own writable `/nix/store` and `/nix/var/nix` database. New and migrated laptops bind these from the private durable `stateRoot/<sessionId>/nix` directory on the host. Installed profiles and their registered packages survive laptop recreation; a running process still ends when its laptop stops. Temporary shell packages can be collected when no profile or other garbage-collection root retains them.
+
+Older laptops may still bind `/nix` from their private scratch drive until an owner coordinates migration. Keep the existing store and profile links intact, save a handoff, and report the exact laptop/session before maintenance. A broker restart can also interrupt terminal and provider transports; do not restart it to install a package. The host daemon and another laptop's store are never needed for ordinary laptop Nix commands.
+
+Build outputs, compiler caches, downloads and temporary files stay under `/scratch`. Moving the Nix store does not move those caches. Scratch persistence at reboot depends on the owner's filesystem and cleanup policy; its name alone does not mean reboot erases it.
+
 ## Protection
 
 CPU is uncapped by default and shared fairly. Memory and task ceilings prevent a runaway laptop from exhausting the whole host. Threads count toward the task limit. Limits and admission budgets are owner-selected host policy; check actual deployment settings before quoting numbers.

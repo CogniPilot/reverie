@@ -50,11 +50,23 @@ def main(argv=None):
         # cap would prevent ordinary Node/V8 and other large-reservation tools.
         # No office/model tokens are inherited by commands. The toolchain comes
         # from Nix, with the laptop's installed packages available afterwards.
+        office = {}
+        if os.environ.get('REVERIE_SCOPED_OFFICE') == '1':
+            import re
+            import urllib.parse
+            url = urllib.parse.urlparse(os.environ.get('REVERIE_API_URL', ''))
+            session = os.environ.get('REVERIE_SESSION_ID', '')
+            if (url.scheme != 'http' or url.hostname != '127.0.0.1' or url.username or url.password or
+                    url.path not in ('', '/') or url.query or url.fragment or not url.port or not 1 <= url.port <= 65535 or
+                    not re.fullmatch(r'[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}', session)):
+                raise ValueError('Invalid scoped office relay')
+            office = {key: os.environ[key] for key in ('REVERIE_MUX', 'REVERIE_SESSION_ID', 'REVERIE_API_URL', 'REVERIE_AGENT_HOME', 'REVERIE_DATA_DIR') if key in os.environ}
         os.environ.clear()
-        os.environ.update(PATH=args.tool_path + ':/home/agent/.nix-profile/bin:/bin',
+        os.environ.update(PATH=args.tool_path + ':/home/agent/.nix-profile/bin:/home/agent/.local/bin:/bin',
                           HOME=str(workspace), TMPDIR='/scratch/tmp', LANG='C.UTF-8',
                           PYTHONDONTWRITEBYTECODE='1', GIT_CONFIG_NOSYSTEM='1',
                           GIT_CONFIG_GLOBAL='/dev/null')
+        os.environ.update(office)
         sys.path.insert(0, str(Path(__file__).parent))
         import workspace_dispatch
         workspace_dispatch.SAME_PROCESS_GROUP = True

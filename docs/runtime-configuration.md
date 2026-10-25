@@ -15,6 +15,34 @@ Only owner-authorized policy grants orchestration or delegation authority.
 
 Environment variables are named `REVERIE_*`.
 
+The Admin Harness defaults to a 15-second general room scan. On an isolated laptop,
+the website must explicitly opt in at startup with the per-instance environment variable
+`REVERIE_ADMIN_PHONE_WAKE=enabled`. The default is OFF: attention returns unavailable,
+no new private phone receipts are written, and automatic Admin Harness room effects
+fail closed. Normal native delivery, joined-channel history and manual reads remain
+available. The same new image can run OFF after activation: it preserves existing
+receipts privately while ignoring them for actions and stripping them from public data.
+After any receipt has been written, roll back only to a schema-aware image; an older
+website may expose unfamiliar stored fields. Enabling the instance setting allows
+one metadata-only long poll through its own office phone to wake the existing serial
+loop for whatever its current canonical phone policy accepts. Ring, Vibrate and Silent
+retain their existing owner/mention, room-notify, recipient and membership rules;
+DMs do not bypass the phone setting. There is no separate mention filter.
+It does not interrupt a running model turn or start a second one. The listener never
+calls a model, reads message bodies or changes the normal durable message claims.
+General scans cover reconnect gaps and use the same server acceptance; they cannot
+reply to muted traffic. Messages discarded while muted cannot become new actions after
+unmute. Ordinary joined-channel history, manual reads and memory access are unchanged;
+muted and legacy messages may remain quoted historical context after a valid request.
+`/status` shows whether phone wake is active,
+connecting or unavailable; unavailable connections use polling with bounded retry.
+Private `runtime-settings.json` accepts `phone_wake` (boolean) and `poll_s`
+(1–300 seconds). The launcher defaults are `true` and `15`. Applying updated launch
+code uses the owner's Restart session action, preserving saved identity and memory;
+direct `tmux respawn-pane` bypasses lifecycle and office-relay setup. The matching
+website API must provide verified phone acceptance; missing policy metadata prevents
+automatic room replies rather than falling back to a local guess.
+
 - `reverie.config`: `REVERIE_MODEL` defaults to `MODEL_ID`; select the served model alias.
   `REVERIE_API_BASE` defaults to the conventional loopback endpoint on port 8080.
   `REVERIE_INSTANCE_CONFIG` selects the identity and memory configuration explicitly.

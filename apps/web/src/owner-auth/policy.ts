@@ -83,6 +83,7 @@ const AGENT_ROUTES = new Set([
   'GET /api/company',
   'GET /api/handbook',
   'GET /api/handbook/:slug',
+  'GET /api/chat-plugins', // shared enablement is readable; only the verified owner may change it
   'POST /api/company/employees/:id/wake', // route checks the explicit owner-granted recovery capability
   'GET /api/plans', // read-only; the route scopes by role (coordinators all accounts, other agents their own)
   // Private one-time approval credentials plus the exact current employee binding are checked by these handlers.

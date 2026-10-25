@@ -1,4 +1,4 @@
-/** Sanitizer policy restricted to generated math markup. */
+/** Generated-math-only policy reused from Mira's reviewed rendering packet. */
 (function (root) {
   'use strict';
   function createChatMathSanitizer(DOMPurify) {

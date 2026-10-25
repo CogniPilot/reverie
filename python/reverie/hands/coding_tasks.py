@@ -39,6 +39,7 @@ class Limits:
     request_bytes: int = 262144
     wire_bytes: int = 131072
     frame_chars: int = 24000
+    argument_chars: int = ARGUMENT_CHARS
     output_chars: int = 20000
     output_bytes: int = 80000
     total_bytes: int = 524288
@@ -53,6 +54,8 @@ class Limits:
                 raise ValueError('invalid limit: ' + name)
         if self.prompt_chars > 120000:
             raise ValueError('prompt limit exceeds supported context budget')
+        if self.argument_chars > ARGUMENT_CHARS:
+            raise ValueError('argument limit exceeds the supported tool argument budget')
 
 
 @dataclass
@@ -79,7 +82,7 @@ class TaskResult:
 
 
 def reserve_chars(limits):
-    return (2 * limits.frame_chars + 2 * ARGUMENT_CHARS + 6 * STEP_CHARS +
+    return (2 * limits.frame_chars + 2 * limits.argument_chars + 6 * STEP_CHARS +
             4 * CALL_ID_CHARS + len(FRAME) * 2 + len(OMITTED) * 2 + 2048)
 
 
@@ -144,7 +147,7 @@ def parse_call(value, permitted, limits):
         raise ValueError('invalid_call')
     name = function.get('name')
     arguments = function.get('arguments')
-    if name not in permitted or not isinstance(arguments, str) or len(arguments) > ARGUMENT_CHARS:
+    if name not in permitted or not isinstance(arguments, str) or len(arguments) > limits.argument_chars:
         raise ValueError('invalid_call')
     arguments = json.loads(arguments)
     if not isinstance(arguments, dict):

@@ -70,6 +70,93 @@ class WorkerTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.load(changed)
 
+    def test_noncanonical_absolute_mount_destinations_are_rejected_before_policy_checks(self):
+        for destination in [
+            '//reverie_workspace',
+            '//reverie_workspace/attachments/private-room',
+        ]:
+            changed = deepcopy(self.config)
+            changed['mounts'][0]['destination'] = destination
+            with self.subTest(destination=destination), self.assertRaisesRegex(ValueError, 'destination must be canonical'):
+                self.load(changed)
+
+    def test_shared_attachment_store_is_overlaid_after_the_workspace_bind(self):
+        workspace = self.root / 'shared-workspace'
+        marker = workspace / 'attachments' / 'synthetic-room' / 'synthetic-nonmember.txt'
+        marker.parent.mkdir(parents=True)
+        marker.write_text('synthetic only')
+        config = deepcopy(self.config)
+        config['mounts'] = [dict(source=str(workspace), destination='/reverie_workspace', readOnly=False)]
+
+        loaded = self.load(config)
+        _, _, args = create_args(loaded, SID, self.root/'home')
+        mounts = [args[i + 1] for i, value in enumerate(args[:-1]) if value == '--mount']
+        workspace_bind = 'type=bind,src=' + str(workspace) + ',dst=/reverie_workspace'
+        attachment_mask = 'type=tmpfs,dst=/reverie_workspace/attachments,tmpfs-mode=0555,tmpfs-size=1048576,readonly'
+        self.assertTrue(marker.is_file())
+        self.assertIn(workspace_bind, mounts)
+        self.assertIn(attachment_mask, mounts)
+        self.assertLess(mounts.index(workspace_bind), mounts.index(attachment_mask))
+        self.assertFalse(any('src=' + str(workspace / 'attachments') in value for value in mounts))
+        worker_path = Path('/reverie_workspace/attachments/synthetic-room/synthetic-nonmember.txt')
+        visible = [
+            spec for spec in mounts
+            if worker_path.is_relative_to(Path(spec.split('dst=', 1)[1].split(',', 1)[0]))
+        ]
+        self.assertEqual(max(visible, key=lambda spec: len(Path(spec.split('dst=', 1)[1].split(',', 1)[0]).parts)), attachment_mask)
+
+    def test_worker_mounts_cannot_reexpose_shared_attachments_by_path_alias(self):
+        workspace = self.root / 'shared-workspace'
+        attachments = workspace / 'attachments'
+        (attachments / 'room').mkdir(parents=True)
+        base = deepcopy(self.config)
+        base['mounts'] = [dict(source=str(workspace), destination='/reverie_workspace', readOnly=False)]
+
+        for source, destination in [
+            (str(attachments), '/attachments-copy'),
+            (str(attachments / 'room'), '/room-copy'),
+            (str(workspace), '/workspace-alias'),
+            (str(self.root), '/broad-parent'),
+        ]:
+            changed = deepcopy(base)
+            changed['mounts'].append(dict(source=source, destination=destination, readOnly=True))
+            with self.subTest(source=source, destination=destination), self.assertRaisesRegex(ValueError, 'shared attachment storage'):
+                self.load(changed)
+
+        alias = self.root / 'attachments-alias'
+        alias.symlink_to(attachments / 'room', target_is_directory=True)
+        changed = deepcopy(base)
+        changed['mounts'].append(dict(source=str(alias), destination='/room-symlink-alias', readOnly=True))
+        with self.assertRaisesRegex(ValueError, 'shared attachment storage'):
+            self.load(changed)
+
+        outside = self.root / 'outside-room-data'
+        outside.mkdir()
+        (attachments / 'room-link').symlink_to(outside, target_is_directory=True)
+        changed = deepcopy(base)
+        changed['mounts'].append(dict(source=str(attachments / 'room-link'), destination='/room-link-alias', readOnly=True))
+        with self.assertRaisesRegex(ValueError, 'shared attachment storage'):
+            self.load(changed)
+
+        changed = deepcopy(base)
+        changed['mounts'].append(dict(source=str(self.root / 'work'), destination='/reverie_workspace/attachments/room', readOnly=True))
+        with self.assertRaisesRegex(ValueError, 'shared attachment storage'):
+            self.load(changed)
+
+    def test_workspace_attachment_root_must_exist_as_a_real_directory(self):
+        workspace = self.root / 'workspace-without-attachments'
+        workspace.mkdir()
+        config = deepcopy(self.config)
+        config['mounts'] = [dict(source=str(workspace), destination='/reverie_workspace', readOnly=False)]
+        with self.assertRaisesRegex(ValueError, 'existing directory'):
+            self.load(config)
+
+        outside = self.root / 'outside-attachments'
+        outside.mkdir()
+        (workspace / 'attachments').symlink_to(outside, target_is_directory=True)
+        with self.assertRaisesRegex(ValueError, 'real directory'):
+            self.load(config)
+
     def test_default_workers_borrow_cpu_and_memory_under_enforced_pool(self):
         name, digest, args = create_args(self.config, SID, self.root/'home')
         self.assertEqual(name, 'test-agent-' + SID)

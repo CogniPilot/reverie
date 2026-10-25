@@ -25,7 +25,7 @@ it('offers the original 50 and 50 new default avatars, excluding the retired peo
     ] }) }
     : { ok: true, blob: async () => new h.window.Blob(['avatar'], { type: 'image/png' }) });
   mount(); await h.flush(); button('Choose avatar').click(); await h.flush();
-  expect(fetch.mock.calls[0]).toEqual(['/assets/avatars/pack-manifest.json', { cache: 'no-cache' }]);
+  expect(fetch.mock.calls[0]).toEqual(['/assets/avatars/pack-manifest.json', { cache: 'no-cache', signal: expect.objectContaining({ aborted: false }) }]);
   const dialog = h.document.querySelector('.ca-avatar-dialog')!;
   expect(dialog.querySelectorAll('.ca-expert-portraits button')).toHaveLength(100);
   expect(dialog.textContent).not.toContain('Outside pack');
@@ -231,4 +231,126 @@ it('cancels an in-flight modal selection before its conversion can change the pr
   finish(photo);
   await h.flush();
   expect(appearance.picture.value()).toBe('');
+});
+
+it('retries a failed catalog on reopening without losing the saved picture', async () => {
+  const current = '/api/avatars/existing?v=1';
+  const { h, fetch, mount, button } = await fixture({ random: false, current });
+  fetch.mockRejectedValueOnce(new Error('prefetch failed'))
+    .mockResolvedValueOnce({ ok: false })
+    .mockResolvedValue({ ok: true, json: async () => ({ avatars }) });
+  const appearance = mount(); await h.flush();
+  button('Choose avatar').click(); await h.flush();
+  expect(h.document.querySelector('.ca-avatar-dialog')!.textContent).toContain('Avatars are unavailable');
+  expect(fetch).toHaveBeenCalledTimes(2);
+  h.document.querySelector('.ca-avatar-dialog [aria-label=Cancel]').click();
+  button('Choose avatar').click(); await h.flush();
+  expect(fetch).toHaveBeenCalledTimes(3);
+  expect(h.document.querySelectorAll('.ca-avatar-dialog .ca-expert-portraits button')).toHaveLength(50);
+  expect(appearance.picture.value()).toBe(current);
+  expect(appearance.pending()).toBe(false);
+});
+
+it('offers explicit Retry after failure and never runs background retry loops', async () => {
+  const { h, fetch, mount, button } = await fixture({ random: false });
+  fetch.mockRejectedValueOnce(new Error('prefetch failed'))
+    .mockRejectedValueOnce(new Error('open failed'))
+    .mockResolvedValue({ ok: true, json: async () => ({ avatars }) });
+  mount(); await h.flush(); button('Choose avatar').click(); await h.flush();
+  const dialog = h.document.querySelector('.ca-avatar-dialog')!;
+  const retry = dialog.querySelector('[aria-label="Retry avatars"]') as HTMLButtonElement;
+  expect(retry.hidden).toBe(false); expect(retry.disabled).toBe(false);
+  await h.flush(); expect(fetch).toHaveBeenCalledTimes(2);
+  retry.click(); await h.flush();
+  expect(fetch).toHaveBeenCalledTimes(3);
+  expect(dialog.querySelectorAll('.ca-expert-portraits button')).toHaveLength(50);
+  expect(retry.hidden).toBe(true);
+});
+
+it('bounds a hung request, aborts it and permits one explicit retry', async () => {
+  const { h, fetch, mount, button } = await fixture({ random: false });
+  fetch.mockImplementationOnce(() => new Promise(() => {}))
+    .mockResolvedValue({ ok: true, json: async () => ({ avatars }) });
+  const before = h.window.__watchdogs.length;
+  mount(); button('Choose avatar').click(); await h.flush();
+  const watchdog = h.window.__watchdogs.slice(before).find((timer: any) => timer.ms === 5000)!;
+  expect(watchdog).toBeDefined(); watchdog.fn(); await h.flush();
+  const dialog = h.document.querySelector('.ca-avatar-dialog')!;
+  expect(dialog.textContent).toContain('took too long');
+  expect(fetch.mock.calls[0][1].signal.aborted).toBe(true);
+  await h.flush(); expect(fetch).toHaveBeenCalledTimes(1);
+  dialog.querySelector('[aria-label="Retry avatars"]').click(); await h.flush();
+  expect(fetch).toHaveBeenCalledTimes(2);
+  expect(dialog.querySelectorAll('.ca-expert-portraits button')).toHaveLength(50);
+});
+
+it('keeps the same deadline through catalog JSON decoding and ignores its late result', async () => {
+  const { h, fetch, mount, button } = await fixture({ random: false });
+  let finish!: (value: unknown) => void;
+  fetch.mockResolvedValueOnce({ ok: true, json: () => new Promise(resolve => { finish = resolve; }) })
+    .mockResolvedValue({ ok: true, json: async () => ({ avatars }) });
+  const before = h.window.__watchdogs.length;
+  mount(); button('Choose avatar').click(); await h.flush();
+  h.window.__watchdogs.slice(before).find((timer: any) => timer.ms === 5000)!.fn(); await h.flush();
+  const dialog = h.document.querySelector('.ca-avatar-dialog')!;
+  dialog.querySelector('[aria-label="Retry avatars"]').click(); await h.flush();
+  finish({ avatars: [{ ...avatars[0], name: 'Stale response' }] }); await h.flush();
+  expect(dialog.querySelectorAll('.ca-expert-portraits button')).toHaveLength(50);
+  expect(dialog.textContent).not.toContain('Stale response');
+});
+
+it('aborts a cancelled chooser and fences its result from a reopened chooser', async () => {
+  const { h, fetch, mount, button } = await fixture({ random: false });
+  let finish!: (value: unknown) => void;
+  fetch.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }))
+    .mockResolvedValue({ ok: true, json: async () => ({ avatars }) });
+  const appearance = mount(); button('Choose avatar').click(); await h.flush();
+  const old = h.document.querySelector('.ca-avatar-dialog')!;
+  old.querySelector('[aria-label=Cancel]').click();
+  expect(fetch.mock.calls[0][1].signal.aborted).toBe(true);
+  button('Choose avatar').click(); await h.flush();
+  const current = h.document.querySelector('.ca-avatar-dialog')!;
+  finish({ ok: true, json: async () => ({ avatars: [{ ...avatars[0], name: 'Old chooser' }] }) }); await h.flush();
+  expect(old.isConnected).toBe(false);
+  expect(current.querySelectorAll('.ca-expert-portraits button')).toHaveLength(50);
+  expect(current.textContent).not.toContain('Old chooser');
+  expect(appearance.picture.value()).toBe('');
+});
+
+it('does not retry an empty or invalid catalog until asked and preserves explicit initials', async () => {
+  const { h, fetch, mount, button } = await fixture();
+  fetch.mockResolvedValueOnce({ ok: true, json: async () => ({ avatars: [] }) })
+    .mockResolvedValueOnce({ ok: true, json: async () => ({ avatars: [{ id: '../private', src: 'https://outside.test/a.png' }] }) })
+    .mockResolvedValue({ ok: true, json: async () => ({ avatars }) });
+  const appearance = mount(); await h.flush(); button('Use initials').click();
+  button('Choose avatar').click(); await h.flush();
+  const dialog = h.document.querySelector('.ca-avatar-dialog')!;
+  expect(dialog.textContent).toContain('Avatars are unavailable');
+  await h.flush(); expect(fetch).toHaveBeenCalledTimes(2);
+  dialog.querySelector('[aria-label="Retry avatars"]').click(); await h.flush();
+  expect(dialog.querySelectorAll('.ca-expert-portraits button')).toHaveLength(50);
+  expect(appearance.picture.value()).toBe('');
+  expect(h.shell.imageToIcon).not.toHaveBeenCalled();
+  expect(fetch.mock.calls.every(call => call[0] === '/assets/avatars/pack-manifest.json')).toBe(true);
+});
+
+it('fetches and previews a versioned transparent replacement while rejecting malformed revisions', async () => {
+  const { h, fetch, mount, button } = await fixture({ random: false });
+  const src = '/assets/avatars/pack-01.png?v=' + 'a'.repeat(64);
+  fetch.mockImplementation(async (url: string) => url === '/assets/avatars/pack-manifest.json'
+    ? { ok: true, json: async () => ({ avatars: [
+      { id: 'pack-01', name: 'Transparent Rocket', src },
+      { id: 'pack-02', name: 'Short version', src: '/assets/avatars/pack-02.png?v=a' },
+      { id: 'pack-03', name: 'Extra parameter', src: '/assets/avatars/pack-03.png?v=' + 'b'.repeat(64) + '&outside=1' },
+      { id: 'pack-04', name: 'Wrong identity', src: '/assets/avatars/pack-05.png?v=' + 'c'.repeat(64) },
+    ] }) }
+    : { ok: true, blob: async () => new h.window.Blob(['avatar'], { type: 'image/png' }) });
+  mount(); await h.flush(); button('Choose avatar').click(); await h.flush();
+  const dialog = h.document.querySelector('.ca-avatar-dialog')!;
+  expect(dialog.querySelectorAll('.ca-expert-portraits button')).toHaveLength(1);
+  const choice = dialog.querySelector('[aria-label="Use Transparent Rocket"]') as HTMLButtonElement;
+  expect(choice.querySelector('img')!.getAttribute('src')).toBe(src);
+  choice.click(); await h.flush();
+  expect(fetch).toHaveBeenCalledWith(src);
+  expect(h.shell.imageToIcon).toHaveBeenCalledTimes(1);
 });

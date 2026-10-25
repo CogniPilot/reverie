@@ -68,11 +68,11 @@ it('offers a reporting manager in Edit profile and persists it through the exist
   const { h, employee, dialog } = await setup(); dialog.close();
   h.app._chatApi = vi.fn(async (path, opts) => {
     if (opts?.method === 'PUT') return { ok: true, data: {} };
-    return { ok: true, data: { settings: { ownerName: 'James' }, employees: [employee, { id: 'manager', name: 'Manager' }] } };
+    return { ok: true, data: { settings: { ownerName: 'James' }, employees: [employee, { id: 'manager', name: 'Burt' }] } };
   });
   h.shell.openEmployeeProfile(employee); await h.flush();
   const parent = h.document.querySelector('.ca-expert-profile [name="reportsTo"]');
-  expect(parent.disabled).toBe(false); expect(parent.textContent).toContain('James'); expect(parent.textContent).toContain('Manager');
+  expect(parent.disabled).toBe(false); expect(parent.textContent).toContain('James'); expect(parent.textContent).toContain('Burt');
   expect([...parent.options].some(option => option.value === employee.id)).toBe(false);
   parent.value = 'manager';
   h.document.querySelector('.ca-expert-profile form').dispatchEvent(new h.window.Event('submit', { bubbles: true, cancelable: true }));

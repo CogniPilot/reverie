@@ -1,4 +1,4 @@
-/** Bounded math parser/renderer. Offline, display-only. */
+/** Math parser/renderer reused from Mira's reviewed chat rendering packet. Offline, display-only. */
 (function (root) {
   'use strict';
   const MAX_MATH = 4096,

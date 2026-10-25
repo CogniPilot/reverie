@@ -47,6 +47,7 @@ interface Employee {
   avatar?: string;
   position?: string;
   sessionId?: string;
+  permissions?: { recoverEmployees?: boolean; moveOwnPlan?: boolean; managePlans?: boolean };
 }
 
 export interface BoardDeps {
@@ -290,6 +291,17 @@ export function registerBoardRoutes(app: FastifyInstance, ctx: SessionPort & Par
         timeZone: company.settings.timeZone,
         ownerName: company.settings.ownerName,
         roster,
+        capabilities: {
+          checkedAt: at,
+          identity: { kind: c.kind, name: nameOf(c), ...(c.kind === 'agent' ? { sessionId: c.sessionId, employeeId: c.memberId } : {}) },
+          board: { read: true, fileIssue: true, createDecision: lead(c), clearDecision: lead(c), manageBoard: c.kind === 'owner', reason: c.kind === 'owner' ? 'Verified owner.' : c.coordinator ? 'Active owner-made coordinator membership; the Board uses this same gate for decision creation.' : 'Decision creation requires an active owner-made coordinator membership. Company plan/recovery grants and titles do not grant it.' },
+          company: {
+            recoverEmployees: c.kind === 'owner' || company.employees.find(e => e.id === c.memberId)?.permissions?.recoverEmployees === true,
+            moveOwnPlan: c.kind === 'owner' || !!company.employees.find(e => e.id === c.memberId && (e.permissions?.moveOwnPlan === true || e.permissions?.managePlans === true)),
+            managePlans: c.kind === 'owner' || company.employees.find(e => e.id === c.memberId)?.permissions?.managePlans === true,
+            planPreconditions: 'Grant admission only. Current owned live source/target bindings, non-vacation employees, supported single-company plan/account and handoff approval are checked again by the plan action.',
+          },
+        },
         ownerIds,
         // Same gate as GET /api/plans.
         planBurn: isAdmin(req) ? await planBurn(state) : null,

@@ -44,13 +44,14 @@ const hoverText = (value: unknown): string => {
 };
 
 export class ChatLanguageService {
-  private readonly active = new Set<AbortController>();
+  private readonly active = new Map<AbortController, LanguageRequest['language']>();
   private stopped = false;
   constructor(
     private readonly options: {
       binaries?: Partial<Record<LanguageRequest['language'], string>>;
       scratch?: string;
       timeoutMs?: number;
+      enabled?: (language: LanguageRequest['language']) => boolean;
     } = {}
   ) {}
 
@@ -77,12 +78,19 @@ export class ChatLanguageService {
 
   stop(): void {
     this.stopped = true;
-    for (const controller of this.active) controller.abort();
+    for (const controller of this.active.keys()) controller.abort();
+  }
+
+  cancel(language: LanguageRequest['language']): void {
+    for (const [controller, activeLanguage] of this.active) {
+      if (activeLanguage === language) controller.abort();
+    }
   }
 
   async assist(input: unknown, signal?: AbortSignal): Promise<LanguageResult> {
     // Validate even direct callers before looking up a binary or creating files/processes.
     const request = ChatLanguageRequest.parse(input);
+    if (!this.options.enabled?.(request.language)) throw new Error('This language plugin is disabled by the owner');
     const binary = this.binary(request.language);
     if (!binary)
       throw new Error(
@@ -91,7 +99,7 @@ export class ChatLanguageService {
     if (this.stopped || signal?.aborted) throw new Error('Language assistance cancelled');
     if (this.active.size >= 2) throw new Error('Language assistance busy; try again shortly');
     const controller = new AbortController();
-    this.active.add(controller);
+    this.active.set(controller, request.language);
     const abort = () => controller.abort();
     signal?.addEventListener('abort', abort, { once: true });
     const timer = setTimeout(abort, Math.min(15000, this.options.timeoutMs ?? 10000));

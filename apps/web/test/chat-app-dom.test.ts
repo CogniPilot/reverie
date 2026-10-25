@@ -293,6 +293,24 @@ describe('members and presence', () => {
     );
   const frame = () => settle(60);
 
+  it('shows a restored expert online from session events without reloading the browser', async () => {
+    const h = await createHarness({ sessions: [{ id: A, name: 'alpha', pid: 10, status: 'idle' }],
+      rooms: [room('r1', 'General', [member(A, 'alpha'), member(B, 'bravo', { alive: false })])] });
+    expect(dotOf(h, 'bravo')).toBe('chatroom-dot--gone');
+    // The harness substitutes the upstream app's session map, which session:created populates.
+    const restored = { id: B, name: 'bravo', pid: 20, status: 'idle', paneExit: null };
+    h.app.sessions.set(B, restored);
+    h.app._onSessionCreated(restored);
+    await frame();
+    expect(dotOf(h, 'bravo')).toBe('chatroom-dot--idle');
+    h.app._onSessionUpdated({ session: { id: B, pid: null, status: 'stopped' } });
+    await frame();
+    expect(dotOf(h, 'bravo')).toBe('chatroom-dot--gone');
+    h.app._onSessionUpdated({ session: { id: B, pid: 21, status: 'idle', paneExit: null } });
+    await frame();
+    expect(dotOf(h, 'bravo')).toBe('chatroom-dot--idle');
+  });
+
   it('follows the app through the REAL entry points: a hook arriving or clearing and a session update move the dot, the words and the label', async () => {
     const rooms = [
       room(
@@ -422,6 +440,7 @@ describe('members and presence', () => {
     expect(h.document.getElementById('chatApp')!.hidden).toBe(true);
     expect(h.app.selected).toEqual([A]);
     expect(h.window.sessionStorage.getItem('reverie:view')).toBe('debug');
+    expect(h.window.sessionStorage.getItem('reverie:debug-session')).toBe(A);
     const back = h.document.querySelector<HTMLButtonElement>('.ca-back')!;
     expect(back.getAttribute('aria-label')).toBe('Back to chat');
     expect(back.parentElement).toBe(h.document.body);
@@ -429,6 +448,7 @@ describe('members and presence', () => {
     expect(h.document.documentElement.getAttribute('data-reverie-view')).toBe('chat');
     expect(h.document.getElementById('chatApp')!.hidden).toBe(false);
     expect(h.window.sessionStorage.getItem('reverie:view')).toBeNull();
+    expect(h.window.sessionStorage.getItem('reverie:debug-session')).toBeNull();
   });
 
   it('says so, and stays in chat, when an agent has no terminal session to open', async () => {
@@ -1368,7 +1388,7 @@ describe('invite to channel', () => {
     { id: '00000040-0050-4000-8000-000000000077', name: 'term', mode: 'shell' },
   ];
 
-  it('has an Invite button on each channel row (not on DMs) that opens the picker', async () => {
+  it('keeps channel settings and the member-list add control without a duplicate row invite', async () => {
     const h = await createHarness({
       sessions: S,
       rooms: [
@@ -1376,9 +1396,10 @@ describe('invite to channel', () => {
         room('dm1', '', [member(B, 'bravo')], { kind: 'dm', dm: ['user', B] }),
       ],
     });
-    const acts = [...h.document.querySelectorAll('.ca-item-act:not(.ca-item-edit)')] as HTMLElement[];
-    expect(acts.map((a) => a.getAttribute('aria-label'))).toEqual(['Invite agents to General']);
-    acts[0].click();
+    expect(h.document.querySelector('.ca-side [data-key="invite:r1"]')).toBeNull();
+    expect(h.document.querySelector('.ca-side [data-key="edit:r1"]')).not.toBeNull();
+    expect(h.document.querySelector('.ca-add-button')?.getAttribute('aria-label')).toBe('Add an agent');
+    (h.document.querySelector('.ca-head-invite') as HTMLButtonElement).click();
     const dlg = h.document.querySelector('.ca-invite') as HTMLDialogElement;
     expect(dlg.textContent).toContain('Invite agents to #General');
     const names = () => [...dlg.querySelectorAll('.ca-invite-row strong')].map((e) => e.textContent);
@@ -1395,7 +1416,7 @@ describe('invite to channel', () => {
 
   it('invites an agent: posts it to that room and shows it as invited', async () => {
     const h = await createHarness({ sessions: S, rooms: [room('r1', 'General', [member(A, 'alpha')], {})] });
-    (h.document.querySelector('.ca-item-act') as HTMLElement).click();
+    (h.document.querySelector('.ca-head-invite') as HTMLButtonElement).click();
     const dlg = h.document.querySelector('.ca-invite') as HTMLDialogElement;
     (
       [...dlg.querySelectorAll('.ca-invite-row button')].find(
@@ -4343,12 +4364,12 @@ it('browser Back returns from a debug session to the full conversation shell', a
 });
 
 it('turns shared workspace artifact paths into browser downloads, including inline code but excluding fenced code', async () => {
-  const path = '/reverie_workspace/projects/example/demo.mp4';
+  const path = '/reverie_workspace/cases/expert-quill/EP010.mp4';
   const h = await createHarness({ sessions, rooms: [room('r1', 'Office', [member(A, 'alpha')], { messages: [message('video', 'r1', agent(A, 'alpha'), 'Video: `' + path + '`\n```\n' + path + '\n```', 1000)] })] });
   const links = [...h.document.querySelectorAll('.ca-workspace-download')];
   expect(links).toHaveLength(1);
   expect(links[0].getAttribute('href')).toBe('/api/filesystem/download?path=' + encodeURIComponent(path));
-  expect(links[0].getAttribute('download')).toBe('demo.mp4');
+  expect(links[0].getAttribute('download')).toBe('EP010.mp4');
   expect(h.document.querySelector('pre .ca-workspace-download')).toBeNull();
   h.dom.window.close();
 });

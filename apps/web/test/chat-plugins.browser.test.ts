@@ -26,7 +26,18 @@ beforeEach(async () => {
   await page?.close();
   page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
   requests = [];
+  let enabled = { latex: false, python: false, modelica: false };
   await page.route('**/*', async (route) => {
+    if (route.request().url().endsWith('/api/chat-plugins')) {
+      if (route.request().method() === 'PUT') enabled = route.request().postDataJSON();
+      return route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({
+          success: true,
+          data: { enabled, available: { python: true, modelica: true }, canManage: true },
+        }),
+      });
+    }
     if (route.request().url().endsWith('/api/chat-plugins/lsp')) {
       requests.push(route.request().postDataJSON());
       return route.fulfill({
@@ -60,15 +71,16 @@ beforeEach(async () => {
   await page.addScriptTag({ content: 'window.app = new ReverieApp();' });
   for (const name of ['chat-app.js', 'chat-plugins.js', 'chat-language-plugins.js'])
     await page.addScriptTag({ content: read(name) });
-  await page.locator('.ca-plugins-open').waitFor();
+  await page.waitForFunction(() => (window as any).ReverieChatPlugins?.canManage());
 });
 
 it('keeps real chat fences unchanged while disabled, requires explicit opt-in/action, and treats results as text', async () => {
   const original = await page.locator('.chatroom-codeblock').first().textContent();
   expect(await page.locator('.chat-plugin-actions').count()).toBe(0);
   expect(requests).toEqual([]);
-  await page.getByRole('button', { name: 'Optional chat plugins' }).click();
+  await page.evaluate(() => (window as any).ReverieChatPlugins.openSettings());
   await page.getByLabel(/Python —/).check();
+  await page.getByText('Saved for everyone.', { exact: true }).waitFor();
   await page.getByRole('button', { name: 'Done', exact: true }).click();
   expect(await page.getByRole('button', { name: 'Python assistance', exact: true }).count()).toBe(1);
   expect(requests).toEqual([]);
@@ -92,32 +104,33 @@ it('keeps real chat fences unchanged while disabled, requires explicit opt-in/ac
   );
   await page.getByRole('button', { name: 'Close', exact: true }).click();
   expect(await page.locator('.chatroom-codeblock').first().textContent()).toBe(original + 'Python assistance');
-  await page.getByRole('button', { name: 'Optional chat plugins' }).click();
+  await page.evaluate(() => (window as any).ReverieChatPlugins.openSettings());
   await page.getByLabel(/Python —/).uncheck();
+  await page.getByText('Saved for everyone.', { exact: true }).waitFor();
   await page.getByRole('button', { name: 'Done', exact: true }).click();
   expect(await page.locator('.chatroom-codeblock').first().textContent()).toBe(original);
 });
 
-it('keeps the Plugins text button inside the header and exposes the same settings in More actions', async () => {
-  for (const width of [940, 390]) {
+it('keeps plugin settings out of the room header and centers a compact server dialog on desktop and mobile', async () => {
+  for (const width of [1365, 390]) {
     await page.setViewportSize({ width, height: 844 });
-    const button = page.getByRole('button', { name: 'Optional chat plugins' });
-    const box = await button.boundingBox();
-    const header = await page.locator('.ca-head').boundingBox();
-    expect(box!.width).toBeGreaterThanOrEqual(68);
-    expect(box!.x).toBeGreaterThanOrEqual(header!.x);
-    expect(box!.x + box!.width).toBeLessThanOrEqual(header!.x + header!.width + 1);
-    expect(box!.x + box!.width).toBeLessThanOrEqual(width);
+    expect(await page.locator('.ca-plugins-open').count()).toBe(0);
+    await page.evaluate(() => (window as any).ReverieChatPlugins.openSettings());
+    const box = await page.locator('.chat-plugins-settings').boundingBox();
+    expect(box!.width).toBeLessThanOrEqual(520);
+    expect(Math.abs(box!.x + box!.width / 2 - width / 2)).toBeLessThanOrEqual(2);
+    expect(Math.abs(box!.y + box!.height / 2 - 844 / 2)).toBeLessThanOrEqual(2);
+    expect(box!.x).toBeGreaterThanOrEqual(16);
+    expect(box!.x + box!.width).toBeLessThanOrEqual(width - 16);
+    await page.getByRole('button', { name: 'Done', exact: true }).click();
   }
-  await page.getByRole('button', { name: 'More actions', exact: true }).click();
-  await page.getByRole('menuitem', { name: 'Chat plugins', exact: true }).click();
-  await page.getByRole('heading', { name: 'Optional chat plugins', exact: true }).waitFor();
 });
 
 it('offers Modelica in a narrow browser with accessible controls and reversible preferences', async () => {
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.getByRole('button', { name: 'Optional chat plugins' }).click();
+  await page.evaluate(() => (window as any).ReverieChatPlugins.openSettings());
   await page.getByLabel(/Modelica —/).check();
+  await page.getByText('Saved for everyone.', { exact: true }).waitFor();
   await page.getByRole('button', { name: 'Done', exact: true }).click();
   await page.getByRole('button', { name: 'Modelica assistance', exact: true }).click();
   expect(await page.getByLabel('Modelica source').inputValue()).toContain('model X');
@@ -132,8 +145,9 @@ it('offers Modelica in a narrow browser with accessible controls and reversible 
   );
   expect(await page.locator('.chat-plugin-output img').count()).toBe(0);
   await page.getByRole('button', { name: 'Close', exact: true }).click();
-  await page.getByRole('button', { name: 'Optional chat plugins' }).click();
+  await page.evaluate(() => (window as any).ReverieChatPlugins.openSettings());
   await page.getByLabel(/Modelica —/).uncheck();
+  await page.getByText('Saved for everyone.', { exact: true }).waitFor();
   await page.getByRole('button', { name: 'Done', exact: true }).click();
   expect(await page.getByRole('button', { name: 'Modelica assistance', exact: true }).count()).toBe(0);
 });

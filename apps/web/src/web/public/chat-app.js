@@ -911,7 +911,7 @@ const CA_IMAGE_DATA = /^data:image\/(?:png|jpeg|webp|gif);base64,[A-Za-z0-9+/]+=
  */
 function caIconImage(icon, urlFn) {
   const s = typeof icon === 'string' ? icon.trim() : '';
-  if (/^\/assets\/avatars\/pack-(?:0[1-9]|[1-9][0-9]|1[0-4][0-9]|15[01])\.png$/.test(s)) return typeof urlFn === 'function' ? urlFn(s) : s;
+  if (/^\/assets\/avatars\/pack-(?:0[1-9]|[1-9][0-9]|1[0-4][0-9]|15[01])\.png(?:\?v=[a-f0-9]{64})?$/.test(s)) return typeof urlFn === 'function' ? urlFn(s) : s;
   if (!s) return '';
   if (s.length <= 160000 && CA_IMAGE_DATA.test(s)) return s;
   // An avatar the server stores for an agent: /api/avatars/<id> with an optional version, so a new picture is fetched afresh.
@@ -1438,6 +1438,7 @@ class ReverieChatApp {
     html.setAttribute('data-reverie-view', this.view);
     // Only a choice made here is remembered: the view the page opened with (a link, a fallback) is not.
     if (!initial) caWrite('session', 'reverie:view', this.view === 'debug' ? 'debug' : null);
+    if (!initial && this.view === 'chat') caWrite('session', 'reverie:debug-session', null);
     this.els.root.hidden = this.view === 'debug';
     if (this.view === 'chat' && this.built) this.touchHint();
     if (this.view === 'debug') {
@@ -1457,6 +1458,7 @@ class ReverieChatApp {
       return;
     }
     const target = sessionId || this.app.activeSessionId;
+    if (target) caWrite('session', 'reverie:debug-session', target);
     if (this.app._tileGrid?.open) {
       this.app.closeTileGrid({ keepStored: true, reselect: false, animate: false });
       this.app.activeSessionId = null;
@@ -2857,6 +2859,10 @@ class ReverieChatApp {
       const manage = data.canManage === true && auth.ok && auth.data?.self === 'owner' && auth.data?.canSetOwn === true;
       status.textContent = '';
       if (manage) {
+        const plugins = this.doc.defaultView?.ReverieChatPlugins;
+        if (plugins) content.append(this.button('ca-btn', 'Configure server chat plugins', () => {
+          void plugins.openSettings().catch(failure => this.toast(failure.message || 'Plugin settings are unavailable.', 'error'));
+        }, { text: 'Chat plugins' }));
         const form = this.el('form', 'ca-company-settings-form');
         form.append(this.el('h3', '', 'Owner details'));
         const field = (label, value) => {
@@ -4685,7 +4691,7 @@ class ReverieChatApp {
       wire(dmWrap);
       return dmWrap;
     }
-    // A channel row also carries its own "Invite" button, shown on hover or focus like Discord's.
+    // Channel settings stay on the row; members are added from the member list.
     const wrap = this.el('div', `ca-item-wrap${item.active ? ' is-active' : ''}${this._order ? ' is-ordering' : ''}`);
     if (this._order) {
       // Reordering: a handle, the channel, and Up / Down buttons (a touch screen cannot drag reliably).
@@ -4704,10 +4710,6 @@ class ReverieChatApp {
     }
     this.wireOrderDrag(wrap, item.id);
     wrap.append(b);
-    const invite = this.button('ca-item-act', `Invite agents to ${item.label}`, () => this.openInviteDialog(item.id), { icon: 'invite' });
-    invite.title = 'Invite to channel';
-    invite.dataset.key = `invite:${item.id}`;
-    wrap.append(invite);
     const edit = this.button('ca-item-act ca-item-edit', `Edit channel ${item.label}`, () => this.openChannelSettings(item.id), { icon: 'gearsmall' });
     edit.title = 'Edit channel';
     edit.dataset.key = `edit:${item.id}`;
@@ -5981,17 +5983,47 @@ class ReverieChatApp {
       } finally { if (converting === ticket) converting = null; }
     };
     const initialIntent = intent;
-    const pack = (async () => {
-      try {
-        const response = await this.doc.defaultView.fetch('/assets/avatars/pack-manifest.json', { cache: 'no-cache' });
-        if (!response.ok) return [];
-        const manifest = await response.json();
-        const avatars = (Array.isArray(manifest.avatars) ? manifest.avatars : []).filter(avatar => avatar && /^pack-(?:0[1-9]|[1-4][0-9]|50|10[2-9]|1[1-4][0-9]|15[01])$/.test(avatar.id) && avatar.src === `/assets/avatars/${avatar.id}.png`);
-        const unused = avatars.filter(avatar => !avoidPhotos.includes(avatar.src));
-        if (random && unused.length && intent === initialIntent && !picture.value()) void select(unused[Math.floor(Math.random() * unused.length)], true);
+    const win = this.doc.defaultView;
+    let catalog = null, catalogRequest = null;
+    const cancelCatalog = () => {
+      const previous = catalogRequest;
+      catalogRequest = null;
+      previous?.cancel();
+    };
+    const loadCatalog = () => {
+      if (catalog) return Promise.resolve(catalog);
+      if (catalogRequest) return catalogRequest.promise;
+      const controller = new win.AbortController();
+      const request = { promise: null, cancel: null };
+      catalogRequest = request;
+      let rejectDeadline;
+      const deadline = new Promise((_, reject) => { rejectDeadline = reject; });
+      request.cancel = () => { rejectDeadline(new Error('Avatar catalog cancelled')); controller.abort(); };
+      const timer = win.setTimeout(() => {
+        if (catalogRequest !== request) return;
+        rejectDeadline(new Error('Avatar catalog deadline')); controller.abort();
+      }, 5000);
+      let fetching;
+      try { fetching = win.fetch('/assets/avatars/pack-manifest.json', { cache: 'no-cache', signal: controller.signal }); }
+      catch (failure) { fetching = Promise.reject(failure); }
+      request.promise = Promise.race([fetching, deadline]).then(async response => {
+        if (!response.ok) throw new Error('Avatar catalog unavailable');
+        const manifest = await Promise.race([response.json(), deadline]);
+        const avatars = (Array.isArray(manifest.avatars) ? manifest.avatars : []).filter(avatar => avatar && /^pack-(?:0[1-9]|[1-4][0-9]|50|10[2-9]|1[1-4][0-9]|15[01])$/.test(avatar.id) && typeof avatar.src === 'string' && avatar.src.split('?')[0] === `/assets/avatars/${avatar.id}.png` && /^\/assets\/avatars\/pack-[0-9]{2,3}\.png(?:\?v=[a-f0-9]{64})?$/.test(avatar.src));
+        if (catalogRequest !== request || !form.isConnected) throw new Error('Avatar catalog cancelled');
+        if (!avatars.length) throw new Error('Avatar catalog unavailable');
+        catalog = avatars;
         return avatars;
-      } catch { return []; }
-    })();
+      }).finally(() => {
+        win.clearTimeout(timer);
+        if (catalogRequest === request) catalogRequest = null;
+      });
+      return request.promise;
+    };
+    void loadCatalog().then(avatars => {
+      const unused = avatars.filter(avatar => !avoidPhotos.includes(avatar.src));
+      if (random && unused.length && intent === initialIntent && !picture.value() && form.isConnected) void select(unused[Math.floor(Math.random() * unused.length)], true);
+    }).catch(() => {}); // One prefetch only; failures retry on explicit open/Retry.
     const choose = this.button('ca-btn', 'Choose avatar', async () => {
       if (this.doc.querySelector('.ca-avatar-dialog')) return;
       intent++; converting = null; picture.cancelPending();
@@ -6001,22 +6033,39 @@ class ReverieChatApp {
       const gallery = this.el('div', 'ca-expert-portraits');
       gallery.setAttribute('role', 'group'); gallery.setAttribute('aria-label', 'Expert illustrations');
       const note = this.el('p', 'ca-hint', 'Loading avatars…'); note.setAttribute('role', 'status');
+      let attempt = 0;
       const close = () => { intent++; converting = null; dialog.close(); };
       const cancel = this.button('ca-btn', 'Cancel', close, { text: 'Cancel' });
-      const actions = this.el('div', 'ca-dialog-actions'); actions.append(cancel);
+      const retry = this.button('ca-btn', 'Retry avatars', () => { if (!retry.disabled) void populate(); }, { text: 'Retry' });
+      retry.hidden = true;
+      const actions = this.el('div', 'ca-dialog-actions'); actions.append(retry, cancel);
       dialog.append(note, gallery, actions);
       dialog.addEventListener('cancel', event => { event.preventDefault(); close(); });
-      dialog.addEventListener('close', () => { intent++; converting = null; dialog.remove(); choose.focus(); });
+      dialog.addEventListener('close', () => { attempt++; intent++; converting = null; cancelCatalog(); dialog.remove(); choose.focus(); });
       this.doc.body.append(dialog); dialog.showModal(); cancel.focus();
-      const avatars = await pack;
-      if (!dialog.isConnected) return;
-      note.textContent = avatars.length ? '' : 'Avatars are unavailable. You can still upload a picture or use initials.';
-      for (const avatar of avatars) {
-        const button = this.button('ca-btn', `Use ${avatar.name}`, async () => { if (await select(avatar) && dialog.isConnected) dialog.close(); });
-        button.title = avatar.name;
-        const image = this.el('img'); image.src = avatar.src; image.alt = ''; image.loading = 'lazy'; image.width = image.height = 56;
-        button.append(image); gallery.append(button);
-      }
+      const populate = async () => {
+        const ticket = ++attempt;
+        retry.disabled = true; retry.hidden = true; gallery.replaceChildren();
+        note.textContent = 'Loading avatars…';
+        try {
+          const avatars = await loadCatalog();
+          if (ticket !== attempt || !dialog.isConnected || !form.isConnected) return;
+          note.textContent = '';
+          for (const avatar of avatars) {
+            const button = this.button('ca-btn', `Use ${avatar.name}`, async () => { if (await select(avatar) && dialog.isConnected) dialog.close(); });
+            button.title = avatar.name;
+            const image = this.el('img'); image.src = avatar.src; image.alt = ''; image.loading = 'lazy'; image.width = image.height = 56;
+            button.append(image); gallery.append(button);
+          }
+        } catch (failure) {
+          if (ticket !== attempt || !dialog.isConnected || !form.isConnected) return;
+          note.textContent = failure?.message === 'Avatar catalog deadline'
+            ? 'Avatars took too long to load. Retry, upload a picture, or use initials.'
+            : 'Avatars are unavailable. Retry, upload a picture, or use initials.';
+          retry.hidden = false;
+        } finally { if (ticket === attempt && dialog.isConnected) retry.disabled = false; }
+      };
+      void populate();
     }, { text: 'Choose avatar' });
     initials.before(choose);
     return { picture, pending: () => converting !== null || picture.pending() };
@@ -7739,6 +7788,8 @@ function caInstall(proto) {
     '_onSessionCreated'(data) {
       const result = original._onSessionCreated?.call(this, data);
       this._chatApp?.syncSessionPresence?.(data.id);
+      if (this._chatApp?.view === 'debug' && this.activeSessionId !== data.id && caRead('session', 'reverie:debug-session', '') === data.id)
+        this._restorePinnedDebugSession?.();
       return result;
     },
     '_onSessionDeleted'(data) {
@@ -7749,6 +7800,9 @@ function caInstall(proto) {
     '_onSessionUpdated'(data) {
       const result = original._onSessionUpdated?.call(this, data);
       this._chatApp?.syncSessionPresence?.((data.session || data).id);
+      const id = (data.session || data).id;
+      if (this._chatApp?.view === 'debug' && this.activeSessionId !== id && caRead('session', 'reverie:debug-session', '') === id)
+        this._restorePinnedDebugSession?.();
       return result;
     },
     async _sendChatMessage(options) {

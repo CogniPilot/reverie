@@ -119,10 +119,12 @@ describe('permanent employee across three runtime replacements', () => {
         icon: '🦊',
       });
       expect(chat.openDm(current, undefined).id).toBe(dm.id);
-      expect(chat.room(room.id)!.messages).toContainEqual(message);
-      expect(chat.room(dm.id)!.messages).toContainEqual(direct);
+      // Public history stays exact while internal phone eligibility travels with the stored record.
+      expect(chat.view(chat.room(room.id)!).messages).toContainEqual(message);
+      expect(chat.view(chat.room(dm.id)!).messages).toContainEqual(direct);
       // The author of an old message stays the original runtime, not rewritten.
       expect(message.from).toMatchObject({ sessionId: 'worker-0' });
+      expect(chat.room(room.id)!.messages.find(item => item.id === message.id)!.from).toMatchObject({ sessionId: 'worker-0' });
       for (let old = 0; old < i; old++) expect(chat.roomsFor(`worker-${old}`)).toEqual([]);
     }
     await chat.stop();
@@ -133,7 +135,7 @@ describe('permanent employee across three runtime replacements', () => {
     expect(loaded.snapshot().employees).toHaveLength(1);
     expect(loaded.snapshot().employees[0]).toMatchObject({ id: hired.id, sessionId: 'worker-3' });
     expect(chat.openDm('worker-3', undefined).id).toBe(dm.id);
-    expect(chat.room(dm.id)!.messages).toContainEqual(direct);
+    expect(chat.view(chat.room(dm.id)!).messages).toContainEqual(direct);
   });
 
   it('drops old queued deliveries and resolves each new mention to only the current runtime', async () => {

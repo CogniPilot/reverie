@@ -62,6 +62,7 @@ function fixture() {
     live: (id: string) => live.has(id),
     closing: (id: string) => closing.has(id),
     noteRunning: vi.fn(async () => {}),
+    begin: () => ({ current: () => true, finish: () => {} }),
     claim,
     wake,
     kickoff,

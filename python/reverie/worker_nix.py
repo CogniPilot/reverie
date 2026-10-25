@@ -1,4 +1,6 @@
 """Seed a private laptop Nix store using only a reviewed image's own closure."""
+from contextlib import contextmanager
+import fcntl
 import json
 import os
 from pathlib import Path
@@ -9,28 +11,85 @@ import time
 SESSION = re.compile(r'^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$')
 
 
-def private_store(config, session_id):
+def session_directory(config, session_id):
     if not isinstance(session_id, str) or not SESSION.fullmatch(session_id):
         raise ValueError('Invalid Nix store session identity')
-    scratch = Path(config['scratchRoot']) / session_id
-    scratch.mkdir(mode=0o700, parents=True, exist_ok=True)
-    if scratch.is_symlink() or scratch.resolve() != scratch:
-        raise ValueError('Invalid laptop scratch directory')
-    path = scratch / 'nix'
+    root = Path(config['stateRoot'])
+    if root.resolve() != root or root.is_relative_to(Path(config['scratchRoot']).resolve()):
+        raise ValueError('Laptop state must be durable and outside scratch')
+    if any(root.is_relative_to(Path(m['source']).resolve()) for m in config.get('mounts', [])):
+        raise ValueError('Laptop state must be outside shared mounts')
+    root.mkdir(mode=0o700, parents=True, exist_ok=True)
+    root_info = root.lstat()
+    if not stat.S_ISDIR(root_info.st_mode) or root_info.st_uid != config['uid'] or root_info.st_mode & 0o077:
+        raise ValueError('Laptop state root must be a private directory owned by its user')
+    directory = root / session_id
+    directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+    info = directory.lstat()
+    if directory.resolve() != directory or not stat.S_ISDIR(info.st_mode) or info.st_uid != config['uid'] or info.st_mode & 0o077:
+        raise ValueError('Laptop state must be a private directory owned by its user')
+    return directory
+
+
+@contextmanager
+def store_guard(config, session_id, *, migration=False):
+    """Serialize container creation with owner migration, including helper startup."""
+    directory = session_directory(config, session_id)
+    fd = os.open(directory / 'nix.lock', os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+    try:
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode) or info.st_uid != config['uid'] or info.st_mode & 0o077:
+            raise ValueError('Invalid laptop Nix lock')
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        fence = directory / 'nix-migration.json'
+        if not migration and (fence.exists() or fence.is_symlink()):
+            raise RuntimeError('Laptop Nix migration is fenced; owner must finish or roll it back')
+        yield directory
+    finally:
+        os.close(fd)
+
+
+def store_path(config, session_id):
+    """Only the owner can opt one laptop back into its fixed legacy location."""
+    if not isinstance(session_id, str) or not SESSION.fullmatch(session_id):
+        raise ValueError('Invalid Nix store session identity')
+    directory = Path(config['stateRoot']) / session_id
+    rollback = directory / 'nix-rollback.json'
+    if rollback.exists() or rollback.is_symlink():
+        info = rollback.lstat()
+        if not stat.S_ISREG(info.st_mode) or info.st_uid != config['uid'] or info.st_mode & 0o077:
+            raise ValueError('Invalid owner Nix rollback marker')
+        if json.loads(rollback.read_text()) != {'version': 1, 'sessionId': session_id, 'legacy': True}:
+            raise ValueError('Invalid owner Nix rollback identity')
+        return Path(config['scratchRoot']) / session_id / 'nix'
+    return directory / 'nix'
+
+
+def private_store(config, session_id):
+    directory = session_directory(config, session_id)
+    fence = directory / 'nix-migration.json'
+    if fence.exists() or fence.is_symlink():
+        raise RuntimeError('Laptop Nix migration is fenced; owner must finish or roll it back')
+    path = store_path(config, session_id)
+    legacy = Path(config['scratchRoot']) / session_id / 'nix'
+    if path == legacy and not path.exists():
+        raise RuntimeError('Selected laptop rollback store is unavailable; refusing an empty replacement')
+    if path != legacy and not path.exists() and (legacy.exists() or legacy.is_symlink()):
+        raise RuntimeError('Legacy laptop Nix store requires an offline migration; refusing an empty replacement')
     path.mkdir(mode=0o700, exist_ok=True)
     info = path.lstat()
-    if not stat.S_ISDIR(info.st_mode) or info.st_uid != config['uid'] or info.st_mode & 0o077:
+    if path.resolve() != path or not stat.S_ISDIR(info.st_mode) or info.st_uid != config['uid'] or info.st_mode & 0o077:
         raise ValueError('Laptop Nix store must be a private directory owned by its user')
     return path
 
 
 def prepare_args(config, session_id, path):
-    """A networkless, unprivileged helper; the one bind is already-owned scratch."""
+    """A networkless, unprivileged helper; its only writable bind is private state."""
     if not isinstance(session_id, str) or not SESSION.fullmatch(session_id):
         raise ValueError('Invalid Nix store session identity')
-    expected = Path(config['scratchRoot']) / session_id / 'nix'
+    expected = store_path(config, session_id)
     if path != expected:
-        raise ValueError('Nix store is outside this laptop scratch directory')
+        raise ValueError('Nix store is outside this laptop private state directory')
     name = config['deployment'] + '-nix-prepare-' + session_id
     args = ['create', '--name', name, '--init', '--read-only', '--cap-drop', 'ALL',
             '--security-opt', 'no-new-privileges', '--network', 'none',
