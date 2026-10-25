@@ -1,0 +1,48 @@
+#!/usr/bin/env python3
+"""Merge the optional Cargo intermediate-directory default without rewriting config."""
+import os, pathlib, stat, tempfile, tomllib
+home = pathlib.Path.home()
+root = home / '.cargo'
+root.mkdir(mode=0o700, exist_ok=True)
+if root.is_symlink() or root.resolve() != root:
+    raise SystemExit('refuse noncanonical Cargo home')
+legacy = root / 'config'
+if legacy.exists():
+    raise SystemExit('legacy Cargo config requires explicit migration; unchanged')
+p = root / 'config.toml'
+prior = None
+if p.exists() or p.is_symlink():
+    prior = p.lstat()
+    if not stat.S_ISREG(prior.st_mode) or prior.st_uid != os.getuid() or prior.st_nlink != 1:
+        raise SystemExit('refuse unsafe Cargo config')
+    raw = p.read_text()
+else:
+    raw = ''
+data = tomllib.loads(raw)
+if 'build-dir' in data.get('build', {}):
+    print('preserved existing build-dir')
+    raise SystemExit(0)
+line = 'build-dir = "/tmp/reverie/cargo-build/{workspace-path-hash}"\n'
+if 'build' in data:
+    lines = raw.splitlines(keepends=True)
+    positions = [i for i,x in enumerate(lines) if x.strip().split('#',1)[0].strip() == '[build]']
+    if len(positions) != 1:
+        raise SystemExit('nonstandard build table; unchanged')
+    lines.insert(positions[0]+1, line)
+    updated = ''.join(lines)
+else:
+    updated = raw + ('\n' if raw else '') + '[build]\n' + line
+tomllib.loads(updated)
+fd, name = tempfile.mkstemp(prefix='.config-', dir=root)
+try:
+    with os.fdopen(fd,'w') as out:
+        out.write(updated);out.flush();os.fsync(out.fileno())
+    current = p.lstat() if p.exists() or p.is_symlink() else None
+    def identity(info):
+        return None if info is None else (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+    if identity(prior) != identity(current):
+        raise SystemExit('Cargo config changed; unchanged')
+    os.replace(name,p)
+finally:
+    if os.path.exists(name): os.unlink(name)
+print('merged Cargo build-dir; final artifacts remain in ./target')

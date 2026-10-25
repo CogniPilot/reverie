@@ -54,7 +54,7 @@ def temporary_environment(cwd=None):
     if cwd is not None:
         root += '/projects/' + hashlib.sha256(os.fsencode(cwd)).hexdigest()[:24]
     return dict(TMPDIR='/tmp', TMP='/tmp', TEMP='/tmp',
-                CARGO_TARGET_DIR=root + '/build/cargo', XDG_CACHE_HOME=root + '/cache',
+                XDG_CACHE_HOME=root + '/cache',
                 PIP_CACHE_DIR=root + '/cache/pip', UV_CACHE_DIR=root + '/cache/uv',
                 npm_config_cache=root + '/cache/npm', CCACHE_DIR=root + '/cache/ccache',
                 GOCACHE=root + '/cache/go-build', GOMODCACHE=root + '/cache/go-mod',
@@ -166,3 +166,24 @@ def write_storage_instructions(home):
         try: os.unlink(temporary, dir_fd=directory)
         except FileNotFoundError: pass
         os.close(directory)
+
+
+def memory_aware_build_jobs(environ, cgroup_root='/sys/fs/cgroup', cpu_count=None):
+    """Conservative new-hire default; explicit job admission always wins.
+
+    Read inside the laptop, never from the host broker's cgroup. One GiB is
+    reserved for non-compiler work; budget one GiB per compiler process.
+    Unknown limits use one job. This limits parallelism, not total build RSS.
+    """
+    if 'CARGO_BUILD_JOBS' in environ:
+        return {}
+    limits = []
+    for name in ('memory.max', 'memory.high'):
+        try:
+            raw = (Path(cgroup_root) / name).read_text().strip()
+            if raw != 'max' and int(raw) > 0:
+                limits.append(int(raw))
+        except (OSError, ValueError):
+            pass
+    jobs = max(1, (min(limits) - 1024**3) // 1024**3) if limits else 1
+    return {'CARGO_BUILD_JOBS': str(min(jobs, cpu_count or os.cpu_count() or 1))}

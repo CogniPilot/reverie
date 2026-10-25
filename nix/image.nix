@@ -3,6 +3,11 @@ let
   uid = if rootlessDocker == null then 2000 else rootlessDocker.uid;
   gid = if rootlessDocker == null then 2000 else rootlessDocker.gid;
   idmap = import ./worker-idmap.nix { inherit pkgs; };
+  # Kernel-start the untouched Claude/Bun ELF so /proc/self/exe names Claude,
+  # not ld-linux (its bundled grep/find shims use process.execPath).
+  claudeInterpreter = if pkgs.stdenv.hostPlatform.isx86_64 then "/lib64/ld-linux-x86-64.so.2"
+    else if pkgs.stdenv.hostPlatform.isAarch64 then "/lib/ld-linux-aarch64.so.1"
+    else null;
   entrypoint = pkgs.writeShellScript "reverie-start" (builtins.readFile (src + "/docker/entrypoint.sh"));
   nixPrepare = pkgs.writeShellApplication {
     name = "reverie-nix-store-prepare";
@@ -11,7 +16,8 @@ let
   };
   baseContents = [ runtime pkgs.dockerTools.binSh pkgs.dockerTools.usrBinEnv
     pkgs.dockerTools.caCertificates pkgs.sudo pkgs.tini ]
-    ++ pkgs.lib.optionals worker [ pkgs.nix nixPrepare ]
+    ++ pkgs.lib.optionals worker ([ pkgs.nix nixPrepare ]
+      ++ import ./worker-base-tools.nix { inherit pkgs; })
     ++ pkgs.lib.optional (rootlessDocker != null) idmap
     ++ pkgs.lib.optional (browserRuntime != null) browserRuntime
     ++ pkgs.lib.optionals (chatLanguageTools != null) [ chatLanguageTools.python chatLanguageTools.modelica ];
@@ -87,6 +93,25 @@ pkgs.dockerTools.buildLayeredImage {
     ln -s ${console}/lib/reverie opt/reverie/apps/web
     ln -s ${memory} opt/reverie/python
     ln -s ${entrypoint} usr/local/bin/reverie-start
+    ${pkgs.lib.optionalString (worker && claudeInterpreter != null) ''
+      mkdir -p .${builtins.dirOf claudeInterpreter}
+      # Never cover a future image's existing interpreter or dangling link.
+      test ! -e .${claudeInterpreter} && test ! -L .${claudeInterpreter}
+      ln -s ${pkgs.stdenv.cc.bintools.dynamicLinker} .${claudeInterpreter}
+    ''}
+    ${pkgs.lib.optionalString worker ''
+      mkdir -p opt/reverie/autoenv/bin opt/reverie/autoenv/lib
+      cp ${src}/scripts/reverie-autoenv-shim opt/reverie/autoenv/lib/shim
+      cp ${src}/scripts/reverie-autoenv bin/reverie-autoenv
+      cp ${src}/scripts/reverie-cargo-defaults bin/reverie-cargo-defaults
+      cp ${src}/scripts/reverie-build-jobs bin/reverie-build-jobs
+      sed -i '1c#!${memory}/bin/python3' bin/reverie-autoenv bin/reverie-cargo-defaults bin/reverie-build-jobs
+      sed -i '1c#!${pkgs.bash}/bin/bash' opt/reverie/autoenv/lib/shim
+      chmod 755 bin/reverie-autoenv bin/reverie-cargo-defaults bin/reverie-build-jobs opt/reverie/autoenv/lib/shim
+      for tool in cargo rustc rustdoc pkg-config; do
+        ln -s /opt/reverie/autoenv/lib/shim opt/reverie/autoenv/bin/$tool
+      done
+    ''}
     chmod 1777 tmp
   '' + pkgs.lib.optionalString worker ''
     mkdir -p etc/nix nix/store/.links target/nix
@@ -130,7 +155,7 @@ pkgs.dockerTools.buildLayeredImage {
     WorkingDir = "/reverie_workspace";
     Entrypoint = if worker then [ "/bin/sleep" ] else [ "/bin/tini" "-g" "-s" "--" "/usr/local/bin/reverie-start" ];
     Cmd = if worker then [ "infinity" ] else [ "reverie" "web" "--host" "0.0.0.0" "--port" "3000" ];
-    Env = [ (if worker then "PATH=/home/agent/.nix-profile/bin:/home/agent/.local/bin:/home/agent/.local/state/nix/profiles/profile/bin:/bin" else "PATH=/bin")
+    Env = [ (if worker then "PATH=/opt/reverie/autoenv/bin:/home/agent/.nix-profile/bin:/home/agent/.local/bin:/home/agent/.local/state/nix/profiles/profile/bin:/bin" else "PATH=/bin")
       "HOME=/home/agent" "REVERIE_CONTAINER=1" "REVERIE_MANAGED_INSTALL=nix"
       "REVERIE_VERSION=${console.version}"
       "REVERIE_CASES_PATH=${if worker then "/home/agent/.local/share/reverie/cases" else "/scratch/cases"}"
@@ -140,7 +165,8 @@ pkgs.dockerTools.buildLayeredImage {
       "TMPDIR=${if worker then "/tmp" else "/scratch/tmp"}"
       "SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt"
       "NIX_SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt" ]
-      ++ pkgs.lib.optionals worker [ "NIX_REMOTE=local" "NIX_PATH=nixpkgs=flake:nixpkgs" ]
+      ++ pkgs.lib.optionals worker [ "NIX_REMOTE=local" "NIX_PATH=nixpkgs=flake:nixpkgs"
+        "TZDIR=${pkgs.tzdata}/share/zoneinfo" ]
       ++ pkgs.lib.optionals (chatLanguageTools != null) [
         "REVERIE_CHAT_PYTHON_LSP_BINARY=${chatLanguageTools.python}/bin/pyright-langserver"
         "REVERIE_CHAT_MODELICA_LSP_BINARY=${chatLanguageTools.modelica}/bin/rumoca-lsp"

@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+# reverie autoenv shim (prototype r3, Ada; r3: the F3 job count comes from the launcher helper, one implementation). Installed as <shimdir>/<cmd> -> this file, with <shimdir> early on PATH.
+# At EACH call it finds the repo enclosing the CURRENT directory (so `cd repo && cargo build` inside one command works, which a
+# BASH_ENV hook cannot do), and if that repo is owner-approved in config and its dev env is cached for the CURRENT flake.nix +
+# flake.lock, it execs the real tool inside that env. Otherwise it execs the next tool of that name on PATH unchanged.
+# Never touches BASH_ENV or project config. No-op (plain passthrough) when: REVERIE_NO_AUTOENV=1 (reviewed runs), IN_NIX_SHELL
+# set (already in a dev shell), or REVERIE_AUTOENV_ACTIVE set (recursion guard: tools started by an activated tool).
+name=${0##*/}; shimdir=$(cd "${0%/*}" && pwd -P)
+strip() { local IFS=: out= p; for p in $PATH; do [ "$p" = "$shimdir" ] || [ "$p" = "${0%/*}" ] || out=${out:+$out:}$p; done; printf '%s' "$out"; }
+# r3 (F3, Vale 16:0x): ONE implementation of the job count, managed Tim's launcher helper (formula clamp(floor((memory.max -
+# 1 GiB) / 1 GiB), 1, nproc)). For the commands in REVERIE_AUTOENV_JOBS_CMDS (default: cargo), when CARGO_BUILD_JOBS is unset
+# and no -j/--jobs is given, the shim runs the helper (REVERIE_JOBS_HELPER, default `reverie-build-jobs` found on PATH outside
+# the shim dir) and exports its output if it is a positive integer. No helper, a failure or other output changes nothing.
+jobs_cap() {
+  case ",${REVERIE_AUTOENV_JOBS_CMDS:-cargo}," in *",$name,"*) ;; *) return 0;; esac
+  [ -z "${CARGO_BUILD_JOBS-}" ] || return 0
+  local a n helper; for a in "$@"; do case "$a" in -j|-j*|--jobs|--jobs=*) return 0;; esac; done
+  helper=${REVERIE_JOBS_HELPER:-reverie-build-jobs}
+  n=$(PATH=$(strip) command "$helper" 2>/dev/null) || return 0
+  case "$n" in ''|0|*[!0-9]*) return 0;; esac
+  export CARGO_BUILD_JOBS=$n
+}
+passthrough() { jobs_cap "$@"; PATH=$(strip); export PATH; exec "$name" "$@"; }
+# Reviewed-run opt-out is a true pass-through: do not even apply jobs policy.
+if [ "${REVERIE_NO_AUTOENV-}" = 1 ]; then
+  PATH=$(strip); export PATH; exec "$name" "$@"
+fi
+[ -n "${IN_NIX_SHELL-}" ] || [ -n "${REVERIE_AUTOENV_ACTIVE-}" ] && passthrough "$@"
+cfg=${REVERIE_AUTOENV_CONFIG:-${XDG_CONFIG_HOME:-$HOME/.config}/reverie/autoenv/approved}
+cache=${REVERIE_AUTOENV_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/reverie/autoenv}
+d=$(pwd -P) || passthrough "$@"
+while [ "$d" != / ] && ! { [ -f "$d/flake.nix" ] && [ -e "$d/.git" ]; }; do d=${d%/*}; [ -n "$d" ] || d=/; done
+[ "$d" != / ] || passthrough "$@"
+# approved: one line per repo: <realpath-glob> <flake-attr> <cmd,cmd,...>   (generic; rumoca is just an example line)
+attr= cmds=
+if [ -r "$cfg" ]; then
+  while read -r glob a c _; do
+    case "$glob" in ''|\#*) continue;; esac
+    case "$d" in $glob) attr=$a cmds=$c; break;; esac
+  done < "$cfg"
+fi
+[ -n "$attr" ] || passthrough "$@"
+case ",$cmds," in *",$name,"*) ;; *) passthrough "$@";; esac
+key=$( { printf '%s\n' "$attr"; cat "$d/flake.nix" "$d/flake.lock" 2>/dev/null; } | sha256sum | cut -c1-32) || passthrough "$@"
+envf=$cache/$key.env
+if [ ! -r "$envf" ]; then
+  [ -n "${REVERIE_AUTOENV_QUIET-}" ] || echo "reverie-autoenv: no cached dev env for $d ($attr, key $key); using plain '$name'. Build it: reverie-autoenv build $d" >&2
+  passthrough "$@"
+fi
+base=$(strip)
+while IFS= read -r -d '' kv; do export "$kv"; done < "$envf"      # NUL-separated KEY=VALUE written by the builder
+export PATH="$PATH:$base" REVERIE_AUTOENV_ACTIVE=$key             # env's PATH first, then the caller's (minus the shim dir)
+jobs_cap "$@"
+exec "$name" "$@"

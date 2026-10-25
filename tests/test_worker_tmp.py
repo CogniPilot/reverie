@@ -74,7 +74,7 @@ class WorkerTemporaryTests(unittest.TestCase):
         a = temporary_environment('/projects/a'); b = temporary_environment('/projects/b')
         self.assertEqual(a, temporary_environment('/projects/a'))
         self.assertEqual({a[k] for k in ('TMPDIR', 'TMP', 'TEMP')}, {'/tmp'})
-        self.assertNotEqual(a['CARGO_TARGET_DIR'], b['CARGO_TARGET_DIR'])
+        self.assertNotEqual(a['XDG_CACHE_HOME'], b['XDG_CACHE_HOME'])
         self.assertTrue(all(value.startswith('/tmp/') for key, value in a.items() if key not in ('TMPDIR', 'TMP', 'TEMP')))
 
     def test_workspace_alias_preserves_grants_and_masks_attachments_at_both_paths(self):
@@ -129,7 +129,7 @@ class WorkerTemporaryTests(unittest.TestCase):
             child(record)
         environment = execute.call_args.args[2]
         self.assertEqual({environment[k] for k in ('TMPDIR', 'TMP', 'TEMP')}, {'/tmp'})
-        self.assertEqual(environment['CARGO_TARGET_DIR'], temporary_environment('/projects/a')['CARGO_TARGET_DIR'])
+        self.assertNotIn('CARGO_TARGET_DIR', temporary_environment('/projects/a'))
         self.assertNotIn('REVERIE_WORKER_SOCKET', environment)
         self.assertFalse(record.exists())
 
