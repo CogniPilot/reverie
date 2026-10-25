@@ -29,12 +29,13 @@ reverie-opencode = "reverie.opencode:main"
 reverie-chat = "reverie.chat:main"
 reverie-gpu-publisher = "reverie.gpu_publisher:main"
 reverie-sleep = "reverie.sleep:main"
+reverie-ops = "reverie.ops_cli:main"
 
 [tool.setuptools]
 package-dir = {"" = "."}
 
 [tool.setuptools.package-data]
-reverie = ["plugins/*.mjs", "rules.md", "skills/*/SKILL.md"]
+reverie = ["plugins/*.mjs", "rules.md", "skills/*/SKILL.md", "ops-core*.schema.json", "ops-classifier-pin.json"]
 
 [tool.setuptools.packages.find]
 where = ["."]

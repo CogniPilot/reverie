@@ -1,0 +1,1118 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:reverie:ops:core:1",
+  "title": "Proposed authenticated OPS core v1",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/command"
+    },
+    {
+      "$ref": "#/$defs/readback"
+    },
+    {
+      "$ref": "#/$defs/admission"
+    },
+    {
+      "$ref": "#/$defs/receipt"
+    }
+  ],
+  "$defs": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]{0,95}$"
+    },
+    "uuid": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$"
+    },
+    "digest": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    },
+    "instant": {
+      "type": "string",
+      "format": "date-time",
+      "maxLength": 40
+    },
+    "action": {
+      "enum": [
+        "reverie.ops.status",
+        "reverie.ops.inspect",
+        "reverie.ops.selftest.run",
+        "reverie.ops.website.restart"
+      ]
+    },
+    "reason": {
+      "enum": [
+        "none",
+        "unauthorized",
+        "stable-identity-unavailable",
+        "unsupported-platform",
+        "adapter-unavailable",
+        "adapter-unhealthy",
+        "custody-invalid",
+        "stale-policy",
+        "stale-capability",
+        "stale-resource",
+        "unreviewed-artifact",
+        "expired-grant",
+        "revoked-grant",
+        "resource-busy",
+        "idempotency-conflict",
+        "unknown-effect",
+        "verification-failed",
+        "selftest-failed",
+        "preflight-failed",
+        "invalid-request",
+        "audit-unavailable",
+        "reconciliation-required",
+        "not-installed"
+      ]
+    },
+    "grantRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "grantId": {
+          "$ref": "#/$defs/id"
+        },
+        "policyGeneration": {
+          "$ref": "#/$defs/digest"
+        }
+      },
+      "required": [
+        "grantId",
+        "policyGeneration"
+      ]
+    },
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "artifactId": {
+          "$ref": "#/$defs/id"
+        },
+        "digest": {
+          "$ref": "#/$defs/digest"
+        },
+        "reviewId": {
+          "$ref": "#/$defs/id"
+        }
+      },
+      "required": [
+        "artifactId",
+        "digest",
+        "reviewId"
+      ]
+    },
+    "actor": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "employeeId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "companyId": {
+          "$ref": "#/$defs/id"
+        },
+        "bindingDigest": {
+          "$ref": "#/$defs/digest"
+        }
+      },
+      "required": [
+        "employeeId",
+        "companyId",
+        "bindingDigest"
+      ],
+      "description": "Server-generated authenticated current-employee context; never a client command field."
+    },
+    "command": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "reverie.ops.command"
+        },
+        "version": {
+          "const": 1
+        },
+        "requestId": {
+          "$ref": "#/$defs/id"
+        },
+        "action": {
+          "$ref": "#/$defs/action"
+        },
+        "resourceId": {
+          "$ref": "#/$defs/id"
+        },
+        "grantRef": {
+          "$ref": "#/$defs/grantRef"
+        },
+        "operationId": {
+          "$ref": "#/$defs/id"
+        },
+        "idempotencyKey": {
+          "$ref": "#/$defs/id"
+        },
+        "artifact": {
+          "$ref": "#/$defs/artifact"
+        },
+        "expectedResourceGeneration": {
+          "$ref": "#/$defs/digest"
+        },
+        "expectedCapabilityGeneration": {
+          "$ref": "#/$defs/digest"
+        }
+      },
+      "required": [
+        "kind",
+        "version",
+        "requestId",
+        "action",
+        "resourceId"
+      ],
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "action": {
+                "enum": [
+                  "reverie.ops.selftest.run",
+                  "reverie.ops.website.restart"
+                ]
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "grantRef",
+              "idempotencyKey",
+              "artifact",
+              "expectedResourceGeneration",
+              "expectedCapabilityGeneration"
+            ]
+          },
+          "else": {
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "grantRef"
+                  ]
+                },
+                {
+                  "required": [
+                    "idempotencyKey"
+                  ]
+                },
+                {
+                  "required": [
+                    "artifact"
+                  ]
+                },
+                {
+                  "required": [
+                    "expectedResourceGeneration"
+                  ]
+                },
+                {
+                  "required": [
+                    "expectedCapabilityGeneration"
+                  ]
+                }
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "action": {
+                "const": "reverie.ops.inspect"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "operationId"
+            ]
+          },
+          "else": {
+            "not": {
+              "required": [
+                "operationId"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "capability": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "$ref": "#/$defs/action"
+        },
+        "availability": {
+          "enum": [
+            "allowed",
+            "denied",
+            "unavailable"
+          ]
+        },
+        "reason": {
+          "$ref": "#/$defs/reason"
+        }
+      },
+      "required": [
+        "action",
+        "availability",
+        "reason"
+      ],
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "availability": {
+                "const": "allowed"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "reason": {
+                "const": "none"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "reason": {
+                "not": {
+                  "const": "none"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "readback": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "reverie.ops.capabilities"
+        },
+        "version": {
+          "const": 1
+        },
+        "requestId": {
+          "$ref": "#/$defs/id"
+        },
+        "actor": {
+          "$ref": "#/$defs/actor"
+        },
+        "resourceId": {
+          "$ref": "#/$defs/id"
+        },
+        "observedAt": {
+          "$ref": "#/$defs/instant"
+        },
+        "installedExecutor": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "serviceBindingDigest": {
+                  "$ref": "#/$defs/digest"
+                },
+                "adapterId": {
+                  "$ref": "#/$defs/id"
+                },
+                "adapterVersion": {
+                  "$ref": "#/$defs/id"
+                }
+              },
+              "required": [
+                "serviceBindingDigest",
+                "adapterId",
+                "adapterVersion"
+              ]
+            }
+          ]
+        },
+        "policyGeneration": {
+          "$ref": "#/$defs/digest"
+        },
+        "capabilityGeneration": {
+          "$ref": "#/$defs/digest"
+        },
+        "resourceGeneration": {
+          "$ref": "#/$defs/digest"
+        },
+        "capabilities": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/capability"
+          },
+          "maxItems": 32
+        },
+        "acceptanceStage": {
+          "enum": [
+            "unverified",
+            "ready-for-extended-tests",
+            "operationally-verified"
+          ]
+        },
+        "acceptanceEvidence": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/digest"
+          },
+          "maxItems": 16
+        },
+        "learningTelemetry": {
+          "enum": [
+            "disabled",
+            "unavailable",
+            "self-reported-enabled"
+          ]
+        }
+      },
+      "required": [
+        "kind",
+        "version",
+        "requestId",
+        "actor",
+        "resourceId",
+        "observedAt",
+        "installedExecutor",
+        "policyGeneration",
+        "capabilityGeneration",
+        "resourceGeneration",
+        "capabilities",
+        "acceptanceStage",
+        "acceptanceEvidence",
+        "learningTelemetry"
+      ],
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "acceptanceStage": {
+                "const": "operationally-verified"
+              }
+            },
+            "required": [
+              "acceptanceStage"
+            ]
+          },
+          "then": {
+            "properties": {
+              "acceptanceEvidence": {
+                "minItems": 1
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "installedExecutor": {
+                "type": "null"
+              }
+            },
+            "required": [
+              "installedExecutor"
+            ]
+          },
+          "then": {
+            "properties": {
+              "acceptanceStage": {
+                "const": "unverified"
+              },
+              "capabilities": {
+                "items": {
+                  "properties": {
+                    "availability": {
+                      "const": "unavailable"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "evidenceId": {
+          "$ref": "#/$defs/digest"
+        },
+        "check": {
+          "enum": [
+            "artifact-matches",
+            "website-process-changed",
+            "application-ready",
+            "laptops-preserved",
+            "providers-preserved",
+            "suite-reviewed",
+            "selftest-results-complete",
+            "selftest-passed",
+            "effects-within-scope",
+            "resource-state-known",
+            "no-effect-started",
+            "container-absence-diagnostic"
+          ]
+        },
+        "result": {
+          "enum": [
+            "pass",
+            "fail",
+            "unknown"
+          ]
+        },
+        "observationDigest": {
+          "$ref": "#/$defs/digest"
+        },
+        "diagnostic": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "engineCategory": {
+              "enum": [
+                "docker",
+                "podman",
+                "other"
+              ]
+            },
+            "engineVersion": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9.+_-]{0,63}$"
+            },
+            "matched": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "engineCategory",
+            "engineVersion",
+            "matched"
+          ]
+        }
+      },
+      "required": [
+        "evidenceId",
+        "check",
+        "result",
+        "observationDigest"
+      ],
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "check": {
+                "const": "container-absence-diagnostic"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "diagnostic"
+            ]
+          },
+          "else": {
+            "not": {
+              "required": [
+                "diagnostic"
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "check": {
+                "const": "container-absence-diagnostic"
+              },
+              "result": {
+                "const": "pass"
+              }
+            },
+            "required": [
+              "check",
+              "result"
+            ]
+          },
+          "then": {
+            "properties": {
+              "diagnostic": {
+                "properties": {
+                  "matched": {
+                    "const": true
+                  }
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "admission": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "reverie.ops.admission"
+        },
+        "version": {
+          "const": 1
+        },
+        "requestId": {
+          "$ref": "#/$defs/id"
+        },
+        "requestDigest": {
+          "$ref": "#/$defs/digest"
+        },
+        "actor": {
+          "$ref": "#/$defs/actor"
+        },
+        "resourceId": {
+          "$ref": "#/$defs/id"
+        },
+        "action": {
+          "$ref": "#/$defs/action"
+        },
+        "decision": {
+          "enum": [
+            "accepted",
+            "refused"
+          ]
+        },
+        "reason": {
+          "$ref": "#/$defs/reason"
+        },
+        "operationId": {
+          "$ref": "#/$defs/id"
+        },
+        "receiptDigest": {
+          "$ref": "#/$defs/digest"
+        }
+      },
+      "required": [
+        "kind",
+        "version",
+        "requestId",
+        "requestDigest",
+        "actor",
+        "resourceId",
+        "action",
+        "decision",
+        "reason"
+      ],
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "decision": {
+                "const": "accepted"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "operationId",
+              "receiptDigest"
+            ],
+            "properties": {
+              "reason": {
+                "const": "none"
+              },
+              "action": {
+                "enum": [
+                  "reverie.ops.selftest.run",
+                  "reverie.ops.website.restart"
+                ]
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "reason": {
+                "not": {
+                  "const": "none"
+                }
+              }
+            },
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "operationId"
+                  ]
+                },
+                {
+                  "required": [
+                    "receiptDigest"
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "receipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "reverie.ops.receipt"
+        },
+        "version": {
+          "const": 1
+        },
+        "operationId": {
+          "$ref": "#/$defs/id"
+        },
+        "requestId": {
+          "$ref": "#/$defs/id"
+        },
+        "requestDigest": {
+          "$ref": "#/$defs/digest"
+        },
+        "actor": {
+          "$ref": "#/$defs/actor"
+        },
+        "resourceId": {
+          "$ref": "#/$defs/id"
+        },
+        "action": {
+          "enum": [
+            "reverie.ops.selftest.run",
+            "reverie.ops.website.restart"
+          ]
+        },
+        "grantRef": {
+          "$ref": "#/$defs/grantRef"
+        },
+        "artifact": {
+          "$ref": "#/$defs/artifact"
+        },
+        "idempotencyKey": {
+          "$ref": "#/$defs/id"
+        },
+        "beforeGeneration": {
+          "$ref": "#/$defs/digest"
+        },
+        "afterGeneration": {
+          "$ref": "#/$defs/digest"
+        },
+        "capabilityGeneration": {
+          "$ref": "#/$defs/digest"
+        },
+        "sequence": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "at": {
+          "$ref": "#/$defs/instant"
+        },
+        "state": {
+          "enum": [
+            "accepted",
+            "executing",
+            "verified",
+            "failed",
+            "unconfirmed"
+          ]
+        },
+        "reason": {
+          "$ref": "#/$defs/reason"
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/evidence"
+          },
+          "maxItems": 32
+        }
+      },
+      "required": [
+        "kind",
+        "version",
+        "operationId",
+        "requestId",
+        "requestDigest",
+        "actor",
+        "resourceId",
+        "action",
+        "grantRef",
+        "artifact",
+        "idempotencyKey",
+        "beforeGeneration",
+        "capabilityGeneration",
+        "sequence",
+        "at",
+        "state",
+        "reason",
+        "evidence"
+      ],
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "enum": [
+                  "accepted",
+                  "executing"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          "then": {
+            "properties": {
+              "reason": {
+                "const": "none"
+              }
+            },
+            "not": {
+              "required": [
+                "afterGeneration"
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "const": "verified"
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          "then": {
+            "required": [
+              "afterGeneration"
+            ],
+            "properties": {
+              "reason": {
+                "const": "none"
+              },
+              "evidence": {
+                "minItems": 1,
+                "items": {
+                  "properties": {
+                    "result": {
+                      "const": "pass"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "enum": [
+                  "failed",
+                  "unconfirmed"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          "then": {
+            "properties": {
+              "reason": {
+                "not": {
+                  "const": "none"
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "const": "unconfirmed"
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          "then": {
+            "not": {
+              "required": [
+                "afterGeneration"
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "const": "failed"
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          "then": {
+            "required": [
+              "afterGeneration"
+            ],
+            "properties": {
+              "evidence": {
+                "minItems": 1,
+                "allOf": [
+                  {
+                    "contains": {
+                      "properties": {
+                        "check": {
+                          "const": "resource-state-known"
+                        },
+                        "result": {
+                          "const": "pass"
+                        }
+                      },
+                      "required": [
+                        "check",
+                        "result"
+                      ]
+                    },
+                    "minContains": 1
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "const": "verified"
+              },
+              "action": {
+                "const": "reverie.ops.website.restart"
+              }
+            },
+            "required": [
+              "state",
+              "action"
+            ]
+          },
+          "then": {
+            "properties": {
+              "evidence": {
+                "allOf": [
+                  {
+                    "contains": {
+                      "properties": {
+                        "check": {
+                          "const": "artifact-matches"
+                        },
+                        "result": {
+                          "const": "pass"
+                        }
+                      },
+                      "required": [
+                        "check",
+                        "result"
+                      ]
+                    },
+                    "minContains": 1
+                  },
+                  {
+                    "contains": {
+                      "properties": {
+                        "check": {
+                          "const": "website-process-changed"
+                        },
+                        "result": {
+                          "const": "pass"
+                        }
+                      },
+                      "required": [
+                        "check",
+                        "result"
+                      ]
+                    },
+                    "minContains": 1
+                  },
+                  {
+                    "contains": {
+                      "properties": {
+                        "check": {
+                          "const": "application-ready"
+                        },
+                        "result": {
+                          "const": "pass"
+                        }
+                      },
+                      "required": [
+                        "check",
+                        "result"
+                      ]
+                    },
+                    "minContains": 1
+                  },
+                  {
+                    "contains": {
+                      "properties": {
+                        "check": {
+                          "const": "laptops-preserved"
+                        },
+                        "result": {
+                          "const": "pass"
+                        }
+                      },
+                      "required": [
+                        "check",
+                        "result"
+                      ]
+                    },
+                    "minContains": 1
+                  },
+                  {
+                    "contains": {
+                      "properties": {
+                        "check": {
+                          "const": "providers-preserved"
+                        },
+                        "result": {
+                          "const": "pass"
+                        }
+                      },
+                      "required": [
+                        "check",
+                        "result"
+                      ]
+                    },
+                    "minContains": 1
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "const": "verified"
+              },
+              "action": {
+                "const": "reverie.ops.selftest.run"
+              }
+            },
+            "required": [
+              "state",
+              "action"
+            ]
+          },
+          "then": {
+            "properties": {
+              "evidence": {
+                "allOf": [
+                  {
+                    "contains": {
+                      "properties": {
+                        "check": {
+                          "const": "suite-reviewed"
+                        },
+                        "result": {
+                          "const": "pass"
+                        }
+                      },
+                      "required": [
+                        "check",
+                        "result"
+                      ]
+                    },
+                    "minContains": 1
+                  },
+                  {
+                    "contains": {
+                      "properties": {
+                        "check": {
+                          "const": "selftest-results-complete"
+                        },
+                        "result": {
+                          "const": "pass"
+                        }
+                      },
+                      "required": [
+                        "check",
+                        "result"
+                      ]
+                    },
+                    "minContains": 1
+                  },
+                  {
+                    "contains": {
+                      "properties": {
+                        "check": {
+                          "const": "selftest-passed"
+                        },
+                        "result": {
+                          "const": "pass"
+                        }
+                      },
+                      "required": [
+                        "check",
+                        "result"
+                      ]
+                    },
+                    "minContains": 1
+                  },
+                  {
+                    "contains": {
+                      "properties": {
+                        "check": {
+                          "const": "effects-within-scope"
+                        },
+                        "result": {
+                          "const": "pass"
+                        }
+                      },
+                      "required": [
+                        "check",
+                        "result"
+                      ]
+                    },
+                    "minContains": 1
+                  }
+                ]
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

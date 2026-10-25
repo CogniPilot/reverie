@@ -38,7 +38,7 @@ def effective_config(config,sid):
 
 def policy_digest(config,sid):
     effective=effective_config(config,sid)
-    return hashlib.sha256(json.dumps({k:v for k,v in effective.items() if k not in ('image','maintenanceSessions')},sort_keys=True).encode()).hexdigest()
+    return hashlib.sha256(json.dumps({k:v for k,v in effective.items() if k not in ('image','maintenanceSessions','opsConfig')},sort_keys=True).encode()).hexdigest()
 
 
 def validate_resource_reload(before,after):

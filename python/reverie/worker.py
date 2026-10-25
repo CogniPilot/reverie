@@ -157,8 +157,16 @@ def load_config(path):
         raise ValueError("Worker configuration must be an owner-only regular file")
     config = json.loads(path.read_text())
     required = {'version', 'deployment', 'image', 'serverContainer', 'socket', 'stateRoot', 'companyFile', 'companyRoot', 'scratchRoot', 'apiSocketRoot', 'budgetMode', 'uid', 'gid', 'memoryMiB', 'poolMemoryMiB', 'poolTasksMax', 'cgroupParent', 'pidsLimit', 'cpus', 'maxWorkers', 'mounts', 'maintenanceSessions'}
-    if not isinstance(config, dict) or set(config) - {'gpuGrants','sessionResources','rootlessDocker','goalPrivateConfig'} != required or config['version'] != 1:
+    if not isinstance(config, dict) or set(config) - {'gpuGrants','sessionResources','rootlessDocker','goalPrivateConfig','opsConfig'} != required or config['version'] != 1:
         raise ValueError("Unsupported worker configuration")
+    if 'opsConfig' in config:
+        if not isinstance(config['opsConfig'], str) or not Path(config['opsConfig']).is_absolute() or Path(config['opsConfig']).anchor != '/' or str(Path(config['opsConfig'])) != config['opsConfig'] or any(ord(c)<32 or ord(c)==127 for c in config['opsConfig']):
+            raise ValueError('Invalid private OPS binding')
+        try:
+            from .ops_service import broker_binding_custody
+            broker_binding_custody(config)
+        except Exception:
+            raise ValueError('Invalid private OPS binding') from None
     validate_gpu_grants(config.get('gpuGrants', {}))
     validate_session_resources(config)
     rootless_docker_enabled(config)
@@ -242,7 +250,7 @@ def create_args(config, session_id, home, *, scratch=None, storage=None):
     config = effective_config(config, session_id)
     name = config['deployment'] + '-agent-' + session_id
     digest = hashlib.sha256(json.dumps(config, sort_keys=True).encode()).hexdigest()
-    policy = hashlib.sha256(json.dumps({k: v for k, v in config.items() if k not in ['image', 'maintenanceSessions']}, sort_keys=True).encode()).hexdigest()
+    policy = hashlib.sha256(json.dumps({k: v for k, v in config.items() if k not in ['image', 'maintenanceSessions', 'opsConfig']}, sort_keys=True).encode()).hexdigest()
     args = ['create', '--name', name, '--init', '--restart', 'no', '--read-only', *docker_security_args(config),
             '--label', 'reverie.worker=' + config['deployment'], '--label', 'reverie.session=' + session_id, '--label', 'reverie.worker-config=' + digest, '--label', 'reverie.worker-policy=' + policy,
             '--user', f"{config['uid']}:{config['gid']}", '--cpu-shares', '1024',
@@ -394,7 +402,7 @@ class OfficeAPI:
     """A laptop's office phone: fixed identity and upstream, bounded HTTP only."""
     slots = threading.BoundedSemaphore(32)
 
-    def __init__(self, directory, session_id, address, company_root, host_actions=None):
+    def __init__(self, directory, session_id, address, company_root, host_actions=None, ops=None):
         directory.mkdir(mode=0o700, parents=True, exist_ok=True)
         if directory.is_symlink():
             raise ValueError('Invalid office connection directory')
@@ -426,6 +434,22 @@ class OfficeAPI:
                     length = int(self.headers.get('Content-Length', '0'))
                     if not 0 <= length <= 8*1024*1024 or self.headers.get('Transfer-Encoding'):
                         self.send_error(413); return
+                    ops_path = parsed.path == '/api/ops' or parsed.path.startswith('/api/ops/')
+                    if ops_path:
+                        if parsed.path != '/api/ops' or self.command != 'POST' or parsed.query or length > 16*1024 or len(self.headers.get_all('Content-Length', [])) > 1:
+                            self.send_error(400); return
+                        if ops is None:
+                            self.send_error(503); return
+                        try:
+                            from .ops_common import command as ops_command, strict_json
+                            result = ops(session_id, ops_command(strict_json(self.rfile.read(length))))
+                            raw = json.dumps(result, separators=(',', ':')).encode()
+                            if len(raw) > 64*1024: self.send_error(502); return
+                        except Exception:
+                            raw = b'{"success":false,"reason":"adapter-unavailable"}'
+                        self.send_response(200); self.send_header('Content-Type', 'application/json')
+                        self.send_header('Content-Length', str(len(raw))); self.end_headers(); self.wfile.write(raw)
+                        return
                     host_path = parsed.path == '/api/host-actions' or parsed.path.startswith('/api/host-actions/')
                     if host_path and (length > 16*1024 or parsed.query or len(self.headers.get_all('Content-Length',[]))>1):
                         self.send_error(400); return
@@ -605,6 +629,13 @@ class Broker:
     def __init__(self, config, engine='docker', config_file=None, host_actions=None):
         self.config, self.engine = config, engine
         self.host_actions = host_actions
+        self.ops = None
+        if config.get('opsConfig') is not None:
+            def ops_call(session, command):
+                from .ops_service import phone_client
+                return phone_client(config['opsConfig']).call(session, command)
+            self.ops = ops_call
+
         # Custody-only host service. office/recover/new launch deliberately never
         # call signer(), launch_binding() or any runtime-pin writer.
         self.goals = GoalBrokerBootstrap(self)
@@ -817,7 +848,7 @@ class Broker:
         if self.stopping.is_set():
             raise RuntimeError('Worker broker is stopping')
         if session_id not in self.offices:
-            self.offices[session_id] = OfficeAPI(Path(self.config['apiSocketRoot'])/session_id, session_id, self.address, Path(self.config['companyRoot']),host_actions=self.host_actions)
+            self.offices[session_id] = OfficeAPI(Path(self.config['apiSocketRoot'])/session_id, session_id, self.address, Path(self.config['companyRoot']),host_actions=self.host_actions,**({'ops':self.ops} if self.ops is not None else {}))
             self.cleanup_offices[id(self.offices[session_id])] = self.offices[session_id]
         if self.stopping.is_set():
             self._close_office(self.offices[session_id])
@@ -879,7 +910,7 @@ class Broker:
                 if self.stopping.is_set():
                     raise RuntimeError('Office recovery cancelled while broker is stopping')
                 if sid not in self.offices:
-                    created[sid]=OfficeAPI(Path(self.config['apiSocketRoot'])/sid, sid, self.address, Path(self.config['companyRoot']),host_actions=self.host_actions)
+                    created[sid]=OfficeAPI(Path(self.config['apiSocketRoot'])/sid, sid, self.address, Path(self.config['companyRoot']),host_actions=self.host_actions,**({'ops':self.ops} if self.ops is not None else {}))
                     self.cleanup_offices[id(created[sid])]=created[sid]
         except BaseException:
             # Goal composition (Otto H2): every owned resource gets its own cleanup attempt; one failure records
@@ -1029,6 +1060,8 @@ class Broker:
         return sorted(running)
 
     def control(self, action, caller=None):
+        if action == 'restart-website' and self.config.get('opsConfig') is not None:
+            raise ValueError('Use the structured OPS restart with current authority, artifact and generation fences')
         if caller is not None and (action != 'restart-website' or caller not in self.config['maintenanceSessions']):
             raise ValueError('This laptop has no owner-granted website maintenance permission')
         if action == 'reload-resources':
