@@ -42,6 +42,11 @@ let
     unscheduledByDefault = enabled.systemd.timers.reverie-prune.wantedBy == [ ];
     scheduledOnlyExplicitly = scheduled.systemd.timers.reverie-prune.wantedBy == [ "timers.target" ];
     fixedDryRun = lib.hasInfix "--dry-run" serviceText && !(lib.hasInfix "--live" serviceText) && lib.hasInfix "reverie-prune-declared" serviceText;
+    exactR12 = prunePackage.sourceHashes.prune == "fbed566fbdfe89d312abb8b1b32354e5f44f35b94918028ce882fbf444b17181" &&
+      prunePackage.sourceHashes.lease == "3458407ef3e2bb71047528d0acebcb2a1266193dd3181ad7fc384b056a72315b" &&
+      pruneHostPackage.sourceHashes == prunePackage.sourceHashes &&
+      lib.hasPrefix "\"${prunePackage}/bin/reverie-prune\"" service.serviceConfig.ExecStart &&
+      lib.hasPrefix "+\"${pruneHostPackage}/bin/reverie-prune-declared\"" service.serviceConfig.ExecStartPre;
     rootAndHostVisibility = service.serviceConfig.User == "root" && !service.serviceConfig.PrivateUsers && !service.serviceConfig.PrivateTmp && service.serviceConfig.ProtectProc == "default" && service.serviceConfig.ProcSubset == "all";
     initializerSeesHostMounts = lib.hasPrefix "+\"${pruneHostPackage}/bin/reverie-prune-declared\"" service.serviceConfig.ExecStartPre &&
       !(lib.hasPrefix "+" service.serviceConfig.ExecStart) &&

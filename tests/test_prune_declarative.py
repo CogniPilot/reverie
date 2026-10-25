@@ -34,6 +34,59 @@ class DeclaredTests(unittest.TestCase):
     def initialize(self):
         return D.initialize(self.installer, self.fixture.input)
 
+    def select_r12(self):
+        candidate = Path(D.__file__).parent / 'candidate/reverie_prune.py'
+        (self.fixture.package / 'libexec/reverie/reverie_prune.py').write_bytes(candidate.read_bytes())
+        (self.fixture.closure / 'bin/reverie-prune-declared').write_text('immutable r12 declaration fixture')
+        self.installer = D.DeclaredInstaller(self.fixture.state, **self.fixture.installer.paths, run=self.run_tool)
+        # The subclass inherits H.check from its immutable sibling module. Bind
+        # that module's custody check to the same fake-root boundary as fixtures.
+        target = patch.dict(D.DeclaredInstaller.check.__globals__, {'protected_chain': fixtures.H.protected_chain})
+        target.start()
+        self.addCleanup(target.stop)
+
+    def test_r12_initializer_accepts_exact_candidate_and_keeps_bootstrap_r8_pins(self):
+        r8_pins = copy.deepcopy(fixtures.H.SOURCE_HASHES)
+        self.select_r12()
+        self.initialize()
+        manifest = json.loads((self.fixture.state / 'install.json').read_text())
+        self.assertEqual(manifest['files']['lib/reverie_prune.py'],
+                         'fbed566fbdfe89d312abb8b1b32354e5f44f35b94918028ce882fbf444b17181')
+        self.assertEqual(fixtures.H.SOURCE_HASHES, r8_pins)
+        self.assertEqual(fixtures.H.SOURCE_HASHES['reverie_prune.py'],
+                         'eee8b1608e1e87117d00b955b6cf6271cea809ab5e0cfd3f77696a05007eb3fb')
+        with self.assertRaisesRegex(ValueError, 'source hash differs'):
+            self.fixture.installer.pins()
+
+    def test_r12_initializer_refuses_r8_or_tampered_candidate_before_state_creation(self):
+        self.select_r12()
+        source = self.fixture.package / 'libexec/reverie/reverie_prune.py'
+        for data in ((Path(fixtures.H.__file__).parent / 'reverie_prune.py').read_bytes(), b'tampered candidate'):
+            with self.subTest(data_hash=fixtures.H.digest(data)):
+                source.write_bytes(data)
+                with self.assertRaisesRegex(ValueError, 'r12.*source hash differs'):
+                    self.initialize()
+                self.assertFalse(self.fixture.state.exists())
+
+    def test_r12_inventory_uses_its_same_immutable_launcher_and_verified_state(self):
+        self.select_r12()
+        self.initialize()
+        settings = self.installer.check()
+        generated = fixtures.H.tomllib.loads((self.fixture.state / 'prune.toml').read_text())
+        self.assertEqual(generated['laptops_cmd'], [str(self.fixture.closure / 'bin/reverie-prune-declared'),
+                                                  '--state-dir', str(self.fixture.state), '--inventory'])
+        args = [piece for key, value in self.installer.paths.items() for piece in ('--' + key.replace('_', '-'), str(value))]
+        args += ['--state-dir', str(self.fixture.state), '--inventory']
+        with contextlib.redirect_stdout(io.StringIO()) as output:
+            code = D.main(args, installer_type=lambda *unused: self.installer)
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(output.getvalue()), [{'id': settings['employee_ids'][0], 'init_pid': 77777}])
+        target = self.fixture.state / 'lib/reverie_prune.py'
+        target.chmod(0o644)
+        target.write_text('changed')
+        with contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(D.main(args, installer_type=lambda *unused: self.installer), 2)
+
     def test_initializes_custody_without_unit_writes_enablement_or_gc(self):
         result = self.initialize()
         self.assertEqual(result['status'], 'CHECKED_DECLARED_DRY_RUN_ONLY')

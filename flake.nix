@@ -56,6 +56,10 @@
           prune = import ./nix/prune.nix { inherit pkgs; src = self; };
           pruneR12 = import ./nix/prune-r12.nix { inherit pkgs; src = self; };
           pruneHost = import ./nix/prune-host.nix { inherit pkgs; src = self; };
+          pruneDeclared = import ./nix/prune-declared.nix {
+            inherit pkgs; src = self;
+            prune = self.packages.${system}.pruneR12;
+          };
           adminHarnessAddon = import ./nix/admin-harness-addon.nix { inherit pkgs; src = self; };
           workerIdmap = import ./nix/worker-idmap.nix { inherit pkgs; };
           workerDocker = import ./nix/worker-docker-tools.nix { inherit pkgs; src = self; };
@@ -186,8 +190,8 @@
       };
       nixosModules.reveriePrune = { config, lib, pkgs, ... }: import ./nix/prune-service.nix {
         inherit config lib pkgs;
-        pruneHostPackage = self.packages.${pkgs.stdenv.hostPlatform.system}.pruneHost;
-        prunePackage = self.packages.${pkgs.stdenv.hostPlatform.system}.prune;
+        pruneHostPackage = self.packages.${pkgs.stdenv.hostPlatform.system}.pruneDeclared;
+        prunePackage = self.packages.${pkgs.stdenv.hostPlatform.system}.pruneR12;
       };
       packages = forAllSystems packagesFor;
       lib.workerDockerImage = { system, uid, gid, subuidStart ? 100000, subgidStart ? 100000, subidCount ? 65536 }:
@@ -224,8 +228,8 @@
           pruneService = let
             evaluated = import ./tests/prune_service_eval.nix {
               inherit nixpkgs system;
-              pruneHostPackage = packages.pruneHost;
-              prunePackage = packages.prune;
+              pruneHostPackage = packages.pruneDeclared;
+              prunePackage = packages.pruneR12;
             };
           in pkgs.runCommand "reverie-prune-service-evaluation" {
             checks = builtins.toJSON evaluated.checks;

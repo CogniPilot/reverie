@@ -2,8 +2,10 @@
 
 The tracked `nixosModules.reveriePrune` module supplies reboot-persistent cleanup
 units. Both the service option and timer scheduling default off. The module
-always uses the reviewed prune r8/lease r7 dry-run packages. It does not qualify
-live deletion, migrate an existing installation or activate a host itself.
+uses the separate prune r12 candidate/lease r7 dry-run packages and an r12-pinned
+initializer. The portable bootstrap retains its original r8 pins. Neither path
+qualifies live deletion, migrates an existing installation or activates a host
+itself.
 
 Import the module from the owner-selected Reverie flake revision into the host's
 ordinary NixOS configuration. No personal NixOS repository is part of Reverie.
@@ -59,6 +61,13 @@ preserves its strict import checks on Nix installations with a mode-1775 store.
 Later runs verify the exact immutable package/configuration binding without
 rewriting it. System generations retain the Nix closure. No separate GC action,
 owner login or chat credential is used by the root service.
+
+The r12 declaration initializer and its fixed inventory command use the same
+immutable launcher. Its source pins are independent of the r8 bootstrap; command
+arguments cannot select another revision. Package hash verification and module
+evaluation bind the declared janitor and initializer to the exact candidate
+source. These bindings do not establish filesystem identity admission or any
+other host acceptance gate; a source gap remains a failed acceptance gate.
 
 The fixed initializer runs as host root before the janitor enters its filesystem
 sandbox. Its systemd `+` command prefix preserves the actual host mount view:
