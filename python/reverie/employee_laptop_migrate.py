@@ -94,7 +94,7 @@ class EmployeeMigration(Migration):
         home=Path(self.config['stateRoot'])/sid/'home'
         nix=Path(self.config['stateRoot'])/sid/'nix'
         for path in (home,nix):private_directory(path,self.config['uid'])
-        mounts=self.mounts(target)
+        mounts=[list(mount) for mount in self.mounts(target)]
         if not any(m[0]=='bind' and m[1]==str(home) and m[2]=='/home/agent' and m[3] for m in mounts):
             raise ValueError('Original private home mount differs')
         bound=[m for m in mounts if m[2]=='/nix']
@@ -139,7 +139,7 @@ class EmployeeMigration(Migration):
             raise ValueError('Employee/intent/native selection/configuration or fixed paths changed')
         if not published:
             item=self.target(paths.session,plan['container'])
-            if item['State']['Running'] is not False or self.mounts(item)!=plan['sourceMounts'] or self.resources(item)!=plan['sourceResources'] or item['Image']!=plan['sourceImage']:
+            if item['State']['Running'] is not False or [list(mount) for mount in self.mounts(item)]!=plan['sourceMounts'] or self.resources(item)!=plan['sourceResources'] or item['Image']!=plan['sourceImage']:
                 raise ValueError('Stopped source laptop or grants changed')
         self.no_writers([*(Path(v) for v in expected.values()),paths.root,Path(plan['stage'])])
         return paths

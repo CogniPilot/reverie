@@ -101,6 +101,17 @@ class PairedEmployeeMigrationTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'running container'):self.migration.plan(OLD)
         self.assertTrue(self.home.exists());self.assertTrue(self.nix.exists());self.assert_off()
 
+    def test_each_phase_reads_the_durable_json_receipt_from_the_previous_process(self):
+        self.plan()
+        for action in ('stage','publish','verify-data'):
+            plan=read_metadata(self.receipt,os.getuid())
+            self.phase(action,plan)
+        published=read_metadata(self.receipt,os.getuid())
+        self.assertEqual(published['phase'],'published')
+        self.assertIn('dataVerifiedAt',published)
+        self.assertFalse(self.home.exists());self.assertFalse(self.nix.exists())
+        self.assert_off()
+
     def test_intent_native_recipe_and_config_changes_refuse_without_partial_move(self):
         plan=self.plan()
         self.employee['onVacation']=False;self.write(self.file,self.company)
