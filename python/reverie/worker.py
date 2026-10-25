@@ -157,7 +157,7 @@ def load_config(path):
         raise ValueError("Worker configuration must be an owner-only regular file")
     config = json.loads(path.read_text())
     required = {'version', 'deployment', 'image', 'serverContainer', 'socket', 'stateRoot', 'companyFile', 'companyRoot', 'scratchRoot', 'apiSocketRoot', 'budgetMode', 'uid', 'gid', 'memoryMiB', 'poolMemoryMiB', 'poolTasksMax', 'cgroupParent', 'pidsLimit', 'cpus', 'maxWorkers', 'mounts', 'maintenanceSessions'}
-    if not isinstance(config, dict) or set(config) - {'gpuGrants','sessionResources','rootlessDocker','goalPrivateConfig','opsConfig'} != required or config['version'] != 1:
+    if not isinstance(config, dict) or set(config) - {'gpuGrants','sessionResources','rootlessDocker','goalPrivateConfig','opsConfig','leaseAcceptance'} != required or config['version'] != 1:
         raise ValueError("Unsupported worker configuration")
     if 'opsConfig' in config:
         if not isinstance(config['opsConfig'], str) or not Path(config['opsConfig']).is_absolute() or Path(config['opsConfig']).anchor != '/' or str(Path(config['opsConfig'])) != config['opsConfig'] or any(ord(c)<32 or ord(c)==127 for c in config['opsConfig']):
@@ -243,7 +243,20 @@ def load_config(path):
             )
             if overlaps_attachment_store and not (source == workspace_source and destination == SHARED_WORKSPACE):
                 raise ValueError('Worker mounts cannot expose shared attachment storage through an alias')
+    if config.get('leaseAcceptance') is not None:
+        _lease_peer_module().validate_option(config)
     return config
+
+
+def _lease_peer_module():
+    if __package__:
+        from .cleanup import peer_port
+        return peer_port
+    import importlib.util
+    spec = importlib.util.spec_from_file_location('_reverie_lease_peer', Path(__file__).with_name('cleanup') / 'peer_port.py')
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def create_args(config, session_id, home, *, scratch=None, storage=None):
@@ -629,6 +642,8 @@ class Broker:
     def __init__(self, config, engine='docker', config_file=None, host_actions=None):
         self.config, self.engine = config, engine
         self.host_actions = host_actions
+        self.lease_peer = None
+        self.lease_peer_error = None
         self.ops = None
         if config.get('opsConfig') is not None:
             def ops_call(session, command):
@@ -1498,6 +1513,13 @@ class Broker:
         try:
             if self.stopping.is_set():
                 return
+            if self.config.get('leaseAcceptance') is not None:
+                try:
+                    module = _lease_peer_module()
+                    self.lease_peer = module.PeerServer(module.BrokerPeerBackend(self)).start()
+                except (ValueError, OSError, RuntimeError, subprocess.SubprocessError):
+                    self.lease_peer_error = 'Lease acceptance endpoint unavailable'
+                    self.lease_peer = None
             supervisor = threading.Thread(target=self.supervise, daemon=True)
             supervisor.start()
             supervisor_started = True
@@ -1532,6 +1554,23 @@ class Broker:
             # Covers supervisor/listener startup failures as well as normal exit.
             self.stopping.set()
             deadline = self.stopping.deadline
+            peer_close = None
+            if self.lease_peer is not None:
+                peer = self.lease_peer
+                def close_peer():
+                    try:
+                        peer.close()
+                    except BaseException:
+                        self.cleanup_uncertain.add('LEASE_PEER_ACTIVE')
+                    finally:
+                        if getattr(peer, 'unconfirmed', True):
+                            self.cleanup_uncertain.add('LEASE_PEER_ACTIVE')
+                try:
+                    candidate = threading.Thread(target=close_peer, daemon=True)
+                    candidate.start()
+                    peer_close = candidate
+                except (RuntimeError, MemoryError, OSError):
+                    self.cleanup_uncertain.add('LEASE_PEER_ACTIVE')
             offices = dict(self.cleanup_offices)
             offices.update((id(office), office) for office in tuple(self.offices.values()))
             # Stop ALL listeners before sequential bounded joins; never spend
@@ -1576,6 +1615,10 @@ class Broker:
                 supervisor.join(min(5., remaining(deadline)))
                 if supervisor.is_alive():
                     self.cleanup_uncertain.add('SUPERVISOR_ACTIVE')
+            if peer_close is not None:
+                peer_close.join(min(1., remaining(deadline)))
+                if peer_close.is_alive():
+                    self.cleanup_uncertain.add('LEASE_PEER_ACTIVE')
             for handler in tuple(self.handlers.values()):
                 if handler is not threading.current_thread():
                     handler.join(remaining(deadline))

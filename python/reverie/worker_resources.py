@@ -33,6 +33,15 @@ def effective_config(config,sid):
     validate_session_resources(config)
     result={k:v for k,v in config.items() if k!='sessionResources'}
     result.update(config.get('sessionResources',{}).get(sid,{}))
+    if result.get('leaseAcceptance') is not None:
+        if __package__:
+            from .cleanup import peer_port
+        else:
+            import importlib.util
+            from pathlib import Path
+            spec=importlib.util.spec_from_file_location('_resource_lease_peer',Path(__file__).with_name('cleanup')/'peer_port.py')
+            peer_port=importlib.util.module_from_spec(spec);spec.loader.exec_module(peer_port)
+        result=peer_port.worker_config(result,sid)
     return result
 
 

@@ -64,6 +64,12 @@
             inherit pkgs; src = self;
             prune = self.packages.${system}.pruneR12;
           };
+          leasePeer = import ./nix/lease-peer-static.nix { inherit pkgs; src = self; };
+          leaseAcceptance = import ./nix/lease-acceptance.nix {
+            inherit pkgs; src = self;
+            initializer = self.packages.${system}.pruneDeclared;
+            peerArtifact = self.packages.${system}.leasePeer;
+          };
           cleanupObservations = import ./nix/cleanup-observations.nix { inherit pkgs; src = self; };
           opsCore = import ./nix/ops-core.nix { inherit pkgs; src = self; };
           adminHarnessAddon = import ./nix/admin-harness-addon.nix { inherit pkgs; src = self; };
