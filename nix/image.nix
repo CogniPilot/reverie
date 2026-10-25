@@ -108,10 +108,12 @@ pkgs.dockerTools.buildLayeredImage {
     Cmd = if worker then [ "infinity" ] else [ "reverie" "web" "--host" "0.0.0.0" "--port" "3000" ];
     Env = [ (if worker then "PATH=/home/agent/.nix-profile/bin:/home/agent/.local/bin:/home/agent/.local/state/nix/profiles/profile/bin:/bin" else "PATH=/bin")
       "HOME=/home/agent" "REVERIE_CONTAINER=1" "REVERIE_MANAGED_INSTALL=nix"
-      "REVERIE_VERSION=${console.version}" "REVERIE_CASES_PATH=/scratch/cases"
+      "REVERIE_VERSION=${console.version}"
+      "REVERIE_CASES_PATH=${if worker then "/home/agent/.local/share/reverie/cases" else "/scratch/cases"}"
       "REVERIE_SHARED_WORKSPACE_PATH=/reverie_workspace"
       "REVERIE_SHARED_ATTACHMENTS_PATH=/reverie_workspace/attachments"
-      "REVERIE_RESEARCH_ROOT=/scratch/research" "TMPDIR=/scratch/tmp"
+      "REVERIE_RESEARCH_ROOT=${if worker then "/home/agent/.local/share/reverie/research" else "/scratch/research"}"
+      "TMPDIR=${if worker then "/tmp" else "/scratch/tmp"}"
       "SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt"
       "NIX_SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt" ]
       ++ pkgs.lib.optionals worker [ "NIX_REMOTE=local" "NIX_PATH=nixpkgs=flake:nixpkgs" ]
