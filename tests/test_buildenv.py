@@ -3,6 +3,7 @@ import fcntl
 import io
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import threading
@@ -128,7 +129,24 @@ class BuildEnvTests(unittest.TestCase):
         script = ("import subprocess,sys; "
                   "kids=[subprocess.Popen([sys.executable,'-c','import time; b=bytearray(40<<20); b[::4096]=b\"x\"*len(b[::4096]); time.sleep(1.5)']) for _ in range(3)]; "
                   "[k.wait() for k in kids]")
-        result = self.run_build([sys.executable, "-c", script], expect=60 * MiB, interval=0.1)
+        # fork/exec can carry a discovery runner's address-space RSS high-water into the
+        # measured child's highwater. Keep the measurement parent fresh, so this
+        # single-process-versus-whole-tree fixture measures only its build tree.
+        helper = ("import json,sys; from pathlib import Path; "
+                  "sys.path.insert(0,sys.argv[1]); from reverie.buildenv import run; "
+                  "p=json.load(sys.stdin); "
+                  "result=run('demo',Path(p['repo']),p['command'],60<<20,1<<20,"
+                  "scratch=Path(p['scratch']),rust_cache=Path(p['cache']),"
+                  "cgroup=Path(p['cgroup']),ledger=Path(p['ledger']),disk_reserve=0,interval=0.1); "
+                  "print(json.dumps(result))")
+        payload = dict(repo=str(self.repo), command=[sys.executable, "-c", script],
+                       scratch=str(self.scratch), cache=str(self.cache), cgroup=str(self.cgroup),
+                       ledger=str(self.scratch / "ledger.jsonl"))
+        measured = subprocess.run([sys.executable, "-I", "-B", "-c", helper,
+                                   str(Path(reverie.buildenv.__file__).resolve().parents[1])],
+                                  input=json.dumps(payload), text=True, capture_output=True,
+                                  check=True, timeout=20)
+        result = json.loads(measured.stdout)
         self.assertEqual(result["status"], "ok", result)
         self.assertLess(result["peak_rss_mib"], 100)
         self.assertGreaterEqual(result["peak_mib"], 110)
