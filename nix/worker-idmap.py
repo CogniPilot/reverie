@@ -39,6 +39,16 @@ def build(shadow, output, patchelf):
         shutil.copyfile(source, target / 'lib' / name)
     for path in [*(target / 'bin').iterdir(), *(target / 'lib').iterdir()]:
         path.chmod(0o755)
+        if path.name in interpreters:
+            # The loader bootstraps itself before ordinary dynamic relocation;
+            # adding/rearranging its dynamic section can make it crash. It has
+            # no interpreter/dependencies and needs no loader search changes.
+            needed = subprocess.check_output([patchelf, '--print-needed', str(path)], text=True).strip()
+            if needed:
+                raise ValueError('Dependency-free ELF interpreter required')
+            path.write_bytes(path.read_bytes().replace(b'/nix/store/', b'/opt/idmap/'))
+            path.chmod(0o555)
+            continue
         subprocess.run([patchelf, '--set-rpath', PREFIX + '/lib', '--no-default-lib', str(path)], check=True)
         needed = subprocess.check_output([patchelf, '--print-needed', str(path)], text=True).splitlines()
         for dependency in needed:
