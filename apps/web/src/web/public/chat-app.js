@@ -6985,7 +6985,50 @@ class ReverieChatApp {
     });
     const management = this.el('section', 'ca-profile-management');
     const permissionStatus = this.el('p', 'ca-hint', 'Checking owner access…'); permissionStatus.setAttribute('role', 'status'); management.append(permissionStatus);
-    dialog.append(form, management); dialog.addEventListener('close', () => dialog.remove()); this.doc.body.append(dialog); dialog.showModal();
+    // Keep the existing controls and submit handler; grouping never recreates fields
+    // or changes immediate permission/session actions into profile writes.
+    const profilePanel = this.el('section', 'ca-profile-panel ca-profile-fields');
+    const identityPanel = this.el('section', 'ca-profile-panel ca-profile-fields');
+    const profileNodes = [position.parentElement, parentLabel, expertise.parentElement,
+      responsibilities.parentElement, personality.parentElement, preferences];
+    const identityNodes = [...form.children].filter(node => !profileNodes.includes(node) && node !== error && node !== profileActions);
+    profilePanel.append(...profileNodes); identityPanel.append(contextActions, ...identityNodes);
+    for (const node of [expertise.parentElement, responsibilities.parentElement, personality.parentElement]) node.classList.add('ca-profile-wide');
+    form.id = 'ca-employee-profile-form'; form.classList.add('ca-profile-form');
+    form.replaceChildren(profilePanel, identityPanel); save.setAttribute('form', form.id);
+    const tabs = this.el('nav', 'ca-profile-tabs'); tabs.setAttribute('role', 'tablist'); tabs.setAttribute('aria-label', 'Employee profile sections');
+    const panels = [['profile', 'Profile', profilePanel], ['permissions', 'Permissions', management], ['identity', 'Identity & context', identityPanel]];
+    const selectTab = key => {
+      for (const [id, , panel] of panels) {
+        panel.hidden = id !== key;
+        const tab = tabs.querySelector(`[data-profile-tab="${id}"]`);
+        tab.setAttribute('aria-selected', String(id === key)); tab.tabIndex = id === key ? 0 : -1;
+      }
+      form.hidden = key === 'permissions';
+      saveHint.textContent = key === 'permissions'
+        ? 'Permissions and session actions apply immediately. Cancel does not undo them.'
+        : 'Profile changes are saved together. Cancel discards unsaved profile edits.';
+      body.scrollTop = 0;
+    };
+    for (const [key, label, panel] of panels) {
+      const tab = this.button('ca-btn', label, () => selectTab(key), { text: label });
+      tab.id = `ca-employee-tab-${key}`; tab.dataset.profileTab = key; tab.setAttribute('role', 'tab');
+      tab.setAttribute('aria-controls', `ca-employee-panel-${key}`);
+      panel.id = `ca-employee-panel-${key}`; panel.setAttribute('role', 'tabpanel'); panel.setAttribute('aria-labelledby', tab.id);
+      tab.addEventListener('keydown', event => {
+        const index = panels.findIndex(([id]) => id === key);
+        const next = event.key === 'ArrowRight' ? (index + 1) % panels.length : event.key === 'ArrowLeft' ? (index + panels.length - 1) % panels.length
+          : event.key === 'Home' ? 0 : event.key === 'End' ? panels.length - 1 : -1;
+        if (next < 0) return; event.preventDefault(); selectTab(panels[next][0]); tabs.children[next].focus();
+      });
+      tabs.append(tab);
+    }
+    const body = this.el('div', 'ca-profile-editor-body'); body.append(form, management);
+    const saveHint = this.el('span', 'ca-hint ca-profile-save-hint');
+    profileActions.classList.add('ca-profile-footer'); profileActions.prepend(saveHint);
+    error.classList.add('ca-profile-save-error');
+    dialog.append(tabs, body, error, profileActions); selectTab('profile');
+    dialog.addEventListener('close', () => dialog.remove()); this.doc.body.append(dialog); dialog.showModal();
     void Promise.all([this.app._chatApi('/api/company'), this.app._chatApi('/api/chatrooms/phone-status')]).then(([company, auth]) => {
       if (!dialog.isConnected || (dialog._companyOrigin && this.companyPage !== dialog._companyOrigin)) return;
       const current = company.ok && company.data?.employees?.find(item => item.id === employee.id);

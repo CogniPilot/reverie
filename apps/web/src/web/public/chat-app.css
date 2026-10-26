@@ -1469,24 +1469,50 @@ button.ca-company-profile-trigger:focus-visible { outline: 2px solid var(--accen
 .ca-company-work-list > summary { cursor: pointer; color: var(--text-dim); }
 .ca-company-work-list > section { border-bottom: 1px solid var(--ca-line); padding: 8px 0; }
 .ca-company-work-list h4 { margin: 4px 0; }
-.ca-expert-profile { width: min(760px, calc(100vw - 32px)); max-width: calc(100vw - 32px); max-height: calc(100dvh - 32px); overflow-y: auto; box-sizing: border-box; }
+/* The full employee editor owns its scrolling; profile actions stay visible. */
+.ca-expert-profile { margin: auto; width: min(760px, calc(100vw - 24px)); max-width: calc(100vw - 24px); max-height: calc(100dvh - 24px); padding: 14px; overflow: hidden; box-sizing: border-box; }
+.ca-expert-profile[open] { display: grid; grid-template-rows: auto auto auto minmax(0, 1fr) auto auto; gap: 8px; }
 .ca-profile-edit-heading { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
 .ca-profile-edit-heading h2 { margin: 0; }
-.ca-expert-profile form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 12px; }
-.ca-expert-profile form > :not(.ca-label) { grid-column: 1 / -1; }
+.ca-expert-profile .ca-profile-edit-heading { gap: 10px; }
+.ca-expert-profile .ca-profile-edit-heading h2 { font-size: 19px; }
+.ca-expert-profile > .ca-hint { margin: 0; font-size: 12px; }
+.ca-expert-profile [hidden] { display: none !important; }
+.ca-expert-profile .ca-profile-tabs { display: flex; gap: 4px; padding-bottom: 7px; border-bottom: 1px solid var(--ca-line); }
+.ca-expert-profile .ca-profile-tabs .ca-btn { flex: 1; min-width: 0; padding: 7px 8px; font-size: 12px; white-space: normal; }
+.ca-expert-profile .ca-profile-tabs [aria-selected='true'] { background: var(--ca-accent, #286b7a); color: #fff; border-color: transparent; }
+.ca-expert-profile .ca-profile-editor-body { min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 2px 3px 8px 1px; overscroll-behavior: contain; }
+.ca-expert-profile form.ca-profile-form { display: block; margin: 0; }
+.ca-expert-profile .ca-profile-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 12px; }
+.ca-expert-profile .ca-profile-fields > :not(.ca-label), .ca-expert-profile .ca-profile-wide { grid-column: 1 / -1; }
+.ca-expert-profile .ca-profile-fields > .ca-label { margin: 0; min-width: 0; }
 .ca-expert-profile .ca-field { width: 100%; min-width: 0; box-sizing: border-box; }
-.ca-expert-profile textarea { min-height: 80px; }
-.ca-profile-management { border-top: 1px solid var(--ca-line); margin-top: 18px; padding-top: 12px; }
-.ca-profile-management fieldset, .ca-profile-preferences { border: 1px solid var(--ca-line); border-radius: 8px; padding: 10px 12px; margin: 10px 0; min-width: 0; }
-.ca-profile-management fieldset > label, .ca-profile-preferences label { display: grid; grid-template-columns: 18px minmax(0, 1fr); gap: 4px 10px; align-items: start; margin: 10px 0; }
-.ca-profile-management input[type="checkbox"], .ca-profile-preferences input[type="checkbox"] { width: 16px; height: 16px; margin: 2px 0 0; }
-.ca-profile-management label small, .ca-profile-management label p { grid-column: 2; margin: 0; }
-.ca-profile-management .ca-company-actions { flex-wrap: wrap; align-items: center; gap: 8px; }
+.ca-expert-profile textarea { min-height: 64px; }
+.ca-expert-profile .ca-dialog-actions { flex-wrap: wrap; gap: 6px; }
+.ca-expert-profile .ca-core-beliefs { margin: 0; padding: 7px 9px; border: 1px solid var(--ca-line); border-radius: 7px; }
+.ca-expert-profile .ca-core-beliefs > summary { cursor: pointer; font-size: 12px; font-weight: 600; }
+.ca-expert-profile .ca-profile-management { border: 0; margin: 0; padding: 0; }
+.ca-expert-profile .ca-profile-management > p { margin: 0 0 7px; }
+.ca-expert-profile .ca-profile-management fieldset, .ca-expert-profile .ca-profile-preferences { border: 1px solid var(--ca-line); border-radius: 7px; padding: 7px 10px; margin: 0 0 8px; min-width: 0; }
+.ca-expert-profile .ca-profile-preferences { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin: 0; }
+.ca-expert-profile .ca-profile-management fieldset > label, .ca-expert-profile .ca-profile-preferences label { display: grid; grid-template-columns: 18px minmax(0, 1fr); gap: 2px 7px; align-items: start; margin: 6px 0; }
+.ca-expert-profile .ca-profile-preferences label { margin: 0; }
+.ca-expert-profile .ca-profile-management input[type='checkbox'], .ca-expert-profile .ca-profile-preferences input[type='checkbox'] { width: 16px; height: 16px; margin: 2px 0 0; }
+.ca-expert-profile .ca-profile-management label small, .ca-expert-profile .ca-profile-management label p { grid-column: 2; margin: 0; }
+.ca-expert-profile .ca-profile-management h3 { font-size: 13px; margin: 10px 0 4px; }
+.ca-expert-profile .ca-profile-management .ca-company-actions { flex-wrap: wrap; align-items: center; gap: 6px; }
+.ca-expert-profile .ca-profile-save-error { margin: 0; }
+.ca-expert-profile .ca-profile-save-error:empty { display: none; }
+.ca-expert-profile .ca-profile-footer { display: flex; align-items: center; flex-wrap: nowrap; border-top: 1px solid var(--ca-line); padding-top: 9px; background: var(--ca-composer-bg); }
+.ca-expert-profile .ca-profile-save-hint { flex: 1; margin-right: 8px; font-size: 11px; }
+.ca-expert-profile .ca-profile-footer button { flex-shrink: 0; }
 @media (max-width: 600px) {
   .ca-company-tree ul > li { flex: 1 1 220px; width: 100%; }
   .ca-company .ca-company-person { max-width: 100%; }
-  .ca-expert-profile { padding: 12px; }
-  .ca-expert-profile form { grid-template-columns: minmax(0, 1fr); }
+  .ca-expert-profile { padding: 10px; }
+  .ca-expert-profile .ca-profile-fields { grid-template-columns: minmax(0, 1fr); gap: 8px; }
+  .ca-expert-profile .ca-profile-footer { flex-wrap: wrap; justify-content: flex-end; }
+  .ca-expert-profile .ca-profile-save-hint { flex-basis: 100%; margin: 0 0 3px; }
 }
 .ca-publication-grant { display: grid; grid-template-columns: 18px minmax(0, 1fr); gap: 8px; align-items: start; margin: 10px 0; }
 .ca-publication-grant span, .ca-publication-grant small { display: block; overflow-wrap: anywhere; }
