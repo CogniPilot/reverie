@@ -31,6 +31,7 @@
         <button class="btn on" data-tab="timeline">Timeline</button>
         <button class="btn" data-tab="kanban">Kanban</button>
       </div>
+      <label class="tools">View <select class="btn" id="work-scope" aria-label="Board work view"><option value="latest">Latest plan</option><option value="all">All work</option></select></label>
       <div class="tools" id="zoombtns">
         <button type="button" class="btn" data-zoom="out" aria-label="Zoom out timeline" title="Zoom out">−</button>
         <button type="button" class="btn" data-zoom="in" aria-label="Zoom in timeline" title="Zoom in">+</button>
@@ -41,6 +42,7 @@
         <button class="btn" data-z="2w">2 weeks</button>
       </div>
     </div>
+    <div class="hint" id="work-scope-count" aria-live="polite"></div>
     <div id="tl"></div>
     <div class="legend" id="legend"></div>
     <div id="kanban" hidden></div>
@@ -56,7 +58,7 @@
     <div class="panel" id="sec-blockers"><div class="phead"><h2>Blockers</h2></div><ul class="list" id="blockers"></ul></div>
     <div class="panel" id="sec-pins"><div class="phead"><h2>Pinned</h2></div><ul class="list" id="pins"></ul></div>
   </section>
-  <div class="foot" id="foot">Served inside Reverie. Refreshes every minute.</div>
+  <div class="foot" id="foot">Served inside Reverie. Refreshes every 10 seconds while visible.</div>
 </div>
 <div class="tip" id="tip" hidden></div>
 <script>
@@ -116,6 +118,31 @@ function kindOf(i) {
 const onTimeline = i => i.status !== 'wontdo' && Number.isFinite(i.start) && Number.isFinite(i.end) && i.end >= i.start;
 const overdue = (i, now) => i.status !== 'done' && i.status !== 'wontdo' && Number.isFinite(i.end) && i.end <= now;
 
+/* Only the work view is filtered. Cards, history and all-work summary totals stay intact. */
+let workChoice = null;
+try { const saved = localStorage.getItem('board-work-view'); if (saved === 'all' || saved === 'latest') workChoice = saved; } catch (e) {}
+function latestPlanTag() {
+  return [...new Set((B?.issues || []).flatMap(i => (i.tags || []).filter(t => /^company-plan-\d{8}$/.test(t))))].sort().at(-1) || null;
+}
+function workIssues() {
+  const tag = latestPlanTag();
+  return tag && workChoice !== 'all' ? B.issues.filter(i => (i.tags || []).includes(tag)) : (B?.issues || []);
+}
+function workScope() {
+  const tag = latestPlanTag(), select = document.getElementById('work-scope');
+  const date = tag ? tag.slice(-8).replace(/^(....)(..)(..)$/, '$1-$2-$3') : null;
+  select.options[0].textContent = date ? 'Latest plan · ' + date : 'Latest plan (none)';
+  select.options[0].disabled = !tag;
+  select.value = tag && workChoice !== 'all' ? 'latest' : 'all';
+  document.getElementById('work-scope-count').textContent = (select.value === 'latest' ? 'Latest plan: ' : 'All work: ') + workIssues().length + ' of ' + B.issues.length + ' cards. Summary totals above cover all work.';
+}
+document.getElementById('work-scope').onchange = e => {
+  workChoice = e.target.value;
+  try { localStorage.setItem('board-work-view', workChoice); } catch (e) {}
+  preset = 'fit'; view = presetView(preset); hideTip(); render();
+  document.querySelectorAll('#zoombtns .btn').forEach(b => b.classList.toggle('on', b.dataset.z === preset));
+};
+
 /* ---------- theme, clock ---------- */
 (function theme() {
   let saved = null; try { saved = localStorage.getItem('board-theme'); } catch (e) {}
@@ -135,8 +162,10 @@ function tick() {
 const zoneShort = () => { try { return (new Intl.DateTimeFormat('en-US', {timeZone: TZ, timeZoneName: 'short'}).formatToParts(new Date()).find(p => p.type === 'timeZoneName') || {}).value || 'ET'; } catch (e) { return 'ET'; } };
 
 /* ---------- loading ---------- */
-let failures = 0;
+let failures = 0, loading = false, renderKey = null;
 async function load() {
+  if (loading) return;
+  loading = true;
   const banner = document.getElementById('banner');
   try {
     const r = await fetch('/api/board', {cache: 'no-store', credentials: 'same-origin', headers: {accept: 'application/json'}});
@@ -152,18 +181,25 @@ async function load() {
     if (j && j.success === false) throw new Error(j.error || 'refused');
     const next = j && j.data ? j.data : j;
     if (!next || !Array.isArray(next.issues)) throw new Error('unexpected reply');
-    const first = !B;
+    const first = !B, previousPlan = latestPlanTag();
+    // built changes on each read; unchanged board data must not rebuild the SVG.
+    const nextKey = JSON.stringify([next.rev, next.timeZone, next.company, next.roster, next.ownerIds, next.polls, next.pins, next.planBurn, next.pace, next.pollNotes, next.structuredDecisionWrites]);
     B = next; TZ = B.timeZone || TZ; failures = 0; banner.hidden = true;
-    if (first) view = presetView(preset);
+    if ((first || previousPlan !== latestPlanTag()) && latestPlanTag() && workChoice !== 'all') preset = 'fit';
+    if (first || preset === 'fit') view = presetView(preset);
+    if (renderKey === nextKey) { kpis(); return; }
+    renderKey = nextKey;
     render();
   } catch (e) {
     failures++;
     banner.hidden = false;
-    banner.textContent = (B ? 'Could not refresh the board (' : 'Could not load the board (') + e.message + '). ' + (B ? 'Showing the last data; ' : '') + 'trying again in a minute.';
-  }
+    banner.textContent = (B ? 'Could not refresh the board (' : 'Could not load the board (') + e.message + '). ' + (B ? 'Showing the last data; ' : '') + 'trying again when visible within 10 seconds.';
+  } finally { loading = false; }
 }
 document.getElementById('refresh').onclick = () => load();
-setInterval(load, 60e3);
+setInterval(() => { if (!document.hidden) load(); }, 10e3);
+addEventListener('focus', () => { if (!document.hidden) load(); });
+document.addEventListener('visibilitychange', () => { if (!document.hidden) load(); });
 setInterval(tick, 30e3);
 load().then(tick);
 
@@ -172,7 +208,7 @@ function render() {
   document.getElementById('co').textContent = (B.company && B.company.name) || '';
   document.title = ((B.company && B.company.name) ? B.company.name + ' ' : '') + 'Board';
   document.getElementById('built').textContent = 'Data built ' + dayLbl(B.built) + ' ' + hm(B.built) + ' ' + zoneShort();
-  kpis(); drawTimeline(); kanban(); milestones(); lists(); cards(); tick();
+  workScope(); kpis(); drawTimeline(); kanban(); milestones(); lists(); cards(); tick();
 }
 
 /* ---------- KPIs ---------- */
@@ -211,7 +247,7 @@ document.getElementById('tabs').onclick = e => {
 function timelineBounds() {
   const now = Date.now(), d0 = startOfDay(now);
   let lo = d0 - D, hi = d0 + 14 * D;
-  (B.issues || []).filter(onTimeline).forEach(i => { lo = Math.min(lo, startOfDay(i.start)); hi = Math.max(hi, i.end); });
+  workIssues().filter(onTimeline).forEach(i => { lo = Math.min(lo, startOfDay(i.start)); hi = Math.max(hi, i.end); });
   (B.milestones || []).forEach(m => { const t = dueMs(m.due); if (Number.isFinite(t)) hi = Math.max(hi, t); });
   return {start: lo, end: Math.min(hi, lo + 60 * D)};
 }
@@ -220,6 +256,7 @@ function presetView(z) {
   if (z === 'now') return {s: now - 4 * H, e: now + 4 * H};
   if (z === 'today') return {s: d0 + 6 * H, e: d0 + 24 * H};
   if (z === '3d') return {s: d0 - 12 * H, e: d0 + 2.5 * D};
+  if (z === '2w') return {s: d0, e: d0 + 14 * D};
   const b = timelineBounds(); return {s: b.start, e: b.end};
 }
 document.getElementById('zoombtns').onclick = e => {
@@ -253,7 +290,7 @@ function zoomTimeline(factor, anchor) {
 /** One row per owner. Today's hour-scale issues replace that owner's overlapping day-scale ones. */
 function rowsForView() {
   const today = startOfDay(Date.now()), tomorrow = today + D, by = new Map();
-  (B.issues || []).filter(onTimeline).forEach(i => { const k = ownerKey(i); if (!by.has(k)) by.set(k, []); by.get(k).push(i); });
+  workIssues().filter(onTimeline).forEach(i => { const k = ownerKey(i); if (!by.has(k)) by.set(k, []); by.get(k).push(i); });
   const order = roster().map(r => r.id);
   const keys = [...by.keys()].sort((a, b) => { const ia = order.indexOf(a), ib = order.indexOf(b);
     return (ia < 0 ? 999 : ia) - (ib < 0 ? 999 : ib) || a.localeCompare(b); });
@@ -429,7 +466,7 @@ function card(i) {
 function kanban() {
   const host = document.getElementById('kanban');
   if (!B || tab !== 'kanban') return;
-  const issues = (B.issues || []).slice().sort((a, b) => (a.end || 9e15) - (b.end || 9e15) || b.updatedAt - a.updatedAt);
+  const issues = workIssues().slice().sort((a, b) => (a.end || 9e15) - (b.end || 9e15) || b.updatedAt - a.updatedAt);
   const col = s => issues.filter(i => i.status === s);
   host.innerHTML = `<div class="ktabs">` + COLS.map((s, n) => `<button data-col="${n}"><b>${col(s).length}</b>${STATUS[s]}</button>`).join('') + `</div><div class="kan">` + COLS.map(s => {
     const items = col(s).slice(0, s === 'done' ? 40 : 200);
