@@ -30,6 +30,7 @@ reverie-chat = "reverie.chat:main"
 reverie-gpu-publisher = "reverie.gpu_publisher:main"
 reverie-sleep = "reverie.sleep:main"
 reverie-ops = "reverie.ops_cli:main"
+reverie-worker-store-maintenance = "reverie.worker_store_maintenance:main"
 
 [tool.setuptools]
 package-dir = {"" = "."}
