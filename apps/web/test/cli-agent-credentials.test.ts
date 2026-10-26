@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { chmod, link, lstat, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -17,6 +17,48 @@ import {
   type RequestOptions,
 } from '../src/cli-agent.js';
 import { credentialReferences } from '../src/credential-references.js';
+
+const rootFixture = vi.hoisted(() => ({
+  normalizeNixRoot: process.env.NIX_REVERIE_TEST_ROOT_CUSTODY === '1',
+  unknownRoot: false,
+}));
+// Nix's UID namespace exposes its trusted sandbox root as overflow UID 65534.
+// Model only that root FD's owner for these custody fixtures; production rejects
+// it. Every child FD, named edge, inode, mode, link count and file byte stays real.
+vi.mock('node:fs/promises', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs/promises')>();
+  return {
+    ...actual,
+    open: async (...args: Parameters<typeof actual.open>) => {
+      const handle = await actual.open(...args);
+      if (args[0] !== '/') return handle;
+      const root = await actual.lstat('/');
+      return new Proxy(handle, {
+        get(target, key) {
+          if (key === 'stat')
+            return async (...options: unknown[]) => {
+              const info = await Reflect.apply(target.stat, target, options);
+              if (info.dev !== root.dev || info.ino !== root.ino) throw Error('Root fixture identity changed');
+              const uid = rootFixture.unknownRoot
+                ? 65534
+                : rootFixture.normalizeNixRoot && info.uid === 65534
+                  ? 0
+                  : info.uid;
+              return new Proxy(info, {
+                get(value, field) {
+                  if (field === 'uid') return uid;
+                  const result = Reflect.get(value, field);
+                  return typeof result === 'function' ? result.bind(value) : result;
+                },
+              });
+            };
+          const value = Reflect.get(target, key);
+          return typeof value === 'function' ? value.bind(target) : value;
+        },
+      });
+    },
+  };
+});
 
 const SID = '11111111-1111-4111-8111-111111111111',
   EID = 'employee-1';
@@ -81,6 +123,20 @@ function client(
 }
 
 describe('explicit named PAT CLI', () => {
+  it('refuses an unknown root owner outside the trusted sandbox fixture adaptation', async () => {
+    const h = await home(), c = client();
+    const previous = rootFixture.normalizeNixRoot;
+    rootFixture.normalizeNixRoot = false;
+    rootFixture.unknownRoot = true;
+    try {
+      expect(await agentCredentialsInstall(c.deps, ID, h)).toBe(4);
+      expect(c.out.join('')).not.toContain(SECRET);
+      await expect(lstat(join(h, '.config'))).rejects.toMatchObject({ code: 'ENOENT' });
+    } finally {
+      rootFixture.normalizeNixRoot = previous;
+      rootFixture.unknownRoot = false;
+    }
+  });
   it('reuses a validated capability identity while still matching the fresh metadata endpoint', async () => {
     const c = client();
     expect(
