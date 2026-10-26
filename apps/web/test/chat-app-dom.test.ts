@@ -419,15 +419,16 @@ describe('members and presence', () => {
     expect(row().querySelector('.ca-dm-state')!.textContent).toBe('Needs your approval');
   });
 
-  it("opens a profile with the agent's actions, and its Debug terminal goes to its terminal and back", async () => {
+  it("opens a compact profile and uses the member action menu to reach its Debug terminal and back", async () => {
     const h = await createHarness({ sessions, rooms: fixtureRooms() });
     (h.document.querySelector('.ca-member') as HTMLButtonElement).click();
     const card = h.document.querySelector('.ca-profile')!;
     expect(card).not.toBeNull();
     const actions = [...card.querySelectorAll('.ca-btn')].map((b) => b.textContent);
-    expect(actions).toContain('Debug terminal');
+    expect(actions).not.toContain('Debug terminal');
     expect(actions).toContain('Message');
-    [...card.querySelectorAll<HTMLButtonElement>('.ca-btn')].find((b) => b.textContent === 'Debug terminal')!.click();
+    (h.document.querySelector('.ca-member') as HTMLElement).dispatchEvent(new h.window.MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+    [...h.document.querySelectorAll<HTMLButtonElement>('.ca-member-menu button')].find((b) => b.textContent === 'Debug terminal')!.click();
     expect(h.document.documentElement.getAttribute('data-reverie-view')).toBe('debug');
     expect(h.document.getElementById('chatApp')!.hidden).toBe(true);
     expect(h.app.selected).toEqual([A]);
@@ -455,7 +456,7 @@ describe('members and presence', () => {
     expect(h.document.querySelector('.ca-user-status')!.textContent).toBe('Online');
     h.app.setConnectionStatus('reconnecting');
     expect(h.document.querySelector('.ca-user-status')!.textContent).toBe('Reconnecting…');
-    (h.document.querySelector('.ca-user [aria-label="Office settings"]') as HTMLButtonElement).click();
+    (h.document.querySelector('.ca-machine-bar [aria-label="Office settings"]') as HTMLButtonElement).click();
     await settle(40);
     expect(h.shell.embed).toBeNull();
     expect(h.document.querySelector('.ca-office-menu')).not.toBeNull();
@@ -639,12 +640,20 @@ describe('never a blank page', () => {
     expect(view(h.document.getElementById('appSettingsModal')!).display).toBe('block');
   });
 
-  it('the gear opens a local menu with terminal settings', async () => {
-    const h = await createHarness({ rooms: fixtureRooms() });
-    (h.document.querySelector('.ca-user [aria-label="Office settings"]') as HTMLButtonElement).click();
+  it('the gear reaches terminal settings through the owner Company tools menu', async () => {
+    const h = await createHarness({ rooms: fixtureRooms(), company: { employees: [], settings: {}, canManage: true } });
+    const api = h.app._chatApi.bind(h.app);
+    h.app._chatApi = (path: string, options: unknown) => path === '/api/chatrooms/phone-status'
+      ? Promise.resolve({ ok: true, data: { self: 'owner', canSetOwn: true } })
+      : api(path, options);
+    (h.document.querySelector('.ca-machine-bar [aria-label="Office settings"]') as HTMLButtonElement).click();
     await settle(40);
     expect(h.app.settingsOpened).toBeUndefined();
-    ([...h.document.querySelectorAll('.ca-office-menu button')].find(button => button.textContent === 'Terminal settings') as HTMLButtonElement).click();
+    ([...h.document.querySelectorAll('.ca-office-menu button')].find(button => button.textContent === 'Company') as HTMLButtonElement).click();
+    await settle(80);
+    (h.document.querySelector('[aria-label="Company tools"]') as HTMLButtonElement).click();
+    await settle(40);
+    ([...h.document.querySelectorAll('.ca-popmenu button')].find(button => button.textContent === 'Terminal settings') as HTMLButtonElement).click();
     expect(h.app.settingsOpened).toBe(1);
     expect(h.shell.view).toBe('chat');
   });
@@ -2167,7 +2176,8 @@ describe('phone: message sheet and member-only terminal access', () => {
   it('removes the duplicate footer org shortcut while keeping settings and Company navigation', async () => {
     const h = await createHarness({ sessions, rooms: [room('r1', 'General', [member(A, 'alpha')], {})] });
     const bar = [...h.document.querySelectorAll('.ca-user > button')].map((b) => b.getAttribute('aria-label'));
-    expect(bar.at(-1)).toBe('Office settings');
+    expect(bar).not.toContain('Office settings');
+    expect(h.document.querySelectorAll('.ca-machine-bar [aria-label="Office settings"]')).toHaveLength(1);
     expect(h.document.querySelector('.ca-rail [aria-label="Org chart"]')).toBeNull();
     expect(h.document.querySelector('.ca-rail [aria-label="Debug terminals"]')).toBeNull();
     expect(h.document.querySelector('.ca-user-org')).toBeNull();
@@ -3773,8 +3783,10 @@ describe('Add people is easy to find and tap', () => {
     expect(btn.getAttribute('aria-label')).toBe('Add people to General');
     expect(btn.title).toBe('Add people to this channel');
     expect(btn.querySelector('svg')).not.toBeNull(); // an icon, not only text
-    // it comes straight after the name in the header
-    expect(h.document.querySelector('.ca-head-title')!.nextElementSibling).toBe(btn);
+    // The compact mute indicator sits between the name and the visible invite control.
+    const badge = h.document.querySelector('.ca-head-title')!.nextElementSibling!;
+    expect(badge.classList.contains('ca-muted-badge')).toBe(true);
+    expect(badge.nextElementSibling).toBe(btn);
     btn.click();
     expect((h.document.querySelector('.ca-invite') as HTMLElement).textContent).toContain('Invite agents to #General');
   });
@@ -4081,12 +4093,12 @@ describe('moving an agent to its new session, and retired sessions', () => {
     room('r1', 'General', [member(A, 'alpha', { role: 'coordinator' }), member(OLD, 'Pat', { alive: false, goal: 'runtime' })], {}),
   ];
 
-  it('an offline member\'s card offers Move to new session; the new one is picked from the open sessions, same name first', async () => {
+  it('an offline member\'s context menu offers Move to new session; the new one is picked from the open sessions, same name first', async () => {
     const S = [...sessions, { id: B, name: 'Pat', mode: 'claude' }, { id: '00000048-005c-4000-8000-00000000008d', name: 'zed', mode: 'claude' }];
     const h = await createHarness({ sessions: S, rooms: rooms(), stored: { 'reverie:chatroom': 'r1' } });
     const offline = ([...h.document.querySelectorAll('.ca-member')] as HTMLButtonElement[]).find((b) => b.textContent!.includes('Pat'))!;
-    offline.click();
-    const move = [...h.document.querySelectorAll('.ca-profile button')].find((b) => b.textContent === 'Move to new session') as HTMLElement;
+    offline.dispatchEvent(new h.window.MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+    const move = [...h.document.querySelectorAll('.ca-member-menu button')].find((b) => b.textContent === 'Move to new session') as HTMLElement;
     expect(move).toBeTruthy();
     move.click();
     const names = [...h.document.querySelectorAll('.ca-replace .ca-invite-row strong')].map((n) => n.textContent);
@@ -4102,11 +4114,11 @@ describe('moving an agent to its new session, and retired sessions', () => {
   it('a running member has no such button, and an older server shows none', async () => {
     const h = await createHarness({ sessions, rooms: rooms(), stored: { 'reverie:chatroom': 'r1' } });
     const online = ([...h.document.querySelectorAll('.ca-member')] as HTMLButtonElement[]).find((b) => b.textContent!.includes('alpha'))!;
-    online.click();
-    expect([...h.document.querySelectorAll('.ca-profile button')].some((b) => b.textContent === 'Move to new session')).toBe(false);
+    online.dispatchEvent(new h.window.MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+    expect([...h.document.querySelectorAll('.ca-member-menu button')].some((b) => b.textContent === 'Move to new session')).toBe(false);
     const old = await createHarness({ sessions, rooms: rooms(), features: { unread: true, dms: true, replies: true }, stored: { 'reverie:chatroom': 'r1' } });
-    ([...old.document.querySelectorAll('.ca-member')] as HTMLButtonElement[]).find((b) => b.textContent!.includes('Pat'))!.click();
-    expect([...old.document.querySelectorAll('.ca-profile button')].some((b) => b.textContent === 'Move to new session')).toBe(false);
+    ([...old.document.querySelectorAll('.ca-member')] as HTMLButtonElement[]).find((b) => b.textContent!.includes('Pat'))!.dispatchEvent(new old.window.MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+    expect([...old.document.querySelectorAll('.ca-member-menu button')].some((b) => b.textContent === 'Move to new session')).toBe(false);
   });
 
   it('retired sessions are hidden from the pickers, listed in the Office tools, and can be restored or deleted', async () => {
