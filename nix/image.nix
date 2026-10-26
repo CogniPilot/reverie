@@ -130,7 +130,12 @@ pkgs.dockerTools.buildLayeredImage {
     REGISTRY
   '';
   fakeRootCommands = ''
+    mkdir -p instances/default
     chown -R ${toString uid}:${toString gid} home/agent workspace reverie_workspace scratch instances
+    # Keep the shared mount parent protected when a deployment selects another
+    # runtime UID. The default instance remains writable by the image user.
+    chown 0:0 instances
+    chmod 0755 instances
     chgrp -R 0 home/agent scratch
     chmod 2770 home/agent scratch scratch/tmp
     chmod 0440 etc/sudoers
