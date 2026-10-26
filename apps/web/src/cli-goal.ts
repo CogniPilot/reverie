@@ -224,10 +224,12 @@ export function registerGoalCommands(
     .description('Canonical Goals through the scoped office API (requires installed server support)');
   goal
     .command('list')
+    .description('List goals visible to the current authenticated agent')
     .option('--json', 'Closed state summaries as JSON')
     .action((options: { json?: boolean }) => run(!!options.json, agentGoalList));
   goal
     .command('read <id>')
+    .description('Read one authorized goal, optionally its private full record')
     .option('--full', 'Explicit authorized full private record')
     .option('--json', 'JSON output')
     .action((id: string, options: { json?: boolean; full?: boolean }) =>
@@ -235,6 +237,7 @@ export function registerGoalCommands(
     );
   goal
     .command('metadata <employee-id>')
+    .description('Read an authorized employee goal projection using an existing metadata grant')
     .option('--grant <id>', 'Existing owner-issued metadata-read grant ID')
     .option('--json', 'Closed projection as JSON')
     .action((id: string, options: { json?: boolean; grant?: string }) =>
@@ -243,6 +246,7 @@ export function registerGoalCommands(
   for (const verb of ['create', 'transition'] as const) {
     goal
       .command(verb === 'create' ? 'create' : 'transition <id>')
+      .description(verb === 'create' ? 'Create a goal from an exact bounded command file' : 'Apply an authorized goal transition with exact generation and sequence checks')
       .requiredOption(
         '--input <path>',
         'Bounded JSON command file, including stable createId/transitionId and exact CAS fields'

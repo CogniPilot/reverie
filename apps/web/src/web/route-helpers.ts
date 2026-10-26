@@ -28,7 +28,7 @@ import type { EventPort } from './ports/event-port.js';
 export const MAX_ROUTE_PARAM_LENGTH = 4096;
 import type { AuthSessionRecord } from './ports/auth-port.js';
 import type { StaleExpirationMap } from '../utils/index.js';
-import { dataPath } from '../config/instance.js';
+import { configuredDataDir } from '../config/instance.js';
 import { getCasesDir } from '../config/cases-dir.js';
 import { isMultiUserMode, maxSessionsPerUser, userCasesDir } from '../config/multiuser.js';
 import { SYNTHETIC_ADMIN, findUser } from '../user-store.js';
@@ -39,7 +39,7 @@ import { AGENT_ORIGIN_SPAWNED_BY_SESSION, normalizeAgentOrigin } from '../agent-
 // The cases dir is resolved in ONE place (config/cases-dir.ts) because the CLI
 // resolves it too, and REVERIE_CASES_PATH must move both or neither.
 export const CASES_DIR = getCasesDir();
-export const SETTINGS_PATH = dataPath('settings.json');
+export const SETTINGS_PATH = join(configuredDataDir(), 'settings.json');
 
 /**
  * Validates that a path component doesn't escape the base directory.

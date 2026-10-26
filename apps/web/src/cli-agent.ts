@@ -2315,7 +2315,7 @@ export function registerAgentCommands(program: Command): Command {
   const context = agent.command('context').description('Read current self profile/core context; old startup is unknown without a harness receipt');
   context.option('--json', 'Machine-readable current context and capture availability')
     .action((options: { json?: boolean }) => run(Boolean(options.json), agentContext));
-  context.command('receipt').requiredOption('--digest <sha256>', 'Exact prior server-issued snapshot digest')
+  context.command('receipt').description('Report an exact previously issued context snapshot as harness input').requiredOption('--digest <sha256>', 'Exact prior server-issued snapshot digest')
     .requiredOption('--stage <stage>', 'startup or model-request; harness-reported inclusion only')
     .option('--json', 'Machine-readable report metadata')
     .action((options: { json?: boolean; digest: string; stage: string }) => run(Boolean(options.json), deps => agentContextReceipt(deps, options.digest, options.stage)));
@@ -2323,9 +2323,9 @@ export function registerAgentCommands(program: Command): Command {
     .option('--json', 'Machine-readable current capability report')
     .action((options: { json?: boolean }) => run(Boolean(options.json), agentCapabilities));
   const credentials = agent.command('credentials').description('List granted named PATs or explicitly install one private local copy; never prints material');
-  credentials.command('list').option('--json', 'Machine-readable granted credential metadata')
+  credentials.command('list').description('List current named publication credential grants without secret values').option('--json', 'Machine-readable granted credential metadata')
     .action((options: { json?: boolean }) => run(Boolean(options.json), agentCredentialsList));
-  credentials.command('install <name-or-id>').option('--json', 'Machine-readable installation metadata; never token material')
+  credentials.command('install <name-or-id>').description('Install one granted credential as a private local file; never print its value').option('--json', 'Machine-readable installation metadata; never token material')
     .action((reference: string, options: { json?: boolean }) => run(Boolean(options.json), (deps) => agentCredentialsInstall(deps, reference)));
   registerGoalCommands(agent, run);
   registerRoutineCommands(program, run);
@@ -2333,6 +2333,7 @@ export function registerAgentCommands(program: Command): Command {
   planMove.command('list').description('List this expert’s pending plan requests').option('--json', 'Machine-readable result')
     .action((options: { json?: boolean }) => run(Boolean(options.json), agentPendingPlanMoves));
   planMove.command('request <account-id>')
+    .description('Prepare a permitted plan move or same-account runtime refresh for safe handoff')
     .option('--restart', 'Refresh this expert on its current account through handoff and approval')
     .option('--employee <id>', 'Team expert ID (requires Manage team plans)')
     .option('--id <id>', 'Stable request ID for safe retries')
@@ -2340,15 +2341,16 @@ export function registerAgentCommands(program: Command): Command {
     .action((toAccount: string, options: { employee?: string; id?: string; json?: boolean; restart?: boolean }) =>
       run(Boolean(options.json), deps => agentRequestPlanMove(deps, { toAccount, employeeId: options.employee, id: options.id, restart: options.restart })));
   planMove.command('approve <id>')
+    .description('Approve your pending request with its work-safe handoff file')
     .requiredOption('--handoff-file <path>', 'Work-safe handoff for the fresh destination session')
     .option('--json', 'Machine-readable result')
     .action((id: string, options: { handoffFile: string; json?: boolean }) =>
       run(Boolean(options.json), deps => agentPlanRequest(deps, { id, decision: 'approve', handoffFile: options.handoffFile })));
-  planMove.command('reject <id>').option('--json', 'Machine-readable result')
+  planMove.command('reject <id>').description('Reject your pending plan request without moving the runtime').option('--json', 'Machine-readable result')
     .action((id: string, options: { json?: boolean }) =>
       run(Boolean(options.json), deps => agentPlanRequest(deps, { id, decision: 'reject' })));
   for (const action of ['status', 'cancel', 'reauthorize'] as const)
-    planMove.command(`${action} <id>`).option('--json', 'Machine-readable result')
+    planMove.command(`${action} <id>`).description({ status: 'Inspect the current plan request and its outcome', cancel: 'Cancel a permitted pending plan request', reauthorize: 'Reauthorize a pending request using current permitted account choices' }[action]).option('--json', 'Machine-readable result')
       .action((id: string, options: { json?: boolean }) =>
         run(Boolean(options.json), deps => agentPlanMoveAction(deps, id, action)));
 

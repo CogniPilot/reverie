@@ -14,7 +14,8 @@ import https from 'node:https';
 import { existsSync, readFileSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
 import { homedir } from 'node:os';
-import { dataPath } from './config/instance.js';
+import { dataPath, configuredDataDir } from './config/instance.js';
+import { registerHelpCommands } from './cli-help.js';
 import { readReverieCredentials } from './reverie-credentials.js';
 import { casePath } from './config/cases-dir.js';
 import { assertValidBasePath } from './config/base-path.js';
@@ -121,7 +122,7 @@ program
 // ============ Skill Commands ============
 
 /** Same registry the server resolves case names through (mirrors `case-routes.ts`). */
-const LINKED_CASES_FILE = dataPath('linked-cases.json');
+const LINKED_CASES_FILE = join(configuredDataDir(), 'linked-cases.json');
 /** Graceful shutdown budget before the process force-exits (see the SIGTERM handler). */
 const SHUTDOWN_FORCE_EXIT_MS = 10_000;
 
@@ -1611,5 +1612,7 @@ program
     }
     process.exit(computeExitCode(results));
   });
+
+registerHelpCommands(program);
 
 export { program };
