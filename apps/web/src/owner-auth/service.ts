@@ -19,8 +19,9 @@
  * The audit log (`<data>/owner-auth-audit.jsonl`, 0600) records outcomes, never a password, code
  * or token.
  */
-import { promises as fs } from 'node:fs';
+import { promises as fs, readFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
+import { z } from 'zod';
 import type { Socket } from 'node:net';
 import { hashPassword, verifyPasswordHash, normalizeUsername, isValidUsername } from '../user-store.js';
 import type { PasswordHash } from '../types.js';
@@ -35,6 +36,26 @@ import {
   sha256,
 } from './crypto.js';
 import type { OwnerAccount, OwnerAuthStore, OwnerPolicy, Throttle } from './store.js';
+
+const MessageOwnerAccountSchema = z.object({
+  version: z.literal(1),
+  username: z.string().refine(isValidUsername),
+  mustChange: z.literal(false),
+  epoch: z.number().int().positive(),
+  passwordChangedAt: z.number().finite().nonnegative(),
+  policy: z.enum(['off', 'log', 'enforce']),
+  password: z.object({
+    algo: z.literal('scrypt'),
+    N: z.number().int().min(2).max(2 ** 24).refine(n => (n & (n - 1)) === 0),
+    r: z.number().int().positive(),
+    p: z.number().int().positive(),
+    salt: z.string().regex(/^(?:[a-f0-9]{2})+$/i),
+    hash: z.string().regex(/^(?:[a-f0-9]{2})+$/i),
+  }),
+  recovery: z.array(z.unknown()),
+  devices: z.array(z.unknown()),
+  services: z.array(z.unknown()),
+});
 
 export const OWNER_SCRYPT_PARAMS = { N: 32768, r: 8, p: 1 } as const;
 export const SESSION_IDLE_MS = 12 * 60 * 60 * 1000;
@@ -189,6 +210,18 @@ export class OwnerAuthService {
     if (!this.session(token)) return undefined;
     const account = this.account();
     return account ? { id: 'owner', username: account.username, name: account.username, role: 'owner', primary: true } : undefined;
+  }
+
+  /** Current authority of the author of a server-marked message, without exposing credentials. */
+  isMessageOwner(humanId: string | undefined): boolean {
+    try {
+      if (humanId !== undefined && humanId !== 'owner') return false;
+      // This grant must not use the account store's mtime cache or its typed JSON cast.
+      return MessageOwnerAccountSchema.safeParse(JSON.parse(readFileSync(this.deps.store.file, 'utf8'))).success;
+    } catch {
+      // A cached account keeps authentication policy enforced; it cannot grant a new tool action.
+      return false;
+    }
   }
 
   setupAvailable(): boolean {

@@ -1,6 +1,7 @@
 import { listClis } from '../../config/cli-registry/registry.js';
 import { modePollsChat } from '../../chatroom-delivery.js';
 import { registerChatAttention } from './chat-attention.js';
+import { agentMessage } from '../../chatroom-agent-message.js';
 import { z } from 'zod';
 /**
  * @fileoverview Chatroom routes: a shared room where the user, an appointed
@@ -139,7 +140,7 @@ export function registerChatroomRoutes(
   roles: RolesStore = new RolesStore(''),
   /** A session id to its company employee id, if it has one. */
   employeeOf: (sessionId: string) => string | undefined = () => undefined,
-  host: { pendingStatus?: ServiceVerifier; human?: (req: FastifyRequest) => import('../../owner-auth/service.js').HumanIdentity | undefined; readAt?: (id: string, roomId: string) => number | undefined; markRead?: (id: string, roomId: string, at?: number) => Promise<number> } = {}
+  host: { pendingStatus?: ServiceVerifier; human?: (req: FastifyRequest) => import('../../owner-auth/service.js').HumanIdentity | undefined; messageOwner?: (humanId: string | undefined) => boolean; readAt?: (id: string, roomId: string) => number | undefined; markRead?: (id: string, roomId: string, at?: number) => Promise<number> } = {}
 ): void {
   /** The session this request speaks as, or undefined for the user. */
   const caller = (req: FastifyRequest): string | undefined =>
@@ -1204,7 +1205,7 @@ export function registerChatroomRoutes(
       const self = caller(req);
       if (!self) return forbid(reply, 'An agent session is required');
       const data = service.exactAgentRead(self, id, messageId);
-      return { success: true, data: { ...data, message: { ...data.message, phoneWake: service.phoneAccepts(self, id, messageId) } } };
+      return { success: true, data: { ...data, message: agentMessage(data.message, service.phoneAccepts(self, id, messageId), host.messageOwner ?? (() => false)) } };
     } catch (error) { return sendError(reply, error); }
   });
 
@@ -1230,7 +1231,7 @@ export function registerChatroomRoutes(
       // An agent that reads the room has seen what it was given: its seen-marker moves to the newest message returned.
       const self = caller(req);
       if (self && room.members.some((m) => m.sessionId === self)) service.acknowledgeAgentRead(self, room.id, view.messages);
-      const messages = self ? view.messages.map(message => ({ ...message, phoneWake: service.phoneAccepts(self, id, message.id) })) : view.messages;
+      const messages = self ? view.messages.map(message => agentMessage(message, service.phoneAccepts(self, id, message.id), host.messageOwner ?? (() => false))) : view.messages;
       return { success: true, data: { messages, members: view.members } };
     } catch (err) {
       return sendError(reply, err);

@@ -138,6 +138,22 @@ export class OfficeAuthService extends OwnerAuthService {
     return undefined;
   }
 
+  override isMessageOwner(humanId: string | undefined): boolean {
+    if (humanId === 'owner') return super.isMessageOwner(humanId);
+    let people: OfficePerson[];
+    try {
+      people = PeopleSchema.parse(JSON.parse(readFileSync(this.peopleFile, 'utf8'))).people;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT' || this.people.length) return false;
+      people = [];
+    }
+    // Shared-office legacy marks without an author id cannot identify a current owner.
+    if (humanId === undefined) return !people.length && !this.people.length && super.isMessageOwner(humanId);
+    const person = people.find(p => p.id === humanId);
+    if (!person || person.role !== 'owner' || person.disabled || this.accessChanging.has(person.id)) return false;
+    return this.children.get(person.id)?.isMessageOwner('owner') === true;
+  }
+
   override async login(...args: Parameters<OwnerAuthService['login']>) {
     if (this.logins >= 2) throw new OwnerAuthError('Sign-in is busy; try again shortly', 429);
     this.logins++;

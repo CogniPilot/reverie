@@ -116,6 +116,17 @@ def office_environment(cfg, task_id):
             'REVERIE_DATA_DIR': str(selected.parents[2])}
 
 
+def source_identity(message):
+    """Immutable request fields; derived read-time authority is checked separately."""
+    sender = message.get('from')
+    if (not isinstance(sender, dict) or not isinstance(message.get('id'), str) or
+            not message['id'] or not isinstance(message.get('roomId'), str) or
+            not isinstance(message.get('text'), str)):
+        raise ValueError('invalid canonical coding source')
+    return {**{key: message.get(key) for key in ('id', 'roomId', 'text', 'at')},
+            'from': {key: value for key, value in sender.items() if key != 'authenticatedOwner'}}
+
+
 def authorize_task(loop, cfg, chat, room, message, settings, task_id, deadline,
                    *, check_cancel=True, clock=time.monotonic):
     remaining = deadline - clock()
@@ -142,9 +153,6 @@ def authorize_task(loop, cfg, chat, room, message, settings, task_id, deadline,
                 lease.get('mode') not in ('silent', 'ring', 'vibrate') or
                 type(lease.get('until')) not in (int, float) or not math.isfinite(lease['until'])):
             return 'authorization_unavailable'
-        cached = SimpleNamespace(member_alert=lambda *args: view)
-        if not loop.alert_allows(cfg, cached, room, message):
-            return 'silent'
         if check_cancel:
             for candidate in chat.read(room, cfg['history_n']):
                 if candidate.get('phoneWake') is False:
@@ -155,6 +163,22 @@ def authorize_task(loop, cfg, chat, room, message, settings, task_id, deadline,
                 if (control and control['action'] == 'cancel' and control['task_id'] == task_id and
                         permitted_sender(current, room, task_id, candidate)):
                     return 'cancelled'
+        # Finish remote metadata preflight before reading current request authority.
+        # No cached owner grant may survive revocation during those slower calls.
+        fresh = chat.exact_message(room, message['id'])
+        if source_identity(fresh) != source_identity(message) or fresh['roomId'] != room:
+            return 'revoked'
+        current = read_json(cfg['_config_path']).get('coding') if cfg.get('_config_path') else settings
+        validate_settings(current)
+        if current != settings or not permitted_sender(current, room, task_id, fresh):
+            return 'revoked'
+        if type(fresh.get('phoneWake')) is not bool:
+            return 'authorization_unavailable'
+        if not fresh['phoneWake']:
+            return 'silent'
+        cached = SimpleNamespace(member_alert=lambda *args: view)
+        if not loop.alert_allows(cfg, cached, room, fresh):
+            return 'silent'
         return None
     except Exception:
         return 'authorization_unavailable'

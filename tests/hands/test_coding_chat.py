@@ -1,3 +1,4 @@
+import copy
 import json
 import tempfile
 import time
@@ -72,6 +73,66 @@ class AuthorizationTests(unittest.TestCase):
         changed['coding']['tasks']['fixture']['delegate_sessions'] = []
         path.write_text(json.dumps(changed))
         self.assertEqual(self.authorize(), 'revoked')
+
+    def test_fresh_owner_revocation_cannot_use_the_cached_grant(self):
+        self.message = copy.deepcopy(self.message)
+        self.chat.rooms['room'][0]['from'] = dict(OWNER, authenticatedOwner=False)
+        self.assertTrue(self.message['from']['authenticatedOwner'])
+        self.assertEqual(self.authorize(), 'revoked')
+
+    def test_owner_revocation_during_slow_metadata_is_rechecked_last(self):
+        self.message = copy.deepcopy(self.message)
+        original = self.chat.member_rooms
+        def revoke():
+            self.chat.rooms['room'][0]['from'] = dict(OWNER, authenticatedOwner=False)
+            return original()
+        with patch.object(self.chat, 'member_rooms', side_effect=revoke):
+            self.assertEqual(self.authorize(), 'revoked')
+
+    def test_current_settings_are_rechecked_after_slow_metadata(self):
+        path = self.root / 'instance.json'
+        path.write_text(json.dumps({'coding': self.settings}))
+        self.cfg['_config_path'] = str(path)
+        original = self.chat.member_rooms
+        def change():
+            changed = copy.deepcopy(self.settings)
+            changed['tasks']['fixture']['enabled'] = False
+            path.write_text(json.dumps({'coding': changed}))
+            return original()
+        with patch.object(self.chat, 'member_rooms', side_effect=change):
+            self.assertEqual(self.authorize(), 'revoked')
+
+    def test_exact_source_is_the_last_remote_authorization_read(self):
+        calls = []
+        for name in ('member_rooms', 'member_alert', 'read', 'exact_message'):
+            original = getattr(self.chat, name)
+            def observed(*args, _name=name, _original=original):
+                calls.append(_name)
+                return _original(*args)
+            setattr(self.chat, name, observed)
+        self.assertIsNone(self.authorize())
+        self.assertEqual(calls, ['member_rooms', 'member_alert', 'read', 'exact_message'])
+
+    def test_exact_source_edits_or_wrong_identity_revoke_before_tools(self):
+        original = copy.deepcopy(self.message)
+        self.message = copy.deepcopy(original)
+        for field, value in [('text', 'changed request'), ('id', 'wrong-id'), ('roomId', 'wrong-room'),
+                             ('from', dict(OWNER, humanId='different-owner'))]:
+            fresh = dict(original, phoneWake=True, **{field: value})
+            with patch.object(self.chat, 'exact_message', return_value=fresh):
+                self.assertEqual(self.authorize(), 'revoked', field)
+
+    def test_exact_source_missing_or_unavailable_has_no_cached_fallback(self):
+        with patch.object(self.chat, 'exact_message', side_effect=TimeoutError('synthetic outage')):
+            self.assertEqual(self.authorize(), 'authorization_unavailable')
+        self.chat.rooms['room'].clear()
+        self.assertEqual(self.authorize(), 'authorization_unavailable')
+
+    def test_fresh_phone_policy_and_delegate_scope_are_both_required(self):
+        self.chat.rooms['room'][0]['phoneWake'] = False
+        self.assertEqual(self.authorize(), 'silent')
+        self.chat.rooms['room'][0]['phoneWake'] = 'true'
+        self.assertEqual(self.authorize(), 'authorization_unavailable')
 
     def test_unconnected_web_search_cannot_silently_bypass_proxy_requirement(self):
         with self.assertRaises(ValueError):

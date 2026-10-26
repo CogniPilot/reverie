@@ -219,8 +219,8 @@ class AttentionWakeTests(unittest.TestCase):
         with self.assertRaises(ValueError): chat.read('room', 30)
         cfg = cfg_for('/unused')
         self.assertFalse(loop.alert_allows(cfg, chat, 'room', {'id': 'message'}))
-        chat._run.return_value = '{"message":{"id":"message","phoneWake":false}}'
+        chat._run.return_value = '{"message":{"id":"message","roomId":"room","phoneWake":false}}'
         self.assertFalse(loop.alert_allows(cfg, chat, 'room', {'id': 'message'}))
-        chat._run.return_value = '{"message":{"id":"message","phoneWake":true}}'
+        chat._run.return_value = '{"message":{"id":"message","roomId":"room","phoneWake":true}}'
         self.assertTrue(loop.alert_allows(cfg, chat, 'room', {'id': 'message'}))
         self.assertIn('--message', chat._run.call_args.args[0])

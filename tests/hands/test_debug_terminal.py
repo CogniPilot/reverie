@@ -230,7 +230,7 @@ class TerminalPTYTests(unittest.TestCase):
                 'import json,sys\nfrom pathlib import Path\n'
                 f'history=Path({str(history_file)!r}); posts=Path({str(posts)!r})\n'
                 'if sys.argv[1]=="read":\n'
-                ' messages=[dict(m,phoneWake=True) for m in json.loads(history.read_text())]\n'
+                ' messages=[dict(m,roomId="room",phoneWake=True) for m in json.loads(history.read_text())]\n'
                 ' if "--message" in sys.argv:\n'
                 '  selected=sys.argv[sys.argv.index("--message")+1]\n'
                 '  print(json.dumps({"message":next(m for m in messages if m["id"]==selected)}))\n'

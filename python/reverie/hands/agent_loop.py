@@ -154,12 +154,16 @@ class Chat:
             raise ValueError('Server did not verify current phone delivery; no automatic replies')
         return messages
 
-    def phone_allows(self, room, message_id):
+    def exact_message(self, room, message_id):
         data = json.loads(self._run(['read', '--room', room, '--message', message_id, '--json']))
         message = data.get('message')
-        if not isinstance(message, dict) or message.get('id') != message_id or type(message.get('phoneWake')) is not bool:
+        if (not isinstance(message, dict) or message.get('id') != message_id or
+                message.get('roomId') != room or type(message.get('phoneWake')) is not bool):
             raise ValueError('No exact current phone acceptance')
-        return message['phoneWake']
+        return message
+
+    def phone_allows(self, room, message_id):
+        return self.exact_message(room, message_id)['phoneWake']
 
     def member_alert(self, room, session_id):
         data = json.loads(self._run(['read', '--room', room, '-n', '1', '--json']))

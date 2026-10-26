@@ -29,7 +29,7 @@ class TaskManager:
         if job:
             self.loop.save_json(self.cfg['state_file'], job['state'])
 
-    def control(self, state, room, history, message):
+    def control(self, state, room, history, message, *, canonical_source=None):
         settings = copy.deepcopy(self.cfg['coding'])
         validate_settings(settings)
         control = control_request(message)
@@ -48,6 +48,11 @@ class TaskManager:
             return 'No active coding task matches that id.'
         if self.active:
             return 'Coding task refused: another task is active.'
+        source = copy.deepcopy(message if canonical_source is None else canonical_source)
+        if (not isinstance(source, dict) or source.get('id') != message.get('id') or
+                source.get('roomId') != room or source.get('from') != message.get('from') or
+                source.get('at') != message.get('at')):
+            return 'Coding task refused: canonical source binding differs.'
         journal = state.setdefault('_coding', {})
         profile = task.get('profile', 'drill')
         limits = Limits(**settings.get('profiles', {'drill': {}})[profile])
@@ -60,7 +65,7 @@ class TaskManager:
         state['_coding_epoch'] = epoch
         journal[room + ':' + source_id]['epoch'] = epoch
         self.active = {'state': state, 'journal': journal, 'key': room + ':' + source_id,
-                       'room': room, 'source': message, 'task_id': task_id, 'profile': profile,
+                       'room': room, 'source': source, 'task_id': task_id, 'profile': profile,
                        'limits': limits, 'settings': settings, 'worker': None, 'arbiter': None,
                        'runner': None, 'pending': None, 'last_progress': self.clock(),
                        'deadline': self.clock() + limits.seconds, 'epoch': epoch}

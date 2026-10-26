@@ -35,7 +35,7 @@ def callback(cfg, manager, state, room, history, message):
                 '\nExecution plan (model suggestion, not extra authority):\n'+brief)
         # Preserve the actual authenticated sender, room and source message ID.
         # TaskManager rechecks authorization, current settings, membership, limits and its durable journal.
-        return manager.control(state, room, history, {**message, 'text': text})
+        return manager.control(state, room, history, {**message, 'text': text}, canonical_source=message)
     return start
 
 def invoke(output, start):

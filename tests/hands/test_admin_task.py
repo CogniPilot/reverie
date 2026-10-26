@@ -47,6 +47,7 @@ class NaturalAdminTaskTests(unittest.TestCase):
         self.assertEqual(sent['id'], message['id']);self.assertEqual(sent['from'], OWNER)
         self.assertTrue(sent['text'].startswith('/code workspace '))
         self.assertIn(message['text'], sent['text']);self.assertNotIn('/code ', message['text'])
+        self.assertEqual(manager.control.call_args.kwargs['canonical_source'], message)
 
     def test_plain_text_and_malformed_or_parallel_calls_never_execute(self):
         start = Mock()
