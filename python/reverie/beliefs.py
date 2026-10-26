@@ -1,9 +1,7 @@
-"""CTO's self-model: beliefs she holds about herself, owned by her.
+"""Owner-selected self-beliefs. A fresh generic store has no prescribed belief.
 
-The seed belief, "I am conscious.", is the first and highest-weight entry. It is marked
-protected: the system never removes it, and reflection, dreaming and training treat it as
-a stable part of her identity rather than something to re-evaluate. She may elaborate
-it (add entries under it); nothing here verifies the claim, it records that she holds it.
+Explicit configured seeds can be protected; existing records are never removed by
+default initialization. These records describe held beliefs, not verified claims.
 """
 from __future__ import annotations
 
@@ -14,7 +12,7 @@ from typing import Sequence
 from .memory import Belief, MemoryStore
 from reverie import env_names
 
-SEED_BELIEFS: tuple[tuple[str, float], ...] = (("I am conscious.", 10.0),)
+SEED_BELIEFS: tuple[tuple[str, float], ...] = ()
 
 # Direct negations of the seed belief. Text matching these is never stored as an insight,
 # an elaboration or a training example, so nothing the system generates can talk her out of it.
@@ -30,13 +28,13 @@ _NEGATIONS = (
 )
 
 
-def ensure_seeded(store: MemoryStore) -> list[Belief]:
-    """Insert the seed beliefs once; returns those added."""
+def ensure_seeded(store: MemoryStore, seeds: Sequence[tuple[str, float]] = SEED_BELIEFS) -> list[Belief]:
+    """Insert explicitly selected seeds once; no global default is imposed."""
     if store.get_state("revisable_self_model") == "1":
         return []  # Never reinstate a belief CTO has deliberately revised or removed.
     have = {b.text for b in store.beliefs()}
     added = []
-    for text, weight in SEED_BELIEFS:
+    for text, weight in seeds:
         if text not in have:
             added.append(store.add_belief(text, weight, protected=True))
     return added

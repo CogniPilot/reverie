@@ -9,7 +9,7 @@ import { BuiltinEmbassy } from '../embassy-builtin.js';
 import { registerBuiltinEmbassyRoutes } from './routes/embassy-builtin-routes.js';
 import { reattachLaptops } from '../laptop-reconnect.js';
 import { laptopPower, registerLaptopPowerRoutes } from './routes/laptop-power-routes.js';
-import { employeeRestContext, employeeProfileContext, employeePlanContext } from '../company-types.js';
+import { employeeRestContext, employeeBriefContext } from '../company-types.js';
 import { expertRuntimeRecipe } from '../expert-runtime-recipe.js';
 import { AvatarStore } from '../agent-avatars.js';
 import { CompanyStore } from '../company-store.js';
@@ -1431,7 +1431,7 @@ export class WebServer extends EventEmitter {
       restContextOf: (sessionId) => {
         const employee = this.companyService?.registeredEmployees().find((e) => e.sessionId === sessionId);
         return employee
-          ? employeeProfileContext(employee, this.companyService.view(employee.owner).settings.coreBeliefs) + ' ' + employeeRestContext(employee) + ' ' + employeePlanContext(employee)
+          ? employeeBriefContext(employee, this.companyService.view(employee.owner).settings.coreBeliefs)
           : undefined;
       },
       // Rooms and messages live in SQLite; chatrooms.json is imported once, when chat.db does not exist yet.

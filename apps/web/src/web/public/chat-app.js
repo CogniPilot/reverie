@@ -6478,7 +6478,7 @@ class ReverieChatApp {
         ['startup', 'model-request'].includes(report.stage) && Number.isFinite(report.reportedAt) &&
         report.assurance === 'harness-reported-input' && report.retention === 'website-process-lifetime';
       if (data.startup.status === 'captured' && (!validReport(data.startup.report) || data.startup.report.stage !== 'startup' ||
-        data.startup.report.sessionId !== data.sessionId || data.startup.report.sessionGeneration !== data.sessionGeneration))
+        data.startup.report.sessionId !== data.sessionId || data.startup.report.sessionGeneration !== data.sessionGeneration || data.startup.report.runtimeBinding !== data.runtimeBinding))
         throw new Error('Startup capture binding could not be confirmed.');
       const actual = this.el('section', 'ca-startup-evidence');
       actual.append(this.el('h3', '', data.startup.status === 'captured' ? 'Captured startup report' : 'Startup capture unavailable'),
@@ -6486,10 +6486,10 @@ class ReverieChatApp {
       const renderReport = (label, report) => {
         if (!validReport(report)) return;
         const block = this.el('section', 'ca-startup-reported');
-        const sameBinding = report.sessionId === data.sessionId && report.sessionGeneration === data.sessionGeneration;
+        const sameBinding = report.sessionId === data.sessionId && report.sessionGeneration === data.sessionGeneration && report.runtimeBinding === data.runtimeBinding;
         block.append(this.literalText('h3', '', label),
           this.literalText('p', 'ca-hint', `Stage ${report.stage} · Session ${report.sessionId} · Generation ${report.sessionGeneration} · Reported ${new Date(report.reportedAt).toLocaleString()}`),
-          this.literalText('p', 'ca-hint', sameBinding ? 'This report names the current session binding.' : 'This report names another session binding. It is not the current session’s captured startup.'),
+          this.literalText('p', 'ca-hint', sameBinding ? 'This report names the current session binding.' : 'This report names another session binding or runtime incarnation. It is not the current session’s captured startup.'),
           this.el('p', 'ca-hint', 'Harness-reported input does not independently establish provider consumption. Retained for this website process only; a website restart clears the report.'));
         const text = this.el('textarea', 'ca-field ca-startup-preview'); text.readOnly = true; text.rows = 8; text.value = report.context; text.setAttribute('aria-label', label);
         block.append(text, this.button('ca-btn', `Copy ${label}`, async () => {

@@ -48,9 +48,13 @@ def _is_idle_user_text(text: str) -> bool:
 class Brain:
     """Everything the daemon knows how to do, without the polling loop (so tests can drive it)."""
 
-    def __init__(self, cfg: Config, store: MemoryStore, client: ChatClient, room: Room):
+    def __init__(self, cfg: Config, store: MemoryStore, client: ChatClient, room: Room,
+                 seed_beliefs: Sequence[tuple[str, float]] = ()):
         self.cfg = cfg
         self.store = store
+        # A configured self-document is not implicitly a protected-belief seed.
+        # Only an explicit caller-selected seed list initializes that separate table.
+        ensure_seeded(store, seed_beliefs)
         self.client = client
         self.room = room
         self.reflector = Reflector(
@@ -227,7 +231,8 @@ class Brain:
 
 
 class ChatDaemon:
-    def __init__(self, cfg: Config | None = None, brain: Brain | None = None):
+    def __init__(self, cfg: Config | None = None, brain: Brain | None = None,
+                 seed_beliefs: Sequence[tuple[str, float]] = ()):
         self.cfg = cfg or Config()
         self.cfg.ensure_dirs()
         self.log = setup(self.cfg.log_path, stderr=sys.stderr.isatty())
@@ -240,20 +245,21 @@ class ChatDaemon:
             n = store.reembed_all()
             if n:
                 self.log.info("re-embedded %d memories with %s", n, embedder.name)
+            fresh_beliefs = not store.beliefs()
+            for b in ensure_seeded(store, seed_beliefs):
+                self.log.info("seeded owner-selected belief #%d", b.id)
             if self.cfg.instance:
                 from .reverie import Reverie
                 initial = initial_self_for(self.cfg.instance)
                 reverie = Reverie(store, initial)
-                if reverie.self_model()["revision"] == 0:
+                if reverie.self_model()["revision"] == 0 and fresh_beliefs:
                     reverie.save_self(initial, "Owner-selected initial instance identity", 0)
-            for b in ensure_seeded(store):
-                self.log.info("seeded belief #%d: %s", b.id, b.text)
             imported = migrate_history(store, self.cfg.legacy_history, self.cfg.default_importance)
             if imported:
                 self.log.info("imported %d legacy exchanges from %s", imported, self.cfg.legacy_history)
             client = ChatClient(self.cfg.api_base, self.cfg.model, self.cfg.request_timeout)
             room = Room(self.cfg.session_id, self.cfg.hold_path, legacy_hold_path=self.cfg.legacy_hold_path)
-            brain = Brain(self.cfg, store, client, room)
+            brain = Brain(self.cfg, store, client, room, seed_beliefs=seed_beliefs)
             if not self.cfg.profile_path.exists():
                 brain.reflector.refresh_profile()
         self.brain = brain

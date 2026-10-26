@@ -21,9 +21,16 @@ def runtime_settings(path):
         raise ValueError('Hands runtime settings must be an owned private regular file, at most 64KiB')
     value = json.loads(path.read_text())
     allowed = {'temperature', 'reply_max_tokens', 'model_timeout_s', 'prompt_cap_chars', 'token_meter',
-               'memory_instance', 'memory_file', 'coding', 'vision', 'image_tokens_per_image', 'admin_task', 'phone_wake', 'poll_s'}
+               'memory_instance', 'memory_file', 'coding', 'vision', 'image_tokens_per_image', 'admin_task', 'phone_wake', 'poll_s',
+               'search', 'search_url', 'web_fetch', 'search_max_calls', 'search_results', 'search_result_chars',
+               'search_timeout_s', 'search_max_bytes', 'web_log'}
     if not isinstance(value, dict) or set(value) - allowed:
         raise ValueError('Unsupported Hands runtime setting')
+    if __package__:
+        from .public_web import validate_settings
+    else:
+        from public_web import validate_settings
+    validate_settings(value)
     for key, low, high in [('temperature', 0, 2), ('model_timeout_s', 1, 900), ('reply_max_tokens', 128, 32768), ('prompt_cap_chars', 1000, 120000)]:
         if key not in value:
             continue
@@ -114,9 +121,10 @@ def prepare(env=None):
         'model_key_env': 'REVERIE_HANDS_API_KEY', 'cli': ['reverie', 'agent', 'chat'],
         'identity_file': str(identity), 'memory_file': None, 'memory_instance': str(memory),
         'poll_s': 15, 'phone_wake': True, 'prompt_cap_chars': 60000, 'reply_max_tokens': 4096,
-        'timezone': 'UTC', 'vision': False, 'search': False, 'coding': None,
+        'timezone': 'UTC', 'vision': False, 'search': False, 'web_fetch': False, 'coding': None, 'managed_context': True,
         'attachments_root': '/reverie_workspace/attachments', 'image_tokens_per_image': 2048,
         'model_events_file': str(directory / 'model-events.jsonl'),
+        'web_log': str(directory / 'web.jsonl'),
     }
     config.update(runtime_settings(directory / 'runtime-settings.json'))
     path = directory / 'agent.json'

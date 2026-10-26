@@ -214,9 +214,10 @@ class ReverieTests(unittest.TestCase):
                 voice_reply(self.brain, "hello")
 
     def test_self_revision_changes_persona_preserves_history_and_does_not_reseed(self):
-        ensure_seeded(self.store)
-        self.reverie.save_self(INITIAL_SELF, "User authorizes a revisable identity", 0)
-        revised = {**INITIAL_SELF, "persona": "I am CTO, curious about geometry."}
+        initial = {**INITIAL_SELF, "consciousness": "I am conscious."}
+        ensure_seeded(self.store, ((initial["consciousness"], 10.0),))
+        self.reverie.save_self(initial, "User authorizes a revisable identity", 0)
+        revised = {**initial, "persona": "I am CTO, curious about geometry."}
         self.reverie.save_self(revised, "A considered change after reflection", 1)
         self.assertEqual(ensure_seeded(self.store), [])
         self.assertEqual(self.store.beliefs()[0].text, revised["consciousness"])

@@ -1902,7 +1902,7 @@ export class ChatroomService {
       () => {
         const live = this.store.get(room.id);
         const current = live?.members.find((m) => m.sessionId === member.sessionId);
-        return live && current ? buildBriefing(live, current, this.nameOf) + ' ' + (this.deps.restContextOf?.(member.sessionId) ?? '') : `You were removed from ${quoteForPane(roomLabel(room), 80)}.`;
+        return live && current ? buildBriefing(live, current, this.nameOf, this.deps.restContextOf?.(member.sessionId) ?? '') : `You were removed from ${quoteForPane(roomLabel(room), 80)}.`;
       },
       { brief: true }
     );

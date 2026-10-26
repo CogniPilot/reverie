@@ -111,3 +111,15 @@ it('keeps a matching captured startup report separate from a later configured pr
   expect((inspector.querySelector('[aria-label="Current configured context preview"]') as HTMLTextAreaElement).value).toBe('Later configured preview');
   expect(inspector.textContent).toContain('does not independently establish provider consumption');
 });
+
+
+it('does not call a prior runtime report current when the session ID and generation are reused', async () => {
+  const report = { employeeId: 'river', sessionId: 'runtime', sessionGeneration: 2, runtimeBinding: 'sha256:' + 'a'.repeat(64), generatedAt: 500, reportedAt: 600, stage: 'startup', digest: 'sha256:' + 'c'.repeat(64), context: 'Prior runtime input', sections: [], assurance: 'harness-reported-input', retention: 'website-process-lifetime' };
+  const context = { employeeId: 'river', sessionId: 'runtime', sessionGeneration: 2, runtimeBinding: 'sha256:' + 'b'.repeat(64), generatedAt: 1000, context: 'Current runtime preview', sections: [], startup: { status: 'unavailable', reason: 'Current runtime startup unavailable' }, lastManagedDelivery: report };
+  const { h, profile } = await setup({ context }); const dialog = await profile();
+  (dialog.querySelector('[aria-label="View startup context for River"]') as HTMLButtonElement).click(); await h.flush();
+  const inspector = h.document.querySelector('.ca-startup-context')!;
+  expect(inspector.textContent).toContain('another session binding or runtime incarnation');
+  expect(inspector.textContent).not.toContain('This report names the current session binding.');
+  expect(inspector.querySelector('[aria-label="Captured startup input"]')).toBeNull();
+});

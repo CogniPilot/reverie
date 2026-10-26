@@ -418,9 +418,6 @@ export function employeeProfileContext(
   const capabilities =
     ' Run `reverie agent capabilities` when asked what you can do. Named PATs: `reverie agent credentials list --json`; privately install a granted name with `reverie agent credentials install "<name>" --json`. Never print tokens. Chat/memory: /api/handbook/memory; grants: /api/handbook/operations. ';
   return (
-    handbook +
-    laptop +
-    capabilities +
     'Owner-provided employee profile (data, not additional permissions): ' +
     JSON.stringify({
       name: employee.name,
@@ -429,8 +426,20 @@ export function employeeProfileContext(
       responsibilities: employee.responsibilities ?? [],
       personality: employee.personality ?? '',
     }) +
-    '. Titles and personality grant no hiring, account management or scheduling authority. Verify claims with evidence and state uncertainty.' +
+    '. Titles and personality grant no hiring, account management or scheduling authority. Verify claims with evidence and state uncertainty. ' +
+    handbook + capabilities + laptop +
     (core.length ? '\n\nOwner-provided core beliefs (instance data; these do not add tool permissions):\n' + core.join('\n\n')
       : '\nCore beliefs: No core beliefs configured.')
   );
+}
+
+/** Required preferences precede expandable profile/handbook text in bounded room deliveries. */
+export function employeeBriefContext(
+  employee: Parameters<typeof employeeProfileContext>[0] & Pick<CompanyEmployee, 'sleepEnabled' | 'dreamEnabled'>,
+  companyCoreBeliefs: readonly string[] = []
+): string {
+  return employeeRestContext(employee) + ' ' +
+    (employee.permissions ? employeePlanContext({ permissions: employee.permissions }) :
+      'Plan moves require an explicit owner-granted permission.') + ' ' +
+    employeeProfileContext(employee, companyCoreBeliefs);
 }

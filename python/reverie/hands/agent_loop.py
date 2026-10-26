@@ -55,6 +55,8 @@ from coding_model_client import ModelClient
 from debug_terminal import DebugTerminal
 from attention_wake import AttentionWake, wait_for_scan
 import scoped_images
+import public_web
+import managed_context
 
 _terminal = None
 
@@ -78,7 +80,7 @@ FAIL_LINE = "I searched but couldn't put together an answer from the results. Pl
 CHAT_FAIL_LINE = "I couldn't finish a usable answer. Please ask me to try again."
 CHAT_LIMIT_LINE = "I reached my response limit before finishing. Please ask me to continue."
 # Tool-call markup written as text (Qwen/Hermes tags, function tags, a JSON call). A reply containing any is unusable.
-MARKUP = re.compile(r'</?tool_call\b|<\|tool_call|<function[=\s>]|<parameter[=\s>]|"name"\s*:\s*"web_search"', re.I)
+MARKUP = re.compile(r'</?tool_call\b|<\|tool_call|<function[=\s>]|<parameter[=\s>]|"name"\s*:\s*"web_(?:search|fetch)"', re.I)
 RECENT_LABEL = 'Recent messages in this room (oldest first):\n'
 ANSWER_LABEL = 'Answer this message:\n'
 IMAGE_MAGIC = {'image/png': (b'\x89PNG\r\n\x1a\n',), 'image/jpeg': (b'\xff\xd8\xff',), 'image/gif': (b'GIF87a', b'GIF89a'),
@@ -220,6 +222,7 @@ def chat_model(cfg, messages, tools=None):
     client = ModelClient(cfg['api_base'], key_env=cfg.get('model_key_env'), timeout_s=cfg['model_timeout_s'],
                          token_meter=meter, events_file=cfg.get('model_events_file'),
                          token_meter_optional=True)
+    managed_context.report(cfg)
     return client(req_body, cfg['model_timeout_s'])
 
 
@@ -238,7 +241,7 @@ def searxng_search(cfg, query):
     return '\n'.join(lines) or '(no results)'
 
 
-def log_web(cfg, room, mid, query):
+def log_web(cfg, room, mid, query, tool='web_search'):
     """Append one search to the web log (time, room, message, query), like the OpenCode plugin's web log.
 
     The log holds search queries, so it is owner-only: created 0600, and an existing log that others can read is set
@@ -260,7 +263,7 @@ def log_web(cfg, room, mid, query):
         raise
     with f:
         f.write(json.dumps({'at': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()), 'room': room, 'msg': mid,
-                            'tool': 'web_search', 'query': query}) + '\n')
+                            'tool': tool, 'query': query}) + '\n')
 
 
 def wakes(cfg, room, msg, history=()):
@@ -441,7 +444,7 @@ SUMMARY_UNAVAILABLE = 'Pending-message snapshot unavailable; pending status is u
 SUMMARY_CAP = 3000
 
 
-def turn_context(cfg, messages, tools_chars=0):
+def pending_context(cfg, messages, tools_chars=0):
     """Refresh an ephemeral snapshot for each request, without retaining it in history."""
     available = min(SUMMARY_CAP, cfg['prompt_cap_chars'] - request_chars(messages) - tools_chars)
     try:
@@ -464,12 +467,18 @@ def turn_context(cfg, messages, tools_chars=0):
     return messages[:2] + [snapshot] + messages[2:]
 
 
+def turn_context(cfg, messages, tools_chars=0):
+    request = pending_context(cfg, messages, tools_chars)
+    return managed_context.inject(cfg, request, tools_chars, request_chars)
+
+
 def search_reserve(cfg):
     """The most text the search rounds of one answer can add: per round, the model's step text, the call passed back
     and the framed result, all capped in answer(); plus the one finishing note. 0 with search off."""
-    if not cfg.get('search'):
+    if not (cfg.get('search') or cfg.get('web_fetch')):
         return 0
-    step = STEP_TEXT_CAP + 2 * CALL_ID_CAP + CALL_NAME_CAP + ARGS_CAP + len(TOOL_FRAME) + cfg['search_result_chars']
+    args = max(ARGS_CAP, 2 * public_web.URL_CAP + 16) if cfg.get('web_fetch') else ARGS_CAP
+    step = STEP_TEXT_CAP + 2 * CALL_ID_CAP + CALL_NAME_CAP + args + len(TOOL_FRAME) + cfg['search_result_chars']
     return cfg['search_max_calls'] * step + FINAL_RESERVE
 
 
@@ -537,6 +546,21 @@ def tool_query(call):
     return q or None
 
 
+def tool_url(call):
+    fn = (call or {}).get('function') or {}
+    if fn.get('name') != 'web_fetch': return None
+    args = fn.get('arguments')
+    if isinstance(args, str):
+        if len(args) > 2 * public_web.URL_CAP + 128: return None
+        try: args = json.loads(args)
+        except ValueError: return None
+    if not isinstance(args, dict) or set(args) != {'url'}: return None
+    url = args['url']
+    try: public_web.target(url)
+    except (ValueError, TypeError, UnicodeError): return None
+    return url
+
+
 def usable(out):
     """The reply text of a model message, or None if it is not an answer: empty after the thinking is removed, or
     holding tool-call markup. Structured tool calls on the message are ignored here (never run)."""
@@ -544,7 +568,7 @@ def usable(out):
     return reply if reply and '<think>' not in reply and '</think>' not in reply and not MARKUP.search(reply) else None
 
 
-def answer(cfg, room, history, msg, model, search, timing=None, recalled=""):
+def answer(cfg, room, history, msg, model, search, timing=None, recalled="", fetch=public_web.fetch):
     """Prompt -> (optional web_search steps) -> reply text. Returns (reply, request_chars, searches), where
     request_chars is the largest request actually sent.
 
@@ -558,9 +582,10 @@ def answer(cfg, room, history, msg, model, search, timing=None, recalled=""):
     start_task = cfg.get('_admin_start_task')
     task_reserve = len(admin_task.RULE) + len(json.dumps(admin_task.TOOL)) if start_task is not None else 0
     summary_reserve = min(SUMMARY_CAP, cfg['prompt_cap_chars'] // 10) if cfg.get('cli') or callable(cfg.get('_turn_summary')) else 0
+    managed_reserve = min(20000, cfg['prompt_cap_chars'] // 3) if cfg.get('managed_context') else 0
     reserve = search_reserve(cfg) + task_reserve
     try:
-        messages, _ = build_prompt(cfg, history, msg, room, reserve=reserve + summary_reserve, recalled=recalled)
+        messages, _ = build_prompt(cfg, history, msg, room, reserve=reserve + summary_reserve + managed_reserve, recalled=recalled)
     except ValueError:
         # Optional pending context cannot displace required instructions or the current request.
         messages, _ = build_prompt(cfg, history, msg, room, reserve=reserve, recalled=recalled)
@@ -568,11 +593,11 @@ def answer(cfg, room, history, msg, model, search, timing=None, recalled=""):
         messages[0]['content'] += '\n' + admin_task.RULE
     searches = largest = 0
     finishing = 0  # finishing calls made (0, 1 or 2)
-    searching = bool(cfg.get('search'))
+    searching = bool(cfg.get('search') or cfg.get('web_fetch'))
 
     def ask(tools):
         nonlocal largest
-        tools_chars = len(json.dumps(tools)) if start_task is not None and tools else 0
+        tools_chars = len(json.dumps(tools)) if (start_task is not None or cfg.get('web_fetch')) and tools else 0
         request = turn_context(cfg, messages, tools_chars)
         size = request_chars(request) + tools_chars
         if size > cfg['prompt_cap_chars']:
@@ -598,7 +623,8 @@ def answer(cfg, room, history, msg, model, search, timing=None, recalled=""):
             break
         if searches >= cfg['search_max_calls']:
             break  # budget spent: finish without tools
-        out = ask([SEARCH_TOOL] + ([admin_task.TOOL] if start_task is not None else []))
+        tools = ([SEARCH_TOOL] if cfg.get('search') else []) + ([public_web.TOOL] if cfg.get('web_fetch') else [])
+        out = ask(tools + ([admin_task.TOOL] if start_task is not None else []))
         task_reply = admin_task.invoke(out, start_task)
         if task_reply is not None:return task_reply, largest, searches
         calls = out.get('tool_calls') or []
@@ -607,33 +633,40 @@ def answer(cfg, room, history, msg, model, search, timing=None, recalled=""):
                 return (WEB_MARK if searches else '') + usable(out), largest, searches
             break  # empty or markup: finish without tools, never run the markup
         call = calls[0] if isinstance(calls[0], dict) else {}  # one call per step; others are dropped, never answered
-        query = tool_query(call)
+        query = tool_query(call) if cfg.get('search') else None
+        url = tool_url(call) if cfg.get('web_fetch') else None
+        selected_tool = 'web_fetch' if url else 'web_search'
         t0 = time.monotonic()
-        if query is None:
-            result = 'Error: only web_search with a non-empty "query" string is available.'
+        if query is None and url is None:
+            result = 'Error: request one configured web tool with its exact argument.'
         else:
             try:
-                log_web(cfg, room, msg.get('id'), query)
+                if url: log_web(cfg, room, msg.get('id'), url, tool='web_fetch')
+                else: log_web(cfg, room, msg.get('id'), query)
             except OSError as e:
                 log('web log failed, search not run', room, msg.get('id'), repr(e)[:200])
                 result = 'Search unavailable: the search log could not be written.'
             else:
                 try:
-                    result = search(cfg, query)
+                    result = fetch(url) if url else search(cfg, query)
                 except Exception as e:
-                    result = 'Search failed: ' + repr(e)[:200]
+                    result = 'Public web read unavailable.' if url else 'Search failed: ' + repr(e)[:200]
         if timing is not None:
             timing.append(('search', round(time.monotonic() - t0, 2), None))
         searches += 1
         # Only capped, rebuilt parts go back to the model, so each round adds at most what search_reserve() counts.
         fn = call.get('function') if isinstance(call.get('function'), dict) else {}
         sent = {'id': str(call.get('id') or 'call0')[:CALL_ID_CAP], 'type': 'function',
-                'function': {'name': 'web_search' if query else str(fn.get('name') or '?')[:CALL_NAME_CAP],
-                             'arguments': json.dumps({'query': query}, ensure_ascii=False) if query else '{}'}}
+                'function': {'name': selected_tool if query or url else str(fn.get('name') or '?')[:CALL_NAME_CAP],
+                             'arguments': json.dumps({'url': url} if url else {'query': query}, ensure_ascii=False) if query or url else '{}'}}
         step_text = THINK.sub('', out.get('content') or '').strip()[:STEP_TEXT_CAP]
         messages.append({'role': 'assistant', 'content': step_text, 'tool_calls': [sent]})
+        result_cap = cfg['search_result_chars']
+        if len(result) > result_cap:
+            suffix = '\n[Web result truncated; omitted content is unknown.]'
+            result = result[:max(0, result_cap - len(suffix))] + suffix
         messages.append({'role': 'tool', 'tool_call_id': sent['id'],
-                         'content': TOOL_FRAME + result[: cfg['search_result_chars']]})
+                         'content': TOOL_FRAME + result[:result_cap]})
     if not searching:
         if out.get('_context_overflow'):
             return 'This conversation exceeds my current context budget. Please narrow the question.', largest, searches
@@ -948,14 +981,14 @@ def terminal_prompt(cfg, text, history, model=chat_model, search=searxng_search)
 
 
 DEFAULTS = {
-    'memory_instance': None, 'recall_cap_chars': 3000, 'memory_timeout_s': 3,
+    'memory_instance': None, 'recall_cap_chars': 3000, 'memory_timeout_s': 3, 'managed_context': False,
     'history_n': 30, 'poll_s': 15, 'phone_wake': False, 'prompt_cap_chars': 60000, 'identity_cap_chars': 6000,
     'memory_cap_chars': 12000, 'message_cap_chars': 4000, 'reply_max_tokens': 1024, 'reply_cap_chars': 6000,
     'model_timeout_s': 300, 'cli_timeout_s': 60, 'max_answers_per_tick': 3, 'dm_rooms': [],
     'timezone': 'America/New_York',
     'vision': False, 'attachments_root': None, 'max_images': 2,
     'max_image_bytes': 5_000_000, 'max_rooms': 32,
-    'search': False, 'search_url': None, 'search_max_calls': 2, 'search_results': 5, 'search_result_chars': 4000,
+    'search': False, 'search_url': None, 'web_fetch': False, 'search_max_calls': 2, 'search_results': 5, 'search_result_chars': 4000,
     'search_timeout_s': 20, 'search_max_bytes': 2_000_000, 'web_log': None,
     'coding': None, 'memory_worker_name': 'agent_memory_worker.py',
     'model_key_env': None,
@@ -967,6 +1000,7 @@ DEFAULTS = {
 def load_config(path):
     cfg = dict(DEFAULTS)
     cfg.update(load_json(path, None) or {})
+    public_web.validate_settings(cfg)
     cfg['_config_path'] = os.path.abspath(path)
     for k in ('rooms', 'self_session_id', 'self_name', 'state_file', 'api_base', 'model', 'cli'):
         if not cfg.get(k):

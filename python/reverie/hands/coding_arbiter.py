@@ -8,7 +8,8 @@ from coding_process import BoundedProcess
 
 class ModelArbiter:
     def __init__(self, api_base, *, key_env=None, timeout_s=300, max_response_bytes=262144,
-                 token_meter=None, events_file=None, process_factory=BoundedProcess, clock=time.monotonic):
+                 token_meter=None, events_file=None, process_factory=BoundedProcess, clock=time.monotonic,
+                 prepare_request=None):
         self.api_base = api_base
         self.key_env = key_env
         self.timeout_s = timeout_s
@@ -25,23 +26,36 @@ class ModelArbiter:
         self.requests_started = 0
         self.watchdog_events = []
         self.epoch = 0
+        self.prepare_request = prepare_request
+        self.preparation_error = None
 
     def submit(self, payload, remaining):
         if self.pending is not None:
             raise RuntimeError('model slot already has a coding request')
         self.pending = payload
+        self.preparation_error = None
         self.deadline = self.clock() + remaining
         if not self.paused:
             self.start()
 
     def start(self):
+        if self.deadline - self.clock() <= 0:
+            return
+        payload = self.pending
+        if self.prepare_request is not None:
+            try:
+                payload = self.prepare_request(payload)
+                if not isinstance(payload, dict): raise ValueError('Invalid prepared request')
+            except Exception:
+                self.preparation_error = 'model_context_unavailable'
+                return
         remaining = self.deadline - self.clock()
         if remaining <= 0:
             return
         self.epoch += 1
         config = {'api_base': self.api_base, 'key_env': self.key_env,
                   'timeout_s': min(self.timeout_s, remaining), 'max_response_bytes': self.max_response_bytes,
-                  'payload': self.pending, 'token_meter': self.token_meter, 'epoch': self.epoch,
+                  'payload': payload, 'token_meter': self.token_meter, 'epoch': self.epoch,
                   'events_file': self.events_file}
         environment = {'PATH': os.defpath, 'LANG': 'C.UTF-8'}
         if self.key_env is not None and self.key_env in os.environ:
@@ -63,12 +77,16 @@ class ModelArbiter:
 
     def resume(self):
         self.paused = False
-        if self.pending is not None and self.job is None:
+        if self.pending is not None and self.job is None and not self.preparation_error:
             self.start()
 
     def poll(self):
         if self.pending is None:
             return None
+        if self.preparation_error:
+            error = self.preparation_error
+            self.pending, self.job, self.preparation_error = None, None, None
+            return {'ok': False, 'error': error}
         if self.clock() >= self.deadline:
             self.cancel()
             return {'ok': False, 'error': 'model_deadline'}

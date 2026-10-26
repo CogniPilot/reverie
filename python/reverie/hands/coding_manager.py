@@ -12,6 +12,7 @@ from coding_process import BoundedProcess
 from coding_tasks import (Limits, begin_request, checked_result, control_request,
                           encoded, permitted_sender, reserve_chars)
 from coding_worker import CodingWorker
+import managed_context
 
 
 class TaskManager:
@@ -161,16 +162,30 @@ class TaskManager:
         meter = copy.deepcopy(job['settings'].get('token_meter'))
         if meter is not None and self.cfg.get('vision'):
             meter['image_tokens_per_image'] = self.cfg.get('image_tokens_per_image', 2048)
+        context_options = {'prepare_request': self.prepare_model_request} if self.cfg.get('managed_context') else {}
         job['arbiter'] = self.arbiter_factory(self.cfg['api_base'], key_env=self.cfg.get('model_key_env'),
                                              timeout_s=min(self.cfg['model_timeout_s'], 300),
                                              token_meter=meter,
-                                             events_file=self.cfg.get('model_events_file'))
+                                             events_file=self.cfg.get('model_events_file'), **context_options)
         options = {'model': self.cfg['model'], 'max_tokens': self.cfg['reply_max_tokens'], 'stream': False}
         if 'temperature' in self.cfg:
             options['temperature'] = self.cfg['temperature']
         job['worker'] = self.worker_factory(job['messages'], job['tools'], replace(job['limits'], seconds=remaining),
             options, epoch=job['epoch'])
         return True
+
+    def prepare_model_request(self, payload):
+        """Also runs on resume after preemption. Current authorization follows every context IO."""
+        cfg = dict(self.cfg, prompt_cap_chars=min(self.cfg['prompt_cap_chars'], self.active['limits'].prompt_chars))
+        request = dict(payload)
+        request['messages'] = managed_context.inject(cfg, payload['messages'],
+            len(json.dumps(payload.get('tools') or [])), self.loop.request_chars)
+        self.cfg['_managed_context_started'] = cfg['_managed_context_started']
+        managed_context.report(cfg)
+        if cfg.get('_managed_context_reported'): self.cfg['_managed_context_reported'] = True
+        denied = self.authorization()
+        if denied: raise ValueError('Current coding authorization refused')
+        return request
 
     def pump(self):
         try:
