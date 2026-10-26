@@ -5,12 +5,38 @@ from .ops_common import *
 from .ops_core import evidence
 from .worker_storage import read_metadata
 
+def program_path(binary):
+ """Root-trusted executable only; DATA continues to use private_directory/read.
+
+ A multi-user Nix store may be root-owned 1775. Sticky ownership protects an
+ existing root-owned output name, whose entire subtree must remain immutable.
+ No other writable ancestor receives this exception, and symlinks are refused.
+ """
+ p=Path(binary);store=Path('/nix/store')
+ try:
+  require(p.is_absolute() and p==Path(os.path.normpath(str(p))) and p.resolve(strict=True)==p
+          and not any(ord(c)<32 or ord(c)==127 for c in str(p)),'custody-invalid')
+  nix=p.is_relative_to(store)
+  if nix:
+   parts=p.relative_to(store).parts
+   require(len(parts)>=2 and re.fullmatch(r'[0-9abcdfghijklmnpqrsvwxyz]{32}-[A-Za-z0-9+._?=-]+',parts[0]),'custody-invalid')
+   output=store/parts[0]
+  for part in [*reversed(p.parents),p]:
+   info=part.lstat()
+   require(info.st_uid==0 and not stat.S_ISLNK(info.st_mode),'custody-invalid')
+   require(stat.S_ISREG(info.st_mode) if part==p else stat.S_ISDIR(info.st_mode),'custody-invalid')
+   if nix and part==store:
+    require(not info.st_mode&0o022 or stat.S_IMODE(info.st_mode)==0o1775,'custody-invalid')
+   else:
+    require(not info.st_mode&(0o222 if nix and part.is_relative_to(output) else 0o022),'custody-invalid')
+  require(p.lstat().st_mode&0o111,'custody-invalid')
+ except OSError:
+  raise Refusal('custody-invalid') from None
+ return p
+
 class Engine:
  def __init__(self,binary,socket,config_directory):
-  p=Path(binary);require(p.is_absolute() and p.resolve()==p and stat.S_ISREG(p.stat().st_mode) and p.stat().st_uid in (0,os.getuid()) and not p.stat().st_mode&0o022,'custody-invalid')
-  for directory in [*reversed(p.parents),p.parent]:
-   info=directory.stat();require(info.st_uid==0 and not info.st_mode&0o022,'custody-invalid')
-  require(p.stat().st_uid==0,'custody-invalid')
+  p=program_path(binary)
   self.local=threading.local()
   self.prefix=[str(p),'--config',str(private_directory(config_directory)),'--host','unix://'+str(Path(socket))]
   require(not any(Path(config_directory).iterdir()),'custody-invalid')

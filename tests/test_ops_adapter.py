@@ -1,8 +1,10 @@
 """Concrete fixed adapter with an injected engine; never invokes a real engine."""
-import contextlib,copy,hashlib,os,tempfile,unittest,uuid
+import contextlib,copy,hashlib,os,stat,sys,tempfile,unittest,uuid
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
 from reverie.ops_common import *
-from reverie.ops_adapter import DockerWebsite
+from reverie.ops_adapter import DockerWebsite,Engine as NativeEngine,program_path
 from reverie.ops_classifier import WorkerClassifier,method_source
 class Engine:
  def __init__(self):self.calls=[];self.webpid=100;self.started='first';self.code=0;self.drop=False;self.names=[];self.diag_match=True
@@ -52,4 +54,57 @@ class Adapter(unittest.TestCase):
   with self.assertRaises(Refusal):DockerWebsite(dict(self.cfg,argv=['unsafe']),self.engine,self.company,os.getuid())
   cfg=copy.deepcopy(self.cfg);cfg['readiness']['host']='outside.example'
   with self.assertRaises(Refusal):DockerWebsite(cfg,self.engine,self.company,os.getuid())
+
+class ProgramCustody(unittest.TestCase):
+ def setUp(self):
+  self.temp=tempfile.TemporaryDirectory();self.addCleanup(self.temp.cleanup);self.root=Path(self.temp.name).resolve()
+ def test_actual_root_owned_nix_program_admits_without_running_engine(self):
+  binary=Path(sys.executable).resolve()
+  if not binary.is_relative_to('/nix/store') or binary.lstat().st_uid!=0 or Path('/nix/store').lstat().st_uid!=0:
+   self.skipTest('actual multi-user root-owned Nix runtime unavailable; single-user stores intentionally refuse')
+  directory=self.root/'empty-engine-config';directory.mkdir(mode=0o700)
+  with patch('reverie.ops_adapter.subprocess.Popen',side_effect=AssertionError('constructor must not execute')):
+   engine=NativeEngine(str(binary),'/run/fixture-engine.sock',str(directory))
+  self.assertEqual(engine.prefix[0],str(binary));self.assertEqual(list(directory.iterdir()),[])
+ def test_real_owned_or_writable_program_and_symlink_refuse(self):
+  binary=self.root/'program';binary.write_text('#!/bin/sh\nexit 0\n');binary.chmod(0o777)
+  link=self.root/'link';link.symlink_to(Path(sys.executable).resolve())
+  for p in [binary,link]:
+   with self.subTest(path=p),self.assertRaises(Refusal):program_path(p)
+ def model(self,path,changes):
+  """Synthetic root metadata admits no host state or authority."""
+  leaf=Path(path);table={str(p):SimpleNamespace(st_uid=0,st_mode=(stat.S_IFREG|0o555 if p==leaf else stat.S_IFDIR|0o555)) for p in [*leaf.parents,leaf]}
+  if '/nix/store' in table:table['/nix/store']=SimpleNamespace(st_uid=0,st_mode=stat.S_IFDIR|0o1775)
+  table.update({str(k):SimpleNamespace(st_uid=uid,st_mode=mode) for k,(uid,mode) in changes.items()})
+  with patch.object(Path,'resolve',lambda p,strict=False:p),patch.object(Path,'lstat',lambda p:table[str(p)]):
+   return program_path(leaf)
+ def test_protected_sticky_store_is_only_writable_ancestor_exception(self):
+  p=Path('/nix/store/'+'a'*32+'-fixture/bin/engine');self.assertEqual(self.model(p,{}),p)
+  for mode in [0o775,0o777,0o1777]:
+   with self.subTest(mode=mode),self.assertRaises(Refusal):self.model(p,{'/nix/store':(0,stat.S_IFDIR|mode)})
+  with self.assertRaises(Refusal):self.model(p,{'/nix/store':(os.getuid()+1,stat.S_IFDIR|0o1775)})
+  outside=Path('/opt/programs/engine')
+  with self.assertRaises(Refusal):self.model(outside,{'/opt/programs':(0,stat.S_IFDIR|0o1775)})
+ def test_regular_root_owned_distro_program_keeps_existing_admission(self):
+  p=Path('/usr/bin/engine')
+  changes={part:(0,(stat.S_IFREG if part==p else stat.S_IFDIR)|0o755) for part in [*p.parents,p]}
+  self.assertEqual(self.model(p,changes),p)
+ def test_forged_output_writable_child_foreign_owner_and_symlinks_refuse(self):
+  base=Path('/nix/store/'+'a'*32+'-fixture');p=base/'bin/engine'
+  cases=[{base:(os.getuid()+1,stat.S_IFDIR|0o555)},
+         {base:(0,stat.S_IFDIR|0o755)},
+         {base/'bin':(0,stat.S_IFDIR|0o775)},
+         {base/'bin':(0,stat.S_IFLNK|0o777)},
+         {p:(0,stat.S_IFREG|0o777)},
+         {p:(0,stat.S_IFREG|0o444)},
+         {p:(0,stat.S_IFLNK|0o777)}]
+  for change in cases:
+   with self.subTest(change=change),self.assertRaises(Refusal):self.model(p,change)
+  with self.assertRaises(Refusal):self.model('/nix/store/not-an-output/bin/engine',{})
+ def test_program_exception_does_not_apply_to_private_data(self):
+  directory=self.root/'data';directory.mkdir(mode=0o700);directory.chmod(0o1775)
+  self.assertEqual(stat.S_IMODE(directory.stat().st_mode),0o1775)  # Independent of the discovery runner's umask.
+  with self.assertRaises(Refusal):private_directory(directory)
+  directory.chmod(0o700);file=directory/'key';file.write_bytes(b'fixture');file.chmod(0o644)
+  with self.assertRaises(Refusal):private_read(file)
 if __name__=='__main__':unittest.main()

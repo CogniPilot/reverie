@@ -46,6 +46,11 @@ describe('GET /board (page)', () => {
 });
 
 describe('shipped Board page', () => {
+  it('refreshes the visible Board every ten seconds', () => {
+    const html = readFileSync(join(__dirname, '..', 'src', 'web', 'public', 'board.html'), 'utf8');
+    expect(html).toContain('setInterval(() => { if (!document.hidden) load(); }, 10e3)');
+    expect(html).toContain("addEventListener('focus'");
+  });
   it('keeps its script parse check after plans move into Company', () => {
     const html = readFileSync(join(__dirname, '..', 'src', 'web', 'public', 'board.html'), 'utf8');
     const script = /<script>([\s\S]*)<\/script>/.exec(html)?.[1] ?? '';
