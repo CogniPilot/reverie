@@ -426,6 +426,21 @@ export interface AgentDeps {
   now?: () => number;
 }
 
+/** Shared thin client for model-context hooks; successful reads never consume delivery. */
+export async function agentChatSummary(deps: AgentDeps, hookEvent?: string): Promise<number> {
+  if (hookEvent && !['SessionStart', 'UserPromptSubmit', 'PostToolUse'].includes(hookEvent))
+    return fail(deps, 'Unsupported summary hook event');
+  const result = await deps.request(deps.ctx, { method: 'GET', path: '/api/chatrooms/turn-summary', timeoutMs: 2000 });
+  const data = result.json?.data as { text?: unknown } | undefined;
+  if (!result.json?.success || typeof data?.text !== 'string' || data.text.length > 3000)
+    return fail(deps, 'Pending message summary unavailable');
+  if (hookEvent) {
+    deps.io.out(JSON.stringify({ hookSpecificOutput: { hookEventName: hookEvent, additionalContext: data.text } }));
+  } else if (deps.json) emitJson(deps, data);
+  else if (data.text) deps.io.out(data.text);
+  return 0;
+}
+
 /** Print `data` as JSON (the `--json` path) — always the envelope's `data`, never a reshaped copy. */
 function emitJson(deps: AgentDeps, data: unknown): void {
   deps.io.out(JSON.stringify(data, null, 2));
@@ -2538,6 +2553,15 @@ export function registerAgentCommands(program: Command): Command {
   const chat = agent
     .command('chat')
     .description('Talk in the Reverie chatroom(s) this session belongs to: say, read, who, status, add, new, rooms');
+
+  chat
+    .command('summary')
+    .description('Bounded own pending-message context, filtered by membership and phone mode; no read acknowledgement')
+    .option('--json', 'Machine-readable snapshot')
+    .option('--hook-event <event>', 'Context output for SessionStart, UserPromptSubmit or PostToolUse')
+    .action((options: { json?: boolean; hookEvent?: string }) =>
+      run(Boolean(options.json), (deps) => agentChatSummary(deps, options.hookEvent))
+    );
 
   chat
     .command('mode [mode]')

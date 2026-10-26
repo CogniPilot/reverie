@@ -22,8 +22,12 @@ import {
 import { join } from 'node:path';
 import { SETTINGS_PATH } from '../src/web/route-helpers.js';
 import { tmpdir, homedir } from 'node:os';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import {
+  applyCodexTurnSummaryHooks,
+  generateCodexTurnSummaryHooks,
+  generateTurnSummaryScript,
   applyStatusLineConfig,
   ensureReverieHooks,
   ensureStatusLineExporterScript,
@@ -115,15 +119,15 @@ describe('generateHooksConfig', () => {
       }>;
     }>;
 
-    expect(postToolHooks).toHaveLength(1);
-    expect(postToolHooks[0].matcher).toBe('Bash');
-    expect(postToolHooks[0].hooks[0]).toMatchObject({
+    expect(postToolHooks).toHaveLength(2);
+    expect(postToolHooks[1].matcher).toBe('Bash');
+    expect(postToolHooks[1].hooks[0]).toMatchObject({
       type: 'command',
       command: 'node',
       asyncRewake: true,
     });
-    expect(postToolHooks[0].hooks[0].args).toEqual(['-e', generateBackgroundWakeScript()]);
-    expect(postToolHooks[0].hooks[0].timeout).toBeGreaterThanOrEqual(3600);
+    expect(postToolHooks[1].hooks[0].args).toEqual(['-e', generateBackgroundWakeScript()]);
+    expect(postToolHooks[1].hooks[0].timeout).toBeGreaterThanOrEqual(3600);
   });
 
   it('should configure idle_prompt matcher', () => {
@@ -332,7 +336,7 @@ describe('writeHooksConfig', () => {
     await refreshStaleReverieHooks(testDir);
 
     const parsed = JSON.parse(readFileSync(settingsPath, 'utf-8'));
-    expect(parsed.hooks.PostToolUse).toHaveLength(1);
+    expect(parsed.hooks.PostToolUse).toHaveLength(2);
     expect(JSON.stringify(parsed.hooks.PostToolUse)).toContain('REVERIE_BACKGROUND_REWAKE_V3');
     expect(JSON.stringify(parsed.hooks.SubagentStop)).toContain('REVERIE_SUBAGENT_STOP_GUARD_V1');
   });
@@ -364,7 +368,7 @@ describe('writeHooksConfig', () => {
 
     const parsed = JSON.parse(readFileSync(settingsPath, 'utf-8'));
     const serialized = JSON.stringify(parsed.hooks.PostToolUse);
-    expect(parsed.hooks.PostToolUse).toHaveLength(1);
+    expect(parsed.hooks.PostToolUse).toHaveLength(2);
     expect(parsed.hooks.PostToolUse[0].hooks).toHaveLength(1);
     expect(serialized).toContain('REVERIE_BACKGROUND_REWAKE_V3');
     expect(serialized).not.toContain('REVERIE_BACKGROUND_REWAKE_V1');
@@ -417,7 +421,7 @@ describe('writeHooksConfig', () => {
 
     const parsed = JSON.parse(readFileSync(settingsPath, 'utf-8'));
     const postToolUse = JSON.stringify(parsed.hooks.PostToolUse);
-    expect(parsed.hooks.PostToolUse).toHaveLength(1);
+    expect(parsed.hooks.PostToolUse).toHaveLength(2);
     expect(postToolUse).toContain('REVERIE_BACKGROUND_REWAKE_V3');
     expect(postToolUse).not.toContain('REVERIE_BACKGROUND_REWAKE_V2');
   });
@@ -1630,5 +1634,153 @@ describe('findEffectiveUserStatusLineCommand', () => {
     );
 
     expect(await findEffectiveUserStatusLineCommand(testDir)).toBe('echo project-shared');
+  });
+});
+
+describe('per-turn message summary hooks', () => {
+  it('registers startup, prompt and every tool continuation for both harnesses', () => {
+    for (const config of [generateHooksConfig(), generateCodexTurnSummaryHooks()]) {
+      for (const event of ['SessionStart', 'UserPromptSubmit', 'PostToolUse']) {
+        const entries = config.hooks[event] as Array<{
+          matcher?: string;
+          hooks: Array<{ command: string; timeout: number }>;
+        }>;
+        const entry = entries.find((item) =>
+          item.hooks.some((hook) => hook.command.includes('REVERIE_TURN_SUMMARY_V2'))
+        )!;
+        expect(entry).toBeDefined();
+        expect(entry.matcher).toBeUndefined();
+        const handler = entry.hooks.find((hook) => hook.command.includes('REVERIE_TURN_SUMMARY_V2'))!;
+        expect(handler.timeout).toBe(3);
+        expect(handler.command).toContain(event);
+      }
+    }
+  });
+
+  it('bounds the helper and emits only validated context, with no hook-event API envelope', () => {
+    const script = generateTurnSummaryScript('PostToolUse');
+    expect(script).toContain('timeout: 2500');
+    expect(script).toContain('maxBuffer: 32768');
+    expect(script).toContain("killSignal: 'SIGKILL'");
+    expect(script).toContain("'--hook-event', 'PostToolUse'");
+    expect(script).toContain('hookSpecificOutput');
+    expect(script).not.toContain('/api/hook-event');
+  });
+
+  it('forwards only valid context and silently drops failures, empty text and API envelopes', () => {
+    const run = (value: unknown, error: Error | null = null) => {
+      let output = '';
+      const execFile = vi.fn((_command, _args, options, callback) => {
+        expect(options.timeout).toBeLessThan(3000);
+        callback(error, JSON.stringify(value));
+      });
+      const processStub = {
+        stdin: { resume: vi.fn() },
+        env: { REVERIE_SESSION_ID: '11111111-1111-4111-8111-111111111111', REVERIE_API_URL: 'http://office' },
+        stdout: {
+          write: (value: string) => {
+            output += value;
+          },
+        },
+      };
+      new Function('require', 'process', generateTurnSummaryScript('PostToolUse'))(() => ({ execFile }), processStub);
+      expect(execFile).toHaveBeenCalledOnce();
+      expect(processStub.stdin.resume).toHaveBeenCalledOnce();
+      return output;
+    };
+    const valid = { hookSpecificOutput: { hookEventName: 'PostToolUse', additionalContext: 'Room update' } };
+    expect(JSON.parse(run(valid))).toEqual(valid);
+    expect(run(valid, new Error('offline'))).toBe('');
+    expect(run({ success: true, data: valid })).toBe('');
+    expect(run({ hookSpecificOutput: { hookEventName: 'PostToolUse', additionalContext: '  ' } })).toBe('');
+    expect(run({ hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: 'wrong event' } })).toBe('');
+  });
+
+  it('deduplicates real helper processes, refreshes each prompt, and clears a prior snapshot once', () => {
+    const dir = join(tmpdir(), `reverie-summary-hook-${randomUUID()}`);
+    mkdirSync(dir, { mode: 0o700 });
+    const cli = join(dir, 'reverie');
+    writeFileSync(
+      cli,
+      `#!${process.execPath}\nif(process.env.SUMMARY_FAIL)process.exit(1);process.stdout.write(JSON.stringify({hookSpecificOutput:{hookEventName:process.argv.at(-1),additionalContext:process.env.SUMMARY_TEXT}}));\n`,
+      { mode: 0o700 }
+    );
+    const sessionId = randomUUID();
+    const run = (event: 'SessionStart' | 'UserPromptSubmit' | 'PostToolUse', text: string, fail = false) => {
+      const result = spawnSync(process.execPath, ['-e', generateTurnSummaryScript(event)], {
+        env: {
+          ...process.env,
+          TMPDIR: dir,
+          PATH: `${dir}:${process.env.PATH}`,
+          REVERIE_SESSION_ID: sessionId,
+          REVERIE_API_URL: 'http://office',
+          SUMMARY_TEXT: text,
+          SUMMARY_FAIL: fail ? '1' : '',
+        },
+        encoding: 'utf8',
+        input: 'untrusted hook payload'.repeat(8192),
+        timeout: 4000,
+      });
+      expect(result.status).toBe(0);
+      expect(result.stderr).toBe('');
+      return result.stdout ? JSON.parse(result.stdout).hookSpecificOutput.additionalContext : '';
+    };
+    try {
+      expect(run('PostToolUse', '')).toBe('');
+      expect(run('PostToolUse', 'first pending message')).toBe('first pending message');
+      expect(run('PostToolUse', 'first pending message')).toBe('');
+      expect(run('PostToolUse', '', true)).toBe('');
+      expect(run('PostToolUse', 'first pending message')).toBe('');
+      expect(run('PostToolUse', 'x'.repeat(3001))).toBe('');
+      expect(run('PostToolUse', 'first pending message')).toBe('');
+      expect(run('PostToolUse', 'changed pending message')).toBe('changed pending message');
+      expect(run('UserPromptSubmit', 'changed pending message')).toBe('changed pending message');
+      expect(run('SessionStart', 'changed pending message')).toBe('changed pending message');
+      expect(run('PostToolUse', '')).toContain('summary cleared');
+      expect(run('PostToolUse', '')).toBe('');
+      const statePath = join(dir, `reverie-turn-summary-${process.getuid!()}`, `${sessionId}.json`);
+      const state = readFileSync(statePath, 'utf8');
+      expect(state).not.toContain('pending message');
+      expect(JSON.parse(state)).toEqual({ digest: expect.stringMatching(/^[a-f0-9]{64}$/), nonempty: false });
+      expect(statSync(statePath).mode & 0o077).toBe(0);
+      rmSync(statePath);
+      const outside = join(dir, 'outside');
+      writeFileSync(outside, 'untouched');
+      symlinkSync(outside, statePath);
+      expect(run('PostToolUse', 'snapshot despite unsafe cache')).toBe('snapshot despite unsafe cache');
+      expect(readFileSync(outside, 'utf8')).toBe('untouched');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('merges Codex user hooks idempotently and refuses symlink and malformed files', async () => {
+    const dir = join(tmpdir(), `reverie-codex-hooks-${Date.now()}-${Math.random()}`);
+    const external = join(tmpdir(), `reverie-codex-hooks-external-${Date.now()}`);
+    mkdirSync(join(dir, '.codex'), { recursive: true });
+    const path = join(dir, '.codex', 'hooks.json');
+    const userHook = { hooks: [{ type: 'command', command: './my-hook' }] };
+    try {
+      writeFileSync(path, JSON.stringify({ custom: true, hooks: { SessionStart: [userHook] } }));
+      await applyCodexTurnSummaryHooks(dir, true);
+      const once = readFileSync(path, 'utf8');
+      const parsed = JSON.parse(once);
+      expect(parsed.custom).toBe(true);
+      expect(parsed.hooks.SessionStart).toContainEqual(userHook);
+      expect(JSON.stringify(parsed)).toContain('REVERIE_TURN_SUMMARY_V2');
+      await applyCodexTurnSummaryHooks(dir, true);
+      expect(readFileSync(path, 'utf8')).toBe(once);
+      writeFileSync(path, '{invalid');
+      await applyCodexTurnSummaryHooks(dir, true);
+      expect(readFileSync(path, 'utf8')).toBe('{invalid');
+      rmSync(path);
+      writeFileSync(external, '{}');
+      symlinkSync(external, path);
+      await applyCodexTurnSummaryHooks(dir, true);
+      expect(readFileSync(external, 'utf8')).toBe('{}');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+      rmSync(external, { force: true });
+    }
   });
 });

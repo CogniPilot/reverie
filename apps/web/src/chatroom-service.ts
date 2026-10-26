@@ -11,6 +11,7 @@
  */
 
 import { randomUUID, createHash } from 'node:crypto';
+import { renderTurnSummary, type TurnSummary, type TurnSummaryCandidate } from './chatroom-turn-summary.js';
 import { EmployeeAlertModes, type AlertLease, type AlertMode } from './employee-alert-mode.js';
 import { isOwnerMark } from './owner-auth/marks.js';
 import { chmodSync, constants as fsConstants, copyFileSync, existsSync, promises as fs, renameSync } from 'node:fs';
@@ -302,6 +303,84 @@ export class ChatroomService {
   /** The newest message of this room the session is known to have seen (submitted to its prompt or read via the API). */
   lastSeen(sessionId: string, roomId: string): SeenMark | undefined {
     return this.seen.get(sessionId, roomId);
+  }
+
+  /** A bounded snapshot for the next model call. Never acknowledges or submits a message. */
+  turnSummary(sessionId: string): TurnSummary {
+    const session = this.deps.getSession(sessionId);
+    const mode = this.alertMode(sessionId)?.mode ?? 'ring';
+    if (!session || session.pid === null) return renderTurnSummary(mode, []);
+    const held = new Set(this.delivery.inspectionFor(sessionId).map((m) => `${m.roomId}\0${m.messageId}`));
+    const owed = new Set(
+      [...this.owedReplies.values()].filter((m) => m.sessionId === sessionId).map((m) => `${m.roomId}\0${m.messageId}`)
+    );
+    const employeeId = this.deps.employeeOf?.(sessionId);
+    const candidates: TurnSummaryCandidate[] = [];
+    const identity = this.depsWithIdentity();
+    for (const room of this.store.roomsFor(sessionId)) {
+      if (room.archivedAt || room.owner !== session.owner || (isDm(room) && !room.dm.includes(sessionId))) continue;
+      const messages = room.messages.map((m) => messageWithEmployeeIdentity(m, room.owner, identity));
+      const seen = this.seen.get(sessionId, room.id);
+      const seenIndex = seen ? messages.findIndex((m) => m.id === seen.messageId) : -1;
+      const answered = new Set(
+        messages
+          .filter(
+            (m) =>
+              !m.deleted &&
+              m.from.kind === 'agent' &&
+              (m.from.sessionId === sessionId || (employeeId && m.from.employeeId === employeeId))
+          )
+          .map((m) => m.replyTo)
+          .filter(Boolean)
+      );
+      for (const [index, message] of messages.entries()) {
+        if (
+          message.deleted ||
+          message.from.kind === 'system' ||
+          answered.has(message.id) ||
+          (message.from.kind === 'agent' &&
+            (message.from.sessionId === sessionId || (employeeId && message.from.employeeId === employeeId))) ||
+          !messageRecipients(room, message).includes(sessionId) ||
+          !this.alertAllows(sessionId, room.id, message.id)
+        )
+          continue;
+        const key = `${room.id}\0${message.id}`;
+        const queued = this.delivery.queuedFor(room.id, message.id).includes(sessionId);
+        const state = held.has(key)
+          ? 'delivery-unconfirmed'
+          : owed.has(key)
+            ? 'reply-pending'
+            : queued
+              ? 'queued'
+              : 'unread';
+        if (
+          state === 'unread' &&
+          seen &&
+          (message.at < seen.at || (message.at === seen.at && seenIndex >= 0 && index <= seenIndex))
+        )
+          continue;
+        const owner = message.from.kind === 'user' && isOwnerMark(message.from.mark);
+        const senderId = message.from.kind === 'agent' ? message.from.sessionId : undefined;
+        const coordinator = senderId && room.members.some((m) => m.sessionId === senderId && m.role === 'coordinator');
+        const name = this.nameOf(sessionId);
+        const uniquelyNamed =
+          room.members.filter((m) => this.nameOf(m.sessionId).toLowerCase() === name.toLowerCase()).length === 1;
+        const direct = message.to !== 'all' || (uniquelyNamed && textMentions(message.text, name));
+        const priority = owner && direct ? 6 : isDm(room) ? 5 : direct ? 4 : owner ? 3 : coordinator ? 2 : 1;
+        candidates.push({
+          priority,
+          roomId: room.id,
+          room: room.name,
+          messageId: message.id,
+          sender: message.from.name,
+          role: owner ? 'owner' : coordinator ? 'coordinator' : message.from.kind,
+          at: message.at,
+          excerpt: message.text || (message.attachments?.length ? '[attachment]' : '[empty message]'),
+          state,
+        });
+      }
+    }
+    return renderTurnSummary(mode, candidates);
   }
 
   deliveryStatus(sessionId: string): { blocked: boolean; pending: number; held: Array<{ roomId: string; messageId: string }> } {

@@ -1,3 +1,4 @@
+import { applyCodexTurnSummaryHooks } from './hooks-config.js';
 import { cliConfigContent } from './cli-config-content.js';
 import { prepareSelectedClaudeProfile } from './selected-claude-profile.js';
 import { managedCodexTrust } from './managed-codex-trust.js';
@@ -2548,6 +2549,9 @@ export class Session extends EventEmitter {
     await this.applyFullAccessDefault();
     await this._prepareSelectedClaudeProfile();
     await this._prepareManagedCodexTrust();
+    if (this.mode === 'codex' && !this._remote && !this._docker) {
+      await applyCodexTurnSummaryHooks(this.workingDir);
+    }
     const options = await this._buildRespawnPaneOptionsWithResumePin();
     if (onlyIfDead && (this._closing || this._respawnBlocked)) return false;
     const newPid = await mux.respawnPane(onlyIfDead ? { ...options, onlyIfDead: true } : options);
@@ -2996,6 +3000,9 @@ export class Session extends EventEmitter {
     await this.applyFullAccessDefault();
     await this._prepareSelectedClaudeProfile();
     await this._prepareManagedCodexTrust();
+    if (this.mode === 'codex' && !this._remote && !this._docker) {
+      await applyCodexTurnSummaryHooks(this.workingDir);
+    }
 
     // Bounds the workspace-trust scan (see _maybeAcceptTrustDialog). Stamped here
     // rather than at PTY spawn so a slow mux attach still counts as startup.

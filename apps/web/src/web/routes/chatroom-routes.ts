@@ -1,3 +1,4 @@
+import { registerChatTurnSummary } from './chat-turn-summary.js';
 import { listClis } from '../../config/cli-registry/registry.js';
 import { modePollsChat } from '../../chatroom-delivery.js';
 import { registerChatAttention } from './chat-attention.js';
@@ -168,6 +169,7 @@ export function registerChatroomRoutes(
   });
 
   registerChatAttention(app, ctx, service);
+  registerChatTurnSummary(app, ctx, service);
 
   const phoneSchema = z.object({ mode: z.enum(['ring', 'vibrate', 'silent']) }).strict();
   const phoneActor = (req: FastifyRequest) => {
