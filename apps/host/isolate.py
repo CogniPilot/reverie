@@ -50,18 +50,34 @@ def admin_phone_wake(root, name):
     return value
 
 
-def server_environment(old, old_image, phone_wake):
+def owner_coding_evidence(root, name):
+    """Optional compatibility staging, independent of authentication and permissions."""
+    path = root/'deployment.json'
+    if not path.exists():
+        return True
+    config = json.loads(path.read_text())
+    if not isinstance(config, dict) or config.get('containerName') != name:
+        raise ValueError('Deployment settings do not select this console')
+    value = config.get('ownerCodingEvidence', True)
+    if type(value) is not bool:
+        raise ValueError('ownerCodingEvidence must be a boolean')
+    return value
+
+
+def server_environment(old, old_image, phone_wake, coding_evidence=True):
     """Preserve other explicit settings; refresh phone activation from durable owner selection."""
     environment = [v for v in old['Config']['Env'] if v not in old_image['Config'].get('Env', []) and
-                   not v.startswith(('REVERIE_WORKER_SOCKET=', 'REVERIE_ADMIN_PHONE_WAKE='))]
+                   not v.startswith(('REVERIE_WORKER_SOCKET=', 'REVERIE_ADMIN_PHONE_WAKE=', 'REVERIE_OWNER_CODING_EVIDENCE='))]
     environment.append('REVERIE_WORKER_SOCKET=/run/reverie-workers/broker.sock')
     if phone_wake:
         environment.append('REVERIE_ADMIN_PHONE_WAKE=enabled')
+    environment.append('REVERIE_OWNER_CODING_EVIDENCE='+('enabled' if coding_evidence else 'disabled'))
     return environment
 
 
 def prepare(args, root, state):
     phone_wake = admin_phone_wake(root, args.name)
+    coding_evidence = owner_coding_evidence(root, args.name)
     old = json.loads(run(['docker', 'inspect', args.name]))[0]
     if not old['State']['Running']:
         raise ValueError('The console is stopped; preparation will not wake it')
@@ -163,7 +179,7 @@ def prepare(args, root, state):
         '  configFile = ' + nix(state/'broker.json') + ';', '  stateRoot = ' + nix(worker_state) + ';',
         '  socketDirectory = ' + nix(socket_dir) + ';', '  scratchRoot = ' + nix(scratch_root) + ';', '  apiSocketRoot = ' + nix(api_root) + ';', '  poolMemoryMiB = ' + str(pool) + ';', '}; }', ''])
     (state/'nixos.nix').write_text(module)
-    private_json(state/'plan.json', dict(containerId=old['Id'], serverImage=server_image, workerImage=worker_image, broker=broker, unit=unit, company=str(company), preparedAt=time.time(), repo=str(repo), adminPhoneWake=phone_wake))
+    private_json(state/'plan.json', dict(containerId=old['Id'], serverImage=server_image, workerImage=worker_image, broker=broker, unit=unit, company=str(company), preparedAt=time.time(), repo=str(repo), adminPhoneWake=phone_wake, ownerCodingEvidence=coding_evidence))
     print('Prepared and scanned both images. Host module: ' + str(state/'nixos.nix'))
     print('Run reverie-isolate activate. Pooled mode first requires ordinary owner activation of the generated NixOS module.')
 
@@ -171,6 +187,9 @@ def prepare(args, root, state):
 def activate(args, root, state):
     plan = json.loads((state/'plan.json').read_text())
     phone_wake = admin_phone_wake(root, args.name)
+    coding_evidence = owner_coding_evidence(root, args.name)
+    if coding_evidence != plan.get('ownerCodingEvidence', True):
+        raise ValueError('Owner coding evidence startup setting changed; prepare a fresh plan')
     if phone_wake != plan.get('adminPhoneWake', False):
         raise ValueError('Admin phone startup setting changed; prepare a fresh plan')
     spec = importlib.util.spec_from_file_location('worker_isolation', Path(plan['repo'])/'python/reverie/worker.py')
@@ -208,7 +227,7 @@ def activate(args, root, state):
     if old['Id'] != plan['containerId'] or not old['State']['Running']:
         raise ValueError('The console changed or stopped after preparation; prepare a fresh plan')
     old_image = json.loads(run(['docker', 'image', 'inspect', old['Image']]))[0]
-    environment = server_environment(old, old_image, phone_wake)
+    environment = server_environment(old, old_image, phone_wake, coding_evidence)
     if any('\n' in v or '\r' in v for v in environment):
         raise ValueError('Review multiline environment overrides before migration')
     env_file = state/'server.env'
@@ -235,6 +254,8 @@ def activate(args, root, state):
     receipts.mkdir(parents=True, exist_ok=True)
     renamed = False
     new_id = None
+    if owner_coding_evidence(root, args.name) != coding_evidence:
+        raise ValueError('Owner coding evidence startup setting changed; prepare a fresh plan')
     if admin_phone_wake(root, args.name) != phone_wake:
         raise ValueError('Admin phone startup setting changed; prepare a fresh plan')
     run(['docker', 'stop', '--time', '20', args.name])

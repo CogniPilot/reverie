@@ -131,9 +131,10 @@ def no_create_mounts(old):
     require(len({value['Target'] for value in result})==len(result),'Duplicate bind target')
     return result
 
-def replacement_spec(old,previous_image,target_image,admin_phone_wake):
+def replacement_spec(old,previous_image,target_image,admin_phone_wake,owner_coding_evidence=True):
     """Refresh inherited image defaults; preserve explicit owner settings."""
     require(type(admin_phone_wake) is bool,'Explicit durable adminPhoneWake boolean required')
+    require(type(owner_coding_evidence) is bool,'ownerCodingEvidence must be a boolean')
     require(exact(old.get('Id'),CONTAINER) and exact(old.get('Image'),IMAGE),'Exact container/image identity required')
     require(previous_image['Id']==old['Image'] and exact(target_image.get('Id'),IMAGE),'Loaded image identities differ')
     require(target_image.get('Os')=='linux' and target_image.get('Architecture')==previous_image.get('Architecture'),'Unsupported target platform')
@@ -153,6 +154,7 @@ def replacement_spec(old,previous_image,target_image,admin_phone_wake):
         if value not in inherited:defaults[key]=value
     defaults.pop('REVERIE_ADMIN_PHONE_WAKE',None)
     defaults['REVERIE_ADMIN_PHONE_WAKE']='REVERIE_ADMIN_PHONE_WAKE='+('enabled' if admin_phone_wake else 'disabled')
+    defaults['REVERIE_OWNER_CODING_EVIDENCE']='REVERIE_OWNER_CODING_EVIDENCE='+('enabled' if owner_coding_evidence else 'disabled')
     cfg['Env']=list(defaults.values())
     for field in ('Cmd','Entrypoint','Healthcheck','StopSignal','StopTimeout','Shell'):
         if cfg.get(field)==before.get(field):
@@ -453,6 +455,7 @@ class WebsiteStage:
     def _inputs(self,name,old_image,new_image):
         raw=private_read(self.deployment,65536);deployment=strict(raw)
         require(type(deployment) is dict and deployment.get('containerName')==name and type(deployment.get('adminPhoneWake')) is bool,'Deployment must explicitly select container and adminPhoneWake boolean')
+        require(type(deployment.get('ownerCodingEvidence',True)) is bool,'ownerCodingEvidence must be a boolean')
         review_raw=private_read(self.policy,65536);review=strict(review_raw)
         keys={'version','reviewId','oldImage','newImage','adoption','schemaFloors','backupScopes','approvedSpecDigest'}
         require(type(review) is dict and set(review)==keys and type(review['version']) is int and review['version']==1,'Unsupported schema review policy')
@@ -487,7 +490,7 @@ class WebsiteStage:
         previous=self._image(expected_image);target=self._image(target_image)
         snapshot=self.guard.snapshot();control_binding,grant_digest=self._admit_control(name,old,snapshot)
         deployment,review,input_pin=self._inputs(name,expected_image,target_image)
-        spec=replacement_spec(old,previous,target,deployment['adminPhoneWake']);scopes=backup_map(old,spec,review)
+        spec=replacement_spec(old,previous,target,deployment['adminPhoneWake'],deployment.get('ownerCodingEvidence',True));scopes=backup_map(old,spec,review)
         for scope in scopes:
             a=self.state;b=Path(scope['hostPath'])
             require(not (a==b or a.is_relative_to(b) or b.is_relative_to(a)),'Journal/backups overlap live state')
@@ -639,7 +642,7 @@ class WebsiteStage:
             require(digest(image_pin(previous))==plan['oldImagePin'] and digest(image_pin(target))==plan['newImagePin'],'Loaded image metadata changed')
             deployment,review,_=self._inputs(plan['name'],plan['oldImage'],plan['newImage'])
             require(review['approvedSpecDigest']==plan['specPin'],'Exact final-spec approval missing/stale')
-            expected_spec=replacement_spec(old,previous,target,deployment['adminPhoneWake']);expected_spec.setdefault('Labels',{})[LABEL]=plan['operationId']
+            expected_spec=replacement_spec(old,previous,target,deployment['adminPhoneWake'],deployment.get('ownerCodingEvidence',True));expected_spec.setdefault('Labels',{})[LABEL]=plan['operationId']
             require(expected_spec==plan['spec'] and backup_map(old,expected_spec,review)==plan['backupScopes'],'Plan spec/backup map does not match actual reviewed inputs')
             require(bind_sources(old)==plan['bindSources'],'Bind source changed after plan')
             def sources_stable():require(bind_sources(old)==plan['bindSources'],'Bind source disappeared/replaced')

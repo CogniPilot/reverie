@@ -15,6 +15,20 @@ Only owner-authorized policy grants orchestration or delegation authority.
 
 Environment variables are named `REVERIE_*`.
 
+Scoped agent message reads normally include current-owner coding evidence. During
+an older coding-consumer transition, the host can select `"ownerCodingEvidence": false`
+in `deployment.json`; omitted or `true` retains the normal default. This strict
+boolean selects `REVERIE_OWNER_CODING_EVIDENCE=disabled` at website startup.
+Disabled scoped exact/history reads return `authenticatedOwner: false`, including
+for real owner messages, and skip the current-owner authority lookup. Chat content,
+phone acceptance and plan-refresh authority are unchanged. This withholds evidence
+for compatibility staging; it does not change authentication, permissions or model
+settings, and is not a cancellation mechanism for tools already running.
+Keep it disabled until the updated consumer is active and reviewed, then use the
+reviewed website replacement workflow to enable evidence. Editing the deployment
+file does not change a running website. Native services use the same host-managed
+environment variable (`enabled` or unset is normal; other values withhold evidence).
+
 The Admin Harness defaults to a 15-second general room scan. On an isolated laptop,
 the website must explicitly opt in at startup with the per-instance environment variable
 `REVERIE_ADMIN_PHONE_WAKE=enabled`. The default is OFF: attention returns unavailable,

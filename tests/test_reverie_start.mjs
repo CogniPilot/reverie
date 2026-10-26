@@ -174,3 +174,44 @@ test('matching deployment labels cannot hide an activated phone override', t => 
   assert.equal(result.status, 1); assert.match(result.stderr, /phone startup setting differs/);
   assert.equal(f.calls().length, before + 1);
 });
+
+test('coding evidence staging uses only the strict durable boolean and defaults on', t => {
+  const f = fixture(t); assert.equal(f.run().status, 0);
+  const file = join(f.deploy, 'deployment.json'), config = JSON.parse(readFileSync(file));
+  for (const choice of [undefined, true, false]) {
+    if (choice === undefined) delete config.ownerCodingEvidence;
+    else config.ownerCodingEvidence = choice;
+    writeFileSync(file, JSON.stringify(config));
+    const result = f.run([], { REVERIE_OWNER_CODING_EVIDENCE: 'disabled' });
+    assert.equal(result.status, 0, result.stderr);
+    const command = f.calls().filter(([tool, a]) => tool === 'docker' && a[0] === 'run').at(-1)[1];
+    assert.deepEqual(command.filter(v => v.startsWith('REVERIE_OWNER_CODING_EVIDENCE=')),
+      ['REVERIE_OWNER_CODING_EVIDENCE=' + (choice === false ? 'disabled' : 'enabled')]);
+  }
+  for (const invalid of ['false', 0, null, {}, []]) {
+    config.ownerCodingEvidence = invalid; writeFileSync(file, JSON.stringify(config));
+    const before = f.calls().length, result = f.run();
+    assert.equal(result.status, 1); assert.match(result.stderr, /ownerCodingEvidence must be a boolean/);
+    assert.equal(f.calls().length, before);
+  }
+});
+
+test('coding evidence omitted and true keep the legacy signature; false and env drift refuse reuse', t => {
+  const f = fixture(t); assert.equal(f.run().status, 0);
+  const command = f.calls().find(([tool, a]) => tool === 'docker' && a[0] === 'run')[1];
+  const signature = command[command.indexOf('--label') + 1].split('=')[1];
+  const file = join(f.deploy, 'deployment.json'), config = JSON.parse(readFileSync(file));
+  const matching = { Config: { Labels: { 'reverie.deployment': signature } }, State: { Running: false } };
+  config.ownerCodingEvidence = true; writeFileSync(file, JSON.stringify(config));
+  assert.equal(f.run([], { INSPECT: JSON.stringify(matching) }).status, 0);
+  config.ownerCodingEvidence = false; writeFileSync(file, JSON.stringify(config));
+  let before = f.calls().length;
+  assert.equal(f.run([], { INSPECT: JSON.stringify(matching) }).status, 1);
+  assert.equal(f.calls().length, before + 1);
+  config.ownerCodingEvidence = true; writeFileSync(file, JSON.stringify(config));
+  matching.Config.Env = ['REVERIE_OWNER_CODING_EVIDENCE=disabled'];
+  before = f.calls().length;
+  const result = f.run([], { INSPECT: JSON.stringify(matching) });
+  assert.equal(result.status, 1); assert.match(result.stderr, /coding evidence startup setting differs/);
+  assert.equal(f.calls().length, before + 1);
+});

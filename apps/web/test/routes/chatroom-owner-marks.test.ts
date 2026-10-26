@@ -5,7 +5,7 @@
  * cannot supply one, and the mark survives save/load and room history. Synthetic fixtures only.
  * Port: N/A (app.inject(); a loopback fake for the voice service).
  */
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
@@ -118,6 +118,8 @@ describe('chatroom owner marks', () => {
   }
 
   afterEach(async () => {
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
     await service.stop();
     await app.close();
     await new Promise((r) => upstream.close(r));
@@ -168,6 +170,30 @@ describe('chatroom owner marks', () => {
       expect(response.statusCode).toBe(200);
       expect(response.json().data.message.from.authenticatedOwner).toBe(false);
     }
+  });
+
+  it.each(['disabled', 'invalid'])('withholds owner coding evidence for host value %s on both scoped reads without consulting owner authority or changing chat', async (selection) => {
+    const posted = sent(await post({ cookie: owner }));
+    const headers = { 'x-reverie-parent-session': ALPHA };
+    const url = `/api/chatrooms/${roomId}/messages/${posted.id}`;
+    const before = (await app.inject({ url, headers })).json().data.message;
+    expect(before.from.authenticatedOwner).toBe(true);
+    const lookup = vi.spyOn(auth, 'isMessageOwner');
+    vi.stubEnv('REVERIE_OWNER_CODING_EVIDENCE', selection);
+    const exact = await app.inject({ url, headers });
+    expect(exact.statusCode).toBe(200);
+    const message = exact.json().data.message;
+    expect(message.from.authenticatedOwner).toBe(false);
+    expect(message.phoneWake).toBe(before.phoneWake);
+    expect(message.text).toBe(before.text);
+    expect(message.from.mark).toBe('owner_typed');
+    const history = await app.inject({ url: `/api/chatrooms/${roomId}/messages`, headers });
+    expect(history.statusCode).toBe(200);
+    expect(history.json().data.messages.find((m: ChatMessage) => m.id === posted.id).from.authenticatedOwner).toBe(false);
+    expect(lookup).not.toHaveBeenCalled();
+    expect(service.room(roomId)!.messages.find(m => m.id === posted.id)!.from).not.toHaveProperty('authenticatedOwner');
+    vi.stubEnv('REVERIE_OWNER_CODING_EVIDENCE', 'enabled');
+    expect((await app.inject({ url, headers })).json().data.message.from.authenticatedOwner).toBe(true);
   });
 
   it('does not grant coding authority from a cached account when its current file is corrupt', async () => {

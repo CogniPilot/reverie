@@ -17,6 +17,8 @@ root = Path(os.environ['UPDATE_TEST_ROOT'])
 with (root/'calls').open('a') as out: out.write(json.dumps([name, *args])+'\n')
 state = json.loads((root/'state').read_text())
 if name == 'nix':
+    if os.environ.get('CODING_CHANGE_DURING_BUILD'):
+        (root/'deployment/deployment.json').write_text(json.dumps({'containerName':'reverie','ownerCodingEvidence':True}))
     if os.environ.get('PHONE_CHANGE_DURING_BUILD'):
         (root/'deployment/deployment.json').write_text(json.dumps({'containerName':'reverie','adminPhoneWake':False}))
     if os.environ.get('STOP_DURING_BUILD'): state['reverie']['running'] = False
@@ -187,6 +189,29 @@ class UpdateScriptTests(unittest.TestCase):
             result = self.run_update()
             self.assertNotEqual(result.returncode, 0)
             self.assertFalse(any(call[0] == 'nix' or call[:2] == ['docker', 'stop'] for call in self.calls()))
+
+    def test_durable_coding_evidence_default_staging_and_invalid_values(self):
+        deployment=self.root/'deployment';deployment.mkdir();file=deployment/'deployment.json'
+        for selection in ('omitted',False,True):
+            config={'containerName':'reverie'}
+            if selection!='omitted':config['ownerCodingEvidence']=selection
+            file.write_text(json.dumps(config))
+            result=self.run_update(REVERIE_OWNER_CODING_EVIDENCE='enabled')
+            self.assertEqual(result.returncode,0,result.stderr)
+            run=[c for c in self.calls() if c[:2]==['docker','run']][-1]
+            self.assertEqual([v for v in run if v.startswith('REVERIE_OWNER_CODING_EVIDENCE=')],['REVERIE_OWNER_CODING_EVIDENCE='+('disabled' if selection is False else 'enabled')])
+        before=len(self.calls())
+        file.write_text(json.dumps({'containerName':'reverie','ownerCodingEvidence':'false'}))
+        self.assertNotEqual(self.run_update().returncode,0)
+        self.assertFalse(any(c[0]=='nix' or c[:2]==['docker','stop'] for c in self.calls()[before:]))
+
+    def test_coding_evidence_change_during_build_never_stops_console(self):
+        deployment=self.root/'deployment';deployment.mkdir()
+        (deployment/'deployment.json').write_text(json.dumps({'containerName':'reverie','ownerCodingEvidence':False}))
+        result=self.run_update(CODING_CHANGE_DURING_BUILD='1')
+        self.assertNotEqual(result.returncode,0)
+        self.assertIn('coding evidence startup setting changed',result.stderr)
+        self.assertFalse(any(c[:2]==['docker','stop'] for c in self.calls()))
 
     def test_phone_selection_change_during_build_never_stops_console(self):
         deployment = self.root/'deployment'; deployment.mkdir()

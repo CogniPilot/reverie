@@ -113,6 +113,25 @@ class WebsiteStageTests(unittest.TestCase):
         self.deployment.write_text(json.dumps({'containerName':'reverie','adminPhoneWake':True}))
         self.engine.containers[OLD]['Config']['Env'][-1]='REVERIE_ADMIN_PHONE_WAKE=disabled'
         self.assertEqual(website.environment(self.plan()['spec']['Env'])['REVERIE_ADMIN_PHONE_WAKE'],'REVERIE_ADMIN_PHONE_WAKE=enabled')
+    def test_owner_coding_evidence_is_durable_and_overrides_old_and_image_environment(self):
+        self.engine.containers[OLD]['Config']['Env'].append('REVERIE_OWNER_CODING_EVIDENCE=enabled')
+        self.engine.images[NEW_IMAGE]['Config']['Env'].append('REVERIE_OWNER_CODING_EVIDENCE=enabled')
+        for selection in (None,False,True):
+            deployment={'containerName':'reverie','adminPhoneWake':True}
+            if selection is not None:deployment['ownerCodingEvidence']=selection
+            self.deployment.write_text(json.dumps(deployment))
+            env=website.environment(self.plan()['spec']['Env'])
+            self.assertEqual(env['REVERIE_OWNER_CODING_EVIDENCE'],'REVERIE_OWNER_CODING_EVIDENCE='+('disabled' if selection is False else 'enabled'))
+            self.assertEqual(env['REVERIE_ADMIN_PHONE_WAKE'],'REVERIE_ADMIN_PHONE_WAKE=enabled')
+        for invalid in ('false',0,None,{},[]):
+            self.deployment.write_text(json.dumps({'containerName':'reverie','adminPhoneWake':True,'ownerCodingEvidence':invalid}))
+            with self.assertRaisesRegex(website.WebsiteRefusal,'ownerCodingEvidence'):self.plan()
+        self.assertFalse(self.engine.mutations())
+    def test_coding_evidence_change_after_plan_refuses_before_effects(self):
+        plan=self.plan()
+        self.deployment.write_text(json.dumps({'containerName':'reverie','adminPhoneWake':False,'ownerCodingEvidence':False}))
+        with self.assertRaises(website.WebsiteRefusal):self.apply(plan)
+        self.assertFalse(self.engine.mutations())
     def test_missing_or_nonboolean_phone_choice_refuses_before_effects(self):
         for value in ({'containerName':'reverie'},{'containerName':'reverie','adminPhoneWake':'true'}):
             self.deployment.write_text(json.dumps(value))

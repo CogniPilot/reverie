@@ -27,6 +27,15 @@ phone_setting() {
   ' "$root/deployment.json"
 }
 phone_wake=$(phone_setting)
+coding_setting() {
+  if [[ ! -f "$root/deployment.json" ]]; then printf '%s\n' enabled; return; fi
+  jq -er --arg name "$name" '
+    if type != "object" or .containerName != $name then error("Deployment settings do not select this console")
+    elif has("ownerCodingEvidence") and (.ownerCodingEvidence | type) != "boolean" then error("ownerCodingEvidence must be a boolean")
+    elif .ownerCodingEvidence == false then "disabled" else "enabled" end
+  ' "$root/deployment.json"
+}
+coding_evidence=$(coding_setting)
 rm -f -- "$control/update.request"
 # Extract argv with NUL delimiters; no request or container text is evaluated as shell.
 # Reuse existing named volumes and bind mounts, including all owner-selected scratch disks.
@@ -71,10 +80,11 @@ printf '%s' "$metadata" | jq -j '
   if (($source | contains(",")) or (.Destination | contains(","))) then error("mount paths containing commas need owner configuration") else . end |
   "--mount\u0000type=\(.Type),src=\($source),dst=\(.Destination)\(if .RW then "" else ",readonly" end)\u0000"
 ' > "$mount_file"
-printf '%s' "$metadata" | jq -j --argjson base "${image_env:-[]}" '.[0].Config.Env[]? | select(startswith("REVERIE_ADMIN_PHONE_WAKE=") | not) | select(. as $entry | $base | index($entry) | not) | "--env\u0000\(.)\u0000"' > "$env_file"
+printf '%s' "$metadata" | jq -j --argjson base "${image_env:-[]}" '.[0].Config.Env[]? | select(startswith("REVERIE_ADMIN_PHONE_WAKE=") or startswith("REVERIE_OWNER_CODING_EVIDENCE=") | not) | select(. as $entry | $base | index($entry) | not) | "--env\u0000\(.)\u0000"' > "$env_file"
 mapfile -d '' -t mounts < "$mount_file"
 mapfile -d '' -t environment < "$env_file"
 if [[ "$phone_wake" == enabled ]]; then environment+=(--env REVERIE_ADMIN_PHONE_WAKE=enabled); fi
+environment+=(--env "REVERIE_OWNER_CODING_EVIDENCE=$coding_evidence")
 # Optional owner-selected telemetry exposes only this directory, read-only.
 gpu=${REVERIE_GPU_PUBLISHED_DIR:-}
 if [[ -n "$gpu" ]]; then
@@ -110,6 +120,7 @@ docker tag reverie:latest "$candidate"
 # A stop during a slow build is authoritative.
 running || { echo 'Reverie was stopped during the build; leaving it stopped.' >&2; exit 1; }
 [[ "$(phone_setting)" == "$phone_wake" ]] || { echo 'Admin phone startup setting changed during the build; retry the update.' >&2; exit 1; }
+[[ "$(coding_setting)" == "$coding_evidence" ]] || { echo 'Owner coding evidence startup setting changed during the build; retry the update.' >&2; exit 1; }
 backup="$name-rollback-$$"
 stopped=0
 renamed=0

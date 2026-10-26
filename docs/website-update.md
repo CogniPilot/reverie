@@ -82,6 +82,12 @@ The private deployment must explicitly select `containerName` and boolean
 `adminPhoneWake`. The resulting environment always includes
 `REVERIE_ADMIN_PHONE_WAKE=enabled` or `disabled`; a target image default cannot
 turn on an owner-selected false value.
+The optional strict boolean `ownerCodingEvidence` defaults to `true`. Its exact
+`REVERIE_OWNER_CODING_EVIDENCE=enabled` or `disabled` replacement value overrides
+both old-container and target-image defaults. Select `false` while an older coding
+consumer remains active; it withholds owner coding evidence without changing chat,
+authentication, permissions or runtime selection. A changed selection invalidates
+the prepared replacement like other deployment bytes.
 
 Image-owned environment defaults, command defaults and labels refresh from the
 new image. Values differing from the old image defaults carry forward. An owner

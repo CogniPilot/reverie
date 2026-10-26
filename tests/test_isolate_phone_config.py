@@ -14,6 +14,29 @@ SPEC.loader.exec_module(isolate)
 
 
 class IsolatePhoneConfigTests(unittest.TestCase):
+    def test_owner_coding_evidence_defaults_true_and_requires_durable_boolean(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory);file=root/'deployment.json'
+            self.assertTrue(isolate.owner_coding_evidence(root,'reverie'))
+            for selected in (False,True):
+                file.write_text(json.dumps({'containerName':'reverie','ownerCodingEvidence':selected}))
+                self.assertIs(isolate.owner_coding_evidence(root,'reverie'),selected)
+                result=isolate.server_environment({'Config':{'Env':['KEEP=owner','REVERIE_OWNER_CODING_EVIDENCE=stale']}},{'Config':{'Env':[]}},True,selected)
+                self.assertEqual([v for v in result if v.startswith('REVERIE_OWNER_CODING_EVIDENCE=')],['REVERIE_OWNER_CODING_EVIDENCE='+('enabled' if selected else 'disabled')])
+                self.assertIn('KEEP=owner',result)
+            for invalid in ('false',0,None,{},[]):
+                file.write_text(json.dumps({'containerName':'reverie','ownerCodingEvidence':invalid}))
+                with self.assertRaisesRegex(ValueError,'boolean'):isolate.owner_coding_evidence(root,'reverie')
+
+    def test_activation_rejects_changed_coding_evidence_before_any_engine_call(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory);state=root/'state';state.mkdir()
+            (root/'deployment.json').write_text(json.dumps({'containerName':'reverie','ownerCodingEvidence':False}))
+            (state/'plan.json').write_text(json.dumps({'ownerCodingEvidence':True}))
+            with patch.object(isolate,'run') as run:
+                with self.assertRaisesRegex(ValueError,'coding evidence'):isolate.activate(SimpleNamespace(name='reverie'),root,state)
+                run.assert_not_called()
+
     def test_scanner_develop_uses_the_same_ordinary_local_reference(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory); repo = root/'exported source'; repo.mkdir()

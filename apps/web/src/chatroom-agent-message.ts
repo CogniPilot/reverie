@@ -7,7 +7,10 @@ export function agentMessage(
   phoneWake: boolean,
   currentOwner: (humanId: string | undefined) => boolean
 ) {
-  const authenticatedOwner = message.from.kind === 'user' && isOwnerMark(message.from.mark) &&
+  // Host-only compatibility staging; do not consult owner authority while evidence is withheld.
+  const evidenceEnabled = process.env.REVERIE_OWNER_CODING_EVIDENCE === undefined ||
+    process.env.REVERIE_OWNER_CODING_EVIDENCE === 'enabled';
+  const authenticatedOwner = evidenceEnabled && message.from.kind === 'user' && isOwnerMark(message.from.mark) &&
     currentOwner(message.from.humanId);
   return { ...message, from: { ...message.from, authenticatedOwner }, phoneWake };
 }
