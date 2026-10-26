@@ -189,6 +189,8 @@ export interface RosterRow {
 }
 
 export interface PlanBurn {
+  /** Latest actual five-hour reading. Percent of that provider window, not weekly points or token counts. */
+  fiveHour?: { used: number | null; reset: number | null; asOf: number | null; stale: boolean };
   /** Plan account id (for sign-in) and its subscription profile id; profileId is null for an account that exists only as an acct directory. */
   id: string;
   profileId: string | null;

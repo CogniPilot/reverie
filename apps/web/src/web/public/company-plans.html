@@ -16,7 +16,7 @@
   </header>
   <div class="banner" id="banner" hidden></div>
   <section class="panel" id="sec-burn">
-    <div class="phead"><h2>Burn rate · this week per plan</h2><details class="plan-help"><summary>How usage is projected</summary><p class="hint">Grey edges = week start and stop point. The stop is the earlier of the next banked-reset expiry and weekly reset; a later weekly reset stays as a thin reference. Dashed grey line = even pace to the stop point (above it = burning faster). Dotted line = current-rate projection, ending at 100% if the budget runs out before the stop point.</p></details><div class="tools plan-header-actions" aria-label="Plan controls"><button type="button" class="btn" id="refresh">Refresh</button><button type="button" class="btn" id="theme">Theme</button><button type="button" class="btn" id="planMoveHistory" hidden>Recent plan moves</button><button type="button" class="btn" id="addAcct" hidden>Add account</button></div></div>
+    <div class="phead"><h2>Burn rate · this week per plan</h2><details class="plan-help"><summary>How usage is projected</summary><p class="hint">Grey edges = week start and stop point. The stop is the earlier of the next banked-reset expiry and weekly reset; a later weekly reset stays as a thin reference. Dashed grey line = even pace to the stop point (above it = burning faster). Dotted line = current-rate projection, ending at 100% if the budget runs out before the stop point. The vertical 5-hour inset shows the latest provider reading against its own 100% limit; it is not weekly usage or a reconstructed history.</p></details><div class="tools plan-header-actions" aria-label="Plan controls"><button type="button" class="btn" id="refresh">Refresh</button><button type="button" class="btn" id="theme">Theme</button><button type="button" class="btn" id="planMoveHistory" hidden>Recent plan moves</button><button type="button" class="btn" id="addAcct" hidden>Add account</button></div></div>
     <div class="grid2" id="plans"></div>
   </section>
 
@@ -165,6 +165,32 @@ function planAuthLabel(p) {
   if (typeof sign !== 'undefined' && sign && sign.accountId === p.id && sign.view && !SETTLED.includes(sign.view.state)) return 'Sign-in pending';
   return ({'signed-in': 'Signed in', 'signed-out': 'Signed out', unavailable: 'Installing or unavailable', error: 'Sign-in status error'})[p.authState] || (p.signedIn ? 'Signed in' : 'Signed out');
 }
+/** A current snapshot, deliberately separate from weekly history and its projection. */
+function fiveHourCard(p) {
+  const reading = p.fiveHour;
+  const used = typeof reading?.used === 'number' && Number.isFinite(reading.used) && reading.used >= 0 && reading.used <= 100 ? reading.used : null;
+  const reset = typeof reading?.reset === 'number' && Number.isFinite(reading.reset) && reading.reset > 0 && reading.reset <= 8.64e15 ? reading.reset : null;
+  const asOf = typeof reading?.asOf === 'number' && Number.isFinite(reading.asOf) && reading.asOf > 0 && reading.asOf <= 8.64e15 ? reading.asOf : null;
+  const stamp = timestamp => fmt(timestamp, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' });
+  const old = reading?.stale === true || (reset !== null && reset <= Date.now());
+  const resetLabel = reset === null ? 'Reset time unavailable' : 'Reset ' + stamp(reset);
+  const freshness = (old ? 'Last reported reading; refresh required. ' : 'Latest reported reading. ') + (asOf === null ? 'Reading time unavailable.' : 'As of ' + stamp(asOf) + '.');
+  if (used === null) return `<section class="plan-five-hour" aria-label="5-hour rate limit"><div class="hint"><b>5-hour limit</b><br>Usage unavailable</div><div class="hint">${esc(resetLabel)}</div></section>`;
+  const remaining = Math.round((100 - used) * 10) / 10;
+  const label = `5-hour window: ${used}% used, ${remaining}% remaining; maximum 100%. ${resetLabel}. ${freshness} No five-hour usage history is shown.`;
+  const color = css(used >= 95 ? '--bad' : used >= 80 ? '--warn' : '--good');
+  const y = 104 - 78 * used / 100;
+  return `<section class="plan-five-hour" aria-label="5-hour rate limit" title="${esc(label)}"><div class="hint"><b>5-hour limit</b></div>
+    <svg role="img" aria-label="${esc(label)}" viewBox="0 0 80 120"><title>${esc(label)}</title>
+      <text x="36" y="13" text-anchor="middle" font-size="12" fill="${color}">${used}%</text>
+      <rect class="five-hour-window" x="27" y="26" width="18" height="78" rx="3" fill="${css('--grid')}"/>
+      <rect class="five-hour-used" x="27" y="${y}" width="18" height="${78 * used / 100}" rx="3" fill="${color}" opacity="${old ? '.45' : '.85'}"/>
+      <line class="five-hour-current" x1="23" x2="49" y1="${y}" y2="${y}" stroke="${color}" stroke-width="2"/>
+      <line class="five-hour-maximum" x1="22" x2="50" y1="26" y2="26" stroke="${css('--bad')}" stroke-width="1.5"/>
+      <text x="77" y="29" text-anchor="end" font-size="8" fill="${css('--faint')}">100%</text><text x="77" y="107" text-anchor="end" font-size="8" fill="${css('--faint')}">0%</text>
+    </svg><div class="hint">${used}% used<br>${remaining}% remaining<br>100% maximum${old ? '<br>Last reported' : ''}</div><div class="hint">${esc(resetLabel)}${old ? ' · Refresh required' : ''}</div></section>`;
+}
+
 function plans() {
   const sec = document.getElementById('sec-burn'), el = document.getElementById('plans');
   document.getElementById('addAcct').hidden = !B.planBurn;
@@ -187,8 +213,8 @@ function plans() {
       ${p.usageError ? `<div class="hint" data-usage-error role="status">${esc(p.usageError)}</div>` : ''}
       <div class="who">${p.reset ? 'Resets ' + dayLbl(p.reset) + ' ' + hm(p.reset) + ' ' + esc(zoneShort()) : ''}</div>
       <div class="plan-members" data-plan-members="${esc(p.id)}" role="group" aria-label="${esc('People allocated to ' + p.name)}" aria-live="polite"></div>
-      <div class="stats"><div class="plan-projection"><b style="color:${css('--' + risk)}">${p.proj == null ? '–' : Math.round(p.proj) + '%'}</b>at reset</div><div class="plan-runout"><b>${p.runsOut ? esc(hm(p.runsOut)) : '–'}</b>${p.runsOut ? 'runs out ' + esc(dayLbl(p.runsOut)) + ' ' + esc(zoneShort()) : 'no run-out projected'}</div><div class="plan-landing" title="${esc(landing.multipleTooltip)}"><b style="color:${css('--' + landing.tone)}">${esc(landing.multipleLabel)}</b>landing pace</div><div class="plan-rate" title="${esc(landing.rateTooltip)}"><b>${esc(landing.rateLabel)}</b>burn now</div><div><b>${esc(num(p.used))}${p.used == null ? '' : '%'}</b>used</div>${bankedStat(p)}</div>
-      ${p.weekStart && p.reset ? `<svg id="burn${i}" role="img" viewBox="0 0 320 120"></svg>` : ''}
+      <div class="stats"><div class="plan-projection"><b style="color:${css('--' + risk)}">${p.proj == null ? '–' : Math.round(p.proj) + '%'}</b>at reset</div><div class="plan-runout"><b>${p.runsOut ? esc(hm(p.runsOut)) : '–'}</b>${p.runsOut ? 'runs out ' + esc(dayLbl(p.runsOut)) + ' ' + esc(zoneShort()) : 'no run-out projected'}</div><div class="plan-landing" title="${esc(landing.multipleTooltip)}"><b style="color:${css('--' + landing.tone)}">${esc(landing.multipleLabel)}</b>landing pace</div><div class="plan-rate" title="${esc(landing.rateTooltip)}"><b>${esc(landing.rateLabel)}</b>burn now</div><div><b>${esc(num(p.used))}${p.used == null ? '' : '%'}</b>weekly used</div>${bankedStat(p)}</div>
+      <div class="plan-usage-plots"><div class="plan-weekly-plot"><div class="hint"><b>Weekly usage</b></div>${p.weekStart && p.reset ? `<svg id="burn${i}" role="img" viewBox="0 0 320 120"></svg>` : '<div class="hint">Weekly usage unavailable</div>'}</div>${fiveHourCard(p)}</div>
       ${planActions(p)}</div>`;
   }).join('') + localPlanCards();
   B.planBurn.forEach((p, i) => { const svg = document.getElementById('burn' + i); if (svg) burnChart(svg, p); });

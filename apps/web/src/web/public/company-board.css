@@ -173,3 +173,9 @@ dialog .qr svg{width:160px;height:160px;background:#fff;padding:6px;border-radiu
 .plan-help p { max-width:64ch; margin:8px 0; }
 
 .plan > svg { max-width:420px; max-height:160px; }
+
+/* Independent quota windows share a graph row, never a usage-history axis. */
+.plan-usage-plots{display:grid;grid-template-columns:minmax(0,1fr)80px;gap:8px;align-items:start;margin-top:8px}
+.plan-usage-plots .plan-weekly-plot,.plan-usage-plots .plan-five-hour{min-width:0}
+.plan-usage-plots svg{margin-top:2px}
+.plan-five-hour .hint{font-size:11px;line-height:1.35;overflow-wrap:anywhere;margin-bottom:3px}

@@ -478,10 +478,10 @@ describe('board logic', () => {
     await store.update({}, (st) => {
       st.plans = { Work: { name: 'Old note name', who: 'Builder' } };
     });
-    const pace = { weekly: 40, burnPerHour: 1, projected: 80, weekStart: NOW - 86400_000, weekReset: NOW + 86400_000, runsOutAt: null, burnBasis: 'average', remainingPct: 60, hoursToReset: 24, sustainablePctPerHour: 2.5 };
+    const pace = { fiveHour: 25, fiveHourReset: NOW + 7200000, weekly: 40, burnPerHour: 1, projected: 80, weekStart: NOW - 86400_000, weekReset: NOW + 86400_000, runsOutAt: null, burnBasis: 'average', remainingPct: 60, hoursToReset: 24, sustainablePctPerHour: 2.5 };
     const rows = [
-      { id: 'p-1', label: 'Work', provider: 'anthropic', profileId: 'p-1', acctName: null, isDefault: false, signedIn: true, updatedAt: NOW, pace },
-      { id: 'acct-openai-spare', label: 'spare', provider: 'openai', profileId: null, acctName: 'spare', isDefault: false, signedIn: false, updatedAt: NOW, pace, bankedResets: { availableCount: 2, earliestExpiresAt: NOW + 5 } },
+      { id: 'p-1', label: 'Work', provider: 'anthropic', profileId: 'p-1', acctName: null, isDefault: false, signedIn: true, updatedAt: NOW, usageAsOf: NOW - 60000, usageStale: false, pace },
+      { id: 'acct-openai-spare', label: 'spare', provider: 'openai', profileId: null, acctName: 'spare', isDefault: false, signedIn: false, updatedAt: NOW, pace: { ...pace, fiveHour: null, fiveHourReset: null }, bankedResets: { availableCount: 2, earliestExpiresAt: NOW + 5 } },
     ];
     const own = Fastify();
     registerBoardRoutes(own, { sessions: new Map(), broadcast: () => {} } as never, { ...({
@@ -498,6 +498,8 @@ describe('board logic', () => {
       expect(burn.map((b: { name: string }) => b.name)).toEqual(['Work', 'spare']);
       expect(burn[0]).toMatchObject({ id: 'p-1', profileId: 'p-1', provider: 'anthropic', isDefault: false, label: 'Work', who: 'Builder', used: 40 });
       expect(burn[1]).toMatchObject({ id: 'acct-openai-spare', profileId: null, who: '', banked: { count: 2, expiresAt: NOW + 5 } });
+      expect(burn[0].fiveHour).toEqual({ used: 25, reset: NOW + 7200000, asOf: NOW - 60000, stale: false });
+      expect(burn[1].fiveHour).toEqual({ used: null, reset: null, asOf: null, stale: false });
       expect(burn[0].banked).toBeNull();
       expect(JSON.stringify(burn)).not.toContain('Old note name');
     } finally {

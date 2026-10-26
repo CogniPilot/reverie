@@ -410,6 +410,7 @@ export function registerBoardRoutes(app: FastifyInstance, ctx: SessionPort & Par
         name: row.label,
         who,
         used: row.pace.weekly,
+        fiveHour: { used: row.pace.fiveHour ?? null, reset: row.pace.fiveHourReset ?? null, asOf: row.usageAsOf ?? null, stale: row.usageStale === true },
         rate: row.pace.burnPerHour,
         proj: row.pace.projected,
         weekStart,
