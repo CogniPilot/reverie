@@ -68,6 +68,18 @@ const move = {
   forceBusy: false,
 };
 describe('explicit agent plan delegation', () => {
+  it('keeps runtime refresh self-only even for a manager and still requires current granted permission', () => {
+    const own = fixture();
+    expect(agentPlanRequestExecution(own.request, { ...own.input, purpose: 'runtime-refresh' },
+      own.runtime as PlanMoveRuntime, own.invoke)).toBeDefined();
+    own.employees[0].permissions.moveOwnPlan = false;
+    expect(agentPlanRequestExecution(own.request, { ...own.input, purpose: 'runtime-refresh' },
+      own.runtime as PlanMoveRuntime, own.invoke)).toBeUndefined();
+    const manager = fixture(true);
+    expect(agentPlanRequestExecution(manager.request, { ...manager.input, purpose: 'runtime-refresh' },
+      manager.runtime as PlanMoveRuntime, manager.invoke)).toBeUndefined();
+    expect(manager.invoke).not.toHaveBeenCalled();
+  });
   it('defaults both capabilities off; rejects titles, temporary agents, stale sessions and another owner', () => {
     expect(EmployeePermissionsSchema.parse({})).toEqual({
       recoverEmployees: false,

@@ -5,7 +5,7 @@ import type { ChatroomService } from './chatroom-service.js';
 import type { SessionPort } from './web/ports/session-port.js';
 import type { TerminalMultiplexer } from './mux-interface.js';
 import { PlanMoveError, type PlanMoveExecutor } from './plan-move.js';
-import { planMoveHarness, planMoveLaunch } from './plan-move-launch.js';
+import { planMoveHarness, planMoveLaunch, runtimeRefreshDigest } from './plan-move-launch.js';
 import { composerReadyMark } from './cli-agent.js';
 import { fullAccessAlertRoom } from './full-access-default.js';
 import { capturePlanProcesses, survivingPlanProcesses } from './plan-move-processes.js';
@@ -29,6 +29,7 @@ export function planMoveExecutor(runtime: PlanMoveRuntime, owner?: string): Plan
   const candidates = new Map<string, string>();
   const createdCandidates = new Set<string>();
   const releases: Array<() => void> = [];
+  const refreshCandidates = new Map<string, { source: string; digest: string; account: string }>();
   const releaseDelivery = () => { releases.splice(0).forEach(release => release()); };
   const session = (id: string) => {
     const current = runtime.sessions.get(id);
@@ -46,6 +47,20 @@ export function planMoveExecutor(runtime: PlanMoveRuntime, owner?: string): Plan
   };
   const binding = (employeeId: string) =>
     runtime.company.view(owner).employees.find((employee) => employee.id === employeeId)?.sessionId;
+  const policy = (current: ReturnType<typeof session>) => ({
+    claudeMode: current.claudeMode, allowedTools: current.allowedTools, niceConfig: current.niceConfig,
+    envOverrides: current.getEnvOverridesForPersist?.(),
+  });
+  const checkRefreshCandidate = async (id: string) => {
+    const expected = refreshCandidates.get(id);
+    if (!expected) return;
+    const account = await runtime.plans.account(expected.account);
+    const state = session(id).toState();
+    if (state.resumeSessionId || state.codexConfig?.resumeSessionId)
+      throw new PlanMoveError('A refreshed replacement must start without provider resume linkage');
+    if (!account || runtimeRefreshDigest(state, account, policy(session(id))) !== expected.digest)
+      throw new PlanMoveError('The replacement would change the approved runtime settings');
+  };
 
   return {
     verifyRecovery: async (record) => {
@@ -80,6 +95,10 @@ export function planMoveExecutor(runtime: PlanMoveRuntime, owner?: string): Plan
           throw new PlanMoveError('The original source is still running; recovery will not stop it');
         if (runtime.sessions.get(record.newSession!) !== candidate || selected() !== selection)
           throw new PlanMoveError('The candidate runtime or account selection changed during recovery');
+        if (record.purpose === 'runtime-refresh' &&
+            (candidate.toState().resumeSessionId || candidate.toState().codexConfig?.resumeSessionId ||
+             runtimeRefreshDigest(candidate.toState(), account, policy(candidate)) !== record.runtimeDigest))
+          throw new PlanMoveError('The approved refresh runtime changed during recovery');
         assertAlive(record.newSession!);
         if (!mark || !runtime.mux.capturePaneText || !candidate.muxName || candidate.isWorking || candidate.paneDialog ||
           !runtime.mux.capturePaneText(candidate.muxName)?.includes(mark))
@@ -88,7 +107,7 @@ export function planMoveExecutor(runtime: PlanMoveRuntime, owner?: string): Plan
       fence();
       return fence;
     },
-    snapshot: async (employeeId) => {
+    snapshot: async (employeeId, _owner, purpose) => {
       assertAuthorized();
       const id = binding(employeeId);
       if (!id) throw new PlanMoveError('Unknown current employee', 404);
@@ -107,6 +126,13 @@ export function planMoveExecutor(runtime: PlanMoveRuntime, owner?: string): Plan
       const allocations = await runtime.plans.allocations();
       const account = allocations.accounts.find((row) => row.sessionIds.includes(id));
       if (!account) throw new PlanMoveError('The current plan allocation is unknown');
+      let runtimeDigest: string | undefined;
+      if (purpose === 'runtime-refresh') {
+        const selected = await runtime.plans.account(account.id);
+        if (!selected || planMoveHarness(selected) !== saved.mode)
+          throw new PlanMoveError('The current runtime and account do not match');
+        runtimeDigest = runtimeRefreshDigest(saved, selected, policy(current));
+      }
       return {
         sessionId: id,
         name: current.name,
@@ -114,6 +140,7 @@ export function planMoveExecutor(runtime: PlanMoveRuntime, owner?: string): Plan
         working: current.isWorking,
         mode: saved.mode,
         model: saved.mode === 'codex' ? saved.codexConfig?.model : saved.model,
+        ...(runtimeDigest ? { runtimeDigest } : {}),
       };
     },
     idle: async (id, signal) => {
@@ -130,7 +157,8 @@ export function planMoveExecutor(runtime: PlanMoveRuntime, owner?: string): Plan
       assertAuthorized();
       const account = await runtime.plans.account(input.toAccount);
       if (!account) throw new PlanMoveError('The destination plan no longer exists', 404);
-      const payload = planMoveLaunch(session(input.sessionId).toState(), account, input);
+      const source = session(input.sessionId);
+      const payload = planMoveLaunch(source.toState(), account, input, policy(source));
       const pauseSource = runtime.chat.delivery?.pauseForMigration(input.sessionId);
       if (pauseSource) releases.push(pauseSource);
       try {
@@ -141,6 +169,8 @@ export function planMoveExecutor(runtime: PlanMoveRuntime, owner?: string): Plan
       if (typeof id !== 'string') throw new PlanMoveError('The replacement response has no session identifier');
       candidates.set(id, input.handoff);
       createdCandidates.add(id);
+      if (input.purpose === 'runtime-refresh')
+        refreshCandidates.set(id, { source: input.sessionId, digest: input.runtimeDigest!, account: input.toAccount });
       const pauseCandidate = runtime.chat.delivery?.pauseForMigration(id);
       if (pauseCandidate) releases.push(pauseCandidate);
       return id;
@@ -152,6 +182,7 @@ export function planMoveExecutor(runtime: PlanMoveRuntime, owner?: string): Plan
     },
     ready: async (id) => {
       assertAuthorized();
+      await checkRefreshCandidate(id);
       const current = session(id);
       const mark = composerReadyMark(current.mode);
       if (!mark) throw new PlanMoveError('This CLI has no verified readiness marker');
@@ -180,10 +211,12 @@ export function planMoveExecutor(runtime: PlanMoveRuntime, owner?: string): Plan
       const handoff = candidates.get(id);
       if (!handoff) throw new PlanMoveError('The replacement has no handoff');
       assertAuthorized();
+      await checkRefreshCandidate(id);
       await submitRecoveryPrompt(current, handoff, () => runtime.authorized() && runtime.sessions.get(id) === current,
         undefined, {fromUser: true});
       assertAlive(id);
       candidates.delete(id);
+      refreshCandidates.delete(id);
       releaseDelivery();
     },
     beforeStop: async (input) => {
@@ -191,6 +224,15 @@ export function planMoveExecutor(runtime: PlanMoveRuntime, owner?: string): Plan
       assertAlive(input.sessionId);
       if (!input.forceBusy && session(input.sessionId).isWorking)
         throw new PlanMoveError('The old session became busy before the replacement started; move rolled back');
+      if (input.purpose === 'runtime-refresh') {
+        const account = await runtime.plans.account(input.fromAccount);
+        const source = session(input.sessionId);
+        if (!account || runtimeRefreshDigest(source.toState(), account, policy(source)) !== input.runtimeDigest)
+          throw new PlanMoveError('The approved source runtime changed before refresh');
+        const candidate = [...refreshCandidates].find(([, expected]) => expected.source === input.sessionId)?.[0];
+        if (!candidate) throw new PlanMoveError('The refresh candidate is not registered');
+        await checkRefreshCandidate(candidate);
+      }
     },
     binding: (employeeId) => binding(employeeId),
     exists: (id) => {
@@ -219,6 +261,7 @@ export function planMoveExecutor(runtime: PlanMoveRuntime, owner?: string): Plan
       finally { if (createdCandidates.has(id)) releaseDelivery(); }
       candidates.delete(id);
       createdCandidates.delete(id);
+      refreshCandidates.delete(id);
       return (runtime.survivors ?? survivingPlanProcesses)(identities);
     },
     audit: async (record) => {
@@ -228,6 +271,7 @@ export function planMoveExecutor(runtime: PlanMoveRuntime, owner?: string): Plan
         event: 'plan_move', owner, actor: runtime.actor ?? owner ?? 'owner', moveId: record.id, employeeId: record.employeeId,
         name: record.name, oldSession: record.oldSession, newSession: record.newSession,
         fromAccount: record.fromAccount, toAccount: record.toAccount, phase: record.phase, error: record.error,
+        ...(record.purpose ? { purpose: record.purpose } : {}),
       });
       // A channel mirror is optional. Never pick another channel, another owner or a DM when the conventional room is absent.
       try {
@@ -238,7 +282,9 @@ export function planMoveExecutor(runtime: PlanMoveRuntime, owner?: string): Plan
         runtime.chat.post(
           room.id,
           { kind: 'system', name: 'Plans' },
-          `AUDIT plan move ${record.phase}: ${runtime.actor ?? owner ?? 'Owner'} moved ${record.name} from ${from?.label ?? record.fromAccount} to ${to?.label ?? record.toAccount}${record.error ? `; ${record.error}` : ''}`
+          record.purpose === 'runtime-refresh'
+            ? `AUDIT runtime refresh ${record.phase}: ${runtime.actor ?? owner ?? 'Owner'} refreshed ${record.name} on ${from?.label ?? record.fromAccount}${record.error ? `; ${record.error}` : ''}`
+            : `AUDIT plan move ${record.phase}: ${runtime.actor ?? owner ?? 'Owner'} moved ${record.name} from ${from?.label ?? record.fromAccount} to ${to?.label ?? record.toAccount}${record.error ? `; ${record.error}` : ''}`
         );
       } catch { console.warn(`[plans] move ${record.id} was audited privately; its optional channel mirror was unavailable`); }
     },

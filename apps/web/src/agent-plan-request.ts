@@ -11,6 +11,7 @@ import { withDelegatedSessionCreate, withDelegatedSessionStart } from './owner-a
 export interface AgentPlanInput {
   employeeId: string;
   sessionId: string;
+  purpose?: 'runtime-refresh';
 }
 export function agentPlanRequestExecution(
   request: FastifyRequest,
@@ -35,6 +36,7 @@ export function agentPlanRequestExecution(
     !source ||
     !delegate ||
     !target ||
+    (input.purpose === 'runtime-refresh' && delegate?.id !== target?.id) ||
     caller.owner !== owner ||
     source.owner !== owner ||
     target.onVacation

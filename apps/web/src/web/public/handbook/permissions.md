@@ -12,6 +12,11 @@ The recoverEmployees permission allows the scoped employee wake API. Website-res
 
 Move own plan allows an expert to request its own plan move. Manage team plans permits requests for colleagues. Both still require the affected expert's handoff and approval. They do not grant provider sign-in or account administration.
 
+The same grants permit an explicit self runtime refresh on the exact current
+account with `plan-move request ACCOUNT_ID --restart`. Refresh stays self-only
+even for a team plan manager, and still requires the one-time approval and safe
+handoff. It grants no installation, general session creation or vacation wake.
+
 ## Sleep and Dream
 
 Sleep allows memory consolidation; Dream allows creative exploration. They are eligibility preferences, not instructions to start background work or a nightly timer. Scheduling requires an explicit owner or authorized scheduler decision; the Sleep and Dream scheduling connection is not implemented yet. Dream output is an idea, not verified evidence.

@@ -82,6 +82,7 @@ export async function agentCapabilities(deps: AgentDeps, references = githubCred
       fileDecision: 'reverie board decision add "<request>" --id <stable-id> --where "<source room>" --option "<choice 1>" --option "<choice 2>" --recommend "<choice 1>" --json',
       inspectBoard: 'reverie board show --json',
       plans: 'reverie plans --json',
+      refreshRuntime: 'reverie agent plan-move request "<current-account-id>" --restart --id "<stable-id>" --json',
       channels: 'reverie agent chat rooms --json',
       readChannel: 'reverie agent chat read --room "<name or ID>" -n 20 --json',
     },

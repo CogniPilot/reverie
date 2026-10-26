@@ -207,6 +207,52 @@ describe('agent-requested cross-provider migration in enforce mode', () => {
     await owner('POST', `/api/plans/requests/${second.id}/cancel`);
   });
 
+  it.each(['codex', 'claude'] as const)('executes a same-account %s self refresh through real HTTP approval and normal replacement handlers', async mode => {
+    const selectedAccount = mode === 'codex' ? originAccount : destination;
+    const created = await owner('POST', '/api/sessions', {
+      workingDir: directory, mode, name: 'Refresh fixture ' + mode, subscriptionProfileId: selectedAccount,
+      ...(mode === 'codex' ? { codexConfig: { model: 'gpt-5.4', reasoningEffort: 'xhigh', dangerouslyBypassApprovals: false } }
+        : { model: 'sonnet', effort: 'high', advisorModel: 'opus' }),
+    });
+    expect(created.statusCode, created.body).toBe(200);
+    const old = created.json().data.session.id;
+    const oldPermission = server.sessions.get(old).claudeMode;
+    const oldAllowedTools = server.sessions.get(old).allowedTools;
+    const hired = await owner('POST', '/api/company/employees', {
+      sessionId: old, name: 'Refresh fixture ' + mode, position: 'Developer', icon: 'T', expertise: ['testing'],
+    });
+    const person = hired.json().data.employee;
+    await owner('PUT', `/api/company/employees/${person.id}`, { permissions: { moveOwnPlan: true } });
+    const input = { id: 'same-account-refresh-' + mode, employeeId: person.id, sessionId: old, toAccount: selectedAccount };
+    expect((await agent(old, '/api/plans/agent-requests', input)).statusCode).toBe(409);
+    const request = await agent(old, '/api/plans/agent-requests', { ...input, purpose: 'runtime-refresh' });
+    expect(request.statusCode, request.body).toBe(202);
+    expect(request.json().data).toMatchObject({ purpose: 'runtime-refresh', fromAccount: selectedAccount, toAccount: selectedAccount });
+    const { nonce } = await new PlanRequestCapabilities().read(old, input.id);
+    expect((await agent(old, `/api/plans/requests/${input.id}/approve`, { nonce, handoff: 'Continue the bounded fixture with a fresh provider thread.' })).statusCode).toBe(202);
+    let record: any;
+    for (let n = 0; n < 100; n++) {
+      record = (await owner('POST', `/api/plans/requests/${input.id}/status`)).json().data;
+      if (['completed', 'failed', 'recovery-required'].includes(record.phase)) break;
+      await new Promise(resolve => setTimeout(resolve, 20));
+    }
+    expect(record, JSON.stringify(record)).toMatchObject({ phase: 'completed', purpose: 'runtime-refresh', newSession: expect.any(String) });
+    expect(record.newSession).not.toBe(old);
+    expect(server.sessions.has(old)).toBe(false);
+    const replacement = server.sessions.get(record.newSession);
+    expect(replacement.toState()).toMatchObject({ workingDir: directory, mode, subscriptionProfile: { id: selectedAccount },
+      ...(mode === 'codex' ? { codexConfig: { model: 'gpt-5.4', reasoningEffort: 'xhigh', dangerouslyBypassApprovals: false } }
+        : { model: 'sonnet', effort: 'high', advisorModel: 'opus' }) });
+    expect(replacement.claudeMode).toBe(oldPermission);
+    expect(replacement.allowedTools).toBe(oldAllowedTools);
+    expect(replacement.toState().codexConfig?.resumeSessionId).toBeUndefined();
+    expect(replacement.toState().resumeSessionId).toBeUndefined();
+    expect(server.companyService.view().employees.find((e: any) => e.id === person.id)).toMatchObject({
+      sessionId: record.newSession, desiredRunning: true, permissions: { moveOwnPlan: true },
+    });
+    expect((await agent(record.newSession, '/api/sessions', { workingDir: directory, mode: 'codex' })).statusCode).toBe(403);
+  });
+
   it.each(['grant', 'owner-stop', 'vacation'] as const)('refuses fresh %s after intentional source deletion before any target start', async change => {
     const created = await owner('POST', '/api/sessions', { workingDir: directory, mode: 'codex', name: 'Boundary ' + change, subscriptionProfileId: originAccount });
     expect(created.statusCode).toBe(200);

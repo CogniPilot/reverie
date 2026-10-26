@@ -2300,11 +2300,12 @@ export function registerAgentCommands(program: Command): Command {
   planMove.command('list').description('List this expert’s pending plan requests').option('--json', 'Machine-readable result')
     .action((options: { json?: boolean }) => run(Boolean(options.json), agentPendingPlanMoves));
   planMove.command('request <account-id>')
+    .option('--restart', 'Refresh this expert on its current account through handoff and approval')
     .option('--employee <id>', 'Team expert ID (requires Manage team plans)')
     .option('--id <id>', 'Stable request ID for safe retries')
     .option('--json', 'Machine-readable result')
-    .action((toAccount: string, options: { employee?: string; id?: string; json?: boolean }) =>
-      run(Boolean(options.json), deps => agentRequestPlanMove(deps, { toAccount, employeeId: options.employee, id: options.id })));
+    .action((toAccount: string, options: { employee?: string; id?: string; json?: boolean; restart?: boolean }) =>
+      run(Boolean(options.json), deps => agentRequestPlanMove(deps, { toAccount, employeeId: options.employee, id: options.id, restart: options.restart })));
   planMove.command('approve <id>')
     .requiredOption('--handoff-file <path>', 'Work-safe handoff for the fresh destination session')
     .option('--json', 'Machine-readable result')

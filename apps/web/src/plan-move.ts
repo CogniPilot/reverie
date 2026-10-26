@@ -20,6 +20,9 @@ export interface PlanMoveInput {
   handoff: string;
   model?: string;
   targetMode?: 'codex' | 'claude';
+  /** Explicit same-account replacement, admitted through the ordinary request/approval flow. */
+  purpose?: 'runtime-refresh';
+  runtimeDigest?: string;
 }
 
 export interface PlanMoveRecord {
@@ -39,6 +42,8 @@ export interface PlanMoveRecord {
   sourceCleanupVerified?: boolean;
   recoveryAction?: 'adopt-existing';
   recoveredAt?: number;
+  purpose?: 'runtime-refresh';
+  runtimeDigest?: string;
 }
 
 export interface PlanMoveSnapshot {
@@ -48,12 +53,13 @@ export interface PlanMoveSnapshot {
   working: boolean;
   mode?: string;
   model?: string;
+  runtimeDigest?: string;
 }
 
 export interface PlanMovePort {
   load(): Promise<PlanMoveRecord[]>;
   save(records: PlanMoveRecord[]): Promise<void>;
-  snapshot(employeeId: string, owner?: string): Promise<PlanMoveSnapshot>;
+  snapshot(employeeId: string, owner?: string, purpose?: 'runtime-refresh'): Promise<PlanMoveSnapshot>;
   idle(sessionId: string, signal: AbortSignal): Promise<void>;
   create(input: PlanMoveInput, owner: string | undefined): Promise<string>;
   start(sessionId: string): Promise<void>;
@@ -123,9 +129,13 @@ export class PlanMoves {
   }
 
   async begin(input: PlanMoveInput, owner?: string, executor: PlanMoveExecutor = this.port): Promise<PlanMoveRecord> {
+    if ((input.purpose !== undefined && input.purpose !== 'runtime-refresh') ||
+        (!input.purpose && input.runtimeDigest !== undefined))
+      throw new PlanMoveError('Unknown plan move purpose');
     await this.init();
     const requestDigest = createHash('sha256')
-      .update(JSON.stringify([input.forceBusy, input.handoff, input.model ?? '', input.targetMode ?? '']))
+      .update(JSON.stringify([input.forceBusy, input.handoff, input.model ?? '', input.targetMode ?? '',
+        ...(input.purpose ? [input.purpose, input.runtimeDigest] : [])]))
       .digest('hex');
     const existing = this.records.get(input.id);
     if (existing) {
@@ -135,6 +145,7 @@ export class PlanMoves {
         existing.oldSession !== input.sessionId ||
         existing.toAccount !== input.toAccount ||
         existing.fromAccount !== input.fromAccount ||
+        existing.purpose !== input.purpose ||
         existing.requestDigest !== requestDigest
       )
         throw new PlanMoveError('That move identifier belongs to another request');
@@ -146,10 +157,17 @@ export class PlanMoves {
     this.locked.add(input.employeeId);
     this.intents.add(input.id);
     try {
-      const snapshot = await executor.snapshot(input.employeeId, owner);
+      const snapshot = await executor.snapshot(input.employeeId, owner, input.purpose);
       if (snapshot.sessionId !== input.sessionId || snapshot.account !== input.fromAccount)
         throw new PlanMoveError('The employee or account changed; refresh before moving');
-      if (input.fromAccount === input.toAccount) throw new PlanMoveError('The employee is already on that plan');
+      if (input.purpose === 'runtime-refresh') {
+        if (input.fromAccount !== input.toAccount || input.forceBusy || !input.handoff.trim() ||
+            !['codex', 'claude'].includes(snapshot.mode ?? '') ||
+            (input.model !== undefined && input.model !== snapshot.model) ||
+            (input.targetMode !== undefined && input.targetMode !== snapshot.mode) ||
+            !input.runtimeDigest || !/^[a-f0-9]{64}$/.test(input.runtimeDigest) || snapshot.runtimeDigest !== input.runtimeDigest)
+          throw new PlanMoveError('A runtime refresh requires the unchanged current plan, runtime and a safe handoff');
+      } else if (input.fromAccount === input.toAccount) throw new PlanMoveError('The employee is already on that plan');
       if (this.records.size >= 100) {
         const oldest = [...this.records.values()].find((record) => ['completed', 'failed'].includes(record.phase) &&
           !this.intents.has(record.id) && !this.aborts.has(record.id));
@@ -167,6 +185,7 @@ export class PlanMoves {
         phase: 'waiting',
         at: Date.now(),
         requestDigest,
+        ...(input.purpose ? { purpose: input.purpose, runtimeDigest: input.runtimeDigest } : {}),
       };
       this.records.set(record.id, record);
       await this.save();
@@ -242,12 +261,13 @@ export class PlanMoves {
     this.aborts.set(record.id, abort);
     try {
       if (!input.forceBusy) await executor.idle(record.oldSession, abort.signal);
-      const snapshot = await executor.snapshot(record.employeeId, record.owner);
+      const snapshot = await executor.snapshot(record.employeeId, record.owner, input.purpose);
       abort.signal.throwIfAborted();
       if (
         snapshot.sessionId !== record.oldSession ||
         snapshot.account !== record.fromAccount ||
-        (snapshot.working && !input.forceBusy)
+        (snapshot.working && !input.forceBusy) ||
+        (input.purpose === 'runtime-refresh' && snapshot.runtimeDigest !== input.runtimeDigest)
       )
         throw new PlanMoveError('The employee changed or became busy before launch; nothing was moved');
       await this.phase(record, 'creating');

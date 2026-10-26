@@ -62,6 +62,8 @@ describe('current agent capability command', () => {
     const f = fixture();
     expect(await agentCapabilities(f.deps, refs)).toBe(0);
     expect(JSON.parse(f.output[0]).board.createDecision).toBe(true);
+    expect(JSON.parse(f.output[0]).commands.refreshRuntime).toContain('--restart');
+    expect(JSON.parse(f.output[0]).company.moveOwnPlan).toBe(false);
     const next = snapshot();
     next.board.createDecision = next.board.manageBoard = false;
     next.checkedAt = 2;

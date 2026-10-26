@@ -42,6 +42,15 @@ describe('private bounded durable plan move journal', () => {
     expect((await store.load())[0].phase).toBe('completed');
   });
 
+  it('retains the explicit same-account runtime binding across reopen and refuses incomplete refresh journals', async () => {
+    const refresh = { ...record, toAccount: 'first', purpose: 'runtime-refresh' as const, runtimeDigest: 'a'.repeat(64) };
+    await store.save([refresh]);
+    expect(await new PlanMoveStore(store.file).load()).toEqual([refresh]);
+    for (const change of [{ runtimeDigest: undefined }, { toAccount: 'second' }, { purpose: undefined }])
+      expect(() => store.save([{ ...refresh, ...change }])).toThrow('refresh journal');
+    expect(await store.load()).toEqual([refresh]);
+  });
+
   it('retains the exact boolean source stop request across durable phase transitions and reopen', async () => {
     for (const phase of ['stopping', 'starting', 'checking', 'recovery-required', 'completed'] as const) {
       await store.save([{ ...record, phase, sourceStopRequested: true }]);

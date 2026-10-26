@@ -351,8 +351,9 @@ Explicit permissions control orchestration independently of organizational title
 Drag an expert onto another plan to request a move, including between Codex and
 Claude. The destination selects its native harness; changing providers uses that
 provider's model and effort defaults. The expert prepares a handoff and approves
-the request before the replacement starts; its source stops only after the
-replacement is ready.
+the request before the replacement starts. Replacement metadata is reserved,
+the source's cleanup is verified, then the replacement starts and is checked
+before receiving the handoff. The two runtimes never share a writable home concurrently.
 
 Grant **Move own plan** or **Manage team plans** on an employee's Company card
 or during hiring. A CTO with Manage team plans can read team plan usage and request
@@ -363,6 +364,17 @@ The affected expert still supplies its own handoff and runs the approval command
 These permissions grant no account login, account deletion or general session creation.
 They default off and currently apply to single-company deployments; multi-user
 account delegation remains disabled.
+
+An authorized Codex or Claude expert can request a fresh runtime on its current
+account with `reverie agent plan-move request <current-account-id> --restart`.
+It still prepares a handoff and approves the one-time request. The explicit
+refresh preserves the selected account, harness, model, effort, permission policy
+and working directory, while starting a fresh provider conversation and session
+binding. Changed settings or grants invalidate the request. Ordinary same-account
+moves remain refused. This does not install packages, change the worker image
+target, wake vacationing experts, or support Hands/custom harnesses.
+Older laptop CLIs need the scoped API bootstrap in the Models handbook; a website
+update alone does not add their `--restart` parser.
 
 Kokoro speech runs locally with Nix-managed Python, ONNX Runtime and espeak-ng.
 The web launcher starts it in the background; its pinned, checksum-verified models

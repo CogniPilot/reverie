@@ -35,9 +35,15 @@ const RecordSchema = z
       .string()
       .regex(/^[a-f0-9]{64}$/)
       .optional(),
+    purpose: z.literal('runtime-refresh').optional(),
+    runtimeDigest: z.string().regex(/^[a-f0-9]{64}$/).optional(),
   })
   .strict()
   .superRefine((record, context) => {
+    if (record.purpose === 'runtime-refresh'
+      ? record.fromAccount !== record.toAccount || !record.runtimeDigest
+      : record.runtimeDigest !== undefined)
+      context.addIssue({ code: 'custom', message: 'A refresh journal must bind its unchanged account and runtime' });
     if (record.sourceCleanupVerified && (!record.sourceStopRequested || !record.newSession))
       context.addIssue({ code: 'custom', message: 'Source cleanup proof requires its stopped-source candidate binding' });
     if ((record.recoveryAction !== undefined || record.recoveredAt !== undefined) &&

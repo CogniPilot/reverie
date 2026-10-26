@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { planMoveLaunch } from '../src/plan-move-launch.js';
+import { planMoveLaunch, runtimeRefreshDigest } from '../src/plan-move-launch.js';
 import type { PlanAccount } from '../src/plan-accounts.js';
 import type { SessionState } from '../src/types.js';
 import type { PlanMoveInput } from '../src/plan-move.js';
@@ -37,6 +37,33 @@ const input: PlanMoveInput = {
 };
 
 describe('fresh account launch selection', () => {
+  it('explicitly refreshes on the same account with the exact model, effort, approval policy and fresh thread', () => {
+    const current = { ...account, id: 'source', profileId: 'old-profile' };
+    const policy = { envOverrides: { CODEX_HOME: '/scratch/selected-account' } };
+    const runtimeDigest = runtimeRefreshDigest(saved, current, policy);
+    const launch = planMoveLaunch(saved, current, { ...input, toAccount: 'source', purpose: 'runtime-refresh',
+      model: 'old-model', runtimeDigest }, policy);
+    expect(launch).toMatchObject({ workingDir: saved.workingDir, mode: 'codex', subscriptionProfileId: 'old-profile',
+      codexConfig: { model: 'old-model', reasoningEffort: 'high', dangerouslyBypassApprovals: false },
+      envOverrides: {} });
+    expect(launch.codexConfig?.resumeSessionId).toBeUndefined();
+    expect(launch.resumeSessionId).toBeUndefined();
+    for (const change of [{ model: 'different' }, { toAccount: 'another' }, { runtimeDigest: 'b'.repeat(64) }])
+      expect(() => planMoveLaunch(saved, current, { ...input, toAccount: 'source', model: 'old-model',
+        purpose: 'runtime-refresh', runtimeDigest, ...change }, policy)).toThrow('runtime or account');
+  });
+
+  it('binds effective permission, account path, effort and workdir while excluding native conversation identifiers', () => {
+    const original = { ...saved, mode: 'claude', model: 'selected', effort: 'high' } as SessionState;
+    const current = { ...account, provider: 'anthropic' } as PlanAccount;
+    const policy = { claudeMode: 'normal' as const, allowedTools: 'Read', envOverrides: { CLAUDE_CONFIG_DIR: '/scratch/account' } };
+    const digest = runtimeRefreshDigest(original, current, policy);
+    expect(runtimeRefreshDigest({ ...original, resumeSessionId: 'new-link', runtimeThreads: { binding: 'new-thread' } }, current, policy)).toBe(digest);
+    for (const changed of [{ effort: 'low' }, { model: 'different' }, { workingDir: '/other' }])
+      expect(runtimeRefreshDigest({ ...original, ...changed } as SessionState, current, policy)).not.toBe(digest);
+    expect(runtimeRefreshDigest(original, { ...current, realDir: '/other-account' }, policy)).not.toBe(digest);
+    expect(runtimeRefreshDigest(original, current, { ...policy, claudeMode: 'auto' })).not.toBe(digest);
+  });
   it('uses the normal profile selector, preserves effort, and never resumes an account-private Codex thread', () => {
     const launch = planMoveLaunch(saved, account, input);
     expect(launch).toMatchObject({

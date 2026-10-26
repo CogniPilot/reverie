@@ -8,6 +8,11 @@ Run `reverie agent capabilities --json` at startup, after grants change, and bef
 
 Allowed still requires task authorization. Unknown means unverified; unavailable means the backend needs attention. Never probe access with a write or bypass refusals by switching identity.
 
+Before a Codex/Claude self-refresh, brief the current account, model/effort,
+approved artifact and handoff. Check your plan grant and follow
+[Models](/handbook/models). The request does not install code, change the worker
+target or grant owner access.
+
 ## Board decision requests
 
 An active owner-created coordinator seat allows decision-card creation. Read `reverie board show --json` to avoid duplicates. Supply **2–10 distinct options**; prose does not create buttons:

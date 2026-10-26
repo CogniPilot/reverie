@@ -16,6 +16,8 @@ export const PlanRequestSchema = z
     mode: z.string(),
     targetMode: z.enum(['codex', 'claude']).optional(),
     model: z.string().optional(),
+    purpose: z.literal('runtime-refresh').optional(),
+    runtimeDigest: z.string().regex(/^[a-f0-9]{64}$/).optional(),
     phase: z.enum([
       'pending',
       'reauthorize-required',
@@ -38,7 +40,13 @@ export const PlanRequestSchema = z
     newSession: PlanRequestId.optional(),
     movePhase: z.string().optional(),
   })
-  .strict();
+  .strict()
+  .superRefine((record, context) => {
+    if (record.purpose === 'runtime-refresh'
+      ? record.fromAccount !== record.toAccount || !record.runtimeDigest
+      : record.runtimeDigest !== undefined)
+      context.addIssue({ code: 'custom', message: 'A refresh request must bind its unchanged account and runtime' });
+  });
 export type PlanRequestRecord = z.infer<typeof PlanRequestSchema>;
 export type PlanRequestView = Omit<PlanRequestRecord, 'nonceHash'>;
 export interface PlanRequestExecution {
@@ -167,6 +175,7 @@ export class PlanMoveRequests {
       fromAccount: record.fromAccount,
       toAccount: record.toAccount,
       phase: record.phase,
+      ...(record.purpose ? { purpose: record.purpose } : {}),
     });
   }
   private async issue(record: PlanRequestRecord, execution: PlanRequestExecution): Promise<void> {
@@ -220,7 +229,7 @@ export class PlanMoveRequests {
     }
   }
   async create(
-    input: { id: string; employeeId: string; sessionId: string; toAccount: string },
+    input: { id: string; employeeId: string; sessionId: string; toAccount: string; purpose?: 'runtime-refresh' },
     owner: string | undefined,
     execution: PlanRequestExecution
   ): Promise<PlanRequestView> {
@@ -233,6 +242,7 @@ export class PlanMoveRequests {
           existing.employeeId !== input.employeeId ||
           existing.sessionId !== input.sessionId ||
           existing.toAccount !== input.toAccount
+          || existing.purpose !== input.purpose
         )
           throw new PlanMoveError('That request identifier is already in use');
         await this.current(existing);
@@ -244,10 +254,15 @@ export class PlanMoveRequests {
           if (active(record.phase))
             throw new PlanMoveError('This expert already has a pending move request or execution');
         }
-      const snapshot = await execution.executor.snapshot(input.employeeId, owner);
-      if (snapshot.sessionId !== input.sessionId || snapshot.account === input.toAccount)
+      const snapshot = await execution.executor.snapshot(input.employeeId, owner, input.purpose);
+      if (snapshot.sessionId !== input.sessionId || (input.purpose === 'runtime-refresh'
+        ? snapshot.account !== input.toAccount || !snapshot.runtimeDigest
+        : snapshot.account === input.toAccount))
         throw new PlanMoveError('The expert or plan changed. Refresh before requesting a move.');
       const target = await this.port.validateTarget(snapshot, input.toAccount, owner);
+      if (input.purpose === 'runtime-refresh' &&
+          (!['codex', 'claude'].includes(snapshot.mode ?? '') || target?.mode !== snapshot.mode))
+        throw new PlanMoveError('Runtime refresh requires the unchanged supported harness');
       if (this.records.size >= 100) {
         const old = [...this.records.values()].find((record) => !active(record.phase));
         if (!old) throw new PlanMoveError('Resolve pending requests before creating more');
@@ -262,6 +277,7 @@ export class PlanMoveRequests {
         mode: snapshot.mode || '',
         ...(target ? { targetMode: target.mode } : {}),
         model: snapshot.model,
+        ...(input.purpose ? { runtimeDigest: snapshot.runtimeDigest } : {}),
         phase: 'pending',
         createdAt: this.now(),
         expiresAt: this.now() + 30 * 60_000,
@@ -324,12 +340,13 @@ export class PlanMoveRequests {
       if (!execution.authorized()) throw new PlanMoveError('Owner authorization is required', 403);
       if (!['pending', 'reauthorize-required'].includes(record.phase))
         throw new PlanMoveError('This request is no longer pending');
-      const snapshot = await execution.executor.snapshot(record.employeeId, owner);
+      const snapshot = await execution.executor.snapshot(record.employeeId, owner, record.purpose);
       if (
         snapshot.sessionId !== record.sessionId ||
         snapshot.account !== record.fromAccount ||
         snapshot.mode !== record.mode ||
-        snapshot.model !== record.model
+        snapshot.model !== record.model ||
+        (record.purpose === 'runtime-refresh' && snapshot.runtimeDigest !== record.runtimeDigest)
       )
         throw new PlanMoveError('The expert’s runtime changed. Cancel this request and create a new one.');
       const target = await this.port.validateTarget(snapshot, record.toAccount, owner);
@@ -374,12 +391,13 @@ export class PlanMoveRequests {
       }
       if (!handoff.trim() || handoff.length > 12000 || /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/.test(handoff))
         throw new PlanMoveError('Provide a work-safe handoff of 1–12000 characters');
-      const snapshot = await execution.executor.snapshot(record.employeeId, record.owner);
+      const snapshot = await execution.executor.snapshot(record.employeeId, record.owner, record.purpose);
       if (
         snapshot.sessionId !== record.sessionId ||
         snapshot.account !== record.fromAccount ||
         snapshot.mode !== record.mode ||
-        snapshot.model !== record.model
+        snapshot.model !== record.model ||
+        (record.purpose === 'runtime-refresh' && snapshot.runtimeDigest !== record.runtimeDigest)
       )
         throw new PlanMoveError('The expert’s runtime changed; ask the owner for a new request');
       const target = await this.port.validateTarget(snapshot, record.toAccount, record.owner);
@@ -403,6 +421,7 @@ export class PlanMoveRequests {
             handoff: handoff.trim().replace(/[\r\n]+/g, ' '),
             ...(record.model ? { model: record.model } : {}),
             ...(record.targetMode ? { targetMode: record.targetMode } : {}),
+            ...(record.purpose ? { purpose: record.purpose, runtimeDigest: record.runtimeDigest } : {}),
           },
           record.owner,
           execution.executor

@@ -12,6 +12,17 @@ function messages() {
   };
 }
 describe('queued expert plan approval messages', () => {
+  it('describes explicit refresh and its real cleanup-before-launch order without exposing a credential', async () => {
+    const m = messages();
+    m.lastSeen.mockReturnValue({ messageId: 'notice', at: 100 });
+    await deliverPlanRequest({ ...record, toAccount: 'first', targetMode: 'codex', purpose: 'runtime-refresh', runtimeDigest: 'a'.repeat(64) },
+      m as unknown as PlanRequestMessages, () => true);
+    const text = (m.post.mock.calls[0] as unknown as [unknown, unknown, string])[2];
+    expect(text).toContain('runtime refresh');
+    expect(text).toContain('preserving the selected runtime settings');
+    expect(text).toContain('verifies source cleanup, then starts');
+    expect(text).not.toContain('a'.repeat(64));
+  });
   it('posts the private nonce-free message immediately and waits for read/submission acknowledgement', async () => {
     const m = messages();
     await deliverPlanRequest(record, m as unknown as PlanRequestMessages, () => true, async () => {

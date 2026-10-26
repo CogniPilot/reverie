@@ -62,6 +62,40 @@ function harness(owner?: string) {
 }
 
 describe('runtime adapter uses normal creation and interactive paths, never changes live account env', () => {
+  async function refreshHarness() {
+    const h = harness();
+    const source = h.sessions.get('old')!, candidate = h.sessions.get('new')!;
+    const saved = source.toState();
+    candidate.toState = () => ({ ...saved, id: 'new', codexConfig: { ...saved.codexConfig, resumeSessionId: undefined } });
+    const snapshot = await h.executor.snapshot('casey', undefined, 'runtime-refresh');
+    const refresh: PlanMoveInput = { ...input, model: undefined, toAccount: 'first',
+      purpose: 'runtime-refresh', runtimeDigest: snapshot.runtimeDigest };
+    return { ...h, source, candidate, saved, refresh };
+  }
+
+  it('refreshes through normal metadata creation while preserving selected policy and clearing provider linkage', async () => {
+    const h = await refreshHarness();
+    expect(await h.executor.create(h.refresh, undefined)).toBe('new');
+    await h.executor.beforeStop(h.refresh);
+    expect(h.runtime.request).toHaveBeenCalledWith('POST', '/api/sessions', expect.objectContaining({
+      subscriptionProfileId: 'first', codexConfig: { reasoningEffort: 'high', renderMode: 'hybrid' }, workingDir: '/scratch/casey' }));
+    expect(h.runtime.cleanup).not.toHaveBeenCalled();
+  });
+
+  it('rejects source setting changes while creating and candidate policy drift before stopping', async () => {
+    for (const drift of ['source', 'candidate', 'resume'] as const) {
+      const h = await refreshHarness();
+      await h.executor.create(h.refresh, undefined);
+      const target = drift === 'source' ? h.source : h.candidate;
+      target.toState = () => ({ ...h.saved, id: drift === 'source' ? 'old' : 'new', codexConfig: {
+        ...h.saved.codexConfig, resumeSessionId: drift === 'resume' ? 'old-thread' : undefined,
+        reasoningEffort: drift === 'resume' ? 'high' : 'low',
+      } });
+      await expect(h.executor.beforeStop(h.refresh)).rejects.toThrow();
+      expect(h.runtime.cleanup).not.toHaveBeenCalled();
+      expect(h.runtime.request).toHaveBeenCalledTimes(1);
+    }
+  });
   it('refuses a bound session belonging to another owner before any launch or cleanup', async () => {
     const test = harness();
     (test.sessions.get('old') as unknown as { owner?: string }).owner = 'another-owner';

@@ -956,6 +956,16 @@ function tmuxCommand(socket: string): string {
   return `tmux -L ${shellescape(socket)}`;
 }
 
+/** Keep the complete pane program opaque to the outer command shell. */
+export function buildTmuxPaneLaunchCommand(
+  tmux: string,
+  muxName: string,
+  launchCommand: string,
+  onlyIfDead = false
+): string {
+  return `${tmux} respawn-pane${onlyIfDead ? '' : ' -k'} -c ${TMUX_LAUNCH_CWD} -t ${shellescape(muxName)} bash -c ${shellescape(launchCommand)}`;
+}
+
 /**
  * Build Claude CLI permission flags for the tmux command string.
  * Validates allowedTools to prevent command injection.
@@ -1373,7 +1383,7 @@ export interface DockerLaunchOptions {
  * Build the ONE `bash -c` launch string for a docker session: image-check ->
  * ensure (inspect-or-create) -> start -> `exec docker exec -it` into the durable
  * in-container tmux (resume-aware). PURE and unit-testable. The escaping survives
- * four layers: outer `bash -c "…"` (JSON.stringify at respawn-pane) -> the joined
+ * four layers: shell-escaped outer `bash -c` argument -> the joined
  * command -> `docker exec … sh -lc '<tmux>'` -> tmux `'<paneCommand>'`.
  */
 export function buildDockerLaunchCommand(opts: DockerLaunchOptions): string {
@@ -1460,11 +1470,8 @@ export function buildDockerLaunchCommand(opts: DockerLaunchOptions): string {
   const ensure = adopted
     ? `${base} inspect ${name} >/dev/null 2>&1 || { echo ${notFoundMsg}; exit 1; }`
     : `${base} inspect ${name} >/dev/null 2>&1 || ${createCommand}`;
-  // ⚠️ No double quotes and no `$(…)` in the ADOPTED arms. This whole chain is
-  // embedded in an outer `bash -c "…"`, so an unescaped `"` closes that string early,
-  // the rest is re-tokenized, and tmux fails to exec with a bare `execvp(3) failed`.
-  // A `grep -qx` pipeline reads the same answer using only the single-quoted form
-  // every other line in this builder already uses.
+  // Inspecting an adopted container never starts it; the fixed pipeline only
+  // accepts an already-running container.
   const start = adopted
     ? `${base} inspect -f ${shellescape('{{.State.Running}}')} ${name} 2>/dev/null | grep -qx true || { echo ${notRunningMsg}; exit 1; }`
     : `${base} start ${name} >/dev/null 2>&1 || { echo ${startFailMsg}; exit 1; }`;
@@ -2123,7 +2130,9 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
     // from inside the pane. `shell` and any unregistered mode resolve to null and get
     // nothing prepended.
     const dir = resolveCliBinDir(mode);
-    return { pathExport: dir ? `export PATH="${dir}:$PATH" && ` : '', dir };
+    // The worker image selects its own CLI and packaged tool PATH. A website
+    // binary directory can shadow those tools even when the command is quoted.
+    return { pathExport: dir && !process.env.REVERIE_WORKER_SOCKET ? `export PATH=${shellescape(dir)}:"$PATH" && ` : '', dir };
   }
 
   /**
@@ -2418,9 +2427,9 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
 
       // Replace the shell with the actual command (no echo in terminal). Keep
       // pane launch in /tmp, then cd inside bash against the current mount table.
-      const launchCmd = remote || docker ? fullCmd : `cd ${JSON.stringify(workingDir)} && ${fullCmd}`;
+      const launchCmd = remote || docker ? fullCmd : `cd ${shellescape(workingDir)} && ${fullCmd}`;
       execSync(
-        `${this.tmux()} respawn-pane -k -c ${TMUX_LAUNCH_CWD} -t "${muxName}" bash -c ${JSON.stringify(launchCmd)}`,
+        buildTmuxPaneLaunchCommand(this.tmux(), muxName, launchCmd),
         {
           timeout: EXEC_TIMEOUT_MS,
           stdio: 'ignore',
@@ -2676,9 +2685,9 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
       this.applyEnvOverrides(muxName, this.mergedCliEnv(mode, options, envOverrides), unsetEnvKeys);
 
       // -c /tmp + cd bounce — see createSession() for rationale (stale FUSE state).
-      const launchCmd = remote || docker ? fullCmd : `cd ${JSON.stringify(workingDir)} && ${fullCmd}`;
+      const launchCmd = remote || docker ? fullCmd : `cd ${shellescape(workingDir)} && ${fullCmd}`;
       await execAsync(
-        `${this.tmux()} respawn-pane${options.onlyIfDead ? '' : ' -k'} -c ${TMUX_LAUNCH_CWD} -t "${muxName}" bash -c ${JSON.stringify(launchCmd)}`,
+        buildTmuxPaneLaunchCommand(this.tmux(), muxName, launchCmd, options.onlyIfDead),
         {
           timeout: EXEC_TIMEOUT_MS,
         }

@@ -11,6 +11,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   TmuxManager,
   buildCodexCommand,
+  buildTmuxPaneLaunchCommand,
   buildRemoteKillCommand,
   buildRemoteLaunchCommand,
   formatPaneSnapshot,
@@ -748,6 +749,139 @@ describe('TmuxManager (unit)', () => {
       });
     });
 
+    async function launchFixture() {
+      const fs = await vi.importActual<typeof import('node:fs')>('node:fs');
+      const child = await vi.importActual<typeof import('node:child_process')>('node:child_process');
+      const bash = child.execFileSync('/bin/sh', ['-c', 'command -v bash'], { encoding: 'utf8', env: { PATH: process.env.PATH } }).trim();
+      const path = await import('node:path');
+      const os = await import('node:os');
+      const root = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'tmux-launch-'));
+      const tools = path.join(root, 'tools');
+      fs.mkdirSync(tools);
+      const capture = path.join(root, 'tmux-argv.json');
+      const script = (file: string, body: string) => {
+        fs.writeFileSync(file, `#!${process.execPath}\n${body}\n`, { mode: 0o700 });
+      };
+      script(path.join(tools, 'tmux'), `require('node:fs').writeFileSync(process.env.TMUX_ARGV, JSON.stringify(process.argv.slice(2)))`);
+      const outerArgs = (command: string, env: Record<string, string> = {}) => {
+        child.execFileSync('/bin/sh', ['-c', command], {
+          env: { HOME: root, PATH: tools + ':/bin', TMUX_ARGV: capture, ...env },
+        });
+        return JSON.parse(fs.readFileSync(capture, 'utf8')) as string[];
+      };
+      return { fs, child, bash, path, root, tools, script, outerArgs, close: () => fs.rmSync(root, { recursive: true, force: true }) };
+    }
+
+    it('passes literal variables, substitutions, backticks and spaces through the outer shell as one program', async () => {
+      const f = await launchFixture();
+      try {
+        const data = 'space $PARENT_MARK $(printf OUTER_SUB) `printf OUTER_TICK`';
+        const program = `printf '%s' '${data}'`;
+        const command = buildTmuxPaneLaunchCommand('tmux -L reverie', 'reverie-test', program, true);
+        const args = f.outerArgs(command, { PARENT_MARK: 'website-value' });
+        expect(args.slice(-3)).toEqual(['bash', '-c', program]);
+        expect(args).not.toContain('-k');
+        expect(f.child.execFileSync(f.bash, ['--noprofile', '--norc', '-c', args.at(-1)!], { encoding: 'utf8' })).toBe(data);
+      } finally { f.close(); }
+    });
+
+    it('defers native PATH expansion until the pane shell', async () => {
+      const f = await launchFixture();
+      try {
+        const program = 'printf "%s" "$PATH"';
+        const args = f.outerArgs(buildTmuxPaneLaunchCommand('tmux -L reverie', 'reverie-test', program), { PATH: f.tools + ':/website-only' });
+        expect(args.at(-1)).toBe(program);
+        expect(f.child.execFileSync(f.bash, ['--noprofile', '--norc', '-c', args.at(-1)!], { env: { PATH: '/pane-only' }, encoding: 'utf8' })).toBe('/pane-only');
+      } finally { f.close(); }
+    });
+
+    it('treats a native CLI directory with spaces and shell metacharacters as literal data', async () => {
+      const f = await launchFixture();
+      const originalWorker = process.env.REVERIE_WORKER_SOCKET;
+      delete process.env.REVERIE_WORKER_SOCKET;
+      const NonTestTmuxManager = await importWithTmuxCommandsEnabled();
+      const nonTestManager = new NonTestTmuxManager();
+      const resolver = await import('../src/utils/cli-resolver.js');
+      const cliDir = f.path.join(f.root, 'CLI $NAME $(printf SUB) `printf TICK` with spaces');
+      f.fs.mkdirSync(cliDir);
+      const output = f.path.join(f.root, 'native-provider.json');
+      f.script(f.path.join(cliDir, 'codex'), `require('node:fs').writeFileSync(process.env.PROVIDER_RESULT, JSON.stringify({cwd:process.cwd(),path:process.env.PATH,args:process.argv.slice(2)}))`);
+      const resolverSpy = vi.spyOn(resolver, 'resolveCliBinDir').mockReturnValue(cliDir);
+      mockedExecSync.mockClear();
+      try {
+        await nonTestManager.createSession({ sessionId: '11111111-1234-4123-8123-123456789abc', workingDir: f.root, mode: 'codex' });
+        const command = mockedExecSync.mock.calls.find(([value]) => String(value).includes(' respawn-pane '))?.[0];
+        const args = f.outerArgs(String(command), { PATH: f.tools + ':/website-parent', NAME: 'PARENT_EXPANSION' });
+        f.child.execFileSync(f.bash, ['--noprofile', '--norc', '-c', args.at(-1)!], { env: { HOME: f.root, PATH: '/pane-base', NAME: 'CHILD_EXPANSION', PROVIDER_RESULT: output } });
+        expect(JSON.parse(f.fs.readFileSync(output, 'utf8'))).toMatchObject({cwd: f.root, path: cliDir + ':/pane-base'});
+      } finally {
+        resolverSpy.mockRestore();
+        if (originalWorker === undefined) delete process.env.REVERIE_WORKER_SOCKET;
+        else process.env.REVERIE_WORKER_SOCKET = originalWorker;
+        nonTestManager.destroy(); f.close();
+      }
+    });
+
+    it.each(['create', 'respawn'] as const)('%s preserves worker image shims and private profile selection across both real shell layers', async (action) => {
+      const f = await launchFixture();
+      const originalWorker = process.env.REVERIE_WORKER_SOCKET;
+      const NonTestTmuxManager = await importWithTmuxCommandsEnabled();
+      const nonTestManager = new NonTestTmuxManager();
+      const resolver = await import('../src/utils/cli-resolver.js');
+      const serverBin = f.path.join(f.root, 'server-bin');
+      const profileBin = f.path.join(f.root, 'private-profile-bin');
+      const shimBin = f.path.join(f.root, 'image-autoenv-bin');
+      const plainBin = f.path.join(f.root, 'image-bin');
+      for (const dir of [serverBin, profileBin, shimBin, plainBin]) f.fs.mkdirSync(dir);
+      const resolverSpy = vi.spyOn(resolver, 'resolveCliBinDir').mockReturnValue(serverBin);
+      const output = f.path.join(f.root, 'provider.json');
+      const workerArgs = f.path.join(f.root, 'worker-argv.json');
+      const cwd = f.path.join(f.root, 'project with spaces');
+      f.fs.mkdirSync(cwd);
+      const provider = (selection: string) => `
+const cp = require('node:child_process');
+require('node:fs').writeFileSync(process.env.PROVIDER_RESULT, JSON.stringify({
+  selection: ${JSON.stringify(selection)}, cwd: process.cwd(), args: process.argv.slice(2),
+  cargo: cp.execFileSync(${JSON.stringify(f.bash)}, ['--noprofile', '--norc', '-c', 'command -v cargo'], {encoding:'utf8'}).trim(),
+  profile: cp.execFileSync(${JSON.stringify(f.bash)}, ['--noprofile', '--norc', '-c', 'command -v profile-tool'], {encoding:'utf8'}).trim()
+}));`;
+      f.script(f.path.join(serverBin, 'codex'), provider('website'));
+      f.script(f.path.join(profileBin, 'codex'), provider('private-profile'));
+      for (const file of [f.path.join(serverBin, 'cargo'), f.path.join(plainBin, 'cargo'), f.path.join(shimBin, 'cargo'), f.path.join(profileBin, 'profile-tool')]) f.script(file, '');
+      f.script(f.path.join(f.tools, 'reverie-worker-exec'), `
+const fs = require('node:fs'); const cp = require('node:child_process'); const args = process.argv.slice(2);
+fs.writeFileSync(process.env.WORKER_ARGV, JSON.stringify(args));
+const command = args[args.indexOf('--command') + 1];
+const result = cp.spawnSync(${JSON.stringify(f.bash)}, ['--noprofile', '--norc', '-c', command], {cwd: args[args.indexOf('--cwd') + 1], env:{...process.env, PATH:process.env.WORKER_IMAGE_PATH}, stdio:'inherit'});
+process.exit(result.status === null ? 1 : result.status);`);
+      process.env.REVERIE_WORKER_SOCKET = '/fixture/broker.sock';
+      mockedExecSync.mockClear(); mockedExec.mockClear();
+      try {
+        const sessionId = '12345678-1234-4123-8123-123456789abc';
+        if (action === 'create') await nonTestManager.createSession({ sessionId, workingDir: cwd, mode: 'codex' });
+        else {
+          nonTestManager.registerSession({ sessionId, muxName: 'reverie-12345678', pid: 1000, createdAt: Date.now(), workingDir: cwd, mode: 'codex', attached: false });
+          expect(await nonTestManager.respawnPane({ sessionId, workingDir: cwd, mode: 'codex', onlyIfDead: true })).toBe(4242);
+        }
+        const calls = action === 'create' ? mockedExecSync.mock.calls : mockedExec.mock.calls;
+        const command = calls.find(([value]) => String(value).includes(' respawn-pane '))?.[0];
+        expect(typeof command).toBe('string');
+        const env = { PATH: f.tools + ':' + serverBin + ':/bin', WORKER_IMAGE_PATH: [shimBin, profileBin, plainBin].join(':'), WORKER_ARGV: workerArgs, PROVIDER_RESULT: output };
+        const args = f.outerArgs(String(command), env);
+        f.child.execFileSync(f.bash, ['--noprofile', '--norc', '-c', args.at(-1)!], { env: { HOME: f.root, ...env } });
+        const sent = JSON.parse(f.fs.readFileSync(workerArgs, 'utf8')) as string[];
+        expect(sent.slice(0, 4)).toEqual(['--session-id', sessionId, '--cwd', cwd]);
+        expect(sent.at(-1)).not.toContain(serverBin);
+        const result = JSON.parse(f.fs.readFileSync(output, 'utf8'));
+        expect(result).toMatchObject({ selection: 'private-profile', cwd, cargo: f.path.join(shimBin, 'cargo'), profile: f.path.join(profileBin, 'profile-tool') });
+      } finally {
+        resolverSpy.mockRestore();
+        if (originalWorker === undefined) delete process.env.REVERIE_WORKER_SOCKET;
+        else process.env.REVERIE_WORKER_SOCKET = originalWorker;
+        nonTestManager.destroy(); f.close();
+      }
+    });
+
     it('starts new tmux sessions from /tmp and cd-bounces into the requested workspace', async () => {
       const NonTestTmuxManager = await importWithTmuxCommandsEnabled();
       const nonTestManager = new NonTestTmuxManager();
@@ -774,8 +908,8 @@ describe('TmuxManager (unit)', () => {
         const respawnCall = mockedExecSync.mock.calls.find(
           ([cmd]) => typeof cmd === 'string' && cmd.includes(' respawn-pane ')
         );
-        expect(respawnCall?.[0]).toContain(`tmux -L 'reverie' respawn-pane -k -c /tmp -t "reverie-00000030"`);
-        expect(respawnCall?.[0]).toContain('cd \\"/mnt/gdrive/project with spaces\\" &&');
+        expect(respawnCall?.[0]).toContain(`tmux -L 'reverie' respawn-pane -k -c /tmp -t 'reverie-00000030'`);
+        expect(respawnCall?.[0]).toContain(String.raw`cd '\''/mnt/gdrive/project with spaces'\'' &&`);
       } finally {
         nonTestManager.destroy();
       }
@@ -859,8 +993,8 @@ describe('TmuxManager (unit)', () => {
         const respawnCall = vi
           .mocked(currentExec)
           .mock.calls.find(([cmd]) => typeof cmd === 'string' && cmd.includes(' respawn-pane '));
-        expect(respawnCall?.[0]).toContain(`tmux -L 'reverie' respawn-pane -k -c /tmp -t "reverie-abcd1234"`);
-        expect(respawnCall?.[0]).toContain('cd \\"/mnt/gdrive/project\\" &&');
+        expect(respawnCall?.[0]).toContain(`tmux -L 'reverie' respawn-pane -k -c /tmp -t 'reverie-abcd1234'`);
+        expect(respawnCall?.[0]).toContain(String.raw`cd '\''/mnt/gdrive/project'\'' &&`);
       } finally {
         nonTestManager.destroy();
       }
@@ -877,7 +1011,7 @@ describe('TmuxManager (unit)', () => {
         expect(await nonTestManager.respawnPane({ sessionId: 'recovery1234', workingDir: '/tmp', mode: 'shell', onlyIfDead })).toBe(4242);
         const { exec: currentExec } = await import('node:child_process');
         const command = vi.mocked(currentExec).mock.calls.find(([cmd]) => String(cmd).includes(' respawn-pane '))?.[0];
-        expect(command).toContain(`respawn-pane${onlyIfDead ? '' : ' -k'} -c /tmp -t "reverie-abcd1234"`);
+        expect(command).toContain(`respawn-pane${onlyIfDead ? '' : ' -k'} -c /tmp -t 'reverie-abcd1234'`);
         if (onlyIfDead) expect(command).not.toMatch(/respawn-pane\s+-k\b/);
       } finally { nonTestManager.destroy(); }
     });

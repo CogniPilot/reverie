@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { PlanMoveStore } from '../src/plan-move-store.js';
 import { describe, expect, it, vi } from 'vitest';
 import { PlanMoves, type PlanMoveInput, type PlanMovePort, type PlanMoveRecord } from '../src/plan-move.js';
+import { createHash } from 'node:crypto';
 
 const input: PlanMoveInput = {
   id: 'move-one',
@@ -67,6 +68,42 @@ function harness(initial: PlanMoveRecord[] = []) {
 }
 
 describe('plan move transaction', () => {
+  it('refreshes only an explicit same-account request through the unchanged stop-before-start transaction', async () => {
+    const h = harness(), runtimeDigest = 'a'.repeat(64);
+    h.port.snapshot = vi.fn(async () => ({ sessionId: 'old', name: 'Casey', account: 'first', working: false, mode: 'codex', runtimeDigest }));
+    const refresh = { ...input, toAccount: 'first', purpose: 'runtime-refresh' as const, runtimeDigest };
+    await h.moves.begin(refresh);
+    await flush();
+    expect(h.events).toEqual(['create', 'audit:stopping', 'stop:old', 'start', 'ready', 'audit:completed']);
+    expect(await h.moves.get(input.id)).toMatchObject({ phase: 'completed', purpose: 'runtime-refresh', runtimeDigest });
+    expect((await h.moves.begin(refresh)).id).toBe(input.id);
+    await expect(h.moves.begin({ ...refresh, purpose: undefined, runtimeDigest: undefined })).rejects.toThrow('another request');
+  });
+
+  it('refuses refresh account, model, force and launch-policy changes before creating anything', async () => {
+    for (const change of [{ toAccount: 'second' }, { runtimeDigest: 'b'.repeat(64) }, { forceBusy: true }, { model: 'changed' }]) {
+      const h = harness(), runtimeDigest = 'a'.repeat(64);
+      h.port.snapshot = vi.fn(async () => ({ sessionId: 'old', name: 'Casey', account: 'first', working: false, mode: 'codex', runtimeDigest }));
+      await expect(h.moves.begin({ ...input, toAccount: 'first', purpose: 'runtime-refresh', runtimeDigest, ...change })).rejects.toThrow();
+      expect(h.port.create).not.toHaveBeenCalled();
+    }
+  });
+
+  it('rechecks refresh policy after waiting for idle and preserves absent-purpose legacy digest bytes', async () => {
+    const h = harness();
+    h.port.idle = vi.fn(() => new Promise(() => {}));
+    await h.moves.begin(input);
+    expect(h.saved()[0].requestDigest).toBe(createHash('sha256').update(JSON.stringify([input.forceBusy, input.handoff, '', ''])).digest('hex'));
+    expect(h.saved()[0]).not.toHaveProperty('purpose');
+    expect(h.saved()[0]).not.toHaveProperty('runtimeDigest');
+    const refresh = harness(); let runtimeDigest = 'a'.repeat(64);
+    refresh.port.snapshot = vi.fn(async () => ({ sessionId: 'old', name: 'Casey', account: 'first', working: false, mode: 'codex', runtimeDigest }));
+    refresh.port.idle = vi.fn(async () => { runtimeDigest = 'b'.repeat(64); });
+    await refresh.moves.begin({ ...input, toAccount: 'first', purpose: 'runtime-refresh', runtimeDigest });
+    await flush();
+    expect(refresh.port.create).not.toHaveBeenCalled();
+    expect((await refresh.moves.get(input.id))?.phase).toBe('failed');
+  });
   it('reserves metadata, audits and stops the old laptop before starting its replacement', async () => {
     const test = harness();
     await test.moves.begin(input);
