@@ -84,6 +84,12 @@ export function registerSessionRuntimeRoutes(app: FastifyInstance, ctx: SessionP
     if (!session) return reply.code(404).send({ success: false, error: 'Unknown expert runtime' });
     const fail = (status: number, error: string) => reply.code(status).send({ success: false, error });
     const body = parseBody(Input, req.body);
+    // A worker transport respawn replaces the server's terminal viewer. The
+    // broker may reuse its still-running laptop and ignore the new launch line,
+    // so a new viewer PID cannot confirm a runtime switch. Keep the selected
+    // recipe intact until a supported whole-session replacement is performed.
+    if (!detached && process.env.REVERIE_WORKER_SOCKET)
+      return fail(409, 'An isolated laptop cannot change runtime in place. Use a supported whole-session replacement; reconnecting its terminal does not restart the running agent.');
     const workBlocked = () => {
       const state = restartEligibility(session);
       if (body.forceRestart) return body.confirmSessionId !== id || !state.recoverable;

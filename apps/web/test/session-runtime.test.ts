@@ -56,6 +56,44 @@ describe('owner runtime transaction', () => {
   const payload = { mode: 'codex', source: { kind: 'subscription', profileId: 'second' }, model: 'gpt-5', effort: 'high' };
   const headers = { 'x-owner-test': 'yes' };
 
+  it.each([false, true])('does not persist an isolated runtime switch from viewer success (recovery=%s)', async (recovery) => {
+    const { app, session, ctx } = await harness();
+    if (recovery) {
+      vi.spyOn(session, 'isBusy').mockReturnValue(true);
+      vi.spyOn(session, 'isWorking', 'get').mockReturnValue(true);
+      vi.spyOn(session, 'lastActivityAt', 'get').mockReturnValue(Date.now() - 300_000);
+    }
+    const original = session.toState();
+    const env = session.getEnvOverridesForPersist();
+    // A new outside viewer does not imply that the broker replaced this
+    // existing inside consumer. The old route treated that viewer as success.
+    const consumer = { pid: 1234, mode: session.mode };
+    let viewerPid = 400;
+    const restart = vi.spyOn(session, 'restartCli').mockImplementation(async () => {
+      viewerPid++;
+      return true;
+    });
+    const configure = vi.spyOn(session, 'configureRuntime');
+    const selected = vi.mocked(selectedSubscription);
+    selected.mockClear();
+    vi.stubEnv('REVERIE_WORKER_SOCKET', '/run/owned-fixture/broker.sock');
+    try {
+      const response = await app.inject({ method: 'POST', url: '/api/sessions/expert-id/runtime', headers,
+        payload: { ...payload, ...(recovery ? { forceRestart: true, confirmSessionId: session.id } : {}) } });
+      expect(response.statusCode).toBe(409);
+      expect(response.json().error).toContain('whole-session replacement');
+      expect(configure).not.toHaveBeenCalled();
+      expect(selected).not.toHaveBeenCalled();
+      expect(restart).not.toHaveBeenCalled();
+      expect(ctx.persistSessionStateNow).not.toHaveBeenCalled();
+      expect(ctx.addSession).not.toHaveBeenCalled();
+      expect(session.toState()).toEqual(original);
+      expect(session.getEnvOverridesForPersist()).toEqual(env);
+      expect(consumer).toEqual({ pid: 1234, mode: original.mode });
+      expect(viewerPid).toBe(400);
+    } finally { vi.unstubAllEnvs(); await app.close(); }
+  });
+
   it('requires the real owner, rejects agents/busy sessions and never starts on GET', async () => {
     const { app, session } = await harness();
     try {
