@@ -47,8 +47,8 @@ try{
  await page.goto(origin,{waitUntil:'domcontentloaded'});
  await page.waitForFunction(()=>window.reverieChat?.built);
  await page.evaluate(()=>window.reverieChat.openCompany());
- for(const name of ['River','Lake']){
-  const card=page.locator('.ca-company-person').filter({has:page.getByText(name,{exact:true})});
+ for(const {id,name} of company.employees){
+  const card=page.locator(`.ca-company-person[data-employee-id="${id}"]`);
   await card.getByRole('checkbox',{name:'Sleep',exact:true}).check();
   await card.getByText('Preferences saved.',{exact:true}).waitFor();
   await card.getByRole('checkbox',{name:'Dream',exact:true}).check();
@@ -58,8 +58,8 @@ try{
   assert.equal(await card.getByRole('button',{name:'Retire '+name,exact:true}).isVisible(),false);
  }
  await page.reload({waitUntil:'domcontentloaded'});await page.waitForFunction(()=>window.reverieChat?.built);await page.evaluate(()=>window.reverieChat.openCompany());
- for(const name of ['River','Lake']){
-  const card=page.locator('.ca-company-person').filter({has:page.getByText(name,{exact:true})});
+ for(const {id,name} of company.employees){
+  const card=page.locator(`.ca-company-person[data-employee-id="${id}"]`);
   assert.equal(await card.getByRole('checkbox',{name:'Sleep',exact:true}).isChecked(),true);
   assert.equal(await card.getByRole('checkbox',{name:'Dream',exact:true}).isChecked(),true);
   for(const label of ['Recovery permission for '+name,'Move own plan for '+name,'Manage team plans for '+name])assert.equal(await card.getByRole('checkbox',{name:label,exact:true}).isChecked(),true);
