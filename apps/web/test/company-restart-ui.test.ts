@@ -50,18 +50,23 @@ it('rejects an unverified owner even with stale management permission', async ()
   expect(h.document.querySelector('.ca-employee-restart .is-primary').disabled).toBe(true);
   expect(h.document.querySelector('.ca-employee-restart [role="alert"]').textContent).toContain('Sign in as the owner'); expect(calls).toHaveLength(0);
 });
-it('offers restart on Company cards and expert popovers without changing identity', async () => {
+it('offers restart in the detailed Company profile and expert popovers without changing identity', async () => {
   const { h } = await setup(); await h.shell.openCompany();
-  h.document.querySelector('[aria-label="Restart session for Alex"]').click(); await h.flush();
+  expect(h.document.querySelector('.ca-company-chart [aria-label="Restart session for Alex"]')).toBeNull();
+  h.document.querySelector('[aria-label="Edit profile for Alex"]').click(); await h.flush();
+  h.document.querySelector('.ca-expert-profile [aria-label="Restart session for Alex"]').click(); await h.flush();
   expect(h.document.querySelector('.ca-employee-restart')).not.toBeNull(); h.document.querySelector('.ca-employee-restart button').click();
   h.shell.closePage(); h.document.querySelector('.ca-member').click();
   const restart = [...h.document.querySelectorAll('.ca-profile-actions button')].find(button => button.textContent === 'Restart session')!;
   expect(restart).not.toBeUndefined(); restart.click(); await h.flush(); expect(h.document.querySelector('.ca-employee-restart')).not.toBeNull();
 });
 
-it('marks restart and leave office as danger actions on cards, profiles and member menus', async () => {
+it('keeps compact cards free of actions and marks profile and member-menu lifecycle actions as dangerous', async () => {
   const { h } = await setup(); await h.shell.openCompany();
-  expect(h.document.querySelector('[aria-label="Restart session for Alex"]').classList.contains('is-danger')).toBe(true);
+  expect(h.document.querySelector('.ca-company-chart [aria-label="Restart session for Alex"]')).toBeNull();
+  expect(h.document.querySelector('.ca-company-chart [aria-label="Leave office for Alex"]')).toBeNull();
+  h.document.querySelector('[aria-label="Edit profile for Alex"]').click(); await h.flush();
+  expect(h.document.querySelector('.ca-expert-profile [aria-label="Restart session for Alex"]').classList.contains('is-danger')).toBe(true);
   expect(h.document.querySelector('[aria-label="Leave office for Alex"]').classList.contains('is-danger')).toBe(true);
   h.shell.closePage(); const anchor = h.document.querySelector('.ca-member'); anchor.click();
   for (const name of ['Restart session', 'Leave office']) {

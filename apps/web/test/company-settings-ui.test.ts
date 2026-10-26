@@ -56,7 +56,7 @@ async function setup(verified = true) {
 }
 const submit = (h: any) =>
   h.document
-    .querySelector('.ca-company-settings form')
+    .querySelector('.ca-company-settings .ca-company-settings-form')
     .dispatchEvent(new h.window.Event('submit', { bubbles: true, cancelable: true }));
 
 it('opens styled settings within Company without the legacy registration or nightly schedule UI', async () => {
@@ -80,7 +80,9 @@ it('opens styled settings within Company without the legacy registration or nigh
     'Enable dedicated tool-capable research sessions',
   ])
     expect(dialog.textContent).not.toContain(label);
-  expect(dialog.querySelector('[name="sessionId"], [name="icon"], input[type="checkbox"]')).toBeNull();
+  expect(dialog.querySelector('[name="sessionId"], [name="icon"]')).toBeNull();
+  expect(dialog.querySelector('[aria-label="Automatic recovery"]')).not.toBeNull();
+  expect(dialog.querySelector('.ca-company-settings-form input[type="checkbox"]')).toBeNull();
   h.document.querySelector('[aria-label="Close company settings"]').click();
   await h.flush();
   expect(h.document.querySelector('.ca-company-settings')).toBeNull();
@@ -143,13 +145,13 @@ it('preserves owner draft values and surfaces server refusal without enabling a 
   await h.flush();
   expect(h.document.querySelector('.ca-company-settings [role=alert]').textContent).toBe('Owner sign-in required');
   expect(h.document.querySelector('.ca-company-settings [aria-label="Owner display name"]').value).toBe('Draft');
-  expect(h.document.querySelector('.ca-company-settings button[type=submit]').disabled).toBe(false);
+  expect(h.document.querySelector('.ca-company-settings-form button[type=submit]').disabled).toBe(false);
   expect(calls.some((call) => call.method === 'POST')).toBe(false);
 });
 
 it('does not expose owner editing when the caller is not verified', async () => {
   const { h } = await setup(false);
   await h.shell.openCompanySettings();
-  expect(h.document.querySelector('.ca-company-settings form')).toBeNull();
+  expect(h.document.querySelector('.ca-company-settings .ca-company-settings-form')).toBeNull();
   expect(h.document.querySelector('.ca-company-settings-receipts')).not.toBeNull();
 });
