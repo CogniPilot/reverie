@@ -23,7 +23,9 @@ async function fixture() {
 it('shows humans with roles, avatars and live presence without adding agent seats or action menus', async () => {
   const h = await fixture();
   h.shell.renderMembers();
-  expect(h.document.querySelector('.ca-members').textContent).toContain('People — 2');
+  expect([...h.document.querySelectorAll('.ca-members-head')].map(heading => heading.textContent)).toEqual([
+    'Admin — 1', 'Online — 1', 'Offline — 1',
+  ]);
   expect(h.document.querySelector('[data-human-id="owner"]').getAttribute('aria-label')).toBe(
     'Original Owner, Owner, online'
   );

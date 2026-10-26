@@ -765,41 +765,26 @@ describe('the profile card', () => {
     expect(h.document.querySelector('.ca-profile')).toBeNull();
     expect(h.document.activeElement).toBe(member);
   });
-  it('describes each button in one line: hover text, read out with the button, and an (i) toggle that shows them on a touch screen', async () => {
+  it('keeps only the conversation action in the compact profile and management in its context menu', async () => {
     const h = await createHarness({ sessions, rooms: fixtureRooms() });
-    (h.document.querySelector('.ca-member') as HTMLButtonElement).click();
-    const buttons = [...h.document.querySelectorAll<HTMLButtonElement>('.ca-profile-actions button')];
-    const tips = Object.fromEntries(buttons.map((b) => [b.textContent, b]));
-    expect(Object.keys(tips)).toEqual(expect.arrayContaining(['Message', 'Debug terminal', 'Remove from channel']));
-    for (const label of ['Edit status', 'Re-brief', 'Upload image', 'Remove image', 'Pronouns', 'Wake on @mentions only']) expect(tips[label]).toBeUndefined();
-    for (const [label, b] of Object.entries(tips)) {
-      expect(b.title.length, label).toBeGreaterThan(15);
-      const described = h.document.getElementById(b.getAttribute('aria-describedby')!)!;
-      expect(described.textContent, label).toBe(b.title);
-      expect(b.title.includes('\n'), label).toBe(false);
-    }
-    expect(tips['Debug terminal'].title).toBe("Open this agent's live terminal");
-    // a mouse device has hover: no toggle
+    const anchor = h.document.querySelector('.ca-member') as HTMLButtonElement;
+    anchor.click();
+    expect([...h.document.querySelectorAll('.ca-profile-actions button')].map(button => button.textContent)).toEqual(['Message']);
     expect(h.document.querySelector('.ca-tips-toggle')).toBeNull();
+    h.shell.openMemberMenu(h.shell.room.members[0], anchor);
+    const labels = [...h.document.querySelectorAll('.ca-member-menu button')].map(button => button.textContent);
+    expect(labels).toEqual(expect.arrayContaining(['Debug terminal', 'Make voice', 'Remove from channel']));
   });
 
-  it('on a touch screen the card has an (i) toggle that shows the one-liners under the buttons', async () => {
+  it('keeps the touch profile concise without an extra explanations toggle', async () => {
     const h = await createHarness({ sessions, rooms: fixtureRooms() });
-    (h.window as unknown as { matchMedia: (q: string) => { matches: boolean } }).matchMedia = (q) => ({ matches: q === '(hover: none)' });
+    (h.window as unknown as { matchMedia: (q: string) => { matches: boolean } }).matchMedia = q => ({ matches: q === '(hover: none)' });
     (h.document.querySelector('.ca-member') as HTMLButtonElement).click();
     const card = h.document.querySelector('.ca-profile') as HTMLElement;
-    const toggle = card.querySelector('.ca-tips-toggle') as HTMLButtonElement;
-    expect(toggle).not.toBeNull();
-    expect(toggle.getAttribute('aria-pressed')).toBe('false');
-    expect(card.classList.contains('show-tips')).toBe(false);
-    toggle.click();
-    expect(card.classList.contains('show-tips')).toBe(true);
-    expect(toggle.getAttribute('aria-pressed')).toBe('true');
-    expect([...card.querySelectorAll('.ca-profile-actions button')].map(button => button.textContent)).toEqual(['Message', 'Debug terminal', 'Make voice', 'Remove from channel']);
-    expect(card.querySelectorAll('.ca-tip')).toHaveLength(4);
-    toggle.click();
-    expect(card.classList.contains('show-tips')).toBe(false);
-    expect(h.document.querySelector('.ca-profile')).not.toBeNull(); // the toggle does not close the card
+    expect(card.querySelector('.ca-tips-toggle')).toBeNull();
+    expect([...card.querySelectorAll('.ca-profile-actions button')].map(button => button.textContent)).toEqual(['Message']);
+    expect(card.querySelectorAll('.ca-tip')).toHaveLength(0);
+    expect(card.querySelector<HTMLDetailsElement>('.ca-profile-technical')!.open).toBe(false);
   });
 
 });
@@ -1230,11 +1215,11 @@ describe('agent profile details', () => {
       [...h.document.querySelectorAll('.ca-profile > .ca-kv')].map(
         (r) => `${r.querySelector('.ca-k')?.textContent}=${r.querySelector('.ca-v')?.textContent}`
       );
-    expect(rows()).toEqual(['Goal=ship it']);
+    expect(rows()).toEqual([]);
     const technical = h.document.querySelector('.ca-profile-technical') as HTMLDetailsElement;
     expect(technical.open).toBe(false);
     expect(technical.querySelector('summary')?.textContent).toBe('Technical details');
-    expect([...technical.querySelectorAll(':scope > .ca-kv')].map(r => r.textContent)).toEqual(['ModelOpus 5.5', 'Efforthigh', 'Wakes onWhat the room says']);
+    expect([...technical.querySelectorAll(':scope > .ca-kv')].map(r => r.textContent)).toEqual(['ModelOpus 5.5', 'Efforthigh', 'Goalship it', 'Wakes onWhat the room says']);
     expect(technical.previousElementSibling?.classList.contains('ca-profile-actions')).toBe(true);
     // a Claude session with no launch effort says so, and one that only has its launch model says that too
     const bare = await createHarness({
@@ -1985,17 +1970,19 @@ describe('notification settings', () => {
   const stored = (h: Awaited<ReturnType<typeof createHarness>>) =>
     JSON.parse(h.window.localStorage.getItem('reverie:chat:notify') || '{}');
 
-  it('the header bell offers Mute and the four levels, and a level changes what the sidebar shows', async () => {
+  it('the channel context menu exposes the notification levels and changes sidebar counts', async () => {
     const h = await createHarness({ sessions, rooms: rs(), stored: { 'reverie:chatroom': 'r1' } });
     // r2 has 2 unread: a dot/count shows; choose "Nothing" for it by selecting it first
     await h.shell.selectRoom('r2');
-    (h.document.querySelector('.ca-head [aria-label^="Notification settings"]') as HTMLElement).click();
+    row(h, 'r2').dispatchEvent(new h.window.MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+    entry(h, 'Notification settings').click();
     const labels = [...h.document.querySelectorAll('.ca-popmenu button')].map((b) => b.textContent);
-    expect(labels).toEqual(['Mute channel›', 'Use defaultAll messages', 'All messages', 'Only @mentions', 'Nothing']);
+    expect(labels).toEqual(expect.arrayContaining(['Use defaultAll messages', 'All messages', 'Only @mentions', 'Nothing']));
     expect(entry(h, 'Use default').getAttribute('aria-checked')).toBe('true');
     entry(h, 'Only @mentions').click();
     expect(stored(h)).toEqual({ r2: { level: 'mentions', until: 0 } });
-    (h.document.querySelector('.ca-head [aria-label^="Notification settings"]') as HTMLElement).click();
+    row(h, 'r2').dispatchEvent(new h.window.MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+    entry(h, 'Notification settings').click();
     expect(entry(h, 'Only @mentions').getAttribute('aria-checked')).toBe('true');
   });
 
@@ -2019,7 +2006,8 @@ describe('notification settings', () => {
     expect(row(h, 'r1').className).toContain('is-muted');
     expect(row(h, 'r1').className).not.toContain('is-unread');
     expect(stored(h).r1.until).toBeGreaterThan(Date.now());
-    expect(h.document.querySelector('.ca-head [aria-label^="Notification settings"]')).not.toBeNull();
+    expect(h.document.querySelector('.ca-head-bell')).toBeNull();
+    expect(row(h, 'r1').querySelector('.ca-muted-badge')?.textContent).toBe('Muted');
     row(h, 'r1').dispatchEvent(
       new h.window.MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 30, clientY: 30 })
     );

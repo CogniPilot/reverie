@@ -26,7 +26,7 @@ describe('profile portrait preview', () => {
     const picture = card.querySelector<HTMLButtonElement>('.ca-profile-picture')!;
     expect(picture.tagName).toBe('BUTTON');
     expect(picture.getAttribute('aria-label')).toBe("View Alex's picture");
-    expect(card.querySelector('.ca-profile-top--portrait > .ca-profile-picture .ca-profile-avatar')).not.toBeNull();
+    expect(card.querySelector('.ca-profile--compact .ca-profile-top > .ca-profile-picture .ca-profile-avatar')).not.toBeNull();
     picture.focus();
     picture.click();
     const viewer = h.document.querySelector<HTMLDialogElement>('.ca-profile-image-view')!;

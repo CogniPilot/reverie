@@ -533,13 +533,19 @@ function caPresence(member) {
   return member.working ? 'working' : 'online';
 }
 
-/** Member list sections: the admin (a room's coordinator), then everyone online, then offline. */
-function caMemberSections(members) {
-  const list = Array.isArray(members) ? members : [];
-  const coordinator = list.filter((m) => m.role === 'coordinator');
-  const rest = list.filter((m) => m.role !== 'coordinator');
-  const online = rest.filter((m) => caPresence(m) !== 'offline');
-  const offline = rest.filter((m) => caPresence(m) === 'offline');
+/** One name-sorted roster: room admins/owner accounts, then online, then offline. */
+function caMemberSections(members, humans = []) {
+  const people = new Set(Array.isArray(humans) ? humans : []);
+  const list = [...(Array.isArray(members) ? members : []), ...people];
+  const admin = (m) => people.has(m) ? m.role === 'owner' : m.role === 'coordinator';
+  const present = (m) => people.has(m) ? m.online === true : caPresence(m) !== 'offline';
+  const byName = (a, b) => String(a.name || '').localeCompare(String(b.name || ''), undefined, { sensitivity: 'base' })
+    || String(a.name || '').localeCompare(String(b.name || ''))
+    || String(a.sessionId || a.id || '').localeCompare(String(b.sessionId || b.id || ''));
+  const coordinator = list.filter(admin).sort(byName);
+  const rest = list.filter((m) => !admin(m));
+  const online = rest.filter(present).sort(byName);
+  const offline = rest.filter((m) => !present(m)).sort(byName);
   const sections = [];
   if (coordinator.length) sections.push({ key: 'coordinator', label: 'Admin', members: coordinator });
   if (online.length) sections.push({ key: 'online', label: 'Online', members: online });
@@ -1068,7 +1074,7 @@ const CA_PAGES = {
   handbook: { label: 'Handbook', icon: 'book', path: '/handbook' },
   workspace: { label: 'Workspace', icon: 'folder', path: '/workspace' },
   bots: { label: 'Bots', icon: 'gear', path: '/bots' },
-  people: { label: 'People', icon: 'members', path: '/people' },
+  people: { label: 'Accounts', icon: 'members', path: '/people' },
   previews: { label: 'Laptop previews', icon: 'folder', path: '/previews' },
   company: { label: 'Company', icon: 'org', path: null, nav: false },
   'company-plans': { label: 'Company plans', icon: 'gauge', path: null, nav: false },
@@ -1535,7 +1541,9 @@ class ReverieChatApp {
     const stats = this.el('div', 'ca-stats');
     stats.hidden = true;
     stats.setAttribute('aria-label', 'Machine load');
-    side.append(sideHead, sideTitle, sideScroll, stats);
+    const machineBar = this.el('div', 'ca-machine-bar');
+    machineBar.append(stats);
+    side.append(sideHead, sideTitle, sideScroll, machineBar);
 
     const main = this.el('main', 'ca-main');
     const head = this.el('header', 'ca-head');
@@ -1556,8 +1564,9 @@ class ReverieChatApp {
     const pinsBtn = this.button('ca-icon-btn ca-head-pins', 'Pinned messages', () => this.room && this.openPinsDialog(this.room.id), { icon: 'pin' });
     pinsBtn.hidden = true;
     const phoneBtn = this.button('ca-icon-btn ca-head-phone', 'Install app and notifications', () => window.ReverieMobile?.open(), { icon: 'phone' });
-    const bellBtn = this.button('ca-icon-btn ca-head-bell', 'Notification settings', () => this.openNotifyMenu(bellBtn), { icon: 'bell' });
-    bellBtn.setAttribute('aria-haspopup', 'menu');
+    const mutedBadge = this.el('span', 'ca-muted-badge', 'Muted');
+    mutedBadge.hidden = true;
+    mutedBadge.title = 'Channel notifications are muted';
     // On or off; who is read ("Replies to me" or "Everyone") is chosen in the channel menu.
     const speakBtn = this.button('ca-icon-btn ca-head-speak', 'Enable spoken replies in this room', () => {
       this.app._setSpeakReplies?.(this.roomId, this.app._speakRepliesIn?.(this.roomId) ? 'off' : 'mine');
@@ -1567,7 +1576,7 @@ class ReverieChatApp {
     moreBtn.title = 'More actions';
     moreBtn.setAttribute('aria-haspopup', 'menu');
     speakBtn.hidden = true;
-    head.append(navBtn, headTitle, inviteBtn, headTopic, spacer, speakBtn, pinsBtn, phoneBtn, bellBtn, membersBtn, moreBtn);
+    head.append(navBtn, headTitle, mutedBadge, inviteBtn, headTopic, spacer, speakBtn, pinsBtn, phoneBtn, membersBtn, moreBtn);
 
     const body = this.el('div', 'ca-body');
     const chat = this.el('section', 'ca-chat');
@@ -1585,7 +1594,7 @@ class ReverieChatApp {
 
     Object.assign(this.els, {
       rail, side, sideHead, sideTitle, sideScroll, user, main, head, headTitle, headTopic,
-      membersBtn, membersDot, membersCount, bellBtn, navBtn, inviteBtn, pinsBtn, phoneBtn, speakBtn, moreBtn, chat, members, scrim, stats, body,
+      membersBtn, membersDot, membersCount, mutedBadge, navBtn, inviteBtn, pinsBtn, phoneBtn, speakBtn, moreBtn, chat, members, scrim, stats, machineBar, body,
     });
 
     // Reuse the chat panel's feed, composer, mic, attachments and create form: it becomes the
@@ -2375,7 +2384,7 @@ class ReverieChatApp {
     this.els.chat.inert = true;
     this.els.members.inert = true;
     const head = this.el('header', 'ca-company-head');
-    head.append(this.el('span', 'ca-spacer'), this.button('ca-btn', 'Back to chat', () => { this.closePage(); this.els.user.querySelector('.ca-office-gear')?.focus(); }, { text: 'Back to chat' }));
+    head.append(this.el('span', 'ca-spacer'), this.button('ca-btn', 'Back to chat', () => { this.closePage(); this.els.machineBar.querySelector('.ca-office-gear')?.focus(); }, { text: 'Back to chat' }));
     const content = this.el('div', 'ca-company-content');
     content.id = 'ca-company-people';
     content.setAttribute('aria-label', 'Company people');
@@ -2427,6 +2436,7 @@ class ReverieChatApp {
       content.replaceChildren();
       head.querySelector('[aria-controls="ca-company-hire"]')?.remove();
       head.querySelector('.ca-company-settings-button')?.remove();
+      head.querySelector('.ca-company-tools-button')?.remove();
       if (!res.ok) { status.textContent = `Could not load company: ${res.error}`; return; }
       const data = res.data || {};
       const employees = data.employees || [];
@@ -2790,7 +2800,10 @@ class ReverieChatApp {
       });
       section.append(form); content.append(section);
       head.querySelector('.ca-company-settings-button')?.remove();
+      head.querySelector('.ca-company-tools-button')?.remove();
       head.insertBefore(this.button('ca-btn ca-company-settings-button', 'Company settings', () => this.openCompanySettings(paint), { text: 'Company settings' }), head.lastElementChild);
+      const tools = this.button('ca-btn ca-company-tools-button', 'Company tools', () => this.openCompanyTools(tools), { text: 'Tools' });
+      head.insertBefore(tools, head.lastElementChild);
     };
     try {
       await paint();
@@ -3131,17 +3144,27 @@ class ReverieChatApp {
   async openOfficeMenu(anchor) {
     let owner = false;
     try { owner = await this.verifyOfficeOwner(); } catch { /* Personal terminal preferences remain available offline. */ }
-    const target = anchor.isConnected ? anchor : this.els.user?.querySelector('.ca-office-gear');
+    const target = anchor.isConnected ? anchor : this.els.machineBar?.querySelector('.ca-office-gear');
     if (!target) return;
-    const entries = owner ? ['handbook', 'workspace', 'bots', 'people', 'previews'].map(kind => ({ label: CA_PAGES[kind].label, run: () => this.openPage(kind) })) : [];
-    if (owner) entries.push({ sep: true }, ...this.officeToolEntries(), { sep: true });
-    entries.push({ label: 'Terminal settings', run: () => this.app.openAppSettings?.() });
-    if (owner) entries.push({ label: 'Office overview', run: () => this.openPage('office') }, { sep: true },
-      ...['company', 'board'].map(kind => ({ label: CA_PAGES[kind].label, run: () => this.openPage(kind) })));
+    const entries = owner
+      ? ['company', 'board'].map(kind => ({ label: CA_PAGES[kind].label, run: () => this.openPage(kind) }))
+      : [{ label: 'Terminal settings', run: () => this.app.openAppSettings?.() }];
     const menu = this.openMenu(entries, { at: target, focus: target, above: true, label: 'Office', className: 'ca-office-menu' });
     // The most-used pages sit next to the footer anchor, including on a short
     // screen where the rest of the menu scrolls above them.
     if (owner) [...menu.querySelectorAll('button')].find(button => button.textContent === 'Company')?.focus();
+  }
+
+  async openCompanyTools(anchor) {
+    try {
+      if (!await this.verifyOfficeOwner()) return this.toast('Sign in as the owner to use company tools.', 'error');
+    } catch { return this.toast('Could not verify company access.', 'error'); }
+    if (!anchor.isConnected) return;
+    const entries = ['handbook', 'workspace', 'bots', 'people', 'previews'].map(kind => ({ label: CA_PAGES[kind].label, run: () => this.openPage(kind) }));
+    entries.push({ sep: true }, ...this.officeToolEntries(), { sep: true },
+      { label: 'Terminal settings', run: () => this.app.openAppSettings?.() },
+      { label: 'Office overview', run: () => this.openPage('office') });
+    this.openMenu(entries, { at: anchor, focus: anchor, label: 'Company tools' });
   }
 
   async runOfficePower(action) {
@@ -3167,7 +3190,7 @@ class ReverieChatApp {
   }
 
   updateOfficeNavigation() {
-    const gear = this.els.user?.querySelector('.ca-office-gear');
+    const gear = this.els.machineBar?.querySelector('.ca-office-gear');
     if (!gear) return;
     const active = !!this.embed && this.embed !== 'embassies';
     gear.classList.toggle('is-active', active);
@@ -4738,7 +4761,7 @@ class ReverieChatApp {
     if (item.active) b.setAttribute('aria-current', 'true');
     const dmState = kind === 'dm' && item.peer ? this.presenceOf(item.peer) : '';
     const isPrivate = kind !== 'dm' && this.rooms.find((r) => r.id === item.id)?.visibility === 'private';
-    b.setAttribute('aria-label', `${kind === 'dm' ? 'Direct message with ' : 'Channel '}${item.label}${isPrivate ? ', private' : ''}${dmState ? `, ${CA_STATE_LABEL[dmState]}` : ''}${this.unreadNote(item)}`);
+    b.setAttribute('aria-label', `${kind === 'dm' ? 'Direct message with ' : 'Channel '}${item.label}${item.muted ? ', notifications muted' : ''}${isPrivate ? ', private' : ''}${dmState ? `, ${CA_STATE_LABEL[dmState]}` : ''}${this.unreadNote(item)}`);
     if (kind === 'dm') {
       b.append(this.app._chatAvatar(item.peer?.sessionId || item.id, item.label, { size: 'md', state: dmState || undefined }));
     } else {
@@ -4748,6 +4771,11 @@ class ReverieChatApp {
       b.append(hash);
     }
     b.append(this.el('span', 'ca-name', item.label));
+    if (item.muted) {
+      const muted = this.el('span', 'ca-muted-badge', 'Muted');
+      muted.setAttribute('aria-hidden', 'true');
+      b.append(muted);
+    }
     // A direct message with an agent that needs you, errored or waits for input says so in words, not only by its dot.
     const note = { needs: 'Needs your approval', error: 'Error', waiting: 'Waiting for input' }[dmState];
     if (note) {
@@ -5262,7 +5290,9 @@ class ReverieChatApp {
     this.els.approvals = approvals;
     user.append(approvals);
     const gear = this.button('ca-icon-btn ca-office-gear', 'Office settings', () => this.openOfficeMenu(gear), { icon: 'gear' });
-    gear.setAttribute('aria-haspopup', 'menu'); user.append(gear);
+    gear.setAttribute('aria-haspopup', 'menu');
+    this.els.machineBar.querySelector('.ca-office-gear')?.remove();
+    this.els.machineBar.prepend(gear);
     if (this.canManageOffice()) {
       const power = this.button('ca-icon-btn ca-office-power-button', 'Office power', () => this.openOfficePowerMenu(power), { icon: 'power' });
       power.setAttribute('aria-haspopup', 'menu'); user.append(power);
@@ -5342,13 +5372,13 @@ class ReverieChatApp {
     }
     headTitle.replaceChildren();
     headTopic.textContent = '';
+    this.els.mutedBadge.hidden = true;
     if (this.embassy?.selected) {
       headTitle.append(this.el('span', 'ca-hash', '#'), this.el('span', 'ca-head-name', this.embassy.connection()?.roomName || 'Shared room'));
       headTopic.textContent = 'Embassy · UNTRUSTED EXTERNAL';
-      this.els.pinsBtn.hidden = true; this.els.inviteBtn.hidden = true; this.els.bellBtn.hidden = true;
+      this.els.pinsBtn.hidden = true; this.els.inviteBtn.hidden = true;
       return;
     }
-    this.els.bellBtn.hidden = false;
     if (this.embed) {
       const page = CA_PAGES[this.embed];
       const mark = this.el('span', 'ca-hash is-drawn');
@@ -5376,9 +5406,8 @@ class ReverieChatApp {
       return;
     }
     const dm = caIsDm(room);
-    const mutedNow = caIsMuted(this.notifyPrefs[room.id]);
-    this.els.bellBtn.classList.toggle('is-muted', mutedNow);
-    this.els.bellBtn.setAttribute('aria-label', mutedNow ? 'Notification settings (this channel is muted)' : 'Notification settings');
+    const mutedNow = this.viewRooms.find(entry => entry.id === room.id)?.muted === true;
+    this.els.mutedBadge.hidden = !mutedNow;
     const headGlyph = dm ? { kind: 'text', text: '@', label: '' } : caRoomGlyph(room);
     const headHash = this.glyphNode(headGlyph);
     if (headGlyph.label) {
@@ -5443,30 +5472,30 @@ class ReverieChatApp {
       const room = this.room;
       if (!room || this.app._chatCreating) return;
       const humans = this.channelHumans();
-      if (humans.length) {
-        box.append(this.el('h3', 'ca-members-head', `People — ${humans.length}`));
-        for (const person of humans) {
-          const row = this.el('button', `ca-member is-${person.online ? 'online' : 'offline'}`);
-          row.type = 'button';
-          row.dataset.humanId = person.id;
-          row.dataset.key = `human:${person.id}`;
-          row.disabled = String(person.name).trim().toLowerCase() === 'everyone';
-          row.title = `Mention ${person.name}`;
-          row.addEventListener('click', () => this.mentionHuman(person.id));
-          row.setAttribute('aria-label', `${person.name}, ${person.role === 'owner' ? 'Owner' : 'Limited'}, ${person.online ? 'online' : 'offline'}`);
-          row.append(this.humanAvatar(person, 'md', person.online ? 'idle' : 'gone'));
-          const text = this.el('span', 'ca-member-text');
-          text.append(this.literalText('span', 'ca-member-name', person.name), this.el('span', 'ca-member-sub', (person.id === this.humanSelf?.id ? 'You · ' : '') + (person.role === 'owner' ? 'Owner' : 'Limited')));
-          row.append(text); box.append(row);
-        }
-      }
-      for (const section of caMemberSections(room.members)) {
+      const people = new Set(humans);
+      for (const section of caMemberSections(room.members, humans)) {
         const h = this.el('h3', 'ca-members-head', `${section.label} — ${section.members.length}`);
         box.append(h);
-        for (const m of section.members) box.append(this.memberRow(m));
+        for (const m of section.members) box.append(people.has(m) ? this.humanMemberRow(m) : this.memberRow(m));
       }
       if (!caIsDm(room)) box.append(this.addMemberRow());
     });
+  }
+
+  humanMemberRow(person) {
+    const row = this.el('button', `ca-member is-${person.online ? 'online' : 'offline'} is-state-${person.online ? 'idle' : 'gone'}`);
+    row.type = 'button';
+    row.dataset.humanId = person.id;
+    row.dataset.key = `human:${person.id}`;
+    row.disabled = String(person.name).trim().toLowerCase() === 'everyone';
+    row.title = `Mention ${person.name}`;
+    row.addEventListener('click', () => this.mentionHuman(person.id));
+    row.setAttribute('aria-label', `${person.name}, ${person.role === 'owner' ? 'Owner' : 'Limited'}, ${person.online ? 'online' : 'offline'}`);
+    row.append(this.humanAvatar(person, 'md', person.online ? 'idle' : 'gone'));
+    const text = this.el('span', 'ca-member-text');
+    text.append(this.literalText('span', 'ca-member-name', person.name), this.el('span', 'ca-member-sub', (person.id === this.humanSelf?.id ? 'You · ' : '') + (person.role === 'owner' ? 'Owner' : 'Limited')));
+    row.append(text);
+    return row;
   }
 
   memberRow(m) {
@@ -5533,8 +5562,11 @@ class ReverieChatApp {
     }
     const employee = this.company?.employees?.find(entry => entry.sessionId === m.sessionId);
     if (!this.app._chatSelf && employee && this.company?.canManage === true && this.phoneStatus?.self === 'owner' && this.phoneStatus?.canSetOwn === true) {
+      entries.push({ label: 'Runtime settings', run: () => this.openRuntimeSettings(employee) },
+        { label: 'Edit profile', run: () => this.openEmployeeProfile(employee, () => { this._profilesAt = 0; this.refreshProfiles(); }) });
       entries.push({ label: 'Restart session', danger: true, disabled: employee.onVacation === true, reason: employee.onVacation ? 'Bring this expert into the office before restarting' : '', run: () => this.openEmployeeRestart(employee) });
-      entries.push({ label: 'Leave office', danger: true, disabled: employee.onVacation === true, reason: employee.onVacation ? 'This expert is already out of office' : '', run: () => this.leaveEmployeeOffice(employee) });
+      const returning = employee.onVacation === true;
+      entries.push({ label: returning ? 'Enter office' : 'Leave office', success: returning, danger: !returning, run: () => returning ? this.enterEmployeeOffice(employee) : this.leaveEmployeeOffice(employee) });
     }
     if (!caIsDm(this.room)) {
       entries.push(
@@ -5543,11 +5575,14 @@ class ReverieChatApp {
           tip: appoint ? 'Change the room coordinator seat' : '',
           reason: !appoint ? 'Only the owner or a server Admin can change the channel lead' : '',
           run: () => this.app._appointChatCoordinator(m.role === 'coordinator' ? null : m.sessionId) },
+        { label: m.voice ? 'Remove voice' : 'Make voice', run: () => this.app._setChatMemberVoice(m.sessionId, !m.voice) },
         { label: 'Remove from channel', danger: true, disabled: !remove,
           reason: !remove ? 'Only the user or channel lead can remove another member' : '',
           run: () => this.app._removeChatMember(m) },
       );
     }
+    if (!caIsDm(this.room) && this.serverFeatures.replace && !m.postOnly && m.alive === false)
+      entries.push({ label: 'Move to new session', run: () => this.openReplaceDialog(m) });
     entries.push({ sep: true });
     if (this.app.sessions?.has?.(m.sessionId)) {
       entries.push({ label: 'Debug terminal', run: () => this.showDebug(m.sessionId) });
@@ -5712,19 +5747,18 @@ class ReverieChatApp {
   openProfile(m, anchor) {
     this.closeMenus();
     this.closeProfile();
-    const card = this.el('div', 'ca-profile');
+    const card = this.el('div', 'ca-profile ca-profile--compact');
     card.setAttribute('role', 'dialog');
     card.setAttribute('aria-label', `${m.name} profile`);
     card.style.setProperty('--chat-hue', String(this.app._chatAccent(m.sessionId)));
     const top = this.el('div', 'ca-profile-top');
-    top.classList.add('ca-profile-top--portrait');
     top.append(this.profilePortrait(this.app._chatAvatar(m.sessionId, m.name, { size: 'md', state: this.presenceOf(m) }), m.name));
     const names = this.el('div', 'ca-profile-names');
     names.append(this.literalText('strong', '', m.name));
-    const tags = [m.role === 'coordinator' ? 'Admin' : 'Member', CA_STATE_LABEL[this.presenceOf(m)]].filter(Boolean).join(' · ');
+    const employee = (Array.isArray(this.company?.employees) ? this.company.employees : []).find((e) => e?.sessionId === m.sessionId);
+    const tags = [m.role === 'coordinator' ? 'Admin' : 'Member', employee?.onVacation === true ? 'Out of office' : CA_STATE_LABEL[this.presenceOf(m)]].filter(Boolean).join(' · ');
     names.append(this.el('span', 'ca-profile-sub', tags));
     // Who they are in the company: position and the owner-set pronouns, from the employee record.
-    const employee = (Array.isArray(this.company?.employees) ? this.company.employees : []).find((e) => e?.sessionId === m.sessionId);
     const pronouns = this.pronounsOf(m);
     const who = [typeof employee?.position === 'string' ? employee.position : '', pronouns].filter(Boolean).join(' · ');
     if (who) names.append(this.literalText('span', 'ca-profile-sub ca-profile-who', who));
@@ -5742,8 +5776,8 @@ class ReverieChatApp {
     const session = this.app.sessions?.get?.(m.sessionId);
     const facts = caAgentFacts(session);
     for (const [k, v] of facts.headline) kv(k, v, technical);
-    kv('Goal', m.goal);
-    kv('Progress', m.progress ? `${m.progress}${m.updatedAt ? ` · ${this.app._chatAgo(m.updatedAt)}` : ''}` : '');
+    kv('Goal', m.goal, technical);
+    kv('Progress', m.progress ? `${m.progress}${m.updatedAt ? ` · ${this.app._chatAgo(m.updatedAt)}` : ''}` : '', technical);
     if (this.serverFeatures.notify && !caIsDm(this.room)) kv('Wakes on', m.notify === 'mentions' ? 'Only @mentions, replies and you' : 'What the room says', technical);
     // What the page already knows is shown at once; the runtime's fuller profile replaces it when it arrives.
     const local = this.el('div', 'ca-profile-local');
@@ -5769,51 +5803,13 @@ class ReverieChatApp {
       ]);
     }
     const actions = this.el('div', 'ca-profile-actions');
-    let actionHost = actions;
-    const manage = this.canManageMembers(this.room);
-    const own = this.app._chatSelf === m.sessionId;
-    const act = (label, fn, primary, tip, reason = '', danger = false) => {
-      const item = this.el('div', 'ca-act-item');
-      const b = this.el('button', `ca-btn${primary ? ' is-primary' : ''}${danger ? ' is-danger' : ''}`, label);
-      b.type = 'button';
-      b.disabled = !!reason;
-      b.addEventListener('click', () => {
+    if (this.serverFeatures.dms && !caIsDm(this.room))
+      actions.append(this.button('ca-btn is-primary', 'Message', () => { this.closeProfile(); this.startDm(m.sessionId); }, { text: 'Message' }));
+    if (!this.app._chatSelf && employee && this.company?.canManage === true && this.phoneStatus?.self === 'owner' && this.phoneStatus?.canSetOwn === true)
+      actions.append(this.button('ca-btn ca-profile-edit-link', 'Edit profile', () => {
         this.closeProfile();
-        fn();
-      });
-      item.append(b);
-      if (tip) this.describeButton(item, b, reason || tip);
-      actionHost.append(item);
-    };
-    if (this.serverFeatures.dms && !caIsDm(this.room)) act('Message', () => this.startDm(m.sessionId), true, 'Start a private chat with this agent');
-    if (!this.app._chatSelf && employee && this.company?.canManage === true && this.phoneStatus?.self === 'owner' && this.phoneStatus?.canSetOwn === true) {
-      act('Runtime settings', () => this.openRuntimeSettings(employee), false, 'Change this expert’s plan, harness, model and effort');
-      act('Edit profile', () => this.openEmployeeProfile(employee, () => {
-        this._profilesAt = 0;
-        this.refreshProfiles();
-      }), false, 'Edit this expert’s picture and optional profile details');
-      act('Restart session', () => this.openEmployeeRestart(employee), false, 'Interrupt current work and restart without a fresh handoff; saved conversation, memory and files remain', employee.onVacation ? 'Bring this expert into the office before restarting' : '', true);
-      act('Leave office', () => this.leaveEmployeeOffice(employee), false, 'Stop this expert and keep them off without a fresh handoff; saved conversation, memory and files remain', employee.onVacation ? 'This expert is already out of office' : '', true);
-    }
-    const secondary = this.el('div', 'ca-profile-secondary'); actions.append(secondary); actionHost = secondary;
-    if (this.app.sessions?.has?.(m.sessionId)) act('Debug terminal', () => this.showDebug(m.sessionId), false, "Open this agent's live terminal");
-    if (!caIsDm(this.room)) {
-      if (m.role !== 'coordinator') act('Make lead', () => this.app._appointChatCoordinator(m.sessionId), false, 'Change the room coordinator seat', !this.canAppointLead(this.room) ? 'Only the owner or a server Admin can change the channel lead' : '');
-      act(m.voice ? 'Remove voice' : 'Make voice', () => this.app._setChatMemberVoice(m.sessionId, !m.voice), false, m.voice ? 'Stop this agent answering push-to-talk' : 'This agent answers push-to-talk in this room');
-      if (this.serverFeatures.replace && !m.postOnly && m.alive === false) {
-        act('Move to new session', () => this.openReplaceDialog(m), false, "Give this offline agent's place in every room to its new session");
-      }
-      act('Remove from channel', () => this.app._removeChatMember(m), false, 'Take this agent out of this channel', !manage && !own ? 'Only the user or channel lead can remove another member' : '');
-    }
-    // Hover has no touch equivalent, so on a touch screen an (i) toggle shows each button's one-liner under it.
-    if (this.doc.defaultView?.matchMedia?.('(hover: none)')?.matches) {
-      const toggle = this.button('ca-btn ca-tips-toggle', 'Show what each button does', () => {
-        const on = card.classList.toggle('show-tips');
-        toggle.setAttribute('aria-pressed', String(on));
-      }, { text: '\u24D8 What do these buttons do?' });
-      toggle.setAttribute('aria-pressed', 'false');
-      card.append(toggle);
-    }
+        this.openEmployeeProfile(employee, () => { this._profilesAt = 0; this.refreshProfiles(); });
+      }, { text: 'Edit profile' }));
     card.append(actions, technical);
     this.presentCard(card, anchor);
     this.loadAgentProfile(m, card, local, full);
@@ -6208,27 +6204,36 @@ class ReverieChatApp {
     } catch { return false; }
   }
 
-  async leaveEmployeeOffice(employee, onSaved) {
-    this._leavingEmployees ||= new Set();
-    if (this._leavingEmployees.has(employee.id) || employee.onVacation) return;
-    this._leavingEmployees.add(employee.id);
+  leaveEmployeeOffice(employee, onSaved) { return this.changeEmployeeOffice(employee, true, onSaved); }
+
+  enterEmployeeOffice(employee, onSaved) { return this.changeEmployeeOffice(employee, false, onSaved); }
+
+  async changeEmployeeOffice(employee, leaving, onSaved) {
+    this._changingOfficeEmployees ||= new Set();
+    if (this._changingOfficeEmployees.has(employee.id) || (leaving ? employee.onVacation === true : employee.onVacation !== true)) return;
+    this._changingOfficeEmployees.add(employee.id);
     let applied = false;
     try {
       const auth = await this.app._chatApi('/api/chatrooms/phone-status');
       if (this.app._chatSelf || this.company?.canManage !== true || !auth.ok || auth.data?.self !== 'owner' || auth.data?.canSetOwn !== true)
-        return this.toast('Sign in as the owner to have an expert leave the office.', 'error');
-      if (!await this.confirmCompanyAction(employee.name, `Have ${employee.name} leave the office? This stops their agent and laptop until you bring them back. Active work is interrupted without a fresh handoff. Their identity, saved conversation, memory, files and room membership are kept.`, 'Leave office')) return;
-      const result = await this.app._chatApi(`/api/company/employees/${encodeURIComponent(employee.id)}/vacation`, { method: 'POST', body: { enabled: true } });
-      if (!result.ok) return this.toast(result.error || `Could not stop ${employee.name}.`, 'error');
-      if (result.data?.employee?.id !== employee.id || result.data.employee.onVacation !== true)
-        return this.toast('Leave office could not be confirmed. Check Company before assuming the expert stopped.', 'error');
+        return this.toast('Sign in as the owner to change an expert’s office status.', 'error');
+      const label = leaving ? 'Leave office' : 'Enter office';
+      const question = leaving ? `Have ${employee.name} leave the office? This stops their agent and laptop until you bring them back. Active work is interrupted without a fresh handoff. Their identity, saved conversation, memory, files and room membership are kept.` : `Bring ${employee.name} into the office? This starts their laptop and resumes their agent using the current plan. Their identity, saved conversation, memory, files and room membership are kept.`;
+      if (!await this.confirmCompanyAction(employee.name, question, label)) return;
+      const result = await this.app._chatApi(`/api/company/employees/${encodeURIComponent(employee.id)}/vacation`, { method: 'POST', body: { enabled: leaving } });
+      if (!result.ok) return this.toast(result.error || `Could not ${leaving ? 'stop' : 'return'} ${employee.name}.`, 'error');
+      if (result.data?.employee?.id !== employee.id || result.data.employee.onVacation !== leaving)
+        return this.toast(`${label} could not be confirmed. Check Company for the current state.`, 'error');
       applied = true;
-      employee.onVacation = true; employee.desiredRunning = false;
+      employee.onVacation = leaving;
+      if (leaving) employee.desiredRunning = false;
       await this.loadOwner(); await onSaved?.();
-      this.toast(`${employee.name} is out of office.`, 'info');
+      const startup = result.data?.startup;
+      const detail = leaving ? 'is out of office.' : startup?.state === 'started' ? 'is in the office. Agent started.' : startup?.state === 'failed' ? 'is in the office, but startup failed. Use Restart session to retry.' : 'is in the office. Check their status for startup progress.';
+      this.toast(`${employee.name} ${detail}`, startup?.state === 'failed' ? 'error' : 'info');
     } catch {
-      this.toast(applied ? `${employee.name} is out of office. Reopen Company to refresh the view.` : 'Leave office could not be confirmed. Check Company before assuming the expert stopped.', 'error');
-    } finally { this._leavingEmployees.delete(employee.id); }
+      this.toast(applied ? `${employee.name}’s office status was saved. Reopen Company to refresh the view.` : 'Office status could not be confirmed. Check Company for the current state.', 'error');
+    } finally { this._changingOfficeEmployees.delete(employee.id); }
   }
 
   async openEmployeeRestart(employee, onSaved) {
@@ -7284,7 +7289,7 @@ class ReverieChatApp {
           menu.append(strip);
           continue;
         }
-        const b = this.el('button', `${e.danger ? 'is-danger' : ''}${e.checked !== undefined ? ' has-check' : ''}`);
+        const b = this.el('button', `${e.danger ? 'is-danger' : e.success ? 'is-success' : ''}${e.checked !== undefined ? ' has-check' : ''}`);
         b.type = 'button';
         b.setAttribute('role', e.checked === undefined ? 'menuitem' : e.checkbox ? 'menuitemcheckbox' : 'menuitemradio');
         if (e.checked !== undefined) b.setAttribute('aria-checked', String(!!e.checked));

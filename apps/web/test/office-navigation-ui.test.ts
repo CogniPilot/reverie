@@ -26,20 +26,21 @@ it('keeps Office navigation only at the footer gear and leaves the sidebar for c
   expect(h.document.querySelectorAll('.ca-office-gear')).toHaveLength(1);
 });
 
-it.each([false, true])('the nameplate gear opens Office choices beside the button without opening a page (narrow=%s)', async narrow => {
+it.each([false, true])('the machine-meter gear opens only Company and Board (narrow=%s)', async narrow => {
   const h = await fixture({ narrow, owner: true });
-  h.document.querySelector<HTMLButtonElement>('.ca-user [aria-label="Office settings"]')!.click(); await h.flush();
+  h.document.querySelector<HTMLButtonElement>('.ca-machine-bar [aria-label="Office settings"]')!.click(); await h.flush();
   expect(h.window.location.hash).toBe('');
   expect(h.document.querySelector('.ca-office-page')).toBeNull();
   const menu = h.document.querySelector('.ca-office-menu')!;
   expect(menu.getAttribute('role')).toBe('menu');
   expect(h.app.settingsOpened).toBeUndefined();
   const entries = [...menu.querySelectorAll<HTMLButtonElement>('button')];
-  expect(entries.slice(0, 5).map(n => n.textContent)).toEqual(['Handbook', 'Workspace', 'Bots', 'People', 'Laptop previews']);
-  expect(entries.slice(-2).map(n => n.textContent)).toEqual(['Company', 'Board']);
-  entries.find(button => button.textContent === 'Terminal settings')!.click();
+  expect(entries.map(n => n.textContent)).toEqual(['Company', 'Board']);
+  entries.find(button => button.textContent === 'Company')!.click(); await h.flush();
+  h.document.querySelector<HTMLButtonElement>('.ca-company-tools-button')!.click(); await h.flush();
+  [...h.document.querySelectorAll<HTMLButtonElement>('[aria-label="Company tools"] button')].find(button => button.textContent === 'Terminal settings')!.click();
   expect(h.app.settingsOpened).toBe(1);
-  expect(h.shell.embed).toBeNull();
+  expect(h.shell.embed).toBe('company');
   expect(h.document.querySelector('.ca-user [aria-label="Shut down Reverie"]')).toBeNull();
 });
 
@@ -48,7 +49,9 @@ it('opens a separate footer power menu without executing an action until selecte
   h.app.officePower = vi.fn(async (_action, output) => { output.textContent = 'Host acknowledgement'; });
   const gear = h.document.querySelector('.ca-office-gear')!;
   const power = h.document.querySelector<HTMLButtonElement>('.ca-office-power-button')!;
-  expect(gear.nextElementSibling).toBe(power);
+  expect(gear.parentElement!.classList.contains('ca-machine-bar')).toBe(true);
+  expect(gear.nextElementSibling!.classList.contains('ca-stats')).toBe(true);
+  expect(power.parentElement!.classList.contains('ca-user')).toBe(true);
   power.click(); await h.flush();
   const buttons = [...h.document.querySelectorAll<HTMLButtonElement>('.ca-power-menu button')];
   expect(buttons.map(button => button.textContent)).toEqual(['Stop all agents', 'Restart website', 'Shut down Reverie']);
@@ -80,13 +83,15 @@ it('keeps the requested quick menu when a presence refresh replaces the footer d
   expect(h.shell.embed).toBeNull();
 });
 
-it('keeps company tools out of the workspace dropdown and accessible at the gear', async () => {
+it('keeps company tools out of the workspace dropdown and accessible inside Company', async () => {
   const h = await fixture({ owner: true });
   h.app._chatRetired = [{ sessionId: 'old' }];
   const workspaceLabels = h.shell.workspaceEntries('', { full: true }).map(entry => entry.label);
   for (const label of ['Org chart', 'Retired sessions', 'Send diagnostics', 'Custom emotes']) expect(workspaceLabels).not.toContain(label);
   h.document.querySelector<HTMLButtonElement>('.ca-office-gear')!.click(); await h.flush();
-  const buttons = [...h.document.querySelectorAll<HTMLButtonElement>('.ca-office-menu button')];
+  [...h.document.querySelectorAll<HTMLButtonElement>('.ca-office-menu button')].find(button => button.textContent === 'Company')!.click(); await h.flush();
+  h.document.querySelector<HTMLButtonElement>('.ca-company-tools-button')!.click(); await h.flush();
+  const buttons = [...h.document.querySelectorAll<HTMLButtonElement>('[aria-label="Company tools"] button')];
   expect(buttons.map(button => button.textContent)).toContain('Retired sessions');
   buttons.find(button => button.textContent === 'Org chart')!.click(); await h.flush();
   expect(h.document.querySelector('.ca-org[role="dialog"]')).not.toBeNull();

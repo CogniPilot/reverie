@@ -1507,3 +1507,17 @@ button.ca-company-profile-trigger:focus-visible { outline: 2px solid var(--accen
 .ca-startup-preview { width: 100%; min-height: 220px; max-height: 45dvh; resize: vertical; box-sizing: border-box; font-family: monospace; }
 .ca-startup-sections details { border-top: 1px solid var(--ca-line); padding: 8px 0; }
 .ca-startup-sections summary { cursor: pointer; }
+
+/* Compact profile and explicit navigation/notification state. */
+.ca-profile--compact .ca-profile-avatar.chatroom-avatar { width: 48px; height: 48px; font-size: 22px; flex-shrink: 0; }
+.ca-profile--compact .ca-profile-edit-link { border-color: transparent; padding-inline: 4px; color: var(--text-dim); }
+.ca-profile--compact .ca-profile-actions { align-items: center; }
+.ca-popmenu button.is-success { color: var(--green, #4fbf86); }
+.ca-popmenu button.is-success:hover:not(:disabled), .ca-popmenu button.is-success:focus-visible { background: color-mix(in srgb, var(--green, #4fbf86) 20%, transparent); }
+.ca-machine-bar { display: flex; align-items: center; gap: 6px; padding: 6px; border-top: 1px solid var(--ca-line); }
+.ca-machine-bar .ca-stats { flex: 1; min-width: 0; padding: 0; border: 0; }
+.ca-machine-bar > .ca-office-gear { flex: 0 0 30px; }
+.ca-muted-badge { flex-shrink: 0; padding: 1px 5px; border: 1px solid var(--ca-line); border-radius: 4px; color: var(--text-dim); font-size: 10px; line-height: 1.4; }
+.ca-muted-badge[hidden] { display: none; }
+
+.ca-item-wrap:not(.is-ordering) .ca-muted-badge { margin-inline-end: 24px; }
