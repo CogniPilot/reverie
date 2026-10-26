@@ -3,6 +3,7 @@ from copy import deepcopy
 import fcntl
 import json
 import os
+import socket
 from pathlib import Path
 import tempfile
 import sys
@@ -155,6 +156,74 @@ class OfflineStoreTests(unittest.TestCase):
     def apply(self):
         plan=self.plan()
         return self.maintenance.apply(EMP,OP,plan['planDigest'])
+    def offline_image_scope(self):
+        self.target['validationScope']=M.OFFLINE_IMAGE_SCOPE
+        for reference in self.target['receipts'].values():
+            path=Path(reference['path']);record=json.loads(path.read_bytes());data=record['data']
+            data.pop('employeeId');data.pop('ownToolShell',None)
+            data.update(imageId=NEW,scope=M.OFFLINE_EVIDENCE_SCOPE)
+            self.write(path,record);reference['digest']=M.sha(path.read_bytes())
+        self.engine.rows[VALIDATION].update(Config={'User':f'{os.getuid()}:{os.getgid()}'},
+            HostConfig={'NetworkMode':'none','ReadonlyRootfs':True,'Privileged':False,
+                'CapAdd':None,'CapDrop':['ALL'],'SecurityOpt':['no-new-privileges:true'],
+                'Memory':4*M.GIB,'MemorySwap':4*M.GIB,'PidsLimit':256,'NanoCpus':2000000000})
+        self.write(self.target_path,self.target)
+    def test_offline_image_scope_prepares_store_without_claiming_runtime_acceptance(self):
+        self.offline_image_scope();before=self.company_path.read_bytes()
+        result=self.apply()
+        self.assertEqual(result['state'],'STORE_PREPARED_RUNTIME_ACCEPTANCE_PENDING')
+        self.assertEqual(result['validationScope'],M.OFFLINE_IMAGE_SCOPE)
+        self.assertEqual(result['runtimeAcceptance'],'PENDING')
+        self.assertEqual(result['containerAdoption'],'NOT_RUN');self.assertFalse(result['providerLaunched'])
+        self.assertEqual(self.company_path.read_bytes(),before)
+        for reference in self.target['receipts'].values():
+            data=json.loads(Path(reference['path']).read_bytes())['data']
+            self.assertNotIn('employeeId',data);self.assertNotIn('ownToolShell',data)
+    def test_offline_image_scope_keeps_strict_vacation_admission(self):
+        self.offline_image_scope();self.employee['onVacation']=False
+        self.target['cohort'][0]['employeeDigest']=M.sha(M.canonical(self.employee))
+        self.write(self.company_path,self.company);self.write(self.target_path,self.target)
+        with self.assertRaises(M.Refused):self.plan()
+        self.assertEqual(self.engine.calls,[])
+    def test_offline_proof_cannot_be_relabelled_current_agent_proof(self):
+        self.offline_image_scope();del self.target['validationScope'];self.write(self.target_path,self.target)
+        with self.assertRaisesRegex(M.Refused,'closed canonical'):self.plan()
+        self.assertEqual(self.engine.calls,[])
+    def test_offline_image_scope_binds_exact_image_and_sandbox(self):
+        self.offline_image_scope();path=self.root/'D2.json';record=json.loads(path.read_bytes())
+        record['data']['imageId']=OLD;self.write(path,record)
+        self.target['receipts']['D2']['digest']=M.sha(path.read_bytes());self.write(self.target_path,self.target)
+        with self.assertRaisesRegex(M.Refused,'exact image/scope'):self.plan()
+        record['data']['imageId']=NEW;self.write(path,record)
+        self.target['receipts']['D2']['digest']=M.sha(path.read_bytes());self.write(self.target_path,self.target)
+        for field,value in [('NetworkMode','bridge'),('PidMode','host'),('IpcMode','host'),
+                            ('UsernsMode','host'),('VolumesFrom',['other'])]:
+            with self.subTest(field=field):
+                host=self.engine.rows[VALIDATION]['HostConfig'];previous=deepcopy(host)
+                host[field]=value
+                with self.assertRaisesRegex(M.Refused,'sandbox differs'):self.plan()
+                host.clear();host.update(previous)
+        self.assertEqual(self.engine.calls,[])
+    def test_offline_image_scope_refuses_private_and_socket_mounts(self):
+        self.offline_image_scope();sock=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM)
+        self.addCleanup(sock.close);sock.bind(str(self.root/'engine.sock'))
+        cases=[(self.paths.nix,'/output',True,'private employee/account'),
+               (self.public,'/home/agent',False,'private runtime'),
+               (self.root/'engine.sock','/engine.sock',False,'sockets or devices')]
+        for source,destination,rw,error in cases:
+            with self.subTest(source=source):
+                self.engine.rows[VALIDATION]['Mounts']=[{'Type':'bind','Source':str(source),
+                    'Destination':destination,'RW':rw}]
+                with self.assertRaisesRegex(M.Refused,error):self.plan()
+        self.assertEqual(self.engine.calls,[])
+    def test_offline_image_scope_refuses_parent_of_office_socket(self):
+        self.offline_image_scope();root=Path(self.config['apiSocketRoot']);root.mkdir(mode=0o700)
+        sock=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM);self.addCleanup(sock.close)
+        sock.bind(str(root/'office.sock'))
+        self.engine.rows[VALIDATION]['Mounts']=[{'Type':'bind','Source':str(root),
+            'Destination':'/office-parent','RW':False}]
+        with self.assertRaisesRegex(M.Refused,'private employee/account'):self.plan()
+        self.assertEqual(self.engine.calls,[])
     def test_plan_is_readonly(self):
         before=set(self.state.rglob('*')); plan=self.plan()
         self.assertEqual(plan['imageId'],NEW); self.assertEqual(self.engine.calls,[])

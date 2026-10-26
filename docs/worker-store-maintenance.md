@@ -12,6 +12,12 @@ A successful receipt says `STORE_PREPARED`; `containerAdoption` remains
 next start may replace that container using the selected image. Store preparation
 does not establish that a future provider, account or coding shell works.
 
+An explicit target `validationScope: "VALIDATED_OFFLINE_IMAGE_TOOL_SHELL"`
+instead qualifies an isolated image check. Its successful receipt says
+`STORE_PREPARED_RUNTIME_ACCEPTANCE_PENDING`, with `runtimeAcceptance: "PENDING"`.
+It never represents employee approval or a successful provider/runtime adoption.
+Omitting the field preserves the existing current-agent validation mode.
+
 ## Qualification and private inputs
 
 Run on Linux as the configured non-root broker owner with the normal local Docker
@@ -54,6 +60,19 @@ image IDs outside the repository. Its closed JSON fields are:
   The loaded image and its UID/GID/rootless capability metadata also pass the
   ordinary broker's image admission. The image's base link is read from the
   validation container without executing a command.
+
+For the alternate offline-image scope, D2 data has exactly `version`,
+`containerId`, `imageId`, `scope`, `rawEvidencePath`, `rawEvidenceDigest`, and
+`jobs`. CAN replaces `jobs` with `probePath` and `probeDigest`. Both bind the
+same exact image/container and `scope: "OFFLINE_IMAGE_TOOL_SHELL"`; neither claims `employeeId` or
+`ownToolShell`. The same actual D2 assertions and CAN shim/grep/completion checks
+still apply. The inspected validation container must use the configured ordinary
+UID/GID, network none, a read-only root, dropped capabilities, no new privileges,
+bounded RAM/tasks/CPUs, and private namespaces. Bind mounts cannot borrow employee
+stores, accounts, private runtime destinations, sockets or devices; only `/output`
+may be a writable bind. Retain this validation container, stopped or running,
+through all preparation calls so its exact image, sandbox and base link can be
+rechecked. Every cohort employee must still be OFF and on vacation.
 
 The normal broker config's `image` must already equal this qualified target.
 Otherwise a future normal start could undo the seed selection. A failed current

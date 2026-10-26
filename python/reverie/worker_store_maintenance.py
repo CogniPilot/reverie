@@ -36,6 +36,9 @@ CID = re.compile(r"[0-9a-f]{64}")
 MAX_ENTRIES = 4096
 MAX_BYTES = 8 * 1024 * 1024
 GIB = 1024**3
+OFFLINE_IMAGE_SCOPE = "VALIDATED_OFFLINE_IMAGE_TOOL_SHELL"
+OFFLINE_EVIDENCE_SCOPE = "OFFLINE_IMAGE_TOOL_SHELL"
+CURRENT_AGENT_SCOPE = "CURRENT_CODEX_TOOL_SHELL_ONLY"
 
 
 class Refused(RuntimeError):
@@ -373,8 +376,10 @@ class OfflineStoreMaintenance:
         value = _json(raw)
         keys = {"version", "kind", "imageId", "engineId", "engineSocket", "validationContainerId", "baseTarget",
                 "closurePaths", "expiresAtEpoch", "cohort", "budget", "receipts"}
-        need(type(value) is dict and set(value) == keys and type(value["version"]) is int and value["version"] == 1
+        need(type(value) is dict and keys <= set(value) <= keys | {"validationScope"} and type(value["version"]) is int and value["version"] == 1
              and value["kind"] == "reverie.worker-store-target", "closed validated target required")
+        scope = value.get("validationScope", CURRENT_AGENT_SCOPE)
+        need(scope in (CURRENT_AGENT_SCOPE, OFFLINE_IMAGE_SCOPE), "unsupported validation scope")
         need(pin(value["imageId"]) and CID.fullmatch(value["validationContainerId"] or "")
              and STORE.fullmatch(value["baseTarget"] or ""), "exact validated image/base required")
         need(isinstance(value["engineId"], str) and 1 <= len(value["engineId"]) <= 128
@@ -407,13 +412,21 @@ class OfflineStoreMaintenance:
                  and record.get("data", {}).get("containerId") == value["validationContainerId"],
                  "actual validation container binding required")
             data = record["data"]
-            fields = {"version", "employeeId", "containerId", "rawEvidencePath", "rawEvidenceDigest"}
-            fields |= {"jobs"} if kind == "D2" else {"ownToolShell", "scope", "probePath", "probeDigest"}
+            fields = {"version", "containerId", "rawEvidencePath", "rawEvidenceDigest"}
+            fields |= {"imageId", "scope"} if scope == OFFLINE_IMAGE_SCOPE else {"employeeId"}
+            fields |= {"jobs"} if kind == "D2" else {"probePath", "probeDigest"}
+            if kind == "CAN" and scope == CURRENT_AGENT_SCOPE:
+                fields |= {"ownToolShell", "scope"}
             need(type(data) is dict and set(data) == fields and type(data["version"]) is int
-                 and data["version"] == 1 and UUID.fullmatch(data["employeeId"] or "")
+                 and data["version"] == 1
                  and pin(data["rawEvidenceDigest"]), "closed canonical validation data required")
-            need(validation_employee in (None, data["employeeId"]), "validation employee differs between receipts")
-            validation_employee = data["employeeId"]
+            if scope == OFFLINE_IMAGE_SCOPE:
+                need(data["scope"] == OFFLINE_EVIDENCE_SCOPE and data["imageId"] == value["imageId"],
+                     "offline image evidence must bind its exact image/scope")
+            else:
+                need(UUID.fullmatch(data["employeeId"] or "")
+                     and validation_employee in (None, data["employeeId"]), "validation employee differs between receipts")
+                validation_employee = data["employeeId"]
             body = _private_bytes(data["rawEvidencePath"], 1024**2)
             need(sha(body) == data["rawEvidenceDigest"], "raw validation evidence changed")
             text = body.decode()
@@ -434,7 +447,8 @@ class OfflineStoreMaintenance:
                 grep = re.search(r"^GREP pos=(\S+) neg=(\S+) find=(\S+)", text, re.M)
                 jobs = re.search(r"jobs=(\S+)", text)
                 shims = re.search(r"^SHIMS (\S+) (\S+)", text, re.M)
-                need(data.get("ownToolShell") is True and data.get("scope") == "CURRENT_CODEX_TOOL_SHELL_ONLY"
+                need((scope == OFFLINE_IMAGE_SCOPE or
+                      data.get("ownToolShell") is True and data.get("scope") == CURRENT_AGENT_SCOPE)
                      and grep is not None and grep.groups() == ("0", "1", "0")
                      and jobs is not None and jobs.group(1).isdigit()
                      and shims is not None and shims.group(1) == "/opt/reverie/autoenv/bin/cargo"
@@ -471,6 +485,8 @@ class OfflineStoreMaintenance:
         validation = self.engine.inspect(target["validationContainerId"])
         need(validation.get("Id") == target["validationContainerId"] and validation.get("Image") == target["imageId"]
              and self.engine.base_target(target["validationContainerId"]) == target["baseTarget"], "qualified image base changed")
+        if target.get("validationScope") == OFFLINE_IMAGE_SCOPE:
+            self._offline_image_validation(validation, config, target["engineSocket"])
         company = read_metadata(config["companyFile"], config["uid"])
         selected = None
         for admitted in target["cohort"]:
@@ -538,6 +554,42 @@ class OfflineStoreMaintenance:
             "sidLockIdentity": _identity(sid_lock.lstat()), "profiles": profiles, "budget": budget,
             "stoppedContainerIds": stopped,
             "helperArgs": args, "helperName": helper_name}
+
+    def _offline_image_validation(self, container, config, engine_socket):
+        """Inspect actual isolated image-check context; never call it an agent shell."""
+        host = container.get("HostConfig", {})
+        need(container.get("Config", {}).get("User") == f"{config['uid']}:{config['gid']}"
+             and host.get("NetworkMode") == "none" and host.get("ReadonlyRootfs") is True
+             and not host.get("Privileged") and not host.get("CapAdd")
+             and host.get("CapDrop") == ["ALL"]
+             and host.get("PidMode", "") == "" and host.get("IpcMode", "private") == "private"
+             and host.get("UsernsMode", "") == "" and not host.get("VolumesFrom")
+             and any(v in ("no-new-privileges", "no-new-privileges:true") for v in host.get("SecurityOpt", []))
+             and type(host.get("Memory")) is int and 0 < host["Memory"] <= 4*GIB
+             and host.get("MemorySwap") == host["Memory"]
+             and type(host.get("PidsLimit")) is int and 0 < host["PidsLimit"] <= 256
+             and type(host.get("NanoCpus")) is int and 0 < host["NanoCpus"] <= 2_000_000_000,
+             "offline image check sandbox differs")
+        points = _mount_points()
+        private = [Path(config["companyRoot"]), Path(config["stateRoot"])/"employees",
+                   Path(config["scratchRoot"])/"employees", Path(config["apiSocketRoot"]),
+                   Path(config["socket"]), Path(engine_socket)]
+        for mount in container.get("Mounts", []):
+            if mount.get("Type") == "tmpfs":
+                continue
+            need(mount.get("Type") == "bind" and
+                 (mount.get("RW") is False or mount.get("Destination") == "/output"),
+                 "offline image check has unexpected writable grant")
+            destination = Path(mount["Destination"])
+            source = Path(mount["Source"]).resolve()
+            source_mode = source.stat().st_mode
+            need(stat.S_ISREG(source_mode) or stat.S_ISDIR(source_mode),
+                 "offline image check cannot borrow sockets or devices")
+            need(not any(destination == p or destination.is_relative_to(p)
+                         for p in map(Path, ("/home/agent", "/nix", "/instances", "/reverie_workspace", "/run"))),
+                 "offline image check cannot borrow private runtime mounts")
+            need(not any(_overlap(source, p, points) for p in private),
+                 "offline image check has private employee/account source")
 
     def plan(self, employee_id, operation_id):
         need(UUID.fullmatch(operation_id or "") and UUID.fullmatch(employee_id or ""), "exact operation/employee UUID required")
@@ -670,6 +722,9 @@ class OfflineStoreMaintenance:
                           "imageId": target["imageId"], "helperContainerId": cid, "planDigest": plan["planDigest"],
                           "offVacationPreserved": True, "providerLaunched": False, "containerAdoption": "NOT_RUN",
                           "databaseObserverReads": False, "profileInventoryDigest": sha(canonical(after))}
+                if target.get("validationScope") == OFFLINE_IMAGE_SCOPE:
+                    result.update(state="STORE_PREPARED_RUNTIME_ACCEPTANCE_PENDING",
+                                  validationScope=OFFLINE_IMAGE_SCOPE, runtimeAcceptance="PENDING")
                 _new_record(audit_dir / (operation_id + ".prepared-store.json"), result)
                 need(_identity(fence.lstat()) == marker_identity and read_metadata(fence, config["uid"]) == marker, "own fence changed before completion")
             except Exception as error:
