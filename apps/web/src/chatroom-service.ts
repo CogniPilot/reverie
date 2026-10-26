@@ -1499,6 +1499,15 @@ export class ChatroomService {
     return this.post(roomId, from, text, 'all');
   }
 
+  /** Typed automation requires a synchronous durable chat commit before acknowledging delivery. */
+  postDurableBotMessage(bot: ChatBot, roomId: string, text: string, recentPosts: number,
+    recipients: 'all' | string[], deliver: boolean): ChatMessage {
+    if (!this.db || this.writesClosed) throw new ChatroomError('Bot requires available durable chat database', 'UNAVAILABLE');
+    this.checkBotPost(bot, roomId, recentPosts);
+    return this.post(roomId, { kind: 'bot', botId: bot.id, name: bot.name, ...(bot.icon ? { icon: bot.icon } : {}) },
+      text, recipients, { deliver });
+  }
+
   /** Fixed watchers require the synchronous SQLite commit path; JSON debounce is not an acknowledgement. */
   postWatchNotice(bot: ChatBot, roomId: string, text: string, recentPosts: number, owner?: string): { messageId: string } {
     if (!this.db || this.writesClosed) throw new ChatroomError('Watcher requires available durable chat database', 'UNAVAILABLE');

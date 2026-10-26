@@ -104,6 +104,8 @@ let
         test/company-reporting-ui.test.ts test/company-core-context-ui.test.ts
       NIX_REVERIE_TEST_ROOT_CUSTODY=1 npm test -- test/cli-agent-credentials.test.ts
       npm test -- test/routes/chat-attention.test.ts test/url-session-fragment.test.ts test/company-lifecycle-fence.test.ts
+      npm test -- test/assignment-status-watch.test.ts test/public-issue-watch.test.ts \
+        test/bot-watches-runtime.test.ts test/bot-watch-durable-chat.test.ts test/bot-watch-state.test.ts
       runHook postCheck
     '';
     installPhase = ''

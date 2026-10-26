@@ -327,6 +327,7 @@ import { planMoveExecutor, type PlanMoveRuntime } from '../plan-move-runtime.js'
 import { PlanService } from '../plan-accounts.js';
 import { githubData, type GithubArgs } from '../cron/github-source.js';
 import { readFixedPr } from '../cron/fixed-github-watch.js';
+import { registerBotWatches } from '../bot-watches-runtime.js';
 import { appendBurnLog, burnLogLines, burnWatchData, hostLoadData, plansPaceData } from '../cron/post-sources.js';
 import { AccountLoginService, defaultLoginDeps } from '../account-login.js';
 import { computeFrontendBuildId } from './frontend-build-id.js';
@@ -1854,6 +1855,14 @@ export class WebServer extends EventEmitter {
     registerChatBotRoutes(this.app, chatBots, verifiedOwner, (id) =>
       this.cronService.listJobs().some((job) => job.action === 'post' && job.botId === id)
     );
+    const botWatches = await registerBotWatches(this.app, {
+      dataPath, bots: chatBots, chat: this.chatroomService, board: boardStore,
+      employees: () => companyStore.snapshot().employees,
+      coordinatorId: owner => companyStore.snapshot().settings.find(s => s.owner === owner)?.coordinatorEmployeeId,
+      running: id => { const s = this.sessions.get(id); return !!s && s.pid !== null && s.pid > 0 && !s.paneExit; },
+      verifiedOwner, multiUser: isMultiUserMode(),
+    });
+    this.cleanup.setInterval(() => void botWatches.tick(), 30_000, { description: 'typed assignment and public issue watchers' });
     this.inputWatch = createInputWatch({
       ledgerFile: dataPath('input-watch-ledger.json'),
       bot: () => (isMultiUserMode() ? undefined : chatBots.get('input-watch')),
