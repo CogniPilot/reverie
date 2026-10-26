@@ -32,7 +32,7 @@ class InstallerProtocol(unittest.TestCase):
   import subprocess
   from reverie.ops_installer import Installer
   from reverie.ops_core import Ledger
-  package=Path(os.environ.get('REVERIE_OPS_TEST_PACKAGE','/unavailable'))
+  package=Path(os.environ.get('OPS_TEST_PACKAGE','/unavailable'))
   if not package.exists():self.skipTest('separate immutable package-build fixture unavailable')
   with tempfile.TemporaryDirectory() as temp:
    root=Path(temp).resolve();home=root/'home';home.mkdir(mode=0o700);private=root/'ops';private.mkdir(mode=0o700);engineconfig=private/'engine';company=root/'company.json';company.write_bytes(canonical({'employees':[]}));company.chmod(0o600);broker=root/'broker.json';broker.write_bytes(canonical({'mounts':[{'source':str(root/'workspace')}],'scratchRoot':str(root/'disposable'),'stateRoot':str(root/'workers'),'companyRoot':str(root/'company'),'deployment':'owned','serverContainer':'website'}));broker.chmod(0o600)

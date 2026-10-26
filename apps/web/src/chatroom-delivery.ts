@@ -552,6 +552,13 @@ export class ChatroomDelivery {
     return [...(this.inspectionHolds.get(sessionId)?.values() ?? [])].map((item) => ({ ...item }));
   }
 
+  /** Read-only message identities from this session's queue, excluding notices and inspection holds. */
+  queuedMessagesFor(sessionId: string): DeliveredMessage[] {
+    return (this.queues.get(sessionId) ?? []).flatMap((item) =>
+      item.messageId === undefined ? [] : [{ roomId: item.roomId, messageId: item.messageId }]
+    );
+  }
+
   pendingFor(sessionId: string): number {
     return this.queues.get(sessionId)?.length ?? 0;
   }

@@ -27,6 +27,6 @@ PY
   "$out/bin/reverie-ops-daemon" --help >/dev/null
   "$out/bin/reverie-ops-service" --help >/dev/null
   "$out/bin/reverie-ops" --help >/dev/null
-  PYTHONPATH=${src}/python REVERIE_OPS_TEST_PACKAGE="$out" ${pkgs.python3}/bin/python3 -B -m unittest discover -s ${src}/tests -p "test_ops_*.py"
+  PYTHONPATH=${src}/python:${src} OPS_TEST_PACKAGE="$out" ${pkgs.python3}/bin/python3 -B -m unittest discover -s ${src}/tests -p "test_ops_*.py"
   chmod -R a-w "$out"
 ''

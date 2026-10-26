@@ -74,6 +74,18 @@ export interface ChatSessionLike extends DeliverySession {
 
 const CLOSED_ALERT = 'Chat is read-only: a change could not be saved or undone on disk. Fix the disk, then restart the console.';
 
+/** Canonical phone policy for an already selected message and recipient name. */
+function phoneAlertAllows(mode: AlertMode, message: ChatMessage | undefined, name: string, unique: boolean): boolean {
+  if (mode === 'ring') return true;
+  if (!message) return false;
+  const owner = message.from.kind === 'user' && isOwnerMark(message.from.mark);
+  if (owner && mode === 'vibrate') return true;
+  const direct = unique && textMentions(message.text, name);
+  // Silent: only the owner's direct @mention or his @everyone. Vibrate: a direct @mention from anyone.
+  if (owner) return direct || textMentions(message.text, 'everyone');
+  return mode === 'vibrate' && direct;
+}
+
 export interface ChatroomServiceDeps {
   file: string;
   employeeOf?: (sessionId: string) => string | undefined;
@@ -311,6 +323,7 @@ export class ChatroomService {
     const mode = this.alertMode(sessionId)?.mode ?? 'ring';
     if (!session || session.pid === null) return renderTurnSummary(mode, []);
     const held = new Set(this.delivery.inspectionFor(sessionId).map((m) => `${m.roomId}\0${m.messageId}`));
+    const queued = new Set(this.delivery.queuedMessagesFor(sessionId).map((m) => `${m.roomId}\0${m.messageId}`));
     const owed = new Set(
       [...this.owedReplies.values()].filter((m) => m.sessionId === sessionId).map((m) => `${m.roomId}\0${m.messageId}`)
     );
@@ -319,6 +332,9 @@ export class ChatroomService {
     const identity = this.depsWithIdentity();
     for (const room of this.store.roomsFor(sessionId)) {
       if (room.archivedAt || room.owner !== session.owner || (isDm(room) && !room.dm.includes(sessionId))) continue;
+      const name = this.nameOf(sessionId);
+      const uniquelyNamed =
+        room.members.filter((m) => this.nameOf(m.sessionId).toLowerCase() === name.toLowerCase()).length === 1;
       const messages = room.messages.map((m) => messageWithEmployeeIdentity(m, room.owner, identity));
       const seen = this.seen.get(sessionId, room.id);
       const seenIndex = seen ? messages.findIndex((m) => m.id === seen.messageId) : -1;
@@ -341,16 +357,15 @@ export class ChatroomService {
           (message.from.kind === 'agent' &&
             (message.from.sessionId === sessionId || (employeeId && message.from.employeeId === employeeId))) ||
           !messageRecipients(room, message).includes(sessionId) ||
-          !this.alertAllows(sessionId, room.id, message.id)
+          !phoneAlertAllows(mode, message, name, uniquelyNamed)
         )
           continue;
         const key = `${room.id}\0${message.id}`;
-        const queued = this.delivery.queuedFor(room.id, message.id).includes(sessionId);
         const state = held.has(key)
           ? 'delivery-unconfirmed'
           : owed.has(key)
             ? 'reply-pending'
-            : queued
+            : queued.has(key)
               ? 'queued'
               : 'unread';
         if (
@@ -362,9 +377,6 @@ export class ChatroomService {
         const owner = message.from.kind === 'user' && isOwnerMark(message.from.mark);
         const senderId = message.from.kind === 'agent' ? message.from.sessionId : undefined;
         const coordinator = senderId && room.members.some((m) => m.sessionId === senderId && m.role === 'coordinator');
-        const name = this.nameOf(sessionId);
-        const uniquelyNamed =
-          room.members.filter((m) => this.nameOf(m.sessionId).toLowerCase() === name.toLowerCase()).length === 1;
         const direct = message.to !== 'all' || (uniquelyNamed && textMentions(message.text, name));
         const priority = owner && direct ? 6 : isDm(room) ? 5 : direct ? 4 : owner ? 3 : coordinator ? 2 : 1;
         candidates.push({
@@ -947,19 +959,13 @@ export class ChatroomService {
   }
 
   private alertAllows(sessionId: string, roomId: string, messageId?: string): boolean {
-    const lease = this.alertMode(sessionId);
-    if (!lease || lease.mode === 'ring') return true;
+    const mode = this.alertMode(sessionId)?.mode ?? 'ring';
+    if (mode === 'ring') return phoneAlertAllows(mode, undefined, '', false);
     const room = this.store.get(roomId);
     const message = room?.messages.find((m) => m.id === messageId);
-    if (!message) return false;
-    const owner = message.from.kind === 'user' && isOwnerMark(message.from.mark);
-    if (owner && lease.mode === 'vibrate') return true;
     const name = this.nameOf(sessionId);
     const unique = room?.members.filter((m) => this.nameOf(m.sessionId).toLowerCase() === name.toLowerCase()).length === 1;
-    const direct = unique && textMentions(message.text, name);
-    // Silent: only the owner's direct @mention or his @everyone. Vibrate: a direct @mention from anyone.
-    if (owner) return direct || textMentions(message.text, 'everyone');
-    return lease.mode === 'vibrate' && direct;
+    return phoneAlertAllows(mode, message, name, unique);
   }
 
   view(room: ChatRoom, options: { since?: number; limit?: number } = {}): ChatRoomView {

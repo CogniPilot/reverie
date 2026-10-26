@@ -138,6 +138,70 @@ it('rechecks phone changes and expiry when summarizing existing unread messages'
   }
 });
 
+it('scans large rooms once without per-message phone lookups or unrelated delivery queues', async () => {
+  const f = await fixture();
+  try {
+    await f.service.setAlertMode(A, 'vibrate', 3600_000);
+    const rooms = [f.room];
+    for (let i = 0; i < 5; i++) {
+      const room = f.service.createRoom('Summary room ' + i);
+      f.service.addMember(room.id, A);
+      f.service.addMember(room.id, B);
+      rooms.push(room);
+    }
+    for (const [index, room] of rooms.entries()) {
+      for (let i = 0; i < (index === 0 ? 1202 : 1000); i++) f.emit({}, room);
+    }
+    const queued = f.room.messages.find((m) => m.from.kind === 'agent')!;
+    f.service.delivery.enqueue(A, f.room, 'queued text', { messageId: queued.id });
+    const queues = (f.service.delivery as unknown as { queues: Map<string, unknown[]> }).queues;
+    const unrelated = [{ roomId: 'unrelated', messageId: queued.id }];
+    for (let i = 0; i < 200; i++) queues.set('unrelated-' + i, unrelated);
+    const globalQueues = vi.spyOn(queues, Symbol.iterator).mockImplementation(() => {
+      throw new Error('summary must not enumerate unrelated sessions');
+    });
+    const finds = rooms.map((room) => vi.spyOn(room.messages, 'find'));
+    const names = vi.spyOn(f.service, 'nameOf');
+    const phone = vi.spyOn(f.service, 'alertMode');
+    const perMessageQueues = vi.spyOn(f.service.delivery, 'queuedFor');
+    const ownQueue = vi.spyOn(f.service.delivery, 'queuedMessagesFor');
+    const summary = f.service.turnSummary(A);
+    expect(summary.total).toBe(6202);
+    expect(summary.messages).toHaveLength(6);
+    expect(summary.text.length).toBeLessThanOrEqual(3000);
+    expect(phone).toHaveBeenCalledTimes(1);
+    expect(names.mock.calls.length).toBeLessThanOrEqual(rooms.reduce((limit, room) => limit + room.members.length + 2, 0));
+    expect(ownQueue).toHaveBeenCalledExactlyOnceWith(A);
+    expect(perMessageQueues).not.toHaveBeenCalled();
+    expect(globalQueues).not.toHaveBeenCalled();
+    expect(finds.reduce((count, find) => count + find.mock.calls.length, 0)).toBeLessThanOrEqual(rooms.length * 2);
+  } finally {
+    vi.restoreAllMocks();
+    await f.app.close();
+  }
+});
+
+it('snapshots only queued message identities, independently of holds, without exposing mutable queue entries', async () => {
+  const f = await fixture();
+  try {
+    const message = f.emit();
+    f.service.delivery.enqueue(A, f.room, 'message', { messageId: message.id });
+    f.service.delivery.enqueue(A, f.room, 'notice');
+    f.service.delivery.enqueue(B, f.room, 'other session', { messageId: 'other-message' });
+    f.service.delivery.holdForInspection(A, [{ roomId: f.room.id, messageId: 'held-only' }]);
+    const expected = [{ roomId: f.room.id, messageId: message.id }];
+    const snapshot = f.service.delivery.queuedMessagesFor(A);
+    expect(snapshot).toEqual(expected);
+    snapshot[0].messageId = 'changed snapshot';
+    snapshot.push({ roomId: f.room.id, messageId: 'inserted snapshot' });
+    expect(f.service.delivery.queuedMessagesFor(A)).toEqual(expected);
+    expect(f.service.delivery.inspectionFor(A)).toEqual([{ roomId: f.room.id, messageId: 'held-only' }]);
+    expect(f.service.delivery.queuedFor(f.room.id, message.id)).toEqual([A]);
+  } finally {
+    await f.app.close();
+  }
+});
+
 it('excludes self, system, deleted, answered, and messages addressed elsewhere', async () => {
   const f = await fixture();
   try {
@@ -221,9 +285,7 @@ it('includes exact queued and inspection-held gaps below a newer seen cursor wit
     const seen = f.emit({ text: 'already read' });
     f.service.markSeen(A, f.room.id, seen.id);
     f.service.delivery.holdForInspection(A, [{ roomId: f.room.id, messageId: held.id }]);
-    vi.spyOn(f.service.delivery, 'queuedFor').mockImplementation((roomId, messageId) =>
-      roomId === f.room.id && messageId === queued.id ? [A] : []
-    );
+    vi.spyOn(f.service.delivery, 'queuedMessagesFor').mockReturnValue([{ roomId: f.room.id, messageId: queued.id }]);
     const summary = f.service.turnSummary(A);
     expect(summary.total).toBe(2);
     expect(summary.messages).toEqual(
@@ -234,7 +296,7 @@ it('includes exact queued and inspection-held gaps below a newer seen cursor wit
     );
     expect(f.service.lastSeen(A, f.room.id)).toEqual({ messageId: seen.id, at: seen.at });
     expect(f.service.delivery.inspectionFor(A)).toEqual([{ roomId: f.room.id, messageId: held.id }]);
-    expect(f.service.delivery.queuedFor(f.room.id, queued.id)).toEqual([A]);
+    expect(f.service.delivery.queuedMessagesFor(A)).toEqual([{ roomId: f.room.id, messageId: queued.id }]);
   } finally {
     await f.app.close();
   }
