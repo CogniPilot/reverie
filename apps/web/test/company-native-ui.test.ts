@@ -105,7 +105,11 @@ it('opens Company from Office without the legacy terminal settings window', asyn
   expect(h.document.querySelector('.ca-company').textContent).toContain('Inspector');
   expect(h.document.querySelector('.ca-company form')).not.toBeNull();
   expect(h.document.querySelector('.reverie-company-dialog')).toBeNull();
-  expect(h.document.querySelector('.ca-company-chart').textContent).toContain('Reporting structure');
+  const chart = h.document.querySelector('.ca-company-chart');
+  expect(chart.getAttribute('aria-label')).toBe('Reporting structure');
+  expect(chart.querySelector('.ca-company-map-viewport')).not.toBeNull();
+  expect(chart.querySelector('[data-employee-id="lead"] .ca-company-person-title').textContent).toContain('Inspector');
+  expect(chart.querySelector('[data-employee-id="lead"] .ca-company-role').textContent).toBe('Security');
   expect(h.document.querySelector('.ca-company-hire').hidden).toBe(true);
   h.document.querySelector('[aria-label="Hire"]').click();
   expect(h.document.querySelector('.ca-company-hire').hidden).toBe(false);
