@@ -26,13 +26,13 @@ it('keeps Office navigation only at the footer gear and leaves the sidebar for c
   expect(h.document.querySelectorAll('.ca-office-gear')).toHaveLength(1);
 });
 
-it.each([false, true])('the machine-meter gear opens only Company and Board (narrow=%s)', async narrow => {
+it.each([false, true])('the avatar-aligned persistent panel exposes only Company and Board (narrow=%s)', async narrow => {
   const h = await fixture({ narrow, owner: true });
-  h.document.querySelector<HTMLButtonElement>('.ca-machine-bar [aria-label="Office settings"]')!.click(); await h.flush();
+  expect(h.document.querySelector('.ca-user .ca-office-gear')).not.toBeNull();
   expect(h.window.location.hash).toBe('');
   expect(h.document.querySelector('.ca-office-page')).toBeNull();
-  const menu = h.document.querySelector('.ca-office-menu')!;
-  expect(menu.getAttribute('role')).toBe('menu');
+  const menu = h.document.querySelector('.ca-office-pane')!;
+  expect(menu.tagName).toBe('NAV'); expect((menu as HTMLElement).hidden).toBe(false);
   expect(h.app.settingsOpened).toBeUndefined();
   const entries = [...menu.querySelectorAll<HTMLButtonElement>('button')];
   expect(entries.map(n => n.textContent)).toEqual(['Company', 'Board']);
@@ -49,8 +49,8 @@ it('opens a separate footer power menu without executing an action until selecte
   h.app.officePower = vi.fn(async (_action, output) => { output.textContent = 'Host acknowledgement'; });
   const gear = h.document.querySelector('.ca-office-gear')!;
   const power = h.document.querySelector<HTMLButtonElement>('.ca-office-power-button')!;
-  expect(gear.parentElement!.classList.contains('ca-machine-bar')).toBe(true);
-  expect(gear.nextElementSibling!.classList.contains('ca-stats')).toBe(true);
+  expect(gear.parentElement!.classList.contains('ca-office-launcher')).toBe(true);
+  expect(gear.nextElementSibling!.classList.contains('ca-office-pane')).toBe(true);
   expect(power.parentElement!.classList.contains('ca-user')).toBe(true);
   power.click(); await h.flush();
   const buttons = [...h.document.querySelectorAll<HTMLButtonElement>('.ca-power-menu button')];
@@ -71,15 +71,16 @@ it('rechecks revoked owner access before offering footer power actions', async (
   expect(h.app.officePower).not.toHaveBeenCalled();
 });
 
-it('keeps the requested quick menu when a presence refresh replaces the footer during access checks', async () => {
+it('keeps the requested inline expansion when a presence refresh replaces the footer during access checks', async () => {
   const h = await fixture({ owner: true });
   let release!: (allowed: boolean) => void;
   vi.spyOn(h.shell, 'verifyOfficeOwner').mockReturnValue(new Promise(resolve => { release = resolve; }));
+  h.window.localStorage.setItem('reverie:office-expanded', 'false'); h.shell.renderUser();
   const previous = h.document.querySelector<HTMLButtonElement>('.ca-office-gear')!;
   previous.click(); h.shell.renderUser();
   expect(previous.isConnected).toBe(false);
   release(true); await h.flush();
-  expect(h.document.querySelector('.ca-office-menu')).not.toBeNull();
+  expect((h.document.querySelector('.ca-office-pane') as HTMLElement).hidden).toBe(false);
   expect(h.shell.embed).toBeNull();
 });
 
@@ -88,8 +89,7 @@ it('keeps company tools out of the workspace dropdown and accessible inside Comp
   h.app._chatRetired = [{ sessionId: 'old' }];
   const workspaceLabels = h.shell.workspaceEntries('', { full: true }).map(entry => entry.label);
   for (const label of ['Org chart', 'Retired sessions', 'Send diagnostics', 'Custom emotes']) expect(workspaceLabels).not.toContain(label);
-  h.document.querySelector<HTMLButtonElement>('.ca-office-gear')!.click(); await h.flush();
-  [...h.document.querySelectorAll<HTMLButtonElement>('.ca-office-menu button')].find(button => button.textContent === 'Company')!.click(); await h.flush();
+  [...h.document.querySelectorAll<HTMLButtonElement>('.ca-office-pane button')].find(button => button.textContent === 'Company')!.click(); await h.flush();
   h.document.querySelector<HTMLButtonElement>('.ca-company-tools-button')!.click(); await h.flush();
   const buttons = [...h.document.querySelectorAll<HTMLButtonElement>('[aria-label="Company tools"] button')];
   expect(buttons.map(button => button.textContent)).toContain('Retired sessions');

@@ -96,7 +96,7 @@ let
         test/office-accounts.test.ts test/human-presence-ui.test.ts test/human-mentions-ui.test.ts test/bots-page.test.ts test/bots-ui.test.ts test/bot-avatar.test.ts test/cron-service.test.ts test/office-navigation-ui.test.ts test/workspace-files-ui.test.ts test/preview-routes.test.ts
       npm test -- test/agent-capabilities.test.ts test/chat-plugin-settings.test.ts
       npm test -- test/cli-help.test.ts test/cli-commands.test.ts test/chat-ui-controls.test.ts \
-        test/member-sorting.test.ts test/company-profile-layout.test.ts
+        test/member-sorting.test.ts test/company-profile-layout.test.ts test/company-space-ui.test.ts
       npm test -- test/board-permissions.test.ts test/owner-auth-board-decisions.test.ts \
         test/publication-credentials.test.ts test/publication-routes.test.ts \
         test/employee-context.test.ts test/employee-context-routes.test.ts test/cli-agent-context.test.ts \

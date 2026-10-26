@@ -101,14 +101,15 @@ it('lays out parents above children, siblings side by side and real SVG reportin
   expect(writes).toEqual([]);
 });
 
-it('fits the full diagram, zooms without writes and removes its resize listener on navigation', async () => {
+it('keeps names readable in a short viewport, zooms without writes and removes its resize listener on navigation', async () => {
   const { h, writes } = await setup();
   const viewport = h.document.querySelector('.ca-company-map-viewport') as HTMLElement;
   Object.defineProperties(viewport, { clientWidth: { value: 500 }, clientHeight: { value: 400 } });
-  (h.document.querySelector('[aria-label="Fit entire company"]') as HTMLButtonElement).click();
+  (h.document.querySelector('[aria-label="Fit company at readable zoom"]') as HTMLButtonElement).click();
   const stage = h.document.querySelector('.ca-company-map-stage') as HTMLElement;
   expect(Number.parseFloat(stage.style.width)).toBeLessThanOrEqual(500);
-  expect(Number.parseFloat(stage.style.height)).toBeLessThanOrEqual(400);
+  expect(Number(viewport.dataset.scale) * 14).toBeGreaterThanOrEqual(12);
+  expect(Number.parseFloat(stage.style.height)).toBeGreaterThan(400); // Pan instead of shrinking readable labels.
   const scale = Number(viewport.dataset.scale);
   (h.document.querySelector('[aria-label="Zoom in reporting chart"]') as HTMLButtonElement).click();
   expect(Number(viewport.dataset.scale)).toBeGreaterThan(scale);

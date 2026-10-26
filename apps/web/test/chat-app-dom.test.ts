@@ -456,10 +456,12 @@ describe('members and presence', () => {
     expect(h.document.querySelector('.ca-user-status')!.textContent).toBe('Online');
     h.app.setConnectionStatus('reconnecting');
     expect(h.document.querySelector('.ca-user-status')!.textContent).toBe('Reconnecting…');
-    (h.document.querySelector('.ca-machine-bar [aria-label="Office settings"]') as HTMLButtonElement).click();
+    (h.document.querySelector('.ca-user [aria-label="Office settings"]') as HTMLButtonElement).click();
     await settle(40);
     expect(h.shell.embed).toBeNull();
-    expect(h.document.querySelector('.ca-office-menu')).not.toBeNull();
+    expect((h.document.querySelector('.ca-office-pane') as HTMLElement).hidden).toBe(true);
+    (h.document.querySelector('.ca-office-gear') as HTMLButtonElement).click(); await settle(40);
+    expect((h.document.querySelector('.ca-office-pane') as HTMLElement).hidden).toBe(false);
     expect(h.app.settingsOpened).toBeUndefined();
     expect(h.document.querySelector('[aria-label="Debug terminals"]')).toBeNull();
   });
@@ -646,10 +648,11 @@ describe('never a blank page', () => {
     h.app._chatApi = (path: string, options: unknown) => path === '/api/chatrooms/phone-status'
       ? Promise.resolve({ ok: true, data: { self: 'owner', canSetOwn: true } })
       : api(path, options);
-    (h.document.querySelector('.ca-machine-bar [aria-label="Office settings"]') as HTMLButtonElement).click();
+    (h.document.querySelector('.ca-user [aria-label="Office settings"]') as HTMLButtonElement).click();
     await settle(40);
     expect(h.app.settingsOpened).toBeUndefined();
-    ([...h.document.querySelectorAll('.ca-office-menu button')].find(button => button.textContent === 'Company') as HTMLButtonElement).click();
+    (h.document.querySelector('.ca-office-gear') as HTMLButtonElement).click(); await settle(40);
+    ([...h.document.querySelectorAll('.ca-office-pane button')].find(button => button.textContent === 'Company') as HTMLButtonElement).click();
     await settle(80);
     (h.document.querySelector('[aria-label="Company tools"]') as HTMLButtonElement).click();
     await settle(40);
@@ -2177,7 +2180,7 @@ describe('phone: message sheet and member-only terminal access', () => {
     const h = await createHarness({ sessions, rooms: [room('r1', 'General', [member(A, 'alpha')], {})] });
     const bar = [...h.document.querySelectorAll('.ca-user > button')].map((b) => b.getAttribute('aria-label'));
     expect(bar).not.toContain('Office settings');
-    expect(h.document.querySelectorAll('.ca-machine-bar [aria-label="Office settings"]')).toHaveLength(1);
+    expect(h.document.querySelectorAll('.ca-user [aria-label="Office settings"]')).toHaveLength(1);
     expect(h.document.querySelector('.ca-rail [aria-label="Org chart"]')).toBeNull();
     expect(h.document.querySelector('.ca-rail [aria-label="Debug terminals"]')).toBeNull();
     expect(h.document.querySelector('.ca-user-org')).toBeNull();

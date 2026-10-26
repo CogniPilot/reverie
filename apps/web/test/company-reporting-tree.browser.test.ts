@@ -5,10 +5,12 @@ import { chromium } from 'playwright';
 import { createServer, member, room, message } from './helpers/chat-app-harness.mjs';
 
 it.each([
-  { label: 'desktop', width: 1440, height: 1000, styles: ['styles.css', 'chat-app.css'] },
-  { label: 'desktop-reverse-css', width: 1440, height: 1000, styles: ['chat-app.css', 'styles.css'] },
-  { label: 'mobile', width: 390, height: 844, styles: ['styles.css', 'chat-app.css'] },
-])('draws a real top-down 12-person tree with nine siblings, depth four and working fit/zoom ($label)', async ({ label, width, height, styles }) => {
+  { label: 'desktop', width: 1580, height: 900, shape: 'current', styles: ['styles.css', 'chat-app.css'] },
+  { label: 'desktop-reverse-css', width: 1580, height: 900, shape: 'current', styles: ['chat-app.css', 'styles.css'] },
+  { label: 'owner-screen', width: 1863, height: 956, shape: 'current', styles: ['styles.css', 'chat-app.css'] },
+  { label: 'stress-wide-deep', width: 1440, height: 1000, shape: 'stress', styles: ['styles.css', 'chat-app.css'] },
+  { label: 'mobile', width: 390, height: 844, shape: 'current', styles: ['styles.css', 'chat-app.css'] },
+])('draws a real top-down 12-person tree with compact current-company geometry and working fit/zoom ($label)', async ({ label, width, height, shape, styles }) => {
   const publicDir = resolve(import.meta.dirname, '../src/web/public');
   const read = (name: string) => readFileSync(resolve(publicDir, name), 'utf8');
   const harness = readFileSync(resolve(import.meta.dirname, 'helpers/chat-app-harness.mjs'), 'utf8');
@@ -29,7 +31,7 @@ it.each([
       window.__server.company={canManage:true,settings:{ownerName:'Owner',ownerTitle:'Office owner'},employees:Array.from({length:12},(_,i)=>({
         id:'person-'+i,sessionId:'runtime-'+i,sessionGeneration:1,name:'Person '+(i+1),position:i<2?'Coordinator':'Engineer',
         icon:i===0?'🦊':i===1?'🦉':'🧑',available:i!==11,onVacation:i===11,
-        reportsTo:i===0?'owner':i===1?'person-0':i===11?'person-2':'person-1',permissions:{}
+        reportsTo:${shape === 'current' ? "['owner','owner','person-1','person-2','person-1','person-1','person-1','person-5','person-6','person-1','person-5','person-1'][i]" : "i===0?'owner':i===1?'person-0':i===11?'person-2':'person-1'"},permissions:{}
       }))};
       const original=window.__server.handle;window.__server.handle=async(path,opts={})=>{
         const ok=data=>({ok:true,status:200,json:async()=>({success:true,data})});
@@ -42,7 +44,7 @@ it.each([
     await page.addScriptTag({ content: read('chat-app.js') });
     await page.waitForSelector('.ca-rail', { state: 'attached' });
     await page.evaluate(() => (window as any).reverieChat.openCompany('people'));
-    await page.waitForFunction(() => Number(document.querySelector<HTMLElement>('.ca-company-map-viewport')?.dataset.scale) < 1);
+    await page.waitForFunction(() => Boolean(document.querySelector<HTMLElement>('.ca-company-map-viewport')?.dataset.scale));
     const initial = await page.evaluate(() => { const v=document.querySelector('.ca-company-map-viewport')!.getBoundingClientRect(), o=document.querySelector('.ca-company-owner')!.getBoundingClientRect(); return {left:v.left,right:v.right,ownerCenter:(o.left+o.right)/2}; });
     expect(initial.ownerCenter).toBeGreaterThan(initial.left); expect(initial.ownerCenter).toBeLessThan(initial.right);
     await page.locator('[aria-label="Show reporting chart at 100%"]' ).click();
@@ -51,7 +53,7 @@ it.each([
     const beforePan = await viewportHandle.evaluate(element => element.scrollLeft);
     await page.mouse.move(bounds.x + 80, bounds.y + 12); await page.mouse.down();
     await page.mouse.move(bounds.x - 20, bounds.y + 12, { steps: 5 }); await page.mouse.up();
-    expect(await viewportHandle.evaluate(element => element.scrollLeft)).toBeGreaterThan(beforePan);
+    if (await viewportHandle.evaluate(element => element.scrollWidth > element.clientWidth)) expect(await viewportHandle.evaluate(element => element.scrollLeft)).toBeGreaterThan(beforePan);
     const geometry = await page.evaluate(() => {
       const viewport = document.querySelector('.ca-company-map-viewport') as HTMLElement;
       const nodes = [...document.querySelectorAll('.ca-company-map-node')].map(element => {
@@ -70,10 +72,9 @@ it.each([
     });
     expect(geometry.nodes).toHaveLength(13); expect(geometry.edges).toHaveLength(12);
     expect(geometry.scrollWidth).toBe(geometry.pageWidth);
-    expect(Math.max(...geometry.nodes.map(node => node.depth))).toBe(4);
-    const siblings = geometry.nodes.filter(node => node.depth === 3);
-    expect(siblings).toHaveLength(9); expect(new Set(siblings.map(node => node.y)).size).toBe(1);
-    for (const node of geometry.nodes) { expect(node.avatarWidth).toBeCloseTo(96, 0); expect(node.width).toBeCloseTo(184, 0); }
+    expect(Math.max(...geometry.nodes.map(node => node.depth))).toBe(shape === 'current' ? 3 : 4);
+    if (shape === 'stress') { const siblings = geometry.nodes.filter(node => node.depth === 3); expect(siblings).toHaveLength(9); expect(new Set(siblings.map(node => node.y)).size).toBe(1); }
+    for (const node of geometry.nodes) { expect(node.avatarWidth).toBeCloseTo(96, 0); expect(node.width).toBeCloseTo(144, 0); expect(node.height).toBeLessThanOrEqual(160); }
     for (const edge of geometry.edges) {
       const parent = geometry.nodes.find(node => node.id === edge.parent)!, child = geometry.nodes.find(node => node.id === edge.child)!;
       expect(child.y).toBeGreaterThan(parent.y + parent.height);
@@ -86,16 +87,20 @@ it.each([
     }
     const output = process.env.TEST_REPORTING_SCREENSHOT_DIRECTORY;
     if (output) { mkdirSync(output, { recursive: true }); await page.screenshot({ path: resolve(output, `${label}-100.png`), fullPage: true }); }
-    await page.getByRole('button', { name: 'Fit entire company', exact: true }).click();
+    await page.getByRole('button', { name: 'Fit company at readable zoom', exact: true }).click();
     const fit = await page.evaluate(() => {
       const viewport = document.querySelector('.ca-company-map-viewport')!.getBoundingClientRect();
       const element = document.querySelector('.ca-company-map-viewport')!;
-      return { scrollWidth: element.scrollWidth, clientWidth: element.clientWidth, scrollHeight: element.scrollHeight, clientHeight: element.clientHeight, viewport: { x: viewport.x, y: viewport.y, right: viewport.right, bottom: viewport.bottom }, nodes: [...document.querySelectorAll('.ca-company-map-node')].map(node => {
+      return { gearAvatarDelta: Math.abs(document.querySelector('.ca-office-gear')!.getBoundingClientRect().left - document.querySelector('.ca-user-btn .chatroom-avatar')!.getBoundingClientRect().left), scale: Number((element as HTMLElement).dataset.scale), nameFont: parseFloat(getComputedStyle(document.querySelector('.ca-company-person-title strong')!).fontSize), scrollWidth: element.scrollWidth, clientWidth: element.clientWidth, scrollHeight: element.scrollHeight, clientHeight: element.clientHeight, viewport: { x: viewport.x, y: viewport.y, right: viewport.right, bottom: viewport.bottom }, nodes: [...document.querySelectorAll('.ca-company-map-node')].map(node => {
         const r = node.getBoundingClientRect(); return { x: r.x, y: r.y, right: r.right, bottom: r.bottom };
       }) };
     });
-    expect(fit.scrollWidth).toBeLessThanOrEqual(fit.clientWidth + 2); expect(fit.scrollHeight).toBeLessThanOrEqual(fit.clientHeight + 2);
-    for (const node of fit.nodes) { expect(node.x).toBeGreaterThanOrEqual(fit.viewport.x); expect(node.y).toBeGreaterThanOrEqual(fit.viewport.y); expect(node.right).toBeLessThanOrEqual(fit.viewport.right); expect(node.bottom).toBeLessThanOrEqual(fit.viewport.bottom); }
+    expect(fit.nameFont * fit.scale).toBeGreaterThanOrEqual(12);
+    if (width > 700) expect(fit.gearAvatarDelta).toBeLessThanOrEqual(6);
+    if (shape === 'current' && width > 700) {
+      expect(fit.scrollWidth).toBeLessThanOrEqual(fit.clientWidth + 2); expect(fit.scrollHeight).toBeLessThanOrEqual(fit.clientHeight + 2);
+      for (const node of fit.nodes) { expect(node.x).toBeGreaterThanOrEqual(fit.viewport.x); expect(node.y).toBeGreaterThanOrEqual(fit.viewport.y); expect(node.right).toBeLessThanOrEqual(fit.viewport.right); expect(node.bottom).toBeLessThanOrEqual(fit.viewport.bottom); }
+    }
     if (output) { await page.screenshot({ path: resolve(output, `${label}-fit.png`), fullPage: true }); writeFileSync(resolve(output, `${label}-geometry.json`), JSON.stringify({ geometry, fit, errors }, null, 2)); }
     await page.locator('[data-employee-id="person-11"] [aria-label="Edit profile for Person 12"]').click();
     await page.locator('.ca-expert-profile').waitFor();

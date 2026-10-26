@@ -2371,7 +2371,8 @@ class ReverieChatApp {
     const svg = this.doc.createElementNS('http://www.w3.org/2000/svg', 'svg');
     svg.setAttribute('class', 'ca-company-map-links'); svg.setAttribute('aria-hidden', 'true');
     canvas.append(svg); stage.append(canvas); viewport.append(stage);
-    const width = 184, height = 256, gap = 32, level = height + 68, margin = 24;
+    const width = 144, gap = 12, margin = 12;
+    const height = 144, level = height + 24;
     const nodes = [];
     const measure = node => {
       node.span = Math.max(width, node.children.reduce((sum, child) => sum + measure(child), 0) + Math.max(0, node.children.length - 1) * gap);
@@ -2413,15 +2414,17 @@ class ReverieChatApp {
     const fit = whole => {
       if (!viewport.isConnected || !viewport.clientWidth) return;
       const horizontal = Math.max(1, viewport.clientWidth - 16) / logicalWidth;
-      apply(whole ? Math.min(1, horizontal, Math.max(1, viewport.clientHeight - 16) / logicalHeight) : Math.max(.65, Math.min(1, horizontal)));
+      const readable = 12 / 14;
+      apply(Math.max(readable, whole ? Math.min(1, horizontal, Math.max(1, viewport.clientHeight - 16) / logicalHeight) : Math.min(1, horizontal)));
       viewport.scrollLeft = Math.max(0, (logicalWidth * scale - viewport.clientWidth) / 2); viewport.scrollTop = 0;
     };
     const zoom = factor => { fitMode = ''; apply(scale * factor); };
     tools.append(this.button('ca-btn', 'Zoom out reporting chart', () => zoom(1 / 1.25), { text: '−' }),
       value, this.button('ca-btn', 'Zoom in reporting chart', () => zoom(1.25), { text: '+' }),
       this.button('ca-btn', 'Show reporting chart at 100%', () => { fitMode = ''; apply(1); }, { text: '100%' }),
-      this.button('ca-btn', 'Fit entire company', () => { fitMode = 'company'; fit(true); }, { text: 'Fit company' }));
-    box.append(tools, this.el('p', 'ca-hint ca-company-map-hint', 'Click a portrait to open its profile. Scroll or drag blank space to pan; use Fit company for the whole tree.'), viewport);
+      this.button('ca-btn', 'Fit company at readable zoom', () => { fitMode = 'company'; fit(true); }, { text: 'Fit company' }));
+    tools.title = 'Open a profile to edit reporting. Drag a person onto a manager to reparent. Scroll or drag blank space to pan.';
+    box.append(tools, viewport);
     let pan;
     viewport.addEventListener('pointerdown', event => {
       if (event.button !== 0 || event.pointerType !== 'mouse' || event.target.closest('.ca-company-map-node, button, select')) return;
@@ -2438,7 +2441,7 @@ class ReverieChatApp {
     this._companyChartResize = () => { if (fitMode) fit(fitMode === 'company'); };
     this.doc.defaultView.addEventListener('resize', this._companyChartResize);
     apply(1);
-    this.doc.defaultView.requestAnimationFrame?.(() => { if (viewport.isConnected) fit(false); });
+    this.doc.defaultView.requestAnimationFrame?.(() => { if (viewport.isConnected) fit(true); });
     return box;
   }
 
@@ -2468,7 +2471,7 @@ class ReverieChatApp {
     this.els.chat.inert = true;
     this.els.members.inert = true;
     const head = this.el('header', 'ca-company-head');
-    head.append(this.el('span', 'ca-spacer'), this.button('ca-btn', 'Back to chat', () => { this.closePage(); this.els.machineBar.querySelector('.ca-office-gear')?.focus(); }, { text: 'Back to chat' }));
+    head.append(this.el('span', 'ca-spacer'), this.button('ca-btn', 'Back to chat', () => { this.closePage(); this.els.user.querySelector('.ca-office-gear')?.focus(); }, { text: 'Back to chat' }));
     const content = this.el('div', 'ca-company-content');
     content.id = 'ca-company-people';
     content.setAttribute('aria-label', 'Company people');
@@ -2578,6 +2581,7 @@ class ReverieChatApp {
         title.append(avatar, this.literalText('strong', '', employee.name));
         const parentId = reportingParent(employee);
         const parent = parentId !== 'owner' ? employees.find(e => e.id === parentId)?.name : data.settings?.ownerName || 'Owner';
+        card.title = `${employee.name} · ${employee.position || ''} · Reports to ${parent || 'Unassigned'} · ${employee.onVacation ? 'Out of office' : employee.available ? 'Connected' : 'Disconnected'}`;
         card.append(title, this.literalText('span', 'ca-company-role', employee.position || ''), parent ? this.literalText('span', 'ca-company-parent', parent) : this.el('span', 'ca-company-parent', 'Unassigned'), this.el('span', `ca-company-state${employee.available && !employee.onVacation ? ' is-connected' : ''}`, employee.onVacation ? 'Out of office' : employee.available ? 'Connected' : 'Disconnected'));
         if (manage) {
           const reporting = this.el('label', 'ca-company-reporting');
@@ -2626,12 +2630,15 @@ class ReverieChatApp {
             } catch (error) {
               manager.value = previous;
               reportingStatus.textContent = `Could not save reporting line: ${error.message}`;
+            status.textContent = reportingStatus.textContent;
             } finally {
               clearTimeout(timeout);
               manager.disabled = false;
             }
           });
           reporting.append(manager, reportingStatus);
+          // Keep the guarded change handler for drag/drop; normal editing lives in the profile.
+          reporting.hidden = true;
           card.querySelector('.ca-company-parent').replaceWith(reporting);
 
         }
@@ -2642,7 +2649,7 @@ class ReverieChatApp {
         cards.set(employee.id, card);
       }
       const chart = this.el('section', 'ca-company-chart');
-      chart.append(this.el('h3', '', 'Reporting structure'));
+      chart.setAttribute('aria-label', 'Reporting structure');
       const ownerNode = this.el('article', 'ca-company-owner'); ownerNode.dataset.employeeId = 'owner'; reportingDropTarget(ownerNode, 'owner');
       const ownerName = data.settings?.ownerName || 'Owner';
       const ownerTitle = this.el(manage ? 'button' : 'div', 'ca-company-owner-title ca-company-profile-trigger');
@@ -3217,18 +3224,32 @@ class ReverieChatApp {
     ];
   }
 
-  async openOfficeMenu(anchor) {
-    let owner = false;
-    try { owner = await this.verifyOfficeOwner(); } catch { /* Personal terminal preferences remain available offline. */ }
-    const target = anchor.isConnected ? anchor : this.els.machineBar?.querySelector('.ca-office-gear');
-    if (!target) return;
+  renderOfficePane(owner = this.canManageOffice()) {
+    const pane = this.els.officePane;
+    if (!pane) return;
+    const expanded = caRead('local', 'reverie:office-expanded', 'true') !== 'false';
+    pane.hidden = !expanded;
+    this.els.user.querySelector('.ca-office-gear')?.setAttribute('aria-expanded', String(expanded));
+    pane.replaceChildren();
     const entries = owner
       ? ['company', 'board'].map(kind => ({ label: CA_PAGES[kind].label, run: () => this.openPage(kind) }))
       : [{ label: 'Terminal settings', run: () => this.app.openAppSettings?.() }];
-    const menu = this.openMenu(entries, { at: target, focus: target, above: true, label: 'Office', className: 'ca-office-menu' });
-    // The most-used pages sit next to the footer anchor, including on a short
-    // screen where the rest of the menu scrolls above them.
-    if (owner) [...menu.querySelectorAll('button')].find(button => button.textContent === 'Company')?.focus();
+    for (const entry of entries) pane.append(this.button('ca-btn ca-office-pane-link', entry.label, async () => {
+      if (owner) {
+        try { if (!await this.verifyOfficeOwner()) { this.renderOfficePane(false); return this.toast('Sign in as the owner to use company tools.', 'error'); } }
+        catch { return this.toast('Could not verify company access.', 'error'); }
+      }
+      entry.run();
+    }, { text: entry.label }));
+  }
+
+  async openOfficeMenu(anchor) {
+    const expanded = anchor.getAttribute('aria-expanded') !== 'true';
+    caWrite('local', 'reverie:office-expanded', String(expanded));
+    this.renderOfficePane();
+    if (!expanded) return;
+    try { this.renderOfficePane(await this.verifyOfficeOwner()); }
+    catch { this.renderOfficePane(false); }
   }
 
   async openCompanyTools(anchor) {
@@ -3266,7 +3287,7 @@ class ReverieChatApp {
   }
 
   updateOfficeNavigation() {
-    const gear = this.els.machineBar?.querySelector('.ca-office-gear');
+    const gear = this.els.user?.querySelector('.ca-office-gear');
     if (!gear) return;
     const active = !!this.embed && this.embed !== 'embassies';
     gear.classList.toggle('is-active', active);
@@ -5356,9 +5377,11 @@ class ReverieChatApp {
     this.els.approvals = approvals;
     user.append(approvals);
     const gear = this.button('ca-icon-btn ca-office-gear', 'Office settings', () => this.openOfficeMenu(gear), { icon: 'gear' });
-    gear.setAttribute('aria-haspopup', 'menu');
-    this.els.machineBar.querySelector('.ca-office-gear')?.remove();
-    this.els.machineBar.prepend(gear);
+    gear.setAttribute('aria-controls', 'ca-office-pane');
+    const launcher = this.el('div', 'ca-office-launcher');
+    const pane = this.el('nav', 'ca-office-pane'); pane.id = 'ca-office-pane'; pane.setAttribute('aria-label', 'Company and board');
+    launcher.append(gear, pane); user.prepend(launcher); this.els.officePane = pane;
+    this.renderOfficePane();
     if (this.canManageOffice()) {
       const power = this.button('ca-icon-btn ca-office-power-button', 'Office power', () => this.openOfficePowerMenu(power), { icon: 'power' });
       power.setAttribute('aria-haspopup', 'menu'); user.append(power);

@@ -35,6 +35,7 @@ export const BROWSER_TEST_GLOBS = [
   'test/debug-terminal-view.browser.test.ts',
   'test/webhook-removal.browser.test.ts',
   'test/company-ui.browser.test.ts',
+  'test/office-power.browser.test.ts',
   'test/company-hire-wizard.browser.test.ts',
   'test/company-reporting-tree.browser.test.ts',
   'test/tab-rail-resize.browser.test.ts',
