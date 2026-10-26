@@ -1303,8 +1303,8 @@ describe('org chart: connected-worker projection without teardown', () => {
     expect(panel.textContent).not.toContain('stale-pinned');
     expect(panel.textContent).not.toContain('gone-unpinned');
     expect(panel.querySelector('.ca-org-former, .ca-org-clean')).toBeNull();
-    const lead = [...panel.querySelectorAll('li')].find((node) => node.querySelector(':scope > .ca-org-node > strong')?.textContent === 'Lead');
-    expect(lead?.textContent).toContain('Report');
+    expect(panel.querySelector('.ca-org-item[data-org-key="employee:report"]')?.getAttribute('data-parent-id')).toBe('employee:lead');
+    expect(panel.querySelector('.ca-company-map-links path[data-parent-id="employee:lead"][data-child-id="employee:report"]')).not.toBeNull();
     expect(JSON.stringify(company)).toBe(original);
     expect([...h.app.sessions.entries()]).toEqual(beforeSessions);
     expect(h.server.calls.some((call: { method: string; path: string }) => call.method !== 'GET')).toBe(false);
@@ -1329,7 +1329,7 @@ describe('org chart', () => {
     expect(panel.hidden).toBe(false);
     const text = panel.textContent || '';
     for (const want of ['Pat', 'Chief', 'CTO', 'Wren', 'Engineer', 'disconnected']) expect(text).toContain(want);
-    expect(panel.querySelectorAll('li.ca-org-item').length).toBe(3);
+    expect(panel.querySelectorAll('.ca-org-item').length).toBe(3);
     expect(panel.querySelector('[role="tree"]')).toBeNull();
     // only people with a live session can be messaged
     expect(panel.querySelectorAll('button.ca-org-node').length).toBe(1);

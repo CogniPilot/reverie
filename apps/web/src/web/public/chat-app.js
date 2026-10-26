@@ -793,6 +793,7 @@ function caOrgTree(company, liveIds) {
   const root = {
     key: 'owner',
     name: data.owner?.name || data.settings?.ownerName || 'Owner',
+    avatar: data.owner?.avatar || data.settings?.ownerAvatar,
     title: data.owner?.title || data.settings?.ownerTitle || '',
     icon: '',
     kind: 'owner',
@@ -802,6 +803,7 @@ function caOrgTree(company, liveIds) {
   for (const e of employees) {
     nodes.set(e.id, {
       key: `employee:${e.id}`,
+      avatar: e.avatar, avatarBackground: e.avatarBackground,
       name: e.name,
       title: e.position || '',
       icon: e.icon || '',
@@ -2358,6 +2360,88 @@ class ReverieChatApp {
     search.focus();
   }
 
+  /** Position real person nodes as a top-down tree; SVG draws only their connecting lines. */
+  companyTreeViewport(root) {
+    const box = this.el('div', 'ca-company-tree ca-company-map');
+    const tools = this.el('div', 'ca-company-map-tools'); tools.setAttribute('aria-label', 'Reporting chart view');
+    const viewport = this.el('div', 'ca-company-map-viewport'); viewport.tabIndex = 0;
+    viewport.setAttribute('aria-label', 'Reporting tree. Scroll to pan; use zoom controls to inspect people.');
+    const stage = this.el('div', 'ca-company-map-stage');
+    const canvas = this.el('div', 'ca-company-map-canvas');
+    const svg = this.doc.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('class', 'ca-company-map-links'); svg.setAttribute('aria-hidden', 'true');
+    canvas.append(svg); stage.append(canvas); viewport.append(stage);
+    const width = 184, height = 256, gap = 32, level = height + 68, margin = 24;
+    const nodes = [];
+    const measure = node => {
+      node.span = Math.max(width, node.children.reduce((sum, child) => sum + measure(child), 0) + Math.max(0, node.children.length - 1) * gap);
+      return node.span;
+    };
+    measure(root);
+    const position = (node, left, depth, parent) => {
+      node.x = left + (node.span - width) / 2 + margin; node.y = depth * level + margin;
+      node.element.classList.add('ca-company-map-node');
+      node.element.style.left = `${node.x}px`; node.element.style.top = `${node.y}px`;
+      node.element.dataset.depth = String(depth); node.element.dataset.parentId = parent?.id || '';
+      canvas.append(node.element); nodes.push(node);
+      if (parent) {
+        const fromX = parent.x + width / 2, fromY = parent.y + height, toX = node.x + width / 2;
+        const bend = (fromY + node.y) / 2;
+        const path = this.doc.createElementNS('http://www.w3.org/2000/svg', 'path');
+        path.setAttribute('d', `M ${fromX} ${fromY} V ${bend} H ${toX} V ${node.y}`);
+        path.dataset.parentId = parent.id; path.dataset.childId = node.id; svg.append(path);
+      }
+      let cursor = left;
+      for (const child of node.children) { position(child, cursor, depth + 1, node); cursor += child.span + gap; }
+    };
+    position(root, 0, 0, null);
+    const logicalWidth = root.span + margin * 2;
+    const logicalHeight = Math.max(...nodes.map(node => node.y)) + height + margin;
+    canvas.style.width = `${logicalWidth}px`; canvas.style.height = `${logicalHeight}px`;
+    svg.setAttribute('width', String(logicalWidth)); svg.setAttribute('height', String(logicalHeight));
+    svg.setAttribute('viewBox', `0 0 ${logicalWidth} ${logicalHeight}`);
+    const value = this.el('output', 'ca-company-map-zoom'); value.setAttribute('aria-label', 'Reporting chart zoom');
+    let scale = 1, fitMode = 'width';
+    const apply = next => {
+      const center = (viewport.scrollLeft + viewport.clientWidth / 2) / scale;
+      scale = Math.max(.1, Math.min(2, next));
+      canvas.style.transform = `scale(${scale})`;
+      stage.style.width = `${logicalWidth * scale}px`; stage.style.height = `${logicalHeight * scale}px`;
+      value.textContent = `${Math.round(scale * 100)}%`; viewport.dataset.scale = String(scale);
+      if (viewport.isConnected && viewport.clientWidth) viewport.scrollLeft = Math.max(0, center * scale - viewport.clientWidth / 2);
+    };
+    const fit = whole => {
+      if (!viewport.isConnected || !viewport.clientWidth) return;
+      const horizontal = Math.max(1, viewport.clientWidth - 16) / logicalWidth;
+      apply(whole ? Math.min(1, horizontal, Math.max(1, viewport.clientHeight - 16) / logicalHeight) : Math.max(.65, Math.min(1, horizontal)));
+      viewport.scrollLeft = Math.max(0, (logicalWidth * scale - viewport.clientWidth) / 2); viewport.scrollTop = 0;
+    };
+    const zoom = factor => { fitMode = ''; apply(scale * factor); };
+    tools.append(this.button('ca-btn', 'Zoom out reporting chart', () => zoom(1 / 1.25), { text: '−' }),
+      value, this.button('ca-btn', 'Zoom in reporting chart', () => zoom(1.25), { text: '+' }),
+      this.button('ca-btn', 'Show reporting chart at 100%', () => { fitMode = ''; apply(1); }, { text: '100%' }),
+      this.button('ca-btn', 'Fit entire company', () => { fitMode = 'company'; fit(true); }, { text: 'Fit company' }));
+    box.append(tools, this.el('p', 'ca-hint ca-company-map-hint', 'Click a portrait to open its profile. Scroll or drag blank space to pan; use Fit company for the whole tree.'), viewport);
+    let pan;
+    viewport.addEventListener('pointerdown', event => {
+      if (event.button !== 0 || event.pointerType !== 'mouse' || event.target.closest('.ca-company-map-node, button, select')) return;
+      pan = { x: event.clientX, y: event.clientY, left: viewport.scrollLeft, top: viewport.scrollTop };
+      viewport.setPointerCapture?.(event.pointerId); viewport.classList.add('is-panning'); event.preventDefault();
+    });
+    viewport.addEventListener('pointermove', event => {
+      if (!pan) return;
+      viewport.scrollLeft = pan.left - event.clientX + pan.x; viewport.scrollTop = pan.top - event.clientY + pan.y;
+    });
+    const endPan = () => { pan = null; viewport.classList.remove('is-panning'); };
+    viewport.addEventListener('pointerup', endPan); viewport.addEventListener('pointercancel', endPan);
+    this._companyChartResize && this.doc.defaultView.removeEventListener('resize', this._companyChartResize);
+    this._companyChartResize = () => { if (fitMode) fit(fitMode === 'company'); };
+    this.doc.defaultView.addEventListener('resize', this._companyChartResize);
+    apply(1);
+    this.doc.defaultView.requestAnimationFrame?.(() => { if (viewport.isConnected) fit(false); });
+    return box;
+  }
+
   /** Company is a first-class chat surface; management requires a verified owner. */
   async openCompany(section = 'plans', { push = true } = {}) {
     this.toggleDrawer(null);
@@ -2559,32 +2643,22 @@ class ReverieChatApp {
       }
       const chart = this.el('section', 'ca-company-chart');
       chart.append(this.el('h3', '', 'Reporting structure'));
-      const tree = this.el('ul', 'ca-company-tree ca-company-roster');
+      const ownerNode = this.el('article', 'ca-company-owner'); ownerNode.dataset.employeeId = 'owner'; reportingDropTarget(ownerNode, 'owner');
+      const ownerName = data.settings?.ownerName || 'Owner';
+      const ownerTitle = this.el(manage ? 'button' : 'div', 'ca-company-owner-title ca-company-profile-trigger');
+      if (manage) { ownerTitle.type = 'button'; ownerTitle.setAttribute('aria-label', 'Edit company owner profile'); ownerTitle.addEventListener('click', () => this.openCompanySettings(paint)); }
+      const ownerAvatar = this.el('span', 'chatroom-avatar ca-company-icon'); ownerAvatar.append(this.literalText('span', 'chatroom-avatar-glyph', ownerName.slice(0, 1)));
+      if (data.settings?.ownerAvatar || this.ownerAvatar) this.fillAvatar(ownerAvatar, data.settings?.ownerAvatar || this.ownerAvatar);
+      ownerTitle.append(ownerAvatar, this.literalText('strong', '', ownerName)); ownerNode.append(ownerTitle, this.literalText('span', 'ca-company-owner-role', data.settings?.ownerTitle || 'Owner'));
       const visited = new Set();
-      const branch = (parentId, ancestors = new Set()) => {
-        const list = this.el('ul', '');
-        for (const e of employees.filter(e => reportingParent(e) === parentId)) {
-          if (ancestors.has(e.id) || visited.has(e.id)) continue;
-          visited.add(e.id);
-          const item = this.el('li', '');
-          const card = cards.get(e.id);
-          if (card) item.append(card);
-          const next = new Set(ancestors); next.add(e.id);
-          const children = branch(e.id, next); if (children.childElementCount) { item.classList.add('has-reports'); item.append(children); }
-          list.append(item);
-        }
-        return list;
-      };
-      const ownerNode = this.el('li', 'ca-company-owner'); reportingDropTarget(ownerNode, 'owner'); ownerNode.append(data.settings?.ownerName ? this.literalText('strong', '', data.settings.ownerName) : this.el('strong', '', 'Owner'), branch('owner')); tree.append(ownerNode);
-      for (const employee of employees.filter(employee => !visited.has(employee.id))) {
-        if (visited.has(employee.id)) continue;
+      const build = employee => {
         visited.add(employee.id);
-        const item = this.el('li', '');
-        const card = cards.get(employee.id);
-        if (card) item.append(card);
-        item.append(branch(employee.id, new Set([employee.id])));
-        tree.append(item);
-      }
+        return { id: employee.id, element: cards.get(employee.id), children: employees.filter(child => reportingParent(child) === employee.id && !visited.has(child.id)).map(build) };
+      };
+      const root = { id: 'owner', element: ownerNode, children: employees.filter(employee => reportingParent(employee) === 'owner').map(build) };
+      // Keep malformed/orphaned records visible without rewriting their stored reporting choice.
+      for (const employee of employees) if (!visited.has(employee.id)) root.children.push(build(employee));
+      const tree = this.companyTreeViewport(root);
       chart.append(tree);
       if (!employees.length) chart.append(this.el('p', 'ca-hint', 'No permanent team members yet.'));
       const people = this.el('section', 'ca-company-people');
@@ -3056,6 +3130,8 @@ class ReverieChatApp {
     if (this._companyTimer) this.doc.defaultView.clearInterval(this._companyTimer);
     if (this._companyResize) this.doc.defaultView.removeEventListener('message', this._companyResize);
     this._companyResize = null;
+    if (this._companyChartResize) this.doc.defaultView.removeEventListener('resize', this._companyChartResize);
+    this._companyChartResize = null;
     this._companyTimer = null;
     this._companySection = null;
     this._companyRefresh = null;
@@ -3328,50 +3404,40 @@ class ReverieChatApp {
   }
 
   orgTreeEl(tree) {
-    const canMessage = (n) => this.serverFeatures.dms && n.sessionId && this.app.sessions?.has?.(n.sessionId);
-    const walk = (node) => {
-      if (node.kind === 'former') return former(node);
-      const item = this.el('li', `ca-org-item ca-org-item--${node.kind}`);
-      const message = canMessage(node);
+    const former = [];
+    const walk = node => {
+      const item = this.el('article', `ca-org-item ca-org-item--${node.kind}`);
+      item.dataset.orgKey = node.key;
+      const message = this.serverFeatures.dms && node.sessionId && this.app.sessions?.has?.(node.sessionId);
       const label = this.el(message ? 'button' : 'div', 'ca-org-node');
       if (message) {
-        label.type = 'button';
-        label.title = `Message ${node.name}`;
-        label.addEventListener('click', () => {
-          this.closeOrg();
-          this.startDm(node.sessionId);
-        });
+        label.type = 'button'; label.title = `Message ${node.name}`;
+        label.addEventListener('click', () => { this.closeOrg(); this.startDm(node.sessionId); });
       }
-      if (node.icon) label.append(this.el('span', 'ca-org-icon', node.icon));
-      label.append(this.literalText('strong', '', node.name));
+      const avatar = this.el('span', 'chatroom-avatar ca-company-icon');
+      if (caAvatarBackground(node.avatarBackground)) avatar.style.backgroundColor = node.avatarBackground;
+      avatar.append(this.literalText('span', 'chatroom-avatar-glyph', node.icon || node.name.slice(0, 1)));
+      if (node.avatar) this.fillAvatar(avatar, node.avatar);
+      label.append(avatar, this.literalText('strong', '', node.name));
       if (node.title) label.append(this.literalText('span', 'ca-org-title', node.title));
       if (node.kind !== 'owner' && node.available === false) label.append(this.el('span', 'ca-org-title', 'disconnected'));
       item.append(label);
-      if (node.children.length) {
-        const sub = this.el('ul', 'ca-org-list');
-        for (const child of node.children) sub.append(walk(child));
-        item.append(sub);
+      const children = [];
+      for (const child of node.children) {
+        if (child.kind === 'former') former.push(child);
+        else children.push(walk(child));
       }
-      return item;
+      return { id: node.key, element: item, children };
     };
-    // The profiles of gone agents: folded away, with one button to clean them up.
-    const former = (node) => {
-      const item = this.el('li', 'ca-org-item ca-org-item--former');
+    const map = this.companyTreeViewport(walk(tree)); map.setAttribute('aria-label', 'Organization');
+    for (const group of former) {
       const details = this.el('details', 'ca-org-former');
-      details.append(this.el('summary', 'ca-org-node', `Former workers (${node.children.length})`));
-      const clean = this.el('button', 'ca-btn ca-org-clean', `Remove ${node.children.length} old profile${node.children.length === 1 ? '' : 's'}`);
-      clean.type = 'button';
-      clean.addEventListener('click', () => this.pruneFormerWorkers(node.children.length));
-      const sub = this.el('ul', 'ca-org-list');
-      for (const child of node.children) sub.append(walk(child));
-      details.append(clean, sub);
-      item.append(details);
-      return item;
-    };
-    const list = this.el('ul', 'ca-org-list ca-org-list--root');
-    list.setAttribute('aria-label', 'Organization');
-    list.append(walk(tree));
-    return list;
+      details.append(this.el('summary', '', `Former workers (${group.children.length})`));
+      details.append(this.button('ca-btn ca-org-clean', `Remove ${group.children.length} old profiles`, () => this.pruneFormerWorkers(group.children.length), { text: `Remove ${group.children.length} old profiles` }));
+      for (const node of group.children) details.append(this.literalText('p', '', node.name));
+      map.append(details);
+    }
+    return map;
   }
 
   /* ── composer ── */

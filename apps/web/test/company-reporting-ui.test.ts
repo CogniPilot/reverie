@@ -86,3 +86,34 @@ it('never enables drag or owner profile controls from an expert title', async ()
   expect(card('river').querySelector('select')).toBeNull();
   drag(card('river'), card('peer')); await h.flush(); expect(writes).toEqual([]);
 });
+
+
+it('lays out parents above children, siblings side by side and real SVG reporting edges', async () => {
+  const { h, card, writes } = await setup();
+  const lead = card('lead'), river = card('river'), peer = card('peer');
+  expect(Number.parseFloat(lead.style.top)).toBeLessThan(Number.parseFloat(river.style.top));
+  expect(lead.style.top).toBe(peer.style.top);
+  expect(lead.style.left).not.toBe(peer.style.left);
+  expect(river.dataset.parentId).toBe('lead');
+  expect(h.document.querySelectorAll('.ca-company-map-links path')).toHaveLength(3);
+  expect(h.document.querySelector('.ca-company-map-links path[data-parent-id="lead"][data-child-id="river"]')).not.toBeNull();
+  expect(h.document.querySelector('.ca-company-tree ul')).toBeNull();
+  expect(writes).toEqual([]);
+});
+
+it('fits the full diagram, zooms without writes and removes its resize listener on navigation', async () => {
+  const { h, writes } = await setup();
+  const viewport = h.document.querySelector('.ca-company-map-viewport') as HTMLElement;
+  Object.defineProperties(viewport, { clientWidth: { value: 500 }, clientHeight: { value: 400 } });
+  (h.document.querySelector('[aria-label="Fit entire company"]') as HTMLButtonElement).click();
+  const stage = h.document.querySelector('.ca-company-map-stage') as HTMLElement;
+  expect(Number.parseFloat(stage.style.width)).toBeLessThanOrEqual(500);
+  expect(Number.parseFloat(stage.style.height)).toBeLessThanOrEqual(400);
+  const scale = Number(viewport.dataset.scale);
+  (h.document.querySelector('[aria-label="Zoom in reporting chart"]') as HTMLButtonElement).click();
+  expect(Number(viewport.dataset.scale)).toBeGreaterThan(scale);
+  (h.document.querySelector('[aria-label="Show reporting chart at 100%"]') as HTMLButtonElement).click();
+  expect(Number(viewport.dataset.scale)).toBe(1); expect(writes).toEqual([]);
+  const listener = h.shell._companyChartResize; h.shell.closePage();
+  expect(listener).toBeTypeOf('function'); expect(h.shell._companyChartResize).toBeNull();
+});

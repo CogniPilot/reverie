@@ -36,6 +36,7 @@ export const BROWSER_TEST_GLOBS = [
   'test/webhook-removal.browser.test.ts',
   'test/company-ui.browser.test.ts',
   'test/company-hire-wizard.browser.test.ts',
+  'test/company-reporting-tree.browser.test.ts',
   'test/tab-rail-resize.browser.test.ts',
   'test/tab-activation.browser.test.ts',
   'test/tab-layout-editing.browser.test.ts',

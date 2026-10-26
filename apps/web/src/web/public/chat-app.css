@@ -1521,3 +1521,33 @@ button.ca-company-profile-trigger:focus-visible { outline: 2px solid var(--accen
 .ca-muted-badge[hidden] { display: none; }
 
 .ca-item-wrap:not(.is-ordering) .ca-muted-badge { margin-inline-end: 24px; }
+
+/* One top-down reporting map. Scoped rules supersede the historical nested-list layouts. */
+.ca-company-tree.ca-company-map { display: block; width: 100%; min-width: 0; margin: 0; padding: 0; border: 0; }
+.ca-company-map-tools { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.ca-company-map-zoom { min-width: 42px; text-align: center; color: var(--text-dim); font-variant-numeric: tabular-nums; }
+.ca-company-map-hint { margin: 8px 0; font-size: 12px; }
+.ca-company-map-viewport { width: 100%; max-width: 100%; min-width: 0; height: clamp(460px, 68dvh, 720px); overflow: auto; position: relative; border: 1px solid var(--ca-line); border-radius: 14px; background: radial-gradient(circle, var(--ca-line) 1px, transparent 1px) 0 0 / 20px 20px; cursor: grab; overscroll-behavior: contain; }
+.ca-company-map-viewport.is-panning { cursor: grabbing; user-select: none; }
+.ca-company-map-stage { position: relative; margin: 0 auto; overflow: hidden; }
+.ca-company-map-canvas { position: relative; transform-origin: top left; }
+.ca-company-map-links { position: absolute; inset: 0; pointer-events: none; overflow: visible; }
+.ca-company-map-links path { fill: none; stroke: color-mix(in srgb, var(--accent, #5b8def) 45%, var(--ca-line)); stroke-width: 2; }
+.ca-company-map .ca-company-map-node { position: absolute; width: 184px; height: 256px; max-width: none; box-sizing: border-box; margin: 0; padding: 12px; display: flex; flex-direction: column; align-items: center; gap: 5px; border: 1px solid var(--ca-line); border-radius: 18px; background: var(--ca-main-bg); color: inherit; text-align: center; font-size: 13px; }
+.ca-company-map .ca-company-owner { border-color: var(--accent, #5b8def); }
+.ca-company-map .ca-company-person-title, .ca-company-map .ca-company-owner-title { width: 100%; display: flex; flex-direction: column; align-items: center; gap: 6px; text-align: center; }
+.ca-company-map .ca-company-person-title strong, .ca-company-map .ca-company-owner-title strong { font-size: 14px; line-height: 20px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ca-company-map .ca-company-icon { width: 96px; height: 96px; min-width: 96px; font-size: 44px; }
+.ca-company-map .ca-company-role, .ca-company-map .ca-company-owner-role { width: 100%; min-height: 18px; max-height: 34px; line-height: 17px; font-size: 12px; overflow: hidden; }
+.ca-company-map .ca-company-parent { font-size: 11px; color: var(--text-dim); }
+.ca-company-map .ca-company-person .ca-company-state { font-size: 10px; line-height: 14px; }
+.ca-company-map .ca-company-reporting { width: 100%; display: flex; gap: 3px; justify-content: center; margin-top: auto; }
+.ca-company-map .ca-company-reporting > .ca-hint { width: 100%; font-size: 10px; line-height: 12px; }
+.ca-company-map .ca-company-reporting select { width: 100%; flex-basis: 100%; font-size: 11px; min-height: 26px; }
+.ca-company-map .ca-company-reporting [role="status"] { font-size: 10px; max-height: 32px; overflow: auto; }
+.ca-company-map .ca-company-person.is-offline { background: color-mix(in srgb, var(--text-dim) 10%, var(--ca-main-bg)); }
+.ca-company-map .ca-company-person.is-offline .ca-company-icon { filter: grayscale(1); opacity: .6; }
+
+.ca-company-map .ca-org-node { width: 100%; min-height: 0; display: flex; flex-direction: column; gap: 7px; align-items: center; padding: 0; border: 0; background: transparent; text-align: center; }
+.ca-company-map .ca-org-item { padding: 12px; }
+.ca-company-map .ca-org-item--owner { border-color: var(--accent, #5b8def); }

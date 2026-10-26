@@ -94,7 +94,8 @@ describe('Company is one page for plans and people', () => {
     const cards = [...handle.document.querySelectorAll('.ca-company-person')] as HTMLElement[];
     expect(cards).toHaveLength(5);
     expect(new Set(cards.map(card => card.dataset.employeeId)).size).toBe(5);
-    expect(cards[0].closest('li')!.querySelector(':scope > ul > li > .ca-company-person')!.getAttribute('data-employee-id')).toBe('child');
+    expect(handle.document.querySelector('.ca-company-map-links path[data-parent-id="employee-one"][data-child-id="child"]')).not.toBeNull();
+    expect(handle.document.querySelector('[data-employee-id="child"].ca-company-person')!.getAttribute('data-parent-id')).toBe('employee-one');
     expect(handle.document.querySelectorAll('.ca-company-chart .ca-company-person')).toHaveLength(5);
   });
 
@@ -370,7 +371,8 @@ describe('reporting lines directly on company cards', () => {
     expect(writes).toEqual([{ reportsTo: 'lead' }]);
     expect(handle.document.querySelector('.ca-company > [role="status"]')!.textContent).toBe('Reporting line saved.');
     const lead = handle.document.querySelector('[data-employee-id="lead"].ca-company-person')!;
-    expect(lead.closest('li')!.querySelector(':scope > ul > li > [data-employee-id="employee-one"]')).not.toBeNull();
+    expect(lead).not.toBeNull();
+    expect(handle.document.querySelector('.ca-company-map-links path[data-parent-id="lead"][data-child-id="employee-one"]')).not.toBeNull();
     handle.shell.closePage(); await handle.shell.openCompany();
     expect(handle.document.querySelector<HTMLSelectElement>('[aria-label="Reports to for Reviewer"]')!.value).toBe('lead');
     expect(company.employees).toHaveLength(3);
@@ -393,7 +395,8 @@ describe('reporting lines directly on company cards', () => {
     const select = handle.document.querySelector<HTMLSelectElement>('[aria-label="Reports to for Legacy"]')!;
     expect(select.selectedOptions[0].textContent).toBe('Company default (Reviewer)');
     const lead = handle.document.querySelector('[data-employee-id="employee-one"].ca-company-person')!;
-    expect(lead.closest('li')!.querySelector(':scope > ul > li > [data-employee-id="legacy"]')).not.toBeNull();
+    expect(lead).not.toBeNull();
+    expect(handle.document.querySelector('.ca-company-map-links path[data-parent-id="employee-one"][data-child-id="legacy"]')).not.toBeNull();
   });
 
   it('keeps reporting controls owner-only', async () => {
