@@ -377,14 +377,27 @@ async function openPlanMove(employeeId, destination) {
 }
 
 function showPlanMoveProgress(dialog, initial, name) {
-  dialog.innerHTML = `<h3>Plan move: ${esc(name)}</h3><p class="status" role="status"></p><p class="hint">Old session: ${esc(initial.oldSession || initial.sessionId || 'not recorded')}<br>New session: ${esc(initial.newSession || 'not created yet')}</p><button type="button" class="btn" data-cancel>Cancel waiting move</button> <button type="button" class="btn" data-close>Hide progress</button>`;
+  dialog.innerHTML = `<h3>Plan move: ${esc(name)}</h3><p class="status" role="status"></p><p class="hint">Old session: ${esc(initial.oldSession || initial.sessionId || 'not recorded')}<br>New session: ${esc(initial.newSession || 'not created yet')}</p><button type="button" class="btn" data-cancel>Cancel waiting move</button> <button type="button" class="btn" data-resolve hidden>Adopt existing destination</button> <button type="button" class="btn" data-close>Hide progress</button>`;
   dialog.querySelector('[data-close]').onclick = () => dialog.close();
-  const cancel = dialog.querySelector('[data-cancel]'), status = dialog.querySelector('.status');
+  const cancel = dialog.querySelector('[data-cancel]'), resolve = dialog.querySelector('[data-resolve]'), status = dialog.querySelector('.status');
   let record = initial, stopped = false;
   cancel.onclick = async () => {
     cancel.disabled = true;
     try { await planMoveRequest(`/api/plans/moves/${encodeURIComponent(record.id)}/cancel`); }
     catch (error) { status.textContent = error.message; }
+  };
+  resolve.onclick = async () => {
+    resolve.disabled = true;
+    status.textContent = 'Checking the existing destination; no session will be started or stopped.';
+    try {
+      record = await planMoveRequest(`/api/plans/moves/${encodeURIComponent(record.id)}/resolve`, {
+        action: 'adopt-existing', oldSession: record.oldSession, newSession: record.newSession, toAccount: record.toAccount });
+      stopped = false;
+      await poll();
+    } catch (error) {
+      status.textContent = `${error.message} The move journal is retained.`;
+      resolve.disabled = false;
+    }
   };
   const deadline = Date.now() + 12 * 60e3;
   const poll = async () => {
@@ -392,6 +405,9 @@ function showPlanMoveProgress(dialog, initial, name) {
     status.textContent = `${record.phase}${record.error ? ': ' + record.error : ''}`;
     dialog.querySelector('.hint').textContent = `Old session: ${record.oldSession || record.sessionId || 'not recorded'}; new session: ${record.newSession || 'not created yet'}`;
     cancel.hidden = record.phase !== 'waiting';
+    resolve.hidden = record.phase !== 'recovery-required' || !record.newSession;
+    resolve.disabled = record.sourceCleanupVerified !== true;
+    resolve.title = resolve.disabled ? 'Source cleanup was not durably verified; inspect both sessions before recovery.' : 'Validate and adopt the already-running destination without launching or replaying its handoff.';
     if (['completed', 'failed', 'recovery-required'].includes(record.phase)) { stopped = true; void refreshPlanMembers(); return; }
     if (Date.now() >= deadline) { stopped = true; status.textContent = 'Status polling ended. Inspect the current binding before retrying.'; return; }
     try { record = await planMoveRequest(`/api/plans/moves/${encodeURIComponent(record.id)}/status`); }

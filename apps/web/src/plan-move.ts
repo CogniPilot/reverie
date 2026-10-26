@@ -36,6 +36,9 @@ export interface PlanMoveRecord {
   error?: string;
   requestDigest?: string;
   sourceStopRequested?: boolean;
+  sourceCleanupVerified?: boolean;
+  recoveryAction?: 'adopt-existing';
+  recoveredAt?: number;
 }
 
 export interface PlanMoveSnapshot {
@@ -61,9 +64,13 @@ export interface PlanMovePort {
   rebind(employeeId: string, sessionId: string, owner?: string): Promise<void>;
   stop(sessionId: string): Promise<number[]>;
   audit(record: PlanMoveRecord): Promise<void>;
+  /** Read-only native inspection; returned fence rechecks live owner/bindings immediately before journal commit. */
+  verifyRecovery?(record: Readonly<PlanMoveRecord>): Promise<() => void>;
+  recoveryPending?(record: Readonly<PlanMoveRecord>): Promise<void>;
+  recoveryConfirmed?(record: Readonly<PlanMoveRecord>): Promise<void>;
 }
 
-export type PlanMoveExecutor = Omit<PlanMovePort, 'load' | 'save'>;
+export type PlanMoveExecutor = Omit<PlanMovePort, 'load' | 'save' | 'recoveryPending' | 'recoveryConfirmed'>;
 
 export class PlanMoveError extends Error {
   constructor(
@@ -88,7 +95,7 @@ export class PlanMoves {
       for (const record of await this.port.load()) {
         if (!['completed', 'failed'].includes(record.phase)) {
           record.phase = 'recovery-required';
-          record.error = 'The server restarted during this move; inspect both sessions before retrying';
+          record.error ??= 'The server restarted during this move; inspect both sessions before retrying';
           this.locked.add(record.employeeId);
         }
         this.records.set(record.id, record);
@@ -144,7 +151,8 @@ export class PlanMoves {
         throw new PlanMoveError('The employee or account changed; refresh before moving');
       if (input.fromAccount === input.toAccount) throw new PlanMoveError('The employee is already on that plan');
       if (this.records.size >= 100) {
-        const oldest = [...this.records.values()].find((record) => ['completed', 'failed'].includes(record.phase));
+        const oldest = [...this.records.values()].find((record) => ['completed', 'failed'].includes(record.phase) &&
+          !this.intents.has(record.id) && !this.aborts.has(record.id));
         if (!oldest) throw new PlanMoveError('The move registry is full; resolve outstanding moves first');
         this.records.delete(oldest.id);
       }
@@ -179,6 +187,48 @@ export class PlanMoves {
     if (record.phase !== 'waiting' || !this.aborts.has(id))
       throw new PlanMoveError('Only a move still waiting for idle can be cancelled');
     this.aborts.get(id)!.abort(new PlanMoveError('Move cancelled by the owner'));
+  }
+
+  /** Resolve a stopped-source move by adopting its existing verified destination. Never launches or replays a handoff. */
+  async resolve(id: string, expected: { oldSession: string; newSession: string; toAccount: string }, owner?: string,
+    executor: PlanMoveExecutor = this.port): Promise<PlanMoveRecord> {
+    await this.init();
+    const record = this.records.get(id);
+    if (!record || record.owner !== owner) throw new PlanMoveError('Unknown move', 404);
+    if (record.oldSession !== expected.oldSession || record.newSession !== expected.newSession || record.toAccount !== expected.toAccount)
+      throw new PlanMoveError('The recovery target changed; refresh its status');
+    if (this.intents.has(id) || this.aborts.has(id)) throw new PlanMoveError('The move is still active; wait before recovery');
+    if (record.phase === 'completed' && record.recoveryAction === 'adopt-existing') return { ...record };
+    if (record.phase !== 'recovery-required' || !record.sourceStopRequested || record.sourceCleanupVerified !== true)
+      throw new PlanMoveError('Recovery requires durable source-cleanup proof; inspect both sessions without clearing the journal');
+    if ([...this.records.values()].filter(row => row.employeeId === record.employeeId && !['completed', 'failed'].includes(row.phase)).length !== 1)
+      throw new PlanMoveError('Multiple unresolved moves name this employee; inspect the journal before recovery');
+    if (!executor.verifyRecovery || !this.port.recoveryPending || !this.port.recoveryConfirmed)
+      throw new PlanMoveError('Native recovery inspection or durable acknowledgement storage is unavailable', 503);
+    this.intents.add(id);
+    const before = { ...record };
+    try {
+      await executor.verifyRecovery({ ...record });
+      await this.port.recoveryPending({ ...record });
+      await executor.audit({ ...record, recoveryAction: 'adopt-existing' });
+      const current = await executor.verifyRecovery({ ...record });
+      current(); // Fresh authority and exact candidate binding after all slow inspection/audit work.
+      record.phase = 'completed'; record.recoveryAction = 'adopt-existing'; record.recoveredAt = Date.now();
+      try {
+        await this.save();
+        current();
+        await this.port.recoveryConfirmed({ ...record });
+      } catch (error) {
+        Object.assign(record, before, { phase: 'recovery-required' });
+        if (before.recoveryAction === undefined) delete record.recoveryAction;
+        if (before.recoveredAt === undefined) delete record.recoveredAt;
+        try { await this.save(); } catch { /* Keep the in-memory hold; durable outcome requires inspection. */ }
+        throw error;
+      }
+      if (![...this.records.values()].some(row => row.employeeId === record.employeeId && !['completed', 'failed'].includes(row.phase)))
+        this.locked.delete(record.employeeId);
+      return { ...record };
+    } finally { this.intents.delete(id); }
   }
 
   private async phase(record: PlanMoveRecord, phase: PlanMovePhase): Promise<void> {
@@ -225,6 +275,7 @@ export class PlanMoves {
         throw new PlanMoveError(`Old session cleanup left ${orphans.length} process(es); inspect before another move`);
       if (executor.binding(record.employeeId, record.owner) !== record.newSession)
         throw new PlanMoveError('The employee binding changed after stopping the source');
+      record.sourceCleanupVerified = true;
       await this.phase(record, 'starting');
       await executor.start(record.newSession);
       await this.phase(record, 'checking');

@@ -28,7 +28,7 @@ export function registerPlanMoveRoutes(
         ? ApiErrorCode.NOT_FOUND
         : error.status === 403
           ? ApiErrorCode.FORBIDDEN
-          : ApiErrorCode.CONFLICT;
+          : error.status === 503 ? ApiErrorCode.OPERATION_FAILED : ApiErrorCode.CONFLICT;
     return reply.code(error.status).send(createErrorResponse(code, error.message));
   };
 
@@ -83,6 +83,16 @@ export function registerPlanMoveRoutes(
       const record = await moves.get(request.params.id, ownerFor(request));
       if (!record) return reply.code(404).send(createErrorResponse(ApiErrorCode.NOT_FOUND, 'Unknown move'));
       return { success: true, data: record };
+    });
+
+    routes.post<{ Params: { id: string } }>('/api/plans/moves/:id/resolve', async (request, reply) => {
+      const input = parseBody(z.object({ action: z.literal('adopt-existing'), oldSession: Identifier,
+        newSession: Identifier, toAccount: Identifier }).strict(), request.body);
+      if (!execution) return reply.code(503).send(createErrorResponse(ApiErrorCode.OPERATION_FAILED, 'Native recovery inspection is unavailable'));
+      try {
+        const data = await moves.resolve(request.params.id, input, ownerFor(request), execution(request));
+        return { success: true, data };
+      } catch (error) { return failure(reply, error); }
     });
 
     routes.post<{ Params: { id: string } }>('/api/plans/moves/:id/cancel', async (request, reply) => {

@@ -5,7 +5,7 @@ import type { ChatroomService } from './chatroom-service.js';
 import type { SessionPort } from './web/ports/session-port.js';
 import type { TerminalMultiplexer } from './mux-interface.js';
 import { PlanMoveError, type PlanMoveExecutor } from './plan-move.js';
-import { planMoveLaunch } from './plan-move-launch.js';
+import { planMoveHarness, planMoveLaunch } from './plan-move-launch.js';
 import { composerReadyMark } from './cli-agent.js';
 import { fullAccessAlertRoom } from './full-access-default.js';
 import { capturePlanProcesses, survivingPlanProcesses } from './plan-move-processes.js';
@@ -48,6 +48,46 @@ export function planMoveExecutor(runtime: PlanMoveRuntime, owner?: string): Plan
     runtime.company.view(owner).employees.find((employee) => employee.id === employeeId)?.sessionId;
 
   return {
+    verifyRecovery: async (record) => {
+      assertAuthorized();
+      if (!record.newSession || record.sourceCleanupVerified !== true || record.sourceStopRequested !== true)
+        throw new PlanMoveError('Source cleanup was not durably confirmed; inspect before recovery');
+      const candidate = assertAlive(record.newSession);
+      const candidateState = candidate.toState();
+      if (candidateState.remote || candidateState.docker || candidateState.customModel)
+        throw new PlanMoveError('Remote, container and custom-model runtimes cannot be adopted as moved subscription sessions');
+      const selected = () => {
+        const state = candidate.toState(), env = candidate.getEnvOverridesForPersist?.() ?? {};
+        return JSON.stringify([state.mode, state.workingDir, candidate.subscriptionProfile?.id,
+          env.CODEX_HOME, env.CLAUDE_CONFIG_DIR, state.remote, state.docker, state.customModel]);
+      };
+      const selection = selected();
+      const employee = runtime.company.view(owner).employees.find(row => row.id === record.employeeId);
+      const generation = employee?.sessionGeneration;
+      const account = await runtime.plans.account(record.toAccount);
+      if (!account || candidate.mode !== planMoveHarness(account)) throw new PlanMoveError('The candidate harness or destination plan changed');
+      const allocations = await runtime.plans.allocations();
+      if (!allocations.accounts.some(row => row.id === record.toAccount && row.sessionIds.includes(record.newSession!)))
+        throw new PlanMoveError('The candidate is not allocated to the recorded destination plan');
+      const mark = composerReadyMark(candidate.mode);
+      const fence = () => {
+        assertAuthorized();
+        const now = runtime.company.view(owner).employees.find(row => row.id === record.employeeId);
+        if (!now || now.sessionId !== record.newSession || now.sessionGeneration !== generation || now.desiredRunning === false || now.onVacation || now.bindingMigration)
+          throw new PlanMoveError('The employee binding or running intent changed during recovery');
+        const old = runtime.sessions.get(record.oldSession);
+        if (old && old.pid && old.muxName && !runtime.mux.isPaneDead(old.muxName))
+          throw new PlanMoveError('The original source is still running; recovery will not stop it');
+        if (runtime.sessions.get(record.newSession!) !== candidate || selected() !== selection)
+          throw new PlanMoveError('The candidate runtime or account selection changed during recovery');
+        assertAlive(record.newSession!);
+        if (!mark || !runtime.mux.capturePaneText || !candidate.muxName || candidate.isWorking || candidate.paneDialog ||
+          !runtime.mux.capturePaneText(candidate.muxName)?.includes(mark))
+          throw new PlanMoveError('The existing candidate is not at its verified composer');
+      };
+      fence();
+      return fence;
+    },
     snapshot: async (employeeId) => {
       assertAuthorized();
       const id = binding(employeeId);

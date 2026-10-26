@@ -2106,6 +2106,8 @@ export class WebServer extends EventEmitter {
       ...unavailableMoveExecutor,
       load: () => planMoveStore.load(),
       save: (records) => planMoveStore.save(records),
+      recoveryPending: (record) => planMoveStore.recoveryPending(record),
+      recoveryConfirmed: (record) => planMoveStore.recoveryConfirmed(record),
     });
     const capturePlanMove = (request: FastifyRequest) =>
       planMoveExecutor(

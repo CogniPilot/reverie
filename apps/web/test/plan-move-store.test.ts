@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PlanMoveStore } from '../src/plan-move-store.js';
@@ -68,4 +68,32 @@ describe('private bounded durable plan move journal', () => {
     expect(() => store.save([{ ...record, phase: 'unknown' } as unknown as PlanMoveRecord])).toThrow();
     expect(await readFile(store.file, 'utf8')).toBe(before);
   });
+  it('persists verified cleanup and terminal owner adoption across restart with private mode', async () => {
+    const adopted = {...record, newSession: 'new', phase: 'completed' as const, sourceStopRequested: true,
+      sourceCleanupVerified: true, recoveryAction: 'adopt-existing' as const, recoveredAt: 2};
+    await store.recoveryPending(adopted); await store.save([adopted]); await store.recoveryConfirmed(adopted);
+    expect(await new PlanMoveStore(store.file).load()).toEqual([adopted]);
+    expect(() => store.save([{...record, sourceCleanupVerified: true}])).toThrow('cleanup proof');
+    expect(() => store.save([{...adopted, phase: 'waiting'}])).toThrow('terminal receipt');
+  });
+
+  it('never treats terminal recovery journal bytes alone as verified completion', async () => {
+    const adopted = {...record, newSession: 'new', phase: 'completed' as const, sourceStopRequested: true,
+      sourceCleanupVerified: true, recoveryAction: 'adopt-existing' as const, recoveredAt: 2};
+    await store.recoveryPending(adopted); await store.save([adopted]);
+    expect((await new PlanMoveStore(store.file).load())[0].phase).toBe('recovery-required');
+    await store.recoveryConfirmed(adopted); expect((await new PlanMoveStore(store.file).load())[0].phase).toBe('completed');
+    await writeFile(store.file, JSON.stringify([{...adopted, toAccount: 'other'}]));
+    await expect(new PlanMoveStore(store.file).load()).rejects.toThrow('differs from terminal');
+  });
+  it('hashes even legacy path-like identifiers and refuses malformed or duplicate-key private receipts', async () => {
+    const id = '../legacy/move', legacy = {...record, id}; await store.save([legacy]); await store.recoveryPending(legacy);
+    const pending = (await readdir(directory)).find(name => name.endsWith('.pending.json'))!;
+    expect(pending).toMatch(/^moves.json[.]recovery-[0-9a-f]{64}[.]pending[.]json$/);
+    await writeFile(join(directory, pending), JSON.stringify({version: 1, id, unknown: true}));
+    await expect(store.load()).rejects.toThrow();
+    await writeFile(join(directory, pending), '{"version":0,"version":1,"id":"../legacy/move"}');
+    await expect(store.load()).rejects.toThrow('Noncanonical');
+  });
+
 });

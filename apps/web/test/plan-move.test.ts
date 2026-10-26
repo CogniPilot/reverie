@@ -1,3 +1,7 @@
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { PlanMoveStore } from '../src/plan-move-store.js';
 import { describe, expect, it, vi } from 'vitest';
 import { PlanMoves, type PlanMoveInput, type PlanMovePort, type PlanMoveRecord } from '../src/plan-move.js';
 
@@ -21,6 +25,8 @@ function harness(initial: PlanMoveRecord[] = []) {
   let saved = initial;
   const port: PlanMovePort = {
     load: vi.fn(async () => structuredClone(saved)),
+    recoveryPending: vi.fn(async () => {}),
+    recoveryConfirmed: vi.fn(async () => {}),
     save: vi.fn(async (records) => {
       saved = structuredClone(records);
     }),
@@ -272,4 +278,116 @@ describe('plan move transaction', () => {
     expect(test.port.stop).not.toHaveBeenCalled();
     expect(test.port.create).not.toHaveBeenCalled();
   });
+});
+
+
+describe('owner journal recovery after restart', () => {
+  const interrupted = (): PlanMoveRecord => ({id: 'interrupted', employeeId: 'casey', name: 'Casey',
+    oldSession: 'old', newSession: 'new', fromAccount: 'first', toAccount: 'second', phase: 'checking',
+    sourceStopRequested: true, sourceCleanupVerified: true, at: 1, error: 'original diagnostic'});
+  const expected = {oldSession: 'old', newSession: 'new', toAccount: 'second'};
+  it('adopts only the verified already-running destination without any lifecycle or handoff replay', async () => {
+    const test = harness([interrupted()]);
+    const fence = vi.fn(); test.port.verifyRecovery = vi.fn(async () => fence);
+    const result = await test.moves.resolve('interrupted', expected);
+    expect(result).toMatchObject({phase: 'completed', recoveryAction: 'adopt-existing', sourceCleanupVerified: true, error: 'original diagnostic'});
+    expect(result.recoveredAt).toEqual(expect.any(Number));
+    expect(test.port.verifyRecovery).toHaveBeenCalledTimes(2); expect(fence).toHaveBeenCalledTimes(2);
+    for (const operation of [test.port.create, test.port.start, test.port.stop, test.port.ready, test.port.rebind]) expect(operation).not.toHaveBeenCalled();
+    expect(await test.moves.resolve('interrupted', expected)).toEqual(result);
+  });
+  it.each([{sourceCleanupVerified: undefined}, {sourceStopRequested: false}, {phase: 'completed'}] as const)(
+    'keeps legacy/unsafe journal held: %j', async change => {
+      const test = harness([{...interrupted(), ...change}]); test.port.verifyRecovery = vi.fn(async () => () => {});
+      await expect(test.moves.resolve('interrupted', expected)).rejects.toThrow();
+      expect(test.port.verifyRecovery).not.toHaveBeenCalled(); expect(test.port.save).not.toHaveBeenCalled();
+    });
+  it('refuses stale target identifiers and cross-owner access before native inspection', async () => {
+    const test = harness([interrupted()]); test.port.verifyRecovery = vi.fn(async () => () => {});
+    await expect(test.moves.resolve('interrupted', {...expected, newSession: 'other'})).rejects.toThrow('target changed');
+    await expect(test.moves.resolve('interrupted', expected, 'another-owner')).rejects.toThrow('Unknown');
+    expect(test.port.verifyRecovery).not.toHaveBeenCalled();
+  });
+  it('requires a qualified native recovery inspector instead of adopting from journal metadata alone', async () => {
+    const test = harness([interrupted()]);
+    await expect(test.moves.resolve('interrupted', expected)).rejects.toThrow('unavailable');
+    expect(test.port.save).not.toHaveBeenCalled();
+  });
+  it('rechecks native authority after the slow audit and retains the hold on revocation', async () => {
+    const test = harness([interrupted()]); let authorized = true;
+    test.port.verifyRecovery = vi.fn(async () => { if (!authorized) throw new Error('revoked'); return () => {}; });
+    test.port.audit = vi.fn(async () => { authorized = false; });
+    await expect(test.moves.resolve('interrupted', expected)).rejects.toThrow('revoked');
+    expect((await test.moves.get('interrupted'))?.phase).toBe('recovery-required');
+    expect(test.port.save).not.toHaveBeenCalled();
+  });
+  it('restores the recovery hold when completion publication is uncertain and does not unlock the employee', async () => {
+    const test = harness([interrupted()]); test.port.verifyRecovery = vi.fn(async () => () => {});
+    test.port.save = vi.fn(async () => { throw new Error('ENOSPC'); });
+    await expect(test.moves.resolve('interrupted', expected)).rejects.toThrow('ENOSPC');
+    expect((await test.moves.get('interrupted'))?.phase).toBe('recovery-required');
+    await expect(test.moves.begin(input)).rejects.toThrow('requiring recovery');
+  });
+  it('retains a concurrent recovery lock while native inspection is pending', async () => {
+    const test = harness([interrupted()]); let release!: () => void;
+    test.port.verifyRecovery = vi.fn(async () => { await new Promise<void>(done => { release = done; }); return () => {}; });
+    const first = test.moves.resolve('interrupted', expected); await flush();
+    await expect(test.moves.resolve('interrupted', expected)).rejects.toThrow('still active');
+    test.port.verifyRecovery = vi.fn(async () => () => {}); release(); await first;
+  });
+  it('refuses ambiguous multiple unfinished records for the same employee without releasing their shared hold', async () => {
+    const test = harness([interrupted(), {...interrupted(), id: 'other'}]); test.port.verifyRecovery = vi.fn(async () => () => {});
+    await expect(test.moves.resolve('interrupted', expected)).rejects.toThrow('Multiple unresolved');
+    await expect(test.moves.begin(input)).rejects.toThrow('requiring recovery');
+    expect(test.port.save).not.toHaveBeenCalled();
+  });
+  it('a real-store terminal write followed by failure and failed compensation remains held on restart without ACK', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'recover-uncertain-'));
+    try {
+      const store = new PlanMoveStore(join(directory, 'moves.json')); await store.save([interrupted()]);
+      const test = harness(); test.port.load = () => store.load();
+      test.port.recoveryPending = record => store.recoveryPending(record);
+      test.port.recoveryConfirmed = record => store.recoveryConfirmed(record);
+      test.port.verifyRecovery = vi.fn(async () => () => {});
+      test.port.save = async records => {
+        if (records[0].phase === 'completed') { await store.save(records); throw new Error('FSYNC_UNKNOWN'); }
+        throw new Error('compensation failed');
+      };
+      await expect(test.moves.resolve('interrupted', expected)).rejects.toThrow('FSYNC_UNKNOWN');
+      expect((await new PlanMoveStore(store.file).load())[0].phase).toBe('recovery-required');
+      const reloaded = new PlanMoves({...test.port, load: () => new PlanMoveStore(store.file).load()});
+      await expect(reloaded.begin(input)).rejects.toThrow('requiring recovery');
+      expect(test.port.start).not.toHaveBeenCalled(); expect(test.port.stop).not.toHaveBeenCalled();
+    } finally { await rm(directory, {recursive: true, force: true}); }
+  });
+  it('explicit durable verified ACK allows an adopted move to stay completed across a real-store restart', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'recover-ack-'));
+    try {
+      const store = new PlanMoveStore(join(directory, 'moves.json')); await store.save([interrupted()]);
+      const test = harness(); test.port.load = () => store.load(); test.port.save = rows => store.save(rows);
+      test.port.recoveryPending = record => store.recoveryPending(record);
+      test.port.recoveryConfirmed = record => store.recoveryConfirmed(record);
+      test.port.verifyRecovery = vi.fn(async () => () => {});
+      const adopted = await test.moves.resolve('interrupted', expected);
+      const reloadedPort = {...test.port, load: () => new PlanMoveStore(store.file).load()};
+      const reloaded = new PlanMoves(reloadedPort);
+      expect(await reloaded.get('interrupted')).toEqual(adopted);
+      reloadedPort.snapshot = vi.fn(async () => { throw new Error('fresh request reached snapshot'); });
+      await expect(reloaded.begin(input)).rejects.toThrow('fresh request reached snapshot');
+    } finally { await rm(directory, {recursive: true, force: true}); }
+  });
+
+  it('does not evict a recovery whose terminal save and acknowledgement are still pending at registry capacity', async () => {
+    const records = [interrupted(), ...Array.from({length: 99}, (_, i) => ({...interrupted(), id: `completed-${i}`, employeeId: `other-${i}`, phase: 'completed' as const}))];
+    const test = harness(records); let release!: () => void;
+    const gate = new Promise<void>(done => { release = done; });
+    test.port.verifyRecovery = vi.fn(async () => () => {});
+    test.port.save = vi.fn(async rows => { if (rows.some(r => r.id === 'interrupted' && r.phase === 'completed')) await gate; });
+    const resolving = test.moves.resolve('interrupted', expected); await flush();
+    const next = test.moves.begin({...input, id: 'other-new', employeeId: 'someone-else'}); await flush();
+    expect(await test.moves.get('interrupted')).toBeDefined();
+    release(); await resolving; await next; await flush();
+    expect(await test.moves.get('interrupted')).toMatchObject({phase: 'completed', recoveryAction: 'adopt-existing'});
+  });
+
 });

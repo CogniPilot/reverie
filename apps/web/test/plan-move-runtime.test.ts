@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { planMoveExecutor, type PlanMoveRuntime } from '../src/plan-move-runtime.js';
 import type { Session } from '../src/session.js';
 import type { PlanAccount } from '../src/plan-accounts.js';
+import { composerReadyMark } from '../src/cli-agent.js';
 import type { PlanMoveInput } from '../src/plan-move.js';
 
 const input: PlanMoveInput = {
@@ -233,4 +234,57 @@ describe('runtime adapter uses normal creation and interactive paths, never chan
     await expect(test.executor.audit(record)).resolves.toBeUndefined();
     expect(test.runtime.chat.auditEntry).toHaveBeenCalledTimes(2); warning.mockRestore();
   });
+});
+
+
+describe('read-only owner inspection of an interrupted move destination', () => {
+  const record = {id: 'move', employeeId: 'casey', name: 'Casey', oldSession: 'old', newSession: 'new',
+    fromAccount: 'first', toAccount: 'second', phase: 'recovery-required' as const, at: 1,
+    sourceStopRequested: true, sourceCleanupVerified: true};
+  function recovery() {
+    const test = harness(); test.sessions.delete('old');
+    test.runtime.company.view = vi.fn(() => ({employees: [{id: 'casey', sessionId: 'new', sessionGeneration: 2, desiredRunning: true, onVacation: false}]}) as never);
+    test.runtime.plans.allocations = vi.fn(async () => ({generatedAt: 1, accounts: [{id: 'second', sessionIds: ['new']}]}));
+    test.runtime.mux.capturePaneText = vi.fn(() => composerReadyMark('codex')!);
+    return test;
+  }
+  it('verifies current binding, actual target allocation and composer without submitting a handoff or touching sessions', async () => {
+    const test = recovery(); const fence = await test.executor.verifyRecovery!(record); fence();
+    expect(test.runtime.request).not.toHaveBeenCalled(); expect(test.runtime.cleanup).not.toHaveBeenCalled();
+    expect(test.sessions.get('new')!.writeViaMux).not.toHaveBeenCalled();
+  });
+  it('does not infer source cleanup from a missing source session or journal stop request', async () => {
+    const test = recovery(); await expect(test.executor.verifyRecovery!({...record, sourceCleanupVerified: undefined})).rejects.toThrow('durably confirmed');
+    expect(test.runtime.plans.allocations).not.toHaveBeenCalled();
+  });
+  it('refuses an alive source, wrong account, absent composer and busy destination', async () => {
+    for (const failure of ['source', 'account', 'composer', 'busy']) {
+      const test = recovery();
+      if (failure === 'source') test.sessions.set('old', {...test.sessions.get('new')!, id: 'old'} as never);
+      if (failure === 'account') test.runtime.plans.allocations = vi.fn(async () => ({generatedAt: 1, accounts: [{id: 'first', sessionIds: ['new']}]}));
+      if (failure === 'composer') test.runtime.mux.capturePaneText = () => '';
+      if (failure === 'busy') (test.sessions.get('new') as unknown as {isWorking: boolean}).isWorking = true;
+      await expect(test.executor.verifyRecovery!(record)).rejects.toThrow();
+      expect(test.runtime.cleanup).not.toHaveBeenCalled(); expect(test.runtime.request).not.toHaveBeenCalled();
+    }
+  });
+  it('the final fence notices revoked owner authority and changed employee intent', async () => {
+    for (const failure of ['authority', 'intent', 'generation', 'selection']) {
+      const test = recovery(); const fence = await test.executor.verifyRecovery!(record);
+      if (failure === 'authority') test.runtime.authorized = () => false;
+      if (failure === 'intent') test.runtime.company.view = () => ({employees: [{id: 'casey', sessionId: 'new', sessionGeneration: 2, desiredRunning: false}]}) as never;
+      if (failure === 'generation') test.runtime.company.view = () => ({employees: [{id: 'casey', sessionId: 'new', sessionGeneration: 3, desiredRunning: true}]}) as never;
+      if (failure === 'selection') (test.sessions.get('new') as unknown as {subscriptionProfile: unknown}).subscriptionProfile = {id: 'changed'};
+      expect(fence).toThrow();
+    }
+  });
+  it('refuses already-unsupported remote, nested-container and custom-model candidates', async () => {
+    for (const change of [{remote: {host: 'remote'}}, {docker: {containerName: 'nested'}}, {customModel: {modelId: 'local'}}]) {
+      const test = recovery(), candidate = test.sessions.get('new')!, saved = candidate.toState();
+      candidate.toState = () => ({...saved, ...change}) as never;
+      await expect(test.executor.verifyRecovery!(record)).rejects.toThrow('cannot be adopted');
+      expect(test.runtime.cleanup).not.toHaveBeenCalled(); expect(test.runtime.request).not.toHaveBeenCalled();
+    }
+  });
+
 });
