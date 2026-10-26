@@ -5,6 +5,9 @@ export interface AgentCapabilities {
   board: {
     read: boolean;
     fileIssue: boolean;
+    /** Optional for compatibility with older capability endpoints. */
+    editBoardIssues?: boolean;
+    manageDecisions?: boolean;
     createDecision: boolean;
     manageBoard: boolean;
     clearDecision: boolean;

@@ -38,6 +38,10 @@ function fixture() {
     io: { out: (text) => output.push(text), err: (text) => output.push(text) },
     request: async (_context, request) => {
       calls.push(request);
+      if (request.path === '/api/publication/credentials') return {
+        status: 200, text: '', json: { success: true,
+          data: { employeeId: 'employee-one', sessionId: 'self-session', credentials: [] } },
+      };
       return {
         status: 200,
         text: '',
@@ -72,7 +76,9 @@ describe('current agent capability command', () => {
     expect(JSON.parse(f.output[1]).board.createDecision).toBe(false);
     expect(f.calls).toEqual([
       expect.objectContaining({ method: 'GET', path: '/api/board' }),
+      expect.objectContaining({ method: 'GET', path: '/api/publication/credentials' }),
       expect.objectContaining({ method: 'GET', path: '/api/board' }),
+      expect.objectContaining({ method: 'GET', path: '/api/publication/credentials' }),
     ]);
     expect(f.calls.every((call) => call.body === undefined)).toBe(true);
     expect(JSON.parse(f.output[0]).website.redeploy.status).toBe('unavailable');
@@ -109,6 +115,25 @@ describe('current agent capability command', () => {
       error: expect.stringContaining('Unknown caller session'),
     });
   });
+  it('reports named PAT metadata without retrieving or printing secret material', async () => {
+    const f = fixture();
+    f.deps.request = async (_context, request) => {
+      f.calls.push(request);
+      return { status: 200, text: '', json: { success: true, data: request.path === '/api/board'
+        ? { capabilities: snapshot() }
+        : { employeeId: 'employee-one', sessionId: 'self-session', credentials: [{
+          id: '44444444-4444-4444-8444-444444444444', name: 'project-publish',
+          repositories: ['example/project'], createdAt: 1, updatedAt: 1,
+          token: 'SYNTHETIC-SECRET-MUST-NOT-PRINT',
+        }] } } };
+    };
+    expect(await agentCapabilities(f.deps, refs)).toBe(0);
+    const report = JSON.parse(f.output[0]);
+    expect(report.publication).toMatchObject({ status: 'verified', credentials: [{ name: 'project-publish' }] });
+    expect(f.output.join(' ')).not.toContain('SYNTHETIC-SECRET');
+    expect(f.calls.every(call => call.method === 'GET' && !call.path.includes('/material'))).toBe(true);
+    expect(report.commands.installPublicationCredential).toContain('credentials install');
+  });
   it('lists only private regular named token references and never reads their bytes', async () => {
     const home = await mkdtemp(join(tmpdir(), 'capability-credentials-'));
     temporary.push(home);
@@ -132,7 +157,7 @@ describe('current agent capability command', () => {
     expect(f.output.join('\n')).toContain('Board decision cards: allowed');
     expect(f.output.join('\n')).toContain('reverie board decision add');
     expect(f.output.join('\n')).toContain('not approval');
-    expect(f.output.join('\n')).toContain('full owner Board operations: denied');
+    expect(f.output.join('\n')).toContain('manage board tasks and schedule: denied');
     expect(f.output.join('\n')).toContain('Plan preconditions:');
     expect(f.output.join('\n')).toContain('/handbook/operations');
   });

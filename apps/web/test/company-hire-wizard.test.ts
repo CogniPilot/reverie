@@ -63,6 +63,9 @@ describe('role-first owner hiring wizard', () => {
     expect(field('position').value).toBe('Chief Technology Officer');
     expect(field('responsibilities').value).toContain('roadmap');
     expect((field('recoverEmployees') as HTMLInputElement).checked).toBe(false);
+    expect((field('editBoardIssues') as HTMLInputElement).checked).toBe(true);
+    expect((field('manageBoard') as HTMLInputElement).checked).toBe(false);
+    expect((field('manageDecisions') as HTMLInputElement).checked).toBe(false);
     field('position').value = 'Technical lead'; field('responsibilities').value = 'Review flight software\nVerify changes on recorded data';
     field('expertise').value = 'Code review, SLAM'; next();
     field('name').value = 'Rowan'; field('personality').value = 'Patient and precise. Explain uncertainty.'; field('pronouns').value = 'they/them';
@@ -81,7 +84,7 @@ describe('role-first owner hiring wizard', () => {
     expect(photos).not.toContain('/assets/avatars/pack-01.png');
     expect(photos).toContain('/assets/avatars/pack-02.png');
     (form.querySelector('button[type=submit]') as HTMLButtonElement).click(); await settle();
-    expect(calls).toEqual([{ name: 'Rowan', icon: 'R', position: 'Technical lead', expertise: ['Code review', 'SLAM'], responsibilities: ['Review flight software', 'Verify changes on recorded data'], personality: 'Patient and precise. Explain uncertainty.', pronouns: 'they/them', permissions: { recoverEmployees: true, moveOwnPlan: false, managePlans: true }, sleepEnabled: true, dreamEnabled: true, source: { kind: 'subscription', profileId: 'work' }, mode: 'codex', reportsTo: 'owner' }]);
+    expect(calls).toEqual([{ name: 'Rowan', icon: 'R', position: 'Technical lead', expertise: ['Code review', 'SLAM'], responsibilities: ['Review flight software', 'Verify changes on recorded data'], personality: 'Patient and precise. Explain uncertainty.', pronouns: 'they/them', permissions: { recoverEmployees: true, moveOwnPlan: false, managePlans: true, editBoardIssues: true, manageBoard: false, manageDecisions: false }, sleepEnabled: true, dreamEnabled: true, source: { kind: 'subscription', profileId: 'work' }, mode: 'codex', reportsTo: 'owner' }]);
     expect(h.document.querySelector('.ca-company-chart')?.textContent).toContain('Rowan');
     expect(h.document.querySelector('.ca-company-people-heading')?.textContent).toContain('People · 2');
     expect(h.shell.saveEmployeePicture).toHaveBeenCalledWith('new-runtime', 'data:image/png;base64,aW1hZ2U=');

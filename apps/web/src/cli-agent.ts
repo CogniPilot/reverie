@@ -30,6 +30,8 @@
  */
 import http from 'node:http';
 import { agentCapabilities } from './cli-agent-capabilities.js';
+import { agentCredentialsInstall, agentCredentialsList } from './cli-agent-credentials.js';
+import { agentContext, agentContextReceipt } from './cli-agent-context.js';
 import { AGENT_EXIT } from './agent-exit-codes.js';
 import https from 'node:https';
 import { StringDecoder } from 'node:string_decoder';
@@ -239,6 +241,8 @@ export interface ApiResponse<T = unknown> {
   text: string;
   /** Only requested by bounded binary downloads; never decoded as text. */
   bytes?: Buffer;
+  /** Selected response metadata; binary credential clients validate caller and material binding. */
+  headers?: Record<string, string | undefined>;
 }
 
 export interface WaitResult {
@@ -374,7 +378,9 @@ export const httpRequest: ApiRequest = (ctx, options) => {
               failed(new Error('download length mismatch'));
               return;
             }
-            resolve({ status: res.statusCode ?? 0, text: '', bytes: Buffer.concat(chunks) });
+            resolve({ status: res.statusCode ?? 0, text: '', bytes: Buffer.concat(chunks),
+              headers: Object.fromEntries(Object.entries(res.headers).filter((entry): entry is [string, string] =>
+                ['content-type', 'cache-control', 'x-reverie-employee-id', 'x-reverie-session-id', 'x-reverie-credential-id'].includes(entry[0]) && typeof entry[1] === 'string')) });
             return;
           }
           const text = Buffer.concat(chunks).toString('utf-8');
@@ -2306,9 +2312,21 @@ export function registerAgentCommands(program: Command): Command {
     .description('Talk to other sessions from inside one (any CLI mode): list, spawn, send, wait, read, interrupt, rm');
 
   const run = runAgentVerb;
+  const context = agent.command('context').description('Read current self profile/core context; old startup is unknown without a harness receipt');
+  context.option('--json', 'Machine-readable current context and capture availability')
+    .action((options: { json?: boolean }) => run(Boolean(options.json), agentContext));
+  context.command('receipt').requiredOption('--digest <sha256>', 'Exact prior server-issued snapshot digest')
+    .requiredOption('--stage <stage>', 'startup or model-request; harness-reported inclusion only')
+    .option('--json', 'Machine-readable report metadata')
+    .action((options: { json?: boolean; digest: string; stage: string }) => run(Boolean(options.json), deps => agentContextReceipt(deps, options.digest, options.stage)));
   agent.command('capabilities').description('Read current authenticated grants, supported commands and credential references; writes nothing')
     .option('--json', 'Machine-readable current capability report')
     .action((options: { json?: boolean }) => run(Boolean(options.json), agentCapabilities));
+  const credentials = agent.command('credentials').description('List granted named PATs or explicitly install one private local copy; never prints material');
+  credentials.command('list').option('--json', 'Machine-readable granted credential metadata')
+    .action((options: { json?: boolean }) => run(Boolean(options.json), agentCredentialsList));
+  credentials.command('install <name-or-id>').option('--json', 'Machine-readable installation metadata; never token material')
+    .action((reference: string, options: { json?: boolean }) => run(Boolean(options.json), (deps) => agentCredentialsInstall(deps, reference)));
   registerGoalCommands(agent, run);
   registerRoutineCommands(program, run);
   const planMove = agent.command('plan-move').description('Request a permitted plan move or approve a handoff for this exact expert');

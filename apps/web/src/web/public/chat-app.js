@@ -23,6 +23,12 @@
 // invitation is held in memory only and never used as a navigation destination.
 let caEmbassyIncomingInvite = typeof window !== 'undefined' ? caEmbassyTakeFragment(window) : null;
 
+const caBoardPermissionFields = [
+  ['editBoardIssues', 'Update own board work', 'File cards into triage, update your own cards, and record your own wins and focus.'],
+  ['manageBoard', 'Manage company board', 'Edit and reassign all cards, manage milestones and blockers, and import schedules. Includes updating own board work.'],
+  ['manageDecisions', 'Prepare decision cards', 'Prepare, annotate and dismiss decision cards and poll notes. Only the owner can choose an answer. Creating choices also requires the site’s decision-write setting.'],
+];
+
 /** Badge text for a count; large counts stop growing. */
 function chatBadgeCount(n) {
   return n > 99 ? '99+' : String(n);
@@ -2413,7 +2419,7 @@ class ReverieChatApp {
         plans.style.height = `${Math.max(120, Math.min(10000, event.data.height))}px`;
     };
     this.doc.defaultView.addEventListener('message', this._companyResize);
-    dlg.append(head, plans, content, status);
+    dlg.append(head, content, plans, status);
     selectSection(section, push);
     const paint = async () => {
       const [res, auth] = await Promise.all([this.app._chatApi('/api/company'), this.app._chatApi('/api/chatrooms/phone-status')]);
@@ -2429,10 +2435,48 @@ class ReverieChatApp {
       const manage = data.canManage === true && auth.ok && auth.data?.self === 'owner' && auth.data?.canSetOwn === true;
       status.textContent = '';
       const cards = new Map();
+      const workDetails = this.el('details', 'ca-company-work-list');
+      workDetails.append(this.el('summary', '', 'Work status'));
+      let draggedEmployee = null;
+      const moveReporting = parentId => {
+        if (!manage || !draggedEmployee || draggedEmployee === parentId) return;
+        const select = cards.get(draggedEmployee)?.querySelector('.ca-company-reporting select');
+        if (!select || select.disabled || select.value === parentId || ![...select.options].some(option => option.value === parentId && !option.disabled)) return;
+        select.value = parentId;
+        select.dispatchEvent(new this.doc.defaultView.Event('change'));
+      };
+      const reportingDropTarget = (node, parentId) => {
+        node.addEventListener('dragover', event => {
+          const select = draggedEmployee && cards.get(draggedEmployee)?.querySelector('.ca-company-reporting select');
+          if (!manage || !select || select.disabled || ![...select.options].some(option => option.value === parentId && !option.disabled)) return;
+          event.preventDefault(); event.stopPropagation(); node.classList.add('is-reporting-target');
+          if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
+        });
+        node.addEventListener('dragleave', () => node.classList.remove('is-reporting-target'));
+        node.addEventListener('drop', event => {
+          event.preventDefault(); event.stopPropagation(); node.classList.remove('is-reporting-target');
+          moveReporting(parentId); draggedEmployee = null;
+        });
+      };
       for (const employee of employees) {
         const card = this.el('article', 'ca-company-person');
         card.dataset.employeeId = employee.id;
-        const title = this.el('div', 'ca-company-person-title');
+        card.classList.toggle('is-offline', !employee.available || employee.onVacation === true);
+        const title = this.el(manage ? 'button' : 'div', 'ca-company-person-title ca-company-profile-trigger');
+        if (manage) {
+          title.type = 'button'; title.setAttribute('aria-label', `Edit profile for ${employee.name}`);
+          title.addEventListener('click', () => this.openEmployeeProfile(employee, paint));
+          card.addEventListener('click', event => { if (!event.target.closest('button, select, input, label, a')) this.openEmployeeProfile(employee, paint); });
+          card.draggable = true;
+          card.addEventListener('dragstart', event => {
+            if (event.target.closest('select, input')) { event.preventDefault(); return; }
+            draggedEmployee = employee.id;
+            event.dataTransfer?.setData('text/plain', employee.id);
+            if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move';
+          });
+          card.addEventListener('dragend', () => { draggedEmployee = null; for (const node of chart.querySelectorAll('.is-reporting-target')) node.classList.remove('is-reporting-target'); });
+          reportingDropTarget(card, employee.id);
+        }
         const avatar = this.el('span', 'chatroom-avatar chatroom-avatar--md ca-company-icon');
         if (caAvatarBackground(employee.avatarBackground)) avatar.style.backgroundColor = employee.avatarBackground;
         avatar.append(this.el('span', 'chatroom-avatar-glyph', employee.icon || '👤'));
@@ -2495,138 +2539,12 @@ class ReverieChatApp {
           });
           reporting.append(manager, reportingStatus);
           card.querySelector('.ca-company-parent').replaceWith(reporting);
-          const label = this.el('label', 'ca-hint', ' May recover disconnected employee sessions');
-          const recovery = this.el('input', '');
-          recovery.type = 'checkbox';
-          recovery.checked = employee.permissions?.recoverEmployees === true;
-          recovery.setAttribute('aria-label', `Recovery permission for ${employee.name}`);
-          label.prepend(recovery);
-          const planPermissions = {};
-          const planLabels = [];
-          for (const [key, text] of [['moveOwnPlan', 'Move own plan'], ['managePlans', 'Manage team plans']]) {
-            const wrap = this.el('label', 'ca-hint', ` ${text}`);
-            const input = this.el('input'); input.type = 'checkbox'; input.checked = employee.permissions?.[key] === true;
-            input.setAttribute('aria-label', `${text} for ${employee.name}`);
-            wrap.title = 'Requests still require the affected expert’s handoff and approval. No account sign-in or plan administration access.';
-            wrap.prepend(input); planPermissions[key] = input; planLabels.push(wrap);
-          }
-          const rest = this.expertRestFields(card, employee);
-          const preferenceStatus = this.el('p', 'ca-hint');
-          preferenceStatus.setAttribute('role', 'status');
-          card.append(preferenceStatus);
-          let preferenceSaves = 0;
-          let preferenceError = '';
-          const savePreference = async (input, key, permission = false) => {
-            if (input.disabled) return;
-            const value = input.checked;
-            const previous = permission ? employee.permissions?.[key] === true : employee[key] === true;
-            input.disabled = true;
-            if (preferenceSaves === 0) preferenceError = '';
-            preferenceSaves++;
-            preferenceStatus.textContent = 'Saving preferences…';
-            const controller = new AbortController();
-            const timeout = setTimeout(() => controller.abort(), 8000);
-            try {
-              const result = await this.app._chatApi(`/api/company/employees/${encodeURIComponent(employee.id)}`, {
-                method: 'PUT', body: permission ? { permissions: { [key]: value } } : { [key]: value }, signal: controller.signal,
-              });
-              const saved = result.data?.employee;
-              if (!result.ok && result.status >= 400 && result.status < 500) throw new Error(result.error || 'Request refused');
-              if (!result.ok || saved?.id !== employee.id || (permission ? saved.permissions?.[key] : saved[key]) !== value)
-                throw new Error('Save not confirmed. Reopen Company to check the current value.');
-              if (permission) employee.permissions = { ...employee.permissions, [key]: value };
-              else employee[key] = value;
-            } catch (error) {
-              input.checked = previous;
-              preferenceError = `Could not save preferences: ${error.message}`;
-              preferenceStatus.textContent = preferenceError;
-            } finally {
-              clearTimeout(timeout);
-              input.disabled = false;
-              preferenceSaves--;
-              if (preferenceSaves === 0) preferenceStatus.textContent = preferenceError || 'Preferences saved.';
-            }
-          };
-          rest.sleep.addEventListener('change', () => { void savePreference(rest.sleep, 'sleepEnabled'); });
-          rest.dream.addEventListener('change', () => { void savePreference(rest.dream, 'dreamEnabled'); });
-          recovery.addEventListener('change', () => { void savePreference(recovery, 'recoverEmployees', true); });
-          for (const [key, input] of Object.entries(planPermissions))
-            input.addEventListener('change', () => { void savePreference(input, key, true); });
-          const controls = this.el('div', 'ca-company-person-controls');
-          controls.append(label, ...planLabels, this.button('ca-btn', `Edit profile for ${employee.name}`, () => this.openEmployeeProfile(employee, paint), { text: 'Edit profile' }));
-          const restart = this.button('ca-btn is-danger', `Restart session for ${employee.name}`, () => this.openEmployeeRestart(employee, paint), { text: 'Restart session' });
-          restart.title = 'Interrupt current work and restart without a fresh handoff. Saved conversation, memory and files remain.';
-          restart.disabled = employee.onVacation === true;
-          if (restart.disabled) restart.title = 'Bring this expert into the office before restarting.';
-          controls.append(restart);
-          card.append(controls);
-          const lifecycle = this.el('div', 'ca-company-actions');
-          const lifecycleError = this.el('p', 'ca-company-error');
-          lifecycleError.setAttribute('role', 'alert');
-          let changingLifecycle = false;
-          const changeLifecycle = async (action) => {
-            if (changingLifecycle) return;
-            changingLifecycle = true;
-            for (const control of lifecycle.querySelectorAll('button, input')) control.disabled = true;
-            const returning = employee.onVacation === true;
-            const confirmLabel = action === 'retire' ? 'Retire' : returning ? 'Enter office' : 'Leave office';
-            const question = action === 'retire'
-              ? `Retire ${employee.name}? This removes this expert from the company and its rooms, while keeping their identity in chat history.`
-              : returning
-                ? `Bring ${employee.name} into the office? This starts their laptop and resumes their agent using the current plan.`
-                : `Have ${employee.name} leave the office? This stops their session and keeps this expert off until you switch them back on. Active work is interrupted without a fresh handoff. Their identity, saved conversation, memory, files and room membership are kept.`;
-            lifecycleError.textContent = '';
-            let applied = false;
-            const success = action === 'retire' ? `Retired ${employee.name}.` : returning ? `${employee.name} is in the office.` : `${employee.name} is out of office.`;
-            try {
-              if (!await this.confirmCompanyAction(employee.name, question, confirmLabel) || this.companyPage !== dlg || !card.isConnected) return;
-              if (returning && action === 'vacation') lifecycleError.textContent = `Starting ${employee.name}…`;
-              const result = await this.app._chatApi(`/api/company/employees/${encodeURIComponent(employee.id)}/${action}`, {
-                method: 'POST', body: action === 'vacation' ? { enabled: !returning } : {},
-              });
-              if (!result.ok) { lifecycleError.textContent = result.error || `Could not update ${employee.name}.`; return; }
-              applied = true;
-              await this.loadOwner();
-              await paint();
-              const startup = result.data?.startup;
-              const startupMessage = startup?.state === 'blocked'
-                ? ` Could not start: ${startup.reason}. Use Restart session to retry.`
-                : startup?.state === 'started' ? ' Agent started.' : '';
-              status.textContent = `${success}${startupMessage}${result.data?.failed?.length ? ' Some room removals failed; this expert may still appear in those rooms.' : ''}`;
-            } catch {
-              lifecycleError.textContent = applied ? `${success} The view could not refresh. Reopen Company to see the updated roster.` : `Could not update ${employee.name}. Try again.`;
-              if (applied) status.textContent = lifecycleError.textContent;
-            } finally {
-              if (!applied) {
-                changingLifecycle = false;
-                for (const control of lifecycle.querySelectorAll('button, input')) control.disabled = false;
-                officeToggle.checked = !employee.onVacation;
-              }
-            }
-          };
-          const officeLabel = this.el('label', 'ca-hint', ' In office');
-          const officeToggle = this.el('input');
-          officeToggle.type = 'checkbox';
-          officeToggle.setAttribute('role', 'switch');
-          officeToggle.checked = !employee.onVacation;
-          officeToggle.setAttribute('aria-label', `${employee.onVacation ? 'Enter office' : 'Leave office'}: ${employee.name}`);
-          officeToggle.addEventListener('click', () => { void changeLifecycle('vacation'); });
-          officeLabel.prepend(officeToggle);
-          const leave = !employee.onVacation
-            ? this.button('ca-btn is-danger', `Leave office for ${employee.name}`, () => changeLifecycle('vacation'), { text: 'Leave office' })
-            : null;
-          const retirement = this.el('details', 'ca-company-retirement');
-          retirement.append(this.el('summary', 'ca-hint', 'Remove from company'),
-            this.button('ca-btn', `Retire ${employee.name}`, () => changeLifecycle('retire'), { text: 'Retire' }));
-          lifecycle.append(officeLabel);
-          if (leave) lifecycle.append(leave);
-          lifecycle.append(this.el('span', 'ca-hint', 'Off stays off until you switch it on.'), retirement);
-          card.append(lifecycle, lifecycleError);
+
         }
         const work = this.el('div', 'ca-company-work');
         work.dataset.employeeId = employee.id;
         work.append(this.el('p', 'ca-hint', 'Loading work status…'));
-        card.append(work);
+        const workEntry = this.el('section'); workEntry.append(this.literalText('h4', '', employee.name), work); workDetails.append(workEntry);
         cards.set(employee.id, card);
       }
       const chart = this.el('section', 'ca-company-chart');
@@ -2642,12 +2560,12 @@ class ReverieChatApp {
           const card = cards.get(e.id);
           if (card) item.append(card);
           const next = new Set(ancestors); next.add(e.id);
-          const children = branch(e.id, next); if (children.childElementCount) item.append(children);
+          const children = branch(e.id, next); if (children.childElementCount) { item.classList.add('has-reports'); item.append(children); }
           list.append(item);
         }
         return list;
       };
-      const ownerNode = this.el('li', ''); ownerNode.append(data.settings?.ownerName ? this.literalText('strong', '', data.settings.ownerName) : this.el('strong', '', 'Owner'), branch('owner')); tree.append(ownerNode);
+      const ownerNode = this.el('li', 'ca-company-owner'); reportingDropTarget(ownerNode, 'owner'); ownerNode.append(data.settings?.ownerName ? this.literalText('strong', '', data.settings.ownerName) : this.el('strong', '', 'Owner'), branch('owner')); tree.append(ownerNode);
       for (const employee of employees.filter(employee => !visited.has(employee.id))) {
         if (visited.has(employee.id)) continue;
         visited.add(employee.id);
@@ -2662,57 +2580,8 @@ class ReverieChatApp {
       const people = this.el('section', 'ca-company-people');
       const peopleHeading = this.el('div', 'ca-company-people-heading');
       peopleHeading.append(this.el('h3', '', `People · ${employees.length}`));
-      people.append(peopleHeading, chart);
-      if (manage) {
-        const recovery = this.el('form', 'ca-company-form ca-company-recovery');
-        recovery.append(this.el('h3', '', 'Crash recovery'));
-        const enabledLabel = this.el('label', 'ca-label');
-        const enabled = this.el('input', ''); enabled.type = 'checkbox';
-        enabled.checked = data.settings?.autoWakeEnabled !== false;
-        enabled.setAttribute('aria-label', 'Automatic recovery');
-        enabledLabel.append(enabled, this.el('span', '', 'Automatic recovery'));
-        const expertLabel = this.el('label', 'ca-label');
-        expertLabel.append(this.el('span', 'ca-label-text', 'Wake after a crash'));
-        const expert = this.el('select', 'ca-field');
-        expert.setAttribute('aria-label', 'Wake after a crash');
-        const coordinator = data.settings?.coordinatorEmployeeId;
-        const recoveryEmployees = employees.filter(employee => !employee.onVacation);
-        const roots = recoveryEmployees.filter(employee => {
-          const parent = employee.reportsTo ?? (employee.id === coordinator ? 'owner' : coordinator);
-          return !parent || parent === 'owner';
-        });
-        const automatic = this.literalText('option', '', roots.length === 1 ? `Automatic: ${roots[0].name}` : 'Choose an expert');
-        automatic.value = ''; expert.append(automatic);
-        for (const employee of recoveryEmployees) {
-          const option = this.literalText('option', '', employee.name);
-          option.value = employee.id; expert.append(option);
-        }
-        const selected = employees.some(employee => employee.id === data.settings?.crashWakeEmployeeId && employee.onVacation) ? '' : data.settings?.crashWakeEmployeeId || '';
-        if (selected && !employees.some(employee => employee.id === selected)) {
-          const missing = this.el('option', '', 'Unavailable expert'); missing.value = selected;
-          expert.append(missing);
-        }
-        expert.value = selected;
-        expert.disabled = !enabled.checked;
-        enabled.addEventListener('change', () => { expert.disabled = !enabled.checked; });
-        expertLabel.append(expert);
-        const save = this.el('button', 'ca-btn', 'Save recovery'); save.type = 'submit';
-        recovery.append(enabledLabel, expertLabel, this.el('p', 'ca-hint', 'Only this expert wakes automatically. They can wake reports with permission.'), save);
-        recovery.addEventListener('submit', async event => {
-          event.preventDefault(); save.disabled = true;
-          const changes = { ...data.settings, autoWakeEnabled: enabled.checked };
-          if (expert.value) changes.crashWakeEmployeeId = expert.value;
-          else delete changes.crashWakeEmployeeId;
-          try {
-            const result = await this.app._chatApi('/api/company/settings', { method: 'PUT', body: changes });
-            status.textContent = result.ok ? 'Recovery settings saved.' : `Could not save recovery settings: ${result.error || 'request failed'}`;
-            if (result.ok) data.settings = result.data?.settings || changes;
-          } catch {
-            status.textContent = 'Could not save recovery settings. Try again.';
-          } finally { save.disabled = false; }
-        });
-        people.insertBefore(recovery, chart);
-      }
+      people.append(peopleHeading, chart, workDetails);
+
       content.replaceChildren(people);
       let workLoading = false;
       this._companyRefresh = async () => {
@@ -2816,6 +2685,22 @@ class ReverieChatApp {
         wrap.append(input, this.el('span', '', text)); pages[2].append(wrap); planPermissions[key] = input;
       }
       pages[2].append(this.el('p', 'ca-hint', 'Plan moves require the affected expert’s handoff and approval. A title alone grants no permission.'));
+      const boardPermissions = {};
+      const boardFields = this.el('fieldset'); boardFields.append(this.el('legend', '', 'Board permissions'));
+      for (const [key, text, detail] of caBoardPermissionFields) {
+        const wrap = this.el('label', 'ca-label'); const input = this.el('input');
+        input.type = 'checkbox'; input.name = key; input.checked = key === 'editBoardIssues';
+        wrap.title = detail; wrap.append(input, this.el('span', '', text), this.el('p', 'ca-hint', detail)); boardFields.append(wrap);
+        boardPermissions[key] = input;
+      }
+      let basicBoardChoice = true;
+      boardPermissions.editBoardIssues.addEventListener('change', () => { basicBoardChoice = boardPermissions.editBoardIssues.checked; });
+      boardPermissions.manageBoard.addEventListener('change', () => {
+        boardPermissions.editBoardIssues.checked = boardPermissions.manageBoard.checked || basicBoardChoice;
+        boardPermissions.editBoardIssues.disabled = boardPermissions.manageBoard.checked;
+      });
+      boardFields.append(this.el('p', 'ca-hint', 'Board managers include updating own work. Decision cards never grant permission to choose the owner’s answer.'));
+      pages[2].append(boardFields);
       const parent = field('reportsTo', 'Reports to', 'select', pages[2]);
       const owner = this.el('option', '', data.settings?.ownerName || 'Owner'); owner.value = 'owner'; parent.append(owner);
       for (const e of employees) { const option = this.el('option', '', e.name); option.value = e.id; parent.append(option); }
@@ -2842,6 +2727,7 @@ class ReverieChatApp {
         const photo = appearance.picture.value(); if (photo) { const image = this.el('img', 'ca-hire-review-photo'); image.src = photo; image.alt = ''; pages[3].append(image); }
         const list = this.el('dl', 'ca-hire-review');
         for (const [label, value] of [['Name', name.value.trim()], ['Role', position.value.trim()], ['Skills', expertise.value], ['Responsibilities', lines().join('\n') || 'None specified'], ['Personality', personality.value || 'None specified'], ['Pronouns', pronouns.value || 'Unspecified'], ['Voice', voice.value()?.id || 'Automatic'], ['Plan', selectedSource()?.label || 'Choose a plan'], ['Harness', harness.selectedOptions[0]?.textContent || 'Choose a harness'], ['Reports to', parent.selectedOptions[0]?.textContent || 'Owner'], ['Recovery permission', recover.checked ? 'May wake reporting experts' : 'Not granted'], ['Plan permissions', planPermissions.managePlans.checked ? 'Manage team plans' : planPermissions.moveOwnPlan.checked ? 'Move own plan' : 'Not granted'], ['Sleep / Dream', `${rest.sleep.checked ? 'Sleep allowed' : 'Sleep off'} · ${rest.dream.checked ? 'Dream allowed' : 'Dream off'}`]]) list.append(this.el('dt', '', label), this.literalText('dd', '', value));
+        list.append(this.el('dt', '', 'Board permissions'), this.literalText('dd', '', caBoardPermissionFields.filter(([key]) => boardPermissions[key].checked).map(([, text]) => text).join('; ') || 'Not granted'));
         pages[3].append(list, this.el('p', 'ca-hint', 'Hiring creates this person and starts their runtime. Plans and harnesses supply the runtime defaults. Sleep and Dream are preferences, not schedules.'));
       };
       const showStep = index => {
@@ -2889,7 +2775,7 @@ class ReverieChatApp {
         saving = true; submit.disabled = true; error.textContent = '';
         const source = selectedSource();
         if (!source || !harness.value) { saving = false; submit.disabled = false; error.textContent = 'Choose a plan and a compatible harness.'; return; }
-        const payload = { responsibilities: lines(), personality: personality.value.trim(), permissions: { recoverEmployees: recover.checked, moveOwnPlan: planPermissions.moveOwnPlan.checked, managePlans: planPermissions.managePlans.checked }, sleepEnabled: rest.sleep.checked, dreamEnabled: rest.dream.checked, source: source.kind === 'local' ? { kind: 'local', endpointId: source.id } : { kind: 'subscription', profileId: source.id }, mode: harness.value, name: name.value.trim(), icon: this.expertInitial(name.value), ...(pronouns.value.trim() ? { pronouns: pronouns.value.trim() } : {}), ...(voice.value() ? { voice: voice.value() } : {}), position: position.value.trim(), expertise: skills, reportsTo: parent.value };
+        const payload = { responsibilities: lines(), personality: personality.value.trim(), permissions: { recoverEmployees: recover.checked, moveOwnPlan: planPermissions.moveOwnPlan.checked, managePlans: planPermissions.managePlans.checked, editBoardIssues: basicBoardChoice, manageBoard: boardPermissions.manageBoard.checked, manageDecisions: boardPermissions.manageDecisions.checked }, sleepEnabled: rest.sleep.checked, dreamEnabled: rest.dream.checked, source: source.kind === 'local' ? { kind: 'local', endpointId: source.id } : { kind: 'subscription', profileId: source.id }, mode: harness.value, name: name.value.trim(), icon: this.expertInitial(name.value), ...(pronouns.value.trim() ? { pronouns: pronouns.value.trim() } : {}), ...(voice.value() ? { voice: voice.value() } : {}), position: position.value.trim(), expertise: skills, reportsTo: parent.value };
         try {
           const result = await this.app._chatApi('/api/company/hire', { method: 'POST', body: payload });
           if (!result.ok) { error.textContent = result.error || 'Could not hire this agent.'; return; }
@@ -2911,6 +2797,58 @@ class ReverieChatApp {
       if (this.companyPage !== dlg) return;
       this._companyTimer = this.doc.defaultView.setInterval(() => { void this._companyRefresh?.(); }, 60000);
     } catch { if (this.companyPage === dlg) status.textContent = 'Could not load company. Please reopen it to try again.'; }
+  }
+
+  companyRecoveryFields(container, data, status) {
+    const employees = data.employees || [];
+    const recovery = this.el('form', 'ca-company-form ca-company-recovery');
+    recovery.append(this.el('h3', '', 'Crash recovery'));
+    const enabledLabel = this.el('label', 'ca-label');
+    const enabled = this.el('input', ''); enabled.type = 'checkbox';
+    enabled.checked = data.settings?.autoWakeEnabled !== false;
+    enabled.setAttribute('aria-label', 'Automatic recovery');
+    enabledLabel.append(enabled, this.el('span', '', 'Automatic recovery'));
+    const expertLabel = this.el('label', 'ca-label');
+    expertLabel.append(this.el('span', 'ca-label-text', 'Wake after a crash'));
+    const expert = this.el('select', 'ca-field');
+    expert.setAttribute('aria-label', 'Wake after a crash');
+    const coordinator = data.settings?.coordinatorEmployeeId;
+    const recoveryEmployees = employees.filter(employee => !employee.onVacation);
+    const roots = recoveryEmployees.filter(employee => {
+      const parent = employee.reportsTo ?? (employee.id === coordinator ? 'owner' : coordinator);
+      return !parent || parent === 'owner';
+    });
+    const automatic = this.literalText('option', '', roots.length === 1 ? `Automatic: ${roots[0].name}` : 'Choose an expert');
+    automatic.value = ''; expert.append(automatic);
+    for (const employee of recoveryEmployees) {
+      const option = this.literalText('option', '', employee.name);
+      option.value = employee.id; expert.append(option);
+    }
+    const selected = employees.some(employee => employee.id === data.settings?.crashWakeEmployeeId && employee.onVacation) ? '' : data.settings?.crashWakeEmployeeId || '';
+    if (selected && !employees.some(employee => employee.id === selected)) {
+      const missing = this.el('option', '', 'Unavailable expert'); missing.value = selected;
+      expert.append(missing);
+    }
+    expert.value = selected;
+    expert.disabled = !enabled.checked;
+    enabled.addEventListener('change', () => { expert.disabled = !enabled.checked; });
+    expertLabel.append(expert);
+    const save = this.el('button', 'ca-btn', 'Save recovery'); save.type = 'submit';
+    recovery.append(enabledLabel, expertLabel, this.el('p', 'ca-hint', 'Only this expert wakes automatically. They can wake reports with permission.'), save);
+    recovery.addEventListener('submit', async event => {
+      event.preventDefault(); save.disabled = true;
+      const changes = { ...data.settings, autoWakeEnabled: enabled.checked };
+      if (expert.value) changes.crashWakeEmployeeId = expert.value;
+      else delete changes.crashWakeEmployeeId;
+      try {
+        const result = await this.app._chatApi('/api/company/settings', { method: 'PUT', body: changes });
+        status.textContent = result.ok ? 'Recovery settings saved.' : `Could not save recovery settings: ${result.error || 'request failed'}`;
+        if (result.ok) data.settings = result.data?.settings || changes;
+      } catch {
+        status.textContent = 'Could not save recovery settings. Try again.';
+      } finally { save.disabled = false; }
+    });
+    container.append(recovery);
   }
 
   async openCompanySettings(onSaved) {
@@ -2935,6 +2873,7 @@ class ReverieChatApp {
       const manage = data.canManage === true && auth.ok && auth.data?.self === 'owner' && auth.data?.canSetOwn === true;
       status.textContent = '';
       if (manage) {
+        this.companyRecoveryFields(content, data, status);
         const plugins = this.doc.defaultView?.ReverieChatPlugins;
         if (plugins) content.append(this.button('ca-btn', 'Configure server chat plugins', () => {
           void plugins.openSettings().catch(failure => this.toast(failure.message || 'Plugin settings are unavailable.', 'error'));
@@ -2966,6 +2905,23 @@ class ReverieChatApp {
           finally { saving = false; save.disabled = false; }
         });
         content.append(form);
+        const coreForm = this.el('form', 'ca-company-core-form');
+        const companyCore = this.coreBeliefFields(coreForm, 'Company core beliefs', data.settings?.coreBeliefs || []);
+        coreForm.append(this.el('p', 'ca-hint', 'Company blocks come first for every expert; personal additions follow with exact duplicates removed. This is configured text, not proof of a running session’s loaded startup.'));
+        const saveCore = this.el('button', 'ca-btn is-primary', 'Save company core beliefs'); saveCore.type = 'submit'; coreForm.append(saveCore);
+        coreForm.addEventListener('submit', async event => {
+          event.preventDefault(); if (saveCore.disabled) return;
+          if (!companyCore.changed()) { status.textContent = 'Company core beliefs unchanged.'; return; }
+          saveCore.disabled = true; error.textContent = '';
+          try {
+            const coreBeliefs = companyCore.values();
+            const result = await this.app._chatApi('/api/company/settings', { method: 'PUT', body: { coreBeliefs } });
+            if (!result.ok) throw new Error(result.error || 'Company core beliefs could not be saved.');
+            if (JSON.stringify(result.data?.settings?.coreBeliefs) !== JSON.stringify(coreBeliefs)) throw new Error('Save not confirmed. Reopen Company settings to check the current beliefs.');
+            companyCore.markSaved(); status.textContent = 'Company core beliefs saved.'; await onSaved?.();
+          } catch (failure) { error.textContent = failure.message || 'Company core beliefs could not be saved.'; }
+          finally { saveCore.disabled = false; }
+        }); content.append(coreForm);
       } else content.append(this.el('p', 'ca-hint', 'Sign in as the owner to change company settings.'));
       const receipts = this.el('details', 'ca-company-settings-receipts');
       receipts.append(this.el('summary', '', 'Research receipts'));
@@ -3082,6 +3038,7 @@ class ReverieChatApp {
   }
 
   disposeCompanyPage() {
+    for (const dialog of this.doc.querySelectorAll('.ca-expert-profile, .ca-publication-tokens, .ca-startup-context')) if (dialog._companyOrigin) dialog.close();
     this._companyConfirm?.(false);
     if (this._companyTimer) this.doc.defaultView.clearInterval(this._companyTimer);
     if (this._companyResize) this.doc.defaultView.removeEventListener('message', this._companyResize);
@@ -6461,12 +6418,432 @@ class ReverieChatApp {
     return { value };
   }
 
+  coreBeliefFields(container, label, values = []) {
+    let original = Array.isArray(values) ? [...values] : [];
+    const details = this.el('details', 'ca-core-beliefs');
+    const summary = this.el('summary', '', label); const list = this.el('div', 'ca-core-belief-blocks');
+    details.append(summary, this.el('p', 'ca-hint', 'Each block preserves its text and paragraphs. Order is retained. Empty fields are removed when saved.'), list);
+    let fields = [];
+    const currentValues = () => fields.map(field => field.input.value === field.displayValue ? field.originalValue : field.input.value).filter(value => value !== '');
+    const paint = () => {
+      summary.textContent = `${label} · ${fields.filter(({ input }) => input.value !== '').length} blocks`;
+      add.disabled = fields.length >= 32;
+      fields.forEach(({ input }, index) => input.setAttribute('aria-label', `${label} block ${index + 1}`));
+    };
+    const append = value => {
+      const row = this.el('div', 'ca-core-belief-block'); const input = this.el('textarea', 'ca-field');
+      input.rows = 4; input.maxLength = 4000; input.value = value;
+      input.addEventListener('input', paint);
+      const remove = this.button('ca-btn', `Remove ${label} block`, () => { fields = fields.filter(field => field.input !== input); row.remove(); paint(); }, { text: 'Remove block' });
+      row.append(input, remove); list.append(row); fields.push({ input, row, originalValue: value, displayValue: input.value });
+    };
+    const add = this.button('ca-btn', `Add ${label} block`, () => { if (fields.length < 32) { append(''); paint(); fields.at(-1).input.focus(); } }, { text: 'Add block' });
+    details.append(add); for (const value of original.length ? original : ['']) append(value); paint(); container.append(details);
+    return { values: currentValues, changed: () => JSON.stringify(currentValues()) !== JSON.stringify(original), markSaved: () => {
+      original = currentValues();
+      for (const field of fields) { field.originalValue = field.input.value === field.displayValue ? field.originalValue : field.input.value; field.displayValue = field.input.value; }
+    }, details };
+  }
+
+  async openStartupContext(employee) {
+    this.doc.querySelector('.ca-startup-context')?.remove();
+    const dialog = this.el('dialog', 'ca-dialog ca-startup-context'); dialog.setAttribute('aria-label', `Startup context: ${employee.name}`);
+    dialog._companyOrigin = this.companyPage;
+    const header = this.el('header', 'ca-profile-edit-heading');
+    header.append(this.literalText('h2', '', `Startup context · ${employee.name}`), this.button('ca-btn', 'Close startup context', () => dialog.close(), { text: 'Close' }));
+    const status = this.el('p', 'ca-hint', 'Loading startup context…'); status.setAttribute('role', 'status');
+    const content = this.el('div'), copyStatus = this.el('p', 'ca-hint'); copyStatus.setAttribute('role', 'status');
+    const preview = this.el('textarea', 'ca-field ca-startup-preview'); preview.readOnly = true; preview.rows = 12; preview.setAttribute('aria-label', 'Current configured context preview');
+    const copy = this.button('ca-btn', 'Copy current configured context', async () => {
+      if (copy.disabled) return;
+      try {
+        const clipboard = this.doc.defaultView.navigator.clipboard;
+        if (clipboard?.writeText) await clipboard.writeText(preview.value);
+        else { preview.focus(); preview.select(); if (!this.doc.execCommand?.('copy')) throw new Error('Copy unavailable'); }
+        copyStatus.textContent = 'Current configured preview copied.';
+      } catch { preview.focus(); preview.select(); copyStatus.textContent = 'Preview selected. Use your device’s copy command.'; }
+    }, { text: 'Copy current preview' }); copy.disabled = true;
+    dialog.append(header, status, content, copy, copyStatus); dialog.addEventListener('close', () => dialog.remove()); this.doc.body.append(dialog); dialog.showModal();
+    try {
+      const result = await this.app._chatApi(`/api/company/employees/${encodeURIComponent(employee.id)}/startup-context`);
+      if (!dialog.isConnected) return;
+      const data = result.data;
+      if (!result.ok) throw new Error(result.error || 'Startup context is unavailable. Owner sign-in is required.');
+      if (data?.employeeId !== employee.id || typeof data.context !== 'string' || !Array.isArray(data.sections) || data.sections.length > 8 ||
+        !data.sections.every(section => typeof section.id === 'string' && typeof section.label === 'string' && typeof section.text === 'string' && ['configured', 'missing', 'captured'].includes(section.status)) ||
+        !['unavailable', 'captured'].includes(data.startup?.status) || !Number.isFinite(data.generatedAt))
+        throw new Error('Startup context response could not be confirmed.');
+      const validReport = report => report?.employeeId === employee.id && typeof report.context === 'string' &&
+        typeof report.sessionId === 'string' && Number.isInteger(report.sessionGeneration) && report.sessionGeneration > 0 &&
+        ['startup', 'model-request'].includes(report.stage) && Number.isFinite(report.reportedAt) &&
+        report.assurance === 'harness-reported-input' && report.retention === 'website-process-lifetime';
+      if (data.startup.status === 'captured' && (!validReport(data.startup.report) || data.startup.report.stage !== 'startup' ||
+        data.startup.report.sessionId !== data.sessionId || data.startup.report.sessionGeneration !== data.sessionGeneration))
+        throw new Error('Startup capture binding could not be confirmed.');
+      const actual = this.el('section', 'ca-startup-evidence');
+      actual.append(this.el('h3', '', data.startup.status === 'captured' ? 'Captured startup report' : 'Startup capture unavailable'),
+        this.literalText('p', '', data.startup.reason || (data.startup.status === 'captured' ? 'The server reports captured startup evidence.' : 'This startup was not captured. Current configuration is not evidence of what that session loaded.')));
+      const renderReport = (label, report) => {
+        if (!validReport(report)) return;
+        const block = this.el('section', 'ca-startup-reported');
+        const sameBinding = report.sessionId === data.sessionId && report.sessionGeneration === data.sessionGeneration;
+        block.append(this.literalText('h3', '', label),
+          this.literalText('p', 'ca-hint', `Stage ${report.stage} · Session ${report.sessionId} · Generation ${report.sessionGeneration} · Reported ${new Date(report.reportedAt).toLocaleString()}`),
+          this.literalText('p', 'ca-hint', sameBinding ? 'This report names the current session binding.' : 'This report names another session binding. It is not the current session’s captured startup.'),
+          this.el('p', 'ca-hint', 'Harness-reported input does not independently establish provider consumption. Retained for this website process only; a website restart clears the report.'));
+        const text = this.el('textarea', 'ca-field ca-startup-preview'); text.readOnly = true; text.rows = 8; text.value = report.context; text.setAttribute('aria-label', label);
+        block.append(text, this.button('ca-btn', `Copy ${label}`, async () => {
+          try {
+            const clipboard = this.doc.defaultView.navigator.clipboard;
+            if (clipboard?.writeText) await clipboard.writeText(text.value);
+            else { text.focus(); text.select(); if (!this.doc.execCommand?.('copy')) throw new Error('Copy unavailable'); }
+            copyStatus.textContent = `${label} copied.`;
+          } catch { text.focus(); text.select(); copyStatus.textContent = 'Report selected. Use your device’s copy command.'; }
+        }, { text: 'Copy reported input' })); content.append(block);
+      };
+      content.append(actual);
+      if (data.startup.status === 'captured') renderReport('Captured startup input', data.startup.report);
+      if (data.lastManagedDelivery) renderReport('Last harness-reported input', data.lastManagedDelivery);
+      content.append(this.el('h3', '', 'Current configured preview'),
+        this.literalText('p', 'ca-hint', `Generated ${new Date(data.generatedAt).toLocaleString()} · Session ${data.sessionId || 'not bound'} · Generation ${data.sessionGeneration ?? 'not bound'}`));
+      preview.value = data.context; content.append(preview);
+      const sections = this.el('section', 'ca-startup-sections');
+      for (const section of data.sections) {
+        const detail = this.el('details');
+        detail.append(this.literalText('summary', '', `${section.label} · ${section.status}`));
+        if (section.source) detail.append(this.literalText('p', 'ca-hint', section.source));
+        detail.append(this.literalText('pre', '', section.text || (section.status === 'missing' ? 'Not configured.' : 'No text supplied.'))); sections.append(detail);
+      }
+      content.append(sections); status.textContent = 'Configured text and startup evidence are shown separately.'; copy.disabled = false;
+    } catch (error) { status.textContent = error.message || 'Startup context could not be loaded.'; }
+  }
+
+  publicationCredentialsFields(container, employee) {
+    const group = this.el('fieldset', 'ca-profile-publication');
+    group.append(this.el('legend', '', 'Publication credentials'));
+    const list = this.el('div');
+    const status = this.el('p', 'ca-hint'); status.setAttribute('role', 'status');
+    group.append(this.el('p', 'ca-hint', 'Allow this expert to download selected named PATs through its scoped API. Repository declarations are notes; GitHub enforces the token’s actual permissions.'), list,
+      this.el('p', 'ca-hint', 'Removing access prevents new downloads; previously copied tokens must be revoked or rotated at GitHub.'));
+    let tokens = [], busy = false, inventoryFailed = false;
+    const granted = () => Array.isArray(employee.permissions?.publicationTokenIds) ? employee.permissions.publicationTokenIds : [];
+    const paint = () => {
+      list.replaceChildren();
+      const known = new Map(tokens.map(token => [token.id, token]));
+      const ids = [...known.keys(), ...granted().filter(id => !known.has(id))];
+      if (!ids.length) list.append(this.el('p', 'ca-hint', inventoryFailed ? 'Token inventory unavailable.' : 'No named PATs. Use Manage PATs to add one.'));
+      for (const id of ids) {
+        const token = known.get(id), label = this.el('label', 'ca-publication-grant');
+        const input = this.el('input'); input.type = 'checkbox'; input.checked = granted().includes(id); input.disabled = busy;
+        input.setAttribute('aria-label', `Access to ${token?.name || 'unavailable PAT ' + id} for ${employee.name}`);
+        const text = this.el('span'); text.append(this.literalText('strong', '', token?.name || 'Unavailable PAT'));
+        if (token?.label) text.append(this.literalText('small', 'ca-hint', token.label));
+        text.append(this.literalText('small', 'ca-hint', token ? `Declared repositories: ${token.repositories?.join(', ') || 'Not specified'}` : 'No new downloads. Uncheck to remove this saved grant.'));
+        label.append(input, text); list.append(label);
+        input.addEventListener('change', async () => {
+          if (busy || !group.isConnected) return;
+          const enabled = input.checked; busy = true;
+          for (const control of list.querySelectorAll('input')) control.disabled = true;
+          status.textContent = 'Saving PAT access…';
+          const controller = new AbortController(); const timeout = setTimeout(() => controller.abort(), 8000);
+          try {
+            const result = await this.app._chatApi(`/api/company/employees/${encodeURIComponent(employee.id)}/publication-tokens/${encodeURIComponent(id)}`, { method: 'PUT', body: { enabled }, signal: controller.signal });
+            const saved = result.data?.employee, ids = saved?.permissions?.publicationTokenIds;
+            if (!result.ok) throw new Error(result.error || 'Access change not confirmed. Reopen the profile before trying again.');
+            if (saved?.id !== employee.id || !Array.isArray(ids) || ids.length > 64 ||
+              !ids.every(value => typeof value === 'string' && /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(value)) ||
+              new Set(ids).size !== ids.length || ids.includes(id) !== enabled)
+              throw new Error('Access change not confirmed. Reopen the profile before trying again.');
+            employee.permissions = { ...employee.permissions, publicationTokenIds: [...ids] };
+            status.textContent = 'PAT access saved.';
+          } catch (error) { status.textContent = `Could not save PAT access: ${error.message}`; }
+          finally { clearTimeout(timeout); busy = false; paint(); }
+        });
+      }
+    };
+    const refresh = async () => {
+      try {
+        const result = await this.app._chatApi('/api/publication/tokens');
+        if (!group.isConnected) return;
+        if (!result.ok || !Array.isArray(result.data?.tokens)) throw new Error('Token inventory unavailable. Existing grants can still be removed.');
+        tokens = result.data.tokens; inventoryFailed = false;
+      } catch { tokens = []; inventoryFailed = true; status.textContent = 'Token inventory unavailable. Existing grants can still be removed.'; }
+      paint();
+    };
+    group.append(this.button('ca-btn', 'Manage PATs', () => this.openPublicationTokens(refresh), { text: 'Manage PATs' }), status);
+    container.append(group); paint(); void refresh();
+  }
+
+  async openPublicationTokens(onChanged) {
+    const existing = this.doc.querySelector('.ca-publication-tokens');
+    if (existing) { existing.querySelector('button')?.focus(); return; }
+    const dialog = this.el('dialog', 'ca-dialog ca-publication-tokens'); dialog.setAttribute('aria-label', 'Manage PATs');
+    dialog._companyOrigin = this.companyPage;
+    const heading = this.el('header', 'ca-profile-edit-heading');
+    heading.append(this.el('h2', '', 'Manage PATs'), this.button('ca-btn', 'Close Manage PATs', () => dialog.close(), { text: 'Close' }));
+    const list = this.el('div', 'ca-publication-inventory'), status = this.el('p', 'ca-hint', 'Loading named PATs…'); status.setAttribute('role', 'status');
+    const error = this.el('p', 'ca-company-error'); error.setAttribute('role', 'alert');
+    dialog.append(heading, this.el('p', 'ca-hint', 'Token values are write-only and are never listed. Repository declarations describe intended use; they do not restrict the token’s actual GitHub permissions.'), list, status, error);
+    const form = this.el('form', 'ca-publication-token-form');
+    const field = (label, tag = 'input') => {
+      const wrap = this.el('label', 'ca-label'), input = this.el(tag, 'ca-field'); input.setAttribute('aria-label', label);
+      wrap.append(this.el('span', '', label), input); form.append(wrap); return input;
+    };
+    const name = field('PAT name'); name.required = true; name.maxLength = 48; name.pattern = '[a-z][a-z0-9-]{0,47}';
+    const note = field('Description (optional)'); note.maxLength = 120;
+    const repositories = field('Declared repositories (optional)', 'textarea'); repositories.placeholder = 'owner/repository, owner/another';
+    const secret = field('PAT value (write-only)'); secret.type = 'password'; secret.maxLength = 4096; secret.autocomplete = 'new-password'; secret.spellcheck = false;
+    const secretHint = this.el('p', 'ca-hint', 'Required for a new PAT. When editing, leave blank to keep its current value.'); form.append(secretHint);
+    const submit = this.el('button', 'ca-btn is-primary', 'Add PAT'); submit.type = 'submit';
+    const reset = this.button('ca-btn', 'Cancel PAT edit', () => clear(), { text: 'Cancel edit' });
+    const actions = this.el('div', 'ca-dialog-actions'); actions.append(submit, reset); form.append(actions);
+    let editing = null, busy = false;
+    const clear = () => { editing = null; name.value = ''; note.value = ''; repositories.value = ''; secret.value = ''; submit.textContent = 'Add PAT'; };
+    const setBusy = value => { busy = value; for (const control of dialog.querySelectorAll('form input, form textarea, form button, .ca-publication-inventory button')) control.disabled = value; };
+    const inventory = async () => {
+      const result = await this.app._chatApi('/api/publication/tokens');
+      if (!dialog.isConnected) return;
+      if (!result.ok || !Array.isArray(result.data?.tokens)) throw new Error('Sign in as the owner to manage PATs.');
+      list.replaceChildren();
+      for (const token of result.data.tokens) {
+        const row = this.el('article', 'ca-publication-token');
+        row.append(this.literalText('strong', '', token.name), this.literalText('p', 'ca-hint', token.label || ''), this.literalText('p', 'ca-hint', `Declared repositories: ${token.repositories?.join(', ') || 'Not specified'}`));
+        row.append(this.button('ca-btn', `Edit PAT ${token.name}`, () => {
+          if (busy) return; editing = token.id; name.value = token.name; note.value = token.label || ''; repositories.value = token.repositories?.join(', ') || ''; secret.value = ''; submit.textContent = 'Save PAT changes'; name.focus();
+        }, { text: 'Edit / replace' }), this.button('ca-btn is-danger', `Delete PAT ${token.name}`, async () => {
+          if (busy) return;
+          if (!await this.confirmCompanyAction(token.name, `Delete the named PAT ${token.name}? This prevents new downloads. Revoke or rotate the token at GitHub to invalidate copies already downloaded.`, 'Delete PAT') || !dialog.isConnected) return;
+          setBusy(true); error.textContent = '';
+          const controller = new AbortController(); const timeout = setTimeout(() => controller.abort(), 8000);
+          try {
+            const result = await this.app._chatApi(`/api/publication/tokens/${encodeURIComponent(token.id)}`, { method: 'DELETE', signal: controller.signal });
+            if (!result.ok || result.data?.id !== token.id || result.data?.deleted !== true) throw new Error('Deletion not confirmed. Refresh the inventory before trying again.');
+            if (editing === token.id) clear();
+            await inventory(); await onChanged?.(); status.textContent = 'Named PAT deleted. Existing copies require GitHub revocation or rotation.';
+          } catch (failure) { error.textContent = failure.message; }
+          finally { clearTimeout(timeout); setBusy(false); }
+        }, { text: 'Delete' })); list.append(row);
+      }
+      if (!result.data.tokens.length) list.append(this.el('p', 'ca-hint', 'No named PATs yet.'));
+      status.textContent = `${result.data.tokens.length} named PATs. Values are never displayed.`;
+      if (!form.isConnected) dialog.append(form);
+    };
+    form.addEventListener('submit', async event => {
+      event.preventDefault(); if (!dialog.isConnected || busy || !form.reportValidity()) return;
+      const value = secret.value; secret.value = '';
+      if ((!editing && !value) || (value && !/^[!-~]{1,4096}$/.test(value))) { error.textContent = 'Enter a PAT with no spaces or line breaks. The value is never displayed.'; return; }
+      const body = { name: name.value.trim(), repositories: repositories.value.split(/[\s,]+/).filter(Boolean), ...(note.value.trim() ? { label: note.value.trim() } : editing ? { label: null } : {}), ...(value ? { token: value } : {}) };
+      setBusy(true); error.textContent = '';
+      const controller = new AbortController(); const timeout = setTimeout(() => controller.abort(), 8000);
+      try {
+        const result = await this.app._chatApi('/api/publication/tokens' + (editing ? '/' + encodeURIComponent(editing) : ''), { method: editing ? 'PUT' : 'POST', body, signal: controller.signal });
+        const saved = result.data?.token;
+        if (!result.ok || typeof saved?.id !== 'string' || !/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(saved.id) ||
+          saved.name !== body.name || (editing && saved.id !== editing)) throw new Error('Save not confirmed. Refresh the inventory before trying again.');
+        clear(); await inventory(); await onChanged?.(); status.textContent = 'Named PAT saved. Its value is not displayed.';
+      } catch { error.textContent = 'PAT could not be saved or confirmed. Check owner access and refresh before retrying; values are never displayed.'; }
+      finally { clearTimeout(timeout); delete body.token; secret.value = ''; setBusy(false); }
+    });
+    dialog.addEventListener('close', () => { secret.value = ''; dialog.remove(); });
+    this.doc.body.append(dialog); dialog.showModal();
+    try { await inventory(); } catch (failure) { status.textContent = ''; error.textContent = failure.message; }
+  }
+
+  employeePermissionFields(container, employee) {
+    const label = this.el('label', 'ca-hint', ' May recover disconnected employee sessions');
+    const recovery = this.el('input', '');
+    recovery.type = 'checkbox';
+    recovery.checked = employee.permissions?.recoverEmployees === true;
+    recovery.setAttribute('aria-label', `Recovery permission for ${employee.name}`);
+    label.prepend(recovery);
+    const planPermissions = {};
+    const planLabels = [];
+    for (const [key, text] of [['moveOwnPlan', 'Move own plan'], ['managePlans', 'Manage team plans']]) {
+      const wrap = this.el('label', 'ca-hint', ` ${text}`);
+      const input = this.el('input'); input.type = 'checkbox'; input.checked = employee.permissions?.[key] === true;
+      input.setAttribute('aria-label', `${text} for ${employee.name}`);
+      wrap.title = 'Requests still require the affected expert’s handoff and approval. No account sign-in or plan administration access.';
+      wrap.prepend(input); planPermissions[key] = input; planLabels.push(wrap);
+    }
+    const boardPermissions = {};
+    const boardSaves = new Set();
+    const boardProjection = value => caBoardPermissionFields.every(([key]) =>
+      typeof value?.effectiveBoardPermissions?.[key] === 'boolean' &&
+      ['explicit', 'legacy', 'included'].includes(value?.boardPermissionSources?.[key]));
+    const boardFields = this.el('fieldset', 'ca-company-board-permissions');
+    boardFields.append(this.el('legend', '', 'Board permissions'));
+    const renderBoardPermissions = () => {
+      for (const [key, text, detail] of caBoardPermissionFields) {
+        const { input, note } = boardPermissions[key];
+        const effective = employee.effectiveBoardPermissions?.[key];
+        const included = key === 'editBoardIssues' && employee.effectiveBoardPermissions?.manageBoard === true;
+        input.checked = effective === true;
+        input.disabled = included || typeof effective !== 'boolean' || boardSaves.size > 0;
+        const source = employee.boardPermissionSources?.[key];
+        note.textContent = typeof effective !== 'boolean' ? 'Current permission unavailable. Reopen Company after updating the server.'
+          : included ? 'Included with Manage company board.'
+          : source === 'legacy' ? 'Inherited current policy. Toggle to set an explicit choice.' : 'Owner-selected permission.';
+        input.closest('label').title = detail;
+      }
+    };
+    for (const [key, text, detail] of caBoardPermissionFields) {
+      const wrap = this.el('label', 'ca-hint');
+      const input = this.el('input'); input.type = 'checkbox';
+      input.setAttribute('aria-label', `${text} for ${employee.name}`);
+      const note = this.el('small', 'ca-hint');
+      wrap.append(input, this.doc.createTextNode(` ${text} `), note, this.el('p', 'ca-hint', detail));
+      boardPermissions[key] = { input, note }; boardFields.append(wrap);
+    }
+    renderBoardPermissions();
+    const preferenceStatus = this.el('p', 'ca-hint');
+    preferenceStatus.setAttribute('role', 'status');
+    container.append(preferenceStatus);
+    let preferenceSaves = 0;
+    let preferenceError = '';
+    const savePreference = async (input, key, permission = false) => {
+      if (input.disabled || !container.isConnected) return;
+      const value = input.checked;
+      const boardPermission = Object.hasOwn(boardPermissions, key);
+      const previous = boardPermission ? employee.effectiveBoardPermissions?.[key] === true
+        : permission ? employee.permissions?.[key] === true : employee[key] === true;
+      if (boardPermission) {
+        boardSaves.add(key);
+        for (const { input: control } of Object.values(boardPermissions)) control.disabled = true;
+      }
+      input.disabled = true;
+      if (preferenceSaves === 0) preferenceError = '';
+      preferenceSaves++;
+      preferenceStatus.textContent = 'Saving preferences…';
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 8000);
+      try {
+        const result = await this.app._chatApi(`/api/company/employees/${encodeURIComponent(employee.id)}`, {
+          method: 'PUT', body: permission ? { permissions: { [key]: value } } : { [key]: value }, signal: controller.signal,
+        });
+        const saved = result.data?.employee;
+        if (!result.ok && result.status >= 400 && result.status < 500) throw new Error(result.error || 'Request refused');
+        if (!result.ok || saved?.id !== employee.id || (permission ? saved.permissions?.[key] : saved[key]) !== value)
+          throw new Error('Save not confirmed. Reopen Company to check the current value.');
+        if (permission) employee.permissions = { ...employee.permissions, [key]: value };
+        else employee[key] = value;
+        if (boardPermission) {
+          if (!boardProjection(saved))
+            throw new Error('Permission saved, but current access could not be read. Reopen Company to check it.');
+          employee.effectiveBoardPermissions = saved.effectiveBoardPermissions;
+          employee.boardPermissionSources = saved.boardPermissionSources;
+        }
+      } catch (error) {
+        input.checked = previous;
+        preferenceError = `Could not save preferences: ${error.message}`;
+        preferenceStatus.textContent = preferenceError;
+      } finally {
+        clearTimeout(timeout);
+        input.disabled = false;
+        if (boardPermission) { boardSaves.delete(key); renderBoardPermissions(); }
+        preferenceSaves--;
+        if (preferenceSaves === 0) preferenceStatus.textContent = preferenceError || 'Preferences saved.';
+      }
+    };
+    recovery.addEventListener('change', () => { void savePreference(recovery, 'recoverEmployees', true); });
+    for (const [key, input] of Object.entries(planPermissions))
+      input.addEventListener('change', () => { void savePreference(input, key, true); });
+    for (const [key, { input }] of Object.entries(boardPermissions))
+      input.addEventListener('change', () => { void savePreference(input, key, true); });
+    const general = this.el('fieldset', 'ca-profile-permissions');
+    general.append(this.el('legend', '', 'Recovery and plans'), label, ...planLabels);
+    preferenceStatus.classList.add('ca-profile-permission-status');
+    container.append(this.el('p', 'ca-hint', 'Permission checkboxes save immediately. They do not need Save profile.'), general, boardFields, preferenceStatus);
+  }
+
+  employeeLifecycleFields(container, employee, onSaved, dialog) {
+    const origin = this.companyPage;
+    const host = this.el('section', 'ca-profile-lifecycle');
+    const status = this.el('p', 'ca-hint ca-profile-lifecycle-status'); status.setAttribute('role', 'status');
+    const paint = () => {
+      host.replaceChildren();
+      const restart = this.button('ca-btn is-danger', `Restart session for ${employee.name}`, () => this.openEmployeeRestart(employee, onSaved), { text: 'Restart session' });
+      restart.disabled = employee.onVacation === true;
+      restart.title = employee.onVacation ? 'Bring this expert into the office before restarting.' : 'Interrupt current work and restart without a fresh handoff. Saved conversation, memory and files remain.';
+      const lifecycle = this.el('div', 'ca-company-actions');
+      const lifecycleError = this.el('p', 'ca-company-error ca-company-lifecycle-error');
+      lifecycleError.setAttribute('role', 'alert');
+      let changingLifecycle = false;
+      const changeLifecycle = async (action) => {
+        if (changingLifecycle) return;
+        changingLifecycle = true;
+        for (const control of lifecycle.querySelectorAll('button, input')) control.disabled = true;
+        const returning = employee.onVacation === true;
+        const confirmLabel = action === 'retire' ? 'Retire' : returning ? 'Enter office' : 'Leave office';
+        const question = action === 'retire'
+          ? `Retire ${employee.name}? This removes this expert from the company and its rooms, while keeping their identity in chat history.`
+          : returning
+            ? `Bring ${employee.name} into the office? This starts their laptop and resumes their agent using the current plan.`
+            : `Have ${employee.name} leave the office? This stops their session and keeps this expert off until you switch them back on. Active work is interrupted without a fresh handoff. Their identity, saved conversation, memory, files and room membership are kept.`;
+        lifecycleError.textContent = '';
+        let applied = false;
+        const success = action === 'retire' ? `Retired ${employee.name}.` : returning ? `${employee.name} is in the office.` : `${employee.name} is out of office.`;
+        try {
+          if (!await this.confirmCompanyAction(employee.name, question, confirmLabel) || (origin && this.companyPage !== origin) || !dialog.isConnected) return;
+          if (returning && action === 'vacation') lifecycleError.textContent = `Starting ${employee.name}…`;
+          const result = await this.app._chatApi(`/api/company/employees/${encodeURIComponent(employee.id)}/${action}`, {
+            method: 'POST', body: action === 'vacation' ? { enabled: !returning } : {},
+          });
+          if (!result.ok) { lifecycleError.textContent = result.error || `Could not update ${employee.name}.`; return; }
+          applied = true;
+          if (result.data?.employee?.id === employee.id) Object.assign(employee, result.data.employee);
+          await this.loadOwner();
+          await onSaved?.();
+          const startup = result.data?.startup;
+          const startupMessage = startup?.state === 'blocked'
+            ? ` Could not start: ${startup.reason}. Use Restart session to retry.`
+            : startup?.state === 'started' ? ' Agent started.' : '';
+          status.textContent = `${success}${startupMessage}${result.data?.failed?.length ? ' Some room removals failed; this expert may still appear in those rooms.' : ''}`;
+          const pageStatus = origin?.querySelector(':scope > [role="status"]'); if (pageStatus) pageStatus.textContent = status.textContent;
+          if (action === 'retire') dialog.close(); else paint();
+        } catch {
+          lifecycleError.textContent = applied ? `${success} The view could not refresh. Reopen Company to see the updated roster.` : `Could not update ${employee.name}. Try again.`;
+          if (applied) status.textContent = lifecycleError.textContent;
+        } finally {
+          if (!applied) {
+            changingLifecycle = false;
+            for (const control of lifecycle.querySelectorAll('button, input')) control.disabled = false;
+            officeToggle.checked = !employee.onVacation;
+          }
+        }
+      };
+      const officeLabel = this.el('label', 'ca-hint', ' In office');
+      const officeToggle = this.el('input');
+      officeToggle.type = 'checkbox';
+      officeToggle.setAttribute('role', 'switch');
+      officeToggle.checked = !employee.onVacation;
+      officeToggle.setAttribute('aria-label', `${employee.onVacation ? 'Enter office' : 'Leave office'}: ${employee.name}`);
+      officeToggle.addEventListener('click', () => { void changeLifecycle('vacation'); });
+      officeLabel.prepend(officeToggle);
+      const leave = !employee.onVacation
+        ? this.button('ca-btn is-danger', `Leave office for ${employee.name}`, () => changeLifecycle('vacation'), { text: 'Leave office' })
+        : null;
+      const retirement = this.el('details', 'ca-company-retirement');
+      retirement.append(this.el('summary', 'ca-hint', 'Remove from company'),
+        this.button('ca-btn', `Retire ${employee.name}`, () => changeLifecycle('retire'), { text: 'Retire' }));
+      lifecycle.append(restart, officeLabel);
+      if (leave) lifecycle.append(leave);
+      lifecycle.append(this.el('span', 'ca-hint', 'Off stays off until you switch it on.'), retirement);
+      host.append(lifecycle, lifecycleError);
+    };
+    container.append(this.el('h3', '', 'Session and company membership'), this.el('p', 'ca-hint', 'Session actions apply separately. They do not save profile edits. Off stays off until you switch it on.'), host, status); paint();
+  }
+
   openEmployeeProfile(employee, onSaved) {
     this.doc.querySelector('.ca-expert-profile')?.remove();
     const dialog = this.el('dialog', 'ca-dialog ca-expert-profile');
     dialog.setAttribute('aria-label', `Edit profile: ${employee.name}`);
-    dialog.append(this.literalText('h2', '', employee.name));
-    dialog.append(this.button('ca-btn', 'Runtime settings', () => this.openRuntimeSettings(employee, onSaved), { text: 'Runtime settings' }));
+    dialog._companyOrigin = this.companyPage;
+    const heading = this.el('header', 'ca-profile-edit-heading');
+    heading.append(this.literalText('h2', '', employee.name), this.button('ca-btn', `Close profile for ${employee.name}`, () => dialog.close(), { text: 'Close' }));
+    dialog.append(heading, this.el('p', 'ca-hint', 'Profile details and Sleep / Dream use Save profile. Permission checkboxes below save immediately.'));
+    const contextActions = this.el('div', 'ca-dialog-actions');
+    contextActions.append(this.button('ca-btn', 'Runtime settings', () => this.openRuntimeSettings(employee, onSaved), { text: 'Runtime settings' }), this.button('ca-btn', `View startup context for ${employee.name}`, () => this.openStartupContext(employee), { text: 'View startup context' }));
+    dialog.append(contextActions);
     const form = this.el('form');
     const pronounLabel = this.el('label', 'ca-label'); pronounLabel.append(this.el('span', 'ca-label-text', 'Pronouns (optional)'));
     const profileField = (key, label, value, multiline = false) => {
@@ -6477,6 +6854,11 @@ class ReverieChatApp {
     const expertise = profileField('expertise', 'Skills and expertise', (employee.expertise || []).join(', '));
     const responsibilities = profileField('responsibilities', 'Responsibilities (one per line)', (employee.responsibilities || []).join('\n'), true); responsibilities.maxLength = 10000;
     const personality = profileField('personality', 'Personality and working style', employee.personality || '', true); personality.maxLength = 1000;
+    const personalCore = this.coreBeliefFields(form, 'Additional personal core beliefs', employee.coreBeliefs || []);
+    const corePreview = this.el('details', 'ca-core-beliefs'); corePreview.append(this.el('summary', '', 'Company core and effective order'));
+    const companyCore = this.el('pre', 'ca-core-preview', 'Loading company core beliefs…');
+    const effectiveCore = this.el('pre', 'ca-core-preview', 'Effective preview unavailable.');
+    corePreview.append(this.el('h4', '', 'Company core beliefs · first'), companyCore, this.el('h4', '', 'Effective core beliefs · deduplicated'), effectiveCore); form.append(corePreview);
     const pronouns = this.el('input', 'ca-field'); pronouns.name = 'pronouns'; pronouns.maxLength = 24; pronouns.value = employee.pronouns || ''; pronouns.placeholder = 'e.g. they/them'; pronounLabel.append(pronouns); form.append(pronounLabel);
     const voice = this.expertVoiceFields(form, pronouns, { value: employee.name }, employee.voice);
     const parentLabel = this.el('label', 'ca-label');
@@ -6487,19 +6869,26 @@ class ReverieChatApp {
     let reportingReady = false;
     void this.app._chatApi('/api/company').then(response => {
       if (!dialog.isConnected || !response.ok) return;
+      const baselineCore = response.data?.settings?.coreBeliefs;
+      companyCore.textContent = Array.isArray(baselineCore) && baselineCore.length ? baselineCore.join('\n\n') : 'No company core beliefs configured.';
+      const current = response.data?.employees?.find(item => item.id === employee.id);
+      const combinedCore = current?.effectiveCoreBeliefs;
+      effectiveCore.textContent = Array.isArray(combinedCore) ? (combinedCore.length ? combinedCore.join('\n\n') : 'No effective core beliefs configured.') : 'Effective preview unavailable. Use View startup context to inspect the current configuration.';
       addParent('owner', response.data?.settings?.ownerName || 'Owner');
       for (const candidate of response.data?.employees || []) if (candidate.id !== employee.id) addParent(candidate.id, candidate.name);
       // Preserve implicit coordinator reporting rather than silently changing it on unrelated saves.
       addParent('', 'Company default'); parent.lastElementChild.disabled = true; parent.value = employee.reportsTo || '';
       reportingReady = true; parent.disabled = false;
     }).catch(() => {});
-    const rest = this.expertRestFields(form, employee);
+    const preferences = this.el('fieldset', 'ca-profile-preferences'); preferences.append(this.el('legend', '', 'Sleep and Dream · saved with profile'));
+    const rest = this.expertRestFields(preferences, employee); form.append(preferences);
     const appearance = this.expertAppearanceFields(form, employee.avatar || '', { name: { value: employee.name } });
     const background = this.employeeAvatarBackgroundFields(form, employee);
     const error = this.el('p', 'ca-company-error'); error.setAttribute('role', 'alert');
     const save = this.el('button', 'ca-btn is-primary', 'Save profile'); save.type = 'submit';
     const cancel = this.el('button', 'ca-btn', 'Cancel'); cancel.type = 'button'; cancel.addEventListener('click', () => dialog.close());
-    form.append(error, save, cancel);
+    const profileActions = this.el('div', 'ca-dialog-actions'); profileActions.append(save, cancel);
+    form.append(error, profileActions);
     form.addEventListener('submit', async event => {
       event.preventDefault();
       if (save.disabled || appearance.pending()) return;
@@ -6513,6 +6902,7 @@ class ReverieChatApp {
         if (JSON.stringify(skills) !== JSON.stringify(employee.expertise || [])) roleChanges.expertise = skills;
         if (JSON.stringify(duties) !== JSON.stringify(employee.responsibilities || [])) roleChanges.responsibilities = duties;
         if (personality.value.trim() !== (employee.personality || '')) roleChanges.personality = personality.value.trim();
+        if (personalCore.changed()) roleChanges.coreBeliefs = personalCore.values();
         const changed = await this.app._chatApi(`/api/company/employees/${encodeURIComponent(employee.id)}`, { method: 'PUT', body: { ...roleChanges, avatarBackground: background.value(), sleepEnabled: rest.sleep.checked, dreamEnabled: rest.dream.checked, icon: employee.avatar && !appearance.picture.value() ? this.expertInitial(employee.name) : employee.icon || this.expertInitial(employee.name), pronouns: pronouns.value.trim() || null, voice: voice.value() || null } });
         if (!changed.ok) { error.textContent = changed.error || 'Profile could not be saved.'; return; }
         if (appearance.picture.value() !== (employee.avatar || '') && !await this.saveEmployeePicture(employee.sessionId, appearance.picture.value())) {
@@ -6522,7 +6912,21 @@ class ReverieChatApp {
       } catch { error.textContent = 'Profile could not be saved. Try again.'; }
       finally { save.disabled = false; }
     });
-    dialog.append(form); dialog.addEventListener('close', () => dialog.remove()); this.doc.body.append(dialog); dialog.showModal();
+    const management = this.el('section', 'ca-profile-management');
+    const permissionStatus = this.el('p', 'ca-hint', 'Checking owner access…'); permissionStatus.setAttribute('role', 'status'); management.append(permissionStatus);
+    dialog.append(form, management); dialog.addEventListener('close', () => dialog.remove()); this.doc.body.append(dialog); dialog.showModal();
+    void Promise.all([this.app._chatApi('/api/company'), this.app._chatApi('/api/chatrooms/phone-status')]).then(([company, auth]) => {
+      if (!dialog.isConnected || (dialog._companyOrigin && this.companyPage !== dialog._companyOrigin)) return;
+      const current = company.ok && company.data?.employees?.find(item => item.id === employee.id);
+      if (!current || company.data?.canManage !== true || !auth.ok || auth.data?.self !== 'owner' || auth.data?.canSetOwn !== true) {
+        permissionStatus.textContent = 'Sign in as the owner to change permissions or manage this expert.'; return;
+      }
+      for (const key of ['permissions', 'effectiveBoardPermissions', 'boardPermissionSources', 'onVacation', 'desiredRunning', 'sessionId', 'sessionGeneration'])
+        if (Object.hasOwn(current, key)) employee[key] = current[key];
+      management.replaceChildren(); this.employeePermissionFields(management, employee);
+      this.publicationCredentialsFields(management, employee);
+      this.employeeLifecycleFields(management, employee, onSaved, dialog);
+    }).catch(() => { if (dialog.isConnected) permissionStatus.textContent = 'Permissions could not be loaded. Reopen the profile to try again.'; });
   }
 
   /** Company marks share the existing upload, preview and workspace-picture persistence. */

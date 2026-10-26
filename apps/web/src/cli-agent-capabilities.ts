@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import type { AgentDeps } from './cli-agent.js';
 import { AGENT_EXIT as EXIT } from './agent-exit-codes.js';
 import type { AgentCapabilities } from './agent-capabilities.js';
+import { fetchGrantedCredentials, type GrantedCredentialMetadata } from './cli-agent-credentials.js';
 
 export const GITHUB_CREDENTIAL_DIRECTORY = '.config/reverie/credentials/github';
 
@@ -61,6 +62,15 @@ export async function agentCapabilities(deps: AgentDeps, references = githubCred
     return EXIT.refused;
   }
   const github = await references();
+  let publication: { status: 'verified' | 'unavailable'; credentials: GrantedCredentialMetadata[]; note: string };
+  try {
+    const granted = await fetchGrantedCredentials(deps, capabilities.identity);
+    publication = { status: 'verified', credentials: granted.credentials,
+      note: 'These named PAT grants permit retrieval only. Repository descriptions are owner-declared; GitHub enforces the actual token permissions. Revoking a grant prevents new retrieval, not use of a previously copied token.' };
+  } catch {
+    publication = { status: 'unavailable', credentials: [],
+      note: 'Current named PAT grants could not be verified. Local credential files do not establish a current grant.' };
+  }
   const report = {
     ...capabilities,
     website: {
@@ -78,6 +88,7 @@ export async function agentCapabilities(deps: AgentDeps, references = githubCred
       },
     },
     github,
+    publication,
     commands: {
       fileDecision: 'reverie board decision add "<request>" --id <stable-id> --where "<source room>" --option "<choice 1>" --option "<choice 2>" --recommend "<choice 1>" --json',
       inspectBoard: 'reverie board show --json',
@@ -85,6 +96,8 @@ export async function agentCapabilities(deps: AgentDeps, references = githubCred
       refreshRuntime: 'reverie agent plan-move request "<current-account-id>" --restart --id "<stable-id>" --json',
       channels: 'reverie agent chat rooms --json',
       readChannel: 'reverie agent chat read --room "<name or ID>" -n 20 --json',
+      publicationCredentials: 'reverie agent credentials list --json',
+      installPublicationCredential: 'reverie agent credentials install "<name>" --json',
     },
     context:
       'A decision request is not approval to execute its proposed action. Check current grants again after role/session changes or an actual refusal. Documentation and job titles grant no authority.',
@@ -98,8 +111,10 @@ export async function agentCapabilities(deps: AgentDeps, references = githubCred
       `Board decision cards: ${capabilities.board.createDecision ? 'allowed' : 'denied'}; clear: ${capabilities.board.clearDecision ? 'allowed' : 'denied'} — ${capabilities.board.reason}`
     );
     deps.io.out(
-      `File an issue: ${capabilities.board.fileIssue ? 'allowed' : 'denied'}; full owner Board operations: ${capabilities.board.manageBoard ? 'allowed' : 'denied'}`
+      `File an issue: ${capabilities.board.fileIssue ? 'allowed' : 'denied'}; manage board tasks and schedule: ${capabilities.board.manageBoard ? 'allowed' : 'denied'}`
     );
+    if (typeof capabilities.board.editBoardIssues === 'boolean')
+      deps.io.out(`Update own board work: ${capabilities.board.editBoardIssues ? 'allowed' : 'denied'}. Only the verified owner answers decision requests.`);
     deps.io.out(
       `Recover colleagues: ${capabilities.company.recoverEmployees ? 'allowed' : 'denied'}; move own plan: ${capabilities.company.moveOwnPlan ? 'allowed' : 'denied'}; manage team plans: ${capabilities.company.managePlans ? 'allowed' : 'denied'}`
     );
@@ -110,6 +125,8 @@ export async function agentCapabilities(deps: AgentDeps, references = githubCred
     deps.io.out(
       `GitHub credential references: ${github.bindings.length ? github.bindings.map((b) => `${b.name}: ${b.path}${b.declaredRepositories?.length ? ' (owner-declared: ' + b.declaredRepositories.join(', ') + ')' : ''}`).join(', ') : 'none installed'} (${github.directory})`
     );
+    deps.io.out(`Named PAT grants: ${publication.status === 'verified' ? publication.credentials.map(item => item.name).join(', ') || 'none' : 'unavailable'}. ${publication.note}`);
+    deps.io.out(`PATs: ${report.commands.publicationCredentials}; install privately: ${report.commands.installPublicationCredential}`);
     deps.io.out(`Decision command: ${report.commands.fileDecision}`);
     deps.io.out(
       `Channels: ${report.commands.channels}; read: ${report.commands.readChannel}. Memory: ${report.memoryGuide}`

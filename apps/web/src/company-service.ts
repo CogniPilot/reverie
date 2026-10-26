@@ -1,5 +1,6 @@
 import { RuntimeRecipeSchema, type RuntimeRecipe } from './expert-runtime-recipe.js';
 import { randomInt, randomUUID } from 'node:crypto';
+import { z } from 'zod';
 import type { ChatroomService } from './chatroom-service.js';
 import { CompanyStore } from './company-store.js';
 import { ChatroomError } from './chatroom-store.js';
@@ -10,6 +11,7 @@ import {
   CompanySettingsSchema,
   EmployeeSchema,
   employeeRestContext,
+  effectiveCoreBeliefs,
   EmployeePermissionsSchema,
   PronounsSchema,
   ResearchResultSchema,
@@ -30,6 +32,11 @@ export class CompanyError extends Error {
   ) {
     super(message);
   }
+}
+
+function validateEffectiveCore(company: readonly string[] = [], personal: readonly string[] = []): void {
+  try { effectiveCoreBeliefs(company, personal); }
+  catch { throw new CompanyError('Combined company and personal core beliefs exceed the context bounds', 400); }
 }
 
 /** An owner runtime transaction, scoped to one unchanged employee/session binding. */
@@ -372,6 +379,7 @@ export class CompanyService {
         throw new CompanyError('Session already bound', 409);
       if (state.employees.some((e) => sameOwner(e.owner, owner) && e.name.toLowerCase() === record.name.toLowerCase()))
         throw new CompanyError(`"${record.name}" is an existing employee; rename one of them first`, 409);
+      validateEffectiveCore(state.settings.find(settings => sameOwner(settings.owner, owner))?.coreBeliefs, record.coreBeliefs);
       state.retired.splice(index, 1);
       state.employees.push(record);
       validateReportingLine(state, record);
@@ -403,6 +411,7 @@ export class CompanyService {
       if (state.employees.some((e) => e.sessionId === employee.sessionId))
         throw new CompanyError('This session already has a permanent identity', 409);
       if (state.employees.length >= 200) throw new CompanyError('Company employee limit reached', 409);
+      validateEffectiveCore(state.settings.find(settings => sameOwner(settings.owner, employee.owner))?.coreBeliefs, employee.coreBeliefs);
       state.employees.push(employee);
       validateReportingLine(state, employee);
       return employee;
@@ -411,13 +420,18 @@ export class CompanyService {
     return hired;
   }
 
-  async configure(owner: string | undefined, input: Omit<CompanySettings, 'owner'>): Promise<CompanySettings> {
+  async configure(owner: string | undefined, input: Partial<Omit<CompanySettings, 'owner'>>): Promise<CompanySettings> {
     // The owner's picture link is set by its own route only: a settings update neither sets nor clears it.
     const { ownerAvatar: _ignored, ...rest } = input;
     void _ignored;
-    const settings = CompanySettingsSchema.parse({ ...rest, owner });
-    if (settings.nightHour >= settings.morningHour) throw new CompanyError('Night hour must precede the morning hour');
     return this.store.update((state) => {
+      const previous = state.settings.find(value => sameOwner(value.owner, owner));
+      const parsed = CompanySettingsSchema.safeParse({ ...previous, ...rest, owner });
+      if (!parsed.success) throw new CompanyError('Invalid company settings', 400);
+      const settings = parsed.data;
+      if (settings.nightHour >= settings.morningHour) throw new CompanyError('Night hour must precede the morning hour');
+      for (const employee of state.employees.filter(row => sameOwner(row.owner, owner)))
+        validateEffectiveCore(settings.coreBeliefs, employee.coreBeliefs);
       if (
         settings.coordinatorEmployeeId &&
         !state.employees.some((e) => e.id === settings.coordinatorEmployeeId && sameOwner(e.owner, owner))
@@ -647,6 +661,7 @@ export class CompanyService {
       expertise?: string[];
       responsibilities?: string[];
       personality?: string;
+      coreBeliefs?: string[];
       icon?: string;
       reportsTo?: string;
       avatarBackground?: string | null;
@@ -664,6 +679,7 @@ export class CompanyService {
       expertise: true,
       responsibilities: true,
       personality: true,
+      coreBeliefs: true,
       icon: true,
       reportsTo: true,
     })
@@ -682,6 +698,8 @@ export class CompanyService {
       const employee = state.employees.find((e) => e.id === employeeId && sameOwner(e.owner, owner));
       if (!employee) throw new CompanyError('Unknown employee', 404);
       const before = structuredClone(employee);
+      validateEffectiveCore(state.settings.find(settings => sameOwner(settings.owner, owner))?.coreBeliefs,
+        parsed.coreBeliefs ?? employee.coreBeliefs);
       if (parsed.position !== undefined) employee.position = parsed.position;
       if (parsed.permissions !== undefined) employee.permissions = { ...employee.permissions, ...parsed.permissions };
       if (parsed.sleepEnabled !== undefined) employee.sleepEnabled = parsed.sleepEnabled;
@@ -689,6 +707,7 @@ export class CompanyService {
       if (parsed.expertise !== undefined) employee.expertise = parsed.expertise;
       if (parsed.responsibilities !== undefined) employee.responsibilities = parsed.responsibilities;
       if (parsed.personality !== undefined) employee.personality = parsed.personality;
+      if (parsed.coreBeliefs !== undefined) employee.coreBeliefs = parsed.coreBeliefs;
       if (parsed.icon !== undefined) employee.icon = parsed.icon;
       if (parsed.avatarBackground === null) delete employee.avatarBackground;
       else if (parsed.avatarBackground !== undefined) employee.avatarBackground = parsed.avatarBackground;
@@ -699,9 +718,32 @@ export class CompanyService {
       else if (parsed.voice !== undefined) employee.voice = parsed.voice;
       validateReportingLine(state, employee);
       return { before, employee };
-    });
-    await audit?.(result.before, result.employee);
+    }, undefined, audit ? ({ before, employee }) => audit(before, employee) : undefined);
     this.deps.bindIdentity?.(result.employee);
+    return result.employee;
+  }
+
+  /** Change one named credential grant without replacing another browser's grants. */
+  async setPublicationTokenGrant(
+    employeeId: string,
+    owner: string | undefined,
+    tokenId: string,
+    enabled: boolean,
+    audit: (before: CompanyEmployee, after: CompanyEmployee) => Promise<void>
+  ): Promise<CompanyEmployee> {
+    if (!z.object({ tokenId: z.string().uuid(), enabled: z.boolean() }).strict().safeParse({ tokenId, enabled }).success)
+      throw new CompanyError('Choose a valid PAT identifier and grant value', 400);
+    const result = await this.store.update(state => {
+      const employee = state.employees.find(item => item.id === employeeId && sameOwner(item.owner, owner));
+      if (!employee) throw new CompanyError('Unknown employee', 404);
+      const before = structuredClone(employee);
+      const current = employee.permissions.publicationTokenIds ?? [];
+      const next = enabled ? [...new Set([...current, tokenId])] : current.filter(id => id !== tokenId);
+      const checked = EmployeePermissionsSchema.shape.publicationTokenIds.safeParse(next);
+      if (!checked.success) throw new CompanyError('At most 64 named PAT grants are allowed per expert', 400);
+      employee.permissions.publicationTokenIds = checked.data;
+      return { before, employee };
+    }, undefined, ({ before, employee }) => audit(before, employee));
     return result.employee;
   }
 

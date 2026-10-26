@@ -50,8 +50,15 @@ export interface Caller {
   session?: string;
 }
 
-/** These handlers require an owner-made coordinator seat; services must never become headerless owners. */
-const BOARD_DECISION_ROUTES = new Set(['POST /api/board/decisions', 'PATCH /api/board/decisions/:id', 'POST /api/board/decisions/:id/clear']);
+/** Handlers enforce current employee grants; services never become headerless owners. */
+const BOARD_DECISION_ROUTES = new Set(['POST /api/board/decisions', 'PATCH /api/board/decisions/:id', 'POST /api/board/decisions/:id/clear', 'PUT /api/board/polls/:roomId/:messageId/note']);
+const BOARD_WRITE_ROUTES = new Set([
+  'POST /api/board/issues', 'PATCH /api/board/issues/:id', 'POST /api/board/wins',
+  'POST /api/board/milestones', 'PATCH /api/board/milestones/:id',
+  'POST /api/board/blockers', 'POST /api/board/blockers/:id/clear',
+  'PUT /api/board/agents/:memberId', 'PUT /api/board/marks', 'POST /api/board/import',
+  ...BOARD_DECISION_ROUTES,
+]);
 
 // Exact routine routes only. Handlers retain explicit grants, author/room checks and
 // post-only mutations; bot/grant management stays owner-only. Service tokens must
@@ -105,9 +112,11 @@ const AGENT_ROUTES = new Set([
   'POST /api/experts/:id/retire',
   // The board: every agent's `reverie board` reads and moves cards.
   'GET /api/board',
-  'POST /api/board/issues',
-  'PATCH /api/board/issues/:id',
-  ...BOARD_DECISION_ROUTES,
+  'GET /api/publication/credentials',
+  'POST /api/publication/credentials/:id/material',
+  'GET /api/agent/context',
+  'POST /api/agent/context/receipt',
+  ...BOARD_WRITE_ROUTES,
 ]);
 /**
  * What an owner-set admin agent may call besides the agent routes. A whitelist: anything that sets
@@ -392,8 +401,8 @@ export function registerOwnerPolicy(app: FastifyInstance, deps: PolicyDeps): voi
       }
       return;
     }
-    if (caller.kind === 'service' && BOARD_DECISION_ROUTES.has(key)) {
-      return deny(403, 'Only the owner or a coordinator may update board decisions', 'decision_service');
+    if (caller.kind === 'service' && BOARD_WRITE_ROUTES.has(key)) {
+      return deny(403, 'Only the verified owner or a permitted employee may update the board', 'decision_service');
     }
     const admin = caller.kind === 'agent' && ADMIN_ROUTES.has(key) && deps.relations.admin(caller.session!);
     if (admin) {

@@ -274,7 +274,11 @@ export class CompanyStore {
     }
   }
 
-  update<T>(mutate: (state: CompanyState) => T, validateAuthority: () => void = () => {}): Promise<T> {
+  update<T>(
+    mutate: (state: CompanyState) => T,
+    validateAuthority: () => void = () => {},
+    beforeSave?: (result: T) => void | Promise<void>
+  ): Promise<T> {
     if (this.queued >= 128) return Promise.reject(new Error('Canonical company transaction queue is full'));
     this.queued++;
     const run = this.chain
@@ -296,6 +300,12 @@ export class CompanyStore {
           if (goalBytes > 8 * 1024 * 1024) throw new Error('Canonical Goal storage budget exhausted');
           if (serviceAuthorityBytes(current) > SERVICE_AUTHORITY_BUDGET)
             throw new Error('Canonical service grant storage budget exhausted');
+          // Optional audit runs while this transaction still owns the writer
+          // lock. It receives a copy and cannot mutate the pending company.
+          if (beforeSave) {
+            await beforeSave(structuredClone(result));
+            validateAuthority();
+          }
           await writeCompanyStateFile(this.file, JSON.stringify(current), validateAuthority);
           this.state = current;
           this.existed = true;

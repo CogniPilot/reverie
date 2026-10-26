@@ -2,8 +2,9 @@ import { NO_OWNER, type OwnerVerifier } from '../../owner-auth/marks.js';
 /**
  * @fileoverview The server's board (board-types.ts): GET /api/board and its audited writes.
  *
- * Who may write: the owner (no agent header) and owner-made room coordinators may do anything; any member may file an issue (it
- * lands in triage), add a win, edit its own issues and set its own focus. Only the owner and coordinators import.
+ * Owner-selected employee grants separate basic Board work, planning and decision preparation.
+ * Absent grants retain basic work and the existing owner-made coordinator fallback; explicit false revokes it.
+ * Only the verified human owner chooses decision options or changes employee grants.
  * An agent is identified by its x-reverie-parent-session header, which must resolve to exactly itself (no prefix, and a
  * body field never stands in for it). Every write appends an audit line BEFORE the board is saved; if the audit
  * cannot be written the write is refused (500) and the board is unchanged.
@@ -34,7 +35,7 @@ import {
 } from '../../board-types.js';
 import { pollIsOpen, USER_RECIPIENT, type ChatRoom } from '../../chatroom-store.js';
 import { waitingForOwner } from '../../decision-alert.js';
-import { ownerMade } from '../../owner-auth/relations.js';
+import { effectiveBoardPermissions, isBoardCoordinator, type BoardPermissionFlags } from '../../board-permissions.js';
 import { burnRate, type UsageSample } from '../../plan-pace.js';
 import type { PlanRow } from '../../plan-accounts.js';
 import type { SessionPort } from '../ports/session-port.js';
@@ -48,7 +49,7 @@ interface Employee {
   avatar?: string;
   position?: string;
   sessionId?: string;
-  permissions?: { recoverEmployees?: boolean; moveOwnPlan?: boolean; managePlans?: boolean };
+  permissions?: BoardPermissionFlags & { recoverEmployees?: boolean; moveOwnPlan?: boolean; managePlans?: boolean };
 }
 
 export interface BoardDeps {
@@ -134,8 +135,7 @@ export function registerBoardRoutes(app: FastifyInstance, ctx: SessionPort & Par
     if (!structuredDecisionWrites)
       throw new BoardError('Structured decision writes are disabled; saved answers are preserved', 503);
   };
-  const isCoordinator = (sessionId: string) =>
-    deps.rooms().some((r) => !r.archivedAt && r.members.some((m) => m.sessionId === sessionId && m.role === 'coordinator' && ownerMade(m)));
+  const isCoordinator = (sessionId: string) => isBoardCoordinator(deps.rooms(), sessionId);
 
   // Apply current membership before reading any room messages, including counts and poll metadata.
   const visibleRooms = (c: Caller) =>
@@ -152,7 +152,20 @@ export function registerBoardRoutes(app: FastifyInstance, ctx: SessionPort & Par
     const memberId = deps.company(owner).employees.find((e) => e.sessionId === sessionId)?.id;
     return { kind: 'agent', by: memberId ?? sessionId, sessionId, memberId, coordinator: isCoordinator(sessionId), owner };
   };
-  const lead = (c: Caller) => c.kind === 'owner' || c.coordinator;
+  const currentEmployee = (c: Caller) => {
+    if (c.kind !== 'agent' || !c.memberId || !ctx.sessions.has(c.sessionId)) return undefined;
+    const rows = deps.company(c.owner).employees;
+    const matches = rows.filter(e => e.id === c.memberId && e.sessionId === c.sessionId);
+    return matches.length === 1 && rows.filter(e => e.id === c.memberId).length === 1 &&
+      rows.filter(e => e.sessionId === c.sessionId).length === 1 ? matches[0] : undefined;
+  };
+  const permissions = (c: Caller) => c.kind === 'owner'
+    ? { editBoardIssues: true, manageBoard: true, manageDecisions: true }
+    : effectiveBoardPermissions(currentEmployee(c), isCoordinator(c.sessionId));
+  const lead = (c: Caller) => permissions(c).manageBoard;
+  const requireDecisionManager = (c: Caller, what: string) => {
+    if (!permissions(c).manageDecisions) throw new BoardError(`Board decision permission required to ${what}`, 403);
+  };
   /** The caller's display name, for "recommended by". */
   const nameOf = (c: Caller) =>
     c.kind === 'owner' ? deps.company(c.owner).settings.ownerName || 'owner' : (deps.company(c.owner).employees.find((e) => e.id === c.memberId)?.name ?? c.by);
@@ -171,7 +184,36 @@ export function registerBoardRoutes(app: FastifyInstance, ctx: SessionPort & Par
     }
   };
   const requireLead = (c: Caller, what: string) => {
-    if (!lead(c)) throw new BoardError(`Only the owner or a coordinator may ${what}`, 403);
+    if (!lead(c)) throw new BoardError(`Board management permission required to ${what}`, 403);
+  };
+  // Called inside the serialized mutation and around its asynchronous audit. An
+  // admission made before queuing must not outlive a changed employee binding/grant.
+  const authorizeWrite = (c: Caller, op: string, detail: Record<string, unknown>, state: BoardState) => {
+    const access = permissions(c);
+    if (c.kind === 'agent' && !currentEmployee(c)) throw new BoardError('Current employee session required', 403);
+    if (op === 'decision-choose') {
+      if (c.kind !== 'owner') throw new BoardError('Only the verified owner may choose a decision option', 403);
+    } else if (op.startsWith('decision-') || op === 'poll-note') {
+      requireDecisionManager(c, 'update decision cards');
+    } else if (op === 'issue-add' || op === 'issue-update' || op === 'win-add' || op === 'agent-update') {
+      if (!access.editBoardIssues) throw new BoardError('Board issue editing permission required', 403);
+      if (op === 'issue-add' && detail.status !== 'triage') requireLead(c, 'plan an issue');
+      if (op === 'issue-update' && !access.manageBoard) {
+        const issue = state.issues.find(i => i.id === detail.id);
+        if (!issue || c.kind !== 'agent' || issue.owner !== c.memberId ||
+            (detail.owner !== undefined && detail.owner !== issue.owner))
+          throw new BoardError('A member edits only its own assigned issues', 403);
+      }
+      if (op === 'agent-update' && !access.manageBoard && (c.kind !== 'agent' || detail.member !== c.memberId))
+        throw new BoardError('A member sets only its own focus', 403);
+      if (op === 'win-add' && !access.manageBoard && detail.who !== nameOf(c))
+        throw new BoardError('A member records only its own wins', 403);
+    } else {
+      requireLead(c, 'manage the board');
+      if (op === 'import' && Number(detail.decisions) > 0) requireDecisionManager(c, 'import decision cards');
+    }
+    if (op === 'poll-note' && !visibleRooms(c).some(room => room.id === detail.roomId))
+      throw new BoardError('Current poll room membership required', 403);
   };
   const normalizeDecisionRecommendation = (decision: BoardState['decisions'][number]) => {
     if (!decision.options || !decision.recommendation) return;
@@ -200,18 +242,25 @@ export function registerBoardRoutes(app: FastifyInstance, ctx: SessionPort & Par
 
   /** One audited write: the audit line goes first; if it fails, nothing is saved. */
   const write = async <T>(c: Caller, op: string, ifRev: number | undefined, detail: Record<string, unknown>, mutate: (s: BoardState) => T) => {
+    let permissionState: BoardState;
     const { rev, result } = await deps.store.update(
       {
         ifRev,
         beforeSave: async () => {
+          authorizeWrite(c, op, detail, permissionState);
           try {
             await deps.audit({ action: `board-${op}`, by: c.by, ...(c.kind === 'agent' ? { session: c.sessionId } : {}), ...detail });
           } catch {
             throw new BoardError('Could not write the audit line; nothing was changed', 500);
           }
+          authorizeWrite(c, op, detail, permissionState);
         },
       },
-      mutate
+      state => {
+        authorizeWrite(c, op, detail, state);
+        permissionState = structuredClone(state);
+        return mutate(state);
+      }
     );
     ctx.broadcast?.('board:changed', { rev });
     return { rev, item: result };
@@ -246,6 +295,7 @@ export function registerBoardRoutes(app: FastifyInstance, ctx: SessionPort & Par
     run(reply, async () => {
       const c = caller(req);
       const company = deps.company(c.owner);
+      const boardAccess = permissions(c);
       const state = deps.store.snapshot();
       const at = now();
       const rooms = visibleRooms(c);
@@ -311,7 +361,11 @@ export function registerBoardRoutes(app: FastifyInstance, ctx: SessionPort & Par
         capabilities: {
           checkedAt: at,
           identity: { kind: c.kind, name: nameOf(c), ...(c.kind === 'agent' ? { sessionId: c.sessionId, employeeId: c.memberId } : {}) },
-          board: { read: true, fileIssue: true, createDecision: structuredDecisionWrites && lead(c), clearDecision: lead(c), manageBoard: c.kind === 'owner', reason: !structuredDecisionWrites ? 'Structured decision writes are disabled; saved answers are preserved. Existing role checks still apply.' : c.kind === 'owner' ? 'Verified owner.' : c.coordinator ? 'Active owner-made coordinator membership; the Board uses this same gate for decision creation.' : 'Decision creation requires an active owner-made coordinator membership. Company plan/recovery grants and titles do not grant it.' },
+          board: { read: true, fileIssue: boardAccess.editBoardIssues, editBoardIssues: boardAccess.editBoardIssues,
+            createDecision: structuredDecisionWrites && boardAccess.manageDecisions,
+            clearDecision: boardAccess.manageDecisions, manageBoard: boardAccess.manageBoard,
+            manageDecisions: boardAccess.manageDecisions,
+            reason: !structuredDecisionWrites ? 'Structured decision writes are disabled; saved answers are preserved. Current Board grants still apply.' : 'Current owner-selected Board permissions; absent grants retain owner-made membership compatibility. Titles and plan/recovery grants confer no Board authority.' },
           company: {
             recoverEmployees: c.kind === 'owner' || company.employees.find(e => e.id === c.memberId)?.permissions?.recoverEmployees === true,
             moveOwnPlan: c.kind === 'owner' || !!company.employees.find(e => e.id === c.memberId && (e.permissions?.moveOwnPlan === true || e.permissions?.managePlans === true)),
@@ -496,7 +550,7 @@ export function registerBoardRoutes(app: FastifyInstance, ctx: SessionPort & Par
   app.post('/api/board/decisions', async (req, reply) =>
     run(reply, async () => {
       const c = caller(req);
-      requireLead(c, 'add a decision');
+      requireDecisionManager(c, 'add a decision');
       requireDecisionWrites();
       if (!req.body || typeof req.body !== 'object' || !('options' in req.body))
         throw new BoardError('Decision options are required: --option "Approve" --option "Hold" (optional --recommend "Approve"). Prose does not create buttons. An older laptop CLI may lack these flags; use its existing scoped API client in /handbook/operations (Older laptop CLI), or update the CLI from the project flake.', 400);
@@ -515,7 +569,7 @@ export function registerBoardRoutes(app: FastifyInstance, ctx: SessionPort & Par
   app.patch<{ Params: { id: string } }>('/api/board/decisions/:id', async (req, reply) =>
     run(reply, async () => {
       const c = caller(req);
-      requireLead(c, 'annotate a decision');
+      requireDecisionManager(c, 'annotate a decision');
       const { ifRev, ...note } = parse(DecisionNoteInput, req.body);
       if (note.options !== undefined) requireDecisionWrites();
       if (Object.keys(note).length === 0) throw new BoardError('Nothing to change', 400);
@@ -554,7 +608,7 @@ export function registerBoardRoutes(app: FastifyInstance, ctx: SessionPort & Par
   app.put<{ Params: { roomId: string; messageId: string } }>('/api/board/polls/:roomId/:messageId/note', async (req, reply) =>
     run(reply, async () => {
       const c = caller(req);
-      requireLead(c, 'annotate a poll');
+      requireDecisionManager(c, 'annotate a poll');
       const { ifRev, ...note } = parse(CardNoteInput, req.body);
       const { roomId, messageId } = req.params;
       const room = deps.rooms().find((r) => r.id === roomId && !r.archivedAt);
@@ -583,7 +637,8 @@ export function registerBoardRoutes(app: FastifyInstance, ctx: SessionPort & Par
     app.post<{ Params: { id: string } }>(`/api/board/${kind}/:id/clear`, async (req, reply) =>
       run(reply, async () => {
         const c = caller(req);
-        requireLead(c, `clear ${kind}`);
+        if (kind === 'decisions') requireDecisionManager(c, 'clear decisions');
+        else requireLead(c, 'clear blockers');
         const { ifRev } = parse(IfRev.strict(), req.body);
         return write(c, `${kind.slice(0, -1)}-clear`, ifRev, { id: req.params.id }, (s) => {
           const item = s[kind].find((x) => x.id === req.params.id);
@@ -647,7 +702,10 @@ export function registerBoardRoutes(app: FastifyInstance, ctx: SessionPort & Par
         throw new BoardError(`Import failed: ${(error as Error).message}`, 400);
       }
       // Reject the whole import, including dry runs, rather than silently dropping choice writes.
-      if (content?.decisions.length) requireDecisionWrites();
+      if (content?.decisions.length) {
+        requireDecisionManager(c, 'import decision cards');
+        requireDecisionWrites();
+      }
       for (const decision of content?.decisions ?? []) {
         if (decision.options) decision.options = parse(DecisionOptionsSchema, decision.options);
       }

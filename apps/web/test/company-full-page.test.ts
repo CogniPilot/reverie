@@ -32,6 +32,19 @@ async function fixture(extraEmployees: object[] = []) {
   return { handle, employee, company, board, boardRead };
 }
 
+async function openProfile(handle: any, name: string) {
+  handle.document.querySelector('.ca-expert-profile')?.close();
+  handle.document.querySelector(`[aria-label="Edit profile for ${name}"]`)!.click();
+  await handle.flush();
+  return handle.document.querySelector('.ca-expert-profile') as HTMLDialogElement;
+}
+
+async function saveProfile(handle: any) {
+  const profile = handle.document.querySelector('.ca-expert-profile')!;
+  [...profile.querySelectorAll('button')].find((button: any) => button.textContent === 'Save profile')!.click();
+  await handle.flush();
+}
+
 describe('Company is one page for plans and people', () => {
   it('keeps plans and people together without duplicate headings or tabs', async () => {
     const { handle, boardRead } = await fixture();
@@ -57,14 +70,16 @@ describe('Company is one page for plans and people', () => {
     expect(cards).toHaveLength(1);
     expect(cards[0].querySelector('.ca-company-role')!.textContent).toBe('Engineer');
     expect(cards[0].querySelector('.ca-company-parent')!.textContent).toBe('Owner name');
-    expect(cards[0].querySelector('.ca-company-live-state')!.textContent).toBe('Working');
-    expect(cards[0].querySelector('.ca-company-ring')!.getAttribute('aria-label')).toBe('Today: 1 of 2 planned issues done');
-    expect(cards[0].querySelector('.ca-company-ring')!.textContent).toBe('1/2');
-    expect(cards[0].querySelector('.ca-company-pace')!.textContent).toBe('Behind');
-    expect(cards[0].querySelector('.ca-company-counts')!.textContent).toBe('2 overdue (3h) · 4 early · 1/2 2-wk items');
-    expect(cards[0].querySelector('.ca-company-focus')!.textContent).toContain('<img src=x');
-    expect(cards[0].querySelector('.ca-company-focus img')).toBeNull();
-    expect(cards[0].querySelector('.ca-company-receipts')!.textContent).toBe('tests passed');
+    const work = handle.document.querySelector('.ca-company-work')!;
+    expect(cards[0].querySelector('.ca-company-work')).toBeNull();
+    expect(work.querySelector('.ca-company-live-state')!.textContent).toBe('Working');
+    expect(work.querySelector('.ca-company-ring')!.getAttribute('aria-label')).toBe('Today: 1 of 2 planned issues done');
+    expect(work.querySelector('.ca-company-ring')!.textContent).toBe('1/2');
+    expect(work.querySelector('.ca-company-pace')!.textContent).toBe('Behind');
+    expect(work.querySelector('.ca-company-counts')!.textContent).toBe('2 overdue (3h) · 4 early · 1/2 2-wk items');
+    expect(work.querySelector('.ca-company-focus')!.textContent).toContain('<img src=x');
+    expect(work.querySelector('.ca-company-focus img')).toBeNull();
+    expect(work.querySelector('.ca-company-receipts')!.textContent).toBe('tests passed');
     expect(boardRead).toHaveBeenCalledOnce();
   });
 
@@ -226,11 +241,12 @@ describe('Company is one page for plans and people', () => {
     };
     await handle.shell.openCompany('people');
     await handle.flush();
-    const checkbox = handle.document.querySelector<HTMLInputElement>('[aria-label="Recovery permission for Reviewer"]')!;
+    const profile = await openProfile(handle, employee.name);
+    const checkbox = profile.querySelector<HTMLInputElement>('[aria-label="Recovery permission for Reviewer"]')!;
     expect(checkbox).not.toBeNull();
     expect(checkbox.checked).toBe(false);
-    const sleep = handle.document.querySelector<HTMLInputElement>('[aria-label="Sleep"]')!;
-    const dream = handle.document.querySelector<HTMLInputElement>('[aria-label="Dream"]')!;
+    const sleep = profile.querySelector<HTMLInputElement>('[aria-label="Sleep"]')!;
+    const dream = profile.querySelector<HTMLInputElement>('[aria-label="Dream"]')!;
     expect(sleep.checked).toBe(false); expect(dream.checked).toBe(false);
     expect(sleep.title).toContain('Gantt'); expect(sleep.title).toContain('not connected');
     expect(dream.title).toContain('ideas, not facts');
@@ -241,6 +257,7 @@ describe('Company is one page for plans and people', () => {
       options: { method: 'PUT', body: { permissions: { recoverEmployees: true } }, signal: expect.anything() },
     }]);
     owner = false;
+    handle.document.querySelector<HTMLDialogElement>('.ca-expert-profile')!.close();
     handle.shell.closePage();
     await handle.shell.openCompany('people');
     await handle.flush();
@@ -271,9 +288,16 @@ async function recoveryFixture(settings: object = {}, extras: object[] = []) {
   return { ...result, writes };
 }
 
+async function recoverySettingsFixture(settings: object = {}, extras: object[] = []) {
+  const result = await recoveryFixture(settings, extras);
+  result.handle.document.querySelector<HTMLButtonElement>('[aria-label="Company settings"]')!.click();
+  await result.handle.flush();
+  return result;
+}
+
 describe('owner chooses one crash recovery expert', () => {
   it('allows selecting a report and saving the choice without a title privilege', async () => {
-    const { handle, writes } = await recoveryFixture({}, [{ id: 'report', name: '<Reviewer>', reportsTo: 'employee-one', position: 'Expert' }]);
+    const { handle, writes } = await recoverySettingsFixture({}, [{ id: 'report', name: '<Reviewer>', reportsTo: 'employee-one', position: 'Expert' }]);
     const select = handle.document.querySelector<HTMLSelectElement>('[aria-label="Wake after a crash"]')!;
     expect(select.options[0].textContent).toBe('Automatic: Reviewer');
     expect([...select.options].map(option => option.value)).toEqual(['', 'employee-one', 'report']);
@@ -285,14 +309,14 @@ describe('owner chooses one crash recovery expert', () => {
   });
 
   it('uses the configured coordinator as the default root for older unspecified reporting lines', async () => {
-    const { handle } = await recoveryFixture({ coordinatorEmployeeId: 'employee-one' }, [{ id: 'legacy-report', name: 'Legacy report' }]);
+    const { handle } = await recoverySettingsFixture({ coordinatorEmployeeId: 'employee-one' }, [{ id: 'legacy-report', name: 'Legacy report' }]);
     const select = handle.document.querySelector<HTMLSelectElement>('[aria-label="Wake after a crash"]')!;
     expect(select.options[0].textContent).toBe('Automatic: Reviewer');
     expect(select.value).toBe('');
   });
 
   it('keeps the selected expert while disabling automatic recovery', async () => {
-    const { handle, writes } = await recoveryFixture({ autoWakeEnabled: true, crashWakeEmployeeId: 'employee-one' });
+    const { handle, writes } = await recoverySettingsFixture({ autoWakeEnabled: true, crashWakeEmployeeId: 'employee-one' });
     const enabled = handle.document.querySelector<HTMLInputElement>('[aria-label="Automatic recovery"]')!;
     const select = handle.document.querySelector<HTMLSelectElement>('[aria-label="Wake after a crash"]')!;
     expect(select.value).toBe('employee-one');
@@ -306,7 +330,7 @@ describe('owner chooses one crash recovery expert', () => {
   });
 
   it('requires a choice for multiple roots and omits a cleared selection', async () => {
-    const { handle, writes } = await recoveryFixture({ crashWakeEmployeeId: 'employee-one' }, [{ id: 'second-root', name: 'Another expert', reportsTo: 'owner' }]);
+    const { handle, writes } = await recoverySettingsFixture({ crashWakeEmployeeId: 'employee-one' }, [{ id: 'second-root', name: 'Another expert', reportsTo: 'owner' }]);
     const select = handle.document.querySelector<HTMLSelectElement>('[aria-label="Wake after a crash"]')!;
     expect(select.options[0].textContent).toBe('Choose an expert');
     select.value = '';
@@ -316,7 +340,7 @@ describe('owner chooses one crash recovery expert', () => {
   });
 
   it('shows an unavailable stored choice without silently selecting another expert', async () => {
-    const { handle } = await recoveryFixture({ autoWakeEnabled: false, crashWakeEmployeeId: 'retired' });
+    const { handle } = await recoverySettingsFixture({ autoWakeEnabled: false, crashWakeEmployeeId: 'retired' });
     const select = handle.document.querySelector<HTMLSelectElement>('[aria-label="Wake after a crash"]')!;
     expect(select.value).toBe('retired');
     expect(select.selectedOptions[0].textContent).toBe('Unavailable expert');
@@ -392,15 +416,19 @@ it('shows saved Sleep/Dream preferences and lets the owner change them during va
     return original(path, options);
   };
   await handle.shell.openCompany('people'); await handle.flush();
-  const sleep = handle.document.querySelector<HTMLInputElement>('[aria-label="Sleep"]')!;
-  const dream = handle.document.querySelector<HTMLInputElement>('[aria-label="Dream"]')!;
+  const profile = await openProfile(handle, employee.name);
+  const sleep = profile.querySelector<HTMLInputElement>('[aria-label="Sleep"]')!;
+  const dream = profile.querySelector<HTMLInputElement>('[aria-label="Dream"]')!;
   expect(sleep.checked).toBe(true); expect(dream.checked).toBe(false);
   expect(handle.document.querySelector<HTMLInputElement>('[aria-label="Recovery permission for Reviewer"]')!.disabled).toBe(false);
   sleep.click(); await handle.flush(); dream.click(); await handle.flush();
-  expect(writes).toEqual([{ sleepEnabled: false }, { dreamEnabled: true }]);
+  expect(writes).toEqual([]);
+  await saveProfile(handle);
+  expect(writes).toEqual([expect.objectContaining({ sleepEnabled: false, dreamEnabled: true })]);
+  expect(writes[0]).not.toHaveProperty('permissions');
 });
 
-it('autosaves Sleep/Dream separately for every expert and restores saved values when Company is reopened', async () => {
+it('saves Sleep/Dream in each expert profile and restores saved values when Company is reopened', async () => {
   const { handle, company } = await fixture([{ id: 'second', sessionId: 'second-session', name: 'Second', reportsTo: 'owner' }]);
   company.canManage = true;
   const writes: any[] = [];
@@ -413,20 +441,24 @@ it('autosaves Sleep/Dream separately for every expert and restores saved values 
   };
   await handle.shell.openCompany();
   for (const employee of company.employees) {
-    const card = handle.document.querySelector(`[data-employee-id="${employee.id}"].ca-company-person`)!;
+    const profile = await openProfile(handle, employee.name);
     for (const key of ['sleepEnabled', 'dreamEnabled']) {
-      (card.querySelector(`[name="${key}"]`) as HTMLInputElement).click();
+      (profile.querySelector(`[name="${key}"]`) as HTMLInputElement).click();
       await handle.flush();
     }
-    expect(card.textContent).toContain('Preferences saved.');
+    await saveProfile(handle);
   }
-  expect(writes).toHaveLength(4);
-  expect(writes.every(body => Object.keys(body).length === 1)).toBe(true);
+  expect(writes).toHaveLength(2);
+  expect(writes.every(body => body.sleepEnabled === true && body.dreamEnabled === true && !('permissions' in body))).toBe(true);
   handle.shell.closePage(); await handle.shell.openCompany();
-  expect([...handle.document.querySelectorAll<HTMLInputElement>('.ca-company-person [name="sleepEnabled"], .ca-company-person [name="dreamEnabled"]')].every(input => input.checked)).toBe(true);
+  for (const employee of company.employees) {
+    const profile = await openProfile(handle, employee.name);
+    expect(profile.querySelector<HTMLInputElement>('[name="sleepEnabled"]')!.checked).toBe(true);
+    expect(profile.querySelector<HTMLInputElement>('[name="dreamEnabled"]')!.checked).toBe(true);
+  }
 });
 
-it('restores Sleep/Dream after a refused autosave and shows the error on the affected card', async () => {
+it('keeps saved Sleep/Dream unchanged after a refused profile save and shows the error on that profile', async () => {
   const { handle, company } = await fixture(); company.canManage = true;
   handle.app._chatApi = async (path: string, options: any) => {
     if (path === '/api/company') return { ok: true, data: company };
@@ -434,8 +466,13 @@ it('restores Sleep/Dream after a refused autosave and shows the error on the aff
     return options?.method === 'PUT' ? { ok: false, status: 403, error: 'Save refused' } : { ok: true, data: {} };
   };
   await handle.shell.openCompany();
-  const sleep = handle.document.querySelector<HTMLInputElement>('.ca-company-person [name="sleepEnabled"]')!;
+  const profile = await openProfile(handle, 'Reviewer');
+  const sleep = profile.querySelector<HTMLInputElement>('[name="sleepEnabled"]')!;
   sleep.click(); await handle.flush();
-  expect(sleep.checked).toBe(false); expect(sleep.disabled).toBe(false);
-  expect(handle.document.querySelector('.ca-company-person')!.textContent).toContain('Could not save preferences: Save refused');
+  await saveProfile(handle);
+  expect(sleep.disabled).toBe(false);
+  expect(profile.textContent).toContain('Save refused');
+  const reopened = await openProfile(handle, 'Reviewer');
+  expect(reopened.querySelector<HTMLInputElement>('[name="sleepEnabled"]')!.checked).toBe(false);
+  expect(reopened.querySelector<HTMLInputElement>('[name="dreamEnabled"]')!.checked).toBe(false);
 });

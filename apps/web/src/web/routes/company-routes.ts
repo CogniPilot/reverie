@@ -18,6 +18,8 @@ import { adminGrant } from '../../owner-auth/policy.js';
 import { ownerAvatarKey, ownerAvatarUrl } from '../../owner-avatar.js';
 import { EmployeeVoiceSchema } from '../../employee-voice.js';
 import type { CompanyWakeReport } from '../../company-wake.js';
+import { effectiveBoardPermissions } from '../../board-permissions.js';
+import { effectiveCoreBeliefs, type CompanyEmployee, type CompanySettings } from '../../company-types.js';
 
 const HireSchema = EmployeeSchema.omit({
   id: true,
@@ -29,10 +31,9 @@ const HireSchema = EmployeeSchema.omit({
   onVacation: true,
   runtimeRecipe: true,
 });
-const SettingsSchema = CompanySettingsSchema.omit({ owner: true, ownerAvatar: true });
 const InviteSchema = z.object({ roomId: z.string().min(1).max(100) });
 // Pronouns: a value sets them, null clears them (owner only, like every field here; an agent only proposes, in chat).
-const UpdateSchema = EmployeeSchema.pick({ position: true, expertise: true, responsibilities: true, personality: true, icon: true, reportsTo: true })
+const UpdateSchema = EmployeeSchema.pick({ position: true, expertise: true, responsibilities: true, personality: true, coreBeliefs: true, icon: true, reportsTo: true })
   .extend({
     avatarBackground: EmployeeSchema.shape.avatarBackground.nullable(),
     pronouns: PronounsSchema.nullable(),
@@ -62,9 +63,42 @@ export function registerCompanyRoutes(
   avatars?: AvatarStore,
   ownerAvatars?: AvatarStore,
   wakeEmployee?: (id: string, options?: { explicitStart?: boolean }) => Promise<CompanyWakeReport>,
-  authority: { verifiedOwner?: OwnerVerifier; serviceRebind?: ServiceVerifier } = {}
+  authority: {
+    verifiedOwner?: OwnerVerifier;
+    serviceRebind?: ServiceVerifier;
+    boardCoordinator?: (sessionId: string) => boolean;
+    publicationTokens?: { assertGrantIds(owner: string | undefined, ids: string[]): Promise<void> };
+  } = {}
 ): void {
   const verifiedOwner = authority.verifiedOwner ?? NO_OWNER;
+  const presentEmployee = (employee: CompanyEmployee, includeCore = true) => {
+    const effective = effectiveBoardPermissions(employee, authority.boardCoordinator?.(employee.sessionId) === true);
+    const source = (key: 'editBoardIssues' | 'manageBoard' | 'manageDecisions') =>
+      typeof employee.permissions[key] === 'boolean' ? 'explicit' : 'legacy';
+    const projected = {
+      ...employee,
+      effectiveBoardPermissions: effective,
+      boardPermissionSources: {
+        editBoardIssues: effective.manageBoard ? 'included' : source('editBoardIssues'),
+        manageBoard: source('manageBoard'),
+        manageDecisions: source('manageDecisions'),
+      },
+    };
+    if (!includeCore) {
+      delete projected.coreBeliefs;
+      return projected;
+    }
+    const companyCore = service.view(employee.owner).settings.coreBeliefs;
+    return { ...projected, effectiveCoreBeliefs: effectiveCoreBeliefs(companyCore, employee.coreBeliefs) };
+  };
+  const validatePublicationChange = async (owner: string | undefined, before: CompanyEmployee, after: CompanyEmployee) => {
+    const previous = new Set(before.permissions.publicationTokenIds ?? []);
+    const added = (after.permissions.publicationTokenIds ?? []).filter(id => !previous.has(id));
+    if (!added.length) return; // Revocation also works while the vault is unavailable.
+    if (!authority.publicationTokens) throw new CompanyError('Publication token registry is unavailable', 503);
+    try { await authority.publicationTokens.assertGrantIds(owner, added); }
+    catch { throw new CompanyError('Choose available PATs belonging to this company', 400); }
+  };
   const caller = (req: FastifyRequest): string | undefined =>
     req.headers['x-reverie-service-token'] !== undefined ? undefined : resolveParentSessionId(ctx, req, undefined, ownerFor(req));
   const ownerOnly = (req: FastifyRequest): void => {
@@ -108,10 +142,14 @@ export function registerCompanyRoutes(
     })
   );
 
-  app.get('/api/company', async (req) => ({
-    success: true,
-    data: { ...service.view(ownerFor(req)), canManage: verifiedOwner(req) },
-  }));
+  app.get('/api/company', async (req) => {
+    const view = service.view(ownerFor(req));
+    return {
+      success: true,
+      data: { ...view, employees: view.employees.map(employee =>
+        presentEmployee(employee, verifiedOwner(req) || caller(req) === employee.sessionId)), canManage: verifiedOwner(req) },
+    };
+  });
   app.post('/api/company/employees', async (req, reply) =>
     run(reply, async () => {
       ownerOnly(req);
@@ -121,7 +159,12 @@ export function registerCompanyRoutes(
   app.put('/api/company/settings', async (req, reply) =>
     run(reply, async () => {
       ownerOnly(req);
-      return { settings: await service.configure(ownerFor(req), parseBody(SettingsSchema, req.body)) };
+      // Parse only supplied keys: applying schema defaults before merging would
+      // reset unrelated recovery, scheduling or core settings on a partial edit.
+      const patch = parseBody(z.record(z.string(), z.unknown()), req.body);
+      if (Object.keys(patch).some(key => !Object.hasOwn(CompanySettingsSchema.shape, key)))
+        throw new CompanyError('Unknown company setting', 400);
+      return { settings: await service.configure(ownerFor(req), patch as Partial<Omit<CompanySettings, 'owner'>>) };
     })
   );
   app.post('/api/company/employees/:id/wake', async (req, reply) =>
@@ -188,8 +231,9 @@ export function registerCompanyRoutes(
       ownerOnly(req);
       const { id } = req.params as { id: string };
       const change = parseBody(UpdateSchema, req.body);
-      const employee = await service.update(id, ownerFor(req), change, async (before, after) =>
-        appendAdminAudit({
+      const employee = await service.update(id, ownerFor(req), change, async (before, after) => {
+        await validatePublicationChange(ownerFor(req), before, after);
+        await appendAdminAudit({
           admin: 'owner',
           action: 'employee_update',
           target: after.name,
@@ -210,9 +254,23 @@ export function registerCompanyRoutes(
               ? { voice: { from: before.voice ?? null, to: after.voice ?? null } }
               : {}),
           },
-        })
-      );
-      return { employee };
+        });
+      });
+      return { employee: presentEmployee(employee) };
+    })
+  );
+  app.put<{ Params: { id: string; tokenId: string } }>('/api/company/employees/:id/publication-tokens/:tokenId', async (req, reply) =>
+    run(reply, async () => {
+      ownerOnly(req);
+      const { id, tokenId } = req.params;
+      const { enabled } = parseBody(z.object({ enabled: z.boolean() }).strict(), req.body);
+      if (!z.string().uuid().safeParse(tokenId).success) throw new CompanyError('Choose a valid PAT identifier', 400);
+      const employee = await service.setPublicationTokenGrant(id, ownerFor(req), tokenId, enabled, async (before, after) => {
+        await validatePublicationChange(ownerFor(req), before, after);
+        await appendAdminAudit({ admin: 'owner', action: 'employee_update', target: after.name, ip: req.ip,
+          detail: { id, fields: ['permissions'], permissions: { from: before.permissions, to: after.permissions } } });
+      });
+      return { employee: presentEmployee(employee) };
     })
   );
   // Retire an employee whose session is gone, or put a retired one back (owner only; refused with any agent header).

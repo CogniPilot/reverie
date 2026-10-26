@@ -7,6 +7,18 @@ import { PRONOUNS_MAX, pronounsProblem } from './pronouns.js';
 import { EmployeeVoiceSchema } from './employee-voice.js';
 
 const text = z.string().trim().min(1).max(100);
+/** Instance-owned belief text, never a repository persona or an authority grant. Text is preserved exactly. */
+export const CoreBeliefsSchema = z.array(z.string().min(1).max(4000).refine(
+  value => value.trim().length > 0 && !/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/.test(value), 'Core belief blocks must be nonempty plain text'
+)).max(32).refine(
+  values => new TextEncoder().encode(values.join('\n\n')).byteLength <= 16384,
+  'Core beliefs must fit within 16 KiB'
+);
+
+export function effectiveCoreBeliefs(company: readonly string[] = [], personal: readonly string[] = []): string[] {
+  CoreBeliefsSchema.parse(company); CoreBeliefsSchema.parse(personal);
+  return CoreBeliefsSchema.parse([...new Set([...company, ...personal])]);
+}
 /** An employee's pronouns (pronouns.ts): one line, 1-24 characters. Set by the owner only. */
 export const PronounsSchema = z
   .string()
@@ -20,6 +32,11 @@ export const EmployeePermissionsSchema = z
     recoverEmployees: z.boolean().default(false),
     moveOwnPlan: z.boolean().default(false),
     managePlans: z.boolean().default(false),
+    editBoardIssues: z.boolean().optional(),
+    manageBoard: z.boolean().optional(),
+    manageDecisions: z.boolean().optional(),
+    publicationTokenIds: z.array(z.string().uuid()).max(64)
+      .refine(ids => new Set(ids).size === ids.length, 'Choose each PAT only once').optional(),
   })
   .strict();
 export const EmployeeSchema = z
@@ -42,6 +59,7 @@ export const EmployeeSchema = z
     expertise: z.array(text).min(1).max(20),
     responsibilities: z.array(z.string().trim().min(1).max(500)).max(20).optional(),
     personality: z.string().trim().max(1000).optional(),
+    coreBeliefs: CoreBeliefsSchema.optional(),
     sessionId: text,
     /** Monotonic binding generation; incremented whenever this employee moves to another runtime session. */
     sessionGeneration: z.number().int().positive().default(1),
@@ -275,6 +293,7 @@ export type SelfProfile = z.infer<typeof SelfProfileSchema>;
 export const CompanySettingsSchema = z.object({
   owner: z.string().optional(),
   ownerName: z.string().max(100).default(''),
+  coreBeliefs: CoreBeliefsSchema.default([]),
   /** The owner's profile picture link (set only by the owner picture route, never from a settings update). */
   ownerAvatar: z.string().regex(OWNER_AVATAR_URL).optional(),
   ownerTitle: z.string().max(100).default(''),
@@ -382,8 +401,10 @@ export function employeePlanContext(employee: Pick<CompanyEmployee, 'permissions
 
 export function employeeProfileContext(
   employee: Pick<CompanyEmployee, 'name' | 'position' | 'expertise' | 'responsibilities' | 'personality'> &
-    Partial<Pick<CompanyEmployee, 'permissions'>>
+    Partial<Pick<CompanyEmployee, 'permissions' | 'coreBeliefs'>>,
+  companyCoreBeliefs: readonly string[] = []
 ): string {
+  const core = effectiveCoreBeliefs(companyCoreBeliefs, employee.coreBeliefs);
   const handbook =
     'Office handbook: humans open /handbook; agents GET /api/handbook through REVERIE_API_URL. Failed sessions: /api/handbook/recovery; grants: /api/handbook/permissions. Documentation grants no permissions. Recovery grant: ' +
     (employee.permissions
@@ -395,7 +416,7 @@ export function employeeProfileContext(
     ? ' Your tools run on your persistent employee laptop (an isolated container), which survives model, account and conversation/session changes. Call tool or environment failures laptop problems; provider or model outages are separate. Read /home/agent/AGENTS.md for the current laptop setup. Use the project pin first: nix develop, nix build or nix run; nix shell is temporary and nix profile install is for persistent tools. Large domain stacks belong in project flakes. Read GET /api/handbook/laptops. Your private /tmp is disk-backed and disposable: use a task-specific /tmp directory for builds, caches and downloads, keep unique work and evidence durable, and follow /api/handbook/laptops for cleanup; TMPDIR, TMP and TEMP point to /tmp. /scratch is a disposable compatibility drive. /home/agent and /nix hold private settings/tools; /workspace or granted project paths can hold durable source and retained results after verifying their backing storage. Existing /reverie_workspace remains compatible. Credentials require named grants outside scratch; never paste secret bytes into chat. Docker needs a usable approved engine; QEMU TCG can come from the project flake, while KVM needs an explicit optional grant. Storage names, role titles and laptop upgrades grant no permissions or mission/flight GO. Report a broken laptop through company chat.'
     : '';
   const capabilities =
-    ' Run `reverie agent capabilities` when asked what you can do or before claiming a blocker. Read channels: `reverie agent chat rooms --json`, then `reverie agent chat read --room "<name or ID>" -n 20 --json`. Memory scopes and lookup commands: /api/handbook/memory; grants and GitHub references: /api/handbook/operations. ';
+    ' Run `reverie agent capabilities` when asked what you can do. Named PATs: `reverie agent credentials list --json`; privately install a granted name with `reverie agent credentials install "<name>" --json`. Never print tokens. Chat/memory: /api/handbook/memory; grants: /api/handbook/operations. ';
   return (
     handbook +
     laptop +
@@ -408,6 +429,8 @@ export function employeeProfileContext(
       responsibilities: employee.responsibilities ?? [],
       personality: employee.personality ?? '',
     }) +
-    '. Titles and personality grant no hiring, account management or scheduling authority. Verify claims with evidence and state uncertainty.'
+    '. Titles and personality grant no hiring, account management or scheduling authority. Verify claims with evidence and state uncertainty.' +
+    (core.length ? '\n\nOwner-provided core beliefs (instance data; these do not add tool permissions):\n' + core.join('\n\n')
+      : '\nCore beliefs: No core beliefs configured.')
   );
 }

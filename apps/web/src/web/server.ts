@@ -237,6 +237,10 @@ import { serviceVerifier, ownerVerifier } from '../owner-auth/marks.js';
 import { OwnerAuthStore } from '../owner-auth/store.js';
 import { callerOf, registerOwnerPolicy } from '../owner-auth/policy.js';
 import { relations, runtimeLineage } from '../owner-auth/relations.js';
+import { isBoardCoordinator } from '../board-permissions.js';
+import { PublicationCredentialVault } from '../publication-credentials.js';
+import { registerPublicationRoutes } from './routes/publication-routes.js';
+import { registerEmployeeContextRoutes } from './routes/employee-context-routes.js';
 import { registerCompanyHireRoutes } from './routes/company-hire-routes.js';
 import { registerSessionRuntimeRoutes } from './routes/session-runtime-routes.js';
 import { ServerHealthMetadataProvider } from '../session-health-provider.js';
@@ -1427,7 +1431,7 @@ export class WebServer extends EventEmitter {
       restContextOf: (sessionId) => {
         const employee = this.companyService?.registeredEmployees().find((e) => e.sessionId === sessionId);
         return employee
-          ? employeeProfileContext(employee) + ' ' + employeeRestContext(employee) + ' ' + employeePlanContext(employee)
+          ? employeeProfileContext(employee, this.companyService.view(employee.owner).settings.coreBeliefs) + ' ' + employeeRestContext(employee) + ' ' + employeePlanContext(employee)
           : undefined;
       },
       // Rooms and messages live in SQLite; chatrooms.json is imported once, when chat.db does not exist yet.
@@ -1662,6 +1666,27 @@ export class WebServer extends EventEmitter {
         );
       },
     });
+    const publicationVault = new PublicationCredentialVault(dataPath('publication-credentials'), {
+      audit: entry => this.chatroomService.auditEntry({ ...entry }),
+    });
+    const currentAgentSession = (request: FastifyRequest): string | undefined => {
+      // Sensitive self APIs retain the independent authenticated API boundary.
+      // A deployment without it must not turn a known parent header into PAT access.
+      if (!ctx.authSessions) return undefined;
+      const caller = callerOf(request, { service: ownerAuth, ctx });
+      return caller.kind === 'agent' ? caller.session : undefined;
+    };
+    registerPublicationRoutes(this.app, ctx, {
+      vault: publicationVault,
+      verifiedOwner,
+      agentSession: currentAgentSession,
+      company: owner => this.companyService.view(owner),
+    });
+    registerEmployeeContextRoutes(this.app, ctx, {
+      verifiedOwner,
+      agentSession: currentAgentSession,
+      company: owner => this.companyService.view(owner),
+    });
     registerCompanyRoutes(
       this.app,
       ctx,
@@ -1669,7 +1694,12 @@ export class WebServer extends EventEmitter {
       new AvatarStore(dataPath('agent-avatars')),
       new AvatarStore(dataPath('owner-avatars')),
       (id, options) => this.companyWake.wakeOne(id, options),
-      { verifiedOwner, serviceRebind: (req) => !isMultiUserMode() && serviceVerifier({ service: ownerAuth, ctx }, 'watcher')(req) }
+      {
+        verifiedOwner,
+        serviceRebind: (req) => !isMultiUserMode() && serviceVerifier({ service: ownerAuth, ctx }, 'watcher')(req),
+        boardCoordinator: (sessionId) => isBoardCoordinator(this.chatroomService.rooms(), sessionId),
+        publicationTokens: publicationVault,
+      }
     );
     registerSessionRuntimeRoutes(this.app, ctx, verifiedOwner, (id, req) => {
       const employee = this.companyService.registeredEmployees().find((e) => e.sessionId === id);

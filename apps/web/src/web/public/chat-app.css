@@ -1449,3 +1449,61 @@ button.ca-stat:focus-visible { outline:2px solid var(--accent); outline-offset:2
 .ca-owner-portrait { margin: 12px 0; }
 .ca-profile-image-view { width: auto; max-width: calc(100vw - 32px); max-height: calc(100dvh - 32px); }
 .ca-profile-full-image { display: block; max-width: 100%; max-height: 75dvh; width: auto; height: auto; object-fit: contain; margin: 0 auto 12px; }
+
+/* Reporting is an overview; owner controls live in the existing profile editor. */
+.ca-company-tree ul { gap: 8px; }
+.ca-company-tree ul > li { flex: 0 1 240px; width: 240px; }
+.ca-company-tree ul > li.has-reports { flex: 1 1 100%; width: 100%; }
+.ca-company .ca-company-person { max-width: 240px; padding: 8px 10px; gap: 4px 8px; }
+.ca-company .ca-company-person.is-offline { background: color-mix(in srgb, var(--text-dim) 9%, transparent); }
+.ca-company-person.is-offline .ca-company-icon { filter: grayscale(1); opacity: .65; }
+.ca-company-person.is-offline .ca-company-role { color: var(--text-dim); }
+button.ca-company-profile-trigger { width: 100%; padding: 0; border: 0; background: transparent; color: inherit; text-align: left; cursor: pointer; }
+button.ca-company-profile-trigger:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.ca-company .ca-company-person .ca-company-state { font-size: 10px; }
+.ca-company .ca-company-reporting { gap: 4px; margin: 0; }
+.ca-company-reporting select { min-height: 28px; padding: 3px 5px; font-size: 12px; }
+.ca-company-reporting [role="status"]:empty { display: none; }
+.ca-company .is-reporting-target { outline: 2px solid var(--accent); outline-offset: 2px; }
+.ca-company-work-list { margin-top: 16px; border-top: 1px solid var(--ca-line); padding-top: 10px; }
+.ca-company-work-list > summary { cursor: pointer; color: var(--text-dim); }
+.ca-company-work-list > section { border-bottom: 1px solid var(--ca-line); padding: 8px 0; }
+.ca-company-work-list h4 { margin: 4px 0; }
+.ca-expert-profile { width: min(760px, calc(100vw - 32px)); max-width: calc(100vw - 32px); max-height: calc(100dvh - 32px); overflow-y: auto; box-sizing: border-box; }
+.ca-profile-edit-heading { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.ca-profile-edit-heading h2 { margin: 0; }
+.ca-expert-profile form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 12px; }
+.ca-expert-profile form > :not(.ca-label) { grid-column: 1 / -1; }
+.ca-expert-profile .ca-field { width: 100%; min-width: 0; box-sizing: border-box; }
+.ca-expert-profile textarea { min-height: 80px; }
+.ca-profile-management { border-top: 1px solid var(--ca-line); margin-top: 18px; padding-top: 12px; }
+.ca-profile-management fieldset, .ca-profile-preferences { border: 1px solid var(--ca-line); border-radius: 8px; padding: 10px 12px; margin: 10px 0; min-width: 0; }
+.ca-profile-management fieldset > label, .ca-profile-preferences label { display: grid; grid-template-columns: 18px minmax(0, 1fr); gap: 4px 10px; align-items: start; margin: 10px 0; }
+.ca-profile-management input[type="checkbox"], .ca-profile-preferences input[type="checkbox"] { width: 16px; height: 16px; margin: 2px 0 0; }
+.ca-profile-management label small, .ca-profile-management label p { grid-column: 2; margin: 0; }
+.ca-profile-management .ca-company-actions { flex-wrap: wrap; align-items: center; gap: 8px; }
+@media (max-width: 600px) {
+  .ca-company-tree ul > li { flex: 1 1 220px; width: 100%; }
+  .ca-company .ca-company-person { max-width: 100%; }
+  .ca-expert-profile { padding: 12px; }
+  .ca-expert-profile form { grid-template-columns: minmax(0, 1fr); }
+}
+.ca-publication-grant { display: grid; grid-template-columns: 18px minmax(0, 1fr); gap: 8px; align-items: start; margin: 10px 0; }
+.ca-publication-grant span, .ca-publication-grant small { display: block; overflow-wrap: anywhere; }
+.ca-publication-grant input { width: 16px; height: 16px; margin-top: 2px; }
+.ca-publication-tokens { width: min(640px, calc(100vw - 32px)); max-width: calc(100vw - 32px); max-height: calc(100dvh - 32px); overflow-y: auto; box-sizing: border-box; }
+.ca-publication-token { border-bottom: 1px solid var(--ca-line); padding: 10px 0; }
+.ca-publication-token .ca-btn { margin-right: 6px; }
+.ca-publication-token-form { display: grid; gap: 10px; margin-top: 16px; }
+.ca-publication-token-form .ca-field { width: 100%; box-sizing: border-box; }
+.ca-core-beliefs { border: 1px solid var(--ca-line); border-radius: 8px; padding: 10px 12px; margin: 12px 0; min-width: 0; }
+.ca-core-beliefs > summary { cursor: pointer; font-weight: 600; }
+.ca-core-belief-block { display: grid; gap: 6px; margin: 10px 0; }
+.ca-core-belief-block .ca-btn { justify-self: end; }
+.ca-core-belief-block textarea, .ca-company-core-form textarea { width: 100%; box-sizing: border-box; }
+.ca-core-preview, .ca-startup-sections pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 240px; overflow-y: auto; }
+.ca-company-core-form { margin: 16px 0; }
+.ca-startup-context { width: min(900px, calc(100vw - 32px)); max-width: calc(100vw - 32px); max-height: calc(100dvh - 32px); overflow-y: auto; box-sizing: border-box; }
+.ca-startup-preview { width: 100%; min-height: 220px; max-height: 45dvh; resize: vertical; box-sizing: border-box; font-family: monospace; }
+.ca-startup-sections details { border-top: 1px solid var(--ca-line); padding: 8px 0; }
+.ca-startup-sections summary { cursor: pointer; }

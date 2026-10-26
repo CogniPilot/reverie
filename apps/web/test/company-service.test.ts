@@ -83,6 +83,35 @@ describe('company identities and genuine research lifecycle', () => {
     await rm(directory, { recursive: true, force: true });
   });
 
+  it('rechecks authority after a pending audit and never commits a revoked grant', async () => {
+    const employee = await hire();
+    const previous = store.snapshot();
+    let allowed = true;
+    await expect(store.update(state => {
+      const target = state.employees.find(item => item.id === employee.id)!;
+      target.permissions.manageBoard = true;
+      return target;
+    }, () => {
+      if (!allowed) throw new Error('Owner authority revoked');
+    }, async detached => {
+      detached.permissions.manageBoard = false;
+      allowed = false;
+    })).rejects.toThrow('Owner authority revoked');
+    expect(store.snapshot()).toEqual(previous);
+    const reloaded = new CompanyStore(store.file); await reloaded.init();
+    expect(reloaded.snapshot()).toEqual(previous);
+  });
+
+  it('keeps the pending grant independent from the audit callback result copy', async () => {
+    const employee = await hire();
+    await store.update(state => {
+      const target = state.employees.find(item => item.id === employee.id)!;
+      target.permissions.manageBoard = true;
+      return target;
+    }, undefined, async detached => { detached.permissions.manageBoard = false; });
+    expect(store.snapshot().employees[0].permissions.manageBoard).toBe(true);
+  });
+
   it('persists vacation before stopping, blocks late wake and research, and returns the same identity', async () => {
     const employee = await hire();
     await service.remember(employee.id, undefined, 'Durable memory');
