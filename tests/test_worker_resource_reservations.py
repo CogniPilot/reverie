@@ -27,6 +27,7 @@ TARGET = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'
 COMPANY = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc'
 POOL = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd'
 KEY = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee'
+APPROVED_TARGET = '99999999-9999-4999-8999-999999999999'
 MIB = R.MIB
 
 
@@ -109,7 +110,7 @@ class Reservations(unittest.TestCase):
         self.resources['memoryMiB'] = 4096
         self.profiles = ProfileStore(self.control / 'profiles'); self.addCleanup(self.profiles.close)
         self.profiles.put(EID, self.resources, {'employee_id': EID, 'current_sid': SID,
-            'target_sid': SID, 'current_generation': 1, 'target_generation': 1},
+            'target_sid': APPROVED_TARGET, 'current_generation': 1, 'target_generation': 2},
             expected_revision=0, expected_profile_version=0, expected_binding=None)
         self.gate = R.ReservationGate(self.native)
 

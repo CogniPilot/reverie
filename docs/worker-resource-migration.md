@@ -158,7 +158,23 @@ unconfirmed; a laptop might already be running, so no blind retry is allowed.
 
 The pure compatibility helper preserves the old SID's exact six fields before a
 changed EID projection. It neither publishes config nor rebinds ProfileStore.
-The journal-generated SID versus the profile's already-versioned `target_sid`
-remains an explicit future ABI seam. Native prepare/start/verify/settlement,
+The private gate consumes the exact `target_sid` selected in the canonical
+profile before approval, requiring the next generation and unchanged profile.
+It passes that SID through OperationStore's optional keyword-only `reserved_sid`;
+this is not a wire request field or authority. The journal checks distinctness,
+retained uniqueness and explicit-target replay agreement under its existing lock.
+The fixed observer rechecks the approved profile/generation at commit fences and
+the caller rechecks after claim and original store finalization. A fixed terminal
+claim context survives to admission exit: the accepted journal reader closes
+before terminal native work. Complete engine/custody snapshots bracket the
+derived capacity, process and physical-storage facts; a final accepted-journal
+file signature then checks for observed replacement or change. Exact profile,
+source intent and target namespace facts are checked while the global lock
+is still held. No native I/O
+follows those terminal metadata checks. External mutations after the final
+observations are not made atomic by this cooperating lock. Changed/uncertain
+outcomes retain the claim and target barrier. No after-approval profile rewrite or new version is substituted.
+Omitted low-level callers retain the original allocation/read-only replay path;
+replay never returns a new effect handle. Native prepare/start/verify/settlement,
 protected owner approval and HTTP APIs, GUI activation and a selected native
 acceptance are **not implemented** by this reservation barrier.

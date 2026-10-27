@@ -454,21 +454,134 @@ class ReservationGate:
             try:
                 fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
                 self._local.fd, self._local.depth = fd, 1
+                self._local.terminal_claim = None
                 self._guard()
                 if sid is not None:
                     self.check_launch(sid)
                 yield
-                self._guard()
+                claim = self._local.terminal_claim
+                if claim is None:
+                    self._guard()
+                else:
+                    self._finish_claim(claim)
             finally:
+                self._local.terminal_claim = None
                 self._local.depth = 0
                 os.close(fd)
 
     def _store(self):
         return journal.OperationStore(self.root / 'operations', scope_guard=self._scope_guard,
-                                      capacity_observer=self.observe)
+                                      capacity_observer=self._observe_claim)
 
     def _scope_guard(self, selected):
         self._guard(selected)
+
+    def _profile(self, eid):
+        profiles = ProfileStore(self.root / 'profiles')
+        try:
+            return profiles.snapshot()['profiles'].get(eid)
+        finally:
+            profiles.close()
+
+    def _observe_claim(self, selected, pool_id, eid):
+        """Runs inside the existing journal flock, including commit fences."""
+        value = self.observe(selected, pool_id, eid)
+        approved = getattr(self._local, 'approved_profile', None)
+        need(approved is not None and approved == self._profile(eid),
+             'RESERVATION_APPROVED_PROFILE_CHANGED')
+        binding = approved['binding']; target = binding['target_sid']
+        need(binding['current_sid'] == value['current_sid'] and
+             str(binding['current_generation']) == value['generation'] and
+             binding['target_generation'] == binding['current_generation'] + 1 and
+             target != value['current_sid'], 'RESERVATION_APPROVED_TARGET_REQUIRED')
+        def target_unpublished():
+            target_paths = storage_paths(self.broker.config, target)
+            need(target_paths.kind == 'session' and target_paths.identity == target and
+                 not os.path.lexists(Path(self.broker.config['stateRoot']) / target),
+                 'RESERVATION_TARGET_ALREADY_PUBLISHED')
+        target_unpublished()
+        native_before = self.native.inventory()
+        need(not any((row.get('Config', {}).get('Labels') or {}).get('reverie.session') == target
+                     for row in native_before), 'RESERVATION_TARGET_ALREADY_PUBLISHED')
+        need(self._profile(eid) == approved, 'RESERVATION_APPROVED_PROFILE_CHANGED')
+        native_after = self.native.inventory()
+        need(native_after == native_before, 'RESERVATION_TARGET_NATIVE_BINDING_CHANGED')
+        need(self._profile(eid) == approved, 'RESERVATION_APPROVED_PROFILE_CHANGED')
+        # Metadata may change during native/profile I/O despite this host's
+        # admission lock. Resolve current/retired/lineage and the SID directory
+        # again after those reads. External changes after final observations
+        # are not made atomic by this cooperating lock or this source slice.
+        target_unpublished()
+        self._local.claim_native = copy.deepcopy(native_after)
+        return value
+
+    def _finish_claim(self, claim):
+        """Fixed terminal claim check, still under the global admission flock.
+
+        Finish the journal reader and its finalizers before the last native
+        guard. No caller-selected callback or effect authority is introduced.
+        """
+        store = self._store()
+        lock = None
+        try:
+            store._root()
+            lock = os.open('operations.lock', os.O_RDWR | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC,
+                           dir_fd=store.fd)
+            store._lock_identity(lock)
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            document, _signature = store._read()
+            need(document == claim['document'], 'RESERVATION_CLAIM_CHANGED')
+            store._root()
+            store._lock_identity(lock)
+        finally:
+            try:
+                if lock is not None:
+                    os.close(lock)
+            finally:
+                store.close()
+        # In particular this must follow the original claim store.close and
+        # the reader above. Its engine I/O can observe concurrent publication.
+        rows = self._guard()
+        need(rows == claim['native'], 'RESERVATION_TARGET_NATIVE_BINDING_CHANGED')
+        profile = claim['profile']; binding = profile['binding']; target = binding['target_sid']
+        observed = claim['observation']
+        total, budget, site, commitments = self.native.capacity(rows, self.option)
+        epoch = journal.fingerprint({'pool': observed['pool_id'], 'budget': budget, 'site': site,
+            'reserve': self.option['hostReserveMiB'], 'commitments': sorted(commitments, key=lambda r: r['containerId'])})
+        need(epoch == observed['pool_revision_digest'] and str(total) == observed['committed_bytes'] and
+             str(budget) == observed['budget_bytes'], 'RESERVATION_CAPACITY_CHANGED')
+        source_paths = storage_paths(self.broker.config, binding['current_sid'])
+        sources = [row for row in rows if row.get('Config', {}).get('Labels', {}).get('reverie.worker') ==
+            self.broker.config['deployment'] and row['Config']['Labels'].get('reverie.session') == binding['current_sid']]
+        need(len(sources) == 1, 'RESERVATION_SOURCE_BINDING')
+        _, native = self.native.limits(sources[0])
+        storage = self.native.storage(sources[0], source_paths)
+        need(journal.fingerprint({'employee': claim['employee'], 'native': native, 'storage': storage,
+             'profile': profile}) == observed['source_binding_digest'], 'RESERVATION_SOURCE_BINDING_CHANGED')
+        # Kernel/storage producers above can block. Bracket them with the last
+        # complete engine/custody observation; do not perform native work after it.
+        need(self._guard() == rows, 'RESERVATION_NATIVE_INVENTORY_CHANGED')
+        current = (self.root / 'operations/operations.json').lstat()
+        need((current.st_dev, current.st_ino, current.st_size, current.st_mtime_ns, current.st_ctime_ns) ==
+             _signature, 'RESERVATION_CLAIM_CHANGED')
+        need(not any((row.get('Config', {}).get('Labels') or {}).get('reverie.session') == target
+                     for row in rows), 'RESERVATION_TARGET_ALREADY_PUBLISHED')
+        eid = binding['employee_id']
+        need(self._profile(eid) == profile, 'RESERVATION_APPROVED_PROFILE_CHANGED')
+        company = read_metadata(self.broker.config['companyFile'], self.broker.config['uid'])
+        need([row for row in company['employees'] if row.get('id') == eid] == [claim['employee']],
+             'RESERVATION_EMPLOYEE_CHANGED_DURING_OBSERVATION')
+        source_paths = storage_paths(self.broker.config, binding['current_sid'])
+        need(source_paths.kind == 'employee' and source_paths.identity == eid and
+             storage_start_allowed(self.broker.config, source_paths),
+             'RESERVATION_CURRENT_EMPLOYEE_REQUIRED')
+        target_paths = storage_paths(self.broker.config, target)
+        need(target_paths.kind == 'session' and target_paths.identity == target and
+             not os.path.lexists(Path(self.broker.config['stateRoot']) / target),
+             'RESERVATION_TARGET_ALREADY_PUBLISHED')
+        # There is no subsequent native I/O or store finalizer before releasing
+        # admission. External writes after these final observations are not
+        # made atomic by this cooperating lock.
 
     def _document(self):
         store = self._store()
@@ -618,31 +731,57 @@ class ReservationGate:
 
     def reserve(self, key, request):
         """Private host claim only; not an approval endpoint and never a permit."""
-        with self.admission():
-            observed = self.observe(self.scope, request['pool_id'], request['employee_id'])
-            profiles = ProfileStore(self.root / 'profiles')
-            try:
-                profile = profiles.snapshot()['profiles'][request['employee_id']]
-            finally:
-                profiles.close()
-            need(request['requested_memory_bytes'] == str(profile['resources']['memoryMiB'] * MIB),
-                 'RESERVATION_REQUEST_PROFILE')
-            need(request['observation_digest'] == journal.fingerprint(observed), 'STALE_CAPACITY_SNAPSHOT')
-            store = self._store()
-            try:
-                view, _local_handle = store.claim(self.scope, key, request)
-                # No effect API exists here. Closing intentionally discards the
-                # process-local handle; only a refusal/recovery view is exposed.
-                return view
-            finally:
-                store.close()
+        claimed = False
+        try:
+            with self.admission():
+                observed = self.observe(self.scope, request['pool_id'], request['employee_id'])
+                profile = self._profile(request['employee_id'])
+                need(profile is not None and request['requested_memory_bytes'] ==
+                     str(profile['resources']['memoryMiB'] * MIB), 'RESERVATION_REQUEST_PROFILE')
+                need(request['observation_digest'] == journal.fingerprint(observed), 'STALE_CAPACITY_SNAPSHOT')
+                self._local.approved_profile = copy.deepcopy(profile)
+                employee = [row for row in read_metadata(self.broker.config['companyFile'],
+                    self.broker.config['uid'])['employees'] if row.get('id') == request['employee_id']]
+                need(len(employee) == 1, 'RESERVATION_CURRENT_EMPLOYEE_REQUIRED')
+                store = None
+                try:
+                    store = self._store()
+                    view, _local_handle = store.claim(self.scope, key, request,
+                        reserved_sid=profile['binding']['target_sid'])
+                    claimed = True
+                    def final_check(document, _context, _lock):
+                        op = document['operations'].get(view['operation']['id'])
+                        need(op is not None and op['reserved_sid'] == profile['binding']['target_sid'] and
+                             op['scope'] == self.scope and op['request'] == request and
+                             op['reservation_id'] == view['operation']['reservation_id'],
+                             'RESERVATION_CLAIM_CHANGED')
+                        need(self._observe_claim(self.scope, request['pool_id'], request['employee_id']) == observed,
+                             'RESERVATION_APPROVED_PROFILE_CHANGED')
+                        return copy.deepcopy(document)
+                    document = store._locked(self.scope, final_check)
+                    self._local.terminal_claim = {'profile': copy.deepcopy(profile),
+                        'employee': copy.deepcopy(employee[0]), 'document': document,
+                        'native': copy.deepcopy(self._local.claim_native), 'observation': observed}
+                    # No effect API exists. Closing discards the local handle;
+                    # this exact preselected SID remains a refusal-only fence.
+                    return view
+                finally:
+                    if store is not None:
+                        store.close()
+        except BaseException as error:
+            if claimed and not isinstance(error, journal.OperationCommitUncertain):
+                raise journal.OperationCommitUncertain('CLAIM_OR_RESPONSE_UNCERTAIN_KEEP_ALL_CLAIMS') from error
+            raise
+        finally:
+            self._local.approved_profile = None
+            self._local.claim_native = None
 
 
 def compatibility_candidate(before, projected, old_sid, target_sid):
     """Pure OLD policy freeze; a caller must separately supply a staged profile.
 
-    The journal-minted SID versus ProfileStore target-binding/version seam is
-    deliberately unresolved here. This helper does not rebind a profile.
+    A protected claim may consume that profile's preselected target unchanged.
+    This helper itself neither authenticates the claim nor rebinds a profile.
     """
     journal.canonical_uuid(old_sid); journal.canonical_uuid(target_sid)
     need(old_sid != target_sid, 'RESERVATION_DISTINCT_TARGET')

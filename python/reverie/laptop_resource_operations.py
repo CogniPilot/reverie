@@ -471,25 +471,41 @@ class OperationStore:
              'OBSERVATION_BINDING')
         return value
 
-    def claim(self, selected, idempotency_key, proposed):
+    def claim(self, selected, idempotency_key, proposed, *, reserved_sid=None):
+        """Claim an optional fixed-provider SID selected before approval.
+
+        This keyword is not a request field or authority. Omitted callers keep
+        the original allocator/replay behavior. The fixed capacity observer must
+        bind any preselection to its approved canonical profile/generation.
+        """
         scope(selected)
         canonical_uuid(idempotency_key)
         request(proposed)
+        if reserved_sid is not None:
+            canonical_uuid(reserved_sid)
         selected, proposed = copy.deepcopy(selected), copy.deepcopy(proposed)
         def create(current, context, lock):
             for op in current['operations'].values():
                 if op['scope'] == selected and op['idempotency_key'] == idempotency_key:
                     need(op['request'] == proposed, 'IDEMPOTENCY_CONFLICT')
+                    need(reserved_sid is None or op['reserved_sid'] == reserved_sid,
+                         'IDEMPOTENCY_CONFLICT')
                     return self._view(op), None  # No replayed effect handle.
             need(len(current['operations']) < MAX_OPERATIONS, 'OPERATION_LIMIT')
             need(not any(op['scope']['company_id'] == selected['company_id']
                          and op['request']['employee_id'] == proposed['employee_id']
                          for op in current['operations'].values()), 'EMPLOYEE_HAS_RETAINED_CLAIM')
             observed = self._observe(selected, proposed)
+            if reserved_sid is not None:
+                need(reserved_sid != observed['current_sid'], 'RESERVATION_ROLES')
+                occupied = {identifier for op in current['operations'].values() for identifier in
+                            (op['id'], op['reservation_id'], op['reserved_sid'], op['observation']['current_sid'])}
+                need(reserved_sid not in occupied, 'RESERVATION_TARGET_IN_USE')
             opid = str(uuid.uuid4())
             op = {'id': opid, 'scope': selected, 'idempotency_key': idempotency_key,
                   'request': proposed, 'request_digest': fingerprint(proposed),
-                  'reservation_id': str(uuid.uuid4()), 'reserved_sid': str(uuid.uuid4()),
+                  'reservation_id': str(uuid.uuid4()),
+                  'reserved_sid': str(uuid.uuid4()) if reserved_sid is None else reserved_sid,
                   'observation': observed,
                   'delta_bytes': str(max(0, memory(proposed['requested_memory_bytes'])
                                         - memory(observed['current_memory_bytes']))),
