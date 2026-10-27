@@ -248,6 +248,7 @@
         kokoro = { type = "app"; program = "${self.packages.${system}.kokoro}/bin/reverie-kokoro"; meta.description = "Local Kokoro speech service with persistent models"; };
         local-model = { type = "app"; program = "${self.packages.${system}.localModel}/bin/reverie-local-model"; meta.description = "Run GGUF models on a host NVIDIA GPU or CPU"; };
         isolate = { type = "app"; program = "${self.packages.${system}.isolate}/bin/reverie-isolate"; meta.description = "Prepare and activate host-managed agent containers"; };
+        collect = { type = "app"; program = "${self.packages.${system}.cleanupObservations}/bin/reverie-observations"; meta.description = "Explicit opt-in user resource observations; no cleanup authority"; };
         preview-proxy = { type = "app"; program = "${self.packages.${system}.previewProxy}/bin/reverie-preview-proxy"; meta.description = "Serve isolated HTTPS previews of opted-in laptop ports"; };
         worker-nix-migrate = { type = "app"; program = "${self.packages.${system}.workerNixMigrate}/bin/reverie-nix-store-migrate"; meta.description = "Inventory and explicitly migrate one stopped laptop Nix store"; };
         employee-laptop-migrate = { type = "app"; program = "${self.packages.${system}.employeeLaptopMigrate}/bin/reverie-employee-laptop-migrate"; meta.description = "Publish stopped paired home and Nix data by permanent employee identity"; };

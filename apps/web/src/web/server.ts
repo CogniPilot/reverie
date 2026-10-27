@@ -237,6 +237,7 @@ import type { SessionPort as OwnerPolicySessions } from './ports/session-port.js
 import { serviceVerifier, ownerVerifier } from '../owner-auth/marks.js';
 import { OwnerAuthStore } from '../owner-auth/store.js';
 import { callerOf, registerOwnerPolicy } from '../owner-auth/policy.js';
+import { registerResourceHistoryRoutes } from '../resource-history.js';
 import { relations, runtimeLineage } from '../owner-auth/relations.js';
 import { isBoardCoordinator } from '../board-permissions.js';
 import { PublicationCredentialVault } from '../publication-credentials.js';
@@ -1072,6 +1073,7 @@ export class WebServer extends EventEmitter {
       basePath: this.basePath,
     });
     registerOwnerRoutes(this.app, ownerAuth, this.https);
+    registerResourceHistoryRoutes(this.app, req => callerOf(req, { service: ownerAuth, ctx }).kind === 'owner');
     // Marks user chat posts a signed-in owner made (whatever the policy); see owner-auth/marks.ts.
     const verifiedOwner = ownerVerifier({
       service: ownerAuth,

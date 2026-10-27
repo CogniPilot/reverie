@@ -429,6 +429,32 @@ def run_bytes(r):
     return (would if mode == "dry" and finite(would, 0) else 0), (deleted if mode == "live" and finite(deleted, 0) else 0)
 
 
+def gpu_rollup(samples):
+    """Additive UUID history only; old/unavailable identities never become indices."""
+    values = {}
+    missing = 0
+    for sample in samples:
+        devices = (sample.get("gpu") or {}).get("devices", []) if isinstance(sample.get("gpu"), dict) else []
+        seen, valid = set(), []
+        for device in devices[:64] if isinstance(devices, list) else []:
+            identity = device.get("uuid") if isinstance(device, dict) else None
+            if (isinstance(identity, str) and NVIDIA_UUID_RE.fullmatch(identity) and
+                    device.get("identity_status") == "available" and finite(device.get("util_pct"), 0, 100)):
+                identity = "GPU-" + identity[4:].lower()
+                valid.append((identity, device["util_pct"]))
+        duplicates = {identity for identity, _ in valid if sum(item[0] == identity for item in valid) > 1}
+        for identity, utilization in valid:
+            if identity not in duplicates:
+                values.setdefault(identity, []).append(utilization); seen.add(identity)
+        if not seen:
+            missing += 1
+        if len(values) > 64:
+            return {"gpu_devices": [], "gpu_devices_incomplete": True, "gpu_identity_missing_samples": len(samples)}
+    return {"gpu_devices": [{"uuid": identity, "util_pct": agg(readings), "missing_samples": len(samples)-len(readings)}
+                             for identity, readings in sorted(values.items())],
+            "gpu_devices_incomplete": False, "gpu_identity_missing_samples": missing}
+
+
 def rollup(samples, start, length, kind, runs=None, prune_ok=True):
     win = [s for s in samples if finite(s.get("t")) and start <= s["t"] < start + length]
     if not win:
@@ -443,12 +469,12 @@ def rollup(samples, start, length, kind, runs=None, prune_ok=True):
         runs = [{**r, "committed_t": s["t"]} for s in win for r in (s.get("prune") or []) if isinstance(r, dict)]
     pr = [r for r in runs if finite(r.get("committed_t")) and start <= r["committed_t"] < start + length]
     if not prune_ok:                                       # R3-1: unknown, never a fabricated zero
-        return {"v": 2, "kind": kind, "start": start, "end": start + length, "samples": len(win),
+        return {"v": 2, "kind": kind, "start": start, "end": start + length, "samples": len(win), **gpu_rollup(win),
                 "cpu_pct": agg([s.get("cpu_pct") for s in win]), "mem_pct": agg([s.get("mem_pct") for s in win]),
                 "gpu_pct": agg([s.get("gpu_pct") for s in win]), "drives": drives, "prune_unavailable": True,
                 "prune_runs_dry": None, "prune_runs_live": None, "prune_runs_partial": None, "prune_runs_failed": None,
                 "prune_bytes_by_mode": None, "prune_bytes": None}
-    return {"v": 2, "kind": kind, "start": start, "end": start + length, "samples": len(win),
+    return {"v": 2, "kind": kind, "start": start, "end": start + length, "samples": len(win), **gpu_rollup(win),
             "cpu_pct": agg([s.get("cpu_pct") for s in win]), "mem_pct": agg([s.get("mem_pct") for s in win]),
             "gpu_pct": agg([s.get("gpu_pct") for s in win]), "drives": drives,
             "prune_runs_dry": sum(1 for r in pr if r.get("mode") == "dry"),
