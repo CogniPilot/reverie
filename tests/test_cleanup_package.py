@@ -30,7 +30,7 @@ class CleanupPackageTests(unittest.TestCase):
     def test_reviewed_sources_are_byte_identical(self):
         for module, expected in [
             (reverie_prune, "eee8b1608e1e87117d00b955b6cf6271cea809ab5e0cfd3f77696a05007eb3fb"),
-            (lease, "3458407ef3e2bb71047528d0acebcb2a1266193dd3181ad7fc384b056a72315b"),
+            (lease, "4a1022e5536f989f9d4ef8495e52d035c497e2567b331b6f82aacbb5285f3d41"),
         ]:
             self.assertEqual(hashlib.sha256(Path(module.__file__).read_bytes()).hexdigest(), expected)
 

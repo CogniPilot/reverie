@@ -3,7 +3,7 @@ let
   lib = pkgs.lib;
   sourceHashes = {
     prune = "eee8b1608e1e87117d00b955b6cf6271cea809ab5e0cfd3f77696a05007eb3fb";
-    lease = "3458407ef3e2bb71047528d0acebcb2a1266193dd3181ad7fc384b056a72315b";
+    lease = "4a1022e5536f989f9d4ef8495e52d035c497e2567b331b6f82aacbb5285f3d41";
   };
 in
 pkgs.runCommand "reverie-prune-tools" {
@@ -19,7 +19,8 @@ pkgs.runCommand "reverie-prune-tools" {
   install -m444 ${src}/python/reverie/cleanup/reverie_prune.py "$out/libexec/reverie/reverie_prune.py"
   install -m444 ${src}/python/reverie/cleanup/lease.py "$out/libexec/reverie/lease.py"
 
-  # These are the reviewed r8/r7 bytes, not a locally revised deletion algorithm.
+  # Frozen r8 prune algorithm plus current canonical lease inventory support.
+  # Source pins are not renewed native/phase-3/authorization acceptance.
   printf '%s  %s\n' '${sourceHashes.prune}' "$out/libexec/reverie/reverie_prune.py" \
     '${sourceHashes.lease}' "$out/libexec/reverie/lease.py" | sha256sum --check --status
 

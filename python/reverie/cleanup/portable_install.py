@@ -20,7 +20,7 @@ import subprocess
 import sys
 import types
 
-HOST_INSTALL_SHA256 = '9267b97555ccaa489174bebbf28f410b97467ebad33936254d04a4e7ff421614'
+HOST_INSTALL_SHA256 = '35bdbb632dc0c657ae6370d02587784a826d8fe4eeed0f455ca3172072b835e4'
 
 
 def _require_root_chain(path):
@@ -69,7 +69,7 @@ UNIT_DIRS = (UNITS, Path('/usr/local/lib/systemd/system'))
 RUNTIME_UNITS = H.UNITS
 SOURCE_HASHES = {
     'reverie_prune.py': 'fbed566fbdfe89d312abb8b1b32354e5f44f35b94918028ce882fbf444b17181',
-    'lease.py': '3458407ef3e2bb71047528d0acebcb2a1266193dd3181ad7fc384b056a72315b',
+    'lease.py': '4a1022e5536f989f9d4ef8495e52d035c497e2567b331b6f82aacbb5285f3d41',
     'host_install.py': HOST_INSTALL_SHA256,
 }
 RELEASE = 'r12-' + SOURCE_HASHES['reverie_prune.py'][:12]

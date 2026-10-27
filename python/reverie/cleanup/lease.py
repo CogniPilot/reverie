@@ -22,6 +22,7 @@ import argparse
 from contextlib import contextmanager, ExitStack
 import fcntl
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -305,13 +306,31 @@ def _reservation_state(base: Path, key: str) -> int:
     return IN_USE if until > now else FREE              # expired: only a stale candidate; other checks still apply
 
 
-def _keys_for(candidate: str, root: str | None):
+def _keys_for(candidate: str, root: str | None, *, max_entries=None, deadline=None):
     """Keys that protect CANDIDATE: itself and its descendants (walk, no symlinks), and its ancestors up to ROOT."""
+    if (max_entries is None) != (deadline is None):
+        raise LeaseError('bounded lease inventory requires both entry and deadline limits')
     candidate = os.path.abspath(candidate)
     def unreadable(error):   # r9 N2: an unlistable or vanished subtree may hide a lease, so the answer is UNKNOWN
         raise LeaseError(f"cannot read part of the tree: {error}")
     try:
-        keys = [key_of(current) for current, _dirs, _files in os.walk(candidate, followlinks=False, onerror=unreadable)]
+        if max_entries is None:
+            keys = [key_of(current) for current, _dirs, _files in os.walk(candidate, followlinks=False, onerror=unreadable)]
+        else:
+            if type(max_entries) is not int or max_entries < 1 or type(deadline) not in (int, float) or not math.isfinite(deadline):
+                raise LeaseError("invalid bounded lease inventory")
+            keys, pending, visited = [], [candidate], 0
+            while pending:
+                if time.monotonic() >= deadline:
+                    raise LeaseError("lease inventory deadline exhausted")
+                current = pending.pop(); keys.append(key_of(current))
+                with os.scandir(current) as stream:
+                    for entry in stream:
+                        visited += 1
+                        if visited > max_entries or time.monotonic() >= deadline:
+                            raise LeaseError("lease inventory bound exhausted")
+                        if entry.is_dir(follow_symlinks=False):
+                            pending.append(entry.path)
         ancestors = []
         stop = os.path.abspath(root) if root else "/"
         parent = os.path.dirname(candidate)
@@ -326,7 +345,7 @@ def _keys_for(candidate: str, root: str | None):
 
 
 @contextmanager
-def janitor(candidate, root: str | None = None, bases=None):
+def janitor(candidate, root: str | None = None, bases=None, *, max_entries=None, deadline=None):
     """For the prune (T7c): hold everything that makes deleting CANDIDATE safe, or raise.
     §5 several lease dirs: take every applicable barrier EX|NB in sorted path order (busy = Busy, so skip;
     missing or unreadable = UNKNOWN). Then walk (candidate, ancestors, descendants); in every lease dir, skip on
@@ -339,7 +358,7 @@ def janitor(candidate, root: str | None = None, bases=None):
     with ExitStack() as stack:
         for base in bases:
             stack.enter_context(_barrier(base, fcntl.LOCK_EX, 0))
-        own, ancestors = _keys_for(candidate, root)
+        own, ancestors = _keys_for(candidate, root, max_entries=max_entries, deadline=deadline)
         keys = sorted(set(own) | set(ancestors))
         for base in bases:
             for key in keys:

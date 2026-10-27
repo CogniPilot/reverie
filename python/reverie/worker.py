@@ -45,6 +45,7 @@ if __package__:
     from .worker_resources import effective_config, policy_digest, validate_session_resources, validate_resource_reload
     from .worker_nix import prepare_store, store_guard
     from .worker_tmp import prepare_temporary, temporary_environment, write_storage_instructions, workspace_alias, home_workspace_alias
+    from .worker_cold_tmp import policy as cold_tmp_policy, require_no_pending as cold_require_no_pending, initialize_leases as cold_initialize_leases, clear_cold_temporary, read_mount_table, refuse_mount_aliases, refuse_host_mount_aliases
     from .worker_storage import storage_paths, storage_guard, prepare_storage, private_directory, storage_start_allowed, record_storage_binding, validate_storage, read_metadata
     from .worker_docker import enabled as rootless_docker_enabled, require_image as require_docker_image, security_args as docker_security_args, runtime_args as docker_runtime_args, require_account_mounts as require_docker_account_mounts
     from .worker_storage_labels import hostname as employee_hostname
@@ -81,6 +82,7 @@ else:
     _tmp_spec = importlib.util.spec_from_file_location('reverie_worker_tmp', Path(__file__).with_name('worker_tmp.py'))
     _tmp_module = importlib.util.module_from_spec(_tmp_spec)
     _tmp_spec.loader.exec_module(_tmp_module)
+    from reverie.worker_cold_tmp import policy as cold_tmp_policy, require_no_pending as cold_require_no_pending, initialize_leases as cold_initialize_leases, clear_cold_temporary, read_mount_table, refuse_mount_aliases, refuse_host_mount_aliases
     prepare_temporary = _tmp_module.prepare_temporary
     temporary_environment = _tmp_module.temporary_environment
     write_storage_instructions = _tmp_module.write_storage_instructions
@@ -161,7 +163,7 @@ def load_config(path):
 def validate_config(config):
     """Validate a captured policy without reopening its configuration path."""
     required = {'version', 'deployment', 'image', 'serverContainer', 'socket', 'stateRoot', 'companyFile', 'companyRoot', 'scratchRoot', 'apiSocketRoot', 'budgetMode', 'uid', 'gid', 'memoryMiB', 'poolMemoryMiB', 'poolTasksMax', 'cgroupParent', 'pidsLimit', 'cpus', 'maxWorkers', 'mounts', 'maintenanceSessions'}
-    if not isinstance(config, dict) or set(config) - {'gpuGrants','sessionResources','rootlessDocker','goalPrivateConfig','opsConfig','leaseAcceptance','commandTelemetry'} != required or config['version'] != 1:
+    if not isinstance(config, dict) or set(config) - {'gpuGrants','sessionResources','rootlessDocker','goalPrivateConfig','opsConfig','leaseAcceptance','commandTelemetry','coldTemporaryCleanup'} != required or config['version'] != 1:
         raise ValueError("Unsupported worker configuration")
     if 'opsConfig' in config:
         if not isinstance(config['opsConfig'], str) or not Path(config['opsConfig']).is_absolute() or Path(config['opsConfig']).anchor != '/' or str(Path(config['opsConfig'])) != config['opsConfig'] or any(ord(c)<32 or ord(c)==127 for c in config['opsConfig']):
@@ -251,6 +253,7 @@ def validate_config(config):
                 raise ValueError('Worker mounts cannot expose shared attachment storage through an alias')
     if config.get('leaseAcceptance') is not None:
         _lease_peer_module().validate_option(config)
+    cold_tmp_policy(config)
     return config
 
 
@@ -812,6 +815,95 @@ class Broker:
             self.storage_leases[session_id]=(guard,paths)
             return paths,True
 
+    def admit_cold_temporary(self, paths, temporary_keys):
+        """Fresh complete engine census; callers already hold this EID lease.
+
+        No provider/engine changes occur here. Successful inspect plus matching
+        inventories must establish that the old named laptop is absent and no
+        running/paused/restarting bind can read OR write this owned tmp tree.
+        """
+        if (self.stopping.is_set() or self.draining.is_set() or
+                storage_paths(self.config, paths.session) != paths or
+                not storage_start_allowed(self.config, paths)):
+            raise RuntimeError('Cold temporary binding or running intent changed')
+        with self.storage_lease_lock:
+            claim = self.storage_leases.get(paths.session)
+            if claim is None or claim[1] != paths:
+                raise RuntimeError('Cold temporary cleanup requires the employee storage lease')
+        listed = self.run_engine(['ps', '--all', '--quiet', '--no-trunc']).stdout.split()
+        if len(listed) > 512 or len(set(listed)) != len(listed) or any(not re.fullmatch('[a-f0-9]{64}', item) for item in listed):
+            raise RuntimeError('Cold temporary engine inventory is unknown')
+        try:
+            items = json.loads(self.run_engine(['inspect', *listed]).stdout) if listed else []
+        except (ValueError, TypeError):
+            raise RuntimeError('Cold temporary engine inspection is unknown') from None
+        if (not isinstance(items, list) or len(items) != len(listed) or
+                any(not isinstance(item, dict) or not isinstance(item.get('Id'), str) for item in items) or
+                {item.get('Id') for item in items} != set(listed)):
+            raise RuntimeError('Cold temporary engine inventory changed')
+        target = Path(paths.scratch) / 'tmp'
+        protected = set(temporary_keys)
+        for directory in (target, *target.parents):
+            info = directory.stat(); protected.add((info.st_dev, info.st_ino))
+            if directory == Path(self.config['scratchRoot']): break
+        name = '/' + self.config['deployment'] + '-agent-' + paths.session
+        host_table = read_mount_table()
+        # The finalization marker must remain outside future configured grants,
+        # as well as current writable namespace aliases. These are host control
+        # files; normal private home/Nix mounts are supplied separately.
+        for declared in self.config['mounts']:
+            refuse_host_mount_aliases(Path(paths.root), Path(declared['source']).resolve(strict=True), host_table)
+        for item in items:
+            state = item.get('State', {})
+            if (type(state.get('Running')) is not bool or type(state.get('Pid')) is not int or
+                    type(state.get('Paused')) is not bool or type(state.get('Restarting')) is not bool or
+                    not isinstance(item.get('Mounts'), list)):
+                raise RuntimeError('Cold temporary container state is unknown')
+            if item.get('Name') == name:
+                raise RuntimeError('Prior named laptop must be absent before cold temporary cleanup')
+            active = state['Running'] or state['Paused'] or state['Restarting'] or state['Pid'] != 0
+            if not active: continue
+            binds = [m for m in item['Mounts'] if isinstance(m, dict) and m.get('Type') == 'bind']
+            container_table = None
+            if binds:
+                if host_table is None: host_table = read_mount_table()
+                container_table = read_mount_table(state['Pid'])
+            for mount in item['Mounts']:
+                if not isinstance(mount, dict):
+                    raise RuntimeError('Cold temporary mount metadata is unknown')
+                if mount.get('Type') != 'bind': continue
+                source = mount.get('Source')
+                if not isinstance(source, str) or not Path(source).is_absolute():
+                    raise RuntimeError('Cold temporary bind inventory is unknown')
+                lexical = Path(source); real = lexical.resolve(strict=True); info = real.stat()
+                if ((info.st_dev, info.st_ino) in protected or
+                        any(p == target or p.is_relative_to(target) or target.is_relative_to(p) for p in (lexical, real))):
+                    raise RuntimeError('A live container can access this temporary storage')
+                destination = mount.get('Destination')
+                if not isinstance(destination, str) or not Path(destination).is_absolute() or str(Path(destination)) != destination:
+                    raise RuntimeError('Cold temporary bind destination is unknown')
+                refuse_mount_aliases(target, real, Path(destination), host_table, container_table)
+                if type(mount.get('RW')) is not bool:
+                    raise RuntimeError('Cold temporary bind writability is unknown')
+                if mount['RW']:
+                    refuse_mount_aliases(Path(paths.root), real, Path(destination), host_table, container_table)
+        # Bracket relevant namespace reads with a fresh exact engine binding.
+        # A PID restart or changed grant within a stable container ID is drift.
+        def projection(rows):
+            return sorted([{'id': x['Id'], 'name': x.get('Name'),
+                            'state': {k: x.get('State', {}).get(k) for k in ('Running','Paused','Restarting','Dead','Pid','StartedAt')},
+                            'mounts': sorted(x.get('Mounts', []), key=lambda m: json.dumps(m, sort_keys=True))}
+                           for x in rows], key=lambda x: x['id'])
+        try:
+            verified = json.loads(self.run_engine(['inspect', *listed]).stdout) if listed else []
+            after = self.run_engine(['ps', '--all', '--quiet', '--no-trunc']).stdout.split()
+            if (len(after) != len(listed) or set(after) != set(listed) or projection(items) != projection(verified)):
+                raise RuntimeError('Cold temporary native binding changed')
+        except (ValueError, TypeError, KeyError, AttributeError):
+            raise RuntimeError('Cold temporary native reinspection is unknown') from None
+        if self.stopping.is_set() or self.draining.is_set() or not storage_start_allowed(self.config, paths):
+            raise RuntimeError('Cold temporary admission changed')
+
     def release_storage(self, session_id):
         """Release an exact session's employee data lease. While the broker is stopping, the lock wait is bounded by the
         shared stop budget (Goal composition): not acquired in time -> the lease is retained, STORAGE_LOCK_UNAVAILABLE is
@@ -1259,7 +1351,10 @@ class Broker:
                 self.active[session_id] = connection
                 self.laptops[session_id] = self.config['deployment']+'-agent-'+session_id
                 claimed = True
+                cold_require_no_pending(paths)
+                fresh_home = not os.path.lexists(paths.home)
                 prepare_storage(self.config,paths)
+                cold_initialize_leases(self.config, paths, fresh_home=fresh_home)
                 home=paths.home
                 runtime_directory=Path(self.config['stateRoot'])/session_id
                 private_directory(runtime_directory,self.config['uid'],create=True)
@@ -1351,6 +1446,7 @@ class Broker:
                         if labels.get('reverie.session') != session_id or labels.get('reverie.worker') != self.config['deployment']:
                             raise ValueError('The worker network is not owned by this session')
                     prepare_temporary(self.config, scratch)
+                    clear_cold_temporary(self.config, paths, lambda keys: self.admit_cold_temporary(paths, keys))
                     for directory in ['build', 'cache', 'downloads', 'tasks']:
                         (scratch/directory).mkdir(mode=0o700, exist_ok=True)
                     home_workspace_alias(self.config, home)

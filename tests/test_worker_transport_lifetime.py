@@ -12,6 +12,7 @@ import subprocess
 import sys
 import threading
 import unittest
+from unittest.mock import patch
 
 from tests import test_worker as fixture
 from reverie.worker import Broker, receive_frame, send_frame
@@ -71,3 +72,12 @@ class BrokerTransportLifetimeTests(unittest.TestCase):
         broker,thread,client=self.attach();broker.stopping.set();thread.join(5)
         self.assertFalse(thread.is_alive());client.close();self.assert_same_synthetic_process()
         self.assertTrue(self.calls);self.assertFalse(any(c[0] in ('create','stop','kill','rm','start') for c in self.calls))
+
+    def test_reattach_with_cleanup_enabled_never_enters_cold_wipe(self):
+        self.config['coldTemporaryCleanup'] = {'version': 1, 'enabled': True, 'hostLeaseDirectories': []}
+        with patch('reverie.worker.clear_cold_temporary', side_effect=AssertionError('reattach must not wipe')) as clear:
+            broker, thread, client = self.attach()
+            client.close(); thread.join(5)
+            self.assertFalse(thread.is_alive()); self.assert_same_synthetic_process()
+            clear.assert_not_called()
+        self.assertFalse(any(c[0] in ('create', 'stop', 'kill', 'rm', 'start') for c in self.calls))

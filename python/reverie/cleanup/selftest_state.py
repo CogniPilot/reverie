@@ -13,7 +13,7 @@ H = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(H)
 
 PRUNE_SHA = 'fbed566fbdfe89d312abb8b1b32354e5f44f35b94918028ce882fbf444b17181'
-LEASE_SHA = '3458407ef3e2bb71047528d0acebcb2a1266193dd3181ad7fc384b056a72315b'
+LEASE_SHA = '4a1022e5536f989f9d4ef8495e52d035c497e2567b331b6f82aacbb5285f3d41'
 KIT = {
     'selftest.py': '280dd66b9c83f0faa99c263dddbee99f8e37a1104548f4d4f690066d0061574e',
     'p3kit.py': 'cf4ca5a1b0fc84b2502e126be5a0c9b06881a11eba9161324efc1e352db0024a',
