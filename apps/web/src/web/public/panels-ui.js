@@ -4297,6 +4297,8 @@ Object.assign(ReverieApp.prototype, {
       keydown: null,
       originalBody,
       body,
+      overlay,
+      backdrop: null,
     };
     this._readOnlyFilePreview = state;
     state.timer = setTimeout(() => state.controller.abort(), 12000);
@@ -4345,6 +4347,10 @@ Object.assign(ReverieApp.prototype, {
       }
     };
     document.addEventListener('keydown', state.keydown, true);
+    state.backdrop = event => {
+      if (event.target === overlay && this._readOnlyFilePreview === state) this.closeFilePreview();
+    };
+    overlay.addEventListener('click', state.backdrop);
     back.focus({ preventScroll: true });
     let source;
     try {
@@ -4546,6 +4552,7 @@ Object.assign(ReverieApp.prototype, {
     for (const url of state.urls) URL.revokeObjectURL(url);
     for (const [element, inert] of state.inert) element.inert = inert;
     document.removeEventListener('keydown', state.keydown, true);
+    state.overlay.removeEventListener('click', state.backdrop);
     state.extra?.remove();
     this.$('filePreviewOverlay')?.classList.remove('file-preview-readonly');
     state.body.replaceChildren();

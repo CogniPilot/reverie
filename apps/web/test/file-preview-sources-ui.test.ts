@@ -91,7 +91,7 @@ function fixture(
     app.closeFilePreview();
     dom.window.close();
   });
-  return { dom, document, app, calls, urls, revoked, trigger };
+  return { dom, document, app, calls, urls, revoked, trigger, context };
 }
 const source = (name = 'notes.md') => ({ kind: 'room-attachment', roomId: 'room-a', attachmentId: 'file-a', name });
 const binding = 'a'.repeat(64);
@@ -381,4 +381,37 @@ it('keeps document fragments inside the preview without changing the application
   const target=f.document.querySelector<HTMLElement>('#filePreviewBody h2')!;target.scrollIntoView=vi.fn();
   f.document.querySelector<HTMLAnchorElement>('#filePreviewBody a')!.click();
   expect(target.scrollIntoView).toHaveBeenCalledOnce();expect(f.dom.window.location.hash).toBe('');
+});
+
+// Backdrop ownership belongs only to the currently mounted read-only viewer.
+it('dismisses only the read-only backdrop and removes its handler before reuse', async () => {
+  const f = fixture();
+  await f.app.openReadOnlyFilePreview(source(), f.trigger);
+  const overlay = f.document.getElementById('filePreviewOverlay')!;
+  f.document.querySelector('.file-preview-window')!.dispatchEvent(new f.dom.window.MouseEvent('click', { bubbles: true }));
+  expect(overlay.classList.contains('visible')).toBe(true);
+  overlay.dispatchEvent(new f.dom.window.MouseEvent('click', { bubbles: true }));
+  expect(overlay.classList.contains('visible')).toBe(false);
+  expect(f.document.activeElement).toBe(f.trigger);
+  const close = vi.spyOn(f.app, 'closeFilePreview');
+  overlay.dispatchEvent(new f.dom.window.MouseEvent('click', { bubbles: true }));
+  expect(close).not.toHaveBeenCalled();
+  await f.app.openReadOnlyFilePreview(source('second.md'), f.trigger);
+  overlay.dispatchEvent(new f.dom.window.MouseEvent('click', { bubbles: true }));
+  expect(close).toHaveBeenCalledTimes(1);
+});
+it('keeps the existing dirty-edit confirmation before a read-only backdrop closes', async () => {
+  const f = fixture();
+  await f.app.openReadOnlyFilePreview(source(), f.trigger);
+  f.app.filePreviewEdit = { dirty: true };
+  const confirm = vi.fn(() => false);
+  f.context.confirm = confirm;
+  const overlay = f.document.getElementById('filePreviewOverlay')!;
+  overlay.dispatchEvent(new f.dom.window.MouseEvent('click', { bubbles: true }));
+  expect(confirm).toHaveBeenCalledTimes(1);
+  expect(overlay.classList.contains('visible')).toBe(true);
+  expect(f.document.getElementById('under')!.inert).toBe(true);
+  confirm.mockReturnValue(true);
+  overlay.dispatchEvent(new f.dom.window.MouseEvent('click', { bubbles: true }));
+  expect(overlay.classList.contains('visible')).toBe(false);
 });

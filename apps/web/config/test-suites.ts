@@ -22,6 +22,7 @@ export const BROWSER_TEST_GLOBS = [
   'test/bots.browser.test.ts',
   'test/bots-http.browser.test.ts',
   'test/previews.browser.test.ts',
+  'test/file-preview-shell.browser.test.ts',
   'test/handbook.browser.test.ts',
   'test/workspace-files.browser.test.ts',
   'test/chat-plugins.browser.test.ts',
