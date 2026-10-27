@@ -1231,6 +1231,15 @@ class Broker:
             outside+=memory
         if peers+1>self.config['maxWorkers']:
             raise RuntimeError('Worker capacity is full')
+        gate = getattr(self, 'resource_reservations', None)
+        if gate is not None or 'resourceReservations' in self.config:
+            if gate is None:
+                raise RuntimeError('Resource reservation control requires reconciliation')
+            # The fixed gate shares the explicit host policy and qualifies held
+            # source deltas under the already-held admission lock. No legacy
+            # margin or candidate credit is substituted after explicit refusal.
+            gate.check_creation(session_id, resources)
+            return
         if resources['budgetMode']=='admission':
             outside+=resources['memoryMiB']*1024*1024
             if outside>self.config['poolMemoryMiB']*1024*1024:
@@ -1244,7 +1253,8 @@ class Broker:
             if pool<=0 or tasks<=0:
                 raise RuntimeError('Finite positive shared pool limits required')
         total_kib=int(next(line.split()[1] for line in (proc_root/'meminfo').read_text().splitlines() if line.startswith('MemTotal:')))
-        if pool+outside+8192*1024*1024>total_kib*1024*.9:
+        from reverie.worker_capacity_policy import legacy_headroom_fits
+        if not legacy_headroom_fits(pool+outside,total_kib*1024):
             raise RuntimeError('Pool plus actual peer ceilings exceed host headroom')
 
     def reload_resources(self):
@@ -1512,8 +1522,6 @@ class Broker:
                     else:
                         self.check_pool()
                     self.check_creation_budget(session_id,resources)
-                    if self.resource_reservations is not None:
-                        self.resource_reservations.check_creation(session_id, resources)
                 admitted = True
                 if previous.returncode==0 and not reuse:
                     if paths.kind=='employee':self.stop(name,retain_storage=True)
@@ -1545,8 +1553,6 @@ class Broker:
                         raise RuntimeError('Current employee running intent changed during preparation')
                     if paths.kind=='employee':self.check_storage_writers(paths,session_id)
                     self.check_creation_budget(session_id, prepared_config)
-                    if self.resource_reservations is not None:
-                        self.resource_reservations.check_creation(session_id, prepared_config)
                     if nix_store is not None:
                         # Private durable store and database; build caches retain
                         # the existing scratch grant.

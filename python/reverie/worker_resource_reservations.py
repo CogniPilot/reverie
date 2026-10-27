@@ -21,6 +21,7 @@ from .employee_resource_profiles import ProfileStore
 from .worker_resources import RESOURCE_FIELDS, effective_config, policy_digest, validate_resource_reload
 from .worker_storage import read_metadata, storage_paths, storage_start_allowed
 from .worker_cold_tmp import read_mount_table, _mount_location
+from .worker_capacity_policy import explicit_host_headroom_fits, pool_headroom_fits
 
 MIB = 1048576
 PROC = Path('/proc')
@@ -347,10 +348,11 @@ class NativeObserver:
                 commitments.append(binding)
         total = sum(row['memory'] for row in commitments)
         budget = config['poolMemoryMiB'] * MIB
-        need(budget + site_memory + selected['hostReserveMiB'] * MIB <= host['MemTotal'] and
-             host['MemAvailable'] >= selected['hostReserveMiB'] * MIB,
-             'RESERVATION_HOST_BUDGET')
-        need(total <= budget, 'RESERVATION_CAPACITY_EXHAUSTED')
+        need(explicit_host_headroom_fits(pool_bytes=budget, site_bytes=site_memory,
+             reserve_bytes=selected['hostReserveMiB'] * MIB, total_bytes=host['MemTotal'],
+             available_bytes=host['MemAvailable']), 'RESERVATION_HOST_BUDGET')
+        need(pool_headroom_fits(budget_bytes=budget, committed_bytes=total, retained_bytes=0, candidate_bytes=0),
+             'RESERVATION_CAPACITY_EXHAUSTED')
         need(time.monotonic() < deadline, 'RESERVATION_OBSERVATION_DEADLINE')
         return total, budget, site, commitments
 
@@ -613,6 +615,12 @@ class ReservationGate:
         rows = self._guard()
         total, budget, _, _ = self.native.capacity(rows, self.option)
         document = self._document()
+        retained = self._retained_delta(document)
+        need(pool_headroom_fits(budget_bytes=budget, committed_bytes=total, retained_bytes=retained,
+             candidate_bytes=resources['memoryMiB'] * MIB), 'RESERVATION_CAPACITY_EXHAUSTED')
+        need(self.native.inventory() == rows, 'RESERVATION_NATIVE_INVENTORY_CHANGED')
+
+    def _retained_delta(self, document):
         for op in document['operations'].values():
             # Delta arithmetic assumes the old ceiling is still committed. A
             # stopped/moved/unknown source is not automatic capacity credit.
@@ -621,9 +629,21 @@ class ReservationGate:
                  current['current_memory_bytes'] == op['observation']['current_memory_bytes'],
                  'RESERVATION_RECONCILIATION_REQUIRED')
         retained = sum(journal.wide(op['delta_bytes']) for op in document['operations'].values())
-        need(total + retained + resources['memoryMiB'] * MIB <= budget,
-             'RESERVATION_CAPACITY_EXHAUSTED')
+        return retained
+
+    def check_headroom(self):
+        """Fixed INSTALL read-only budget proof, never a candidate or permit.
+
+        Caller holds admission. Unlike ordinary existing transport/recovery,
+        INSTALL must qualify every retained old-source commitment assumption.
+        """
+        rows = self._guard()
+        total, budget, _site, _commitments = self.native.capacity(rows, self.option)
+        retained = self._retained_delta(self._document())
+        need(pool_headroom_fits(budget_bytes=budget, committed_bytes=total, retained_bytes=retained,
+             candidate_bytes=0), 'RESERVATION_CAPACITY_EXHAUSTED')
         need(self.native.inventory() == rows, 'RESERVATION_NATIVE_INVENTORY_CHANGED')
+        return {'budgetBytes': budget, 'committedBytes': total, 'retainedBytes': retained}
 
     def check_reload(self, updated):
         need(not self._document()['operations'] or updated == self.broker.config,

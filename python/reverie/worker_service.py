@@ -121,18 +121,49 @@ class WorkerService:
                 value.get('Name') == 'docker-desktop' or str(value.get('CgroupVersion')) != '2' or
                 any(value.get(key) is not True for key in ('MemoryLimit', 'SwapLimit', 'PidsLimit'))):
             raise ValueError('Engine must support cgroup-v2 RAM, no-swap and PID ceilings; refusing unbounded fallback')
-        if (type(value.get('MemTotal')) is not int or value['MemTotal'] <= 0 or
-                config['poolMemoryMiB'] * 1024 * 1024 + 8 * 1024**3 > value['MemTotal'] * .9):
-            raise ValueError('Worker admission budget must retain website and host memory headroom')
+        from .worker_capacity_policy import legacy_headroom_fits
         from .worker_resource_reservations import option, configured, marker, pending, NativeObserver, ReservationGate
-        if configured(config):
-            probe = self.resource_probe(config)
-            if installing and option(config) is not None and not os.path.lexists(marker(config)) and not os.path.lexists(pending(config)):
-                NativeObserver(probe).custody(Path(option(config)['directory']), marker(config))
-            else:
-                with ReservationGate(probe).admission():
+        selected = option(config)
+        if selected is None:
+            if configured(config):
+                # A removed explicit option must not become legacy acceptance.
+                with ReservationGate(self.resource_probe(config)).admission():
                     pass
+            if not legacy_headroom_fits(config['poolMemoryMiB'] * 1024 * 1024, value.get('MemTotal')):
+                raise ValueError('Worker admission budget must retain website and host memory headroom')
+        else:
+            probe = self.resource_probe(config)
+            if installing and not os.path.lexists(marker(config)) and not os.path.lexists(pending(config)):
+                native = NativeObserver(probe)
+                rows = native.custody(Path(selected['directory']), marker(config))
+                self.native_headroom(native, selected, rows)
+            else:
+                gate = ReservationGate(probe)
+                with gate.admission():
+                    if installing:
+                        # Installation capacity acceptance has no candidate or
+                        # start authority. Unknown retained source facts refuse.
+                        gate.check_headroom()
+                    else:
+                        # Cold START preserves intact unknown-source fences and
+                        # existing transport recovery; no claim is credited or
+                        # granted permission to create a replacement here.
+                        self.native_headroom(gate.native, selected)
         return config
+
+    @staticmethod
+    def native_headroom(native, selected, rows=None):
+        """Fixed observer only; no READY gate, candidate or effect is invented."""
+        rows = native.inventory() if rows is None else rows
+        before = native.capacity(rows, selected)
+        if native.inventory() != rows:
+            raise ValueError('Native capacity inventory changed during service preflight')
+        # Qualify kernel/root/ancestor facts again after the engine observation.
+        # MemAvailable is freshly tested by the observer, never frozen equal.
+        if native.capacity(rows, selected) != before:
+            raise ValueError('Native effective capacity changed during service preflight')
+        if native.inventory() != rows:
+            raise ValueError('Native capacity inventory changed during service preflight')
 
     def resource_probe(self, config):
         service = self
