@@ -1,7 +1,7 @@
 # Running Reverie from the published image
 
-Each release publishes a container image to `ghcr.io/jgoppert/reverie`, tagged with its
-version (`0.2.0`, `0.2`, `latest`). It holds the console, the memory runtime, the generic
+Each release publishes a container image to `ghcr.io/cognipilot/reverie`, tagged with its
+version (`0.3.0`, `0.3`, `latest`). It holds the console, the memory runtime, the generic
 expert templates and a provider-tool installer. Provider CLIs are installed in private
 persistent storage on first start, not bundled in the image. It holds no instance:
 no identities, memories, rooms, credentials or model weights. The first start creates an
@@ -13,7 +13,7 @@ Running the published image requires **no Nix installation or source checkout**.
 Nix builds the image in CI; its runtime is already inside the image. The host
 needs a working Docker Engine or Podman, Bash and a browser. Node and Python
 are not host requirements. Use a host matching the release image's architecture
-(the v0.2.0 Debian instructions target x86_64).
+(the v0.3.0 Debian instructions target x86_64).
 
 On Debian 12, install Docker as your normal user with sudo permission:
 
@@ -30,12 +30,12 @@ Docker users on other systems can use the
 
 ### Download the setup script
 
-Download `setup.sh` from the **v0.2.0 GitHub release**, or use the copy from its
+Download `setup.sh` from the **v0.3.0 GitHub release**, or use the copy from its
 extracted offline bundle. Wait for release CI to finish publishing the assets
 and GHCR tag before installing. With the optional GitHub CLI:
 
 ```bash
-gh release download v0.2.0 --repo CogniPilot/reverie --pattern setup.sh
+gh release download v0.3.0 --repo CogniPilot/reverie --pattern setup.sh
 ```
 
 Private release downloads require signing in with `gh auth login` using an
@@ -65,12 +65,12 @@ See [GitHub's registry authentication guide](https://docs.github.com/en/packages
 In the directory containing `setup.sh`, run:
 
 ```bash
-bash setup.sh --engine docker --version 0.2.0
+bash setup.sh --engine docker --version 0.3.0
 ```
 
 For Podman, use `podman login` above and `--engine podman` here. Use the same
 engine and normal user for login and installation. The version pins the pull to
-`ghcr.io/jgoppert/reverie:0.2.0`; `latest` and `0.2` can move with later releases.
+`ghcr.io/cognipilot/reverie:0.3.0`; `latest` and `0.3` can move with later releases.
 
 `setup.sh` pulls the release, starts one container named `reverie` with a data volume
 `reverie-data` mounted at `/instances` and a home volume `reverie-home` mounted at
@@ -115,14 +115,14 @@ uses NAME-data and NAME-home. Removing either volume permanently removes its rec
 For a manual start, use these commands instead of the setup-script start:
 
 ```bash
-docker pull ghcr.io/jgoppert/reverie:0.2.0
+docker pull ghcr.io/cognipilot/reverie:0.3.0
 docker run --detach --name reverie --restart unless-stopped \
   --publish 127.0.0.1:3000:3000 \
   --mount type=volume,src=reverie-data,dst=/instances \
   --mount type=volume,src=reverie-home,dst=/home/agent \
-  ghcr.io/jgoppert/reverie:0.2.0
+  ghcr.io/cognipilot/reverie:0.3.0
 docker logs reverie
-docker image inspect ghcr.io/jgoppert/reverie:0.2.0 --format '{{json .RepoDigests}}'
+docker image inspect ghcr.io/cognipilot/reverie:0.3.0 --format '{{json .RepoDigests}}'
 ```
 
 The direct command returns before the application is ready; follow its logs and

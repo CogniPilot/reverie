@@ -38,7 +38,7 @@ The host needs no Nix installation, source checkout, Node or Python. Download
 [release](https://github.com/CogniPilot/reverie/releases), then run:
 
 ```bash
-bash setup.sh --engine docker --version 0.2.0
+bash setup.sh --engine docker --version 0.3.0
 ```
 
 Follow [the image guide](docs/image.md#quick-start) for prerequisites, registry
@@ -544,6 +544,19 @@ Tests cover memory, reflection, dreams, deliberate values, scope isolation, life
 archives, model continuity, context budgeting and scratch leases. Test histories are
 synthetic fixtures. Keep migration receipts and operational logs in private instance
 storage; do not commit them with the shareable source.
+
+The portable acceptance-helper controls run separately inside `nix develop`:
+
+```bash
+python3 scripts/acceptance/stale-busy-lifecycle.test.py
+python3 scripts/acceptance/task-cancel-source.test.py
+python3 scripts/acceptance/task-cancel-scope.test.py
+```
+
+These controls do not start the native fixtures. The native runners' `--help`
+describes their explicit package/tool pins and fresh leased workspace inputs.
+They exercise isolated test accounts and programs; their results distinguish
+component acceptance from production agent authentication or laptop replacement.
 
 ## Proposed memory design
 

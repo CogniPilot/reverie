@@ -44,7 +44,7 @@ class SetupScriptTest(unittest.TestCase):
     def test_install_binds_loopback_keeps_volume_and_pins_digest(self):
         result = self.run_setup("--version", "v0.1.0", "--port", "3100", "--name", "second", "--with-claude-code")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("+ podman pull ghcr.io/jgoppert/reverie:0.1.0", result.stdout)
+        self.assertIn("+ podman pull ghcr.io/cognipilot/reverie:0.1.0", result.stdout)
         run_line = next(line for line in result.stdout.splitlines() if line.startswith("+ podman run"))
         self.assertIn("--publish 127.0.0.1:3100:3000", run_line)
         self.assertIn("type=volume,src=second-data,dst=/instances", run_line)
@@ -291,7 +291,8 @@ if args[0] == "container" and os.environ.get("MISSING_CONTAINER"):
         guide = SETUP.parent.parent / "docs" / "offline-install.md"
         commands = re.findall(r"```bash\n(.*?)```", guide.read_text(), re.DOTALL)[0]
         (self.root / "setup.sh").write_bytes(SETUP.read_bytes())
-        (self.root / "IMAGE-REF.txt").write_text("example.test/app:1.2.3\n")
+        (self.root / "IMAGE-REF.txt").write_text(
+            "Version: 1.2.3\nRepository: example.test/app\nImage-ID: " + self.image_id + "\n")
         checksums = []
         for name in ("setup.sh", "reverie-image.tar", "IMAGE-REF.txt"):
             checksums.append(hashlib.sha256((self.root / name).read_bytes()).hexdigest() + "  " + name)
