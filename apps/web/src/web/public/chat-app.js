@@ -1087,6 +1087,7 @@ const CA_PAGES = {
 /** Which supported page a URL fragment asks for, or null. */
 function caPageFromHash(hash) {
   const key = String(hash || '').replace(/^#/, '');
+  if (key.startsWith('previews?')) return 'previews';
   return Object.hasOwn(CA_PAGES, key) ? key : null;
 }
 
@@ -3510,9 +3511,23 @@ class ReverieChatApp {
     } else {
     if (!frame) { frame = this.el('iframe', 'ca-page-frame'); panel.replaceChildren(frame); }
     frame.title = page.label;
-    if (panel.dataset.kind !== kind) {
+    let framePath = ['workspace', 'bots', 'previews'].includes(kind) ? (this.doc.defaultView.__REVERIE_BASE__ || '') + page.path : page.path;
+    if (kind === 'previews') {
+      const location = this.doc.defaultView.location;
+      const query = new URLSearchParams(location.search);
+      const fragment = /^#previews\?(.*)$/.exec(location.hash);
+      const hash = new URLSearchParams(fragment ? fragment[1] : '');
+      const fields = new URLSearchParams();
+      for (const name of ['sessionId', 'port', 'path']) {
+        const value = query.has(name) ? query.get(name) : hash.get(name);
+        if (value !== null) fields.set(name, value);
+      }
+      const encoded = fields.toString();
+      if (encoded) framePath += '?' + encoded;
+    }
+    if (panel.dataset.kind !== kind || frame.getAttribute('src') !== framePath) {
       panel.dataset.kind = kind;
-      frame.src = ['workspace', 'bots', 'previews'].includes(kind) ? (this.doc.defaultView.__REVERIE_BASE__ || '') + page.path : page.path;
+      frame.src = framePath;
     } else if (again) {
       try {
         frame.contentWindow.location.reload();

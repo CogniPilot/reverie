@@ -300,7 +300,7 @@ def _reservation_value_state(value, now=None) -> int:
               and 0 < until - created <= MAX_RESERVE and created <= now + 60 and until - now <= MAX_RESERVE)
     except (KeyError, TypeError, AttributeError):
         ok = False
-    if not ok:                                          # an explicit test, never `assert` (stripped under -O; Rex A1)
+    if not ok:                                          # an explicit test, never `assert` (stripped under -O)
         return UNKNOWN                                  # skip and report; never "live" and never "expired"
     return IN_USE if until > now else FREE              # expired: only a stale candidate; other checks still apply
 

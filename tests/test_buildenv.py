@@ -357,6 +357,19 @@ class BuildEnvTests(unittest.TestCase):
         self.assertEqual(vitest_file_count(tee.tail), 2)
 
     def test_without_expect_files_output_and_ledger_are_unchanged(self):
+        # This is an I/O/schema fixture, not a memory measurement. A full-suite
+        # runner can pass its >100 MiB high-water into the forked child. Control
+        # only the two peak meters; keep real spawn, wait status, pipes and ledger.
+        real_wait4 = os.wait4
+        def subbudget_wait4(*args):
+            pid, status, usage = real_wait4(*args)
+            fields = list(usage); fields[2] = 64 * 1024  # ru_maxrss is KiB on Linux
+            return pid, status, type(usage)(fields)
+        with mock.patch.object(reverie.buildenv, "group_rss", return_value=64 * MiB), \
+                mock.patch.object(reverie.buildenv.os, "wait4", side_effect=subbudget_wait4):
+            self._without_expect_files_output_and_ledger()
+
+    def _without_expect_files_output_and_ledger(self):
         probe = "import os; s = os.fstat(1); open('fd1', 'w').write('%d %d' % (s.st_dev, s.st_ino))"
         mine = os.fstat(1)
         result = self.run_build([sys.executable, "-c", probe])

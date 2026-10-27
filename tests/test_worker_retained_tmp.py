@@ -313,3 +313,87 @@ class RetainedTemporary(unittest.TestCase):
         with patch('os.close',fail):
             with self.assertRaises(OSError):self.finish(ready)
         self.assertTrue(injected);self.assertTrue(self.pending().exists())
+
+    def test_each_observer_entry_checks_clock_without_resolving_anchors(self):
+        scans=0
+        def entries(_path,*,check,**_kw):
+            nonlocal scans
+            scans+=1
+            clock=retained.time.monotonic
+            with patch.object(Path,'resolve',side_effect=AssertionError('per-entry filesystem custody work')), \
+                    patch.object(retained.time,'monotonic',wraps=clock) as ticks:
+                for _ in range(1024):check()
+                self.assertGreaterEqual(ticks.call_count,1024)
+            return self.observations
+        ready=self.prepare(references=entries)
+        retained.finish_retained(self.config,self.paths,ready,lambda:self.native,references=entries)
+        self.assertEqual(scans,4)
+        self.assertFalse(self.pending().exists())
+
+    def test_first_scan_anchor_replacement_refuses_before_intent_or_rename(self):
+        preserved=self.paths.scratch.with_name('preserved-scratch')
+        def changed(_path,*,check,**_kw):
+            check();self.paths.scratch.rename(preserved);self.paths.scratch.mkdir(mode=0o700)
+            check()
+            return self.observations
+        with self.assertRaisesRegex(RuntimeError,'parent custody changed'):
+            self.prepare(references=changed)
+        self.assertFalse(self.pending().exists())
+        self.assertEqual((preserved/'tmp').stat().st_ino,self.old[1])
+        self.assertEqual((preserved/'tmp/payload').read_bytes(),b'owned old bytes')
+        self.assertFalse(list(retained.retired_root(self.config,self.paths).glob('*/data')))
+
+    def test_mid_postscan_custody_change_retains_partial_namespace_fence(self):
+        scans=0
+        def changed(_path,*,check,**_kw):
+            nonlocal scans
+            scans+=1;check()
+            if scans==2:
+                self.leasebase.rename(self.leasebase.with_name('preserved-lease-directory'))
+                self.leasebase.mkdir(mode=0o700)
+            for _ in range(32):check()
+            return self.observations
+        with self.assertRaises((RuntimeError,lease.LeaseError)):
+            self.prepare(references=changed)
+        self.assertEqual(scans,2)
+        self.assertTrue(self.pending().exists())
+        data=list(retained.retired_root(self.config,self.paths).glob('*/data'))
+        self.assertEqual(data[0].stat().st_ino,self.old[1])
+        self.assertEqual((data[0]/'payload').read_bytes(),b'owned old bytes')
+        self.assertNotEqual(self.tmp.stat().st_ino,self.old[1])
+        self.assertFalse(list(self.paths.root.glob('cold-tmp-retained-ready-*.json')))
+        with self.assertRaisesRegex(RuntimeError,'reconciliation'):
+            cold.clear_cold_temporary({k:v for k,v in self.config.items() if k!='coldTemporaryCleanup'},self.paths,lambda _k:None)
+
+    def commit_scan_custody_fault(self,at_scan):
+        ready=self.prepare();scans=0
+        def changed(_path,*,check,**_kw):
+            nonlocal scans
+            scans+=1;check()
+            if scans==at_scan:(ready.envelope/'.keep').chmod(0o640)
+            for _ in range(32):check()
+            return self.observations
+        with self.assertRaises(RuntimeError):
+            retained.finish_retained(self.config,self.paths,ready,lambda:self.native,references=changed)
+        self.assertEqual(scans,at_scan)
+        self.assertTrue(self.pending().exists())
+        self.assertEqual((ready.data/'payload').read_bytes(),b'owned old bytes')
+        self.assertFalse((self.paths.root/('cold-tmp-retained-'+ready.epoch+'.json')).exists())
+
+    def test_first_commit_scan_anchor_change_keeps_fence(self):
+        self.commit_scan_custody_fault(1)
+
+    def test_second_commit_scan_anchor_change_keeps_fence(self):
+        self.commit_scan_custody_fault(2)
+
+    def test_entry_clock_expiry_still_refuses_without_intent_or_mutation(self):
+        def expired(_path,*,check,**_kw):
+            now=retained.time.monotonic()
+            with patch.object(retained.time,'monotonic',return_value=now+retained.SECONDS+1):check()
+            self.fail('entry deadline check was skipped')
+        with self.assertRaisesRegex(RuntimeError,'publication deadline exhausted'):
+            self.prepare(references=expired)
+        self.assertEqual(retained.SECONDS,30)
+        self.assertFalse(self.pending().exists())
+        self.assertEqual(self.tmp.stat().st_ino,self.old[1])
+        self.assertEqual(self.marker.read_bytes(),b'owned old bytes')

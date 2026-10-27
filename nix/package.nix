@@ -119,6 +119,7 @@ let
         OWN_TEST_NODE="${pkgs.nodejs_22}/bin/node" \
         OWNER_TERMINAL_TEST_DIST="$PWD/dist" \
         OWNER_TERMINAL_TEST_CONNECTOR="$PWD/scripts/connect-owner-terminal.mjs" \
+        NIX_REVERIE_TEST_NODE_CUSTODY=1 \
         python3 -B test/fixtures/owner-terminal/test_bridge.py
       runHook postCheck
     '';

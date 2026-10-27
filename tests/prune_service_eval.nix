@@ -43,7 +43,7 @@ let
     scheduledOnlyExplicitly = scheduled.systemd.timers.reverie-prune.wantedBy == [ "timers.target" ];
     fixedDryRun = lib.hasInfix "--dry-run" serviceText && !(lib.hasInfix "--live" serviceText) && lib.hasInfix "reverie-prune-declared" serviceText;
     exactR12 = prunePackage.sourceHashes.prune == "fbed566fbdfe89d312abb8b1b32354e5f44f35b94918028ce882fbf444b17181" &&
-      prunePackage.sourceHashes.lease == "13f2f4af7ea1bf7cf1d9f315ee214c367eb5434bf8a4cb2ee570b5b990420c3c" &&
+      prunePackage.sourceHashes.lease == "7b640a38331c198626601346594ead1437fd6c15044393e55996aee9b62337f9" &&
       pruneHostPackage.sourceHashes == prunePackage.sourceHashes &&
       lib.hasPrefix "\"${prunePackage}/bin/reverie-prune\"" service.serviceConfig.ExecStart &&
       lib.hasPrefix "+\"${pruneHostPackage}/bin/reverie-prune-declared\"" service.serviceConfig.ExecStartPre;

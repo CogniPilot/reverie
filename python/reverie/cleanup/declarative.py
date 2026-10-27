@@ -32,7 +32,7 @@ class DeclaredInstaller(H.Installer):
     """
     source_hashes = {
         'reverie_prune.py': 'fbed566fbdfe89d312abb8b1b32354e5f44f35b94918028ce882fbf444b17181',
-        'lease.py': '13f2f4af7ea1bf7cf1d9f315ee214c367eb5434bf8a4cb2ee570b5b990420c3c',
+        'lease.py': '7b640a38331c198626601346594ead1437fd6c15044393e55996aee9b62337f9',
     }
 
     def pins(self):

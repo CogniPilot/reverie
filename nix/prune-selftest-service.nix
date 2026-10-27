@@ -67,7 +67,7 @@ in {
           "--prune" "${prunePackage}/libexec/reverie/reverie_prune.py"
           "--prune-sha" "fbed566fbdfe89d312abb8b1b32354e5f44f35b94918028ce882fbf444b17181"
           "--lease-lib" "${state}/lib/lease.py"
-          "--lease-sha" "13f2f4af7ea1bf7cf1d9f315ee214c367eb5434bf8a4cb2ee570b5b990420c3c"
+          "--lease-sha" "7b640a38331c198626601346594ead1437fd6c15044393e55996aee9b62337f9"
           "--runner" "${kit}/p3_host_runner.sh" "--kit" kit "--receipt" "${state}/selftest-receipt.json" ];
         PrivateMounts = true; PrivateTmp = true; PrivateNetwork = true; ProtectHome = true;
         NoNewPrivileges = true; PrivateUsers = false; ProtectProc = "default"; ProcSubset = "all";

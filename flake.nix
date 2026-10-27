@@ -75,6 +75,10 @@
           opsCore = import ./nix/ops-core.nix { inherit pkgs; src = source; };
           adminHarnessAddon = import ./nix/admin-harness-addon.nix { inherit pkgs; src = source; };
           ownerTerminalCore = import ./nix/owner-terminal-core.nix { inherit pkgs; src = source; };
+          # Optional diagnostic candidate only; never part of default runtime/image.
+          codexObserver = import ./nix/codex-observer.nix { inherit pkgs; };
+          codexObserverVendor = self.packages.${system}.codexObserver.cargoDeps;
+          codexObserverNativeCheck = self.packages.${system}.codexObserver.tests.native;
           workerIdmap = import ./nix/worker-idmap.nix { inherit pkgs; };
           workerDocker = import ./nix/worker-docker-tools.nix { inherit pkgs; src = source; };
           workerDockerSeccomp = import ./nix/worker-docker-profile.nix { inherit pkgs; };
@@ -253,6 +257,8 @@
           packages = self.packages.${system};
         in {
           inherit (packages) reverie memoryPackage start update gpuPublisher previewProxy previewService prune pruneR12 cleanupObservations ownerTerminalCore;
+          codexObserverSource = packages.codexObserver.tests.source;
+          codexObserverVendor = packages.codexObserver.tests.vendor;
           collectService = pkgs.runCommand "reverie-collect-service-evaluation" {
             checks = builtins.toJSON (import ./tests/collect_service_eval.nix {
               inherit nixpkgs system;

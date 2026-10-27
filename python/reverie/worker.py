@@ -1114,7 +1114,7 @@ class Broker:
                     created[sid]=OfficeAPI(Path(self.config['apiSocketRoot'])/sid, sid, self.address, Path(self.config['companyRoot']),**self.office_options())
                     self.cleanup_offices[id(created[sid])]=created[sid]
         except BaseException:
-            # Goal composition (Otto H2): every owned resource gets its own cleanup attempt; one failure records
+            # Goal composition: every owned resource gets its own cleanup attempt; one failure records
             # uncertainty and never prevents the remaining Office closes or lease releases. Recovered laptops are not stopped.
             for office in created.values():
                 try:self._close_office(office)

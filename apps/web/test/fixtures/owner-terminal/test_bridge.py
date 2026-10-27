@@ -17,6 +17,7 @@ import time
 import threading
 import unittest
 from unittest.mock import patch
+from fixture_support import accept_child, run_backend, stop_child
 from reverie import human_shell_capabilities as capabilities
 from reverie import human_terminal_protocol as protocol
 from reverie.owner_terminal_channel import Handoff, WebsitePeer, Program, Refusal as PeerRefusal, read_proc
@@ -53,8 +54,8 @@ class ConsumerPeer:
 
 class BridgeTests(unittest.TestCase):
  def setUp(self):
-  self.temp=tempfile.TemporaryDirectory(prefix='ob-',dir=os.environ['TMPDIR']);self.root=Path(self.temp.name)
-  self.endpoint=str(self.root/'s');self.listener=socket.socket(socket.AF_UNIX);self.listener.bind(self.endpoint);self.listener.listen(2);self.listener.settimeout(3)
+  self.temp=tempfile.TemporaryDirectory(prefix='ob-',dir=os.environ['TMPDIR']);self.addCleanup(self.temp.cleanup);self.root=Path(self.temp.name)
+  self.endpoint=str(self.root/'s');self.listener=socket.socket(socket.AF_UNIX);self.listener.bind(self.endpoint);self.listener.listen(2);self.listener.settimeout(3);self.addCleanup(self.listener.close)
   # R2 fixed endpoint substituted only in this owned fixture copy.
   source=CONNECTOR.read_text();self.assertEqual(source.count("'/run/reverie-owner-terminal/bootstrap.sock'"),1)
   (self.root/'fixture-connect.mjs').write_text(source.replace("'/run/reverie-owner-terminal/bootstrap.sock'",json.dumps(self.endpoint)))
@@ -63,17 +64,16 @@ class BridgeTests(unittest.TestCase):
   fixture=fixture.replace("'./dist/owner-laptop-terminal-authority.js'",json.dumps(str(DIST/'owner-laptop-terminal-authority.js'))).replace("'./dist/owner-ledger-bridge.js'",json.dumps(str(DIST/'owner-ledger-bridge.js')))
   (self.root/'fixture.mjs').write_text(fixture);(self.root/'target.json').write_text(json.dumps(TARGET))
   bootstrap=(PYTHON_SOURCE/'owner_terminal_bootstrap.py').read_text().replace("'/run/reverie-owner-terminal/bootstrap.sock'",json.dumps(self.endpoint));(self.root/'owner_terminal_bootstrap.py').write_text(bootstrap)
-  (self.root/'boot.py').write_text("import sys\nfrom owner_terminal_bootstrap import exec_backend\nexec_backend(sys.argv[1],tuple(sys.argv[1:]))\n")
-  self.process=subprocess.Popen([sys.executable,str(self.root/'boot.py'),str(NODE),str(self.root/'fixture.mjs'),str(self.root/'target.json')],stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,env={'PATH':'/not-used'})
+  selection=os.environ.get('NIX_REVERIE_TEST_NODE_CUSTODY')
+  if selection not in (None,'1'):raise ValueError('Unknown owned Node fixture mode')
+  (self.root/'fixture_support.py').write_text((ROOT/'fixture_support.py').read_text())
+  (self.root/'boot.py').write_text("import sys\nfrom owner_terminal_bootstrap import exec_backend\nfrom fixture_support import run_backend\nrun_backend(exec_backend,sys.argv[1],tuple(sys.argv[1:]),normalize_unmapped_node="+repr(selection=='1')+")\n")
+  self.process=subprocess.Popen([sys.executable,str(self.root/'boot.py'),str(NODE),str(self.root/'fixture.mjs'),str(self.root/'target.json')],stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,env={'PATH':'/not-used'});self.addCleanup(stop_child,self.process)
   pr=Program(str(NODE),(str(NODE),));site=OwnWebsite('/not-an-engine','a'*64,'sha256:'+'b'*64,'c'*64,os.getpid(),read_proc(os.getpid())['start'],os.getuid(),os.getgid(),pr,pr)
-  self.channel=Handoff(site);first,_=self.listener.accept();self.channel.bootstrap(first);second,_=self.listener.accept();self.channel.accept_node(second)
+  self.channel=Handoff(site);self.addCleanup(self.channel.close);first=accept_child(self.listener,self.process,'bootstrap');self.channel.bootstrap(first);second=accept_child(self.listener,self.process,'node');self.channel.accept_node(second)
   self.assertEqual(self.read()['event'],'ready')
   self.directory=self.root/'ledger';self.directory.mkdir(mode=0o700)
-  self.native=NativeTarget();self.service=LedgerService(self.channel,self.directory,native_target=self.native,consumer_verifier=ConsumerPeer())
- def tearDown(self):
-  self.service.close();self.listener.close()
-  if self.process.poll()is None:self.process.kill()
-  self.process.communicate(timeout=3);self.temp.cleanup()
+  self.native=NativeTarget();self.service=LedgerService(self.channel,self.directory,native_target=self.native,consumer_verifier=ConsumerPeer());self.addCleanup(self.service.close)
  def read(self):
   self.assertTrue(select.select([self.process.stdout],[],[],3)[0],'owned Node response timeout')
   line=self.process.stdout.readline();self.assertTrue(line,'owned Node exited before static metadata response');return json.loads(line)
@@ -193,5 +193,49 @@ class BridgeTests(unittest.TestCase):
   self._consumer_refusal_preserves_active_owner(False)
  def test_wrong_thread_consumer_refusal_preserves_live_owner_operation(self):
   self._consumer_refusal_preserves_active_owner(True)
+
+class FixtureInfrastructureTests(unittest.TestCase):
+ def stat_port(self, *, writable=False, drift=False):
+  native=Path.stat;calls=0
+  def observe(path,*args,**kwargs):
+   nonlocal calls
+   info=native(NODE if path==NODE.parent/'unselected'else path,*args,**kwargs)
+   fields=list(info)
+   if path==Path('/')or path==NODE or path==NODE.parent/'unselected':fields[4]=65534
+   if path==NODE:
+    calls+=1
+    if writable:fields[0]|=0o222
+    if drift and calls>1:fields[1]+=1
+   return os.stat_result(fields)
+  return observe
+ def test_explicit_fixture_only_normalizes_selected_unmapped_node_uid(self):
+  with patch.object(Path,'stat',self.stat_port()):
+   observed=run_backend(lambda *_:(NODE.stat().st_uid,(NODE.parent/'unselected').stat().st_uid),str(NODE),(str(NODE),),normalize_unmapped_node=True)
+  self.assertEqual(observed,(0,65534))
+ def test_default_unmapped_node_is_rejected_by_real_bootstrap_before_socket(self):
+  from reverie.owner_terminal_bootstrap import exec_backend
+  with patch.object(Path,'stat',self.stat_port()),patch('socket.socket')as opened:
+   with self.assertRaisesRegex(ValueError,'Fixed immutable backend required'):
+    run_backend(exec_backend,str(NODE),(str(NODE),))
+   opened.assert_not_called()
+ def test_fixture_preserves_writable_mode_refusal_in_real_bootstrap(self):
+  from reverie.owner_terminal_bootstrap import exec_backend
+  with patch.object(Path,'stat',self.stat_port(writable=True)),patch('socket.socket')as opened:
+   with self.assertRaisesRegex(ValueError,'Fixed immutable backend required'):
+    run_backend(exec_backend,str(NODE),(str(NODE),),normalize_unmapped_node=True)
+   opened.assert_not_called()
+ def test_fixture_node_inode_drift_refuses_without_entry_result(self):
+  with patch.object(Path,'stat',self.stat_port(drift=True)):
+   with self.assertRaisesRegex(ValueError,'fixture identity changed'):
+    run_backend(lambda *_:NODE.stat(),str(NODE),(str(NODE),),normalize_unmapped_node=True)
+ def test_bootstrap_failure_reports_child_stderr_without_waiting_on_accept(self):
+  with tempfile.TemporaryDirectory(prefix='of-',dir=os.environ['TMPDIR'])as directory:
+   listener=socket.socket(socket.AF_UNIX);self.addCleanup(listener.close)
+   listener.bind(str(Path(directory)/'s'));listener.listen(1)
+   child=subprocess.Popen([sys.executable,'-c',"import sys;sys.stderr.write('synthetic bootstrap refusal');sys.exit(7)"],stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
+   self.addCleanup(stop_child,child)
+   with self.assertRaisesRegex(AssertionError,'exit 7.*synthetic bootstrap refusal'):
+    accept_child(listener,child,'bootstrap')
+   self.assertEqual(child.returncode,7)
 
 if __name__=='__main__':unittest.main(verbosity=2)

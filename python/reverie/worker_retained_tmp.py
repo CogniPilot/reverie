@@ -251,19 +251,27 @@ def prepare_retained(config, paths, native_guard, *, references=collect):
             device, inside = _mount_location(path.resolve(strict=True), host_table)
             return device == target_coordinate[0] and (inside.is_relative_to(target_coordinate[1]) or
                    (target_coordinate[1].is_relative_to(inside) and inside.is_relative_to(scope_coordinate[1])))
+        def check_deadline():
+            need(time.monotonic() < deadline, 'Retained TMP publication deadline exhausted')
         def check():
+            check_deadline()
             for base, descriptor in lease_descriptors:
                 need(base.resolve() == base and _stamp(base.lstat())[:4] == _stamp(os.fstat(descriptor))[:4],
                      'Retained TMP lease directory changed')
-            need(time.monotonic() < deadline, 'Retained TMP publication deadline exhausted')
             need(_stamp(Path(paths.root).lstat())[:4] == _stamp(control)[:4], 'Retained TMP control custody changed')
             need(_stamp(Path(paths.scratch).lstat())[:4] == _stamp(parent)[:4], 'Retained TMP parent custody changed')
+            check_deadline()
         def guard(keys):
             check(); _sync_guard(native_guard, frozenset(keys)); check()
         with lease.retirement(target, Path(paths.scratch), bases, deadline=deadline, related=related,
                               resolve_paths=lambda path, key: _lease_path_candidates(config, paths, path, key)):
             guard({_key(original)})
-            observations = references(target, ignored_fds={oldfd}, check=check)
+            # Keep a clock check at every observer entry. Pinned directory FDs,
+            # lease barriers and full checks bracket each scan/publication;
+            # resolving all anchors per FD/map row adds unrelated filesystem IO.
+            check()
+            observations = references(target, ignored_fds={oldfd}, check=check_deadline)
+            check()
             need(observations['counts']['known'] == 0, 'Known live temporary reference refuses retirement')
             need(observations['allInitiallyEnumeratedProcessesVisited'] is True)
             check()
@@ -305,7 +313,9 @@ def prepare_retained(config, paths, native_guard, *, references=collect):
             guard({_key(original), _key(fresh)})
             # Do not stop after an early permission gap: a now-known holder
             # remains a refusal, and the intent fences this partial transition.
-            after_refs = references(envelope / 'data', ignored_fds={oldfd}, check=check)
+            check()
+            after_refs = references(envelope / 'data', ignored_fds={oldfd}, check=check_deadline)
+            check()
             need(after_refs['counts']['known'] == 0, 'Known retired-tree holder appeared during publication')
             need(after_refs['allInitiallyEnumeratedProcessesVisited'] is True)
             observations = {'before': observations, 'after': after_refs}
@@ -373,12 +383,15 @@ def finish_retained(config, paths, ready, native_confirmation, *, references=col
         for base in bases:
             descriptor = _directory(base, config['uid']); stack.callback(os.close, descriptor)
             lease_descriptors.append((base, descriptor))
-        def check():
+        def check_deadline():
             need(time.monotonic() < deadline, 'Retained TMP commit deadline exhausted')
+        def check():
+            check_deadline()
             for base, descriptor in lease_descriptors:
                 need(base.resolve() == base and _stamp(base.lstat())[:4] == _stamp(os.fstat(descriptor))[:4],
                      'Retained TMP commit lease directory changed')
             verify()
+            check_deadline()
         host_table = read_mount_table()
         target_coordinate = _mount_location(target, host_table)
         scope_coordinate = _mount_location(Path(paths.scratch), host_table)
@@ -390,7 +403,9 @@ def finish_retained(config, paths, ready, native_confirmation, *, references=col
                               resolve_paths=lambda path, key: _lease_path_candidates(config, paths, path, key)))
         commit_references = []
         for observed in (ready.data, target):
-            current_refs = references(observed, check=check)
+            check()
+            current_refs = references(observed, check=check_deadline)
+            check()
             need(current_refs['allInitiallyEnumeratedProcessesVisited'] is True)
             need(current_refs['counts']['known'] == 0, 'Known temporary reference appeared before canonical startup')
             commit_references.append(current_refs)
