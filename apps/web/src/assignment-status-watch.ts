@@ -251,6 +251,20 @@ export class AssignmentStatusWatch {
       else s.entries[i] = entry;
     });
   }
+  /** Only the typed pre-post refusal proves that this attempt had no chat effect. */
+  private async saveRefusedPost(entry: Entry, reservation: readonly number[]) {
+    await this.store.update((s) => {
+      const i = s.entries.findIndex((e) => e.id === entry.id);
+      if (i < 0) s.entries.push(entry);
+      else s.entries[i] = entry;
+      // Ticks serialize quota writers; configure does not change posts. Match the
+      // entire reserved array before removing only our appended slot, including
+      // when earlier attempts have the same timestamp. Unexpected drift retains
+      // quota conservatively rather than releasing somebody else's reservation.
+      if (s.posts.length === reservation.length && s.posts.every((t, n) => t === reservation[n]))
+        s.posts.pop();
+    });
+  }
   private async run() {
     let state = this.store.snapshot();
     const cfg = state.config;
@@ -437,6 +451,7 @@ export class AssignmentStatusWatch {
       const at = this.now();
       const recent = this.store.snapshot().posts.filter((t) => t > at - 3600000);
       if (recent.length >= bot.maxPerHour) return;
+      const reservation = [...recent, at];
       const entry: Entry = {
         id: randomUUID(),
         taskId: task.id,
@@ -456,7 +471,7 @@ export class AssignmentStatusWatch {
       };
       await this.store.update((s) => {
         s.entries.push(entry);
-        s.posts = [...recent, at];
+        s.posts = reservation;
       }); // Durable quota + attempt before chat IO.
       try {
         const fresh = this.current(entry);
@@ -478,7 +493,8 @@ export class AssignmentStatusWatch {
         await this.save(entry);
       } catch (error) {
         entry.phase = error instanceof BotWatchPostRefused ? 'not-delivered' : 'unknown';
-        await this.save(entry);
+        if (error instanceof BotWatchPostRefused) await this.saveRefusedPost(entry, reservation);
+        else await this.save(entry);
       }
     }
   }
@@ -651,10 +667,11 @@ export class AssignmentStatusWatch {
     const at = this.now(),
       recent = this.store.snapshot().posts.filter((t) => t > at - 3600000);
     if (recent.length >= bot.maxPerHour) return;
+    const reservation = [...recent, at];
     response.ackAttempted = true;
     await this.store.update((s) => {
       s.entries[s.entries.findIndex((e) => e.id === entry.id)] = entry;
-      s.posts = [...recent, at];
+      s.posts = reservation;
     });
     try {
       if (!this.responseCurrent(entry)) {
@@ -672,7 +689,7 @@ export class AssignmentStatusWatch {
     } catch (error) {
       if (error instanceof BotWatchPostRefused) {
         response.ackAttempted = false;
-        await this.save(entry);
+        await this.saveRefusedPost(entry, reservation);
       } else throw error;
     }
   }
@@ -811,10 +828,11 @@ export class AssignmentStatusWatch {
     const at = this.now(),
       recent = this.store.snapshot().posts.filter((t) => t > at - 3600000);
     if (recent.length >= bot.maxPerHour) return;
+    const reservation = [...recent, at];
     entry.notifiedManager = recipient;
     await this.store.update((s) => {
       s.entries[s.entries.findIndex((e) => e.id === entry.id)] = entry;
-      s.posts = [...recent, at];
+      s.posts = reservation;
     });
     try {
       if (!this.routingCurrent(entry, manager?.id)) return;
@@ -828,7 +846,7 @@ export class AssignmentStatusWatch {
     } catch (error) {
       if (error instanceof BotWatchPostRefused) {
         delete entry.notifiedManager;
-        await this.save(entry);
+        await this.saveRefusedPost(entry, reservation);
       } else throw error;
     }
   }
