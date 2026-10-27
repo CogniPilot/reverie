@@ -154,6 +154,12 @@ it('returns from the embedded People page only for its own same-origin back mess
     })
   );
   expect(h.shell.embed).toBe('people');
+  h.window.dispatchEvent(new h.window.MessageEvent('message', {
+    origin: h.window.location.origin,
+    source: h.window,
+    data: { type: 'office-back-to-chat' },
+  }));
+  expect(h.shell.embed).toBe('people');
   h.window.dispatchEvent(
     new h.window.MessageEvent('message', {
       origin: h.window.location.origin,
@@ -161,5 +167,5 @@ it('returns from the embedded People page only for its own same-origin back mess
       data: { type: 'office-back-to-chat' },
     })
   );
-  expect(h.shell.embed).toBeNull();
+  expect(h.shell.embed).toBe('company');
 });

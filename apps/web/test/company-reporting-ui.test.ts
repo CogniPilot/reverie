@@ -118,3 +118,10 @@ it('keeps names readable in a short viewport, zooms without writes and removes i
   const listener = h.shell._companyChartResize; h.shell.closePage();
   expect(listener).toBeTypeOf('function'); expect(h.shell._companyChartResize).toBeNull();
 });
+
+it('leaves ordinary left drags alone and reserves blank-map dragging for the middle mouse button', async () => {
+  const {h,writes}=await setup();const viewport=h.document.querySelector<HTMLElement>('.ca-company-map-viewport')!;
+  const pointer=(type:string,button:number,x:number)=>{const e=new h.window.MouseEvent(type,{button,clientX:x,clientY:30,bubbles:true,cancelable:true});Object.defineProperties(e,{pointerType:{value:'mouse'},pointerId:{value:1}});viewport.dispatchEvent(e);return e;};
+  viewport.scrollLeft=100;const left=pointer('pointerdown',0,100);pointer('pointermove',0,70);expect(left.defaultPrevented).toBe(false);expect(viewport.scrollLeft).toBe(100);expect(viewport.classList.contains('is-panning')).toBe(false);
+  const middle=pointer('pointerdown',1,100);pointer('pointermove',1,70);expect(middle.defaultPrevented).toBe(true);expect(viewport.scrollLeft).toBe(130);pointer('pointerup',1,70);expect(viewport.classList.contains('is-panning')).toBe(false);expect(writes).toEqual([]);
+});

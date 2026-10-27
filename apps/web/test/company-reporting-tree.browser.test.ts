@@ -53,6 +53,9 @@ it.each([
     const beforePan = await viewportHandle.evaluate(element => element.scrollLeft);
     await page.mouse.move(bounds.x + 80, bounds.y + 12); await page.mouse.down();
     await page.mouse.move(bounds.x - 20, bounds.y + 12, { steps: 5 }); await page.mouse.up();
+    expect(await viewportHandle.evaluate(element => element.scrollLeft)).toBe(beforePan);
+    await page.mouse.move(bounds.x + 80, bounds.y + 12); await page.mouse.down({button:'middle'});
+    await page.mouse.move(bounds.x - 20, bounds.y + 12, { steps: 5 }); await page.mouse.up({button:'middle'});
     if (await viewportHandle.evaluate(element => element.scrollWidth > element.clientWidth)) expect(await viewportHandle.evaluate(element => element.scrollLeft)).toBeGreaterThan(beforePan);
     const geometry = await page.evaluate(() => {
       const viewport = document.querySelector('.ca-company-map-viewport') as HTMLElement;
@@ -104,6 +107,21 @@ it.each([
     if (output) { await page.screenshot({ path: resolve(output, `${label}-fit.png`), fullPage: true }); writeFileSync(resolve(output, `${label}-geometry.json`), JSON.stringify({ geometry, fit, errors }, null, 2)); }
     await page.locator('[data-employee-id="person-11"] [aria-label="Edit profile for Person 12"]').click();
     await page.locator('.ca-expert-profile').waitFor();
+    if (label === 'desktop' || label === 'mobile') {
+      await page.evaluate(() => (document.querySelector('.ca-expert-profile') as HTMLDialogElement).close());
+      const scroll = await page.evaluate(() => {
+        const company = document.querySelector('.ca-company') as HTMLElement, chart = document.querySelector('.ca-company-map-viewport') as HTMLElement;
+        chart.scrollTop = chart.scrollHeight; company.scrollTop = Math.max(0, company.scrollHeight - company.clientHeight - 140);
+        const rect = chart.getBoundingClientRect(); return { before: company.scrollTop, remaining: company.scrollHeight - company.clientHeight - company.scrollTop, x: rect.x + Math.min(50, rect.width / 2), y: Math.max(80, Math.min(innerHeight - 120, rect.y + 100)) };
+      });
+      if (label === 'mobile') {
+        const cdp = await page.context().newCDPSession(page);
+        await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: scroll.x, y: scroll.y, id: 1 }] });
+        for (let i = 1; i <= 6; i++) { await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: scroll.x, y: scroll.y - i * 25, id: 1 }] }); await page.waitForTimeout(30); }
+        await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+      } else { await page.mouse.move(scroll.x, scroll.y); await page.mouse.wheel(0, 180); }
+      await expect.poll(() => page.locator('.ca-company').evaluate(e => e.scrollTop)).toBeGreaterThan(scroll.before + Math.min(50, scroll.remaining - 1));
+    }
     expect(errors).toEqual([]);
   } finally { await browser.close(); }
 });

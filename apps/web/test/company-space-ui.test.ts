@@ -70,3 +70,11 @@ it('rewires only the same-origin embedded back link and preserves the channel an
   const prior=h.shell.roomId;frame.contentDocument!.querySelector('a')!.click();await h.flush();await h.flush();
   expect(h.shell.embed).toBe('company');expect(h.shell.roomId).toBe(prior);
 });
+
+it('opens the category links for keyboard use and collapses with Escape back to the gear', async () => {
+  const {h}=await fixture();const gear=h.document.querySelector<HTMLButtonElement>('.ca-office-gear')!,pane=h.document.querySelector<HTMLElement>('.ca-office-pane')!;
+  expect(h.document.activeElement).toBe(pane.querySelector('button'));
+  pane.querySelector('button')!.dispatchEvent(new h.window.KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));
+  expect(pane.hidden).toBe(true);expect(gear.getAttribute('aria-expanded')).toBe('false');expect(h.document.activeElement).toBe(gear);
+  expect(h.window.localStorage.getItem('reverie:office-expanded')).toBe('false');
+});

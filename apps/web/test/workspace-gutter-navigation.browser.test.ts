@@ -22,6 +22,7 @@ it.each([{label:'desktop',width:1280,height:900},{label:'mobile',width:393,heigh
  await page.waitForTimeout(250);
  const geometry=await page.evaluate(()=>{const r=(s:string)=>{const a=document.querySelector(s)!.getBoundingClientRect();return {x:a.x,y:a.y,right:a.right,bottom:a.bottom,width:a.width,height:a.height};};return {gear:r('.ca-office-gear'),rail:r('.ca-rail'),pane:r('.ca-office-pane'),stats:r('.ca-machine-bar'),viewport:{width:innerWidth,height:innerHeight},buttons:[...document.querySelectorAll('.ca-office-pane button')].map(b=>b.textContent)};});
  expect(geometry.gear.x).toBeGreaterThanOrEqual(geometry.rail.x);expect(geometry.gear.right).toBeLessThanOrEqual(geometry.rail.right+1);expect(geometry.gear.right).toBeLessThanOrEqual(geometry.stats.x+1);expect(geometry.pane.bottom).toBeLessThanOrEqual(geometry.gear.y+1);expect(geometry.pane.x).toBeGreaterThanOrEqual(0);expect(geometry.pane.right).toBeLessThanOrEqual(width);expect(geometry.pane.y).toBeGreaterThanOrEqual(0);expect(geometry.buttons).toEqual(['Company','Board']);
+ const links=await page.locator('.ca-office-pane button').evaluateAll(buttons=>buttons.map(b=>{const r=b.getBoundingClientRect();return {x:r.x,y:r.y,right:r.right,bottom:r.bottom};}));expect(links[1].y).toBeGreaterThanOrEqual(links[0].bottom);expect(links[1].x).toBe(links[0].x);
  if(label==='small-mobile') {
    for(const viewport of [{width:320,height:568},{width:360,height:640},{width:320,height:740}]) {
      await page.setViewportSize(viewport);await page.waitForTimeout(250);
@@ -30,6 +31,8 @@ it.each([{label:'desktop',width:1280,height:900},{label:'mobile',width:393,heigh
    }
  }
  if(process.env.NAV_SCREENSHOT_DIR){mkdirSync(process.env.NAV_SCREENSHOT_DIR,{recursive:true});await page.screenshot({path:resolve(process.env.NAV_SCREENSHOT_DIR,label+'-gutter.png')});writeFileSync(resolve(process.env.NAV_SCREENSHOT_DIR,label+'-geometry.json'),JSON.stringify(geometry,null,2));}
+ await page.locator('.ca-office-pane button').first().focus();await page.keyboard.press('Escape');expect(await page.locator('.ca-office-gear').getAttribute('aria-expanded')).toBe('false');expect(await page.locator('.ca-office-gear').evaluate(e=>e===document.activeElement)).toBe(true);
+ await page.keyboard.press('Enter');await expect.poll(async()=>page.locator('.ca-office-pane button').first().evaluate(e=>e===document.activeElement)).toBe(true);await page.keyboard.press('Tab');expect(await page.locator('.ca-office-pane button').nth(1).evaluate(e=>e===document.activeElement)).toBe(true);
  await page.locator('.ca-office-pane button').filter({hasText:'Company'}).click();await page.waitForSelector('.ca-company-tools-button');
  await page.locator('.ca-company-tools-button').click();await page.locator('[aria-label="Company tools"] button').filter({hasText:/^Workspace$/}).click();
  await page.waitForSelector('.ca-tool-page-head button');await expect.poll(async()=>page.frameLocator('.ca-page-frame').locator('a').textContent()).toBe('Back to Company / tools');

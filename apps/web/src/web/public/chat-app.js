@@ -2366,7 +2366,7 @@ class ReverieChatApp {
     const box = this.el('div', 'ca-company-tree ca-company-map');
     const tools = this.el('div', 'ca-company-map-tools'); tools.setAttribute('aria-label', 'Reporting chart view');
     const viewport = this.el('div', 'ca-company-map-viewport'); viewport.tabIndex = 0;
-    viewport.setAttribute('aria-label', 'Reporting tree. Scroll to pan; use zoom controls to inspect people.');
+    viewport.setAttribute('aria-label', 'Reporting tree. Scroll normally; use zoom controls or middle-drag blank space to inspect people.');
     const stage = this.el('div', 'ca-company-map-stage');
     const canvas = this.el('div', 'ca-company-map-canvas');
     const svg = this.doc.createElementNS('http://www.w3.org/2000/svg', 'svg');
@@ -2424,11 +2424,11 @@ class ReverieChatApp {
       value, this.button('ca-btn', 'Zoom in reporting chart', () => zoom(1.25), { text: '+' }),
       this.button('ca-btn', 'Show reporting chart at 100%', () => { fitMode = ''; apply(1); }, { text: '100%' }),
       this.button('ca-btn', 'Fit company at readable zoom', () => { fitMode = 'company'; fit(true); }, { text: 'Fit company' }));
-    tools.title = 'Open a profile to edit reporting. Drag a person onto a manager to reparent. Scroll or drag blank space to pan.';
+    tools.title = 'Open a profile to edit reporting. Drag a person onto a manager to reparent. Scroll normally; middle-drag blank space to pan.';
     box.append(tools, viewport);
     let pan;
     viewport.addEventListener('pointerdown', event => {
-      if (event.button !== 0 || event.pointerType !== 'mouse' || event.target.closest('.ca-company-map-node, button, select')) return;
+      if (event.button !== 1 || event.pointerType !== 'mouse' || event.target.closest('.ca-company-map-node, button, select')) return;
       pan = { x: event.clientX, y: event.clientY, left: viewport.scrollLeft, top: viewport.scrollTop };
       viewport.setPointerCapture?.(event.pointerId); viewport.classList.add('is-panning'); event.preventDefault();
     });
@@ -3254,6 +3254,7 @@ class ReverieChatApp {
     if (!expanded) return;
     try { this.renderOfficePane(await this.verifyOfficeOwner()); }
     catch { this.renderOfficePane(false); }
+    this.els.officePane?.querySelector('button')?.focus();
   }
 
   async returnToCompanyTools() {
@@ -5413,6 +5414,12 @@ class ReverieChatApp {
     gear.setAttribute('aria-controls', 'ca-office-pane');
     const launcher = this.el('div', 'ca-office-launcher');
     const pane = this.el('nav', 'ca-office-pane'); pane.id = 'ca-office-pane'; pane.setAttribute('aria-label', 'Company and board');
+    pane.addEventListener('keydown', event => {
+      if (event.key !== 'Escape') return;
+      event.preventDefault(); event.stopPropagation();
+      caWrite('local', 'reverie:office-expanded', 'false'); this.renderOfficePane();
+      this.els.rail.querySelector('.ca-office-gear')?.focus();
+    });
     this.els.officeLauncher?.remove(); this.els.officePane?.remove();
     launcher.append(gear); this.els.rail.append(launcher); this.els.root.append(pane);
     this.els.officeLauncher = launcher; this.els.officePane = pane;
