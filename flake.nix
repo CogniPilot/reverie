@@ -74,6 +74,7 @@
           cleanupObservations = import ./nix/cleanup-observations.nix { inherit pkgs; src = source; };
           opsCore = import ./nix/ops-core.nix { inherit pkgs; src = source; };
           adminHarnessAddon = import ./nix/admin-harness-addon.nix { inherit pkgs; src = source; };
+          ownerTerminalCore = import ./nix/owner-terminal-core.nix { inherit pkgs; src = source; };
           workerIdmap = import ./nix/worker-idmap.nix { inherit pkgs; };
           workerDocker = import ./nix/worker-docker-tools.nix { inherit pkgs; src = source; };
           workerDockerSeccomp = import ./nix/worker-docker-profile.nix { inherit pkgs; };
@@ -251,7 +252,7 @@
           pkgs = pkgsFor system;
           packages = self.packages.${system};
         in {
-          inherit (packages) reverie memoryPackage start update gpuPublisher previewProxy previewService prune pruneR12 cleanupObservations;
+          inherit (packages) reverie memoryPackage start update gpuPublisher previewProxy previewService prune pruneR12 cleanupObservations ownerTerminalCore;
           collectService = pkgs.runCommand "reverie-collect-service-evaluation" {
             checks = builtins.toJSON (import ./tests/collect_service_eval.nix {
               inherit nixpkgs system;

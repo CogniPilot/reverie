@@ -115,7 +115,7 @@ class ResourcePolicyTests(unittest.TestCase):
                 if getattr(self,'done',False):return b''
                 self.done=True;return b'{}'
         class Upstream:
-            def __init__(self,*a,**k):pass
+            def __init__(self,*a,**k):self.sock=None
             def request(self,*a,**k):pass
             def getresponse(self):return Response()
             def close(self):pass

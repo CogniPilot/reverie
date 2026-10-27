@@ -30,9 +30,10 @@ def policy(config):
     value = config.get('coldTemporaryCleanup')
     if value is None:
         return None
-    if (type(value) is not dict or set(value) != {'version', 'enabled', 'hostLeaseDirectories'} or
+    if (type(value) is not dict or set(value) - {'strategy'} != {'version', 'enabled', 'hostLeaseDirectories'} or
             type(value['version']) is not int or value['version'] != 1 or value['enabled'] is not True or
-            type(value['hostLeaseDirectories']) is not list or len(value['hostLeaseDirectories']) > 16):
+            type(value['hostLeaseDirectories']) is not list or len(value['hostLeaseDirectories']) > 16 or
+            value.get('strategy', 'clear') not in ('clear', 'retain-and-replace')):
         raise ValueError('Invalid cold temporary cleanup policy')
     result = []
     for name in value['hostLeaseDirectories']:
@@ -48,6 +49,11 @@ def policy(config):
             raise ValueError('Duplicate host lease directory')
         result.append(name)
     return tuple(result)
+
+
+def strategy(config):
+    hosts = policy(config)
+    return None if hosts is None else config['coldTemporaryCleanup'].get('strategy', 'clear')
 
 
 def require_no_pending(paths):
@@ -254,6 +260,7 @@ def clear_cold_temporary(config, paths, native_guard, *, process_scan=_same_uid_
     require_no_pending(paths)
     if hosts is None:
         return {'state': 'COLD_TMP_CLEANUP_DISABLED'}
+    need(strategy(config) == 'clear', 'Non-destructive policy requires the retained TMP lifecycle')
     from .worker_tmp import prepare_temporary, IDENTITY
     from .cleanup import lease
     need(IDENTITY.fullmatch(paths.identity) and paths.kind in ('employee', 'session'))

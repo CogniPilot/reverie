@@ -45,7 +45,9 @@ if __package__:
     from .worker_resources import effective_config, policy_digest, validate_session_resources, validate_resource_reload
     from .worker_nix import prepare_store, store_guard
     from .worker_tmp import prepare_temporary, temporary_environment, write_storage_instructions, workspace_alias, home_workspace_alias
-    from .worker_cold_tmp import policy as cold_tmp_policy, require_no_pending as cold_require_no_pending, initialize_leases as cold_initialize_leases, clear_cold_temporary, read_mount_table, refuse_mount_aliases, refuse_host_mount_aliases
+    from .worker_cold_tmp import policy as cold_tmp_policy, require_no_pending as cold_require_no_pending, initialize_leases as cold_initialize_leases, clear_cold_temporary, strategy as cold_tmp_strategy, read_mount_table, refuse_mount_aliases, refuse_host_mount_aliases
+    from .worker_retained_tmp import prepare_retained, finish_retained, retired_root
+    from .worker_cold_tmp import _mount_location as _retained_mount_location
     from .worker_storage import storage_paths, storage_guard, prepare_storage, private_directory, storage_start_allowed, record_storage_binding, validate_storage, read_metadata
     from .worker_docker import enabled as rootless_docker_enabled, require_image as require_docker_image, security_args as docker_security_args, runtime_args as docker_runtime_args, require_account_mounts as require_docker_account_mounts
     from .worker_storage_labels import hostname as employee_hostname
@@ -82,7 +84,9 @@ else:
     _tmp_spec = importlib.util.spec_from_file_location('reverie_worker_tmp', Path(__file__).with_name('worker_tmp.py'))
     _tmp_module = importlib.util.module_from_spec(_tmp_spec)
     _tmp_spec.loader.exec_module(_tmp_module)
-    from reverie.worker_cold_tmp import policy as cold_tmp_policy, require_no_pending as cold_require_no_pending, initialize_leases as cold_initialize_leases, clear_cold_temporary, read_mount_table, refuse_mount_aliases, refuse_host_mount_aliases
+    from reverie.worker_cold_tmp import policy as cold_tmp_policy, require_no_pending as cold_require_no_pending, initialize_leases as cold_initialize_leases, clear_cold_temporary, strategy as cold_tmp_strategy, read_mount_table, refuse_mount_aliases, refuse_host_mount_aliases
+    from reverie.worker_retained_tmp import prepare_retained, finish_retained, retired_root
+    from reverie.worker_cold_tmp import _mount_location as _retained_mount_location
     prepare_temporary = _tmp_module.prepare_temporary
     temporary_environment = _tmp_module.temporary_environment
     write_storage_instructions = _tmp_module.write_storage_instructions
@@ -848,11 +852,14 @@ class Broker:
             if directory == Path(self.config['scratchRoot']): break
         name = '/' + self.config['deployment'] + '-agent-' + paths.session
         host_table = read_mount_table()
+        retained = retired_root(self.config, paths) if cold_tmp_strategy(self.config) == 'retain-and-replace' else None
         # The finalization marker must remain outside future configured grants,
         # as well as current writable namespace aliases. These are host control
         # files; normal private home/Nix mounts are supplied separately.
         for declared in self.config['mounts']:
             refuse_host_mount_aliases(Path(paths.root), Path(declared['source']).resolve(strict=True), host_table)
+            if retained is not None:
+                refuse_host_mount_aliases(retained, Path(declared['source']).resolve(strict=True), host_table)
         for item in items:
             state = item.get('State', {})
             if (type(state.get('Running')) is not bool or type(state.get('Pid')) is not int or
@@ -883,6 +890,8 @@ class Broker:
                 if not isinstance(destination, str) or not Path(destination).is_absolute() or str(Path(destination)) != destination:
                     raise RuntimeError('Cold temporary bind destination is unknown')
                 refuse_mount_aliases(target, real, Path(destination), host_table, container_table)
+                if retained is not None:
+                    refuse_mount_aliases(retained, real, Path(destination), host_table, container_table)
                 if type(mount.get('RW')) is not bool:
                     raise RuntimeError('Cold temporary bind writability is unknown')
                 if mount['RW']:
@@ -903,6 +912,66 @@ class Broker:
             raise RuntimeError('Cold temporary native reinspection is unknown') from None
         if self.stopping.is_set() or self.draining.is_set() or not storage_start_allowed(self.config, paths):
             raise RuntimeError('Cold temporary admission changed')
+
+    def confirm_retained_temporary(self, paths, ready, created_id):
+        """Actual new sleeping laptop binding, before any CLI can consume TMP."""
+        if (self.stopping.is_set() or self.draining.is_set() or
+                storage_paths(self.config, paths.session) != paths or
+                not storage_start_allowed(self.config, paths) or
+                cold_tmp_strategy(self.config) != 'retain-and-replace'):
+            raise RuntimeError('Retained TMP launch binding changed')
+        with self.storage_lease_lock:
+            lease = self.storage_leases.get(paths.session)
+            if lease is None or lease[1] != paths:
+                raise RuntimeError('Retained TMP storage lease is unavailable')
+        if not isinstance(created_id, str) or not re.fullmatch('[a-f0-9]{64}', created_id):
+            raise RuntimeError('Retained TMP requires the actual created container ID')
+        def inspect_created():
+            value = json.loads(self.run_engine(['inspect', created_id]).stdout)
+            if not isinstance(value, list) or len(value) != 1 or value[0].get('Id') != created_id:
+                raise RuntimeError('Retained TMP container identity is unavailable')
+            return value[0]
+        item = inspect_created(); state = item.get('State', {}); labels = item.get('Config', {}).get('Labels') or {}
+        if (item.get('Image') != self.config['image'] or
+                item.get('Name') != '/' + self.config['deployment'] + '-agent-' + paths.session or
+                labels.get('reverie.worker') != self.config['deployment'] or labels.get('reverie.session') != paths.session or
+                (paths.kind == 'employee' and labels.get('reverie.employee') != paths.identity) or
+                item.get('Config', {}).get('User') != str(self.config['uid']) + ':' + str(self.config['gid']) or
+                item.get('Config', {}).get('Entrypoint') != ['/bin/sleep'] or
+                item.get('Config', {}).get('Cmd') != ['infinity'] or
+                state.get('Running') is not True or state.get('Paused') is not False or
+                state.get('Restarting') is not False or type(state.get('Pid')) is not int or state['Pid'] <= 0):
+            raise RuntimeError('Retained TMP canonical container binding differs')
+        pid = state['Pid']; proc = Path('/proc') / str(pid)
+        before = (proc/'stat').read_text().rsplit(')', 1)[1].split()[19]
+        target = Path(paths.scratch)/'tmp'; actual = target.stat()
+        if (actual.st_dev, actual.st_ino) != ready.new_key or actual.st_uid != self.config['uid'] or stat.S_IMODE(actual.st_mode) != 0o700:
+            raise RuntimeError('Retained TMP fresh inode changed before startup')
+        mounts = item.get('Mounts')
+        if not isinstance(mounts, list):
+            raise RuntimeError('Retained TMP mount inventory is unavailable')
+        selected = [m for m in mounts if m.get('Destination') == '/tmp']
+        if len(selected) != 1 or selected[0].get('Type') != 'bind' or selected[0].get('Source') != str(target) or selected[0].get('RW') is not True:
+            raise RuntimeError('Retained TMP startup mount differs')
+        host_table, container_table = read_mount_table(), read_mount_table(pid)
+        device, inside = _retained_mount_location(target, host_table)
+        actual_tmp = [row for row in container_table if row['point'] == Path('/tmp')]
+        if len(actual_tmp) != 1 or actual_tmp[0]['device'] != device or actual_tmp[0]['root'] != inside:
+            raise RuntimeError('Retained TMP actual namespace differs')
+        for mount in mounts:
+            if mount.get('Type') == 'bind':
+                refuse_mount_aliases(retired_root(self.config, paths), Path(mount['Source']).resolve(strict=True),
+                                     Path(mount['Destination']), host_table, container_table)
+        def projection(value):
+            return {'id': value.get('Id'), 'image': value.get('Image'), 'name': value.get('Name'),
+                    'state': {key: value.get('State', {}).get(key) for key in ('Running','Paused','Restarting','Pid','StartedAt')},
+                    'mounts': sorted(value.get('Mounts', []), key=lambda m: json.dumps(m, sort_keys=True)),
+                    'labels': value.get('Config', {}).get('Labels'), 'user': value.get('Config', {}).get('User')}
+        if (projection(item) != projection(inspect_created()) or before != (proc/'stat').read_text().rsplit(')', 1)[1].split()[19]):
+            raise RuntimeError('Retained TMP native container drifted')
+        if self.stopping.is_set() or self.draining.is_set() or not storage_start_allowed(self.config, paths):
+            raise RuntimeError('Retained TMP current intent changed')
+        return {'containerId': created_id, 'image': self.config['image'], 'pid': pid, 'startTick': before}
 
     def release_storage(self, session_id):
         """Release an exact session's employee data lease. While the broker is stopping, the lock wait is bounded by the
@@ -1293,6 +1362,8 @@ class Broker:
         exit_file = None
         nix_guard = None
         storage_claimed = False
+        retention_ready = None
+        retention_container_id = None
         viewer_token = None
         try:
             if self.stopping.is_set():
@@ -1435,6 +1506,9 @@ class Broker:
                         args[-4:-4] = ['--mount', f'type=bind,src={nix_store},dst=/nix']
                     if previous.returncode == 0:
                         self.run_engine(['rm', name])
+                if not reuse and cold_tmp_strategy(self.config) == 'retain-and-replace':
+                    prepare_temporary(self.config, scratch)
+                    retention_ready = prepare_retained(self.config, paths, lambda keys: self.admit_cold_temporary(paths, keys))
                 self.office(session_id)
                 if not reuse:
                     network = name+'-lan'
@@ -1446,7 +1520,8 @@ class Broker:
                         if labels.get('reverie.session') != session_id or labels.get('reverie.worker') != self.config['deployment']:
                             raise ValueError('The worker network is not owned by this session')
                     prepare_temporary(self.config, scratch)
-                    clear_cold_temporary(self.config, paths, lambda keys: self.admit_cold_temporary(paths, keys))
+                    if retention_ready is None:
+                        clear_cold_temporary(self.config, paths, lambda keys: self.admit_cold_temporary(paths, keys))
                     for directory in ['build', 'cache', 'downloads', 'tasks']:
                         (scratch/directory).mkdir(mode=0o700, exist_ok=True)
                     home_workspace_alias(self.config, home)
@@ -1459,7 +1534,9 @@ class Broker:
                     if not storage_start_allowed(self.config,paths):
                         raise RuntimeError('Current employee running intent changed before creation')
                     self.command_telemetry.check_create_args(args)
-                    self.run_engine(args)
+                    creation = self.run_engine(args)
+                    if retention_ready is not None:
+                        retention_container_id = creation.stdout.strip()
                     owned = True
                     request['env'].update(
                         REVERIE_SESSION_ID=session_id, REVERIE_API_URL='http://127.0.0.1:8093',
@@ -1479,6 +1556,9 @@ class Broker:
                     if not storage_start_allowed(self.config,paths):
                         raise RuntimeError('Current employee running intent changed before startup')
                     self.run_engine(['start', name])
+                    if retention_ready is not None:
+                        finish_retained(self.config, paths, retention_ready,
+                                        lambda: self.confirm_retained_temporary(paths, retention_ready, retention_container_id))
                     wrapper = '/bin/reverie-worker-child "$1"; result=$?; printf "%s" "$result" > "$2.tmp"; mv "$2.tmp" "$2"; exec /bin/sleep infinity'
                     self.run_engine(tmux_exec_args(name, '-f', '/dev/null', 'new-session', '-d', '-x', str(request['cols']), '-y', str(request['rows']), '-s', 'office', '/bin/bash', '-c', wrapper, 'laptop', '/home/agent/.reverie-launch/'+launch.name, '/home/agent/.reverie-launch/'+exit_file.name))
                     self.run_engine(tmux_exec_args(name, 'set-option', '-g', 'status', 'off'))

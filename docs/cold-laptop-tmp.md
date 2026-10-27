@@ -89,3 +89,57 @@ active-process and lease protections, migration preservation, and the selected
 read-only recovery archive. Verify kernel write refusal and unchanged archive
 bytes. Synthetic fixtures and packaged-import checks do not establish these
 production guarantees. Periodic pruning requires separate validation.
+
+## Retain the old tree and publish fresh TMP
+
+An additional explicit policy strategy is available for an ordinary host that
+cannot inspect every owned process reference:
+
+```json
+{
+  "coldTemporaryCleanup": {
+    "version": 1,
+    "enabled": true,
+    "hostLeaseDirectories": [],
+    "strategy": "retain-and-replace"
+  }
+}
+```
+
+Omitting the policy still disables this feature. Omitting `strategy` keeps the
+strict destructive clearing described above. The additional strategy always
+retains the old tree, including when process metadata is inaccessible; it never
+labels that uncertainty as proof that no reference exists.
+
+The bounded observer continues past permission gaps so a later known file,
+working-directory, mapping or Unix listener reference still refuses publication.
+Registered active descendant tasks, applicable leases and reservations, live
+container aliases, root preservation markers, identity changes and exhausted
+metadata bounds also refuse. The metadata-first lease barrier checks registered
+path/inode evidence without walking the old tree. Ordinary destructive prune
+and its default lease behavior are unchanged.
+
+This strategy can retain large trees without reading or enumerating their files.
+A root `.keep`, task or source marker refuses. Deeper uninspected markers and
+work are preserved unchanged; no claim is made that unfinished work was released
+or that its storage was disposable. Retained data moves to a private same-device
+epoch outside laptop grants. A permanent ancestor `.keep` protects it under the
+normal prune policy, with an additional canonical reservation lasting at most
+24 hours. Expiry of that reservation does not remove the preservation marker.
+There is no automatic deletion or space-reclamation operation.
+
+A durable intent fences the namespace changes. No-replace renames preserve the
+old inode and publish a different writable mode-0700 TMP inode. The fence remains
+through all finalizers and actual canonical container confirmation, before any
+CLI starts. Partial or unknown results remain fenced even if the policy is
+removed. The resulting state is `OLD_TMP_RETAINED_FRESH_TMP_READY`, with explicit
+old/new inode and retained-path evidence, rather than `COLD_TMP_CLEARED`.
+
+Fresh TMP is an intermediate capability. It does not reclaim the old space,
+qualify destructive pruning, establish a production archive grant or complete
+the broader storage-cleanup acceptance requirements.
+
+The retained strategy brackets metadata/publication stages with a shared
+30-second stage budget; it does not raise the strict clear strategy's ten-second
+budget or interrupt a blocked kernel syscall. Namespace socket observations
+identify an observer process, rather than asserting that process owns the FD.

@@ -25,7 +25,7 @@ import uuid
 
 SOURCE_HASHES = {
     'reverie_prune.py': 'eee8b1608e1e87117d00b955b6cf6271cea809ab5e0cfd3f77696a05007eb3fb',
-    'lease.py': '4a1022e5536f989f9d4ef8495e52d035c497e2567b331b6f82aacbb5285f3d41',
+    'lease.py': '13f2f4af7ea1bf7cf1d9f315ee214c367eb5434bf8a4cb2ee570b5b990420c3c',
 }
 STORE = Path('/nix/store')
 UNITS = Path('/run/systemd/system')

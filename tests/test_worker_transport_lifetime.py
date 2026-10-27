@@ -81,3 +81,14 @@ class BrokerTransportLifetimeTests(unittest.TestCase):
             self.assertFalse(thread.is_alive()); self.assert_same_synthetic_process()
             clear.assert_not_called()
         self.assertFalse(any(c[0] in ('create', 'stop', 'kill', 'rm', 'start') for c in self.calls))
+
+    def test_reattach_with_retention_policy_never_rotates_or_commits(self):
+        self.config['coldTemporaryCleanup'] = {'version': 1, 'enabled': True,
+            'hostLeaseDirectories': [], 'strategy': 'retain-and-replace'}
+        with patch('reverie.worker.prepare_retained', side_effect=AssertionError('reattach must not rotate')) as prepare, \
+             patch('reverie.worker.finish_retained', side_effect=AssertionError('reattach must not commit')) as finish:
+            broker, thread, client = self.attach()
+            client.close(); thread.join(5)
+            self.assertFalse(thread.is_alive()); self.assert_same_synthetic_process()
+            prepare.assert_not_called(); finish.assert_not_called()
+        self.assertFalse(any(c[0] in ('create', 'stop', 'kill', 'rm', 'start') for c in self.calls))

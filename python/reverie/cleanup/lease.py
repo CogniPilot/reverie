@@ -244,11 +244,11 @@ def _parse_duration(text: str) -> int:
 
 
 def reserve(directory, duration: str, owner: str = "", compute_lease_id: str | None = None,
-            wait: float = 60.0, renew: bool = False) -> str:
+            wait: float = 60.0, renew: bool = False, *, base: Path | None = None) -> str:
     """RESERVE (contract §2): a time-bound reservation for staged inputs, written under the barrier SH."""
     directory = os.path.abspath(directory)
     length = _parse_duration(duration)
-    base = leases_dir()
+    base = leases_dir() if base is None else _scan_base(base)
     with _barrier(base, fcntl.LOCK_SH, wait):
         try:
             key = key_of(directory)           # D must still be a plain dir; never recreated
@@ -288,11 +288,10 @@ def _read_reservation(path: Path):
         return {"malformed": True}
 
 
-def _reservation_state(base: Path, key: str) -> int:
-    value = _read_reservation(base / f"{key}.reserve.json")
+def _reservation_value_state(value, now=None) -> int:
     if value is None:
         return FREE
-    now = _now()
+    now = _now() if now is None else now
     try:
         created, until = value["created_utc"], value["until_utc"]
         # §T: JSON numbers only (bool is excluded: type(True) is bool), and P5's three bounds.
@@ -304,6 +303,10 @@ def _reservation_state(base: Path, key: str) -> int:
     if not ok:                                          # an explicit test, never `assert` (stripped under -O; Rex A1)
         return UNKNOWN                                  # skip and report; never "live" and never "expired"
     return IN_USE if until > now else FREE              # expired: only a stale candidate; other checks still apply
+
+
+def _reservation_state(base: Path, key: str) -> int:
+    return _reservation_value_state(_read_reservation(base / f"{key}.reserve.json"))
 
 
 def _keys_for(candidate: str, root: str | None, *, max_entries=None, deadline=None):
@@ -513,6 +516,182 @@ def _ls_locked(base: Path) -> list[dict]:
             out.append({"key": key, "held": held, "reserved": reserved, "malformedMetadata": malformed,
                         "path": _path_record(base, key)[0], "holders": records})
     return out
+
+
+def _retirement_record(basefd, name):
+    """Bounded, pinned lease metadata; no symlink/special-file payload reads."""
+    fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC, dir_fd=basefd)
+    try:
+        before = os.fstat(fd)
+        owner = os.fstat(basefd).st_uid
+        if (not stat.S_ISREG(before.st_mode) or before.st_uid != owner or
+                before.st_mode & 0o022 or before.st_nlink != 1 or before.st_size > 65536):
+            raise LeaseError('retirement lease metadata unavailable')
+        raw = b''
+        while True:
+            chunk = os.read(fd, 65537 - len(raw))
+            if not chunk:
+                break
+            raw += chunk
+            if len(raw) > 65536:
+                raise LeaseError('retirement lease metadata bound exhausted')
+        after = os.fstat(fd)
+        current = os.stat(name, dir_fd=basefd, follow_symlinks=False)
+        stamp = lambda value: (value.st_dev, value.st_ino, value.st_size, value.st_mtime_ns, value.st_ctime_ns)
+        if stamp(before) != stamp(after) or stamp(after) != stamp(current) or len(raw) != before.st_size:
+            raise LeaseError('retirement lease metadata changed')
+        def unique(pairs):
+            value = {}
+            for key, item in pairs:
+                if key in value:
+                    raise LeaseError('duplicate retirement lease metadata')
+                value[key] = item
+            return value
+        value = json.loads(raw, object_pairs_hook=unique)
+        if not isinstance(value, dict) or type(value.get('version')) is not int or value['version'] != 1:
+            raise LeaseError('retirement lease metadata malformed')
+        return value
+    except (OSError, ValueError) as error:
+        raise LeaseError('retirement lease metadata unavailable') from error
+    finally:
+        os.close(fd)
+
+
+def _retirement_probe_lock(basefd, key, owner):
+    fd = os.open(key + '.lock', os.O_RDWR | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=basefd)
+    try:
+        info = os.fstat(fd)
+        if (not stat.S_ISREG(info.st_mode) or info.st_uid != owner or
+                info.st_mode & 0o077 or info.st_nlink != 1):
+            raise LeaseError('retirement lease lock unavailable')
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            held = False
+        except BlockingIOError:
+            held = True
+        return fd, held
+    except BaseException:
+        os.close(fd)
+        raise
+
+
+@contextmanager
+def retirement(candidate, root, bases, *, deadline, max_records=4096, related=None, resolve_paths=None):
+    """Canonical barriers for NON-DESTRUCTIVE tree retirement, without a walk.
+
+    Every registered active path is classified from pinned path/key metadata;
+    a live related root/ancestor/descendant refuses. Missing or ambiguous active
+    evidence refuses. All barriers and relevant existing kernel locks remain
+    held until exit. This is not the destructive janitor's subtree inode oracle.
+    A trusted optional synchronous relationship callback adds host-mount aliases.
+    """
+    if (type(deadline) not in (int, float) or not math.isfinite(deadline) or
+            type(max_records) is not int or max_records < 1):
+        raise LeaseError('invalid retirement lease bounds')
+    candidate, root = Path(candidate), Path(root)
+    if (not candidate.is_absolute() or candidate.resolve() != candidate or
+            candidate.is_symlink() or not candidate.is_dir() or
+            not candidate.is_relative_to(root) or root.resolve() != root):
+        raise LeaseError('canonical retirement lease root required')
+    def check():
+        if time.monotonic() >= deadline:
+            raise LeaseError('retirement lease deadline exhausted')
+    ancestors = set()
+    parent = candidate
+    while True:
+        ancestors.add(key_of(parent))
+        if parent == root:
+            break
+        parent = parent.parent
+    ordered = sorted((_scan_base(base) for base in bases), key=str)
+    if not ordered or len(set(map(str, ordered))) != len(ordered):
+        raise LeaseError('retirement lease inventory unavailable')
+    count, relevant_count = 0, 0
+    with ExitStack() as stack:
+        descriptors = []
+        for base in ordered:
+            check()
+            fd = os.open(base, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
+            stack.callback(os.close, fd)
+            descriptors.append((base, fd, os.fstat(fd)))
+            stack.enter_context(_barrier(base, fcntl.LOCK_EX, 0))
+        for base, basefd, baseinfo in descriptors:
+            grouped = {}
+            with os.scandir(basefd) as entries:
+                for entry in entries:
+                    check()
+                    count += 1
+                    if count > max_records:
+                        raise LeaseError('retirement lease inventory bound exhausted')
+                    if entry.name == 'barrier.lock':
+                        continue
+                    match = re.fullmatch(r'([0-9]+-[0-9]+)\.(lock|path\.json|reserve\.json|[0-9]+\.json)', entry.name)
+                    if not match:
+                        raise LeaseError('retirement lease inventory malformed')
+                    grouped.setdefault(match[1], []).append((entry.name, match[2]))
+            for key, names in sorted(grouped.items()):
+                check()
+                records = [(name, kind, _retirement_record(basefd, name))
+                           for name, kind in names if kind != 'lock']
+                reservation = next((value for _name, kind, value in records if kind == 'reserve.json'), None)
+                reservation_state = _reservation_value_state(reservation)
+                if reservation_state == UNKNOWN:
+                    raise LeaseError('retirement reservation is malformed')
+                lockfd, held = None, False
+                if any(kind == 'lock' for _name, kind in names):
+                    lockfd, held = _retirement_probe_lock(basefd, key, baseinfo.st_uid)
+                active = held or reservation_state == IN_USE
+                relevant = key in ancestors
+                try:
+                    paths = [value.get('path') for _name, _kind, value in records]
+                    if active and not paths:
+                        raise LeaseError('active retirement lease has no path evidence')
+                    for name in paths:
+                        if (not isinstance(name, str) or len(name.encode()) > 4096 or
+                                not Path(name).is_absolute() or str(Path(name)) != name or '\0' in name or '..' in Path(name).parts):
+                            raise LeaseError('retirement registered path unavailable')
+                        path = Path(name)
+                        relevant = relevant or path.is_relative_to(candidate) or (candidate.is_relative_to(path) and path.is_relative_to(root))
+                        if active:
+                            physicals = (path.resolve(strict=True),) if resolve_paths is None else resolve_paths(path, key)
+                            if type(physicals) is not tuple or not 0 < len(physicals) <= 32:
+                                if hasattr(physicals, 'close'):
+                                    physicals.close()
+                                raise LeaseError('active retirement lease path cannot be resolved')
+                            for physical in physicals:
+                                if (not isinstance(physical, Path) or physical.resolve(strict=True) != physical or
+                                        key_of(physical) != key):
+                                    raise LeaseError('active retirement lease path changed')
+                                relevant = relevant or physical.is_relative_to(candidate) or (candidate.is_relative_to(physical) and physical.is_relative_to(root))
+                                if related is not None:
+                                    result = related(physical)
+                                    if type(result) is not bool:
+                                        if hasattr(result, 'close'):
+                                            result.close()
+                                        raise LeaseError('synchronous retirement path classification required')
+                                    relevant = relevant or result
+                    if relevant:
+                        relevant_count += 1
+                        if active:
+                            error = LeaseError('temporary tree has a live registered lease or reservation')
+                            error.code = IN_USE
+                            raise error
+                        if lockfd is not None:
+                            stack.callback(os.close, lockfd)
+                            lockfd = None
+                finally:
+                    if lockfd is not None:
+                        os.close(lockfd)
+        def validate_bases():
+            check()
+            for base, fd, original in descriptors:
+                held, current = os.fstat(fd), base.lstat()
+                stamp = lambda value: (value.st_dev, value.st_ino, value.st_uid, value.st_mode)
+                if base.resolve() != base or stamp(original) != stamp(held) or stamp(held) != stamp(current):
+                    raise LeaseError('retirement lease directory changed')
+        validate_bases()
+        yield {'registeredRecords': count, 'relevantKeys': relevant_count, 'treeWalkPerformed': False}
+        validate_bases()
 
 
 def main(argv=None) -> int:

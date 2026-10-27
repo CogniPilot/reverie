@@ -113,6 +113,13 @@ let
         test/bot-watches-runtime.test.ts test/bot-watch-durable-chat.test.ts test/bot-watch-state.test.ts \
         test/github-repository-watch-source.test.ts test/github-repository-watches.test.ts \
         test/github-repository-watch-routes.test.ts test/chat-bot-commit-authority.test.ts
+      # The console owns this Python/Node composition check after its TS build.
+      # memoryPackage's Python discovery never depends on the console output.
+      PYTHONPATH="$PWD/test/fixtures/goal-source/python" \
+        OWN_TEST_NODE="${pkgs.nodejs_22}/bin/node" \
+        OWNER_TERMINAL_TEST_DIST="$PWD/dist" \
+        OWNER_TERMINAL_TEST_CONNECTOR="$PWD/scripts/connect-owner-terminal.mjs" \
+        python3 -B test/fixtures/owner-terminal/test_bridge.py
       runHook postCheck
     '';
     installPhase = ''
