@@ -16,7 +16,7 @@ it.each([0,40,100])('plots actual %s%% reading plus horizontal cap and real rese
  expect(Number(cap.getAttribute('y1'))).toBeCloseTo(8+(1-100/110)*94);expect(cap.getAttribute('y1')).toBe(cap.getAttribute('y2'));
  expect(Number(line.getAttribute('x1'))).toBeCloseTo(28+(reset-START)/(END-START)*284);expect(line.getAttribute('x1')).toBe(line.getAttribute('x2'));
  expect(Number(point.getAttribute('cx'))).toBeCloseTo(28+(asOf-START)/(END-START)*284);expect(Number(point.getAttribute('cy'))).toBeCloseTo(8+(1-used/110)*94);
- expect(doc.body.textContent).toContain(`${100-used}% remaining`);expect(doc.body.textContent).toContain('5h cap · 100%');expect(svg.getAttribute('aria-label')).toContain('percentages of their own window limits');
+ expect(doc.body.textContent).toContain(`${100-used}% remaining`);expect(svg.getAttribute('aria-label')).toContain('100% cap');expect(svg.getAttribute('aria-label')).toContain('percentages of their own window limits');
  expect(svg.querySelectorAll('.five-hour-markers polyline,.five-hour-markers polygon,.five-hour-markers rect')).toHaveLength(0);expect(svg.querySelectorAll('polyline')).toHaveLength(1);expect(svg.querySelector('polyline')!.getAttribute('points')).toContain('68.6');
  expect(doc.querySelectorAll('svg')).toHaveLength(1);
 });
@@ -29,8 +29,8 @@ it('retains expired readings at their actual time and dims them without assuming
 it('does not invent a reading position when only its timestamp is unavailable',()=>{
  const doc=render({used:10,reset:null,asOf:null,stale:true});expect(doc.body.textContent).toContain('Reset time unavailable');expect(doc.body.textContent).toContain('Reading time unavailable');expect(doc.querySelector('.five-hour-cap')).not.toBeNull();expect(doc.querySelector('.five-hour-reading')).toBeNull();expect(doc.querySelector('.five-hour-reset')).toBeNull();
 });
-it.each([START-HOUR,END+HOUR])('labels reset outside the plotted interval without clamping a fake vertical line (%s)',reset=>{
- const doc=render({used:25,reset,asOf:NOW});expect(doc.body.textContent).toContain('outside plotted week');expect(doc.querySelector('.five-hour-reset')).toBeNull();expect(doc.querySelector('.five-hour-reset-outside')!.textContent).toContain(reset>END?'→':'←');
+it.each([START-HOUR,END+HOUR])('reports reset outside the plotted interval without clamping a fake vertical line (%s)',reset=>{
+ const doc=render({used:25,reset,asOf:NOW});expect(doc.body.textContent).toContain('outside plotted week');expect(doc.querySelector('.five-hour-reset')).toBeNull();expect(doc.querySelector('.five-hour-reset-outside')).toBeNull();
 });
 it.each([1e20,1e308,Infinity,NaN])('rejects invalid Date-range reset/as-of without breaking real formatting (%s)',invalid=>{
  const doc=render({used:25,reset:invalid,asOf:invalid,stale:false});expect(doc.body.textContent).toContain('25% used');expect(doc.body.textContent).toContain('Reset time unavailable');expect(doc.body.textContent).toContain('Reading time unavailable');expect(doc.querySelector('.five-hour-reset')).toBeNull();expect(doc.querySelector('.five-hour-reading')).toBeNull();

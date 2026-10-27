@@ -797,12 +797,10 @@ function burnChart(svg, p) {
   if (used5h !== null || reset5h !== null) {
     const c5h = css('--accent'), opacity5h = stale5h ? '.5' : '.9';
     g += `<g class="five-hour-markers" opacity="${opacity5h}"><title>${esc(summary5h + ' ' + explanation5h)}</title>`;
-    g += `<line class="five-hour-cap" x1="${L}" x2="${W - R}" y1="${Y(100)}" y2="${Y(100)}" stroke="${c5h}" stroke-width="1.5" stroke-dasharray="8 3 2 3"/><text class="five-hour-cap-label" x="${L + 4}" y="${Y(100) - 4}" font-size="9" fill="${c5h}">5h cap · 100%</text>`;
+    g += `<line class="five-hour-cap" x1="${L}" x2="${W - R}" y1="${Y(100)}" y2="${Y(100)}" stroke="${c5h}" stroke-width="1.5" stroke-dasharray="8 3 2 3"/>`;
     if (reset5h !== null && !outside5h) {
-      const rx = X(reset5h), anchor = rx < W / 2 ? 'start' : 'end', offset = rx < W / 2 ? 4 : -4;
-      g += `<line class="five-hour-reset" x1="${rx}" x2="${rx}" y1="${T}" y2="${Hh - Bm}" stroke="${c5h}" stroke-width="1.5" stroke-dasharray="3 3"><title>${esc(resetLabel5h)}</title></line><text class="five-hour-reset-label" x="${rx + offset}" y="${Y(100) + 13}" text-anchor="${anchor}" font-size="9" fill="${c5h}">5h reset</text>`;
-    } else if (outside5h) {
-      g += `<text class="five-hour-reset-outside" x="${W - R}" y="${Y(100) + 13}" text-anchor="end" font-size="9" fill="${c5h}">5h reset ${reset5h > e ? '→' : '←'} outside view</text>`;
+      const rx = X(reset5h);
+      g += `<line class="five-hour-reset" x1="${rx}" x2="${rx}" y1="${T}" y2="${Hh - Bm}" stroke="${c5h}" stroke-width="1.5" stroke-dasharray="3 3"><title>${esc(resetLabel5h)}</title></line>`;
     }
     if (used5h !== null && asOf5h !== null && asOf5h >= s && asOf5h <= e) g += `<circle class="five-hour-reading" cx="${X(asOf5h)}" cy="${Y(used5h)}" r="4" fill="${css('--panel')}" stroke="${c5h}" stroke-width="2"><title>${esc(summary5h)}</title></circle>`;
     g += '</g>';
