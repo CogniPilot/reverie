@@ -68,7 +68,7 @@ function harness() {
         (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]!
       ),
   };
-  const methods = runInNewContext(`${source}; ({openPlanMove, renderPlanMembers, planRequestStatus})`, context);
+  const methods = runInNewContext(`${source}; ({openPlanMove, renderPlanMembers, planRequestStatus, showPlanMoveProgress, showPlanRequestProgress, forcePlanMove})`, context);
   const dialog = dom.window.document.querySelector('dialog')!;
   return { dom, context, methods, fetch, dialog };
 }
@@ -176,5 +176,145 @@ describe('plan request deadline display', () => {
     expect(h.methods.planRequestStatus({ ...r, notified: true }, 65_000)).toContain('Awaiting the expert');
     expect(h.methods.planRequestStatus(r, 1_800_000)).toContain('Expired');
     expect(r.expiresAt).toBe(1_800_000);
+  });
+});
+
+
+describe('completed plan progress dialogs', () => {
+  function response(data: unknown) {
+    return { ok: true, status: 200, json: async () => ({ success: true, data }) };
+  }
+  function progress(kind: 'move' | 'request', initial: Record<string, unknown>, h = harness()) {
+    h.dialog.showModal();
+    if (kind === 'move') h.methods.showPlanMoveProgress(h.dialog, initial, 'Alex');
+    else h.methods.showPlanRequestProgress(h.dialog, { name: 'Alex', ...initial });
+    return h;
+  }
+  for (const kind of ['move', 'request'] as const) {
+    it(`${kind} closes once its current status reports successful completion`, async () => {
+      const h = harness();
+      h.fetch.mockImplementationOnce(async () => response({ id: 'progress', phase: 'completed' }));
+      const close = vi.spyOn(h.dialog, 'close');
+      progress(kind, { id: 'progress', phase: 'executing' }, h);
+      await vi.waitFor(() => expect(close).toHaveBeenCalledTimes(1));
+      expect(h.dialog.open).toBe(false);
+      expect(h.context.setTimeout.mock.calls.filter(([, delay]) => delay === 1000 || delay === 1500)).toHaveLength(0);
+      expect(h.fetch.mock.calls.every(([path]) => !path.endsWith('/cancel') && !path.endsWith('/resolve'))).toBe(true);
+    });
+    for (const phase of ['failed', 'recovery-required']) {
+      it(`${kind} keeps ${phase} visible without further polling`, async () => {
+        const h = harness();
+        h.fetch.mockImplementationOnce(async () => response({ id: 'progress', phase, error: 'Inspect the retained move', newSession: 'destination', sourceCleanupVerified: true }));
+        progress(kind, { id: 'progress', phase: 'executing' }, h);
+        await vi.waitFor(() => expect(h.dialog.querySelector('.status')!.textContent).toContain(phase));
+        expect(h.dialog.open).toBe(true);
+        expect(h.dialog.textContent).toContain('Inspect the retained move');
+        expect(h.context.setTimeout.mock.calls.filter(([, delay]) => delay === 1000 || delay === 1500)).toHaveLength(0);
+        if (kind === 'move' && phase === 'recovery-required') expect(h.dialog.querySelector<HTMLButtonElement>('[data-resolve]')!.hidden).toBe(false);
+      });
+    }
+    it(`${kind} ignores an old successful response after another progress dialog replaces it`, async () => {
+      const h = harness();
+      let finish!: (value: ReturnType<typeof response>) => void;
+      h.fetch.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+      progress(kind, { id: 'old', phase: 'executing' }, h);
+      const other = kind === 'move' ? 'request' : 'move';
+      progress(other, { id: 'new', phase: 'failed', error: 'New dialog stays' }, h);
+      const currentHTML = h.dialog.innerHTML;
+      finish(response({ id: 'old', phase: 'completed' }));
+      await new Promise(resolve => setImmediate(resolve));
+      expect(h.dialog.open).toBe(true);
+      expect(h.dialog.innerHTML).toBe(currentHTML);
+      expect(h.context.setTimeout.mock.calls.filter(([, delay]) => delay === 1000 || delay === 1500)).toHaveLength(0);
+    });
+    it(`${kind} does not repaint or poll after progress is hidden`, async () => {
+      const h = harness();
+      let finish!: (value: ReturnType<typeof response>) => void;
+      h.fetch.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+      progress(kind, { id: 'old', phase: 'executing' }, h);
+      h.dialog.querySelector<HTMLButtonElement>('[data-close]')!.click();
+      const hiddenHTML = h.dialog.innerHTML;
+      finish(response({ id: 'old', phase: 'failed', error: 'Late failure' }));
+      await new Promise(resolve => setImmediate(resolve));
+      expect(h.dialog.open).toBe(false);
+      expect(h.dialog.innerHTML).toBe(hiddenHTML);
+      expect(h.context.setTimeout.mock.calls.filter(([, delay]) => delay === 1000 || delay === 1500)).toHaveLength(0);
+    });
+  }
+  for (const kind of ['move', 'request'] as const) {
+    it(`${kind} stops a queued poll after native dialog close without cancelling the move`, async () => {
+      const h = harness();
+      h.fetch.mockImplementationOnce(async () => response({ id: 'progress', phase: 'executing' }));
+      progress(kind, { id: 'progress', phase: 'executing' }, h);
+      await vi.waitFor(() => expect(h.context.setTimeout.mock.calls.some(([, delay]) => delay === (kind === 'move' ? 1000 : 1500))).toBe(true));
+      const callback = h.context.setTimeout.mock.calls.find(([, delay]) => delay === (kind === 'move' ? 1000 : 1500))![0];
+      const calls = h.fetch.mock.calls.length;
+      h.dialog.close();
+      await callback();
+      expect(h.fetch).toHaveBeenCalledTimes(calls);
+      expect(h.dialog.open).toBe(false);
+    });
+  }
+  it('immediate owner-forced success closes the progress dialog without another move', async () => {
+    const h = harness();
+    vi.spyOn(h.dom.window, 'confirm').mockReturnValue(true);
+    await h.methods.openPlanMove('alex', 'second');
+    h.dialog.querySelector<HTMLButtonElement>('[data-force]')!.click();
+    await vi.waitFor(() => expect(h.dialog.open).toBe(false));
+    expect(h.fetch.mock.calls.filter(([path]) => path === '/api/plans/moves/force')).toHaveLength(1);
+    expect(h.fetch.mock.calls.some(([path]) => path.endsWith('/cancel'))).toBe(false);
+  });
+});
+
+
+describe('plan move create and preview dialog ownership', () => {
+  function response(data: unknown) { return {ok: true, status: 200, json: async () => ({success: true, data})}; }
+  for (const action of ['force', 'request', 'preview'] as const) {
+    for (const outcome of ['success', 'failure'] as const) {
+      it(`ignores late ${action} ${outcome} after close and a new form opens`, async () => {
+        const h = harness();
+        vi.spyOn(h.dom.window, 'confirm').mockReturnValue(true);
+        let finish!: (value: ReturnType<typeof response>) => void;
+        let fail!: (error: Error) => void;
+        if (action !== 'preview') await h.methods.openPlanMove('alex', 'second');
+        h.fetch.mockImplementationOnce(() => new Promise((resolve, reject) => { finish = resolve; fail = reject; }));
+        let preview: Promise<void> | undefined;
+        if (action === 'preview') preview = h.methods.openPlanMove('alex', 'second');
+        else if (action === 'force') h.dialog.querySelector<HTMLButtonElement>('[data-force]')!.click();
+        else h.dialog.querySelector('form')!.dispatchEvent(new h.dom.window.Event('submit', {bubbles: true, cancelable: true}));
+        // Native Escape and a fresh owner action: no move/cancel request from hiding.
+        h.dialog.close();
+        await h.methods.openPlanMove('alex', 'second');
+        const newForm = h.dialog.querySelector('form');
+        const currentHTML = h.dialog.innerHTML;
+        if (outcome === 'failure') fail(new Error('Old request failed'));
+        else finish(response(action === 'preview'
+          ? {account: 'first', mode: 'codex', sessionId: 'source'}
+          : {id: 'old', name: 'Alex', employeeId: 'alex', toAccount: 'second', phase: action === 'force' ? 'completed' : 'pending'}));
+        await preview;
+        await new Promise(resolve => setImmediate(resolve));
+        expect(h.dialog.open).toBe(true);
+        expect(h.dialog.querySelector('form')).toBe(newForm);
+        expect(h.dialog.innerHTML).toBe(currentHTML);
+        expect(h.fetch.mock.calls.some(([path]) => path.endsWith('/cancel'))).toBe(false);
+        if (action === 'request' && outcome === 'success') expect(h.dom.window.document.querySelector('.plan-member-pending')).not.toBeNull();
+      });
+    }
+  }
+  it('retains existing forced-request cleanup while refusing to close a newer form', async () => {
+    const h = harness();
+    vi.spyOn(h.dom.window, 'confirm').mockReturnValue(true);
+    await h.methods.openPlanMove('alex', 'second');
+    let finish!: (value: ReturnType<typeof response>) => void;
+    h.fetch.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+    const force = h.methods.forcePlanMove(h.dialog, h.context.planAllocations.employees[0], 'second', 'approved-request');
+    h.dialog.close();
+    await h.methods.openPlanMove('alex', 'second');
+    const currentHTML = h.dialog.innerHTML;
+    finish(response({id: 'old-forced', phase: 'completed'}));
+    await force;
+    expect(h.fetch.mock.calls.filter(([path]) => path === '/api/plans/requests/approved-request/cancel')).toHaveLength(1);
+    expect(h.dialog.open).toBe(true);
+    expect(h.dialog.innerHTML).toBe(currentHTML);
   });
 });

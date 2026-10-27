@@ -4623,11 +4623,11 @@ class ReverieChatApp {
     const names = [...new Set(['everyone', ...(this.room?.members || []).map(m => m.name), ...this.channelHumans().map(p => p.name)].filter(Boolean))];
     names.sort((a, b) => b.length - a.length);
     const escaped = names.map((n) => n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
-    const re = new RegExp(`(^|[^\\w@])(@(?:${escaped.join('|')}))(?![\\w-])`, 'gi');
+    const re = new RegExp(`(^|[^\\p{L}\\p{N}_@])(@(?:${escaped.join('|')}))(?![\\p{L}\\p{N}_-])`, 'giu');
     const walker = this.doc.createTreeWalker(el, 4);
     const nodes = [];
     for (let n = walker.nextNode(); n; n = walker.nextNode()) {
-      if (!n.parentElement?.closest('code, pre, a, .ca-mention-tag')) nodes.push(n);
+      if (!n.parentElement?.closest('code, pre, a, button, script, style, .ca-mention-tag')) nodes.push(n);
     }
     for (const node of nodes) {
       const text = node.nodeValue;
@@ -4635,12 +4635,112 @@ class ReverieChatApp {
       let last = 0;
       for (const m of text.matchAll(re)) {
         const at = m.index + m[1].length;
-        parts.push(text.slice(last, at), this.el('span', 'ca-mention-tag', m[2]));
+        parts.push(text.slice(last, at), this.mentionReference(m[2]));
         last = at + m[2].length;
       }
       if (!parts.length) continue;
       parts.push(text.slice(last));
       node.replaceWith(...parts.filter((p) => p !== ''));
+    }
+  }
+
+  /** References carry no authority: resolve current room membership again on every action. */
+  mentionReference(text) {
+    const name = text.slice(1).toLowerCase(), roomId = this.roomId;
+    const matches = () => [...(this.room?.members || []).map(member => ({ member })),
+      ...this.channelHumans().map(human => ({ human }))]
+      .filter(value => String((value.member || value.human).name).toLowerCase() === name);
+    const initial = matches();
+    if (name === 'everyone' || initial.length !== 1) return this.el('span', 'ca-mention-tag', text);
+    const identity = initial[0].member?.sessionId || initial[0].human?.id;
+    const kind = initial[0].member ? 'member' : 'human';
+    const current = () => {
+      const found = this.roomId === roomId ? matches() : [];
+      return found.length === 1 && (found[0][kind]?.sessionId || found[0][kind]?.id) === identity ? found[0][kind] : null;
+    };
+    const button = this.el('button', 'ca-mention-tag ca-chat-reference', text); button.type = 'button';
+    button.title = kind === 'member' ? `View ${text.slice(1)} profile` : `Mention ${text.slice(1)}`;
+    button.addEventListener('click', event => {
+      event.stopPropagation(); const person = current();
+      if (!person) return;
+      if (kind === 'member') this.openProfile(person, button);
+      else this.mentionHuman(person.id);
+    });
+    if (kind === 'member') {
+      const menu = event => {
+        event.preventDefault(); event.stopPropagation(); const person = current();
+        if (person) this.openMemberMenu(person, button, event.type === 'contextmenu' ? { x: event.clientX, y: event.clientY } : button);
+      };
+      button.addEventListener('contextmenu', menu);
+      button.addEventListener('keydown', event => { if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) menu(event); });
+    }
+    return button;
+  }
+
+  /** Only known, unambiguous channel names and canonical assignment IDs become read-only links. */
+  decorateChatReferences(root) {
+    const channels = this.rooms.filter(room => !caIsDm(room) && !room.archivedAt && room.name);
+    const names = [...new Set(channels.map(room => room.name))].sort((a, b) => b.length - a.length);
+    const escaped = names.map(name => name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+    const channelPattern = escaped.length ? `#(?:${escaped.join('|')})|` : '';
+    const re = new RegExp(`(^|[^\\p{L}\\p{N}_@#/.:-])(${channelPattern}i-[a-f0-9]{8})(?![\\p{L}\\p{N}_-])`, 'giu');
+    const walker = this.doc.createTreeWalker(root, 4), nodes = [];
+    while (walker.nextNode()) if (!walker.currentNode.parentElement?.closest('code,pre,a,button,script,style,.ca-mention-tag')) nodes.push(walker.currentNode);
+    for (const node of nodes) {
+      const text = node.nodeValue, parts = []; let last = 0;
+      for (const match of text.matchAll(re)) {
+        const value = match[2], at = match.index + match[1].length;
+        const rooms = value.startsWith('#') ? channels.filter(room => room.name.toLowerCase() === value.slice(1).toLowerCase()) : [];
+        if (value.startsWith('#') && rooms.length !== 1) continue;
+        const button = this.el('button', 'ca-chat-reference', value); button.type = 'button';
+        if (rooms.length) {
+          const id = rooms[0].id, roomId = this.roomId;
+          button.title = `Open ${value}`;
+          button.addEventListener('click', event => {
+            event.stopPropagation();
+            const current = this.rooms.filter(room => !caIsDm(room) && !room.archivedAt && room.name?.toLowerCase() === value.slice(1).toLowerCase());
+            if (this.roomId === roomId && current.length === 1 && current[0].id === id) void this.selectRoom(id);
+          });
+        } else {
+          const roomId = this.roomId;
+          button.title = `View assignment ${value}`;
+          button.addEventListener('click', event => {
+            event.stopPropagation();
+            if (button.isConnected && this.roomId === roomId) void this.openAssignment(value, button);
+          });
+        }
+        parts.push(text.slice(last, at), button); last = at + value.length;
+      }
+      if (parts.length) { parts.push(text.slice(last)); node.replaceWith(...parts); }
+    }
+  }
+
+  async openAssignment(id, anchor) {
+    if (!/^i-[a-f0-9]{8}$/i.test(id)) return;
+    id = id.toLowerCase();
+    this.doc.querySelector('.ca-assignment-dialog')?.close();
+    const dialog = this.el('dialog', 'ca-dialog ca-assignment-dialog'); dialog.setAttribute('aria-label', `Assignment ${id}`);
+    const heading = this.literalText('h2', '', `Assignment ${id}`), body = this.el('div', 'ca-assignment-body');
+    body.setAttribute('aria-live', 'polite'); body.append(this.el('p', '', 'Loading assignment…'));
+    const controller = new AbortController(), roomId = this.roomId, actor = this.app._chatSelf, human = this.humanSelf?.id;
+    const close = this.button('ca-btn', 'Close assignment', () => dialog.close(), { text: 'Close' });
+    dialog.append(heading, body, close);
+    dialog.addEventListener('cancel', event => { event.preventDefault(); dialog.close(); });
+    dialog.addEventListener('close', () => { controller.abort(); dialog.remove(); if (anchor?.isConnected) anchor.focus(); }, { once: true });
+    this.doc.body.append(dialog); dialog.showModal(); close.focus();
+    try {
+      const result = await this.app._chatApi('/api/board', { signal: controller.signal });
+      if (!dialog.isConnected || !dialog.open || controller.signal.aborted) return;
+      if (this.roomId !== roomId || this.app._chatSelf !== actor || this.humanSelf?.id !== human) { dialog.close(); return; }
+      const issue = result.ok && Array.isArray(result.data?.issues) ? result.data.issues.find(issue => issue.id === id) : null;
+      if (!issue) { body.replaceChildren(this.el('p', '', result.ok ? 'Assignment unavailable or no longer present.' : 'Assignment unavailable. Check your access and try again.')); return; }
+      heading.textContent = issue.title;
+      const facts = this.el('p', 'ca-dialog-note');
+      const owner = result.data.roster?.find(person => person.id === issue.owner)?.name || issue.owner || 'Unassigned';
+      facts.textContent = `${id} · ${issue.status || 'Unknown status'} · ${owner}`;
+      body.replaceChildren(facts, this.literalText('p', 'ca-assignment-description', issue.reason || 'No additional description has been provided.'));
+    } catch {
+      if (dialog.isConnected && dialog.open && !controller.signal.aborted) body.replaceChildren(this.el('p', '', 'Could not load assignment. Close and try again.'));
     }
   }
 
@@ -5240,6 +5340,7 @@ class ReverieChatApp {
   }
 
   async selectRoom(id) {
+    this.doc.querySelector('.ca-assignment-dialog')?.close();
     this.embassy?.close();
     if (this.orgOpen) this.closeOrg();
     this.closePage();
@@ -8393,6 +8494,7 @@ class ReverieChatApp {
       const text = this.app._chatTextEl ? this.app._chatTextEl(m.text) : this.el('div', 'chatroom-msg-text', m.text);
       if (m.external) text.classList.add('eg-text');
       this.decorateMentions(text);
+      this.decorateChatReferences(text);
       if (!m.external) this.decorateWorkspaceFiles(text);
       if (m.edited) {
         const mark = this.el('span', 'ca-edited', '(edited)');

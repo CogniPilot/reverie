@@ -21,8 +21,10 @@ function fixture(decision: object, writesEnabled: boolean | undefined = true) {
 
 it('renders real choice buttons and recommendation; a click sends the exact owner choice with the revision', async () => {
   const f = fixture({ id: 'snapshot', text: 'Publish?', at: 1, options: ['Approve', 'Hold', 'Reject'], recommendation: { option: 'Hold', reason: 'Review first', by: 'Reviewer' } });
-  expect([...f.document.querySelectorAll('[data-decide]')].map(button => button.textContent)).toEqual(['Approve', 'Hold ★', 'Reject']);
+  expect([...f.document.querySelectorAll('[data-decide]')].map(button => button.textContent)).toEqual(['Approve', 'Hold', 'Reject']);
   expect(f.document.querySelector('.rec')!.textContent).toContain('Recommended: Hold — Review first');
+  expect([...f.document.querySelectorAll('[data-decide]')].every(button => button.className === 'btn')).toBe(true);
+  expect(f.document.querySelector('[data-decide][aria-pressed="true"], [data-decide][aria-selected="true"]')).toBeNull();
   expect(f.fetch).not.toHaveBeenCalled();
   (f.document.querySelector('[data-opt="Hold"]') as HTMLButtonElement).click();
   await vi.waitFor(() => expect(f.load).toHaveBeenCalledOnce());

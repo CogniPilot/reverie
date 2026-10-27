@@ -350,6 +350,15 @@ function wirePlanMoves(row) {
   });
 }
 
+function planDialogView(dialog) {
+  const marker = {root: dialog.firstElementChild};
+  dialog._planProgress = marker;
+  return {
+    current: () => dialog.open && dialog._planProgress === marker && dialog.firstElementChild === marker.root,
+    stop: () => { if (dialog._planProgress === marker) dialog._planProgress = null; }
+  };
+}
+
 async function openPlanMove(employeeId, destination) {
   const dialog = document.getElementById('moveDlg');
   if (!dialog || dialog.open) return;
@@ -363,9 +372,10 @@ async function openPlanMove(employeeId, destination) {
   dialog.innerHTML = `<h3>${esc(employee.name)}</h3><p class="status">Checking the current session…</p><button type="button" class="btn" data-close>Close</button>`;
   dialog.querySelector('[data-close]').onclick = () => dialog.close();
   dialog.showModal();
+  let view = planDialogView(dialog);
   try {
     const preview = await planMoveRequest('/api/plans/moves/preview', {employeeId, sessionId: employee.sessionId});
-    if (!dialog.open) return;
+    if (!view.current()) return;
     const source = B.planBurn.find(account => account.id === preview.account);
     const targets = B.planBurn.filter(account => account.id !== preview.account && ['openai', 'anthropic'].includes(account.provider));
     if (!targets.length) throw new Error('No other plan is available.');
@@ -375,6 +385,7 @@ async function openPlanMove(employeeId, destination) {
       <label>Destination plan<select name="target">${targets.map(account => `<option value="${esc(account.id)}"${account.id === destination ? ' selected' : ''}>${esc(account.name)}</option>`).join('')}</select></label>
       <p class="hint" data-target-harness role="status"></p>
       <p class="err" role="alert"></p><div><button type="submit" class="btn">Request move</button> <button type="button" class="btn" data-force>Force move now</button> <button type="button" class="btn" data-close>Cancel</button></div></form>`;
+    view = planDialogView(dialog);
     dialog.querySelector('[data-close]').onclick = () => dialog.close();
     const target = dialog.querySelector('[name=target]');
     const explainHarness = () => {
@@ -397,78 +408,106 @@ async function openPlanMove(employeeId, destination) {
         const record = await planMoveRequest('/api/plans/requests', {id, employeeId, sessionId: preview.sessionId, toAccount: form.elements.target.value});
         pendingPlanRequests = [record, ...pendingPlanRequests.filter(previous => previous.id !== record.id)];
         renderPlanMembers();
-        if (dialog.open) showPlanRequestProgress(dialog, record);
+        if (view.current()) showPlanRequestProgress(dialog, record);
       } catch (error) {
+        if (!view.current()) return;
         form.querySelector('.err').textContent = `${error.message} Check Recent plan moves before retrying if the request timed out.`;
         submitting = false; submit.disabled = false;
       }
     };
-  } catch (error) { dialog.querySelector('.status').textContent = error.message; }
+  } catch (error) { if (view.current()) dialog.querySelector('.status').textContent = error.message; }
 }
 
 function showPlanMoveProgress(dialog, initial, name) {
   dialog.innerHTML = `<h3>Plan move: ${esc(name)}</h3><p class="status" role="status"></p><p class="hint">Old session: ${esc(initial.oldSession || initial.sessionId || 'not recorded')}<br>New session: ${esc(initial.newSession || 'not created yet')}</p><button type="button" class="btn" data-cancel>Cancel waiting move</button> <button type="button" class="btn" data-resolve hidden>Adopt existing destination</button> <button type="button" class="btn" data-close>Hide progress</button>`;
-  dialog.querySelector('[data-close]').onclick = () => dialog.close();
   const cancel = dialog.querySelector('[data-cancel]'), resolve = dialog.querySelector('[data-resolve]'), status = dialog.querySelector('.status');
-  let record = initial, stopped = false;
+  let record = initial, stopped = false, timer;
+  const view = planDialogView(dialog), current = view.current;
+  const stop = () => { stopped = true; clearTimeout(timer); view.stop(); };
+  dialog.querySelector('[data-close]').onclick = () => { stop(); dialog.close(); };
   cancel.onclick = async () => {
+    if (!current()) return;
     cancel.disabled = true;
     try { await planMoveRequest(`/api/plans/moves/${encodeURIComponent(record.id)}/cancel`); }
-    catch (error) { status.textContent = error.message; }
+    catch (error) { if (current()) status.textContent = error.message; }
   };
   resolve.onclick = async () => {
+    if (!current()) return;
     resolve.disabled = true;
     status.textContent = 'Checking the existing destination; no session will be started or stopped.';
     try {
-      record = await planMoveRequest(`/api/plans/moves/${encodeURIComponent(record.id)}/resolve`, {
+      const next = await planMoveRequest(`/api/plans/moves/${encodeURIComponent(record.id)}/resolve`, {
         action: 'adopt-existing', oldSession: record.oldSession, newSession: record.newSession, toAccount: record.toAccount });
+      if (!current()) return;
+      record = next;
       stopped = false;
       await poll();
     } catch (error) {
+      if (!current()) return;
       status.textContent = `${error.message} The move journal is retained.`;
       resolve.disabled = false;
     }
   };
   const deadline = Date.now() + 12 * 60e3;
-  const poll = async () => {
-    if (stopped) return;
+  const paint = () => {
     status.textContent = `${record.phase}${record.error ? ': ' + record.error : ''}`;
     dialog.querySelector('.hint').textContent = `Old session: ${record.oldSession || record.sessionId || 'not recorded'}; new session: ${record.newSession || 'not created yet'}`;
     cancel.hidden = record.phase !== 'waiting';
     resolve.hidden = record.phase !== 'recovery-required' || !record.newSession;
     resolve.disabled = record.sourceCleanupVerified !== true;
     resolve.title = resolve.disabled ? 'Source cleanup was not durably verified; inspect both sessions before recovery.' : 'Validate and adopt the already-running destination without launching or replaying its handoff.';
-    if (['completed', 'failed', 'recovery-required'].includes(record.phase)) { stopped = true; void refreshPlanMembers(); return; }
-    if (Date.now() >= deadline) { stopped = true; status.textContent = 'Status polling ended. Inspect the current binding before retrying.'; return; }
-    try { record = await planMoveRequest(`/api/plans/moves/${encodeURIComponent(record.id)}/status`); }
-    catch (error) { status.textContent = `Status unavailable: ${error.message}. Do not start another move until checked.`; }
-    setTimeout(poll, 1000);
+    if (['completed', 'failed', 'recovery-required'].includes(record.phase)) {
+      stopped = true;
+      if (record.phase === 'completed') { stop(); dialog.close(); }
+      void refreshPlanMembers();
+      return true;
+    }
+    if (Date.now() >= deadline) { stopped = true; status.textContent = 'Status polling ended. Inspect the current binding before retrying.'; return true; }
+    return false;
+  };
+  const poll = async () => {
+    if (stopped || !current() || paint()) return;
+    try {
+      const next = await planMoveRequest(`/api/plans/moves/${encodeURIComponent(record.id)}/status`);
+      if (!current()) return;
+      record = next;
+      if (paint()) return;
+    } catch (error) { if (current()) status.textContent = `Status unavailable: ${error.message}. Do not start another move until checked.`; }
+    if (current()) timer = setTimeout(poll, 1000);
   };
   void poll();
 }
 function showPlanRequestProgress(dialog, initial) {
-  const marker = {};
-  dialog._planRequest = marker;
   dialog.innerHTML = `<h3>Move request: ${esc(initial.name)}</h3><p class="status" role="status"></p><p class="hint">The expert prepares its handoff and decides this request. An owner can force a move without waiting for the expert.</p><p class="err" role="alert"></p><button type="button" class="btn" data-reauthorize>Reauthorize request</button> <button type="button" class="btn" data-force>Force move now</button> <button type="button" class="btn" data-cancel>Cancel request</button> <button type="button" class="btn" data-close>Close</button>`;
   const cancel = dialog.querySelector('[data-cancel]'), reauthorize = dialog.querySelector('[data-reauthorize]');
-  const force = dialog.querySelector('[data-force]');
-  dialog.querySelector('[data-close]').onclick = () => dialog.close();
-  let record = initial, busy = false;
+  const force = dialog.querySelector('[data-force]'), status = dialog.querySelector('.status');
+  let record = initial, busy = false, timer;
+  const view = planDialogView(dialog), current = view.current;
+  const stop = () => { clearTimeout(timer); view.stop(); };
+  dialog.querySelector('[data-close]').onclick = () => { stop(); dialog.close(); };
   const paint = () => {
-    dialog.querySelector('.status').textContent = `${planRequestStatus(record)}${record.movePhase ? ' · ' + record.movePhase : ''}${record.error ? ': ' + record.error : ''}`;
+    status.textContent = `${planRequestStatus(record)}${record.movePhase ? ' · ' + record.movePhase : ''}${record.error ? ': ' + record.error : ''}`;
     cancel.hidden = !(['pending', 'reauthorize-required'].includes(record.phase) || record.phase === 'executing' && record.movePhase === 'waiting');
     reauthorize.hidden = record.phase !== 'reauthorize-required';
     force.hidden = !['pending', 'reauthorize-required'].includes(record.phase);
     force.disabled = busy;
     cancel.disabled = reauthorize.disabled = busy;
   };
+  const terminal = () => {
+    if (['pending', 'reauthorize-required', 'executing'].includes(record.phase)) return false;
+    if (record.phase === 'completed') { stop(); dialog.close(); }
+    void refreshPlanMembers();
+    return true;
+  };
   const act = async action => {
-    if (busy) return; busy = true; paint();
+    if (busy || !current()) return; busy = true; paint();
     try {
-      record = await planMoveRequest(`/api/plans/requests/${encodeURIComponent(record.id)}/${action}`);
+      const next = await planMoveRequest(`/api/plans/requests/${encodeURIComponent(record.id)}/${action}`);
+      if (!current()) return;
+      record = next;
       pendingPlanRequests = [record, ...pendingPlanRequests.filter(previous => previous.id !== record.id)]; renderPlanMembers();
-    } catch (error) { dialog.querySelector('.err').textContent = error.message; }
-    finally { busy = false; paint(); }
+    } catch (error) { if (current()) dialog.querySelector('.err').textContent = error.message; }
+    finally { busy = false; if (current()) { paint(); terminal(); } }
   };
   cancel.onclick = () => { void act('cancel'); };
   reauthorize.onclick = () => { void act('reauthorize'); };
@@ -477,18 +516,23 @@ function showPlanRequestProgress(dialog, initial) {
     if (employee) void forcePlanMove(dialog, employee, record.toAccount, record.id);
   };
   const poll = async () => {
-    if (!dialog.open || dialog._planRequest !== marker) return;
+    if (!current()) return;
     paint();
-    if (!['pending', 'reauthorize-required', 'executing'].includes(record.phase)) { void refreshPlanMembers(); return; }
-    try { record = await planMoveRequest(`/api/plans/requests/${encodeURIComponent(record.id)}/status`); }
-    catch (error) { if (dialog.open && dialog._planRequest === marker) dialog.querySelector('.err').textContent = `Status unavailable: ${error.message}`; }
-    if (dialog.open && dialog._planRequest === marker) setTimeout(poll, 1500);
+    if (terminal()) return;
+    try {
+      const next = await planMoveRequest(`/api/plans/requests/${encodeURIComponent(record.id)}/status`);
+      if (!current()) return;
+      record = next;
+      paint();
+      if (terminal()) return;
+    } catch (error) { if (current()) dialog.querySelector('.err').textContent = `Status unavailable: ${error.message}`; }
+    if (current()) timer = setTimeout(poll, 1500);
   };
   void poll();
 }
 async function forcePlanMove(dialog, employee, target, requestId) {
   if (!window.confirm(`Force ${employee.name} to move now? This skips their handoff approval. Unfinished work may be interrupted after the replacement is ready.`)) return;
-  dialog._planRequest = null;
+  const view = planDialogView(dialog);
   dialog.querySelectorAll('button').forEach(button => { button.disabled = true; });
   try {
     const id = 'force-' + Array.from(crypto.getRandomValues(new Uint8Array(16)), byte => byte.toString(16).padStart(2, '0')).join('');
@@ -498,8 +542,9 @@ async function forcePlanMove(dialog, employee, target, requestId) {
       try { await planMoveRequest(`/api/plans/requests/${encodeURIComponent(requestId)}/cancel`); }
       catch { /* A completed binding change already invalidates the old approval. */ }
     }
-    showPlanMoveProgress(dialog, record, employee.name);
+    if (view.current()) showPlanMoveProgress(dialog, record, employee.name);
   } catch (error) {
+    if (!view.current()) return;
     dialog.querySelector('.err').textContent = error.message;
     dialog.querySelectorAll('button').forEach(button => { button.disabled = false; });
   }
@@ -510,10 +555,12 @@ document.getElementById('planMoveHistory')?.addEventListener('click', async () =
   dialog.innerHTML = '<h3>Recent plan moves</h3><p class="status">Loading…</p><div data-moves></div><button type="button" class="btn" data-close>Close</button>';
   dialog.querySelector('[data-close]').onclick = () => dialog.close();
   dialog.showModal();
+  const view = planDialogView(dialog);
   try {
     const requests = await planMoveRequest('/api/plans/requests/recent');
+    if (!view.current()) return;
     const moves = await planMoveRequest('/api/plans/moves/recent');
-    if (!dialog.open) return;
+    if (!view.current()) return;
     const requestIds = new Set(requests.map(record => record.id));
     const records = [...requests, ...moves.filter(record => !requestIds.has(record.id))];
     dialog.querySelector('.status').textContent = records.length ? 'Select a request or move to inspect its status.' : 'No recorded requests or moves.';
@@ -524,7 +571,7 @@ document.getElementById('planMoveHistory')?.addEventListener('click', async () =
       button.onclick = () => requestIds.has(record.id) ? showPlanRequestProgress(dialog, record) : showPlanMoveProgress(dialog, record, record.name);
       list.appendChild(button);
     });
-  } catch (error) { dialog.querySelector('.status').textContent = error.message; }
+  } catch (error) { if (view.current()) dialog.querySelector('.status').textContent = error.message; }
 });
 // Codex banked resets: a fresh week on demand. Claude plans have none, so they show nothing.
 function bankedStat(p) {
