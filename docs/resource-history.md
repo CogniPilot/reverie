@@ -33,6 +33,21 @@ are retained for 30 days, rollups for 400; these settings are configurable.
 GPU sampling is off unless the owner selects a compatible `gpuPackage` containing
 `nvidia-smi`. Missing readings remain unavailable rather than fabricated zeros.
 
+Version 2 samples retain the same aggregate `gpu_pct` arithmetic mean. Each GPU
+reading now adds `uuid` and `identity_status`: a validated NVIDIA physical GPU
+UUID (`GPU-` plus hexadecimal UUID, normalized to lowercase hexadecimal) has
+status `available`. A missing/unsupported identity or sysfs fallback has
+`uuid: null` and status `unavailable`; malformed or duplicate identities become
+null with status `invalid` or `duplicate` for every affected member. A listing
+above the existing 64-device metrics cap marks all returned identities
+`incomplete`. Valid utilization remains visible in these cases. The transient
+`index` is never a stable identity. Old samples may lack both new fields.
+
+This metadata does not attribute GPU usage to employees or prove a resource
+limit. Historical per-device storage/read APIs, service activation and UI
+acceptance remain separate gates; this change does not enable them or add an
+AMD/PCI identity scheme.
+
 Optional producer receipts run after collection, serialized within the same
 oneshot. They contain no paths or free text and remain explicitly unauthenticated
 observations. This integration supplies no admission context and cannot promote

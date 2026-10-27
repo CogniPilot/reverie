@@ -58,6 +58,7 @@ DEFAULTS = {
 SAMPLE_RE = re.compile(r"^samples-(\d{4})-(\d{2})-(\d{2})\.jsonl$")
 ROLLUP_RE = re.compile(r"^rollup-(hour-(\d{4})-(\d{2})|day-(\d{4}))\.jsonl$")
 RUN_ID_RE = re.compile(r"^[A-Za-z0-9._-]{1,128}$")
+NVIDIA_UUID_RE = re.compile(r"GPU-[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}\Z")
 EXIT_OK, EXIT_CONFIG, EXIT_BUSY = 0, 2, 5
 
 
@@ -213,14 +214,34 @@ def gpus(cfg):
     exe = shutil.which(cfg["nvidia_smi"])
     if exe:
         try:
-            out = run_capped([exe, "--query-gpu=index,utilization.gpu,memory.used,memory.total",
+            out = run_capped([exe, "--query-gpu=index,utilization.gpu,memory.used,memory.total,uuid",
                               "--format=csv,noheader,nounits"], cfg["max_input_bytes"])
-            devs = []
-            for line in out.strip().splitlines()[:64]:
-                i, u, mu, mt = (x.strip() for x in line.split(","))
-                d = {"index": int(i), "util_pct": float(u), "mem_used_mib": float(mu), "mem_total_mib": float(mt)}
+            devs, identities = [], {}
+            rows = out.strip().splitlines()
+            for line in rows[:64]:
+                fields = [x.strip() for x in line.split(",")]
+                if len(fields) not in (4, 5):
+                    raise InputError("unexpected GPU reading")
+                i, u, mu, mt = fields[:4]
+                identity = fields[4] if len(fields) == 5 else ""
+                if NVIDIA_UUID_RE.fullmatch(identity):
+                    identity = "GPU-" + identity[4:].lower()
+                    identities[identity] = identities.get(identity, 0) + 1
+                    identity_status = "available"
+                else:
+                    identity_status = "unavailable" if identity in ("", "N/A", "[Not Supported]") else "invalid"
+                    identity = None
+                d = {"index": int(i), "util_pct": float(u), "mem_used_mib": float(mu), "mem_total_mib": float(mt),
+                     "uuid": identity, "identity_status": identity_status}
                 if finite(d["util_pct"], 0, 100) and finite(d["mem_used_mib"], 0) and finite(d["mem_total_mib"], 0):
                     devs.append(d)
+            # Never preserve one arbitrary member of a duplicate identity set.
+            # A capped listing cannot establish uniqueness across omitted rows.
+            for d in devs:
+                if len(rows) > 64:
+                    d["uuid"], d["identity_status"] = None, "incomplete"
+                elif d["uuid"] and identities[d["uuid"]] > 1:
+                    d["uuid"], d["identity_status"] = None, "duplicate"
             if devs:
                 return round(sum(d["util_pct"] for d in devs) / len(devs), 2), {"status": "ok", "source": "nvidia-smi",
                                                                                  "devices": devs}
@@ -234,7 +255,8 @@ def gpus(cfg):
             try:
                 u = float(read_small(p, 64).strip())
                 if finite(u, 0, 100):
-                    devs.append({"index": int(card[4:]), "util_pct": u})
+                    devs.append({"index": int(card[4:]), "util_pct": u,
+                                 "uuid": None, "identity_status": "unavailable"})
             except (OSError, ValueError, InputError):
                 pass
     if devs:

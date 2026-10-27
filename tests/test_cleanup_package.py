@@ -11,7 +11,7 @@ import time
 import unittest
 from unittest.mock import patch
 
-from reverie.cleanup import lease, reverie_prune
+from reverie.cleanup import collector, lease, reverie_prune
 
 
 class CleanupPackageTests(unittest.TestCase):
@@ -91,6 +91,72 @@ class CleanupPackageTests(unittest.TestCase):
         self.assertTrue(candidates)
         self.assertTrue(all(row["mode"] == "dry" for row in rows))
         self.assertTrue(all(row["decision"] not in ("DELETED", "PARTIAL") for row in rows))
+
+
+class GPUIdentityTests(unittest.TestCase):
+    UUID_A = "GPU-01234567-89ab-cdef-0123-456789abcdef"
+    UUID_B = "GPU-fedcba98-7654-3210-fedc-ba9876543210"
+
+    def read_gpus(self, output):
+        cfg = {**collector.DEFAULTS, "sys_root": "/nonexistent-fixture-sys"}
+        with patch.object(collector.shutil, "which", return_value="/fixed/nvidia-smi"), \
+             patch.object(collector, "run_capped", return_value=output) as run:
+            result = collector.gpus(cfg)
+        self.assertEqual(run.call_args.args, (["/fixed/nvidia-smi",
+            "--query-gpu=index,utilization.gpu,memory.used,memory.total,uuid",
+            "--format=csv,noheader,nounits"], cfg["max_input_bytes"]))
+        return result
+
+    def test_uuid_tracks_same_devices_across_index_reordering_without_changing_aggregate(self):
+        first = self.read_gpus(f"0, 40, 100, 8000, {self.UUID_A}\n1, 60, 200, 16000, {self.UUID_B}\n")
+        second = self.read_gpus(f"0, 60, 200, 16000, {self.UUID_B}\n1, 40, 100, 8000, {self.UUID_A}\n")
+        self.assertEqual((first[0], second[0]), (50.0, 50.0))
+        for result in (first, second):
+            self.assertEqual((result[1]["status"], result[1]["source"]), ("ok", "nvidia-smi"))
+            self.assertEqual({d["uuid"]: (d["util_pct"], d["mem_total_mib"]) for d in result[1]["devices"]},
+                             {self.UUID_A: (40, 8000), self.UUID_B: (60, 16000)})
+            self.assertEqual({d["identity_status"] for d in result[1]["devices"]}, {"available"})
+        self.assertEqual([d["uuid"] for d in first[1]["devices"]], list(reversed([d["uuid"] for d in second[1]["devices"]])))
+
+    def test_bad_or_duplicate_identity_preserves_metrics_but_never_false_device_attribution(self):
+        upper = "GPU-" + self.UUID_A[4:].upper()
+        pct, gpu = self.read_gpus(f"0, 10, 1, 2, {self.UUID_A}\n1, 20, 1, 2, {upper}\n"
+                                  "2, 30, 1, 2, GPU-not-a-uuid\n3, 40, 1, 2, N/A\n4, 50, 1, 2\n")
+        self.assertEqual((pct, gpu["status"]), (30.0, "ok"))
+        self.assertEqual([d["uuid"] for d in gpu["devices"]], [None] * 5)
+        self.assertEqual([d["identity_status"] for d in gpu["devices"]],
+                         ["duplicate", "duplicate", "invalid", "unavailable", "unavailable"])
+        self.assertNotIn("GPU-not-a-uuid", json.dumps(gpu))
+
+    def test_sysfs_and_missing_driver_do_not_invent_identity_from_card_index(self):
+        with tempfile.TemporaryDirectory(prefix="gpu-identity-") as root:
+            cfg = {**collector.DEFAULTS, "sys_root": root}
+            with patch.object(collector.shutil, "which", return_value=None), \
+                 patch.object(collector, "run_capped") as run:
+                self.assertEqual(collector.gpus(cfg), (None, {"status": "unavailable", "source": "none", "devices": []}))
+                card = Path(root)/"class/drm/card7/device"
+                card.mkdir(parents=True); (card/"gpu_busy_percent").write_text("33\n")
+                pct, gpu = collector.gpus(cfg)
+                self.assertEqual((pct, gpu["source"]), (33.0, "sysfs"))
+                self.assertEqual(gpu["devices"], [{"index": 7, "util_pct": 33.0, "uuid": None, "identity_status": "unavailable"}])
+                run.assert_not_called()
+                with patch.object(collector.shutil, "which", return_value="/fixed/nvidia-smi"), \
+                     patch.object(collector, "run_capped", side_effect=collector.InputError("driver unavailable")):
+                    self.assertEqual(collector.gpus(cfg), (pct, gpu))
+
+    def test_capped_listing_marks_identities_incomplete_instead_of_missing_late_duplicates(self):
+        rows = [f"{n}, 25, 1, 2, GPU-{n:08x}-0000-0000-0000-000000000000" for n in range(64)]
+        rows.append(rows[0])  # the duplicate lies beyond the existing metrics cap
+        pct, gpu = self.read_gpus("\n".join(rows))
+        self.assertEqual((pct, len(gpu["devices"])), (25.0, 64))
+        self.assertTrue(all(d["uuid"] is None and d["identity_status"] == "incomplete" for d in gpu["devices"]))
+
+    def test_invalid_metrics_are_still_excluded_and_cannot_hide_duplicate_identity(self):
+        pct, gpu = self.read_gpus(f"0, 40, 1, 2, {self.UUID_A}\n1, nan, 1, 2, {self.UUID_A}\n"
+                                  f"2, 101, 1, 2, {self.UUID_B}\n3, 20, -1, 2, {self.UUID_B}\n4, 60, 1, 2, {self.UUID_B}\n")
+        self.assertEqual(pct, 50.0)
+        self.assertEqual([d["index"] for d in gpu["devices"]], [0, 4])
+        self.assertTrue(all(d["uuid"] is None and d["identity_status"] == "duplicate" for d in gpu["devices"]))
 
 
 if __name__ == "__main__":

@@ -9,7 +9,7 @@ pkgs.runCommand "reverie-cleanup-observations" {
   install -m444 ${src}/python/reverie/cleanup/receipts.py "$out/libexec/reverie/receipts.py"
   install -m444 ${src}/python/reverie/cleanup/collector_state.py "$out/libexec/reverie/collector_state.py"
   printf '%s  %s\n' \
-    '20aca9af5e5d30b757f8b366a0dda0ec3aac15b9fb63af88aa65ca58f0db6dcf' "$out/libexec/reverie/collector.py" \
+    '699c6eaf35b3b3f40e07d90631e96e029e4ad0acbde9ec29e2ab3e602890732a' "$out/libexec/reverie/collector.py" \
     'e0c74d139680364b8069627d718bd8389a1c42c0e3732538adeb63da7f21b626' "$out/libexec/reverie/receipts.py" \
     | sha256sum --check --status
   makeWrapper ${pkgs.python3}/bin/python3 "$out/bin/reverie-collect" \
