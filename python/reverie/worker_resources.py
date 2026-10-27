@@ -62,7 +62,7 @@ def resource_config(config,sid):
     validate_session_resources(config)
     # Native control custody is not a laptop grant and must not change any
     # existing laptop's create arguments or reattachment policy label.
-    result={k:v for k,v in config.items() if k not in ('sessionResources','employeeResources','resourceReservations')}
+    result={k:v for k,v in config.items() if k not in ('sessionResources','employeeResources','resourceReservations','browserJobPolicy')}
     policies=config.get('sessionResources',{})
     if sid in policies:
         result.update(policies[sid])

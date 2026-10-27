@@ -5,11 +5,13 @@ created here. Positive operations require an existing private admission policy.
 """
 import argparse
 import json
+import math
 import os
 from pathlib import Path
 import stat
 import subprocess
 import sys
+import time
 
 from .worker import load_config
 
@@ -17,8 +19,15 @@ UNIT = 'reverie-worker-broker.service'
 STORE_ROOT = Path('/nix/store')
 
 
-def run_command(args):
-    return subprocess.run(args, text=True, capture_output=True, timeout=20)
+def run_command(args, *, deadline=None):
+    timeout = 20
+    if deadline is not None:
+        if type(deadline) not in (int, float) or not math.isfinite(deadline):
+            raise ValueError('Finite installation observation deadline required')
+        timeout = min(timeout, deadline - time.monotonic())
+        if timeout <= 0:
+            raise RuntimeError('Installation observation deadline exhausted')
+    return subprocess.run(args, text=True, capture_output=True, timeout=timeout)
 
 
 def environment_selection(path):
@@ -170,10 +179,11 @@ class WorkerService:
         class InstallProbe:
             """Fixed metadata-only adapter; no browser/worker resource authority."""
             def __init__(self): self.config = config
-            def run_engine(self, args, optional=False):
+            def run_engine(self, args, optional=False, *, deadline=None):
                 if not args or args[0] not in ('ps', 'inspect'):
                     raise ValueError('Installation probe is metadata-only')
-                result = service.run(['docker', *args])
+                result = (service.run(['docker', *args]) if deadline is None else
+                          service.run(['docker', *args], deadline=deadline))
                 if result.returncode:
                     raise ValueError('Resource custody inventory unavailable')
                 return result

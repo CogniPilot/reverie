@@ -106,6 +106,7 @@
             worker = true;
           };
           browserRuntime = import ./nix/browser-runtime.nix { inherit pkgs; src = source; };
+          browserJobRuntime = import ./nix/browser-job-runtime.nix { inherit pkgs; src = source; };
           workerBrowserImage = import ./nix/image.nix {
             inherit pkgs;
             src = source;

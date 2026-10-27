@@ -37,6 +37,7 @@ import sys
 import termios
 import threading
 import time
+import math
 import tty
 import uuid
 from urllib.parse import unquote, urlsplit
@@ -168,7 +169,7 @@ def load_config(path):
 def validate_config(config):
     """Validate a captured policy without reopening its configuration path."""
     required = {'version', 'deployment', 'image', 'serverContainer', 'socket', 'stateRoot', 'companyFile', 'companyRoot', 'scratchRoot', 'apiSocketRoot', 'budgetMode', 'uid', 'gid', 'memoryMiB', 'poolMemoryMiB', 'poolTasksMax', 'cgroupParent', 'pidsLimit', 'cpus', 'maxWorkers', 'mounts', 'maintenanceSessions'}
-    if not isinstance(config, dict) or set(config) - {'gpuGrants','sessionResources','employeeResources','rootlessDocker','goalPrivateConfig','opsConfig','leaseAcceptance','commandTelemetry','coldTemporaryCleanup','resourceReservations'} != required or config['version'] != 1:
+    if not isinstance(config, dict) or set(config) - {'gpuGrants','sessionResources','employeeResources','rootlessDocker','goalPrivateConfig','opsConfig','leaseAcceptance','commandTelemetry','coldTemporaryCleanup','resourceReservations','browserJobPolicy'} != required or config['version'] != 1:
         raise ValueError("Unsupported worker configuration")
     from reverie.worker_resource_reservations import option as reservation_option
     reservation_option(config)
@@ -180,6 +181,10 @@ def validate_config(config):
             broker_binding_custody(config)
         except Exception:
             raise ValueError('Invalid private OPS binding') from None
+    if 'browserJobPolicy' in config:
+        value=config['browserJobPolicy']
+        if not isinstance(value,str) or not Path(value).is_absolute() or Path(value).resolve()!=Path(value):
+            raise ValueError('Invalid private fixed-browser-job binding')
     from reverie.worker_command_telemetry import configuration
     configuration(config)
     validate_gpu_grants(config.get('gpuGrants', {}))
@@ -431,7 +436,7 @@ class OfficeAPI:
     """A laptop's office phone: fixed identity and upstream, bounded HTTP only."""
     slots = threading.BoundedSemaphore(32)
 
-    def __init__(self, directory, session_id, address, company_root, host_actions=None, ops=None, command_telemetry=None):
+    def __init__(self, directory, session_id, address, company_root, host_actions=None, ops=None, command_telemetry=None, browser_jobs=None):
         directory.mkdir(mode=0o700, parents=True, exist_ok=True)
         if directory.is_symlink():
             raise ValueError('Invalid office connection directory')
@@ -463,6 +468,24 @@ class OfficeAPI:
                     length = int(self.headers.get('Content-Length', '0'))
                     if not 0 <= length <= 8*1024*1024 or self.headers.get('Transfer-Encoding'):
                         self.send_error(413); return
+                    browser_path = parsed.path == '/api/browser-jobs' or parsed.path.startswith('/api/browser-jobs/')
+                    if browser_path:
+                        if parsed.path!='/api/browser-jobs' or self.command!='POST' or parsed.query or length>1024 or len(self.headers.get_all('Content-Length',[]))!=1 or self.headers.get('Content-Type')!='application/json':
+                            self.send_error(400);return
+                        if browser_jobs is None:
+                            self.send_error(503);return
+                        from reverie.browser_job_requests import decode_command as browser_command, BrowserJobRefused, BrowserJobUnconfirmed
+                        try:
+                            value=browser_command(self.rfile.read(length))
+                            result=browser_jobs(session_id,value)
+                            raw=json.dumps({'success':True,'data':result},separators=(',',':')).encode()
+                            if len(raw)>16384:raise BrowserJobUnconfirmed('response bound')
+                            status=200
+                        except BrowserJobRefused:
+                            status=403;raw=b'{"success":false,"errorCode":"BROWSER_JOB_REFUSED"}'
+                        except (BrowserJobUnconfirmed,OSError,ValueError,RuntimeError):
+                            status=502;raw=b'{"success":false,"errorCode":"BROWSER_JOB_UNCONFIRMED_INSPECT_BEFORE_RETRY"}'
+                        self.send_response(status);self.send_header('Content-Type','application/json');self.send_header('Content-Length',str(len(raw)));self.end_headers();self.wfile.write(raw);return
                     ops_path = parsed.path == '/api/ops' or parsed.path.startswith('/api/ops/')
                     if ops_path:
                         if parsed.path != '/api/ops' or self.command != 'POST' or parsed.query or length > 16*1024 or len(self.headers.get_all('Content-Length', [])) > 1:
@@ -703,6 +726,10 @@ class Broker:
         self.command_telemetry = CommandTelemetry(config, self.run_engine)
         from reverie.worker_resource_reservations import ReservationGate, configured
         self.resource_reservations = ReservationGate(self) if configured(config) else None
+        self.browser_jobs = None
+        if config.get('browserJobPolicy') is not None:
+            from reverie.browser_job_requests import BrowserJobRequests
+            self.browser_jobs = BrowserJobRequests(self,config['browserJobPolicy'])
 
     def resource_admission(self, sid=None):
         if self.resource_reservations is None:
@@ -722,10 +749,17 @@ class Broker:
             self.cleanup_uncertain.add('RESOURCE_ADMISSION_RELEASE_UNCONFIRMED')
             raise RuntimeError('Resource admission release unconfirmed') from error
 
-    def run_engine(self, args, optional=False):
+    def run_engine(self, args, optional=False, *, deadline=None):
         if self.stopping.is_set() and (args[0] in ('create', 'start', 'exec') or args[:2] == ['network', 'create']):
             raise RuntimeError('Laptop launch cancelled while broker is stopping')
-        result = run_client([self.engine, *args], timeout=20, owner=self)
+        timeout = 20
+        if deadline is not None:
+            if type(deadline) not in (int, float) or not math.isfinite(deadline):
+                raise ValueError('Finite engine observation deadline required')
+            timeout = min(timeout, deadline - time.monotonic())
+            if timeout <= 0:
+                raise RuntimeError('Engine observation deadline exhausted')
+        result = run_client([self.engine, *args], timeout=timeout, owner=self)
         if result.returncode and not optional:
             # Engine diagnostics can contain credentials or owner-selected paths.
             raise RuntimeError('Worker engine operation failed: ' + args[0])
@@ -1064,6 +1098,8 @@ class Broker:
         options = {'host_actions': self.host_actions}
         if self.ops is not None:
             options['ops'] = self.ops
+        if self.browser_jobs is not None:
+            options['browser_jobs'] = self.browser_jobs.dispatch
         if self.command_telemetry.enabled:
             options['command_telemetry'] = self.command_telemetry
         return options

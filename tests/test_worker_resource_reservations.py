@@ -45,7 +45,7 @@ class NativeFixture:
                 'State': {'Running': True, 'Pid': pid}, 'Mounts': [],
                 'HostConfig': {'Memory': memory * MIB, 'MemorySwap': memory * MIB, 'PidsLimit': 128, 'NanoCpus': 0}}
 
-    def run_engine(self, args, optional=False):
+    def run_engine(self, args, optional=False, *, deadline=None):
         self.calls.append(args)
         if args == ['ps', '-aq', '--no-trunc']:
             data = '\n'.join(r['Id'] for r in self.rows)
@@ -183,7 +183,7 @@ class Reservations(unittest.TestCase):
 
     def test_complete_inventory_missing_duplicate_and_changed_sources_refuse(self):
         original = self.native.run_engine
-        def missing(args, optional=False):
+        def missing(args, optional=False, *, deadline=None):
             result = original(args, optional)
             if args[0] == 'inspect':result.stdout = '[]'
             return result

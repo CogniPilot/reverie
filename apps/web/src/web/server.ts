@@ -1,3 +1,4 @@
+import { registerBrowserJobEvidence } from '../browser-job-evidence.js';
 import { restSessionMetadataFromRegistry } from '../rest-canonical-metadata.js';
 import { OWNER_COOKIE } from '../owner-auth/policy.js';
 import { OfficeAuthService } from '../owner-auth/office.js';
@@ -1850,6 +1851,7 @@ export class WebServer extends EventEmitter {
           ?.id,
       { pendingStatus: (req) => !isMultiUserMode() && serviceVerifier({ service: ownerAuth, ctx }, 'stall-watch')(req), human: req => ownerAuth.identity(req.cookies?.[OWNER_COOKIE]), messageOwner: id => ownerAuth.isMessageOwner(id), readAt: (id, roomId) => ownerAuth.cursor(id, roomId), markRead: (id, roomId, at) => ownerAuth.markRead(id, roomId, at) }
     );
+    registerBrowserJobEvidence(this.app, { sessions: ctx, chat: this.chatroomService, company: companyStore, currentOwner: id => ownerAuth.isMessageOwner(id), policy: { service: ownerAuth, ctx } });
     // Chat bots: the sender a scheduled 'post' job speaks as (see chat-bots.ts). The registry is instance data.
     const chatBots = new ChatBotRegistry(dataPath('chat-bots.json'));
     registerChatBotRoutes(this.app, chatBots, verifiedOwner, (id) =>

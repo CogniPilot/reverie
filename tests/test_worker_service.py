@@ -36,7 +36,7 @@ class WorkerServiceTests(unittest.TestCase):
     def write_config(self):
         self.path.write_text(json.dumps(self.config)); self.path.chmod(0o600)
 
-    def fake_run(self, args):
+    def fake_run(self, args, *, deadline=None):
         self.calls.append(args)
         code, output = 0, ''
         if args[:3] == ['docker', 'context', 'inspect']: output = json.dumps(self.endpoint)
