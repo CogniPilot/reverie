@@ -174,8 +174,11 @@ dialog .qr svg{width:160px;height:160px;background:#fff;padding:6px;border-radiu
 
 .plan > svg { max-width:420px; max-height:160px; }
 
-/* Independent quota windows share a graph row, never a usage-history axis. */
-.plan-usage-plots{display:grid;grid-template-columns:minmax(0,1fr)80px;gap:8px;align-items:start;margin-top:8px}
-.plan-usage-plots .plan-weekly-plot,.plan-usage-plots .plan-five-hour{min-width:0}
-.plan-usage-plots svg{margin-top:2px}
-.plan-five-hour .hint{font-size:11px;line-height:1.35;overflow-wrap:anywhere;margin-bottom:3px}
+/* Shared time axis; each percentage is relative to its own quota window. */
+.plan-usage-plot{min-width:0;margin-top:8px}
+.plan-usage-plot svg{display:block;width:100%;max-height:180px;margin-top:4px}
+.plan-plot-legend{display:flex;flex-wrap:wrap;gap:6px 14px;color:var(--muted);font-size:11px;line-height:1.4}
+.plan-plot-legend span{display:inline-flex;align-items:center;gap:5px}
+.plan-plot-legend i{display:inline-block;width:18px;border-top:2px solid var(--good)}
+.plan-plot-legend .five-hour-key{border-top:2px dashed var(--accent)}
+.plan-five-hour-status{font-size:11px;line-height:1.4;overflow-wrap:anywhere;margin-top:4px}

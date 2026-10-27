@@ -1623,7 +1623,7 @@ class ReverieChatApp {
     this.renderUser();
     this.doc.defaultView?.addEventListener('message', event => {
       if (!((this.embed === 'workspace' && event.data?.type === 'workspace-back-to-chat') || (this.embed === 'people' && event.data?.type === 'office-back-to-chat')) || event.origin !== this.doc.defaultView.location.origin || event.source !== this.els.page?.querySelector('iframe')?.contentWindow) return;
-      this.closePage(); this.els.composerInput()?.focus();
+      void this.returnToCompanyTools();
     });
     // Back and forward move between the conversation and Board; a #board link opens it.
     this.doc.defaultView?.addEventListener('popstate', () => {
@@ -1636,6 +1636,7 @@ class ReverieChatApp {
         else this.showChat();
       }
     });
+    this.doc.defaultView?.addEventListener('resize', () => this.renderOfficePane());
     this.doc.defaultView?.addEventListener('pageshow', event => {
       if (event.persisted && this.active) { this.renderAll(); this.refreshAfterReturn(); }
     });
@@ -2471,7 +2472,7 @@ class ReverieChatApp {
     this.els.chat.inert = true;
     this.els.members.inert = true;
     const head = this.el('header', 'ca-company-head');
-    head.append(this.el('span', 'ca-spacer'), this.button('ca-btn', 'Back to chat', () => { this.closePage(); this.els.user.querySelector('.ca-office-gear')?.focus(); }, { text: 'Back to chat' }));
+    head.append(this.el('span', 'ca-spacer'), this.button('ca-btn', 'Back to chat', () => { this.closePage(); this.els.rail.querySelector('.ca-office-gear')?.focus(); }, { text: 'Back to chat' }));
     const content = this.el('div', 'ca-company-content');
     content.id = 'ca-company-people';
     content.setAttribute('aria-label', 'Company people');
@@ -2515,7 +2516,7 @@ class ReverieChatApp {
         plans.style.height = `${Math.max(120, Math.min(10000, event.data.height))}px`;
     };
     this.doc.defaultView.addEventListener('message', this._companyResize);
-    dlg.append(head, content, plans, status);
+    dlg.append(head, plans, content, status);
     selectSection(section, push);
     const paint = async () => {
       const [res, auth] = await Promise.all([this.app._chatApi('/api/company'), this.app._chatApi('/api/chatrooms/phone-status')]);
@@ -3227,9 +3228,12 @@ class ReverieChatApp {
   renderOfficePane(owner = this.canManageOffice()) {
     const pane = this.els.officePane;
     if (!pane) return;
-    const expanded = caRead('local', 'reverie:office-expanded', 'true') !== 'false';
+    const expanded = caRead('local', 'reverie:office-expanded', 'false') !== 'false';
     pane.hidden = !expanded;
-    this.els.user.querySelector('.ca-office-gear')?.setAttribute('aria-expanded', String(expanded));
+    const gearRect = this.els.rail.querySelector('.ca-office-gear')?.getBoundingClientRect();
+    const rootRect = this.els.root.getBoundingClientRect();
+    if (gearRect) pane.style.bottom = `${Math.max(8, rootRect.bottom - gearRect.top + 6)}px`;
+    this.els.rail.querySelector('.ca-office-gear')?.setAttribute('aria-expanded', String(expanded));
     pane.replaceChildren();
     const entries = owner
       ? ['company', 'board'].map(kind => ({ label: CA_PAGES[kind].label, run: () => this.openPage(kind) }))
@@ -3250,6 +3254,26 @@ class ReverieChatApp {
     if (!expanded) return;
     try { this.renderOfficePane(await this.verifyOfficeOwner()); }
     catch { this.renderOfficePane(false); }
+  }
+
+  async returnToCompanyTools() {
+    await this.openCompany('plans');
+    const anchor = this.companyPage?.querySelector('.ca-company-tools-button');
+    if (anchor?.isConnected) { anchor.focus(); await this.openCompanyTools(anchor); }
+  }
+
+  configureCompanyToolsBack(frame) {
+    if (!['handbook', 'workspace', 'bots', 'people', 'previews'].includes(this.embed)) return;
+    // These are our same-origin pages. Preserve standalone behavior outside the shell.
+    try {
+      if (frame.contentWindow.location.origin !== this.doc.defaultView.location.origin) return;
+      for (const link of frame.contentDocument.querySelectorAll('a')) {
+        if (link.textContent.trim() !== 'Back to chat') continue;
+        link.textContent = 'Back to Company / tools'; link.setAttribute('href', '#company');
+        link.removeAttribute('target');
+        link.addEventListener('click', event => { event.preventDefault(); event.stopImmediatePropagation(); void this.returnToCompanyTools(); }, { capture: true });
+      }
+    } catch { /* The shell header remains a working return path while the frame loads. */ }
   }
 
   async openCompanyTools(anchor) {
@@ -3287,7 +3311,7 @@ class ReverieChatApp {
   }
 
   updateOfficeNavigation() {
-    const gear = this.els.user?.querySelector('.ca-office-gear');
+    const gear = this.els.rail?.querySelector('.ca-office-gear');
     if (!gear) return;
     const active = !!this.embed && this.embed !== 'embassies';
     gear.classList.toggle('is-active', active);
@@ -3298,7 +3322,7 @@ class ReverieChatApp {
   officePageEl() {
     const root = this.el('section', 'ca-office-page'); root.setAttribute('aria-label', 'Office settings');
     const head = this.el('header', 'ca-office-head');
-    head.append(this.el('h1', '', 'Office'), this.button('ca-btn', 'Back to chat', () => this.closePage(), { text: 'Back to chat' }));
+    head.append(this.el('h1', '', 'Office'), this.button('ca-btn', 'Back to Company / tools', () => void this.returnToCompanyTools(), { text: 'Back to Company / tools' }));
     const nav = this.el('nav', 'ca-office-sections'); nav.setAttribute('aria-label', 'Office pages');
     const terminal = this.el('section', 'ca-office-terminal');
     terminal.append(this.el('h2', '', 'Terminal settings'), this.el('p', 'ca-hint', 'Terminal appearance, CLI preferences and advanced console settings.'),
@@ -3380,6 +3404,14 @@ class ReverieChatApp {
       }
     }
     }
+    panel.querySelector('.ca-tool-page-head')?.remove();
+    if (['handbook', 'workspace', 'bots', 'people', 'previews'].includes(kind)) {
+      const back = this.el('header', 'ca-tool-page-head');
+      back.append(this.button('ca-btn', 'Back to Company / tools', () => void this.returnToCompanyTools(), { icon: 'back', text: 'Back to Company / tools' }));
+      panel.prepend(back);
+      frame.onload = () => this.configureCompanyToolsBack(frame);
+      this.configureCompanyToolsBack(frame);
+    } else if (frame) frame.onload = null;
     panel.hidden = false;
     this.els.root.classList.add('is-page');
     // The conversation stays where it was but is out of reach of the keyboard and screen readers while the page covers it.
@@ -4543,6 +4575,7 @@ class ReverieChatApp {
       this.doc.documentElement.style.setProperty('--ca-vtop', `${Math.round(vv.offsetTop)}px`);
       this.els.root.style.setProperty('--ca-vh', `${Math.round(vv.height)}px`);
       this.els.root.style.setProperty('--ca-vtop', `${Math.round(vv.offsetTop)}px`);
+      this.renderOfficePane(); // Measure after the visual-viewport variables update, including keyboard/rotation changes.
       // A keyboard opening, closing or resizing keeps the newest message in view, but only for a reader who was at the
       // bottom: `_feedStick` comes from the feed's own scroll events, so the resize itself cannot change it.
       const feed = this.app._chatEls?.feed;
@@ -4766,8 +4799,8 @@ class ReverieChatApp {
         add.dataset.key = 'add';
         group.append(add);
       }
-      // The org chart and the Debug terminals live next to the gear, in the profile bar (renderUser), not in the rail.
       rail.append(group);
+      if (this.els.officeLauncher) rail.append(this.els.officeLauncher);
     });
   }
 
@@ -5380,7 +5413,9 @@ class ReverieChatApp {
     gear.setAttribute('aria-controls', 'ca-office-pane');
     const launcher = this.el('div', 'ca-office-launcher');
     const pane = this.el('nav', 'ca-office-pane'); pane.id = 'ca-office-pane'; pane.setAttribute('aria-label', 'Company and board');
-    launcher.append(gear, pane); user.prepend(launcher); this.els.officePane = pane;
+    this.els.officeLauncher?.remove(); this.els.officePane?.remove();
+    launcher.append(gear); this.els.rail.append(launcher); this.els.root.append(pane);
+    this.els.officeLauncher = launcher; this.els.officePane = pane;
     this.renderOfficePane();
     if (this.canManageOffice()) {
       const power = this.button('ca-icon-btn ca-office-power-button', 'Office power', () => this.openOfficePowerMenu(power), { icon: 'power' });

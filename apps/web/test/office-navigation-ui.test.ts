@@ -13,10 +13,11 @@ async function fixture({ owner = false, verified = owner, hash = '', narrow = fa
     return previous(path, options);
   };
   await h.shell.loadOwner();
+  h.document.querySelector<HTMLButtonElement>('.ca-office-gear')!.click(); await h.flush();
   return h;
 }
 
-it('keeps Office navigation only at the footer gear and leaves the sidebar for channels', async () => {
+it('keeps Office navigation only at the workspace gear and leaves the sidebar for channels', async () => {
   const h = await fixture();
   expect(h.document.querySelector('.ca-pages')).toBeNull();
   expect(h.document.querySelector('.ca-item--room')).not.toBeNull();
@@ -26,9 +27,9 @@ it('keeps Office navigation only at the footer gear and leaves the sidebar for c
   expect(h.document.querySelectorAll('.ca-office-gear')).toHaveLength(1);
 });
 
-it.each([false, true])('the avatar-aligned persistent panel exposes only Company and Board (narrow=%s)', async narrow => {
+it.each([false, true])('the workspace-gutter panel exposes only Company and Board (narrow=%s)', async narrow => {
   const h = await fixture({ narrow, owner: true });
-  expect(h.document.querySelector('.ca-user .ca-office-gear')).not.toBeNull();
+  expect(h.document.querySelector('.ca-rail .ca-office-gear')).not.toBeNull();
   expect(h.window.location.hash).toBe('');
   expect(h.document.querySelector('.ca-office-page')).toBeNull();
   const menu = h.document.querySelector('.ca-office-pane')!;
@@ -50,7 +51,7 @@ it('opens a separate footer power menu without executing an action until selecte
   const gear = h.document.querySelector('.ca-office-gear')!;
   const power = h.document.querySelector<HTMLButtonElement>('.ca-office-power-button')!;
   expect(gear.parentElement!.classList.contains('ca-office-launcher')).toBe(true);
-  expect(gear.nextElementSibling!.classList.contains('ca-office-pane')).toBe(true);
+  expect(h.document.querySelector('.ca-root > .ca-office-pane')).not.toBeNull();
   expect(power.parentElement!.classList.contains('ca-user')).toBe(true);
   power.click(); await h.flush();
   const buttons = [...h.document.querySelectorAll<HTMLButtonElement>('.ca-power-menu button')];
@@ -130,8 +131,8 @@ it('preserves hub links, browser Back/Forward and the selected channel', async (
   expect(h.shell.embed).toBe('office'); expect(h.document.querySelector('.ca-office-page')).not.toBeNull();
   h.window.history.forward(); await new Promise(resolve => setTimeout(resolve, 50));
   expect(h.shell.embed).toBe('board');
-  h.shell.openPage('office'); h.document.querySelector<HTMLButtonElement>('.ca-office-head [aria-label="Back to chat"]')!.click();
-  expect(h.shell.embed).toBeNull(); expect(h.window.location.hash).toBe('');
+  h.shell.openPage('office'); h.document.querySelector<HTMLButtonElement>('.ca-office-head [aria-label="Back to Company / tools"]')!.click(); await h.flush(); await h.flush();
+  expect(h.shell.embed).toBe('company'); expect(h.window.location.hash).toBe('#company');
   expect(h.shell.roomId).toBe('general');
 });
 

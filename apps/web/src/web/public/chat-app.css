@@ -1597,3 +1597,16 @@ button.ca-company-profile-trigger:focus-visible { outline: 2px solid var(--accen
 .ca-office-pane .ca-btn { flex: 1; min-width: 0; padding: 5px 8px; text-align: left; }
 .ca-machine-bar { padding: 4px 6px; }
 @media (max-width: 700px) { .ca-company-map-viewport { height: max(420px, calc(100dvh - 145px)); } }
+
+/* Workspace-gutter page launcher. The flyout is outside the scrolling rail. */
+.ca-rail > .ca-office-launcher { flex: 0 0 auto; margin-top: auto; width: 100%; justify-content: center; padding-top: 8px; }
+.ca-rail .ca-office-gear { width: 40px; height: 36px; }
+.ca-root > .ca-office-pane { position: absolute; z-index: 30; left: calc(var(--ca-rail) + 4px); width: min(var(--ca-side), calc(100% - var(--ca-rail) - 12px)); box-sizing: border-box; display: flex; flex-direction: row; gap: 4px; padding: 6px; border: 1px solid var(--ca-line); border-radius: 10px; background: var(--ca-side-bg, var(--ca-main-bg)); box-shadow: 0 8px 28px #0005; animation: ca-office-slide-up .16s ease-out; }
+.ca-root > .ca-office-pane[hidden] { display: none; }
+.ca-root > .ca-office-pane .ca-office-pane-link { flex: 1; min-height: 36px; white-space: nowrap; }
+.ca-tool-page-head { flex: 0 0 auto; display: flex; padding: 8px 12px; border-bottom: 1px solid var(--ca-line); }
+.ca-page:has(> .ca-tool-page-head) { display: flex; flex-direction: column; }
+.ca-page > .ca-tool-page-head + .ca-page-frame { flex: 1; min-height: 0; }
+@keyframes ca-office-slide-up { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+@media (max-width: 767px) { .ca-root .ca-rail { bottom: 56px; } .ca-root:not([data-drawer='channels']) > .ca-office-pane { display: none; } }
+@media (prefers-reduced-motion: reduce) { .ca-root > .ca-office-pane { animation: none; } }

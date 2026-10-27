@@ -91,12 +91,12 @@ it.each([
     const fit = await page.evaluate(() => {
       const viewport = document.querySelector('.ca-company-map-viewport')!.getBoundingClientRect();
       const element = document.querySelector('.ca-company-map-viewport')!;
-      return { gearAvatarDelta: Math.abs(document.querySelector('.ca-office-gear')!.getBoundingClientRect().left - document.querySelector('.ca-user-btn .chatroom-avatar')!.getBoundingClientRect().left), scale: Number((element as HTMLElement).dataset.scale), nameFont: parseFloat(getComputedStyle(document.querySelector('.ca-company-person-title strong')!).fontSize), scrollWidth: element.scrollWidth, clientWidth: element.clientWidth, scrollHeight: element.scrollHeight, clientHeight: element.clientHeight, viewport: { x: viewport.x, y: viewport.y, right: viewport.right, bottom: viewport.bottom }, nodes: [...document.querySelectorAll('.ca-company-map-node')].map(node => {
+      return { gearRailDelta: Math.abs((document.querySelector('.ca-office-gear')!.getBoundingClientRect().left + document.querySelector('.ca-office-gear')!.getBoundingClientRect().right)/2 - (document.querySelector('.ca-rail')!.getBoundingClientRect().left + document.querySelector('.ca-rail')!.getBoundingClientRect().right)/2), scale: Number((element as HTMLElement).dataset.scale), nameFont: parseFloat(getComputedStyle(document.querySelector('.ca-company-person-title strong')!).fontSize), scrollWidth: element.scrollWidth, clientWidth: element.clientWidth, scrollHeight: element.scrollHeight, clientHeight: element.clientHeight, viewport: { x: viewport.x, y: viewport.y, right: viewport.right, bottom: viewport.bottom }, nodes: [...document.querySelectorAll('.ca-company-map-node')].map(node => {
         const r = node.getBoundingClientRect(); return { x: r.x, y: r.y, right: r.right, bottom: r.bottom };
       }) };
     });
     expect(fit.nameFont * fit.scale).toBeGreaterThanOrEqual(12);
-    if (width > 700) expect(fit.gearAvatarDelta).toBeLessThanOrEqual(6);
+    if (width > 700) expect(fit.gearRailDelta).toBeLessThanOrEqual(1);
     if (shape === 'current' && width > 700) {
       expect(fit.scrollWidth).toBeLessThanOrEqual(fit.clientWidth + 2); expect(fit.scrollHeight).toBeLessThanOrEqual(fit.clientHeight + 2);
       for (const node of fit.nodes) { expect(node.x).toBeGreaterThanOrEqual(fit.viewport.x); expect(node.y).toBeGreaterThanOrEqual(fit.viewport.y); expect(node.right).toBeLessThanOrEqual(fit.viewport.right); expect(node.bottom).toBeLessThanOrEqual(fit.viewport.bottom); }
