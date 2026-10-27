@@ -37,6 +37,15 @@ const RecordSchema = z
       .optional(),
     purpose: z.literal('runtime-refresh').optional(),
     runtimeDigest: z.string().regex(/^[a-f0-9]{64}$/).optional(),
+    resourceIntent: z.object({
+      operationId: z.string().uuid().regex(/^[0-9a-f-]+$/),
+      reservationId: z.string().uuid().regex(/^[0-9a-f-]+$/),
+      profileVersion: z.string().regex(/^(?:0|[1-9][0-9]{0,19})$/).refine(value =>
+        /^(?:0|[1-9][0-9]{0,19})$/.test(value) && BigInt(value) <= 18446744073709551615n),
+      profileDigest: z.string().regex(/^[a-f0-9]{64}$/),
+      previewDigest: z.string().regex(/^[a-f0-9]{64}$/),
+    }).strict().optional(),
+    resourcePhase: z.enum(['reserved', 'preparing', 'prepared', 'verifying', 'verified']).optional(),
   })
   .strict()
   .superRefine((record, context) => {
@@ -44,6 +53,16 @@ const RecordSchema = z
       ? record.fromAccount !== record.toAccount || !record.runtimeDigest
       : record.runtimeDigest !== undefined)
       context.addIssue({ code: 'custom', message: 'A refresh journal must bind its unchanged account and runtime' });
+    if (record.resourceIntent ? record.purpose !== 'runtime-refresh' : record.resourcePhase !== undefined)
+      context.addIssue({ code: 'custom', message: 'Resource state requires its same-account refresh intent' });
+    if (record.resourceIntent && !record.owner)
+      context.addIssue({ code: 'custom', message: 'Resource intent requires its explicit owner scope' });
+    if (record.resourceIntent && record.phase === 'failed')
+      context.addIssue({ code: 'custom', message: 'Resource failures retain recovery until their separate actor reconciles them' });
+    if (record.resourcePhase !== undefined && !record.newSession)
+      context.addIssue({ code: 'custom', message: 'Resource preparation requires the durable candidate SID' });
+    if (record.resourceIntent && record.phase === 'completed' && record.resourcePhase !== 'verified')
+      context.addIssue({ code: 'custom', message: 'Resource completion requires verified replacement evidence' });
     if (record.sourceCleanupVerified && (!record.sourceStopRequested || !record.newSession))
       context.addIssue({ code: 'custom', message: 'Source cleanup proof requires its stopped-source candidate binding' });
     if ((record.recoveryAction !== undefined || record.recoveredAt !== undefined) &&
@@ -129,6 +148,12 @@ export class PlanMoveStore {
       if (stat.size > 1024 * 1024) throw new Error('Plan move journal exceeds its size bound');
       const records = JournalSchema.parse(JSON.parse(await fs.readFile(this.file, 'utf8')));
       for (const record of records) {
+        if (record.resourceIntent && record.phase === 'completed') {
+          // The journal is historical evidence, not a fresh host observation.
+          // Also covers a lost recovery write after a completed ACK/drift race.
+          record.phase = 'recovery-required';
+          record.error ??= 'Resource transactions require fresh native reconciliation after restart';
+        }
         const pending = await this.recoveryRead(record.id, 'pending');
         const verified = await this.recoveryRead(record.id, 'verified');
         if (verified && !pending) throw new Error('Orphan recovery acknowledgement');

@@ -10,6 +10,33 @@ export type PlanMovePhase =
   | 'failed'
   | 'recovery-required';
 
+/** Server-private references to a separately admitted resource transaction.
+ * These references confer no authority and must never come from the move route.
+ */
+export interface PlanMoveResourceIntent {
+  readonly operationId: string;
+  readonly reservationId: string;
+  readonly profileVersion: string;
+  readonly profileDigest: string;
+  readonly previewDigest: string;
+}
+
+export type PlanMoveResourcePhase = 'reserved' | 'preparing' | 'prepared' | 'verifying' | 'verified';
+
+function resourceIntent(value: PlanMoveResourceIntent): Readonly<PlanMoveResourceIntent> {
+  const keys = ['operationId', 'reservationId', 'profileVersion', 'profileDigest', 'previewDigest'];
+  const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+  if (!value || typeof value !== 'object' || Array.isArray(value) ||
+      Object.keys(value).length !== keys.length || Object.keys(value).some(key => !keys.includes(key)) ||
+      ![value.operationId, value.reservationId].every(id => typeof id === 'string' && uuid.test(id)) ||
+      typeof value.profileVersion !== 'string' || !/^(?:0|[1-9][0-9]{0,19})$/.test(value.profileVersion) ||
+      BigInt(value.profileVersion) > 18446744073709551615n ||
+      ![value.profileDigest, value.previewDigest].every(hash => typeof hash === 'string' && /^[a-f0-9]{64}$/.test(hash)))
+    throw new PlanMoveError('Invalid resource transaction references');
+  return Object.freeze({ operationId: value.operationId, reservationId: value.reservationId,
+    profileVersion: value.profileVersion, profileDigest: value.profileDigest, previewDigest: value.previewDigest });
+}
+
 export interface PlanMoveInput {
   id: string;
   employeeId: string;
@@ -23,6 +50,7 @@ export interface PlanMoveInput {
   /** Explicit same-account replacement, admitted through the ordinary request/approval flow. */
   purpose?: 'runtime-refresh';
   runtimeDigest?: string;
+  resourceIntent?: PlanMoveResourceIntent;
 }
 
 export interface PlanMoveRecord {
@@ -44,6 +72,8 @@ export interface PlanMoveRecord {
   recoveredAt?: number;
   purpose?: 'runtime-refresh';
   runtimeDigest?: string;
+  resourceIntent?: PlanMoveResourceIntent;
+  resourcePhase?: PlanMoveResourcePhase;
 }
 
 export interface PlanMoveSnapshot {
@@ -74,6 +104,16 @@ export interface PlanMovePort {
   verifyRecovery?(record: Readonly<PlanMoveRecord>): Promise<() => void>;
   recoveryPending?(record: Readonly<PlanMoveRecord>): Promise<void>;
   recoveryConfirmed?(record: Readonly<PlanMoveRecord>): Promise<void>;
+  /** Fixed server actor only. Called after the new SID and intent are durable.
+   * Must recheck owner/profile/capacity and serialize exact config projection/reload.
+   * Any exception is an uncertain resource outcome; no generic rollback/release.
+   */
+  prepareResources?(record: Readonly<PlanMoveRecord>): Promise<void>;
+  /** Real replacement/cgroup/roots verification; returns a synchronous, repeatable
+   * read-only fence whose result must be undefined. Promise/other results refuse.
+   * Missing native observation or settlement must refuse, never return a no-op.
+   */
+  verifyResources?(record: Readonly<PlanMoveRecord>): Promise<() => unknown>;
 }
 
 export type PlanMoveExecutor = Omit<PlanMovePort, 'load' | 'save' | 'recoveryPending' | 'recoveryConfirmed'>;
@@ -98,10 +138,13 @@ export class PlanMoves {
 
   private init(): Promise<void> {
     this.loaded ??= (async () => {
-      for (const record of await this.port.load()) {
-        if (!['completed', 'failed'].includes(record.phase)) {
+      for (const saved of await this.port.load()) {
+        const record = { ...saved, ...(saved.resourceIntent ? { resourceIntent: resourceIntent(saved.resourceIntent) } : {}) };
+        if (record.resourceIntent || !['completed', 'failed'].includes(record.phase)) {
           record.phase = 'recovery-required';
-          record.error ??= 'The server restarted during this move; inspect both sessions before retrying';
+          record.error ??= record.resourceIntent
+            ? 'Resource transactions require fresh native reconciliation after restart'
+            : 'The server restarted during this move; inspect both sessions before retrying';
           this.locked.add(record.employeeId);
         }
         this.records.set(record.id, record);
@@ -114,28 +157,46 @@ export class PlanMoves {
     return this.port.save([...this.records.values()].map((record) => ({ ...record })));
   }
 
+  private view(record: PlanMoveRecord): PlanMoveRecord {
+    // A completion journal write is provisional while final native/audit fences
+    // are still pending. Readers must not turn that window into successful Apply.
+    return record.resourceIntent && record.phase === 'completed' && this.aborts.has(record.id)
+      ? { ...record, phase: 'checking', resourcePhase: 'verifying' }
+      : { ...record };
+  }
+
   async get(id: string, owner?: string): Promise<PlanMoveRecord | undefined> {
     await this.init();
     const record = this.records.get(id);
-    return record && record.owner === owner ? { ...record } : undefined;
+    return record && record.owner === owner ? this.view(record) : undefined;
   }
 
   async list(owner?: string): Promise<PlanMoveRecord[]> {
     await this.init();
     return [...this.records.values()]
       .filter((record) => record.owner === owner)
-      .map((record) => ({ ...record }))
+      .map((record) => this.view(record))
       .reverse();
   }
 
   async begin(input: PlanMoveInput, owner?: string, executor: PlanMoveExecutor = this.port): Promise<PlanMoveRecord> {
+    // Capture references before the first await. No caller mutation may redirect
+    // a queued transaction or silently turn a resource refresh into a plain one.
+    input = { ...input, ...(input.resourceIntent !== undefined ? { resourceIntent: resourceIntent(input.resourceIntent) } : {}) };
+    if (input.resourceIntent && (typeof owner !== 'string' || !owner || owner.length > 200))
+      throw new PlanMoveError('Resource refresh requires an explicit verified owner scope', 403);
+    if (input.resourceIntent && (input.purpose !== 'runtime-refresh' ||
+        typeof executor.prepareResources !== 'function' || typeof executor.verifyResources !== 'function'))
+      throw new PlanMoveError('Resource refresh requires its fixed preparation and native verification actor', 503);
     if ((input.purpose !== undefined && input.purpose !== 'runtime-refresh') ||
         (!input.purpose && input.runtimeDigest !== undefined))
       throw new PlanMoveError('Unknown plan move purpose');
     await this.init();
     const requestDigest = createHash('sha256')
       .update(JSON.stringify([input.forceBusy, input.handoff, input.model ?? '', input.targetMode ?? '',
-        ...(input.purpose ? [input.purpose, input.runtimeDigest] : [])]))
+        ...(input.purpose ? [input.purpose, input.runtimeDigest] : []),
+        ...(input.resourceIntent ? ['resources-v1', input.resourceIntent.operationId, input.resourceIntent.reservationId,
+          input.resourceIntent.profileVersion, input.resourceIntent.profileDigest, input.resourceIntent.previewDigest] : [])]))
       .digest('hex');
     const existing = this.records.get(input.id);
     if (existing) {
@@ -149,7 +210,7 @@ export class PlanMoves {
         existing.requestDigest !== requestDigest
       )
         throw new PlanMoveError('That move identifier belongs to another request');
-      return { ...existing };
+      return this.view(existing);
     }
     if (this.intents.has(input.id)) throw new PlanMoveError('That move identifier is already being prepared');
     if (this.locked.has(input.employeeId))
@@ -186,14 +247,24 @@ export class PlanMoves {
         at: Date.now(),
         requestDigest,
         ...(input.purpose ? { purpose: input.purpose, runtimeDigest: input.runtimeDigest } : {}),
+        ...(input.resourceIntent ? { resourceIntent: input.resourceIntent } : {}),
       };
       this.records.set(record.id, record);
       await this.save();
       void this.run(record, input, executor);
       return { ...record };
     } catch (error) {
-      this.records.delete(input.id);
-      this.locked.delete(input.employeeId);
+      const uncertain = this.records.get(input.id);
+      if (input.resourceIntent && uncertain) {
+        // save() can lose its acknowledgement after durable rename/fsync. Keep
+        // both the in-memory fence and any persisted intent for reconciliation.
+        uncertain.phase = 'recovery-required';
+        uncertain.error = 'Resource intent journal outcome requires inspection';
+        try { await this.save(); } catch { /* retain the lock even if storage stays unavailable */ }
+      } else {
+        this.records.delete(input.id);
+        this.locked.delete(input.employeeId);
+      }
       throw error;
     } finally {
       this.intents.delete(input.id);
@@ -214,6 +285,7 @@ export class PlanMoves {
     await this.init();
     const record = this.records.get(id);
     if (!record || record.owner !== owner) throw new PlanMoveError('Unknown move', 404);
+    if (record.resourceIntent) throw new PlanMoveError('Resource transactions require their own verified recovery actor');
     if (record.oldSession !== expected.oldSession || record.newSession !== expected.newSession || record.toAccount !== expected.toAccount)
       throw new PlanMoveError('The recovery target changed; refresh its status');
     if (this.intents.has(id) || this.aborts.has(id)) throw new PlanMoveError('The move is still active; wait before recovery');
@@ -272,6 +344,20 @@ export class PlanMoves {
         throw new PlanMoveError('The employee changed or became busy before launch; nothing was moved');
       await this.phase(record, 'creating');
       record.newSession = await executor.create(input, record.owner);
+      if (record.resourceIntent) {
+        // The existing create operation is metadata-only. Resource effects belong
+        // here, never in a create wrapper that can throw before returning its SID.
+        record.resourcePhase = 'reserved';
+        await this.save();
+        await executor.beforeStop(input);
+        if (executor.binding(record.employeeId, record.owner) !== record.newSession || !executor.exists(record.oldSession))
+          throw new PlanMoveError('The resource target or source changed before preparation');
+        record.resourcePhase = 'preparing';
+        await this.save();
+        await executor.prepareResources!(Object.freeze({ ...record }));
+        record.resourcePhase = 'prepared';
+        await this.save();
+      }
       // Creation reserves metadata and the employee binding; it must not launch a CLI.
       // Both sessions use the employee's permanent home and Nix store, so release the
       // old laptop before starting its replacement. The broker also fences actual writers.
@@ -300,18 +386,42 @@ export class PlanMoves {
       await executor.start(record.newSession);
       await this.phase(record, 'checking');
       await executor.ready(record.newSession);
+      let resourceFence: (() => unknown) | undefined;
+      if (record.resourceIntent) {
+        record.resourcePhase = 'verifying';
+        await this.save();
+        resourceFence = await executor.verifyResources!(Object.freeze({ ...record }));
+        if (typeof resourceFence !== 'function') throw new PlanMoveError('Missing resource verification fence');
+      }
       if (
         executor.binding(record.employeeId, record.owner) !== record.newSession ||
         !executor.exists(record.newSession)
       )
         throw new PlanMoveError('The employee binding or replacement changed before commit');
+      const recheckResources = () => {
+        if (!record.resourceIntent) return;
+        if (executor.binding(record.employeeId, record.owner) !== record.newSession || !executor.exists(record.newSession!))
+          throw new PlanMoveError('The resource replacement changed during completion');
+        const outcome = resourceFence!();
+        if (outcome !== undefined) {
+          // Never await a fence: asynchronous work is not synchronous evidence.
+          // Observe a rejected Promise only to avoid an unhandled rejection;
+          // no eventual fulfillment can authorize this completion.
+          if (outcome instanceof Promise) void outcome.catch(() => {});
+          throw new PlanMoveError('Resource verification fence must return synchronous undefined');
+        }
+      };
+      recheckResources();
+      if (record.resourceIntent) record.resourcePhase = 'verified';
       await this.phase(record, 'completed');
+      recheckResources();
       await executor.audit({ ...record });
+      recheckResources();
     } catch (error) {
       record.error = error instanceof Error ? error.message : 'Move failed';
       let recovered = !record.newSession && executor.binding(record.employeeId, record.owner) === record.oldSession;
       if (
-        !stopping &&
+        !record.resourceIntent && !stopping &&
         record.newSession &&
         executor.exists(record.oldSession) &&
         executor.binding(record.employeeId, record.owner) === record.newSession
@@ -334,7 +444,10 @@ export class PlanMoves {
           record.error += `; candidate cleanup requires inspection: ${cleanupError instanceof Error ? cleanupError.message : 'failed'}`;
         }
       }
-      record.phase = recovered && !stopping ? 'failed' : 'recovery-required';
+      // A resource reservation is owned by its separate durable transaction.
+      // Even pre-stop errors/cancel/lost acknowledgements must retain recovery;
+      // generic rebind/cleanup success is never evidence that capacity is free.
+      record.phase = recovered && !stopping && !record.resourceIntent ? 'failed' : 'recovery-required';
       try {
         await this.save();
       } catch {
